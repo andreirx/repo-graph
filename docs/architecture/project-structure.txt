@@ -1,0 +1,339 @@
+Project Structure — Clean Architecture
+=======================================
+
+Dependency rule: source code dependencies point inward.
+CLI -> Use Cases -> Core Model. Adapters implement Core Ports.
+Nothing in core/ imports anything from adapters/ or cli/.
+main.ts is the composition root — the only place that wires concrete adapters to ports.
+
+
+root/
+|
+|-- docs/
+|   |-- research/                        Background research and analysis
+|   |   |-- feathers-book-extraction.txt   Feathers book chapter-by-chapter extraction
+|   |   |-- missing-links-in-tooling.txt   Codebase intelligence gap analysis
+|   |   |-- agent-pipelines.txt            26 agent pipeline sections
+|   |   |-- free-tools-and-gaps.txt        Free/OSS tools mapped to pipelines
+|   |   |-- paid-tools.txt                 Commercial tools mapped to pipelines
+|   |
+|   |-- architecture/                    Architecture decisions and plans
+|   |   |-- project-structure.txt          This file
+|   |   |-- decisions/                     ADRs (Architecture Decision Records)
+|   |       |-- 001-typescript-node.txt      Why TypeScript/Node, not Python
+|   |       |-- 002-sqlite-substrate.txt     Why SQLite, not graph DB or vector DB
+|   |       |-- 003-facts-vs-inference.txt   Separation of deterministic facts from inferences
+|   |       |-- ...
+|   |
+|   |-- cli/                             CLI surface documentation
+|   |   |-- planned-cli.txt               Full planned CLI (all phases)
+|   |   |-- v1-cli.txt                    V1 reduced scope CLI
+|   |
+|   |-- skills/                          Agent skill definitions (see below)
+|       |-- README.txt
+|       |-- investigate-change-impact.txt
+|       |-- characterize-legacy-method.txt
+|       |-- find-architecture-violations.txt
+|       |-- trace-data-flow.txt
+|       |-- assess-test-coverage-gaps.txt
+|       |-- detect-dead-code.txt
+|       |-- plan-safe-refactoring.txt
+|
+|-- src/
+|   |
+|   |-- core/                            INNERMOST LAYER — zero external dependencies
+|   |   |                                Pure TypeScript types, interfaces, domain logic.
+|   |   |                                No imports from adapters/, cli/, or node_modules
+|   |   |                                (except TypeScript standard lib).
+|   |   |
+|   |   |-- model/                       Domain entities
+|   |   |   |-- types.ts                   Canonical enums: NodeKind, EdgeType, Resolution,
+|   |   |   |                              SnapshotScope, ModuleMaturity, EvidenceSource
+|   |   |   |-- node.ts                    Node entity (symbol, file, module, endpoint, etc.)
+|   |   |   |-- edge.ts                    Edge entity (typed, with resolution + evidence)
+|   |   |   |-- snapshot.ts                Snapshot entity (id, parent, commit, scope)
+|   |   |   |-- declaration.ts             Human-declared facts (boundaries, invariants, etc.)
+|   |   |   |-- evidence.ts                Evidence attachment (source, confidence, snapshot)
+|   |   |   |-- repo.ts                    Repository registration entity
+|   |   |   |-- query-result.ts            Canonical response shape for all queries
+|   |   |
+|   |   |-- queries/                     Use cases — pure functions over the model
+|   |   |   |-- callers.ts                 Find all callers of a symbol (recursive)
+|   |   |   |-- callees.ts                 Find all callees of a symbol (recursive)
+|   |   |   |-- imports.ts                 Find imports of a file or module
+|   |   |   |-- path.ts                    Find path between two nodes (with max depth)
+|   |   |   |-- dead-nodes.ts              Find nodes with zero incoming edges minus entrypoints
+|   |   |   |-- cycles.ts                  Detect dependency cycles at module/file level
+|   |   |   |-- neighbors.ts               Find N-depth neighborhood of a node
+|   |   |   |-- index.ts                   Re-exports
+|   |   |
+|   |   |-- ports/                       Interfaces that adapters must implement
+|   |       |-- storage.ts                 GraphStorage interface (read/write nodes, edges,
+|   |       |                              snapshots, declarations; run graph queries)
+|   |       |-- extractor.ts               CodeExtractor interface (parse file, return nodes
+|   |       |                              and edges)
+|   |       |-- framework-extractor.ts     FrameworkExtractor interface (given AST + file,
+|   |       |                              return additional edges: routes, DI, events, ORM)
+|   |       |-- git.ts                     GitAdapter interface (log, diff, blame, commit info)
+|   |       |-- watcher.ts                FileWatcher interface (watch for changes, emit events)
+|   |
+|   |-- adapters/                        OUTER LAYER — implements core ports
+|   |   |                                Each adapter depends on core/ and on its specific
+|   |   |                                external dependency (sqlite, tree-sitter, etc.)
+|   |   |
+|   |   |-- storage/
+|   |   |   |-- sqlite/
+|   |   |       |-- sqlite-storage.ts      Implements GraphStorage port
+|   |   |       |-- schema.sql             Canonical table definitions
+|   |   |       |-- migrations/            Schema migrations (versioned)
+|   |   |       |   |-- 001-initial.sql
+|   |   |       |   |-- ...
+|   |   |       |-- queries/               Prepared SQL statements (named, parameterized)
+|   |   |           |-- find-callers.sql
+|   |   |           |-- find-callees.sql
+|   |   |           |-- find-path.sql       Recursive CTE for path queries
+|   |   |           |-- find-dead.sql
+|   |   |           |-- find-cycles.sql
+|   |   |           |-- ...
+|   |   |
+|   |   |-- extractors/
+|   |   |   |-- common/
+|   |   |   |   |-- tree-sitter-base.ts    Shared Tree-sitter initialization, AST walking utils
+|   |   |   |
+|   |   |   |-- typescript/
+|   |   |   |   |-- ts-extractor.ts        Implements CodeExtractor for TS/JS
+|   |   |   |   |                          Extracts: files, symbols (functions, classes,
+|   |   |   |   |                          interfaces, type aliases, exports), imports, calls
+|   |   |   |   |-- frameworks/
+|   |   |   |       |-- express.ts          FrameworkExtractor for Express routes
+|   |   |   |       |-- nestjs.ts           FrameworkExtractor for NestJS decorators
+|   |   |   |       |-- typeorm.ts          FrameworkExtractor for TypeORM entities
+|   |   |   |       |-- ...
+|   |   |   |
+|   |   |   |-- java/                      (future — v2+)
+|   |   |   |   |-- java-extractor.ts
+|   |   |   |   |-- frameworks/
+|   |   |   |       |-- spring-boot.ts
+|   |   |   |       |-- ...
+|   |   |   |
+|   |   |   |-- rust/                      (future — v2+)
+|   |   |   |   |-- rust-extractor.ts
+|   |   |   |   |-- ...
+|   |   |   |
+|   |   |   |-- c/                         (future — v2+)
+|   |   |       |-- c-extractor.ts
+|   |   |       |-- ...
+|   |   |
+|   |   |-- git/
+|   |   |   |-- git-adapter.ts             Implements GitAdapter port
+|   |   |   |                              Wraps git CLI calls (log, diff, blame, status)
+|   |   |
+|   |   |-- watcher/
+|   |       |-- fs-watcher.ts              Implements FileWatcher port
+|   |                                      Uses chokidar or fs.watch
+|   |
+|   |-- cli/                             OUTERMOST LAYER — user-facing
+|   |   |                                Depends on core/ use cases. Does NOT depend on
+|   |   |                                adapters/ directly — receives them via dependency
+|   |   |                                injection from main.ts.
+|   |   |
+|   |   |-- index.ts                      CLI entry point. Registers commands.
+|   |   |-- commands/
+|   |   |   |-- repo.ts                    tool repo add|index|status|refresh|watch|snapshot
+|   |   |   |-- graph.ts                   tool graph callers|callees|imports|path|dead|cycles
+|   |   |   |-- declare.ts                 tool declare module|boundary|entrypoint|invariant
+|   |   |   |-- arch.ts                    (v2) tool arch boundaries|violations|classify
+|   |   |   |-- flow.ts                    (v2) tool flow trace|events|producers|consumers
+|   |   |   |-- change.ts                  (v2) tool change impact|effect|pinch-points
+|   |   |   |-- legacy.ts                  (v2) tool legacy hotspots|clones|seams|monster-methods
+|   |   |   |-- fleet.ts                   (v3) tool fleet index|map|deps|api-drift|db-shared
+|   |   |
+|   |   |-- formatters/
+|   |       |-- json.ts                    --json output formatting
+|   |       |-- table.ts                   Human-readable table output (default)
+|   |       |-- csv.ts                     --csv output formatting (optional)
+|   |
+|   |-- main.ts                           COMPOSITION ROOT
+|                                         The ONLY file that knows about concrete adapters.
+|                                         Instantiates SqliteStorage, TsExtractor, GitAdapter.
+|                                         Injects them into use cases.
+|                                         Passes use cases to CLI commands.
+|                                         This is the "Main Component" from Clean Architecture.
+|
+|-- tools/                               EXTERNAL / OUT-OF-PROCESS analysis tools
+|   |                                    These are NOT part of the core tool. They are
+|   |                                    separate programs that read from / write to the
+|   |                                    same SQLite database.
+|   |
+|   |-- python/                          Heavy analysis pipelines (optional, Python)
+|   |   |-- semantic-grouping/             Embedding + HDBSCAN clustering (Tier 2)
+|   |   |-- clone-detection/               AST normalization + FAISS (Tier 2)
+|   |   |-- hotspot-matrix/                git churn + complexity join (Tier 1 — could also
+|   |   |                                 be done in TS, but Pandas makes it trivial)
+|   |   |-- state-machine-extraction/      State value harvesting (Tier 2)
+|   |   |-- exception-flow/               Throw-to-catch tracing (Tier 2)
+|   |   |-- config-archaeology/            Config-to-branch mapping (Tier 2)
+|   |   |-- requirements.txt               Shared Python deps
+|   |   |-- venv/                          (gitignored)
+|   |
+|   |-- scripts/                         Shell scripts wrapping external tools
+|       |-- run-lizard.sh                  Wrapper: lizard -> JSON -> SQLite import
+|       |-- run-coverage.sh                Wrapper: coverage tool -> SQLite import
+|       |-- run-scip-index.sh              Wrapper: SCIP indexer -> SQLite import
+|       |-- ...
+|
+|-- test/
+|   |-- core/                            Unit tests for core domain logic
+|   |   |-- queries/
+|   |       |-- callers.test.ts
+|   |       |-- dead-nodes.test.ts
+|   |       |-- cycles.test.ts
+|   |       |-- ...
+|   |
+|   |-- adapters/                        Integration tests for adapters
+|   |   |-- storage/
+|   |   |   |-- sqlite-storage.test.ts
+|   |   |-- extractors/
+|   |       |-- typescript/
+|   |           |-- ts-extractor.test.ts
+|   |           |-- express-extractor.test.ts
+|   |
+|   |-- cli/                             End-to-end CLI tests
+|   |   |-- repo-commands.test.ts
+|   |   |-- graph-commands.test.ts
+|   |
+|   |-- fixtures/                        Sample codebases for testing extractors
+|       |-- typescript/
+|       |   |-- simple-imports/            Minimal TS project with known import graph
+|       |   |-- express-app/               Minimal Express app with routes
+|       |   |-- circular-deps/             Project with known cycles
+|       |   |-- dead-code/                 Project with known unreachable functions
+|       |-- java/                          (future)
+|       |-- c/                             (future)
+|
+|-- package.json
+|-- tsconfig.json
+|-- .gitignore
+|-- AGENTS.md                            Instructions for AI agents working on THIS repo
+|-- CLAUDE.md                            Claude Code project instructions
+
+
+================================================================================
+DESIGN PRINCIPLES
+================================================================================
+
+1. Core model is language-neutral.
+   NodeKind includes FUNCTION, CLASS, INTERFACE, MODULE, FILE, ENDPOINT, EVENT,
+   TABLE, CONFIG_KEY — not TypeScriptFunction or JavaClass. The language is a
+   property on the node, not a type in the domain model.
+
+2. Extractors are evidence sources, not truth sources.
+   Every edge produced by an extractor carries an evidence field saying which
+   extractor produced it and what resolution was achieved (STATIC, DYNAMIC, INFERRED).
+   Multiple extractors can produce edges for the same relationship — the storage
+   layer deduplicates and records all evidence sources.
+
+3. Facts, declarations, and inferences are stored separately.
+   - Facts: extracted from code by deterministic parsers. Attached to snapshots.
+   - Declarations: human-supplied via `tool declare`. Persistent until explicitly changed.
+   - Inferences: computed by analysis pipelines (architecture classification, dead-code
+     likelihood, ownership guesses). Carry confidence scores. Attached to snapshots.
+   Only inferences have confidence scores. Facts are 1.0 by definition.
+
+4. The SQLite database is the integration point.
+   The core tool writes facts and declarations. External Python scripts read facts,
+   compute inferences, and write inferences back. The CLI queries all three.
+   No process needs to know about any other process. The database schema IS the contract.
+
+5. Framework extractors are the highest-value custom code.
+   Base extractors (Tree-sitter symbol + import extraction) are commodity.
+   Framework extractors (Express routes, NestJS decorators, Spring annotations,
+   TypeORM entities) capture edges invisible to generic import analysis.
+   These are where the tool's differentiation lives.
+
+6. Skills are agent workflows, not tool features.
+   A skill is a markdown file describing a sequence of CLI commands an agent should
+   run to accomplish a specific analysis task. The tool stays deterministic.
+   The skill encodes the engineering judgment of how to chain queries.
+   Skills are updated independently of tool code.
+
+7. Tests use fixture codebases with known graphs.
+   Every test fixture is a minimal project where the expected nodes, edges, and
+   query results are known in advance. Extractor tests assert against these
+   known-good graphs. This prevents "testing the parser with the parser."
+
+
+================================================================================
+DEPENDENCY MAP
+================================================================================
+
+                    +-----------+
+                    |    CLI    |  commands, formatters
+                    +-----+-----+
+                          |
+                          | depends on
+                          v
+                    +-----------+
+                    | Use Cases |  callers, callees, path, dead, cycles
+                    +-----+-----+
+                          |
+                          | depends on
+                          v
+                    +-----------+
+                    |   Core    |  model (Node, Edge, Snapshot, Declaration)
+                    |   Model   |  ports (Storage, Extractor, Git, Watcher)
+                    +-----------+
+                          ^
+                          |
+                          | implements
+                          |
+        +-----------------+-----------------+
+        |                 |                 |
+  +-----------+    +-----------+    +-----------+
+  |  SQLite   |    | Tree-sitter|   |    Git    |
+  |  Storage  |    | Extractors |   |  Adapter  |
+  +-----------+    +-----------+    +-----------+
+
+
+  External (out-of-process, optional):
+
+  +-------------------+
+  | Python Analysis   |  reads/writes SQLite directly
+  | Pipelines         |  no dependency on core TS code
+  +-------------------+
+
+  +-------------------+
+  | External Tool     |  lizard, SCIP, coverage tools
+  | Wrappers          |  output -> SQLite import scripts
+  +-------------------+
+
+
+================================================================================
+MATURITY LEVELS
+================================================================================
+
+v1 (PROTOTYPE -> MATURE):
+  src/core/model/           — define and stabilize
+  src/core/queries/          — callers, callees, imports, path, dead, cycles
+  src/core/ports/            — Storage, Extractor
+  src/adapters/storage/      — SQLite implementation
+  src/adapters/extractors/typescript/  — base TS extractor + 1 framework
+  src/cli/commands/repo.ts   — add, index, status, refresh
+  src/cli/commands/graph.ts  — callers, callees, imports, path, dead, cycles
+  src/cli/commands/declare.ts — module, boundary, entrypoint
+
+v2 (PROTOTYPE):
+  src/core/ports/git.ts, watcher.ts
+  src/adapters/git/
+  src/adapters/watcher/
+  src/cli/commands/arch.ts
+  src/cli/commands/change.ts
+  src/cli/commands/legacy.ts
+  src/adapters/extractors/java/
+  tools/python/ analysis pipelines
+
+v3 (PROTOTYPE):
+  src/cli/commands/fleet.ts
+  src/adapters/extractors/rust/
+  src/adapters/extractors/c/
+  Cross-repo boundary graph

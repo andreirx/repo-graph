@@ -1,0 +1,649 @@
+Canonical Schema
+=================
+
+Design constraints:
+  1. Backend-neutral SQL. No SQLite-specific or Postgres-specific idioms.
+  2. Globally portable identities. TEXT UIDs, not auto-increment integers.
+  3. Relative paths. Repo-relative, never machine-absolute.
+  4. Facts, declarations, and inferences stored separately.
+  5. Every extracted fact carries extractor name and resolution.
+  6. Heavy artifacts stored externally, referenced by content hash.
+
+SQLite is the v1 local backend. Postgres is the planned central backend.
+The schema must work identically on both.
+
+
+================================================================================
+IDENTITY STRATEGY
+================================================================================
+
+Every entity has a TEXT primary key that is globally unique and portable.
+
+  repo_uid        — human-assigned or generated. e.g. "billing-service", UUID
+  snapshot_uid    — generated. format: "<repo_uid>/<iso-timestamp>/<short-hash>"
+  file_uid        — derived. format: "<repo_uid>:<relative-path>"
+  node_uid        — generated UUID
+  edge_uid        — generated UUID
+  declaration_uid — generated UUID
+  inference_uid   — generated UUID
+  artifact_uid    — generated UUID
+
+The stable_key on nodes is the human-readable cross-system identity:
+  "billing-service:src/payments/RetryGuard.ts#PaymentService.retry"
+
+The node_uid is the database-internal join key. The stable_key is the
+portable identity used in exchange formats, cross-repo references, and
+CLI output.
+
+
+================================================================================
+CANONICAL TABLES
+================================================================================
+
+
+-- Repository registry
+-- One row per tracked repository.
+-- root_path is stored as an absolute local path for the local backend,
+-- but the exchange format uses only repo_uid + name.
+
+CREATE TABLE repos (
+  repo_uid        TEXT PRIMARY KEY,
+  name            TEXT NOT NULL,
+  root_path       TEXT NOT NULL,
+  default_branch  TEXT,
+  created_at      TEXT NOT NULL,
+  metadata_json   TEXT
+);
+
+
+-- Snapshots
+-- A snapshot represents the state of a repo's extracted knowledge at a point in time.
+-- Snapshots are immutable once sealed. The "working" snapshot is mutable until sealed.
+
+CREATE TABLE snapshots (
+  snapshot_uid        TEXT PRIMARY KEY,
+  repo_uid            TEXT NOT NULL REFERENCES repos(repo_uid),
+  parent_snapshot_uid TEXT REFERENCES snapshots(snapshot_uid),
+  kind                TEXT NOT NULL,        -- full | refresh | working | sealed
+  basis_ref           TEXT,                 -- branch name or tag
+  basis_commit        TEXT,                 -- git commit hash
+  dirty_hash          TEXT,                 -- hash of uncommitted changes (null if clean)
+  status              TEXT NOT NULL,        -- building | ready | stale | failed
+  files_total         INTEGER DEFAULT 0,
+  nodes_total         INTEGER DEFAULT 0,
+  edges_total         INTEGER DEFAULT 0,
+  created_at          TEXT NOT NULL,
+  completed_at        TEXT,
+  label               TEXT
+);
+
+
+-- File inventory
+-- One row per tracked file per repo. Persistent across snapshots.
+-- The path is ALWAYS relative to repo root.
+
+CREATE TABLE files (
+  file_uid        TEXT PRIMARY KEY,         -- "<repo_uid>:<relative-path>"
+  repo_uid        TEXT NOT NULL REFERENCES repos(repo_uid),
+  path            TEXT NOT NULL,            -- relative to repo root, forward slashes
+  language        TEXT,                     -- typescript | java | c | rust | python | ...
+  is_test         INTEGER NOT NULL DEFAULT 0,
+  is_generated    INTEGER NOT NULL DEFAULT 0,
+  is_excluded     INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE UNIQUE INDEX idx_files_repo_path ON files(repo_uid, path);
+
+
+-- File versions
+-- Tracks the parse state of each file at each snapshot.
+-- This is the invalidation mechanism: if content_hash changes, the file is stale.
+
+CREATE TABLE file_versions (
+  snapshot_uid    TEXT NOT NULL REFERENCES snapshots(snapshot_uid),
+  file_uid        TEXT NOT NULL REFERENCES files(file_uid),
+  content_hash    TEXT NOT NULL,            -- hash of file content at parse time
+  ast_hash        TEXT,                     -- hash of the parsed AST (for cache)
+  extractor       TEXT,                     -- "ts-core:0.1.0" — name:version
+  parse_status    TEXT NOT NULL,            -- parsed | skipped | failed | stale
+  size_bytes      INTEGER,
+  line_count      INTEGER,
+  indexed_at      TEXT NOT NULL,
+  PRIMARY KEY (snapshot_uid, file_uid)
+);
+
+
+-- Nodes
+-- The unified graph node table. Everything is a node:
+-- symbols, files, modules, endpoints, events, tables, configs, tests, states.
+-- Differentiated by kind + subtype.
+
+CREATE TABLE nodes (
+  node_uid        TEXT PRIMARY KEY,
+  snapshot_uid    TEXT NOT NULL REFERENCES snapshots(snapshot_uid),
+  repo_uid        TEXT NOT NULL REFERENCES repos(repo_uid),
+  stable_key      TEXT NOT NULL,            -- portable cross-system identity
+                                            -- format: "<repo_uid>:<path>#<qualified_name>:<kind>"
+  kind            TEXT NOT NULL,            -- MODULE | FILE | SYMBOL | ENDPOINT | EVENT_TOPIC
+                                            -- | TABLE | CONFIG_KEY | TEST | STATE | QUEUE | JOB
+  subtype         TEXT,                     -- FUNCTION | CLASS | METHOD | INTERFACE | TYPE_ALIAS
+                                            -- | VARIABLE | CONSTANT | ENUM | ROUTE | LISTENER
+                                            -- | COLUMN | FIELD | TEST_CASE | TEST_SUITE
+  name            TEXT NOT NULL,            -- short name (e.g. "retry")
+  qualified_name  TEXT,                     -- full qualified name (e.g. "PaymentService.retry")
+  file_uid        TEXT REFERENCES files(file_uid),
+  parent_node_uid TEXT REFERENCES nodes(node_uid),
+  line_start      INTEGER,
+  col_start       INTEGER,
+  line_end        INTEGER,
+  col_end         INTEGER,
+  signature       TEXT,                     -- function signature, type annotation
+  visibility      TEXT,                     -- public | private | protected | internal | export
+  doc_comment     TEXT,                     -- extracted JSDoc/Javadoc/docstring
+  metadata_json   TEXT                      -- framework-specific extra facts (non-canonical)
+);
+
+CREATE UNIQUE INDEX idx_nodes_snapshot_key ON nodes(snapshot_uid, stable_key);
+CREATE INDEX idx_nodes_snapshot_kind ON nodes(snapshot_uid, kind);
+CREATE INDEX idx_nodes_snapshot_file ON nodes(snapshot_uid, file_uid);
+CREATE INDEX idx_nodes_repo_key ON nodes(repo_uid, stable_key);
+
+
+-- Edges
+-- The unified graph edge table. Connects any node to any node.
+-- Typed, with resolution and extractor provenance.
+
+CREATE TABLE edges (
+  edge_uid        TEXT PRIMARY KEY,
+  snapshot_uid    TEXT NOT NULL REFERENCES snapshots(snapshot_uid),
+  repo_uid        TEXT NOT NULL REFERENCES repos(repo_uid),
+  source_node_uid TEXT NOT NULL REFERENCES nodes(node_uid),
+  target_node_uid TEXT NOT NULL REFERENCES nodes(node_uid),
+  type            TEXT NOT NULL,            -- one of the 18 canonical edge types (see below)
+  resolution      TEXT NOT NULL,            -- static | dynamic | inferred
+  extractor       TEXT NOT NULL,            -- "ts-core:0.1.0" | "express:0.1.0" | "declaration"
+  line_start      INTEGER,                  -- location of the reference in source code
+  col_start       INTEGER,
+  line_end        INTEGER,
+  col_end         INTEGER,
+  metadata_json   TEXT                      -- edge-specific extra data (non-canonical)
+);
+
+CREATE INDEX idx_edges_snapshot_src ON edges(snapshot_uid, source_node_uid);
+CREATE INDEX idx_edges_snapshot_dst ON edges(snapshot_uid, target_node_uid);
+CREATE INDEX idx_edges_snapshot_type ON edges(snapshot_uid, type);
+CREATE INDEX idx_edges_snapshot_type_src ON edges(snapshot_uid, type, source_node_uid);
+CREATE INDEX idx_edges_snapshot_type_dst ON edges(snapshot_uid, type, target_node_uid);
+CREATE INDEX idx_edges_repo_type ON edges(repo_uid, type);
+
+
+-- Declarations
+-- Human-supplied facts. Not extracted from code.
+-- Persistent across snapshots unless explicitly superseded.
+-- snapshot_uid is NULL for repo-wide declarations, non-NULL for snapshot-scoped ones.
+
+CREATE TABLE declarations (
+  declaration_uid     TEXT PRIMARY KEY,
+  repo_uid            TEXT NOT NULL REFERENCES repos(repo_uid),
+  snapshot_uid        TEXT REFERENCES snapshots(snapshot_uid),
+  target_stable_key   TEXT NOT NULL,        -- what this declaration is about
+  kind                TEXT NOT NULL,        -- module | boundary | entrypoint | invariant
+                                            -- | owner | maturity
+  value_json          TEXT NOT NULL,        -- structured value (shape depends on kind)
+  created_at          TEXT NOT NULL,
+  created_by          TEXT,                 -- who/what created this declaration
+  supersedes_uid      TEXT REFERENCES declarations(declaration_uid),
+  is_active           INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX idx_declarations_target ON declarations(repo_uid, target_stable_key, kind);
+CREATE INDEX idx_declarations_active ON declarations(repo_uid, is_active);
+
+
+-- Inferences
+-- Computed guesses. Always attached to a snapshot.
+-- Always carry confidence scores. Never contaminate the facts tables.
+
+CREATE TABLE inferences (
+  inference_uid       TEXT PRIMARY KEY,
+  snapshot_uid        TEXT NOT NULL REFERENCES snapshots(snapshot_uid),
+  repo_uid            TEXT NOT NULL REFERENCES repos(repo_uid),
+  target_stable_key   TEXT NOT NULL,
+  kind                TEXT NOT NULL,        -- arch_role | dead_likelihood | ownership_guess
+                                            -- | hotspot_score | clone_cluster | state_machine
+  value_json          TEXT NOT NULL,
+  confidence          REAL NOT NULL,        -- 0.0 to 1.0
+  basis_json          TEXT NOT NULL,        -- what evidence supports this inference
+  extractor           TEXT NOT NULL,        -- "hotspot-analyzer:0.1.0" | "arch-classifier:0.1.0"
+  created_at          TEXT NOT NULL
+);
+
+CREATE INDEX idx_inferences_target ON inferences(snapshot_uid, target_stable_key, kind);
+CREATE INDEX idx_inferences_kind ON inferences(snapshot_uid, kind);
+
+
+-- Artifacts
+-- References to heavy evidence stored outside the database.
+-- The database stores metadata. The file system (or object store) stores content.
+
+CREATE TABLE artifacts (
+  artifact_uid    TEXT PRIMARY KEY,
+  snapshot_uid    TEXT NOT NULL REFERENCES snapshots(snapshot_uid),
+  repo_uid        TEXT NOT NULL REFERENCES repos(repo_uid),
+  kind            TEXT NOT NULL,            -- ast_manifest | coverage_report | trace_dump
+                                            -- | git_metrics | contract_comparison
+                                            -- | clone_report | hotspot_data
+  relative_path   TEXT NOT NULL,            -- path relative to artifact store root
+  content_hash    TEXT,                     -- for deduplication and integrity
+  size_bytes      INTEGER,
+  format          TEXT,                     -- json | ndjson | csv | binary
+  created_at      TEXT NOT NULL
+);
+
+CREATE INDEX idx_artifacts_snapshot ON artifacts(snapshot_uid, kind);
+
+
+-- Evidence links
+-- Connects artifacts to the nodes, edges, or inferences they support.
+-- An edge might be supported by multiple evidence sources.
+-- An inference might cite multiple artifacts as basis.
+
+CREATE TABLE evidence_links (
+  evidence_link_uid   TEXT PRIMARY KEY,
+  snapshot_uid        TEXT NOT NULL REFERENCES snapshots(snapshot_uid),
+  subject_type        TEXT NOT NULL,        -- node | edge | inference
+  subject_uid         TEXT NOT NULL,        -- node_uid, edge_uid, or inference_uid
+  artifact_uid        TEXT NOT NULL REFERENCES artifacts(artifact_uid),
+  note                TEXT                  -- optional annotation
+);
+
+CREATE INDEX idx_evidence_subject ON evidence_links(snapshot_uid, subject_type, subject_uid);
+
+
+================================================================================
+CONVENIENCE VIEWS
+================================================================================
+
+-- Symbols (functions, classes, interfaces, etc.)
+CREATE VIEW symbols AS
+SELECT * FROM nodes WHERE kind = 'SYMBOL';
+
+-- File nodes
+CREATE VIEW file_nodes AS
+SELECT * FROM nodes WHERE kind = 'FILE';
+
+-- Module nodes
+CREATE VIEW module_nodes AS
+SELECT * FROM nodes WHERE kind = 'MODULE';
+
+-- Endpoints (routes, RPC handlers, GraphQL resolvers)
+CREATE VIEW endpoints AS
+SELECT * FROM nodes WHERE kind = 'ENDPOINT';
+
+-- Active declarations only
+CREATE VIEW active_declarations AS
+SELECT * FROM declarations WHERE is_active = 1;
+
+-- Boundary declarations (for violation checking)
+CREATE VIEW boundaries AS
+SELECT * FROM declarations WHERE kind = 'boundary' AND is_active = 1;
+
+-- Declared entrypoints (for dead code exclusion)
+CREATE VIEW declared_entrypoints AS
+SELECT * FROM declarations WHERE kind = 'entrypoint' AND is_active = 1;
+
+
+================================================================================
+CANONICAL EDGE TYPES
+================================================================================
+
+Structural:
+  IMPORTS          — file/module imports another
+  CALLS            — function/method calls another
+  IMPLEMENTS       — class implements interface
+  INSTANTIATES     — code creates instance (new X)
+
+Data flow:
+  READS            — function reads variable/field
+  WRITES           — function writes/mutates variable/field
+
+Async/event:
+  EMITS            — code publishes to event topic
+  CONSUMES         — code subscribes to event topic
+
+Framework:
+  ROUTES_TO        — HTTP/RPC route maps to handler
+  REGISTERED_BY    — DI container binds interface to class
+  GATED_BY         — execution gated by config/flag
+
+Relational:
+  DEPENDS_ON       — generic dependency
+  OWNS             — module owns table/topic/config
+  TESTED_BY        — test imports production code (static)
+  COVERS           — test exercises production code (dynamic, from coverage)
+
+Exception:
+  THROWS           — function throws exception type
+  CATCHES          — catch block handles exception type
+
+State:
+  TRANSITIONS_TO   — state value transitions to another
+
+
+================================================================================
+NODE KINDS AND SUBTYPES
+================================================================================
+
+kind: MODULE
+  subtypes: PACKAGE | NAMESPACE | DIRECTORY
+
+kind: FILE
+  subtypes: SOURCE | TEST | CONFIG | MIGRATION | SCHEMA
+
+kind: SYMBOL
+  subtypes: FUNCTION | CLASS | METHOD | INTERFACE | TYPE_ALIAS
+            | VARIABLE | CONSTANT | ENUM | ENUM_MEMBER | PROPERTY
+            | CONSTRUCTOR | GETTER | SETTER
+
+kind: ENDPOINT
+  subtypes: ROUTE | RPC_METHOD | GRAPHQL_RESOLVER | WEBSOCKET_HANDLER
+
+kind: EVENT_TOPIC
+  subtypes: KAFKA_TOPIC | RABBITMQ_EXCHANGE | REDIS_CHANNEL | INTERNAL_EVENT
+
+kind: TABLE
+  subtypes: TABLE | VIEW | MATERIALIZED_VIEW | COLLECTION
+
+kind: CONFIG_KEY
+  subtypes: ENV_VAR | FEATURE_FLAG | CONFIG_FILE_KEY | DI_BINDING
+
+kind: TEST
+  subtypes: TEST_FILE | TEST_SUITE | TEST_CASE
+
+kind: STATE
+  subtypes: STATE_VALUE | STATE_FIELD
+
+kind: QUEUE
+  subtypes: (none yet)
+
+kind: JOB
+  subtypes: CRON | SCHEDULED_TASK | BACKGROUND_WORKER
+
+
+================================================================================
+RESOLUTION VALUES
+================================================================================
+
+  static    — deterministically resolved from source code
+              Examples: import statement, direct function call, type annotation,
+              class declaration with "implements" clause
+
+  dynamic   — known to exist but resolved at runtime, not statically provable
+              Examples: DI container injection, reflection, dynamic import,
+              string-based event topic registration
+
+  inferred  — guessed from naming patterns, proximity, or heuristics
+              Examples: architectural role classification, likely ownership,
+              probable event consumer based on naming convention
+
+
+================================================================================
+DECLARATION KINDS AND VALUE SHAPES
+================================================================================
+
+kind: "module"
+  value_json: {
+    "purpose": "payment invariants and orchestration",
+    "maturity": "MATURE",
+    "owner": "payments-team"
+  }
+
+kind: "boundary"
+  value_json: {
+    "forbids": "src/infrastructure",
+    "reason": "core must not depend on infrastructure adapters"
+  }
+
+kind: "entrypoint"
+  value_json: {
+    "type": "route_handler" | "event_listener" | "cron_job" | "public_export",
+    "description": "POST /api/payments/charge"
+  }
+
+kind: "invariant"
+  value_json: {
+    "text": "duplicate settlement must not occur",
+    "severity": "critical"
+  }
+
+kind: "owner"
+  value_json: {
+    "team": "payments-team",
+    "contact": "alice@example.com"
+  }
+
+kind: "maturity"
+  value_json: {
+    "level": "PROTOTYPE" | "MATURE" | "PRODUCTION",
+    "notes": "scheduled for rewrite in Q3"
+  }
+
+
+================================================================================
+STORAGE ARCHITECTURE
+================================================================================
+
+The storage port (src/core/ports/storage.ts) defines the interface.
+Adapters implement it for specific backends.
+
+  StorageAdapter
+    |
+    |-- SqliteStorageAdapter     (v1 — local CLI use)
+    |     Uses: better-sqlite3
+    |     Artifact store: local filesystem (./artifacts/)
+    |
+    |-- PostgresStorageAdapter   (future — central enterprise)
+    |     Uses: pg or postgres.js
+    |     Artifact store: S3/MinIO
+    |
+    |-- ExportAdapter            (v1 — for exchange format)
+          Writes: NDJSON snapshot bundle to file
+          Reads: NDJSON snapshot bundle from file
+
+The export/import cycle:
+
+  1. Local indexer indexes repo, writes to SQLite.
+  2. "tool repo export <repo> --snapshot <id>" writes NDJSON bundle.
+  3. Central service ingests NDJSON bundle into Postgres.
+  4. Central service can answer cross-repo queries.
+
+The NDJSON bundle format:
+
+  Line 1:  {"type": "repo", "data": { repo row }}
+  Line 2:  {"type": "snapshot", "data": { snapshot row }}
+  Lines:   {"type": "file", "data": { file row }}
+  Lines:   {"type": "file_version", "data": { file_version row }}
+  Lines:   {"type": "node", "data": { node row }}
+  Lines:   {"type": "edge", "data": { edge row }}
+  Lines:   {"type": "declaration", "data": { declaration row }}
+  Lines:   {"type": "inference", "data": { inference row }}
+  Lines:   {"type": "artifact", "data": { artifact metadata row }}
+
+Each line is a self-contained JSON object. The bundle can be streamed.
+Ingestion is idempotent: re-importing a snapshot overwrites the same UIDs.
+
+
+================================================================================
+INVALIDATION MODEL
+================================================================================
+
+When a file changes (detected by content_hash mismatch):
+
+  1. Mark the file_version as stale (parse_status = 'stale').
+  2. Do NOT delete old nodes/edges immediately.
+  3. On "tool repo refresh":
+     a. Create a new snapshot (kind = 'refresh', parent = previous snapshot).
+     b. For each stale file:
+        - Re-parse the file.
+        - Delete old nodes where file_uid = this file AND snapshot = old.
+        - Delete old edges where source or target was in the deleted nodes.
+        - Insert new nodes and edges with the new snapshot_uid.
+     c. For unchanged files:
+        - Copy their nodes and edges forward to the new snapshot
+          (or reference the parent snapshot — implementation choice).
+     d. Mark snapshot status = 'ready'.
+
+The "copy forward or reference parent" decision:
+
+  Option A: Physical copy — duplicate unchanged rows with new snapshot_uid.
+    Pro: Every snapshot is self-contained. Queries need no joins across snapshots.
+    Con: Storage grows linearly with snapshots.
+
+  Option B: Logical inheritance — query falls through to parent snapshot for
+    files not re-indexed in the current snapshot.
+    Pro: Minimal storage.
+    Con: Queries are more complex (must walk snapshot chain).
+
+  Recommendation for v1: Option A (physical copy).
+  Reason: Simplicity. At the data volumes of a single repo (thousands of nodes),
+  storage is not a concern. Query simplicity is.
+
+  Recommendation for enterprise: Option B with materialized views.
+  Reason: At portfolio scale (hundreds of repos, daily snapshots), storage matters.
+
+
+================================================================================
+RECURSIVE CTE EXAMPLES
+================================================================================
+
+These are the graph traversal queries that power the CLI commands.
+They work identically on SQLite and Postgres.
+
+
+-- Find all transitive callers of a symbol (up to depth N)
+
+WITH RECURSIVE callers(node_uid, depth, path) AS (
+  -- Base case: find the target node
+  SELECT e.source_node_uid, 1, e.source_node_uid || ' -> ' || e.target_node_uid
+  FROM edges e
+  JOIN nodes n ON e.target_node_uid = n.node_uid
+  WHERE n.stable_key = :target_stable_key
+    AND e.snapshot_uid = :snapshot_uid
+    AND e.type = 'CALLS'
+
+  UNION ALL
+
+  -- Recursive case: walk backward through CALLS edges
+  SELECT e.source_node_uid, c.depth + 1, e.source_node_uid || ' -> ' || c.path
+  FROM edges e
+  JOIN callers c ON e.target_node_uid = c.node_uid
+  WHERE e.snapshot_uid = :snapshot_uid
+    AND e.type = 'CALLS'
+    AND c.depth < :max_depth
+    AND c.path NOT LIKE '%' || e.source_node_uid || '%'   -- cycle prevention
+)
+SELECT DISTINCT n.*, c.depth, c.path
+FROM callers c
+JOIN nodes n ON c.node_uid = n.node_uid;
+
+
+-- Find dead nodes (zero incoming edges, not declared entrypoints)
+
+SELECT n.*
+FROM nodes n
+WHERE n.snapshot_uid = :snapshot_uid
+  AND n.kind = 'SYMBOL'
+  AND n.node_uid NOT IN (
+    SELECT e.target_node_uid
+    FROM edges e
+    WHERE e.snapshot_uid = :snapshot_uid
+  )
+  AND n.stable_key NOT IN (
+    SELECT d.target_stable_key
+    FROM declarations d
+    WHERE d.repo_uid = :repo_uid
+      AND d.kind = 'entrypoint'
+      AND d.is_active = 1
+  );
+
+
+-- Find shortest path between two nodes
+
+WITH RECURSIVE path_search(node_uid, depth, path, found) AS (
+  SELECT :from_node_uid, 0, :from_node_uid, 0
+
+  UNION ALL
+
+  SELECT e.target_node_uid, p.depth + 1,
+         p.path || ' -> ' || e.target_node_uid,
+         CASE WHEN e.target_node_uid = :to_node_uid THEN 1 ELSE 0 END
+  FROM edges e
+  JOIN path_search p ON e.source_node_uid = p.node_uid
+  WHERE e.snapshot_uid = :snapshot_uid
+    AND e.type IN ('CALLS', 'IMPORTS')
+    AND p.depth < :max_depth
+    AND p.found = 0
+    AND p.path NOT LIKE '%' || e.target_node_uid || '%'
+)
+SELECT * FROM path_search WHERE found = 1
+ORDER BY depth ASC
+LIMIT 1;
+
+
+-- Detect cycles at module level
+
+WITH RECURSIVE cycle_search(start, current, path, is_cycle) AS (
+  SELECT n.node_uid, n.node_uid, n.node_uid, 0
+  FROM nodes n
+  WHERE n.snapshot_uid = :snapshot_uid
+    AND n.kind = 'MODULE'
+
+  UNION ALL
+
+  SELECT cs.start, e.target_node_uid,
+         cs.path || ' -> ' || e.target_node_uid,
+         CASE WHEN e.target_node_uid = cs.start THEN 1 ELSE 0 END
+  FROM edges e
+  JOIN cycle_search cs ON e.source_node_uid = cs.current
+  WHERE e.snapshot_uid = :snapshot_uid
+    AND e.type = 'IMPORTS'
+    AND cs.is_cycle = 0
+    AND (cs.path NOT LIKE '%' || e.target_node_uid || '%'
+         OR e.target_node_uid = cs.start)
+)
+SELECT DISTINCT path FROM cycle_search WHERE is_cycle = 1;
+
+
+================================================================================
+V1 POPULATION SCOPE
+================================================================================
+
+Tables populated in v1:
+  repos               — full
+  snapshots            — full
+  files                — full
+  file_versions        — full
+  nodes                — kinds: MODULE, FILE, SYMBOL only
+                         subtypes: FUNCTION, CLASS, METHOD, INTERFACE, TYPE_ALIAS,
+                                   VARIABLE, CONSTANT, ENUM, PROPERTY, CONSTRUCTOR
+  edges                — types: IMPORTS, CALLS only
+                         resolution: static only
+  declarations         — kinds: module, boundary, entrypoint, invariant
+
+Tables present but empty in v1:
+  inferences
+  artifacts
+  evidence_links
+
+Tables populated in v2:
+  nodes                — add: ENDPOINT, EVENT_TOPIC, TABLE, CONFIG_KEY, TEST, STATE
+  edges                — add: IMPLEMENTS, INSTANTIATES, ROUTES_TO, REGISTERED_BY,
+                               EMITS, CONSUMES, GATED_BY, TESTED_BY, THROWS, CATCHES
+  inferences           — add: arch_role, dead_likelihood, hotspot_score
+  artifacts            — add: coverage_report, git_metrics
+  evidence_links       — link artifacts to nodes/edges
+
+Tables populated in v3:
+  Cross-repo nodes and edges (endpoints, event topics, tables with OWNS edges
+  connecting to repos)
+  Fleet-level inferences

@@ -1,0 +1,1160 @@
+Legacy Codebase Toolbox: Existing Tools vs Homegrown Gaps
+==========================================================
+
+This document maps every pipeline section from "Working With Legacy Code With AI Agents" to:
+  A. Existing free/open-source tools that cover it (or partially cover it)
+  B. Gaps that require homegrown Python scripts
+
+Status legend:
+  [COVERED]  — An existing tool does this well enough to use directly.
+  [PARTIAL]  — An existing tool handles part of it; a script must orchestrate or extend.
+  [GAP]      — No existing tool does this. Must be built.
+
+
+================================================================================
+SECTION 1: AUTOMATED COMPREHENSION AND STRUCTURAL MAPPING
+================================================================================
+
+1.1 Dependency Graphing
+-----------------------
+
+EXISTING TOOLS:
+
+  Tree-sitter
+    What: Incremental parser producing concrete syntax trees. 100+ language grammars.
+    Install: pip install tree-sitter / cargo install tree-sitter-cli
+    Status: Very active. 24k+ stars. MIT license.
+    Use for: AST extraction of imports, function definitions, class definitions, call sites.
+    Limitation: Syntax only. No type resolution. No cross-file reference tracking.
+
+  SCIP (Code Intelligence Protocol)
+    What: Protobuf-based protocol for precise code intelligence (definitions, references, hover).
+    Install: Language-specific indexers (scip-typescript, scip-java, scip-python, etc.)
+    Status: Active. Apache 2.0. Sourcegraph project.
+    Use for: Cross-file symbol resolution, reference tracking.
+    Limitation: Indexer quality varies by language. Designed for Sourcegraph integration.
+
+  dependency-cruiser (JS/TS only)
+    What: Validates and visualizes module dependencies. Custom rules. JSON/DOT/Mermaid output.
+    Install: npm install -g dependency-cruiser
+    Status: Very active. 6.5k stars. MIT.
+    Use for: JS/TS import graph extraction with rule enforcement.
+
+  Madge (JS/TS only)
+    What: Circular dependency detection and dependency graph visualization.
+    Install: npm install -g madge
+    Status: Active. 10k stars. MIT.
+    Use for: Quick circular dependency checks in JS/TS.
+
+  pydeps (Python only)
+    What: Module-level dependency graph generation with Graphviz rendering.
+    Install: pip install pydeps
+    Status: Active. BSD.
+    Use for: Python package-level dependency visualization.
+
+  Joern
+    What: Code Property Graph generator (AST + CFG + PDG + call graph). Queryable.
+    Install: Download from joern.io or build from source.
+    Status: Very active. 3k stars. Apache 2.0.
+    Use for: Deep data flow and control flow analysis. Taint tracking.
+    Limitation: Scala query language learning curve. Memory-intensive.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Global Graph Resolution
+    dependency-cruiser and pydeps produce language-specific graphs.
+    SCIP provides cross-file references but not a unified queryable graph.
+    Must build: A script that aggregates per-file Tree-sitter extractions OR SCIP index
+    outputs into a single repository_graph.json with unified node IDs and typed edges
+    (IMPORTS, CALLS, IMPLEMENTS, INSTANTIATES, EMITS, CONSUMES).
+    NetworkX or SQLite as the storage backend.
+
+  [GAP] Framework-Aware Edge Extraction
+    No existing tool extracts framework-specific registrations:
+    - Route registrations (Express, Flask, Spring, Django, FastAPI)
+    - DI container bindings (inversify, Spring XML, .NET DI)
+    - ORM model-to-table mappings
+    - Event emitter/listener registrations
+    Must build: Framework-specific Tree-sitter queries or regex scanners per framework.
+    These are the highest-value custom scripts because they capture edges invisible to
+    generic import analysis.
+
+  [GAP] Dead Node Detection
+    No tool flags functions with zero incoming calls that are NOT entrypoints.
+    Must build: A script that queries the assembled graph for nodes with in-degree 0,
+    filters against known entrypoints (routes, event listeners, exports), and flags
+    the remainder as potentially dead.
+
+
+1.2 Semantic Grouping
+---------------------
+
+EXISTING TOOLS:
+
+  Tree-sitter — [COVERED] for AST extraction / code chunk shredding.
+
+  Embedding Models (local, free):
+    all-MiniLM-L6-v2 — sentence-transformers. Free. ~80MB model.
+    jina-embeddings-v2-base-code — code-specific. Free for local use.
+    Install: pip install sentence-transformers
+
+  HDBSCAN — [COVERED]
+    Install: pip install hdbscan
+    Density-based clustering that does not require specifying cluster count.
+
+  NetworkX — [COVERED]
+    Install: pip install networkx
+    Louvain community detection: networkx.community.louvain_communities()
+
+  scikit-learn — [COVERED]
+    Install: pip install scikit-learn
+    Cosine similarity, spectral clustering, K-Means fallback.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] The AST Shredder
+    No tool takes a massive file and outputs a JSON array of CodeChunks with
+    id, type, name, raw_code, extracted_text. Must build using Tree-sitter.
+
+  [GAP] The Hybrid Cohesion Matrix
+    No tool combines embedding similarity AND structural call/variable-sharing
+    into a single weighted graph. Must build: cosine similarity from embeddings
+    + structural edges from AST analysis = hybrid adjacency matrix.
+
+  [GAP] CRC Model Generator
+    The LLM synthesis step (labeling clusters with business names and designing
+    interfaces) is inherently a gap — no deterministic tool does this.
+
+
+1.3 Duplication Detection
+-------------------------
+
+EXISTING TOOLS:
+
+  jscpd
+    What: Token-based copy-paste detection. 150+ languages. JSON/HTML/SARIF output.
+    Install: npm install -g jscpd
+    Status: Active. 5.5k stars. MIT.
+    Limitation: Token matching. Misses semantic clones with renamed variables.
+
+  PMD CPD
+    What: Token-based duplicate finder. 31+ languages.
+    Install: Download PMD release. Requires JVM.
+    Status: Very active. 5.4k stars.
+    Limitation: JVM dependency. Token-level, not semantic.
+
+  FAISS
+    What: Efficient similarity search over dense vectors.
+    Install: pip install faiss-cpu (or faiss-gpu)
+    Status: Very active. Meta project. MIT.
+    Use for: Pairwise comparison of function embeddings at scale.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] AST Normalizer
+    jscpd and PMD CPD match tokens. They miss clones where variables are renamed or
+    loop constructs differ. Must build: A Tree-sitter script that strips comments,
+    replaces all identifiers with positional tokens (VAR_1, VAR_2), exposing the
+    raw logical skeleton for embedding.
+
+  [GAP] Semantic Clone Detector
+    No free tool performs semantic clone detection (same logic, different syntax).
+    Must build: Normalize via AST -> embed via code model -> FAISS index ->
+    pairwise cosine similarity -> cluster above threshold.
+    This is the highest-value gap in duplication detection.
+
+
+1.4 Hotspot Prioritization
+--------------------------
+
+EXISTING TOOLS:
+
+  Git (built-in)
+    git log --numstat — raw churn data. Free. Universal.
+
+  Lizard
+    What: Language-agnostic cyclomatic complexity. 15+ languages.
+    Install: pip install lizard
+    Status: Active. MIT.
+    Use for: Max CCN per file/function. CSV/XML output.
+
+  Radon (Python only)
+    What: CC, Halstead, Maintainability Index for Python.
+    Install: pip install radon
+    Status: Low activity (last push Oct 2024). MIT.
+
+  Wily (Python only)
+    What: Tracks complexity metrics over git history.
+    Install: pip install wily
+    Status: Active. Apache 2.0.
+    Use for: Complexity trend analysis over time.
+
+  code-maat
+    What: Git history mining for hotspots, temporal coupling, knowledge distribution.
+    Install: java -jar code-maat.jar (requires JVM and manual git log export)
+    Status: Low activity. Eclipse Public License.
+    Limitation: Clunky workflow. JVM dependency.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Hotspot Matrix Engine
+    code-maat computes churn. Lizard computes complexity. No tool joins them.
+    Must build: A Pandas script that:
+    1. Parses git log --numstat for commit frequency and line churn per file.
+    2. Parses lizard output for max CCN per file.
+    3. Normalizes both, computes Hotspot_Score = normalized_churn * normalized_complexity.
+    4. Ranks and filters.
+    Simple to build. High leverage.
+
+
+1.5 Effect Analysis / Change Impact Propagation
+------------------------------------------------
+
+EXISTING TOOLS:
+
+  None that do exactly this.
+
+  Partial coverage:
+    SCIP — can find "references to this symbol" but does NOT perform forward
+    traversal to compute the transitive affected set.
+    Joern — can query data flow paths but requires Scala queries per case.
+    CodeQL — can model taint flow but requires QL query writing and is not free
+    for closed-source repos.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Change Point Classifier
+    Must build: Analyze the target method to determine propagation vectors
+    (return value, mutated parameter, shared state).
+
+  [GAP] Forward Effect Walker
+    Must build: Recursive graph traversal from change point along CALLS edges,
+    checking return value consumption at each hop.
+
+  [GAP] Shared State Radiator
+    Must build: Cross-reference against variable lifecycle map for non-call-graph
+    propagation via shared mutable state.
+
+  [GAP] Test Scope Calculator
+    Must build: Cross-reference affected set against coverage data.
+
+  This is a MAJOR gap. No existing tool computes "given this specific edit,
+  what is the minimal mandatory test scope." This is one of the highest-value
+  scripts to build.
+
+
+1.6 Interception Point / Pinch Point Selection
+-----------------------------------------------
+
+EXISTING TOOLS:
+
+  NetworkX — [COVERED] for dominator tree computation.
+    nx.immediate_dominators() is built-in.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Subgraph Extraction + Dominator Selection
+    Must build: Extract the affected subgraph, compute the dominator tree,
+    find the lowest common dominator covering all affected nodes.
+    Straightforward to build on top of NetworkX + Effect Analysis output.
+
+  [GAP] Pinch Point Feasibility Checker
+    Must build: Check whether the identified pinch point can actually be called
+    from a test harness (does it have hidden dependencies that block instantiation?).
+
+
+================================================================================
+SECTION 2: HIGH-SPEED DISCOVERY AND REVERSE ENGINEERING
+================================================================================
+
+2.1 Scratch Refactoring
+------------------------
+
+EXISTING TOOLS:
+
+  Git — [COVERED] for sandbox branching.
+  Tree-sitter — [COVERED] for isolating the target function.
+  Vulture (Python) — [PARTIAL] for dead code identification within a function.
+  ESLint (JS/TS) — [PARTIAL] for unused variable detection.
+  Frontier LLMs — the primary engine. No tool replacement.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Context Isolator
+    Must build: A Tree-sitter script that takes a file + line number, walks up the
+    AST to the enclosing function/class, extracts it plus referenced local types.
+
+  [GAP] Sandbox Manager
+    Must build: A script that creates scratch branch, runs analysis, guarantees
+    cleanup (git reset --hard + branch deletion).
+
+  Both are simple scripts. The LLM does the actual scratch refactoring work.
+
+
+2.2 Dead Code Purging
+----------------------
+
+EXISTING TOOLS:
+
+  Knip (JS/TS)
+    What: Finds unused files, exports, dependencies. Plugin-aware (Jest, Storybook, etc.)
+    Install: npx knip
+    Status: Very active. 10.8k stars. ISC.
+    Use for: JS/TS dead export and dead file detection. Best-in-class for this ecosystem.
+    Limitation: JS/TS only.
+
+  Vulture (Python)
+    What: Finds unused functions, classes, variables, imports.
+    Install: pip install vulture
+    Status: Active. MIT.
+    Use for: Python dead code detection.
+    Limitation: Misses dynamically referenced code without allowlists.
+
+  ts-prune — ARCHIVED. Use Knip instead.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Dynamic Trap Scanner
+    Knip and Vulture find statically unused code. Neither checks for dynamic usage
+    (reflection, DI containers resolving by string name, plugin systems).
+    Must build: A ripgrep-based script that takes every "dead" symbol name and searches
+    for it as a string literal across the entire codebase.
+
+  [GAP] AST Surgeon (safe deletion)
+    Knip reports dead code. It does NOT delete it safely.
+    Must build: A Tree-sitter script that removes the exact AST node (preserving
+    surrounding syntax) and runs the compiler to verify.
+
+
+2.3 Execution Tracing
+----------------------
+
+EXISTING TOOLS:
+
+  OpenTelemetry
+    What: Vendor-neutral observability framework. Auto-instrumentation agents for
+    Java, Python, Node, .NET, Go, PHP, Ruby, Rust, C++.
+    Install: Language-specific (pip install opentelemetry-distro, npm install @opentelemetry/auto-instrumentations-node)
+    Status: Very active. CNCF graduated project.
+    Use for: Capturing runtime call trees, database queries, HTTP calls without code changes.
+
+  Jaeger
+    What: Distributed tracing backend. Stores and visualizes OpenTelemetry spans.
+    Install: docker run jaegertracing/all-in-one
+    Status: Very active. CNCF graduated.
+    Use for: Trace storage, querying, and visualization.
+
+  sys.settrace / cProfile (Python built-in) — [COVERED] for local Python profiling.
+  eBPF tools (bpftrace, bcc) — [COVERED] for system-level tracing without code changes.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Trace Distiller
+    OpenTelemetry and Jaeger produce massive raw trace dumps full of framework noise.
+    Must build: A script that parses trace JSON, filters out framework-level spans
+    (Spring Boot init, Express middleware chain, etc.), and produces a clean
+    domain-specific call tree.
+
+  [GAP] Sensing Variable Injector
+    When auto-instrumentation is not available (embedded systems, legacy frameworks),
+    must build: A Tree-sitter script that injects temporary logging statements at
+    key points in a monster method to capture internal state mutations.
+
+
+2.4 Configuration Archaeology
+------------------------------
+
+EXISTING TOOLS:
+
+  Piranha (Uber)
+    What: Removes stale feature flag code using Tree-sitter rules.
+    Install: cargo install polyglot_piranha (or use Docker)
+    Status: Active. 2.4k stars. Apache 2.0.
+    Limitation: Cleanup tool, not discovery tool. You must tell it which flags are stale.
+
+  Unleash — feature flag platform with stale flag detection via runtime metrics.
+    Not a code analysis tool.
+
+  No tool discovers all config reads in source code and maps them to execution branches.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Config Key Enumerator
+    Must build: Scan .env, .yaml, .json, .properties, Dockerfiles, CI/CD files.
+    Extract all key-value pairs grouped by environment.
+
+  [GAP] Config Read Scanner
+    Must build: Language-specific Tree-sitter queries to find process.env.X,
+    os.environ["X"], @Value("${X}"), ConfigurationManager.AppSettings["X"], etc.
+
+  [GAP] Branch Gate Mapper
+    Must build: Link each config read to the conditional branch it controls.
+
+  [GAP] DI Binding Resolver
+    Must build: Parse DI container configs (Spring XML, inversify modules, .NET
+    Startup.cs) to resolve interface -> concrete class per environment.
+
+  This is an ENTIRELY homegrown pipeline. No existing tool does config archaeology.
+
+
+2.5 State Machine Extraction
+-----------------------------
+
+EXISTING TOOLS:
+
+  None.
+  No existing tool extracts implicit state machines from legacy code.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] State Field Identifier
+    Must build: Scan ORM models and type definitions for fields named status, state,
+    phase, step. Check for enum types or constrained string validation.
+
+  [GAP] State Value Harvester
+    Must build: ripgrep + Tree-sitter to find every comparison and assignment
+    involving the state field across the entire codebase.
+
+  [GAP] Transition Extractor
+    Must build: Pair READ (guard) with WRITE (transition) within the same method
+    or execution path.
+
+  [GAP] State Machine Assembler
+    Must build: NetworkX directed graph. Nodes = state values. Edges = transitions
+    with guard conditions, executing methods, and trigger types.
+
+  This is ENTIRELY homegrown. High value for any workflow-heavy legacy system.
+
+
+2.6 Error Handling Archaeology
+-------------------------------
+
+EXISTING TOOLS:
+
+  Semgrep (with custom rules)
+    What: Can match patterns like empty catch blocks, broad exception catches.
+    Install: pip install semgrep
+    Status: Very active. LGPL 2.1 (community).
+    Limitation: Finds individual anti-patterns. Does NOT trace throw-to-catch flows
+    across the call stack.
+
+  SonarQube (Community Edition)
+    What: 5000+ rules including error handling patterns.
+    Install: Docker or download. Scanner: pip install sonar-scanner or npm install sonarqube-scanner
+    Status: Very active. LGPL 3.0 (community edition).
+    Limitation: Rule-based detection, not exception flow tracing.
+
+  SpotBugs (Java only)
+    What: Bytecode-level detection of error handling bugs.
+    Install: spotbugs CLI or Maven/Gradle plugin. Requires JVM.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Throw Harvester
+    Must build: Tree-sitter scan for all throw/raise statements with exception type
+    and enclosing method.
+
+  [GAP] Catch Harvester with Classification
+    Must build: Tree-sitter scan for all catch blocks. Classify body as RETHROW,
+    LOG_AND_RETHROW, LOG_AND_SWALLOW, RETURN_NULL, RETURN_DEFAULT, EMPTY_CATCH, etc.
+    Semgrep can find empty catches but cannot classify the handling strategy.
+
+  [GAP] Exception Flow Linker
+    Must build: Walk up the call stack (via repository graph) from each throw site
+    to find the nearest matching catch. This is the core gap — no tool does
+    cross-method exception flow tracing for free.
+
+  [GAP] Black Hole Detector
+    Must build: Flag catch blocks that swallow broad exception types without logging.
+
+
+================================================================================
+SECTION 3: TEST HARNESS GENERATION AND CHARACTERIZATION
+================================================================================
+
+3.1 Characterization Scaffolding
+---------------------------------
+
+EXISTING TOOLS:
+
+  Tree-sitter — [COVERED] for parsing method signatures.
+
+  Property-Based Testing:
+    Hypothesis (Python) — pip install hypothesis. Very active. Free.
+    fast-check (JS/TS) — npm install fast-check. Very active. Free.
+    jqwik (Java) — Maven dependency. Active. Free.
+
+  Test Runners: pytest, Jest, JUnit — all free, all mature.
+
+  Coverage Tools:
+    coverage.py (Python) — pip install coverage. Free.
+    Istanbul/c8 (JS/TS) — npm install c8. Free.
+    JaCoCo (Java) — Maven/Gradle plugin. Free.
+    lcov (C/C++) — apt install lcov. Free.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Signature Fuzzer
+    Must build: Tree-sitter-based extraction of parameter types, then generation
+    of input data matrix (happy path, boundaries, nulls, empty collections).
+
+  [GAP] Assertion Patcher (the feedback loop)
+    Must build: Run tests with placeholder assertions, parse failure logs to capture
+    actual outputs, rewrite test file to replace placeholders with real values.
+    This is the core characterization test technique and no tool does it.
+
+  [GAP] Coverage Gap Prioritizer
+    Must build: Cross-reference coverage data with hotspot scores to produce
+    a prioritized list of methods needing characterization tests.
+
+
+3.2 Variable Scope Mapping
+---------------------------
+
+EXISTING TOOLS:
+
+  Tree-sitter — [COVERED] for AST traversal within a function.
+  Python ast module — [COVERED] for Python-specific Def-Use chain extraction.
+  Joern — [PARTIAL] can model data flow inside a function via CPG queries.
+  NetworkX — [COVERED] for DAG construction.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Def-Use Extractor
+    Must build: For every local variable in a monster method, log the exact line of
+    declaration, every line of mutation, every line of read.
+
+  [GAP] Liveness Calculator
+    Must build: Compute the active lifespan (first declaration to last read) of each
+    variable.
+
+  [GAP] Seam Finder
+    Must build: Scan for contiguous line ranges with minimal variable overlap with the
+    rest of the function. These are the safe extraction points.
+
+  [GAP] Sensing Variable Injector
+    Must build: When no clean seam exists, calculate the optimal line to inject a
+    temporary logging array to capture internal state.
+
+
+3.3 Procedural Test Seams
+--------------------------
+
+EXISTING TOOLS:
+
+  Tree-sitter (C/C++ grammars) — [COVERED] for AST extraction.
+  libclang — [COVERED] for semantic analysis (type resolution, macro expansion).
+  Make / CMake / Bazel — the build system IS the DI framework in C/C++.
+  C Preprocessor (gcc -E) — [COVERED] for evaluating macro expansion.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Global State Extractor
+    Must build: Identify every variable read/written by a function that is NOT in
+    its parameter list or locally declared.
+
+  [GAP] Function Pointer Injector
+    Must build: Rewrite a C function signature to accept function pointers for its
+    external dependencies (parameterization).
+
+  [GAP] Preprocessor Seam Generator
+    Must build: Generate test-specific #define headers that redirect system calls
+    to mock functions.
+
+  [GAP] Link Seam Orchestrator
+    Must build: Parse Makefile/CMakeLists.txt, duplicate build target, swap object
+    files for mocks.
+
+
+3.4 Test Organization and Code-Test Mapping
+--------------------------------------------
+
+EXISTING TOOLS:
+
+  Coverage tools (coverage.py, Istanbul, JaCoCo) — [COVERED] for which-test-covers-which-file.
+  Knip — [PARTIAL] can find unused test files in JS/TS.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Test Import Analyzer
+    Must build: Tree-sitter scan of test files to extract all production module imports.
+    Produces a static mapping independent of coverage.
+
+  [GAP] Assertion Quality Scanner
+    Must build: Classify each assertion as MEANINGFUL, TRIVIAL, SNAPSHOT, or NONE.
+    No existing tool does this.
+
+  [GAP] Orphan Detector
+    Must build: Cross-reference test imports against current production file paths.
+    Flag tests importing non-existent modules.
+
+  [GAP] Boundary Violation Detector
+    Must build: Flag "unit tests" that import infrastructure or framework modules.
+
+  [GAP] Test Reorganization Planner
+    Must build: Propose new test directory structure aligned with module boundaries.
+
+
+================================================================================
+SECTION 4: ARCHITECTURAL DECOUPLING AND ISOLATION
+================================================================================
+
+4.1 API / Framework Quarantine
+-------------------------------
+
+EXISTING TOOLS:
+
+  Tree-sitter — [COVERED] for identifying framework-specific constructs.
+  Semgrep — [PARTIAL] for pattern-matching framework imports in business logic.
+  eslint-plugin-boundaries — [PARTIAL] for enforcing layer rules in JS/TS.
+  Frontier LLMs — the primary engine for the Humble Object extraction.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] API Locator
+    Must build: Scan for files where framework types are passed deep into internal
+    private methods (infection detection).
+
+  The actual Humble Object extraction is an LLM task, not a script task.
+
+
+4.2 Interface Segregation
+--------------------------
+
+EXISTING TOOLS:
+
+  Tree-sitter — [COVERED] for method signature extraction.
+  NetworkX — [COVERED] for bipartite graph construction and community detection.
+  Repository graph — required input (built in 1.1).
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Client Usage Mapper
+    Must build: Query repository graph. For each external caller of the God Class,
+    record which specific public methods that caller invokes.
+
+  [GAP] Interface Cluster Engine
+    Must build: Bipartite graph (callers x methods), project onto methods, community
+    detection to reveal natural interface boundaries.
+
+  [GAP] Interface Generator
+    Must build: Tree-sitter extraction of method signatures per cluster, output as
+    new interface files.
+
+
+4.3 Adapter Generation
+-----------------------
+
+EXISTING TOOLS:
+
+  Tree-sitter — [COVERED] for import scanning and method call extraction.
+  Repository graph — [COVERED] for identifying all files importing the vendor.
+  TypeScript Compiler API / javaparser / Python ast — [COVERED] for type resolution.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Infection Scanner
+    Must build: Query graph for all import edges into vendor namespace.
+
+  [GAP] Usage Enumerator
+    Must build: Extract exact vendor method calls with argument and return types.
+
+  [GAP] Minimal Interface Calculator
+    Must build: Deduplicate usage across all infected files to compute the smallest
+    possible domain interface.
+
+  The domain translation (vendor terminology -> domain terminology) is an LLM task.
+
+
+4.4 Sprout/Wrap Automation
+---------------------------
+
+EXISTING TOOLS:
+
+  ts-morph (TypeScript) — [COVERED] for programmatic AST manipulation.
+    Install: npm install ts-morph
+  libcst (Python) — [COVERED] for formatting-preserving AST manipulation.
+    Install: pip install libcst
+  JavaParser (Java) — [COVERED] for Java AST manipulation.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Pattern Selector
+    Must build: Evaluate structural context (constructor dependencies, insertion
+    constraint) and select the correct pattern (Sprout Method/Class, Wrap Method/Class).
+
+  [GAP] Sprout Generator
+    Must build: Create new method/class with correct parameter list derived from
+    variable lifecycle data.
+
+  [GAP] Insertion Surgeon
+    Must build: AST manipulation to insert minimal wiring (one line for Sprout,
+    rename + new method for Wrap).
+
+
+4.5 Programming by Difference
+-------------------------------
+
+EXISTING TOOLS:
+
+  ts-morph / JavaParser / libcst — [COVERED] for access modifier analysis and
+  class generation.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Override Feasibility Checker
+    Must build: Verify method is non-final, non-static, non-private. Verify class
+    is non-sealed. Check for private field access in the target method.
+
+  [GAP] Subclass Generator
+    Must build: Generate subclass extending parent, overriding only the target method.
+
+  [GAP] Instantiation Redirector
+    Must build: Query repository graph for all INSTANTIATES edges. Classify each as
+    FACTORY, DI_CONTAINER, DIRECT, or REFLECTION. Update accordingly.
+
+  [GAP] Factory Extractor
+    Must build: If >5 direct instantiation sites, generate factory method and redirect
+    all call sites.
+
+
+================================================================================
+SECTION 5: MECHANICAL ENFORCEMENT AND RISK MITIGATION
+================================================================================
+
+5.1 Strict Pattern Execution
+------------------------------
+
+EXISTING TOOLS:
+
+  ts-morph / libcst / JavaParser — [COVERED] for AST manipulation.
+  IDE refactoring engines (IntelliJ, VS Code) — available but not scriptable CLI tools.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Technique Registry
+    Must build: Machine-readable catalog (JSON/YAML) of the 25 named dependency-breaking
+    techniques, each with Preconditions, Steps, and Postconditions.
+    This is the CORE artifact. No such registry exists anywhere in machine-readable form.
+
+  [GAP] Precondition Validator
+    Must build: Parse target code, check structural preconditions per technique.
+
+  [GAP] Step Executor
+    Must build: Apply each AST transformation in strict sequence using ts-morph/libcst.
+
+  [GAP] Postcondition Verifier
+    Must build: Re-parse, verify postconditions, run compiler.
+
+  [GAP] Call Site Updater
+    Must build: Query repository graph for all call sites, apply corresponding updates.
+
+
+5.2 Pre-Commit Diff Analysis
+------------------------------
+
+EXISTING TOOLS:
+
+  Git — [COVERED] for snapshot extraction.
+  Difftastic
+    What: Structural diff using Tree-sitter. Compares ASTs, not text lines.
+    Install: cargo install difftastic (or brew install difftastic)
+    Status: Very active. 24.9k stars. MIT.
+    Limitation: Terminal output. Not machine-parseable for automated analysis.
+
+  GumTree
+    What: AST edit script computation (INSERT, DELETE, UPDATE, MOVE).
+    Install: Download from github.com/GumTreeDiff/gumtree. Requires JVM.
+    Status: Active. 1.3k stars. LGPL 3.0.
+    Use for: Machine-readable structural diff. This IS the right tool for automated
+    pre-commit analysis.
+    Limitation: JVM dependency. Slower than Difftastic.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Snapshot Extractor
+    Must build: Retrieve pre/post versions of every modified file from Git.
+    Simple. Wraps git show.
+
+  [GAP] Control Flow Comparator
+    GumTree provides AST edit scripts but does NOT compare control flow graphs.
+    Must build: Generate CFG for pre/post versions of each modified function,
+    compare branch counts and branch conditions.
+
+  [GAP] Scope Collision Detector
+    Must build: Check newly declared variables against variable liveness ranges
+    in enclosing scopes.
+
+  [GAP] Side Effect Tracker
+    Must build: Extract ordered list of side-effecting statements from pre/post,
+    compare for additions/removals/reorderings.
+
+
+5.3 Build Dependency Severing
+------------------------------
+
+EXISTING TOOLS:
+
+  dependency-cruiser (JS/TS) — [PARTIAL] computes dependency graphs but does NOT
+    compute cascade sizes (transitive recompilation impact).
+  Include-What-You-Use (C/C++)
+    What: Analyzes #include directives and recommends unnecessary include removals.
+    Install: apt install iwyu (or build from source)
+    Status: Active. Clang-based.
+    Use for: C/C++ include chain optimization.
+    Limitation: C/C++ only. Recommends removals but does NOT compute cascade sizes.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Cascade Calculator
+    Must build: Compute transitive import closure for every file. Calculate fan-in,
+    fan-out, cascade_size. Rank files by cascade_size.
+
+  [GAP] Usage Analyzer
+    Must build: For each high-cascade file, analyze what each importer actually uses
+    (types only vs. runtime functions). Determines if importers can be redirected
+    to a lightweight interface/types-only file.
+
+  [GAP] Interface Extraction Planner
+    Must build: Set-cover optimization to find the minimum interface extractions
+    that reduce max cascade below threshold.
+
+  [GAP] Cascade Verifier
+    Must build: Simulate the import graph post-extraction and recalculate cascades.
+
+
+================================================================================
+SECTION 6: MULTI-CODEBASE OPERATIONS
+================================================================================
+
+6.1 Cross-Repository Dependency Mapping
+-----------------------------------------
+
+EXISTING TOOLS:
+
+  Nx — [PARTIAL] for monorepos. Import-level dependency analysis within a workspace.
+    Limitation: Designed for monorepos, not multi-repo systems.
+  Turborepo — [PARTIAL] file-hash change detection in monorepos. Less granular than Nx.
+
+  No tool maps dependencies across separate repositories via API calls, shared databases,
+  event topics, and shared libraries simultaneously.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Boundary Extractor (Per Repo)
+    Must build: For each repo, extract: exposed endpoints (from route defs or OpenAPI),
+    outbound HTTP clients (base URLs, SDK imports), event topics published/consumed,
+    database connection strings and table references, shared library versions.
+
+  [GAP] Super-Graph Assembler
+    Must build: Stitch per-repo boundary extractions into a unified system graph.
+    Match outbound API calls to exposed endpoints. Match event publishers to consumers
+    via topic strings. Identify shared databases.
+
+  [GAP] Version Conflict Detector
+    Must build: Compare shared library versions across repos. Flag diamond dependencies
+    and stale versions.
+
+  [GAP] Shared Database Mapper
+    Must build: Identify tables accessed by multiple services. Classify as READ/WRITE.
+
+  This is ENTIRELY homegrown. The highest-complexity pipeline to build.
+
+
+6.2 API Contract Drift Detection
+----------------------------------
+
+EXISTING TOOLS:
+
+  Pact
+    What: Consumer-driven contract testing framework.
+    Install: Language-specific SDKs. Ruby, Java, .NET, JS, Go, Python, Rust, etc.
+    Status: Very active. MIT.
+    Use for: Verifying provider matches consumer expectations.
+    Limitation: Requires adoption by BOTH consumer and provider teams. Not retrofit-friendly
+    for legacy systems that have no contract tests.
+
+  Schemathesis
+    What: Property-based API testing from OpenAPI/GraphQL specs.
+    Install: pip install schemathesis
+    Status: Very active. MIT.
+    Use for: Fuzzing a single API for spec violations.
+    Limitation: Tests one API in isolation. Does not compare provider output vs consumer usage.
+
+  Spectral
+    What: Lints OpenAPI/AsyncAPI spec files for style violations.
+    Install: npm install -g @stoplight/spectral-cli
+    Status: Active. Apache 2.0.
+    Limitation: Lints the spec file, not the implementation.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Provider Schema Extractor
+    Must build: Extract actual response structure from route handler code (not from
+    the spec file, which may be outdated). Trace the return statement through
+    serialization to determine exact fields and types.
+
+  [GAP] Consumer Usage Extractor
+    Must build: Parse HTTP client code in each consumer. Trace the response variable
+    to every field access. Record which fields are actually consumed and how.
+
+  [GAP] Contract Comparator
+    Must build: Field-level comparison between provider output and consumer usage.
+    Classify as MATCHED, UNUSED, MISSING, TYPE_MISMATCH, RENAMED.
+
+  Pact is the right tool IF you can adopt it from scratch. For investigating existing
+  legacy systems that have no contract tests, you need the homegrown extraction pipeline.
+
+
+6.3 Database Schema Archaeology
+---------------------------------
+
+EXISTING TOOLS:
+
+  SchemaCrawler
+    What: Schema discovery and documentation from live databases. ER diagrams, lint.
+    Install: Download. Requires JVM and JDBC driver.
+    Status: Very active. 1.8k stars.
+    Limitation: Connects to live databases. Does NOT analyze ORM model code in source files.
+
+  Atlas
+    What: Declarative schema management with ORM integration (GORM, Sequelize, Django,
+    SQLAlchemy, Hibernate).
+    Install: curl -sSf https://atlasgo.sh | sh
+    Status: Very active. 8.2k stars. Apache 2.0.
+    Use for: Reading ORM models and generating migration plans.
+    Limitation: Designed for one service's schema, not cross-service shared table detection.
+
+  Azimutt
+    What: Database explorer. Interactive ERDs from live databases.
+    Install: npm install -g azimutt
+    Status: Moderate. MIT.
+    Limitation: Connects to live databases. Does not analyze code.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Table Reference Harvester (Per Repo)
+    Must build: Scan each repo for ORM model definitions, migration files, raw SQL
+    strings. Extract table names, column definitions, access patterns.
+
+  [GAP] Access Pattern Classifier
+    Must build: Classify each service's relationship to each table as OWNER, READER,
+    WRITER, FULL_ACCESS, MIGRATION_OWNER.
+
+  [GAP] Schema Divergence Detector
+    Must build: Compare ORM model definitions for the same table across different
+    services. Detect column name mismatches, type mismatches, missing columns.
+
+  [GAP] Migration Risk Analyzer
+    Must build: Simulate impact of a proposed migration against all consuming services.
+
+  SchemaCrawler and Atlas analyze single-database schema. The cross-service ownership
+  and divergence analysis is entirely homegrown.
+
+
+6.4 Cross-Codebase Event Flow Tracing
+---------------------------------------
+
+EXISTING TOOLS:
+
+  EventCatalog
+    What: Architecture catalog for event-driven systems. Documents events, services, flows.
+    Install: npm install @eventcatalog/core
+    Status: Active. 2.6k stars.
+    Limitation: Documentation tool. Does NOT automatically discover flows from code.
+
+  AsyncAPI CLI
+    What: Validates and generates code from AsyncAPI specification files.
+    Install: npm install -g @asyncapi/cli
+    Status: Active. Apache 2.0.
+    Limitation: Requires AsyncAPI specs to exist. Does not extract from source code.
+
+  Apache SkyWalking
+    What: Distributed tracing with automatic topology discovery from runtime traces.
+    Install: Agents per language + OAP server.
+    Status: Very active. CNCF.
+    Use for: Runtime topology discovery (IF the system is running with agents deployed).
+    Limitation: Runtime only. Does not perform static analysis.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Event Registry Unifier
+    Must build: Aggregate per-repo event_mesh.json files into a single registry.
+    For each topic, collect all publishers and consumers across all repos.
+
+  [GAP] Flow Chain Builder
+    Must build: Recursive link following from entrypoint -> publish -> topic -> consumer
+    -> consumer logic -> next publish -> etc.
+
+  [GAP] Payload Schema Comparator
+    Must build: Compare serialized payload at publish site vs deserialized payload at
+    consume site. Detect field-level schema drift.
+
+  [GAP] Dead Event Detector
+    Must build: Find orphaned topics (published, never consumed), phantom subscriptions
+    (consumed, never published).
+
+  For running systems, SkyWalking provides runtime topology. For static analysis of
+  event flows from code, everything is homegrown.
+
+
+6.5 Strangler Fig / Migration Path Planning
+---------------------------------------------
+
+EXISTING TOOLS:
+
+  NetworkX — [COVERED] for topological sorting and dependency ordering.
+
+  Infrastructure for traffic splitting:
+    Istio / Envoy / NGINX — free, open-source. Handle traffic routing between
+    legacy and new implementations. Not analysis tools.
+
+  Feature Flag Platforms:
+    Unleash — open-source. For controlling traffic split percentages.
+    OpenFeature — open standard for flag SDKs.
+
+  Log4brains
+    What: ADR management CLI.
+    Install: npx log4brains
+    Status: Low activity. Apache 2.0.
+    Use for: Documenting migration decisions.
+
+  No tool computes the valid migration order from dependency constraints.
+
+GAPS — BUILD IN PYTHON:
+
+  [GAP] Dependency Order Calculator
+    Must build: Topological sort on combined constraint graph (API deps + shared
+    database coupling + event publishing deps). Identify leaf nodes (migration-ready),
+    blocked nodes, circular dependencies.
+
+  [GAP] Facade Point Identifier
+    Must build: For each component, find the narrowest interface boundary where a
+    proxy can be inserted.
+
+  [GAP] Migration Phase Generator
+    Must build: Group topologically sorted components into phases. Each phase contains
+    components, facades, flags, data migration, rollback mechanism, verification criteria.
+
+  [GAP] Rollback Boundary Analyzer
+    Must build: Determine whether each phase is independently rollbackable.
+
+  This is ENTIRELY homegrown. No existing tool does migration path computation.
+
+
+================================================================================
+SUMMARY: WHAT TO INSTALL RIGHT NOW
+================================================================================
+
+Core Foundation (install first, used by almost every pipeline):
+  pip install tree-sitter networkx pandas
+  pip install sentence-transformers faiss-cpu hdbscan scikit-learn
+  pip install lizard coverage semgrep
+  cargo install ripgrep difftastic
+
+Language-Specific:
+  JS/TS:  npm install -g dependency-cruiser knip
+          npm install ts-morph
+  Python: pip install vulture libcst radon
+  Java:   Download Joern, PMD, SpotBugs. Add ArchUnit to build.
+  C/C++:  apt install iwyu
+          Download libclang / tree-sitter C grammar
+
+Cross-Repo / Multi-Service:
+  pip install schemathesis
+  npm install -g @stoplight/spectral-cli
+  Consider: Pact (if you can adopt contract testing)
+  Consider: Atlas (for ORM-aware schema management)
+
+Structural Diff:
+  Download GumTree (JVM) for machine-readable AST edit scripts
+  cargo install difftastic (for human-readable structural diffs)
+
+Git History:
+  Download code-maat (JVM) for temporal coupling analysis
+  OR build the simpler Hotspot Matrix Engine in Python (recommended)
+
+
+================================================================================
+SUMMARY: WHAT TO BUILD (PRIORITY ORDER)
+================================================================================
+
+The gaps below are ordered by value-to-effort ratio.
+
+TIER 1 — HIGH VALUE, MODERATE EFFORT (build first):
+
+  1. Repository Graph Assembler
+     Aggregates Tree-sitter extractions into unified repository_graph.json.
+     Foundation for 80% of all other pipelines.
+
+  2. Framework-Aware Edge Extractors
+     Route registrations, DI bindings, ORM mappings, event emitter/listener links.
+     Per-framework scripts. Most valuable custom code.
+
+  3. Hotspot Matrix Engine
+     Joins git log churn data with Lizard complexity scores.
+     Simple Pandas script. Immediate value.
+
+  4. Effect Analysis Engine
+     Forward propagation from change point through the graph.
+     Requires repository graph. Produces mandatory test scope.
+
+  5. Characterization Test Assertion Patcher
+     Feedback loop: run with placeholder -> parse failures -> patch assertions.
+     Core technique. No existing tool does this.
+
+TIER 2 — HIGH VALUE, HIGHER EFFORT:
+
+  6. Semantic Clone Detector
+     AST normalization -> embeddings -> FAISS -> cosine clustering.
+     Requires embedding model. More powerful than jscpd/PMD.
+
+  7. Exception Flow Linker
+     Throw-to-catch tracing across the call stack.
+     Requires repository graph.
+
+  8. State Machine Extractor
+     Harvest all state reads/writes -> build transition graph.
+     High value for workflow-heavy systems.
+
+  9. Config-to-Behavior Mapper
+     Enumerate config keys, map to gated branches.
+     Critical for understanding what the system actually does in production.
+
+  10. Technique Registry (Machine-Readable)
+      The 25 dependency-breaking techniques as Preconditions/Steps/Postconditions.
+      Foundation for Strict Pattern Execution. Massive documentation effort.
+
+TIER 3 — HIGHEST EFFORT, CROSS-REPO:
+
+  11. Cross-Repository Super-Graph Assembler
+      Boundary extraction per repo + stitching via API/event/database edges.
+
+  12. Provider Schema Extractor + Consumer Usage Extractor
+      API contract drift detection without Pact adoption.
+
+  13. Cross-Service Table Access Mapper
+      ORM model comparison across repos. Schema divergence detection.
+
+  14. Event Flow Chain Builder
+      End-to-end flow tracing across service boundaries via topic string matching.
+
+  15. Migration Path Calculator
+      Topological ordering with database/event coupling constraints.
+
+
+================================================================================
+DEPENDENCY CHAIN
+================================================================================
+
+Most pipelines depend on the Repository Graph. Build order matters.
+
+  Level 0: Tree-sitter setup, language grammars
+  Level 1: Repository Graph Assembler + Framework-Aware Edge Extractors
+  Level 2: Effect Analysis, Hotspot Matrix, Dead Code (graph queries)
+  Level 3: Interception Points, Variable Scope Mapping (requires Effect Analysis)
+  Level 4: Characterization Scaffolding, Strict Pattern Execution (requires scope mapping)
+  Level 5: Pre-Commit Diff Analysis (requires all structural tools)
+  Level 6: Cross-Repo Super-Graph (requires per-repo graphs)
+  Level 7: Contract Drift, DB Archaeology, Event Tracing (requires super-graph)
+  Level 8: Migration Path Planning (requires everything)

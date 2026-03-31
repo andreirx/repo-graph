@@ -1,0 +1,341 @@
+V1 CLI — Reduced Scope
+=======================
+
+V1 proves one thing: the tool can index one TypeScript repo, build a correct
+structural graph, and answer deterministic queries over it.
+
+Nothing beyond this scope ships in v1. If the graph is wrong, everything built
+on top of it is wrong.
+
+Every command supports --json for machine consumption.
+Default output is human-readable tables.
+
+Tool name: TBD (using "tool" as placeholder)
+
+
+================================================================================
+REPO MANAGEMENT
+================================================================================
+
+tool repo add <path> [--name <alias>]
+
+  Register a local repository for indexing.
+  Stores the absolute path, assigns a stable repo ID.
+  Does NOT index automatically — indexing is explicit.
+
+  Example:
+    tool repo add /home/dev/payments-service --name payments
+    tool repo add .
+
+  Output:
+    repo_id, name, path, status (registered)
+
+
+tool repo index <repo>
+
+  Full parse of the repository. Creates snapshot S0.
+  Walks all source files (respecting .gitignore and exclusion rules).
+  Runs the language extractor (TS for v1) on each file.
+  Runs any detected framework extractors.
+  Stores all nodes and edges in SQLite attached to the new snapshot.
+
+  <repo> can be the repo name, repo ID, or path.
+
+  Flags:
+    --exclude <glob>        Additional exclusion patterns (e.g., --exclude "*.test.ts")
+    --include <glob>        Only include matching files
+    --verbose               Show progress (files parsed, nodes/edges found)
+
+  Example:
+    tool repo index payments
+    tool repo index payments --exclude "**/__tests__/**" --verbose
+
+  Output:
+    snapshot_id, files_parsed, symbols_found, edges_found, duration_ms
+
+
+tool repo status <repo>
+
+  Show current state of a repo: last snapshot, stale files, pending refresh.
+
+  Example:
+    tool repo status payments
+
+  Output:
+    repo_id, name, path, last_snapshot, snapshot_commit, stale_files_count,
+    total_files, total_symbols, total_edges
+
+
+tool repo refresh <repo>
+
+  Incremental re-index. Only re-parses files changed since the last snapshot.
+  Removes old facts for changed files, re-extracts, re-links.
+  Does NOT eagerly recompute derived views — marks them stale.
+
+  Example:
+    tool repo refresh payments
+
+  Output:
+    snapshot_id (new), files_changed, files_added, files_deleted,
+    symbols_added, symbols_removed, edges_added, edges_removed, duration_ms
+
+
+================================================================================
+GRAPH QUERIES
+================================================================================
+
+All graph queries return results attached to the current snapshot.
+All support --json.
+All return evidence sources and edge resolution (static/dynamic/inferred).
+
+
+tool graph callers <repo> <symbol-id> [--depth <n>]
+
+  Find all direct callers of a symbol. With --depth, find transitive callers
+  up to N levels deep.
+
+  <symbol-id> is a qualified name (e.g., "PaymentService.retry") or a
+  node ID from a previous query result.
+
+  Flags:
+    --depth <n>             Transitive callers up to depth N (default: 1)
+    --json                  Machine-readable output
+
+  Example:
+    tool graph callers payments PaymentService.retry
+    tool graph callers payments PaymentService.retry --depth 3 --json
+
+  Output per result:
+    node_id, symbol_name, file, line, edge_type, resolution, evidence[], depth
+
+
+tool graph callees <repo> <symbol-id> [--depth <n>]
+
+  Find all symbols called by this symbol. With --depth, find transitive callees.
+
+  Example:
+    tool graph callees payments CheckoutService.process --depth 2
+
+  Output: same shape as callers
+
+
+tool graph imports <repo> <file-or-module> [--depth <n>]
+
+  Find all modules/files imported by the target. With --depth, find transitive
+  import chains.
+
+  Example:
+    tool graph imports payments src/services/payment.ts
+    tool graph imports payments src/services/ --depth 3
+
+  Output per result:
+    node_id, file, imported_from, edge_type, resolution, evidence[]
+
+
+tool graph path <repo> <from-id> <to-id> [--max-depth <n>]
+
+  Find the shortest path between two nodes in the call/import graph.
+  Returns the full edge path if one exists.
+
+  Flags:
+    --max-depth <n>         Maximum traversal depth (default: 8)
+    --edge-types <types>    Comma-separated edge types to follow
+                            (default: CALLS,IMPORTS)
+
+  Example:
+    tool graph path payments CheckoutController.create PaymentGateway.charge
+    tool graph path payments CheckoutController.create PaymentGateway.charge --edge-types CALLS
+
+  Output:
+    found (bool), path_length, path (array of edges with node_id, symbol, file, line)
+
+
+tool graph dead <repo>
+
+  Find all nodes with zero incoming edges that are NOT declared entrypoints.
+  These are dead code candidates.
+
+  Flags:
+    --kind <node-kind>      Filter by node kind (FUNCTION, CLASS, etc.)
+    --min-lines <n>         Only show nodes with at least N lines of code
+
+  Example:
+    tool graph dead payments
+    tool graph dead payments --kind FUNCTION --min-lines 10
+
+  Output per result:
+    node_id, symbol_name, file, line, kind, lines_of_code, evidence[]
+
+
+tool graph cycles <repo>
+
+  Detect dependency cycles at the module or file level.
+  Returns each cycle as an ordered list of nodes.
+
+  Flags:
+    --level <file|module>   Detection level (default: module)
+
+  Example:
+    tool graph cycles payments
+    tool graph cycles payments --level file --json
+
+  Output per cycle:
+    cycle_id, length, nodes (array of node_id, file/module name)
+
+
+================================================================================
+DECLARATIONS
+================================================================================
+
+Human-supplied facts. Persistent until explicitly changed.
+Stored separately from extracted facts.
+Used by graph queries (e.g., dead node detection excludes declared entrypoints).
+
+
+tool declare module <repo> <module-path> [flags]
+
+  Declare metadata about a module.
+
+  Flags:
+    --purpose <text>        What this module is for
+    --maturity <level>      PROTOTYPE | MATURE | PRODUCTION
+    --owner <text>          Team or person responsible
+
+  Example:
+    tool declare module payments src/core/payments \
+      --purpose "payment invariants and orchestration" \
+      --maturity MATURE \
+      --owner payments-team
+
+
+tool declare boundary <repo> <module-a> --forbids <module-b>
+
+  Declare that module-a must NOT depend on module-b.
+  Used by arch violations queries (v2) and can be checked against
+  the extracted graph immediately.
+
+  Example:
+    tool declare boundary payments src/core --forbids src/infrastructure
+    tool declare boundary payments src/domain --forbids src/api
+
+
+tool declare entrypoint <repo> <symbol-id>
+
+  Declare that a symbol is a known entrypoint (route handler, event listener,
+  cron job, public API export). Declared entrypoints are excluded from dead
+  code detection.
+
+  Example:
+    tool declare entrypoint payments CheckoutController.create
+    tool declare entrypoint payments PaymentEventHandler.onPaymentReceived
+
+
+tool declare invariant <repo> <symbol-id> <text>
+
+  Attach a business invariant to a symbol. Informational for now. Used by
+  agent skills to assess risk during change impact analysis.
+
+  Example:
+    tool declare invariant payments PaymentService.charge \
+      "duplicate settlement must not occur"
+
+
+tool declare list <repo>
+
+  List all declarations for a repo.
+
+  Flags:
+    --kind <module|boundary|entrypoint|invariant>   Filter by declaration type
+
+  Example:
+    tool declare list payments
+    tool declare list payments --kind boundary --json
+
+
+tool declare remove <repo> <declaration-id>
+
+  Remove a declaration by ID.
+
+
+================================================================================
+RESPONSE CONTRACT
+================================================================================
+
+Every --json response follows this shape:
+
+{
+  "command": "graph callers",
+  "repo": "payments",
+  "snapshot": "snap-2026-03-31T10:15:00Z",
+  "snapshot_scope": "incremental",
+  "basis_commit": "a1b2c3d",
+  "results": [
+    {
+      "node_id": "payments://src/app/CheckoutService.ts#CheckoutService.retryPayment",
+      "symbol": "CheckoutService.retryPayment",
+      "kind": "FUNCTION",
+      "file": "src/app/CheckoutService.ts",
+      "line": 142,
+      "column": 4,
+      "edge_type": "CALLS",
+      "resolution": "static",
+      "evidence": ["tree-sitter"],
+      "depth": 1
+    }
+  ],
+  "count": 1,
+  "stale": false
+}
+
+Fields:
+  command         — which query was run
+  repo            — repo name or ID
+  snapshot        — snapshot ID the results are based on
+  snapshot_scope  — "full" or "incremental"
+  basis_commit    — git commit the snapshot was taken from
+  results         — array of result objects
+  count           — number of results
+  stale           — true if files have changed since the snapshot
+
+
+================================================================================
+WHAT IS EXPLICITLY NOT IN V1
+================================================================================
+
+These are planned but do NOT ship until the graph is proven correct:
+
+  tool repo watch            (v2 — file watcher for live refresh)
+  tool repo snapshot         (v2 — named snapshots for comparison)
+  tool arch *                (v2 — architecture boundary queries)
+  tool flow *                (v2 — execution and data flow tracing)
+  tool change *              (v2 — impact analysis, effect propagation)
+  tool legacy *              (v2 — hotspots, clones, seams, monster methods)
+  tool fleet *               (v3 — cross-repo operations)
+  tool ask *                 (never in core — separate NL wrapper if ever)
+
+No inference layer in v1. Only deterministic facts and human declarations.
+No Python pipelines in v1. Only TypeScript extractors and SQLite storage.
+No framework extractor plugin interface in v1. Hardcoded extractors only.
+
+
+================================================================================
+V1 ACCEPTANCE CRITERIA
+================================================================================
+
+The tool is v1-complete when:
+
+1. It can index a real TypeScript codebase (>100 files) in under 30 seconds.
+2. tool graph callers returns the correct set of callers for any symbol,
+   verified against manual inspection.
+3. tool graph callees returns the correct set of callees.
+4. tool graph dead returns provably unreachable functions (verified by
+   cross-referencing with Knip output or manual inspection).
+5. tool graph cycles detects known circular dependencies (verified against
+   dependency-cruiser or Madge output).
+6. tool graph path finds the correct shortest path between two nodes.
+7. tool repo refresh correctly handles file additions, deletions, and modifications
+   without requiring a full re-index.
+8. tool declare entrypoint causes declared entrypoints to be excluded from
+   tool graph dead results.
+9. tool declare boundary records are stored and retrievable.
+10. All of the above work with --json output that an agent can parse.

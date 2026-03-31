@@ -1,0 +1,621 @@
+Paid / Commercial Tools for Legacy Codebase Analysis
+=====================================================
+
+Mapped against the 26 pipeline sections from "Working With Legacy Code With AI Agents"
+and cross-referenced with "Toolbox Inventory and Gaps" (free tools document).
+
+Coverage legend:
+  [FULL]     — The paid tool covers this pipeline section substantially.
+  [PARTIAL]  — Covers part of the pipeline. Scripts still needed for the rest.
+  [ADJACENT] — Solves a related problem but not the exact pipeline described.
+  [NONE]     — No paid tool covers this either. Fully homegrown.
+
+Price legend:
+  $     = Under $1,000/year
+  $$    = $1,000–$20,000/year
+  $$$   = $20,000–$100,000/year
+  $$$$  = $100,000+/year
+
+
+================================================================================
+CATEGORY A: DEEP STATIC ANALYSIS AND CODE COMPREHENSION
+================================================================================
+
+These tools provide the foundation layer — parsing, symbol resolution, cross-file
+reference tracking — that many pipeline sections depend on.
+
+SciTools Understand                                              [$]
+  Price: ~$600–$1,200/seat/year.
+  Languages: C, C++, C#, Java, Python, Fortran, Ada, VHDL, COBOL, Jovial, Pascal, 30+.
+  CLI: Yes. "und" command-line. Python and Perl APIs for custom scripts.
+  What it covers:
+    [PARTIAL] 1.1 Dependency Graphing — builds call graphs, dependency graphs, butterfly
+      diagrams. The Perl/Python API lets you query the parsed database for symbols,
+      references, and relationships programmatically.
+    [PARTIAL] 1.4 Hotspot Prioritization — computes cyclomatic complexity, lines of code,
+      coupling metrics per function.
+    [PARTIAL] 3.2 Variable Scope Mapping — generates control flow graphs at function level.
+      Can identify variable declarations and references.
+  What it does NOT cover:
+    No framework-aware edge extraction (routes, DI, events).
+    No git history analysis.
+    No test generation or characterization.
+    No architecture rule enforcement.
+  Honest assessment:
+    Best value for money on this entire list if you have exotic languages (COBOL, Fortran,
+    Ada). The Python API makes it a genuine foundation for agent-driven pipelines — your
+    scripts can query the Understand database instead of running Tree-sitter from scratch.
+    For mainstream languages (Java, Python, JS/TS), Tree-sitter + SCIP gets you 70-80% of
+    what Understand provides for free, but Understand's parsers handle edge cases better.
+  Verdict:
+    Worth it if you have C/C++, Fortran, Ada, or COBOL legacy code.
+    Marginal if your codebase is purely Java/Python/TypeScript.
+
+
+Parasoft (Jtest, C/C++test, dotTEST, SOAtest)                   [$$–$$$]
+  Price: ~$2,000–$5,000/seat/year per module. Sales call required.
+  Languages: Java (Jtest), C/C++ (C/C++test), .NET (dotTEST). SOAtest: language-agnostic API testing.
+  CLI: Yes. All tools have CLI interfaces. DTP server for centralized reporting.
+  What it covers:
+    [PARTIAL] 3.1 Characterization Scaffolding — Jtest can generate skeleton unit tests for
+      existing Java code. This is the closest any commercial tool gets to the "characterization
+      test feedback loop" described in the pipeline. The generated tests need human refinement
+      but provide a starting point.
+    [PARTIAL] 5.2 Pre-Commit Diff Analysis — static analysis rules catch some unintended
+      side effects, but NOT structural AST diffing or control flow comparison.
+    [ADJACENT] Compliance — DO-178C, IEC 62304, ISO 26262 for safety-critical industries.
+      Generates traceability matrices between requirements, code, and tests.
+  What it does NOT cover:
+    No dependency graphing, architecture analysis, or semantic grouping.
+    No git history analysis.
+    No cross-repo analysis.
+  Honest assessment:
+    Justified only for regulated industries (automotive, medical, aerospace) where compliance
+    documentation is mandatory. The test generation is decent for Java but not transformative.
+    SOAtest is solid for API contract testing but Pact (free) is often sufficient.
+    For general legacy analysis of web applications, this is overkill.
+  Verdict:
+    Buy if you are in a safety-critical domain.
+    Skip if you are analyzing a general-purpose web/enterprise codebase.
+
+
+Coverity (Synopsys)                                              [$$$–$$$$]
+  Price: ~$50,000–$200,000+/year. Enterprise contracts.
+  Languages: C, C++, C#, Java, JavaScript, Python, Go, Ruby, Swift, 20+.
+  CLI: Yes. cov-build, cov-analyze, cov-commit-defects. REST API.
+  What it covers:
+    [PARTIAL] 2.6 Error Handling Archaeology — deep interprocedural dataflow analysis traces
+      execution paths across function boundaries. Finds null dereferences, resource leaks,
+      concurrency bugs that cross call sites. This is deeper than what any free tool or
+      homegrown script can achieve.
+    [PARTIAL] 5.2 Pre-Commit Diff Analysis — can analyze incremental changes.
+  What it does NOT cover:
+    Not an architecture tool. No dependency graphing, no semantic grouping, no git history
+    analysis, no cross-repo analysis.
+  Honest assessment:
+    Gold standard for finding real bugs in C/C++ legacy code. The interprocedural analysis
+    genuinely catches issues that SonarQube, cppcheck, and Semgrep miss. For Java/Python,
+    the gap vs free tools is smaller. Very expensive. Slow on large codebases (hours).
+    The Synopsys restructuring has created uncertainty.
+  Verdict:
+    Buy if you have a large C/C++ legacy codebase and the budget exists.
+    For Java/Python, Semgrep + SonarQube Community is usually sufficient.
+
+
+Qodana (JetBrains)                                              [$]
+  Price: ~$5–$10/active contributor/month. Bundled with JetBrains All Products.
+  Languages: Java, Kotlin, Python, JS/TS, PHP, Go, C#, C/C++.
+  CLI: Yes. Docker-based. "qodana scan" command.
+  What it covers:
+    [PARTIAL] 5.2 Pre-Commit Diff Analysis — runs IntelliJ inspections in CI. The "baseline"
+      feature lets you acknowledge existing issues and only flag new ones.
+  Honest assessment:
+    Good value if your team already uses JetBrains IDEs. The inspections ARE IntelliJ's
+    inspections, which are genuinely good. The baseline feature is the killer feature for
+    legacy code — it prevents alert fatigue from thousands of pre-existing issues.
+  Verdict:
+    Buy if you're in the JetBrains ecosystem. The baseline feature alone is worth the cost
+    for legacy codebases.
+
+
+================================================================================
+CATEGORY B: ARCHITECTURE AND TECHNICAL DEBT
+================================================================================
+
+These tools cover the structural and behavioral analysis of codebases.
+
+CodeScene                                                        [$$]
+  Price: ~$15–$20/developer/month. Free tier with limited features.
+  Languages: Language-agnostic (git history). Code analysis: 30+ languages.
+  CLI: REST API. CI/CD integration via webhooks. PR-level analysis.
+  What it covers:
+    [FULL] 1.4 Hotspot Prioritization — this is CodeScene's core feature. Hotspot detection
+      (high complexity + high churn), temporal coupling (files that always change together),
+      knowledge distribution (bus factor per module). Directly implements the Hotspot Matrix
+      from the pipeline, plus adds organizational metrics no script easily replicates.
+    [PARTIAL] 1.5 Effect Analysis — the "X-Ray" feature shows which functions within a file
+      are the actual hotspots. Not full forward propagation, but narrower targeting.
+    [ADJACENT] Risk prediction — predicts which commits are likely to introduce bugs based
+      on historical patterns. Unique capability.
+  What it does NOT cover:
+    No dependency graphing, no semantic grouping, no test generation, no cross-repo mapping.
+  Honest assessment:
+    CodeScene provides insights that are genuinely hard to replicate with homegrown scripts.
+    You can build a basic hotspot matrix in Python (git log + lizard + pandas), and you should.
+    But CodeScene adds temporal coupling, organizational analysis, trend tracking, and PR-level
+    risk scoring that would take weeks of engineering to replicate.
+    This is the highest-value paid tool relative to its cost for legacy analysis.
+  Verdict:
+    Buy. Best price-to-value ratio on this entire list for legacy codebase prioritization.
+
+
+Lattix                                                           [$$]
+  Price: ~$1,500–$3,000/seat/year. Enterprise for CI integration.
+  Languages: Java, C/C++, .NET, JavaScript, database schemas, Simulink/MATLAB.
+  CLI: Yes. Command-line for CI. Data export API.
+  What it covers:
+    [FULL] 1.1 Dependency Graphing — Dependency Structure Matrix (DSM) analysis. Makes
+      cyclic dependencies and layering violations immediately visible.
+    [PARTIAL] 4.2 Interface Segregation — the DSM reveals which modules are over-coupled,
+      though it doesn't suggest interface splits.
+    [PARTIAL] 5.3 Build Dependency Severing — the DSM shows physical dependency chains
+      that cause recompilation cascades.
+  Honest assessment:
+    The DSM view is genuinely different from call graphs or tree diagrams. It makes
+    architectural problems visible in a way that's hard to replicate with Graphviz.
+    A homegrown script using NetworkX could compute the same data, but the visualization
+    and interactive exploration in Lattix would take significant frontend effort to match.
+  Verdict:
+    Buy if your primary problem is architecture erosion and you need to enforce layering.
+    Skip if you're focused on test generation, characterization, or code comprehension.
+
+
+CAST (Application Intelligence Platform)                         [$$$$]
+  Price: ~$50,000–$300,000+/year. Per application or per million LOC.
+  Languages: 50+ including COBOL, ABAP, PL/SQL, T-SQL, JCL + all modern languages.
+  CLI: Yes. Automated analysis. REST API.
+  What it covers:
+    [FULL] 1.1 Dependency Graphing — CAST Imaging generates full application architecture
+      maps automatically, including code-to-database relationships, API endpoints, and
+      service-to-service calls.
+    [PARTIAL] 6.3 Database Schema Archaeology — maps code-to-database relationships
+      (which code touches which tables). This is one of the few tools that does this.
+    [PARTIAL] 6.1 Cross-Repository Dependency Mapping — CAST can analyze multiple
+      applications and map their relationships.
+    [ADJACENT] Technical debt quantification based on ISO 25010.
+  Honest assessment:
+    CAST is the only tool that genuinely attempts the cross-layer analysis (code + database
+    + config + middleware) that many pipeline sections require. The architecture maps from
+    CAST Imaging are impressive. However, the cost is extreme and the setup takes weeks.
+    Justified for portfolio-level assessment (M&A due diligence, cloud migration of 50+ apps).
+    Not justified for analyzing a single codebase.
+  Verdict:
+    Buy only for large-scale portfolio assessment or M&A due diligence.
+    Skip for single-codebase analysis. Build scripts instead.
+
+
+NDepend                                                          [$]
+  Price: ~$450–$1,000/developer/year. Free for open source.
+  Languages: .NET only (C#, VB.NET, F#).
+  CLI: Yes. Full CLI. Azure DevOps integration. Programmatically queryable results.
+  What it covers:
+    [FULL] 1.1 Dependency Graphing — dependency matrix, call graphs, coupling metrics.
+    [FULL] 1.4 Hotspot Prioritization — complexity trends over time, code churned vs tested.
+    [FULL] 4.2 Interface Segregation — CQLinq queries like "find classes with > 20 public
+      methods where different callers use different method subsets" directly identify ISP
+      violations.
+    [FULL] 5.3 Build Dependency Severing — assembly/namespace dependency analysis with
+      metrics on coupling and afferent/efferent dependencies.
+    [PARTIAL] 1.5 Effect Analysis — CQLinq can query "methods changed in this diff that are
+      called by methods not covered by tests." Partial but useful.
+    [PARTIAL] 1.3 Duplication Detection — built-in code duplication detection.
+  Honest assessment:
+    If your legacy codebase is .NET, NDepend is the single best tool purchase you can make.
+    The CQLinq query language is genuinely powerful — no other tool lets you write queries
+    against code metadata at this level. The technical debt estimation is honest (estimates
+    fix time based on actual metrics, not arbitrary scores).
+  Verdict:
+    Buy immediately if your codebase is .NET. Nothing else comes close in this ecosystem.
+
+
+Teamscale (CQSE)                                                [$$]
+  Price: Not published. Mid-range enterprise. Per-user or per-project.
+  Languages: Java, C/C++, C#, Python, TypeScript, ABAP, COBOL, more.
+  CLI: REST API. IDE plugins. CI/CD integration.
+  What it covers:
+    [FULL] 1.3 Duplication Detection — Type 1, 2, and 3 clone detection. Academic-grade
+      algorithms from TUM research. Type 3 (semantic/gapped clones) is genuinely superior
+      to jscpd or PMD CPD.
+    [FULL] 1.4 Hotspot Prioritization — quality trends over time, metric tracking.
+    [PARTIAL] 1.5 Effect Analysis — "Test Gap Analysis" identifies changed code not covered
+      by test executions. This is different from simple coverage — it uses test impact analysis
+      to tell you which tests to run for a given change.
+    [PARTIAL] 3.4 Test Organization — identifies test-to-code mapping and coverage gaps.
+  Honest assessment:
+    Under-appreciated tool with strong technical foundations. The clone detection and test
+    gap analysis are best-in-class capabilities. Less polished than CodeScene but deeper
+    in some technical analyses. Good for organizations that want rigorous, defensible metrics.
+  Verdict:
+    Buy if Type 3 clone detection or test gap analysis is a priority.
+    Consider alongside CodeScene — they complement each other well.
+
+
+Structure101 / Restructure101                                    [$$]
+  Price: ~$500–$1,500/seat/year.
+  Languages: Java, C/C++, .NET, JavaScript/TypeScript.
+  CLI: Structure101 Build for CI. Can fail builds on architecture violations.
+  What it covers:
+    [FULL] 1.1 Dependency Graphing — Levelized Structure Maps. Architecture visualization.
+    [PARTIAL] 5.3 Build Dependency Severing — identifies tangled dependencies.
+  Honest assessment:
+    Similar to Lattix. More visual/intuitive. Good for communicating architectural problems
+    to non-technical stakeholders. Product future is uncertain due to ownership changes.
+  Verdict:
+    Consider Lattix instead unless the visualization style appeals more.
+
+
+================================================================================
+CATEGORY C: SONARQUBE PAID TIERS
+================================================================================
+
+SonarQube Developer Edition                                      [$–$$]
+  Price: Starts ~$150/year for 100K LOC. Scales with codebase size.
+  What it adds over Community:
+    Branch analysis (analyze PRs before merge).
+    Additional languages: C, C++, Objective-C, Swift, ABAP, COBOL, PL/SQL, T-SQL, Apex, RPG.
+    Taint analysis for security vulnerabilities (SQL injection, XSS, path traversal).
+  What it covers:
+    [PARTIAL] 2.6 Error Handling Archaeology — rules for empty catch blocks, broad exception
+      handling, swallowed exceptions. Rule-based, not flow-based.
+    [PARTIAL] 5.2 Pre-Commit Diff Analysis — branch analysis shows new issues introduced
+      in a PR. Quality Gates can block merges.
+  Honest assessment:
+    Branch analysis alone justifies Developer Edition for most teams. If you need C/C++
+    analysis, this is the cheapest path (vs Coverity at $50K+). The taint analysis is
+    competent but not as deep as Checkmarx or Coverity.
+  Verdict:
+    Buy Developer Edition if you use SonarQube at all. The branch analysis is essential.
+
+SonarQube Enterprise Edition                                     [$$$]
+  Price: Starts ~$20,000/year.
+  What it adds over Developer:
+    Portfolio views across multiple projects.
+    Security reports (OWASP Top 10, CWE mapping).
+    Regulatory compliance reporting.
+  Verdict:
+    Buy only if you manage 10+ codebases and need portfolio-level views.
+
+
+================================================================================
+CATEGORY D: RUNTIME OBSERVABILITY (APM)
+================================================================================
+
+These are not code analysis tools. They analyze running systems. Relevant for:
+  2.3 Execution Tracing, 2.4 Configuration Archaeology (runtime config resolution),
+  6.1 Cross-Repository Dependency Mapping (runtime topology discovery),
+  6.4 Cross-Codebase Event Flow Tracing (actual message flows).
+
+Dynatrace                                                        [$$$$]
+  Price: ~$60/host/month (full-stack). Enterprise deployments: $100K–$1M+/year.
+  Languages: Java, .NET, Node.js, Go, Python, PHP, Ruby, Rust (via OneAgent).
+  CLI: REST API v2. Dynatrace CLI. Terraform provider.
+  Key capability:
+    Smartscape auto-discovers service topology, database connections, message queue
+    relationships in a running system. Deploys agent, shows you what's actually talking
+    to what. For legacy systems where documentation is fiction, this is transformative.
+  Verdict:
+    If you can get a trial/POC, the topology map from 2 weeks of production traffic will
+    tell you more about the actual architecture than any amount of static analysis.
+    Buy if budget allows and the system is running.
+
+Datadog                                                          [$$$–$$$$]
+  Price: APM ~$31/host/month. Infrastructure ~$15/host/month. $50K–$500K+/year typical.
+  Key capability:
+    Service Map from actual traffic. Flame graphs for distributed traces.
+    Stronger in cloud-native environments than Dynatrace.
+  Verdict:
+    Similar to Dynatrace. Choose based on environment (cloud-native -> Datadog, traditional
+    enterprise -> Dynatrace).
+
+New Relic                                                        [$$–$$$]
+  Price: Free tier (1 user, 100GB data/month). Pro: $0.30/GB + $49/user/month.
+  Key capability:
+    Most generous free tier. Automap for service dependencies.
+    Lower entry cost than Dynatrace/Datadog.
+  Verdict:
+    Start here if budget is constrained. The free tier covers a lot.
+
+
+================================================================================
+CATEGORY E: API CONTRACT TESTING
+================================================================================
+
+SmartBear ReadyAPI                                               [$]
+  Price: ~$700–$900/user/year for functional testing.
+  Key capability:
+    Service virtualization — mock out parts of the legacy system that are expensive to run.
+    Better than Postman for complex multi-step API scenarios and SOAP/XML.
+  What it covers:
+    [PARTIAL] 6.2 API Contract Drift Detection — can test API contracts but does NOT
+    automatically extract schemas from provider code or compare consumer usage patterns.
+  Verdict:
+    Buy if you have complex SOAP/XML legacy services. For REST-only, Postman is cheaper.
+
+Postman                                                          [$]
+  Price: Free tier is generous. Pro ~$14/user/month.
+  Key capability:
+    Newman CLI for CI execution. Collections for organized API testing.
+  Verdict:
+    Already ubiquitous. Use for ad-hoc API exploration. Not sufficient for rigorous
+    contract testing — use Pact (free) for that.
+
+
+================================================================================
+CATEGORY F: DATABASE SCHEMA MANAGEMENT
+================================================================================
+
+Liquibase Pro                                                    [$$]
+  Price: ~$130/month per target database.
+  Key capability:
+    Stored logic support (procedures, triggers, packages).
+    Drift detection — detects when production schema diverges from expected.
+    Quality checks (policy-as-code for database changes).
+  What it covers:
+    [PARTIAL] 6.3 Database Schema Archaeology — drift detection tells you if someone
+    applied changes directly to production. But does NOT map which codebases access
+    which tables. That is still a homegrown script.
+  Verdict:
+    Buy Pro if you have complex stored procedures/triggers in your legacy database.
+    Community edition is sufficient for table/index migrations.
+
+Flyway Teams (Redgate)                                           [$]
+  Price: ~$485/year per user (10 schemas).
+  Key capability:
+    Undo migrations. Cherry Pick deployment. Drift detection.
+    Redgate ecosystem (SQL Compare, SQL Prompt) for SQL Server.
+  Verdict:
+    Buy if you are in a SQL Server environment. Otherwise, Flyway Community or Liquibase
+    Community is sufficient.
+
+
+================================================================================
+CATEGORY G: FEATURE FLAG MANAGEMENT
+================================================================================
+
+LaunchDarkly                                                     [$$–$$$]
+  Price: Pro ~$10/seat/month + MAU charges. Enterprise: custom.
+  Key capability:
+    Code references — scans codebase and links flags to their usage in code.
+    This directly supports 2.4 Configuration Archaeology (finding stale flags).
+    Percentage rollouts for Strangler Fig migrations (6.5).
+  What it covers:
+    [PARTIAL] 2.4 Configuration Archaeology — the "code references" feature identifies where
+    each flag is used, which is part of config-to-code mapping.
+    [PARTIAL] 6.5 Strangler Fig — percentage-based traffic routing between legacy and new
+    implementations.
+  Verdict:
+    Buy if you are doing Strangler Fig migration and need production traffic routing.
+    Unleash (free) covers basic flag management. LaunchDarkly adds experimentation,
+    code references, and enterprise reliability.
+
+Unleash (open-source) — covered in free tools document. Listed here for completeness.
+  Free edition covers core feature flags. Worth using before paying for LaunchDarkly.
+
+
+================================================================================
+CATEGORY H: MIGRATION AND MODERNIZATION
+================================================================================
+
+Moderne (OpenRewrite Commercial)                                 [$$–$$$]
+  Price: OpenRewrite core: free. Moderne platform: estimated $20K–$100K+/year.
+  Languages: Java (primary), Kotlin, Groovy, XML, YAML. Python/JS early.
+  CLI: "mod" CLI. Maven/Gradle plugins. REST API.
+  What it covers:
+    [FULL] 5.1 Strict Pattern Execution — OpenRewrite recipes ARE deterministic AST
+    transformations with preconditions and postconditions. The Lossless Semantic Tree (LST)
+    preserves formatting and comments. This is the closest any existing tool gets to the
+    "Technique Registry" concept from the pipeline.
+    [PARTIAL] 4.3 Adapter Generation — recipes can systematically replace one API with
+    another (e.g., migrate from Log4j to SLF4J, from JUnit 4 to JUnit 5).
+  Honest assessment:
+    OpenRewrite/Moderne is the most important tool on this list for Java legacy codebases.
+    The LST technology is genuinely transformative — it does in hours what takes weeks manually.
+    The recipe marketplace has hundreds of pre-built migrations (Spring Boot upgrades, Java
+    version migrations, security fixes). Custom recipe development requires learning the LST
+    model but is feasible.
+    The free OpenRewrite core is already extremely valuable. The paid Moderne platform adds
+    multi-repo orchestration.
+  Verdict:
+    Use OpenRewrite (free) immediately if you have a Java codebase.
+    Buy Moderne platform if you need to apply transformations across multiple repos.
+
+vFunction                                                        [$$$$]
+  Price: ~$100,000+/year. Enterprise contracts.
+  Languages: Java, .NET.
+  What it covers:
+    [PARTIAL] 1.2 Semantic Grouping — uses runtime analysis + AI to identify bounded contexts
+    and recommend microservice boundaries. This is the closest any tool gets to the semantic
+    grouping pipeline, but it approaches it from runtime observation rather than static
+    embedding analysis.
+    [PARTIAL] 6.5 Strangler Fig — provides decomposition recommendations for monolith-to-
+    microservice migration.
+  Honest assessment:
+    If "decompose this Java monolith into microservices" is the exact problem, vFunction
+    is targeted at it. The runtime analysis provides insights static analysis cannot.
+    However, the recommendations need heavy human review. The tool suggests splits that
+    may require distributed transactions or cross-service data synchronization that it
+    doesn't account for. Very expensive.
+  Verdict:
+    Consider only for large Java monolith decomposition projects with budget.
+    For general legacy analysis, build scripts instead.
+
+IBM MONO2MICRO                                                   [$$$–$$$$]
+  Price: Bundled with IBM consulting/WebSphere. Not standalone pricing.
+  Languages: Java (WebSphere focus).
+  Verdict:
+    Consider only if already in IBM/WebSphere ecosystem. vFunction is more polished.
+
+
+================================================================================
+CATEGORY I: SECURITY-FOCUSED SAST
+================================================================================
+
+Relevant for pipeline sections 2.6 (Error Handling Archaeology) and 5.2 (Pre-Commit
+Diff Analysis) because deep taint analysis catches issues that rule-based tools miss.
+
+Snyk                                                             [$–$$]
+  Price: Free tier (200 code tests/month). Team: $25/dev/month.
+  Languages: Java, JS/TS, Python, C#, Go, Ruby, PHP, C/C++, Swift, Kotlin.
+  CLI: Yes. "snyk" CLI. REST API. Excellent IDE/CI integration.
+  Key capability:
+    Speed — runs in seconds, not hours. Can run in PR checks without blocking developers.
+    AI/ML-based analysis produces different (sometimes better) results than rule-based tools.
+    Priority scoring helps triage the massive backlog in legacy codebases.
+  Verdict:
+    Start here for security analysis. Free tier is generous. Much faster than Checkmarx
+    or Fortify. Less deep but more practical for day-to-day development.
+
+Checkmarx                                                        [$$$–$$$$]
+  Price: ~$30,000–$150,000+/year. Enterprise contracts.
+  Languages: 25+ languages.
+  CLI: Yes. Full CLI and REST API.
+  Key capability:
+    Custom query language (CxQL) lets you define organization-specific vulnerability
+    patterns. The "best fix location" feature suggests where to fix, not just where the
+    vulnerability is.
+  Verdict:
+    Buy only if you need deep SAST for regulated industries or large security teams.
+    Snyk + Semgrep covers 80% of the value at 10% of the cost.
+
+Fortify (OpenText)                                               [$$$–$$$$]
+  Price: ~$40,000–$200,000+/year. FoD (SaaS) priced per-scan.
+  Languages: 25+ languages.
+  Verdict:
+    Buy only for government/defense contracts where Fortify is mandated.
+
+Veracode                                                         [$$–$$$]
+  Price: ~$10,000–$50,000+/year per application.
+  Key capability:
+    Binary/bytecode analysis — you upload compiled artifacts, not source code. Useful
+    when the build system is broken or you're analyzing third-party components.
+  Verdict:
+    Consider if you have legacy code you cannot build locally.
+
+
+================================================================================
+CATEGORY J: BUILD OPTIMIZATION
+================================================================================
+
+Develocity (formerly Gradle Enterprise)                          [$$$–$$$$]
+  Price: ~$50,000–$200,000+/year.
+  Languages: Gradle and Maven projects (Java, Kotlin, Groovy, Scala, Android).
+  CLI: Gradle/Maven plugins. REST API for build scan data.
+  What it covers:
+    [PARTIAL] 5.3 Build Dependency Severing — build scans show WHY builds are slow.
+    Build cache avoids re-executing unchanged tasks (40-90% build time reduction).
+    Predictive test selection runs only tests affected by changes (connects to 1.5 Effect
+    Analysis conceptually).
+  Verdict:
+    Buy if your legacy codebase has 30+ minute builds and uses Gradle/Maven.
+    Does not help with Make, Ant, or other legacy build systems.
+
+
+================================================================================
+MAPPING: PAID TOOLS vs PIPELINE SECTIONS
+================================================================================
+
+Section                                | Best Paid Tool           | Coverage | Gap?
+---------------------------------------|--------------------------|----------|------
+1.1 Dependency Graphing                | CAST, Lattix, NDepend    | PARTIAL  | Framework edges still GAP
+1.2 Semantic Grouping                  | vFunction                | PARTIAL  | Embedding pipeline still GAP
+1.3 Duplication Detection              | Teamscale                | FULL     | Type 3 clones covered
+1.4 Hotspot Prioritization             | CodeScene                | FULL     | Temporal coupling, org metrics
+1.5 Effect Analysis                    | Teamscale (test gap)     | PARTIAL  | Forward propagation still GAP
+1.6 Interception Points                | NONE                     | —        | Fully GAP
+2.1 Scratch Refactoring                | NONE                     | —        | LLM task, no tool
+2.2 Dead Code Purging                  | NONE beyond Knip/Vulture | —        | Dynamic trap scan still GAP
+2.3 Execution Tracing                  | Dynatrace, Datadog       | FULL     | Runtime topology
+2.4 Configuration Archaeology          | LaunchDarkly (partial)   | PARTIAL  | Branch-gate mapping still GAP
+2.5 State Machine Extraction           | NONE                     | —        | Fully GAP
+2.6 Error Handling Archaeology         | Coverity, Snyk           | PARTIAL  | Flow linking still GAP
+3.1 Characterization Scaffolding       | Parasoft Jtest (Java)    | PARTIAL  | Assertion patching still GAP
+3.2 Variable Scope Mapping             | Understand               | PARTIAL  | Seam finder still GAP
+3.3 Procedural Test Seams              | Parasoft C/C++test       | PARTIAL  | Build seam scripts still GAP
+3.4 Test Organization                  | Teamscale                | PARTIAL  | Assertion quality scan still GAP
+4.1 Framework Quarantine               | NONE                     | —        | LLM task
+4.2 Interface Segregation              | NDepend (.NET)           | FULL*    | *Only for .NET
+4.3 Adapter Generation                 | Moderne (Java)           | PARTIAL  | Domain translation still GAP
+4.4 Sprout/Wrap Automation             | NONE                     | —        | Fully GAP
+4.5 Programming by Difference          | NONE                     | —        | Fully GAP
+5.1 Strict Pattern Execution           | Moderne/OpenRewrite      | PARTIAL  | Only Java. Registry still GAP
+5.2 Pre-Commit Diff Analysis           | Qodana, SonarQube        | PARTIAL  | AST diffing still GAP
+5.3 Build Dependency Severing          | Lattix, Develocity       | PARTIAL  | Cascade calculator still GAP
+6.1 Cross-Repo Mapping                 | CAST, Dynatrace          | PARTIAL  | Super-graph assembly still GAP
+6.2 API Contract Drift                 | Pact (free), SmartBear   | PARTIAL  | Schema extraction still GAP
+6.3 Database Schema Archaeology        | CAST, Atlas              | PARTIAL  | Cross-service access map still GAP
+6.4 Cross-Codebase Event Flow          | SkyWalking (runtime)     | PARTIAL  | Static flow tracing still GAP
+6.5 Strangler Fig Planning             | vFunction (Java only)    | PARTIAL  | Migration ordering still GAP
+
+
+================================================================================
+BUYING RECOMMENDATIONS BY BUDGET
+================================================================================
+
+BUDGET: $0 (Free only)
+  Use the free tools from "Toolbox Inventory and Gaps.txt".
+  Build the homegrown Python scripts.
+  This is a viable path. Most pipeline sections are fully addressable with free tools + scripts.
+
+BUDGET: Under $5,000/year
+  1. CodeScene ($15-20/dev/month) — highest ROI purchase for legacy analysis.
+  2. SonarQube Developer Edition (~$150+/year) — branch analysis + C/C++ support.
+  3. NDepend (~$450-1000/year) — if .NET codebase.
+  4. Understand (~$600-1200/year) — if exotic languages (COBOL, Fortran, Ada, C/C++).
+
+BUDGET: $5,000–$20,000/year
+  All of the above, plus:
+  5. Teamscale — for Type 3 clone detection and test gap analysis.
+  6. Lattix — for architecture enforcement via DSM.
+  7. Snyk Team ($25/dev/month) — for security analysis.
+
+BUDGET: $20,000–$100,000/year
+  All of the above, plus:
+  8. Moderne platform — if Java codebase needs systematic transformations.
+  9. SonarQube Enterprise — if managing 10+ codebases.
+  10. APM trial (Dynatrace or Datadog) — for runtime topology discovery.
+
+BUDGET: $100,000+/year
+  All of the above, plus:
+  11. Dynatrace or Datadog (full deployment) — for ongoing runtime observability.
+  12. CAST — for portfolio-level assessment of 10+ applications.
+  13. vFunction — specifically for Java monolith decomposition.
+  14. Coverity — for deep C/C++ bug finding.
+  15. Develocity — if Gradle/Maven builds exceed 30 minutes.
+
+
+================================================================================
+WHAT NO PAID TOOL COVERS (BUILD THESE REGARDLESS)
+================================================================================
+
+No matter what you buy, these remain gaps that require homegrown scripts:
+
+  1. Unified repository_graph.json with framework-aware edges.
+  2. Effect Analysis forward propagation engine.
+  3. Interception Point / Pinch Point selection via dominator trees.
+  4. State Machine extraction from scattered if/else chains.
+  5. Configuration-to-behavior branch gate mapping.
+  6. Exception flow linking across the call stack (throw-to-catch tracing).
+  7. Characterization test assertion patching feedback loop.
+  8. Variable scope seam finder for monster method extraction.
+  9. Sprout/Wrap pattern selection and AST insertion.
+  10. Programming by Difference override feasibility + subclass generation.
+  11. Technique Registry (25 dependency-breaking techniques as machine-readable specs).
+  12. Pre-commit AST structural diff with control flow comparison.
+  13. Cross-repo super-graph assembly from boundary extractions.
+  14. Consumer usage extraction for API contract drift.
+  15. Cross-service database table access classification and ownership resolution.
+  16. Cross-codebase event flow chain building via topic string matching.
+  17. Migration path topological ordering with coupling constraints.
+
+These 17 scripts are the actual intellectual property of the toolbox.
+The paid tools handle the commodity analysis. The scripts handle the novel analysis.

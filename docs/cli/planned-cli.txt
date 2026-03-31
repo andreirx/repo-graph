@@ -1,0 +1,475 @@
+Planned CLI — Full Surface (All Phases)
+========================================
+
+This is the complete planned CLI across all phases (v1, v2, v3).
+V1 scope is defined in v1-cli.txt.
+Commands marked with phase indicators:
+  [v1] — ships in first release
+  [v2] — ships after graph is proven correct
+  [v3] — ships after cross-repo substrate exists
+
+Every command supports --json for machine consumption.
+Tool name: TBD (using "tool" as placeholder)
+
+
+================================================================================
+REPO MANAGEMENT
+================================================================================
+
+tool repo add <path> [--name <alias>]                              [v1]
+  Register a local repository.
+
+tool repo index <repo> [--exclude <glob>] [--include <glob>]       [v1]
+  Full parse. Creates new snapshot.
+
+tool repo status <repo>                                            [v1]
+  Current state: last snapshot, stale files, counts.
+
+tool repo refresh <repo>                                           [v1]
+  Incremental re-index of changed files.
+
+tool repo watch <repo>                                             [v2]
+  Start filesystem watcher. Marks changed files as stale.
+  Does NOT auto-refresh — notifies the agent that refresh is available.
+
+tool repo snapshot <repo> [--label <name>]                         [v2]
+  Seal current working state against a git commit.
+  Named snapshots enable temporal comparison:
+    "what changed structurally since last release?"
+
+tool repo diff <repo> <snapshot-a> <snapshot-b>                    [v2]
+  Structural diff between two snapshots.
+  Shows: nodes added/removed, edges added/removed, boundary violations
+  introduced/resolved.
+
+tool repo list                                                     [v1]
+  List all registered repos with status.
+
+tool repo remove <repo>                                            [v1]
+  Unregister a repo and optionally delete its SQLite data.
+
+
+================================================================================
+GRAPH QUERIES — STRUCTURAL
+================================================================================
+
+tool graph symbols <repo> [--file <path>] [--kind <kind>]          [v1]
+  List all symbols. Filter by file or kind (FUNCTION, CLASS, INTERFACE, etc.)
+
+tool graph callers <repo> <symbol-id> [--depth <n>]                [v1]
+  Direct or transitive callers of a symbol.
+
+tool graph callees <repo> <symbol-id> [--depth <n>]                [v1]
+  Direct or transitive callees of a symbol.
+
+tool graph imports <repo> <file-or-module> [--depth <n>]           [v1]
+  Import chain from a file or module.
+
+tool graph implements <repo> <symbol-id>                           [v2]
+  Find all implementations of an interface or abstract class.
+
+tool graph instantiates <repo> <symbol-id>                         [v2]
+  Find all instantiation sites (new ClassName()) of a class.
+
+tool graph path <repo> <from> <to> [--max-depth <n>]              [v1]
+  Shortest path between two nodes.
+  --edge-types filters which edge types to traverse.
+
+tool graph dead <repo> [--kind <kind>] [--min-lines <n>]          [v1]
+  Nodes with zero incoming edges, excluding declared entrypoints.
+
+tool graph cycles <repo> [--level file|module]                    [v1]
+  Dependency cycles at file or module level.
+
+tool graph neighbors <repo> <node-id> [--depth <n>]               [v2]
+  N-depth neighborhood around a node. All edge types.
+
+tool graph stats <repo>                                            [v2]
+  Summary statistics: total nodes by kind, total edges by type,
+  average fan-in/fan-out, max fan-in/fan-out, largest files.
+
+
+================================================================================
+DECLARATIONS — HUMAN-SUPPLIED FACTS
+================================================================================
+
+tool declare module <repo> <path> [--purpose] [--maturity] [--owner]   [v1]
+  Declare module metadata.
+
+tool declare boundary <repo> <module-a> --forbids <module-b>           [v1]
+  Declare a forbidden dependency.
+
+tool declare entrypoint <repo> <symbol-id>                             [v1]
+  Declare a symbol as a known entrypoint.
+
+tool declare invariant <repo> <symbol-id> <text>                       [v1]
+  Attach a business invariant to a symbol.
+
+tool declare list <repo> [--kind <type>]                               [v1]
+  List all declarations.
+
+tool declare remove <repo> <declaration-id>                            [v1]
+  Remove a declaration.
+
+tool declare import <repo> <file>                                      [v2]
+  Bulk import declarations from a YAML/JSON file.
+  Supports MODULE.yaml format from the architecture docs.
+
+tool declare export <repo> [--format yaml|json]                        [v2]
+  Export all declarations to a file.
+
+
+================================================================================
+ARCHITECTURE AND BOUNDARY QUERIES
+================================================================================
+
+tool arch boundaries <repo>                                        [v2]
+  List all modules with their declared boundaries, maturity levels, and
+  ownership. Cross-reference with extracted dependency edges to show
+  which boundaries are clean and which are violated.
+
+tool arch violations <repo>                                        [v2]
+  Find all edges that cross a declared forbidden boundary.
+  For each violation: source node, target node, edge type, boundary rule
+  violated.
+
+tool arch classify <repo> <node-id>                                [v2]
+  Infer the architectural role of a node based on its position in the graph:
+  dependency direction, naming patterns, import patterns.
+  Returns: inferred role (controller, service, repository, entity, adapter,
+  utility), confidence, evidence.
+  This is an INFERENCE — marked as such.
+
+tool arch entrypoints <repo>                                       [v2]
+  Find all likely entrypoints: route handlers, event listeners, cron jobs,
+  public exports. Combines declared entrypoints with framework-extracted ones.
+
+tool arch sinks <repo>                                             [v2]
+  Find all likely sinks: database persistence, external API calls, file writes,
+  event emissions.
+
+tool arch owns <repo> <table-or-module-id>                         [v2]
+  Determine ownership of a shared resource (table, event topic, config key).
+  Based on declarations and extraction evidence.
+
+tool arch blast-radius <repo> <node-id>                            [v2]
+  Compute the transitive closure of all nodes that could be affected if
+  this node changes. Combines callers (backward) and callees (forward)
+  with shared-state propagation.
+
+tool arch module <repo> <module-id>                                [v2]
+  Full module profile: symbols, exports, imports, dependencies, dependents,
+  declared boundaries, violations, maturity, test coverage (if available).
+
+
+================================================================================
+EXECUTION, DATA, AND EVENT FLOW
+================================================================================
+
+tool flow trace <repo> <entrypoint-id> [--to <sink-id>]           [v2]
+  Trace the execution path from an entrypoint through the call graph.
+  If --to is specified, stops when the sink is reached.
+  Returns the ordered sequence of calls with modules crossed.
+
+tool flow data-path <repo> <source-id> <sink-id>                  [v2]
+  Find the data flow path between a source (parameter, config read, API input)
+  and a sink (database write, API response, event emission).
+  Requires data flow edges (READS, WRITES) in the graph.
+
+tool flow events <repo>                                            [v2]
+  List all event topics: publishers, consumers, payload schemas (if extractable).
+  Based on framework extractor output (EMITS, CONSUMES edges).
+
+tool flow producers <repo> <topic>                                 [v2]
+  Find all code that publishes to a specific event topic.
+
+tool flow consumers <repo> <topic>                                 [v2]
+  Find all code that consumes from a specific event topic.
+
+tool flow chain <repo> <entrypoint-id>                             [v2]
+  Full execution chain from an entrypoint to all sinks, including async
+  event hops. Combines synchronous call graph with event producer/consumer links.
+
+tool flow config-gates <repo> <node-id>                            [v2]
+  Find all configuration reads (env vars, feature flags, config file lookups)
+  that gate execution paths leading to or from this node.
+  Requires GATED_BY edges from the config archaeology extractor.
+
+
+================================================================================
+CHANGE AND TEST PLANNING
+================================================================================
+
+tool change impact <repo> <symbol-id>                              [v2]
+  Forward effect propagation. Find all downstream nodes whose observable
+  behavior could change if this symbol is modified.
+  Returns: affected nodes, propagation vectors (return value, mutated param,
+  shared state), propagation paths.
+
+tool change effect <repo> <symbol-id>                              [v2]
+  Same as impact but with richer detail: classifies each affected node by
+  risk level (on critical path, consumes shared state, has no tests).
+
+tool change pinch-points <repo> <symbol-id>                        [v2]
+  Compute the dominator tree of the affected subgraph from effect analysis.
+  Returns the minimum set of interception points where tests can be placed
+  to cover the maximum number of affected nodes.
+
+tool change required-tests <repo> <symbol-id>                      [v2]
+  Combine effect analysis + coverage data (if available) + pinch points.
+  Returns the ordered list of test obligations: what must be characterized
+  before the change is safe.
+
+tool change uncovered <repo> <symbol-id>                           [v2]
+  Subset of required-tests: only the affected nodes that have zero existing
+  test coverage.
+
+tool change contracts <repo> <symbol-id>                           [v2]
+  Find all interface contracts (method signatures, return types, parameter types)
+  that this symbol participates in. If the symbol's signature changes, these
+  contracts must be updated.
+
+tool change diff <repo> [--staged|--working|--commit <range>]      [v2]
+  Structural diff of changed files. Uses AST comparison, not text diff.
+  Shows: nodes added/removed/modified, edges added/removed, control flow changes.
+
+tool change verify <repo> [--staged|--working]                     [v2]
+  Pre-commit structural verification.
+  Checks: boundary violations introduced, scope collisions, side effect changes.
+  Returns verdict: CLEAN, WARNING, REJECT with evidence.
+
+
+================================================================================
+LEGACY-CODE OPERATIONS
+================================================================================
+
+tool legacy hotspots <repo> [--since <timeframe>]                  [v2]
+  Git churn * cyclomatic complexity. Requires git adapter.
+  Returns: top N files ranked by hotspot score with commit frequency,
+  max complexity, and top offending functions.
+
+tool legacy clones <repo> [--threshold <float>]                    [v2]
+  Semantic duplication detection.
+  Can use built-in AST normalization + token hashing (fast, Type 1/2 clones).
+  Can delegate to external Python pipeline for embedding-based detection (Type 3).
+  Returns: clone clusters with file paths, line ranges, similarity scores.
+
+tool legacy seams <repo> <symbol-id>                               [v2]
+  Variable scope mapping for a function.
+  Returns: variable lifecycle (declared_at, mutated_at[], read_at[]),
+  liveness ranges, safe extraction points (contiguous blocks with minimal
+  variable overlap).
+
+tool legacy characterize <repo> <symbol-id>                        [v2]
+  Generate characterization test scaffold for a function.
+  Extracts parameter types, generates input matrix, writes test file
+  with placeholder assertions.
+  Does NOT execute the tests — that is the agent's job.
+
+tool legacy monster-methods <repo> [--min-lines <n>] [--min-ccn <n>]  [v2]
+  Find functions exceeding size and complexity thresholds.
+  Returns: function name, file, lines, cyclomatic complexity, parameter count.
+
+tool legacy dead-code-candidates <repo>                            [v2]
+  Extended dead code analysis. Combines graph dead-node detection with
+  dynamic trap scanning (ripgrep for string-literal references).
+  Returns: candidates with safety classification (SAFE_TO_DELETE,
+  UNSAFE_DYNAMIC_REFERENCE, REVIEW_REQUIRED).
+
+tool legacy build-cascades <repo>                                  [v2]
+  Compute recompilation cascade size for every file.
+  Returns: files ranked by cascade_size (transitive import closure),
+  with fan-in and fan-out counts.
+
+tool legacy state-machine <repo> <entity> <field>                  [v2]
+  Extract implicit state machine for an entity's state field.
+  Returns: states, transitions (from, to, guard, action, triggered_by),
+  orphan states, unreachable states.
+
+tool legacy error-flows <repo>                                     [v2]
+  Exception flow mapping.
+  Returns: throw sites, catch sites with handling classification,
+  throw-to-catch flow paths, black holes (swallowed exceptions).
+
+
+================================================================================
+CROSS-REPO OPERATIONS (FLEET)
+================================================================================
+
+tool fleet index <repo-a> <repo-b> [...]                           [v3]
+  Index multiple repos and build the cross-repo boundary graph.
+  Extracts: API endpoints, HTTP client calls, event topics, shared database
+  tables, shared library versions.
+
+tool fleet map                                                     [v3]
+  Show the system topology: services, databases, brokers, shared libraries,
+  and all inter-service edges.
+
+tool fleet deps [--service <name>]                                 [v3]
+  Inter-service dependency graph. For a specific service, show what it
+  depends on and what depends on it.
+
+tool fleet api-drift [--provider <service>] [--consumer <service>]  [v3]
+  API contract drift detection between provider and consumer services.
+  Compares actual response schemas with actual consumption patterns.
+
+tool fleet db-shared                                               [v3]
+  Shared database table analysis.
+  Returns: tables accessed by multiple services, access classification
+  (OWNER, READER, WRITER, FULL_ACCESS), schema divergences.
+
+tool fleet event-topology                                          [v3]
+  Cross-service event flow map.
+  Returns: unified topic registry, publishers, consumers, payload drift,
+  orphaned topics, phantom subscriptions.
+
+tool fleet blast-radius <service-id>                               [v3]
+  System-level blast radius. If this service changes or goes down,
+  what other services are affected?
+
+tool fleet migration-order                                         [v3]
+  Topological ordering for incremental migration.
+  Returns: phases, facade insertion points, blocked components,
+  circular dependencies, critical path.
+
+
+================================================================================
+EDGE TYPES (CANONICAL)
+================================================================================
+
+Structural (deterministic, from parsers):
+  IMPORTS          — file/module imports another file/module
+  CALLS            — function/method calls another function/method
+  IMPLEMENTS       — class implements an interface
+  INSTANTIATES     — code creates an instance of a class (new X())
+
+Data flow:
+  READS            — function reads a variable/field/property
+  WRITES           — function writes/mutates a variable/field/property
+
+Event/async:
+  EMITS            — code publishes to an event topic/channel
+  CONSUMES         — code subscribes to an event topic/channel
+
+Framework-specific:
+  ROUTES_TO        — HTTP/RPC route maps to a handler function
+  REGISTERED_BY    — DI container binds interface to concrete class
+  GATED_BY         — execution path is gated by a config key/feature flag
+
+Relational:
+  DEPENDS_ON       — generic dependency (used when more specific type unknown)
+  OWNS             — module owns a table, topic, or config key
+  TESTED_BY        — test file imports/exercises production code (static link)
+  COVERS           — test execution covers production code (dynamic, from coverage)
+
+Exception flow:
+  THROWS           — function throws/raises an exception type
+  CATCHES          — catch block handles an exception type
+
+State machine:
+  TRANSITIONS_TO   — state value transitions to another state value
+
+Total: 18 edge types.
+
+
+================================================================================
+EDGE RESOLUTION VALUES
+================================================================================
+
+  static       — deterministically resolved from source code
+                 (import statement, direct function call, type annotation)
+
+  dynamic      — known to exist but resolved at runtime
+                 (DI injection, reflection, dynamic import, plugin loading)
+
+  inferred     — guessed from naming patterns, proximity, or heuristics
+                 (architectural classification, ownership inference)
+
+
+================================================================================
+NODE KINDS (CANONICAL)
+================================================================================
+
+Code-level:
+  FILE
+  FUNCTION
+  CLASS
+  INTERFACE
+  TYPE_ALIAS
+  VARIABLE
+  CONSTANT
+  ENUM
+
+Module-level:
+  MODULE            — a directory/package treated as a unit
+  PACKAGE           — a published/versioned package
+
+System-level:
+  ENDPOINT          — HTTP route, gRPC method, GraphQL resolver
+  EVENT_TOPIC       — message broker topic/channel
+  TABLE             — database table
+  QUEUE             — message queue
+  JOB               — scheduled job / cron
+  CONFIG_KEY        — environment variable, feature flag, config entry
+
+Test:
+  TEST_FILE
+  TEST_CASE
+
+
+================================================================================
+SNAPSHOT MODEL
+================================================================================
+
+  snapshot_id          — unique identifier
+  parent_snapshot_id   — previous snapshot (null for first)
+  repo_id              — which repo this snapshot belongs to
+  basis_commit         — git commit hash at snapshot time
+  dirty_hash           — hash of uncommitted changes (null if clean)
+  scope                — FULL | INCREMENTAL | WORKING
+  created_at           — timestamp
+  label                — optional human-readable label
+
+Every fact and edge is attached to a snapshot_id.
+Queries default to the latest snapshot unless specified.
+
+
+================================================================================
+EVIDENCE MODEL
+================================================================================
+
+Every edge and inference carries evidence:
+
+  source          — what produced this fact
+                    values: "tree-sitter", "scip", "framework:express",
+                    "framework:nestjs", "framework:typeorm", "git",
+                    "coverage", "declaration", "inference:arch-classify"
+
+  resolution      — how certain is the link (see above)
+
+  snapshot_id     — when this evidence was produced
+
+  confidence      — 1.0 for facts, 0.0-1.0 for inferences only
+
+
+================================================================================
+PHASING SUMMARY
+================================================================================
+
+V1:  repo (add, index, status, refresh, list, remove)
+     graph (symbols, callers, callees, imports, path, dead, cycles)
+     declare (module, boundary, entrypoint, invariant, list, remove)
+
+V2:  repo (watch, snapshot, diff)
+     graph (implements, instantiates, neighbors, stats)
+     declare (import, export)
+     arch (boundaries, violations, classify, entrypoints, sinks, owns,
+           blast-radius, module)
+     flow (trace, data-path, events, producers, consumers, chain, config-gates)
+     change (impact, effect, pinch-points, required-tests, uncovered,
+             contracts, diff, verify)
+     legacy (hotspots, clones, seams, characterize, monster-methods,
+             dead-code-candidates, build-cascades, state-machine, error-flows)
+
+V3:  fleet (index, map, deps, api-drift, db-shared, event-topology,
+            blast-radius, migration-order)

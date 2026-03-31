@@ -1,0 +1,1255 @@
+Missing Links in Current Tooling
+
+Yes. That is still an open problem.
+
+What you are describing is not ordinary code RAG. It is repository intelligence: a system that can answer not just “find relevant code” but “place this code in the architecture and execution reality of the system.” Vector search alone does not do that.
+
+The core distinction:
+
+1. Retrieval answers “what text or code looks related to this query?”
+2. Code intelligence answers “what symbol references what?”
+3. Architecture understanding answers “what role does this component play, what boundary is it on, what depends on it, and what runtime path reaches it?”
+4. Execution understanding answers “when does this actually run, under which entrypoint, event, request, job, or scheduler?”
+
+Only the first of those is RAG.
+
+Why this remains open:
+
+1. Code meaning is relational, not chunk-local.
+A function only “means” something through imports, callers, interfaces, registrations, config wiring, DI containers, routes, schemas, queues, tests, and runtime traces. Embeddings flatten code into vectors. They lose graph structure unless you rebuild that structure separately.
+
+2. Architecture is mostly implicit.
+Most repos do not contain explicit machine-readable facts saying “this is an application service,” “this is an adapter,” or “this sits on the write path after validation but before persistence.” Humans infer that from naming, folder structure, dependency direction, framework conventions, and docs. Machines can infer some of it, but not reliably across codebases.
+
+3. Execution path is not the same as call graph.
+A call graph is static. Real execution also depends on routing, async queues, reflection, codegen, config flags, feature gates, plugin systems, dynamic imports, ORM hooks, middleware chains, retry systems, and external events.
+
+4. Data path and event path are cross-cutting.
+A single business flow may traverse HTTP controller -> use case -> domain service -> repository -> outbox -> queue consumer -> webhook handler -> projection updater. No single chunk captures that. A vector DB of chunks will miss the path unless the system explicitly models edges.
+
+5. Exact understanding is impossible in the general case.
+For unrestricted programs, full semantic behavior cannot be decided mechanically in the general case. Practical tools always work by approximation: parsers, heuristics, type systems, framework-specific rules, traces, and confidence scoring.
+
+What is solved reasonably well:
+
+1. Symbol lookup, references, definitions, imports.
+2. Semantic search when you do not know the keyword.
+3. Localized impact analysis in well-behaved typed codebases.
+4. Repo maps and token-budget summaries.
+5. Basic call graph extraction in some languages and frameworks.
+
+What is still weak:
+
+1. “Where does this sit in the architecture?”
+2. “What runtime path activates this?”
+3. “What data contracts pass through this?”
+4. “What events eventually reach this handler?”
+5. “What business capability does this cluster of files implement?”
+6. “Which invariants or failure modes does this component protect?”
+
+The correct mental model is not “slap a vector database on a repo.” The correct model is a layered repository knowledge system:
+
+1. Structural index.
+Files, symbols, definitions, references, imports, inheritance, implementations, routes, schemas, configs.
+
+2. Semantic index.
+Embeddings over symbols, modules, comments, docs, commit messages, ADRs, test names.
+
+3. Graph model.
+Nodes: repo, package, module, file, symbol, endpoint, event, table, queue, job, config key.
+Edges: imports, calls, implements, instantiates, reads, writes, emits, consumes, routes_to, registered_by, guarded_by, tested_by.
+
+4. Runtime evidence.
+Logs, traces, coverage, integration tests, sampled execution, event recordings.
+
+5. Architectural inference layer.
+Rules such as dependency direction, folder conventions, interface ownership, port/adapter detection, entrypoint classification, boundary crossing detection.
+
+6. Query planner.
+For “who calls this?” use structural search.
+For “what handles payment retries?” use hybrid semantic + graph.
+For “how does request X reach table Y?” use graph expansion plus runtime evidence.
+
+That is why current tools feel partial. Most of them are good at one or two layers, not all six.
+
+If the target is “understands and maps code components better,” the central artifact should be a graph with evidence, not a vector store. RAG should sit on top as a natural-language retrieval interface into that graph. Without the graph, the system will sound insightful while being structurally wrong.
+
+The strongest product direction is:
+
+1. Build a code graph first.
+2. Attach architectural labels and confidence scores.
+3. Add semantic retrieval over graph nodes.
+4. Answer every query with evidence paths, not just chunks.
+
+That is the open problem: not retrieval of code, but faithful synthesis of structure, intent, and runtime reality from incomplete evidence.
+
+—
+
+The industry is re-creating pre-process software engineering failure modes because most current agent tooling optimizes for local code generation, not system-level translation and control.
+
+JIRA, design reviews, change control, test plans, architecture docs, release gates: those were not bureaucracy by accident. They were crude but necessary mechanisms for translating:
+
+1. intent
+2. constraints
+3. decomposition
+4. ownership
+5. verification
+6. traceability
+
+into code changes that do not destroy the system.
+
+Current “just tell the LLM to do it” workflows discard that translation layer. So teams get speed on the front edge and chaos on the back edge:
+- requirements drift
+- architecture erosion
+- hidden coupling
+- incomplete impact analysis
+- shallow testing
+- unverifiable changes
+- no durable institutional memory
+
+So the real product opportunity is not “better code RAG”. It is an engineering cognition system that turns high-level intent into constrained, architecture-aware, verifiable execution.
+
+**What The Surviving Tool Actually Is**
+
+Not a chatbot.
+Not a vector DB over a repo.
+Not a ticket system with AI lipstick.
+
+It is a constrained compiler from product intent to engineering action.
+
+Its internal pipeline should look like this:
+
+1. Intent model
+Captures requirements, constraints, invariants, non-goals, rollout conditions, safety boundaries, architecture rules, maturity levels.
+
+2. System model
+Builds a repository graph:
+- modules
+- symbols
+- dependency edges
+- API surfaces
+- event flows
+- data flows
+- ownership boundaries
+- test coverage edges
+- runtime entrypoints
+- configs and feature flags
+
+3. Translation model
+Maps intent onto impacted parts of the system:
+- which components are affected
+- what architectural boundaries are crossed
+- what contracts change
+- what tests must exist
+- what migration or rollout risk appears
+
+4. Execution model
+Breaks work into machine-executable tasks with scope and evidence requirements:
+- exact files/modules in scope
+- required preconditions
+- allowed abstractions
+- forbidden dependencies
+- definition of done
+- required tests
+- required review artifacts
+
+5. Verification model
+Checks whether the produced change actually satisfies the intent:
+- architecture conformance
+- dependency rule checks
+- test completeness
+- behavioral diff
+- static analysis
+- runtime trace or sandbox execution
+- policy checks
+
+6. Memory model
+Stores what was learned:
+- why this design was chosen
+- what failed before
+- which patterns are preferred
+- known hazards
+- module maturity
+- divergence from plan
+
+That is the missing layer.
+
+**Why This Checks Yegge’s Boxes**
+
+It can satisfy all six levers if built correctly.
+
+1. Insight Compression
+This is the main value. The tool would encode decades of engineering practice:
+- requirement decomposition
+- impact analysis
+- architecture conformance
+- test obligations
+- rollout safety
+- change review heuristics
+- traceability
+
+That is real compressed cognition. Re-synthesizing that from scratch every task is wasteful.
+
+2. Substrate Efficiency
+Most of this should not be done by a frontier model.
+Use cheaper substrates for what they are good at:
+- AST parsers
+- graph queries
+- static analysis
+- code search
+- typecheckers
+- test runners
+- trace analyzers
+- rule engines
+
+Use LLMs only for ambiguity resolution, summarization, synthesis, and tradeoff explanation.
+
+3. Broad Utility
+This applies across:
+- coding agents
+- human reviewers
+- onboarding
+- refactoring
+- incident analysis
+- architecture governance
+- compliance
+- migrations
+- release planning
+
+Broad utility is plausible if the core artifact is the system graph plus intent-to-verification pipeline.
+
+4. Publicity
+This is the weak point for any new tool. But if it plugs into existing agent loops through CLI, MCP, GitHub, CI, and editor surfaces, awareness cost drops. It must become a default part of how agents ask “what should I touch, what must I prove, what am I not allowed to break?”
+
+5. Minimizing Friction
+This is where most “AI for engineering” tools fail. The interface must match agent instincts:
+- give me the impacted modules
+- show me evidence
+- tell me what tests are mandatory
+- show safe edit boundaries
+- show why this change violates architecture
+- give me review-ready reasoning
+- return machine-readable outputs
+
+No vague prose blobs. No magical hidden state. Deterministic commands with evidence.
+
+6. Human Coefficient
+This can be strong if the system preserves human judgment rather than replacing it:
+- ADRs
+- review rationales
+- approved patterns
+- exception records
+- explicit sign-offs
+- module maturity and ownership
+
+Humans do not just want code. They want accountable decisions.
+
+**The Correct Product Thesis**
+
+The thesis is:
+
+“Software teams do not need an AI that writes more code. They need an AI-assisted system that preserves engineering intent and enforces evidence between idea and merge.”
+
+That is a much stronger thesis than code RAG.
+
+**What Makes It Hard**
+
+The hard part is not embeddings. It is formalizing the translation chain.
+
+You need first-class models for:
+- architecture boundaries
+- business invariants
+- event/data paths
+- ownership and maturity
+- test obligations
+- rollout risk
+- evidence quality
+
+Most repositories do not encode those explicitly. So the tool must infer some of it, import some from docs/config/CI/tests, and require humans to declare the rest.
+
+That is why this is still open.
+
+**What To Build First**
+
+If this were built seriously, the first version should not start with natural-language Q&A. It should start with hard-edged engineering primitives:
+
+1. Build the system graph.
+2. Add architecture and boundary rules.
+3. Add intent/change specs as structured inputs.
+4. Add impact analysis.
+5. Add verification obligations.
+6. Add agent-facing commands on top.
+
+Natural language comes last, as a front-end over reliable internals.
+
+Otherwise you get a confident liar with a repo index.
+
+**The Central Mistake Everyone Is Making**
+
+They are trying to replace process with generation.
+
+The winning move is to replace manual process overhead with executable engineering constraints.
+
+That preserves the value of the old lessons while removing the human clerical burden.
+
+“so what ARE all the lessons that we learned across these domains? what's the data format wrangling that needs to happen between intent statement to scaled agile planning to codebases via clean architecture to reusing modules to creating new to deployments? what would a REAL ENGINEERED pipeline look like if it used all the lessons learned in the past 50 years but compressed them for AI to use?”
+
+The core lesson is simple: software engineering spent 50 years discovering that raw intent is too lossy to send directly into code.
+
+Every serious discipline that survived learned to insert translation layers.
+
+Those layers exist because each step changes the question:
+
+1. Product asks: what outcome is needed?
+2. Systems asks: under what constraints and failure modes?
+3. Architecture asks: where does this belong and what must not be coupled?
+4. Planning asks: what can be changed independently and verified independently?
+5. Implementation asks: what exact interfaces, modules, and invariants change?
+6. Delivery asks: can this ship safely?
+7. Operations asks: did reality match the model?
+8. Governance asks: what was learned and what must now become policy?
+
+Current LLM workflows often collapse all of that into one prompt. That is the regression.
+
+**What We Actually Learned Across Domains**
+
+From product management:
+- Requirements must separate outcomes from proposed solutions.
+- Constraints and non-goals matter as much as goals.
+- Stakeholders change requirements for different reasons; that must stay visible.
+- Ambiguity deferred becomes rework later.
+
+From systems engineering:
+- Interfaces and failure modes must be explicit.
+- Verification must be planned before implementation.
+- Traceability from requirement to evidence is not optional in complex systems.
+- Operational context matters as much as nominal behavior.
+
+From clean architecture:
+- Stable policy must not depend on volatile mechanisms.
+- Boundaries must be deliberate and enforced.
+- Data crossing boundaries must be simplified and normalized.
+- Reuse works only when abstractions align with real axes of change.
+
+From component/module engineering:
+- Reuse is expensive when module boundaries are wrong.
+- Premature shared modules create coupling and release paralysis.
+- Mature reusable modules need versioning, ownership, compatibility rules, and test contracts.
+
+From agile and scaled planning:
+- Work must be decomposed into independently valuable, independently testable slices.
+- Cross-team coordination requires shared dependency visibility.
+- Planning artifacts exist to manage sequencing, not to satisfy management theater.
+- Fast feedback loops beat speculative detail, but only when scope and evidence are controlled.
+
+From DevOps and release engineering:
+- Build, test, deploy, rollback, observe.
+- If it is not reproducible, it is not engineered.
+- Progressive delivery beats big-bang release.
+- Production telemetry is part of the specification loop.
+
+From safety-critical and high-reliability engineering:
+- Hazards, invariants, and failure containment must be explicit.
+- Evidence matters more than confidence.
+- Human review should focus on irreducible judgment, not clerical translation.
+- Change impact must be bounded before execution.
+
+All of those are the same lesson in different clothes: preserve intent while reducing ambiguity and proving correctness at every boundary.
+
+**What Data Wrangling Actually Has To Happen**
+
+The correct pipeline is a sequence of representation changes. Each stage narrows ambiguity and increases executability.
+
+1. Intent statement
+Raw form:
+- user need
+- business outcome
+- pain point
+- urgency
+- context
+
+Problem:
+- ambiguous
+- solution-contaminated
+- missing constraints
+- missing acceptance criteria
+
+2. Intent spec
+Normalized fields:
+- objective
+- actors
+- triggers
+- desired outcomes
+- non-goals
+- constraints
+- risks
+- success metrics
+- required evidence
+- rollout sensitivity
+- domain maturity
+
+This is the first real machine-usable form.
+
+3. Capability decomposition
+Maps intent to:
+- business capabilities
+- affected workflows
+- operational scenarios
+- exception scenarios
+- data entities
+- event sources
+- external systems
+
+This is where high-level intent becomes system surface area.
+
+4. Requirement graph
+Each requirement becomes typed:
+- functional requirement
+- quality attribute
+- safety constraint
+- regulatory or policy rule
+- architectural invariant
+- test obligation
+- observability obligation
+
+Each node gets:
+- source
+- rationale
+- priority
+- verification method
+- impacted actors
+
+Now the system can reason over requirement classes instead of prose.
+
+5. Architecture mapping
+Map requirements onto:
+- domain entities
+- use cases
+- ports
+- adapters
+- infrastructure services
+- bounded contexts
+- module ownership
+- maturity levels
+- dependency boundaries
+
+This is where “what” becomes “where”.
+
+6. Change scope model
+For each impacted area:
+- existing module to extend
+- reusable module candidate
+- new module needed
+- interface change required
+- data contract change required
+- migration needed
+- deployment coupling
+- backward compatibility expectations
+
+This is where reuse decisions happen.
+
+7. Work packet decomposition
+Each unit of work should contain:
+- goal
+- exact scope
+- dependencies
+- preconditions
+- allowed files/modules
+- forbidden boundaries to cross
+- required abstractions to use
+- required tests
+- review focus
+- done criteria
+
+This is where planning becomes executable.
+
+8. Code change plan
+Translate work packets into:
+- symbols to add/change
+- interfaces to create/extend
+- modules to touch
+- data contracts to revise
+- config changes
+- migration steps
+- feature flag behavior
+- rollback behavior
+
+This is where an agent can act safely.
+
+9. Verification plan
+For each change:
+- unit tests
+- contract tests
+- integration tests
+- property tests
+- migration checks
+- architecture checks
+- performance checks
+- rollout checks
+- observability checks
+
+This is where “works” gets replaced by “provably satisfies obligations”.
+
+10. Release plan
+Includes:
+- deployment order
+- dark launch or feature flag
+- compatibility window
+- migration sequence
+- rollback criteria
+- blast radius
+- monitoring thresholds
+- human approval gates
+
+11. Operational evidence
+Collect:
+- test results
+- static analysis
+- runtime traces
+- logs
+- metrics
+- alert deltas
+- rollback events
+- user impact
+
+12. Learning update
+Feed back:
+- assumptions wrong
+- docs updated
+- architecture decisions added
+- module maturity changed
+- playbooks refined
+- prompts/rules improved
+
+That is the actual wrangling.
+
+**The Canonical Data Model**
+
+A real AI-native engineering pipeline needs one canonical model underneath all tools. Not tickets as prose. Not code chunks. A typed graph plus immutable evidence.
+
+Core node types:
+- Intent
+- Constraint
+- Requirement
+- Capability
+- Scenario
+- Risk
+- Invariant
+- BoundedContext
+- Module
+- Interface
+- DataContract
+- Endpoint
+- Event
+- Table
+- Queue
+- Job
+- ConfigKey
+- Test
+- BuildArtifact
+- Deployment
+- Observation
+- Decision
+- Exception
+
+Core edge types:
+- refines
+- constrains
+- satisfies
+- verifies
+- depends_on
+- owns
+- emits
+- consumes
+- reads
+- writes
+- calls
+- implements
+- instantiates
+- deploys_with
+- guarded_by
+- traced_by
+- supersedes
+
+This graph is the real system of record. JIRA, docs, repo, CI, and runtime are views onto it.
+
+**What A Real Engineered AI Pipeline Looks Like**
+
+A serious version would be shaped like a compiler pipeline, not a chatbot.
+
+1. Intake compiler
+Input:
+- raw request
+Output:
+- normalized intent spec
+Checks:
+- ambiguity detection
+- missing constraints
+- actor extraction
+- success metric extraction
+- safety classification
+
+2. System mapper
+Input:
+- intent spec
+- repository graph
+- runtime graph
+- architecture rules
+Output:
+- impacted capabilities
+- impacted modules
+- impacted flows
+- risks and unknowns
+
+3. Reuse/new decision engine
+Input:
+- impacted modules
+- existing module catalog
+- maturity levels
+- compatibility rules
+Output:
+- extend existing
+- extract shared support module
+- create new module
+- reject due to architectural conflict
+
+This is where most current agent systems are blind.
+
+4. Change planner
+Input:
+- architecture map
+- chosen design path
+Output:
+- ordered work packets
+- dependencies
+- test obligations
+- review obligations
+- release plan skeleton
+
+5. Implementation workers
+Input:
+- one work packet at a time
+- local architectural constraints
+- exact allowed context
+Output:
+- patch
+- local design notes
+- assumption record
+- self-check evidence
+
+Workers should not have unconstrained repo-wide freedom.
+
+6. Structural verifiers
+Deterministic tools:
+- parser
+- typechecker
+- linter
+- architecture rule checker
+- dependency cycle checker
+- API diff checker
+- migration checker
+
+Use cheap substrates first.
+
+7. Behavioral verifiers
+- unit tests
+- contract tests
+- integration tests
+- trace replay
+- property tests
+- shadow execution
+- benchmark regressions
+
+8. Review synthesizer
+Output:
+- what changed
+- why
+- what assumptions were made
+- what evidence exists
+- what remains uncertain
+- what architectural debts were introduced
+
+9. Release controller
+- checks rollout prerequisites
+- validates migration order
+- enforces feature flag policy
+- monitors early signals
+- freezes or rolls back on policy breach
+
+10. Learning ingestor
+- updates decision records
+- records postmortem deltas
+- refines module metadata
+- preserves reusable patterns and anti-patterns
+
+That is the compressed form of 50 years of learning.
+
+**What The Formats Should Look Like**
+
+Do not use free-form prose as the primary machine interface.
+
+Use typed schemas with referenced evidence.
+
+A minimal intent spec should look like this conceptually:
+
+```yaml
+intent_id: INT-2026-031
+objective: "Reduce checkout failures during payment retries"
+actors:
+  - shopper
+  - payment-service
+triggers:
+  - payment gateway timeout
+desired_outcomes:
+  - retry succeeds without duplicate charge
+non_goals:
+  - redesign payment provider integration
+constraints:
+  - no schema-breaking API change
+  - must preserve idempotency
+risks:
+  - duplicate settlement
+  - order state divergence
+success_metrics:
+  - retry success rate
+  - duplicate charge rate
+verification_requirements:
+  - contract test
+  - replay test
+  - rollback plan
+```
+
+A work packet should look like this:
+
+```yaml
+work_packet_id: WP-044
+goal: "Add retry-state guard in payment application service"
+scope:
+  modules:
+    - payments/application
+    - payments/domain
+allowed_changes:
+  - add domain invariant
+  - extend retry DTO
+forbidden_changes:
+  - no direct infrastructure calls from domain
+dependencies:
+  - WP-041
+required_tests:
+  - unit
+  - contract
+review_focus:
+  - idempotency invariant
+  - state transition safety
+done_when:
+  - invariant enforced
+  - tests passing
+  - architecture checks passing
+```
+
+A verification record should look like this:
+
+```yaml
+verification_id: VER-044
+work_packet_id: WP-044
+checks:
+  - typecheck: pass
+  - architecture_rules: pass
+  - unit_tests: pass
+  - contract_tests: pass
+  - replay_test: pass
+residual_risks:
+  - gateway timeout burst behavior not load-tested
+assumptions:
+  - provider retry token remains stable
+evidence_refs:
+  - test_run_8821
+  - trace_replay_119
+```
+
+This is how AI stops hallucinating process and starts operating inside engineered constraints.
+
+**The Compression Principle**
+
+The past 50 years should be compressed into five machine-usable doctrines:
+
+1. Separate intent from implementation.
+2. Represent the system as typed structure, not prose.
+3. Make architectural boundaries executable.
+4. Require evidence at every translation step.
+5. Preserve learning as reusable policy, not tribal memory.
+
+Everything else is a specialization of those five.
+
+**The Real Replacement For JIRA-And-Friends**
+
+Not “AI does tickets”.
+Not “AI replaces PM and architect and reviewer”.
+
+The replacement is:
+- structured intent records instead of vague tickets
+- graph-backed impact analysis instead of manual dependency guessing
+- executable architecture policy instead of wiki commandments
+- machine-generated work packets instead of human clerical decomposition
+- evidence-backed review instead of opinion-backed review
+- traceable verification instead of “LGTM”
+
+That is the real compression.
+
+**What Would Actually Survive**
+
+A system that becomes the default translation layer between:
+- business intent
+- system structure
+- implementation work
+- verification evidence
+- deployment reality
+
+That would save real cognition.
+
+A code RAG tool will not.
+A better coding chatbot will not.
+A ticket summarizer will not.
+
+A disciplined intent-to-evidence compiler might.
+
+“what would be an intermediary natural step RIGHT NOW that makes it easy for an agent to work in a codebase? I already have AGENTS.md, docs with architecture, vision, various plans. even ADRs. I use them to keep agents on track. should I add requirements? test runs? evidence? lessons learned?”
+
+Yes. The natural next step is not more prose. It is to add a thin structured execution layer on top of what you already have.
+
+`AGENTS.md`, architecture docs, ADRs, vision docs: those are global policy and background. What agents still lack is task-local contract plus module-local contract.
+
+Add these two things first.
+
+**1. Change Spec**
+One file per requested change. This becomes the agent’s working contract.
+
+Use a format like `work/changes/CHG-xxxx.yaml`.
+
+```yaml
+id: CHG-2026-03-025
+title: "Add retry-state guard to payment flow"
+intent:
+  objective: "Prevent duplicate processing on retry"
+  actor: "shopper"
+  trigger: "payment provider timeout"
+constraints:
+  - "No dependency from core to infrastructure"
+  - "No schema-breaking API changes"
+  - "Preserve idempotency"
+in_scope:
+  modules:
+    - "packages/engine/src/core/payments"
+    - "packages/api/src/routes/payments"
+out_of_scope:
+  - "UI redesign"
+reuse_decision:
+  extend:
+    - "existing payment application service"
+  create_new: []
+architecture_rules:
+  - "DTOs only across boundary"
+  - "Domain invariants enforced in core"
+acceptance_criteria:
+  - "Retry does not create duplicate charge"
+  - "Existing payment happy path still passes"
+required_evidence:
+  - "unit_tests"
+  - "integration_tests"
+  - "architecture_check"
+  - "changed_files_summary"
+open_questions: []
+assumptions:
+  - "provider retry token remains stable across timeout retry"
+```
+
+This solves the biggest current gap: agents usually jump from vague request straight into edits.
+
+**2. Evidence Record**
+One file per change execution. This is where test runs, verification, and lessons get normalized.
+
+Use `work/evidence/CHG-xxxx.yaml`.
+
+```yaml
+change_id: CHG-2026-03-025
+status: "verified"
+edits:
+  - path: "packages/engine/src/core/payments/RetryGuard.ts"
+    reason: "enforce duplicate-prevention invariant"
+  - path: "packages/engine/src/core/payments/__tests__/RetryGuard.test.ts"
+    reason: "prove retry behavior"
+verification:
+  unit_tests:
+    status: "pass"
+    command: "npm run test --workspace=@fraktag/engine -- RetryGuard"
+  integration_tests:
+    status: "pass"
+    command: "npm run test --workspace=api -- payments"
+  architecture_check:
+    status: "pass"
+    command: "npm run lint"
+residual_risks:
+  - "burst retry behavior not load-tested"
+assumptions_confirmed:
+  - "retry token available in all retry paths"
+lessons_learned:
+  - "payment retry invariant belonged in core, not route handler"
+```
+
+This makes test runs useful. Raw logs are not the artifact. Structured evidence is.
+
+**What To Add After That**
+
+Add module contracts. One per package or major submodule.
+
+Use `MODULE.yaml` or keep `MAP.md` and add a machine-readable sidecar.
+
+Minimum fields:
+- purpose
+- maturity level
+- owned abstractions
+- allowed dependencies
+- forbidden dependencies
+- public interfaces
+- invariants
+- common change reasons
+- test entrypoints
+
+Example:
+
+```yaml
+name: "payments-core"
+path: "packages/engine/src/core/payments"
+maturity: "MATURE"
+purpose: "payment invariants and application orchestration"
+owns:
+  - "payment state machine"
+  - "retry/idempotency rules"
+allowed_dependencies:
+  - "packages/engine/src/core/shared"
+forbidden_dependencies:
+  - "api"
+  - "infrastructure"
+public_interfaces:
+  - "PaymentService"
+invariants:
+  - "duplicate settlement must not occur"
+test_entrypoints:
+  - "packages/engine/src/core/payments/__tests__"
+```
+
+This is what helps an agent understand where code belongs before editing.
+
+**Order Of Importance**
+
+1. Structured change specs
+2. Structured evidence records
+3. Module contracts
+4. Lessons learned linked back into module contracts and ADRs
+
+**Do Not Add First**
+- giant requirement documents
+- pasted raw test logs
+- more broad narrative plans
+- duplicate architecture prose
+
+Those increase context volume without increasing executability.
+
+**How To Think About Requirements**
+Yes, add requirements, but only as typed fields inside the change spec:
+- objective
+- constraints
+- acceptance criteria
+- non-goals
+- required evidence
+
+Do not create a separate heavy requirements bureaucracy unless the domain demands it.
+
+**How To Think About Test Runs**
+Yes, keep them, but as references and summarized outcomes:
+- command
+- scope
+- pass/fail
+- artifact path if needed
+- what obligation that test proves
+
+A test run without mapped obligation is noise.
+
+**How To Think About Evidence**
+This is the highest-value addition after change specs. Evidence is what prevents “agent confidence” from masquerading as correctness.
+
+Evidence should answer:
+- what changed
+- why it changed
+- what proves it works
+- what remains uncertain
+- what architectural rule was checked
+
+**How To Think About Lessons Learned**
+Yes, but only if they are fed back into policy.
+A lesson learned that stays in a dead document is waste.
+
+Promote lessons into:
+- `AGENTS.md` if globally applicable
+- module contract if local to a component
+- ADR if it changes design policy
+- test template if it implies a recurring verification obligation
+
+**The Practical Intermediate Pipeline**
+Right now, the real pipeline should be:
+
+1. User request
+2. `Change Spec`
+3. agent analysis against module contracts and architecture docs
+4. implementation
+5. `Evidence Record`
+6. promote durable lessons into module contracts or ADRs
+
+That is the smallest serious upgrade from “prompt the agent and hope.”
+
+That analysis is mostly correct.
+
+The mistake in the earlier “full engineered pipeline” vision is not the architecture. The mistake is product sequencing.
+
+The full pipeline is a correct end-state thesis:
+- intent
+- structure
+- scope
+- execution
+- verification
+- learning
+
+But if you force teams to author all of that up front, adoption dies. History already proved this with UML-heavy workflows, MDA, overbuilt ALM suites, and process-first “engineering platforms”. Correct model. Wrong activation energy.
+
+The other AI is right about the survival bottleneck: friction dominates.
+
+So the disciplined answer is:
+
+1. The full pipeline is not a day-one product.
+2. It is a layering strategy.
+3. The graph is the first indispensable substrate.
+4. Human-authored structure must be sparse, high-leverage, and optional at first.
+
+The useful distinction is this:
+
+- Thesis: “software engineering needs an intent-to-evidence compiler”
+- First product: “agents need a structural codebase server”
+
+Those are not contradictory.
+
+**What Ships First**
+
+A serious first product is:
+
+- automatic repository graph extraction
+- framework-aware edge extraction
+- architectural boundary inference
+- impact analysis
+- evidence lookup
+- agent-facing query surface via CLI and MCP
+
+Not YAML-first planning.
+
+The right first commands are exactly in this shape:
+
+```text
+codegraph index .
+codegraph query "who calls PaymentService.retry?"
+codegraph trace "POST /orders -> db"
+codegraph impact packages/engine/src/core/payments/RetryGuard.ts
+codegraph boundaries
+codegraph violations
+codegraph tests-for PaymentService.retry
+```
+
+That has the right selection properties:
+- high savings
+- low marginal friction
+- broad utility
+- CPU substrate
+- immediate value to agents and humans
+
+**What The Tool Should Understand**
+
+Not just syntax.
+
+It should extract and represent:
+
+- file/module/package containment
+- symbols, definitions, references
+- imports and dependency direction
+- route registrations
+- DI registrations and bindings
+- event emitters and handlers
+- queue producers and consumers
+- ORM models and repository edges
+- config-gated execution paths
+- test-to-code coverage links
+- migrations and deployment coupling
+
+That is already enough to create major cognitive savings.
+
+**What Must Be Automatic vs Human-Supplied**
+
+Automatic first:
+- AST parsing
+- import/reference graph
+- framework-specific edges
+- dependency cycles
+- approximate boundary inference
+- impacted tests
+- likely entrypoints
+- architectural violations from existing code
+
+Human-supplied later, selectively:
+- module purpose
+- critical invariants
+- maturity level
+- approved exceptions
+- non-obvious architectural intent
+- change-specific constraints for major work
+
+This is the correct compression of past process lessons: automate the clerical parts, preserve human judgment only where judgment is actually needed.
+
+**What To Add In Your Repo Right Now**
+
+You already have:
+- `AGENTS.md`
+- architecture docs
+- vision docs
+- ADRs
+
+That is enough to support the next step.
+
+Add only the low-friction structured artifacts that a graph-based tool can consume or enrich.
+
+First add:
+1. Module contracts
+2. Executable architecture rules
+3. Structured evidence summaries
+4. Lessons-learned registry tied to modules and rules
+
+Do not start with heavyweight requirements bureaucracy.
+
+**1. Module Contracts**
+One small machine-readable file per major module/package.
+
+Fields:
+- purpose
+- maturity
+- owned abstractions
+- allowed dependencies
+- forbidden dependencies
+- public interfaces
+- critical invariants
+- test entrypoints
+
+This is high leverage because it gives the graph semantic anchors.
+
+**2. Executable Architecture Rules**
+Turn key architectural constraints into checks.
+
+Examples:
+- core must not import adapters
+- API layer cannot bypass application services
+- DTO-only across boundary
+- no cyclic dependencies between bounded contexts
+- certain modules are read-only except through approved ports
+
+This converts wiki rules into machine enforcement.
+
+**3. Structured Evidence Summaries**
+Not raw logs. Summaries keyed to code or change scope.
+
+Fields:
+- target module or symbol
+- test command
+- pass/fail
+- last run timestamp
+- what obligation it proves
+
+This lets agents answer “what evidence exists for this area” without reading CI sludge.
+
+**4. Lessons-Learned Registry**
+Short records with:
+- trigger
+- failure mode
+- affected area
+- permanent rule or heuristic
+- test obligation added
+- ADR link if promoted
+
+A lesson that is not attached to a module, rule, or test obligation is dead text.
+
+**What Not To Add Yet**
+
+Do not add:
+- full formal requirements specs for every task
+- work packets for every change
+- manual system graph curation
+- giant YAML programs nobody will maintain
+- separate process artifacts that duplicate docs
+
+That is where adoption collapses.
+
+**The Real Compression Of 50 Years Of Engineering**
+
+The past 50 years did not teach “write more process documents”.
+
+They taught:
+- separate concerns
+- preserve traceability
+- constrain changes
+- verify behavior
+- encode lessons
+- automate repetition
+- keep humans on the judgment path, not the clerical path
+
+So the compressed AI-native form is:
+
+1. auto-extract structure
+2. let humans declare a few critical truths
+3. enforce boundaries mechanically
+4. attach evidence to structure
+5. let agents query and operate against that substrate
+
+That is the intermediary natural step.
+
+**So Is The Other AI Right?**
+
+Mostly.
+
+Right:
+- full pipeline first would fail
+- graph first is the right product
+- framework-specific extractors are the real moat
+- optional higher layers must come later
+
+Too strong:
+- “5-10 year research program that will never ship”
+
+That part is wrong because the early layers are shippable now:
+- AST-based graph
+- framework plugins
+- architecture checks
+- evidence mapping
+- agent query surface
+
+That is a real product, not a research fantasy.
+
+The full pipeline should be treated as a roadmap of progressively stronger guarantees, not as the MVP.
+
+**The Correct Near-Term Strategy**
+
+For your own repo and for a general tool, the sequence is:
+
+1. Keep `AGENTS.md`, ADRs, architecture docs.
+2. Add module contracts in machine-readable form.
+3. Add executable architecture rules.
+4. Add structured evidence summaries.
+5. Build or adopt a code graph indexer over the repo.
+6. Expose it to agents through CLI/MCP.
+7. Add optional change specs only for non-trivial work.
+8. Add stronger planning/verification layers after the graph proves its value.
+
+That path respects both engineering reality and Yegge’s survival ratio.

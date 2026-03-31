@@ -1,0 +1,48 @@
+{
+  "name": "repo-graph",
+  "version": "0.1.0",
+  "description": "Deterministic code graph tool for analyzing legacy codebases",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:unit": "vitest run test/core",
+    "test:int": "vitest run test/adapters",
+    "test:watch": "vitest",
+    "lint": "biome check src/ test/",
+    "lint:fix": "biome check --write src/ test/",
+    "format": "biome format --write src/ test/",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm run build"
+  },
+  "keywords": [
+    "code-analysis",
+    "dependency-graph",
+    "legacy-code",
+    "static-analysis",
+    "cli"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "commander": "^14.0.3",
+    "uuid": "^13.0.0",
+    "web-tree-sitter": "^0.26.7"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.10",
+    "@types/better-sqlite3": "^7.6.13",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2"
+  }
+}

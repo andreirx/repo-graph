@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# SQLite databases (local working data, not committed)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Artifact store (heavy evidence files)
+artifacts/
+
+# Python virtual environments (for optional analysis pipelines)
+tools/python/venv/
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Test coverage
+coverage/
+
+# npm
+*.tgz
+
+# Logs
+*.log
+npm-debug.log*
