@@ -36,12 +36,13 @@ export function registerGraphCommands(
 		.command("callers <repo> <symbol>")
 		.description("Find all callers of a symbol")
 		.option("--depth <n>", "Transitive depth", "1")
+		.option("--edge-types <types>", "Comma-separated edge types", "CALLS")
 		.option("--json", "JSON output")
 		.action(
 			(
 				repoRef: string,
 				symbol: string,
-				opts: { depth: string; json?: boolean },
+				opts: { depth: string; edgeTypes: string; json?: boolean },
 			) => {
 				const ctx = getCtx();
 				const snap = resolveSnapshot(ctx, repoRef);
@@ -62,10 +63,18 @@ export function registerGraphCommands(
 					return;
 				}
 
+				const parsed = parseEdgeTypes(opts.edgeTypes);
+				if (!parsed.ok) {
+					outputError(opts.json, parsed.error);
+					process.exitCode = 1;
+					return;
+				}
+
 				const results = ctx.storage.findCallers({
 					snapshotUid,
 					stableKey,
 					maxDepth: Number.parseInt(opts.depth, 10),
+					edgeTypes: parsed.types,
 				});
 
 				outputNodeResults("graph callers", snap, results, opts.json);
@@ -76,12 +85,13 @@ export function registerGraphCommands(
 		.command("callees <repo> <symbol>")
 		.description("Find all symbols called by this symbol")
 		.option("--depth <n>", "Transitive depth", "1")
+		.option("--edge-types <types>", "Comma-separated edge types", "CALLS")
 		.option("--json", "JSON output")
 		.action(
 			(
 				repoRef: string,
 				symbol: string,
-				opts: { depth: string; json?: boolean },
+				opts: { depth: string; edgeTypes: string; json?: boolean },
 			) => {
 				const ctx = getCtx();
 				const snap = resolveSnapshot(ctx, repoRef);
@@ -102,10 +112,18 @@ export function registerGraphCommands(
 					return;
 				}
 
+				const parsed = parseEdgeTypes(opts.edgeTypes);
+				if (!parsed.ok) {
+					outputError(opts.json, parsed.error);
+					process.exitCode = 1;
+					return;
+				}
+
 				const results = ctx.storage.findCallees({
 					snapshotUid,
 					stableKey,
 					maxDepth: Number.parseInt(opts.depth, 10),
+					edgeTypes: parsed.types,
 				});
 
 				outputNodeResults("graph callees", snap, results, opts.json);
@@ -196,16 +214,19 @@ export function registerGraphCommands(
 					return;
 				}
 
-				const edgeTypes = opts.edgeTypes
-					.split(",")
-					.map((t) => t.trim()) as EdgeType[];
+				const parsed = parseEdgeTypes(opts.edgeTypes);
+				if (!parsed.ok) {
+					outputError(opts.json, parsed.error);
+					process.exitCode = 1;
+					return;
+				}
 
 				const result = ctx.storage.findPath({
 					snapshotUid,
 					fromStableKey: fromKey,
 					toStableKey: toKey,
 					maxDepth: Number.parseInt(opts.maxDepth, 10),
-					edgeTypes,
+					edgeTypes: parsed.types,
 				});
 
 				if (opts.json) {
@@ -403,6 +424,47 @@ function outputNodeResults(
 	} else {
 		console.log(formatNodeResults(results));
 	}
+}
+
+const VALID_EDGE_TYPES = new Set([
+	"IMPORTS",
+	"CALLS",
+	"IMPLEMENTS",
+	"INSTANTIATES",
+	"READS",
+	"WRITES",
+	"EMITS",
+	"CONSUMES",
+	"ROUTES_TO",
+	"REGISTERED_BY",
+	"GATED_BY",
+	"DEPENDS_ON",
+	"OWNS",
+	"TESTED_BY",
+	"COVERS",
+	"THROWS",
+	"CATCHES",
+	"TRANSITIONS_TO",
+]);
+
+/**
+ * Parse and validate a comma-separated edge types string.
+ * Returns null with an error message if any type is invalid.
+ */
+function parseEdgeTypes(
+	raw: string,
+): { ok: true; types: EdgeType[] } | { ok: false; error: string } {
+	const types = raw.split(",").map((t) => t.trim());
+	for (const t of types) {
+		if (!VALID_EDGE_TYPES.has(t)) {
+			const valid = [...VALID_EDGE_TYPES].sort().join(", ");
+			return {
+				ok: false,
+				error: `Unknown edge type "${t}". Valid types: ${valid}`,
+			};
+		}
+	}
+	return { ok: true, types: types as EdgeType[] };
 }
 
 function outputError(json: boolean | undefined, message: string): void {

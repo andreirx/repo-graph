@@ -93,7 +93,7 @@ All support --json.
 All return evidence sources and edge resolution (static/dynamic/inferred).
 
 
-tool graph callers <repo> <symbol-id> [--depth <n>]
+tool graph callers <repo> <symbol-id> [--depth <n>] [--edge-types <types>]
 
   Find all direct callers of a symbol. With --depth, find transitive callers
   up to N levels deep.
@@ -103,22 +103,33 @@ tool graph callers <repo> <symbol-id> [--depth <n>]
 
   Flags:
     --depth <n>             Transitive callers up to depth N (default: 1)
+    --edge-types <types>    Comma-separated edge types to follow
+                            (default: CALLS)
+                            Common values: CALLS, INSTANTIATES, IMPLEMENTS,
+                            IMPORTS, OWNS
     --json                  Machine-readable output
 
   Example:
     tool graph callers payments PaymentService.retry
     tool graph callers payments PaymentService.retry --depth 3 --json
+    tool graph callers payments TreeStore --edge-types CALLS,INSTANTIATES
 
   Output per result:
     node_id, symbol_name, file, line, edge_type, resolution, evidence[], depth
 
 
-tool graph callees <repo> <symbol-id> [--depth <n>]
+tool graph callees <repo> <symbol-id> [--depth <n>] [--edge-types <types>]
 
   Find all symbols called by this symbol. With --depth, find transitive callees.
 
+  Flags:
+    --depth <n>             Transitive callers up to depth N (default: 1)
+    --edge-types <types>    Comma-separated edge types (default: CALLS)
+    --json                  Machine-readable output
+
   Example:
     tool graph callees payments CheckoutService.process --depth 2
+    tool graph callees payments UserService --edge-types CALLS,INSTANTIATES
 
   Output: same shape as callers
 

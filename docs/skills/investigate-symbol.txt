@@ -1,0 +1,79 @@
+SKILL: investigate-symbol
+PURPOSE: Understand what a symbol does, who depends on it, and what it depends on.
+PHASE: v1
+
+PREREQUISITES:
+  - Repository is registered: rgr repo list shows it
+  - Repository is indexed: rgr repo status <repo> shows a ready snapshot
+
+STEPS:
+
+  1. Find the symbol.
+
+     Run: rgr graph callers <repo> <symbol> --json
+     Read: If count is 0 and the symbol name is partial, the name may not
+           have resolved. Try a more specific qualified name like
+           ClassName.methodName or the full stable key.
+
+  2. Check who CALLS this symbol.
+
+     Run: rgr graph callers <repo> <symbol> --depth 2 --json
+     Read: The results array shows every caller up to 2 levels deep.
+           Each result has file, line, depth, edge_type, and resolution.
+           Depth 1 = direct callers. Depth 2 = callers of callers.
+     Decide: If count is 0, the symbol may only be referenced via
+             INSTANTIATES or IMPORTS edges. Go to step 3.
+
+  3. Check who INSTANTIATES or IMPLEMENTS this symbol.
+
+     Run: rgr graph callers <repo> <symbol> --edge-types CALLS,INSTANTIATES,IMPLEMENTS --json
+     Read: This finds all references: calls, constructor invocations,
+           and interface implementations.
+     Decide: If still 0, the symbol may be dead code. Go to step 6.
+
+  4. Check what this symbol calls.
+
+     Run: rgr graph callees <repo> <symbol> --depth 1 --json
+     Read: Shows the direct dependencies of this symbol.
+           Note: v1 may miss some callees due to unresolved this.method()
+           or obj.method() calls. Check the source directly for completeness.
+
+  5. Check the import chain.
+
+     Run: rgr graph imports <repo> <file-containing-symbol> --depth 2 --json
+     Read: Shows what files this file depends on, transitively.
+           Useful for understanding the dependency footprint of a symbol.
+
+  6. Check if the symbol is dead code.
+
+     Run: rgr graph dead <repo> --kind SYMBOL --json
+     Read: Search the results array for this symbol. If present, it has
+           no incoming CALLS, INSTANTIATES, or IMPLEMENTS edges and is
+           not a declared entrypoint.
+     Decide: If the symbol IS dead and shouldn't be, declare it as an
+             entrypoint:
+             rgr declare entrypoint <repo> <stable-key> --type public_export
+
+  7. Check for circular dependencies involving this symbol's module.
+
+     Run: rgr graph cycles <repo> --json
+     Read: Search the cycles for the module directory that contains
+           this symbol's file. If present, the module is in a dependency
+           cycle.
+
+OUTPUT:
+  A summary containing:
+    - What the symbol is (class, function, interface, etc.)
+    - Who depends on it (callers, instantiators, implementors)
+    - What it depends on (callees)
+    - Whether it's dead code
+    - Whether its module has circular dependencies
+    - File and line location
+
+NOTES:
+  - v1 resolution is syntax-only. If callees look incomplete, check the
+    source directly for this.method() or obj.method() patterns.
+  - The --edge-types flag on callers/callees is important. Default is
+    CALLS only. Use CALLS,INSTANTIATES,IMPLEMENTS for a full picture.
+  - For path queries between two symbols, use:
+    rgr graph path <repo> <from> <to> --edge-types CALLS,IMPORTS
