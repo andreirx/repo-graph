@@ -699,7 +699,10 @@ export class SqliteStorage implements StoragePort {
 			LEFT JOIN files f ON n.file_uid = f.file_uid
 			WHERE n.snapshot_uid = ?
 			  AND n.node_uid NOT IN (
-				SELECT e.target_node_uid FROM edges e WHERE e.snapshot_uid = ?
+				SELECT e.target_node_uid FROM edges e
+				WHERE e.snapshot_uid = ?
+				  AND e.type IN ('IMPORTS', 'CALLS', 'IMPLEMENTS', 'INSTANTIATES',
+				                 'ROUTES_TO', 'REGISTERED_BY', 'TESTED_BY', 'COVERS')
 			  )
 			  ${kindFilter}
 			  AND n.stable_key NOT IN (
