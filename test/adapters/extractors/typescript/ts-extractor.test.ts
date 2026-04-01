@@ -232,15 +232,64 @@ describe("index.ts extraction", () => {
 // ── Stable key format ──────────────────────────────────────────────────
 
 describe("stable key format", () => {
-	it("produces symbol stable keys in canonical format", async () => {
+	it("produces symbol stable keys in canonical format (includes subtype)", async () => {
 		const result = await extractFile("types.ts");
 		const iface = result.nodes.find((n) => n.name === "User");
-		expect(iface?.stableKey).toBe(`${REPO_UID}:src/types.ts#User:SYMBOL`);
+		expect(iface?.stableKey).toBe(
+			`${REPO_UID}:src/types.ts#User:SYMBOL:INTERFACE`,
+		);
 	});
 
 	it("produces FILE stable keys in canonical format", async () => {
 		const result = await extractFile("types.ts");
 		const fileNode = result.nodes.find((n) => n.kind === NodeKind.FILE);
 		expect(fileNode?.stableKey).toBe(`${REPO_UID}:src/types.ts:FILE`);
+	});
+});
+
+// ── Dual export regression (stable key v2) ────────────────────────────
+
+describe("dual export: const + type with same name", () => {
+	let result: ExtractionResult;
+
+	beforeAll(async () => {
+		result = await extractFile("dual-export.ts");
+	});
+
+	it("extracts both the const and the type alias as separate nodes", () => {
+		const statusNodes = result.nodes.filter((n) => n.name === "Status");
+		expect(statusNodes.length).toBe(2);
+
+		const subtypes = statusNodes.map((n) => n.subtype).sort();
+		expect(subtypes).toEqual([NodeSubtype.CONSTANT, NodeSubtype.TYPE_ALIAS]);
+	});
+
+	it("assigns distinct stable_keys to const and type with same name", () => {
+		const statusNodes = result.nodes.filter((n) => n.name === "Status");
+		const keys = statusNodes.map((n) => n.stableKey).sort();
+		expect(keys.length).toBe(2);
+		expect(keys[0]).not.toBe(keys[1]);
+
+		expect(keys).toContain(
+			`${REPO_UID}:src/dual-export.ts#Status:SYMBOL:CONSTANT`,
+		);
+		expect(keys).toContain(
+			`${REPO_UID}:src/dual-export.ts#Status:SYMBOL:TYPE_ALIAS`,
+		);
+	});
+
+	it("handles multiple companion-type pairs in the same file", () => {
+		const priorityNodes = result.nodes.filter((n) => n.name === "Priority");
+		expect(priorityNodes.length).toBe(2);
+
+		const keys = priorityNodes.map((n) => n.stableKey).sort();
+		expect(keys[0]).not.toBe(keys[1]);
+	});
+
+	it("marks both exports as EXPORT visibility", () => {
+		const statusNodes = result.nodes.filter((n) => n.name === "Status");
+		for (const node of statusNodes) {
+			expect(node.visibility).toBe(Visibility.EXPORT);
+		}
 	});
 });

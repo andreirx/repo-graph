@@ -66,7 +66,14 @@ function makeNode(
 	fileUid: string,
 	overrides?: Partial<GraphNode>,
 ): GraphNode {
-	const stableKey = `${repoUid}:${fileUid.split(":")[1] ?? "unknown"}#${name}:SYMBOL`;
+	// Stable key v2: includes subtype for SYMBOL nodes.
+	// If overrides supply a subtype, use it in the key; default is FUNCTION.
+	// If overrides supply a non-SYMBOL kind (e.g. MODULE), the subtype
+	// suffix may be semantically wrong but won't collide — these test nodes
+	// are not looked up by stable_key in cycle/module tests.
+	const subtype = overrides?.subtype ?? NodeSubtype.FUNCTION;
+	const subtypeSuffix = subtype ? `:${subtype}` : "";
+	const stableKey = `${repoUid}:${fileUid.split(":")[1] ?? "unknown"}#${name}:SYMBOL${subtypeSuffix}`;
 	return {
 		nodeUid: randomUUID(),
 		snapshotUid,

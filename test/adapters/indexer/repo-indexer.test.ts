@@ -4,12 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { TypeScriptExtractor } from "../../../src/adapters/extractors/typescript/ts-extractor.js";
-import { RepoIndexer } from "../../../src/adapters/indexer/repo-indexer.js";
+import {
+	filterByEdgeAffinity,
+	RepoIndexer,
+} from "../../../src/adapters/indexer/repo-indexer.js";
 import { SqliteStorage } from "../../../src/adapters/storage/sqlite/sqlite-storage.js";
+import type { GraphNode } from "../../../src/core/model/index.js";
 import {
 	EdgeType,
 	NodeKind,
 	NodeSubtype,
+	Visibility,
 } from "../../../src/core/model/index.js";
 
 const FIXTURES_ROOT = join(
@@ -60,7 +65,7 @@ describe("indexRepo", () => {
 		const result = await indexer.indexRepo(REPO_UID);
 
 		expect(result.snapshotUid).toBeTruthy();
-		expect(result.filesTotal).toBe(4); // types.ts, repository.ts, service.ts, index.ts
+		expect(result.filesTotal).toBe(5); // types.ts, repository.ts, service.ts, index.ts, dual-export.ts
 		expect(result.nodesTotal).toBeGreaterThan(0);
 		expect(result.edgesTotal).toBeGreaterThan(0);
 		expect(result.durationMs).toBeGreaterThan(0);
@@ -106,7 +111,7 @@ describe("indexRepo", () => {
 
 		const userService = storage.getNodeByStableKey(
 			result.snapshotUid,
-			`${REPO_UID}:src/service.ts#UserService:SYMBOL`,
+			`${REPO_UID}:src/service.ts#UserService:SYMBOL:CLASS`,
 		);
 		expect(userService).not.toBeNull();
 		expect(userService?.kind).toBe(NodeKind.SYMBOL);
@@ -151,13 +156,13 @@ describe("indexRepo", () => {
 		// It's unambiguous (only one function named generateId)
 		const generateId = storage.getNodeByStableKey(
 			result.snapshotUid,
-			`${REPO_UID}:src/service.ts#generateId:SYMBOL`,
+			`${REPO_UID}:src/service.ts#generateId:SYMBOL:FUNCTION`,
 		);
 		expect(generateId).not.toBeNull();
 
 		const callers = storage.findCallers({
 			snapshotUid: result.snapshotUid,
-			stableKey: `${REPO_UID}:src/service.ts#generateId:SYMBOL`,
+			stableKey: `${REPO_UID}:src/service.ts#generateId:SYMBOL:FUNCTION`,
 			edgeTypes: [EdgeType.CALLS],
 		});
 
@@ -179,7 +184,7 @@ describe("indexRepo", () => {
 
 		const snapshot = storage.getSnapshot(result.snapshotUid);
 		expect(snapshot?.status).toBe("ready");
-		expect(snapshot?.filesTotal).toBe(4);
+		expect(snapshot?.filesTotal).toBe(5);
 		expect(snapshot?.nodesTotal).toBeGreaterThan(0);
 		expect(snapshot?.edgesTotal).toBeGreaterThan(0);
 	});
@@ -202,7 +207,7 @@ describe("indexRepo", () => {
 			exclude: ["src/repository.ts"],
 		});
 
-		expect(result.filesTotal).toBe(3);
+		expect(result.filesTotal).toBe(4);
 	});
 
 	it("excludes specified patterns by glob", async () => {
@@ -211,13 +216,13 @@ describe("indexRepo", () => {
 		});
 
 		// src/repository.ts matches src/repo*
-		expect(result.filesTotal).toBe(3);
+		expect(result.filesTotal).toBe(4);
 	});
 
 	it("creates OWNS edges from MODULE to FILE nodes", async () => {
 		const result = await indexer.indexRepo(REPO_UID);
 
-		// src module should own the 4 files
+		// src module should own the 5 files
 		const srcModule = storage.getNodeByStableKey(
 			result.snapshotUid,
 			`${REPO_UID}:src:MODULE`,
@@ -231,7 +236,7 @@ describe("indexRepo", () => {
 			edgeTypes: [EdgeType.OWNS],
 		});
 
-		expect(owned.length).toBe(4);
+		expect(owned.length).toBe(5);
 	});
 
 	it("creates module-to-module IMPORTS edges", async () => {
@@ -258,10 +263,10 @@ describe("indexRepo", () => {
 
 	it("refreshRepo creates a refresh snapshot with parent link", async () => {
 		const initial = await indexer.indexRepo(REPO_UID);
-		expect(initial.filesTotal).toBe(4);
+		expect(initial.filesTotal).toBe(5);
 
 		const refresh = await indexer.refreshRepo(REPO_UID);
-		expect(refresh.filesTotal).toBe(4);
+		expect(refresh.filesTotal).toBe(5);
 		expect(refresh.nodesTotal).toBeGreaterThan(0);
 
 		// Verify it's a REFRESH snapshot with parent
@@ -310,7 +315,7 @@ describe("scanner hygiene", () => {
 		// the test verifies that the scanner doesn't crash and
 		// only returns .ts/.tsx/.js/.jsx files from src/
 		const result = await indexer.indexRepo(REPO_UID);
-		expect(result.filesTotal).toBe(4);
+		expect(result.filesTotal).toBe(5);
 	});
 
 	it("excludes patterns via glob matching", async () => {
@@ -318,7 +323,7 @@ describe("scanner hygiene", () => {
 			exclude: ["src/repo*"],
 		});
 		// src/repository.ts should be excluded
-		expect(result.filesTotal).toBe(3);
+		expect(result.filesTotal).toBe(4);
 	});
 
 	it("excludes patterns via wildcard extension matching", async () => {
@@ -326,6 +331,106 @@ describe("scanner hygiene", () => {
 			exclude: ["*.test.ts"],
 		});
 		// No test files in the fixture, so count should be same
-		expect(result.filesTotal).toBe(4);
+		expect(result.filesTotal).toBe(5);
+	});
+});
+
+// ── Edge affinity disambiguation (stable key v2 regression) ───────────
+
+describe("filterByEdgeAffinity", () => {
+	function fakeNode(subtype: NodeSubtype | null, name = "Foo"): GraphNode {
+		return {
+			nodeUid: randomUUID(),
+			snapshotUid: "s",
+			repoUid: "r",
+			stableKey: `r:f.ts#${name}:SYMBOL:${subtype}`,
+			kind: NodeKind.SYMBOL,
+			subtype,
+			name,
+			qualifiedName: name,
+			fileUid: "r:f.ts",
+			parentNodeUid: null,
+			location: { lineStart: 1, colStart: 0, lineEnd: 10, colEnd: 0 },
+			signature: null,
+			visibility: Visibility.EXPORT,
+			docComment: null,
+			metadataJson: null,
+		};
+	}
+
+	it("INSTANTIATES prefers CLASS over TYPE_ALIAS companion", () => {
+		const cls = fakeNode(NodeSubtype.CLASS);
+		const typeAlias = fakeNode(NodeSubtype.TYPE_ALIAS);
+		const result = filterByEdgeAffinity(
+			[cls, typeAlias],
+			EdgeType.INSTANTIATES,
+		);
+		expect(result).toEqual([cls]);
+	});
+
+	it("INSTANTIATES prefers CLASS over INTERFACE companion", () => {
+		const cls = fakeNode(NodeSubtype.CLASS);
+		const iface = fakeNode(NodeSubtype.INTERFACE);
+		const result = filterByEdgeAffinity([cls, iface], EdgeType.INSTANTIATES);
+		expect(result).toEqual([cls]);
+	});
+
+	it("IMPLEMENTS prefers INTERFACE over CLASS companion", () => {
+		const cls = fakeNode(NodeSubtype.CLASS);
+		const iface = fakeNode(NodeSubtype.INTERFACE);
+		const result = filterByEdgeAffinity([cls, iface], EdgeType.IMPLEMENTS);
+		expect(result).toEqual([iface]);
+	});
+
+	it("CALLS filters out type-only subtypes", () => {
+		const fn = fakeNode(NodeSubtype.CONSTANT);
+		const typeAlias = fakeNode(NodeSubtype.TYPE_ALIAS);
+		const result = filterByEdgeAffinity([fn, typeAlias], EdgeType.CALLS);
+		expect(result).toEqual([fn]);
+	});
+
+	it("CALLS keeps all value-space candidates (may still be ambiguous)", () => {
+		const fn1 = fakeNode(NodeSubtype.FUNCTION, "doStuff");
+		const fn2 = fakeNode(NodeSubtype.METHOD, "doStuff");
+		const result = filterByEdgeAffinity([fn1, fn2], EdgeType.CALLS);
+		expect(result.length).toBe(2); // still ambiguous, but type-correct
+	});
+
+	it("returns empty when no candidate matches the required declaration space", () => {
+		// INSTANTIATES but no CLASS candidate — must not resolve
+		const iface = fakeNode(NodeSubtype.INTERFACE);
+		const typeAlias = fakeNode(NodeSubtype.TYPE_ALIAS);
+		const result = filterByEdgeAffinity(
+			[iface, typeAlias],
+			EdgeType.INSTANTIATES,
+		);
+		expect(result.length).toBe(0);
+	});
+
+	it("rejects a lone type-only candidate for INSTANTIATES", () => {
+		// export interface Foo {}; new Foo() — must NOT resolve
+		const iface = fakeNode(NodeSubtype.INTERFACE);
+		const result = filterByEdgeAffinity([iface], EdgeType.INSTANTIATES);
+		expect(result.length).toBe(0);
+	});
+
+	it("rejects a lone type-only candidate for CALLS", () => {
+		// export type X = ...; X() — must NOT resolve
+		const typeAlias = fakeNode(NodeSubtype.TYPE_ALIAS);
+		const result = filterByEdgeAffinity([typeAlias], EdgeType.CALLS);
+		expect(result.length).toBe(0);
+	});
+
+	it("accepts a lone value-space candidate for CALLS", () => {
+		const fn = fakeNode(NodeSubtype.FUNCTION);
+		const result = filterByEdgeAffinity([fn], EdgeType.CALLS);
+		expect(result.length).toBe(1);
+	});
+
+	it("passes through unfiltered for IMPORTS edge type", () => {
+		const a = fakeNode(NodeSubtype.CLASS);
+		const b = fakeNode(NodeSubtype.INTERFACE);
+		const result = filterByEdgeAffinity([a, b], EdgeType.IMPORTS);
+		expect(result.length).toBe(2);
 	});
 });

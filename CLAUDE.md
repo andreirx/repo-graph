@@ -67,3 +67,34 @@ See `docs/architecture/project-structure.txt` for the full folder layout and dep
 - All CLI output supports `--json`. Default is human-readable tables.
 - Tests use fixture codebases in `test/fixtures/` with known-good expected graphs.
 - No emojis in code or output.
+
+## Eat Your Own Dogfood For Codebase Intelligence (rgr)
+
+Use `rgr` (Repo-Graph) for structural analysis. If rgr is available on PATH:
+
+```bash
+rgr repo add .                           # Register this repo
+rgr repo index repo-graph                     # Full index (~400 files, <1s)
+rgr graph cycles repo-graph                   # Module-level dependency cycles
+rgr graph dead repo-graph --kind SYMBOL       # Unreferenced exported symbols
+rgr graph callers repo-graph <symbol>         # Who calls this?
+rgr graph callers repo-graph <symbol> --edge-types CALLS,INSTANTIATES  # Who uses this?
+rgr graph path repo-graph <from> <to>         # Shortest path between two symbols
+```
+
+Use `/investigate-symbol repo-graph <SymbolName>` for a guided investigation workflow. Use `/repo-overview .` for a full structural health check.
+
+rgr uses syntax-only resolution (no type info). Import graphs are accurate. Call graphs are conservative — `this.method()` and `obj.method()` calls may not resolve. When callee results look incomplete, read the source directly.
+
+When you find architectural breadcrumbs, comments, or docs in the repo:
+- Do not copy them into repo-graph blindly.
+- First verify them against current code.
+- If the claim is still true and operationally useful, store the distilled fact in rgr as a declaration.
+- Prefer short, canonical facts over prose.
+- Treat rgr as the system of record for verified architectural facts, with source files/docs serving as evidence.
+- If a breadcrumb conflicts with code, trust code and report the drift.
+
+HOWEVER - Only store a fact in rgr if it would help a future agent make a better design/debugging decision without rereading the same code.
+Store surprises, constraints, hazards, and architectural intent.
+Don’t store summaries of obvious code.
+

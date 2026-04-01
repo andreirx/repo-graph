@@ -28,12 +28,47 @@ Every entity has a TEXT primary key that is globally unique and portable.
   inference_uid   — generated UUID
   artifact_uid    — generated UUID
 
-The stable_key on nodes is the human-readable cross-system identity:
-  "billing-service:src/payments/RetryGuard.ts#PaymentService.retry"
-
+The stable_key on nodes is the human-readable cross-system identity.
 The node_uid is the database-internal join key. The stable_key is the
 portable identity used in exchange formats, cross-repo references, and
 CLI output.
+
+Stable key format (v2, as of ts-core:0.2.0):
+
+  FILE nodes:    "<repo_uid>:<relative-path>:FILE"
+  MODULE nodes:  "<repo_uid>:<directory-path>:MODULE"
+  SYMBOL nodes:  "<repo_uid>:<relative-path>#<qualified_name>:SYMBOL:<subtype>"
+
+  Examples:
+    "billing-service:src/payments/RetryGuard.ts:FILE"
+    "billing-service:src/payments:MODULE"
+    "billing-service:src/payments/RetryGuard.ts#PaymentService.retry:SYMBOL:METHOD"
+    "billing-service:src/payments/types.ts#PaymentStatus:SYMBOL:CONSTANT"
+    "billing-service:src/payments/types.ts#PaymentStatus:SYMBOL:TYPE_ALIAS"
+
+  The subtype suffix disambiguates TypeScript's value/type namespace
+  overlap, where a const and a type alias can legally share the same
+  name in the same file.
+
+Stable key v1 (ts-core:0.1.0, retired):
+
+  SYMBOL nodes used "<repo_uid>:<path>#<name>:SYMBOL" without subtype.
+  This caused UNIQUE constraint violations on files with companion-type
+  patterns (e.g., `export const X = {} as const; export type X = ...`).
+  v1 stable_keys are not compatible with v2. Reindex to upgrade.
+
+  KNOWN DEBT: Symbol-targeting declarations (entrypoint, invariant)
+  store the stable_key verbatim in target_stable_key. After the v1→v2
+  format change, existing declarations referencing v1 keys will not
+  match any node post-reindex. Module and boundary declarations are
+  unaffected (they use :MODULE keys). Remediation options:
+    a) Warn on reindex if orphaned declarations are detected.
+    b) Add a `declare migrate` command that rewrites target_stable_key
+       values to the current format using fuzzy matching.
+    c) Accept data loss in v1 (no production deployments exist yet)
+       and document the requirement to re-declare after reindex.
+  Current status: option (c) applies. Options (a) and (b) should be
+  implemented before any deployment where declarations carry real value.
 
 
 ================================================================================

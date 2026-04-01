@@ -108,11 +108,17 @@ export function registerRepoCommands(
 							edges_total: result.edgesTotal,
 							edges_unresolved: result.edgesUnresolved,
 							unresolved_breakdown: result.unresolvedBreakdown,
+							orphaned_declarations: result.orphanedDeclarations,
 							duration_ms: result.durationMs,
 						}),
 					);
 				} else {
 					console.log(formatIndexResult(result));
+					if (result.orphanedDeclarations > 0) {
+						console.error(
+							`Warning: ${result.orphanedDeclarations} active declaration(s) reference symbol keys that no longer match any node. Run "rgr declare list <repo>" to review.`,
+						);
+					}
 				}
 			},
 		);
@@ -183,11 +189,17 @@ export function registerRepoCommands(
 						edges_total: result.edgesTotal,
 						edges_unresolved: result.edgesUnresolved,
 						unresolved_breakdown: result.unresolvedBreakdown,
+						orphaned_declarations: result.orphanedDeclarations,
 						duration_ms: result.durationMs,
 					}),
 				);
 			} else {
 				console.log(formatIndexResult(result));
+				if (result.orphanedDeclarations > 0) {
+					console.error(
+						`Warning: ${result.orphanedDeclarations} active declaration(s) reference symbol keys that no longer match any node. Run "rgr declare list <repo>" to review.`,
+					);
+				}
 			}
 		});
 

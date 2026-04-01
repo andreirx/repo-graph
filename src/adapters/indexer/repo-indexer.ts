@@ -11,6 +11,7 @@ import type {
 	TrackedFile,
 } from "../../core/model/index.js";
 import {
+	DeclarationKind,
 	EdgeType,
 	NodeKind,
 	NodeSubtype,
@@ -250,6 +251,12 @@ export class RepoIndexer implements IndexerPort {
 
 			emit({ phase: "persisting", current: 1, total: 1 });
 
+			// 11. Check for orphaned symbol declarations
+			const orphanedDeclarations = this.countOrphanedDeclarations(
+				repoUid,
+				snapshot.snapshotUid,
+			);
+
 			return {
 				snapshotUid: snapshot.snapshotUid,
 				filesTotal: filePaths.length,
@@ -258,6 +265,7 @@ export class RepoIndexer implements IndexerPort {
 				edgesUnresolved: unresolvedCount,
 				unresolvedBreakdown,
 				durationMs: Date.now() - startTime,
+				orphanedDeclarations,
 			};
 		} catch (err) {
 			// Mark snapshot as failed
@@ -591,10 +599,11 @@ export class RepoIndexer implements IndexerPort {
 					nodesByName,
 				);
 			case EdgeType.INSTANTIATES:
+				return this.resolveNamedTarget(edge.targetKey, nodesByName, edge.type);
 			case EdgeType.IMPLEMENTS:
-				return this.resolveNamedTarget(edge.targetKey, nodesByName);
+				return this.resolveNamedTarget(edge.targetKey, nodesByName, edge.type);
 			default:
-				return this.resolveNamedTarget(edge.targetKey, nodesByName);
+				return this.resolveNamedTarget(edge.targetKey, nodesByName, edge.type);
 		}
 	}
 
@@ -633,45 +642,105 @@ export class RepoIndexer implements IndexerPort {
 			// on the class that owns the calling method
 			if (parts[0] === "this" && parts.length >= 3) {
 				// "this.repo.findById" — try matching "*.findById" across all classes
-				const candidates = nodesByName.get(methodName);
-				if (candidates && candidates.length === 1) {
-					return candidates[0].nodeUid;
-				}
+				const resolved = this.pickUnambiguous(
+					nodesByName.get(methodName),
+					EdgeType.CALLS,
+				);
+				if (resolved) return resolved;
 				// If ambiguous (multiple methods with the same name across classes),
 				// we cannot disambiguate without type information — leave unresolved.
 				// Future: use the property name (parts[1], e.g. "repo") to narrow
 				// by matching the field type to a class that defines the method.
-				if (candidates && candidates.length > 1) {
-					return null;
-				}
 			}
 
 			// For "obj.method()" where obj is not "this", try method name
-			const candidates = nodesByName.get(methodName);
-			if (candidates && candidates.length === 1) {
-				return candidates[0].nodeUid;
-			}
+			const resolved = this.pickUnambiguous(
+				nodesByName.get(methodName),
+				EdgeType.CALLS,
+			);
+			if (resolved) return resolved;
 		}
 
 		// Simple function call: "generateId" → look for a function/method with that name
-		const candidates = nodesByName.get(targetKey);
-		if (candidates && candidates.length === 1) {
-			return candidates[0].nodeUid;
-		}
-
-		return null;
+		return this.pickUnambiguous(nodesByName.get(targetKey), EdgeType.CALLS);
 	}
 
 	private resolveNamedTarget(
 		targetKey: string,
 		nodesByName: Map<string, GraphNode[]>,
+		edgeType: EdgeType,
 	): string | null {
-		const candidates = nodesByName.get(targetKey);
-		if (candidates && candidates.length === 1) {
-			return candidates[0].nodeUid;
+		return this.pickUnambiguous(nodesByName.get(targetKey), edgeType);
+	}
+
+	// ── Orphaned declaration detection ─────────────────────────────────
+
+	/**
+	 * Count active symbol-targeting declarations whose target_stable_key
+	 * does not match any node in the given snapshot.
+	 *
+	 * Only checks entrypoint and invariant declarations, which reference
+	 * symbol stable_keys. Module and boundary declarations use :MODULE
+	 * keys and are not affected by symbol identity changes.
+	 */
+	private countOrphanedDeclarations(
+		repoUid: string,
+		snapshotUid: string,
+	): number {
+		const symbolDeclarationKinds = [
+			DeclarationKind.ENTRYPOINT,
+			DeclarationKind.INVARIANT,
+		];
+
+		let orphaned = 0;
+		for (const kind of symbolDeclarationKinds) {
+			const decls = this.storage.getActiveDeclarations({ repoUid, kind });
+			for (const decl of decls) {
+				const node = this.storage.getNodeByStableKey(
+					snapshotUid,
+					decl.targetStableKey,
+				);
+				if (!node) {
+					orphaned++;
+				}
+			}
 		}
-		// If multiple candidates with the same name, cannot disambiguate
-		// without type information — leave unresolved
+		return orphaned;
+	}
+
+	// ── Disambiguation ────────────────────────────────────────────────
+
+	/**
+	 * Given a list of candidate nodes sharing the same name, return the
+	 * node_uid of the unique match, or null if ambiguous/missing.
+	 *
+	 * When multiple candidates exist (e.g. a CLASS and a companion
+	 * TYPE_ALIAS both named "Foo"), the edge type determines which
+	 * declaration space to prefer:
+	 *
+	 *   INSTANTIATES → CLASS  (you can only `new` a class)
+	 *   IMPLEMENTS   → INTERFACE  (you implement interfaces)
+	 *   CALLS        → value-space symbols (not TYPE_ALIAS or INTERFACE)
+	 *
+	 * This is not a heuristic — TypeScript's declaration spaces are
+	 * well-defined. A `new Foo()` structurally cannot target a type alias.
+	 */
+	private pickUnambiguous(
+		candidates: GraphNode[] | undefined,
+		edgeType: EdgeType,
+	): string | null {
+		if (!candidates || candidates.length === 0) return null;
+
+		// Always apply affinity filtering first, even for singletons.
+		// A lone interface node must not satisfy an INSTANTIATES edge —
+		// `new Foo()` cannot target an interface. Declaration-space
+		// correctness takes priority over the singleton fast path.
+		const filtered = filterByEdgeAffinity(candidates, edgeType);
+		if (filtered.length === 1) return filtered[0].nodeUid;
+
+		// Zero after filtering: the only candidates were in the wrong
+		// declaration space (e.g. interface-only for INSTANTIATES).
+		// More than one: genuinely ambiguous even within the correct space.
 		return null;
 	}
 }
@@ -789,6 +858,59 @@ async function loadGitignore(rootPath: string): Promise<Ignore> {
 		ig.add(content);
 	}
 	return ig;
+}
+
+/**
+ * TypeScript type-only subtypes: exist only at compile time.
+ * These can never be the runtime target of CALLS or INSTANTIATES.
+ */
+export const TYPE_ONLY_SUBTYPES: ReadonlySet<string | null> = new Set([
+	NodeSubtype.TYPE_ALIAS,
+	NodeSubtype.INTERFACE,
+]);
+
+/**
+ * When the resolver finds multiple nodes sharing the same name,
+ * use the edge type to pick the correct declaration space.
+ *
+ * TypeScript legally allows the same identifier in both value and
+ * type namespaces (e.g. `export const Foo = {}; export type Foo = ...`).
+ * The edge type tells us which namespace the reference lives in:
+ *
+ *   INSTANTIATES → must be a CLASS (runtime `new`)
+ *   IMPLEMENTS   → must be an INTERFACE
+ *   CALLS        → must be a value-space symbol (not type-only)
+ *
+ * Returns the filtered subset. If filtering empties the list,
+ * returns the original candidates so the caller can still apply
+ * its length === 1 check.
+ */
+export function filterByEdgeAffinity(
+	candidates: GraphNode[],
+	edgeType: EdgeType,
+): GraphNode[] {
+	let filtered: GraphNode[];
+
+	switch (edgeType) {
+		case EdgeType.INSTANTIATES:
+			filtered = candidates.filter((n) => n.subtype === NodeSubtype.CLASS);
+			break;
+		case EdgeType.IMPLEMENTS:
+			filtered = candidates.filter((n) => n.subtype === NodeSubtype.INTERFACE);
+			break;
+		case EdgeType.CALLS:
+			filtered = candidates.filter((n) => !TYPE_ONLY_SUBTYPES.has(n.subtype));
+			break;
+		default:
+			return candidates;
+	}
+
+	// If filtering removed everything, return the empty list.
+	// This is correct: if the only candidate for INSTANTIATES is an
+	// interface, the edge genuinely cannot resolve. Falling back to
+	// the unfiltered list would create a false positive (a runtime
+	// edge pointing at a type-only declaration).
+	return filtered;
 }
 
 /**

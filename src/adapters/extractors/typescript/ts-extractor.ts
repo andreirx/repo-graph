@@ -17,7 +17,7 @@ import type {
 	UnresolvedEdge,
 } from "../../../core/ports/extractor.js";
 
-const EXTRACTOR_NAME = "ts-core:0.1.0";
+const EXTRACTOR_NAME = "ts-core:0.2.0";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GRAMMARS_DIR = join(__dirname, "..", "..", "..", "..", "grammars");
 
@@ -357,7 +357,7 @@ export class TypeScriptExtractor implements ExtractorPort {
 			nodeUid: uuidv4(),
 			snapshotUid: ctx.snapshotUid,
 			repoUid: ctx.repoUid,
-			stableKey: `${ctx.repoUid}:${ctx.filePath}#${qualifiedName}:SYMBOL`,
+			stableKey: `${ctx.repoUid}:${ctx.filePath}#${qualifiedName}:SYMBOL:${subtype}`,
 			kind: NodeKind.SYMBOL,
 			subtype,
 			name,
@@ -393,7 +393,7 @@ export class TypeScriptExtractor implements ExtractorPort {
 			nodeUid: uuidv4(),
 			snapshotUid: ctx.snapshotUid,
 			repoUid: ctx.repoUid,
-			stableKey: `${ctx.repoUid}:${ctx.filePath}#${qualifiedName}:SYMBOL`,
+			stableKey: `${ctx.repoUid}:${ctx.filePath}#${qualifiedName}:SYMBOL:${NodeSubtype.PROPERTY}`,
 			kind: NodeKind.SYMBOL,
 			subtype: NodeSubtype.PROPERTY,
 			name,
@@ -640,7 +640,7 @@ export class TypeScriptExtractor implements ExtractorPort {
 			nodeUid: uuidv4(),
 			snapshotUid: ctx.snapshotUid,
 			repoUid: ctx.repoUid,
-			stableKey: `${ctx.repoUid}:${ctx.filePath}#${name}:SYMBOL`,
+			stableKey: `${ctx.repoUid}:${ctx.filePath}#${name}:SYMBOL:${subtype}`,
 			kind: NodeKind.SYMBOL,
 			subtype,
 			name,

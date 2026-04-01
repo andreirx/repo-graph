@@ -41,6 +41,12 @@ export interface IndexResult {
 	/** Breakdown of unresolved edges by diagnostic category. */
 	unresolvedBreakdown: Record<string, number>;
 	durationMs: number;
+	/**
+	 * Number of active symbol-targeting declarations (entrypoint, invariant)
+	 * whose target_stable_key does not match any node in the new snapshot.
+	 * Non-zero indicates stale declarations from a prior stable_key format.
+	 */
+	orphanedDeclarations: number;
 }
 
 export interface IndexProgressEvent {
