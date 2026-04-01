@@ -111,8 +111,17 @@ const requiredFieldValidators: Record<
 	DeclarationKind,
 	(obj: Record<string, unknown>) => void
 > = {
-	[DeclarationKind.MODULE]: () => {
-		// All fields optional
+	[DeclarationKind.MODULE]: (obj) => {
+		// All fields optional, but maturity is constrained when present
+		if (obj.maturity !== undefined) {
+			const valid = ["PROTOTYPE", "MATURE", "PRODUCTION"];
+			if (!valid.includes(obj.maturity as string)) {
+				throw new DeclarationValidationError(
+					"module",
+					`maturity must be one of: ${valid.join(", ")}`,
+				);
+			}
+		}
 	},
 	[DeclarationKind.BOUNDARY]: (obj) => {
 		requireString(obj, "forbids", "boundary");
@@ -134,6 +143,15 @@ const requiredFieldValidators: Record<
 	},
 	[DeclarationKind.INVARIANT]: (obj) => {
 		requireString(obj, "text", "invariant");
+		if (obj.severity !== undefined) {
+			const valid = ["critical", "high", "medium", "low"];
+			if (!valid.includes(obj.severity as string)) {
+				throw new DeclarationValidationError(
+					"invariant",
+					`severity must be one of: ${valid.join(", ")}`,
+				);
+			}
+		}
 	},
 	[DeclarationKind.OWNER]: (obj) => {
 		requireString(obj, "team", "owner");

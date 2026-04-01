@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "Deterministic code graph tool for analyzing legacy codebases",
   "type": "module",
+  "bin": {
+    "rgr": "./dist/cli/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",

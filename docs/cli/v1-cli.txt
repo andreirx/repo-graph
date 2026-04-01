@@ -68,16 +68,20 @@ tool repo status <repo>
 
 tool repo refresh <repo>
 
-  Incremental re-index. Only re-parses files changed since the last snapshot.
-  Removes old facts for changed files, re-extracts, re-links.
-  Does NOT eagerly recompute derived views — marks them stale.
+  Re-index the repository and create a new refresh snapshot linked to the
+  previous one. In v1 this performs a full re-extraction (same as index) but
+  records the result as a refresh snapshot with a parent link, enabling
+  snapshot comparison in future versions.
+
+  True incremental refresh (only re-parsing changed files based on content
+  hash comparison) is deferred to v2.
 
   Example:
     tool repo refresh payments
 
   Output:
-    snapshot_id (new), files_changed, files_added, files_deleted,
-    symbols_added, symbols_removed, edges_added, edges_removed, duration_ms
+    snapshot_uid, files_total, nodes_total, edges_total,
+    edges_unresolved, duration_ms
 
 
 ================================================================================
@@ -261,7 +265,10 @@ tool declare remove <repo> <declaration-id>
 RESPONSE CONTRACT
 ================================================================================
 
-Every --json response follows this shape:
+Every graph query --json response follows this envelope.
+Repo management and declare commands return operation-specific JSON
+structures (not wrapped in this envelope) because they are CRUD
+operations, not result-set queries.
 
 {
   "command": "graph callers",
@@ -295,7 +302,10 @@ Fields:
   basis_commit    — git commit the snapshot was taken from
   results         — array of result objects
   count           — number of results
-  stale           — true if files have changed since the snapshot
+  stale           — true if files have changed since the snapshot.
+                     In v1 this is always false because refresh does full
+                     re-extraction. The field will activate in v2 when
+                     file watching or incremental diff marks files stale.
 
 
 ================================================================================
