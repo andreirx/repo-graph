@@ -94,6 +94,69 @@ describe("types.ts extraction", () => {
 		const iface = result.nodes.find((n) => n.name === "User");
 		expect(iface?.docComment).toBe("/** A user in the system. */");
 	});
+
+	// ── Interface member extraction ────────────────────────────────────
+
+	it("extracts interface property members as child nodes", () => {
+		const properties = result.nodes.filter(
+			(n) =>
+				n.subtype === NodeSubtype.PROPERTY &&
+				n.parentNodeUid !== null &&
+				n.qualifiedName?.startsWith("User."),
+		);
+		const names = properties.map((n) => n.name).sort();
+		expect(names).toEqual(["email", "id", "name"]);
+	});
+
+	it("extracts interface method members as child nodes", () => {
+		const method = result.nodes.find(
+			(n) =>
+				n.subtype === NodeSubtype.METHOD &&
+				n.qualifiedName === "User.getDisplayName",
+		);
+		expect(method).toBeDefined();
+		expect(method?.kind).toBe(NodeKind.SYMBOL);
+		expect(method?.visibility).toBe(Visibility.PUBLIC);
+		expect(method?.signature).toBe("getDisplayName()");
+	});
+
+	it("sets parent_node_uid to the interface node for members", () => {
+		const iface = result.nodes.find(
+			(n) => n.name === "User" && n.subtype === NodeSubtype.INTERFACE,
+		);
+		const members = result.nodes.filter(
+			(n) => n.parentNodeUid === iface?.nodeUid,
+		);
+		expect(members.length).toBe(4); // id, name, email, getDisplayName
+	});
+
+	it("generates stable keys with qualified names for interface members", () => {
+		const method = result.nodes.find(
+			(n) => n.qualifiedName === "User.getDisplayName",
+		);
+		expect(method?.stableKey).toBe(
+			`${REPO_UID}:src/types.ts#User.getDisplayName:SYMBOL:METHOD`,
+		);
+	});
+
+	// ── Interface overload merging ─────────────────────────────────────
+
+	it("merges overloaded interface methods into one node", () => {
+		const formatNodes = result.nodes.filter(
+			(n) => n.qualifiedName === "Formatter.format",
+		);
+		// Three overload signatures, but only one node
+		expect(formatNodes.length).toBe(1);
+		expect(formatNodes[0].subtype).toBe(NodeSubtype.METHOD);
+	});
+
+	it("keeps the first overload's signature", () => {
+		const formatNode = result.nodes.find(
+			(n) => n.qualifiedName === "Formatter.format",
+		);
+		// First overload: format(value: string): string
+		expect(formatNode?.signature).toBe("format(value: string)");
+	});
 });
 
 // ── repository.ts ──────────────────────────────────────────────────────
@@ -167,10 +230,22 @@ describe("service.ts extraction", () => {
 		const calleeNames = calls.map(
 			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
 		);
-		expect(calleeNames).toContain("this.repo.findById");
-		expect(calleeNames).toContain("this.repo.save");
-		expect(calleeNames).toContain("this.repo.updateRole");
+		// Receiver type binding: this.repo -> UserRepository (from constructor param)
+		expect(calleeNames).toContain("UserRepository.findById");
+		expect(calleeNames).toContain("UserRepository.save");
+		expect(calleeNames).toContain("UserRepository.updateRole");
 		expect(calleeNames).toContain("generateId");
+	});
+
+	it("preserves raw call name in metadata when binding resolves", () => {
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const findByIdEdge = calls.find((e) => {
+			const meta = JSON.parse(e.metadataJson ?? "{}");
+			return meta.calleeName === "UserRepository.findById";
+		});
+		expect(findByIdEdge).toBeDefined();
+		const meta = JSON.parse(findByIdEdge?.metadataJson ?? "{}");
+		expect(meta.rawCalleeName).toBe("this.repo.findById");
 	});
 
 	it("extracts class methods with qualified names", () => {
@@ -244,6 +319,43 @@ describe("stable key format", () => {
 		const result = await extractFile("types.ts");
 		const fileNode = result.nodes.find((n) => n.kind === NodeKind.FILE);
 		expect(fileNode?.stableKey).toBe(`${REPO_UID}:src/types.ts:FILE`);
+	});
+});
+
+// ── Receiver binding scope regression ──────────────────────────────────
+
+describe("receiver binding respects parameter shadowing", () => {
+	it("does not rewrite calls when a parameter shadows a file-scope binding", async () => {
+		const source = `
+const repo: RepoA = new RepoA();
+
+function topLevel() {
+	repo.save(); // should resolve to RepoA.save
+}
+
+function shadowed(repo: RepoB) {
+	repo.save(); // should NOT resolve to RepoA.save — param shadows
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/shadow-test.ts",
+			`${REPO_UID}:src/shadow-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+
+		// topLevel's call should be rewritten via file-scope binding
+		expect(calleeNames).toContain("RepoA.save");
+		// shadowed's call should NOT be rewritten (parameter shadows the binding)
+		expect(calleeNames).toContain("repo.save");
+		// There should NOT be two RepoA.save entries
+		expect(calleeNames.filter((n) => n === "RepoA.save").length).toBe(1);
 	});
 });
 

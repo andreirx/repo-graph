@@ -100,6 +100,8 @@ export class TypeScriptExtractor implements ExtractorPort {
 			nodes,
 			edges,
 			exportedNames: new Set<string>(),
+			fileScopeBindings: new Map<string, string>(),
+			classBindings: null,
 		};
 
 		// First pass: walk all top-level declarations to extract symbols
@@ -280,10 +282,12 @@ export class TypeScriptExtractor implements ExtractorPort {
 		);
 		ctx.nodes.push(graphNode);
 
-		// Extract calls within the function body
+		// Extract calls within the function body.
+		// Collect parameter names to prevent false file-scope binding rewrites.
 		const body = node.childForFieldName("body");
 		if (body) {
-			this.extractCallsFromNode(body, ctx, graphNode.nodeUid);
+			const shadows = this.collectParameterNames(params);
+			this.extractCallsFromNode(body, ctx, graphNode.nodeUid, shadows);
 		}
 	}
 
@@ -314,9 +318,12 @@ export class TypeScriptExtractor implements ExtractorPort {
 			this.extractImplements(heritage, classNode.nodeUid, ctx);
 		}
 
-		// Extract methods
 		const body = node.childForFieldName("body");
 		if (!body) return;
+
+		// Build class-scope type bindings before walking methods.
+		// These let call extraction resolve this.property.method() chains.
+		ctx.classBindings = this.buildClassBindings(body);
 
 		for (const member of body.children) {
 			if (member.type === "method_definition") {
@@ -325,6 +332,9 @@ export class TypeScriptExtractor implements ExtractorPort {
 				this.extractProperty(member, classNode, ctx);
 			}
 		}
+
+		// Clear class-scope bindings
+		ctx.classBindings = null;
 	}
 
 	private extractMethod(
@@ -372,10 +382,12 @@ export class TypeScriptExtractor implements ExtractorPort {
 		};
 		ctx.nodes.push(methodNode);
 
-		// Extract calls within the method body
+		// Extract calls within the method body.
+		// Collect parameter names to prevent false file-scope binding rewrites.
 		const body = node.childForFieldName("body");
 		if (body) {
-			this.extractCallsFromNode(body, ctx, methodNode.nodeUid);
+			const shadows = this.collectParameterNames(params);
+			this.extractCallsFromNode(body, ctx, methodNode.nodeUid, shadows);
 		}
 	}
 
@@ -406,6 +418,80 @@ export class TypeScriptExtractor implements ExtractorPort {
 			docComment: null,
 			metadataJson: null,
 		});
+	}
+
+	/**
+	 * Build a type binding map for class-scope receivers.
+	 * Maps property name → type name from:
+	 *   1. Field declarations with type annotations: `private storage: StoragePort`
+	 *   2. Constructor parameter properties: `constructor(private extractor: ExtractorPort)`
+	 *
+	 * Only captures simple type identifiers (not union types, generics, etc.).
+	 * This is syntax-only: the type name is taken from the annotation, not resolved.
+	 */
+	private buildClassBindings(classBody: SyntaxNode): Map<string, string> {
+		const bindings = new Map<string, string>();
+
+		for (const member of classBody.children) {
+			// 1. Field declarations: `private storage: StoragePort;`
+			if (member.type === "public_field_definition") {
+				const name = member.childForFieldName("name");
+				const typeName = this.extractSimpleTypeName(member);
+				if (name && typeName) {
+					bindings.set(name.text, typeName);
+				}
+			}
+
+			// 2. Constructor parameter properties:
+			//    `constructor(private storage: StoragePort)`
+			if (member.type === "method_definition") {
+				const methodName = member.childForFieldName("name");
+				if (methodName?.text !== "constructor") continue;
+
+				const params = member.childForFieldName("parameters");
+				if (!params) continue;
+
+				for (const param of params.children) {
+					if (param.type !== "required_parameter") continue;
+
+					// Only parameter properties (those with accessibility modifiers
+					// like private/protected/public/readonly) become this.X bindings
+					const hasAccessibility = param.children.some(
+						(c: SyntaxNode) =>
+							c.type === "accessibility_modifier" || c.type === "readonly",
+					);
+					if (!hasAccessibility) continue;
+
+					const paramName = param.childForFieldName("pattern");
+					const typeName = this.extractSimpleTypeName(param);
+					if (paramName && typeName) {
+						bindings.set(paramName.text, typeName);
+					}
+				}
+			}
+		}
+
+		return bindings;
+	}
+
+	/**
+	 * Extract a simple type name from a node's type annotation.
+	 * Returns the text of a `type_identifier` if the annotation is a plain
+	 * type reference (e.g. `StoragePort`). Returns null for complex types
+	 * (unions, intersections, generics, predefined types like `string`).
+	 */
+	private extractSimpleTypeName(node: SyntaxNode): string | null {
+		const typeAnn = node.childForFieldName("type");
+		if (!typeAnn) return null;
+
+		// type_annotation contains ": TypeName"
+		// Look for a direct type_identifier child
+		for (const child of typeAnn.children) {
+			if (child.type === "type_identifier") {
+				return child.text;
+			}
+		}
+		return null;
 	}
 
 	private extractImplements(
@@ -449,16 +535,111 @@ export class TypeScriptExtractor implements ExtractorPort {
 		const nameNode = node.childForFieldName("name");
 		if (!nameNode) return;
 
-		ctx.nodes.push(
-			this.makeSymbolNode(
-				nameNode.text,
-				NodeSubtype.INTERFACE,
-				exported ? Visibility.EXPORT : Visibility.PRIVATE,
-				null,
-				node,
-				ctx,
-			),
+		const interfaceNode = this.makeSymbolNode(
+			nameNode.text,
+			NodeSubtype.INTERFACE,
+			exported ? Visibility.EXPORT : Visibility.PRIVATE,
+			null,
+			node,
+			ctx,
 		);
+		ctx.nodes.push(interfaceNode);
+
+		// Extract interface members: method signatures and property signatures.
+		// Skipped: index_signature, call_signature — structural typing features,
+		// not named members that appear in call graphs.
+		//
+		// Overloaded methods (multiple signatures with the same name) are
+		// merged into one node. From a call graph perspective, overloads are
+		// one method — callers write `api.foo(x)`, not a specific overload.
+		// The first signature is kept; subsequent overloads are skipped.
+		const body = this.findChildByType(node, "interface_body");
+		if (!body) return;
+
+		const seenMembers = new Set<string>();
+		for (const member of body.children) {
+			if (member.type === "method_signature") {
+				const nameNode = member.childForFieldName("name");
+				if (!nameNode) continue;
+				const key = `${nameNode.text}:method`;
+				if (seenMembers.has(key)) continue; // skip overload
+				seenMembers.add(key);
+				this.extractInterfaceMethod(member, interfaceNode, ctx);
+			} else if (member.type === "property_signature") {
+				this.extractInterfaceProperty(member, interfaceNode, ctx);
+			}
+		}
+	}
+
+	private extractInterfaceMethod(
+		node: SyntaxNode,
+		parentInterfaceNode: GraphNode,
+		ctx: ExtractionContext,
+	): void {
+		const nameNode = node.childForFieldName("name");
+		if (!nameNode) return;
+		const name = nameNode.text;
+		const qualifiedName = `${parentInterfaceNode.name}.${name}`;
+
+		let subtype: NodeSubtype = NodeSubtype.METHOD;
+
+		// Check for getter/setter (interfaces can declare get/set signatures)
+		const getterSetter = node.children.find(
+			(c: SyntaxNode) => c.type === "get" || c.type === "set",
+		);
+		if (getterSetter?.type === "get") subtype = NodeSubtype.GETTER;
+		if (getterSetter?.type === "set") subtype = NodeSubtype.SETTER;
+
+		const params = node.childForFieldName("parameters");
+		const sig = params ? `${name}${params.text}` : name;
+
+		ctx.nodes.push({
+			nodeUid: uuidv4(),
+			snapshotUid: ctx.snapshotUid,
+			repoUid: ctx.repoUid,
+			stableKey: `${ctx.repoUid}:${ctx.filePath}#${qualifiedName}:SYMBOL:${subtype}`,
+			kind: NodeKind.SYMBOL,
+			subtype,
+			name,
+			qualifiedName,
+			fileUid: ctx.fileUid,
+			parentNodeUid: parentInterfaceNode.nodeUid,
+			location: locationFromNode(node),
+			signature: sig,
+			visibility: Visibility.PUBLIC,
+			docComment: this.extractDocComment(node),
+			metadataJson: null,
+		});
+		// No call extraction — interface methods have no bodies.
+	}
+
+	private extractInterfaceProperty(
+		node: SyntaxNode,
+		parentInterfaceNode: GraphNode,
+		ctx: ExtractionContext,
+	): void {
+		const nameNode = node.childForFieldName("name");
+		if (!nameNode) return;
+		const name = nameNode.text;
+		const qualifiedName = `${parentInterfaceNode.name}.${name}`;
+
+		ctx.nodes.push({
+			nodeUid: uuidv4(),
+			snapshotUid: ctx.snapshotUid,
+			repoUid: ctx.repoUid,
+			stableKey: `${ctx.repoUid}:${ctx.filePath}#${qualifiedName}:SYMBOL:${NodeSubtype.PROPERTY}`,
+			kind: NodeKind.SYMBOL,
+			subtype: NodeSubtype.PROPERTY,
+			name,
+			qualifiedName,
+			fileUid: ctx.fileUid,
+			parentNodeUid: parentInterfaceNode.nodeUid,
+			location: locationFromNode(node),
+			signature: null,
+			visibility: Visibility.PUBLIC,
+			docComment: null,
+			metadataJson: null,
+		});
 	}
 
 	// ── Type alias extraction ────────────────────────────────────────────
@@ -547,6 +728,20 @@ export class TypeScriptExtractor implements ExtractorPort {
 				);
 				ctx.nodes.push(graphNode);
 
+				// Build file-scope type binding for this variable.
+				// Priority: explicit type annotation > new ClassName() initializer.
+				if (!isFunctionLike) {
+					const typeName = this.extractSimpleTypeName(child);
+					if (typeName) {
+						ctx.fileScopeBindings.set(name, typeName);
+					} else if (value?.type === "new_expression") {
+						const ctor = value.childForFieldName("constructor");
+						if (ctor) {
+							ctx.fileScopeBindings.set(name, ctor.text);
+						}
+					}
+				}
+
 				// Extract calls from the initializer
 				if (value) {
 					this.extractCallsFromNode(value, ctx, graphNode.nodeUid);
@@ -568,23 +763,36 @@ export class TypeScriptExtractor implements ExtractorPort {
 		node: SyntaxNode,
 		ctx: ExtractionContext,
 		callerNodeUid: string,
+		shadowedNames?: ReadonlySet<string>,
 	): void {
 		if (node.type === "call_expression") {
 			const fnNode = node.childForFieldName("function");
 			if (fnNode) {
-				const calleeName = this.getCallTargetName(fnNode);
-				if (calleeName && !this.isBuiltinCall(calleeName)) {
+				const rawCalleeName = this.getCallTargetName(fnNode);
+				if (rawCalleeName && !this.isBuiltinCall(rawCalleeName)) {
+					// Apply receiver type bindings to produce a typed target key.
+					// Preserves the raw name in metadata for diagnostics.
+					const calleeName = this.resolveReceiverType(
+						rawCalleeName,
+						ctx,
+						shadowedNames,
+					);
 					ctx.edges.push({
 						edgeUid: uuidv4(),
 						snapshotUid: ctx.snapshotUid,
 						repoUid: ctx.repoUid,
 						sourceNodeUid: callerNodeUid,
-						targetKey: calleeName, // resolved by indexer
+						targetKey: calleeName, // may be typed (e.g. "StoragePort.insertNodes")
 						type: EdgeType.CALLS,
 						resolution: Resolution.STATIC,
 						extractor: EXTRACTOR_NAME,
 						location: locationFromNode(node),
-						metadataJson: JSON.stringify({ calleeName }),
+						metadataJson: JSON.stringify({
+							calleeName,
+							...(calleeName !== rawCalleeName && {
+								rawCalleeName,
+							}),
+						}),
 					});
 				}
 			}
@@ -622,8 +830,29 @@ export class TypeScriptExtractor implements ExtractorPort {
 			) {
 				continue;
 			}
-			this.extractCallsFromNode(child, ctx, callerNodeUid);
+			this.extractCallsFromNode(child, ctx, callerNodeUid, shadowedNames);
 		}
+	}
+
+	/**
+	 * Collect parameter names from a formal_parameters node.
+	 * These names shadow file-scope bindings within the function body.
+	 */
+	private collectParameterNames(paramsNode: SyntaxNode | null): Set<string> {
+		const names = new Set<string>();
+		if (!paramsNode) return names;
+		for (const param of paramsNode.children) {
+			if (
+				param.type === "required_parameter" ||
+				param.type === "optional_parameter"
+			) {
+				const pattern = param.childForFieldName("pattern");
+				if (pattern) {
+					names.add(pattern.text);
+				}
+			}
+		}
+		return names;
 	}
 
 	// ── Helpers ──────────────────────────────────────────────────────────
@@ -671,6 +900,59 @@ export class TypeScriptExtractor implements ExtractorPort {
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * Apply receiver type bindings to a raw call target name.
+	 *
+	 * Handles three patterns:
+	 *   "this.storage.insertNodes" → class binding for "storage" → "StoragePort.insertNodes"
+	 *   "this.doStuff"            → no binding (direct this.method, no property chain)
+	 *   "repo.save"               → file-scope binding for "repo" → "UserRepository.save"
+	 *   "generateId"              → no receiver, returned as-is
+	 *
+	 * Returns the original name unchanged if no binding is found.
+	 */
+	private resolveReceiverType(
+		rawName: string,
+		ctx: ExtractionContext,
+		shadowedNames?: ReadonlySet<string>,
+	): string {
+		if (!rawName.includes(".")) return rawName;
+
+		const parts = rawName.split(".");
+		const method = parts[parts.length - 1];
+
+		// Pattern 1: this.property.method() — look up property in class bindings.
+		// Class bindings are never shadowed (they're on `this`, not local vars).
+		if (parts[0] === "this" && parts.length >= 3 && ctx.classBindings) {
+			const propertyName = parts[1];
+			const typeName = ctx.classBindings.get(propertyName);
+			if (typeName) {
+				return `${typeName}.${method}`;
+			}
+		}
+
+		// Pattern 2: this.method() — 2 parts, no property chain.
+		// Leave as-is; the resolver handles this via name matching.
+		if (parts[0] === "this" && parts.length === 2) {
+			return rawName;
+		}
+
+		// Pattern 3: variable.method() — look up variable in file-scope bindings.
+		// Skip if the variable name is shadowed by a parameter in the current scope.
+		if (parts.length === 2) {
+			const varName = parts[0];
+			if (shadowedNames?.has(varName)) {
+				return rawName; // shadowed — don't rewrite
+			}
+			const typeName = ctx.fileScopeBindings.get(varName);
+			if (typeName) {
+				return `${typeName}.${method}`;
+			}
+		}
+
+		return rawName;
 	}
 
 	private isBuiltinCall(name: string): boolean {
@@ -807,6 +1089,24 @@ interface ExtractionContext {
 	edges: UnresolvedEdge[];
 	/** Collected from `export { x, y }` lists — applied in a second pass. */
 	exportedNames: Set<string>;
+
+	// ── Receiver type bindings (v1.5) ─────────────────────────────────
+	// These enable the extractor to emit typed target keys for member
+	// calls (e.g. "StoragePort.insertNodes" instead of "this.storage.insertNodes").
+
+	/**
+	 * File-scope bindings: variable name → type name.
+	 * Built from `const x: Type = ...` and `const x = new Type()`.
+	 * Accumulated as top-level declarations are walked.
+	 */
+	fileScopeBindings: Map<string, string>;
+
+	/**
+	 * Class-scope bindings: property name → type name.
+	 * Built from class field type annotations and constructor parameter
+	 * properties. Set per-class during extractClass, null outside classes.
+	 */
+	classBindings: Map<string, string> | null;
 }
 
 // ── Utility ────────────────────────────────────────────────────────────
