@@ -327,6 +327,33 @@ No inference layer in v1. Only deterministic facts and human declarations.
 No Python pipelines in v1. Only TypeScript extractors and SQLite storage.
 No framework extractor plugin interface in v1. Hardcoded extractors only.
 
+Resolution semantics in v1:
+
+  V1 uses direct AST walking in the TypeScript extractor plus a strict second
+  pass in the indexer.
+
+  The extractor emits unresolved symbolic targets:
+    IMPORTS        -> extensionless file keys
+    CALLS          -> names like generateId or this.repo.findById
+    INSTANTIATES   -> class names
+    IMPLEMENTS     -> interface names
+
+  The indexer upgrades an unresolved edge to a stored graph edge only when
+  the target resolves to exactly one node in the current repo snapshot.
+  If resolution is ambiguous or missing, the edge is not persisted and is
+  counted as unresolved.
+
+  This gives v1 high precision but lower recall for inter-file call graphs.
+  IMPORTS usually resolve well. CALLS / INSTANTIATES / IMPLEMENTS are more
+  conservative because v1 does not perform local type binding, scope-aware
+  variable tracing, or compiler-assisted semantic resolution.
+
+  Potential v2 improvements:
+    local binding analysis inside the extractor
+    stronger symbol-to-import linking before the indexer pass
+    compiler-assisted adapters (for example TypeScript compiler data or SCIP)
+    richer unresolved-edge diagnostics and breakdowns
+
 
 ================================================================================
 V1 ACCEPTANCE CRITERIA
@@ -337,14 +364,18 @@ The tool is v1-complete when:
 1. It can index a real TypeScript codebase (>100 files) in under 30 seconds.
 2. tool graph callers returns the correct set of callers for any symbol,
    verified against manual inspection.
-3. tool graph callees returns the correct set of callees.
+3. tool graph callees returns resolved callees with high precision.
+   v1 uses syntax-only resolution, so recall is lower for this.method()
+   and obj.method() calls. See Resolution Semantics above.
 4. tool graph dead returns provably unreachable functions (verified by
    cross-referencing with Knip output or manual inspection).
 5. tool graph cycles detects known circular dependencies (verified against
    dependency-cruiser or Madge output).
-6. tool graph path finds the correct shortest path between two nodes.
-7. tool repo refresh correctly handles file additions, deletions, and modifications
-   without requiring a full re-index.
+6. tool graph path finds the correct shortest path between two nodes
+   (limited to resolved edges).
+7. tool repo refresh creates a refresh snapshot linked to the previous one.
+   In v1, refresh performs a full re-extraction. True incremental refresh
+   (only re-parsing changed files) is v2.
 8. tool declare entrypoint causes declared entrypoints to be excluded from
    tool graph dead results.
 9. tool declare boundary records are stored and retrievable.

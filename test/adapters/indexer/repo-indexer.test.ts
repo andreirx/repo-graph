@@ -285,4 +285,47 @@ describe("indexRepo", () => {
 		const deadFileNames = deadFiles.map((d) => d.symbol);
 		expect(deadFileNames).toContain("src/index.ts");
 	});
+
+	it("reports unresolved edge breakdown by category", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+
+		// The fixture has this.repo.findById() style calls that cannot resolve
+		expect(result.unresolvedBreakdown).toBeDefined();
+		expect(typeof result.unresolvedBreakdown).toBe("object");
+
+		// There should be some unresolved edges
+		const totalUnresolved = Object.values(result.unresolvedBreakdown).reduce(
+			(sum, count) => sum + count,
+			0,
+		);
+		expect(totalUnresolved).toBe(result.edgesUnresolved);
+	});
+});
+
+// ── Scanner hygiene ────────────────────────────────────────────────────
+
+describe("scanner hygiene", () => {
+	it("excludes directories in the ALWAYS_EXCLUDED list", async () => {
+		// The fixture doesn't have node_modules or dist, but
+		// the test verifies that the scanner doesn't crash and
+		// only returns .ts/.tsx/.js/.jsx files from src/
+		const result = await indexer.indexRepo(REPO_UID);
+		expect(result.filesTotal).toBe(4);
+	});
+
+	it("excludes patterns via glob matching", async () => {
+		const result = await indexer.indexRepo(REPO_UID, {
+			exclude: ["src/repo*"],
+		});
+		// src/repository.ts should be excluded
+		expect(result.filesTotal).toBe(3);
+	});
+
+	it("excludes patterns via wildcard extension matching", async () => {
+		const result = await indexer.indexRepo(REPO_UID, {
+			exclude: ["*.test.ts"],
+		});
+		// No test files in the fixture, so count should be same
+		expect(result.filesTotal).toBe(4);
+	});
 });

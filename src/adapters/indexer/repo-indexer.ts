@@ -40,11 +40,18 @@ const ALWAYS_EXCLUDED = new Set([
 	".git",
 	"dist",
 	"build",
+	"out",
 	".next",
 	".nuxt",
 	"coverage",
 	".turbo",
 	".cache",
+	// Python virtualenvs (common in mixed JS/Python repos)
+	"venv",
+	".venv",
+	"__pycache__",
+	// CDK build output
+	"cdk.out",
 ]);
 
 export class RepoIndexer implements IndexerPort {
@@ -207,13 +214,14 @@ export class RepoIndexer implements IndexerPort {
 				total: allUnresolvedEdges.length,
 			});
 
-			const { resolved, unresolvedCount } = this.resolveEdges(
-				allUnresolvedEdges,
-				allNodes,
-				trackedFiles,
-				repoUid,
-				snapshot.snapshotUid,
-			);
+			const { resolved, unresolvedCount, unresolvedBreakdown } =
+				this.resolveEdges(
+					allUnresolvedEdges,
+					allNodes,
+					trackedFiles,
+					repoUid,
+					snapshot.snapshotUid,
+				);
 
 			emit({
 				phase: "resolving",
@@ -248,6 +256,7 @@ export class RepoIndexer implements IndexerPort {
 				nodesTotal: allNodes.length,
 				edgesTotal: allEdges.length,
 				edgesUnresolved: unresolvedCount,
+				unresolvedBreakdown,
 				durationMs: Date.now() - startTime,
 			};
 		} catch (err) {
@@ -321,6 +330,8 @@ export class RepoIndexer implements IndexerPort {
 				if (isExcluded(relPath, entry.name, excludePatterns)) continue;
 				// .gitignore uses trailing slash for directories
 				if (ig.ignores(`${relPath}/`)) continue;
+				// Skip Python virtualenvs (contain pyvenv.cfg at their root)
+				if (existsSync(join(fullPath, "pyvenv.cfg"))) continue;
 				await this.walkDir(fullPath, rootPath, files, excludePatterns, ig);
 			} else if (entry.isFile()) {
 				const ext = getExtension(entry.name);
@@ -478,7 +489,11 @@ export class RepoIndexer implements IndexerPort {
 		trackedFiles: TrackedFile[],
 		repoUid: string,
 		snapshotUid: string,
-	): { resolved: GraphEdge[]; unresolvedCount: number } {
+	): {
+		resolved: GraphEdge[];
+		unresolvedCount: number;
+		unresolvedBreakdown: Record<string, number>;
+	} {
 		// Build lookup maps
 		const nodesByStableKey = new Map<string, GraphNode>();
 		const nodesByName = new Map<string, GraphNode[]>();
@@ -520,6 +535,7 @@ export class RepoIndexer implements IndexerPort {
 
 		const resolved: GraphEdge[] = [];
 		let unresolvedCount = 0;
+		const unresolvedBreakdown: Record<string, number> = {};
 
 		for (const edge of unresolved) {
 			const targetNodeUid = this.resolveTarget(
@@ -544,10 +560,14 @@ export class RepoIndexer implements IndexerPort {
 				});
 			} else {
 				unresolvedCount++;
+				// Classify the unresolved edge for diagnostics
+				const category = classifyUnresolvedEdge(edge);
+				unresolvedBreakdown[category] =
+					(unresolvedBreakdown[category] ?? 0) + 1;
 			}
 		}
 
-		return { resolved, unresolvedCount };
+		return { resolved, unresolvedCount, unresolvedBreakdown };
 	}
 
 	private resolveTarget(
@@ -769,4 +789,45 @@ async function loadGitignore(rootPath: string): Promise<Ignore> {
 		ig.add(content);
 	}
 	return ig;
+}
+
+/**
+ * Classify an unresolved edge into a diagnostic category
+ * for the breakdown report.
+ */
+function classifyUnresolvedEdge(edge: UnresolvedEdge): string {
+	const key = edge.targetKey;
+	const type = edge.type;
+
+	if (type === EdgeType.IMPORTS) {
+		return "IMPORTS (file not found)";
+	}
+
+	if (type === EdgeType.INSTANTIATES) {
+		return "INSTANTIATES (class not found)";
+	}
+
+	if (type === EdgeType.IMPLEMENTS) {
+		return "IMPLEMENTS (interface not found)";
+	}
+
+	// CALLS breakdown
+	if (type === EdgeType.CALLS) {
+		if (key.startsWith("this.")) {
+			if (key.split(".").length > 2) {
+				// this.prop.method() — needs type resolution
+				return "CALLS this.*.method (needs type info)";
+			}
+			// this.method() — needs class context
+			return "CALLS this.method (needs class context)";
+		}
+		if (key.includes(".")) {
+			// obj.method() — needs variable type
+			return "CALLS obj.method (needs type info)";
+		}
+		// plain function call — ambiguous or not imported
+		return "CALLS function (ambiguous or missing)";
+	}
+
+	return `${type} (other)`;
 }

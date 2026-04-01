@@ -107,6 +107,7 @@ export function registerRepoCommands(
 							nodes_total: result.nodesTotal,
 							edges_total: result.edgesTotal,
 							edges_unresolved: result.edgesUnresolved,
+							unresolved_breakdown: result.unresolvedBreakdown,
 							duration_ms: result.durationMs,
 						}),
 					);
@@ -181,6 +182,7 @@ export function registerRepoCommands(
 						nodes_total: result.nodesTotal,
 						edges_total: result.edgesTotal,
 						edges_unresolved: result.edgesUnresolved,
+						unresolved_breakdown: result.unresolvedBreakdown,
 						duration_ms: result.durationMs,
 					}),
 				);

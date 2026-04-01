@@ -38,6 +38,8 @@ export interface IndexResult {
 	nodesTotal: number;
 	edgesTotal: number;
 	edgesUnresolved: number;
+	/** Breakdown of unresolved edges by diagnostic category. */
+	unresolvedBreakdown: Record<string, number>;
 	durationMs: number;
 }
 

@@ -49,13 +49,24 @@ export function formatRepoStatus(
 }
 
 export function formatIndexResult(result: IndexResult): string {
-	return [
+	const lines = [
 		`Indexed ${result.filesTotal} files in ${result.durationMs}ms`,
 		`  Nodes:      ${result.nodesTotal}`,
 		`  Edges:      ${result.edgesTotal}`,
 		`  Unresolved: ${result.edgesUnresolved}`,
-		`  Snapshot:   ${result.snapshotUid}`,
-	].join("\n");
+	];
+
+	// Show breakdown if there are unresolved edges
+	const entries = Object.entries(result.unresolvedBreakdown);
+	if (entries.length > 0) {
+		lines.push("  Unresolved breakdown:");
+		for (const [category, count] of entries.sort((a, b) => b[1] - a[1])) {
+			lines.push(`    ${String(count).padStart(5)}  ${category}`);
+		}
+	}
+
+	lines.push(`  Snapshot:   ${result.snapshotUid}`);
+	return lines.join("\n");
 }
 
 export function formatNodeResults(results: NodeResult[]): string {
