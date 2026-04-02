@@ -102,6 +102,7 @@ export class TypeScriptExtractor implements ExtractorPort {
 			exportedNames: new Set<string>(),
 			fileScopeBindings: new Map<string, string>(),
 			classBindings: null,
+			memberTypes: new Map<string, Map<string, string>>(),
 		};
 
 		// First pass: walk all top-level declarations to extract symbols
@@ -283,11 +284,25 @@ export class TypeScriptExtractor implements ExtractorPort {
 		ctx.nodes.push(graphNode);
 
 		// Extract calls within the function body.
-		// Collect parameter names to prevent false file-scope binding rewrites.
+		// Parameter bindings are the initial local scope.
+		// var names are hoisted into a SEPARATE function-level map as
+		// shadow-only entries; their typed bindings are installed at
+		// statement position by walkBlockSequentially.
+		// Keeping them separate prevents var shadows from contaminating
+		// block-local binding copies (which would make them indistinguishable
+		// from const/let TDZ shadows).
 		const body = node.childForFieldName("body");
 		if (body) {
-			const shadows = this.collectParameterNames(params);
-			this.extractCallsFromNode(body, ctx, graphNode.nodeUid, shadows);
+			const paramBindings = this.collectParameterBindings(params);
+			const varBindings = new Map<string, string | null>();
+			this.collectVarBindings(body, varBindings);
+			this.extractCallsFromNode(
+				body,
+				ctx,
+				graphNode.nodeUid,
+				paramBindings,
+				varBindings,
+			);
 		}
 	}
 
@@ -320,6 +335,9 @@ export class TypeScriptExtractor implements ExtractorPort {
 
 		const body = node.childForFieldName("body");
 		if (!body) return;
+
+		// Collect member type annotations for 3-part chain resolution.
+		this.collectMemberTypes(name, body, ctx);
 
 		// Build class-scope type bindings before walking methods.
 		// These let call extraction resolve this.property.method() chains.
@@ -383,11 +401,20 @@ export class TypeScriptExtractor implements ExtractorPort {
 		ctx.nodes.push(methodNode);
 
 		// Extract calls within the method body.
-		// Collect parameter names to prevent false file-scope binding rewrites.
+		// Same separation as extractFunction: paramBindings for local scope,
+		// varBindings for function-scoped var declarations.
 		const body = node.childForFieldName("body");
 		if (body) {
-			const shadows = this.collectParameterNames(params);
-			this.extractCallsFromNode(body, ctx, methodNode.nodeUid, shadows);
+			const paramBindings = this.collectParameterBindings(params);
+			const varBindings = new Map<string, string | null>();
+			this.collectVarBindings(body, varBindings);
+			this.extractCallsFromNode(
+				body,
+				ctx,
+				methodNode.nodeUid,
+				paramBindings,
+				varBindings,
+			);
 		}
 	}
 
@@ -494,6 +521,47 @@ export class TypeScriptExtractor implements ExtractorPort {
 		return null;
 	}
 
+	/**
+	 * Collect property type annotations from an interface body or class body
+	 * into the memberTypes map on the extraction context.
+	 *
+	 * For interfaces: scans property_signature nodes.
+	 * For classes: scans public_field_definition nodes.
+	 *
+	 * Only records simple type identifiers (not unions, generics, etc.).
+	 * Used for 3-part chain resolution: given `ctx: AppContext` and
+	 * `interface AppContext { storage: StoragePort }`, resolves
+	 * `ctx.storage.method()` to `StoragePort.method`.
+	 */
+	private collectMemberTypes(
+		typeName: string,
+		body: SyntaxNode,
+		ctx: ExtractionContext,
+	): void {
+		const members = new Map<string, string>();
+
+		for (const member of body.children) {
+			// Interface properties: property_signature
+			// Class fields: public_field_definition
+			if (
+				member.type !== "property_signature" &&
+				member.type !== "public_field_definition"
+			) {
+				continue;
+			}
+
+			const nameNode = member.childForFieldName("name");
+			const memberType = this.extractSimpleTypeName(member);
+			if (nameNode && memberType) {
+				members.set(nameNode.text, memberType);
+			}
+		}
+
+		if (members.size > 0) {
+			ctx.memberTypes.set(typeName, members);
+		}
+	}
+
 	private extractImplements(
 		heritage: SyntaxNode,
 		classNodeUid: string,
@@ -555,6 +623,11 @@ export class TypeScriptExtractor implements ExtractorPort {
 		// The first signature is kept; subsequent overloads are skipped.
 		const body = this.findChildByType(node, "interface_body");
 		if (!body) return;
+
+		// Collect member type annotations for 3-part chain resolution.
+		// e.g. interface AppContext { storage: StoragePort } →
+		// memberTypes["AppContext"]["storage"] = "StoragePort"
+		this.collectMemberTypes(nameNode.text, body, ctx);
 
 		const seenMembers = new Set<string>();
 		for (const member of body.children) {
@@ -759,30 +832,322 @@ export class TypeScriptExtractor implements ExtractorPort {
 		this.extractCallsFromNode(node, ctx, ctx.fileNodeUid);
 	}
 
+	/**
+	 * @param localBindings - Current scope's read-only binding map.
+	 * @param fnBindings - Mutable function-level binding map. var
+	 *   declarations at any nesting depth write their typed binding
+	 *   here when reached sequentially. Shared across all blocks in
+	 *   the same function.
+	 */
 	private extractCallsFromNode(
 		node: SyntaxNode,
 		ctx: ExtractionContext,
 		callerNodeUid: string,
-		shadowedNames?: ReadonlySet<string>,
+		localBindings?: ReadonlyMap<string, string | null>,
+		fnBindings?: Map<string, string | null>,
+	): void {
+		// Scope boundary: statement_block → sequential walk with TDZ.
+		if (node.type === "statement_block") {
+			this.walkBlockSequentially(
+				node,
+				ctx,
+				callerNodeUid,
+				localBindings,
+				fnBindings,
+			);
+			return;
+		}
+
+		// Scope boundary: for/for-in/for-of loops introduce a scope that
+		// covers the initializer, condition, update, and body.
+		if (node.type === "for_statement" || node.type === "for_in_statement") {
+			this.walkLoopWithHeaderScope(
+				node,
+				ctx,
+				callerNodeUid,
+				localBindings,
+				fnBindings,
+			);
+			return;
+		}
+
+		this.extractCallsFromSingleNode(
+			node,
+			ctx,
+			callerNodeUid,
+			localBindings,
+			fnBindings,
+		);
+
+		// Recurse into children (for non-block nodes)
+		for (const child of node.children) {
+			if (this.isNewScopeNode(child)) continue;
+			this.extractCallsFromNode(
+				child,
+				ctx,
+				callerNodeUid,
+				localBindings,
+				fnBindings,
+			);
+		}
+	}
+
+	/**
+	 * Handle for/for-in/for-of loops by extracting header bindings
+	 * and passing them into all loop parts (condition, update, body).
+	 *
+	 * Loop initializer bindings:
+	 *   for (const x = new Foo(); ...) → x binds to Foo (loop scope)
+	 *   for (const x of items)         → x shadows outer (no type, null)
+	 *   for (var x = new Foo(); ...)   → x typed binding at statement position,
+	 *                                    also written to fnBindings (function-scoped)
+	 */
+	private walkLoopWithHeaderScope(
+		node: SyntaxNode,
+		ctx: ExtractionContext,
+		callerNodeUid: string,
+		parentBindings?: ReadonlyMap<string, string | null>,
+		fnBindings?: Map<string, string | null>,
+	): void {
+		const loopBindings = new Map<string, string | null>(parentBindings ?? []);
+
+		if (node.type === "for_statement") {
+			// for_statement: initializer is a lexical_declaration or variable_declaration.
+			//
+			// Ordering for correctness:
+			//   1. Install shadow-only entries (TDZ for const/let, hoisted for var)
+			//      so the initializer can't see the outer binding.
+			//   2. Extract calls from the initializer with the shadow in place.
+			//   3. Upgrade the shadow to a typed binding for condition/update/body.
+			const initializer = node.childForFieldName("initializer");
+			if (initializer) {
+				// Step 1: shadow the names before extracting initializer calls
+				this.prescanDeclarationNames(initializer, loopBindings);
+				// Step 2: extract calls from the initializer
+				this.extractCallsFromNode(
+					initializer,
+					ctx,
+					callerNodeUid,
+					loopBindings,
+					fnBindings,
+				);
+				// Step 3: install typed bindings for use in condition/update/body
+				if (initializer.type === "lexical_declaration") {
+					this.accumulateDeclarationBindings(initializer, loopBindings);
+				} else if (initializer.type === "variable_declaration") {
+					this.accumulateDeclarationBindings(initializer, loopBindings);
+					if (fnBindings) {
+						this.accumulateDeclarationBindings(initializer, fnBindings);
+					}
+				}
+			}
+
+			// Extract calls from condition and update expressions
+			for (const child of node.children) {
+				const fieldName = this.getFieldName(node, child);
+				if (fieldName === "condition" || fieldName === "increment") {
+					this.extractCallsFromNode(
+						child,
+						ctx,
+						callerNodeUid,
+						loopBindings,
+						fnBindings,
+					);
+				}
+			}
+		} else if (node.type === "for_in_statement") {
+			// for_in_statement: loop variable is the "left" field
+			const left = node.childForFieldName("left");
+			if (left?.type === "identifier") {
+				// Shadow-only: for (const item of items) — no type info available
+				loopBindings.set(left.text, null);
+			}
+
+			// Extract calls from the iterable expression (right side)
+			const right = node.childForFieldName("right");
+			if (right) {
+				this.extractCallsFromNode(
+					right,
+					ctx,
+					callerNodeUid,
+					loopBindings,
+					fnBindings,
+				);
+			}
+		}
+
+		// Process the loop body with the loop-scoped bindings
+		const body = node.childForFieldName("body");
+		if (body) {
+			this.extractCallsFromNode(
+				body,
+				ctx,
+				callerNodeUid,
+				loopBindings,
+				fnBindings,
+			);
+		}
+	}
+
+	/**
+	 * Get the field name for a child node within its parent.
+	 * Returns null if the child is not a named field.
+	 */
+	private getFieldName(parent: SyntaxNode, child: SyntaxNode): string | null {
+		for (let i = 0; i < parent.childCount; i++) {
+			if (parent.child(i)?.id === child.id) {
+				return parent.fieldNameForChild(i);
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Walk a statement_block's children in source order, accumulating
+	 * bindings as declarations are encountered.
+	 *
+	 * Scope semantics modeled:
+	 *
+	 *   const/let (TDZ): Names shadow from the START of the block
+	 *   (pre-scanned as null entries), but the typed binding is only
+	 *   installed when the sequential walk reaches the declaration.
+	 *   References before the declaration see null → no rewrite.
+	 *
+	 *   var (hoisted): Names are hoisted to function scope as shadow-only
+	 *   entries by collectVarBindings(). The typed binding is installed
+	 *   here when the sequential walk reaches the var declaration.
+	 *
+	 * Principle: shadow early, bind late.
+	 */
+	private walkBlockSequentially(
+		block: SyntaxNode,
+		ctx: ExtractionContext,
+		callerNodeUid: string,
+		parentBindings?: ReadonlyMap<string, string | null>,
+		fnBindings?: Map<string, string | null>,
+	): void {
+		const blockBindings = new Map<string, string | null>(parentBindings ?? []);
+
+		// TDZ pre-scan: install shadow-only entries for all const/let
+		// declarations in this block. This prevents earlier references
+		// from resolving to an outer binding when an inner declaration
+		// exists (temporal dead zone).
+		this.prescanLexicalNames(block, blockBindings);
+
+		for (const child of block.children) {
+			if (this.isNewScopeNode(child)) continue;
+
+			// const/let: extract calls from the initializer FIRST (the
+			// binding is not yet usable inside its own initializer), then
+			// upgrade the shadow entry to a typed binding for subsequent
+			// statements.
+			if (child.type === "lexical_declaration") {
+				this.extractCallsFromNode(
+					child,
+					ctx,
+					callerNodeUid,
+					blockBindings,
+					fnBindings,
+				);
+				this.accumulateDeclarationBindings(child, blockBindings);
+				continue;
+			}
+
+			// var: same ordering — extract calls from initializer first,
+			// then install typed binding in both block and function maps.
+			if (child.type === "variable_declaration") {
+				this.extractCallsFromNode(
+					child,
+					ctx,
+					callerNodeUid,
+					blockBindings,
+					fnBindings,
+				);
+				this.accumulateDeclarationBindings(child, blockBindings);
+				if (fnBindings) {
+					this.accumulateDeclarationBindings(child, fnBindings);
+				}
+				continue;
+			}
+
+			this.extractCallsFromNode(
+				child,
+				ctx,
+				callerNodeUid,
+				blockBindings,
+				fnBindings,
+			);
+		}
+	}
+
+	/**
+	 * Pre-scan a block for const/let declaration names and install
+	 * shadow-only (null) entries. This models the temporal dead zone:
+	 * the name is "taken" from the start of the block, but the typed
+	 * binding isn't available until the declaration statement.
+	 */
+	private prescanLexicalNames(
+		block: SyntaxNode,
+		bindings: Map<string, string | null>,
+	): void {
+		for (const child of block.children) {
+			if (child.type !== "lexical_declaration") continue;
+			for (const decl of child.children) {
+				if (decl.type !== "variable_declarator") continue;
+				const nameNode = decl.childForFieldName("name");
+				if (nameNode) {
+					bindings.set(nameNode.text, null);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Install shadow-only (null) entries for all variable names in a
+	 * declaration node (lexical_declaration or variable_declaration).
+	 * Used to prevent initializer self-references from resolving.
+	 */
+	private prescanDeclarationNames(
+		declNode: SyntaxNode,
+		bindings: Map<string, string | null>,
+	): void {
+		for (const decl of declNode.children) {
+			if (decl.type !== "variable_declarator") continue;
+			const nameNode = decl.childForFieldName("name");
+			if (nameNode) {
+				bindings.set(nameNode.text, null);
+			}
+		}
+	}
+
+	/**
+	 * Extract calls and new-expressions from a single AST node
+	 * (without recursing into children).
+	 */
+	private extractCallsFromSingleNode(
+		node: SyntaxNode,
+		ctx: ExtractionContext,
+		callerNodeUid: string,
+		localBindings?: ReadonlyMap<string, string | null>,
+		fnBindings?: ReadonlyMap<string, string | null>,
 	): void {
 		if (node.type === "call_expression") {
 			const fnNode = node.childForFieldName("function");
 			if (fnNode) {
 				const rawCalleeName = this.getCallTargetName(fnNode);
 				if (rawCalleeName && !this.isBuiltinCall(rawCalleeName)) {
-					// Apply receiver type bindings to produce a typed target key.
-					// Preserves the raw name in metadata for diagnostics.
 					const calleeName = this.resolveReceiverType(
 						rawCalleeName,
 						ctx,
-						shadowedNames,
+						localBindings,
+						fnBindings,
 					);
 					ctx.edges.push({
 						edgeUid: uuidv4(),
 						snapshotUid: ctx.snapshotUid,
 						repoUid: ctx.repoUid,
 						sourceNodeUid: callerNodeUid,
-						targetKey: calleeName, // may be typed (e.g. "StoragePort.insertNodes")
+						targetKey: calleeName,
 						type: EdgeType.CALLS,
 						resolution: Resolution.STATIC,
 						extractor: EXTRACTOR_NAME,
@@ -807,7 +1172,7 @@ export class TypeScriptExtractor implements ExtractorPort {
 					snapshotUid: ctx.snapshotUid,
 					repoUid: ctx.repoUid,
 					sourceNodeUid: callerNodeUid,
-					targetKey: className, // resolved by indexer
+					targetKey: className,
 					type: EdgeType.INSTANTIATES,
 					resolution: Resolution.STATIC,
 					extractor: EXTRACTOR_NAME,
@@ -816,31 +1181,101 @@ export class TypeScriptExtractor implements ExtractorPort {
 				});
 			}
 		}
+	}
 
-		// Recurse into children
-		for (const child of node.children) {
-			// Don't recurse into nested function/class declarations — they
-			// get their own scope from visitTopLevel or extractMethod
-			if (
-				child.type === "function_declaration" ||
-				child.type === "class_declaration" ||
-				child.type === "arrow_function" ||
-				child.type === "function_expression" ||
-				child.type === "method_definition"
-			) {
+	/**
+	 * Add bindings from a lexical_declaration (const/let) to the
+	 * given mutable map. Called during sequential block walking.
+	 */
+	private accumulateDeclarationBindings(
+		declNode: SyntaxNode,
+		bindings: Map<string, string | null>,
+	): void {
+		for (const decl of declNode.children) {
+			if (decl.type !== "variable_declarator") continue;
+			const nameNode = decl.childForFieldName("name");
+			if (!nameNode) continue;
+
+			const typeName = this.extractSimpleTypeName(decl);
+			if (typeName) {
+				bindings.set(nameNode.text, typeName);
 				continue;
 			}
-			this.extractCallsFromNode(child, ctx, callerNodeUid, shadowedNames);
+
+			const value = decl.childForFieldName("value");
+			if (value?.type === "new_expression") {
+				const ctor = value.childForFieldName("constructor");
+				if (ctor) {
+					bindings.set(nameNode.text, ctor.text);
+					continue;
+				}
+			}
+
+			// Variable exists but has no resolvable type — shadow only
+			bindings.set(nameNode.text, null);
 		}
 	}
 
 	/**
-	 * Collect parameter names from a formal_parameters node.
-	 * These names shadow file-scope bindings within the function body.
+	 * Recursively collect all `var` declaration NAMES in a function body
+	 * and install them as shadow-only (null) entries.
+	 *
+	 * var is function-scoped in JS/TS: the name is hoisted to the
+	 * function scope, but the initializer runs at statement position.
+	 * Before the assignment, the variable is `undefined`, so we must
+	 * not resolve calls through it. The typed binding is installed
+	 * later by walkBlockSequentially when it reaches the var statement.
+	 *
+	 * Principle: shadow early, bind late.
 	 */
-	private collectParameterNames(paramsNode: SyntaxNode | null): Set<string> {
-		const names = new Set<string>();
-		if (!paramsNode) return names;
+	private collectVarBindings(
+		node: SyntaxNode,
+		bindings: Map<string, string | null>,
+	): void {
+		for (const child of node.children) {
+			// Don't descend into nested functions — var doesn't hoist across them
+			if (this.isNewScopeNode(child)) continue;
+
+			if (child.type === "variable_declaration") {
+				// Hoist names as shadow-only — the typed binding comes later
+				for (const decl of child.children) {
+					if (decl.type !== "variable_declarator") continue;
+					const nameNode = decl.childForFieldName("name");
+					if (nameNode) {
+						bindings.set(nameNode.text, null);
+					}
+				}
+			}
+
+			// Recurse into nested blocks, if/for/while bodies, etc.
+			this.collectVarBindings(child, bindings);
+		}
+	}
+
+	private isNewScopeNode(node: SyntaxNode): boolean {
+		return (
+			node.type === "function_declaration" ||
+			node.type === "class_declaration" ||
+			node.type === "arrow_function" ||
+			node.type === "function_expression" ||
+			node.type === "method_definition"
+		);
+	}
+
+	/**
+	 * Collect parameter bindings from a formal_parameters node.
+	 *
+	 * Returns a map of parameter name → type name (or null if no simple
+	 * type annotation). Entries with a type name enable receiver binding
+	 * (e.g. `storage: StoragePort` → `storage.insert()` becomes
+	 * `StoragePort.insert`). Entries with null shadow file-scope bindings
+	 * without providing a positive binding.
+	 */
+	private collectParameterBindings(
+		paramsNode: SyntaxNode | null,
+	): Map<string, string | null> {
+		const bindings = new Map<string, string | null>();
+		if (!paramsNode) return bindings;
 		for (const param of paramsNode.children) {
 			if (
 				param.type === "required_parameter" ||
@@ -848,11 +1283,12 @@ export class TypeScriptExtractor implements ExtractorPort {
 			) {
 				const pattern = param.childForFieldName("pattern");
 				if (pattern) {
-					names.add(pattern.text);
+					const typeName = this.extractSimpleTypeName(param);
+					bindings.set(pattern.text, typeName);
 				}
 			}
 		}
-		return names;
+		return bindings;
 	}
 
 	// ── Helpers ──────────────────────────────────────────────────────────
@@ -905,26 +1341,28 @@ export class TypeScriptExtractor implements ExtractorPort {
 	/**
 	 * Apply receiver type bindings to a raw call target name.
 	 *
-	 * Handles three patterns:
-	 *   "this.storage.insertNodes" → class binding for "storage" → "StoragePort.insertNodes"
-	 *   "this.doStuff"            → no binding (direct this.method, no property chain)
-	 *   "repo.save"               → file-scope binding for "repo" → "UserRepository.save"
-	 *   "generateId"              → no receiver, returned as-is
+	 * Binding lookup order for variable.method():
+	 *   1. Block-local bindings (const/let declarations in current block)
+	 *   2. Function-level bindings (var declarations + parameters)
+	 *   3. File-scope bindings (top-level const declarations)
 	 *
-	 * Returns the original name unchanged if no binding is found.
+	 * A null entry at any level means "name is taken but has no type" —
+	 * it blocks all lower-priority lookups (shadow without rewrite).
+	 *
+	 * Class bindings (this.property.method) are separate and checked first.
 	 */
 	private resolveReceiverType(
 		rawName: string,
 		ctx: ExtractionContext,
-		shadowedNames?: ReadonlySet<string>,
+		localBindings?: ReadonlyMap<string, string | null>,
+		fnBindings?: ReadonlyMap<string, string | null>,
 	): string {
 		if (!rawName.includes(".")) return rawName;
 
 		const parts = rawName.split(".");
 		const method = parts[parts.length - 1];
 
-		// Pattern 1: this.property.method() — look up property in class bindings.
-		// Class bindings are never shadowed (they're on `this`, not local vars).
+		// Pattern 1: this.property.method() — class bindings, never shadowed.
 		if (parts[0] === "this" && parts.length >= 3 && ctx.classBindings) {
 			const propertyName = parts[1];
 			const typeName = ctx.classBindings.get(propertyName);
@@ -933,22 +1371,52 @@ export class TypeScriptExtractor implements ExtractorPort {
 			}
 		}
 
-		// Pattern 2: this.method() — 2 parts, no property chain.
-		// Leave as-is; the resolver handles this via name matching.
+		// Pattern 2: this.method() — no rewrite.
 		if (parts[0] === "this" && parts.length === 2) {
 			return rawName;
 		}
 
-		// Pattern 3: variable.method() — look up variable in file-scope bindings.
-		// Skip if the variable name is shadowed by a parameter in the current scope.
-		if (parts.length === 2) {
-			const varName = parts[0];
-			if (shadowedNames?.has(varName)) {
-				return rawName; // shadowed — don't rewrite
+		// Three-level variable type lookup: local → function → file.
+		// A null entry at any level means "shadowed, stop looking."
+		const resolveVarType = (varName: string): string | null | "shadowed" => {
+			// Block-local bindings (const/let in current block)
+			if (localBindings?.has(varName)) {
+				const t = localBindings.get(varName);
+				return t ?? "shadowed";
 			}
-			const typeName = ctx.fileScopeBindings.get(varName);
-			if (typeName) {
-				return `${typeName}.${method}`;
+			// Function-level bindings (var + params, shared across blocks)
+			if (fnBindings?.has(varName)) {
+				const t = fnBindings.get(varName);
+				return t ?? "shadowed";
+			}
+			// File-scope bindings (top-level const)
+			const fileType = ctx.fileScopeBindings.get(varName);
+			if (fileType) return fileType;
+			return null;
+		};
+
+		// Pattern 3: variable.method() — 2-part chain.
+		if (parts.length === 2) {
+			const result = resolveVarType(parts[0]);
+			if (result === "shadowed") return rawName;
+			if (result) return `${result}.${method}`;
+			return rawName;
+		}
+
+		// Pattern 4: variable.property.method() — 3-part chain without `this`.
+		if (parts.length >= 3 && parts[0] !== "this") {
+			const result = resolveVarType(parts[0]);
+			if (result === "shadowed") return rawName;
+			if (result) {
+				const propName = parts[1];
+				const memberMap = ctx.memberTypes.get(result);
+				if (memberMap) {
+					const propType = memberMap.get(propName);
+					if (propType) {
+						return `${propType}.${method}`;
+					}
+				}
+				return `${result}.${propName}.${method}`;
 			}
 		}
 
@@ -1107,6 +1575,15 @@ interface ExtractionContext {
 	 * properties. Set per-class during extractClass, null outside classes.
 	 */
 	classBindings: Map<string, string> | null;
+
+	/**
+	 * Member type map: type name → (member name → member type name).
+	 * Built from interface property signatures and class field type
+	 * annotations. Used for 3-part chain resolution:
+	 *   ctx.storage.insertNodes() → AppContext.storage → StoragePort
+	 * Only contains types defined in the current file.
+	 */
+	memberTypes: Map<string, Map<string, string>>;
 }
 
 // ── Utility ────────────────────────────────────────────────────────────

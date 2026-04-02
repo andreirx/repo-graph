@@ -325,16 +325,20 @@ describe("stable key format", () => {
 // ── Receiver binding scope regression ──────────────────────────────────
 
 describe("receiver binding respects parameter shadowing", () => {
-	it("does not rewrite calls when a parameter shadows a file-scope binding", async () => {
+	it("resolves typed parameters and shadows untyped parameters", async () => {
 		const source = `
 const repo: RepoA = new RepoA();
 
-function topLevel() {
-	repo.save(); // should resolve to RepoA.save
+function usesFileScope() {
+	repo.save(); // should resolve to RepoA.save via file-scope binding
 }
 
-function shadowed(repo: RepoB) {
-	repo.save(); // should NOT resolve to RepoA.save — param shadows
+function hasTypedParam(repo: RepoB) {
+	repo.save(); // should resolve to RepoB.save via parameter binding (not RepoA)
+}
+
+function hasUntypedParam(repo) {
+	repo.save(); // should stay as repo.save — untyped param shadows without rewriting
 }
 `;
 		const result = await extractor.extract(
@@ -350,12 +354,466 @@ function shadowed(repo: RepoB) {
 			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
 		);
 
-		// topLevel's call should be rewritten via file-scope binding
+		// File-scope binding: repo -> RepoA
 		expect(calleeNames).toContain("RepoA.save");
-		// shadowed's call should NOT be rewritten (parameter shadows the binding)
+		// Typed parameter binding: repo -> RepoB (overrides file-scope)
+		expect(calleeNames).toContain("RepoB.save");
+		// Untyped parameter: shadows file-scope, no rewrite
 		expect(calleeNames).toContain("repo.save");
-		// There should NOT be two RepoA.save entries
+		// Each appears exactly once
 		expect(calleeNames.filter((n) => n === "RepoA.save").length).toBe(1);
+		expect(calleeNames.filter((n) => n === "RepoB.save").length).toBe(1);
+		expect(calleeNames.filter((n) => n === "repo.save").length).toBe(1);
+	});
+});
+
+// ── Function-local bindings with block scope ──────────────────────────
+
+describe("function-local bindings and block shadowing", () => {
+	it("resolves calls via function-local const declarations", async () => {
+		const source = `
+function doWork() {
+	const repo: UserRepository = new UserRepository();
+	repo.save();
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/local-test.ts",
+			`${REPO_UID}:src/local-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		expect(calleeNames).toContain("UserRepository.save");
+	});
+
+	it("resolves calls via new ClassName() without explicit annotation", async () => {
+		const source = `
+function doWork() {
+	const repo = new UserRepository();
+	repo.save();
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/local-new-test.ts",
+			`${REPO_UID}:src/local-new-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		expect(calleeNames).toContain("UserRepository.save");
+	});
+
+	it("inner block shadows outer binding", async () => {
+		const source = `
+function doWork() {
+	const repo: RepoA = new RepoA();
+	repo.save(); // -> RepoA.save
+	if (true) {
+		const repo: RepoB = new RepoB();
+		repo.save(); // -> RepoB.save (shadows outer)
+	}
+	repo.save(); // -> RepoA.save (outer scope restored)
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/block-shadow-test.ts",
+			`${REPO_UID}:src/block-shadow-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		expect(calleeNames.filter((n) => n === "RepoA.save").length).toBe(2);
+		expect(calleeNames.filter((n) => n === "RepoB.save").length).toBe(1);
+	});
+
+	it("does not resolve call before its declaration (temporal correctness)", async () => {
+		const source = `
+function f() {
+	repo.save(); // call BEFORE declaration — must NOT resolve
+	const repo: Repo = new Repo();
+	repo.save(); // call AFTER declaration — should resolve
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/temporal-test.ts",
+			`${REPO_UID}:src/temporal-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		// First call: before declaration, unresolved
+		expect(calleeNames).toContain("repo.save");
+		// Second call: after declaration, resolved
+		expect(calleeNames).toContain("Repo.save");
+		expect(calleeNames.filter((n) => n === "Repo.save").length).toBe(1);
+	});
+
+	it("var before assignment does not resolve (hoisted but uninitialized)", async () => {
+		const source = `
+function f() {
+	repo.save(); // var hoisted but not assigned yet — must NOT resolve
+	var repo: Repo = new Repo();
+	repo.save(); // after assignment — should resolve
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/var-temporal-test.ts",
+			`${REPO_UID}:src/var-temporal-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		// Before assignment: hoisted name shadows file-scope, no typed binding
+		expect(calleeNames).toContain("repo.save");
+		// After assignment: typed binding is active
+		expect(calleeNames).toContain("Repo.save");
+		expect(calleeNames.filter((n) => n === "Repo.save").length).toBe(1);
+	});
+
+	it("TDZ shadows outer binding before inner declaration", async () => {
+		const source = `
+const repo: Outer = new Outer();
+function f() {
+	{
+		repo.save(); // inner const repo exists — TDZ, must NOT resolve to Outer
+		const repo: Inner = new Inner();
+		repo.save(); // after declaration — should resolve to Inner
+	}
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/tdz-shadow-test.ts",
+			`${REPO_UID}:src/tdz-shadow-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		// Before inner declaration: TDZ shadow blocks outer
+		expect(calleeNames).toContain("repo.save");
+		expect(calleeNames).not.toContain("Outer.save");
+		// After inner declaration
+		expect(calleeNames).toContain("Inner.save");
+	});
+
+	it("var declaration is visible after the block it was declared in", async () => {
+		const source = `
+function f() {
+	if (true) {
+		var repo: Repo = new Repo();
+	}
+	repo.save(); // var is function-scoped, should resolve
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/var-hoist-test.ts",
+			`${REPO_UID}:src/var-hoist-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		expect(calleeNames).toContain("Repo.save");
+	});
+
+	// ── Loop-header scope ──────────────────────────────────────────────
+
+	it("for-loop const initializer binds in loop body", async () => {
+		const source = `
+function f() {
+	for (const repo = new Repo(); ; ) {
+		repo.save();
+		break;
+	}
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/for-const-test.ts",
+			`${REPO_UID}:src/for-const-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		expect(calleeNames).toContain("Repo.save");
+	});
+
+	it("for-loop const initializer shadows outer binding", async () => {
+		const source = `
+const repo: Outer = new Outer();
+function f() {
+	for (const repo = new Inner(); ; ) {
+		repo.save();
+		break;
+	}
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/for-shadow-test.ts",
+			`${REPO_UID}:src/for-shadow-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		expect(calleeNames).toContain("Inner.save");
+		expect(calleeNames).not.toContain("Outer.save");
+	});
+
+	it("for-of loop variable shadows outer binding", async () => {
+		const source = `
+const repo: Outer = new Outer();
+function f(repos: any[]) {
+	for (const repo of repos) {
+		repo.save(); // should NOT resolve to Outer.save
+	}
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/for-of-shadow-test.ts",
+			`${REPO_UID}:src/for-of-shadow-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		expect(calleeNames).toContain("repo.save");
+		expect(calleeNames).not.toContain("Outer.save");
+	});
+
+	it("for-var initializer typed binding survives loop and reaches later code", async () => {
+		const source = `
+function f() {
+	for (var repo = new Repo(); ; ) {
+		repo.save(); // inside loop: should resolve
+		break;
+	}
+	repo.save(); // after loop: var is function-scoped, should resolve
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/for-var-test.ts",
+			`${REPO_UID}:src/for-var-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		expect(calleeNames.filter((n) => n === "Repo.save").length).toBe(2);
+	});
+
+	// ── Initializer self-reference soundness ───────────────────────────
+
+	it("const binding is not visible inside its own initializer", async () => {
+		const source = `
+const repo: Outer = new Outer();
+function f() {
+	const repo: Inner = setup(repo.save());
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/init-self-ref-test.ts",
+			`${REPO_UID}:src/init-self-ref-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		// repo.save() inside the initializer should NOT resolve to Inner.save.
+		// The inner const is in TDZ at that point, so it shadows Outer too.
+		expect(calleeNames).not.toContain("Inner.save");
+		expect(calleeNames).not.toContain("Outer.save");
+		expect(calleeNames).toContain("repo.save");
+	});
+
+	it("var binding is not visible inside its own initializer", async () => {
+		const source = `
+function f() {
+	var repo = new Repo(repo.save());
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/var-init-self-ref-test.ts",
+			`${REPO_UID}:src/var-init-self-ref-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		// repo.save() inside new Repo() should NOT resolve to Repo.save
+		expect(calleeNames).not.toContain("Repo.save");
+		expect(calleeNames).toContain("repo.save");
+	});
+
+	it("for-loop initializer binding is not visible inside its own initializer", async () => {
+		const source = `
+const repo: Outer = new Outer();
+function f() {
+	for (const repo: Inner = setup(repo.save()); ; ) { break; }
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/for-init-self-ref-test.ts",
+			`${REPO_UID}:src/for-init-self-ref-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		expect(calleeNames).not.toContain("Inner.save");
+		expect(calleeNames).not.toContain("Outer.save");
+		expect(calleeNames).toContain("repo.save");
+	});
+
+	it("untyped local variable shadows file-scope binding", async () => {
+		const source = `
+const repo: RepoA = new RepoA();
+
+function doWork() {
+	const repo = getRepo(); // no type annotation, no new — shadow only
+	repo.save(); // should NOT resolve to RepoA.save
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/shadow-local-test.ts",
+			`${REPO_UID}:src/shadow-local-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		expect(calleeNames).toContain("repo.save");
+		expect(calleeNames).not.toContain("RepoA.save");
+	});
+});
+
+// ── 3-part chain resolution ────────────────────────────────────────────
+
+describe("3-part chain resolution (variable.property.method)", () => {
+	it("resolves ctx.storage.insertNodes() via memberTypes", async () => {
+		const source = `
+interface AppContext {
+	storage: StoragePort;
+	indexer: IndexerPort;
+}
+
+function bootstrap(ctx: AppContext) {
+	ctx.storage.insertNodes([]);
+	ctx.indexer.indexRepo("x");
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/chain-test.ts",
+			`${REPO_UID}:src/chain-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		expect(calleeNames).toContain("StoragePort.insertNodes");
+		expect(calleeNames).toContain("IndexerPort.indexRepo");
+	});
+
+	it("falls back to partial resolution when property type unknown", async () => {
+		const source = `
+interface Config {
+	debug: boolean;
+}
+
+function run(cfg: Config) {
+	cfg.logger.info("hello");
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/chain-partial-test.ts",
+			`${REPO_UID}:src/chain-partial-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		// logger is not in Config's memberTypes (boolean is not a type_identifier),
+		// so falls back to Config.logger.info (partially resolved)
+		expect(calleeNames).toContain("Config.logger.info");
+	});
+
+	it("does not resolve 3-part chain when variable type is imported (not in file)", async () => {
+		const source = `
+function run(ctx: ExternalType) {
+	ctx.db.query("SELECT 1");
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/chain-external-test.ts",
+			`${REPO_UID}:src/chain-external-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		// ExternalType is not defined in this file, so no memberTypes available.
+		// Falls back to partially resolved: ExternalType.db.query
+		expect(calleeNames).toContain("ExternalType.db.query");
 	});
 });
 
