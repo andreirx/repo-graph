@@ -84,6 +84,18 @@ export interface StoragePort {
 	findPath(input: FindPathInput): PathResult;
 	findDeadNodes(input: FindDeadNodesInput): DeadNodeResult[];
 	findCycles(input: FindCyclesInput): CycleResult[];
+
+	/**
+	 * Find all IMPORTS edges where the source file is under sourcePrefix
+	 * and the target file is under targetPrefix.
+	 *
+	 * Used for boundary violation detection: given a forbidden dependency
+	 * (moduleA must not import moduleB), returns the specific file-level
+	 * imports that cross the boundary.
+	 */
+	findImportsBetweenPaths(
+		input: FindImportsBetweenPathsInput,
+	): ImportEdgeResult[];
 }
 
 // ── Input types ──────────────────────────────────────────────────────────
@@ -160,4 +172,18 @@ export interface FindCyclesInput {
 	snapshotUid: string;
 	/** Detection granularity. Default: MODULE. */
 	level?: "file" | "module";
+}
+
+export interface FindImportsBetweenPathsInput {
+	snapshotUid: string;
+	/** Source path prefix (e.g. "src/core"). Files under this prefix. */
+	sourcePrefix: string;
+	/** Target path prefix (e.g. "src/adapters"). Files under this prefix. */
+	targetPrefix: string;
+}
+
+export interface ImportEdgeResult {
+	sourceFile: string;
+	targetFile: string;
+	line: number | null;
 }

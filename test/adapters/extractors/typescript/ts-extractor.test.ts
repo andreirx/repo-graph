@@ -322,6 +322,80 @@ describe("stable key format", () => {
 	});
 });
 
+// ── this.method() class-context resolution ────────────────────────────
+
+describe("this.method() resolves to enclosing class", () => {
+	it("rewrites this.method() to ClassName.method", async () => {
+		const source = `
+class UserService {
+	save() {}
+	doWork() {
+		this.save();
+	}
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/this-method-test.ts",
+			`${REPO_UID}:src/this-method-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		expect(calleeNames).toContain("UserService.save");
+		expect(calleeNames).not.toContain("this.save");
+	});
+
+	it("does not resolve this.method() outside a class", async () => {
+		const source = `
+function standalone() {
+	this.save(); // not inside a class — should stay as this.save
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/this-no-class-test.ts",
+			`${REPO_UID}:src/this-no-class-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const calleeNames = calls.map(
+			(e) => JSON.parse(e.metadataJson ?? "{}").calleeName,
+		);
+		expect(calleeNames).toContain("this.save");
+	});
+
+	it("preserves raw this.method in metadata", async () => {
+		const source = `
+class Repo {
+	commit() {
+		this.flush();
+	}
+	flush() {}
+}
+`;
+		const result = await extractor.extract(
+			source,
+			"src/this-meta-test.ts",
+			`${REPO_UID}:src/this-meta-test.ts`,
+			REPO_UID,
+			SNAPSHOT_UID,
+		);
+		const calls = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		const flushEdge = calls.find((e) => {
+			const meta = JSON.parse(e.metadataJson ?? "{}");
+			return meta.calleeName === "Repo.flush";
+		});
+		expect(flushEdge).toBeDefined();
+		const meta = JSON.parse(flushEdge?.metadataJson ?? "{}");
+		expect(meta.rawCalleeName).toBe("this.flush");
+	});
+});
+
 // ── Receiver binding scope regression ──────────────────────────────────
 
 describe("receiver binding respects parameter shadowing", () => {

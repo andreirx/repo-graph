@@ -19,6 +19,7 @@ export type { FileVersion, TrackedFile } from "./file.js";
 export type { Inference } from "./inference.js";
 export type { GraphNode } from "./node.js";
 export type {
+	BoundaryViolation,
 	CycleNode,
 	CycleResult,
 	DeadNodeResult,

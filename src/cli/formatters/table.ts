@@ -4,6 +4,7 @@
  */
 
 import type {
+	BoundaryViolation,
 	CycleResult,
 	DeadNodeResult,
 	NodeResult,
@@ -116,6 +117,33 @@ export function formatCycles(results: CycleResult[]): string {
 	for (const c of results) {
 		const names = c.nodes.map((n) => n.name).join(" -> ");
 		lines.push(`  ${c.cycleId}: ${names} -> ${c.nodes[0]?.name ?? "?"}`);
+	}
+	return lines.join("\n");
+}
+
+export function formatViolations(violations: BoundaryViolation[]): string {
+	if (violations.length === 0) return "No boundary violations found.";
+
+	// Group by boundary rule for readability
+	const groups = new Map<string, BoundaryViolation[]>();
+	for (const v of violations) {
+		const key = `${v.boundaryModule} --/-> ${v.forbiddenModule}`;
+		const group = groups.get(key) ?? [];
+		group.push(v);
+		groups.set(key, group);
+	}
+
+	const lines = [
+		`Found ${violations.length} violation(s) across ${groups.size} boundary rule(s):\n`,
+	];
+	for (const [rule, group] of groups) {
+		const reason = group[0].reason ? ` (${group[0].reason})` : "";
+		lines.push(`  ${rule}${reason}`);
+		for (const v of group) {
+			const loc = v.line != null ? `:${v.line}` : "";
+			lines.push(`    ${v.sourceFile}${loc} -> ${v.targetFile}`);
+		}
+		lines.push("");
 	}
 	return lines.join("\n");
 }

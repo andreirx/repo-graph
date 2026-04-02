@@ -148,33 +148,41 @@ Weak (known gaps, not fixable by more local binding rules):
   - Dynamic patterns: computed property access, bracket notation,
     Proxy, string-template method names.
 
-Known precision regression (Horizon 1 unfinished):
+Addressed precision regression:
   - Interface member extraction introduced new same-named nodes that
-    increase ambiguity in the resolver's name-matching pool.
-    FRAKTAG: this.method (needs class context) went from 0 to 109
-    because methods like "save", "findById" now exist on both class
-    AND interface nodes.
-  - This is a self-inflicted regression, not a natural ceiling.
-    The fix is to narrow the resolver's name matching to prefer nodes
-    on the class being called from (requires propagating class context
-    into the resolver, not just the extractor). Tracked as remaining
-    Horizon 1 precision work.
+    increased ambiguity in the resolver's name-matching pool.
+    FRAKTAG: this.method went from 0 to 109 after interface members
+    were extracted.
+  - Fix: the extractor now rewrites this.method() to ClassName.method
+    using enclosing class context, so the resolver matches the specific
+    class's method node instead of competing on bare name.
+  - Result: FRAKTAG this.method dropped from 109 to 11. The remaining
+    11 are inherited methods not defined on the calling class — a
+    genuine syntax-only extraction boundary (no inheritance chain).
+  - Diagnostic classifier updated to use raw call name from metadata
+    so rewritten-but-unresolved this.method() calls are correctly
+    categorized, not hidden under obj.method.
 
-Measurement (2026-04-02):
-                      v1 baseline    v1.5 current
-  repo-graph:           285 edges     351 edges    (+23%)
-  FRAKTAG:              836 edges     979 edges    (+17%)
+Measurement (2026-04-02, final):
+                      v1 baseline    v1.5 final
+  repo-graph:           285 edges     368 edges    (+29%)
+  FRAKTAG:              836 edges    1077 edges    (+29%)
   AMODX:               1685 edges    1699 edges    (+1%)
+
+  FRAKTAG breakdown (honest classification):
+    this.method:    0 → 11  (11 are inherited methods, genuine gap)
+    this.*.method: 94 → 45  (class binding resolved many)
+    obj.method:   719 → 816 (interface members added some new ambiguity)
 
 
 ================================================================================
 KNOWN V1 LIMITATIONS (UPDATED)
 ================================================================================
 
-1. [PARTIALLY ADDRESSED] this.method() calls now resolve when the method
-   name is globally unique. When ambiguous (same method name on multiple
-   classes/interfaces), resolution fails. The interface member extraction
-   increased ambiguity — see precision regression above.
+1. [MOSTLY ADDRESSED] this.method() calls are rewritten to ClassName.method
+   by the extractor using enclosing class context. Resolves when the class
+   defines that method. Fails for inherited methods (11 remaining on FRAKTAG)
+   because syntax-only extraction does not walk the inheritance chain.
 
 2. [PARTIALLY ADDRESSED] this.property.method() resolves via class-scope
    bindings when the property has an explicit type annotation. Untyped
@@ -198,12 +206,13 @@ RECOMMENDED IMPROVEMENTS (UPDATED PRIORITY ORDER)
 ================================================================================
 
 Horizon 1 remaining:
-  1. Fix the this.method() ambiguity regression: when resolving a bare
-     method name from inside a class, prefer methods on the same class
-     (or its supertypes) over same-named methods on unrelated types.
+  1. Inherited method resolution: this.method() where the method is
+     defined on a superclass, not the calling class. Requires walking
+     extends/implements chain to find the defining type. 11 cases on
+     FRAKTAG. Bounded work but diminishing returns.
 
 Horizon 2:
-  2. arch violations over IMPORTS edges (trustworthy substrate).
+  2. [DONE] arch violations over IMPORTS edges.
   3. Express framework extractor for ROUTES_TO edges.
   4. True incremental refresh using content hash comparison.
   5. Nested .gitignore support.
@@ -217,11 +226,14 @@ VERDICT (UPDATED)
 ================================================================================
 
 v1.5 is usable. The import/module graph is the trustworthy substrate —
-high precision, high recall, suitable for policy enforcement. The call
-graph is improved but architecture-sensitive: strong on explicitly-typed
-class-heavy codebases, bounded on functional/SDK-heavy patterns, and
-carrying one self-inflicted ambiguity regression from interface member
-extraction. Arch violations should build on IMPORTS, not CALLS.
+high precision, high recall, suitable for policy enforcement via
+arch violations (now implemented, IMPORTS-only). The call graph is
+improved but architecture-sensitive: strong on explicitly-typed
+class-heavy codebases (+29% on FRAKTAG), bounded on functional/SDK-heavy
+patterns (+1% on AMODX). The self-inflicted this.method ambiguity
+regression from interface member extraction has been addressed (109 → 11
+on FRAKTAG). The remaining 11 are inherited methods — a genuine
+syntax-only boundary, not a self-inflicted defect.
 Module-level cycle detection is accurate and immediately actionable.
 Dead code detection works and produces real, verifiable results.
 

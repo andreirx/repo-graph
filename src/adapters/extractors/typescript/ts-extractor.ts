@@ -102,6 +102,7 @@ export class TypeScriptExtractor implements ExtractorPort {
 			exportedNames: new Set<string>(),
 			fileScopeBindings: new Map<string, string>(),
 			classBindings: null,
+			enclosingClassName: null,
 			memberTypes: new Map<string, Map<string, string>>(),
 		};
 
@@ -339,9 +340,11 @@ export class TypeScriptExtractor implements ExtractorPort {
 		// Collect member type annotations for 3-part chain resolution.
 		this.collectMemberTypes(name, body, ctx);
 
-		// Build class-scope type bindings before walking methods.
-		// These let call extraction resolve this.property.method() chains.
+		// Set class context before walking methods.
+		// classBindings: resolve this.property.method() chains.
+		// enclosingClassName: resolve this.method() to ClassName.method.
 		ctx.classBindings = this.buildClassBindings(body);
+		ctx.enclosingClassName = name;
 
 		for (const member of body.children) {
 			if (member.type === "method_definition") {
@@ -351,8 +354,9 @@ export class TypeScriptExtractor implements ExtractorPort {
 			}
 		}
 
-		// Clear class-scope bindings
+		// Clear class context
 		ctx.classBindings = null;
+		ctx.enclosingClassName = null;
 	}
 
 	private extractMethod(
@@ -1371,8 +1375,16 @@ export class TypeScriptExtractor implements ExtractorPort {
 			}
 		}
 
-		// Pattern 2: this.method() — no rewrite.
+		// Pattern 2: this.method() — rewrite to ClassName.method when
+		// inside a class. This narrows the resolver's candidate pool from
+		// "all nodes named method" to "the specific method on this class."
+		// If the class doesn't define that method (e.g. inherited), the
+		// qualified name won't match and the edge stays unresolved —
+		// which is correct for syntax-only extraction.
 		if (parts[0] === "this" && parts.length === 2) {
+			if (ctx.enclosingClassName) {
+				return `${ctx.enclosingClassName}.${method}`;
+			}
 			return rawName;
 		}
 
@@ -1575,6 +1587,14 @@ interface ExtractionContext {
 	 * properties. Set per-class during extractClass, null outside classes.
 	 */
 	classBindings: Map<string, string> | null;
+
+	/**
+	 * The name of the enclosing class, if currently inside a class body.
+	 * Used to rewrite `this.method()` to `ClassName.method` so the
+	 * resolver can match against the specific class's method node.
+	 * Set per-class during extractClass, null outside classes.
+	 */
+	enclosingClassName: string | null;
 
 	/**
 	 * Member type map: type name → (member name → member type name).

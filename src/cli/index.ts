@@ -9,6 +9,7 @@
 
 import { Command } from "commander";
 import { type AppContext, bootstrap, shutdown } from "../main.js";
+import { registerArchCommands } from "./commands/arch.js";
 import { registerDeclareCommands } from "./commands/declare.js";
 import { registerGraphCommands } from "./commands/graph.js";
 import { registerRepoCommands } from "./commands/repo.js";
@@ -35,6 +36,7 @@ function getCtx(): AppContext {
 registerRepoCommands(program, getCtx);
 registerGraphCommands(program, getCtx);
 registerDeclareCommands(program, getCtx);
+registerArchCommands(program, getCtx);
 
 // Main execution
 async function main(): Promise<void> {

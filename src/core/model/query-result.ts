@@ -83,3 +83,22 @@ export interface DeadNodeResult {
 	line: number | null;
 	lineCount: number | null;
 }
+
+/**
+ * A boundary violation: an IMPORTS edge that crosses a declared
+ * forbidden boundary.
+ */
+export interface BoundaryViolation {
+	/** The module path that has the boundary rule. */
+	boundaryModule: string;
+	/** The module path that is forbidden. */
+	forbiddenModule: string;
+	/** The reason from the boundary declaration, if any. */
+	reason: string | null;
+	/** The file that contains the violating import. */
+	sourceFile: string;
+	/** The file being imported. */
+	targetFile: string;
+	/** Line number of the import statement. */
+	line: number | null;
+}

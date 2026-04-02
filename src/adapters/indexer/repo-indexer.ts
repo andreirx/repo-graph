@@ -918,7 +918,6 @@ export function filterByEdgeAffinity(
  * for the breakdown report.
  */
 function classifyUnresolvedEdge(edge: UnresolvedEdge): string {
-	const key = edge.targetKey;
 	const type = edge.type;
 
 	if (type === EdgeType.IMPORTS) {
@@ -933,21 +932,33 @@ function classifyUnresolvedEdge(edge: UnresolvedEdge): string {
 		return "IMPLEMENTS (interface not found)";
 	}
 
-	// CALLS breakdown
+	// CALLS breakdown: use the raw call name (before receiver-type rewriting)
+	// to classify accurately. The extractor stores the original call text in
+	// metadataJson.rawCalleeName when a rewrite occurs. Without this, a
+	// rewritten "this.save()" → "ClassName.save" would be misclassified as
+	// "obj.method" instead of "this.method".
 	if (type === EdgeType.CALLS) {
+		let key = edge.targetKey;
+		if (edge.metadataJson) {
+			try {
+				const meta = JSON.parse(edge.metadataJson);
+				if (meta.rawCalleeName) {
+					key = meta.rawCalleeName;
+				}
+			} catch {
+				// malformed metadata — use targetKey as-is
+			}
+		}
+
 		if (key.startsWith("this.")) {
 			if (key.split(".").length > 2) {
-				// this.prop.method() — needs type resolution
 				return "CALLS this.*.method (needs type info)";
 			}
-			// this.method() — needs class context
 			return "CALLS this.method (needs class context)";
 		}
 		if (key.includes(".")) {
-			// obj.method() — needs variable type
 			return "CALLS obj.method (needs type info)";
 		}
-		// plain function call — ambiguous or not imported
 		return "CALLS function (ambiguous or missing)";
 	}
 

@@ -19,10 +19,12 @@ import type {
 	CreateSnapshotInput,
 	FindCyclesInput,
 	FindDeadNodesInput,
+	FindImportsBetweenPathsInput,
 	FindImportsInput,
 	FindPathInput,
 	FindTraversalInput,
 	GetDeclarationsInput,
+	ImportEdgeResult,
 	RepoRef,
 	ResolveSymbolInput,
 	StoragePort,
@@ -805,6 +807,49 @@ export class SqliteStorage implements StoragePort {
 		}
 
 		return results;
+	}
+
+	// ── Boundary queries ──────────────────────────────────────────────
+
+	findImportsBetweenPaths(
+		input: FindImportsBetweenPathsInput,
+	): ImportEdgeResult[] {
+		// Find all IMPORTS edges where the source FILE node's path starts
+		// with sourcePrefix and the target FILE node's path starts with
+		// targetPrefix. Uses the files table to match paths.
+		// Normalize: strip trailing slashes to prevent double-slash in LIKE pattern.
+		const srcPrefix = input.sourcePrefix.replace(/\/+$/, "");
+		const tgtPrefix = input.targetPrefix.replace(/\/+$/, "");
+		const srcPattern = `${srcPrefix}/%`;
+		const tgtPattern = `${tgtPrefix}/%`;
+
+		const rows = this.db
+			.prepare(
+				`SELECT
+				   src_f.path AS source_file,
+				   tgt_f.path AS target_file,
+				   e.line_start AS line
+				 FROM edges e
+				 JOIN nodes src_n ON e.source_node_uid = src_n.node_uid
+				 JOIN nodes tgt_n ON e.target_node_uid = tgt_n.node_uid
+				 JOIN files src_f ON src_n.file_uid = src_f.file_uid
+				 JOIN files tgt_f ON tgt_n.file_uid = tgt_f.file_uid
+				 WHERE e.snapshot_uid = ?
+				   AND e.type = 'IMPORTS'
+				   AND src_f.path LIKE ?
+				   AND tgt_f.path LIKE ?
+				 ORDER BY src_f.path, e.line_start`,
+			)
+			.all(input.snapshotUid, srcPattern, tgtPattern) as Record<
+			string,
+			unknown
+		>[];
+
+		return rows.map((row) => ({
+			sourceFile: row.source_file as string,
+			targetFile: row.target_file as string,
+			line: (row.line as number) ?? null,
+		}));
 	}
 
 	// ── Row mappers ────────────────────────────────────────────────────
