@@ -203,6 +203,28 @@ Make repo-graph part of day-to-day change safety:
 - required test obligations
 - pre-merge structural verification
 - structured evidence summaries
+- registry and plugin liveness edges
+
+Registry-driven architectures (CMS block renderers, plugin systems,
+extension registries, render maps) wire liveness through mechanisms
+invisible to import/call analysis. Until those are modeled as edges,
+dead code detection overstates confidence on these codebases.
+
+High-value edge types for registry liveness:
+- REGISTERED_BY: plugin/extension registered into a composition root
+- RENDERS_BLOCK: block-type render map binding component to type key
+- PROVIDES_EXTENSION: extension export registered into a registry
+- DISPATCHED_BY: string-key or config-driven component dispatch
+
+These are framework-extractor concerns — same architectural layer as
+Express ROUTES_TO or NestJS DI bindings. They should be implemented
+as framework extractors, not as generic resolution improvements.
+
+Until registry edges are extracted, `graph dead` results on
+registry-heavy codebases should be interpreted as "graph orphans"
+(no inbound evidence in the modeled graph), not "safe to delete."
+The tiered dead-code model (definitely_unreferenced / graph_orphaned /
+suppressed_by_declaration) addresses the presentation side.
 
 ### Horizon 3: Versioned Engineering Substrate
 

@@ -78,6 +78,23 @@ tool graph path <repo> <from> <to> [--max-depth <n>]              [v1]
 tool graph dead <repo> [--kind <kind>] [--min-lines <n>]          [v1]
   Nodes with zero incoming edges, excluding declared entrypoints.
 
+  TRUST BOUNDARY: This answers "no known inbound graph edges," not
+  "semantically unreachable." On registry/plugin-driven architectures
+  where liveness is wired through maps, string-key dispatch, or
+  framework callbacks, results should be treated as graph orphans,
+  not deletion candidates.
+
+  Planned tiered model (v2):
+    --confidence <tier>
+      definitely_unreferenced  — no inbound edges AND no string-ref patterns
+      graph_orphaned           — no inbound edges (current behavior)
+      suppressed_by_declaration — manually declared live nodes (current)
+
+  The "definitely_unreferenced" tier would combine graph dead-node
+  detection with dynamic trap scanning (ripgrep for string-literal
+  references to the symbol name) to reduce false positives on
+  registry-heavy codebases.
+
 tool graph cycles <repo> [--level file|module]                    [v1]
   Dependency cycles at file or module level.
 

@@ -351,6 +351,16 @@ Framework:
   REGISTERED_BY    — DI container binds interface to class
   GATED_BY         — execution gated by config/flag
 
+Registry/plugin (planned Horizon 2):
+  PROVIDES_EXTENSION — extension export registered into a registry
+  RENDERS_BLOCK    — block-type render map binds component to type key
+  DISPATCHED_BY    — string-key or config-driven component dispatch
+
+  These edge types capture liveness channels invisible to import/call
+  analysis. Without them, graph dead overstates confidence on
+  registry-driven architectures (CMS, plugin systems, extension maps).
+  They are framework-extractor concerns, not generic resolution.
+
 Relational:
   DEPENDS_ON       — generic dependency
   OWNS             — module owns table/topic/config

@@ -148,6 +148,33 @@ Weak (known gaps, not fixable by more local binding rules):
   - Dynamic patterns: computed property access, bracket notation,
     Proxy, string-template method names.
 
+Dead code trust boundary:
+  `graph dead` currently answers: "which nodes have no known incoming
+  graph edges, after excluding declared entrypoints, under the extractor
+  and resolver rules that exist today." That is NOT semantic unreachability.
+
+  Codebases that wire liveness through non-import, non-call channels
+  will show false positives in dead code detection:
+    - Extension/plugin registries (getExtensions(), registerPlugin())
+    - Render maps (RENDER_MAP[type], component lookup by string key)
+    - Config-driven component composition
+    - Framework callbacks and lifecycle hooks
+    - String-key dispatch and CMS block-type bindings
+
+  These are real liveness channels that the graph does not yet model
+  as edges. Until they are extracted, `graph dead` overstates confidence
+  on registry-heavy codebases (confirmed on AMODX).
+
+  Correct interpretation:
+    - On clean-architecture codebases with explicit call/import graphs:
+      high-confidence dead code detection.
+    - On registry/plugin-driven frontends and CMS architectures:
+      treat results as "no inbound evidence in the modeled graph,"
+      not "safe to delete."
+
+  See planned-cli.txt and VISION.md for the tiered dead-code model
+  and registry edge types planned for Horizon 2+.
+
 Addressed precision regression:
   - Interface member extraction introduced new same-named nodes that
     increased ambiguity in the resolver's name-matching pool.

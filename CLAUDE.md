@@ -84,7 +84,14 @@ rgr graph path repo-graph <from> <to>         # Shortest path between two symbol
 
 Use `/investigate-symbol repo-graph <SymbolName>` for a guided investigation workflow. Use `/repo-overview .` for a full structural health check.
 
-rgr uses syntax-only resolution (no type info). Import graphs are accurate. Call graphs are conservative — `this.method()` and `obj.method()` calls may not resolve. When callee results look incomplete, read the source directly.
+rgr uses syntax-only resolution with receiver type binding. Import graphs are accurate. Call graphs resolve well on class-heavy architectures with explicit typing; weaker on SDK-heavy or functional patterns. When callee results look incomplete, read the source directly.
+
+Trust boundaries for `graph dead`:
+- On clean-architecture codebases with explicit call/import graphs: high confidence.
+- On registry/plugin-driven architectures (CMS renderers, extension registries, render maps, string-key dispatch): treat results as "graph orphans," not deletion candidates. These codebases wire liveness through channels the graph does not yet model.
+- Use `declare entrypoint` to suppress known live nodes that appear as false positives.
+
+`arch violations` checks IMPORTS edges only. It does not check CALLS edges (call graph resolution is architecture-sensitive). The import graph is the trustworthy substrate for policy enforcement.
 
 When you find architectural breadcrumbs, comments, or docs in the repo:
 - Do not copy them into repo-graph blindly.
