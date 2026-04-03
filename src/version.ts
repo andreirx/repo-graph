@@ -27,6 +27,9 @@ export const EXTRACTOR_VERSIONS = {
 /** Indexer build version. */
 export const INDEXER_VERSION = "indexer:0.2.0";
 
+/** Manifest extractor build version. */
+export const MANIFEST_EXTRACTOR_VERSION = "manifest-extractor:0.1.0";
+
 // ── Data compatibility versions ─────────────────────────────────────
 // These are bumped only when the output semantics change.
 // A patch or refactoring that produces identical data does NOT bump these.
@@ -63,9 +66,11 @@ export function buildToolchainJson(): ToolchainJson {
 		indexer_version: INDEXER_VERSION,
 		measurement_semantics: {
 			"ast-metrics": 1,
+			"domain-versions": 1,
 		},
 		measurement_versions: {
 			"ast-metrics": "ast-metrics:0.1.0",
+			"domain-versions": "manifest-extractor:0.1.0",
 		},
 	};
 }

@@ -18,6 +18,7 @@ import type {
 import { EdgeType, SnapshotStatus } from "../../../core/model/index.js";
 import type {
 	CreateSnapshotInput,
+	DomainVersionRow,
 	FindCyclesInput,
 	FindDeadNodesInput,
 	FindImportsBetweenPathsInput,
@@ -1053,6 +1054,33 @@ export class SqliteStorage implements StoragePort {
 		return results.sort(
 			(a, b) => b.maxCyclomaticComplexity - a.maxCyclomaticComplexity,
 		);
+	}
+
+	queryDomainVersions(snapshotUid: string): DomainVersionRow[] {
+		const rows = this.db
+			.prepare(
+				`SELECT kind, value_json
+				 FROM measurements
+				 WHERE snapshot_uid = ?
+				   AND kind IN ('package_name', 'package_version')
+				 ORDER BY kind`,
+			)
+			.all(snapshotUid) as Array<{
+			kind: string;
+			value_json: string;
+		}>;
+
+		return rows.map((row) => {
+			const parsed = JSON.parse(row.value_json) as {
+				value: string;
+				source_file: string;
+			};
+			return {
+				kind: row.kind,
+				value: parsed.value,
+				sourceFile: parsed.source_file,
+			};
+		});
 	}
 
 	insertMeasurements(measurements: Measurement[]): void {

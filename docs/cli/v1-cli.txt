@@ -285,6 +285,26 @@ tool graph metrics <repo>
     function count, avg cyclomatic complexity, max cyclomatic complexity
 
 
+tool graph versions <repo>
+
+  Extracted domain versions from manifest files.
+  Currently extracts package name and version from package.json
+  at the repository root.
+
+  These are domain versions — what the system claims to be — distinct
+  from repo-graph's internal toolchain provenance.
+
+  Flags:
+    --json                  Machine-readable output
+
+  Example:
+    tool graph versions payments
+    tool graph versions payments --json
+
+  Output per version:
+    kind (package_name | package_version), value, source_file
+
+
 ================================================================================
 DECLARATIONS
 ================================================================================

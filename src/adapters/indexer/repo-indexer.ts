@@ -31,7 +31,12 @@ import type {
 	IndexResult,
 } from "../../core/ports/indexer.js";
 import type { Measurement, StoragePort } from "../../core/ports/storage.js";
-import { buildToolchainJson, INDEXER_VERSION } from "../../version.js";
+import {
+	INDEXER_VERSION,
+	MANIFEST_EXTRACTOR_VERSION,
+	buildToolchainJson,
+} from "../../version.js";
+import { extractPackageManifest } from "../extractors/manifest/package-json.js";
 
 /** File extensions the TS extractor handles. */
 const TS_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
@@ -294,7 +299,14 @@ export class RepoIndexer implements IndexerPort {
 				this.storage.insertMeasurements(measurements);
 			}
 
-			// 11. Finalize snapshot
+			// 11. Extract domain versions from manifest files
+			await this.extractManifestVersions(
+				repo.rootPath,
+				repoUid,
+				snapshot.snapshotUid,
+			);
+
+			// 12. Finalize snapshot
 			this.storage.updateSnapshotCounts(snapshot.snapshotUid);
 			this.storage.updateSnapshotStatus({
 				snapshotUid: snapshot.snapshotUid,
@@ -735,6 +747,63 @@ export class RepoIndexer implements IndexerPort {
 	 * symbol stable_keys. Module and boundary declarations use :MODULE
 	 * keys and are not affected by symbol identity changes.
 	 */
+	/**
+	 * Extract domain versions from manifest files (package.json).
+	 * Stores package_name and package_version as measurements.
+	 */
+	private async extractManifestVersions(
+		rootPath: string,
+		repoUid: string,
+		snapshotUid: string,
+	): Promise<void> {
+		const manifestPath = join(rootPath, "package.json");
+		if (!existsSync(manifestPath)) return;
+
+		const content = await readFile(manifestPath, "utf-8");
+		const manifest = extractPackageManifest(content, "package.json");
+		if (!manifest) return;
+
+		const now = new Date().toISOString();
+		const repoStableKey = `${repoUid}:.:MODULE`;
+		const measurements: Measurement[] = [];
+
+		if (manifest.packageName) {
+			measurements.push({
+				measurementUid: uuidv4(),
+				snapshotUid,
+				repoUid,
+				targetStableKey: repoStableKey,
+				kind: "package_name",
+				valueJson: JSON.stringify({
+					value: manifest.packageName,
+					source_file: manifest.sourcePath,
+				}),
+				source: MANIFEST_EXTRACTOR_VERSION,
+				createdAt: now,
+			});
+		}
+
+		if (manifest.packageVersion) {
+			measurements.push({
+				measurementUid: uuidv4(),
+				snapshotUid,
+				repoUid,
+				targetStableKey: repoStableKey,
+				kind: "package_version",
+				valueJson: JSON.stringify({
+					value: manifest.packageVersion,
+					source_file: manifest.sourcePath,
+				}),
+				source: MANIFEST_EXTRACTOR_VERSION,
+				createdAt: now,
+			});
+		}
+
+		if (measurements.length > 0) {
+			this.storage.insertMeasurements(measurements);
+		}
+	}
+
 	private countOrphanedDeclarations(
 		repoUid: string,
 		snapshotUid: string,

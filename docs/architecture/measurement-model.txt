@@ -212,14 +212,17 @@ Phase 2: AST-derived metrics [DONE]
   - measurement_semantics: { "ast-metrics": 1 }
   - Counting rules documented in v1-cli.txt
 
-  Test coverage boundary:
-    Covered: metric formulas (12 tests), persistence/query semantics (4 tests),
-      migration upgrade path (1 test), snapshot provenance fields (1 test)
-    Not covered: CLI command dispatch and stdout/JSON contract end-to-end.
-      No CLI integration test harness exists in the project yet.
-      Adding one is a separate support-module effort.
-    Planned: SUPPORT module for CLI test harness, then coverage targets:
-      graph metrics, graph metrics --module, graph stats, arch violations
+  Test coverage:
+    Metric formulas: 12 unit tests (ast-metrics.test.ts)
+    Persistence/query semantics: 4 storage tests
+    Migration upgrade path: 1 test
+    Snapshot provenance fields: 1 test
+    CLI integration: 14 end-to-end tests (test/cli/commands.test.ts)
+      graph stats --json, human output
+      graph metrics --json, --limit, --sort, --module, --module --limit, human output
+      arch violations --json, with boundary declaration
+      graph callers --json, graph cycles --json
+      repo status --json (toolchain provenance), repo list --json
 
 Phase 3: Coverage import
   - Coverage import script (Istanbul/c8 JSON -> COVERS edges + measurements)
@@ -236,7 +239,7 @@ Phase 5: Extracted domain versions
   - API version extraction from route prefixes / OpenAPI specs
   - Database migration version extraction from migration files
   - Git tag / release branch extraction
-  - Store as measurements with evidence links to source files
+  - Store as measurements with source_file provenance in value_json
   - Enable snapshot-to-app-version correlation queries
 
 Phase 6: Policy queries and trend
@@ -284,8 +287,15 @@ Measurement kinds for extracted versions:
 
 Each carries:
   - target_stable_key: the repo, module, or file this version describes
-  - value_json: { "version": "2.4.1", "source_file": "package.json", "line": 3 }
-  - source: "version-extractor:0.1.0" (or "declaration" for human-supplied)
+  - value_json: { "value": "2.4.1", "source_file": "package.json" }
+  - source: "manifest-extractor:0.1.0" (or "declaration" for human-supplied)
+
+Evidence model:
+  Source file provenance is embedded in value_json (source_file field),
+  not via evidence_links rows. This is adequate for manifest-extracted
+  facts where the source is a single known file. The evidence_links
+  table is reserved for external artifacts (coverage reports, git
+  metrics) where the evidence is a separate file or output.
 
 Extraction priority:
   1. Manifest files (package.json, etc.) — highest signal, structured

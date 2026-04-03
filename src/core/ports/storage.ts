@@ -107,6 +107,9 @@ export interface StoragePort {
 	/** Query per-module complexity aggregates from measurements. */
 	queryModuleMetricAggregates(snapshotUid: string): ModuleMetricAggregate[];
 
+	/** Query extracted domain versions from measurements. */
+	queryDomainVersions(snapshotUid: string): DomainVersionRow[];
+
 	/** Insert measurements (batch). */
 	insertMeasurements(measurements: Measurement[]): void;
 }
@@ -230,6 +233,12 @@ export interface FunctionMetricRow {
 	cyclomaticComplexity: number;
 	parameterCount: number;
 	maxNestingDepth: number;
+}
+
+export interface DomainVersionRow {
+	kind: string;
+	value: string;
+	sourceFile: string;
 }
 
 export interface ModuleMetricAggregate {

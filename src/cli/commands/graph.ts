@@ -11,6 +11,7 @@ import type {
 	QueryResult,
 } from "../../core/model/index.js";
 import type {
+	DomainVersionRow,
 	FunctionMetricRow,
 	ModuleMetricAggregate,
 } from "../../core/ports/storage.js";
@@ -474,6 +475,54 @@ export function registerGraphCommands(
 				}
 			},
 		);
+
+	graph
+		.command("versions <repo>")
+		.description("Extracted domain versions from manifest files")
+		.option("--json", "JSON output")
+		.action((repoRef: string, opts: { json?: boolean }) => {
+			const ctx = getCtx();
+			const snap = resolveSnapshot(ctx, repoRef);
+			const { snapshotUid } = snap;
+			if (!snapshotUid) {
+				outputError(
+					opts.json,
+					`Repository not found or not indexed: ${repoRef}`,
+				);
+				process.exitCode = 1;
+				return;
+			}
+
+			const versions = ctx.storage.queryDomainVersions(snapshotUid);
+
+			if (opts.json) {
+				const qr: QueryResult<DomainVersionRow> = {
+					command: "graph versions",
+					repo: snap.repoName,
+					snapshot: snapshotUid,
+					snapshotScope: snap.snapshotScope,
+					basisCommit: snap.basisCommit,
+					results: versions,
+					count: versions.length,
+					stale: snap.stale,
+				};
+				console.log(
+					formatQueryResult(qr, (v) => ({
+						kind: v.kind,
+						value: v.value,
+						source_file: v.sourceFile,
+					})),
+				);
+			} else {
+				if (versions.length === 0) {
+					console.log("No domain versions found. No package.json detected.");
+				} else {
+					for (const v of versions) {
+						console.log(`${v.kind}: ${v.value}  (from ${v.sourceFile})`);
+					}
+				}
+			}
+		});
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

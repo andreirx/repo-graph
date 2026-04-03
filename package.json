@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "vitest run",
+    "test": "tsc && vitest run",
     "test:unit": "vitest run test/core",
     "test:int": "vitest run test/adapters",
     "test:watch": "vitest",

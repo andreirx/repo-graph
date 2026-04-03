@@ -298,9 +298,10 @@ code" to "versioned engineering substrate." Version sources to extract:
 - Git tags and release branches
 - Lockfile dependency versions for third-party compatibility context
 
-Extracted versions are attached to the graph as nodes or measurements
-with evidence links back to the source file/line. They enable queries
-like:
+Extracted versions are stored as measurements with source file
+provenance embedded in value_json. For external artifacts (coverage
+reports, git metrics), evidence_links connect artifacts to the
+measurements they support. They enable queries like:
 - which snapshots correspond to app version 2.4.x
 - which modules still depend on API v1
 - which migrations introduced schema version 37

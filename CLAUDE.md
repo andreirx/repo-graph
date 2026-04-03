@@ -38,7 +38,7 @@ Read `docs/architecture/` for full context. Summary:
 
 ```
 pnpm run build          Build TypeScript
-pnpm run test           Run all tests
+pnpm run test           Build + run all tests (includes CLI integration)
 pnpm run test:unit      Run unit tests only (test/core)
 pnpm run test:int       Run integration tests only (test/adapters)
 pnpm run lint           Run Biome linter

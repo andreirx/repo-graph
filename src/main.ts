@@ -29,7 +29,7 @@ export interface AppContext {
  * @param dbPath - Override the default database path (useful for testing).
  */
 export async function bootstrap(dbPath?: string): Promise<AppContext> {
-	const resolvedDbPath = dbPath ?? DEFAULT_DB_PATH;
+	const resolvedDbPath = dbPath ?? process.env.RGR_DB_PATH ?? DEFAULT_DB_PATH;
 
 	// Ensure the data directory exists
 	const dir =
