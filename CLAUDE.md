@@ -119,13 +119,16 @@ rgr declare list repo-graph --kind requirement
 rgr declare remove repo-graph <uid>
 ```
 
-Use `/investigate-symbol repo-graph <SymbolName>` for a guided investigation workflow.
-Use `/repo-overview .` for a full structural health check.
+Slash commands (`.claude/commands/`):
+- `/investigate-symbol <repo> <SymbolName>` — callers, callees, dead-code, cycles
+- `/repo-overview <path>` — index + structural health overview
+- `/assess-health <repo>` — full quality health report (structure, complexity, hotspots, risk)
+- `/verify-requirements <repo>` — evaluate requirement obligations (PASS/FAIL/MISSING)
 
-Agent skills in `docs/skills/`:
-- `investigate-symbol.txt` — understand a symbol's callers, callees, and dead-code status
-- `assess-code-health.txt` — full structural + quality health report (stats, metrics, hotspots, risk)
-- `verify-requirements.txt` — check verification obligations against measurements
+Agent skill docs (`docs/skills/`):
+- `investigate-symbol.txt` — detailed investigation workflow
+- `assess-code-health.txt` — full health report workflow with all measurement steps
+- `verify-requirements.txt` — requirement obligation verification workflow
 
 rgr uses syntax-only resolution with receiver type binding. Import graphs are accurate. Call graphs resolve well on class-heavy architectures with explicit typing; weaker on SDK-heavy or functional patterns. When callee results look incomplete, read the source directly.
 
