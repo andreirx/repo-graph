@@ -362,6 +362,34 @@ tool graph churn <repo>
   Non-git directories return empty results.
 
 
+tool graph coverage <repo> <report>
+
+  Import coverage from an Istanbul/c8 JSON report (coverage-final.json).
+  Reads per-file statement, function, and branch coverage from the report,
+  rebases paths to repo-relative, filters to indexed files, and stores
+  as measurements. Re-running is idempotent.
+
+  Measurement kinds:
+    line_coverage     — statements covered / total (0.0 to 1.0)
+    function_coverage — functions covered / total (0.0 to 1.0)
+    branch_coverage   — branches covered / total (0.0 to 1.0)
+
+  Each measurement value includes covered count and total for transparency.
+
+  Flags:
+    --json                  Machine-readable output
+
+  Example:
+    tool graph coverage payments ./coverage/coverage-final.json
+    tool graph coverage payments ./coverage/coverage-final.json --json
+
+  Output per file:
+    file, line%, func%, branch%
+
+  Note: only files that exist in the indexed snapshot are imported.
+  Files in the report but not in the graph are silently skipped.
+
+
 tool graph hotspots <repo>
 
   File-level hotspots: churn x complexity. Requires prior churn import

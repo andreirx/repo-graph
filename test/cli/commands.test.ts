@@ -8,6 +8,9 @@
  * human-readable formatting.
  */
 
+import { randomUUID } from "node:crypto";
+import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestHarness, type TestHarness } from "./harness.js";
@@ -309,5 +312,82 @@ describe("graph hotspots", () => {
 		expect(json.total_files).toBe(0);
 		expect(json.formula).toBe("churn_lines * sum_cyclomatic_complexity");
 		expect(json.formula_version).toBe(1);
+	});
+});
+
+// ── graph coverage ────────────────────────────────────────────────────
+
+describe("graph coverage", () => {
+	let coverageReportPath: string;
+
+	beforeAll(() => {
+		// Create a synthetic Istanbul coverage report referencing fixture files
+		const dir = join(tmpdir(), `rgr-cov-cli-${randomUUID()}`);
+		mkdirSync(dir, { recursive: true });
+		coverageReportPath = join(dir, "coverage-final.json");
+
+		const report: Record<string, unknown> = {};
+		// Use absolute paths as Istanbul does
+		report[join(FIXTURES_PATH, "src/service.ts")] = {
+			s: { "0": 5, "1": 0, "2": 3 },
+			f: { "0": 2, "1": 0 },
+			b: { "0": [1, 0] },
+			statementMap: {},
+			fnMap: {},
+			branchMap: {},
+		};
+		report[join(FIXTURES_PATH, "src/types.ts")] = {
+			s: { "0": 1, "1": 1 },
+			f: { "0": 1 },
+			b: {},
+			statementMap: {},
+			fnMap: {},
+			branchMap: {},
+		};
+
+		writeFileSync(coverageReportPath, JSON.stringify(report));
+	});
+
+	afterAll(() => {
+		try {
+			unlinkSync(coverageReportPath);
+		} catch {
+			// best effort
+		}
+	});
+
+	it("--json imports coverage and returns per-file data", async () => {
+		const r = await h.run(
+			"graph",
+			"coverage",
+			"test-repo",
+			coverageReportPath,
+			"--json",
+		);
+		expect(r.exitCode).toBe(0);
+		const json = r.json();
+		expect(json.command).toBe("graph coverage");
+		expect(json.repo).toBe("test-repo");
+		expect(json.matched_to_index).toBeGreaterThanOrEqual(1);
+		const results = json.results as Array<Record<string, unknown>>;
+		expect(results.length).toBeGreaterThanOrEqual(1);
+		// service.ts: 2/3 statements covered = ~0.6667
+		const service = results.find((r) =>
+			(r.file as string).includes("service.ts"),
+		);
+		expect(service).toBeDefined();
+		expect(service?.line_coverage).toBeCloseTo(0.6667, 2);
+	});
+
+	// Note: coverage import idempotency (delete-before-insert) is tested at the
+	// storage layer via deleteMeasurementsByKind. The CLI renders from the
+	// freshly parsed report, not stored measurements, so a CLI-level
+	// idempotency test cannot verify storage row counts.
+
+	it("human output shows percentage columns", async () => {
+		const r = await h.run("graph", "coverage", "test-repo", coverageReportPath);
+		expect(r.exitCode).toBe(0);
+		expect(r.stdout).toContain("LINE%");
+		expect(r.stdout).toContain("files imported");
 	});
 });

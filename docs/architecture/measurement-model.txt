@@ -224,16 +224,28 @@ Phase 2: AST-derived metrics [DONE]
       graph callers --json, graph cycles --json
       repo status --json (toolchain provenance), repo list --json
 
-Phase 3: Coverage import
-  - Coverage import script (Istanbul/c8 JSON -> COVERS edges + measurements)
-  - Store line/function/branch coverage as measurements per file
-  - Implement coverage-gap queries (high-complexity + low-coverage)
+Phase 3: Coverage import [DONE]
+  - coverage-import.ts: Istanbul/c8 JSON parser
+  - graph coverage command: imports line/function/branch coverage per file
+  - Path rebasing from absolute to repo-relative
+  - Filtered to repo-level file inventory (getFilesByRepo), not
+    snapshot-scoped FILE nodes. Adequate for the current single-snapshot
+    model. Tightening to snapshot-scoped lookup is needed when
+    multi-snapshot support is added. Same limitation as churn import.
+  - Idempotent (deletes previous coverage measurements before import).
+    Idempotency verified at storage layer (deleteMeasurementsByKind test).
+  - measurement_semantics: { "coverage": 1 }
+  - 8 unit tests for the importer, 2 CLI integration tests
+  - Pending: coverage-gap queries (high-complexity + low-coverage),
+    COVERS edges, under-tested hotspot assessment
 
 Phase 4: Churn import [DONE — churn import only, hotspot computation pending]
   - GitPort in src/core/ports/git.ts
   - GitAdapter in src/adapters/git/git-adapter.ts
   - graph churn command: imports change_frequency and churn_lines per file
   - Configurable time window (--since)
+  - Filtered to repo-level file inventory, not snapshot-scoped FILE nodes.
+    Same limitation as coverage import.
   - Measurements: change_frequency (commit count), churn_lines (added + deleted)
   - measurement_semantics: { "git-churn": 1 }
   - Tests: 6 git adapter tests, 2 CLI integration tests

@@ -96,8 +96,11 @@ root/
 |   |       |                              persistence, manifest version extraction
 |   |
 |   |   |-- git/
-|   |       |-- git-adapter.ts             Implements GitPort. Wraps git CLI for commit hash,
-|   |                                      dirty state, and per-file churn data.
+|   |   |   |-- git-adapter.ts             Implements GitPort. Wraps git CLI for commit hash,
+|   |   |                                  dirty state, and per-file churn data.
+|   |   |
+|   |   |-- importers/
+|   |       |-- coverage-import.ts         Istanbul/c8 JSON parser for coverage data
 |   |
 |   |   Future adapters (not yet implemented):
 |   |   |-- watcher/                       (v2) File watcher for live refresh
