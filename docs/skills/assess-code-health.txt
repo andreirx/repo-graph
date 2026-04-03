@@ -1,0 +1,72 @@
+SKILL: assess-code-health
+PURPOSE: Produce a structural and quality health report for a codebase.
+PHASE: v1.5
+
+PREREQUISITES:
+  - Repository is registered and indexed: rgr repo status <repo> shows a ready snapshot
+  - For churn/hotspot data: rgr graph churn <repo> has been run
+  - For coverage data: rgr graph coverage <repo> <report> has been run
+
+STEPS:
+
+  1. Check structural health.
+
+     Run: rgr graph stats <repo> --json
+     Read: Module-level metrics. Look for:
+       - High instability (> 0.8) on modules that should be stable
+       - High distance from main sequence (> 0.5)
+       - Modules with high fan-out (> 5) that may be change amplifiers
+
+  2. Check for dependency cycles.
+
+     Run: rgr graph cycles <repo> --json
+     Read: Any cycles indicate structural coupling that should be broken.
+
+  3. Check architecture boundary compliance.
+
+     Run: rgr arch violations <repo> --json
+     Read: Violations mean declared boundaries are being crossed.
+       Zero violations = clean architecture.
+
+  4. Check complexity distribution.
+
+     Run: rgr graph metrics <repo> --limit 20 --json
+     Read: Top 20 most complex functions. Look for:
+       - CC > 15: consider refactoring
+       - CC > 25: strong refactoring candidate
+       - Functions with high nesting depth (> 4)
+
+     Run: rgr graph metrics <repo> --module --json
+     Read: Per-module complexity aggregates. High avg_cc modules
+       need the most attention.
+
+  5. Check churn and hotspots (if available).
+
+     Run: rgr graph hotspots <repo> --limit 10 --json
+     Read: Top hotspot files (churn x complexity). These are the
+       files most likely to cause maintenance pain.
+
+  6. Check risk (if coverage available).
+
+     Run: rgr graph risk <repo> --limit 10 --json
+     Read: Under-tested hotspots. Files that are complex, churned,
+       AND poorly covered. Highest-priority remediation targets.
+
+  7. Check domain version.
+
+     Run: rgr graph versions <repo> --json
+     Read: Package name and version for context.
+
+OUTPUT:
+  A health summary containing:
+    - Structural: cycle count, violation count, avg instability
+    - Complexity: top complex functions, modules with highest avg CC
+    - Churn: top hotspot files (if available)
+    - Risk: top under-tested hotspots (if coverage available)
+    - Version: current package version
+
+NOTES:
+  - Churn and coverage data must be imported separately before steps 5-6.
+  - Hotspot formula is v1: churn_lines * sum_cyclomatic_complexity.
+  - Risk formula is v1: hotspot_score * (1 - line_coverage).
+  - Both formulas have known biases (see measurement-model.txt).

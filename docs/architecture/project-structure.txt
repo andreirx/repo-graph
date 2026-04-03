@@ -33,15 +33,11 @@ root/
 |   |   |-- planned-cli.txt               Full planned CLI (all phases)
 |   |   |-- v1-cli.txt                    V1 reduced scope CLI
 |   |
-|   |-- skills/                          Agent skill definitions (see below)
-|       |-- README.txt
-|       |-- investigate-change-impact.txt
-|       |-- characterize-legacy-method.txt
-|       |-- find-architecture-violations.txt
-|       |-- trace-data-flow.txt
-|       |-- assess-test-coverage-gaps.txt
-|       |-- detect-dead-code.txt
-|       |-- plan-safe-refactoring.txt
+|   |-- skills/                          Agent skill definitions
+|       |-- README.txt                     Skill format and inventory
+|       |-- investigate-symbol.txt         Symbol callers, callees, dead-code status
+|       |-- assess-code-health.txt         Full structural + quality health report
+|       |-- verify-requirements.txt        Requirement obligation verification
 |
 |-- src/
 |   |
@@ -65,6 +61,7 @@ root/
 |   |       |-- storage.ts                 StoragePort (CRUD, graph queries, measurements)
 |   |       |-- extractor.ts               ExtractorPort (parse file, return nodes/edges/metrics)
 |   |       |-- indexer.ts                 IndexerPort (orchestrate indexing + refresh)
+|   |       |-- git.ts                     GitPort (commit hash, dirty state, file churn)
 |   |
 |   |-- adapters/                        OUTER LAYER — implements core ports
 |   |   |                                Each adapter depends on core/ and on its specific
@@ -117,9 +114,10 @@ root/
 |   |   |-- commands/
 |   |   |   |-- repo.ts                    rgr repo add|index|status|refresh|list|remove
 |   |   |   |-- graph.ts                   rgr graph callers|callees|imports|path|dead|cycles
-|   |   |   |                              |stats|metrics|versions
+|   |   |   |                              |stats|metrics|versions|churn|hotspots|coverage
+|   |   |   |                              |risk|obligations
 |   |   |   |-- declare.ts                 rgr declare module|boundary|entrypoint|invariant
-|   |   |   |                              |list|remove
+|   |   |   |                              |requirement|obligation|list|remove
 |   |   |   |-- arch.ts                    rgr arch violations
 |   |   |
 |   |   |   Future commands (not yet implemented):
@@ -134,9 +132,9 @@ root/
 |   |
 |   |-- main.ts                           COMPOSITION ROOT
 |   |                                     The ONLY file that knows about concrete adapters.
-|   |                                     Instantiates SqliteStorage, TsExtractor, RepoIndexer.
-|   |                                     Injects them into CLI commands. Supports RGR_DB_PATH
-|   |                                     env var for testing.
+|   |                                     Instantiates SqliteStorage, TsExtractor, RepoIndexer,
+|   |                                     GitAdapter. Injects them into CLI commands.
+|   |                                     Supports RGR_DB_PATH env var for testing.
 |   |
 |   |-- version.ts                        CANONICAL VERSION MANIFEST
 |                                         Single source of truth for all component versions,
@@ -159,11 +157,15 @@ root/
 |   |   |-- indexer/
 |   |   |   |-- repo-indexer.test.ts       Edge resolution, affinity, module creation
 |   |   |-- git/
-|   |       |-- git-adapter.test.ts        Git commit, dirty state, churn data
+|   |   |   |-- git-adapter.test.ts        Git commit, dirty state, churn data
+|   |   |-- importers/
+|   |       |-- coverage-import.test.ts    Istanbul/c8 JSON parsing, path rebasing
 |   |
 |   |-- cli/                             CLI integration tests (end-to-end)
 |   |   |-- harness.ts                    Test harness: temp DB, CLI subprocess, assertions
-|   |   |-- commands.test.ts              All commands: repo, graph, arch, declare, versions, churn
+|   |   |-- commands.test.ts              All commands: repo, graph, arch, declare,
+|   |   |                                 versions, churn, hotspots, coverage, risk,
+|   |   |                                 requirements, obligations
 |   |
 |   |-- fixtures/                        Sample codebases for testing extractors
 |       |-- typescript/
@@ -198,23 +200,24 @@ DESIGN PRINCIPLES
    Multiple extractors can produce edges for the same relationship — the storage
    layer deduplicates and records all evidence sources.
 
-3. Facts, declarations, and inferences are stored separately.
-   - Facts: extracted from code by deterministic parsers. Attached to snapshots.
-   - Declarations: human-supplied via `tool declare`. Persistent until explicitly changed.
-   - Inferences: computed by analysis pipelines (architecture classification, dead-code
-     likelihood, ownership guesses). Carry confidence scores. Attached to snapshots.
-   Only inferences have confidence scores. Facts are 1.0 by definition.
+3. Four data categories, stored separately.
+   - Facts: nodes and edges extracted from code. Attached to snapshots.
+   - Measurements: deterministic values from graph, AST, or imported evidence.
+     No confidence score. See measurement-model.txt.
+   - Declarations: human-supplied via `rgr declare`. Persistent until superseded.
+     Includes requirements with verification obligations.
+   - Inferences: derived assessments (hotspot scores, risk scores).
+     Carry confidence scores. Attached to snapshots.
 
 4. The SQLite database is the integration point.
-   The core tool writes facts and declarations. External Python scripts read facts,
-   compute inferences, and write inferences back. The CLI queries all three.
-   No process needs to know about any other process. The database schema IS the contract.
+   The core tool writes facts, measurements, and declarations.
+   Coverage and churn are imported from external tools into the same DB.
+   The CLI queries all four data categories. The database schema IS the contract.
 
-5. Framework extractors are the highest-value custom code.
+5. Framework extractors are the planned differentiation (v2+).
    Base extractors (Tree-sitter symbol + import extraction) are commodity.
-   Framework extractors (Express routes, NestJS decorators, Spring annotations,
-   TypeORM entities) capture edges invisible to generic import analysis.
-   These are where the tool's differentiation lives.
+   Framework extractors (Express routes, NestJS decorators, Spring annotations)
+   will capture edges invisible to import analysis. Not yet implemented.
 
 6. Skills are agent workflows, not tool features.
    A skill is a markdown file describing a sequence of CLI commands an agent should
@@ -239,66 +242,53 @@ DEPENDENCY MAP
                           | depends on
                           v
                     +-----------+
-                    | Use Cases |  callers, callees, path, dead, cycles
-                    +-----+-----+
-                          |
-                          | depends on
-                          v
-                    +-----------+
-                    |   Core    |  model (Node, Edge, Snapshot, Declaration)
-                    |   Model   |  ports (Storage, Extractor, Git, Watcher)
+                    |   Core    |  model (Node, Edge, Snapshot, Declaration,
+                    |   Model   |         Measurement, Inference, Requirement)
+                    |   +       |  ports (Storage, Extractor, Indexer, Git)
+                    |   Ports   |
                     +-----------+
                           ^
                           |
                           | implements
                           |
-        +-----------------+-----------------+
-        |                 |                 |
-  +-----------+    +-----------+    +-----------+
-  |  SQLite   |    | Tree-sitter|   |    Git    |
-  |  Storage  |    | Extractors |   |  Adapter  |
-  +-----------+    +-----------+    +-----------+
+        +--------+--------+--------+--------+
+        |        |        |        |        |
+  +--------+ +--------+ +--------+ +--------+ +--------+
+  | SQLite | | TS     | | Repo   | | Git    | | Import |
+  |Storage | |Extract | |Indexer | |Adapter | |  ers   |
+  +--------+ +--------+ +--------+ +--------+ +--------+
 
-
-  External (out-of-process, optional):
-
-  +-------------------+
-  | Python Analysis   |  reads/writes SQLite directly
-  | Pipelines         |  no dependency on core TS code
-  +-------------------+
-
-  +-------------------+
-  | External Tool     |  lizard, SCIP, coverage tools
-  | Wrappers          |  output -> SQLite import scripts
-  +-------------------+
+  version.ts is the canonical version manifest (all component versions).
+  main.ts is the composition root (wires all adapters).
 
 
 ================================================================================
-MATURITY LEVELS
+CURRENT STATUS (v1.5)
 ================================================================================
 
-v1 (PROTOTYPE -> MATURE):
-  src/core/model/           — define and stabilize
-  src/core/queries/          — callers, callees, imports, path, dead, cycles
-  src/core/ports/            — Storage, Extractor
-  src/adapters/storage/      — SQLite implementation
-  src/adapters/extractors/typescript/  — base TS extractor + 1 framework
-  src/cli/commands/repo.ts   — add, index, status, refresh
-  src/cli/commands/graph.ts  — callers, callees, imports, path, dead, cycles
-  src/cli/commands/declare.ts — module, boundary, entrypoint
+Shipped and stable:
+  src/core/model/           — domain entities, types, query results
+  src/core/ports/            — StoragePort, ExtractorPort, IndexerPort, GitPort
+  src/adapters/storage/      — SQLite with migrations 001-003
+  src/adapters/extractors/   — TS extractor with binding model, AST metrics,
+                               manifest extractor (package.json)
+  src/adapters/indexer/      — file scanning, edge resolution, measurement persistence
+  src/adapters/git/          — commit hash, dirty state, file churn
+  src/adapters/importers/    — Istanbul/c8 coverage import
+  src/cli/commands/repo.ts   — add, index, status, refresh, list, remove
+  src/cli/commands/graph.ts  — callers, callees, imports, path, dead, cycles,
+                               stats, metrics, versions, churn, hotspots,
+                               coverage, risk, obligations
+  src/cli/commands/declare.ts — module, boundary, entrypoint, invariant,
+                                requirement, obligation, list, remove
+  src/cli/commands/arch.ts   — violations (IMPORTS only)
 
-v2 (PROTOTYPE):
-  src/core/ports/git.ts, watcher.ts
-  src/adapters/git/
-  src/adapters/watcher/
-  src/cli/commands/arch.ts
-  src/cli/commands/change.ts
-  src/cli/commands/legacy.ts
-  src/adapters/extractors/java/
-  tools/python/ analysis pipelines
-
-v3 (PROTOTYPE):
-  src/cli/commands/fleet.ts
-  src/adapters/extractors/rust/
-  src/adapters/extractors/c/
-  Cross-repo boundary graph
+Not yet implemented (v2+):
+  src/adapters/watcher/       — file watcher for live refresh
+  src/adapters/extractors/typescript/frameworks/ — Express, NestJS, etc.
+  src/adapters/extractors/java/  — Java extractor
+  src/cli/commands/flow.ts    — trace, events, producers, consumers
+  src/cli/commands/change.ts  — impact, effect, pinch-points
+  src/cli/commands/legacy.ts  — hotspots, clones, seams, monster-methods
+  src/cli/commands/fleet.ts   — cross-repo operations
+  tools/python/               — external analysis pipelines

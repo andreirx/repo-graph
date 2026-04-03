@@ -45,28 +45,25 @@ The agent can deviate from the skill if the results warrant it, but the skill
 provides the default path.
 
 
-SKILL INVENTORY (PLANNED)
+SKILL INVENTORY
 --------------------------
 
-v1 skills (use only v1 CLI commands):
+Implemented (v1.5 — use current CLI commands):
 
   investigate-symbol.txt
     "I need to understand what this symbol does and who depends on it."
-    Commands: graph callees, graph callers, graph path
+    Commands: graph callers, graph callees, graph path, graph dead
 
-  find-dead-code.txt
-    "Find unreachable code in this repo."
-    Commands: declare entrypoint (verify), graph dead
+  assess-code-health.txt
+    "Produce a structural and quality health report for a codebase."
+    Commands: graph stats, graph cycles, arch violations, graph metrics,
+    graph hotspots, graph risk, graph versions
 
-  detect-circular-deps.txt
-    "Find and report circular dependencies."
-    Commands: graph cycles, graph path (for each cycle, show the chain)
+  verify-requirements.txt
+    "Check whether declared requirements and obligations are satisfied."
+    Commands: declare list --kind requirement, graph obligations
 
-  verify-declarations.txt
-    "Check that declared boundaries match the extracted graph."
-    Commands: declare list, graph imports (for each boundary, check for violations)
-
-v2 skills (use v2 CLI commands):
+Planned (v2 — not yet implemented):
 
   investigate-change-impact.txt
     "I need to modify symbol X. What else could break?"
@@ -76,30 +73,13 @@ v2 skills (use v2 CLI commands):
     "I need to test a legacy method before modifying it."
     Commands: legacy seams, legacy characterize, change uncovered
 
-  find-architecture-violations.txt
-    "Show me all dependency rule violations in the codebase."
-    Commands: arch violations, arch boundaries, declare boundary
-
   trace-data-flow.txt
     "Trace how data flows from this HTTP endpoint to the database."
     Commands: flow trace, flow data-path, arch sinks
 
-  assess-test-coverage-gaps.txt
-    "Which critical code has no tests?"
-    Commands: legacy hotspots, change uncovered, legacy monster-methods
-
-  detect-dead-code-safe.txt
-    "Find dead code with dynamic-reference safety checks."
-    Commands: legacy dead-code-candidates (extends v1 graph dead)
-
   plan-safe-refactoring.txt
     "I want to refactor this hotspot. What's the safe approach?"
-    Commands: legacy hotspots, legacy seams, change impact,
-    change required-tests, legacy characterize
-
-  extract-state-machine.txt
-    "Map the implicit state machine for this entity."
-    Commands: legacy state-machine, graph callers (for each transition)
+    Commands: legacy hotspots, legacy seams, change impact
 
   audit-error-handling.txt
     "Find silent exception swallowing and missing error handling."

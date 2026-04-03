@@ -1,0 +1,65 @@
+SKILL: verify-requirements
+PURPOSE: Check whether declared requirements and verification obligations are satisfied.
+PHASE: v1.5
+
+PREREQUISITES:
+  - Repository is registered and indexed
+  - Requirements declared: rgr declare list <repo> --kind requirement
+  - Obligations added: rgr declare obligation <repo> <req-id> ...
+  - For coverage obligations: coverage imported
+  - For hotspot obligations: churn imported and hotspots computed
+
+STEPS:
+
+  1. List all requirements.
+
+     Run: rgr declare list <repo> --kind requirement --json
+     Read: Each requirement has req_id, version, objective, constraints,
+       non_goals, and a verification array (if obligations exist).
+
+  2. Evaluate all obligations.
+
+     Run: rgr graph obligations <repo> --json
+     Read: Each obligation produces a verdict:
+       - PASS: evidence meets the obligation
+       - FAIL: evidence does not meet the obligation (with details)
+       - MISSING_EVIDENCE: required measurements or declarations not found
+       - UNSUPPORTED: verification method not yet implemented
+
+  3. For FAIL verdicts, investigate the evidence.
+
+     Read the evidence payload for each FAIL. It contains:
+       - For arch_violations: violation_count, snapshot
+       - For coverage_threshold: avg_coverage, threshold, files_measured
+       - For complexity_threshold: max_complexity, threshold, functions_measured
+       - For hotspot_threshold: max_hotspot_score, threshold
+
+  4. For MISSING_EVIDENCE, determine what data is needed.
+
+     Common causes:
+       - No boundary declarations for arch_violations target
+       - No coverage import for coverage_threshold
+       - No churn/hotspot data for hotspot_threshold
+       - Target path does not match any indexed files
+
+  5. Remediate or waive.
+
+     For FAIL: fix the code or adjust the threshold.
+     For MISSING_EVIDENCE: import the required data.
+     For UNSUPPORTED: record as manual review obligation (future).
+
+OUTPUT:
+  A verification status report:
+    - Total obligations: N
+    - PASS: N
+    - FAIL: N (with details)
+    - MISSING_EVIDENCE: N (with causes)
+    - Requirement closure: X of Y requirements fully satisfied
+
+NOTES:
+  - Supported verification methods: arch_violations, coverage_threshold,
+    complexity_threshold, hotspot_threshold.
+  - manual_review, test_exists, and custom are modeled but not yet
+    machine-checkable. They return UNSUPPORTED.
+  - Obligations are embedded in requirement declarations and versioned
+    with the requirement. Adding an obligation bumps the version.
