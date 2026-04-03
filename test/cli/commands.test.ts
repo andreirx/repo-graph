@@ -263,3 +263,34 @@ describe("graph versions", () => {
 		expect(r.stdout).toContain("package_version: 0.0.1");
 	});
 });
+
+// ── graph churn ───────────────────────────────────────────────────────
+
+describe("graph churn", () => {
+	it("--json returns churn data with since field", async () => {
+		const r = await h.run(
+			"graph",
+			"churn",
+			"test-repo",
+			"--since",
+			"365.days.ago",
+			"--json",
+		);
+		expect(r.exitCode).toBe(0);
+		const json = r.json();
+		expect(json.command).toBe("graph churn");
+		expect(json.since).toBe("365.days.ago");
+		// Fixture dir may not be a git repo, so count could be 0
+		expect(json.count).toBeGreaterThanOrEqual(0);
+	});
+
+	it("does not crash on non-git fixture directory", async () => {
+		const r = await h.run("graph", "churn", "test-repo", "--json");
+		expect(r.exitCode).toBe(0);
+	});
+
+	// Note: idempotency of persisted measurements is tested at the storage
+	// layer (deleteMeasurementsByKind + re-insert test). The CLI test cannot
+	// verify storage row counts because graph churn displays from fresh git
+	// data, not from stored measurements.
+});

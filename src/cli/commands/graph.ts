@@ -523,6 +523,149 @@ export function registerGraphCommands(
 				}
 			}
 		});
+
+	graph
+		.command("churn <repo>")
+		.description("Import and display per-file git churn measurements")
+		.option("--since <period>", "Time window (git date format)", "90.days.ago")
+		.option("--limit <n>", "Max results to display")
+		.option("--json", "JSON output")
+		.action(
+			async (
+				repoRef: string,
+				opts: { since: string; limit?: string; json?: boolean },
+			) => {
+				const ctx = getCtx();
+				const snap = resolveSnapshot(ctx, repoRef);
+				const { snapshotUid, repoUid } = snap;
+				if (!snapshotUid || !repoUid) {
+					outputError(
+						opts.json,
+						`Repository not found or not indexed: ${repoRef}`,
+					);
+					process.exitCode = 1;
+					return;
+				}
+
+				const repo = ctx.storage.getRepo({ uid: repoUid });
+				if (!repo) {
+					outputError(opts.json, `Repository not found: ${repoRef}`);
+					process.exitCode = 1;
+					return;
+				}
+
+				// Import churn from git
+				const rawChurn = await ctx.git.getFileChurn(repo.rootPath, opts.since);
+
+				// Filter to files that exist as indexed FILE nodes.
+				// Git history includes docs, configs, lockfiles etc. that
+				// are not in the graph. Only persist churn for indexed files.
+				const indexedFiles = new Set<string>();
+				const files = ctx.storage.getFilesByRepo(repoUid);
+				for (const f of files) {
+					indexedFiles.add(f.path);
+				}
+				const churnData = rawChurn.filter((e) => indexedFiles.has(e.filePath));
+
+				// Idempotent: delete previous churn measurements for this
+				// snapshot before inserting fresh data.
+				ctx.storage.deleteMeasurementsByKind(snapshotUid, [
+					"change_frequency",
+					"churn_lines",
+				]);
+
+				// Persist as measurements
+				const now = new Date().toISOString();
+				const measurements: Array<{
+					measurementUid: string;
+					snapshotUid: string;
+					repoUid: string;
+					targetStableKey: string;
+					kind: string;
+					valueJson: string;
+					source: string;
+					createdAt: string;
+				}> = [];
+
+				for (const entry of churnData) {
+					const fileKey = `${repoUid}:${entry.filePath}:FILE`;
+					measurements.push({
+						measurementUid: crypto.randomUUID(),
+						snapshotUid,
+						repoUid,
+						targetStableKey: fileKey,
+						kind: "change_frequency",
+						valueJson: JSON.stringify({
+							value: entry.commitCount,
+							since: opts.since,
+						}),
+						source: "git-churn:0.1.0",
+						createdAt: now,
+					});
+					measurements.push({
+						measurementUid: crypto.randomUUID(),
+						snapshotUid,
+						repoUid,
+						targetStableKey: fileKey,
+						kind: "churn_lines",
+						valueJson: JSON.stringify({
+							value: entry.linesChanged,
+							since: opts.since,
+						}),
+						source: "git-churn:0.1.0",
+						createdAt: now,
+					});
+				}
+
+				if (measurements.length > 0) {
+					ctx.storage.insertMeasurements(measurements);
+				}
+
+				// Display results
+				let display = churnData;
+				if (opts.limit) {
+					display = display.slice(0, Number.parseInt(opts.limit, 10));
+				}
+
+				if (opts.json) {
+					const results = display.map((e) => ({
+						file: e.filePath,
+						commit_count: e.commitCount,
+						lines_changed: e.linesChanged,
+					}));
+					const qr = {
+						command: "graph churn",
+						repo: snap.repoName,
+						snapshot: snapshotUid,
+						snapshot_scope: snap.snapshotScope,
+						basis_commit: snap.basisCommit,
+						results,
+						count: results.length,
+						stale: snap.stale,
+						since: opts.since,
+					};
+					console.log(JSON.stringify(qr, null, 2));
+				} else {
+					if (display.length === 0) {
+						console.log("No file changes found in the specified window.");
+					} else {
+						console.log(
+							"FILE                                         COMMITS  LINES_CHANGED",
+						);
+						for (const e of display) {
+							const file = e.filePath.padEnd(45);
+							const commits = String(e.commitCount).padStart(7);
+							const lines = String(e.linesChanged).padStart(14);
+							console.log(`${file}${commits}${lines}`);
+						}
+						console.log("");
+						console.log(
+							`${churnData.length} files changed (showing ${display.length}, --since ${opts.since})`,
+						);
+					}
+				}
+			},
+		);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

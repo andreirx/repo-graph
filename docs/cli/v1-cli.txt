@@ -334,6 +334,34 @@ tool graph versions <repo>
     kind (package_name | package_version), value, source_file
 
 
+tool graph churn <repo>
+
+  Import and display per-file git churn measurements.
+  Reads git commit history for the specified time window and stores
+  change_frequency (commit count) and churn_lines (lines added + deleted)
+  as measurements attached to FILE nodes.
+
+  Measurement definitions:
+    change_frequency — number of commits that modified the file in the window
+    churn_lines — total lines added + deleted in the window
+
+  Flags:
+    --since <period>        Time window in git date format (default: 90.days.ago)
+    --limit <n>             Max results to display
+    --json                  Machine-readable output
+
+  Example:
+    tool graph churn payments --since 30.days.ago
+    tool graph churn payments --since 365.days.ago --limit 20
+    tool graph churn payments --json
+
+  Output per file:
+    file, commit_count, lines_changed
+
+  Note: requires the repo root to be a git repository.
+  Non-git directories return empty results.
+
+
 ================================================================================
 DECLARATIONS
 ================================================================================

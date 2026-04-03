@@ -67,10 +67,12 @@ export function buildToolchainJson(): ToolchainJson {
 		measurement_semantics: {
 			"ast-metrics": 1,
 			"domain-versions": 1,
+			"git-churn": 1,
 		},
 		measurement_versions: {
 			"ast-metrics": "ast-metrics:0.1.0",
 			"domain-versions": "manifest-extractor:0.1.0",
+			"git-churn": "git-churn:0.1.0",
 		},
 	};
 }

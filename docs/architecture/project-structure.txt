@@ -95,8 +95,11 @@ root/
 |   |       |                              orchestration, edge resolution, measurement
 |   |       |                              persistence, manifest version extraction
 |   |
+|   |   |-- git/
+|   |       |-- git-adapter.ts             Implements GitPort. Wraps git CLI for commit hash,
+|   |                                      dirty state, and per-file churn data.
+|   |
 |   |   Future adapters (not yet implemented):
-|   |   |-- git/                           (v2) Git adapter for churn, blame, commit history
 |   |   |-- watcher/                       (v2) File watcher for live refresh
 |   |   |-- extractors/typescript/frameworks/  (v2) Express, NestJS, etc.
 |   |   |-- extractors/java/              (v2+)
@@ -151,11 +154,13 @@ root/
 |   |   |   |-- manifest/
 |   |   |       |-- package-json.test.ts   Package manifest extraction
 |   |   |-- indexer/
-|   |       |-- repo-indexer.test.ts       Edge resolution, affinity, module creation
+|   |   |   |-- repo-indexer.test.ts       Edge resolution, affinity, module creation
+|   |   |-- git/
+|   |       |-- git-adapter.test.ts        Git commit, dirty state, churn data
 |   |
 |   |-- cli/                             CLI integration tests (end-to-end)
 |   |   |-- harness.ts                    Test harness: temp DB, CLI subprocess, assertions
-|   |   |-- commands.test.ts              All commands: repo, graph, arch, declare, versions
+|   |   |-- commands.test.ts              All commands: repo, graph, arch, declare, versions, churn
 |   |
 |   |-- fixtures/                        Sample codebases for testing extractors
 |       |-- typescript/

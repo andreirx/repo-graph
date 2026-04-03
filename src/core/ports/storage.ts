@@ -110,6 +110,9 @@ export interface StoragePort {
 	/** Query extracted domain versions from measurements. */
 	queryDomainVersions(snapshotUid: string): DomainVersionRow[];
 
+	/** Delete measurements by kind(s) for a snapshot. Used for idempotent re-import. */
+	deleteMeasurementsByKind(snapshotUid: string, kinds: string[]): void;
+
 	/** Insert measurements (batch). */
 	insertMeasurements(measurements: Measurement[]): void;
 }

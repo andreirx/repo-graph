@@ -1083,6 +1083,17 @@ export class SqliteStorage implements StoragePort {
 		});
 	}
 
+	deleteMeasurementsByKind(snapshotUid: string, kinds: string[]): void {
+		if (kinds.length === 0) return;
+		const placeholders = kinds.map(() => "?").join(", ");
+		this.db
+			.prepare(
+				`DELETE FROM measurements
+				 WHERE snapshot_uid = ? AND kind IN (${placeholders})`,
+			)
+			.run(snapshotUid, ...kinds);
+	}
+
 	insertMeasurements(measurements: Measurement[]): void {
 		const stmt = this.db.prepare(
 			`INSERT INTO measurements

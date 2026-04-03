@@ -229,16 +229,21 @@ Phase 3: Coverage import
   - Store line/function/branch coverage as measurements per file
   - Implement coverage-gap queries (high-complexity + low-coverage)
 
-Phase 4: Churn import + hotspot computation
-  - Git adapter reads commit history
-  - Store churn metrics as measurements per file
-  - Compute hotspot scores as assessments (inferences table)
+Phase 4: Churn import [DONE — churn import only, hotspot computation pending]
+  - GitPort in src/core/ports/git.ts
+  - GitAdapter in src/adapters/git/git-adapter.ts
+  - graph churn command: imports change_frequency and churn_lines per file
+  - Configurable time window (--since)
+  - Measurements: change_frequency (commit count), churn_lines (added + deleted)
+  - measurement_semantics: { "git-churn": 1 }
+  - Tests: 6 git adapter tests, 2 CLI integration tests
+  - Pending: hotspot computation (churn x complexity as assessment in inferences table)
 
-Phase 5: Extracted domain versions
-  - Package version extraction from manifests (package.json, etc.)
-  - API version extraction from route prefixes / OpenAPI specs
-  - Database migration version extraction from migration files
-  - Git tag / release branch extraction
+Phase 5: Extracted domain versions [DONE — package.json only]
+  - Package version extraction from manifests (package.json name + version)
+  - API version extraction from route prefixes / OpenAPI specs (future)
+  - Database migration version extraction from migration files (future)
+  - Git tag / release branch extraction (future)
   - Store as measurements with source_file provenance in value_json
   - Enable snapshot-to-app-version correlation queries
 

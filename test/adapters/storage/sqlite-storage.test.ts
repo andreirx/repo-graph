@@ -774,6 +774,65 @@ describe("graph queries", () => {
 	});
 });
 
+// ── Measurement idempotency ────────────────────────────────────────────
+
+describe("deleteMeasurementsByKind + re-insert", () => {
+	it("delete-then-insert produces the same row count as a single insert", () => {
+		const snap = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.FULL,
+		});
+		const now = new Date().toISOString();
+		const makeMeasurement = (kind: string, key: string) => ({
+			measurementUid: randomUUID(),
+			snapshotUid: snap.snapshotUid,
+			repoUid: REPO_UID,
+			targetStableKey: key,
+			kind,
+			valueJson: JSON.stringify({ value: 1 }),
+			source: "test",
+			createdAt: now,
+		});
+
+		// Insert 3 churn measurements
+		storage.insertMeasurements([
+			makeMeasurement("change_frequency", `${REPO_UID}:a.ts:FILE`),
+			makeMeasurement("churn_lines", `${REPO_UID}:a.ts:FILE`),
+			makeMeasurement("change_frequency", `${REPO_UID}:b.ts:FILE`),
+		]);
+
+		// Verify 3 rows
+		const count1 = (
+			storage["db"]
+				.prepare(
+					"SELECT COUNT(*) as c FROM measurements WHERE snapshot_uid = ?",
+				)
+				.get(snap.snapshotUid) as { c: number }
+		).c;
+		expect(count1).toBe(3);
+
+		// Delete churn kinds and re-insert 2 rows (simulating idempotent re-import)
+		storage.deleteMeasurementsByKind(snap.snapshotUid, [
+			"change_frequency",
+			"churn_lines",
+		]);
+		storage.insertMeasurements([
+			makeMeasurement("change_frequency", `${REPO_UID}:a.ts:FILE`),
+			makeMeasurement("churn_lines", `${REPO_UID}:a.ts:FILE`),
+		]);
+
+		// Verify exactly 2 rows, not 5
+		const count2 = (
+			storage["db"]
+				.prepare(
+					"SELECT COUNT(*) as c FROM measurements WHERE snapshot_uid = ?",
+				)
+				.get(snap.snapshotUid) as { c: number }
+		).c;
+		expect(count2).toBe(2);
+	});
+});
+
 // ── Function metric queries ────────────────────────────────────────────
 
 describe("queryFunctionMetrics", () => {

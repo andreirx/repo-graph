@@ -10,6 +10,7 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { TypeScriptExtractor } from "./adapters/extractors/typescript/ts-extractor.js";
+import { GitAdapter } from "./adapters/git/git-adapter.js";
 import { RepoIndexer } from "./adapters/indexer/repo-indexer.js";
 import { SqliteStorage } from "./adapters/storage/sqlite/sqlite-storage.js";
 
@@ -20,6 +21,7 @@ export interface AppContext {
 	storage: SqliteStorage;
 	extractor: TypeScriptExtractor;
 	indexer: RepoIndexer;
+	git: GitAdapter;
 }
 
 /**
@@ -46,10 +48,11 @@ export async function bootstrap(dbPath?: string): Promise<AppContext> {
 	const extractor = new TypeScriptExtractor();
 	await extractor.initialize();
 
-	// Create indexer
+	// Create indexer and git adapter
 	const indexer = new RepoIndexer(storage, extractor);
+	const git = new GitAdapter();
 
-	return { storage, extractor, indexer };
+	return { storage, extractor, indexer, git };
 }
 
 /**

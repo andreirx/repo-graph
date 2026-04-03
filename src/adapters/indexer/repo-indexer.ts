@@ -32,9 +32,9 @@ import type {
 } from "../../core/ports/indexer.js";
 import type { Measurement, StoragePort } from "../../core/ports/storage.js";
 import {
+	buildToolchainJson,
 	INDEXER_VERSION,
 	MANIFEST_EXTRACTOR_VERSION,
-	buildToolchainJson,
 } from "../../version.js";
 import { extractPackageManifest } from "../extractors/manifest/package-json.js";
 
