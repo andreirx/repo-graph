@@ -76,6 +76,14 @@ CANONICAL TABLES
 ================================================================================
 
 
+-- IMPORTANT: The tables below show the FINAL schema after all migrations.
+-- The initial schema is in 001-initial.ts. Columns added by later migrations
+-- are annotated with the migration that introduced them.
+-- Migration history:
+--   001-initial.ts:            Base schema (all tables except measurements)
+--   002-provenance-columns.ts: snapshots.toolchain_json, declarations.authored_basis_json
+--   003-measurements.ts:       measurements table
+
 -- Repository registry
 -- One row per tracked repository.
 -- root_path is stored as an absolute local path for the local backend,
@@ -94,6 +102,7 @@ CREATE TABLE repos (
 -- Snapshots
 -- A snapshot represents the state of a repo's extracted knowledge at a point in time.
 -- Snapshots are immutable once sealed. The "working" snapshot is mutable until sealed.
+-- Note: toolchain_json added by migration 002 (not in 001-initial).
 
 CREATE TABLE snapshots (
   snapshot_uid        TEXT PRIMARY KEY,
@@ -110,15 +119,16 @@ CREATE TABLE snapshots (
   created_at          TEXT NOT NULL,
   completed_at        TEXT,
   label               TEXT,
-  toolchain_json      TEXT                  -- snapshot-level provenance (v2+)
+  toolchain_json      TEXT                  -- snapshot-level provenance (migration 002)
                                             -- see docs/architecture/versioning-model.txt
                                             -- example: {"schema_compat":1,
                                             --   "extraction_semantics":2,
                                             --   "stable_key_format":2,
                                             --   "extractor_versions":{"typescript":"ts-core:0.2.0"},
-                                            --   "indexer_version":"indexer:0.1.0",
-                                            --   "measurement_semantics":{},
-                                            --   "measurement_versions":{}}
+                                            --   "indexer_version":"indexer:0.2.0",
+                                            --   "measurement_semantics":{"ast-metrics":1,"domain-versions":1},
+                                            --   "measurement_versions":{"ast-metrics":"ast-metrics:0.1.0",
+                                            --     "domain-versions":"manifest-extractor:0.1.0"}}
 );
 
 
@@ -223,6 +233,7 @@ CREATE INDEX idx_edges_repo_type ON edges(repo_uid, type);
 
 -- Declarations
 -- Human-supplied facts. Not extracted from code.
+-- Note: authored_basis_json added by migration 002 (not in 001-initial).
 -- Persistent across snapshots unless explicitly superseded.
 -- snapshot_uid is NULL for repo-wide declarations, non-NULL for snapshot-scoped ones.
 

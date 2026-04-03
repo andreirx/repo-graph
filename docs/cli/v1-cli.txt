@@ -84,6 +84,35 @@ tool repo refresh <repo>
     edges_unresolved, duration_ms
 
 
+tool repo list
+
+  List all registered repositories.
+
+  Flags:
+    --json                  Machine-readable output
+
+  Example:
+    tool repo list
+    tool repo list --json
+
+  Output per repo:
+    name, path (human) or repo_uid, name, path (JSON)
+
+
+tool repo remove <repo>
+
+  Unregister a repository. Does not delete the SQLite data unless
+  explicitly removed.
+
+  <repo> can be the repo name, repo ID, or path.
+
+  Flags:
+    --json                  Machine-readable output
+
+  Example:
+    tool repo remove payments
+
+
 ================================================================================
 GRAPH QUERIES
 ================================================================================

@@ -14,11 +14,11 @@ Clean Architecture. Dependency rule: inward only.
 
 ```
 src/core/model/     Domain entities (Node, Edge, Snapshot, Declaration). Zero external deps.
-src/core/queries/   Use cases (callers, callees, path, dead, cycles). Depend on core model only.
-src/core/ports/     Interfaces (StoragePort, ExtractorPort). Implemented by adapters.
-src/adapters/       SQLite storage, Tree-sitter extractors, Git adapter. Implement core ports.
-src/cli/            Commander-based CLI. Depends on use cases, not adapters directly.
+src/core/ports/     Interfaces (StoragePort, ExtractorPort, IndexerPort). Implemented by adapters.
+src/adapters/       SQLite storage, Tree-sitter extractors, indexer, manifest extractor.
+src/cli/            Commander-based CLI. Depends on ports, not adapters directly.
 src/main.ts         Composition root. Only file that wires concrete adapters to ports.
+src/version.ts      Canonical version manifest. Single source of truth for all component versions.
 ```
 
 Nothing in `core/` imports from `adapters/` or `cli/`.
@@ -30,17 +30,17 @@ Read `docs/architecture/` for full context. Summary:
 - **SQLite is the local backend.** Portable schema designed for future Postgres central backend.
 - **TEXT UIDs everywhere.** No auto-increment integers as identity. Globally portable.
 - **Relative paths.** All file paths in the DB are repo-relative. Never absolute.
-- **Three data categories:** Facts (extracted, confidence 1.0), Declarations (human-supplied), Inferences (computed, carry confidence). Stored in separate tables.
+- **Four data categories:** Facts (nodes/edges, confidence 1.0), Measurements (deterministic metrics), Declarations (human-supplied), Inferences (computed, carry confidence). Stored in separate tables.
 - **18 canonical edge types.** Each edge has a `resolution` (static/dynamic/inferred) and `extractor` (name:version).
-- **Framework extractors are the differentiation.** Base Tree-sitter extraction is commodity. Express/NestJS/Spring route extraction captures edges invisible to import analysis.
+- **Framework extractors are the differentiation** (planned v2). Base Tree-sitter extraction is commodity. Express/NestJS/Spring route extraction will capture edges invisible to import analysis.
 
 ## Commands
 
 ```
 pnpm run build          Build TypeScript
 pnpm run test           Build + run all tests (includes CLI integration)
-pnpm run test:unit      Run unit tests only (test/core)
 pnpm run test:int       Run integration tests only (test/adapters)
+pnpm run test:cli       Build + run CLI integration tests only (test/cli)
 pnpm run lint           Run Biome linter
 pnpm run lint:fix       Auto-fix lint issues
 ```
@@ -53,13 +53,17 @@ pnpm run lint:fix       Auto-fix lint issues
 pnpm rebuild better-sqlite3
 ```
 
-## Current phase: v1
+## Current phase: v1.5
 
-v1 scope is strictly: index one TypeScript repo, answer structural graph queries.
+v1.5 scope: index one TypeScript repo, answer structural graph queries,
+enforce architecture boundaries, compute quality measurements, extract domain versions.
 
-See `docs/cli/v1-cli.txt` for the exact command surface and acceptance criteria.
+See `docs/cli/v1-cli.txt` for the exact command surface.
 See `docs/architecture/schema.txt` for the database schema.
-See `docs/architecture/project-structure.txt` for the full folder layout and dependency map.
+See `docs/architecture/project-structure.txt` for the folder layout.
+See `docs/architecture/measurement-model.txt` for the four-layer truth model.
+See `docs/architecture/versioning-model.txt` for toolchain provenance.
+See `docs/architecture/v1-validation-report.txt` for extraction capability boundary.
 
 ## Conventions
 
@@ -73,13 +77,39 @@ See `docs/architecture/project-structure.txt` for the full folder layout and dep
 Use `rgr` (Repo-Graph) for structural analysis. If rgr is available on PATH:
 
 ```bash
+# Repository management
 rgr repo add .                           # Register this repo
-rgr repo index repo-graph                     # Full index (~400 files, <1s)
-rgr graph cycles repo-graph                   # Module-level dependency cycles
-rgr graph dead repo-graph --kind SYMBOL       # Unreferenced exported symbols
-rgr graph callers repo-graph <symbol>         # Who calls this?
-rgr graph callers repo-graph <symbol> --edge-types CALLS,INSTANTIATES  # Who uses this?
-rgr graph path repo-graph <from> <to>         # Shortest path between two symbols
+rgr repo index repo-graph                # Full index (<1s)
+rgr repo status repo-graph               # Current snapshot, toolchain provenance
+rgr repo refresh repo-graph              # Re-index (refresh snapshot)
+rgr repo list                            # All registered repos
+rgr repo remove repo-graph               # Unregister
+
+# Structural graph queries
+rgr graph callers repo-graph <symbol>    # Who calls this?
+rgr graph callers repo-graph <symbol> --edge-types CALLS,INSTANTIATES
+rgr graph callees repo-graph <symbol>    # What does this call?
+rgr graph imports repo-graph <file>      # Import chain
+rgr graph path repo-graph <from> <to>    # Shortest path between two symbols
+rgr graph dead repo-graph --kind SYMBOL  # Unreferenced exported symbols
+rgr graph cycles repo-graph              # Module-level dependency cycles
+
+# Architecture & governance
+rgr arch violations repo-graph           # IMPORTS edges crossing forbidden boundaries
+rgr declare boundary repo-graph src/core --forbids src/adapters
+
+# Quality measurements
+rgr graph stats repo-graph               # Module structural metrics (fan-in/out, instability)
+rgr graph metrics repo-graph --limit 10  # Top complex functions (cyclomatic complexity)
+rgr graph metrics repo-graph --module    # Per-module complexity aggregates
+rgr graph versions repo-graph            # Extracted domain versions (package.json)
+
+# Declarations
+rgr declare module repo-graph src/core --purpose "domain model" --maturity MATURE
+rgr declare entrypoint repo-graph <symbol> --type public_export
+rgr declare invariant repo-graph <symbol> "must not fail silently"
+rgr declare list repo-graph --kind boundary
+rgr declare remove repo-graph <uid>
 ```
 
 Use `/investigate-symbol repo-graph <SymbolName>` for a guided investigation workflow. Use `/repo-overview .` for a full structural health check.
