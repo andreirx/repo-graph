@@ -294,3 +294,20 @@ describe("graph churn", () => {
 	// verify storage row counts because graph churn displays from fresh git
 	// data, not from stored measurements.
 });
+
+// ── graph hotspots ────────────────────────────────────────────────────
+
+describe("graph hotspots", () => {
+	it("--json returns consistent envelope even with no data", async () => {
+		const r = await h.run("graph", "hotspots", "test-repo", "--json");
+		expect(r.exitCode).toBe(0);
+		const json = r.json();
+		expect(json.command).toBe("graph hotspots");
+		expect(json.repo).toBe("test-repo");
+		expect(json.snapshot).toBeDefined();
+		expect(json.count).toBe(0);
+		expect(json.total_files).toBe(0);
+		expect(json.formula).toBe("churn_lines * sum_cyclomatic_complexity");
+		expect(json.formula_version).toBe(1);
+	});
+});

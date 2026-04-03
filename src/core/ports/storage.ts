@@ -113,6 +113,21 @@ export interface StoragePort {
 	/** Delete measurements by kind(s) for a snapshot. Used for idempotent re-import. */
 	deleteMeasurementsByKind(snapshotUid: string, kinds: string[]): void;
 
+	/**
+	 * Query per-file hotspot input data by joining churn and complexity
+	 * measurements. Returns files that have BOTH churn and complexity data.
+	 */
+	queryHotspotInputs(snapshotUid: string): HotspotInput[];
+
+	/** Insert inferences (batch). */
+	insertInferences(inferences: InferenceRow[]): void;
+
+	/** Delete inferences by kind for a snapshot. Used for idempotent recompute. */
+	deleteInferencesByKind(snapshotUid: string, kind: string): void;
+
+	/** Query inferences by kind for a snapshot. */
+	queryInferences(snapshotUid: string, kind: string): InferenceRow[];
+
 	/** Insert measurements (batch). */
 	insertMeasurements(measurements: Measurement[]): void;
 }
@@ -242,6 +257,27 @@ export interface DomainVersionRow {
 	kind: string;
 	value: string;
 	sourceFile: string;
+}
+
+export interface HotspotInput {
+	fileStableKey: string;
+	filePath: string;
+	churnLines: number;
+	changeFrequency: number;
+	sumComplexity: number;
+}
+
+export interface InferenceRow {
+	inferenceUid: string;
+	snapshotUid: string;
+	repoUid: string;
+	targetStableKey: string;
+	kind: string;
+	valueJson: string;
+	confidence: number;
+	basisJson: string;
+	extractor: string;
+	createdAt: string;
 }
 
 export interface ModuleMetricAggregate {

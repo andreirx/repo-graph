@@ -1082,6 +1082,250 @@ describe("toolchain provenance includes measurement versions", () => {
 	});
 });
 
+// ── Hotspot input query ────────────────────────────────────────────────
+
+describe("queryHotspotInputs", () => {
+	it("joins churn and complexity measurements per file", () => {
+		const snap = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.FULL,
+		});
+		storage.updateSnapshotStatus({
+			snapshotUid: snap.snapshotUid,
+			status: SnapshotStatus.READY,
+		});
+
+		// Create a file and two functions in it
+		const fileObj = makeFile(REPO_UID, "src/hot.ts");
+		storage.upsertFiles([fileObj]);
+
+		const fileNode = makeNode(
+			snap.snapshotUid,
+			REPO_UID,
+			"hot.ts",
+			fileObj.fileUid,
+			{ kind: NodeKind.FILE, subtype: null },
+		);
+		const fn1 = makeNode(snap.snapshotUid, REPO_UID, "fnA", fileObj.fileUid);
+		const fn2 = makeNode(snap.snapshotUid, REPO_UID, "fnB", fileObj.fileUid);
+		storage.insertNodes([fileNode, fn1, fn2]);
+
+		const now = new Date().toISOString();
+
+		// Complexity measurements: fn1 CC=5, fn2 CC=8 → sum should be 13
+		storage.insertMeasurements([
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: fn1.stableKey,
+				kind: "cyclomatic_complexity",
+				valueJson: JSON.stringify({ value: 5 }),
+				source: "test",
+				createdAt: now,
+			},
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: fn2.stableKey,
+				kind: "cyclomatic_complexity",
+				valueJson: JSON.stringify({ value: 8 }),
+				source: "test",
+				createdAt: now,
+			},
+		]);
+
+		// Churn measurements for the file
+		storage.insertMeasurements([
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: `${REPO_UID}:src/hot.ts:FILE`,
+				kind: "churn_lines",
+				valueJson: JSON.stringify({ value: 200, since: "90.days.ago" }),
+				source: "test",
+				createdAt: now,
+			},
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: `${REPO_UID}:src/hot.ts:FILE`,
+				kind: "change_frequency",
+				valueJson: JSON.stringify({ value: 10, since: "90.days.ago" }),
+				source: "test",
+				createdAt: now,
+			},
+		]);
+
+		const inputs = storage.queryHotspotInputs(snap.snapshotUid);
+
+		expect(inputs.length).toBe(1);
+		expect(inputs[0].filePath).toBe("src/hot.ts");
+		expect(inputs[0].churnLines).toBe(200);
+		expect(inputs[0].changeFrequency).toBe(10);
+		// sum of CC across both functions in the file
+		expect(inputs[0].sumComplexity).toBe(13);
+
+		// Verify hotspot formula: raw = churn * sum_cc
+		const rawScore = inputs[0].churnLines * inputs[0].sumComplexity;
+		expect(rawScore).toBe(2600);
+	});
+
+	it("excludes files with churn but no complexity", () => {
+		const snap = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.FULL,
+		});
+
+		const fileObj = makeFile(REPO_UID, "src/no-cc.ts");
+		storage.upsertFiles([fileObj]);
+
+		const now = new Date().toISOString();
+		// Churn only, no CC
+		storage.insertMeasurements([
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: `${REPO_UID}:src/no-cc.ts:FILE`,
+				kind: "churn_lines",
+				valueJson: JSON.stringify({ value: 100 }),
+				source: "test",
+				createdAt: now,
+			},
+		]);
+
+		const inputs = storage.queryHotspotInputs(snap.snapshotUid);
+		// Should not include files without complexity data
+		const noCC = inputs.find((i) => i.filePath === "src/no-cc.ts");
+		expect(noCC).toBeUndefined();
+	});
+});
+
+// ── Inference storage (hotspots) ───────────────────────────────────────
+
+describe("inference storage", () => {
+	it("inserts and queries inferences by kind", () => {
+		const snap = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.FULL,
+		});
+		const now = new Date().toISOString();
+		storage.insertInferences([
+			{
+				inferenceUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: `${REPO_UID}:src/a.ts:FILE`,
+				kind: "hotspot_score",
+				valueJson: JSON.stringify({
+					normalized_score: 1.0,
+					raw_score: 500,
+					churn_lines: 100,
+					change_frequency: 5,
+					sum_complexity: 5,
+					formula_version: 1,
+				}),
+				confidence: 1.0,
+				basisJson: JSON.stringify({ formula: "churn * cc" }),
+				extractor: "hotspot-analyzer:0.1.0",
+				createdAt: now,
+			},
+			{
+				inferenceUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: `${REPO_UID}:src/b.ts:FILE`,
+				kind: "hotspot_score",
+				valueJson: JSON.stringify({
+					normalized_score: 0.5,
+					raw_score: 250,
+					churn_lines: 50,
+					change_frequency: 2,
+					sum_complexity: 5,
+					formula_version: 1,
+				}),
+				confidence: 1.0,
+				basisJson: JSON.stringify({ formula: "churn * cc" }),
+				extractor: "hotspot-analyzer:0.1.0",
+				createdAt: now,
+			},
+		]);
+
+		const results = storage.queryInferences(snap.snapshotUid, "hotspot_score");
+		expect(results.length).toBe(2);
+		// Sorted by normalized_score desc
+		const first = JSON.parse(results[0].valueJson);
+		expect(first.normalized_score).toBe(1.0);
+		expect(first.raw_score).toBe(500);
+	});
+
+	it("deleteInferencesByKind is idempotent for recompute", () => {
+		const snap = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.FULL,
+		});
+		const now = new Date().toISOString();
+
+		// Insert 2 inferences
+		storage.insertInferences([
+			{
+				inferenceUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: `${REPO_UID}:src/a.ts:FILE`,
+				kind: "hotspot_score",
+				valueJson: "{}",
+				confidence: 1.0,
+				basisJson: "{}",
+				extractor: "test",
+				createdAt: now,
+			},
+			{
+				inferenceUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: `${REPO_UID}:src/b.ts:FILE`,
+				kind: "hotspot_score",
+				valueJson: "{}",
+				confidence: 1.0,
+				basisJson: "{}",
+				extractor: "test",
+				createdAt: now,
+			},
+		]);
+
+		expect(
+			storage.queryInferences(snap.snapshotUid, "hotspot_score").length,
+		).toBe(2);
+
+		// Delete and re-insert 1
+		storage.deleteInferencesByKind(snap.snapshotUid, "hotspot_score");
+		storage.insertInferences([
+			{
+				inferenceUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: `${REPO_UID}:src/a.ts:FILE`,
+				kind: "hotspot_score",
+				valueJson: "{}",
+				confidence: 1.0,
+				basisJson: "{}",
+				extractor: "test",
+				createdAt: now,
+			},
+		]);
+
+		// Should be 1, not 3
+		expect(
+			storage.queryInferences(snap.snapshotUid, "hotspot_score").length,
+		).toBe(1);
+	});
+});
+
 // ── Schema migration upgrade path ─────────────────────────────────────
 
 describe("schema migration from v1 baseline", () => {

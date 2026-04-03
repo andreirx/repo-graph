@@ -237,7 +237,34 @@ Phase 4: Churn import [DONE — churn import only, hotspot computation pending]
   - Measurements: change_frequency (commit count), churn_lines (added + deleted)
   - measurement_semantics: { "git-churn": 1 }
   - Tests: 6 git adapter tests, 2 CLI integration tests
-  - Pending: hotspot computation (churn x complexity as assessment in inferences table)
+  - Hotspot computation: graph hotspots command
+    Formula (v1): churn_lines * sum_cyclomatic_complexity
+    Stored as inferences (kind = "hotspot_score", confidence = 1.0)
+    Self-explaining payload: normalized_score, raw_score, churn_lines,
+    change_frequency, sum_complexity, formula_version
+    Idempotent: previous hotspot inferences deleted before recompute
+  Validation (2026-04-03, FRAKTAG + AMODX + repo-graph):
+    Rankings are directionally correct — top files are plausible
+    inspection targets. Not yet conclusive as a mature risk model.
+    Known biases:
+      - sum_cc favors large files and aggregation/barrel files
+      - change_frequency is non-informative when history is squashed
+        (all files show 1 commit, so churn = churn_lines only)
+      - normalization is repo-local; cross-repo comparison not valid
+    Correct product wording: "file-level hotspot ranking based on
+    recent line churn and summed function complexity," not
+    "maintenance risk score" in the broader sense.
+    Formula refinement path: comparative validation on multiple repos,
+    classify false positives (barrel roots, generated files, large
+    simple UI), then decide sum_cc vs max_cc vs blended.
+
+  Test coverage:
+    Storage: queryHotspotInputs (join correctness, sum verification,
+      exclusion of churn-only files), inference CRUD + idempotency
+    CLI: empty-data JSON envelope verified
+    Gap: non-empty graph hotspots CLI path not covered. Test fixture
+      is not a git repo, so churn returns empty. Covering this requires
+      a temporary git repo in the test harness — a valid follow-up.
 
 Phase 5: Extracted domain versions [DONE — package.json only]
   - Package version extraction from manifests (package.json name + version)

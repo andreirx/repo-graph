@@ -27,7 +27,9 @@ import type {
 	FindTraversalInput,
 	FunctionMetricRow,
 	GetDeclarationsInput,
+	HotspotInput,
 	ImportEdgeResult,
+	InferenceRow,
 	Measurement,
 	ModuleMetricAggregate,
 	QueryFunctionMetricsInput,
@@ -1116,6 +1118,102 @@ export class SqliteStorage implements StoragePort {
 			}
 		});
 		insertAll();
+	}
+
+	queryHotspotInputs(snapshotUid: string): HotspotInput[] {
+		// Join churn measurements (per-file) with complexity measurements
+		// (per-function, summed to file level). Only return files that have
+		// BOTH churn and complexity data.
+		const rows = this.db
+			.prepare(
+				`SELECT
+				   churn.target_stable_key AS file_key,
+				   REPLACE(churn.target_stable_key, churn.repo_uid || ':', '') AS raw_path,
+				   CAST(json_extract(churn.value_json, '$.value') AS INTEGER) AS churn_lines,
+				   COALESCE(freq.change_freq, 0) AS change_frequency,
+				   COALESCE(cc.sum_cc, 0) AS sum_complexity
+				 FROM measurements churn
+				 LEFT JOIN (
+				   SELECT target_stable_key,
+				     CAST(json_extract(value_json, '$.value') AS INTEGER) AS change_freq
+				   FROM measurements
+				   WHERE snapshot_uid = ? AND kind = 'change_frequency'
+				 ) freq ON freq.target_stable_key = churn.target_stable_key
+				 LEFT JOIN (
+				   SELECT n.file_uid, SUM(CAST(json_extract(m.value_json, '$.value') AS INTEGER)) AS sum_cc
+				   FROM measurements m
+				   JOIN nodes n ON m.target_stable_key = n.stable_key AND n.snapshot_uid = m.snapshot_uid
+				   WHERE m.snapshot_uid = ? AND m.kind = 'cyclomatic_complexity'
+				   GROUP BY n.file_uid
+				 ) cc ON cc.file_uid = (
+				   SELECT file_uid FROM files WHERE file_uid = churn.repo_uid || ':' ||
+				     REPLACE(REPLACE(churn.target_stable_key, churn.repo_uid || ':', ''), ':FILE', '')
+				 )
+				 WHERE churn.snapshot_uid = ? AND churn.kind = 'churn_lines'
+				   AND cc.sum_cc > 0
+				 ORDER BY churn_lines * sum_complexity DESC`,
+			)
+			.all(snapshotUid, snapshotUid, snapshotUid) as Record<string, unknown>[];
+
+		return rows.map((row) => ({
+			fileStableKey: row.file_key as string,
+			filePath: ((row.raw_path as string) ?? "").replace(/:FILE$/, ""),
+			churnLines: (row.churn_lines as number) ?? 0,
+			changeFrequency: (row.change_frequency as number) ?? 0,
+			sumComplexity: (row.sum_complexity as number) ?? 0,
+		}));
+	}
+
+	insertInferences(inferences: InferenceRow[]): void {
+		const stmt = this.db.prepare(
+			`INSERT INTO inferences
+			 (inference_uid, snapshot_uid, repo_uid, target_stable_key, kind,
+			  value_json, confidence, basis_json, extractor, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const inf of inferences) {
+				stmt.run(
+					inf.inferenceUid,
+					inf.snapshotUid,
+					inf.repoUid,
+					inf.targetStableKey,
+					inf.kind,
+					inf.valueJson,
+					inf.confidence,
+					inf.basisJson,
+					inf.extractor,
+					inf.createdAt,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	deleteInferencesByKind(snapshotUid: string, kind: string): void {
+		this.db
+			.prepare("DELETE FROM inferences WHERE snapshot_uid = ? AND kind = ?")
+			.run(snapshotUid, kind);
+	}
+
+	queryInferences(snapshotUid: string, kind: string): InferenceRow[] {
+		const rows = this.db
+			.prepare(
+				"SELECT * FROM inferences WHERE snapshot_uid = ? AND kind = ? ORDER BY CAST(json_extract(value_json, '$.normalized_score') AS REAL) DESC",
+			)
+			.all(snapshotUid, kind) as Record<string, unknown>[];
+		return rows.map((row) => ({
+			inferenceUid: row.inference_uid as string,
+			snapshotUid: row.snapshot_uid as string,
+			repoUid: row.repo_uid as string,
+			targetStableKey: row.target_stable_key as string,
+			kind: row.kind as string,
+			valueJson: row.value_json as string,
+			confidence: row.confidence as number,
+			basisJson: row.basis_json as string,
+			extractor: row.extractor as string,
+			createdAt: row.created_at as string,
+		}));
 	}
 
 	queryFunctionMetrics(input: QueryFunctionMetricsInput): FunctionMetricRow[] {

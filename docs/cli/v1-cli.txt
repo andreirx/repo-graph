@@ -362,6 +362,34 @@ tool graph churn <repo>
   Non-git directories return empty results.
 
 
+tool graph hotspots <repo>
+
+  File-level hotspots: churn x complexity. Requires prior churn import
+  via `graph churn`. Reads churn and complexity measurements from the
+  database, computes hotspot scores, and stores them as inferences.
+
+  Formula (v1):
+    raw_score = churn_lines * sum_cyclomatic_complexity_in_file
+    normalized_score = raw_score / max(raw_score)
+
+  Each result includes all component values for transparency:
+    file, normalized_score, raw_score, churn_lines, change_frequency,
+    sum_complexity
+
+  Scores are stored in the inferences table (kind = "hotspot_score")
+  for later use in risk assessment and trend analysis. Re-running is
+  idempotent (previous hotspot inferences are deleted first).
+
+  Flags:
+    --limit <n>             Max results (default: 20)
+    --json                  Machine-readable output
+
+  Example:
+    tool graph hotspots payments
+    tool graph hotspots payments --limit 10
+    tool graph hotspots payments --json
+
+
 ================================================================================
 DECLARATIONS
 ================================================================================

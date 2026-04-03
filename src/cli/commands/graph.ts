@@ -666,6 +666,147 @@ export function registerGraphCommands(
 				}
 			},
 		);
+
+	graph
+		.command("hotspots <repo>")
+		.description(
+			"File-level hotspots: churn x complexity (requires prior churn import)",
+		)
+		.option("--limit <n>", "Max results", "20")
+		.option("--json", "JSON output")
+		.action((repoRef: string, opts: { limit: string; json?: boolean }) => {
+			const ctx = getCtx();
+			const snap = resolveSnapshot(ctx, repoRef);
+			const { snapshotUid, repoUid } = snap;
+			if (!snapshotUid || !repoUid) {
+				outputError(
+					opts.json,
+					`Repository not found or not indexed: ${repoRef}`,
+				);
+				process.exitCode = 1;
+				return;
+			}
+
+			// Read hotspot inputs (churn + complexity per file)
+			const inputs = ctx.storage.queryHotspotInputs(snapshotUid);
+
+			if (inputs.length === 0) {
+				if (opts.json) {
+					console.log(
+						JSON.stringify(
+							{
+								command: "graph hotspots",
+								repo: snap.repoName,
+								snapshot: snapshotUid,
+								results: [],
+								count: 0,
+								total_files: 0,
+								formula: "churn_lines * sum_cyclomatic_complexity",
+								formula_version: 1,
+							},
+							null,
+							2,
+						),
+					);
+				} else {
+					console.log(
+						"No hotspot data. Run `graph churn` first to import churn measurements.",
+					);
+				}
+				return;
+			}
+
+			// Compute hotspot scores
+			const scored = inputs.map((inp) => ({
+				...inp,
+				rawScore: inp.churnLines * inp.sumComplexity,
+			}));
+			const maxRaw = Math.max(...scored.map((s) => s.rawScore));
+			const hotspots = scored.map((s) => ({
+				...s,
+				normalizedScore:
+					maxRaw > 0 ? Math.round((s.rawScore / maxRaw) * 100) / 100 : 0,
+			}));
+
+			// Persist as inferences (idempotent)
+			ctx.storage.deleteInferencesByKind(snapshotUid, "hotspot_score");
+			const now = new Date().toISOString();
+			const inferences = hotspots.map((h) => ({
+				inferenceUid: crypto.randomUUID(),
+				snapshotUid,
+				repoUid,
+				targetStableKey: h.fileStableKey,
+				kind: "hotspot_score",
+				valueJson: JSON.stringify({
+					normalized_score: h.normalizedScore,
+					raw_score: h.rawScore,
+					churn_lines: h.churnLines,
+					change_frequency: h.changeFrequency,
+					sum_complexity: h.sumComplexity,
+					formula_version: 1,
+				}),
+				confidence: 1.0,
+				basisJson: JSON.stringify({
+					measurements: [
+						"churn_lines",
+						"change_frequency",
+						"cyclomatic_complexity",
+					],
+					formula: "churn_lines * sum_cyclomatic_complexity",
+				}),
+				extractor: "hotspot-analyzer:0.1.0",
+				createdAt: now,
+			}));
+			ctx.storage.insertInferences(inferences);
+
+			// Display
+			const limit = Number.parseInt(opts.limit, 10);
+			const display = hotspots.slice(0, limit);
+
+			if (opts.json) {
+				const results = display.map((h) => ({
+					file: h.filePath,
+					normalized_score: h.normalizedScore,
+					raw_score: h.rawScore,
+					churn_lines: h.churnLines,
+					change_frequency: h.changeFrequency,
+					sum_complexity: h.sumComplexity,
+				}));
+				console.log(
+					JSON.stringify(
+						{
+							command: "graph hotspots",
+							repo: snap.repoName,
+							snapshot: snapshotUid,
+							results,
+							count: results.length,
+							total_files: hotspots.length,
+							formula: "churn_lines * sum_cyclomatic_complexity",
+							formula_version: 1,
+						},
+						null,
+						2,
+					),
+				);
+			} else {
+				console.log(
+					"FILE                                         SCORE  CHURN  COMMITS  SUM_CC",
+				);
+				for (const h of display) {
+					const file = h.filePath.padEnd(45);
+					const score = h.normalizedScore.toFixed(2).padStart(5);
+					const churn = String(h.churnLines).padStart(7);
+					const commits = String(h.changeFrequency).padStart(8);
+					const cc = String(h.sumComplexity).padStart(7);
+					console.log(`${file}${score}${churn}${commits}${cc}`);
+				}
+				console.log("");
+				console.log(
+					`${hotspots.length} files with hotspot data (showing ${display.length})`,
+				);
+				console.log("Formula: churn_lines * sum_cyclomatic_complexity (v1)");
+			}
+		});
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
