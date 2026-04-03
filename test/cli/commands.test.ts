@@ -267,6 +267,162 @@ describe("graph versions", () => {
 	});
 });
 
+// ── declare requirement ───────────────────────────────────────────────
+
+describe("declare requirement", () => {
+	it("creates a requirement with objective and constraints", async () => {
+		const r = await h.run(
+			"declare",
+			"requirement",
+			"test-repo",
+			"src",
+			"--req-id",
+			"REQ-TEST-001",
+			"--objective",
+			"All source files must be type-safe",
+			"--constraint",
+			"No any types",
+			"--json",
+		);
+		expect(r.exitCode).toBe(0);
+		const json = r.json();
+		expect(json.kind).toBe("requirement");
+	});
+
+	it("requirement appears in declare list", async () => {
+		const r = await h.run(
+			"declare",
+			"list",
+			"test-repo",
+			"--kind",
+			"requirement",
+			"--json",
+		);
+		expect(r.exitCode).toBe(0);
+		const json = JSON.parse(r.stdout) as Array<Record<string, unknown>>;
+		const req = json.find(
+			(d) => (d.value as Record<string, unknown>).req_id === "REQ-TEST-001",
+		);
+		expect(req).toBeDefined();
+		expect((req?.value as Record<string, unknown>).objective).toBe(
+			"All source files must be type-safe",
+		);
+	});
+});
+
+// ── declare obligation + graph obligations ────────────────────────────
+
+describe("obligations", () => {
+	it("graph obligations --json returns empty with no requirements", async () => {
+		const r = await h.run("graph", "obligations", "test-repo", "--json");
+		expect(r.exitCode).toBe(0);
+		const json = r.json();
+		expect(json.command).toBe("graph obligations");
+		expect(json.count).toBe(0);
+	});
+
+	it("evaluates arch_violations obligation as PASS when no violations", async () => {
+		// Create requirement
+		await h.run(
+			"declare",
+			"requirement",
+			"test-repo",
+			"src",
+			"--req-id",
+			"REQ-ARCH-001",
+			"--objective",
+			"Source must not import from tests",
+		);
+		// Add boundary
+		await h.run(
+			"declare",
+			"boundary",
+			"test-repo",
+			"src",
+			"--forbids",
+			"nonexistent",
+		);
+		// Add obligation
+		await h.run(
+			"declare",
+			"obligation",
+			"test-repo",
+			"REQ-ARCH-001",
+			"--obligation",
+			"No boundary violations",
+			"--method",
+			"arch_violations",
+			"--target",
+			"src",
+		);
+		// Evaluate
+		const r = await h.run("graph", "obligations", "test-repo", "--json");
+		expect(r.exitCode).toBe(0);
+		const json = r.json();
+		expect(json.count).toBeGreaterThanOrEqual(1);
+		const archObl = (json.results as Array<Record<string, unknown>>).find(
+			(o) => o.req_id === "REQ-ARCH-001",
+		);
+		expect(archObl?.verdict).toBe("PASS");
+	});
+
+	it("obligation addition bumps requirement version", async () => {
+		// REQ-ARCH-001 was already created and had an obligation added above.
+		// The obligation command supersedes the old declaration and bumps version.
+		// Note: supersedes_uid linkage is set in code but not verified here
+		// because declare list --json does not expose the supersedes_uid field.
+		const r = await h.run(
+			"declare",
+			"list",
+			"test-repo",
+			"--kind",
+			"requirement",
+			"--json",
+		);
+		expect(r.exitCode).toBe(0);
+		const reqs = JSON.parse(r.stdout) as Array<Record<string, unknown>>;
+		const archReq = reqs.find(
+			(d) => (d.value as Record<string, unknown>).req_id === "REQ-ARCH-001",
+		);
+		expect(archReq).toBeDefined();
+		// Version should be > 1 (was bumped by declare obligation)
+		expect((archReq?.value as Record<string, unknown>).version).toBeGreaterThan(
+			1,
+		);
+	});
+
+	it("unsupported method returns UNSUPPORTED verdict", async () => {
+		// Create a requirement with an unsupported method
+		await h.run(
+			"declare",
+			"requirement",
+			"test-repo",
+			"src",
+			"--req-id",
+			"REQ-UNSUP-001",
+			"--objective",
+			"Test unsupported method",
+		);
+		await h.run(
+			"declare",
+			"obligation",
+			"test-repo",
+			"REQ-UNSUP-001",
+			"--obligation",
+			"Manual code review",
+			"--method",
+			"manual_review",
+		);
+		const r = await h.run("graph", "obligations", "test-repo", "--json");
+		expect(r.exitCode).toBe(0);
+		const json = r.json();
+		const unsup = (json.results as Array<Record<string, unknown>>).find(
+			(o) => o.req_id === "REQ-UNSUP-001" && o.method === "manual_review",
+		);
+		expect(unsup?.verdict).toBe("UNSUPPORTED");
+	});
+});
+
 // ── graph churn ───────────────────────────────────────────────────────
 
 describe("graph churn", () => {
@@ -390,4 +546,28 @@ describe("graph coverage", () => {
 		expect(r.stdout).toContain("LINE%");
 		expect(r.stdout).toContain("files imported");
 	});
+});
+
+// ── graph risk ────────────────────────────────────────────────────────
+
+describe("graph risk", () => {
+	it("--json returns consistent envelope with no data", async () => {
+		const r = await h.run("graph", "risk", "test-repo", "--json");
+		expect(r.exitCode).toBe(0);
+		const json = r.json();
+		expect(json.command).toBe("graph risk");
+		expect(json.repo).toBe("test-repo");
+		expect(json.snapshot).toBeDefined();
+		expect(json.count).toBe(0);
+		expect(json.total_files).toBe(0);
+		expect(json.formula).toBe("hotspot_score * (1 - line_coverage)");
+		expect(json.formula_version).toBe(1);
+	});
+
+	// Note: non-empty graph risk path is not testable via the CLI harness
+	// because it requires both hotspot inferences (from churn + complexity)
+	// and coverage measurements. The test fixture is not a git repo (no churn),
+	// so hotspot data is always empty. The formula is verified by the
+	// storage-level hotspot input tests and the manual validation on
+	// repo-graph with real coverage data.
 });

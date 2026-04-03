@@ -390,6 +390,36 @@ tool graph coverage <repo> <report>
   Files in the report but not in the graph are silently skipped.
 
 
+tool graph risk <repo>
+
+  Under-tested hotspots: files that are complex, frequently changed,
+  AND poorly covered. Requires prior `graph hotspots` and optionally
+  `graph coverage`. Produces the strongest risk signal the tool offers.
+
+  Formula (v1):
+    risk_score = hotspot_score * (1 - line_coverage)
+
+  Files without coverage data are treated as 0% covered (maximum risk
+  multiplier). A fully covered hotspot has risk 0. An uncovered
+  non-hotspot also has low risk (hotspot score near 0).
+
+  Each result includes all component values for transparency:
+    file, risk_score, hotspot_score, line_coverage, churn_lines,
+    sum_complexity
+
+  Scores are stored in the inferences table (kind = "under_tested_hotspot").
+  Re-running is idempotent.
+
+  Flags:
+    --limit <n>             Max results (default: 20)
+    --json                  Machine-readable output
+
+  Example:
+    tool graph risk payments
+    tool graph risk payments --limit 10
+    tool graph risk payments --json
+
+
 tool graph hotspots <repo>
 
   File-level hotspots: churn x complexity. Requires prior churn import
@@ -405,6 +435,7 @@ tool graph hotspots <repo>
     sum_complexity
 
   Scores are stored in the inferences table (kind = "hotspot_score")
+  for later use in risk assessment (see `graph risk`)
   for later use in risk assessment and trend analysis. Re-running is
   idempotent (previous hotspot inferences are deleted first).
 
@@ -475,12 +506,106 @@ tool declare invariant <repo> <symbol-id> <text>
       "duplicate settlement must not occur"
 
 
+tool declare requirement <repo> <module>
+
+  Declare a structured requirement object. First Tier 1 primitive:
+  versioned engineering intent with explicit constraints and non-goals.
+
+  Verification obligations are modeled in the type system but not yet
+  CLI-creatable. The `verification` array in the stored value is
+  reserved for a future `declare obligation` command.
+
+  Flags:
+    --req-id <id>           Requirement identifier (e.g. REQ-001) [required]
+    --objective <text>      What must be achieved [required]
+    --constraint <text...>  What must not happen (repeatable)
+    --non-goal <text...>    Explicitly out of scope (repeatable)
+    --json                  JSON output
+
+  Example:
+    tool declare requirement payments src/core \
+      --req-id REQ-001 \
+      --objective "Core domain must have zero external dependencies" \
+      --constraint "No imports from adapters/" \
+      --constraint "No imports from cli/" \
+      --non-goal "Performance optimization"
+
+  Stored value shape:
+    {
+      "req_id": "REQ-001",
+      "version": 1,
+      "objective": "...",
+      "constraints": ["..."],
+      "non_goals": ["..."],
+      "verification": [...],
+      "status": "active"
+    }
+
+
+tool declare obligation <repo> <reqId>
+
+  Add a verification obligation to an existing requirement.
+  Supersedes the old requirement declaration with an updated version
+  containing the new obligation.
+
+  Supported methods:
+    arch_violations       — check that boundary violations = 0
+    coverage_threshold    — check average line coverage against threshold
+    complexity_threshold  — check max cyclomatic complexity against threshold
+    hotspot_threshold     — check max hotspot score against threshold
+
+  Flags:
+    --obligation <text>     What must be proven [required]
+    --method <method>       Verification method [required]
+    --target <path>         Target module or file path
+    --threshold <n>         Numeric threshold
+    --operator <op>         Comparison operator (>= | <= | == | > | <)
+    --json                  JSON output
+
+  Example:
+    tool declare obligation payments REQ-001 \
+      --obligation "Zero boundary violations for core" \
+      --method arch_violations \
+      --target src/core
+
+    tool declare obligation payments REQ-001 \
+      --obligation "Line coverage >= 80% on core" \
+      --method coverage_threshold \
+      --target src/core \
+      --threshold 0.8
+
+
+tool graph obligations <repo>
+
+  Evaluate verification obligations from all active requirements
+  against current measurements and declarations. Reports a verdict
+  for each obligation: PASS, FAIL, MISSING_EVIDENCE, or UNSUPPORTED.
+
+  Each verdict includes the exact evidence used for the evaluation:
+  measurement values, thresholds, operators, file counts.
+
+  Flags:
+    --json                  Machine-readable output
+
+  Example:
+    tool graph obligations payments
+    tool graph obligations payments --json
+
+  Output per obligation:
+    verdict, req_id, req_version, obligation, method, target,
+    threshold, evidence
+
+  Summary (human output):
+    total obligations, pass count, fail count, missing evidence count
+
+
 tool declare list <repo>
 
   List all declarations for a repo.
 
   Flags:
-    --kind <module|boundary|entrypoint|invariant>   Filter by declaration type
+    --kind <kind>           Filter by declaration kind
+                            (module|boundary|entrypoint|invariant|requirement)
 
   Example:
     tool declare list payments

@@ -59,6 +59,53 @@ export interface MaturityDeclarationValue {
 	notes?: string;
 }
 
+/**
+ * A structured requirement/constraint declaration.
+ *
+ * This is the first Tier 1 primitive: versioned engineering intent
+ * with explicit objectives, constraints, and non-goals. The
+ * `verification` array is modeled but not yet CLI-creatable —
+ * reserved for a future `declare obligation` command.
+ *
+ * See docs/VISION.md "Process As Entropy Containment" for the strategic context.
+ */
+export interface RequirementDeclarationValue {
+	/** Human-assigned identifier, e.g. "REQ-001". */
+	req_id: string;
+	/** Requirement version. Bumped on material change. */
+	version: number;
+	/** What must be achieved. */
+	objective: string;
+	/** What must not happen. */
+	constraints?: string[];
+	/** Explicitly out of scope. */
+	non_goals?: string[];
+	/** Verification obligations: what evidence closes this requirement. */
+	verification?: VerificationObligation[];
+	/** Requirement lifecycle status. */
+	status?: "active" | "superseded" | "withdrawn";
+}
+
+export interface VerificationObligation {
+	/** Human-readable description of what must be proven. */
+	obligation: string;
+	/** Verification method: what kind of check satisfies this. */
+	method:
+		| "arch_violations"
+		| "coverage_threshold"
+		| "complexity_threshold"
+		| "hotspot_threshold"
+		| "manual_review"
+		| "test_exists"
+		| "custom";
+	/** Target module or file path this obligation applies to. */
+	target?: string;
+	/** Numeric threshold (for threshold-type methods). */
+	threshold?: number;
+	/** Comparison operator for thresholds. Default: ">=" for coverage, "<=" for complexity. */
+	operator?: ">=" | "<=" | "==" | ">" | "<";
+}
+
 // ── Discriminated union: kind -> value ──────────────────────────────────────
 
 /** Maps each declaration kind to its typed value shape. */
@@ -69,6 +116,7 @@ export interface DeclarationValueMap {
 	[DeclarationKind.INVARIANT]: InvariantDeclarationValue;
 	[DeclarationKind.OWNER]: OwnerDeclarationValue;
 	[DeclarationKind.MATURITY]: MaturityDeclarationValue;
+	[DeclarationKind.REQUIREMENT]: RequirementDeclarationValue;
 }
 
 /**
@@ -167,6 +215,25 @@ const requiredFieldValidators: Record<
 				"maturity",
 				`level must be one of: ${valid.join(", ")}`,
 			);
+		}
+	},
+	[DeclarationKind.REQUIREMENT]: (obj) => {
+		requireString(obj, "req_id", "requirement");
+		if (typeof obj.version !== "number") {
+			throw new DeclarationValidationError(
+				"requirement",
+				"version must be a number",
+			);
+		}
+		requireString(obj, "objective", "requirement");
+		if (obj.status !== undefined) {
+			const valid = ["active", "superseded", "withdrawn"];
+			if (!valid.includes(obj.status as string)) {
+				throw new DeclarationValidationError(
+					"requirement",
+					`status must be one of: ${valid.join(", ")}`,
+				);
+			}
 		}
 	},
 };

@@ -60,6 +60,52 @@ Repo-graph should make high-assurance practices cheap enough for normal software
 
 Rigor becomes operational leverage, not compliance theater.
 
+## Process As Entropy Containment
+
+Safety-critical process was historically a human straightjacket.
+It existed to compensate for human weakness at exhaustive, repetitive,
+pedantic detail work. Humans provide system judgment well, but do not
+scale to maintaining full traceability matrices, verification
+obligations, and change records by hand.
+
+LLMs invert that profile:
+
+- strong at expansion, clerical repetition, and detail grinding
+- weak at systems judgment, boundary design, and long-horizon correctness
+- prone to probabilistic drift when asked to generate unconstrained code
+
+This changes the role of process.
+
+Repo-graph should treat high-assurance process as a deterministic
+containment vessel for stochastic agents. The value is not "generate
+compliance paperwork." The value is forcing code generation through
+machine-checkable choke points that reduce the probability space:
+
+1. intent is captured as structured requirements, constraints, and
+   non-goals
+2. verification obligations are generated before implementation
+3. tests and checks become executable boundary conditions
+4. implementation is judged against locked requirements and verified
+   obligations
+5. evidence is linked back to the specific requirement, contract, and
+   process version that demanded it
+
+The system does not replace engineering judgment.
+It externalizes and enforces the parts humans are bad at sustaining,
+while keeping high-level architecture, trade-offs, and exception
+decisions in human hands.
+
+This is the real opportunity:
+
+- apply avionics/medical-style rigor to ordinary software projects
+- make strong process economically viable outside regulated industries
+- reduce quality dependence on human fatigue and review stamina
+- constrain AI generation with explicit structure instead of post-hoc
+  code reading
+
+Repo-graph should therefore be designed as an engineering control
+system for stochastic agents, not merely as a repository index.
+
 ## Versioning-First Model
 
 Versioning is not only for source files. It is first-class across the entire engineering lifecycle.
@@ -257,9 +303,12 @@ Make repo-graph part of day-to-day change safety:
 
 - architecture violation detection
 - quality measurement (structure, complexity, coverage, churn)
+- structured requirement and verification-obligation objects
 - impact/effect analysis
 - required test obligations
 - pre-merge structural verification
+- machine-checkable quality and release gates
+- waiver/exception recording tied to policy versions
 - structured evidence summaries
 - registry and plugin liveness edges
 - extracted domain version intelligence
@@ -313,6 +362,9 @@ Expand to full lifecycle intelligence:
 
 - versioned requirements and contracts
 - versioned artifacts/evidence/process
+- requirement-to-evidence closure tracking
+- agent execution records linked to gates, evidence, and approvals
+- reusable process profiles for different assurance levels
 - database/version compatibility reasoning
 - cross-repo fleet operations and migration planning
 - declared versions for governance objects where extraction is impossible
@@ -320,7 +372,8 @@ Expand to full lifecycle intelligence:
 ## Product Principle
 
 Keep deterministic facts, declarations, and inferences separate.
-Use AI for synthesis and automation, but ground decisions in explicit, inspectable evidence.
+Use AI for synthesis and mechanical expansion, but ground decisions in
+explicit, inspectable evidence and human-owned architectural judgment.
 
 If an answer cannot show versioned provenance, evidence chain, and policy context, it is advisory only, not authoritative.
 

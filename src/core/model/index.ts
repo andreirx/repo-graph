@@ -7,7 +7,9 @@ export type {
 	MaturityDeclarationValue,
 	ModuleDeclarationValue,
 	OwnerDeclarationValue,
+	RequirementDeclarationValue,
 	TypedDeclaration,
+	VerificationObligation,
 } from "./declaration.js";
 export {
 	DeclarationValidationError,

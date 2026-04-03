@@ -198,6 +198,166 @@ export function registerDeclareCommands(
 		);
 
 	declare
+		.command("requirement <repo> <module>")
+		.description(
+			"Declare a structured requirement (objective, constraints, non-goals)",
+		)
+		.requiredOption("--req-id <id>", "Requirement identifier (e.g. REQ-001)")
+		.requiredOption("--objective <text>", "What must be achieved")
+		.option("--constraint <text...>", "What must not happen (repeatable)")
+		.option("--non-goal <text...>", "Explicitly out of scope (repeatable)")
+		.option("--json", "JSON output")
+		.action(
+			(
+				repoRef: string,
+				modulePath: string,
+				opts: {
+					reqId: string;
+					objective: string;
+					constraint?: string[];
+					nonGoal?: string[];
+					json?: boolean;
+				},
+			) => {
+				const ctx = getCtx();
+				const repo = resolveRepo(ctx, repoRef);
+				if (!repo) {
+					outputError(opts.json, `Repository not found: ${repoRef}`);
+					process.exitCode = 1;
+					return;
+				}
+
+				const stableKey = `${repo.repoUid}:${modulePath}:MODULE`;
+				const value = {
+					req_id: opts.reqId,
+					version: 1,
+					objective: opts.objective,
+					...(opts.constraint && { constraints: opts.constraint }),
+					...(opts.nonGoal && { non_goals: opts.nonGoal }),
+					status: "active",
+				};
+
+				parseDeclarationValue(
+					DeclarationKind.REQUIREMENT,
+					JSON.stringify(value),
+				);
+
+				const uid = insertDeclaration(
+					ctx,
+					repo.repoUid,
+					stableKey,
+					DeclarationKind.REQUIREMENT,
+					value,
+				);
+				outputCreated(opts.json, uid, "requirement", stableKey);
+			},
+		);
+
+	declare
+		.command("obligation <repo> <reqId>")
+		.description("Add a verification obligation to an existing requirement")
+		.requiredOption("--obligation <text>", "What must be proven")
+		.requiredOption(
+			"--method <method>",
+			"Verification method (arch_violations|coverage_threshold|complexity_threshold|hotspot_threshold)",
+		)
+		.option("--target <path>", "Target module or file path")
+		.option("--threshold <n>", "Numeric threshold")
+		.option("--operator <op>", "Comparison operator (>= | <= | == | > | <)")
+		.option("--json", "JSON output")
+		.action(
+			(
+				repoRef: string,
+				reqId: string,
+				opts: {
+					obligation: string;
+					method: string;
+					target?: string;
+					threshold?: string;
+					operator?: string;
+					json?: boolean;
+				},
+			) => {
+				const ctx = getCtx();
+				const repo = resolveRepo(ctx, repoRef);
+				if (!repo) {
+					outputError(opts.json, `Repository not found: ${repoRef}`);
+					process.exitCode = 1;
+					return;
+				}
+
+				// Find the active requirement with this req_id
+				const allReqs = ctx.storage.getActiveDeclarations({
+					repoUid: repo.repoUid,
+					kind: DeclarationKind.REQUIREMENT,
+				});
+				const reqDecl = allReqs.find((d) => {
+					const val = JSON.parse(d.valueJson) as Record<string, unknown>;
+					return val.req_id === reqId;
+				});
+
+				if (!reqDecl) {
+					outputError(
+						opts.json,
+						`No active requirement found with req_id "${reqId}"`,
+					);
+					process.exitCode = 1;
+					return;
+				}
+
+				// Parse current value and add the obligation
+				const currentValue = JSON.parse(reqDecl.valueJson) as Record<
+					string,
+					unknown
+				>;
+				const existingObligations = (currentValue.verification ?? []) as Array<
+					Record<string, unknown>
+				>;
+
+				const newObligation: Record<string, unknown> = {
+					obligation: opts.obligation,
+					method: opts.method,
+				};
+				if (opts.target) newObligation.target = opts.target;
+				if (opts.threshold)
+					newObligation.threshold = Number.parseFloat(opts.threshold);
+				if (opts.operator) newObligation.operator = opts.operator;
+
+				existingObligations.push(newObligation);
+				currentValue.verification = existingObligations;
+				currentValue.version = ((currentValue.version as number) ?? 0) + 1;
+
+				// Supersede the old declaration with updated value.
+				// Link the new row back to the old one for audit lineage.
+				ctx.storage.deactivateDeclaration(reqDecl.declarationUid);
+				const uid = insertDeclaration(
+					ctx,
+					repo.repoUid,
+					reqDecl.targetStableKey,
+					DeclarationKind.REQUIREMENT,
+					currentValue,
+					reqDecl.declarationUid,
+				);
+
+				if (opts.json) {
+					console.log(
+						JSON.stringify({
+							declaration_uid: uid,
+							req_id: reqId,
+							obligation: opts.obligation,
+							method: opts.method,
+							version: currentValue.version,
+						}),
+					);
+				} else {
+					console.log(
+						`Added obligation to ${reqId} (v${currentValue.version}): ${opts.obligation}`,
+					);
+				}
+			},
+		);
+
+	declare
 		.command("list <repo>")
 		.description("List all active declarations")
 		.option("--kind <kind>", "Filter by declaration kind")
@@ -282,6 +442,7 @@ function insertDeclaration(
 	targetStableKey: string,
 	kind: DeclarationKind,
 	value: Record<string, unknown>,
+	supersedesUid?: string,
 ): string {
 	const uid = uuidv4();
 	ctx.storage.insertDeclaration({
@@ -293,7 +454,7 @@ function insertDeclaration(
 		valueJson: JSON.stringify(value),
 		createdAt: new Date().toISOString(),
 		createdBy: "cli",
-		supersedesUid: null,
+		supersedesUid: supersedesUid ?? null,
 		isActive: true,
 		authoredBasisJson: JSON.stringify(buildAuthoredBasisJson()),
 	});

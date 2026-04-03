@@ -147,6 +147,7 @@ export const DeclarationKind = {
 	INVARIANT: "invariant",
 	OWNER: "owner",
 	MATURITY: "maturity",
+	REQUIREMENT: "requirement",
 } as const;
 
 export type DeclarationKind =

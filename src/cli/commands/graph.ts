@@ -9,7 +9,9 @@ import type {
 	NodeResult,
 	PathResult,
 	QueryResult,
+	VerificationObligation,
 } from "../../core/model/index.js";
+import { DeclarationKind } from "../../core/model/index.js";
 import type {
 	DomainVersionRow,
 	FunctionMetricRow,
@@ -991,6 +993,532 @@ export function registerGraphCommands(
 				}
 			},
 		);
+
+	graph
+		.command("risk <repo>")
+		.description(
+			"Under-tested hotspots: files that are complex, churned, AND poorly covered",
+		)
+		.option("--limit <n>", "Max results", "20")
+		.option("--json", "JSON output")
+		.action((repoRef: string, opts: { limit: string; json?: boolean }) => {
+			const ctx = getCtx();
+			const snap = resolveSnapshot(ctx, repoRef);
+			const { snapshotUid, repoUid } = snap;
+			if (!snapshotUid || !repoUid) {
+				outputError(
+					opts.json,
+					`Repository not found or not indexed: ${repoRef}`,
+				);
+				process.exitCode = 1;
+				return;
+			}
+
+			// Read existing hotspot inferences
+			const hotspots = ctx.storage.queryInferences(
+				snapshotUid,
+				"hotspot_score",
+			);
+			if (hotspots.length === 0) {
+				const empty = {
+					command: "graph risk",
+					repo: snap.repoName,
+					snapshot: snapshotUid,
+					results: [] as unknown[],
+					count: 0,
+					total_files: 0,
+					formula: "hotspot_score * (1 - line_coverage)",
+					formula_version: 1,
+				};
+				if (opts.json) {
+					console.log(JSON.stringify(empty, null, 2));
+				} else {
+					console.log(
+						"No hotspot data. Run `graph churn` then `graph hotspots` first.",
+					);
+				}
+				return;
+			}
+
+			// Build hotspot map from inferences
+			const hotspotMap = new Map<
+				string,
+				{ normalizedScore: number; churnLines: number; sumComplexity: number }
+			>();
+			for (const inf of hotspots) {
+				const val = JSON.parse(inf.valueJson) as Record<string, number>;
+				hotspotMap.set(inf.targetStableKey, {
+					normalizedScore: val.normalized_score ?? 0,
+					churnLines: val.churn_lines ?? 0,
+					sumComplexity: val.sum_complexity ?? 0,
+				});
+			}
+
+			// Read line_coverage measurements
+			const coverageRows = ctx.storage.queryMeasurementsByKind(
+				snapshotUid,
+				"line_coverage",
+			);
+			const coverageMap = new Map<string, number>();
+			for (const row of coverageRows) {
+				const val = JSON.parse(row.valueJson) as { value: number };
+				coverageMap.set(row.targetStableKey, val.value);
+			}
+
+			// Compute risk: hotspot_score * (1 - line_coverage)
+			// Files without coverage data are treated as 0% covered (maximum risk multiplier).
+			const riskEntries: Array<{
+				fileKey: string;
+				filePath: string;
+				riskScore: number;
+				hotspotScore: number;
+				lineCoverage: number | null;
+				churnLines: number;
+				sumComplexity: number;
+			}> = [];
+
+			for (const [fileKey, hs] of hotspotMap) {
+				const coverage = coverageMap.get(fileKey) ?? null;
+				const coverageMultiplier = coverage !== null ? 1 - coverage : 1;
+				const riskScore =
+					Math.round(hs.normalizedScore * coverageMultiplier * 100) / 100;
+				const filePath = fileKey
+					.replace(`${repoUid}:`, "")
+					.replace(/:FILE$/, "");
+
+				riskEntries.push({
+					fileKey,
+					filePath,
+					riskScore,
+					hotspotScore: hs.normalizedScore,
+					lineCoverage: coverage,
+					churnLines: hs.churnLines,
+					sumComplexity: hs.sumComplexity,
+				});
+			}
+
+			riskEntries.sort((a, b) => b.riskScore - a.riskScore);
+
+			// Persist as inferences (idempotent)
+			ctx.storage.deleteInferencesByKind(snapshotUid, "under_tested_hotspot");
+			const now = new Date().toISOString();
+			const inferences = riskEntries.map((r) => ({
+				inferenceUid: crypto.randomUUID(),
+				snapshotUid,
+				repoUid,
+				targetStableKey: r.fileKey,
+				kind: "under_tested_hotspot",
+				valueJson: JSON.stringify({
+					normalized_risk: r.riskScore,
+					hotspot_score: r.hotspotScore,
+					line_coverage: r.lineCoverage,
+					churn_lines: r.churnLines,
+					sum_complexity: r.sumComplexity,
+					formula_version: 1,
+				}),
+				confidence: 1.0,
+				basisJson: JSON.stringify({
+					inputs: ["hotspot_score", "line_coverage"],
+					formula: "hotspot_score * (1 - line_coverage)",
+				}),
+				extractor: "risk-analyzer:0.1.0",
+				createdAt: now,
+			}));
+			ctx.storage.insertInferences(inferences);
+
+			// Display
+			const limit = Number.parseInt(opts.limit, 10);
+			const display = riskEntries.slice(0, limit);
+
+			if (opts.json) {
+				const results = display.map((r) => ({
+					file: r.filePath,
+					risk_score: r.riskScore,
+					hotspot_score: r.hotspotScore,
+					line_coverage: r.lineCoverage,
+					churn_lines: r.churnLines,
+					sum_complexity: r.sumComplexity,
+				}));
+				console.log(
+					JSON.stringify(
+						{
+							command: "graph risk",
+							repo: snap.repoName,
+							snapshot: snapshotUid,
+							results,
+							count: results.length,
+							total_files: riskEntries.length,
+							formula: "hotspot_score * (1 - line_coverage)",
+							formula_version: 1,
+						},
+						null,
+						2,
+					),
+				);
+			} else {
+				console.log(
+					"FILE                                         RISK  HOTSPOT  COVERAGE  CHURN  SUM_CC",
+				);
+				for (const r of display) {
+					const file = r.filePath.padEnd(45);
+					const risk = r.riskScore.toFixed(2).padStart(5);
+					const hs = r.hotspotScore.toFixed(2).padStart(8);
+					const cov =
+						r.lineCoverage !== null
+							? `${(r.lineCoverage * 100).toFixed(0)}%`.padStart(9)
+							: "     none";
+					const churn = String(r.churnLines).padStart(7);
+					const cc = String(r.sumComplexity).padStart(7);
+					console.log(`${file}${risk}${hs}${cov}${churn}${cc}`);
+				}
+				console.log("");
+				console.log(
+					`${riskEntries.length} files assessed (showing ${display.length})`,
+				);
+				console.log("Formula: hotspot_score * (1 - line_coverage) (v1)");
+				console.log(
+					"Files without coverage data are treated as 0% covered (maximum risk).",
+				);
+			}
+		});
+
+	graph
+		.command("obligations <repo>")
+		.description(
+			"Evaluate verification obligations against current measurements",
+		)
+		.option("--json", "JSON output")
+		.action((repoRef: string, opts: { json?: boolean }) => {
+			const ctx = getCtx();
+			const snap = resolveSnapshot(ctx, repoRef);
+			const { snapshotUid, repoUid } = snap;
+			if (!snapshotUid || !repoUid) {
+				outputError(
+					opts.json,
+					`Repository not found or not indexed: ${repoRef}`,
+				);
+				process.exitCode = 1;
+				return;
+			}
+
+			// Load all active requirements
+			const requirements = ctx.storage.getActiveDeclarations({
+				repoUid,
+				kind: DeclarationKind.REQUIREMENT,
+			});
+
+			if (requirements.length === 0) {
+				if (opts.json) {
+					console.log(
+						JSON.stringify(
+							{
+								command: "graph obligations",
+								repo: snap.repoName,
+								snapshot: snapshotUid,
+								results: [],
+								count: 0,
+							},
+							null,
+							2,
+						),
+					);
+				} else {
+					console.log(
+						"No requirements declared. Use `declare requirement` to create one.",
+					);
+				}
+				return;
+			}
+
+			type Verdict = "PASS" | "FAIL" | "MISSING_EVIDENCE" | "UNSUPPORTED";
+
+			interface ObligationResult {
+				reqId: string;
+				reqVersion: number;
+				obligation: string;
+				method: string;
+				target: string | null;
+				threshold: number | null;
+				operator: string | null;
+				verdict: Verdict;
+				evidence: Record<string, unknown>;
+			}
+
+			const results: ObligationResult[] = [];
+
+			for (const reqDecl of requirements) {
+				const val = JSON.parse(reqDecl.valueJson) as {
+					req_id: string;
+					version: number;
+					verification?: VerificationObligation[];
+				};
+
+				if (!val.verification || val.verification.length === 0) continue;
+
+				for (const obl of val.verification) {
+					const result: ObligationResult = {
+						reqId: val.req_id,
+						reqVersion: val.version,
+						obligation: obl.obligation,
+						method: obl.method,
+						target: obl.target ?? null,
+						threshold: obl.threshold ?? null,
+						operator: obl.operator ?? null,
+						verdict: "UNSUPPORTED",
+						evidence: {},
+					};
+
+					// Evaluate based on method
+					switch (obl.method) {
+						case "arch_violations": {
+							if (!obl.target) {
+								result.verdict = "MISSING_EVIDENCE";
+								result.evidence = { reason: "no target specified" };
+								break;
+							}
+							// Check boundary violations for the target module
+							const boundaries = ctx.storage.getActiveDeclarations({
+								repoUid,
+								kind: "boundary" as DeclarationKind,
+								targetStableKey: `${repoUid}:${obl.target}:MODULE`,
+							});
+							if (boundaries.length === 0) {
+								result.verdict = "MISSING_EVIDENCE";
+								result.evidence = {
+									reason: "no boundary declarations for target",
+								};
+								break;
+							}
+							let totalViolations = 0;
+							for (const bd of boundaries) {
+								const bv = JSON.parse(bd.valueJson) as { forbids: string };
+								const violations = ctx.storage.findImportsBetweenPaths({
+									snapshotUid,
+									sourcePrefix: obl.target,
+									targetPrefix: bv.forbids,
+								});
+								totalViolations += violations.length;
+							}
+							result.verdict = totalViolations === 0 ? "PASS" : "FAIL";
+							result.evidence = {
+								violation_count: totalViolations,
+								snapshot: snapshotUid,
+							};
+							break;
+						}
+						case "coverage_threshold": {
+							if (!obl.target || obl.threshold === undefined) {
+								result.verdict = "MISSING_EVIDENCE";
+								result.evidence = {
+									reason: "target or threshold not specified",
+								};
+								break;
+							}
+							// Read coverage measurements for files under the target path
+							const coverageRows = ctx.storage.queryMeasurementsByKind(
+								snapshotUid,
+								"line_coverage",
+							);
+							const prefix = `${repoUid}:${obl.target}/`;
+							const matchingCoverage = coverageRows.filter((r) =>
+								r.targetStableKey.startsWith(prefix),
+							);
+							if (matchingCoverage.length === 0) {
+								result.verdict = "MISSING_EVIDENCE";
+								result.evidence = {
+									reason: "no coverage data for target path",
+								};
+								break;
+							}
+							const avgCoverage =
+								matchingCoverage.reduce((sum, r) => {
+									const v = JSON.parse(r.valueJson) as { value: number };
+									return sum + v.value;
+								}, 0) / matchingCoverage.length;
+							const op = obl.operator ?? ">=";
+							const pass =
+								op === ">="
+									? avgCoverage >= obl.threshold
+									: op === ">"
+										? avgCoverage > obl.threshold
+										: op === "<="
+											? avgCoverage <= obl.threshold
+											: op === "<"
+												? avgCoverage < obl.threshold
+												: avgCoverage === obl.threshold;
+							result.verdict = pass ? "PASS" : "FAIL";
+							result.evidence = {
+								avg_coverage: Math.round(avgCoverage * 10000) / 10000,
+								threshold: obl.threshold,
+								operator: op,
+								files_measured: matchingCoverage.length,
+							};
+							break;
+						}
+						case "complexity_threshold": {
+							if (!obl.target || obl.threshold === undefined) {
+								result.verdict = "MISSING_EVIDENCE";
+								result.evidence = {
+									reason: "target or threshold not specified",
+								};
+								break;
+							}
+							const ccRows = ctx.storage.queryMeasurementsByKind(
+								snapshotUid,
+								"cyclomatic_complexity",
+							);
+							const ccPrefix = `${repoUid}:${obl.target}/`;
+							const matchingCC = ccRows.filter((r) =>
+								r.targetStableKey.includes(ccPrefix),
+							);
+							if (matchingCC.length === 0) {
+								result.verdict = "MISSING_EVIDENCE";
+								result.evidence = {
+									reason: "no complexity data for target path",
+								};
+								break;
+							}
+							const maxCC = Math.max(
+								...matchingCC.map((r) => {
+									const v = JSON.parse(r.valueJson) as { value: number };
+									return v.value;
+								}),
+							);
+							const ccOp = obl.operator ?? "<=";
+							const ccPass =
+								ccOp === "<="
+									? maxCC <= obl.threshold
+									: ccOp === "<"
+										? maxCC < obl.threshold
+										: ccOp === ">="
+											? maxCC >= obl.threshold
+											: ccOp === ">"
+												? maxCC > obl.threshold
+												: maxCC === obl.threshold;
+							result.verdict = ccPass ? "PASS" : "FAIL";
+							result.evidence = {
+								max_complexity: maxCC,
+								threshold: obl.threshold,
+								operator: ccOp,
+								functions_measured: matchingCC.length,
+							};
+							break;
+						}
+						case "hotspot_threshold": {
+							if (obl.threshold === undefined) {
+								result.verdict = "MISSING_EVIDENCE";
+								result.evidence = { reason: "threshold not specified" };
+								break;
+							}
+							let hotspots = ctx.storage.queryInferences(
+								snapshotUid,
+								"hotspot_score",
+							);
+							// Filter to target path if specified
+							if (obl.target) {
+								const hsPrefix = `${repoUid}:${obl.target}/`;
+								hotspots = hotspots.filter((h) =>
+									h.targetStableKey.startsWith(hsPrefix),
+								);
+							}
+							if (hotspots.length === 0) {
+								result.verdict = "MISSING_EVIDENCE";
+								result.evidence = {
+									reason: obl.target
+										? "no hotspot data for target path"
+										: "no hotspot data",
+								};
+								break;
+							}
+							const maxHotspot = Math.max(
+								...hotspots.map((h) => {
+									const v = JSON.parse(h.valueJson) as {
+										normalized_score: number;
+									};
+									return v.normalized_score;
+								}),
+							);
+							const hsOp = obl.operator ?? "<=";
+							const hsPass =
+								hsOp === "<="
+									? maxHotspot <= obl.threshold
+									: maxHotspot < obl.threshold;
+							result.verdict = hsPass ? "PASS" : "FAIL";
+							result.evidence = {
+								max_hotspot_score: maxHotspot,
+								threshold: obl.threshold,
+							};
+							break;
+						}
+						default:
+							result.verdict = "UNSUPPORTED";
+							result.evidence = {
+								reason: `method "${obl.method}" not yet supported`,
+							};
+					}
+
+					results.push(result);
+				}
+			}
+
+			// Output
+			if (opts.json) {
+				const passCount = results.filter((r) => r.verdict === "PASS").length;
+				const failCount = results.filter((r) => r.verdict === "FAIL").length;
+				console.log(
+					JSON.stringify(
+						{
+							command: "graph obligations",
+							repo: snap.repoName,
+							snapshot: snapshotUid,
+							results: results.map((r) => ({
+								req_id: r.reqId,
+								req_version: r.reqVersion,
+								obligation: r.obligation,
+								method: r.method,
+								target: r.target,
+								threshold: r.threshold,
+								verdict: r.verdict,
+								evidence: r.evidence,
+							})),
+							count: results.length,
+							pass: passCount,
+							fail: failCount,
+						},
+						null,
+						2,
+					),
+				);
+			} else {
+				if (results.length === 0) {
+					console.log("No verification obligations found in any requirement.");
+				} else {
+					for (const r of results) {
+						const icon =
+							r.verdict === "PASS"
+								? "[PASS]"
+								: r.verdict === "FAIL"
+									? "[FAIL]"
+									: r.verdict === "MISSING_EVIDENCE"
+										? "[MISS]"
+										: "[SKIP]";
+						console.log(`${icon} ${r.reqId} v${r.reqVersion}: ${r.obligation}`);
+						if (r.verdict === "FAIL" || r.verdict === "MISSING_EVIDENCE") {
+							console.log(`       ${JSON.stringify(r.evidence)}`);
+						}
+					}
+					const passCount = results.filter((r) => r.verdict === "PASS").length;
+					const failCount = results.filter((r) => r.verdict === "FAIL").length;
+					const missCount = results.filter(
+						(r) => r.verdict === "MISSING_EVIDENCE",
+					).length;
+					console.log("");
+					console.log(
+						`${results.length} obligations: ${passCount} pass, ${failCount} fail, ${missCount} missing evidence`,
+					);
+				}
+			}
+		});
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

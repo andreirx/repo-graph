@@ -1085,6 +1085,24 @@ export class SqliteStorage implements StoragePort {
 		});
 	}
 
+	queryMeasurementsByKind(
+		snapshotUid: string,
+		kind: string,
+	): Array<{ targetStableKey: string; valueJson: string }> {
+		const rows = this.db
+			.prepare(
+				"SELECT target_stable_key, value_json FROM measurements WHERE snapshot_uid = ? AND kind = ?",
+			)
+			.all(snapshotUid, kind) as Array<{
+			target_stable_key: string;
+			value_json: string;
+		}>;
+		return rows.map((r) => ({
+			targetStableKey: r.target_stable_key,
+			valueJson: r.value_json,
+		}));
+	}
+
 	deleteMeasurementsByKind(snapshotUid: string, kinds: string[]): void {
 		if (kinds.length === 0) return;
 		const placeholders = kinds.map(() => "?").join(", ");
