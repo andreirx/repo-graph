@@ -61,8 +61,12 @@ export function buildToolchainJson(): ToolchainJson {
 		stable_key_format: STABLE_KEY_FORMAT,
 		extractor_versions: { ...EXTRACTOR_VERSIONS },
 		indexer_version: INDEXER_VERSION,
-		measurement_semantics: {},
-		measurement_versions: {},
+		measurement_semantics: {
+			"ast-metrics": 1,
+		},
+		measurement_versions: {
+			"ast-metrics": "ast-metrics:0.1.0",
+		},
 	};
 }
 

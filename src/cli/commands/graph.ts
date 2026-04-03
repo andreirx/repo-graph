@@ -4,15 +4,23 @@ import type {
 	CycleResult,
 	DeadNodeResult,
 	EdgeType,
+	ModuleStats,
 	NodeKind,
 	NodeResult,
 	PathResult,
 	QueryResult,
 } from "../../core/model/index.js";
+import type {
+	FunctionMetricRow,
+	ModuleMetricAggregate,
+} from "../../core/ports/storage.js";
 import type { AppContext } from "../../main.js";
 import {
 	formatCycleResult,
 	formatDeadNodeResult,
+	formatFunctionMetricResult,
+	formatModuleMetricAggResult,
+	formatModuleStatsResult,
 	formatNodeResult,
 	formatPathResult as formatPathResultJson,
 	formatQueryResult,
@@ -20,6 +28,9 @@ import {
 import {
 	formatCycles,
 	formatDeadNodes,
+	formatFunctionMetrics,
+	formatModuleMetricAggregates,
+	formatModuleStats,
 	formatNodeResults,
 	formatPathResult,
 } from "../formatters/table.js";
@@ -335,6 +346,134 @@ export function registerGraphCommands(
 				console.log(formatCycles(results));
 			}
 		});
+
+	graph
+		.command("stats <repo>")
+		.description(
+			"Module structural metrics (fan-in/out, instability, abstractness)",
+		)
+		.option("--json", "JSON output")
+		.action((repoRef: string, opts: { json?: boolean }) => {
+			const ctx = getCtx();
+			const snap = resolveSnapshot(ctx, repoRef);
+			const { snapshotUid } = snap;
+			if (!snapshotUid) {
+				outputError(
+					opts.json,
+					`Repository not found or not indexed: ${repoRef}`,
+				);
+				process.exitCode = 1;
+				return;
+			}
+
+			const stats = ctx.storage.computeModuleStats(snapshotUid);
+
+			if (opts.json) {
+				const qr: QueryResult<ModuleStats> = {
+					command: "graph stats",
+					repo: snap.repoName,
+					snapshot: snapshotUid,
+					snapshotScope: snap.snapshotScope,
+					basisCommit: snap.basisCommit,
+					results: stats,
+					count: stats.length,
+					stale: snap.stale,
+				};
+				console.log(formatQueryResult(qr, formatModuleStatsResult));
+			} else {
+				console.log(formatModuleStats(stats));
+			}
+		});
+
+	graph
+		.command("metrics <repo>")
+		.description("Function-level complexity metrics from stored measurements")
+		.option("--sort <field>", "Sort by: cc, params, nesting", "cc")
+		.option("--limit <n>", "Max results")
+		.option("--module", "Aggregate per module instead of per function")
+		.option("--json", "JSON output")
+		.action(
+			(
+				repoRef: string,
+				opts: {
+					sort: string;
+					limit?: string;
+					module?: boolean;
+					json?: boolean;
+				},
+			) => {
+				const ctx = getCtx();
+				const snap = resolveSnapshot(ctx, repoRef);
+				const { snapshotUid } = snap;
+				if (!snapshotUid) {
+					outputError(
+						opts.json,
+						`Repository not found or not indexed: ${repoRef}`,
+					);
+					process.exitCode = 1;
+					return;
+				}
+
+				if (opts.module) {
+					let aggregates = ctx.storage.queryModuleMetricAggregates(snapshotUid);
+					// Module mode sorts by max CC desc (natural order).
+					// --sort is not applicable (module aggregates have different fields).
+					// --limit is applied as a simple slice.
+					if (opts.limit) {
+						aggregates = aggregates.slice(0, Number.parseInt(opts.limit, 10));
+					}
+
+					if (opts.json) {
+						const qr: QueryResult<ModuleMetricAggregate> = {
+							command: "graph metrics --module",
+							repo: snap.repoName,
+							snapshot: snapshotUid,
+							snapshotScope: snap.snapshotScope,
+							basisCommit: snap.basisCommit,
+							results: aggregates,
+							count: aggregates.length,
+							stale: snap.stale,
+						};
+						console.log(formatQueryResult(qr, formatModuleMetricAggResult));
+					} else {
+						console.log(formatModuleMetricAggregates(aggregates));
+					}
+					return;
+				}
+
+				const sortMap: Record<string, string> = {
+					cc: "cyclomatic_complexity",
+					params: "parameter_count",
+					nesting: "max_nesting_depth",
+				};
+				const sortBy = (sortMap[opts.sort] ?? "cyclomatic_complexity") as
+					| "cyclomatic_complexity"
+					| "parameter_count"
+					| "max_nesting_depth";
+
+				const metrics = ctx.storage.queryFunctionMetrics({
+					snapshotUid,
+					sortBy,
+					limit: opts.limit ? Number.parseInt(opts.limit, 10) : undefined,
+				});
+
+				if (opts.json) {
+					const qr: QueryResult<FunctionMetricRow> = {
+						command: "graph metrics",
+						repo: snap.repoName,
+						snapshot: snapshotUid,
+						snapshotScope: snap.snapshotScope,
+						basisCommit: snap.basisCommit,
+						results: metrics,
+						count: metrics.length,
+						stale: snap.stale,
+					};
+					console.log(formatQueryResult(qr, formatFunctionMetricResult));
+				} else {
+					console.log(formatFunctionMetrics(metrics));
+				}
+			},
+		);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

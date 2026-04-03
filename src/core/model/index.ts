@@ -23,6 +23,7 @@ export type {
 	CycleNode,
 	CycleResult,
 	DeadNodeResult,
+	ModuleStats,
 	NodeResult,
 	PathResult,
 	PathStep,

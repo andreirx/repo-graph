@@ -198,6 +198,93 @@ tool graph cycles <repo>
     cycle_id, length, nodes (array of node_id, file/module name)
 
 
+tool graph stats <repo>
+
+  Module structural metrics. Computes fan-in, fan-out, instability,
+  abstractness, and distance from main sequence for each module that
+  contains at least one source file.
+
+  Definitions:
+    fan_in       — number of modules that import this module
+    fan_out      — number of modules this module imports
+    instability  — fan_out / (fan_in + fan_out). 0 = stable, 1 = unstable
+    abstractness — interfaces and type aliases / total type declarations
+    distance     — |abstractness + instability - 1|. 0 = on main sequence
+
+  Flags:
+    --json                  Machine-readable output
+
+  Example:
+    tool graph stats payments
+    tool graph stats payments --json
+
+  Output per module:
+    module, fan_in, fan_out, instability, abstractness,
+    distance_from_main_sequence, file_count, symbol_count
+
+  Summary (human output only):
+    module count, avg instability, avg distance, max fan-in, max fan-out
+
+
+tool arch violations <repo>
+
+  Find IMPORTS edges that cross declared forbidden boundaries.
+  Scoped to IMPORTS edges only (call graph is not used for policy
+  enforcement). Returns each violation with source file, target file,
+  line, and the boundary rule that was violated.
+
+  Flags:
+    --json                  Machine-readable output
+
+  Example:
+    tool arch violations payments
+    tool arch violations payments --json
+
+  Output per violation:
+    boundary_module, forbidden_module, reason, source_file, target_file, line
+
+
+tool graph metrics <repo>
+
+  Function-level complexity metrics from stored measurements.
+  Queries the measurements table for cyclomatic complexity, parameter
+  count, and max nesting depth computed during indexing.
+
+  Counting rules:
+    cyclomatic_complexity — base 1, +1 per decision point:
+      if, else if, for, for-of/in, while, do-while, catch,
+      switch case (not default), ternary, &&, ||, ??
+    parameter_count — required + optional + rest parameters
+    max_nesting_depth — deepest control flow nesting:
+      if, for, while, do, switch, try, catch
+      else-if chains count as same level (not stacking)
+      nested function bodies are excluded
+
+  Flags:
+    --sort <field>          Sort by: cc (default), params, nesting
+                            (function mode only; module mode sorts by max CC)
+    --limit <n>             Max results to return (applies in both modes)
+    --module                Aggregate per module instead of per function
+    --json                  Machine-readable output
+
+  Example:
+    tool graph metrics payments --limit 20
+    tool graph metrics payments --sort nesting --limit 10
+    tool graph metrics payments --module
+    tool graph metrics payments --json
+
+  Output per function (default):
+    symbol, file, line, cyclomatic_complexity, parameter_count,
+    max_nesting_depth
+
+  Output per module (--module):
+    module, function_count, avg_cyclomatic_complexity,
+    max_cyclomatic_complexity, avg_nesting_depth, max_nesting_depth
+
+  Summary (human output only, function mode):
+    function count, avg cyclomatic complexity, max cyclomatic complexity
+
+
 ================================================================================
 DECLARATIONS
 ================================================================================

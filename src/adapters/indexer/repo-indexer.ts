@@ -30,7 +30,7 @@ import type {
 	IndexOptions,
 	IndexResult,
 } from "../../core/ports/indexer.js";
-import type { StoragePort } from "../../core/ports/storage.js";
+import type { Measurement, StoragePort } from "../../core/ports/storage.js";
 import { buildToolchainJson, INDEXER_VERSION } from "../../version.js";
 
 /** File extensions the TS extractor handles. */
@@ -152,6 +152,10 @@ export class RepoIndexer implements IndexerPort {
 			// 4. Extract each file
 			const allNodes: GraphNode[] = [];
 			const allUnresolvedEdges: UnresolvedEdge[] = [];
+			const allMetrics = new Map<
+				string,
+				{ cc: number; params: number; nesting: number }
+			>();
 			let extractIdx = 0;
 
 			for (const relPath of filePaths) {
@@ -189,6 +193,13 @@ export class RepoIndexer implements IndexerPort {
 
 				allNodes.push(...result.nodes);
 				allUnresolvedEdges.push(...result.edges);
+				for (const [key, m] of result.metrics) {
+					allMetrics.set(key, {
+						cc: m.cyclomaticComplexity,
+						params: m.parameterCount,
+						nesting: m.maxNestingDepth,
+					});
+				}
 				extractIdx++;
 			}
 
@@ -244,7 +255,46 @@ export class RepoIndexer implements IndexerPort {
 			// 9. Persist edges
 			this.storage.insertEdges(allEdges);
 
-			// 10. Finalize snapshot
+			// 10. Persist function-level measurements
+			if (allMetrics.size > 0) {
+				const now = new Date().toISOString();
+				const measurements: Measurement[] = [];
+				for (const [stableKey, m] of allMetrics) {
+					measurements.push({
+						measurementUid: uuidv4(),
+						snapshotUid: snapshot.snapshotUid,
+						repoUid,
+						targetStableKey: stableKey,
+						kind: "cyclomatic_complexity",
+						valueJson: JSON.stringify({ value: m.cc }),
+						source: INDEXER_VERSION,
+						createdAt: now,
+					});
+					measurements.push({
+						measurementUid: uuidv4(),
+						snapshotUid: snapshot.snapshotUid,
+						repoUid,
+						targetStableKey: stableKey,
+						kind: "parameter_count",
+						valueJson: JSON.stringify({ value: m.params }),
+						source: INDEXER_VERSION,
+						createdAt: now,
+					});
+					measurements.push({
+						measurementUid: uuidv4(),
+						snapshotUid: snapshot.snapshotUid,
+						repoUid,
+						targetStableKey: stableKey,
+						kind: "max_nesting_depth",
+						valueJson: JSON.stringify({ value: m.nesting }),
+						source: INDEXER_VERSION,
+						createdAt: now,
+					});
+				}
+				this.storage.insertMeasurements(measurements);
+			}
+
+			// 11. Finalize snapshot
 			this.storage.updateSnapshotCounts(snapshot.snapshotUid);
 			this.storage.updateSnapshotStatus({
 				snapshotUid: snapshot.snapshotUid,

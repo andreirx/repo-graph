@@ -54,6 +54,18 @@ export interface ExtractionResult {
 	 * before persisting to the database.
 	 */
 	edges: UnresolvedEdge[];
+	/**
+	 * Function-level metrics computed from the AST.
+	 * Keyed by the node's stable_key. Values are deterministic
+	 * measurements persisted into the measurements table.
+	 */
+	metrics: Map<string, ExtractedMetrics>;
+}
+
+export interface ExtractedMetrics {
+	cyclomaticComplexity: number;
+	parameterCount: number;
+	maxNestingDepth: number;
 }
 
 /**

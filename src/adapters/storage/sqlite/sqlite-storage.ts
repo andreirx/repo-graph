@@ -7,6 +7,7 @@ import type {
 	FileVersion,
 	GraphEdge,
 	GraphNode,
+	ModuleStats,
 	NodeResult,
 	PathResult,
 	PathStep,
@@ -23,8 +24,12 @@ import type {
 	FindImportsInput,
 	FindPathInput,
 	FindTraversalInput,
+	FunctionMetricRow,
 	GetDeclarationsInput,
 	ImportEdgeResult,
+	Measurement,
+	ModuleMetricAggregate,
+	QueryFunctionMetricsInput,
 	RepoRef,
 	ResolveSymbolInput,
 	StoragePort,
@@ -32,6 +37,7 @@ import type {
 } from "../../../core/ports/storage.js";
 import { INITIAL_MIGRATION } from "./migrations/001-initial.js";
 import { runMigration002 } from "./migrations/002-provenance-columns.js";
+import { runMigration003 } from "./migrations/003-measurements.js";
 
 export class SqliteStorage implements StoragePort {
 	private db: Database.Database;
@@ -59,16 +65,17 @@ export class SqliteStorage implements StoragePort {
 		runInitial();
 
 		// Migration 002+: incremental migrations.
-		// Each checks schema_migrations and column existence before acting.
-		const applied = this.db
-			.prepare("SELECT version FROM schema_migrations WHERE version = 2")
-			.get();
-		if (!applied) {
-			const runIncremental = this.db.transaction(() => {
-				runMigration002(this.db);
-			});
-			runIncremental();
-		}
+		// Each checks schema_migrations before acting.
+		const runIncremental = this.db.transaction(() => {
+			const maxVersion = (
+				this.db
+					.prepare("SELECT MAX(version) as v FROM schema_migrations")
+					.get() as { v: number }
+			).v;
+			if (maxVersion < 2) runMigration002(this.db);
+			if (maxVersion < 3) runMigration003(this.db);
+		});
+		runIncremental();
 	}
 
 	close(): void {
@@ -863,6 +870,255 @@ export class SqliteStorage implements StoragePort {
 			sourceFile: row.source_file as string,
 			targetFile: row.target_file as string,
 			line: (row.line as number) ?? null,
+		}));
+	}
+
+	// ── Module metrics ────────────────────────────────────────────────
+
+	computeModuleStats(snapshotUid: string): ModuleStats[] {
+		// One query to get all module-level structural metrics.
+		// fan_in: count of distinct modules that import this module
+		// fan_out: count of distinct modules this module imports
+		// file_count: OWNS edges from this module to FILE nodes
+		// symbol_count: nodes where parent_node_uid is in this module's files
+		//               and visibility = 'export'
+		// abstractness: interface/type_alias count / total type count
+		// Use correlated subqueries for symbol/type counts to correctly
+		// sum across all files owned by each module.
+		const rows = this.db
+			.prepare(
+				`SELECT
+				   m.node_uid,
+				   m.stable_key,
+				   m.name,
+				   m.qualified_name AS path,
+				   COALESCE(fan_in.cnt, 0) AS fan_in,
+				   COALESCE(fan_out.cnt, 0) AS fan_out,
+				   COALESCE(files.cnt, 0) AS file_count,
+				   (SELECT COUNT(*) FROM nodes n
+				    WHERE n.snapshot_uid = ?
+				      AND n.kind = 'SYMBOL' AND n.visibility = 'export'
+				      AND n.file_uid IN (
+				        SELECT tgt.file_uid FROM edges oe
+				        JOIN nodes tgt ON oe.target_node_uid = tgt.node_uid
+				        WHERE oe.snapshot_uid = ? AND oe.type = 'OWNS'
+				          AND oe.source_node_uid = m.node_uid
+				      )
+				   ) AS symbol_count,
+				   (SELECT COUNT(*) FROM nodes n
+				    WHERE n.snapshot_uid = ?
+				      AND n.kind = 'SYMBOL'
+				      AND n.subtype IN ('INTERFACE', 'TYPE_ALIAS')
+				      AND n.parent_node_uid IS NULL
+				      AND n.file_uid IN (
+				        SELECT tgt.file_uid FROM edges oe
+				        JOIN nodes tgt ON oe.target_node_uid = tgt.node_uid
+				        WHERE oe.snapshot_uid = ? AND oe.type = 'OWNS'
+				          AND oe.source_node_uid = m.node_uid
+				      )
+				   ) AS abstract_count,
+				   (SELECT COUNT(*) FROM nodes n
+				    WHERE n.snapshot_uid = ?
+				      AND n.kind = 'SYMBOL'
+				      AND n.subtype IN ('INTERFACE', 'TYPE_ALIAS', 'CLASS', 'ENUM')
+				      AND n.parent_node_uid IS NULL
+				      AND n.file_uid IN (
+				        SELECT tgt.file_uid FROM edges oe
+				        JOIN nodes tgt ON oe.target_node_uid = tgt.node_uid
+				        WHERE oe.snapshot_uid = ? AND oe.type = 'OWNS'
+				          AND oe.source_node_uid = m.node_uid
+				      )
+				   ) AS type_count
+				 FROM nodes m
+				 LEFT JOIN (
+				   SELECT target_node_uid AS nid, COUNT(DISTINCT source_node_uid) AS cnt
+				   FROM edges
+				   WHERE snapshot_uid = ? AND type = 'IMPORTS'
+				     AND source_node_uid IN (SELECT node_uid FROM nodes WHERE snapshot_uid = ? AND kind = 'MODULE')
+				   GROUP BY target_node_uid
+				 ) fan_in ON fan_in.nid = m.node_uid
+				 LEFT JOIN (
+				   SELECT source_node_uid AS nid, COUNT(DISTINCT target_node_uid) AS cnt
+				   FROM edges
+				   WHERE snapshot_uid = ? AND type = 'IMPORTS'
+				     AND target_node_uid IN (SELECT node_uid FROM nodes WHERE snapshot_uid = ? AND kind = 'MODULE')
+				   GROUP BY source_node_uid
+				 ) fan_out ON fan_out.nid = m.node_uid
+				 LEFT JOIN (
+				   SELECT source_node_uid AS nid, COUNT(*) AS cnt
+				   FROM edges
+				   WHERE snapshot_uid = ? AND type = 'OWNS'
+				   GROUP BY source_node_uid
+				 ) files ON files.nid = m.node_uid
+				 WHERE m.snapshot_uid = ? AND m.kind = 'MODULE'
+				   AND COALESCE(files.cnt, 0) > 0
+				 ORDER BY m.qualified_name`,
+			)
+			.all(
+				// Correlated subquery params (6) + join params (6) + final WHERE (1)
+				snapshotUid,
+				snapshotUid, // symbol_count
+				snapshotUid,
+				snapshotUid, // abstract_count
+				snapshotUid,
+				snapshotUid, // type_count
+				snapshotUid,
+				snapshotUid, // fan_in
+				snapshotUid,
+				snapshotUid, // fan_out
+				snapshotUid, // files
+				snapshotUid, // WHERE
+			) as Record<string, unknown>[];
+
+		return rows.map((row) => {
+			const fanIn = row.fan_in as number;
+			const fanOut = row.fan_out as number;
+			const total = fanIn + fanOut;
+			const instability = total > 0 ? fanOut / total : 0;
+			const abstractCount = row.abstract_count as number;
+			const typeCount = row.type_count as number;
+			const abstractness = typeCount > 0 ? abstractCount / typeCount : 0;
+			const distance = Math.abs(abstractness + instability - 1);
+
+			return {
+				stableKey: row.stable_key as string,
+				name: row.name as string,
+				path: (row.path as string) ?? (row.name as string),
+				fanIn,
+				fanOut,
+				instability: Math.round(instability * 100) / 100,
+				abstractness: Math.round(abstractness * 100) / 100,
+				distanceFromMainSequence: Math.round(distance * 100) / 100,
+				fileCount: row.file_count as number,
+				symbolCount: row.symbol_count as number,
+			};
+		});
+	}
+
+	queryModuleMetricAggregates(snapshotUid: string): ModuleMetricAggregate[] {
+		// Step 1: get per-function metrics with file paths (in TS, fast)
+		const funcRows = this.db
+			.prepare(
+				`SELECT
+				   f.path AS file_path,
+				   MAX(CASE WHEN m.kind = 'cyclomatic_complexity'
+				     THEN CAST(json_extract(m.value_json, '$.value') AS INTEGER) END) AS cc,
+				   MAX(CASE WHEN m.kind = 'max_nesting_depth'
+				     THEN CAST(json_extract(m.value_json, '$.value') AS INTEGER) END) AS nesting
+				 FROM measurements m
+				 JOIN nodes n ON m.target_stable_key = n.stable_key
+				   AND n.snapshot_uid = m.snapshot_uid
+				 LEFT JOIN files f ON n.file_uid = f.file_uid
+				 WHERE m.snapshot_uid = ?
+				   AND m.kind IN ('cyclomatic_complexity', 'max_nesting_depth')
+				 GROUP BY m.target_stable_key`,
+			)
+			.all(snapshotUid) as Array<{
+			file_path: string | null;
+			cc: number;
+			nesting: number;
+		}>;
+
+		// Step 2: aggregate per module (directory) in TypeScript
+		// since SQLite lacks a clean dirname() function.
+		const moduleMap = new Map<string, { ccs: number[]; nestings: number[] }>();
+		for (const row of funcRows) {
+			if (!row.file_path) continue;
+			const lastSlash = row.file_path.lastIndexOf("/");
+			const dir = lastSlash > 0 ? row.file_path.slice(0, lastSlash) : ".";
+			let entry = moduleMap.get(dir);
+			if (!entry) {
+				entry = { ccs: [], nestings: [] };
+				moduleMap.set(dir, entry);
+			}
+			entry.ccs.push(row.cc ?? 0);
+			entry.nestings.push(row.nesting ?? 0);
+		}
+
+		const results: ModuleMetricAggregate[] = [];
+		for (const [dir, data] of moduleMap) {
+			const n = data.ccs.length;
+			results.push({
+				modulePath: dir,
+				functionCount: n,
+				avgCyclomaticComplexity:
+					Math.round((data.ccs.reduce((a, b) => a + b, 0) / n) * 10) / 10,
+				maxCyclomaticComplexity: Math.max(...data.ccs),
+				avgNestingDepth:
+					Math.round((data.nestings.reduce((a, b) => a + b, 0) / n) * 10) / 10,
+				maxNestingDepth: Math.max(...data.nestings),
+			});
+		}
+
+		return results.sort(
+			(a, b) => b.maxCyclomaticComplexity - a.maxCyclomaticComplexity,
+		);
+	}
+
+	insertMeasurements(measurements: Measurement[]): void {
+		const stmt = this.db.prepare(
+			`INSERT INTO measurements
+			 (measurement_uid, snapshot_uid, repo_uid, target_stable_key, kind,
+			  value_json, source, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const m of measurements) {
+				stmt.run(
+					m.measurementUid,
+					m.snapshotUid,
+					m.repoUid,
+					m.targetStableKey,
+					m.kind,
+					m.valueJson,
+					m.source,
+					m.createdAt,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	queryFunctionMetrics(input: QueryFunctionMetricsInput): FunctionMetricRow[] {
+		const sortField = input.sortBy ?? "cyclomatic_complexity";
+		const limitClause = input.limit ? `LIMIT ${input.limit}` : "";
+
+		// Pivot three measurement rows per function into one row with
+		// all three metrics. Uses conditional aggregation over the
+		// measurements table joined to nodes for file/line info.
+		const rows = this.db
+			.prepare(
+				`SELECT
+				   m.target_stable_key AS stable_key,
+				   n.qualified_name AS symbol,
+				   f.path AS file,
+				   n.line_start AS line,
+				   MAX(CASE WHEN m.kind = 'cyclomatic_complexity'
+				     THEN CAST(json_extract(m.value_json, '$.value') AS INTEGER) END) AS cc,
+				   MAX(CASE WHEN m.kind = 'parameter_count'
+				     THEN CAST(json_extract(m.value_json, '$.value') AS INTEGER) END) AS params,
+				   MAX(CASE WHEN m.kind = 'max_nesting_depth'
+				     THEN CAST(json_extract(m.value_json, '$.value') AS INTEGER) END) AS nesting
+				 FROM measurements m
+				 JOIN nodes n ON m.target_stable_key = n.stable_key
+				   AND n.snapshot_uid = m.snapshot_uid
+				 LEFT JOIN files f ON n.file_uid = f.file_uid
+				 WHERE m.snapshot_uid = ?
+				   AND m.kind IN ('cyclomatic_complexity', 'parameter_count', 'max_nesting_depth')
+				 GROUP BY m.target_stable_key
+				 ORDER BY ${sortField === "parameter_count" ? "params" : sortField === "max_nesting_depth" ? "nesting" : "cc"} DESC
+				 ${limitClause}`,
+			)
+			.all(input.snapshotUid) as Record<string, unknown>[];
+
+		return rows.map((row) => ({
+			stableKey: row.stable_key as string,
+			symbol: (row.symbol as string) ?? "",
+			file: (row.file as string) ?? "",
+			line: (row.line as number) ?? null,
+			cyclomaticComplexity: (row.cc as number) ?? 0,
+			parameterCount: (row.params as number) ?? 0,
+			maxNestingDepth: (row.nesting as number) ?? 0,
 		}));
 	}
 

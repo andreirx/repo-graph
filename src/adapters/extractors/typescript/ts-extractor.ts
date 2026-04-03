@@ -12,12 +12,15 @@ import {
 	Visibility,
 } from "../../../core/model/index.js";
 import type {
+	ExtractedMetrics,
 	ExtractionResult,
 	ExtractorPort,
 	UnresolvedEdge,
 } from "../../../core/ports/extractor.js";
 
 import { EXTRACTOR_VERSIONS } from "../../../version.js";
+
+import { computeFunctionMetrics } from "./ast-metrics.js";
 
 const EXTRACTOR_NAME = EXTRACTOR_VERSIONS.typescript;
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -67,6 +70,7 @@ export class TypeScriptExtractor implements ExtractorPort {
 		}
 		const nodes: GraphNode[] = [];
 		const edges: UnresolvedEdge[] = [];
+		const metrics = new Map<string, ExtractedMetrics>();
 
 		// Emit the FILE node. This is the source of all IMPORTS edges
 		// and the parent of top-level symbols in this file.
@@ -102,6 +106,7 @@ export class TypeScriptExtractor implements ExtractorPort {
 			nodes,
 			edges,
 			exportedNames: new Set<string>(),
+			metrics,
 			fileScopeBindings: new Map<string, string>(),
 			classBindings: null,
 			enclosingClassName: null,
@@ -128,7 +133,7 @@ export class TypeScriptExtractor implements ExtractorPort {
 		}
 
 		tree.delete();
-		return { nodes, edges };
+		return { nodes, edges, metrics };
 	}
 
 	// ── Top-level visitor ────────────────────────────────────────────────
@@ -296,6 +301,12 @@ export class TypeScriptExtractor implements ExtractorPort {
 		// from const/let TDZ shadows).
 		const body = node.childForFieldName("body");
 		if (body) {
+			// Compute AST-derived metrics
+			ctx.metrics.set(
+				graphNode.stableKey,
+				computeFunctionMetrics(body, params),
+			);
+
 			const paramBindings = this.collectParameterBindings(params);
 			const varBindings = new Map<string, string | null>();
 			this.collectVarBindings(body, varBindings);
@@ -407,10 +418,14 @@ export class TypeScriptExtractor implements ExtractorPort {
 		ctx.nodes.push(methodNode);
 
 		// Extract calls within the method body.
-		// Same separation as extractFunction: paramBindings for local scope,
-		// varBindings for function-scoped var declarations.
 		const body = node.childForFieldName("body");
 		if (body) {
+			// Compute AST-derived metrics
+			ctx.metrics.set(
+				methodNode.stableKey,
+				computeFunctionMetrics(body, params),
+			);
+
 			const paramBindings = this.collectParameterBindings(params);
 			const varBindings = new Map<string, string | null>();
 			this.collectVarBindings(body, varBindings);
@@ -1569,6 +1584,8 @@ interface ExtractionContext {
 	snapshotUid: string;
 	nodes: GraphNode[];
 	edges: UnresolvedEdge[];
+	/** Function-level metrics, keyed by stable_key. */
+	metrics: Map<string, ExtractedMetrics>;
 	/** Collected from `export { x, y }` lists — applied in a second pass. */
 	exportedNames: Set<string>;
 

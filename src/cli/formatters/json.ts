@@ -10,10 +10,15 @@
 import type {
 	CycleResult,
 	DeadNodeResult,
+	ModuleStats,
 	NodeResult,
 	PathResult,
 	QueryResult,
 } from "../../core/model/index.js";
+import type {
+	FunctionMetricRow,
+	ModuleMetricAggregate,
+} from "../../core/ports/storage.js";
 
 // ── Generic query result wrapper ───────────────────────────────────────
 
@@ -89,5 +94,46 @@ export function formatCycleResult(r: CycleResult): Record<string, unknown> {
 			name: n.name,
 			file: n.file,
 		})),
+	};
+}
+
+export function formatModuleStatsResult(
+	r: ModuleStats,
+): Record<string, unknown> {
+	return {
+		module: r.path,
+		fan_in: r.fanIn,
+		fan_out: r.fanOut,
+		instability: r.instability,
+		abstractness: r.abstractness,
+		distance_from_main_sequence: r.distanceFromMainSequence,
+		file_count: r.fileCount,
+		symbol_count: r.symbolCount,
+	};
+}
+
+export function formatFunctionMetricResult(
+	r: FunctionMetricRow,
+): Record<string, unknown> {
+	return {
+		symbol: r.symbol,
+		file: r.file,
+		line: r.line,
+		cyclomatic_complexity: r.cyclomaticComplexity,
+		parameter_count: r.parameterCount,
+		max_nesting_depth: r.maxNestingDepth,
+	};
+}
+
+export function formatModuleMetricAggResult(
+	r: ModuleMetricAggregate,
+): Record<string, unknown> {
+	return {
+		module: r.modulePath,
+		function_count: r.functionCount,
+		avg_cyclomatic_complexity: r.avgCyclomaticComplexity,
+		max_cyclomatic_complexity: r.maxCyclomaticComplexity,
+		avg_nesting_depth: r.avgNestingDepth,
+		max_nesting_depth: r.maxNestingDepth,
 	};
 }

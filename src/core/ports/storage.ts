@@ -6,6 +6,7 @@ import type {
 	FileVersion,
 	GraphEdge,
 	GraphNode,
+	ModuleStats,
 	NodeKind,
 	NodeResult,
 	PathResult,
@@ -96,6 +97,18 @@ export interface StoragePort {
 	findImportsBetweenPaths(
 		input: FindImportsBetweenPathsInput,
 	): ImportEdgeResult[];
+
+	/** Compute structural metrics for all modules in a snapshot. */
+	computeModuleStats(snapshotUid: string): ModuleStats[];
+
+	/** Query function-level metrics from the measurements table. */
+	queryFunctionMetrics(input: QueryFunctionMetricsInput): FunctionMetricRow[];
+
+	/** Query per-module complexity aggregates from measurements. */
+	queryModuleMetricAggregates(snapshotUid: string): ModuleMetricAggregate[];
+
+	/** Insert measurements (batch). */
+	insertMeasurements(measurements: Measurement[]): void;
 }
 
 // ── Input types ──────────────────────────────────────────────────────────
@@ -188,4 +201,42 @@ export interface ImportEdgeResult {
 	sourceFile: string;
 	targetFile: string;
 	line: number | null;
+}
+
+export interface Measurement {
+	measurementUid: string;
+	snapshotUid: string;
+	repoUid: string;
+	targetStableKey: string;
+	kind: string;
+	valueJson: string;
+	source: string;
+	createdAt: string;
+}
+
+export interface QueryFunctionMetricsInput {
+	snapshotUid: string;
+	/** Sort field. Default: cyclomatic_complexity. */
+	sortBy?: "cyclomatic_complexity" | "parameter_count" | "max_nesting_depth";
+	/** Max results to return. Default: all. */
+	limit?: number;
+}
+
+export interface FunctionMetricRow {
+	stableKey: string;
+	symbol: string;
+	file: string;
+	line: number | null;
+	cyclomaticComplexity: number;
+	parameterCount: number;
+	maxNestingDepth: number;
+}
+
+export interface ModuleMetricAggregate {
+	modulePath: string;
+	functionCount: number;
+	avgCyclomaticComplexity: number;
+	maxCyclomaticComplexity: number;
+	avgNestingDepth: number;
+	maxNestingDepth: number;
 }

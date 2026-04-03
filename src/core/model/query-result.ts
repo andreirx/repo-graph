@@ -85,6 +85,32 @@ export interface DeadNodeResult {
 }
 
 /**
+ * Module structural metrics from graph stats.
+ */
+export interface ModuleStats {
+	/** Module stable key. */
+	stableKey: string;
+	/** Module name (directory name). */
+	name: string;
+	/** Module path (repo-relative). */
+	path: string;
+	/** Number of modules that import this module. */
+	fanIn: number;
+	/** Number of modules this module imports. */
+	fanOut: number;
+	/** fan_out / (fan_in + fan_out). 0 = stable, 1 = unstable. */
+	instability: number;
+	/** Ratio of interface/abstract types to total types. 0-1. */
+	abstractness: number;
+	/** |abstractness + instability - 1|. 0 = ideal. */
+	distanceFromMainSequence: number;
+	/** Number of files in this module (direct, not recursive). */
+	fileCount: number;
+	/** Number of exported symbols in this module. */
+	symbolCount: number;
+}
+
+/**
  * A boundary violation: an IMPORTS edge that crosses a declared
  * forbidden boundary.
  */

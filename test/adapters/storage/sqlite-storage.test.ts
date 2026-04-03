@@ -619,4 +619,557 @@ describe("graph queries", () => {
 			expect(cycleLengths).toEqual([2, 3]); // one 2-edge cycle, one 3-edge cycle
 		});
 	});
+
+	describe("computeModuleStats", () => {
+		it("computes fan-in and fan-out for modules with IMPORTS edges", () => {
+			// Build: modA -> modB -> modC
+			const file = makeFile(REPO_UID, "src/test.ts");
+			storage.upsertFiles([file]);
+
+			const modA = makeNode(snap.snapshotUid, REPO_UID, "modA", file.fileUid, {
+				kind: NodeKind.MODULE,
+				subtype: null,
+			});
+			const modB = makeNode(snap.snapshotUid, REPO_UID, "modB", file.fileUid, {
+				kind: NodeKind.MODULE,
+				subtype: null,
+			});
+			const modC = makeNode(snap.snapshotUid, REPO_UID, "modC", file.fileUid, {
+				kind: NodeKind.MODULE,
+				subtype: null,
+			});
+			// Give each module a file via OWNS edge so they appear in results
+			const fileA = makeFile(REPO_UID, "modA/a.ts");
+			const fileB = makeFile(REPO_UID, "modB/b.ts");
+			const fileC = makeFile(REPO_UID, "modC/c.ts");
+			storage.upsertFiles([fileA, fileB, fileC]);
+
+			const fileNodeA = makeNode(
+				snap.snapshotUid,
+				REPO_UID,
+				"a.ts",
+				fileA.fileUid,
+				{ kind: NodeKind.FILE, subtype: null },
+			);
+			const fileNodeB = makeNode(
+				snap.snapshotUid,
+				REPO_UID,
+				"b.ts",
+				fileB.fileUid,
+				{ kind: NodeKind.FILE, subtype: null },
+			);
+			const fileNodeC = makeNode(
+				snap.snapshotUid,
+				REPO_UID,
+				"c.ts",
+				fileC.fileUid,
+				{ kind: NodeKind.FILE, subtype: null },
+			);
+			storage.insertNodes([modA, modB, modC, fileNodeA, fileNodeB, fileNodeC]);
+
+			storage.insertEdges([
+				// Module IMPORTS
+				makeEdge(
+					snap.snapshotUid,
+					REPO_UID,
+					modA.nodeUid,
+					modB.nodeUid,
+					EdgeType.IMPORTS,
+				),
+				makeEdge(
+					snap.snapshotUid,
+					REPO_UID,
+					modB.nodeUid,
+					modC.nodeUid,
+					EdgeType.IMPORTS,
+				),
+				// OWNS edges
+				makeEdge(
+					snap.snapshotUid,
+					REPO_UID,
+					modA.nodeUid,
+					fileNodeA.nodeUid,
+					EdgeType.OWNS,
+				),
+				makeEdge(
+					snap.snapshotUid,
+					REPO_UID,
+					modB.nodeUid,
+					fileNodeB.nodeUid,
+					EdgeType.OWNS,
+				),
+				makeEdge(
+					snap.snapshotUid,
+					REPO_UID,
+					modC.nodeUid,
+					fileNodeC.nodeUid,
+					EdgeType.OWNS,
+				),
+			]);
+
+			const stats = storage.computeModuleStats(snap.snapshotUid);
+			const byName = new Map(stats.map((s) => [s.name, s]));
+
+			const a = byName.get("modA");
+			expect(a).toBeDefined();
+			expect(a?.fanIn).toBe(0);
+			expect(a?.fanOut).toBe(1);
+			expect(a?.instability).toBe(1);
+
+			const b = byName.get("modB");
+			expect(b).toBeDefined();
+			expect(b?.fanIn).toBe(1);
+			expect(b?.fanOut).toBe(1);
+			expect(b?.instability).toBe(0.5);
+
+			const c = byName.get("modC");
+			expect(c).toBeDefined();
+			expect(c?.fanIn).toBe(1);
+			expect(c?.fanOut).toBe(0);
+			expect(c?.instability).toBe(0);
+		});
+
+		it("excludes modules with zero files", () => {
+			// Module with no OWNS edges should not appear
+			const file = makeFile(REPO_UID, "src/empty-test.ts");
+			storage.upsertFiles([file]);
+
+			const emptyMod = makeNode(
+				snap.snapshotUid,
+				REPO_UID,
+				"emptyMod",
+				file.fileUid,
+				{ kind: NodeKind.MODULE, subtype: null },
+			);
+			storage.insertNodes([emptyMod]);
+
+			const stats = storage.computeModuleStats(snap.snapshotUid);
+			const names = stats.map((s) => s.name);
+			expect(names).not.toContain("emptyMod");
+		});
+	});
+
+	describe("insertMeasurements", () => {
+		it("inserts and stores measurements", () => {
+			storage.insertMeasurements([
+				{
+					measurementUid: randomUUID(),
+					snapshotUid: snap.snapshotUid,
+					repoUid: REPO_UID,
+					targetStableKey: `${REPO_UID}:src:MODULE`,
+					kind: "fan_in",
+					valueJson: JSON.stringify({ value: 5 }),
+					source: "graph-stats:0.1.0",
+					createdAt: new Date().toISOString(),
+				},
+			]);
+
+			// Verify it's in the DB
+			const row = storage["db"]
+				.prepare("SELECT * FROM measurements WHERE target_stable_key = ?")
+				.get(`${REPO_UID}:src:MODULE`) as Record<string, unknown>;
+			expect(row).toBeDefined();
+			expect(row.kind).toBe("fan_in");
+		});
+	});
+});
+
+// ── Function metric queries ────────────────────────────────────────────
+
+describe("queryFunctionMetrics", () => {
+	it("returns function metrics sorted by CC descending", () => {
+		const snap = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.FULL,
+		});
+		storage.updateSnapshotStatus({
+			snapshotUid: snap.snapshotUid,
+			status: SnapshotStatus.READY,
+		});
+
+		const fileObj = makeFile(REPO_UID, "src/test.ts");
+		storage.upsertFiles([fileObj]);
+
+		const fnA = makeNode(snap.snapshotUid, REPO_UID, "fnA", fileObj.fileUid);
+		const fnB = makeNode(snap.snapshotUid, REPO_UID, "fnB", fileObj.fileUid);
+		storage.insertNodes([fnA, fnB]);
+
+		const now = new Date().toISOString();
+		storage.insertMeasurements([
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: fnA.stableKey,
+				kind: "cyclomatic_complexity",
+				valueJson: JSON.stringify({ value: 5 }),
+				source: "test",
+				createdAt: now,
+			},
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: fnA.stableKey,
+				kind: "parameter_count",
+				valueJson: JSON.stringify({ value: 2 }),
+				source: "test",
+				createdAt: now,
+			},
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: fnA.stableKey,
+				kind: "max_nesting_depth",
+				valueJson: JSON.stringify({ value: 3 }),
+				source: "test",
+				createdAt: now,
+			},
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: fnB.stableKey,
+				kind: "cyclomatic_complexity",
+				valueJson: JSON.stringify({ value: 10 }),
+				source: "test",
+				createdAt: now,
+			},
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: fnB.stableKey,
+				kind: "parameter_count",
+				valueJson: JSON.stringify({ value: 1 }),
+				source: "test",
+				createdAt: now,
+			},
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: fnB.stableKey,
+				kind: "max_nesting_depth",
+				valueJson: JSON.stringify({ value: 4 }),
+				source: "test",
+				createdAt: now,
+			},
+		]);
+
+		const results = storage.queryFunctionMetrics({
+			snapshotUid: snap.snapshotUid,
+		});
+
+		expect(results.length).toBe(2);
+		// Default sort by CC descending: fnB(10) before fnA(5)
+		expect(results[0].symbol).toBe("fnB");
+		expect(results[0].cyclomaticComplexity).toBe(10);
+		expect(results[0].parameterCount).toBe(1);
+		expect(results[0].maxNestingDepth).toBe(4);
+		expect(results[1].symbol).toBe("fnA");
+		expect(results[1].cyclomaticComplexity).toBe(5);
+	});
+
+	it("respects limit parameter", () => {
+		// Uses same data from previous test setup (separate snapshot)
+		const snap = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.FULL,
+		});
+		storage.updateSnapshotStatus({
+			snapshotUid: snap.snapshotUid,
+			status: SnapshotStatus.READY,
+		});
+
+		const fileObj = makeFile(REPO_UID, "src/limit-test.ts");
+		storage.upsertFiles([fileObj]);
+
+		const fn1 = makeNode(snap.snapshotUid, REPO_UID, "fn1", fileObj.fileUid);
+		const fn2 = makeNode(snap.snapshotUid, REPO_UID, "fn2", fileObj.fileUid);
+		const fn3 = makeNode(snap.snapshotUid, REPO_UID, "fn3", fileObj.fileUid);
+		storage.insertNodes([fn1, fn2, fn3]);
+
+		const now = new Date().toISOString();
+		for (const fn of [fn1, fn2, fn3]) {
+			storage.insertMeasurements([
+				{
+					measurementUid: randomUUID(),
+					snapshotUid: snap.snapshotUid,
+					repoUid: REPO_UID,
+					targetStableKey: fn.stableKey,
+					kind: "cyclomatic_complexity",
+					valueJson: JSON.stringify({ value: 1 }),
+					source: "test",
+					createdAt: now,
+				},
+			]);
+		}
+
+		const results = storage.queryFunctionMetrics({
+			snapshotUid: snap.snapshotUid,
+			limit: 2,
+		});
+		expect(results.length).toBe(2);
+	});
+});
+
+describe("queryModuleMetricAggregates", () => {
+	it("aggregates function metrics per module directory", () => {
+		const snap = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.FULL,
+		});
+		storage.updateSnapshotStatus({
+			snapshotUid: snap.snapshotUid,
+			status: SnapshotStatus.READY,
+		});
+
+		// Two files in different directories
+		const fileA = makeFile(REPO_UID, "src/core/a.ts");
+		const fileB = makeFile(REPO_UID, "src/cli/b.ts");
+		storage.upsertFiles([fileA, fileB]);
+
+		const fnA = makeNode(snap.snapshotUid, REPO_UID, "fnA", fileA.fileUid);
+		const fnB = makeNode(snap.snapshotUid, REPO_UID, "fnB", fileB.fileUid);
+		storage.insertNodes([fnA, fnB]);
+
+		const now = new Date().toISOString();
+		storage.insertMeasurements([
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: fnA.stableKey,
+				kind: "cyclomatic_complexity",
+				valueJson: JSON.stringify({ value: 8 }),
+				source: "test",
+				createdAt: now,
+			},
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: fnA.stableKey,
+				kind: "max_nesting_depth",
+				valueJson: JSON.stringify({ value: 3 }),
+				source: "test",
+				createdAt: now,
+			},
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: fnB.stableKey,
+				kind: "cyclomatic_complexity",
+				valueJson: JSON.stringify({ value: 2 }),
+				source: "test",
+				createdAt: now,
+			},
+			{
+				measurementUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: fnB.stableKey,
+				kind: "max_nesting_depth",
+				valueJson: JSON.stringify({ value: 1 }),
+				source: "test",
+				createdAt: now,
+			},
+		]);
+
+		const results = storage.queryModuleMetricAggregates(snap.snapshotUid);
+		expect(results.length).toBe(2);
+
+		// Sorted by max CC desc: src/core (8) before src/cli (2)
+		const core = results.find((r) => r.modulePath === "src/core");
+		expect(core).toBeDefined();
+		expect(core?.functionCount).toBe(1);
+		expect(core?.maxCyclomaticComplexity).toBe(8);
+		expect(core?.maxNestingDepth).toBe(3);
+
+		const cli = results.find((r) => r.modulePath === "src/cli");
+		expect(cli).toBeDefined();
+		expect(cli?.functionCount).toBe(1);
+		expect(cli?.maxCyclomaticComplexity).toBe(2);
+	});
+});
+
+describe("toolchain provenance includes measurement versions", () => {
+	it("snapshot toolchain_json includes ast-metrics semantics", () => {
+		const snap = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.FULL,
+			toolchainJson: JSON.stringify({
+				schema_compat: 1,
+				extraction_semantics: 2,
+				stable_key_format: 2,
+				extractor_versions: { typescript: "ts-core:0.2.0" },
+				indexer_version: "indexer:0.2.0",
+				measurement_semantics: { "ast-metrics": 1 },
+				measurement_versions: { "ast-metrics": "ast-metrics:0.1.0" },
+			}),
+		});
+
+		const retrieved = storage.getSnapshot(snap.snapshotUid);
+		expect(retrieved?.toolchainJson).toBeDefined();
+
+		const toolchain = JSON.parse(retrieved?.toolchainJson ?? "{}");
+		expect(toolchain.measurement_semantics["ast-metrics"]).toBe(1);
+		expect(toolchain.measurement_versions["ast-metrics"]).toBe(
+			"ast-metrics:0.1.0",
+		);
+	});
+});
+
+// ── Schema migration upgrade path ─────────────────────────────────────
+
+describe("schema migration from v1 baseline", () => {
+	let upgradeDbPath: string;
+
+	afterEach(() => {
+		try {
+			unlinkSync(upgradeDbPath);
+		} catch {
+			// ignore
+		}
+	});
+
+	/**
+	 * Create a database with only the v1 schema (no toolchain_json,
+	 * no authored_basis_json, no measurements table). Then open it
+	 * with SqliteStorage.initialize() and verify all migrations ran.
+	 */
+	it("upgrades a v1 database to current schema", async () => {
+		// Dynamic import to get raw Database constructor
+		const Database = (await import("better-sqlite3")).default;
+
+		upgradeDbPath = join(tmpdir(), `rgr-upgrade-${randomUUID()}.db`);
+		const rawDb = new Database(upgradeDbPath);
+
+		// Create v1 schema WITHOUT the new columns
+		rawDb.exec(`
+			PRAGMA journal_mode = WAL;
+			PRAGMA foreign_keys = ON;
+
+			CREATE TABLE repos (
+				repo_uid TEXT PRIMARY KEY, name TEXT NOT NULL,
+				root_path TEXT NOT NULL, default_branch TEXT,
+				created_at TEXT NOT NULL, metadata_json TEXT
+			);
+			CREATE TABLE snapshots (
+				snapshot_uid TEXT PRIMARY KEY,
+				repo_uid TEXT NOT NULL REFERENCES repos(repo_uid),
+				parent_snapshot_uid TEXT, kind TEXT NOT NULL,
+				basis_ref TEXT, basis_commit TEXT, dirty_hash TEXT,
+				status TEXT NOT NULL,
+				files_total INTEGER DEFAULT 0, nodes_total INTEGER DEFAULT 0,
+				edges_total INTEGER DEFAULT 0,
+				created_at TEXT NOT NULL, completed_at TEXT, label TEXT
+			);
+			CREATE TABLE files (
+				file_uid TEXT PRIMARY KEY, repo_uid TEXT NOT NULL,
+				path TEXT NOT NULL, language TEXT,
+				is_test INTEGER DEFAULT 0, is_generated INTEGER DEFAULT 0,
+				is_excluded INTEGER DEFAULT 0
+			);
+			CREATE TABLE file_versions (
+				snapshot_uid TEXT NOT NULL, file_uid TEXT NOT NULL,
+				content_hash TEXT NOT NULL, ast_hash TEXT, extractor TEXT,
+				parse_status TEXT NOT NULL, size_bytes INTEGER,
+				line_count INTEGER, indexed_at TEXT NOT NULL,
+				PRIMARY KEY (snapshot_uid, file_uid)
+			);
+			CREATE TABLE nodes (
+				node_uid TEXT PRIMARY KEY, snapshot_uid TEXT NOT NULL,
+				repo_uid TEXT NOT NULL, stable_key TEXT NOT NULL,
+				kind TEXT NOT NULL, subtype TEXT, name TEXT NOT NULL,
+				qualified_name TEXT, file_uid TEXT, parent_node_uid TEXT,
+				line_start INTEGER, col_start INTEGER,
+				line_end INTEGER, col_end INTEGER,
+				signature TEXT, visibility TEXT, doc_comment TEXT,
+				metadata_json TEXT
+			);
+			CREATE TABLE edges (
+				edge_uid TEXT PRIMARY KEY, snapshot_uid TEXT NOT NULL,
+				repo_uid TEXT NOT NULL, source_node_uid TEXT NOT NULL,
+				target_node_uid TEXT NOT NULL, type TEXT NOT NULL,
+				resolution TEXT NOT NULL, extractor TEXT NOT NULL,
+				line_start INTEGER, col_start INTEGER,
+				line_end INTEGER, col_end INTEGER, metadata_json TEXT
+			);
+			CREATE TABLE declarations (
+				declaration_uid TEXT PRIMARY KEY, repo_uid TEXT NOT NULL,
+				snapshot_uid TEXT, target_stable_key TEXT NOT NULL,
+				kind TEXT NOT NULL, value_json TEXT NOT NULL,
+				created_at TEXT NOT NULL, created_by TEXT,
+				supersedes_uid TEXT, is_active INTEGER DEFAULT 1
+			);
+			CREATE TABLE inferences (
+				inference_uid TEXT PRIMARY KEY, snapshot_uid TEXT NOT NULL,
+				repo_uid TEXT NOT NULL, target_stable_key TEXT NOT NULL,
+				kind TEXT NOT NULL, value_json TEXT NOT NULL,
+				confidence REAL NOT NULL, basis_json TEXT NOT NULL,
+				extractor TEXT NOT NULL, created_at TEXT NOT NULL
+			);
+			CREATE TABLE artifacts (
+				artifact_uid TEXT PRIMARY KEY, snapshot_uid TEXT NOT NULL,
+				repo_uid TEXT NOT NULL, kind TEXT NOT NULL,
+				relative_path TEXT NOT NULL, content_hash TEXT,
+				size_bytes INTEGER, format TEXT, created_at TEXT NOT NULL
+			);
+			CREATE TABLE evidence_links (
+				evidence_link_uid TEXT PRIMARY KEY, snapshot_uid TEXT NOT NULL,
+				subject_type TEXT NOT NULL, subject_uid TEXT NOT NULL,
+				artifact_uid TEXT NOT NULL, note TEXT
+			);
+			CREATE TABLE schema_migrations (
+				version INTEGER PRIMARY KEY, name TEXT NOT NULL,
+				applied_at TEXT NOT NULL
+			);
+			INSERT INTO schema_migrations VALUES (1, '001-initial', datetime('now'));
+		`);
+		rawDb.close();
+
+		// Open with SqliteStorage — this should run migrations 002 and 003
+		const upgraded = new SqliteStorage(upgradeDbPath);
+		upgraded.initialize();
+
+		// Verify migration 002: toolchain_json on snapshots
+		const rawDb2 = new Database(upgradeDbPath);
+		const snapCols = (
+			rawDb2.prepare("PRAGMA table_info(snapshots)").all() as Array<{
+				name: string;
+			}>
+		).map((c) => c.name);
+		expect(snapCols).toContain("toolchain_json");
+
+		// Verify migration 002: authored_basis_json on declarations
+		const declCols = (
+			rawDb2.prepare("PRAGMA table_info(declarations)").all() as Array<{
+				name: string;
+			}>
+		).map((c) => c.name);
+		expect(declCols).toContain("authored_basis_json");
+
+		// Verify migration 003: measurements table exists
+		const tables = (
+			rawDb2
+				.prepare(
+					"SELECT name FROM sqlite_master WHERE type='table' AND name='measurements'",
+				)
+				.all() as Array<{ name: string }>
+		).map((t) => t.name);
+		expect(tables).toContain("measurements");
+
+		// Verify all migrations recorded
+		const migrations = rawDb2
+			.prepare("SELECT version FROM schema_migrations ORDER BY version")
+			.all() as Array<{ version: number }>;
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3]);
+
+		rawDb2.close();
+		upgraded.close();
+	});
 });

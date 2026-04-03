@@ -204,11 +204,22 @@ Phase 1: Measurement infrastructure + graph-derived metrics
     distance, cycle participation, coupling)
   - Store as measurements attached to MODULE nodes
 
-Phase 2: AST-derived metrics
-  - Extend extractor to compute cyclomatic complexity, parameter count,
-    nesting depth, function length during extraction
-  - Store as measurements attached to SYMBOL nodes
-  - Implement monster-methods query
+Phase 2: AST-derived metrics [DONE]
+  - ast-metrics.ts: cyclomatic complexity, parameter count, max nesting depth
+  - Computed during extraction, persisted as measurements (3 per function)
+  - graph metrics: per-function query (--sort cc|params|nesting, --limit)
+  - graph metrics --module: per-module aggregates (function count, avg/max CC, avg/max nesting)
+  - measurement_semantics: { "ast-metrics": 1 }
+  - Counting rules documented in v1-cli.txt
+
+  Test coverage boundary:
+    Covered: metric formulas (12 tests), persistence/query semantics (4 tests),
+      migration upgrade path (1 test), snapshot provenance fields (1 test)
+    Not covered: CLI command dispatch and stdout/JSON contract end-to-end.
+      No CLI integration test harness exists in the project yet.
+      Adding one is a separate support-module effort.
+    Planned: SUPPORT module for CLI test harness, then coverage targets:
+      graph metrics, graph metrics --module, graph stats, arch violations
 
 Phase 3: Coverage import
   - Coverage import script (Istanbul/c8 JSON -> COVERS edges + measurements)
