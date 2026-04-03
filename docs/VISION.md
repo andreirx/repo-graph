@@ -87,6 +87,41 @@ Without versioning across these layers, teams can answer "what changed in code?"
 
 Repo-graph should answer those deterministically.
 
+### Three Version Classes
+
+Repo-graph handles three distinct classes of version information.
+They must not be mixed or conflated.
+
+**Provenance versions** (internal to repo-graph):
+What toolchain produced this snapshot. Schema compat, extraction
+semantics, measurement formulas, stable key format. These answer
+reproducibility: "can I compare these two snapshots?"
+
+**Extracted domain versions** (from the codebase itself):
+What the system claims to be. Package versions from manifests,
+API versions from route prefixes or OpenAPI specs, database
+migration versions from migration files, event/schema versions
+from topic names or schema registries, git tags, lockfile
+dependency versions. These answer compatibility and intent:
+"which consumers depend on API v1?" "which release shipped
+contract version X?"
+
+**Declared versions** (human-authored):
+User-supplied version facts where extraction is impossible or
+incomplete. Requirement versions, contract versions, process
+versions, exception/waiver versions. These answer governance:
+"which process version governed this decision?"
+
+Each extracted or declared version should carry:
+- source (extracted | declared | inferred)
+- evidence link (which file, line, or artifact)
+- confidence (1.0 for extracted/declared, < 1.0 for inferred)
+
+The bridge from "graph of code" to "versioned engineering substrate"
+is extracted domain versions. Without them, repo-graph knows what
+the code does structurally but not what the system claims to be
+or what compatibility promises it makes.
+
 ## Traceability As A Product Primitive
 
 Traceability should be queryable, not narrative.
@@ -156,6 +191,28 @@ Artifacts (test runs, contract checks, replay traces, coverage reports, migratio
 
 Evidence is not an attachment; it is part of the graph.
 
+## Quality Measurement As A First-Class Concern
+
+Code quality is not one number. It is a health vector with trend:
+
+- structure: modularity metrics (instability, abstractness, coupling, cycles)
+- complexity: AST-derived metrics (cyclomatic, cognitive, nesting, size)
+- coverage: test coverage weighted by risk (complexity, churn, boundary exposure)
+- churn: change frequency and hotspot pressure
+- policy: violation count against declared thresholds
+
+These are four distinct kinds of truth and must be stored separately:
+
+- Evidence: raw artifacts from external tools (coverage JSON, git log)
+- Measurements: deterministic facts from graph, AST, or imported evidence
+- Policies: human-declared thresholds and quality gates
+- Assessments: derived judgments combining measurements with policies
+
+The strongest product move is not a composite score. It is a per-module
+health vector that trends across snapshots and feeds into pre-merge
+verification. See docs/architecture/measurement-model.txt for the
+full design.
+
 ## Process As Versioned, Executable Intelligence
 
 Process should also be versioned and queryable:
@@ -199,11 +256,13 @@ Prove correctness and evidence quality:
 Make repo-graph part of day-to-day change safety:
 
 - architecture violation detection
+- quality measurement (structure, complexity, coverage, churn)
 - impact/effect analysis
 - required test obligations
 - pre-merge structural verification
 - structured evidence summaries
 - registry and plugin liveness edges
+- extracted domain version intelligence
 
 Registry-driven architectures (CMS block renderers, plugin systems,
 extension registries, render maps) wire liveness through mechanisms
@@ -226,6 +285,27 @@ registry-heavy codebases should be interpreted as "graph orphans"
 The tiered dead-code model (definitely_unreferenced / graph_orphaned /
 suppressed_by_declaration) addresses the presentation side.
 
+Extracted domain version intelligence bridges the gap from "graph of
+code" to "versioned engineering substrate." Version sources to extract:
+
+- Package/app versions from manifests (package.json, pyproject.toml,
+  Cargo.toml, pom.xml)
+- API versions from route prefixes, OpenAPI specs, protobuf package
+  versions, GraphQL schema conventions
+- Database migration versions from migration filenames, ORM metadata
+- Event/schema versions from topic names, schema registries,
+  AsyncAPI/JSON Schema docs
+- Git tags and release branches
+- Lockfile dependency versions for third-party compatibility context
+
+Extracted versions are attached to the graph as nodes or measurements
+with evidence links back to the source file/line. They enable queries
+like:
+- which snapshots correspond to app version 2.4.x
+- which modules still depend on API v1
+- which migrations introduced schema version 37
+- which release first shipped contract version X
+
 ### Horizon 3: Versioned Engineering Substrate
 
 Expand to full lifecycle intelligence:
@@ -234,6 +314,7 @@ Expand to full lifecycle intelligence:
 - versioned artifacts/evidence/process
 - database/version compatibility reasoning
 - cross-repo fleet operations and migration planning
+- declared versions for governance objects where extraction is impossible
 
 ## Product Principle
 

@@ -31,6 +31,7 @@ import type {
 	UpdateSnapshotStatusInput,
 } from "../../../core/ports/storage.js";
 import { INITIAL_MIGRATION } from "./migrations/001-initial.js";
+import { runMigration002 } from "./migrations/002-provenance-columns.js";
 
 export class SqliteStorage implements StoragePort {
 	private db: Database.Database;
@@ -45,18 +46,29 @@ export class SqliteStorage implements StoragePort {
 		this.db.pragma("journal_mode = WAL");
 		this.db.pragma("foreign_keys = ON");
 
-		// Migration SQL is inlined as a TypeScript constant so it travels
-		// with the compiled output. No runtime file reads.
+		// Migration 001: initial schema (CREATE TABLE IF NOT EXISTS — safe to replay)
 		const statements = INITIAL_MIGRATION.split(";")
 			.map((s) => s.trim())
 			.filter((s) => s.length > 0 && !s.startsWith("PRAGMA"));
 
-		const migrate = this.db.transaction(() => {
+		const runInitial = this.db.transaction(() => {
 			for (const stmt of statements) {
 				this.db.exec(`${stmt};`);
 			}
 		});
-		migrate();
+		runInitial();
+
+		// Migration 002+: incremental migrations.
+		// Each checks schema_migrations and column existence before acting.
+		const applied = this.db
+			.prepare("SELECT version FROM schema_migrations WHERE version = 2")
+			.get();
+		if (!applied) {
+			const runIncremental = this.db.transaction(() => {
+				runMigration002(this.db);
+			});
+			runIncremental();
+		}
 	}
 
 	close(): void {
@@ -118,8 +130,8 @@ export class SqliteStorage implements StoragePort {
 		this.db
 			.prepare(
 				`INSERT INTO snapshots
-			 (snapshot_uid, repo_uid, parent_snapshot_uid, kind, basis_ref, basis_commit, status, created_at, label)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 (snapshot_uid, repo_uid, parent_snapshot_uid, kind, basis_ref, basis_commit, status, created_at, label, toolchain_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				uid,
@@ -131,6 +143,7 @@ export class SqliteStorage implements StoragePort {
 				SnapshotStatus.BUILDING,
 				now,
 				input.label ?? null,
+				input.toolchainJson ?? null,
 			);
 		const snapshot = this.getSnapshot(uid);
 		if (!snapshot) {
@@ -359,8 +372,8 @@ export class SqliteStorage implements StoragePort {
 			.prepare(
 				`INSERT INTO declarations
 			 (declaration_uid, repo_uid, snapshot_uid, target_stable_key, kind,
-			  value_json, created_at, created_by, supersedes_uid, is_active)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			  value_json, created_at, created_by, supersedes_uid, is_active, authored_basis_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				declaration.declarationUid,
@@ -373,6 +386,7 @@ export class SqliteStorage implements StoragePort {
 				declaration.createdBy,
 				declaration.supersedesUid,
 				declaration.isActive ? 1 : 0,
+				declaration.authoredBasisJson ?? null,
 			);
 	}
 
@@ -881,6 +895,7 @@ export class SqliteStorage implements StoragePort {
 			createdAt: row.created_at as string,
 			completedAt: (row.completed_at as string) ?? null,
 			label: (row.label as string) ?? null,
+			toolchainJson: (row.toolchain_json as string) ?? null,
 		};
 	}
 
@@ -936,6 +951,7 @@ export class SqliteStorage implements StoragePort {
 			createdBy: (row.created_by as string) ?? null,
 			supersedesUid: (row.supersedes_uid as string) ?? null,
 			isActive: (row.is_active as number) === 1,
+			authoredBasisJson: (row.authored_basis_json as string) ?? null,
 		};
 	}
 

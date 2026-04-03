@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS snapshots (
   edges_total         INTEGER NOT NULL DEFAULT 0,
   created_at          TEXT NOT NULL,
   completed_at        TEXT,
-  label               TEXT
+  label               TEXT,
+  toolchain_json      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_repo ON snapshots(repo_uid);
@@ -124,7 +125,8 @@ CREATE TABLE IF NOT EXISTS declarations (
   created_at          TEXT NOT NULL,
   created_by          TEXT,
   supersedes_uid      TEXT REFERENCES declarations(declaration_uid),
-  is_active           INTEGER NOT NULL DEFAULT 1
+  is_active           INTEGER NOT NULL DEFAULT 1,
+  authored_basis_json TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_declarations_target ON declarations(repo_uid, target_stable_key, kind);

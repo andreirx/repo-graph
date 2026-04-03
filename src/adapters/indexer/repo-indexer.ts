@@ -31,6 +31,7 @@ import type {
 	IndexResult,
 } from "../../core/ports/indexer.js";
 import type { StoragePort } from "../../core/ports/storage.js";
+import { buildToolchainJson, INDEXER_VERSION } from "../../version.js";
 
 /** File extensions the TS extractor handles. */
 const TS_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
@@ -87,11 +88,12 @@ export class RepoIndexer implements IndexerPort {
 				? this.storage.getLatestSnapshot(repoUid)
 				: null;
 
-		// 1. Create snapshot
+		// 1. Create snapshot with toolchain provenance
 		const snapshot = this.storage.createSnapshot({
 			repoUid,
 			kind: snapshotKind,
 			parentSnapshotUid: parentSnapshot?.snapshotUid,
+			toolchainJson: JSON.stringify(buildToolchainJson()),
 		});
 
 		try {
@@ -444,7 +446,7 @@ export class RepoIndexer implements IndexerPort {
 					targetNodeUid: fileNodeUid,
 					type: EdgeType.OWNS,
 					resolution: Resolution.STATIC,
-					extractor: "indexer:0.1.0",
+					extractor: INDEXER_VERSION,
 					location: null,
 					metadataJson: null,
 				});
@@ -478,7 +480,7 @@ export class RepoIndexer implements IndexerPort {
 						targetNodeUid: targetModuleUid,
 						type: EdgeType.IMPORTS,
 						resolution: Resolution.STATIC,
-						extractor: "indexer:0.1.0",
+						extractor: INDEXER_VERSION,
 						location: null,
 						metadataJson: null,
 					});

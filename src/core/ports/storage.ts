@@ -110,6 +110,8 @@ export interface CreateSnapshotInput {
 	basisCommit?: string;
 	parentSnapshotUid?: string;
 	label?: string;
+	/** Snapshot-level toolchain provenance JSON. */
+	toolchainJson?: string;
 }
 
 export interface UpdateSnapshotStatusInput {

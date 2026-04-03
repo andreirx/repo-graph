@@ -17,7 +17,9 @@ import type {
 	UnresolvedEdge,
 } from "../../../core/ports/extractor.js";
 
-const EXTRACTOR_NAME = "ts-core:0.2.0";
+import { EXTRACTOR_VERSIONS } from "../../../version.js";
+
+const EXTRACTOR_NAME = EXTRACTOR_VERSIONS.typescript;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GRAMMARS_DIR = join(__dirname, "..", "..", "..", "..", "grammars");
 

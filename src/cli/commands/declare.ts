@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { parseDeclarationValue } from "../../core/model/declaration.js";
 import { DeclarationKind } from "../../core/model/index.js";
 import type { AppContext } from "../../main.js";
+import { buildAuthoredBasisJson } from "../../version.js";
 
 export function registerDeclareCommands(
 	program: Command,
@@ -294,6 +295,7 @@ function insertDeclaration(
 		createdBy: "cli",
 		supersedesUid: null,
 		isActive: true,
+		authoredBasisJson: JSON.stringify(buildAuthoredBasisJson()),
 	});
 	return uid;
 }

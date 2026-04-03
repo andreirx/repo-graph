@@ -1,0 +1,301 @@
+Measurement Model — Four Truth Layers
+======================================
+
+Date: 2026-04-03
+
+Repo-graph handles four distinct kinds of truth. Collapsing them into
+one storage shape makes query semantics muddy and the product harder
+to trust.
+
+
+================================================================================
+THE FOUR LAYERS
+================================================================================
+
+1. Evidence
+   Raw artifacts from external tools. Not interpreted by repo-graph.
+   Examples: Istanbul coverage JSON, git log output, ESLint report,
+   bundle stats, trace dumps.
+   Storage: artifacts table + filesystem. Evidence links connect
+   artifacts to the nodes/edges/measurements they support.
+
+2. Measurements
+   Deterministic values computed from graph, AST, or imported evidence.
+   Reproducible: same input -> same value. No confidence score needed
+   because they are facts, not guesses.
+   Examples: cyclomatic complexity of a function, fan-out of a module,
+   line coverage percentage of a file, parameter count.
+   Storage: NEW measurements table (see schema below).
+
+3. Policies
+   Thresholds, architectural rules, and quality gates. Human-declared.
+   Examples: "cyclomatic complexity must not exceed 15",
+   "src/core must not import src/adapters",
+   "coverage on boundary modules must be >= 80%".
+   Storage: declarations table (existing) with new declaration kinds.
+
+4. Assessments
+   Derived judgments that combine measurements with policies or
+   heuristics. Carry confidence or severity. May be probabilistic.
+   Examples: hotspot score, risk level, "unhealthy module" verdict,
+   "low-test-confidence" warning.
+   Storage: inferences table (existing). This is the correct use of
+   inferences — derived, judgment-bearing, confidence-scored.
+
+
+================================================================================
+WHY MEASUREMENTS ARE NOT INFERENCES
+================================================================================
+
+Cyclomatic complexity = 12 is a measured fact. It is not a guess.
+It does not have a confidence score. It does not need a basis_json
+explaining what evidence supports it. It IS the evidence.
+
+Hotspot score = 0.87 is a derived assessment. It combines churn rate
+(measured) with complexity (measured) using a formula (policy/heuristic).
+The formula could change. The score is a judgment, not a fact.
+
+If both live in the inferences table, a consumer cannot distinguish
+"this is measured" from "this is estimated." That distinction matters
+for trust. A system of record must make it queryable.
+
+
+================================================================================
+MEASUREMENTS TABLE (NEW)
+================================================================================
+
+CREATE TABLE measurements (
+  measurement_uid     TEXT PRIMARY KEY,
+  snapshot_uid        TEXT NOT NULL REFERENCES snapshots(snapshot_uid),
+  repo_uid            TEXT NOT NULL REFERENCES repos(repo_uid),
+  target_stable_key   TEXT NOT NULL,        -- what this measures
+  kind                TEXT NOT NULL,        -- metric kind (see below)
+  value_json          TEXT NOT NULL,        -- structured value
+  source              TEXT NOT NULL,        -- "extractor:ts-core:0.2.0"
+                                            -- | "graph-stats:0.1.0"
+                                            -- | "coverage-import:0.1.0"
+  created_at          TEXT NOT NULL
+);
+
+CREATE INDEX idx_measurements_target
+  ON measurements(snapshot_uid, target_stable_key, kind);
+CREATE INDEX idx_measurements_kind
+  ON measurements(snapshot_uid, kind);
+
+No confidence field. No basis_json. These are facts.
+
+
+================================================================================
+MEASUREMENT KINDS
+================================================================================
+
+Module structural metrics (computed from graph):
+
+  fan_in              — number of modules that import this module
+  fan_out             — number of modules this module imports
+  instability         — fan_out / (fan_in + fan_out)
+  abstractness        — interfaces and abstract types / total types
+  distance_main_seq   — |abstractness + instability - 1|
+  cycle_count         — number of dependency cycles this module participates in
+  boundary_violations — number of forbidden imports from this module
+  coupling_density    — cross-module edge count / module pair count
+
+Function/symbol metrics (computed from AST by extractor):
+
+  cyclomatic_complexity — decision point count
+  cognitive_complexity  — weighted complexity penalizing nesting
+  parameter_count       — number of formal parameters
+  nesting_depth         — deepest control flow nesting level
+  function_length       — line count (line_end - line_start + 1)
+
+File/module size metrics:
+
+  module_size           — total LOC across all files in the module
+  symbol_count          — number of exported symbols
+  file_count            — number of source files in the module
+
+Coverage metrics (imported from external tools):
+
+  line_coverage         — lines covered / total lines (0.0 to 1.0)
+  function_coverage     — functions covered / total functions
+  branch_coverage       — branches covered / total branches
+
+Churn metrics (imported from git):
+
+  change_frequency      — commits touching this file in time window
+  churn_lines           — lines added + deleted in time window
+  author_count          — distinct authors in time window
+
+
+================================================================================
+METRIC FAMILIES AND THEIR SOURCES
+================================================================================
+
+Family          Source               Depends On
+------          ------               ----------
+Modularity      graph queries        existing edges + module nodes
+Code Quality    extractor AST walk   tree-sitter parse (during indexing)
+Coverage        external import      Istanbul/c8/nyc JSON artifacts
+Churn           external import      git log artifacts
+Hotspot         computation          churn + complexity measurements
+Risk            computation          hotspot + coverage + violations
+
+
+================================================================================
+ASSESSMENT KINDS (USE INFERENCES TABLE)
+================================================================================
+
+Assessments are derived from measurements + policies. They belong in
+the inferences table because they carry confidence and subjective
+judgment.
+
+  hotspot_score       — churn_lines * cyclomatic_complexity (normalized)
+  risk_score          — hotspot * (1 - coverage) * violation_weight
+  module_health       — composite of structure + complexity + coverage
+  dead_likelihood     — graph orphan confidence (existing)
+  arch_role           — inferred architectural role (existing)
+
+Each assessment cites the measurements it was derived from via
+evidence_links or basis_json. The formula is documented and versioned
+as part of the assessment source identifier.
+
+
+================================================================================
+POLICY DECLARATION KINDS (USE DECLARATIONS TABLE)
+================================================================================
+
+New declaration kinds for quality policies:
+
+  complexity_threshold — max cyclomatic/cognitive complexity for a module
+  coverage_threshold   — min coverage percentage for a module
+  size_threshold       — max LOC or symbol count for a module
+  quality_gate         — composite pass/fail rule for pre-merge checks
+
+These are human-declared, persistent across snapshots, and used by
+assessment queries to produce pass/fail verdicts.
+
+
+================================================================================
+THE HEALTH VECTOR
+================================================================================
+
+The strongest product move is not a single "quality" number. It is a
+health vector with trend across snapshots:
+
+  Module Health = {
+    structure:  { instability, abstractness, distance, cycles, violations }
+    complexity: { max_cc, avg_cc, monster_methods, avg_nesting }
+    coverage:   { line, branch, function, risk_weighted }
+    churn:      { frequency, lines, hotspot_pressure }
+    policy:     { violations_count, gates_passing }
+  }
+
+Each dimension is measured. The combination is assessed. The trend is
+queryable across snapshots. That is what makes the tool credible.
+
+
+================================================================================
+IMPLEMENTATION ROADMAP
+================================================================================
+
+Phase 1: Measurement infrastructure + graph-derived metrics
+  - Add measurements table to schema
+  - Implement graph stats command (fan-in/out, instability, abstractness,
+    distance, cycle participation, coupling)
+  - Store as measurements attached to MODULE nodes
+
+Phase 2: AST-derived metrics
+  - Extend extractor to compute cyclomatic complexity, parameter count,
+    nesting depth, function length during extraction
+  - Store as measurements attached to SYMBOL nodes
+  - Implement monster-methods query
+
+Phase 3: Coverage import
+  - Coverage import script (Istanbul/c8 JSON -> COVERS edges + measurements)
+  - Store line/function/branch coverage as measurements per file
+  - Implement coverage-gap queries (high-complexity + low-coverage)
+
+Phase 4: Churn import + hotspot computation
+  - Git adapter reads commit history
+  - Store churn metrics as measurements per file
+  - Compute hotspot scores as assessments (inferences table)
+
+Phase 5: Extracted domain versions
+  - Package version extraction from manifests (package.json, etc.)
+  - API version extraction from route prefixes / OpenAPI specs
+  - Database migration version extraction from migration files
+  - Git tag / release branch extraction
+  - Store as measurements with evidence links to source files
+  - Enable snapshot-to-app-version correlation queries
+
+Phase 6: Policy queries and trend
+  - Policy declarations (thresholds)
+  - Health vector per module
+  - Snapshot-to-snapshot trend comparison
+  - Pre-merge verification (does this change worsen any health dimension?)
+
+Phase 7: Composite health score
+  - Only after phases 1-6 are proven
+  - Document the formula explicitly and version it
+  - Present as advisory, not authoritative, until calibrated
+
+
+================================================================================
+EXTRACTED DOMAIN VERSIONS
+================================================================================
+
+Extracted domain versions are a distinct class of measurement.
+They represent what the system claims to be, not what repo-graph
+observed structurally.
+
+Three version classes (must not be conflated):
+
+  Provenance versions (repo-graph internal):
+    What toolchain produced this snapshot. Answers reproducibility.
+    Stored in: snapshots.toolchain_json, declarations.authored_basis_json
+
+  Extracted domain versions (from the codebase):
+    What the system claims to be. Answers compatibility and intent.
+    Stored in: measurements table with source = "version-extractor:X.Y.Z"
+
+  Declared versions (human-authored):
+    Version facts where extraction is impossible or incomplete.
+    Stored in: declarations table with appropriate kinds.
+
+Measurement kinds for extracted versions:
+
+  package_version       — from package.json, Cargo.toml, pyproject.toml, etc.
+  api_version           — from route prefixes, OpenAPI specs, protobuf packages
+  migration_version     — from migration filenames, ORM metadata
+  schema_version        — from schema registries, JSON Schema, AsyncAPI
+  dependency_version    — from lockfiles (third-party compatibility context)
+  release_tag           — from git tags and release branches
+
+Each carries:
+  - target_stable_key: the repo, module, or file this version describes
+  - value_json: { "version": "2.4.1", "source_file": "package.json", "line": 3 }
+  - source: "version-extractor:0.1.0" (or "declaration" for human-supplied)
+
+Extraction priority:
+  1. Manifest files (package.json, etc.) — highest signal, structured
+  2. OpenAPI/AsyncAPI/protobuf specs — contract-level versions
+  3. Migration filenames — database schema versions
+  4. Git tags — release-level versions
+  5. Route prefixes / URL patterns — API version conventions
+
+The extraction is deterministic (parsing structured files), so these
+are measurements (confidence 1.0), not inferences.
+
+
+================================================================================
+V2 POPULATION SCOPE (UPDATED)
+================================================================================
+
+Tables populated in v2 (addition to existing plan):
+
+  measurements       — kinds: fan_in, fan_out, instability, abstractness,
+                        distance_main_seq, cyclomatic_complexity,
+                        parameter_count, nesting_depth, function_length,
+                        module_size, symbol_count
+                        (coverage, churn, and extracted version kinds
+                        added as their pipelines are implemented)

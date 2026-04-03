@@ -19,4 +19,6 @@ export interface Snapshot {
 	createdAt: string;
 	completedAt: string | null;
 	label: string | null;
+	/** Snapshot-level toolchain provenance. See versioning-model.txt. */
+	toolchainJson: string | null;
 }

@@ -21,6 +21,9 @@ export interface Declaration {
 	createdBy: string | null;
 	supersedesUid: string | null;
 	isActive: boolean;
+	/** Identity basis at authoring time. See versioning-model.txt.
+	 *  NULL means "unknown basis — treat as potentially stale." */
+	authoredBasisJson: string | null;
 }
 
 // ── Declaration value shapes ───────────────────────────────────────────────

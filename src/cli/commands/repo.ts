@@ -154,6 +154,9 @@ export function registerRepoCommands(
 									nodes_total: snapshot.nodesTotal,
 									edges_total: snapshot.edgesTotal,
 									created_at: snapshot.createdAt,
+									toolchain: snapshot.toolchainJson
+										? JSON.parse(snapshot.toolchainJson)
+										: null,
 								}
 							: null,
 					}),

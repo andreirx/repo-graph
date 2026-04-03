@@ -19,6 +19,10 @@ root/
 |   |
 |   |-- architecture/                    Architecture decisions and plans
 |   |   |-- project-structure.txt          This file
+|   |   |-- measurement-model.txt         Four-layer truth model (evidence,
+|   |   |                                 measurements, policies, assessments)
+|   |   |-- versioning-model.txt          Snapshot-scoped toolchain provenance
+|   |   |                                 and version compatibility rules
 |   |   |-- decisions/                     ADRs (Architecture Decision Records)
 |   |       |-- 001-typescript-node.txt      Why TypeScript/Node, not Python
 |   |       |-- 002-sqlite-substrate.txt     Why SQLite, not graph DB or vector DB

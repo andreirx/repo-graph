@@ -285,6 +285,7 @@ describe("declarations", () => {
 			createdBy: "test",
 			supersedesUid: null,
 			isActive: true,
+			authoredBasisJson: null,
 		};
 		storage.insertDeclaration(decl);
 
@@ -305,6 +306,7 @@ describe("declarations", () => {
 			createdBy: null,
 			supersedesUid: null,
 			isActive: true,
+			authoredBasisJson: null,
 		};
 		storage.insertDeclaration(decl);
 		storage.deactivateDeclaration(decl.declarationUid);
@@ -444,6 +446,7 @@ describe("graph queries", () => {
 				createdBy: "test",
 				supersedesUid: null,
 				isActive: true,
+				authoredBasisJson: null,
 			});
 
 			const dead = storage.findDeadNodes({

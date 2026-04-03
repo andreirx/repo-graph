@@ -1,0 +1,376 @@
+Versioning Model — Snapshot-Scoped Toolchain Provenance
+========================================================
+
+Date: 2026-04-03
+
+
+================================================================================
+PROBLEM
+================================================================================
+
+Repo-graph has version information scattered across multiple locations
+with no unified model:
+
+  - CLI version: package.json / cli index.ts
+  - Extractor version: hardcoded string per extractor ("ts-core:0.2.0")
+  - Indexer version: hardcoded string on generated edges ("indexer:0.1.0")
+  - Schema version: migration table (schema_migrations.version)
+  - Stable key format: documented but not modeled as a field
+  - Snapshot lineage: parent_snapshot_uid, basis_commit
+  - File versions: content_hash + extractor per file_version row
+
+These are provenance fragments. There is no way to answer:
+  "Under what toolchain version set was this snapshot produced?"
+  "Are these two snapshots comparable?"
+  "Is this measurement reproducible with the current toolchain?"
+  "Which snapshots need recomputation after an extractor upgrade?"
+
+Without that, snapshot comparison, trend analysis, and measurement
+reproducibility are all on informal trust.
+
+
+================================================================================
+DESIGN: SNAPSHOT-SCOPED TOOLCHAIN PROVENANCE
+================================================================================
+
+Every snapshot records the full toolchain version set that produced it.
+This is not a single version number — it is a vector.
+
+The toolchain version set:
+
+  schema_version           — database schema version (migration number)
+  extractor_versions       — map of language → extractor name:version
+                             e.g. { "typescript": "ts-core:0.2.0" }
+  indexer_version          — indexer module version ("indexer:0.1.0")
+  stable_key_version       — stable key identity format version (2)
+  measurement_versions     — map of measurement source → version
+                             e.g. { "graph-stats": "0.1.0" }
+
+Storage: JSON field on the snapshots table.
+
+  ALTER TABLE snapshots ADD COLUMN toolchain_json TEXT;
+
+  Example value:
+  {
+    "schema_version": 1,
+    "extractor_versions": { "typescript": "ts-core:0.2.0" },
+    "indexer_version": "indexer:0.1.0",
+    "stable_key_version": 2,
+    "measurement_versions": {}
+  }
+
+This field is written at snapshot creation time by the indexer, which
+has access to all the component versions.
+
+
+================================================================================
+WHAT THIS ENABLES
+================================================================================
+
+1. Snapshot comparability.
+   Two snapshots are comparable if their toolchain_json matches on the
+   fields that affect the data being compared. Structural comparison
+   (nodes, edges) requires matching extractor + indexer + stable_key
+   versions. Measurement comparison requires matching measurement
+   formula versions.
+
+2. Stale detection.
+   After an extractor upgrade, all snapshots produced by the old
+   extractor are stale for call graph queries (the edges were produced
+   with different resolution rules). The toolchain field makes this
+   queryable: "find snapshots where extractor_versions.typescript
+   != current extractor version."
+
+3. Reproducibility.
+   Every measurement is attached to a snapshot. The snapshot records
+   the toolchain that produced it. A consumer can verify that the
+   measurement was produced by a known formula version.
+
+4. Migration planning.
+   When stable_key_version changes (as happened in v1 -> v2), the
+   toolchain field identifies which snapshots have old-format keys
+   and which declarations need migration.
+
+5. Trend integrity.
+   Comparing health vectors across snapshots is only meaningful if the
+   measurement methodology didn't change between them. The toolchain
+   field makes methodology changes explicit and detectable.
+
+
+================================================================================
+VERSION CATEGORIES
+================================================================================
+
+Category         What it versions      Change frequency    Impact of change
+--------         -----------------     ----------------    ----------------
+Schema           Table structure        Rare               Requires migration
+Extractor        AST walking rules      Medium             Nodes/edges change
+Indexer          Resolution rules       Medium             Edge resolution changes
+Stable key       Node identity format   Rare               All stable_keys change
+Measurement      Metric formulas        Medium             Metric values change
+Policy           Threshold definitions  Frequent           Assessment verdicts change
+Assessment       Scoring formulas       Medium             Derived scores change
+
+Schema, extractor, indexer, and stable key versions affect FACTS.
+Measurement versions affect MEASUREMENTS.
+Policy and assessment versions affect JUDGMENTS.
+
+This mirrors the four truth layers:
+  Facts       → schema + extractor + indexer + stable_key
+  Measurements → measurement formula versions
+  Policies    → policy versions (in declaration metadata)
+  Assessments → assessment formula versions (in inference metadata)
+
+
+================================================================================
+TOOLCHAIN VERSION VS DATA COMPATIBILITY VERSION
+================================================================================
+
+These are not the same thing:
+
+  Toolchain version: the build identifier of a component.
+    Example: ts-core:0.2.3
+
+  Data compatibility version: which graph semantics this component
+    produces. A patch release may not change extraction semantics.
+    Example: extraction_semantics:2
+
+A toolchain version bump does NOT always imply a data compatibility
+break. An extractor refactoring that changes internal code but produces
+identical nodes/edges should not invalidate snapshots.
+
+The compatibility-relevant versions are:
+
+  schema_compat         — minimum schema version required to read this data
+  extraction_semantics  — version of the extraction rules (what nodes/edges
+                          are produced, how calls are resolved, what binding
+                          model is used). Bumped when output changes.
+  stable_key_format     — version of the node identity format. Bumped only
+                          when the stable_key string format changes.
+  measurement_semantics — version of the measurement formulas. Bumped when
+                          a formula change would produce different values.
+
+The toolchain_json on snapshots records BOTH:
+  - Toolchain build versions (for auditing: what binary produced this)
+  - Data compatibility versions (for comparison: is this snapshot
+    comparable to that snapshot)
+
+Example toolchain_json:
+  {
+    "schema_compat": 1,
+    "extraction_semantics": 2,
+    "stable_key_format": 2,
+    "extractor_versions": { "typescript": "ts-core:0.2.0" },
+    "indexer_version": "indexer:0.1.0",
+    "measurement_semantics": {},
+    "measurement_versions": {}
+  }
+
+
+================================================================================
+CANONICAL VERSION SOURCE
+================================================================================
+
+Component versions must come from one place, not scattered hardcoded
+strings.
+
+Current problem:
+  - "ts-core:0.2.0" is hardcoded in ts-extractor.ts
+  - "indexer:0.1.0" is hardcoded in repo-indexer.ts
+  - Schema version is in the migrations table
+  - Stable key version is documented, not stored
+
+Solution: a single version manifest module.
+
+  src/version.ts
+    export const VERSIONS = {
+      cli: "0.1.0",
+      schemaCompat: 1,
+      extractionSemantics: 2,
+      stableKeyFormat: 2,
+      extractors: { typescript: "ts-core:0.2.0" },
+      indexer: "indexer:0.1.0",
+    } as const;
+
+All components import from this module. The indexer reads it when
+populating toolchain_json. The CLI reads it for --version output.
+Extractors read their own version from it. No more hardcoded strings.
+
+
+================================================================================
+DECLARATION-LEVEL IDENTITY BASIS
+================================================================================
+
+Snapshots are ephemeral — each index produces a new one. Declarations
+are persistent — they outlive snapshots. Many declarations are
+repo-scoped (snapshot_uid = NULL).
+
+This creates a version gap:
+
+  - toolchain_json on a snapshot tells you what produced that snapshot.
+  - But an entrypoint declaration that stores a stable_key was authored
+    at a specific point in time, against a specific stable_key_format.
+  - When stable_key_format changes, snapshot toolchain_json tells you
+    which snapshots use the new format. It does NOT tell you which
+    declaration rows were authored against the old format.
+
+Without declaration-level identity basis, the system cannot answer:
+  "Was this declaration authored against stable_key_format 1 or 2?"
+  "Which declarations need migration after a stable_key evolution?"
+  "Can this declaration be safely matched to this snapshot?"
+
+Solution: add an authored_basis field to declarations.
+
+  ALTER TABLE declarations ADD COLUMN authored_basis_json TEXT;
+
+  Example value:
+  {
+    "stable_key_format": 2,
+    "schema_compat": 1
+  }
+
+This is lightweight — it only records the compatibility-relevant
+versions that affect declaration matching. It does not record the
+full toolchain (declarations are not produced by extractors).
+
+The matching rule:
+  A declaration's target_stable_key can be matched to a snapshot's
+  nodes only if:
+    declaration.authored_basis_json.stable_key_format
+    == snapshot.toolchain_json.stable_key_format
+
+  If they don't match:
+    - Warn during graph dead, arch violations, and any query that
+      joins declarations to nodes.
+    - Offer `declare migrate` to rewrite target_stable_keys.
+
+For declarations authored before this field exists: authored_basis_json
+is NULL, which means "unknown basis — treat as potentially stale."
+
+
+================================================================================
+COMPATIBILITY RULES
+================================================================================
+
+Snapshot-to-snapshot comparison is valid when:
+
+  For structural diff (nodes/edges):
+    schema_compat must match
+    stable_key_format must match
+    extraction_semantics must match for compared languages
+
+  For measurement trend:
+    measurement_semantics must match for compared metrics
+    (a formula change breaks trend continuity — start a new series)
+
+  For assessment comparison:
+    assessment formula versions must match
+    underlying measurement_semantics must match
+
+  For declaration-to-snapshot matching:
+    declaration.authored_basis_json.stable_key_format
+    must match snapshot.toolchain_json.stable_key_format
+
+When versions don't match, the system should:
+  - Warn on comparison queries
+  - Suggest reindex for stale snapshots
+  - Suggest `declare migrate` for stale declarations
+  - Track series breaks in trend data
+
+
+================================================================================
+CURRENT STATE AND MIGRATION PATH
+================================================================================
+
+Current (v1.5):
+  - Extractor version is on every edge and file_version record
+    (hardcoded string per component).
+  - Indexer version is on generated edges (hardcoded string).
+  - Schema version is in schema_migrations table.
+  - Stable key version is documented but not stored anywhere.
+  - No toolchain_json on snapshots.
+  - No authored_basis_json on declarations.
+  - No canonical version manifest module.
+
+Phase 1:
+  - Create src/version.ts as the canonical version source.
+  - Add toolchain_json to snapshots table (nullable for backcompat).
+  - Populate it during indexing from the version manifest.
+  - Add authored_basis_json to declarations table (nullable).
+  - Populate it during `declare` CLI commands.
+  - Replace hardcoded version strings with imports from version.ts.
+
+Phase 2:
+  - Add measurement_semantics when measurements are implemented.
+  - Compatibility checks on snapshot comparison queries.
+  - Stale-declaration warnings during graph dead, arch violations.
+  - `declare migrate` command for identity format evolution.
+
+Phase 3:
+  - Trend queries check data compatibility before comparing.
+  - Series-break detection in health vector trends.
+  - Reindex recommendations when extraction_semantics changes.
+
+
+================================================================================
+THREE LEVELS OF PROVENANCE
+================================================================================
+
+The system needs three provenance levels, not two:
+
+  1. Row-level: per-edge, per-file_version extractor field.
+     Answers: "what produced this specific edge?"
+
+  2. Snapshot-level: toolchain_json on the snapshot.
+     Answers: "what toolchain produced this snapshot as a whole?"
+     Enables: comparison, trend, staleness detection.
+
+  3. Declaration-level: authored_basis_json on declarations.
+     Answers: "what identity format was this declaration authored against?"
+     Enables: safe matching, migration, stale-declaration warnings.
+
+Row-level provenance already exists. Snapshot-level and declaration-level
+are the additions from this design.
+
+
+================================================================================
+VERSIONING IN THE VISION CONTEXT
+================================================================================
+
+The VISION.md describes versioning as first-class across the entire
+engineering lifecycle: requirements, contracts, modules, artifacts,
+process, evidence, decisions.
+
+Toolchain provenance is the foundation layer. Without it, the
+versioning of higher-level objects (requirements, contracts) has
+no grounded basis for comparison or reproducibility.
+
+The system handles three distinct version classes:
+
+  Provenance versions (internal to repo-graph):
+    What toolchain produced this data. Answers reproducibility.
+    → toolchain_json on snapshots, authored_basis_json on declarations
+
+  Extracted domain versions (from the codebase itself):
+    What the system claims to be. Answers compatibility and intent.
+    → measurements table (package_version, api_version, migration_version, etc.)
+    → See measurement-model.txt "EXTRACTED DOMAIN VERSIONS" section
+
+  Declared versions (human-authored):
+    Version facts where extraction is impossible or incomplete.
+    → declarations table
+
+These must never be conflated. Provenance answers "can I trust this
+data?" Extracted versions answer "what does the system promise?"
+Declared versions answer "what did humans assert?"
+
+The implementation sequence:
+  1. [DONE] Canonical version source + toolchain provenance on snapshots
+  2. [DONE] Declaration-level identity basis
+  3. Measurement formula versioning (measurement-model.txt)
+  4. Extracted domain versions (package.json, OpenAPI, migrations, git tags)
+  5. Policy/gate versioning (declaration metadata)
+  6. Contract/requirement versioning (Horizon 3)
+  7. Cross-repo version compatibility (Horizon 3)
+
+Each layer builds on the one below it.

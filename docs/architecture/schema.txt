@@ -109,7 +109,16 @@ CREATE TABLE snapshots (
   edges_total         INTEGER DEFAULT 0,
   created_at          TEXT NOT NULL,
   completed_at        TEXT,
-  label               TEXT
+  label               TEXT,
+  toolchain_json      TEXT                  -- snapshot-level provenance (v2+)
+                                            -- see docs/architecture/versioning-model.txt
+                                            -- example: {"schema_compat":1,
+                                            --   "extraction_semantics":2,
+                                            --   "stable_key_format":2,
+                                            --   "extractor_versions":{"typescript":"ts-core:0.2.0"},
+                                            --   "indexer_version":"indexer:0.1.0",
+                                            --   "measurement_semantics":{},
+                                            --   "measurement_versions":{}}
 );
 
 
@@ -228,15 +237,46 @@ CREATE TABLE declarations (
   created_at          TEXT NOT NULL,
   created_by          TEXT,                 -- who/what created this declaration
   supersedes_uid      TEXT REFERENCES declarations(declaration_uid),
-  is_active           INTEGER NOT NULL DEFAULT 1
+  is_active           INTEGER NOT NULL DEFAULT 1,
+  authored_basis_json TEXT                  -- identity basis at authoring time (v2+)
+                                            -- see docs/architecture/versioning-model.txt
+                                            -- example: {"stable_key_format":2,"schema_compat":1}
+                                            -- NULL means "unknown basis — treat as potentially stale"
 );
 
 CREATE INDEX idx_declarations_target ON declarations(repo_uid, target_stable_key, kind);
 CREATE INDEX idx_declarations_active ON declarations(repo_uid, is_active);
 
 
+-- Measurements
+-- Deterministic values computed from graph, AST, or imported evidence.
+-- Reproducible: same input -> same value. No confidence score.
+-- Distinct from inferences (probabilistic) and artifacts (raw evidence).
+-- See docs/architecture/measurement-model.txt for the four-layer truth model.
+
+CREATE TABLE measurements (
+  measurement_uid     TEXT PRIMARY KEY,
+  snapshot_uid        TEXT NOT NULL REFERENCES snapshots(snapshot_uid),
+  repo_uid            TEXT NOT NULL REFERENCES repos(repo_uid),
+  target_stable_key   TEXT NOT NULL,        -- what this measures
+  kind                TEXT NOT NULL,        -- fan_in | fan_out | instability
+                                            -- | abstractness | distance_main_seq
+                                            -- | cyclomatic_complexity | parameter_count
+                                            -- | nesting_depth | function_length
+                                            -- | line_coverage | branch_coverage
+                                            -- | change_frequency | churn_lines
+  value_json          TEXT NOT NULL,        -- structured metric value
+  source              TEXT NOT NULL,        -- "graph-stats:0.1.0" | "ts-core:0.2.0"
+                                            -- | "coverage-import:0.1.0"
+  created_at          TEXT NOT NULL
+);
+
+CREATE INDEX idx_measurements_target ON measurements(snapshot_uid, target_stable_key, kind);
+CREATE INDEX idx_measurements_kind ON measurements(snapshot_uid, kind);
+
+
 -- Inferences
--- Computed guesses. Always attached to a snapshot.
+-- Derived assessments. Always attached to a snapshot.
 -- Always carry confidence scores. Never contaminate the facts tables.
 
 CREATE TABLE inferences (
@@ -676,17 +716,27 @@ Tables populated in v1:
   declarations         — kinds: module, boundary, entrypoint, invariant
 
 Tables present but empty in v1:
+  measurements
   inferences
   artifacts
   evidence_links
 
 Tables populated in v2:
+  measurements         — graph-derived: fan_in, fan_out, instability, abstractness,
+                         distance_main_seq, cycle_count, boundary_violations
+                         AST-derived: cyclomatic_complexity, parameter_count,
+                         nesting_depth, function_length, module_size
+                         (coverage and churn kinds added with import pipelines)
   nodes                — add: ENDPOINT, EVENT_TOPIC, TABLE, CONFIG_KEY, TEST, STATE
   edges                — add: IMPLEMENTS, INSTANTIATES, ROUTES_TO, REGISTERED_BY,
                                EMITS, CONSUMES, GATED_BY, TESTED_BY, THROWS, CATCHES
-  inferences           — add: arch_role, dead_likelihood, hotspot_score
+  inferences           — add: hotspot_score, risk_score, module_health
+                         (assessments derived from measurements + policies)
   artifacts            — add: coverage_report, git_metrics
-  evidence_links       — link artifacts to nodes/edges
+  evidence_links       — link artifacts to nodes/edges/measurements
+
+  See docs/architecture/measurement-model.txt for the full four-layer
+  truth model: evidence -> measurements -> policies -> assessments.
 
 Tables populated in v3:
   Cross-repo nodes and edges (endpoints, event topics, tables with OWNS edges

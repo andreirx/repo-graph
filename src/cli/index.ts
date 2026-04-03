@@ -9,6 +9,7 @@
 
 import { Command } from "commander";
 import { type AppContext, bootstrap, shutdown } from "../main.js";
+import { CLI_VERSION } from "../version.js";
 import { registerArchCommands } from "./commands/arch.js";
 import { registerDeclareCommands } from "./commands/declare.js";
 import { registerGraphCommands } from "./commands/graph.js";
@@ -19,7 +20,7 @@ const program = new Command();
 program
 	.name("rgr")
 	.description("Deterministic code graph tool for analyzing legacy codebases")
-	.version("0.1.0");
+	.version(CLI_VERSION);
 
 // Lazy-init context — only bootstrapped when a command actually runs.
 // This avoids initializing the database and WASM parser for --help or --version.
