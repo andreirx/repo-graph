@@ -73,7 +73,7 @@ CREATE TABLE measurements (
   value_json          TEXT NOT NULL,        -- structured value
   source              TEXT NOT NULL,        -- "extractor:ts-core:0.2.0"
                                             -- | "graph-stats:0.1.0"
-                                            -- | "coverage-import:0.1.0"
+                                            -- | "coverage-istanbul:0.1.0"
   created_at          TEXT NOT NULL
 );
 
@@ -225,7 +225,7 @@ Phase 2: AST-derived metrics [DONE]
       repo status --json (toolchain provenance), repo list --json
 
 Phase 3: Coverage import [DONE]
-  - coverage-import.ts: Istanbul/c8 JSON parser
+  - istanbul-coverage.ts: Istanbul/c8 adapter behind CoverageImporterPort
   - graph coverage command: imports line/function/branch coverage per file
   - Path rebasing from absolute to repo-relative
   - Filtered to repo-level file inventory (getFilesByRepo), not

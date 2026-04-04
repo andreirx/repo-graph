@@ -11,8 +11,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { TypeScriptExtractor } from "./adapters/extractors/typescript/ts-extractor.js";
 import { GitAdapter } from "./adapters/git/git-adapter.js";
+import { IstanbulCoverageImporter } from "./adapters/importers/istanbul-coverage.js";
 import { RepoIndexer } from "./adapters/indexer/repo-indexer.js";
 import { SqliteStorage } from "./adapters/storage/sqlite/sqlite-storage.js";
+import type { CoverageImporterPort } from "./core/ports/coverage-importer.js";
 
 const RGR_DIR = join(homedir(), ".rgr");
 const DEFAULT_DB_PATH = join(RGR_DIR, "repo-graph.db");
@@ -22,6 +24,7 @@ export interface AppContext {
 	extractor: TypeScriptExtractor;
 	indexer: RepoIndexer;
 	git: GitAdapter;
+	coverageImporters: CoverageImporterPort[];
 }
 
 /**
@@ -48,11 +51,15 @@ export async function bootstrap(dbPath?: string): Promise<AppContext> {
 	const extractor = new TypeScriptExtractor();
 	await extractor.initialize();
 
-	// Create indexer and git adapter
+	// Create indexer, git adapter, and coverage importers
 	const indexer = new RepoIndexer(storage, extractor);
 	const git = new GitAdapter();
+	const coverageImporters: CoverageImporterPort[] = [
+		new IstanbulCoverageImporter(),
+		// Future: new JacocoCoverageImporter(),
+	];
 
-	return { storage, extractor, indexer, git };
+	return { storage, extractor, indexer, git, coverageImporters };
 }
 
 /**

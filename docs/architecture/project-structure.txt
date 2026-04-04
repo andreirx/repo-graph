@@ -62,6 +62,7 @@ root/
 |   |       |-- extractor.ts               ExtractorPort (parse file, return nodes/edges/metrics)
 |   |       |-- indexer.ts                 IndexerPort (orchestrate indexing + refresh)
 |   |       |-- git.ts                     GitPort (commit hash, dirty state, file churn)
+|   |       |-- coverage-importer.ts       CoverageImporterPort (format-agnostic coverage import)
 |   |
 |   |-- adapters/                        OUTER LAYER — implements core ports
 |   |   |                                Each adapter depends on core/ and on its specific
@@ -97,7 +98,8 @@ root/
 |   |   |                                  dirty state, and per-file churn data.
 |   |   |
 |   |   |-- importers/
-|   |       |-- coverage-import.ts         Istanbul/c8 JSON parser for coverage data
+|   |   |   |-- istanbul-coverage.ts       Istanbul/c8 adapter implementing CoverageImporterPort
+|   |       |-- coverage-registry.ts       Auto-detection registry for coverage formats
 |   |
 |   |   Future adapters (not yet implemented):
 |   |   |-- watcher/                       (v2) File watcher for live refresh
@@ -159,7 +161,8 @@ root/
 |   |   |-- git/
 |   |   |   |-- git-adapter.test.ts        Git commit, dirty state, churn data
 |   |   |-- importers/
-|   |       |-- coverage-import.test.ts    Istanbul/c8 JSON parsing, path rebasing
+|   |   |   |-- coverage-import.test.ts    Istanbul/c8 JSON parsing, path rebasing
+|   |       |-- coverage-registry.test.ts  Format auto-detection, registry
 |   |
 |   |-- cli/                             CLI integration tests (end-to-end)
 |   |   |-- harness.ts                    Test harness: temp DB, CLI subprocess, assertions

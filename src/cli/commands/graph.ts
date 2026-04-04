@@ -835,13 +835,39 @@ export function registerGraphCommands(
 					return;
 				}
 
-				// Import coverage
-				const { importCoverageReport } = await import(
-					"../../adapters/importers/coverage-import.js"
-				);
-				let result: Awaited<ReturnType<typeof importCoverageReport>>;
+				// Detect and import coverage via injected importers
+				const { readFile } = await import("node:fs/promises");
+				let sniffContent: string;
 				try {
-					result = await importCoverageReport(reportPath, repo.rootPath);
+					const full = await readFile(reportPath, "utf-8");
+					sniffContent = full.slice(0, 4096);
+				} catch (err) {
+					outputError(
+						opts.json,
+						`Cannot read report: ${err instanceof Error ? err.message : String(err)}`,
+					);
+					process.exitCode = 1;
+					return;
+				}
+
+				const importer = ctx.coverageImporters.find((i) =>
+					i.canHandle(reportPath, sniffContent),
+				);
+				if (!importer) {
+					const formats = ctx.coverageImporters
+						.map((i) => i.formatName)
+						.join(", ");
+					outputError(
+						opts.json,
+						`Unrecognized coverage format. Supported: ${formats}`,
+					);
+					process.exitCode = 1;
+					return;
+				}
+
+				let result: Awaited<ReturnType<typeof importer.importReport>>;
+				try {
+					result = await importer.importReport(reportPath, repo.rootPath);
 				} catch (err) {
 					outputError(
 						opts.json,
@@ -895,7 +921,7 @@ export function registerGraphCommands(
 								covered: Math.round(fc.lineCoverage * fc.totalLines),
 								total: fc.totalLines,
 							}),
-							source: "coverage-import:0.1.0",
+							source: `coverage-${importer.formatName}:0.1.0`,
 							createdAt: now,
 						});
 					}
@@ -911,7 +937,7 @@ export function registerGraphCommands(
 								covered: Math.round(fc.functionCoverage * fc.totalFunctions),
 								total: fc.totalFunctions,
 							}),
-							source: "coverage-import:0.1.0",
+							source: `coverage-${importer.formatName}:0.1.0`,
 							createdAt: now,
 						});
 					}
@@ -927,7 +953,7 @@ export function registerGraphCommands(
 								covered: Math.round(fc.branchCoverage * fc.totalBranches),
 								total: fc.totalBranches,
 							}),
-							source: "coverage-import:0.1.0",
+							source: `coverage-${importer.formatName}:0.1.0`,
 							createdAt: now,
 						});
 					}

@@ -74,7 +74,7 @@ export function buildToolchainJson(): ToolchainJson {
 			"ast-metrics": "ast-metrics:0.1.0",
 			"domain-versions": "manifest-extractor:0.1.0",
 			"git-churn": "git-churn:0.1.0",
-			coverage: "coverage-import:0.1.0",
+			coverage: "coverage-istanbul:0.1.0",
 		},
 	};
 }

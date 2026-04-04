@@ -3,7 +3,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { importCoverageReport } from "../../../src/adapters/importers/coverage-import.js";
+import { IstanbulCoverageImporter } from "../../../src/adapters/importers/istanbul-coverage.js";
+
+const importer = new IstanbulCoverageImporter();
+const importCoverageReport = (path: string, root: string) =>
+	importer.importReport(path, root);
 
 // Create a synthetic Istanbul coverage-final.json fixture
 const FIXTURE_DIR = join(tmpdir(), `rgr-coverage-test-${randomUUID()}`);

@@ -278,7 +278,7 @@ CREATE TABLE measurements (
                                             -- | change_frequency | churn_lines
   value_json          TEXT NOT NULL,        -- structured metric value
   source              TEXT NOT NULL,        -- "graph-stats:0.1.0" | "ts-core:0.2.0"
-                                            -- | "coverage-import:0.1.0"
+                                            -- | "coverage-istanbul:0.1.0"
   created_at          TEXT NOT NULL
 );
 
