@@ -12,21 +12,13 @@
 
 import { resolve } from "node:path";
 import type { Command } from "commander";
+import {
+	evaluateObligation,
+	type ObligationVerdict,
+} from "../../core/evaluator/obligation-evaluator.js";
 import type { VerificationObligation } from "../../core/model/index.js";
 import { DeclarationKind } from "../../core/model/index.js";
 import type { AppContext } from "../../main.js";
-
-type Verdict = "PASS" | "FAIL" | "MISSING_EVIDENCE" | "UNSUPPORTED";
-
-interface ObligationVerdict {
-	obligation: string;
-	method: string;
-	target: string | null;
-	threshold: number | null;
-	operator: string | null;
-	verdict: Verdict;
-	evidence: Record<string, unknown>;
-}
 
 interface RequirementEvidence {
 	reqId: string;
@@ -112,7 +104,12 @@ export function registerEvidenceCommand(
 				const obligations: ObligationVerdict[] = [];
 
 				for (const obl of req.value.verification ?? []) {
-					const verdict = evaluateObligation(obl, ctx, snapshotUid, repoUid);
+					const verdict = evaluateObligation(
+						obl,
+						ctx.storage,
+						snapshotUid,
+						repoUid,
+					);
 					obligations.push(verdict);
 				}
 
@@ -256,203 +253,6 @@ function computeRequirementStatus(
 	if (summary.unsupported > 0) return "UNVERIFIABLE";
 	if (summary.total === 0) return "NO OBLIGATIONS";
 	return "SATISFIED";
-}
-
-// ── Obligation evaluator ──────────────────────────────────────────────
-
-function evaluateObligation(
-	obl: VerificationObligation,
-	ctx: AppContext,
-	snapshotUid: string,
-	repoUid: string,
-): ObligationVerdict {
-	const base: ObligationVerdict = {
-		obligation: obl.obligation,
-		method: obl.method,
-		target: obl.target ?? null,
-		threshold: obl.threshold ?? null,
-		operator: obl.operator ?? null,
-		verdict: "UNSUPPORTED",
-		evidence: {},
-	};
-
-	switch (obl.method) {
-		case "arch_violations": {
-			if (!obl.target) {
-				base.verdict = "MISSING_EVIDENCE";
-				base.evidence = { reason: "no target specified" };
-				break;
-			}
-			const boundaries = ctx.storage.getActiveDeclarations({
-				repoUid,
-				kind: "boundary" as DeclarationKind,
-				targetStableKey: `${repoUid}:${obl.target}:MODULE`,
-			});
-			if (boundaries.length === 0) {
-				base.verdict = "MISSING_EVIDENCE";
-				base.evidence = {
-					reason: "no boundary declarations for target",
-				};
-				break;
-			}
-			let totalViolations = 0;
-			for (const bd of boundaries) {
-				const bv = JSON.parse(bd.valueJson) as { forbids: string };
-				const violations = ctx.storage.findImportsBetweenPaths({
-					snapshotUid,
-					sourcePrefix: obl.target,
-					targetPrefix: bv.forbids,
-				});
-				totalViolations += violations.length;
-			}
-			base.verdict = totalViolations === 0 ? "PASS" : "FAIL";
-			base.evidence = {
-				violation_count: totalViolations,
-				snapshot: snapshotUid,
-			};
-			break;
-		}
-		case "coverage_threshold": {
-			if (!obl.target || obl.threshold === undefined) {
-				base.verdict = "MISSING_EVIDENCE";
-				base.evidence = {
-					reason: "target or threshold not specified",
-				};
-				break;
-			}
-			const coverageRows = ctx.storage.queryMeasurementsByKind(
-				snapshotUid,
-				"line_coverage",
-			);
-			const prefix = `${repoUid}:${obl.target}/`;
-			const matching = coverageRows.filter((r) =>
-				r.targetStableKey.startsWith(prefix),
-			);
-			if (matching.length === 0) {
-				base.verdict = "MISSING_EVIDENCE";
-				base.evidence = {
-					reason: "no coverage data for target path",
-				};
-				break;
-			}
-			const avg =
-				matching.reduce((sum, r) => {
-					const v = JSON.parse(r.valueJson) as { value: number };
-					return sum + v.value;
-				}, 0) / matching.length;
-			const op = obl.operator ?? ">=";
-			const pass = compare(avg, op, obl.threshold);
-			base.verdict = pass ? "PASS" : "FAIL";
-			base.evidence = {
-				avg_coverage: Math.round(avg * 10000) / 10000,
-				threshold: obl.threshold,
-				operator: op,
-				files_measured: matching.length,
-			};
-			break;
-		}
-		case "complexity_threshold": {
-			if (!obl.target || obl.threshold === undefined) {
-				base.verdict = "MISSING_EVIDENCE";
-				base.evidence = {
-					reason: "target or threshold not specified",
-				};
-				break;
-			}
-			const ccRows = ctx.storage.queryMeasurementsByKind(
-				snapshotUid,
-				"cyclomatic_complexity",
-			);
-			const ccPrefix = `${repoUid}:${obl.target}/`;
-			const matchingCC = ccRows.filter((r) =>
-				r.targetStableKey.includes(ccPrefix),
-			);
-			if (matchingCC.length === 0) {
-				base.verdict = "MISSING_EVIDENCE";
-				base.evidence = {
-					reason: "no complexity data for target path",
-				};
-				break;
-			}
-			const maxCC = Math.max(
-				...matchingCC.map((r) => {
-					const v = JSON.parse(r.valueJson) as { value: number };
-					return v.value;
-				}),
-			);
-			const ccOp = obl.operator ?? "<=";
-			base.verdict = compare(maxCC, ccOp, obl.threshold) ? "PASS" : "FAIL";
-			base.evidence = {
-				max_complexity: maxCC,
-				threshold: obl.threshold,
-				operator: ccOp,
-				functions_measured: matchingCC.length,
-			};
-			break;
-		}
-		case "hotspot_threshold": {
-			if (obl.threshold === undefined) {
-				base.verdict = "MISSING_EVIDENCE";
-				base.evidence = { reason: "threshold not specified" };
-				break;
-			}
-			let hotspots = ctx.storage.queryInferences(snapshotUid, "hotspot_score");
-			if (obl.target) {
-				const hsPrefix = `${repoUid}:${obl.target}/`;
-				hotspots = hotspots.filter((h) =>
-					h.targetStableKey.startsWith(hsPrefix),
-				);
-			}
-			if (hotspots.length === 0) {
-				base.verdict = "MISSING_EVIDENCE";
-				base.evidence = {
-					reason: obl.target
-						? "no hotspot data for target path"
-						: "no hotspot data",
-				};
-				break;
-			}
-			const maxHS = Math.max(
-				...hotspots.map((h) => {
-					const v = JSON.parse(h.valueJson) as {
-						normalized_score: number;
-					};
-					return v.normalized_score;
-				}),
-			);
-			const hsOp = obl.operator ?? "<=";
-			base.verdict = compare(maxHS, hsOp, obl.threshold) ? "PASS" : "FAIL";
-			base.evidence = {
-				max_hotspot_score: maxHS,
-				threshold: obl.threshold,
-			};
-			break;
-		}
-		default:
-			base.verdict = "UNSUPPORTED";
-			base.evidence = {
-				reason: `method "${obl.method}" not yet supported`,
-			};
-	}
-
-	return base;
-}
-
-function compare(value: number, op: string, threshold: number): boolean {
-	switch (op) {
-		case ">=":
-			return value >= threshold;
-		case ">":
-			return value > threshold;
-		case "<=":
-			return value <= threshold;
-		case "<":
-			return value < threshold;
-		case "==":
-			return value === threshold;
-		default:
-			return false;
-	}
 }
 
 function outputError(json: boolean | undefined, message: string): void {

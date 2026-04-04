@@ -1,12 +1,10 @@
-import { resolve } from "node:path";
 import type { Command } from "commander";
+import { evaluateObligation } from "../../core/evaluator/obligation-evaluator.js";
 import type {
 	CycleResult,
 	DeadNodeResult,
-	EdgeType,
 	ModuleStats,
 	NodeKind,
-	NodeResult,
 	PathResult,
 	QueryResult,
 	VerificationObligation,
@@ -24,7 +22,6 @@ import {
 	formatFunctionMetricResult,
 	formatModuleMetricAggResult,
 	formatModuleStatsResult,
-	formatNodeResult,
 	formatPathResult as formatPathResultJson,
 	formatQueryResult,
 } from "../formatters/json.js";
@@ -34,9 +31,15 @@ import {
 	formatFunctionMetrics,
 	formatModuleMetricAggregates,
 	formatModuleStats,
-	formatNodeResults,
 	formatPathResult,
 } from "../formatters/table.js";
+import {
+	outputError,
+	outputNodeResults,
+	parseEdgeTypes,
+	resolveSnapshot,
+	resolveSymbolKey,
+} from "./graph/helpers.js";
 
 export function registerGraphCommands(
 	program: Command,
@@ -1282,187 +1285,18 @@ export function registerGraphCommands(
 				if (!val.verification || val.verification.length === 0) continue;
 
 				for (const obl of val.verification) {
-					const result: ObligationResult = {
+					const ev = evaluateObligation(obl, ctx.storage, snapshotUid, repoUid);
+					results.push({
 						reqId: val.req_id,
 						reqVersion: val.version,
-						obligation: obl.obligation,
-						method: obl.method,
-						target: obl.target ?? null,
-						threshold: obl.threshold ?? null,
-						operator: obl.operator ?? null,
-						verdict: "UNSUPPORTED",
-						evidence: {},
-					};
-
-					// Evaluate based on method
-					switch (obl.method) {
-						case "arch_violations": {
-							if (!obl.target) {
-								result.verdict = "MISSING_EVIDENCE";
-								result.evidence = { reason: "no target specified" };
-								break;
-							}
-							// Check boundary violations for the target module
-							const boundaries = ctx.storage.getActiveDeclarations({
-								repoUid,
-								kind: "boundary" as DeclarationKind,
-								targetStableKey: `${repoUid}:${obl.target}:MODULE`,
-							});
-							if (boundaries.length === 0) {
-								result.verdict = "MISSING_EVIDENCE";
-								result.evidence = {
-									reason: "no boundary declarations for target",
-								};
-								break;
-							}
-							let totalViolations = 0;
-							for (const bd of boundaries) {
-								const bv = JSON.parse(bd.valueJson) as { forbids: string };
-								const violations = ctx.storage.findImportsBetweenPaths({
-									snapshotUid,
-									sourcePrefix: obl.target,
-									targetPrefix: bv.forbids,
-								});
-								totalViolations += violations.length;
-							}
-							result.verdict = totalViolations === 0 ? "PASS" : "FAIL";
-							result.evidence = {
-								violation_count: totalViolations,
-								snapshot: snapshotUid,
-							};
-							break;
-						}
-						case "coverage_threshold": {
-							if (!obl.target || obl.threshold === undefined) {
-								result.verdict = "MISSING_EVIDENCE";
-								result.evidence = {
-									reason: "target or threshold not specified",
-								};
-								break;
-							}
-							// Read coverage measurements for files under the target path
-							const coverageRows = ctx.storage.queryMeasurementsByKind(
-								snapshotUid,
-								"line_coverage",
-							);
-							const prefix = `${repoUid}:${obl.target}/`;
-							const matchingCoverage = coverageRows.filter((r) =>
-								r.targetStableKey.startsWith(prefix),
-							);
-							if (matchingCoverage.length === 0) {
-								result.verdict = "MISSING_EVIDENCE";
-								result.evidence = {
-									reason: "no coverage data for target path",
-								};
-								break;
-							}
-							const avgCoverage =
-								matchingCoverage.reduce((sum, r) => {
-									const v = JSON.parse(r.valueJson) as { value: number };
-									return sum + v.value;
-								}, 0) / matchingCoverage.length;
-							const op = obl.operator ?? ">=";
-							const pass = compareValues(avgCoverage, op, obl.threshold);
-							result.verdict = pass ? "PASS" : "FAIL";
-							result.evidence = {
-								avg_coverage: Math.round(avgCoverage * 10000) / 10000,
-								threshold: obl.threshold,
-								operator: op,
-								files_measured: matchingCoverage.length,
-							};
-							break;
-						}
-						case "complexity_threshold": {
-							if (!obl.target || obl.threshold === undefined) {
-								result.verdict = "MISSING_EVIDENCE";
-								result.evidence = {
-									reason: "target or threshold not specified",
-								};
-								break;
-							}
-							const ccRows = ctx.storage.queryMeasurementsByKind(
-								snapshotUid,
-								"cyclomatic_complexity",
-							);
-							const ccPrefix = `${repoUid}:${obl.target}/`;
-							const matchingCC = ccRows.filter((r) =>
-								r.targetStableKey.includes(ccPrefix),
-							);
-							if (matchingCC.length === 0) {
-								result.verdict = "MISSING_EVIDENCE";
-								result.evidence = {
-									reason: "no complexity data for target path",
-								};
-								break;
-							}
-							const maxCC = Math.max(
-								...matchingCC.map((r) => {
-									const v = JSON.parse(r.valueJson) as { value: number };
-									return v.value;
-								}),
-							);
-							const ccOp = obl.operator ?? "<=";
-							const ccPass = compareValues(maxCC, ccOp, obl.threshold);
-							result.verdict = ccPass ? "PASS" : "FAIL";
-							result.evidence = {
-								max_complexity: maxCC,
-								threshold: obl.threshold,
-								operator: ccOp,
-								functions_measured: matchingCC.length,
-							};
-							break;
-						}
-						case "hotspot_threshold": {
-							if (obl.threshold === undefined) {
-								result.verdict = "MISSING_EVIDENCE";
-								result.evidence = { reason: "threshold not specified" };
-								break;
-							}
-							let hotspots = ctx.storage.queryInferences(
-								snapshotUid,
-								"hotspot_score",
-							);
-							// Filter to target path if specified
-							if (obl.target) {
-								const hsPrefix = `${repoUid}:${obl.target}/`;
-								hotspots = hotspots.filter((h) =>
-									h.targetStableKey.startsWith(hsPrefix),
-								);
-							}
-							if (hotspots.length === 0) {
-								result.verdict = "MISSING_EVIDENCE";
-								result.evidence = {
-									reason: obl.target
-										? "no hotspot data for target path"
-										: "no hotspot data",
-								};
-								break;
-							}
-							const maxHotspot = Math.max(
-								...hotspots.map((h) => {
-									const v = JSON.parse(h.valueJson) as {
-										normalized_score: number;
-									};
-									return v.normalized_score;
-								}),
-							);
-							const hsOp = obl.operator ?? "<=";
-							const hsPass = compareValues(maxHotspot, hsOp, obl.threshold);
-							result.verdict = hsPass ? "PASS" : "FAIL";
-							result.evidence = {
-								max_hotspot_score: maxHotspot,
-								threshold: obl.threshold,
-							};
-							break;
-						}
-						default:
-							result.verdict = "UNSUPPORTED";
-							result.evidence = {
-								reason: `method "${obl.method}" not yet supported`,
-							};
-					}
-
-					results.push(result);
+						obligation: ev.obligation,
+						method: ev.method,
+						target: ev.target,
+						threshold: ev.threshold,
+						operator: ev.operator,
+						verdict: ev.verdict,
+						evidence: ev.evidence,
+					});
 				}
 			}
 
@@ -1526,157 +1360,8 @@ export function registerGraphCommands(
 		});
 }
 
-function compareValues(value: number, op: string, threshold: number): boolean {
-	switch (op) {
-		case ">=":
-			return value >= threshold;
-		case ">":
-			return value > threshold;
-		case "<=":
-			return value <= threshold;
-		case "<":
-			return value < threshold;
-		case "==":
-			return value === threshold;
-		default:
-			return false;
-	}
-}
+// compareValues removed — now in core/evaluator/obligation-evaluator.ts
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-interface ResolvedSnapshot {
-	snapshotUid: string | null;
-	repoName: string;
-	repoUid: string | null;
-	snapshotScope: string;
-	basisCommit: string | null;
-	stale: boolean;
-}
-
-function resolveSnapshot(ctx: AppContext, ref: string): ResolvedSnapshot {
-	const repo =
-		ctx.storage.getRepo({ uid: ref }) ??
-		ctx.storage.getRepo({ name: ref }) ??
-		ctx.storage.getRepo({ rootPath: resolve(ref) });
-
-	if (!repo)
-		return {
-			snapshotUid: null,
-			repoName: ref,
-			repoUid: null,
-			snapshotScope: "full",
-			basisCommit: null,
-			stale: false,
-		};
-
-	const snapshot = ctx.storage.getLatestSnapshot(repo.repoUid);
-	const staleFiles = snapshot
-		? ctx.storage.getStaleFiles(snapshot.snapshotUid)
-		: [];
-
-	return {
-		snapshotUid: snapshot?.snapshotUid ?? null,
-		repoName: repo.name,
-		repoUid: repo.repoUid,
-		// Map internal snapshot kinds to the documented wire format:
-		// "full" -> "full", everything else -> "incremental"
-		snapshotScope: snapshot?.kind === "full" ? "full" : "incremental",
-		basisCommit: snapshot?.basisCommit ?? null,
-		// In v1, `stale` is always false because refresh does full re-extraction
-		// and nothing writes parse_status='stale'. When v2 adds a file watcher
-		// or incremental diff, changed files will be marked stale and this
-		// field will activate.
-		stale: staleFiles.length > 0,
-	};
-}
-
-function resolveSymbolKey(
-	ctx: AppContext,
-	snapshotUid: string,
-	query: string,
-): string | null {
-	// Try as a direct stable key first
-	const direct = ctx.storage.getNodeByStableKey(snapshotUid, query);
-	if (direct) return query;
-
-	// Try fuzzy symbol resolution
-	const candidates = ctx.storage.resolveSymbol({
-		snapshotUid,
-		query,
-		limit: 1,
-	});
-	return candidates.length > 0 ? candidates[0].stableKey : null;
-}
-
-function outputNodeResults(
-	command: string,
-	snap: ResolvedSnapshot,
-	results: NodeResult[],
-	json?: boolean,
-): void {
-	if (json) {
-		const qr: QueryResult<NodeResult> = {
-			command,
-			repo: snap.repoName,
-			snapshot: snap.snapshotUid ?? "",
-			snapshotScope: snap.snapshotScope,
-			basisCommit: snap.basisCommit,
-			results,
-			count: results.length,
-			stale: snap.stale,
-		};
-		console.log(formatQueryResult(qr, formatNodeResult));
-	} else {
-		console.log(formatNodeResults(results));
-	}
-}
-
-const VALID_EDGE_TYPES = new Set([
-	"IMPORTS",
-	"CALLS",
-	"IMPLEMENTS",
-	"INSTANTIATES",
-	"READS",
-	"WRITES",
-	"EMITS",
-	"CONSUMES",
-	"ROUTES_TO",
-	"REGISTERED_BY",
-	"GATED_BY",
-	"DEPENDS_ON",
-	"OWNS",
-	"TESTED_BY",
-	"COVERS",
-	"THROWS",
-	"CATCHES",
-	"TRANSITIONS_TO",
-]);
-
-/**
- * Parse and validate a comma-separated edge types string.
- * Returns null with an error message if any type is invalid.
- */
-function parseEdgeTypes(
-	raw: string,
-): { ok: true; types: EdgeType[] } | { ok: false; error: string } {
-	const types = raw.split(",").map((t) => t.trim());
-	for (const t of types) {
-		if (!VALID_EDGE_TYPES.has(t)) {
-			const valid = [...VALID_EDGE_TYPES].sort().join(", ");
-			return {
-				ok: false,
-				error: `Unknown edge type "${t}". Valid types: ${valid}`,
-			};
-		}
-	}
-	return { ok: true, types: types as EdgeType[] };
-}
-
-function outputError(json: boolean | undefined, message: string): void {
-	if (json) {
-		console.log(JSON.stringify({ error: message }));
-	} else {
-		console.error(`Error: ${message}`);
-	}
-}
+// ── Helpers now in graph/helpers.ts ────────────────────────────────────
