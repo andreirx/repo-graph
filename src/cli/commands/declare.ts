@@ -314,7 +314,16 @@ export function registerDeclareCommands(
 					Record<string, unknown>
 				>;
 
+				// `declare obligation` only APPENDS. The new obligation gets
+				// a fresh UUID; existing obligations are copied forward
+				// verbatim with their obligation_ids intact. This command
+				// does NOT invoke the semantic-match inheritance matcher
+				// from core/model — matching is only exercised when an
+				// edit-obligation flow (not yet shipped) supersedes with
+				// potentially modified obligations. The matcher is tested
+				// as a pure helper in test/core/model/declaration.test.ts.
 				const newObligation: Record<string, unknown> = {
+					obligation_id: uuidv4(),
 					obligation: opts.obligation,
 					method: opts.method,
 				};
@@ -326,6 +335,15 @@ export function registerDeclareCommands(
 				existingObligations.push(newObligation);
 				currentValue.verification = existingObligations;
 				currentValue.version = ((currentValue.version as number) ?? 0) + 1;
+
+				// Validate the full updated requirement before persisting.
+				// This catches malformed verification arrays (e.g. from
+				// direct DB mutation) and enforces the obligation_id
+				// invariant at write time.
+				parseDeclarationValue(
+					DeclarationKind.REQUIREMENT,
+					JSON.stringify(currentValue),
+				);
 
 				// Supersede the old declaration with updated value.
 				// Link the new row back to the old one for audit lineage.
@@ -344,6 +362,7 @@ export function registerDeclareCommands(
 						JSON.stringify({
 							declaration_uid: uid,
 							req_id: reqId,
+							obligation_id: newObligation.obligation_id,
 							obligation: opts.obligation,
 							method: opts.method,
 							version: currentValue.version,
@@ -352,6 +371,168 @@ export function registerDeclareCommands(
 				} else {
 					console.log(
 						`Added obligation to ${reqId} (v${currentValue.version}): ${opts.obligation}`,
+					);
+				}
+			},
+		);
+
+	declare
+		.command("waiver <repo> <reqId>")
+		.description(
+			"Record a waiver against a specific obligation of a requirement version",
+		)
+		.requiredOption(
+			"--obligation-id <id>",
+			"obligation_id of the obligation being waived",
+		)
+		.requiredOption(
+			"--requirement-version <n>",
+			"Requirement version the waiver applies to (must match current active)",
+		)
+		.requiredOption(
+			"--reason <text>",
+			"Explanation of why the exception is acceptable",
+		)
+		.option("--expires-at <iso>", "ISO 8601 expiry timestamp")
+		.option("--review-by <iso>", "ISO 8601 review deadline")
+		.option(
+			"--rationale <category>",
+			"Categorization for reporting (e.g. tech_debt, pilot)",
+		)
+		.option(
+			"--policy-basis <text>",
+			"Reference to policy/gate version this waiver was made under",
+		)
+		.option("--created-by <text>", "Authorship marker (defaults to 'cli')")
+		.option("--json", "JSON output")
+		.action(
+			(
+				repoRef: string,
+				reqId: string,
+				opts: {
+					obligationId: string;
+					requirementVersion: string;
+					reason: string;
+					expiresAt?: string;
+					reviewBy?: string;
+					rationale?: string;
+					policyBasis?: string;
+					createdBy?: string;
+					json?: boolean;
+				},
+			) => {
+				const ctx = getCtx();
+				const repo = resolveRepo(ctx, repoRef);
+				if (!repo) {
+					outputError(opts.json, `Repository not found: ${repoRef}`);
+					process.exitCode = 1;
+					return;
+				}
+
+				const requirementVersion = Number.parseInt(opts.requirementVersion, 10);
+				if (Number.isNaN(requirementVersion)) {
+					outputError(
+						opts.json,
+						"--requirement-version must be an integer",
+					);
+					process.exitCode = 1;
+					return;
+				}
+
+				// Find the active requirement with this req_id
+				const allReqs = ctx.storage.getActiveDeclarations({
+					repoUid: repo.repoUid,
+					kind: DeclarationKind.REQUIREMENT,
+				});
+				const reqDecl = allReqs.find((d) => {
+					const val = JSON.parse(d.valueJson) as { req_id: string };
+					return val.req_id === reqId;
+				});
+				if (!reqDecl) {
+					outputError(
+						opts.json,
+						`No active requirement found with req_id "${reqId}"`,
+					);
+					process.exitCode = 1;
+					return;
+				}
+
+				// Verify that the specified version matches the active version.
+				// Waivers are only creatable against the current active version;
+				// superseded versions cannot receive new waivers.
+				const reqValue = JSON.parse(reqDecl.valueJson) as {
+					version: number;
+					verification?: Array<{ obligation_id: string }>;
+				};
+				if (reqValue.version !== requirementVersion) {
+					outputError(
+						opts.json,
+						`Requirement ${reqId} active version is ${reqValue.version}, not ${requirementVersion}. ` +
+							`Waivers can only be created against the current active version.`,
+					);
+					process.exitCode = 1;
+					return;
+				}
+
+				// Verify that obligation_id exists in this requirement version
+				const obligationExists = (reqValue.verification ?? []).some(
+					(o) => o.obligation_id === opts.obligationId,
+				);
+				if (!obligationExists) {
+					outputError(
+						opts.json,
+						`Obligation ${opts.obligationId} not found in ${reqId} v${requirementVersion}`,
+					);
+					process.exitCode = 1;
+					return;
+				}
+
+				const now = new Date().toISOString();
+				const waiverValue: Record<string, unknown> = {
+					req_id: reqId,
+					requirement_version: requirementVersion,
+					obligation_id: opts.obligationId,
+					reason: opts.reason,
+					created_at: now,
+					created_by: opts.createdBy ?? "cli",
+				};
+				if (opts.expiresAt) waiverValue.expires_at = opts.expiresAt;
+				if (opts.reviewBy) waiverValue.review_by = opts.reviewBy;
+				if (opts.rationale) waiverValue.rationale_category = opts.rationale;
+				if (opts.policyBasis) waiverValue.policy_basis = opts.policyBasis;
+
+				// Schema validation before persisting
+				parseDeclarationValue(
+					DeclarationKind.WAIVER,
+					JSON.stringify(waiverValue),
+				);
+
+				// Target stable key anchors the waiver to its requirement row
+				// for indexing/filtering purposes. The operational identity
+				// is the (req_id, version, obligation_id) tuple in value_json.
+				const stableKey = `${repo.repoUid}:waiver:${reqId}#${opts.obligationId}`;
+
+				const uid = insertDeclaration(
+					ctx,
+					repo.repoUid,
+					stableKey,
+					DeclarationKind.WAIVER,
+					waiverValue,
+				);
+
+				if (opts.json) {
+					console.log(
+						JSON.stringify({
+							declaration_uid: uid,
+							req_id: reqId,
+							requirement_version: requirementVersion,
+							obligation_id: opts.obligationId,
+							reason: opts.reason,
+						}),
+					);
+				} else {
+					console.log(
+						`Recorded waiver ${uid} against ${reqId} v${requirementVersion}, obligation ${opts.obligationId}`,
 					);
 				}
 			},

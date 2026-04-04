@@ -71,6 +71,21 @@ export interface StoragePort {
 	insertDeclaration(declaration: Declaration): void;
 	getActiveDeclarations(input: GetDeclarationsInput): Declaration[];
 	deactivateDeclaration(declarationUid: string): void;
+	/**
+	 * Find active, non-expired waiver declarations matching the filter.
+	 *
+	 * Version-scoped semantics: when reqId, requirementVersion, and
+	 * obligationId are all supplied, returns at most the waiver(s)
+	 * bound to that exact (req_id, version, obligation_id) tuple.
+	 *
+	 * Expiry semantics: a waiver with expires_at <= now is excluded
+	 * (expired waivers stop suppressing verdict, per Decision Q3).
+	 * A waiver without expires_at never expires.
+	 *
+	 * @param now - ISO 8601 timestamp for expiry comparison. Omit to
+	 *              use the current time.
+	 */
+	findActiveWaivers(input: FindActiveWaiversInput): Declaration[];
 
 	// ── Graph Queries ────────────────────────────────────────────────────
 
@@ -164,6 +179,15 @@ export interface GetDeclarationsInput {
 	repoUid: string;
 	kind?: string;
 	targetStableKey?: string;
+}
+
+export interface FindActiveWaiversInput {
+	repoUid: string;
+	reqId?: string;
+	requirementVersion?: number;
+	obligationId?: string;
+	/** ISO 8601 timestamp. Omit for current time. */
+	now?: string;
 }
 
 export interface ResolveSymbolInput {

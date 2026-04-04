@@ -44,6 +44,35 @@ THE FOUR LAYERS
 
 
 ================================================================================
+WAIVERS: POLICY OVERLAY ON ASSESSMENTS
+================================================================================
+
+Waivers are a distinct form of policy (layer 3) that overlays on
+evaluation results. They do NOT belong to any of the four truth layers
+above; they modify how assessments are consumed by gates and reports.
+
+Waivers are declarations (kind = 'waiver'). A waiver references a
+specific (req_id, requirement_version, obligation_id) tuple and
+suppresses that obligation's failure for gate purposes.
+
+Core principle: a waiver suppresses gate failure, NOT the underlying
+computed verdict. Every consumer (graph obligations, evidence, gate)
+exposes BOTH computed_verdict (truth) and effective_verdict (policy-
+adjusted). The computed verdict is never erased.
+
+Five-state effective verdict: PASS, FAIL, MISSING_EVIDENCE,
+UNSUPPORTED, WAIVED. WAIVED is ONLY an effective state — never a
+computed state.
+
+Waivers are version-scoped: when a requirement is superseded, active
+waivers against the old version stop applying to the new version
+(the waiver remains in the audit trail). Expired waivers (expires_at
+<= now) stop suppressing; the computed verdict resumes as effective.
+
+Full contract: docs/architecture/gate-contract.txt (normative).
+
+
+================================================================================
 WHY MEASUREMENTS ARE NOT INFERENCES
 ================================================================================
 
@@ -173,6 +202,12 @@ New declaration kinds for quality policies:
 
 These are human-declared, persistent across snapshots, and used by
 assessment queries to produce pass/fail verdicts.
+
+Waiver declarations (kind = 'waiver', shipped) are a policy overlay,
+not a threshold policy. They reference a specific
+(req_id, requirement_version, obligation_id) tuple and suppress gate
+failure for that obligation. See WAIVERS section above and
+docs/architecture/gate-contract.txt.
 
 
 ================================================================================

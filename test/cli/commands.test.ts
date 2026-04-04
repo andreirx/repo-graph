@@ -363,7 +363,42 @@ describe("obligations", () => {
 		const archObl = (json.results as Array<Record<string, unknown>>).find(
 			(o) => o.req_id === "REQ-ARCH-001",
 		);
-		expect(archObl?.verdict).toBe("PASS");
+		expect(archObl?.effective_verdict).toBe("PASS");
+		expect(archObl?.computed_verdict).toBe("PASS");
+		// Obligation carries a stable obligation_id (UUID)
+		expect(archObl?.obligation_id).toBeDefined();
+		expect(typeof archObl?.obligation_id).toBe("string");
+		expect((archObl?.obligation_id as string).length).toBeGreaterThan(0);
+	});
+
+	it("declare obligation --json returns generated obligation_id", async () => {
+		// Create a requirement, then add obligation with --json
+		await h.run(
+			"declare",
+			"requirement",
+			"test-repo",
+			"src",
+			"--req-id",
+			"REQ-OBL-ID-001",
+			"--objective",
+			"Exposes obligation_id in output",
+		);
+		const r = await h.run(
+			"declare",
+			"obligation",
+			"test-repo",
+			"REQ-OBL-ID-001",
+			"--obligation",
+			"test",
+			"--method",
+			"manual_review",
+			"--json",
+		);
+		expect(r.exitCode).toBe(0);
+		const json = r.json();
+		expect(json.obligation_id).toBeDefined();
+		expect(typeof json.obligation_id).toBe("string");
+		expect((json.obligation_id as string).length).toBeGreaterThan(0);
 	});
 
 	it("obligation addition bumps requirement version", async () => {
@@ -419,7 +454,361 @@ describe("obligations", () => {
 		const unsup = (json.results as Array<Record<string, unknown>>).find(
 			(o) => o.req_id === "REQ-UNSUP-001" && o.method === "manual_review",
 		);
-		expect(unsup?.verdict).toBe("UNSUPPORTED");
+		expect(unsup?.effective_verdict).toBe("UNSUPPORTED");
+		expect(unsup?.computed_verdict).toBe("UNSUPPORTED");
+	});
+});
+
+// ── declare waiver ────────────────────────────────────────────────────
+
+describe("declare waiver", () => {
+	// This suite creates its own REQ/obligation pair so it does not
+	// depend on side effects from other obligation tests.
+	let obligationId: string;
+	const WAIVER_REQ_ID = "REQ-WAIVER-001";
+
+	beforeAll(async () => {
+		await h.run(
+			"declare",
+			"requirement",
+			"test-repo",
+			"src",
+			"--req-id",
+			WAIVER_REQ_ID,
+			"--objective",
+			"Target for waiver tests",
+		);
+		const r = await h.run(
+			"declare",
+			"obligation",
+			"test-repo",
+			WAIVER_REQ_ID,
+			"--obligation",
+			"manual review",
+			"--method",
+			"manual_review",
+			"--json",
+		);
+		obligationId = (r.json() as { obligation_id: string }).obligation_id;
+	}, 30000);
+
+	it("creates a waiver for a current-version obligation (--json)", async () => {
+		const r = await h.run(
+			"declare",
+			"waiver",
+			"test-repo",
+			WAIVER_REQ_ID,
+			"--obligation-id",
+			obligationId,
+			"--requirement-version",
+			"2", // version bumped to 2 by declare obligation
+			"--reason",
+			"Known limitation, tracked in ADR-003",
+			"--rationale",
+			"tech_debt",
+			"--json",
+		);
+		expect(r.exitCode).toBe(0);
+		const json = r.json();
+		expect(json.declaration_uid).toBeDefined();
+		expect(json.req_id).toBe(WAIVER_REQ_ID);
+		expect(json.obligation_id).toBe(obligationId);
+		expect(json.requirement_version).toBe(2);
+		expect(json.reason).toBe("Known limitation, tracked in ADR-003");
+	});
+
+	it("waiver appears in declare list with kind=waiver", async () => {
+		const r = await h.run(
+			"declare",
+			"list",
+			"test-repo",
+			"--kind",
+			"waiver",
+			"--json",
+		);
+		expect(r.exitCode).toBe(0);
+		const list = JSON.parse(r.stdout) as Array<{
+			kind: string;
+			value: { req_id: string; obligation_id: string };
+		}>;
+		const found = list.find(
+			(d) =>
+				d.kind === "waiver" &&
+				d.value.req_id === WAIVER_REQ_ID &&
+				d.value.obligation_id === obligationId,
+		);
+		expect(found).toBeDefined();
+	});
+
+	it("rejects waiver for non-existent requirement", async () => {
+		const r = await h.run(
+			"declare",
+			"waiver",
+			"test-repo",
+			"REQ-DOES-NOT-EXIST",
+			"--obligation-id",
+			"anything",
+			"--requirement-version",
+			"1",
+			"--reason",
+			"test",
+			"--json",
+		);
+		expect(r.exitCode).toBe(1);
+	});
+
+	it("rejects waiver for wrong requirement version", async () => {
+		const r = await h.run(
+			"declare",
+			"waiver",
+			"test-repo",
+			WAIVER_REQ_ID,
+			"--obligation-id",
+			obligationId,
+			"--requirement-version",
+			"999",
+			"--reason",
+			"test",
+			"--json",
+		);
+		expect(r.exitCode).toBe(1);
+	});
+
+	it("rejects waiver for non-existent obligation_id", async () => {
+		const r = await h.run(
+			"declare",
+			"waiver",
+			"test-repo",
+			WAIVER_REQ_ID,
+			"--obligation-id",
+			"not-a-real-obligation-id",
+			"--requirement-version",
+			"2",
+			"--reason",
+			"test",
+			"--json",
+		);
+		expect(r.exitCode).toBe(1);
+	});
+});
+
+// ── gate command ──────────────────────────────────────────────────────
+
+describe("gate command", () => {
+	// Self-contained: fresh harness with a deterministic set of
+	// obligations that cover each verdict state (PASS, UNSUPPORTED,
+	// WAIVED). Decoupled from other describes' declarations.
+	let gh: TestHarness;
+	const GATE_REPO = "gate-repo";
+
+	beforeAll(async () => {
+		const { createTestHarness: create } = await import("./harness.js");
+		gh = await create();
+		await gh.run("repo", "add", FIXTURES_PATH, "--name", GATE_REPO);
+		await gh.run("repo", "index", GATE_REPO);
+
+		// REQ-GATE-PASS: arch_violations trivially satisfied (boundary
+		// forbids a nonexistent path)
+		await gh.run(
+			"declare",
+			"requirement",
+			GATE_REPO,
+			"src",
+			"--req-id",
+			"REQ-GATE-PASS",
+			"--objective",
+			"gate pass case",
+		);
+		await gh.run(
+			"declare",
+			"boundary",
+			GATE_REPO,
+			"src",
+			"--forbids",
+			"nonexistent-path-xyz",
+		);
+		await gh.run(
+			"declare",
+			"obligation",
+			GATE_REPO,
+			"REQ-GATE-PASS",
+			"--obligation",
+			"no boundary violations",
+			"--method",
+			"arch_violations",
+			"--target",
+			"src",
+		);
+
+		// REQ-GATE-UNSUP: manual_review method (always UNSUPPORTED)
+		await gh.run(
+			"declare",
+			"requirement",
+			GATE_REPO,
+			"src",
+			"--req-id",
+			"REQ-GATE-UNSUP",
+			"--objective",
+			"gate unsupported case",
+		);
+		await gh.run(
+			"declare",
+			"obligation",
+			GATE_REPO,
+			"REQ-GATE-UNSUP",
+			"--obligation",
+			"needs manual review",
+			"--method",
+			"manual_review",
+		);
+
+		// REQ-GATE-WAIVED: manual_review obligation with an active waiver
+		await gh.run(
+			"declare",
+			"requirement",
+			GATE_REPO,
+			"src",
+			"--req-id",
+			"REQ-GATE-WAIVED",
+			"--objective",
+			"gate waived case",
+		);
+		const oblRes = await gh.run(
+			"declare",
+			"obligation",
+			GATE_REPO,
+			"REQ-GATE-WAIVED",
+			"--obligation",
+			"pending review",
+			"--method",
+			"manual_review",
+			"--json",
+		);
+		const waivedOblId = (oblRes.json() as { obligation_id: string })
+			.obligation_id;
+		await gh.run(
+			"declare",
+			"waiver",
+			GATE_REPO,
+			"REQ-GATE-WAIVED",
+			"--obligation-id",
+			waivedOblId,
+			"--requirement-version",
+			"2", // bumped by declare obligation
+			"--reason",
+			"pilot phase, tracked in ADR-003",
+			"--rationale",
+			"pilot",
+		);
+	}, 30000);
+
+	afterAll(() => {
+		gh.cleanup();
+	});
+
+	it("--json returns five-state verdicts and gate outcome", async () => {
+		const r = await gh.run("gate", GATE_REPO, "--json");
+		const json = JSON.parse(r.stdout);
+		expect(json.command).toBe("gate");
+		expect(json.repo).toBe(GATE_REPO);
+		expect(json.gate.outcome).toMatch(/^(pass|fail|incomplete)$/);
+		expect(json.gate.mode).toBe("default");
+		expect([0, 1, 2]).toContain(json.gate.exit_code);
+		expect(json.gate.counts).toHaveProperty("total");
+		expect(json.gate.counts).toHaveProperty("pass");
+		expect(json.gate.counts).toHaveProperty("waived");
+		expect(json.gate.counts).toHaveProperty("missing_evidence");
+		expect(json.gate.counts).toHaveProperty("unsupported");
+
+		const obligations = json.obligations as Array<Record<string, unknown>>;
+		expect(obligations.length).toBe(3);
+		expect(obligations[0]).toHaveProperty("computed_verdict");
+		expect(obligations[0]).toHaveProperty("effective_verdict");
+		expect(obligations[0]).toHaveProperty("waiver_basis");
+		expect(obligations[0]).toHaveProperty("obligation_id");
+	});
+
+	it("counts match the deterministic obligation set: 1 PASS, 1 UNSUPPORTED, 1 WAIVED", async () => {
+		const r = await gh.run("gate", GATE_REPO, "--json");
+		const json = JSON.parse(r.stdout);
+		expect(json.gate.counts.total).toBe(3);
+		expect(json.gate.counts.pass).toBe(1);
+		expect(json.gate.counts.fail).toBe(0);
+		expect(json.gate.counts.waived).toBe(1);
+		expect(json.gate.counts.unsupported).toBe(1);
+		expect(json.gate.counts.missing_evidence).toBe(0);
+	});
+
+	it("default mode: incomplete outcome (UNSUPPORTED present, no FAIL), exit 2", async () => {
+		const r = await gh.run("gate", GATE_REPO, "--json");
+		const json = JSON.parse(r.stdout);
+		expect(json.gate.outcome).toBe("incomplete");
+		expect(json.gate.exit_code).toBe(2);
+		expect(r.exitCode).toBe(2);
+	});
+
+	it("strict mode: fail outcome (UNSUPPORTED escalates), exit 1", async () => {
+		const r = await gh.run("gate", GATE_REPO, "--strict", "--json");
+		const json = JSON.parse(r.stdout);
+		expect(json.gate.mode).toBe("strict");
+		expect(json.gate.outcome).toBe("fail");
+		expect(json.gate.exit_code).toBe(1);
+		expect(r.exitCode).toBe(1);
+	});
+
+	it("advisory mode: pass outcome (no FAIL, UNSUPPORTED informational), exit 0", async () => {
+		const r = await gh.run("gate", GATE_REPO, "--advisory", "--json");
+		const json = JSON.parse(r.stdout);
+		expect(json.gate.mode).toBe("advisory");
+		expect(json.gate.outcome).toBe("pass");
+		expect(json.gate.exit_code).toBe(0);
+		expect(r.exitCode).toBe(0);
+	});
+
+	it("--strict and --advisory together produce an error", async () => {
+		const r = await gh.run("gate", GATE_REPO, "--strict", "--advisory");
+		expect(r.exitCode).toBe(1);
+	});
+
+	it("returns error exit code for unindexed repo", async () => {
+		const r = await gh.run("gate", "nonexistent-repo");
+		expect(r.exitCode).toBe(1);
+	});
+
+	it("human output shows gate banner and mode", async () => {
+		const r = await gh.run("gate", GATE_REPO);
+		expect(r.stdout).toContain("Gate:");
+		expect(r.stdout).toContain("default mode");
+		expect(r.stdout).toContain("obligations");
+	});
+
+	it("waived obligation surfaces waiver_basis with preserved computed_verdict", async () => {
+		const r = await gh.run("gate", GATE_REPO, "--json");
+		const json = JSON.parse(r.stdout);
+		const waived = (
+			json.obligations as Array<Record<string, unknown>>
+		).find((o) => o.req_id === "REQ-GATE-WAIVED");
+		expect(waived).toBeDefined();
+		// Audit preservation: computed stays UNSUPPORTED
+		expect(waived?.computed_verdict).toBe("UNSUPPORTED");
+		// Governance overlay: effective becomes WAIVED
+		expect(waived?.effective_verdict).toBe("WAIVED");
+		expect(waived?.waiver_basis).not.toBeNull();
+		const basis = waived?.waiver_basis as Record<string, unknown>;
+		expect(basis.reason).toBe("pilot phase, tracked in ADR-003");
+		expect(basis.rationale_category).toBe("pilot");
+	});
+
+	it("pass obligation has matching computed and effective verdicts", async () => {
+		const r = await gh.run("gate", GATE_REPO, "--json");
+		const json = JSON.parse(r.stdout);
+		const passObl = (
+			json.obligations as Array<Record<string, unknown>>
+		).find((o) => o.req_id === "REQ-GATE-PASS");
+		expect(passObl).toBeDefined();
+		expect(passObl?.computed_verdict).toBe("PASS");
+		expect(passObl?.effective_verdict).toBe("PASS");
+		expect(passObl?.waiver_basis).toBeNull();
 	});
 });
 

@@ -271,8 +271,17 @@ CURRENT STATUS (v1.5)
 
 Shipped and stable:
   src/core/model/           — domain entities, types, query results
+                              (includes obligation_id identity contract:
+                               SEMANTIC_MATCH_FIELDS, inheritObligationIds)
   src/core/ports/            — StoragePort, ExtractorPort, IndexerPort, GitPort
-  src/adapters/storage/      — SQLite with migrations 001-003
+                               (StoragePort.findActiveWaivers)
+  src/core/evaluator/        — obligation-evaluator (4-state computed verdicts),
+                               effective-verdict (waiver overlay -> 5-state
+                               effective verdicts, audit preservation)
+  src/core/gate/             — reducer (pure function: verdicts -> gate outcome
+                               + exit code, three modes: default/strict/advisory)
+  src/adapters/storage/      — SQLite with migrations 001-004
+                               (004: backfill obligation_id on legacy requirements)
   src/adapters/extractors/   — TS extractor with binding model, AST metrics,
                                manifest extractor (package.json)
   src/adapters/indexer/      — file scanning, edge resolution, measurement persistence
@@ -281,10 +290,17 @@ Shipped and stable:
   src/cli/commands/repo.ts   — add, index, status, refresh, list, remove
   src/cli/commands/graph.ts  — callers, callees, imports, path, dead, cycles,
                                stats, metrics, versions, churn, hotspots,
-                               coverage, risk, obligations
+                               coverage, risk, obligations (5-state verdicts)
   src/cli/commands/declare.ts — module, boundary, entrypoint, invariant,
-                                requirement, obligation, list, remove
+                                requirement, obligation (generates obligation_id),
+                                waiver (version-scoped), list, remove
   src/cli/commands/arch.ts   — violations (IMPORTS only)
+  src/cli/commands/evidence.ts — verification report with computed + effective
+                                 verdicts, waiver basis
+  src/cli/commands/trend.ts   — snapshot-to-snapshot health delta
+  src/cli/commands/gate.ts    — CI gate surface (composes evaluator +
+                                effective-verdict + reducer; see
+                                docs/architecture/gate-contract.txt)
 
 Not yet implemented (v2+):
   src/adapters/watcher/       — file watcher for live refresh

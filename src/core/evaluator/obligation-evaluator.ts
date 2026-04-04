@@ -19,6 +19,8 @@ import type { StoragePort } from "../ports/storage.js";
 export type Verdict = "PASS" | "FAIL" | "MISSING_EVIDENCE" | "UNSUPPORTED";
 
 export interface ObligationVerdict {
+	/** Stable identity of the evaluated obligation. Used by waivers. */
+	obligation_id: string;
 	obligation: string;
 	method: string;
 	target: string | null;
@@ -47,6 +49,7 @@ export function evaluateObligation(
 	repoUid: string,
 ): ObligationVerdict {
 	const base: ObligationVerdict = {
+		obligation_id: obl.obligation_id,
 		obligation: obl.obligation,
 		method: obl.method,
 		target: obl.target ?? null,

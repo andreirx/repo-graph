@@ -26,6 +26,7 @@ import type {
 	FindPathInput,
 	FindTraversalInput,
 	FunctionMetricRow,
+	FindActiveWaiversInput,
 	GetDeclarationsInput,
 	HotspotInput,
 	ImportEdgeResult,
@@ -41,6 +42,7 @@ import type {
 import { INITIAL_MIGRATION } from "./migrations/001-initial.js";
 import { runMigration002 } from "./migrations/002-provenance-columns.js";
 import { runMigration003 } from "./migrations/003-measurements.js";
+import { runMigration004 } from "./migrations/004-obligation-ids.js";
 
 export class SqliteStorage implements StoragePort {
 	private db: Database.Database;
@@ -77,6 +79,7 @@ export class SqliteStorage implements StoragePort {
 			).v;
 			if (maxVersion < 2) runMigration002(this.db);
 			if (maxVersion < 3) runMigration003(this.db);
+			if (maxVersion < 4) runMigration004(this.db);
 		});
 		runIncremental();
 	}
@@ -427,6 +430,41 @@ export class SqliteStorage implements StoragePort {
 				"UPDATE declarations SET is_active = 0 WHERE declaration_uid = ?",
 			)
 			.run(declarationUid);
+	}
+
+	findActiveWaivers(input: FindActiveWaiversInput): Declaration[] {
+		// Expiry comparison is lexicographic on ISO 8601 strings. This
+		// works for all timezone-normalized formats and is consistent
+		// with the string-based storage format.
+		const now = input.now ?? new Date().toISOString();
+
+		let sql = `SELECT * FROM declarations
+		           WHERE repo_uid = ?
+		             AND kind = 'waiver'
+		             AND is_active = 1
+		             AND (json_extract(value_json, '$.expires_at') IS NULL
+		                  OR json_extract(value_json, '$.expires_at') > ?)`;
+		const params: unknown[] = [input.repoUid, now];
+
+		if (input.reqId !== undefined) {
+			sql += " AND json_extract(value_json, '$.req_id') = ?";
+			params.push(input.reqId);
+		}
+		if (input.requirementVersion !== undefined) {
+			sql += " AND json_extract(value_json, '$.requirement_version') = ?";
+			params.push(input.requirementVersion);
+		}
+		if (input.obligationId !== undefined) {
+			sql += " AND json_extract(value_json, '$.obligation_id') = ?";
+			params.push(input.obligationId);
+		}
+		sql += " ORDER BY created_at DESC";
+
+		const rows = this.db.prepare(sql).all(...params) as Record<
+			string,
+			unknown
+		>[];
+		return rows.map((r) => this.mapDeclaration(r));
 	}
 
 	// ── Graph Queries ──────────────────────────────────────────────────

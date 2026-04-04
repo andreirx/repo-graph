@@ -1,0 +1,433 @@
+Gate Contract — Verdicts, Waivers, Exit Codes, Obligation Identity
+===================================================================
+
+Status: NORMATIVE
+Date:   2026-04-04
+
+This document is the authoritative specification for the gate
+integration surface of repo-graph. All CLI commands, JSON output
+surfaces, and storage contracts related to obligations, waivers,
+verdicts, and gate reduction MUST conform to what this document
+describes. Other docs reference this document; they do not restate
+its contents.
+
+CI integrators, agents, and downstream consumers should treat this
+document as the stable contract against which they build.
+
+
+================================================================================
+1. PURPOSE AND SCOPE
+================================================================================
+
+Repo-graph ships a CI-integratable gate surface built on four
+coupled primitives:
+
+  1. Obligations      — verification checks attached to requirements
+  2. Verdicts         — five-state evaluation results
+  3. Waivers          — version-scoped exceptions that suppress gate failure
+  4. Gate reduction   — policy layer producing a single process exit code
+
+This document specifies the protocol and data contracts of all four.
+Implementation details (SQL, migration mechanics, storage internals)
+live elsewhere.
+
+Consumers of this contract:
+  - CI pipelines invoking `rgr gate`
+  - Agents reading `graph obligations` / `evidence` / `gate` JSON output
+  - Integrators building on top of repo-graph as a governance layer
+
+
+================================================================================
+2. THE FIVE-STATE VERDICT MODEL
+================================================================================
+
+Every obligation produces TWO verdicts on every evaluation:
+
+  computed_verdict   — the raw truth of the evaluation
+  effective_verdict  — computed_verdict with active waivers applied
+
+Computed verdict domain (4-state):
+  PASS             — evaluation succeeded, obligation is satisfied
+  FAIL             — evaluation completed, obligation is not satisfied
+  MISSING_EVIDENCE — the data required to evaluate this obligation is absent
+                     (e.g. coverage_threshold with no coverage measurements)
+  UNSUPPORTED      — the evaluator cannot handle this obligation's method
+                     (e.g. method = "manual_review", method = "custom")
+
+Effective verdict domain (5-state):
+  computed_verdict values, PLUS:
+  WAIVED           — an active, non-expired waiver suppresses the verdict
+
+WAIVED is ONLY an effective state. It NEVER appears as a computed verdict.
+The computed verdict beneath a WAIVED effective verdict remains visible
+and auditable in every read surface.
+
+Audit preservation principle (non-negotiable):
+  A waiver suppresses gate failure. It does NOT erase the underlying
+  computed evaluation. Every consumer (graph obligations, evidence,
+  gate) MUST expose both computed_verdict and effective_verdict.
+
+
+================================================================================
+3. GATE REDUCTION CONTRACT
+================================================================================
+
+The gate reducer is a pure function of (verdicts[], mode) that produces
+a gate outcome and a process exit code. It has no storage access and
+no side effects.
+
+Inputs:
+  verdicts: list of effective verdicts (the five-state domain)
+  mode:     "default" | "strict" | "advisory"
+
+Outputs:
+  outcome:  "pass" | "fail" | "incomplete"
+  exit_code: 0 | 1 | 2
+  counts:   { total, pass, fail, waived, missing_evidence, unsupported }
+  mode:     echoed input
+
+Reduction rules per mode:
+
+  default:
+    exit 0, outcome "pass"
+      all verdicts are PASS or WAIVED
+    exit 1, outcome "fail"
+      at least one FAIL
+    exit 2, outcome "incomplete"
+      no FAIL, but at least one MISSING_EVIDENCE or UNSUPPORTED
+
+  strict:
+    exit 0, outcome "pass"
+      all verdicts are PASS or WAIVED
+    exit 1, outcome "fail"
+      at least one FAIL, MISSING_EVIDENCE, or UNSUPPORTED
+
+  advisory:
+    exit 0, outcome "pass"
+      no FAIL (MISSING_EVIDENCE and UNSUPPORTED are informational)
+    exit 1, outcome "fail"
+      at least one FAIL
+
+Empty verdicts input is treated as vacuously passing (outcome "pass",
+exit 0, all counts zero).
+
+Exit-code semantics rationale:
+
+  The three-exit default preserves the distinction between two
+  operationally different failure classes:
+
+    exit 1 — "we judged and it failed"
+    exit 2 — "we could not reach a verdict"
+
+  CI pipelines should react differently: exit 1 blocks the developer;
+  exit 2 flags the evidence pipeline or platform team. Strict mode
+  collapses this distinction for release gates; advisory mode collapses
+  it for early-adoption CI where teams are still building infrastructure.
+
+
+================================================================================
+4. WAIVER SEMANTICS
+================================================================================
+
+A waiver is a governance declaration (kind = "waiver") that references
+a specific obligation and suppresses its gate failure.
+
+4.1 Version-scoped tuple
+
+Every waiver carries exactly these identity fields:
+  req_id                   — identifier of the requirement
+  requirement_version      — exact version of the requirement
+  obligation_id            — stable UUID of the obligation within that version
+
+When gate evaluation resolves effective verdicts, it looks up waivers
+matching the exact (req_id, requirement_version, obligation_id) tuple.
+
+Version-scoped consequence: when a requirement is superseded (e.g.
+v2 → v3), waivers against v2 remain in the audit trail but stop
+suppressing verdicts on v3. A new waiver must be explicitly issued
+for the new version. This enforces review on every policy change.
+
+4.2 Expiry behavior
+
+Optional field: expires_at (ISO 8601 timestamp).
+
+If expires_at is absent, the waiver is perpetual (suppresses until
+deactivated).
+
+If expires_at <= now at evaluation time, the waiver stops suppressing.
+The underlying computed verdict resumes as the effective verdict.
+
+Expired waivers are NOT deleted or transformed into a distinct
+verdict state. They remain queryable in the audit trail via
+`declare list --kind waiver`. Callers that need to flag stale
+exceptions should query waivers by expiry directly.
+
+Time comparison is lexicographic on ISO 8601 strings, requiring
+timezone-normalized input (Z-suffixed UTC is recommended).
+
+4.3 Multiple active waivers
+
+If multiple active, non-expired waivers match the same
+(req_id, requirement_version, obligation_id) tuple, the most
+recently created waiver wins (ordered by created_at DESC).
+
+This is a deterministic tie-breaker, not a product feature. Duplicate
+active waivers should not occur in normal operation and indicate a
+declaration-management error.
+
+4.4 Deactivation
+
+Waivers can be deactivated via declaration deactivation
+(`declare remove`). A deactivated waiver stops suppressing verdict
+regardless of its expiry state. The declaration row remains for audit.
+
+4.5 Fields
+
+Required:
+  req_id                 — string
+  requirement_version    — number
+  obligation_id          — string (UUID)
+  reason                 — string (human-readable justification)
+  created_at             — ISO 8601 timestamp
+
+Optional:
+  created_by             — authorship marker (user, team, system)
+  expires_at             — ISO 8601 timestamp (perpetual if absent)
+  review_by              — ISO 8601 timestamp (governance reminder)
+  rationale_category     — freeform category for reporting
+                           (e.g. "tech_debt", "pilot", "vendor_bug")
+  policy_basis           — reference to policy/gate version
+
+
+================================================================================
+5. OBLIGATION IDENTITY CONTRACT
+================================================================================
+
+Every verification obligation carries a stable obligation_id (UUID)
+that serves as the waiver reference target. Identity is governed by
+a frozen semantic-match tuple.
+
+5.1 The semantic-match tuple (frozen)
+
+  SEMANTIC_MATCH_FIELDS = (method, target, threshold, operator)
+
+Two obligations are "the same obligation" iff all fields in this
+tuple match exactly. Fields NOT in the tuple (obligation text,
+free-form description) are cosmetic and do not affect identity.
+
+This tuple is FROZEN. Any change to this list is a breaking change
+to the waiver contract and requires a data migration that re-assigns
+obligation_ids across all historical requirement declarations.
+
+5.2 Inheritance across supersession
+
+When a requirement is superseded (version bumped), the new version's
+obligations inherit obligation_ids from the immediate prior version:
+
+  For each obligation in the new version:
+    Search the IMMEDIATE prior version's obligations for one with
+    a matching semantic tuple.
+    If found: inherit the prior obligation_id.
+    If not found: generate a fresh UUID.
+
+Matching is greedy and one-to-one: each prior obligation can be
+claimed at most once. When two new obligations share a semantic
+tuple (itself a declaration-model error), only the first inherits.
+
+5.3 No reversion resurrection
+
+Inheritance searches ONLY the immediate prior version, not the full
+supersession history. This is intentional.
+
+Example:
+  v1: obligation A, threshold 0.8 → obligation_id=X
+  v2: obligation A, threshold 0.85 → tuple differs, new id=Y (X not inherited)
+  v3: obligation A, threshold 0.8 → tuple differs from v2, new id=Z
+
+The original obligation_id X is NOT resurrected at v3, even though
+v3's semantic tuple matches v1's. Waivers against X remain bound to
+v1 only. This prevents stale exceptions from silently reactivating
+on semantic reversions.
+
+5.4 Current shipped behavior
+
+The identity contract and the inheritance helper are implemented
+and unit-tested in the pure helper `inheritObligationIds()`.
+
+The `declare obligation` command only APPENDS obligations to
+requirements. It generates a fresh UUID for the new obligation and
+preserves existing obligation_ids by copying. It does NOT invoke
+the inheritance matcher at runtime (there is no edit-obligation flow
+that would exercise matching against modified obligations).
+
+Future edit-obligation flows MUST use `inheritObligationIds()` to
+preserve the identity contract.
+
+
+================================================================================
+6. JSON CONTRACT SKETCHES
+================================================================================
+
+The following sketches are non-exhaustive (fields may be added in
+non-breaking ways). Consumers should treat these fields as stable
+and tolerate additional fields.
+
+6.1 graph obligations --json
+
+{
+  "command": "graph obligations",
+  "repo": "<name>",
+  "snapshot": "<snapshot_uid>",
+  "results": [
+    {
+      "req_id": "REQ-001",
+      "req_version": 2,
+      "obligation_id": "<uuid>",
+      "obligation": "Line coverage >= 80%",
+      "method": "coverage_threshold",
+      "target": "src/core",
+      "threshold": 0.8,
+      "operator": ">=",
+      "computed_verdict": "FAIL",
+      "effective_verdict": "WAIVED",
+      "evidence": { "avg_coverage": 0.67, ... },
+      "waiver_basis": {
+        "waiver_uid": "<uuid>",
+        "reason": "...",
+        "created_at": "...",
+        "created_by": "...",
+        "expires_at": "...",
+        "rationale_category": "...",
+        "policy_basis": "..."
+      }
+    }
+  ],
+  "count": <total>,
+  "pass": <count>,
+  "fail": <count>,
+  "waived": <count>,
+  "missing_evidence": <count>,
+  "unsupported": <count>
+}
+
+waiver_basis is null when effective_verdict != "WAIVED".
+All counts are against EFFECTIVE verdicts.
+
+6.2 evidence --json
+
+{
+  "command": "graph evidence",
+  "repo": "<name>",
+  "snapshot": "<snapshot_uid>",
+  "toolchain": { ... },
+  "requirements": [
+    {
+      "req_id": "REQ-001",
+      "version": 2,
+      "objective": "...",
+      "target": "src/core",
+      "status": "active",
+      "verification_status": "SATISFIED" | "INCOMPLETE" | "PARTIAL"
+                             | "UNVERIFIABLE" | "NO OBLIGATIONS",
+      "obligations": [
+        { computed_verdict, effective_verdict, evidence, waiver_basis, ... }
+      ],
+      "summary": {
+        "total": <n>,
+        "pass": <n>,
+        "fail": <n>,
+        "waived": <n>,
+        "missing_evidence": <n>,
+        "unsupported": <n>
+      }
+    }
+  ],
+  "summary": {
+    "requirements": <n>,
+    "total_obligations": <n>,
+    "pass": <n>,
+    "fail": <n>,
+    "waived": <n>,
+    "missing_evidence": <n>,
+    "unsupported": <n>
+  }
+}
+
+verification_status derivation (from EFFECTIVE counts):
+  fail > 0              -> "INCOMPLETE"
+  missing_evidence > 0  -> "PARTIAL"
+  unsupported > 0       -> "UNVERIFIABLE"
+  total == 0            -> "NO OBLIGATIONS"
+  else                  -> "SATISFIED"
+
+WAIVED counts as satisfied for status purposes (organization accepted
+the exception). The waived count is visible separately for audit.
+
+6.3 gate --json
+
+{
+  "command": "gate",
+  "repo": "<name>",
+  "snapshot": "<snapshot_uid>",
+  "toolchain": { ... },
+  "obligations": [
+    {
+      "req_id": "...", "req_version": <n>,
+      "obligation_id": "...", "obligation": "...",
+      "method": "...", "target": "...", "threshold": <n>, "operator": "...",
+      "computed_verdict": "...", "effective_verdict": "...",
+      "evidence": { ... }, "waiver_basis": { ... } | null
+    }
+  ],
+  "gate": {
+    "outcome": "pass" | "fail" | "incomplete",
+    "exit_code": 0 | 1 | 2,
+    "mode": "default" | "strict" | "advisory",
+    "counts": {
+      "total": <n>,
+      "pass": <n>, "fail": <n>, "waived": <n>,
+      "missing_evidence": <n>, "unsupported": <n>
+    }
+  }
+}
+
+Process exit code = gate.exit_code.
+
+
+================================================================================
+7. NON-GOALS AND BOUNDARIES
+================================================================================
+
+This contract does NOT specify:
+  - the set of supported evaluation methods (see obligation-evaluator.ts)
+  - how individual method evaluators derive their computed verdict
+  - the underlying measurement kinds consumed by evaluators
+  - SQL, migration, or storage mechanics
+  - CLI flag parsing details
+
+Those are implementation concerns documented in:
+  docs/architecture/measurement-model.txt  — four truth layers
+  docs/architecture/versioning-model.txt   — toolchain provenance
+  docs/architecture/schema.txt             — storage schema
+  docs/cli/v1-cli.txt                      — CLI surface
+
+This contract covers only what an external integrator needs to know
+to build on the gate surface safely.
+
+
+================================================================================
+8. STABILITY AND CHANGE POLICY
+================================================================================
+
+Breaking changes to this contract (new verdict state, changed exit
+code semantics, changed SEMANTIC_MATCH_FIELDS, changed mode behavior)
+are versioned and announced. Non-breaking additions (new optional
+JSON fields, new optional flags) do not require version bumps.
+
+If SEMANTIC_MATCH_FIELDS changes, a data migration MUST re-assign
+obligation_ids across all historical requirement declarations. This
+is a coordinated upgrade event, not a lazy backfill.
+
+If gate exit codes or reduction rules change, the default mode
+behavior is held constant and new behavior is introduced behind
+explicit flags.

@@ -46,7 +46,10 @@ export class GitAdapter implements GitPort {
 		try {
 			const { stdout } = await execFileAsync(
 				"git",
-				["log", "--format=", "--name-only", `--since=${since}`],
+				// --pretty="format:" (not --format="") produces a blank line
+				// between each commit's file list, which we rely on for
+				// per-commit counting via split("\n\n").
+				["log", "--pretty=format:", "--name-only", `--since=${since}`],
 				{ cwd: repoPath, maxBuffer: 50 * 1024 * 1024 },
 			);
 			// Each non-empty line is a file touched by a commit.

@@ -83,6 +83,9 @@ CANONICAL TABLES
 --   001-initial.ts:            Base schema (all tables except measurements)
 --   002-provenance-columns.ts: snapshots.toolchain_json, declarations.authored_basis_json
 --   003-measurements.ts:       measurements table
+--   004-obligation-ids.ts:     backfill obligation_id on pre-existing
+--                              requirement declarations' verification entries;
+--                              hard-fails on malformed legacy payloads
 
 -- Repository registry
 -- One row per tracked repository.
@@ -243,7 +246,11 @@ CREATE TABLE declarations (
   snapshot_uid        TEXT REFERENCES snapshots(snapshot_uid),
   target_stable_key   TEXT NOT NULL,        -- what this declaration is about
   kind                TEXT NOT NULL,        -- module | boundary | entrypoint | invariant
-                                            -- | owner | maturity
+                                            -- | owner | maturity | requirement | waiver
+                                            -- requirement: versioned engineering intent
+                                            -- waiver: (req_id, version, obligation_id)-scoped
+                                            --         exception suppressing gate failure
+                                            --         (see docs/architecture/gate-contract.txt)
   value_json          TEXT NOT NULL,        -- structured value (shape depends on kind)
   created_at          TEXT NOT NULL,
   created_by          TEXT,                 -- who/what created this declaration
@@ -724,7 +731,8 @@ Tables populated in v1:
                                    VARIABLE, CONSTANT, ENUM, PROPERTY, CONSTRUCTOR
   edges                — types: IMPORTS, CALLS only
                          resolution: static only
-  declarations         — kinds: module, boundary, entrypoint, invariant
+  declarations         — kinds: module, boundary, entrypoint, invariant,
+                         owner, maturity, requirement, waiver
 
 Tables present but empty in v1:
   measurements

@@ -45,6 +45,122 @@ Every meaningful engineering object is versioned, linked, and queryable:
 
 The result is not "documentation for authorities." The result is a living operational intelligence graph that engineers and agents use every day.
 
+## Agent Operating Model
+
+This section is the operational contract for implementation agents working on repo-graph. It is not aspirational. It tells an agent how to decide what is correct **right now**.
+
+### Current Product Truth
+
+| Area | Shipped | Partial | Future |
+|------|---------|---------|--------|
+| Structural graph | IMPORTS, CALLS extraction; callers/callees/path/dead/cycles | Call graph recall on SDK/functional patterns | Framework extractors (Express, NestJS) |
+| Measurements | Graph stats, AST metrics, coverage, churn, hotspots, risk | Coverage/churn snapshot-tight filtering | Custom measurement kinds |
+| Declarations | module, boundary, entrypoint, invariant, requirement, obligation, waiver | `supersedes_uid` lineage exposure | Policy/gate-mode versioning |
+| Verdicts | 5-state effective model (computed + effective + WAIVED) | — | Persisted verification records |
+| Gate | `rgr gate` with 3 modes, 3 exit codes, waiver overlay | — | CI integration examples |
+| Versioning | Toolchain provenance, obligation_id identity, version-scoped waivers | Extracted domain versions (package.json only) | Contract/API/migration versions |
+| Trust reporting | v1-validation-report.txt (prose) | — | Machine-queryable trust boundaries |
+| Dead-code confidence | Graph orphan detection | Registry/plugin liveness not modeled | REGISTERED_BY, RENDERS_BLOCK edges |
+| Cross-repo | — | — | Fleet supergraph, drift detection |
+
+### Agent Priorities
+
+1. **Correctness over surface expansion.** Do not ship a feature whose verdict you cannot defend.
+2. **Preserve computed truth under policy overlays.** Waivers, entrypoint declarations, and any future suppression layer must NEVER erase the underlying computed fact. Every read surface exposes both.
+3. **Do not compare non-comparable snapshots.** Check toolchain provenance before computing deltas. Report NOT_COMPARABLE rather than fake numbers.
+4. **Do not erase superseded records.** Supersession creates new rows; it does not overwrite. Audit depends on this.
+5. **Document every divergence and temporary debt.** Every assumption, shortcut, and known limitation must be recorded in the appropriate doc at the time it is made.
+
+### Canonical Concepts
+
+| Concept | One-line meaning | Source of truth | Stability |
+|---------|------------------|-----------------|-----------|
+| snapshot | Point-in-time indexed state of a repo | `snapshots` table | stable |
+| declaration | Human-supplied fact or policy object | `declarations` table | stable |
+| requirement | Versioned engineering intent with obligations | `declarations` kind=requirement | stable |
+| obligation | Verification check inside a requirement, with stable `obligation_id` | `verification[]` in requirement value | stable |
+| waiver | Version-scoped exception suppressing gate failure | `declarations` kind=waiver | stable |
+| measurement | Deterministic value computed from graph/AST/imports | `measurements` table | stable |
+| inference | Derived assessment with confidence | `inferences` table | stable |
+| computed_verdict | Raw obligation evaluation result (4-state) | `resolveEffectiveVerdict()` output | frozen |
+| effective_verdict | Computed verdict with waiver overlay (5-state) | `resolveEffectiveVerdict()` output | frozen |
+| gate outcome | Policy reduction of verdicts to pass/fail/incomplete + exit code | `reduceToGateOutcome()` | frozen |
+
+Stability: **frozen** = breaking change requires contract version bump; **stable** = additive changes only; **evolving** = contract under iteration.
+
+Normative contracts:
+- `docs/architecture/gate-contract.txt` — verdicts, waivers, gate, obligation identity
+- `docs/architecture/versioning-model.txt` — toolchain provenance
+- `docs/architecture/measurement-model.txt` — four-layer truth model
+
+### Trust Boundaries
+
+| Category | What it contains | Confidence |
+|----------|------------------|------------|
+| Deterministic | IMPORTS edges, structural node identity, measurements from AST/graph | high — replay-reproducible |
+| Inferred | Hotspot scores, risk scores, dead-code candidates | medium — formula-dependent |
+| Unresolved | Ambiguous calls (multiple candidates), dynamic dispatch, SDK methods | tracked but not persisted |
+| Snapshot-scoped | Nodes, edges, per-function metrics | correct within snapshot |
+| Repo-scoped, not snapshot-tight | Coverage import, churn import (filtered against repo-level file inventory) | known limitation — see measurement-model.txt |
+| Framework-opaque | Registry/plugin/extension-driven call paths | not modeled — use `declare entrypoint` to suppress false positives |
+
+An agent MUST surface uncertainty when consumers will act on a result. Do not present inferred or snapshot-scoped data without its category label.
+
+### Operational Sequence
+
+When adding a capability, follow this order. Do not collapse steps.
+
+1. **Support module.** Primitives, pure helpers, types, validators. No storage, no CLI.
+2. **Storage / model changes.** Schema migration if needed. Port additions. Adapter implementation.
+3. **Feature using support module.** Composes primitives. Does not re-implement them.
+4. **Tests.** Unit tests for pure helpers. Integration tests for storage. End-to-end CLI tests.
+5. **Contract docs.** Update `v1-cli.txt` for CLI-visible changes. Update normative docs if the contract surface changed. Update architecture summary docs (schema, project-structure, measurement-model, versioning-model) with links back to normative docs.
+6. **Limitations and debt.** Record every assumption, every divergence from the proposal, every deferred cleanup. Do not leave these uncommitted.
+
+### Decision Rules
+
+- **If a policy overlay is added, preserve underlying computed fact.** Never erase. Every read surface exposes both computed and effective views.
+- **If identity changes, define the versioning contract.** What tuple constitutes identity? What changes invalidate inheritance? What is the migration path?
+- **If a new CLI surface changes JSON, update normative contract docs.** Breaking JSON changes require updates to `gate-contract.txt` or equivalent normative specs.
+- **If a command is CI-facing, define exit code semantics explicitly.** Distinguish "judged and failed" from "could not reach a verdict."
+- **If a feature spans snapshot history, state comparability rules first.** Toolchain mismatch → NOT_COMPARABLE, not silent drift.
+
+### Near-Term Roadmap For Agents
+
+Ordered list. "Why now" is the rationale — not priority rhetoric.
+
+1. **Extraction trust reporting (machine-queryable).** Why now: the honesty signals exist in prose (v1-validation-report.txt) but agents cannot query them. Without machine-readable trust boundaries, `graph dead` confidence is implicit. Adding structured trust metadata closes the agent-facing honesty gap.
+2. **Change/impact minimum viable slice.** Why now: "which modules are affected by files changed since last snapshot" is the highest-leverage gate enhancement. Combines git diff + existing graph traversal. Unblocks pre-merge verification.
+3. **Persisted verification records.** Why now: `gate` currently recomputes on every run. Archival of gate results as durable artifacts enables trend-of-verdicts and post-hoc auditing.
+4. **Registry/framework liveness edges (REGISTERED_BY, RENDERS_BLOCK, etc.).** Why now: without these, dead-code detection on plugin-driven codebases is unsafe. This is the largest known soundness gap in the extraction layer.
+5. **Live edit-obligation flow.** Why now: `inheritObligationIds()` exists as a tested helper but no runtime path invokes it. An edit-obligation command would exercise the identity contract end-to-end and reveal any gaps.
+6. **Shared obligation evaluator unit tests.** Why now: the evaluator is only tested through integration paths. Direct unit tests with mock storage would catch method-level regressions without fixture overhead.
+
+## Current State And Next Moves
+
+**Just shipped:**
+- Waiver declaration kind with version-scoped tuple
+- `resolveEffectiveVerdict()` resolver with audit preservation
+- Gate reducer (pure function, 3 modes, 3 exit codes)
+- `declare waiver` and `rgr gate` CLI commands
+- Migration 004: obligation_id backfill with hard-fail on malformed legacy payloads
+- `graph obligations` and `evidence` migrated to five-state effective verdict model
+
+**Known open items (not blocking):**
+- `supersedes_uid` lineage not exposed in `declare list --json` output
+- `inheritObligationIds()` matcher tested as pure helper but not wired to a live supersession path
+- Coverage and churn imports use repo-level file inventory, not snapshot-scoped FILE nodes
+
+**Open decisions waiting for user:**
+- Whether to build extraction trust reporting next, or change/impact slice next
+- Whether to archive gate results as durable artifacts (persisted verification records) and how to model the artifact schema
+- Whether to build an edit-obligation command or defer until a concrete need emerges
+
+**What is NOT next:**
+- Fleet / cross-repo features (Horizon 3 — not approaching yet)
+- Framework extractors (Horizon 2 but large; blocked on registry liveness edge design)
+- Token consumption benchmarking (planned but not prerequisite for any Horizon 2 item)
+
 ## High-Assurance Engineering, Made Cheap
 
 Historically, avionics/medical-device style rigor is expensive because humans maintain traceability manually.

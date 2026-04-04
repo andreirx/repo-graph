@@ -63,6 +63,7 @@ See `docs/architecture/schema.txt` for the database schema.
 See `docs/architecture/project-structure.txt` for the folder layout.
 See `docs/architecture/measurement-model.txt` for the four-layer truth model.
 See `docs/architecture/versioning-model.txt` for toolchain provenance.
+See `docs/architecture/gate-contract.txt` for the normative gate/waiver/verdict contract.
 See `docs/architecture/v1-validation-report.txt` for extraction capability boundary.
 
 ## Conventions
@@ -96,8 +97,11 @@ rgr graph cycles repo-graph              # Module-level dependency cycles
 
 # Architecture & governance
 rgr arch violations repo-graph           # IMPORTS edges crossing forbidden boundaries
-rgr graph obligations repo-graph         # Evaluate verification obligations (PASS/FAIL/MISSING)
-rgr evidence repo-graph                  # Full verification status report (requirements + verdicts + evidence)
+rgr graph obligations repo-graph         # Evaluate obligations (five-state: PASS/FAIL/MISSING/UNSUPPORTED/WAIVED)
+rgr evidence repo-graph                  # Verification status report (computed + effective verdicts, waiver basis)
+rgr gate repo-graph                      # CI gate: five-state verdicts, three modes, structured exit code
+rgr gate repo-graph --strict             # Strict mode: exit 1 on FAIL/MISSING/UNSUPPORTED
+rgr gate repo-graph --advisory           # Advisory mode: exit 1 only on FAIL
 rgr trend repo-graph                     # Snapshot-to-snapshot health delta (latest vs parent)
 
 # Quality measurements
@@ -117,7 +121,9 @@ rgr declare entrypoint repo-graph <symbol> --type public_export
 rgr declare invariant repo-graph <symbol> "must not fail silently"
 rgr declare requirement repo-graph src/core --req-id REQ-001 --objective "..."
 rgr declare obligation repo-graph REQ-001 --obligation "..." --method arch_violations --target src/core
+rgr declare waiver repo-graph REQ-001 --obligation-id <id> --requirement-version 2 --reason "..."
 rgr declare list repo-graph --kind requirement
+rgr declare list repo-graph --kind waiver
 rgr declare remove repo-graph <uid>
 ```
 
@@ -167,12 +173,17 @@ Coverage/churn import:
   FILE nodes. Adequate for single-snapshot model, needs tightening for multi-snapshot.
 
 Test coverage gaps:
-- Non-empty `graph hotspots` and `graph risk` CLI paths: not testable because the
-  test fixture is not a git repo (churn returns empty). Requires temp git repo harness.
-- `supersedes_uid` linkage in obligation supersession: implemented but not verified
+- `supersedes_uid` linkage in declaration supersession: implemented but not verified
   because `declare list --json` does not expose the field.
-- Obligation evaluation for coverage_threshold, complexity_threshold, hotspot_threshold:
-  only arch_violations PASS and UNSUPPORTED verdicts tested end-to-end.
+- `inheritObligationIds()` matcher is tested as a pure helper but not yet exercised
+  by any live supersession path (`declare obligation` only appends). Awaits a
+  future edit-obligation flow.
+
+Fixed in this phase:
+- Assessment-chain end-to-end tests (churn, hotspots, coverage, risk, obligation
+  evaluation for coverage_threshold/complexity_threshold/hotspot_threshold) run
+  against a temporary git repository fixture.
+- `declare waiver` and `gate` have self-contained CLI tests with fresh harness.
 
 Dead code trust boundary:
 - `graph dead` answers "no known inbound graph edges," not "semantically unreachable."

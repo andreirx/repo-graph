@@ -374,3 +374,34 @@ The implementation sequence:
   7. Cross-repo version compatibility (Horizon 3)
 
 Each layer builds on the one below it.
+
+
+================================================================================
+OPERATIONAL-OBJECT IDENTITY: OBLIGATIONS AND WAIVERS
+================================================================================
+
+Obligations inside requirement declarations carry stable UUIDs
+(obligation_id) that persist across requirement supersession when the
+semantic-match tuple is unchanged. This is the reference target for
+waiver declarations.
+
+The semantic-match tuple is frozen:
+  SEMANTIC_MATCH_FIELDS = (method, target, threshold, operator)
+
+Changing any field in the tuple on a subsequent requirement version
+generates a new obligation_id, which in turn invalidates existing
+waivers. Cosmetic changes (obligation text, req-level objective)
+preserve identity.
+
+Inheritance rule: only the IMMEDIATE prior version is searched for
+matching obligations. History is not walked. A threshold of
+0.8 → 0.85 → 0.8 produces three distinct obligation_ids, preventing
+old waiver resurrection across semantic reversions.
+
+Waiver scope is version-scoped: a waiver references
+(req_id, requirement_version, obligation_id) exactly. When the
+requirement is superseded, the waiver remains queryable for audit
+but no longer applies to the new version. A new waiver must be
+explicitly issued.
+
+Full contract: docs/architecture/gate-contract.txt (normative).

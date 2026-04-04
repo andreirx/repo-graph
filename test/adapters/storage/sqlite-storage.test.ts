@@ -316,6 +316,189 @@ describe("declarations", () => {
 	});
 });
 
+// ── findActiveWaivers ─────────────────────────────────────────────────
+
+describe("findActiveWaivers", () => {
+	function insertWaiver(overrides?: {
+		reqId?: string;
+		requirementVersion?: number;
+		obligationId?: string;
+		expiresAt?: string | null;
+		isActive?: boolean;
+	}): string {
+		const uid = randomUUID();
+		const value = {
+			req_id: overrides?.reqId ?? "REQ-001",
+			requirement_version: overrides?.requirementVersion ?? 1,
+			obligation_id: overrides?.obligationId ?? "obl-A",
+			reason: "test waiver",
+			created_at: new Date().toISOString(),
+			...(overrides?.expiresAt !== undefined && overrides.expiresAt !== null
+				? { expires_at: overrides.expiresAt }
+				: {}),
+		};
+		storage.insertDeclaration({
+			declarationUid: uid,
+			repoUid: REPO_UID,
+			snapshotUid: null,
+			targetStableKey: `${REPO_UID}:waiver:REQ-001`,
+			kind: DeclarationKind.WAIVER,
+			valueJson: JSON.stringify(value),
+			createdAt: new Date().toISOString(),
+			createdBy: "test",
+			supersedesUid: null,
+			isActive: overrides?.isActive ?? true,
+			authoredBasisJson: null,
+		});
+		return uid;
+	}
+
+	it("returns active waivers filtered by repo only", () => {
+		insertWaiver({ obligationId: "obl-1" });
+		insertWaiver({ obligationId: "obl-2" });
+		const results = storage.findActiveWaivers({ repoUid: REPO_UID });
+		expect(results.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it("excludes inactive (deactivated) waivers", () => {
+		const uid = insertWaiver({ obligationId: "will-deactivate" });
+		storage.deactivateDeclaration(uid);
+		const results = storage.findActiveWaivers({
+			repoUid: REPO_UID,
+			obligationId: "will-deactivate",
+		});
+		expect(results.length).toBe(0);
+	});
+
+	it("excludes waivers with expires_at in the past", () => {
+		insertWaiver({
+			obligationId: "obl-expired",
+			expiresAt: "2020-01-01T00:00:00Z",
+		});
+		const results = storage.findActiveWaivers({
+			repoUid: REPO_UID,
+			obligationId: "obl-expired",
+		});
+		expect(results.length).toBe(0);
+	});
+
+	it("includes waivers with no expires_at", () => {
+		insertWaiver({ obligationId: "obl-perpetual" });
+		const results = storage.findActiveWaivers({
+			repoUid: REPO_UID,
+			obligationId: "obl-perpetual",
+		});
+		expect(results.length).toBe(1);
+	});
+
+	it("includes waivers with expires_at in the future", () => {
+		insertWaiver({
+			obligationId: "obl-future",
+			expiresAt: "2099-01-01T00:00:00Z",
+		});
+		const results = storage.findActiveWaivers({
+			repoUid: REPO_UID,
+			obligationId: "obl-future",
+		});
+		expect(results.length).toBe(1);
+	});
+
+	it("honors the provided now timestamp for expiry comparison", () => {
+		insertWaiver({
+			obligationId: "obl-time-test",
+			expiresAt: "2025-06-01T00:00:00Z",
+		});
+
+		// Before expiry: waiver is active
+		const beforeResults = storage.findActiveWaivers({
+			repoUid: REPO_UID,
+			obligationId: "obl-time-test",
+			now: "2025-01-01T00:00:00Z",
+		});
+		expect(beforeResults.length).toBe(1);
+
+		// After expiry: waiver is gone
+		const afterResults = storage.findActiveWaivers({
+			repoUid: REPO_UID,
+			obligationId: "obl-time-test",
+			now: "2025-12-01T00:00:00Z",
+		});
+		expect(afterResults.length).toBe(0);
+	});
+
+	it("filters by exact (req_id, requirement_version, obligation_id) tuple", () => {
+		insertWaiver({
+			reqId: "REQ-TUPLE",
+			requirementVersion: 1,
+			obligationId: "obl-tuple",
+		});
+		insertWaiver({
+			reqId: "REQ-TUPLE",
+			requirementVersion: 2,
+			obligationId: "obl-tuple",
+		});
+		insertWaiver({
+			reqId: "REQ-OTHER",
+			requirementVersion: 1,
+			obligationId: "obl-tuple",
+		});
+
+		// Match exact tuple
+		const exact = storage.findActiveWaivers({
+			repoUid: REPO_UID,
+			reqId: "REQ-TUPLE",
+			requirementVersion: 1,
+			obligationId: "obl-tuple",
+		});
+		expect(exact.length).toBe(1);
+
+		// Same req, different version: one match
+		const v2 = storage.findActiveWaivers({
+			repoUid: REPO_UID,
+			reqId: "REQ-TUPLE",
+			requirementVersion: 2,
+			obligationId: "obl-tuple",
+		});
+		expect(v2.length).toBe(1);
+
+		// Different req: one match
+		const otherReq = storage.findActiveWaivers({
+			repoUid: REPO_UID,
+			reqId: "REQ-OTHER",
+			obligationId: "obl-tuple",
+		});
+		expect(otherReq.length).toBe(1);
+	});
+
+	it("version scoping: superseded version still returns its own waiver until deactivated", () => {
+		// Waivers are version-scoped. A waiver for (REQ, v1, obl-X)
+		// remains queryable even after REQ is superseded to v2, until
+		// the waiver is explicitly deactivated.
+		insertWaiver({
+			reqId: "REQ-SCOPE",
+			requirementVersion: 1,
+			obligationId: "obl-scope",
+		});
+
+		const v1Results = storage.findActiveWaivers({
+			repoUid: REPO_UID,
+			reqId: "REQ-SCOPE",
+			requirementVersion: 1,
+			obligationId: "obl-scope",
+		});
+		expect(v1Results.length).toBe(1);
+
+		// Looking for v2 returns nothing (no waiver was re-issued)
+		const v2Results = storage.findActiveWaivers({
+			repoUid: REPO_UID,
+			reqId: "REQ-SCOPE",
+			requirementVersion: 2,
+			obligationId: "obl-scope",
+		});
+		expect(v2Results.length).toBe(0);
+	});
+});
+
 // ── Graph Queries ──────────────────────────────────────────────────────
 
 describe("graph queries", () => {
@@ -1552,9 +1735,164 @@ describe("schema migration from v1 baseline", () => {
 		const migrations = rawDb2
 			.prepare("SELECT version FROM schema_migrations ORDER BY version")
 			.all() as Array<{ version: number }>;
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3]);
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4]);
 
 		rawDb2.close();
 		upgraded.close();
+	});
+
+	/**
+	 * Migration 004 must backfill obligation_id on pre-existing
+	 * verification entries, parsing and hard-failing on malformed
+	 * legacy payloads.
+	 */
+	it("backfills obligation_id on pre-existing requirement declarations", async () => {
+		const Database = (await import("better-sqlite3")).default;
+
+		upgradeDbPath = join(tmpdir(), `rgr-migrate-004-${randomUUID()}.db`);
+
+		// Create a database at migration version 3 (all earlier migrations
+		// already applied) with a requirement declaration that has
+		// obligations lacking obligation_id.
+		const freshStorage = new SqliteStorage(upgradeDbPath);
+		freshStorage.initialize();
+		freshStorage.close();
+
+		// Manually downgrade: remove the v4 marker so migration 004 re-runs,
+		// and inject a legacy declaration row.
+		const rawDb = new Database(upgradeDbPath);
+		rawDb.prepare("DELETE FROM schema_migrations WHERE version = 4").run();
+
+		const legacyRepoUid = "legacy-repo";
+		rawDb
+			.prepare(
+				`INSERT INTO repos (repo_uid, name, root_path, default_branch, created_at)
+				 VALUES (?, ?, ?, ?, ?)`,
+			)
+			.run(
+				legacyRepoUid,
+				"legacy",
+				"/tmp/legacy",
+				"main",
+				new Date().toISOString(),
+			);
+
+		const legacyDeclUid = randomUUID();
+		const legacyValue = JSON.stringify({
+			req_id: "REQ-LEGACY-001",
+			version: 2,
+			objective: "legacy requirement",
+			verification: [
+				{ obligation: "first", method: "arch_violations", target: "src" },
+				{
+					obligation: "second",
+					method: "coverage_threshold",
+					target: "src",
+					threshold: 0.8,
+				},
+			],
+		});
+		rawDb
+			.prepare(
+				`INSERT INTO declarations
+				 (declaration_uid, repo_uid, snapshot_uid, target_stable_key, kind,
+				  value_json, created_at, created_by, supersedes_uid, is_active, authored_basis_json)
+				 VALUES (?, ?, NULL, ?, 'requirement', ?, ?, 'test', NULL, 1, NULL)`,
+			)
+			.run(
+				legacyDeclUid,
+				legacyRepoUid,
+				`${legacyRepoUid}:src:MODULE`,
+				legacyValue,
+				new Date().toISOString(),
+			);
+		rawDb.close();
+
+		// Re-open via SqliteStorage: migration 004 should run and backfill
+		const upgraded = new SqliteStorage(upgradeDbPath);
+		upgraded.initialize();
+		upgraded.close();
+
+		// Verify each obligation now has a unique obligation_id
+		const rawDb2 = new Database(upgradeDbPath);
+		const row = rawDb2
+			.prepare("SELECT value_json FROM declarations WHERE declaration_uid = ?")
+			.get(legacyDeclUid) as { value_json: string };
+		const parsed = JSON.parse(row.value_json) as {
+			verification: Array<{ obligation_id: string; method: string }>;
+		};
+		expect(parsed.verification).toHaveLength(2);
+		expect(parsed.verification[0].obligation_id).toBeDefined();
+		expect(parsed.verification[0].obligation_id.length).toBeGreaterThan(0);
+		expect(parsed.verification[1].obligation_id).toBeDefined();
+		expect(parsed.verification[0].obligation_id).not.toBe(
+			parsed.verification[1].obligation_id,
+		);
+
+		// Verify migration 004 is recorded
+		const mig = rawDb2
+			.prepare("SELECT version FROM schema_migrations WHERE version = 4")
+			.get() as { version: number } | undefined;
+		expect(mig?.version).toBe(4);
+
+		rawDb2.close();
+	});
+
+	it("hard-fails migration 004 on malformed legacy payload", async () => {
+		const Database = (await import("better-sqlite3")).default;
+
+		upgradeDbPath = join(tmpdir(), `rgr-migrate-004-bad-${randomUUID()}.db`);
+
+		// Create DB at v4 then downgrade to v3
+		const freshStorage = new SqliteStorage(upgradeDbPath);
+		freshStorage.initialize();
+		freshStorage.close();
+
+		const rawDb = new Database(upgradeDbPath);
+		rawDb.prepare("DELETE FROM schema_migrations WHERE version = 4").run();
+
+		const legacyRepoUid = "bad-repo";
+		rawDb
+			.prepare(
+				`INSERT INTO repos (repo_uid, name, root_path, default_branch, created_at)
+				 VALUES (?, ?, ?, ?, ?)`,
+			)
+			.run(
+				legacyRepoUid,
+				"bad",
+				"/tmp/bad",
+				"main",
+				new Date().toISOString(),
+			);
+
+		// Inject a requirement with a verification entry missing method
+		const badValue = JSON.stringify({
+			req_id: "REQ-BAD-001",
+			version: 1,
+			objective: "bad",
+			verification: [{ obligation: "oops" }], // no method
+		});
+		rawDb
+			.prepare(
+				`INSERT INTO declarations
+				 (declaration_uid, repo_uid, snapshot_uid, target_stable_key, kind,
+				  value_json, created_at, created_by, supersedes_uid, is_active, authored_basis_json)
+				 VALUES (?, ?, NULL, ?, 'requirement', ?, ?, 'test', NULL, 1, NULL)`,
+			)
+			.run(
+				randomUUID(),
+				legacyRepoUid,
+				`${legacyRepoUid}:src:MODULE`,
+				badValue,
+				new Date().toISOString(),
+			);
+		rawDb.close();
+
+		// Re-open should throw during migration 004
+		expect(() => {
+			const upgraded = new SqliteStorage(upgradeDbPath);
+			upgraded.initialize();
+			upgraded.close();
+		}).toThrow(/malformed requirement declaration/i);
 	});
 });

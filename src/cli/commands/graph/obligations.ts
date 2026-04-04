@@ -1,10 +1,19 @@
 /**
  * Obligation evaluation command.
- * Evaluates verification obligations against current measurements.
+ *
+ * Evaluates verification obligations against current measurements,
+ * then applies active waivers to produce effective verdicts. Both
+ * computed_verdict (truth) and effective_verdict (policy-adjusted)
+ * are surfaced. This keeps `graph obligations` consistent with the
+ * `gate` command's verdict semantics.
  */
 
 import type { Command } from "commander";
-import { evaluateObligation } from "../../../core/evaluator/obligation-evaluator.js";
+import {
+	resolveEffectiveVerdict,
+	type WaiverBasis,
+} from "../../../core/evaluator/effective-verdict.js";
+import type { Verdict } from "../../../core/evaluator/obligation-evaluator.js";
 import type { VerificationObligation } from "../../../core/model/index.js";
 import { DeclarationKind } from "../../../core/model/index.js";
 import type { AppContext } from "../../../main.js";
@@ -17,7 +26,7 @@ export function registerObligationCommands(
 	graph
 		.command("obligations <repo>")
 		.description(
-			"Evaluate verification obligations against current measurements",
+			"Evaluate verification obligations against current measurements and active waivers",
 		)
 		.option("--json", "JSON output")
 		.action((repoRef: string, opts: { json?: boolean }) => {
@@ -62,18 +71,19 @@ export function registerObligationCommands(
 				return;
 			}
 
-			type Verdict = "PASS" | "FAIL" | "MISSING_EVIDENCE" | "UNSUPPORTED";
-
 			interface ObligationResult {
 				reqId: string;
 				reqVersion: number;
+				obligationId: string;
 				obligation: string;
 				method: string;
 				target: string | null;
 				threshold: number | null;
 				operator: string | null;
-				verdict: Verdict;
+				computedVerdict: Verdict;
+				effectiveVerdict: Verdict | "WAIVED";
 				evidence: Record<string, unknown>;
+				waiverBasis: WaiverBasis | null;
 			}
 
 			const results: ObligationResult[] = [];
@@ -88,25 +98,50 @@ export function registerObligationCommands(
 				if (!val.verification || val.verification.length === 0) continue;
 
 				for (const obl of val.verification) {
-					const ev = evaluateObligation(obl, ctx.storage, snapshotUid, repoUid);
+					const ev = resolveEffectiveVerdict(
+						obl,
+						val.req_id,
+						val.version,
+						ctx.storage,
+						snapshotUid,
+						repoUid,
+					);
 					results.push({
 						reqId: val.req_id,
 						reqVersion: val.version,
+						obligationId: ev.obligation_id,
 						obligation: ev.obligation,
 						method: ev.method,
 						target: ev.target,
 						threshold: ev.threshold,
 						operator: ev.operator,
-						verdict: ev.verdict,
+						computedVerdict: ev.computed_verdict,
+						effectiveVerdict: ev.effective_verdict,
 						evidence: ev.evidence,
+						waiverBasis: ev.waiver_basis,
 					});
 				}
 			}
 
+			// Counts are against EFFECTIVE verdicts (policy-adjusted)
+			const passCount = results.filter(
+				(r) => r.effectiveVerdict === "PASS",
+			).length;
+			const failCount = results.filter(
+				(r) => r.effectiveVerdict === "FAIL",
+			).length;
+			const waivedCount = results.filter(
+				(r) => r.effectiveVerdict === "WAIVED",
+			).length;
+			const missingCount = results.filter(
+				(r) => r.effectiveVerdict === "MISSING_EVIDENCE",
+			).length;
+			const unsupportedCount = results.filter(
+				(r) => r.effectiveVerdict === "UNSUPPORTED",
+			).length;
+
 			// Output
 			if (opts.json) {
-				const passCount = results.filter((r) => r.verdict === "PASS").length;
-				const failCount = results.filter((r) => r.verdict === "FAIL").length;
 				console.log(
 					JSON.stringify(
 						{
@@ -116,16 +151,23 @@ export function registerObligationCommands(
 							results: results.map((r) => ({
 								req_id: r.reqId,
 								req_version: r.reqVersion,
+								obligation_id: r.obligationId,
 								obligation: r.obligation,
 								method: r.method,
 								target: r.target,
 								threshold: r.threshold,
-								verdict: r.verdict,
+								operator: r.operator,
+								computed_verdict: r.computedVerdict,
+								effective_verdict: r.effectiveVerdict,
 								evidence: r.evidence,
+								waiver_basis: r.waiverBasis,
 							})),
 							count: results.length,
 							pass: passCount,
 							fail: failCount,
+							waived: waivedCount,
+							missing_evidence: missingCount,
+							unsupported: unsupportedCount,
 						},
 						null,
 						2,
@@ -136,29 +178,43 @@ export function registerObligationCommands(
 					console.log("No verification obligations found in any requirement.");
 				} else {
 					for (const r of results) {
-						const icon =
-							r.verdict === "PASS"
-								? "[PASS]"
-								: r.verdict === "FAIL"
-									? "[FAIL]"
-									: r.verdict === "MISSING_EVIDENCE"
-										? "[MISS]"
-										: "[SKIP]";
-						console.log(`${icon} ${r.reqId} v${r.reqVersion}: ${r.obligation}`);
-						if (r.verdict === "FAIL" || r.verdict === "MISSING_EVIDENCE") {
+						const icon = verdictIcon(r.effectiveVerdict);
+						console.log(
+							`${icon} ${r.reqId} v${r.reqVersion}: ${r.obligation}`,
+						);
+						if (
+							r.effectiveVerdict === "FAIL" ||
+							r.effectiveVerdict === "MISSING_EVIDENCE"
+						) {
 							console.log(`       ${JSON.stringify(r.evidence)}`);
 						}
+						if (r.effectiveVerdict === "WAIVED" && r.waiverBasis !== null) {
+							console.log(`       computed: ${r.computedVerdict}`);
+							console.log(`       waiver: ${r.waiverBasis.reason}`);
+						}
 					}
-					const passCount = results.filter((r) => r.verdict === "PASS").length;
-					const failCount = results.filter((r) => r.verdict === "FAIL").length;
-					const missCount = results.filter(
-						(r) => r.verdict === "MISSING_EVIDENCE",
-					).length;
 					console.log("");
 					console.log(
-						`${results.length} obligations: ${passCount} pass, ${failCount} fail, ${missCount} missing evidence`,
+						`${results.length} obligations: ${passCount} pass, ${failCount} fail, ${waivedCount} waived, ${missingCount} missing evidence, ${unsupportedCount} unsupported`,
 					);
 				}
 			}
 		});
+}
+
+function verdictIcon(v: string): string {
+	switch (v) {
+		case "PASS":
+			return "[PASS]";
+		case "FAIL":
+			return "[FAIL]";
+		case "WAIVED":
+			return "[WAIVED]";
+		case "MISSING_EVIDENCE":
+			return "[MISS]";
+		case "UNSUPPORTED":
+			return "[SKIP]";
+		default:
+			return "[????]";
+	}
 }

@@ -434,20 +434,25 @@ tool trend <repo>
 tool evidence <repo>
 
   Verification status report. Produces a snapshot-level view of all
-  requirements, their obligations, verdicts, and the evidence basis
-  for each verdict. This is the Tier 1 read surface that makes the
-  requirement-to-evidence closure loop visible.
+  requirements, their obligations, computed verdicts, waiver overlays,
+  and effective verdicts. This is the Tier 1 read surface that makes
+  the requirement-to-evidence closure loop visible.
 
-  Recomputes verdicts on demand (does not read stored inferences).
-  Includes snapshot and toolchain metadata for traceability.
+  Recomputes verdicts on demand and applies active waivers via the
+  effective-verdict resolver. Includes snapshot and toolchain metadata
+  for traceability.
 
-  Requirement-level status:
-    SATISFIED        — all obligations pass
-    INCOMPLETE       — at least one obligation fails
-    PARTIAL          — at least one obligation has missing evidence
-    NO OBLIGATIONS   — requirement has no verification obligations defined
+  Verdict model: five-state (PASS, FAIL, MISSING_EVIDENCE, UNSUPPORTED,
+  WAIVED). WAIVED is only an EFFECTIVE state. Every obligation emits
+  both computed_verdict (truth) and effective_verdict (policy-adjusted).
+  Normative contract: docs/architecture/gate-contract.txt.
 
-  Obligation-level verdicts: PASS, FAIL, MISSING_EVIDENCE, UNSUPPORTED
+  Requirement-level status (derived from EFFECTIVE verdicts):
+    SATISFIED        — all obligations are PASS or WAIVED
+    INCOMPLETE       — at least one effective FAIL
+    PARTIAL          — no FAIL, at least one MISSING_EVIDENCE
+    UNVERIFIABLE     — no FAIL/MISSING, at least one UNSUPPORTED
+    NO OBLIGATIONS   — no verification entries defined
 
   Flags:
     --req-id <id>           Filter to a specific requirement
@@ -460,8 +465,9 @@ tool evidence <repo>
 
   JSON output includes:
     command, repo, snapshot, toolchain (full provenance),
-    requirements (array with obligations and per-obligation verdicts),
-    summary (aggregate pass/fail/missing counts)
+    requirements (array with per-obligation computed_verdict,
+      effective_verdict, evidence, waiver_basis),
+    summary (aggregate pass/fail/waived/missing_evidence/unsupported counts)
 
 
 tool graph risk <repo>
@@ -584,10 +590,8 @@ tool declare requirement <repo> <module>
 
   Declare a structured requirement object. First Tier 1 primitive:
   versioned engineering intent with explicit constraints and non-goals.
-
-  Verification obligations are modeled in the type system but not yet
-  CLI-creatable. The `verification` array in the stored value is
-  reserved for a future `declare obligation` command.
+  Verification obligations are added via `declare obligation` (each
+  obligation carries a stable obligation_id for waiver reference).
 
   Flags:
     --req-id <id>           Requirement identifier (e.g. REQ-001) [required]
@@ -622,6 +626,11 @@ tool declare obligation <repo> <reqId>
   Supersedes the old requirement declaration with an updated version
   containing the new obligation.
 
+  A stable obligation_id (UUID) is generated on creation. This id is
+  the reference target for waiver declarations. Identity is frozen by
+  the semantic-match tuple (method, target, threshold, operator) —
+  see docs/architecture/gate-contract.txt for the full identity contract.
+
   Supported methods:
     arch_violations       — check that boundary violations = 0
     coverage_threshold    — check average line coverage against threshold
@@ -648,15 +657,70 @@ tool declare obligation <repo> <reqId>
       --target src/core \
       --threshold 0.8
 
+  JSON output includes declaration_uid, req_id, obligation_id,
+  obligation, method, version.
+
+
+tool declare waiver <repo> <reqId>
+
+  Record a waiver against a specific obligation of a requirement version.
+  Waivers are VERSION-SCOPED: they reference exactly
+  (req_id, requirement_version, obligation_id). When the requirement
+  is superseded, the waiver remains in the audit trail but stops
+  applying to the new version; a new waiver must be explicitly issued.
+
+  Waivers suppress gate failure. They do NOT erase the underlying
+  computed verdict — both computed_verdict and effective_verdict
+  remain visible in all read surfaces. Normative contract:
+  docs/architecture/gate-contract.txt.
+
+  Validations:
+    - referenced requirement must exist and be active
+    - --requirement-version must match the current active version
+      (waivers cannot be created against superseded versions)
+    - --obligation-id must exist in that requirement version
+
+  Expiry semantics: a waiver with expires_at <= now stops suppressing
+  verdict (the computed verdict resumes as effective). The expired
+  waiver remains queryable via `declare list --kind waiver`.
+
+  Flags:
+    --obligation-id <id>        Target obligation's obligation_id [required]
+    --requirement-version <n>   Requirement version to waive against [required]
+    --reason <text>             Explanation of why exception is acceptable [required]
+    --expires-at <iso>          ISO 8601 expiry timestamp
+    --review-by <iso>           ISO 8601 review deadline
+    --rationale <category>      Categorization (e.g. tech_debt, pilot)
+    --policy-basis <text>       Reference to policy/gate version
+    --created-by <text>         Authorship marker (defaults to 'cli')
+    --json                      JSON output
+
+  Example:
+    tool declare waiver payments REQ-001 \
+      --obligation-id 9f3e-... \
+      --requirement-version 2 \
+      --reason "Pilot phase, tracked in ADR-003" \
+      --expires-at 2026-07-01T00:00:00Z \
+      --rationale pilot
+
+  JSON output: declaration_uid, req_id, requirement_version,
+  obligation_id, reason.
+
 
 tool graph obligations <repo>
 
   Evaluate verification obligations from all active requirements
-  against current measurements and declarations. Reports a verdict
-  for each obligation: PASS, FAIL, MISSING_EVIDENCE, or UNSUPPORTED.
+  against current measurements, then apply active waivers to produce
+  effective verdicts. Emits BOTH computed_verdict (truth) and
+  effective_verdict (policy-adjusted) for every obligation.
+
+  Verdict model: five-state (PASS, FAIL, MISSING_EVIDENCE, UNSUPPORTED,
+  WAIVED). WAIVED is only an EFFECTIVE state. Consistent with `gate`
+  and `evidence`. Normative: docs/architecture/gate-contract.txt.
 
   Each verdict includes the exact evidence used for the evaluation:
-  measurement values, thresholds, operators, file counts.
+  measurement values, thresholds, operators, file counts. When a
+  waiver applies, waiver_basis carries the full exception audit trail.
 
   Flags:
     --json                  Machine-readable output
@@ -666,11 +730,12 @@ tool graph obligations <repo>
     tool graph obligations payments --json
 
   Output per obligation:
-    verdict, req_id, req_version, obligation, method, target,
-    threshold, evidence
+    req_id, req_version, obligation_id, obligation, method, target,
+    threshold, operator, computed_verdict, effective_verdict,
+    evidence, waiver_basis
 
-  Summary (human output):
-    total obligations, pass count, fail count, missing evidence count
+  Counts (all against EFFECTIVE verdicts):
+    pass, fail, waived, missing_evidence, unsupported
 
 
 tool declare list <repo>
@@ -678,17 +743,78 @@ tool declare list <repo>
   List all declarations for a repo.
 
   Flags:
-    --kind <kind>           Filter by declaration kind
-                            (module|boundary|entrypoint|invariant|requirement)
+    --kind <kind>           Filter by declaration kind:
+                            module | boundary | entrypoint | invariant |
+                            requirement | waiver | owner | maturity
 
   Example:
     tool declare list payments
     tool declare list payments --kind boundary --json
+    tool declare list payments --kind waiver --json
 
 
 tool declare remove <repo> <declaration-id>
 
   Remove a declaration by ID.
+
+
+================================================================================
+GATE
+================================================================================
+
+tool gate <repo> [--strict | --advisory]
+
+  CI integration surface. Evaluates all active obligations, applies
+  waiver overlays, reduces to a single gate outcome, and exits with
+  a code that CI pipelines can branch on.
+
+  This is the external integration point. Full normative contract:
+  docs/architecture/gate-contract.txt. Summary below.
+
+  Verdict model (five-state):
+    computed:   PASS | FAIL | MISSING_EVIDENCE | UNSUPPORTED
+    effective:  computed OR WAIVED (when an active waiver applies)
+
+  Computed verdict is never erased. Both are visible in JSON output.
+
+  Gate modes and exit codes:
+
+    default (no flag):
+      exit 0 — all effective verdicts are PASS or WAIVED
+      exit 1 — at least one effective FAIL
+      exit 2 — no FAIL, but at least one MISSING_EVIDENCE or UNSUPPORTED
+
+    --strict:
+      exit 0 — all PASS or WAIVED
+      exit 1 — any FAIL, MISSING_EVIDENCE, or UNSUPPORTED
+      (escalates incomplete evaluability to hard fail)
+
+    --advisory:
+      exit 0 — no FAIL (MISSING/UNSUPPORTED are informational)
+      exit 1 — any FAIL
+      (for early-adoption CI while evidence infrastructure is built)
+
+  The three-exit default preserves the distinction between
+  "judged and failed" (1) and "could not reach a verdict" (2).
+
+  Flags:
+    --strict                Escalate MISSING/UNSUPPORTED to fail
+    --advisory              Treat MISSING/UNSUPPORTED as informational
+    --json                  Machine-readable output
+
+  Example:
+    tool gate payments
+    tool gate payments --strict --json
+    tool gate payments --advisory
+
+  JSON output:
+    command, repo, snapshot, toolchain,
+    obligations[] (each with req_id, req_version, obligation_id,
+      obligation, method, target, threshold, operator,
+      computed_verdict, effective_verdict, evidence, waiver_basis),
+    gate { outcome, exit_code, mode, counts }
+
+  Process exit code = gate.exit_code.
 
 
 ================================================================================

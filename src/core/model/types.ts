@@ -148,6 +148,7 @@ export const DeclarationKind = {
 	OWNER: "owner",
 	MATURITY: "maturity",
 	REQUIREMENT: "requirement",
+	WAIVER: "waiver",
 } as const;
 
 export type DeclarationKind =
