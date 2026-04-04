@@ -57,6 +57,33 @@ export function registerAssessmentCommands(
 						"No hotspot data. Run `graph churn` first to import churn measurements.",
 					);
 				}
+				// Still write the assessment-run marker so trend knows
+				// computation was attempted (zero results, not "never run").
+				ctx.storage.deleteInferencesByKind(
+					snapshotUid,
+					"assessment_run:hotspot_score",
+				);
+				ctx.storage.insertInferences([
+					{
+						inferenceUid: crypto.randomUUID(),
+						snapshotUid,
+						repoUid,
+						targetStableKey: `${repoUid}:.:MODULE`,
+						kind: "assessment_run:hotspot_score",
+						valueJson: JSON.stringify({
+							assessment: "hotspot_score",
+							formula_version: 1,
+							files_assessed: 0,
+							computed_at: new Date().toISOString(),
+						}),
+						confidence: 1.0,
+						basisJson: JSON.stringify({
+							formula: "churn_lines * sum_cyclomatic_complexity",
+						}),
+						extractor: "hotspot-analyzer:0.1.0",
+						createdAt: new Date().toISOString(),
+					},
+				]);
 				return;
 			}
 
@@ -102,6 +129,34 @@ export function registerAssessmentCommands(
 				createdAt: now,
 			}));
 			ctx.storage.insertInferences(inferences);
+
+			// Persist assessment-run marker so trend can distinguish
+			// "never computed" from "computed with zero results."
+			ctx.storage.deleteInferencesByKind(
+				snapshotUid,
+				"assessment_run:hotspot_score",
+			);
+			ctx.storage.insertInferences([
+				{
+					inferenceUid: crypto.randomUUID(),
+					snapshotUid,
+					repoUid,
+					targetStableKey: `${repoUid}:.:MODULE`,
+					kind: "assessment_run:hotspot_score",
+					valueJson: JSON.stringify({
+						assessment: "hotspot_score",
+						formula_version: 1,
+						files_assessed: hotspots.length,
+						computed_at: now,
+					}),
+					confidence: 1.0,
+					basisJson: JSON.stringify({
+						formula: "churn_lines * sum_cyclomatic_complexity",
+					}),
+					extractor: "hotspot-analyzer:0.1.0",
+					createdAt: now,
+				},
+			]);
 
 			// Display
 			const limit = Number.parseInt(opts.limit, 10);
@@ -195,6 +250,32 @@ export function registerAssessmentCommands(
 						"No hotspot data. Run `graph churn` then `graph hotspots` first.",
 					);
 				}
+				// Write marker even on empty path
+				ctx.storage.deleteInferencesByKind(
+					snapshotUid,
+					"assessment_run:under_tested_hotspot",
+				);
+				ctx.storage.insertInferences([
+					{
+						inferenceUid: crypto.randomUUID(),
+						snapshotUid,
+						repoUid,
+						targetStableKey: `${repoUid}:.:MODULE`,
+						kind: "assessment_run:under_tested_hotspot",
+						valueJson: JSON.stringify({
+							assessment: "under_tested_hotspot",
+							formula_version: 1,
+							files_assessed: 0,
+							computed_at: new Date().toISOString(),
+						}),
+						confidence: 1.0,
+						basisJson: JSON.stringify({
+							formula: "hotspot_score * (1 - line_coverage)",
+						}),
+						extractor: "risk-analyzer:0.1.0",
+						createdAt: new Date().toISOString(),
+					},
+				]);
 				return;
 			}
 
@@ -283,6 +364,33 @@ export function registerAssessmentCommands(
 				createdAt: now,
 			}));
 			ctx.storage.insertInferences(inferences);
+
+			// Persist assessment-run marker
+			ctx.storage.deleteInferencesByKind(
+				snapshotUid,
+				"assessment_run:under_tested_hotspot",
+			);
+			ctx.storage.insertInferences([
+				{
+					inferenceUid: crypto.randomUUID(),
+					snapshotUid,
+					repoUid,
+					targetStableKey: `${repoUid}:.:MODULE`,
+					kind: "assessment_run:under_tested_hotspot",
+					valueJson: JSON.stringify({
+						assessment: "under_tested_hotspot",
+						formula_version: 1,
+						files_assessed: riskEntries.length,
+						computed_at: now,
+					}),
+					confidence: 1.0,
+					basisJson: JSON.stringify({
+						formula: "hotspot_score * (1 - line_coverage)",
+					}),
+					extractor: "risk-analyzer:0.1.0",
+					createdAt: now,
+				},
+			]);
 
 			// Display
 			const limit = Number.parseInt(opts.limit, 10);

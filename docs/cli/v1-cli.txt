@@ -364,7 +364,10 @@ tool graph churn <repo>
 
 tool graph coverage <repo> <report>
 
-  Import coverage from an Istanbul/c8 JSON report (coverage-final.json).
+  Import coverage from a supported report format (auto-detected).
+  Currently supports Istanbul/c8 JSON (coverage-final.json).
+  Additional formats (JaCoCo, lcov, Cobertura) can be added as adapters
+  behind the CoverageImporterPort without changing this command.
   Reads per-file statement, function, and branch coverage from the report,
   rebases paths to repo-relative, filters to indexed files, and stores
   as measurements. Re-running is idempotent.

@@ -132,6 +132,23 @@ The token-reduction value compounds across task complexity:
 - architecture violation check: one command vs manual import tracing
 - requirement/evidence closure: structured query vs scattered doc reading
 
+A clean separation of concerns enables this reduction:
+
+- rgr owns identity and structure: what symbol, which module, what
+  relationships, what measurements.
+- The agent owns live source location: which line right now, exact
+  current byte span, current file content.
+- rgr provides snapshot-scoped coordinates (file path, line range,
+  file content hash) as lightweight traceability aids.
+- The agent resolves final live positions on demand from the working
+  tree using standard tools (rg, awk, tree-sitter, LSP).
+
+This means rgr does not need a live line database, continuously
+updated coordinates, or branch-sensitive mutable location tracking.
+The indexed snapshot stays internally consistent. Workspace divergence
+(branch switch, revert, uncommitted edits) is a normal condition
+surfaced as staleness, not a data integrity problem.
+
 To validate this value, the product should eventually support:
 1. Benchmark tasks with defined expected artifacts
 2. Comparable protocols: pure agent discovery vs rgr-assisted discovery

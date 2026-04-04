@@ -233,7 +233,7 @@ export function registerTrendCommand(
 							notes: comparable
 								? [
 										"violations: evaluated using current boundary declarations, not historical",
-										"hotspot_files 0: may mean clean or graph hotspots never run (ambiguous without computation marker)",
+										"hotspot_files: null = never computed, 0 = computed with zero results (assessment-run marker based)",
 									]
 								: undefined,
 						},
@@ -357,20 +357,15 @@ function computeHealth(
 				) / 10000
 			: null;
 
-	// Hotspots — null when prerequisite data (churn + complexity) is absent.
-	// When prerequisites exist but no hotspot inferences are stored, we
-	// cannot distinguish "computed zero hotspots" from "never computed."
-	// This is an unresolvable ambiguity without a computation-ran marker.
-	// We report null (no_data) when prerequisites are absent, and the
-	// inference count when prerequisites exist — acknowledging that 0
-	// may mean either "clean" or "not yet computed."
+	// Hotspots — use assessment-run marker to distinguish "never computed"
+	// from "computed with zero results." The marker is persisted by
+	// `graph hotspots` when it runs.
 	const hotspots = ctx.storage.queryInferences(snapshotUid, "hotspot_score");
-	const hasChurn =
-		ctx.storage.queryMeasurementsByKind(snapshotUid, "churn_lines").length > 0;
-	const hasComplexity =
-		ctx.storage.queryMeasurementsByKind(snapshotUid, "cyclomatic_complexity")
-			.length > 0;
-	const hotspotFiles = hasChurn && hasComplexity ? hotspots.length : null;
+	const hotspotRunMarker = ctx.storage.queryInferences(
+		snapshotUid,
+		"assessment_run:hotspot_score",
+	);
+	const hotspotFiles = hotspotRunMarker.length > 0 ? hotspots.length : null;
 
 	return {
 		snapshotUid,

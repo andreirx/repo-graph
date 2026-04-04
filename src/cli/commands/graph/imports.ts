@@ -156,7 +156,9 @@ export function registerImportCommands(
 
 	graph
 		.command("coverage <repo> <report>")
-		.description("Import coverage from a supported report format (auto-detected)")
+		.description(
+			"Import coverage from a supported report format (auto-detected)",
+		)
 		.option("--json", "JSON output")
 		.action(
 			async (repoRef: string, reportPath: string, opts: { json?: boolean }) => {

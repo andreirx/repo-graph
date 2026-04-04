@@ -1205,6 +1205,88 @@ describe("queryHotspotInputs", () => {
 	});
 });
 
+// ── Assessment-run markers ─────────────────────────────────────────────
+
+describe("assessment-run markers", () => {
+	it("queryInferences can distinguish marker presence from absence", () => {
+		const snap = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.FULL,
+		});
+		const now = new Date().toISOString();
+
+		// No marker yet — should be empty
+		const before = storage.queryInferences(
+			snap.snapshotUid,
+			"assessment_run:hotspot_score",
+		);
+		expect(before.length).toBe(0);
+
+		// Insert marker
+		storage.insertInferences([
+			{
+				inferenceUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: `${REPO_UID}:.:MODULE`,
+				kind: "assessment_run:hotspot_score",
+				valueJson: JSON.stringify({
+					assessment: "hotspot_score",
+					formula_version: 1,
+					files_assessed: 0,
+					computed_at: now,
+				}),
+				confidence: 1.0,
+				basisJson: "{}",
+				extractor: "test",
+				createdAt: now,
+			},
+		]);
+
+		// Marker present — should be found
+		const after = storage.queryInferences(
+			snap.snapshotUid,
+			"assessment_run:hotspot_score",
+		);
+		expect(after.length).toBe(1);
+		const val = JSON.parse(after[0].valueJson);
+		expect(val.files_assessed).toBe(0);
+	});
+
+	it("deleteInferencesByKind removes markers idempotently", () => {
+		const snap = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.FULL,
+		});
+		const now = new Date().toISOString();
+
+		storage.insertInferences([
+			{
+				inferenceUid: randomUUID(),
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				targetStableKey: `${REPO_UID}:.:MODULE`,
+				kind: "assessment_run:hotspot_score",
+				valueJson: "{}",
+				confidence: 1.0,
+				basisJson: "{}",
+				extractor: "test",
+				createdAt: now,
+			},
+		]);
+
+		storage.deleteInferencesByKind(
+			snap.snapshotUid,
+			"assessment_run:hotspot_score",
+		);
+		const after = storage.queryInferences(
+			snap.snapshotUid,
+			"assessment_run:hotspot_score",
+		);
+		expect(after.length).toBe(0);
+	});
+});
+
 // ── Inference storage (hotspots) ───────────────────────────────────────
 
 describe("inference storage", () => {
