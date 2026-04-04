@@ -119,12 +119,16 @@ root/
 |   |   |   |                              |stats|metrics|versions|churn|hotspots|coverage
 |   |   |   |                              |risk|obligations
 |   |   |   |-- declare.ts                 rgr declare module|boundary|entrypoint|invariant
-|   |   |   |                              |requirement|obligation|list|remove
+|   |   |   |                              |requirement|obligation|waiver|list|remove
 |   |   |   |-- arch.ts                    rgr arch violations
+|   |   |   |-- evidence.ts                rgr evidence (computed+effective verdicts)
+|   |   |   |-- trend.ts                   rgr trend (snapshot-to-snapshot deltas)
+|   |   |   |-- gate.ts                    rgr gate (CI gate, 5-state verdicts, modes)
+|   |   |   |-- change.ts                  rgr change impact
 |   |   |
 |   |   |   Future commands (not yet implemented):
 |   |   |   |-- flow.ts                    (v2) trace|events|producers|consumers
-|   |   |   |-- change.ts                  (v2) impact|effect|pinch-points
+|   |   |   |   change effect|pinch-points (v2) deferred subcommands of change.ts
 |   |   |   |-- legacy.ts                  (v2) hotspots|clones|seams|monster-methods
 |   |   |   |-- fleet.ts                   (v3) index|map|deps|api-drift|db-shared
 |   |   |
@@ -312,7 +316,8 @@ Not yet implemented (v2+):
   src/adapters/extractors/typescript/frameworks/ — Express, NestJS, etc.
   src/adapters/extractors/java/  — Java extractor
   src/cli/commands/flow.ts    — trace, events, producers, consumers
-  src/cli/commands/change.ts  — impact, effect, pinch-points
+  change effect|pinch-points  — deferred subcommands of change.ts
+                                (impact is shipped; see shipped list above)
   src/cli/commands/legacy.ts  — hotspots, clones, seams, monster-methods
   src/cli/commands/fleet.ts   — cross-repo operations
   tools/python/               — external analysis pipelines
