@@ -17,6 +17,11 @@ build/
 # Artifact store (heavy evidence files)
 artifacts/
 
+# Smoke-run outputs (field-calibration logs, per-run timestamped folders).
+# The README is kept in-tree as documentation; individual runs are local only.
+smoke-runs/*
+!smoke-runs/README.md
+
 # Python virtual environments (for optional analysis pipelines)
 tools/python/venv/
 __pycache__/

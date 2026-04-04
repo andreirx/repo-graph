@@ -431,6 +431,61 @@ tool trend <repo>
     implemented.
 
 
+tool trust <repo>
+
+  Extraction trust report. Surfaces reliability levels per axis and
+  triggered downgrade flags so consumers can decide whether to act
+  on rgr output before running queries that claim structural truth.
+
+  This is an INFORMATIONAL surface. Exit code is always 0 when a
+  report is produced. It does NOT gate anything.
+
+  Reliability axes (each is HIGH | MEDIUM | LOW with machine-stable
+  reasons):
+    import_graph       — fan-in/out + module-to-module IMPORTS correctness
+    call_graph         — resolved_calls / (resolved + unresolved) rate
+    dead_code          — reliability of `graph dead` on this codebase
+    change_impact      — reliability of change-impact propagation
+
+  Downgrade triggers (each is triggered bool + reasons[]):
+    framework_heavy_suspicion         — Next.js or React-heavy UI surface
+    registry_pattern_suspicion        — path-prefix 2-node module cycles
+    missing_entrypoint_declarations   — zero active entrypoint declarations
+    alias_resolution_suspicion        — clusters of zero-connectivity modules
+
+  Normative contract: trust report is a derived-on-read interpretation
+  over snapshot facts plus deterministic rules. It is NOT persisted
+  as measurement or inference.
+
+  Provenance: the report includes the snapshot's toolchain block
+  (extraction_semantics, stable_key_format, extractor_versions) and
+  the diagnostics_version field so consumers can determine whether
+  two reports are comparable.
+
+  Flags:
+    --json                  Machine-readable output
+
+  Example:
+    tool trust payments
+    tool trust payments --json
+
+  JSON output includes:
+    command, repo, snapshot_uid, basis_commit, toolchain,
+    diagnostics_version, diagnostics_available,
+    summary (edges_total, unresolved_total, resolved_calls,
+             unresolved_calls, call_resolution_rate, reliability,
+             triggered_downgrades),
+    categories[] (machine key + human label + unresolved count),
+    modules[] (per-module fan-in/out + suspicious flag + trust notes),
+    caveats[]
+
+  Design principle: reliability levels describe whether the COMMAND'S
+  CLAIMED SEMANTICS are reliable on this repo, not completeness
+  against every possible runtime behavior. `change impact` can be
+  HIGH despite excluding CALLS because the command explicitly claims
+  "reverse MODULE IMPORTS only."
+
+
 tool change impact <repo> [--against-snapshot | --staged | --since <ref>] [--max-depth <n>]
 
   Compute the set of modules affected by a file-change set, propagating

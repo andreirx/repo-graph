@@ -47,7 +47,12 @@ export interface IndexResult {
 	nodesTotal: number;
 	edgesTotal: number;
 	edgesUnresolved: number;
-	/** Breakdown of unresolved edges by diagnostic category. */
+	/**
+	 * Breakdown of unresolved edges by machine-stable diagnostic category.
+	 * Keys are from UnresolvedEdgeCategory (see
+	 * src/core/diagnostics/unresolved-edge-categories.ts).
+	 * Human-readable labels are rendered at display time.
+	 */
 	unresolvedBreakdown: Record<string, number>;
 	durationMs: number;
 	/**

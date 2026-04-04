@@ -18,6 +18,7 @@ import { registerGateCommand } from "./commands/gate.js";
 import { registerGraphCommands } from "./commands/graph.js";
 import { registerRepoCommands } from "./commands/repo.js";
 import { registerTrendCommand } from "./commands/trend.js";
+import { registerTrustCommand } from "./commands/trust.js";
 
 const program = new Command();
 
@@ -46,6 +47,7 @@ registerEvidenceCommand(program, getCtx);
 registerTrendCommand(program, getCtx);
 registerGateCommand(program, getCtx);
 registerChangeCommands(program, getCtx);
+registerTrustCommand(program, getCtx);
 
 // Main execution
 async function main(): Promise<void> {

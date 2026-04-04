@@ -3,6 +3,7 @@
  * Default output mode when --json is not specified.
  */
 
+import { humanLabelForCategory } from "../../core/diagnostics/unresolved-edge-categories.js";
 import type {
 	BoundaryViolation,
 	CycleResult,
@@ -62,12 +63,14 @@ export function formatIndexResult(result: IndexResult): string {
 		`  Unresolved: ${result.edgesUnresolved}`,
 	];
 
-	// Show breakdown if there are unresolved edges
+	// Show breakdown if there are unresolved edges. The stored keys are
+	// machine-stable; render them as human labels for CLI display.
 	const entries = Object.entries(result.unresolvedBreakdown);
 	if (entries.length > 0) {
 		lines.push("  Unresolved breakdown:");
 		for (const [category, count] of entries.sort((a, b) => b[1] - a[1])) {
-			lines.push(`    ${String(count).padStart(5)}  ${category}`);
+			const label = humanLabelForCategory(category);
+			lines.push(`    ${String(count).padStart(5)}  ${label}`);
 		}
 	}
 

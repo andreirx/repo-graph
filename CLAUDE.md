@@ -106,6 +106,7 @@ rgr trend repo-graph                     # Snapshot-to-snapshot health delta (la
 rgr change impact repo-graph             # Modules affected by changes (reverse IMPORTS only)
 rgr change impact repo-graph --staged    # Diff staged changes instead of working tree vs basis
 rgr change impact repo-graph --since main --max-depth 3
+rgr trust repo-graph                     # Extraction trust report: reliability levels + downgrade flags
 
 # Quality measurements
 rgr graph stats repo-graph               # Module structural metrics (fan-in/out, instability)

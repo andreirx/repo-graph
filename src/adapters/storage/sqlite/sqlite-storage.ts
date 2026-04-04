@@ -30,6 +30,7 @@ import type {
 	FindActiveWaiversInput,
 	FindReverseModuleImportsInput,
 	GetDeclarationsInput,
+	PathPrefixModuleCycle,
 	ResolveChangedFilesToModulesInput,
 	ReverseModuleImportResult,
 	HotspotInput,
@@ -47,6 +48,7 @@ import { INITIAL_MIGRATION } from "./migrations/001-initial.js";
 import { runMigration002 } from "./migrations/002-provenance-columns.js";
 import { runMigration003 } from "./migrations/003-measurements.js";
 import { runMigration004 } from "./migrations/004-obligation-ids.js";
+import { runMigration005 } from "./migrations/005-extraction-diagnostics.js";
 
 export class SqliteStorage implements StoragePort {
 	private db: Database.Database;
@@ -84,6 +86,7 @@ export class SqliteStorage implements StoragePort {
 			if (maxVersion < 2) runMigration002(this.db);
 			if (maxVersion < 3) runMigration003(this.db);
 			if (maxVersion < 4) runMigration004(this.db);
+			if (maxVersion < 5) runMigration005(this.db);
 		});
 		runIncremental();
 	}
@@ -212,6 +215,28 @@ export class SqliteStorage implements StoragePort {
 			 WHERE snapshot_uid = ?`,
 			)
 			.run(snapshotUid, snapshotUid, snapshotUid, snapshotUid);
+	}
+
+	updateSnapshotExtractionDiagnostics(
+		snapshotUid: string,
+		diagnosticsJson: string,
+	): void {
+		this.db
+			.prepare(
+				"UPDATE snapshots SET extraction_diagnostics_json = ? WHERE snapshot_uid = ?",
+			)
+			.run(diagnosticsJson, snapshotUid);
+	}
+
+	getSnapshotExtractionDiagnostics(snapshotUid: string): string | null {
+		const row = this.db
+			.prepare(
+				"SELECT extraction_diagnostics_json FROM snapshots WHERE snapshot_uid = ?",
+			)
+			.get(snapshotUid) as
+			| { extraction_diagnostics_json: string | null }
+			| undefined;
+		return row?.extraction_diagnostics_json ?? null;
 	}
 
 	// ── Files ──────────────────────────────────────────────────────────
@@ -1053,6 +1078,82 @@ export class SqliteStorage implements StoragePort {
 		return rows.map((row) => ({
 			moduleStableKey: row.stable_key as string,
 			distance: row.distance as number,
+		}));
+	}
+
+	countEdgesByType(snapshotUid: string, edgeType: string): number {
+		const row = this.db
+			.prepare(
+				"SELECT COUNT(*) AS c FROM edges WHERE snapshot_uid = ? AND type = ?",
+			)
+			.get(snapshotUid, edgeType) as { c: number };
+		return row.c;
+	}
+
+	findPathPrefixModuleCycles(
+		snapshotUid: string,
+	): PathPrefixModuleCycle[] {
+		// Find 2-node MODULE IMPORTS cycles where one module's qualified_name
+		// is a strict path-prefix ancestor of the other's.
+		//
+		// Algorithm (SQL):
+		//   1. Find all (A, B) module pairs where A -> B AND B -> A (mutual IMPORTS).
+		//   2. Keep only pairs where A.qualified_name is a strict prefix of
+		//      B.qualified_name (or vice versa), using '/' as path separator.
+		//   3. Normalize each pair so the ancestor is returned first.
+		//
+		// Strict prefix check: B.qualified_name must start with
+		// A.qualified_name + '/'. This prevents accidental matches between
+		// modules with shared prefixes but no ancestor relationship
+		// (e.g. "src/api" and "src/api-legacy").
+		const sql = `
+			WITH mutual_pairs AS (
+				SELECT
+					e1.source_node_uid AS a_uid,
+					e1.target_node_uid AS b_uid
+				FROM edges e1
+				JOIN edges e2
+					ON e2.snapshot_uid = e1.snapshot_uid
+					AND e2.type = 'IMPORTS'
+					AND e2.source_node_uid = e1.target_node_uid
+					AND e2.target_node_uid = e1.source_node_uid
+				JOIN nodes a ON a.node_uid = e1.source_node_uid
+				JOIN nodes b ON b.node_uid = e1.target_node_uid
+				WHERE e1.snapshot_uid = ?
+					AND e1.type = 'IMPORTS'
+					AND a.kind = 'MODULE'
+					AND b.kind = 'MODULE'
+					AND a.node_uid < b.node_uid  -- dedupe each pair once
+			)
+			SELECT
+				CASE
+					WHEN LENGTH(a.qualified_name) < LENGTH(b.qualified_name)
+						THEN a.stable_key
+					ELSE b.stable_key
+				END AS ancestor_key,
+				CASE
+					WHEN LENGTH(a.qualified_name) < LENGTH(b.qualified_name)
+						THEN b.stable_key
+					ELSE a.stable_key
+				END AS descendant_key
+			FROM mutual_pairs mp
+			JOIN nodes a ON a.node_uid = mp.a_uid
+			JOIN nodes b ON b.node_uid = mp.b_uid
+			WHERE
+				(b.qualified_name LIKE a.qualified_name || '/%'
+					AND a.qualified_name != b.qualified_name)
+				OR
+				(a.qualified_name LIKE b.qualified_name || '/%'
+					AND a.qualified_name != b.qualified_name)
+			ORDER BY ancestor_key, descendant_key
+		`;
+		const rows = this.db.prepare(sql).all(snapshotUid) as Record<
+			string,
+			unknown
+		>[];
+		return rows.map((row) => ({
+			ancestorStableKey: row.ancestor_key as string,
+			descendantStableKey: row.descendant_key as string,
 		}));
 	}
 

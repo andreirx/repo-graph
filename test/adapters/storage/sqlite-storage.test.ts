@@ -2057,7 +2057,7 @@ describe("schema migration from v1 baseline", () => {
 		const migrations = rawDb2
 			.prepare("SELECT version FROM schema_migrations ORDER BY version")
 			.all() as Array<{ version: number }>;
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4]);
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5]);
 
 		rawDb2.close();
 		upgraded.close();
@@ -2083,7 +2083,7 @@ describe("schema migration from v1 baseline", () => {
 		// Manually downgrade: remove the v4 marker so migration 004 re-runs,
 		// and inject a legacy declaration row.
 		const rawDb = new Database(upgradeDbPath);
-		rawDb.prepare("DELETE FROM schema_migrations WHERE version = 4").run();
+		rawDb.prepare("DELETE FROM schema_migrations WHERE version >= 4").run();
 
 		const legacyRepoUid = "legacy-repo";
 		rawDb
@@ -2171,7 +2171,7 @@ describe("schema migration from v1 baseline", () => {
 		freshStorage.close();
 
 		const rawDb = new Database(upgradeDbPath);
-		rawDb.prepare("DELETE FROM schema_migrations WHERE version = 4").run();
+		rawDb.prepare("DELETE FROM schema_migrations WHERE version >= 4").run();
 
 		const legacyRepoUid = "bad-repo";
 		rawDb

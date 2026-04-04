@@ -50,6 +50,26 @@ export interface StoragePort {
 	getLatestSnapshot(repoUid: string): Snapshot | null;
 	updateSnapshotStatus(input: UpdateSnapshotStatusInput): void;
 	updateSnapshotCounts(snapshotUid: string): void;
+	/**
+	 * Persist the snapshot-level extraction diagnostics payload.
+	 * Called by the indexer after resolution completes, so the
+	 * unresolved-edge breakdown can be retrieved by the trust
+	 * reporting surface later without re-running extraction.
+	 *
+	 * The payload is an opaque JSON string at this layer; the
+	 * indexer constructs it and the trust service parses it.
+	 */
+	updateSnapshotExtractionDiagnostics(
+		snapshotUid: string,
+		diagnosticsJson: string,
+	): void;
+	/**
+	 * Read the extraction diagnostics payload for a snapshot.
+	 * Returns null for snapshots indexed before migration 005 was
+	 * applied — the trust report surfaces this as "diagnostics
+	 * unavailable; re-index to populate."
+	 */
+	getSnapshotExtractionDiagnostics(snapshotUid: string): string | null;
 
 	// ── Files ────────────────────────────────────────────────────────────
 
@@ -131,6 +151,30 @@ export interface StoragePort {
 	resolveChangedFilesToModules(
 		input: ResolveChangedFilesToModulesInput,
 	): ChangedFileResolution[];
+
+	/**
+	 * Count edges of a given type in a snapshot.
+	 * Used by trust reporting to compute resolved-edge rates.
+	 */
+	countEdgesByType(snapshotUid: string, edgeType: string): number;
+
+	/**
+	 * Find 2-node MODULE cycles where one module's path is a strict
+	 * path-prefix ancestor of the other's. Used by trust reporting
+	 * to detect registry/dispatch patterns characteristic of block
+	 * or plugin systems (e.g. `packages/foo/src -> packages/foo/src/core -> packages/foo/src`).
+	 *
+	 * Returns pairs: one ancestor module + one descendant module that
+	 * form a 2-node IMPORTS cycle. Single-pair per detection; does
+	 * not enumerate longer cycle chains.
+	 *
+	 * This is a trust-specific query intentionally kept separate
+	 * from the general `findCycles` API so it can evolve without
+	 * affecting user-facing cycle output.
+	 */
+	findPathPrefixModuleCycles(
+		snapshotUid: string,
+	): PathPrefixModuleCycle[];
 
 	/**
 	 * Reverse-IMPORTS BFS traversal at the MODULE level.
@@ -318,6 +362,13 @@ export interface ReverseModuleImportResult {
 	moduleStableKey: string;
 	/** Minimum hop count from the seed set (>= 1). */
 	distance: number;
+}
+
+export interface PathPrefixModuleCycle {
+	/** Ancestor module (path-prefix parent) stable_key. */
+	ancestorStableKey: string;
+	/** Descendant module stable_key (path is under ancestor's path). */
+	descendantStableKey: string;
 }
 
 export interface Measurement {

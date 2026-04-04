@@ -125,6 +125,7 @@ root/
 |   |   |   |-- trend.ts                   rgr trend (snapshot-to-snapshot deltas)
 |   |   |   |-- gate.ts                    rgr gate (CI gate, 5-state verdicts, modes)
 |   |   |   |-- change.ts                  rgr change impact
+|   |   |   |-- trust.ts                   rgr trust (reliability + downgrade flags)
 |   |   |
 |   |   |   Future commands (not yet implemented):
 |   |   |   |-- flow.ts                    (v2) trace|events|producers|consumers
@@ -287,8 +288,14 @@ Shipped and stable:
   src/core/impact/           — change-impact service: maps git diff to seed
                                modules, propagates via reverse MODULE IMPORTS,
                                emits trust metadata alongside results
-  src/adapters/storage/      — SQLite with migrations 001-004
-                               (004: backfill obligation_id on legacy requirements)
+  src/core/diagnostics/      — machine-stable categories for unresolved edges
+                               (frozen enum, human-label map)
+  src/core/trust/            — trust reporting: pure rules (detection +
+                               reliability formulas), service orchestrator;
+                               derived-on-read, NOT persisted
+  src/adapters/storage/      — SQLite with migrations 001-005
+                               (004: backfill obligation_id on legacy requirements;
+                                005: extraction_diagnostics_json on snapshots)
   src/adapters/extractors/   — TS extractor with binding model, AST metrics,
                                manifest extractor (package.json)
   src/adapters/indexer/      — file scanning, edge resolution, measurement persistence
@@ -310,6 +317,8 @@ Shipped and stable:
                                 docs/architecture/gate-contract.txt)
   src/cli/commands/change.ts  — change-impact: reverse-IMPORTS propagation
                                 from git-diff seeds with trust metadata
+  src/cli/commands/trust.ts   — trust reporting: reliability levels +
+                                downgrade triggers + provenance
 
 Not yet implemented (v2+):
   src/adapters/watcher/       — file watcher for live refresh

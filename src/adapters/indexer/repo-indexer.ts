@@ -20,6 +20,7 @@ import {
 	SnapshotKind,
 	SnapshotStatus,
 } from "../../core/model/index.js";
+import { UnresolvedEdgeCategory } from "../../core/diagnostics/unresolved-edge-categories.js";
 import type {
 	ExtractionResult,
 	ExtractorPort,
@@ -324,6 +325,20 @@ export class RepoIndexer implements IndexerPort {
 				snapshot.snapshotUid,
 			);
 
+			// 12. Persist snapshot-level extraction diagnostics.
+			// These would otherwise be lost after this method returns.
+			// The trust reporting surface reads them on demand.
+			const extractionDiagnostics = {
+				diagnostics_version: 1,
+				edges_total: allEdges.length,
+				unresolved_total: unresolvedCount,
+				unresolved_breakdown: unresolvedBreakdown,
+			};
+			this.storage.updateSnapshotExtractionDiagnostics(
+				snapshot.snapshotUid,
+				JSON.stringify(extractionDiagnostics),
+			);
+
 			return {
 				snapshotUid: snapshot.snapshotUid,
 				filesTotal: filePaths.length,
@@ -570,7 +585,7 @@ export class RepoIndexer implements IndexerPort {
 	): {
 		resolved: GraphEdge[];
 		unresolvedCount: number;
-		unresolvedBreakdown: Record<string, number>;
+		unresolvedBreakdown: Partial<Record<UnresolvedEdgeCategory, number>>;
 	} {
 		// Build lookup maps
 		const nodesByStableKey = new Map<string, GraphNode>();
@@ -613,7 +628,7 @@ export class RepoIndexer implements IndexerPort {
 
 		const resolved: GraphEdge[] = [];
 		let unresolvedCount = 0;
-		const unresolvedBreakdown: Record<string, number> = {};
+		const unresolvedBreakdown: Partial<Record<UnresolvedEdgeCategory, number>> = {};
 
 		for (const edge of unresolved) {
 			const targetNodeUid = this.resolveTarget(
@@ -1041,22 +1056,25 @@ export function filterByEdgeAffinity(
 }
 
 /**
- * Classify an unresolved edge into a diagnostic category
- * for the breakdown report.
+ * Classify an unresolved edge into a machine-stable diagnostic category.
+ *
+ * Returns a key from UnresolvedEdgeCategory. Human-readable labels are
+ * rendered at display time via humanLabelForCategory(); they are not
+ * persisted or emitted as JSON keys.
  */
-function classifyUnresolvedEdge(edge: UnresolvedEdge): string {
+function classifyUnresolvedEdge(edge: UnresolvedEdge): UnresolvedEdgeCategory {
 	const type = edge.type;
 
 	if (type === EdgeType.IMPORTS) {
-		return "IMPORTS (file not found)";
+		return UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND;
 	}
 
 	if (type === EdgeType.INSTANTIATES) {
-		return "INSTANTIATES (class not found)";
+		return UnresolvedEdgeCategory.INSTANTIATES_CLASS_NOT_FOUND;
 	}
 
 	if (type === EdgeType.IMPLEMENTS) {
-		return "IMPLEMENTS (interface not found)";
+		return UnresolvedEdgeCategory.IMPLEMENTS_INTERFACE_NOT_FOUND;
 	}
 
 	// CALLS breakdown: use the raw call name (before receiver-type rewriting)
@@ -1079,15 +1097,15 @@ function classifyUnresolvedEdge(edge: UnresolvedEdge): string {
 
 		if (key.startsWith("this.")) {
 			if (key.split(".").length > 2) {
-				return "CALLS this.*.method (needs type info)";
+				return UnresolvedEdgeCategory.CALLS_THIS_WILDCARD_METHOD_NEEDS_TYPE_INFO;
 			}
-			return "CALLS this.method (needs class context)";
+			return UnresolvedEdgeCategory.CALLS_THIS_METHOD_NEEDS_CLASS_CONTEXT;
 		}
 		if (key.includes(".")) {
-			return "CALLS obj.method (needs type info)";
+			return UnresolvedEdgeCategory.CALLS_OBJ_METHOD_NEEDS_TYPE_INFO;
 		}
-		return "CALLS function (ambiguous or missing)";
+		return UnresolvedEdgeCategory.CALLS_FUNCTION_AMBIGUOUS_OR_MISSING;
 	}
 
-	return `${type} (other)`;
+	return UnresolvedEdgeCategory.OTHER;
 }
