@@ -12,6 +12,7 @@ import { type AppContext, bootstrap, shutdown } from "../main.js";
 import { CLI_VERSION } from "../version.js";
 import { registerArchCommands } from "./commands/arch.js";
 import { registerDeclareCommands } from "./commands/declare.js";
+import { registerEvidenceCommand } from "./commands/evidence.js";
 import { registerGraphCommands } from "./commands/graph.js";
 import { registerRepoCommands } from "./commands/repo.js";
 
@@ -38,6 +39,7 @@ registerRepoCommands(program, getCtx);
 registerGraphCommands(program, getCtx);
 registerDeclareCommands(program, getCtx);
 registerArchCommands(program, getCtx);
+registerEvidenceCommand(program, getCtx);
 
 // Main execution
 async function main(): Promise<void> {

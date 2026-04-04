@@ -1336,16 +1336,7 @@ export function registerGraphCommands(
 									return sum + v.value;
 								}, 0) / matchingCoverage.length;
 							const op = obl.operator ?? ">=";
-							const pass =
-								op === ">="
-									? avgCoverage >= obl.threshold
-									: op === ">"
-										? avgCoverage > obl.threshold
-										: op === "<="
-											? avgCoverage <= obl.threshold
-											: op === "<"
-												? avgCoverage < obl.threshold
-												: avgCoverage === obl.threshold;
+							const pass = compareValues(avgCoverage, op, obl.threshold);
 							result.verdict = pass ? "PASS" : "FAIL";
 							result.evidence = {
 								avg_coverage: Math.round(avgCoverage * 10000) / 10000,
@@ -1385,16 +1376,7 @@ export function registerGraphCommands(
 								}),
 							);
 							const ccOp = obl.operator ?? "<=";
-							const ccPass =
-								ccOp === "<="
-									? maxCC <= obl.threshold
-									: ccOp === "<"
-										? maxCC < obl.threshold
-										: ccOp === ">="
-											? maxCC >= obl.threshold
-											: ccOp === ">"
-												? maxCC > obl.threshold
-												: maxCC === obl.threshold;
+							const ccPass = compareValues(maxCC, ccOp, obl.threshold);
 							result.verdict = ccPass ? "PASS" : "FAIL";
 							result.evidence = {
 								max_complexity: maxCC,
@@ -1439,10 +1421,7 @@ export function registerGraphCommands(
 								}),
 							);
 							const hsOp = obl.operator ?? "<=";
-							const hsPass =
-								hsOp === "<="
-									? maxHotspot <= obl.threshold
-									: maxHotspot < obl.threshold;
+							const hsPass = compareValues(maxHotspot, hsOp, obl.threshold);
 							result.verdict = hsPass ? "PASS" : "FAIL";
 							result.evidence = {
 								max_hotspot_score: maxHotspot,
@@ -1519,6 +1498,23 @@ export function registerGraphCommands(
 				}
 			}
 		});
+}
+
+function compareValues(value: number, op: string, threshold: number): boolean {
+	switch (op) {
+		case ">=":
+			return value >= threshold;
+		case ">":
+			return value > threshold;
+		case "<=":
+			return value <= threshold;
+		case "<":
+			return value < threshold;
+		case "==":
+			return value === threshold;
+		default:
+			return false;
+	}
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

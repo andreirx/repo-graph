@@ -423,6 +423,44 @@ describe("obligations", () => {
 	});
 });
 
+// ── evidence report ───────────────────────────────────────────────────
+
+describe("evidence report", () => {
+	it("--json returns verification report with toolchain metadata", async () => {
+		// REQ-ARCH-001 was created in the obligations tests above
+		const r = await h.run("evidence", "test-repo", "--json");
+		expect(r.exitCode).toBe(0);
+		const json = r.json();
+		expect(json.command).toBe("graph evidence");
+		expect(json.repo).toBe("test-repo");
+		expect(json.snapshot).toBeDefined();
+		expect(json.toolchain).toBeDefined();
+		expect(json.summary).toBeDefined();
+		expect(json.summary.requirements).toBeGreaterThanOrEqual(1);
+	});
+
+	it("returns empty report when no requirements exist", async () => {
+		// Create a fresh harness with no requirements
+		const { createTestHarness: create } = await import("./harness.js");
+		const h2 = await create();
+		await h2.run("repo", "add", FIXTURES_PATH, "--name", "empty-repo");
+		await h2.run("repo", "index", "empty-repo");
+		const r = await h2.run("evidence", "empty-repo", "--json");
+		expect(r.exitCode).toBe(0);
+		const json = r.json();
+		expect(json.summary.requirements).toBe(0);
+		h2.cleanup();
+	});
+
+	it("human output shows requirement status and verdict icons", async () => {
+		const r = await h.run("evidence", "test-repo");
+		expect(r.exitCode).toBe(0);
+		expect(r.stdout).toContain("Verification Report");
+		expect(r.stdout).toContain("requirements");
+		expect(r.stdout).toContain("obligations");
+	});
+});
+
 // ── graph churn ───────────────────────────────────────────────────────
 
 describe("graph churn", () => {

@@ -106,6 +106,43 @@ This is the real opportunity:
 Repo-graph should therefore be designed as an engineering control
 system for stochastic agents, not merely as a repository index.
 
+## Deterministic Discovery As Token Reduction
+
+A secondary but measurable value of repo-graph is reducing the token
+cost of engineering cognition for AI agents.
+
+Without a deterministic graph, an agent answering "who calls this
+function?" must read source files, follow imports, scan for references,
+and reason about the results. That is expensive in input tokens,
+output tokens, tool calls, and wall-clock time. The answer quality
+depends on the agent's search strategy and context window.
+
+With repo-graph, the same question is a single `rgr graph callers`
+call that returns a deterministic, pre-indexed result. The agent
+consumes fewer tokens, makes fewer tool calls, and gets a more
+complete answer.
+
+This is not a side metric. It is proof that the product reduces the
+cost of controlled engineering cognition.
+
+The token-reduction value compounds across task complexity:
+- caller/callee discovery: one query vs multi-file search
+- impact analysis: graph traversal vs heuristic file reading
+- hotspot triage: pre-computed ranking vs ad-hoc churn analysis
+- architecture violation check: one command vs manual import tracing
+- requirement/evidence closure: structured query vs scattered doc reading
+
+To validate this value, the product should eventually support:
+1. Benchmark tasks with defined expected artifacts
+2. Comparable protocols: pure agent discovery vs rgr-assisted discovery
+3. Measurement: input tokens, output tokens, tool calls, wall-clock time,
+   correctness, completeness, human verification burden
+4. Results stored as first-class evidence artifacts linked to repo
+   snapshots and toolchain versions
+
+This positions repo-graph not just as "better answers" but as a
+lower-cost, higher-fidelity control plane for agent-driven engineering.
+
 ## Versioning-First Model
 
 Versioning is not only for source files. It is first-class across the entire engineering lifecycle.

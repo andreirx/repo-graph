@@ -390,6 +390,39 @@ tool graph coverage <repo> <report>
   Files in the report but not in the graph are silently skipped.
 
 
+tool evidence <repo>
+
+  Verification status report. Produces a snapshot-level view of all
+  requirements, their obligations, verdicts, and the evidence basis
+  for each verdict. This is the Tier 1 read surface that makes the
+  requirement-to-evidence closure loop visible.
+
+  Recomputes verdicts on demand (does not read stored inferences).
+  Includes snapshot and toolchain metadata for traceability.
+
+  Requirement-level status:
+    SATISFIED        — all obligations pass
+    INCOMPLETE       — at least one obligation fails
+    PARTIAL          — at least one obligation has missing evidence
+    NO OBLIGATIONS   — requirement has no verification obligations defined
+
+  Obligation-level verdicts: PASS, FAIL, MISSING_EVIDENCE, UNSUPPORTED
+
+  Flags:
+    --req-id <id>           Filter to a specific requirement
+    --json                  Machine-readable output
+
+  Example:
+    tool evidence payments
+    tool evidence payments --req-id REQ-001
+    tool evidence payments --json
+
+  JSON output includes:
+    command, repo, snapshot, toolchain (full provenance),
+    requirements (array with obligations and per-obligation verdicts),
+    summary (aggregate pass/fail/missing counts)
+
+
 tool graph risk <repo>
 
   Under-tested hotspots: files that are complex, frequently changed,

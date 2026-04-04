@@ -297,6 +297,33 @@ Phase 7: Composite health score
   - Document the formula explicitly and version it
   - Present as advisory, not authoritative, until calibrated
 
+Phase 8: Token consumption benchmarking
+  - Measure the cost of engineering discovery tasks with and without rgr
+  - Benchmark tasks:
+    - caller/callee discovery
+    - impact analysis
+    - hotspot triage
+    - architecture violation investigation
+    - requirement/evidence closure lookup
+  - Comparable protocols:
+    - pure agent discovery from repo text (baseline)
+    - agent + rgr assisted discovery (treatment)
+    - same task, same repo snapshot, same expected artifact
+  - Metrics:
+    - input tokens consumed
+    - output tokens consumed
+    - tool calls made
+    - wall-clock time
+    - correctness / completeness vs expected artifact
+    - human verification burden
+  - Results stored as first-class evidence artifacts:
+    - benchmark artifact kind in artifacts table
+    - linked to repo snapshot and toolchain version
+    - prompt/profile version recorded
+  - Purpose: prove that deterministic graph queries reduce the cost
+    of controlled engineering cognition for AI agents. This is not
+    a side metric — it is the economic case for the product.
+
 
 ================================================================================
 EXTRACTED DOMAIN VERSIONS

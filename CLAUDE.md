@@ -97,6 +97,7 @@ rgr graph cycles repo-graph              # Module-level dependency cycles
 # Architecture & governance
 rgr arch violations repo-graph           # IMPORTS edges crossing forbidden boundaries
 rgr graph obligations repo-graph         # Evaluate verification obligations (PASS/FAIL/MISSING)
+rgr evidence repo-graph                  # Full verification status report (requirements + verdicts + evidence)
 
 # Quality measurements
 rgr graph stats repo-graph               # Module structural metrics (fan-in/out, instability)
