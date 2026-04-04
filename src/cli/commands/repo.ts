@@ -78,8 +78,17 @@ export function registerRepoCommands(
 					return;
 				}
 
+				// Capture the current git commit hash so the snapshot has
+				// a basis_commit anchor. This enables change-impact analysis
+				// and snapshot comparability checks later. Null if the repo
+				// is not a git repository — that is allowed, but removes
+				// against_snapshot scope from later `change impact` calls.
+				const basisCommit =
+					(await ctx.git.getCurrentCommit(repoEntity.rootPath)) ?? undefined;
+
 				const result = await ctx.indexer.indexRepo(repoEntity.repoUid, {
 					exclude: opts.exclude,
+					basisCommit,
 					onProgress: opts.verbose
 						? (e) => {
 								if (e.file) {
@@ -181,7 +190,13 @@ export function registerRepoCommands(
 				return;
 			}
 
-			const result = await ctx.indexer.refreshRepo(repoEntity.repoUid);
+			// Capture the current git commit hash for the refresh snapshot.
+			const basisCommit =
+				(await ctx.git.getCurrentCommit(repoEntity.rootPath)) ?? undefined;
+
+			const result = await ctx.indexer.refreshRepo(repoEntity.repoUid, {
+				basisCommit,
+			});
 
 			if (opts.json) {
 				console.log(

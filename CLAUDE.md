@@ -103,6 +103,9 @@ rgr gate repo-graph                      # CI gate: five-state verdicts, three m
 rgr gate repo-graph --strict             # Strict mode: exit 1 on FAIL/MISSING/UNSUPPORTED
 rgr gate repo-graph --advisory           # Advisory mode: exit 1 only on FAIL
 rgr trend repo-graph                     # Snapshot-to-snapshot health delta (latest vs parent)
+rgr change impact repo-graph             # Modules affected by changes (reverse IMPORTS only)
+rgr change impact repo-graph --staged    # Diff staged changes instead of working tree vs basis
+rgr change impact repo-graph --since main --max-depth 3
 
 # Quality measurements
 rgr graph stats repo-graph               # Module structural metrics (fan-in/out, instability)

@@ -93,11 +93,14 @@ export class RepoIndexer implements IndexerPort {
 				? this.storage.getLatestSnapshot(repoUid)
 				: null;
 
-		// 1. Create snapshot with toolchain provenance
+		// 1. Create snapshot with toolchain provenance and basis commit.
+		// basisCommit comes from options (resolved by the composition root
+		// via GitPort). The indexer itself does not call git.
 		const snapshot = this.storage.createSnapshot({
 			repoUid,
 			kind: snapshotKind,
 			parentSnapshotUid: parentSnapshot?.snapshotUid,
+			basisCommit: options?.basisCommit,
 			toolchainJson: JSON.stringify(buildToolchainJson()),
 		});
 
@@ -341,7 +344,10 @@ export class RepoIndexer implements IndexerPort {
 		}
 	}
 
-	async refreshRepo(repoUid: string): Promise<IndexResult> {
+	async refreshRepo(
+		repoUid: string,
+		options?: IndexOptions,
+	): Promise<IndexResult> {
 		const repo = this.storage.getRepo({ uid: repoUid });
 		if (!repo) {
 			throw new Error(`Repository not found: ${repoUid}`);
@@ -356,7 +362,7 @@ export class RepoIndexer implements IndexerPort {
 		// 4. Delete nodes/edges for removed files
 		// 5. Re-resolve edges affected by changes
 		// That optimization is deferred to v2.
-		return this.runIndex(repoUid, SnapshotKind.REFRESH);
+		return this.runIndex(repoUid, SnapshotKind.REFRESH, options);
 	}
 
 	// ── File scanning ──────────────────────────────────────────────────

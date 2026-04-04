@@ -26,8 +26,12 @@ import type {
 	FindPathInput,
 	FindTraversalInput,
 	FunctionMetricRow,
+	ChangedFileResolution,
 	FindActiveWaiversInput,
+	FindReverseModuleImportsInput,
 	GetDeclarationsInput,
+	ResolveChangedFilesToModulesInput,
+	ReverseModuleImportResult,
 	HotspotInput,
 	ImportEdgeResult,
 	InferenceRow,
@@ -911,6 +915,144 @@ export class SqliteStorage implements StoragePort {
 			sourceFile: row.source_file as string,
 			targetFile: row.target_file as string,
 			line: (row.line as number) ?? null,
+		}));
+	}
+
+	resolveChangedFilesToModules(
+		input: ResolveChangedFilesToModulesInput,
+	): ChangedFileResolution[] {
+		if (input.filePaths.length === 0) return [];
+
+		// Build expected FILE stable_keys for each input path.
+		// Keep a map from stable_key back to original path so results
+		// can be matched to input ordering.
+		const keyToPath = new Map<string, string>();
+		for (const path of input.filePaths) {
+			const key = `${input.repoUid}:${path}:FILE`;
+			keyToPath.set(key, path);
+		}
+
+		// Single query: for each candidate FILE node, LEFT JOIN the
+		// OWNS edge and the owning MODULE. Null module_key means the
+		// file exists but has no OWNS edge (defensive).
+		const placeholders = Array.from(keyToPath.keys())
+			.map(() => "?")
+			.join(", ");
+		const sql = `
+			SELECT
+				file_n.stable_key AS file_key,
+				mod_n.stable_key AS module_key
+			FROM nodes file_n
+			LEFT JOIN edges own_e
+				ON own_e.target_node_uid = file_n.node_uid
+				AND own_e.type = 'OWNS'
+				AND own_e.snapshot_uid = ?
+			LEFT JOIN nodes mod_n
+				ON own_e.source_node_uid = mod_n.node_uid
+				AND mod_n.kind = 'MODULE'
+				AND mod_n.snapshot_uid = ?
+			WHERE file_n.snapshot_uid = ?
+				AND file_n.kind = 'FILE'
+				AND file_n.stable_key IN (${placeholders})
+		`;
+		const params = [
+			input.snapshotUid,
+			input.snapshotUid,
+			input.snapshotUid,
+			...keyToPath.keys(),
+		];
+		const rows = this.db.prepare(sql).all(...params) as Record<
+			string,
+			unknown
+		>[];
+
+		// Build lookup map
+		const matched = new Map<string, string | null>();
+		for (const row of rows) {
+			matched.set(
+				row.file_key as string,
+				(row.module_key as string | null) ?? null,
+			);
+		}
+
+		// Preserve input order
+		return input.filePaths.map((path) => {
+			const key = `${input.repoUid}:${path}:FILE`;
+			if (matched.has(key)) {
+				return {
+					filePath: path,
+					matched: true,
+					owningModuleKey: matched.get(key) ?? null,
+				};
+			}
+			return { filePath: path, matched: false, owningModuleKey: null };
+		});
+	}
+
+	findReverseModuleImports(
+		input: FindReverseModuleImportsInput,
+	): ReverseModuleImportResult[] {
+		if (input.seedModuleKeys.length === 0) return [];
+
+		const seedPlaceholders = input.seedModuleKeys.map(() => "?").join(", ");
+		// Unbounded traversal uses a large sentinel. SQLite recursive CTEs
+		// need a depth guard to terminate; the visited-set semantics
+		// (WHERE node_uid NOT IN visited) break cycles, but depth also
+		// serves as belt-and-suspenders. 10000 is effectively unbounded
+		// for any realistic repo.
+		const maxDepth = input.maxDepth ?? 10000;
+
+		// Recursive CTE: reverse IMPORTS at MODULE level only.
+		// Level 1: modules importing any seed.
+		// Level n: modules importing a module found at level n-1.
+		// Cycle-safe: track visited node_uids in the path column.
+		const sql = `
+			WITH RECURSIVE traversal(node_uid, stable_key, distance, path) AS (
+				SELECT src_n.node_uid, src_n.stable_key, 1,
+				       ',' || src_n.node_uid || ','
+				FROM edges e
+				JOIN nodes src_n ON e.source_node_uid = src_n.node_uid
+				JOIN nodes tgt_n ON e.target_node_uid = tgt_n.node_uid
+				WHERE e.snapshot_uid = ?
+				  AND e.type = 'IMPORTS'
+				  AND src_n.kind = 'MODULE'
+				  AND tgt_n.kind = 'MODULE'
+				  AND tgt_n.stable_key IN (${seedPlaceholders})
+
+				UNION ALL
+
+				SELECT src_n.node_uid, src_n.stable_key, t.distance + 1,
+				       t.path || src_n.node_uid || ','
+				FROM edges e
+				JOIN traversal t ON e.target_node_uid = t.node_uid
+				JOIN nodes src_n ON e.source_node_uid = src_n.node_uid
+				WHERE e.snapshot_uid = ?
+				  AND e.type = 'IMPORTS'
+				  AND src_n.kind = 'MODULE'
+				  AND t.distance < ?
+				  AND t.path NOT LIKE '%,' || src_n.node_uid || ',%'
+			)
+			SELECT stable_key, MIN(distance) AS distance
+			FROM traversal
+			WHERE stable_key NOT IN (${seedPlaceholders})
+			GROUP BY stable_key
+			ORDER BY distance ASC, stable_key ASC
+		`;
+		const params = [
+			input.snapshotUid,
+			...input.seedModuleKeys,
+			input.snapshotUid,
+			maxDepth,
+			...input.seedModuleKeys,
+		];
+
+		const rows = this.db.prepare(sql).all(...params) as Record<
+			string,
+			unknown
+		>[];
+		return rows.map((row) => ({
+			moduleStableKey: row.stable_key as string,
+			distance: row.distance as number,
 		}));
 	}
 

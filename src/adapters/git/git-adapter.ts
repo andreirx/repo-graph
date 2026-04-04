@@ -7,7 +7,11 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { FileChurnEntry, GitPort } from "../../core/ports/git.js";
+import type {
+	FileChurnEntry,
+	GitDiffScope,
+	GitPort,
+} from "../../core/ports/git.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -108,5 +112,34 @@ export class GitAdapter implements GitPort {
 		}
 
 		return results.sort((a, b) => b.linesChanged - a.linesChanged);
+	}
+
+	async getChangedFiles(
+		repoPath: string,
+		scope: GitDiffScope,
+	): Promise<string[]> {
+		// Translate scope into git diff arguments.
+		// --name-only returns just the file paths; one per line.
+		// Paths from git are already repo-relative with forward slashes
+		// on all platforms except Windows; we normalize defensively.
+		let args: string[];
+		switch (scope.kind) {
+			case "staged":
+				args = ["diff", "--cached", "--name-only"];
+				break;
+			case "working_tree_vs_commit":
+				args = ["diff", "--name-only", scope.commit];
+				break;
+		}
+
+		const { stdout } = await execFileAsync("git", args, {
+			cwd: repoPath,
+			maxBuffer: 50 * 1024 * 1024,
+		});
+
+		return stdout
+			.split("\n")
+			.map((line) => line.trim().replace(/\\/g, "/"))
+			.filter((line) => line.length > 0);
 	}
 }

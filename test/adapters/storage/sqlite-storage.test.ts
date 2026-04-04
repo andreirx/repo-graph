@@ -316,6 +316,328 @@ describe("declarations", () => {
 	});
 });
 
+// ── change-impact queries ─────────────────────────────────────────────
+
+describe("resolveChangedFilesToModules", () => {
+	// Build a small graph with two modules and three files:
+	//   src/core/     (MODULE) owns src/core/a.ts, src/core/b.ts
+	//   src/adapters/ (MODULE) owns src/adapters/c.ts
+	let snap: ReturnType<typeof makeSnapshot>;
+	let modCoreUid: string;
+	let modAdaptersUid: string;
+	let fileAUid: string;
+	let fileBUid: string;
+	let fileCUid: string;
+
+	beforeEach(() => {
+		snap = makeSnapshot();
+		storage.upsertFiles([
+			makeFile(REPO_UID, "src/core/a.ts"),
+			makeFile(REPO_UID, "src/core/b.ts"),
+			makeFile(REPO_UID, "src/adapters/c.ts"),
+		]);
+
+		// Build MODULE and FILE nodes + OWNS edges manually
+		modCoreUid = randomUUID();
+		modAdaptersUid = randomUUID();
+		fileAUid = randomUUID();
+		fileBUid = randomUUID();
+		fileCUid = randomUUID();
+
+		storage.insertNodes([
+			{
+				nodeUid: modCoreUid,
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				stableKey: `${REPO_UID}:src/core:MODULE`,
+				kind: NodeKind.MODULE,
+				subtype: NodeSubtype.DIRECTORY,
+				name: "src/core",
+				qualifiedName: "src/core",
+				fileUid: null,
+				parentNodeUid: null,
+				location: { lineStart: 0, colStart: 0, lineEnd: 0, colEnd: 0 },
+				signature: null,
+				visibility: Visibility.EXPORT,
+				docComment: null,
+				metadataJson: null,
+			},
+			{
+				nodeUid: modAdaptersUid,
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				stableKey: `${REPO_UID}:src/adapters:MODULE`,
+				kind: NodeKind.MODULE,
+				subtype: NodeSubtype.DIRECTORY,
+				name: "src/adapters",
+				qualifiedName: "src/adapters",
+				fileUid: null,
+				parentNodeUid: null,
+				location: { lineStart: 0, colStart: 0, lineEnd: 0, colEnd: 0 },
+				signature: null,
+				visibility: Visibility.EXPORT,
+				docComment: null,
+				metadataJson: null,
+			},
+			{
+				nodeUid: fileAUid,
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				stableKey: `${REPO_UID}:src/core/a.ts:FILE`,
+				kind: NodeKind.FILE,
+				subtype: NodeSubtype.SOURCE,
+				name: "a.ts",
+				qualifiedName: "src/core/a.ts",
+				fileUid: `${REPO_UID}:src/core/a.ts`,
+				parentNodeUid: null,
+				location: { lineStart: 0, colStart: 0, lineEnd: 0, colEnd: 0 },
+				signature: null,
+				visibility: Visibility.EXPORT,
+				docComment: null,
+				metadataJson: null,
+			},
+			{
+				nodeUid: fileBUid,
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				stableKey: `${REPO_UID}:src/core/b.ts:FILE`,
+				kind: NodeKind.FILE,
+				subtype: NodeSubtype.SOURCE,
+				name: "b.ts",
+				qualifiedName: "src/core/b.ts",
+				fileUid: `${REPO_UID}:src/core/b.ts`,
+				parentNodeUid: null,
+				location: { lineStart: 0, colStart: 0, lineEnd: 0, colEnd: 0 },
+				signature: null,
+				visibility: Visibility.EXPORT,
+				docComment: null,
+				metadataJson: null,
+			},
+			{
+				nodeUid: fileCUid,
+				snapshotUid: snap.snapshotUid,
+				repoUid: REPO_UID,
+				stableKey: `${REPO_UID}:src/adapters/c.ts:FILE`,
+				kind: NodeKind.FILE,
+				subtype: NodeSubtype.SOURCE,
+				name: "c.ts",
+				qualifiedName: "src/adapters/c.ts",
+				fileUid: `${REPO_UID}:src/adapters/c.ts`,
+				parentNodeUid: null,
+				location: { lineStart: 0, colStart: 0, lineEnd: 0, colEnd: 0 },
+				signature: null,
+				visibility: Visibility.EXPORT,
+				docComment: null,
+				metadataJson: null,
+			},
+		]);
+
+		storage.insertEdges([
+			makeEdge(snap.snapshotUid, REPO_UID, modCoreUid, fileAUid, EdgeType.OWNS),
+			makeEdge(snap.snapshotUid, REPO_UID, modCoreUid, fileBUid, EdgeType.OWNS),
+			makeEdge(
+				snap.snapshotUid,
+				REPO_UID,
+				modAdaptersUid,
+				fileCUid,
+				EdgeType.OWNS,
+			),
+		]);
+	});
+
+	it("resolves matched files to their owning modules", () => {
+		const results = storage.resolveChangedFilesToModules({
+			snapshotUid: snap.snapshotUid,
+			repoUid: REPO_UID,
+			filePaths: ["src/core/a.ts", "src/adapters/c.ts"],
+		});
+		expect(results).toHaveLength(2);
+		expect(results[0]).toEqual({
+			filePath: "src/core/a.ts",
+			matched: true,
+			owningModuleKey: `${REPO_UID}:src/core:MODULE`,
+		});
+		expect(results[1]).toEqual({
+			filePath: "src/adapters/c.ts",
+			matched: true,
+			owningModuleKey: `${REPO_UID}:src/adapters:MODULE`,
+		});
+	});
+
+	it("reports unmatched files as matched=false", () => {
+		const results = storage.resolveChangedFilesToModules({
+			snapshotUid: snap.snapshotUid,
+			repoUid: REPO_UID,
+			filePaths: ["does/not/exist.ts", "src/core/a.ts"],
+		});
+		expect(results[0]).toEqual({
+			filePath: "does/not/exist.ts",
+			matched: false,
+			owningModuleKey: null,
+		});
+		expect(results[1].matched).toBe(true);
+	});
+
+	it("preserves input order in output", () => {
+		const paths = [
+			"src/adapters/c.ts",
+			"src/core/a.ts",
+			"src/core/b.ts",
+		];
+		const results = storage.resolveChangedFilesToModules({
+			snapshotUid: snap.snapshotUid,
+			repoUid: REPO_UID,
+			filePaths: paths,
+		});
+		expect(results.map((r) => r.filePath)).toEqual(paths);
+	});
+
+	it("returns empty array for empty input", () => {
+		const results = storage.resolveChangedFilesToModules({
+			snapshotUid: snap.snapshotUid,
+			repoUid: REPO_UID,
+			filePaths: [],
+		});
+		expect(results).toEqual([]);
+	});
+});
+
+describe("findReverseModuleImports", () => {
+	// Build a module import graph:
+	//   A imports B
+	//   B imports C
+	//   D imports C
+	//   C imports nothing
+	// Reverse BFS from C: A (d=2), B (d=1), D (d=1)
+	// Reverse BFS from B: A (d=1)
+	let snap: ReturnType<typeof makeSnapshot>;
+	let modA: string;
+	let modB: string;
+	let modC: string;
+	let modD: string;
+
+	function mkMod(uid: string, snap: string, key: string) {
+		return {
+			nodeUid: uid,
+			snapshotUid: snap,
+			repoUid: REPO_UID,
+			stableKey: key,
+			kind: NodeKind.MODULE,
+			subtype: NodeSubtype.DIRECTORY,
+			name: key,
+			qualifiedName: key,
+			fileUid: null,
+			parentNodeUid: null,
+			location: { lineStart: 0, colStart: 0, lineEnd: 0, colEnd: 0 },
+			signature: null,
+			visibility: Visibility.EXPORT,
+			docComment: null,
+			metadataJson: null,
+		};
+	}
+
+	beforeEach(() => {
+		snap = makeSnapshot();
+		modA = randomUUID();
+		modB = randomUUID();
+		modC = randomUUID();
+		modD = randomUUID();
+
+		storage.insertNodes([
+			mkMod(modA, snap.snapshotUid, `${REPO_UID}:A:MODULE`),
+			mkMod(modB, snap.snapshotUid, `${REPO_UID}:B:MODULE`),
+			mkMod(modC, snap.snapshotUid, `${REPO_UID}:C:MODULE`),
+			mkMod(modD, snap.snapshotUid, `${REPO_UID}:D:MODULE`),
+		]);
+
+		storage.insertEdges([
+			makeEdge(snap.snapshotUid, REPO_UID, modA, modB, EdgeType.IMPORTS),
+			makeEdge(snap.snapshotUid, REPO_UID, modB, modC, EdgeType.IMPORTS),
+			makeEdge(snap.snapshotUid, REPO_UID, modD, modC, EdgeType.IMPORTS),
+		]);
+	});
+
+	it("finds direct importers at distance 1", () => {
+		const results = storage.findReverseModuleImports({
+			snapshotUid: snap.snapshotUid,
+			seedModuleKeys: [`${REPO_UID}:B:MODULE`],
+		});
+		expect(results).toEqual([
+			{ moduleStableKey: `${REPO_UID}:A:MODULE`, distance: 1 },
+		]);
+	});
+
+	it("finds transitive importers with correct minimum distance", () => {
+		const results = storage.findReverseModuleImports({
+			snapshotUid: snap.snapshotUid,
+			seedModuleKeys: [`${REPO_UID}:C:MODULE`],
+		});
+		// Expected: B and D at distance 1, A at distance 2
+		expect(results).toEqual([
+			{ moduleStableKey: `${REPO_UID}:B:MODULE`, distance: 1 },
+			{ moduleStableKey: `${REPO_UID}:D:MODULE`, distance: 1 },
+			{ moduleStableKey: `${REPO_UID}:A:MODULE`, distance: 2 },
+		]);
+	});
+
+	it("excludes seed modules from results", () => {
+		const results = storage.findReverseModuleImports({
+			snapshotUid: snap.snapshotUid,
+			seedModuleKeys: [`${REPO_UID}:B:MODULE`, `${REPO_UID}:C:MODULE`],
+		});
+		const keys = results.map((r) => r.moduleStableKey);
+		expect(keys).not.toContain(`${REPO_UID}:B:MODULE`);
+		expect(keys).not.toContain(`${REPO_UID}:C:MODULE`);
+	});
+
+	it("respects maxDepth cap", () => {
+		const results = storage.findReverseModuleImports({
+			snapshotUid: snap.snapshotUid,
+			seedModuleKeys: [`${REPO_UID}:C:MODULE`],
+			maxDepth: 1,
+		});
+		const keys = results.map((r) => r.moduleStableKey);
+		expect(keys).toContain(`${REPO_UID}:B:MODULE`);
+		expect(keys).toContain(`${REPO_UID}:D:MODULE`);
+		expect(keys).not.toContain(`${REPO_UID}:A:MODULE`);
+	});
+
+	it("returns empty array for empty seed set", () => {
+		const results = storage.findReverseModuleImports({
+			snapshotUid: snap.snapshotUid,
+			seedModuleKeys: [],
+		});
+		expect(results).toEqual([]);
+	});
+
+	it("returns empty when no reverse imports exist", () => {
+		const results = storage.findReverseModuleImports({
+			snapshotUid: snap.snapshotUid,
+			seedModuleKeys: [`${REPO_UID}:A:MODULE`],
+		});
+		expect(results).toEqual([]);
+	});
+
+	it("is cycle-safe", () => {
+		// Add a cycle: C imports A
+		storage.insertEdges([
+			makeEdge(snap.snapshotUid, REPO_UID, modC, modA, EdgeType.IMPORTS),
+		]);
+		// Now the graph has a cycle: A -> B -> C -> A
+		// From seed C, reverse traversal should still terminate.
+		const results = storage.findReverseModuleImports({
+			snapshotUid: snap.snapshotUid,
+			seedModuleKeys: [`${REPO_UID}:C:MODULE`],
+		});
+		// B and D at distance 1, A at distance 2.
+		// Should NOT loop forever, should NOT include C.
+		const keys = results.map((r) => r.moduleStableKey);
+		expect(keys).not.toContain(`${REPO_UID}:C:MODULE`);
+		expect(keys).toContain(`${REPO_UID}:B:MODULE`);
+		expect(keys).toContain(`${REPO_UID}:A:MODULE`);
+	});
+});
+
 // ── findActiveWaivers ─────────────────────────────────────────────────
 
 describe("findActiveWaivers", () => {

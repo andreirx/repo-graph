@@ -431,6 +431,55 @@ tool trend <repo>
     implemented.
 
 
+tool change impact <repo> [--against-snapshot | --staged | --since <ref>] [--max-depth <n>]
+
+  Compute the set of modules affected by a file-change set, propagating
+  over REVERSE MODULE IMPORTS edges from the modules owning the changed
+  files. Output includes seed modules, impacted modules with distance,
+  and honest trust metadata.
+
+  Scope (mutually exclusive):
+    --against-snapshot    Diff working tree vs the snapshot's
+                          basis_commit. DEFAULT. Fails if the snapshot
+                          has no basis_commit (repo indexed from a
+                          non-git directory).
+    --staged              Diff staged changes (git diff --cached).
+    --since <ref>         Diff working tree vs the given git ref
+                          (commit, branch, tag).
+
+  Flags:
+    --max-depth <n>       Cap reverse-IMPORTS traversal depth
+                          (default: unbounded)
+    --json                Machine-readable output
+
+  Graph basis: reverse MODULE IMPORTS only. This is a deliberate
+  conservative first slice. CALLS edges, dynamic dispatch, and
+  registry/framework liveness are NOT modeled. See the trust.caveats
+  array in output for the full honesty boundary.
+
+  Example:
+    tool change impact payments
+    tool change impact payments --staged --json
+    tool change impact payments --since main --max-depth 3
+
+  JSON output includes:
+    command, repo, scope (echoed), snapshot_uid, snapshot_basis_commit,
+    trust (graph_basis, calls_included, caveats[]),
+    changed_files[] (path, matched_to_index, owning_module,
+                     unmatched_reason),
+    seed_modules[] (owning modules of matched changed files),
+    impacted_modules[] (module, distance, reason = seed | reverse_import),
+    counts (changed_files, changed_files_matched,
+            changed_files_unmatched, seed_modules, impacted_modules,
+            max_distance)
+
+  Design principle: impact analysis is easy to make dishonest. This
+  command emits trust metadata as first-class output so consumers
+  (CI, agents) can tell what was and was NOT considered. Extending
+  the propagation basis (e.g. adding CALLS) will require updating
+  trust.graph_basis and trust.calls_included explicitly.
+
+
 tool evidence <repo>
 
   Verification status report. Produces a snapshot-level view of all

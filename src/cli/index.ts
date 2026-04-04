@@ -11,6 +11,7 @@ import { Command } from "commander";
 import { type AppContext, bootstrap, shutdown } from "../main.js";
 import { CLI_VERSION } from "../version.js";
 import { registerArchCommands } from "./commands/arch.js";
+import { registerChangeCommands } from "./commands/change.js";
 import { registerDeclareCommands } from "./commands/declare.js";
 import { registerEvidenceCommand } from "./commands/evidence.js";
 import { registerGateCommand } from "./commands/gate.js";
@@ -44,6 +45,7 @@ registerArchCommands(program, getCtx);
 registerEvidenceCommand(program, getCtx);
 registerTrendCommand(program, getCtx);
 registerGateCommand(program, getCtx);
+registerChangeCommands(program, getCtx);
 
 // Main execution
 async function main(): Promise<void> {

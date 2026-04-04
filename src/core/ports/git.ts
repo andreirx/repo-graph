@@ -30,6 +30,18 @@ export interface GitPort {
 	 * @param since - ISO date string or git date format (e.g. "90.days.ago").
 	 */
 	getFileChurn(repoPath: string, since: string): Promise<FileChurnEntry[]>;
+
+	/**
+	 * List files changed in the given diff scope, relative to repo root.
+	 *
+	 * Paths are returned repo-relative with forward slashes, matching
+	 * the convention used by getFileChurn.
+	 *
+	 * Throws if the repo path is not a git repository, or if the
+	 * specified commit ref cannot be resolved. The throwing contract
+	 * is explicit so callers can surface the exact failure mode.
+	 */
+	getChangedFiles(repoPath: string, scope: GitDiffScope): Promise<string[]>;
 }
 
 export interface FileChurnEntry {
@@ -40,3 +52,15 @@ export interface FileChurnEntry {
 	/** Total lines added + deleted in the window. */
 	linesChanged: number;
 }
+
+/**
+ * Scope for a git diff that returns changed file paths.
+ *
+ *   staged                     — diff --cached (staged changes only)
+ *   working_tree_vs_commit     — diff against the given commit ref,
+ *                                includes BOTH staged and unstaged
+ *                                (equivalent to `git diff <ref>`)
+ */
+export type GitDiffScope =
+	| { kind: "staged" }
+	| { kind: "working_tree_vs_commit"; commit: string };

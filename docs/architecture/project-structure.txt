@@ -280,6 +280,9 @@ Shipped and stable:
                                effective verdicts, audit preservation)
   src/core/gate/             — reducer (pure function: verdicts -> gate outcome
                                + exit code, three modes: default/strict/advisory)
+  src/core/impact/           — change-impact service: maps git diff to seed
+                               modules, propagates via reverse MODULE IMPORTS,
+                               emits trust metadata alongside results
   src/adapters/storage/      — SQLite with migrations 001-004
                                (004: backfill obligation_id on legacy requirements)
   src/adapters/extractors/   — TS extractor with binding model, AST metrics,
@@ -301,6 +304,8 @@ Shipped and stable:
   src/cli/commands/gate.ts    — CI gate surface (composes evaluator +
                                 effective-verdict + reducer; see
                                 docs/architecture/gate-contract.txt)
+  src/cli/commands/change.ts  — change-impact: reverse-IMPORTS propagation
+                                from git-diff seeds with trust metadata
 
 Not yet implemented (v2+):
   src/adapters/watcher/       — file watcher for live refresh

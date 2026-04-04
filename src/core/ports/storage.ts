@@ -113,6 +113,44 @@ export interface StoragePort {
 		input: FindImportsBetweenPathsInput,
 	): ImportEdgeResult[];
 
+	/**
+	 * Resolve repo-relative file paths to their owning MODULE nodes
+	 * within a snapshot.
+	 *
+	 * For each input path, returns:
+	 *   - whether a FILE node exists for that path in this snapshot
+	 *   - the stable_key of the owning MODULE (via OWNS edge), if any
+	 *
+	 * A file is considered "matched" iff it has a FILE node in the snapshot.
+	 * A matched file may still have owningModuleKey === null if no OWNS
+	 * edge exists (defensive: should not occur in normally-indexed repos).
+	 *
+	 * Used by change-impact analysis to map git diff output to the
+	 * indexed graph's module-centric view.
+	 */
+	resolveChangedFilesToModules(
+		input: ResolveChangedFilesToModulesInput,
+	): ChangedFileResolution[];
+
+	/**
+	 * Reverse-IMPORTS BFS traversal at the MODULE level.
+	 *
+	 * Given a set of seed MODULE stable_keys, returns all MODULE nodes
+	 * that reach any seed via IMPORTS edges (i.e. modules that depend
+	 * on any seed, directly or transitively). Seeds themselves are NOT
+	 * emitted — only reached modules.
+	 *
+	 * Distance is the minimum hop count from seed set to the reached
+	 * module. Cycle-safe (each node visited at most once, at its
+	 * minimum distance).
+	 *
+	 * When maxDepth is omitted, traversal is unbounded. When provided,
+	 * traversal stops after `maxDepth` hops.
+	 */
+	findReverseModuleImports(
+		input: FindReverseModuleImportsInput,
+	): ReverseModuleImportResult[];
+
 	/** Compute structural metrics for all modules in a snapshot. */
 	computeModuleStats(snapshotUid: string): ModuleStats[];
 
@@ -252,6 +290,34 @@ export interface ImportEdgeResult {
 	sourceFile: string;
 	targetFile: string;
 	line: number | null;
+}
+
+export interface ResolveChangedFilesToModulesInput {
+	snapshotUid: string;
+	repoUid: string;
+	/** Repo-relative file paths (forward slashes). */
+	filePaths: string[];
+}
+
+export interface ChangedFileResolution {
+	filePath: string;
+	/** True iff a FILE node exists for this path in the snapshot. */
+	matched: boolean;
+	/** Stable_key of the owning MODULE, or null if unmatched / no OWNS edge. */
+	owningModuleKey: string | null;
+}
+
+export interface FindReverseModuleImportsInput {
+	snapshotUid: string;
+	seedModuleKeys: string[];
+	/** Undefined = unbounded traversal. Positive integer = hop cap. */
+	maxDepth?: number;
+}
+
+export interface ReverseModuleImportResult {
+	moduleStableKey: string;
+	/** Minimum hop count from the seed set (>= 1). */
+	distance: number;
 }
 
 export interface Measurement {

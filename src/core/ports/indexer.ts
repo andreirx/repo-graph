@@ -18,9 +18,10 @@ export interface IndexerPort {
 	 * Re-extracts only files that changed since the last snapshot.
 	 *
 	 * @param repoUid - The repository to refresh.
+	 * @param options - Indexing options.
 	 * @returns The snapshot UID of the refresh snapshot.
 	 */
-	refreshRepo(repoUid: string): Promise<IndexResult>;
+	refreshRepo(repoUid: string, options?: IndexOptions): Promise<IndexResult>;
 }
 
 export interface IndexOptions {
@@ -30,6 +31,14 @@ export interface IndexOptions {
 	include?: string[];
 	/** Log progress callbacks. */
 	onProgress?: (event: IndexProgressEvent) => void;
+	/**
+	 * Git commit hash that the working tree was at when indexing started.
+	 * Stored on the snapshot as `basis_commit` and used later by change-
+	 * impact analysis and snapshot comparability checks. The indexer
+	 * itself does not call git; the composition root (CLI) resolves the
+	 * commit and passes it here.
+	 */
+	basisCommit?: string;
 }
 
 export interface IndexResult {
