@@ -15,6 +15,7 @@ import { registerDeclareCommands } from "./commands/declare.js";
 import { registerEvidenceCommand } from "./commands/evidence.js";
 import { registerGraphCommands } from "./commands/graph.js";
 import { registerRepoCommands } from "./commands/repo.js";
+import { registerTrendCommand } from "./commands/trend.js";
 
 const program = new Command();
 
@@ -40,6 +41,7 @@ registerGraphCommands(program, getCtx);
 registerDeclareCommands(program, getCtx);
 registerArchCommands(program, getCtx);
 registerEvidenceCommand(program, getCtx);
+registerTrendCommand(program, getCtx);
 
 // Main execution
 async function main(): Promise<void> {

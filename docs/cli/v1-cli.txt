@@ -390,6 +390,44 @@ tool graph coverage <repo> <report>
   Files in the report but not in the graph are silently skipped.
 
 
+tool trend <repo>
+
+  Compare health metrics between the latest snapshot and its parent.
+  Shows whether the codebase is improving or decaying across measured
+  dimensions.
+
+  Checks toolchain comparability before computing deltas. Reports
+  NOT_COMPARABLE when measurement semantics, extraction semantics,
+  or stable key format differ between snapshots.
+
+  Metrics tracked:
+    files, nodes, edges (neutral — no judgment)
+    cycles (lower = better)
+    violations (lower = better)
+    avg_complexity, max_complexity (lower = better)
+    functions_measured (neutral)
+    avg_coverage (higher = better)
+    hotspot_files (lower = better)
+
+  Delta directions: improved, worsened, unchanged, new, no_data
+
+  Flags:
+    --json                  Machine-readable output
+
+  Example:
+    tool trend payments
+    tool trend payments --json
+
+  Prerequisites:
+    At least two snapshots must exist (run `repo index` then `repo refresh`).
+
+  Known limitation:
+    Coverage and churn measurements are snapshot-scoped but use
+    repo-level file inventory for filtering. Fine-grained historical
+    deltas may be imprecise until snapshot-scoped FILE matching is
+    implemented.
+
+
 tool evidence <repo>
 
   Verification status report. Produces a snapshot-level view of all

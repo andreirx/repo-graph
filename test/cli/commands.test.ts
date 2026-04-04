@@ -461,6 +461,32 @@ describe("evidence report", () => {
 	});
 });
 
+// ── trend ─────────────────────────────────────────────────────────────
+
+describe("trend", () => {
+	it("reports error when only one snapshot exists", async () => {
+		// test-repo has been indexed once, no refresh yet
+		const r = await h.run("trend", "test-repo");
+		// Should fail gracefully — only one snapshot
+		expect(r.exitCode).toBe(1);
+		expect(r.stderr + r.stdout).toContain("one snapshot");
+	});
+
+	it("--json returns comparable trend after refresh", async () => {
+		// Create a second snapshot
+		await h.run("repo", "refresh", "test-repo");
+		const r = await h.run("trend", "test-repo", "--json");
+		expect(r.exitCode).toBe(0);
+		const json = r.json();
+		expect(json.command).toBe("trend");
+		expect(json.comparable).toBe(true);
+		expect(json.from_snapshot).toBeDefined();
+		expect(json.to_snapshot).toBeDefined();
+		expect(json.deltas).toBeDefined();
+		expect(json.deltas.length).toBeGreaterThan(0);
+	});
+});
+
 // ── graph churn ───────────────────────────────────────────────────────
 
 describe("graph churn", () => {

@@ -277,6 +277,14 @@ Phase 4: Churn import [DONE — churn import only, hotspot computation pending]
     Gap: non-empty graph hotspots CLI path not covered. Test fixture
       is not a git repo, so churn returns empty. Covering this requires
       a temporary git repo in the test harness — a valid follow-up.
+    Gap: trend cannot distinguish "hotspot computation ran with zero
+      results" from "hotspot computation never ran." Both show as 0
+      when prerequisites (churn + complexity) exist. Fix requires
+      explicit assessment-run markers:
+        - snapshot-scoped assessment run record
+        - fields: snapshot_uid, kind (hotspot_score), formula_version, computed_at
+        - then trend can distinguish: not computed / computed zero / computed nonzero
+      This is follow-up infrastructure, not a correctness blocker.
 
 Phase 5: Extracted domain versions [DONE — package.json only]
   - Package version extraction from manifests (package.json name + version)
