@@ -30,14 +30,14 @@ import type {
 
 /**
  * Next.js app-router convention detection.
- * Matches any file under `app/` or ending `/app/<segment>/page.tsx`,
- * `/app/<segment>/layout.tsx`, or `/app/<segment>/route.ts`.
+ * Matches any file under `app/` ending in page.tsx/page.jsx,
+ * layout.tsx/layout.jsx, or route.ts/route.js.
  */
 export function detectNextjsConventions(filePaths: string[]): boolean {
 	const patterns = [
-		/(^|\/)app\/.*\/page\.tsx$/,
-		/(^|\/)app\/.*\/layout\.tsx$/,
-		/(^|\/)app\/.*\/route\.ts$/,
+		/(^|\/)app\/.*\/page\.(tsx|jsx)$/,
+		/(^|\/)app\/.*\/layout\.(tsx|jsx)$/,
+		/(^|\/)app\/.*\/route\.(ts|js)$/,
 	];
 	for (const path of filePaths) {
 		for (const re of patterns) {
@@ -49,21 +49,23 @@ export function detectNextjsConventions(filePaths: string[]): boolean {
 
 /**
  * React-heavy UI surface detection.
- * First-slice proxy: tsx_file_ratio >= 0.20.
+ * First-slice proxy: (tsx + jsx) file ratio >= 0.20.
+ *
+ * Counts both .tsx and .jsx extensions because both imply React
+ * component code regardless of TS vs JS. The "framework_heavy"
+ * downgrade applies equally to JS-React codebases.
  *
  * The full rule also requires package manifest to indicate `react`
  * as a dependency. That subcheck is deferred until the manifest
- * extractor captures dependencies (currently only captures name +
- * version). Documented assumption: .tsx files effectively imply
- * React+TS in practice, so the ratio alone is a usable proxy.
+ * extractor captures dependencies.
  */
 export function detectReactHeavy(filePaths: string[]): boolean {
 	if (filePaths.length === 0) return false;
-	let tsxCount = 0;
+	let reactCount = 0;
 	for (const path of filePaths) {
-		if (path.endsWith(".tsx")) tsxCount++;
+		if (path.endsWith(".tsx") || path.endsWith(".jsx")) reactCount++;
 	}
-	const ratio = tsxCount / filePaths.length;
+	const ratio = reactCount / filePaths.length;
 	return ratio >= 0.2;
 }
 

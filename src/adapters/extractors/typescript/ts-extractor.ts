@@ -61,7 +61,12 @@ export class TypeScriptExtractor implements ExtractorPort {
 			throw new Error("Extractor not initialized. Call initialize() first.");
 		}
 
-		const isTsx = filePath.endsWith(".tsx");
+		// JSX-bearing extensions use the tsx grammar.
+		// .jsx was previously parsed with the TypeScript grammar, which
+		// fails on JSX syntax and can produce spurious top-level
+		// declarations (e.g. inner function-scope consts misattributed
+		// to module scope, causing stable_key collisions).
+		const isTsx = filePath.endsWith(".tsx") || filePath.endsWith(".jsx");
 		this.parser.setLanguage(isTsx ? this.tsxLanguage : this.tsLanguage);
 
 		const tree = this.parser.parse(source);

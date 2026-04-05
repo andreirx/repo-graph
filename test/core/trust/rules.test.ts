@@ -74,7 +74,29 @@ describe("detectReactHeavy", () => {
 		expect(detectReactHeavy(files)).toBe(true);
 	});
 
-	it("false when < 20% of files are .tsx", () => {
+	it("true when >= 20% of files are .jsx (JS-React codebase)", () => {
+		const files = [
+			"a.jsx",
+			"b.jsx",
+			"c.js",
+			"d.js",
+			"e.js",
+			"f.js",
+			"g.js",
+			"h.js",
+			"i.js",
+			"j.js",
+		];
+		expect(detectReactHeavy(files)).toBe(true);
+	});
+
+	it("counts .tsx and .jsx together against the ratio", () => {
+		const files = ["a.tsx", "b.jsx", "c.ts", "d.js", "e.js"];
+		// (1 + 1) / 5 = 40%
+		expect(detectReactHeavy(files)).toBe(true);
+	});
+
+	it("false when < 20% of files are .tsx/.jsx", () => {
 		const files = ["a.tsx", "b.ts", "c.ts", "d.ts", "e.ts", "f.ts"];
 		// 1 / 6 = ~16.7%
 		expect(detectReactHeavy(files)).toBe(false);

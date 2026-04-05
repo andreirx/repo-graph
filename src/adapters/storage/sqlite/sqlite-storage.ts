@@ -44,6 +44,86 @@ import type {
 	StoragePort,
 	UpdateSnapshotStatusInput,
 } from "../../../core/ports/storage.js";
+/**
+ * Thrown by insertNodes when the input batch contains two or more
+ * nodes with the same stable_key. This is an identity-model defect
+ * — either an extractor bug (duplicate emission), an indexer bug
+ * (double-building the same symbol), or a stable_key format gap
+ * (declaration merging case not disambiguated).
+ *
+ * The error message names the colliding stable_key and surfaces
+ * each candidate node's identity fields so the root cause can be
+ * found directly, instead of being masked by SQLite's bare
+ * "UNIQUE constraint failed" message.
+ */
+/**
+ * Extract the repo-relative path from a file_uid.
+ *
+ * file_uid format is `<repo_uid>:<path>`. The repo_uid never contains
+ * a colon, so splitting on the first colon is safe and recovers the
+ * path verbatim (including any nested slashes or colons within the
+ * path itself — though paths normally contain neither).
+ *
+ * Used by NodeStableKeyCollisionError to surface the file path
+ * directly in the error message, so operators can open the file
+ * without a second database lookup.
+ */
+function extractPathFromFileUid(fileUid: string | null): string | null {
+	if (fileUid === null) return null;
+	const firstColon = fileUid.indexOf(":");
+	if (firstColon < 0) return null;
+	return fileUid.slice(firstColon + 1);
+}
+
+export class NodeStableKeyCollisionError extends Error {
+	constructor(
+		public readonly collisions: Array<{
+			stableKey: string;
+			nodes: Array<{
+				nodeUid: string;
+				stableKey: string;
+				kind: string;
+				subtype: string | null;
+				name: string;
+				qualifiedName: string | null;
+				fileUid: string | null;
+				location: { lineStart: number } | null;
+			}>;
+		}>,
+	) {
+		const lines: string[] = [
+			`Node stable_key collision(s) detected during insert.`,
+			`${collisions.length} colliding key(s):`,
+			"",
+		];
+		for (const c of collisions) {
+			lines.push(`  stable_key: ${c.stableKey}`);
+			for (const n of c.nodes) {
+				const loc = n.location ? `:${n.location.lineStart}` : "";
+				// file_uid format is `<repo_uid>:<repo-relative-path>`.
+				// Extract the path so the operator can open the file directly
+				// without a second lookup against the files table.
+				const filePath = extractPathFromFileUid(n.fileUid);
+				lines.push(
+					`    kind=${n.kind} subtype=${n.subtype ?? "-"} name=${n.name} ` +
+						`qualified_name=${n.qualifiedName ?? "-"}`,
+				);
+				lines.push(
+					`      file: ${filePath ?? "(unknown)"}${loc}` +
+						(n.fileUid ? `  [file_uid=${n.fileUid}]` : "") +
+						`  node_uid=${n.nodeUid}`,
+				);
+			}
+			lines.push("");
+		}
+		lines.push(
+			`This is an identity-model defect. The stable_key format is not disambiguating these emissions.`,
+		);
+		super(lines.join("\n"));
+		this.name = "NodeStableKeyCollisionError";
+	}
+}
+
 export class SqliteStorage implements StoragePort {
 	/**
 	 * Constructor accepts a Database handle owned by the caller
@@ -283,6 +363,39 @@ export class SqliteStorage implements StoragePort {
 	// ── Nodes & Edges ──────────────────────────────────────────────────
 
 	insertNodes(nodes: GraphNode[]): void {
+		// Pre-flight: detect stable_key collisions within the input batch.
+		// All nodes in a single insertNodes call share the same
+		// snapshot_uid, so (snapshot_uid, stable_key) collisions are
+		// equivalent to stable_key duplicates inside this array.
+		//
+		// Without this check, SQLite emits:
+		//   SqliteError: UNIQUE constraint failed: nodes.snapshot_uid, nodes.stable_key
+		// which does not identify WHICH rows collided. That makes
+		// identity-defect diagnosis on real codebases nearly impossible.
+		//
+		// With this check, the error names the stable_key and surfaces
+		// the two (or more) candidate emissions so the upstream
+		// extractor/indexer bug can be found directly.
+		const seen = new Map<string, GraphNode>();
+		const collisions: Array<{ stableKey: string; nodes: GraphNode[] }> = [];
+		for (const n of nodes) {
+			const existing = seen.get(n.stableKey);
+			if (existing === undefined) {
+				seen.set(n.stableKey, n);
+				continue;
+			}
+			// Collision found. Group all nodes sharing this key.
+			let group = collisions.find((g) => g.stableKey === n.stableKey);
+			if (group === undefined) {
+				group = { stableKey: n.stableKey, nodes: [existing] };
+				collisions.push(group);
+			}
+			group.nodes.push(n);
+		}
+		if (collisions.length > 0) {
+			throw new NodeStableKeyCollisionError(collisions);
+		}
+
 		const stmt = this.db.prepare(
 			`INSERT INTO nodes
 			 (node_uid, snapshot_uid, repo_uid, stable_key, kind, subtype, name,
