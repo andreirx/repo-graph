@@ -308,6 +308,71 @@ describe("indexRepo", () => {
 		);
 		expect(totalUnresolved).toBe(result.edgesUnresolved);
 	});
+
+	it("persists a classified row for every unresolved edge", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+
+		// Count persisted rows via classification axis — they should
+		// match the reported unresolved total exactly.
+		const byClassification = storage.countUnresolvedEdges({
+			snapshotUid: result.snapshotUid,
+			groupBy: "classification",
+		});
+		const persistedTotal = byClassification.reduce(
+			(sum, r) => sum + r.count,
+			0,
+		);
+		expect(persistedTotal).toBe(result.edgesUnresolved);
+
+		// Count by category must ALSO match (and match breakdown totals).
+		const byCategory = storage.countUnresolvedEdges({
+			snapshotUid: result.snapshotUid,
+			groupBy: "category",
+		});
+		const persistedTotalByCategory = byCategory.reduce(
+			(sum, r) => sum + r.count,
+			0,
+		);
+		expect(persistedTotalByCategory).toBe(result.edgesUnresolved);
+	});
+
+	it("classified rows carry non-empty classification and basis_code", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+		if (result.edgesUnresolved === 0) return; // nothing to verify
+
+		const rows = storage.queryUnresolvedEdges({
+			snapshotUid: result.snapshotUid,
+			limit: 500,
+		});
+		expect(rows.length).toBeGreaterThan(0);
+
+		const validClassifications = new Set([
+			"external_library_candidate",
+			"internal_candidate",
+			"unknown",
+		]);
+		for (const row of rows) {
+			expect(validClassifications.has(row.classification)).toBe(true);
+			// basis_code: non-empty string
+			expect(typeof row.basisCode).toBe("string");
+			expect(row.basisCode.length).toBeGreaterThan(0);
+			// source_file_path resolved via join
+			expect(row.sourceFilePath).toBeTruthy();
+		}
+	});
+
+	it("this.x.m() calls classify as internal_candidate via this-shortcut", async () => {
+		// The fixture has this.* method calls that go unresolved.
+		const result = await indexer.indexRepo(REPO_UID);
+		const thisRows = storage.queryUnresolvedEdges({
+			snapshotUid: result.snapshotUid,
+			category: "calls_this_method_needs_class_context",
+		});
+		for (const row of thisRows) {
+			expect(row.classification).toBe("internal_candidate");
+			expect(row.basisCode).toBe("this_receiver_implies_internal");
+		}
+	});
 });
 
 // ── Scanner hygiene ────────────────────────────────────────────────────

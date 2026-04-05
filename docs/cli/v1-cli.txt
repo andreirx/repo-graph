@@ -476,14 +476,74 @@ tool trust <repo>
              unresolved_calls, call_resolution_rate, reliability,
              triggered_downgrades),
     categories[] (machine key + human label + unresolved count),
+    classifications[] (machine key + count — see below),
     modules[] (per-module fan-in/out + suspicious flag + trust notes),
     caveats[]
+
+  Classifications (Tier 1a, added in step 3):
+    Orthogonal to `categories`: categories name the extraction
+    failure mode; classifications name the SEMANTIC meaning of the
+    gap. Every persisted unresolved edge (from migration 007) carries
+    both axes. Vocabulary:
+      external_library_candidate   — points at an external package
+      internal_candidate           — points inward (same-file, alias,
+                                     internal import, or `this`)
+      unknown                      — no classifier signal matched
+    Reliability levels do NOT currently re-weight based on
+    classification output; this is a descriptive surface.
 
   Design principle: reliability levels describe whether the COMMAND'S
   CLAIMED SEMANTICS are reliable on this repo, not completeness
   against every possible runtime behavior. `change impact` can be
   HIGH despite excluding CALLS because the command explicitly claims
   "reverse MODULE IMPORTS only."
+
+
+tool trust unresolved-samples <repo>
+
+  Tier 1b per-edge sample surface for the classification work (step 3).
+  Returns actual unresolved-edge rows with source file paths + line
+  numbers, so an agent can inspect specific classifier verdicts
+  without drilling into storage.
+
+  Rows come from the `unresolved_edges` table (migration 007), joined
+  to nodes + files for source path resolution.
+
+  Ordering is deterministic:
+    1. source_file_path ASC
+    2. line_start ASC
+    3. target_key ASC
+    4. edge_uid ASC (tiebreak)
+
+  Mixed output (no bucket filter) preserves this global ordering —
+  it does NOT regroup by classification in presentation.
+
+  Flags (all optional):
+    --bucket <classification>   Filter to a classification bucket.
+                                Validated against the vocabulary
+                                (external_library_candidate,
+                                 internal_candidate, unknown).
+    --category <category>       Filter to a UnresolvedEdgeCategory.
+                                Validated against vocabulary.
+    --basis-code <code>         Filter to a specific classifier basis.
+                                Validated against vocabulary.
+    --limit <n>                 Max rows. Default 20.
+    --json                      Machine-readable output.
+
+  Exit codes:
+    0 — output produced
+    1 — repo/snapshot not found OR invalid filter value (typed
+        filters fail fast, do not fall through to empty result)
+
+  JSON output includes:
+    command, repo, snapshot_uid, filters (bucket, category,
+    basis_code, limit), count, samples[]
+  Each sample carries:
+    edgeUid, classification, category, basisCode, targetKey,
+    sourceNodeUid, sourceStableKey, sourceFilePath, lineStart, colStart
+
+  Example:
+    tool trust unresolved-samples payments --bucket external_library_candidate --limit 10
 
 
 tool docs <repo> <target>

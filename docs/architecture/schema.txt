@@ -234,6 +234,55 @@ CREATE INDEX idx_edges_snapshot_type_dst ON edges(snapshot_uid, type, target_nod
 CREATE INDEX idx_edges_repo_type ON edges(repo_uid, type);
 
 
+-- Unresolved edges (added by migration 007)
+-- Persisted observations of edges the extractor emitted but could
+-- NOT resolve to a concrete target node. Sibling to `edges`, not a
+-- replacement: resolved facts (FK-clean, confidence 1.0) stay in
+-- `edges`; symbolic observations with semantic classification live
+-- here.
+--
+-- Classification axes are orthogonal:
+--   category        — extraction failure mode (UnresolvedEdgeCategory)
+--                     e.g. calls_obj_method_needs_type_info
+--   classification  — semantic bucket
+--                     e.g. external_library_candidate, internal_candidate, unknown
+--   basis_code      — the specific rule match that produced the
+--                     classification (UnresolvedEdgeBasisCode)
+--
+-- No FK on target: target_key is symbolic (a call expression, an
+-- import path, a class name), not a node identifier.
+--
+-- FK policy mirrors `edges`: plain REFERENCES without ON DELETE
+-- CASCADE. Snapshot pruning will require coordinated delete ordering
+-- for both tables when that slice is introduced.
+
+CREATE TABLE unresolved_edges (
+  edge_uid            TEXT PRIMARY KEY,
+  snapshot_uid        TEXT NOT NULL REFERENCES snapshots(snapshot_uid),
+  repo_uid            TEXT NOT NULL REFERENCES repos(repo_uid),
+  source_node_uid     TEXT NOT NULL REFERENCES nodes(node_uid),
+  target_key          TEXT NOT NULL,        -- symbolic target (not a node_uid)
+  type                TEXT NOT NULL,        -- EdgeType
+  resolution          TEXT NOT NULL,        -- static | dynamic | inferred
+  extractor           TEXT NOT NULL,        -- "ts-core:0.1.0"
+  line_start          INTEGER,
+  col_start           INTEGER,
+  line_end            INTEGER,
+  col_end             INTEGER,
+  metadata_json       TEXT,
+  category            TEXT NOT NULL,        -- extraction failure mode
+  classification      TEXT NOT NULL,        -- semantic bucket
+  classifier_version  INTEGER NOT NULL,     -- signals backfill eligibility
+  basis_code          TEXT NOT NULL,        -- rule-match explanation
+  observed_at         TEXT NOT NULL         -- ISO 8601, set by indexer at commit
+);
+
+CREATE INDEX idx_unresolved_edges_snapshot_class ON unresolved_edges(snapshot_uid, classification);
+CREATE INDEX idx_unresolved_edges_snapshot_category ON unresolved_edges(snapshot_uid, category);
+CREATE INDEX idx_unresolved_edges_snapshot_source ON unresolved_edges(snapshot_uid, source_node_uid);
+CREATE INDEX idx_unresolved_edges_snapshot_classifier_version ON unresolved_edges(snapshot_uid, classifier_version);
+
+
 -- Declarations
 -- Human-supplied facts. Not extracted from code.
 -- Note: authored_basis_json added by migration 002 (not in 001-initial).
@@ -731,8 +780,17 @@ Tables populated in v1:
                                    VARIABLE, CONSTANT, ENUM, PROPERTY, CONSTRUCTOR
   edges                — types: IMPORTS, CALLS only
                          resolution: static only
+  unresolved_edges     — per-observation records of unresolved extractor
+                         output with semantic classification (migration 007).
+                         Sibling to `edges`; stores symbolic target_key,
+                         category, classification, basis_code, classifier_version.
   declarations         — kinds: module, boundary, entrypoint, invariant,
                          owner, maturity, requirement, waiver
+  annotations          — provisional author claims extracted from source
+                         artifacts (JSDoc, package descriptions, READMEs,
+                         file headers). Added by migration 006. Accessed
+                         only through AnnotationsPort (see
+                         docs/architecture/annotations-contract.txt).
 
 Tables present but empty in v1:
   measurements

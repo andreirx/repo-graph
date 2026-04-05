@@ -17,6 +17,7 @@ import type {
 } from "../../../core/model/index.js";
 import { EdgeType, SnapshotStatus } from "../../../core/model/index.js";
 import type {
+	CountUnresolvedEdgesInput,
 	CreateSnapshotInput,
 	DomainVersionRow,
 	FindCyclesInput,
@@ -31,6 +32,8 @@ import type {
 	FindReverseModuleImportsInput,
 	GetDeclarationsInput,
 	PathPrefixModuleCycle,
+	PersistedUnresolvedEdge,
+	QueryUnresolvedEdgesInput,
 	ResolveChangedFilesToModulesInput,
 	ReverseModuleImportResult,
 	HotspotInput,
@@ -42,8 +45,15 @@ import type {
 	RepoRef,
 	ResolveSymbolInput,
 	StoragePort,
+	UnresolvedEdgeCountRow,
+	UnresolvedEdgeSampleRow,
 	UpdateSnapshotStatusInput,
 } from "../../../core/ports/storage.js";
+import type { UnresolvedEdgeCategory } from "../../../core/diagnostics/unresolved-edge-categories.js";
+import type {
+	UnresolvedEdgeBasisCode,
+	UnresolvedEdgeClassification,
+} from "../../../core/diagnostics/unresolved-edge-classification.js";
 /**
  * Thrown by insertNodes when the input batch contains two or more
  * nodes with the same stable_key. This is an identity-model defect
@@ -479,6 +489,143 @@ export class SqliteStorage implements StoragePort {
 				.run(snapshotUid, fileUid);
 		});
 		deleteOps();
+	}
+
+	// ── Unresolved Edges ────────────────────────────────────────────────
+
+	insertUnresolvedEdges(edges: PersistedUnresolvedEdge[]): void {
+		const stmt = this.db.prepare(
+			`INSERT INTO unresolved_edges
+			 (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key,
+			  type, resolution, extractor,
+			  line_start, col_start, line_end, col_end, metadata_json,
+			  category, classification, classifier_version, basis_code, observed_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const e of edges) {
+				stmt.run(
+					e.edgeUid,
+					e.snapshotUid,
+					e.repoUid,
+					e.sourceNodeUid,
+					e.targetKey,
+					e.type,
+					e.resolution,
+					e.extractor,
+					e.location?.lineStart ?? null,
+					e.location?.colStart ?? null,
+					e.location?.lineEnd ?? null,
+					e.location?.colEnd ?? null,
+					e.metadataJson,
+					e.category,
+					e.classification,
+					e.classifierVersion,
+					e.basisCode,
+					e.observedAt,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	queryUnresolvedEdges(
+		input: QueryUnresolvedEdgesInput,
+	): UnresolvedEdgeSampleRow[] {
+		// Join through nodes → files so the caller gets source path in
+		// one round trip. LEFT JOIN on files: a source node may have
+		// file_uid = NULL defensively (should be rare in practice).
+		let sql = `
+			SELECT
+				ue.edge_uid          AS edge_uid,
+				ue.classification    AS classification,
+				ue.category          AS category,
+				ue.basis_code        AS basis_code,
+				ue.target_key        AS target_key,
+				ue.source_node_uid   AS source_node_uid,
+				n.stable_key         AS source_stable_key,
+				f.path               AS source_file_path,
+				ue.line_start        AS line_start,
+				ue.col_start         AS col_start
+			FROM unresolved_edges ue
+			LEFT JOIN nodes n ON n.node_uid = ue.source_node_uid
+			LEFT JOIN files f ON f.file_uid = n.file_uid
+			WHERE ue.snapshot_uid = ?`;
+		const params: unknown[] = [input.snapshotUid];
+
+		if (input.classification) {
+			sql += " AND ue.classification = ?";
+			params.push(input.classification);
+		}
+		if (input.category) {
+			sql += " AND ue.category = ?";
+			params.push(input.category);
+		}
+		if (input.basisCode) {
+			sql += " AND ue.basis_code = ?";
+			params.push(input.basisCode);
+		}
+
+		// Deterministic ordering. SQLite default: NULLS FIRST on ASC.
+		// Tiebreak by edge_uid to make ties within the same file/line
+		// stable across runs regardless of insertion order.
+		sql +=
+			" ORDER BY f.path ASC, ue.line_start ASC, ue.target_key ASC, ue.edge_uid ASC";
+
+		if (input.limit !== undefined) {
+			sql += " LIMIT ?";
+			params.push(input.limit);
+		}
+
+		const rows = this.db.prepare(sql).all(...params) as Array<{
+			edge_uid: string;
+			classification: string;
+			category: string;
+			basis_code: string;
+			target_key: string;
+			source_node_uid: string;
+			source_stable_key: string | null;
+			source_file_path: string | null;
+			line_start: number | null;
+			col_start: number | null;
+		}>;
+
+		return rows.map((r) => ({
+			edgeUid: r.edge_uid,
+			classification: r.classification as UnresolvedEdgeClassification,
+			category: r.category as UnresolvedEdgeCategory,
+			basisCode: r.basis_code as UnresolvedEdgeBasisCode,
+			targetKey: r.target_key,
+			sourceNodeUid: r.source_node_uid,
+			// n.stable_key comes from a LEFT JOIN; coerce NULL to empty
+			// to keep the type narrow. In practice it's only NULL if the
+			// source node was deleted underneath us (shouldn't happen).
+			sourceStableKey: r.source_stable_key ?? "",
+			sourceFilePath: r.source_file_path,
+			lineStart: r.line_start,
+			colStart: r.col_start,
+		}));
+	}
+
+	countUnresolvedEdges(
+		input: CountUnresolvedEdgesInput,
+	): UnresolvedEdgeCountRow[] {
+		// Map groupBy to a column name. Guard against injection by
+		// allowing only the two documented axes.
+		const column =
+			input.groupBy === "classification" ? "classification" : "category";
+		const sql = `
+			SELECT ${column} AS key, COUNT(*) AS count
+			FROM unresolved_edges
+			WHERE snapshot_uid = ?
+			GROUP BY ${column}
+			ORDER BY key ASC`;
+
+		const rows = this.db.prepare(sql).all(input.snapshotUid) as Array<{
+			key: string;
+			count: number;
+		}>;
+		return rows.map((r) => ({ key: r.key, count: r.count }));
 	}
 
 	// ── Declarations ───────────────────────────────────────────────────

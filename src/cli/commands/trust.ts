@@ -1,17 +1,29 @@
 /**
- * rgr trust — extraction trust reporting.
+ * rgr trust — extraction trust reporting surface.
  *
- * Thin CLI layer over computeTrustReport(). Emits JSON with the full
- * report envelope, or a human-readable summary.
+ * Two subcommands:
+ *
+ *   rgr trust <repo>
+ *       Default subcommand. Full reliability report (Tier 1a counts
+ *       by category + classification).
+ *
+ *   rgr trust unresolved-samples <repo>
+ *       Tier 1b. Per-edge samples joined to source file + line.
+ *
+ * Both emit JSON with --json, human-readable tables otherwise.
  *
  * Exit codes:
- *   0 — report produced (regardless of trust levels; this is an
- *       INFORMATIONAL surface, not a gate)
- *   1 — repo/snapshot not found
+ *   0 — output produced (informational surface, not a gate)
+ *   1 — repo/snapshot not found, or invalid filter value
  */
 
 import { resolve as resolvePath } from "node:path";
 import type { Command } from "commander";
+import { UnresolvedEdgeCategory } from "../../core/diagnostics/unresolved-edge-categories.js";
+import {
+	UnresolvedEdgeBasisCode,
+	UnresolvedEdgeClassification,
+} from "../../core/diagnostics/unresolved-edge-classification.js";
 import { computeTrustReport } from "../../core/trust/service.js";
 import type { TrustReport } from "../../core/trust/types.js";
 import type { AppContext } from "../../main.js";
@@ -20,56 +32,220 @@ export function registerTrustCommand(
 	program: Command,
 	getCtx: () => AppContext,
 ): void {
-	program
-		.command("trust <repo>")
+	const trust = program
+		.command("trust")
 		.description(
-			"Extraction trust report: reliability levels per axis + downgrade triggers",
+			"Extraction trust reporting: reliability axes, downgrade triggers, unresolved classification",
+		);
+
+	// Default subcommand: `rgr trust <repo>` → full report.
+	trust
+		.command("report <repo>", { isDefault: true })
+		.description(
+			"Full trust report: reliability levels + category/classification counts",
 		)
 		.option("--json", "JSON output")
 		.action((repoRef: string, opts: { json?: boolean }) => {
-			const ctx = getCtx();
-			const repo =
-				ctx.storage.getRepo({ uid: repoRef }) ??
-				ctx.storage.getRepo({ name: repoRef }) ??
-				ctx.storage.getRepo({ rootPath: resolvePath(repoRef) });
-			if (!repo) {
-				outputError(opts.json, `Repository not found: ${repoRef}`);
-				process.exitCode = 1;
-				return;
-			}
-
-			const snapshot = ctx.storage.getLatestSnapshot(repo.repoUid);
-			if (!snapshot) {
-				outputError(opts.json, `Repository not indexed: ${repoRef}`);
-				process.exitCode = 1;
-				return;
-			}
-
-			const report = computeTrustReport({
-				storage: ctx.storage,
-				repoUid: repo.repoUid,
-				snapshotUid: snapshot.snapshotUid,
-				snapshotBasisCommit: snapshot.basisCommit ?? null,
-				snapshotToolchainJson: snapshot.toolchainJson ?? null,
-			});
-
-			if (opts.json) {
-				console.log(
-					JSON.stringify(
-						{
-							command: "trust",
-							repo: repo.name,
-							...report,
-						},
-						null,
-						2,
-					),
-				);
-			} else {
-				printHuman(repo.name, report);
-			}
+			runReport(repoRef, opts, getCtx());
 		});
+
+	// Tier 1b: per-edge unresolved samples with source file + line.
+	trust
+		.command("unresolved-samples <repo>")
+		.description(
+			"Tier 1b: per-edge unresolved samples (source file + line + classification)",
+		)
+		.option("--bucket <classification>", "Filter by classification bucket")
+		.option("--category <category>", "Filter by extraction failure category")
+		.option("--basis-code <code>", "Filter by classifier basis code")
+		.option("--limit <n>", "Max rows to return", "20")
+		.option("--json", "JSON output")
+		.action(
+			(
+				repoRef: string,
+				opts: {
+					bucket?: string;
+					category?: string;
+					basisCode?: string;
+					limit: string;
+					json?: boolean;
+				},
+			) => {
+				runSamples(repoRef, opts, getCtx());
+			},
+		);
 }
+
+// ── Subcommand implementations ──────────────────────────────────────
+
+function runReport(
+	repoRef: string,
+	opts: { json?: boolean },
+	ctx: AppContext,
+): void {
+	const repo = resolveRepo(ctx, repoRef);
+	if (!repo) {
+		outputError(opts.json, `Repository not found: ${repoRef}`);
+		process.exitCode = 1;
+		return;
+	}
+
+	const snapshot = ctx.storage.getLatestSnapshot(repo.repoUid);
+	if (!snapshot) {
+		outputError(opts.json, `Repository not indexed: ${repoRef}`);
+		process.exitCode = 1;
+		return;
+	}
+
+	const report = computeTrustReport({
+		storage: ctx.storage,
+		repoUid: repo.repoUid,
+		snapshotUid: snapshot.snapshotUid,
+		snapshotBasisCommit: snapshot.basisCommit ?? null,
+		snapshotToolchainJson: snapshot.toolchainJson ?? null,
+	});
+
+	if (opts.json) {
+		console.log(
+			JSON.stringify(
+				{ command: "trust", repo: repo.name, ...report },
+				null,
+				2,
+			),
+		);
+	} else {
+		printHuman(repo.name, report);
+	}
+}
+
+function runSamples(
+	repoRef: string,
+	opts: {
+		bucket?: string;
+		category?: string;
+		basisCode?: string;
+		limit: string;
+		json?: boolean;
+	},
+	ctx: AppContext,
+): void {
+	const repo = resolveRepo(ctx, repoRef);
+	if (!repo) {
+		outputError(opts.json, `Repository not found: ${repoRef}`);
+		process.exitCode = 1;
+		return;
+	}
+
+	const snapshot = ctx.storage.getLatestSnapshot(repo.repoUid);
+	if (!snapshot) {
+		outputError(opts.json, `Repository not indexed: ${repoRef}`);
+		process.exitCode = 1;
+		return;
+	}
+
+	// Validate typed filters against known vocabularies. Immediate
+	// input validation beats silent empty-result fallthrough.
+	if (opts.bucket && !isKnownClassification(opts.bucket)) {
+		outputError(
+			opts.json,
+			`Unknown --bucket value: ${opts.bucket}. Valid: ${validClassifications().join(", ")}`,
+		);
+		process.exitCode = 1;
+		return;
+	}
+	if (opts.category && !isKnownCategory(opts.category)) {
+		outputError(
+			opts.json,
+			`Unknown --category value: ${opts.category}. Valid: ${validCategories().join(", ")}`,
+		);
+		process.exitCode = 1;
+		return;
+	}
+	if (opts.basisCode && !isKnownBasisCode(opts.basisCode)) {
+		outputError(
+			opts.json,
+			`Unknown --basis-code value: ${opts.basisCode}. Valid: ${validBasisCodes().join(", ")}`,
+		);
+		process.exitCode = 1;
+		return;
+	}
+
+	const limit = Number.parseInt(opts.limit, 10);
+	if (!Number.isFinite(limit) || limit <= 0) {
+		outputError(opts.json, `Invalid --limit value: ${opts.limit}`);
+		process.exitCode = 1;
+		return;
+	}
+
+	const rows = ctx.storage.queryUnresolvedEdges({
+		snapshotUid: snapshot.snapshotUid,
+		// biome-ignore lint/suspicious/noExplicitAny: validated above
+		classification: opts.bucket as any,
+		// biome-ignore lint/suspicious/noExplicitAny: validated above
+		category: opts.category as any,
+		// biome-ignore lint/suspicious/noExplicitAny: validated above
+		basisCode: opts.basisCode as any,
+		limit,
+	});
+
+	if (opts.json) {
+		console.log(
+			JSON.stringify(
+				{
+					command: "trust unresolved-samples",
+					repo: repo.name,
+					snapshot_uid: snapshot.snapshotUid,
+					filters: {
+						bucket: opts.bucket ?? null,
+						category: opts.category ?? null,
+						basis_code: opts.basisCode ?? null,
+						limit,
+					},
+					count: rows.length,
+					samples: rows,
+				},
+				null,
+				2,
+			),
+		);
+	} else {
+		printSamplesHuman(repo.name, rows);
+	}
+}
+
+// ── Validators ──────────────────────────────────────────────────────
+
+function validClassifications(): string[] {
+	return Object.values(UnresolvedEdgeClassification);
+}
+function validCategories(): string[] {
+	return Object.values(UnresolvedEdgeCategory);
+}
+function validBasisCodes(): string[] {
+	return Object.values(UnresolvedEdgeBasisCode);
+}
+
+function isKnownClassification(v: string): boolean {
+	return validClassifications().includes(v);
+}
+function isKnownCategory(v: string): boolean {
+	return validCategories().includes(v);
+}
+function isKnownBasisCode(v: string): boolean {
+	return validBasisCodes().includes(v);
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+function resolveRepo(ctx: AppContext, ref: string) {
+	return (
+		ctx.storage.getRepo({ uid: ref }) ??
+		ctx.storage.getRepo({ name: ref }) ??
+		ctx.storage.getRepo({ rootPath: resolvePath(ref) })
+	);
+}
+
+// ── Human-readable output ───────────────────────────────────────────
 
 function printHuman(repoName: string, report: TrustReport): void {
 	console.log(`Trust Report — ${repoName}`);
@@ -85,7 +261,6 @@ function printHuman(repoName: string, report: TrustReport): void {
 	}
 	console.log("");
 
-	// Summary counts
 	const s = report.summary;
 	console.log("Counts:");
 	console.log(`  edges_total:        ${s.edges_total}`);
@@ -97,7 +272,6 @@ function printHuman(repoName: string, report: TrustReport): void {
 	);
 	console.log("");
 
-	// Reliability axes
 	console.log("Reliability:");
 	const axes = [
 		["import_graph", s.reliability.import_graph],
@@ -114,7 +288,6 @@ function printHuman(repoName: string, report: TrustReport): void {
 	}
 	console.log("");
 
-	// Downgrade triggers
 	console.log("Downgrade triggers:");
 	const triggers = [
 		["framework_heavy_suspicion", s.triggered_downgrades.framework_heavy_suspicion],
@@ -140,7 +313,6 @@ function printHuman(repoName: string, report: TrustReport): void {
 	}
 	console.log("");
 
-	// Category breakdown
 	if (report.categories.length > 0) {
 		console.log("Unresolved edges by category:");
 		for (const c of report.categories) {
@@ -150,7 +322,16 @@ function printHuman(repoName: string, report: TrustReport): void {
 		console.log("");
 	}
 
-	// Suspicious modules (truncated)
+	// New: classification breakdown (Tier 1a).
+	if (report.classifications.length > 0) {
+		console.log("Unresolved edges by classification:");
+		for (const c of report.classifications) {
+			const count = String(c.count).padStart(5);
+			console.log(`  ${count}  ${c.classification}`);
+		}
+		console.log("");
+	}
+
 	const suspicious = report.modules.filter(
 		(m) => m.suspicious_zero_connectivity,
 	);
@@ -166,11 +347,48 @@ function printHuman(repoName: string, report: TrustReport): void {
 		console.log("");
 	}
 
-	// Caveats
 	console.log("Caveats:");
 	for (const c of report.caveats) {
 		console.log(`  - ${c}`);
 	}
+}
+
+interface SampleRow {
+	classification: string;
+	category: string;
+	basisCode: string;
+	targetKey: string;
+	sourceFilePath: string | null;
+	lineStart: number | null;
+}
+
+function printSamplesHuman(repoName: string, rows: SampleRow[]): void {
+	console.log(`Unresolved samples — ${repoName}`);
+	console.log(`Rows: ${rows.length}`);
+	if (rows.length === 0) {
+		console.log("(no rows match the given filters)");
+		return;
+	}
+	console.log("");
+	// Column order: classification | basis | category | file:line | target
+	const header = "CLASSIFICATION               BASIS                                 CATEGORY                                     FILE:LINE                         TARGET";
+	console.log(header);
+	console.log("-".repeat(header.length));
+	for (const r of rows) {
+		const cls = pad(r.classification, 28);
+		const basis = pad(r.basisCode, 38);
+		const cat = pad(r.category, 44);
+		const loc = pad(
+			`${r.sourceFilePath ?? "?"}:${r.lineStart ?? "?"}`,
+			33,
+		);
+		console.log(`${cls} ${basis} ${cat} ${loc} ${r.targetKey}`);
+	}
+}
+
+function pad(s: string, width: number): string {
+	if (s.length >= width) return s.slice(0, width - 1) + "…";
+	return s.padEnd(width, " ");
 }
 
 function outputError(json: boolean | undefined, message: string): void {

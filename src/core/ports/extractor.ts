@@ -42,6 +42,50 @@ export interface UnresolvedEdge {
 }
 
 /**
+ * A single import-statement binding observed in the source file.
+ *
+ * ImportBinding is a SIDE-CHANNEL extractor fact: it records what
+ * identifiers were introduced by import statements, for use by the
+ * classifier. It is NOT an edge, and it does NOT affect the
+ * graph's trust posture.
+ *
+ * The extractor emits ONE ImportBinding per identifier-bearing
+ * specifier, including:
+ *   - default imports             `import X from "m"`       → {X, m}
+ *   - named imports               `import { a } from "m"`   → {a, m}
+ *   - renamed named imports       `import { a as b }...`    → {b, m} (local name)
+ *   - namespace imports           `import * as ns from "m"` → {ns, m}
+ *   - combinations                `import X, { a } from ...`→ both
+ *   - type-only statements        `import type { X }...`    → {X, m, isTypeOnly=true}
+ *
+ * NOT captured (deferred):
+ *   - side-effect imports         `import "m"`              (no identifier)
+ *   - dynamic imports             `await import("m")`
+ *   - CJS require                 `require("m")`
+ *   - specifier-level type        `import { type X }...`    (first slice: treated as value)
+ *
+ * Side-effect imports are skipped because the first classifier
+ * has no use for identifier-less imports. They may be added later
+ * for boundary/liveness analysis.
+ */
+export interface ImportBinding {
+	/** Local identifier introduced by this import. */
+	identifier: string;
+	/** Module specifier as written in source (quotes stripped). */
+	specifier: string;
+	/** True iff specifier starts with "." (path-relative import). */
+	isRelative: boolean;
+	/** Source location of the import statement. */
+	location: SourceLocation | null;
+	/**
+	 * True iff the enclosing statement is `import type ...`.
+	 * First-slice scope: statement-level only. Specifier-level
+	 * `{ type X }` is NOT detected yet and will yield isTypeOnly=false.
+	 */
+	isTypeOnly: boolean;
+}
+
+/**
  * Result of extracting a single file.
  * Contains the nodes and unresolved edges found in that file.
  */
@@ -60,6 +104,13 @@ export interface ExtractionResult {
 	 * measurements persisted into the measurements table.
 	 */
 	metrics: Map<string, ExtractedMetrics>;
+	/**
+	 * Every identifier-bearing import binding observed in the file.
+	 * See ImportBinding for coverage. This is a side-channel fact
+	 * stream for downstream classification; it does NOT correspond
+	 * to graph edges.
+	 */
+	importBindings: ImportBinding[];
 }
 
 export interface ExtractedMetrics {

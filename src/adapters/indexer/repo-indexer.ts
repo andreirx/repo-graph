@@ -21,6 +21,15 @@ import {
 	SnapshotStatus,
 } from "../../core/model/index.js";
 import { UnresolvedEdgeCategory } from "../../core/diagnostics/unresolved-edge-categories.js";
+import { CURRENT_CLASSIFIER_VERSION } from "../../core/diagnostics/unresolved-edge-classification.js";
+import { classifyUnresolvedEdge } from "../../core/classification/unresolved-classifier.js";
+import {
+	emptyFileSignals,
+	emptySnapshotSignals,
+	type FileSignals,
+	type PackageDependencySet,
+	type SnapshotSignals,
+} from "../../core/classification/signals.js";
 import type {
 	ExtractionResult,
 	ExtractorPort,
@@ -31,7 +40,12 @@ import type {
 	IndexOptions,
 	IndexResult,
 } from "../../core/ports/indexer.js";
-import type { Measurement, StoragePort } from "../../core/ports/storage.js";
+import type {
+	Measurement,
+	PersistedUnresolvedEdge,
+	StoragePort,
+} from "../../core/ports/storage.js";
+import { readTsconfigAliases } from "../config/tsconfig-reader.js";
 import type { AnnotationsPort } from "../../core/ports/annotations.js";
 import {
 	applyContentTruncation,
@@ -53,7 +67,10 @@ import {
 	INDEXER_VERSION,
 	MANIFEST_EXTRACTOR_VERSION,
 } from "../../version.js";
-import { extractPackageManifest } from "../extractors/manifest/package-json.js";
+import {
+	extractPackageDependencies,
+	extractPackageManifest,
+} from "../extractors/manifest/package-json.js";
 
 /** File extensions the TS extractor handles. */
 const TS_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
@@ -133,6 +150,11 @@ export class RepoIndexer implements IndexerPort {
 		});
 
 		try {
+			// 1a. Read snapshot-level classifier signals BEFORE extraction.
+			// These degrade to empty on any read/parse failure — indexing
+			// must not fail because classifier inputs are unavailable.
+			const snapshotSignals = await this.buildSnapshotSignals(repo.rootPath);
+
 			// 2. Scan file tree
 			emit({ phase: "scanning", current: 0, total: 0 });
 			const filePaths = await this.scanFiles(
@@ -192,6 +214,13 @@ export class RepoIndexer implements IndexerPort {
 				string,
 				{ cc: number; params: number; nesting: number }
 			>();
+			// Classifier supporting data built during extraction:
+			//   - fileSignalsCache: per-file importBindings + sameFileSymbols
+			//   - nodeUidToFileUid: reverse lookup for source files from
+			//     unresolved-edge source node UIDs (avoids DB round-trip
+			//     during classification).
+			const fileSignalsCache = new Map<string, FileSignals>();
+			const nodeUidToFileUid = new Map<string, string>();
 			let extractIdx = 0;
 
 			for (const relPath of filePaths) {
@@ -236,6 +265,50 @@ export class RepoIndexer implements IndexerPort {
 						nesting: m.maxNestingDepth,
 					});
 				}
+
+				// Build per-file classifier signals.
+				// SUBTYPE-AWARE: split same-file symbols into value / class /
+				// interface sets so the classifier doesn't misclassify
+				// a runtime call against a type-only name (and vice versa).
+				const sameFileValueSymbols = new Set<string>();
+				const sameFileClassSymbols = new Set<string>();
+				const sameFileInterfaceSymbols = new Set<string>();
+				for (const node of result.nodes) {
+					if (node.kind === NodeKind.SYMBOL) {
+						const sub = node.subtype;
+						// Value-bindable subtypes (runtime identifiers).
+						if (
+							sub === NodeSubtype.FUNCTION ||
+							sub === NodeSubtype.CLASS ||
+							sub === NodeSubtype.METHOD ||
+							sub === NodeSubtype.VARIABLE ||
+							sub === NodeSubtype.CONSTANT ||
+							sub === NodeSubtype.ENUM ||
+							sub === NodeSubtype.ENUM_MEMBER ||
+							sub === NodeSubtype.CONSTRUCTOR ||
+							sub === NodeSubtype.GETTER ||
+							sub === NodeSubtype.SETTER ||
+							sub === NodeSubtype.PROPERTY
+						) {
+							sameFileValueSymbols.add(node.name);
+						}
+						if (sub === NodeSubtype.CLASS) {
+							sameFileClassSymbols.add(node.name);
+						}
+						if (sub === NodeSubtype.INTERFACE) {
+							sameFileInterfaceSymbols.add(node.name);
+						}
+					}
+					// Build reverse lookup for every extracted node.
+					nodeUidToFileUid.set(node.nodeUid, fileUid);
+				}
+				fileSignalsCache.set(fileUid, {
+					importBindings: result.importBindings,
+					sameFileValueSymbols,
+					sameFileClassSymbols,
+					sameFileInterfaceSymbols,
+				});
+
 				extractIdx++;
 			}
 
@@ -264,7 +337,7 @@ export class RepoIndexer implements IndexerPort {
 				total: allUnresolvedEdges.length,
 			});
 
-			const { resolved, unresolvedCount, unresolvedBreakdown } =
+			const { resolved, stillUnresolved, unresolvedBreakdown } =
 				this.resolveEdges(
 					allUnresolvedEdges,
 					allNodes,
@@ -272,6 +345,7 @@ export class RepoIndexer implements IndexerPort {
 					repoUid,
 					snapshot.snapshotUid,
 				);
+			const unresolvedCount = stillUnresolved.length;
 
 			emit({
 				phase: "resolving",
@@ -290,6 +364,36 @@ export class RepoIndexer implements IndexerPort {
 
 			// 9. Persist edges
 			this.storage.insertEdges(allEdges);
+
+			// 9a. Classify still-unresolved edges and persist observations.
+			// Runs BEFORE count aggregation so both artifacts come from
+			// the same unresolved inventory. Purely additive: resolved
+			// edges and trust diagnostics are unaffected.
+			if (stillUnresolved.length > 0) {
+				const observedAt = new Date().toISOString();
+				const classifiedRows: PersistedUnresolvedEdge[] = [];
+				for (const { edge, category } of stillUnresolved) {
+					const sourceFileUid = nodeUidToFileUid.get(edge.sourceNodeUid);
+					const fileSignals = sourceFileUid
+						? (fileSignalsCache.get(sourceFileUid) ?? emptyFileSignals())
+						: emptyFileSignals();
+					const verdict = classifyUnresolvedEdge(
+						edge,
+						category,
+						snapshotSignals,
+						fileSignals,
+					);
+					classifiedRows.push({
+						...edge,
+						category,
+						classification: verdict.classification,
+						classifierVersion: CURRENT_CLASSIFIER_VERSION,
+						basisCode: verdict.basisCode,
+						observedAt,
+					});
+				}
+				this.storage.insertUnresolvedEdges(classifiedRows);
+			}
 
 			// 10. Persist function-level measurements
 			if (allMetrics.size > 0) {
@@ -625,7 +729,10 @@ export class RepoIndexer implements IndexerPort {
 		snapshotUid: string,
 	): {
 		resolved: GraphEdge[];
-		unresolvedCount: number;
+		stillUnresolved: Array<{
+			edge: UnresolvedEdge;
+			category: UnresolvedEdgeCategory;
+		}>;
 		unresolvedBreakdown: Partial<Record<UnresolvedEdgeCategory, number>>;
 	} {
 		// Build lookup maps
@@ -668,7 +775,10 @@ export class RepoIndexer implements IndexerPort {
 		}
 
 		const resolved: GraphEdge[] = [];
-		let unresolvedCount = 0;
+		const stillUnresolved: Array<{
+			edge: UnresolvedEdge;
+			category: UnresolvedEdgeCategory;
+		}> = [];
 		const unresolvedBreakdown: Partial<Record<UnresolvedEdgeCategory, number>> = {};
 
 		for (const edge of unresolved) {
@@ -693,15 +803,16 @@ export class RepoIndexer implements IndexerPort {
 					metadataJson: edge.metadataJson,
 				});
 			} else {
-				unresolvedCount++;
-				// Classify the unresolved edge for diagnostics
-				const category = classifyUnresolvedEdge(edge);
+				// Categorize for aggregate diagnostics AND carry the
+				// category forward to the semantic classifier.
+				const category = categorizeUnresolvedEdge(edge);
+				stillUnresolved.push({ edge, category });
 				unresolvedBreakdown[category] =
 					(unresolvedBreakdown[category] ?? 0) + 1;
 			}
 		}
 
-		return { resolved, unresolvedCount, unresolvedBreakdown };
+		return { resolved, stillUnresolved, unresolvedBreakdown };
 	}
 
 	private resolveTarget(
@@ -809,6 +920,44 @@ export class RepoIndexer implements IndexerPort {
 	 * symbol stable_keys. Module and boundary declarations use :MODULE
 	 * keys and are not affected by symbol identity changes.
 	 */
+	/**
+	 * Read snapshot-level classifier signals from the repo root:
+	 *   - tsconfig.json → path alias entries
+	 *   - package.json  → dependency name set
+	 *
+	 * Both reads are best-effort. If either file is absent, unreadable,
+	 * or unparseable, the corresponding signal degrades to an empty
+	 * set. Indexing MUST NOT fail because classifier signals are
+	 * unavailable — classification is additive, not required for
+	 * graph correctness.
+	 */
+	private async buildSnapshotSignals(
+		repoRootPath: string,
+	): Promise<SnapshotSignals> {
+		const empty = emptySnapshotSignals();
+
+		// tsconfig aliases
+		const tsconfigAliases =
+			(await readTsconfigAliases(repoRootPath)) ?? empty.tsconfigAliases;
+
+		// package.json dependencies
+		let packageDependencies: PackageDependencySet = empty.packageDependencies;
+		try {
+			const pkgContent = await readFile(
+				join(repoRootPath, "package.json"),
+				"utf-8",
+			);
+			const deps = extractPackageDependencies(pkgContent);
+			if (deps !== null) {
+				packageDependencies = deps;
+			}
+		} catch {
+			// file missing or unreadable — use empty
+		}
+
+		return { packageDependencies, tsconfigAliases };
+	}
+
 	/**
 	 * Extract domain versions from manifest files (package.json).
 	 * Stores package_name and package_version as measurements.
@@ -1303,13 +1452,20 @@ export function filterByEdgeAffinity(
 }
 
 /**
- * Classify an unresolved edge into a machine-stable diagnostic category.
+ * Categorize an unresolved edge into a machine-stable extraction
+ * failure category (UnresolvedEdgeCategory). This maps the edge to
+ * "what kind of resolution gap is this?" — distinct from SEMANTIC
+ * CLASSIFICATION (classifyUnresolvedEdge in core/classification/).
  *
- * Returns a key from UnresolvedEdgeCategory. Human-readable labels are
- * rendered at display time via humanLabelForCategory(); they are not
- * persisted or emitted as JSON keys.
+ * Both functions operate on UnresolvedEdges but produce orthogonal
+ * axes:
+ *   categorize → UnresolvedEdgeCategory (extraction failure mode)
+ *   classify   → UnresolvedEdgeClassification (semantic meaning)
+ *
+ * Human-readable labels for categories are rendered at display time
+ * via humanLabelForCategory(); they are not persisted as JSON keys.
  */
-function classifyUnresolvedEdge(edge: UnresolvedEdge): UnresolvedEdgeCategory {
+function categorizeUnresolvedEdge(edge: UnresolvedEdge): UnresolvedEdgeCategory {
 	const type = edge.type;
 
 	if (type === EdgeType.IMPORTS) {

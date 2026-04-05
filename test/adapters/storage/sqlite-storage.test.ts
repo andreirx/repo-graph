@@ -2060,7 +2060,7 @@ describe("schema migration from v1 baseline", () => {
 		const migrations = rawDb2
 			.prepare("SELECT version FROM schema_migrations ORDER BY version")
 			.all() as Array<{ version: number }>;
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6]);
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
 
 		rawDb2.close();
 		upgradeProvider.close();

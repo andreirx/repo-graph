@@ -1,3 +1,8 @@
+import type { UnresolvedEdgeCategory } from "../diagnostics/unresolved-edge-categories.js";
+import type {
+	UnresolvedEdgeBasisCode,
+	UnresolvedEdgeClassification,
+} from "../diagnostics/unresolved-edge-classification.js";
 import type {
 	CycleResult,
 	DeadNodeResult,
@@ -16,6 +21,7 @@ import type {
 	SnapshotStatus,
 	TrackedFile,
 } from "../model/index.js";
+import type { UnresolvedEdge } from "./extractor.js";
 
 /**
  * Storage port — the contract any storage backend must fulfill.
@@ -82,6 +88,39 @@ export interface StoragePort {
 
 	/** Remove all nodes and edges for a given file in a given snapshot. */
 	deleteNodesByFile(snapshotUid: string, fileUid: string): void;
+
+	// ── Unresolved Edges ─────────────────────────────────────────────────
+
+	/**
+	 * Persist pre-classified unresolved-edge observations.
+	 *
+	 * Storage does NOT classify. Callers (the indexer) are responsible
+	 * for running the classifier and supplying `category`,
+	 * `classification`, `basisCode`, `classifierVersion`, and
+	 * `observedAt` on every row.
+	 */
+	insertUnresolvedEdges(edges: PersistedUnresolvedEdge[]): void;
+
+	/**
+	 * Query unresolved-edge samples for a snapshot. Joins through
+	 * nodes and files so the result is operationally readable (source
+	 * file path + line included).
+	 *
+	 * Ordering is deterministic: sourceFilePath ASC, lineStart ASC,
+	 * targetKey ASC, edge_uid ASC tiebreak. SQLite's default NULL
+	 * ordering (NULLS FIRST on ASC) applies where columns are nullable.
+	 */
+	queryUnresolvedEdges(
+		input: QueryUnresolvedEdgesInput,
+	): UnresolvedEdgeSampleRow[];
+
+	/**
+	 * Count unresolved edges for a snapshot grouped by either
+	 * classification or category. Returns ordered rows (key ASC).
+	 */
+	countUnresolvedEdges(
+		input: CountUnresolvedEdgesInput,
+	): UnresolvedEdgeCountRow[];
 
 	// ── Declarations ─────────────────────────────────────────────────────
 
@@ -431,4 +470,68 @@ export interface ModuleMetricAggregate {
 	maxCyclomaticComplexity: number;
 	avgNestingDepth: number;
 	maxNestingDepth: number;
+}
+
+// ── Unresolved edge types ────────────────────────────────────────────────
+
+/**
+ * Persisted unresolved-edge row. Extends the extractor's
+ * UnresolvedEdge with the classifier verdict and observation
+ * provenance.
+ *
+ * Clean separation from UnresolvedEdge:
+ *   - UnresolvedEdge       = pre-persistence, pre-classification, emitted by extractor
+ *   - PersistedUnresolvedEdge = post-classification, persisted to unresolved_edges
+ */
+export interface PersistedUnresolvedEdge extends UnresolvedEdge {
+	category: UnresolvedEdgeCategory;
+	classification: UnresolvedEdgeClassification;
+	classifierVersion: number;
+	basisCode: UnresolvedEdgeBasisCode;
+	/** ISO 8601 timestamp stamped by the caller at commit time. */
+	observedAt: string;
+}
+
+export interface QueryUnresolvedEdgesInput {
+	snapshotUid: string;
+	classification?: UnresolvedEdgeClassification;
+	category?: UnresolvedEdgeCategory;
+	basisCode?: UnresolvedEdgeBasisCode;
+	/** Max rows to return. Omit for unbounded. */
+	limit?: number;
+}
+
+export interface CountUnresolvedEdgesInput {
+	snapshotUid: string;
+	groupBy: "classification" | "category";
+}
+
+/**
+ * Count row for unresolved-edge aggregate queries. `key` holds either
+ * a classification or category value depending on the groupBy axis
+ * used at the query site. Rows are ordered by `key` ASC.
+ */
+export interface UnresolvedEdgeCountRow {
+	key: string;
+	count: number;
+}
+
+/**
+ * Reading-shape row for unresolved-edge samples. Richer than
+ * PersistedUnresolvedEdge: exposes source stable_key and source file
+ * path via join, so the result is operationally readable without
+ * further lookups.
+ */
+export interface UnresolvedEdgeSampleRow {
+	edgeUid: string;
+	classification: UnresolvedEdgeClassification;
+	category: UnresolvedEdgeCategory;
+	basisCode: UnresolvedEdgeBasisCode;
+	targetKey: string;
+	sourceNodeUid: string;
+	sourceStableKey: string;
+	/** Repo-relative path of the source file. NULL iff the source node has no file_uid. */
+	sourceFilePath: string | null;
+	lineStart: number | null;
+	colStart: number | null;
 }

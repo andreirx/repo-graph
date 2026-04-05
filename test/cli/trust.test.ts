@@ -80,10 +80,31 @@ describe("trust command — JSON envelope", () => {
 			).toBe(true);
 		}
 
-		// Categories + modules + caveats are arrays
+		// Categories + classifications + modules + caveats are arrays
 		expect(Array.isArray(json.categories)).toBe(true);
+		expect(Array.isArray(json.classifications)).toBe(true);
 		expect(Array.isArray(json.modules)).toBe(true);
 		expect(Array.isArray(json.caveats)).toBe(true);
+	});
+
+	it("emits classification_breakdown rows with machine keys + counts", async () => {
+		const r = await h.run("trust", REPO_NAME, "--json");
+		const json = JSON.parse(r.stdout);
+		// The simple-imports fixture has unresolved edges from this.repo.*
+		// calls, so classifications should be non-empty post-migration-007.
+		if (json.classifications.length > 0) {
+			for (const row of json.classifications) {
+				expect(typeof row.classification).toBe("string");
+				expect(typeof row.count).toBe("number");
+				expect(row.count).toBeGreaterThan(0);
+			}
+			// Sorted by count desc (non-strictly)
+			for (let i = 1; i < json.classifications.length; i++) {
+				expect(json.classifications[i - 1].count).toBeGreaterThanOrEqual(
+					json.classifications[i].count,
+				);
+			}
+		}
 	});
 
 	it("missing_entrypoint_declarations triggers on fixture with no entrypoints", async () => {
@@ -148,5 +169,96 @@ describe("trust command — human output", () => {
 		expect(r.stdout).toContain("Reliability:");
 		expect(r.stdout).toContain("Downgrade triggers:");
 		expect(r.stdout).toContain("Caveats:");
+	});
+});
+
+// ── unresolved-samples subcommand ───────────────────────────────────
+
+describe("trust unresolved-samples — JSON envelope", () => {
+	it("emits samples with the full envelope", async () => {
+		const r = await h.run(
+			"trust",
+			"unresolved-samples",
+			REPO_NAME,
+			"--json",
+			"--limit",
+			"5",
+		);
+		expect(r.exitCode).toBe(0);
+		const json = JSON.parse(r.stdout);
+		expect(json.command).toBe("trust unresolved-samples");
+		expect(json.repo).toBe(REPO_NAME);
+		expect(json.snapshot_uid).toBeDefined();
+		expect(json.filters).toBeDefined();
+		expect(json.filters.limit).toBe(5);
+		expect(typeof json.count).toBe("number");
+		expect(Array.isArray(json.samples)).toBe(true);
+		expect(json.count).toBe(json.samples.length);
+		expect(json.samples.length).toBeLessThanOrEqual(5);
+		// Each sample row must have the shape we committed to
+		for (const s of json.samples) {
+			expect(typeof s.edgeUid).toBe("string");
+			expect(typeof s.classification).toBe("string");
+			expect(typeof s.category).toBe("string");
+			expect(typeof s.basisCode).toBe("string");
+			expect(typeof s.targetKey).toBe("string");
+			expect(typeof s.sourceNodeUid).toBe("string");
+		}
+	});
+
+	it("applies --bucket filter", async () => {
+		const r = await h.run(
+			"trust",
+			"unresolved-samples",
+			REPO_NAME,
+			"--bucket",
+			"internal_candidate",
+			"--json",
+			"--limit",
+			"50",
+		);
+		expect(r.exitCode).toBe(0);
+		const json = JSON.parse(r.stdout);
+		for (const s of json.samples) {
+			expect(s.classification).toBe("internal_candidate");
+		}
+	});
+
+	it("rejects unknown --bucket value with exit 1", async () => {
+		const r = await h.run(
+			"trust",
+			"unresolved-samples",
+			REPO_NAME,
+			"--bucket",
+			"nonsense_bucket",
+			"--json",
+		);
+		expect(r.exitCode).toBe(1);
+		const json = JSON.parse(r.stdout);
+		expect(json.error).toContain("Unknown --bucket");
+	});
+
+	it("rejects unknown --category value with exit 1", async () => {
+		const r = await h.run(
+			"trust",
+			"unresolved-samples",
+			REPO_NAME,
+			"--category",
+			"nonsense_cat",
+			"--json",
+		);
+		expect(r.exitCode).toBe(1);
+	});
+
+	it("rejects invalid --limit value with exit 1", async () => {
+		const r = await h.run(
+			"trust",
+			"unresolved-samples",
+			REPO_NAME,
+			"--limit",
+			"not-a-number",
+			"--json",
+		);
+		expect(r.exitCode).toBe(1);
 	});
 });

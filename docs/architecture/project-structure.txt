@@ -58,11 +58,26 @@ root/
 |   |   |   |-- query-result.ts            Canonical response shape for all queries
 |   |   |
 |   |   |-- ports/                       Interfaces that adapters must implement
-|   |       |-- storage.ts                 StoragePort (CRUD, graph queries, measurements)
-|   |       |-- extractor.ts               ExtractorPort (parse file, return nodes/edges/metrics)
-|   |       |-- indexer.ts                 IndexerPort (orchestrate indexing + refresh)
-|   |       |-- git.ts                     GitPort (commit hash, dirty state, file churn)
-|   |       |-- coverage-importer.ts       CoverageImporterPort (format-agnostic coverage import)
+|   |   |   |-- storage.ts                 StoragePort (CRUD, graph queries, measurements,
+|   |   |   |                              unresolved-edge persistence + samples + counts)
+|   |   |   |-- extractor.ts               ExtractorPort (parse file, return nodes/edges/metrics/
+|   |   |   |                              importBindings side-channel)
+|   |   |   |-- indexer.ts                 IndexerPort (orchestrate indexing + refresh)
+|   |   |   |-- git.ts                     GitPort (commit hash, dirty state, file churn)
+|   |   |   |-- coverage-importer.ts       CoverageImporterPort (format-agnostic coverage import)
+|   |   |
+|   |   |-- classification/              Pure classification logic over unresolved edges
+|   |   |   |-- signals.ts                 DTOs + predicates: TsconfigAliases, PackageDependencySet,
+|   |   |   |                              SnapshotSignals, FileSignals, matchesAnyAlias,
+|   |   |   |                              hasPackageDependency
+|   |   |   |-- unresolved-classifier.ts   classifyUnresolvedEdge: pure rule engine mapping
+|   |   |                                  (edge, category, signals) → (classification, basisCode)
+|   |   |
+|   |   |-- diagnostics/                 Stable vocabularies (machine keys)
+|   |       |-- unresolved-edge-categories.ts  UnresolvedEdgeCategory (extraction failure modes)
+|   |       |-- unresolved-edge-classification.ts  UnresolvedEdgeClassification (semantic
+|   |                                              buckets), UnresolvedEdgeBasisCode (rule
+|   |                                              explanations), CURRENT_CLASSIFIER_VERSION
 |   |
 |   |-- adapters/                        OUTER LAYER — implements core ports
 |   |   |                                Each adapter depends on core/ and on its specific
@@ -80,6 +95,9 @@ root/
 |   |   |           |                          requirement declarations (hard-fail on malformed)
 |   |   |           |-- 005-extraction-diagnostics.ts  snapshots.extraction_diagnostics_json
 |   |   |           |-- 006-annotations.ts  annotations table (provisional author claims)
+|   |   |           |-- 007-unresolved-edges.ts  unresolved_edges table (per-observation
+|   |   |                                        classifier verdicts with category,
+|   |   |                                        classification, basis_code, classifier_version)
 |   |   |
 |   |   |-- extractors/
 |   |   |   |-- typescript/
@@ -91,11 +109,19 @@ root/
 |   |   |   |
 |   |   |   |-- manifest/
 |   |   |       |-- package-json.ts        Extracts name + version from package.json
+|   |                                      (extractPackageManifest for domain versions) AND
+|   |                                      dependency name set (extractPackageDependencies for
+|   |                                      classifier signals). Two functions sharing the file
+|   |                                      but not coupled.
 |   |   |
 |   |   |-- indexer/
 |   |       |-- repo-indexer.ts            Implements IndexerPort. File scanning, extraction
 |   |       |                              orchestration, edge resolution, measurement
-|   |       |                              persistence, manifest version extraction
+|   |       |                              persistence, manifest version extraction.
+|   |       |                              Also: reads snapshot-level classifier signals
+|   |       |                              (tsconfig + package.json), builds per-file
+|   |       |                              FileSignals, classifies still-unresolved edges,
+|   |       |                              persists them via insertUnresolvedEdges.
 |   |
 |   |   |-- git/
 |   |   |   |-- git-adapter.ts             Implements GitPort. Wraps git CLI for commit hash,
@@ -104,6 +130,12 @@ root/
 |   |   |-- importers/
 |   |   |   |-- istanbul-coverage.ts       Istanbul/c8 adapter implementing CoverageImporterPort
 |   |       |-- coverage-registry.ts       Auto-detection registry for coverage formats
+|   |
+|   |   |-- config/
+|   |       |-- tsconfig-reader.ts         Reads repo-root tsconfig.json, returns
+|   |                                      TsconfigAliases (compilerOptions.paths entries).
+|   |                                      Classifier signal source; degrades to empty on
+|   |                                      read/parse failure (indexing is not affected).
 |   |
 |   |   Future adapters (not yet implemented):
 |   |   |-- watcher/                       (v2) File watcher for live refresh
@@ -129,7 +161,12 @@ root/
 |   |   |   |-- trend.ts                   rgr trend (snapshot-to-snapshot deltas)
 |   |   |   |-- gate.ts                    rgr gate (CI gate, 5-state verdicts, modes)
 |   |   |   |-- change.ts                  rgr change impact
-|   |   |   |-- trust.ts                   rgr trust (reliability + downgrade flags)
+|   |   |   |-- trust.ts                   rgr trust group:
+|   |   |   |                              - `trust <repo>` (default subcommand): reliability
+|   |   |   |                                + downgrade flags + category/classification counts
+|   |   |   |                              - `trust unresolved-samples <repo>`: Tier 1b
+|   |   |   |                                per-edge samples with source file + line,
+|   |   |   |                                bucket/category/basis filters (vocabulary-validated)
 |   |   |   |-- docs.ts                    rgr docs (provisional annotations, HINT-only)
 |   |   |
 |   |   |   Future commands (not yet implemented):
@@ -293,8 +330,17 @@ Shipped and stable:
   src/core/impact/           — change-impact service: maps git diff to seed
                                modules, propagates via reverse MODULE IMPORTS,
                                emits trust metadata alongside results
-  src/core/diagnostics/      — machine-stable categories for unresolved edges
-                               (frozen enum, human-label map)
+  src/core/diagnostics/      — machine-stable vocabularies for unresolved edges:
+                               categories (extraction failure modes),
+                               classifications (semantic buckets),
+                               basis codes (classifier rule explanations),
+                               CURRENT_CLASSIFIER_VERSION
+  src/core/classification/   — pure classification logic over unresolved edges:
+                               signal DTOs (SnapshotSignals, FileSignals,
+                               TsconfigAliases, PackageDependencySet),
+                               predicates (matchesAnyAlias, hasPackageDependency),
+                               classifyUnresolvedEdge rule engine
+                               (subtype-aware same-file matching)
   src/core/trust/            — trust reporting: pure rules (detection +
                                reliability formulas), service orchestrator;
                                derived-on-read, NOT persisted
@@ -306,15 +352,33 @@ Shipped and stable:
                                from StoragePort to enforce isolation)
   src/adapters/annotations/  — SqliteAnnotationsStorage + filesystem
                                extractors (package_description, module_readme)
-  src/adapters/storage/      — SQLite with migrations 001-006
+  src/adapters/storage/      — SQLite with migrations 001-007
                                (004: backfill obligation_id on legacy requirements;
                                 005: extraction_diagnostics_json on snapshots;
-                                006: annotations table)
+                                006: annotations table;
+                                007: unresolved_edges table with per-observation
+                                     classifier verdicts: category, classification,
+                                     basis_code, classifier_version, observed_at).
+                               StoragePort extends with insertUnresolvedEdges,
+                               queryUnresolvedEdges, countUnresolvedEdges.
                                SqliteConnectionProvider owns lifecycle;
                                storage adapters share one connection.
   src/adapters/extractors/   — TS extractor with binding model, AST metrics,
-                               manifest extractor (package.json)
-  src/adapters/indexer/      — file scanning, edge resolution, measurement persistence
+                               importBindings side-channel (per-file ImportBinding[]
+                               for every identifier-bearing static import,
+                               including non-relative: classifier signal);
+                               manifest extractor (package.json — both
+                               extractPackageManifest for domain versions and
+                               extractPackageDependencies for classifier signals)
+  src/adapters/config/       — tsconfig-reader: reads compilerOptions.paths for
+                               classifier alias matching; degrades to empty on
+                               any read/parse failure (indexing unaffected)
+  src/adapters/indexer/      — file scanning, edge resolution, measurement
+                               persistence; also: reads snapshot classifier
+                               signals, builds per-file FileSignals during
+                               extraction, classifies still-unresolved edges
+                               after resolution, persists classified
+                               observations via insertUnresolvedEdges
   src/adapters/git/          — commit hash, dirty state, file churn
   src/adapters/importers/    — Istanbul/c8 coverage import
   src/cli/commands/repo.ts   — add, index, status, refresh, list, remove
@@ -333,8 +397,10 @@ Shipped and stable:
                                 docs/architecture/gate-contract.txt)
   src/cli/commands/change.ts  — change-impact: reverse-IMPORTS propagation
                                 from git-diff seeds with trust metadata
-  src/cli/commands/trust.ts   — trust reporting: reliability levels +
-                                downgrade triggers + provenance
+  src/cli/commands/trust.ts   — trust reporting command group: reliability
+                                levels + downgrade triggers + provenance
+                                (default subcommand), plus unresolved-samples
+                                (Tier 1b) with typed filter validation
 
 Not yet implemented (v2+):
   src/adapters/watcher/       — file watcher for live refresh

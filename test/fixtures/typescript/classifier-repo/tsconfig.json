@@ -1,0 +1,9 @@
+{
+	// tsconfig used ONLY for path aliases signal. Not invoked for type-checking.
+	"compilerOptions": {
+		"baseUrl": ".",
+		"paths": {
+			"@/*": ["./src/*"]
+		}
+	}
+}

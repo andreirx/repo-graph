@@ -15,6 +15,7 @@ import type {
 	ExtractedMetrics,
 	ExtractionResult,
 	ExtractorPort,
+	ImportBinding,
 	UnresolvedEdge,
 } from "../../../core/ports/extractor.js";
 
@@ -76,6 +77,7 @@ export class TypeScriptExtractor implements ExtractorPort {
 		const nodes: GraphNode[] = [];
 		const edges: UnresolvedEdge[] = [];
 		const metrics = new Map<string, ExtractedMetrics>();
+		const importBindings: ImportBinding[] = [];
 
 		// Emit the FILE node. This is the source of all IMPORTS edges
 		// and the parent of top-level symbols in this file.
@@ -112,6 +114,7 @@ export class TypeScriptExtractor implements ExtractorPort {
 			edges,
 			exportedNames: new Set<string>(),
 			metrics,
+			importBindings,
 			fileScopeBindings: new Map<string, string>(),
 			classBindings: null,
 			enclosingClassName: null,
@@ -138,7 +141,7 @@ export class TypeScriptExtractor implements ExtractorPort {
 		}
 
 		tree.delete();
-		return { nodes, edges, metrics };
+		return { nodes, edges, metrics, importBindings };
 	}
 
 	// ── Top-level visitor ────────────────────────────────────────────────
@@ -187,8 +190,34 @@ export class TypeScriptExtractor implements ExtractorPort {
 		// Get the import path string value (strip quotes)
 		const rawPath = sourceNode.text.replace(/^['"]|['"]$/g, "");
 
-		// Only track relative imports (project-internal dependencies)
-		if (!rawPath.startsWith(".")) return;
+		const isRelative = rawPath.startsWith(".");
+		const location = locationFromNode(node);
+
+		// Statement-level `import type`. First-slice: detect via leading
+		// tokens. Specifier-level `{ type X }` is not distinguished here.
+		const isTypeOnly = /^import\s+type\s/.test(node.text);
+
+		// Emit ImportBinding records for every identifier-bearing
+		// binding in the import clause. Side-effect imports (no
+		// identifier) are skipped by design.
+		for (const child of node.children) {
+			if (child.type !== "import_clause") continue;
+			for (const localIdentifier of collectLocalIdentifiers(child)) {
+				ctx.importBindings.push({
+					identifier: localIdentifier,
+					specifier: rawPath,
+					isRelative,
+					location,
+					isTypeOnly,
+				});
+			}
+		}
+
+		// Graph edge emission: unchanged from prior behavior.
+		// Only relative imports produce unresolved IMPORTS edges. This
+		// preserves the existing trust posture: non-relative imports
+		// remain side-channel facts only.
+		if (!isRelative) return;
 
 		// Resolve the import to a repo-relative path
 		const resolvedPath = this.resolveImportPath(rawPath, ctx.filePath);
@@ -208,7 +237,7 @@ export class TypeScriptExtractor implements ExtractorPort {
 			type: EdgeType.IMPORTS,
 			resolution: Resolution.STATIC,
 			extractor: EXTRACTOR_NAME,
-			location: locationFromNode(node),
+			location,
 			metadataJson: JSON.stringify({ rawPath, resolvedPath }),
 		});
 	}
@@ -1593,6 +1622,8 @@ interface ExtractionContext {
 	metrics: Map<string, ExtractedMetrics>;
 	/** Collected from `export { x, y }` lists — applied in a second pass. */
 	exportedNames: Set<string>;
+	/** Identifier-bearing import bindings observed in this file. */
+	importBindings: ImportBinding[];
 
 	// ── Receiver type bindings (v1.5) ─────────────────────────────────
 	// These enable the extractor to emit typed target keys for member
@@ -1639,4 +1670,51 @@ function locationFromNode(node: SyntaxNode): SourceLocation {
 		lineEnd: node.endPosition.row + 1,
 		colEnd: node.endPosition.column,
 	};
+}
+
+/**
+ * Walk an `import_clause` AST node and return the local identifiers
+ * each specifier binds.
+ *
+ * Handles:
+ *   - default import:    `import X from "m"`                → ["X"]
+ *   - named imports:     `import { a, b } from "m"`         → ["a", "b"]
+ *   - renamed named:     `import { a as x } from "m"`       → ["x"]
+ *   - namespace import:  `import * as ns from "m"`          → ["ns"]
+ *   - default + named:   `import X, { a } from "m"`         → ["X", "a"]
+ *
+ * Does NOT introduce any binding for side-effect imports
+ * (`import "m"`), which have no import_clause to walk.
+ *
+ * Order of returned identifiers follows their source-text order.
+ */
+function collectLocalIdentifiers(importClause: SyntaxNode): string[] {
+	const identifiers: string[] = [];
+	for (const child of importClause.children) {
+		if (child.type === "identifier") {
+			// Default import binding: `import X from "m"`
+			identifiers.push(child.text);
+		} else if (child.type === "namespace_import") {
+			// `import * as ns from "m"` — the bound identifier is the
+			// single `identifier` child of the namespace_import node.
+			for (const n of child.children) {
+				if (n.type === "identifier") {
+					identifiers.push(n.text);
+					break;
+				}
+			}
+		} else if (child.type === "named_imports") {
+			// `import { a, b as c } from "m"` — iterate import_specifier
+			// children. When `alias` is present the LOCAL binding is the
+			// alias, otherwise it's `name`.
+			for (const spec of child.children) {
+				if (spec.type !== "import_specifier") continue;
+				const alias = spec.childForFieldName("alias");
+				const name = spec.childForFieldName("name");
+				const localName = alias?.text ?? name?.text;
+				if (localName) identifiers.push(localName);
+			}
+		}
+	}
+	return identifiers;
 }

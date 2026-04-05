@@ -89,6 +89,20 @@ export interface TrustCategoryRow {
 	unresolved: number;
 }
 
+/**
+ * Classifier-bucket count row. Parallel to TrustCategoryRow but on
+ * the ORTHOGONAL classification axis (semantic meaning of the gap,
+ * not extraction failure mode).
+ *
+ * See docs/architecture/schema.txt (unresolved_edges table) and
+ * src/core/classification/unresolved-classifier.ts.
+ */
+export interface TrustClassificationRow {
+	/** Machine-stable classification key (e.g. "external_library_candidate"). */
+	classification: string;
+	count: number;
+}
+
 export interface ModuleTrustRow {
 	module_stable_key: string;
 	qualified_name: string;
@@ -125,6 +139,13 @@ export interface TrustReport {
 	diagnostics_version: number | null;
 	summary: TrustSummary;
 	categories: TrustCategoryRow[];
+	/**
+	 * Classifier bucket counts (Tier 1a). Present when the snapshot
+	 * was indexed after migration 007; empty otherwise. The axis is
+	 * orthogonal to `categories`: a single unresolved edge has both
+	 * a category (failure mode) and a classification (semantic meaning).
+	 */
+	classifications: TrustClassificationRow[];
 	modules: ModuleTrustRow[];
 	/** Human-readable caveats summarizing the trust posture. */
 	caveats: string[];

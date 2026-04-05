@@ -29,6 +29,7 @@ import type {
 	ExtractionDiagnostics,
 	ModuleTrustRow,
 	TrustCategoryRow,
+	TrustClassificationRow,
 	TrustReport,
 } from "./types.js";
 
@@ -169,6 +170,26 @@ export function computeTrustReport(
 				.sort((a, b) => b.unresolved - a.unresolved)
 		: [];
 
+	// ── Build classification rows (Tier 1a) ─────────────────────
+	// Reads from the unresolved_edges table (migration 007). For
+	// snapshots indexed before that migration the query returns an
+	// empty array and `classifications` is []. Sorted by count desc
+	// so the dominant bucket leads. Tie-break by key ASC for
+	// determinism.
+	const classificationCounts = storage.countUnresolvedEdges({
+		snapshotUid,
+		groupBy: "classification",
+	});
+	const classifications: TrustClassificationRow[] = classificationCounts
+		.map((row) => ({
+			classification: row.key,
+			count: row.count,
+		}))
+		.sort((a, b) => {
+			if (b.count !== a.count) return b.count - a.count;
+			return a.classification.localeCompare(b.classification);
+		});
+
 	// ── Build module rows ────────────────────────────────────────
 	const modules: ModuleTrustRow[] = moduleStats.map((m) => {
 		const suspicious =
@@ -230,6 +251,7 @@ export function computeTrustReport(
 			},
 		},
 		categories,
+		classifications,
 		modules,
 		caveats,
 		diagnostics_available: diagnosticsAvailable,

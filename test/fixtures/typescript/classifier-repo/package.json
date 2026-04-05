@@ -1,0 +1,11 @@
+{
+	"name": "classifier-fixture",
+	"version": "0.0.1",
+	"description": "Fixture exercising classifier rules end-to-end.",
+	"dependencies": {
+		"lodash": "^4.17.0"
+	},
+	"devDependencies": {
+		"typescript": "^5.0.0"
+	}
+}
