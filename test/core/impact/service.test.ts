@@ -16,6 +16,7 @@ import { unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { SqliteConnectionProvider } from "../../../src/adapters/storage/sqlite/connection-provider.js";
 import { SqliteStorage } from "../../../src/adapters/storage/sqlite/sqlite-storage.js";
 import {
 	computeChangeImpact,
@@ -107,6 +108,7 @@ const REPO_UID = "impact-repo";
 
 describe("computeChangeImpact", () => {
 	let storage: SqliteStorage;
+	let provider: SqliteConnectionProvider;
 	let dbPath: string;
 	let snapshotUid: string;
 
@@ -121,8 +123,9 @@ describe("computeChangeImpact", () => {
 
 	beforeEach(() => {
 		dbPath = join(tmpdir(), `rgr-impact-${randomUUID()}.db`);
-		storage = new SqliteStorage(dbPath);
-		storage.initialize();
+		provider = new SqliteConnectionProvider(dbPath);
+		provider.initialize();
+		storage = new SqliteStorage(provider.getDatabase());
 		storage.addRepo({
 			repoUid: REPO_UID,
 			name: "impact-repo",
@@ -262,7 +265,7 @@ describe("computeChangeImpact", () => {
 	});
 
 	afterEach(() => {
-		storage.close();
+		provider.close();
 		try {
 			unlinkSync(dbPath);
 		} catch {}

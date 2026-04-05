@@ -1,4 +1,5 @@
 {
 	"name": "simple-imports-fixture",
-	"version": "0.0.1"
+	"version": "0.0.1",
+	"description": "Test fixture for rgr extractor and CLI tests."
 }

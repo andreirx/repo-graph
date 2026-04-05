@@ -76,6 +76,10 @@ root/
 |   |   |           |                        declarations, inferences, artifacts, evidence_links)
 |   |   |           |-- 002-provenance-columns.ts  toolchain_json + authored_basis_json
 |   |   |           |-- 003-measurements.ts  measurements table
+|   |   |           |-- 004-obligation-ids.ts  backfill obligation_id on legacy
+|   |   |           |                          requirement declarations (hard-fail on malformed)
+|   |   |           |-- 005-extraction-diagnostics.ts  snapshots.extraction_diagnostics_json
+|   |   |           |-- 006-annotations.ts  annotations table (provisional author claims)
 |   |   |
 |   |   |-- extractors/
 |   |   |   |-- typescript/
@@ -126,6 +130,7 @@ root/
 |   |   |   |-- gate.ts                    rgr gate (CI gate, 5-state verdicts, modes)
 |   |   |   |-- change.ts                  rgr change impact
 |   |   |   |-- trust.ts                   rgr trust (reliability + downgrade flags)
+|   |   |   |-- docs.ts                    rgr docs (provisional annotations, HINT-only)
 |   |   |
 |   |   |   Future commands (not yet implemented):
 |   |   |   |-- flow.ts                    (v2) trace|events|producers|consumers
@@ -293,9 +298,20 @@ Shipped and stable:
   src/core/trust/            — trust reporting: pure rules (detection +
                                reliability formulas), service orchestrator;
                                derived-on-read, NOT persisted
-  src/adapters/storage/      — SQLite with migrations 001-005
+  src/core/annotations/      — provisional annotations: frozen types,
+                               pure attribution rules, collision resolution,
+                               content normalization. Isolated from
+                               computed-truth surfaces (contract §7).
+  src/core/ports/annotations.ts — dedicated AnnotationsPort (separate
+                               from StoragePort to enforce isolation)
+  src/adapters/annotations/  — SqliteAnnotationsStorage + filesystem
+                               extractors (package_description, module_readme)
+  src/adapters/storage/      — SQLite with migrations 001-006
                                (004: backfill obligation_id on legacy requirements;
-                                005: extraction_diagnostics_json on snapshots)
+                                005: extraction_diagnostics_json on snapshots;
+                                006: annotations table)
+                               SqliteConnectionProvider owns lifecycle;
+                               storage adapters share one connection.
   src/adapters/extractors/   — TS extractor with binding model, AST metrics,
                                manifest extractor (package.json)
   src/adapters/indexer/      — file scanning, edge resolution, measurement persistence

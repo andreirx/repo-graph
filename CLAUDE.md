@@ -64,6 +64,7 @@ See `docs/architecture/project-structure.txt` for the folder layout.
 See `docs/architecture/measurement-model.txt` for the four-layer truth model.
 See `docs/architecture/versioning-model.txt` for toolchain provenance.
 See `docs/architecture/gate-contract.txt` for the normative gate/waiver/verdict contract.
+See `docs/architecture/annotations-contract.txt` for the normative provisional-annotations contract.
 See `docs/architecture/v1-validation-report.txt` for extraction capability boundary.
 
 ## Conventions
@@ -107,6 +108,8 @@ rgr change impact repo-graph             # Modules affected by changes (reverse 
 rgr change impact repo-graph --staged    # Diff staged changes instead of working tree vs basis
 rgr change impact repo-graph --since main --max-depth 3
 rgr trust repo-graph                     # Extraction trust report: reliability levels + downgrade flags
+rgr docs repo-graph .                    # Repo-level provisional annotations (README, package description)
+rgr docs repo-graph src/core             # Module-level annotations via path match
 
 # Quality measurements
 rgr graph stats repo-graph               # Module structural metrics (fan-in/out, instability)

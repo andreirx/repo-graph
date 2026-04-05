@@ -3,6 +3,7 @@ import { unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { SqliteConnectionProvider } from "../../../src/adapters/storage/sqlite/connection-provider.js";
 import { SqliteStorage } from "../../../src/adapters/storage/sqlite/sqlite-storage.js";
 import type {
 	Declaration,
@@ -22,6 +23,7 @@ import {
 } from "../../../src/core/model/index.js";
 
 let storage: SqliteStorage;
+let provider: SqliteConnectionProvider;
 let dbPath: string;
 
 const REPO_UID = "test-repo";
@@ -117,13 +119,14 @@ function makeEdge(
 
 beforeEach(() => {
 	dbPath = join(tmpdir(), `rgr-test-${randomUUID()}.db`);
-	storage = new SqliteStorage(dbPath);
-	storage.initialize();
+	provider = new SqliteConnectionProvider(dbPath);
+	provider.initialize();
+	storage = new SqliteStorage(provider.getDatabase());
 	storage.addRepo(REPO);
 });
 
 afterEach(() => {
-	storage.close();
+	provider.close();
 	try {
 		unlinkSync(dbPath);
 	} catch {
@@ -2022,9 +2025,9 @@ describe("schema migration from v1 baseline", () => {
 		`);
 		rawDb.close();
 
-		// Open with SqliteStorage — this should run migrations 002 and 003
-		const upgraded = new SqliteStorage(upgradeDbPath);
-		upgraded.initialize();
+		// Open with the provider — it runs the missing migrations
+		const upgradeProvider = new SqliteConnectionProvider(upgradeDbPath);
+		upgradeProvider.initialize();
 
 		// Verify migration 002: toolchain_json on snapshots
 		const rawDb2 = new Database(upgradeDbPath);
@@ -2057,10 +2060,10 @@ describe("schema migration from v1 baseline", () => {
 		const migrations = rawDb2
 			.prepare("SELECT version FROM schema_migrations ORDER BY version")
 			.all() as Array<{ version: number }>;
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5]);
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6]);
 
 		rawDb2.close();
-		upgraded.close();
+		upgradeProvider.close();
 	});
 
 	/**
@@ -2073,15 +2076,15 @@ describe("schema migration from v1 baseline", () => {
 
 		upgradeDbPath = join(tmpdir(), `rgr-migrate-004-${randomUUID()}.db`);
 
-		// Create a database at migration version 3 (all earlier migrations
-		// already applied) with a requirement declaration that has
-		// obligations lacking obligation_id.
-		const freshStorage = new SqliteStorage(upgradeDbPath);
-		freshStorage.initialize();
-		freshStorage.close();
+		// Create a database at the current migration baseline with a
+		// requirement declaration that has obligations lacking
+		// obligation_id.
+		const freshProvider = new SqliteConnectionProvider(upgradeDbPath);
+		freshProvider.initialize();
+		freshProvider.close();
 
-		// Manually downgrade: remove the v4 marker so migration 004 re-runs,
-		// and inject a legacy declaration row.
+		// Manually downgrade: remove the v4+ markers so migrations 004+
+		// re-run, and inject a legacy declaration row.
 		const rawDb = new Database(upgradeDbPath);
 		rawDb.prepare("DELETE FROM schema_migrations WHERE version >= 4").run();
 
@@ -2130,8 +2133,8 @@ describe("schema migration from v1 baseline", () => {
 			);
 		rawDb.close();
 
-		// Re-open via SqliteStorage: migration 004 should run and backfill
-		const upgraded = new SqliteStorage(upgradeDbPath);
+		// Re-open via the provider: migration 004 should run and backfill
+		const upgraded = new SqliteConnectionProvider(upgradeDbPath);
 		upgraded.initialize();
 		upgraded.close();
 
@@ -2165,10 +2168,10 @@ describe("schema migration from v1 baseline", () => {
 
 		upgradeDbPath = join(tmpdir(), `rgr-migrate-004-bad-${randomUUID()}.db`);
 
-		// Create DB at v4 then downgrade to v3
-		const freshStorage = new SqliteStorage(upgradeDbPath);
-		freshStorage.initialize();
-		freshStorage.close();
+		// Create DB at current baseline then downgrade past v4
+		const freshProvider = new SqliteConnectionProvider(upgradeDbPath);
+		freshProvider.initialize();
+		freshProvider.close();
 
 		const rawDb = new Database(upgradeDbPath);
 		rawDb.prepare("DELETE FROM schema_migrations WHERE version >= 4").run();
@@ -2212,7 +2215,7 @@ describe("schema migration from v1 baseline", () => {
 
 		// Re-open should throw during migration 004
 		expect(() => {
-			const upgraded = new SqliteStorage(upgradeDbPath);
+			const upgraded = new SqliteConnectionProvider(upgradeDbPath);
 			upgraded.initialize();
 			upgraded.close();
 		}).toThrow(/malformed requirement declaration/i);

@@ -486,6 +486,64 @@ tool trust <repo>
   "reverse MODULE IMPORTS only."
 
 
+tool docs <repo> <target>
+
+  Show provisional annotations attached to a target. Annotations
+  are PROVISIONAL author claims extracted from README files and
+  package.json descriptions. They are orientation material only —
+  NEVER treat as verified facts. Normative contract:
+  docs/architecture/annotations-contract.txt.
+
+  Target resolution is deterministic and precedence-ordered:
+    step 0: "." or "" resolves to the repo-level target
+    step 1: exact stable_key match
+    step 2: exact repo-relative path match (FILE or MODULE nodes)
+    step 3: exact module name / qualified_name match
+  Ambiguity at any step returns resolution_error with candidates.
+
+  Annotation kinds surfaced in A1:
+    module_readme        — README.md / README.txt attributed to
+                           repo or owning MODULE
+    package_description  — package.json `description` field attributed
+                           to repo (root) or MODULE (sub-directory)
+
+  A2 (deferred) will add:
+    file_header_comment  — first comment in TS file, attributed to FILE
+    jsdoc_block          — JSDoc on exported declarations, attributed to SYMBOL
+
+  Output is ordered deterministically:
+    1. target_stable_key alphabetical
+    2. annotation_kind fixed order:
+       package_description → module_readme → file_header_comment → jsdoc_block
+    3. source_file alphabetical
+    4. source_line_start ascending
+
+  Flags:
+    --json                  Machine-readable output
+
+  Example:
+    tool docs payments .                    # repo-level annotations
+    tool docs payments src/core             # module-level via path
+    tool docs payments core                 # module-level via short name
+
+  JSON output includes:
+    command, repo, target_query, resolved_target,
+    annotations[] (full Annotation records including content_hash +
+                   source_file + source_line_start/end + provisional flag),
+    count, [resolution_error + candidates when ambiguous or not found]
+
+  Agent consumption contract: contract_class is HINT (orientation
+  material). Use for:
+    - recovering module/repo intent quickly
+    - dead-code triage context (is this module documented as live?)
+    - declaration suggestion candidates
+  Do NOT use for:
+    - computed-truth decisions
+    - gate verdicts
+    - automatic dead-code suppression
+  See annotations-contract.txt §7 for the full isolation invariant.
+
+
 tool change impact <repo> [--against-snapshot | --staged | --since <ref>] [--max-depth <n>]
 
   Compute the set of modules affected by a file-change set, propagating

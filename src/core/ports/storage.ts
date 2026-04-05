@@ -28,13 +28,10 @@ import type {
  * Input objects prevent method explosion as filters evolve.
  */
 export interface StoragePort {
-	// ── Lifecycle ────────────────────────────────────────────────────────
-
-	/** Initialize the storage backend (create tables, run migrations). */
-	initialize(): void;
-
-	/** Close the storage backend and release resources. */
-	close(): void;
+	// Lifecycle (initialize/close) is NOT part of this port.
+	// Those are infrastructure concerns owned by the composition root
+	// and the backend-specific provider (e.g. SqliteConnectionProvider).
+	// Core code depends only on query/command methods below.
 
 	// ── Repos ────────────────────────────────────────────────────────────
 

@@ -44,56 +44,17 @@ import type {
 	StoragePort,
 	UpdateSnapshotStatusInput,
 } from "../../../core/ports/storage.js";
-import { INITIAL_MIGRATION } from "./migrations/001-initial.js";
-import { runMigration002 } from "./migrations/002-provenance-columns.js";
-import { runMigration003 } from "./migrations/003-measurements.js";
-import { runMigration004 } from "./migrations/004-obligation-ids.js";
-import { runMigration005 } from "./migrations/005-extraction-diagnostics.js";
-
 export class SqliteStorage implements StoragePort {
-	private db: Database.Database;
-
-	constructor(dbPath: string) {
-		this.db = new Database(dbPath);
-	}
-
-	// ── Lifecycle ──────────────────────────────────────────────────────
-
-	initialize(): void {
-		this.db.pragma("journal_mode = WAL");
-		this.db.pragma("foreign_keys = ON");
-
-		// Migration 001: initial schema (CREATE TABLE IF NOT EXISTS — safe to replay)
-		const statements = INITIAL_MIGRATION.split(";")
-			.map((s) => s.trim())
-			.filter((s) => s.length > 0 && !s.startsWith("PRAGMA"));
-
-		const runInitial = this.db.transaction(() => {
-			for (const stmt of statements) {
-				this.db.exec(`${stmt};`);
-			}
-		});
-		runInitial();
-
-		// Migration 002+: incremental migrations.
-		// Each checks schema_migrations before acting.
-		const runIncremental = this.db.transaction(() => {
-			const maxVersion = (
-				this.db
-					.prepare("SELECT MAX(version) as v FROM schema_migrations")
-					.get() as { v: number }
-			).v;
-			if (maxVersion < 2) runMigration002(this.db);
-			if (maxVersion < 3) runMigration003(this.db);
-			if (maxVersion < 4) runMigration004(this.db);
-			if (maxVersion < 5) runMigration005(this.db);
-		});
-		runIncremental();
-	}
-
-	close(): void {
-		this.db.close();
-	}
+	/**
+	 * Constructor accepts a Database handle owned by the caller
+	 * (typically SqliteConnectionProvider). This adapter does NOT
+	 * own the connection lifecycle — it does not open, close, or
+	 * migrate the database.
+	 *
+	 * See src/adapters/storage/sqlite/connection-provider.ts for
+	 * the infrastructure lifecycle contract.
+	 */
+	constructor(private db: Database.Database) {}
 
 	// ── Repos ──────────────────────────────────────────────────────────
 

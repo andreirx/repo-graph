@@ -18,6 +18,7 @@ import { unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { SqliteConnectionProvider } from "../../../src/adapters/storage/sqlite/connection-provider.js";
 import { SqliteStorage } from "../../../src/adapters/storage/sqlite/sqlite-storage.js";
 import { resolveEffectiveVerdict } from "../../../src/core/evaluator/effective-verdict.js";
 import type { VerificationObligation } from "../../../src/core/model/declaration.js";
@@ -32,6 +33,7 @@ const OBL_ID = "obl-eff-id";
 const SNAPSHOT_UID_PLACEHOLDER = "placeholder-snap";
 
 let storage: SqliteStorage;
+let provider: SqliteConnectionProvider;
 let dbPath: string;
 let snapshotUid: string;
 
@@ -88,8 +90,9 @@ const unsupportedObligation: VerificationObligation = {
 
 beforeEach(() => {
 	dbPath = join(tmpdir(), `rgr-effective-${randomUUID()}.db`);
-	storage = new SqliteStorage(dbPath);
-	storage.initialize();
+	provider = new SqliteConnectionProvider(dbPath);
+	provider.initialize();
+	storage = new SqliteStorage(provider.getDatabase());
 
 	storage.addRepo({
 		repoUid: REPO_UID,
@@ -111,7 +114,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	storage.close();
+	provider.close();
 	try {
 		unlinkSync(dbPath);
 	} catch {

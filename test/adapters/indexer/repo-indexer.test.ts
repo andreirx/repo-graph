@@ -8,6 +8,7 @@ import {
 	filterByEdgeAffinity,
 	RepoIndexer,
 } from "../../../src/adapters/indexer/repo-indexer.js";
+import { SqliteConnectionProvider } from "../../../src/adapters/storage/sqlite/connection-provider.js";
 import { SqliteStorage } from "../../../src/adapters/storage/sqlite/sqlite-storage.js";
 import type { GraphNode } from "../../../src/core/model/index.js";
 import {
@@ -23,6 +24,7 @@ const FIXTURES_ROOT = join(
 );
 
 let storage: SqliteStorage;
+let provider: SqliteConnectionProvider;
 let extractor: TypeScriptExtractor;
 let indexer: RepoIndexer;
 let dbPath: string;
@@ -36,8 +38,9 @@ beforeAll(async () => {
 
 beforeEach(() => {
 	dbPath = join(tmpdir(), `rgr-indexer-test-${randomUUID()}.db`);
-	storage = new SqliteStorage(dbPath);
-	storage.initialize();
+	provider = new SqliteConnectionProvider(dbPath);
+	provider.initialize();
+	storage = new SqliteStorage(provider.getDatabase());
 	indexer = new RepoIndexer(storage, extractor);
 
 	// Register the fixture repo
@@ -52,7 +55,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	storage.close();
+	provider.close();
 	try {
 		unlinkSync(dbPath);
 	} catch {

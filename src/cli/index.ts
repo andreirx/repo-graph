@@ -13,6 +13,7 @@ import { CLI_VERSION } from "../version.js";
 import { registerArchCommands } from "./commands/arch.js";
 import { registerChangeCommands } from "./commands/change.js";
 import { registerDeclareCommands } from "./commands/declare.js";
+import { registerDocsCommand } from "./commands/docs.js";
 import { registerEvidenceCommand } from "./commands/evidence.js";
 import { registerGateCommand } from "./commands/gate.js";
 import { registerGraphCommands } from "./commands/graph.js";
@@ -48,6 +49,7 @@ registerTrendCommand(program, getCtx);
 registerGateCommand(program, getCtx);
 registerChangeCommands(program, getCtx);
 registerTrustCommand(program, getCtx);
+registerDocsCommand(program, getCtx);
 
 // Main execution
 async function main(): Promise<void> {

@@ -32,6 +32,22 @@ import type {
 	IndexResult,
 } from "../../core/ports/indexer.js";
 import type { Measurement, StoragePort } from "../../core/ports/storage.js";
+import type { AnnotationsPort } from "../../core/ports/annotations.js";
+import {
+	applyContentTruncation,
+	attributePackageDescription,
+	attributeReadme,
+	isEmptyContent,
+	preferReadmeFile,
+	resolveCollisions,
+} from "../../core/annotations/attribution.js";
+import {
+	AnnotationContractClass,
+	AnnotationKind,
+	type Annotation,
+} from "../../core/annotations/types.js";
+import { extractPackageDescription } from "../annotations/extractors/package-description-extractor.js";
+import { extractReadme } from "../annotations/extractors/readme-extractor.js";
 import {
 	buildToolchainJson,
 	INDEXER_VERSION,
@@ -63,9 +79,20 @@ const ALWAYS_EXCLUDED = new Set([
 ]);
 
 export class RepoIndexer implements IndexerPort {
+	/**
+	 * Optional AnnotationsPort. When present, the indexer extracts
+	 * README + package.json-description annotations during the
+	 * indexing pass and persists them via the port.
+	 *
+	 * When absent (e.g. in tests that don't exercise annotations),
+	 * annotation extraction is silently skipped. The hard-rule
+	 * isolation invariant (annotations-contract.txt §7) holds
+	 * either way: the indexer WRITES annotations but NEVER reads them.
+	 */
 	constructor(
 		private storage: StoragePort,
 		private extractor: ExtractorPort,
+		private annotations?: AnnotationsPort,
 	) {}
 
 	async indexRepo(
@@ -310,6 +337,19 @@ export class RepoIndexer implements IndexerPort {
 				snapshot.snapshotUid,
 			);
 
+			// 11a. Extract provisional annotations (README + package.json
+			// description) and persist via AnnotationsPort. Writes-only;
+			// indexer never reads annotations back. Skipped silently when
+			// no port is injected (annotations-contract.txt §7).
+			const annotationCollisionsDropped = this.annotations
+				? await this.extractAndPersistAnnotations(
+						repo.rootPath,
+						repoUid,
+						snapshot.snapshotUid,
+						allNodes,
+					)
+				: 0;
+
 			// 12. Finalize snapshot
 			this.storage.updateSnapshotCounts(snapshot.snapshotUid);
 			this.storage.updateSnapshotStatus({
@@ -333,6 +373,7 @@ export class RepoIndexer implements IndexerPort {
 				edges_total: allEdges.length,
 				unresolved_total: unresolvedCount,
 				unresolved_breakdown: unresolvedBreakdown,
+				annotation_collisions_dropped: annotationCollisionsDropped,
 			};
 			this.storage.updateSnapshotExtractionDiagnostics(
 				snapshot.snapshotUid,
@@ -825,6 +866,204 @@ export class RepoIndexer implements IndexerPort {
 		}
 	}
 
+	/**
+	 * Extract provisional annotations (README + package.json
+	 * description) and persist them via AnnotationsPort. Returns
+	 * the count of annotations dropped due to same-kind same-target
+	 * collisions.
+	 *
+	 * Walks the repository filesystem (gitignore-respecting) looking
+	 * for package.json files and README.md / README.txt files. Uses
+	 * the attribution helpers from core/annotations/ to map each
+	 * candidate to a target stable_key (repo or MODULE). Drops
+	 * candidates that cannot be attributed. Applies deterministic
+	 * collision resolution before inserting.
+	 *
+	 * Isolation: writes only. Never reads annotations back. The
+	 * AnnotationsPort is injected and the indexer has no read
+	 * method exposed on it.
+	 */
+	private async extractAndPersistAnnotations(
+		rootPath: string,
+		repoUid: string,
+		snapshotUid: string,
+		allNodes: GraphNode[],
+	): Promise<number> {
+		if (!this.annotations) return 0;
+
+		// Build a lookup: directory path → MODULE stable_key
+		const moduleByPath = new Map<string, string>();
+		for (const n of allNodes) {
+			if (n.kind === NodeKind.MODULE && n.qualifiedName) {
+				moduleByPath.set(n.qualifiedName, n.stableKey);
+			}
+		}
+		// Repo-level target: distinct from any MODULE. No graph node is
+		// created for it; the stable_key is synthetic. Resolver handles
+		// the "." alias that maps queries to this target.
+		const repoStableKey = `${repoUid}:REPO`;
+
+		// Scan the filesystem for annotation source files
+		const { readmePaths, packageJsonPaths } =
+			await this.scanAnnotationSources(rootPath);
+
+		const candidates: Array<Omit<Annotation, "annotation_uid">> = [];
+		const now = new Date().toISOString();
+
+		// README extraction
+		// Group by directory to apply README preference (.md over .txt)
+		const readmesByDir = new Map<string, string[]>();
+		for (const rel of readmePaths) {
+			const lastSlash = rel.lastIndexOf("/");
+			const dir = lastSlash >= 0 ? rel.slice(0, lastSlash) : "";
+			const arr = readmesByDir.get(dir) ?? [];
+			arr.push(rel);
+			readmesByDir.set(dir, arr);
+		}
+		for (const [dir, paths] of readmesByDir) {
+			const filenames = paths.map((p) => p.split("/").pop() ?? p);
+			const preferred = preferReadmeFile(filenames);
+			if (!preferred) continue;
+			const preferredPath = paths.find((p) => p.endsWith(preferred));
+			if (!preferredPath) continue;
+
+			let raw: string;
+			try {
+				raw = await readFile(join(rootPath, preferredPath), "utf-8");
+			} catch {
+				continue;
+			}
+			const cand = extractReadme(preferredPath, raw);
+			if (!cand) continue;
+
+			// Attribute: repo root or owning module
+			const isRepoRoot = dir === "" || dir === ".";
+			const owningModuleKey = moduleByPath.get(dir) ?? null;
+			const attribution = attributeReadme({
+				isRepoRoot,
+				repoStableKey,
+				owningModuleStableKey: owningModuleKey,
+			});
+			if (!attribution) continue;
+
+			const normalized = applyContentTruncation(cand.content);
+			if (isEmptyContent(normalized)) continue;
+
+			candidates.push({
+				snapshot_uid: snapshotUid,
+				target_kind: attribution.target_kind,
+				target_stable_key: attribution.target_stable_key,
+				annotation_kind: AnnotationKind.MODULE_README,
+				contract_class: AnnotationContractClass.HINT,
+				content: normalized,
+				content_hash: sha256Hex(normalized),
+				source_file: cand.sourceFile,
+				source_line_start: cand.sourceLineStart,
+				source_line_end: cand.sourceLineEnd,
+				language: cand.language,
+				provisional: true,
+				extracted_at: now,
+			});
+		}
+
+		// package.json description extraction
+		for (const rel of packageJsonPaths) {
+			let raw: string;
+			try {
+				raw = await readFile(join(rootPath, rel), "utf-8");
+			} catch {
+				continue;
+			}
+			const cand = extractPackageDescription(rel, raw);
+			if (!cand) continue;
+
+			const lastSlash = rel.lastIndexOf("/");
+			const dir = lastSlash >= 0 ? rel.slice(0, lastSlash) : "";
+			const isRepoRoot = dir === "" || dir === ".";
+			const owningModuleKey = moduleByPath.get(dir) ?? null;
+			const attribution = attributePackageDescription({
+				isRepoRoot,
+				repoStableKey,
+				owningModuleStableKey: owningModuleKey,
+			});
+			if (!attribution) continue;
+
+			const normalized = applyContentTruncation(cand.content);
+			if (isEmptyContent(normalized)) continue;
+
+			candidates.push({
+				snapshot_uid: snapshotUid,
+				target_kind: attribution.target_kind,
+				target_stable_key: attribution.target_stable_key,
+				annotation_kind: AnnotationKind.PACKAGE_DESCRIPTION,
+				contract_class: AnnotationContractClass.HINT,
+				content: normalized,
+				content_hash: sha256Hex(normalized),
+				source_file: cand.sourceFile,
+				source_line_start: cand.sourceLineStart,
+				source_line_end: cand.sourceLineEnd,
+				language: "json",
+				provisional: true,
+				extracted_at: now,
+			});
+		}
+
+		// Apply collision resolution
+		const { keptIndices, droppedCount } = resolveCollisions(candidates);
+
+		// Assign UUIDs and insert
+		const toInsert: Annotation[] = keptIndices.map((i) => ({
+			annotation_uid: uuidv4(),
+			...candidates[i],
+		}));
+		if (toInsert.length > 0) {
+			this.annotations.insertAnnotations(toInsert);
+		}
+
+		return droppedCount;
+	}
+
+	/**
+	 * Scan the filesystem for annotation source files: README.md,
+	 * README.txt, and package.json files. Respects .gitignore and
+	 * ALWAYS_EXCLUDED directories.
+	 */
+	private async scanAnnotationSources(
+		rootPath: string,
+	): Promise<{
+		readmePaths: string[];
+		packageJsonPaths: string[];
+	}> {
+		const readmePaths: string[] = [];
+		const packageJsonPaths: string[] = [];
+		const ig = await loadGitignore(rootPath);
+
+		const walk = async (currentPath: string): Promise<void> => {
+			const entries = await readdir(currentPath, { withFileTypes: true });
+			for (const entry of entries) {
+				const fullPath = join(currentPath, entry.name);
+				const relPath = toPosixPath(relative(rootPath, fullPath));
+				if (entry.isDirectory()) {
+					if (ALWAYS_EXCLUDED.has(entry.name)) continue;
+					if (ig.ignores(`${relPath}/`)) continue;
+					if (existsSync(join(fullPath, "pyvenv.cfg"))) continue;
+					await walk(fullPath);
+				} else if (entry.isFile()) {
+					if (ig.ignores(relPath)) continue;
+					const lower = entry.name.toLowerCase();
+					if (lower === "readme.md" || lower === "readme.txt") {
+						readmePaths.push(relPath);
+					} else if (lower === "package.json") {
+						packageJsonPaths.push(relPath);
+					}
+				}
+			}
+		};
+
+		await walk(rootPath);
+		return { readmePaths, packageJsonPaths };
+	}
+
 	private countOrphanedDeclarations(
 		repoUid: string,
 		snapshotUid: string,
@@ -891,6 +1130,14 @@ export class RepoIndexer implements IndexerPort {
 
 function hashContent(content: string): string {
 	return createHash("sha256").update(content).digest("hex").slice(0, 16);
+}
+
+/**
+ * Full-length sha256 hex digest. Used for annotation content_hash
+ * per annotations-contract.txt §4 (no truncation).
+ */
+function sha256Hex(content: string): string {
+	return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
 
 function detectLanguage(filePath: string): string | null {

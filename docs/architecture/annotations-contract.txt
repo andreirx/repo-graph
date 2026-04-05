@@ -1,0 +1,372 @@
+Annotations Contract — Provisional Author Claims
+==================================================
+
+Status: NORMATIVE
+Date:   2026-04-05
+
+This document is the authoritative specification for the provisional
+annotations extraction layer of repo-graph. All extractors, storage
+contracts, CLI surfaces, and isolation rules related to annotations
+MUST conform to what this document describes.
+
+Consumers (CI pipelines, agents, human readers) should treat this
+document as the stable contract. Other architecture docs reference
+this document; they do not restate its contents.
+
+
+================================================================================
+1. PURPOSE AND SCOPE
+================================================================================
+
+Annotations are PROVISIONAL author claims extracted from source
+artifacts. They serve four roles:
+
+  1. Intent bootstrap — recover module/symbol intent cheaply
+  2. Declaration suggestion — surface candidates for governance
+  3. Human-question generation — tell the tool operator what to ask
+  4. Dead-code triage hints — signal likely runtime-registered targets
+
+Annotations are NOT structural truth. They NEVER participate in
+computed verdicts, gate outcomes, dead-code classification, change-
+impact propagation, or obligation evaluation. This is enforced
+architecturally (section 7).
+
+What annotations extract:
+  - JSDoc/TSDoc on exported declarations       [A2 — deferred]
+  - package.json `description` field            [A1 — shipped]
+  - File-header comments                        [A2 — deferred]
+    (first comment in a file, before any code)
+  - Directory/module README files               [A1 — shipped]
+    (README.md preferred over .txt)
+
+Slice status:
+  A1 (shipped): package_description + module_readme.
+    Storage, port, command, isolation invariant, and contract all
+    final. Attribution and collision rules apply to all four kinds.
+  A2 (deferred): file_header_comment + jsdoc_block.
+    AST-based extractors requiring tree-sitter walks. The
+    AnnotationKind enum already defines FILE_HEADER_COMMENT and
+    JSDOC_BLOCK; storage accepts them when written by future
+    extractors. Contract sections 2-7 below cover all four kinds;
+    only the EXTRACTORS are deferred.
+
+What annotations do NOT extract in v1:
+  - Inline comments
+  - TODO/FIXME/HACK markers (separate axis)
+  - JSDoc on non-exported declarations
+  - Re-exported symbols' JSDoc (deferred; documented as incompleteness)
+  - ADR documents, design notes, or external documentation
+
+
+================================================================================
+2. TARGET ATTRIBUTION CONTRACT
+================================================================================
+
+Every annotation attaches to EXACTLY ONE target. If attribution is
+ambiguous, the annotation is DROPPED — never approximated.
+
+| Source                                | Target                      |
+|---------------------------------------|-----------------------------|
+| JSDoc above exported declaration      | that SYMBOL                 |
+| JSDoc above non-exported declaration  | DROPPED                     |
+| package.json description at repo root | REPO                        |
+| package.json description in sub-dir   | MODULE for that dir         |
+| package.json description, no MODULE   | DROPPED                     |
+| File header comment                   | that FILE                   |
+| README.md at repo root                | REPO                        |
+| README.md at dir WITH a MODULE node   | that MODULE                 |
+| README.md at dir WITHOUT MODULE node  | DROPPED                     |
+
+Tiebreaker: if both README.md and README.txt exist in the same
+directory, prefer .md. The .txt is dropped silently.
+
+"Exported" definition in v1 (documented incompleteness):
+  A declaration is "exported" iff it has a literal `export` keyword
+  as a modifier. Re-exports via `export { X } from '...'` do NOT
+  carry their JSDoc to the re-exporting module in v1.
+
+Attribution is deterministic. Two runs at the same basis_commit
+with the same toolchain MUST produce identical target_stable_key
+assignments.
+
+
+================================================================================
+3. COLLISION POLICY
+================================================================================
+
+Multiple annotations across DIFFERENT kinds attaching to the same
+target: KEEP ALL. Different kinds legitimately coexist.
+
+Multiple annotations of the SAME kind attaching to the same target:
+Deterministic winner = lowest `source_line_start`. Other collisions
+are DROPPED silently.
+
+Dropped-collision counts are accumulated during indexing and
+recorded in the snapshot's extraction_diagnostics_json payload as
+`annotation_collisions_dropped` (a single integer for the snapshot).
+
+
+================================================================================
+4. CONTENT NORMALIZATION
+================================================================================
+
+Before storage:
+
+  1. Strip JSDoc decorations: remove leading `/**`, leading ` * `
+     per line, trailing ` */`. Preserve interior line breaks and
+     markdown formatting.
+  2. Trim leading/trailing whitespace.
+  3. If content is empty or whitespace-only after trim → DROP.
+  4. Preserve markdown formatting (do not strip `#`, `*`, `_`, etc.).
+  5. Truncate at 8 KB. If truncated, append literal suffix
+     `"\n...[TRUNCATED]"` to the stored content.
+  6. Compute sha256 of the final stored content, hex-encoded, store
+     as `content_hash`.
+
+NO length-based triviality filter is applied to ANY kind. Short
+content is legitimate (package descriptions, concise module headers).
+
+Boilerplate filter (applies to `file_header_comment` ONLY):
+  Drop the annotation if the first 500 characters of the stripped
+  content match the regex `/copyright/i`, `/license/i`, or `/spdx/i`.
+  This removes license-header noise at extraction time.
+
+  Rationale: file headers that are purely legal boilerplate add
+  noise without carrying intent. The regex is intentionally simple;
+  more nuanced license classification can be added later as a
+  non-breaking change.
+
+
+================================================================================
+5. STORAGE MODEL
+================================================================================
+
+Storage table: `annotations` (separate from declarations, measurements,
+inferences, and nodes/edges).
+
+Required fields:
+  annotation_uid        TEXT PRIMARY KEY
+  snapshot_uid          TEXT NOT NULL
+  target_kind           TEXT NOT NULL  (symbol | file | module | repo)
+  target_stable_key     TEXT NOT NULL
+  annotation_kind       TEXT NOT NULL  (jsdoc_block | file_header_comment |
+                                        module_readme | package_description)
+  contract_class        TEXT NOT NULL  (HINT | CITATION)
+  content               TEXT NOT NULL
+  content_hash          TEXT NOT NULL
+  source_file           TEXT NOT NULL
+  source_line_start     INTEGER NOT NULL
+  source_line_end       INTEGER NOT NULL
+  language              TEXT NOT NULL  (source artifact language)
+  provisional           INTEGER NOT NULL DEFAULT 1
+  extracted_at          TEXT NOT NULL
+
+`provisional` is always 1 in v1; field reserved for future
+annotation classes that may be promoted from provisional to
+verified-by-human-declaration.
+
+`language` describes the SOURCE ARTIFACT (e.g. `typescript` for
+JSDoc in .ts, `markdown` for README.md, `json` for package.json).
+It is NOT the natural language of the prose content.
+
+
+================================================================================
+6. OUTPUT CONTRACT (`rgr docs <target>`)
+================================================================================
+
+Default scope: EXACT target only. The command returns annotations
+attached to precisely the resolved target, NOT descendants.
+
+A `--recursive` flag is DEFERRED. First-slice users who want
+descendant annotations issue one command per target.
+
+Target resolution rules:
+
+Resolution is deterministic and precedence-ordered. No fuzzy or
+prefix matching is permitted. Each step tries EXACT match only.
+
+Repo-level target stable_key format:
+  `<repo_uid>:REPO` (synthetic — no corresponding graph node)
+
+Repo-level targets cannot be reached via path match or module-name
+match because no graph node corresponds to them. A dedicated alias
+handles this.
+
+  Step 0 (alias): repo-level "." alias
+    - Query strings "." or "" resolve to the single repo-level
+      annotation target (target_kind='repo') in the snapshot.
+    - If no repo-level annotations exist: return not_found.
+    - If multiple repo-level stable_keys exist (anomaly): return
+      ambiguous at step "path".
+    - This alias is the stable surface for agents to request
+      repo-level annotations without knowing the repo_uid.
+
+  Step 1: exact `stable_key` match
+    - Look up the query string as a stable_key in the annotations
+      table's `target_stable_key` column.
+    - If exactly one match: that is the resolved target. STOP.
+    - If no match: proceed to Step 2.
+    - (Duplicates at the stable_key level cannot occur by design —
+      stable_keys are unique identities.)
+
+  Step 2: exact repo-relative path match
+    - Look up the query string as a path against FILE nodes
+      (target_kind=file) and MODULE nodes (target_kind=module).
+    - If exactly one match: that is the resolved target. STOP.
+    - If no match: proceed to Step 3.
+    - If ambiguous (multiple matches across file/module): ERROR,
+      resolved_target=null, no fallback to later steps.
+
+  Step 3: exact module name / qualified name match
+    - Look up the query string as a short module name or fully
+      qualified module name.
+    - If exactly one match: that is the resolved target. STOP.
+    - If no match: resolved_target=null (no annotations returned).
+    - If ambiguous: ERROR, resolved_target=null, no fallback.
+
+Rationale:
+  Attribution and query resolution are the two places this feature
+  can become dishonest. Exact-target default is only clean if
+  target resolution itself is deterministic. Fuzzy fallback
+  (substring match, approximate name resolution) would silently
+  return annotations for a target the user did not name. Errors
+  on ambiguity are the correct behavior; the user must name the
+  target precisely (typically via stable_key for disambiguation).
+
+Error envelope on ambiguity:
+  {
+    "command": "docs",
+    "repo": "...",
+    "target_query": "...",
+    "resolved_target": null,
+    "resolution_error": "ambiguous_at_step_2" | "ambiguous_at_step_3",
+    "candidates": [...],
+    "annotations": [],
+    "count": 0
+  }
+
+JSON envelope:
+
+  {
+    "command": "docs",
+    "repo": "...",
+    "target_query": "src/core",
+    "resolved_target": "<repo_uid>:src/core:MODULE" | null,
+    "annotations": [ ... ],
+    "count": N
+  }
+
+Per-annotation shape:
+
+  {
+    "annotation_uid": "...",
+    "target_kind": "module",
+    "target_stable_key": "<repo_uid>:src/core:MODULE",
+    "annotation_kind": "module_readme",
+    "contract_class": "HINT",
+    "content": "...",
+    "content_hash": "sha256:...",
+    "source_file": "src/core/README.md",
+    "source_line_start": 1,
+    "source_line_end": 24,
+    "language": "markdown",
+    "provisional": true,
+    "extracted_at": "..."
+  }
+
+Deterministic ordering (REQUIRED):
+  1. target_stable_key alphabetical
+  2. annotation_kind in fixed order:
+     package_description → module_readme → file_header_comment → jsdoc_block
+  3. source_file alphabetical
+  4. source_line_start ascending
+
+Consumers that mechanically diff annotations output MUST rely on
+this ordering.
+
+Contract class semantics in output:
+  `HINT`    — orientation material. Use to search, triage, or
+              understand intent. Do not treat as verified.
+  `CITATION`— exact author claim with source location. Use when
+              reasoning and presenting why the tool believes a
+              target has stated intent.
+
+In v1 the stored `contract_class` is always `HINT`. `CITATION` is
+reserved for future richer rendering modes.
+
+
+================================================================================
+7. ISOLATION INVARIANT (HARD RULE)
+================================================================================
+
+Annotations MUST NOT be read by any module that computes derived
+truth. This is enforced by:
+
+  (a) a dedicated AnnotationsPort (not merged into StoragePort)
+  (b) no imports from src/core/annotations/ in the listed paths
+  (c) a grep-based architecture test that fails the build on
+      violations
+
+Prohibited reader paths (computed-truth surfaces):
+  src/core/evaluator/*           (obligation-evaluator, effective-verdict)
+  src/core/gate/*                (reducer)
+  src/core/impact/*              (change-impact service)
+  src/core/trust/*               (trust reporting)
+  src/cli/commands/gate.ts
+  src/cli/commands/evidence.ts
+  src/cli/commands/graph/obligations.ts
+  src/cli/commands/graph/queries.ts (dead, callers, callees, path)
+  src/cli/commands/change.ts
+
+Indexer rule:
+  src/adapters/indexer/* MAY WRITE annotations (via AnnotationsPort
+  during extraction). It MUST NOT READ annotations back. This is
+  also enforced by the architecture test.
+
+Rationale:
+  Annotations are provisional author claims. They are stale-prone,
+  aspirational, and unverified. Computed-truth surfaces (policy,
+  gate, dead-code, trust, change-impact) derive their output from
+  structural facts. Allowing annotations to flow into those surfaces
+  would silently promote unverified text into decision paths, which
+  violates the waiver/annotation suppresses-but-does-not-erase
+  principle of the broader architecture.
+
+Consumers that legitimately need both structural facts and
+annotation hints (evidence rendering, rgr docs, agent orientation)
+MUST read them side-by-side in their OWN composition layer. They
+may never intermix the two streams inside a single fact.
+
+
+================================================================================
+8. DIAGNOSTICS PAYLOAD EXTENSION
+================================================================================
+
+The snapshot extraction_diagnostics_json payload gains one field:
+
+  annotation_collisions_dropped: integer
+    Count of annotations dropped due to same-kind + same-target
+    collisions during extraction.
+
+This extension is additive and non-breaking; diagnostics_version
+remains 1. Consumers that do not know about this field safely
+ignore it.
+
+
+================================================================================
+9. STABILITY AND CHANGE POLICY
+================================================================================
+
+Breaking changes to this contract (new annotation_kind values that
+existing consumers cannot ignore, changed attribution rules that
+remap historical annotations, removal of target_kind categories)
+require a migration and announced version bump.
+
+Non-breaking additions (new optional fields, new annotation_kind
+values treated as opaque by existing consumers, new CLI flags)
+do not require version bumps.
+
+If the attribution rule set changes, a migration MUST re-extract
+annotations from source. Stored annotations are snapshot-scoped
+and do not survive re-indexing; a fresh extraction pass will
+apply the new rules cleanly.
