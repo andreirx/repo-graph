@@ -25,15 +25,11 @@ import type { ImportBinding, UnresolvedEdge } from "../../../src/core/ports/extr
 // ── Test harness ────────────────────────────────────────────────────
 
 function snapshot(
-	packageNames: string[] = [],
 	aliasPatterns: string[] = [],
 	runtimeGlobals: string[] = [],
 	runtimeModules: string[] = [],
 ): SnapshotSignals {
 	return {
-		packageDependencies: {
-			names: Object.freeze([...packageNames].sort()),
-		},
 		tsconfigAliases: {
 			entries: aliasPatterns.map((p) => ({ pattern: p, substitutions: [] })),
 		},
@@ -49,6 +45,7 @@ function file(
 	valueSymbols: string[] = [],
 	classSymbols: string[] = [],
 	interfaceSymbols: string[] = [],
+	packageNames: string[] = [],
 ): FileSignals {
 	return {
 		importBindings: imports.map((b) => ({
@@ -61,6 +58,9 @@ function file(
 		sameFileValueSymbols: new Set(valueSymbols),
 		sameFileClassSymbols: new Set(classSymbols),
 		sameFileInterfaceSymbols: new Set(interfaceSymbols),
+		packageDependencies: {
+			names: Object.freeze([...packageNames].sort()),
+		},
 	};
 }
 
@@ -132,8 +132,8 @@ describe("classifyUnresolvedEdge — category shortcuts", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("weird"),
 			UnresolvedEdgeCategory.OTHER,
-			snapshot(["lodash"]),
-			file([{ identifier: "weird", specifier: "lodash" }]),
+			snapshot(),
+			file([{ identifier: "weird", specifier: "lodash" }], [], [], [], ["lodash"]),
 		);
 		expect(verdict.classification).toBe(UnresolvedEdgeClassification.UNKNOWN);
 		expect(verdict.basisCode).toBe(
@@ -151,8 +151,8 @@ describe("classifyUnresolvedEdge — CALLS_FUNCTION precedence", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("foo"),
 			UnresolvedEdgeCategory.CALLS_FUNCTION_AMBIGUOUS_OR_MISSING,
-			snapshot(["lodash"]),
-			file([{ identifier: "foo", specifier: "lodash" }], ["foo"]),
+			snapshot(),
+			file([{ identifier: "foo", specifier: "lodash" }], ["foo"], [], [], ["lodash"]),
 		);
 		expect(verdict.classification).toBe(
 			UnresolvedEdgeClassification.INTERNAL_CANDIDATE,
@@ -166,8 +166,8 @@ describe("classifyUnresolvedEdge — CALLS_FUNCTION precedence", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("debounce"),
 			UnresolvedEdgeCategory.CALLS_FUNCTION_AMBIGUOUS_OR_MISSING,
-			snapshot(["lodash"]),
-			file([{ identifier: "debounce", specifier: "lodash" }]),
+			snapshot(),
+			file([{ identifier: "debounce", specifier: "lodash" }], [], [], [], ["lodash"]),
 		);
 		expect(verdict.classification).toBe(
 			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
@@ -196,7 +196,7 @@ describe("classifyUnresolvedEdge — CALLS_FUNCTION precedence", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("helper"),
 			UnresolvedEdgeCategory.CALLS_FUNCTION_AMBIGUOUS_OR_MISSING,
-			snapshot([], ["@/*"]),
+			snapshot(["@/*"]),
 			file([{ identifier: "helper", specifier: "@/lib/helper" }]),
 		);
 		expect(verdict.classification).toBe(
@@ -254,8 +254,8 @@ describe("classifyUnresolvedEdge — CALLS_OBJ_METHOD receiver classification", 
 		const verdict = classifyUnresolvedEdge(
 			edge("axios.get"),
 			UnresolvedEdgeCategory.CALLS_OBJ_METHOD_NEEDS_TYPE_INFO,
-			snapshot(["axios"]),
-			file([{ identifier: "axios", specifier: "axios" }]),
+			snapshot(),
+			file([{ identifier: "axios", specifier: "axios" }], [], [], [], ["axios"]),
 		);
 		expect(verdict.classification).toBe(
 			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
@@ -284,7 +284,7 @@ describe("classifyUnresolvedEdge — CALLS_OBJ_METHOD receiver classification", 
 		const verdict = classifyUnresolvedEdge(
 			edge("helper.send"),
 			UnresolvedEdgeCategory.CALLS_OBJ_METHOD_NEEDS_TYPE_INFO,
-			snapshot([], ["@/*"]),
+			snapshot(["@/*"]),
 			file([{ identifier: "helper", specifier: "@/lib/helper" }]),
 		);
 		expect(verdict.classification).toBe(
@@ -325,8 +325,8 @@ describe("classifyUnresolvedEdge — INSTANTIATES + IMPLEMENTS", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("EventEmitter", EdgeType.INSTANTIATES),
 			UnresolvedEdgeCategory.INSTANTIATES_CLASS_NOT_FOUND,
-			snapshot(["events"]),
-			file([{ identifier: "EventEmitter", specifier: "events" }]),
+			snapshot(),
+			file([{ identifier: "EventEmitter", specifier: "events" }], [], [], [], ["events"]),
 		);
 		expect(verdict.classification).toBe(
 			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
@@ -344,8 +344,8 @@ describe("classifyUnresolvedEdge — INSTANTIATES + IMPLEMENTS", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("Foo", EdgeType.INSTANTIATES),
 			UnresolvedEdgeCategory.INSTANTIATES_CLASS_NOT_FOUND,
-			snapshot(["ext-pkg"]),
-			file([{ identifier: "Foo", specifier: "ext-pkg" }], ["Foo"]),
+			snapshot(),
+			file([{ identifier: "Foo", specifier: "ext-pkg" }], ["Foo"], [], [], ["ext-pkg"]),
 		);
 		expect(verdict.classification).toBe(
 			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
@@ -371,12 +371,13 @@ describe("classifyUnresolvedEdge — INSTANTIATES + IMPLEMENTS", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("Foo"),
 			UnresolvedEdgeCategory.CALLS_FUNCTION_AMBIGUOUS_OR_MISSING,
-			snapshot(["ext-pkg"]),
+			snapshot(),
 			file(
 				[{ identifier: "Foo", specifier: "ext-pkg" }],
 				[], // no value symbols
 				[], // no class symbols
 				["Foo"], // Foo is only an interface
+				["ext-pkg"],
 			),
 		);
 		expect(verdict.classification).toBe(
@@ -476,7 +477,7 @@ describe("classifyUnresolvedEdge — runtime builtins", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("Map", EdgeType.INSTANTIATES),
 			UnresolvedEdgeCategory.INSTANTIATES_CLASS_NOT_FOUND,
-			snapshot([], [], ["Map", "Set", "Date"]),
+			snapshot([], ["Map", "Set", "Date"]),
 			file(),
 		);
 		expect(verdict.classification).toBe(
@@ -491,7 +492,7 @@ describe("classifyUnresolvedEdge — runtime builtins", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("process.exit"),
 			UnresolvedEdgeCategory.CALLS_OBJ_METHOD_NEEDS_TYPE_INFO,
-			snapshot([], [], ["process"]),
+			snapshot([], ["process"]),
 			file(),
 		);
 		expect(verdict.classification).toBe(
@@ -506,7 +507,7 @@ describe("classifyUnresolvedEdge — runtime builtins", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("path.join"),
 			UnresolvedEdgeCategory.CALLS_OBJ_METHOD_NEEDS_TYPE_INFO,
-			snapshot([], [], [], ["path", "node:path"]),
+			snapshot([], [], ["path", "node:path"]),
 			file([{ identifier: "path", specifier: "path" }]),
 		);
 		expect(verdict.classification).toBe(
@@ -521,7 +522,7 @@ describe("classifyUnresolvedEdge — runtime builtins", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("readFile"),
 			UnresolvedEdgeCategory.CALLS_FUNCTION_AMBIGUOUS_OR_MISSING,
-			snapshot([], [], [], ["fs", "node:fs"]),
+			snapshot([], [], ["fs", "node:fs"]),
 			file([{ identifier: "readFile", specifier: "node:fs" }]),
 		);
 		expect(verdict.classification).toBe(
@@ -538,8 +539,8 @@ describe("classifyUnresolvedEdge — runtime builtins", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("path.join"),
 			UnresolvedEdgeCategory.CALLS_OBJ_METHOD_NEEDS_TYPE_INFO,
-			snapshot(["path"], [], [], ["path"]),
-			file([{ identifier: "path", specifier: "path" }]),
+			snapshot([], [], ["path"]),
+			file([{ identifier: "path", specifier: "path" }], [], [], [], ["path"]),
 		);
 		expect(verdict.basisCode).toBe(
 			UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_RUNTIME_MODULE,
@@ -552,7 +553,7 @@ describe("classifyUnresolvedEdge — runtime builtins", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("Map"),
 			UnresolvedEdgeCategory.CALLS_FUNCTION_AMBIGUOUS_OR_MISSING,
-			snapshot([], [], ["Map"]),
+			snapshot([], ["Map"]),
 			file([], ["Map"]),
 		);
 		expect(verdict.classification).toBe(
@@ -569,8 +570,8 @@ describe("classifyUnresolvedEdge — runtime builtins", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("Map"),
 			UnresolvedEdgeCategory.CALLS_FUNCTION_AMBIGUOUS_OR_MISSING,
-			snapshot(["custom-collections"], [], ["Map"]),
-			file([{ identifier: "Map", specifier: "custom-collections" }]),
+			snapshot([], ["Map"]),
+			file([{ identifier: "Map", specifier: "custom-collections" }], [], [], [], ["custom-collections"]),
 		);
 		expect(verdict.classification).toBe(
 			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
@@ -584,7 +585,7 @@ describe("classifyUnresolvedEdge — runtime builtins", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("mysteryIdentifier"),
 			UnresolvedEdgeCategory.CALLS_FUNCTION_AMBIGUOUS_OR_MISSING,
-			snapshot([], [], ["Map", "Set"]),
+			snapshot([], ["Map", "Set"]),
 			file(),
 		);
 		expect(verdict.classification).toBe(UnresolvedEdgeClassification.UNKNOWN);

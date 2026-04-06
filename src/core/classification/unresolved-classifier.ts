@@ -127,9 +127,11 @@ export function classifyUnresolvedEdge(
 			return external(UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_RUNTIME_MODULE);
 		}
 		// Rule 5b: binding specifier matches a declared package dependency.
+		// Uses fileSignals.packageDependencies (nearest package.json
+		// to this source file, not the repo root).
 		if (
 			!binding.isRelative &&
-			hasPackageDependency(snapshotSignals.packageDependencies, binding.specifier)
+			hasPackageDependency(fileSignals.packageDependencies, binding.specifier)
 		) {
 			return external(externalBasisFor(category));
 		}

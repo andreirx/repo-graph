@@ -1,0 +1,8 @@
+{
+	"name": "@fixture/api",
+	"version": "0.0.1",
+	"dependencies": {
+		"express": "^4.0.0",
+		"cors": "^2.0.0"
+	}
+}

@@ -221,6 +221,10 @@ export class RepoIndexer implements IndexerPort {
 			//     during classification).
 			const fileSignalsCache = new Map<string, FileSignals>();
 			const nodeUidToFileUid = new Map<string, string>();
+			// Per-directory package.json deps cache. Shared across files
+			// in the same directory subtree to avoid redundant upward
+			// walks and file reads.
+			const packageDepsCache = new Map<string, PackageDependencySet>();
 			let extractIdx = 0;
 
 			for (const relPath of filePaths) {
@@ -302,11 +306,18 @@ export class RepoIndexer implements IndexerPort {
 					// Build reverse lookup for every extracted node.
 					nodeUidToFileUid.set(node.nodeUid, fileUid);
 				}
+				// Resolve per-file package deps from nearest package.json.
+				const packageDependencies = await this.resolveNearestPackageDeps(
+					relPath,
+					repo.rootPath,
+					packageDepsCache,
+				);
 				fileSignalsCache.set(fileUid, {
 					importBindings: result.importBindings,
 					sameFileValueSymbols,
 					sameFileClassSymbols,
 					sameFileInterfaceSymbols,
+					packageDependencies,
 				});
 
 				extractIdx++;
@@ -940,25 +951,72 @@ export class RepoIndexer implements IndexerPort {
 		const tsconfigAliases =
 			(await readTsconfigAliases(repoRootPath)) ?? empty.tsconfigAliases;
 
-		// package.json dependencies
-		let packageDependencies: PackageDependencySet = empty.packageDependencies;
-		try {
-			const pkgContent = await readFile(
-				join(repoRootPath, "package.json"),
-				"utf-8",
-			);
-			const deps = extractPackageDependencies(pkgContent);
-			if (deps !== null) {
-				packageDependencies = deps;
-			}
-		} catch {
-			// file missing or unreadable — use empty
-		}
-
 		// Runtime builtins from the extractor (language-specific via port).
 		const runtimeBuiltins = this.extractor.runtimeBuiltins;
 
-		return { packageDependencies, tsconfigAliases, runtimeBuiltins };
+		return { tsconfigAliases, runtimeBuiltins };
+	}
+
+	/**
+	 * Resolve the nearest package.json ancestor for a file and return
+	 * its declared dependency set. Walks upward from the file's
+	 * directory to the repo root. First hit wins.
+	 *
+	 * Cache semantics: every directory on the walk path is cached so
+	 * subsequent files in the same subtree resolve in O(1). A cache
+	 * miss triggers at most one directory walk + one file read.
+	 *
+	 * If no package.json is found between fileDir and repoRoot
+	 * (inclusive), returns an empty PackageDependencySet.
+	 */
+	private async resolveNearestPackageDeps(
+		fileRelPath: string,
+		repoRootPath: string,
+		cache: Map<string, PackageDependencySet>,
+	): Promise<PackageDependencySet> {
+		const emptyDeps: PackageDependencySet = { names: Object.freeze([]) };
+		// Work with the file's directory (repo-relative, forward slashes).
+		let dir = fileRelPath.includes("/")
+			? fileRelPath.slice(0, fileRelPath.lastIndexOf("/"))
+			: "";
+
+		// Collect uncached dirs to backfill after resolution.
+		const uncachedDirs: string[] = [];
+
+		while (true) {
+			const cached = cache.get(dir);
+			if (cached !== undefined) {
+				// Backfill all intermediate uncached dirs with the resolved value.
+				for (const d of uncachedDirs) cache.set(d, cached);
+				return cached;
+			}
+			uncachedDirs.push(dir);
+
+			// Try reading package.json at this directory level.
+			const pkgPath = dir === ""
+				? join(repoRootPath, "package.json")
+				: join(repoRootPath, dir, "package.json");
+			try {
+				const content = await readFile(pkgPath, "utf-8");
+				const deps = extractPackageDependencies(content);
+				const resolved = deps ?? emptyDeps;
+				// Cache the resolved value for this dir AND all dirs walked so far.
+				for (const d of uncachedDirs) cache.set(d, resolved);
+				return resolved;
+			} catch {
+				// No package.json here — walk up.
+			}
+
+			// Stop if we've reached repo root (dir === "").
+			if (dir === "") break;
+			// Move to parent directory.
+			const slash = dir.lastIndexOf("/");
+			dir = slash >= 0 ? dir.slice(0, slash) : "";
+		}
+
+		// No package.json found anywhere up to repo root.
+		for (const d of uncachedDirs) cache.set(d, emptyDeps);
+		return emptyDeps;
 	}
 
 	/**

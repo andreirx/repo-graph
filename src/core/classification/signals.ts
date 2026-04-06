@@ -151,8 +151,16 @@ export function matchesAnyAlias(
  * Snapshot-scoped signals. Built once per indexing pass; shared
  * across every file's classification in that snapshot.
  */
+/**
+ * Snapshot-scoped signals. Built once per indexing pass; shared
+ * across every file's classification in that snapshot.
+ *
+ * packageDependencies is NOT here — it moved to FileSignals in
+ * slice 4.2 because monorepo sub-packages declare their own deps.
+ * Each source file is classified against its NEAREST owning
+ * package.json, not the repo-root one.
+ */
 export interface SnapshotSignals {
-	readonly packageDependencies: PackageDependencySet;
 	readonly tsconfigAliases: TsconfigAliases;
 	readonly runtimeBuiltins: RuntimeBuiltinsSet;
 }
@@ -188,6 +196,13 @@ export interface FileSignals {
 	readonly sameFileValueSymbols: ReadonlySet<string>;
 	readonly sameFileClassSymbols: ReadonlySet<string>;
 	readonly sameFileInterfaceSymbols: ReadonlySet<string>;
+	/**
+	 * Dependencies declared in the NEAREST package.json ancestor
+	 * of this source file. In a monorepo, different files may have
+	 * different dep sets. Resolved at indexing time by walking
+	 * upward from the file's directory to the repo root.
+	 */
+	readonly packageDependencies: PackageDependencySet;
 }
 
 /**
@@ -198,7 +213,6 @@ export interface FileSignals {
  */
 export function emptySnapshotSignals(): SnapshotSignals {
 	return {
-		packageDependencies: { names: Object.freeze([]) },
 		tsconfigAliases: { entries: Object.freeze([]) },
 		runtimeBuiltins: { identifiers: Object.freeze([]), moduleSpecifiers: Object.freeze([]) },
 	};
@@ -216,5 +230,6 @@ export function emptyFileSignals(): FileSignals {
 		sameFileValueSymbols: new Set<string>(),
 		sameFileClassSymbols: new Set<string>(),
 		sameFileInterfaceSymbols: new Set<string>(),
+		packageDependencies: { names: Object.freeze([]) },
 	};
 }
