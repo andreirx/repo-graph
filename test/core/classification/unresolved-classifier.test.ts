@@ -155,6 +155,34 @@ describe("classifyUnresolvedEdge — category shortcuts", () => {
 		);
 	});
 
+	it("Rust hyphenated Cargo dep (my-crate → my_crate in use path) → external", () => {
+		// Cargo.toml has "my-crate", but Rust use path normalizes to my_crate.
+		const verdict = classifyUnresolvedEdge(
+			edge("my_crate", EdgeType.IMPORTS, JSON.stringify({ specifier: "my_crate", identifier: "Thing" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot(),
+			file([], [], [], [], ["my-crate"]),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PACKAGE_DEPENDENCY,
+		);
+	});
+
+	it("Rust hyphenated dep with path (serde_json::Value → serde-json in Cargo) → external", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("serde_json", EdgeType.IMPORTS, JSON.stringify({ specifier: "serde_json::Value" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot(),
+			file([], [], [], [], ["serde-json"]),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
+		);
+	});
+
 	it("Rust crate::module import → internal (relative)", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("crate_module", EdgeType.IMPORTS, JSON.stringify({ specifier: "crate::utils" })),
@@ -237,9 +265,84 @@ describe("classifyUnresolvedEdge — category shortcuts", () => {
 		);
 	});
 
-	it("unknown bare import (not in deps, not runtime, not relative) → unknown", () => {
+	it("Rust crate-internal module (renderer::camera) → internal / heuristic basis", () => {
 		const verdict = classifyUnresolvedEdge(
-			edge("mystery_crate", EdgeType.IMPORTS, JSON.stringify({ specifier: "mystery_crate" })),
+			edge("renderer::camera", EdgeType.IMPORTS, JSON.stringify({ specifier: "renderer::camera", identifier: "Camera" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot(),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.INTERNAL_CANDIDATE,
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.RUST_CRATE_INTERNAL_MODULE_HEURISTIC,
+		);
+	});
+
+	it("Rust crate-internal single-segment module (easing) → internal / heuristic basis", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("easing", EdgeType.IMPORTS, JSON.stringify({ specifier: "easing", identifier: "EaseIn" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot(),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.INTERNAL_CANDIDATE,
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.RUST_CRATE_INTERNAL_MODULE_HEURISTIC,
+		);
+	});
+
+	it("Rust crate-internal with underscores (input_queue) → internal / heuristic basis", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("input_queue", EdgeType.IMPORTS, JSON.stringify({ specifier: "input_queue", identifier: "InputQueue" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot(),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.INTERNAL_CANDIDATE,
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.RUST_CRATE_INTERNAL_MODULE_HEURISTIC,
+		);
+	});
+
+	it("Rust crate:: prefix uses DEFINITE basis (not heuristic)", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("crate_module", EdgeType.IMPORTS, JSON.stringify({ specifier: "crate::utils" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot(),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.INTERNAL_CANDIDATE,
+		);
+		// crate:: prefix is definite, not heuristic.
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.RELATIVE_IMPORT_TARGET_UNRESOLVED,
+		);
+	});
+
+	it("Rust heuristic does NOT apply to TS imports (rawPath present)", () => {
+		// TS import with rawPath metadata — should NOT be caught by Rust heuristic.
+		const verdict = classifyUnresolvedEdge(
+			edge("mystery", EdgeType.IMPORTS, JSON.stringify({ rawPath: "mystery" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot(),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.UNKNOWN,
+		);
+	});
+
+	it("TS unknown bare import (not in deps, not runtime, not relative) → unknown", () => {
+		// TS-origin import (rawPath present) that matches nothing.
+		const verdict = classifyUnresolvedEdge(
+			edge("mystery_package", EdgeType.IMPORTS, JSON.stringify({ rawPath: "mystery_package" })),
 			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
 			snapshot(),
 			file(),

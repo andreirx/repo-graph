@@ -103,11 +103,17 @@ export const UnresolvedEdgeBasisCode = {
 	THIS_RECEIVER_IMPLIES_INTERNAL: "this_receiver_implies_internal",
 	/**
 	 * An `imports_file_not_found` observation whose specifier is
-	 * path-relative (starts with "."). Current extractor behavior
-	 * only emits unresolved IMPORTS edges for relative specifiers,
-	 * so this basis fires for every such observation.
+	 * path-relative (starts with "." for TS, or crate::/super::/self::
+	 * for Rust). Definite internal import.
 	 */
 	RELATIVE_IMPORT_TARGET_UNRESOLVED: "relative_import_target_unresolved",
+	/**
+	 * Rust crate-internal module import heuristic. The specifier is
+	 * lowercase, not in Cargo deps, not in stdlib, and came from the
+	 * Rust extractor. LIKELY internal but NOT definite — a mistyped
+	 * or undeclared external crate would also match this pattern.
+	 */
+	RUST_CRATE_INTERNAL_MODULE_HEURISTIC: "rust_crate_internal_module_heuristic",
 	/**
 	 * Express route registration: app.get(), app.post(), router.use(), etc.
 	 * Detected when the source file imports from "express" and the
@@ -144,6 +150,17 @@ export type UnresolvedEdgeBasisCode =
  * detect and rewrite stale rows without a migration.
  */
 /**
+ * Version 6 changes (from v5):
+ *   - Hyphenated Cargo deps matched via underscore→hyphen normalization
+ *     (my_crate in use path matches my-crate in Cargo.toml).
+ *   - Rust crate-internal module heuristic now uses distinct basis code
+ *     RUST_CRATE_INTERNAL_MODULE_HEURISTIC (not RELATIVE_IMPORT_TARGET_UNRESOLVED).
+ *
+ * Version 5 changes (from v4):
+ *   - Rust crate-internal module imports (use renderer::Camera, use easing)
+ *     now classified as internal_candidate instead of unknown. Heuristic:
+ *     Rust-origin metadata + lowercase module name + not in deps/stdlib.
+ *
  * Version 4 changes (from v3):
  *   - IMPORTS_FILE_NOT_FOUND no longer blanket-classified as internal.
  *     Import classification is now language-aware: external deps
@@ -165,4 +182,4 @@ export type UnresolvedEdgeBasisCode =
  *   - Alias-basis fidelity: alias matches now emit specifier_matches_project_alias
  *     directly instead of reusing the internal-import basis
  */
-export const CURRENT_CLASSIFIER_VERSION = 4;
+export const CURRENT_CLASSIFIER_VERSION = 6;

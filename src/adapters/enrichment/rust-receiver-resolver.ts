@@ -23,7 +23,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReceiverTypeResult, EnrichmentProgress } from "./typescript-receiver-resolver.js";
 
@@ -332,6 +332,15 @@ export function isValidRustTypeName(name: string): boolean {
 /**
  * Resolve receiver types for Rust call sites using rust-analyzer.
  */
+/**
+ * Resolve receiver types for Rust call sites using rust-analyzer.
+ *
+ * Groups sites by nearest-owning Cargo.toml and starts one
+ * rust-analyzer instance per Cargo context. This handles:
+ *   - repos where Cargo.toml is not at the repo root
+ *   - repos with multiple independent Cargo projects
+ *   - workspace repos (workspace root's Cargo.toml serves all crates)
+ */
 export async function resolveRustReceiverTypes(
 	repoRootPath: string,
 	sites: ReadonlyArray<{
@@ -346,100 +355,173 @@ export async function resolveRustReceiverTypes(
 	if (sites.length === 0) return [];
 	const emit = onProgress ?? (() => {});
 
-	emit({ phase: "starting_rust_analyzer", current: 0, total: sites.length });
+	// Group sites by nearest Cargo.toml ancestor directory.
+	const groups = groupSitesByCargoRoot(repoRootPath, sites);
 
-	const client = new RustAnalyzerClient();
-	const started = await client.start(repoRootPath);
-	if (!started) {
-		// rust-analyzer unavailable — return all as failed.
-		return sites.map((s) => ({
-			edgeUid: s.edgeUid,
-			receiverType: null,
-			receiverTypeOrigin: "failed" as const,
-			typeDisplayName: null,
-			isExternalType: false,
-			failureReason: "rust-analyzer not available or failed to start",
-		}));
-	}
+	const allResults: ReceiverTypeResult[] = [];
+	let totalProcessed = 0;
 
-	// Wait for rust-analyzer to finish loading the project.
-	// Send a warm-up hover on the first file and retry until we
-	// get a non-null response. rust-analyzer queues requests but
-	// may return empty results before indexing completes.
-	emit({ phase: "loading_project", current: 0, total: sites.length });
-	const firstAbsPath = join(repoRootPath, sites[0].sourceFilePath);
-	let warmedUp = false;
-	for (let attempt = 0; attempt < 30; attempt++) {
-		const warmup = await client.hover(firstAbsPath, sites[0].lineStart, sites[0].colStart);
-		if (warmup !== null) {
-			warmedUp = true;
-			break;
+	for (const [cargoRoot, groupSites] of groups) {
+		emit({ phase: "starting_rust_analyzer", current: totalProcessed, total: sites.length });
+
+		const client = new RustAnalyzerClient();
+		const started = await client.start(cargoRoot);
+		if (!started) {
+			for (const s of groupSites) {
+				allResults.push({
+					edgeUid: s.edgeUid,
+					receiverType: null,
+					receiverTypeOrigin: "failed" as const,
+					typeDisplayName: null,
+					isExternalType: false,
+					failureReason: `rust-analyzer failed to start at ${cargoRoot}`,
+				});
+			}
+			totalProcessed += groupSites.length;
+			continue;
 		}
-		// Wait 2 seconds between retries while rust-analyzer loads.
-		await new Promise((r) => setTimeout(r, 2000));
-	}
-	if (!warmedUp) {
-		// Could not get a response after 60 seconds of waiting.
-		// rust-analyzer may not support this project or is too slow.
+
+		// Warm up: retry hover on the first site until rust-analyzer loads.
+		emit({ phase: "loading_project", current: totalProcessed, total: sites.length });
+		const firstAbsPath = join(repoRootPath, groupSites[0].sourceFilePath);
+		let warmedUp = false;
+		for (let attempt = 0; attempt < 30; attempt++) {
+			const warmup = await client.hover(
+				firstAbsPath,
+				groupSites[0].lineStart,
+				groupSites[0].colStart,
+			);
+			if (warmup !== null) {
+				warmedUp = true;
+				break;
+			}
+			await new Promise((r) => setTimeout(r, 2000));
+		}
+
+		if (!warmedUp) {
+			await client.stop();
+			for (const s of groupSites) {
+				allResults.push({
+					edgeUid: s.edgeUid,
+					receiverType: null,
+					receiverTypeOrigin: "failed" as const,
+					typeDisplayName: null,
+					isExternalType: false,
+					failureReason: "rust-analyzer did not respond after loading timeout",
+				});
+			}
+			totalProcessed += groupSites.length;
+			continue;
+		}
+
+		// Resolve types for this group.
+		for (const site of groupSites) {
+			emit({ phase: "resolving_types", current: totalProcessed, total: sites.length });
+
+			const absPath = join(repoRootPath, site.sourceFilePath);
+			const typeName = await client.hover(absPath, site.lineStart, site.colStart);
+
+			if (typeName && isValidRustTypeName(typeName)) {
+				allResults.push({
+					edgeUid: site.edgeUid,
+					receiverType: typeName,
+					receiverTypeOrigin: "compiler",
+					typeDisplayName: typeName,
+					isExternalType: isRustExternalType(typeName),
+					failureReason: null,
+				});
+			} else {
+				allResults.push({
+					edgeUid: site.edgeUid,
+					receiverType: null,
+					receiverTypeOrigin: "failed",
+					typeDisplayName: null,
+					isExternalType: false,
+					failureReason: typeName
+						? `type is ${typeName}`
+						: "hover returned no type",
+				});
+			}
+
+			totalProcessed++;
+		}
+
 		await client.stop();
-		return sites.map((s) => ({
-			edgeUid: s.edgeUid,
-			receiverType: null,
-			receiverTypeOrigin: "failed" as const,
-			typeDisplayName: null,
-			isExternalType: false,
-			failureReason: "rust-analyzer did not respond after loading timeout",
-		}));
 	}
 
-	const results: ReceiverTypeResult[] = [];
-	let processed = 0;
+	emit({ phase: "done", current: sites.length, total: sites.length });
+	return allResults;
+}
+
+// ── Cargo root grouping ─────────────────────────────────────────────
+
+type Site = {
+	edgeUid: string;
+	sourceFilePath: string;
+	lineStart: number;
+	colStart: number;
+	targetKey: string;
+};
+
+/**
+ * Group sites by their nearest Cargo.toml ancestor directory.
+ * Walks upward from each file's directory to the repo root.
+ * Falls back to repoRootPath if no Cargo.toml is found.
+ */
+function groupSitesByCargoRoot(
+	repoRootPath: string,
+	sites: ReadonlyArray<Site>,
+): Map<string, Site[]> {
+	const cache = new Map<string, string>();
+	const groups = new Map<string, Site[]>();
 
 	for (const site of sites) {
-		emit({ phase: "resolving_types", current: processed, total: sites.length });
-
-		const absPath = join(repoRootPath, site.sourceFilePath);
-
-		// For obj.method() or self.field.method(), hover on the receiver.
-		// The receiver is the first segment of the targetKey.
-		const receiverCol = site.colStart;
-
-		const typeName = await client.hover(absPath, site.lineStart, receiverCol);
-
-		if (typeName && isValidRustTypeName(typeName)) {
-			// Heuristic: types from std/core/alloc are "external" (stdlib).
-			// Types matching the project's own modules are "internal".
-			const isExternal = isRustExternalType(typeName);
-
-			results.push({
-				edgeUid: site.edgeUid,
-				receiverType: typeName,
-				receiverTypeOrigin: "compiler",
-				typeDisplayName: typeName,
-				isExternalType: isExternal,
-				failureReason: null,
-			});
-		} else {
-			results.push({
-				edgeUid: site.edgeUid,
-				receiverType: null,
-				receiverTypeOrigin: "failed",
-				typeDisplayName: null,
-				isExternalType: false,
-				failureReason: typeName
-					? `type is ${typeName}`
-					: "hover returned no type",
-			});
-		}
-
-		processed++;
+		const cargoRoot = findNearestCargoRoot(
+			site.sourceFilePath,
+			repoRootPath,
+			cache,
+		);
+		const group = groups.get(cargoRoot) ?? [];
+		group.push(site);
+		groups.set(cargoRoot, group);
 	}
 
-	emit({ phase: "stopping", current: sites.length, total: sites.length });
-	await client.stop();
-	emit({ phase: "done", current: sites.length, total: sites.length });
+	return groups;
+}
 
-	return results;
+function findNearestCargoRoot(
+	fileRelPath: string,
+	repoRoot: string,
+	cache: Map<string, string>,
+): string {
+	let dir = fileRelPath.includes("/")
+		? fileRelPath.slice(0, fileRelPath.lastIndexOf("/"))
+		: "";
+
+	// Walk upward checking cache + filesystem.
+	const uncached: string[] = [];
+	while (true) {
+		const cached = cache.get(dir);
+		if (cached !== undefined) {
+			for (const d of uncached) cache.set(d, cached);
+			return cached;
+		}
+		uncached.push(dir);
+
+		const absDir = dir === "" ? repoRoot : join(repoRoot, dir);
+		if (existsSync(join(absDir, "Cargo.toml"))) {
+			for (const d of uncached) cache.set(d, absDir);
+			return absDir;
+		}
+
+		if (dir === "") break;
+		const slash = dir.lastIndexOf("/");
+		dir = slash >= 0 ? dir.slice(0, slash) : "";
+	}
+
+	// No Cargo.toml found — fall back to repo root.
+	for (const d of uncached) cache.set(d, repoRoot);
+	return repoRoot;
 }
 
 function isRustExternalType(typeName: string): boolean {

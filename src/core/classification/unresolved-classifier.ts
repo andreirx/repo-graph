@@ -218,10 +218,20 @@ function classifyUnresolvedImport(
 
 	// Check if the specifier (or its first segment for Rust paths)
 	// matches a declared package dependency.
+	// Rust normalizes hyphens to underscores in use paths:
+	//   Cargo.toml: my-crate = "1.0"
+	//   source:     use my_crate::Thing;
+	// Check both the original and hyphen-normalized forms.
 	const baseSpecifier = specifier.includes("::")
 		? specifier.split("::")[0]
 		: specifier;
 	if (hasPackageDependency(fileSignals.packageDependencies, baseSpecifier)) {
+		return external(UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PACKAGE_DEPENDENCY);
+	}
+	// Try hyphen form: my_crate → my-crate (Cargo.toml convention).
+	const hyphenated = baseSpecifier.replace(/_/g, "-");
+	if (hyphenated !== baseSpecifier &&
+		hasPackageDependency(fileSignals.packageDependencies, hyphenated)) {
 		return external(UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PACKAGE_DEPENDENCY);
 	}
 
@@ -243,8 +253,67 @@ function classifyUnresolvedImport(
 		return internal(UnresolvedEdgeBasisCode.RELATIVE_IMPORT_TARGET_UNRESOLVED);
 	}
 
+	// Rust crate-internal module import heuristic.
+	// If the import came from the Rust extractor (metadata has "specifier"
+	// key, not "rawPath") and the specifier:
+	//   - is not in declared dependencies (including hyphen-normalized)
+	//   - is not a known stdlib module
+	//   - uses lowercase naming (Rust module convention)
+	// then it's LIKELY a crate-internal module. Uses a distinct basis
+	// code (RUST_CRATE_INTERNAL_MODULE_HEURISTIC) to distinguish from
+	// definite relative imports (RELATIVE_IMPORT_TARGET_UNRESOLVED).
+	// A mistyped or undeclared external crate would also match.
+	if (isRustCrateInternalImport(edge, specifier)) {
+		return internal(UnresolvedEdgeBasisCode.RUST_CRATE_INTERNAL_MODULE_HEURISTIC);
+	}
+
 	// Truly unknown import.
 	return unknown();
+}
+
+/**
+ * Detect Rust crate-internal module imports.
+ *
+ * Rust files often import sibling modules without the `crate::` prefix:
+ *   `use renderer::Camera;`   (equivalent to `use crate::renderer::Camera;`)
+ *   `use easing;`             (sibling module)
+ *
+ * These have already passed through dep/stdlib/alias checks and failed.
+ * The heuristic: if the metadata indicates Rust origin AND the
+ * specifier follows Rust module naming conventions (lowercase/snake_case),
+ * it's a crate-internal module, not an external dependency.
+ *
+ * Safety: in valid Rust, external crate deps MUST appear in Cargo.toml.
+ * If a specifier is not in deps, it cannot be an external crate in a
+ * project that compiles. The only remaining interpretation is
+ * crate-internal.
+ */
+function isRustCrateInternalImport(
+	edge: UnresolvedEdge,
+	specifier: string,
+): boolean {
+	if (!edge.metadataJson) return false;
+	try {
+		const meta = JSON.parse(edge.metadataJson) as Record<string, unknown>;
+		// Rust extractor stores "specifier" key. TS extractor stores "rawPath".
+		// If "rawPath" exists, this is a TS import — not applicable.
+		if (typeof meta.rawPath === "string") return false;
+		if (typeof meta.specifier !== "string") return false;
+	} catch {
+		return false;
+	}
+
+	// The first path segment should be a valid Rust module name:
+	// lowercase, may contain underscores, no hyphens (those are crate
+	// deps in Cargo.toml but get normalized to underscores in `use`).
+	const firstSegment = specifier.includes("::")
+		? specifier.split("::")[0]
+		: specifier;
+	if (!firstSegment) return false;
+	// Must start with lowercase and contain only valid Rust identifier chars.
+	if (!/^[a-z][a-z0-9_]*$/.test(firstSegment)) return false;
+
+	return true;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
