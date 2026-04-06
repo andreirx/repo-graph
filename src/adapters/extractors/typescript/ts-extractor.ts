@@ -20,6 +20,7 @@ import type {
 } from "../../../core/ports/extractor.js";
 
 import { EXTRACTOR_VERSIONS } from "../../../version.js";
+import { TS_JS_RUNTIME_BUILTINS } from "./runtime-builtins.js";
 
 import { computeFunctionMetrics } from "./ast-metrics.js";
 
@@ -30,6 +31,7 @@ const GRAMMARS_DIR = join(__dirname, "..", "..", "..", "..", "grammars");
 export class TypeScriptExtractor implements ExtractorPort {
 	readonly name = EXTRACTOR_NAME;
 	readonly languages = ["typescript", "tsx"];
+	readonly runtimeBuiltins = TS_JS_RUNTIME_BUILTINS;
 
 	private parser: Parser | null = null;
 	private tsLanguage: Language | null = null;

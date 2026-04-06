@@ -53,6 +53,43 @@ export function hasPackageDependency(
 	return false;
 }
 
+// ── Runtime builtins ────────────────────────────────────────────────
+
+/**
+ * Language-agnostic DTO representing identifiers and module
+ * specifiers that exist at runtime without a declaration in source.
+ *
+ * Populated by the extractor adapter from language-specific lists
+ * (e.g. TS/JS globals, Node stdlib). The classifier sees only the
+ * abstract set — no language-specific knowledge crosses the boundary.
+ */
+export interface RuntimeBuiltinsSet {
+	/** Identifiers globally available at runtime (Map, Date, process, etc.) */
+	readonly identifiers: readonly string[];
+	/** Module specifiers for stdlib/runtime modules ("path", "node:fs", etc.) */
+	readonly moduleSpecifiers: readonly string[];
+}
+
+export function hasRuntimeBuiltinIdentifier(
+	builtins: RuntimeBuiltinsSet,
+	identifier: string,
+): boolean {
+	for (const name of builtins.identifiers) {
+		if (name === identifier) return true;
+	}
+	return false;
+}
+
+export function hasRuntimeBuiltinModule(
+	builtins: RuntimeBuiltinsSet,
+	specifier: string,
+): boolean {
+	for (const name of builtins.moduleSpecifiers) {
+		if (name === specifier) return true;
+	}
+	return false;
+}
+
 // ── tsconfig path aliases ───────────────────────────────────────────
 
 /**
@@ -117,6 +154,7 @@ export function matchesAnyAlias(
 export interface SnapshotSignals {
 	readonly packageDependencies: PackageDependencySet;
 	readonly tsconfigAliases: TsconfigAliases;
+	readonly runtimeBuiltins: RuntimeBuiltinsSet;
 }
 
 /**
@@ -162,6 +200,7 @@ export function emptySnapshotSignals(): SnapshotSignals {
 	return {
 		packageDependencies: { names: Object.freeze([]) },
 		tsconfigAliases: { entries: Object.freeze([]) },
+		runtimeBuiltins: { identifiers: Object.freeze([]), moduleSpecifiers: Object.freeze([]) },
 	};
 }
 

@@ -93,7 +93,7 @@ describe("classifier integration — classifier-repo fixture", () => {
 		expect(row?.basisCode).toBe("callee_matches_external_import");
 	});
 
-	it("classifies aliased() as internal_candidate via tsconfig alias", async () => {
+	it("classifies aliased() as internal_candidate via project alias", async () => {
 		const result = await indexer.indexRepo(REPO_UID);
 		const rows = storage.queryUnresolvedEdges({
 			snapshotUid: result.snapshotUid,
@@ -103,7 +103,7 @@ describe("classifier integration — classifier-repo fixture", () => {
 		const row = findRowByTargetIdentifier(rows, "aliased");
 		expect(row).toBeDefined();
 		expect(row?.classification).toBe("internal_candidate");
-		expect(row?.basisCode).toBe("callee_matches_internal_import");
+		expect(row?.basisCode).toBe("specifier_matches_project_alias");
 	});
 
 	it("classifies relatively() as internal_candidate via relative import", async () => {

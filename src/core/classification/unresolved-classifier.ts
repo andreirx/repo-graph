@@ -44,6 +44,8 @@ import {
 import type { ImportBinding, UnresolvedEdge } from "../ports/extractor.js";
 import {
 	hasPackageDependency,
+	hasRuntimeBuiltinIdentifier,
+	hasRuntimeBuiltinModule,
 	matchesAnyAlias,
 	type FileSignals,
 	type SnapshotSignals,
@@ -114,26 +116,43 @@ export function classifyUnresolvedEdge(
 	);
 
 	if (binding) {
-		const isBareExternal =
+		// Rule 5a: binding specifier matches a known runtime/stdlib module.
+		// Checked BEFORE package deps because names like "path", "fs",
+		// "crypto" are stdlib even if a repo happens to have a package
+		// with the same name.
+		if (
 			!binding.isRelative &&
-			hasPackageDependency(snapshotSignals.packageDependencies, binding.specifier);
-		// Rule 3: external import binding match.
-		if (isBareExternal) {
+			hasRuntimeBuiltinModule(snapshotSignals.runtimeBuiltins, binding.specifier)
+		) {
+			return external(UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_RUNTIME_MODULE);
+		}
+		// Rule 5b: binding specifier matches a declared package dependency.
+		if (
+			!binding.isRelative &&
+			hasPackageDependency(snapshotSignals.packageDependencies, binding.specifier)
+		) {
 			return external(externalBasisFor(category));
 		}
-		// Rule 4: internal relative import binding match.
+		// Rule 5c: binding is a relative import.
 		if (binding.isRelative) {
 			return internal(internalImportBasisFor(category));
 		}
-		// Rule 5: tsconfig alias match (non-relative, non-package).
+		// Rule 5d: binding specifier matches a project alias.
 		if (matchesAnyAlias(binding.specifier, snapshotSignals.tsconfigAliases)) {
-			return internal(internalImportBasisFor(category));
+			return internal(UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PROJECT_ALIAS);
 		}
-		// Non-relative specifier that is neither an external package
-		// nor a known alias. Fall through to unknown.
+		// Non-relative specifier that matched nothing.
+		// Fall through to runtime-global check.
 	}
 
-	// Rule 6: unknown.
+	// Rule 6: identifier matches a known runtime global (Map, Date,
+	// process, etc.). Last-resort before unknown — any explicit
+	// binding or same-file evidence wins first.
+	if (hasRuntimeBuiltinIdentifier(snapshotSignals.runtimeBuiltins, identifier)) {
+		return external(runtimeGlobalBasisFor(category));
+	}
+
+	// Rule 7: unknown.
 	return unknown();
 }
 
@@ -222,6 +241,15 @@ function internalImportBasisFor(
 		return UnresolvedEdgeBasisCode.RECEIVER_MATCHES_INTERNAL_IMPORT;
 	}
 	return UnresolvedEdgeBasisCode.CALLEE_MATCHES_INTERNAL_IMPORT;
+}
+
+function runtimeGlobalBasisFor(
+	category: UnresolvedEdgeCategory,
+): UnresolvedEdgeBasisCode {
+	if (category === UnresolvedEdgeCategory.CALLS_OBJ_METHOD_NEEDS_TYPE_INFO) {
+		return UnresolvedEdgeBasisCode.RECEIVER_MATCHES_RUNTIME_GLOBAL;
+	}
+	return UnresolvedEdgeBasisCode.CALLEE_MATCHES_RUNTIME_GLOBAL;
 }
 
 /**

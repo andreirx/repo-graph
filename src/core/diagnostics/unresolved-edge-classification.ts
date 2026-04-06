@@ -59,20 +59,35 @@ export type UnresolvedEdgeClassification =
 export const UnresolvedEdgeBasisCode = {
 	/** import specifier is a bare name matching a package.json dependency */
 	SPECIFIER_MATCHES_PACKAGE_DEPENDENCY: "specifier_matches_package_dependency",
-	/** import specifier matches a tsconfig `paths` alias */
-	SPECIFIER_MATCHES_TSCONFIG_ALIAS: "specifier_matches_tsconfig_alias",
+	/**
+	 * Import binding specifier matches a project-level path alias
+	 * (e.g. tsconfig `paths` entry). Renamed from the v1
+	 * `specifier_matches_tsconfig_alias` to keep the persisted basis
+	 * semantic rather than config-file-specific.
+	 */
+	SPECIFIER_MATCHES_PROJECT_ALIAS: "specifier_matches_project_alias",
+	/**
+	 * Import binding specifier matches a known runtime/stdlib module
+	 * (e.g. "path", "fs", "node:crypto"). The module is part of the
+	 * execution runtime, not a declared package dependency.
+	 */
+	SPECIFIER_MATCHES_RUNTIME_MODULE: "specifier_matches_runtime_module",
 	/** obj.method() receiver came in via external import in this file */
 	RECEIVER_MATCHES_EXTERNAL_IMPORT: "receiver_matches_external_import",
 	/** obj.method() receiver came in via internal (relative/alias) import */
 	RECEIVER_MATCHES_INTERNAL_IMPORT: "receiver_matches_internal_import",
 	/** obj.method() receiver is a symbol declared in the same source file */
 	RECEIVER_MATCHES_SAME_FILE_SYMBOL: "receiver_matches_same_file_symbol",
+	/** obj.method() receiver is a known runtime global (Map, Date, etc.) */
+	RECEIVER_MATCHES_RUNTIME_GLOBAL: "receiver_matches_runtime_global",
 	/** fn() callee is declared in the same source file */
 	CALLEE_MATCHES_SAME_FILE_SYMBOL: "callee_matches_same_file_symbol",
 	/** fn() callee came in via external import in this file */
 	CALLEE_MATCHES_EXTERNAL_IMPORT: "callee_matches_external_import",
 	/** fn() callee came in via internal import in this file */
 	CALLEE_MATCHES_INTERNAL_IMPORT: "callee_matches_internal_import",
+	/** fn() / new Foo() callee is a known runtime global (Map, Date, etc.) */
+	CALLEE_MATCHES_RUNTIME_GLOBAL: "callee_matches_runtime_global",
 	/** this.m() or this.x.m() — receiver is on the current class */
 	THIS_RECEIVER_IMPLIES_INTERNAL: "this_receiver_implies_internal",
 	/**
@@ -106,4 +121,13 @@ export type UnresolvedEdgeBasisCode =
  * slice; the version column is already in place so that tooling can
  * detect and rewrite stale rows without a migration.
  */
-export const CURRENT_CLASSIFIER_VERSION = 1;
+/**
+ * Version 2 changes (from v1):
+ *   - RENAMED: specifier_matches_tsconfig_alias → specifier_matches_project_alias
+ *   - ADDED: specifier_matches_runtime_module, callee_matches_runtime_global,
+ *     receiver_matches_runtime_global
+ *   - NEW RULE: runtime-builtins check (last-resort before unknown)
+ *   - Alias-basis fidelity: alias matches now emit specifier_matches_project_alias
+ *     directly instead of reusing the internal-import basis
+ */
+export const CURRENT_CLASSIFIER_VERSION = 2;

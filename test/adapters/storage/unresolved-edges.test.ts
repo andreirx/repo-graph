@@ -306,7 +306,7 @@ describe("queryUnresolvedEdges filters", () => {
 		storage.insertUnresolvedEdges([
 			makeUnresolvedEdge(snap.snapshotUid, node.nodeUid, {
 				targetKey: "t1",
-				basisCode: UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_TSCONFIG_ALIAS,
+				basisCode: UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PROJECT_ALIAS,
 			}),
 			makeUnresolvedEdge(snap.snapshotUid, node.nodeUid, {
 				targetKey: "t2",
@@ -316,7 +316,7 @@ describe("queryUnresolvedEdges filters", () => {
 
 		const aliasHits = storage.queryUnresolvedEdges({
 			snapshotUid: snap.snapshotUid,
-			basisCode: UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_TSCONFIG_ALIAS,
+			basisCode: UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PROJECT_ALIAS,
 		});
 		expect(aliasHits.length).toBe(1);
 		expect(aliasHits[0].targetKey).toBe("t1");

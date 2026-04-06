@@ -1,3 +1,4 @@
+import type { RuntimeBuiltinsSet } from "../classification/signals.js";
 import type {
 	EdgeType,
 	GraphNode,
@@ -133,6 +134,17 @@ export interface ExtractorPort {
 
 	/** Language IDs this extractor handles. e.g. ["typescript", "tsx"] */
 	readonly languages: string[];
+
+	/**
+	 * Runtime builtins known to this extractor's language ecosystem.
+	 * Contains globally-available identifiers and stdlib module
+	 * specifiers. The indexer feeds this into SnapshotSignals so the
+	 * classifier can distinguish runtime globals from unknown callees.
+	 *
+	 * Extractors for languages without a concept of runtime globals
+	 * return an empty set.
+	 */
+	readonly runtimeBuiltins: RuntimeBuiltinsSet;
 
 	/**
 	 * Extract nodes and edges from a single file's source text.

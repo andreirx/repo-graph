@@ -27,6 +27,8 @@ import type { ImportBinding, UnresolvedEdge } from "../../../src/core/ports/extr
 function snapshot(
 	packageNames: string[] = [],
 	aliasPatterns: string[] = [],
+	runtimeGlobals: string[] = [],
+	runtimeModules: string[] = [],
 ): SnapshotSignals {
 	return {
 		packageDependencies: {
@@ -34,6 +36,10 @@ function snapshot(
 		},
 		tsconfigAliases: {
 			entries: aliasPatterns.map((p) => ({ pattern: p, substitutions: [] })),
+		},
+		runtimeBuiltins: {
+			identifiers: Object.freeze([...runtimeGlobals]),
+			moduleSpecifiers: Object.freeze([...runtimeModules]),
 		},
 	};
 }
@@ -186,7 +192,7 @@ describe("classifyUnresolvedEdge — CALLS_FUNCTION precedence", () => {
 		);
 	});
 
-	it("rule 5: alias import (non-relative, no package match)", () => {
+	it("rule 5d: alias import (non-relative, no package match)", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("helper"),
 			UnresolvedEdgeCategory.CALLS_FUNCTION_AMBIGUOUS_OR_MISSING,
@@ -197,7 +203,7 @@ describe("classifyUnresolvedEdge — CALLS_FUNCTION precedence", () => {
 			UnresolvedEdgeClassification.INTERNAL_CANDIDATE,
 		);
 		expect(verdict.basisCode).toBe(
-			UnresolvedEdgeBasisCode.CALLEE_MATCHES_INTERNAL_IMPORT,
+			UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PROJECT_ALIAS,
 		);
 	});
 
@@ -274,7 +280,7 @@ describe("classifyUnresolvedEdge — CALLS_OBJ_METHOD receiver classification", 
 		);
 	});
 
-	it("receiver imported via tsconfig alias", () => {
+	it("receiver imported via project alias", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("helper.send"),
 			UnresolvedEdgeCategory.CALLS_OBJ_METHOD_NEEDS_TYPE_INFO,
@@ -285,7 +291,7 @@ describe("classifyUnresolvedEdge — CALLS_OBJ_METHOD receiver classification", 
 			UnresolvedEdgeClassification.INTERNAL_CANDIDATE,
 		);
 		expect(verdict.basisCode).toBe(
-			UnresolvedEdgeBasisCode.RECEIVER_MATCHES_INTERNAL_IMPORT,
+			UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PROJECT_ALIAS,
 		);
 	});
 
@@ -459,6 +465,131 @@ describe("classifyUnresolvedEdge — rawCalleeName pre-rewrite handling", () => 
 		);
 		expect(verdict.basisCode).toBe(
 			UnresolvedEdgeBasisCode.CALLEE_MATCHES_SAME_FILE_SYMBOL,
+		);
+	});
+});
+
+// ── Runtime builtins (last-resort rule) ──────────────────────────────
+
+describe("classifyUnresolvedEdge — runtime builtins", () => {
+	it("rule 6: `new Map()` with no binding → external / CALLEE_MATCHES_RUNTIME_GLOBAL", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("Map", EdgeType.INSTANTIATES),
+			UnresolvedEdgeCategory.INSTANTIATES_CLASS_NOT_FOUND,
+			snapshot([], [], ["Map", "Set", "Date"]),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.CALLEE_MATCHES_RUNTIME_GLOBAL,
+		);
+	});
+
+	it("rule 6: `process.exit()` with no binding → external / RECEIVER_MATCHES_RUNTIME_GLOBAL", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("process.exit"),
+			UnresolvedEdgeCategory.CALLS_OBJ_METHOD_NEEDS_TYPE_INFO,
+			snapshot([], [], ["process"]),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.RECEIVER_MATCHES_RUNTIME_GLOBAL,
+		);
+	});
+
+	it("rule 5a: `import path from 'path'; path.join()` → external / SPECIFIER_MATCHES_RUNTIME_MODULE", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("path.join"),
+			UnresolvedEdgeCategory.CALLS_OBJ_METHOD_NEEDS_TYPE_INFO,
+			snapshot([], [], [], ["path", "node:path"]),
+			file([{ identifier: "path", specifier: "path" }]),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_RUNTIME_MODULE,
+		);
+	});
+
+	it("rule 5a: node: prefixed specifier → external / SPECIFIER_MATCHES_RUNTIME_MODULE", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("readFile"),
+			UnresolvedEdgeCategory.CALLS_FUNCTION_AMBIGUOUS_OR_MISSING,
+			snapshot([], [], [], ["fs", "node:fs"]),
+			file([{ identifier: "readFile", specifier: "node:fs" }]),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_RUNTIME_MODULE,
+		);
+	});
+
+	it("runtime module check fires BEFORE package-dep check", () => {
+		// "path" is BOTH in runtime modules and (hypothetically) in
+		// package.json. Runtime module wins because it's checked first.
+		const verdict = classifyUnresolvedEdge(
+			edge("path.join"),
+			UnresolvedEdgeCategory.CALLS_OBJ_METHOD_NEEDS_TYPE_INFO,
+			snapshot(["path"], [], [], ["path"]),
+			file([{ identifier: "path", specifier: "path" }]),
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_RUNTIME_MODULE,
+		);
+	});
+
+	it("same-file match beats runtime global", () => {
+		// File declares a local `Map` (value symbol). Same-file is
+		// stronger evidence than ambient runtime knowledge.
+		const verdict = classifyUnresolvedEdge(
+			edge("Map"),
+			UnresolvedEdgeCategory.CALLS_FUNCTION_AMBIGUOUS_OR_MISSING,
+			snapshot([], [], ["Map"]),
+			file([], ["Map"]),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.INTERNAL_CANDIDATE,
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.CALLEE_MATCHES_SAME_FILE_SYMBOL,
+		);
+	});
+
+	it("explicit import binding beats runtime global", () => {
+		// File imports Map from a package. Binding is stronger than
+		// ambient runtime.
+		const verdict = classifyUnresolvedEdge(
+			edge("Map"),
+			UnresolvedEdgeCategory.CALLS_FUNCTION_AMBIGUOUS_OR_MISSING,
+			snapshot(["custom-collections"], [], ["Map"]),
+			file([{ identifier: "Map", specifier: "custom-collections" }]),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.CALLEE_MATCHES_EXTERNAL_IMPORT,
+		);
+	});
+
+	it("identifier NOT in runtime globals → unknown (not misclassified)", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("mysteryIdentifier"),
+			UnresolvedEdgeCategory.CALLS_FUNCTION_AMBIGUOUS_OR_MISSING,
+			snapshot([], [], ["Map", "Set"]),
+			file(),
+		);
+		expect(verdict.classification).toBe(UnresolvedEdgeClassification.UNKNOWN);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.NO_SUPPORTING_SIGNAL,
 		);
 	});
 });

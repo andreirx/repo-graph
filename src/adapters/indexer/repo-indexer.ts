@@ -955,7 +955,10 @@ export class RepoIndexer implements IndexerPort {
 			// file missing or unreadable — use empty
 		}
 
-		return { packageDependencies, tsconfigAliases };
+		// Runtime builtins from the extractor (language-specific via port).
+		const runtimeBuiltins = this.extractor.runtimeBuiltins;
+
+		return { packageDependencies, tsconfigAliases, runtimeBuiltins };
 	}
 
 	/**
