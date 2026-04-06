@@ -19,6 +19,7 @@
 import { resolve as resolvePath } from "node:path";
 import type { Command } from "commander";
 import { promoteEdges, type PromotionCandidate } from "../../adapters/enrichment/edge-promoter.js";
+import { resolveRustReceiverTypes } from "../../adapters/enrichment/rust-receiver-resolver.js";
 import { resolveReceiverTypes } from "../../adapters/enrichment/typescript-receiver-resolver.js";
 import { NodeSubtype } from "../../core/model/index.js";
 import type { GraphNode } from "../../core/model/index.js";
@@ -112,25 +113,48 @@ export function registerEnrichCommand(
 					targetKey: e.targetKey,
 				}));
 
-			const results = await resolveReceiverTypes(
-				repo.rootPath,
-				sites,
-				!opts.json
-					? (p) => {
-							if (p.phase === "building_program") {
-								process.stdout.write(
-									`\r  Building program... ${p.current}/${p.total}`,
-								);
-							} else if (p.phase === "resolving_types") {
-								process.stdout.write(
-									`\r  Resolving types... ${p.current}/${p.total}`,
-								);
-							} else if (p.phase === "done") {
-								process.stdout.write("\r  Done.                              \n");
-							}
-						}
-					: undefined,
+			// Route enrichment by language: TS files → TypeScript checker,
+			// Rust files → rust-analyzer LSP.
+			const tsSites = sites.filter((s) =>
+				s.sourceFilePath.endsWith(".ts") ||
+				s.sourceFilePath.endsWith(".tsx") ||
+				s.sourceFilePath.endsWith(".js") ||
+				s.sourceFilePath.endsWith(".jsx"),
 			);
+			const rsSites = sites.filter((s) => s.sourceFilePath.endsWith(".rs"));
+
+			const progressCb = !opts.json
+				? (p: { phase: string; current: number; total: number }) => {
+						if (
+							p.phase === "building_program" ||
+							p.phase === "loading_project" ||
+							p.phase === "starting_rust_analyzer"
+						) {
+							process.stdout.write(
+								`\r  Loading... ${p.current}/${p.total}`,
+							);
+						} else if (p.phase === "resolving_types") {
+							process.stdout.write(
+								`\r  Resolving types... ${p.current}/${p.total}`,
+							);
+						} else if (p.phase === "done") {
+							process.stdout.write(
+								"\r  Done.                              \n",
+							);
+						}
+					}
+				: undefined;
+
+			// Run both language resolvers.
+			const tsResults =
+				tsSites.length > 0
+					? await resolveReceiverTypes(repo.rootPath, tsSites, progressCb)
+					: [];
+			const rsResults =
+				rsSites.length > 0
+					? await resolveRustReceiverTypes(repo.rootPath, rsSites, progressCb)
+					: [];
+			const results = [...tsResults, ...rsResults];
 
 			// Persist enrichments via merge into existing metadata_json.
 			// Merge semantics preserve extractor-provided context
