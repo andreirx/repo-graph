@@ -115,6 +115,19 @@ export interface StoragePort {
 	): UnresolvedEdgeSampleRow[];
 
 	/**
+	 * Shallow-merge a JSON patch into existing metadata_json on
+	 * unresolved-edge rows. Preserves all prior metadata keys
+	 * (e.g. rawCalleeName from the extractor) and adds/overwrites
+	 * keys from the patch.
+	 *
+	 * Used by the enrichment pass to attach compiler-derived evidence
+	 * without destroying extractor-provided context.
+	 */
+	mergeUnresolvedEdgesMetadata(
+		updates: Array<{ edgeUid: string; metadataJsonPatch: string }>,
+	): void;
+
+	/**
 	 * Count unresolved edges for a snapshot grouped by either
 	 * classification or category. Returns ordered rows (key ASC).
 	 */

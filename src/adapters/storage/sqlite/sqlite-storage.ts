@@ -607,6 +607,46 @@ export class SqliteStorage implements StoragePort {
 		}));
 	}
 
+	mergeUnresolvedEdgesMetadata(
+		updates: Array<{ edgeUid: string; metadataJsonPatch: string }>,
+	): void {
+		const readStmt = this.db.prepare(
+			"SELECT metadata_json FROM unresolved_edges WHERE edge_uid = ?",
+		);
+		const writeStmt = this.db.prepare(
+			"UPDATE unresolved_edges SET metadata_json = ? WHERE edge_uid = ?",
+		);
+		const runAll = this.db.transaction(() => {
+			for (const u of updates) {
+				// Read existing metadata.
+				const row = readStmt.get(u.edgeUid) as
+					| { metadata_json: string | null }
+					| undefined;
+				let existing: Record<string, unknown> = {};
+				if (row?.metadata_json) {
+					try {
+						existing = JSON.parse(row.metadata_json) as Record<
+							string,
+							unknown
+						>;
+					} catch {
+						// Malformed existing metadata — start fresh.
+					}
+				}
+				// Shallow-merge the patch.
+				let patch: Record<string, unknown> = {};
+				try {
+					patch = JSON.parse(u.metadataJsonPatch) as Record<string, unknown>;
+				} catch {
+					continue; // Skip malformed patches.
+				}
+				const merged = { ...existing, ...patch };
+				writeStmt.run(JSON.stringify(merged), u.edgeUid);
+			}
+		});
+		runAll();
+	}
+
 	countUnresolvedEdges(
 		input: CountUnresolvedEdgesInput,
 	): UnresolvedEdgeCountRow[] {

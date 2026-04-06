@@ -547,3 +547,120 @@ describe("countUnresolvedEdges", () => {
 		expect(rows1.reduce((acc, r) => acc + r.count, 0)).toBe(6);
 	});
 });
+
+// ── Metadata merge ───────────────────────────────────────────────────
+
+describe("mergeUnresolvedEdgesMetadata", () => {
+	/** Read raw metadata_json from the DB for an edge_uid. */
+	function readRawMetadata(edgeUid: string): Record<string, unknown> | null {
+		const db = provider.getDatabase();
+		const row = db
+			.prepare("SELECT metadata_json FROM unresolved_edges WHERE edge_uid = ?")
+			.get(edgeUid) as { metadata_json: string | null } | undefined;
+		if (!row?.metadata_json) return null;
+		return JSON.parse(row.metadata_json) as Record<string, unknown>;
+	}
+
+	it("merges enrichment into existing extractor metadata (preserving prior keys)", () => {
+		const snap = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.FULL,
+			basisCommit: "abc",
+		});
+		const file = makeFile("src/a.ts");
+		storage.upsertFiles([file]);
+		const node = makeNode(snap.snapshotUid, "caller", file.fileUid);
+		storage.insertNodes([node]);
+
+		// Edge with extractor-provided metadata (rawCalleeName).
+		const edge = makeUnresolvedEdge(snap.snapshotUid, node.nodeUid, {
+			targetKey: "foo.bar",
+			metadataJson: JSON.stringify({ rawCalleeName: "original.bar" }),
+		});
+		storage.insertUnresolvedEdges([edge]);
+
+		// Merge enrichment.
+		storage.mergeUnresolvedEdgesMetadata([
+			{
+				edgeUid: edge.edgeUid,
+				metadataJsonPatch: JSON.stringify({
+					enrichment: { receiverType: "FooClass" },
+				}),
+			},
+		]);
+
+		// Verify BOTH original and enrichment keys survive.
+		const meta = readRawMetadata(edge.edgeUid);
+		expect(meta).not.toBeNull();
+		expect(meta?.rawCalleeName).toBe("original.bar");
+		expect(meta?.enrichment).toEqual({ receiverType: "FooClass" });
+	});
+
+	it("works when existing metadata is null", () => {
+		const snap = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.FULL,
+			basisCommit: "abc",
+		});
+		const file = makeFile("src/a.ts");
+		storage.upsertFiles([file]);
+		const node = makeNode(snap.snapshotUid, "caller", file.fileUid);
+		storage.insertNodes([node]);
+
+		const edge = makeUnresolvedEdge(snap.snapshotUid, node.nodeUid, {
+			targetKey: "foo.bar",
+			metadataJson: null,
+		});
+		storage.insertUnresolvedEdges([edge]);
+
+		storage.mergeUnresolvedEdgesMetadata([
+			{
+				edgeUid: edge.edgeUid,
+				metadataJsonPatch: JSON.stringify({
+					enrichment: { receiverType: "FooClass" },
+				}),
+			},
+		]);
+
+		const meta = readRawMetadata(edge.edgeUid);
+		expect(meta?.enrichment).toEqual({ receiverType: "FooClass" });
+	});
+
+	it("handles batch merge of multiple rows", () => {
+		const snap = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.FULL,
+			basisCommit: "abc",
+		});
+		const file = makeFile("src/a.ts");
+		storage.upsertFiles([file]);
+		const node = makeNode(snap.snapshotUid, "caller", file.fileUid);
+		storage.insertNodes([node]);
+
+		const edges = [
+			makeUnresolvedEdge(snap.snapshotUid, node.nodeUid, {
+				targetKey: "a.m",
+				metadataJson: JSON.stringify({ rawCalleeName: "a.m" }),
+			}),
+			makeUnresolvedEdge(snap.snapshotUid, node.nodeUid, {
+				targetKey: "b.m",
+				metadataJson: JSON.stringify({ rawCalleeName: "b.m" }),
+			}),
+		];
+		storage.insertUnresolvedEdges(edges);
+
+		storage.mergeUnresolvedEdgesMetadata(
+			edges.map((e) => ({
+				edgeUid: e.edgeUid,
+				metadataJsonPatch: JSON.stringify({ enrichment: { receiverType: "X" } }),
+			})),
+		);
+
+		// Both rows preserve original + gain enrichment.
+		for (const e of edges) {
+			const meta = readRawMetadata(e.edgeUid);
+			expect(meta?.rawCalleeName).toBeDefined();
+			expect(meta?.enrichment).toEqual({ receiverType: "X" });
+		}
+	});
+});

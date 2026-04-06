@@ -14,6 +14,7 @@ import { registerArchCommands } from "./commands/arch.js";
 import { registerChangeCommands } from "./commands/change.js";
 import { registerDeclareCommands } from "./commands/declare.js";
 import { registerDocsCommand } from "./commands/docs.js";
+import { registerEnrichCommand } from "./commands/enrich.js";
 import { registerEvidenceCommand } from "./commands/evidence.js";
 import { registerGateCommand } from "./commands/gate.js";
 import { registerGraphCommands } from "./commands/graph.js";
@@ -49,6 +50,7 @@ registerTrendCommand(program, getCtx);
 registerGateCommand(program, getCtx);
 registerChangeCommands(program, getCtx);
 registerTrustCommand(program, getCtx);
+registerEnrichCommand(program, getCtx);
 registerDocsCommand(program, getCtx);
 
 // Main execution

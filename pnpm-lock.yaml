@@ -17,6 +17,9 @@ importers:
       ignore:
         specifier: ^7.0.5
         version: 7.0.5
+      typescript:
+        specifier: ^6.0.2
+        version: 6.0.2
       uuid:
         specifier: ^13.0.0
         version: 13.0.0
@@ -33,9 +36,6 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^4.1.2
         version: 4.1.2(vitest@4.1.2(@types/node@25.5.0)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)))
-      typescript:
-        specifier: ^6.0.2
-        version: 6.0.2
       vitest:
         specifier: ^4.1.2
         version: 4.1.2(@types/node@25.5.0)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0))
