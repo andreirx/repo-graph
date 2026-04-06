@@ -10,7 +10,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readTsconfigAliases } from "../../../src/adapters/config/tsconfig-reader.js";
+import {
+	readTsconfigAliases,
+	readTsconfigAliasesFromPath,
+} from "../../../src/adapters/config/tsconfig-reader.js";
 
 let workDir: string;
 
@@ -176,5 +179,136 @@ describe("readTsconfigAliases — failure modes", () => {
 		);
 		const aliases = await readTsconfigAliases(workDir);
 		expect(aliases?.entries[0].substitutions).toEqual(["./src/*", "./lib/*"]);
+	});
+});
+
+describe("readTsconfigAliasesFromPath — extends chain", () => {
+	it("inherits paths from parent when child has no paths", async () => {
+		// base.json defines paths; child extends it without overriding.
+		writeFileSync(
+			join(workDir, "base.json"),
+			JSON.stringify({
+				compilerOptions: {
+					paths: { "@shared/*": ["./shared/*"] },
+				},
+			}),
+			"utf-8",
+		);
+		writeFileSync(
+			join(workDir, "tsconfig.json"),
+			JSON.stringify({
+				extends: "./base.json",
+				compilerOptions: { strict: true },
+			}),
+			"utf-8",
+		);
+		const aliases = await readTsconfigAliasesFromPath(
+			join(workDir, "tsconfig.json"),
+		);
+		expect(aliases?.entries.length).toBe(1);
+		expect(aliases?.entries[0].pattern).toBe("@shared/*");
+	});
+
+	it("child paths replace parent paths entirely (TypeScript merge rule)", async () => {
+		writeFileSync(
+			join(workDir, "base.json"),
+			JSON.stringify({
+				compilerOptions: {
+					paths: { "@base/*": ["./base/*"] },
+				},
+			}),
+			"utf-8",
+		);
+		writeFileSync(
+			join(workDir, "tsconfig.json"),
+			JSON.stringify({
+				extends: "./base.json",
+				compilerOptions: {
+					paths: { "@child/*": ["./child/*"] },
+				},
+			}),
+			"utf-8",
+		);
+		const aliases = await readTsconfigAliasesFromPath(
+			join(workDir, "tsconfig.json"),
+		);
+		// Child has paths → parent paths NOT inherited.
+		expect(aliases?.entries.length).toBe(1);
+		expect(aliases?.entries[0].pattern).toBe("@child/*");
+	});
+
+	it("multi-level extends: grandchild → child → grandparent", async () => {
+		writeFileSync(
+			join(workDir, "grandparent.json"),
+			JSON.stringify({
+				compilerOptions: {
+					paths: { "@gp/*": ["./gp/*"] },
+				},
+			}),
+			"utf-8",
+		);
+		writeFileSync(
+			join(workDir, "parent.json"),
+			JSON.stringify({
+				extends: "./grandparent.json",
+				compilerOptions: { strict: true },
+			}),
+			"utf-8",
+		);
+		writeFileSync(
+			join(workDir, "tsconfig.json"),
+			JSON.stringify({
+				extends: "./parent.json",
+				compilerOptions: { strict: true },
+			}),
+			"utf-8",
+		);
+		const aliases = await readTsconfigAliasesFromPath(
+			join(workDir, "tsconfig.json"),
+		);
+		expect(aliases?.entries.length).toBe(1);
+		expect(aliases?.entries[0].pattern).toBe("@gp/*");
+	});
+
+	it("stops at non-relative extends (package-name) and returns empty", async () => {
+		writeFileSync(
+			join(workDir, "tsconfig.json"),
+			JSON.stringify({
+				extends: "@tsconfig/node18/tsconfig.json",
+				compilerOptions: { strict: true },
+			}),
+			"utf-8",
+		);
+		const aliases = await readTsconfigAliasesFromPath(
+			join(workDir, "tsconfig.json"),
+		);
+		expect(aliases?.entries).toEqual([]);
+	});
+
+	it("handles JSONC comments in extended configs", async () => {
+		writeFileSync(
+			join(workDir, "base.json"),
+			`{
+				// Base config comment
+				"compilerOptions": {
+					/* block comment */
+					"paths": { "@base/*": ["./base/*"] }
+				}
+			}`,
+			"utf-8",
+		);
+		writeFileSync(
+			join(workDir, "tsconfig.json"),
+			JSON.stringify({
+				extends: "./base.json",
+				compilerOptions: { strict: true },
+			}),
+			"utf-8",
+		);
+		const aliases = await readTsconfigAliasesFromPath(
+			join(workDir, "tsconfig.json"),
+		);
+		expect(aliases?.entries.length).toBe(1);
+		expect(aliases?.entries[0].pattern).toBe("@base/*");
 	});
 });

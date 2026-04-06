@@ -19,6 +19,7 @@
 
 import { resolve as resolvePath } from "node:path";
 import type { Command } from "commander";
+import { deriveBlastRadius } from "../../core/classification/blast-radius.js";
 import { UnresolvedEdgeCategory } from "../../core/diagnostics/unresolved-edge-categories.js";
 import {
 	UnresolvedEdgeBasisCode,
@@ -58,6 +59,7 @@ export function registerTrustCommand(
 		.option("--bucket <classification>", "Filter by classification bucket")
 		.option("--category <category>", "Filter by extraction failure category")
 		.option("--basis-code <code>", "Filter by classifier basis code")
+		.option("--blast-radius <level>", "Filter by blast radius (low, medium, high)")
 		.option("--limit <n>", "Max rows to return", "20")
 		.option("--json", "JSON output")
 		.action(
@@ -67,6 +69,7 @@ export function registerTrustCommand(
 					bucket?: string;
 					category?: string;
 					basisCode?: string;
+					blastRadius?: string;
 					limit: string;
 					json?: boolean;
 				},
@@ -124,6 +127,7 @@ function runSamples(
 		bucket?: string;
 		category?: string;
 		basisCode?: string;
+		blastRadius?: string;
 		limit: string;
 		json?: boolean;
 	},
@@ -143,8 +147,7 @@ function runSamples(
 		return;
 	}
 
-	// Validate typed filters against known vocabularies. Immediate
-	// input validation beats silent empty-result fallthrough.
+	// Validate typed filters.
 	if (opts.bucket && !isKnownClassification(opts.bucket)) {
 		outputError(
 			opts.json,
@@ -169,6 +172,15 @@ function runSamples(
 		process.exitCode = 1;
 		return;
 	}
+	const validRadii = ["low", "medium", "high"];
+	if (opts.blastRadius && !validRadii.includes(opts.blastRadius)) {
+		outputError(
+			opts.json,
+			`Unknown --blast-radius value: ${opts.blastRadius}. Valid: ${validRadii.join(", ")}`,
+		);
+		process.exitCode = 1;
+		return;
+	}
 
 	const limit = Number.parseInt(opts.limit, 10);
 	if (!Number.isFinite(limit) || limit <= 0) {
@@ -177,7 +189,12 @@ function runSamples(
 		return;
 	}
 
-	const rows = ctx.storage.queryUnresolvedEdges({
+	// Fetch more rows than requested if blast-radius filter is active,
+	// because the filter is applied post-query (blast-radius is derived,
+	// not stored). Overfetch then truncate.
+	const queryLimit = opts.blastRadius ? limit * 10 : limit;
+
+	let rows = ctx.storage.queryUnresolvedEdges({
 		snapshotUid: snapshot.snapshotUid,
 		// biome-ignore lint/suspicious/noExplicitAny: validated above
 		classification: opts.bucket as any,
@@ -185,8 +202,25 @@ function runSamples(
 		category: opts.category as any,
 		// biome-ignore lint/suspicious/noExplicitAny: validated above
 		basisCode: opts.basisCode as any,
-		limit,
+		limit: queryLimit,
 	});
+
+	// Enrich rows with derived blast-radius.
+	const enriched = rows.map((r) => {
+		const assessment = deriveBlastRadius({
+			category: r.category,
+			basisCode: r.basisCode,
+			sourceNodeVisibility: r.sourceNodeVisibility,
+		});
+		return { ...r, ...assessment };
+	});
+
+	// Apply blast-radius filter if requested.
+	let filtered = enriched;
+	if (opts.blastRadius) {
+		filtered = enriched.filter((r) => r.blastRadius === opts.blastRadius);
+	}
+	const output = filtered.slice(0, limit);
 
 	if (opts.json) {
 		console.log(
@@ -199,17 +233,18 @@ function runSamples(
 						bucket: opts.bucket ?? null,
 						category: opts.category ?? null,
 						basis_code: opts.basisCode ?? null,
+						blast_radius: opts.blastRadius ?? null,
 						limit,
 					},
-					count: rows.length,
-					samples: rows,
+					count: output.length,
+					samples: output,
 				},
 				null,
 				2,
 			),
 		);
 	} else {
-		printSamplesHuman(repo.name, rows);
+		printSamplesHuman(repo.name, output);
 	}
 }
 
@@ -263,12 +298,14 @@ function printHuman(repoName: string, report: TrustReport): void {
 
 	const s = report.summary;
 	console.log("Counts:");
-	console.log(`  edges_total:        ${s.edges_total}`);
-	console.log(`  unresolved_total:   ${s.unresolved_total}`);
-	console.log(`  resolved_calls:     ${s.resolved_calls}`);
-	console.log(`  unresolved_calls:   ${s.unresolved_calls}`);
+	console.log(`  edges_total:                  ${s.edges_total}`);
+	console.log(`  unresolved_total:             ${s.unresolved_total}`);
+	console.log(`  resolved_calls:               ${s.resolved_calls}`);
+	console.log(`  unresolved_calls:             ${s.unresolved_calls}`);
+	console.log(`  unresolved_calls_external:    ${s.unresolved_calls_external}`);
+	console.log(`  unresolved_calls_internal_like: ${s.unresolved_calls_internal_like}`);
 	console.log(
-		`  call_resolution_rate: ${(s.call_resolution_rate * 100).toFixed(1)}%`,
+		`  call_resolution_rate:         ${(s.call_resolution_rate * 100).toFixed(1)}% (excludes external)`,
 	);
 	console.log("");
 
@@ -332,6 +369,19 @@ function printHuman(repoName: string, report: TrustReport): void {
 		console.log("");
 	}
 
+	// Blast-radius breakdown (scoped to unknown CALLS).
+	if (report.unknown_calls_blast_radius) {
+		const br = report.unknown_calls_blast_radius;
+		const total = br.low + br.medium + br.high;
+		if (total > 0) {
+			console.log(`Unknown CALLS blast-radius breakdown (${total} edges):`);
+			if (br.low > 0) console.log(`  ${String(br.low).padStart(5)}  low    (function-local, private scope)`);
+			if (br.medium > 0) console.log(`  ${String(br.medium).padStart(5)}  medium (exported scope or import-bound)`);
+			if (br.high > 0) console.log(`  ${String(br.high).padStart(5)}  high   (entrypoint path)`);
+			console.log("");
+		}
+	}
+
 	const suspicious = report.modules.filter(
 		(m) => m.suspicious_zero_connectivity,
 	);
@@ -360,6 +410,7 @@ interface SampleRow {
 	targetKey: string;
 	sourceFilePath: string | null;
 	lineStart: number | null;
+	blastRadius?: string;
 }
 
 function printSamplesHuman(repoName: string, rows: SampleRow[]): void {
@@ -370,11 +421,11 @@ function printSamplesHuman(repoName: string, rows: SampleRow[]): void {
 		return;
 	}
 	console.log("");
-	// Column order: classification | basis | category | file:line | target
-	const header = "CLASSIFICATION               BASIS                                 CATEGORY                                     FILE:LINE                         TARGET";
+	const header = "BLAST  CLASSIFICATION               BASIS                                 CATEGORY                                     FILE:LINE                         TARGET";
 	console.log(header);
 	console.log("-".repeat(header.length));
 	for (const r of rows) {
+		const br = pad(r.blastRadius ?? "-", 6);
 		const cls = pad(r.classification, 28);
 		const basis = pad(r.basisCode, 38);
 		const cat = pad(r.category, 44);
@@ -382,7 +433,7 @@ function printSamplesHuman(repoName: string, rows: SampleRow[]): void {
 			`${r.sourceFilePath ?? "?"}:${r.lineStart ?? "?"}`,
 			33,
 		);
-		console.log(`${cls} ${basis} ${cat} ${loc} ${r.targetKey}`);
+		console.log(`${br} ${cls} ${basis} ${cat} ${loc} ${r.targetKey}`);
 	}
 }
 

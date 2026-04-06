@@ -5,8 +5,12 @@
 
 import React from "react";
 import { useState } from "react";
+import sharedUtil from "@shared/util";
 
 export function App() {
 	const [count, setCount] = useState(0);
+	// Unresolved call to sharedUtil() — callee from alias import.
+	// UI tsconfig has no paths of its own, inherits @shared/* from base.
+	sharedUtil();
 	return React.createElement("div", null, count);
 }

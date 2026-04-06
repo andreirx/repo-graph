@@ -9,8 +9,13 @@
 
 import { EdgeType } from "../model/index.js";
 import { DeclarationKind } from "../model/index.js";
+import type { UnresolvedEdgeClassification } from "../diagnostics/unresolved-edge-classification.js";
 import type { StoragePort } from "../ports/storage.js";
-import { humanLabelForCategory } from "../diagnostics/unresolved-edge-categories.js";
+import { deriveBlastRadius } from "../classification/blast-radius.js";
+import {
+	CALLS_CATEGORIES,
+	humanLabelForCategory,
+} from "../diagnostics/unresolved-edge-categories.js";
 import {
 	computeCallGraphReliability,
 	computeChangeImpactReliability,
@@ -31,6 +36,7 @@ import type {
 	TrustCategoryRow,
 	TrustClassificationRow,
 	TrustReport,
+	UnknownCallsBlastRadiusBreakdown,
 } from "./types.js";
 
 export interface ComputeTrustReportInput {
@@ -135,6 +141,20 @@ export function computeTrustReport(
 		? sumUnresolvedImports(diagnostics)
 		: 0;
 
+	// Variant A reweighting: compute how many unresolved CALLS are
+	// classified as external_library_candidate. These are excluded
+	// from the call-graph rate denominator.
+	const callsClassifiedByBucket = storage.countUnresolvedEdges({
+		snapshotUid,
+		groupBy: "classification",
+		filterCategories: [...CALLS_CATEGORIES] as string[],
+	});
+	const unresolvedCallsExternal =
+		callsClassifiedByBucket.find(
+			(r) => r.key === "external_library_candidate",
+		)?.count ?? 0;
+	const unresolvedCallsInternalLike = unresolvedCalls - unresolvedCallsExternal;
+
 	const importGraphReliability = computeImportGraphReliability({
 		aliasResolutionSuspicion: aliasResolution.triggered,
 		registryPatternSuspicion: registryPattern.triggered,
@@ -143,7 +163,7 @@ export function computeTrustReport(
 
 	const callGraphReliability = computeCallGraphReliability({
 		resolvedCalls,
-		unresolvedCalls,
+		unresolvedCallsInternalLike,
 	});
 
 	const deadCodeReliability = computeDeadCodeReliability({
@@ -190,6 +210,34 @@ export function computeTrustReport(
 			return a.classification.localeCompare(b.classification);
 		});
 
+	// ── Blast-radius breakdown (scoped to unknown CALLS) ────────
+	// Query-time derived: fetch unknown CALLS samples, derive
+	// blast-radius per-row, aggregate counts.
+	let unknownCallsBlastRadius: UnknownCallsBlastRadiusBreakdown | null = null;
+	if (classificationCounts.length > 0) {
+		const unknownCallsSamples = storage.queryUnresolvedEdges({
+			snapshotUid,
+			classification: "unknown" as UnresolvedEdgeClassification,
+			limit: 100000,
+		});
+		// Filter to CALLS-family only (queryUnresolvedEdges doesn't
+		// support multi-category filter, so filter in-memory).
+		const callsFamilySet = new Set(CALLS_CATEGORIES as readonly string[]);
+		const breakdown = { low: 0, medium: 0, high: 0 };
+		for (const row of unknownCallsSamples) {
+			if (!callsFamilySet.has(row.category)) continue;
+			const assessment = deriveBlastRadius({
+				category: row.category,
+				basisCode: row.basisCode,
+				sourceNodeVisibility: row.sourceNodeVisibility,
+			});
+			if (assessment.blastRadius === "low") breakdown.low++;
+			else if (assessment.blastRadius === "medium") breakdown.medium++;
+			else if (assessment.blastRadius === "high") breakdown.high++;
+		}
+		unknownCallsBlastRadius = breakdown;
+	}
+
 	// ── Build module rows ────────────────────────────────────────
 	const modules: ModuleTrustRow[] = moduleStats.map((m) => {
 		const suspicious =
@@ -233,9 +281,11 @@ export function computeTrustReport(
 			unresolved_total: diagnostics?.unresolved_total ?? 0,
 			resolved_calls: resolvedCalls,
 			unresolved_calls: unresolvedCalls,
+			unresolved_calls_external: unresolvedCallsExternal,
+			unresolved_calls_internal_like: unresolvedCallsInternalLike,
 			call_resolution_rate:
-				resolvedCalls + unresolvedCalls > 0
-					? resolvedCalls / (resolvedCalls + unresolvedCalls)
+				resolvedCalls + unresolvedCallsInternalLike > 0
+					? resolvedCalls / (resolvedCalls + unresolvedCallsInternalLike)
 					: 1,
 			reliability: {
 				import_graph: importGraphReliability,
@@ -252,6 +302,7 @@ export function computeTrustReport(
 		},
 		categories,
 		classifications,
+		unknown_calls_blast_radius: unknownCallsBlastRadius,
 		modules,
 		caveats,
 		diagnostics_available: diagnosticsAvailable,

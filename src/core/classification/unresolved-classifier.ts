@@ -139,8 +139,9 @@ export function classifyUnresolvedEdge(
 		if (binding.isRelative) {
 			return internal(internalImportBasisFor(category));
 		}
-		// Rule 5d: binding specifier matches a project alias.
-		if (matchesAnyAlias(binding.specifier, snapshotSignals.tsconfigAliases)) {
+		// Rule 5d: binding specifier matches a project alias
+		// (from the nearest tsconfig.json to this source file).
+		if (matchesAnyAlias(binding.specifier, fileSignals.tsconfigAliases)) {
 			return internal(UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PROJECT_ALIAS);
 		}
 		// Non-relative specifier that matched nothing.

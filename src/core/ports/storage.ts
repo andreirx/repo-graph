@@ -504,6 +504,12 @@ export interface QueryUnresolvedEdgesInput {
 export interface CountUnresolvedEdgesInput {
 	snapshotUid: string;
 	groupBy: "classification" | "category";
+	/**
+	 * Optional: restrict to rows matching these categories BEFORE
+	 * grouping. Used by the trust service to count only CALLS-family
+	 * unresolved edges grouped by classification.
+	 */
+	filterCategories?: string[];
 }
 
 /**
@@ -534,4 +540,6 @@ export interface UnresolvedEdgeSampleRow {
 	sourceFilePath: string | null;
 	lineStart: number | null;
 	colStart: number | null;
+	/** Visibility of the enclosing source node (EXPORT, PRIVATE, null). */
+	sourceNodeVisibility: string | null;
 }

@@ -168,3 +168,56 @@ describe("monorepo nearest-package resolution", () => {
 		expect(crossLeaks).toEqual([]);
 	});
 });
+
+// ── Nearest-owning tsconfig resolution ──────────────────────────────
+
+describe("monorepo nearest-tsconfig resolution", () => {
+	it("API file classifies @api/helper as internal via package-local tsconfig alias", async () => {
+		// packages/api/tsconfig.json defines @api/* → ./src/*.
+		// apiHelper imported from "@api/helper" should match this alias.
+		const result = await indexer.indexRepo(REPO_UID);
+		const rows = storage.queryUnresolvedEdges({
+			snapshotUid: result.snapshotUid,
+			category: "calls_function_ambiguous_or_missing",
+		});
+		const row = rows.find(
+			(r) => r.targetKey === "apiHelper" && r.sourceFilePath?.includes("packages/api/"),
+		);
+		expect(row).toBeDefined();
+		expect(row?.classification).toBe("internal_candidate");
+		expect(row?.basisCode).toBe("specifier_matches_project_alias");
+	});
+
+	it("UI file classifies @shared/util as internal via inherited tsconfig alias (extends chain)", async () => {
+		// packages/ui/tsconfig.json has no paths, extends ../../tsconfig.base.json.
+		// tsconfig.base.json defines @shared/* → ./shared/*.
+		// sharedUtil imported from "@shared/util" should match via extends.
+		const result = await indexer.indexRepo(REPO_UID);
+		const rows = storage.queryUnresolvedEdges({
+			snapshotUid: result.snapshotUid,
+			category: "calls_function_ambiguous_or_missing",
+		});
+		const row = rows.find(
+			(r) => r.targetKey === "sharedUtil" && r.sourceFilePath?.includes("packages/ui/"),
+		);
+		expect(row).toBeDefined();
+		expect(row?.classification).toBe("internal_candidate");
+		expect(row?.basisCode).toBe("specifier_matches_project_alias");
+	});
+
+	it("API @api/* alias does NOT leak into UI files (tsconfig isolation)", async () => {
+		// UI tsconfig inherits @shared/* from base, NOT @api/* from API.
+		// If tsconfig aliases were unioned, @api/* would incorrectly
+		// match in UI files.
+		const result = await indexer.indexRepo(REPO_UID);
+		const uiRows = storage.queryUnresolvedEdges({
+			snapshotUid: result.snapshotUid,
+		}).filter((r) => r.sourceFilePath?.includes("packages/ui/"));
+
+		const apiAliasLeaks = uiRows.filter(
+			(r) => r.basisCode === "specifier_matches_project_alias" &&
+				r.targetKey !== "sharedUtil",
+		);
+		expect(apiAliasLeaks).toEqual([]);
+	});
+});

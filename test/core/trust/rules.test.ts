@@ -269,7 +269,7 @@ describe("computeCallGraphReliability", () => {
 	it("LOW when rate < 50%", () => {
 		const result = computeCallGraphReliability({
 			resolvedCalls: 4,
-			unresolvedCalls: 6,
+			unresolvedCallsInternalLike: 6,
 		});
 		expect(result.level).toBe("LOW");
 	});
@@ -277,7 +277,7 @@ describe("computeCallGraphReliability", () => {
 	it("MEDIUM when 50% <= rate < 85%", () => {
 		const result = computeCallGraphReliability({
 			resolvedCalls: 7,
-			unresolvedCalls: 3,
+			unresolvedCallsInternalLike: 3,
 		});
 		expect(result.level).toBe("MEDIUM");
 	});
@@ -285,7 +285,7 @@ describe("computeCallGraphReliability", () => {
 	it("HIGH when rate >= 85%", () => {
 		const result = computeCallGraphReliability({
 			resolvedCalls: 9,
-			unresolvedCalls: 1,
+			unresolvedCallsInternalLike: 1,
 		});
 		expect(result.level).toBe("HIGH");
 	});
@@ -293,7 +293,7 @@ describe("computeCallGraphReliability", () => {
 	it("HIGH when no CALLS edges at all (nothing to fail)", () => {
 		const result = computeCallGraphReliability({
 			resolvedCalls: 0,
-			unresolvedCalls: 0,
+			unresolvedCallsInternalLike: 0,
 		});
 		expect(result.level).toBe("HIGH");
 	});

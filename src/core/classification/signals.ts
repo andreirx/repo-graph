@@ -155,13 +155,12 @@ export function matchesAnyAlias(
  * Snapshot-scoped signals. Built once per indexing pass; shared
  * across every file's classification in that snapshot.
  *
- * packageDependencies is NOT here — it moved to FileSignals in
- * slice 4.2 because monorepo sub-packages declare their own deps.
- * Each source file is classified against its NEAREST owning
- * package.json, not the repo-root one.
+ * packageDependencies and tsconfigAliases are NOT here — they moved
+ * to FileSignals because monorepo sub-packages declare their own
+ * deps and may have their own tsconfig with distinct path aliases.
+ * Each source file is classified against its NEAREST owning context.
  */
 export interface SnapshotSignals {
-	readonly tsconfigAliases: TsconfigAliases;
 	readonly runtimeBuiltins: RuntimeBuiltinsSet;
 }
 
@@ -203,6 +202,13 @@ export interface FileSignals {
 	 * upward from the file's directory to the repo root.
 	 */
 	readonly packageDependencies: PackageDependencySet;
+	/**
+	 * Path aliases from the NEAREST tsconfig.json ancestor of this
+	 * source file. Follows `extends` chains (relative paths only
+	 * in first slice). In a monorepo, different packages may have
+	 * distinct path alias configurations.
+	 */
+	readonly tsconfigAliases: TsconfigAliases;
 }
 
 /**
@@ -213,7 +219,6 @@ export interface FileSignals {
  */
 export function emptySnapshotSignals(): SnapshotSignals {
 	return {
-		tsconfigAliases: { entries: Object.freeze([]) },
 		runtimeBuiltins: { identifiers: Object.freeze([]), moduleSpecifiers: Object.freeze([]) },
 	};
 }
@@ -231,5 +236,6 @@ export function emptyFileSignals(): FileSignals {
 		sameFileClassSymbols: new Set<string>(),
 		sameFileInterfaceSymbols: new Set<string>(),
 		packageDependencies: { names: Object.freeze([]) },
+		tsconfigAliases: { entries: Object.freeze([]) },
 	};
 }

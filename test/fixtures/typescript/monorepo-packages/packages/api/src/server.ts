@@ -5,12 +5,15 @@
 
 import express from "express";
 import cors from "cors";
+import apiHelper from "@api/helper";
 
 const app = express();
 app.use(cors());
 
 // Unresolved call to express() and cors() — callees from external import.
 // Unresolved call to app.use() — receiver from same-file value.
+// Unresolved call to apiHelper() — callee from alias import (@api/*).
+apiHelper();
 
 export function startServer(): void {
 	// empty

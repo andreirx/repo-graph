@@ -1,0 +1,11 @@
+{
+	// API package: overrides paths entirely (TypeScript merge rule).
+	// @api/* is defined here; @shared/* from base is NOT inherited
+	// because child paths replaces parent paths.
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"paths": {
+			"@api/*": ["./src/*"]
+		}
+	}
+}

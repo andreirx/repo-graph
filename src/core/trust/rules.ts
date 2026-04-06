@@ -182,19 +182,26 @@ export function computeImportGraphReliability(input: {
 
 /**
  * Call graph reliability.
- *   rate = resolved_calls / (resolved_calls + unresolved_calls)
+ *
+ * Variant A reweighting (classifier v2):
+ *   The denominator is `resolved + unresolvedCallsInternalLike`,
+ *   which excludes unresolved CALLS classified as
+ *   `external_library_candidate`. External-library calls are not
+ *   internal call-graph failures and should not deflate the rate.
+ *
+ *   rate = resolved / (resolved + internal_like_unresolved)
  *   LOW     if rate < 0.50
  *   MEDIUM  if 0.50 <= rate < 0.85
  *   HIGH    if rate >= 0.85
  *
- * Edge case: if resolved + unresolved == 0 (no CALLS edges at all),
- * the rate is undefined. We return HIGH — there is nothing to fail.
+ * Edge case: if resolved + internal_like == 0 (no internal CALLS at
+ * all), the rate is undefined. We return HIGH — nothing to fail.
  */
 export function computeCallGraphReliability(input: {
 	resolvedCalls: number;
-	unresolvedCalls: number;
+	unresolvedCallsInternalLike: number;
 }): ReliabilityAxisScore {
-	const total = input.resolvedCalls + input.unresolvedCalls;
+	const total = input.resolvedCalls + input.unresolvedCallsInternalLike;
 	if (total === 0) {
 		return { level: "HIGH", reasons: [] };
 	}

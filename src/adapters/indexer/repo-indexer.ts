@@ -25,10 +25,10 @@ import { CURRENT_CLASSIFIER_VERSION } from "../../core/diagnostics/unresolved-ed
 import { classifyUnresolvedEdge } from "../../core/classification/unresolved-classifier.js";
 import {
 	emptyFileSignals,
-	emptySnapshotSignals,
 	type FileSignals,
 	type PackageDependencySet,
 	type SnapshotSignals,
+	type TsconfigAliases,
 } from "../../core/classification/signals.js";
 import type {
 	ExtractionResult,
@@ -153,7 +153,7 @@ export class RepoIndexer implements IndexerPort {
 			// 1a. Read snapshot-level classifier signals BEFORE extraction.
 			// These degrade to empty on any read/parse failure — indexing
 			// must not fail because classifier inputs are unavailable.
-			const snapshotSignals = await this.buildSnapshotSignals(repo.rootPath);
+			const snapshotSignals = this.buildSnapshotSignals();
 
 			// 2. Scan file tree
 			emit({ phase: "scanning", current: 0, total: 0 });
@@ -225,6 +225,7 @@ export class RepoIndexer implements IndexerPort {
 			// in the same directory subtree to avoid redundant upward
 			// walks and file reads.
 			const packageDepsCache = new Map<string, PackageDependencySet>();
+			const tsconfigAliasesCache = new Map<string, TsconfigAliases>();
 			let extractIdx = 0;
 
 			for (const relPath of filePaths) {
@@ -306,11 +307,16 @@ export class RepoIndexer implements IndexerPort {
 					// Build reverse lookup for every extracted node.
 					nodeUidToFileUid.set(node.nodeUid, fileUid);
 				}
-				// Resolve per-file package deps from nearest package.json.
+				// Resolve per-file package deps + tsconfig aliases from nearest ancestors.
 				const packageDependencies = await this.resolveNearestPackageDeps(
 					relPath,
 					repo.rootPath,
 					packageDepsCache,
+				);
+				const tsconfigAliases = await this.resolveNearestTsconfigAliases(
+					relPath,
+					repo.rootPath,
+					tsconfigAliasesCache,
 				);
 				fileSignalsCache.set(fileUid, {
 					importBindings: result.importBindings,
@@ -318,6 +324,7 @@ export class RepoIndexer implements IndexerPort {
 					sameFileClassSymbols,
 					sameFileInterfaceSymbols,
 					packageDependencies,
+					tsconfigAliases,
 				});
 
 				extractIdx++;
@@ -942,19 +949,10 @@ export class RepoIndexer implements IndexerPort {
 	 * unavailable — classification is additive, not required for
 	 * graph correctness.
 	 */
-	private async buildSnapshotSignals(
-		repoRootPath: string,
-	): Promise<SnapshotSignals> {
-		const empty = emptySnapshotSignals();
-
-		// tsconfig aliases
-		const tsconfigAliases =
-			(await readTsconfigAliases(repoRootPath)) ?? empty.tsconfigAliases;
-
+	private buildSnapshotSignals(): SnapshotSignals {
 		// Runtime builtins from the extractor (language-specific via port).
 		const runtimeBuiltins = this.extractor.runtimeBuiltins;
-
-		return { tsconfigAliases, runtimeBuiltins };
+		return { runtimeBuiltins };
 	}
 
 	/**
@@ -1017,6 +1015,52 @@ export class RepoIndexer implements IndexerPort {
 		// No package.json found anywhere up to repo root.
 		for (const d of uncachedDirs) cache.set(d, emptyDeps);
 		return emptyDeps;
+	}
+
+	/**
+	 * Resolve the nearest tsconfig.json ancestor for a file and return
+	 * its effective path aliases (following `extends` chains).
+	 *
+	 * Same walk + cache pattern as resolveNearestPackageDeps: every
+	 * directory on the upward path is cached so sibling files resolve
+	 * in O(1).
+	 */
+	private async resolveNearestTsconfigAliases(
+		fileRelPath: string,
+		repoRootPath: string,
+		cache: Map<string, TsconfigAliases>,
+	): Promise<TsconfigAliases> {
+		const emptyAliases: TsconfigAliases = { entries: Object.freeze([]) };
+		let dir = fileRelPath.includes("/")
+			? fileRelPath.slice(0, fileRelPath.lastIndexOf("/"))
+			: "";
+
+		const uncachedDirs: string[] = [];
+
+		while (true) {
+			const cached = cache.get(dir);
+			if (cached !== undefined) {
+				for (const d of uncachedDirs) cache.set(d, cached);
+				return cached;
+			}
+			uncachedDirs.push(dir);
+
+			const tsconfigDir = dir === ""
+				? repoRootPath
+				: join(repoRootPath, dir);
+			const aliases = await readTsconfigAliases(tsconfigDir);
+			if (aliases !== null) {
+				for (const d of uncachedDirs) cache.set(d, aliases);
+				return aliases;
+			}
+
+			if (dir === "") break;
+			const slash = dir.lastIndexOf("/");
+			dir = slash >= 0 ? dir.slice(0, slash) : "";
+		}
+
+		for (const d of uncachedDirs) cache.set(d, emptyAliases);
+		return emptyAliases;
 	}
 
 	/**

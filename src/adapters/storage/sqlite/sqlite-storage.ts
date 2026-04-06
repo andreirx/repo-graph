@@ -546,7 +546,8 @@ export class SqliteStorage implements StoragePort {
 				n.stable_key         AS source_stable_key,
 				f.path               AS source_file_path,
 				ue.line_start        AS line_start,
-				ue.col_start         AS col_start
+				ue.col_start         AS col_start,
+				n.visibility         AS source_node_visibility
 			FROM unresolved_edges ue
 			LEFT JOIN nodes n ON n.node_uid = ue.source_node_uid
 			LEFT JOIN files f ON f.file_uid = n.file_uid
@@ -588,6 +589,7 @@ export class SqliteStorage implements StoragePort {
 			source_file_path: string | null;
 			line_start: number | null;
 			col_start: number | null;
+			source_node_visibility: string | null;
 		}>;
 
 		return rows.map((r) => ({
@@ -597,13 +599,11 @@ export class SqliteStorage implements StoragePort {
 			basisCode: r.basis_code as UnresolvedEdgeBasisCode,
 			targetKey: r.target_key,
 			sourceNodeUid: r.source_node_uid,
-			// n.stable_key comes from a LEFT JOIN; coerce NULL to empty
-			// to keep the type narrow. In practice it's only NULL if the
-			// source node was deleted underneath us (shouldn't happen).
 			sourceStableKey: r.source_stable_key ?? "",
 			sourceFilePath: r.source_file_path,
 			lineStart: r.line_start,
 			colStart: r.col_start,
+			sourceNodeVisibility: r.source_node_visibility,
 		}));
 	}
 
@@ -614,14 +614,24 @@ export class SqliteStorage implements StoragePort {
 		// allowing only the two documented axes.
 		const column =
 			input.groupBy === "classification" ? "classification" : "category";
-		const sql = `
+
+		let sql = `
 			SELECT ${column} AS key, COUNT(*) AS count
 			FROM unresolved_edges
-			WHERE snapshot_uid = ?
-			GROUP BY ${column}
-			ORDER BY key ASC`;
+			WHERE snapshot_uid = ?`;
+		const params: unknown[] = [input.snapshotUid];
 
-		const rows = this.db.prepare(sql).all(input.snapshotUid) as Array<{
+		// Optional category pre-filter (e.g. restrict to CALLS-family
+		// categories before grouping by classification).
+		if (input.filterCategories && input.filterCategories.length > 0) {
+			const placeholders = input.filterCategories.map(() => "?").join(", ");
+			sql += ` AND category IN (${placeholders})`;
+			params.push(...input.filterCategories);
+		}
+
+		sql += ` GROUP BY ${column} ORDER BY key ASC`;
+
+		const rows = this.db.prepare(sql).all(...params) as Array<{
 			key: string;
 			count: number;
 		}>;

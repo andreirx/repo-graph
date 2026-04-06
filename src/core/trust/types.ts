@@ -73,9 +73,34 @@ export interface TrustSummary {
 	unresolved_total: number;
 	/** Count of resolved CALLS edges in the snapshot. */
 	resolved_calls: number;
-	/** Sum of unresolved CALLS-family categories. */
+	/** Sum of ALL unresolved CALLS-family categories (total). */
 	unresolved_calls: number;
-	/** resolved_calls / (resolved_calls + unresolved_calls). */
+	/**
+	 * Unresolved CALLS classified as external_library_candidate.
+	 * These are calls to code outside the repo (npm packages,
+	 * runtime builtins, stdlib modules). Excluded from the
+	 * call_resolution_rate denominator because they are not
+	 * internal call-graph failures.
+	 *
+	 * Zero when the snapshot predates migration 007 (no
+	 * classification data available).
+	 */
+	unresolved_calls_external: number;
+	/**
+	 * Unresolved CALLS NOT classified as external: internal_candidate
+	 * + unknown. These remain in the call_resolution_rate denominator
+	 * because they represent genuine internal call-graph uncertainty.
+	 *
+	 * Equal to unresolved_calls - unresolved_calls_external.
+	 */
+	unresolved_calls_internal_like: number;
+	/**
+	 * resolved_calls / (resolved_calls + unresolved_calls_internal_like).
+	 *
+	 * The denominator excludes external-library unresolved calls
+	 * (Variant A reweighting, introduced with classifier v2).
+	 * The result is a cleaner measure of internal call-graph quality.
+	 */
 	call_resolution_rate: number;
 	reliability: TrustReliability;
 	triggered_downgrades: TrustDowngrades;
@@ -97,6 +122,17 @@ export interface TrustCategoryRow {
  * See docs/architecture/schema.txt (unresolved_edges table) and
  * src/core/classification/unresolved-classifier.ts.
  */
+/**
+ * Blast-radius breakdown for unknown-classified CALLS edges.
+ * Scoped: only counts CALLS-family edges with classification=unknown.
+ */
+export interface UnknownCallsBlastRadiusBreakdown {
+	low: number;
+	medium: number;
+	/** Currently always 0 (entrypoint-path detection deferred). */
+	high: number;
+}
+
 export interface TrustClassificationRow {
 	/** Machine-stable classification key (e.g. "external_library_candidate"). */
 	classification: string;
@@ -146,6 +182,14 @@ export interface TrustReport {
 	 * a category (failure mode) and a classification (semantic meaning).
 	 */
 	classifications: TrustClassificationRow[];
+	/**
+	 * Blast-radius breakdown for unknown-classified CALLS edges.
+	 * Scoped to the subset that motivated the axis: CALLS where
+	 * classification=unknown (the dominant residual). Non-CALLS
+	 * unresolveds are excluded. Null when the snapshot predates
+	 * migration 007.
+	 */
+	unknown_calls_blast_radius: UnknownCallsBlastRadiusBreakdown | null;
 	modules: ModuleTrustRow[];
 	/** Human-readable caveats summarizing the trust posture. */
 	caveats: string[];
