@@ -31,6 +31,7 @@ import {
 	sumUnresolvedImports,
 } from "./rules.js";
 import type {
+	EnrichmentStatus,
 	ExtractionDiagnostics,
 	ModuleTrustRow,
 	TrustCategoryRow,
@@ -214,18 +215,25 @@ export function computeTrustReport(
 	// Query-time derived: fetch unknown CALLS samples, derive
 	// blast-radius per-row, aggregate counts.
 	let unknownCallsBlastRadius: UnknownCallsBlastRadiusBreakdown | null = null;
+	let enrichmentStatus: EnrichmentStatus | null = null;
 	if (classificationCounts.length > 0) {
 		const unknownCallsSamples = storage.queryUnresolvedEdges({
 			snapshotUid,
 			classification: "unknown" as UnresolvedEdgeClassification,
 			limit: 100000,
 		});
-		// Filter to CALLS-family only (queryUnresolvedEdges doesn't
-		// support multi-category filter, so filter in-memory).
+		// Filter to CALLS-family only.
 		const callsFamilySet = new Set(CALLS_CATEGORIES as readonly string[]);
 		const breakdown = { low: 0, medium: 0, high: 0 };
+		// Enrichment tracking.
+		let enrichedCount = 0;
+		let eligibleCount = 0;
+		let enrichmentWasRun = false;
+		const typeCounts = new Map<string, { count: number; isExternal: boolean }>();
+
 		for (const row of unknownCallsSamples) {
 			if (!callsFamilySet.has(row.category)) continue;
+			// Blast radius.
 			const assessment = deriveBlastRadius({
 				category: row.category,
 				basisCode: row.basisCode,
@@ -234,8 +242,49 @@ export function computeTrustReport(
 			if (assessment.blastRadius === "low") breakdown.low++;
 			else if (assessment.blastRadius === "medium") breakdown.medium++;
 			else if (assessment.blastRadius === "high") breakdown.high++;
+
+			// Enrichment status: check metadata_json for enrichment key.
+			if (row.category === "calls_obj_method_needs_type_info") {
+				eligibleCount++;
+				if (row.metadataJson) {
+					try {
+						const meta = JSON.parse(row.metadataJson) as Record<string, unknown>;
+						const enrichment = meta.enrichment as Record<string, unknown> | undefined;
+						if (enrichment) {
+							// Enrichment marker present — enrichment WAS run on this edge.
+							enrichmentWasRun = true;
+							if (enrichment.receiverType) {
+								enrichedCount++;
+								const typeName = String(enrichment.typeDisplayName ?? enrichment.receiverType);
+								const isExt = Boolean(enrichment.isExternalType);
+								const existing = typeCounts.get(typeName);
+								if (existing) {
+									existing.count++;
+								} else {
+									typeCounts.set(typeName, { count: 1, isExternal: isExt });
+								}
+							}
+						}
+					} catch {
+						// ignore malformed metadata
+					}
+				}
+			}
 		}
 		unknownCallsBlastRadius = breakdown;
+
+		// Build enrichment status.
+		// Null ONLY if enrichment was never run (no enrichment markers
+		// found on any edge). Populated with enriched=0 if enrichment
+		// ran but resolved zero types. This distinction matters for
+		// the trust display.
+		if (enrichmentWasRun) {
+			const topTypes = [...typeCounts.entries()]
+				.sort((a, b) => b[1].count - a[1].count)
+				.slice(0, 15)
+				.map(([type, { count, isExternal }]) => ({ type, count, isExternal }));
+			enrichmentStatus = { eligible: eligibleCount, enriched: enrichedCount, top_types: topTypes };
+		}
 	}
 
 	// ── Build module rows ────────────────────────────────────────
@@ -303,6 +352,7 @@ export function computeTrustReport(
 		categories,
 		classifications,
 		unknown_calls_blast_radius: unknownCallsBlastRadius,
+		enrichment_status: enrichmentStatus,
 		modules,
 		caveats,
 		diagnostics_available: diagnosticsAvailable,

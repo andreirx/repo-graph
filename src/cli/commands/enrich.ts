@@ -119,9 +119,14 @@ export function registerEnrichCommand(
 			// Persist enrichments via merge into existing metadata_json.
 			// Merge semantics preserve extractor-provided context
 			// (rawCalleeName, rawPath, etc.) while adding the enrichment key.
+			//
+			// EVERY eligible edge gets an enrichment marker — even those
+			// where the compiler failed. This allows the trust report to
+			// distinguish "enrichment not run" from "enrichment run with
+			// zero successes." The marker carries origin="compiler" for
+			// successes and origin="failed" for failures.
 			const updates: Array<{ edgeUid: string; metadataJsonPatch: string }> = [];
 			for (const r of results) {
-				if (r.receiverType === null) continue;
 				updates.push({
 					edgeUid: r.edgeUid,
 					metadataJsonPatch: JSON.stringify({
@@ -130,6 +135,7 @@ export function registerEnrichCommand(
 							typeDisplayName: r.typeDisplayName,
 							isExternalType: r.isExternalType,
 							origin: r.receiverTypeOrigin,
+							...(r.failureReason ? { failureReason: r.failureReason } : {}),
 						},
 					}),
 				});

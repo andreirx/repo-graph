@@ -555,4 +555,6 @@ export interface UnresolvedEdgeSampleRow {
 	colStart: number | null;
 	/** Visibility of the enclosing source node (EXPORT, PRIVATE, null). */
 	sourceNodeVisibility: string | null;
+	/** Raw metadata_json from the unresolved_edges row. May contain enrichment data. */
+	metadataJson: string | null;
 }

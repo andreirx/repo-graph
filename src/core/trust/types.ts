@@ -133,6 +133,15 @@ export interface UnknownCallsBlastRadiusBreakdown {
 	high: number;
 }
 
+export interface EnrichmentStatus {
+	/** How many unknown CALLS edges were eligible for enrichment. */
+	eligible: number;
+	/** How many carry enrichment metadata (enrichment has been run). */
+	enriched: number;
+	/** Top resolved receiver types, sorted by count desc. */
+	top_types: Array<{ type: string; count: number; isExternal: boolean }>;
+}
+
 export interface TrustClassificationRow {
 	/** Machine-stable classification key (e.g. "external_library_candidate"). */
 	classification: string;
@@ -190,6 +199,16 @@ export interface TrustReport {
 	 * migration 007.
 	 */
 	unknown_calls_blast_radius: UnknownCallsBlastRadiusBreakdown | null;
+	/**
+	 * Enrichment status for unknown CALLS. Reports how many of the
+	 * eligible unknown obj.method() edges have been enriched with
+	 * compiler-derived receiver types via `rgr enrich`.
+	 *
+	 * Null when no enrichment has been run (no edges carry enrichment
+	 * metadata). This explicitly distinguishes "not enriched" from
+	 * "enriched with zero results."
+	 */
+	enrichment_status: EnrichmentStatus | null;
 	modules: ModuleTrustRow[];
 	/** Human-readable caveats summarizing the trust posture. */
 	caveats: string[];

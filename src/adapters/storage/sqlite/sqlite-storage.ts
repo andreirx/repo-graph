@@ -547,7 +547,8 @@ export class SqliteStorage implements StoragePort {
 				f.path               AS source_file_path,
 				ue.line_start        AS line_start,
 				ue.col_start         AS col_start,
-				n.visibility         AS source_node_visibility
+				n.visibility         AS source_node_visibility,
+				ue.metadata_json     AS metadata_json
 			FROM unresolved_edges ue
 			LEFT JOIN nodes n ON n.node_uid = ue.source_node_uid
 			LEFT JOIN files f ON f.file_uid = n.file_uid
@@ -590,6 +591,7 @@ export class SqliteStorage implements StoragePort {
 			line_start: number | null;
 			col_start: number | null;
 			source_node_visibility: string | null;
+			metadata_json: string | null;
 		}>;
 
 		return rows.map((r) => ({
@@ -604,6 +606,7 @@ export class SqliteStorage implements StoragePort {
 			lineStart: r.line_start,
 			colStart: r.col_start,
 			sourceNodeVisibility: r.source_node_visibility,
+			metadataJson: r.metadata_json,
 		}));
 	}
 

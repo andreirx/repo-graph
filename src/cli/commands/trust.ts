@@ -205,14 +205,27 @@ function runSamples(
 		limit: queryLimit,
 	});
 
-	// Enrich rows with derived blast-radius.
+	// Enrich rows with derived blast-radius + compiler receiver type.
 	const enriched = rows.map((r) => {
 		const assessment = deriveBlastRadius({
 			category: r.category,
 			basisCode: r.basisCode,
 			sourceNodeVisibility: r.sourceNodeVisibility,
 		});
-		return { ...r, ...assessment };
+		// Extract compiler-resolved receiver type from metadata if present.
+		let receiverType: string | null = null;
+		if (r.metadataJson) {
+			try {
+				const meta = JSON.parse(r.metadataJson) as Record<string, unknown>;
+				const enrichment = meta.enrichment as Record<string, unknown> | undefined;
+				if (enrichment?.receiverType) {
+					receiverType = String(enrichment.typeDisplayName ?? enrichment.receiverType);
+				}
+			} catch {
+				// ignore
+			}
+		}
+		return { ...r, ...assessment, receiverType };
 	});
 
 	// Apply blast-radius filter if requested.
@@ -382,6 +395,27 @@ function printHuman(repoName: string, report: TrustReport): void {
 		}
 	}
 
+	// Enrichment status (from rgr enrich).
+	if (report.enrichment_status) {
+		const es = report.enrichment_status;
+		const rate = es.eligible > 0
+			? ((es.enriched / es.eligible) * 100).toFixed(1)
+			: "0";
+		console.log(`Compiler enrichment (unknown obj.method() calls):`);
+		console.log(`  enriched: ${es.enriched}/${es.eligible} (${rate}%)`);
+		if (es.top_types.length > 0) {
+			console.log("  Top resolved receiver types:");
+			for (const t of es.top_types) {
+				const ext = t.isExternal ? " [ext]" : "";
+				console.log(`    ${String(t.count).padStart(5)}  ${t.type}${ext}`);
+			}
+		}
+		console.log("");
+	} else if (report.classifications.length > 0) {
+		console.log("Compiler enrichment: not run (use `rgr enrich` to resolve receiver types)");
+		console.log("");
+	}
+
 	const suspicious = report.modules.filter(
 		(m) => m.suspicious_zero_connectivity,
 	);
@@ -411,6 +445,7 @@ interface SampleRow {
 	sourceFilePath: string | null;
 	lineStart: number | null;
 	blastRadius?: string;
+	receiverType?: string | null;
 }
 
 function printSamplesHuman(repoName: string, rows: SampleRow[]): void {
@@ -420,8 +455,12 @@ function printSamplesHuman(repoName: string, rows: SampleRow[]): void {
 		console.log("(no rows match the given filters)");
 		return;
 	}
+	// RECV_TYPE is additive — shown alongside all existing columns
+	// when any row has enrichment. Columns are never removed.
+	const hasEnrichment = rows.some((r) => r.receiverType);
 	console.log("");
-	const header = "BLAST  CLASSIFICATION               BASIS                                 CATEGORY                                     FILE:LINE                         TARGET";
+	const rtCol = hasEnrichment ? "RECV_TYPE            " : "";
+	const header = `BLAST  CLASSIFICATION               BASIS                                 CATEGORY                                     ${rtCol}FILE:LINE                         TARGET`;
 	console.log(header);
 	console.log("-".repeat(header.length));
 	for (const r of rows) {
@@ -429,11 +468,9 @@ function printSamplesHuman(repoName: string, rows: SampleRow[]): void {
 		const cls = pad(r.classification, 28);
 		const basis = pad(r.basisCode, 38);
 		const cat = pad(r.category, 44);
-		const loc = pad(
-			`${r.sourceFilePath ?? "?"}:${r.lineStart ?? "?"}`,
-			33,
-		);
-		console.log(`${br} ${cls} ${basis} ${cat} ${loc} ${r.targetKey}`);
+		const rt = hasEnrichment ? pad(r.receiverType ?? "-", 21) : "";
+		const loc = pad(`${r.sourceFilePath ?? "?"}:${r.lineStart ?? "?"}`, 33);
+		console.log(`${br} ${cls} ${basis} ${cat} ${rt} ${loc} ${r.targetKey}`);
 	}
 }
 
