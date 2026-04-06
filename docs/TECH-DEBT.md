@@ -11,19 +11,28 @@
 
 ## Extraction — Rust
 
-- Rust extractor (tree-sitter-rust) indexes .rs files: structs, enums, traits,
-  impl methods, functions, constants, statics, type aliases.
-- Cargo.toml dependency reader feeds per-crate deps into the classifier.
-- Rust stdlib module specifiers (std::*, core::*, alloc::*) recognized as runtime.
-- Compiler enrichment via rust-analyzer LSP resolves ~85% of unknown receiver types.
+- Rust extractor indexes: structs, enums, traits, impl methods, functions,
+  constants, statics, type aliases. `use` declarations produce IMPORTS edges +
+  import bindings. Method/function calls produce CALLS edges.
 - `#[cfg(...)]` conditional duplicates deduplicated (first emission wins).
-- Language-aware manifest isolation: .rs files use Cargo.toml, .ts/.js use package.json.
-- **Rust internal module path resolution incomplete:** `use renderer::Camera`
-  (without `crate::/super::/self::` prefix) falls to `unknown`. Needs
-  crate-root-relative module path awareness.
-- **Nearest-Cargo-context routing missing:** `rgr enrich` sends all .rs sites
-  to one repo-root rust-analyzer instance. Nested-crate or multi-workspace repos
-  need per-Cargo.toml enrichment boundaries.
+- Compiler enrichment via rust-analyzer LSP resolves ~85% of unknown receiver types.
+- **Crate-internal module heuristic is not infallible:** `use renderer::Camera`
+  classified as `internal_candidate` via `RUST_CRATE_INTERNAL_MODULE_HEURISTIC`.
+  A mistyped or undeclared external crate with a lowercase name would be
+  misclassified as internal. This is a documented limitation of the heuristic,
+  not a defect in the model.
+- **No Rust framework detectors yet:** Actix-web, Axum, Rocket, Warp routes
+  are unmodeled. Same gap as pre-Express TS had.
+
+## Extraction — Languages Not Yet Supported
+
+- **Java:** glamCRM has Java code. Architecture is ready. Requires tree-sitter-java,
+  Maven/Gradle reader. Blocked only on implementation effort.
+- **Python:** Common in data/ML pipelines and build tooling. Requires tree-sitter-python,
+  pip/pyproject.toml reader.
+- **C/C++:** Highest business value (Linux BSP, embedded). Requires compile_commands.json
+  boundary + Clang-backed extraction. Do not start until simpler languages validate
+  the architecture.
 
 ## Coverage / Churn Import
 
@@ -40,12 +49,10 @@
   exercised by any live supersession path.
 
 ### Rust-Specific
-- **Live Rust enrichment integration test (next slice):**
-  `resolveRustReceiverTypes()` and the Rust branch in `rgr enrich` have NO
-  automated coverage. The hover parser and validator are unit-tested (34 tests),
-  but the end-to-end path — rust-analyzer subprocess startup, project warm-up,
-  live hover requests, failure handling, and metadata persistence — is unpinned.
-  Requires a real Cargo project fixture + rust-analyzer on PATH.
+- **pnpm test is not giving a clean signal in the current workspace** due to
+  recurring `better-sqlite3` NODE_MODULE_VERSION drift. The issue is
+  environmental (Node.js version changes between invocations), not code-related.
+  Fix: `pnpm rebuild better-sqlite3`.
 
 ### TypeScript-Specific
 - `package-name extends` in tsconfig: `extends: "@tsconfig/node18"` not
@@ -56,3 +63,15 @@
 - `graph dead` answers "no known inbound graph edges," not "semantically unreachable."
 - Registry/plugin-driven architectures produce false positives.
 - See v1-validation-report.txt for the full extraction capability boundary.
+
+## Classifier Limitations
+
+- **Classifier version 6** is the current persisted format. Rows from earlier
+  versions are distinguishable by `classifier_version` column on `unresolved_edges`.
+- The crate-internal module heuristic (`RUST_CRATE_INTERNAL_MODULE_HEURISTIC`)
+  labels likely-internal Rust imports but cannot prove they are internal without
+  crate module-tree awareness.
+- Blast-radius HIGH is always 0 (entrypoint-path detection deferred).
+- No systematic accuracy spot-check of classifier verdicts has been performed
+  since the v4 spot-check (100% precision on 96 sampled edges). Rust-specific
+  precision has not been formally measured.
