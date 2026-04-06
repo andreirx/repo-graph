@@ -1,6 +1,6 @@
 # Repo-Graph (rgr)
 
-Deterministic code graph tool for analyzing legacy codebases. TypeScript CLI over SQLite. Produces structured JSON for AI agent consumption.
+Deterministic code graph tool for analyzing codebases. Multi-language (TypeScript, Rust; Java and C/C++ planned). CLI over SQLite. Produces structured JSON for AI agent consumption.
 
 ## What this is
 
@@ -13,12 +13,17 @@ Not a chatbot. Not a vector DB. A deterministic graph query engine.
 Clean Architecture. Dependency rule: inward only.
 
 ```
-src/core/model/     Domain entities (Node, Edge, Snapshot, Declaration). Zero external deps.
-src/core/ports/     Interfaces (StoragePort, ExtractorPort, IndexerPort). Implemented by adapters.
-src/adapters/       SQLite storage, Tree-sitter extractors, indexer, manifest extractor.
-src/cli/            Commander-based CLI. Depends on ports, not adapters directly.
-src/main.ts         Composition root. Only file that wires concrete adapters to ports.
-src/version.ts      Canonical version manifest. Single source of truth for all component versions.
+src/core/model/          Domain entities (Node, Edge, Snapshot, Declaration). Zero external deps.
+src/core/ports/          Interfaces (StoragePort, ExtractorPort, IndexerPort). Implemented by adapters.
+src/core/classification/ Unresolved-edge classifier, blast-radius derivation, framework-boundary detection.
+src/core/trust/          Trust reporting: reliability rules, service orchestrator.
+src/adapters/extractors/ Tree-sitter extractors: typescript/ (TS/JS), rust/ (Rust).
+src/adapters/enrichment/ Post-index semantic enrichment: TS TypeChecker, Rust rust-analyzer LSP.
+src/adapters/config/     Config readers: tsconfig-reader, cargo-reader.
+src/adapters/storage/    SQLite storage (migrations 001-007).
+src/adapters/indexer/    Multi-language indexer: file routing, edge resolution, classification.
+src/cli/                 Commander-based CLI. Depends on ports, not adapters directly.
+src/main.ts              Composition root. Wires all extractors and adapters.
 ```
 
 Nothing in `core/` imports from `adapters/` or `cli/`.
@@ -53,19 +58,17 @@ pnpm run lint:fix       Auto-fix lint issues
 pnpm rebuild better-sqlite3
 ```
 
-## Current phase: v1.5
+## Reference docs
 
-v1.5 scope: index one TypeScript repo, answer structural graph queries,
-enforce architecture boundaries, compute quality measurements, extract domain versions.
-
-See `docs/cli/v1-cli.txt` for the exact command surface.
+See `docs/ROADMAP.md` for the product roadmap (what is shipped, what is next, what is deferred).
+See `docs/TECH-DEBT.md` for known limitations and test-scope debt.
+See `docs/cli/v1-cli.txt` for the CLI command surface.
 See `docs/architecture/schema.txt` for the database schema.
 See `docs/architecture/project-structure.txt` for the folder layout.
 See `docs/architecture/measurement-model.txt` for the four-layer truth model.
 See `docs/architecture/versioning-model.txt` for toolchain provenance.
 See `docs/architecture/gate-contract.txt` for the normative gate/waiver/verdict contract.
 See `docs/architecture/annotations-contract.txt` for the normative provisional-annotations contract.
-See `docs/architecture/v1-validation-report.txt` for extraction capability boundary.
 
 ## Conventions
 
@@ -145,7 +148,7 @@ Agent skill docs (`docs/skills/`):
 - `assess-code-health.txt` — full health report workflow with all measurement steps
 - `verify-requirements.txt` — requirement obligation verification workflow
 
-rgr uses syntax-only resolution with receiver type binding. Import graphs are accurate. Call graphs resolve well on class-heavy architectures with explicit typing; weaker on SDK-heavy or functional patterns. When callee results look incomplete, read the source directly.
+rgr uses syntax-only extraction (tree-sitter) with optional compiler enrichment (`rgr enrich`). Import graphs are accurate. Call graphs resolve well on class-heavy architectures; weaker on SDK-heavy or functional patterns. Compiler enrichment resolves ~80-85% of unknown receiver types (TypeScript via TypeChecker, Rust via rust-analyzer). When callee results look incomplete, read the source directly or run `rgr enrich`.
 
 Trust boundaries for `graph dead`:
 - On clean-architecture codebases with explicit call/import graphs: high confidence.
@@ -166,34 +169,4 @@ HOWEVER - Only store a fact in rgr if it would help a future agent make a better
 Store surprises, constraints, hazards, and architectural intent.
 Don’t store summaries of obvious code.
 
-## Known limitations and test-scope debt
-
-Extraction:
-- Call graph resolution: 37% on self-index. Strong on class-heavy architectures,
-  weak on SDK-heavy/functional patterns. See v1-validation-report.txt.
-- Inherited method resolution: 11 remaining cases on FRAKTAG (diminishing returns).
-- External SDK types (node_modules): not indexed.
-- Destructured bindings, reassignment: not tracked.
-
-Coverage/churn import:
-- File filtering uses repo-level file inventory (getFilesByRepo), not snapshot-scoped
-  FILE nodes. Adequate for single-snapshot model, needs tightening for multi-snapshot.
-
-Test coverage gaps:
-- `supersedes_uid` linkage in declaration supersession: implemented but not verified
-  because `declare list --json` does not expose the field.
-- `inheritObligationIds()` matcher is tested as a pure helper but not yet exercised
-  by any live supersession path (`declare obligation` only appends). Awaits a
-  future edit-obligation flow.
-
-Fixed in this phase:
-- Assessment-chain end-to-end tests (churn, hotspots, coverage, risk, obligation
-  evaluation for coverage_threshold/complexity_threshold/hotspot_threshold) run
-  against a temporary git repository fixture.
-- `declare waiver` and `gate` have self-contained CLI tests with fresh harness.
-
-Dead code trust boundary:
-- `graph dead` answers "no known inbound graph edges," not "semantically unreachable."
-- Registry/plugin-driven architectures produce false positives.
-- See v1-validation-report.txt for the full extraction capability boundary.
 
