@@ -48,6 +48,17 @@
 export const UnresolvedEdgeClassification = {
 	EXTERNAL_LIBRARY_CANDIDATE: "external_library_candidate",
 	INTERNAL_CANDIDATE: "internal_candidate",
+	/**
+	 * The unresolved call matches a known framework runtime-wiring
+	 * or registration pattern. Semantically distinct from external
+	 * (the call IS in user code) and from internal (the framework
+	 * behavior is externally defined).
+	 *
+	 * Narrow contract: only for true runtime wiring / registration /
+	 * framework-defined execution surfaces. NOT for ordinary framework
+	 * API usage (e.g. React hooks, generic SDK calls).
+	 */
+	FRAMEWORK_BOUNDARY_CANDIDATE: "framework_boundary_candidate",
 	UNKNOWN: "unknown",
 } as const;
 
@@ -97,6 +108,17 @@ export const UnresolvedEdgeBasisCode = {
 	 * so this basis fires for every such observation.
 	 */
 	RELATIVE_IMPORT_TARGET_UNRESOLVED: "relative_import_target_unresolved",
+	/**
+	 * Express route registration: app.get(), app.post(), router.use(), etc.
+	 * Detected when the source file imports from "express" and the
+	 * unresolved method call matches a route/middleware registration name.
+	 */
+	EXPRESS_ROUTE_REGISTRATION: "express_route_registration",
+	/**
+	 * Express middleware registration: app.use(), router.use().
+	 * Subset of route registration specifically for .use() calls.
+	 */
+	EXPRESS_MIDDLEWARE_REGISTRATION: "express_middleware_registration",
 	/** no classification signal matched */
 	NO_SUPPORTING_SIGNAL: "no_supporting_signal",
 } as const;
@@ -122,6 +144,12 @@ export type UnresolvedEdgeBasisCode =
  * detect and rewrite stale rows without a migration.
  */
 /**
+ * Version 3 changes (from v2):
+ *   - ADDED: framework_boundary_candidate classification bucket
+ *   - ADDED: express_route_registration, express_middleware_registration basis codes
+ *   - NEW: post-classification framework-boundary pass may override
+ *     generic classification to framework_boundary_candidate
+ *
  * Version 2 changes (from v1):
  *   - RENAMED: specifier_matches_tsconfig_alias → specifier_matches_project_alias
  *   - ADDED: specifier_matches_runtime_module, callee_matches_runtime_global,
@@ -130,4 +158,4 @@ export type UnresolvedEdgeBasisCode =
  *   - Alias-basis fidelity: alias matches now emit specifier_matches_project_alias
  *     directly instead of reusing the internal-import basis
  */
-export const CURRENT_CLASSIFIER_VERSION = 2;
+export const CURRENT_CLASSIFIER_VERSION = 3;

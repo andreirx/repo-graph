@@ -22,6 +22,8 @@ import {
 } from "../../core/model/index.js";
 import { UnresolvedEdgeCategory } from "../../core/diagnostics/unresolved-edge-categories.js";
 import { CURRENT_CLASSIFIER_VERSION } from "../../core/diagnostics/unresolved-edge-classification.js";
+import { detectFrameworkBoundary } from "../../core/classification/framework-boundary.js";
+import { detectLambdaEntrypoints } from "../../core/classification/framework-entrypoints.js";
 import { classifyUnresolvedEdge } from "../../core/classification/unresolved-classifier.js";
 import {
 	emptyFileSignals,
@@ -41,6 +43,7 @@ import type {
 	IndexResult,
 } from "../../core/ports/indexer.js";
 import type {
+	InferenceRow,
 	Measurement,
 	PersistedUnresolvedEdge,
 	StoragePort,
@@ -395,22 +398,95 @@ export class RepoIndexer implements IndexerPort {
 					const fileSignals = sourceFileUid
 						? (fileSignalsCache.get(sourceFileUid) ?? emptyFileSignals())
 						: emptyFileSignals();
+					// Phase 1: generic classification.
 					const verdict = classifyUnresolvedEdge(
 						edge,
 						category,
 						snapshotSignals,
 						fileSignals,
 					);
+					let { classification } = verdict;
+					let { basisCode } = verdict;
+
+					// Phase 2: framework-boundary post-pass.
+					// May override the generic classification for edges
+					// matching known runtime-wiring / registration patterns.
+					const fwOverride = detectFrameworkBoundary(
+						edge.targetKey,
+						category,
+						fileSignals.importBindings,
+					);
+					if (fwOverride) {
+						classification = fwOverride.classification;
+						basisCode = fwOverride.basisCode;
+					}
+
 					classifiedRows.push({
 						...edge,
 						category,
-						classification: verdict.classification,
+						classification,
 						classifierVersion: CURRENT_CLASSIFIER_VERSION,
-						basisCode: verdict.basisCode,
+						basisCode,
 						observedAt,
 					});
 				}
 				this.storage.insertUnresolvedEdges(classifiedRows);
+			}
+
+			// 9b. Detect framework entrypoints (node-level liveness facts).
+			// Scans each file's exports + imports for conventions that
+			// indicate the symbol is invoked by an external runtime.
+			// Emitted as inferences (kind: "framework_entrypoint").
+			{
+				const entrypointInferences: InferenceRow[] = [];
+				const detectedAt = new Date().toISOString();
+				for (const [fileUid, signals] of fileSignalsCache) {
+					// Gather exported SYMBOL nodes from this file.
+					const fileNodes = allNodes.filter(
+						(n) => n.fileUid === fileUid && n.kind === NodeKind.SYMBOL,
+					);
+					const exportedSymbols = fileNodes
+						.filter((n) => n.visibility != null)
+						.map((n) => ({
+							stableKey: n.stableKey,
+							name: n.name,
+							visibility: n.visibility,
+							subtype: n.subtype,
+						}));
+
+					const detected = detectLambdaEntrypoints({
+						importBindings: signals.importBindings,
+						exportedSymbols,
+					});
+
+					for (const ep of detected) {
+						entrypointInferences.push({
+							inferenceUid: uuidv4(),
+							snapshotUid: snapshot.snapshotUid,
+							repoUid,
+							targetStableKey: ep.targetStableKey,
+							kind: "framework_entrypoint",
+							valueJson: JSON.stringify({
+								convention: ep.convention,
+								reason: ep.reason,
+							}),
+							confidence: ep.confidence,
+							basisJson: JSON.stringify({
+								convention: ep.convention,
+								classifier_version: CURRENT_CLASSIFIER_VERSION,
+							}),
+							extractor: INDEXER_VERSION,
+							createdAt: detectedAt,
+						});
+					}
+				}
+				if (entrypointInferences.length > 0) {
+					this.storage.deleteInferencesByKind(
+						snapshot.snapshotUid,
+						"framework_entrypoint",
+					);
+					this.storage.insertInferences(entrypointInferences);
+				}
 			}
 
 			// 10. Persist function-level measurements
