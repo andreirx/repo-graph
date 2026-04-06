@@ -18,7 +18,10 @@
 
 import { resolve as resolvePath } from "node:path";
 import type { Command } from "commander";
+import { promoteEdges, type PromotionCandidate } from "../../adapters/enrichment/edge-promoter.js";
 import { resolveReceiverTypes } from "../../adapters/enrichment/typescript-receiver-resolver.js";
+import { NodeSubtype } from "../../core/model/index.js";
+import type { GraphNode } from "../../core/model/index.js";
 import type { AppContext } from "../../main.js";
 
 export function registerEnrichCommand(
@@ -32,7 +35,8 @@ export function registerEnrichCommand(
 		)
 		.option("--json", "JSON output")
 		.option("--limit <n>", "Max edges to enrich", "10000")
-		.action(async (repoRef: string, opts: { json?: boolean; limit: string }) => {
+		.option("--promote", "Promote safe-subset enriched edges to resolved graph edges")
+		.action(async (repoRef: string, opts: { json?: boolean; limit: string; promote?: boolean }) => {
 			const ctx = getCtx();
 			const repo =
 				ctx.storage.getRepo({ uid: repoRef }) ??
@@ -58,13 +62,25 @@ export function registerEnrichCommand(
 				return;
 			}
 
-			// Query unknown CALLS_OBJ_METHOD edges (the dominant residual).
-			const edges = ctx.storage.queryUnresolvedEdges({
+			// Query enrichment-eligible edges:
+			// 1. Unknown obj.method() calls (original C1 scope)
+			// 2. Internal this.x.method() calls (this-wildcard expansion)
+			// Limit is applied across the combined set, not per-category.
+			const objMethodEdges = ctx.storage.queryUnresolvedEdges({
 				snapshotUid: snapshot.snapshotUid,
 				classification: "unknown" as any,
 				category: "calls_obj_method_needs_type_info" as any,
 				limit,
 			});
+			const remaining = Math.max(0, limit - objMethodEdges.length);
+			const thisWildcardEdges = remaining > 0
+				? ctx.storage.queryUnresolvedEdges({
+						snapshotUid: snapshot.snapshotUid,
+						category: "calls_this_wildcard_method_needs_type_info" as any,
+						limit: remaining,
+					})
+				: [];
+			const edges = [...objMethodEdges, ...thisWildcardEdges];
 
 			if (edges.length === 0) {
 				if (opts.json) {
@@ -147,6 +163,132 @@ export function registerEnrichCommand(
 			const resolved = results.filter((r) => r.receiverType !== null);
 			const failedResults = results.filter((r) => r.receiverType === null);
 
+			// D2c: promote safe subset if --promote flag is set.
+			let promotedCount = 0;
+			let promotionSkipped: Record<string, number> = {};
+			if (opts.promote && resolved.length > 0) {
+				if (!opts.json) console.log("\nPromoting safe-subset edges...");
+
+				// Build node indexes needed for promotion gates.
+				// We need: all SYMBOL nodes for name lookup + class→method index.
+				const nodesByName = new Map<string, GraphNode[]>();
+				const classMethodIndex = new Map<string, Map<string, GraphNode>>();
+
+				// Read nodes from DB for this snapshot.
+				// StoragePort doesn't expose a bulk-read-all-nodes method, so
+				// we use the fact that resolved symbol names can be looked up.
+				// For first slice: query symbol resolution for each unique type name.
+				const uniqueTypes = new Set<string>();
+				for (const r of resolved) {
+					if (!r.isExternalType && r.typeDisplayName) {
+						uniqueTypes.add(r.typeDisplayName);
+					}
+				}
+
+				for (const typeName of uniqueTypes) {
+					const matches = ctx.storage.resolveSymbol({
+						snapshotUid: snapshot.snapshotUid,
+						query: typeName,
+						limit: 50,
+					});
+					if (!nodesByName.has(typeName)) {
+						nodesByName.set(typeName, []);
+					}
+					for (const node of matches) {
+						nodesByName.get(typeName)!.push(node);
+						// Build class→method index for CLASS nodes.
+						if (node.subtype === NodeSubtype.CLASS) {
+							const methodMap = new Map<string, GraphNode>();
+							// Query methods that are children of this class.
+							const classMethodNodes = ctx.storage.resolveSymbol({
+								snapshotUid: snapshot.snapshotUid,
+								query: `${typeName}.`,
+								limit: 200,
+							});
+							for (const m of classMethodNodes) {
+								if (m.subtype === NodeSubtype.METHOD || m.subtype === NodeSubtype.GETTER || m.subtype === NodeSubtype.SETTER) {
+									const qn = m.qualifiedName ?? "";
+									const dotIdx = qn.lastIndexOf(".");
+									if (dotIdx >= 0) {
+										const mName = qn.slice(dotIdx + 1);
+										if (!methodMap.has(mName)) {
+											methodMap.set(mName, m);
+										} else {
+											// Multiple methods with same name — ambiguous, remove.
+											methodMap.delete(mName);
+										}
+									}
+								}
+							}
+							classMethodIndex.set(node.stableKey, methodMap);
+						}
+					}
+				}
+
+				// Build promotion candidates from enriched results + original edge data.
+				const candidates: PromotionCandidate[] = [];
+				for (let i = 0; i < results.length; i++) {
+					const r = results[i];
+					if (!r.receiverType || r.isExternalType) continue;
+					const site = sites[i];
+					if (!site) continue;
+					// Find the original edge data.
+					const originalEdge = edges.find((e) => e.edgeUid === r.edgeUid);
+					if (!originalEdge) continue;
+
+					let enrichment: PromotionCandidate["enrichment"];
+					try {
+						enrichment = {
+							receiverType: r.receiverType,
+							typeDisplayName: r.typeDisplayName,
+							isExternalType: r.isExternalType,
+							origin: r.receiverTypeOrigin,
+						};
+					} catch {
+						continue;
+					}
+
+					candidates.push({
+						edgeUid: r.edgeUid,
+						snapshotUid: snapshot.snapshotUid,
+						repoUid: repo.repoUid,
+						sourceNodeUid: originalEdge.sourceNodeUid,
+						targetKey: originalEdge.targetKey,
+						lineStart: originalEdge.lineStart,
+						colStart: originalEdge.colStart,
+						lineEnd: null,
+						colEnd: null,
+						category: originalEdge.category,
+						enrichment,
+					});
+				}
+
+				const promotionResult = promoteEdges(candidates, nodesByName, classMethodIndex);
+				promotedCount = promotionResult.promoted.length;
+				promotionSkipped = promotionResult.skippedReasons;
+
+				if (promotionResult.promoted.length > 0) {
+					// Idempotent: delete any previously promoted edges for
+					// this snapshot before inserting, so rerunning --promote
+					// doesn't hit duplicate-key failures.
+					const promotedUids = promotionResult.promoted.map((e) => e.edgeUid);
+					ctx.storage.deleteEdgesByUids(promotedUids);
+					ctx.storage.insertEdges(promotionResult.promoted);
+				}
+
+				if (!opts.json) {
+					console.log(`Promoted: ${promotedCount} edges to resolved graph`);
+					if (Object.keys(promotionSkipped).length > 0) {
+						const topSkips = Object.entries(promotionSkipped)
+							.sort((a, b) => b[1] - a[1])
+							.slice(0, 5);
+						for (const [reason, count] of topSkips) {
+							console.log(`  skipped: ${count} (${reason})`);
+						}
+					}
+				}
+			}
+
 			if (opts.json) {
 				// Summarize failure reasons.
 				const failureReasons: Record<string, number> = {};
@@ -173,6 +315,8 @@ export function registerEnrichCommand(
 					enrichment_rate: edges.length > 0
 						? `${((resolved.length / edges.length) * 100).toFixed(1)}%`
 						: "n/a",
+					promoted: promotedCount,
+					promotion_skipped: promotionSkipped,
 					top_types: Object.entries(typeDistribution)
 						.sort((a, b) => b[1] - a[1])
 						.slice(0, 20)

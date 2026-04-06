@@ -471,6 +471,14 @@ export class SqliteStorage implements StoragePort {
 		insertAll();
 	}
 
+	deleteEdgesByUids(edgeUids: string[]): void {
+		if (edgeUids.length === 0) return;
+		const placeholders = edgeUids.map(() => "?").join(", ");
+		this.db
+			.prepare(`DELETE FROM edges WHERE edge_uid IN (${placeholders})`)
+			.run(...edgeUids);
+	}
+
 	deleteNodesByFile(snapshotUid: string, fileUid: string): void {
 		const deleteOps = this.db.transaction(() => {
 			// Delete edges where source or target is in the file's nodes

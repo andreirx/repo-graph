@@ -89,6 +89,9 @@ export interface StoragePort {
 	/** Remove all nodes and edges for a given file in a given snapshot. */
 	deleteNodesByFile(snapshotUid: string, fileUid: string): void;
 
+	/** Delete edges by their UIDs. Used for idempotent promotion reruns. */
+	deleteEdgesByUids(edgeUids: string[]): void;
+
 	// ── Unresolved Edges ─────────────────────────────────────────────────
 
 	/**
