@@ -144,6 +144,13 @@ export type UnresolvedEdgeBasisCode =
  * detect and rewrite stale rows without a migration.
  */
 /**
+ * Version 4 changes (from v3):
+ *   - IMPORTS_FILE_NOT_FOUND no longer blanket-classified as internal.
+ *     Import classification is now language-aware: external deps
+ *     (Cargo.toml / package.json), runtime modules, project aliases,
+ *     and relative paths are distinguished. Unknown bare imports
+ *     correctly fall to UNKNOWN instead of being force-labeled internal.
+ *
  * Version 3 changes (from v2):
  *   - ADDED: framework_boundary_candidate classification bucket
  *   - ADDED: express_route_registration, express_middleware_registration basis codes
@@ -158,4 +165,4 @@ export type UnresolvedEdgeBasisCode =
  *   - Alias-basis fidelity: alias matches now emit specifier_matches_project_alias
  *     directly instead of reusing the internal-import basis
  */
-export const CURRENT_CLASSIFIER_VERSION = 3;
+export const CURRENT_CLASSIFIER_VERSION = 4;

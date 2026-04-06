@@ -113,7 +113,7 @@ describe("classifyUnresolvedEdge — category shortcuts", () => {
 		);
 	});
 
-	it("imports_file_not_found → internal via RELATIVE_IMPORT_TARGET_UNRESOLVED", () => {
+	it("TS relative import (stable-key form) → internal", () => {
 		const verdict = classifyUnresolvedEdge(
 			edge("repo:src/missing:FILE", EdgeType.IMPORTS),
 			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
@@ -125,6 +125,127 @@ describe("classifyUnresolvedEdge — category shortcuts", () => {
 		);
 		expect(verdict.basisCode).toBe(
 			UnresolvedEdgeBasisCode.RELATIVE_IMPORT_TARGET_UNRESOLVED,
+		);
+	});
+
+	it("TS relative import (rawPath in metadata) → internal", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("repo:src/missing:FILE", EdgeType.IMPORTS, JSON.stringify({ rawPath: "./missing" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot(),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.INTERNAL_CANDIDATE,
+		);
+	});
+
+	it("Rust external crate import (serde in Cargo deps) → external", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("serde", EdgeType.IMPORTS, JSON.stringify({ specifier: "serde", identifier: "Serialize" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot(),
+			file([], [], [], [], ["serde"]),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PACKAGE_DEPENDENCY,
+		);
+	});
+
+	it("Rust crate::module import → internal (relative)", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("crate_module", EdgeType.IMPORTS, JSON.stringify({ specifier: "crate::utils" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot(),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.INTERNAL_CANDIDATE,
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.RELATIVE_IMPORT_TARGET_UNRESOLVED,
+		);
+	});
+
+	it("Rust super::module import → internal (relative)", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("super_module", EdgeType.IMPORTS, JSON.stringify({ specifier: "super::types" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot(),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.INTERNAL_CANDIDATE,
+		);
+	});
+
+	it("Node stdlib import (path) → external via runtime module", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("path", EdgeType.IMPORTS, JSON.stringify({ rawPath: "path" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot([], ["path", "node:path"]),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_RUNTIME_MODULE,
+		);
+	});
+
+	it("Rust std::collections import → external via runtime module", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("std::collections", EdgeType.IMPORTS, JSON.stringify({ specifier: "std::collections" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot([], ["std", "std::collections"]),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
+		);
+		expect(verdict.basisCode).toBe(
+			UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_RUNTIME_MODULE,
+		);
+	});
+
+	it("Rust std (bare root) import → external via runtime module", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("std", EdgeType.IMPORTS, JSON.stringify({ specifier: "std" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot([], ["std"]),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
+		);
+	});
+
+	it("Rust std::io::Read (nested path, first segment matches) → external", () => {
+		// The classifier checks baseSpecifier (first :: segment) against runtime modules.
+		const verdict = classifyUnresolvedEdge(
+			edge("std::io", EdgeType.IMPORTS, JSON.stringify({ specifier: "std::io::Read" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot([], ["std", "std::io"]),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.EXTERNAL_LIBRARY_CANDIDATE,
+		);
+	});
+
+	it("unknown bare import (not in deps, not runtime, not relative) → unknown", () => {
+		const verdict = classifyUnresolvedEdge(
+			edge("mystery_crate", EdgeType.IMPORTS, JSON.stringify({ specifier: "mystery_crate" })),
+			UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND,
+			snapshot(),
+			file(),
+		);
+		expect(verdict.classification).toBe(
+			UnresolvedEdgeClassification.UNKNOWN,
 		);
 	});
 

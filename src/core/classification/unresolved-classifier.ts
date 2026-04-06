@@ -80,10 +80,13 @@ export function classifyUnresolvedEdge(
 		return internal(UnresolvedEdgeBasisCode.THIS_RECEIVER_IMPLIES_INTERNAL);
 	}
 
-	// IMPORTS_FILE_NOT_FOUND: current extractor emits unresolved
-	// IMPORTS edges only for relative specifiers.
+	// IMPORTS_FILE_NOT_FOUND: classify by import kind.
+	// - Relative path imports (TS "./missing") → internal
+	// - External dep imports (Rust "serde", TS "lodash") → external
+	// - Runtime module imports ("path", "fs") → external
+	// - Unknown → unknown
 	if (category === UnresolvedEdgeCategory.IMPORTS_FILE_NOT_FOUND) {
-		return internal(UnresolvedEdgeBasisCode.RELATIVE_IMPORT_TARGET_UNRESOLVED);
+		return classifyUnresolvedImport(edge, snapshotSignals, fileSignals);
 	}
 
 	// OTHER: no semantic rules apply.
@@ -156,6 +159,91 @@ export function classifyUnresolvedEdge(
 	}
 
 	// Rule 7: unknown.
+	return unknown();
+}
+
+/**
+ * Classify an unresolved IMPORTS edge by import kind.
+ *
+ * Separates three semantic cases that were previously collapsed into
+ * a single "internal / relative_import_target_unresolved":
+ *
+ *   1. External dep: the import specifier matches a declared package
+ *      dependency (package.json or Cargo.toml). → external_library
+ *   2. Runtime module: the specifier matches a known stdlib module
+ *      (node:fs, std::io). → external_library
+ *   3. Relative path: the import looks like an internal file path
+ *      that didn't resolve (TS metadata.rawPath starts with ".").
+ *      → internal_candidate
+ *   4. Otherwise: → unknown
+ *
+ * This function uses TWO evidence sources:
+ *   - The edge's targetKey (bare name for Rust crates, stable-key
+ *     for TS file imports)
+ *   - The edge's metadataJson (rawPath for TS, specifier for Rust)
+ */
+function classifyUnresolvedImport(
+	edge: UnresolvedEdge,
+	snapshotSignals: SnapshotSignals,
+	fileSignals: FileSignals,
+): ClassifierVerdict {
+	// Extract the import specifier from metadata or targetKey.
+	let specifier: string = edge.targetKey;
+	let isRelative = false;
+
+	if (edge.metadataJson) {
+		try {
+			const meta = JSON.parse(edge.metadataJson) as Record<string, unknown>;
+			// TS extractor: rawPath is the original specifier.
+			if (typeof meta.rawPath === "string") {
+				specifier = meta.rawPath;
+				isRelative = specifier.startsWith(".");
+			}
+			// Rust extractor: specifier is the crate/module path.
+			if (typeof meta.specifier === "string") {
+				specifier = meta.specifier;
+				isRelative = specifier.startsWith("crate::") ||
+					specifier.startsWith("super::") ||
+					specifier.startsWith("self::");
+			}
+		} catch {
+			// malformed metadata — use targetKey as-is
+		}
+	}
+
+	// If relative import path → internal (same as before for TS).
+	if (isRelative) {
+		return internal(UnresolvedEdgeBasisCode.RELATIVE_IMPORT_TARGET_UNRESOLVED);
+	}
+
+	// Check if the specifier (or its first segment for Rust paths)
+	// matches a declared package dependency.
+	const baseSpecifier = specifier.includes("::")
+		? specifier.split("::")[0]
+		: specifier;
+	if (hasPackageDependency(fileSignals.packageDependencies, baseSpecifier)) {
+		return external(UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PACKAGE_DEPENDENCY);
+	}
+
+	// Check against known runtime modules.
+	if (
+		hasRuntimeBuiltinModule(snapshotSignals.runtimeBuiltins, specifier) ||
+		hasRuntimeBuiltinModule(snapshotSignals.runtimeBuiltins, baseSpecifier)
+	) {
+		return external(UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_RUNTIME_MODULE);
+	}
+
+	// Check project aliases (tsconfig paths, etc.).
+	if (matchesAnyAlias(specifier, fileSignals.tsconfigAliases)) {
+		return internal(UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PROJECT_ALIAS);
+	}
+
+	// TS stable-key form (contains ":FILE") → internal file import.
+	if (specifier.includes(":FILE") || edge.targetKey.includes(":FILE")) {
+		return internal(UnresolvedEdgeBasisCode.RELATIVE_IMPORT_TARGET_UNRESOLVED);
+	}
+
+	// Truly unknown import.
 	return unknown();
 }
 
