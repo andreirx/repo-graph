@@ -48,6 +48,7 @@ import type {
 	PersistedUnresolvedEdge,
 	StoragePort,
 } from "../../core/ports/storage.js";
+import { readCargoDependencies } from "../config/cargo-reader.js";
 import { readTsconfigAliases } from "../config/tsconfig-reader.js";
 import type { AnnotationsPort } from "../../core/ports/annotations.js";
 import {
@@ -75,8 +76,29 @@ import {
 	extractPackageManifest,
 } from "../extractors/manifest/package-json.js";
 
-/** File extensions the TS extractor handles. */
-const TS_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
+/** All file extensions that any registered extractor might handle. */
+const ALL_SOURCE_EXTENSIONS = new Set([
+	".ts", ".tsx", ".js", ".jsx",  // TypeScript/JavaScript
+	".rs",                          // Rust
+]);
+
+/**
+ * Map a language ID (from ExtractorPort.languages) to file extensions.
+ */
+function languageToExtensions(lang: string): string[] {
+	switch (lang) {
+		case "typescript":
+			return [".ts"];
+		case "tsx":
+			return [".tsx", ".jsx"];
+		case "javascript":
+			return [".js"];
+		case "rust":
+			return [".rs"];
+		default:
+			return [];
+	}
+}
 
 /** Directories always excluded from scanning. */
 const ALWAYS_EXCLUDED = new Set([
@@ -109,11 +131,35 @@ export class RepoIndexer implements IndexerPort {
 	 * isolation invariant (annotations-contract.txt §7) holds
 	 * either way: the indexer WRITES annotations but NEVER reads them.
 	 */
+	/** Map of file extension → ExtractorPort. e.g. ".ts" → TypeScriptExtractor */
+	private extractorsByExtension: Map<string, ExtractorPort>;
+
 	constructor(
 		private storage: StoragePort,
-		private extractor: ExtractorPort,
+		extractors: ExtractorPort | ExtractorPort[],
 		private annotations?: AnnotationsPort,
-	) {}
+	) {
+		// Build extension → extractor lookup from each extractor's declared languages.
+		this.extractorsByExtension = new Map();
+		const list = Array.isArray(extractors) ? extractors : [extractors];
+		for (const ext of list) {
+			for (const lang of ext.languages) {
+				// Map language IDs to file extensions. Convention:
+				// "typescript" → .ts, "tsx" → .tsx, "rust" → .rs, etc.
+				const extensions = languageToExtensions(lang);
+				for (const fileExt of extensions) {
+					this.extractorsByExtension.set(fileExt, ext);
+				}
+			}
+		}
+	}
+
+	/** Get the extractor for a file, or null if unsupported. */
+	private getExtractorForFile(filePath: string): ExtractorPort | null {
+		const ext = filePath.slice(filePath.lastIndexOf("."));
+		return this.extractorsByExtension.get(ext) ?? null;
+	}
+
 
 	async indexRepo(
 		repoUid: string,
@@ -197,7 +243,7 @@ export class RepoIndexer implements IndexerPort {
 					fileUid,
 					contentHash,
 					astHash: null,
-					extractor: this.extractor.name,
+					extractor: (this.getExtractorForFile(relPath)?.name ?? "unknown"),
 					parseStatus: ParseStatus.PARSED,
 					sizeBytes: Buffer.byteLength(content, "utf-8"),
 					lineCount: content.split("\n").length,
@@ -243,9 +289,14 @@ export class RepoIndexer implements IndexerPort {
 				if (!content) continue;
 
 				const fileUid = `${repoUid}:${relPath}`;
+				const extractor = this.getExtractorForFile(relPath);
+				if (!extractor) {
+					extractIdx++;
+					continue;
+				}
 				let result: ExtractionResult;
 				try {
-					result = await this.extractor.extract(
+					result = await extractor.extract(
 						content,
 						relPath,
 						fileUid,
@@ -667,7 +718,7 @@ export class RepoIndexer implements IndexerPort {
 				await this.walkDir(fullPath, rootPath, files, excludePatterns, ig);
 			} else if (entry.isFile()) {
 				const ext = getExtension(entry.name);
-				if (!TS_EXTENSIONS.has(ext)) continue;
+				if (!ALL_SOURCE_EXTENSIONS.has(ext)) continue;
 				if (isExcluded(relPath, entry.name, excludePatterns)) continue;
 				if (ig.ignores(relPath)) continue;
 				files.push(relPath);
@@ -1026,9 +1077,23 @@ export class RepoIndexer implements IndexerPort {
 	 * graph correctness.
 	 */
 	private buildSnapshotSignals(): SnapshotSignals {
-		// Runtime builtins from the extractor (language-specific via port).
-		const runtimeBuiltins = this.extractor.runtimeBuiltins;
-		return { runtimeBuiltins };
+		// Merge runtime builtins from ALL registered extractors so that
+		// both TS and Rust builtins are recognized in mixed-language repos.
+		const allIdentifiers: string[] = [];
+		const allModuleSpecifiers: string[] = [];
+		const seen = new Set<ExtractorPort>();
+		for (const ext of this.extractorsByExtension.values()) {
+			if (seen.has(ext)) continue; // same extractor serves multiple extensions
+			seen.add(ext);
+			allIdentifiers.push(...ext.runtimeBuiltins.identifiers);
+			allModuleSpecifiers.push(...ext.runtimeBuiltins.moduleSpecifiers);
+		}
+		return {
+			runtimeBuiltins: {
+				identifiers: Object.freeze(allIdentifiers),
+				moduleSpecifiers: Object.freeze(allModuleSpecifiers),
+			},
+		};
 	}
 
 	/**
@@ -1049,6 +1114,11 @@ export class RepoIndexer implements IndexerPort {
 		cache: Map<string, PackageDependencySet>,
 	): Promise<PackageDependencySet> {
 		const emptyDeps: PackageDependencySet = { names: Object.freeze([]) };
+		// Language-aware: Rust files search for Cargo.toml; all others for package.json.
+		const isRustFile = fileRelPath.endsWith(".rs");
+		// Use separate cache keys for Rust vs TS/JS to prevent cross-contamination
+		// when both manifest types exist at the same directory level.
+		const cachePrefix = isRustFile ? "rs:" : "js:";
 		// Work with the file's directory (repo-relative, forward slashes).
 		let dir = fileRelPath.includes("/")
 			? fileRelPath.slice(0, fileRelPath.lastIndexOf("/"))
@@ -1058,27 +1128,37 @@ export class RepoIndexer implements IndexerPort {
 		const uncachedDirs: string[] = [];
 
 		while (true) {
-			const cached = cache.get(dir);
+			const cacheKey = `${cachePrefix}${dir}`;
+			const cached = cache.get(cacheKey);
 			if (cached !== undefined) {
-				// Backfill all intermediate uncached dirs with the resolved value.
-				for (const d of uncachedDirs) cache.set(d, cached);
+				for (const d of uncachedDirs) cache.set(`${cachePrefix}${d}`, cached);
 				return cached;
 			}
 			uncachedDirs.push(dir);
 
-			// Try reading package.json at this directory level.
-			const pkgPath = dir === ""
-				? join(repoRootPath, "package.json")
-				: join(repoRootPath, dir, "package.json");
-			try {
-				const content = await readFile(pkgPath, "utf-8");
-				const deps = extractPackageDependencies(content);
-				const resolved = deps ?? emptyDeps;
-				// Cache the resolved value for this dir AND all dirs walked so far.
-				for (const d of uncachedDirs) cache.set(d, resolved);
-				return resolved;
-			} catch {
-				// No package.json here — walk up.
+			// Try reading the language-appropriate package manifest.
+			// Rust files use Cargo.toml; TS/JS files use package.json.
+			// This prevents mixed-manifest repos from classifying Rust
+			// files against Node deps or vice versa.
+			const absDir = dir === "" ? repoRootPath : join(repoRootPath, dir);
+
+			if (isRustFile) {
+				const cargoDeps = await readCargoDependencies(absDir);
+				if (cargoDeps !== null && cargoDeps.names.length > 0) {
+					for (const d of uncachedDirs) cache.set(`${cachePrefix}${d}`, cargoDeps);
+					return cargoDeps;
+				}
+			} else {
+				const pkgPath = join(absDir, "package.json");
+				try {
+					const content = await readFile(pkgPath, "utf-8");
+					const deps = extractPackageDependencies(content);
+					const resolved = deps ?? emptyDeps;
+					for (const d of uncachedDirs) cache.set(`${cachePrefix}${d}`, resolved);
+					return resolved;
+				} catch {
+					// No package.json here — walk up.
+				}
 			}
 
 			// Stop if we've reached repo root (dir === "").
@@ -1088,8 +1168,8 @@ export class RepoIndexer implements IndexerPort {
 			dir = slash >= 0 ? dir.slice(0, slash) : "";
 		}
 
-		// No package.json found anywhere up to repo root.
-		for (const d of uncachedDirs) cache.set(d, emptyDeps);
+		// No manifest found anywhere up to repo root.
+		for (const d of uncachedDirs) cache.set(`${cachePrefix}${d}`, emptyDeps);
 		return emptyDeps;
 	}
 

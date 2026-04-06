@@ -10,6 +10,7 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { SqliteAnnotationsStorage } from "./adapters/annotations/sqlite-annotations-storage.js";
+import { RustExtractor } from "./adapters/extractors/rust/rust-extractor.js";
 import { TypeScriptExtractor } from "./adapters/extractors/typescript/ts-extractor.js";
 import { GitAdapter } from "./adapters/git/git-adapter.js";
 import { IstanbulCoverageImporter } from "./adapters/importers/istanbul-coverage.js";
@@ -65,13 +66,19 @@ export async function bootstrap(dbPath?: string): Promise<AppContext> {
 		sqliteProvider.getDatabase(),
 	);
 
-	// Initialize extractor
+	// Initialize extractors (multi-language support).
 	const extractor = new TypeScriptExtractor();
 	await extractor.initialize();
+	const rustExtractor = new RustExtractor();
+	await rustExtractor.initialize();
 
-	// Create indexer (receives annotations port for write-only use),
-	// git adapter, and coverage importers.
-	const indexer = new RepoIndexer(storage, extractor, annotations);
+	// Create indexer with all extractors. Files are routed to the
+	// correct extractor by extension.
+	const indexer = new RepoIndexer(
+		storage,
+		[extractor, rustExtractor],
+		annotations,
+	);
 	const git = new GitAdapter();
 	const coverageImporters: CoverageImporterPort[] = [
 		new IstanbulCoverageImporter(),
