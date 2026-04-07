@@ -6,7 +6,7 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Current state (as of last commit)
 
-- **1083 tests** across 58 test files.
+- **1155 tests** across 60 test files.
 - **Languages:** TypeScript/JavaScript + Rust + Java. Three-extractor indexer.
 - **Enrichment:** TS (~81%), Rust (~85%), Java (operational but fragile). All three wired.
 - **Classifier version:** 6.
@@ -111,6 +111,23 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - Validated on glamCRM: 97 providers, 85 consumers, 80 links, 82.5%/94.1% match rates.
 - Validated on fraktag: 47 providers, 42 consumers, 41 links, 70.2%/97.6% match rates.
 
+### CLI boundary model (first slice)
+- Mechanism: `cli_command` — second boundary mechanism after HTTP.
+- Commander.js provider extractor: command registrations → provider facts. Handles
+  nested command composition, positional args, options, descriptions. Import gate +
+  receiver-variable tracking for parent-child command path composition.
+- package.json script consumer extractor: direct tool invocations → consumer facts.
+  Shell chain splitting (`&&`, `||`, `;`), npx/pnpm-exec/yarn-exec unwrapping,
+  script-indirection filtering (npm run/pnpm run skipped), shell-builtin filtering.
+- `CliBoundaryMatchStrategy`: exact command-path matching + guarded binary-prefix
+  heuristic (strips leading binary from 3+ token consumer paths). Guard prevents
+  false positives where 2-word external tool invocations (vite build, cargo test)
+  would match single-word internal commands.
+- Validated on repo-graph: 80 CLI providers, 15 CLI consumers, 9 CLI links.
+- Known limitations: cross-file Commander composition (commands registered via function
+  params from different modules), aliased receivers (const api = express.Router()),
+  binary-prefix matching requires 3+ tokens.
+
 ### Compiler enrichment
 - `rgr enrich <repo>`: post-index receiver-type resolution
 - TypeScript: via `ts.Program` / `TypeChecker` (~81% enrichment rate)
@@ -125,53 +142,55 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Next (in priority order)
 
-### 1. CLI boundary modeling
-The CLI is a real interaction boundary. Users, scripts, cron, systemd,
-CI, Makefiles, and Docker entrypoints interact through it. That is not
-a normal language call edge — it is a boundary interaction.
-
-Mechanism: `cli_command` (new `BoundaryMechanism` variant).
-
-Provider facts (command surface):
-- Extracted from Commander/yargs/clap/argparse command registrations
-- Operation: `rgr boundary links`, `fraktag serve`, `ip link set`
-- Address: command path (program + subcommand chain)
-- Metadata: flags, positional args, exit behavior
-
-Consumer facts (invocations):
-- Extracted from shell scripts, Makefiles, CI configs (.github/workflows),
-  systemd unit files, Dockerfiles, package.json scripts
-- Operation: the invocation command string
-- Confidence: exact invocation > wrapper > interpolated
-
-Matcher: `CliBoundaryMatchStrategy`
-- Command name + subcommand path matching
-- Normalized flag surface matching (future)
-
-Why this matters:
-- Many repos (Linux tools, build tools, compilers, FRAKTAG, repo-graph
-  itself) have the CLI as the primary entry surface
-- Enables: unused command detection, blast radius of flag changes,
-  script-to-command coupling, operational usage paths
-- Distinct from `declare boundary` (architecture rule) — this is a
-  system interaction fact
-- Reuses the full boundary-fact architecture (facts, links, matcher,
-  CLI query surface) with a new mechanism
-
-### 2. Python extractor
+### 1. Python extractor (syntax-first)
 Python is common in data/ML pipelines, build scripts, and analysis tools.
-Requires: tree-sitter-python grammar, Python extractor implementing
-ExtractorPort, pip/pyproject.toml/setup.py dependency reader, Python
-builtins (builtins module, stdlib modules).
 
-### 3. Java enrichment hardening
-jdtls is operational but fragile. Cold-start penalty on Gradle projects
-is prohibitive. Viable improvements: pre-warmed daemon, javac-based
-type resolution for simpler cases, persistent background server.
+First slice — same proven delivery pattern as TS, Rust, Java:
+- tree-sitter-python grammar, Python extractor implementing ExtractorPort
+- pip/pyproject.toml/setup.py/requirements.txt dependency reader
+- Python builtins (builtins module, stdlib modules)
+- language-aware manifest isolation in mixed repos
 
-### 4. Rust framework detectors
+Do NOT drag into the first slice:
+- Python semantic enrichment (pyright/mypy) — that is a separate later step
+- Python framework detectors (Django, Flask, FastAPI) — follow after syntax base
+- Boundary provider/consumer extraction — follow after framework detectors
+
+### 2. Java semantic enrichment operationalization
+jdtls is operational but fragile. The remaining issues are not polish:
+- Cold-start/workspace reliability: jdtls Gradle import takes minutes on
+  large projects. The start→query→stop model amplifies this.
+- Protocol/client completeness: server→client request handling (workspace/
+  configuration, client/registerCapability) is implemented but edge cases
+  may remain on unfamiliar project structures.
+- Operational determinism on large repos: readiness detection (ServiceReady)
+  does not guarantee all project symbols are indexed. Results may vary
+  between runs on the same project.
+
+Viable improvements:
+- Pre-warmed jdtls daemon (persistent background server)
+- javac-based type resolution for simpler cases (no LSP overhead)
+- Persistent workspace directory with validated warm-start path
+
+### 3. Rust framework detectors
 Actix-web, Axum, Rocket, Warp route handlers. Same pattern as Express
-detection: post-classification pass, receiver-provenance gated.
+detection: post-classification pass, receiver-provenance gated. Also
+enables Rust HTTP boundary provider extraction for the boundary model.
+
+### 4. CLI boundary expansion
+The `cli_command` mechanism has a first closed loop (Commander providers +
+package.json script consumers + binary-prefix matching). Remaining
+consumer adapters to broaden coverage:
+- Shell scripts (`.sh`, `.bash`)
+- Makefiles (`make` target → tool invocation)
+- CI configs (`.github/workflows/*.yml`, `.gitlab-ci.yml`)
+- Dockerfiles (`ENTRYPOINT`, `CMD`)
+- systemd unit files (`ExecStart=`)
+
+Also:
+- Provider adapters for other CLI frameworks (yargs, clap, argparse)
+- Cross-file Commander composition (commands registered via function params)
+- Binary-identity verification for prefix matching (package.json bin field)
 
 ### 5. C/C++ extractor
 Highest business value (Linux BSP, embedded applications). Highest
@@ -180,6 +199,69 @@ Do not start until Rust, Java, and Python have validated the
 multi-language architecture. Needs: Clang-backed symbol extraction,
 translation-unit-aware resolution, header/source ownership policy,
 macro/preprocessor caveat model.
+
+### 6. Storage/state boundary model
+A component interacts with persisted or semi-persisted state through
+a storage mechanism. This is a STATE boundary, distinct from the
+interaction boundaries (HTTP, CLI) already modeled. Agents can grep
+for individual file reads or SQL queries; they cannot cheaply maintain
+normalized resource identities, read/write directionality, confidence,
+cross-language storage coupling, or historic repeatability across
+many queries. The indexer can.
+
+Mechanisms (new `BoundaryMechanism` variants):
+- `filesystem` — file read/write/append/delete
+- `database_sql` — SQL table read/write/migrate (SQLite, Postgres, MySQL)
+- `database_nosql` — document/collection access (MongoDB, DynamoDB)
+- `cache` — key/value read/write (Redis, Memcached)
+- `object_store` — bucket/object read/write (S3, GCS, Azure Blob)
+
+Roles (richer than HTTP/CLI provider/consumer):
+- resource definition / schema owner
+- reader
+- writer
+- migrator
+
+Provider/resource facts:
+- file path or path pattern
+- DB table / collection / key prefix / bucket prefix
+- schema/migration identifier
+- ownership module
+- declared resource kind
+
+Consumer interaction facts:
+- operation: read / write / append / delete / migrate / enumerate
+- resource address: normalized path/table/key
+- confidence: literal path > resolved constant > pattern > dynamic
+
+Why a separate mechanism family, not an extension of HTTP/CLI:
+- HTTP/CLI are interaction boundaries (request/response, command/exit)
+- storage is a state boundary (read/write to persisted data)
+- the semantics are different: directionality (read vs write),
+  schema coupling, migration lineage, orphaned resource detection
+- flattening them would lose the operational distinction
+
+Best first slice:
+- Filesystem literal-path reads/writes in TS/JS
+  (`readFile`, `writeFile`, `open`, `createReadStream`, etc.)
+- Only literal or file-local-resolved paths (reuse FileLocalStringResolver)
+- Classify operation: read/write/append/delete
+- Higher-value but harder: SQL table access from literal query strings
+
+What this unlocks:
+- which modules read vs write which resources
+- which storage resources are shared across components
+- which writes have no known readers
+- which reads depend on external state no in-repo writer maintains
+- which changes affect persistence contracts or operational data flow
+- which repos/components couple through filesystem, DB, cache, or
+  object-store boundaries
+
+Design constraint: do not start this before the current boundary model
+(HTTP + CLI) is mature. The fact table schema supports it already
+(mechanism is extensible). The matcher strategy pattern supports it.
+The CLI query surfaces support it. The new work is extraction adapters
+and a resource-centric (not call-centric) matching model.
 
 ## Deferred
 

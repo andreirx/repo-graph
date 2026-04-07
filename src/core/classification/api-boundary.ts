@@ -27,9 +27,18 @@
  * Extensible: new mechanisms are added as adapters are built.
  */
 export type BoundaryMechanism =
+	// Interaction boundaries (request/response, command/exit)
 	| "http"
 	| "grpc"
 	| "rpc"
+	| "cli_command"
+	// State boundaries (read/write to persisted data)
+	| "filesystem"
+	| "database_sql"
+	| "database_nosql"
+	| "cache"
+	| "object_store"
+	// System-level boundaries
 	| "ipc_shared_memory"
 	| "ioctl"
 	| "queue"
@@ -37,7 +46,6 @@ export type BoundaryMechanism =
 	| "socket"
 	| "device_protocol"
 	| "register_map"
-	| "cli_command"
 	| "other";
 
 /**

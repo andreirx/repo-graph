@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { SqliteAnnotationsStorage } from "./adapters/annotations/sqlite-annotations-storage.js";
 import { JavaExtractor } from "./adapters/extractors/java/java-extractor.js";
+import { PythonExtractor } from "./adapters/extractors/python/python-extractor.js";
 import { RustExtractor } from "./adapters/extractors/rust/rust-extractor.js";
 import { TypeScriptExtractor } from "./adapters/extractors/typescript/ts-extractor.js";
 import { GitAdapter } from "./adapters/git/git-adapter.js";
@@ -74,12 +75,14 @@ export async function bootstrap(dbPath?: string): Promise<AppContext> {
 	await rustExtractor.initialize();
 	const javaExtractor = new JavaExtractor();
 	await javaExtractor.initialize();
+	const pythonExtractor = new PythonExtractor();
+	await pythonExtractor.initialize();
 
 	// Create indexer with all extractors. Files are routed to the
 	// correct extractor by extension.
 	const indexer = new RepoIndexer(
 		storage,
-		[extractor, rustExtractor, javaExtractor],
+		[extractor, rustExtractor, javaExtractor, pythonExtractor],
 		annotations,
 	);
 	const git = new GitAdapter();

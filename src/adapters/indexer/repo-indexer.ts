@@ -96,6 +96,7 @@ const ALL_SOURCE_EXTENSIONS = new Set([
 	".ts", ".tsx", ".js", ".jsx",  // TypeScript/JavaScript
 	".rs",                          // Rust
 	".java",                        // Java
+	".py",                          // Python
 ]);
 
 /**
@@ -113,6 +114,8 @@ function languageToExtensions(lang: string): string[] {
 			return [".rs"];
 		case "java":
 			return [".java"];
+		case "python":
+			return [".py"];
 		default:
 			return [];
 	}
