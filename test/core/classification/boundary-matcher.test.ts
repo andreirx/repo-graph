@@ -19,6 +19,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+	CliBoundaryMatchStrategy,
 	HttpBoundaryMatchStrategy,
 	type MatchableConsumerFact,
 	type MatchableProviderFact,
@@ -339,6 +340,125 @@ describe("matchBoundaryFacts — orchestrator", () => {
 	});
 });
 
+// ── CLI command match strategy ───────────────────────────────────────
+
+describe("CliBoundaryMatchStrategy", () => {
+	const cli = new CliBoundaryMatchStrategy();
+
+	function cliProvider(address: string): MatchableProviderFact {
+		return makeProvider({
+			mechanism: "cli_command",
+			address,
+			operation: `CLI ${address}`,
+			framework: "commander",
+			basis: "registration",
+		});
+	}
+
+	function cliConsumer(address: string, conf = 0.85): MatchableConsumerFact {
+		return makeConsumer({
+			mechanism: "cli_command",
+			address,
+			operation: `CLI ${address}`,
+			confidence: conf,
+			basis: "literal",
+		});
+	}
+
+	it("matches exact command path", () => {
+		const candidates = cli.match(
+			[cliProvider("repo add")],
+			[cliConsumer("repo add")],
+		);
+		expect(candidates.length).toBe(1);
+		expect(candidates[0].matchBasis).toBe("operation_match");
+	});
+
+	it("matches consumer with binary prefix via heuristic", () => {
+		const candidates = cli.match(
+			[cliProvider("repo add")],
+			[cliConsumer("rgr repo add")],
+		);
+		expect(candidates.length).toBe(1);
+		expect(candidates[0].matchBasis).toBe("heuristic");
+	});
+
+	it("binary-prefix match has lower confidence than exact match", () => {
+		const exact = cli.match(
+			[cliProvider("repo add")],
+			[cliConsumer("repo add", 0.85)],
+		);
+		const prefixed = cli.match(
+			[cliProvider("repo add")],
+			[cliConsumer("rgr repo add", 0.85)],
+		);
+		expect(prefixed[0].confidence).toBeLessThan(exact[0].confidence);
+	});
+
+	it("prefers exact match over binary-prefix match", () => {
+		// Consumer "repo add" matches provider "repo add" exactly.
+		// Should NOT also try binary-prefix.
+		const candidates = cli.match(
+			[cliProvider("repo add")],
+			[cliConsumer("repo add")],
+		);
+		expect(candidates.length).toBe(1);
+		expect(candidates[0].matchBasis).toBe("operation_match");
+	});
+
+	it("does not match single-token consumer via binary-prefix", () => {
+		// "tsc" has no subcommand after stripping binary — nothing to match.
+		const candidates = cli.match(
+			[cliProvider("build")],
+			[cliConsumer("tsc")],
+		);
+		expect(candidates.length).toBe(0);
+	});
+
+	it("does not match 2-word external tool against single-word internal command", () => {
+		// "vite build" should NOT match provider "build" — stripping "vite"
+		// leaves "build" (1 token), which is too ambiguous. The guard
+		// requires at least 2 tokens after stripping.
+		const candidates = cli.match(
+			[cliProvider("build")],
+			[cliConsumer("vite build")],
+		);
+		expect(candidates.length).toBe(0);
+	});
+
+	it("does not match cargo test against internal test command", () => {
+		const candidates = cli.match(
+			[cliProvider("test")],
+			[cliConsumer("cargo test")],
+		);
+		expect(candidates.length).toBe(0);
+	});
+
+	it("does not match biome check against internal check command", () => {
+		const candidates = cli.match(
+			[cliProvider("check")],
+			[cliConsumer("biome check")],
+		);
+		expect(candidates.length).toBe(0);
+	});
+
+	it("does not match unrelated commands", () => {
+		const candidates = cli.match(
+			[cliProvider("repo add")],
+			[cliConsumer("graph callers")],
+		);
+		expect(candidates.length).toBe(0);
+	});
+
+	it("case-insensitive matching", () => {
+		const candidates = cli.match(
+			[cliProvider("Repo Add")],
+			[cliConsumer("repo add")],
+		);
+		expect(candidates.length).toBe(1);
+	});
+});
+
 // ── getMatchStrategy ────────────────────────────────────────────────
 
 describe("getMatchStrategy", () => {
@@ -346,6 +466,12 @@ describe("getMatchStrategy", () => {
 		const strategy = getMatchStrategy("http");
 		expect(strategy).not.toBeNull();
 		expect(strategy!.mechanism).toBe("http");
+	});
+
+	it("returns CLI strategy for cli_command mechanism", () => {
+		const strategy = getMatchStrategy("cli_command");
+		expect(strategy).not.toBeNull();
+		expect(strategy!.mechanism).toBe("cli_command");
 	});
 
 	it("returns null for unregistered mechanism", () => {

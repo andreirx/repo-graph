@@ -84,10 +84,11 @@ That separation is the basis for the trust surface.
 
 This repository contains language-specific adapters behind a shared extractor contract.
 
-Implemented adapters in this codebase:
+Implemented adapters:
 
 - TypeScript / JavaScript
 - Rust
+- Java
 
 ### TypeScript / JavaScript adapter
 
@@ -97,6 +98,10 @@ Implemented:
 - nearest-owning `tsconfig.json` alias context with relative `extends`
 - runtime builtins and Node stdlib classification
 - TypeScript compiler side-channel for receiver-type enrichment
+- Express route provider extraction (boundary facts)
+- HTTP client consumer extraction (axios/fetch, with file-local string resolution)
+- Commander CLI command surface extraction (boundary facts)
+- package.json script consumer extraction (CLI boundary facts)
 
 ### Rust adapter
 
@@ -106,6 +111,17 @@ Implemented:
 - Rust stdlib/runtime module classification (`std`, `core`, `alloc`)
 - language-aware manifest isolation in mixed TS/Rust repos
 - rust-analyzer side-channel for receiver-type enrichment
+
+### Java adapter
+
+Implemented:
+- `tree-sitter-java` extractor
+- Gradle dependency reader (Groovy + Kotlin DSL)
+- overload disambiguation via parameter type signatures in stable keys
+- language-aware manifest isolation in mixed TS/Java repos
+- Spring MVC route provider extraction (AST-backed, boundary facts)
+- Spring container-managed bean detection (`@Component`, `@Service`, `@Repository`, `@Configuration`, `@RestController`, `@Bean`)
+- jdtls (Eclipse JDT Language Server) side-channel for receiver-type enrichment (operational, fragile)
 
 ## Architecture
 
@@ -155,6 +171,9 @@ SQLite is the system of record for:
 - declarations
 - inferences
 - measurements
+- boundary provider facts (source of truth)
+- boundary consumer facts (source of truth)
+- boundary links (derived, discardable)
 
 ## Installation
 
@@ -175,6 +194,7 @@ Optional but required for semantic enrichment:
 
 - TypeScript enrichment: `typescript` package is already a dependency
 - Rust enrichment: `rust-analyzer` must be on `PATH`
+- Java enrichment: `jdtls` (Eclipse JDT Language Server) must be on `PATH`
 
 Rust analyzer installation example:
 
@@ -210,6 +230,14 @@ rgr graph callers some-repo "SomeClass.someMethod"
 rgr graph callees some-repo "SomeClass.someMethod"
 rgr graph cycles some-repo
 rgr graph dead some-repo
+```
+
+Inspect boundary interactions:
+
+```bash
+rgr boundary summary some-repo
+rgr boundary links some-repo
+rgr boundary unmatched some-repo
 ```
 
 Run semantic enrichment:
@@ -262,6 +290,8 @@ The CLI is organized by responsibility:
   - CI reduction over obligations and waivers
 - `trend`
   - snapshot-to-snapshot health comparison
+- `boundary`
+  - boundary interaction facts and links (HTTP routes, CLI commands, package.json scripts)
 - `docs`
   - read-only provisional annotation surface
 
@@ -317,6 +347,7 @@ Current behavior:
 
 - TypeScript / JavaScript files are enriched through the TypeScript compiler
 - Rust files are enriched through rust-analyzer
+- Java files are enriched through jdtls (Eclipse JDT Language Server)
 - enrichment writes receiver-type metadata onto unresolved edges
 - failed enrichment is recorded explicitly
 - the original unresolved edge remains for auditability
@@ -330,18 +361,57 @@ Current behavior:
 
 This is not a generic speculative resolver. It is a constrained graph-improvement path.
 
+## Boundary Interaction Model
+
+`repo-graph` models cross-boundary interactions that the normal call graph cannot capture: HTTP requests, CLI command invocations, and (planned) gRPC, IPC, and other protocol-level links.
+
+Boundary facts are stored separately from the core graph edges table. They are protocol-level inferred observations, not language-level extraction edges.
+
+Two sides:
+- **Provider facts** — something exposes an entry surface (Spring route, Express route, Commander command)
+- **Consumer facts** — something reaches across the boundary (axios/fetch call, package.json script invocation)
+
+A mechanism-keyed matcher pairs providers and consumers into derived links. These links are discardable convenience artifacts that can be recomputed from raw facts.
+
+Current mechanisms:
+- `http` — Spring MVC routes (AST-backed), Express routes, axios/fetch calls
+- `cli_command` — Commander.js command registrations, package.json script invocations
+
+Query boundary data:
+
+```bash
+rgr boundary summary some-repo
+rgr boundary providers some-repo --mechanism http
+rgr boundary consumers some-repo --mechanism cli_command
+rgr boundary links some-repo
+rgr boundary unmatched some-repo
+```
+
+## Framework Detection
+
+Framework-liveness inferences suppress false dead-code reports for symbols that are live by container convention rather than by explicit caller edges.
+
+Current detectors:
+- **Spring beans**: `@Component`, `@Service`, `@Repository`, `@Configuration`, `@RestController`, `@Controller`, `@Bean` factory methods. Emitted as `spring_container_managed` inferences.
+- **Lambda handlers**: exported functions matching Lambda naming conventions in files importing AWS Lambda types. Emitted as `framework_entrypoint` inferences.
+- **Express routes**: edge-level classification of `app.get()` / `router.post()` as framework boundary registration.
+
+`graph dead` automatically excludes nodes with framework-liveness inferences.
+
 ## Mixed-Language Repositories
 
 The indexer is language-aware.
 
-Current behavior in mixed TS/Rust repositories:
+Current behavior in mixed-language repositories:
 
-- files are routed to extractors by extension
+- files are routed to extractors by extension (`.ts`/`.tsx`/`.js`/`.jsx` → TypeScript, `.rs` → Rust, `.java` → Java)
 - TypeScript files resolve dependency context from nearest `package.json`
 - Rust files resolve dependency context from nearest `Cargo.toml`
+- Java files resolve dependency context from nearest `build.gradle`
 - runtime builtins from all registered extractors are merged into classifier signals
+- boundary fact extraction runs on all applicable files regardless of language
 
-This prevents Node dependency context from contaminating Rust files and vice versa.
+This prevents Node dependency context from contaminating Rust or Java files and vice versa.
 
 ## Development
 

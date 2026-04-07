@@ -1,6 +1,6 @@
 # Repo-Graph (rgr)
 
-Deterministic code graph tool for analyzing codebases. Multi-language (TypeScript, Rust; Java and C/C++ planned). CLI over SQLite. Produces structured JSON for AI agent consumption.
+Deterministic code graph tool for analyzing codebases. Multi-language (TypeScript, Rust, Java; Python and C/C++ planned). CLI over SQLite. Produces structured JSON for AI agent consumption.
 
 ## What this is
 
@@ -15,7 +15,7 @@ Clean Architecture. Dependency rule: inward only.
 ```
 src/core/model/          Domain entities (Node, Edge, Snapshot, Declaration). Zero external deps.
 src/core/ports/          Interfaces (StoragePort, ExtractorPort, IndexerPort). Implemented by adapters.
-src/core/classification/ Unresolved-edge classifier, blast-radius derivation, framework-boundary detection.
+src/core/classification/ Unresolved-edge classifier, blast-radius derivation, framework-boundary detection, boundary matcher (HTTP + CLI).
 src/core/trust/          Trust reporting: reliability rules, service orchestrator.
 src/adapters/extractors/ Tree-sitter extractors: typescript/ (TS/JS), rust/ (Rust).
 src/adapters/enrichment/ Post-index semantic enrichment: TS TypeChecker, Rust rust-analyzer LSP.
@@ -114,13 +114,14 @@ rgr trust repo-graph                     # Extraction trust report: reliability 
 rgr docs repo-graph .                    # Repo-level provisional annotations (README, package description)
 rgr docs repo-graph src/core             # Module-level annotations via path match
 
-# Boundary interactions (HTTP provider/consumer)
+# Boundary interactions (HTTP + CLI command)
 rgr boundary summary repo-graph          # Aggregate counts: providers, consumers, links, match rates
-rgr boundary providers repo-graph        # List boundary provider facts (Spring routes, Express routes)
-rgr boundary consumers repo-graph        # List boundary consumer facts (axios/fetch calls)
+rgr boundary providers repo-graph        # List boundary provider facts
+rgr boundary consumers repo-graph        # List boundary consumer facts
 rgr boundary links repo-graph            # List matched provider-consumer links (derived)
 rgr boundary unmatched repo-graph        # Providers/consumers with no matched link
 rgr boundary providers repo-graph --mechanism http --limit 20
+rgr boundary providers repo-graph --mechanism cli_command
 rgr boundary unmatched repo-graph --side consumers
 
 # Quality measurements
@@ -162,6 +163,8 @@ rgr uses syntax-only extraction (tree-sitter) with optional compiler enrichment 
 Trust boundaries for `graph dead`:
 - On clean-architecture codebases with explicit call/import graphs: high confidence.
 - On registry/plugin-driven architectures (CMS renderers, extension registries, render maps, string-key dispatch): treat results as "graph orphans," not deletion candidates. These codebases wire liveness through channels the graph does not yet model.
+- Spring container-managed classes (`@Component`, `@Service`, `@Repository`, `@Configuration`, `@RestController`, `@Bean`) are automatically suppressed from dead-code results via framework-liveness inferences.
+- Lambda exported handler functions are suppressed via `framework_entrypoint` inferences.
 - Use `declare entrypoint` to suppress known live nodes that appear as false positives.
 
 `arch violations` checks IMPORTS edges only. It does not check CALLS edges (call graph resolution is architecture-sensitive). The import graph is the trustworthy substrate for policy enforcement.

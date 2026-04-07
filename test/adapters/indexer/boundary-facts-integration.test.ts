@@ -557,7 +557,7 @@ describe("boundary-facts indexer integration — Commander CLI commands", () => 
 		expect(repoList).toBeDefined();
 	});
 
-	it("materializes cli_command links between Commander providers and script consumers", async () => {
+	it("materializes cli_command links via binary-prefix matching", async () => {
 		const result = await cliIndexer.indexRepo(CLI_REPO_UID);
 
 		const links = cliStorage.queryBoundaryLinks({
@@ -568,22 +568,19 @@ describe("boundary-facts indexer integration — Commander CLI commands", () => 
 		// Provider commands: repo, repo add, repo list, build
 		// Consumer invocations: mytool repo add, mytool repo list, tsc, mytool build
 		//
-		// The consumer extracts "mytool repo add" as the command path.
-		// The provider has "repo add" as the command path.
-		// These won't match because "mytool repo add" != "repo add".
+		// Binary-prefix matching strips the leading token from 3+ word
+		// consumer paths (guard against 2-word external tool false positives):
+		//   "mytool repo add" (3 tokens) → "repo add" → matches provider "repo add"
+		//   "mytool repo list" (3 tokens) → "repo list" → matches provider "repo list"
+		//   "mytool build" (2 tokens) → blocked by guard (would leave single token)
+		//   "tsc" (1 token) → no prefix to strip
 		//
-		// The consumer also has "mytool build" vs provider "build".
-		// Same issue — the binary name "mytool" is part of the consumer path
-		// but not part of the provider path.
-		//
-		// This is an honest architectural observation: the consumer includes
-		// the binary name in the path, the provider does not. The matcher
-		// needs to handle this. For now, 0 links is correct given the
-		// current matcher behavior.
-		//
-		// TODO: either the consumer should strip the binary prefix when it
-		// matches the repo's own package name, or the matcher should handle
-		// binary-prefix normalization.
-		expect(links.length).toBe(0);
+		// Raw consumer facts remain truthful ("mytool repo add").
+		// The interpretation lives in the matcher, not the extracted fact.
+		expect(links.length).toBe(2);
+
+		for (const l of links) {
+			expect(l.matchBasis).toBe("heuristic");
+		}
 	});
 });

@@ -306,15 +306,54 @@ export class CliBoundaryMatchStrategy implements BoundaryMatchStrategy {
 
 		for (const c of consumers) {
 			const consumerKey = this.computeMatcherKey(c.address, c.metadata);
-			const matches = providerIndex.get(consumerKey);
-			if (matches) {
-				for (const p of matches) {
+
+			// Strategy 1: exact command path match.
+			const exactMatches = providerIndex.get(consumerKey);
+			if (exactMatches) {
+				for (const p of exactMatches) {
 					candidates.push({
 						providerFactUid: p.factUid,
 						consumerFactUid: c.factUid,
 						matchBasis: "operation_match",
 						confidence: c.confidence * 0.9,
 					});
+				}
+				continue;
+			}
+
+			// Strategy 2: binary-prefix match.
+			// Consumer paths from scripts include the binary name
+			// (e.g., "rgr repo add") but Commander providers register
+			// only the subcommand path (e.g., "repo add"). Strip the
+			// leading token (binary) and retry.
+			//
+			// Guard: the stripped remainder must have at least 2 tokens.
+			// This prevents false positives where a 2-word external tool
+			// invocation (e.g., "vite build", "cargo test") would match
+			// a single-word internal command ("build", "test"). Those
+			// single-segment matches are too ambiguous without binary
+			// identity verification.
+			//
+			// Trade-off: top-level commands invoked via binary
+			// ("mytool build" → "build") won't match. This is acceptable
+			// because single-segment provider commands are common names
+			// shared across many tools.
+			//
+			// Raw consumer facts stay truthful — the interpretation
+			// lives here in the matcher, not in the extracted fact.
+			const tokens = consumerKey.split(" ");
+			if (tokens.length >= 3) {
+				const withoutBinary = tokens.slice(1).join(" ");
+				const prefixMatches = providerIndex.get(withoutBinary);
+				if (prefixMatches) {
+					for (const p of prefixMatches) {
+						candidates.push({
+							providerFactUid: p.factUid,
+							consumerFactUid: c.factUid,
+							matchBasis: "heuristic",
+							confidence: c.confidence * 0.75,
+						});
+					}
 				}
 			}
 		}
