@@ -10,9 +10,11 @@
  *   - Provider: something exposes an entry/control/data surface
  *   - Consumer: something reaches across the boundary
  *
- * The matcher creates BOUNDARY_LINK edges from these facts.
- * These are NOT ordinary CALLS edges — they carry mechanism,
- * confidence, and protocol-specific metadata.
+ * The matcher pairs provider and consumer facts into link candidates.
+ * These are stored in a SEPARATE derived table (boundary_links),
+ * NOT in the core edges table. Boundary links are protocol-level
+ * inferred facts, not language-level extraction edges. They carry
+ * mechanism, confidence, and protocol-specific metadata.
  *
  * Transport-specific details live in adapter code, not here.
  * The core model carries only normalized dimensions.
@@ -35,6 +37,7 @@ export type BoundaryMechanism =
 	| "socket"
 	| "device_protocol"
 	| "register_map"
+	| "cli_command"
 	| "other";
 
 /**
@@ -120,12 +123,21 @@ export interface BoundaryConsumerFact {
 // ── Link ────────────────────────────────────────────────────────────
 
 /**
- * A matched boundary link: a provider and a consumer were paired.
- * This becomes a BOUNDARY_LINK edge in the graph.
+ * A matched boundary link candidate: a provider and consumer were paired.
+ *
+ * Stored in the `boundary_links` derived table, NOT in the core
+ * `edges` table. Derived links are discardable convenience artifacts
+ * that can be recomputed from raw facts.
+ *
+ * Carries stable persisted fact UIDs, not object references.
+ * This allows match strategies to normalize, clone, or reconstruct
+ * working objects without breaking the link-to-fact association.
  */
 export interface BoundaryLinkCandidate {
-	provider: BoundaryProviderFact;
-	consumer: BoundaryConsumerFact;
+	/** Persisted UID of the provider fact that was matched. */
+	providerFactUid: string;
+	/** Persisted UID of the consumer fact that was matched. */
+	consumerFactUid: string;
 	/** How the match was determined. */
 	matchBasis: "exact_contract" | "address_match" | "operation_match" | "heuristic";
 	/** Combined confidence. */

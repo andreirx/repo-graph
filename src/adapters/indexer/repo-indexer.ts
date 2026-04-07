@@ -22,6 +22,10 @@ import {
 } from "../../core/model/index.js";
 import { UnresolvedEdgeCategory } from "../../core/diagnostics/unresolved-edge-categories.js";
 import { CURRENT_CLASSIFIER_VERSION } from "../../core/diagnostics/unresolved-edge-classification.js";
+import {
+	getMatchStrategy,
+	matchBoundaryFacts,
+} from "../../core/classification/boundary-matcher.js";
 import { detectFrameworkBoundary } from "../../core/classification/framework-boundary.js";
 import { detectLambdaEntrypoints } from "../../core/classification/framework-entrypoints.js";
 import { classifyUnresolvedEdge } from "../../core/classification/unresolved-classifier.js";
@@ -45,9 +49,14 @@ import type {
 import type {
 	InferenceRow,
 	Measurement,
+	PersistedBoundaryConsumerFact,
+	PersistedBoundaryLink,
+	PersistedBoundaryProviderFact,
 	PersistedUnresolvedEdge,
 	StoragePort,
 } from "../../core/ports/storage.js";
+import { extractSpringRoutes } from "../extractors/java/spring-route-extractor.js";
+import { extractHttpClientRequests } from "../extractors/typescript/http-client-extractor.js";
 import { readCargoDependencies } from "../config/cargo-reader.js";
 import { readGradleDependencies } from "../config/gradle-reader.js";
 import { readTsconfigAliases } from "../config/tsconfig-reader.js";
@@ -544,7 +553,135 @@ export class RepoIndexer implements IndexerPort {
 				}
 			}
 
-			// 10. Persist function-level measurements
+			// 9c. Boundary fact extraction (PROTOTYPE).
+				// Runs boundary-specific extractors on applicable files,
+				// persists raw facts (source of truth), then materializes
+				// intra-repo derived links (convenience artifact).
+				//
+				// This is separate from the main extractor pipeline because
+				// boundary facts are NOT ExtractionResult objects — they
+				// have a different shape (BoundaryProviderFact/ConsumerFact)
+				// and live in separate tables, not in nodes/edges.
+				{
+					const providerFacts: PersistedBoundaryProviderFact[] = [];
+					const consumerFacts: PersistedBoundaryConsumerFact[] = [];
+					const boundaryObservedAt = new Date().toISOString();
+
+					for (const relPath of filePaths) {
+						const content = fileContents.get(relPath);
+						if (!content) continue;
+						const fileUid = `${repoUid}:${relPath}`;
+
+						// Gather symbols from this file for caller/handler attribution.
+						const fileSymbols = allNodes
+							.filter(
+								(n) =>
+									n.fileUid === fileUid &&
+									n.kind === NodeKind.SYMBOL,
+							)
+							.map((n) => ({
+								stableKey: n.stableKey,
+								name: n.name,
+								qualifiedName: n.qualifiedName ?? n.name,
+								lineStart: n.location?.lineStart ?? null,
+							}));
+
+						// Java files: extract Spring route provider facts.
+						if (relPath.endsWith(".java")) {
+							const routes = extractSpringRoutes(
+								content,
+								relPath,
+								repoUid,
+								fileSymbols,
+							);
+							for (const r of routes) {
+								const strategy = getMatchStrategy(r.mechanism);
+								const matcherKey = strategy
+									? strategy.computeMatcherKey(r.address, r.metadata)
+									: r.operation;
+								providerFacts.push({
+									...r,
+									factUid: uuidv4(),
+									snapshotUid: snapshot.snapshotUid,
+									repoUid,
+									matcherKey,
+									extractor: "spring-route-extractor:0.1",
+									observedAt: boundaryObservedAt,
+								});
+							}
+						}
+
+						// TS/JS files: extract HTTP client consumer facts.
+						if (
+							relPath.endsWith(".ts") ||
+							relPath.endsWith(".tsx") ||
+							relPath.endsWith(".js") ||
+							relPath.endsWith(".jsx")
+						) {
+							const requests = extractHttpClientRequests(
+								content,
+								relPath,
+								repoUid,
+								fileSymbols,
+							);
+							for (const c of requests) {
+								const strategy = getMatchStrategy(c.mechanism);
+								const matcherKey = strategy
+									? strategy.computeMatcherKey(c.address, c.metadata)
+									: c.operation;
+								consumerFacts.push({
+									...c,
+									factUid: uuidv4(),
+									snapshotUid: snapshot.snapshotUid,
+									repoUid,
+									matcherKey,
+									extractor: "http-client-extractor:0.1",
+									observedAt: boundaryObservedAt,
+								});
+							}
+						}
+					}
+
+					// Persist raw facts (source of truth).
+					if (providerFacts.length > 0) {
+						this.storage.insertBoundaryProviderFacts(providerFacts);
+					}
+					if (consumerFacts.length > 0) {
+						this.storage.insertBoundaryConsumerFacts(consumerFacts);
+					}
+
+					// Materialize intra-repo derived links (convenience artifact).
+					// These are DISCARDABLE — they can be regenerated from raw facts.
+					//
+					// The matcher accepts persisted facts (which carry factUid) and
+					// returns candidates with stable UIDs — no object-identity
+					// assumptions across the strategy boundary.
+					if (providerFacts.length > 0 && consumerFacts.length > 0) {
+						const candidates = matchBoundaryFacts(
+							providerFacts,
+							consumerFacts,
+						);
+						if (candidates.length > 0) {
+							const materializedAt = new Date().toISOString();
+							const links: PersistedBoundaryLink[] = candidates.map(
+								(c) => ({
+									linkUid: uuidv4(),
+									snapshotUid: snapshot.snapshotUid,
+									repoUid,
+									providerFactUid: c.providerFactUid,
+									consumerFactUid: c.consumerFactUid,
+									matchBasis: c.matchBasis,
+									confidence: c.confidence,
+									metadataJson: null,
+									materializedAt,
+								}),
+							);
+							this.storage.insertBoundaryLinks(links);
+						}
+					}
+				}
+
+				// 10. Persist function-level measurements
 			if (allMetrics.size > 0) {
 				const now = new Date().toISOString();
 				const measurements: Measurement[] = [];

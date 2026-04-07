@@ -11,6 +11,7 @@ import { Command } from "commander";
 import { type AppContext, bootstrap, shutdown } from "../main.js";
 import { CLI_VERSION } from "../version.js";
 import { registerArchCommands } from "./commands/arch.js";
+import { registerBoundaryCommands } from "./commands/boundary.js";
 import { registerChangeCommands } from "./commands/change.js";
 import { registerDeclareCommands } from "./commands/declare.js";
 import { registerDocsCommand } from "./commands/docs.js";
@@ -52,6 +53,7 @@ registerChangeCommands(program, getCtx);
 registerTrustCommand(program, getCtx);
 registerEnrichCommand(program, getCtx);
 registerDocsCommand(program, getCtx);
+registerBoundaryCommands(program, getCtx);
 
 // Main execution
 async function main(): Promise<void> {

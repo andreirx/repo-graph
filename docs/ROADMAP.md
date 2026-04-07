@@ -6,7 +6,7 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Current state (as of last commit)
 
-- **841 tests** across 48 test files.
+- **972 tests** across 54 test files.
 - **Languages:** TypeScript/JavaScript + Rust + Java. Three-extractor indexer.
 - **Enrichment:** TS (~81%), Rust (~85%), Java (~76%). All three operational.
 - **Classifier version:** 6.
@@ -66,6 +66,26 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - Express route/middleware registration (edge-level, receiver-provenance gated)
 - Lambda exported handler entrypoints (node-level, inference-based)
 
+### Boundary interaction model (HTTP slice)
+- Generic boundary-fact architecture: provider facts, consumer facts, derived links.
+- Separate storage: `boundary_provider_facts`, `boundary_consumer_facts` (source of
+  truth), `boundary_links` (derived artifact, discardable).
+- NOT in the core `edges` table. Boundary links are protocol-level inferred facts,
+  not language-level extraction edges.
+- Mechanism-keyed matcher: `BoundaryMatchStrategy` interface, `HttpBoundaryMatchStrategy`
+  first implementation. Strategy pattern for future gRPC, IOCTL, CLI mechanisms.
+- Structured segment normalization: Spring `{id}`, Express `:id`, consumer `{param}`
+  all normalize to `{_}` for matching. Raw paths preserved in facts.
+- HTTP provider extractor: Spring `@GetMapping`/`@PostMapping`/etc. (PROTOTYPE, regex).
+- HTTP consumer extractor: `axios.get/post/put/delete/patch`, `fetch()` (PROTOTYPE, regex).
+- Indexer wiring: boundary extraction runs during indexing, facts persisted, intra-repo
+  links materialized as convenience.
+- CLI surface: `rgr boundary summary|providers|consumers|links|unmatched`.
+- Validated on glamCRM: 97 providers, 82 consumers, 66 links, 68% provider match rate.
+- Known limitation: consumer extractor misses calls where API prefix is baked into a
+  base URL constant (e.g. `const BASE = VITE_API_URL + "/api/v2/users"`). Fix path:
+  AST-backed extraction with constant resolution.
+
 ### Compiler enrichment
 - `rgr enrich <repo>`: post-index receiver-type resolution
 - TypeScript: via `ts.Program` / `TypeChecker` (~81% enrichment rate)
@@ -80,66 +100,66 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Next (in priority order)
 
-### 1. API-boundary extraction (cross-language REST linkage)
-First-class modeling of frontend↔backend REST/HTTP relationships
-in mixed-language monorepos. NOT a normal call-graph edge — this is
-a protocol-boundary edge with its own confidence model.
-
-Architecture:
-- Facts are the source of truth. Persist provider/consumer boundary
-  facts first; links are derived artifacts.
-- Matching should be facts-first, hybrid delivery:
-  - raw facts persist regardless
-  - intra-repo links may be materialized at index time as a convenience
-  - cross-repo matching remains a separate command/path
-- Design the core model generically for future mechanisms:
-  HTTP, gRPC/RPC, IPC/shared-memory, IOCTLs, queues, events, sockets.
-
-Support module:
-- HTTP server-route extractor: `@GetMapping("/api/orders")`,
-  Express `app.get("/api/...")`, Lambda API Gateway routes. Emits:
-  method, path template, handler symbol, framework evidence.
-- HTTP client-request extractor: `fetch("/api/orders")`, axios
-  wrappers, RTK Query / TanStack Query patterns. Emits normalized
-  facts: method, path template, source file, caller symbol.
-
-Feature implementation:
-- Cross-boundary matcher: creates protocol-boundary links from client
-  request sites to server route handlers.
-- Trust surface: "frontend module X talks to backend controller Y",
-  "this route has no client callers in the monorepo", "this client
-  endpoint has no matching server route."
-- Confidence: heuristic path/method matching vs exact (generated
-  client, OpenAPI spec, shared type contract).
-- Execution order:
-  1. server-route/provider facts
-  2. client-request/consumer facts
-  3. matcher + persistence + surfaces
-
-Why this is next:
-- glamCRM is a Spring Boot + React monorepo. The current model
-  indexes both sides but cannot prove REST linkage end-to-end.
-- This is the highest-value cross-language feature for real-world
-  monorepos.
-- It aligns with the product vision: deterministic discovery of
-  relationships agents cannot cheaply extract with grep.
-
-### 2. Java/Spring framework detectors
+### 1. Java/Spring framework detectors
 Spring annotations (@RestController, @Service, @Repository, @Autowired),
 JAX-RS, servlet/container entrypoints. These support the API-boundary
 provider side and improve dead-code/liveness analysis.
 
-### 3. Python extractor
+### 2. Boundary extractor maturation (AST-backed)
+Upgrade Spring provider and TS HTTP consumer extractors from PROTOTYPE
+(regex) to MATURE (AST-backed). This is an adapter swap — the fact
+schema, matcher, storage, and CLI surfaces are stable. The extractors
+are behind the `BoundaryProviderFact[]` / `BoundaryConsumerFact[]`
+interface. Specific fixes:
+- Spring: use tree-sitter-java AST for annotation extraction
+- TS HTTP consumer: resolve base URL constants from AST, handle
+  multi-line URL arguments, wrapper functions
+- Express route provider: new extractor, same boundary-fact model
+
+### 3. CLI boundary modeling
+The CLI is a real interaction boundary. Users, scripts, cron, systemd,
+CI, Makefiles, and Docker entrypoints interact through it. That is not
+a normal language call edge — it is a boundary interaction.
+
+Mechanism: `cli_command` (new `BoundaryMechanism` variant).
+
+Provider facts (command surface):
+- Extracted from Commander/yargs/clap/argparse command registrations
+- Operation: `rgr boundary links`, `fraktag serve`, `ip link set`
+- Address: command path (program + subcommand chain)
+- Metadata: flags, positional args, exit behavior
+
+Consumer facts (invocations):
+- Extracted from shell scripts, Makefiles, CI configs (.github/workflows),
+  systemd unit files, Dockerfiles, package.json scripts
+- Operation: the invocation command string
+- Confidence: exact invocation > wrapper > interpolated
+
+Matcher: `CliBoundaryMatchStrategy`
+- Command name + subcommand path matching
+- Normalized flag surface matching (future)
+
+Why this matters:
+- Many repos (Linux tools, build tools, compilers, FRAKTAG, repo-graph
+  itself) have the CLI as the primary entry surface
+- Enables: unused command detection, blast radius of flag changes,
+  script-to-command coupling, operational usage paths
+- Distinct from `declare boundary` (architecture rule) — this is a
+  system interaction fact
+- Reuses the full boundary-fact architecture (facts, links, matcher,
+  CLI query surface) with a new mechanism
+
+### 4. Python extractor
 Python is common in data/ML pipelines, build scripts, and analysis tools.
 Requires: tree-sitter-python grammar, Python extractor implementing
 ExtractorPort, pip/pyproject.toml/setup.py dependency reader, Python
 builtins (builtins module, stdlib modules).
 
-### 4. Rust framework detectors
+### 5. Rust framework detectors
 Actix-web, Axum, Rocket, Warp route handlers. Same pattern as Express
 detection: post-classification pass, receiver-provenance gated.
 
-### 5. C/C++ extractor
+### 6. C/C++ extractor
 Highest business value (Linux BSP, embedded applications). Highest
 implementation cost. Requires compile_commands.json as boundary.
 Do not start until Rust, Java, and Python have validated the
