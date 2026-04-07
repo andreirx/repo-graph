@@ -56,6 +56,7 @@ import type {
 	StoragePort,
 } from "../../core/ports/storage.js";
 import { extractSpringRoutes } from "../extractors/java/spring-route-extractor.js";
+import { extractExpressRoutes } from "../extractors/typescript/express-route-extractor.js";
 import { FileLocalStringResolver } from "../extractors/typescript/file-local-string-resolver.js";
 import { extractHttpClientRequests } from "../extractors/typescript/http-client-extractor.js";
 import { readCargoDependencies } from "../config/cargo-reader.js";
@@ -614,9 +615,9 @@ export class RepoIndexer implements IndexerPort {
 							}
 						}
 
-						// TS/JS files: extract HTTP client consumer facts.
-						// Resolve file-local string bindings first so the
-						// extractor can recover base URL constants.
+						// TS/JS files: extract Express route provider facts AND
+						// HTTP client consumer facts. Resolve file-local string
+						// bindings first so both extractors can recover constants.
 						if (
 							relPath.endsWith(".ts") ||
 							relPath.endsWith(".tsx") ||
@@ -629,6 +630,32 @@ export class RepoIndexer implements IndexerPort {
 								await this.stringResolver.initialize();
 							}
 							const bindings = this.stringResolver.resolve(content, relPath);
+
+							// Express route provider facts.
+							const routes = extractExpressRoutes(
+								content,
+								relPath,
+								repoUid,
+								fileSymbols,
+								bindings,
+							);
+							for (const r of routes) {
+								const strategy = getMatchStrategy(r.mechanism);
+								const matcherKey = strategy
+									? strategy.computeMatcherKey(r.address, r.metadata)
+									: r.operation;
+								providerFacts.push({
+									...r,
+									factUid: uuidv4(),
+									snapshotUid: snapshot.snapshotUid,
+									repoUid,
+									matcherKey,
+									extractor: "express-route-extractor:0.1",
+									observedAt: boundaryObservedAt,
+								});
+							}
+
+							// HTTP client consumer facts.
 							const requests = extractHttpClientRequests(
 								content,
 								relPath,

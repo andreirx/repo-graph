@@ -1,11 +1,11 @@
 /**
- * Boundary-facts indexer integration test.
+ * Boundary-facts indexer integration tests.
  *
  * Verifies end-to-end wiring: extractor → fact persistence → matcher → derived links.
  *
- * Uses an in-memory fixture with:
- *   - A Java file with Spring @GetMapping + @PostMapping routes (provider)
- *   - A TS file with axios.get + axios.post calls to matching paths (consumer)
+ * Two fixture sets:
+ *   1. Spring + TS (Java provider, TS consumer) — mixed-language monorepo pattern
+ *   2. Express + TS (TS provider, TS consumer) — TS-only pattern
  *
  * Assertions:
  *   - Provider facts are persisted with correct matcherKey normalization
@@ -13,6 +13,7 @@
  *   - Derived boundary links are materialized for matching paths
  *   - Non-matching paths produce no links
  *   - Facts survive in isolation (separate from edges table)
+ *   - Express :id params normalize to {id} and match consumer {param}
  */
 
 import { randomUUID } from "node:crypto";
@@ -283,5 +284,134 @@ describe("boundary-facts indexer integration", () => {
 			snapshotUid: result1.snapshotUid,
 		});
 		expect(p1Again.length).toBe(3);
+	});
+});
+
+// ── Express + TS integration (TS-only boundary) ─────────────────────
+
+describe("boundary-facts indexer integration — Express provider", () => {
+	const EXPRESS_REPO_UID = "express-boundary-test";
+	const EXPRESS_FIXTURE_ROOT = join(
+		import.meta.dirname,
+		"../../fixtures/express-boundary",
+	);
+
+	let exStorage: SqliteStorage;
+	let exProvider: SqliteConnectionProvider;
+	let exIndexer: RepoIndexer;
+	let exDbPath: string;
+
+	beforeEach(() => {
+		exDbPath = join(tmpdir(), `rgr-express-boundary-${randomUUID()}.db`);
+		exProvider = new SqliteConnectionProvider(exDbPath);
+		exProvider.initialize();
+		exStorage = new SqliteStorage(exProvider.getDatabase());
+		// TS extractor only — this is the TS-only repo pattern.
+		exIndexer = new RepoIndexer(exStorage, [tsExtractor]);
+
+		exStorage.addRepo({
+			repoUid: EXPRESS_REPO_UID,
+			name: EXPRESS_REPO_UID,
+			rootPath: EXPRESS_FIXTURE_ROOT,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+	});
+
+	afterEach(() => {
+		exProvider.close();
+		try {
+			unlinkSync(exDbPath);
+		} catch {
+			// ignore
+		}
+	});
+
+	it("persists Express provider facts with framework=express", async () => {
+		const result = await exIndexer.indexRepo(EXPRESS_REPO_UID);
+
+		const providers = exStorage.queryBoundaryProviderFacts({
+			snapshotUid: result.snapshotUid,
+		});
+
+		// server.ts: GET /products, GET /products/:id, POST /products, DELETE /products/:id
+		expect(providers.length).toBe(4);
+
+		for (const p of providers) {
+			expect(p.mechanism).toBe("http");
+			expect(p.framework).toBe("express");
+			expect(p.basis).toBe("registration");
+			expect(p.sourceFile).toBe("src/server.ts");
+		}
+	});
+
+	it("normalizes Express :id params to {id} in address", async () => {
+		const result = await exIndexer.indexRepo(EXPRESS_REPO_UID);
+
+		const providers = exStorage.queryBoundaryProviderFacts({
+			snapshotUid: result.snapshotUid,
+		});
+
+		const getById = providers.find((p) =>
+			p.operation === "GET /api/v2/products/{id}",
+		);
+		expect(getById).toBeDefined();
+		expect(getById!.address).toBe("/api/v2/products/{id}");
+	});
+
+	it("computes matcher keys that normalize {id} to {_}", async () => {
+		const result = await exIndexer.indexRepo(EXPRESS_REPO_UID);
+
+		const providers = exStorage.queryBoundaryProviderFacts({
+			snapshotUid: result.snapshotUid,
+		});
+
+		const getById = providers.find((p) =>
+			p.address === "/api/v2/products/{id}",
+		);
+		expect(getById).toBeDefined();
+		expect(getById!.matcherKey).toBe("GET /api/v2/products/{_}");
+	});
+
+	it("materializes links between Express providers and TS consumers", async () => {
+		const result = await exIndexer.indexRepo(EXPRESS_REPO_UID);
+
+		const links = exStorage.queryBoundaryLinks({
+			snapshotUid: result.snapshotUid,
+		});
+
+		// Provider: GET /products, GET /products/{id}, POST /products, DELETE /products/{id}
+		// Consumer: GET /products, GET /products/{param}, GET /orders
+		// Expected matches:
+		//   GET /api/v2/products         ↔ GET /api/v2/products  (literal)
+		//   GET /api/v2/products/{_}     ↔ GET /api/v2/products/{_}  (param match)
+		//   POST /api/v2/products        ↔ (no consumer POST)
+		//   DELETE /api/v2/products/{_}  ↔ (no consumer DELETE)
+		//   GET /api/v2/orders           ↔ (no provider)
+		expect(links.length).toBe(2);
+
+		// Verify the param match works across Express {id} ↔ consumer {param}.
+		const paramMatch = links.find((l) =>
+			l.providerAddress === "/api/v2/products/{id}",
+		);
+		expect(paramMatch).toBeDefined();
+		expect(paramMatch!.consumerAddress).toBe("/api/v2/products/{param}");
+		expect(paramMatch!.matchBasis).toBe("address_match");
+		expect(paramMatch!.providerFramework).toBe("express");
+	});
+
+	it("does NOT create links for unmatched paths", async () => {
+		const result = await exIndexer.indexRepo(EXPRESS_REPO_UID);
+
+		const links = exStorage.queryBoundaryLinks({
+			snapshotUid: result.snapshotUid,
+		});
+
+		const ordersLink = links.find((l) =>
+			l.consumerAddress.includes("orders") ||
+			l.providerAddress.includes("orders"),
+		);
+		expect(ordersLink).toBeUndefined();
 	});
 });
