@@ -56,7 +56,7 @@ import type {
 	StoragePort,
 } from "../../core/ports/storage.js";
 import { detectSpringBeans } from "../extractors/java/spring-bean-detector.js";
-import { extractSpringRoutes } from "../extractors/java/spring-route-extractor.js";
+import { extractSpringRoutes, initSpringRouteParser } from "../extractors/java/spring-route-extractor.js";
 import { extractExpressRoutes } from "../extractors/typescript/express-route-extractor.js";
 import { FileLocalStringResolver } from "../extractors/typescript/file-local-string-resolver.js";
 import { extractHttpClientRequests } from "../extractors/typescript/http-client-extractor.js";
@@ -151,6 +151,8 @@ export class RepoIndexer implements IndexerPort {
 	private extractorsByExtension: Map<string, ExtractorPort>;
 	/** Lazy-initialized string resolver for boundary extraction. */
 	private stringResolver: FileLocalStringResolver | null = null;
+	/** Whether the Spring route parser has been initialized. */
+	private springParserReady = false;
 
 	constructor(
 		private storage: StoragePort,
@@ -650,7 +652,15 @@ export class RepoIndexer implements IndexerPort {
 							}));
 
 						// Java files: extract Spring route provider facts.
+						// Note: this reparses the file with tree-sitter-java
+						// because the Java extractor does not expose its parse
+						// tree. Passing the tree through would avoid this cost
+						// but requires extending ExtractionResult. Deferred.
 						if (relPath.endsWith(".java")) {
+							if (!this.springParserReady) {
+								await initSpringRouteParser();
+								this.springParserReady = true;
+							}
 							const routes = extractSpringRoutes(
 								content,
 								relPath,

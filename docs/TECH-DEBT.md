@@ -39,8 +39,18 @@
   under the same vendor root. This is a fundamental limitation of
   matching build coordinates against source imports without JAR manifest
   or transitive dependency resolution. Documented as approximate.
-- **No Java framework detectors yet:** Spring annotations, JAX-RS,
-  servlet/container entrypoints are unmodeled.
+- **Spring framework detectors (first slice shipped):** `@Component`, `@Service`,
+  `@Repository`, `@Configuration`, `@RestController`, `@Controller`, `@Bean`
+  detected via regex line scanning with comment-line filtering. Emitted as
+  `spring_container_managed` inferences. Suppresses class-level dead-code false
+  positives. Known gaps:
+  - Methods inside container-managed classes still show dead (handler methods have
+    no Java-caller inbound edges; Spring dispatcher invokes them at runtime).
+  - Plain classes instantiated only by `@Bean` factories remain dead until the `new`
+    call is resolved by enrichment or bean-return-type analysis.
+  - `@Autowired` / constructor injection not modeled (DI edges, not liveness).
+  - Custom stereotype annotations not detected.
+  - JAX-RS, servlet/container entrypoints not yet modeled.
 - **Java semantic enrichment operational but fragile:** jdtls (Eclipse JDT
   Language Server) adapter exists at `src/adapters/enrichment/java-receiver-resolver.ts`
   and has produced results on spring-petclinic and glamCRM. However, reliability is
@@ -87,8 +97,13 @@
 
 ## Dead Code Trust Boundary
 
-- `graph dead` answers "no known inbound graph edges," not "semantically unreachable."
+- `graph dead` answers "no known inbound graph edges AND no framework-liveness
+  inference," not "semantically unreachable."
+- Three suppression layers: (1) inbound edges, (2) entrypoint declarations,
+  (3) framework-liveness inferences (`framework_entrypoint`, `spring_container_managed`).
 - Registry/plugin-driven architectures produce false positives.
+- Spring bean detection suppresses class-level false positives but not method-level
+  (handler methods, injected fields inside beans remain dead in the graph).
 - See v1-validation-report.txt for the full extraction capability boundary.
 
 ## Classifier Limitations
@@ -106,24 +121,38 @@
 ## Boundary Interaction Model
 
 ### HTTP provider extractor (Spring)
-- **PROTOTYPE — regex-based**, not AST-backed. Sufficient for glamCRM validation.
-  Fragile on multi-line annotations, `value=` attribute syntax, `produces`/`consumes`
-  constraints. Should be rebuilt on tree-sitter-java AST.
+- **MATURE — AST-backed** via tree-sitter-java. Handles multiline annotations,
+  `value=`/`path=` attributes, `method=RequestMethod.X`, marker annotations
+  (no parens). Validated on glamCRM (97 routes, identical output to regex version).
+- **Known inefficiency:** each Java file is parsed twice during indexing (once by
+  the Java extractor, once by the Spring route extractor) because the Java extractor
+  does not expose its parse tree. Deferred until measurable cost.
+- **Not supported:** array-valued paths `@GetMapping({"/a", "/b"})`, custom composed
+  annotations, Spring WebFlux functional endpoints.
+
+### HTTP provider extractor (Express)
+- **PROTOTYPE — line-based regex.** Receiver provenance gated to `{app, router, server}`.
+  Express import gate prevents false positives on non-Express files.
+- Consumes `FileLocalStringResolver` for constant-backed route paths.
+- Validated on fraktag (47 routes).
+- **Not supported:** aliased receivers (`const api = express.Router(); api.get(...)`),
+  `app.route("/x").get().post()` chaining, middleware-only registrations (`app.use`),
+  mounted router prefixes (`app.use("/api", router)`).
 
 ### HTTP consumer extractor (TS/JS)
 - **PROTOTYPE — line-based regex** with file-local string resolution via
-  `FileLocalStringResolver`. Resolves base-URL constants (glamCRM 93.9% consumer
-  match rate, up from 80.5% before resolver).
+  `FileLocalStringResolver`. Resolves base-URL constants including bare identifiers.
+  glamCRM: 85 consumers, 94.1% match rate. fraktag: 42 consumers, 97.6% match rate.
 - **FileLocalStringResolver scope (v1):**
   - Same-file only. Does not follow imports.
-  - Top-level `const` declarations only. No `let`, `var`, destructuring.
+  - Top-level `const` and `export const` declarations. No `let`, `var`, destructuring.
   - String literals, template literals, binary `+` concatenation.
   - References to previously-resolved same-file constants (chained bindings).
   - Environment variable placeholders (`import.meta.env.*`, `process.env.*`)
     treated as opaque prefix, stripped from resolved value.
   - No function calls, no object property access, no computed expressions.
   - Bounded recursion (max 10 steps) for cycle safety.
-- **Remaining consumer gaps (glamCRM 5 of 82):**
+- **Remaining consumer gaps (glamCRM 5 of 85):**
   - Genuine path mismatches between frontend and backend (e.g. `with-docx` vs
     `with-doc`, `POST /estimates` vs `POST /estimates/create`). These are
     application-level facts, not extractor failures.
@@ -138,4 +167,11 @@
 - Stored in separate `boundary_links` table, NOT in core `edges` table.
 - Materialized at index time for intra-repo convenience. Discardable.
 - No cross-repo matching yet (architecture supports it, no implementation).
-- No Express route provider extractor yet (TS-only repos have no provider facts).
+
+### Dead-code suppression via framework inferences
+- `findDeadNodes` excludes nodes with `framework_entrypoint` (Lambda) or
+  `spring_container_managed` (Spring bean) inferences.
+- **Remaining gap:** methods inside container-managed classes (e.g. `@GetMapping`
+  handler methods, injected fields) still show dead because they have no
+  Java-caller inbound edges. Spring's HTTP dispatcher invokes them at runtime.
+  Compounding with boundary route facts could suppress handler methods.

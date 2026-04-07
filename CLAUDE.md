@@ -20,7 +20,7 @@ src/core/trust/          Trust reporting: reliability rules, service orchestrato
 src/adapters/extractors/ Tree-sitter extractors: typescript/ (TS/JS), rust/ (Rust).
 src/adapters/enrichment/ Post-index semantic enrichment: TS TypeChecker, Rust rust-analyzer LSP.
 src/adapters/config/     Config readers: tsconfig-reader, cargo-reader.
-src/adapters/storage/    SQLite storage (migrations 001-007).
+src/adapters/storage/    SQLite storage (migrations 001-008).
 src/adapters/indexer/    Multi-language indexer: file routing, edge resolution, classification.
 src/cli/                 Commander-based CLI. Depends on ports, not adapters directly.
 src/main.ts              Composition root. Wires all extractors and adapters.
@@ -113,6 +113,15 @@ rgr change impact repo-graph --since main --max-depth 3
 rgr trust repo-graph                     # Extraction trust report: reliability levels + downgrade flags
 rgr docs repo-graph .                    # Repo-level provisional annotations (README, package description)
 rgr docs repo-graph src/core             # Module-level annotations via path match
+
+# Boundary interactions (HTTP provider/consumer)
+rgr boundary summary repo-graph          # Aggregate counts: providers, consumers, links, match rates
+rgr boundary providers repo-graph        # List boundary provider facts (Spring routes, Express routes)
+rgr boundary consumers repo-graph        # List boundary consumer facts (axios/fetch calls)
+rgr boundary links repo-graph            # List matched provider-consumer links (derived)
+rgr boundary unmatched repo-graph        # Providers/consumers with no matched link
+rgr boundary providers repo-graph --mechanism http --limit 20
+rgr boundary unmatched repo-graph --side consumers
 
 # Quality measurements
 rgr graph stats repo-graph               # Module structural metrics (fan-in/out, instability)

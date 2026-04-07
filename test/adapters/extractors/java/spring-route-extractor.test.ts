@@ -1,12 +1,19 @@
 /**
- * Spring route fact extractor — unit tests (prototype).
+ * Spring route fact extractor — unit tests.
  *
- * Tests the regex-based annotation scanner against known Spring
+ * Tests the AST-backed annotation scanner against known Spring
  * patterns. Does not require Java compilation or jdtls.
  */
 
-import { describe, expect, it } from "vitest";
-import { extractSpringRoutes } from "../../../../src/adapters/extractors/java/spring-route-extractor.js";
+import { beforeAll, describe, expect, it } from "vitest";
+import {
+	extractSpringRoutes,
+	initSpringRouteParser,
+} from "../../../../src/adapters/extractors/java/spring-route-extractor.js";
+
+beforeAll(async () => {
+	await initSpringRouteParser();
+});
 
 function extract(source: string) {
 	return extractSpringRoutes(source, "src/Controller.java", "test-repo", []);
@@ -144,6 +151,122 @@ public class C {
 	});
 });
 
+// ── AST maturity: multiline annotations ─────────────────────────────
+
+describe("extractSpringRoutes — multiline annotations", () => {
+	it("handles multiline @PostMapping with value= attribute", () => {
+		const facts = extract(`
+@RequestMapping("/api/v2")
+public class Controller {
+    @PostMapping(
+        value = "/products",
+        produces = "application/json"
+    )
+    public Product create(Product p) { return null; }
+}`);
+		expect(facts.length).toBe(1);
+		expect(facts[0].address).toBe("/api/v2/products");
+		expect(facts[0].metadata.httpMethod).toBe("POST");
+	});
+
+	it("handles multiline @RequestMapping with method and path", () => {
+		const facts = extract(`
+@RequestMapping("/api/v2")
+public class Controller {
+    @RequestMapping(
+        method = RequestMethod.DELETE,
+        path = "/{id}"
+    )
+    public void delete(Long id) {}
+}`);
+		expect(facts.length).toBe(1);
+		expect(facts[0].address).toBe("/api/v2/{id}");
+		expect(facts[0].metadata.httpMethod).toBe("DELETE");
+	});
+
+	it("handles class-level @RequestMapping split across lines", () => {
+		const facts = extract(`
+@RequestMapping(
+    value = "/api/v2/orders"
+)
+public class OrderController {
+    @GetMapping("/{id}")
+    public Order getById(Long id) { return null; }
+}`);
+		expect(facts.length).toBe(1);
+		expect(facts[0].address).toBe("/api/v2/orders/{id}");
+	});
+});
+
+// ── AST maturity: attribute forms ───────────────────────────────────
+
+describe("extractSpringRoutes — attribute forms", () => {
+	it("extracts value= attribute", () => {
+		const facts = extract(`
+public class Controller {
+    @GetMapping(value = "/items")
+    public List<Item> list() { return null; }
+}`);
+		expect(facts.length).toBe(1);
+		expect(facts[0].address).toBe("/items");
+	});
+
+	it("extracts path= attribute", () => {
+		const facts = extract(`
+public class Controller {
+    @GetMapping(path = "/items")
+    public List<Item> list() { return null; }
+}`);
+		expect(facts.length).toBe(1);
+		expect(facts[0].address).toBe("/items");
+	});
+
+	it("extracts positional string (no attribute name)", () => {
+		const facts = extract(`
+public class Controller {
+    @GetMapping("/items")
+    public List<Item> list() { return null; }
+}`);
+		expect(facts.length).toBe(1);
+		expect(facts[0].address).toBe("/items");
+	});
+
+	it("handles empty @GetMapping (no parens)", () => {
+		const facts = extract(`
+@RequestMapping("/api")
+public class Controller {
+    @GetMapping
+    public List<Item> list() { return null; }
+}`);
+		expect(facts.length).toBe(1);
+		expect(facts[0].address).toBe("/api");
+	});
+
+	it("handles @GetMapping() with empty parens", () => {
+		const facts = extract(`
+@RequestMapping("/api")
+public class Controller {
+    @GetMapping()
+    public List<Item> list() { return null; }
+}`);
+		expect(facts.length).toBe(1);
+		expect(facts[0].address).toBe("/api");
+	});
+
+	it("handles @RequestMapping with method=RequestMethod.PUT", () => {
+		const facts = extract(`
+public class Controller {
+    @RequestMapping(method = RequestMethod.PUT, value = "/items/{id}")
+    public Item update(Long id, Item item) { return null; }
+}`);
+		expect(facts.length).toBe(1);
+		expect(facts[0].metadata.httpMethod).toBe("PUT");
+		expect(facts[0].address).toBe("/items/{id}");
+	});
+});
+
+// ── No false positives ──────────────────────────────────────────────
+
 describe("extractSpringRoutes — no false positives", () => {
 	it("returns empty for non-Spring Java class", () => {
 		const facts = extract(`
@@ -159,7 +282,19 @@ public class Utils {
 public class OrderController {
 }`;
 		const facts = extract(source);
-		// Class-level annotation alone produces no route facts.
+		expect(facts).toEqual([]);
+	});
+
+	it("returns empty without crash when parser is not initialized and no rootNode", () => {
+		// Direct call without init and without rootNode.
+		// The shared parser may already be initialized from beforeAll,
+		// so this test verifies the quick-gate on non-Spring files.
+		const facts = extractSpringRoutes(
+			"public class Plain { void foo() {} }",
+			"src/Plain.java",
+			"test",
+			[],
+		);
 		expect(facts).toEqual([]);
 	});
 });

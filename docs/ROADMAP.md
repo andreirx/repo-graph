@@ -6,16 +6,21 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Current state (as of last commit)
 
-- **972 tests** across 54 test files.
+- **1083 tests** across 58 test files.
 - **Languages:** TypeScript/JavaScript + Rust + Java. Three-extractor indexer.
-- **Enrichment:** TS (~81%), Rust (~85%), Java (~76%). All three operational.
+- **Enrichment:** TS (~81%), Rust (~85%), Java (operational but fragile). All three wired.
 - **Classifier version:** 6.
   - v4: language-aware imports
   - v5: Rust crate-internal module heuristic
   - v6: hyphen-normalized Cargo deps + heuristic basis-code distinction
+- **Boundary interaction model:** HTTP slice shipped (Spring + Express providers, TS consumers).
+  - glamCRM: 97 providers, 85 consumers, 80 links (82.5% provider, 94.1% consumer match rate)
+  - fraktag: 47 providers, 42 consumers, 41 links (70.2% provider, 97.6% consumer match rate)
+- **Spring framework detectors:** container-managed bean liveness via `@Component`, `@Service`,
+  `@Repository`, `@Configuration`, `@RestController`, `@Controller`, `@Bean`. Suppresses 93
+  false dead-code reports on glamCRM. Also fixes Lambda entrypoint suppression in `findDeadNodes`.
 - **6-repo smoke set:** amodx, fraktag, glamCRM, zap-engine, zap-squad, repo-graph.
   - 2 TS-only, 2 TS+Rust, 1 TS+Java, 1 TS-only (self-index).
-  - Latest assessment: `smoke-runs/2026-04-07T08-20-00Z/ASSESSMENT-from-agent.md`
   - Benchmark pack: langchain4j (2641 Java files), spring-petclinic (47 Java files)
 - **Non-unknown classification rates (before enrichment):**
   - TS-only repos: 53-69%
@@ -23,6 +28,7 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - **Enrichment:** TS ~81%, Rust ~85% receiver-type resolution via `rgr enrich`.
 - **Call-graph reliability:** all repos LOW (thresholds 50%/85%, fraktag closest at 47%).
 - **Framework detection:** Express routes (50 on fraktag), Lambda handlers (93 on amodx, 20 on glamCRM).
+  Spring bean liveness (93 suppressions on glamCRM).
 - **Key architectural decisions made:**
   - Nearest-owning per-file context for deps, tsconfig, AND Cargo enrichment.
   - Enrichment is a separate `rgr enrich` pass, not inline with indexing.
@@ -30,6 +36,8 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   - Blast-radius is query-time derived, not persisted.
   - Framework-boundary detection is a post-classification pass.
   - Rust crate-internal module classification uses a distinct heuristic basis code.
+  - Boundary facts stored separately from core edges table (derived links discardable).
+  - `findDeadNodes` now consults framework-liveness inferences (Lambda + Spring).
 
 ## Shipped
 
@@ -65,8 +73,16 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 ### Framework detection
 - Express route/middleware registration (edge-level, receiver-provenance gated)
 - Lambda exported handler entrypoints (node-level, inference-based)
+- Spring container-managed bean detection: `@Component`, `@Service`, `@Repository`,
+  `@Configuration`, `@RestController`, `@Controller`, `@Bean` factory methods.
+  Emitted as inferences (kind: `spring_container_managed`). Suppresses false
+  dead-code reports via `findDeadNodes` inference exclusion.
+- `findDeadNodes` now consults framework-liveness inferences (both `framework_entrypoint`
+  and `spring_container_managed`), not just entrypoint declarations. This also fixes
+  the pre-existing Lambda entrypoint gap where detected entrypoints were persisted but
+  not consumed by dead-code analysis.
 
-### Boundary interaction model (HTTP slice)
+### Boundary interaction model (HTTP slice — mature)
 - Generic boundary-fact architecture: provider facts, consumer facts, derived links.
 - Separate storage: `boundary_provider_facts`, `boundary_consumer_facts` (source of
   truth), `boundary_links` (derived artifact, discardable).
@@ -74,17 +90,26 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   not language-level extraction edges.
 - Mechanism-keyed matcher: `BoundaryMatchStrategy` interface, `HttpBoundaryMatchStrategy`
   first implementation. Strategy pattern for future gRPC, IOCTL, CLI mechanisms.
+  Link candidates carry stable persisted fact UIDs, not object references.
 - Structured segment normalization: Spring `{id}`, Express `:id`, consumer `{param}`
   all normalize to `{_}` for matching. Raw paths preserved in facts.
-- HTTP provider extractor: Spring `@GetMapping`/`@PostMapping`/etc. (PROTOTYPE, regex).
-- HTTP consumer extractor: `axios.get/post/put/delete/patch`, `fetch()` (PROTOTYPE, regex).
+- HTTP provider extractors:
+  - Spring: AST-backed via tree-sitter-java (MATURE). Handles multiline annotations,
+    `value=`/`path=` attributes, `method=RequestMethod.X`. Known double-parse
+    inefficiency (Java extractor does not expose parse tree to route extractor).
+  - Express: regex-based (PROTOTYPE). Receiver provenance gated to `app`, `router`,
+    `server`. Express import gate prevents false positives. Consumes FileLocalStringResolver
+    for constant-backed route paths.
+- HTTP consumer extractor: `axios.get/post/put/delete/patch`, `fetch()` (PROTOTYPE,
+  regex). Supports bare identifier URL arguments resolved via binding table.
+- FileLocalStringResolver: reusable support module for file-local constant string
+  propagation. Resolves `const`, template literals, binary `+`, chained bindings,
+  env-var prefix stripping. Used by both consumer and Express provider extractors.
 - Indexer wiring: boundary extraction runs during indexing, facts persisted, intra-repo
   links materialized as convenience.
 - CLI surface: `rgr boundary summary|providers|consumers|links|unmatched`.
-- Validated on glamCRM: 97 providers, 82 consumers, 66 links, 68% provider match rate.
-- Known limitation: consumer extractor misses calls where API prefix is baked into a
-  base URL constant (e.g. `const BASE = VITE_API_URL + "/api/v2/users"`). Fix path:
-  AST-backed extraction with constant resolution.
+- Validated on glamCRM: 97 providers, 85 consumers, 80 links, 82.5%/94.1% match rates.
+- Validated on fraktag: 47 providers, 42 consumers, 41 links, 70.2%/97.6% match rates.
 
 ### Compiler enrichment
 - `rgr enrich <repo>`: post-index receiver-type resolution
@@ -100,42 +125,7 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Next (in priority order)
 
-### 1. Java/Spring framework detectors
-Spring annotations (@RestController, @Service, @Repository, @Autowired),
-JAX-RS, servlet/container entrypoints. These support the API-boundary
-provider side and improve dead-code/liveness analysis.
-
-### 2. Boundary extractor maturation
-Two sub-phases. The fact schema, matcher, storage, and CLI surfaces
-are stable. The extractors are behind the `BoundaryProviderFact[]` /
-`BoundaryConsumerFact[]` interface — changes are adapter-local.
-
-#### 2A. TS consumer extractor maturation (highest ROI)
-The glamCRM gap is not a parser problem — it is a value-resolution
-problem. `const BASE_URL = VITE_API_URL + "/api/v2/sales-targets"`
-followed by `axios.get(\`${BASE_URL}/salesperson/${id}\`)` requires
-extractor-local binding analysis, not only a different parser.
-
-Target defects:
-- Base-URL constant resolution: trace `const BASE = ...` definitions,
-  evaluate string concatenation, combine with template literal paths.
-  Requires a small constant propagator on top of the AST.
-- Simple wrapper recognition: `function apiGet(path) { return axios.get(BASE + path) }`
-  — follow one level of function indirection.
-- Path concatenation normalization: `BASE + "/foo"` vs template literal.
-
-AST gets the structure to find the bindings. The constant propagator
-is the actual fix.
-
-#### 2B. Provider extractor maturation
-- Spring: move from regex to tree-sitter-java AST for annotation extraction.
-  More robust on multi-line annotations, `value=` vs positional, `produces`/
-  `consumes` attributes.
-- Express route provider: new extractor for `app.get("/api/...")`,
-  `router.post(...)` patterns. Enables boundary modeling on TS-only repos
-  (fraktag, amodx). Same boundary-fact model, new adapter.
-
-### 3. CLI boundary modeling
+### 1. CLI boundary modeling
 The CLI is a real interaction boundary. Users, scripts, cron, systemd,
 CI, Makefiles, and Docker entrypoints interact through it. That is not
 a normal language call edge — it is a boundary interaction.
@@ -168,17 +158,22 @@ Why this matters:
 - Reuses the full boundary-fact architecture (facts, links, matcher,
   CLI query surface) with a new mechanism
 
-### 4. Python extractor
+### 2. Python extractor
 Python is common in data/ML pipelines, build scripts, and analysis tools.
 Requires: tree-sitter-python grammar, Python extractor implementing
 ExtractorPort, pip/pyproject.toml/setup.py dependency reader, Python
 builtins (builtins module, stdlib modules).
 
-### 5. Rust framework detectors
+### 3. Java enrichment hardening
+jdtls is operational but fragile. Cold-start penalty on Gradle projects
+is prohibitive. Viable improvements: pre-warmed daemon, javac-based
+type resolution for simpler cases, persistent background server.
+
+### 4. Rust framework detectors
 Actix-web, Axum, Rocket, Warp route handlers. Same pattern as Express
 detection: post-classification pass, receiver-provenance gated.
 
-### 6. C/C++ extractor
+### 5. C/C++ extractor
 Highest business value (Linux BSP, embedded applications). Highest
 implementation cost. Requires compile_commands.json as boundary.
 Do not start until Rust, Java, and Python have validated the
