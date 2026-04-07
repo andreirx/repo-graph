@@ -6,8 +6,9 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Current state (as of last commit)
 
-- **816 tests** across 46 test files.
+- **841 tests** across 48 test files.
 - **Languages:** TypeScript/JavaScript + Rust + Java. Three-extractor indexer.
+- **Enrichment:** TS (~81%), Rust (~85%), Java (~76%). All three operational.
 - **Classifier version:** 6.
   - v4: language-aware imports
   - v5: Rust crate-internal module heuristic
@@ -15,6 +16,7 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - **6-repo smoke set:** amodx, fraktag, glamCRM, zap-engine, zap-squad, repo-graph.
   - 2 TS-only, 2 TS+Rust, 1 TS+Java, 1 TS-only (self-index).
   - Latest assessment: `smoke-runs/2026-04-07T08-20-00Z/ASSESSMENT-from-agent.md`
+  - Benchmark pack: langchain4j (2641 Java files), spring-petclinic (47 Java files)
 - **Non-unknown classification rates (before enrichment):**
   - TS-only repos: 53-69%
   - TS+Rust repos: 39-46% (lower due to large Rust unknown-CALLS mass)
@@ -68,7 +70,8 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - `rgr enrich <repo>`: post-index receiver-type resolution
 - TypeScript: via `ts.Program` / `TypeChecker` (~81% enrichment rate)
 - Rust: via rust-analyzer LSP subprocess (~85% enrichment rate)
-- Per-Cargo-context routing: one rust-analyzer per nearest Cargo.toml
+- Java: via Eclipse JDT Language Server (~76% enrichment rate on glamCRM)
+- Per-project-context routing: one language server per nearest build manifest
 - Safe-subset edge promotion (`--promote`): 8-gate filter, inferred resolution
 
 ### Blast-radius axis
@@ -77,27 +80,72 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Next (in priority order)
 
-### 1. Python extractor
+### 1. API-boundary extraction (cross-language REST linkage)
+First-class modeling of frontend↔backend REST/HTTP relationships
+in mixed-language monorepos. NOT a normal call-graph edge — this is
+a protocol-boundary edge with its own confidence model.
+
+Architecture:
+- Facts are the source of truth. Persist provider/consumer boundary
+  facts first; links are derived artifacts.
+- Matching should be facts-first, hybrid delivery:
+  - raw facts persist regardless
+  - intra-repo links may be materialized at index time as a convenience
+  - cross-repo matching remains a separate command/path
+- Design the core model generically for future mechanisms:
+  HTTP, gRPC/RPC, IPC/shared-memory, IOCTLs, queues, events, sockets.
+
+Support module:
+- HTTP server-route extractor: `@GetMapping("/api/orders")`,
+  Express `app.get("/api/...")`, Lambda API Gateway routes. Emits:
+  method, path template, handler symbol, framework evidence.
+- HTTP client-request extractor: `fetch("/api/orders")`, axios
+  wrappers, RTK Query / TanStack Query patterns. Emits normalized
+  facts: method, path template, source file, caller symbol.
+
+Feature implementation:
+- Cross-boundary matcher: creates protocol-boundary links from client
+  request sites to server route handlers.
+- Trust surface: "frontend module X talks to backend controller Y",
+  "this route has no client callers in the monorepo", "this client
+  endpoint has no matching server route."
+- Confidence: heuristic path/method matching vs exact (generated
+  client, OpenAPI spec, shared type contract).
+- Execution order:
+  1. server-route/provider facts
+  2. client-request/consumer facts
+  3. matcher + persistence + surfaces
+
+Why this is next:
+- glamCRM is a Spring Boot + React monorepo. The current model
+  indexes both sides but cannot prove REST linkage end-to-end.
+- This is the highest-value cross-language feature for real-world
+  monorepos.
+- It aligns with the product vision: deterministic discovery of
+  relationships agents cannot cheaply extract with grep.
+
+### 2. Java/Spring framework detectors
+Spring annotations (@RestController, @Service, @Repository, @Autowired),
+JAX-RS, servlet/container entrypoints. These support the API-boundary
+provider side and improve dead-code/liveness analysis.
+
+### 3. Python extractor
 Python is common in data/ML pipelines, build scripts, and analysis tools.
 Requires: tree-sitter-python grammar, Python extractor implementing
 ExtractorPort, pip/pyproject.toml/setup.py dependency reader, Python
 builtins (builtins module, stdlib modules).
 
-### 2. Rust framework detectors
+### 4. Rust framework detectors
 Actix-web, Axum, Rocket, Warp route handlers. Same pattern as Express
 detection: post-classification pass, receiver-provenance gated.
 
-### 3. C/C++ extractor
+### 5. C/C++ extractor
 Highest business value (Linux BSP, embedded applications). Highest
 implementation cost. Requires compile_commands.json as boundary.
 Do not start until Rust, Java, and Python have validated the
 multi-language architecture. Needs: Clang-backed symbol extraction,
 translation-unit-aware resolution, header/source ownership policy,
 macro/preprocessor caveat model.
-
-### 4. Java framework detectors
-Spring (annotations, DI, REST controllers), JAX-RS, servlet/container
-entrypoints. High value for enterprise Java codebases.
 
 ## Deferred
 
@@ -126,7 +174,18 @@ extraction. Largest architectural investment. Only justified after
 the current syntax-first + classifier + enrichment model has been
 pushed to its natural ceiling.
 
-### Java/Python semantic enrichment
-Equivalent of TS TypeChecker / Rust rust-analyzer for Java and Python.
-Java: JDT/javac-based type resolution. Python: pyright/mypy for
-type inference. Both follow the same enrichment adapter pattern.
+### Python semantic enrichment
+Equivalent of TS TypeChecker / Rust rust-analyzer / Java jdtls for Python.
+pyright/mypy for type inference. Follows the same enrichment adapter pattern.
+
+### Go extractor
+Useful, but lower priority than Python and C/C++ given the current repo set.
+Add only after the primary language stack is mature:
+TypeScript/JavaScript + Rust + Python + C/C++.
+
+Why later:
+- Current demand is exploratory rather than product-critical.
+- It should not displace Python breadth or the C/C++ systems track.
+- When added, it will reuse the shared scaffolding:
+  multi-extractor indexer, manifest routing, trust/reporting, and the
+  boundary-interaction model. Semantic enrichment would likely use `gopls`.
