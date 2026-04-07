@@ -59,6 +59,7 @@ import type {
 import { detectSpringBeans } from "../extractors/java/spring-bean-detector.js";
 import { detectPytestItems } from "../extractors/python/pytest-detector.js";
 import { extractSpringRoutes, initSpringRouteParser } from "../extractors/java/spring-route-extractor.js";
+import { extractMakefileConsumers } from "../extractors/cli/makefile-cli-extractor.js";
 import { extractShellScriptConsumers } from "../extractors/cli/shell-script-cli-extractor.js";
 import { extractCommanderCommands } from "../extractors/typescript/commander-command-extractor.js";
 import { extractPackageScriptConsumers } from "../extractors/manifest/package-script-cli-extractor.js";
@@ -925,6 +926,41 @@ export class RepoIndexer implements IndexerPort {
 						}
 					}
 
+					// 9c-iv. Extract CLI consumer facts from Makefiles.
+					{
+						const makefilePaths = await this.findMakefiles(repo.rootPath);
+						for (const mkRelPath of makefilePaths) {
+							try {
+								const mkContent = await readFile(
+									join(repo.rootPath, mkRelPath),
+									"utf-8",
+								);
+								const mkFacts = extractMakefileConsumers(
+									mkContent,
+									mkRelPath,
+									repoUid,
+								);
+								for (const c of mkFacts) {
+									const strategy = getMatchStrategy(c.mechanism);
+									const matcherKey = strategy
+										? strategy.computeMatcherKey(c.address, c.metadata)
+										: c.operation;
+									consumerFacts.push({
+										...c,
+										factUid: uuidv4(),
+										snapshotUid: snapshot.snapshotUid,
+										repoUid,
+										matcherKey,
+										extractor: "makefile-cli-extractor:0.1",
+										observedAt: boundaryObservedAt,
+									});
+								}
+							} catch {
+								// Skip unreadable Makefiles.
+							}
+						}
+					}
+
 					// Persist raw facts (source of truth).
 					if (providerFacts.length > 0) {
 						this.storage.insertBoundaryProviderFacts(providerFacts);
@@ -1117,6 +1153,43 @@ export class RepoIndexer implements IndexerPort {
 		}
 
 		return files;
+	}
+
+	/**
+	 * Find all Makefile and *.mk files in the repo.
+	 * Returns repo-relative paths.
+	 */
+	private async findMakefiles(rootPath: string): Promise<string[]> {
+		const results: string[] = [];
+		const ig = await loadGitignore(rootPath);
+
+		const walk = async (dir: string) => {
+			let entries: import("node:fs").Dirent[];
+			try {
+				entries = await readdir(dir, { withFileTypes: true });
+			} catch {
+				return;
+			}
+			for (const entry of entries) {
+				if (entry.isDirectory()) {
+					if (ALWAYS_EXCLUDED.has(entry.name)) continue;
+					const relDir = relative(rootPath, join(dir, entry.name));
+					if (ig.ignores(relDir + "/")) continue;
+					await walk(join(dir, entry.name));
+				} else if (
+					entry.name === "Makefile" ||
+					entry.name === "GNUmakefile" ||
+					entry.name === "makefile" ||
+					entry.name.endsWith(".mk")
+				) {
+					const relPath = relative(rootPath, join(dir, entry.name));
+					results.push(relPath);
+				}
+			}
+		};
+
+		await walk(rootPath);
+		return results;
 	}
 
 	/**

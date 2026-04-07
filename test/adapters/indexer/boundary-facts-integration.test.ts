@@ -616,8 +616,26 @@ describe("boundary-facts indexer integration — Commander CLI commands", () => 
 		});
 
 		const sources = new Set(allConsumers.map((c) => c.sourceFile));
-		// Should have consumers from both package.json and deploy.sh.
+		// Should have consumers from package.json, deploy.sh, and Makefile.
 		expect(sources.has("package.json")).toBe(true);
 		expect(sources.has("scripts/deploy.sh")).toBe(true);
+		expect(sources.has("Makefile")).toBe(true);
+	});
+
+	it("extracts Makefile recipe consumer facts", async () => {
+		const result = await cliIndexer.indexRepo(CLI_REPO_UID);
+
+		const consumers = cliStorage.queryBoundaryConsumerFacts({
+			snapshotUid: result.snapshotUid,
+			mechanism: "cli_command",
+		});
+
+		const mkConsumers = consumers.filter((c) => c.sourceFile === "Makefile");
+		// Makefile has: tsc, vitest run, mytool repo add staging
+		// rm is a builtin — skipped.
+		expect(mkConsumers.length).toBeGreaterThanOrEqual(3);
+
+		const tscFromMk = mkConsumers.find((c) => c.address === "tsc");
+		expect(tscFromMk).toBeDefined();
 	});
 });
