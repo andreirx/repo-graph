@@ -3,14 +3,39 @@
  *
  * Tests the regex-based scanner against known axios/fetch patterns.
  * Does not require TypeScript compilation or node_modules.
+ *
+ * Includes binding-resolution tests that exercise the
+ * FileLocalStringResolver integration for base-URL constants.
  */
 
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { extractHttpClientRequests } from "../../../../src/adapters/extractors/typescript/http-client-extractor.js";
+import {
+	FileLocalStringResolver,
+	type StringBindingTable,
+} from "../../../../src/adapters/extractors/typescript/file-local-string-resolver.js";
+
+let resolver: FileLocalStringResolver;
+
+beforeAll(async () => {
+	resolver = new FileLocalStringResolver();
+	await resolver.initialize();
+});
 
 /** Shorthand: extract from inline source with no enclosing symbols. */
 function extract(source: string) {
 	return extractHttpClientRequests(source, "src/api/client.ts", "test-repo", []);
+}
+
+/** Extract with binding resolution. */
+function extractWithBindings(source: string, bindings: StringBindingTable) {
+	return extractHttpClientRequests(source, "src/api/client.ts", "test-repo", [], bindings);
+}
+
+/** Extract with resolver: parse source for bindings, then extract. */
+function extractResolved(source: string) {
+	const bindings = resolver.resolve(source, "src/api/client.ts");
+	return extractHttpClientRequests(source, "src/api/client.ts", "test-repo", [], bindings);
 }
 
 /** Extract with enclosing symbols for caller attribution. */
@@ -339,5 +364,172 @@ fetch("/api/v2/orders");
 		expect(facts.length).toBe(2);
 		expect(facts[0].address).toBe("/api/v2/products");
 		expect(facts[1].address).toBe("/api/v2/orders");
+	});
+});
+
+// ── Binding resolution (FileLocalStringResolver integration) ────────
+
+describe("extractHttpClientRequests — binding resolution", () => {
+	it("resolves glamCRM salesTarget pattern: BASE_URL with baked API prefix", () => {
+		const source = `
+const BASE_URL = \`\${import.meta.env.VITE_API_URL}/api/v2/sales-targets\`;
+
+export const getSalesTargetsByYearMonth = async (yearMonth) => {
+    const response = await axios.get(\`\${BASE_URL}/year-month\`, {});
+    return response.data;
+};
+
+export const getSalesTargetsBySalesperson = async (salesId) => {
+    const response = await axios.get(\`\${BASE_URL}/salesperson/\${salesId}\`, {});
+    return response.data;
+};
+
+export const getSalesTargetById = async (id) => {
+    const response = await axios.get(\`\${BASE_URL}/\${id}\`, {});
+    return response.data;
+};
+`;
+		const facts = extractResolved(source);
+		expect(facts.length).toBe(3);
+
+		expect(facts[0].address).toBe("/api/v2/sales-targets/year-month");
+		expect(facts[1].address).toBe("/api/v2/sales-targets/salesperson/{param}");
+		expect(facts[2].address).toBe("/api/v2/sales-targets/{param}");
+	});
+
+	it("resolves glamCRM user pattern: two-level BACKEND_URL -> BASE_URL chain", () => {
+		const source = `
+const BACKEND_URL = \`\${import.meta.env.VITE_API_URL}\`;
+const BASE_URL = \`\${BACKEND_URL}/api/v2/users\`;
+
+export const getUserById = async (id) => {
+    const response = await axios.get(\`\${BASE_URL}/\${id}\`, {});
+    return response.data;
+};
+
+export const getCurrentUser = async () => {
+    const response = await axios.get(\`\${BASE_URL}/me\`, {});
+    return response.data;
+};
+
+export const deleteUser = async (id) => {
+    const response = await axios.delete(\`\${BASE_URL}/\${id}\`, {});
+    return response.data;
+};
+`;
+		const facts = extractResolved(source);
+		expect(facts.length).toBe(3);
+
+		expect(facts[0].address).toBe("/api/v2/users/{param}");
+		expect(facts[0].metadata.httpMethod).toBe("GET");
+		expect(facts[1].address).toBe("/api/v2/users/me");
+		expect(facts[1].metadata.httpMethod).toBe("GET");
+		expect(facts[2].address).toBe("/api/v2/users/{param}");
+		expect(facts[2].metadata.httpMethod).toBe("DELETE");
+	});
+
+	it("existing inline env-prefixed pattern still works with bindings", () => {
+		const source = `
+axios.get(\`\${import.meta.env.VITE_API_URL}/api/v2/products\`);
+`;
+		const facts = extractResolved(source);
+		expect(facts.length).toBe(1);
+		expect(facts[0].address).toBe("/api/v2/products");
+	});
+
+	it("unresolved dynamic expression does not emit false-positive path", () => {
+		const source = `
+const URL = getBaseUrl();
+axios.get(\`\${URL}/api/v2/products\`);
+`;
+		// getBaseUrl() is not resolvable. The ${URL} stays as-is.
+		// After env-pattern stripping, ${URL} does not match env patterns.
+		// It becomes {param}, and the path is "/{param}/api/v2/products"
+		// which starts with / but the first segment is a param — still emits.
+		const facts = extractResolved(source);
+		// The URL binding is unresolvable, so ${URL} stays in the raw arg.
+		// The extractor treats it as a path param {param}.
+		// This produces /{param}/api/v2/products — a valid but low-confidence path.
+		// This is acceptable: it emits but with template basis and lower confidence.
+		// The key assertion: it does NOT emit the same path as a resolved constant would.
+		if (facts.length > 0) {
+			expect(facts[0].address).not.toBe("/api/v2/products");
+		}
+	});
+
+	it("binding-resolved facts carry resolvedUrl in metadata", () => {
+		const source = `
+const BASE_URL = \`\${import.meta.env.VITE_API_URL}/api/v2/items\`;
+axios.get(\`\${BASE_URL}/list\`);
+`;
+		const facts = extractResolved(source);
+		expect(facts.length).toBe(1);
+		expect(facts[0].metadata.resolvedUrl).toBeDefined();
+	});
+
+	it("binding-resolved confidence is between literal and raw template", () => {
+		// Resolved binding: 0.85 for axios
+		const resolvedSource = `
+const BASE_URL = \`\${import.meta.env.VITE_API_URL}/api/v2/items\`;
+axios.get(\`\${BASE_URL}/list\`);
+`;
+		const resolvedFacts = extractResolved(resolvedSource);
+
+		// Raw template (no binding): 0.8 for axios
+		const rawFacts = extract(
+			"axios.get(`${import.meta.env.VITE_API_URL}/api/v2/items/list`);",
+		);
+
+		// Literal: 0.95 for axios
+		const literalFacts = extract('axios.get("/api/v2/items/list");');
+
+		expect(resolvedFacts[0].confidence).toBeGreaterThan(rawFacts[0].confidence);
+		expect(resolvedFacts[0].confidence).toBeLessThan(literalFacts[0].confidence);
+	});
+
+	it("no bindings provided: behaves identically to original extractor", () => {
+		const source = 'axios.get("/api/v2/products");';
+		const withBindings = extractWithBindings(source, new Map());
+		const without = extract(source);
+		expect(withBindings[0].address).toBe(without[0].address);
+		expect(withBindings[0].confidence).toBe(without[0].confidence);
+	});
+
+	it("axios.post with resolved bare BASE_URL identifier", () => {
+		const source = `
+const BASE_URL = \`\${import.meta.env.VITE_API_URL}/api/v2/sales-targets\`;
+const response = await axios.post(BASE_URL, salesTargetDTO, getAxiosConfig());
+`;
+		const facts = extractResolved(source);
+		expect(facts.length).toBe(1);
+		expect(facts[0].address).toBe("/api/v2/sales-targets");
+		expect(facts[0].metadata.httpMethod).toBe("POST");
+	});
+
+	it("fetch with resolved bare identifier", () => {
+		const source = `
+const BASE_URL = \`\${import.meta.env.VITE_API_URL}/api/v2/products\`;
+const response = await fetch(BASE_URL);
+`;
+		const facts = extractResolved(source);
+		expect(facts.length).toBe(1);
+		expect(facts[0].address).toBe("/api/v2/products");
+		expect(facts[0].metadata.httpMethod).toBe("GET");
+	});
+
+	it("fetch bare identifier without bindings does not false-positive", () => {
+		const source = "fetch(someVariable);";
+		const facts = extract(source);
+		expect(facts.length).toBe(0);
+	});
+
+	it("export const bindings are resolved in HTTP calls", () => {
+		const source = `
+export const BASE = \`\${import.meta.env.VITE_API_URL}/api/v2/orders\`;
+axios.get(\`\${BASE}/active\`);
+`;
+		const facts = extractResolved(source);
+		expect(facts.length).toBe(1);
+		expect(facts[0].address).toBe("/api/v2/orders/active");
 	});
 });

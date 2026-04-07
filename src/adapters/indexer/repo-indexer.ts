@@ -56,6 +56,7 @@ import type {
 	StoragePort,
 } from "../../core/ports/storage.js";
 import { extractSpringRoutes } from "../extractors/java/spring-route-extractor.js";
+import { FileLocalStringResolver } from "../extractors/typescript/file-local-string-resolver.js";
 import { extractHttpClientRequests } from "../extractors/typescript/http-client-extractor.js";
 import { readCargoDependencies } from "../config/cargo-reader.js";
 import { readGradleDependencies } from "../config/gradle-reader.js";
@@ -146,6 +147,8 @@ export class RepoIndexer implements IndexerPort {
 	 */
 	/** Map of file extension → ExtractorPort. e.g. ".ts" → TypeScriptExtractor */
 	private extractorsByExtension: Map<string, ExtractorPort>;
+	/** Lazy-initialized string resolver for boundary extraction. */
+	private stringResolver: FileLocalStringResolver | null = null;
 
 	constructor(
 		private storage: StoragePort,
@@ -612,17 +615,26 @@ export class RepoIndexer implements IndexerPort {
 						}
 
 						// TS/JS files: extract HTTP client consumer facts.
+						// Resolve file-local string bindings first so the
+						// extractor can recover base URL constants.
 						if (
 							relPath.endsWith(".ts") ||
 							relPath.endsWith(".tsx") ||
 							relPath.endsWith(".js") ||
 							relPath.endsWith(".jsx")
 						) {
+							// Lazy-init the string resolver on first use.
+							if (!this.stringResolver) {
+								this.stringResolver = new FileLocalStringResolver();
+								await this.stringResolver.initialize();
+							}
+							const bindings = this.stringResolver.resolve(content, relPath);
 							const requests = extractHttpClientRequests(
 								content,
 								relPath,
 								repoUid,
 								fileSymbols,
+								bindings,
 							);
 							for (const c of requests) {
 								const strategy = getMatchStrategy(c.mechanism);

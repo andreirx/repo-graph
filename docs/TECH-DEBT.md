@@ -41,15 +41,17 @@
   or transitive dependency resolution. Documented as approximate.
 - **No Java framework detectors yet:** Spring annotations, JAX-RS,
   servlet/container entrypoints are unmodeled.
-- **Java semantic enrichment not yet operational:** jdtls (Eclipse JDT
-  Language Server) was implemented but cannot serve hover results within
-  10 minutes for Gradle-based Spring Boot projects. The cold-start
-  penalty for jdtls's Gradle import is prohibitive in the current
-  `rgr enrich` model (start process → query → stop process). The adapter
-  exists at `src/adapters/enrichment/java-receiver-resolver.ts` and
-  initializes correctly, but produces 0% enrichment on real repos.
-  Viable alternatives: javac-based type resolution, pre-warmed jdtls
-  daemon, or building a Java compiler model in-process.
+- **Java semantic enrichment operational but fragile:** jdtls (Eclipse JDT
+  Language Server) adapter exists at `src/adapters/enrichment/java-receiver-resolver.ts`
+  and has produced results on spring-petclinic and glamCRM. However, reliability is
+  below TS (~81%) and Rust (~85%) enrichment. Known issues:
+  - Cold-start penalty: jdtls Gradle import is slow (minutes on large projects).
+    The current `rgr enrich` model (start process → query → stop) amplifies this.
+  - Workspace caching helps on repeated runs but does not eliminate first-run cost.
+  - Server readiness detection (language/status ServiceReady) is correct but
+    does not guarantee all project symbols are indexed.
+  Viable improvements: pre-warmed jdtls daemon, javac-based type resolution
+  for simpler cases, or persistent background server.
 
 ## Extraction — Languages Not Yet Supported
 
@@ -100,3 +102,40 @@
 - No systematic accuracy spot-check of classifier verdicts has been performed
   since the v4 spot-check (100% precision on 96 sampled edges). Rust-specific
   precision has not been formally measured.
+
+## Boundary Interaction Model
+
+### HTTP provider extractor (Spring)
+- **PROTOTYPE — regex-based**, not AST-backed. Sufficient for glamCRM validation.
+  Fragile on multi-line annotations, `value=` attribute syntax, `produces`/`consumes`
+  constraints. Should be rebuilt on tree-sitter-java AST.
+
+### HTTP consumer extractor (TS/JS)
+- **PROTOTYPE — line-based regex** with file-local string resolution via
+  `FileLocalStringResolver`. Resolves base-URL constants (glamCRM 93.9% consumer
+  match rate, up from 80.5% before resolver).
+- **FileLocalStringResolver scope (v1):**
+  - Same-file only. Does not follow imports.
+  - Top-level `const` declarations only. No `let`, `var`, destructuring.
+  - String literals, template literals, binary `+` concatenation.
+  - References to previously-resolved same-file constants (chained bindings).
+  - Environment variable placeholders (`import.meta.env.*`, `process.env.*`)
+    treated as opaque prefix, stripped from resolved value.
+  - No function calls, no object property access, no computed expressions.
+  - Bounded recursion (max 10 steps) for cycle safety.
+- **Remaining consumer gaps (glamCRM 5 of 82):**
+  - Genuine path mismatches between frontend and backend (e.g. `with-docx` vs
+    `with-doc`, `POST /estimates` vs `POST /estimates/create`). These are
+    application-level facts, not extractor failures.
+- **Not yet supported:**
+  - Imported constants (`import { BASE_URL } from "./config"`)
+  - Wrapper functions (`function apiGet(path) { return axios.get(BASE + path) }`)
+  - Object property URLs (`config.baseUrl`)
+  - Multi-line URL arguments
+  - RTK Query / TanStack Query patterns
+
+### Boundary links (derived)
+- Stored in separate `boundary_links` table, NOT in core `edges` table.
+- Materialized at index time for intra-repo convenience. Discardable.
+- No cross-repo matching yet (architecture supports it, no implementation).
+- No Express route provider extractor yet (TS-only repos have no provider facts).

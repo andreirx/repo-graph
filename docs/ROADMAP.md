@@ -105,16 +105,35 @@ Spring annotations (@RestController, @Service, @Repository, @Autowired),
 JAX-RS, servlet/container entrypoints. These support the API-boundary
 provider side and improve dead-code/liveness analysis.
 
-### 2. Boundary extractor maturation (AST-backed)
-Upgrade Spring provider and TS HTTP consumer extractors from PROTOTYPE
-(regex) to MATURE (AST-backed). This is an adapter swap — the fact
-schema, matcher, storage, and CLI surfaces are stable. The extractors
-are behind the `BoundaryProviderFact[]` / `BoundaryConsumerFact[]`
-interface. Specific fixes:
-- Spring: use tree-sitter-java AST for annotation extraction
-- TS HTTP consumer: resolve base URL constants from AST, handle
-  multi-line URL arguments, wrapper functions
-- Express route provider: new extractor, same boundary-fact model
+### 2. Boundary extractor maturation
+Two sub-phases. The fact schema, matcher, storage, and CLI surfaces
+are stable. The extractors are behind the `BoundaryProviderFact[]` /
+`BoundaryConsumerFact[]` interface — changes are adapter-local.
+
+#### 2A. TS consumer extractor maturation (highest ROI)
+The glamCRM gap is not a parser problem — it is a value-resolution
+problem. `const BASE_URL = VITE_API_URL + "/api/v2/sales-targets"`
+followed by `axios.get(\`${BASE_URL}/salesperson/${id}\`)` requires
+extractor-local binding analysis, not only a different parser.
+
+Target defects:
+- Base-URL constant resolution: trace `const BASE = ...` definitions,
+  evaluate string concatenation, combine with template literal paths.
+  Requires a small constant propagator on top of the AST.
+- Simple wrapper recognition: `function apiGet(path) { return axios.get(BASE + path) }`
+  — follow one level of function indirection.
+- Path concatenation normalization: `BASE + "/foo"` vs template literal.
+
+AST gets the structure to find the bindings. The constant propagator
+is the actual fix.
+
+#### 2B. Provider extractor maturation
+- Spring: move from regex to tree-sitter-java AST for annotation extraction.
+  More robust on multi-line annotations, `value=` vs positional, `produces`/
+  `consumes` attributes.
+- Express route provider: new extractor for `app.get("/api/...")`,
+  `router.post(...)` patterns. Enables boundary modeling on TS-only repos
+  (fraktag, amodx). Same boundary-fact model, new adapter.
 
 ### 3. CLI boundary modeling
 The CLI is a real interaction boundary. Users, scripts, cron, systemd,
