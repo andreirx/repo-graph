@@ -415,3 +415,124 @@ describe("boundary-facts indexer integration — Express provider", () => {
 		expect(ordersLink).toBeUndefined();
 	});
 });
+
+// ── Commander CLI command integration (cli_command boundary) ─────────
+
+describe("boundary-facts indexer integration — Commander CLI commands", () => {
+	const CLI_REPO_UID = "cli-boundary-test";
+	const CLI_FIXTURE_ROOT = join(
+		import.meta.dirname,
+		"../../fixtures/cli-boundary",
+	);
+
+	let cliStorage: SqliteStorage;
+	let cliProvider: SqliteConnectionProvider;
+	let cliIndexer: RepoIndexer;
+	let cliDbPath: string;
+
+	beforeEach(() => {
+		cliDbPath = join(tmpdir(), `rgr-cli-boundary-${randomUUID()}.db`);
+		cliProvider = new SqliteConnectionProvider(cliDbPath);
+		cliProvider.initialize();
+		cliStorage = new SqliteStorage(cliProvider.getDatabase());
+		cliIndexer = new RepoIndexer(cliStorage, [tsExtractor]);
+
+		cliStorage.addRepo({
+			repoUid: CLI_REPO_UID,
+			name: CLI_REPO_UID,
+			rootPath: CLI_FIXTURE_ROOT,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+	});
+
+	afterEach(() => {
+		cliProvider.close();
+		try {
+			unlinkSync(cliDbPath);
+		} catch {
+			// ignore
+		}
+	});
+
+	it("persists cli_command provider facts with framework=commander", async () => {
+		const result = await cliIndexer.indexRepo(CLI_REPO_UID);
+
+		const providers = cliStorage.queryBoundaryProviderFacts({
+			snapshotUid: result.snapshotUid,
+			mechanism: "cli_command",
+		});
+
+		// cli.ts: repo (group), repo add, repo list, build = 4 commands.
+		// "repo" group has description, so it emits.
+		expect(providers.length).toBe(4);
+
+		for (const p of providers) {
+			expect(p.mechanism).toBe("cli_command");
+			expect(p.framework).toBe("commander");
+			expect(p.basis).toBe("registration");
+		}
+	});
+
+	it("composes nested command paths correctly", async () => {
+		const result = await cliIndexer.indexRepo(CLI_REPO_UID);
+
+		const providers = cliStorage.queryBoundaryProviderFacts({
+			snapshotUid: result.snapshotUid,
+			mechanism: "cli_command",
+		});
+
+		const repoAdd = providers.find((p) => p.address === "repo add");
+		expect(repoAdd).toBeDefined();
+		expect(repoAdd!.operation).toBe("CLI repo add");
+
+		const repoList = providers.find((p) => p.address === "repo list");
+		expect(repoList).toBeDefined();
+
+		const build = providers.find((p) => p.address === "build");
+		expect(build).toBeDefined();
+		expect(build!.operation).toBe("CLI build");
+	});
+
+	it("computes lowercased matcher keys", async () => {
+		const result = await cliIndexer.indexRepo(CLI_REPO_UID);
+
+		const providers = cliStorage.queryBoundaryProviderFacts({
+			snapshotUid: result.snapshotUid,
+			mechanism: "cli_command",
+		});
+
+		const repoAdd = providers.find((p) => p.address === "repo add");
+		expect(repoAdd).toBeDefined();
+		expect(repoAdd!.matcherKey).toBe("repo add");
+	});
+
+	it("stores option metadata", async () => {
+		const result = await cliIndexer.indexRepo(CLI_REPO_UID);
+
+		const providers = cliStorage.queryBoundaryProviderFacts({
+			snapshotUid: result.snapshotUid,
+			mechanism: "cli_command",
+		});
+
+		const repoAdd = providers.find((p) => p.address === "repo add");
+		expect(repoAdd).toBeDefined();
+		expect(repoAdd!.metadata.options).toContain("--name <name>");
+
+		const repoList = providers.find((p) => p.address === "repo list");
+		expect(repoList).toBeDefined();
+		expect(repoList!.metadata.options).toContain("--json");
+	});
+
+	it("cli_command facts are separate from http facts", async () => {
+		const result = await cliIndexer.indexRepo(CLI_REPO_UID);
+
+		const httpProviders = cliStorage.queryBoundaryProviderFacts({
+			snapshotUid: result.snapshotUid,
+			mechanism: "http",
+		});
+		// No Express routes in this fixture.
+		expect(httpProviders.length).toBe(0);
+	});
+});

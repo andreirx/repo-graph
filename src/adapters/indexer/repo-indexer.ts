@@ -57,6 +57,7 @@ import type {
 } from "../../core/ports/storage.js";
 import { detectSpringBeans } from "../extractors/java/spring-bean-detector.js";
 import { extractSpringRoutes, initSpringRouteParser } from "../extractors/java/spring-route-extractor.js";
+import { extractCommanderCommands } from "../extractors/typescript/commander-command-extractor.js";
 import { extractExpressRoutes } from "../extractors/typescript/express-route-extractor.js";
 import { FileLocalStringResolver } from "../extractors/typescript/file-local-string-resolver.js";
 import { extractHttpClientRequests } from "../extractors/typescript/http-client-extractor.js";
@@ -699,6 +700,29 @@ export class RepoIndexer implements IndexerPort {
 								await this.stringResolver.initialize();
 							}
 							const bindings = this.stringResolver.resolve(content, relPath);
+
+							// Commander CLI command provider facts.
+							const cliCommands = extractCommanderCommands(
+								content,
+								relPath,
+								repoUid,
+								fileSymbols,
+							);
+							for (const cmd of cliCommands) {
+								const strategy = getMatchStrategy(cmd.mechanism);
+								const matcherKey = strategy
+									? strategy.computeMatcherKey(cmd.address, cmd.metadata)
+									: cmd.operation;
+								providerFacts.push({
+									...cmd,
+									factUid: uuidv4(),
+									snapshotUid: snapshot.snapshotUid,
+									repoUid,
+									matcherKey,
+									extractor: "commander-command-extractor:0.1",
+									observedAt: boundaryObservedAt,
+								});
+							}
 
 							// Express route provider facts.
 							const routes = extractExpressRoutes(

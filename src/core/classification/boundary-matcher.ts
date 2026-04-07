@@ -274,11 +274,61 @@ function computeHttpConfidence(
 	return Math.max(0, Math.min(1, conf));
 }
 
+// ── CLI command match strategy ───────────────────────────────────────
+
+export class CliBoundaryMatchStrategy implements BoundaryMatchStrategy {
+	readonly mechanism: BoundaryMechanism = "cli_command";
+
+	computeMatcherKey(
+		address: string,
+		_metadata: Record<string, unknown>,
+	): string {
+		// CLI command path is already normalized (space-separated command words).
+		// Lowercase for case-insensitive matching.
+		return address.toLowerCase().trim();
+	}
+
+	match(
+		providers: MatchableProviderFact[],
+		consumers: MatchableConsumerFact[],
+	): BoundaryLinkCandidate[] {
+		if (providers.length === 0 || consumers.length === 0) return [];
+
+		// Build provider index by normalized command path.
+		const providerIndex = new Map<string, MatchableProviderFact[]>();
+		for (const p of providers) {
+			const key = this.computeMatcherKey(p.address, p.metadata);
+			if (!providerIndex.has(key)) providerIndex.set(key, []);
+			providerIndex.get(key)!.push(p);
+		}
+
+		const candidates: BoundaryLinkCandidate[] = [];
+
+		for (const c of consumers) {
+			const consumerKey = this.computeMatcherKey(c.address, c.metadata);
+			const matches = providerIndex.get(consumerKey);
+			if (matches) {
+				for (const p of matches) {
+					candidates.push({
+						providerFactUid: p.factUid,
+						consumerFactUid: c.factUid,
+						matchBasis: "operation_match",
+						confidence: c.confidence * 0.9,
+					});
+				}
+			}
+		}
+
+		return candidates;
+	}
+}
+
 // ── Orchestrator ────────────────────────────────────────────────────
 
 /** Default strategy registry. Extend as new mechanisms are added. */
 const DEFAULT_STRATEGIES: BoundaryMatchStrategy[] = [
 	new HttpBoundaryMatchStrategy(),
+	new CliBoundaryMatchStrategy(),
 ];
 
 /**
