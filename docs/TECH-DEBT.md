@@ -41,8 +41,15 @@
   or transitive dependency resolution. Documented as approximate.
 - **No Java framework detectors yet:** Spring annotations, JAX-RS,
   servlet/container entrypoints are unmodeled.
-- **No Java semantic enrichment yet:** JDT/javac-based type resolution
-  would be the equivalent of TS TypeChecker / Rust rust-analyzer.
+- **Java semantic enrichment not yet operational:** jdtls (Eclipse JDT
+  Language Server) was implemented but cannot serve hover results within
+  10 minutes for Gradle-based Spring Boot projects. The cold-start
+  penalty for jdtls's Gradle import is prohibitive in the current
+  `rgr enrich` model (start process → query → stop process). The adapter
+  exists at `src/adapters/enrichment/java-receiver-resolver.ts` and
+  initializes correctly, but produces 0% enrichment on real repos.
+  Viable alternatives: javac-based type resolution, pre-warmed jdtls
+  daemon, or building a Java compiler model in-process.
 
 ## Extraction — Languages Not Yet Supported
 

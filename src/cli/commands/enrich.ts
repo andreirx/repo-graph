@@ -19,6 +19,7 @@
 import { resolve as resolvePath } from "node:path";
 import type { Command } from "commander";
 import { promoteEdges, type PromotionCandidate } from "../../adapters/enrichment/edge-promoter.js";
+import { resolveJavaReceiverTypes } from "../../adapters/enrichment/java-receiver-resolver.js";
 import { resolveRustReceiverTypes } from "../../adapters/enrichment/rust-receiver-resolver.js";
 import { resolveReceiverTypes } from "../../adapters/enrichment/typescript-receiver-resolver.js";
 import { NodeSubtype } from "../../core/model/index.js";
@@ -122,6 +123,7 @@ export function registerEnrichCommand(
 				s.sourceFilePath.endsWith(".jsx"),
 			);
 			const rsSites = sites.filter((s) => s.sourceFilePath.endsWith(".rs"));
+			const javaSites = sites.filter((s) => s.sourceFilePath.endsWith(".java"));
 
 			const progressCb = !opts.json
 				? (p: { phase: string; current: number; total: number }) => {
@@ -154,7 +156,11 @@ export function registerEnrichCommand(
 				rsSites.length > 0
 					? await resolveRustReceiverTypes(repo.rootPath, rsSites, progressCb)
 					: [];
-			const results = [...tsResults, ...rsResults];
+			const javaResults =
+				javaSites.length > 0
+					? await resolveJavaReceiverTypes(repo.rootPath, javaSites, progressCb)
+					: [];
+			const results = [...tsResults, ...rsResults, ...javaResults];
 
 			// Persist enrichments via merge into existing metadata_json.
 			// Merge semantics preserve extractor-provided context

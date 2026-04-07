@@ -6,15 +6,15 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Current state (as of last commit)
 
-- **795 tests** across 44 test files.
-- **Languages:** TypeScript/JavaScript + Rust. Multi-extractor indexer.
+- **816 tests** across 46 test files.
+- **Languages:** TypeScript/JavaScript + Rust + Java. Three-extractor indexer.
 - **Classifier version:** 6.
   - v4: language-aware imports
   - v5: Rust crate-internal module heuristic
   - v6: hyphen-normalized Cargo deps + heuristic basis-code distinction
 - **6-repo smoke set:** amodx, fraktag, glamCRM, zap-engine, zap-squad, repo-graph.
-  - 3 TS-only, 2 TS+Rust, 1 TS-only (self-index).
-  - Latest assessment: `smoke-runs/2026-04-06T21-00-00Z/ASSESSMENT-from-agent.md`
+  - 2 TS-only, 2 TS+Rust, 1 TS+Java, 1 TS-only (self-index).
+  - Latest assessment: `smoke-runs/2026-04-07T08-20-00Z/ASSESSMENT-from-agent.md`
 - **Non-unknown classification rates (before enrichment):**
   - TS-only repos: 53-69%
   - TS+Rust repos: 39-46% (lower due to large Rust unknown-CALLS mass)
@@ -34,8 +34,11 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 ### Multi-language graph engine
 - TypeScript/JavaScript extractor (tree-sitter, syntax-only)
 - Rust extractor (tree-sitter-rust)
+- Java extractor (tree-sitter-java)
 - Multi-extractor indexer: routes files by extension
-- Language-aware manifest isolation (.rs → Cargo.toml, .ts → package.json)
+- Language-aware manifest isolation (.rs → Cargo.toml, .java → build.gradle, .ts → package.json)
+- Java overload disambiguation via parameter type signatures in stable keys
+- Gradle dependency reader (Groovy + Kotlin DSL) with 2-segment prefix heuristic
 
 ### Unresolved-edge classification (classifier v6)
 - 4-bucket vocabulary: external_library_candidate, internal_candidate,
@@ -74,23 +77,17 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Next (in priority order)
 
-### 1. Java extractor
-Third language. glamCRM has Java code. Architecture is proven for
-multi-language. Requires: tree-sitter-java grammar, Java extractor
-implementing ExtractorPort, Maven/Gradle dependency reader, Java
-runtime builtins (java.lang, java.util, etc.).
-
-### 2. Python extractor
+### 1. Python extractor
 Python is common in data/ML pipelines, build scripts, and analysis tools.
 Requires: tree-sitter-python grammar, Python extractor implementing
 ExtractorPort, pip/pyproject.toml/setup.py dependency reader, Python
 builtins (builtins module, stdlib modules).
 
-### 3. Rust framework detectors
+### 2. Rust framework detectors
 Actix-web, Axum, Rocket, Warp route handlers. Same pattern as Express
 detection: post-classification pass, receiver-provenance gated.
 
-### 4. C/C++ extractor
+### 3. C/C++ extractor
 Highest business value (Linux BSP, embedded applications). Highest
 implementation cost. Requires compile_commands.json as boundary.
 Do not start until Rust, Java, and Python have validated the
@@ -98,7 +95,7 @@ multi-language architecture. Needs: Clang-backed symbol extraction,
 translation-unit-aware resolution, header/source ownership policy,
 macro/preprocessor caveat model.
 
-### 5. Java framework detectors
+### 4. Java framework detectors
 Spring (annotations, DI, REST controllers), JAX-RS, servlet/container
 entrypoints. High value for enterprise Java codebases.
 

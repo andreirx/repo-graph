@@ -22,6 +22,8 @@ export const CLI_VERSION = "0.2.0";
 /** Extractor build versions. Keyed by language. */
 export const EXTRACTOR_VERSIONS = {
 	typescript: "ts-core:0.2.0",
+	rust: "rust-core:0.1.0",
+	java: "java-core:0.1.0",
 } as const;
 
 /** Indexer build version. */

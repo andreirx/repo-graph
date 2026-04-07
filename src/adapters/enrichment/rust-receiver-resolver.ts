@@ -86,7 +86,7 @@ class RustAnalyzerClient {
 			this.proc.stdin.write(
 				lspRequest("initialize", {
 					processId: process.pid,
-					rootUri: `file://${rootPath}`,
+					rootUri: `file://${encodeURI(rootPath).replace(/%3A/g, ":")}`,
 					capabilities: {},
 					initializationOptions: {
 						// Disable features we don't need for faster startup.
@@ -122,7 +122,8 @@ class RustAnalyzerClient {
 	): Promise<string | null> {
 		if (!this.proc?.stdin) return null;
 
-		const uri = `file://${filePath}`;
+		const uri = `file://${encodeURI(filePath).replace(/%3A/g, ":")}`;
+
 		const hoverId = msgId;
 
 		// Open the document (LSP requires didOpen before hover).
