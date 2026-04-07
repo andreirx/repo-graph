@@ -49,6 +49,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@vitest/coverage-v8": "^4.1.2",
     "tree-sitter-cli": "^0.26.8",
+    "tree-sitter-java": "^0.23.5",
     "tree-sitter-rust": "^0.24.0",
     "vitest": "^4.1.2"
   }

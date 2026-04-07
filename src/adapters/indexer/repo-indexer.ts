@@ -49,6 +49,7 @@ import type {
 	StoragePort,
 } from "../../core/ports/storage.js";
 import { readCargoDependencies } from "../config/cargo-reader.js";
+import { readGradleDependencies } from "../config/gradle-reader.js";
 import { readTsconfigAliases } from "../config/tsconfig-reader.js";
 import type { AnnotationsPort } from "../../core/ports/annotations.js";
 import {
@@ -80,6 +81,7 @@ import {
 const ALL_SOURCE_EXTENSIONS = new Set([
 	".ts", ".tsx", ".js", ".jsx",  // TypeScript/JavaScript
 	".rs",                          // Rust
+	".java",                        // Java
 ]);
 
 /**
@@ -95,6 +97,8 @@ function languageToExtensions(lang: string): string[] {
 			return [".js"];
 		case "rust":
 			return [".rs"];
+		case "java":
+			return [".java"];
 		default:
 			return [];
 	}
@@ -1114,11 +1118,13 @@ export class RepoIndexer implements IndexerPort {
 		cache: Map<string, PackageDependencySet>,
 	): Promise<PackageDependencySet> {
 		const emptyDeps: PackageDependencySet = { names: Object.freeze([]) };
-		// Language-aware: Rust files search for Cargo.toml; all others for package.json.
+		// Language-aware manifest selection:
+		// .rs → Cargo.toml, .java → build.gradle, .ts/.js → package.json.
 		const isRustFile = fileRelPath.endsWith(".rs");
-		// Use separate cache keys for Rust vs TS/JS to prevent cross-contamination
-		// when both manifest types exist at the same directory level.
-		const cachePrefix = isRustFile ? "rs:" : "js:";
+		const isJavaFile = fileRelPath.endsWith(".java");
+		// Separate cache keys per language to prevent cross-contamination
+		// when multiple manifest types exist at the same directory level.
+		const cachePrefix = isRustFile ? "rs:" : isJavaFile ? "java:" : "js:";
 		// Work with the file's directory (repo-relative, forward slashes).
 		let dir = fileRelPath.includes("/")
 			? fileRelPath.slice(0, fileRelPath.lastIndexOf("/"))
@@ -1147,6 +1153,13 @@ export class RepoIndexer implements IndexerPort {
 				if (cargoDeps !== null && cargoDeps.names.length > 0) {
 					for (const d of uncachedDirs) cache.set(`${cachePrefix}${d}`, cargoDeps);
 					return cargoDeps;
+				}
+			} else if (isJavaFile) {
+				// build.gradle / build.gradle.kts for Java projects.
+				const gradleDeps = await readGradleDependencies(absDir);
+				if (gradleDeps !== null && gradleDeps.names.length > 0) {
+					for (const d of uncachedDirs) cache.set(`${cachePrefix}${d}`, gradleDeps);
+					return gradleDeps;
 				}
 			} else {
 				const pkgPath = join(absDir, "package.json");

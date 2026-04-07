@@ -24,10 +24,28 @@
 - **No Rust framework detectors yet:** Actix-web, Axum, Rocket, Warp routes
   are unmodeled. Same gap as pre-Express TS had.
 
+## Extraction — Java
+
+- Java extractor (tree-sitter-java) indexes: classes, interfaces, enums,
+  methods, constructors, fields, annotation types. Overloads disambiguated
+  by parameter type signatures in stable keys.
+- Gradle dependency reader parses build.gradle / build.gradle.kts.
+- **Gradle-to-Java-package namespace gap:** Maven group IDs (e.g.
+  `org.springframework.boot`) do not directly correspond to Java package
+  paths (e.g. `org.springframework.web.bind.annotation`). The classifier
+  uses a 2-segment prefix heuristic (group `org.springframework.boot` →
+  also matches `org.springframework.*` imports) which catches most
+  transitive framework packages but can over-classify unrelated packages
+  under the same vendor root. This is a fundamental limitation of
+  matching build coordinates against source imports without JAR manifest
+  or transitive dependency resolution. Documented as approximate.
+- **No Java framework detectors yet:** Spring annotations, JAX-RS,
+  servlet/container entrypoints are unmodeled.
+- **No Java semantic enrichment yet:** JDT/javac-based type resolution
+  would be the equivalent of TS TypeChecker / Rust rust-analyzer.
+
 ## Extraction — Languages Not Yet Supported
 
-- **Java:** glamCRM has Java code. Architecture is ready. Requires tree-sitter-java,
-  Maven/Gradle reader. Blocked only on implementation effort.
 - **Python:** Common in data/ML pipelines and build tooling. Requires tree-sitter-python,
   pip/pyproject.toml reader.
 - **C/C++:** Highest business value (Linux BSP, embedded). Requires compile_commands.json

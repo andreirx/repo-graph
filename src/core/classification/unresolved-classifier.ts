@@ -216,23 +216,32 @@ function classifyUnresolvedImport(
 		return internal(UnresolvedEdgeBasisCode.RELATIVE_IMPORT_TARGET_UNRESOLVED);
 	}
 
-	// Check if the specifier (or its first segment for Rust paths)
-	// matches a declared package dependency.
-	// Rust normalizes hyphens to underscores in use paths:
-	//   Cargo.toml: my-crate = "1.0"
-	//   source:     use my_crate::Thing;
-	// Check both the original and hyphen-normalized forms.
+	// Check if the specifier matches a declared package dependency.
+	// Language-specific matching:
+	//   Rust: first :: segment, with hyphen normalization
+	//   Java: specifier prefix matches Maven group ID
+	//   TS/JS: exact bare-name match
 	const baseSpecifier = specifier.includes("::")
 		? specifier.split("::")[0]
 		: specifier;
 	if (hasPackageDependency(fileSignals.packageDependencies, baseSpecifier)) {
 		return external(UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PACKAGE_DEPENDENCY);
 	}
-	// Try hyphen form: my_crate → my-crate (Cargo.toml convention).
+	// Rust hyphen normalization: my_crate → my-crate.
 	const hyphenated = baseSpecifier.replace(/_/g, "-");
 	if (hyphenated !== baseSpecifier &&
 		hasPackageDependency(fileSignals.packageDependencies, hyphenated)) {
 		return external(UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PACKAGE_DEPENDENCY);
+	}
+	// Java prefix matching: import specifier "org.springframework.web.bind"
+	// should match Maven group "org.springframework.boot" if the specifier
+	// STARTS WITH any dep name (group ID). Dot-separated prefix match.
+	if (specifier.includes(".") && !specifier.includes("::") && !specifier.includes("/")) {
+		for (const dep of fileSignals.packageDependencies.names) {
+			if (dep.includes(".") && specifier.startsWith(dep)) {
+				return external(UnresolvedEdgeBasisCode.SPECIFIER_MATCHES_PACKAGE_DEPENDENCY);
+			}
+		}
 	}
 
 	// Check against known runtime modules.

@@ -10,6 +10,7 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { SqliteAnnotationsStorage } from "./adapters/annotations/sqlite-annotations-storage.js";
+import { JavaExtractor } from "./adapters/extractors/java/java-extractor.js";
 import { RustExtractor } from "./adapters/extractors/rust/rust-extractor.js";
 import { TypeScriptExtractor } from "./adapters/extractors/typescript/ts-extractor.js";
 import { GitAdapter } from "./adapters/git/git-adapter.js";
@@ -71,12 +72,14 @@ export async function bootstrap(dbPath?: string): Promise<AppContext> {
 	await extractor.initialize();
 	const rustExtractor = new RustExtractor();
 	await rustExtractor.initialize();
+	const javaExtractor = new JavaExtractor();
+	await javaExtractor.initialize();
 
 	// Create indexer with all extractors. Files are routed to the
 	// correct extractor by extension.
 	const indexer = new RepoIndexer(
 		storage,
-		[extractor, rustExtractor],
+		[extractor, rustExtractor, javaExtractor],
 		annotations,
 	);
 	const git = new GitAdapter();

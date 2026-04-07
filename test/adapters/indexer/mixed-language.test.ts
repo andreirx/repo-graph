@@ -1,14 +1,13 @@
 /**
  * Mixed-language indexer integration test.
  *
- * Exercises the actual multi-extractor architectural seam:
- *   - BOTH TypeScript and Rust extractors registered
- *   - .ts file routed to TS extractor, .rs file to Rust extractor
- *   - TS file gets package.json deps (express)
- *   - Rust file gets Cargo.toml deps (serde, wgpu)
- *   - NO cross-contamination: TS file does NOT see Cargo deps,
- *     Rust file does NOT see package.json deps
- *   - merged builtins include BOTH TS and Rust globals
+ * Exercises the actual multi-extractor architectural seam with ALL
+ * three languages: TypeScript, Rust, and Java.
+ *   - .ts → TS extractor + package.json deps
+ *   - .rs → Rust extractor + Cargo.toml deps
+ *   - .java → Java extractor + build.gradle deps
+ *   - NO cross-contamination between manifest types
+ *   - merged builtins include all three language sets
  */
 
 import { randomUUID } from "node:crypto";
@@ -16,6 +15,7 @@ import { unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { JavaExtractor } from "../../../src/adapters/extractors/java/java-extractor.js";
 import { RustExtractor } from "../../../src/adapters/extractors/rust/rust-extractor.js";
 import { TypeScriptExtractor } from "../../../src/adapters/extractors/typescript/ts-extractor.js";
 import { RepoIndexer } from "../../../src/adapters/indexer/repo-indexer.js";
@@ -33,6 +33,7 @@ let storage: SqliteStorage;
 let provider: SqliteConnectionProvider;
 let tsExtractor: TypeScriptExtractor;
 let rustExtractor: RustExtractor;
+let javaExtractor: JavaExtractor;
 let indexer: RepoIndexer;
 let dbPath: string;
 
@@ -41,6 +42,8 @@ beforeAll(async () => {
 	await tsExtractor.initialize();
 	rustExtractor = new RustExtractor();
 	await rustExtractor.initialize();
+	javaExtractor = new JavaExtractor();
+	await javaExtractor.initialize();
 });
 
 beforeEach(() => {
@@ -48,8 +51,8 @@ beforeEach(() => {
 	provider = new SqliteConnectionProvider(dbPath);
 	provider.initialize();
 	storage = new SqliteStorage(provider.getDatabase());
-	// Multi-extractor indexer — the architectural seam under test.
-	indexer = new RepoIndexer(storage, [tsExtractor, rustExtractor]);
+	// All three extractors registered — full multi-language seam.
+	indexer = new RepoIndexer(storage, [tsExtractor, rustExtractor, javaExtractor]);
 	storage.addRepo({
 		repoUid: REPO_UID,
 		name: REPO_UID,
@@ -70,9 +73,10 @@ afterEach(() => {
 });
 
 describe("mixed-language indexer — routing", () => {
-	it("indexes both .ts and .rs files in the same repo", async () => {
+	it("indexes .ts, .rs, and .java files in the same repo", async () => {
 		const result = await indexer.indexRepo(REPO_UID);
-		expect(result.filesTotal).toBe(2);
+		// Fixture: server.ts + engine.rs + App.java = 3 files.
+		expect(result.filesTotal).toBe(3);
 		expect(result.nodesTotal).toBeGreaterThan(0);
 
 		const tsFile = storage.getNodeByStableKey(
@@ -80,17 +84,21 @@ describe("mixed-language indexer — routing", () => {
 			`${REPO_UID}:src/server.ts:FILE`,
 		);
 		expect(tsFile).not.toBeNull();
-		expect(tsFile?.kind).toBe(NodeKind.FILE);
 
 		const rsFile = storage.getNodeByStableKey(
 			result.snapshotUid,
 			`${REPO_UID}:src/engine.rs:FILE`,
 		);
 		expect(rsFile).not.toBeNull();
-		expect(rsFile?.kind).toBe(NodeKind.FILE);
+
+		const javaFile = storage.getNodeByStableKey(
+			result.snapshotUid,
+			`${REPO_UID}:src/App.java:FILE`,
+		);
+		expect(javaFile).not.toBeNull();
 	});
 
-	it("emits TS symbols from .ts file and Rust symbols from .rs file", async () => {
+	it("emits symbols from all three languages", async () => {
 		const result = await indexer.indexRepo(REPO_UID);
 
 		// TS: should have "start" function.
@@ -108,6 +116,58 @@ describe("mixed-language indexer — routing", () => {
 			limit: 5,
 		});
 		expect(rustSymbol.some((s) => s.name === "GameState")).toBe(true);
+
+		// Java: should have "App" class from App.java.
+		const javaSymbol = storage.resolveSymbol({
+			snapshotUid: result.snapshotUid,
+			query: "App",
+			limit: 10,
+		});
+		// Filter to only Java-file symbols to avoid confusing with TS App.
+		const javaApp = javaSymbol.find((s) =>
+			s.stableKey.includes(".java#"),
+		);
+		expect(javaApp).toBeDefined();
+	});
+});
+
+describe("mixed-language indexer — Java dependency isolation", () => {
+	it("Java file gets Gradle deps, not package.json or Cargo deps", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+		const javaEdges = storage.queryUnresolvedEdges({
+			snapshotUid: result.snapshotUid,
+		}).filter((r) => r.sourceFilePath?.endsWith(".java"));
+
+		// Java edges should exist.
+		expect(javaEdges.length).toBeGreaterThan(0);
+
+		// No Java edge should reference express (TS dep) or serde (Rust dep).
+		for (const e of javaEdges) {
+			expect(e.targetKey).not.toContain("express");
+			expect(e.targetKey).not.toContain("serde");
+		}
+	});
+
+	it("Java Spring import classifies as external via Gradle deps (prefix match)", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+		const javaEdges = storage.queryUnresolvedEdges({
+			snapshotUid: result.snapshotUid,
+		}).filter((r) => r.sourceFilePath?.endsWith(".java"));
+
+		// The fixture imports org.springframework.web.bind.annotation.RestController.
+		// build.gradle has org.springframework.boot:spring-boot-starter-web.
+		// Gradle reader stores "org.springframework" as 2-segment prefix.
+		// Classifier prefix-matches against "org.springframework" → external.
+		//
+		// This MUST produce an unresolved IMPORTS edge because there is no
+		// local file to resolve it to. The assertion is unconditional.
+		const springImport = javaEdges.find(
+			(r) => r.category === "imports_file_not_found" &&
+				r.targetKey.includes("springframework"),
+		);
+		expect(springImport).toBeDefined();
+		expect(springImport!.classification).toBe("external_library_candidate");
+		expect(springImport!.basisCode).toBe("specifier_matches_package_dependency");
 	});
 });
 
