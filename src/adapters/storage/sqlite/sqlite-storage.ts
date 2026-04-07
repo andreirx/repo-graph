@@ -17,6 +17,7 @@ import type {
 } from "../../../core/model/index.js";
 import { EdgeType, SnapshotStatus } from "../../../core/model/index.js";
 import type {
+	BoundaryLinkRow,
 	CountUnresolvedEdgesInput,
 	CreateSnapshotInput,
 	DomainVersionRow,
@@ -32,7 +33,12 @@ import type {
 	FindReverseModuleImportsInput,
 	GetDeclarationsInput,
 	PathPrefixModuleCycle,
+	PersistedBoundaryConsumerFact,
+	PersistedBoundaryLink,
+	PersistedBoundaryProviderFact,
 	PersistedUnresolvedEdge,
+	QueryBoundaryFactsInput,
+	QueryBoundaryLinksInput,
 	QueryUnresolvedEdgesInput,
 	ResolveChangedFilesToModulesInput,
 	ReverseModuleImportResult,
@@ -687,6 +693,276 @@ export class SqliteStorage implements StoragePort {
 			count: number;
 		}>;
 		return rows.map((r) => ({ key: r.key, count: r.count }));
+	}
+
+	// ── Boundary Facts (source of truth) ──────────────────────────────
+
+	insertBoundaryProviderFacts(facts: PersistedBoundaryProviderFact[]): void {
+		const stmt = this.db.prepare(
+			`INSERT INTO boundary_provider_facts
+			 (fact_uid, snapshot_uid, repo_uid, mechanism, operation, address,
+			  matcher_key, handler_stable_key, source_file, line_start,
+			  framework, basis, schema_ref, metadata_json, extractor, observed_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const f of facts) {
+				stmt.run(
+					f.factUid,
+					f.snapshotUid,
+					f.repoUid,
+					f.mechanism,
+					f.operation,
+					f.address,
+					f.matcherKey,
+					f.handlerStableKey,
+					f.sourceFile,
+					f.lineStart,
+					f.framework,
+					f.basis,
+					f.schemaRef,
+					f.metadata ? JSON.stringify(f.metadata) : null,
+					f.extractor,
+					f.observedAt,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	insertBoundaryConsumerFacts(facts: PersistedBoundaryConsumerFact[]): void {
+		const stmt = this.db.prepare(
+			`INSERT INTO boundary_consumer_facts
+			 (fact_uid, snapshot_uid, repo_uid, mechanism, operation, address,
+			  matcher_key, caller_stable_key, source_file, line_start,
+			  basis, confidence, schema_ref, metadata_json, extractor, observed_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const f of facts) {
+				stmt.run(
+					f.factUid,
+					f.snapshotUid,
+					f.repoUid,
+					f.mechanism,
+					f.operation,
+					f.address,
+					f.matcherKey,
+					f.callerStableKey,
+					f.sourceFile,
+					f.lineStart,
+					f.basis,
+					f.confidence,
+					f.schemaRef,
+					f.metadata ? JSON.stringify(f.metadata) : null,
+					f.extractor,
+					f.observedAt,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	queryBoundaryProviderFacts(
+		input: QueryBoundaryFactsInput,
+	): PersistedBoundaryProviderFact[] {
+		const conditions = ["snapshot_uid = ?"];
+		const params: unknown[] = [input.snapshotUid];
+
+		if (input.mechanism) {
+			conditions.push("mechanism = ?");
+			params.push(input.mechanism);
+		}
+		if (input.matcherKey) {
+			conditions.push("matcher_key = ?");
+			params.push(input.matcherKey);
+		}
+		if (input.sourceFile) {
+			conditions.push("source_file = ?");
+			params.push(input.sourceFile);
+		}
+
+		let sql = `SELECT * FROM boundary_provider_facts WHERE ${conditions.join(" AND ")} ORDER BY source_file ASC, line_start ASC`;
+		if (input.limit) {
+			sql += ` LIMIT ${input.limit}`;
+		}
+
+		const rows = this.db.prepare(sql).all(...params) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			factUid: r.fact_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			mechanism: r.mechanism as string,
+			operation: r.operation as string,
+			address: r.address as string,
+			matcherKey: r.matcher_key as string,
+			handlerStableKey: r.handler_stable_key as string,
+			sourceFile: r.source_file as string,
+			lineStart: r.line_start as number,
+			framework: r.framework as string,
+			basis: r.basis as string,
+			schemaRef: (r.schema_ref as string) ?? null,
+			metadata: r.metadata_json ? JSON.parse(r.metadata_json as string) : {},
+			extractor: r.extractor as string,
+			observedAt: r.observed_at as string,
+		} as PersistedBoundaryProviderFact));
+	}
+
+	queryBoundaryConsumerFacts(
+		input: QueryBoundaryFactsInput,
+	): PersistedBoundaryConsumerFact[] {
+		const conditions = ["snapshot_uid = ?"];
+		const params: unknown[] = [input.snapshotUid];
+
+		if (input.mechanism) {
+			conditions.push("mechanism = ?");
+			params.push(input.mechanism);
+		}
+		if (input.matcherKey) {
+			conditions.push("matcher_key = ?");
+			params.push(input.matcherKey);
+		}
+		if (input.sourceFile) {
+			conditions.push("source_file = ?");
+			params.push(input.sourceFile);
+		}
+
+		let sql = `SELECT * FROM boundary_consumer_facts WHERE ${conditions.join(" AND ")} ORDER BY source_file ASC, line_start ASC`;
+		if (input.limit) {
+			sql += ` LIMIT ${input.limit}`;
+		}
+
+		const rows = this.db.prepare(sql).all(...params) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			factUid: r.fact_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			mechanism: r.mechanism as string,
+			operation: r.operation as string,
+			address: r.address as string,
+			matcherKey: r.matcher_key as string,
+			callerStableKey: r.caller_stable_key as string,
+			sourceFile: r.source_file as string,
+			lineStart: r.line_start as number,
+			basis: r.basis as string,
+			confidence: r.confidence as number,
+			schemaRef: (r.schema_ref as string) ?? null,
+			metadata: r.metadata_json ? JSON.parse(r.metadata_json as string) : {},
+			extractor: r.extractor as string,
+			observedAt: r.observed_at as string,
+		} as PersistedBoundaryConsumerFact));
+	}
+
+	// ── Boundary Links (derived artifact) ─────────────────────────────
+
+	insertBoundaryLinks(links: PersistedBoundaryLink[]): void {
+		const stmt = this.db.prepare(
+			`INSERT INTO boundary_links
+			 (link_uid, snapshot_uid, repo_uid, provider_fact_uid, consumer_fact_uid,
+			  match_basis, confidence, metadata_json, materialized_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const l of links) {
+				stmt.run(
+					l.linkUid,
+					l.snapshotUid,
+					l.repoUid,
+					l.providerFactUid,
+					l.consumerFactUid,
+					l.matchBasis,
+					l.confidence,
+					l.metadataJson,
+					l.materializedAt,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	queryBoundaryLinks(input: QueryBoundaryLinksInput): BoundaryLinkRow[] {
+		const conditions = ["bl.snapshot_uid = ?"];
+		const params: unknown[] = [input.snapshotUid];
+
+		if (input.mechanism) {
+			conditions.push("bp.mechanism = ?");
+			params.push(input.mechanism);
+		}
+		if (input.matchBasis) {
+			conditions.push("bl.match_basis = ?");
+			params.push(input.matchBasis);
+		}
+
+		let sql = `
+			SELECT
+				bl.link_uid,
+				bl.match_basis,
+				bl.confidence,
+				bl.metadata_json,
+				bp.mechanism   AS provider_mechanism,
+				bp.operation   AS provider_operation,
+				bp.address     AS provider_address,
+				bp.handler_stable_key AS provider_handler_stable_key,
+				bp.source_file AS provider_source_file,
+				bp.line_start  AS provider_line_start,
+				bp.framework   AS provider_framework,
+				bc.operation   AS consumer_operation,
+				bc.address     AS consumer_address,
+				bc.caller_stable_key AS consumer_caller_stable_key,
+				bc.source_file AS consumer_source_file,
+				bc.line_start  AS consumer_line_start,
+				bc.basis       AS consumer_basis,
+				bc.confidence  AS consumer_confidence
+			FROM boundary_links bl
+			JOIN boundary_provider_facts bp ON bp.fact_uid = bl.provider_fact_uid
+			JOIN boundary_consumer_facts bc ON bc.fact_uid = bl.consumer_fact_uid
+			WHERE ${conditions.join(" AND ")}
+			ORDER BY bp.source_file ASC, bp.line_start ASC
+		`;
+		if (input.limit) {
+			sql += ` LIMIT ${input.limit}`;
+		}
+
+		const rows = this.db.prepare(sql).all(...params) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			linkUid: r.link_uid as string,
+			matchBasis: r.match_basis as string,
+			confidence: r.confidence as number,
+			providerMechanism: r.provider_mechanism as string,
+			providerOperation: r.provider_operation as string,
+			providerAddress: r.provider_address as string,
+			providerHandlerStableKey: r.provider_handler_stable_key as string,
+			providerSourceFile: r.provider_source_file as string,
+			providerLineStart: r.provider_line_start as number,
+			providerFramework: r.provider_framework as string,
+			consumerOperation: r.consumer_operation as string,
+			consumerAddress: r.consumer_address as string,
+			consumerCallerStableKey: r.consumer_caller_stable_key as string,
+			consumerSourceFile: r.consumer_source_file as string,
+			consumerLineStart: r.consumer_line_start as number,
+			consumerBasis: r.consumer_basis as string,
+			consumerConfidence: r.consumer_confidence as number,
+			metadataJson: (r.metadata_json as string) ?? null,
+		}));
+	}
+
+	deleteBoundaryLinksBySnapshot(snapshotUid: string): void {
+		this.db
+			.prepare("DELETE FROM boundary_links WHERE snapshot_uid = ?")
+			.run(snapshotUid);
+	}
+
+	deleteBoundaryFactsBySnapshot(snapshotUid: string): void {
+		// Delete derived links first (FK constraint on fact tables).
+		this.db
+			.prepare("DELETE FROM boundary_links WHERE snapshot_uid = ?")
+			.run(snapshotUid);
+		this.db
+			.prepare("DELETE FROM boundary_consumer_facts WHERE snapshot_uid = ?")
+			.run(snapshotUid);
+		this.db
+			.prepare("DELETE FROM boundary_provider_facts WHERE snapshot_uid = ?")
+			.run(snapshotUid);
 	}
 
 	// ── Declarations ───────────────────────────────────────────────────

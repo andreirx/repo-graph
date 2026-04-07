@@ -1,3 +1,8 @@
+import type {
+	BoundaryConsumerFact,
+	BoundaryMechanism,
+	BoundaryProviderFact,
+} from "../classification/api-boundary.js";
 import type { UnresolvedEdgeCategory } from "../diagnostics/unresolved-edge-categories.js";
 import type {
 	UnresolvedEdgeBasisCode,
@@ -137,6 +142,61 @@ export interface StoragePort {
 	countUnresolvedEdges(
 		input: CountUnresolvedEdgesInput,
 	): UnresolvedEdgeCountRow[];
+
+	// ── Boundary Facts (source of truth) ─────────────────────────────────
+	//
+	// Raw boundary interaction observations. These are the durable
+	// substrate. Provider facts = something exposes an entry surface.
+	// Consumer facts = something reaches across a boundary.
+	//
+	// These tables are NOT the edges table. Boundary links are NOT
+	// language edges. They live in explicit boundary-fact surfaces.
+
+	/** Persist boundary provider facts (batch). */
+	insertBoundaryProviderFacts(facts: PersistedBoundaryProviderFact[]): void;
+
+	/** Persist boundary consumer facts (batch). */
+	insertBoundaryConsumerFacts(facts: PersistedBoundaryConsumerFact[]): void;
+
+	/** Query provider facts for a snapshot. */
+	queryBoundaryProviderFacts(
+		input: QueryBoundaryFactsInput,
+	): PersistedBoundaryProviderFact[];
+
+	/** Query consumer facts for a snapshot. */
+	queryBoundaryConsumerFacts(
+		input: QueryBoundaryFactsInput,
+	): PersistedBoundaryConsumerFact[];
+
+	// ── Boundary Links (derived artifact) ────────────────────────────────
+	//
+	// Materialized provider-consumer matches. EXPLICITLY DERIVED.
+	// Can be deleted and recomputed from raw facts without data loss.
+
+	/** Persist materialized boundary links (batch). */
+	insertBoundaryLinks(links: PersistedBoundaryLink[]): void;
+
+	/**
+	 * Query materialized boundary links for a snapshot.
+	 * Returns enriched rows with provider/consumer details joined in
+	 * so results are operationally readable without further lookups.
+	 */
+	queryBoundaryLinks(
+		input: QueryBoundaryLinksInput,
+	): BoundaryLinkRow[];
+
+	/**
+	 * Delete all derived boundary links for a snapshot.
+	 * Used for idempotent re-materialization: delete old links,
+	 * rerun matcher, insert new links.
+	 */
+	deleteBoundaryLinksBySnapshot(snapshotUid: string): void;
+
+	/**
+	 * Delete all boundary facts (provider + consumer) and derived
+	 * links for a snapshot. Used when re-indexing replaces all facts.
+	 */
+	deleteBoundaryFactsBySnapshot(snapshotUid: string): void;
 
 	// ── Declarations ─────────────────────────────────────────────────────
 
@@ -559,5 +619,137 @@ export interface UnresolvedEdgeSampleRow {
 	/** Visibility of the enclosing source node (EXPORT, PRIVATE, null). */
 	sourceNodeVisibility: string | null;
 	/** Raw metadata_json from the unresolved_edges row. May contain enrichment data. */
+	metadataJson: string | null;
+}
+
+// ── Boundary fact types ─────────────────────────────────────────────────
+
+/**
+ * Persisted boundary provider fact. Extends the core domain type
+ * with storage identity, scope, matcher key, and provenance.
+ *
+ * Clean separation from BoundaryProviderFact:
+ *   - BoundaryProviderFact       = emitted by extractor, pre-persistence
+ *   - PersistedBoundaryProviderFact = post-normalization, persisted to boundary_provider_facts
+ */
+export interface PersistedBoundaryProviderFact extends BoundaryProviderFact {
+	/** Storage identity. */
+	factUid: string;
+	/** Scope: which snapshot this fact belongs to. */
+	snapshotUid: string;
+	/** Scope: which repo this fact belongs to. */
+	repoUid: string;
+	/**
+	 * Normalized operation identifier for matching.
+	 * Mechanism-specific format, computed by the match strategy.
+	 * For HTTP: "GET /api/v2/products/{_}" (params → wildcard tokens).
+	 * Opaque to storage; semantics owned by the match strategy.
+	 */
+	matcherKey: string;
+	/** Which adapter + version produced this fact (e.g. "spring-route-extractor:0.1"). */
+	extractor: string;
+	/** ISO 8601 timestamp when this fact was extracted. Immutable. */
+	observedAt: string;
+}
+
+/**
+ * Persisted boundary consumer fact. Extends the core domain type
+ * with storage identity, scope, matcher key, and provenance.
+ *
+ * Clean separation from BoundaryConsumerFact:
+ *   - BoundaryConsumerFact       = emitted by extractor, pre-persistence
+ *   - PersistedBoundaryConsumerFact = post-normalization, persisted to boundary_consumer_facts
+ */
+export interface PersistedBoundaryConsumerFact extends BoundaryConsumerFact {
+	/** Storage identity. */
+	factUid: string;
+	/** Scope: which snapshot this fact belongs to. */
+	snapshotUid: string;
+	/** Scope: which repo this fact belongs to. */
+	repoUid: string;
+	/**
+	 * Normalized operation identifier for matching.
+	 * Same format as the provider matcher_key for the same mechanism.
+	 */
+	matcherKey: string;
+	/** Which adapter + version produced this fact (e.g. "http-client-extractor:0.1"). */
+	extractor: string;
+	/** ISO 8601 timestamp when this fact was extracted. Immutable. */
+	observedAt: string;
+}
+
+/**
+ * Persisted boundary link — a materialized provider-consumer match.
+ * EXPLICITLY DERIVED. Can be deleted and recomputed without data loss.
+ */
+export interface PersistedBoundaryLink {
+	linkUid: string;
+	snapshotUid: string;
+	repoUid: string;
+	providerFactUid: string;
+	consumerFactUid: string;
+	/** How the match was determined. */
+	matchBasis: "exact_contract" | "address_match" | "operation_match" | "heuristic";
+	/** Combined confidence (provider × consumer × match quality). */
+	confidence: number;
+	/** Matcher-specific metadata (e.g. segment comparison details). */
+	metadataJson: string | null;
+	/** ISO 8601 timestamp when this link was materialized. */
+	materializedAt: string;
+}
+
+/**
+ * Input filter for querying boundary facts (provider or consumer).
+ */
+export interface QueryBoundaryFactsInput {
+	snapshotUid: string;
+	/** Filter to a specific mechanism (http, grpc, etc.). */
+	mechanism?: BoundaryMechanism;
+	/** Filter by matcher_key (exact match). */
+	matcherKey?: string;
+	/** Filter by source file (repo-relative path). */
+	sourceFile?: string;
+	/** Max rows to return. Omit for unbounded. */
+	limit?: number;
+}
+
+/**
+ * Input filter for querying materialized boundary links.
+ */
+export interface QueryBoundaryLinksInput {
+	snapshotUid: string;
+	/** Filter to a specific mechanism (via provider's mechanism). */
+	mechanism?: BoundaryMechanism;
+	/** Filter by match basis. */
+	matchBasis?: PersistedBoundaryLink["matchBasis"];
+	/** Max rows to return. Omit for unbounded. */
+	limit?: number;
+}
+
+/**
+ * Reading-shape row for boundary links. Joins provider and consumer
+ * details so results are operationally readable without further lookups.
+ */
+export interface BoundaryLinkRow {
+	linkUid: string;
+	matchBasis: string;
+	confidence: number;
+	// Provider side
+	providerMechanism: string;
+	providerOperation: string;
+	providerAddress: string;
+	providerHandlerStableKey: string;
+	providerSourceFile: string;
+	providerLineStart: number;
+	providerFramework: string;
+	// Consumer side
+	consumerOperation: string;
+	consumerAddress: string;
+	consumerCallerStableKey: string;
+	consumerSourceFile: string;
+	consumerLineStart: number;
+	consumerBasis: string;
+	consumerConfidence: number;
+	/** Link-level metadata_json (matcher notes). */
 	metadataJson: string | null;
 }
