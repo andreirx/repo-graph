@@ -58,6 +58,7 @@ import type {
 import { detectSpringBeans } from "../extractors/java/spring-bean-detector.js";
 import { extractSpringRoutes, initSpringRouteParser } from "../extractors/java/spring-route-extractor.js";
 import { extractCommanderCommands } from "../extractors/typescript/commander-command-extractor.js";
+import { extractPackageScriptConsumers } from "../extractors/manifest/package-script-cli-extractor.js";
 import { extractExpressRoutes } from "../extractors/typescript/express-route-extractor.js";
 import { FileLocalStringResolver } from "../extractors/typescript/file-local-string-resolver.js";
 import { extractHttpClientRequests } from "../extractors/typescript/http-client-extractor.js";
@@ -774,6 +775,46 @@ export class RepoIndexer implements IndexerPort {
 						}
 					}
 
+					// 9c-ii. Extract CLI consumer facts from package.json scripts.
+					// Reads package.json files in the repo and parses "scripts"
+					// entries as cli_command consumer invocations.
+					{
+						const packageJsonPaths = await this.findPackageJsonFiles(repo.rootPath);
+						for (const pkgRelPath of packageJsonPaths) {
+							try {
+								const pkgContent = await readFile(
+									join(repo.rootPath, pkgRelPath),
+									"utf-8",
+								);
+								const pkg = JSON.parse(pkgContent);
+								if (pkg.scripts && typeof pkg.scripts === "object") {
+									const scriptFacts = extractPackageScriptConsumers(
+										pkg.scripts,
+										pkgRelPath,
+										repoUid,
+									);
+									for (const c of scriptFacts) {
+										const strategy = getMatchStrategy(c.mechanism);
+										const matcherKey = strategy
+											? strategy.computeMatcherKey(c.address, c.metadata)
+											: c.operation;
+										consumerFacts.push({
+											...c,
+											factUid: uuidv4(),
+											snapshotUid: snapshot.snapshotUid,
+											repoUid,
+											matcherKey,
+											extractor: "package-script-cli-extractor:0.1",
+											observedAt: boundaryObservedAt,
+										});
+									}
+								}
+							} catch {
+								// Skip unreadable / unparseable package.json files.
+							}
+						}
+					}
+
 					// Persist raw facts (source of truth).
 					if (providerFacts.length > 0) {
 						this.storage.insertBoundaryProviderFacts(providerFacts);
@@ -966,6 +1007,38 @@ export class RepoIndexer implements IndexerPort {
 		}
 
 		return files;
+	}
+
+	/**
+	 * Find all package.json files in the repo, excluding node_modules.
+	 * Returns repo-relative paths.
+	 */
+	private async findPackageJsonFiles(rootPath: string): Promise<string[]> {
+		const results: string[] = [];
+		const ig = await loadGitignore(rootPath);
+
+		const walk = async (dir: string) => {
+			let entries: import("node:fs").Dirent[];
+			try {
+				entries = await readdir(dir, { withFileTypes: true });
+			} catch {
+				return;
+			}
+			for (const entry of entries) {
+				if (entry.isDirectory()) {
+					if (ALWAYS_EXCLUDED.has(entry.name)) continue;
+					const relDir = relative(rootPath, join(dir, entry.name));
+					if (ig.ignores(relDir + "/")) continue;
+					await walk(join(dir, entry.name));
+				} else if (entry.name === "package.json") {
+					const relPath = relative(rootPath, join(dir, entry.name));
+					results.push(relPath);
+				}
+			}
+		};
+
+		await walk(rootPath);
+		return results;
 	}
 
 	private async walkDir(

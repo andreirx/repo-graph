@@ -231,3 +231,47 @@ describe("boundary unmatched", () => {
 		expect(r.stdout).toContain("Unmatched consumers");
 	});
 });
+
+// ── boundary summary with cli_command mechanism ─────────────────────
+
+describe("boundary summary — cli_command mechanism display", () => {
+	const CLI_FIXTURES_PATH = join(
+		import.meta.dirname,
+		"../fixtures/cli-boundary",
+	);
+	const CLI_REPO_NAME = "cli-summary-test";
+
+	let hCli: TestHarness;
+
+	beforeAll(async () => {
+		hCli = await createTestHarness();
+		await hCli.run("repo", "add", CLI_FIXTURES_PATH, "--name", CLI_REPO_NAME);
+		const indexResult = await hCli.run("repo", "index", CLI_REPO_NAME);
+		if (indexResult.exitCode !== 0) {
+			throw new Error(`Index failed: ${indexResult.stderr}`);
+		}
+	}, 30000);
+
+	afterAll(() => {
+		hCli.cleanup();
+	});
+
+	it("shows cli_command mechanism in JSON summary", async () => {
+		const r = await hCli.run("boundary", "summary", CLI_REPO_NAME, "--json");
+		expect(r.exitCode).toBe(0);
+		const json = r.json();
+
+		const byMech = json.by_mechanism as Record<string, Record<string, number>>;
+		expect(byMech.providers).toBeDefined();
+		// cli-boundary fixture has Commander commands (cli_command providers)
+		// and package.json scripts (cli_command consumers).
+		expect(byMech.providers.cli_command).toBeGreaterThan(0);
+		expect(byMech.consumers.cli_command).toBeGreaterThan(0);
+	});
+
+	it("shows cli_command in human-readable summary", async () => {
+		const r = await hCli.run("boundary", "summary", CLI_REPO_NAME);
+		expect(r.exitCode).toBe(0);
+		expect(r.stdout).toContain("cli_command:");
+	});
+});

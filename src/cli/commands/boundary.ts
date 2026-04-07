@@ -92,12 +92,15 @@ export function registerBoundaryCommands(
 				if (consumers.length > 0) {
 					console.log(`  Consumer match rate: ${((consumerLinked.size / consumers.length) * 100).toFixed(1)}%`);
 				}
-				if (mechProviders.size > 0) {
+				// Collect all unique mechanisms from providers and consumers.
+				const allMechanisms = new Set([...mechProviders.keys(), ...mechConsumers.keys()]);
+				if (allMechanisms.size > 0) {
 					console.log("\n  By mechanism:");
-					for (const [mech, count] of mechProviders) {
+					for (const mech of [...allMechanisms].sort()) {
+						const pCount = mechProviders.get(mech) ?? 0;
 						const cCount = mechConsumers.get(mech) ?? 0;
 						const lCount = mechLinks.get(mech) ?? 0;
-						console.log(`    ${mech}: ${count} providers, ${cCount} consumers, ${lCount} links`);
+						console.log(`    ${mech}: ${pCount} providers, ${cCount} consumers, ${lCount} links`);
 					}
 				}
 			}

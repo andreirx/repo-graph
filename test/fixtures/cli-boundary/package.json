@@ -3,5 +3,10 @@
   "version": "1.0.0",
   "dependencies": {
     "commander": "^12.0.0"
+  },
+  "scripts": {
+    "add-repo": "mytool repo add .",
+    "list-repos": "mytool repo list --json",
+    "ci": "tsc && mytool build"
   }
 }
