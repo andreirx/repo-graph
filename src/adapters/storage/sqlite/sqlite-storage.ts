@@ -1371,7 +1371,7 @@ export class SqliteStorage implements StoragePort {
 			  AND n.stable_key NOT IN (
 				SELECT i.target_stable_key FROM inferences i
 				WHERE i.snapshot_uid = ?
-				  AND i.kind IN ('framework_entrypoint', 'spring_container_managed')
+				  AND i.kind IN ('framework_entrypoint', 'spring_container_managed', 'pytest_test', 'pytest_fixture')
 			  )
 			  ${minLinesFilter}
 			ORDER BY n.name ASC

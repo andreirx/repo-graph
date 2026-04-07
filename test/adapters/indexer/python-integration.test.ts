@@ -61,7 +61,7 @@ afterEach(() => {
 describe("Python indexer integration", () => {
 	it("indexes .py files and produces nodes", async () => {
 		const result = await indexer.indexRepo(REPO_UID);
-		expect(result.filesTotal).toBe(2);
+		expect(result.filesTotal).toBe(3);
 		expect(result.nodesTotal).toBeGreaterThan(0);
 	});
 
@@ -216,5 +216,80 @@ describe("Python indexer integration", () => {
 				e.classification === "internal_candidate",
 		);
 		expect(relativeEdge).toBeDefined();
+	});
+
+	it("persists pytest_test inferences for test functions", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const inferences = storage.queryInferences(
+			result.snapshotUid,
+			"pytest_test",
+		);
+
+		// test_main.py has: test_process_items, TestUserService, TestUserService.test_get_user
+		expect(inferences.length).toBeGreaterThanOrEqual(2);
+
+		const testFunc = inferences.find((i) => {
+			const val = JSON.parse(i.valueJson);
+			return val.convention === "pytest_test_function";
+		});
+		expect(testFunc).toBeDefined();
+
+		const testClass = inferences.find((i) => {
+			const val = JSON.parse(i.valueJson);
+			return val.convention === "pytest_test_class";
+		});
+		expect(testClass).toBeDefined();
+	});
+
+	it("persists pytest_fixture inferences for fixture functions", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const inferences = storage.queryInferences(
+			result.snapshotUid,
+			"pytest_fixture",
+		);
+
+		// test_main.py has: @pytest.fixture db_connection
+		expect(inferences.length).toBeGreaterThanOrEqual(1);
+	});
+
+	it("suppresses pytest test functions from findDeadNodes", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const dead = storage.findDeadNodes({
+			snapshotUid: result.snapshotUid,
+			kind: NodeKind.SYMBOL,
+		});
+
+		// test_process_items should NOT be dead (it has pytest_test inference).
+		const testFunc = dead.find((d) => d.symbol === "test_process_items");
+		expect(testFunc).toBeUndefined();
+	});
+
+	it("suppresses pytest fixture from findDeadNodes", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const dead = storage.findDeadNodes({
+			snapshotUid: result.snapshotUid,
+			kind: NodeKind.SYMBOL,
+		});
+
+		// db_connection should NOT be dead (it has pytest_fixture inference).
+		const fixture = dead.find((d) => d.symbol === "db_connection");
+		expect(fixture).toBeUndefined();
+	});
+
+	it("does NOT suppress non-test functions from findDeadNodes", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const dead = storage.findDeadNodes({
+			snapshotUid: result.snapshotUid,
+			kind: NodeKind.SYMBOL,
+		});
+
+		// process_items in main.py is not a test — should still be dead.
+		const nonTest = dead.find((d) => d.symbol === "process_items");
+		expect(nonTest).toBeDefined();
 	});
 });

@@ -39,6 +39,7 @@ import {
 import type {
 	ExtractionResult,
 	ExtractorPort,
+	ImportBinding,
 	UnresolvedEdge,
 } from "../../core/ports/extractor.js";
 import type {
@@ -56,7 +57,9 @@ import type {
 	StoragePort,
 } from "../../core/ports/storage.js";
 import { detectSpringBeans } from "../extractors/java/spring-bean-detector.js";
+import { detectPytestItems } from "../extractors/python/pytest-detector.js";
 import { extractSpringRoutes, initSpringRouteParser } from "../extractors/java/spring-route-extractor.js";
+import { extractShellScriptConsumers } from "../extractors/cli/shell-script-cli-extractor.js";
 import { extractCommanderCommands } from "../extractors/typescript/commander-command-extractor.js";
 import { extractPackageScriptConsumers } from "../extractors/manifest/package-script-cli-extractor.js";
 import { extractExpressRoutes } from "../extractors/typescript/express-route-extractor.js";
@@ -435,14 +438,25 @@ export class RepoIndexer implements IndexerPort {
 				total: allUnresolvedEdges.length,
 			});
 
-			const { resolved, stillUnresolved, unresolvedBreakdown } =
-				this.resolveEdges(
-					allUnresolvedEdges,
-					allNodes,
-					trackedFiles,
-					repoUid,
-					snapshot.snapshotUid,
-				);
+			// Build import-binding index for call resolution.
+				// Maps fileUid → ImportBinding[] so the resolver can use
+				// import bindings to disambiguate bare-identifier calls.
+				const importBindingsByFile = new Map<string, ImportBinding[]>();
+				for (const [fileUid, signals] of fileSignalsCache) {
+					if (signals.importBindings.length > 0) {
+						importBindingsByFile.set(fileUid, [...signals.importBindings]);
+					}
+				}
+
+				const { resolved, stillUnresolved, unresolvedBreakdown } =
+					this.resolveEdges(
+						allUnresolvedEdges,
+						allNodes,
+						trackedFiles,
+						repoUid,
+						snapshot.snapshotUid,
+						importBindingsByFile,
+					);
 			const unresolvedCount = stillUnresolved.length;
 
 			emit({
@@ -621,6 +635,63 @@ export class RepoIndexer implements IndexerPort {
 							"spring_container_managed",
 						);
 						this.storage.insertInferences(springInferences);
+					}
+				}
+
+			// 9e. Pytest test/fixture detection.
+				// Scans Python files for pytest conventions (test_* functions,
+				// Test* classes, @pytest.fixture). Emits inferences that
+				// suppress false dead-code reports for test infrastructure.
+				{
+					const pytestInferences: InferenceRow[] = [];
+					const detectedAt = new Date().toISOString();
+					for (const relPath of filePaths) {
+						if (!relPath.endsWith(".py")) continue;
+						const content = fileContents.get(relPath);
+						if (!content) continue;
+						const fileUid = `${repoUid}:${relPath}`;
+
+						const fileSymbols = allNodes
+							.filter(
+								(n) => n.fileUid === fileUid && n.kind === NodeKind.SYMBOL,
+							)
+							.map((n) => ({
+								stableKey: n.stableKey,
+								name: n.name,
+								qualifiedName: n.qualifiedName ?? n.name,
+								subtype: n.subtype,
+								lineStart: n.location?.lineStart ?? null,
+							}));
+
+						const items = detectPytestItems(content, relPath, fileSymbols);
+						for (const item of items) {
+							const kind = item.convention.startsWith("pytest_fixture")
+								? "pytest_fixture"
+								: "pytest_test";
+							pytestInferences.push({
+								inferenceUid: uuidv4(),
+								snapshotUid: snapshot.snapshotUid,
+								repoUid,
+								targetStableKey: item.targetStableKey,
+								kind,
+								valueJson: JSON.stringify({
+									convention: item.convention,
+									reason: item.reason,
+								}),
+								confidence: item.confidence,
+								basisJson: JSON.stringify({
+									convention: item.convention,
+									classifier_version: CURRENT_CLASSIFIER_VERSION,
+								}),
+								extractor: INDEXER_VERSION,
+								createdAt: detectedAt,
+							});
+						}
+					}
+					if (pytestInferences.length > 0) {
+						this.storage.deleteInferencesByKind(snapshot.snapshotUid, "pytest_test");
+						this.storage.deleteInferencesByKind(snapshot.snapshotUid, "pytest_fixture");
+						this.storage.insertInferences(pytestInferences);
 					}
 				}
 
@@ -819,6 +890,41 @@ export class RepoIndexer implements IndexerPort {
 						}
 					}
 
+					// 9c-iii. Extract CLI consumer facts from shell scripts.
+					{
+						const shellPaths = await this.findShellScripts(repo.rootPath);
+						for (const shellRelPath of shellPaths) {
+							try {
+								const shellContent = await readFile(
+									join(repo.rootPath, shellRelPath),
+									"utf-8",
+								);
+								const shellFacts = extractShellScriptConsumers(
+									shellContent,
+									shellRelPath,
+									repoUid,
+								);
+								for (const c of shellFacts) {
+									const strategy = getMatchStrategy(c.mechanism);
+									const matcherKey = strategy
+										? strategy.computeMatcherKey(c.address, c.metadata)
+										: c.operation;
+									consumerFacts.push({
+										...c,
+										factUid: uuidv4(),
+										snapshotUid: snapshot.snapshotUid,
+										repoUid,
+										matcherKey,
+										extractor: "shell-script-cli-extractor:0.1",
+										observedAt: boundaryObservedAt,
+									});
+								}
+							} catch {
+								// Skip unreadable shell scripts.
+							}
+						}
+					}
+
 					// Persist raw facts (source of truth).
 					if (providerFacts.length > 0) {
 						this.storage.insertBoundaryProviderFacts(providerFacts);
@@ -1011,6 +1117,38 @@ export class RepoIndexer implements IndexerPort {
 		}
 
 		return files;
+	}
+
+	/**
+	 * Find all shell script files (.sh, .bash) in the repo.
+	 * Returns repo-relative paths.
+	 */
+	private async findShellScripts(rootPath: string): Promise<string[]> {
+		const results: string[] = [];
+		const ig = await loadGitignore(rootPath);
+
+		const walk = async (dir: string) => {
+			let entries: import("node:fs").Dirent[];
+			try {
+				entries = await readdir(dir, { withFileTypes: true });
+			} catch {
+				return;
+			}
+			for (const entry of entries) {
+				if (entry.isDirectory()) {
+					if (ALWAYS_EXCLUDED.has(entry.name)) continue;
+					const relDir = relative(rootPath, join(dir, entry.name));
+					if (ig.ignores(relDir + "/")) continue;
+					await walk(join(dir, entry.name));
+				} else if (entry.name.endsWith(".sh") || entry.name.endsWith(".bash")) {
+					const relPath = relative(rootPath, join(dir, entry.name));
+					results.push(relPath);
+				}
+			}
+		};
+
+		await walk(rootPath);
+		return results;
 	}
 
 	/**
@@ -1222,6 +1360,7 @@ export class RepoIndexer implements IndexerPort {
 		trackedFiles: TrackedFile[],
 		repoUid: string,
 		snapshotUid: string,
+		importBindingsByFile?: Map<string, ImportBinding[]>,
 	): {
 		resolved: GraphEdge[];
 		stillUnresolved: Array<{
@@ -1269,6 +1408,14 @@ export class RepoIndexer implements IndexerPort {
 			}
 		}
 
+		// Build nodeUid → fileUid for import-binding-assisted call resolution.
+		const nodeUidToFileUid = new Map<string, string>();
+		if (importBindingsByFile) {
+			for (const node of allNodes) {
+				if (node.fileUid) nodeUidToFileUid.set(node.nodeUid, node.fileUid);
+			}
+		}
+
 		const resolved: GraphEdge[] = [];
 		const stillUnresolved: Array<{
 			edge: UnresolvedEdge;
@@ -1282,6 +1429,8 @@ export class RepoIndexer implements IndexerPort {
 				nodesByStableKey,
 				nodesByName,
 				fileResolution,
+				importBindingsByFile,
+				nodeUidToFileUid,
 			);
 
 			if (targetNodeUid) {
@@ -1315,6 +1464,8 @@ export class RepoIndexer implements IndexerPort {
 		nodesByStableKey: Map<string, GraphNode>,
 		nodesByName: Map<string, GraphNode[]>,
 		fileResolution: Map<string, string>,
+		importBindingsByFile: Map<string, ImportBinding[]> | undefined,
+		nodeUidToFileUid: Map<string, string>,
 	): string | null {
 		switch (edge.type) {
 			case EdgeType.IMPORTS:
@@ -1329,6 +1480,9 @@ export class RepoIndexer implements IndexerPort {
 					edge.sourceNodeUid,
 					nodesByStableKey,
 					nodesByName,
+					fileResolution,
+					importBindingsByFile,
+					nodeUidToFileUid,
 				);
 			case EdgeType.INSTANTIATES:
 				return this.resolveNamedTarget(edge.targetKey, nodesByName, edge.type);
@@ -1360,9 +1514,12 @@ export class RepoIndexer implements IndexerPort {
 
 	private resolveCallTarget(
 		targetKey: string,
-		_sourceNodeUid: string,
-		_nodesByStableKey: Map<string, GraphNode>,
+		sourceNodeUid: string,
+		nodesByStableKey: Map<string, GraphNode>,
 		nodesByName: Map<string, GraphNode[]>,
+		fileResolution: Map<string, string>,
+		importBindingsByFile: Map<string, ImportBinding[]> | undefined,
+		nodeUidToFileUid: Map<string, string>,
 	): string | null {
 		// For "this.foo.bar()" style calls, try the last segment as a method name
 		// e.g. "this.repo.findById" → look for a method named "findById"
@@ -1379,10 +1536,6 @@ export class RepoIndexer implements IndexerPort {
 					EdgeType.CALLS,
 				);
 				if (resolved) return resolved;
-				// If ambiguous (multiple methods with the same name across classes),
-				// we cannot disambiguate without type information — leave unresolved.
-				// Future: use the property name (parts[1], e.g. "repo") to narrow
-				// by matching the field type to a class that defines the method.
 			}
 
 			// For "obj.method()" where obj is not "this", try method name
@@ -1393,8 +1546,95 @@ export class RepoIndexer implements IndexerPort {
 			if (resolved) return resolved;
 		}
 
-		// Simple function call: "generateId" → look for a function/method with that name
-		return this.pickUnambiguous(nodesByName.get(targetKey), EdgeType.CALLS);
+		// Simple function call: "classifyMedia" → look for a function with that name.
+		const globalResult = this.pickUnambiguous(
+			nodesByName.get(targetKey),
+			EdgeType.CALLS,
+		);
+		if (globalResult) return globalResult;
+
+		// Import-binding-assisted resolution.
+		// If the bare identifier was imported in this file, use the import
+		// binding to narrow the search to the specific source module.
+		// This resolves calls like:
+		//   import { classifyMedia } from "./media";
+		//   classifyMedia(asset)
+		// without requiring a type checker.
+		if (importBindingsByFile && nodeUidToFileUid.size > 0) {
+			const sourceFileUid = nodeUidToFileUid.get(sourceNodeUid);
+			if (sourceFileUid) {
+				const bindings = importBindingsByFile.get(sourceFileUid);
+				if (bindings) {
+					const binding = bindings.find(
+						(b) => b.identifier === targetKey,
+					);
+					if (binding) {
+						// Resolve the binding's specifier to a file.
+						const resolvedFileKey = this.resolveImportSpecifierToFile(
+							binding.specifier,
+							sourceFileUid,
+							nodesByStableKey,
+							fileResolution,
+						);
+						if (resolvedFileKey) {
+							// Find the symbol in that specific file.
+							const candidates = nodesByName.get(targetKey);
+							if (candidates) {
+								const inFile = candidates.filter(
+									(n) => n.fileUid === resolvedFileKey,
+								);
+								const result = this.pickUnambiguous(inFile, EdgeType.CALLS);
+								if (result) return result;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Resolve an import specifier to a file UID.
+	 * Handles relative paths: "./media" → "repo:src/media.ts" file UID.
+	 */
+	/**
+	 * Resolve an import specifier to a file UID.
+	 * Handles relative paths: "./media" → "repo:src/media.ts" file UID.
+	 * Returns the fileUid string (format: "repoUid:path"), not a node UID.
+	 */
+	private resolveImportSpecifierToFile(
+		specifier: string,
+		sourceFileUid: string,
+		_nodesByStableKey: Map<string, GraphNode>,
+		fileResolution: Map<string, string>,
+	): string | null {
+		if (!specifier.startsWith(".")) return null;
+
+		// Extract the source file's directory from its file UID.
+		// fileUid format: "repoUid:path/to/file.ts"
+		const colonIdx = sourceFileUid.indexOf(":");
+		if (colonIdx < 0) return null;
+		const repoUid = sourceFileUid.slice(0, colonIdx);
+		const sourcePath = sourceFileUid.slice(colonIdx + 1);
+		const sourceDir = sourcePath.includes("/")
+			? sourcePath.slice(0, sourcePath.lastIndexOf("/"))
+			: "";
+
+		// Resolve the relative specifier against the source directory.
+		const resolvedPath = resolveRelativePath(sourceDir, specifier);
+		const targetFileKey = `${repoUid}:${resolvedPath}:FILE`;
+
+		// Try the file resolution map (handles extensionless → with extension).
+		const resolvedStableKey = fileResolution.get(targetFileKey);
+		if (resolvedStableKey) {
+			// Extract the fileUid from the stable key: "repoUid:path.ts:FILE" → "repoUid:path.ts"
+			const fileUid = resolvedStableKey.replace(/:FILE$/, "");
+			return fileUid;
+		}
+
+		return null;
 	}
 
 	private resolveNamedTarget(
@@ -1966,6 +2206,26 @@ function stripExtension(filePath: string): string {
 
 function toPosixPath(p: string): string {
 	return p.split("\\").join("/");
+}
+
+/**
+ * Resolve a relative import specifier against a source directory.
+ * "./media" from "src/lib" → "src/lib/media"
+ * "../utils" from "src/lib" → "src/utils"
+ */
+function resolveRelativePath(sourceDir: string, specifier: string): string {
+	const parts = sourceDir ? sourceDir.split("/") : [];
+	const specParts = specifier.split("/");
+
+	for (const seg of specParts) {
+		if (seg === ".") continue;
+		if (seg === "..") {
+			parts.pop();
+		} else {
+			parts.push(seg);
+		}
+	}
+	return parts.join("/");
 }
 
 /**

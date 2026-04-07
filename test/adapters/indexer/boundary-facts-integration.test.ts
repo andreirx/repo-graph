@@ -583,4 +583,41 @@ describe("boundary-facts indexer integration — Commander CLI commands", () => 
 			expect(l.matchBasis).toBe("heuristic");
 		}
 	});
+
+	it("extracts shell script consumer facts", async () => {
+		const result = await cliIndexer.indexRepo(CLI_REPO_UID);
+
+		const consumers = cliStorage.queryBoundaryConsumerFacts({
+			snapshotUid: result.snapshotUid,
+			mechanism: "cli_command",
+		});
+
+		// scripts/deploy.sh has: tsc, vitest run, mytool repo add staging, mytool build
+		// + package.json scripts: mytool repo add, mytool repo list, tsc, mytool build
+		const shellConsumers = consumers.filter((c) =>
+			c.sourceFile.endsWith(".sh"),
+		);
+		expect(shellConsumers.length).toBeGreaterThanOrEqual(3);
+
+		// Verify a shell-sourced command is present.
+		const vitestFromShell = shellConsumers.find((c) =>
+			c.address === "vitest run",
+		);
+		expect(vitestFromShell).toBeDefined();
+		expect(vitestFromShell!.sourceFile).toBe("scripts/deploy.sh");
+	});
+
+	it("shell script consumers are queryable alongside package.json consumers", async () => {
+		const result = await cliIndexer.indexRepo(CLI_REPO_UID);
+
+		const allConsumers = cliStorage.queryBoundaryConsumerFacts({
+			snapshotUid: result.snapshotUid,
+			mechanism: "cli_command",
+		});
+
+		const sources = new Set(allConsumers.map((c) => c.sourceFile));
+		// Should have consumers from both package.json and deploy.sh.
+		expect(sources.has("package.json")).toBe(true);
+		expect(sources.has("scripts/deploy.sh")).toBe(true);
+	});
 });

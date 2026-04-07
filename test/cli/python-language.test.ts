@@ -42,7 +42,7 @@ describe("Python language — CLI composition root", () => {
 		const json = r.json();
 		const snapshot = json.snapshot as Record<string, unknown>;
 		expect(snapshot).not.toBeNull();
-		expect(snapshot.files_total).toBe(2);
+		expect(snapshot.files_total).toBe(3);
 		expect((snapshot.nodes_total as number)).toBeGreaterThan(0);
 	});
 

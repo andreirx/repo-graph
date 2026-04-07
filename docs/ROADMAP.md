@@ -6,7 +6,7 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Current state (as of last commit)
 
-- **1155 tests** across 60 test files.
+- **1261 tests** across 66 test files.
 - **Languages:** TypeScript/JavaScript + Rust + Java. Three-extractor indexer.
 - **Enrichment:** TS (~81%), Rust (~85%), Java (operational but fragile). All three wired.
 - **Classifier version:** 6.
@@ -128,6 +128,37 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   params from different modules), aliased receivers (const api = express.Router()),
   binary-prefix matching requires 3+ tokens.
 
+### Python extractor (syntax-plus-dependency-context baseline)
+- tree-sitter-python extractor: functions, classes, methods, constructors,
+  variables, imports, calls, cyclomatic complexity, nesting depth.
+- Python dependency reader: pyproject.toml ([project].dependencies +
+  optional-dependencies) and requirements.txt. PEP 508 parsing.
+- Python runtime builtins: 60+ identifiers + 80+ stdlib modules.
+- Language-aware manifest isolation: .py → pyproject.toml/requirements.txt.
+- Classifier integration: stdlib imports classified as external via runtime
+  builtins, pip deps classified via specifier_matches_package_dependency,
+  relative imports (.utils) classified as internal.
+- Pytest detector: test_* functions, Test* classes, @pytest.fixture.
+  Emitted as pytest_test/pytest_fixture inferences. Suppresses test code
+  from dead-code reports.
+- Grammar build infrastructure: scripts/build-grammars.mjs for reproducible
+  WASM grammar builds from npm packages.
+- Validated on: mempalace (30 files, 396 nodes), glam-scrapers, unelte,
+  swupdate (18 Python files + shell scripts).
+- Known limitation: Python package names do not map 1:1 to import specifiers
+  (pyyaml → import yaml, beautifulsoup4 → import bs4). Exact name matches
+  work; mismatches remain unclassified.
+
+### CLI boundary expansion (shell scripts)
+- Shell script consumer extractor: .sh/.bash files → cli_command consumer facts.
+  Line-based conservative extraction with heredoc detection, continuation
+  line skipping, control flow skipping, pipe exclusion, env-prefix stripping.
+- Shared cli-invocation-parser support module: chain splitting, wrapper
+  unwrapping, builtin filtering, command parsing. Reused by both package.json
+  and shell script consumers.
+- Validated on: swupdate (66 shell consumers from CI/build scripts),
+  glamCRM (15 shell consumers from deploy/setup scripts).
+
 ### Compiler enrichment
 - `rgr enrich <repo>`: post-index receiver-type resolution
 - TypeScript: via `ts.Program` / `TypeChecker` (~81% enrichment rate)
@@ -142,65 +173,100 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Next (in priority order)
 
-### 1. Python extractor (syntax-first)
-Python is common in data/ML pipelines, build scripts, and analysis tools.
+### 1. Imported free-function call resolution (TS/JS)
+The single most leverageful correctness improvement. Resolves calls to
+imported free functions without requiring the TypeScript compiler.
 
-First slice — same proven delivery pattern as TS, Rust, Java:
-- tree-sitter-python grammar, Python extractor implementing ExtractorPort
-- pip/pyproject.toml/setup.py/requirements.txt dependency reader
-- Python builtins (builtins module, stdlib modules)
-- language-aware manifest isolation in mixed repos
+Problem: `import { classifyMedia } from "./media"; classifyMedia(x)` is
+currently an unresolved CALLS edge because the TS extractor emits the
+callee as "classifyMedia" (identifier) and the resolver cannot match it
+to the imported symbol. This produces false dead-symbol reports on real
+repos (amodx: functions like classifyMedia, matchesMediaFilter appear
+dead despite being imported and called).
 
-Do NOT drag into the first slice:
-- Python semantic enrichment (pyright/mypy) — that is a separate later step
-- Python framework detectors (Django, Flask, FastAPI) — follow after syntax base
-- Boundary provider/consumer extraction — follow after framework detectors
+This is NOT a type-enrichment gap. These are plain function calls, not
+receiver-typed `obj.method()`. The import bindings already record that
+"classifyMedia" was imported from "./media". The resolver can use that.
 
-### 2. Java semantic enrichment operationalization
-jdtls is operational but fragile. The remaining issues are not polish:
-- Cold-start/workspace reliability: jdtls Gradle import takes minutes on
-  large projects. The start→query→stop model amplifies this.
-- Protocol/client completeness: server→client request handling (workspace/
-  configuration, client/registerCapability) is implemented but edge cases
-  may remain on unfamiliar project structures.
-- Operational determinism on large repos: readiness detection (ServiceReady)
-  does not guarantee all project symbols are indexed. Results may vary
-  between runs on the same project.
+Implementation:
+- During edge resolution, when a CALLS edge targetKey is a bare identifier:
+  - Check if it matches an import binding in the same file
+  - If yes, resolve the binding's specifier to a FILE node, then look up
+    the exported symbol in that file
+  - If found, resolve the edge (FILE→SYMBOL stable key)
+- Scope: imported free functions, aliased imports, re-exported names
+- Not: namespace imports (ns.foo()), one-hop barrel re-exports (later)
 
-Viable improvements:
-- Pre-warmed jdtls daemon (persistent background server)
-- javac-based type resolution for simpler cases (no LSP overhead)
-- Persistent workspace directory with validated warm-start path
+Product value:
+- Directly reduces false dead-symbol reports
+- Improves call_resolution_rate without compiler enrichment
+- Makes `graph dead` and `graph callers` trustworthy for design-phase use
 
-### 3. Rust framework detectors
-Actix-web, Axum, Rocket, Warp route handlers. Same pattern as Express
-detection: post-classification pass, receiver-provenance gated. Also
-enables Rust HTTP boundary provider extraction for the boundary model.
+### 2. Dead-code confidence stratification
+Stop presenting every zero-caller symbol as equally dead. Add evidence
+quality to dead-symbol reports.
 
-### 4. CLI boundary expansion
-The `cli_command` mechanism has a first closed loop (Commander providers +
-package.json script consumers + binary-prefix matching). Remaining
-consumer adapters to broaden coverage:
-- Shell scripts (`.sh`, `.bash`)
+Labels:
+- `dead_high_confidence` — zero callers, zero imports, no unresolved pressure
+- `dead_low_confidence` — zero resolved callers, but imported in files with
+  high unresolved CALLS mass
+- `imported_but_call_unresolved` — symbol is imported elsewhere but the
+  call resolution did not connect
+
+This makes `graph dead` honest about what it knows vs what it can't prove.
+
+### 3. CLI boundary expansion (remaining)
+Shell script consumer extraction is shipped. Remaining adapters:
 - Makefiles (`make` target → tool invocation)
 - CI configs (`.github/workflows/*.yml`, `.gitlab-ci.yml`)
-- Dockerfiles (`ENTRYPOINT`, `CMD`)
-- systemd unit files (`ExecStart=`)
+- Dockerfiles (`ENTRYPOINT`, `CMD`) — deferred further
 
 Also:
 - Provider adapters for other CLI frameworks (yargs, clap, argparse)
 - Cross-file Commander composition (commands registered via function params)
 - Binary-identity verification for prefix matching (package.json bin field)
+- Barrel-cycle normalization: separate export-only/barrel cycles from
+  logic cycles in cycle reporting
 
-### 5. C/C++ extractor
-Highest business value (Linux BSP, embedded applications). Highest
-implementation cost. Requires compile_commands.json as boundary.
-Do not start until Rust, Java, and Python have validated the
-multi-language architecture. Needs: Clang-backed symbol extraction,
-translation-unit-aware resolution, header/source ownership policy,
-macro/preprocessor caveat model.
+### 4. C/C++ extractor
+Strategic target: Linux, drivers, RTOS, HAL/OSAL-style repos.
+Highest business value for the target domain. Highest implementation cost.
 
-### 6. Storage/state boundary model
+Anchor around:
+- `compile_commands.json` as the compilation boundary
+- Clang/clangd/libclang-backed extraction
+- Translation-unit-aware symbol ownership
+- Header/source ownership policy
+- Macro/preprocessor caveat model
+
+Target repos: swupdate (already indexed for Python/shell), Linux BSP
+components, RTOS application code.
+
+Framework/system detectors to follow:
+- Linux kernel module patterns
+- Driver registration patterns (module_init, platform_driver)
+- RTOS task/thread registration
+- IOCTL/shared-memory boundary extraction
+
+### 5. Trust overlay on structural queries
+Surface evidence quality on query output. Examples:
+- "0 callers, low confidence: module has 4042 unresolved CALLS"
+- "dead symbol candidate, low confidence: imported in 2 files but call
+  target unresolved"
+Turns raw graph limitations into explicit epistemic status.
+
+### 6. Rust framework detectors
+Actix-web, Axum, Rocket, Warp route handlers. Same pattern as Express
+detection: post-classification pass, receiver-provenance gated. Also
+enables Rust HTTP boundary provider extraction for the boundary model.
+
+### 7. Java semantic enrichment operationalization
+jdtls is operational but fragile. The remaining issues are not polish:
+- Cold-start/workspace reliability
+- Protocol/client completeness
+- Operational determinism on large repos
+
+### 8. Storage/state boundary model
 A component interacts with persisted or semi-persisted state through
 a storage mechanism. This is a STATE boundary, distinct from the
 interaction boundaries (HTTP, CLI) already modeled. Agents can grep
