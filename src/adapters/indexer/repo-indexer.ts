@@ -55,6 +55,7 @@ import type {
 	PersistedUnresolvedEdge,
 	StoragePort,
 } from "../../core/ports/storage.js";
+import { detectSpringBeans } from "../extractors/java/spring-bean-detector.js";
 import { extractSpringRoutes } from "../extractors/java/spring-route-extractor.js";
 import { extractExpressRoutes } from "../extractors/typescript/express-route-extractor.js";
 import { FileLocalStringResolver } from "../extractors/typescript/file-local-string-resolver.js";
@@ -557,7 +558,65 @@ export class RepoIndexer implements IndexerPort {
 				}
 			}
 
-			// 9c. Boundary fact extraction (PROTOTYPE).
+			// 9d. Spring container-managed bean detection.
+				// Scans Java files for Spring stereotype annotations and @Bean
+				// factory methods. Emits inferences (kind: "spring_container_managed")
+				// that suppress false dead-code reports for container-wired classes.
+				{
+					const springInferences: InferenceRow[] = [];
+					const detectedAt = new Date().toISOString();
+					for (const relPath of filePaths) {
+						if (!relPath.endsWith(".java")) continue;
+						const content = fileContents.get(relPath);
+						if (!content) continue;
+						const fileUid = `${repoUid}:${relPath}`;
+
+						// Gather symbols from this file with subtype info.
+						const fileSymbols = allNodes
+							.filter(
+								(n) => n.fileUid === fileUid && n.kind === NodeKind.SYMBOL,
+							)
+							.map((n) => ({
+								stableKey: n.stableKey,
+								name: n.name,
+								qualifiedName: n.qualifiedName ?? n.name,
+								subtype: n.subtype,
+								lineStart: n.location?.lineStart ?? null,
+							}));
+
+						const beans = detectSpringBeans(content, relPath, fileSymbols);
+						for (const bean of beans) {
+							springInferences.push({
+								inferenceUid: uuidv4(),
+								snapshotUid: snapshot.snapshotUid,
+								repoUid,
+								targetStableKey: bean.targetStableKey,
+								kind: "spring_container_managed",
+								valueJson: JSON.stringify({
+									annotation: bean.annotation,
+									convention: bean.convention,
+									reason: bean.reason,
+								}),
+								confidence: bean.confidence,
+								basisJson: JSON.stringify({
+									convention: bean.convention,
+									classifier_version: CURRENT_CLASSIFIER_VERSION,
+								}),
+								extractor: INDEXER_VERSION,
+								createdAt: detectedAt,
+							});
+						}
+					}
+					if (springInferences.length > 0) {
+						this.storage.deleteInferencesByKind(
+							snapshot.snapshotUid,
+							"spring_container_managed",
+						);
+						this.storage.insertInferences(springInferences);
+					}
+				}
+
+				// 9c. Boundary fact extraction (PROTOTYPE).
 				// Runs boundary-specific extractors on applicable files,
 				// persists raw facts (source of truth), then materializes
 				// intra-repo derived links (convenience artifact).

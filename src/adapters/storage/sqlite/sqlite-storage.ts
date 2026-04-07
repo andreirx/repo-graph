@@ -1338,6 +1338,11 @@ export class SqliteStorage implements StoragePort {
 		// Entrypoint declarations apply if:
 		//   - repo-wide (snapshot_uid IS NULL), OR
 		//   - scoped to this specific snapshot
+		//
+		// Framework-liveness inferences also suppress dead-code:
+		//   - "framework_entrypoint" (Lambda handlers)
+		//   - "spring_container_managed" (Spring beans, @Configuration, @Bean)
+		params.push(input.snapshotUid);
 		const sql = `
 			SELECT
 				n.node_uid, n.name, n.qualified_name, n.kind, n.subtype,
@@ -1362,6 +1367,11 @@ export class SqliteStorage implements StoragePort {
 				  AND d.kind = 'entrypoint'
 				  AND d.is_active = 1
 				  AND (d.snapshot_uid IS NULL OR d.snapshot_uid = ?)
+			  )
+			  AND n.stable_key NOT IN (
+				SELECT i.target_stable_key FROM inferences i
+				WHERE i.snapshot_uid = ?
+				  AND i.kind IN ('framework_entrypoint', 'spring_container_managed')
 			  )
 			  ${minLinesFilter}
 			ORDER BY n.name ASC
