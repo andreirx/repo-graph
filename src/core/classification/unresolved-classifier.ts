@@ -211,6 +211,12 @@ function classifyUnresolvedImport(
 		}
 	}
 
+	// Python relative imports: targetKey starts with "." (e.g., ".utils", "..core").
+	// These are always internal — same semantics as TS relative imports.
+	if (!isRelative && specifier.startsWith(".")) {
+		isRelative = true;
+	}
+
 	// If relative import path → internal (same as before for TS).
 	if (isRelative) {
 		return internal(UnresolvedEdgeBasisCode.RELATIVE_IMPORT_TARGET_UNRESOLVED);

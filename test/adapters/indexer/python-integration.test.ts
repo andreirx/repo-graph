@@ -166,4 +166,55 @@ describe("Python indexer integration", () => {
 		expect(processMetric).toBeDefined();
 		expect(processMetric!.cyclomaticComplexity).toBeGreaterThanOrEqual(2);
 	});
+
+	it("classifies pip dependency import as external_library_candidate", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const unresolved = storage.queryUnresolvedEdges({
+			snapshotUid: result.snapshotUid,
+		});
+
+		// main.py imports "requests" which is declared in pyproject.toml.
+		// The classifier should match it as specifier_matches_package_dependency.
+		const requestsEdge = unresolved.find(
+			(e) =>
+				e.targetKey === "requests" &&
+				e.classification === "external_library_candidate" &&
+				e.basisCode === "specifier_matches_package_dependency",
+		);
+		expect(requestsEdge).toBeDefined();
+	});
+
+	it("classifies stdlib import as external via runtime builtins", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const unresolved = storage.queryUnresolvedEdges({
+			snapshotUid: result.snapshotUid,
+		});
+
+		// main.py imports "os" which is in Python stdlib builtins.
+		const osEdge = unresolved.find(
+			(e) =>
+				e.targetKey === "os" &&
+				e.classification === "external_library_candidate" &&
+				e.basisCode === "specifier_matches_runtime_module",
+		);
+		expect(osEdge).toBeDefined();
+	});
+
+	it("classifies relative import as internal", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const unresolved = storage.queryUnresolvedEdges({
+			snapshotUid: result.snapshotUid,
+		});
+
+		// main.py has "from .utils import helper" → specifier ".utils" is relative.
+		const relativeEdge = unresolved.find(
+			(e) =>
+				e.targetKey === ".utils" &&
+				e.classification === "internal_candidate",
+		);
+		expect(relativeEdge).toBeDefined();
+	});
 });

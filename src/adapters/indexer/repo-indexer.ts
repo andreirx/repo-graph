@@ -64,6 +64,7 @@ import { FileLocalStringResolver } from "../extractors/typescript/file-local-str
 import { extractHttpClientRequests } from "../extractors/typescript/http-client-extractor.js";
 import { readCargoDependencies } from "../config/cargo-reader.js";
 import { readGradleDependencies } from "../config/gradle-reader.js";
+import { readPythonDependencies } from "../config/python-deps-reader.js";
 import { readTsconfigAliases } from "../config/tsconfig-reader.js";
 import type { AnnotationsPort } from "../../core/ports/annotations.js";
 import {
@@ -1464,12 +1465,14 @@ export class RepoIndexer implements IndexerPort {
 	): Promise<PackageDependencySet> {
 		const emptyDeps: PackageDependencySet = { names: Object.freeze([]) };
 		// Language-aware manifest selection:
-		// .rs → Cargo.toml, .java → build.gradle, .ts/.js → package.json.
+		// .rs → Cargo.toml, .java → build.gradle, .py → pyproject.toml/requirements.txt,
+		// .ts/.js → package.json.
 		const isRustFile = fileRelPath.endsWith(".rs");
 		const isJavaFile = fileRelPath.endsWith(".java");
+		const isPythonFile = fileRelPath.endsWith(".py");
 		// Separate cache keys per language to prevent cross-contamination
 		// when multiple manifest types exist at the same directory level.
-		const cachePrefix = isRustFile ? "rs:" : isJavaFile ? "java:" : "js:";
+		const cachePrefix = isRustFile ? "rs:" : isJavaFile ? "java:" : isPythonFile ? "py:" : "js:";
 		// Work with the file's directory (repo-relative, forward slashes).
 		let dir = fileRelPath.includes("/")
 			? fileRelPath.slice(0, fileRelPath.lastIndexOf("/"))
@@ -1505,6 +1508,18 @@ export class RepoIndexer implements IndexerPort {
 				if (gradleDeps !== null && gradleDeps.names.length > 0) {
 					for (const d of uncachedDirs) cache.set(`${cachePrefix}${d}`, gradleDeps);
 					return gradleDeps;
+				}
+			} else if (isPythonFile) {
+				// pyproject.toml / requirements.txt for Python projects.
+				// A present manifest with zero deps is a valid result —
+				// stop walking. This prevents inheriting unrelated parent
+				// dependencies in monorepos where a leaf package
+				// intentionally has no third-party deps.
+				const pythonDeps = await readPythonDependencies(absDir);
+				if (pythonDeps !== null) {
+					const resolved = pythonDeps.names.length > 0 ? pythonDeps : emptyDeps;
+					for (const d of uncachedDirs) cache.set(`${cachePrefix}${d}`, resolved);
+					return resolved;
 				}
 			} else {
 				const pkgPath = join(absDir, "package.json");
