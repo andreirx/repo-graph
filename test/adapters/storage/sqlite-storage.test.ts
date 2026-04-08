@@ -2056,11 +2056,27 @@ describe("schema migration from v1 baseline", () => {
 		).map((t) => t.name);
 		expect(tables).toContain("measurements");
 
+		// Verify staging tables from migration 009 exist
+		const stagingTables = rawDb2
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type='table' AND name IN ('staged_edges', 'file_signals') ORDER BY name",
+			)
+			.all() as Array<{ name: string }>;
+		expect(stagingTables.map((t) => t.name)).toEqual(["file_signals", "staged_edges"]);
+
+		// Verify staging table indexes exist
+		const stagingIndexes = rawDb2
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_staged_%' OR name LIKE 'idx_file_signals_%' ORDER BY name",
+			)
+			.all() as Array<{ name: string }>;
+		expect(stagingIndexes.length).toBeGreaterThanOrEqual(2);
+
 		// Verify all migrations recorded
 		const migrations = rawDb2
 			.prepare("SELECT version FROM schema_migrations ORDER BY version")
 			.all() as Array<{ version: number }>;
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
 		rawDb2.close();
 		upgradeProvider.close();
