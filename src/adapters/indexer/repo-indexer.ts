@@ -420,7 +420,25 @@ export class RepoIndexer implements IndexerPort {
 					continue;
 				}
 
+				// Persist nodes immediately — no accumulation needed for
+				// the staged architecture. But we still push to allNodes
+				// for the resolver index (MODULE nodes + edge resolution).
+				// TODO: in the next step, replace allNodes with a lightweight
+				// index (stableKey→nodeUid, name→nodeUid[]) and stop accumulating.
+				this.storage.insertNodes(result.nodes);
 				allNodes.push(...result.nodes);
+
+				// Persist raw edges to staging table immediately.
+				if (result.edges.length > 0) {
+					this.storage.insertStagedEdges(result.edges.map((e) => ({
+						...e,
+						lineStart: e.location?.lineStart ?? null,
+						colStart: e.location?.colStart ?? null,
+						lineEnd: e.location?.lineEnd ?? null,
+						colEnd: e.location?.colEnd ?? null,
+						sourceFileUid: fileUid,
+					})));
+				}
 				allUnresolvedEdges.push(...result.edges);
 				for (const [key, m] of result.metrics) {
 					allMetrics.set(key, {
@@ -486,6 +504,18 @@ export class RepoIndexer implements IndexerPort {
 					tsconfigAliases,
 				});
 
+				// Persist import bindings to staging so the classifier can
+				// read them back during the resolution phase without keeping
+				// all bindings in memory. sameFileSymbols can be rebuilt
+				// from persisted nodes by file_uid.
+				if (result.importBindings.length > 0) {
+					this.storage.insertFileSignals([{
+						snapshotUid: snapshot.snapshotUid,
+						fileUid,
+						importBindingsJson: JSON.stringify(result.importBindings),
+					}]);
+				}
+
 				extractIdx++;
 			}
 
@@ -503,9 +533,12 @@ export class RepoIndexer implements IndexerPort {
 			);
 			allNodes.push(...moduleNodes);
 
-			// 6. Persist nodes
-			emit({ phase: "persisting", current: 0, total: allNodes.length });
-			this.storage.insertNodes(allNodes);
+			// 6. Persist MODULE nodes only — per-file nodes were
+			// already persisted during extraction (Phase 1).
+			emit({ phase: "persisting", current: 0, total: moduleNodes.length });
+			if (moduleNodes.length > 0) {
+				this.storage.insertNodes(moduleNodes);
+			}
 
 			// 7. Resolve edges
 			emit({
@@ -1242,16 +1275,20 @@ export class RepoIndexer implements IndexerPort {
 				JSON.stringify(extractionDiagnostics),
 			);
 
-			return {
-				snapshotUid: snapshot.snapshotUid,
-				filesTotal: trackedFiles.length,
-				nodesTotal: allNodes.length,
-				edgesTotal: allEdges.length,
-				edgesUnresolved: unresolvedCount,
-				unresolvedBreakdown,
-				durationMs: Date.now() - startTime,
-				orphanedDeclarations,
-			};
+			// Clean up staging tables — edges are now in their final tables.
+				this.storage.deleteStagedEdges(snapshot.snapshotUid);
+				// Keep file_signals — useful for re-classification without re-extraction.
+
+				return {
+					snapshotUid: snapshot.snapshotUid,
+					filesTotal: trackedFiles.length,
+					nodesTotal: allNodes.length,
+					edgesTotal: allEdges.length,
+					edgesUnresolved: unresolvedCount,
+					unresolvedBreakdown,
+					durationMs: Date.now() - startTime,
+					orphanedDeclarations,
+				};
 		} catch (err) {
 			// Mark snapshot as failed
 			this.storage.updateSnapshotStatus({

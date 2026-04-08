@@ -36,8 +36,10 @@ import type {
 	PersistedBoundaryConsumerFact,
 	PersistedBoundaryLink,
 	PersistedBoundaryProviderFact,
+	FileSignalRow,
 	PersistedUnresolvedEdge,
 	QueryBoundaryFactsInput,
+	StagedEdge,
 	QueryBoundaryLinksInput,
 	QueryUnresolvedEdgesInput,
 	ResolveChangedFilesToModulesInput,
@@ -693,6 +695,98 @@ export class SqliteStorage implements StoragePort {
 			count: number;
 		}>;
 		return rows.map((r) => ({ key: r.key, count: r.count }));
+	}
+
+	// ── Staging (transient indexing artifacts) ────────────────────────
+
+	insertStagedEdges(edges: StagedEdge[]): void {
+		const stmt = this.db.prepare(
+			`INSERT INTO staged_edges
+			 (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key,
+			  type, resolution, extractor,
+			  line_start, col_start, line_end, col_end, metadata_json, source_file_uid)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const e of edges) {
+				stmt.run(
+					e.edgeUid, e.snapshotUid, e.repoUid, e.sourceNodeUid, e.targetKey,
+					e.type, e.resolution, e.extractor,
+					e.lineStart, e.colStart, e.lineEnd, e.colEnd,
+					e.metadataJson, e.sourceFileUid,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	queryStagedEdges(snapshotUid: string): StagedEdge[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM staged_edges WHERE snapshot_uid = ?",
+		).all(snapshotUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			edgeUid: r.edge_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			sourceNodeUid: r.source_node_uid as string,
+			targetKey: r.target_key as string,
+			type: r.type as string,
+			resolution: r.resolution as string,
+			extractor: r.extractor as string,
+			lineStart: (r.line_start as number) ?? null,
+			colStart: (r.col_start as number) ?? null,
+			lineEnd: (r.line_end as number) ?? null,
+			colEnd: (r.col_end as number) ?? null,
+			metadataJson: (r.metadata_json as string) ?? null,
+			sourceFileUid: (r.source_file_uid as string) ?? null,
+		}));
+	}
+
+	deleteStagedEdges(snapshotUid: string): void {
+		this.db.prepare("DELETE FROM staged_edges WHERE snapshot_uid = ?")
+			.run(snapshotUid);
+	}
+
+	insertFileSignals(signals: FileSignalRow[]): void {
+		const stmt = this.db.prepare(
+			`INSERT OR REPLACE INTO file_signals
+			 (snapshot_uid, file_uid, import_bindings_json)
+			 VALUES (?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const s of signals) {
+				stmt.run(s.snapshotUid, s.fileUid, s.importBindingsJson);
+			}
+		});
+		insertAll();
+	}
+
+	queryFileSignals(snapshotUid: string, fileUid: string): FileSignalRow | null {
+		const row = this.db.prepare(
+			"SELECT * FROM file_signals WHERE snapshot_uid = ? AND file_uid = ?",
+		).get(snapshotUid, fileUid) as Record<string, unknown> | undefined;
+		if (!row) return null;
+		return {
+			snapshotUid: row.snapshot_uid as string,
+			fileUid: row.file_uid as string,
+			importBindingsJson: (row.import_bindings_json as string) ?? null,
+		};
+	}
+
+	queryAllFileSignals(snapshotUid: string): FileSignalRow[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM file_signals WHERE snapshot_uid = ?",
+		).all(snapshotUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			snapshotUid: r.snapshot_uid as string,
+			fileUid: r.file_uid as string,
+			importBindingsJson: (r.import_bindings_json as string) ?? null,
+		}));
+	}
+
+	deleteFileSignals(snapshotUid: string): void {
+		this.db.prepare("DELETE FROM file_signals WHERE snapshot_uid = ?")
+			.run(snapshotUid);
 	}
 
 	// ── Boundary Facts (source of truth) ──────────────────────────────

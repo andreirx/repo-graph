@@ -143,6 +143,33 @@ export interface StoragePort {
 		input: CountUnresolvedEdgesInput,
 	): UnresolvedEdgeCountRow[];
 
+	// ── Staging (transient indexing artifacts) ───────────────────────────
+	//
+	// Used by the two-phase indexer pipeline. Extraction persists raw
+	// edges and file signals immediately. Resolution reads them back
+	// in batches. Staging rows are cleaned up after finalization.
+
+	/** Persist raw extracted edges to staging table (batch). */
+	insertStagedEdges(edges: StagedEdge[]): void;
+
+	/** Read all staged edges for a snapshot. */
+	queryStagedEdges(snapshotUid: string): StagedEdge[];
+
+	/** Delete all staged edges for a snapshot (cleanup after resolution). */
+	deleteStagedEdges(snapshotUid: string): void;
+
+	/** Persist per-file import bindings to staging table (batch). */
+	insertFileSignals(signals: FileSignalRow[]): void;
+
+	/** Read import bindings for a specific file in a snapshot. */
+	queryFileSignals(snapshotUid: string, fileUid: string): FileSignalRow | null;
+
+	/** Read all file signals for a snapshot. */
+	queryAllFileSignals(snapshotUid: string): FileSignalRow[];
+
+	/** Delete all file signals for a snapshot (optional cleanup). */
+	deleteFileSignals(snapshotUid: string): void;
+
 	// ── Boundary Facts (source of truth) ─────────────────────────────────
 	//
 	// Raw boundary interaction observations. These are the durable
@@ -752,4 +779,41 @@ export interface BoundaryLinkRow {
 	consumerConfidence: number;
 	/** Link-level metadata_json (matcher notes). */
 	metadataJson: string | null;
+}
+
+// ── Staging types ───────────────────────────────────────────────────
+
+/**
+ * A staged unresolved edge — raw extractor output persisted before
+ * resolution. Same shape as UnresolvedEdge but with an additional
+ * sourceFileUid for per-TU resolution context.
+ */
+export interface StagedEdge {
+	edgeUid: string;
+	snapshotUid: string;
+	repoUid: string;
+	sourceNodeUid: string;
+	targetKey: string;
+	type: string;
+	resolution: string;
+	extractor: string;
+	lineStart: number | null;
+	colStart: number | null;
+	lineEnd: number | null;
+	colEnd: number | null;
+	metadataJson: string | null;
+	/** File UID of the source file this edge was extracted from. */
+	sourceFileUid: string | null;
+}
+
+/**
+ * Per-file import binding signals — persisted during extraction so
+ * the classifier can read them back during the resolution phase
+ * without keeping all bindings in memory.
+ */
+export interface FileSignalRow {
+	snapshotUid: string;
+	fileUid: string;
+	/** JSON-serialized ImportBinding[]. */
+	importBindingsJson: string | null;
 }
