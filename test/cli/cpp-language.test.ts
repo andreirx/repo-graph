@@ -38,8 +38,8 @@ describe("C/C++ language — CLI composition root", () => {
 		const json = r.json();
 		const snapshot = json.snapshot as Record<string, unknown>;
 		expect(snapshot).not.toBeNull();
-		// main.c, util.h, engine.cpp
-		expect(snapshot.files_total).toBe(3);
+		// main.c, include/util.h, engine.cpp, handler.c
+		expect(snapshot.files_total).toBe(4);
 		expect((snapshot.nodes_total as number)).toBeGreaterThan(0);
 	});
 

@@ -55,8 +55,8 @@ afterEach(() => {
 describe("C/C++ indexer integration", () => {
 	it("indexes .c, .h, and .cpp files", async () => {
 		const result = await indexer.indexRepo(REPO_UID);
-		// main.c, util.h, engine.cpp
-		expect(result.filesTotal).toBe(3);
+		// main.c, include/util.h, engine.cpp, handler.c
+		expect(result.filesTotal).toBe(4);
 		expect(result.nodesTotal).toBeGreaterThan(0);
 	});
 
@@ -70,7 +70,7 @@ describe("C/C++ indexer integration", () => {
 
 		const headerFile = storage.getNodeByStableKey(
 			result.snapshotUid,
-			`${REPO_UID}:util.h:FILE`,
+			`${REPO_UID}:include/util.h:FILE`,
 		);
 		expect(headerFile).not.toBeNull();
 
@@ -165,17 +165,49 @@ describe("C/C++ indexer integration", () => {
 		expect(run!.qualifiedName).toBe("mylib::Engine::run");
 	});
 
-	it("classifies quoted #include as internal (relative)", async () => {
+	it("resolves #include via compile_commands.json per-TU include paths", async () => {
 		const result = await indexer.indexRepo(REPO_UID);
-		const unresolved = storage.queryUnresolvedEdges({
-			snapshotUid: result.snapshotUid,
-		});
-		// #include "util.h" from both main.c and engine.cpp should be
-		// classified as internal (relative import).
-		const utilInclude = unresolved.find(
-			(e) => e.targetKey === "util.h" &&
-				e.classification === "internal_candidate",
+		const resolvedImportCount = storage.countEdgesByType(
+			result.snapshotUid,
+			EdgeType.IMPORTS,
 		);
-		expect(utilInclude).toBeDefined();
+		expect(resolvedImportCount).toBeGreaterThanOrEqual(2);
+	});
+
+	it("persists linux_system_managed inferences for constructor functions", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+		const inferences = storage.queryInferences(
+			result.snapshotUid,
+			"linux_system_managed",
+		);
+		// handler.c has __attribute__((constructor)) on register_my_handler.
+		expect(inferences.length).toBeGreaterThanOrEqual(1);
+		const ctorInf = inferences.find((i) => {
+			const val = JSON.parse(i.valueJson);
+			return val.convention === "gcc_constructor";
+		});
+		expect(ctorInf).toBeDefined();
+	});
+
+	it("suppresses constructor-registered function from findDeadNodes", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+		const dead = storage.findDeadNodes({
+			snapshotUid: result.snapshotUid,
+			kind: NodeKind.SYMBOL,
+		});
+		// register_my_handler should NOT be dead — it has gcc_constructor inference.
+		const ctorDead = dead.find((d) => d.symbol === "register_my_handler");
+		expect(ctorDead).toBeUndefined();
+	});
+
+	it("does NOT suppress non-framework C functions from findDeadNodes", async () => {
+		const result = await indexer.indexRepo(REPO_UID);
+		const dead = storage.findDeadNodes({
+			snapshotUid: result.snapshotUid,
+			kind: NodeKind.SYMBOL,
+		});
+		// unused_func has no framework registration — should be dead.
+		const unusedDead = dead.find((d) => d.symbol === "unused_func");
+		expect(unusedDead).toBeDefined();
 	});
 });

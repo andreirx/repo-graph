@@ -77,9 +77,39 @@ See `docs/architecture/annotations-contract.txt` for the normative provisional-a
 - Tests use fixture codebases in `test/fixtures/` with known-good expected graphs.
 - No emojis in code or output.
 
-## Eat Your Own Dogfood For Codebase Intelligence (rgr)
+## IMPORTANT: Use rgr For Every Structural Change
 
-Use `rgr` (Repo-Graph) for structural analysis. If rgr is available on PATH:
+**MANDATORY.** Before modifying any file in this codebase, use `rgr` to understand what you are touching. After completing work, re-index and verify.
+
+This is not optional. Every session that skipped rgr produced avoidable mistakes: missed callers, broken stable-key contracts, wrong file counts, undetected regressions. Every session that used rgr caught issues earlier and produced cleaner code.
+
+**Before making changes:**
+- `rgr graph callers repo-graph <symbol>` — who depends on what you're changing?
+- `rgr graph callees repo-graph <symbol>` — what does it call?
+- `rgr graph imports repo-graph <file>` — what does this file import?
+- `rgr graph stats repo-graph` — module stability/abstraction before touching it
+- `rgr trust repo-graph` — current extraction quality baseline
+
+**After making changes:**
+- `rgr repo refresh repo-graph` — re-index to pick up new code
+- `rgr boundary summary repo-graph` — verify boundary facts if boundary code changed
+- `rgr graph dead repo-graph --kind SYMBOL` — check for new dead symbols
+
+**In every response, include a brief rgr usage report:**
+- What queries were run
+- What was learned from them
+- What the alternative would have been (grep, reading files, guessing)
+- Whether rgr saved time or caught something grep would have missed
+
+Known rgr limitations on this codebase:
+- Type-only imports (`import type { X }`) are invisible to the import graph
+- `obj.method()` calls with unresolved receiver types show as unresolved
+- Import-binding-assisted resolution helps but aliased imports are not yet resolved
+- Framework-liveness inferences suppress some dead-code false positives but not all
+
+If rgr is not on PATH, register it: `ln -sf "$(pwd)/dist/cli/index.js" /usr/local/bin/rgr`
+
+Commands reference:
 
 ```bash
 # Repository management

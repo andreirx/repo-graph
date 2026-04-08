@@ -1,0 +1,12 @@
+[
+  {
+    "directory": ".",
+    "file": "main.c",
+    "arguments": ["gcc", "-Iinclude", "-c", "main.c", "-o", "main.o"]
+  },
+  {
+    "directory": ".",
+    "file": "engine.cpp",
+    "arguments": ["g++", "-Iinclude", "-c", "engine.cpp", "-o", "engine.o"]
+  }
+]

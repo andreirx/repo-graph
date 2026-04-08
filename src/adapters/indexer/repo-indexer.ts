@@ -5,7 +5,6 @@ import { join, relative } from "node:path";
 import ignore, { type Ignore } from "ignore";
 import { v4 as uuidv4 } from "uuid";
 import type {
-	FileVersion,
 	GraphEdge,
 	GraphNode,
 	TrackedFile,
@@ -56,6 +55,7 @@ import type {
 	PersistedUnresolvedEdge,
 	StoragePort,
 } from "../../core/ports/storage.js";
+import { detectLinuxSystemPatterns } from "../extractors/cpp/linux-system-detector.js";
 import { detectSpringBeans } from "../extractors/java/spring-bean-detector.js";
 import { detectPytestItems } from "../extractors/python/pytest-detector.js";
 import { extractSpringRoutes, initSpringRouteParser } from "../extractors/java/spring-route-extractor.js";
@@ -67,6 +67,7 @@ import { extractExpressRoutes } from "../extractors/typescript/express-route-ext
 import { FileLocalStringResolver } from "../extractors/typescript/file-local-string-resolver.js";
 import { extractHttpClientRequests } from "../extractors/typescript/http-client-extractor.js";
 import { readCargoDependencies } from "../config/cargo-reader.js";
+import { readCompileCommands, type CompilationDatabase } from "../config/compile-commands-reader.js";
 import { readGradleDependencies } from "../config/gradle-reader.js";
 import { readPythonDependencies } from "../config/python-deps-reader.js";
 import { readTsconfigAliases } from "../config/tsconfig-reader.js";
@@ -252,6 +253,11 @@ export class RepoIndexer implements IndexerPort {
 			// must not fail because classifier inputs are unavailable.
 			const snapshotSignals = this.buildSnapshotSignals();
 
+			// 1b. Read compile_commands.json for C/C++ include path resolution.
+			// Optional: if absent, C/C++ #include resolution falls back to
+			// direct filename matching only.
+			const compileDb = await readCompileCommands(repo.rootPath);
+
 			// 2. Scan file tree
 			emit({ phase: "scanning", current: 0, total: 0 });
 			const filePaths = await this.scanFiles(
@@ -265,26 +271,96 @@ export class RepoIndexer implements IndexerPort {
 				total: filePaths.length,
 			});
 
-			// 3. Register files and compute hashes
+			// 3+4. Register files, extract, and discard source text per-file.
+			// Source text is NOT accumulated in memory. Each file is read,
+			// extracted, and the source text is released before the next
+			// file is processed. This bounds memory growth to the extraction
+			// output (nodes + edges + signals), not the source text corpus.
 			const trackedFiles: TrackedFile[] = [];
-			const fileVersions: FileVersion[] = [];
-			const fileContents = new Map<string, string>();
-
+			const allNodes: GraphNode[] = [];
+			const allUnresolvedEdges: UnresolvedEdge[] = [];
+			const allMetrics = new Map<
+				string,
+				{ cc: number; params: number; nesting: number }
+			>();
+			const fileSignalsCache = new Map<string, FileSignals>();
+			const nodeUidToFileUid = new Map<string, string>();
+			const packageDepsCache = new Map<string, PackageDependencySet>();
+			const tsconfigAliasesCache = new Map<string, TsconfigAliases>();
 			let skippedOversized = 0;
+			let filesReadFailed = 0;
+			let extractIdx = 0;
 
 			for (const relPath of filePaths) {
-				const absPath = join(repo.rootPath, relPath);
-				const content = await readFile(absPath, "utf-8");
+				emit({
+					phase: "extracting",
+					current: extractIdx,
+					total: filePaths.length,
+					file: relPath,
+				});
 
-				// Large-file guard: skip files above a hard size threshold.
-				// This is a PROTOTYPE operational containment measure, not
-				// a semantic correctness feature. Generated register headers,
-				// auto-generated code, and concatenated files can be hundreds
-				// of thousands of lines. Parsing them consumes excessive
-				// memory in the WASM tree-sitter runtime and delays indexing.
-				// Skipped files are recorded in extraction diagnostics.
+				const absPath = join(repo.rootPath, relPath);
+				let content: string;
+				try {
+					content = await readFile(absPath, "utf-8");
+				} catch {
+					// Register the file as FAILED so it appears in the snapshot
+					// and diagnostics. Silent drops create partial indexes that
+					// look trustworthy while missing source files.
+					const failedFileUid = `${repoUid}:${relPath}`;
+					trackedFiles.push({
+						fileUid: failedFileUid,
+						repoUid,
+						path: relPath,
+						language: detectLanguage(relPath),
+						isTest: isTestFile(relPath),
+						isGenerated: false,
+						isExcluded: false,
+					});
+					this.storage.upsertFiles([trackedFiles[trackedFiles.length - 1]]);
+					this.storage.upsertFileVersions([{
+						snapshotUid: snapshot.snapshotUid,
+						fileUid: failedFileUid,
+						contentHash: "",
+						astHash: null,
+						extractor: (this.getExtractorForFile(relPath)?.name ?? "unknown"),
+						parseStatus: ParseStatus.FAILED,
+						sizeBytes: 0,
+						lineCount: 0,
+						indexedAt: new Date().toISOString(),
+					}]);
+					filesReadFailed++;
+					extractIdx++;
+					continue;
+				}
+
+				// Large-file guard: register as SKIPPED so the snapshot
+				// knows the file exists but was not extracted.
 				if (content.length > MAX_FILE_SIZE_BYTES) {
+					const skippedFileUid = `${repoUid}:${relPath}`;
+					trackedFiles.push({
+						fileUid: skippedFileUid,
+						repoUid,
+						path: relPath,
+						language: detectLanguage(relPath),
+						isTest: isTestFile(relPath),
+						isGenerated: false,
+						isExcluded: true,
+					});
+					this.storage.upsertFiles([trackedFiles[trackedFiles.length - 1]]);
+					this.storage.upsertFileVersions([{
+						snapshotUid: snapshot.snapshotUid,
+						fileUid: skippedFileUid,
+						contentHash: hashContent(content),
+						astHash: null,
+						extractor: "skipped:oversized",
+						parseStatus: ParseStatus.SKIPPED,
+						sizeBytes: Buffer.byteLength(content, "utf-8"),
+						lineCount: content.split("\n").length,
+						indexedAt: new Date().toISOString(),
+					}]);
 					skippedOversized++;
+					extractIdx++;
 					continue;
 				}
 
@@ -301,7 +377,8 @@ export class RepoIndexer implements IndexerPort {
 					isExcluded: false,
 				});
 
-				fileVersions.push({
+				this.storage.upsertFiles([trackedFiles[trackedFiles.length - 1]]);
+				this.storage.upsertFileVersions([{
 					snapshotUid: snapshot.snapshotUid,
 					fileUid,
 					contentHash,
@@ -311,47 +388,7 @@ export class RepoIndexer implements IndexerPort {
 					sizeBytes: Buffer.byteLength(content, "utf-8"),
 					lineCount: content.split("\n").length,
 					indexedAt: new Date().toISOString(),
-				});
-
-				fileContents.set(relPath, content);
-			}
-
-			this.storage.upsertFiles(trackedFiles);
-			this.storage.upsertFileVersions(fileVersions);
-
-			// 4. Extract each file
-			const allNodes: GraphNode[] = [];
-			const allUnresolvedEdges: UnresolvedEdge[] = [];
-			const allMetrics = new Map<
-				string,
-				{ cc: number; params: number; nesting: number }
-			>();
-			// Classifier supporting data built during extraction:
-			//   - fileSignalsCache: per-file importBindings + sameFileSymbols
-			//   - nodeUidToFileUid: reverse lookup for source files from
-			//     unresolved-edge source node UIDs (avoids DB round-trip
-			//     during classification).
-			const fileSignalsCache = new Map<string, FileSignals>();
-			const nodeUidToFileUid = new Map<string, string>();
-			// Per-directory package.json deps cache. Shared across files
-			// in the same directory subtree to avoid redundant upward
-			// walks and file reads.
-			const packageDepsCache = new Map<string, PackageDependencySet>();
-			const tsconfigAliasesCache = new Map<string, TsconfigAliases>();
-			let extractIdx = 0;
-
-			for (const relPath of filePaths) {
-				emit({
-					phase: "extracting",
-					current: extractIdx,
-					total: filePaths.length,
-					file: relPath,
-				});
-
-				const content = fileContents.get(relPath);
-				if (!content) continue;
-
-				const fileUid = `${repoUid}:${relPath}`;
+				}]);
 				const extractor = this.getExtractorForFile(relPath);
 				if (!extractor) {
 					extractIdx++;
@@ -367,13 +404,18 @@ export class RepoIndexer implements IndexerPort {
 						snapshot.snapshotUid,
 					);
 				} catch {
-					// Mark file as failed but continue indexing
-					this.storage.upsertFileVersions([
-						{
-							...fileVersions[extractIdx],
-							parseStatus: ParseStatus.FAILED,
-						},
-					]);
+					// Mark file as failed — update the already-persisted version.
+					this.storage.upsertFileVersions([{
+						snapshotUid: snapshot.snapshotUid,
+						fileUid,
+						contentHash,
+						astHash: null,
+						extractor: (this.getExtractorForFile(relPath)?.name ?? "unknown"),
+						parseStatus: ParseStatus.FAILED,
+						sizeBytes: Buffer.byteLength(content, "utf-8"),
+						lineCount: content.split("\n").length,
+						indexedAt: new Date().toISOString(),
+					}]);
 					extractIdx++;
 					continue;
 				}
@@ -490,6 +532,7 @@ export class RepoIndexer implements IndexerPort {
 						repoUid,
 						snapshot.snapshotUid,
 						importBindingsByFile,
+						compileDb,
 					);
 			const unresolvedCount = stillUnresolved.length;
 
@@ -623,11 +666,13 @@ export class RepoIndexer implements IndexerPort {
 					const detectedAt = new Date().toISOString();
 					for (const relPath of filePaths) {
 						if (!relPath.endsWith(".java")) continue;
-						const content = fileContents.get(relPath);
-						if (!content) continue;
+						let content: string;
+						try {
+							content = await readFile(join(repo.rootPath, relPath), "utf-8");
+						} catch { continue; }
+						if (content.length > MAX_FILE_SIZE_BYTES) continue;
 						const fileUid = `${repoUid}:${relPath}`;
 
-						// Gather symbols from this file with subtype info.
 						const fileSymbols = allNodes
 							.filter(
 								(n) => n.fileUid === fileUid && n.kind === NodeKind.SYMBOL,
@@ -681,8 +726,11 @@ export class RepoIndexer implements IndexerPort {
 					const detectedAt = new Date().toISOString();
 					for (const relPath of filePaths) {
 						if (!relPath.endsWith(".py")) continue;
-						const content = fileContents.get(relPath);
-						if (!content) continue;
+						let content: string;
+						try {
+							content = await readFile(join(repo.rootPath, relPath), "utf-8");
+						} catch { continue; }
+						if (content.length > MAX_FILE_SIZE_BYTES) continue;
 						const fileUid = `${repoUid}:${relPath}`;
 
 						const fileSymbols = allNodes
@@ -729,6 +777,64 @@ export class RepoIndexer implements IndexerPort {
 					}
 				}
 
+			// 9f. Linux/system framework detection (C/C++).
+				// Scans C/C++ files for kernel module, GCC constructor, and
+				// handler registration patterns. Emits inferences that suppress
+				// false dead-code reports for framework-managed symbols.
+				{
+					const systemInferences: InferenceRow[] = [];
+					const detectedAt = new Date().toISOString();
+					for (const relPath of filePaths) {
+						const ext = relPath.slice(relPath.lastIndexOf("."));
+						if (![".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hxx"].includes(ext)) continue;
+						let content: string;
+						try {
+							content = await readFile(join(repo.rootPath, relPath), "utf-8");
+						} catch { continue; }
+						if (content.length > MAX_FILE_SIZE_BYTES) continue;
+						const fileUid = `${repoUid}:${relPath}`;
+
+						const fileSymbols = allNodes
+							.filter((n) => n.fileUid === fileUid && n.kind === NodeKind.SYMBOL)
+							.map((n) => ({
+								stableKey: n.stableKey,
+								name: n.name,
+								qualifiedName: n.qualifiedName ?? n.name,
+								subtype: n.subtype,
+								lineStart: n.location?.lineStart ?? null,
+							}));
+
+						const entries = detectLinuxSystemPatterns(content, relPath, fileSymbols);
+						for (const entry of entries) {
+							systemInferences.push({
+								inferenceUid: uuidv4(),
+								snapshotUid: snapshot.snapshotUid,
+								repoUid,
+								targetStableKey: entry.targetStableKey,
+								kind: "linux_system_managed",
+								valueJson: JSON.stringify({
+									convention: entry.convention,
+									reason: entry.reason,
+								}),
+								confidence: entry.confidence,
+								basisJson: JSON.stringify({
+									convention: entry.convention,
+									classifier_version: CURRENT_CLASSIFIER_VERSION,
+								}),
+								extractor: INDEXER_VERSION,
+								createdAt: detectedAt,
+							});
+						}
+					}
+					if (systemInferences.length > 0) {
+						this.storage.deleteInferencesByKind(
+							snapshot.snapshotUid,
+							"linux_system_managed",
+						);
+						this.storage.insertInferences(systemInferences);
+					}
+				}
+
 				// 9c. Boundary fact extraction (PROTOTYPE).
 				// Runs boundary-specific extractors on applicable files,
 				// persists raw facts (source of truth), then materializes
@@ -744,8 +850,20 @@ export class RepoIndexer implements IndexerPort {
 					const boundaryObservedAt = new Date().toISOString();
 
 					for (const relPath of filePaths) {
-						const content = fileContents.get(relPath);
-						if (!content) continue;
+						// Re-read source for boundary extraction.
+						// fileContents is no longer in memory (released per-file
+						// during extraction). Boundary extractors are lightweight
+						// regex scanners, so the re-read cost is acceptable.
+						let content: string;
+						try {
+							content = await readFile(
+								join(repo.rootPath, relPath),
+								"utf-8",
+							);
+						} catch {
+							continue;
+						}
+						if (content.length > MAX_FILE_SIZE_BYTES) continue;
 						const fileUid = `${repoUid}:${relPath}`;
 
 						// Gather symbols from this file for caller/handler attribution.
@@ -1117,6 +1235,7 @@ export class RepoIndexer implements IndexerPort {
 				unresolved_breakdown: unresolvedBreakdown,
 				annotation_collisions_dropped: annotationCollisionsDropped,
 				files_skipped_oversized: skippedOversized,
+				files_read_failed: filesReadFailed,
 			};
 			this.storage.updateSnapshotExtractionDiagnostics(
 				snapshot.snapshotUid,
@@ -1125,7 +1244,7 @@ export class RepoIndexer implements IndexerPort {
 
 			return {
 				snapshotUid: snapshot.snapshotUid,
-				filesTotal: filePaths.length,
+				filesTotal: trackedFiles.length,
 				nodesTotal: allNodes.length,
 				edgesTotal: allEdges.length,
 				edgesUnresolved: unresolvedCount,
@@ -1468,6 +1587,7 @@ export class RepoIndexer implements IndexerPort {
 		repoUid: string,
 		snapshotUid: string,
 		importBindingsByFile?: Map<string, ImportBinding[]>,
+		compileDb?: CompilationDatabase | null,
 	): {
 		resolved: GraphEdge[];
 		stillUnresolved: Array<{
@@ -1515,6 +1635,48 @@ export class RepoIndexer implements IndexerPort {
 			}
 		}
 
+		// C/C++ include path resolution: build a per-source-file include
+		// resolution map from compile_commands.json. Each source file has
+		// its own -I flags — different translation units may have different
+		// include paths. The resolver uses the source file's include paths
+		// to resolve #include directives, not a global flattened set.
+		//
+		// Map: sourceFileUid → Map<bareHeaderName, resolvedStableKey>
+		const perFileIncludeResolution = new Map<string, Map<string, string>>();
+		if (compileDb) {
+			// Build a lookup: headerPath → stableKey for all header files.
+			const headerStableKeys = new Map<string, string>();
+			for (const file of trackedFiles) {
+				if (file.path.endsWith(".h") || file.path.endsWith(".hpp") ||
+					file.path.endsWith(".hxx")) {
+					headerStableKeys.set(file.path, `${repoUid}:${file.path}:FILE`);
+				}
+			}
+
+			for (const [sourceRelPath, entry] of compileDb.entries) {
+				const sourceFileUid = `${repoUid}:${sourceRelPath}`;
+				const resolution = new Map<string, string>();
+
+				for (const incPath of entry.includePaths) {
+					const prefix = incPath === "" ? "" : incPath + "/";
+					for (const [headerPath, headerKey] of headerStableKeys) {
+						if (prefix === "" || headerPath.startsWith(prefix)) {
+							const bareName = prefix === ""
+								? headerPath
+								: headerPath.slice(prefix.length);
+							if (!resolution.has(bareName)) {
+								resolution.set(bareName, headerKey);
+							}
+						}
+					}
+				}
+
+				if (resolution.size > 0) {
+					perFileIncludeResolution.set(sourceFileUid, resolution);
+				}
+			}
+		}
+
 		// Build nodeUid → fileUid for import-binding-assisted call resolution.
 		const nodeUidToFileUid = new Map<string, string>();
 		if (importBindingsByFile) {
@@ -1538,6 +1700,7 @@ export class RepoIndexer implements IndexerPort {
 				fileResolution,
 				importBindingsByFile,
 				nodeUidToFileUid,
+				perFileIncludeResolution,
 			);
 
 			if (targetNodeUid) {
@@ -1573,14 +1736,24 @@ export class RepoIndexer implements IndexerPort {
 		fileResolution: Map<string, string>,
 		importBindingsByFile: Map<string, ImportBinding[]> | undefined,
 		nodeUidToFileUid: Map<string, string>,
+		perFileIncludeResolution: Map<string, Map<string, string>>,
 	): string | null {
 		switch (edge.type) {
-			case EdgeType.IMPORTS:
+			case EdgeType.IMPORTS: {
+				// For C/C++ includes, use the source file's per-TU include
+				// paths from compile_commands.json.
+				const sourceFileUid = nodeUidToFileUid.get(edge.sourceNodeUid);
+				const tuIncludes = sourceFileUid
+					? perFileIncludeResolution.get(sourceFileUid)
+					: undefined;
 				return this.resolveImportTarget(
 					edge.targetKey,
 					nodesByStableKey,
 					fileResolution,
+					edge.repoUid,
+					tuIncludes,
 				);
+			}
 			case EdgeType.CALLS:
 				return this.resolveCallTarget(
 					edge.targetKey,
@@ -1604,6 +1777,8 @@ export class RepoIndexer implements IndexerPort {
 		targetKey: string,
 		nodesByStableKey: Map<string, GraphNode>,
 		fileResolution: Map<string, string>,
+		repoUid?: string,
+		tuIncludeResolution?: Map<string, string>,
 	): string | null {
 		// Direct match (already has extension in stable key)
 		const directNode = nodesByStableKey.get(targetKey);
@@ -1614,6 +1789,30 @@ export class RepoIndexer implements IndexerPort {
 		if (resolvedKey) {
 			const node = nodesByStableKey.get(resolvedKey);
 			if (node) return node.nodeUid;
+		}
+
+		// C/C++ #include: targetKey is a bare header name (e.g., "util.h").
+		// First try per-TU include resolution from compile_commands.json.
+		// This respects the source file's actual -I flags, not a global set.
+		if (tuIncludeResolution) {
+			const resolvedHeader = tuIncludeResolution.get(targetKey);
+			if (resolvedHeader) {
+				const node = nodesByStableKey.get(resolvedHeader);
+				if (node) return node.nodeUid;
+			}
+		}
+
+		// Fallback: try constructing a stable key with repoUid prefix.
+		// This handles headers at the repo root without compile_commands.json.
+		if (repoUid && !targetKey.includes(":")) {
+			const constructedKey = `${repoUid}:${targetKey}:FILE`;
+			const constructed = fileResolution.get(constructedKey);
+			if (constructed) {
+				const node = nodesByStableKey.get(constructed);
+				if (node) return node.nodeUid;
+			}
+			const directConstructed = nodesByStableKey.get(constructedKey);
+			if (directConstructed) return directConstructed.nodeUid;
 		}
 
 		return null;
