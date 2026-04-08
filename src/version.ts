@@ -25,6 +25,8 @@ export const EXTRACTOR_VERSIONS = {
 	rust: "rust-core:0.1.0",
 	java: "java-core:0.1.0",
 	python: "python-core:0.1.0",
+	c: "cpp-core:0.1.0",
+	cpp: "cpp-core:0.1.0",
 } as const;
 
 /** Indexer build version. */

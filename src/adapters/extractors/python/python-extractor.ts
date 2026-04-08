@@ -68,6 +68,8 @@ interface ExtractionContext {
 	edges: UnresolvedEdge[];
 	metrics: Map<string, ExtractedMetrics>;
 	importBindings: ImportBinding[];
+	/** Track emitted variable stable keys to skip re-assignments. */
+	seenVariableKeys: Set<string>;
 }
 
 // ── Extractor class ─────────────────────────────────────────────────
@@ -117,6 +119,7 @@ export class PythonExtractor implements ExtractorPort {
 			edges: [],
 			metrics: new Map(),
 			importBindings: [],
+			seenVariableKeys: new Set(),
 		};
 
 		// FILE node.
@@ -475,11 +478,17 @@ export class PythonExtractor implements ExtractorPort {
 				? `${parentClassNode.name}.${name}`
 				: name;
 
+			const stableKey = `${ctx.repoUid}:${ctx.filePath}#${qualifiedName}:SYMBOL:VARIABLE`;
+			// Skip re-assignments to the same variable name in the same file.
+			// Python allows `result = expr1; result = expr2` — only emit the first.
+			if (ctx.seenVariableKeys.has(stableKey)) continue;
+			ctx.seenVariableKeys.add(stableKey);
+
 			ctx.nodes.push({
 				nodeUid: uuidv4(),
 				snapshotUid: ctx.snapshotUid,
 				repoUid: ctx.repoUid,
-				stableKey: `${ctx.repoUid}:${ctx.filePath}#${qualifiedName}:SYMBOL:VARIABLE`,
+				stableKey,
 				kind: NodeKind.SYMBOL,
 				subtype: NodeSubtype.VARIABLE,
 				name,

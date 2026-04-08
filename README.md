@@ -89,6 +89,8 @@ Implemented adapters:
 - TypeScript / JavaScript
 - Rust
 - Java
+- Python
+- C / C++
 
 ### TypeScript / JavaScript adapter
 
@@ -122,6 +124,33 @@ Implemented:
 - Spring MVC route provider extraction (AST-backed, boundary facts)
 - Spring container-managed bean detection (`@Component`, `@Service`, `@Repository`, `@Configuration`, `@RestController`, `@Bean`)
 - jdtls (Eclipse JDT Language Server) side-channel for receiver-type enrichment (operational, fragile)
+
+### Python adapter
+
+Implemented:
+- `tree-sitter-python` extractor
+- `pyproject.toml` / `requirements.txt` dependency reader
+- Python builtins and stdlib module classification
+- language-aware manifest isolation in mixed repos
+- Pytest test/fixture detection (dead-code suppression)
+
+### C / C++ adapter
+
+Implemented:
+- `tree-sitter-c` + `tree-sitter-cpp` dual-grammar extractor
+- Functions, structs, classes, typedefs, enums, namespaces, methods, constructors
+- `#include` directives (system vs local classification)
+- Preprocessor guard recursion (`#ifndef`/`#ifdef` blocks)
+- STL qualified calls (`std::sort`, `std::make_unique`)
+- C/C++ runtime builtins (C stdlib, POSIX headers, C++ STL)
+- Cyclomatic complexity, parameter count, nesting depth
+- Large-file guard (files > 1MB skipped)
+
+Not yet implemented:
+- `compile_commands.json` integration
+- Header search path resolution
+- Clangd/libclang semantic enrichment
+- Macro expansion, template instantiation
 
 ## Architecture
 
@@ -195,6 +224,13 @@ Optional but required for semantic enrichment:
 - TypeScript enrichment: `typescript` package is already a dependency
 - Rust enrichment: `rust-analyzer` must be on `PATH`
 - Java enrichment: `jdtls` (Eclipse JDT Language Server) must be on `PATH`
+
+To rebuild WASM grammars (required after grammar package updates):
+
+```bash
+pnpm rebuild tree-sitter-cli
+pnpm run build:grammars
+```
 
 Rust analyzer installation example:
 
@@ -348,6 +384,7 @@ Current behavior:
 - TypeScript / JavaScript files are enriched through the TypeScript compiler
 - Rust files are enriched through rust-analyzer
 - Java files are enriched through jdtls (Eclipse JDT Language Server)
+- Python and C/C++ enrichment not yet implemented (planned: pyright, clangd)
 - enrichment writes receiver-type metadata onto unresolved edges
 - failed enrichment is recorded explicitly
 - the original unresolved edge remains for auditability
@@ -404,10 +441,17 @@ The indexer is language-aware.
 
 Current behavior in mixed-language repositories:
 
-- files are routed to extractors by extension (`.ts`/`.tsx`/`.js`/`.jsx` → TypeScript, `.rs` → Rust, `.java` → Java)
+- files are routed to extractors by extension:
+  - `.ts`/`.tsx`/`.js`/`.jsx` → TypeScript
+  - `.rs` → Rust
+  - `.java` → Java
+  - `.py` → Python
+  - `.c`/`.h` → C, `.cpp`/`.hpp`/`.cc`/`.cxx` → C++
 - TypeScript files resolve dependency context from nearest `package.json`
 - Rust files resolve dependency context from nearest `Cargo.toml`
 - Java files resolve dependency context from nearest `build.gradle`
+- Python files resolve dependency context from nearest `pyproject.toml` or `requirements.txt`
+- C/C++ files: quoted `#include` classified as internal, angle-bracket as system
 - runtime builtins from all registered extractors are merged into classifier signals
 - boundary fact extraction runs on all applicable files regardless of language
 

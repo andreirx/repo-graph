@@ -36,6 +36,8 @@ const GRAMMARS = [
 	{ pkg: "tree-sitter-rust", out: "tree-sitter-rust.wasm" },
 	{ pkg: "tree-sitter-java", out: "tree-sitter-java.wasm" },
 	{ pkg: "tree-sitter-python", out: "tree-sitter-python.wasm" },
+	{ pkg: "tree-sitter-c", out: "tree-sitter-c.wasm" },
+	{ pkg: "tree-sitter-cpp", out: "tree-sitter-cpp.wasm" },
 ];
 
 // Find the tree-sitter CLI binary.

@@ -6,8 +6,8 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Current state (as of last commit)
 
-- **1261 tests** across 66 test files.
-- **Languages:** TypeScript/JavaScript + Rust + Java. Three-extractor indexer.
+- **1341 tests** across 71 test files.
+- **Languages:** TypeScript/JavaScript + Rust + Java + Python + C/C++. Five-extractor indexer.
 - **Enrichment:** TS (~81%), Rust (~85%), Java (operational but fragile). All three wired.
 - **Classifier version:** 6.
   - v4: language-aware imports
@@ -19,25 +19,24 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - **Spring framework detectors:** container-managed bean liveness via `@Component`, `@Service`,
   `@Repository`, `@Configuration`, `@RestController`, `@Controller`, `@Bean`. Suppresses 93
   false dead-code reports on glamCRM. Also fixes Lambda entrypoint suppression in `findDeadNodes`.
-- **6-repo smoke set:** amodx, fraktag, glamCRM, zap-engine, zap-squad, repo-graph.
-  - 2 TS-only, 2 TS+Rust, 1 TS+Java, 1 TS-only (self-index).
-  - Benchmark pack: langchain4j (2641 Java files), spring-petclinic (47 Java files)
-- **Non-unknown classification rates (before enrichment):**
-  - TS-only repos: 53-69%
-  - TS+Rust repos: 39-46% (lower due to large Rust unknown-CALLS mass)
-- **Enrichment:** TS ~81%, Rust ~85% receiver-type resolution via `rgr enrich`.
-- **Call-graph reliability:** all repos LOW (thresholds 50%/85%, fraktag closest at 47%).
-- **Framework detection:** Express routes (50 on fraktag), Lambda handlers (93 on amodx, 20 on glamCRM).
-  Spring bean liveness (93 suppressions on glamCRM).
+- **Imported free-function call resolution:** TS/JS import-binding-assisted call
+  resolution. repo-graph call_resolution_rate improved from ~15% to 33%.
+- **Repo set:** amodx, fraktag, glamCRM, repo-graph, mempalace, glam-scrapers,
+  unelte, swupdate, buildroot, C++11 Deep Dives.
+  - TS-only, TS+Rust, TS+Java, Python, C/C++, mixed multi-language.
+  - C/C++ validated on swupdate (208 files, 3422 nodes) and buildroot (645 files, 5249 nodes).
+  - Linux kernel registered but exceeds current indexer memory model (63k C files).
+- **Framework detection:** Express routes, Lambda handlers, Spring beans, pytest tests/fixtures.
+  `findDeadNodes` consults all framework-liveness inferences.
+- **CLI boundary model:** HTTP + cli_command mechanisms. Commander providers, package.json
+  script consumers, shell script consumers, Makefile recipe consumers. Binary-prefix matching.
 - **Key architectural decisions made:**
-  - Nearest-owning per-file context for deps, tsconfig, AND Cargo enrichment.
+  - Nearest-owning per-file context for deps, tsconfig, Cargo, Gradle, pyproject.toml.
   - Enrichment is a separate `rgr enrich` pass, not inline with indexing.
   - Edge promotion (D2c) is opt-in via `--promote`, 8-gate safety filter.
-  - Blast-radius is query-time derived, not persisted.
-  - Framework-boundary detection is a post-classification pass.
-  - Rust crate-internal module classification uses a distinct heuristic basis code.
   - Boundary facts stored separately from core edges table (derived links discardable).
-  - `findDeadNodes` now consults framework-liveness inferences (Lambda + Spring).
+  - Large-file guard: files > 1MB skipped during indexing (operational containment).
+  - Imported free-function calls resolved via import bindings (no compiler needed).
 
 ## Shipped
 
@@ -159,6 +158,35 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - Validated on: swupdate (66 shell consumers from CI/build scripts),
   glamCRM (15 shell consumers from deploy/setup scripts).
 
+### Makefile CLI consumer extraction
+- Makefile recipe-line consumer extractor: tab-detection, @/-/+ prefix stripping,
+  $(Q) quiet-prefix handling, $(VAR) expansion skipping, quoted-$(VAR) filtering,
+  Make directive filtering. Reuses shared cli-invocation-parser.
+- Validated on: buildroot (3410 Makefiles → 1551 CLI consumers), swupdate.
+
+### Imported free-function call resolution (TS/JS)
+- Import-binding-assisted call resolution for bare-identifier CALLS edges.
+- When global name lookup is ambiguous (multiple same-name functions across files),
+  import bindings disambiguate by narrowing to the imported source file.
+- repo-graph call_resolution_rate: ~15% → 33%. Resolved calls: ~300 → 1004.
+- No compiler enrichment needed — uses existing import bindings from extractors.
+- Known limitation: aliased imports (`import { foo as bar }`) not yet resolved.
+
+### C/C++ extractor (syntax-only first slice)
+- tree-sitter-c + tree-sitter-cpp grammars (WASM, built via build-grammars.mjs).
+- Extracts: functions, structs, classes, typedefs, enums, namespaces, methods,
+  constructors, #include directives, CALLS edges, cyclomatic complexity.
+- Dual grammar: .c/.h use C grammar, .cpp/.hpp/.cc/.cxx use C++ grammar.
+- Preprocessor guard recursion: symbols inside #ifndef/#ifdef blocks are extracted.
+- Stable-key dedup: typedef+struct and #ifdef branch collisions handled.
+- Quoted #include classified as internal (rawPath metadata with "./" prefix).
+- STL qualified calls (std::sort, std::make_unique) extracted and pinned.
+- Large-file guard: files > 1MB skipped (operational containment for generated headers).
+- Validated on: swupdate (208 files, 3422 nodes), buildroot (645 files, 5249 nodes),
+  C++11 Deep Dives (165 files, 829 nodes).
+- Linux kernel: 63k C files exceeds current all-in-memory indexer architecture.
+  Requires batch-persistence redesign (see Next).
+
 ### Compiler enrichment
 - `rgr enrich <repo>`: post-index receiver-type resolution
 - TypeScript: via `ts.Program` / `TypeChecker` (~81% enrichment rate)
@@ -173,36 +201,36 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Next (in priority order)
 
-### 1. Imported free-function call resolution (TS/JS)
-The single most leverageful correctness improvement. Resolves calls to
-imported free functions without requiring the TypeScript compiler.
+### 1. Large-repo indexing architecture
+The current indexer reads all files into memory, accumulates all nodes
+and edges, then persists. This works for repos up to ~1000 files but
+fails on Linux-scale repos (63k C files).
 
-Problem: `import { classifyMedia } from "./media"; classifyMedia(x)` is
-currently an unresolved CALLS edge because the TS extractor emits the
-callee as "classifyMedia" (identifier) and the resolver cannot match it
-to the imported symbol. This produces false dead-symbol reports on real
-repos (amodx: functions like classifyMedia, matchesMediaFilter appear
-dead despite being imported and called).
+Required changes:
+- Remove `fileContents` all-in-memory map
+- Persist nodes/edges in batches during extraction, not after
+- Bounded in-memory resolution windows (chunked resolution)
+- Optional skip policy for generated/preprocessed files (current 1MB
+  guard is containment, not the fix)
 
-This is NOT a type-enrichment gap. These are plain function calls, not
-receiver-typed `obj.method()`. The import bindings already record that
-"classifyMedia" was imported from "./media". The resolver can use that.
+This is the primary architectural blocker for Linux, large BSP repos,
+and monorepos with thousands of source files.
 
-Implementation:
-- During edge resolution, when a CALLS edge targetKey is a bare identifier:
-  - Check if it matches an import binding in the same file
-  - If yes, resolve the binding's specifier to a FILE node, then look up
-    the exported symbol in that file
-  - If found, resolve the edge (FILE→SYMBOL stable key)
-- Scope: imported free functions, aliased imports, re-exported names
-- Not: namespace imports (ns.foo()), one-hop barrel re-exports (later)
+### 2. C/C++ maturation
+The syntax-only first slice is shipped. Next maturation steps:
+- `compile_commands.json` integration for include path resolution
+- Header/source ownership: which .h belongs to which translation unit
+- Clangd/libclang enrichment for receiver-type resolution (same
+  architectural pattern as TS TypeChecker / Rust rust-analyzer)
+- #include resolution against actual file paths (not just specifiers)
 
-Product value:
-- Directly reduces false dead-symbol reports
-- Improves call_resolution_rate without compiler enrichment
-- Makes `graph dead` and `graph callers` trustworthy for design-phase use
+System/framework detectors:
+- Linux kernel module patterns (module_init, platform_driver)
+- Driver registration patterns
+- RTOS task/thread registration (FreeRTOS, Zephyr)
+- IOCTL/shared-memory boundary extraction
 
-### 2. Dead-code confidence stratification
+### 3. Dead-code confidence stratification
 Stop presenting every zero-caller symbol as equally dead. Add evidence
 quality to dead-symbol reports.
 
@@ -213,11 +241,8 @@ Labels:
 - `imported_but_call_unresolved` — symbol is imported elsewhere but the
   call resolution did not connect
 
-This makes `graph dead` honest about what it knows vs what it can't prove.
-
-### 3. CLI boundary expansion (remaining)
-Shell script consumer extraction is shipped. Remaining adapters:
-- Makefiles (`make` target → tool invocation)
+### 4. CLI boundary expansion (remaining)
+Shell and Makefile consumer extraction shipped. Remaining adapters:
 - CI configs (`.github/workflows/*.yml`, `.gitlab-ci.yml`)
 - Dockerfiles (`ENTRYPOINT`, `CMD`) — deferred further
 
@@ -227,26 +252,6 @@ Also:
 - Binary-identity verification for prefix matching (package.json bin field)
 - Barrel-cycle normalization: separate export-only/barrel cycles from
   logic cycles in cycle reporting
-
-### 4. C/C++ extractor
-Strategic target: Linux, drivers, RTOS, HAL/OSAL-style repos.
-Highest business value for the target domain. Highest implementation cost.
-
-Anchor around:
-- `compile_commands.json` as the compilation boundary
-- Clang/clangd/libclang-backed extraction
-- Translation-unit-aware symbol ownership
-- Header/source ownership policy
-- Macro/preprocessor caveat model
-
-Target repos: swupdate (already indexed for Python/shell), Linux BSP
-components, RTOS application code.
-
-Framework/system detectors to follow:
-- Linux kernel module patterns
-- Driver registration patterns (module_init, platform_driver)
-- RTOS task/thread registration
-- IOCTL/shared-memory boundary extraction
 
 ### 5. Trust overlay on structural queries
 Surface evidence quality on query output. Examples:

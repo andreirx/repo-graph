@@ -1,6 +1,6 @@
 # Repo-Graph (rgr)
 
-Deterministic code graph tool for analyzing codebases. Multi-language (TypeScript, Rust, Java; Python and C/C++ planned). CLI over SQLite. Produces structured JSON for AI agent consumption.
+Deterministic code graph tool for analyzing codebases. Multi-language (TypeScript, Rust, Java, Python, C/C++). CLI over SQLite. Produces structured JSON for AI agent consumption.
 
 ## What this is
 
@@ -17,9 +17,9 @@ src/core/model/          Domain entities (Node, Edge, Snapshot, Declaration). Ze
 src/core/ports/          Interfaces (StoragePort, ExtractorPort, IndexerPort). Implemented by adapters.
 src/core/classification/ Unresolved-edge classifier, blast-radius derivation, framework-boundary detection, boundary matcher (HTTP + CLI).
 src/core/trust/          Trust reporting: reliability rules, service orchestrator.
-src/adapters/extractors/ Tree-sitter extractors: typescript/ (TS/JS), rust/ (Rust).
+src/adapters/extractors/ Tree-sitter extractors: typescript/, rust/, java/, python/, cpp/.
 src/adapters/enrichment/ Post-index semantic enrichment: TS TypeChecker, Rust rust-analyzer LSP.
-src/adapters/config/     Config readers: tsconfig-reader, cargo-reader.
+src/adapters/config/     Config readers: tsconfig-reader, cargo-reader, gradle-reader, python-deps-reader.
 src/adapters/storage/    SQLite storage (migrations 001-008).
 src/adapters/indexer/    Multi-language indexer: file routing, edge resolution, classification.
 src/cli/                 Commander-based CLI. Depends on ports, not adapters directly.

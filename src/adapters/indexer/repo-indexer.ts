@@ -102,6 +102,8 @@ const ALL_SOURCE_EXTENSIONS = new Set([
 	".rs",                          // Rust
 	".java",                        // Java
 	".py",                          // Python
+	".c", ".h",                     // C
+	".cpp", ".hpp", ".cc", ".cxx", ".hxx",  // C++
 ]);
 
 /**
@@ -121,10 +123,26 @@ function languageToExtensions(lang: string): string[] {
 			return [".java"];
 		case "python":
 			return [".py"];
+		case "c":
+			return [".c", ".h"];
+		case "cpp":
+			return [".cpp", ".hpp", ".cc", ".cxx", ".hxx"];
 		default:
 			return [];
 	}
 }
+
+/**
+ * Maximum file size in bytes for extraction. Files above this threshold
+ * are skipped entirely. This is an operational containment measure for
+ * pathological files (generated register headers, concatenated outputs)
+ * that would consume excessive memory in the WASM tree-sitter runtime.
+ *
+ * 1 MB ≈ ~25,000 lines of typical C/C++ code. The largest non-generated
+ * source files in the Linux kernel are under 30,000 lines. Generated
+ * register mask headers can exceed 200,000 lines (8+ MB).
+ */
+const MAX_FILE_SIZE_BYTES = 1_000_000; // 1 MB
 
 /** Directories always excluded from scanning. */
 const ALWAYS_EXCLUDED = new Set([
@@ -252,9 +270,24 @@ export class RepoIndexer implements IndexerPort {
 			const fileVersions: FileVersion[] = [];
 			const fileContents = new Map<string, string>();
 
+			let skippedOversized = 0;
+
 			for (const relPath of filePaths) {
 				const absPath = join(repo.rootPath, relPath);
 				const content = await readFile(absPath, "utf-8");
+
+				// Large-file guard: skip files above a hard size threshold.
+				// This is a PROTOTYPE operational containment measure, not
+				// a semantic correctness feature. Generated register headers,
+				// auto-generated code, and concatenated files can be hundreds
+				// of thousands of lines. Parsing them consumes excessive
+				// memory in the WASM tree-sitter runtime and delays indexing.
+				// Skipped files are recorded in extraction diagnostics.
+				if (content.length > MAX_FILE_SIZE_BYTES) {
+					skippedOversized++;
+					continue;
+				}
+
 				const contentHash = hashContent(content);
 				const fileUid = `${repoUid}:${relPath}`;
 
@@ -1083,6 +1116,7 @@ export class RepoIndexer implements IndexerPort {
 				unresolved_total: unresolvedCount,
 				unresolved_breakdown: unresolvedBreakdown,
 				annotation_collisions_dropped: annotationCollisionsDropped,
+				files_skipped_oversized: skippedOversized,
 			};
 			this.storage.updateSnapshotExtractionDiagnostics(
 				snapshot.snapshotUid,

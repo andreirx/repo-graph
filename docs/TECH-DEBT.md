@@ -2,9 +2,19 @@
 
 ## Extraction — TypeScript
 
-- Call graph resolution: 37% on self-index (syntax-only). Strong on class-heavy
-  architectures, weak on SDK-heavy/functional patterns. Compiler enrichment
-  (`rgr enrich`) resolves ~81% of remaining unknown receiver types via TypeChecker.
+- Call graph resolution: 33% on self-index with import-binding-assisted resolution
+  (up from ~15% syntax-only). Strong on class-heavy architectures, weak on
+  SDK-heavy/functional patterns. Compiler enrichment (`rgr enrich`) resolves
+  ~81% of remaining unknown receiver types via TypeChecker.
+- **Imported free-function call resolution:** bare-identifier calls that match an
+  import binding are resolved using the binding's source module. Disambiguates
+  when the same function name exists in multiple files.
+- **Aliased imports not yet resolved:** `import { foo as bar }` — the binding
+  stores the local name (`bar`) but not the original name (`foo`). The resolver
+  looks for `bar` in the target file, which finds nothing. Requires storing the
+  original name in ImportBinding.
+- **Namespace imports not resolved:** `import * as ns from "./m"; ns.foo()` —
+  the callee is `ns.foo`, which includes the namespace alias. Not handled.
 - Inherited method resolution: 11 remaining cases on FRAKTAG (diminishing returns).
 - External SDK types (node_modules): not indexed.
 - Destructured bindings, reassignment: not tracked.
@@ -63,13 +73,42 @@
   Viable improvements: pre-warmed jdtls daemon, javac-based type resolution
   for simpler cases, or persistent background server.
 
-## Extraction — Languages Not Yet Supported
+## Extraction — Python
 
-- **Python:** Common in data/ML pipelines and build tooling. Requires tree-sitter-python,
-  pip/pyproject.toml reader.
-- **C/C++:** Highest business value (Linux BSP, embedded). Requires compile_commands.json
-  boundary + Clang-backed extraction. Do not start until simpler languages validate
-  the architecture.
+- Python extractor (tree-sitter-python): functions, classes, methods, constructors,
+  variables, imports, calls, complexity metrics. Syntax-only.
+- Dependency reader: pyproject.toml + requirements.txt. PEP 508 parsing.
+- **Package-name-to-import-specifier gap:** `pyyaml` → `import yaml`,
+  `beautifulsoup4` → `import bs4`. Exact name matches work; mismatches
+  remain unclassified. Curated alias map not yet implemented.
+- Pytest detector: test_* functions, Test* classes, @pytest.fixture.
+  Non-decorated conftest.py functions not detected.
+- **No Python semantic enrichment** (pyright/mypy) yet.
+- **No Python framework detectors** (Django, Flask, FastAPI) yet.
+
+## Extraction — C/C++
+
+- C/C++ extractor (tree-sitter-c + tree-sitter-cpp): functions, structs, classes,
+  typedefs, enums, namespaces, methods, constructors, #include, CALLS, complexity.
+- **Syntax-only, no compile_commands.json integration.** Header search paths
+  are not resolved — `#include "util.h"` does not resolve to a FILE node
+  unless the path matches the repo-relative filename exactly.
+- **No macro expansion or preprocessor evaluation.** Code inside `#ifdef` blocks
+  is extracted from all branches (first-wins dedup prevents collisions).
+- **No template instantiation tracking.** Templates are parsed syntactically but
+  instantiation-specific edges are not emitted.
+- **No overload resolution.** Multiple same-named functions produce ambiguous
+  CALLS edges, same as other languages.
+- **STL calls:** Qualified calls (std::sort, std::find) are extracted and
+  recognized as stdlib. Receiver-method calls (v.push_back) are extracted
+  with raw receiver text — no type resolution.
+- **Large-file guard:** Files > 1MB are skipped. This is operational containment
+  for generated register headers (Linux AMD GPU headers: 200k+ lines). Not a
+  semantic correctness feature.
+- **Large-repo limitation:** The all-in-memory indexer architecture cannot handle
+  Linux-scale repos (63k files). Requires batch-persistence redesign.
+- **No clangd/libclang enrichment** for receiver-type resolution yet.
+- **No C/C++ framework/system detectors** (kernel modules, drivers, RTOS) yet.
 
 ## Coverage / Churn Import
 
@@ -169,9 +208,21 @@
 - No cross-repo matching yet (architecture supports it, no implementation).
 
 ### Dead-code suppression via framework inferences
-- `findDeadNodes` excludes nodes with `framework_entrypoint` (Lambda) or
-  `spring_container_managed` (Spring bean) inferences.
+- `findDeadNodes` excludes nodes with `framework_entrypoint` (Lambda),
+  `spring_container_managed` (Spring bean), `pytest_test`, `pytest_fixture`.
 - **Remaining gap:** methods inside container-managed classes (e.g. `@GetMapping`
   handler methods, injected fields) still show dead because they have no
   Java-caller inbound edges. Spring's HTTP dispatcher invokes them at runtime.
-  Compounding with boundary route facts could suppress handler methods.
+
+## Large-Repo Scalability
+
+- **All-in-memory indexer architecture:** `fileContents` Map holds all source
+  text, `allNodes` and `allUnresolvedEdges` arrays accumulate all extracted
+  data before persistence. This works up to ~1000 files but OOMs on
+  Linux-scale repos (63k C files).
+- **Large-file guard (1MB):** operational containment for generated headers
+  (AMD GPU register masks: 200k+ lines). Does not fix the aggregate memory
+  problem from tens of thousands of normal-sized files.
+- **Required fix:** batch persistence + bounded resolution windows. Remove
+  `fileContents`, persist nodes/edges incrementally during extraction, then
+  resolve in chunks. This is an architecture redesign, not a parameter tune.
