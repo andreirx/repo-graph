@@ -15,7 +15,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SqliteConnectionProvider } from "../../../src/adapters/storage/sqlite/connection-provider.js";
 import { SqliteStorage } from "../../../src/adapters/storage/sqlite/sqlite-storage.js";
-import { SnapshotKind } from "../../../src/core/model/index.js";
+import type { GraphNode, TrackedFile } from "../../../src/core/model/index.js";
+import { NodeKind, NodeSubtype, SnapshotKind, Visibility } from "../../../src/core/model/index.js";
 import type { StagedEdge, FileSignalRow } from "../../../src/core/ports/storage.js";
 
 let storage: SqliteStorage;
@@ -206,5 +207,114 @@ describe("file_signals round-trip", () => {
 
 		const row = storage.queryFileSignals(snap.snapshotUid, `${REPO_UID}:a.ts`);
 		expect(row!.importBindingsJson).toBe('[{"new":true}]');
+	});
+});
+
+// ── queryAllNodes (Phase 3 read-back) ───────────────────────────────
+
+describe("queryAllNodes round-trip", () => {
+	function makeNode(
+		snapshotUid: string,
+		name: string,
+		fileUid: string,
+	): GraphNode {
+		return {
+			nodeUid: randomUUID(),
+			snapshotUid,
+			repoUid: REPO_UID,
+			stableKey: `${REPO_UID}:${fileUid.split(":")[1] ?? "x"}#${name}:SYMBOL:FUNCTION`,
+			kind: NodeKind.SYMBOL,
+			subtype: NodeSubtype.FUNCTION,
+			name,
+			qualifiedName: name,
+			fileUid,
+			parentNodeUid: null,
+			location: { lineStart: 1, colStart: 0, lineEnd: 10, colEnd: 0 },
+			signature: `${name}()`,
+			visibility: Visibility.EXPORT,
+			docComment: null,
+			metadataJson: null,
+		};
+	}
+
+	function makeFile(path: string): TrackedFile {
+		return {
+			fileUid: `${REPO_UID}:${path}`,
+			repoUid: REPO_UID,
+			path,
+			language: "typescript",
+			isTest: false,
+			isGenerated: false,
+			isExcluded: false,
+		};
+	}
+
+	it("reads back inserted nodes with all resolver-critical fields", () => {
+		const snap = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
+		const file = makeFile("src/a.ts");
+		storage.upsertFiles([file]);
+		const node = makeNode(snap.snapshotUid, "helper", file.fileUid);
+		storage.insertNodes([node]);
+
+		const all = storage.queryAllNodes(snap.snapshotUid);
+		expect(all.length).toBe(1);
+		const n = all[0];
+		expect(n.nodeUid).toBe(node.nodeUid);
+		expect(n.stableKey).toBe(node.stableKey);
+		expect(n.name).toBe("helper");
+		expect(n.qualifiedName).toBe("helper");
+		expect(n.kind).toBe(NodeKind.SYMBOL);
+		expect(n.subtype).toBe(NodeSubtype.FUNCTION);
+		expect(n.fileUid).toBe(file.fileUid);
+		expect(n.signature).toBe("helper()");
+		expect(n.visibility).toBe(Visibility.EXPORT);
+	});
+
+	it("reads back multiple nodes", () => {
+		const snap = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
+		const file = makeFile("src/a.ts");
+		storage.upsertFiles([file]);
+		storage.insertNodes([
+			makeNode(snap.snapshotUid, "foo", file.fileUid),
+			makeNode(snap.snapshotUid, "bar", file.fileUid),
+		]);
+
+		const all = storage.queryAllNodes(snap.snapshotUid);
+		expect(all.length).toBe(2);
+	});
+
+	it("scopes to snapshot", () => {
+		const snap1 = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
+		const snap2 = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
+		const file = makeFile("src/a.ts");
+		storage.upsertFiles([file]);
+		storage.insertNodes([makeNode(snap1.snapshotUid, "inSnap1", file.fileUid)]);
+		storage.insertNodes([makeNode(snap2.snapshotUid, "inSnap2", file.fileUid)]);
+
+		const n1 = storage.queryAllNodes(snap1.snapshotUid);
+		expect(n1.length).toBe(1);
+		expect(n1[0].name).toBe("inSnap1");
+
+		const n2 = storage.queryAllNodes(snap2.snapshotUid);
+		expect(n2.length).toBe(1);
+		expect(n2[0].name).toBe("inSnap2");
+	});
+
+	it("returns empty for snapshot with no nodes", () => {
+		const snap = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
+		expect(storage.queryAllNodes(snap.snapshotUid)).toEqual([]);
+	});
+
+	it("hydrates location correctly", () => {
+		const snap = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
+		const file = makeFile("src/a.ts");
+		storage.upsertFiles([file]);
+		const node = makeNode(snap.snapshotUid, "fn", file.fileUid);
+		storage.insertNodes([node]);
+
+		const all = storage.queryAllNodes(snap.snapshotUid);
+		expect(all[0].location).not.toBeNull();
+		expect(all[0].location!.lineStart).toBe(1);
+		expect(all[0].location!.lineEnd).toBe(10);
 	});
 });

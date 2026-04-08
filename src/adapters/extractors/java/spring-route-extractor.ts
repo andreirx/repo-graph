@@ -126,11 +126,31 @@ export function extractSpringRoutes(
 		const parsed = sharedParser.parse(source);
 		if (!parsed) return [];
 		tree = parsed.rootNode;
+		// Clean up after extraction (parsed tree owns WASM memory).
+		const cleanup = () => parsed.delete();
+		try {
+			return extractFromTree(tree, filePath, repoUid, symbols);
+		} finally {
+			cleanup();
+		}
 	}
 
+	return extractFromTree(tree, filePath, repoUid, symbols);
+}
+
+function extractFromTree(
+	tree: SyntaxNode,
+	filePath: string,
+	repoUid: string,
+	symbols: Array<{
+		stableKey: string;
+		name: string;
+		qualifiedName: string;
+		lineStart: number | null;
+	}>,
+): BoundaryProviderFact[] {
 	const facts: BoundaryProviderFact[] = [];
 
-	// Walk class declarations at the top level.
 	for (const child of tree.children) {
 		if (child.type !== "class_declaration") continue;
 		extractFromClass(child, "", filePath, repoUid, symbols, facts);

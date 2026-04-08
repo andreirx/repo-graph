@@ -76,13 +76,13 @@ export class TypeScriptExtractor implements ExtractorPort {
 		if (!tree) {
 			throw new Error(`Failed to parse ${filePath}`);
 		}
+		try {
+
 		const nodes: GraphNode[] = [];
 		const edges: UnresolvedEdge[] = [];
 		const metrics = new Map<string, ExtractedMetrics>();
 		const importBindings: ImportBinding[] = [];
 
-		// Emit the FILE node. This is the source of all IMPORTS edges
-		// and the parent of top-level symbols in this file.
 		const lineCount = source.split("\n").length;
 		const fileNodeUid = uuidv4();
 		nodes.push({
@@ -91,9 +91,7 @@ export class TypeScriptExtractor implements ExtractorPort {
 			repoUid,
 			stableKey: `${repoUid}:${filePath}:FILE`,
 			kind: NodeKind.FILE,
-			subtype: filePath.endsWith(".tsx")
-				? NodeSubtype.SOURCE
-				: NodeSubtype.SOURCE,
+			subtype: NodeSubtype.SOURCE,
 			name: filePath.split("/").pop() ?? filePath,
 			qualifiedName: filePath,
 			fileUid,
@@ -123,13 +121,10 @@ export class TypeScriptExtractor implements ExtractorPort {
 			memberTypes: new Map<string, Map<string, string>>(),
 		};
 
-		// First pass: walk all top-level declarations to extract symbols
 		for (const child of tree.rootNode.children) {
 			this.visitTopLevel(child, ctx);
 		}
 
-		// Second pass: apply export visibility from `export { x, y }` lists
-		// that were collected during visitTopLevel.
 		if (ctx.exportedNames.size > 0) {
 			for (const node of ctx.nodes) {
 				if (
@@ -142,8 +137,11 @@ export class TypeScriptExtractor implements ExtractorPort {
 			}
 		}
 
-		tree.delete();
 		return { nodes, edges, metrics, importBindings };
+
+		} finally {
+			tree.delete();
+		}
 	}
 
 	// ── Top-level visitor ────────────────────────────────────────────────

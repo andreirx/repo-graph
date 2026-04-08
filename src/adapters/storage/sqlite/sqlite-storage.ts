@@ -449,6 +449,38 @@ export class SqliteStorage implements StoragePort {
 		insertAll();
 	}
 
+	queryAllNodes(snapshotUid: string): GraphNode[] {
+		const rows = this.db.prepare(
+			`SELECT node_uid, snapshot_uid, repo_uid, stable_key, kind, subtype,
+			        name, qualified_name, file_uid, parent_node_uid,
+			        line_start, col_start, line_end, col_end,
+			        signature, visibility, doc_comment, metadata_json
+			 FROM nodes WHERE snapshot_uid = ?`,
+		).all(snapshotUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			nodeUid: r.node_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			stableKey: r.stable_key as string,
+			kind: r.kind as string,
+			subtype: (r.subtype as string) ?? null,
+			name: r.name as string,
+			qualifiedName: (r.qualified_name as string) ?? null,
+			fileUid: (r.file_uid as string) ?? null,
+			parentNodeUid: (r.parent_node_uid as string) ?? null,
+			location: r.line_start !== null ? {
+				lineStart: r.line_start as number,
+				colStart: (r.col_start as number) ?? 0,
+				lineEnd: (r.line_end as number) ?? (r.line_start as number),
+				colEnd: (r.col_end as number) ?? 0,
+			} : null,
+			signature: (r.signature as string) ?? null,
+			visibility: (r.visibility as string) ?? null,
+			docComment: (r.doc_comment as string) ?? null,
+			metadataJson: (r.metadata_json as string) ?? null,
+		})) as GraphNode[];
+	}
+
 	insertEdges(edges: GraphEdge[]): void {
 		const stmt = this.db.prepare(
 			`INSERT INTO edges

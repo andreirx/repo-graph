@@ -105,12 +105,13 @@ export class JavaExtractor implements ExtractorPort {
 			throw new Error(`Failed to parse ${filePath}`);
 		}
 
+		try {
+
 		const nodes: GraphNode[] = [];
 		const edges: UnresolvedEdge[] = [];
 		const metrics = new Map<string, ExtractedMetrics>();
 		const importBindings: ImportBinding[] = [];
 
-		// FILE node
 		const lineCount = source.split("\n").length;
 		const fileNodeUid = uuidv4();
 		nodes.push({
@@ -145,13 +146,15 @@ export class JavaExtractor implements ExtractorPort {
 			emittedStableKeys: new Set<string>(),
 		};
 
-		// Walk top-level declarations (inside program node).
 		for (const child of tree.rootNode.children) {
 			this.visitTopLevel(child, ctx, null);
 		}
 
-		tree.delete();
 		return { nodes, edges, metrics, importBindings };
+
+		} finally {
+			tree.delete();
+		}
 	}
 
 	/**

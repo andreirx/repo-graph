@@ -271,20 +271,55 @@ export class RepoIndexer implements IndexerPort {
 				total: filePaths.length,
 			});
 
-			// 3+4. Register files, extract, and discard source text per-file.
-			// Source text is NOT accumulated in memory. Each file is read,
-			// extracted, and the source text is released before the next
-			// file is processed. This bounds memory growth to the extraction
-			// output (nodes + edges + signals), not the source text corpus.
+			// ═══════════════════════════════════════════════════════════════
+			// PHASE 1: Extract & Persist (bounded memory)
+			// ═══════════════════════════════════════════════════════════════
+			// Per-file: read → extract → persist nodes immediately →
+			// persist staged edges immediately → persist file signals →
+			// discard source text and full node objects.
+			//
+			// In-memory accumulation is LIMITED to:
+			//   - trackedFiles: lightweight file metadata (~100 bytes each)
+			//   - resolverIndex: stableKey→nodeUid + name→nodeUid[] + nodeUid→fileUid
+			//     (~50 bytes per node — for 100k nodes: ~5MB)
+			//   - nodesTotal/edgesAccumulated: counters only
+			//   - packageDepsCache/tsconfigAliasesCache: per-directory, bounded
+			//
+			// Full GraphNode[], UnresolvedEdge[], and FileSignals are NOT
+			// accumulated. They are persisted per-file and read back in
+			// Phase 3 during batch resolution.
+			//
+			// Staging cleanup policy:
+			//   - staged_edges: deleted after successful finalization
+			//   - file_signals: retained until snapshot deletion (CASCADE)
+			//
+			// Failure-path policy:
+			//   - If indexing fails, snapshot is marked FAILED
+			//   - Staging rows remain (scoped by snapshot_uid)
+			//   - Rerun creates a new snapshot with fresh staging rows
+			//   - Old staging rows cleaned up when FAILED snapshot is deleted
 			const trackedFiles: TrackedFile[] = [];
-			const allNodes: GraphNode[] = [];
-			const allUnresolvedEdges: UnresolvedEdge[] = [];
+
+			// Lightweight resolver index — only the fields needed for
+			// edge resolution. NOT full GraphNode objects.
+			const resolverByStableKey = new Map<string, string>(); // stableKey → nodeUid
+			const resolverByName = new Map<string, string[]>();    // name → nodeUid[]
+			const resolverNodeToFile = new Map<string, string>();  // nodeUid → fileUid
+
+			let nodesTotal = 0;
+			let stagedEdgesTotal = 0;
+
+			// Metrics are small (~100 bytes per function) — keep in memory.
 			const allMetrics = new Map<
 				string,
 				{ cc: number; params: number; nesting: number }
 			>();
+
+			// File signals cache is kept for now for the classification phase.
+			// TODO: eliminate in next refinement by reading from file_signals table.
 			const fileSignalsCache = new Map<string, FileSignals>();
 			const nodeUidToFileUid = new Map<string, string>();
+
 			const packageDepsCache = new Map<string, PackageDependencySet>();
 			const tsconfigAliasesCache = new Map<string, TsconfigAliases>();
 			let skippedOversized = 0;
@@ -420,13 +455,23 @@ export class RepoIndexer implements IndexerPort {
 					continue;
 				}
 
-				// Persist nodes immediately — no accumulation needed for
-				// the staged architecture. But we still push to allNodes
-				// for the resolver index (MODULE nodes + edge resolution).
-				// TODO: in the next step, replace allNodes with a lightweight
-				// index (stableKey→nodeUid, name→nodeUid[]) and stop accumulating.
+				// Persist nodes immediately. Populate lightweight resolver index.
 				this.storage.insertNodes(result.nodes);
-				allNodes.push(...result.nodes);
+				nodesTotal += result.nodes.length;
+				for (const node of result.nodes) {
+					resolverByStableKey.set(node.stableKey, node.nodeUid);
+					const existing = resolverByName.get(node.name) ?? [];
+					existing.push(node.nodeUid);
+					resolverByName.set(node.name, existing);
+					if (node.qualifiedName && node.qualifiedName !== node.name) {
+						const existingQ = resolverByName.get(node.qualifiedName) ?? [];
+						existingQ.push(node.nodeUid);
+						resolverByName.set(node.qualifiedName, existingQ);
+					}
+					if (node.fileUid) {
+						resolverNodeToFile.set(node.nodeUid, node.fileUid);
+					}
+				}
 
 				// Persist raw edges to staging table immediately.
 				if (result.edges.length > 0) {
@@ -438,8 +483,8 @@ export class RepoIndexer implements IndexerPort {
 						colEnd: e.location?.colEnd ?? null,
 						sourceFileUid: fileUid,
 					})));
+					stagedEdgesTotal += result.edges.length;
 				}
-				allUnresolvedEdges.push(...result.edges);
 				for (const [key, m] of result.metrics) {
 					allMetrics.set(key, {
 						cc: m.cyclomaticComplexity,
@@ -525,20 +570,63 @@ export class RepoIndexer implements IndexerPort {
 				total: filePaths.length,
 			});
 
-			// 5. Create MODULE nodes for directories
+			// ═══════════════════════════════════════════════════════════════
+			// PHASE 2: MODULE nodes
+			// ═══════════════════════════════════════════════════════════════
 			const moduleNodes = this.createModuleNodes(
 				filePaths,
 				repoUid,
 				snapshot.snapshotUid,
 			);
-			allNodes.push(...moduleNodes);
-
-			// 6. Persist MODULE nodes only — per-file nodes were
-			// already persisted during extraction (Phase 1).
-			emit({ phase: "persisting", current: 0, total: moduleNodes.length });
 			if (moduleNodes.length > 0) {
 				this.storage.insertNodes(moduleNodes);
+				nodesTotal += moduleNodes.length;
+				// Add MODULE nodes to the lightweight resolver index.
+				for (const node of moduleNodes) {
+					resolverByStableKey.set(node.stableKey, node.nodeUid);
+					const existing = resolverByName.get(node.name) ?? [];
+					existing.push(node.nodeUid);
+					resolverByName.set(node.name, existing);
+				}
 			}
+
+			// ═══════════════════════════════════════════════════════════════
+			// PHASE 3: Resolve & Classify (batch read from staging)
+			// ═══════════════════════════════════════════════════════════════
+			// Read all nodes back from DB for the resolution phase.
+			// This is a bounded read — nodes are already persisted, we just
+			// need them as full GraphNode objects for the resolver's
+			// affinity filtering and module-edge creation. The extraction
+			// phase did NOT accumulate them; they were persisted and released
+			// per-file.
+			//
+			// Memory during resolution: allNodes (~50MB for 100k nodes)
+			// + staged edges (~60MB for 200k edges). This is the same as
+			// the old architecture's resolution phase. The difference is
+			// that source text (~2GB for Linux) is no longer in memory.
+			const allNodes = this.storage.queryAllNodes(snapshot.snapshotUid);
+
+			// Read staged edges back for resolution.
+			const stagedEdges = this.storage.queryStagedEdges(snapshot.snapshotUid);
+			const allUnresolvedEdges: UnresolvedEdge[] = stagedEdges.map((se) => ({
+				edgeUid: se.edgeUid,
+				snapshotUid: se.snapshotUid,
+				repoUid: se.repoUid,
+				sourceNodeUid: se.sourceNodeUid,
+				targetKey: se.targetKey,
+				type: se.type as any,
+				resolution: se.resolution as any,
+				extractor: se.extractor,
+				location: se.lineStart !== null ? {
+					lineStart: se.lineStart,
+					colStart: se.colStart ?? 0,
+					lineEnd: se.lineEnd ?? se.lineStart,
+					colEnd: se.colEnd ?? 0,
+				} : null,
+				metadataJson: se.metadataJson,
+			}));
+
+			emit({ phase: "persisting", current: 0, total: nodesTotal });
 
 			// 7. Resolve edges
 			emit({
@@ -1282,7 +1370,7 @@ export class RepoIndexer implements IndexerPort {
 				return {
 					snapshotUid: snapshot.snapshotUid,
 					filesTotal: trackedFiles.length,
-					nodesTotal: allNodes.length,
+					nodesTotal,
 					edgesTotal: allEdges.length,
 					edgesUnresolved: unresolvedCount,
 					unresolvedBreakdown,

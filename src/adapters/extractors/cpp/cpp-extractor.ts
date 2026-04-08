@@ -78,6 +78,9 @@ export class CppExtractor implements ExtractorPort {
 	private parser: Parser | null = null;
 	private cLanguage: Language | null = null;
 	private cppLanguage: Language | null = null;
+	private parseCount = 0;
+	/** Reset parser every N parses to prevent WASM heap exhaustion on large repos. */
+	private static readonly PARSER_RESET_INTERVAL = 5000;
 
 	async initialize(): Promise<void> {
 		await Parser.init();
@@ -101,12 +104,23 @@ export class CppExtractor implements ExtractorPort {
 			throw new Error("CppExtractor not initialized.");
 		}
 
+		// Periodic parser reset to prevent WASM heap exhaustion on large repos.
+		// tree-sitter's WASM runtime accumulates internal state across parses.
+		// After thousands of parses, it can exhaust the 4GB WASM linear memory limit.
+		this.parseCount++;
+		if (this.parseCount % CppExtractor.PARSER_RESET_INTERVAL === 0) {
+			this.parser.delete();
+			this.parser = new Parser();
+		}
+
 		const ext = filePath.slice(filePath.lastIndexOf("."));
 		const isCpp = CPP_EXTENSIONS.has(ext);
 		this.parser.setLanguage(isCpp ? this.cppLanguage : this.cLanguage);
 
 		const tree = this.parser.parse(source);
 		if (!tree) throw new Error(`Failed to parse ${filePath}`);
+
+		try {
 
 		const fileNodeUid = uuidv4();
 		const ctx: ExtractionContext = {
@@ -139,6 +153,13 @@ export class CppExtractor implements ExtractorPort {
 			metrics: ctx.metrics,
 			importBindings: ctx.importBindings,
 		};
+
+		} finally {
+			// Release the Tree's WASM memory. Without this, each parsed
+			// tree accumulates in the WASM linear memory until GC runs
+			// (which may never happen fast enough for 63k files).
+			tree.delete();
+		}
 	}
 
 	// ── Top-level dispatch ─────────────────────────────────────────

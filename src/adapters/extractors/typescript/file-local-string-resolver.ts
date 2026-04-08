@@ -380,6 +380,10 @@ export class FileLocalStringResolver {
 		const tree = this.parser.parse(source);
 		if (!tree) return new Map();
 
-		return resolveFileLocalStrings(tree.rootNode);
+		try {
+			return resolveFileLocalStrings(tree.rootNode);
+		} finally {
+			tree.delete();
+		}
 	}
 }

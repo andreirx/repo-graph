@@ -107,6 +107,8 @@ export class PythonExtractor implements ExtractorPort {
 			throw new Error(`Failed to parse ${filePath}`);
 		}
 
+		try {
+
 		const fileNodeUid = uuidv4();
 		const ctx: ExtractionContext = {
 			source,
@@ -122,7 +124,6 @@ export class PythonExtractor implements ExtractorPort {
 			seenVariableKeys: new Set(),
 		};
 
-		// FILE node.
 		ctx.nodes.push({
 			nodeUid: fileNodeUid,
 			snapshotUid,
@@ -141,7 +142,6 @@ export class PythonExtractor implements ExtractorPort {
 			metadataJson: null,
 		});
 
-		// Walk top-level statements.
 		for (const child of tree.rootNode.children) {
 			this.processTopLevel(child, ctx, null);
 		}
@@ -152,6 +152,10 @@ export class PythonExtractor implements ExtractorPort {
 			metrics: ctx.metrics,
 			importBindings: ctx.importBindings,
 		};
+
+		} finally {
+			tree.delete();
+		}
 	}
 
 	// ── Top-level dispatch ─────────────────────────────────────────

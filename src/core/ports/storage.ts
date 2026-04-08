@@ -91,6 +91,13 @@ export interface StoragePort {
 	insertNodes(nodes: GraphNode[]): void;
 	insertEdges(edges: GraphEdge[]): void;
 
+	/**
+	 * Read all nodes for a snapshot. Used by the staged indexer to
+	 * reconstruct the full node set for resolution after per-file
+	 * extraction persisted them incrementally.
+	 */
+	queryAllNodes(snapshotUid: string): GraphNode[];
+
 	/** Remove all nodes and edges for a given file in a given snapshot. */
 	deleteNodesByFile(snapshotUid: string, fileUid: string): void;
 
