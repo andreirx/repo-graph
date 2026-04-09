@@ -7,6 +7,8 @@ import { v4 as uuidv4 } from "uuid";
 import type {
 	GraphEdge,
 	GraphNode,
+	Repo,
+	Snapshot,
 	TrackedFile,
 } from "../../core/model/index.js";
 import {
@@ -44,6 +46,7 @@ import type {
 import type {
 	IndexerPort,
 	IndexOptions,
+	IndexProgressEvent,
 	IndexResult,
 } from "../../core/ports/indexer.js";
 import type {
@@ -76,6 +79,10 @@ import { readTsconfigAliases } from "../config/tsconfig-reader.js";
 import type { AnnotationsPort } from "../../core/ports/annotations.js";
 import type { ModuleDiscoveryPort } from "../../core/ports/discovery.js";
 import { discoverModules } from "../../core/modules/module-discovery.js";
+// Delta indexing imports — used by refreshRepo once the build
+// pipeline is decomposed into reusable phase helpers.
+// import { buildInvalidationPlan, type CurrentFileState } from "../../core/delta/invalidation-planner.js";
+// import type { InvalidationPlan } from "../../core/delta/invalidation-plan.js";
 import {
 	applyContentTruncation,
 	attributePackageDescription,
@@ -117,6 +124,22 @@ interface ResolverIndex {
 	/** For module-edge creation: file nodeUid → module stableKey. */
 	fileToModule: Map<string, string>;
 }
+
+/**
+ * Output of the extraction phase. Passed to downstream phases
+ * (resolution, detectors, finalization) as a boundary DTO.
+ * Both full-index and refresh orchestrators produce this shape.
+ */
+interface ExtractionPhaseResult {
+	trackedFiles: TrackedFile[];
+	nodesTotal: number;
+	extractionEdgesTotal: number;
+	allMetrics: Map<string, { cc: number; params: number; nesting: number }>;
+	fileSignalsCache: Map<string, FileSignals>;
+	skippedOversized: number;
+	filesReadFailed: number;
+}
+
 
 /** All file extensions that any registered extractor might handle. */
 const ALL_SOURCE_EXTENSIONS = new Set([
@@ -293,1174 +316,71 @@ export class RepoIndexer implements IndexerPort {
 				total: filePaths.length,
 			});
 
-			// ═══════════════════════════════════════════════════════════════
-			// PHASE 1: Extract & Persist (bounded memory)
-			// ═══════════════════════════════════════════════════════════════
-			// Per-file: read → extract → persist nodes immediately →
-			// persist staged edges immediately → persist file signals →
-			// discard source text and full node objects.
-			//
-			// In-memory accumulation is LIMITED to:
-			//   - trackedFiles: lightweight file metadata (~100 bytes each)
-			//   - resolverIndex: stableKey→nodeUid + name→nodeUid[] + nodeUid→fileUid
-			//     (~50 bytes per node — for 100k nodes: ~5MB)
-			//   - nodesTotal/edgesAccumulated: counters only
-			//   - packageDepsCache/tsconfigAliasesCache: per-directory, bounded
-			//
-			// Full GraphNode[], UnresolvedEdge[], and FileSignals are NOT
-			// accumulated. They are persisted per-file and read back in
-			// Phase 3 during batch resolution.
-			//
-			// Staging cleanup policy:
-			//   - staged_edges: deleted after successful finalization
-			//   - file_signals: retained until snapshot deletion (CASCADE)
-			//
-			// Failure-path policy:
-			//   - If indexing fails, snapshot is marked FAILED
-			//   - Staging rows remain (scoped by snapshot_uid)
-			//   - Rerun creates a new snapshot with fresh staging rows
-			//   - Old staging rows cleaned up when FAILED snapshot is deleted
-			const trackedFiles: TrackedFile[] = [];
-
-			let nodesTotal = 0;
-			let stagedEdgesTotal = 0;
-
-			// Metrics are small (~100 bytes per function) — keep in memory.
-			const allMetrics = new Map<
-				string,
-				{ cc: number; params: number; nesting: number }
-			>();
-
-			// Minimal import-bindings-only cache for Lambda entrypoint
-			// detection (Phase 4). Classification no longer depends on this
-			// cache — it loads signals per-batch from the file_signals table
-			// and rebuilds same-file symbols from persisted nodes.
-			// Contains only { importBindings } with empty stubs for all
-			// other FileSignals fields. Populated only for files with
-			// import bindings (TS/JS). Not a Linux-scale concern.
-			const fileSignalsCache = new Map<string, FileSignals>();
-
-			const packageDepsCache = new Map<string, PackageDependencySet>();
-			const tsconfigAliasesCache = new Map<string, TsconfigAliases>();
-			let skippedOversized = 0;
-			let filesReadFailed = 0;
-			let extractIdx = 0;
-
-			for (const relPath of filePaths) {
-				emit({
-					phase: "extracting",
-					current: extractIdx,
-					total: filePaths.length,
-					file: relPath,
-				});
-
-				const absPath = join(repo.rootPath, relPath);
-				let content: string;
-				try {
-					content = await readFile(absPath, "utf-8");
-				} catch {
-					// Register the file as FAILED so it appears in the snapshot
-					// and diagnostics. Silent drops create partial indexes that
-					// look trustworthy while missing source files.
-					const failedFileUid = `${repoUid}:${relPath}`;
-					trackedFiles.push({
-						fileUid: failedFileUid,
-						repoUid,
-						path: relPath,
-						language: detectLanguage(relPath),
-						isTest: isTestFile(relPath),
-						isGenerated: false,
-						isExcluded: false,
-					});
-					this.storage.upsertFiles([trackedFiles[trackedFiles.length - 1]]);
-					this.storage.upsertFileVersions([{
-						snapshotUid: snapshot.snapshotUid,
-						fileUid: failedFileUid,
-						contentHash: "",
-						astHash: null,
-						extractor: (this.getExtractorForFile(relPath)?.name ?? "unknown"),
-						parseStatus: ParseStatus.FAILED,
-						sizeBytes: 0,
-						lineCount: 0,
-						indexedAt: new Date().toISOString(),
-					}]);
-					filesReadFailed++;
-					extractIdx++;
-					continue;
-				}
-
-				// Large-file guard: register as SKIPPED so the snapshot
-				// knows the file exists but was not extracted.
-				if (content.length > MAX_FILE_SIZE_BYTES) {
-					const skippedFileUid = `${repoUid}:${relPath}`;
-					trackedFiles.push({
-						fileUid: skippedFileUid,
-						repoUid,
-						path: relPath,
-						language: detectLanguage(relPath),
-						isTest: isTestFile(relPath),
-						isGenerated: false,
-						isExcluded: true,
-					});
-					this.storage.upsertFiles([trackedFiles[trackedFiles.length - 1]]);
-					this.storage.upsertFileVersions([{
-						snapshotUid: snapshot.snapshotUid,
-						fileUid: skippedFileUid,
-						contentHash: hashContent(content),
-						astHash: null,
-						extractor: "skipped:oversized",
-						parseStatus: ParseStatus.SKIPPED,
-						sizeBytes: Buffer.byteLength(content, "utf-8"),
-						lineCount: content.split("\n").length,
-						indexedAt: new Date().toISOString(),
-					}]);
-					skippedOversized++;
-					extractIdx++;
-					continue;
-				}
-
-				const contentHash = hashContent(content);
-				const fileUid = `${repoUid}:${relPath}`;
-
-				trackedFiles.push({
-					fileUid,
-					repoUid,
-					path: relPath,
-					language: detectLanguage(relPath),
-					isTest: isTestFile(relPath),
-					isGenerated: false,
-					isExcluded: false,
-				});
-
-				this.storage.upsertFiles([trackedFiles[trackedFiles.length - 1]]);
-				this.storage.upsertFileVersions([{
-					snapshotUid: snapshot.snapshotUid,
-					fileUid,
-					contentHash,
-					astHash: null,
-					extractor: (this.getExtractorForFile(relPath)?.name ?? "unknown"),
-					parseStatus: ParseStatus.PARSED,
-					sizeBytes: Buffer.byteLength(content, "utf-8"),
-					lineCount: content.split("\n").length,
-					indexedAt: new Date().toISOString(),
-				}]);
-				const extractor = this.getExtractorForFile(relPath);
-				if (!extractor) {
-					extractIdx++;
-					continue;
-				}
-				let result: ExtractionResult;
-				try {
-					result = await extractor.extract(
-						content,
-						relPath,
-						fileUid,
-						repoUid,
-						snapshot.snapshotUid,
-					);
-				} catch {
-					// Mark file as failed — update the already-persisted version.
-					this.storage.upsertFileVersions([{
-						snapshotUid: snapshot.snapshotUid,
-						fileUid,
-						contentHash,
-						astHash: null,
-						extractor: (this.getExtractorForFile(relPath)?.name ?? "unknown"),
-						parseStatus: ParseStatus.FAILED,
-						sizeBytes: Buffer.byteLength(content, "utf-8"),
-						lineCount: content.split("\n").length,
-						indexedAt: new Date().toISOString(),
-					}]);
-					extractIdx++;
-					continue;
-				}
-
-				// Persist nodes immediately — no in-memory accumulation.
-				// Resolver index is rebuilt from DB in Phase 3 via
-				// queryResolverNodesIter (row-at-a-time, no bulk .all()).
-				this.storage.insertNodes(result.nodes);
-				nodesTotal += result.nodes.length;
-
-				// Persist raw edges to staging table immediately.
-				if (result.edges.length > 0) {
-					this.storage.insertStagedEdges(result.edges.map((e) => ({
-						...e,
-						lineStart: e.location?.lineStart ?? null,
-						colStart: e.location?.colStart ?? null,
-						lineEnd: e.location?.lineEnd ?? null,
-						colEnd: e.location?.colEnd ?? null,
-						sourceFileUid: fileUid,
-					})));
-					stagedEdgesTotal += result.edges.length;
-				}
-				for (const [key, m] of result.metrics) {
-					allMetrics.set(key, {
-						cc: m.cyclomaticComplexity,
-						params: m.parameterCount,
-						nesting: m.maxNestingDepth,
-					});
-				}
-
-				// Build per-file classifier signals.
-				// SUBTYPE-AWARE: split same-file symbols into value / class /
-				// interface sets so the classifier doesn't misclassify
-				// a runtime call against a type-only name (and vice versa).
-				const sameFileValueSymbols = new Set<string>();
-				const sameFileClassSymbols = new Set<string>();
-				const sameFileInterfaceSymbols = new Set<string>();
-				for (const node of result.nodes) {
-					if (node.kind === NodeKind.SYMBOL) {
-						const sub = node.subtype;
-						// Value-bindable subtypes (runtime identifiers).
-						if (
-							sub === NodeSubtype.FUNCTION ||
-							sub === NodeSubtype.CLASS ||
-							sub === NodeSubtype.METHOD ||
-							sub === NodeSubtype.VARIABLE ||
-							sub === NodeSubtype.CONSTANT ||
-							sub === NodeSubtype.ENUM ||
-							sub === NodeSubtype.ENUM_MEMBER ||
-							sub === NodeSubtype.CONSTRUCTOR ||
-							sub === NodeSubtype.GETTER ||
-							sub === NodeSubtype.SETTER ||
-							sub === NodeSubtype.PROPERTY
-						) {
-							sameFileValueSymbols.add(node.name);
-						}
-						if (sub === NodeSubtype.CLASS) {
-							sameFileClassSymbols.add(node.name);
-						}
-						if (sub === NodeSubtype.INTERFACE) {
-							sameFileInterfaceSymbols.add(node.name);
-						}
-					}
-				}
-				// Resolve per-file package deps + tsconfig aliases from nearest ancestors.
-				const packageDependencies = await this.resolveNearestPackageDeps(
-					relPath,
-					repo.rootPath,
-					packageDepsCache,
-				);
-				const tsconfigAliases = await this.resolveNearestTsconfigAliases(
-					relPath,
-					repo.rootPath,
-					tsconfigAliasesCache,
-				);
-				// Persist file signals to staging: import bindings, package
-				// deps, tsconfig aliases. Classification reads these back
-				// per-batch from DB. sameFileSymbols are rebuilt from
-				// persisted nodes via querySymbolsByFile.
-				const hasBindings = result.importBindings.length > 0;
-				const hasDeps = packageDependencies.names.length > 0;
-				const hasAliases = tsconfigAliases.entries.length > 0;
-				if (hasBindings || hasDeps || hasAliases) {
-					this.storage.insertFileSignals([{
-						snapshotUid: snapshot.snapshotUid,
-						fileUid,
-						importBindingsJson: hasBindings
-							? JSON.stringify(result.importBindings)
-							: null,
-						packageDependenciesJson: hasDeps
-							? JSON.stringify(packageDependencies)
-							: null,
-						tsconfigAliasesJson: hasAliases
-							? JSON.stringify(tsconfigAliases)
-							: null,
-					}]);
-				}
-
-				// Lambda entrypoint detection still needs import bindings
-				// keyed by file. Retain a minimal cache for that pass only.
-				// Only importBindings are needed — empty stubs for the rest.
-				if (hasBindings) {
-					fileSignalsCache.set(fileUid, {
-						importBindings: result.importBindings,
-						sameFileValueSymbols: new Set(),
-						sameFileClassSymbols: new Set(),
-						sameFileInterfaceSymbols: new Set(),
-						packageDependencies: { names: [] },
-						tsconfigAliases: { entries: [] },
-					});
-				}
-
-				extractIdx++;
-			}
-
-			emit({
-				phase: "extracting",
-				current: filePaths.length,
-				total: filePaths.length,
-			});
-
-			// ═══════════════════════════════════════════════════════════════
-			// PHASE 2: MODULE nodes
-			// ═══════════════════════════════════════════════════════════════
-			const moduleNodes = this.createModuleNodes(
+			const extraction = await this.extractFilesIntoSnapshot(
+				snapshot,
+				repo,
 				filePaths,
 				repoUid,
-				snapshot.snapshotUid,
+				emit,
 			);
-			if (moduleNodes.length > 0) {
-				this.storage.insertNodes(moduleNodes);
-				nodesTotal += moduleNodes.length;
-			}
+			const {
+				trackedFiles,
+				nodesTotal,
+				extractionEdgesTotal,
+				allMetrics,
+				fileSignalsCache,
+				skippedOversized,
+				filesReadFailed,
+			} = extraction;
 
 			// ═══════════════════════════════════════════════════════════════
-			// PHASE 3: Resolve & Classify (streaming/batch from staging)
+			// PHASE 3: Resolve & Classify + Module edges
 			// ═══════════════════════════════════════════════════════════════
-			//
-			// Three-step pipeline that avoids bulk .all() materialization:
-			//
-			// 3a. Build resolver index from row-at-a-time DB iterator.
-			//     Peak memory = Maps only (no intermediate array).
-			//
-			// 3b. Process staged edges in batches (cursor-based pagination).
-			//     Per batch: read → resolve → classify → persist → discard.
-			//     File signals loaded per-batch from DB, not from an
-			//     eager whole-snapshot cache.
-			//
-			// 3c. Create module-level edges from the resolver index (already
-			//     in memory as Maps) plus resolved edges.
-			//
-			// This replaces the previous pattern that materialized ALL
-			// resolver nodes, ALL staged edges, and ALL file signals as
-			// JS arrays via .all(), which hit V8 heap limit at ~3.6 GB
-			// on Linux-scale repos (500K+ nodes/edges).
-
-			emit({ phase: "persisting", current: 0, total: nodesTotal });
-
-			// 3a. Build resolver index from iterator.
-			const resolverIndex = this.buildResolverIndex(
-				snapshot.snapshotUid,
+			const resolution = this.resolveSnapshotEdges(
+				snapshot,
 				trackedFiles,
 				repoUid,
+				snapshotSignals,
 				compileDb,
+				extractionEdgesTotal,
+				options?.edgeBatchSize,
+				emit,
 			);
 
-			// 3b. Batch-process staged edges.
-			const EDGE_BATCH_SIZE = options?.edgeBatchSize ?? 10_000;
-			let edgeCursor: string | null = null;
-			let resolvedTotal = 0;
-			let unresolvedCount = 0;
-			// Accumulate resolved IMPORTS pairs for module-edge derivation.
-			// Lightweight: only [sourceNodeUid, targetNodeUid] tuples.
-			const resolvedImportPairs: Array<[string, string]> = [];
-			const unresolvedBreakdown: Partial<Record<UnresolvedEdgeCategory, number>> = {};
-			const classificationObservedAt = new Date().toISOString();
+			const { resolvedTotal, unresolvedCount, unresolvedBreakdown, moduleEdgesCount } = resolution;
 
-			emit({ phase: "resolving", current: 0, total: stagedEdgesTotal });
-
-			// eslint-disable-next-line no-constant-condition
-			while (true) {
-				const batch = this.storage.queryStagedEdgesBatch(
-					snapshot.snapshotUid,
-					EDGE_BATCH_SIZE,
-					edgeCursor,
-				);
-				if (batch.length === 0) break;
-				edgeCursor = batch[batch.length - 1].edgeUid;
-
-				// Map staged edges to UnresolvedEdge shape.
-				const batchUnresolved: UnresolvedEdge[] = batch.map((se) => ({
-					edgeUid: se.edgeUid,
-					snapshotUid: se.snapshotUid,
-					repoUid: se.repoUid,
-					sourceNodeUid: se.sourceNodeUid,
-					targetKey: se.targetKey,
-					type: se.type as any,
-					resolution: se.resolution as any,
-					extractor: se.extractor,
-					location: se.lineStart !== null ? {
-						lineStart: se.lineStart,
-						colStart: se.colStart ?? 0,
-						lineEnd: se.lineEnd ?? se.lineStart,
-						colEnd: se.colEnd ?? 0,
-					} : null,
-					metadataJson: se.metadataJson,
-				}));
-
-				// Load file signals for source files in THIS batch only.
-				const batchSourceFileUids = new Set<string>();
-				for (const se of batch) {
-					if (se.sourceFileUid) batchSourceFileUids.add(se.sourceFileUid);
-					// Map source node → file via staged edge metadata.
-					if (se.sourceFileUid) {
-						resolverIndex.nodeUidToFileUid.set(
-							se.sourceNodeUid,
-							se.sourceFileUid,
-						);
-					}
-				}
-				// Load full file signal rows (bindings + deps + aliases).
-				const batchSignals = new Map<string, FileSignalRow>();
-				const batchImportBindings = new Map<string, ImportBinding[]>();
-				if (batchSourceFileUids.size > 0) {
-					const signalRows = this.storage.queryFileSignalsBatch(
-						snapshot.snapshotUid,
-						[...batchSourceFileUids],
-					);
-					for (const row of signalRows) {
-						batchSignals.set(row.fileUid, row);
-						if (row.importBindingsJson) {
-							const bindings = JSON.parse(row.importBindingsJson) as ImportBinding[];
-							if (bindings.length > 0) {
-								batchImportBindings.set(row.fileUid, bindings);
-							}
-						}
-					}
-				}
-
-				// Resolve this batch.
-				const batchResult = this.resolveEdges(
-					batchUnresolved,
-					resolverIndex,
-					repoUid,
-					snapshot.snapshotUid,
-					batchImportBindings,
-				);
-
-				// Persist resolved edges from this batch immediately.
-				if (batchResult.resolved.length > 0) {
-					this.storage.insertEdges(batchResult.resolved);
-					// Accumulate IMPORTS pairs for module-edge derivation.
-					for (const e of batchResult.resolved) {
-						if (e.type === EdgeType.IMPORTS) {
-							resolvedImportPairs.push([e.sourceNodeUid, e.targetNodeUid]);
-						}
-					}
-				}
-				resolvedTotal += batchResult.resolved.length;
-
-				// Classify and persist unresolved edges from this batch.
-				if (batchResult.stillUnresolved.length > 0) {
-					const classifiedRows: PersistedUnresolvedEdge[] = [];
-					for (const { edge, category, sourceFileUid } of batchResult.stillUnresolved) {
-						const fileSignals = this.buildFileSignalsForClassification(
-							snapshot.snapshotUid,
-							sourceFileUid,
-							batchSignals,
-						);
-
-						const verdict = classifyUnresolvedEdge(
-							edge,
-							category,
-							snapshotSignals,
-							fileSignals,
-						);
-						let { classification } = verdict;
-						let { basisCode } = verdict;
-
-						const fwOverride = detectFrameworkBoundary(
-							edge.targetKey,
-							category,
-							fileSignals.importBindings,
-						);
-						if (fwOverride) {
-							classification = fwOverride.classification;
-							basisCode = fwOverride.basisCode;
-						}
-
-						classifiedRows.push({
-							...edge,
-							category,
-							classification,
-							classifierVersion: CURRENT_CLASSIFIER_VERSION,
-							basisCode,
-							observedAt: classificationObservedAt,
-						});
-
-						unresolvedBreakdown[category] =
-							(unresolvedBreakdown[category] ?? 0) + 1;
-					}
-					this.storage.insertUnresolvedEdges(classifiedRows);
-					unresolvedCount += batchResult.stillUnresolved.length;
-				}
-
-				for (const [cat, count] of Object.entries(batchResult.unresolvedBreakdown)) {
-					// Already counted in the classification loop above.
-					// unresolvedBreakdown merge is handled there.
-					void cat;
-					void count;
-				}
-
-				emit({
-					phase: "resolving",
-					current: resolvedTotal + unresolvedCount,
-					total: stagedEdgesTotal,
-				});
-			}
-
-			emit({
-				phase: "resolving",
-				current: stagedEdgesTotal,
-				total: stagedEdgesTotal,
-			});
-
-			// 3c. Create module-level edges from resolver index Maps.
-			// The resolver index already has stableKey→nodeUid and
-			// kind/qualifiedName from the iterator build. We read resolved
-			// edges back from DB since they were persisted per-batch.
-			const moduleEdges = this.createModuleEdgesFromIndex(
-				resolverIndex,
-				resolvedImportPairs,
-				snapshot.snapshotUid,
+			// ═══════════════════════════════════════════════════════════════
+			// PHASE 3d + 4: Module discovery, detectors, boundary extraction
+			// ═══════════════════════════════════════════════════════════════
+			await this.runPostpasses(
+				snapshot,
+				repo,
+				filePaths,
+				trackedFiles,
 				repoUid,
+				fileSignalsCache,
 			);
-			if (moduleEdges.length > 0) {
-				this.storage.insertEdges(moduleEdges);
-			}
 
 			// ═══════════════════════════════════════════════════════════════
-			// PHASE 3d: Module discovery (declared modules from manifests)
+			// PHASE 5: Finalize
 			// ═══════════════════════════════════════════════════════════════
-			// Additive: discovers declared module roots from workspace/
-			// manifest files and persists candidates + evidence + file
-			// ownership. Does NOT replace directory-based MODULE nodes.
-			if (this.discovery) {
-				const discoveredRoots = await this.discovery.discoverDeclaredModules(
-					repo.rootPath,
-					repoUid,
-				);
-				if (discoveredRoots.length > 0) {
-					const moduleResult = discoverModules({
-						repoUid,
-						snapshotUid: snapshot.snapshotUid,
-						discoveredRoots,
-						trackedFiles,
-					});
-					if (moduleResult.candidates.length > 0) {
-						this.storage.insertModuleCandidates(moduleResult.candidates);
-						this.storage.insertModuleCandidateEvidence(moduleResult.evidence);
-						this.storage.insertModuleFileOwnership(moduleResult.ownership);
-					}
-				}
-			}
-
-			// ═══════════════════════════════════════════════════════════════
-			// PHASE 4: Framework detectors and boundary extraction
-			// ═══════════════════════════════════════════════════════════════
-			// Each detector reads symbols per-file from DB via
-			// querySymbolsByFile — small result set per file (5-50 rows).
-			// No whole-snapshot node materialization.
-
-			// 9b. Detect framework entrypoints (node-level liveness facts).
-			// Lambda/serverless handler detection. Only fires for files
-			// that have import bindings (TS/JS files with imports).
-			{
-				const entrypointInferences: InferenceRow[] = [];
-				const detectedAt = new Date().toISOString();
-				for (const [fileUid, signals] of fileSignalsCache) {
-					const fileSymbols = this.storage.querySymbolsByFile(
-						snapshot.snapshotUid,
-						fileUid,
-					);
-					const exportedSymbols = fileSymbols
-						.filter((n) => n.visibility != null)
-						.map((n) => ({
-							stableKey: n.stableKey,
-							name: n.name,
-							visibility: n.visibility,
-							subtype: n.subtype,
-						}));
-
-					const detected = detectLambdaEntrypoints({
-						importBindings: signals.importBindings,
-						exportedSymbols,
-					});
-
-					for (const ep of detected) {
-						entrypointInferences.push({
-							inferenceUid: uuidv4(),
-							snapshotUid: snapshot.snapshotUid,
-							repoUid,
-							targetStableKey: ep.targetStableKey,
-							kind: "framework_entrypoint",
-							valueJson: JSON.stringify({
-								convention: ep.convention,
-								reason: ep.reason,
-							}),
-							confidence: ep.confidence,
-							basisJson: JSON.stringify({
-								convention: ep.convention,
-								classifier_version: CURRENT_CLASSIFIER_VERSION,
-							}),
-							extractor: INDEXER_VERSION,
-							createdAt: detectedAt,
-						});
-					}
-				}
-				if (entrypointInferences.length > 0) {
-					this.storage.deleteInferencesByKind(
-						snapshot.snapshotUid,
-						"framework_entrypoint",
-					);
-					this.storage.insertInferences(entrypointInferences);
-				}
-			}
-
-			// 9d. Spring container-managed bean detection.
-			{
-				const springInferences: InferenceRow[] = [];
-				const detectedAt = new Date().toISOString();
-				for (const relPath of filePaths) {
-					if (!relPath.endsWith(".java")) continue;
-					let content: string;
-					try {
-						content = await readFile(join(repo.rootPath, relPath), "utf-8");
-					} catch { continue; }
-					if (content.length > MAX_FILE_SIZE_BYTES) continue;
-					const fileUid = `${repoUid}:${relPath}`;
-
-					const fileSymbols = this.storage.querySymbolsByFile(
-						snapshot.snapshotUid,
-						fileUid,
-					);
-
-					const beans = detectSpringBeans(content, relPath, fileSymbols);
-					for (const bean of beans) {
-						springInferences.push({
-							inferenceUid: uuidv4(),
-							snapshotUid: snapshot.snapshotUid,
-							repoUid,
-							targetStableKey: bean.targetStableKey,
-							kind: "spring_container_managed",
-							valueJson: JSON.stringify({
-								annotation: bean.annotation,
-								convention: bean.convention,
-								reason: bean.reason,
-							}),
-							confidence: bean.confidence,
-							basisJson: JSON.stringify({
-								convention: bean.convention,
-								classifier_version: CURRENT_CLASSIFIER_VERSION,
-							}),
-							extractor: INDEXER_VERSION,
-							createdAt: detectedAt,
-						});
-					}
-				}
-				if (springInferences.length > 0) {
-					this.storage.deleteInferencesByKind(
-						snapshot.snapshotUid,
-						"spring_container_managed",
-					);
-					this.storage.insertInferences(springInferences);
-				}
-			}
-
-			// 9e. Pytest test/fixture detection.
-			{
-				const pytestInferences: InferenceRow[] = [];
-				const detectedAt = new Date().toISOString();
-				for (const relPath of filePaths) {
-					if (!relPath.endsWith(".py")) continue;
-					let content: string;
-					try {
-						content = await readFile(join(repo.rootPath, relPath), "utf-8");
-					} catch { continue; }
-					if (content.length > MAX_FILE_SIZE_BYTES) continue;
-					const fileUid = `${repoUid}:${relPath}`;
-
-					const fileSymbols = this.storage.querySymbolsByFile(
-						snapshot.snapshotUid,
-						fileUid,
-					);
-
-					const items = detectPytestItems(content, relPath, fileSymbols);
-					for (const item of items) {
-						const kind = item.convention.startsWith("pytest_fixture")
-							? "pytest_fixture"
-							: "pytest_test";
-						pytestInferences.push({
-							inferenceUid: uuidv4(),
-							snapshotUid: snapshot.snapshotUid,
-							repoUid,
-							targetStableKey: item.targetStableKey,
-							kind,
-							valueJson: JSON.stringify({
-								convention: item.convention,
-								reason: item.reason,
-							}),
-							confidence: item.confidence,
-							basisJson: JSON.stringify({
-								convention: item.convention,
-								classifier_version: CURRENT_CLASSIFIER_VERSION,
-							}),
-							extractor: INDEXER_VERSION,
-							createdAt: detectedAt,
-						});
-					}
-				}
-				if (pytestInferences.length > 0) {
-					this.storage.deleteInferencesByKind(snapshot.snapshotUid, "pytest_test");
-					this.storage.deleteInferencesByKind(snapshot.snapshotUid, "pytest_fixture");
-					this.storage.insertInferences(pytestInferences);
-				}
-			}
-
-			// 9f. Linux/system framework detection (C/C++).
-			{
-				const systemInferences: InferenceRow[] = [];
-				const detectedAt = new Date().toISOString();
-				for (const relPath of filePaths) {
-					const ext = relPath.slice(relPath.lastIndexOf("."));
-					if (![".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hxx"].includes(ext)) continue;
-					let content: string;
-					try {
-						content = await readFile(join(repo.rootPath, relPath), "utf-8");
-					} catch { continue; }
-					if (content.length > MAX_FILE_SIZE_BYTES) continue;
-					const fileUid = `${repoUid}:${relPath}`;
-
-					const fileSymbols = this.storage.querySymbolsByFile(
-						snapshot.snapshotUid,
-						fileUid,
-					);
-
-					const entries = detectLinuxSystemPatterns(content, relPath, fileSymbols);
-					for (const entry of entries) {
-						systemInferences.push({
-							inferenceUid: uuidv4(),
-							snapshotUid: snapshot.snapshotUid,
-							repoUid,
-							targetStableKey: entry.targetStableKey,
-							kind: "linux_system_managed",
-							valueJson: JSON.stringify({
-								convention: entry.convention,
-								reason: entry.reason,
-							}),
-							confidence: entry.confidence,
-							basisJson: JSON.stringify({
-								convention: entry.convention,
-								classifier_version: CURRENT_CLASSIFIER_VERSION,
-							}),
-							extractor: INDEXER_VERSION,
-							createdAt: detectedAt,
-						});
-					}
-				}
-				if (systemInferences.length > 0) {
-					this.storage.deleteInferencesByKind(
-						snapshot.snapshotUid,
-						"linux_system_managed",
-					);
-					this.storage.insertInferences(systemInferences);
-				}
-			}
-
-				// 9c. Boundary fact extraction (PROTOTYPE).
-				// Runs boundary-specific extractors on applicable files,
-				// persists raw facts (source of truth), then materializes
-				// intra-repo derived links (convenience artifact).
-				//
-				// This is separate from the main extractor pipeline because
-				// boundary facts are NOT ExtractionResult objects — they
-				// have a different shape (BoundaryProviderFact/ConsumerFact)
-				// and live in separate tables, not in nodes/edges.
-				{
-					const providerFacts: PersistedBoundaryProviderFact[] = [];
-					const consumerFacts: PersistedBoundaryConsumerFact[] = [];
-					const boundaryObservedAt = new Date().toISOString();
-
-					for (const relPath of filePaths) {
-						// Re-read source for boundary extraction.
-						// fileContents is no longer in memory (released per-file
-						// during extraction). Boundary extractors are lightweight
-						// regex scanners, so the re-read cost is acceptable.
-						let content: string;
-						try {
-							content = await readFile(
-								join(repo.rootPath, relPath),
-								"utf-8",
-							);
-						} catch {
-							continue;
-						}
-						if (content.length > MAX_FILE_SIZE_BYTES) continue;
-						const fileUid = `${repoUid}:${relPath}`;
-
-						// Gather symbols from this file for caller/handler attribution.
-						const fileSymbols = this.storage.querySymbolsByFile(
-							snapshot.snapshotUid,
-							fileUid,
-						);
-
-						// Java files: extract Spring route provider facts.
-						// Note: this reparses the file with tree-sitter-java
-						// because the Java extractor does not expose its parse
-						// tree. Passing the tree through would avoid this cost
-						// but requires extending ExtractionResult. Deferred.
-						if (relPath.endsWith(".java")) {
-							if (!this.springParserReady) {
-								await initSpringRouteParser();
-								this.springParserReady = true;
-							}
-							const routes = extractSpringRoutes(
-								content,
-								relPath,
-								repoUid,
-								fileSymbols,
-							);
-							for (const r of routes) {
-								const strategy = getMatchStrategy(r.mechanism);
-								const matcherKey = strategy
-									? strategy.computeMatcherKey(r.address, r.metadata)
-									: r.operation;
-								providerFacts.push({
-									...r,
-									factUid: uuidv4(),
-									snapshotUid: snapshot.snapshotUid,
-									repoUid,
-									matcherKey,
-									extractor: "spring-route-extractor:0.1",
-									observedAt: boundaryObservedAt,
-								});
-							}
-						}
-
-						// TS/JS files: extract Express route provider facts AND
-						// HTTP client consumer facts. Resolve file-local string
-						// bindings first so both extractors can recover constants.
-						if (
-							relPath.endsWith(".ts") ||
-							relPath.endsWith(".tsx") ||
-							relPath.endsWith(".js") ||
-							relPath.endsWith(".jsx")
-						) {
-							// Lazy-init the string resolver on first use.
-							if (!this.stringResolver) {
-								this.stringResolver = new FileLocalStringResolver();
-								await this.stringResolver.initialize();
-							}
-							const bindings = this.stringResolver.resolve(content, relPath);
-
-							// Commander CLI command provider facts.
-							const cliCommands = extractCommanderCommands(
-								content,
-								relPath,
-								repoUid,
-								fileSymbols,
-							);
-							for (const cmd of cliCommands) {
-								const strategy = getMatchStrategy(cmd.mechanism);
-								const matcherKey = strategy
-									? strategy.computeMatcherKey(cmd.address, cmd.metadata)
-									: cmd.operation;
-								providerFacts.push({
-									...cmd,
-									factUid: uuidv4(),
-									snapshotUid: snapshot.snapshotUid,
-									repoUid,
-									matcherKey,
-									extractor: "commander-command-extractor:0.1",
-									observedAt: boundaryObservedAt,
-								});
-							}
-
-							// Express route provider facts.
-							const routes = extractExpressRoutes(
-								content,
-								relPath,
-								repoUid,
-								fileSymbols,
-								bindings,
-							);
-							for (const r of routes) {
-								const strategy = getMatchStrategy(r.mechanism);
-								const matcherKey = strategy
-									? strategy.computeMatcherKey(r.address, r.metadata)
-									: r.operation;
-								providerFacts.push({
-									...r,
-									factUid: uuidv4(),
-									snapshotUid: snapshot.snapshotUid,
-									repoUid,
-									matcherKey,
-									extractor: "express-route-extractor:0.1",
-									observedAt: boundaryObservedAt,
-								});
-							}
-
-							// HTTP client consumer facts.
-							const requests = extractHttpClientRequests(
-								content,
-								relPath,
-								repoUid,
-								fileSymbols,
-								bindings,
-							);
-							for (const c of requests) {
-								const strategy = getMatchStrategy(c.mechanism);
-								const matcherKey = strategy
-									? strategy.computeMatcherKey(c.address, c.metadata)
-									: c.operation;
-								consumerFacts.push({
-									...c,
-									factUid: uuidv4(),
-									snapshotUid: snapshot.snapshotUid,
-									repoUid,
-									matcherKey,
-									extractor: "http-client-extractor:0.1",
-									observedAt: boundaryObservedAt,
-								});
-							}
-						}
-					}
-
-					// 9c-ii. Extract CLI consumer facts from package.json scripts.
-					// Reads package.json files in the repo and parses "scripts"
-					// entries as cli_command consumer invocations.
-					{
-						const packageJsonPaths = await this.findPackageJsonFiles(repo.rootPath);
-						for (const pkgRelPath of packageJsonPaths) {
-							try {
-								const pkgContent = await readFile(
-									join(repo.rootPath, pkgRelPath),
-									"utf-8",
-								);
-								const pkg = JSON.parse(pkgContent);
-								if (pkg.scripts && typeof pkg.scripts === "object") {
-									const scriptFacts = extractPackageScriptConsumers(
-										pkg.scripts,
-										pkgRelPath,
-										repoUid,
-									);
-									for (const c of scriptFacts) {
-										const strategy = getMatchStrategy(c.mechanism);
-										const matcherKey = strategy
-											? strategy.computeMatcherKey(c.address, c.metadata)
-											: c.operation;
-										consumerFacts.push({
-											...c,
-											factUid: uuidv4(),
-											snapshotUid: snapshot.snapshotUid,
-											repoUid,
-											matcherKey,
-											extractor: "package-script-cli-extractor:0.1",
-											observedAt: boundaryObservedAt,
-										});
-									}
-								}
-							} catch {
-								// Skip unreadable / unparseable package.json files.
-							}
-						}
-					}
-
-					// 9c-iii. Extract CLI consumer facts from shell scripts.
-					{
-						const shellPaths = await this.findShellScripts(repo.rootPath);
-						for (const shellRelPath of shellPaths) {
-							try {
-								const shellContent = await readFile(
-									join(repo.rootPath, shellRelPath),
-									"utf-8",
-								);
-								const shellFacts = extractShellScriptConsumers(
-									shellContent,
-									shellRelPath,
-									repoUid,
-								);
-								for (const c of shellFacts) {
-									const strategy = getMatchStrategy(c.mechanism);
-									const matcherKey = strategy
-										? strategy.computeMatcherKey(c.address, c.metadata)
-										: c.operation;
-									consumerFacts.push({
-										...c,
-										factUid: uuidv4(),
-										snapshotUid: snapshot.snapshotUid,
-										repoUid,
-										matcherKey,
-										extractor: "shell-script-cli-extractor:0.1",
-										observedAt: boundaryObservedAt,
-									});
-								}
-							} catch {
-								// Skip unreadable shell scripts.
-							}
-						}
-					}
-
-					// 9c-iv. Extract CLI consumer facts from Makefiles.
-					{
-						const makefilePaths = await this.findMakefiles(repo.rootPath);
-						for (const mkRelPath of makefilePaths) {
-							try {
-								const mkContent = await readFile(
-									join(repo.rootPath, mkRelPath),
-									"utf-8",
-								);
-								const mkFacts = extractMakefileConsumers(
-									mkContent,
-									mkRelPath,
-									repoUid,
-								);
-								for (const c of mkFacts) {
-									const strategy = getMatchStrategy(c.mechanism);
-									const matcherKey = strategy
-										? strategy.computeMatcherKey(c.address, c.metadata)
-										: c.operation;
-									consumerFacts.push({
-										...c,
-										factUid: uuidv4(),
-										snapshotUid: snapshot.snapshotUid,
-										repoUid,
-										matcherKey,
-										extractor: "makefile-cli-extractor:0.1",
-										observedAt: boundaryObservedAt,
-									});
-								}
-							} catch {
-								// Skip unreadable Makefiles.
-							}
-						}
-					}
-
-					// Persist raw facts (source of truth).
-					if (providerFacts.length > 0) {
-						this.storage.insertBoundaryProviderFacts(providerFacts);
-					}
-					if (consumerFacts.length > 0) {
-						this.storage.insertBoundaryConsumerFacts(consumerFacts);
-					}
-
-					// Materialize intra-repo derived links (convenience artifact).
-					// These are DISCARDABLE — they can be regenerated from raw facts.
-					//
-					// The matcher accepts persisted facts (which carry factUid) and
-					// returns candidates with stable UIDs — no object-identity
-					// assumptions across the strategy boundary.
-					if (providerFacts.length > 0 && consumerFacts.length > 0) {
-						const candidates = matchBoundaryFacts(
-							providerFacts,
-							consumerFacts,
-						);
-						if (candidates.length > 0) {
-							const materializedAt = new Date().toISOString();
-							const links: PersistedBoundaryLink[] = candidates.map(
-								(c) => ({
-									linkUid: uuidv4(),
-									snapshotUid: snapshot.snapshotUid,
-									repoUid,
-									providerFactUid: c.providerFactUid,
-									consumerFactUid: c.consumerFactUid,
-									matchBasis: c.matchBasis,
-									confidence: c.confidence,
-									metadataJson: null,
-									materializedAt,
-								}),
-							);
-							this.storage.insertBoundaryLinks(links);
-						}
-					}
-				}
-
-				// 10. Persist function-level measurements
-			if (allMetrics.size > 0) {
-				const now = new Date().toISOString();
-				const measurements: Measurement[] = [];
-				for (const [stableKey, m] of allMetrics) {
-					measurements.push({
-						measurementUid: uuidv4(),
-						snapshotUid: snapshot.snapshotUid,
-						repoUid,
-						targetStableKey: stableKey,
-						kind: "cyclomatic_complexity",
-						valueJson: JSON.stringify({ value: m.cc }),
-						source: INDEXER_VERSION,
-						createdAt: now,
-					});
-					measurements.push({
-						measurementUid: uuidv4(),
-						snapshotUid: snapshot.snapshotUid,
-						repoUid,
-						targetStableKey: stableKey,
-						kind: "parameter_count",
-						valueJson: JSON.stringify({ value: m.params }),
-						source: INDEXER_VERSION,
-						createdAt: now,
-					});
-					measurements.push({
-						measurementUid: uuidv4(),
-						snapshotUid: snapshot.snapshotUid,
-						repoUid,
-						targetStableKey: stableKey,
-						kind: "max_nesting_depth",
-						valueJson: JSON.stringify({ value: m.nesting }),
-						source: INDEXER_VERSION,
-						createdAt: now,
-					});
-				}
-				this.storage.insertMeasurements(measurements);
-			}
-
-			// 11. Extract domain versions from manifest files
-			await this.extractManifestVersions(
-				repo.rootPath,
+			return this.finalizeSnapshot(
+				snapshot,
+				repo,
 				repoUid,
-				snapshot.snapshotUid,
+				trackedFiles,
+				nodesTotal,
+				resolvedTotal,
+				moduleEdgesCount,
+				unresolvedCount,
+				unresolvedBreakdown,
+				allMetrics,
+				skippedOversized,
+				filesReadFailed,
+				startTime,
+				emit,
 			);
 
-			// 11a. Extract provisional annotations (README + package.json
-			// description) and persist via AnnotationsPort. Writes-only;
-			// indexer never reads annotations back. Skipped silently when
-			// no port is injected (annotations-contract.txt §7).
-			const annotationCollisionsDropped = this.annotations
-				? await this.extractAndPersistAnnotations(
-						repo.rootPath,
-						repoUid,
-						snapshot.snapshotUid,
-						resolverIndex,
-					)
-				: 0;
-
-			// 12. Finalize snapshot
-			this.storage.updateSnapshotCounts(snapshot.snapshotUid);
-			this.storage.updateSnapshotStatus({
-				snapshotUid: snapshot.snapshotUid,
-				status: SnapshotStatus.READY,
-			});
-
-			emit({ phase: "persisting", current: 1, total: 1 });
-
-			// 11. Check for orphaned symbol declarations
-			const orphanedDeclarations = this.countOrphanedDeclarations(
-				repoUid,
-				snapshot.snapshotUid,
-			);
-
-			// 12. Persist snapshot-level extraction diagnostics.
-			// These would otherwise be lost after this method returns.
-			// The trust reporting surface reads them on demand.
-			const extractionDiagnostics = {
-				diagnostics_version: 1,
-				edges_total: resolvedTotal + moduleEdges.length,
-				unresolved_total: unresolvedCount,
-				unresolved_breakdown: unresolvedBreakdown,
-				annotation_collisions_dropped: annotationCollisionsDropped,
-				files_skipped_oversized: skippedOversized,
-				files_read_failed: filesReadFailed,
-			};
-			this.storage.updateSnapshotExtractionDiagnostics(
-				snapshot.snapshotUid,
-				JSON.stringify(extractionDiagnostics),
-			);
-
-			// Clean up staging tables — edges are now in their final tables.
-				this.storage.deleteStagedEdges(snapshot.snapshotUid);
-				// Keep file_signals — useful for re-classification without re-extraction.
-
-				return {
-					snapshotUid: snapshot.snapshotUid,
-					filesTotal: trackedFiles.length,
-					nodesTotal,
-					edgesTotal: resolvedTotal + moduleEdges.length,
-					edgesUnresolved: unresolvedCount,
-					unresolvedBreakdown,
-					durationMs: Date.now() - startTime,
-					orphanedDeclarations,
-				};
 		} catch (err) {
 			// Mark snapshot as failed
 			this.storage.updateSnapshotStatus({
@@ -1480,16 +400,809 @@ export class RepoIndexer implements IndexerPort {
 			throw new Error(`Repository not found: ${repoUid}`);
 		}
 
-		// For v1, refresh performs a full re-extraction but records it as a
-		// REFRESH snapshot with a parent link to the previous snapshot.
-		// A true incremental refresh would:
-		// 1. Compare content hashes to identify changed/added/removed files
-		// 2. Copy unchanged file nodes/edges from the previous snapshot
-		// 3. Only re-extract changed/added files
-		// 4. Delete nodes/edges for removed files
-		// 5. Re-resolve edges affected by changes
-		// That optimization is deferred to v2.
+		// TODO: delta indexing implementation.
+		// Currently falls through to full re-extraction with parent link.
+		// The correct implementation will use:
+		//   1. buildInvalidationPlan (support module, shipped)
+		//   2. copyForwardUnchangedFiles (storage, shipped)
+		//   3. executeBuildPipeline (shared internal phases, not yet extracted)
+		// Blocked on: runIndex decomposition into reusable phase helpers.
 		return this.runIndex(repoUid, SnapshotKind.REFRESH, options);
+	}
+
+	// ── Phase helpers (shared between full and refresh orchestrators) ──
+
+	/**
+	 * Phase 1 + 2: Extract files and create MODULE nodes.
+	 *
+	 * Per-file: read → extract → persist nodes → persist extraction edges
+	 * → persist file signals → discard source text.
+	 * Then create MODULE nodes from directory structure.
+	 *
+	 * Returns an ExtractionPhaseResult DTO for downstream phases.
+	 * Both full-index and refresh orchestrators call this with their
+	 * respective file lists.
+	 */
+	private async extractFilesIntoSnapshot(
+		snapshot: Snapshot,
+		repo: Repo,
+		filePaths: string[],
+		repoUid: string,
+		emit: (event: IndexProgressEvent) => void,
+	): Promise<ExtractionPhaseResult> {
+		const trackedFiles: TrackedFile[] = [];
+		let nodesTotal = 0;
+		let extractionEdgesTotal = 0;
+
+		const allMetrics = new Map<
+			string,
+			{ cc: number; params: number; nesting: number }
+		>();
+
+		// Minimal import-bindings-only cache for Lambda entrypoint
+		// detection (Phase 4). Classification loads signals per-batch
+		// from the file_signals table.
+		const fileSignalsCache = new Map<string, FileSignals>();
+
+		const packageDepsCache = new Map<string, PackageDependencySet>();
+		const tsconfigAliasesCache = new Map<string, TsconfigAliases>();
+		let skippedOversized = 0;
+		let filesReadFailed = 0;
+		let extractIdx = 0;
+
+		for (const relPath of filePaths) {
+			emit({
+				phase: "extracting",
+				current: extractIdx,
+				total: filePaths.length,
+				file: relPath,
+			});
+
+			const absPath = join(repo.rootPath, relPath);
+			let content: string;
+			try {
+				content = await readFile(absPath, "utf-8");
+			} catch {
+				const failedFileUid = `${repoUid}:${relPath}`;
+				trackedFiles.push({
+					fileUid: failedFileUid,
+					repoUid,
+					path: relPath,
+					language: detectLanguage(relPath),
+					isTest: isTestFile(relPath),
+					isGenerated: false,
+					isExcluded: false,
+				});
+				this.storage.upsertFiles([trackedFiles[trackedFiles.length - 1]]);
+				this.storage.upsertFileVersions([{
+					snapshotUid: snapshot.snapshotUid,
+					fileUid: failedFileUid,
+					contentHash: "",
+					astHash: null,
+					extractor: (this.getExtractorForFile(relPath)?.name ?? "unknown"),
+					parseStatus: ParseStatus.FAILED,
+					sizeBytes: 0,
+					lineCount: 0,
+					indexedAt: new Date().toISOString(),
+				}]);
+				filesReadFailed++;
+				extractIdx++;
+				continue;
+			}
+
+			if (content.length > MAX_FILE_SIZE_BYTES) {
+				const skippedFileUid = `${repoUid}:${relPath}`;
+				trackedFiles.push({
+					fileUid: skippedFileUid,
+					repoUid,
+					path: relPath,
+					language: detectLanguage(relPath),
+					isTest: isTestFile(relPath),
+					isGenerated: false,
+					isExcluded: true,
+				});
+				this.storage.upsertFiles([trackedFiles[trackedFiles.length - 1]]);
+				this.storage.upsertFileVersions([{
+					snapshotUid: snapshot.snapshotUid,
+					fileUid: skippedFileUid,
+					contentHash: hashContent(content),
+					astHash: null,
+					extractor: "skipped:oversized",
+					parseStatus: ParseStatus.SKIPPED,
+					sizeBytes: Buffer.byteLength(content, "utf-8"),
+					lineCount: content.split("\n").length,
+					indexedAt: new Date().toISOString(),
+				}]);
+				skippedOversized++;
+				extractIdx++;
+				continue;
+			}
+
+			const contentHash = hashContent(content);
+			const fileUid = `${repoUid}:${relPath}`;
+
+			trackedFiles.push({
+				fileUid,
+				repoUid,
+				path: relPath,
+				language: detectLanguage(relPath),
+				isTest: isTestFile(relPath),
+				isGenerated: false,
+				isExcluded: false,
+			});
+
+			this.storage.upsertFiles([trackedFiles[trackedFiles.length - 1]]);
+			this.storage.upsertFileVersions([{
+				snapshotUid: snapshot.snapshotUid,
+				fileUid,
+				contentHash,
+				astHash: null,
+				extractor: (this.getExtractorForFile(relPath)?.name ?? "unknown"),
+				parseStatus: ParseStatus.PARSED,
+				sizeBytes: Buffer.byteLength(content, "utf-8"),
+				lineCount: content.split("\n").length,
+				indexedAt: new Date().toISOString(),
+			}]);
+			const extractor = this.getExtractorForFile(relPath);
+			if (!extractor) {
+				extractIdx++;
+				continue;
+			}
+			let result: ExtractionResult;
+			try {
+				result = await extractor.extract(
+					content,
+					relPath,
+					fileUid,
+					repoUid,
+					snapshot.snapshotUid,
+				);
+			} catch {
+				this.storage.upsertFileVersions([{
+					snapshotUid: snapshot.snapshotUid,
+					fileUid,
+					contentHash,
+					astHash: null,
+					extractor: (this.getExtractorForFile(relPath)?.name ?? "unknown"),
+					parseStatus: ParseStatus.FAILED,
+					sizeBytes: Buffer.byteLength(content, "utf-8"),
+					lineCount: content.split("\n").length,
+					indexedAt: new Date().toISOString(),
+				}]);
+				extractIdx++;
+				continue;
+			}
+
+			this.storage.insertNodes(result.nodes);
+			nodesTotal += result.nodes.length;
+
+			if (result.edges.length > 0) {
+				this.storage.insertExtractionEdges(result.edges.map((e) => ({
+					...e,
+					lineStart: e.location?.lineStart ?? null,
+					colStart: e.location?.colStart ?? null,
+					lineEnd: e.location?.lineEnd ?? null,
+					colEnd: e.location?.colEnd ?? null,
+					sourceFileUid: fileUid,
+				})));
+				extractionEdgesTotal += result.edges.length;
+			}
+			for (const [key, m] of result.metrics) {
+				allMetrics.set(key, {
+					cc: m.cyclomaticComplexity,
+					params: m.parameterCount,
+					nesting: m.maxNestingDepth,
+				});
+			}
+
+			const sameFileValueSymbols = new Set<string>();
+			const sameFileClassSymbols = new Set<string>();
+			const sameFileInterfaceSymbols = new Set<string>();
+			for (const node of result.nodes) {
+				if (node.kind === NodeKind.SYMBOL) {
+					const sub = node.subtype;
+					if (
+						sub === NodeSubtype.FUNCTION ||
+						sub === NodeSubtype.CLASS ||
+						sub === NodeSubtype.METHOD ||
+						sub === NodeSubtype.VARIABLE ||
+						sub === NodeSubtype.CONSTANT ||
+						sub === NodeSubtype.ENUM ||
+						sub === NodeSubtype.ENUM_MEMBER ||
+						sub === NodeSubtype.CONSTRUCTOR ||
+						sub === NodeSubtype.GETTER ||
+						sub === NodeSubtype.SETTER ||
+						sub === NodeSubtype.PROPERTY
+					) {
+						sameFileValueSymbols.add(node.name);
+					}
+					if (sub === NodeSubtype.CLASS) {
+						sameFileClassSymbols.add(node.name);
+					}
+					if (sub === NodeSubtype.INTERFACE) {
+						sameFileInterfaceSymbols.add(node.name);
+					}
+				}
+			}
+			const packageDependencies = await this.resolveNearestPackageDeps(
+				relPath,
+				repo.rootPath,
+				packageDepsCache,
+			);
+			const tsconfigAliases = await this.resolveNearestTsconfigAliases(
+				relPath,
+				repo.rootPath,
+				tsconfigAliasesCache,
+			);
+			const hasBindings = result.importBindings.length > 0;
+			const hasDeps = packageDependencies.names.length > 0;
+			const hasAliases = tsconfigAliases.entries.length > 0;
+			if (hasBindings || hasDeps || hasAliases) {
+				this.storage.insertFileSignals([{
+					snapshotUid: snapshot.snapshotUid,
+					fileUid,
+					importBindingsJson: hasBindings
+						? JSON.stringify(result.importBindings)
+						: null,
+					packageDependenciesJson: hasDeps
+						? JSON.stringify(packageDependencies)
+						: null,
+					tsconfigAliasesJson: hasAliases
+						? JSON.stringify(tsconfigAliases)
+						: null,
+				}]);
+			}
+
+			if (hasBindings) {
+				fileSignalsCache.set(fileUid, {
+					importBindings: result.importBindings,
+					sameFileValueSymbols: new Set(),
+					sameFileClassSymbols: new Set(),
+					sameFileInterfaceSymbols: new Set(),
+					packageDependencies: { names: [] },
+					tsconfigAliases: { entries: [] },
+				});
+			}
+
+			extractIdx++;
+		}
+
+		emit({
+			phase: "extracting",
+			current: filePaths.length,
+			total: filePaths.length,
+		});
+
+		// Phase 2: MODULE nodes.
+		const moduleNodes = this.createModuleNodes(
+			filePaths,
+			repoUid,
+			snapshot.snapshotUid,
+		);
+		if (moduleNodes.length > 0) {
+			this.storage.insertNodes(moduleNodes);
+			nodesTotal += moduleNodes.length;
+		}
+
+		return {
+			trackedFiles,
+			nodesTotal,
+			extractionEdgesTotal,
+			allMetrics,
+			fileSignalsCache,
+			skippedOversized,
+			filesReadFailed,
+		};
+	}
+
+	/**
+	 * Phase 3: Resolve extraction edges, classify unresolved, create
+	 * module-level edges. Operates on whatever nodes and extraction
+	 * edges exist in the snapshot (from extraction or copy-forward).
+	 */
+	private resolveSnapshotEdges(
+		snapshot: Snapshot,
+		trackedFiles: TrackedFile[],
+		repoUid: string,
+		snapshotSignals: SnapshotSignals,
+		compileDb: CompilationDatabase | null,
+		extractionEdgesTotal: number,
+		edgeBatchSize?: number,
+		emit: (event: IndexProgressEvent) => void = () => {},
+	): { resolvedTotal: number; unresolvedCount: number; unresolvedBreakdown: Partial<Record<UnresolvedEdgeCategory, number>>; moduleEdgesCount: number } {
+		emit({ phase: "persisting", current: 0, total: 0 });
+
+		const resolverIndex = this.buildResolverIndex(
+			snapshot.snapshotUid,
+			trackedFiles,
+			repoUid,
+			compileDb,
+		);
+
+		const BATCH_SIZE = edgeBatchSize ?? 10_000;
+		let edgeCursor: string | null = null;
+		let resolvedTotal = 0;
+		let unresolvedCount = 0;
+		const resolvedImportPairs: Array<[string, string]> = [];
+		const unresolvedBreakdown: Partial<Record<UnresolvedEdgeCategory, number>> = {};
+		const classificationObservedAt = new Date().toISOString();
+
+		emit({ phase: "resolving", current: 0, total: extractionEdgesTotal });
+
+		// eslint-disable-next-line no-constant-condition
+		while (true) {
+			const batch = this.storage.queryExtractionEdgesBatch(
+				snapshot.snapshotUid,
+				BATCH_SIZE,
+				edgeCursor,
+			);
+			if (batch.length === 0) break;
+			edgeCursor = batch[batch.length - 1].edgeUid;
+
+			const batchUnresolved: UnresolvedEdge[] = batch.map((se) => ({
+				edgeUid: se.edgeUid,
+				snapshotUid: se.snapshotUid,
+				repoUid: se.repoUid,
+				sourceNodeUid: se.sourceNodeUid,
+				targetKey: se.targetKey,
+				type: se.type as any,
+				resolution: se.resolution as any,
+				extractor: se.extractor,
+				location: se.lineStart !== null ? {
+					lineStart: se.lineStart,
+					colStart: se.colStart ?? 0,
+					lineEnd: se.lineEnd ?? se.lineStart,
+					colEnd: se.colEnd ?? 0,
+				} : null,
+				metadataJson: se.metadataJson,
+			}));
+
+			const batchSourceFileUids = new Set<string>();
+			for (const se of batch) {
+				if (se.sourceFileUid) batchSourceFileUids.add(se.sourceFileUid);
+				if (se.sourceFileUid) {
+					resolverIndex.nodeUidToFileUid.set(se.sourceNodeUid, se.sourceFileUid);
+				}
+			}
+			const batchSignals = new Map<string, FileSignalRow>();
+			const batchImportBindings = new Map<string, ImportBinding[]>();
+			if (batchSourceFileUids.size > 0) {
+				const signalRows = this.storage.queryFileSignalsBatch(
+					snapshot.snapshotUid,
+					[...batchSourceFileUids],
+				);
+				for (const row of signalRows) {
+					batchSignals.set(row.fileUid, row);
+					if (row.importBindingsJson) {
+						const bindings = JSON.parse(row.importBindingsJson) as ImportBinding[];
+						if (bindings.length > 0) {
+							batchImportBindings.set(row.fileUid, bindings);
+						}
+					}
+				}
+			}
+
+			const batchResult = this.resolveEdges(
+				batchUnresolved,
+				resolverIndex,
+				repoUid,
+				snapshot.snapshotUid,
+				batchImportBindings,
+			);
+
+			if (batchResult.resolved.length > 0) {
+				this.storage.insertEdges(batchResult.resolved);
+				for (const e of batchResult.resolved) {
+					if (e.type === EdgeType.IMPORTS) {
+						resolvedImportPairs.push([e.sourceNodeUid, e.targetNodeUid]);
+					}
+				}
+			}
+			resolvedTotal += batchResult.resolved.length;
+
+			if (batchResult.stillUnresolved.length > 0) {
+				const classifiedRows: PersistedUnresolvedEdge[] = [];
+				for (const { edge, category, sourceFileUid } of batchResult.stillUnresolved) {
+					const fileSignals = this.buildFileSignalsForClassification(
+						snapshot.snapshotUid,
+						sourceFileUid,
+						batchSignals,
+					);
+					const verdict = classifyUnresolvedEdge(edge, category, snapshotSignals, fileSignals);
+					let { classification } = verdict;
+					let { basisCode } = verdict;
+					const fwOverride = detectFrameworkBoundary(edge.targetKey, category, fileSignals.importBindings);
+					if (fwOverride) {
+						classification = fwOverride.classification;
+						basisCode = fwOverride.basisCode;
+					}
+					classifiedRows.push({
+						...edge, category, classification,
+						classifierVersion: CURRENT_CLASSIFIER_VERSION,
+						basisCode, observedAt: classificationObservedAt,
+					});
+					unresolvedBreakdown[category] = (unresolvedBreakdown[category] ?? 0) + 1;
+				}
+				this.storage.insertUnresolvedEdges(classifiedRows);
+				unresolvedCount += batchResult.stillUnresolved.length;
+			}
+
+			emit({
+				phase: "resolving",
+				current: resolvedTotal + unresolvedCount,
+				total: extractionEdgesTotal,
+			});
+		}
+
+		emit({ phase: "resolving", current: extractionEdgesTotal, total: extractionEdgesTotal });
+
+		const moduleEdges = this.createModuleEdgesFromIndex(
+			resolverIndex, resolvedImportPairs, snapshot.snapshotUid, repoUid,
+		);
+		if (moduleEdges.length > 0) {
+			this.storage.insertEdges(moduleEdges);
+		}
+
+		return { resolvedTotal, unresolvedCount, unresolvedBreakdown, moduleEdgesCount: moduleEdges.length };
+	}
+
+	/**
+	 * Phase 3d + 4: Module discovery, framework detectors, boundary
+	 * extraction. Operates on persisted nodes/edges.
+	 */
+	private async runPostpasses(
+		snapshot: Snapshot,
+		repo: Repo,
+		filePaths: string[],
+		trackedFiles: TrackedFile[],
+		repoUid: string,
+		fileSignalsCache: Map<string, FileSignals>,
+	): Promise<void> {
+		// Module discovery.
+		if (this.discovery) {
+			const discoveredRoots = await this.discovery.discoverDeclaredModules(
+				repo.rootPath, repoUid,
+			);
+			if (discoveredRoots.length > 0) {
+				const moduleResult = discoverModules({
+					repoUid, snapshotUid: snapshot.snapshotUid, discoveredRoots, trackedFiles,
+				});
+				if (moduleResult.candidates.length > 0) {
+					this.storage.insertModuleCandidates(moduleResult.candidates);
+					this.storage.insertModuleCandidateEvidence(moduleResult.evidence);
+					this.storage.insertModuleFileOwnership(moduleResult.ownership);
+				}
+			}
+		}
+
+		// Lambda entrypoint detection.
+		{
+			const entrypointInferences: InferenceRow[] = [];
+			const detectedAt = new Date().toISOString();
+			for (const [fileUid, signals] of fileSignalsCache) {
+				const fileSymbols = this.storage.querySymbolsByFile(snapshot.snapshotUid, fileUid);
+				const exportedSymbols = fileSymbols
+					.filter((n) => n.visibility != null)
+					.map((n) => ({ stableKey: n.stableKey, name: n.name, visibility: n.visibility, subtype: n.subtype }));
+				const detected = detectLambdaEntrypoints({ importBindings: signals.importBindings, exportedSymbols });
+				for (const ep of detected) {
+					entrypointInferences.push({
+						inferenceUid: uuidv4(), snapshotUid: snapshot.snapshotUid, repoUid,
+						targetStableKey: ep.targetStableKey, kind: "framework_entrypoint",
+						valueJson: JSON.stringify({ convention: ep.convention, reason: ep.reason }),
+						confidence: ep.confidence,
+						basisJson: JSON.stringify({ convention: ep.convention, classifier_version: CURRENT_CLASSIFIER_VERSION }),
+						extractor: INDEXER_VERSION, createdAt: detectedAt,
+					});
+				}
+			}
+			if (entrypointInferences.length > 0) {
+				this.storage.deleteInferencesByKind(snapshot.snapshotUid, "framework_entrypoint");
+				this.storage.insertInferences(entrypointInferences);
+			}
+		}
+
+		// Spring bean detection.
+		{
+			const springInferences: InferenceRow[] = [];
+			const detectedAt = new Date().toISOString();
+			for (const relPath of filePaths) {
+				if (!relPath.endsWith(".java")) continue;
+				let content: string;
+				try { content = await readFile(join(repo.rootPath, relPath), "utf-8"); } catch { continue; }
+				if (content.length > MAX_FILE_SIZE_BYTES) continue;
+				const fileUid = `${repoUid}:${relPath}`;
+				const fileSymbols = this.storage.querySymbolsByFile(snapshot.snapshotUid, fileUid);
+				const beans = detectSpringBeans(content, relPath, fileSymbols);
+				for (const bean of beans) {
+					springInferences.push({
+						inferenceUid: uuidv4(), snapshotUid: snapshot.snapshotUid, repoUid,
+						targetStableKey: bean.targetStableKey, kind: "spring_container_managed",
+						valueJson: JSON.stringify({ annotation: bean.annotation, convention: bean.convention, reason: bean.reason }),
+						confidence: bean.confidence,
+						basisJson: JSON.stringify({ convention: bean.convention, classifier_version: CURRENT_CLASSIFIER_VERSION }),
+						extractor: INDEXER_VERSION, createdAt: detectedAt,
+					});
+				}
+			}
+			if (springInferences.length > 0) {
+				this.storage.deleteInferencesByKind(snapshot.snapshotUid, "spring_container_managed");
+				this.storage.insertInferences(springInferences);
+			}
+		}
+
+		// Pytest detection.
+		{
+			const pytestInferences: InferenceRow[] = [];
+			const detectedAt = new Date().toISOString();
+			for (const relPath of filePaths) {
+				if (!relPath.endsWith(".py")) continue;
+				let content: string;
+				try { content = await readFile(join(repo.rootPath, relPath), "utf-8"); } catch { continue; }
+				if (content.length > MAX_FILE_SIZE_BYTES) continue;
+				const fileUid = `${repoUid}:${relPath}`;
+				const fileSymbols = this.storage.querySymbolsByFile(snapshot.snapshotUid, fileUid);
+				const items = detectPytestItems(content, relPath, fileSymbols);
+				for (const item of items) {
+					const kind = item.convention.startsWith("pytest_fixture") ? "pytest_fixture" : "pytest_test";
+					pytestInferences.push({
+						inferenceUid: uuidv4(), snapshotUid: snapshot.snapshotUid, repoUid,
+						targetStableKey: item.targetStableKey, kind,
+						valueJson: JSON.stringify({ convention: item.convention, reason: item.reason }),
+						confidence: item.confidence,
+						basisJson: JSON.stringify({ convention: item.convention, classifier_version: CURRENT_CLASSIFIER_VERSION }),
+						extractor: INDEXER_VERSION, createdAt: detectedAt,
+					});
+				}
+			}
+			if (pytestInferences.length > 0) {
+				this.storage.deleteInferencesByKind(snapshot.snapshotUid, "pytest_test");
+				this.storage.deleteInferencesByKind(snapshot.snapshotUid, "pytest_fixture");
+				this.storage.insertInferences(pytestInferences);
+			}
+		}
+
+		// Linux/system detection.
+		{
+			const systemInferences: InferenceRow[] = [];
+			const detectedAt = new Date().toISOString();
+			for (const relPath of filePaths) {
+				const ext = relPath.slice(relPath.lastIndexOf("."));
+				if (![".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hxx"].includes(ext)) continue;
+				let content: string;
+				try { content = await readFile(join(repo.rootPath, relPath), "utf-8"); } catch { continue; }
+				if (content.length > MAX_FILE_SIZE_BYTES) continue;
+				const fileUid = `${repoUid}:${relPath}`;
+				const fileSymbols = this.storage.querySymbolsByFile(snapshot.snapshotUid, fileUid);
+				const entries = detectLinuxSystemPatterns(content, relPath, fileSymbols);
+				for (const entry of entries) {
+					systemInferences.push({
+						inferenceUid: uuidv4(), snapshotUid: snapshot.snapshotUid, repoUid,
+						targetStableKey: entry.targetStableKey, kind: "linux_system_managed",
+						valueJson: JSON.stringify({ convention: entry.convention, reason: entry.reason }),
+						confidence: entry.confidence,
+						basisJson: JSON.stringify({ convention: entry.convention, classifier_version: CURRENT_CLASSIFIER_VERSION }),
+						extractor: INDEXER_VERSION, createdAt: detectedAt,
+					});
+				}
+			}
+			if (systemInferences.length > 0) {
+				this.storage.deleteInferencesByKind(snapshot.snapshotUid, "linux_system_managed");
+				this.storage.insertInferences(systemInferences);
+			}
+		}
+
+		// Boundary fact extraction.
+		{
+			const providerFacts: PersistedBoundaryProviderFact[] = [];
+			const consumerFacts: PersistedBoundaryConsumerFact[] = [];
+			const boundaryObservedAt = new Date().toISOString();
+
+			for (const relPath of filePaths) {
+				let content: string;
+				try { content = await readFile(join(repo.rootPath, relPath), "utf-8"); } catch { continue; }
+				if (content.length > MAX_FILE_SIZE_BYTES) continue;
+				const fileUid = `${repoUid}:${relPath}`;
+				const fileSymbols = this.storage.querySymbolsByFile(snapshot.snapshotUid, fileUid);
+
+				if (relPath.endsWith(".java")) {
+					if (!this.springParserReady) {
+						await initSpringRouteParser();
+						this.springParserReady = true;
+					}
+					const routes = extractSpringRoutes(content, relPath, repoUid, fileSymbols);
+					for (const r of routes) {
+						const strategy = getMatchStrategy(r.mechanism);
+						const matcherKey = strategy ? strategy.computeMatcherKey(r.address, r.metadata) : r.operation;
+						providerFacts.push({ ...r, factUid: uuidv4(), snapshotUid: snapshot.snapshotUid, repoUid, matcherKey, extractor: "spring-route-extractor:0.1", observedAt: boundaryObservedAt });
+					}
+				}
+
+				if (relPath.endsWith(".ts") || relPath.endsWith(".tsx") || relPath.endsWith(".js") || relPath.endsWith(".jsx")) {
+					if (!this.stringResolver) {
+						this.stringResolver = new FileLocalStringResolver();
+						await this.stringResolver.initialize();
+					}
+					const bindings = this.stringResolver.resolve(content, relPath);
+					const cliCommands = extractCommanderCommands(content, relPath, repoUid, fileSymbols);
+					for (const cmd of cliCommands) {
+						const strategy = getMatchStrategy(cmd.mechanism);
+						const matcherKey = strategy ? strategy.computeMatcherKey(cmd.address, cmd.metadata) : cmd.operation;
+						providerFacts.push({ ...cmd, factUid: uuidv4(), snapshotUid: snapshot.snapshotUid, repoUid, matcherKey, extractor: "commander-command-extractor:0.1", observedAt: boundaryObservedAt });
+					}
+					const routes = extractExpressRoutes(content, relPath, repoUid, fileSymbols, bindings);
+					for (const r of routes) {
+						const strategy = getMatchStrategy(r.mechanism);
+						const matcherKey = strategy ? strategy.computeMatcherKey(r.address, r.metadata) : r.operation;
+						providerFacts.push({ ...r, factUid: uuidv4(), snapshotUid: snapshot.snapshotUid, repoUid, matcherKey, extractor: "express-route-extractor:0.1", observedAt: boundaryObservedAt });
+					}
+					const requests = extractHttpClientRequests(content, relPath, repoUid, fileSymbols, bindings);
+					for (const c of requests) {
+						const strategy = getMatchStrategy(c.mechanism);
+						const matcherKey = strategy ? strategy.computeMatcherKey(c.address, c.metadata) : c.operation;
+						consumerFacts.push({ ...c, factUid: uuidv4(), snapshotUid: snapshot.snapshotUid, repoUid, matcherKey, extractor: "http-client-extractor:0.1", observedAt: boundaryObservedAt });
+					}
+				}
+			}
+
+			// package.json script consumers.
+			{
+				const packageJsonPaths = await this.findPackageJsonFiles(repo.rootPath);
+				for (const pkgRelPath of packageJsonPaths) {
+					try {
+						const pkgContent = await readFile(join(repo.rootPath, pkgRelPath), "utf-8");
+						const pkg = JSON.parse(pkgContent);
+						if (pkg.scripts && typeof pkg.scripts === "object") {
+							const scriptFacts = extractPackageScriptConsumers(pkg.scripts, pkgRelPath, repoUid);
+							for (const c of scriptFacts) {
+								const strategy = getMatchStrategy(c.mechanism);
+								const matcherKey = strategy ? strategy.computeMatcherKey(c.address, c.metadata) : c.operation;
+								consumerFacts.push({ ...c, factUid: uuidv4(), snapshotUid: snapshot.snapshotUid, repoUid, matcherKey, extractor: "package-script-cli-extractor:0.1", observedAt: boundaryObservedAt });
+							}
+						}
+					} catch { /* skip */ }
+				}
+			}
+
+			// Shell script consumers.
+			{
+				const shellPaths = await this.findShellScripts(repo.rootPath);
+				for (const shellRelPath of shellPaths) {
+					try {
+						const shellContent = await readFile(join(repo.rootPath, shellRelPath), "utf-8");
+						const shellFacts = extractShellScriptConsumers(shellContent, shellRelPath, repoUid);
+						for (const c of shellFacts) {
+							const strategy = getMatchStrategy(c.mechanism);
+							const matcherKey = strategy ? strategy.computeMatcherKey(c.address, c.metadata) : c.operation;
+							consumerFacts.push({ ...c, factUid: uuidv4(), snapshotUid: snapshot.snapshotUid, repoUid, matcherKey, extractor: "shell-script-cli-extractor:0.1", observedAt: boundaryObservedAt });
+						}
+					} catch { /* skip */ }
+				}
+			}
+
+			// Makefile consumers.
+			{
+				const makefilePaths = await this.findMakefiles(repo.rootPath);
+				for (const mkRelPath of makefilePaths) {
+					try {
+						const mkContent = await readFile(join(repo.rootPath, mkRelPath), "utf-8");
+						const mkFacts = extractMakefileConsumers(mkContent, mkRelPath, repoUid);
+						for (const c of mkFacts) {
+							const strategy = getMatchStrategy(c.mechanism);
+							const matcherKey = strategy ? strategy.computeMatcherKey(c.address, c.metadata) : c.operation;
+							consumerFacts.push({ ...c, factUid: uuidv4(), snapshotUid: snapshot.snapshotUid, repoUid, matcherKey, extractor: "makefile-cli-extractor:0.1", observedAt: boundaryObservedAt });
+						}
+					} catch { /* skip */ }
+				}
+			}
+
+			if (providerFacts.length > 0) this.storage.insertBoundaryProviderFacts(providerFacts);
+			if (consumerFacts.length > 0) this.storage.insertBoundaryConsumerFacts(consumerFacts);
+
+			// Materialize boundary links.
+			if (providerFacts.length > 0 && consumerFacts.length > 0) {
+				const candidates = matchBoundaryFacts(providerFacts, consumerFacts);
+				if (candidates.length > 0) {
+					const materializedAt = new Date().toISOString();
+					const links: PersistedBoundaryLink[] = candidates.map((c) => ({
+						linkUid: uuidv4(),
+						snapshotUid: snapshot.snapshotUid,
+						repoUid,
+						providerFactUid: c.providerFactUid,
+						consumerFactUid: c.consumerFactUid,
+						matchBasis: c.matchBasis,
+						confidence: c.confidence,
+						metadataJson: null,
+						materializedAt,
+					}));
+					this.storage.insertBoundaryLinks(links);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Phase 5: Finalize snapshot — diagnostics, counts, status,
+	 * annotations, orphan check. Returns the IndexResult.
+	 */
+	private async finalizeSnapshot(
+		snapshot: Snapshot,
+		repo: Repo,
+		repoUid: string,
+		trackedFiles: TrackedFile[],
+		nodesTotal: number,
+		resolvedTotal: number,
+		moduleEdgesCount: number,
+		unresolvedCount: number,
+		unresolvedBreakdown: Partial<Record<UnresolvedEdgeCategory, number>>,
+		allMetrics: Map<string, { cc: number; params: number; nesting: number }>,
+		skippedOversized: number,
+		filesReadFailed: number,
+		startTime: number,
+		emit: (event: IndexProgressEvent) => void,
+	): Promise<IndexResult> {
+		// Persist metrics.
+		if (allMetrics.size > 0) {
+			const now = new Date().toISOString();
+			const measurements: Measurement[] = [];
+			for (const [stableKey, m] of allMetrics) {
+				measurements.push({
+					measurementUid: uuidv4(), snapshotUid: snapshot.snapshotUid, repoUid,
+					targetStableKey: stableKey, kind: "cyclomatic_complexity",
+					valueJson: JSON.stringify({ value: m.cc }), source: INDEXER_VERSION, createdAt: now,
+				});
+				measurements.push({
+					measurementUid: uuidv4(), snapshotUid: snapshot.snapshotUid, repoUid,
+					targetStableKey: stableKey, kind: "parameter_count",
+					valueJson: JSON.stringify({ value: m.params }), source: INDEXER_VERSION, createdAt: now,
+				});
+				measurements.push({
+					measurementUid: uuidv4(), snapshotUid: snapshot.snapshotUid, repoUid,
+					targetStableKey: stableKey, kind: "max_nesting_depth",
+					valueJson: JSON.stringify({ value: m.nesting }), source: INDEXER_VERSION, createdAt: now,
+				});
+			}
+			this.storage.insertMeasurements(measurements);
+		}
+
+		// Extract domain versions.
+		await this.extractManifestVersions(repo.rootPath, repoUid, snapshot.snapshotUid);
+
+		// Annotations.
+		const resolverIndex = this.buildResolverIndex(snapshot.snapshotUid, trackedFiles, repoUid, null);
+		const annotationCollisionsDropped = this.annotations
+			? await this.extractAndPersistAnnotations(repo.rootPath, repoUid, snapshot.snapshotUid, resolverIndex)
+			: 0;
+
+		// Finalize snapshot.
+		this.storage.updateSnapshotCounts(snapshot.snapshotUid);
+		this.storage.updateSnapshotStatus({ snapshotUid: snapshot.snapshotUid, status: SnapshotStatus.READY });
+
+		emit({ phase: "persisting", current: 1, total: 1 });
+
+		const orphanedDeclarations = this.countOrphanedDeclarations(repoUid, snapshot.snapshotUid);
+
+		const extractionDiagnostics = {
+			diagnostics_version: 1,
+			edges_total: resolvedTotal + moduleEdgesCount,
+			unresolved_total: unresolvedCount,
+			unresolved_breakdown: unresolvedBreakdown,
+			annotation_collisions_dropped: annotationCollisionsDropped,
+			files_skipped_oversized: skippedOversized,
+			files_read_failed: filesReadFailed,
+		};
+		this.storage.updateSnapshotExtractionDiagnostics(snapshot.snapshotUid, JSON.stringify(extractionDiagnostics));
+
+		return {
+			snapshotUid: snapshot.snapshotUid,
+			filesTotal: trackedFiles.length,
+			nodesTotal,
+			edgesTotal: resolvedTotal + moduleEdgesCount,
+			edgesUnresolved: unresolvedCount,
+			unresolvedBreakdown,
+			durationMs: Date.now() - startTime,
+			orphanedDeclarations,
+		};
 	}
 
 	// ── File scanning ──────────────────────────────────────────────────

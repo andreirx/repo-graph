@@ -6,7 +6,7 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Current state (as of last commit)
 
-- **1403 tests** across 74 test files.
+- **1464 tests** across 78 test files.
 - **Languages:** TypeScript/JavaScript + Rust + Java + Python + C/C++. Five-extractor indexer.
 - **Enrichment:** TS (~81%), Rust (~85%), Java (operational but fragile). All three wired.
 - **Classifier version:** 6.
@@ -45,6 +45,11 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   `findDeadNodes` consults all framework-liveness inferences.
 - **CLI boundary model:** HTTP + cli_command mechanisms. Commander providers, package.json
   script consumers, shell script consumers, Makefile recipe consumers. Binary-prefix matching.
+- **Module discovery:** Declared modules detected from manifests/workspaces
+  (package.json, pnpm-workspace.yaml, Cargo.toml, settings.gradle, pyproject.toml).
+  Module candidates, evidence, and file ownership persisted in dedicated tables
+  (migration 011). CLI surface: `rgr modules list|evidence|files`.
+  Additive — coexists with directory MODULE nodes.
 - **Key architectural decisions made:**
   - Nearest-owning per-file context for deps, tsconfig, Cargo, Gradle, pyproject.toml.
   - Enrichment is a separate `rgr enrich` pass, not inline with indexing.
@@ -266,87 +271,104 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - Query-time derived: receiver origin + enclosing scope significance
 - Scoped to unknown CALLS (low = private scope, medium = exported scope)
 
+### Module discovery support module (Layer 1 — declared)
+- Core model: ModuleCandidate, ModuleCandidateEvidence, ModuleFileOwnership.
+  Identity anchored by repo-relative root path, not package name.
+  moduleKey format: `{repoUid}:{rootPath}:DISCOVERED_MODULE`.
+- Pure detectors: package.json workspaces, pnpm-workspace.yaml, Cargo.toml
+  (workspace + crate), settings.gradle, pyproject.toml ([project] + [tool.poetry]).
+- Pure orchestrator: dedup by root path, evidence merging, longest-prefix
+  file ownership assignment, confidence propagation.
+- Discovery port: narrow interface, ManifestScanner adapter.
+- Migration 011: module_candidates, module_candidate_evidence, module_file_ownership.
+  All CASCADE on snapshot/repo deletion.
+- Source-specific evidence attribution: pnpm vs package.json patterns expanded
+  separately. Evidence attributed only to the source that matched.
+- Cargo workspace root with [workspace] + [package] emits crate root.
+- Additive: existing directory MODULE nodes unchanged.
+- 57 tests: 33 detector unit, 16 orchestrator unit, 4 scanner attribution,
+  8 integration (monorepo workspace + mixed-lang + rollups + owned files).
+- Validated on repo-graph: 9 candidates, 10 evidence items, 228 ownership rows.
+
+### Module graph and file-to-module ownership (feature slice 1)
+- `rgr modules list <repo>` — catalog with rollups (file count, symbol count,
+  test files, evidence count, languages, has-directory-module).
+- `rgr modules evidence <repo> <module>` — evidence items per module.
+- `rgr modules files <repo> <module>` — owned files with language, test flag,
+  assignment kind, confidence. Targeted SQL query per module, not whole-snapshot.
+- `queryModuleCandidateRollups` — single SQL with LEFT JOINs.
+- Deterministic languages output (GROUP_CONCAT with ORDER BY).
+- All commands support --json.
+- No directory MODULE replacement. No module dependency edges. No arch violations.
+
 ## Next (in priority order)
 
-### 1. Module discovery support module
-Detects declared, operational, and inferred modules. Assigns files to
-modules. Persists module evidence and module ownership. Pure support
-substrate — no user-facing features in this item.
+### 1. Delta indexing support module
+Full indexing (77 min on Linux) is a bootstrap path, not operational
+flow. Delta indexing changes the amount of work, not just the startup
+cost.
 
-**Three-layer precedence model:**
+**Support module: delta invalidation planner**
+- determine what changed (git diff, working-tree diff)
+- determine what must be invalidated (reverse edge traversal)
+- determine what can be reused from the parent snapshot
+- classify invalidation scope:
+  - file-local only (body change, no interface change)
+  - outbound dependency change (import/include changes)
+  - public surface change (exported symbols, signatures)
+  - config/manifest change (package.json, Cargo.toml, tsconfig, compile_commands)
+  - structural/module change (file moved, module root changed)
+- output: affected files, affected modules, invalidation plan, reuse plan
 
-Layer 1 — Declared modules (highest trust):
-- package.json workspaces, pnpm-workspace.yaml
-- Gradle subprojects, Cargo workspaces/crates
-- Python package roots, Bazel packages
-- Make/Kbuild object groups
-- Terraform root modules
-
-Layer 2 — Operational modules:
-- Server/app entrypoints (backend, frontend, admin)
-- Worker/queue/render pipeline entrypoints
-- CLI entrypoints
-- Infra roots (Terraform/Pulumi/Helm/Ansible)
-- Separate build/deploy targets
-
-Layer 3 — Inferred modules (fallback only):
-- Import graph density clusters
-- Dependency directionality
-- Common-root file ownership
-- Build-target membership
-- Boundary facts, framework detector hits
-
-**Module candidate schema:**
-- module_key, module_kind (declared_package, app_surface, service,
-  plugin, infra_root, build_shard, inferred_cluster)
-- root_paths, entrypoints, owned_files
-- evidence (manifest root, build target, entrypoint file, etc.)
-- confidence
-
-**File assignment order:**
-1. Explicit module root containment
-2. Build-target membership
-3. Nearest operational root
-4. Plugin/package ownership
-5. Inferred cluster fallback
-6. Shared/common bucket only if truly ambiguous
+**Feature: parent-snapshot incremental indexing**
+- parent snapshot is baseline
+- copy/reuse unchanged truth logically
+- delete stale rows only for affected scope
+- re-extract only affected files
+- recompute only affected derived artifacts
+- carry forward unchanged nodes, edges, file signals, module candidates
+- explicit trust metadata: what was reused vs recomputed vs widened
 
 **Why this is #1:**
-- Helps own repos immediately (backend/frontend/admin/renderer/infra)
-- Provides natural shard boundaries for sharded indexing
-- Reusable across all languages and build systems
-- Architecture-level truth, not just another detector
+- 77-minute full index is not operationally viable for iterative work
+- module discovery (just shipped) provides better invalidation scoping
+  (file-to-module ownership, manifest change detection)
+- daemon only improves startup/flow; delta indexing reduces total work
+- C/C++ header fan-out and compile context changes need explicit
+  invalidation semantics, not just file-level diff
 
-### 2. Module graph and file-to-module ownership
-User-facing implementation on top of the module discovery substrate.
+**Special considerations for C/C++:**
+- header changes have wide blast radius
+- compile_commands.json changes can invalidate per-TU resolution
+- macro-heavy code may require conservative widening
 
-- Module dependency edges
-- Cross-module violation checks
-- Per-module rollups for dead code, boundaries, blast radius
-- `rgr graph modules <repo>` — module catalog with evidence
-- `rgr arch violations <repo>` augmented with module-level policy
-- File-to-module ownership visible in graph queries
+### 2. Module discovery expansion (Layer 2 + Layer 3)
+Extend the shipped Layer 1 (declared/manifest) module discovery with:
+- Layer 2: operational modules (entrypoints, deploy surfaces)
+- Layer 3: inferred modules (graph clustering, structural patterns)
+- Kbuild/obj-y parsing for Linux kernel module boundaries
+- `__init__.py` as weaker evidence (not declared-tier)
 
-### 3. Long-lived analysis daemon
-Support module: warmed runtime that eliminates repeated CLI bootstrap
-cost (WASM grammar load, extractor initialization, SQLite open,
-migration checks). Not a substitute for the streaming/batch pipeline —
-that must be correct first.
+### 3. Module graph — dependency edges and violations
+User-facing implementation on top of discovered modules:
+- module dependency edges derived from discovered module ownership
+- cross-module violation checks
+- per-module rollups for dead code, boundaries, blast radius
+- `rgr arch violations <repo>` augmented with discovered-module policy
 
-Provides:
-- warm parser pool and prepared SQLite statements
-- request routing (JSON-RPC over Unix socket)
-- three concurrency lanes: query (many readers), index (single writer),
-  maintenance (background)
-- per-repo write locks, snapshot pinning during active reads
-- progress streaming and cancellation tokens
+### 4. Long-lived analysis daemon + daemon-backed CLI
+Two-part item: support module (warmed runtime) + feature (CLI client).
 
-### 4. Daemon-backed CLI flow
-Feature implementation on top of the daemon substrate:
-- CLI becomes a thin client (connect, send request, render response)
-- auto-start daemon on first command if absent
-- progress rendering via stderr from daemon progress stream
-- fallback to direct execution if daemon unavailable
+Support: warmed runtime that eliminates repeated CLI bootstrap cost
+(WASM grammar load, extractor initialization, SQLite open, migration
+checks). Provides warm parser pool, prepared SQLite statements,
+request routing (JSON-RPC over Unix socket), three concurrency lanes
+(query/index/maintenance), per-repo write locks, snapshot pinning,
+progress streaming, cancellation tokens.
+
+Feature: CLI becomes a thin client (connect, send request, render
+response). Auto-start daemon on first command if absent. Progress
+rendering via stderr. Fallback to direct execution if daemon unavailable.
 
 ### 5. Sharded indexing architecture
 The streaming pipeline handles Linux-scale repos in a single pass

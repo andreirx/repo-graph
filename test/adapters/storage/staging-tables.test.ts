@@ -1,11 +1,12 @@
 /**
- * Staging tables round-trip tests.
+ * Extraction edges and file signals round-trip tests.
  *
  * Covers:
- *   - insertStagedEdges / queryStagedEdges / deleteStagedEdges
+ *   - insertExtractionEdges / queryExtractionEdgesBatch
+ *   - queryExtractionEdgesByFiles / copyExtractionEdgesForFiles
  *   - insertFileSignals / queryFileSignals / queryAllFileSignals / deleteFileSignals
  *   - Snapshot scoping
- *   - Cleanup semantics
+ *   - Durable retention (no delete-on-finalize)
  */
 
 import { randomUUID } from "node:crypto";
@@ -17,7 +18,7 @@ import { SqliteConnectionProvider } from "../../../src/adapters/storage/sqlite/c
 import { SqliteStorage } from "../../../src/adapters/storage/sqlite/sqlite-storage.js";
 import type { GraphNode, TrackedFile } from "../../../src/core/model/index.js";
 import { NodeKind, NodeSubtype, SnapshotKind, Visibility } from "../../../src/core/model/index.js";
-import type { StagedEdge, FileSignalRow } from "../../../src/core/ports/storage.js";
+import type { ExtractionEdge, FileSignalRow } from "../../../src/core/ports/storage.js";
 
 let storage: SqliteStorage;
 let provider: SqliteConnectionProvider;
@@ -33,10 +34,10 @@ const REPO = {
 	metadataJson: null,
 };
 
-function makeStagedEdge(
+function makeExtractionEdge(
 	snapshotUid: string,
-	overrides?: Partial<StagedEdge>,
-): StagedEdge {
+	overrides?: Partial<ExtractionEdge>,
+): ExtractionEdge {
 	return {
 		edgeUid: randomUUID(),
 		snapshotUid,
@@ -57,7 +58,7 @@ function makeStagedEdge(
 }
 
 beforeEach(() => {
-	dbPath = join(tmpdir(), `rgr-staging-${randomUUID()}.db`);
+	dbPath = join(tmpdir(), `rgr-extraction-${randomUUID()}.db`);
 	provider = new SqliteConnectionProvider(dbPath);
 	provider.initialize();
 	storage = new SqliteStorage(provider.getDatabase());
@@ -69,15 +70,15 @@ afterEach(() => {
 	try { unlinkSync(dbPath); } catch { /* ignore */ }
 });
 
-// ── Staged edges ────────────────────────────────────────────────────
+// ── Extraction edges ──────────────────────────────────────────────
 
-describe("staged_edges round-trip", () => {
-	it("inserts and reads back staged edges", () => {
+describe("extraction_edges round-trip", () => {
+	it("inserts and reads back extraction edges via batch cursor", () => {
 		const snap = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
-		const edge = makeStagedEdge(snap.snapshotUid);
-		storage.insertStagedEdges([edge]);
+		const edge = makeExtractionEdge(snap.snapshotUid);
+		storage.insertExtractionEdges([edge]);
 
-		const rows = storage.queryStagedEdges(snap.snapshotUid);
+		const rows = storage.queryExtractionEdgesBatch(snap.snapshotUid, 100, null);
 		expect(rows.length).toBe(1);
 		expect(rows[0].edgeUid).toBe(edge.edgeUid);
 		expect(rows[0].targetKey).toBe("someFunc");
@@ -88,53 +89,139 @@ describe("staged_edges round-trip", () => {
 
 	it("inserts batch atomically", () => {
 		const snap = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
-		const edges = Array.from({ length: 50 }, () => makeStagedEdge(snap.snapshotUid));
-		storage.insertStagedEdges(edges);
+		const edges = Array.from({ length: 50 }, () => makeExtractionEdge(snap.snapshotUid));
+		storage.insertExtractionEdges(edges);
 
-		const rows = storage.queryStagedEdges(snap.snapshotUid);
+		const rows = storage.queryExtractionEdgesBatch(snap.snapshotUid, 100, null);
 		expect(rows.length).toBe(50);
+	});
+
+	it("batch cursor paginates correctly", () => {
+		const snap = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
+		const edges = Array.from({ length: 5 }, () => makeExtractionEdge(snap.snapshotUid));
+		storage.insertExtractionEdges(edges);
+
+		const page1 = storage.queryExtractionEdgesBatch(snap.snapshotUid, 2, null);
+		expect(page1.length).toBe(2);
+
+		const page2 = storage.queryExtractionEdgesBatch(snap.snapshotUid, 2, page1[1].edgeUid);
+		expect(page2.length).toBe(2);
+
+		const page3 = storage.queryExtractionEdgesBatch(snap.snapshotUid, 2, page2[1].edgeUid);
+		expect(page3.length).toBe(1);
+
+		// All 5 edges covered.
+		const allUids = [...page1, ...page2, ...page3].map((e) => e.edgeUid);
+		expect(new Set(allUids).size).toBe(5);
 	});
 
 	it("scopes to snapshot", () => {
 		const snap1 = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
 		const snap2 = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
-		storage.insertStagedEdges([makeStagedEdge(snap1.snapshotUid)]);
-		storage.insertStagedEdges([makeStagedEdge(snap2.snapshotUid)]);
+		storage.insertExtractionEdges([makeExtractionEdge(snap1.snapshotUid)]);
+		storage.insertExtractionEdges([makeExtractionEdge(snap2.snapshotUid)]);
 
-		expect(storage.queryStagedEdges(snap1.snapshotUid).length).toBe(1);
-		expect(storage.queryStagedEdges(snap2.snapshotUid).length).toBe(1);
+		expect(storage.queryExtractionEdgesBatch(snap1.snapshotUid, 100, null).length).toBe(1);
+		expect(storage.queryExtractionEdgesBatch(snap2.snapshotUid, 100, null).length).toBe(1);
 	});
 
-	it("deletes staged edges by snapshot", () => {
+	it("returns empty for snapshot with no extraction edges", () => {
 		const snap = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
-		storage.insertStagedEdges([
-			makeStagedEdge(snap.snapshotUid),
-			makeStagedEdge(snap.snapshotUid),
-		]);
-		expect(storage.queryStagedEdges(snap.snapshotUid).length).toBe(2);
-
-		storage.deleteStagedEdges(snap.snapshotUid);
-		expect(storage.queryStagedEdges(snap.snapshotUid).length).toBe(0);
-	});
-
-	it("delete does not affect other snapshots", () => {
-		const snap1 = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
-		const snap2 = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
-		storage.insertStagedEdges([makeStagedEdge(snap1.snapshotUid)]);
-		storage.insertStagedEdges([makeStagedEdge(snap2.snapshotUid)]);
-
-		storage.deleteStagedEdges(snap1.snapshotUid);
-		expect(storage.queryStagedEdges(snap1.snapshotUid).length).toBe(0);
-		expect(storage.queryStagedEdges(snap2.snapshotUid).length).toBe(1);
-	});
-
-	it("returns empty for snapshot with no staged edges", () => {
-		const snap = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
-		expect(storage.queryStagedEdges(snap.snapshotUid)).toEqual([]);
+		expect(storage.queryExtractionEdgesBatch(snap.snapshotUid, 100, null)).toEqual([]);
 	});
 });
 
-// ── File signals ────────────────────────────────────────────────────
+// ── Per-file queries ──────────────────────────────────────────────
+
+describe("extraction_edges per-file queries", () => {
+	it("queryExtractionEdgesByFiles returns edges for specified files only", () => {
+		const snap = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
+		storage.insertExtractionEdges([
+			makeExtractionEdge(snap.snapshotUid, { sourceFileUid: `${REPO_UID}:src/a.ts` }),
+			makeExtractionEdge(snap.snapshotUid, { sourceFileUid: `${REPO_UID}:src/b.ts` }),
+			makeExtractionEdge(snap.snapshotUid, { sourceFileUid: `${REPO_UID}:src/c.ts` }),
+		]);
+
+		const result = storage.queryExtractionEdgesByFiles(
+			snap.snapshotUid,
+			[`${REPO_UID}:src/a.ts`, `${REPO_UID}:src/c.ts`],
+		);
+		expect(result.length).toBe(2);
+		const files = result.map((e) => e.sourceFileUid).sort();
+		expect(files).toEqual([`${REPO_UID}:src/a.ts`, `${REPO_UID}:src/c.ts`]);
+	});
+
+	it("returns empty for non-matching files", () => {
+		const snap = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
+		storage.insertExtractionEdges([
+			makeExtractionEdge(snap.snapshotUid, { sourceFileUid: `${REPO_UID}:src/a.ts` }),
+		]);
+
+		const result = storage.queryExtractionEdgesByFiles(
+			snap.snapshotUid,
+			[`${REPO_UID}:src/nonexistent.ts`],
+		);
+		expect(result).toEqual([]);
+	});
+});
+
+// ── Cross-snapshot copy ───────────────────────────────────────────
+
+describe("extraction_edges cross-snapshot copy", () => {
+	it("copies edges from parent to child snapshot for specified files", () => {
+		const parent = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
+		storage.insertExtractionEdges([
+			makeExtractionEdge(parent.snapshotUid, { sourceFileUid: `${REPO_UID}:src/a.ts` }),
+			makeExtractionEdge(parent.snapshotUid, { sourceFileUid: `${REPO_UID}:src/a.ts` }),
+			makeExtractionEdge(parent.snapshotUid, { sourceFileUid: `${REPO_UID}:src/b.ts` }),
+		]);
+
+		const child = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.REFRESH,
+			parentSnapshotUid: parent.snapshotUid,
+		});
+
+		// Copy only src/a.ts edges to child.
+		const copied = storage.copyExtractionEdgesForFiles(
+			parent.snapshotUid,
+			child.snapshotUid,
+			REPO_UID,
+			[`${REPO_UID}:src/a.ts`],
+		);
+		expect(copied).toBe(2);
+
+		// Child should have 2 edges (from a.ts), parent still has 3.
+		const childEdges = storage.queryExtractionEdgesBatch(child.snapshotUid, 100, null);
+		expect(childEdges.length).toBe(2);
+		expect(childEdges.every((e) => e.snapshotUid === child.snapshotUid)).toBe(true);
+		expect(childEdges.every((e) => e.sourceFileUid === `${REPO_UID}:src/a.ts`)).toBe(true);
+
+		const parentEdges = storage.queryExtractionEdgesBatch(parent.snapshotUid, 100, null);
+		expect(parentEdges.length).toBe(3);
+	});
+
+	it("copies zero edges for empty file list", () => {
+		const parent = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
+		storage.insertExtractionEdges([makeExtractionEdge(parent.snapshotUid)]);
+
+		const child = storage.createSnapshot({
+			repoUid: REPO_UID,
+			kind: SnapshotKind.REFRESH,
+			parentSnapshotUid: parent.snapshotUid,
+		});
+
+		const copied = storage.copyExtractionEdgesForFiles(
+			parent.snapshotUid,
+			child.snapshotUid,
+			REPO_UID,
+			[],
+		);
+		expect(copied).toBe(0);
+	});
+});
+
+// ── File signals ──────────────────────────────────────────────────
 
 describe("file_signals round-trip", () => {
 	it("inserts and reads back file signals", () => {
@@ -145,6 +232,8 @@ describe("file_signals round-trip", () => {
 			importBindingsJson: JSON.stringify([
 				{ identifier: "foo", specifier: "./foo", isRelative: true, isTypeOnly: false },
 			]),
+			packageDependenciesJson: null,
+			tsconfigAliasesJson: null,
 		};
 		storage.insertFileSignals([signal]);
 
@@ -166,8 +255,8 @@ describe("file_signals round-trip", () => {
 	it("queryAllFileSignals returns all signals for a snapshot", () => {
 		const snap = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
 		storage.insertFileSignals([
-			{ snapshotUid: snap.snapshotUid, fileUid: `${REPO_UID}:a.ts`, importBindingsJson: "[]" },
-			{ snapshotUid: snap.snapshotUid, fileUid: `${REPO_UID}:b.ts`, importBindingsJson: "[]" },
+			{ snapshotUid: snap.snapshotUid, fileUid: `${REPO_UID}:a.ts`, importBindingsJson: "[]", packageDependenciesJson: null, tsconfigAliasesJson: null },
+			{ snapshotUid: snap.snapshotUid, fileUid: `${REPO_UID}:b.ts`, importBindingsJson: "[]", packageDependenciesJson: null, tsconfigAliasesJson: null },
 		]);
 
 		const all = storage.queryAllFileSignals(snap.snapshotUid);
@@ -178,7 +267,7 @@ describe("file_signals round-trip", () => {
 		const snap1 = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
 		const snap2 = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
 		storage.insertFileSignals([
-			{ snapshotUid: snap1.snapshotUid, fileUid: `${REPO_UID}:a.ts`, importBindingsJson: "[]" },
+			{ snapshotUid: snap1.snapshotUid, fileUid: `${REPO_UID}:a.ts`, importBindingsJson: "[]", packageDependenciesJson: null, tsconfigAliasesJson: null },
 		]);
 
 		expect(storage.queryFileSignals(snap1.snapshotUid, `${REPO_UID}:a.ts`)).not.toBeNull();
@@ -188,7 +277,7 @@ describe("file_signals round-trip", () => {
 	it("deletes file signals by snapshot", () => {
 		const snap = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
 		storage.insertFileSignals([
-			{ snapshotUid: snap.snapshotUid, fileUid: `${REPO_UID}:a.ts`, importBindingsJson: "[]" },
+			{ snapshotUid: snap.snapshotUid, fileUid: `${REPO_UID}:a.ts`, importBindingsJson: "[]", packageDependenciesJson: null, tsconfigAliasesJson: null },
 		]);
 		expect(storage.queryAllFileSignals(snap.snapshotUid).length).toBe(1);
 
@@ -199,10 +288,10 @@ describe("file_signals round-trip", () => {
 	it("upserts on conflict (same snapshot + file)", () => {
 		const snap = storage.createSnapshot({ repoUid: REPO_UID, kind: SnapshotKind.FULL });
 		storage.insertFileSignals([
-			{ snapshotUid: snap.snapshotUid, fileUid: `${REPO_UID}:a.ts`, importBindingsJson: '[{"old":true}]' },
+			{ snapshotUid: snap.snapshotUid, fileUid: `${REPO_UID}:a.ts`, importBindingsJson: '[{"old":true}]', packageDependenciesJson: null, tsconfigAliasesJson: null },
 		]);
 		storage.insertFileSignals([
-			{ snapshotUid: snap.snapshotUid, fileUid: `${REPO_UID}:a.ts`, importBindingsJson: '[{"new":true}]' },
+			{ snapshotUid: snap.snapshotUid, fileUid: `${REPO_UID}:a.ts`, importBindingsJson: '[{"new":true}]', packageDependenciesJson: null, tsconfigAliasesJson: null },
 		]);
 
 		const row = storage.queryFileSignals(snap.snapshotUid, `${REPO_UID}:a.ts`);
@@ -210,7 +299,7 @@ describe("file_signals round-trip", () => {
 	});
 });
 
-// ── queryAllNodes (Phase 3 read-back) ───────────────────────────────
+// ── queryAllNodes (Phase 3 read-back) ─────────────────────────────
 
 describe("queryAllNodes round-trip", () => {
 	function makeNode(

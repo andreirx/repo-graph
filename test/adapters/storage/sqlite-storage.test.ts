@@ -2056,13 +2056,13 @@ describe("schema migration from v1 baseline", () => {
 		).map((t) => t.name);
 		expect(tables).toContain("measurements");
 
-		// Verify staging tables from migration 009 exist
+		// Verify staging/extraction tables exist
 		const stagingTables = rawDb2
 			.prepare(
-				"SELECT name FROM sqlite_master WHERE type='table' AND name IN ('staged_edges', 'file_signals') ORDER BY name",
+				"SELECT name FROM sqlite_master WHERE type='table' AND name IN ('staged_edges', 'file_signals', 'extraction_edges') ORDER BY name",
 			)
 			.all() as Array<{ name: string }>;
-		expect(stagingTables.map((t) => t.name)).toEqual(["file_signals", "staged_edges"]);
+		expect(stagingTables.map((t) => t.name)).toEqual(["extraction_edges", "file_signals", "staged_edges"]);
 
 		// Verify staging table indexes exist
 		const stagingIndexes = rawDb2
@@ -2076,7 +2076,7 @@ describe("schema migration from v1 baseline", () => {
 		const migrations = rawDb2
 			.prepare("SELECT version FROM schema_migrations ORDER BY version")
 			.all() as Array<{ version: number }>;
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
 
 		rawDb2.close();
 		upgradeProvider.close();
@@ -2235,5 +2235,78 @@ describe("schema migration from v1 baseline", () => {
 			upgraded.initialize();
 			upgraded.close();
 		}).toThrow(/malformed requirement declaration/i);
+	});
+
+	/**
+	 * Migration 012: staged_edges → extraction_edges data preservation.
+	 * Verifies that surviving staged_edges rows are copied into the
+	 * new durable extraction_edges table during upgrade.
+	 */
+	it("preserves staged_edges rows into extraction_edges during migration 012", async () => {
+		const Database = (await import("better-sqlite3")).default;
+
+		upgradeDbPath = join(tmpdir(), `rgr-migrate-012-${randomUUID()}.db`);
+
+		// Create a database at current schema.
+		const freshProvider = new SqliteConnectionProvider(upgradeDbPath);
+		freshProvider.initialize();
+		freshProvider.close();
+
+		// Manually remove migration 012 marker so it re-runs.
+		// Insert a staged_edges row to simulate an incomplete run.
+		const rawDb = new Database(upgradeDbPath);
+		rawDb.prepare("DELETE FROM schema_migrations WHERE version >= 12").run();
+		// Drop extraction_edges so migration 012 recreates it.
+		rawDb.exec("DROP TABLE IF EXISTS extraction_edges");
+
+		// Need a repo and snapshot for FK constraints.
+		const testRepoUid = "mig-012-repo";
+		rawDb.prepare(
+			"INSERT INTO repos (repo_uid, name, root_path, default_branch, created_at) VALUES (?, ?, ?, ?, ?)",
+		).run(testRepoUid, "mig012", "/tmp/mig012", "main", new Date().toISOString());
+		const snapUid = `${testRepoUid}/${new Date().toISOString()}/test`;
+		rawDb.prepare(
+			"INSERT INTO snapshots (snapshot_uid, repo_uid, kind, status, created_at) VALUES (?, ?, ?, ?, ?)",
+		).run(snapUid, testRepoUid, "full", "ready", new Date().toISOString());
+
+		// Insert a staged_edges row.
+		const edgeUid = randomUUID();
+		rawDb.prepare(
+			`INSERT INTO staged_edges
+			 (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key,
+			  type, resolution, extractor, source_file_uid)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		).run(edgeUid, snapUid, testRepoUid, randomUUID(), "testTarget",
+			"CALLS", "static", "test:0.1", `${testRepoUid}:src/a.ts`);
+
+		const stagedCount = (rawDb.prepare("SELECT COUNT(*) AS cnt FROM staged_edges").get() as { cnt: number }).cnt;
+		expect(stagedCount).toBe(1);
+		rawDb.close();
+
+		// Re-open via provider: migration 012 should run and copy rows.
+		const upgraded = new SqliteConnectionProvider(upgradeDbPath);
+		upgraded.initialize();
+
+		const rawDb2 = new Database(upgradeDbPath);
+
+		// Verify extraction_edges has the copied row.
+		const extractionCount = (rawDb2.prepare("SELECT COUNT(*) AS cnt FROM extraction_edges").get() as { cnt: number }).cnt;
+		expect(extractionCount).toBe(1);
+
+		const copiedRow = rawDb2.prepare(
+			"SELECT edge_uid, target_key, source_file_uid FROM extraction_edges WHERE edge_uid = ?",
+		).get(edgeUid) as { edge_uid: string; target_key: string; source_file_uid: string } | undefined;
+		expect(copiedRow).toBeDefined();
+		expect(copiedRow!.target_key).toBe("testTarget");
+		expect(copiedRow!.source_file_uid).toBe(`${testRepoUid}:src/a.ts`);
+
+		// Verify migration 012 is recorded.
+		const mig = rawDb2.prepare(
+			"SELECT version FROM schema_migrations WHERE version = 12",
+		).get() as { version: number } | undefined;
+		expect(mig?.version).toBe(12);
+
+		rawDb2.close();
+		upgraded.close();
 	});
 });

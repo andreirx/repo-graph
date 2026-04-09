@@ -40,8 +40,8 @@ import type {
 	FileSymbolRow,
 	PersistedUnresolvedEdge,
 	QueryBoundaryFactsInput,
+	ExtractionEdge,
 	ResolverNode,
-	StagedEdge,
 	QueryBoundaryLinksInput,
 	QueryUnresolvedEdgesInput,
 	ResolveChangedFilesToModulesInput,
@@ -50,6 +50,8 @@ import type {
 	ImportEdgeResult,
 	InferenceRow,
 	Measurement,
+	CopyForwardInput,
+	CopyForwardResult,
 	ModuleCandidateRollup,
 	ModuleMetricAggregate,
 	ModuleOwnedFileRow,
@@ -782,11 +784,11 @@ export class SqliteStorage implements StoragePort {
 		return rows.map((r) => ({ key: r.key, count: r.count }));
 	}
 
-	// ── Staging (transient indexing artifacts) ────────────────────────
+	// ── Extraction Edges (durable raw edge facts) ────────────────────
 
-	insertStagedEdges(edges: StagedEdge[]): void {
+	insertExtractionEdges(edges: ExtractionEdge[]): void {
 		const stmt = this.db.prepare(
-			`INSERT INTO staged_edges
+			`INSERT INTO extraction_edges
 			 (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key,
 			  type, resolution, extractor,
 			  line_start, col_start, line_end, col_end, metadata_json, source_file_uid)
@@ -805,41 +807,68 @@ export class SqliteStorage implements StoragePort {
 		insertAll();
 	}
 
-	queryStagedEdges(snapshotUid: string): StagedEdge[] {
-		const rows = this.db.prepare(
-			"SELECT * FROM staged_edges WHERE snapshot_uid = ?",
-		).all(snapshotUid) as Array<Record<string, unknown>>;
-		return rows.map((r) => ({
-			edgeUid: r.edge_uid as string,
-			snapshotUid: r.snapshot_uid as string,
-			repoUid: r.repo_uid as string,
-			sourceNodeUid: r.source_node_uid as string,
-			targetKey: r.target_key as string,
-			type: r.type as string,
-			resolution: r.resolution as string,
-			extractor: r.extractor as string,
-			lineStart: (r.line_start as number) ?? null,
-			colStart: (r.col_start as number) ?? null,
-			lineEnd: (r.line_end as number) ?? null,
-			colEnd: (r.col_end as number) ?? null,
-			metadataJson: (r.metadata_json as string) ?? null,
-			sourceFileUid: (r.source_file_uid as string) ?? null,
-		}));
-	}
-
-	queryStagedEdgesBatch(
+	queryExtractionEdgesBatch(
 		snapshotUid: string,
 		limit: number,
 		afterEdgeUid: string | null,
-	): StagedEdge[] {
+	): ExtractionEdge[] {
 		const sql = afterEdgeUid
-			? "SELECT * FROM staged_edges WHERE snapshot_uid = ? AND edge_uid > ? ORDER BY edge_uid LIMIT ?"
-			: "SELECT * FROM staged_edges WHERE snapshot_uid = ? ORDER BY edge_uid LIMIT ?";
+			? "SELECT * FROM extraction_edges WHERE snapshot_uid = ? AND edge_uid > ? ORDER BY edge_uid LIMIT ?"
+			: "SELECT * FROM extraction_edges WHERE snapshot_uid = ? ORDER BY edge_uid LIMIT ?";
 		const params = afterEdgeUid
 			? [snapshotUid, afterEdgeUid, limit]
 			: [snapshotUid, limit];
 		const rows = this.db.prepare(sql).all(...params) as Array<Record<string, unknown>>;
-		return rows.map((r) => ({
+		return rows.map((r) => this.mapExtractionEdge(r));
+	}
+
+	queryExtractionEdgesByFiles(
+		snapshotUid: string,
+		sourceFileUids: string[],
+	): ExtractionEdge[] {
+		if (sourceFileUids.length === 0) return [];
+		const placeholders = sourceFileUids.map(() => "?").join(",");
+		const sql = `SELECT * FROM extraction_edges
+		             WHERE snapshot_uid = ? AND source_file_uid IN (${placeholders})`;
+		const rows = this.db
+			.prepare(sql)
+			.all(snapshotUid, ...sourceFileUids) as Array<Record<string, unknown>>;
+		return rows.map((r) => this.mapExtractionEdge(r));
+	}
+
+	copyExtractionEdgesForFiles(
+		fromSnapshotUid: string,
+		toSnapshotUid: string,
+		toRepoUid: string,
+		sourceFileUids: string[],
+	): number {
+		if (sourceFileUids.length === 0) return 0;
+		// Database-native copy: INSERT...SELECT with SQLite-generated UUIDs.
+		// Uses lower(hex(randomblob(16))) to produce new edge_uid values
+		// entirely in SQL — no JS materialization of the source row set.
+		// This is critical for Linux-scale delta indexing where unchanged
+		// files may have hundreds of thousands of raw edges.
+		const placeholders = sourceFileUids.map(() => "?").join(",");
+		const result = this.db.prepare(`
+			INSERT INTO extraction_edges (
+				edge_uid, snapshot_uid, repo_uid,
+				source_node_uid, target_key, type, resolution, extractor,
+				line_start, col_start, line_end, col_end,
+				metadata_json, source_file_uid
+			)
+			SELECT
+				lower(hex(randomblob(16))), ?, ?,
+				source_node_uid, target_key, type, resolution, extractor,
+				line_start, col_start, line_end, col_end,
+				metadata_json, source_file_uid
+			FROM extraction_edges
+			WHERE snapshot_uid = ? AND source_file_uid IN (${placeholders})
+		`).run(toSnapshotUid, toRepoUid, fromSnapshotUid, ...sourceFileUids);
+		return result.changes;
+	}
+
+	private mapExtractionEdge(r: Record<string, unknown>): ExtractionEdge {
+		return {
 			edgeUid: r.edge_uid as string,
 			snapshotUid: r.snapshot_uid as string,
 			repoUid: r.repo_uid as string,
@@ -854,12 +883,7 @@ export class SqliteStorage implements StoragePort {
 			colEnd: (r.col_end as number) ?? null,
 			metadataJson: (r.metadata_json as string) ?? null,
 			sourceFileUid: (r.source_file_uid as string) ?? null,
-		}));
-	}
-
-	deleteStagedEdges(snapshotUid: string): void {
-		this.db.prepare("DELETE FROM staged_edges WHERE snapshot_uid = ?")
-			.run(snapshotUid);
+		};
 	}
 
 	insertFileSignals(signals: FileSignalRow[]): void {
@@ -1466,6 +1490,119 @@ export class SqliteStorage implements StoragePort {
 			assignmentKind: r.assignment_kind as string,
 			confidence: r.confidence as number,
 		}));
+	}
+
+	// ── Delta indexing copy-forward ────────────────────────────────
+
+	queryFileVersionHashes(snapshotUid: string): Map<string, string> {
+		const rows = this.db.prepare(
+			"SELECT file_uid, content_hash FROM file_versions WHERE snapshot_uid = ?",
+		).all(snapshotUid) as Array<{ file_uid: string; content_hash: string }>;
+		const map = new Map<string, string>();
+		for (const r of rows) {
+			map.set(r.file_uid, r.content_hash);
+		}
+		return map;
+	}
+
+	copyForwardUnchangedFiles(input: CopyForwardInput): CopyForwardResult {
+		if (input.fileUids.length === 0) {
+			return { nodesCopied: 0, extractionEdgesCopied: 0, fileSignalsCopied: 0, fileVersionsCopied: 0 };
+		}
+
+		const { fromSnapshotUid, toSnapshotUid, repoUid, fileUids } = input;
+		const placeholders = fileUids.map(() => "?").join(",");
+
+		let nodesCopied = 0;
+		let extractionEdgesCopied = 0;
+		let fileSignalsCopied = 0;
+		let fileVersionsCopied = 0;
+
+		const copyAll = this.db.transaction(() => {
+			// 1. Build node_uid mapping (old → new) for files being copied.
+			this.db.exec("CREATE TEMP TABLE IF NOT EXISTS _node_uid_map (old_uid TEXT PRIMARY KEY, new_uid TEXT NOT NULL)");
+			this.db.exec("DELETE FROM _node_uid_map");
+
+			this.db.prepare(`
+				INSERT INTO _node_uid_map (old_uid, new_uid)
+				SELECT node_uid, lower(hex(randomblob(16)))
+				FROM nodes
+				WHERE snapshot_uid = ? AND file_uid IN (${placeholders})
+			`).run(fromSnapshotUid, ...fileUids);
+
+			// 2. Copy nodes with new UIDs.
+			const nodeResult = this.db.prepare(`
+				INSERT INTO nodes (
+					node_uid, snapshot_uid, repo_uid, stable_key, kind, subtype,
+					name, qualified_name, file_uid, parent_node_uid,
+					line_start, col_start, line_end, col_end,
+					signature, visibility, doc_comment, metadata_json
+				)
+				SELECT
+					m.new_uid, ?, n.repo_uid, n.stable_key, n.kind, n.subtype,
+					n.name, n.qualified_name, n.file_uid, n.parent_node_uid,
+					n.line_start, n.col_start, n.line_end, n.col_end,
+					n.signature, n.visibility, n.doc_comment, n.metadata_json
+				FROM nodes n
+				JOIN _node_uid_map m ON n.node_uid = m.old_uid
+			`).run(toSnapshotUid);
+			nodesCopied = nodeResult.changes;
+
+			// 3. Copy extraction_edges with new edge_uids and remapped source_node_uids.
+			const edgeResult = this.db.prepare(`
+				INSERT INTO extraction_edges (
+					edge_uid, snapshot_uid, repo_uid,
+					source_node_uid, target_key, type, resolution, extractor,
+					line_start, col_start, line_end, col_end,
+					metadata_json, source_file_uid
+				)
+				SELECT
+					lower(hex(randomblob(16))), ?, ?,
+					COALESCE(m.new_uid, e.source_node_uid),
+					e.target_key, e.type, e.resolution, e.extractor,
+					e.line_start, e.col_start, e.line_end, e.col_end,
+					e.metadata_json, e.source_file_uid
+				FROM extraction_edges e
+				LEFT JOIN _node_uid_map m ON e.source_node_uid = m.old_uid
+				WHERE e.snapshot_uid = ? AND e.source_file_uid IN (${placeholders})
+			`).run(toSnapshotUid, repoUid, fromSnapshotUid, ...fileUids);
+			extractionEdgesCopied = edgeResult.changes;
+
+			// 4. Copy file_signals (no node_uid references).
+			const signalResult = this.db.prepare(`
+				INSERT INTO file_signals (
+					snapshot_uid, file_uid, import_bindings_json,
+					package_dependencies_json, tsconfig_aliases_json
+				)
+				SELECT
+					?, file_uid, import_bindings_json,
+					package_dependencies_json, tsconfig_aliases_json
+				FROM file_signals
+				WHERE snapshot_uid = ? AND file_uid IN (${placeholders})
+			`).run(toSnapshotUid, fromSnapshotUid, ...fileUids);
+			fileSignalsCopied = signalResult.changes;
+
+			// 5. Copy file_versions (no node_uid references).
+			const versionResult = this.db.prepare(`
+				INSERT INTO file_versions (
+					snapshot_uid, file_uid, content_hash, ast_hash,
+					extractor, parse_status, size_bytes, line_count, indexed_at
+				)
+				SELECT
+					?, file_uid, content_hash, ast_hash,
+					extractor, parse_status, size_bytes, line_count, indexed_at
+				FROM file_versions
+				WHERE snapshot_uid = ? AND file_uid IN (${placeholders})
+			`).run(toSnapshotUid, fromSnapshotUid, ...fileUids);
+			fileVersionsCopied = versionResult.changes;
+
+			// Cleanup temp table.
+			this.db.exec("DELETE FROM _node_uid_map");
+		});
+
+		copyAll();
+
+		return { nodesCopied, extractionEdgesCopied, fileSignalsCopied, fileVersionsCopied };
 	}
 
 	deleteModuleCandidatesBySnapshot(snapshotUid: string): void {

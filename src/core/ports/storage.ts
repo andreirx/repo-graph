@@ -179,26 +179,50 @@ export interface StoragePort {
 	 */
 	queryResolverNodesIter(snapshotUid: string): IterableIterator<ResolverNode>;
 
-	/** Persist raw extracted edges to staging table (batch). */
-	insertStagedEdges(edges: StagedEdge[]): void;
+	// ── Extraction Edges (durable raw edge facts) ──────────────────────
+	//
+	// Raw extracted unresolved edges persisted during extraction.
+	// Durable: NOT deleted after finalization. Retained for delta
+	// indexing reuse (unchanged files' edges are copied forward to
+	// new snapshots without re-extraction).
+	//
+	// Replaces the former `staged_edges` transient plumbing.
 
-	/** Read all staged edges for a snapshot. */
-	queryStagedEdges(snapshotUid: string): StagedEdge[];
+	/** Persist raw extracted edges (batch). Durable — survives finalization. */
+	insertExtractionEdges(edges: ExtractionEdge[]): void;
 
 	/**
-	 * Read staged edges in batches using cursor-based pagination.
+	 * Read extraction edges in batches using cursor-based pagination.
 	 * Orders by edge_uid ASC. Returns up to `limit` rows where
 	 * edge_uid > afterEdgeUid (or from the start if null).
-	 * Stable under concurrent deletion.
 	 */
-	queryStagedEdgesBatch(
+	queryExtractionEdgesBatch(
 		snapshotUid: string,
 		limit: number,
 		afterEdgeUid: string | null,
-	): StagedEdge[];
+	): ExtractionEdge[];
 
-	/** Delete all staged edges for a snapshot (cleanup after resolution). */
-	deleteStagedEdges(snapshotUid: string): void;
+	/**
+	 * Read extraction edges for specific source files.
+	 * Used during delta indexing to copy raw edges from unchanged
+	 * files in the parent snapshot to the new snapshot.
+	 */
+	queryExtractionEdgesByFiles(
+		snapshotUid: string,
+		sourceFileUids: string[],
+	): ExtractionEdge[];
+
+	/**
+	 * Copy extraction edges from one snapshot to another, scoped to
+	 * specific source files. Used by delta indexing to carry forward
+	 * unchanged files' raw edges without reading them into JS.
+	 */
+	copyExtractionEdgesForFiles(
+		fromSnapshotUid: string,
+		toSnapshotUid: string,
+		toRepoUid: string,
+		sourceFileUids: string[],
+	): number;
 
 	/** Persist per-file import bindings to staging table (batch). */
 	insertFileSignals(signals: FileSignalRow[]): void;
@@ -334,6 +358,30 @@ export interface StoragePort {
 		moduleCandidateUid: string,
 		limit?: number,
 	): ModuleOwnedFileRow[];
+
+	// ── Delta indexing copy-forward ──────────────────────────────────
+	//
+	// Copy unchanged files' artifacts from parent to child snapshot.
+	// All operations are database-native (no JS materialization).
+	// Node UIDs are remapped to preserve PRIMARY KEY uniqueness.
+
+	/**
+	 * Load content hashes for all file versions in a snapshot.
+	 * Used by the invalidation planner to compare against current hashes.
+	 */
+	queryFileVersionHashes(snapshotUid: string): Map<string, string>;
+
+	/**
+	 * Copy all artifacts for unchanged files from parent to child
+	 * snapshot in a single transaction. Handles:
+	 *   - nodes (with new node_uids, preserving stable_keys)
+	 *   - extraction_edges (with new edge_uids, remapped source_node_uids)
+	 *   - file_signals
+	 *   - file_versions
+	 *
+	 * Returns counts per artifact type for trust metadata.
+	 */
+	copyForwardUnchangedFiles(input: CopyForwardInput): CopyForwardResult;
 
 	/** Delete all module candidates (and cascaded evidence/ownership) for a snapshot. */
 	deleteModuleCandidatesBySnapshot(snapshotUid: string): void;
@@ -897,11 +945,20 @@ export interface BoundaryLinkRow {
 // ── Staging types ───────────────────────────────────────────────────
 
 /**
- * A staged unresolved edge — raw extractor output persisted before
- * resolution. Same shape as UnresolvedEdge but with an additional
- * sourceFileUid for per-TU resolution context.
+ * A raw extracted edge — durable extractor output persisted during
+ * extraction. Same shape as UnresolvedEdge but with an additional
+ * sourceFileUid for per-TU resolution context and delta-indexing
+ * file-scoped copy-forward.
+ *
+ * Retained after finalization for delta indexing reuse. Unchanged
+ * files' extraction edges are copied forward to new snapshots
+ * without re-extraction.
+ *
+ * Historical note: formerly named StagedEdge when this was transient
+ * plumbing. Renamed to ExtractionEdge when delta indexing made raw
+ * edge facts durable.
  */
-export interface StagedEdge {
+export interface ExtractionEdge {
 	edgeUid: string;
 	snapshotUid: string;
 	repoUid: string;
@@ -983,6 +1040,27 @@ export interface ModuleCandidateRollup {
 	languages: string;
 	/** Whether a directory MODULE node exists with this root path. */
 	hasDirectoryModule: boolean;
+}
+
+/**
+ * Input for copy-forward of unchanged files between snapshots.
+ */
+export interface CopyForwardInput {
+	readonly fromSnapshotUid: string;
+	readonly toSnapshotUid: string;
+	readonly repoUid: string;
+	/** File UIDs to copy forward (unchanged files only). */
+	readonly fileUids: string[];
+}
+
+/**
+ * Result of copy-forward for trust metadata.
+ */
+export interface CopyForwardResult {
+	readonly nodesCopied: number;
+	readonly extractionEdgesCopied: number;
+	readonly fileSignalsCopied: number;
+	readonly fileVersionsCopied: number;
 }
 
 /**
