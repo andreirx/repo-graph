@@ -50,7 +50,9 @@ import type {
 	ImportEdgeResult,
 	InferenceRow,
 	Measurement,
+	ModuleCandidateRollup,
 	ModuleMetricAggregate,
+	ModuleOwnedFileRow,
 	QueryFunctionMetricsInput,
 	RepoRef,
 	ResolveSymbolInput,
@@ -1366,6 +1368,103 @@ export class SqliteStorage implements StoragePort {
 			assignmentKind: r.assignment_kind as AssignmentKind,
 			confidence: r.confidence as number,
 			basisJson: (r.basis_json as string) ?? null,
+		}));
+	}
+
+	queryModuleCandidateRollups(snapshotUid: string): ModuleCandidateRollup[] {
+		const rows = this.db.prepare(`
+			SELECT
+				mc.module_candidate_uid,
+				mc.module_key,
+				mc.canonical_root_path,
+				mc.display_name,
+				mc.module_kind,
+				mc.confidence,
+				COALESCE(ownership.file_count, 0) AS file_count,
+				COALESCE(ownership.test_file_count, 0) AS test_file_count,
+				COALESCE(symbols.symbol_count, 0) AS symbol_count,
+				COALESCE(evidence.evidence_count, 0) AS evidence_count,
+				COALESCE(ownership.languages, '') AS languages,
+				CASE WHEN dir_mod.node_uid IS NOT NULL THEN 1 ELSE 0 END AS has_directory_module
+			FROM module_candidates mc
+			LEFT JOIN (
+				SELECT
+					mfo.module_candidate_uid,
+					COUNT(*) AS file_count,
+					SUM(CASE WHEN f.is_test = 1 THEN 1 ELSE 0 END) AS test_file_count,
+					GROUP_CONCAT(DISTINCT f.language ORDER BY f.language) AS languages
+				FROM module_file_ownership mfo
+				JOIN files f ON f.file_uid = mfo.file_uid
+				WHERE mfo.snapshot_uid = ?
+				GROUP BY mfo.module_candidate_uid
+			) ownership ON ownership.module_candidate_uid = mc.module_candidate_uid
+			LEFT JOIN (
+				SELECT
+					mfo.module_candidate_uid,
+					COUNT(*) AS symbol_count
+				FROM module_file_ownership mfo
+				JOIN nodes n ON n.file_uid = mfo.file_uid AND n.snapshot_uid = mfo.snapshot_uid AND n.kind = 'SYMBOL'
+				WHERE mfo.snapshot_uid = ?
+				GROUP BY mfo.module_candidate_uid
+			) symbols ON symbols.module_candidate_uid = mc.module_candidate_uid
+			LEFT JOIN (
+				SELECT module_candidate_uid, COUNT(*) AS evidence_count
+				FROM module_candidate_evidence
+				WHERE snapshot_uid = ?
+				GROUP BY module_candidate_uid
+			) evidence ON evidence.module_candidate_uid = mc.module_candidate_uid
+			LEFT JOIN nodes dir_mod
+				ON dir_mod.snapshot_uid = mc.snapshot_uid
+				AND dir_mod.kind = 'MODULE'
+				AND dir_mod.qualified_name = mc.canonical_root_path
+			WHERE mc.snapshot_uid = ?
+			ORDER BY mc.canonical_root_path
+		`).all(snapshotUid, snapshotUid, snapshotUid, snapshotUid) as Array<Record<string, unknown>>;
+
+		return rows.map((r) => ({
+			moduleCandidateUid: r.module_candidate_uid as string,
+			moduleKey: r.module_key as string,
+			canonicalRootPath: r.canonical_root_path as string,
+			displayName: (r.display_name as string) ?? null,
+			moduleKind: r.module_kind as string,
+			confidence: r.confidence as number,
+			fileCount: r.file_count as number,
+			symbolCount: r.symbol_count as number,
+			testFileCount: r.test_file_count as number,
+			evidenceCount: r.evidence_count as number,
+			languages: (r.languages as string) ?? "",
+			hasDirectoryModule: (r.has_directory_module as number) === 1,
+		}));
+	}
+
+	queryModuleOwnedFiles(
+		snapshotUid: string,
+		moduleCandidateUid: string,
+		limit?: number,
+	): ModuleOwnedFileRow[] {
+		const limitClause = limit ? `LIMIT ${limit}` : "";
+		const rows = this.db.prepare(`
+			SELECT
+				mfo.file_uid,
+				f.path AS file_path,
+				f.language,
+				f.is_test,
+				mfo.assignment_kind,
+				mfo.confidence
+			FROM module_file_ownership mfo
+			JOIN files f ON f.file_uid = mfo.file_uid
+			WHERE mfo.snapshot_uid = ?
+			  AND mfo.module_candidate_uid = ?
+			ORDER BY f.path
+			${limitClause}
+		`).all(snapshotUid, moduleCandidateUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			fileUid: r.file_uid as string,
+			filePath: r.file_path as string,
+			language: (r.language as string) ?? null,
+			isTest: (r.is_test as number) === 1,
+			assignmentKind: r.assignment_kind as string,
+			confidence: r.confidence as number,
 		}));
 	}
 

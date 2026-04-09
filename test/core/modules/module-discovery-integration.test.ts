@@ -263,3 +263,125 @@ describe("module discovery integration — mixed-lang", () => {
 		provider.close();
 	});
 });
+
+// ── Rollup and targeted query surfaces ─────────────────────────────
+
+describe("module discovery integration — rollups and queries", () => {
+	it("queryModuleCandidateRollups returns correct counts", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "rollup-test";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "monorepo-fixture",
+			rootPath: MONOREPO_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const rollups = storage.queryModuleCandidateRollups(result.snapshotUid);
+		expect(rollups.length).toBeGreaterThanOrEqual(2);
+
+		const apiRollup = rollups.find((r) => r.canonicalRootPath === "packages/api");
+		expect(apiRollup).toBeDefined();
+		expect(apiRollup!.displayName).toBe("@fixture/api");
+		expect(apiRollup!.moduleKind).toBe("declared");
+		expect(apiRollup!.fileCount).toBeGreaterThanOrEqual(1);
+		expect(apiRollup!.symbolCount).toBeGreaterThanOrEqual(0);
+		expect(apiRollup!.evidenceCount).toBeGreaterThanOrEqual(1);
+		expect(apiRollup!.confidence).toBeGreaterThan(0);
+		// Languages should be deterministic (sorted).
+		if (apiRollup!.languages) {
+			const langs = apiRollup!.languages.split(",");
+			const sorted = [...langs].sort();
+			expect(langs).toEqual(sorted);
+		}
+
+		provider.close();
+	});
+
+	it("queryModuleOwnedFiles returns only files for the specified module", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "owned-files-test";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "monorepo-fixture",
+			rootPath: MONOREPO_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const candidates = storage.queryModuleCandidates(result.snapshotUid);
+		const apiCandidate = candidates.find((c) =>
+			c.canonicalRootPath === "packages/api",
+		);
+		expect(apiCandidate).toBeDefined();
+
+		const files = storage.queryModuleOwnedFiles(
+			result.snapshotUid,
+			apiCandidate!.moduleCandidateUid,
+		);
+
+		// All returned files should be under packages/api/.
+		expect(files.length).toBeGreaterThanOrEqual(1);
+		for (const f of files) {
+			expect(f.filePath.startsWith("packages/api/")).toBe(true);
+			expect(f.assignmentKind).toBe("root_containment");
+			expect(f.confidence).toBeGreaterThan(0);
+			expect(f.language).toBeTruthy();
+		}
+
+		// Should not include files from packages/ui/.
+		const uiFiles = files.filter((f) => f.filePath.startsWith("packages/ui/"));
+		expect(uiFiles).toHaveLength(0);
+
+		provider.close();
+	});
+
+	it("queryModuleOwnedFiles respects limit parameter", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "owned-files-limit";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "monorepo-fixture",
+			rootPath: MONOREPO_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const candidates = storage.queryModuleCandidates(result.snapshotUid);
+		const candidate = candidates.find((c) => c.canonicalRootPath === "packages/api")
+			?? candidates[0];
+
+		const limited = storage.queryModuleOwnedFiles(
+			result.snapshotUid,
+			candidate.moduleCandidateUid,
+			1,
+		);
+		const unlimited = storage.queryModuleOwnedFiles(
+			result.snapshotUid,
+			candidate.moduleCandidateUid,
+		);
+
+		if (unlimited.length > 1) {
+			expect(limited).toHaveLength(1);
+			expect(unlimited.length).toBeGreaterThan(1);
+		}
+
+		provider.close();
+	});
+});

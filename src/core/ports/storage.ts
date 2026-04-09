@@ -317,6 +317,24 @@ export interface StoragePort {
 	/** Query file ownership for a snapshot. */
 	queryModuleFileOwnership(snapshotUid: string): ModuleFileOwnership[];
 
+	/**
+	 * Rollup statistics per module candidate: file count, symbol count,
+	 * evidence count, language breakdown, test file count.
+	 * Single query — no N+1 per candidate.
+	 */
+	queryModuleCandidateRollups(snapshotUid: string): ModuleCandidateRollup[];
+
+	/**
+	 * Query files owned by a specific module candidate, joined with
+	 * file metadata. Targeted query — does not materialize whole
+	 * snapshot ownership.
+	 */
+	queryModuleOwnedFiles(
+		snapshotUid: string,
+		moduleCandidateUid: string,
+		limit?: number,
+	): ModuleOwnedFileRow[];
+
 	/** Delete all module candidates (and cascaded evidence/ownership) for a snapshot. */
 	deleteModuleCandidatesBySnapshot(snapshotUid: string): void;
 
@@ -944,4 +962,37 @@ export interface FileSymbolRow {
 	subtype: string | null;
 	lineStart: number | null;
 	visibility: string | null;
+}
+
+/**
+ * Rollup statistics for a discovered module candidate.
+ * Computed from ownership + files + nodes joins.
+ */
+export interface ModuleCandidateRollup {
+	moduleCandidateUid: string;
+	moduleKey: string;
+	canonicalRootPath: string;
+	displayName: string | null;
+	moduleKind: string;
+	confidence: number;
+	fileCount: number;
+	symbolCount: number;
+	testFileCount: number;
+	evidenceCount: number;
+	/** Comma-separated list of distinct languages in owned files. */
+	languages: string;
+	/** Whether a directory MODULE node exists with this root path. */
+	hasDirectoryModule: boolean;
+}
+
+/**
+ * File row joined with ownership metadata for a specific module.
+ */
+export interface ModuleOwnedFileRow {
+	fileUid: string;
+	filePath: string;
+	language: string | null;
+	isTest: boolean;
+	assignmentKind: string;
+	confidence: number;
 }
