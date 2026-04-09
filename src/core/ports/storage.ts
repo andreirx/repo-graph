@@ -156,11 +156,41 @@ export interface StoragePort {
 	// edges and file signals immediately. Resolution reads them back
 	// in batches. Staging rows are cleaned up after finalization.
 
+	/**
+	 * Read all nodes for a snapshot with only the fields needed by the
+	 * edge resolver — not full GraphNode objects. Smaller memory footprint.
+	 *
+	 * CAUTION: materializes the full result set as a JS array. For
+	 * Linux-scale snapshots (500K+ nodes), use queryResolverNodesIter
+	 * to avoid V8 heap exhaustion from bulk .all() materialization.
+	 */
+	queryResolverNodes(snapshotUid: string): ResolverNode[];
+
+	/**
+	 * Row-at-a-time iterator over slim resolver nodes for a snapshot.
+	 * Uses better-sqlite3's .iterate() — does NOT materialize the
+	 * full result set. Consumers build Maps directly from the stream,
+	 * keeping peak memory = Maps only (no duplicate intermediate array).
+	 */
+	queryResolverNodesIter(snapshotUid: string): IterableIterator<ResolverNode>;
+
 	/** Persist raw extracted edges to staging table (batch). */
 	insertStagedEdges(edges: StagedEdge[]): void;
 
 	/** Read all staged edges for a snapshot. */
 	queryStagedEdges(snapshotUid: string): StagedEdge[];
+
+	/**
+	 * Read staged edges in batches using cursor-based pagination.
+	 * Orders by edge_uid ASC. Returns up to `limit` rows where
+	 * edge_uid > afterEdgeUid (or from the start if null).
+	 * Stable under concurrent deletion.
+	 */
+	queryStagedEdgesBatch(
+		snapshotUid: string,
+		limit: number,
+		afterEdgeUid: string | null,
+	): StagedEdge[];
 
 	/** Delete all staged edges for a snapshot (cleanup after resolution). */
 	deleteStagedEdges(snapshotUid: string): void;
@@ -171,11 +201,34 @@ export interface StoragePort {
 	/** Read import bindings for a specific file in a snapshot. */
 	queryFileSignals(snapshotUid: string, fileUid: string): FileSignalRow | null;
 
+	/**
+	 * Read file signals for a batch of file UIDs in a snapshot.
+	 * Used during edge resolution to load import bindings only for
+	 * files referenced by the current edge batch.
+	 */
+	queryFileSignalsBatch(
+		snapshotUid: string,
+		fileUids: string[],
+	): FileSignalRow[];
+
 	/** Read all file signals for a snapshot. */
 	queryAllFileSignals(snapshotUid: string): FileSignalRow[];
 
 	/** Delete all file signals for a snapshot (optional cleanup). */
 	deleteFileSignals(snapshotUid: string): void;
+
+	/**
+	 * Query SYMBOL nodes for a specific file in a snapshot.
+	 * Returns only the fields needed by framework detectors and
+	 * boundary extractors. Small per-file result set (5-50 rows).
+	 *
+	 * Use for targeted per-file passes. For whole-snapshot iteration,
+	 * prefer queryResolverNodesIter to avoid per-file query thrash.
+	 */
+	querySymbolsByFile(
+		snapshotUid: string,
+		fileUid: string,
+	): FileSymbolRow[];
 
 	// ── Boundary Facts (source of truth) ─────────────────────────────────
 	//
@@ -823,4 +876,37 @@ export interface FileSignalRow {
 	fileUid: string;
 	/** JSON-serialized ImportBinding[]. */
 	importBindingsJson: string | null;
+	/** JSON-serialized PackageDependencySet. Nearest-owning manifest deps. */
+	packageDependenciesJson: string | null;
+	/** JSON-serialized TsconfigAliases. Nearest-owning tsconfig paths. */
+	tsconfigAliasesJson: string | null;
+}
+
+/**
+ * Slim node representation for the edge resolver.
+ * Only the fields needed for resolution and affinity filtering.
+ * Much smaller than full GraphNode (~7 fields vs ~18).
+ */
+export interface ResolverNode {
+	nodeUid: string;
+	stableKey: string;
+	name: string;
+	qualifiedName: string | null;
+	kind: string;
+	subtype: string | null;
+	fileUid: string | null;
+}
+
+/**
+ * Per-file symbol row for framework detectors and boundary extractors.
+ * Only SYMBOL-kind nodes, with the fields those passes actually need.
+ */
+export interface FileSymbolRow {
+	stableKey: string;
+	nodeUid: string;
+	name: string;
+	qualifiedName: string;
+	subtype: string | null;
+	lineStart: number | null;
+	visibility: string | null;
 }

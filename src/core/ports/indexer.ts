@@ -39,6 +39,12 @@ export interface IndexOptions {
 	 * commit and passes it here.
 	 */
 	basisCommit?: string;
+	/**
+	 * Override the edge resolution batch size. Default is 10,000.
+	 * Exposed for testing multi-batch cursor pagination with small
+	 * fixtures. Not intended for production tuning.
+	 */
+	edgeBatchSize?: number;
 }
 
 export interface IndexResult {

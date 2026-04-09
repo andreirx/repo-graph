@@ -83,6 +83,11 @@
   remain unclassified. Curated alias map not yet implemented.
 - Pytest detector: test_* functions, Test* classes, @pytest.fixture.
   Non-decorated conftest.py functions not detected.
+- **Shadowed definitions:** Two-pass extraction emits only the last
+  same-name `def`/`class` at each scope level (module root, class body).
+  Earlier shadowed definitions are silently suppressed. No diagnostic
+  channel exists to report them. Future: emit extractor diagnostics
+  for shadowed definitions so downstream tools can flag dead redefinitions.
 - **No Python semantic enrichment** (pyright/mypy) yet.
 - **No Python framework detectors** (Django, Flask, FastAPI) yet.
 
@@ -105,10 +110,26 @@
 - **Large-file guard:** Files > 1MB are skipped. This is operational containment
   for generated register headers (Linux AMD GPU headers: 200k+ lines). Not a
   semantic correctness feature.
-- **Large-repo limitation:** The all-in-memory indexer architecture cannot handle
-  Linux-scale repos (63k files). Requires batch-persistence redesign.
+- **Large-repo streaming/batched pipeline:**
+  - Bulk `.all()` eliminated: `queryResolverNodes`, `queryStagedEdges`, `queryAllNodes`
+    no longer called on the indexing hot path.
+  - Resolver index built from row-at-a-time DB iterator.
+  - Staged edges resolved in cursor-based batches (default 10K, configurable).
+  - Detector/boundary passes use per-file `querySymbolsByFile`.
+  - Dead Phase 1 in-memory maps removed (resolverByStableKey, resolverByName,
+    resolverNodeToFile, nodeUidToFileUid).
+  - Classification loads file signals per-batch from DB (migration 010:
+    packageDependenciesJson + tsconfigAliasesJson added to file_signals).
+    Same-file symbol sets rebuilt from persisted nodes via querySymbolsByFile.
+    No snapshot-wide fileSignalsCache on the classification path.
+  - `fileSignalsCache` retained only for Lambda entrypoint detection — stores
+    import bindings only (empty stubs for other fields). TS/JS files only.
+  - Multi-batch seam tests: edgeBatchSize=1 and edgeBatchSize=3 verified to
+    produce identical results to default batch size.
+  - **Linux-scale status:** not yet validated. Previous run hit V8 heap OOM at
+    3.6 GB during bulk `.all()` materialization, which is now eliminated. Rerun
+    required to discover the next blocker, if any.
 - **No clangd/libclang enrichment** for receiver-type resolution yet.
-- **No C/C++ framework/system detectors** (kernel modules, drivers, RTOS) yet.
 
 ## Coverage / Churn Import
 

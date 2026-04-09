@@ -375,6 +375,79 @@ describe("indexRepo", () => {
 	});
 });
 
+// ── Multi-batch seam test ──────────────────────────────────────────────
+
+describe("multi-batch edge resolution", () => {
+	it("produces identical results with edgeBatchSize=1 vs default", async () => {
+		// Run with default batch size (all edges in one batch).
+		const baseline = await indexer.indexRepo(REPO_UID);
+
+		// Clean up and re-register for a second run.
+		provider.close();
+		try { unlinkSync(dbPath); } catch { /* ignore */ }
+
+		dbPath = join(tmpdir(), `rgr-indexer-batch-${randomUUID()}.db`);
+		provider = new SqliteConnectionProvider(dbPath);
+		provider.initialize();
+		storage = new SqliteStorage(provider.getDatabase());
+		indexer = new RepoIndexer(storage, extractor);
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "fixture-repo",
+			rootPath: FIXTURES_ROOT,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		// Run with batch size 1 — forces one batch per staged edge.
+		const batched = await indexer.indexRepo(REPO_UID, {
+			edgeBatchSize: 1,
+		});
+
+		// Core invariants: identical counts.
+		expect(batched.filesTotal).toBe(baseline.filesTotal);
+		expect(batched.nodesTotal).toBe(baseline.nodesTotal);
+		expect(batched.edgesTotal).toBe(baseline.edgesTotal);
+		expect(batched.edgesUnresolved).toBe(baseline.edgesUnresolved);
+
+		// Verify unresolved breakdown categories match.
+		expect(batched.unresolvedBreakdown).toEqual(baseline.unresolvedBreakdown);
+	});
+
+	it("produces identical results with edgeBatchSize=3 vs default", async () => {
+		// A batch size that is not 1 and not aligned to edge count.
+		const baseline = await indexer.indexRepo(REPO_UID);
+
+		provider.close();
+		try { unlinkSync(dbPath); } catch { /* ignore */ }
+
+		dbPath = join(tmpdir(), `rgr-indexer-batch3-${randomUUID()}.db`);
+		provider = new SqliteConnectionProvider(dbPath);
+		provider.initialize();
+		storage = new SqliteStorage(provider.getDatabase());
+		indexer = new RepoIndexer(storage, extractor);
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "fixture-repo",
+			rootPath: FIXTURES_ROOT,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const batched = await indexer.indexRepo(REPO_UID, {
+			edgeBatchSize: 3,
+		});
+
+		expect(batched.filesTotal).toBe(baseline.filesTotal);
+		expect(batched.nodesTotal).toBe(baseline.nodesTotal);
+		expect(batched.edgesTotal).toBe(baseline.edgesTotal);
+		expect(batched.edgesUnresolved).toBe(baseline.edgesUnresolved);
+		expect(batched.unresolvedBreakdown).toEqual(baseline.unresolvedBreakdown);
+	});
+});
+
 // ── Scanner hygiene ────────────────────────────────────────────────────
 
 describe("scanner hygiene", () => {

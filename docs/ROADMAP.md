@@ -6,7 +6,7 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Current state (as of last commit)
 
-- **1341 tests** across 71 test files.
+- **1403 tests** across 74 test files.
 - **Languages:** TypeScript/JavaScript + Rust + Java + Python + C/C++. Five-extractor indexer.
 - **Enrichment:** TS (~81%), Rust (~85%), Java (operational but fragile). All three wired.
 - **Classifier version:** 6.
@@ -21,12 +21,27 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   false dead-code reports on glamCRM. Also fixes Lambda entrypoint suppression in `findDeadNodes`.
 - **Imported free-function call resolution:** TS/JS import-binding-assisted call
   resolution. repo-graph call_resolution_rate improved from ~15% to 33%.
+- **Streaming/batched indexing pipeline:** Linux kernel indexes successfully.
+  - Resolver index built from row-at-a-time DB iterator (no bulk `.all()`).
+  - Staged edges resolved in cursor-based batches (10K default).
+  - Classification loads file signals per-batch from DB (migration 010:
+    packageDependenciesJson + tsconfigAliasesJson in file_signals table).
+    Same-file symbol sets rebuilt from persisted nodes. No snapshot-wide
+    fileSignalsCache on the classification hot path.
+  - Detector/boundary passes use per-file `querySymbolsByFile`.
+  - Dead Phase 1 in-memory maps eliminated.
+  - Multi-batch seam tests verify count/breakdown parity at batch sizes 1 and 3.
+- **Python two-pass extraction:** last-definition-wins semantics for same-scope function
+  and class redefinitions. Shadowed definitions suppressed (no node, no edges, no metrics).
 - **Repo set:** amodx, fraktag, glamCRM, repo-graph, mempalace, glam-scrapers,
-  unelte, swupdate, buildroot, C++11 Deep Dives.
+  unelte, swupdate, buildroot, C++11 Deep Dives, **Linux kernel**.
   - TS-only, TS+Rust, TS+Java, Python, C/C++, mixed multi-language.
   - C/C++ validated on swupdate (208 files, 3422 nodes) and buildroot (645 files, 5249 nodes).
-  - Linux kernel registered but exceeds current indexer memory model (63k C files).
-- **Framework detection:** Express routes, Lambda handlers, Spring beans, pytest tests/fixtures.
+  - Linux kernel: 63,701 files, 1,045,482 nodes, 2,045,964 resolved edges,
+    2,775,402 unresolved edges. Indexed in 77 min. Syntax-only (no compile_commands.json
+    in this run). High unresolved rate expected without build-system context.
+- **Framework detection:** Express routes, Lambda handlers, Spring beans, pytest tests/fixtures,
+  Linux kernel system patterns (module_init, platform_driver, GCC constructor/destructor).
   `findDeadNodes` consults all framework-liveness inferences.
 - **CLI boundary model:** HTTP + cli_command mechanisms. Commander providers, package.json
   script consumers, shell script consumers, Makefile recipe consumers. Binary-prefix matching.
@@ -37,6 +52,8 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   - Boundary facts stored separately from core edges table (derived links discardable).
   - Large-file guard: files > 1MB skipped during indexing (operational containment).
   - Imported free-function calls resolved via import bindings (no compiler needed).
+  - Sharded indexing (shard-local extraction + global integration pass) is the target
+    architecture for Linux-scale repos beyond the current streaming pipeline.
 
 ## Shipped
 
@@ -184,8 +201,58 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - Large-file guard: files > 1MB skipped (operational containment for generated headers).
 - Validated on: swupdate (208 files, 3422 nodes), buildroot (645 files, 5249 nodes),
   C++11 Deep Dives (165 files, 829 nodes).
-- Linux kernel: 63k C files exceeds current all-in-memory indexer architecture.
-  Requires batch-persistence redesign (see Next).
+- Linux kernel: 63k C files. Staged architecture removed primary memory
+  bottleneck; runs ~18 min before runtime crash. Sharded indexing architecture
+  is the target solution (see Next #1).
+
+### Streaming/batched indexing pipeline (Linux-scale validated)
+- Per-file persistence: read → extract → insertNodes → insertStagedEdges →
+  insertFileSignals → discard source. Source text no longer retained across files.
+- Staging tables: `staged_edges` and `file_signals` (migrations 009-010), both
+  CASCADE-scoped to snapshot. Migration 010 added `package_dependencies_json`
+  and `tsconfig_aliases_json` to `file_signals`.
+- Resolver index built from row-at-a-time DB iterator (`queryResolverNodesIter`).
+  No bulk `.all()` materialization. Peak memory = Maps only.
+- Staged edges resolved in cursor-based batches (`queryStagedEdgesBatch`, default
+  10K, configurable via `IndexOptions.edgeBatchSize`). Per batch: read → resolve →
+  classify → persist → discard.
+- Classification loads file signals per-batch from DB. Same-file symbol sets
+  rebuilt from persisted nodes via `querySymbolsByFile`. No snapshot-wide
+  `fileSignalsCache` on the classification hot path.
+- `queryAllNodes` eliminated from all indexer call sites. Module-edge creation
+  uses pre-built Maps from resolver iterator. Detector/boundary passes use
+  per-file `querySymbolsByFile`.
+- Dead Phase 1 in-memory maps removed: `resolverByStableKey`, `resolverByName`,
+  `resolverNodeToFile`, `nodeUidToFileUid`.
+- tree.delete() in try/finally across all 5 extractors (WASM heap hygiene).
+- Parser reset every 5000 parses (C/C++ extractor).
+- Read failures registered as FAILED file versions (not silently dropped).
+- Oversized files registered as SKIPPED with isExcluded=true.
+- Multi-batch seam tests: edgeBatchSize=1 and edgeBatchSize=3 verified to
+  produce identical counts/breakdown vs default.
+- **Validated on Linux kernel:** 63,701 files, 1,045,482 nodes, 2,045,964
+  edges, 77 min. Exit code 0, clean stderr.
+
+### Python two-pass last-definition-wins extraction
+- Pre-scan determines winning (last) definition for each function/class name
+  at every scope level (module root, class body).
+- Shadowed definitions fully suppressed: no node, no edges, no metrics emitted.
+- Matches Python runtime semantics (last same-name def at a scope shadows earlier).
+- Handles decorated definitions (unwraps decorated_definition to inner def/class).
+- No diagnostic channel for reporting shadowed definitions yet (TECH-DEBT).
+
+### compile_commands.json reader
+- Per-translation-unit include path and define extraction.
+- Relative directory resolution against compile_commands.json location.
+- Used by indexer for per-TU include resolution in C/C++ import targets.
+
+### Linux system detector
+- module_init/module_exit macro patterns.
+- platform_driver registration.
+- GCC constructor/destructor attributes.
+- register_handler patterns.
+- Emitted as `linux_system_managed` inferences. Suppresses false dead-code
+  reports for kernel-managed symbols.
 
 ### Compiler enrichment
 - `rgr enrich <repo>`: post-index receiver-type resolution
@@ -201,36 +268,135 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Next (in priority order)
 
-### 1. Large-repo indexing architecture
-The current indexer reads all files into memory, accumulates all nodes
-and edges, then persists. This works for repos up to ~1000 files but
-fails on Linux-scale repos (63k C files).
+### 1. Module discovery support module
+Detects declared, operational, and inferred modules. Assigns files to
+modules. Persists module evidence and module ownership. Pure support
+substrate — no user-facing features in this item.
 
-Required changes:
-- Remove `fileContents` all-in-memory map
-- Persist nodes/edges in batches during extraction, not after
-- Bounded in-memory resolution windows (chunked resolution)
-- Optional skip policy for generated/preprocessed files (current 1MB
-  guard is containment, not the fix)
+**Three-layer precedence model:**
 
-This is the primary architectural blocker for Linux, large BSP repos,
-and monorepos with thousands of source files.
+Layer 1 — Declared modules (highest trust):
+- package.json workspaces, pnpm-workspace.yaml
+- Gradle subprojects, Cargo workspaces/crates
+- Python package roots, Bazel packages
+- Make/Kbuild object groups
+- Terraform root modules
 
-### 2. C/C++ maturation
-The syntax-only first slice is shipped. Next maturation steps:
-- `compile_commands.json` integration for include path resolution
+Layer 2 — Operational modules:
+- Server/app entrypoints (backend, frontend, admin)
+- Worker/queue/render pipeline entrypoints
+- CLI entrypoints
+- Infra roots (Terraform/Pulumi/Helm/Ansible)
+- Separate build/deploy targets
+
+Layer 3 — Inferred modules (fallback only):
+- Import graph density clusters
+- Dependency directionality
+- Common-root file ownership
+- Build-target membership
+- Boundary facts, framework detector hits
+
+**Module candidate schema:**
+- module_key, module_kind (declared_package, app_surface, service,
+  plugin, infra_root, build_shard, inferred_cluster)
+- root_paths, entrypoints, owned_files
+- evidence (manifest root, build target, entrypoint file, etc.)
+- confidence
+
+**File assignment order:**
+1. Explicit module root containment
+2. Build-target membership
+3. Nearest operational root
+4. Plugin/package ownership
+5. Inferred cluster fallback
+6. Shared/common bucket only if truly ambiguous
+
+**Why this is #1:**
+- Helps own repos immediately (backend/frontend/admin/renderer/infra)
+- Provides natural shard boundaries for sharded indexing
+- Reusable across all languages and build systems
+- Architecture-level truth, not just another detector
+
+### 2. Module graph and file-to-module ownership
+User-facing implementation on top of the module discovery substrate.
+
+- Module dependency edges
+- Cross-module violation checks
+- Per-module rollups for dead code, boundaries, blast radius
+- `rgr graph modules <repo>` — module catalog with evidence
+- `rgr arch violations <repo>` augmented with module-level policy
+- File-to-module ownership visible in graph queries
+
+### 3. Long-lived analysis daemon
+Support module: warmed runtime that eliminates repeated CLI bootstrap
+cost (WASM grammar load, extractor initialization, SQLite open,
+migration checks). Not a substitute for the streaming/batch pipeline —
+that must be correct first.
+
+Provides:
+- warm parser pool and prepared SQLite statements
+- request routing (JSON-RPC over Unix socket)
+- three concurrency lanes: query (many readers), index (single writer),
+  maintenance (background)
+- per-repo write locks, snapshot pinning during active reads
+- progress streaming and cancellation tokens
+
+### 4. Daemon-backed CLI flow
+Feature implementation on top of the daemon substrate:
+- CLI becomes a thin client (connect, send request, render response)
+- auto-start daemon on first command if absent
+- progress rendering via stderr from daemon progress stream
+- fallback to direct execution if daemon unavailable
+
+### 5. Sharded indexing architecture
+The streaming pipeline handles Linux-scale repos in a single pass
+(77 min, exit 0). Sharding is the next scaling tier for:
+- reducing peak memory further (bounded by shard, not snapshot)
+- enabling parallel shard extraction
+- natural fit for build-aware C/C++ partitioning
+
+Architecture: shard-local extraction + global integration pass.
+Same pattern as Clang tooling, LSIF pipelines, large code intelligence.
+
+**Shard partition keys** (language-dependent):
+- C/C++: translation-unit shards (compile_commands.json), subsystem
+  directories, Kbuild/object groups
+- JS/TS: package/workspace roots
+- Java: Gradle subproject or Maven module
+- Python: package roots
+- Monorepos: workspace manifest entries
+
+**Invariants:**
+- Global stable keys regardless of shard
+- Per-TU compile context attached to source file
+- Cross-shard unresolved edges are expected, not failures
+- All shards in same logical snapshot
+- Module/subsystem aggregation happens last
+
+### 6. C/C++ semantic maturation
+The syntax-only first slice + compile_commands.json reader + Linux
+system detector are shipped. Next maturation steps:
 - Header/source ownership: which .h belongs to which translation unit
 - Clangd/libclang enrichment for receiver-type resolution (same
   architectural pattern as TS TypeChecker / Rust rust-analyzer)
 - #include resolution against actual file paths (not just specifiers)
 
-System/framework detectors:
-- Linux kernel module patterns (module_init, platform_driver)
-- Driver registration patterns
+Remaining system/framework detectors:
 - RTOS task/thread registration (FreeRTOS, Zephyr)
 - IOCTL/shared-memory boundary extraction
+- Driver registration patterns beyond platform_driver
 
-### 3. Dead-code confidence stratification
+### 7. CLI progress rendering
+The indexer emits progress events via callback. The CLI layer should
+render them to stderr. stdout remains reserved for final `--json`
+output. Not implemented yet — indexing runs silently until completion.
+
+Options:
+- `--progress` flag rendering to stderr (human-readable)
+- `--progress=jsonl` for machine-readable progress stream
+- daemon progress streaming (once daemon exists)
+
+### 8. Dead-code confidence stratification
 Stop presenting every zero-caller symbol as equally dead. Add evidence
 quality to dead-symbol reports.
 
@@ -241,7 +407,7 @@ Labels:
 - `imported_but_call_unresolved` — symbol is imported elsewhere but the
   call resolution did not connect
 
-### 4. CLI boundary expansion (remaining)
+### 9. CLI boundary expansion (remaining)
 Shell and Makefile consumer extraction shipped. Remaining adapters:
 - CI configs (`.github/workflows/*.yml`, `.gitlab-ci.yml`)
 - Dockerfiles (`ENTRYPOINT`, `CMD`) — deferred further
@@ -253,25 +419,25 @@ Also:
 - Barrel-cycle normalization: separate export-only/barrel cycles from
   logic cycles in cycle reporting
 
-### 5. Trust overlay on structural queries
+### 10. Trust overlay on structural queries
 Surface evidence quality on query output. Examples:
 - "0 callers, low confidence: module has 4042 unresolved CALLS"
 - "dead symbol candidate, low confidence: imported in 2 files but call
   target unresolved"
 Turns raw graph limitations into explicit epistemic status.
 
-### 6. Rust framework detectors
+### 11. Rust framework detectors
 Actix-web, Axum, Rocket, Warp route handlers. Same pattern as Express
 detection: post-classification pass, receiver-provenance gated. Also
 enables Rust HTTP boundary provider extraction for the boundary model.
 
-### 7. Java semantic enrichment operationalization
+### 12. Java semantic enrichment operationalization
 jdtls is operational but fragile. The remaining issues are not polish:
 - Cold-start/workspace reliability
 - Protocol/client completeness
 - Operational determinism on large repos
 
-### 8. Storage/state boundary model
+### 13. Storage/state boundary model
 A component interacts with persisted or semi-persisted state through
 a storage mechanism. This is a STATE boundary, distinct from the
 interaction boundaries (HTTP, CLI) already modeled. Agents can grep

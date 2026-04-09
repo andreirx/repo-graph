@@ -47,12 +47,14 @@ import type {
 	IndexResult,
 } from "../../core/ports/indexer.js";
 import type {
+	FileSignalRow,
 	InferenceRow,
 	Measurement,
 	PersistedBoundaryConsumerFact,
 	PersistedBoundaryLink,
 	PersistedBoundaryProviderFact,
 	PersistedUnresolvedEdge,
+	ResolverNode,
 	StoragePort,
 } from "../../core/ports/storage.js";
 import { detectLinuxSystemPatterns } from "../extractors/cpp/linux-system-detector.js";
@@ -96,6 +98,23 @@ import {
 	extractPackageDependencies,
 	extractPackageManifest,
 } from "../extractors/manifest/package-json.js";
+
+/**
+ * Pre-built resolver index for edge resolution and module-edge creation.
+ * Built once from row-at-a-time DB iteration (no bulk .all()).
+ * Shared across all edge resolution batches and module-edge derivation.
+ */
+interface ResolverIndex {
+	nodesByStableKey: Map<string, ResolverNode>;
+	nodesByName: Map<string, ResolverNode[]>;
+	nodeUidToFileUid: Map<string, string>;
+	fileResolution: Map<string, string>;
+	perFileIncludeResolution: Map<string, Map<string, string>>;
+	/** For module-edge creation: stableKey → nodeUid. */
+	stableKeyToUid: Map<string, string>;
+	/** For module-edge creation: file nodeUid → module stableKey. */
+	fileToModule: Map<string, string>;
+}
 
 /** All file extensions that any registered extractor might handle. */
 const ALL_SOURCE_EXTENSIONS = new Set([
@@ -300,12 +319,6 @@ export class RepoIndexer implements IndexerPort {
 			//   - Old staging rows cleaned up when FAILED snapshot is deleted
 			const trackedFiles: TrackedFile[] = [];
 
-			// Lightweight resolver index — only the fields needed for
-			// edge resolution. NOT full GraphNode objects.
-			const resolverByStableKey = new Map<string, string>(); // stableKey → nodeUid
-			const resolverByName = new Map<string, string[]>();    // name → nodeUid[]
-			const resolverNodeToFile = new Map<string, string>();  // nodeUid → fileUid
-
 			let nodesTotal = 0;
 			let stagedEdgesTotal = 0;
 
@@ -315,10 +328,14 @@ export class RepoIndexer implements IndexerPort {
 				{ cc: number; params: number; nesting: number }
 			>();
 
-			// File signals cache is kept for now for the classification phase.
-			// TODO: eliminate in next refinement by reading from file_signals table.
+			// Minimal import-bindings-only cache for Lambda entrypoint
+			// detection (Phase 4). Classification no longer depends on this
+			// cache — it loads signals per-batch from the file_signals table
+			// and rebuilds same-file symbols from persisted nodes.
+			// Contains only { importBindings } with empty stubs for all
+			// other FileSignals fields. Populated only for files with
+			// import bindings (TS/JS). Not a Linux-scale concern.
 			const fileSignalsCache = new Map<string, FileSignals>();
-			const nodeUidToFileUid = new Map<string, string>();
 
 			const packageDepsCache = new Map<string, PackageDependencySet>();
 			const tsconfigAliasesCache = new Map<string, TsconfigAliases>();
@@ -455,23 +472,11 @@ export class RepoIndexer implements IndexerPort {
 					continue;
 				}
 
-				// Persist nodes immediately. Populate lightweight resolver index.
+				// Persist nodes immediately — no in-memory accumulation.
+				// Resolver index is rebuilt from DB in Phase 3 via
+				// queryResolverNodesIter (row-at-a-time, no bulk .all()).
 				this.storage.insertNodes(result.nodes);
 				nodesTotal += result.nodes.length;
-				for (const node of result.nodes) {
-					resolverByStableKey.set(node.stableKey, node.nodeUid);
-					const existing = resolverByName.get(node.name) ?? [];
-					existing.push(node.nodeUid);
-					resolverByName.set(node.name, existing);
-					if (node.qualifiedName && node.qualifiedName !== node.name) {
-						const existingQ = resolverByName.get(node.qualifiedName) ?? [];
-						existingQ.push(node.nodeUid);
-						resolverByName.set(node.qualifiedName, existingQ);
-					}
-					if (node.fileUid) {
-						resolverNodeToFile.set(node.nodeUid, node.fileUid);
-					}
-				}
 
 				// Persist raw edges to staging table immediately.
 				if (result.edges.length > 0) {
@@ -526,8 +531,6 @@ export class RepoIndexer implements IndexerPort {
 							sameFileInterfaceSymbols.add(node.name);
 						}
 					}
-					// Build reverse lookup for every extracted node.
-					nodeUidToFileUid.set(node.nodeUid, fileUid);
 				}
 				// Resolve per-file package deps + tsconfig aliases from nearest ancestors.
 				const packageDependencies = await this.resolveNearestPackageDeps(
@@ -540,25 +543,41 @@ export class RepoIndexer implements IndexerPort {
 					repo.rootPath,
 					tsconfigAliasesCache,
 				);
-				fileSignalsCache.set(fileUid, {
-					importBindings: result.importBindings,
-					sameFileValueSymbols,
-					sameFileClassSymbols,
-					sameFileInterfaceSymbols,
-					packageDependencies,
-					tsconfigAliases,
-				});
-
-				// Persist import bindings to staging so the classifier can
-				// read them back during the resolution phase without keeping
-				// all bindings in memory. sameFileSymbols can be rebuilt
-				// from persisted nodes by file_uid.
-				if (result.importBindings.length > 0) {
+				// Persist file signals to staging: import bindings, package
+				// deps, tsconfig aliases. Classification reads these back
+				// per-batch from DB. sameFileSymbols are rebuilt from
+				// persisted nodes via querySymbolsByFile.
+				const hasBindings = result.importBindings.length > 0;
+				const hasDeps = packageDependencies.names.length > 0;
+				const hasAliases = tsconfigAliases.entries.length > 0;
+				if (hasBindings || hasDeps || hasAliases) {
 					this.storage.insertFileSignals([{
 						snapshotUid: snapshot.snapshotUid,
 						fileUid,
-						importBindingsJson: JSON.stringify(result.importBindings),
+						importBindingsJson: hasBindings
+							? JSON.stringify(result.importBindings)
+							: null,
+						packageDependenciesJson: hasDeps
+							? JSON.stringify(packageDependencies)
+							: null,
+						tsconfigAliasesJson: hasAliases
+							? JSON.stringify(tsconfigAliases)
+							: null,
 					}]);
+				}
+
+				// Lambda entrypoint detection still needs import bindings
+				// keyed by file. Retain a minimal cache for that pass only.
+				// Only importBindings are needed — empty stubs for the rest.
+				if (hasBindings) {
+					fileSignalsCache.set(fileUid, {
+						importBindings: result.importBindings,
+						sameFileValueSymbols: new Set(),
+						sameFileClassSymbols: new Set(),
+						sameFileInterfaceSymbols: new Set(),
+						packageDependencies: { names: [] },
+						tsconfigAliases: { entries: [] },
+					});
 				}
 
 				extractIdx++;
@@ -581,160 +600,232 @@ export class RepoIndexer implements IndexerPort {
 			if (moduleNodes.length > 0) {
 				this.storage.insertNodes(moduleNodes);
 				nodesTotal += moduleNodes.length;
-				// Add MODULE nodes to the lightweight resolver index.
-				for (const node of moduleNodes) {
-					resolverByStableKey.set(node.stableKey, node.nodeUid);
-					const existing = resolverByName.get(node.name) ?? [];
-					existing.push(node.nodeUid);
-					resolverByName.set(node.name, existing);
-				}
 			}
 
 			// ═══════════════════════════════════════════════════════════════
-			// PHASE 3: Resolve & Classify (batch read from staging)
+			// PHASE 3: Resolve & Classify (streaming/batch from staging)
 			// ═══════════════════════════════════════════════════════════════
-			// Read all nodes back from DB for the resolution phase.
-			// This is a bounded read — nodes are already persisted, we just
-			// need them as full GraphNode objects for the resolver's
-			// affinity filtering and module-edge creation. The extraction
-			// phase did NOT accumulate them; they were persisted and released
-			// per-file.
 			//
-			// Memory during resolution: allNodes (~50MB for 100k nodes)
-			// + staged edges (~60MB for 200k edges). This is the same as
-			// the old architecture's resolution phase. The difference is
-			// that source text (~2GB for Linux) is no longer in memory.
-			const allNodes = this.storage.queryAllNodes(snapshot.snapshotUid);
-
-			// Read staged edges back for resolution.
-			const stagedEdges = this.storage.queryStagedEdges(snapshot.snapshotUid);
-			const allUnresolvedEdges: UnresolvedEdge[] = stagedEdges.map((se) => ({
-				edgeUid: se.edgeUid,
-				snapshotUid: se.snapshotUid,
-				repoUid: se.repoUid,
-				sourceNodeUid: se.sourceNodeUid,
-				targetKey: se.targetKey,
-				type: se.type as any,
-				resolution: se.resolution as any,
-				extractor: se.extractor,
-				location: se.lineStart !== null ? {
-					lineStart: se.lineStart,
-					colStart: se.colStart ?? 0,
-					lineEnd: se.lineEnd ?? se.lineStart,
-					colEnd: se.colEnd ?? 0,
-				} : null,
-				metadataJson: se.metadataJson,
-			}));
+			// Three-step pipeline that avoids bulk .all() materialization:
+			//
+			// 3a. Build resolver index from row-at-a-time DB iterator.
+			//     Peak memory = Maps only (no intermediate array).
+			//
+			// 3b. Process staged edges in batches (cursor-based pagination).
+			//     Per batch: read → resolve → classify → persist → discard.
+			//     File signals loaded per-batch from DB, not from an
+			//     eager whole-snapshot cache.
+			//
+			// 3c. Create module-level edges from the resolver index (already
+			//     in memory as Maps) plus resolved edges.
+			//
+			// This replaces the previous pattern that materialized ALL
+			// resolver nodes, ALL staged edges, and ALL file signals as
+			// JS arrays via .all(), which hit V8 heap limit at ~3.6 GB
+			// on Linux-scale repos (500K+ nodes/edges).
 
 			emit({ phase: "persisting", current: 0, total: nodesTotal });
 
-			// 7. Resolve edges
-			emit({
-				phase: "resolving",
-				current: 0,
-				total: allUnresolvedEdges.length,
-			});
-
-			// Build import-binding index for call resolution.
-				// Maps fileUid → ImportBinding[] so the resolver can use
-				// import bindings to disambiguate bare-identifier calls.
-				const importBindingsByFile = new Map<string, ImportBinding[]>();
-				for (const [fileUid, signals] of fileSignalsCache) {
-					if (signals.importBindings.length > 0) {
-						importBindingsByFile.set(fileUid, [...signals.importBindings]);
-					}
-				}
-
-				const { resolved, stillUnresolved, unresolvedBreakdown } =
-					this.resolveEdges(
-						allUnresolvedEdges,
-						allNodes,
-						trackedFiles,
-						repoUid,
-						snapshot.snapshotUid,
-						importBindingsByFile,
-						compileDb,
-					);
-			const unresolvedCount = stillUnresolved.length;
-
-			emit({
-				phase: "resolving",
-				current: allUnresolvedEdges.length,
-				total: allUnresolvedEdges.length,
-			});
-
-			// 8. Create module-level edges
-			const moduleEdges = this.createModuleEdges(
-				allNodes,
-				resolved,
-				repoUid,
+			// 3a. Build resolver index from iterator.
+			const resolverIndex = this.buildResolverIndex(
 				snapshot.snapshotUid,
+				trackedFiles,
+				repoUid,
+				compileDb,
 			);
-			const allEdges = [...resolved, ...moduleEdges];
 
-			// 9. Persist edges
-			this.storage.insertEdges(allEdges);
+			// 3b. Batch-process staged edges.
+			const EDGE_BATCH_SIZE = options?.edgeBatchSize ?? 10_000;
+			let edgeCursor: string | null = null;
+			let resolvedTotal = 0;
+			let unresolvedCount = 0;
+			// Accumulate resolved IMPORTS pairs for module-edge derivation.
+			// Lightweight: only [sourceNodeUid, targetNodeUid] tuples.
+			const resolvedImportPairs: Array<[string, string]> = [];
+			const unresolvedBreakdown: Partial<Record<UnresolvedEdgeCategory, number>> = {};
+			const classificationObservedAt = new Date().toISOString();
 
-			// 9a. Classify still-unresolved edges and persist observations.
-			// Runs BEFORE count aggregation so both artifacts come from
-			// the same unresolved inventory. Purely additive: resolved
-			// edges and trust diagnostics are unaffected.
-			if (stillUnresolved.length > 0) {
-				const observedAt = new Date().toISOString();
-				const classifiedRows: PersistedUnresolvedEdge[] = [];
-				for (const { edge, category } of stillUnresolved) {
-					const sourceFileUid = nodeUidToFileUid.get(edge.sourceNodeUid);
-					const fileSignals = sourceFileUid
-						? (fileSignalsCache.get(sourceFileUid) ?? emptyFileSignals())
-						: emptyFileSignals();
-					// Phase 1: generic classification.
-					const verdict = classifyUnresolvedEdge(
-						edge,
-						category,
-						snapshotSignals,
-						fileSignals,
-					);
-					let { classification } = verdict;
-					let { basisCode } = verdict;
+			emit({ phase: "resolving", current: 0, total: stagedEdgesTotal });
 
-					// Phase 2: framework-boundary post-pass.
-					// May override the generic classification for edges
-					// matching known runtime-wiring / registration patterns.
-					const fwOverride = detectFrameworkBoundary(
-						edge.targetKey,
-						category,
-						fileSignals.importBindings,
-					);
-					if (fwOverride) {
-						classification = fwOverride.classification;
-						basisCode = fwOverride.basisCode;
+			// eslint-disable-next-line no-constant-condition
+			while (true) {
+				const batch = this.storage.queryStagedEdgesBatch(
+					snapshot.snapshotUid,
+					EDGE_BATCH_SIZE,
+					edgeCursor,
+				);
+				if (batch.length === 0) break;
+				edgeCursor = batch[batch.length - 1].edgeUid;
+
+				// Map staged edges to UnresolvedEdge shape.
+				const batchUnresolved: UnresolvedEdge[] = batch.map((se) => ({
+					edgeUid: se.edgeUid,
+					snapshotUid: se.snapshotUid,
+					repoUid: se.repoUid,
+					sourceNodeUid: se.sourceNodeUid,
+					targetKey: se.targetKey,
+					type: se.type as any,
+					resolution: se.resolution as any,
+					extractor: se.extractor,
+					location: se.lineStart !== null ? {
+						lineStart: se.lineStart,
+						colStart: se.colStart ?? 0,
+						lineEnd: se.lineEnd ?? se.lineStart,
+						colEnd: se.colEnd ?? 0,
+					} : null,
+					metadataJson: se.metadataJson,
+				}));
+
+				// Load file signals for source files in THIS batch only.
+				const batchSourceFileUids = new Set<string>();
+				for (const se of batch) {
+					if (se.sourceFileUid) batchSourceFileUids.add(se.sourceFileUid);
+					// Map source node → file via staged edge metadata.
+					if (se.sourceFileUid) {
+						resolverIndex.nodeUidToFileUid.set(
+							se.sourceNodeUid,
+							se.sourceFileUid,
+						);
 					}
-
-					classifiedRows.push({
-						...edge,
-						category,
-						classification,
-						classifierVersion: CURRENT_CLASSIFIER_VERSION,
-						basisCode,
-						observedAt,
-					});
 				}
-				this.storage.insertUnresolvedEdges(classifiedRows);
+				// Load full file signal rows (bindings + deps + aliases).
+				const batchSignals = new Map<string, FileSignalRow>();
+				const batchImportBindings = new Map<string, ImportBinding[]>();
+				if (batchSourceFileUids.size > 0) {
+					const signalRows = this.storage.queryFileSignalsBatch(
+						snapshot.snapshotUid,
+						[...batchSourceFileUids],
+					);
+					for (const row of signalRows) {
+						batchSignals.set(row.fileUid, row);
+						if (row.importBindingsJson) {
+							const bindings = JSON.parse(row.importBindingsJson) as ImportBinding[];
+							if (bindings.length > 0) {
+								batchImportBindings.set(row.fileUid, bindings);
+							}
+						}
+					}
+				}
+
+				// Resolve this batch.
+				const batchResult = this.resolveEdges(
+					batchUnresolved,
+					resolverIndex,
+					repoUid,
+					snapshot.snapshotUid,
+					batchImportBindings,
+				);
+
+				// Persist resolved edges from this batch immediately.
+				if (batchResult.resolved.length > 0) {
+					this.storage.insertEdges(batchResult.resolved);
+					// Accumulate IMPORTS pairs for module-edge derivation.
+					for (const e of batchResult.resolved) {
+						if (e.type === EdgeType.IMPORTS) {
+							resolvedImportPairs.push([e.sourceNodeUid, e.targetNodeUid]);
+						}
+					}
+				}
+				resolvedTotal += batchResult.resolved.length;
+
+				// Classify and persist unresolved edges from this batch.
+				if (batchResult.stillUnresolved.length > 0) {
+					const classifiedRows: PersistedUnresolvedEdge[] = [];
+					for (const { edge, category, sourceFileUid } of batchResult.stillUnresolved) {
+						const fileSignals = this.buildFileSignalsForClassification(
+							snapshot.snapshotUid,
+							sourceFileUid,
+							batchSignals,
+						);
+
+						const verdict = classifyUnresolvedEdge(
+							edge,
+							category,
+							snapshotSignals,
+							fileSignals,
+						);
+						let { classification } = verdict;
+						let { basisCode } = verdict;
+
+						const fwOverride = detectFrameworkBoundary(
+							edge.targetKey,
+							category,
+							fileSignals.importBindings,
+						);
+						if (fwOverride) {
+							classification = fwOverride.classification;
+							basisCode = fwOverride.basisCode;
+						}
+
+						classifiedRows.push({
+							...edge,
+							category,
+							classification,
+							classifierVersion: CURRENT_CLASSIFIER_VERSION,
+							basisCode,
+							observedAt: classificationObservedAt,
+						});
+
+						unresolvedBreakdown[category] =
+							(unresolvedBreakdown[category] ?? 0) + 1;
+					}
+					this.storage.insertUnresolvedEdges(classifiedRows);
+					unresolvedCount += batchResult.stillUnresolved.length;
+				}
+
+				for (const [cat, count] of Object.entries(batchResult.unresolvedBreakdown)) {
+					// Already counted in the classification loop above.
+					// unresolvedBreakdown merge is handled there.
+					void cat;
+					void count;
+				}
+
+				emit({
+					phase: "resolving",
+					current: resolvedTotal + unresolvedCount,
+					total: stagedEdgesTotal,
+				});
 			}
 
+			emit({
+				phase: "resolving",
+				current: stagedEdgesTotal,
+				total: stagedEdgesTotal,
+			});
+
+			// 3c. Create module-level edges from resolver index Maps.
+			// The resolver index already has stableKey→nodeUid and
+			// kind/qualifiedName from the iterator build. We read resolved
+			// edges back from DB since they were persisted per-batch.
+			const moduleEdges = this.createModuleEdgesFromIndex(
+				resolverIndex,
+				resolvedImportPairs,
+				snapshot.snapshotUid,
+				repoUid,
+			);
+			if (moduleEdges.length > 0) {
+				this.storage.insertEdges(moduleEdges);
+			}
+
+			// ═══════════════════════════════════════════════════════════════
+			// PHASE 4: Framework detectors and boundary extraction
+			// ═══════════════════════════════════════════════════════════════
+			// Each detector reads symbols per-file from DB via
+			// querySymbolsByFile — small result set per file (5-50 rows).
+			// No whole-snapshot node materialization.
+
 			// 9b. Detect framework entrypoints (node-level liveness facts).
-			// Scans each file's exports + imports for conventions that
-			// indicate the symbol is invoked by an external runtime.
-			// Emitted as inferences (kind: "framework_entrypoint").
+			// Lambda/serverless handler detection. Only fires for files
+			// that have import bindings (TS/JS files with imports).
 			{
 				const entrypointInferences: InferenceRow[] = [];
 				const detectedAt = new Date().toISOString();
 				for (const [fileUid, signals] of fileSignalsCache) {
-					// Gather exported SYMBOL nodes from this file.
-					const fileNodes = allNodes.filter(
-						(n) => n.fileUid === fileUid && n.kind === NodeKind.SYMBOL,
+					const fileSymbols = this.storage.querySymbolsByFile(
+						snapshot.snapshotUid,
+						fileUid,
 					);
-					const exportedSymbols = fileNodes
+					const exportedSymbols = fileSymbols
 						.filter((n) => n.visibility != null)
 						.map((n) => ({
 							stableKey: n.stableKey,
@@ -779,182 +870,154 @@ export class RepoIndexer implements IndexerPort {
 			}
 
 			// 9d. Spring container-managed bean detection.
-				// Scans Java files for Spring stereotype annotations and @Bean
-				// factory methods. Emits inferences (kind: "spring_container_managed")
-				// that suppress false dead-code reports for container-wired classes.
-				{
-					const springInferences: InferenceRow[] = [];
-					const detectedAt = new Date().toISOString();
-					for (const relPath of filePaths) {
-						if (!relPath.endsWith(".java")) continue;
-						let content: string;
-						try {
-							content = await readFile(join(repo.rootPath, relPath), "utf-8");
-						} catch { continue; }
-						if (content.length > MAX_FILE_SIZE_BYTES) continue;
-						const fileUid = `${repoUid}:${relPath}`;
+			{
+				const springInferences: InferenceRow[] = [];
+				const detectedAt = new Date().toISOString();
+				for (const relPath of filePaths) {
+					if (!relPath.endsWith(".java")) continue;
+					let content: string;
+					try {
+						content = await readFile(join(repo.rootPath, relPath), "utf-8");
+					} catch { continue; }
+					if (content.length > MAX_FILE_SIZE_BYTES) continue;
+					const fileUid = `${repoUid}:${relPath}`;
 
-						const fileSymbols = allNodes
-							.filter(
-								(n) => n.fileUid === fileUid && n.kind === NodeKind.SYMBOL,
-							)
-							.map((n) => ({
-								stableKey: n.stableKey,
-								name: n.name,
-								qualifiedName: n.qualifiedName ?? n.name,
-								subtype: n.subtype,
-								lineStart: n.location?.lineStart ?? null,
-							}));
+					const fileSymbols = this.storage.querySymbolsByFile(
+						snapshot.snapshotUid,
+						fileUid,
+					);
 
-						const beans = detectSpringBeans(content, relPath, fileSymbols);
-						for (const bean of beans) {
-							springInferences.push({
-								inferenceUid: uuidv4(),
-								snapshotUid: snapshot.snapshotUid,
-								repoUid,
-								targetStableKey: bean.targetStableKey,
-								kind: "spring_container_managed",
-								valueJson: JSON.stringify({
-									annotation: bean.annotation,
-									convention: bean.convention,
-									reason: bean.reason,
-								}),
-								confidence: bean.confidence,
-								basisJson: JSON.stringify({
-									convention: bean.convention,
-									classifier_version: CURRENT_CLASSIFIER_VERSION,
-								}),
-								extractor: INDEXER_VERSION,
-								createdAt: detectedAt,
-							});
-						}
-					}
-					if (springInferences.length > 0) {
-						this.storage.deleteInferencesByKind(
-							snapshot.snapshotUid,
-							"spring_container_managed",
-						);
-						this.storage.insertInferences(springInferences);
+					const beans = detectSpringBeans(content, relPath, fileSymbols);
+					for (const bean of beans) {
+						springInferences.push({
+							inferenceUid: uuidv4(),
+							snapshotUid: snapshot.snapshotUid,
+							repoUid,
+							targetStableKey: bean.targetStableKey,
+							kind: "spring_container_managed",
+							valueJson: JSON.stringify({
+								annotation: bean.annotation,
+								convention: bean.convention,
+								reason: bean.reason,
+							}),
+							confidence: bean.confidence,
+							basisJson: JSON.stringify({
+								convention: bean.convention,
+								classifier_version: CURRENT_CLASSIFIER_VERSION,
+							}),
+							extractor: INDEXER_VERSION,
+							createdAt: detectedAt,
+						});
 					}
 				}
+				if (springInferences.length > 0) {
+					this.storage.deleteInferencesByKind(
+						snapshot.snapshotUid,
+						"spring_container_managed",
+					);
+					this.storage.insertInferences(springInferences);
+				}
+			}
 
 			// 9e. Pytest test/fixture detection.
-				// Scans Python files for pytest conventions (test_* functions,
-				// Test* classes, @pytest.fixture). Emits inferences that
-				// suppress false dead-code reports for test infrastructure.
-				{
-					const pytestInferences: InferenceRow[] = [];
-					const detectedAt = new Date().toISOString();
-					for (const relPath of filePaths) {
-						if (!relPath.endsWith(".py")) continue;
-						let content: string;
-						try {
-							content = await readFile(join(repo.rootPath, relPath), "utf-8");
-						} catch { continue; }
-						if (content.length > MAX_FILE_SIZE_BYTES) continue;
-						const fileUid = `${repoUid}:${relPath}`;
+			{
+				const pytestInferences: InferenceRow[] = [];
+				const detectedAt = new Date().toISOString();
+				for (const relPath of filePaths) {
+					if (!relPath.endsWith(".py")) continue;
+					let content: string;
+					try {
+						content = await readFile(join(repo.rootPath, relPath), "utf-8");
+					} catch { continue; }
+					if (content.length > MAX_FILE_SIZE_BYTES) continue;
+					const fileUid = `${repoUid}:${relPath}`;
 
-						const fileSymbols = allNodes
-							.filter(
-								(n) => n.fileUid === fileUid && n.kind === NodeKind.SYMBOL,
-							)
-							.map((n) => ({
-								stableKey: n.stableKey,
-								name: n.name,
-								qualifiedName: n.qualifiedName ?? n.name,
-								subtype: n.subtype,
-								lineStart: n.location?.lineStart ?? null,
-							}));
+					const fileSymbols = this.storage.querySymbolsByFile(
+						snapshot.snapshotUid,
+						fileUid,
+					);
 
-						const items = detectPytestItems(content, relPath, fileSymbols);
-						for (const item of items) {
-							const kind = item.convention.startsWith("pytest_fixture")
-								? "pytest_fixture"
-								: "pytest_test";
-							pytestInferences.push({
-								inferenceUid: uuidv4(),
-								snapshotUid: snapshot.snapshotUid,
-								repoUid,
-								targetStableKey: item.targetStableKey,
-								kind,
-								valueJson: JSON.stringify({
-									convention: item.convention,
-									reason: item.reason,
-								}),
-								confidence: item.confidence,
-								basisJson: JSON.stringify({
-									convention: item.convention,
-									classifier_version: CURRENT_CLASSIFIER_VERSION,
-								}),
-								extractor: INDEXER_VERSION,
-								createdAt: detectedAt,
-							});
-						}
-					}
-					if (pytestInferences.length > 0) {
-						this.storage.deleteInferencesByKind(snapshot.snapshotUid, "pytest_test");
-						this.storage.deleteInferencesByKind(snapshot.snapshotUid, "pytest_fixture");
-						this.storage.insertInferences(pytestInferences);
+					const items = detectPytestItems(content, relPath, fileSymbols);
+					for (const item of items) {
+						const kind = item.convention.startsWith("pytest_fixture")
+							? "pytest_fixture"
+							: "pytest_test";
+						pytestInferences.push({
+							inferenceUid: uuidv4(),
+							snapshotUid: snapshot.snapshotUid,
+							repoUid,
+							targetStableKey: item.targetStableKey,
+							kind,
+							valueJson: JSON.stringify({
+								convention: item.convention,
+								reason: item.reason,
+							}),
+							confidence: item.confidence,
+							basisJson: JSON.stringify({
+								convention: item.convention,
+								classifier_version: CURRENT_CLASSIFIER_VERSION,
+							}),
+							extractor: INDEXER_VERSION,
+							createdAt: detectedAt,
+						});
 					}
 				}
+				if (pytestInferences.length > 0) {
+					this.storage.deleteInferencesByKind(snapshot.snapshotUid, "pytest_test");
+					this.storage.deleteInferencesByKind(snapshot.snapshotUid, "pytest_fixture");
+					this.storage.insertInferences(pytestInferences);
+				}
+			}
 
 			// 9f. Linux/system framework detection (C/C++).
-				// Scans C/C++ files for kernel module, GCC constructor, and
-				// handler registration patterns. Emits inferences that suppress
-				// false dead-code reports for framework-managed symbols.
-				{
-					const systemInferences: InferenceRow[] = [];
-					const detectedAt = new Date().toISOString();
-					for (const relPath of filePaths) {
-						const ext = relPath.slice(relPath.lastIndexOf("."));
-						if (![".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hxx"].includes(ext)) continue;
-						let content: string;
-						try {
-							content = await readFile(join(repo.rootPath, relPath), "utf-8");
-						} catch { continue; }
-						if (content.length > MAX_FILE_SIZE_BYTES) continue;
-						const fileUid = `${repoUid}:${relPath}`;
+			{
+				const systemInferences: InferenceRow[] = [];
+				const detectedAt = new Date().toISOString();
+				for (const relPath of filePaths) {
+					const ext = relPath.slice(relPath.lastIndexOf("."));
+					if (![".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hxx"].includes(ext)) continue;
+					let content: string;
+					try {
+						content = await readFile(join(repo.rootPath, relPath), "utf-8");
+					} catch { continue; }
+					if (content.length > MAX_FILE_SIZE_BYTES) continue;
+					const fileUid = `${repoUid}:${relPath}`;
 
-						const fileSymbols = allNodes
-							.filter((n) => n.fileUid === fileUid && n.kind === NodeKind.SYMBOL)
-							.map((n) => ({
-								stableKey: n.stableKey,
-								name: n.name,
-								qualifiedName: n.qualifiedName ?? n.name,
-								subtype: n.subtype,
-								lineStart: n.location?.lineStart ?? null,
-							}));
+					const fileSymbols = this.storage.querySymbolsByFile(
+						snapshot.snapshotUid,
+						fileUid,
+					);
 
-						const entries = detectLinuxSystemPatterns(content, relPath, fileSymbols);
-						for (const entry of entries) {
-							systemInferences.push({
-								inferenceUid: uuidv4(),
-								snapshotUid: snapshot.snapshotUid,
-								repoUid,
-								targetStableKey: entry.targetStableKey,
-								kind: "linux_system_managed",
-								valueJson: JSON.stringify({
-									convention: entry.convention,
-									reason: entry.reason,
-								}),
-								confidence: entry.confidence,
-								basisJson: JSON.stringify({
-									convention: entry.convention,
-									classifier_version: CURRENT_CLASSIFIER_VERSION,
-								}),
-								extractor: INDEXER_VERSION,
-								createdAt: detectedAt,
-							});
-						}
-					}
-					if (systemInferences.length > 0) {
-						this.storage.deleteInferencesByKind(
-							snapshot.snapshotUid,
-							"linux_system_managed",
-						);
-						this.storage.insertInferences(systemInferences);
+					const entries = detectLinuxSystemPatterns(content, relPath, fileSymbols);
+					for (const entry of entries) {
+						systemInferences.push({
+							inferenceUid: uuidv4(),
+							snapshotUid: snapshot.snapshotUid,
+							repoUid,
+							targetStableKey: entry.targetStableKey,
+							kind: "linux_system_managed",
+							valueJson: JSON.stringify({
+								convention: entry.convention,
+								reason: entry.reason,
+							}),
+							confidence: entry.confidence,
+							basisJson: JSON.stringify({
+								convention: entry.convention,
+								classifier_version: CURRENT_CLASSIFIER_VERSION,
+							}),
+							extractor: INDEXER_VERSION,
+							createdAt: detectedAt,
+						});
 					}
 				}
+				if (systemInferences.length > 0) {
+					this.storage.deleteInferencesByKind(
+						snapshot.snapshotUid,
+						"linux_system_managed",
+					);
+					this.storage.insertInferences(systemInferences);
+				}
+			}
 
 				// 9c. Boundary fact extraction (PROTOTYPE).
 				// Runs boundary-specific extractors on applicable files,
@@ -988,18 +1051,10 @@ export class RepoIndexer implements IndexerPort {
 						const fileUid = `${repoUid}:${relPath}`;
 
 						// Gather symbols from this file for caller/handler attribution.
-						const fileSymbols = allNodes
-							.filter(
-								(n) =>
-									n.fileUid === fileUid &&
-									n.kind === NodeKind.SYMBOL,
-							)
-							.map((n) => ({
-								stableKey: n.stableKey,
-								name: n.name,
-								qualifiedName: n.qualifiedName ?? n.name,
-								lineStart: n.location?.lineStart ?? null,
-							}));
+						const fileSymbols = this.storage.querySymbolsByFile(
+							snapshot.snapshotUid,
+							fileUid,
+						);
 
 						// Java files: extract Spring route provider facts.
 						// Note: this reparses the file with tree-sitter-java
@@ -1327,7 +1382,7 @@ export class RepoIndexer implements IndexerPort {
 						repo.rootPath,
 						repoUid,
 						snapshot.snapshotUid,
-						allNodes,
+						resolverIndex,
 					)
 				: 0;
 
@@ -1351,7 +1406,7 @@ export class RepoIndexer implements IndexerPort {
 			// The trust reporting surface reads them on demand.
 			const extractionDiagnostics = {
 				diagnostics_version: 1,
-				edges_total: allEdges.length,
+				edges_total: resolvedTotal + moduleEdges.length,
 				unresolved_total: unresolvedCount,
 				unresolved_breakdown: unresolvedBreakdown,
 				annotation_collisions_dropped: annotationCollisionsDropped,
@@ -1371,7 +1426,7 @@ export class RepoIndexer implements IndexerPort {
 					snapshotUid: snapshot.snapshotUid,
 					filesTotal: trackedFiles.length,
 					nodesTotal,
-					edgesTotal: allEdges.length,
+					edgesTotal: resolvedTotal + moduleEdges.length,
 					edgesUnresolved: unresolvedCount,
 					unresolvedBreakdown,
 					durationMs: Date.now() - startTime,
@@ -1613,42 +1668,203 @@ export class RepoIndexer implements IndexerPort {
 		return nodes;
 	}
 
-	// ── Module-level edge creation ─────────────────────────────────────
+	// ── Resolver index ────────────────────────────────────────────────
 
 	/**
-	 * Create two kinds of module-level edges:
-	 * 1. OWNS: MODULE -> FILE (each file belongs to its directory module)
-	 * 2. IMPORTS: MODULE -> MODULE (derived from file-level IMPORTS edges)
+	 * Pre-built resolver index for edge resolution. All Maps are built
+	 * from row-at-a-time DB iteration — no bulk .all() materialization.
 	 */
-	private createModuleEdges(
-		allNodes: GraphNode[],
-		resolvedEdges: GraphEdge[],
-		repoUid: string,
+	private buildResolverIndex(
 		snapshotUid: string,
-	): GraphEdge[] {
-		const edges: GraphEdge[] = [];
-
-		// Build lookup: stable key -> node uid
+		trackedFiles: TrackedFile[],
+		repoUid: string,
+		compileDb?: CompilationDatabase | null,
+	): ResolverIndex {
+		// Build lookup maps from row-at-a-time iterator.
+		// Peak memory = Maps only (no intermediate array).
+		const nodesByStableKey = new Map<string, ResolverNode>();
+		const nodesByName = new Map<string, ResolverNode[]>();
+		const nodeUidToFileUid = new Map<string, string>();
+		// For module-edge creation: stableKey→nodeUid and file→module Maps.
 		const stableKeyToUid = new Map<string, string>();
-		for (const n of allNodes) {
-			stableKeyToUid.set(n.stableKey, n.nodeUid);
-		}
-
-		// Build lookup: file node uid -> module stable key
 		const fileToModule = new Map<string, string>();
-		for (const n of allNodes) {
-			if (n.kind === NodeKind.FILE && n.qualifiedName) {
-				const modPath = getModulePath(n.qualifiedName);
+
+		for (const node of this.storage.queryResolverNodesIter(snapshotUid)) {
+			nodesByStableKey.set(node.stableKey, node);
+			stableKeyToUid.set(node.stableKey, node.nodeUid);
+
+			const existing = nodesByName.get(node.name) ?? [];
+			existing.push(node);
+			nodesByName.set(node.name, existing);
+			if (node.qualifiedName && node.qualifiedName !== node.name) {
+				const existingQ = nodesByName.get(node.qualifiedName) ?? [];
+				existingQ.push(node);
+				nodesByName.set(node.qualifiedName, existingQ);
+			}
+
+			if (node.fileUid) {
+				nodeUidToFileUid.set(node.nodeUid, node.fileUid);
+			}
+
+			// FILE nodes: build file→module mapping for module-edge creation.
+			if (node.kind === NodeKind.FILE && node.qualifiedName) {
+				const modPath = getModulePath(node.qualifiedName);
 				if (modPath) {
 					const moduleKey = `${repoUid}:${modPath}:MODULE`;
-					fileToModule.set(n.nodeUid, moduleKey);
+					fileToModule.set(node.nodeUid, moduleKey);
 				}
 			}
 		}
 
+		// Build file resolution map: extensionless path → file stable key
+		const fileResolution = new Map<string, string>();
+		for (const file of trackedFiles) {
+			const stableKey = `${repoUid}:${file.path}:FILE`;
+			fileResolution.set(`${repoUid}:${file.path}:FILE`, stableKey);
+			const withoutExt = stripExtension(file.path);
+			const extlessKey = `${repoUid}:${withoutExt}:FILE`;
+			if (!fileResolution.has(extlessKey)) {
+				fileResolution.set(extlessKey, stableKey);
+			}
+			if (file.path.endsWith("/index.ts") || file.path.endsWith("/index.tsx")) {
+				const dirPath = file.path.replace(/\/index\.tsx?$/, "");
+				const dirKey = `${repoUid}:${dirPath}:FILE`;
+				if (!fileResolution.has(dirKey)) {
+					fileResolution.set(dirKey, stableKey);
+				}
+			}
+		}
+
+		// C/C++ include path resolution from compile_commands.json.
+		const perFileIncludeResolution = new Map<string, Map<string, string>>();
+		if (compileDb) {
+			const headerStableKeys = new Map<string, string>();
+			for (const file of trackedFiles) {
+				if (file.path.endsWith(".h") || file.path.endsWith(".hpp") ||
+					file.path.endsWith(".hxx")) {
+					headerStableKeys.set(file.path, `${repoUid}:${file.path}:FILE`);
+				}
+			}
+			for (const [sourceRelPath, entry] of compileDb.entries) {
+				const sourceFileUid = `${repoUid}:${sourceRelPath}`;
+				const resolution = new Map<string, string>();
+				for (const incPath of entry.includePaths) {
+					const prefix = incPath === "" ? "" : incPath + "/";
+					for (const [headerPath, headerKey] of headerStableKeys) {
+						if (prefix === "" || headerPath.startsWith(prefix)) {
+							const bareName = prefix === ""
+								? headerPath
+								: headerPath.slice(prefix.length);
+							if (!resolution.has(bareName)) {
+								resolution.set(bareName, headerKey);
+							}
+						}
+					}
+				}
+				if (resolution.size > 0) {
+					perFileIncludeResolution.set(sourceFileUid, resolution);
+				}
+			}
+		}
+
+		return {
+			nodesByStableKey,
+			nodesByName,
+			nodeUidToFileUid,
+			fileResolution,
+			perFileIncludeResolution,
+			stableKeyToUid,
+			fileToModule,
+		};
+	}
+
+	/**
+	 * Build full FileSignals for classification from batch-loaded
+	 * staged signals (import bindings, package deps, tsconfig aliases)
+	 * and rebuilt same-file symbol sets from persisted nodes.
+	 *
+	 * No dependence on fileSignalsCache. All data comes from DB.
+	 */
+	private buildFileSignalsForClassification(
+		snapshotUid: string,
+		sourceFileUid: string | undefined,
+		batchSignals: Map<string, FileSignalRow>,
+	): FileSignals {
+		if (!sourceFileUid) return emptyFileSignals();
+
+		const row = batchSignals.get(sourceFileUid);
+
+		// Parse staged signals.
+		const importBindings: ImportBinding[] = row?.importBindingsJson
+			? JSON.parse(row.importBindingsJson)
+			: [];
+		const packageDependencies: PackageDependencySet = row?.packageDependenciesJson
+			? JSON.parse(row.packageDependenciesJson)
+			: { names: [] };
+		const tsconfigAliases: TsconfigAliases = row?.tsconfigAliasesJson
+			? JSON.parse(row.tsconfigAliasesJson)
+			: { entries: [] };
+
+		// Rebuild same-file symbol sets from persisted nodes.
+		const sameFileValueSymbols = new Set<string>();
+		const sameFileClassSymbols = new Set<string>();
+		const sameFileInterfaceSymbols = new Set<string>();
+		const fileSymbols = this.storage.querySymbolsByFile(snapshotUid, sourceFileUid);
+		for (const sym of fileSymbols) {
+			const sub = sym.subtype;
+			if (
+				sub === NodeSubtype.FUNCTION ||
+				sub === NodeSubtype.CLASS ||
+				sub === NodeSubtype.METHOD ||
+				sub === NodeSubtype.VARIABLE ||
+				sub === NodeSubtype.CONSTANT ||
+				sub === NodeSubtype.ENUM ||
+				sub === NodeSubtype.ENUM_MEMBER ||
+				sub === NodeSubtype.CONSTRUCTOR ||
+				sub === NodeSubtype.GETTER ||
+				sub === NodeSubtype.SETTER ||
+				sub === NodeSubtype.PROPERTY
+			) {
+				sameFileValueSymbols.add(sym.name);
+			}
+			if (sub === NodeSubtype.CLASS) {
+				sameFileClassSymbols.add(sym.name);
+			}
+			if (sub === NodeSubtype.INTERFACE) {
+				sameFileInterfaceSymbols.add(sym.name);
+			}
+		}
+
+		return {
+			importBindings,
+			sameFileValueSymbols,
+			sameFileClassSymbols,
+			sameFileInterfaceSymbols,
+			packageDependencies,
+			tsconfigAliases,
+		};
+	}
+
+	// ── Module-level edge creation ─────────────────────────────────────
+
+	/**
+	 * Create module-level edges from the pre-built resolver index and
+	 * accumulated resolved IMPORTS pairs. No queryAllNodes needed.
+	 *
+	 * @param resolvedImportPairs - [sourceNodeUid, targetNodeUid] pairs
+	 *   accumulated during batch resolution. Only IMPORTS edges.
+	 */
+	private createModuleEdgesFromIndex(
+		index: ResolverIndex,
+		resolvedImportPairs: Array<[string, string]>,
+		snapshotUid: string,
+		repoUid: string,
+	): GraphEdge[] {
+		const edges: GraphEdge[] = [];
+
 		// 1. OWNS edges: MODULE -> FILE
-		for (const [fileNodeUid, moduleKey] of fileToModule.entries()) {
-			const moduleUid = stableKeyToUid.get(moduleKey);
+		for (const [fileNodeUid, moduleKey] of index.fileToModule.entries()) {
+			const moduleUid = index.stableKeyToUid.get(moduleKey);
 			if (moduleUid) {
 				edges.push({
 					edgeUid: uuidv4(),
@@ -1665,13 +1881,11 @@ export class RepoIndexer implements IndexerPort {
 			}
 		}
 
-		// 2. MODULE->MODULE IMPORTS: derived from file-level IMPORTS edges
-		// If file A (in module X) imports file B (in module Y), then module X imports module Y.
+		// 2. MODULE->MODULE IMPORTS: derived from file-level IMPORTS edges.
 		const moduleImportPairs = new Set<string>();
-		for (const edge of resolvedEdges) {
-			if (edge.type !== EdgeType.IMPORTS) continue;
-			const sourceModuleKey = fileToModule.get(edge.sourceNodeUid);
-			const targetModuleKey = fileToModule.get(edge.targetNodeUid);
+		for (const [srcUid, tgtUid] of resolvedImportPairs) {
+			const sourceModuleKey = index.fileToModule.get(srcUid);
+			const targetModuleKey = index.fileToModule.get(tgtUid);
 			if (
 				sourceModuleKey &&
 				targetModuleKey &&
@@ -1681,8 +1895,8 @@ export class RepoIndexer implements IndexerPort {
 				if (moduleImportPairs.has(pairKey)) continue;
 				moduleImportPairs.add(pairKey);
 
-				const sourceModuleUid = stableKeyToUid.get(sourceModuleKey);
-				const targetModuleUid = stableKeyToUid.get(targetModuleKey);
+				const sourceModuleUid = index.stableKeyToUid.get(sourceModuleKey);
+				const targetModuleUid = index.stableKeyToUid.get(targetModuleKey);
 				if (sourceModuleUid && targetModuleUid) {
 					edges.push({
 						edgeUid: uuidv4(),
@@ -1705,127 +1919,43 @@ export class RepoIndexer implements IndexerPort {
 
 	// ── Edge resolution ────────────────────────────────────────────────
 
+	/**
+	 * Resolve a batch of unresolved edges against the pre-built resolver
+	 * index. Returns resolved GraphEdges and categorized still-unresolved
+	 * edges with their source file UIDs for classification.
+	 */
 	private resolveEdges(
 		unresolved: UnresolvedEdge[],
-		allNodes: GraphNode[],
-		trackedFiles: TrackedFile[],
+		index: ResolverIndex,
 		repoUid: string,
 		snapshotUid: string,
 		importBindingsByFile?: Map<string, ImportBinding[]>,
-		compileDb?: CompilationDatabase | null,
 	): {
 		resolved: GraphEdge[];
 		stillUnresolved: Array<{
 			edge: UnresolvedEdge;
 			category: UnresolvedEdgeCategory;
+			sourceFileUid: string | undefined;
 		}>;
 		unresolvedBreakdown: Partial<Record<UnresolvedEdgeCategory, number>>;
 	} {
-		// Build lookup maps
-		const nodesByStableKey = new Map<string, GraphNode>();
-		const nodesByName = new Map<string, GraphNode[]>();
-
-		for (const node of allNodes) {
-			nodesByStableKey.set(node.stableKey, node);
-			// Index by short name and qualified name for call resolution
-			const existing = nodesByName.get(node.name) ?? [];
-			existing.push(node);
-			nodesByName.set(node.name, existing);
-			if (node.qualifiedName && node.qualifiedName !== node.name) {
-				const existingQ = nodesByName.get(node.qualifiedName) ?? [];
-				existingQ.push(node);
-				nodesByName.set(node.qualifiedName, existingQ);
-			}
-		}
-
-		// Build file resolution map: extensionless path → file stable key
-		const fileResolution = new Map<string, string>();
-		for (const file of trackedFiles) {
-			const stableKey = `${repoUid}:${file.path}:FILE`;
-			// Map the full path with extension
-			fileResolution.set(`${repoUid}:${file.path}:FILE`, stableKey);
-			// Map extensionless variants for import resolution
-			const withoutExt = stripExtension(file.path);
-			const extlessKey = `${repoUid}:${withoutExt}:FILE`;
-			if (!fileResolution.has(extlessKey)) {
-				fileResolution.set(extlessKey, stableKey);
-			}
-			// Also handle index file resolution: "src/foo" → "src/foo/index.ts"
-			if (file.path.endsWith("/index.ts") || file.path.endsWith("/index.tsx")) {
-				const dirPath = file.path.replace(/\/index\.tsx?$/, "");
-				const dirKey = `${repoUid}:${dirPath}:FILE`;
-				if (!fileResolution.has(dirKey)) {
-					fileResolution.set(dirKey, stableKey);
-				}
-			}
-		}
-
-		// C/C++ include path resolution: build a per-source-file include
-		// resolution map from compile_commands.json. Each source file has
-		// its own -I flags — different translation units may have different
-		// include paths. The resolver uses the source file's include paths
-		// to resolve #include directives, not a global flattened set.
-		//
-		// Map: sourceFileUid → Map<bareHeaderName, resolvedStableKey>
-		const perFileIncludeResolution = new Map<string, Map<string, string>>();
-		if (compileDb) {
-			// Build a lookup: headerPath → stableKey for all header files.
-			const headerStableKeys = new Map<string, string>();
-			for (const file of trackedFiles) {
-				if (file.path.endsWith(".h") || file.path.endsWith(".hpp") ||
-					file.path.endsWith(".hxx")) {
-					headerStableKeys.set(file.path, `${repoUid}:${file.path}:FILE`);
-				}
-			}
-
-			for (const [sourceRelPath, entry] of compileDb.entries) {
-				const sourceFileUid = `${repoUid}:${sourceRelPath}`;
-				const resolution = new Map<string, string>();
-
-				for (const incPath of entry.includePaths) {
-					const prefix = incPath === "" ? "" : incPath + "/";
-					for (const [headerPath, headerKey] of headerStableKeys) {
-						if (prefix === "" || headerPath.startsWith(prefix)) {
-							const bareName = prefix === ""
-								? headerPath
-								: headerPath.slice(prefix.length);
-							if (!resolution.has(bareName)) {
-								resolution.set(bareName, headerKey);
-							}
-						}
-					}
-				}
-
-				if (resolution.size > 0) {
-					perFileIncludeResolution.set(sourceFileUid, resolution);
-				}
-			}
-		}
-
-		// Build nodeUid → fileUid for import-binding-assisted call resolution.
-		const nodeUidToFileUid = new Map<string, string>();
-		if (importBindingsByFile) {
-			for (const node of allNodes) {
-				if (node.fileUid) nodeUidToFileUid.set(node.nodeUid, node.fileUid);
-			}
-		}
-
 		const resolved: GraphEdge[] = [];
 		const stillUnresolved: Array<{
 			edge: UnresolvedEdge;
 			category: UnresolvedEdgeCategory;
+			sourceFileUid: string | undefined;
 		}> = [];
 		const unresolvedBreakdown: Partial<Record<UnresolvedEdgeCategory, number>> = {};
 
 		for (const edge of unresolved) {
 			const targetNodeUid = this.resolveTarget(
 				edge,
-				nodesByStableKey,
-				nodesByName,
-				fileResolution,
+				index.nodesByStableKey,
+				index.nodesByName,
+				index.fileResolution,
 				importBindingsByFile,
-				nodeUidToFileUid,
-				perFileIncludeResolution,
+				index.nodeUidToFileUid,
+				index.perFileIncludeResolution,
 			);
 
 			if (targetNodeUid) {
@@ -1842,10 +1972,9 @@ export class RepoIndexer implements IndexerPort {
 					metadataJson: edge.metadataJson,
 				});
 			} else {
-				// Categorize for aggregate diagnostics AND carry the
-				// category forward to the semantic classifier.
 				const category = categorizeUnresolvedEdge(edge);
-				stillUnresolved.push({ edge, category });
+				const sourceFileUid = index.nodeUidToFileUid.get(edge.sourceNodeUid);
+				stillUnresolved.push({ edge, category, sourceFileUid });
 				unresolvedBreakdown[category] =
 					(unresolvedBreakdown[category] ?? 0) + 1;
 			}
@@ -1856,8 +1985,8 @@ export class RepoIndexer implements IndexerPort {
 
 	private resolveTarget(
 		edge: UnresolvedEdge,
-		nodesByStableKey: Map<string, GraphNode>,
-		nodesByName: Map<string, GraphNode[]>,
+		nodesByStableKey: Map<string, ResolverNode>,
+		nodesByName: Map<string, ResolverNode[]>,
 		fileResolution: Map<string, string>,
 		importBindingsByFile: Map<string, ImportBinding[]> | undefined,
 		nodeUidToFileUid: Map<string, string>,
@@ -1900,7 +2029,7 @@ export class RepoIndexer implements IndexerPort {
 
 	private resolveImportTarget(
 		targetKey: string,
-		nodesByStableKey: Map<string, GraphNode>,
+		nodesByStableKey: Map<string, ResolverNode>,
 		fileResolution: Map<string, string>,
 		repoUid?: string,
 		tuIncludeResolution?: Map<string, string>,
@@ -1946,8 +2075,8 @@ export class RepoIndexer implements IndexerPort {
 	private resolveCallTarget(
 		targetKey: string,
 		sourceNodeUid: string,
-		nodesByStableKey: Map<string, GraphNode>,
-		nodesByName: Map<string, GraphNode[]>,
+		nodesByStableKey: Map<string, ResolverNode>,
+		nodesByName: Map<string, ResolverNode[]>,
 		fileResolution: Map<string, string>,
 		importBindingsByFile: Map<string, ImportBinding[]> | undefined,
 		nodeUidToFileUid: Map<string, string>,
@@ -2038,7 +2167,7 @@ export class RepoIndexer implements IndexerPort {
 	private resolveImportSpecifierToFile(
 		specifier: string,
 		sourceFileUid: string,
-		_nodesByStableKey: Map<string, GraphNode>,
+		_nodesByStableKey: Map<string, ResolverNode>,
 		fileResolution: Map<string, string>,
 	): string | null {
 		if (!specifier.startsWith(".")) return null;
@@ -2070,7 +2199,7 @@ export class RepoIndexer implements IndexerPort {
 
 	private resolveNamedTarget(
 		targetKey: string,
-		nodesByName: Map<string, GraphNode[]>,
+		nodesByName: Map<string, ResolverNode[]>,
 		edgeType: EdgeType,
 	): string | null {
 		return this.pickUnambiguous(nodesByName.get(targetKey), edgeType);
@@ -2341,15 +2470,17 @@ export class RepoIndexer implements IndexerPort {
 		rootPath: string,
 		repoUid: string,
 		snapshotUid: string,
-		allNodes: GraphNode[],
+		resolverIndex: ResolverIndex,
 	): Promise<number> {
 		if (!this.annotations) return 0;
 
-		// Build a lookup: directory path → MODULE stable_key
+		// Build a lookup: directory path → MODULE stable_key.
+		// Uses the resolver index's nodesByStableKey to find MODULE nodes
+		// without materializing all nodes.
 		const moduleByPath = new Map<string, string>();
-		for (const n of allNodes) {
-			if (n.kind === NodeKind.MODULE && n.qualifiedName) {
-				moduleByPath.set(n.qualifiedName, n.stableKey);
+		for (const [stableKey, node] of resolverIndex.nodesByStableKey) {
+			if (node.kind === NodeKind.MODULE && node.qualifiedName) {
+				moduleByPath.set(node.qualifiedName, stableKey);
 			}
 		}
 		// Repo-level target: distinct from any MODULE. No graph node is
@@ -2561,7 +2692,7 @@ export class RepoIndexer implements IndexerPort {
 	 * well-defined. A `new Foo()` structurally cannot target a type alias.
 	 */
 	private pickUnambiguous(
-		candidates: GraphNode[] | undefined,
+		candidates: ResolverNode[] | undefined,
 		edgeType: EdgeType,
 	): string | null {
 		if (!candidates || candidates.length === 0) return null;
@@ -2749,10 +2880,10 @@ export const TYPE_ONLY_SUBTYPES: ReadonlySet<string | null> = new Set([
  * its length === 1 check.
  */
 export function filterByEdgeAffinity(
-	candidates: GraphNode[],
+	candidates: ResolverNode[],
 	edgeType: EdgeType,
-): GraphNode[] {
-	let filtered: GraphNode[];
+): ResolverNode[] {
+	let filtered: ResolverNode[];
 
 	switch (edgeType) {
 		case EdgeType.INSTANTIATES:

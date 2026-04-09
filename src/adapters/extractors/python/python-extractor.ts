@@ -14,6 +14,13 @@
  * exports everything not prefixed with _). Names starting with _
  * are PRIVATE.
  *
+ * Two-pass extraction: a pre-scan determines the winning (last)
+ * definition for each function/class name at every scope level
+ * (module root and class bodies). Shadowed definitions are
+ * suppressed — no node, no edges, no metrics emitted. This
+ * matches Python runtime semantics where the last `def`/`class`
+ * binding at a scope level shadows all earlier ones.
+ *
  * NOT in this first slice:
  *   - Semantic enrichment (pyright/mypy)
  *   - Framework detectors (Django, Flask, FastAPI)
@@ -21,6 +28,7 @@
  *   - Comprehension/generator complexity
  *   - Type stub (.pyi) handling
  *   - __all__ export filtering
+ *   - Diagnostic reporting for shadowed definitions (TECH-DEBT)
  *
  * Maturity: PROTOTYPE. Sufficient to index Python files and extract
  * symbols, imports, and calls. Stdlib imports are classifiable via
@@ -142,8 +150,13 @@ export class PythonExtractor implements ExtractorPort {
 			metadataJson: null,
 		});
 
+		// Two-pass extraction: pre-scan determines the winning (last)
+		// definition for each name at module scope. Python allows
+		// same-name redefinitions — only the last is callable at runtime.
+		const winningDefs = this.scanWinningDefinitions(tree.rootNode.children);
+
 		for (const child of tree.rootNode.children) {
-			this.processTopLevel(child, ctx, null);
+			this.processTopLevel(child, ctx, null, winningDefs);
 		}
 
 		return {
@@ -158,12 +171,55 @@ export class PythonExtractor implements ExtractorPort {
 		}
 	}
 
+	// ── Two-pass definition scanning ──────────────────────────────
+
+	/**
+	 * Pre-scan a scope (module root or class body) to determine the
+	 * winning definition for each function/class name. In Python, the
+	 * last same-name `def`/`class` at the same scope level shadows all
+	 * earlier ones — only the last is callable at runtime.
+	 *
+	 * Returns a Set of position keys ("row:col") for winning definitions.
+	 * Non-winners are suppressed during emission (no node, no edges, no
+	 * metrics). Shadowed definitions are silently dropped — a diagnostic
+	 * channel for reporting them does not yet exist (see TECH-DEBT).
+	 */
+	private scanWinningDefinitions(children: SyntaxNode[]): Set<string> {
+		const lastDefByName = new Map<string, string>();
+
+		for (const child of children) {
+			let defNode: SyntaxNode | null = null;
+
+			if (child.type === "function_definition" || child.type === "class_definition") {
+				defNode = child;
+			} else if (child.type === "decorated_definition") {
+				for (const inner of child.children) {
+					if (inner.type === "function_definition" || inner.type === "class_definition") {
+						defNode = inner;
+						break;
+					}
+				}
+			}
+
+			if (defNode) {
+				const nameNode = defNode.childForFieldName("name");
+				if (nameNode) {
+					const posKey = `${defNode.startPosition.row}:${defNode.startPosition.column}`;
+					lastDefByName.set(nameNode.text, posKey);
+				}
+			}
+		}
+
+		return new Set(lastDefByName.values());
+	}
+
 	// ── Top-level dispatch ─────────────────────────────────────────
 
 	private processTopLevel(
 		node: SyntaxNode,
 		ctx: ExtractionContext,
 		parentClassNode: GraphNode | null,
+		winningDefs: Set<string>,
 	): void {
 		switch (node.type) {
 			case "import_statement":
@@ -173,13 +229,13 @@ export class PythonExtractor implements ExtractorPort {
 				this.processFromImport(node, ctx);
 				break;
 			case "class_definition":
-				this.processClass(node, ctx);
+				this.processClass(node, ctx, winningDefs);
 				break;
 			case "function_definition":
-				this.processFunction(node, ctx, parentClassNode);
+				this.processFunction(node, ctx, parentClassNode, winningDefs);
 				break;
 			case "decorated_definition":
-				this.processDecorated(node, ctx, parentClassNode);
+				this.processDecorated(node, ctx, parentClassNode, winningDefs);
 				break;
 			case "expression_statement":
 				this.processExpressionStatement(node, ctx, parentClassNode);
@@ -301,9 +357,19 @@ export class PythonExtractor implements ExtractorPort {
 
 	// ── Classes ───────────────────────────────────────────────────
 
-	private processClass(node: SyntaxNode, ctx: ExtractionContext): void {
+	private processClass(
+		node: SyntaxNode,
+		ctx: ExtractionContext,
+		winningDefs: Set<string>,
+	): void {
 		const nameNode = node.childForFieldName("name");
 		if (!nameNode) return;
+
+		// Skip shadowed class definitions — only the last same-name
+		// class at this scope level is the winning definition.
+		const posKey = `${node.startPosition.row}:${node.startPosition.column}`;
+		if (!winningDefs.has(posKey)) return;
+
 		const name = nameNode.text;
 
 		const visibility = name.startsWith("_") ? Visibility.PRIVATE : Visibility.EXPORT;
@@ -349,11 +415,12 @@ export class PythonExtractor implements ExtractorPort {
 			}
 		}
 
-		// Process class body.
+		// Process class body — pre-scan for method-level shadowing too.
 		const body = node.childForFieldName("body");
 		if (body) {
+			const classWinningDefs = this.scanWinningDefinitions(body.children);
 			for (const child of body.children) {
-				this.processTopLevel(child, ctx, classGraphNode);
+				this.processTopLevel(child, ctx, classGraphNode, classWinningDefs);
 			}
 		}
 	}
@@ -364,9 +431,16 @@ export class PythonExtractor implements ExtractorPort {
 		node: SyntaxNode,
 		ctx: ExtractionContext,
 		parentClassNode: GraphNode | null,
+		winningDefs: Set<string>,
 	): void {
 		const nameNode = node.childForFieldName("name");
 		if (!nameNode) return;
+
+		// Skip shadowed function definitions — only the last same-name
+		// def at this scope level is callable at runtime.
+		const posKey = `${node.startPosition.row}:${node.startPosition.column}`;
+		if (!winningDefs.has(posKey)) return;
+
 		const name = nameNode.text;
 
 		const isMethod = parentClassNode !== null;
@@ -448,14 +522,17 @@ export class PythonExtractor implements ExtractorPort {
 		node: SyntaxNode,
 		ctx: ExtractionContext,
 		parentClassNode: GraphNode | null,
+		winningDefs: Set<string>,
 	): void {
 		// A decorated_definition contains decorator(s) and then a
-		// function_definition or class_definition.
+		// function_definition or class_definition. The inner definition
+		// node is what gets checked against winningDefs (the scanner
+		// unwraps decorated_definition the same way).
 		for (const child of node.children) {
 			if (child.type === "function_definition") {
-				this.processFunction(child, ctx, parentClassNode);
+				this.processFunction(child, ctx, parentClassNode, winningDefs);
 			} else if (child.type === "class_definition") {
-				this.processClass(child, ctx);
+				this.processClass(child, ctx, winningDefs);
 			}
 		}
 	}

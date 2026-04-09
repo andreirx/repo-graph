@@ -330,6 +330,129 @@ describe("PythonExtractor — runtime builtins", () => {
 	});
 });
 
+// ── Shadowed definitions (two-pass last-wins) ─────────────────────
+
+describe("PythonExtractor — shadowed definitions", () => {
+	it("emits only the last same-name function at module scope", async () => {
+		const result = await extract(`
+def process(x):
+    return x + 1
+
+def process(x, y):
+    return x + y
+`);
+		const fns = result.nodes.filter(
+			(n) => n.subtype === NodeSubtype.FUNCTION && n.name === "process",
+		);
+		expect(fns).toHaveLength(1);
+		// The winning definition is the last one (2 params).
+		expect(fns[0].signature).toContain("x, y");
+	});
+
+	it("emits call edges only from the winning definition", async () => {
+		const result = await extract(`
+def handler():
+    dead_call()
+
+def handler():
+    live_call()
+`);
+		const callEdges = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		expect(callEdges).toHaveLength(1);
+		expect(callEdges[0].targetKey).toBe("live_call");
+	});
+
+	it("emits metrics only for the winning definition", async () => {
+		const result = await extract(`
+def compute(x):
+    if x > 0:
+        if x > 10:
+            return x
+    return 0
+
+def compute(x):
+    return x
+`);
+		const metrics = [...result.metrics.entries()];
+		const computeMetric = metrics.find(([k]) => k.includes("#compute:"));
+		expect(computeMetric).toBeDefined();
+		// The winning definition (last) is trivial — cc=1.
+		expect(computeMetric![1].cyclomaticComplexity).toBe(1);
+	});
+
+	it("handles method shadowing within a class body", async () => {
+		const result = await extract(`
+class Service:
+    def run(self):
+        old_impl()
+
+    def run(self):
+        new_impl()
+`);
+		const methods = result.nodes.filter(
+			(n) => n.subtype === NodeSubtype.METHOD && n.name === "run",
+		);
+		expect(methods).toHaveLength(1);
+
+		const callEdges = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		expect(callEdges).toHaveLength(1);
+		expect(callEdges[0].targetKey).toBe("new_impl");
+	});
+
+	it("handles class redefinition at module scope", async () => {
+		const result = await extract(`
+class Config:
+    pass
+
+class Config:
+    def get(self):
+        return 42
+`);
+		const classes = result.nodes.filter(
+			(n) => n.subtype === NodeSubtype.CLASS && n.name === "Config",
+		);
+		expect(classes).toHaveLength(1);
+		// The winning class has the get method.
+		const methods = result.nodes.filter(
+			(n) => n.subtype === NodeSubtype.METHOD && n.name === "get",
+		);
+		expect(methods).toHaveLength(1);
+	});
+
+	it("handles decorated function shadowing", async () => {
+		const result = await extract(`
+@decorator_a
+def setup():
+    first_version()
+
+@decorator_b
+def setup():
+    second_version()
+`);
+		const fns = result.nodes.filter(
+			(n) => n.subtype === NodeSubtype.FUNCTION && n.name === "setup",
+		);
+		expect(fns).toHaveLength(1);
+
+		const callEdges = result.edges.filter((e) => e.type === EdgeType.CALLS);
+		expect(callEdges).toHaveLength(1);
+		expect(callEdges[0].targetKey).toBe("second_version");
+	});
+
+	it("does not affect unique functions — single definition still works", async () => {
+		const result = await extract(`
+def alpha():
+    pass
+
+def beta():
+    pass
+`);
+		const fns = result.nodes.filter((n) => n.subtype === NodeSubtype.FUNCTION);
+		expect(fns).toHaveLength(2);
+		expect(fns.map((f) => f.name).sort()).toEqual(["alpha", "beta"]);
+	});
+});
+
 // ── ExtractorPort contract ──────────────────────────────────────────
 
 describe("PythonExtractor — ExtractorPort", () => {

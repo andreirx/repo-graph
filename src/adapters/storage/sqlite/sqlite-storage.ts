@@ -37,8 +37,10 @@ import type {
 	PersistedBoundaryLink,
 	PersistedBoundaryProviderFact,
 	FileSignalRow,
+	FileSymbolRow,
 	PersistedUnresolvedEdge,
 	QueryBoundaryFactsInput,
+	ResolverNode,
 	StagedEdge,
 	QueryBoundaryLinksInput,
 	QueryUnresolvedEdgesInput,
@@ -481,6 +483,46 @@ export class SqliteStorage implements StoragePort {
 		})) as GraphNode[];
 	}
 
+	queryResolverNodes(snapshotUid: string): ResolverNode[] {
+		const rows = this.db.prepare(
+			`SELECT node_uid, stable_key, name, qualified_name, kind, subtype, file_uid
+			 FROM nodes WHERE snapshot_uid = ?`,
+		).all(snapshotUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			nodeUid: r.node_uid as string,
+			stableKey: r.stable_key as string,
+			name: r.name as string,
+			qualifiedName: (r.qualified_name as string) ?? null,
+			kind: r.kind as string,
+			subtype: (r.subtype as string) ?? null,
+			fileUid: (r.file_uid as string) ?? null,
+		}));
+	}
+
+	/**
+	 * Row-at-a-time iterator over resolver nodes. Uses better-sqlite3's
+	 * .iterate() to avoid materializing the full result set as a JS array.
+	 * Yields ResolverNode objects one at a time — the caller builds Maps
+	 * directly, keeping peak memory = Maps only.
+	 */
+	*queryResolverNodesIter(snapshotUid: string): IterableIterator<ResolverNode> {
+		const stmt = this.db.prepare(
+			`SELECT node_uid, stable_key, name, qualified_name, kind, subtype, file_uid
+			 FROM nodes WHERE snapshot_uid = ?`,
+		);
+		for (const r of stmt.iterate(snapshotUid) as Iterable<Record<string, unknown>>) {
+			yield {
+				nodeUid: r.node_uid as string,
+				stableKey: r.stable_key as string,
+				name: r.name as string,
+				qualifiedName: (r.qualified_name as string) ?? null,
+				kind: r.kind as string,
+				subtype: (r.subtype as string) ?? null,
+				fileUid: (r.file_uid as string) ?? null,
+			};
+		}
+	}
+
 	insertEdges(edges: GraphEdge[]): void {
 		const stmt = this.db.prepare(
 			`INSERT INTO edges
@@ -774,6 +816,36 @@ export class SqliteStorage implements StoragePort {
 		}));
 	}
 
+	queryStagedEdgesBatch(
+		snapshotUid: string,
+		limit: number,
+		afterEdgeUid: string | null,
+	): StagedEdge[] {
+		const sql = afterEdgeUid
+			? "SELECT * FROM staged_edges WHERE snapshot_uid = ? AND edge_uid > ? ORDER BY edge_uid LIMIT ?"
+			: "SELECT * FROM staged_edges WHERE snapshot_uid = ? ORDER BY edge_uid LIMIT ?";
+		const params = afterEdgeUid
+			? [snapshotUid, afterEdgeUid, limit]
+			: [snapshotUid, limit];
+		const rows = this.db.prepare(sql).all(...params) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			edgeUid: r.edge_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			sourceNodeUid: r.source_node_uid as string,
+			targetKey: r.target_key as string,
+			type: r.type as string,
+			resolution: r.resolution as string,
+			extractor: r.extractor as string,
+			lineStart: (r.line_start as number) ?? null,
+			colStart: (r.col_start as number) ?? null,
+			lineEnd: (r.line_end as number) ?? null,
+			colEnd: (r.col_end as number) ?? null,
+			metadataJson: (r.metadata_json as string) ?? null,
+			sourceFileUid: (r.source_file_uid as string) ?? null,
+		}));
+	}
+
 	deleteStagedEdges(snapshotUid: string): void {
 		this.db.prepare("DELETE FROM staged_edges WHERE snapshot_uid = ?")
 			.run(snapshotUid);
@@ -782,12 +854,19 @@ export class SqliteStorage implements StoragePort {
 	insertFileSignals(signals: FileSignalRow[]): void {
 		const stmt = this.db.prepare(
 			`INSERT OR REPLACE INTO file_signals
-			 (snapshot_uid, file_uid, import_bindings_json)
-			 VALUES (?, ?, ?)`,
+			 (snapshot_uid, file_uid, import_bindings_json,
+			  package_dependencies_json, tsconfig_aliases_json)
+			 VALUES (?, ?, ?, ?, ?)`,
 		);
 		const insertAll = this.db.transaction(() => {
 			for (const s of signals) {
-				stmt.run(s.snapshotUid, s.fileUid, s.importBindingsJson);
+				stmt.run(
+					s.snapshotUid,
+					s.fileUid,
+					s.importBindingsJson,
+					s.packageDependenciesJson ?? null,
+					s.tsconfigAliasesJson ?? null,
+				);
 			}
 		});
 		insertAll();
@@ -802,6 +881,8 @@ export class SqliteStorage implements StoragePort {
 			snapshotUid: row.snapshot_uid as string,
 			fileUid: row.file_uid as string,
 			importBindingsJson: (row.import_bindings_json as string) ?? null,
+			packageDependenciesJson: (row.package_dependencies_json as string) ?? null,
+			tsconfigAliasesJson: (row.tsconfig_aliases_json as string) ?? null,
 		};
 	}
 
@@ -813,12 +894,55 @@ export class SqliteStorage implements StoragePort {
 			snapshotUid: r.snapshot_uid as string,
 			fileUid: r.file_uid as string,
 			importBindingsJson: (r.import_bindings_json as string) ?? null,
+			packageDependenciesJson: (r.package_dependencies_json as string) ?? null,
+			tsconfigAliasesJson: (r.tsconfig_aliases_json as string) ?? null,
 		}));
 	}
 
 	deleteFileSignals(snapshotUid: string): void {
 		this.db.prepare("DELETE FROM file_signals WHERE snapshot_uid = ?")
 			.run(snapshotUid);
+	}
+
+	queryFileSignalsBatch(
+		snapshotUid: string,
+		fileUids: string[],
+	): FileSignalRow[] {
+		if (fileUids.length === 0) return [];
+		const placeholders = fileUids.map(() => "?").join(",");
+		const sql = `SELECT * FROM file_signals
+		             WHERE snapshot_uid = ? AND file_uid IN (${placeholders})`;
+		const rows = this.db
+			.prepare(sql)
+			.all(snapshotUid, ...fileUids) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			snapshotUid: r.snapshot_uid as string,
+			fileUid: r.file_uid as string,
+			importBindingsJson: (r.import_bindings_json as string) ?? null,
+			packageDependenciesJson: (r.package_dependencies_json as string) ?? null,
+			tsconfigAliasesJson: (r.tsconfig_aliases_json as string) ?? null,
+		}));
+	}
+
+	querySymbolsByFile(
+		snapshotUid: string,
+		fileUid: string,
+	): FileSymbolRow[] {
+		const rows = this.db.prepare(
+			`SELECT stable_key, node_uid, name, qualified_name, subtype,
+			        line_start, visibility
+			 FROM nodes
+			 WHERE snapshot_uid = ? AND file_uid = ? AND kind = 'SYMBOL'`,
+		).all(snapshotUid, fileUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			stableKey: r.stable_key as string,
+			nodeUid: r.node_uid as string,
+			name: r.name as string,
+			qualifiedName: (r.qualified_name as string) ?? r.name as string,
+			subtype: (r.subtype as string) ?? null,
+			lineStart: (r.line_start as number) ?? null,
+			visibility: (r.visibility as string) ?? null,
+		}));
 	}
 
 	// ── Boundary Facts (source of truth) ──────────────────────────────
