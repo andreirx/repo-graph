@@ -13,6 +13,7 @@ import { CLI_VERSION } from "../version.js";
 import { registerArchCommands } from "./commands/arch.js";
 import { registerBoundaryCommands } from "./commands/boundary.js";
 import { registerModulesCommands } from "./commands/modules.js";
+import { registerSurfacesCommands } from "./commands/surfaces.js";
 import { registerChangeCommands } from "./commands/change.js";
 import { registerDeclareCommands } from "./commands/declare.js";
 import { registerDocsCommand } from "./commands/docs.js";
@@ -56,6 +57,7 @@ registerEnrichCommand(program, getCtx);
 registerDocsCommand(program, getCtx);
 registerBoundaryCommands(program, getCtx);
 registerModulesCommands(program, getCtx);
+registerSurfacesCommands(program, getCtx);
 
 // Main execution
 async function main(): Promise<void> {
