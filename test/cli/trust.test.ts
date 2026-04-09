@@ -44,7 +44,7 @@ describe("trust command — JSON envelope", () => {
 		expect(json.toolchain).not.toBeNull();
 		expect(json.toolchain.extraction_semantics).toBeDefined();
 		expect(json.toolchain.stable_key_format).toBeDefined();
-		expect(json.diagnostics_version).toBe(1);
+		expect(json.diagnostics_version).toBe(2);
 
 		// Summary
 		expect(json.summary).toBeDefined();

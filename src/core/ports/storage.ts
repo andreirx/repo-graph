@@ -32,6 +32,10 @@ import type {
 	ModuleCandidateEvidence,
 	ModuleFileOwnership,
 } from "../modules/module-candidate.js";
+import type {
+	ProjectSurface,
+	ProjectSurfaceEvidence,
+} from "../runtime/project-surface.js";
 
 /**
  * Storage port — the contract any storage backend must fulfill.
@@ -385,6 +389,26 @@ export interface StoragePort {
 
 	/** Delete all module candidates (and cascaded evidence/ownership) for a snapshot. */
 	deleteModuleCandidatesBySnapshot(snapshotUid: string): void;
+
+	// ── Project Surfaces (operational module characterization) ───────
+	//
+	// How a module is operationalized. Separate from module identity.
+	// One module can have zero, one, or many surfaces.
+
+	/** Persist project surfaces (batch). */
+	insertProjectSurfaces(surfaces: ProjectSurface[]): void;
+
+	/** Persist project surface evidence items (batch). */
+	insertProjectSurfaceEvidence(evidence: ProjectSurfaceEvidence[]): void;
+
+	/** Query all project surfaces for a snapshot. */
+	queryProjectSurfaces(snapshotUid: string): ProjectSurface[];
+
+	/** Query evidence for a specific project surface. */
+	queryProjectSurfaceEvidence(projectSurfaceUid: string): ProjectSurfaceEvidence[];
+
+	/** Query all project surface evidence for a snapshot. */
+	queryAllProjectSurfaceEvidence(snapshotUid: string): ProjectSurfaceEvidence[];
 
 	// ── Declarations ─────────────────────────────────────────────────────
 

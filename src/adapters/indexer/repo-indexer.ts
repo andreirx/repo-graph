@@ -79,10 +79,17 @@ import { readTsconfigAliases } from "../config/tsconfig-reader.js";
 import type { AnnotationsPort } from "../../core/ports/annotations.js";
 import type { ModuleDiscoveryPort } from "../../core/ports/discovery.js";
 import { discoverModules } from "../../core/modules/module-discovery.js";
-// Delta indexing imports — used by refreshRepo once the build
-// pipeline is decomposed into reusable phase helpers.
-// import { buildInvalidationPlan, type CurrentFileState } from "../../core/delta/invalidation-planner.js";
-// import type { InvalidationPlan } from "../../core/delta/invalidation-plan.js";
+import { discoverSurfaces } from "../../core/runtime/surface-discovery.js";
+import {
+	detectCargoSurfaces,
+	detectPackageJsonSurfaces,
+	detectPyprojectSurfaces,
+	type DetectedSurface,
+} from "../../core/runtime/surface-detectors.js";
+import {
+	buildInvalidationPlan,
+	type CurrentFileState,
+} from "../../core/delta/invalidation-planner.js";
 import {
 	applyContentTruncation,
 	attributePackageDescription,
@@ -140,6 +147,23 @@ interface ExtractionPhaseResult {
 	filesReadFailed: number;
 }
 
+
+/**
+ * Trust metadata for delta refresh snapshots. Persisted in extraction
+ * diagnostics so the refresh behavior is auditable.
+ */
+interface DeltaTrustMetadata {
+	parentSnapshotUid: string;
+	filesUnchanged: number;
+	filesChanged: number;
+	filesNew: number;
+	filesDeleted: number;
+	filesConfigWidened: number;
+	nodesCopied: number;
+	extractionEdgesCopied: number;
+	fileSignalsCopied: number;
+	fileVersionsCopied: number;
+}
 
 /** All file extensions that any registered extractor might handle. */
 const ALL_SOURCE_EXTENSIONS = new Set([
@@ -325,13 +349,26 @@ export class RepoIndexer implements IndexerPort {
 			);
 			const {
 				trackedFiles,
-				nodesTotal,
 				extractionEdgesTotal,
 				allMetrics,
 				fileSignalsCache,
 				skippedOversized,
 				filesReadFailed,
 			} = extraction;
+			let { nodesTotal } = extraction;
+
+			// ═══════════════════════════════════════════════════════════════
+			// PHASE 2: Create directory MODULE nodes from full file set.
+			// ═══════════════════════════════════════════════════════════════
+			const moduleNodes = this.createModuleNodes(
+				filePaths,
+				repoUid,
+				snapshot.snapshotUid,
+			);
+			if (moduleNodes.length > 0) {
+				this.storage.insertNodes(moduleNodes);
+				nodesTotal += moduleNodes.length;
+			}
 
 			// ═══════════════════════════════════════════════════════════════
 			// PHASE 3: Resolve & Classify + Module edges
@@ -395,19 +432,188 @@ export class RepoIndexer implements IndexerPort {
 		repoUid: string,
 		options?: IndexOptions,
 	): Promise<IndexResult> {
+		const startTime = Date.now();
 		const repo = this.storage.getRepo({ uid: repoUid });
 		if (!repo) {
 			throw new Error(`Repository not found: ${repoUid}`);
 		}
 
-		// TODO: delta indexing implementation.
-		// Currently falls through to full re-extraction with parent link.
-		// The correct implementation will use:
-		//   1. buildInvalidationPlan (support module, shipped)
-		//   2. copyForwardUnchangedFiles (storage, shipped)
-		//   3. executeBuildPipeline (shared internal phases, not yet extracted)
-		// Blocked on: runIndex decomposition into reusable phase helpers.
-		return this.runIndex(repoUid, SnapshotKind.REFRESH, options);
+		const emit = options?.onProgress ?? (() => {});
+
+		// 1. Check for parent snapshot. No parent → fall back to full index.
+		const parentSnapshot = this.storage.getLatestSnapshot(repoUid);
+		if (!parentSnapshot) {
+			return this.runIndex(repoUid, SnapshotKind.FULL, options);
+		}
+
+		// 2. Scan current files and compute content hashes.
+		emit({ phase: "scanning", current: 0, total: 0 });
+		const filePaths = await this.scanFiles(
+			repo.rootPath,
+			options?.exclude,
+			options?.include,
+		);
+		emit({ phase: "scanning", current: filePaths.length, total: filePaths.length });
+
+		const currentFiles: CurrentFileState[] = [];
+		for (const relPath of filePaths) {
+			const absPath = join(repo.rootPath, relPath);
+			let content: string;
+			try {
+				content = await readFile(absPath, "utf-8");
+			} catch {
+				continue;
+			}
+			if (content.length > MAX_FILE_SIZE_BYTES) continue;
+			currentFiles.push({
+				fileUid: `${repoUid}:${relPath}`,
+				path: relPath,
+				contentHash: hashContent(content),
+			});
+		}
+
+		// 3. Load parent content hashes and build invalidation plan.
+		const parentHashes = this.storage.queryFileVersionHashes(
+			parentSnapshot.snapshotUid,
+		);
+		const plan = buildInvalidationPlan(
+			parentSnapshot.snapshotUid,
+			parentHashes,
+			currentFiles,
+			repoUid,
+		);
+
+		// If nothing to copy forward (all changed/new), fall back to full.
+		if (plan.filesToCopy.length === 0) {
+			return this.runIndex(repoUid, SnapshotKind.REFRESH, options);
+		}
+
+		// 4. Create refresh snapshot with parent link.
+		const snapshot = this.storage.createSnapshot({
+			repoUid,
+			kind: SnapshotKind.REFRESH,
+			parentSnapshotUid: parentSnapshot.snapshotUid,
+			basisCommit: options?.basisCommit,
+			toolchainJson: JSON.stringify(buildToolchainJson()),
+		});
+
+		try {
+			// 5. Copy forward unchanged files' artifacts.
+			const copyFileUids = plan.filesToCopy.map((p) => `${repoUid}:${p}`);
+			const copyResult = this.storage.copyForwardUnchangedFiles({
+				fromSnapshotUid: parentSnapshot.snapshotUid,
+				toSnapshotUid: snapshot.snapshotUid,
+				repoUid,
+				fileUids: copyFileUids,
+			});
+
+			// Register copied files as tracked so downstream phases see them.
+			const copiedTrackedFiles: TrackedFile[] = plan.filesToCopy.map((path) => ({
+				fileUid: `${repoUid}:${path}`,
+				repoUid,
+				path,
+				language: detectLanguage(path),
+				isTest: isTestFile(path),
+				isGenerated: false,
+				isExcluded: false,
+			}));
+			for (const f of copiedTrackedFiles) {
+				this.storage.upsertFiles([f]);
+			}
+
+			// 6. Extract only invalidated files (changed + new + config-widened).
+			const extraction = await this.extractFilesIntoSnapshot(
+				snapshot,
+				repo,
+				plan.filesToExtract,
+				repoUid,
+				emit,
+			);
+
+			// 7. Merge tracked files: copied + freshly extracted.
+			const allTrackedFiles = [...copiedTrackedFiles, ...extraction.trackedFiles];
+			let totalNodes = copyResult.nodesCopied + extraction.nodesTotal;
+			const totalExtractionEdges = copyResult.extractionEdgesCopied + extraction.extractionEdgesTotal;
+
+			// 7b. Create directory MODULE nodes from full merged file set.
+			const allFilePaths = [...plan.filesToCopy, ...plan.filesToExtract];
+			const moduleNodes = this.createModuleNodes(
+				allFilePaths,
+				repoUid,
+				snapshot.snapshotUid,
+			);
+			if (moduleNodes.length > 0) {
+				this.storage.insertNodes(moduleNodes);
+				totalNodes += moduleNodes.length;
+			}
+
+			// 8. Read snapshot-level classifier signals.
+			const snapshotSignals = this.buildSnapshotSignals();
+			const compileDb = await readCompileCommands(repo.rootPath);
+
+			// 9. Resolve all extraction edges (copied + new) against full node set.
+			const resolution = this.resolveSnapshotEdges(
+				snapshot,
+				allTrackedFiles,
+				repoUid,
+				snapshotSignals,
+				compileDb,
+				totalExtractionEdges,
+				options?.edgeBatchSize,
+				emit,
+			);
+
+			// 10. Run postpasses (detectors, boundaries, module discovery).
+			// Slice 1: conservative — run on all files. Scoped postpasses
+			// (only invalidated files + copy-forward for file-local facts)
+			// is a future optimization.
+			await this.runPostpasses(
+				snapshot,
+				repo,
+				allFilePaths,
+				allTrackedFiles,
+				repoUid,
+				extraction.fileSignalsCache,
+			);
+
+			// 11. Finalize with delta trust metadata.
+			const result = await this.finalizeSnapshot(
+				snapshot,
+				repo,
+				repoUid,
+				allTrackedFiles,
+				totalNodes,
+				resolution.resolvedTotal,
+				resolution.moduleEdgesCount,
+				resolution.unresolvedCount,
+				resolution.unresolvedBreakdown,
+				extraction.allMetrics,
+				extraction.skippedOversized,
+				extraction.filesReadFailed,
+				startTime,
+				emit,
+				{
+					parentSnapshotUid: parentSnapshot.snapshotUid,
+					filesUnchanged: plan.counts.unchanged,
+					filesChanged: plan.counts.changed,
+					filesNew: plan.counts.new,
+					filesDeleted: plan.counts.deleted,
+					filesConfigWidened: plan.counts.configWidened,
+					nodesCopied: copyResult.nodesCopied,
+					extractionEdgesCopied: copyResult.extractionEdgesCopied,
+					fileSignalsCopied: copyResult.fileSignalsCopied,
+					fileVersionsCopied: copyResult.fileVersionsCopied,
+				},
+			);
+
+			return result;
+		} catch (err) {
+			this.storage.updateSnapshotStatus({
+				snapshotUid: snapshot.snapshotUid,
+				status: SnapshotStatus.FAILED,
+			});
+			throw err;
+		}
 	}
 
 	// ── Phase helpers (shared between full and refresh orchestrators) ──
@@ -673,17 +879,6 @@ export class RepoIndexer implements IndexerPort {
 			total: filePaths.length,
 		});
 
-		// Phase 2: MODULE nodes.
-		const moduleNodes = this.createModuleNodes(
-			filePaths,
-			repoUid,
-			snapshot.snapshotUid,
-		);
-		if (moduleNodes.length > 0) {
-			this.storage.insertNodes(moduleNodes);
-			nodesTotal += moduleNodes.length;
-		}
-
 		return {
 			trackedFiles,
 			nodesTotal,
@@ -871,6 +1066,26 @@ export class RepoIndexer implements IndexerPort {
 					this.storage.insertModuleCandidates(moduleResult.candidates);
 					this.storage.insertModuleCandidateEvidence(moduleResult.evidence);
 					this.storage.insertModuleFileOwnership(moduleResult.ownership);
+
+					// Surface discovery — runs after module candidates are persisted.
+					// Reads the same manifests as module discovery. Links surfaces
+					// to existing module candidates by root path.
+					const detectedSurfaces = await this.detectProjectSurfaces(
+						repo.rootPath,
+						moduleResult.candidates,
+					);
+					if (detectedSurfaces.length > 0) {
+						const surfaceResult = discoverSurfaces({
+							repoUid,
+							snapshotUid: snapshot.snapshotUid,
+							detectedSurfaces,
+							moduleCandidates: moduleResult.candidates,
+						});
+						if (surfaceResult.surfaces.length > 0) {
+							this.storage.insertProjectSurfaces(surfaceResult.surfaces);
+							this.storage.insertProjectSurfaceEvidence(surfaceResult.evidence);
+						}
+					}
 				}
 			}
 		}
@@ -1140,6 +1355,7 @@ export class RepoIndexer implements IndexerPort {
 		filesReadFailed: number,
 		startTime: number,
 		emit: (event: IndexProgressEvent) => void,
+		deltaTrust?: DeltaTrustMetadata,
 	): Promise<IndexResult> {
 		// Persist metrics.
 		if (allMetrics.size > 0) {
@@ -1182,8 +1398,8 @@ export class RepoIndexer implements IndexerPort {
 
 		const orphanedDeclarations = this.countOrphanedDeclarations(repoUid, snapshot.snapshotUid);
 
-		const extractionDiagnostics = {
-			diagnostics_version: 1,
+		const extractionDiagnostics: Record<string, unknown> = {
+			diagnostics_version: 2,
 			edges_total: resolvedTotal + moduleEdgesCount,
 			unresolved_total: unresolvedCount,
 			unresolved_breakdown: unresolvedBreakdown,
@@ -1191,6 +1407,20 @@ export class RepoIndexer implements IndexerPort {
 			files_skipped_oversized: skippedOversized,
 			files_read_failed: filesReadFailed,
 		};
+		if (deltaTrust) {
+			extractionDiagnostics.delta = {
+				parent_snapshot_uid: deltaTrust.parentSnapshotUid,
+				files_unchanged: deltaTrust.filesUnchanged,
+				files_changed: deltaTrust.filesChanged,
+				files_new: deltaTrust.filesNew,
+				files_deleted: deltaTrust.filesDeleted,
+				files_config_widened: deltaTrust.filesConfigWidened,
+				nodes_copied: deltaTrust.nodesCopied,
+				extraction_edges_copied: deltaTrust.extractionEdgesCopied,
+				file_signals_copied: deltaTrust.fileSignalsCopied,
+				file_versions_copied: deltaTrust.fileVersionsCopied,
+			};
+		}
 		this.storage.updateSnapshotExtractionDiagnostics(snapshot.snapshotUid, JSON.stringify(extractionDiagnostics));
 
 		return {
@@ -1203,6 +1433,48 @@ export class RepoIndexer implements IndexerPort {
 			durationMs: Date.now() - startTime,
 			orphanedDeclarations,
 		};
+	}
+
+	/**
+	 * Detect project surfaces from manifests at module candidate roots.
+	 * Reads the manifest file for each module candidate and runs the
+	 * appropriate surface detector.
+	 */
+	private async detectProjectSurfaces(
+		rootPath: string,
+		moduleCandidates: import("../../core/modules/module-candidate.js").ModuleCandidate[],
+	): Promise<DetectedSurface[]> {
+		const results: DetectedSurface[] = [];
+
+		for (const mc of moduleCandidates) {
+			const absRoot = mc.canonicalRootPath === "."
+				? rootPath
+				: join(rootPath, mc.canonicalRootPath);
+			const relPrefix = mc.canonicalRootPath === "." ? "" : mc.canonicalRootPath + "/";
+
+			// package.json
+			try {
+				const content = await readFile(join(absRoot, "package.json"), "utf-8");
+				const relPath = `${relPrefix}package.json`.replace(/^\//, "");
+				results.push(...detectPackageJsonSurfaces(content, relPath));
+			} catch { /* no package.json */ }
+
+			// Cargo.toml
+			try {
+				const content = await readFile(join(absRoot, "Cargo.toml"), "utf-8");
+				const relPath = `${relPrefix}Cargo.toml`.replace(/^\//, "");
+				results.push(...detectCargoSurfaces(content, relPath));
+			} catch { /* no Cargo.toml */ }
+
+			// pyproject.toml
+			try {
+				const content = await readFile(join(absRoot, "pyproject.toml"), "utf-8");
+				const relPath = `${relPrefix}pyproject.toml`.replace(/^\//, "");
+				results.push(...detectPyprojectSurfaces(content, relPath));
+			} catch { /* no pyproject.toml */ }
+		}
+
+		return results;
 	}
 
 	// ── File scanning ──────────────────────────────────────────────────

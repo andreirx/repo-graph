@@ -129,6 +129,25 @@
   - **Linux-scale status:** not yet validated. Previous run hit V8 heap OOM at
     3.6 GB during bulk `.all()` materialization, which is now eliminated. Rerun
     required to discover the next blocker, if any.
+- **Delta indexing (slice 1):**
+  - Invalidation planner, copy-forward storage, durable extraction edges shipped.
+  - `refreshRepo` uses delta path: scan → hash → plan → copy forward → extract
+    only invalidated files → resolve all edges → postpasses → finalize.
+  - Trust metadata persisted in extraction diagnostics (`delta` block with
+    per-category file counts and per-artifact-kind copy counts).
+  - **Config-file tracking gap:** manifest/config files (package.json, tsconfig.json,
+    Cargo.toml, etc.) are not tracked by the file scanner. The invalidation planner
+    only compares hashes for scanner-returned source files. Config changes are
+    invisible to the invalidation plan. Config-widening logic exists in the planner
+    but never fires because config files are never in the current-file hash set.
+    Fix: include config files in the hash comparison or add a separate config-change
+    detection pass using parent snapshot's file_versions.
+  - **Postpasses are conservative:** run on all files, not just invalidated scope.
+    Erodes refresh win for detector-heavy repos.
+  - **File-local fact reuse not implemented:** inferences, boundary facts not
+    copied forward for unchanged files.
+  - **Large-repo delta refresh not validated:** verified on repo-graph (235 files),
+    not on Linux or other large repos.
 - **No clangd/libclang enrichment** for receiver-type resolution yet.
 
 ## Coverage / Churn Import

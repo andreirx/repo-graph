@@ -77,6 +77,15 @@ import type {
 	ModuleFileOwnership,
 	ModuleKind,
 } from "../../../core/modules/module-candidate.js";
+import type {
+	BuildSystem,
+	ProjectSurface,
+	ProjectSurfaceEvidence,
+	RuntimeKind,
+	SurfaceEvidenceKind,
+	SurfaceEvidenceSourceType,
+	SurfaceKind,
+} from "../../../core/runtime/project-surface.js";
 /**
  * Thrown by insertNodes when the input batch contains two or more
  * nodes with the same stable_key. This is an identity-model defect
@@ -1609,6 +1618,104 @@ export class SqliteStorage implements StoragePort {
 		// CASCADE handles evidence and ownership rows.
 		this.db.prepare("DELETE FROM module_candidates WHERE snapshot_uid = ?")
 			.run(snapshotUid);
+	}
+
+	// ── Project Surfaces ───────────────────────────────────────────
+
+	insertProjectSurfaces(surfaces: ProjectSurface[]): void {
+		if (surfaces.length === 0) return;
+		const stmt = this.db.prepare(
+			`INSERT OR REPLACE INTO project_surfaces
+			 (project_surface_uid, snapshot_uid, repo_uid, module_candidate_uid,
+			  surface_kind, display_name, root_path, entrypoint_path,
+			  build_system, runtime_kind, confidence, metadata_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const s of surfaces) {
+				stmt.run(
+					s.projectSurfaceUid, s.snapshotUid, s.repoUid, s.moduleCandidateUid,
+					s.surfaceKind, s.displayName, s.rootPath, s.entrypointPath,
+					s.buildSystem, s.runtimeKind, s.confidence, s.metadataJson,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	insertProjectSurfaceEvidence(evidence: ProjectSurfaceEvidence[]): void {
+		if (evidence.length === 0) return;
+		const stmt = this.db.prepare(
+			`INSERT OR REPLACE INTO project_surface_evidence
+			 (project_surface_evidence_uid, project_surface_uid, snapshot_uid, repo_uid,
+			  source_type, source_path, evidence_kind, confidence, payload_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const e of evidence) {
+				stmt.run(
+					e.projectSurfaceEvidenceUid, e.projectSurfaceUid,
+					e.snapshotUid, e.repoUid,
+					e.sourceType, e.sourcePath, e.evidenceKind, e.confidence,
+					e.payloadJson,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	queryProjectSurfaces(snapshotUid: string): ProjectSurface[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM project_surfaces WHERE snapshot_uid = ? ORDER BY root_path, surface_kind",
+		).all(snapshotUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			projectSurfaceUid: r.project_surface_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			moduleCandidateUid: r.module_candidate_uid as string,
+			surfaceKind: r.surface_kind as SurfaceKind,
+			displayName: (r.display_name as string) ?? null,
+			rootPath: r.root_path as string,
+			entrypointPath: (r.entrypoint_path as string) ?? null,
+			buildSystem: r.build_system as BuildSystem,
+			runtimeKind: r.runtime_kind as RuntimeKind,
+			confidence: r.confidence as number,
+			metadataJson: (r.metadata_json as string) ?? null,
+		}));
+	}
+
+	queryProjectSurfaceEvidence(projectSurfaceUid: string): ProjectSurfaceEvidence[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM project_surface_evidence WHERE project_surface_uid = ?",
+		).all(projectSurfaceUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			projectSurfaceEvidenceUid: r.project_surface_evidence_uid as string,
+			projectSurfaceUid: r.project_surface_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			sourceType: r.source_type as SurfaceEvidenceSourceType,
+			sourcePath: r.source_path as string,
+			evidenceKind: r.evidence_kind as SurfaceEvidenceKind,
+			confidence: r.confidence as number,
+			payloadJson: (r.payload_json as string) ?? null,
+		}));
+	}
+
+	queryAllProjectSurfaceEvidence(snapshotUid: string): ProjectSurfaceEvidence[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM project_surface_evidence WHERE snapshot_uid = ?",
+		).all(snapshotUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			projectSurfaceEvidenceUid: r.project_surface_evidence_uid as string,
+			projectSurfaceUid: r.project_surface_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			sourceType: r.source_type as SurfaceEvidenceSourceType,
+			sourcePath: r.source_path as string,
+			evidenceKind: r.evidence_kind as SurfaceEvidenceKind,
+			confidence: r.confidence as number,
+			payloadJson: (r.payload_json as string) ?? null,
+		}));
 	}
 
 	// ── Declarations ───────────────────────────────────────────────────

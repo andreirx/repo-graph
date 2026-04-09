@@ -36,6 +36,7 @@ import { runMigration009 } from "./migrations/009-staging-tables.js";
 import { runMigration010 } from "./migrations/010-file-signals-expansion.js";
 import { runMigration011 } from "./migrations/011-module-candidates.js";
 import { runMigration012 } from "./migrations/012-extraction-edges.js";
+import { runMigration013 } from "./migrations/013-project-surfaces.js";
 
 export class SqliteConnectionProvider {
 	private db: Database.Database | null = null;
@@ -83,6 +84,7 @@ export class SqliteConnectionProvider {
 			if (maxVersion < 10) runMigration010(this.db!);
 			if (maxVersion < 11) runMigration011(this.db!);
 			if (maxVersion < 12) runMigration012(this.db!);
+			if (maxVersion < 13) runMigration013(this.db!);
 		});
 		runIncremental();
 	}

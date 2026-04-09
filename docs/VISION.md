@@ -4,16 +4,66 @@
 
 Repo-graph is a deterministic engineering intelligence system, not a chat layer and not a generic code indexer.
 
+The primary use case is **fast AI agent orientation on the current state of a codebase.** An agent working on a repo needs to immediately understand:
+
+- what modules exist and what they own
+- where the boundaries and seams are
+- how modules and projects relate to each other
+- what runtime/build environment each module runs under
+- what changed since the last known state
+
+This is the high-value, slow-changing architectural truth that agents cannot efficiently reconstruct from raw file reads. The product exists to make this truth queryable in milliseconds, not minutes.
+
 The long-term direction is to become the portable, queryable substrate for:
 
 - structural code facts
-- architectural intent
+- architectural intent (modules, boundaries, seams, runtimes)
 - requirements and constraints
 - versioned contracts
 - versioned artifacts and evidence
 - cross-repo topology and dependency intelligence
 
 The central bet is simple: generic "code understanding" will be commoditized, but high-assurance, traceable, versioned engineering intelligence across repositories will remain valuable and under-served.
+
+## Operational Architecture
+
+The end-state runtime is a **long-lived daemon** holding the current repo state in memory. Not SQLite-first. Not snapshot-history-first.
+
+**Primary truth:** current repo state in memory.
+- current file inventory
+- current symbol graph (nodes + resolved/unresolved edges)
+- current module catalog and file-to-module ownership
+- current boundary/provider/consumer facts
+- current runtime/build environment model
+- current config/build context
+
+**Secondary truth:** persistent disk cache.
+- warm start after daemon restart or crash recovery
+- content hashes and file fingerprints for incremental update
+- raw extraction facts for delta rebuild
+- module/boundary/runtime cache
+
+**Not the primary concern:**
+- indefinite snapshot history (git provides history)
+- many retained snapshots (latest full + latest delta is sufficient)
+- trend databases or archaeology (useful later, not core)
+- WAL-heavy retained state
+
+The current SQLite design is the transition mechanism. It is useful now for persistence and query infrastructure. It is not the conceptual center of the end-state architecture. The daemon's in-memory model will become the conceptual center.
+
+## Value Frontier
+
+The highest-value, slowest-changing substrate is not the raw code graph. It is the **architectural understanding layer:**
+
+**1. Modules** — declared, operational, and inferred module boundaries. File ownership. Inter-module relationships. This is the primary orientation layer for agents.
+
+**2. Boundaries and seams** — API providers/consumers (HTTP, gRPC, CLI). State boundaries (database, filesystem, cache). Event/queue boundaries. Framework entrypoints. Service/plugin seams. External system touchpoints.
+
+**3. Runtime/build environment** — how each module runs, what config defines it, what build system owns it, what deployment surface it belongs to, what compile context applies.
+
+These three layers change slowly relative to code. They are expensive for an agent to reconstruct from scratch. They are cheap to maintain incrementally. And they are what an agent needs first when orienting in a codebase.
+
+The extraction layer (symbols, imports, calls) is the necessary foundation. But the value is in the architectural interpretation built on top of it.
 
 ## Strategic Position
 
@@ -127,39 +177,65 @@ When adding a capability, follow this order. Do not collapse steps.
 
 ### Near-Term Roadmap For Agents
 
-Ordered list. "Why now" is the rationale — not priority rhetoric.
+Ordered by current product priority. The architectural understanding
+layer is the primary value frontier.
 
-1. **Extraction trust reporting (machine-queryable).** Why now: the honesty signals exist in prose (v1-validation-report.txt) but agents cannot query them. Without machine-readable trust boundaries, `graph dead` confidence is implicit. Adding structured trust metadata closes the agent-facing honesty gap.
-2. **Change/impact minimum viable slice.** Why now: "which modules are affected by files changed since last snapshot" is the highest-leverage gate enhancement. Combines git diff + existing graph traversal. Unblocks pre-merge verification.
-3. **Persisted verification records.** Why now: `gate` currently recomputes on every run. Archival of gate results as durable artifacts enables trend-of-verdicts and post-hoc auditing.
-4. **Registry/framework liveness edges (REGISTERED_BY, RENDERS_BLOCK, etc.).** Why now: without these, dead-code detection on plugin-driven codebases is unsafe. This is the largest known soundness gap in the extraction layer.
-5. **Live edit-obligation flow.** Why now: `inheritObligationIds()` exists as a tested helper but no runtime path invokes it. An edit-obligation command would exercise the identity contract end-to-end and reveal any gaps.
-6. **Shared obligation evaluator unit tests.** Why now: the evaluator is only tested through integration paths. Direct unit tests with mock storage would catch method-level regressions without fixture overhead.
+1. **Module discovery expansion (Layer 2 + 3).** Why now: Layer 1
+   (manifest-declared) is shipped. Operational modules (entrypoints,
+   deploy surfaces) and inferred modules (graph clustering) are the
+   next step toward complete module truth. Agents need this for
+   orientation in multi-surface repos (backend/frontend/admin/infra).
+
+2. **Boundary/seam expansion.** Why now: HTTP and CLI boundaries are
+   shipped. State boundaries (database, filesystem, cache) are the
+   next high-value seam class. Agents need to know which modules
+   read/write which resources.
+
+3. **Runtime/build environment model.** Why now: without this, an agent
+   knows what a module contains but not how it runs. Compile context,
+   deployment target, and runtime configuration are critical for
+   correct reasoning about changes.
+
+4. **Delta indexing completion.** Why now: 77-minute full index on Linux
+   is not operationally viable. Delta refresh slice 1 is shipped.
+   Config-file tracking, scoped postpasses, and large-repo validation
+   remain.
+
+5. **Long-lived daemon with in-memory graph.** Why now: eliminates
+   cold-start overhead, enables concurrent queries, provides the
+   correct runtime model for fast agent orientation.
+
+6. **Registry/framework liveness edges.** Why now: without these,
+   dead-code detection on plugin-driven codebases is unsafe. Largest
+   known soundness gap in the extraction layer.
 
 ## Current State And Next Moves
 
 **Just shipped:**
-- Waiver declaration kind with version-scoped tuple
-- `resolveEffectiveVerdict()` resolver with audit preservation
-- Gate reducer (pure function, 3 modes, 3 exit codes)
-- `declare waiver` and `rgr gate` CLI commands
-- Migration 004: obligation_id backfill with hard-fail on malformed legacy payloads
-- `graph obligations` and `evidence` migrated to five-state effective verdict model
+- Streaming/batched indexing pipeline — Linux kernel indexes (63K files,
+  1M+ nodes, 2M+ edges, 77 min). V8 heap OOM eliminated.
+- Module discovery Layer 1 — declared modules from manifests/workspaces.
+  9 detectors, evidence persistence, file ownership, CLI surface.
+- Delta refresh slice 1 — content-hash-based invalidation, copy-forward
+  for unchanged files, trust metadata in diagnostics. Verified on repo-graph.
+- Python two-pass last-definition-wins extraction.
+- Durable extraction edges (migration 012) for delta reuse.
+- `runIndex` decomposed into reusable phase helpers.
 
-**Known open items (not blocking):**
+**Known open items (not blocking current frontier):**
+- Config-file tracking gap in delta invalidation
+- Conservative postpasses in delta refresh
+- Large-repo delta refresh not yet validated
 - `supersedes_uid` lineage not exposed in `declare list --json` output
-- `inheritObligationIds()` matcher tested as pure helper but not wired to a live supersession path
-- Coverage and churn imports use repo-level file inventory, not snapshot-scoped FILE nodes
 
-**Open decisions waiting for user:**
-- Whether to build extraction trust reporting next, or change/impact slice next
-- Whether to archive gate results as durable artifacts (persisted verification records) and how to model the artifact schema
-- Whether to build an edit-obligation command or defer until a concrete need emerges
+**Current product priority:**
+Module/boundary/runtime substrate — the architectural understanding
+layer that makes agents effective. See Horizon 1 above.
 
 **What is NOT next:**
-- Fleet / cross-repo features (Horizon 3 — not approaching yet)
-- Framework extractors (Horizon 2 but large; blocked on registry liveness edge design)
-- Token consumption benchmarking (planned but not prerequisite for any Horizon 2 item)
+- Fleet / cross-repo features (Horizon 3)
+- Snapshot history / trend optimization
+- Token consumption benchmarking
 
 ## High-Assurance Engineering, Made Cheap
 
@@ -458,14 +534,18 @@ This is where large organizations fail today and where deterministic graph intel
 
 ## Horizon Roadmap
 
-### Horizon 1: Deterministic Trust
+### Horizon 1: Architectural Understanding (current frontier)
 
-Prove correctness and evidence quality:
+Make the codebase structurally legible to agents:
 
-- high-precision graph extraction
-- explicit unresolved-edge diagnostics
-- snapshot lineage and reproducibility
-- stable declaration workflows
+- multi-language extraction (shipped: TS, Rust, Java, Python, C/C++)
+- module discovery from manifests/workspaces (shipped: Layer 1 declared)
+- module discovery from operational surfaces (Layer 2: entrypoints, deploy targets)
+- boundary/seam discovery (shipped: HTTP, CLI; next: state boundaries)
+- runtime/build environment model per module
+- incremental update from diffs (shipped: delta refresh slice 1)
+- long-lived daemon with in-memory current-state graph
+- fast agent orientation queries
 
 ### Horizon 2: Governance And Verification
 

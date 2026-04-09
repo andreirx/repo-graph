@@ -2072,11 +2072,27 @@ describe("schema migration from v1 baseline", () => {
 			.all() as Array<{ name: string }>;
 		expect(stagingIndexes.length).toBeGreaterThanOrEqual(2);
 
+		// Verify project_surfaces and project_surface_evidence tables from migration 013
+		const surfaceTables = rawDb2
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type='table' AND name IN ('project_surfaces', 'project_surface_evidence') ORDER BY name",
+			)
+			.all() as Array<{ name: string }>;
+		expect(surfaceTables.map((t) => t.name)).toEqual(["project_surface_evidence", "project_surfaces"]);
+
+		// Verify project surface indexes exist
+		const surfaceIndexes = rawDb2
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_project_surface%' ORDER BY name",
+			)
+			.all() as Array<{ name: string }>;
+		expect(surfaceIndexes.length).toBeGreaterThanOrEqual(4);
+
 		// Verify all migrations recorded
 		const migrations = rawDb2
 			.prepare("SELECT version FROM schema_migrations ORDER BY version")
 			.all() as Array<{ version: number }>;
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
 
 		rawDb2.close();
 		upgradeProvider.close();
