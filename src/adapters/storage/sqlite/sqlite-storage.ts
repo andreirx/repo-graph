@@ -64,6 +64,15 @@ import type {
 	UnresolvedEdgeBasisCode,
 	UnresolvedEdgeClassification,
 } from "../../../core/diagnostics/unresolved-edge-classification.js";
+import type {
+	AssignmentKind,
+	EvidenceKind,
+	EvidenceSourceType,
+	ModuleCandidate,
+	ModuleCandidateEvidence,
+	ModuleFileOwnership,
+	ModuleKind,
+} from "../../../core/modules/module-candidate.js";
 /**
  * Thrown by insertNodes when the input batch contains two or more
  * nodes with the same stable_key. This is an identity-model defect
@@ -1212,6 +1221,157 @@ export class SqliteStorage implements StoragePort {
 			.run(snapshotUid);
 		this.db
 			.prepare("DELETE FROM boundary_provider_facts WHERE snapshot_uid = ?")
+			.run(snapshotUid);
+	}
+
+	// ── Module Candidates ──────────────────────────────────────────────
+
+	insertModuleCandidates(candidates: ModuleCandidate[]): void {
+		if (candidates.length === 0) return;
+		const stmt = this.db.prepare(
+			`INSERT OR REPLACE INTO module_candidates
+			 (module_candidate_uid, snapshot_uid, repo_uid, module_key,
+			  module_kind, canonical_root_path, confidence, display_name,
+			  metadata_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const c of candidates) {
+				stmt.run(
+					c.moduleCandidateUid,
+					c.snapshotUid,
+					c.repoUid,
+					c.moduleKey,
+					c.moduleKind,
+					c.canonicalRootPath,
+					c.confidence,
+					c.displayName,
+					c.metadataJson,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	insertModuleCandidateEvidence(evidence: ModuleCandidateEvidence[]): void {
+		if (evidence.length === 0) return;
+		const stmt = this.db.prepare(
+			`INSERT OR REPLACE INTO module_candidate_evidence
+			 (evidence_uid, module_candidate_uid, snapshot_uid, repo_uid,
+			  source_type, source_path, evidence_kind, confidence, payload_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const e of evidence) {
+				stmt.run(
+					e.evidenceUid,
+					e.moduleCandidateUid,
+					e.snapshotUid,
+					e.repoUid,
+					e.sourceType,
+					e.sourcePath,
+					e.evidenceKind,
+					e.confidence,
+					e.payloadJson,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	insertModuleFileOwnership(ownership: ModuleFileOwnership[]): void {
+		if (ownership.length === 0) return;
+		const stmt = this.db.prepare(
+			`INSERT OR REPLACE INTO module_file_ownership
+			 (snapshot_uid, repo_uid, file_uid, module_candidate_uid,
+			  assignment_kind, confidence, basis_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const o of ownership) {
+				stmt.run(
+					o.snapshotUid,
+					o.repoUid,
+					o.fileUid,
+					o.moduleCandidateUid,
+					o.assignmentKind,
+					o.confidence,
+					o.basisJson,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	queryModuleCandidates(snapshotUid: string): ModuleCandidate[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM module_candidates WHERE snapshot_uid = ? ORDER BY canonical_root_path",
+		).all(snapshotUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			moduleCandidateUid: r.module_candidate_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			moduleKey: r.module_key as string,
+			moduleKind: r.module_kind as ModuleKind,
+			canonicalRootPath: r.canonical_root_path as string,
+			confidence: r.confidence as number,
+			displayName: (r.display_name as string) ?? null,
+			metadataJson: (r.metadata_json as string) ?? null,
+		}));
+	}
+
+	queryModuleCandidateEvidence(moduleCandidateUid: string): ModuleCandidateEvidence[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM module_candidate_evidence WHERE module_candidate_uid = ?",
+		).all(moduleCandidateUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			evidenceUid: r.evidence_uid as string,
+			moduleCandidateUid: r.module_candidate_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			sourceType: r.source_type as EvidenceSourceType,
+			sourcePath: r.source_path as string,
+			evidenceKind: r.evidence_kind as EvidenceKind,
+			confidence: r.confidence as number,
+			payloadJson: (r.payload_json as string) ?? null,
+		}));
+	}
+
+	queryAllModuleCandidateEvidence(snapshotUid: string): ModuleCandidateEvidence[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM module_candidate_evidence WHERE snapshot_uid = ?",
+		).all(snapshotUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			evidenceUid: r.evidence_uid as string,
+			moduleCandidateUid: r.module_candidate_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			sourceType: r.source_type as EvidenceSourceType,
+			sourcePath: r.source_path as string,
+			evidenceKind: r.evidence_kind as EvidenceKind,
+			confidence: r.confidence as number,
+			payloadJson: (r.payload_json as string) ?? null,
+		}));
+	}
+
+	queryModuleFileOwnership(snapshotUid: string): ModuleFileOwnership[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM module_file_ownership WHERE snapshot_uid = ? ORDER BY file_uid",
+		).all(snapshotUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			fileUid: r.file_uid as string,
+			moduleCandidateUid: r.module_candidate_uid as string,
+			assignmentKind: r.assignment_kind as AssignmentKind,
+			confidence: r.confidence as number,
+			basisJson: (r.basis_json as string) ?? null,
+		}));
+	}
+
+	deleteModuleCandidatesBySnapshot(snapshotUid: string): void {
+		// CASCADE handles evidence and ownership rows.
+		this.db.prepare("DELETE FROM module_candidates WHERE snapshot_uid = ?")
 			.run(snapshotUid);
 	}
 

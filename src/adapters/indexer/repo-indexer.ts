@@ -74,6 +74,8 @@ import { readGradleDependencies } from "../config/gradle-reader.js";
 import { readPythonDependencies } from "../config/python-deps-reader.js";
 import { readTsconfigAliases } from "../config/tsconfig-reader.js";
 import type { AnnotationsPort } from "../../core/ports/annotations.js";
+import type { ModuleDiscoveryPort } from "../../core/ports/discovery.js";
+import { discoverModules } from "../../core/modules/module-discovery.js";
 import {
 	applyContentTruncation,
 	attributePackageDescription,
@@ -206,6 +208,7 @@ export class RepoIndexer implements IndexerPort {
 		private storage: StoragePort,
 		extractors: ExtractorPort | ExtractorPort[],
 		private annotations?: AnnotationsPort,
+		private discovery?: ModuleDiscoveryPort,
 	) {
 		// Build extension → extractor lookup from each extractor's declared languages.
 		this.extractorsByExtension = new Map();
@@ -805,6 +808,32 @@ export class RepoIndexer implements IndexerPort {
 			);
 			if (moduleEdges.length > 0) {
 				this.storage.insertEdges(moduleEdges);
+			}
+
+			// ═══════════════════════════════════════════════════════════════
+			// PHASE 3d: Module discovery (declared modules from manifests)
+			// ═══════════════════════════════════════════════════════════════
+			// Additive: discovers declared module roots from workspace/
+			// manifest files and persists candidates + evidence + file
+			// ownership. Does NOT replace directory-based MODULE nodes.
+			if (this.discovery) {
+				const discoveredRoots = await this.discovery.discoverDeclaredModules(
+					repo.rootPath,
+					repoUid,
+				);
+				if (discoveredRoots.length > 0) {
+					const moduleResult = discoverModules({
+						repoUid,
+						snapshotUid: snapshot.snapshotUid,
+						discoveredRoots,
+						trackedFiles,
+					});
+					if (moduleResult.candidates.length > 0) {
+						this.storage.insertModuleCandidates(moduleResult.candidates);
+						this.storage.insertModuleCandidateEvidence(moduleResult.evidence);
+						this.storage.insertModuleFileOwnership(moduleResult.ownership);
+					}
+				}
 			}
 
 			// ═══════════════════════════════════════════════════════════════

@@ -17,6 +17,7 @@ import { RustExtractor } from "./adapters/extractors/rust/rust-extractor.js";
 import { TypeScriptExtractor } from "./adapters/extractors/typescript/ts-extractor.js";
 import { GitAdapter } from "./adapters/git/git-adapter.js";
 import { IstanbulCoverageImporter } from "./adapters/importers/istanbul-coverage.js";
+import { ManifestScanner } from "./adapters/discovery/manifest-scanner.js";
 import { RepoIndexer } from "./adapters/indexer/repo-indexer.js";
 import { SqliteConnectionProvider } from "./adapters/storage/sqlite/connection-provider.js";
 import { SqliteStorage } from "./adapters/storage/sqlite/sqlite-storage.js";
@@ -81,12 +82,16 @@ export async function bootstrap(dbPath?: string): Promise<AppContext> {
 	const cppExtractor = new CppExtractor();
 	await cppExtractor.initialize();
 
+	// Module discovery adapter.
+	const discovery = new ManifestScanner();
+
 	// Create indexer with all extractors. Files are routed to the
 	// correct extractor by extension.
 	const indexer = new RepoIndexer(
 		storage,
 		[extractor, rustExtractor, javaExtractor, pythonExtractor, cppExtractor],
 		annotations,
+		discovery,
 	);
 	const git = new GitAdapter();
 	const coverageImporters: CoverageImporterPort[] = [

@@ -1,0 +1,265 @@
+/**
+ * Integration test for module discovery — end-to-end pipeline.
+ *
+ * Tests the full path: ManifestScanner → discoverModules orchestrator
+ * → SQLite persistence → query-back verification.
+ *
+ * Uses existing fixtures:
+ *   - monorepo-packages: package.json workspaces with 2 members
+ *   - mixed-lang: standalone package.json + Cargo.toml at same root
+ *
+ * Verifies:
+ *   - Candidates persisted with correct keys and names
+ *   - Evidence items linked to correct candidates
+ *   - File ownership assigned by longest-prefix containment
+ *   - Workspace root is not a candidate (has workspaces field)
+ *   - Workspace members are candidates
+ *   - Multi-source evidence for same root is merged
+ */
+
+import { randomUUID } from "node:crypto";
+import { unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { ManifestScanner } from "../../../src/adapters/discovery/manifest-scanner.js";
+import { TypeScriptExtractor } from "../../../src/adapters/extractors/typescript/ts-extractor.js";
+import { RepoIndexer } from "../../../src/adapters/indexer/repo-indexer.js";
+import { SqliteConnectionProvider } from "../../../src/adapters/storage/sqlite/connection-provider.js";
+import { SqliteStorage } from "../../../src/adapters/storage/sqlite/sqlite-storage.js";
+
+const MONOREPO_FIXTURE = join(
+	import.meta.dirname,
+	"../../fixtures/typescript/monorepo-packages",
+);
+
+const MIXED_LANG_FIXTURE = join(
+	import.meta.dirname,
+	"../../fixtures/mixed-lang",
+);
+
+let extractor: TypeScriptExtractor;
+let scanner: ManifestScanner;
+
+beforeAll(async () => {
+	extractor = new TypeScriptExtractor();
+	await extractor.initialize();
+	scanner = new ManifestScanner();
+});
+
+// Track DB paths for cleanup.
+const dbPaths: string[] = [];
+
+afterEach(() => {
+	for (const p of dbPaths) {
+		try { unlinkSync(p); } catch { /* ignore */ }
+	}
+	dbPaths.length = 0;
+});
+
+function setupDb(): { storage: SqliteStorage; provider: SqliteConnectionProvider; dbPath: string } {
+	const dbPath = join(tmpdir(), `rgr-module-discovery-${randomUUID()}.db`);
+	dbPaths.push(dbPath);
+	const provider = new SqliteConnectionProvider(dbPath);
+	provider.initialize();
+	const storage = new SqliteStorage(provider.getDatabase());
+	return { storage, provider, dbPath };
+}
+
+// ── Monorepo workspace fixture ─────────────────────────────────────
+
+describe("module discovery integration — monorepo workspace", () => {
+	it("discovers workspace members as module candidates", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "monorepo-test";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "monorepo-fixture",
+			rootPath: MONOREPO_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		// Query persisted candidates.
+		const candidates = storage.queryModuleCandidates(result.snapshotUid);
+
+		// Workspace root has workspaces field → not a standalone candidate.
+		// Members packages/api and packages/ui should be candidates.
+		const memberCandidates = candidates.filter(
+			(c) => c.canonicalRootPath.startsWith("packages/"),
+		);
+		expect(memberCandidates.length).toBeGreaterThanOrEqual(2);
+
+		const apiCandidate = candidates.find((c) =>
+			c.canonicalRootPath === "packages/api",
+		);
+		expect(apiCandidate).toBeDefined();
+		expect(apiCandidate!.displayName).toBe("@fixture/api");
+		expect(apiCandidate!.moduleKind).toBe("declared");
+		expect(apiCandidate!.moduleKey).toBe(
+			`${REPO_UID}:packages/api:DISCOVERED_MODULE`,
+		);
+
+		const uiCandidate = candidates.find((c) =>
+			c.canonicalRootPath === "packages/ui",
+		);
+		expect(uiCandidate).toBeDefined();
+		expect(uiCandidate!.displayName).toBe("@fixture/ui");
+
+		provider.close();
+	});
+
+	it("creates evidence items for each workspace member", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "monorepo-evidence";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "monorepo-fixture",
+			rootPath: MONOREPO_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const candidates = storage.queryModuleCandidates(result.snapshotUid);
+		const apiCandidate = candidates.find((c) =>
+			c.canonicalRootPath === "packages/api",
+		);
+		expect(apiCandidate).toBeDefined();
+
+		const evidence = storage.queryModuleCandidateEvidence(
+			apiCandidate!.moduleCandidateUid,
+		);
+		expect(evidence.length).toBeGreaterThanOrEqual(1);
+		expect(evidence[0].sourceType).toBe("package_json_workspaces");
+		expect(evidence[0].evidenceKind).toBe("workspace_member");
+
+		provider.close();
+	});
+
+	it("assigns files to their workspace member module", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "monorepo-ownership";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "monorepo-fixture",
+			rootPath: MONOREPO_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const candidates = storage.queryModuleCandidates(result.snapshotUid);
+		const apiCandidate = candidates.find((c) =>
+			c.canonicalRootPath === "packages/api",
+		);
+
+		const ownership = storage.queryModuleFileOwnership(result.snapshotUid);
+
+		// Find ownership for the api server file.
+		const serverOwnership = ownership.find((o) =>
+			o.fileUid.endsWith("packages/api/src/server.ts"),
+		);
+		expect(serverOwnership).toBeDefined();
+		expect(serverOwnership!.moduleCandidateUid).toBe(
+			apiCandidate!.moduleCandidateUid,
+		);
+		expect(serverOwnership!.assignmentKind).toBe("root_containment");
+
+		// Find ownership for the ui app file.
+		const uiCandidate = candidates.find((c) =>
+			c.canonicalRootPath === "packages/ui",
+		);
+		const appOwnership = ownership.find((o) =>
+			o.fileUid.endsWith("packages/ui/src/App.tsx"),
+		);
+		expect(appOwnership).toBeDefined();
+		expect(appOwnership!.moduleCandidateUid).toBe(
+			uiCandidate!.moduleCandidateUid,
+		);
+
+		provider.close();
+	});
+});
+
+// ── Mixed-lang fixture ─────────────────────────────────────────────
+
+describe("module discovery integration — mixed-lang", () => {
+	it("discovers both package.json and Cargo.toml at the same root", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "mixed-lang-test";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "mixed-lang-fixture",
+			rootPath: MIXED_LANG_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const candidates = storage.queryModuleCandidates(result.snapshotUid);
+
+		// Root "." should be a candidate (standalone package.json + Cargo.toml).
+		const rootCandidate = candidates.find((c) =>
+			c.canonicalRootPath === ".",
+		);
+		expect(rootCandidate).toBeDefined();
+		expect(rootCandidate!.displayName).toBe("mixed-lang-fixture");
+
+		// Multiple evidence items: package.json + Cargo.toml.
+		const allEvidence = storage.queryAllModuleCandidateEvidence(result.snapshotUid);
+		const rootEvidence = allEvidence.filter(
+			(e) => e.moduleCandidateUid === rootCandidate!.moduleCandidateUid,
+		);
+		expect(rootEvidence.length).toBeGreaterThanOrEqual(2);
+
+		const sourceTypes = rootEvidence.map((e) => e.sourceType).sort();
+		expect(sourceTypes).toContain("cargo_crate");
+		expect(sourceTypes).toContain("package_json_workspaces");
+
+		provider.close();
+	});
+
+	it("assigns all files to the root module", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "mixed-lang-ownership";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "mixed-lang-fixture",
+			rootPath: MIXED_LANG_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const ownership = storage.queryModuleFileOwnership(result.snapshotUid);
+
+		// All tracked files should be owned by the root module.
+		expect(ownership.length).toBe(result.filesTotal);
+		const uniqueOwners = new Set(ownership.map((o) => o.moduleCandidateUid));
+		expect(uniqueOwners.size).toBe(1);
+
+		provider.close();
+	});
+});

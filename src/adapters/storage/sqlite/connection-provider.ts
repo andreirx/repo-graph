@@ -34,6 +34,7 @@ import { runMigration007 } from "./migrations/007-unresolved-edges.js";
 import { runMigration008 } from "./migrations/008-boundary-facts.js";
 import { runMigration009 } from "./migrations/009-staging-tables.js";
 import { runMigration010 } from "./migrations/010-file-signals-expansion.js";
+import { runMigration011 } from "./migrations/011-module-candidates.js";
 
 export class SqliteConnectionProvider {
 	private db: Database.Database | null = null;
@@ -79,6 +80,7 @@ export class SqliteConnectionProvider {
 			if (maxVersion < 8) runMigration008(this.db!);
 			if (maxVersion < 9) runMigration009(this.db!);
 			if (maxVersion < 10) runMigration010(this.db!);
+			if (maxVersion < 11) runMigration011(this.db!);
 		});
 		runIncremental();
 	}

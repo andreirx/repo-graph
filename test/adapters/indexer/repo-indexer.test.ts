@@ -376,75 +376,103 @@ describe("indexRepo", () => {
 });
 
 // ── Multi-batch seam test ──────────────────────────────────────────────
+//
+// Verifies that the batch pipeline produces identical results regardless
+// of batch size — not just count parity, but row-for-row classification
+// identity on every unresolved edge.
 
-describe("multi-batch edge resolution", () => {
-	it("produces identical results with edgeBatchSize=1 vs default", async () => {
-		// Run with default batch size (all edges in one batch).
-		const baseline = await indexer.indexRepo(REPO_UID);
-
-		// Clean up and re-register for a second run.
-		provider.close();
-		try { unlinkSync(dbPath); } catch { /* ignore */ }
-
-		dbPath = join(tmpdir(), `rgr-indexer-batch-${randomUUID()}.db`);
-		provider = new SqliteConnectionProvider(dbPath);
-		provider.initialize();
-		storage = new SqliteStorage(provider.getDatabase());
-		indexer = new RepoIndexer(storage, extractor);
-		storage.addRepo({
-			repoUid: REPO_UID,
-			name: "fixture-repo",
-			rootPath: FIXTURES_ROOT,
-			defaultBranch: "main",
-			createdAt: new Date().toISOString(),
-			metadataJson: null,
-		});
-
-		// Run with batch size 1 — forces one batch per staged edge.
-		const batched = await indexer.indexRepo(REPO_UID, {
-			edgeBatchSize: 1,
-		});
-
-		// Core invariants: identical counts.
-		expect(batched.filesTotal).toBe(baseline.filesTotal);
-		expect(batched.nodesTotal).toBe(baseline.nodesTotal);
-		expect(batched.edgesTotal).toBe(baseline.edgesTotal);
-		expect(batched.edgesUnresolved).toBe(baseline.edgesUnresolved);
-
-		// Verify unresolved breakdown categories match.
-		expect(batched.unresolvedBreakdown).toEqual(baseline.unresolvedBreakdown);
+/**
+ * Helper: index with a given batch size in a fresh DB.
+ * Returns the IndexResult plus a sorted snapshot of all unresolved edges
+ * keyed by (sourceFilePath, lineStart, targetKey) with their full
+ * classification tuple (category, classification, basisCode).
+ */
+async function indexAndCapture(
+	batchSize: number | undefined,
+	ext: TypeScriptExtractor,
+) {
+	const path = join(tmpdir(), `rgr-batch-identity-${randomUUID()}.db`);
+	const prov = new SqliteConnectionProvider(path);
+	prov.initialize();
+	const stor = new SqliteStorage(prov.getDatabase());
+	const idx = new RepoIndexer(stor, ext);
+	stor.addRepo({
+		repoUid: REPO_UID,
+		name: "fixture-repo",
+		rootPath: FIXTURES_ROOT,
+		defaultBranch: "main",
+		createdAt: new Date().toISOString(),
+		metadataJson: null,
 	});
 
-	it("produces identical results with edgeBatchSize=3 vs default", async () => {
-		// A batch size that is not 1 and not aligned to edge count.
-		const baseline = await indexer.indexRepo(REPO_UID);
+	const result = batchSize
+		? await idx.indexRepo(REPO_UID, { edgeBatchSize: batchSize })
+		: await idx.indexRepo(REPO_UID);
 
-		provider.close();
-		try { unlinkSync(dbPath); } catch { /* ignore */ }
+	// Capture all unresolved edges with full classification detail.
+	const unresolvedRows = stor.queryUnresolvedEdges({
+		snapshotUid: result.snapshotUid,
+	});
 
-		dbPath = join(tmpdir(), `rgr-indexer-batch3-${randomUUID()}.db`);
-		provider = new SqliteConnectionProvider(dbPath);
-		provider.initialize();
-		storage = new SqliteStorage(provider.getDatabase());
-		indexer = new RepoIndexer(storage, extractor);
-		storage.addRepo({
-			repoUid: REPO_UID,
-			name: "fixture-repo",
-			rootPath: FIXTURES_ROOT,
-			defaultBranch: "main",
-			createdAt: new Date().toISOString(),
-			metadataJson: null,
-		});
+	// Sort by a stable composite key so row order is deterministic.
+	const sorted = unresolvedRows
+		.map((r) => ({
+			key: `${r.sourceFilePath ?? ""}|${r.lineStart ?? 0}|${r.targetKey}`,
+			category: r.category,
+			classification: r.classification,
+			basisCode: r.basisCode,
+		}))
+		.sort((a, b) => a.key.localeCompare(b.key));
 
-		const batched = await indexer.indexRepo(REPO_UID, {
-			edgeBatchSize: 3,
-		});
+	prov.close();
+	try { unlinkSync(path); } catch { /* ignore */ }
 
-		expect(batched.filesTotal).toBe(baseline.filesTotal);
-		expect(batched.nodesTotal).toBe(baseline.nodesTotal);
-		expect(batched.edgesTotal).toBe(baseline.edgesTotal);
-		expect(batched.edgesUnresolved).toBe(baseline.edgesUnresolved);
-		expect(batched.unresolvedBreakdown).toEqual(baseline.unresolvedBreakdown);
+	return { result, sorted };
+}
+
+describe("multi-batch edge resolution", () => {
+	it("produces row-for-row identical classifications with edgeBatchSize=1", async () => {
+		const baseline = await indexAndCapture(undefined, extractor);
+		const batched = await indexAndCapture(1, extractor);
+
+		// Count parity.
+		expect(batched.result.filesTotal).toBe(baseline.result.filesTotal);
+		expect(batched.result.nodesTotal).toBe(baseline.result.nodesTotal);
+		expect(batched.result.edgesTotal).toBe(baseline.result.edgesTotal);
+		expect(batched.result.edgesUnresolved).toBe(baseline.result.edgesUnresolved);
+		expect(batched.result.unresolvedBreakdown).toEqual(baseline.result.unresolvedBreakdown);
+
+		// Row-for-row classification identity.
+		expect(batched.sorted.length).toBe(baseline.sorted.length);
+		for (let i = 0; i < baseline.sorted.length; i++) {
+			const b = baseline.sorted[i];
+			const t = batched.sorted[i];
+			expect(t.key).toBe(b.key);
+			expect(t.category).toBe(b.category);
+			expect(t.classification).toBe(b.classification);
+			expect(t.basisCode).toBe(b.basisCode);
+		}
+	});
+
+	it("produces row-for-row identical classifications with edgeBatchSize=3", async () => {
+		const baseline = await indexAndCapture(undefined, extractor);
+		const batched = await indexAndCapture(3, extractor);
+
+		expect(batched.result.filesTotal).toBe(baseline.result.filesTotal);
+		expect(batched.result.nodesTotal).toBe(baseline.result.nodesTotal);
+		expect(batched.result.edgesTotal).toBe(baseline.result.edgesTotal);
+		expect(batched.result.edgesUnresolved).toBe(baseline.result.edgesUnresolved);
+		expect(batched.result.unresolvedBreakdown).toEqual(baseline.result.unresolvedBreakdown);
+
+		expect(batched.sorted.length).toBe(baseline.sorted.length);
+		for (let i = 0; i < baseline.sorted.length; i++) {
+			const b = baseline.sorted[i];
+			const t = batched.sorted[i];
+			expect(t.key).toBe(b.key);
+			expect(t.category).toBe(b.category);
+			expect(t.classification).toBe(b.classification);
+			expect(t.basisCode).toBe(b.basisCode);
+		}
 	});
 });
 

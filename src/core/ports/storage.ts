@@ -27,6 +27,11 @@ import type {
 	TrackedFile,
 } from "../model/index.js";
 import type { UnresolvedEdge } from "./extractor.js";
+import type {
+	ModuleCandidate,
+	ModuleCandidateEvidence,
+	ModuleFileOwnership,
+} from "../modules/module-candidate.js";
 
 /**
  * Storage port — the contract any storage backend must fulfill.
@@ -284,6 +289,36 @@ export interface StoragePort {
 	 * links for a snapshot. Used when re-indexing replaces all facts.
 	 */
 	deleteBoundaryFactsBySnapshot(snapshotUid: string): void;
+
+	// ── Module Candidates (discovered modules) ──────────────────────────
+	//
+	// Machine-derived module discovery facts. Separate from declarations
+	// (human-authored) and inferences (node-targeted). Architectural
+	// precedent: boundary-fact tables.
+
+	/** Persist discovered module candidates (batch). */
+	insertModuleCandidates(candidates: ModuleCandidate[]): void;
+
+	/** Persist evidence items for module candidates (batch). */
+	insertModuleCandidateEvidence(evidence: ModuleCandidateEvidence[]): void;
+
+	/** Persist file-to-module ownership assignments (batch). */
+	insertModuleFileOwnership(ownership: ModuleFileOwnership[]): void;
+
+	/** Query all module candidates for a snapshot. */
+	queryModuleCandidates(snapshotUid: string): ModuleCandidate[];
+
+	/** Query evidence items for a specific module candidate. */
+	queryModuleCandidateEvidence(moduleCandidateUid: string): ModuleCandidateEvidence[];
+
+	/** Query all evidence items for a snapshot. */
+	queryAllModuleCandidateEvidence(snapshotUid: string): ModuleCandidateEvidence[];
+
+	/** Query file ownership for a snapshot. */
+	queryModuleFileOwnership(snapshotUid: string): ModuleFileOwnership[];
+
+	/** Delete all module candidates (and cascaded evidence/ownership) for a snapshot. */
+	deleteModuleCandidatesBySnapshot(snapshotUid: string): void;
 
 	// ── Declarations ─────────────────────────────────────────────────────
 
