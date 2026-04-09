@@ -36,6 +36,10 @@ import type {
 	ProjectSurface,
 	ProjectSurfaceEvidence,
 } from "../runtime/project-surface.js";
+import type {
+	SurfaceConfigRoot,
+	SurfaceEntrypoint,
+} from "../topology/topology-links.js";
 
 /**
  * Storage port — the contract any storage backend must fulfill.
@@ -409,6 +413,29 @@ export interface StoragePort {
 
 	/** Query all project surface evidence for a snapshot. */
 	queryAllProjectSurfaceEvidence(snapshotUid: string): ProjectSurfaceEvidence[];
+
+	// ── Topology Links ──────────────────────────────────────────────
+	//
+	// Narrow link tables connecting surfaces to config roots and
+	// entrypoints. Persist the stable topology relationships.
+
+	/** Persist config root links for surfaces (batch). */
+	insertSurfaceConfigRoots(roots: SurfaceConfigRoot[]): void;
+
+	/** Persist entrypoint links for surfaces (batch). */
+	insertSurfaceEntrypoints(entrypoints: SurfaceEntrypoint[]): void;
+
+	/** Query config roots for a specific surface. */
+	querySurfaceConfigRoots(projectSurfaceUid: string): SurfaceConfigRoot[];
+
+	/** Query all config roots for a snapshot. */
+	queryAllSurfaceConfigRoots(snapshotUid: string): SurfaceConfigRoot[];
+
+	/** Query entrypoints for a specific surface. */
+	querySurfaceEntrypoints(projectSurfaceUid: string): SurfaceEntrypoint[];
+
+	/** Query all entrypoints for a snapshot. */
+	queryAllSurfaceEntrypoints(snapshotUid: string): SurfaceEntrypoint[];
 
 	// ── Declarations ─────────────────────────────────────────────────────
 

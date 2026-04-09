@@ -226,6 +226,134 @@ export function registerModulesCommands(
 				process.stdout.write(row + "\n");
 			}
 		});
+
+	// ── show ─────────────────────────────────────────────────────────
+
+	modules
+		.command("show <repo> <module>")
+		.description("Full detail for one module: identity, surfaces, files, topology")
+		.option("--json", "JSON output")
+		.action((repoRef: string, moduleQuery: string, opts: { json?: boolean }) => {
+			const ctx = getCtx();
+			const resolved = resolveRepoAndSnapshot(ctx, repoRef);
+			if (!resolved) {
+				outputError(opts.json, `Repository not found or not indexed: ${repoRef}`);
+				process.exitCode = 1;
+				return;
+			}
+			const { snapshotUid } = resolved;
+
+			const candidates = ctx.storage.queryModuleCandidates(snapshotUid);
+			const matches = candidates.filter(
+				(c) =>
+					c.canonicalRootPath === moduleQuery ||
+					c.displayName === moduleQuery ||
+					c.moduleKey.endsWith(`:${moduleQuery}:DISCOVERED_MODULE`),
+			);
+
+			if (matches.length === 0) {
+				outputError(opts.json, `Module not found: ${moduleQuery}`);
+				process.exitCode = 1;
+				return;
+			}
+			if (matches.length > 1) {
+				const names = matches.map((c) =>
+					`${c.displayName ?? c.canonicalRootPath}`,
+				).join(", ");
+				outputError(opts.json, `Ambiguous module query "${moduleQuery}" matches ${matches.length}: ${names}. Use a more specific root path or display name.`);
+				process.exitCode = 1;
+				return;
+			}
+			const candidate = matches[0];
+
+			// Gather related data.
+			const evidence = ctx.storage.queryModuleCandidateEvidence(candidate.moduleCandidateUid);
+			const surfaces = ctx.storage.queryProjectSurfaces(snapshotUid)
+				.filter((s) => s.moduleCandidateUid === candidate.moduleCandidateUid);
+			const fileCount = ctx.storage.queryModuleOwnedFiles(
+				snapshotUid, candidate.moduleCandidateUid, 0,
+			).length;
+
+			// Topology links for each surface.
+			const surfaceDetails = surfaces.map((s) => {
+				const configRoots = ctx.storage.querySurfaceConfigRoots(s.projectSurfaceUid);
+				const entrypoints = ctx.storage.querySurfaceEntrypoints(s.projectSurfaceUid);
+				return { surface: s, configRoots, entrypoints };
+			});
+
+			if (opts.json) {
+				process.stdout.write(JSON.stringify({
+					module: {
+						moduleCandidateUid: candidate.moduleCandidateUid,
+						moduleKey: candidate.moduleKey,
+						displayName: candidate.displayName,
+						canonicalRootPath: candidate.canonicalRootPath,
+						moduleKind: candidate.moduleKind,
+						confidence: candidate.confidence,
+					},
+					evidence: evidence.map((e) => ({
+						sourceType: e.sourceType,
+						sourcePath: e.sourcePath,
+						evidenceKind: e.evidenceKind,
+						confidence: e.confidence,
+					})),
+					fileCount,
+					surfaces: surfaceDetails.map((sd) => ({
+						surfaceKind: sd.surface.surfaceKind,
+						displayName: sd.surface.displayName,
+						buildSystem: sd.surface.buildSystem,
+						runtimeKind: sd.surface.runtimeKind,
+						entrypointPath: sd.surface.entrypointPath,
+						configRoots: sd.configRoots.map((cr) => ({
+							configPath: cr.configPath,
+							configKind: cr.configKind,
+						})),
+						entrypoints: sd.entrypoints.map((ep) => ({
+							entrypointPath: ep.entrypointPath,
+							entrypointTarget: ep.entrypointTarget,
+							entrypointKind: ep.entrypointKind,
+							displayName: ep.displayName,
+						})),
+					})),
+				}, null, 2));
+				return;
+			}
+
+			// Human-readable detail.
+			process.stdout.write(`Module: ${candidate.displayName ?? candidate.canonicalRootPath}\n`);
+			process.stdout.write(`Key: ${candidate.moduleKey}\n`);
+			process.stdout.write(`Root: ${candidate.canonicalRootPath}\n`);
+			process.stdout.write(`Kind: ${candidate.moduleKind}\n`);
+			process.stdout.write(`Confidence: ${candidate.confidence.toFixed(2)}\n`);
+			process.stdout.write(`Files: ${fileCount}\n`);
+			process.stdout.write(`\n`);
+
+			if (evidence.length > 0) {
+				process.stdout.write(`Evidence (${evidence.length}):\n`);
+				for (const e of evidence) {
+					process.stdout.write(`  ${e.sourceType.padEnd(28)} ${e.evidenceKind.padEnd(18)} ${e.sourcePath}\n`);
+				}
+				process.stdout.write(`\n`);
+			}
+
+			if (surfaceDetails.length > 0) {
+				process.stdout.write(`Surfaces (${surfaceDetails.length}):\n`);
+				for (const sd of surfaceDetails) {
+					process.stdout.write(`  ${sd.surface.surfaceKind.padEnd(18)} ${sd.surface.displayName ?? "-"}\n`);
+					process.stdout.write(`    Build: ${sd.surface.buildSystem} | Runtime: ${sd.surface.runtimeKind}\n`);
+					if (sd.configRoots.length > 0) {
+						process.stdout.write(`    Config: ${sd.configRoots.map((cr) => cr.configPath).join(", ")}\n`);
+					}
+					if (sd.entrypoints.length > 0) {
+						for (const ep of sd.entrypoints) {
+							process.stdout.write(`    Entry: ${ep.entrypointKind} -> ${ep.entrypointPath ?? ep.entrypointTarget ?? "-"}\n`);
+						}
+					}
+				}
+			} else {
+				process.stdout.write(`No project surfaces detected.\n`);
+			}
+		});
 }
 
 // ── Helpers ────────────────────────────────────────────────────────

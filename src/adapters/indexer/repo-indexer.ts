@@ -80,6 +80,7 @@ import type { AnnotationsPort } from "../../core/ports/annotations.js";
 import type { ModuleDiscoveryPort } from "../../core/ports/discovery.js";
 import { discoverModules } from "../../core/modules/module-discovery.js";
 import { discoverSurfaces } from "../../core/runtime/surface-discovery.js";
+import { enrichTopology } from "../../core/topology/topology-enrichment.js";
 import {
 	detectCargoSurfaces,
 	detectPackageJsonSurfaces,
@@ -1084,6 +1085,26 @@ export class RepoIndexer implements IndexerPort {
 						if (surfaceResult.surfaces.length > 0) {
 							this.storage.insertProjectSurfaces(surfaceResult.surfaces);
 							this.storage.insertProjectSurfaceEvidence(surfaceResult.evidence);
+
+							// Topology enrichment: config roots and entrypoints.
+							// Companion configs resolved here (adapter layer, filesystem).
+							const companionConfigs = this.resolveCompanionConfigs(
+								surfaceResult.surfaces,
+								repo.rootPath,
+							);
+							const topology = enrichTopology({
+								repoUid,
+								snapshotUid: snapshot.snapshotUid,
+								surfaces: surfaceResult.surfaces,
+								evidence: surfaceResult.evidence,
+								companionConfigs,
+							});
+							if (topology.configRoots.length > 0) {
+								this.storage.insertSurfaceConfigRoots(topology.configRoots);
+							}
+							if (topology.entrypoints.length > 0) {
+								this.storage.insertSurfaceEntrypoints(topology.entrypoints);
+							}
 						}
 					}
 				}
@@ -1475,6 +1496,41 @@ export class RepoIndexer implements IndexerPort {
 		}
 
 		return results;
+	}
+
+	/**
+	 * Resolve companion config files for surfaces. Adapter-layer
+	 * filesystem probing — produces input for the pure core enricher.
+	 */
+	private resolveCompanionConfigs(
+		surfaces: import("../../core/runtime/project-surface.js").ProjectSurface[],
+		repoRootPath: string,
+	): Map<string, Array<{ path: string; kind: import("../../core/topology/topology-links.js").ConfigRootKind; confidence: number }>> {
+		const result = new Map<string, Array<{ path: string; kind: import("../../core/topology/topology-links.js").ConfigRootKind; confidence: number }>>();
+
+		for (const surface of surfaces) {
+			const absRoot = surface.rootPath === "."
+				? repoRootPath
+				: join(repoRootPath, surface.rootPath);
+			const relPrefix = surface.rootPath === "." ? "" : surface.rootPath + "/";
+			const companions: Array<{ path: string; kind: import("../../core/topology/topology-links.js").ConfigRootKind; confidence: number }> = [];
+
+			if (surface.buildSystem === "typescript_tsc" || surface.buildSystem === "typescript_bundler") {
+				if (existsSync(join(absRoot, "tsconfig.json"))) {
+					companions.push({
+						path: `${relPrefix}tsconfig.json`.replace(/^\//, ""),
+						kind: "tsconfig_json",
+						confidence: 0.90,
+					});
+				}
+			}
+
+			if (companions.length > 0) {
+				result.set(surface.rootPath, companions);
+			}
+		}
+
+		return result;
 	}
 
 	// ── File scanning ──────────────────────────────────────────────────

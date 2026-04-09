@@ -86,6 +86,12 @@ import type {
 	SurfaceEvidenceSourceType,
 	SurfaceKind,
 } from "../../../core/runtime/project-surface.js";
+import type {
+	ConfigRootKind,
+	EntrypointKind,
+	SurfaceConfigRoot,
+	SurfaceEntrypoint,
+} from "../../../core/topology/topology-links.js";
 /**
  * Thrown by insertNodes when the input batch contains two or more
  * nodes with the same stable_key. This is an identity-model defect
@@ -1715,6 +1721,118 @@ export class SqliteStorage implements StoragePort {
 			evidenceKind: r.evidence_kind as SurfaceEvidenceKind,
 			confidence: r.confidence as number,
 			payloadJson: (r.payload_json as string) ?? null,
+		}));
+	}
+
+	// ── Topology Links ─────────────────────────────────────────────────
+
+	insertSurfaceConfigRoots(roots: SurfaceConfigRoot[]): void {
+		if (roots.length === 0) return;
+		const stmt = this.db.prepare(
+			`INSERT OR REPLACE INTO surface_config_roots
+			 (surface_config_root_uid, project_surface_uid, snapshot_uid, repo_uid,
+			  config_path, config_kind, confidence, metadata_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const r of roots) {
+				stmt.run(
+					r.surfaceConfigRootUid, r.projectSurfaceUid,
+					r.snapshotUid, r.repoUid,
+					r.configPath, r.configKind, r.confidence, r.metadataJson,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	insertSurfaceEntrypoints(entrypoints: SurfaceEntrypoint[]): void {
+		if (entrypoints.length === 0) return;
+		const stmt = this.db.prepare(
+			`INSERT OR REPLACE INTO surface_entrypoints
+			 (surface_entrypoint_uid, project_surface_uid, snapshot_uid, repo_uid,
+			  entrypoint_path, entrypoint_target, entrypoint_kind,
+			  display_name, confidence, metadata_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const e of entrypoints) {
+				stmt.run(
+					e.surfaceEntrypointUid, e.projectSurfaceUid,
+					e.snapshotUid, e.repoUid,
+					e.entrypointPath, e.entrypointTarget, e.entrypointKind,
+					e.displayName, e.confidence, e.metadataJson,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	querySurfaceConfigRoots(projectSurfaceUid: string): SurfaceConfigRoot[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM surface_config_roots WHERE project_surface_uid = ? ORDER BY config_path",
+		).all(projectSurfaceUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			surfaceConfigRootUid: r.surface_config_root_uid as string,
+			projectSurfaceUid: r.project_surface_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			configPath: r.config_path as string,
+			configKind: r.config_kind as ConfigRootKind,
+			confidence: r.confidence as number,
+			metadataJson: (r.metadata_json as string) ?? null,
+		}));
+	}
+
+	queryAllSurfaceConfigRoots(snapshotUid: string): SurfaceConfigRoot[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM surface_config_roots WHERE snapshot_uid = ? ORDER BY config_path",
+		).all(snapshotUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			surfaceConfigRootUid: r.surface_config_root_uid as string,
+			projectSurfaceUid: r.project_surface_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			configPath: r.config_path as string,
+			configKind: r.config_kind as ConfigRootKind,
+			confidence: r.confidence as number,
+			metadataJson: (r.metadata_json as string) ?? null,
+		}));
+	}
+
+	querySurfaceEntrypoints(projectSurfaceUid: string): SurfaceEntrypoint[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM surface_entrypoints WHERE project_surface_uid = ?",
+		).all(projectSurfaceUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			surfaceEntrypointUid: r.surface_entrypoint_uid as string,
+			projectSurfaceUid: r.project_surface_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			entrypointPath: (r.entrypoint_path as string) ?? null,
+			entrypointTarget: (r.entrypoint_target as string) ?? null,
+			entrypointKind: r.entrypoint_kind as EntrypointKind,
+			displayName: (r.display_name as string) ?? null,
+			confidence: r.confidence as number,
+			metadataJson: (r.metadata_json as string) ?? null,
+		}));
+	}
+
+	queryAllSurfaceEntrypoints(snapshotUid: string): SurfaceEntrypoint[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM surface_entrypoints WHERE snapshot_uid = ? ORDER BY entrypoint_path",
+		).all(snapshotUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			surfaceEntrypointUid: r.surface_entrypoint_uid as string,
+			projectSurfaceUid: r.project_surface_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			entrypointPath: (r.entrypoint_path as string) ?? null,
+			entrypointTarget: (r.entrypoint_target as string) ?? null,
+			entrypointKind: r.entrypoint_kind as EntrypointKind,
+			displayName: (r.display_name as string) ?? null,
+			confidence: r.confidence as number,
+			metadataJson: (r.metadata_json as string) ?? null,
 		}));
 	}
 

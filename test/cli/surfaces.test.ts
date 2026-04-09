@@ -1,178 +1,160 @@
 /**
- * CLI tests for `rgr surfaces list` and `rgr surfaces evidence`.
+ * CLI integration tests for `rgr surfaces` and `rgr modules show`.
  *
- * Uses the simple-imports fixture (has package.json with name but no bin)
- * and mixed-lang fixture (has express dep + Cargo.toml) to verify:
- *   - command parsing
- *   - JSON output structure
- *   - surface resolution (exact match, ambiguous rejection)
- *   - evidence output
+ * Uses the real CLI harness (subprocess execution against a temp DB).
+ * Indexes the mixed-lang fixture which produces surfaces (backend_service
+ * from express dep, library from Cargo.toml).
  */
 
-import { randomUUID } from "node:crypto";
-import { unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { ManifestScanner } from "../../src/adapters/discovery/manifest-scanner.js";
-import { TypeScriptExtractor } from "../../src/adapters/extractors/typescript/ts-extractor.js";
-import { RepoIndexer } from "../../src/adapters/indexer/repo-indexer.js";
-import { SqliteConnectionProvider } from "../../src/adapters/storage/sqlite/connection-provider.js";
-import { SqliteStorage } from "../../src/adapters/storage/sqlite/sqlite-storage.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTestHarness, type TestHarness } from "./harness.js";
 
 const MIXED_LANG_FIXTURE = join(
 	import.meta.dirname,
 	"../fixtures/mixed-lang",
 );
 
-let extractor: TypeScriptExtractor;
-let scanner: ManifestScanner;
+let h: TestHarness;
 
 beforeAll(async () => {
-	extractor = new TypeScriptExtractor();
-	await extractor.initialize();
-	scanner = new ManifestScanner();
-});
+	h = await createTestHarness();
+	await h.run("repo", "add", MIXED_LANG_FIXTURE, "--name", "mixed-lang");
+	await h.run("repo", "index", "mixed-lang");
+}, 30000);
 
-interface TestEnv {
-	storage: SqliteStorage;
-	provider: SqliteConnectionProvider;
-	dbPath: string;
-	repoUid: string;
-	snapshotUid: string;
-}
-
-const envs: TestEnv[] = [];
-
-async function setupIndexed(fixturePath: string, repoName: string): Promise<TestEnv> {
-	const dbPath = join(tmpdir(), `rgr-surfaces-cli-${randomUUID()}.db`);
-	const provider = new SqliteConnectionProvider(dbPath);
-	provider.initialize();
-	const storage = new SqliteStorage(provider.getDatabase());
-	const repoUid = `surfaces-cli-${randomUUID().slice(0, 8)}`;
-
-	storage.addRepo({
-		repoUid,
-		name: repoName,
-		rootPath: fixturePath,
-		defaultBranch: "main",
-		createdAt: new Date().toISOString(),
-		metadataJson: null,
-	});
-
-	const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
-	const result = await indexer.indexRepo(repoUid);
-
-	const env = { storage, provider, dbPath, repoUid, snapshotUid: result.snapshotUid };
-	envs.push(env);
-	return env;
-}
-
-afterEach(() => {
-	for (const env of envs) {
-		env.provider.close();
-		try { unlinkSync(env.dbPath); } catch { /* ignore */ }
-	}
-	envs.length = 0;
+afterAll(() => {
+	h.cleanup();
 });
 
 // ── surfaces list ──────────────────────────────────────────────────
 
 describe("surfaces list", () => {
-	it("returns surfaces with correct fields in JSON", async () => {
-		const env = await setupIndexed(MIXED_LANG_FIXTURE, "mixed-lang");
+	it("exits 0 and returns JSON array", async () => {
+		const r = await h.run("surfaces", "list", "mixed-lang", "--json");
+		expect(r.exitCode).toBe(0);
+		const json = JSON.parse(r.stdout) as unknown[];
+		expect(Array.isArray(json)).toBe(true);
+		expect(json.length).toBeGreaterThanOrEqual(1);
+	});
 
-		const surfaces = env.storage.queryProjectSurfaces(env.snapshotUid);
-		expect(surfaces.length).toBeGreaterThanOrEqual(1);
-
-		// Verify JSON structure matches what the CLI would output.
-		for (const s of surfaces) {
-			expect(s.projectSurfaceUid).toBeTruthy();
-			expect(s.moduleCandidateUid).toBeTruthy();
-			expect(s.surfaceKind).toBeTruthy();
-			expect(s.buildSystem).toBeTruthy();
-			expect(s.runtimeKind).toBeTruthy();
-			expect(s.confidence).toBeGreaterThan(0);
+	it("JSON rows have required fields", async () => {
+		const r = await h.run("surfaces", "list", "mixed-lang", "--json");
+		const json = JSON.parse(r.stdout) as Array<Record<string, unknown>>;
+		for (const row of json) {
+			expect(row.projectSurfaceUid).toBeTruthy();
+			expect(row.moduleCandidateUid).toBeTruthy();
+			expect(row.surfaceKind).toBeTruthy();
+			expect(row.buildSystem).toBeTruthy();
+			expect(row.runtimeKind).toBeTruthy();
+			expect(typeof row.confidence).toBe("number");
+			expect(typeof row.evidenceCount).toBe("number");
+			expect(typeof row.configRootCount).toBe("number");
 		}
 	});
 
-	it("detects backend_service for express-using fixture", async () => {
-		const env = await setupIndexed(MIXED_LANG_FIXTURE, "mixed-lang");
-
-		const surfaces = env.storage.queryProjectSurfaces(env.snapshotUid);
-		const backend = surfaces.find((s) => s.surfaceKind === "backend_service");
+	it("detects backend_service from express dependency", async () => {
+		const r = await h.run("surfaces", "list", "mixed-lang", "--json");
+		const json = JSON.parse(r.stdout) as Array<Record<string, unknown>>;
+		const backend = json.find((s) => s.surfaceKind === "backend_service");
 		expect(backend).toBeDefined();
 		expect(backend!.runtimeKind).toBe("node");
 	});
 
-	it("links every surface to a valid module candidate", async () => {
-		const env = await setupIndexed(MIXED_LANG_FIXTURE, "mixed-lang");
+	it("human output includes header row", async () => {
+		const r = await h.run("surfaces", "list", "mixed-lang");
+		expect(r.exitCode).toBe(0);
+		expect(r.stdout).toContain("MODULE");
+		expect(r.stdout).toContain("KIND");
+		expect(r.stdout).toContain("BUILD");
+	});
+});
 
-		const surfaces = env.storage.queryProjectSurfaces(env.snapshotUid);
-		const candidates = env.storage.queryModuleCandidates(env.snapshotUid);
-		const candidateUids = new Set(candidates.map((c) => c.moduleCandidateUid));
+// ── surfaces show ──────────────────────────────────────────────────
 
-		for (const s of surfaces) {
-			expect(candidateUids.has(s.moduleCandidateUid)).toBe(true);
-		}
+describe("surfaces show", () => {
+	it("shows full detail for a surface by kind", async () => {
+		const r = await h.run("surfaces", "show", "mixed-lang", "backend_service", "--json");
+		expect(r.exitCode).toBe(0);
+		const json = JSON.parse(r.stdout) as Record<string, unknown>;
+		expect(json.surface).toBeDefined();
+		const surface = json.surface as Record<string, unknown>;
+		expect(surface.surfaceKind).toBe("backend_service");
+		expect(json.module).toBeDefined();
+		expect(json.evidence).toBeDefined();
+		expect(Array.isArray(json.configRoots)).toBe(true);
+		expect(Array.isArray(json.entrypoints)).toBe(true);
+	});
+
+	it("exits 1 for nonexistent surface", async () => {
+		const r = await h.run("surfaces", "show", "mixed-lang", "nonexistent");
+		expect(r.exitCode).toBe(1);
+	});
+
+	it("human output includes module and build info", async () => {
+		const r = await h.run("surfaces", "show", "mixed-lang", "backend_service");
+		expect(r.exitCode).toBe(0);
+		expect(r.stdout).toContain("Surface:");
+		expect(r.stdout).toContain("Module:");
+		expect(r.stdout).toContain("Runtime:");
 	});
 });
 
 // ── surfaces evidence ──────────────────────────────────────────────
 
 describe("surfaces evidence", () => {
-	it("returns evidence for a specific surface", async () => {
-		const env = await setupIndexed(MIXED_LANG_FIXTURE, "mixed-lang");
-
-		const surfaces = env.storage.queryProjectSurfaces(env.snapshotUid);
-		expect(surfaces.length).toBeGreaterThanOrEqual(1);
-
-		const surface = surfaces[0];
-		const evidence = env.storage.queryProjectSurfaceEvidence(surface.projectSurfaceUid);
-		expect(evidence.length).toBeGreaterThanOrEqual(1);
-
-		for (const e of evidence) {
-			expect(e.projectSurfaceUid).toBe(surface.projectSurfaceUid);
-			expect(e.sourceType).toBeTruthy();
-			expect(e.evidenceKind).toBeTruthy();
-			expect(e.confidence).toBeGreaterThan(0);
-		}
+	it("returns evidence array for a surface", async () => {
+		const r = await h.run("surfaces", "evidence", "mixed-lang", "backend_service", "--json");
+		expect(r.exitCode).toBe(0);
+		const json = JSON.parse(r.stdout) as unknown[];
+		expect(Array.isArray(json)).toBe(true);
+		expect(json.length).toBeGreaterThanOrEqual(1);
 	});
 
-	it("evidence references the correct surface UID", async () => {
-		const env = await setupIndexed(MIXED_LANG_FIXTURE, "mixed-lang");
-
-		const surfaces = env.storage.queryProjectSurfaces(env.snapshotUid);
-		const allEvidence = env.storage.queryAllProjectSurfaceEvidence(env.snapshotUid);
-
-		const surfaceUids = new Set(surfaces.map((s) => s.projectSurfaceUid));
-		for (const e of allEvidence) {
-			expect(surfaceUids.has(e.projectSurfaceUid)).toBe(true);
-		}
+	it("exits 1 for nonexistent surface", async () => {
+		const r = await h.run("surfaces", "evidence", "mixed-lang", "nonexistent");
+		expect(r.exitCode).toBe(1);
 	});
 });
 
-// ── ambiguous resolution ───────────────────────────────────────────
+// ── modules show ───────────────────────────────────────────────────
 
-describe("surfaces evidence — ambiguous resolution", () => {
-	it("finds multiple matches for a shared surface kind", async () => {
-		const env = await setupIndexed(MIXED_LANG_FIXTURE, "mixed-lang");
+describe("modules show", () => {
+	it("shows module detail with surfaces in JSON", async () => {
+		const r = await h.run("modules", "show", "mixed-lang", ".", "--json");
+		expect(r.exitCode).toBe(0);
+		const json = JSON.parse(r.stdout) as Record<string, unknown>;
+		expect(json.module).toBeDefined();
+		const mod = json.module as Record<string, unknown>;
+		expect(mod.canonicalRootPath).toBe(".");
+		expect(mod.displayName).toBe("mixed-lang-fixture");
+		expect(typeof json.fileCount).toBe("number");
+		expect(Array.isArray(json.surfaces)).toBe(true);
+		expect(Array.isArray(json.evidence)).toBe(true);
+	});
 
-		// The mixed-lang fixture may have multiple surfaces.
-		// Query by a kind that might match more than one.
-		const surfaces = env.storage.queryProjectSurfaces(env.snapshotUid);
-
-		// Count surfaces by kind to see if any kind is ambiguous.
-		const kindCounts = new Map<string, number>();
+	it("surfaces include build and runtime info", async () => {
+		const r = await h.run("modules", "show", "mixed-lang", ".", "--json");
+		const json = JSON.parse(r.stdout) as Record<string, unknown>;
+		const surfaces = json.surfaces as Array<Record<string, unknown>>;
+		expect(surfaces.length).toBeGreaterThanOrEqual(1);
 		for (const s of surfaces) {
-			kindCounts.set(s.surfaceKind, (kindCounts.get(s.surfaceKind) ?? 0) + 1);
+			expect(s.surfaceKind).toBeTruthy();
+			expect(s.buildSystem).toBeTruthy();
+			expect(s.runtimeKind).toBeTruthy();
 		}
+	});
 
-		// If no kind is ambiguous in this fixture, the ambiguity test
-		// still verifies the resolution logic works for unique matches.
-		for (const [kind, count] of kindCounts) {
-			const matches = surfaces.filter((s) => s.surfaceKind === kind);
-			expect(matches).toHaveLength(count);
-		}
+	it("exits 1 for nonexistent module", async () => {
+		const r = await h.run("modules", "show", "mixed-lang", "nonexistent");
+		expect(r.exitCode).toBe(1);
+	});
+
+	it("human output includes files and surfaces", async () => {
+		const r = await h.run("modules", "show", "mixed-lang", ".");
+		expect(r.exitCode).toBe(0);
+		expect(r.stdout).toContain("Module:");
+		expect(r.stdout).toContain("Files:");
+		expect(r.stdout).toContain("Surfaces");
 	});
 });
