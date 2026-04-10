@@ -116,7 +116,7 @@ Commands reference:
 rgr repo add .                           # Register this repo
 rgr repo index repo-graph                # Full index (<1s)
 rgr repo status repo-graph               # Current snapshot, toolchain provenance
-rgr repo refresh repo-graph              # Re-index (refresh snapshot)
+rgr repo refresh repo-graph              # Delta refresh (reuses unchanged files)
 rgr repo list                            # All registered repos
 rgr repo remove repo-graph               # Unregister
 
@@ -163,6 +163,17 @@ rgr graph churn repo-graph --since 90.days.ago  # Per-file git churn
 rgr graph hotspots repo-graph            # Churn x complexity ranking
 rgr graph coverage repo-graph ./coverage/coverage-final.json  # Import Istanbul/c8 coverage
 rgr graph risk repo-graph                # Under-tested hotspots (hotspot x coverage gap)
+
+# Discovered modules (manifest/workspace-detected)
+rgr modules list repo-graph              # Module catalog with rollups (files, symbols, evidence)
+rgr modules show repo-graph <module>     # Full detail: identity, surfaces, files, topology
+rgr modules evidence repo-graph <module> # Evidence items for a module
+rgr modules files repo-graph <module>    # Files owned by a module
+
+# Project surfaces (operational characterization)
+rgr surfaces list repo-graph             # Surface catalog: kind, build, runtime, entrypoints, configs
+rgr surfaces show repo-graph <surface>   # Full detail: module, build, runtime, config roots, entrypoints, evidence
+rgr surfaces evidence repo-graph <surface> # Evidence items for a surface
 
 # Declarations
 rgr declare module repo-graph src/core --purpose "domain model" --maturity MATURE

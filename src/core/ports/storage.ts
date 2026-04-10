@@ -40,6 +40,10 @@ import type {
 	SurfaceConfigRoot,
 	SurfaceEntrypoint,
 } from "../topology/topology-links.js";
+import type {
+	SurfaceEnvDependency,
+	SurfaceEnvEvidence,
+} from "../seams/env-dependency.js";
 
 /**
  * Storage port — the contract any storage backend must fulfill.
@@ -436,6 +440,23 @@ export interface StoragePort {
 
 	/** Query all entrypoints for a snapshot. */
 	queryAllSurfaceEntrypoints(snapshotUid: string): SurfaceEntrypoint[];
+
+	// ── Env Dependencies ────────────────────────────────────────────
+
+	/** Persist env dependency identity rows (batch). */
+	insertSurfaceEnvDependencies(deps: SurfaceEnvDependency[]): void;
+
+	/** Persist env evidence rows (batch). */
+	insertSurfaceEnvEvidence(evidence: SurfaceEnvEvidence[]): void;
+
+	/** Query env dependencies for a specific surface. */
+	querySurfaceEnvDependencies(projectSurfaceUid: string): SurfaceEnvDependency[];
+
+	/** Query all env dependencies for a snapshot. */
+	queryAllSurfaceEnvDependencies(snapshotUid: string): SurfaceEnvDependency[];
+
+	/** Query env evidence for a specific dependency. */
+	querySurfaceEnvEvidence(surfaceEnvDependencyUid: string): SurfaceEnvEvidence[];
 
 	// ── Declarations ─────────────────────────────────────────────────────
 

@@ -92,6 +92,12 @@ import type {
 	SurfaceConfigRoot,
 	SurfaceEntrypoint,
 } from "../../../core/topology/topology-links.js";
+import type {
+	EnvAccessKind,
+	EnvAccessPattern,
+	SurfaceEnvDependency,
+	SurfaceEnvEvidence,
+} from "../../../core/seams/env-dependency.js";
 /**
  * Thrown by insertNodes when the input batch contains two or more
  * nodes with the same stable_key. This is an identity-model defect
@@ -1831,6 +1837,99 @@ export class SqliteStorage implements StoragePort {
 			entrypointTarget: (r.entrypoint_target as string) ?? null,
 			entrypointKind: r.entrypoint_kind as EntrypointKind,
 			displayName: (r.display_name as string) ?? null,
+			confidence: r.confidence as number,
+			metadataJson: (r.metadata_json as string) ?? null,
+		}));
+	}
+
+	// ── Env Dependencies ──────────────────────────────────────────────
+
+	insertSurfaceEnvDependencies(deps: SurfaceEnvDependency[]): void {
+		if (deps.length === 0) return;
+		const stmt = this.db.prepare(
+			`INSERT OR REPLACE INTO surface_env_dependencies
+			 (surface_env_dependency_uid, snapshot_uid, repo_uid, project_surface_uid,
+			  env_name, access_kind, default_value, confidence, metadata_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const d of deps) {
+				stmt.run(
+					d.surfaceEnvDependencyUid, d.snapshotUid, d.repoUid, d.projectSurfaceUid,
+					d.envName, d.accessKind, d.defaultValue, d.confidence, d.metadataJson,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	insertSurfaceEnvEvidence(evidence: SurfaceEnvEvidence[]): void {
+		if (evidence.length === 0) return;
+		const stmt = this.db.prepare(
+			`INSERT OR REPLACE INTO surface_env_evidence
+			 (surface_env_evidence_uid, surface_env_dependency_uid, snapshot_uid, repo_uid,
+			  source_file_path, line_number, access_pattern, confidence, metadata_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const e of evidence) {
+				stmt.run(
+					e.surfaceEnvEvidenceUid, e.surfaceEnvDependencyUid,
+					e.snapshotUid, e.repoUid,
+					e.sourceFilePath, e.lineNumber, e.accessPattern, e.confidence,
+					e.metadataJson,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	querySurfaceEnvDependencies(projectSurfaceUid: string): SurfaceEnvDependency[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM surface_env_dependencies WHERE project_surface_uid = ? ORDER BY env_name",
+		).all(projectSurfaceUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			surfaceEnvDependencyUid: r.surface_env_dependency_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			projectSurfaceUid: r.project_surface_uid as string,
+			envName: r.env_name as string,
+			accessKind: r.access_kind as EnvAccessKind,
+			defaultValue: (r.default_value as string) ?? null,
+			confidence: r.confidence as number,
+			metadataJson: (r.metadata_json as string) ?? null,
+		}));
+	}
+
+	queryAllSurfaceEnvDependencies(snapshotUid: string): SurfaceEnvDependency[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM surface_env_dependencies WHERE snapshot_uid = ? ORDER BY env_name",
+		).all(snapshotUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			surfaceEnvDependencyUid: r.surface_env_dependency_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			projectSurfaceUid: r.project_surface_uid as string,
+			envName: r.env_name as string,
+			accessKind: r.access_kind as EnvAccessKind,
+			defaultValue: (r.default_value as string) ?? null,
+			confidence: r.confidence as number,
+			metadataJson: (r.metadata_json as string) ?? null,
+		}));
+	}
+
+	querySurfaceEnvEvidence(surfaceEnvDependencyUid: string): SurfaceEnvEvidence[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM surface_env_evidence WHERE surface_env_dependency_uid = ?",
+		).all(surfaceEnvDependencyUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => ({
+			surfaceEnvEvidenceUid: r.surface_env_evidence_uid as string,
+			surfaceEnvDependencyUid: r.surface_env_dependency_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			sourceFilePath: r.source_file_path as string,
+			lineNumber: r.line_number as number,
+			accessPattern: r.access_pattern as EnvAccessPattern,
 			confidence: r.confidence as number,
 			metadataJson: (r.metadata_json as string) ?? null,
 		}));

@@ -81,6 +81,8 @@ import type { ModuleDiscoveryPort } from "../../core/ports/discovery.js";
 import { discoverModules } from "../../core/modules/module-discovery.js";
 import { discoverSurfaces } from "../../core/runtime/surface-discovery.js";
 import { enrichTopology } from "../../core/topology/topology-enrichment.js";
+import { detectEnvAccesses } from "../../core/seams/env-detectors.js";
+import { linkEnvDependencies } from "../../core/seams/env-linkage.js";
 import {
 	detectCargoSurfaces,
 	detectPackageJsonSurfaces,
@@ -1106,6 +1108,68 @@ export class RepoIndexer implements IndexerPort {
 								this.storage.insertSurfaceEntrypoints(topology.entrypoints);
 							}
 						}
+					// Env dependency detection + linkage.
+					// Scan source files for env var accesses, link to surfaces.
+					{
+						const allDetectedEnv: import("../../core/seams/env-dependency.js").DetectedEnvDependency[] = [];
+						for (const relPath of filePaths) {
+							let content: string;
+							try {
+								content = await readFile(join(repo.rootPath, relPath), "utf-8");
+							} catch { continue; }
+							if (content.length > MAX_FILE_SIZE_BYTES) continue;
+							const fileEnvs = detectEnvAccesses(content, relPath);
+							allDetectedEnv.push(...fileEnvs);
+						}
+
+						if (allDetectedEnv.length > 0) {
+							// Build file → surface mapping from ownership + surfaces.
+							const ownership = this.storage.queryModuleFileOwnership(snapshot.snapshotUid);
+							const allSurfaces = this.storage.queryProjectSurfaces(snapshot.snapshotUid);
+
+							// Module → surfaces lookup.
+							const moduleToSurfaces = new Map<string, string[]>();
+							for (const s of allSurfaces) {
+								const list = moduleToSurfaces.get(s.moduleCandidateUid) ?? [];
+								list.push(s.projectSurfaceUid);
+								moduleToSurfaces.set(s.moduleCandidateUid, list);
+							}
+
+							// File → surfaces via ownership → module → surfaces.
+							// A file may be owned by multiple modules; accumulate
+							// (not overwrite) and dedupe surface UIDs per file.
+							const fileToSurfaces = new Map<string, string[]>();
+							for (const o of ownership) {
+								const filePath = o.fileUid.startsWith(repoUid + ":")
+									? o.fileUid.slice(repoUid.length + 1)
+									: o.fileUid;
+								const moduleSurfaces = moduleToSurfaces.get(o.moduleCandidateUid);
+								if (!moduleSurfaces) continue;
+								const existing = fileToSurfaces.get(filePath);
+								if (existing) {
+									for (const sUid of moduleSurfaces) {
+										if (!existing.includes(sUid)) {
+											existing.push(sUid);
+										}
+									}
+								} else {
+									fileToSurfaces.set(filePath, [...moduleSurfaces]);
+								}
+							}
+
+							const envResult = linkEnvDependencies({
+								repoUid,
+								snapshotUid: snapshot.snapshotUid,
+								detectedAccesses: allDetectedEnv,
+								fileToSurfaces,
+							});
+
+							if (envResult.dependencies.length > 0) {
+								this.storage.insertSurfaceEnvDependencies(envResult.dependencies);
+								this.storage.insertSurfaceEnvEvidence(envResult.evidence);
+							}
+						}
+					}
 					}
 				}
 			}

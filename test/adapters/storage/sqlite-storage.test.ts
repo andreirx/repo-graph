@@ -2096,11 +2096,19 @@ describe("schema migration from v1 baseline", () => {
 			.all() as Array<{ name: string }>;
 		expect(topologyTables.map((t) => t.name)).toEqual(["surface_config_roots", "surface_entrypoints"]);
 
+		// Verify env dependency tables from migration 015
+		const envTables = rawDb2
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type='table' AND name IN ('surface_env_dependencies', 'surface_env_evidence') ORDER BY name",
+			)
+			.all() as Array<{ name: string }>;
+		expect(envTables.map((t) => t.name)).toEqual(["surface_env_dependencies", "surface_env_evidence"]);
+
 		// Verify all migrations recorded
 		const migrations = rawDb2
 			.prepare("SELECT version FROM schema_migrations ORDER BY version")
 			.all() as Array<{ version: number }>;
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
 
 		rawDb2.close();
 		upgradeProvider.close();
