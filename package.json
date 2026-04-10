@@ -7,11 +7,11 @@
     "rgr": "./dist/cli/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-runtime-assets.mjs",
     "dev": "tsc --watch",
-    "test": "tsc && vitest run",
+    "test": "pnpm run build && vitest run",
     "test:int": "vitest run test/adapters",
-    "test:cli": "tsc && vitest run test/cli",
+    "test:cli": "pnpm run build && vitest run test/cli",
     "test:watch": "vitest",
     "lint": "biome check src/ test/",
     "lint:fix": "biome check --write src/ test/",
@@ -33,6 +33,7 @@
   },
   "packageManager": "pnpm@10.33.0",
   "dependencies": {
+    "@iarna/toml": "^2.2.5",
     "better-sqlite3": "^12.8.0",
     "commander": "^14.0.3",
     "ignore": "^7.0.5",

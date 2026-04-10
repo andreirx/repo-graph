@@ -1,0 +1,549 @@
+# ── Operational dependency seam detector graph ────────────────────
+#
+# This file is the source of truth for env + fs seam detector
+# coverage. The TypeScript loader (`loader.ts`) parses this file at
+# module-load time, validates every declaration against the strict
+# schema, and produces a `LoadedDetectorGraph` consumed by the
+# generic walker.
+#
+# The future Rust daemon will load the same file with the same
+# strictness rules and the same hook names. The hook registry on
+# either runtime is the only language-specific surface; everything
+# else is data.
+#
+# Schema:
+#   [[detector]]
+#   language    = "ts" | "py" | "rs" | "java" | "c"
+#   family      = "env" | "fs"
+#   pattern_id  = unique-within-(language, family) identifier
+#   regex       = JavaScript-flavored regex (literal single-quoted)
+#   flags       = optional, defaults to "g"
+#   confidence  = 0.0 .. 1.0
+#   hook        = optional named hook from the registry
+#   single_match_per_line = optional, defaults false
+#
+#   env-only fields:
+#     access_kind     = "required" | "optional" | "unknown"
+#     access_pattern  = enum from EnvAccessPattern
+#
+#   fs-only fields:
+#     base_kind             = enum from MutationKind
+#     base_pattern          = enum from MutationPattern
+#     two_ended             = optional, defaults false
+#     position_dedup_group  = optional named overlap group
+#
+# Either a static field is declared OR a hook supplies it. The
+# loader rejects any record where required fields are unreachable.
+#
+# Record order matters: the walker iterates records in declaration
+# order per line, and env-family dedup is "first occurrence wins".
+# Preserve the same order as the legacy detector code to keep
+# byte-identical behavior.
+
+# ══════════════════════════════════════════════════════════════════
+# ENV — JS/TS family (covers .ts, .tsx, .js, .jsx)
+# ══════════════════════════════════════════════════════════════════
+
+[[detector]]
+language       = "ts"
+family         = "env"
+pattern_id     = "process_env_dot"
+regex          = 'process\.env\.([A-Z_][A-Z0-9_]*)'
+confidence     = 0.95
+access_pattern = "process_env_dot"
+hook           = "infer_js_env_access_with_default"
+
+[[detector]]
+language       = "ts"
+family         = "env"
+pattern_id     = "process_env_bracket"
+regex          = '''process\.env\[["']([A-Z_][A-Z0-9_]*)["']\]'''
+confidence     = 0.95
+access_pattern = "process_env_bracket"
+hook           = "infer_js_env_access_with_default"
+
+# Legacy used `line.match()` (no `g`), single match per line.
+# `single_match_per_line = true` preserves that exactly.
+[[detector]]
+language              = "ts"
+family                = "env"
+pattern_id            = "process_env_destructure"
+regex                 = '(?:const|let|var)\s*\{([^}]+)\}\s*=\s*process\.env'
+confidence            = 0.90
+access_pattern        = "process_env_destructure"
+hook                  = "expand_js_env_destructure"
+single_match_per_line = true
+
+# ══════════════════════════════════════════════════════════════════
+# ENV — Python
+# ══════════════════════════════════════════════════════════════════
+
+[[detector]]
+language       = "py"
+family         = "env"
+pattern_id     = "os_environ_bracket"
+regex          = '''os\.environ\[["']([A-Z_][A-Z0-9_]*)["']\]'''
+confidence     = 0.95
+access_kind    = "required"
+access_pattern = "os_environ"
+
+[[detector]]
+language       = "py"
+family         = "env"
+pattern_id     = "os_environ_get"
+regex          = '''os\.environ\.get\(["']([A-Z_][A-Z0-9_]*)["'](?:\s*,\s*["']([^"']*)["'])?\)'''
+confidence     = 0.95
+access_pattern = "os_environ"
+hook           = "python_get_default_from_group2"
+
+[[detector]]
+language       = "py"
+family         = "env"
+pattern_id     = "os_getenv"
+regex          = '''os\.getenv\(["']([A-Z_][A-Z0-9_]*)["'](?:\s*,\s*["']([^"']*)["'])?\)'''
+confidence     = 0.95
+access_pattern = "os_getenv"
+hook           = "python_get_default_from_group2"
+
+# ══════════════════════════════════════════════════════════════════
+# ENV — Rust
+# ══════════════════════════════════════════════════════════════════
+
+[[detector]]
+language       = "rs"
+family         = "env"
+pattern_id     = "std_env_var"
+regex          = '(?:std::)?env::var(?:_os)?\("([A-Z_][A-Z0-9_]*)"\)'
+confidence     = 0.95
+access_kind    = "unknown"
+access_pattern = "std_env_var"
+
+# ══════════════════════════════════════════════════════════════════
+# ENV — Java
+# ══════════════════════════════════════════════════════════════════
+
+[[detector]]
+language       = "java"
+family         = "env"
+pattern_id     = "system_getenv"
+regex          = 'System\.getenv\("([A-Z_][A-Z0-9_]*)"\)'
+confidence     = 0.95
+access_kind    = "unknown"
+access_pattern = "system_getenv"
+
+# ══════════════════════════════════════════════════════════════════
+# ENV — C/C++
+# ══════════════════════════════════════════════════════════════════
+
+[[detector]]
+language       = "c"
+family         = "env"
+pattern_id     = "c_getenv"
+regex          = 'getenv\("([A-Z_][A-Z0-9_]*)"\)'
+confidence     = 0.95
+access_kind    = "unknown"
+access_pattern = "c_getenv"
+
+# ══════════════════════════════════════════════════════════════════
+# FS — JS/TS family
+# ══════════════════════════════════════════════════════════════════
+
+[[detector]]
+language     = "ts"
+family       = "fs"
+pattern_id   = "fs_write_file"
+regex        = '\bfs\.writeFile(?:Sync)?\s*\('
+confidence   = 0.90
+base_kind    = "write_file"
+base_pattern = "fs_write_file"
+hook         = "extract_first_string_arg"
+
+[[detector]]
+language     = "ts"
+family       = "fs"
+pattern_id   = "fs_append_file"
+regex        = '\bfs\.appendFile(?:Sync)?\s*\('
+confidence   = 0.90
+base_kind    = "append_file"
+base_pattern = "fs_append_file"
+hook         = "extract_first_string_arg"
+
+[[detector]]
+language     = "ts"
+family       = "fs"
+pattern_id   = "fs_unlink"
+regex        = '\bfs\.unlink(?:Sync)?\s*\('
+confidence   = 0.90
+base_kind    = "delete_path"
+base_pattern = "fs_unlink"
+hook         = "extract_first_string_arg"
+
+[[detector]]
+language     = "ts"
+family       = "fs"
+pattern_id   = "fs_rm"
+regex        = '\bfs\.rm(?:Sync)?\s*\('
+confidence   = 0.90
+base_kind    = "delete_path"
+base_pattern = "fs_rm"
+hook         = "extract_first_string_arg"
+
+[[detector]]
+language     = "ts"
+family       = "fs"
+pattern_id   = "fs_mkdir"
+regex        = '\bfs\.mkdir(?:Sync)?\s*\('
+confidence   = 0.90
+base_kind    = "create_dir"
+base_pattern = "fs_mkdir"
+hook         = "extract_first_string_arg"
+
+[[detector]]
+language     = "ts"
+family       = "fs"
+pattern_id   = "fs_create_write_stream"
+regex        = '\bfs\.createWriteStream\s*\('
+confidence   = 0.90
+base_kind    = "write_file"
+base_pattern = "fs_create_write_stream"
+hook         = "extract_first_string_arg"
+
+[[detector]]
+language     = "ts"
+family       = "fs"
+pattern_id   = "fs_rename"
+regex        = '\bfs\.rename(?:Sync)?\s*\('
+confidence   = 0.90
+base_kind    = "rename_path"
+base_pattern = "fs_rename"
+two_ended    = true
+hook         = "extract_two_ended_args"
+
+[[detector]]
+language     = "ts"
+family       = "fs"
+pattern_id   = "fs_copy_file"
+regex        = '\bfs\.copyFile(?:Sync)?\s*\('
+confidence   = 0.90
+base_kind    = "copy_path"
+base_pattern = "fs_copy_file"
+two_ended    = true
+hook         = "extract_two_ended_args"
+
+[[detector]]
+language     = "ts"
+family       = "fs"
+pattern_id   = "fs_chmod"
+regex        = '\bfs\.chmod(?:Sync)?\s*\('
+confidence   = 0.90
+base_kind    = "chmod_path"
+base_pattern = "fs_chmod"
+hook         = "extract_first_string_arg"
+
+# ══════════════════════════════════════════════════════════════════
+# FS — Python
+# ══════════════════════════════════════════════════════════════════
+
+# open(path, "w") and open(path, "a") share one regex with mode in
+# group 2. Walker default targetPath comes from group 1 (literal or
+# null). Mode-based dispatch is via... wait, the legacy splits mode
+# manually inside the loop. We need a hook here to dispatch.
+#
+# Actually the legacy's regex captures mode in group 2 and the
+# emission selects kind+pattern based on group 2[0]. Since both kind
+# AND pattern depend on mode, hook is required.
+[[detector]]
+language     = "py"
+family       = "fs"
+pattern_id   = "py_open_write_or_append"
+regex        = '''\bopen\s*\(\s*(?:["']([^"']+)["']|[^,)]+)\s*,\s*["']([wa])[^"']*["']'''
+confidence   = 0.85
+hook         = "dispatch_python_open_mode"
+
+[[detector]]
+language     = "py"
+family       = "fs"
+pattern_id   = "py_remove_or_unlink_or_rmtree"
+regex        = '''\b(os\.(?:remove|unlink)|shutil\.rmtree)\s*\(\s*(?:["']([^"']+)["']|[^)]+)\s*\)'''
+confidence   = 0.90
+base_kind    = "delete_path"
+hook         = "dispatch_python_remove_call"
+
+[[detector]]
+language     = "py"
+family       = "fs"
+pattern_id   = "py_mkdir_or_makedirs"
+regex        = '''\bos\.(mkdir|makedirs)\s*\(\s*(?:["']([^"']+)["']|[^)]+)'''
+confidence   = 0.90
+base_kind    = "create_dir"
+hook         = "dispatch_python_mkdir_call"
+
+[[detector]]
+language     = "py"
+family       = "fs"
+pattern_id   = "py_pathlib_write"
+regex        = '''Path\s*\(\s*["']([^"']+)["']\s*\)\.write_(?:text|bytes)'''
+confidence   = 0.85
+base_kind    = "write_file"
+base_pattern = "py_pathlib_write"
+
+[[detector]]
+language     = "py"
+family       = "fs"
+pattern_id   = "py_pathlib_mkdir"
+regex        = '''Path\s*\(\s*["']([^"']+)["']\s*\)\.mkdir'''
+confidence   = 0.85
+base_kind    = "create_dir"
+base_pattern = "py_pathlib_mkdir"
+
+# Legacy used `regex.test(line)` and emits one record per line.
+# `single_match_per_line = true` preserves that exactly.
+[[detector]]
+language              = "py"
+family                = "fs"
+pattern_id            = "py_tempfile"
+regex                 = '\btempfile\.(?:NamedTemporaryFile|mkstemp|TemporaryFile)'
+confidence            = 0.90
+base_kind             = "create_temp"
+base_pattern          = "py_tempfile"
+single_match_per_line = true
+
+# ══════════════════════════════════════════════════════════════════
+# FS — Rust
+# ══════════════════════════════════════════════════════════════════
+#
+# Each Rust fs call type is expressed as TWO records: a literal
+# variant and a catch-all variant. Both records share a named
+# overlap group so the walker dedupes by (line, match.index)
+# within the group, keeping the literal-capturing variant when
+# both match the same call site. Distinct call sites still emit
+# independently because dedup is position-keyed.
+
+[[detector]]
+language             = "rs"
+family               = "fs"
+pattern_id           = "rust_fs_write_literal"
+regex                = '(?:std::)?fs::write\s*\(\s*"([^"]+)"'
+confidence           = 0.90
+base_kind            = "write_file"
+base_pattern         = "rust_fs_write"
+position_dedup_group = "rust_fs_write_callsite"
+
+[[detector]]
+language             = "rs"
+family               = "fs"
+pattern_id           = "rust_fs_write_catchall"
+regex                = '(?:std::)?fs::write\s*\('
+confidence           = 0.90
+base_kind            = "write_file"
+base_pattern         = "rust_fs_write"
+position_dedup_group = "rust_fs_write_callsite"
+
+[[detector]]
+language             = "rs"
+family               = "fs"
+pattern_id           = "rust_fs_remove_file_literal"
+regex                = '(?:std::)?fs::remove_file\s*\(\s*"([^"]+)"'
+confidence           = 0.90
+base_kind            = "delete_path"
+base_pattern         = "rust_fs_remove_file"
+position_dedup_group = "rust_fs_remove_file_callsite"
+
+[[detector]]
+language             = "rs"
+family               = "fs"
+pattern_id           = "rust_fs_remove_file_catchall"
+regex                = '(?:std::)?fs::remove_file\s*\('
+confidence           = 0.90
+base_kind            = "delete_path"
+base_pattern         = "rust_fs_remove_file"
+position_dedup_group = "rust_fs_remove_file_callsite"
+
+[[detector]]
+language             = "rs"
+family               = "fs"
+pattern_id           = "rust_fs_remove_dir_all_literal"
+regex                = '(?:std::)?fs::remove_dir_all\s*\(\s*"([^"]+)"'
+confidence           = 0.90
+base_kind            = "delete_path"
+base_pattern         = "rust_fs_remove_dir_all"
+position_dedup_group = "rust_fs_remove_dir_all_callsite"
+
+[[detector]]
+language             = "rs"
+family               = "fs"
+pattern_id           = "rust_fs_remove_dir_all_catchall"
+regex                = '(?:std::)?fs::remove_dir_all\s*\('
+confidence           = 0.90
+base_kind            = "delete_path"
+base_pattern         = "rust_fs_remove_dir_all"
+position_dedup_group = "rust_fs_remove_dir_all_callsite"
+
+[[detector]]
+language             = "rs"
+family               = "fs"
+pattern_id           = "rust_fs_create_dir_literal"
+regex                = '(?:std::)?fs::create_dir(?:_all)?\s*\(\s*"([^"]+)"'
+confidence           = 0.90
+base_kind            = "create_dir"
+base_pattern         = "rust_fs_create_dir"
+position_dedup_group = "rust_fs_create_dir_callsite"
+
+[[detector]]
+language             = "rs"
+family               = "fs"
+pattern_id           = "rust_fs_create_dir_catchall"
+regex                = '(?:std::)?fs::create_dir(?:_all)?\s*\('
+confidence           = 0.90
+base_kind            = "create_dir"
+base_pattern         = "rust_fs_create_dir"
+position_dedup_group = "rust_fs_create_dir_callsite"
+
+# Rust rename has TWO patterns: a 2-arg literal variant (twoEnded
+# captures both src and dst) and a 1-arg literal variant (only
+# src captured, dst null). Same dedup group so the 2-arg version
+# wins when both match the same call site.
+[[detector]]
+language             = "rs"
+family               = "fs"
+pattern_id           = "rust_fs_rename_two_args"
+regex                = '(?:std::)?fs::rename\s*\(\s*"([^"]+)"\s*,\s*"([^"]+)"'
+confidence           = 0.90
+base_kind            = "rename_path"
+base_pattern         = "rust_fs_rename"
+two_ended            = true
+position_dedup_group = "rust_fs_rename_callsite"
+
+[[detector]]
+language             = "rs"
+family               = "fs"
+pattern_id           = "rust_fs_rename_one_arg"
+regex                = '(?:std::)?fs::rename\s*\(\s*"([^"]+)"'
+confidence           = 0.90
+base_kind            = "rename_path"
+base_pattern         = "rust_fs_rename"
+position_dedup_group = "rust_fs_rename_callsite"
+
+[[detector]]
+language             = "rs"
+family               = "fs"
+pattern_id           = "rust_fs_copy_two_args"
+regex                = '(?:std::)?fs::copy\s*\(\s*"([^"]+)"\s*,\s*"([^"]+)"'
+confidence           = 0.90
+base_kind            = "copy_path"
+base_pattern         = "rust_fs_copy"
+two_ended            = true
+position_dedup_group = "rust_fs_copy_callsite"
+
+[[detector]]
+language             = "rs"
+family               = "fs"
+pattern_id           = "rust_fs_copy_one_arg"
+regex                = '(?:std::)?fs::copy\s*\(\s*"([^"]+)"'
+confidence           = 0.90
+base_kind            = "copy_path"
+base_pattern         = "rust_fs_copy"
+position_dedup_group = "rust_fs_copy_callsite"
+
+# ══════════════════════════════════════════════════════════════════
+# FS — Java
+# ══════════════════════════════════════════════════════════════════
+#
+# Each Java fs detector emits ONE record per line in the legacy
+# code (via `regex.test()` then a separate `line.match()` for the
+# literal). `single_match_per_line = true` preserves that exactly.
+# The hook does the line-wide literal extraction.
+
+[[detector]]
+language              = "java"
+family                = "fs"
+pattern_id            = "java_files_write"
+regex                 = '\bFiles\.write(?:String)?\s*\('
+confidence            = 0.85
+base_kind             = "write_file"
+base_pattern          = "java_files_write"
+hook                  = "unwrap_java_files_write_literal"
+single_match_per_line = true
+
+[[detector]]
+language              = "java"
+family                = "fs"
+pattern_id            = "java_files_delete"
+regex                 = '\bFiles\.delete\s*\('
+confidence            = 0.85
+base_kind             = "delete_path"
+base_pattern          = "java_files_delete"
+hook                  = "unwrap_java_files_delete_literal"
+single_match_per_line = true
+
+[[detector]]
+language              = "java"
+family                = "fs"
+pattern_id            = "java_files_create_directory"
+regex                 = '\bFiles\.createDirector(?:y|ies)\s*\('
+confidence            = 0.85
+base_kind             = "create_dir"
+base_pattern          = "java_files_create_directory"
+hook                  = "unwrap_java_files_create_directory_literal"
+single_match_per_line = true
+
+# new FileOutputStream: literal case has confidence 0.85 (the
+# static), dynamic case has confidence 0.80 (overridden by hook).
+[[detector]]
+language              = "java"
+family                = "fs"
+pattern_id            = "java_file_output_stream"
+regex                 = '\bnew\s+FileOutputStream\s*\('
+confidence            = 0.85
+base_kind             = "write_file"
+base_pattern          = "java_file_output_stream"
+hook                  = "unwrap_java_file_output_stream_literal"
+single_match_per_line = true
+
+# ══════════════════════════════════════════════════════════════════
+# FS — C/C++
+# ══════════════════════════════════════════════════════════════════
+
+[[detector]]
+language     = "c"
+family       = "fs"
+pattern_id   = "c_fopen"
+regex        = '\bfopen\s*\(\s*(?:"([^"]+)"|[^,]+)\s*,\s*"([wa][b+]?)"'
+confidence   = 0.85
+hook         = "dispatch_c_fopen_mode"
+
+[[detector]]
+language     = "c"
+family       = "fs"
+pattern_id   = "c_unlink"
+regex        = '\bunlink\s*\(\s*(?:"([^"]+)"|[^)]+)\s*\)'
+confidence   = 0.90
+base_kind    = "delete_path"
+base_pattern = "c_unlink"
+
+[[detector]]
+language     = "c"
+family       = "fs"
+pattern_id   = "c_remove"
+regex        = '\bremove\s*\(\s*"([^"]+)"\s*\)'
+confidence   = 0.85
+base_kind    = "delete_path"
+base_pattern = "c_remove"
+
+[[detector]]
+language     = "c"
+family       = "fs"
+pattern_id   = "c_rmdir"
+regex        = '\brmdir\s*\(\s*(?:"([^"]+)"|[^)]+)\s*\)'
+confidence   = 0.90
+base_kind    = "delete_path"
+base_pattern = "c_rmdir"
+
+[[detector]]
+language     = "c"
+family       = "fs"
+pattern_id   = "c_mkdir"
+regex        = '\bmkdir\s*\(\s*"([^"]+)"'
+confidence   = 0.85
+base_kind    = "create_dir"
+base_pattern = "c_mkdir"
