@@ -2104,11 +2104,19 @@ describe("schema migration from v1 baseline", () => {
 			.all() as Array<{ name: string }>;
 		expect(envTables.map((t) => t.name)).toEqual(["surface_env_dependencies", "surface_env_evidence"]);
 
+		// Verify fs mutation tables from migration 016
+		const fsTables = rawDb2
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type='table' AND name IN ('surface_fs_mutations', 'surface_fs_mutation_evidence') ORDER BY name",
+			)
+			.all() as Array<{ name: string }>;
+		expect(fsTables.map((t) => t.name)).toEqual(["surface_fs_mutation_evidence", "surface_fs_mutations"]);
+
 		// Verify all migrations recorded
 		const migrations = rawDb2
 			.prepare("SELECT version FROM schema_migrations ORDER BY version")
 			.all() as Array<{ version: number }>;
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 
 		rawDb2.close();
 		upgradeProvider.close();

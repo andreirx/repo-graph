@@ -44,6 +44,10 @@ import type {
 	SurfaceEnvDependency,
 	SurfaceEnvEvidence,
 } from "../seams/env-dependency.js";
+import type {
+	SurfaceFsMutation,
+	SurfaceFsMutationEvidence,
+} from "../seams/fs-mutation.js";
 
 /**
  * Storage port — the contract any storage backend must fulfill.
@@ -457,6 +461,35 @@ export interface StoragePort {
 
 	/** Query env evidence for a specific dependency. */
 	querySurfaceEnvEvidence(surfaceEnvDependencyUid: string): SurfaceEnvEvidence[];
+
+	// ── FS Mutations ────────────────────────────────────────────────
+
+	/** Persist filesystem mutation identity rows (batch). */
+	insertSurfaceFsMutations(mutations: SurfaceFsMutation[]): void;
+
+	/** Persist filesystem mutation evidence rows (batch). */
+	insertSurfaceFsMutationEvidence(evidence: SurfaceFsMutationEvidence[]): void;
+
+	/** Query mutations for a specific surface. */
+	querySurfaceFsMutations(projectSurfaceUid: string): SurfaceFsMutation[];
+
+	/** Query all mutations for a snapshot. */
+	queryAllSurfaceFsMutations(snapshotUid: string): SurfaceFsMutation[];
+
+	/** Query mutation evidence for a specific identity row. */
+	querySurfaceFsMutationEvidence(surfaceFsMutationUid: string): SurfaceFsMutationEvidence[];
+
+	/**
+	 * Query all mutation evidence for a specific surface, including
+	 * dynamic-path occurrences that have no identity row.
+	 * Targeted query — does not materialize whole-snapshot evidence.
+	 */
+	querySurfaceFsMutationEvidenceBySurface(
+		projectSurfaceUid: string,
+	): SurfaceFsMutationEvidence[];
+
+	/** Query all mutation evidence for a snapshot (includes dynamic-path). */
+	queryAllSurfaceFsMutationEvidence(snapshotUid: string): SurfaceFsMutationEvidence[];
 
 	// ── Declarations ─────────────────────────────────────────────────────
 

@@ -83,6 +83,8 @@ import { discoverSurfaces } from "../../core/runtime/surface-discovery.js";
 import { enrichTopology } from "../../core/topology/topology-enrichment.js";
 import { detectEnvAccesses } from "../../core/seams/env-detectors.js";
 import { linkEnvDependencies } from "../../core/seams/env-linkage.js";
+import { detectFsMutations } from "../../core/seams/fs-mutation-detectors.js";
+import { linkFsMutations } from "../../core/seams/fs-mutation-linkage.js";
 import {
 	detectCargoSurfaces,
 	detectPackageJsonSurfaces,
@@ -1108,21 +1110,23 @@ export class RepoIndexer implements IndexerPort {
 								this.storage.insertSurfaceEntrypoints(topology.entrypoints);
 							}
 						}
-					// Env dependency detection + linkage.
-					// Scan source files for env var accesses, link to surfaces.
+					// Operational seam detection: env vars + filesystem mutations.
+					// Read each source file once, run all seam detectors,
+					// link to surfaces via existing ownership.
 					{
 						const allDetectedEnv: import("../../core/seams/env-dependency.js").DetectedEnvDependency[] = [];
+						const allDetectedFs: import("../../core/seams/fs-mutation.js").DetectedFsMutation[] = [];
 						for (const relPath of filePaths) {
 							let content: string;
 							try {
 								content = await readFile(join(repo.rootPath, relPath), "utf-8");
 							} catch { continue; }
 							if (content.length > MAX_FILE_SIZE_BYTES) continue;
-							const fileEnvs = detectEnvAccesses(content, relPath);
-							allDetectedEnv.push(...fileEnvs);
+							allDetectedEnv.push(...detectEnvAccesses(content, relPath));
+							allDetectedFs.push(...detectFsMutations(content, relPath));
 						}
 
-						if (allDetectedEnv.length > 0) {
+						if (allDetectedEnv.length > 0 || allDetectedFs.length > 0) {
 							// Build file → surface mapping from ownership + surfaces.
 							const ownership = this.storage.queryModuleFileOwnership(snapshot.snapshotUid);
 							const allSurfaces = this.storage.queryProjectSurfaces(snapshot.snapshotUid);
@@ -1157,16 +1161,32 @@ export class RepoIndexer implements IndexerPort {
 								}
 							}
 
-							const envResult = linkEnvDependencies({
-								repoUid,
-								snapshotUid: snapshot.snapshotUid,
-								detectedAccesses: allDetectedEnv,
-								fileToSurfaces,
-							});
+							if (allDetectedEnv.length > 0) {
+								const envResult = linkEnvDependencies({
+									repoUid,
+									snapshotUid: snapshot.snapshotUid,
+									detectedAccesses: allDetectedEnv,
+									fileToSurfaces,
+								});
+								if (envResult.dependencies.length > 0) {
+									this.storage.insertSurfaceEnvDependencies(envResult.dependencies);
+									this.storage.insertSurfaceEnvEvidence(envResult.evidence);
+								}
+							}
 
-							if (envResult.dependencies.length > 0) {
-								this.storage.insertSurfaceEnvDependencies(envResult.dependencies);
-								this.storage.insertSurfaceEnvEvidence(envResult.evidence);
+							if (allDetectedFs.length > 0) {
+								const fsResult = linkFsMutations({
+									repoUid,
+									snapshotUid: snapshot.snapshotUid,
+									detectedMutations: allDetectedFs,
+									fileToSurfaces,
+								});
+								if (fsResult.identities.length > 0) {
+									this.storage.insertSurfaceFsMutations(fsResult.identities);
+								}
+								if (fsResult.evidence.length > 0) {
+									this.storage.insertSurfaceFsMutationEvidence(fsResult.evidence);
+								}
 							}
 						}
 					}

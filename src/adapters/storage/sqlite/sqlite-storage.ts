@@ -98,6 +98,12 @@ import type {
 	SurfaceEnvDependency,
 	SurfaceEnvEvidence,
 } from "../../../core/seams/env-dependency.js";
+import type {
+	MutationKind,
+	MutationPattern,
+	SurfaceFsMutation,
+	SurfaceFsMutationEvidence,
+} from "../../../core/seams/fs-mutation.js";
 /**
  * Thrown by insertNodes when the input batch contains two or more
  * nodes with the same stable_key. This is an identity-model defect
@@ -1933,6 +1939,124 @@ export class SqliteStorage implements StoragePort {
 			confidence: r.confidence as number,
 			metadataJson: (r.metadata_json as string) ?? null,
 		}));
+	}
+
+	// ── FS Mutations ────────────────────────────────────────────────
+
+	insertSurfaceFsMutations(mutations: SurfaceFsMutation[]): void {
+		if (mutations.length === 0) return;
+		const stmt = this.db.prepare(
+			`INSERT OR REPLACE INTO surface_fs_mutations
+			 (surface_fs_mutation_uid, snapshot_uid, repo_uid, project_surface_uid,
+			  target_path, mutation_kind, confidence, metadata_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const m of mutations) {
+				stmt.run(
+					m.surfaceFsMutationUid, m.snapshotUid, m.repoUid, m.projectSurfaceUid,
+					m.targetPath, m.mutationKind, m.confidence, m.metadataJson,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	insertSurfaceFsMutationEvidence(evidence: SurfaceFsMutationEvidence[]): void {
+		if (evidence.length === 0) return;
+		const stmt = this.db.prepare(
+			`INSERT OR REPLACE INTO surface_fs_mutation_evidence
+			 (surface_fs_mutation_evidence_uid, surface_fs_mutation_uid, snapshot_uid,
+			  repo_uid, project_surface_uid, source_file_path, line_number,
+			  mutation_kind, mutation_pattern, dynamic_path, confidence, metadata_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const e of evidence) {
+				stmt.run(
+					e.surfaceFsMutationEvidenceUid,
+					e.surfaceFsMutationUid,
+					e.snapshotUid,
+					e.repoUid,
+					e.projectSurfaceUid,
+					e.sourceFilePath,
+					e.lineNumber,
+					e.mutationKind,
+					e.mutationPattern,
+					e.dynamicPath ? 1 : 0,
+					e.confidence,
+					e.metadataJson,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	querySurfaceFsMutations(projectSurfaceUid: string): SurfaceFsMutation[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM surface_fs_mutations WHERE project_surface_uid = ? ORDER BY target_path, mutation_kind",
+		).all(projectSurfaceUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => this.mapFsMutationRow(r));
+	}
+
+	queryAllSurfaceFsMutations(snapshotUid: string): SurfaceFsMutation[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM surface_fs_mutations WHERE snapshot_uid = ? ORDER BY target_path, mutation_kind",
+		).all(snapshotUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => this.mapFsMutationRow(r));
+	}
+
+	querySurfaceFsMutationEvidence(surfaceFsMutationUid: string): SurfaceFsMutationEvidence[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM surface_fs_mutation_evidence WHERE surface_fs_mutation_uid = ?",
+		).all(surfaceFsMutationUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => this.mapFsMutationEvidenceRow(r));
+	}
+
+	querySurfaceFsMutationEvidenceBySurface(
+		projectSurfaceUid: string,
+	): SurfaceFsMutationEvidence[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM surface_fs_mutation_evidence WHERE project_surface_uid = ? ORDER BY source_file_path, line_number",
+		).all(projectSurfaceUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => this.mapFsMutationEvidenceRow(r));
+	}
+
+	queryAllSurfaceFsMutationEvidence(snapshotUid: string): SurfaceFsMutationEvidence[] {
+		const rows = this.db.prepare(
+			"SELECT * FROM surface_fs_mutation_evidence WHERE snapshot_uid = ?",
+		).all(snapshotUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => this.mapFsMutationEvidenceRow(r));
+	}
+
+	private mapFsMutationRow(r: Record<string, unknown>): SurfaceFsMutation {
+		return {
+			surfaceFsMutationUid: r.surface_fs_mutation_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			projectSurfaceUid: r.project_surface_uid as string,
+			targetPath: r.target_path as string,
+			mutationKind: r.mutation_kind as MutationKind,
+			confidence: r.confidence as number,
+			metadataJson: (r.metadata_json as string) ?? null,
+		};
+	}
+
+	private mapFsMutationEvidenceRow(r: Record<string, unknown>): SurfaceFsMutationEvidence {
+		return {
+			surfaceFsMutationEvidenceUid: r.surface_fs_mutation_evidence_uid as string,
+			surfaceFsMutationUid: (r.surface_fs_mutation_uid as string) ?? null,
+			snapshotUid: r.snapshot_uid as string,
+			repoUid: r.repo_uid as string,
+			projectSurfaceUid: r.project_surface_uid as string,
+			sourceFilePath: r.source_file_path as string,
+			lineNumber: r.line_number as number,
+			mutationKind: r.mutation_kind as MutationKind,
+			mutationPattern: r.mutation_pattern as MutationPattern,
+			dynamicPath: (r.dynamic_path as number) === 1,
+			confidence: r.confidence as number,
+			metadataJson: (r.metadata_json as string) ?? null,
+		};
 	}
 
 	// ── Declarations ───────────────────────────────────────────────────
