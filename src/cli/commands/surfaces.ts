@@ -11,7 +11,9 @@
  */
 
 import type { Command } from "commander";
+import { summarizeFsDynamicEvidence } from "../../core/seams/module-seam-rollup.js";
 import type { AppContext } from "../../main.js";
+import { buildEnvRows, buildFsLiteralRows } from "./_seam-display.js";
 
 export function registerSurfacesCommands(
 	program: Command,
@@ -261,6 +263,17 @@ export function registerSurfacesCommands(
 			const configRoots = ctx.storage.querySurfaceConfigRoots(surface.projectSurfaceUid);
 			const entrypoints = ctx.storage.querySurfaceEntrypoints(surface.projectSurfaceUid);
 
+			// Operational dependency seams (env + fs).
+			// Both fetched per-surface using targeted storage queries.
+			const envDeps = ctx.storage.querySurfaceEnvDependencies(surface.projectSurfaceUid);
+			const envEvidence = ctx.storage.querySurfaceEnvEvidenceBySurface(surface.projectSurfaceUid);
+			const fsMutations = ctx.storage.querySurfaceFsMutations(surface.projectSurfaceUid);
+			const fsEvidence = ctx.storage.querySurfaceFsMutationEvidenceBySurface(surface.projectSurfaceUid);
+
+			const envRows = buildEnvRows(envDeps, envEvidence);
+			const fsLiteralRows = buildFsLiteralRows(fsMutations, fsEvidence);
+			const fsDynamic = summarizeFsDynamicEvidence(fsEvidence);
+
 			if (opts.json) {
 				process.stdout.write(JSON.stringify({
 					surface: {
@@ -290,6 +303,11 @@ export function registerSurfacesCommands(
 						displayName: ep.displayName,
 						confidence: ep.confidence,
 					})),
+					envDependencies: envRows,
+					fsMutations: {
+						literal: fsLiteralRows,
+						dynamic: fsDynamic,
+					},
 					evidence: evidence.map((e) => ({
 						sourceType: e.sourceType,
 						sourcePath: e.sourcePath,
@@ -333,6 +351,47 @@ export function registerSurfacesCommands(
 				process.stdout.write(`\n`);
 			}
 
+			if (envRows.length > 0) {
+				process.stdout.write(`Env Dependencies (${envRows.length}):\n`);
+				for (const row of envRows) {
+					const def = row.defaultValue !== null ? `=${row.defaultValue}` : "";
+					process.stdout.write(
+						`  ${row.accessKind.padEnd(9)} ${(row.envName + def).padEnd(32)} evidence=${row.evidenceCount}  conf=${row.confidence.toFixed(2)}\n`,
+					);
+				}
+				process.stdout.write(`\n`);
+			}
+
+			if (fsLiteralRows.length > 0 || fsDynamic.totalCount > 0) {
+				const dynLabel = fsDynamic.totalCount > 0
+					? ` + ${fsDynamic.totalCount} dynamic`
+					: "";
+				process.stdout.write(
+					`Filesystem Mutations (${fsLiteralRows.length} literal${dynLabel}):\n`,
+				);
+				for (const row of fsLiteralRows) {
+					const dest = row.destinationPaths.length > 0
+						? ` -> ${row.destinationPaths.join(", ")}`
+						: "";
+					process.stdout.write(
+						`  ${row.mutationKind.padEnd(12)} ${row.targetPath.padEnd(34)} evidence=${row.evidenceCount}  conf=${row.confidence.toFixed(2)}${dest}\n`,
+					);
+				}
+
+				if (fsDynamic.totalCount > 0) {
+					process.stdout.write(`\n`);
+					process.stdout.write(
+						`  Dynamic-path mutations: ${fsDynamic.totalCount} occurrence${fsDynamic.totalCount === 1 ? "" : "s"} in ${fsDynamic.distinctFileCount} file${fsDynamic.distinctFileCount === 1 ? "" : "s"}\n`,
+					);
+					const kindKeys = Object.keys(fsDynamic.byKind).sort();
+					for (const k of kindKeys) {
+						const count = fsDynamic.byKind[k as keyof typeof fsDynamic.byKind];
+						process.stdout.write(`    ${k}: ${count}\n`);
+					}
+				}
+				process.stdout.write(`\n`);
+			}
+
 			if (evidence.length > 0) {
 				process.stdout.write(`Evidence (${evidence.length}):\n`);
 				for (const e of evidence) {
@@ -341,6 +400,7 @@ export function registerSurfacesCommands(
 			}
 		});
 }
+
 
 // ── Helpers ────────────────────────────────────────────────────────
 

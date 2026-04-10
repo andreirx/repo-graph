@@ -166,13 +166,13 @@ rgr graph risk repo-graph                # Under-tested hotspots (hotspot x cove
 
 # Discovered modules (manifest/workspace-detected)
 rgr modules list repo-graph              # Module catalog with rollups (files, symbols, evidence)
-rgr modules show repo-graph <module>     # Full detail: identity, surfaces, files, topology
+rgr modules show repo-graph <module>     # Full detail: identity, surfaces, files, topology, env+fs rollup
 rgr modules evidence repo-graph <module> # Evidence items for a module
 rgr modules files repo-graph <module>    # Files owned by a module
 
 # Project surfaces (operational characterization)
 rgr surfaces list repo-graph             # Surface catalog: kind, build, runtime, entrypoints, configs
-rgr surfaces show repo-graph <surface>   # Full detail: module, build, runtime, config roots, entrypoints, evidence
+rgr surfaces show repo-graph <surface>   # Full detail: module, build, runtime, config roots, entrypoints, evidence, env deps, fs mutations
 rgr surfaces evidence repo-graph <surface> # Evidence items for a surface
 
 # Declarations

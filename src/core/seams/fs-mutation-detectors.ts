@@ -11,6 +11,7 @@
  * No filesystem, no AST. Line-based regex scanning.
  */
 
+import { maskCommentsForFile } from "./comment-masker.js";
 import type {
 	DetectedFsMutation,
 	MutationKind,
@@ -19,31 +20,37 @@ import type {
 
 /**
  * Detect filesystem mutation occurrences in a source file.
+ *
+ * Source content is run through a positional comment masker first so
+ * that fs-mutation patterns inside line comments, block comments, and
+ * JSDoc do not produce false positives. The masker preserves length
+ * and newline positions, so detector line numbers remain stable.
  */
 export function detectFsMutations(
 	content: string,
 	filePath: string,
 ): DetectedFsMutation[] {
 	const ext = filePath.slice(filePath.lastIndexOf("."));
+	const masked = maskCommentsForFile(filePath, content);
 	switch (ext) {
 		case ".ts":
 		case ".tsx":
 		case ".js":
 		case ".jsx":
-			return detectJsMutations(content, filePath);
+			return detectJsMutations(masked, filePath);
 		case ".py":
-			return detectPythonMutations(content, filePath);
+			return detectPythonMutations(masked, filePath);
 		case ".rs":
-			return detectRustMutations(content, filePath);
+			return detectRustMutations(masked, filePath);
 		case ".java":
-			return detectJavaMutations(content, filePath);
+			return detectJavaMutations(masked, filePath);
 		case ".c":
 		case ".h":
 		case ".cpp":
 		case ".hpp":
 		case ".cc":
 		case ".cxx":
-			return detectCMutations(content, filePath);
+			return detectCMutations(masked, filePath);
 		default:
 			return [];
 	}

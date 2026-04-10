@@ -462,6 +462,16 @@ export interface StoragePort {
 	/** Query env evidence for a specific dependency. */
 	querySurfaceEnvEvidence(surfaceEnvDependencyUid: string): SurfaceEnvEvidence[];
 
+	/**
+	 * Query all env evidence for a specific surface across every
+	 * env dependency identity row attached to that surface.
+	 * Targeted query — does not materialize whole-snapshot evidence.
+	 * Mirrors querySurfaceFsMutationEvidenceBySurface for symmetry.
+	 */
+	querySurfaceEnvEvidenceBySurface(
+		projectSurfaceUid: string,
+	): SurfaceEnvEvidence[];
+
 	// ── FS Mutations ────────────────────────────────────────────────
 
 	/** Persist filesystem mutation identity rows (batch). */

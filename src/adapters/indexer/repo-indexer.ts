@@ -1117,6 +1117,12 @@ export class RepoIndexer implements IndexerPort {
 						const allDetectedEnv: import("../../core/seams/env-dependency.js").DetectedEnvDependency[] = [];
 						const allDetectedFs: import("../../core/seams/fs-mutation.js").DetectedFsMutation[] = [];
 						for (const relPath of filePaths) {
+							// Skip test files: seam contract is about runtime
+							// behavior of operational surfaces, not test code.
+							// File ownership is unchanged; only this pipeline
+							// filters. Explicit test-surface reporting would
+							// be a separate feature.
+							if (isTestFile(relPath)) continue;
 							let content: string;
 							try {
 								content = await readFile(join(repo.rootPath, relPath), "utf-8");
@@ -2901,7 +2907,14 @@ function isTestFile(filePath: string): boolean {
 		filePath.includes(".test.") ||
 		filePath.includes(".spec.") ||
 		filePath.includes("/test/") ||
-		filePath.includes("/tests/")
+		filePath.includes("/tests/") ||
+		// Top-level test directory conventions: a file at
+		// `test/foo.ts`, `tests/foo.ts`, or `__tests__/foo.ts`
+		// without a leading slash should still classify as test.
+		// Common in pytest, mocha, and most TS conventions.
+		filePath.startsWith("test/") ||
+		filePath.startsWith("tests/") ||
+		filePath.startsWith("__tests__/")
 	);
 }
 

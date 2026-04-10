@@ -11,6 +11,7 @@
  * No filesystem, no AST. Line-based regex scanning.
  */
 
+import { maskCommentsForFile } from "./comment-masker.js";
 import type {
 	DetectedEnvDependency,
 	EnvAccessKind,
@@ -19,31 +20,37 @@ import type {
 /**
  * Detect env var accesses in a source file.
  * Dispatches to language-specific detectors based on file extension.
+ *
+ * Source content is run through a positional comment masker first so
+ * that env-access patterns inside line comments, block comments, and
+ * JSDoc do not produce false positives. The masker preserves length
+ * and newline positions, so detector line numbers remain stable.
  */
 export function detectEnvAccesses(
 	content: string,
 	filePath: string,
 ): DetectedEnvDependency[] {
 	const ext = filePath.slice(filePath.lastIndexOf("."));
+	const masked = maskCommentsForFile(filePath, content);
 	switch (ext) {
 		case ".ts":
 		case ".tsx":
 		case ".js":
 		case ".jsx":
-			return detectJsEnvAccesses(content, filePath);
+			return detectJsEnvAccesses(masked, filePath);
 		case ".py":
-			return detectPythonEnvAccesses(content, filePath);
+			return detectPythonEnvAccesses(masked, filePath);
 		case ".rs":
-			return detectRustEnvAccesses(content, filePath);
+			return detectRustEnvAccesses(masked, filePath);
 		case ".java":
-			return detectJavaEnvAccesses(content, filePath);
+			return detectJavaEnvAccesses(masked, filePath);
 		case ".c":
 		case ".h":
 		case ".cpp":
 		case ".hpp":
 		case ".cc":
 		case ".cxx":
-			return detectCEnvAccesses(content, filePath);
+			return detectCEnvAccesses(masked, filePath);
 		default:
 			return [];
 	}

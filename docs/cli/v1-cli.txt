@@ -752,6 +752,325 @@ tool graph hotspots <repo>
 
 
 ================================================================================
+PROJECT SURFACES & DISCOVERED MODULES — operational dependency seams
+================================================================================
+
+Project surfaces describe how a module is operationalized: cli tools,
+backend services, libraries, and so on. Discovered modules are the
+manifest-detected roots (package.json, Cargo.toml, etc.) that own files
+and may attach one or more project surfaces.
+
+Both `surfaces show` and `modules show` expose two operational dependency
+seam contracts on top of the existing identity/topology data:
+
+  - Environment variables a surface depends on at runtime
+  - Filesystem mutations a surface performs at runtime
+
+The seam contract describes runtime behavior of operational surfaces.
+Test files (`__tests__`, `.test.`, `.spec.`, top-level `test/` and
+`tests/` directories) are excluded from seam detection by design — see
+`docs/architecture` for the rationale.
+
+Aggregation rules across surfaces of the same module are documented in
+the `modules show` rollup section below.
+
+
+tool surfaces show <repo> <surface>
+
+  Full detail for one project surface: identity, owning module,
+  config roots, entrypoints, env dependencies, fs mutations, evidence.
+
+  <surface> may be matched by displayName, surfaceKind, or projectSurfaceUid
+  prefix. Ambiguous matches are rejected with the list of candidates.
+
+  Flags:
+    --json                  Machine-readable output
+
+  Sections in the human output:
+
+    Surface header          kind, root, build, runtime, confidence
+    Module                  owning module candidate
+    Config Roots            tsconfig.json, package.json, etc.
+    Entrypoints             cli binaries, http roots, library exports
+    Env Dependencies        env var name, access kind, default, evidence count
+    Filesystem Mutations    target path, mutation kind, evidence count
+                            destinations for rename/copy
+                            dynamic-path summary block
+    Evidence                source-of-truth provenance items
+
+  Env row fields:
+    envName                 e.g. DATABASE_URL
+    accessKind              required | optional | unknown
+                            (required if any access has no fallback)
+    defaultValue            captured from `|| "x"` or `?? "x"` patterns
+                            null if no default detectable
+    evidenceCount           number of source occurrences for this var
+    confidence              detection confidence (0..1)
+
+  Fs literal row fields:
+    targetPath              first-arg literal path
+    mutationKind            write_file | append_file | delete_path |
+                            create_dir | rename_path | copy_path |
+                            chmod_path | create_temp
+    evidenceCount           number of literal-path occurrences
+    confidence              detection confidence (0..1)
+    destinationPaths        sorted distinct destinations for rename/copy
+                            empty array for single-ended ops
+
+  Fs dynamic summary fields:
+    totalCount              dynamic-path occurrences with no literal target
+    distinctFileCount       distinct source files producing dynamic evidence
+    byKind                  map of mutationKind to count
+
+  Sort order:
+    env rows                sorted ascending by envName
+    fs literal rows         sorted ascending by (targetPath, mutationKind)
+
+  Example (human):
+
+    tool surfaces show payments rgr
+
+    Surface: rgr
+    Kind: cli
+    Root: .
+    Build: typescript_tsc
+    Runtime: node
+    Confidence: 0.95
+
+    Module: payments
+    Module Key: 8ac7cfdb:.:DISCOVERED_MODULE
+
+    Config Roots (2):
+      package_json           package.json
+      tsconfig_json          tsconfig.json
+
+    Entrypoints (1):
+      binary           rgr -> ./dist/cli/index.js
+
+    Env Dependencies (3):
+      required  DATABASE_URL                     evidence=2  conf=0.95
+      optional  PORT=3000                        evidence=1  conf=0.95
+      optional  RGR_DB_PATH                      evidence=1  conf=0.95
+
+    Filesystem Mutations (3 literal + 1 dynamic):
+      write_file   logs/app.log                  evidence=2  conf=0.90
+      delete_path  data/cache.json               evidence=1  conf=0.90
+      rename_path  tmp/staging.txt               evidence=1  conf=0.90 -> data/final.txt
+
+      Dynamic-path mutations: 1 occurrence in 1 file
+        write_file: 1
+
+    Evidence (1):
+      package_json_bin          binary_entrypoint    package.json
+
+  Example (--json, abbreviated):
+
+    tool surfaces show payments rgr --json
+
+    {
+      "surface": { "projectSurfaceUid": "...", "surfaceKind": "cli", ... },
+      "module":  { "moduleCandidateUid": "...", "displayName": "payments" },
+      "configRoots":  [ ... ],
+      "entrypoints":  [ ... ],
+      "envDependencies": [
+        {
+          "envName": "DATABASE_URL",
+          "accessKind": "required",
+          "defaultValue": null,
+          "evidenceCount": 2,
+          "confidence": 0.95
+        },
+        {
+          "envName": "PORT",
+          "accessKind": "optional",
+          "defaultValue": "3000",
+          "evidenceCount": 1,
+          "confidence": 0.95
+        }
+      ],
+      "fsMutations": {
+        "literal": [
+          {
+            "targetPath": "logs/app.log",
+            "mutationKind": "write_file",
+            "evidenceCount": 2,
+            "confidence": 0.90,
+            "destinationPaths": []
+          },
+          {
+            "targetPath": "tmp/staging.txt",
+            "mutationKind": "rename_path",
+            "evidenceCount": 1,
+            "confidence": 0.90,
+            "destinationPaths": ["data/final.txt"]
+          }
+        ],
+        "dynamic": {
+          "totalCount": 1,
+          "distinctFileCount": 1,
+          "byKind": { "write_file": 1 }
+        }
+      },
+      "evidence": [ ... ]
+    }
+
+
+tool modules show <repo> <module>
+
+  Full detail for one discovered module: identity, owned files count,
+  attached surfaces, and a cross-surface ROLLUP of the operational
+  dependency seams collected across every attached surface.
+
+  <module> may be matched by canonicalRootPath, displayName, or
+  moduleKey suffix. Ambiguous matches are rejected.
+
+  Flags:
+    --json                  Machine-readable output
+
+  Top-level structure of the human output:
+
+    Module header           displayName, key, root, kind, confidence, file count
+    Evidence                manifest evidence items
+    Module Rollup           cross-surface union of env + fs seams
+    Surfaces                per-surface compact breadcrumb (one block per surface)
+
+  Module rollup is the primary orientation artifact. Per-surface detail
+  in human output is intentionally compact — for full per-surface env
+  and fs tables, run `tool surfaces show <surface>`.
+
+  Aggregation rules (cross-surface union):
+
+    Env rollup (one row per envName):
+      accessKind            required if any contributing surface is required,
+                            otherwise optional if any is optional, else unknown
+      defaultValue          first non-null default in deterministic surface order
+      hasConflictingDefaults  true if two or more distinct non-null defaults
+                            were observed across surfaces
+      surfaceCount          distinct surface UIDs contributing this env var
+      evidenceCount         sum of per-surface evidence counts
+      maxConfidence         max across contributing surfaces
+
+    Fs rollup (one row per (targetPath, mutationKind)):
+      surfaceCount          distinct surface UIDs contributing this pair
+      evidenceCount         sum of per-surface literal evidence counts
+      destinationPaths      union of per-surface destinations, sorted, deduped
+      maxConfidence         max across contributing surfaces
+
+    Fs dynamic summary:
+      totalCount            sum of dynamic occurrences across all surfaces
+      distinctFileCount     distinct source files contributing dynamic evidence
+                            across the union
+      byKind                summed counts per mutationKind
+
+  Per-surface section in JSON output exposes direct (non-aggregated)
+  surface-local data, mirroring the shape of `surfaces show`. The
+  per-surface section in human output is a single compact `Seams:` line
+  per surface (env count, fs literal count, fs dynamic count).
+
+  Example (human):
+
+    tool modules show payments payments
+
+    Module: payments
+    Key: 8ac7cfdb:.:DISCOVERED_MODULE
+    Root: .
+    Kind: declared
+    Confidence: 0.95
+    Files: 248
+
+    Evidence (1):
+      package_json_workspaces      package_root       package.json
+
+    Module Rollup:
+      Env Dependencies (3):
+        required  DATABASE_URL                     surfaces=2  evidence=4  conf=0.95
+        optional  PORT=3000                        surfaces=2  evidence=3  conf=0.95 [conflicting defaults]
+        optional  RGR_DB_PATH                      surfaces=1  evidence=1  conf=0.95
+      Filesystem Mutations (3 literal + 2 dynamic):
+        write_file   logs/app.log                       surfaces=2  evidence=4  conf=0.90
+        delete_path  data/cache.json                    surfaces=2  evidence=2  conf=0.90
+        rename_path  tmp/staging.txt                    surfaces=2  evidence=2  conf=0.90 -> data/final.txt
+        Dynamic-path: 2 occurrences in 1 file
+          write_file: 2
+
+    Surfaces (2):
+      cli                payments-cli
+        Build: typescript_tsc | Runtime: node
+        Config: package.json, tsconfig.json
+        Entry: binary -> ./dist/cli/index.js
+        Seams: env=3  fs=3 +1 dyn
+      backend_service    -
+        Build: typescript_tsc | Runtime: node
+        Config: package.json
+        Seams: env=2  fs=3 +1 dyn
+
+  Example (--json, abbreviated):
+
+    tool modules show payments payments --json
+
+    {
+      "module": { "moduleCandidateUid": "...", "displayName": "payments", ... },
+      "evidence": [ ... ],
+      "fileCount": 248,
+      "rollup": {
+        "envDependencies": [
+          {
+            "envName": "DATABASE_URL",
+            "accessKind": "required",
+            "defaultValue": null,
+            "hasConflictingDefaults": false,
+            "surfaceCount": 2,
+            "evidenceCount": 4,
+            "maxConfidence": 0.95
+          },
+          {
+            "envName": "PORT",
+            "accessKind": "optional",
+            "defaultValue": "3000",
+            "hasConflictingDefaults": true,
+            "surfaceCount": 2,
+            "evidenceCount": 3,
+            "maxConfidence": 0.95
+          }
+        ],
+        "fsMutations": {
+          "literal": [
+            {
+              "targetPath": "logs/app.log",
+              "mutationKind": "write_file",
+              "surfaceCount": 2,
+              "evidenceCount": 4,
+              "destinationPaths": [],
+              "maxConfidence": 0.90
+            }
+          ],
+          "dynamic": {
+            "totalCount": 2,
+            "distinctFileCount": 1,
+            "byKind": { "write_file": 2 }
+          }
+        }
+      },
+      "surfaces": [
+        {
+          "projectSurfaceUid": "...",
+          "surfaceKind": "cli",
+          "displayName": "payments-cli",
+          "buildSystem": "typescript_tsc",
+          "runtimeKind": "node",
+          "configRoots": [ ... ],
+          "entrypoints": [ ... ],
+          "envDependencies": [ ... ],
+          "fsMutations": {
+            "literal": [ ... ],
+            "dynamic": { "totalCount": 1, "distinctFileCount": 1, "byKind": {} }
+          }
+        }
+      ]
+    }
+
+
+================================================================================
 DECLARATIONS
 ================================================================================
 

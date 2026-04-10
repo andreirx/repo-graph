@@ -1928,7 +1928,29 @@ export class SqliteStorage implements StoragePort {
 		const rows = this.db.prepare(
 			"SELECT * FROM surface_env_evidence WHERE surface_env_dependency_uid = ?",
 		).all(surfaceEnvDependencyUid) as Array<Record<string, unknown>>;
-		return rows.map((r) => ({
+		return rows.map((r) => this.mapEnvEvidenceRow(r));
+	}
+
+	querySurfaceEnvEvidenceBySurface(
+		projectSurfaceUid: string,
+	): SurfaceEnvEvidence[] {
+		// Env evidence has no denormalized project_surface_uid column
+		// because every evidence row is always linked to a dependency
+		// identity row (no dynamic-null-FK case as on the fs side).
+		// JOIN through surface_env_dependencies to scope by surface.
+		const rows = this.db.prepare(
+			`SELECT e.*
+			   FROM surface_env_evidence e
+			   JOIN surface_env_dependencies d
+			     ON e.surface_env_dependency_uid = d.surface_env_dependency_uid
+			  WHERE d.project_surface_uid = ?
+			  ORDER BY e.source_file_path, e.line_number`,
+		).all(projectSurfaceUid) as Array<Record<string, unknown>>;
+		return rows.map((r) => this.mapEnvEvidenceRow(r));
+	}
+
+	private mapEnvEvidenceRow(r: Record<string, unknown>): SurfaceEnvEvidence {
+		return {
 			surfaceEnvEvidenceUid: r.surface_env_evidence_uid as string,
 			surfaceEnvDependencyUid: r.surface_env_dependency_uid as string,
 			snapshotUid: r.snapshot_uid as string,
@@ -1938,7 +1960,7 @@ export class SqliteStorage implements StoragePort {
 			accessPattern: r.access_pattern as EnvAccessPattern,
 			confidence: r.confidence as number,
 			metadataJson: (r.metadata_json as string) ?? null,
-		}));
+		};
 	}
 
 	// ── FS Mutations ────────────────────────────────────────────────

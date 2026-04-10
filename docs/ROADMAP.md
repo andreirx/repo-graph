@@ -301,6 +301,49 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - All commands support --json.
 - No directory MODULE replacement. No module dependency edges. No arch violations.
 
+### Operational dependency seams (env + fs feature surface)
+- Cross-language detectors (TS/JS, Python, Rust, Java, C/C++) for environment
+  variable accesses and filesystem mutations. Pure functions, line-based regex.
+- Identity + evidence persistence pattern:
+  - env identity: `(snapshot, surface, env_name)`, evidence per source occurrence
+  - fs identity: `(snapshot, surface, target_path, mutation_kind)`, evidence
+    per source occurrence including dynamic-path occurrences with null FK
+- Pure linkage cores: `linkEnvDependencies`, `linkFsMutations`. Multi-surface
+  linkage when files are shared across surfaces. Identity dedup per surface.
+- Pure cross-surface aggregator: `aggregateEnvAcrossSurfaces`,
+  `aggregateFsAcrossSurfaces`, `summarizeFsDynamicEvidence` in
+  `src/core/seams/module-seam-rollup.ts`. Aggregation rules:
+  - env accessKind: required-if-any > optional-if-any > unknown
+  - env defaultValue: first non-null in deterministic surface order
+  - env hasConflictingDefaults: true if ≥2 distinct non-null defaults
+  - fs union by `(target_path, mutation_kind)` with destinationPaths union
+  - fs dynamic summary aggregated across surfaces (totalCount, distinctFileCount, byKind)
+- Storage migrations 015 (env) + 016 (fs). Targeted per-surface query methods
+  for both env and fs evidence (`querySurfaceEnvEvidenceBySurface`,
+  `querySurfaceFsMutationEvidenceBySurface`).
+- Feature surface in CLI:
+  - `rgr surfaces show <surface>` exposes direct env + fs sections
+    (envDependencies, fsMutations.literal, fsMutations.dynamic) in both
+    `--json` and human output.
+  - `rgr modules show <module>` exposes module-level cross-surface rollup
+    (rollup.envDependencies, rollup.fsMutations) plus per-surface direct
+    env + fs blocks. Human output uses a compact `Seams: env=N fs=M +K dyn`
+    breadcrumb per surface; `surfaces show` is the drill-down surface for
+    full per-surface tables.
+- Positional comment masker (`src/core/seams/comment-masker.ts`) pre-pass
+  for both env and fs detectors. Masks line, block, and JSDoc comments
+  while preserving newlines (line-number stability) and string literal
+  contents (fs detectors depend on literal first-arg paths). C-style and
+  Python language families.
+- Test files excluded from seam detection at the indexer seam-pass entry
+  point. The `isTestFile` heuristic recognizes `__tests__`, `.test.`,
+  `.spec.`, `/test/`, `/tests/`, plus top-level `test/`, `tests/`, and
+  `__tests__/` paths (the prior heuristic missed root-level conventions).
+- See `docs/cli/v1-cli.txt` for the full JSON contract and worked examples.
+- See `docs/TECH-DEBT.md` for deferred items (string-literal-embedded env
+  false positives, detector externalization, jdtls live-test gating, Node
+  version pinning, node:sqlite evaluation).
+
 ## Next (in priority order)
 
 ### 1. Delta indexing support module

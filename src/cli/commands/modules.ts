@@ -12,7 +12,17 @@
  */
 
 import type { Command } from "commander";
+import type { SurfaceEnvEvidence } from "../../core/seams/env-dependency.js";
+import type { SurfaceFsMutationEvidence } from "../../core/seams/fs-mutation.js";
+import {
+	aggregateEnvAcrossSurfaces,
+	aggregateFsAcrossSurfaces,
+	type EnvAggregationInput,
+	type FsAggregationInput,
+	summarizeFsDynamicEvidence,
+} from "../../core/seams/module-seam-rollup.js";
 import type { AppContext } from "../../main.js";
+import { buildEnvRows, buildFsLiteralRows } from "./_seam-display.js";
 
 export function registerModulesCommands(
 	program: Command,
@@ -268,18 +278,74 @@ export function registerModulesCommands(
 
 			// Gather related data.
 			const evidence = ctx.storage.queryModuleCandidateEvidence(candidate.moduleCandidateUid);
-			const surfaces = ctx.storage.queryProjectSurfaces(snapshotUid)
+			const moduleSurfaces = ctx.storage.queryProjectSurfaces(snapshotUid)
 				.filter((s) => s.moduleCandidateUid === candidate.moduleCandidateUid);
 			const fileCount = ctx.storage.queryModuleOwnedFiles(
 				snapshotUid, candidate.moduleCandidateUid, 0,
 			).length;
 
-			// Topology links for each surface.
-			const surfaceDetails = surfaces.map((s) => {
+			// Sort surfaces by projectSurfaceUid for deterministic
+			// iteration. The pure rollup core's "first non-null default"
+			// rule depends on a stable input order — we anchor it here.
+			const surfacesSorted = [...moduleSurfaces].sort(
+				(a, b) => a.projectSurfaceUid.localeCompare(b.projectSurfaceUid),
+			);
+
+			// Per-surface fetch (M1 loop pattern). Each surface gets its
+			// own configRoots, entrypoints, env deps + evidence, fs
+			// mutations + evidence. Direct surface-local data only —
+			// aggregation is performed by the pure rollup core, never
+			// re-derived in this CLI layer.
+			const surfaceDetails = surfacesSorted.map((s) => {
 				const configRoots = ctx.storage.querySurfaceConfigRoots(s.projectSurfaceUid);
 				const entrypoints = ctx.storage.querySurfaceEntrypoints(s.projectSurfaceUid);
-				return { surface: s, configRoots, entrypoints };
+				const envDeps = ctx.storage.querySurfaceEnvDependencies(s.projectSurfaceUid);
+				const envEvidence = ctx.storage.querySurfaceEnvEvidenceBySurface(s.projectSurfaceUid);
+				const fsMutations = ctx.storage.querySurfaceFsMutations(s.projectSurfaceUid);
+				const fsEvidence = ctx.storage.querySurfaceFsMutationEvidenceBySurface(s.projectSurfaceUid);
+				return {
+					surface: s,
+					configRoots,
+					entrypoints,
+					envDeps,
+					envEvidence,
+					fsMutations,
+					fsEvidence,
+				};
 			});
+
+			// Build aggregation inputs and call the pure rollup core.
+			// The CLI does not invent aggregation rules — it only maps
+			// storage rows into the input shape and passes them through.
+			const envAggInput: EnvAggregationInput[] = [];
+			const fsAggInput: FsAggregationInput[] = [];
+			const allFsEvidence: SurfaceFsMutationEvidence[] = [];
+
+			for (const sd of surfaceDetails) {
+				const envEvidenceCounts = countEnvEvidencePerDep(sd.envEvidence);
+				for (const dep of sd.envDeps) {
+					envAggInput.push({
+						surfaceUid: sd.surface.projectSurfaceUid,
+						dependency: dep,
+						evidenceCount: envEvidenceCounts.get(dep.surfaceEnvDependencyUid) ?? 0,
+					});
+				}
+
+				const fsLiteralCounts = countFsLiteralEvidencePerIdentity(sd.fsEvidence);
+				for (const mut of sd.fsMutations) {
+					fsAggInput.push({
+						surfaceUid: sd.surface.projectSurfaceUid,
+						mutation: mut,
+						evidenceCount: fsLiteralCounts.get(mut.surfaceFsMutationUid) ?? 0,
+					});
+				}
+
+				allFsEvidence.push(...sd.fsEvidence);
+			}
+
+			const rollupEnv = aggregateEnvAcrossSurfaces(envAggInput);
+			const rollupFs = aggregateFsAcrossSurfaces(fsAggInput);
+			const rollupFsDynamic = summarizeFsDynamicEvidence(allFsEvidence);
 
 			if (opts.json) {
 				process.stdout.write(JSON.stringify({
@@ -298,7 +364,15 @@ export function registerModulesCommands(
 						confidence: e.confidence,
 					})),
 					fileCount,
+					rollup: {
+						envDependencies: rollupEnv,
+						fsMutations: {
+							literal: rollupFs,
+							dynamic: rollupFsDynamic,
+						},
+					},
 					surfaces: surfaceDetails.map((sd) => ({
+						projectSurfaceUid: sd.surface.projectSurfaceUid,
 						surfaceKind: sd.surface.surfaceKind,
 						displayName: sd.surface.displayName,
 						buildSystem: sd.surface.buildSystem,
@@ -314,6 +388,11 @@ export function registerModulesCommands(
 							entrypointKind: ep.entrypointKind,
 							displayName: ep.displayName,
 						})),
+						envDependencies: buildEnvRows(sd.envDeps, sd.envEvidence),
+						fsMutations: {
+							literal: buildFsLiteralRows(sd.fsMutations, sd.fsEvidence),
+							dynamic: summarizeFsDynamicEvidence(sd.fsEvidence),
+						},
 					})),
 				}, null, 2));
 				return;
@@ -336,9 +415,62 @@ export function registerModulesCommands(
 				process.stdout.write(`\n`);
 			}
 
+			// Module-level rollup is the primary human-readable artifact.
+			// Rendered before the per-surface detail block.
+			if (rollupEnv.length > 0 || rollupFs.length > 0 || rollupFsDynamic.totalCount > 0) {
+				process.stdout.write(`Module Rollup:\n`);
+
+				if (rollupEnv.length > 0) {
+					process.stdout.write(`  Env Dependencies (${rollupEnv.length}):\n`);
+					for (const r of rollupEnv) {
+						const def = r.defaultValue !== null ? `=${r.defaultValue}` : "";
+						const conflict = r.hasConflictingDefaults ? " [conflicting defaults]" : "";
+						process.stdout.write(
+							`    ${r.accessKind.padEnd(9)} ${(r.envName + def).padEnd(32)} surfaces=${r.surfaceCount}  evidence=${r.evidenceCount}  conf=${r.maxConfidence.toFixed(2)}${conflict}\n`,
+						);
+					}
+				}
+
+				if (rollupFs.length > 0 || rollupFsDynamic.totalCount > 0) {
+					const dynLabel = rollupFsDynamic.totalCount > 0
+						? ` + ${rollupFsDynamic.totalCount} dynamic`
+						: "";
+					process.stdout.write(
+						`  Filesystem Mutations (${rollupFs.length} literal${dynLabel}):\n`,
+					);
+					for (const r of rollupFs) {
+						const dest = r.destinationPaths.length > 0
+							? ` -> ${r.destinationPaths.join(", ")}`
+							: "";
+						process.stdout.write(
+							`    ${r.mutationKind.padEnd(12)} ${r.targetPath.padEnd(34)} surfaces=${r.surfaceCount}  evidence=${r.evidenceCount}  conf=${r.maxConfidence.toFixed(2)}${dest}\n`,
+						);
+					}
+					if (rollupFsDynamic.totalCount > 0) {
+						process.stdout.write(
+							`    Dynamic-path: ${rollupFsDynamic.totalCount} occurrence${rollupFsDynamic.totalCount === 1 ? "" : "s"} in ${rollupFsDynamic.distinctFileCount} file${rollupFsDynamic.distinctFileCount === 1 ? "" : "s"}\n`,
+						);
+						const kindKeys = Object.keys(rollupFsDynamic.byKind).sort();
+						for (const k of kindKeys) {
+							const count = rollupFsDynamic.byKind[k as keyof typeof rollupFsDynamic.byKind];
+							process.stdout.write(`      ${k}: ${count}\n`);
+						}
+					}
+				}
+
+				process.stdout.write(`\n`);
+			}
+
+			// Per-surface detail (compact). Each surface gets a one-line
+			// summary of how much it contributes to the rollup. For full
+			// per-surface env/fs detail, the user runs `rgr surfaces show`.
 			if (surfaceDetails.length > 0) {
 				process.stdout.write(`Surfaces (${surfaceDetails.length}):\n`);
 				for (const sd of surfaceDetails) {
+					const envCount = sd.envDeps.length;
+					const fsLiteralCount = sd.fsMutations.length;
+					const fsDynamicCount = sd.fsEvidence.filter((e) => e.dynamicPath).length;
+
 					process.stdout.write(`  ${sd.surface.surfaceKind.padEnd(18)} ${sd.surface.displayName ?? "-"}\n`);
 					process.stdout.write(`    Build: ${sd.surface.buildSystem} | Runtime: ${sd.surface.runtimeKind}\n`);
 					if (sd.configRoots.length > 0) {
@@ -349,11 +481,49 @@ export function registerModulesCommands(
 							process.stdout.write(`    Entry: ${ep.entrypointKind} -> ${ep.entrypointPath ?? ep.entrypointTarget ?? "-"}\n`);
 						}
 					}
+					if (envCount > 0 || fsLiteralCount > 0 || fsDynamicCount > 0) {
+						const fsDynLabel = fsDynamicCount > 0 ? ` +${fsDynamicCount} dyn` : "";
+						process.stdout.write(
+							`    Seams: env=${envCount}  fs=${fsLiteralCount}${fsDynLabel}\n`,
+						);
+					}
 				}
 			} else {
 				process.stdout.write(`No project surfaces detected.\n`);
 			}
 		});
+}
+
+// ── Local helpers (count grouping only — no aggregation rules) ────
+
+function countEnvEvidencePerDep(
+	evidence: readonly SurfaceEnvEvidence[],
+): Map<string, number> {
+	const counts = new Map<string, number>();
+	for (const e of evidence) {
+		counts.set(
+			e.surfaceEnvDependencyUid,
+			(counts.get(e.surfaceEnvDependencyUid) ?? 0) + 1,
+		);
+	}
+	return counts;
+}
+
+function countFsLiteralEvidencePerIdentity(
+	evidence: readonly SurfaceFsMutationEvidence[],
+): Map<string, number> {
+	const counts = new Map<string, number>();
+	for (const e of evidence) {
+		// Dynamic-path evidence has null surfaceFsMutationUid and is
+		// summarized via summarizeFsDynamicEvidence, never counted as
+		// per-identity literal evidence.
+		if (e.surfaceFsMutationUid === null) continue;
+		counts.set(
+			e.surfaceFsMutationUid,
+			(counts.get(e.surfaceFsMutationUid) ?? 0) + 1,
+		);
+	}
+	return counts;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────

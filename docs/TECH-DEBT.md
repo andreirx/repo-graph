@@ -266,3 +266,114 @@
 - **Required fix:** batch persistence + bounded resolution windows. Remove
   `fileContents`, persist nodes/edges incrementally during extraction, then
   resolve in chunks. This is an architecture redesign, not a parameter tune.
+
+## Operational Dependency Seam Slice (deferred items)
+
+Items surfaced during the env + fs operational dependency seam slice that
+were intentionally not addressed in that slice. Tracked here so they do
+not drift. Each item names the in-slice context in which it was discovered.
+
+### Pin Node version via .nvmrc and tighten engines (P2)
+- `package.json` declares `engines.node: ">=20"`, which permits any of
+  v20, v22, v24. `better-sqlite3` is a native addon and its compiled
+  binary is keyed to the Node ABI version. Switching Node versions
+  silently invalidates the binary, producing recurring `NODE_MODULE_VERSION`
+  mismatches that cost minutes per encounter and create false-baseline
+  test claims when the rebuild ran against a different Node than the
+  developer's interactive shell.
+- **Fix:** add `.nvmrc` (or `.tool-versions`) pinning a specific Node
+  version, and tighten `engines.node` to a narrow range (e.g. `">=22 <23"`)
+  so an accidental v24 invocation fails fast.
+- **Severity:** P2. Affects every contributor with multiple Node versions
+  installed (homebrew + nvm + asdf are common). Discovered during the
+  seam slice's Step 0 floor stabilization.
+
+### CLAUDE.md rebuild note must clarify Node-version scope (P3)
+- The current note `pnpm rebuild better-sqlite3` does not state that the
+  rebuild is only valid for the Node version active when the rebuild ran.
+  Switching Node afterwards silently re-breaks the binary.
+- **Fix:** two-line addition to CLAUDE.md noting that the rebuild is
+  Node-version-scoped and must be re-run after `nvm use` / version
+  switches.
+- **Severity:** P3. Documentation. Cheap.
+
+### Evaluate node:sqlite as a substrate replacement (P2)
+- Node ≥22.5 ships a built-in `node:sqlite` module. Migrating off
+  `better-sqlite3` would eliminate the entire native-addon ABI failure
+  class. This is the durable structural fix that the .nvmrc pin only
+  postpones.
+- **Not an automatic win.** Capability parity must be evaluated
+  before adopting:
+  - synchronous API shape (better-sqlite3 is sync, node:sqlite is sync)
+  - prepared statement behavior and lifecycle
+  - transaction ergonomics
+  - WAL mode behavior
+  - performance on the sizes this codebase actually exercises
+- **Severity:** P2. Substrate decision, not a maintenance tweak. Should
+  be a separate evaluation slice. May be subsumed by the eventual Rust
+  daemon move (which uses `rusqlite` and bypasses the issue entirely).
+
+### Live jdtls test self-skip is incomplete (P2)
+- `test/adapters/enrichment/java-enrichment-integration.test.ts` gates
+  itself on `which jdtls`. If jdtls is on PATH, the tests run; if not,
+  they self-skip. The gate does NOT detect the case where jdtls is on
+  PATH but its workspace state is corrupted, the JDK toolchain is
+  incompatible, or the Gradle import fails to complete. In those cases
+  hover requests return `null` and assertions like `expect(receiverType).toBe("HashMap")`
+  fail with no obvious connection to environment state.
+- **Effect:** `pnpm run test` produces false-negative baselines whenever
+  jdtls workspace state drifts. Affects every contributor with jdtls
+  installed.
+- **Fix options:**
+  1. Add a sentinel hover precheck that verifies jdtls + JDK + fixture
+     import are actually working before running the receiver-type
+     assertions. Skip the live tests if the precheck fails.
+  2. Gate the live test behind an explicit `RGR_LIVE_INTEGRATION=1`
+     env var so it never runs by default.
+  3. Move all live integration tests into a separate `pnpm run test:live`
+     script and exclude them from the default `pnpm run test`.
+- **Severity:** P2. Discovered during the seam slice's Step 6
+  re-baseline. Caused divergence between the AI's environment (test
+  passed) and the user's shell (test failed). Out of scope for the
+  seam slice itself.
+
+### String-literal-embedded env access false positives (P3)
+- The comment masker landed in the seam slice (`src/core/seams/comment-masker.ts`)
+  preserves string literal contents by design — fs detectors rely on
+  literal first-argument paths inside strings (e.g.
+  `fs.writeFile("real_path")`). As a side effect, env-access patterns
+  embedded in string literals like `"http://example.com/path/process.env.X"`
+  are still matched by the env detector regex.
+- **Severity:** P3. Lower than the comment-derived false positives that
+  the masker DID fix. String-embedded env patterns are rare in real
+  production code and were not visible in repo-graph dogfood after the
+  masker landed.
+- **Possible fix paths (any of):**
+  - Tighten env regex to require code-context anchors (e.g., assignment
+    operator, declaration, or call argument boundary).
+  - Add a second pre-pass that masks string literal contents
+    specifically for the env detector (the fs detector cannot use this
+    because it depends on string literal contents).
+  - Move env detection from regex to a real lexer so context is
+    available.
+- Discovered during seam slice Step 6 dogfood after C-1 (comment
+  masking) shipped.
+
+### Detector externalization to shared YAML/TOML tables (P2)
+- Env, fs, and other seam detectors are currently regex tables defined
+  inline in TypeScript. The architectural decision recorded earlier in
+  this conversation (R-Q3) is to externalize detector rules to shared
+  YAML or TOML tables consumed by both the TypeScript implementation
+  and the eventual Rust daemon implementation. This avoids regex drift
+  between two language runtimes during the prototype-then-port window.
+- **Scope:** detector tables become data; detector wiring becomes a
+  YAML loader plus a generic regex-table walker. Comment masking
+  remains language-specific code.
+- **Severity:** P2. Substrate refactor, scheduled after the operational
+  dependency seam feature surface ships and after detector contracts
+  stabilize from real-repo exposure. Not P1 because the current
+  hardcoded tables work and the parity problem only matters once Rust
+  porting begins.
+- **Critical sequencing:** must NOT be folded into a feature slice.
+  This is its own substrate move. Recorded as the "next substrate
+  slice" in the conversation roadmap.
