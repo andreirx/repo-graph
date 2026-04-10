@@ -52,11 +52,17 @@ pnpm run lint:fix       Auto-fix lint issues
 
 ## Native dependency note
 
-`better-sqlite3` is a native Node.js addon. If you switch Node.js versions (e.g. via nvm), tests will fail with `NODE_MODULE_VERSION` mismatch. Fix:
+`better-sqlite3` is a native Node.js addon. The compiled binary is keyed to the **active Node ABI** at rebuild time, not to the version it was first installed with.
+
+This repo pins Node `v22.21.1` via `.nvmrc` and `.tool-versions`. `package.json` declares `engines.node: ">=22 <23"` as the safety envelope (NODE_MODULE_VERSION 127 across all v22.x). Run `nvm use` (or your version manager equivalent) before any install or rebuild to align with the pinned version.
+
+If you switch Node versions afterward (e.g. `nvm use 24`), the binary becomes invalid and produces `NODE_MODULE_VERSION` mismatch errors. Fix:
 
 ```
 pnpm rebuild better-sqlite3
 ```
+
+The rebuild only fixes the binary for whichever Node is active when you run it. Switching Node again requires another rebuild. **If the binary was built under a different Node, run `nvm use && pnpm rebuild better-sqlite3` before running tests or invoking the CLI** — otherwise the failure surfaces inside test output or `rgr` invocation, not at install time.
 
 ## Reference docs
 
