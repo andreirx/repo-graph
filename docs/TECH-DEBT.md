@@ -313,7 +313,37 @@ not drift. Each item names the in-slice context in which it was discovered.
   be a separate evaluation slice. May be subsumed by the eventual Rust
   daemon move (which uses `rusqlite` and bypasses the issue entirely).
 
-### Live jdtls test self-skip is incomplete (P2)
+### Live jdtls test self-skip is incomplete (P2) — RESOLVED in D-1
+
+**RESOLUTION (D-1, live-enrichment test gating cleanup):** Closed via fix
+option 3 from the original entry. Both live integration tests
+(`java-enrichment-integration.test.ts`, `rust-enrichment-integration.test.ts`)
+were moved from `test/adapters/enrichment/` to `test/live/`. The default
+vitest config (`vitest.config.ts`) now excludes `test/live/**` via
+`configDefaults.exclude` extension. A new `pnpm run test:live` script runs
+the live tests explicitly as opt-in observability via a dedicated
+`vitest.live.config.ts` that inherits shared test options from the default
+config and includes only `test/live/**/*.test.ts`. After D-1, `pnpm run test`
+and `pnpm run test:all` no longer transit `test/live/**` and therefore can
+no longer be made false-negative by jdtls workspace drift, rust-analyzer
+indexing race, or any other live external-tool state. The Rust-1
+acceptance report's "non-admissible surfaces" caveat about live-tool
+contamination is historically resolved.
+
+**SCOPE LIMIT — what D-1 does NOT fix.** D-1 closed the live-tool
+contamination only. The default `pnpm test` surface still has a separate,
+unrelated instability source: the `pnpm test is not giving a clean signal`
+debt about `better-sqlite3` NODE_MODULE_VERSION drift listed under
+`Test-Scope Debt > Rust-Specific` earlier in this file. That debt is
+environmental (Node.js version changes between invocations) and is
+independent of D-1's scope. Acceptance language for any future slice
+that uses `pnpm run test` or `pnpm run test:all` as evidence should
+phrase those surfaces as "green in this shell with the current Node ABI
+aligned" rather than as universally deterministic, until the
+NODE_MODULE_VERSION drift debt is also closed.
+
+**Original problem statement (preserved for audit trail):**
+
 - `test/adapters/enrichment/java-enrichment-integration.test.ts` gates
   itself on `which jdtls`. If jdtls is on PATH, the tests run; if not,
   they self-skip. The gate does NOT detect the case where jdtls is on
@@ -324,7 +354,7 @@ not drift. Each item names the in-slice context in which it was discovered.
 - **Effect:** `pnpm run test` produces false-negative baselines whenever
   jdtls workspace state drifts. Affects every contributor with jdtls
   installed.
-- **Fix options:**
+- **Fix options (option 3 was selected and implemented in D-1):**
   1. Add a sentinel hover precheck that verifies jdtls + JDK + fixture
      import are actually working before running the receiver-type
      assertions. Skip the live tests if the precheck fails.

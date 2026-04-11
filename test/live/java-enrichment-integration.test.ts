@@ -17,11 +17,11 @@
 import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveJavaReceiverTypes } from "../../../src/adapters/enrichment/java-receiver-resolver.js";
+import { resolveJavaReceiverTypes } from "../../src/adapters/enrichment/java-receiver-resolver.js";
 
 const FIXTURE_ROOT = join(
 	import.meta.dirname,
-	"../../fixtures/java/spring-mini",
+	"../fixtures/java/spring-mini",
 );
 
 let jdtlsAvailable = false;

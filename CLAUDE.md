@@ -43,12 +43,13 @@ Read `docs/architecture/` for full context. Summary:
 
 ```
 pnpm run build          Build TypeScript
-pnpm run test           Build + run all TS tests (includes CLI integration)
+pnpm run test           Build + run all default TS tests (includes CLI integration)
 pnpm run test:int       Run TS integration tests only (test/adapters)
 pnpm run test:cli       Build + run CLI integration tests only (test/cli)
 pnpm run test:rust      Run the Rust detector crate suite (requires cargo on PATH)
 pnpm run test:parity    Run the cross-runtime parity harness (TS half + Rust half)
-pnpm run test:all       Composite acceptance: full TS suite + full Rust suite
+pnpm run test:all       Composite acceptance: full default TS suite + full Rust suite
+pnpm run test:live      Run live external-tool integration tests (test/live, opt-in)
 pnpm run lint           Run Biome linter
 pnpm run lint:fix       Auto-fix lint issues
 ```
@@ -59,6 +60,17 @@ The Rust scripts (`test:rust`, `test:parity`, `test:all`) shell out to
 fast with an actionable error pointing at rustup. TS-only contributors
 who never touch the Rust crates can ignore these scripts; `pnpm test`
 remains unchanged and does not require cargo.
+
+`pnpm run test:live` is a peer surface that runs the live external-tool
+integration tests under `test/live/` (currently jdtls and rust-analyzer
+hover-resolver tests). These are EXCLUDED from `pnpm run test` and
+`pnpm run test:all` because their pass/fail depends on external language
+servers being installed AND in a healthy workspace state. They self-skip
+gracefully when the required tool is missing from PATH, but they cannot
+detect tool-state corruption (jdtls workspace drift, rust-analyzer
+indexing race) and therefore are not admissible as a deterministic
+acceptance baseline. Run them explicitly when investigating enrichment
+behavior; do not rely on them for slice closure evidence.
 
 ## Native dependency note
 

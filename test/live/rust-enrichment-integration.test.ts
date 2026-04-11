@@ -17,11 +17,11 @@
 import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveRustReceiverTypes } from "../../../src/adapters/enrichment/rust-receiver-resolver.js";
+import { resolveRustReceiverTypes } from "../../src/adapters/enrichment/rust-receiver-resolver.js";
 
 const FIXTURE_ROOT = join(
 	import.meta.dirname,
-	"../../fixtures/rust/enrichment-crate",
+	"../fixtures/rust/enrichment-crate",
 );
 
 let rustAnalyzerAvailable = false;
