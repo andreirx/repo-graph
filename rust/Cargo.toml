@@ -20,6 +20,7 @@
 resolver = "2"
 members = [
     "crates/detectors",
+    "crates/storage",
 ]
 
 # Shared profile settings: optimize for correctness and clear errors

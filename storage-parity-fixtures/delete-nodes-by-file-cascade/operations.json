@@ -1,0 +1,172 @@
+{
+  "name": "delete-nodes-by-file-cascade",
+  "description": "Exercises deleteNodesByFile composite delete (incident edges then nodes, in one transaction) and deleteEdgesByUids. Sets up a snapshot with two files, four nodes (two per file), and three edges (one intra-file for each file, one cross-file), then deletes all nodes for src/a.ts. Verifies that both the src/a.ts nodes AND the edges incident to them are gone from post-state, while the src/b.ts nodes and their intra-file edge survive.",
+  "operations": [
+    {
+      "op": "addRepo",
+      "repo": {
+        "repoUid": "r1",
+        "name": "alpha",
+        "rootPath": "/tmp/alpha",
+        "defaultBranch": "main",
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "metadataJson": null
+      }
+    },
+    {
+      "op": "createSnapshot",
+      "as": "snapA",
+      "input": {
+        "repoUid": "r1",
+        "kind": "full",
+        "basisRef": null,
+        "basisCommit": null,
+        "parentSnapshotUid": null,
+        "label": null,
+        "toolchainJson": null
+      }
+    },
+    {
+      "op": "upsertFiles",
+      "files": [
+        {
+          "fileUid": "r1:src/a.ts",
+          "repoUid": "r1",
+          "path": "src/a.ts",
+          "language": "typescript",
+          "isTest": false,
+          "isGenerated": false,
+          "isExcluded": false
+        },
+        {
+          "fileUid": "r1:src/b.ts",
+          "repoUid": "r1",
+          "path": "src/b.ts",
+          "language": "typescript",
+          "isTest": false,
+          "isGenerated": false,
+          "isExcluded": false
+        }
+      ]
+    },
+    {
+      "op": "insertNodes",
+      "nodes": [
+        {
+          "nodeUid": "node-a1",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "stableKey": "r1:src/a.ts#fnA1:SYMBOL:FUNCTION",
+          "kind": "SYMBOL",
+          "subtype": "FUNCTION",
+          "name": "fnA1",
+          "qualifiedName": "fnA1",
+          "fileUid": "r1:src/a.ts",
+          "parentNodeUid": null,
+          "location": { "lineStart": 1, "colStart": 0, "lineEnd": 5, "colEnd": 0 },
+          "signature": null,
+          "visibility": "export",
+          "docComment": null,
+          "metadataJson": null
+        },
+        {
+          "nodeUid": "node-a2",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "stableKey": "r1:src/a.ts#fnA2:SYMBOL:FUNCTION",
+          "kind": "SYMBOL",
+          "subtype": "FUNCTION",
+          "name": "fnA2",
+          "qualifiedName": "fnA2",
+          "fileUid": "r1:src/a.ts",
+          "parentNodeUid": null,
+          "location": { "lineStart": 7, "colStart": 0, "lineEnd": 12, "colEnd": 0 },
+          "signature": null,
+          "visibility": "export",
+          "docComment": null,
+          "metadataJson": null
+        },
+        {
+          "nodeUid": "node-b1",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "stableKey": "r1:src/b.ts#fnB1:SYMBOL:FUNCTION",
+          "kind": "SYMBOL",
+          "subtype": "FUNCTION",
+          "name": "fnB1",
+          "qualifiedName": "fnB1",
+          "fileUid": "r1:src/b.ts",
+          "parentNodeUid": null,
+          "location": { "lineStart": 1, "colStart": 0, "lineEnd": 5, "colEnd": 0 },
+          "signature": null,
+          "visibility": "export",
+          "docComment": null,
+          "metadataJson": null
+        },
+        {
+          "nodeUid": "node-b2",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "stableKey": "r1:src/b.ts#fnB2:SYMBOL:FUNCTION",
+          "kind": "SYMBOL",
+          "subtype": "FUNCTION",
+          "name": "fnB2",
+          "qualifiedName": "fnB2",
+          "fileUid": "r1:src/b.ts",
+          "parentNodeUid": null,
+          "location": { "lineStart": 7, "colStart": 0, "lineEnd": 12, "colEnd": 0 },
+          "signature": null,
+          "visibility": "export",
+          "docComment": null,
+          "metadataJson": null
+        }
+      ]
+    },
+    {
+      "op": "insertEdges",
+      "edges": [
+        {
+          "edgeUid": "edge-a-intra",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "sourceNodeUid": "node-a1",
+          "targetNodeUid": "node-a2",
+          "type": "CALLS",
+          "resolution": "static",
+          "extractor": "ts-core:0.1.0",
+          "location": null,
+          "metadataJson": null
+        },
+        {
+          "edgeUid": "edge-b-intra",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "sourceNodeUid": "node-b1",
+          "targetNodeUid": "node-b2",
+          "type": "CALLS",
+          "resolution": "static",
+          "extractor": "ts-core:0.1.0",
+          "location": null,
+          "metadataJson": null
+        },
+        {
+          "edgeUid": "edge-cross",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "sourceNodeUid": "node-a1",
+          "targetNodeUid": "node-b1",
+          "type": "CALLS",
+          "resolution": "static",
+          "extractor": "ts-core:0.1.0",
+          "location": null,
+          "metadataJson": null
+        }
+      ]
+    },
+    {
+      "op": "deleteNodesByFile",
+      "snapshotUid": "@snapA.snapshotUid",
+      "fileUid": "r1:src/a.ts"
+    }
+  ]
+}

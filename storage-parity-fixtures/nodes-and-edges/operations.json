@@ -1,0 +1,101 @@
+{
+  "name": "nodes-and-edges",
+  "description": "Exercises the graph entity write path: insertNodes (with explicit node_uids so the post-state is deterministic), queryAllNodes read, insertEdges. Uses createSnapshot because nodes/edges require a snapshot FK.",
+  "operations": [
+    {
+      "op": "addRepo",
+      "repo": {
+        "repoUid": "r1",
+        "name": "alpha",
+        "rootPath": "/tmp/alpha",
+        "defaultBranch": "main",
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "metadataJson": null
+      }
+    },
+    {
+      "op": "createSnapshot",
+      "as": "snapA",
+      "input": {
+        "repoUid": "r1",
+        "kind": "full",
+        "basisRef": null,
+        "basisCommit": null,
+        "parentSnapshotUid": null,
+        "label": null,
+        "toolchainJson": null
+      }
+    },
+    {
+      "op": "upsertFiles",
+      "files": [
+        {
+          "fileUid": "r1:src/a.ts",
+          "repoUid": "r1",
+          "path": "src/a.ts",
+          "language": "typescript",
+          "isTest": false,
+          "isGenerated": false,
+          "isExcluded": false
+        }
+      ]
+    },
+    {
+      "op": "insertNodes",
+      "nodes": [
+        {
+          "nodeUid": "node-fnA",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "stableKey": "r1:src/a.ts#fnA:SYMBOL:FUNCTION",
+          "kind": "SYMBOL",
+          "subtype": "FUNCTION",
+          "name": "fnA",
+          "qualifiedName": "fnA",
+          "fileUid": "r1:src/a.ts",
+          "parentNodeUid": null,
+          "location": { "lineStart": 1, "colStart": 0, "lineEnd": 10, "colEnd": 0 },
+          "signature": null,
+          "visibility": "export",
+          "docComment": null,
+          "metadataJson": null
+        },
+        {
+          "nodeUid": "node-fnB",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "stableKey": "r1:src/a.ts#fnB:SYMBOL:FUNCTION",
+          "kind": "SYMBOL",
+          "subtype": "FUNCTION",
+          "name": "fnB",
+          "qualifiedName": "fnB",
+          "fileUid": "r1:src/a.ts",
+          "parentNodeUid": null,
+          "location": { "lineStart": 12, "colStart": 0, "lineEnd": 20, "colEnd": 0 },
+          "signature": null,
+          "visibility": "export",
+          "docComment": null,
+          "metadataJson": null
+        }
+      ]
+    },
+    { "op": "queryAllNodes", "as": "allNodes", "snapshotUid": "@snapA.snapshotUid" },
+    {
+      "op": "insertEdges",
+      "edges": [
+        {
+          "edgeUid": "edge-1",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "sourceNodeUid": "node-fnA",
+          "targetNodeUid": "node-fnB",
+          "type": "CALLS",
+          "resolution": "static",
+          "extractor": "ts-core:0.1.0",
+          "location": { "lineStart": 5, "colStart": 2, "lineEnd": 5, "colEnd": 8 },
+          "metadataJson": null
+        }
+      ]
+    }
+  ]
+}

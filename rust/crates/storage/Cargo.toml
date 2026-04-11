@@ -1,0 +1,133 @@
+# ── repo-graph-storage ────────────────────────────────────────────
+#
+# Rust port of the SQLite storage substrate. Mirror of the
+# TypeScript adapter at `src/adapters/storage/sqlite/` and the
+# storage port at `src/core/ports/storage.ts`.
+#
+# Slice scope (Rust-2 storage substrate, locked):
+#   - port all 16 schema migrations (001 through 016) as the
+#     Rust-side migration boundary
+#   - implement read/write CRUD parity for the D4-Core entity
+#     set: repos, snapshots, files, file_versions, nodes, edges
+#   - mirror the file_versions behavioral surface explicitly:
+#     upsertFileVersions, getStaleFiles, queryFileVersionHashes
+#   - prove byte-structural cross-runtime parity against a
+#     curated `storage-parity-fixtures/` corpus shared between
+#     the TS and Rust runtimes
+#   - expose the standard public API:
+#       open(path) -> Result<StorageConnection>
+#       (CRUD methods on StorageConnection per the 6 entities)
+#
+# NOT in scope (explicit deferrals from R2 lock):
+#   - CRUD for entities outside D4-Core (declarations, modules,
+#     measurements, annotations, obligations, surfaces,
+#     env_dependencies, fs_mutations, etc.)
+#   - file_versions methods outside the locked surface
+#     (copyForwardUnchangedFiles is excluded; extraction_edges
+#     and file_signals are out of scope)
+#   - cross-runtime DB-file interoperability (deferred future
+#     work; was D11, removed from contract during R2 lock to
+#     avoid the overclaim pattern)
+#   - TS-side migration source-of-truth refactor
+#   - Postgres backend
+#   - replacing better-sqlite3 in TS
+#   - indexer / daemon / classification / trust / extractors port
+#
+# Operating model: O-C zipper. The TS implementation defines or
+# refines the storage contract; this Rust crate ports it; parity
+# is verified before the next contract-changing TS slice. Same
+# discipline as the Rust-1 detector parity slice.
+#
+# Parity surface: `storage-parity-fixtures/` at the repo root will
+# contain the curated cross-runtime contract test corpus (added
+# in R2-F). Both this crate and the TS test harness consume the
+# same fixtures.
+
+[package]
+name         = "repo-graph-storage"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Rust port of the repo-graph SQLite storage substrate"
+publish      = false
+
+[dependencies]
+# rusqlite — the canonical Rust binding to libsqlite3. Sync API,
+# matches the TypeScript better-sqlite3 shape on the TS side.
+#
+# `bundled` feature: compiles libsqlite3 from source as part of the
+# build (via the libsqlite3-sys crate). The Rust binary statically
+# links a known libsqlite3 version, eliminating the entire
+# "different machines have different libsqlite3 versions" axis from
+# parity drift. This matches the TS side's bundling philosophy
+# (better-sqlite3 also bundles its libsqlite3). Locked at R2 D1a.
+#
+# Cost: ~30s first-build to compile libsqlite3, then cached. ~1MB
+# extra static link. Requires a C compiler on the build machine.
+# These are build-mechanism costs, not contract-surface risks.
+#
+# Version pinning is stricter than typical Rust deps because
+# rusqlite's API is more volatile across minor versions than
+# average crates. Bump deliberately when a parity test against
+# the new minor version is added to R2-F's harness.
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Serde for hand-rolled DTO derives. Used by the parity boundary
+# (R2-F) to serialize entity rows to JSON for cross-runtime
+# structural comparison. Hand-rolled row mappers (D5) handle the
+# rusqlite::Row -> DTO direction; serde handles the DTO -> JSON
+# direction at the parity boundary only.
+serde      = { version = "1", features = ["derive"] }
+
+# serde_json for the parity boundary's JSON I/O surface (R2-F
+# fixture parsing and structural comparison output) AND for
+# migration 004's dynamic JSON manipulation (parses requirement
+# `value_json`, validates structure, backfills `obligation_id`,
+# re-serializes).
+#
+# `preserve_order` feature: switches the underlying Map type from
+# `BTreeMap` (alphabetical key order) to `IndexMap` (insertion
+# order). Required for migration 004 parity: TypeScript's
+# `JSON.stringify` preserves object property insertion order.
+# Without `preserve_order`, Rust would re-serialize the same data
+# with alphabetized keys, which is semantically equivalent but
+# byte-different from the TS output and would cause spurious
+# parity failures at the storage value_json column. The feature
+# does NOT affect R2-B's struct-based DTOs (those use field
+# declaration order regardless of map type).
+serde_json = { version = "1", features = ["preserve_order"] }
+
+# Typed error enum for storage operations. Matches the Rust-1
+# detector crate's pattern (DetectorLoadError) and the broader
+# Rust ecosystem convention for substrate libraries that expose
+# typed failure modes to upstream crates.
+thiserror = "2"
+
+# UUID v4 generation for migration 004's obligation_id backfill.
+# The TS migration calls `randomUUID()` from node:crypto, which
+# returns RFC 4122 v4 UUIDs. The Rust `uuid` crate is the
+# canonical equivalent. Locked at R2-C decision D-C2: must match
+# the TS UUID format because the backfilled IDs become permanent
+# identifiers in the database, used as reference targets by waiver
+# declarations.
+#
+# Only the `v4` feature is enabled (random-generated UUIDs). No
+# v1/v3/v5 namespace generators. This matches the TS surface
+# exactly (`randomUUID()` is v4 only).
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+# tempfile for tests that need a real file-backed SQLite database
+# in a unique temporary path. Added in R2-D when the connection
+# lifecycle tests need file-backed mode (not just in-memory) to
+# verify open + close + re-open semantics. Also used by R2-E's
+# integration tests where appropriate.
+#
+# Cleanup is automatic via Drop on the tempfile handle when the
+# test ends. No manual cleanup code needed.
+tempfile = "3"
+
+# (R2-F may add walkdir for parity-fixture corpus discovery,
+# mirroring the detector crate's dev-dep pattern. Added per
+# substep when first needed.)

@@ -1,0 +1,53 @@
+{
+  "name": "create-snapshot-and-latest-ready",
+  "description": "Exercises createSnapshot's generated UID and createdAt, the binding substitution machinery (<SNAP:snapA>, <TS:snapA:createdAt>), reference resolution (@snapA.snapshotUid), and getLatestSnapshot's parity-critical READY-only filter. The getLatestSnapshot call before updateSnapshotStatus must return null because the snapshot is still in BUILDING status.",
+  "operations": [
+    {
+      "op": "addRepo",
+      "repo": {
+        "repoUid": "r1",
+        "name": "alpha",
+        "rootPath": "/tmp/alpha",
+        "defaultBranch": "main",
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "metadataJson": null
+      }
+    },
+    {
+      "op": "createSnapshot",
+      "as": "snapA",
+      "input": {
+        "repoUid": "r1",
+        "kind": "full",
+        "basisRef": "main",
+        "basisCommit": "abc123",
+        "parentSnapshotUid": null,
+        "label": "initial",
+        "toolchainJson": null
+      }
+    },
+    {
+      "op": "getSnapshot",
+      "as": "snapAReadback",
+      "snapshotUid": "@snapA.snapshotUid"
+    },
+    {
+      "op": "getLatestSnapshot",
+      "as": "latestWhileBuilding",
+      "repoUid": "r1"
+    },
+    {
+      "op": "updateSnapshotStatus",
+      "input": {
+        "snapshotUid": "@snapA.snapshotUid",
+        "status": "ready",
+        "completedAt": "2025-02-01T12:00:00.000Z"
+      }
+    },
+    {
+      "op": "getLatestSnapshot",
+      "as": "latestWhenReady",
+      "repoUid": "r1"
+    }
+  ]
+}

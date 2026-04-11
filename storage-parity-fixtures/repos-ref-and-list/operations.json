@@ -1,0 +1,35 @@
+{
+  "name": "repos-ref-and-list",
+  "description": "Exercises the full Repo CRUD surface: addRepo, getRepo by {uid,name,rootPath}, the not-found case, listRepos ordering, and removeRepo. No snapshots, no binding substitution beyond the blanket applied_at rule.",
+  "operations": [
+    {
+      "op": "addRepo",
+      "repo": {
+        "repoUid": "r1",
+        "name": "alpha",
+        "rootPath": "/tmp/alpha",
+        "defaultBranch": "main",
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "metadataJson": null
+      }
+    },
+    {
+      "op": "addRepo",
+      "repo": {
+        "repoUid": "r2",
+        "name": "beta",
+        "rootPath": "/tmp/beta",
+        "defaultBranch": "develop",
+        "createdAt": "2025-01-02T00:00:00.000Z",
+        "metadataJson": "{\"owner\":\"team-b\"}"
+      }
+    },
+    { "op": "getRepo", "as": "byUid", "ref": { "uid": "r1" } },
+    { "op": "getRepo", "as": "byName", "ref": { "name": "beta" } },
+    { "op": "getRepo", "as": "byRootPath", "ref": { "rootPath": "/tmp/alpha" } },
+    { "op": "getRepo", "as": "notFound", "ref": { "uid": "nope" } },
+    { "op": "listRepos", "as": "allBeforeRemove" },
+    { "op": "removeRepo", "repoUid": "r1" },
+    { "op": "listRepos", "as": "allAfterRemove" }
+  ]
+}

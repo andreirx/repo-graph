@@ -1,0 +1,179 @@
+{
+  "name": "update-snapshot-counts",
+  "description": "Exercises updateSnapshotCounts recomputation against real graph state. Sets up a snapshot with 2 files, 3 file_versions (wait — files have 1 version each per the composite PK; using 2 files, 2 file_versions), 3 nodes, and 2 edges. Initial snapshot counter columns default to 0. After updateSnapshotCounts, the columns must equal (2, 3, 2). The subsequent getSnapshot verifies the recomputed values.",
+  "operations": [
+    {
+      "op": "addRepo",
+      "repo": {
+        "repoUid": "r1",
+        "name": "alpha",
+        "rootPath": "/tmp/alpha",
+        "defaultBranch": "main",
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "metadataJson": null
+      }
+    },
+    {
+      "op": "createSnapshot",
+      "as": "snapA",
+      "input": {
+        "repoUid": "r1",
+        "kind": "full",
+        "basisRef": null,
+        "basisCommit": null,
+        "parentSnapshotUid": null,
+        "label": null,
+        "toolchainJson": null
+      }
+    },
+    {
+      "op": "upsertFiles",
+      "files": [
+        {
+          "fileUid": "r1:src/a.ts",
+          "repoUid": "r1",
+          "path": "src/a.ts",
+          "language": "typescript",
+          "isTest": false,
+          "isGenerated": false,
+          "isExcluded": false
+        },
+        {
+          "fileUid": "r1:src/b.ts",
+          "repoUid": "r1",
+          "path": "src/b.ts",
+          "language": "typescript",
+          "isTest": false,
+          "isGenerated": false,
+          "isExcluded": false
+        }
+      ]
+    },
+    {
+      "op": "upsertFileVersions",
+      "fileVersions": [
+        {
+          "snapshotUid": "@snapA.snapshotUid",
+          "fileUid": "r1:src/a.ts",
+          "contentHash": "hash-a",
+          "astHash": null,
+          "extractor": "ts-core:0.1.0",
+          "parseStatus": "parsed",
+          "sizeBytes": 100,
+          "lineCount": 10,
+          "indexedAt": "2025-01-01T00:05:00.000Z"
+        },
+        {
+          "snapshotUid": "@snapA.snapshotUid",
+          "fileUid": "r1:src/b.ts",
+          "contentHash": "hash-b",
+          "astHash": null,
+          "extractor": "ts-core:0.1.0",
+          "parseStatus": "parsed",
+          "sizeBytes": 200,
+          "lineCount": 20,
+          "indexedAt": "2025-01-01T00:05:00.000Z"
+        }
+      ]
+    },
+    {
+      "op": "insertNodes",
+      "nodes": [
+        {
+          "nodeUid": "node-fnA",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "stableKey": "r1:src/a.ts#fnA:SYMBOL:FUNCTION",
+          "kind": "SYMBOL",
+          "subtype": "FUNCTION",
+          "name": "fnA",
+          "qualifiedName": "fnA",
+          "fileUid": "r1:src/a.ts",
+          "parentNodeUid": null,
+          "location": { "lineStart": 1, "colStart": 0, "lineEnd": 5, "colEnd": 0 },
+          "signature": null,
+          "visibility": "export",
+          "docComment": null,
+          "metadataJson": null
+        },
+        {
+          "nodeUid": "node-fnB",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "stableKey": "r1:src/b.ts#fnB:SYMBOL:FUNCTION",
+          "kind": "SYMBOL",
+          "subtype": "FUNCTION",
+          "name": "fnB",
+          "qualifiedName": "fnB",
+          "fileUid": "r1:src/b.ts",
+          "parentNodeUid": null,
+          "location": { "lineStart": 1, "colStart": 0, "lineEnd": 5, "colEnd": 0 },
+          "signature": null,
+          "visibility": "export",
+          "docComment": null,
+          "metadataJson": null
+        },
+        {
+          "nodeUid": "node-fnC",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "stableKey": "r1:src/b.ts#fnC:SYMBOL:FUNCTION",
+          "kind": "SYMBOL",
+          "subtype": "FUNCTION",
+          "name": "fnC",
+          "qualifiedName": "fnC",
+          "fileUid": "r1:src/b.ts",
+          "parentNodeUid": null,
+          "location": { "lineStart": 10, "colStart": 0, "lineEnd": 15, "colEnd": 0 },
+          "signature": null,
+          "visibility": "export",
+          "docComment": null,
+          "metadataJson": null
+        }
+      ]
+    },
+    {
+      "op": "insertEdges",
+      "edges": [
+        {
+          "edgeUid": "edge-1",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "sourceNodeUid": "node-fnA",
+          "targetNodeUid": "node-fnB",
+          "type": "CALLS",
+          "resolution": "static",
+          "extractor": "ts-core:0.1.0",
+          "location": null,
+          "metadataJson": null
+        },
+        {
+          "edgeUid": "edge-2",
+          "snapshotUid": "@snapA.snapshotUid",
+          "repoUid": "r1",
+          "sourceNodeUid": "node-fnB",
+          "targetNodeUid": "node-fnC",
+          "type": "CALLS",
+          "resolution": "static",
+          "extractor": "ts-core:0.1.0",
+          "location": null,
+          "metadataJson": null
+        }
+      ]
+    },
+    {
+      "op": "getSnapshot",
+      "as": "beforeRecompute",
+      "snapshotUid": "@snapA.snapshotUid"
+    },
+    {
+      "op": "updateSnapshotCounts",
+      "snapshotUid": "@snapA.snapshotUid"
+    },
+    {
+      "op": "getSnapshot",
+      "as": "afterRecompute",
+      "snapshotUid": "@snapA.snapshotUid"
+    }
+  ]
+}

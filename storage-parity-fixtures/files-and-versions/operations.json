@@ -1,0 +1,92 @@
+{
+  "name": "files-and-versions",
+  "description": "Exercises the file and file_version CRUD surface: upsertFiles, upsertFileVersions, getFilesByRepo (with is_excluded filter), getStaleFiles (parse_status = 'stale' filter), and queryFileVersionHashes (HashMap return semantics). Uses createSnapshot because file_versions require a snapshot FK.",
+  "operations": [
+    {
+      "op": "addRepo",
+      "repo": {
+        "repoUid": "r1",
+        "name": "alpha",
+        "rootPath": "/tmp/alpha",
+        "defaultBranch": "main",
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "metadataJson": null
+      }
+    },
+    {
+      "op": "createSnapshot",
+      "as": "snapA",
+      "input": {
+        "repoUid": "r1",
+        "kind": "full",
+        "basisRef": null,
+        "basisCommit": null,
+        "parentSnapshotUid": null,
+        "label": null,
+        "toolchainJson": null
+      }
+    },
+    {
+      "op": "upsertFiles",
+      "files": [
+        {
+          "fileUid": "r1:src/a.ts",
+          "repoUid": "r1",
+          "path": "src/a.ts",
+          "language": "typescript",
+          "isTest": false,
+          "isGenerated": false,
+          "isExcluded": false
+        },
+        {
+          "fileUid": "r1:src/b.ts",
+          "repoUid": "r1",
+          "path": "src/b.ts",
+          "language": "typescript",
+          "isTest": true,
+          "isGenerated": false,
+          "isExcluded": false
+        },
+        {
+          "fileUid": "r1:node_modules/excluded.ts",
+          "repoUid": "r1",
+          "path": "node_modules/excluded.ts",
+          "language": "typescript",
+          "isTest": false,
+          "isGenerated": false,
+          "isExcluded": true
+        }
+      ]
+    },
+    {
+      "op": "upsertFileVersions",
+      "fileVersions": [
+        {
+          "snapshotUid": "@snapA.snapshotUid",
+          "fileUid": "r1:src/a.ts",
+          "contentHash": "hash-a-v1",
+          "astHash": "ast-a-v1",
+          "extractor": "ts-core:0.1.0",
+          "parseStatus": "parsed",
+          "sizeBytes": 1024,
+          "lineCount": 42,
+          "indexedAt": "2025-01-01T00:10:00.000Z"
+        },
+        {
+          "snapshotUid": "@snapA.snapshotUid",
+          "fileUid": "r1:src/b.ts",
+          "contentHash": "hash-b-v1",
+          "astHash": null,
+          "extractor": "ts-core:0.1.0",
+          "parseStatus": "stale",
+          "sizeBytes": 2048,
+          "lineCount": 88,
+          "indexedAt": "2025-01-01T00:11:00.000Z"
+        }
+      ]
+    },
+    { "op": "getFilesByRepo", "as": "activeFiles", "repoUid": "r1" },
+    { "op": "getStaleFiles", "as": "stale", "snapshotUid": "@snapA.snapshotUid" },
+    { "op": "queryFileVersionHashes", "as": "hashes", "snapshotUid": "@snapA.snapshotUid" }
+  ]
+}
