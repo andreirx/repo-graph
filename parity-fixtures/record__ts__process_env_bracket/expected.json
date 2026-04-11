@@ -1,0 +1,14 @@
+{
+  "env": [
+    {
+      "varName": "PORT",
+      "accessKind": "required",
+      "accessPattern": "process_env_bracket",
+      "filePath": "input.ts",
+      "lineNumber": 1,
+      "defaultValue": null,
+      "confidence": 0.95
+    }
+  ],
+  "fs": []
+}

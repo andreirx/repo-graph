@@ -1,0 +1,15 @@
+{
+  "env": [],
+  "fs": [
+    {
+      "filePath": "input.java",
+      "lineNumber": 1,
+      "mutationKind": "write_file",
+      "mutationPattern": "java_files_write",
+      "targetPath": null,
+      "destinationPath": null,
+      "dynamicPath": true,
+      "confidence": 0.85
+    }
+  ]
+}

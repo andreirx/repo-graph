@@ -1,0 +1,15 @@
+{
+  "env": [],
+  "fs": [
+    {
+      "filePath": "input.rs",
+      "lineNumber": 1,
+      "mutationKind": "create_dir",
+      "mutationPattern": "rust_fs_create_dir",
+      "targetPath": "data/cache",
+      "destinationPath": null,
+      "dynamicPath": false,
+      "confidence": 0.9
+    }
+  ]
+}

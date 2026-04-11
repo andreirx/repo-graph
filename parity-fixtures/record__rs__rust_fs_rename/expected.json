@@ -1,0 +1,15 @@
+{
+  "env": [],
+  "fs": [
+    {
+      "filePath": "input.rs",
+      "lineNumber": 1,
+      "mutationKind": "rename_path",
+      "mutationPattern": "rust_fs_rename",
+      "targetPath": "a.txt",
+      "destinationPath": "b.txt",
+      "dynamicPath": false,
+      "confidence": 0.9
+    }
+  ]
+}

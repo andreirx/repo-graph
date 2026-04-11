@@ -1,0 +1,23 @@
+{
+  "env": [
+    {
+      "varName": "A",
+      "accessKind": "unknown",
+      "accessPattern": "process_env_destructure",
+      "filePath": "input.ts",
+      "lineNumber": 1,
+      "defaultValue": null,
+      "confidence": 0.9
+    },
+    {
+      "varName": "B",
+      "accessKind": "unknown",
+      "accessPattern": "process_env_destructure",
+      "filePath": "input.ts",
+      "lineNumber": 1,
+      "defaultValue": null,
+      "confidence": 0.9
+    }
+  ],
+  "fs": []
+}

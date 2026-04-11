@@ -1,0 +1,14 @@
+{
+  "env": [
+    {
+      "varName": "PORT",
+      "accessKind": "unknown",
+      "accessPattern": "c_getenv",
+      "filePath": "input.c",
+      "lineNumber": 1,
+      "defaultValue": null,
+      "confidence": 0.95
+    }
+  ],
+  "fs": []
+}

@@ -1,0 +1,15 @@
+{
+  "env": [],
+  "fs": [
+    {
+      "filePath": "input.ts",
+      "lineNumber": 1,
+      "mutationKind": "append_file",
+      "mutationPattern": "fs_append_file",
+      "targetPath": "audit.log",
+      "destinationPath": null,
+      "dynamicPath": false,
+      "confidence": 0.9
+    }
+  ]
+}

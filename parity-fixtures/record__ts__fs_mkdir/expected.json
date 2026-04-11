@@ -1,0 +1,15 @@
+{
+  "env": [],
+  "fs": [
+    {
+      "filePath": "input.ts",
+      "lineNumber": 1,
+      "mutationKind": "create_dir",
+      "mutationPattern": "fs_mkdir",
+      "targetPath": "uploads",
+      "destinationPath": null,
+      "dynamicPath": false,
+      "confidence": 0.9
+    }
+  ]
+}

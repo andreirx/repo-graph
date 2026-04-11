@@ -1,0 +1,15 @@
+{
+  "env": [],
+  "fs": [
+    {
+      "filePath": "input.java",
+      "lineNumber": 1,
+      "mutationKind": "create_dir",
+      "mutationPattern": "java_files_create_directory",
+      "targetPath": "uploads",
+      "destinationPath": null,
+      "dynamicPath": false,
+      "confidence": 0.85
+    }
+  ]
+}

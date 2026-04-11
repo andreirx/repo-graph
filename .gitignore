@@ -8,6 +8,12 @@ build/
 # TypeScript cache
 *.tsbuildinfo
 
+# Rust workspace build output (cargo).
+# Cargo.lock IS committed because the workspace will produce binary
+# artifacts (the daemon CLI). This matches the Node toolchain pinning
+# discipline: exact, reproducible builds across contributors.
+rust/target/
+
 # SQLite databases (local working data, not committed)
 *.db
 *.db-journal

@@ -1,0 +1,15 @@
+{
+  "env": [],
+  "fs": [
+    {
+      "filePath": "input.ts",
+      "lineNumber": 1,
+      "mutationKind": "copy_path",
+      "mutationPattern": "fs_copy_file",
+      "targetPath": "src.txt",
+      "destinationPath": "dst.txt",
+      "dynamicPath": false,
+      "confidence": 0.9
+    }
+  ]
+}

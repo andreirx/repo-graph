@@ -1,0 +1,15 @@
+{
+  "env": [],
+  "fs": [
+    {
+      "filePath": "input.java",
+      "lineNumber": 1,
+      "mutationKind": "delete_path",
+      "mutationPattern": "java_files_delete",
+      "targetPath": "tmp.dat",
+      "destinationPath": null,
+      "dynamicPath": false,
+      "confidence": 0.85
+    }
+  ]
+}

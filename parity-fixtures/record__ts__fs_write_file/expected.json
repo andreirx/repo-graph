@@ -1,0 +1,15 @@
+{
+  "env": [],
+  "fs": [
+    {
+      "filePath": "input.ts",
+      "lineNumber": 1,
+      "mutationKind": "write_file",
+      "mutationPattern": "fs_write_file",
+      "targetPath": "out.txt",
+      "destinationPath": null,
+      "dynamicPath": false,
+      "confidence": 0.9
+    }
+  ]
+}

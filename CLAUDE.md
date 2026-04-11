@@ -43,12 +43,22 @@ Read `docs/architecture/` for full context. Summary:
 
 ```
 pnpm run build          Build TypeScript
-pnpm run test           Build + run all tests (includes CLI integration)
-pnpm run test:int       Run integration tests only (test/adapters)
+pnpm run test           Build + run all TS tests (includes CLI integration)
+pnpm run test:int       Run TS integration tests only (test/adapters)
 pnpm run test:cli       Build + run CLI integration tests only (test/cli)
+pnpm run test:rust      Run the Rust detector crate suite (requires cargo on PATH)
+pnpm run test:parity    Run the cross-runtime parity harness (TS half + Rust half)
+pnpm run test:all       Composite acceptance: full TS suite + full Rust suite
 pnpm run lint           Run Biome linter
 pnpm run lint:fix       Auto-fix lint issues
 ```
+
+The Rust scripts (`test:rust`, `test:parity`, `test:all`) shell out to
+`cargo` and require a Rust toolchain. The pinned channel lives in
+`rust/rust-toolchain.toml`. If `cargo` is not on PATH the scripts fail
+fast with an actionable error pointing at rustup. TS-only contributors
+who never touch the Rust crates can ignore these scripts; `pnpm test`
+remains unchanged and does not require cargo.
 
 ## Native dependency note
 

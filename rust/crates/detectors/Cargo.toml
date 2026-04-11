@@ -1,0 +1,58 @@
+# ── repo-graph-detectors ──────────────────────────────────────────
+#
+# Rust port of the operational dependency seam detector substrate.
+# Mirror of the TypeScript implementation under
+# `src/core/seams/detectors/` and `src/core/seams/comment-masker.ts`.
+#
+# Slice scope (Rust-1):
+#   - parse the same `detectors.toml` as the TS runtime
+#   - implement the strict-validating loader
+#   - implement the comment masker (positional, language-aware)
+#   - implement the generic walker
+#   - implement the 11 named hooks
+#   - expose the same public wrapper API:
+#       detect_env_accesses(content, file_path) -> Vec<DetectedEnvDependency>
+#       detect_fs_mutations(content, file_path) -> Vec<DetectedFsMutation>
+#
+# NOT in scope: SQLite, indexer, daemon, tree-sitter, or any
+# integration with the rest of the codebase. The crate is a
+# standalone substrate library.
+#
+# Parity acceptance: structurally identical JSON output against the
+# curated `parity-fixtures/` corpus, compared byte-for-byte after
+# serialization with `serde(rename_all = "camelCase")`.
+
+[package]
+name         = "repo-graph-detectors"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Rust port of the operational dependency seam detector substrate"
+publish      = false
+
+[dependencies]
+# TOML 1.0 parser, the canonical Rust crate maintained by toml-lang.
+# Matches the TS-side @iarna/toml choice in spec strictness.
+toml = "0.8"
+
+# Serde for typed deserialization of detector records and JSON
+# serialization of fact outputs. The wrapper output uses
+# `rename_all = "camelCase"` to match the TS public API shape.
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Linear-time regex engine. Compatible with every regex in
+# `detectors.toml` (no lookarounds, no backreferences). Linear-time
+# matching is the safety property we want for the detector hot path.
+regex = "1"
+
+# Typed error enum for loader and walker failures. Matches the
+# TS-side `DetectorLoadError` shape; each variant carries enough
+# context (record index, pattern_id, field name) for the error
+# message to identify the offending declaration unambiguously.
+thiserror = "2"
+
+[dev-dependencies]
+# Used by parity tests to walk the fixture directory.
+walkdir = "2"

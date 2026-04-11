@@ -1,0 +1,14 @@
+{
+  "env": [
+    {
+      "varName": "PORT",
+      "accessKind": "required",
+      "accessPattern": "os_environ",
+      "filePath": "input.py",
+      "lineNumber": 1,
+      "defaultValue": null,
+      "confidence": 0.95
+    }
+  ],
+  "fs": []
+}

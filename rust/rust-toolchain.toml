@@ -1,0 +1,15 @@
+# Rust toolchain pin for the repo-graph workspace.
+#
+# Cargo automatically respects this file when invoked from within
+# `rust/` or any subdirectory. It does NOT affect anything outside
+# `rust/`, so the Node-only workflows in the repo root remain
+# untouched.
+#
+# Pinned to 1.93.0 (the locally validated toolchain at the start of
+# the Rust-1 slice). Bumping requires explicit acknowledgment in
+# this file and a fresh `cargo test` baseline.
+
+[toolchain]
+channel = "1.93.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

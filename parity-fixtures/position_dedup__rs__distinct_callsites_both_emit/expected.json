@@ -1,0 +1,25 @@
+{
+  "env": [],
+  "fs": [
+    {
+      "filePath": "input.rs",
+      "lineNumber": 1,
+      "mutationKind": "write_file",
+      "mutationPattern": "rust_fs_write",
+      "targetPath": "a.txt",
+      "destinationPath": null,
+      "dynamicPath": false,
+      "confidence": 0.9
+    },
+    {
+      "filePath": "input.rs",
+      "lineNumber": 1,
+      "mutationKind": "write_file",
+      "mutationPattern": "rust_fs_write",
+      "targetPath": "b.txt",
+      "destinationPath": null,
+      "dynamicPath": false,
+      "confidence": 0.9
+    }
+  ]
+}

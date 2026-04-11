@@ -1,0 +1,15 @@
+{
+  "env": [],
+  "fs": [
+    {
+      "filePath": "input.c",
+      "lineNumber": 1,
+      "mutationKind": "delete_path",
+      "mutationPattern": "c_rmdir",
+      "targetPath": "empty",
+      "destinationPath": null,
+      "dynamicPath": false,
+      "confidence": 0.9
+    }
+  ]
+}

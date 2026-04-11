@@ -1,0 +1,15 @@
+{
+  "env": [],
+  "fs": [
+    {
+      "filePath": "input.ts",
+      "lineNumber": 1,
+      "mutationKind": "write_file",
+      "mutationPattern": "fs_create_write_stream",
+      "targetPath": "output.bin",
+      "destinationPath": null,
+      "dynamicPath": false,
+      "confidence": 0.9
+    }
+  ]
+}

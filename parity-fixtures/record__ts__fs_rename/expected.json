@@ -1,0 +1,15 @@
+{
+  "env": [],
+  "fs": [
+    {
+      "filePath": "input.ts",
+      "lineNumber": 1,
+      "mutationKind": "rename_path",
+      "mutationPattern": "fs_rename",
+      "targetPath": "old.txt",
+      "destinationPath": "new.txt",
+      "dynamicPath": false,
+      "confidence": 0.9
+    }
+  ]
+}

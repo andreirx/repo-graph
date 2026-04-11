@@ -1,0 +1,15 @@
+{
+  "env": [],
+  "fs": [
+    {
+      "filePath": "input.py",
+      "lineNumber": 1,
+      "mutationKind": "write_file",
+      "mutationPattern": "py_open_write",
+      "targetPath": null,
+      "destinationPath": null,
+      "dynamicPath": true,
+      "confidence": 0.85
+    }
+  ]
+}

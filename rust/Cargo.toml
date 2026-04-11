@@ -1,0 +1,32 @@
+# ── repo-graph Rust workspace ─────────────────────────────────────
+#
+# This workspace is the Rust track of the repo-graph daemon
+# prototype-then-port path. The first member crate is the detector
+# substrate port (Rust-1 slice). Future member crates will be added
+# as they are needed for storage, walker, indexer, daemon, etc.
+#
+# Operating model: O-C zipper. The TS implementation defines or
+# refines a contract; the matching Rust slice ports it; parity is
+# verified before the next contract-changing TS slice. The Rust
+# workspace exists alongside the TS source tree, NOT inside it.
+#
+# Parity surface: `parity-fixtures/` at the repo root contains the
+# curated cross-runtime contract test corpus. Both this workspace
+# and the TS test harness consume the same fixtures.
+#
+# Workspace resolver "2" is required for >= Rust 2021 edition.
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/detectors",
+]
+
+# Shared profile settings: optimize for correctness and clear errors
+# during the prototype-then-port phase, not raw speed.
+[profile.dev]
+debug = true
+
+[profile.release]
+debug = "line-tables-only"
+lto = "thin"

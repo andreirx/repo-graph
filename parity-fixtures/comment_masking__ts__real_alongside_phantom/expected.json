@@ -1,0 +1,14 @@
+{
+  "env": [
+    {
+      "varName": "REAL",
+      "accessKind": "required",
+      "accessPattern": "process_env_dot",
+      "filePath": "input.ts",
+      "lineNumber": 2,
+      "defaultValue": null,
+      "confidence": 0.95
+    }
+  ],
+  "fs": []
+}
