@@ -1,0 +1,15 @@
+{
+  "fn": "compute_trust_report",
+  "snapshotUid": "snap1",
+  "basisCommit": null,
+  "toolchain": null,
+  "diagnostics": null,
+  "filePaths": [],
+  "moduleStats": [],
+  "pathPrefixCycles": [],
+  "activeEntrypointCount": 1,
+  "resolvedCalls": 0,
+  "callsClassificationCounts": [],
+  "allClassificationCounts": [],
+  "unknownCallsSamples": []
+}

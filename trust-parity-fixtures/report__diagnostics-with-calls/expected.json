@@ -1,0 +1,121 @@
+{
+  "snapshot_uid": "snap2",
+  "basis_commit": "abc123",
+  "toolchain": {
+    "schema_compat": 1,
+    "extractor": "ts-base:1.0.0"
+  },
+  "diagnostics_version": 1,
+  "summary": {
+    "edges_total": 200,
+    "edges_resolved": 200,
+    "unresolved_total": 30,
+    "resolved_calls": 80,
+    "unresolved_calls": 25,
+    "unresolved_calls_external": 10,
+    "unresolved_calls_internal_like": 15,
+    "call_resolution_rate": 0.8421052631578947,
+    "reliability": {
+      "import_graph": {
+        "level": "LOW",
+        "reasons": [
+          "unresolved_imports=5"
+        ]
+      },
+      "call_graph": {
+        "level": "MEDIUM",
+        "reasons": [
+          "call_resolution_rate=84.2%_below_85%"
+        ]
+      },
+      "dead_code": {
+        "level": "HIGH",
+        "reasons": []
+      },
+      "change_impact": {
+        "level": "LOW",
+        "reasons": [
+          "import_graph_reliability_low"
+        ]
+      }
+    },
+    "triggered_downgrades": {
+      "framework_heavy_suspicion": {
+        "triggered": false,
+        "reasons": []
+      },
+      "registry_pattern_suspicion": {
+        "triggered": false,
+        "reasons": []
+      },
+      "missing_entrypoint_declarations": {
+        "triggered": false,
+        "reasons": []
+      },
+      "alias_resolution_suspicion": {
+        "triggered": false,
+        "reasons": []
+      }
+    }
+  },
+  "categories": [
+    {
+      "category": "calls_obj_method_needs_type_info",
+      "label": "CALLS obj.method (needs type info)",
+      "unresolved": 15
+    },
+    {
+      "category": "calls_function_ambiguous_or_missing",
+      "label": "CALLS function (ambiguous or missing)",
+      "unresolved": 10
+    },
+    {
+      "category": "imports_file_not_found",
+      "label": "IMPORTS (file not found)",
+      "unresolved": 5
+    }
+  ],
+  "classifications": [
+    {
+      "classification": "unknown",
+      "count": 18
+    },
+    {
+      "classification": "external_library_candidate",
+      "count": 12
+    }
+  ],
+  "unknown_calls_blast_radius": {
+    "low": 2,
+    "medium": 0,
+    "high": 0
+  },
+  "enrichment_status": null,
+  "modules": [
+    {
+      "module_stable_key": "r1:src/api:MODULE",
+      "qualified_name": "src/api",
+      "fan_in": 0,
+      "fan_out": 2,
+      "file_count": 2,
+      "suspicious_zero_connectivity": false,
+      "trust_notes": []
+    },
+    {
+      "module_stable_key": "r1:src/core:MODULE",
+      "qualified_name": "src/core",
+      "fan_in": 2,
+      "fan_out": 1,
+      "file_count": 3,
+      "suspicious_zero_connectivity": false,
+      "trust_notes": []
+    }
+  ],
+  "caveats": [
+    "Call-graph reliability is MEDIUM on this repo. Do not use callers/callees for safety-critical decisions without verification.",
+    "Import-graph reliability is LOW. Module fan-in/fan-out and change-impact propagation may undercount relationships.",
+    "Change-impact reliability is LOW. Impacted-module sets may be incomplete on this repo.",
+    "Cycle payloads currently emit leaf module names only; full stable keys are not in the user-facing `graph cycles` output."
+  ],
+  "diagnostics_available": true
+}

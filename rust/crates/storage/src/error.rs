@@ -70,6 +70,20 @@ pub enum StorageError {
 		reason: String,
 	},
 
+	/// A storage method that has been declared in the
+	/// `TrustStorageRead` trait but not yet implemented in the
+	/// adapter. Returns through the typed error channel instead
+	/// of panicking via `todo!()`, so callers can handle it
+	/// explicitly.
+	///
+	/// Added in R4-E for the 4 complex methods deferred to R4-F.
+	/// R4-F has landed and all methods are now implemented. This
+	/// variant is currently unreachable and can be removed in a
+	/// future cleanup pass. Kept for now to avoid a breaking
+	/// change on the public `StorageError` enum.
+	#[error("storage method not yet implemented: {0}")]
+	NotImplemented(String),
+
 	/// `insert_nodes` detected two or more nodes in the input
 	/// batch that share the same `stable_key`. This is an
 	/// identity-model defect — either an extractor bug

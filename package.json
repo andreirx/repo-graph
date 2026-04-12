@@ -18,6 +18,7 @@
     "test:parity": "vitest run test/parity && pnpm run _cargo:check && cargo test --manifest-path rust/Cargo.toml -p repo-graph-detectors --test parity",
     "test:storage:parity": "vitest run test/storage-parity && pnpm run _cargo:check && cargo test --manifest-path rust/Cargo.toml -p repo-graph-storage --test parity",
     "test:classification:parity": "vitest run test/classification-parity && pnpm run _cargo:check && cargo test --manifest-path rust/Cargo.toml -p repo-graph-classification --test parity",
+    "test:trust:parity": "vitest run test/trust-parity && pnpm run _cargo:check && cargo test --manifest-path rust/Cargo.toml -p repo-graph-trust --test parity",
     "test:all": "pnpm run test && pnpm run test:rust",
     "test:live": "vitest run --config vitest.live.config.ts",
     "lint": "biome check src/ test/",

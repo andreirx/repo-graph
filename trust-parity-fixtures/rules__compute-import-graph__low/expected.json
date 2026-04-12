@@ -1,0 +1,7 @@
+{
+  "level": "LOW",
+  "reasons": [
+    "alias_resolution_suspicion",
+    "unresolved_imports=3"
+  ]
+}

@@ -330,12 +330,23 @@ dependencies = [
 name = "repo-graph-storage"
 version = "0.1.0"
 dependencies = [
+ "repo-graph-trust",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
  "uuid",
+]
+
+[[package]]
+name = "repo-graph-trust"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-classification",
+ "serde",
+ "serde_json",
+ "walkdir",
 ]
 
 [[package]]

@@ -1,0 +1,62 @@
+{
+  "snapshot_uid": "snap1",
+  "basis_commit": null,
+  "toolchain": null,
+  "diagnostics_version": null,
+  "summary": {
+    "edges_total": 0,
+    "edges_resolved": 0,
+    "unresolved_total": 0,
+    "resolved_calls": 0,
+    "unresolved_calls": 0,
+    "unresolved_calls_external": 0,
+    "unresolved_calls_internal_like": 0,
+    "call_resolution_rate": 1.0,
+    "reliability": {
+      "import_graph": {
+        "level": "HIGH",
+        "reasons": []
+      },
+      "call_graph": {
+        "level": "HIGH",
+        "reasons": []
+      },
+      "dead_code": {
+        "level": "HIGH",
+        "reasons": []
+      },
+      "change_impact": {
+        "level": "HIGH",
+        "reasons": []
+      }
+    },
+    "triggered_downgrades": {
+      "framework_heavy_suspicion": {
+        "triggered": false,
+        "reasons": []
+      },
+      "registry_pattern_suspicion": {
+        "triggered": false,
+        "reasons": []
+      },
+      "missing_entrypoint_declarations": {
+        "triggered": false,
+        "reasons": []
+      },
+      "alias_resolution_suspicion": {
+        "triggered": false,
+        "reasons": []
+      }
+    }
+  },
+  "categories": [],
+  "classifications": [],
+  "unknown_calls_blast_radius": null,
+  "enrichment_status": null,
+  "modules": [],
+  "caveats": [
+    "Extraction diagnostics unavailable for this snapshot. Re-index to populate.",
+    "Cycle payloads currently emit leaf module names only; full stable keys are not in the user-facing `graph cycles` output."
+  ],
+  "diagnostics_available": false
+}

@@ -151,6 +151,7 @@ pub mod crud;
 pub(crate) mod diagnostic;
 pub mod error;
 pub mod migrations;
+mod trust_impl; // TrustStorageRead impl for StorageConnection (R4-E/F)
 pub mod types;
 
 // Convenience re-exports for the public connection lifecycle API.

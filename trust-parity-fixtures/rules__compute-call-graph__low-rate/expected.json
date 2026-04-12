@@ -1,0 +1,6 @@
+{
+  "level": "LOW",
+  "reasons": [
+    "call_resolution_rate=9.1%_below_50%"
+  ]
+}

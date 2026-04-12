@@ -1,0 +1,6 @@
+{
+  "triggered": true,
+  "reasons": [
+    "suspicious_zero_connectivity_modules=5"
+  ]
+}

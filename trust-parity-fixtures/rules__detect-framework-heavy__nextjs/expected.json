@@ -1,0 +1,7 @@
+{
+  "triggered": true,
+  "reasons": [
+    "nextjs_app_router_detected",
+    "react_heavy_tsx_ratio"
+  ]
+}

@@ -117,6 +117,17 @@ thiserror = "2"
 # exactly (`randomUUID()` is v4 only).
 uuid = { version = "1", features = ["v4"] }
 
+# Trust crate — added in R4-E so the storage crate (adapter) can
+# implement the TrustStorageRead trait defined by the trust crate
+# (policy). Dependency direction: adapter → policy (outer → inner),
+# which follows the Clean Architecture dependency rule.
+#
+# The storage crate imports only the TrustStorageRead trait plus
+# its supporting DTOs (TrustModuleStats, PathPrefixModuleCycle,
+# ClassificationCountRow, TrustUnresolvedEdgeSample, etc.).
+# It does NOT import trust rules, trust types, or TrustReport.
+repo-graph-trust = { path = "../trust" }
+
 [dev-dependencies]
 # tempfile for tests that need a real file-backed SQLite database
 # in a unique temporary path. Added in R2-D when the connection

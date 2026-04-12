@@ -1,0 +1,46 @@
+{
+  "fn": "compute_trust_report",
+  "snapshotUid": "snap2",
+  "basisCommit": "abc123",
+  "toolchain": {"schema_compat": 1, "extractor": "ts-base:1.0.0"},
+  "diagnostics": {
+    "diagnostics_version": 1,
+    "edges_total": 200,
+    "unresolved_total": 30,
+    "unresolved_breakdown": {
+      "calls_obj_method_needs_type_info": 15,
+      "calls_function_ambiguous_or_missing": 10,
+      "imports_file_not_found": 5
+    }
+  },
+  "filePaths": ["src/index.ts", "src/server.ts", "src/db.ts"],
+  "moduleStats": [
+    {"stableKey": "r1:src/api:MODULE", "path": "src/api", "fanIn": 0, "fanOut": 2, "fileCount": 2},
+    {"stableKey": "r1:src/core:MODULE", "path": "src/core", "fanIn": 2, "fanOut": 1, "fileCount": 3}
+  ],
+  "pathPrefixCycles": [],
+  "activeEntrypointCount": 1,
+  "resolvedCalls": 80,
+  "callsClassificationCounts": [
+    {"classification": "external_library_candidate", "count": 10},
+    {"classification": "unknown", "count": 15}
+  ],
+  "allClassificationCounts": [
+    {"classification": "external_library_candidate", "count": 12},
+    {"classification": "unknown", "count": 18}
+  ],
+  "unknownCallsSamples": [
+    {
+      "category": "calls_obj_method_needs_type_info",
+      "basisCode": "receiver_matches_external_import",
+      "sourceNodeVisibility": "export",
+      "metadataJson": null
+    },
+    {
+      "category": "calls_function_ambiguous_or_missing",
+      "basisCode": "callee_matches_same_file_symbol",
+      "sourceNodeVisibility": null,
+      "metadataJson": null
+    }
+  ]
+}

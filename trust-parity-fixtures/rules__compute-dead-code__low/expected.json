@@ -1,0 +1,6 @@
+{
+  "level": "LOW",
+  "reasons": [
+    "missing_entrypoint_declarations"
+  ]
+}

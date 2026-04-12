@@ -1,0 +1,6 @@
+{
+  "triggered": true,
+  "reasons": [
+    "ancestor_with_3_parent_child_cycles:r1:src/core:MODULE"
+  ]
+}

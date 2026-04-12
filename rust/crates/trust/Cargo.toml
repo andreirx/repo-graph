@@ -1,0 +1,63 @@
+# ── repo-graph-trust ──────────────────────────────────────────────
+#
+# Rust port of the trust reporting substrate. Mirror of the
+# TypeScript implementation under `src/core/trust/`.
+#
+# Slice scope (Rust-4):
+#   - port types.ts, rules.ts, service.ts as a two-layer design:
+#     1. Pure trust computation from TrustComputationInput
+#        (no storage import, no SQL knowledge)
+#     2. Storage-backed input assembly via TrustStorageRead trait
+#        defined in this crate (dependency inversion)
+#   - supporting read-only storage methods added to
+#     repo-graph-storage (7 named methods, no write side)
+#
+# Architecture (D-4-1 override — trait abstraction):
+#   - This crate is POLICY code. It defines the TrustStorageRead
+#     trait (the read port it needs). The storage crate (adapter)
+#     implements the trait on StorageConnection.
+#   - This crate does NOT depend on repo-graph-storage.
+#   - This crate depends on repo-graph-classification for the
+#     classification types it consumes (UnresolvedEdgeCategory,
+#     BlastRadiusAssessment, etc.) — policy → policy, follows
+#     the dependency rule.
+#
+# NOT in scope:
+#   - tree-sitter / extractors
+#   - indexer / daemon orchestration
+#   - CLI formatting (trust produces TrustReport; CLI adapts it)
+#   - write-side storage methods
+#   - schema changes / new migrations
+#   - humanLabelForCategory — originally deferred as "display-time
+#     rendering, stays TS." Ported as pub(crate) in service.rs per
+#     R4-G lock deviation: the label is part of TrustReport DTO parity.
+#   - better-sqlite3 debt
+
+[package]
+name         = "repo-graph-trust"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Rust port of the repo-graph trust reporting substrate"
+publish      = false
+
+[dependencies]
+# Classification crate — for the policy types trust consumes:
+# UnresolvedEdgeCategory, BlastRadiusAssessment, etc.
+# Policy → policy dependency, follows the dependency rule.
+repo-graph-classification = { path = "../classification" }
+
+# Serde for DTO derives on the trust report types.
+serde = { version = "1", features = ["derive"] }
+
+# serde_json needed by the service layer to parse JSON strings
+# from storage (extraction_diagnostics_json, toolchain_json).
+# Also used by TrustStorageRead trait return types if any carry
+# arbitrary JSON metadata. Added at R4-A per the D-A1 lesson:
+# the service port already knows it needs JSON parsing.
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+# walkdir for parity-fixture corpus discovery (R4-H).
+walkdir = "2"
