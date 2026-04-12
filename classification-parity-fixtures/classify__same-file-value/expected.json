@@ -1,0 +1,4 @@
+{
+  "classification": "internal_candidate",
+  "basisCode": "callee_matches_same_file_symbol"
+}

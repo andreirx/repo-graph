@@ -1,0 +1,1 @@
+{"fn":"compute_matcher_key","mechanism":"http","address":"/api/orders/{id}","metadata":{"httpMethod":"GET"}}

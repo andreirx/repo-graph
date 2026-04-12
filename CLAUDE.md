@@ -46,16 +46,18 @@ pnpm run build                Build TypeScript
 pnpm run test                 Build + run all default TS tests (includes CLI integration)
 pnpm run test:int             Run TS integration tests only (test/adapters)
 pnpm run test:cli             Build + run CLI integration tests only (test/cli)
-pnpm run test:rust            Run ALL Rust workspace crates (detectors + storage); requires cargo on PATH
-pnpm run test:parity          Run the detector cross-runtime parity harness (TS half + Rust half)
-pnpm run test:storage:parity  Run the storage cross-runtime parity harness (TS half + Rust half)
-pnpm run test:all             Composite acceptance: full default TS suite + full Rust workspace
+pnpm run test:rust                   Run ALL Rust workspace crates (detectors + storage + classification)
+pnpm run test:parity                 Run the detector cross-runtime parity harness (TS half + Rust half)
+pnpm run test:storage:parity         Run the storage cross-runtime parity harness (TS half + Rust half)
+pnpm run test:classification:parity  Run the classification cross-runtime parity harness (TS half + Rust half)
+pnpm run test:all                    Composite acceptance: full default TS suite + full Rust workspace
 pnpm run test:live            Run live external-tool integration tests (test/live, opt-in)
 pnpm run lint                 Run Biome linter
 pnpm run lint:fix             Auto-fix lint issues
 ```
 
 The Rust scripts (`test:rust`, `test:parity`, `test:storage:parity`,
+`test:classification:parity`,
 `test:all`) shell out to `cargo` and require a Rust toolchain. The
 pinned channel lives in `rust/rust-toolchain.toml`. If `cargo` is not
 on PATH the scripts fail fast with an actionable error pointing at
@@ -73,13 +75,15 @@ corresponding shared fixture corpus) AND the Rust half (via the
 qualified `cargo test -p <crate> --test parity` invocation). They
 share the same cargo-guard prefix.
 
-The two parity surfaces (detector parity in `parity-fixtures/`,
-storage parity in `storage-parity-fixtures/`) are deliberately
-independent scripts. A detector-code change runs `test:parity` for
-fast feedback without paying the storage harness cost; a storage-code
-change runs `test:storage:parity` for the inverse. `test:all`
-transitively covers both (via `test` + `test:rust`) for contributors
-who want comprehensive coverage in one command.
+The three parity surfaces (detector parity in `parity-fixtures/`,
+storage parity in `storage-parity-fixtures/`, classification parity
+in `classification-parity-fixtures/`) are deliberately independent
+scripts. A detector-code change runs `test:parity` for fast feedback
+without paying the storage or classification harness cost; a
+storage-code change runs `test:storage:parity`; a classification-code
+change runs `test:classification:parity`. `test:all` transitively
+covers all three (via `test` + `test:rust`) for contributors who want
+comprehensive coverage in one command.
 
 `pnpm run test:live` is a peer surface that runs the live external-tool
 integration tests under `test/live/` (currently jdtls and rust-analyzer

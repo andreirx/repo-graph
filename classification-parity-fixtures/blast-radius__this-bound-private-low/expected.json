@@ -1,0 +1,5 @@
+{
+  "receiverOrigin": "this_bound",
+  "enclosingScopeSignificance": "internal_private",
+  "blastRadius": "low"
+}

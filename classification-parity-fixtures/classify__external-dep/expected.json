@@ -1,0 +1,4 @@
+{
+  "classification": "external_library_candidate",
+  "basisCode": "callee_matches_external_import"
+}

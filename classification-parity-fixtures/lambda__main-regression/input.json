@@ -1,0 +1,1 @@
+{"fn":"detect_lambda_entrypoints","importBindings":[{"identifier":"Handler","specifier":"aws-lambda","isRelative":false,"location":null,"isTypeOnly":true}],"exportedSymbols":[{"stableKey":"r1:src/index.ts#main:SYMBOL:FUNCTION","name":"main","visibility":"export","subtype":"FUNCTION"}]}

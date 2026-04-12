@@ -19,6 +19,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/classification",
     "crates/detectors",
     "crates/storage",
 ]

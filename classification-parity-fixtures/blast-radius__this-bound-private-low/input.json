@@ -1,0 +1,1 @@
+{"fn":"derive_blast_radius","category":"calls_obj_method_needs_type_info","basisCode":"this_receiver_implies_internal","sourceNodeVisibility":"private"}

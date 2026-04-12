@@ -1,0 +1,8 @@
+[
+  {
+    "targetStableKey": "r1:src/index.ts#handler:SYMBOL:FUNCTION",
+    "convention": "lambda_exported_handler",
+    "confidence": 0.9,
+    "reason": "exported function \"handler\" in file importing Lambda types"
+  }
+]

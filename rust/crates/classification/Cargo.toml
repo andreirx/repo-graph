@@ -1,0 +1,124 @@
+# ── repo-graph-classification ─────────────────────────────────────
+#
+# Rust port of the core classification substrate. Mirror of the
+# TypeScript implementation under `src/core/classification/` plus
+# the necessary type deps from `src/core/diagnostics/`.
+#
+# Slice scope (Rust-3):
+#   - port all 7 files in src/core/classification/ as pure Rust
+#     policy code
+#   - port src/core/diagnostics/unresolved-edge-categories.ts and
+#     src/core/diagnostics/unresolved-edge-classification.ts as
+#     type deps (consumed by the classifier and blast-radius)
+#   - mirror ONLY the ImportBinding type from
+#     src/core/ports/extractor.ts (the rest of the extractor port
+#     stays TS-only)
+#   - expose a narrow public API:
+#       classify_unresolved_edge
+#       derive_blast_radius
+#       compute_matcher_key
+#       match_boundary_facts
+#       detect_framework_boundary
+#       detect_lambda_entrypoints
+#   - plus the shared types module
+#
+# NOT in scope (explicit deferrals from R3 lock):
+#   - extractor port itself (ExtractorPort interface, adapters,
+#     tree-sitter glue)
+#   - indexer orchestration
+#   - storage integration
+#   - trust reporting (Rust-4 candidate)
+#   - async / tokio / runtime scaffolding
+#   - cross-mechanism boundary matching (HTTP ↔ gRPC)
+#   - new framework detectors beyond Express routes and Lambda
+#     handlers
+#
+# Operating model: O-C zipper. Mirrors the discipline used in the
+# Rust-1 detector substrate port and the Rust-2 storage substrate
+# port. The TS implementation is the source of truth for behavior;
+# this crate ports it; parity is verified before any contract-
+# changing TS slice.
+#
+# Parity surface: `classification-parity-fixtures/` at the repo
+# root will contain the curated cross-runtime contract test
+# corpus (added in R3-G). Per-fixture directory layout, one
+# function call per fixture, `input.json` + `expected.json` pair.
+# No normalization is needed because classification outputs have
+# no generated UIDs or timestamps.
+#
+# ── Dep discipline (R3-A lock override) ─────────────────────────
+#
+# Per the R3 lock, this crate starts with ONLY `serde` at R3-A.
+# Speculative deps are the wrong shape for a pure-policy slice:
+#
+#   - `serde_json` is added in R3-G when the parity harness
+#     actually needs it for fixture loading and JSON comparison.
+#     Not needed before then.
+#
+#   - `thiserror` is NOT added unless a real public error surface
+#     appears. Classification is deterministic transform code, not
+#     an error-producing I/O boundary. `unresolved-classifier.ts`,
+#     `signals.ts`, and `boundary-matcher.ts` are all pure
+#     functions that return verdicts, not fallible operations.
+#     If a future R3 substep discovers a real error surface
+#     (e.g., structured malformed-input handling), thiserror can
+#     be added then.
+#
+#   - No rusqlite, no uuid, no regex, no tree-sitter, no tokio,
+#     no tempfile, no walkdir. The dep set at R3-A is the
+#     smallest of any Rust workspace crate so far.
+
+[package]
+name         = "repo-graph-classification"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Rust port of the repo-graph core classification substrate"
+publish      = false
+
+[dependencies]
+# Serde for hand-rolled DTO derives. Used throughout the types
+# module for the shared parity-boundary representation. The
+# `derive` feature enables #[derive(Serialize, Deserialize)] on
+# the typed Rust enums (per D-A2 lock) and the parity-boundary
+# structs.
+serde = { version = "1", features = ["derive"] }
+
+# serde_json added at R3-B (narrow D-A1 timing correction, not a
+# general relaxation of the "no speculative deps" rule).
+#
+# Why it is required at R3-B and not deferred to R3-G:
+#   - BoundaryProviderFact.metadata and BoundaryConsumerFact.metadata
+#     are `Record<string, unknown>` in the TS DTO contract
+#     (src/core/classification/api-boundary.ts:96 and :128). The
+#     only idiomatic Rust equivalent is
+#     `serde_json::Map<String, serde_json::Value>`.
+#   - boundary-matcher.ts:82 already consumes metadata semantically
+#     as input to computeMatcherKey. The field is not a future
+#     convenience; it is an existing part of the DTO contract.
+#   - Deferring the field from R3-B's type surface would leave an
+#     incomplete DTO and force a later correction. Representing
+#     metadata as escaped JSON strings (Vec<(String, String)>) would
+#     corrupt the JSON shape at the parity boundary.
+#
+# The `preserve_order` feature is required for the same reason R2-E
+# needed it: JSON object key order is a parity contract surface.
+# TypeScript's JSON.stringify preserves insertion order; Rust's
+# serde_json with the default BTreeMap would alphabetize keys.
+# The feature switches the underlying Map type to IndexMap, which
+# preserves insertion order and produces byte-equal JSON output
+# across runtimes. Without this feature, metadata object ordering
+# would become a new parity drift surface.
+#
+# Scope discipline: serde_json is used ONLY for the metadata fields
+# on boundary facts. All other DTO fields use native Rust types
+# (String, i64, f64, bool, Option<T>, Vec<T>, typed enums). No
+# speculative use of serde_json::Value for fields that have a
+# concrete Rust type.
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+# walkdir for parity-fixture directory discovery, mirroring the
+# Rust-1 detector and Rust-2 storage parity patterns.
+walkdir = "2"

@@ -1,0 +1,8 @@
+[
+  {
+    "providerFactUid": "p1",
+    "consumerFactUid": "c1",
+    "matchBasis": "operation_match",
+    "confidence": 0.765
+  }
+]

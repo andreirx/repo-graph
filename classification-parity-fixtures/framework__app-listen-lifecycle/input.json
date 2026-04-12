@@ -1,0 +1,1 @@
+{"fn":"detect_framework_boundary","targetKey":"app.listen","category":"calls_obj_method_needs_type_info","importBindings":[{"identifier":"express","specifier":"express","isRelative":false,"location":null,"isTypeOnly":false}]}
