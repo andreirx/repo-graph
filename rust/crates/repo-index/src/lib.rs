@@ -33,14 +33,14 @@
 //! result (child replaces parent entirely per TypeScript merge
 //! rule).
 //!
-//! **API shape:** Two entry points:
-//!   - `index_path(repo_path, db_path, options)` — full composition,
-//!     opens storage, creates extractor, runs pipeline
-//!   - `index_into_storage(repo_path, storage, options)` — accepts
-//!     existing `&mut StorageConnection` for deterministic testing
+//! **API shape:** Four entry points:
+//!   - `index_path` / `index_into_storage` — full index from disk
+//!   - `refresh_path` / `refresh_into_storage` — incremental refresh
+//!   Both share `prepare_repo_inputs` for scanning/config/assembly
+//!   and `persist_read_failures` for read-failure repair.
 //!
-//! **Scope:** Full-index only. No refresh-from-disk, no CLI, no
-//! trust computation. Policy crates unchanged.
+//! **Scope:** Full-index + refresh from disk. No CLI, no trust
+//! computation. Policy crates unchanged.
 //!
 //! ── Intermediate types ───────────────────────────────────────
 //!

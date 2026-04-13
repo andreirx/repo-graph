@@ -1,11 +1,9 @@
 //! Minimal Rust CLI for repo-graph.
 //!
-//! Rust-7B: `index` command.
-//! Rust-8:  `trust` command.
-//!
 //! Commands:
-//!   rgr-rust index <repo_path> <db_path>
-//!   rgr-rust trust <db_path> <repo_uid>
+//!   rgr-rust index   <repo_path> <db_path>
+//!   rgr-rust refresh <repo_path> <db_path>
+//!   rgr-rust trust   <db_path> <repo_uid>
 //!
 //! Exit codes:
 //!   0 — success
@@ -25,6 +23,7 @@ fn main() -> ExitCode {
 
 	match args[1].as_str() {
 		"index" => run_index(&args[2..]),
+		"refresh" => run_refresh(&args[2..]),
 		"trust" => run_trust(&args[2..]),
 		other => {
 			eprintln!("unknown command: {}", other);
@@ -36,8 +35,9 @@ fn main() -> ExitCode {
 
 fn print_usage() {
 	eprintln!("usage:");
-	eprintln!("  rgr-rust index <repo_path> <db_path>");
-	eprintln!("  rgr-rust trust <db_path> <repo_uid>");
+	eprintln!("  rgr-rust index   <repo_path> <db_path>");
+	eprintln!("  rgr-rust refresh <repo_path> <db_path>");
+	eprintln!("  rgr-rust trust   <db_path> <repo_uid>");
 }
 
 // ── index command ────────────────────────────────────────────────
@@ -69,6 +69,50 @@ fn run_index(args: &[String]) -> ExitCode {
 		Ok(result) => {
 			eprintln!(
 				"indexed {} files, {} nodes, {} edges ({} unresolved) → {}",
+				result.files_total,
+				result.nodes_total,
+				result.edges_total,
+				result.edges_unresolved,
+				result.snapshot_uid,
+			);
+			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+// ── refresh command ──────────────────────────────────────────────
+
+fn run_refresh(args: &[String]) -> ExitCode {
+	if args.len() != 2 {
+		eprintln!("usage: rgr-rust refresh <repo_path> <db_path>");
+		return ExitCode::from(1);
+	}
+
+	let repo_path = Path::new(&args[0]);
+	let db_path = Path::new(&args[1]);
+
+	if !repo_path.is_dir() {
+		eprintln!(
+			"error: repo path does not exist or is not a directory: {}",
+			repo_path.display()
+		);
+		return ExitCode::from(1);
+	}
+
+	let repo_uid = repo_path
+		.file_name()
+		.and_then(|n| n.to_str())
+		.unwrap_or("repo");
+
+	use repo_graph_repo_index::compose::{refresh_path, ComposeOptions};
+	match refresh_path(repo_path, db_path, repo_uid, &ComposeOptions::default()) {
+		Ok(result) => {
+			eprintln!(
+				"refreshed {} files, {} nodes, {} edges ({} unresolved) → {}",
 				result.files_total,
 				result.nodes_total,
 				result.edges_total,

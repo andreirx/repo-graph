@@ -4,10 +4,11 @@
 # everything, nothing depends on it.
 #
 # Commands (accumulated by slice):
-#   Rust-7B: `index <repo_path> <db_path>`
-#   Rust-8:  `trust <db_path> <repo_uid>`
+#   Rust-7B: `index   <repo_path> <db_path>`
+#   Rust-8:  `trust   <db_path> <repo_uid>`
+#   Rust-9:  `refresh <repo_path> <db_path>`
 #
-# No graph query commands, no refresh, no formatting-heavy UX.
+# No graph query commands. No formatting-heavy UX.
 
 [package]
 name         = "repo-graph-rgr"
