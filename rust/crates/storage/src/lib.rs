@@ -145,6 +145,8 @@
 //! R2-D: `connection` module exposing `open(path)`,
 //!       `StorageConnection`, lifecycle.
 //! R2-E: CRUD methods on `StorageConnection` for the 6 entities.
+//! R10:  `queries` module — `resolve_symbol` (SYMBOL-only, 3-step
+//!       exact resolution) + `find_direct_callers` (one-hop CALLS).
 
 pub mod connection;
 pub mod crud;
@@ -152,6 +154,7 @@ pub(crate) mod diagnostic;
 pub mod error;
 pub mod migrations;
 mod indexer_impl; // SnapshotLifecyclePort + FileCatalogPort impl (R5-C)
+pub mod queries; // Read-side graph queries (R10+)
 mod trust_impl; // TrustStorageRead impl for StorageConnection (R4-E/F)
 pub mod types;
 

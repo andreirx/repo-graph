@@ -7,8 +7,9 @@
 #   Rust-7B: `index   <repo_path> <db_path>`
 #   Rust-8:  `trust   <db_path> <repo_uid>`
 #   Rust-9:  `refresh <repo_path> <db_path>`
+#   Rust-10: `callers <db_path> <repo_uid> <symbol>`
 #
-# No graph query commands. No formatting-heavy UX.
+# No formatting-heavy UX.
 
 [package]
 name         = "repo-graph-rgr"

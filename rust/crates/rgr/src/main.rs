@@ -4,6 +4,7 @@
 //!   rgr-rust index   <repo_path> <db_path>
 //!   rgr-rust refresh <repo_path> <db_path>
 //!   rgr-rust trust   <db_path> <repo_uid>
+//!   rgr-rust callers <db_path> <repo_uid> <symbol>
 //!
 //! Exit codes:
 //!   0 — success
@@ -25,6 +26,7 @@ fn main() -> ExitCode {
 		"index" => run_index(&args[2..]),
 		"refresh" => run_refresh(&args[2..]),
 		"trust" => run_trust(&args[2..]),
+		"callers" => run_callers(&args[2..]),
 		other => {
 			eprintln!("unknown command: {}", other);
 			print_usage();
@@ -38,6 +40,7 @@ fn print_usage() {
 	eprintln!("  rgr-rust index   <repo_path> <db_path>");
 	eprintln!("  rgr-rust refresh <repo_path> <db_path>");
 	eprintln!("  rgr-rust trust   <db_path> <repo_uid>");
+	eprintln!("  rgr-rust callers <db_path> <repo_uid> <symbol>");
 }
 
 // ── index command ────────────────────────────────────────────────
@@ -196,6 +199,89 @@ fn run_trust(args: &[String]) -> ExitCode {
 		}
 		Err(e) => {
 			eprintln!("error: failed to serialize trust report: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+// ── callers command ──────────────────────────────────────────────
+
+fn run_callers(args: &[String]) -> ExitCode {
+	if args.len() != 3 {
+		eprintln!("usage: rgr-rust callers <db_path> <repo_uid> <symbol>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+	let symbol_query = &args[2];
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Latest READY snapshot (same rule as trust command).
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(snap)) => snap,
+		Ok(None) => {
+			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Resolve symbol (exact match only).
+	use repo_graph_storage::queries::SymbolResolveError;
+	let target = match storage.resolve_symbol(&snapshot.snapshot_uid, symbol_query) {
+		Ok(sym) => sym,
+		Err(SymbolResolveError::NotFound) => {
+			eprintln!("error: symbol not found: {}", symbol_query);
+			return ExitCode::from(2);
+		}
+		Err(SymbolResolveError::Ambiguous(keys)) => {
+			eprintln!("error: ambiguous symbol '{}', matches:", symbol_query);
+			for k in &keys {
+				eprintln!("  {}", k);
+			}
+			return ExitCode::from(2);
+		}
+		Err(SymbolResolveError::Storage(e)) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Find direct callers.
+	let callers = match storage.find_direct_callers(&snapshot.snapshot_uid, &target.stable_key) {
+		Ok(c) => c,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// JSON to stdout.
+	let output = serde_json::json!({
+		"snapshot_uid": snapshot.snapshot_uid,
+		"target": target,
+		"results": callers,
+		"count": callers.len(),
+	});
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
 			ExitCode::from(2)
 		}
 	}
