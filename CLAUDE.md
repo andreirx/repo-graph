@@ -46,7 +46,7 @@ pnpm run build                Build TypeScript
 pnpm run test                 Build + run all default TS tests (includes CLI integration)
 pnpm run test:int             Run TS integration tests only (test/adapters)
 pnpm run test:cli             Build + run CLI integration tests only (test/cli)
-pnpm run test:rust                   Run ALL Rust workspace crates (detectors + storage + classification + trust + indexer + ts-extractor)
+pnpm run test:rust                   Run ALL Rust workspace crates (detectors + storage + classification + trust + indexer + ts-extractor + repo-index + rgr)
 pnpm run test:parity                 Run the detector cross-runtime parity harness (TS half + Rust half)
 pnpm run test:storage:parity         Run the storage cross-runtime parity harness (TS half + Rust half)
 pnpm run test:classification:parity  Run the classification cross-runtime parity harness (TS half + Rust half)
