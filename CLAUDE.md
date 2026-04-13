@@ -53,6 +53,7 @@ pnpm run test:classification:parity  Run the classification cross-runtime parity
 pnpm run test:trust:parity           Run the trust cross-runtime parity harness (TS half + Rust half)
 pnpm run test:indexer:parity         Run the indexer cross-runtime parity harness (TS half + Rust half)
 pnpm run test:ts-extractor:parity   Run the ts-extractor cross-runtime parity harness (TS half + Rust half)
+pnpm run test:interop                Run the cross-runtime DB interop test (Rust writes SQLite, TS reads)
 pnpm run test:all                    Composite acceptance: full default TS suite + full Rust workspace
 pnpm run test:live            Run live external-tool integration tests (test/live, opt-in)
 pnpm run lint                 Run Biome linter
@@ -61,8 +62,8 @@ pnpm run lint:fix             Auto-fix lint issues
 
 The Rust scripts (`test:rust`, `test:parity`, `test:storage:parity`,
 `test:classification:parity`, `test:trust:parity`,
-`test:indexer:parity`, `test:ts-extractor:parity`, `test:all`) shell
-out to `cargo` and require a Rust toolchain. The
+`test:indexer:parity`, `test:ts-extractor:parity`, `test:interop`,
+`test:all`) shell out to `cargo` and require a Rust toolchain. The
 pinned channel lives in `rust/rust-toolchain.toml`. If `cargo` is not
 on PATH the scripts fail fast with an actionable error pointing at
 rustup. TS-only contributors who never touch the Rust crates can
@@ -90,15 +91,21 @@ storage parity in `storage-parity-fixtures/`, classification parity
 in `classification-parity-fixtures/`, trust parity in
 `trust-parity-fixtures/`, indexer parity in
 `indexer-parity-fixtures/`, ts-extractor parity in
-`ts-extractor-parity-fixtures/`) are deliberately independent scripts. A
-detector-code change runs `test:parity` for fast feedback without
-paying the storage, classification, trust, indexer, or extractor harness cost; a
-storage-code change runs `test:storage:parity`; a classification-code
-change runs `test:classification:parity`; a trust-code change runs
-`test:trust:parity`; an indexer-code change runs
-`test:indexer:parity`. `test:all` transitively covers all six (via
-`test` + `test:rust`) for contributors who want comprehensive
+`ts-extractor-parity-fixtures/`) are deliberately independent scripts.
+A detector-code change runs `test:parity` for fast feedback without
+paying the storage, classification, trust, indexer, or extractor harness
+cost; a storage-code change runs `test:storage:parity`; a
+classification-code change runs `test:classification:parity`; a
+trust-code change runs `test:trust:parity`; an indexer-code change
+runs `test:indexer:parity`. `test:all` transitively covers all six
+(via `test` + `test:rust`) for contributors who want comprehensive
 coverage in one command.
+
+`pnpm run test:interop` is a separate cross-runtime acceptance surface
+that builds the Rust `rgr-rust` binary, indexes a checked-in fixture
+repo into a temp SQLite file, then opens that file from the TS storage
+adapter and verifies real read-side operations succeed. It proves that
+Rust-written databases are consumable by the existing TS product layer.
 
 `pnpm run test:live` is a peer surface that runs the live external-tool
 integration tests under `test/live/` (currently jdtls and rust-analyzer

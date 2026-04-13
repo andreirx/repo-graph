@@ -467,6 +467,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-rgr"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-repo-index",
+]
+
+[[package]]
 name = "repo-graph-storage"
 version = "0.1.0"
 dependencies = [

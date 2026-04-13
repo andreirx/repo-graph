@@ -1,0 +1,23 @@
+# ── repo-graph-rgr ─────────────────────────────────────────────────
+#
+# Minimal Rust CLI entry point. Outermost layer — depends on
+# everything, nothing depends on it.
+#
+# Rust-7B scope: one command only (`index`).
+# No trust, no query, no refresh, no output formatting.
+
+[package]
+name         = "repo-graph-rgr"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Minimal Rust CLI for repo-graph indexing"
+publish      = false
+
+[[bin]]
+name = "rgr-rust"
+path = "src/main.rs"
+
+[dependencies]
+repo-graph-repo-index = { path = "../repo-index" }

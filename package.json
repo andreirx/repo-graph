@@ -21,6 +21,7 @@
     "test:trust:parity": "vitest run test/trust-parity && pnpm run _cargo:check && cargo test --manifest-path rust/Cargo.toml -p repo-graph-trust --test parity",
     "test:indexer:parity": "vitest run test/indexer-parity && pnpm run _cargo:check && cargo test --manifest-path rust/Cargo.toml -p repo-graph-indexer --test parity",
     "test:ts-extractor:parity": "vitest run test/ts-extractor-parity && pnpm run _cargo:check && cargo test --manifest-path rust/Cargo.toml -p repo-graph-ts-extractor --test parity",
+    "test:interop": "pnpm run _cargo:check && cargo build --manifest-path rust/Cargo.toml -p repo-graph-rgr && vitest run test/interop",
     "test:all": "pnpm run test && pnpm run test:rust",
     "test:live": "vitest run --config vitest.live.config.ts",
     "lint": "biome check src/ test/",

@@ -23,6 +23,7 @@ members = [
     "crates/detectors",
     "crates/indexer",
     "crates/repo-index",
+    "crates/rgr",
     "crates/storage",
     "crates/trust",
     "crates/ts-extractor",
