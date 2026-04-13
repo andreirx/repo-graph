@@ -21,6 +21,7 @@ resolver = "2"
 members = [
     "crates/classification",
     "crates/detectors",
+    "crates/indexer",
     "crates/storage",
     "crates/trust",
 ]

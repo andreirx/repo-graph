@@ -1,0 +1,20 @@
+{
+  "counts": {
+    "unchanged": 1,
+    "changed": 1,
+    "new": 1,
+    "deleted": 1,
+    "config_widened": 0,
+    "total": 4
+  },
+  "files_to_extract": [
+    "src/b.ts",
+    "src/new.ts"
+  ],
+  "files_to_copy": [
+    "src/a.ts"
+  ],
+  "files_to_delete": [
+    "src/deleted.ts"
+  ]
+}

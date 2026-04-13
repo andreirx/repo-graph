@@ -1,0 +1,15 @@
+{
+  "fn": "build_invalidation_plan",
+  "parentSnapshotUid": "snap1",
+  "parentHashes": {
+    "r1:src/a.ts": "h1",
+    "r1:src/b.ts": "h2",
+    "r1:src/deleted.ts": "h3"
+  },
+  "currentFiles": [
+    {"fileUid": "r1:src/a.ts", "path": "src/a.ts", "contentHash": "h1"},
+    {"fileUid": "r1:src/b.ts", "path": "src/b.ts", "contentHash": "h2_new"},
+    {"fileUid": "r1:src/new.ts", "path": "src/new.ts", "contentHash": "h4"}
+  ],
+  "repoUid": "r1"
+}

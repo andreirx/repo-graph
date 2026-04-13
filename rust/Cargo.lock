@@ -327,9 +327,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-indexer"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-classification",
+ "serde",
+ "serde_json",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "repo-graph-storage"
 version = "0.1.0"
 dependencies = [
+ "repo-graph-classification",
+ "repo-graph-indexer",
  "repo-graph-trust",
  "rusqlite",
  "serde",

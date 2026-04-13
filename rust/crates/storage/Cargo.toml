@@ -117,6 +117,11 @@ thiserror = "2"
 # exactly (`randomUUID()` is v4 only).
 uuid = { version = "1", features = ["v4"] }
 
+# Classification crate — needed for SourceLocation type used in
+# ExtractedNode.location when implementing NodeStorePort (R5-F).
+# Already a transitive dep through trust → classification.
+repo-graph-classification = { path = "../classification" }
+
 # Trust crate — added in R4-E so the storage crate (adapter) can
 # implement the TrustStorageRead trait defined by the trust crate
 # (policy). Dependency direction: adapter → policy (outer → inner),
@@ -127,6 +132,12 @@ uuid = { version = "1", features = ["v4"] }
 # ClassificationCountRow, TrustUnresolvedEdgeSample, etc.).
 # It does NOT import trust rules, trust types, or TrustReport.
 repo-graph-trust = { path = "../trust" }
+
+# Indexer crate — added in R5-C so the storage crate (adapter) can
+# implement the indexer-owned storage sub-traits
+# (SnapshotLifecyclePort, FileCatalogPort, etc.). Same dependency
+# direction: adapter → policy (outer → inner).
+repo-graph-indexer = { path = "../indexer" }
 
 [dev-dependencies]
 # tempfile for tests that need a real file-backed SQLite database

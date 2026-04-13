@@ -1,0 +1,64 @@
+# ── repo-graph-indexer ─────────────────────────────────────────────
+#
+# Rust port of the indexer orchestration layer. Mirror of the
+# TypeScript adapter at `src/adapters/indexer/repo-indexer.ts` and
+# the indexer port at `src/core/ports/indexer.ts`.
+#
+# Slice scope (Rust-5 indexer core, locked):
+#   - pure orchestration policy only
+#   - no tree-sitter grammars
+#   - no extractor adapter implementations
+#   - no CLI entry point
+#   - no daemon process work
+#   - no filesystem I/O (receives candidate files from caller)
+#
+# Architecture:
+#   - This crate is POLICY code. It defines the ports it needs:
+#     ExtractorPort, composed IndexerStoragePort (facade over
+#     narrow sub-traits), and uses classification/trust for
+#     edge classification and trust report computation.
+#   - Does NOT depend on repo-graph-storage concrete types.
+#   - Storage crate (adapter) implements the indexer-owned
+#     storage sub-traits on StorageConnection.
+#
+# Dependencies:
+#   - repo-graph-classification: for ImportBinding, RuntimeBuiltinsSet,
+#     UnresolvedEdgeCategory, classifier functions, blast-radius
+#   - repo-graph-trust: for trust report computation at finalization
+#   - serde + serde_json: for DTO parity boundary
+#
+# NOT in scope (Rust-5):
+#   - postpasses (module discovery, boundary extraction, framework
+#     detectors, seam detection) — deferred enrichment
+#   - annotations port
+#   - measurements/metrics persistence
+#   - concrete extractor implementations (Rust-6)
+#   - CLI formatting
+
+[package]
+name         = "repo-graph-indexer"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Rust port of the repo-graph indexer orchestration layer"
+publish      = false
+
+[dependencies]
+# Classification crate — for ImportBinding, RuntimeBuiltinsSet,
+# UnresolvedEdgeCategory, classifier functions. Policy → policy.
+repo-graph-classification = { path = "../classification" }
+
+# Serde for DTO derives on the parity boundary.
+serde = { version = "1", features = ["derive"] }
+
+# serde_json for JSON metadata fields and parity fixture parsing.
+serde_json = { version = "1", features = ["preserve_order"] }
+
+# UUID v4 for generating edge and node UIDs during orchestration
+# (module nodes, module edges, OWNS edges).
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+# walkdir for parity-fixture corpus discovery (R5-I).
+walkdir = "2"
