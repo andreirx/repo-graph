@@ -5,6 +5,8 @@
 //!   rgr-rust refresh <repo_path> <db_path>
 //!   rgr-rust trust   <db_path> <repo_uid>
 //!   rgr-rust callers <db_path> <repo_uid> <symbol>
+//!   rgr-rust callees <db_path> <repo_uid> <symbol>
+//!   rgr-rust dead    <db_path> <repo_uid> [kind]
 //!
 //! Exit codes:
 //!   0 — success
@@ -27,6 +29,8 @@ fn main() -> ExitCode {
 		"refresh" => run_refresh(&args[2..]),
 		"trust" => run_trust(&args[2..]),
 		"callers" => run_callers(&args[2..]),
+		"callees" => run_callees(&args[2..]),
+		"dead" => run_dead(&args[2..]),
 		other => {
 			eprintln!("unknown command: {}", other);
 			print_usage();
@@ -41,6 +45,8 @@ fn print_usage() {
 	eprintln!("  rgr-rust refresh <repo_path> <db_path>");
 	eprintln!("  rgr-rust trust   <db_path> <repo_uid>");
 	eprintln!("  rgr-rust callers <db_path> <repo_uid> <symbol>");
+	eprintln!("  rgr-rust callees <db_path> <repo_uid> <symbol>");
+	eprintln!("  rgr-rust dead    <db_path> <repo_uid> [kind]");
 }
 
 // ── index command ────────────────────────────────────────────────
@@ -273,6 +279,168 @@ fn run_callers(args: &[String]) -> ExitCode {
 		"target": target,
 		"results": callers,
 		"count": callers.len(),
+	});
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+// ── callees command ──────────────────────────────────────────────
+
+fn run_callees(args: &[String]) -> ExitCode {
+	if args.len() != 3 {
+		eprintln!("usage: rgr-rust callees <db_path> <repo_uid> <symbol>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+	let symbol_query = &args[2];
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Latest READY snapshot (same rule as callers/trust).
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(snap)) => snap,
+		Ok(None) => {
+			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Resolve symbol (exact match only, SYMBOL kind only).
+	use repo_graph_storage::queries::SymbolResolveError;
+	let target = match storage.resolve_symbol(&snapshot.snapshot_uid, symbol_query) {
+		Ok(sym) => sym,
+		Err(SymbolResolveError::NotFound) => {
+			eprintln!("error: symbol not found: {}", symbol_query);
+			return ExitCode::from(2);
+		}
+		Err(SymbolResolveError::Ambiguous(keys)) => {
+			eprintln!("error: ambiguous symbol '{}', matches:", symbol_query);
+			for k in &keys {
+				eprintln!("  {}", k);
+			}
+			return ExitCode::from(2);
+		}
+		Err(SymbolResolveError::Storage(e)) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Find direct callees.
+	let callees = match storage.find_direct_callees(&snapshot.snapshot_uid, &target.stable_key) {
+		Ok(c) => c,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// JSON to stdout.
+	let output = serde_json::json!({
+		"snapshot_uid": snapshot.snapshot_uid,
+		"target": target,
+		"results": callees,
+		"count": callees.len(),
+	});
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+// ── dead command ─────────────────────────────────────────────────
+
+fn run_dead(args: &[String]) -> ExitCode {
+	if args.len() < 2 || args.len() > 3 {
+		eprintln!("usage: rgr-rust dead <db_path> <repo_uid> [kind]");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+	let kind_filter = args.get(2).map(|s| s.as_str());
+
+	// Validate kind filter against known node kinds.
+	const VALID_KINDS: &[&str] = &["SYMBOL", "FILE", "MODULE"];
+	if let Some(kind) = kind_filter {
+		if !VALID_KINDS.contains(&kind) {
+			eprintln!(
+				"error: unknown kind '{}', expected one of: {}",
+				kind,
+				VALID_KINDS.join(", ")
+			);
+			return ExitCode::from(1);
+		}
+	}
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Latest READY snapshot (same rule as callers/callees/trust).
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(snap)) => snap,
+		Ok(None) => {
+			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Find dead nodes.
+	let dead = match storage.find_dead_nodes(
+		&snapshot.snapshot_uid,
+		repo_uid,
+		kind_filter,
+	) {
+		Ok(d) => d,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// JSON to stdout.
+	let output = serde_json::json!({
+		"snapshot_uid": snapshot.snapshot_uid,
+		"kind_filter": kind_filter,
+		"results": dead,
+		"count": dead.len(),
 	});
 
 	match serde_json::to_string_pretty(&output) {

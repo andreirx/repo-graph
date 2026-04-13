@@ -147,6 +147,8 @@
 //! R2-E: CRUD methods on `StorageConnection` for the 6 entities.
 //! R10:  `queries` module — `resolve_symbol` (SYMBOL-only, 3-step
 //!       exact resolution) + `find_direct_callers` (one-hop CALLS).
+//! R11:  `find_direct_callees` (symmetric reverse of callers).
+//! R12:  `find_dead_nodes` (unreferenced nodes, 3 exclusion layers).
 
 pub mod connection;
 pub mod crud;

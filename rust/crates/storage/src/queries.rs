@@ -5,6 +5,8 @@
 //! from trait impls (indexer/trust port implementations).
 //!
 //! Rust-10: `resolve_symbol` + `find_direct_callers`.
+//! Rust-11: `find_direct_callees`.
+//! Rust-12: `find_dead_nodes`.
 
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +41,34 @@ pub struct CallerResult {
 	pub column: Option<i64>,
 	pub edge_type: String,
 	pub resolution: String,
+}
+
+/// A direct callee of a symbol.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalleeResult {
+	pub stable_key: String,
+	pub name: String,
+	pub qualified_name: Option<String>,
+	pub kind: String,
+	pub subtype: Option<String>,
+	pub file: Option<String>,
+	pub line: Option<i64>,
+	pub column: Option<i64>,
+	pub edge_type: String,
+	pub resolution: String,
+}
+
+/// A node with no incoming reference edges (dead code candidate).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeadNodeResult {
+	pub stable_key: String,
+	/// `qualified_name` if present, else `name`.
+	pub symbol: String,
+	pub kind: String,
+	pub subtype: Option<String>,
+	pub file: Option<String>,
+	pub line: Option<i64>,
+	pub line_count: Option<i64>,
 }
 
 /// Error when resolving a symbol query.
@@ -158,6 +188,148 @@ impl StorageConnection {
 
 		rows.collect::<Result<Vec<_>, _>>()
 			.map_err(StorageError::from)
+	}
+
+	/// Find direct callees of a symbol (one hop, CALLS edges only).
+	///
+	/// Symmetric reverse of `find_direct_callers`: the given symbol
+	/// is the source node, returned nodes are the targets.
+	pub fn find_direct_callees(
+		&self,
+		snapshot_uid: &str,
+		source_stable_key: &str,
+	) -> Result<Vec<CalleeResult>, StorageError> {
+		let mut stmt = self.connection().prepare(
+			"SELECT
+				n.stable_key, n.name, n.qualified_name, n.kind, n.subtype,
+				f.path AS file_path, n.line_start, n.col_start,
+				e.type AS edge_type, e.resolution
+			 FROM edges e
+			 JOIN nodes source_n ON e.source_node_uid = source_n.node_uid
+			 JOIN nodes n ON e.target_node_uid = n.node_uid
+			 LEFT JOIN files f ON n.file_uid = f.file_uid
+			 WHERE source_n.snapshot_uid = ?
+			   AND source_n.stable_key = ?
+			   AND e.snapshot_uid = ?
+			   AND e.type = 'CALLS'
+			 ORDER BY n.name ASC, f.path ASC",
+		)?;
+
+		let rows = stmt.query_map(
+			rusqlite::params![snapshot_uid, source_stable_key, snapshot_uid],
+			|row| {
+				Ok(CalleeResult {
+					stable_key: row.get(0)?,
+					name: row.get(1)?,
+					qualified_name: row.get(2)?,
+					kind: row.get(3)?,
+					subtype: row.get(4)?,
+					file: row.get(5)?,
+					line: row.get(6)?,
+					column: row.get(7)?,
+					edge_type: row.get(8)?,
+					resolution: row.get(9)?,
+				})
+			},
+		)?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(StorageError::from)
+	}
+
+	/// Find dead nodes — nodes with no incoming reference edges.
+	///
+	/// Mirrors the TS `findDeadNodes` algorithm exactly:
+	///   1. Select all nodes in the snapshot.
+	///   2. Exclude nodes that are targets of reference edges
+	///      (IMPORTS, CALLS, IMPLEMENTS, INSTANTIATES, ROUTES_TO,
+	///      REGISTERED_BY, TESTED_BY, COVERS).
+	///   3. Exclude declared entrypoints (declarations table).
+	///   4. Exclude framework-liveness inferences.
+	///   5. Optional: filter by node kind (e.g., "SYMBOL").
+	///   6. ORDER BY name ASC.
+	///
+	/// The declarations and inferences subqueries operate on tables
+	/// that exist in every Rust-migrated DB (created by migration 001).
+	/// When no declarations or inferences are present (typical for
+	/// Rust-indexed DBs), those subqueries return empty sets and the
+	/// exclusions are no-ops.
+	pub fn find_dead_nodes(
+		&self,
+		snapshot_uid: &str,
+		repo_uid: &str,
+		kind_filter: Option<&str>,
+	) -> Result<Vec<DeadNodeResult>, StorageError> {
+		let kind_clause = if kind_filter.is_some() {
+			"AND n.kind = ?3"
+		} else {
+			""
+		};
+
+		let sql = format!(
+			"SELECT
+				n.stable_key, n.name, n.qualified_name, n.kind, n.subtype,
+				f.path AS file_path, n.line_start,
+				CASE WHEN n.line_end IS NOT NULL AND n.line_start IS NOT NULL
+				     THEN n.line_end - n.line_start + 1
+				     ELSE NULL
+				END AS line_count
+			 FROM nodes n
+			 LEFT JOIN files f ON n.file_uid = f.file_uid
+			 WHERE n.snapshot_uid = ?1
+			   AND n.node_uid NOT IN (
+			     SELECT e.target_node_uid FROM edges e
+			     WHERE e.snapshot_uid = ?1
+			       AND e.type IN ('IMPORTS', 'CALLS', 'IMPLEMENTS', 'INSTANTIATES',
+			                      'ROUTES_TO', 'REGISTERED_BY', 'TESTED_BY', 'COVERS')
+			   )
+			   {kind_clause}
+			   AND n.stable_key NOT IN (
+			     SELECT d.target_stable_key FROM declarations d
+			     WHERE d.repo_uid = ?2
+			       AND d.kind = 'entrypoint'
+			       AND d.is_active = 1
+			       AND (d.snapshot_uid IS NULL OR d.snapshot_uid = ?1)
+			   )
+			   AND n.stable_key NOT IN (
+			     SELECT i.target_stable_key FROM inferences i
+			     WHERE i.snapshot_uid = ?1
+			       AND i.kind IN ('framework_entrypoint', 'spring_container_managed',
+			                      'pytest_test', 'pytest_fixture', 'linux_system_managed')
+			   )
+			 ORDER BY n.name ASC"
+		);
+
+		let mut stmt = self.connection().prepare(&sql)?;
+
+		let rows = if let Some(kind) = kind_filter {
+			stmt.query_map(
+				rusqlite::params![snapshot_uid, repo_uid, kind],
+				Self::map_dead_node_row,
+			)?
+		} else {
+			stmt.query_map(
+				rusqlite::params![snapshot_uid, repo_uid],
+				Self::map_dead_node_row,
+			)?
+		};
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(StorageError::from)
+	}
+
+	fn map_dead_node_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeadNodeResult> {
+		let name: String = row.get(1)?;
+		let qualified_name: Option<String> = row.get(2)?;
+		Ok(DeadNodeResult {
+			stable_key: row.get(0)?,
+			symbol: qualified_name.unwrap_or(name),
+			kind: row.get(3)?,
+			subtype: row.get(4)?,
+			file: row.get(5)?,
+			line: row.get(6)?,
+			line_count: row.get(7)?,
+		})
 	}
 
 	// ── Internal helpers ─────────────────────────────────────

@@ -8,6 +8,8 @@
 #   Rust-8:  `trust   <db_path> <repo_uid>`
 #   Rust-9:  `refresh <repo_path> <db_path>`
 #   Rust-10: `callers <db_path> <repo_uid> <symbol>`
+#   Rust-11: `callees <db_path> <repo_uid> <symbol>`
+#   Rust-12: `dead    <db_path> <repo_uid> [kind]`
 #
 # No formatting-heavy UX.
 
@@ -17,7 +19,7 @@ version      = "0.1.0"
 edition      = "2021"
 rust-version = "1.93.0"
 license      = "MIT"
-description  = "Minimal Rust CLI for repo-graph indexing"
+description  = "Minimal Rust CLI for repo-graph indexing, trust, and graph queries"
 publish      = false
 
 [[bin]]
