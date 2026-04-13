@@ -1,0 +1,68 @@
+# ── repo-graph-repo-index ──────────────────────────────────────────
+#
+# Outer-layer composition crate: indexes a real repo from disk
+# into SQLite. Owns filesystem scanning, config reading, content
+# hashing, FileInput assembly, and composition wiring.
+#
+# Slice scope (Rust-7A):
+#   - full-index-from-disk only (no refresh-from-disk)
+#   - no CLI entry point
+#   - no trust auto-computation
+#   - no new inward ports
+#
+# Architecture:
+#   - Outermost crate. Depends on all adapter and policy crates.
+#   - No existing crate depends on this one.
+#   - All new code is outer mechanism (scanning, config, wiring).
+#   - Policy crates remain unchanged.
+#
+# ── Hash algorithm (locked) ──────────────────────────────────────
+#
+# SHA-256 of UTF-8 source bytes, hex-encoded, truncated to first
+# 16 characters. Matches TS `hashContent` at repo-indexer.ts:2877:
+#   createHash("sha256").update(content).digest("hex").slice(0, 16)
+#
+# ── Config lookup rules (locked) ─────────────────────────────────
+#
+# package.json: walk from file's directory upward to repo root.
+#   First package.json found wins. Language-aware: only for
+#   JS/TS files (not Rust/Java/Python). Reads dependencies,
+#   devDependencies, peerDependencies, optionalDependencies.
+#   Names collected as sorted unique set.
+#
+# tsconfig.json: walk from file's directory upward to repo root.
+#   First tsconfig.json found wins. Follows `extends` chains
+#   (relative paths only, max depth 10). First `compilerOptions.paths`
+#   in the chain wins (child replaces parent entirely).
+
+[package]
+name         = "repo-graph-repo-index"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Outer composition: index a repo from disk into SQLite"
+publish      = false
+
+[dependencies]
+# Policy + adapter crates (all existing, unchanged).
+repo-graph-indexer = { path = "../indexer" }
+repo-graph-storage = { path = "../storage" }
+repo-graph-trust = { path = "../trust" }
+repo-graph-ts-extractor = { path = "../ts-extractor" }
+repo-graph-classification = { path = "../classification" }
+
+# Filesystem walking.
+walkdir = "2"
+# Gitignore pattern matching (root .gitignore only, matching TS).
+ignore = "0.4"
+
+# SHA-256 for content hashing (locked to match TS hashContent).
+sha2 = "0.10"
+
+# Serde for config file parsing (package.json, tsconfig.json).
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+
+[dev-dependencies]
+tempfile = "3"
