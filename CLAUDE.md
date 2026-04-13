@@ -46,12 +46,13 @@ pnpm run build                Build TypeScript
 pnpm run test                 Build + run all default TS tests (includes CLI integration)
 pnpm run test:int             Run TS integration tests only (test/adapters)
 pnpm run test:cli             Build + run CLI integration tests only (test/cli)
-pnpm run test:rust                   Run ALL Rust workspace crates (detectors + storage + classification + trust + indexer)
+pnpm run test:rust                   Run ALL Rust workspace crates (detectors + storage + classification + trust + indexer + ts-extractor)
 pnpm run test:parity                 Run the detector cross-runtime parity harness (TS half + Rust half)
 pnpm run test:storage:parity         Run the storage cross-runtime parity harness (TS half + Rust half)
 pnpm run test:classification:parity  Run the classification cross-runtime parity harness (TS half + Rust half)
 pnpm run test:trust:parity           Run the trust cross-runtime parity harness (TS half + Rust half)
 pnpm run test:indexer:parity         Run the indexer cross-runtime parity harness (TS half + Rust half)
+pnpm run test:ts-extractor:parity   Run the ts-extractor cross-runtime parity harness (TS half + Rust half)
 pnpm run test:all                    Composite acceptance: full default TS suite + full Rust workspace
 pnpm run test:live            Run live external-tool integration tests (test/live, opt-in)
 pnpm run lint                 Run Biome linter
@@ -60,8 +61,8 @@ pnpm run lint:fix             Auto-fix lint issues
 
 The Rust scripts (`test:rust`, `test:parity`, `test:storage:parity`,
 `test:classification:parity`, `test:trust:parity`,
-`test:indexer:parity`, `test:all`) shell out to `cargo` and require
-a Rust toolchain. The
+`test:indexer:parity`, `test:ts-extractor:parity`, `test:all`) shell
+out to `cargo` and require a Rust toolchain. The
 pinned channel lives in `rust/rust-toolchain.toml`. If `cargo` is not
 on PATH the scripts fail fast with an actionable error pointing at
 rustup. TS-only contributors who never touch the Rust crates can
@@ -69,31 +70,33 @@ ignore these scripts; `pnpm test` remains unchanged and does not
 require cargo.
 
 `test:rust` runs `cargo test --workspace` which executes every Rust
-crate's unit tests + integration tests, including all five parity test
+crate's unit tests + integration tests, including all six parity test
 files (`rust/crates/detectors/tests/parity.rs`,
 `rust/crates/storage/tests/parity.rs`,
 `rust/crates/classification/tests/parity.rs`,
-`rust/crates/trust/tests/parity.rs`, and
-`rust/crates/indexer/tests/parity.rs`). The dedicated `test:parity`,
-`test:storage:parity`, `test:classification:parity`,
-`test:trust:parity`, and `test:indexer:parity` scripts are for targeted
-cross-runtime
+`rust/crates/trust/tests/parity.rs`,
+`rust/crates/indexer/tests/parity.rs`, and
+`rust/crates/ts-extractor/tests/parity.rs`). The dedicated
+`test:parity`, `test:storage:parity`, `test:classification:parity`,
+`test:trust:parity`, `test:indexer:parity`, and
+`test:ts-extractor:parity` scripts are for targeted cross-runtime
 verification: each runs BOTH the TS half (via vitest against the
 corresponding shared fixture corpus) AND the Rust half (via the
 qualified `cargo test -p <crate> --test parity` invocation). They
 share the same cargo-guard prefix.
 
-The five parity surfaces (detector parity in `parity-fixtures/`,
+The six parity surfaces (detector parity in `parity-fixtures/`,
 storage parity in `storage-parity-fixtures/`, classification parity
 in `classification-parity-fixtures/`, trust parity in
 `trust-parity-fixtures/`, indexer parity in
-`indexer-parity-fixtures/`) are deliberately independent scripts. A
+`indexer-parity-fixtures/`, ts-extractor parity in
+`ts-extractor-parity-fixtures/`) are deliberately independent scripts. A
 detector-code change runs `test:parity` for fast feedback without
-paying the storage, classification, trust, or indexer harness cost; a
+paying the storage, classification, trust, indexer, or extractor harness cost; a
 storage-code change runs `test:storage:parity`; a classification-code
 change runs `test:classification:parity`; a trust-code change runs
 `test:trust:parity`; an indexer-code change runs
-`test:indexer:parity`. `test:all` transitively covers all five (via
+`test:indexer:parity`. `test:all` transitively covers all six (via
 `test` + `test:rust`) for contributors who want comprehensive
 coverage in one command.
 

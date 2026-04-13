@@ -24,6 +24,7 @@ members = [
     "crates/indexer",
     "crates/storage",
     "crates/trust",
+    "crates/ts-extractor",
 ]
 
 # Shared profile settings: optimize for correctness and clear errors

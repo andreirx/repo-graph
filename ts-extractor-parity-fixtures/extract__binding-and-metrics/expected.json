@@ -1,0 +1,160 @@
+{
+  "nodes": {
+    "r1:src/process.ts:FILE": {
+      "kind": "FILE",
+      "subtype": "SOURCE",
+      "name": "process.ts",
+      "qualified_name": "src/process.ts",
+      "location": {
+        "lineStart": 1,
+        "colStart": 0,
+        "lineEnd": 15,
+        "colEnd": 0
+      },
+      "signature": null,
+      "visibility": null,
+      "doc_comment": null
+    },
+    "r1:src/process.ts#processUsers:SYMBOL:FUNCTION": {
+      "kind": "SYMBOL",
+      "subtype": "FUNCTION",
+      "name": "processUsers",
+      "qualified_name": "processUsers",
+      "location": {
+        "lineStart": 3,
+        "colStart": 7,
+        "lineEnd": 14,
+        "colEnd": 1
+      },
+      "signature": "processUsers(repo: UserRepo)",
+      "visibility": "export",
+      "doc_comment": null
+    }
+  },
+  "edges": [
+    {
+      "source": "r1:src/process.ts#processUsers:SYMBOL:FUNCTION",
+      "type": "CALLS",
+      "target": "Database.close",
+      "location": {
+        "lineStart": 13,
+        "colStart": 9,
+        "lineEnd": 13,
+        "colEnd": 19
+      },
+      "metadata": {
+        "calleeName": "Database.close",
+        "rawCalleeName": "db.close"
+      }
+    },
+    {
+      "source": "r1:src/process.ts#processUsers:SYMBOL:FUNCTION",
+      "type": "CALLS",
+      "target": "Database.execute",
+      "location": {
+        "lineStart": 9,
+        "colStart": 8,
+        "lineEnd": 9,
+        "colEnd": 28
+      },
+      "metadata": {
+        "calleeName": "Database.execute",
+        "rawCalleeName": "db.execute"
+      }
+    },
+    {
+      "source": "r1:src/process.ts#processUsers:SYMBOL:FUNCTION",
+      "type": "CALLS",
+      "target": "UserRepo.disconnect",
+      "location": {
+        "lineStart": 13,
+        "colStart": 23,
+        "lineEnd": 13,
+        "colEnd": 40
+      },
+      "metadata": {
+        "calleeName": "UserRepo.disconnect",
+        "rawCalleeName": "repo.disconnect"
+      }
+    },
+    {
+      "source": "r1:src/process.ts#processUsers:SYMBOL:FUNCTION",
+      "type": "CALLS",
+      "target": "UserRepo.save",
+      "location": {
+        "lineStart": 8,
+        "colStart": 8,
+        "lineEnd": 8,
+        "colEnd": 23
+      },
+      "metadata": {
+        "calleeName": "UserRepo.save",
+        "rawCalleeName": "repo.save"
+      }
+    },
+    {
+      "source": "r1:src/process.ts#processUsers:SYMBOL:FUNCTION",
+      "type": "CALLS",
+      "target": "getDb",
+      "location": {
+        "lineStart": 4,
+        "colStart": 23,
+        "lineEnd": 4,
+        "colEnd": 30
+      },
+      "metadata": {
+        "calleeName": "getDb"
+      }
+    },
+    {
+      "source": "r1:src/process.ts#processUsers:SYMBOL:FUNCTION",
+      "type": "CALLS",
+      "target": "getItems",
+      "location": {
+        "lineStart": 6,
+        "colStart": 23,
+        "lineEnd": 6,
+        "colEnd": 33
+      },
+      "metadata": {
+        "calleeName": "getItems"
+      }
+    },
+    {
+      "source": "r1:src/process.ts:FILE",
+      "type": "IMPORTS",
+      "target": "r1:src/repository:FILE",
+      "location": {
+        "lineStart": 1,
+        "colStart": 0,
+        "lineEnd": 1,
+        "colEnd": 40
+      },
+      "metadata": {
+        "rawPath": "./repository",
+        "resolvedPath": "src/repository"
+      }
+    }
+  ],
+  "import_bindings": [
+    {
+      "identifier": "UserRepo",
+      "specifier": "./repository",
+      "is_relative": true,
+      "is_type_only": false,
+      "location": {
+        "lineStart": 1,
+        "colStart": 0,
+        "lineEnd": 1,
+        "colEnd": 40
+      }
+    }
+  ],
+  "metrics": {
+    "r1:src/process.ts#processUsers:SYMBOL:FUNCTION": {
+      "cyclomatic_complexity": 6,
+      "parameter_count": 1,
+      "max_nesting_depth": 3
+    }
+  }
+}

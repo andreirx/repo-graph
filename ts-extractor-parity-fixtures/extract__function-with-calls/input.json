@@ -1,0 +1,8 @@
+{
+  "fn": "extract",
+  "source": "import type { Config } from \"./config\";\nimport express from \"express\";\n\nexport function serve(cfg: Config) {\n  const app = new express();\n  app.listen(cfg.port);\n}\n",
+  "filePath": "src/server.ts",
+  "fileUid": "r1:src/server.ts",
+  "repoUid": "r1",
+  "snapshotUid": "snap1"
+}

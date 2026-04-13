@@ -1,0 +1,79 @@
+{
+  "nodes": {
+    "r1:src/mod.ts:FILE": {
+      "kind": "FILE",
+      "subtype": "SOURCE",
+      "name": "mod.ts",
+      "qualified_name": "src/mod.ts",
+      "location": {
+        "lineStart": 1,
+        "colStart": 0,
+        "lineEnd": 5,
+        "colEnd": 0
+      },
+      "signature": null,
+      "visibility": null,
+      "doc_comment": null
+    },
+    "r1:src/mod.ts#internal:SYMBOL:FUNCTION": {
+      "kind": "SYMBOL",
+      "subtype": "FUNCTION",
+      "name": "internal",
+      "qualified_name": "internal",
+      "location": {
+        "lineStart": 1,
+        "colStart": 0,
+        "lineEnd": 1,
+        "colEnd": 22
+      },
+      "signature": "internal()",
+      "visibility": "private",
+      "doc_comment": null
+    },
+    "r1:src/mod.ts#publicFn:SYMBOL:FUNCTION": {
+      "kind": "SYMBOL",
+      "subtype": "FUNCTION",
+      "name": "publicFn",
+      "qualified_name": "publicFn",
+      "location": {
+        "lineStart": 2,
+        "colStart": 0,
+        "lineEnd": 2,
+        "colEnd": 22
+      },
+      "signature": "publicFn()",
+      "visibility": "export",
+      "doc_comment": null
+    }
+  },
+  "edges": [
+    {
+      "source": "r1:src/mod.ts:FILE",
+      "type": "IMPORTS",
+      "target": "r1:src/foo:FILE",
+      "location": {
+        "lineStart": 4,
+        "colStart": 0,
+        "lineEnd": 4,
+        "colEnd": 28
+      },
+      "metadata": {
+        "rawPath": "./foo",
+        "resolvedPath": "src/foo"
+      }
+    }
+  ],
+  "import_bindings": [],
+  "metrics": {
+    "r1:src/mod.ts#internal:SYMBOL:FUNCTION": {
+      "cyclomatic_complexity": 1,
+      "parameter_count": 0,
+      "max_nesting_depth": 0
+    },
+    "r1:src/mod.ts#publicFn:SYMBOL:FUNCTION": {
+      "cyclomatic_complexity": 1,
+      "parameter_count": 0,
+      "max_nesting_depth": 0
+    }
+  }
+}

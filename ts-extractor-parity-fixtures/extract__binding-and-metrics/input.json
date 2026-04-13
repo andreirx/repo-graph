@@ -1,0 +1,8 @@
+{
+  "fn": "extract",
+  "source": "import { UserRepo } from \"./repository\";\n\nexport function processUsers(repo: UserRepo) {\n  const db: Database = getDb();\n  if (db) {\n    for (const item of getItems()) {\n      if (item && item.active) {\n        repo.save(item);\n        db.execute(\"INSERT\");\n      }\n    }\n  }\n  return db.close() || repo.disconnect();\n}\n",
+  "filePath": "src/process.ts",
+  "fileUid": "r1:src/process.ts",
+  "repoUid": "r1",
+  "snapshotUid": "snap1"
+}

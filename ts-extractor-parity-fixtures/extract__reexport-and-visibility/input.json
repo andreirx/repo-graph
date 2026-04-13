@@ -1,0 +1,8 @@
+{
+  "fn": "extract",
+  "source": "function internal() {}\nfunction publicFn() {}\nexport { publicFn };\nexport { Foo } from \"./foo\";\n",
+  "filePath": "src/mod.ts",
+  "fileUid": "r1:src/mod.ts",
+  "repoUid": "r1",
+  "snapshotUid": "snap1"
+}

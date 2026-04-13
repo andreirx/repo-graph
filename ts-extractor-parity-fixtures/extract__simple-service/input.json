@@ -1,0 +1,8 @@
+{
+  "fn": "extract",
+  "source": "import { UserRepo } from \"./repository\";\n\nexport class UserService {\n  private repo: UserRepo;\n  constructor(repo: UserRepo) {\n    this.repo = repo;\n  }\n  getUser(id: string) {\n    return this.repo.findById(id);\n  }\n}\n",
+  "filePath": "src/service.ts",
+  "fileUid": "r1:src/service.ts",
+  "repoUid": "r1",
+  "snapshotUid": "snap1"
+}

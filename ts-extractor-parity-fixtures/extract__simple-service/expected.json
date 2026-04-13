@@ -1,0 +1,137 @@
+{
+  "nodes": {
+    "r1:src/service.ts:FILE": {
+      "kind": "FILE",
+      "subtype": "SOURCE",
+      "name": "service.ts",
+      "qualified_name": "src/service.ts",
+      "location": {
+        "lineStart": 1,
+        "colStart": 0,
+        "lineEnd": 12,
+        "colEnd": 0
+      },
+      "signature": null,
+      "visibility": null,
+      "doc_comment": null
+    },
+    "r1:src/service.ts#UserService:SYMBOL:CLASS": {
+      "kind": "SYMBOL",
+      "subtype": "CLASS",
+      "name": "UserService",
+      "qualified_name": "UserService",
+      "location": {
+        "lineStart": 3,
+        "colStart": 7,
+        "lineEnd": 11,
+        "colEnd": 1
+      },
+      "signature": null,
+      "visibility": "export",
+      "doc_comment": null
+    },
+    "r1:src/service.ts#UserService.repo:SYMBOL:PROPERTY": {
+      "kind": "SYMBOL",
+      "subtype": "PROPERTY",
+      "name": "repo",
+      "qualified_name": "UserService.repo",
+      "location": {
+        "lineStart": 4,
+        "colStart": 2,
+        "lineEnd": 4,
+        "colEnd": 24
+      },
+      "signature": null,
+      "visibility": "private",
+      "doc_comment": null
+    },
+    "r1:src/service.ts#UserService.constructor:SYMBOL:CONSTRUCTOR": {
+      "kind": "SYMBOL",
+      "subtype": "CONSTRUCTOR",
+      "name": "constructor",
+      "qualified_name": "UserService.constructor",
+      "location": {
+        "lineStart": 5,
+        "colStart": 2,
+        "lineEnd": 7,
+        "colEnd": 3
+      },
+      "signature": "constructor(repo: UserRepo)",
+      "visibility": "public",
+      "doc_comment": null
+    },
+    "r1:src/service.ts#UserService.getUser:SYMBOL:METHOD": {
+      "kind": "SYMBOL",
+      "subtype": "METHOD",
+      "name": "getUser",
+      "qualified_name": "UserService.getUser",
+      "location": {
+        "lineStart": 8,
+        "colStart": 2,
+        "lineEnd": 10,
+        "colEnd": 3
+      },
+      "signature": "getUser(id: string)",
+      "visibility": "public",
+      "doc_comment": null
+    }
+  },
+  "edges": [
+    {
+      "source": "r1:src/service.ts#UserService.getUser:SYMBOL:METHOD",
+      "type": "CALLS",
+      "target": "UserRepo.findById",
+      "location": {
+        "lineStart": 9,
+        "colStart": 11,
+        "lineEnd": 9,
+        "colEnd": 33
+      },
+      "metadata": {
+        "calleeName": "UserRepo.findById",
+        "rawCalleeName": "this.repo.findById"
+      }
+    },
+    {
+      "source": "r1:src/service.ts:FILE",
+      "type": "IMPORTS",
+      "target": "r1:src/repository:FILE",
+      "location": {
+        "lineStart": 1,
+        "colStart": 0,
+        "lineEnd": 1,
+        "colEnd": 40
+      },
+      "metadata": {
+        "rawPath": "./repository",
+        "resolvedPath": "src/repository"
+      }
+    }
+  ],
+  "import_bindings": [
+    {
+      "identifier": "UserRepo",
+      "specifier": "./repository",
+      "is_relative": true,
+      "is_type_only": false,
+      "location": {
+        "lineStart": 1,
+        "colStart": 0,
+        "lineEnd": 1,
+        "colEnd": 40
+      }
+    }
+  ],
+  "metrics": {
+    "r1:src/service.ts#UserService.constructor:SYMBOL:CONSTRUCTOR": {
+      "cyclomatic_complexity": 1,
+      "parameter_count": 1,
+      "max_nesting_depth": 0
+    },
+    "r1:src/service.ts#UserService.getUser:SYMBOL:METHOD": {
+      "cyclomatic_complexity": 1,
+      "parameter_count": 1,
+      "max_nesting_depth": 0
+    }
+  }
+}

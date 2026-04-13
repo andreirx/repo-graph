@@ -112,8 +112,13 @@ pub trait ExtractorPort {
 	/// - `snapshot_uid`: snapshot being built
 	///
 	/// # Errors
-	/// Returns `Err(ExtractorError)` if the file cannot be parsed.
-	/// The indexer catches this and records `ParseStatus::Failed`.
+	/// Returns `Err(ExtractorError)` only for true adapter/setup
+	/// failures (null parser, wrong grammar, uninitialized state).
+	/// Syntactically broken source still produces `Ok` with a
+	/// partial extraction result — tree-sitter returns partial
+	/// trees with ERROR nodes, and the extractor visits whatever
+	/// it can find. The indexer records `ParseStatus::Failed` only
+	/// when this method returns `Err`.
 	fn extract(
 		&self,
 		source: &str,

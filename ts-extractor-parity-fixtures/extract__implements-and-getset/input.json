@@ -1,0 +1,8 @@
+{
+  "fn": "extract",
+  "source": "class Adapter implements StoragePort, LoggerPort {\n  private _name: string;\n  get name() { return this._name; }\n  set name(v: string) { this._name = v; }\n  process() { console.log(this._name); }\n}\n",
+  "filePath": "src/adapter.ts",
+  "fileUid": "r1:src/adapter.ts",
+  "repoUid": "r1",
+  "snapshotUid": "snap1"
+}

@@ -1,0 +1,113 @@
+{
+  "nodes": {
+    "r1:src/server.ts:FILE": {
+      "kind": "FILE",
+      "subtype": "SOURCE",
+      "name": "server.ts",
+      "qualified_name": "src/server.ts",
+      "location": {
+        "lineStart": 1,
+        "colStart": 0,
+        "lineEnd": 8,
+        "colEnd": 0
+      },
+      "signature": null,
+      "visibility": null,
+      "doc_comment": null
+    },
+    "r1:src/server.ts#serve:SYMBOL:FUNCTION": {
+      "kind": "SYMBOL",
+      "subtype": "FUNCTION",
+      "name": "serve",
+      "qualified_name": "serve",
+      "location": {
+        "lineStart": 4,
+        "colStart": 7,
+        "lineEnd": 7,
+        "colEnd": 1
+      },
+      "signature": "serve(cfg: Config)",
+      "visibility": "export",
+      "doc_comment": null
+    }
+  },
+  "edges": [
+    {
+      "source": "r1:src/server.ts#serve:SYMBOL:FUNCTION",
+      "type": "CALLS",
+      "target": "express.listen",
+      "location": {
+        "lineStart": 6,
+        "colStart": 2,
+        "lineEnd": 6,
+        "colEnd": 22
+      },
+      "metadata": {
+        "calleeName": "express.listen",
+        "rawCalleeName": "app.listen"
+      }
+    },
+    {
+      "source": "r1:src/server.ts:FILE",
+      "type": "IMPORTS",
+      "target": "r1:src/config:FILE",
+      "location": {
+        "lineStart": 1,
+        "colStart": 0,
+        "lineEnd": 1,
+        "colEnd": 39
+      },
+      "metadata": {
+        "rawPath": "./config",
+        "resolvedPath": "src/config"
+      }
+    },
+    {
+      "source": "r1:src/server.ts#serve:SYMBOL:FUNCTION",
+      "type": "INSTANTIATES",
+      "target": "express",
+      "location": {
+        "lineStart": 5,
+        "colStart": 14,
+        "lineEnd": 5,
+        "colEnd": 27
+      },
+      "metadata": {
+        "className": "express"
+      }
+    }
+  ],
+  "import_bindings": [
+    {
+      "identifier": "Config",
+      "specifier": "./config",
+      "is_relative": true,
+      "is_type_only": true,
+      "location": {
+        "lineStart": 1,
+        "colStart": 0,
+        "lineEnd": 1,
+        "colEnd": 39
+      }
+    },
+    {
+      "identifier": "express",
+      "specifier": "express",
+      "is_relative": false,
+      "is_type_only": false,
+      "location": {
+        "lineStart": 2,
+        "colStart": 0,
+        "lineEnd": 2,
+        "colEnd": 30
+      }
+    }
+  ],
+  "metrics": {
+    "r1:src/server.ts#serve:SYMBOL:FUNCTION": {
+      "cyclomatic_complexity": 1,
+      "parameter_count": 1,
+      "max_nesting_depth": 0
+    }
+  }
+}

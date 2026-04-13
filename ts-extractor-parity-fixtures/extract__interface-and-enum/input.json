@@ -1,0 +1,8 @@
+{
+  "fn": "extract",
+  "source": "/** Storage port. */\nexport interface StoragePort {\n  getUser(id: string): any;\n  name: string;\n}\n\nexport type UserId = string;\n\nenum Status {\n  Active,\n  Inactive\n}\n",
+  "filePath": "src/types.ts",
+  "fileUid": "r1:src/types.ts",
+  "repoUid": "r1",
+  "snapshotUid": "snap1"
+}

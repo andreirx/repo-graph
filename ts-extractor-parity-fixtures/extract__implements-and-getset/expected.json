@@ -1,0 +1,142 @@
+{
+  "nodes": {
+    "r1:src/adapter.ts:FILE": {
+      "kind": "FILE",
+      "subtype": "SOURCE",
+      "name": "adapter.ts",
+      "qualified_name": "src/adapter.ts",
+      "location": {
+        "lineStart": 1,
+        "colStart": 0,
+        "lineEnd": 7,
+        "colEnd": 0
+      },
+      "signature": null,
+      "visibility": null,
+      "doc_comment": null
+    },
+    "r1:src/adapter.ts#Adapter:SYMBOL:CLASS": {
+      "kind": "SYMBOL",
+      "subtype": "CLASS",
+      "name": "Adapter",
+      "qualified_name": "Adapter",
+      "location": {
+        "lineStart": 1,
+        "colStart": 0,
+        "lineEnd": 6,
+        "colEnd": 1
+      },
+      "signature": null,
+      "visibility": "private",
+      "doc_comment": null
+    },
+    "r1:src/adapter.ts#Adapter._name:SYMBOL:PROPERTY": {
+      "kind": "SYMBOL",
+      "subtype": "PROPERTY",
+      "name": "_name",
+      "qualified_name": "Adapter._name",
+      "location": {
+        "lineStart": 2,
+        "colStart": 2,
+        "lineEnd": 2,
+        "colEnd": 23
+      },
+      "signature": null,
+      "visibility": "private",
+      "doc_comment": null
+    },
+    "r1:src/adapter.ts#Adapter.name:SYMBOL:GETTER": {
+      "kind": "SYMBOL",
+      "subtype": "GETTER",
+      "name": "name",
+      "qualified_name": "Adapter.name",
+      "location": {
+        "lineStart": 3,
+        "colStart": 2,
+        "lineEnd": 3,
+        "colEnd": 35
+      },
+      "signature": "name()",
+      "visibility": "public",
+      "doc_comment": null
+    },
+    "r1:src/adapter.ts#Adapter.name:SYMBOL:SETTER": {
+      "kind": "SYMBOL",
+      "subtype": "SETTER",
+      "name": "name",
+      "qualified_name": "Adapter.name",
+      "location": {
+        "lineStart": 4,
+        "colStart": 2,
+        "lineEnd": 4,
+        "colEnd": 41
+      },
+      "signature": "name(v: string)",
+      "visibility": "public",
+      "doc_comment": null
+    },
+    "r1:src/adapter.ts#Adapter.process:SYMBOL:METHOD": {
+      "kind": "SYMBOL",
+      "subtype": "METHOD",
+      "name": "process",
+      "qualified_name": "Adapter.process",
+      "location": {
+        "lineStart": 5,
+        "colStart": 2,
+        "lineEnd": 5,
+        "colEnd": 40
+      },
+      "signature": "process()",
+      "visibility": "public",
+      "doc_comment": null
+    }
+  },
+  "edges": [
+    {
+      "source": "r1:src/adapter.ts#Adapter:SYMBOL:CLASS",
+      "type": "IMPLEMENTS",
+      "target": "LoggerPort",
+      "location": {
+        "lineStart": 1,
+        "colStart": 38,
+        "lineEnd": 1,
+        "colEnd": 48
+      },
+      "metadata": {
+        "targetName": "LoggerPort"
+      }
+    },
+    {
+      "source": "r1:src/adapter.ts#Adapter:SYMBOL:CLASS",
+      "type": "IMPLEMENTS",
+      "target": "StoragePort",
+      "location": {
+        "lineStart": 1,
+        "colStart": 25,
+        "lineEnd": 1,
+        "colEnd": 36
+      },
+      "metadata": {
+        "targetName": "StoragePort"
+      }
+    }
+  ],
+  "import_bindings": [],
+  "metrics": {
+    "r1:src/adapter.ts#Adapter.name:SYMBOL:GETTER": {
+      "cyclomatic_complexity": 1,
+      "parameter_count": 0,
+      "max_nesting_depth": 0
+    },
+    "r1:src/adapter.ts#Adapter.name:SYMBOL:SETTER": {
+      "cyclomatic_complexity": 1,
+      "parameter_count": 1,
+      "max_nesting_depth": 0
+    },
+    "r1:src/adapter.ts#Adapter.process:SYMBOL:METHOD": {
+      "cyclomatic_complexity": 1,
+      "parameter_count": 0,
+      "max_nesting_depth": 0
+    }
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "nodes": {
+    "r1:src/types.ts:FILE": {
+      "kind": "FILE",
+      "subtype": "SOURCE",
+      "name": "types.ts",
+      "qualified_name": "src/types.ts",
+      "location": {
+        "lineStart": 1,
+        "colStart": 0,
+        "lineEnd": 13,
+        "colEnd": 0
+      },
+      "signature": null,
+      "visibility": null,
+      "doc_comment": null
+    },
+    "r1:src/types.ts#StoragePort:SYMBOL:INTERFACE": {
+      "kind": "SYMBOL",
+      "subtype": "INTERFACE",
+      "name": "StoragePort",
+      "qualified_name": "StoragePort",
+      "location": {
+        "lineStart": 2,
+        "colStart": 7,
+        "lineEnd": 5,
+        "colEnd": 1
+      },
+      "signature": null,
+      "visibility": "export",
+      "doc_comment": "/** Storage port. */"
+    },
+    "r1:src/types.ts#StoragePort.getUser:SYMBOL:METHOD": {
+      "kind": "SYMBOL",
+      "subtype": "METHOD",
+      "name": "getUser",
+      "qualified_name": "StoragePort.getUser",
+      "location": {
+        "lineStart": 3,
+        "colStart": 2,
+        "lineEnd": 3,
+        "colEnd": 26
+      },
+      "signature": "getUser(id: string)",
+      "visibility": "public",
+      "doc_comment": null
+    },
+    "r1:src/types.ts#StoragePort.name:SYMBOL:PROPERTY": {
+      "kind": "SYMBOL",
+      "subtype": "PROPERTY",
+      "name": "name",
+      "qualified_name": "StoragePort.name",
+      "location": {
+        "lineStart": 4,
+        "colStart": 2,
+        "lineEnd": 4,
+        "colEnd": 14
+      },
+      "signature": null,
+      "visibility": "public",
+      "doc_comment": null
+    },
+    "r1:src/types.ts#UserId:SYMBOL:TYPE_ALIAS": {
+      "kind": "SYMBOL",
+      "subtype": "TYPE_ALIAS",
+      "name": "UserId",
+      "qualified_name": "UserId",
+      "location": {
+        "lineStart": 7,
+        "colStart": 7,
+        "lineEnd": 7,
+        "colEnd": 28
+      },
+      "signature": null,
+      "visibility": "export",
+      "doc_comment": null
+    },
+    "r1:src/types.ts#Status:SYMBOL:ENUM": {
+      "kind": "SYMBOL",
+      "subtype": "ENUM",
+      "name": "Status",
+      "qualified_name": "Status",
+      "location": {
+        "lineStart": 9,
+        "colStart": 0,
+        "lineEnd": 12,
+        "colEnd": 1
+      },
+      "signature": null,
+      "visibility": "private",
+      "doc_comment": null
+    }
+  },
+  "edges": [],
+  "import_bindings": [],
+  "metrics": {}
+}
