@@ -9,6 +9,11 @@
 //!   6. Exact JSON contract (toolchain, computed/effective verdict, gate counts)
 //!   7. Malformed active requirement => command error, exit 2
 //!   8. Multiple obligations with mixed verdicts => fail wins
+//!   9. FAIL + active waiver => WAIVED, exit 0 (Rust-25)
+//!  10. FAIL + waiver with wrong obligation_id => no suppression, exit 1 (Rust-25)
+//!  11. FAIL + expired waiver => no suppression, exit 1 (Rust-25)
+//!  12. PASS + active waiver => remains PASS, waiver_basis null (Rust-25)
+//!  13. Malformed active waiver => command error, exit 2 (Rust-25)
 //!
 //! Note: storage-read failures during arch_violations evaluation are
 //! not testable at the CLI integration level because StorageConnection::open()
@@ -363,5 +368,293 @@ fn gate_mixed_verdicts_fail_wins() {
 	assert_eq!(result["gate"]["counts"]["total"], 2);
 	assert_eq!(result["gate"]["counts"]["pass"], 1);
 	assert_eq!(result["gate"]["counts"]["fail"], 1);
+}
+
+// ── Rust-25: Waiver tests ──────────────────────────────────────────
+
+/// Insert a waiver declaration for a specific obligation tuple.
+fn insert_waiver(
+	db_path: &std::path::Path,
+	uid: &str,
+	repo_uid: &str,
+	req_id: &str,
+	requirement_version: i64,
+	obligation_id: &str,
+	reason: &str,
+	created_at: &str,
+	expires_at: Option<&str>,
+) {
+	let conn = rusqlite::Connection::open(db_path).unwrap();
+	let mut value = serde_json::json!({
+		"req_id": req_id,
+		"requirement_version": requirement_version,
+		"obligation_id": obligation_id,
+		"reason": reason,
+		"created_at": created_at,
+	});
+	if let Some(exp) = expires_at {
+		value["expires_at"] = serde_json::Value::String(exp.to_string());
+	}
+	let target_key = format!("{}:waiver:{}#{}", repo_uid, req_id, obligation_id);
+	conn.execute(
+		"INSERT INTO declarations
+		 (declaration_uid, repo_uid, target_stable_key, kind, value_json, created_at, is_active)
+		 VALUES (?, ?, ?, 'waiver', ?, ?, 1)",
+		rusqlite::params![uid, repo_uid, target_key, value.to_string(), created_at],
+	)
+	.unwrap();
+}
+
+// -- 9. FAIL + active waiver => WAIVED, exit 0 -----------------------
+
+#[test]
+fn gate_waiver_suppresses_fail() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	// Boundary: adapters --forbids--> core (1 violation).
+	insert_boundary(&db, "r1", "src/adapters", "src/core");
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"adapters must not depend on core","method":"arch_violations","target":"src/adapters"}]"#,
+	);
+
+	// Active waiver matching the exact tuple (no expiry = perpetual).
+	insert_waiver(
+		&db, "waiver-1", "r1", "REQ-001", 1, "obl-1",
+		"known dependency, tracked for removal",
+		"2024-01-01T00:00:00Z",
+		None,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(0), "WAIVED => exit 0");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "pass");
+	assert_eq!(result["gate"]["counts"]["waived"], 1);
+	assert_eq!(result["gate"]["counts"]["fail"], 0);
+	assert_eq!(result["gate"]["counts"]["pass"], 0);
+
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls.len(), 1);
+	assert_eq!(obls[0]["computed_verdict"], "FAIL");
+	assert_eq!(obls[0]["effective_verdict"], "WAIVED");
+
+	// Waiver basis populated with audit trail.
+	let basis = &obls[0]["waiver_basis"];
+	assert!(!basis.is_null(), "waiver_basis must be non-null for WAIVED");
+	assert_eq!(basis["waiver_uid"], "waiver-1");
+	assert_eq!(basis["reason"], "known dependency, tracked for removal");
+	assert!(basis["expires_at"].is_null(), "perpetual waiver has no expiry");
+}
+
+// -- 10. FAIL + waiver with wrong obligation_id => no suppression ----
+
+#[test]
+fn gate_waiver_wrong_obligation_id_no_suppression() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	insert_boundary(&db, "r1", "src/adapters", "src/core");
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"adapters must not depend on core","method":"arch_violations","target":"src/adapters"}]"#,
+	);
+
+	// Waiver for a DIFFERENT obligation_id.
+	insert_waiver(
+		&db, "waiver-wrong", "r1", "REQ-001", 1, "obl-OTHER",
+		"wrong obligation",
+		"2024-01-01T00:00:00Z",
+		None,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(1), "wrong obl_id => no suppression, exit 1");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "fail");
+	assert_eq!(result["gate"]["counts"]["fail"], 1);
+	assert_eq!(result["gate"]["counts"]["waived"], 0);
+
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "FAIL");
+	assert_eq!(obls[0]["effective_verdict"], "FAIL");
+	assert!(obls[0]["waiver_basis"].is_null());
+}
+
+// -- 11. FAIL + expired waiver => no suppression ---------------------
+
+#[test]
+fn gate_expired_waiver_no_suppression() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	insert_boundary(&db, "r1", "src/adapters", "src/core");
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"adapters must not depend on core","method":"arch_violations","target":"src/adapters"}]"#,
+	);
+
+	// Waiver that expired in the past.
+	insert_waiver(
+		&db, "waiver-expired", "r1", "REQ-001", 1, "obl-1",
+		"temporary exception",
+		"2023-01-01T00:00:00Z",
+		Some("2023-06-01T00:00:00Z"), // Expired mid-2023
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(1), "expired waiver => no suppression, exit 1");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "fail");
+	assert_eq!(result["gate"]["counts"]["fail"], 1);
+	assert_eq!(result["gate"]["counts"]["waived"], 0);
+
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["effective_verdict"], "FAIL");
+	assert!(obls[0]["waiver_basis"].is_null());
+}
+
+// -- 12. PASS + active waiver => remains PASS, waiver_basis null -----
+
+#[test]
+fn gate_pass_with_waiver_stays_pass() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	// Boundary: core --forbids--> adapters. core does NOT import from
+	// adapters, so the obligation PASSES on merit.
+	insert_boundary(&db, "r1", "src/core", "src/adapters");
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"core must not depend on adapters","method":"arch_violations","target":"src/core"}]"#,
+	);
+
+	// Active waiver for this obligation — should NOT transform PASS to WAIVED.
+	insert_waiver(
+		&db, "waiver-unnecessary", "r1", "REQ-001", 1, "obl-1",
+		"precautionary waiver",
+		"2024-01-01T00:00:00Z",
+		None,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(0), "PASS stays PASS => exit 0");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "pass");
+	assert_eq!(result["gate"]["counts"]["pass"], 1);
+	assert_eq!(result["gate"]["counts"]["waived"], 0, "PASS must not count as waived");
+
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "PASS");
+	assert_eq!(obls[0]["effective_verdict"], "PASS");
+	assert!(
+		obls[0]["waiver_basis"].is_null(),
+		"waiver_basis must be null when computed_verdict is PASS"
+	);
+}
+
+// -- 13. Malformed active waiver => command error, exit 2 ------------
+
+#[test]
+fn gate_malformed_waiver_aborts() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	// Set up a failing obligation so the gate attempts waiver lookup.
+	insert_boundary(&db, "r1", "src/adapters", "src/core");
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"adapters clean","method":"arch_violations","target":"src/adapters"}]"#,
+	);
+
+	// Insert a waiver with invalid JSON.
+	let conn = rusqlite::Connection::open(&db).unwrap();
+	conn.execute(
+		"INSERT INTO declarations
+		 (declaration_uid, repo_uid, target_stable_key, kind, value_json, created_at, is_active)
+		 VALUES ('bad-waiver', 'r1', 'r1:waiver:REQ-001#obl-1', 'waiver', 'not valid json', '2024-01-01T00:00:00Z', 1)",
+		[],
+	)
+	.unwrap();
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(
+		output.status.code(),
+		Some(2),
+		"malformed waiver must cause exit 2, stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+	assert!(output.stdout.is_empty(), "no JSON on stdout for command error");
+	// SQLite's json_extract fails on invalid JSON before our parsing
+	// layer sees the row. The error propagates through the Sqlite
+	// variant as "malformed JSON", which is then wrapped by the gate
+	// evaluator as "failed to read waivers: ...". Either way: the
+	// malformed waiver cannot silently disappear.
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	assert!(
+		stderr.contains("failed to read waivers"),
+		"error should propagate from waiver lookup, stderr: {}",
+		stderr
+	);
+}
+
+// -- 14. Waiver missing required field => command error, exit 2 ------
+
+#[test]
+fn gate_waiver_missing_reason_aborts() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	insert_boundary(&db, "r1", "src/adapters", "src/core");
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"adapters clean","method":"arch_violations","target":"src/adapters"}]"#,
+	);
+
+	// Insert a waiver with valid JSON but missing required "reason" field.
+	let conn = rusqlite::Connection::open(&db).unwrap();
+	let incomplete_value = serde_json::json!({
+		"req_id": "REQ-001",
+		"requirement_version": 1,
+		"obligation_id": "obl-1",
+		"created_at": "2024-01-01T00:00:00Z"
+		// "reason" deliberately omitted
+	});
+	conn.execute(
+		"INSERT INTO declarations
+		 (declaration_uid, repo_uid, target_stable_key, kind, value_json, created_at, is_active)
+		 VALUES ('incomplete-waiver', 'r1', 'r1:waiver:REQ-001#obl-1', 'waiver', ?, '2024-01-01T00:00:00Z', 1)",
+		rusqlite::params![incomplete_value.to_string()],
+	)
+	.unwrap();
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(
+		output.status.code(),
+		Some(2),
+		"missing required field must cause exit 2, stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+	assert!(output.stdout.is_empty(), "no JSON on stdout for command error");
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	assert!(
+		stderr.contains("malformed waiver"),
+		"error should mention malformed waiver, stderr: {}",
+		stderr
+	);
+	assert!(
+		stderr.contains("reason"),
+		"error should identify the missing field, stderr: {}",
+		stderr
+	);
 }
 

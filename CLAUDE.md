@@ -138,7 +138,7 @@ rgr-rust callees    <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Dire
 rgr-rust path       <db_path> <repo_uid> <from> <to>   # Shortest path (CALLS+IMPORTS, depth 8)
 rgr-rust imports    <db_path> <repo_uid> <file_path>   # File import chain (one hop, IMPORTS)
 rgr-rust violations <db_path> <repo_uid>               # Boundary violation check (IMPORTS)
-rgr-rust gate       <db_path> <repo_uid>               # CI gate (arch_violations only, default mode)
+rgr-rust gate       <db_path> <repo_uid>               # CI gate (arch_violations only, default mode, waiver overlay)
 rgr-rust dead       <db_path> <repo_uid> [kind]        # Unreferenced nodes
 rgr-rust cycles     <db_path> <repo_uid>               # Module-level IMPORTS cycles
 rgr-rust stats      <db_path> <repo_uid>               # Module structural metrics
@@ -173,6 +173,9 @@ Known Rust CLI divergences from TS CLI:
 - `trust` command envelope does not use the QueryResult wrapper
   (trust has its own report shape, matching TS)
 - `index` and `refresh` use stderr for progress, no JSON output
+- `gate` waiver overlay: PASS obligations are not waivable (Rust-25
+  deliberate correction — TS unconditionally marks WAIVED, Rust only
+  suppresses non-PASS verdicts; see TECH-DEBT.md)
 
 ## Native dependency note
 

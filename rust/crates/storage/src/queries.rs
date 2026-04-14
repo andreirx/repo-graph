@@ -13,6 +13,7 @@
 //! Rust-19: `find_shortest_path`.
 //! Rust-22: `get_active_boundary_declarations` + `find_imports_between_paths`.
 //! Rust-24: `get_active_requirement_declarations`.
+//! Rust-25: `find_active_waivers`.
 
 use serde::{Deserialize, Serialize};
 
@@ -163,6 +164,26 @@ pub struct VerificationObligation {
 	pub target: Option<String>,
 	pub threshold: Option<f64>,
 	pub operator: Option<String>,
+}
+
+/// An active, non-expired waiver declaration.
+///
+/// Parsed from the `declarations` table where `kind='waiver'`.
+/// Fields are extracted from `value_json` at the storage layer so
+/// raw JSON does not leak to the gate evaluator.
+#[derive(Debug, Clone)]
+pub struct WaiverDeclaration {
+	/// The `declaration_uid` of the waiver row.
+	pub declaration_uid: String,
+	pub req_id: String,
+	pub requirement_version: i64,
+	pub obligation_id: String,
+	pub reason: String,
+	pub created_at: String,
+	pub created_by: Option<String>,
+	pub expires_at: Option<String>,
+	pub rationale_category: Option<String>,
+	pub policy_basis: Option<String>,
 }
 
 /// A node with no incoming reference edges (dead code candidate).
@@ -1107,6 +1128,122 @@ impl StorageConnection {
 				req_id,
 				version,
 				obligations,
+			});
+		}
+
+		Ok(results)
+	}
+
+	/// Find active, non-expired waivers matching the given tuple.
+	///
+	/// Mirrors TS `findActiveWaivers` (sqlite-storage.ts). Uses
+	/// `json_extract` on `value_json` for the 3-tuple filter
+	/// (req_id, requirement_version, obligation_id) and expiry
+	/// comparison.
+	///
+	/// Returns waivers ordered by `created_at DESC` (most recent
+	/// first). When multiple waivers match, the caller should use
+	/// the first entry.
+	///
+	/// Expiry semantics: lexicographic ISO 8601 comparison.
+	/// Waivers with `expires_at IS NULL` are perpetual.
+	/// Waivers with `expires_at <= now` are excluded.
+	pub fn find_active_waivers(
+		&self,
+		repo_uid: &str,
+		req_id: &str,
+		requirement_version: i64,
+		obligation_id: &str,
+		now: &str,
+	) -> Result<Vec<WaiverDeclaration>, StorageError> {
+		let mut stmt = self.connection().prepare(
+			"SELECT declaration_uid, value_json
+			 FROM declarations
+			 WHERE repo_uid = ?
+			   AND kind = 'waiver'
+			   AND is_active = 1
+			   AND (json_extract(value_json, '$.expires_at') IS NULL
+			        OR json_extract(value_json, '$.expires_at') > ?)
+			   AND json_extract(value_json, '$.req_id') = ?
+			   AND json_extract(value_json, '$.requirement_version') = ?
+			   AND json_extract(value_json, '$.obligation_id') = ?
+			 ORDER BY created_at DESC",
+		)?;
+
+		let rows = stmt.query_map(
+			rusqlite::params![repo_uid, now, req_id, requirement_version, obligation_id],
+			|row| {
+				let uid: String = row.get(0)?;
+				let value_json: String = row.get(1)?;
+				Ok((uid, value_json))
+			},
+		)?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			let (declaration_uid, value_json) = row.map_err(StorageError::from)?;
+
+			let parsed: serde_json::Value = serde_json::from_str(&value_json)
+				.map_err(|e| StorageError::MalformedWaiver {
+					declaration_uid: declaration_uid.clone(),
+					reason: format!("malformed value_json: {}", e),
+				})?;
+
+			let reason = parsed["reason"]
+				.as_str()
+				.ok_or_else(|| StorageError::MalformedWaiver {
+					declaration_uid: declaration_uid.clone(),
+					reason: "missing required field: reason".to_string(),
+				})?
+				.to_string();
+
+			let created_at = parsed["created_at"]
+				.as_str()
+				.ok_or_else(|| StorageError::MalformedWaiver {
+					declaration_uid: declaration_uid.clone(),
+					reason: "missing required field: created_at".to_string(),
+				})?
+				.to_string();
+
+			let waiver_req_id = parsed["req_id"]
+				.as_str()
+				.ok_or_else(|| StorageError::MalformedWaiver {
+					declaration_uid: declaration_uid.clone(),
+					reason: "missing required field: req_id".to_string(),
+				})?
+				.to_string();
+
+			let waiver_version = parsed["requirement_version"]
+				.as_i64()
+				.ok_or_else(|| StorageError::MalformedWaiver {
+					declaration_uid: declaration_uid.clone(),
+					reason: "missing or non-integer field: requirement_version".to_string(),
+				})?;
+
+			let waiver_obl_id = parsed["obligation_id"]
+				.as_str()
+				.ok_or_else(|| StorageError::MalformedWaiver {
+					declaration_uid: declaration_uid.clone(),
+					reason: "missing required field: obligation_id".to_string(),
+				})?
+				.to_string();
+
+			let created_by = parsed["created_by"].as_str().map(|s| s.to_string());
+			let expires_at = parsed["expires_at"].as_str().map(|s| s.to_string());
+			let rationale_category = parsed["rationale_category"].as_str().map(|s| s.to_string());
+			let policy_basis = parsed["policy_basis"].as_str().map(|s| s.to_string());
+
+			results.push(WaiverDeclaration {
+				declaration_uid,
+				req_id: waiver_req_id,
+				requirement_version: waiver_version,
+				obligation_id: waiver_obl_id,
+				reason,
+				created_at,
+				created_by,
+				expires_at,
+				rationale_category,
+				policy_basis,
 			});
 		}
 

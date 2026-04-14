@@ -449,6 +449,19 @@ intentionally diverges.
   not emit this. The Rust side adds it for transparency. Superset.
 - **`trust` command does not use QueryResult envelope.** Both TS
   and Rust emit a trust-specific report shape. No drift.
+- **Rust `gate` waiver overlay: PASS obligations are not waivable (Rust-25).**
+  TS unconditionally sets `effective_verdict = WAIVED` when any
+  matching active waiver exists, regardless of `computed_verdict`.
+  This means a PASS obligation with a waiver shows as WAIVED in TS,
+  inflating `waived` counts and hiding the distinction between
+  obligations that needed an exception and obligations that passed
+  on merit. Rust applies waivers only to non-PASS computed verdicts.
+  A PASS obligation stays PASS with `waiver_basis = null`, even if
+  a matching waiver exists. This is the corrected policy model:
+  `effective_verdict` represents the verdict after policy
+  transformation, and no transformation occurs for PASS.
+  The TS prototype should be aligned to match if/when TS is still
+  actively maintained.
 
 ### Known contract gaps
 

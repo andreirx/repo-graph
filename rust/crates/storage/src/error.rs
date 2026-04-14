@@ -66,6 +66,19 @@ pub enum StorageError {
 		reason: String,
 	},
 
+	/// A waiver declaration's `value_json` has a structural invariant
+	/// violation. Waivers are authored governance inputs; malformed
+	/// active waivers must fail loudly (not silently disappear from
+	/// gate evaluation). Follows the same principle as
+	/// `MalformedRequirement` (Rust-24).
+	///
+	/// Added in Rust-25 for `find_active_waivers`.
+	#[error("malformed waiver declaration {declaration_uid}: {reason}")]
+	MalformedWaiver {
+		declaration_uid: String,
+		reason: String,
+	},
+
 	/// A storage method that has been declared in the
 	/// `TrustStorageRead` trait but not yet implemented in the
 	/// adapter. Returns through the typed error channel instead

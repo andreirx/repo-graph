@@ -1,13 +1,26 @@
 //! Gate evaluation support for `rgr-rust gate`.
 //!
-//! Narrow gate evaluator: evaluates requirement obligations against
-//! the current snapshot. Only `arch_violations` is supported in
-//! Rust-24; all other methods return UNSUPPORTED.
+//! Evaluates requirement obligations against the current snapshot
+//! and layers waiver overlay for governance policy.
+//!
+//! Only `arch_violations` method is supported; all other methods
+//! return UNSUPPORTED.
 //!
 //! This module owns:
 //!   - Obligation evaluation (method dispatch)
+//!   - Waiver overlay (effective verdict resolution)
 //!   - Gate reduction (verdict list → outcome + exit code)
-//!   - Output DTOs (matching TS gate JSON shape)
+//!   - Output DTOs (TS-compatible gate JSON shape)
+//!
+//! Waiver semantics (Rust-25, deliberate divergence from TS):
+//!   - Waivers only suppress non-PASS computed verdicts.
+//!   - A PASS obligation with a matching waiver remains PASS with
+//!     waiver_basis = null. The waiver does not transform a passing
+//!     obligation into WAIVED because no policy exception occurred.
+//!   - This differs from the TS prototype which unconditionally sets
+//!     effective_verdict = WAIVED when any matching waiver exists,
+//!     regardless of computed verdict. The Rust model is the
+//!     corrected policy model (documented in TECH-DEBT.md).
 //!
 //! main.rs stays a wiring layer: parse args, open storage, call
 //! this module, serialize output, set exit code.
@@ -43,6 +56,48 @@ impl std::fmt::Display for Verdict {
 	}
 }
 
+/// Five-state effective verdict used at the gate boundary.
+///
+/// WAIVED is ONLY an effective state — never a computed state.
+/// Serializes to the same string values as Verdict, plus "WAIVED".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[allow(non_camel_case_types)]
+pub enum EffectiveVerdict {
+	PASS,
+	FAIL,
+	MISSING_EVIDENCE,
+	UNSUPPORTED,
+	WAIVED,
+}
+
+impl From<Verdict> for EffectiveVerdict {
+	fn from(v: Verdict) -> Self {
+		match v {
+			Verdict::PASS => Self::PASS,
+			Verdict::FAIL => Self::FAIL,
+			Verdict::MISSING_EVIDENCE => Self::MISSING_EVIDENCE,
+			Verdict::UNSUPPORTED => Self::UNSUPPORTED,
+		}
+	}
+}
+
+// ── Waiver basis ────────────────────────────────────────────────
+
+/// Audit trail of the waiver that suppressed a computed verdict.
+///
+/// Fields mirror TS `WaiverBasis` interface. Non-null iff
+/// `effective_verdict === WAIVED`.
+#[derive(Debug, Clone, Serialize)]
+pub struct WaiverBasis {
+	pub waiver_uid: String,
+	pub reason: String,
+	pub created_at: String,
+	pub created_by: Option<String>,
+	pub expires_at: Option<String>,
+	pub rationale_category: Option<String>,
+	pub policy_basis: Option<String>,
+}
+
 // ── Obligation evaluation ───────────────────────────────────────
 
 /// Evaluated obligation result (one per verification obligation).
@@ -57,11 +112,9 @@ pub struct ObligationResult {
 	pub threshold: Option<f64>,
 	pub operator: Option<String>,
 	pub computed_verdict: Verdict,
-	/// Same as computed_verdict in Rust-24 (no waivers yet).
-	pub effective_verdict: Verdict,
+	pub effective_verdict: EffectiveVerdict,
 	pub evidence: serde_json::Value,
-	/// Always null in Rust-24 (no waivers yet).
-	pub waiver_basis: Option<()>,
+	pub waiver_basis: Option<WaiverBasis>,
 }
 
 /// Evaluate all obligations from a list of requirement declarations.
@@ -70,17 +123,26 @@ pub struct ObligationResult {
 /// Policy verdicts (PASS/FAIL/MISSING_EVIDENCE/UNSUPPORTED) are
 /// returned inside `Ok`; only infrastructure failures propagate as
 /// errors.
+///
+/// After computing each verdict, layers waiver overlay:
+///   - Non-PASS computed verdicts with a matching active waiver
+///     become effective_verdict = WAIVED.
+///   - PASS verdicts are never transformed (no exception occurred).
+///
+/// `now` is an ISO 8601 timestamp for waiver expiry comparison.
 pub fn evaluate_obligations(
 	storage: &StorageConnection,
 	snapshot_uid: &str,
 	repo_uid: &str,
 	requirements: &[RequirementDeclaration],
+	now: &str,
 ) -> Result<Vec<ObligationResult>, String> {
 	let mut results = Vec::new();
 
 	for req in requirements {
 		for obl in &req.obligations {
-			let result = evaluate_single(storage, snapshot_uid, repo_uid, req, obl)?;
+			let mut result = evaluate_single(storage, snapshot_uid, repo_uid, req, obl)?;
+			apply_waiver_overlay(storage, repo_uid, req, obl, &mut result, now)?;
 			results.push(result);
 		}
 	}
@@ -105,7 +167,7 @@ fn evaluate_single(
 		threshold: obl.threshold,
 		operator: obl.operator.clone(),
 		computed_verdict: Verdict::UNSUPPORTED,
-		effective_verdict: Verdict::UNSUPPORTED,
+		effective_verdict: EffectiveVerdict::UNSUPPORTED,
 		evidence: serde_json::json!({}),
 		waiver_basis: None,
 	};
@@ -114,7 +176,7 @@ fn evaluate_single(
 		"arch_violations" => evaluate_arch_violations(storage, snapshot_uid, repo_uid, obl, &mut result)?,
 		_ => {
 			result.computed_verdict = Verdict::UNSUPPORTED;
-			result.effective_verdict = Verdict::UNSUPPORTED;
+			result.effective_verdict = EffectiveVerdict::UNSUPPORTED;
 			result.evidence = serde_json::json!({
 				"reason": format!("method \"{}\" not yet supported", obl.method),
 			});
@@ -122,6 +184,54 @@ fn evaluate_single(
 	}
 
 	Ok(result)
+}
+
+/// Layer waiver overlay on a computed obligation result.
+///
+/// Only non-PASS computed verdicts are candidates for waiver
+/// suppression. A PASS obligation stays PASS regardless of active
+/// waivers (no policy exception occurred).
+///
+/// This is a deliberate divergence from the TS prototype, which
+/// unconditionally sets effective_verdict = WAIVED for any matching
+/// waiver. See module-level doc comment for rationale.
+fn apply_waiver_overlay(
+	storage: &StorageConnection,
+	repo_uid: &str,
+	req: &RequirementDeclaration,
+	obl: &VerificationObligation,
+	result: &mut ObligationResult,
+	now: &str,
+) -> Result<(), String> {
+	// PASS obligations are not waivable — no exception needed.
+	if result.computed_verdict == Verdict::PASS {
+		return Ok(());
+	}
+
+	let waivers = storage
+		.find_active_waivers(
+			repo_uid,
+			&req.req_id,
+			req.version,
+			&obl.obligation_id,
+			now,
+		)
+		.map_err(|e| format!("failed to read waivers: {}", e))?;
+
+	if let Some(waiver) = waivers.first() {
+		result.effective_verdict = EffectiveVerdict::WAIVED;
+		result.waiver_basis = Some(WaiverBasis {
+			waiver_uid: waiver.declaration_uid.clone(),
+			reason: waiver.reason.clone(),
+			created_at: waiver.created_at.clone(),
+			created_by: waiver.created_by.clone(),
+			expires_at: waiver.expires_at.clone(),
+			rationale_category: waiver.rationale_category.clone(),
+			policy_basis: waiver.policy_basis.clone(),
+		});
+	}
+
+	Ok(())
 }
 
 /// Evaluate the `arch_violations` method.
@@ -140,7 +250,7 @@ fn evaluate_arch_violations(
 		Some(t) => t,
 		None => {
 			result.computed_verdict = Verdict::MISSING_EVIDENCE;
-			result.effective_verdict = Verdict::MISSING_EVIDENCE;
+			result.effective_verdict = EffectiveVerdict::MISSING_EVIDENCE;
 			result.evidence = serde_json::json!({ "reason": "no target specified" });
 			return Ok(());
 		}
@@ -158,7 +268,7 @@ fn evaluate_arch_violations(
 
 	if target_boundaries.is_empty() {
 		result.computed_verdict = Verdict::MISSING_EVIDENCE;
-		result.effective_verdict = Verdict::MISSING_EVIDENCE;
+		result.effective_verdict = EffectiveVerdict::MISSING_EVIDENCE;
 		result.evidence = serde_json::json!({
 			"reason": "no boundary declarations for target",
 		});
@@ -181,7 +291,7 @@ fn evaluate_arch_violations(
 	};
 
 	result.computed_verdict = verdict;
-	result.effective_verdict = verdict;
+	result.effective_verdict = verdict.into();
 	result.evidence = serde_json::json!({
 		"violation_count": total_violations,
 		"snapshot": snapshot_uid,
@@ -213,11 +323,13 @@ pub struct GateCounts {
 
 /// Reduce obligation verdicts to a gate outcome (default mode only).
 ///
-/// Mirrors TS `reduceToGateOutcome` (core/gate/reducer.ts) for
-/// default mode:
-///   - exit 0: all PASS (or empty)
+/// Default mode exit semantics:
+///   - exit 0: all PASS or WAIVED (or empty)
 ///   - exit 1: any FAIL
 ///   - exit 2: no FAIL, but MISSING_EVIDENCE or UNSUPPORTED
+///
+/// WAIVED obligations do not contribute to fail or incomplete.
+/// They are counted separately in `counts.waived`.
 pub fn reduce_to_gate_outcome(obligations: &[ObligationResult]) -> GateResult {
 	let mut counts = GateCounts {
 		total: obligations.len(),
@@ -230,10 +342,11 @@ pub fn reduce_to_gate_outcome(obligations: &[ObligationResult]) -> GateResult {
 
 	for obl in obligations {
 		match obl.effective_verdict {
-			Verdict::PASS => counts.pass += 1,
-			Verdict::FAIL => counts.fail += 1,
-			Verdict::MISSING_EVIDENCE => counts.missing_evidence += 1,
-			Verdict::UNSUPPORTED => counts.unsupported += 1,
+			EffectiveVerdict::PASS => counts.pass += 1,
+			EffectiveVerdict::FAIL => counts.fail += 1,
+			EffectiveVerdict::MISSING_EVIDENCE => counts.missing_evidence += 1,
+			EffectiveVerdict::UNSUPPORTED => counts.unsupported += 1,
+			EffectiveVerdict::WAIVED => counts.waived += 1,
 		}
 	}
 

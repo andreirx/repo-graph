@@ -79,10 +79,15 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   (Rust-22). Reads boundary declarations, queries cross-module
   IMPORTS edges, reports violations.
 - `gate`: CI gate with obligation evaluation (Rust-24). Narrow first
-  gate: arch_violations method only, default mode only, no waivers.
+  gate: arch_violations method only, default mode only.
   Exit codes: 0 pass, 1 fail, 2 incomplete. TS-compatible gate
   report shape with toolchain, computed/effective verdicts.
-- Deferred: waivers, strict/advisory modes, additional gate methods
+- `gate`: Rust-25 adds active waiver resolution. Exact 3-tuple
+  match (req_id, requirement_version, obligation_id). Expiry via
+  lexicographic ISO 8601 comparison. waiver_basis audit trail in
+  output. Deliberate divergence from TS: PASS obligations are not
+  waivable (corrected policy model, see TECH-DEBT.md).
+- Deferred: strict/advisory modes, additional gate methods
   (coverage_threshold, complexity_threshold, hotspot_threshold)
 - Deferred: evidence, obligations, declare commands
 - Deferred: measurement commands, table output, full edge-type set

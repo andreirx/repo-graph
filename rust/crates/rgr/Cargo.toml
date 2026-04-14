@@ -21,6 +21,7 @@
 # Rust-20: Interop hardening — cross-runtime proof for all graph query surfaces.
 # Rust-22: `violations <db_path> <repo_uid>` (first governance command).
 # Rust-24: `gate <db_path> <repo_uid>` (narrow: arch_violations only, default mode).
+# Rust-25: gate waiver overlay (active waiver resolution, expiry, audit trail).
 #
 # No formatting-heavy UX.
 
