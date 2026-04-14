@@ -407,3 +407,45 @@ NODE_MODULE_VERSION drift debt is also closed.
 - **Critical sequencing:** must NOT be folded into a feature slice.
   This is its own substrate move. Recorded as the "next substrate
   slice" in the conversation roadmap.
+
+## Rust CLI (`rgr-rust`) — known divergences and deferred items
+
+Accumulated through Rust-7B to Rust-15. The Rust CLI mirrors the TS
+`rgr` command surface incrementally. This section tracks what is not
+yet ported and what intentionally diverges.
+
+### Deferred TS CLI features (not yet ported to Rust)
+
+- **`--edge-types` filter for callers/callees.** TS supports
+  `--edge-types CALLS,INSTANTIATES` to broaden beyond CALLS-only.
+  Rust hardcodes CALLS. Planned for Rust-17.
+- **`--min-lines` filter for dead.** TS supports `--min-lines N`.
+  Rust omits this filter.
+- **`graph imports <file>`.** Not ported.
+- **`graph path <from> <to>`.** Not ported.
+- **`graph metrics`.** Not ported.
+- **`graph versions`.** Not ported.
+- **Table output format.** Rust is JSON-only. No human-readable
+  tables. No `--json` flag (always JSON).
+
+### Accepted divergences (intentional, not debt)
+
+- **Rust `callers`/`callees` envelope includes `target` field.**
+  The TS CLI does not include the resolved target in the callers/
+  callees JSON output (it uses a different formatting path via
+  `outputNodeResults`). The Rust side adds `target` as a
+  convenience field. This is a superset, not a contract break.
+- **Rust `dead` envelope includes `kind_filter` field.** TS does
+  not emit this. The Rust side adds it for transparency. Superset.
+- **`trust` command does not use QueryResult envelope.** Both TS
+  and Rust emit a trust-specific report shape. No drift.
+
+### Known contract gaps
+
+- **`index` and `refresh` have no JSON output.** They print
+  progress to stderr only. TS `rgr repo index` also uses stderr
+  for progress, so this is aligned.
+- **No `--level file` flag for cycles.** TS supports `--level
+  file` to detect file-level cycles. Rust hardcodes module-level.
+- **No staleness tracking for `index`/`refresh` commands.** Only
+  read-side commands compute the `stale` field.

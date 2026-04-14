@@ -14,6 +14,7 @@
 #   Rust-14: `stats   <db_path> <repo_uid>`
 #
 # Rust-15: QueryResult envelope standardization across all read commands.
+# Rust-16: Consolidation — docs, tech-debt register, contract tests, interop expansion.
 #
 # No formatting-heavy UX.
 

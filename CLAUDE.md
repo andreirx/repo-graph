@@ -118,6 +118,53 @@ indexing race) and therefore are not admissible as a deterministic
 acceptance baseline. Run them explicitly when investigating enrichment
 behavior; do not rely on them for slice closure evidence.
 
+## Rust CLI (`rgr-rust`)
+
+The Rust binary `rgr-rust` (crate `repo-graph-rgr`) is the Rust-side
+CLI. It produces JSON-only output on stdout and uses stderr for errors.
+Exit codes: 0 success, 1 usage error, 2 runtime error.
+
+Commands (accumulated Rust-7B through Rust-15):
+
+```
+rgr-rust index   <repo_path> <db_path>              # Full index to SQLite
+rgr-rust refresh <repo_path> <db_path>              # Delta refresh
+rgr-rust trust   <db_path> <repo_uid>               # Trust report
+rgr-rust callers <db_path> <repo_uid> <symbol>      # Direct callers (CALLS, one hop)
+rgr-rust callees <db_path> <repo_uid> <symbol>      # Direct callees (CALLS, one hop)
+rgr-rust dead    <db_path> <repo_uid> [kind]         # Unreferenced nodes
+rgr-rust cycles  <db_path> <repo_uid>               # Module-level IMPORTS cycles
+rgr-rust stats   <db_path> <repo_uid>               # Module structural metrics
+```
+
+Read-side commands (callers, callees, dead, cycles, stats) emit a
+TS-compatible QueryResult JSON envelope:
+
+```json
+{
+  "command": "graph <cmd>",
+  "repo": "<repo name>",
+  "snapshot": "<snapshot_uid>",
+  "snapshot_scope": "full" | "incremental",
+  "basis_commit": "<hash>" | null,
+  "results": [...],
+  "count": N,
+  "stale": true | false
+}
+```
+
+Symbol resolution (callers, callees) uses exact match only:
+stable_key, then qualified_name, then name. SYMBOL kind only.
+
+Known Rust CLI divergences from TS CLI:
+- No `--edge-types` filter on callers/callees (CALLS only)
+- No `--min-lines` filter on dead
+- No `--json` flag (always JSON, no table format)
+- No `graph imports`, `graph path`, `graph metrics` commands yet
+- `trust` command envelope does not use the QueryResult wrapper
+  (trust has its own report shape, matching TS)
+- `index` and `refresh` use stderr for progress, no JSON output
+
 ## Native dependency note
 
 `better-sqlite3` is a native Node.js addon. The compiled binary is keyed to the **active Node ABI** at rebuild time, not to the version it was first installed with.
