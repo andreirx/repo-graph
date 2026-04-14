@@ -7,6 +7,7 @@
 //!   rgr-rust callers <db_path> <repo_uid> <symbol>
 //!   rgr-rust callees <db_path> <repo_uid> <symbol>
 //!   rgr-rust dead    <db_path> <repo_uid> [kind]
+//!   rgr-rust cycles  <db_path> <repo_uid>
 //!
 //! Exit codes:
 //!   0 — success
@@ -31,6 +32,7 @@ fn main() -> ExitCode {
 		"callers" => run_callers(&args[2..]),
 		"callees" => run_callees(&args[2..]),
 		"dead" => run_dead(&args[2..]),
+		"cycles" => run_cycles(&args[2..]),
 		other => {
 			eprintln!("unknown command: {}", other);
 			print_usage();
@@ -47,6 +49,7 @@ fn print_usage() {
 	eprintln!("  rgr-rust callers <db_path> <repo_uid> <symbol>");
 	eprintln!("  rgr-rust callees <db_path> <repo_uid> <symbol>");
 	eprintln!("  rgr-rust dead    <db_path> <repo_uid> [kind]");
+	eprintln!("  rgr-rust cycles  <db_path> <repo_uid>");
 }
 
 // ── index command ────────────────────────────────────────────────
@@ -441,6 +444,66 @@ fn run_dead(args: &[String]) -> ExitCode {
 		"kind_filter": kind_filter,
 		"results": dead,
 		"count": dead.len(),
+	});
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+// ── cycles command ───────────────────────────────────────────────
+
+fn run_cycles(args: &[String]) -> ExitCode {
+	if args.len() != 2 {
+		eprintln!("usage: rgr-rust cycles <db_path> <repo_uid>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Latest READY snapshot (same rule as all read commands).
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(snap)) => snap,
+		Ok(None) => {
+			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Module-level cycles (TS default).
+	let cycles = match storage.find_cycles(&snapshot.snapshot_uid, "module") {
+		Ok(c) => c,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// JSON to stdout.
+	let output = serde_json::json!({
+		"snapshot_uid": snapshot.snapshot_uid,
+		"results": cycles,
+		"count": cycles.len(),
 	});
 
 	match serde_json::to_string_pretty(&output) {

@@ -7,6 +7,7 @@
 //! Rust-10: `resolve_symbol` + `find_direct_callers`.
 //! Rust-11: `find_direct_callees`.
 //! Rust-12: `find_dead_nodes`.
+//! Rust-13: `find_cycles`.
 
 use serde::{Deserialize, Serialize};
 
@@ -69,6 +70,27 @@ pub struct DeadNodeResult {
 	pub file: Option<String>,
 	pub line: Option<i64>,
 	pub line_count: Option<i64>,
+}
+
+/// A single cycle (circular dependency path).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycleResult {
+	pub cycle_id: String,
+	/// Number of nodes (and edges) in the ring.
+	pub length: usize,
+	pub nodes: Vec<CycleNode>,
+}
+
+/// A node participating in a cycle.
+///
+/// The `file` field is always `None` for MODULE-level cycles
+/// (MODULE nodes have no associated file). Matches TS behavior
+/// where `file` is always `null` for cycle nodes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycleNode {
+	pub node_id: String,
+	pub name: String,
+	pub file: Option<String>,
 }
 
 /// Error when resolving a symbol query.
@@ -332,6 +354,107 @@ impl StorageConnection {
 		})
 	}
 
+	/// Find module-level dependency cycles via IMPORTS edges.
+	///
+	/// Mirrors the TS `findCycles` algorithm (sqlite-storage.ts:2511-2585):
+	///   1. Recursive CTE walks IMPORTS edges between MODULE nodes.
+	///   2. Detects when a path returns to its starting node.
+	///   3. Post-processes: canonicalize each cycle by rotating to put
+	///      the lexicographically smallest UID first, then deduplicate.
+	///
+	/// The `level` parameter selects the node kind: "module" → MODULE,
+	/// "file" → FILE. Default is "module" (matching TS default).
+	pub fn find_cycles(
+		&self,
+		snapshot_uid: &str,
+		level: &str,
+	) -> Result<Vec<CycleResult>, StorageError> {
+		let node_kind = match level {
+			"file" => "FILE",
+			_ => "MODULE",
+		};
+
+		let mut stmt = self.connection().prepare(
+			"WITH RECURSIVE cycle_search(start_uid, current_uid, path, is_cycle) AS (
+				SELECT n.node_uid, n.node_uid, n.node_uid, 0
+				FROM nodes n
+				WHERE n.snapshot_uid = ? AND n.kind = ?
+
+				UNION ALL
+
+				SELECT cs.start_uid, e.target_node_uid,
+				       cs.path || ' -> ' || e.target_node_uid,
+				       CASE WHEN e.target_node_uid = cs.start_uid THEN 1 ELSE 0 END
+				FROM edges e
+				JOIN cycle_search cs ON e.source_node_uid = cs.current_uid
+				WHERE e.snapshot_uid = ?
+				  AND e.type = 'IMPORTS'
+				  AND cs.is_cycle = 0
+				  AND (cs.path NOT LIKE '%' || e.target_node_uid || '%'
+				       OR e.target_node_uid = cs.start_uid)
+			)
+			SELECT DISTINCT path FROM cycle_search
+			WHERE is_cycle = 1
+			ORDER BY path",
+		)?;
+
+		let raw_paths: Vec<String> = stmt
+			.query_map(
+				rusqlite::params![snapshot_uid, node_kind, snapshot_uid],
+				|row| row.get(0),
+			)?
+			.collect::<Result<Vec<_>, _>>()?;
+
+		// Canonicalize and deduplicate (same algorithm as TS).
+		let mut seen = std::collections::HashSet::new();
+		let mut results = Vec::new();
+
+		for path in &raw_paths {
+			let uids: Vec<&str> = path.split(" -> ").collect();
+			// The path includes the start node repeated at the end;
+			// remove it to get the unique ring members.
+			let ring = &uids[..uids.len().saturating_sub(1)];
+			if ring.is_empty() {
+				continue;
+			}
+
+			let canonical = canonicalize_cycle(ring);
+			if !seen.insert(canonical.clone()) {
+				continue;
+			}
+
+			let canonical_uids: Vec<&str> = canonical.split(',').collect();
+
+			// Look up names for each node in the cycle.
+			let nodes: Vec<CycleNode> = canonical_uids
+				.iter()
+				.map(|uid| {
+					let name: String = self
+						.connection()
+						.query_row(
+							"SELECT name FROM nodes WHERE node_uid = ?",
+							rusqlite::params![uid],
+							|row| row.get(0),
+						)
+						.unwrap_or_else(|_| uid.to_string());
+					CycleNode {
+						node_id: uid.to_string(),
+						name,
+						file: None,
+					}
+				})
+				.collect();
+
+			results.push(CycleResult {
+				cycle_id: format!("cycle-{}", results.len() + 1),
+				length: canonical_uids.len(),
+				nodes,
+			});
+		}
+
+		Ok(results)
+	}
+
 	// ── Internal helpers ─────────────────────────────────────
 
 	fn query_symbol_by_field(
@@ -409,6 +532,24 @@ impl StorageConnection {
 		rows.collect::<Result<Vec<_>, _>>()
 			.map_err(StorageError::from)
 	}
+}
+
+/// Canonicalize a cycle by rotating so the lexicographically
+/// smallest UID comes first. Matches TS `canonicalizeCycle`
+/// (sqlite-storage.ts:3356-3365).
+fn canonicalize_cycle(uids: &[&str]) -> String {
+	let min_idx = uids
+		.iter()
+		.enumerate()
+		.min_by_key(|(_, uid)| **uid)
+		.map(|(i, _)| i)
+		.unwrap_or(0);
+	let rotated: Vec<&str> = uids[min_idx..]
+		.iter()
+		.chain(uids[..min_idx].iter())
+		.copied()
+		.collect();
+	rotated.join(",")
 }
 
 // ── Storage-layer regression tests ──────────────────────────────

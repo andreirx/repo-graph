@@ -10,6 +10,7 @@
 #   Rust-10: `callers <db_path> <repo_uid> <symbol>`
 #   Rust-11: `callees <db_path> <repo_uid> <symbol>`
 #   Rust-12: `dead    <db_path> <repo_uid> [kind]`
+#   Rust-13: `cycles  <db_path> <repo_uid>`
 #
 # No formatting-heavy UX.
 
