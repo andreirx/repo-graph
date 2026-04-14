@@ -1278,4 +1278,156 @@ mod tests {
 			result
 		);
 	}
+
+	// ── Rust-23: boundary declaration reading ───────────────
+
+	fn insert_declaration(
+		storage: &StorageConnection,
+		uid: &str,
+		repo_uid: &str,
+		target_stable_key: &str,
+		kind: &str,
+		value_json: &str,
+		is_active: bool,
+	) {
+		storage
+			.connection()
+			.execute(
+				"INSERT INTO declarations
+				 (declaration_uid, repo_uid, target_stable_key, kind, value_json, created_at, is_active)
+				 VALUES (?, ?, ?, ?, ?, '2024-01-01T00:00:00Z', ?)",
+				rusqlite::params![uid, repo_uid, target_stable_key, kind, value_json, is_active as i32],
+			)
+			.unwrap();
+	}
+
+	#[test]
+	fn boundary_declarations_returns_active_only() {
+		let (storage, _snap_uid) = setup_db_with_snapshot();
+
+		// Active boundary.
+		insert_declaration(
+			&storage, "d1", "r1", "r1:src/core:MODULE", "boundary",
+			r#"{"forbids":"src/adapters"}"#, true,
+		);
+		// Inactive boundary (deactivated).
+		insert_declaration(
+			&storage, "d2", "r1", "r1:src/util:MODULE", "boundary",
+			r#"{"forbids":"src/core"}"#, false,
+		);
+
+		let result = storage.get_active_boundary_declarations("r1").unwrap();
+		assert_eq!(result.len(), 1, "only active boundary should be returned");
+		assert_eq!(result[0].boundary_module, "src/core");
+		assert_eq!(result[0].forbids, "src/adapters");
+	}
+
+	#[test]
+	fn boundary_declarations_skips_malformed_value_json() {
+		let (storage, _snap_uid) = setup_db_with_snapshot();
+
+		// Valid.
+		insert_declaration(
+			&storage, "d1", "r1", "r1:src/core:MODULE", "boundary",
+			r#"{"forbids":"src/adapters"}"#, true,
+		);
+		// Malformed JSON.
+		insert_declaration(
+			&storage, "d2", "r1", "r1:src/util:MODULE", "boundary",
+			"not json", true,
+		);
+		// Valid JSON but missing forbids field.
+		insert_declaration(
+			&storage, "d3", "r1", "r1:src/lib:MODULE", "boundary",
+			r#"{"something":"else"}"#, true,
+		);
+
+		let result = storage.get_active_boundary_declarations("r1").unwrap();
+		assert_eq!(result.len(), 1, "only valid boundary should survive");
+		assert_eq!(result[0].boundary_module, "src/core");
+	}
+
+	#[test]
+	fn boundary_declarations_skips_non_module_stable_key() {
+		let (storage, _snap_uid) = setup_db_with_snapshot();
+
+		// MODULE key (valid).
+		insert_declaration(
+			&storage, "d1", "r1", "r1:src/core:MODULE", "boundary",
+			r#"{"forbids":"src/adapters"}"#, true,
+		);
+		// FILE key (invalid for boundary).
+		insert_declaration(
+			&storage, "d2", "r1", "r1:src/index.ts:FILE", "boundary",
+			r#"{"forbids":"src/adapters"}"#, true,
+		);
+		// SYMBOL key (invalid for boundary).
+		insert_declaration(
+			&storage, "d3", "r1", "r1:src/core/service.ts#serve:SYMBOL:FUNCTION", "boundary",
+			r#"{"forbids":"src/adapters"}"#, true,
+		);
+
+		let result = storage.get_active_boundary_declarations("r1").unwrap();
+		assert_eq!(result.len(), 1, "only MODULE key should survive");
+		assert_eq!(result[0].boundary_module, "src/core");
+	}
+
+	#[test]
+	fn boundary_declarations_extracts_reason() {
+		let (storage, _snap_uid) = setup_db_with_snapshot();
+
+		// With reason.
+		insert_declaration(
+			&storage, "d1", "r1", "r1:src/core:MODULE", "boundary",
+			r#"{"forbids":"src/adapters","reason":"clean architecture"}"#, true,
+		);
+		// Without reason.
+		insert_declaration(
+			&storage, "d2", "r1", "r1:src/util:MODULE", "boundary",
+			r#"{"forbids":"src/core"}"#, true,
+		);
+
+		let result = storage.get_active_boundary_declarations("r1").unwrap();
+		assert_eq!(result.len(), 2);
+
+		let core = result.iter().find(|d| d.boundary_module == "src/core").unwrap();
+		assert_eq!(core.reason.as_deref(), Some("clean architecture"));
+
+		let util = result.iter().find(|d| d.boundary_module == "src/util").unwrap();
+		assert!(util.reason.is_none());
+	}
+
+	#[test]
+	fn boundary_declarations_ignores_non_boundary_kinds() {
+		let (storage, _snap_uid) = setup_db_with_snapshot();
+
+		// Boundary kind.
+		insert_declaration(
+			&storage, "d1", "r1", "r1:src/core:MODULE", "boundary",
+			r#"{"forbids":"src/adapters"}"#, true,
+		);
+		// Entrypoint kind (not boundary).
+		insert_declaration(
+			&storage, "d2", "r1", "r1:src/core:MODULE", "entrypoint",
+			r#"{"type":"public_export"}"#, true,
+		);
+
+		let result = storage.get_active_boundary_declarations("r1").unwrap();
+		assert_eq!(result.len(), 1, "only boundary kind should be returned");
+	}
+
+	#[test]
+	fn extract_module_path_parses_correctly() {
+		assert_eq!(
+			extract_module_path("r1:src/core:MODULE"),
+			Some("src/core".to_string())
+		);
+		assert_eq!(
+			extract_module_path("repo-graph:src/adapters/storage:MODULE"),
+			Some("src/adapters/storage".to_string())
+		);
+		assert_eq!(extract_module_path("r1:src/index.ts:FILE"), None);
+		assert_eq!(extract_module_path("r1:src/core"), None);
+		assert_eq!(extract_module_path(""), None);
+	}
 }

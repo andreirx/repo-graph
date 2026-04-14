@@ -590,4 +590,184 @@ describe("Rust-20: graph-query interop on rich fixture", () => {
 		const serveDead = dead.find((d) => d.symbol === "serve");
 		expect(serveDead).toBeUndefined();
 	});
+
+});
+
+// ── Rust-23: end-to-end violations interop ───────────────────────
+//
+// The rich fixture uses flat files (src/*.ts) which cannot produce
+// cross-module boundary violations. This block builds a dedicated
+// subdirectory fixture for the violations flow.
+
+describe("Rust-23: violations interop on subdirectory fixture", () => {
+	let violTempDir: string;
+	let violDbPath: string;
+	let violProvider: SqliteConnectionProvider;
+	let violStorage: SqliteStorage;
+	let violSnapshotUid: string;
+
+	beforeAll(() => {
+		if (!existsSync(RUST_BINARY)) {
+			throw new Error(
+				`Rust binary not found at ${RUST_BINARY}. Run \`cargo build -p repo-graph-rgr\` first.`,
+			);
+		}
+
+		violTempDir = mkdtempSync(join(tmpdir(), "rgr-interop-viol-"));
+		const repoDir = join(violTempDir, "repo");
+		mkdirSync(join(repoDir, "src/core"), { recursive: true });
+		mkdirSync(join(repoDir, "src/adapters"), { recursive: true });
+		mkdirSync(join(repoDir, "src/util"), { recursive: true });
+
+		writeFileSync(
+			join(repoDir, "package.json"),
+			'{"dependencies":{}}',
+		);
+		// core imports from util (allowed).
+		writeFileSync(
+			join(repoDir, "src/core/service.ts"),
+			'import { helper } from "../util/helper";\nexport function serve() { helper(); }\n',
+		);
+		// adapters imports from core (violating if boundary forbids it).
+		writeFileSync(
+			join(repoDir, "src/adapters/store.ts"),
+			'import { serve } from "../core/service";\nexport function store() { serve(); }\n',
+		);
+		writeFileSync(
+			join(repoDir, "src/util/helper.ts"),
+			"export function helper() {}\n",
+		);
+
+		violDbPath = join(violTempDir, "viol.db");
+		const cmd = `"${RUST_BINARY}" index "${repoDir}" "${violDbPath}"`;
+		execSync(cmd, { encoding: "utf-8", timeout: 30000 });
+		expect(existsSync(violDbPath)).toBe(true);
+
+		violProvider = new SqliteConnectionProvider(violDbPath);
+		violProvider.initialize();
+		violStorage = new SqliteStorage(violProvider.getDatabase());
+
+		const snap = violStorage.getLatestSnapshot("repo");
+		expect(snap).not.toBeNull();
+		violSnapshotUid = snap!.snapshotUid;
+	});
+
+	afterAll(() => {
+		if (violProvider) {
+			try {
+				violProvider.close();
+			} catch {
+				// ignore
+			}
+		}
+		if (violTempDir && existsSync(violTempDir)) {
+			rmSync(violTempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("findImportsBetweenPaths finds cross-module violations on Rust-written DB", () => {
+		// adapters imports from core → findImportsBetweenPaths should find it.
+		const results = violStorage.findImportsBetweenPaths({
+			snapshotUid: violSnapshotUid,
+			sourcePrefix: "src/adapters",
+			targetPrefix: "src/core",
+		});
+		expect(results.length).toBe(1);
+		expect(results[0].sourceFile).toContain("store.ts");
+		expect(results[0].targetFile).toContain("service.ts");
+	});
+
+	it("findImportsBetweenPaths returns empty for non-violating direction", () => {
+		// core does NOT import from adapters.
+		const results = violStorage.findImportsBetweenPaths({
+			snapshotUid: violSnapshotUid,
+			sourcePrefix: "src/core",
+			targetPrefix: "src/adapters",
+		});
+		expect(results.length).toBe(0);
+	});
+
+	it("getActiveDeclarations reads boundary declarations from Rust-written DB", () => {
+		const db = violProvider.getDatabase();
+		db.prepare(
+			`INSERT INTO declarations
+			 (declaration_uid, repo_uid, target_stable_key, kind, value_json, created_at, is_active)
+			 VALUES (?, ?, ?, 'boundary', ?, '2024-01-01T00:00:00Z', 1)`,
+		).run(
+			"viol-boundary-1",
+			"repo",
+			"repo:src/adapters:MODULE",
+			'{"forbids":"src/core","reason":"clean architecture"}',
+		);
+
+		const boundaries = violStorage.getActiveDeclarations({
+			repoUid: "repo",
+			kind: "boundary" as never,
+		});
+		const found = boundaries.find(
+			(d) => d.targetStableKey === "repo:src/adapters:MODULE",
+		);
+		expect(found).toBeDefined();
+		expect(JSON.parse(found!.valueJson).forbids).toBe("src/core");
+
+		// Clean up.
+		db.prepare("DELETE FROM declarations WHERE declaration_uid = ?").run(
+			"viol-boundary-1",
+		);
+	});
+
+	it("end-to-end: boundary + imports produces exact violation on Rust-written DB", () => {
+		// Insert boundary: src/adapters --forbids--> src/core.
+		const db = violProvider.getDatabase();
+		db.prepare(
+			`INSERT INTO declarations
+			 (declaration_uid, repo_uid, target_stable_key, kind, value_json, created_at, is_active)
+			 VALUES (?, ?, ?, 'boundary', ?, '2024-01-01T00:00:00Z', 1)`,
+		).run(
+			"viol-boundary-e2e",
+			"repo",
+			"repo:src/adapters:MODULE",
+			'{"forbids":"src/core","reason":"adapters must not depend on core"}',
+		);
+
+		// Read the boundary declaration.
+		const boundaries = violStorage.getActiveDeclarations({
+			repoUid: "repo",
+			kind: "boundary" as never,
+		});
+		const boundary = boundaries.find(
+			(d) => d.declarationUid === "viol-boundary-e2e",
+		);
+		expect(boundary).toBeDefined();
+
+		const value = JSON.parse(boundary!.valueJson) as {
+			forbids: string;
+			reason: string;
+		};
+
+		// Query violating imports using the same logic as arch violations.
+		const stableKey = boundary!.targetStableKey;
+		const moduleMatch = stableKey.match(/^[^:]+:(.+):MODULE$/);
+		expect(moduleMatch).not.toBeNull();
+		const boundaryModule = moduleMatch![1];
+
+		const violations = violStorage.findImportsBetweenPaths({
+			snapshotUid: violSnapshotUid,
+			sourcePrefix: boundaryModule,
+			targetPrefix: value.forbids,
+		});
+
+		// Exact: 1 violation (store.ts → service.ts).
+		expect(violations.length).toBe(1);
+		expect(violations[0].sourceFile).toContain("store.ts");
+		expect(violations[0].targetFile).toContain("service.ts");
+		expect(
+			violations[0].line === null || typeof violations[0].line === "number",
+		).toBe(true);
+
+		// Clean up.
+		db.prepare("DELETE FROM declarations WHERE declaration_uid = ?").run(
+			"viol-boundary-e2e",
+		);
+	});
 });

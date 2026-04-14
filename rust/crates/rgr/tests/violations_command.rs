@@ -7,7 +7,8 @@
 //!   4. No declarations => empty result
 //!   5. Declaration exists but no violating imports => empty result
 //!   6. Exact violation result with raw-SQL boundary declarations
-//!   7. Envelope contract
+//!   7. Duplicate boundary declarations produce deduplicated violations
+//!   8. Envelope contract
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -240,7 +241,49 @@ fn violations_exact_results() {
 	);
 }
 
-// -- 7. Envelope contract ---------------------------------------------
+// -- 7. Duplicate declarations produce deduplicated violations --------
+
+#[test]
+fn violations_dedup_duplicate_declarations() {
+	let (_r, _d, db) = build_violations_db();
+	let db_str = db.to_str().unwrap();
+
+	// Insert the SAME boundary rule twice (different declaration UIDs).
+	insert_boundary_declaration(
+		&db,
+		"r1",
+		"src/adapters",
+		"src/core",
+		Some("first declaration"),
+	);
+	// Second declaration with same (module, forbids) but different UID.
+	let conn = rusqlite::Connection::open(&db).unwrap();
+	conn.execute(
+		"INSERT INTO declarations (declaration_uid, repo_uid, target_stable_key, kind, value_json, created_at, is_active)
+		 VALUES ('decl-dup-2', 'r1', 'r1:src/adapters:MODULE', 'boundary', '{\"forbids\":\"src/core\",\"reason\":\"second declaration\"}', '2024-01-02T00:00:00Z', 1)",
+		[],
+	)
+	.unwrap();
+
+	let output = run_cmd(&["violations", db_str, "r1"]);
+	assert_eq!(
+		output.status.code(),
+		Some(0),
+		"stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let result = parse_json(&output);
+	// Should still produce exactly 1 violation (store.ts → service.ts),
+	// not 2 (one per declaration).
+	assert_eq!(
+		result["count"], 1,
+		"duplicate declarations must be deduplicated, got: {}",
+		result
+	);
+}
+
+// -- 8. Envelope contract ---------------------------------------------
 
 #[test]
 fn violations_envelope_contract() {
