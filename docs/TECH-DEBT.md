@@ -410,9 +410,10 @@ NODE_MODULE_VERSION drift debt is also closed.
 
 ## Rust CLI (`rgr-rust`) — known divergences and deferred items
 
-Accumulated through Rust-7B to Rust-15. The Rust CLI mirrors the TS
-`rgr` command surface incrementally. This section tracks what is not
-yet ported and what intentionally diverges.
+Frozen at milestone `rgr-rust-structural-v1` (Rust-7B through Rust-20).
+See `docs/milestones/rgr-rust-structural-v1.md` for the full milestone
+document. This section tracks what is not yet ported and what
+intentionally diverges.
 
 ### Deferred TS CLI features (not yet ported to Rust)
 

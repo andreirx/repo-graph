@@ -120,11 +120,14 @@ behavior; do not rely on them for slice closure evidence.
 
 ## Rust CLI (`rgr-rust`)
 
+Milestone: `rgr-rust-structural-v1`. See `docs/milestones/rgr-rust-structural-v1.md`
+for full contracts, slice inventory, and deferred items.
+
 The Rust binary `rgr-rust` (crate `repo-graph-rgr`) is the Rust-side
 CLI. It produces JSON-only output on stdout and uses stderr for errors.
 Exit codes: 0 success, 1 usage error, 2 runtime error.
 
-Commands (accumulated Rust-7B through Rust-15):
+Commands (Rust-7B through Rust-20):
 
 ```
 rgr-rust index   <repo_path> <db_path>              # Full index to SQLite
@@ -139,8 +142,8 @@ rgr-rust cycles  <db_path> <repo_uid>               # Module-level IMPORTS cycle
 rgr-rust stats   <db_path> <repo_uid>               # Module structural metrics
 ```
 
-Read-side commands (callers, callees, dead, cycles, stats) emit a
-TS-compatible QueryResult JSON envelope:
+Read-side commands (callers, callees, path, imports, dead, cycles,
+stats) emit a TS-compatible QueryResult JSON envelope:
 
 ```json
 {
@@ -194,6 +197,7 @@ See `docs/architecture/measurement-model.txt` for the four-layer truth model.
 See `docs/architecture/versioning-model.txt` for toolchain provenance.
 See `docs/architecture/gate-contract.txt` for the normative gate/waiver/verdict contract.
 See `docs/architecture/annotations-contract.txt` for the normative provisional-annotations contract.
+See `docs/milestones/rgr-rust-structural-v1.md` for the Rust CLI structural milestone (commands, contracts, deferred items).
 
 ## Conventions
 

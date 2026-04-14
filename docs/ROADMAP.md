@@ -62,6 +62,19 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Shipped
 
+### Rust structural CLI (`rgr-rust-structural-v1`)
+- 10 commands: index, refresh, trust, callers, callees, path, imports, dead, cycles, stats
+- JSON-only output with TS-compatible QueryResult envelopes
+- Exact symbol resolution (SYMBOL-only, 3-step)
+- Edge-type filters on callers/callees (CALLS, INSTANTIATES)
+- Shortest-path BFS (CALLS+IMPORTS, depth 8)
+- Module-level cycle detection, structural metrics, dead-code analysis
+- Cross-runtime interop proven (19 tests: Rust writes, TS reads + formats)
+- Contract tests, envelope tests, per-command deterministic test matrices
+- Milestone doc: `docs/milestones/rgr-rust-structural-v1.md`
+- Deferred: governance commands, measurement commands, table output, full edge-type set
+- Built across Rust-7B through Rust-20 (14 slices)
+
 ### Multi-language graph engine
 - TypeScript/JavaScript extractor (tree-sitter, syntax-only)
 - Rust extractor (tree-sitter-rust)
