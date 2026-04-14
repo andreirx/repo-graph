@@ -9,7 +9,8 @@
 //! Rust-12: `find_dead_nodes`.
 //! Rust-13: `find_cycles`.
 //! Rust-14: `compute_module_stats`.
-//! Rust-18: `node_exists` (imports support).
+//! Rust-18: `node_exists` + `find_imports`.
+//! Rust-19: `find_shortest_path`.
 
 use serde::{Deserialize, Serialize};
 
@@ -82,6 +83,29 @@ pub struct ImportResult {
 	/// Extractor evidence (e.g. `["ts-core:0.2.0"]`).
 	pub evidence: Vec<String>,
 	pub depth: i64,
+}
+
+/// Result of a shortest-path search between two symbols.
+///
+/// Matches the TS `formatPathResult` wire format (json.ts:74-86).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PathResult {
+	pub found: bool,
+	pub path_length: i64,
+	pub path: Vec<PathStep>,
+}
+
+/// A single step in a shortest-path result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PathStep {
+	pub node_id: String,
+	/// `qualified_name` if present, else `name`.
+	pub symbol: String,
+	/// File path, or empty string if no file.
+	pub file: String,
+	pub line: Option<i64>,
+	/// Edge type that led to this step. Empty string for the start node.
+	pub edge_type: String,
 }
 
 /// A node with no incoming reference edges (dead code candidate).
@@ -709,6 +733,141 @@ impl StorageConnection {
 
 		rows.collect::<Result<Vec<_>, _>>()
 			.map_err(StorageError::from)
+	}
+
+	/// Find the shortest path between two nodes via BFS.
+	///
+	/// Mirrors the TS `findPath` (sqlite-storage.ts:2335-2432).
+	/// Uses a recursive CTE bounded by `max_depth`. Edge types
+	/// are fixed to CALLS and IMPORTS. Returns `PathResult` with
+	/// `found: false` if no path exists within the depth bound.
+	///
+	/// Both `from_stable_key` and `to_stable_key` must be valid
+	/// node stable keys (caller is responsible for resolution).
+	pub fn find_shortest_path(
+		&self,
+		snapshot_uid: &str,
+		from_stable_key: &str,
+		to_stable_key: &str,
+		max_depth: i64,
+	) -> Result<PathResult, StorageError> {
+		// Resolve stable keys to node UIDs.
+		let from_uid: Option<String> = self
+			.connection()
+			.query_row(
+				"SELECT node_uid FROM nodes WHERE snapshot_uid = ? AND stable_key = ?",
+				rusqlite::params![snapshot_uid, from_stable_key],
+				|row| row.get(0),
+			)
+			.ok();
+
+		let to_uid: Option<String> = self
+			.connection()
+			.query_row(
+				"SELECT node_uid FROM nodes WHERE snapshot_uid = ? AND stable_key = ?",
+				rusqlite::params![snapshot_uid, to_stable_key],
+				|row| row.get(0),
+			)
+			.ok();
+
+		let (from_uid, to_uid) = match (from_uid, to_uid) {
+			(Some(f), Some(t)) => (f, t),
+			_ => {
+				return Ok(PathResult {
+					found: false,
+					path_length: 0,
+					path: Vec::new(),
+				});
+			}
+		};
+
+		let mut stmt = self.connection().prepare(
+			"WITH RECURSIVE path_search(node_uid, depth, path_uids, path_edges) AS (
+				SELECT ?, 0, ?, ''
+
+				UNION ALL
+
+				SELECT e.target_node_uid, p.depth + 1,
+				       p.path_uids || ',' || e.target_node_uid,
+				       p.path_edges || CASE WHEN p.path_edges = '' THEN '' ELSE '|' END
+				         || e.source_node_uid || ':' || e.type || ':' || e.target_node_uid
+				FROM edges e
+				JOIN path_search p ON e.source_node_uid = p.node_uid
+				WHERE e.snapshot_uid = ?
+				  AND e.type IN ('CALLS', 'IMPORTS')
+				  AND p.depth < ?
+				  AND p.path_uids NOT LIKE '%' || e.target_node_uid || '%'
+			)
+			SELECT path_uids, path_edges, depth
+			FROM path_search
+			WHERE node_uid = ?
+			ORDER BY depth ASC
+			LIMIT 1",
+		)?;
+
+		let row: Option<(String, String, i64)> = stmt
+			.query_row(
+				rusqlite::params![&from_uid, &from_uid, snapshot_uid, max_depth, &to_uid],
+				|row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+			)
+			.ok();
+
+		let (path_uids_str, path_edges_str, depth) = match row {
+			Some(r) => r,
+			None => {
+				return Ok(PathResult {
+					found: false,
+					path_length: 0,
+					path: Vec::new(),
+				});
+			}
+		};
+
+		// Parse path UIDs and look up each node.
+		let path_uids: Vec<&str> = path_uids_str.split(',').filter(|s| !s.is_empty()).collect();
+		let mut steps: Vec<PathStep> = Vec::new();
+
+		for uid in &path_uids {
+			let node: Option<(String, Option<String>, Option<String>, Option<i64>)> = self
+				.connection()
+				.query_row(
+					"SELECT n.name, n.qualified_name, f.path, n.line_start
+					 FROM nodes n
+					 LEFT JOIN files f ON n.file_uid = f.file_uid
+					 WHERE n.node_uid = ?",
+					rusqlite::params![uid],
+					|row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+				)
+				.ok();
+
+			if let Some((name, qualified_name, file_path, line)) = node {
+				steps.push(PathStep {
+					node_id: uid.to_string(),
+					symbol: qualified_name.unwrap_or(name),
+					file: file_path.unwrap_or_default(),
+					line,
+					edge_type: String::new(), // filled below
+				});
+			}
+		}
+
+		// Fill edge types from path_edges string.
+		// Format: "source_uid:EDGE_TYPE:target_uid|source_uid:EDGE_TYPE:target_uid|..."
+		let edge_segments: Vec<&str> = path_edges_str.split('|').filter(|s| !s.is_empty()).collect();
+		for (i, segment) in edge_segments.iter().enumerate() {
+			if i + 1 < steps.len() {
+				let parts: Vec<&str> = segment.split(':').collect();
+				if parts.len() >= 2 {
+					steps[i + 1].edge_type = parts[1].to_string();
+				}
+			}
+		}
+
+		Ok(PathResult {
+			found: true,
+			path_length: depth,
+			path: steps,
+		})
 	}
 
 	/// Check whether a node with the given stable_key exists in a snapshot.

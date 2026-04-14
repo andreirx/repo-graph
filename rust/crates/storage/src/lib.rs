@@ -151,7 +151,8 @@
 //! R12:  `find_dead_nodes` (unreferenced nodes, 3 exclusion layers).
 //! R13:  `find_cycles` (simple cycle enumeration via recursive CTE).
 //! R14:  `compute_module_stats` (fan-in/out, instability, abstractness).
-//! R18:  `node_exists` (FILE node check for imports command).
+//! R18:  `node_exists` + `find_imports`.
+//! R19:  `find_shortest_path` (BFS via recursive CTE, CALLS+IMPORTS).
 
 pub mod connection;
 pub mod crud;

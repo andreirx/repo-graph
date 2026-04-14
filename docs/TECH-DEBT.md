@@ -428,7 +428,10 @@ yet ported and what intentionally diverges.
   module/symbol names (falls back to `resolveSymbolKey`). Rust
   (Rust-18) accepts file paths only (constructs `{repo}:{path}:FILE`
   stable key). Module input is a future extension.
-- **`graph path <from> <to>`.** Not ported.
+- **`graph path` parameter surface.** TS supports `--max-depth N`
+  (default 8) and `--edge-types CALLS,IMPORTS`. Rust (Rust-19)
+  hardcodes both defaults. Also, TS accepts FILE/MODULE stable
+  keys via `resolveSymbolKey`; Rust is symbol-only at both endpoints.
 - **`graph metrics`.** Not ported.
 - **`graph versions`.** Not ported.
 - **Table output format.** Rust is JSON-only. No human-readable

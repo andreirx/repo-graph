@@ -6,6 +6,7 @@
 //!   rgr-rust trust   <db_path> <repo_uid>
 //!   rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]
 //!   rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]
+//!   rgr-rust path    <db_path> <repo_uid> <from> <to>
 //!   rgr-rust imports <db_path> <repo_uid> <file_path>
 //!   rgr-rust dead    <db_path> <repo_uid> [kind]
 //!   rgr-rust cycles  <db_path> <repo_uid>
@@ -33,6 +34,7 @@ fn main() -> ExitCode {
 		"trust" => run_trust(&args[2..]),
 		"callers" => run_callers(&args[2..]),
 		"callees" => run_callees(&args[2..]),
+		"path" => run_path(&args[2..]),
 		"imports" => run_imports(&args[2..]),
 		"dead" => run_dead(&args[2..]),
 		"cycles" => run_cycles(&args[2..]),
@@ -52,6 +54,7 @@ fn print_usage() {
 	eprintln!("  rgr-rust trust   <db_path> <repo_uid>");
 	eprintln!("  rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]");
 	eprintln!("  rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]");
+	eprintln!("  rgr-rust path    <db_path> <repo_uid> <from> <to>");
 	eprintln!("  rgr-rust imports <db_path> <repo_uid> <file_path>");
 	eprintln!("  rgr-rust dead    <db_path> <repo_uid> [kind]");
 	eprintln!("  rgr-rust cycles  <db_path> <repo_uid>");
@@ -397,6 +400,125 @@ fn run_callees(args: &[String]) -> ExitCode {
 	let output = match build_envelope(
 		&storage, "graph callees", repo_uid, &snapshot,
 		serde_json::to_value(&callees).unwrap(), count, extra,
+	) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+// ── path command ─────────────────────────────────────────────────
+
+fn run_path(args: &[String]) -> ExitCode {
+	if args.len() != 4 {
+		eprintln!("usage: rgr-rust path <db_path> <repo_uid> <from> <to>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+	let from_query = &args[2];
+	let to_query = &args[3];
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(snap)) => snap,
+		Ok(None) => {
+			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Resolve both endpoints (exact SYMBOL resolution only).
+	use repo_graph_storage::queries::SymbolResolveError;
+
+	let from_sym = match storage.resolve_symbol(&snapshot.snapshot_uid, from_query) {
+		Ok(sym) => sym,
+		Err(SymbolResolveError::NotFound) => {
+			eprintln!("error: symbol not found: {}", from_query);
+			return ExitCode::from(2);
+		}
+		Err(SymbolResolveError::Ambiguous(keys)) => {
+			eprintln!("error: ambiguous symbol '{}', matches:", from_query);
+			for k in &keys {
+				eprintln!("  {}", k);
+			}
+			return ExitCode::from(2);
+		}
+		Err(SymbolResolveError::Storage(e)) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	let to_sym = match storage.resolve_symbol(&snapshot.snapshot_uid, to_query) {
+		Ok(sym) => sym,
+		Err(SymbolResolveError::NotFound) => {
+			eprintln!("error: symbol not found: {}", to_query);
+			return ExitCode::from(2);
+		}
+		Err(SymbolResolveError::Ambiguous(keys)) => {
+			eprintln!("error: ambiguous symbol '{}', matches:", to_query);
+			for k in &keys {
+				eprintln!("  {}", k);
+			}
+			return ExitCode::from(2);
+		}
+		Err(SymbolResolveError::Storage(e)) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Shortest path: CALLS + IMPORTS, max depth 8.
+	let path_result = match storage.find_shortest_path(
+		&snapshot.snapshot_uid,
+		&from_sym.stable_key,
+		&to_sym.stable_key,
+		8,
+	) {
+		Ok(r) => r,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// JSON to stdout (TS-compatible QueryResult envelope).
+	// TS wraps the single PathResult in a 1-element array.
+	let count = if path_result.found { 1 } else { 0 };
+	let output = match build_envelope(
+		&storage,
+		"graph path",
+		repo_uid,
+		&snapshot,
+		serde_json::json!([path_result]),
+		count,
+		serde_json::Map::new(),
 	) {
 		Ok(v) => v,
 		Err(e) => {
