@@ -8,6 +8,7 @@
 //!   rgr-rust callees <db_path> <repo_uid> <symbol>
 //!   rgr-rust dead    <db_path> <repo_uid> [kind]
 //!   rgr-rust cycles  <db_path> <repo_uid>
+//!   rgr-rust stats   <db_path> <repo_uid>
 //!
 //! Exit codes:
 //!   0 — success
@@ -33,6 +34,7 @@ fn main() -> ExitCode {
 		"callees" => run_callees(&args[2..]),
 		"dead" => run_dead(&args[2..]),
 		"cycles" => run_cycles(&args[2..]),
+		"stats" => run_stats(&args[2..]),
 		other => {
 			eprintln!("unknown command: {}", other);
 			print_usage();
@@ -50,6 +52,7 @@ fn print_usage() {
 	eprintln!("  rgr-rust callees <db_path> <repo_uid> <symbol>");
 	eprintln!("  rgr-rust dead    <db_path> <repo_uid> [kind]");
 	eprintln!("  rgr-rust cycles  <db_path> <repo_uid>");
+	eprintln!("  rgr-rust stats   <db_path> <repo_uid>");
 }
 
 // ── index command ────────────────────────────────────────────────
@@ -504,6 +507,87 @@ fn run_cycles(args: &[String]) -> ExitCode {
 		"snapshot_uid": snapshot.snapshot_uid,
 		"results": cycles,
 		"count": cycles.len(),
+	});
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+// ── stats command ────────────────────────────────────────────────
+
+fn run_stats(args: &[String]) -> ExitCode {
+	if args.len() != 2 {
+		eprintln!("usage: rgr-rust stats <db_path> <repo_uid>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(snap)) => snap,
+		Ok(None) => {
+			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	let stats = match storage.compute_module_stats(&snapshot.snapshot_uid) {
+		Ok(s) => s,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Look up repo name for the envelope (TS uses repo.name, not repo_uid).
+	use repo_graph_storage::types::RepoRef;
+	let repo_name = storage
+		.get_repo(&RepoRef::Uid(repo_uid.to_string()))
+		.ok()
+		.flatten()
+		.map(|r| r.name)
+		.unwrap_or_else(|| repo_uid.to_string());
+
+	// TS snapshot_scope: "full" if kind == "full", else "incremental".
+	let snapshot_scope = if snapshot.kind == "full" { "full" } else { "incremental" };
+
+	// TS stale: getStaleFiles(snapshotUid).length > 0.
+	let stale = storage
+		.get_stale_files(&snapshot.snapshot_uid)
+		.map(|files| !files.is_empty())
+		.unwrap_or(false);
+
+	// Full TS-compatible QueryResult envelope.
+	let output = serde_json::json!({
+		"command": "graph stats",
+		"repo": repo_name,
+		"snapshot": snapshot.snapshot_uid,
+		"snapshot_scope": snapshot_scope,
+		"basis_commit": snapshot.basis_commit,
+		"results": stats,
+		"count": stats.len(),
+		"stale": stale,
 	});
 
 	match serde_json::to_string_pretty(&output) {

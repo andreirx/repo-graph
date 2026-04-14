@@ -150,6 +150,7 @@
 //! R11:  `find_direct_callees` (symmetric reverse of callers).
 //! R12:  `find_dead_nodes` (unreferenced nodes, 3 exclusion layers).
 //! R13:  `find_cycles` (simple cycle enumeration via recursive CTE).
+//! R14:  `compute_module_stats` (fan-in/out, instability, abstractness).
 
 pub mod connection;
 pub mod crud;

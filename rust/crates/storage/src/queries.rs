@@ -8,6 +8,7 @@
 //! Rust-11: `find_direct_callees`.
 //! Rust-12: `find_dead_nodes`.
 //! Rust-13: `find_cycles`.
+//! Rust-14: `compute_module_stats`.
 
 use serde::{Deserialize, Serialize};
 
@@ -91,6 +92,24 @@ pub struct CycleNode {
 	pub node_id: String,
 	pub name: String,
 	pub file: Option<String>,
+}
+
+/// Per-module structural metrics.
+///
+/// Field names match the TS CLI JSON output (snake_case).
+/// Fractional metrics are rounded to 2 decimal places using
+/// `(x * 100.0).round() / 100.0`, mirroring TS `Math.round(x * 100) / 100`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModuleStatsResult {
+	/// Module path (repo-relative directory).
+	pub module: String,
+	pub fan_in: i64,
+	pub fan_out: i64,
+	pub instability: f64,
+	pub abstractness: f64,
+	pub distance_from_main_sequence: f64,
+	pub file_count: i64,
+	pub symbol_count: i64,
 }
 
 /// Error when resolving a symbol query.
@@ -449,6 +468,136 @@ impl StorageConnection {
 				cycle_id: format!("cycle-{}", results.len() + 1),
 				length: canonical_uids.len(),
 				nodes,
+			});
+		}
+
+		Ok(results)
+	}
+
+	/// Compute per-module structural metrics.
+	///
+	/// Mirrors the TS `computeModuleStats` (sqlite-storage.ts:2846-2964).
+	/// Single SQL query with correlated subqueries for symbol/type counts,
+	/// LEFT JOINs for fan-in/fan-out/file counts, and Rust-side rounding.
+	///
+	/// Only modules with `file_count > 0` are included (matches TS).
+	/// Ordered by module path (qualified_name) ascending.
+	pub fn compute_module_stats(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<ModuleStatsResult>, StorageError> {
+		let mut stmt = self.connection().prepare(
+			"SELECT
+			   m.qualified_name AS path,
+			   COALESCE(fan_in.cnt, 0) AS fan_in,
+			   COALESCE(fan_out.cnt, 0) AS fan_out,
+			   COALESCE(files.cnt, 0) AS file_count,
+			   (SELECT COUNT(*) FROM nodes n
+			    WHERE n.snapshot_uid = ?1
+			      AND n.kind = 'SYMBOL' AND n.visibility = 'export'
+			      AND n.file_uid IN (
+			        SELECT tgt.file_uid FROM edges oe
+			        JOIN nodes tgt ON oe.target_node_uid = tgt.node_uid
+			        WHERE oe.snapshot_uid = ?1 AND oe.type = 'OWNS'
+			          AND oe.source_node_uid = m.node_uid
+			      )
+			   ) AS symbol_count,
+			   (SELECT COUNT(*) FROM nodes n
+			    WHERE n.snapshot_uid = ?1
+			      AND n.kind = 'SYMBOL'
+			      AND n.subtype IN ('INTERFACE', 'TYPE_ALIAS')
+			      AND n.parent_node_uid IS NULL
+			      AND n.file_uid IN (
+			        SELECT tgt.file_uid FROM edges oe
+			        JOIN nodes tgt ON oe.target_node_uid = tgt.node_uid
+			        WHERE oe.snapshot_uid = ?1 AND oe.type = 'OWNS'
+			          AND oe.source_node_uid = m.node_uid
+			      )
+			   ) AS abstract_count,
+			   (SELECT COUNT(*) FROM nodes n
+			    WHERE n.snapshot_uid = ?1
+			      AND n.kind = 'SYMBOL'
+			      AND n.subtype IN ('INTERFACE', 'TYPE_ALIAS', 'CLASS', 'ENUM')
+			      AND n.parent_node_uid IS NULL
+			      AND n.file_uid IN (
+			        SELECT tgt.file_uid FROM edges oe
+			        JOIN nodes tgt ON oe.target_node_uid = tgt.node_uid
+			        WHERE oe.snapshot_uid = ?1 AND oe.type = 'OWNS'
+			          AND oe.source_node_uid = m.node_uid
+			      )
+			   ) AS type_count
+			 FROM nodes m
+			 LEFT JOIN (
+			   SELECT target_node_uid AS nid, COUNT(DISTINCT source_node_uid) AS cnt
+			   FROM edges
+			   WHERE snapshot_uid = ?1 AND type = 'IMPORTS'
+			     AND source_node_uid IN (SELECT node_uid FROM nodes WHERE snapshot_uid = ?1 AND kind = 'MODULE')
+			   GROUP BY target_node_uid
+			 ) fan_in ON fan_in.nid = m.node_uid
+			 LEFT JOIN (
+			   SELECT source_node_uid AS nid, COUNT(DISTINCT target_node_uid) AS cnt
+			   FROM edges
+			   WHERE snapshot_uid = ?1 AND type = 'IMPORTS'
+			     AND target_node_uid IN (SELECT node_uid FROM nodes WHERE snapshot_uid = ?1 AND kind = 'MODULE')
+			   GROUP BY source_node_uid
+			 ) fan_out ON fan_out.nid = m.node_uid
+			 LEFT JOIN (
+			   SELECT source_node_uid AS nid, COUNT(*) AS cnt
+			   FROM edges
+			   WHERE snapshot_uid = ?1 AND type = 'OWNS'
+			   GROUP BY source_node_uid
+			 ) files ON files.nid = m.node_uid
+			 WHERE m.snapshot_uid = ?1 AND m.kind = 'MODULE'
+			   AND COALESCE(files.cnt, 0) > 0
+			 ORDER BY m.qualified_name",
+		)?;
+
+		let rows = stmt.query_map(
+			rusqlite::params![snapshot_uid],
+			|row| {
+				let path: String = row.get(0)?;
+				let fan_in: i64 = row.get(1)?;
+				let fan_out: i64 = row.get(2)?;
+				let file_count: i64 = row.get(3)?;
+				let symbol_count: i64 = row.get(4)?;
+				let abstract_count: i64 = row.get(5)?;
+				let type_count: i64 = row.get(6)?;
+				Ok((path, fan_in, fan_out, file_count, symbol_count, abstract_count, type_count))
+			},
+		)?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			let (path, fan_in, fan_out, file_count, symbol_count, abstract_count, type_count) =
+				row.map_err(StorageError::from)?;
+
+			let total = fan_in + fan_out;
+			let instability_raw = if total > 0 {
+				fan_out as f64 / total as f64
+			} else {
+				0.0
+			};
+			let abstractness_raw = if type_count > 0 {
+				abstract_count as f64 / type_count as f64
+			} else {
+				0.0
+			};
+			let distance_raw = (abstractness_raw + instability_raw - 1.0).abs();
+
+			// Round to 2 decimal places: mirrors TS Math.round(x * 100) / 100.
+			let instability = (instability_raw * 100.0).round() / 100.0;
+			let abstractness = (abstractness_raw * 100.0).round() / 100.0;
+			let distance = (distance_raw * 100.0).round() / 100.0;
+
+			results.push(ModuleStatsResult {
+				module: path,
+				fan_in,
+				fan_out,
+				instability,
+				abstractness,
+				distance_from_main_sequence: distance,
+				file_count,
+				symbol_count,
 			});
 		}
 

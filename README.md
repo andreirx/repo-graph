@@ -50,6 +50,8 @@ It treats unresolved structure as first-class data. That allows:
 
 Repo-graph is not a chat layer and not a generic code indexer.
 
+This is alpha. It will break. But it is a sound way to feed a large codebase to an LLM.
+
 Its role is to be a deterministic system of record for engineering intelligence:
 
 - structural code facts
