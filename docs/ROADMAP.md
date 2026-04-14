@@ -87,8 +87,13 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   lexicographic ISO 8601 comparison. waiver_basis audit trail in
   output. Deliberate divergence from TS: PASS obligations are not
   waivable (corrected policy model, see TECH-DEBT.md).
-- Deferred: strict/advisory modes, additional gate methods
-  (coverage_threshold, complexity_threshold, hotspot_threshold)
+- `gate`: Rust-26 adds strict/advisory modes via `--strict` and
+  `--advisory` flags (mutually exclusive). Default mode unchanged.
+  Strict: MISSING_EVIDENCE/UNSUPPORTED treated as fail (exit 1).
+  Advisory: MISSING_EVIDENCE/UNSUPPORTED informational (exit 0).
+  WAIVED non-failing in all three modes. Mirrors TS flag interface.
+- Deferred: additional gate methods (coverage_threshold,
+  complexity_threshold, hotspot_threshold)
 - Deferred: evidence, obligations, declare commands
 - Deferred: measurement commands, table output, full edge-type set
 

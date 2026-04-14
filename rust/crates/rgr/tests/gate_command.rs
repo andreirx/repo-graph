@@ -14,6 +14,13 @@
 //!  11. FAIL + expired waiver => no suppression, exit 1 (Rust-25)
 //!  12. PASS + active waiver => remains PASS, waiver_basis null (Rust-25)
 //!  13. Malformed active waiver => command error, exit 2 (Rust-25)
+//!  14. Waiver missing required field => command error, exit 2 (Rust-25)
+//!  15. Default mode: UNSUPPORTED without FAIL => incomplete, exit 2 (Rust-26)
+//!  16. Strict mode: UNSUPPORTED without FAIL => fail, exit 1 (Rust-26)
+//!  17. Advisory mode: UNSUPPORTED without FAIL => pass, exit 0 (Rust-26)
+//!  18. Strict mode: WAIVED obligation remains non-failing (Rust-26)
+//!  19. --strict + --advisory => usage error, exit 1 (Rust-26)
+//!  20. Exact JSON gate.mode field reflects selected mode (Rust-26)
 //!
 //! Note: storage-read failures during arch_violations evaluation are
 //! not testable at the CLI integration level because StorageConnection::open()
@@ -656,5 +663,141 @@ fn gate_waiver_missing_reason_aborts() {
 		"error should identify the missing field, stderr: {}",
 		stderr
 	);
+}
+
+// ── Rust-26: Gate mode tests ───────────────────────────────────────
+
+// -- 15. Default mode: UNSUPPORTED without FAIL => incomplete, exit 2 --
+// (This is the same as test 5, but explicitly confirms default mode label.)
+
+#[test]
+fn gate_default_mode_unsupported_is_incomplete() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"coverage check","method":"coverage_threshold","target":"src/core","threshold":80,"operator":">="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(2), "default: UNSUPPORTED => exit 2");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "incomplete");
+	assert_eq!(result["gate"]["mode"], "default");
+	assert_eq!(result["gate"]["counts"]["unsupported"], 1);
+}
+
+// -- 16. Strict mode: UNSUPPORTED without FAIL => fail, exit 1 -------
+
+#[test]
+fn gate_strict_mode_unsupported_is_fail() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"coverage check","method":"coverage_threshold","target":"src/core","threshold":80,"operator":">="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1", "--strict"]);
+	assert_eq!(output.status.code(), Some(1), "strict: UNSUPPORTED => exit 1");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "fail");
+	assert_eq!(result["gate"]["mode"], "strict");
+	assert_eq!(result["gate"]["counts"]["unsupported"], 1);
+	assert_eq!(result["gate"]["counts"]["fail"], 0);
+}
+
+// -- 17. Advisory mode: UNSUPPORTED without FAIL => pass, exit 0 -----
+
+#[test]
+fn gate_advisory_mode_unsupported_is_pass() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"coverage check","method":"coverage_threshold","target":"src/core","threshold":80,"operator":">="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1", "--advisory"]);
+	assert_eq!(output.status.code(), Some(0), "advisory: UNSUPPORTED => exit 0");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "pass");
+	assert_eq!(result["gate"]["mode"], "advisory");
+	assert_eq!(result["gate"]["counts"]["unsupported"], 1);
+}
+
+// -- 18. Strict mode: WAIVED obligation remains non-failing ----------
+
+#[test]
+fn gate_strict_mode_waived_is_non_failing() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	// Set up a failing obligation with a waiver.
+	insert_boundary(&db, "r1", "src/adapters", "src/core");
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"adapters clean","method":"arch_violations","target":"src/adapters"}]"#,
+	);
+	insert_waiver(
+		&db, "waiver-1", "r1", "REQ-001", 1, "obl-1",
+		"known dependency",
+		"2024-01-01T00:00:00Z",
+		None,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1", "--strict"]);
+	assert_eq!(output.status.code(), Some(0), "strict: WAIVED => exit 0");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "pass");
+	assert_eq!(result["gate"]["mode"], "strict");
+	assert_eq!(result["gate"]["counts"]["waived"], 1);
+	assert_eq!(result["gate"]["counts"]["fail"], 0);
+}
+
+// -- 19. --strict + --advisory => usage error, exit 1 ----------------
+
+#[test]
+fn gate_strict_and_advisory_mutually_exclusive() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	let output = run_cmd(&["gate", db_str, "r1", "--strict", "--advisory"]);
+	assert_eq!(output.status.code(), Some(1), "mutually exclusive => exit 1");
+	assert!(output.stdout.is_empty(), "no JSON on stdout for usage error");
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	assert!(
+		stderr.contains("mutually exclusive"),
+		"error should mention mutual exclusion, stderr: {}",
+		stderr
+	);
+}
+
+// -- 20. Exact JSON: gate.mode reflects selected mode ----------------
+
+#[test]
+fn gate_mode_field_reflects_selection() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	// No requirements => vacuous pass. Test mode field in each mode.
+	let output_default = run_cmd(&["gate", db_str, "r1"]);
+	let result_default = parse_json(&output_default);
+	assert_eq!(result_default["gate"]["mode"], "default");
+
+	let output_strict = run_cmd(&["gate", db_str, "r1", "--strict"]);
+	let result_strict = parse_json(&output_strict);
+	assert_eq!(result_strict["gate"]["mode"], "strict");
+
+	let output_advisory = run_cmd(&["gate", db_str, "r1", "--advisory"]);
+	let result_advisory = parse_json(&output_advisory);
+	assert_eq!(result_advisory["gate"]["mode"], "advisory");
 }
 

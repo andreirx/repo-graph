@@ -300,6 +300,36 @@ fn evaluate_arch_violations(
 	Ok(())
 }
 
+// ── Gate mode ───────────────────────────────────────────────────
+
+/// Gate reduction mode (Rust-26).
+///
+/// Mirrors TS `GateMode` from `core/gate/reducer.ts`.
+/// Determines how non-PASS effective verdicts map to exit codes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateMode {
+	/// exit 0: all PASS/WAIVED. exit 1: any FAIL. exit 2: no FAIL
+	/// but MISSING_EVIDENCE or UNSUPPORTED.
+	Default,
+	/// exit 0: all PASS/WAIVED. exit 1: any FAIL, MISSING_EVIDENCE,
+	/// or UNSUPPORTED.
+	Strict,
+	/// exit 0: no FAIL (MISSING/UNSUPPORTED informational).
+	/// exit 1: any FAIL.
+	Advisory,
+}
+
+impl GateMode {
+	/// Serialize to the lowercase string used in JSON output.
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Self::Default => "default",
+			Self::Strict => "strict",
+			Self::Advisory => "advisory",
+		}
+	}
+}
+
 // ── Gate reduction ──────────────────────────────────────────────
 
 /// Gate outcome after reducing all obligation verdicts.
@@ -321,16 +351,29 @@ pub struct GateCounts {
 	pub unsupported: usize,
 }
 
-/// Reduce obligation verdicts to a gate outcome (default mode only).
+/// Reduce obligation verdicts to a gate outcome.
 ///
-/// Default mode exit semantics:
-///   - exit 0: all PASS or WAIVED (or empty)
-///   - exit 1: any FAIL
-///   - exit 2: no FAIL, but MISSING_EVIDENCE or UNSUPPORTED
-///
-/// WAIVED obligations do not contribute to fail or incomplete.
+/// WAIVED obligations are non-failing in all three modes.
 /// They are counted separately in `counts.waived`.
-pub fn reduce_to_gate_outcome(obligations: &[ObligationResult]) -> GateResult {
+///
+/// Mode semantics (mirrors TS `reduceToGateOutcome`):
+///
+///   default:
+///     exit 0 — all PASS or WAIVED (or empty)
+///     exit 1 — any FAIL
+///     exit 2 — no FAIL, but MISSING_EVIDENCE or UNSUPPORTED
+///
+///   strict:
+///     exit 0 — all PASS or WAIVED
+///     exit 1 — any FAIL, MISSING_EVIDENCE, or UNSUPPORTED
+///
+///   advisory:
+///     exit 0 — no FAIL (MISSING/UNSUPPORTED are informational)
+///     exit 1 — any FAIL
+pub fn reduce_to_gate_outcome(
+	obligations: &[ObligationResult],
+	mode: GateMode,
+) -> GateResult {
 	let mut counts = GateCounts {
 		total: obligations.len(),
 		pass: 0,
@@ -353,18 +396,36 @@ pub fn reduce_to_gate_outcome(obligations: &[ObligationResult]) -> GateResult {
 	let has_fail = counts.fail > 0;
 	let has_incomplete = counts.missing_evidence > 0 || counts.unsupported > 0;
 
-	let (outcome, exit_code) = if has_fail {
-		("fail", 1)
-	} else if has_incomplete {
-		("incomplete", 2)
-	} else {
-		("pass", 0)
+	let (outcome, exit_code) = match mode {
+		GateMode::Default => {
+			if has_fail {
+				("fail", 1)
+			} else if has_incomplete {
+				("incomplete", 2)
+			} else {
+				("pass", 0)
+			}
+		}
+		GateMode::Strict => {
+			if has_fail || has_incomplete {
+				("fail", 1)
+			} else {
+				("pass", 0)
+			}
+		}
+		GateMode::Advisory => {
+			if has_fail {
+				("fail", 1)
+			} else {
+				("pass", 0)
+			}
+		}
 	};
 
 	GateResult {
 		outcome: outcome.to_string(),
 		exit_code,
-		mode: "default".to_string(),
+		mode: mode.as_str().to_string(),
 		counts,
 	}
 }

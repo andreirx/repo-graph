@@ -750,13 +750,44 @@ fn run_violations(args: &[String]) -> ExitCode {
 // ── gate command ─────────────────────────────────────────────────
 
 fn run_gate(args: &[String]) -> ExitCode {
-	if args.len() != 2 {
-		eprintln!("usage: rgr-rust gate <db_path> <repo_uid>");
+	// Parse positional args and optional mode flags.
+	let mut positional = Vec::new();
+	let mut strict = false;
+	let mut advisory = false;
+
+	for arg in args {
+		match arg.as_str() {
+			"--strict" => strict = true,
+			"--advisory" => advisory = true,
+			_ if arg.starts_with('-') => {
+				eprintln!("error: unknown flag: {}", arg);
+				eprintln!("usage: rgr-rust gate <db_path> <repo_uid> [--strict | --advisory]");
+				return ExitCode::from(1);
+			}
+			_ => positional.push(arg),
+		}
+	}
+
+	if positional.len() != 2 {
+		eprintln!("usage: rgr-rust gate <db_path> <repo_uid> [--strict | --advisory]");
 		return ExitCode::from(1);
 	}
 
-	let db_path = Path::new(&args[0]);
-	let repo_uid = &args[1];
+	if strict && advisory {
+		eprintln!("error: --strict and --advisory are mutually exclusive");
+		return ExitCode::from(1);
+	}
+
+	let mode = if strict {
+		gate::GateMode::Strict
+	} else if advisory {
+		gate::GateMode::Advisory
+	} else {
+		gate::GateMode::Default
+	};
+
+	let db_path = Path::new(positional[0]);
+	let repo_uid = positional[1];
 
 	let storage = match open_storage(db_path) {
 		Ok(s) => s,
@@ -806,7 +837,7 @@ fn run_gate(args: &[String]) -> ExitCode {
 	};
 
 	// Reduce to gate outcome.
-	let gate_result = gate::reduce_to_gate_outcome(&obligations);
+	let gate_result = gate::reduce_to_gate_outcome(&obligations, mode);
 	let exit_code = gate_result.exit_code;
 
 	// Repo name for the report.
