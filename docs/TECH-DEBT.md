@@ -422,7 +422,12 @@ yet ported and what intentionally diverges.
   change in `VALID_EDGE_TYPES` but deferred until needed.
 - **`--min-lines` filter for dead.** TS supports `--min-lines N`.
   Rust omits this filter.
-- **`graph imports <file>`.** Not ported.
+- **`graph imports --depth`.** TS supports `--depth N` for transitive
+  imports. Rust (Rust-18) is one-hop only.
+- **`graph imports` module input.** TS accepts both file paths and
+  module/symbol names (falls back to `resolveSymbolKey`). Rust
+  (Rust-18) accepts file paths only (constructs `{repo}:{path}:FILE`
+  stable key). Module input is a future extension.
 - **`graph path <from> <to>`.** Not ported.
 - **`graph metrics`.** Not ported.
 - **`graph versions`.** Not ported.

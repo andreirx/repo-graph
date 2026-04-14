@@ -6,6 +6,7 @@
 //!   rgr-rust trust   <db_path> <repo_uid>
 //!   rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]
 //!   rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]
+//!   rgr-rust imports <db_path> <repo_uid> <file_path>
 //!   rgr-rust dead    <db_path> <repo_uid> [kind]
 //!   rgr-rust cycles  <db_path> <repo_uid>
 //!   rgr-rust stats   <db_path> <repo_uid>
@@ -32,6 +33,7 @@ fn main() -> ExitCode {
 		"trust" => run_trust(&args[2..]),
 		"callers" => run_callers(&args[2..]),
 		"callees" => run_callees(&args[2..]),
+		"imports" => run_imports(&args[2..]),
 		"dead" => run_dead(&args[2..]),
 		"cycles" => run_cycles(&args[2..]),
 		"stats" => run_stats(&args[2..]),
@@ -50,6 +52,7 @@ fn print_usage() {
 	eprintln!("  rgr-rust trust   <db_path> <repo_uid>");
 	eprintln!("  rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]");
 	eprintln!("  rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]");
+	eprintln!("  rgr-rust imports <db_path> <repo_uid> <file_path>");
 	eprintln!("  rgr-rust dead    <db_path> <repo_uid> [kind]");
 	eprintln!("  rgr-rust cycles  <db_path> <repo_uid>");
 	eprintln!("  rgr-rust stats   <db_path> <repo_uid>");
@@ -394,6 +397,92 @@ fn run_callees(args: &[String]) -> ExitCode {
 	let output = match build_envelope(
 		&storage, "graph callees", repo_uid, &snapshot,
 		serde_json::to_value(&callees).unwrap(), count, extra,
+	) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+// ── imports command ──────────────────────────────────────────────
+
+fn run_imports(args: &[String]) -> ExitCode {
+	if args.len() != 3 {
+		eprintln!("usage: rgr-rust imports <db_path> <repo_uid> <file_path>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+	let file_path = &args[2];
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(snap)) => snap,
+		Ok(None) => {
+			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Construct the FILE stable key: {repo_uid}:{file_path}:FILE
+	// This matches the TS resolution path (graph.ts:175).
+	let file_stable_key = format!("{}:{}:FILE", repo_uid, file_path);
+
+	// Verify the FILE node exists.
+	match storage.node_exists(&snapshot.snapshot_uid, &file_stable_key) {
+		Ok(true) => {}
+		Ok(false) => {
+			eprintln!("error: file not found: {}", file_path);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	}
+
+	// Dedicated imports query (TS-compatible NodeResult wire format).
+	let imports = match storage.find_imports(
+		&snapshot.snapshot_uid,
+		&file_stable_key,
+	) {
+		Ok(c) => c,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// JSON to stdout (TS-compatible QueryResult envelope).
+	let count = imports.len();
+	let output = match build_envelope(
+		&storage, "graph imports", repo_uid, &snapshot,
+		serde_json::to_value(&imports).unwrap(), count, serde_json::Map::new(),
 	) {
 		Ok(v) => v,
 		Err(e) => {

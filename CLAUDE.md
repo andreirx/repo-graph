@@ -132,6 +132,7 @@ rgr-rust refresh <repo_path> <db_path>              # Delta refresh
 rgr-rust trust   <db_path> <repo_uid>               # Trust report
 rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callers (one hop)
 rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callees (one hop)
+rgr-rust imports <db_path> <repo_uid> <file_path>    # File import chain (one hop, IMPORTS)
 rgr-rust dead    <db_path> <repo_uid> [kind]         # Unreferenced nodes
 rgr-rust cycles  <db_path> <repo_uid>               # Module-level IMPORTS cycles
 rgr-rust stats   <db_path> <repo_uid>               # Module structural metrics
@@ -160,7 +161,8 @@ Known Rust CLI divergences from TS CLI:
 - `--edge-types` on callers/callees accepts CALLS and INSTANTIATES only (TS accepts all 18 edge types)
 - No `--min-lines` filter on dead
 - No `--json` flag (always JSON, no table format)
-- No `graph imports`, `graph path`, `graph metrics` commands yet
+- No `graph path`, `graph metrics` commands yet
+- `imports` is one-hop only (no `--depth`), file paths only (no module/symbol fallback)
 - `trust` command envelope does not use the QueryResult wrapper
   (trust has its own report shape, matching TS)
 - `index` and `refresh` use stderr for progress, no JSON output

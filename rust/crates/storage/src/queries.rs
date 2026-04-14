@@ -9,6 +9,7 @@
 //! Rust-12: `find_dead_nodes`.
 //! Rust-13: `find_cycles`.
 //! Rust-14: `compute_module_stats`.
+//! Rust-18: `node_exists` (imports support).
 
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +59,29 @@ pub struct CalleeResult {
 	pub column: Option<i64>,
 	pub edge_type: String,
 	pub resolution: String,
+}
+
+/// An import result matching the TS `formatNodeResult` wire format.
+///
+/// Field names match the TS JSON output (snake_case via `formatNodeResult`):
+/// `node_id`, `symbol`, `kind`, `subtype`, `file`, `line`, `column`,
+/// `edge_type`, `resolution`, `evidence`, `depth`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportResult {
+	pub node_id: String,
+	/// `qualified_name` if present, else `name`.
+	pub symbol: String,
+	pub kind: String,
+	pub subtype: Option<String>,
+	/// File path, or empty string if no file.
+	pub file: String,
+	pub line: Option<i64>,
+	pub column: Option<i64>,
+	pub edge_type: Option<String>,
+	pub resolution: Option<String>,
+	/// Extractor evidence (e.g. `["ts-core:0.2.0"]`).
+	pub evidence: Vec<String>,
+	pub depth: i64,
 }
 
 /// A node with no incoming reference edges (dead code candidate).
@@ -633,6 +657,75 @@ impl StorageConnection {
 		}
 
 		Ok(results)
+	}
+
+	/// Find direct imports of a file (one hop, IMPORTS edges only).
+	///
+	/// Returns `ImportResult` items matching the TS `formatNodeResult`
+	/// wire format, including `node_id`, `symbol`, `evidence`, and `depth`.
+	pub fn find_imports(
+		&self,
+		snapshot_uid: &str,
+		source_stable_key: &str,
+	) -> Result<Vec<ImportResult>, StorageError> {
+		let mut stmt = self.connection().prepare(
+			"SELECT
+				n.node_uid, n.name, n.qualified_name, n.kind, n.subtype,
+				f.path AS file_path, n.line_start, n.col_start,
+				e.type AS edge_type, e.resolution, e.extractor
+			 FROM edges e
+			 JOIN nodes source_n ON e.source_node_uid = source_n.node_uid
+			 JOIN nodes n ON e.target_node_uid = n.node_uid
+			 LEFT JOIN files f ON n.file_uid = f.file_uid
+			 WHERE source_n.snapshot_uid = ?
+			   AND source_n.stable_key = ?
+			   AND e.snapshot_uid = ?
+			   AND e.type = 'IMPORTS'
+			 ORDER BY n.name ASC, f.path ASC",
+		)?;
+
+		let rows = stmt.query_map(
+			rusqlite::params![snapshot_uid, source_stable_key, snapshot_uid],
+			|row| {
+				let name: String = row.get(1)?;
+				let qualified_name: Option<String> = row.get(2)?;
+				let file_path: Option<String> = row.get(5)?;
+				let extractor: Option<String> = row.get(10)?;
+				Ok(ImportResult {
+					node_id: row.get(0)?,
+					symbol: qualified_name.unwrap_or(name),
+					kind: row.get(3)?,
+					subtype: row.get(4)?,
+					file: file_path.unwrap_or_default(),
+					line: row.get(6)?,
+					column: row.get(7)?,
+					edge_type: row.get(8)?,
+					resolution: row.get(9)?,
+					evidence: extractor.into_iter().collect(),
+					depth: 1,
+				})
+			},
+		)?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(StorageError::from)
+	}
+
+	/// Check whether a node with the given stable_key exists in a snapshot.
+	///
+	/// Used by the `imports` command to verify the FILE node exists
+	/// before querying its outgoing IMPORTS edges.
+	pub fn node_exists(
+		&self,
+		snapshot_uid: &str,
+		stable_key: &str,
+	) -> Result<bool, StorageError> {
+		let exists: bool = self.connection().query_row(
+			"SELECT EXISTS(SELECT 1 FROM nodes WHERE snapshot_uid = ? AND stable_key = ?)",
+			rusqlite::params![snapshot_uid, stable_key],
+			|row| row.get(0),
+		)?;
+		Ok(exists)
 	}
 
 	// ── Internal helpers ─────────────────────────────────────
