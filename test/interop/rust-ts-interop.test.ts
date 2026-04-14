@@ -19,10 +19,18 @@ import { tmpdir } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SqliteConnectionProvider } from "../../src/adapters/storage/sqlite/connection-provider.js";
 import { SqliteStorage } from "../../src/adapters/storage/sqlite/sqlite-storage.js";
-import type { ModuleStats, QueryResult } from "../../src/core/model/index.js";
+import type {
+	ModuleStats,
+	NodeResult,
+	PathResult,
+	QueryResult,
+} from "../../src/core/model/index.js";
+import { EdgeType } from "../../src/core/model/index.js";
 import {
 	formatQueryResult,
 	formatModuleStatsResult,
+	formatNodeResult,
+	formatPathResult as formatPathResultJson,
 } from "../../src/cli/formatters/json.js";
 
 const FIXTURE_REPO = join(
@@ -244,5 +252,342 @@ describe("Rust-written SQLite consumed by TS storage layer", () => {
 		expect(typeof first.distance_from_main_sequence).toBe("number");
 		expect(typeof first.file_count).toBe("number");
 		expect(typeof first.symbol_count).toBe("number");
+	});
+});
+
+// ── Rust-20: graph-query interop on a richer fixture ─────────────
+//
+// The classifier-repo has only one file and no resolved call chains.
+// This block builds an inline fixture with callers, callees, imports,
+// path, and INSTANTIATES edges, indexes it with rgr-rust, then proves
+// every shipped read-side surface through the TS storage + formatter
+// boundary.
+
+import { writeFileSync, mkdirSync } from "node:fs";
+
+describe("Rust-20: graph-query interop on rich fixture", () => {
+	let richTempDir: string;
+	let richDbPath: string;
+	let richProvider: SqliteConnectionProvider;
+	let richStorage: SqliteStorage;
+	let richSnapshotUid: string;
+
+	beforeAll(() => {
+		if (!existsSync(RUST_BINARY)) {
+			throw new Error(
+				`Rust binary not found at ${RUST_BINARY}. Run \`cargo build -p repo-graph-rgr\` first.`,
+			);
+		}
+
+		// Build inline fixture on disk.
+		richTempDir = mkdtempSync(join(tmpdir(), "rgr-interop-rich-"));
+		const repoDir = join(richTempDir, "repo");
+		mkdirSync(join(repoDir, "src"), { recursive: true });
+
+		writeFileSync(
+			join(repoDir, "package.json"),
+			'{"dependencies":{}}',
+		);
+		// index.ts: imports server, calls serve(), instantiates Server
+		writeFileSync(
+			join(repoDir, "src/index.ts"),
+			[
+				'import { serve, Server } from "./server";',
+				"export function main() { serve(); const s = new Server(); }",
+				"",
+			].join("\n"),
+		);
+		// server.ts: imports util, exports serve() which calls helper(), exports class Server
+		writeFileSync(
+			join(repoDir, "src/server.ts"),
+			[
+				'import { helper } from "./util";',
+				"export function serve() { helper(); }",
+				"export class Server {}",
+				"",
+			].join("\n"),
+		);
+		// util.ts: exports helper(), exports isolated() (unreferenced)
+		writeFileSync(
+			join(repoDir, "src/util.ts"),
+			[
+				"export function helper() {}",
+				"export function isolated() {}",
+				"",
+			].join("\n"),
+		);
+
+		// Index with rgr-rust.
+		richDbPath = join(richTempDir, "rich.db");
+		const cmd = `"${RUST_BINARY}" index "${repoDir}" "${richDbPath}"`;
+		execSync(cmd, { encoding: "utf-8", timeout: 30000 });
+		expect(existsSync(richDbPath)).toBe(true);
+
+		// Open with TS.
+		richProvider = new SqliteConnectionProvider(richDbPath);
+		richProvider.initialize();
+		richStorage = new SqliteStorage(richProvider.getDatabase());
+
+		const snap = richStorage.getLatestSnapshot("repo");
+		expect(snap).not.toBeNull();
+		richSnapshotUid = snap!.snapshotUid;
+	});
+
+	afterAll(() => {
+		if (richProvider) {
+			try {
+				richProvider.close();
+			} catch {
+				// ignore
+			}
+		}
+		if (richTempDir && existsSync(richTempDir)) {
+			rmSync(richTempDir, { recursive: true, force: true });
+		}
+	});
+
+	// ── callers ──────────────────────────────────────────────
+
+	it("findCallers returns CALLS callers from Rust-written DB", () => {
+		// serve is called by main.
+		const serveNode = richStorage.queryAllNodes(richSnapshotUid).find(
+			(n) => n.name === "serve" && n.kind === "SYMBOL",
+		);
+		expect(serveNode).toBeDefined();
+
+		const callers = richStorage.findCallers({
+			snapshotUid: richSnapshotUid,
+			stableKey: serveNode!.stableKey,
+			maxDepth: 1,
+			edgeTypes: [EdgeType.CALLS],
+		});
+		expect(callers.length).toBeGreaterThan(0);
+		// At least one caller should reference index.ts.
+		const fromIndex = callers.find((c) => c.file.includes("index.ts"));
+		expect(fromIndex).toBeDefined();
+	});
+
+	it("findCallers with INSTANTIATES returns class instantiators", () => {
+		const serverClass = richStorage.queryAllNodes(richSnapshotUid).find(
+			(n) => n.name === "Server" && n.kind === "SYMBOL",
+		);
+		expect(serverClass).toBeDefined();
+
+		const callers = richStorage.findCallers({
+			snapshotUid: richSnapshotUid,
+			stableKey: serverClass!.stableKey,
+			maxDepth: 1,
+			edgeTypes: [EdgeType.INSTANTIATES],
+		});
+		expect(callers.length).toBeGreaterThan(0);
+		expect(callers[0].edgeType).toBe("INSTANTIATES");
+	});
+
+	// ── callers formatter boundary ──────────────────────────
+
+	it("TS formatQueryResult produces valid callers envelope from Rust-written DB", () => {
+		const serveNode = richStorage.queryAllNodes(richSnapshotUid).find(
+			(n) => n.name === "serve" && n.kind === "SYMBOL",
+		);
+		expect(serveNode).toBeDefined();
+
+		const results = richStorage.findCallers({
+			snapshotUid: richSnapshotUid,
+			stableKey: serveNode!.stableKey,
+			maxDepth: 1,
+		});
+
+		const qr: QueryResult<NodeResult> = {
+			command: "graph callers",
+			repo: "repo",
+			snapshot: richSnapshotUid,
+			snapshotScope: "full",
+			basisCommit: null,
+			results,
+			count: results.length,
+			stale: false,
+		};
+
+		const json = formatQueryResult(qr, formatNodeResult);
+		const parsed = JSON.parse(json);
+
+		expect(parsed.command).toBe("graph callers");
+		expect(Array.isArray(parsed.results)).toBe(true);
+		if (parsed.results.length > 0) {
+			const r = parsed.results[0];
+			expect(typeof r.node_id).toBe("string");
+			expect(typeof r.symbol).toBe("string");
+			expect(typeof r.kind).toBe("string");
+			expect(typeof r.edge_type).toBe("string");
+			expect(typeof r.depth).toBe("number");
+		}
+	});
+
+	// ── callees ──────────────────────────────────────────────
+
+	it("findCallees returns CALLS callees from Rust-written DB", () => {
+		const mainNode = richStorage.queryAllNodes(richSnapshotUid).find(
+			(n) => n.name === "main" && n.kind === "SYMBOL",
+		);
+		expect(mainNode).toBeDefined();
+
+		const callees = richStorage.findCallees({
+			snapshotUid: richSnapshotUid,
+			stableKey: mainNode!.stableKey,
+			maxDepth: 1,
+			edgeTypes: [EdgeType.CALLS],
+		});
+		expect(callees.length).toBeGreaterThan(0);
+		const serveCallee = callees.find((c) => c.symbol.includes("serve"));
+		expect(serveCallee).toBeDefined();
+	});
+
+	it("findCallees with INSTANTIATES returns instantiated classes", () => {
+		const mainNode = richStorage.queryAllNodes(richSnapshotUid).find(
+			(n) => n.name === "main" && n.kind === "SYMBOL",
+		);
+		expect(mainNode).toBeDefined();
+
+		const callees = richStorage.findCallees({
+			snapshotUid: richSnapshotUid,
+			stableKey: mainNode!.stableKey,
+			maxDepth: 1,
+			edgeTypes: [EdgeType.INSTANTIATES],
+		});
+		expect(callees.length).toBeGreaterThan(0);
+		expect(callees[0].edgeType).toBe("INSTANTIATES");
+	});
+
+	// ── imports ──────────────────────────────────────────────
+
+	it("findImports returns IMPORTS results from Rust-written DB", () => {
+		const indexFile = richStorage.queryAllNodes(richSnapshotUid).find(
+			(n) => n.stableKey === "repo:src/index.ts:FILE",
+		);
+		expect(indexFile).toBeDefined();
+
+		const imports = richStorage.findImports({
+			snapshotUid: richSnapshotUid,
+			stableKey: indexFile!.stableKey,
+			maxDepth: 1,
+		});
+		expect(imports.length).toBeGreaterThan(0);
+		const serverImport = imports.find((i) => i.file.includes("server.ts"));
+		expect(serverImport).toBeDefined();
+		expect(serverImport!.edgeType).toBe("IMPORTS");
+	});
+
+	// ── path ─────────────────────────────────────────────────
+
+	it("findPath returns shortest path from Rust-written DB", () => {
+		const mainNode = richStorage.queryAllNodes(richSnapshotUid).find(
+			(n) => n.name === "main" && n.kind === "SYMBOL",
+		);
+		const helperNode = richStorage.queryAllNodes(richSnapshotUid).find(
+			(n) => n.name === "helper" && n.kind === "SYMBOL",
+		);
+		expect(mainNode).toBeDefined();
+		expect(helperNode).toBeDefined();
+
+		const result = richStorage.findPath({
+			snapshotUid: richSnapshotUid,
+			fromStableKey: mainNode!.stableKey,
+			toStableKey: helperNode!.stableKey,
+		});
+		expect(result.found).toBe(true);
+		// Exact path: main --CALLS--> serve --CALLS--> helper (2 edges, 3 steps).
+		expect(result.pathLength).toBe(2);
+		expect(result.steps).toHaveLength(3);
+
+		expect(result.steps[0].symbol).toContain("main");
+		expect(result.steps[0].edgeType).toBe("");
+		expect(result.steps[1].symbol).toContain("serve");
+		expect(result.steps[1].edgeType).toBe("CALLS");
+		expect(result.steps[2].symbol).toContain("helper");
+		expect(result.steps[2].edgeType).toBe("CALLS");
+	});
+
+	it("findPath returns not-found for disconnected symbols", () => {
+		const mainNode = richStorage.queryAllNodes(richSnapshotUid).find(
+			(n) => n.name === "main" && n.kind === "SYMBOL",
+		);
+		const isolatedNode = richStorage.queryAllNodes(richSnapshotUid).find(
+			(n) => n.name === "isolated" && n.kind === "SYMBOL",
+		);
+		expect(mainNode).toBeDefined();
+		expect(isolatedNode).toBeDefined();
+
+		const result = richStorage.findPath({
+			snapshotUid: richSnapshotUid,
+			fromStableKey: mainNode!.stableKey,
+			toStableKey: isolatedNode!.stableKey,
+		});
+		expect(result.found).toBe(false);
+		expect(result.pathLength).toBe(0);
+		expect(result.steps).toHaveLength(0);
+	});
+
+	// ── path formatter boundary ─────────────────────────────
+
+	it("TS formatQueryResult produces valid path envelope from Rust-written DB", () => {
+		const mainNode = richStorage.queryAllNodes(richSnapshotUid).find(
+			(n) => n.name === "main" && n.kind === "SYMBOL",
+		);
+		const serveNode = richStorage.queryAllNodes(richSnapshotUid).find(
+			(n) => n.name === "serve" && n.kind === "SYMBOL",
+		);
+		expect(mainNode).toBeDefined();
+		expect(serveNode).toBeDefined();
+
+		const result = richStorage.findPath({
+			snapshotUid: richSnapshotUid,
+			fromStableKey: mainNode!.stableKey,
+			toStableKey: serveNode!.stableKey,
+		});
+
+		const qr: QueryResult<PathResult> = {
+			command: "graph path",
+			repo: "repo",
+			snapshot: richSnapshotUid,
+			snapshotScope: "full",
+			basisCommit: null,
+			results: [result],
+			count: result.found ? 1 : 0,
+			stale: false,
+		};
+
+		const json = formatQueryResult(qr, formatPathResultJson);
+		const parsed = JSON.parse(json);
+
+		expect(parsed.command).toBe("graph path");
+		expect(Array.isArray(parsed.results)).toBe(true);
+		expect(parsed.results.length).toBe(1);
+
+		const pr = parsed.results[0];
+		expect(pr.found).toBe(true);
+		expect(pr.path_length).toBe(1);
+		expect(pr.path).toHaveLength(2);
+
+		// Exact steps: main → serve.
+		expect(typeof pr.path[0].node_id).toBe("string");
+		expect(pr.path[0].symbol).toContain("main");
+		expect(pr.path[0].edge_type).toBe("");
+		expect(pr.path[1].symbol).toContain("serve");
+		expect(pr.path[1].edge_type).toBe("CALLS");
+	});
+
+	// ── dead ─────────────────────────────────────────────────
+
+	it("findDeadNodes returns dead symbols from rich Rust-written DB", () => {
+		const dead = richStorage.findDeadNodes({
+			snapshotUid: richSnapshotUid,
+			kind: "SYMBOL",
+		});
+		// isolated() should be dead (nobody calls it).
+		const isolatedDead = dead.find((d) => d.symbol === "isolated");
+		expect(isolatedDead).toBeDefined();
+		// serve should NOT be dead (called by main).
+		const serveDead = dead.find((d) => d.symbol === "serve");
+		expect(serveDead).toBeUndefined();
 	});
 });

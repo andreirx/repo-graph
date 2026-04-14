@@ -18,6 +18,7 @@
 # Rust-17: --edge-types filter for callers/callees (CALLS, INSTANTIATES).
 # Rust-18: `imports <db_path> <repo_uid> <file_path>`
 # Rust-19: `path    <db_path> <repo_uid> <from> <to>`
+# Rust-20: Interop hardening — cross-runtime proof for all graph query surfaces.
 #
 # No formatting-heavy UX.
 
