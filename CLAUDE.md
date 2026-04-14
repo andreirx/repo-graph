@@ -130,8 +130,8 @@ Commands (accumulated Rust-7B through Rust-15):
 rgr-rust index   <repo_path> <db_path>              # Full index to SQLite
 rgr-rust refresh <repo_path> <db_path>              # Delta refresh
 rgr-rust trust   <db_path> <repo_uid>               # Trust report
-rgr-rust callers <db_path> <repo_uid> <symbol>      # Direct callers (CALLS, one hop)
-rgr-rust callees <db_path> <repo_uid> <symbol>      # Direct callees (CALLS, one hop)
+rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callers (one hop)
+rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callees (one hop)
 rgr-rust dead    <db_path> <repo_uid> [kind]         # Unreferenced nodes
 rgr-rust cycles  <db_path> <repo_uid>               # Module-level IMPORTS cycles
 rgr-rust stats   <db_path> <repo_uid>               # Module structural metrics
@@ -157,7 +157,7 @@ Symbol resolution (callers, callees) uses exact match only:
 stable_key, then qualified_name, then name. SYMBOL kind only.
 
 Known Rust CLI divergences from TS CLI:
-- No `--edge-types` filter on callers/callees (CALLS only)
+- `--edge-types` on callers/callees accepts CALLS and INSTANTIATES only (TS accepts all 18 edge types)
 - No `--min-lines` filter on dead
 - No `--json` flag (always JSON, no table format)
 - No `graph imports`, `graph path`, `graph metrics` commands yet

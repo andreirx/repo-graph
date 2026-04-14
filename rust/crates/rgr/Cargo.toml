@@ -15,6 +15,7 @@
 #
 # Rust-15: QueryResult envelope standardization across all read commands.
 # Rust-16: Consolidation — docs, tech-debt register, contract tests, interop expansion.
+# Rust-17: --edge-types filter for callers/callees (CALLS, INSTANTIATES).
 #
 # No formatting-heavy UX.
 

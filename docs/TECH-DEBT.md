@@ -416,9 +416,10 @@ yet ported and what intentionally diverges.
 
 ### Deferred TS CLI features (not yet ported to Rust)
 
-- **`--edge-types` filter for callers/callees.** TS supports
-  `--edge-types CALLS,INSTANTIATES` to broaden beyond CALLS-only.
-  Rust hardcodes CALLS. Planned for Rust-17.
+- **`--edge-types` filter: narrow type set.** TS accepts all 18
+  canonical edge types for callers/callees. Rust (Rust-17) accepts
+  only CALLS and INSTANTIATES. Widening to all 18 is a one-line
+  change in `VALID_EDGE_TYPES` but deferred until needed.
 - **`--min-lines` filter for dead.** TS supports `--min-lines N`.
   Rust omits this filter.
 - **`graph imports <file>`.** Not ported.

@@ -4,8 +4,8 @@
 //!   rgr-rust index   <repo_path> <db_path>
 //!   rgr-rust refresh <repo_path> <db_path>
 //!   rgr-rust trust   <db_path> <repo_uid>
-//!   rgr-rust callers <db_path> <repo_uid> <symbol>
-//!   rgr-rust callees <db_path> <repo_uid> <symbol>
+//!   rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]
+//!   rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]
 //!   rgr-rust dead    <db_path> <repo_uid> [kind]
 //!   rgr-rust cycles  <db_path> <repo_uid>
 //!   rgr-rust stats   <db_path> <repo_uid>
@@ -48,8 +48,8 @@ fn print_usage() {
 	eprintln!("  rgr-rust index   <repo_path> <db_path>");
 	eprintln!("  rgr-rust refresh <repo_path> <db_path>");
 	eprintln!("  rgr-rust trust   <db_path> <repo_uid>");
-	eprintln!("  rgr-rust callers <db_path> <repo_uid> <symbol>");
-	eprintln!("  rgr-rust callees <db_path> <repo_uid> <symbol>");
+	eprintln!("  rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]");
+	eprintln!("  rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]");
 	eprintln!("  rgr-rust dead    <db_path> <repo_uid> [kind]");
 	eprintln!("  rgr-rust cycles  <db_path> <repo_uid>");
 	eprintln!("  rgr-rust stats   <db_path> <repo_uid>");
@@ -219,14 +219,22 @@ fn run_trust(args: &[String]) -> ExitCode {
 // ── callers command ──────────────────────────────────────────────
 
 fn run_callers(args: &[String]) -> ExitCode {
-	if args.len() != 3 {
-		eprintln!("usage: rgr-rust callers <db_path> <repo_uid> <symbol>");
+	let (positional, edge_types) = match parse_edge_types_flag(args) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			eprintln!("usage: rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]");
+			return ExitCode::from(1);
+		}
+	};
+	if positional.len() != 3 {
+		eprintln!("usage: rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]");
 		return ExitCode::from(1);
 	}
 
-	let db_path = Path::new(&args[0]);
-	let repo_uid = &args[1];
-	let symbol_query = &args[2];
+	let db_path = Path::new(&positional[0]);
+	let repo_uid = &positional[1];
+	let symbol_query = &positional[2];
 
 	let storage = match open_storage(db_path) {
 		Ok(s) => s,
@@ -271,7 +279,8 @@ fn run_callers(args: &[String]) -> ExitCode {
 	};
 
 	// Find direct callers.
-	let callers = match storage.find_direct_callers(&snapshot.snapshot_uid, &target.stable_key) {
+	let et_refs: Vec<&str> = edge_types.iter().map(|s| s.as_str()).collect();
+	let callers = match storage.find_direct_callers(&snapshot.snapshot_uid, &target.stable_key, &et_refs) {
 		Ok(c) => c,
 		Err(e) => {
 			eprintln!("error: {}", e);
@@ -309,14 +318,22 @@ fn run_callers(args: &[String]) -> ExitCode {
 // ── callees command ──────────────────────────────────────────────
 
 fn run_callees(args: &[String]) -> ExitCode {
-	if args.len() != 3 {
-		eprintln!("usage: rgr-rust callees <db_path> <repo_uid> <symbol>");
+	let (positional, edge_types) = match parse_edge_types_flag(args) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			eprintln!("usage: rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]");
+			return ExitCode::from(1);
+		}
+	};
+	if positional.len() != 3 {
+		eprintln!("usage: rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]");
 		return ExitCode::from(1);
 	}
 
-	let db_path = Path::new(&args[0]);
-	let repo_uid = &args[1];
-	let symbol_query = &args[2];
+	let db_path = Path::new(&positional[0]);
+	let repo_uid = &positional[1];
+	let symbol_query = &positional[2];
 
 	let storage = match open_storage(db_path) {
 		Ok(s) => s,
@@ -361,7 +378,8 @@ fn run_callees(args: &[String]) -> ExitCode {
 	};
 
 	// Find direct callees.
-	let callees = match storage.find_direct_callees(&snapshot.snapshot_uid, &target.stable_key) {
+	let et_refs: Vec<&str> = edge_types.iter().map(|s| s.as_str()).collect();
+	let callees = match storage.find_direct_callees(&snapshot.snapshot_uid, &target.stable_key, &et_refs) {
 		Ok(c) => c,
 		Err(e) => {
 			eprintln!("error: {}", e);
@@ -623,6 +641,66 @@ fn open_storage(
 	}
 	repo_graph_storage::StorageConnection::open(db_path)
 		.map_err(|e| format!("failed to open database: {}", e))
+}
+
+/// Valid edge types for `--edge-types` filter (Rust-17).
+const VALID_EDGE_TYPES: &[&str] = &["CALLS", "INSTANTIATES"];
+
+/// Parse `--edge-types` from a command's argument slice.
+///
+/// Returns `(positional_args, edge_types)` on success, or an error
+/// message on failure. If `--edge-types` is absent, returns the
+/// default `["CALLS"]`.
+///
+/// Rules:
+///   - Comma-separated, trimmed, uppercase only
+///   - Unknown tokens → usage error
+///   - Empty value → usage error
+///   - Repeated `--edge-types` flag → usage error
+///   - Missing value after `--edge-types` → usage error
+fn parse_edge_types_flag(args: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
+	let mut positional = Vec::new();
+	let mut edge_types: Option<Vec<String>> = None;
+	let mut i = 0;
+
+	while i < args.len() {
+		if args[i] == "--edge-types" {
+			if edge_types.is_some() {
+				return Err("repeated --edge-types flag".to_string());
+			}
+			i += 1;
+			if i >= args.len() {
+				return Err("missing value after --edge-types".to_string());
+			}
+			let raw = &args[i];
+			if raw.is_empty() {
+				return Err("empty --edge-types value".to_string());
+			}
+			let types: Vec<String> = raw
+				.split(',')
+				.map(|t| t.trim().to_string())
+				.collect();
+			for t in &types {
+				if t.is_empty() {
+					return Err("empty token in --edge-types value".to_string());
+				}
+				if !VALID_EDGE_TYPES.contains(&t.as_str()) {
+					return Err(format!(
+						"unknown edge type '{}', expected one of: {}",
+						t,
+						VALID_EDGE_TYPES.join(", ")
+					));
+				}
+			}
+			edge_types = Some(types);
+		} else {
+			positional.push(args[i].clone());
+		}
+		i += 1;
+	}
+
+	let types = edge_types.unwrap_or_else(|| vec!["CALLS".to_string()]);
+	Ok((positional, types))
 }
 
 /// Build a TS-compatible QueryResult JSON envelope.

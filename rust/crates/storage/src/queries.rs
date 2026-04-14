@@ -187,13 +187,18 @@ impl StorageConnection {
 		Err(SymbolResolveError::NotFound)
 	}
 
-	/// Find direct callers of a symbol (one hop, CALLS edges only).
+	/// Find direct callers of a symbol (one hop).
+	///
+	/// `edge_types` controls which edge kinds are traversed.
+	/// Typical values: `&["CALLS"]` or `&["CALLS", "INSTANTIATES"]`.
 	pub fn find_direct_callers(
 		&self,
 		snapshot_uid: &str,
 		target_stable_key: &str,
+		edge_types: &[&str],
 	) -> Result<Vec<CallerResult>, StorageError> {
-		let mut stmt = self.connection().prepare(
+		let placeholders = edge_types.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+		let sql = format!(
 			"SELECT
 				n.stable_key, n.name, n.qualified_name, n.kind, n.subtype,
 				f.path AS file_path, n.line_start, n.col_start,
@@ -205,12 +210,24 @@ impl StorageConnection {
 			 WHERE target_n.snapshot_uid = ?
 			   AND target_n.stable_key = ?
 			   AND e.snapshot_uid = ?
-			   AND e.type = 'CALLS'
-			 ORDER BY n.name ASC, f.path ASC",
-		)?;
+			   AND e.type IN ({placeholders})
+			 ORDER BY n.name ASC, f.path ASC"
+		);
+
+		let mut stmt = self.connection().prepare(&sql)?;
+
+		// Build params: snapshot_uid, target_stable_key, snapshot_uid, then edge types.
+		let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+		params.push(Box::new(snapshot_uid.to_string()));
+		params.push(Box::new(target_stable_key.to_string()));
+		params.push(Box::new(snapshot_uid.to_string()));
+		for et in edge_types {
+			params.push(Box::new(et.to_string()));
+		}
+		let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
 
 		let rows = stmt.query_map(
-			rusqlite::params![snapshot_uid, target_stable_key, snapshot_uid],
+			param_refs.as_slice(),
 			|row| {
 				Ok(CallerResult {
 					stable_key: row.get(0)?,
@@ -231,16 +248,19 @@ impl StorageConnection {
 			.map_err(StorageError::from)
 	}
 
-	/// Find direct callees of a symbol (one hop, CALLS edges only).
+	/// Find direct callees of a symbol (one hop).
 	///
 	/// Symmetric reverse of `find_direct_callers`: the given symbol
 	/// is the source node, returned nodes are the targets.
+	/// `edge_types` controls which edge kinds are traversed.
 	pub fn find_direct_callees(
 		&self,
 		snapshot_uid: &str,
 		source_stable_key: &str,
+		edge_types: &[&str],
 	) -> Result<Vec<CalleeResult>, StorageError> {
-		let mut stmt = self.connection().prepare(
+		let placeholders = edge_types.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+		let sql = format!(
 			"SELECT
 				n.stable_key, n.name, n.qualified_name, n.kind, n.subtype,
 				f.path AS file_path, n.line_start, n.col_start,
@@ -252,12 +272,23 @@ impl StorageConnection {
 			 WHERE source_n.snapshot_uid = ?
 			   AND source_n.stable_key = ?
 			   AND e.snapshot_uid = ?
-			   AND e.type = 'CALLS'
-			 ORDER BY n.name ASC, f.path ASC",
-		)?;
+			   AND e.type IN ({placeholders})
+			 ORDER BY n.name ASC, f.path ASC"
+		);
+
+		let mut stmt = self.connection().prepare(&sql)?;
+
+		let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+		params.push(Box::new(snapshot_uid.to_string()));
+		params.push(Box::new(source_stable_key.to_string()));
+		params.push(Box::new(snapshot_uid.to_string()));
+		for et in edge_types {
+			params.push(Box::new(et.to_string()));
+		}
+		let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
 
 		let rows = stmt.query_map(
-			rusqlite::params![snapshot_uid, source_stable_key, snapshot_uid],
+			param_refs.as_slice(),
 			|row| {
 				Ok(CalleeResult {
 					stable_key: row.get(0)?,
