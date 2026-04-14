@@ -19,6 +19,7 @@
 # Rust-18: `imports <db_path> <repo_uid> <file_path>`
 # Rust-19: `path    <db_path> <repo_uid> <from> <to>`
 # Rust-20: Interop hardening — cross-runtime proof for all graph query surfaces.
+# Rust-22: `violations <db_path> <repo_uid>` (first governance command).
 #
 # No formatting-heavy UX.
 
@@ -43,3 +44,4 @@ serde_json = "1"
 
 [dev-dependencies]
 tempfile = "3"
+rusqlite = { version = "0.31", features = ["bundled"] }

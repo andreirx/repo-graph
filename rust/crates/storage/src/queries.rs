@@ -11,6 +11,7 @@
 //! Rust-14: `compute_module_stats`.
 //! Rust-18: `node_exists` + `find_imports`.
 //! Rust-19: `find_shortest_path`.
+//! Rust-22: `get_active_boundary_declarations` + `find_imports_between_paths`.
 
 use serde::{Deserialize, Serialize};
 
@@ -106,6 +107,42 @@ pub struct PathStep {
 	pub line: Option<i64>,
 	/// Edge type that led to this step. Empty string for the start node.
 	pub edge_type: String,
+}
+
+/// A boundary declaration read from the declarations table.
+///
+/// Only the fields needed by the violations command are exposed.
+/// The `value_json` is parsed into `forbids` and `reason` at the
+/// storage layer so raw JSON does not leak to the CLI.
+#[derive(Debug, Clone)]
+pub struct BoundaryDeclaration {
+	/// Module path extracted from target_stable_key.
+	pub boundary_module: String,
+	/// The forbidden module path (from value_json.forbids).
+	pub forbids: String,
+	/// Optional reason (from value_json.reason).
+	pub reason: Option<String>,
+}
+
+/// An IMPORTS edge between two file path prefixes.
+#[derive(Debug, Clone)]
+pub struct ImportEdgeResult {
+	pub source_file: String,
+	pub target_file: String,
+	pub line: Option<i64>,
+}
+
+/// A boundary violation: an IMPORTS edge crossing a declared boundary.
+///
+/// Matches the TS `formatViolationJson` wire format (arch.ts:147-156).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoundaryViolation {
+	pub boundary_module: String,
+	pub forbidden_module: String,
+	pub reason: Option<String>,
+	pub source_file: String,
+	pub target_file: String,
+	pub line: Option<i64>,
 }
 
 /// A node with no incoming reference edges (dead code candidate).
@@ -887,6 +924,117 @@ impl StorageConnection {
 		Ok(exists)
 	}
 
+	/// Load active boundary declarations for a repo.
+	///
+	/// Reads from the `declarations` table where `kind='boundary'`
+	/// and `is_active=1`. Parses `value_json` to extract `forbids`
+	/// and `reason`. Extracts the module path from
+	/// `target_stable_key` (format: `{repo}:{path}:MODULE`).
+	///
+	/// Rows that fail to parse or lack a MODULE stable key are
+	/// silently skipped (defensive, matches TS behavior where the
+	/// regex match filters non-MODULE keys).
+	pub fn get_active_boundary_declarations(
+		&self,
+		repo_uid: &str,
+	) -> Result<Vec<BoundaryDeclaration>, StorageError> {
+		let mut stmt = self.connection().prepare(
+			"SELECT target_stable_key, value_json
+			 FROM declarations
+			 WHERE repo_uid = ? AND kind = 'boundary' AND is_active = 1
+			 ORDER BY created_at DESC",
+		)?;
+
+		let rows = stmt.query_map(
+			rusqlite::params![repo_uid],
+			|row| {
+				let stable_key: String = row.get(0)?;
+				let value_json: String = row.get(1)?;
+				Ok((stable_key, value_json))
+			},
+		)?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			let (stable_key, value_json) = row.map_err(StorageError::from)?;
+
+			// Extract module path from stable key: {repo}:{path}:MODULE
+			let module_path = match extract_module_path(&stable_key) {
+				Some(p) => p,
+				None => continue,
+			};
+
+			// Parse value_json for forbids and reason.
+			let parsed: serde_json::Value = match serde_json::from_str(&value_json) {
+				Ok(v) => v,
+				Err(_) => continue,
+			};
+			let forbids = match parsed["forbids"].as_str() {
+				Some(f) => f.to_string(),
+				None => continue,
+			};
+			let reason = parsed["reason"].as_str().map(|s| s.to_string());
+
+			results.push(BoundaryDeclaration {
+				boundary_module: module_path,
+				forbids,
+				reason,
+			});
+		}
+
+		Ok(results)
+	}
+
+	/// Find IMPORTS edges where the source file is under `source_prefix`
+	/// and the target file is under `target_prefix`.
+	///
+	/// Mirrors TS `findImportsBetweenPaths` (sqlite-storage.ts:2589-2628).
+	/// Uses `LIKE '{prefix}/%'` matching on file paths.
+	/// Ordered by source file path, then line number.
+	pub fn find_imports_between_paths(
+		&self,
+		snapshot_uid: &str,
+		source_prefix: &str,
+		target_prefix: &str,
+	) -> Result<Vec<ImportEdgeResult>, StorageError> {
+		// Normalize: strip trailing slashes.
+		let src = source_prefix.trim_end_matches('/');
+		let tgt = target_prefix.trim_end_matches('/');
+		let src_pattern = format!("{}/%%", src);
+		let tgt_pattern = format!("{}/%%", tgt);
+
+		let mut stmt = self.connection().prepare(
+			"SELECT
+			   src_f.path AS source_file,
+			   tgt_f.path AS target_file,
+			   e.line_start AS line
+			 FROM edges e
+			 JOIN nodes src_n ON e.source_node_uid = src_n.node_uid
+			 JOIN nodes tgt_n ON e.target_node_uid = tgt_n.node_uid
+			 JOIN files src_f ON src_n.file_uid = src_f.file_uid
+			 JOIN files tgt_f ON tgt_n.file_uid = tgt_f.file_uid
+			 WHERE e.snapshot_uid = ?
+			   AND e.type = 'IMPORTS'
+			   AND src_f.path LIKE ?
+			   AND tgt_f.path LIKE ?
+			 ORDER BY src_f.path, e.line_start",
+		)?;
+
+		let rows = stmt.query_map(
+			rusqlite::params![snapshot_uid, src_pattern, tgt_pattern],
+			|row| {
+				Ok(ImportEdgeResult {
+					source_file: row.get(0)?,
+					target_file: row.get(1)?,
+					line: row.get(2)?,
+				})
+			},
+		)?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(StorageError::from)
+	}
+
 	// ── Internal helpers ─────────────────────────────────────
 
 	fn query_symbol_by_field(
@@ -964,6 +1112,21 @@ impl StorageConnection {
 		rows.collect::<Result<Vec<_>, _>>()
 			.map_err(StorageError::from)
 	}
+}
+
+/// Extract the module path from a MODULE stable key.
+///
+/// Format: `{repo_uid}:{path}:MODULE` → `{path}`.
+/// Returns `None` if the key does not end with `:MODULE`.
+fn extract_module_path(stable_key: &str) -> Option<String> {
+	let suffix = ":MODULE";
+	if !stable_key.ends_with(suffix) {
+		return None;
+	}
+	let without_suffix = &stable_key[..stable_key.len() - suffix.len()];
+	// Skip the repo_uid prefix (everything before the first colon).
+	let colon_pos = without_suffix.find(':')?;
+	Some(without_suffix[colon_pos + 1..].to_string())
 }
 
 /// Canonicalize a cycle by rotating so the lexicographically

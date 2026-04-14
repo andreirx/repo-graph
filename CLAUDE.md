@@ -127,23 +127,24 @@ The Rust binary `rgr-rust` (crate `repo-graph-rgr`) is the Rust-side
 CLI. It produces JSON-only output on stdout and uses stderr for errors.
 Exit codes: 0 success, 1 usage error, 2 runtime error.
 
-Commands (Rust-7B through Rust-20):
+Commands (structural: Rust-7B through Rust-20, governance: Rust-22+):
 
 ```
-rgr-rust index   <repo_path> <db_path>              # Full index to SQLite
-rgr-rust refresh <repo_path> <db_path>              # Delta refresh
-rgr-rust trust   <db_path> <repo_uid>               # Trust report
-rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callers (one hop)
-rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callees (one hop)
-rgr-rust path    <db_path> <repo_uid> <from> <to>    # Shortest path (CALLS+IMPORTS, depth 8)
-rgr-rust imports <db_path> <repo_uid> <file_path>    # File import chain (one hop, IMPORTS)
-rgr-rust dead    <db_path> <repo_uid> [kind]         # Unreferenced nodes
-rgr-rust cycles  <db_path> <repo_uid>               # Module-level IMPORTS cycles
-rgr-rust stats   <db_path> <repo_uid>               # Module structural metrics
+rgr-rust index      <repo_path> <db_path>              # Full index to SQLite
+rgr-rust refresh    <repo_path> <db_path>              # Delta refresh
+rgr-rust trust      <db_path> <repo_uid>               # Trust report
+rgr-rust callers    <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callers (one hop)
+rgr-rust callees    <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callees (one hop)
+rgr-rust path       <db_path> <repo_uid> <from> <to>   # Shortest path (CALLS+IMPORTS, depth 8)
+rgr-rust imports    <db_path> <repo_uid> <file_path>   # File import chain (one hop, IMPORTS)
+rgr-rust violations <db_path> <repo_uid>               # Boundary violation check (IMPORTS)
+rgr-rust dead       <db_path> <repo_uid> [kind]        # Unreferenced nodes
+rgr-rust cycles     <db_path> <repo_uid>               # Module-level IMPORTS cycles
+rgr-rust stats      <db_path> <repo_uid>               # Module structural metrics
 ```
 
-Read-side commands (callers, callees, path, imports, dead, cycles,
-stats) emit a TS-compatible QueryResult JSON envelope:
+Read-side commands (callers, callees, path, imports, violations, dead,
+cycles, stats) emit a TS-compatible QueryResult JSON envelope:
 
 ```json
 {

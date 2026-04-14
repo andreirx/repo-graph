@@ -153,6 +153,7 @@
 //! R14:  `compute_module_stats` (fan-in/out, instability, abstractness).
 //! R18:  `node_exists` + `find_imports`.
 //! R19:  `find_shortest_path` (BFS via recursive CTE, CALLS+IMPORTS).
+//! R22:  `get_active_boundary_declarations` + `find_imports_between_paths`.
 
 pub mod connection;
 pub mod crud;

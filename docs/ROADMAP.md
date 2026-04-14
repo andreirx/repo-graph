@@ -72,8 +72,14 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - Cross-runtime interop proven (19 tests: Rust writes, TS reads + formats)
 - Contract tests, envelope tests, per-command deterministic test matrices
 - Milestone doc: `docs/milestones/rgr-rust-structural-v1.md`
-- Deferred: governance commands, measurement commands, table output, full edge-type set
 - Built across Rust-7B through Rust-20 (14 slices)
+
+### Rust governance CLI (post-v1)
+- `violations`: boundary violation check via declared forbidden IMPORTS
+  (Rust-22). Reads boundary declarations from declarations table,
+  queries cross-module IMPORTS edges, reports violations.
+- Deferred: gate, evidence, obligations, waivers, declare commands
+- Deferred: measurement commands, table output, full edge-type set
 
 ### Multi-language graph engine
 - TypeScript/JavaScript extractor (tree-sitter, syntax-only)

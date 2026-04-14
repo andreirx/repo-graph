@@ -8,6 +8,7 @@
 //!   rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]
 //!   rgr-rust path    <db_path> <repo_uid> <from> <to>
 //!   rgr-rust imports <db_path> <repo_uid> <file_path>
+//!   rgr-rust violations <db_path> <repo_uid>
 //!   rgr-rust dead    <db_path> <repo_uid> [kind]
 //!   rgr-rust cycles  <db_path> <repo_uid>
 //!   rgr-rust stats   <db_path> <repo_uid>
@@ -36,6 +37,7 @@ fn main() -> ExitCode {
 		"callees" => run_callees(&args[2..]),
 		"path" => run_path(&args[2..]),
 		"imports" => run_imports(&args[2..]),
+		"violations" => run_violations(&args[2..]),
 		"dead" => run_dead(&args[2..]),
 		"cycles" => run_cycles(&args[2..]),
 		"stats" => run_stats(&args[2..]),
@@ -56,6 +58,7 @@ fn print_usage() {
 	eprintln!("  rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]");
 	eprintln!("  rgr-rust path    <db_path> <repo_uid> <from> <to>");
 	eprintln!("  rgr-rust imports <db_path> <repo_uid> <file_path>");
+	eprintln!("  rgr-rust violations <db_path> <repo_uid>");
 	eprintln!("  rgr-rust dead    <db_path> <repo_uid> [kind]");
 	eprintln!("  rgr-rust cycles  <db_path> <repo_uid>");
 	eprintln!("  rgr-rust stats   <db_path> <repo_uid>");
@@ -605,6 +608,119 @@ fn run_imports(args: &[String]) -> ExitCode {
 	let output = match build_envelope(
 		&storage, "graph imports", repo_uid, &snapshot,
 		serde_json::to_value(&imports).unwrap(), count, serde_json::Map::new(),
+	) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+// ── violations command ───────────────────────────────────────────
+
+fn run_violations(args: &[String]) -> ExitCode {
+	if args.len() != 2 {
+		eprintln!("usage: rgr-rust violations <db_path> <repo_uid>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(snap)) => snap,
+		Ok(None) => {
+			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Load active boundary declarations.
+	let boundaries = match storage.get_active_boundary_declarations(repo_uid) {
+		Ok(b) => b,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Deduplicate rules by (boundary_module, forbids).
+	use std::collections::HashMap;
+	let mut rule_map: HashMap<(String, String), (String, String, Option<String>)> = HashMap::new();
+	for decl in &boundaries {
+		let key = (decl.boundary_module.clone(), decl.forbids.clone());
+		rule_map.entry(key).or_insert_with(|| {
+			(decl.boundary_module.clone(), decl.forbids.clone(), decl.reason.clone())
+		});
+	}
+
+	// For each unique rule, find violating IMPORTS edges.
+	use repo_graph_storage::queries::BoundaryViolation;
+	let mut violations: Vec<BoundaryViolation> = Vec::new();
+
+	// Sort rules for deterministic output.
+	let mut rules: Vec<_> = rule_map.into_values().collect();
+	rules.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
+
+	for (boundary_module, forbids, reason) in &rules {
+		let edges = match storage.find_imports_between_paths(
+			&snapshot.snapshot_uid,
+			boundary_module,
+			forbids,
+		) {
+			Ok(e) => e,
+			Err(e) => {
+				eprintln!("error: {}", e);
+				return ExitCode::from(2);
+			}
+		};
+
+		for edge in &edges {
+			violations.push(BoundaryViolation {
+				boundary_module: boundary_module.clone(),
+				forbidden_module: forbids.clone(),
+				reason: reason.clone(),
+				source_file: edge.source_file.clone(),
+				target_file: edge.target_file.clone(),
+				line: edge.line,
+			});
+		}
+	}
+
+	// JSON to stdout (TS-compatible QueryResult envelope).
+	let count = violations.len();
+	let output = match build_envelope(
+		&storage,
+		"arch violations",
+		repo_uid,
+		&snapshot,
+		serde_json::to_value(&violations).unwrap(),
+		count,
+		serde_json::Map::new(),
 	) {
 		Ok(v) => v,
 		Err(e) => {
