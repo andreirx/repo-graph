@@ -76,9 +76,15 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ### Rust governance CLI (post-v1)
 - `violations`: boundary violation check via declared forbidden IMPORTS
-  (Rust-22). Reads boundary declarations from declarations table,
-  queries cross-module IMPORTS edges, reports violations.
-- Deferred: gate, evidence, obligations, waivers, declare commands
+  (Rust-22). Reads boundary declarations, queries cross-module
+  IMPORTS edges, reports violations.
+- `gate`: CI gate with obligation evaluation (Rust-24). Narrow first
+  gate: arch_violations method only, default mode only, no waivers.
+  Exit codes: 0 pass, 1 fail, 2 incomplete. TS-compatible gate
+  report shape with toolchain, computed/effective verdicts.
+- Deferred: waivers, strict/advisory modes, additional gate methods
+  (coverage_threshold, complexity_threshold, hotspot_threshold)
+- Deferred: evidence, obligations, declare commands
 - Deferred: measurement commands, table output, full edge-type set
 
 ### Multi-language graph engine

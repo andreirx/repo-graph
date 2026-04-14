@@ -154,6 +154,7 @@
 //! R18:  `node_exists` + `find_imports`.
 //! R19:  `find_shortest_path` (BFS via recursive CTE, CALLS+IMPORTS).
 //! R22:  `get_active_boundary_declarations` + `find_imports_between_paths`.
+//! R24:  `get_active_requirement_declarations`.
 
 pub mod connection;
 pub mod crud;

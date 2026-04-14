@@ -13,10 +13,14 @@
 //!   rgr-rust cycles  <db_path> <repo_uid>
 //!   rgr-rust stats   <db_path> <repo_uid>
 //!
+//!   rgr-rust gate    <db_path> <repo_uid>
+//!
 //! Exit codes:
-//!   0 — success
-//!   1 — usage error
-//!   2 — runtime error
+//!   0 — success (gate: all pass)
+//!   1 — usage error (gate: any fail)
+//!   2 — runtime error (gate: incomplete)
+
+mod gate;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -38,6 +42,7 @@ fn main() -> ExitCode {
 		"path" => run_path(&args[2..]),
 		"imports" => run_imports(&args[2..]),
 		"violations" => run_violations(&args[2..]),
+		"gate" => run_gate(&args[2..]),
 		"dead" => run_dead(&args[2..]),
 		"cycles" => run_cycles(&args[2..]),
 		"stats" => run_stats(&args[2..]),
@@ -59,6 +64,7 @@ fn print_usage() {
 	eprintln!("  rgr-rust path    <db_path> <repo_uid> <from> <to>");
 	eprintln!("  rgr-rust imports <db_path> <repo_uid> <file_path>");
 	eprintln!("  rgr-rust violations <db_path> <repo_uid>");
+	eprintln!("  rgr-rust gate       <db_path> <repo_uid>");
 	eprintln!("  rgr-rust dead    <db_path> <repo_uid> [kind]");
 	eprintln!("  rgr-rust cycles  <db_path> <repo_uid>");
 	eprintln!("  rgr-rust stats   <db_path> <repo_uid>");
@@ -733,6 +739,102 @@ fn run_violations(args: &[String]) -> ExitCode {
 		Ok(json) => {
 			println!("{}", json);
 			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+// ── gate command ─────────────────────────────────────────────────
+
+fn run_gate(args: &[String]) -> ExitCode {
+	if args.len() != 2 {
+		eprintln!("usage: rgr-rust gate <db_path> <repo_uid>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(snap)) => snap,
+		Ok(None) => {
+			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Load active requirement declarations.
+	let requirements = match storage.get_active_requirement_declarations(repo_uid) {
+		Ok(r) => r,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Evaluate obligations.
+	let obligations = match gate::evaluate_obligations(
+		&storage,
+		&snapshot.snapshot_uid,
+		repo_uid,
+		&requirements,
+	) {
+		Ok(o) => o,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Reduce to gate outcome.
+	let gate_result = gate::reduce_to_gate_outcome(&obligations);
+	let exit_code = gate_result.exit_code;
+
+	// Repo name for the report.
+	use repo_graph_storage::types::RepoRef;
+	let repo_name = storage
+		.get_repo(&RepoRef::Uid(repo_uid.to_string()))
+		.ok()
+		.flatten()
+		.map(|r| r.name)
+		.unwrap_or_else(|| repo_uid.to_string());
+
+	// Toolchain metadata from snapshot (may be null).
+	let toolchain: serde_json::Value = snapshot
+		.toolchain_json
+		.as_deref()
+		.and_then(|s| serde_json::from_str(s).ok())
+		.unwrap_or(serde_json::Value::Null);
+
+	// Gate report JSON (TS-compatible shape, NOT QueryResult envelope).
+	let output = serde_json::json!({
+		"command": "gate",
+		"repo": repo_name,
+		"snapshot": snapshot.snapshot_uid,
+		"toolchain": toolchain,
+		"obligations": obligations,
+		"gate": gate_result,
+	});
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::from(exit_code as u8)
 		}
 		Err(e) => {
 			eprintln!("error: {}", e);

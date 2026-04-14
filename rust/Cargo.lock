@@ -474,6 +474,7 @@ dependencies = [
  "repo-graph-storage",
  "repo-graph-trust",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
 ]

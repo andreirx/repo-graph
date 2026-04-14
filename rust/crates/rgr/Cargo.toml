@@ -20,6 +20,7 @@
 # Rust-19: `path    <db_path> <repo_uid> <from> <to>`
 # Rust-20: Interop hardening — cross-runtime proof for all graph query surfaces.
 # Rust-22: `violations <db_path> <repo_uid>` (first governance command).
+# Rust-24: `gate <db_path> <repo_uid>` (narrow: arch_violations only, default mode).
 #
 # No formatting-heavy UX.
 
@@ -40,6 +41,7 @@ path = "src/main.rs"
 repo-graph-repo-index = { path = "../repo-index" }
 repo-graph-storage = { path = "../storage" }
 repo-graph-trust = { path = "../trust" }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]

@@ -33,13 +33,13 @@
 //! `MalformedRequirement` formats as:
 //!
 //! ```text
-//! Migration 004: malformed requirement declaration <uid>: <reason>
+//! malformed requirement declaration <uid>: <reason>
 //! ```
 //!
 //! Matching the TS error message exactly:
 //!
 //! ```text
-//! Migration 004: malformed requirement declaration ${declarationUid}: ${reason}
+//! malformed requirement declaration ${declarationUid}: ${reason}
 //! ```
 //!
 //! This parity at the error-message level is intentional: error
@@ -56,15 +56,11 @@ pub enum StorageError {
 	#[error(transparent)]
 	Sqlite(#[from] rusqlite::Error),
 
-	/// Migration 004 detected a structural invariant violation in
-	/// a requirement declaration's `value_json`. The migration is
-	/// rolled back via SQLite transaction; no partial state is
-	/// committed.
-	///
-	/// Mirrors the TypeScript `MalformedRequirementError` class
-	/// from `004-obligation-ids.ts`. The error message format is
-	/// byte-equivalent to the TS message.
-	#[error("Migration 004: malformed requirement declaration {declaration_uid}: {reason}")]
+	/// A requirement declaration's `value_json` has a structural
+	/// invariant violation. Used by both migration 004 (obligation-id
+	/// backfill) and runtime reads (gate command). The declaration UID
+	/// and reason are preserved for diagnostics.
+	#[error("malformed requirement declaration {declaration_uid}: {reason}")]
 	MalformedRequirement {
 		declaration_uid: String,
 		reason: String,

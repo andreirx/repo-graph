@@ -12,6 +12,7 @@
 //! Rust-18: `node_exists` + `find_imports`.
 //! Rust-19: `find_shortest_path`.
 //! Rust-22: `get_active_boundary_declarations` + `find_imports_between_paths`.
+//! Rust-24: `get_active_requirement_declarations`.
 
 use serde::{Deserialize, Serialize};
 
@@ -143,6 +144,25 @@ pub struct BoundaryViolation {
 	pub source_file: String,
 	pub target_file: String,
 	pub line: Option<i64>,
+}
+
+/// A parsed requirement declaration with its verification obligations.
+#[derive(Debug, Clone)]
+pub struct RequirementDeclaration {
+	pub req_id: String,
+	pub version: i64,
+	pub obligations: Vec<VerificationObligation>,
+}
+
+/// A single verification obligation from a requirement declaration.
+#[derive(Debug, Clone)]
+pub struct VerificationObligation {
+	pub obligation_id: String,
+	pub obligation: String,
+	pub method: String,
+	pub target: Option<String>,
+	pub threshold: Option<f64>,
+	pub operator: Option<String>,
 }
 
 /// A node with no incoming reference edges (dead code candidate).
@@ -991,6 +1011,108 @@ impl StorageConnection {
 	/// Mirrors TS `findImportsBetweenPaths` (sqlite-storage.ts:2589-2628).
 	/// Uses `LIKE '{prefix}/%'` matching on file paths.
 	/// Ordered by source file path, then line number.
+	/// Load active requirement declarations for a repo.
+	///
+	/// Reads from the `declarations` table where `kind='requirement'`
+	/// and `is_active=1`. Parses `value_json` to extract `req_id`,
+	/// `version`, and `verification` obligations.
+	///
+	/// Requirements with empty or missing `verification` arrays are
+	/// skipped (matches TS: `if (!val.verification) continue`).
+	///
+	/// Active requirements with unparseable `value_json` or missing
+	/// `req_id` are errors (not silently skipped) because they are
+	/// authored governance inputs that should not vanish from the
+	/// gate report.
+	pub fn get_active_requirement_declarations(
+		&self,
+		repo_uid: &str,
+	) -> Result<Vec<RequirementDeclaration>, StorageError> {
+		let mut stmt = self.connection().prepare(
+			"SELECT declaration_uid, value_json
+			 FROM declarations
+			 WHERE repo_uid = ? AND kind = 'requirement' AND is_active = 1
+			 ORDER BY created_at DESC",
+		)?;
+
+		let rows = stmt.query_map(
+			rusqlite::params![repo_uid],
+			|row| {
+				let uid: String = row.get(0)?;
+				let value_json: String = row.get(1)?;
+				Ok((uid, value_json))
+			},
+		)?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			let (decl_uid, value_json) = row.map_err(StorageError::from)?;
+
+			let parsed: serde_json::Value = serde_json::from_str(&value_json)
+				.map_err(|e| StorageError::MalformedRequirement {
+					declaration_uid: decl_uid.clone(),
+					reason: format!("malformed value_json: {}", e),
+				})?;
+
+			let req_id = parsed["req_id"]
+				.as_str()
+				.ok_or_else(|| StorageError::MalformedRequirement {
+					declaration_uid: decl_uid.clone(),
+					reason: "missing req_id".to_string(),
+				})?
+				.to_string();
+
+			let version = parsed["version"].as_i64().unwrap_or(1);
+
+			// Empty/missing verification → skip (matches TS behavior).
+			let verification = match parsed["verification"].as_array() {
+				Some(arr) if !arr.is_empty() => arr,
+				_ => continue,
+			};
+
+			let mut obligations = Vec::new();
+			for (i, obl_val) in verification.iter().enumerate() {
+				let obligation_id = obl_val["obligation_id"]
+					.as_str()
+					.ok_or_else(|| StorageError::MalformedRequirement {
+						declaration_uid: decl_uid.clone(),
+						reason: format!("obligation {} missing obligation_id", i),
+					})?
+					.to_string();
+				let obligation = obl_val["obligation"]
+					.as_str()
+					.ok_or_else(|| StorageError::MalformedRequirement {
+						declaration_uid: decl_uid.clone(),
+						reason: format!("obligation {} missing obligation text", i),
+					})?
+					.to_string();
+				let method = obl_val["method"]
+					.as_str()
+					.ok_or_else(|| StorageError::MalformedRequirement {
+						declaration_uid: decl_uid.clone(),
+						reason: format!("obligation {} missing method", i),
+					})?
+					.to_string();
+				obligations.push(VerificationObligation {
+					obligation_id,
+					obligation,
+					method,
+					target: obl_val["target"].as_str().map(|s| s.to_string()),
+					threshold: obl_val["threshold"].as_f64(),
+					operator: obl_val["operator"].as_str().map(|s| s.to_string()),
+				});
+			}
+
+			results.push(RequirementDeclaration {
+				req_id,
+				version,
+				obligations,
+			});
+		}
+
+		Ok(results)
+	}
+
 	pub fn find_imports_between_paths(
 		&self,
 		snapshot_uid: &str,
@@ -1429,5 +1551,44 @@ mod tests {
 		assert_eq!(extract_module_path("r1:src/index.ts:FILE"), None);
 		assert_eq!(extract_module_path("r1:src/core"), None);
 		assert_eq!(extract_module_path(""), None);
+	}
+
+	// ── Rust-24: storage-read failure propagation ────────────
+
+	#[test]
+	fn find_imports_between_paths_propagates_error_on_schema_corruption() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		// Drop the files table so the JOIN in find_imports_between_paths fails.
+		// In-memory DB: no migration repair on reopen.
+		storage
+			.connection()
+			.execute_batch("DROP TABLE files")
+			.unwrap();
+
+		let result = storage.find_imports_between_paths(&snap_uid, "src/core", "src/adapters");
+		assert!(
+			result.is_err(),
+			"find_imports_between_paths must propagate SQL error, got: {:?}",
+			result
+		);
+	}
+
+	#[test]
+	fn get_active_boundary_declarations_propagates_error_on_schema_corruption() {
+		let (storage, _snap_uid) = setup_db_with_snapshot();
+
+		// Drop the declarations table.
+		storage
+			.connection()
+			.execute_batch("DROP TABLE declarations")
+			.unwrap();
+
+		let result = storage.get_active_boundary_declarations("r1");
+		assert!(
+			result.is_err(),
+			"get_active_boundary_declarations must propagate SQL error, got: {:?}",
+			result
+		);
 	}
 }
