@@ -13,6 +13,8 @@
 #   Rust-13: `cycles  <db_path> <repo_uid>`
 #   Rust-14: `stats   <db_path> <repo_uid>`
 #
+# Rust-15: QueryResult envelope standardization across all read commands.
+#
 # No formatting-heavy UX.
 
 [package]

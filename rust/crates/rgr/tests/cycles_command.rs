@@ -214,6 +214,14 @@ fn cycles_exact_results() {
 	let stdout = String::from_utf8_lossy(&output.stdout);
 	let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
 
+	// TS-compatible QueryResult envelope.
+	assert_eq!(result["command"], "graph cycles");
+	assert!(result["repo"].is_string());
+	assert!(result["snapshot"].is_string());
+	assert!(result["snapshot_scope"] == "full" || result["snapshot_scope"] == "incremental");
+	assert!(result["basis_commit"].is_null() || result["basis_commit"].is_string());
+	assert!(result["stale"].is_boolean());
+
 	// Exactly one cycle: src/a <-> src/b.
 	assert_eq!(
 		result["count"], 1,

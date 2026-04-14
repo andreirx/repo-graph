@@ -256,6 +256,14 @@ fn callers_with_exact_results() {
 	let stdout = String::from_utf8_lossy(&output.stdout);
 	let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
 
+	// TS-compatible QueryResult envelope.
+	assert_eq!(result["command"], "graph callers");
+	assert!(result["repo"].is_string());
+	assert!(result["snapshot"].is_string());
+	assert!(result["snapshot_scope"] == "full" || result["snapshot_scope"] == "incremental");
+	assert!(result["basis_commit"].is_null() || result["basis_commit"].is_string());
+	assert!(result["stale"].is_boolean());
+
 	// Target is the serve function.
 	let target = &result["target"];
 	assert_eq!(target["name"], "serve");

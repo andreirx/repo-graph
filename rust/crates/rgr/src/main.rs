@@ -279,13 +279,20 @@ fn run_callers(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// JSON to stdout.
-	let output = serde_json::json!({
-		"snapshot_uid": snapshot.snapshot_uid,
-		"target": target,
-		"results": callers,
-		"count": callers.len(),
-	});
+	// JSON to stdout (TS-compatible QueryResult envelope).
+	let count = callers.len();
+	let mut extra = serde_json::Map::new();
+	extra.insert("target".to_string(), serde_json::to_value(&target).unwrap());
+	let output = match build_envelope(
+		&storage, "graph callers", repo_uid, &snapshot,
+		serde_json::to_value(&callers).unwrap(), count, extra,
+	) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
 
 	match serde_json::to_string_pretty(&output) {
 		Ok(json) => {
@@ -362,13 +369,20 @@ fn run_callees(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// JSON to stdout.
-	let output = serde_json::json!({
-		"snapshot_uid": snapshot.snapshot_uid,
-		"target": target,
-		"results": callees,
-		"count": callees.len(),
-	});
+	// JSON to stdout (TS-compatible QueryResult envelope).
+	let count = callees.len();
+	let mut extra = serde_json::Map::new();
+	extra.insert("target".to_string(), serde_json::to_value(&target).unwrap());
+	let output = match build_envelope(
+		&storage, "graph callees", repo_uid, &snapshot,
+		serde_json::to_value(&callees).unwrap(), count, extra,
+	) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
 
 	match serde_json::to_string_pretty(&output) {
 		Ok(json) => {
@@ -441,13 +455,20 @@ fn run_dead(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// JSON to stdout.
-	let output = serde_json::json!({
-		"snapshot_uid": snapshot.snapshot_uid,
-		"kind_filter": kind_filter,
-		"results": dead,
-		"count": dead.len(),
-	});
+	// JSON to stdout (TS-compatible QueryResult envelope).
+	let count = dead.len();
+	let mut extra = serde_json::Map::new();
+	extra.insert("kind_filter".to_string(), serde_json::json!(kind_filter));
+	let output = match build_envelope(
+		&storage, "graph dead", repo_uid, &snapshot,
+		serde_json::to_value(&dead).unwrap(), count, extra,
+	) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
 
 	match serde_json::to_string_pretty(&output) {
 		Ok(json) => {
@@ -502,12 +523,18 @@ fn run_cycles(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// JSON to stdout.
-	let output = serde_json::json!({
-		"snapshot_uid": snapshot.snapshot_uid,
-		"results": cycles,
-		"count": cycles.len(),
-	});
+	// JSON to stdout (TS-compatible QueryResult envelope).
+	let count = cycles.len();
+	let output = match build_envelope(
+		&storage, "graph cycles", repo_uid, &snapshot,
+		serde_json::to_value(&cycles).unwrap(), count, serde_json::Map::new(),
+	) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
 
 	match serde_json::to_string_pretty(&output) {
 		Ok(json) => {
@@ -560,35 +587,18 @@ fn run_stats(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// Look up repo name for the envelope (TS uses repo.name, not repo_uid).
-	use repo_graph_storage::types::RepoRef;
-	let repo_name = storage
-		.get_repo(&RepoRef::Uid(repo_uid.to_string()))
-		.ok()
-		.flatten()
-		.map(|r| r.name)
-		.unwrap_or_else(|| repo_uid.to_string());
-
-	// TS snapshot_scope: "full" if kind == "full", else "incremental".
-	let snapshot_scope = if snapshot.kind == "full" { "full" } else { "incremental" };
-
-	// TS stale: getStaleFiles(snapshotUid).length > 0.
-	let stale = storage
-		.get_stale_files(&snapshot.snapshot_uid)
-		.map(|files| !files.is_empty())
-		.unwrap_or(false);
-
-	// Full TS-compatible QueryResult envelope.
-	let output = serde_json::json!({
-		"command": "graph stats",
-		"repo": repo_name,
-		"snapshot": snapshot.snapshot_uid,
-		"snapshot_scope": snapshot_scope,
-		"basis_commit": snapshot.basis_commit,
-		"results": stats,
-		"count": stats.len(),
-		"stale": stale,
-	});
+	// JSON to stdout (TS-compatible QueryResult envelope).
+	let count = stats.len();
+	let output = match build_envelope(
+		&storage, "graph stats", repo_uid, &snapshot,
+		serde_json::to_value(&stats).unwrap(), count, serde_json::Map::new(),
+	) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
 
 	match serde_json::to_string_pretty(&output) {
 		Ok(json) => {
@@ -613,4 +623,56 @@ fn open_storage(
 	}
 	repo_graph_storage::StorageConnection::open(db_path)
 		.map_err(|e| format!("failed to open database: {}", e))
+}
+
+/// Build a TS-compatible QueryResult JSON envelope.
+///
+/// Mirrors the TS `formatQueryResult` wrapper (json.ts:25-40).
+/// `extra_fields` are merged into the envelope alongside the
+/// standard metadata fields (e.g., `target` for callers/callees,
+/// `kind_filter` for dead).
+fn build_envelope(
+	storage: &repo_graph_storage::StorageConnection,
+	command: &str,
+	repo_uid: &str,
+	snapshot: &repo_graph_storage::types::Snapshot,
+	results: serde_json::Value,
+	count: usize,
+	extra_fields: serde_json::Map<String, serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+	use repo_graph_storage::types::RepoRef;
+
+	let repo_name = storage
+		.get_repo(&RepoRef::Uid(repo_uid.to_string()))
+		.ok()
+		.flatten()
+		.map(|r| r.name)
+		.unwrap_or_else(|| repo_uid.to_string());
+
+	let snapshot_scope = if snapshot.kind == "full" { "full" } else { "incremental" };
+
+	let stale = storage
+		.get_stale_files(&snapshot.snapshot_uid)
+		.map(|files| !files.is_empty())
+		.map_err(|e| format!("failed to compute stale state: {}", e))?;
+
+	let mut envelope = serde_json::json!({
+		"command": command,
+		"repo": repo_name,
+		"snapshot": snapshot.snapshot_uid,
+		"snapshot_scope": snapshot_scope,
+		"basis_commit": snapshot.basis_commit,
+		"results": results,
+		"count": count,
+		"stale": stale,
+	});
+
+	// Merge command-specific fields into the envelope.
+	if let serde_json::Value::Object(ref mut map) = envelope {
+		for (k, v) in extra_fields {
+			map.insert(k, v);
+		}
+	}
+
+	Ok(envelope)
 }
