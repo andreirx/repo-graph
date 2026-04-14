@@ -97,8 +97,14 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   plumbing). Filters by target path prefix, computes average, compares
   against threshold with operator (default `>=`). Evidence includes
   avg_coverage, threshold, operator, files_measured.
-- Deferred: additional gate methods (complexity_threshold,
-  hotspot_threshold)
+- `gate`: Rust-29 adds `complexity_threshold` method. Reads
+  `cyclomatic_complexity` measurements, finds max across matching
+  functions (prefix filter), compares against threshold with operator
+  (default `<=`). Evidence: max_complexity, threshold, operator,
+  functions_measured. Strict parsing on malformed measurement JSON.
+  Uses `starts_with` for prefix matching (TS uses `includes` which
+  is arguably a bug).
+- Deferred: additional gate methods (hotspot_threshold)
 - Deferred: evidence, obligations, declare commands
 - Deferred: measurement commands, table output, full edge-type set
 

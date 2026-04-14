@@ -3,8 +3,8 @@
 //! Evaluates requirement obligations against the current snapshot
 //! and layers waiver overlay for governance policy.
 //!
-//! Supported methods: `arch_violations`, `coverage_threshold`.
-//! All other methods return UNSUPPORTED.
+//! Supported methods: `arch_violations`, `coverage_threshold`,
+//! `complexity_threshold`. All other methods return UNSUPPORTED.
 //!
 //! This module owns:
 //!   - Obligation evaluation (method dispatch)
@@ -175,6 +175,7 @@ fn evaluate_single(
 	match obl.method.as_str() {
 		"arch_violations" => evaluate_arch_violations(storage, snapshot_uid, repo_uid, obl, &mut result)?,
 		"coverage_threshold" => evaluate_coverage_threshold(storage, snapshot_uid, repo_uid, obl, &mut result)?,
+		"complexity_threshold" => evaluate_complexity_threshold(storage, snapshot_uid, repo_uid, obl, &mut result)?,
 		_ => {
 			result.computed_verdict = Verdict::UNSUPPORTED;
 			result.effective_verdict = EffectiveVerdict::UNSUPPORTED;
@@ -393,6 +394,106 @@ fn evaluate_coverage_threshold(
 		"threshold": threshold,
 		"operator": op,
 		"files_measured": matching.len(),
+	});
+
+	Ok(())
+}
+
+/// Evaluate the `complexity_threshold` method (Rust-29).
+///
+/// Reads `cyclomatic_complexity` measurements, filters by target
+/// path prefix, finds the maximum complexity value, and compares
+/// against the obligation's threshold.
+///
+/// Mirrors TS `evaluateObligation` case `complexity_threshold`
+/// (core/evaluator/obligation-evaluator.ts).
+///
+/// TS uses `.includes()` for prefix filtering; Rust uses
+/// `.starts_with()` (consistent with `coverage_threshold`). The
+/// `.includes()` in TS is arguably a bug — it would match paths
+/// that contain the prefix as a substring anywhere.
+///
+/// Evidence fields: `max_complexity`, `threshold`, `operator`,
+/// `functions_measured`.
+fn evaluate_complexity_threshold(
+	storage: &StorageConnection,
+	snapshot_uid: &str,
+	repo_uid: &str,
+	obl: &VerificationObligation,
+	result: &mut ObligationResult,
+) -> Result<(), String> {
+	let target = match &obl.target {
+		Some(t) => t,
+		None => {
+			result.computed_verdict = Verdict::MISSING_EVIDENCE;
+			result.effective_verdict = EffectiveVerdict::MISSING_EVIDENCE;
+			result.evidence = serde_json::json!({
+				"reason": "target or threshold not specified",
+			});
+			return Ok(());
+		}
+	};
+
+	let threshold = match obl.threshold {
+		Some(t) => t,
+		None => {
+			result.computed_verdict = Verdict::MISSING_EVIDENCE;
+			result.effective_verdict = EffectiveVerdict::MISSING_EVIDENCE;
+			result.evidence = serde_json::json!({
+				"reason": "target or threshold not specified",
+			});
+			return Ok(());
+		}
+	};
+
+	let all_rows = storage
+		.query_measurements_by_kind(snapshot_uid, "cyclomatic_complexity")
+		.map_err(|e| format!("failed to read complexity measurements: {}", e))?;
+
+	let prefix = format!("{}:{}/", repo_uid, target);
+	let matching: Vec<_> = all_rows
+		.iter()
+		.filter(|r| r.target_stable_key.starts_with(&prefix))
+		.collect();
+
+	if matching.is_empty() {
+		result.computed_verdict = Verdict::MISSING_EVIDENCE;
+		result.effective_verdict = EffectiveVerdict::MISSING_EVIDENCE;
+		result.evidence = serde_json::json!({
+			"reason": "no complexity data for target path",
+		});
+		return Ok(());
+	}
+
+	// Find max complexity. Malformed rows abort — measurements are
+	// authored policy evidence, not optional hints.
+	let mut max_cc = f64::NEG_INFINITY;
+	for row in &matching {
+		let parsed: serde_json::Value = serde_json::from_str(&row.value_json)
+			.map_err(|e| format!(
+				"malformed complexity measurement for {}: {}",
+				row.target_stable_key, e,
+			))?;
+		let value = parsed["value"].as_f64().ok_or_else(|| format!(
+			"complexity measurement for {} missing numeric \"value\" field",
+			row.target_stable_key,
+		))?;
+		if value > max_cc {
+			max_cc = value;
+		}
+	}
+
+	let op = obl.operator.as_deref().unwrap_or("<=");
+	let pass = compare_values(max_cc, op, threshold);
+
+	let verdict = if pass { Verdict::PASS } else { Verdict::FAIL };
+	result.computed_verdict = verdict;
+	result.effective_verdict = verdict.into();
+	result.evidence = serde_json::json!({
+		"max_complexity": max_cc,
+		"threshold": threshold,
+		"operator": op,
+		"functions_measured": matching.len(),
 	});
 
 	Ok(())

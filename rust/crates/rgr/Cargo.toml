@@ -24,6 +24,7 @@
 # Rust-25: gate waiver overlay (active waiver resolution, expiry, audit trail).
 # Rust-26: gate modes (--strict, --advisory, default).
 # Rust-28: coverage_threshold gate method (reads line_coverage measurements).
+# Rust-29: complexity_threshold gate method (reads cyclomatic_complexity measurements).
 #
 # No formatting-heavy UX.
 

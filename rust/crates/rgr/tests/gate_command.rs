@@ -28,6 +28,13 @@
 //!  25. coverage_threshold: exact evidence shape (Rust-28)
 //!  26. coverage_threshold: malformed measurement JSON => exit 2 (Rust-28)
 //!  27. coverage_threshold: measurement missing value field => exit 2 (Rust-28)
+//!  28. complexity_threshold: PASS when max <= threshold (Rust-29)
+//!  29. complexity_threshold: FAIL when max > threshold (Rust-29)
+//!  30. complexity_threshold: MISSING_EVIDENCE when no data (Rust-29)
+//!  31. complexity_threshold: MISSING_EVIDENCE when target missing (Rust-29)
+//!  32. complexity_threshold: exact evidence shape (Rust-29)
+//!  33. complexity_threshold: malformed JSON aborts (Rust-29)
+//!  34. complexity_threshold: missing value field aborts (Rust-29)
 //!
 //! Note: storage-read failures during arch_violations evaluation are
 //! not testable at the CLI integration level because StorageConnection::open()
@@ -1060,6 +1067,226 @@ fn gate_coverage_threshold_missing_value_field_aborts() {
 	assert!(
 		stderr.contains("missing numeric \"value\" field"),
 		"error should identify missing value, stderr: {}",
+		stderr
+	);
+}
+
+// ── Rust-29: complexity_threshold tests ────────────────────────────
+
+/// Insert a cyclomatic_complexity measurement row for a symbol.
+fn insert_complexity(
+	db_path: &std::path::Path,
+	uid: &str,
+	snapshot_uid: &str,
+	repo_uid: &str,
+	symbol_key: &str,
+	value: f64,
+) {
+	let conn = rusqlite::Connection::open(db_path).unwrap();
+	let value_json = format!(r#"{{"value":{}}}"#, value);
+	conn.execute(
+		"INSERT INTO measurements
+		 (measurement_uid, snapshot_uid, repo_uid, target_stable_key, kind, value_json, source, created_at)
+		 VALUES (?, ?, ?, ?, 'cyclomatic_complexity', ?, 'test', '2024-01-01T00:00:00Z')",
+		rusqlite::params![uid, snapshot_uid, repo_uid, symbol_key, value_json],
+	)
+	.unwrap();
+}
+
+// -- 28. complexity_threshold: PASS when max <= threshold -------------
+
+#[test]
+fn gate_complexity_threshold_passes() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	// CC=4 and CC=7, max=7, threshold=10, <= => PASS
+	insert_complexity(&db, "cc-1", &snap, "r1", "r1:src/core/service.ts:SYMBOL:serve", 4.0);
+	insert_complexity(&db, "cc-2", &snap, "r1", "r1:src/core/service.ts:SYMBOL:helper", 7.0);
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"core complexity <= 10","method":"complexity_threshold","target":"src/core","threshold":10,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(0), "complexity PASS => exit 0");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "pass");
+
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "PASS");
+	assert_eq!(obls[0]["evidence"]["max_complexity"], 7.0);
+	assert_eq!(obls[0]["evidence"]["functions_measured"], 2);
+}
+
+// -- 29. complexity_threshold: FAIL when max > threshold --------------
+
+#[test]
+fn gate_complexity_threshold_fails() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	// CC=4 and CC=15, max=15, threshold=10 => FAIL
+	insert_complexity(&db, "cc-1", &snap, "r1", "r1:src/core/service.ts:SYMBOL:serve", 4.0);
+	insert_complexity(&db, "cc-2", &snap, "r1", "r1:src/core/service.ts:SYMBOL:complex", 15.0);
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"core complexity <= 10","method":"complexity_threshold","target":"src/core","threshold":10,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(1), "complexity FAIL => exit 1");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "fail");
+
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "FAIL");
+	assert_eq!(obls[0]["evidence"]["max_complexity"], 15.0);
+	assert_eq!(obls[0]["evidence"]["threshold"], 10.0);
+}
+
+// -- 30. complexity_threshold: MISSING_EVIDENCE when no data ---------
+
+#[test]
+fn gate_complexity_threshold_missing_data() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"core complexity <= 10","method":"complexity_threshold","target":"src/core","threshold":10,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(2), "no complexity data => exit 2");
+
+	let result = parse_json(&output);
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "MISSING_EVIDENCE");
+	assert_eq!(obls[0]["evidence"]["reason"], "no complexity data for target path");
+}
+
+// -- 31. complexity_threshold: MISSING_EVIDENCE when target missing ---
+
+#[test]
+fn gate_complexity_threshold_missing_target() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"complexity check","method":"complexity_threshold","threshold":10,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(2));
+
+	let result = parse_json(&output);
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "MISSING_EVIDENCE");
+	assert_eq!(obls[0]["evidence"]["reason"], "target or threshold not specified");
+}
+
+// -- 32. complexity_threshold: exact evidence shape -------------------
+
+#[test]
+fn gate_complexity_threshold_evidence_shape() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	// CC=10 exactly, threshold=10, <= => PASS (boundary)
+	insert_complexity(&db, "cc-1", &snap, "r1", "r1:src/core/service.ts:SYMBOL:serve", 10.0);
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"core complexity","method":"complexity_threshold","target":"src/core","threshold":10,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(0), "boundary CC=10 <= 10 => PASS");
+
+	let result = parse_json(&output);
+	let obl = &result["obligations"].as_array().unwrap()[0];
+
+	assert_eq!(obl["computed_verdict"], "PASS");
+	assert_eq!(obl["method"], "complexity_threshold");
+
+	let ev = &obl["evidence"];
+	assert_eq!(ev["max_complexity"], 10.0);
+	assert_eq!(ev["threshold"], 10.0);
+	assert_eq!(ev["operator"], "<=");
+	assert_eq!(ev["functions_measured"], 1);
+}
+
+// -- 33. complexity_threshold: malformed JSON aborts -----------------
+
+#[test]
+fn gate_complexity_threshold_malformed_json_aborts() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	let conn = rusqlite::Connection::open(&db).unwrap();
+	conn.execute(
+		"INSERT INTO measurements
+		 (measurement_uid, snapshot_uid, repo_uid, target_stable_key, kind, value_json, source, created_at)
+		 VALUES ('cc-bad', ?, 'r1', 'r1:src/core/service.ts:SYMBOL:broken', 'cyclomatic_complexity', 'not json', 'test', '2024-01-01T00:00:00Z')",
+		rusqlite::params![snap],
+	)
+	.unwrap();
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"core complexity","method":"complexity_threshold","target":"src/core","threshold":10,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(2));
+	assert!(output.stdout.is_empty());
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	assert!(
+		stderr.contains("malformed complexity measurement"),
+		"stderr: {}",
+		stderr
+	);
+}
+
+// -- 34. complexity_threshold: missing value field aborts ------------
+
+#[test]
+fn gate_complexity_threshold_missing_value_field_aborts() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	let conn = rusqlite::Connection::open(&db).unwrap();
+	conn.execute(
+		"INSERT INTO measurements
+		 (measurement_uid, snapshot_uid, repo_uid, target_stable_key, kind, value_json, source, created_at)
+		 VALUES ('cc-novalue', ?, 'r1', 'r1:src/core/service.ts:SYMBOL:incomplete', 'cyclomatic_complexity', '{\"source\":\"test\"}', 'test', '2024-01-01T00:00:00Z')",
+		rusqlite::params![snap],
+	)
+	.unwrap();
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"core complexity","method":"complexity_threshold","target":"src/core","threshold":10,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(2));
+	assert!(output.stdout.is_empty());
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	assert!(
+		stderr.contains("missing numeric \"value\" field"),
+		"stderr: {}",
 		stderr
 	);
 }
