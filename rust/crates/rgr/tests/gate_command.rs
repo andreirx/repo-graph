@@ -21,6 +21,13 @@
 //!  18. Strict mode: WAIVED obligation remains non-failing (Rust-26)
 //!  19. --strict + --advisory => usage error, exit 1 (Rust-26)
 //!  20. Exact JSON gate.mode field reflects selected mode (Rust-26)
+//!  21. coverage_threshold: PASS when avg coverage >= threshold (Rust-28)
+//!  22. coverage_threshold: FAIL when avg coverage < threshold (Rust-28)
+//!  23. coverage_threshold: MISSING_EVIDENCE when no coverage data (Rust-28)
+//!  24. coverage_threshold: MISSING_EVIDENCE when target not specified (Rust-28)
+//!  25. coverage_threshold: exact evidence shape (Rust-28)
+//!  26. coverage_threshold: malformed measurement JSON => exit 2 (Rust-28)
+//!  27. coverage_threshold: measurement missing value field => exit 2 (Rust-28)
 //!
 //! Note: storage-read failures during arch_violations evaluation are
 //! not testable at the CLI integration level because StorageConnection::open()
@@ -238,7 +245,7 @@ fn gate_unsupported_method() {
 
 	insert_requirement(
 		&db, "req-1", "r1", "REQ-001", 1,
-		r#"[{"obligation_id":"obl-1","obligation":"coverage check","method":"coverage_threshold","target":"src/core","threshold":80,"operator":">="}]"#,
+		r#"[{"obligation_id":"obl-1","obligation":"manual check","method":"manual_review","target":"src/core"}]"#,
 	);
 
 	let output = run_cmd(&["gate", db_str, "r1"]);
@@ -250,7 +257,7 @@ fn gate_unsupported_method() {
 
 	let obls = result["obligations"].as_array().unwrap();
 	assert_eq!(obls[0]["computed_verdict"], "UNSUPPORTED");
-	assert_eq!(obls[0]["method"], "coverage_threshold");
+	assert_eq!(obls[0]["method"], "manual_review");
 }
 
 // -- 6. Exact JSON contract -------------------------------------------
@@ -677,7 +684,7 @@ fn gate_default_mode_unsupported_is_incomplete() {
 
 	insert_requirement(
 		&db, "req-1", "r1", "REQ-001", 1,
-		r#"[{"obligation_id":"obl-1","obligation":"coverage check","method":"coverage_threshold","target":"src/core","threshold":80,"operator":">="}]"#,
+		r#"[{"obligation_id":"obl-1","obligation":"manual check","method":"manual_review","target":"src/core"}]"#,
 	);
 
 	let output = run_cmd(&["gate", db_str, "r1"]);
@@ -698,7 +705,7 @@ fn gate_strict_mode_unsupported_is_fail() {
 
 	insert_requirement(
 		&db, "req-1", "r1", "REQ-001", 1,
-		r#"[{"obligation_id":"obl-1","obligation":"coverage check","method":"coverage_threshold","target":"src/core","threshold":80,"operator":">="}]"#,
+		r#"[{"obligation_id":"obl-1","obligation":"manual check","method":"manual_review","target":"src/core"}]"#,
 	);
 
 	let output = run_cmd(&["gate", db_str, "r1", "--strict"]);
@@ -720,7 +727,7 @@ fn gate_advisory_mode_unsupported_is_pass() {
 
 	insert_requirement(
 		&db, "req-1", "r1", "REQ-001", 1,
-		r#"[{"obligation_id":"obl-1","obligation":"coverage check","method":"coverage_threshold","target":"src/core","threshold":80,"operator":">="}]"#,
+		r#"[{"obligation_id":"obl-1","obligation":"manual check","method":"manual_review","target":"src/core"}]"#,
 	);
 
 	let output = run_cmd(&["gate", db_str, "r1", "--advisory"]);
@@ -799,5 +806,261 @@ fn gate_mode_field_reflects_selection() {
 	let output_advisory = run_cmd(&["gate", db_str, "r1", "--advisory"]);
 	let result_advisory = parse_json(&output_advisory);
 	assert_eq!(result_advisory["gate"]["mode"], "advisory");
+}
+
+// ── Rust-28: coverage_threshold tests ──────────────────────────────
+
+/// Insert a line_coverage measurement row for a file.
+fn insert_coverage(
+	db_path: &std::path::Path,
+	uid: &str,
+	snapshot_uid: &str,
+	repo_uid: &str,
+	file_path: &str,
+	value: f64,
+) {
+	let conn = rusqlite::Connection::open(db_path).unwrap();
+	let target_key = format!("{}:{}:FILE", repo_uid, file_path);
+	let value_json = format!(r#"{{"value":{}}}"#, value);
+	conn.execute(
+		"INSERT INTO measurements
+		 (measurement_uid, snapshot_uid, repo_uid, target_stable_key, kind, value_json, source, created_at)
+		 VALUES (?, ?, ?, ?, 'line_coverage', ?, 'test', '2024-01-01T00:00:00Z')",
+		rusqlite::params![uid, snapshot_uid, repo_uid, target_key, value_json],
+	)
+	.unwrap();
+}
+
+/// Get the snapshot_uid from the indexed DB (first snapshot for r1).
+fn get_snapshot_uid(db_path: &std::path::Path) -> String {
+	let conn = rusqlite::Connection::open(db_path).unwrap();
+	conn.query_row(
+		"SELECT snapshot_uid FROM snapshots WHERE repo_uid = 'r1' ORDER BY created_at DESC LIMIT 1",
+		[],
+		|row| row.get(0),
+	)
+	.unwrap()
+}
+
+// -- 21. coverage_threshold: PASS when avg >= threshold ---------------
+
+#[test]
+fn gate_coverage_threshold_passes() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	// Insert coverage data: 85% and 92% for src/core files.
+	insert_coverage(&db, "cov-1", &snap, "r1", "src/core/service.ts", 0.85);
+	insert_coverage(&db, "cov-2", &snap, "r1", "src/core/model.ts", 0.92);
+	// avg = 0.885, threshold = 0.80 => PASS
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"core coverage >= 80%","method":"coverage_threshold","target":"src/core","threshold":0.80,"operator":">="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(0), "coverage PASS => exit 0");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "pass");
+
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "PASS");
+	assert_eq!(obls[0]["effective_verdict"], "PASS");
+	assert_eq!(obls[0]["evidence"]["files_measured"], 2);
+}
+
+// -- 22. coverage_threshold: FAIL when avg < threshold ----------------
+
+#[test]
+fn gate_coverage_threshold_fails() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	// Insert coverage: 50% and 60% for src/core. avg = 0.55, threshold = 0.80 => FAIL
+	insert_coverage(&db, "cov-1", &snap, "r1", "src/core/service.ts", 0.50);
+	insert_coverage(&db, "cov-2", &snap, "r1", "src/core/model.ts", 0.60);
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"core coverage >= 80%","method":"coverage_threshold","target":"src/core","threshold":0.80,"operator":">="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(1), "coverage FAIL => exit 1");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "fail");
+
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "FAIL");
+	assert_eq!(obls[0]["evidence"]["threshold"], 0.80);
+	assert_eq!(obls[0]["evidence"]["operator"], ">=");
+}
+
+// -- 23. coverage_threshold: MISSING_EVIDENCE when no data -----------
+
+#[test]
+fn gate_coverage_threshold_missing_data() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	// No coverage rows inserted.
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"core coverage >= 80%","method":"coverage_threshold","target":"src/core","threshold":0.80,"operator":">="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(2), "no coverage data => exit 2");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "incomplete");
+
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "MISSING_EVIDENCE");
+	assert_eq!(obls[0]["evidence"]["reason"], "no coverage data for target path");
+}
+
+// -- 24. coverage_threshold: MISSING_EVIDENCE when no target ---------
+
+#[test]
+fn gate_coverage_threshold_missing_target() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	// Obligation with no target field.
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"coverage check","method":"coverage_threshold","threshold":0.80,"operator":">="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(2));
+
+	let result = parse_json(&output);
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "MISSING_EVIDENCE");
+	assert_eq!(obls[0]["evidence"]["reason"], "target or threshold not specified");
+}
+
+// -- 25. coverage_threshold: exact evidence shape --------------------
+
+#[test]
+fn gate_coverage_threshold_evidence_shape() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	// 70% and 90% => avg 0.80, threshold 0.80, >= => PASS (boundary)
+	insert_coverage(&db, "cov-1", &snap, "r1", "src/core/service.ts", 0.70);
+	insert_coverage(&db, "cov-2", &snap, "r1", "src/core/model.ts", 0.90);
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"core coverage","method":"coverage_threshold","target":"src/core","threshold":0.80,"operator":">="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(0), "boundary avg 0.80 >= 0.80 => PASS");
+
+	let result = parse_json(&output);
+	let obl = &result["obligations"].as_array().unwrap()[0];
+
+	assert_eq!(obl["computed_verdict"], "PASS");
+	assert_eq!(obl["method"], "coverage_threshold");
+
+	// Evidence fields.
+	let ev = &obl["evidence"];
+	assert_eq!(ev["avg_coverage"], 0.8);
+	assert_eq!(ev["threshold"], 0.8);
+	assert_eq!(ev["operator"], ">=");
+	assert_eq!(ev["files_measured"], 2);
+
+	// Coverage data from other modules must not leak in.
+	// (src/adapters/store.ts has no coverage row, so only 2 files.)
+}
+
+// -- 26. coverage_threshold: malformed measurement JSON => exit 2 ----
+
+#[test]
+fn gate_coverage_threshold_malformed_json_aborts() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	// Insert one valid row and one with invalid JSON.
+	insert_coverage(&db, "cov-1", &snap, "r1", "src/core/service.ts", 0.85);
+
+	let conn = rusqlite::Connection::open(&db).unwrap();
+	conn.execute(
+		"INSERT INTO measurements
+		 (measurement_uid, snapshot_uid, repo_uid, target_stable_key, kind, value_json, source, created_at)
+		 VALUES ('cov-bad', ?, 'r1', 'r1:src/core/broken.ts:FILE', 'line_coverage', 'not json', 'test', '2024-01-01T00:00:00Z')",
+		rusqlite::params![snap],
+	)
+	.unwrap();
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"core coverage","method":"coverage_threshold","target":"src/core","threshold":0.80,"operator":">="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(
+		output.status.code(),
+		Some(2),
+		"malformed measurement JSON must cause exit 2, stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+	assert!(output.stdout.is_empty(), "no JSON on stdout for command error");
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	assert!(
+		stderr.contains("malformed coverage measurement"),
+		"error should identify malformed measurement, stderr: {}",
+		stderr
+	);
+}
+
+// -- 27. coverage_threshold: measurement missing value field => exit 2 --
+
+#[test]
+fn gate_coverage_threshold_missing_value_field_aborts() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	// Valid JSON but missing the "value" field.
+	let conn = rusqlite::Connection::open(&db).unwrap();
+	conn.execute(
+		"INSERT INTO measurements
+		 (measurement_uid, snapshot_uid, repo_uid, target_stable_key, kind, value_json, source, created_at)
+		 VALUES ('cov-novalue', ?, 'r1', 'r1:src/core/incomplete.ts:FILE', 'line_coverage', '{\"source\":\"test\"}', 'test', '2024-01-01T00:00:00Z')",
+		rusqlite::params![snap],
+	)
+	.unwrap();
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"core coverage","method":"coverage_threshold","target":"src/core","threshold":0.80,"operator":">="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(
+		output.status.code(),
+		Some(2),
+		"missing value field must cause exit 2, stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+	assert!(output.stdout.is_empty());
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	assert!(
+		stderr.contains("missing numeric \"value\" field"),
+		"error should identify missing value, stderr: {}",
+		stderr
+	);
 }
 

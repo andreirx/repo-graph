@@ -3,8 +3,8 @@
 //! Evaluates requirement obligations against the current snapshot
 //! and layers waiver overlay for governance policy.
 //!
-//! Only `arch_violations` method is supported; all other methods
-//! return UNSUPPORTED.
+//! Supported methods: `arch_violations`, `coverage_threshold`.
+//! All other methods return UNSUPPORTED.
 //!
 //! This module owns:
 //!   - Obligation evaluation (method dispatch)
@@ -174,6 +174,7 @@ fn evaluate_single(
 
 	match obl.method.as_str() {
 		"arch_violations" => evaluate_arch_violations(storage, snapshot_uid, repo_uid, obl, &mut result)?,
+		"coverage_threshold" => evaluate_coverage_threshold(storage, snapshot_uid, repo_uid, obl, &mut result)?,
 		_ => {
 			result.computed_verdict = Verdict::UNSUPPORTED;
 			result.effective_verdict = EffectiveVerdict::UNSUPPORTED;
@@ -298,6 +299,118 @@ fn evaluate_arch_violations(
 	});
 
 	Ok(())
+}
+
+/// Evaluate the `coverage_threshold` method (Rust-28).
+///
+/// Reads `line_coverage` measurements from the measurements table,
+/// filters by target path prefix, computes the average coverage,
+/// and compares against the obligation's threshold.
+///
+/// Mirrors TS `evaluateObligation` case `coverage_threshold`
+/// (core/evaluator/obligation-evaluator.ts).
+///
+/// Returns MISSING_EVIDENCE when:
+///   - target or threshold not specified
+///   - no coverage data exists for the target path
+fn evaluate_coverage_threshold(
+	storage: &StorageConnection,
+	snapshot_uid: &str,
+	repo_uid: &str,
+	obl: &VerificationObligation,
+	result: &mut ObligationResult,
+) -> Result<(), String> {
+	let target = match &obl.target {
+		Some(t) => t,
+		None => {
+			result.computed_verdict = Verdict::MISSING_EVIDENCE;
+			result.effective_verdict = EffectiveVerdict::MISSING_EVIDENCE;
+			result.evidence = serde_json::json!({
+				"reason": "target or threshold not specified",
+			});
+			return Ok(());
+		}
+	};
+
+	let threshold = match obl.threshold {
+		Some(t) => t,
+		None => {
+			result.computed_verdict = Verdict::MISSING_EVIDENCE;
+			result.effective_verdict = EffectiveVerdict::MISSING_EVIDENCE;
+			result.evidence = serde_json::json!({
+				"reason": "target or threshold not specified",
+			});
+			return Ok(());
+		}
+	};
+
+	let all_rows = storage
+		.query_measurements_by_kind(snapshot_uid, "line_coverage")
+		.map_err(|e| format!("failed to read coverage measurements: {}", e))?;
+
+	// Filter by target path prefix: "{repo_uid}:{target}/"
+	let prefix = format!("{}:{}/", repo_uid, target);
+	let matching: Vec<_> = all_rows
+		.iter()
+		.filter(|r| r.target_stable_key.starts_with(&prefix))
+		.collect();
+
+	if matching.is_empty() {
+		result.computed_verdict = Verdict::MISSING_EVIDENCE;
+		result.effective_verdict = EffectiveVerdict::MISSING_EVIDENCE;
+		result.evidence = serde_json::json!({
+			"reason": "no coverage data for target path",
+		});
+		return Ok(());
+	}
+
+	// Compute average coverage from value_json.value fields.
+	// Measurements are authored policy evidence — malformed rows
+	// must fail the gate, not silently drag the average to zero.
+	let mut sum = 0.0_f64;
+	for row in &matching {
+		let parsed: serde_json::Value = serde_json::from_str(&row.value_json)
+			.map_err(|e| format!(
+				"malformed coverage measurement for {}: {}",
+				row.target_stable_key, e,
+			))?;
+		let value = parsed["value"].as_f64().ok_or_else(|| format!(
+			"coverage measurement for {} missing numeric \"value\" field",
+			row.target_stable_key,
+		))?;
+		sum += value;
+	}
+	let avg = sum / matching.len() as f64;
+
+	let op = obl.operator.as_deref().unwrap_or(">=");
+	let pass = compare_values(avg, op, threshold);
+
+	let verdict = if pass { Verdict::PASS } else { Verdict::FAIL };
+	result.computed_verdict = verdict;
+	result.effective_verdict = verdict.into();
+	result.evidence = serde_json::json!({
+		"avg_coverage": (avg * 10000.0).round() / 10000.0,
+		"threshold": threshold,
+		"operator": op,
+		"files_measured": matching.len(),
+	});
+
+	Ok(())
+}
+
+/// Compare a numeric value against a threshold using a string operator.
+///
+/// Mirrors TS `compareValues` (obligation-evaluator.ts).
+/// Unknown operators return false (fail-safe).
+fn compare_values(value: f64, op: &str, threshold: f64) -> bool {
+	match op {
+		">=" => value >= threshold,
+		">" => value > threshold,
+		"<=" => value <= threshold,
+		"<" => value < threshold,
+		"==" => (value - threshold).abs() < f64::EPSILON,
+		_ => false,
+	}
 }
 
 // ── Gate mode ───────────────────────────────────────────────────

@@ -92,8 +92,13 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   Strict: MISSING_EVIDENCE/UNSUPPORTED treated as fail (exit 1).
   Advisory: MISSING_EVIDENCE/UNSUPPORTED informational (exit 0).
   WAIVED non-failing in all three modes. Mirrors TS flag interface.
-- Deferred: additional gate methods (coverage_threshold,
-  complexity_threshold, hotspot_threshold)
+- `gate`: Rust-28 adds `coverage_threshold` method. Reads
+  `line_coverage` measurements from the measurements table (Rust-27
+  plumbing). Filters by target path prefix, computes average, compares
+  against threshold with operator (default `>=`). Evidence includes
+  avg_coverage, threshold, operator, files_measured.
+- Deferred: additional gate methods (complexity_threshold,
+  hotspot_threshold)
 - Deferred: evidence, obligations, declare commands
 - Deferred: measurement commands, table output, full edge-type set
 

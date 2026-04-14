@@ -14,6 +14,7 @@
 //! Rust-22: `get_active_boundary_declarations` + `find_imports_between_paths`.
 //! Rust-24: `get_active_requirement_declarations`.
 //! Rust-25: `find_active_waivers`.
+//! Rust-27: `query_measurements_by_kind`.
 
 use serde::{Deserialize, Serialize};
 
@@ -184,6 +185,18 @@ pub struct WaiverDeclaration {
 	pub expires_at: Option<String>,
 	pub rationale_category: Option<String>,
 	pub policy_basis: Option<String>,
+}
+
+/// A measurement row read from the `measurements` table.
+///
+/// Mirrors TS `queryMeasurementsByKind` return shape:
+/// `{ targetStableKey: string, valueJson: string }`.
+/// The `value_json` is opaque at this layer — interpretation
+/// belongs to the evaluator (gate method or CLI command).
+#[derive(Debug, Clone)]
+pub struct MeasurementRow {
+	pub target_stable_key: String,
+	pub value_json: String,
 }
 
 /// A node with no incoming reference edges (dead code candidate).
@@ -1250,6 +1263,39 @@ impl StorageConnection {
 		Ok(results)
 	}
 
+	/// Read measurements by kind for a snapshot.
+	///
+	/// Mirrors TS `queryMeasurementsByKind` (sqlite-storage.ts).
+	/// Returns all measurement rows matching the snapshot and kind,
+	/// with `target_stable_key` and raw `value_json` only.
+	///
+	/// No ordering guarantee — TS does not specify one either.
+	/// Callers that need deterministic order must sort the result.
+	pub fn query_measurements_by_kind(
+		&self,
+		snapshot_uid: &str,
+		kind: &str,
+	) -> Result<Vec<MeasurementRow>, StorageError> {
+		let mut stmt = self.connection().prepare(
+			"SELECT target_stable_key, value_json
+			 FROM measurements
+			 WHERE snapshot_uid = ? AND kind = ?",
+		)?;
+
+		let rows = stmt.query_map(
+			rusqlite::params![snapshot_uid, kind],
+			|row| {
+				Ok(MeasurementRow {
+					target_stable_key: row.get(0)?,
+					value_json: row.get(1)?,
+				})
+			},
+		)?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(StorageError::from)
+	}
+
 	pub fn find_imports_between_paths(
 		&self,
 		snapshot_uid: &str,
@@ -1725,6 +1771,151 @@ mod tests {
 		assert!(
 			result.is_err(),
 			"get_active_boundary_declarations must propagate SQL error, got: {:?}",
+			result
+		);
+	}
+
+	// ── Rust-27: query_measurements_by_kind ─────────────────────
+
+	/// Insert a measurement row directly.
+	fn insert_measurement(
+		storage: &StorageConnection,
+		uid: &str,
+		snapshot_uid: &str,
+		target_stable_key: &str,
+		kind: &str,
+		value_json: &str,
+	) {
+		storage
+			.connection()
+			.execute(
+				"INSERT INTO measurements
+				 (measurement_uid, snapshot_uid, repo_uid, target_stable_key, kind, value_json, source, created_at)
+				 VALUES (?, ?, 'r1', ?, ?, ?, 'test', '2024-01-01T00:00:00Z')",
+				rusqlite::params![uid, snapshot_uid, target_stable_key, kind, value_json],
+			)
+			.unwrap();
+	}
+
+	#[test]
+	fn query_measurements_by_kind_empty_on_no_rows() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		let result = storage
+			.query_measurements_by_kind(&snap_uid, "line_coverage")
+			.unwrap();
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn query_measurements_by_kind_returns_exact_rows() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		insert_measurement(
+			&storage, "m1", &snap_uid,
+			"r1:src/core/service.ts:FILE", "line_coverage",
+			r#"{"value":0.85}"#,
+		);
+		insert_measurement(
+			&storage, "m2", &snap_uid,
+			"r1:src/core/model.ts:FILE", "line_coverage",
+			r#"{"value":0.92}"#,
+		);
+
+		let result = storage
+			.query_measurements_by_kind(&snap_uid, "line_coverage")
+			.unwrap();
+		assert_eq!(result.len(), 2);
+
+		let keys: Vec<&str> = result.iter().map(|r| r.target_stable_key.as_str()).collect();
+		assert!(keys.contains(&"r1:src/core/service.ts:FILE"));
+		assert!(keys.contains(&"r1:src/core/model.ts:FILE"));
+
+		// value_json is opaque — verify it round-trips.
+		let m1 = result.iter().find(|r| r.target_stable_key.contains("service")).unwrap();
+		assert_eq!(m1.value_json, r#"{"value":0.85}"#);
+	}
+
+	#[test]
+	fn query_measurements_by_kind_filters_by_kind() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		insert_measurement(
+			&storage, "m1", &snap_uid,
+			"r1:src/core/service.ts:FILE", "line_coverage",
+			r#"{"value":0.85}"#,
+		);
+		insert_measurement(
+			&storage, "m2", &snap_uid,
+			"r1:src/core/service.ts:SYMBOL:serve", "cyclomatic_complexity",
+			r#"{"value":4}"#,
+		);
+
+		let coverage = storage
+			.query_measurements_by_kind(&snap_uid, "line_coverage")
+			.unwrap();
+		assert_eq!(coverage.len(), 1);
+		assert!(coverage[0].target_stable_key.contains("service.ts:FILE"));
+
+		let complexity = storage
+			.query_measurements_by_kind(&snap_uid, "cyclomatic_complexity")
+			.unwrap();
+		assert_eq!(complexity.len(), 1);
+		assert!(complexity[0].target_stable_key.contains("SYMBOL:serve"));
+	}
+
+	#[test]
+	fn query_measurements_by_kind_filters_by_snapshot() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		// Create a second snapshot.
+		storage
+			.connection()
+			.execute(
+				"INSERT INTO snapshots (snapshot_uid, repo_uid, status, kind, created_at)
+				 VALUES ('snap-other', 'r1', 'ready', 'full', '2024-01-02T00:00:00Z')",
+				[],
+			)
+			.unwrap();
+
+		insert_measurement(
+			&storage, "m1", &snap_uid,
+			"r1:src/a.ts:FILE", "line_coverage",
+			r#"{"value":0.80}"#,
+		);
+		insert_measurement(
+			&storage, "m2", "snap-other",
+			"r1:src/b.ts:FILE", "line_coverage",
+			r#"{"value":0.60}"#,
+		);
+
+		let result = storage
+			.query_measurements_by_kind(&snap_uid, "line_coverage")
+			.unwrap();
+		assert_eq!(result.len(), 1);
+		assert!(result[0].target_stable_key.contains("a.ts"));
+
+		let other = storage
+			.query_measurements_by_kind("snap-other", "line_coverage")
+			.unwrap();
+		assert_eq!(other.len(), 1);
+		assert!(other[0].target_stable_key.contains("b.ts"));
+	}
+
+	#[test]
+	fn query_measurements_by_kind_propagates_error_on_schema_corruption() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		// Drop the measurements table.
+		storage
+			.connection()
+			.execute_batch("DROP TABLE measurements")
+			.unwrap();
+
+		let result = storage.query_measurements_by_kind(&snap_uid, "line_coverage");
+		assert!(
+			result.is_err(),
+			"query_measurements_by_kind must propagate SQL error, got: {:?}",
 			result
 		);
 	}
