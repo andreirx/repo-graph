@@ -4,7 +4,8 @@
 //! and layers waiver overlay for governance policy.
 //!
 //! Supported methods: `arch_violations`, `coverage_threshold`,
-//! `complexity_threshold`. All other methods return UNSUPPORTED.
+//! `complexity_threshold`, `hotspot_threshold`.
+//! All other methods return UNSUPPORTED.
 //!
 //! This module owns:
 //!   - Obligation evaluation (method dispatch)
@@ -176,6 +177,7 @@ fn evaluate_single(
 		"arch_violations" => evaluate_arch_violations(storage, snapshot_uid, repo_uid, obl, &mut result)?,
 		"coverage_threshold" => evaluate_coverage_threshold(storage, snapshot_uid, repo_uid, obl, &mut result)?,
 		"complexity_threshold" => evaluate_complexity_threshold(storage, snapshot_uid, repo_uid, obl, &mut result)?,
+		"hotspot_threshold" => evaluate_hotspot_threshold(storage, snapshot_uid, repo_uid, obl, &mut result)?,
 		_ => {
 			result.computed_verdict = Verdict::UNSUPPORTED;
 			result.effective_verdict = EffectiveVerdict::UNSUPPORTED;
@@ -494,6 +496,98 @@ fn evaluate_complexity_threshold(
 		"threshold": threshold,
 		"operator": op,
 		"functions_measured": matching.len(),
+	});
+
+	Ok(())
+}
+
+/// Evaluate the `hotspot_threshold` method (Rust-31).
+///
+/// Reads `hotspot_score` inferences, optionally filters by target
+/// path prefix, finds the maximum `normalized_score`, and compares
+/// against the obligation's threshold.
+///
+/// Mirrors TS `evaluateObligation` case `hotspot_threshold`
+/// (core/evaluator/obligation-evaluator.ts).
+///
+/// Key differences from coverage/complexity:
+///   - Target is optional. If omitted, all hotspot inferences for
+///     the snapshot are considered (whole-repo scope).
+///   - Value field is `normalized_score`, not `value`.
+///   - Evidence shape: `max_hotspot_score`, `threshold` only
+///     (no operator or count fields — matches TS).
+fn evaluate_hotspot_threshold(
+	storage: &StorageConnection,
+	snapshot_uid: &str,
+	repo_uid: &str,
+	obl: &VerificationObligation,
+	result: &mut ObligationResult,
+) -> Result<(), String> {
+	let threshold = match obl.threshold {
+		Some(t) => t,
+		None => {
+			result.computed_verdict = Verdict::MISSING_EVIDENCE;
+			result.effective_verdict = EffectiveVerdict::MISSING_EVIDENCE;
+			result.evidence = serde_json::json!({
+				"reason": "threshold not specified",
+			});
+			return Ok(());
+		}
+	};
+
+	let all_rows = storage
+		.query_inferences_by_kind(snapshot_uid, "hotspot_score")
+		.map_err(|e| format!("failed to read hotspot inferences: {}", e))?;
+
+	// Filter by target prefix if target is specified.
+	let matching: Vec<_> = if let Some(target) = &obl.target {
+		let prefix = format!("{}:{}/", repo_uid, target);
+		all_rows
+			.iter()
+			.filter(|r| r.target_stable_key.starts_with(&prefix))
+			.collect()
+	} else {
+		all_rows.iter().collect()
+	};
+
+	if matching.is_empty() {
+		let reason = if obl.target.is_some() {
+			"no hotspot data for target path"
+		} else {
+			"no hotspot data"
+		};
+		result.computed_verdict = Verdict::MISSING_EVIDENCE;
+		result.effective_verdict = EffectiveVerdict::MISSING_EVIDENCE;
+		result.evidence = serde_json::json!({ "reason": reason });
+		return Ok(());
+	}
+
+	// Find max normalized_score. Malformed rows abort.
+	let mut max_hs = f64::NEG_INFINITY;
+	for row in &matching {
+		let parsed: serde_json::Value = serde_json::from_str(&row.value_json)
+			.map_err(|e| format!(
+				"malformed hotspot inference for {}: {}",
+				row.target_stable_key, e,
+			))?;
+		let score = parsed["normalized_score"].as_f64().ok_or_else(|| format!(
+			"hotspot inference for {} missing numeric \"normalized_score\" field",
+			row.target_stable_key,
+		))?;
+		if score > max_hs {
+			max_hs = score;
+		}
+	}
+
+	let op = obl.operator.as_deref().unwrap_or("<=");
+	let pass = compare_values(max_hs, op, threshold);
+
+	let verdict = if pass { Verdict::PASS } else { Verdict::FAIL };
+	result.computed_verdict = verdict;
+	result.effective_verdict = verdict.into();
+	result.evidence = serde_json::json!({
+		"max_hotspot_score": max_hs,
+		"threshold": threshold,
 	});
 
 	Ok(())

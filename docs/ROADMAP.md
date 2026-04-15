@@ -104,7 +104,12 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   functions_measured. Strict parsing on malformed measurement JSON.
   Uses `starts_with` for prefix matching (TS uses `includes` which
   is arguably a bug).
-- Deferred: additional gate methods (hotspot_threshold)
+- `gate`: Rust-31 adds `hotspot_threshold` method. Reads
+  `hotspot_score` inferences (Rust-30 plumbing), finds max
+  `normalized_score`. Target optional (whole-repo if omitted).
+  Default operator `<=`. Evidence: max_hotspot_score, threshold.
+  Strict parsing on malformed inference JSON. This completes the
+  TS gate method set: all four methods are now ported to Rust.
 - Deferred: evidence, obligations, declare commands
 - Deferred: measurement commands, table output, full edge-type set
 

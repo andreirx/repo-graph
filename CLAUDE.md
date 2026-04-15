@@ -138,7 +138,7 @@ rgr-rust callees    <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Dire
 rgr-rust path       <db_path> <repo_uid> <from> <to>   # Shortest path (CALLS+IMPORTS, depth 8)
 rgr-rust imports    <db_path> <repo_uid> <file_path>   # File import chain (one hop, IMPORTS)
 rgr-rust violations <db_path> <repo_uid>               # Boundary violation check (IMPORTS)
-rgr-rust gate       <db_path> <repo_uid> [--strict | --advisory]  # CI gate (arch_violations, waivers, 3 modes)
+rgr-rust gate       <db_path> <repo_uid> [--strict | --advisory]  # CI gate (4 methods, waivers, 3 modes)
 rgr-rust dead       <db_path> <repo_uid> [kind]        # Unreferenced nodes
 rgr-rust cycles     <db_path> <repo_uid>               # Module-level IMPORTS cycles
 rgr-rust stats      <db_path> <repo_uid>               # Module structural metrics

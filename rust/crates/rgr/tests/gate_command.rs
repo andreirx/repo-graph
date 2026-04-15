@@ -35,6 +35,15 @@
 //!  32. complexity_threshold: exact evidence shape (Rust-29)
 //!  33. complexity_threshold: malformed JSON aborts (Rust-29)
 //!  34. complexity_threshold: missing value field aborts (Rust-29)
+//!  35. hotspot_threshold: PASS when max <= threshold (Rust-31)
+//!  36. hotspot_threshold: FAIL when max > threshold (Rust-31)
+//!  37. hotspot_threshold: whole-repo (no target) (Rust-31)
+//!  38. hotspot_threshold: target prefix filter (Rust-31)
+//!  39. hotspot_threshold: MISSING_EVIDENCE when no threshold (Rust-31)
+//!  40. hotspot_threshold: MISSING_EVIDENCE when no data (Rust-31)
+//!  41. hotspot_threshold: malformed JSON aborts (Rust-31)
+//!  42. hotspot_threshold: missing normalized_score aborts (Rust-31)
+//!  43. hotspot_threshold: exact evidence shape (Rust-31)
 //!
 //! Note: storage-read failures during arch_violations evaluation are
 //! not testable at the CLI integration level because StorageConnection::open()
@@ -1289,5 +1298,280 @@ fn gate_complexity_threshold_missing_value_field_aborts() {
 		"stderr: {}",
 		stderr
 	);
+}
+
+// ── Rust-31: hotspot_threshold tests ───────────────────────────────
+
+/// Insert a hotspot_score inference row.
+fn insert_hotspot(
+	db_path: &std::path::Path,
+	uid: &str,
+	snapshot_uid: &str,
+	repo_uid: &str,
+	target_key: &str,
+	normalized_score: f64,
+) {
+	let conn = rusqlite::Connection::open(db_path).unwrap();
+	let value_json = format!(r#"{{"normalized_score":{}}}"#, normalized_score);
+	conn.execute(
+		"INSERT INTO inferences
+		 (inference_uid, snapshot_uid, repo_uid, target_stable_key, kind, value_json, confidence, basis_json, extractor, created_at)
+		 VALUES (?, ?, ?, ?, 'hotspot_score', ?, 1.0, '{}', 'test', '2024-01-01T00:00:00Z')",
+		rusqlite::params![uid, snapshot_uid, repo_uid, target_key, value_json],
+	)
+	.unwrap();
+}
+
+// -- 35. hotspot_threshold: PASS when max <= threshold ----------------
+
+#[test]
+fn gate_hotspot_threshold_passes() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	insert_hotspot(&db, "hs-1", &snap, "r1", "r1:src/core/service.ts:FILE", 0.3);
+	insert_hotspot(&db, "hs-2", &snap, "r1", "r1:src/core/model.ts:FILE", 0.5);
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"hotspots <= 0.8","method":"hotspot_threshold","target":"src/core","threshold":0.8,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(0), "hotspot PASS => exit 0");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "pass");
+
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "PASS");
+	assert_eq!(obls[0]["evidence"]["max_hotspot_score"], 0.5);
+}
+
+// -- 36. hotspot_threshold: FAIL when max > threshold -----------------
+
+#[test]
+fn gate_hotspot_threshold_fails() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	insert_hotspot(&db, "hs-1", &snap, "r1", "r1:src/core/service.ts:FILE", 0.3);
+	insert_hotspot(&db, "hs-2", &snap, "r1", "r1:src/core/model.ts:FILE", 0.95);
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"hotspots <= 0.8","method":"hotspot_threshold","target":"src/core","threshold":0.8,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(1), "hotspot FAIL => exit 1");
+
+	let result = parse_json(&output);
+	assert_eq!(result["gate"]["outcome"], "fail");
+
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "FAIL");
+	assert_eq!(obls[0]["evidence"]["max_hotspot_score"], 0.95);
+	assert_eq!(obls[0]["evidence"]["threshold"], 0.8);
+}
+
+// -- 37. hotspot_threshold: whole-repo (no target) --------------------
+
+#[test]
+fn gate_hotspot_threshold_whole_repo() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	// Hotspots across different modules — all should be included.
+	insert_hotspot(&db, "hs-1", &snap, "r1", "r1:src/core/service.ts:FILE", 0.2);
+	insert_hotspot(&db, "hs-2", &snap, "r1", "r1:src/adapters/store.ts:FILE", 0.6);
+	insert_hotspot(&db, "hs-3", &snap, "r1", "r1:src/util/helper.ts:FILE", 0.4);
+
+	// No target — whole repo scope. max=0.6, threshold=0.8 => PASS
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"repo hotspots <= 0.8","method":"hotspot_threshold","threshold":0.8,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(0), "whole-repo PASS => exit 0");
+
+	let result = parse_json(&output);
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "PASS");
+	assert_eq!(obls[0]["evidence"]["max_hotspot_score"], 0.6);
+}
+
+// -- 38. hotspot_threshold: target prefix filter ----------------------
+
+#[test]
+fn gate_hotspot_threshold_target_filter() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	// src/core has low hotspot, src/adapters has high hotspot.
+	insert_hotspot(&db, "hs-1", &snap, "r1", "r1:src/core/service.ts:FILE", 0.2);
+	insert_hotspot(&db, "hs-2", &snap, "r1", "r1:src/adapters/store.ts:FILE", 0.95);
+
+	// Target src/core only — should see 0.2, not 0.95.
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"core hotspots <= 0.8","method":"hotspot_threshold","target":"src/core","threshold":0.8,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(0), "target filter PASS => exit 0");
+
+	let result = parse_json(&output);
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "PASS");
+	assert_eq!(obls[0]["evidence"]["max_hotspot_score"], 0.2);
+}
+
+// -- 39. hotspot_threshold: MISSING_EVIDENCE when no threshold --------
+
+#[test]
+fn gate_hotspot_threshold_missing_threshold() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"hotspot check","method":"hotspot_threshold","target":"src/core","operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(2));
+
+	let result = parse_json(&output);
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "MISSING_EVIDENCE");
+	assert_eq!(obls[0]["evidence"]["reason"], "threshold not specified");
+}
+
+// -- 40. hotspot_threshold: MISSING_EVIDENCE when no data -------------
+
+#[test]
+fn gate_hotspot_threshold_no_data() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+
+	// With target.
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"hotspot check","method":"hotspot_threshold","target":"src/core","threshold":0.8,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(2));
+
+	let result = parse_json(&output);
+	let obls = result["obligations"].as_array().unwrap();
+	assert_eq!(obls[0]["computed_verdict"], "MISSING_EVIDENCE");
+	assert_eq!(obls[0]["evidence"]["reason"], "no hotspot data for target path");
+}
+
+// -- 41. hotspot_threshold: malformed JSON aborts ---------------------
+
+#[test]
+fn gate_hotspot_threshold_malformed_json_aborts() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	let conn = rusqlite::Connection::open(&db).unwrap();
+	conn.execute(
+		"INSERT INTO inferences
+		 (inference_uid, snapshot_uid, repo_uid, target_stable_key, kind, value_json, confidence, basis_json, extractor, created_at)
+		 VALUES ('hs-bad', ?, 'r1', 'r1:src/core/service.ts:FILE', 'hotspot_score', 'not json', 1.0, '{}', 'test', '2024-01-01T00:00:00Z')",
+		rusqlite::params![snap],
+	)
+	.unwrap();
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"hotspot check","method":"hotspot_threshold","target":"src/core","threshold":0.8,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(2));
+	assert!(output.stdout.is_empty());
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	assert!(
+		stderr.contains("malformed hotspot inference"),
+		"stderr: {}",
+		stderr
+	);
+}
+
+// -- 42. hotspot_threshold: missing normalized_score aborts -----------
+
+#[test]
+fn gate_hotspot_threshold_missing_score_aborts() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	let conn = rusqlite::Connection::open(&db).unwrap();
+	conn.execute(
+		"INSERT INTO inferences
+		 (inference_uid, snapshot_uid, repo_uid, target_stable_key, kind, value_json, confidence, basis_json, extractor, created_at)
+		 VALUES ('hs-noscore', ?, 'r1', 'r1:src/core/service.ts:FILE', 'hotspot_score', '{\"other\":1}', 1.0, '{}', 'test', '2024-01-01T00:00:00Z')",
+		rusqlite::params![snap],
+	)
+	.unwrap();
+
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"hotspot check","method":"hotspot_threshold","target":"src/core","threshold":0.8,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(2));
+	assert!(output.stdout.is_empty());
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	assert!(
+		stderr.contains("missing numeric \"normalized_score\" field"),
+		"stderr: {}",
+		stderr
+	);
+}
+
+// -- 43. hotspot_threshold: exact evidence shape ----------------------
+
+#[test]
+fn gate_hotspot_threshold_evidence_shape() {
+	let (_r, _d, db) = build_gate_db();
+	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	insert_hotspot(&db, "hs-1", &snap, "r1", "r1:src/core/service.ts:FILE", 0.8);
+
+	// Boundary: max=0.8, threshold=0.8, <= => PASS
+	insert_requirement(
+		&db, "req-1", "r1", "REQ-001", 1,
+		r#"[{"obligation_id":"obl-1","obligation":"hotspot check","method":"hotspot_threshold","target":"src/core","threshold":0.8,"operator":"<="}]"#,
+	);
+
+	let output = run_cmd(&["gate", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(0));
+
+	let result = parse_json(&output);
+	let obl = &result["obligations"].as_array().unwrap()[0];
+
+	assert_eq!(obl["computed_verdict"], "PASS");
+	assert_eq!(obl["method"], "hotspot_threshold");
+
+	let ev = &obl["evidence"];
+	assert_eq!(ev["max_hotspot_score"], 0.8);
+	assert_eq!(ev["threshold"], 0.8);
+
+	// TS evidence does NOT include operator or count fields for hotspot.
+	assert!(ev.get("operator").is_none(), "operator should not be in evidence");
+	assert!(ev.get("functions_measured").is_none(), "functions_measured should not be in evidence");
 }
 
