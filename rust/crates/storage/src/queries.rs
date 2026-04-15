@@ -15,6 +15,7 @@
 //! Rust-24: `get_active_requirement_declarations`.
 //! Rust-25: `find_active_waivers`.
 //! Rust-27: `query_measurements_by_kind`.
+//! Rust-30: `query_inferences_by_kind`.
 
 use serde::{Deserialize, Serialize};
 
@@ -195,6 +196,17 @@ pub struct WaiverDeclaration {
 /// belongs to the evaluator (gate method or CLI command).
 #[derive(Debug, Clone)]
 pub struct MeasurementRow {
+	pub target_stable_key: String,
+	pub value_json: String,
+}
+
+/// An inference row read from the `inferences` table.
+///
+/// Mirrors TS `InferenceRow` from `core/ports/storage.ts`, but
+/// only carries the fields needed by gate evaluators.
+/// The `value_json` is opaque at this layer.
+#[derive(Debug, Clone)]
+pub struct InferenceRow {
 	pub target_stable_key: String,
 	pub value_json: String,
 }
@@ -1296,6 +1308,39 @@ impl StorageConnection {
 			.map_err(StorageError::from)
 	}
 
+	/// Read inferences by kind for a snapshot.
+	///
+	/// Mirrors TS `queryInferences` (sqlite-storage.ts).
+	/// Returns `target_stable_key` and raw `value_json` for each
+	/// matching inference row. No ordering guarantee — the TS
+	/// implementation orders by `normalized_score DESC` but that is
+	/// a query-side optimization, not a contract the caller depends
+	/// on (the gate evaluator scans for max regardless).
+	pub fn query_inferences_by_kind(
+		&self,
+		snapshot_uid: &str,
+		kind: &str,
+	) -> Result<Vec<InferenceRow>, StorageError> {
+		let mut stmt = self.connection().prepare(
+			"SELECT target_stable_key, value_json
+			 FROM inferences
+			 WHERE snapshot_uid = ? AND kind = ?",
+		)?;
+
+		let rows = stmt.query_map(
+			rusqlite::params![snapshot_uid, kind],
+			|row| {
+				Ok(InferenceRow {
+					target_stable_key: row.get(0)?,
+					value_json: row.get(1)?,
+				})
+			},
+		)?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(StorageError::from)
+	}
+
 	pub fn find_imports_between_paths(
 		&self,
 		snapshot_uid: &str,
@@ -1916,6 +1961,148 @@ mod tests {
 		assert!(
 			result.is_err(),
 			"query_measurements_by_kind must propagate SQL error, got: {:?}",
+			result
+		);
+	}
+
+	// ── Rust-30: query_inferences_by_kind ───────────────────────
+
+	/// Insert an inference row directly.
+	fn insert_inference(
+		storage: &StorageConnection,
+		uid: &str,
+		snapshot_uid: &str,
+		target_stable_key: &str,
+		kind: &str,
+		value_json: &str,
+	) {
+		storage
+			.connection()
+			.execute(
+				"INSERT INTO inferences
+				 (inference_uid, snapshot_uid, repo_uid, target_stable_key, kind, value_json, confidence, basis_json, extractor, created_at)
+				 VALUES (?, ?, 'r1', ?, ?, ?, 1.0, '{}', 'test', '2024-01-01T00:00:00Z')",
+				rusqlite::params![uid, snapshot_uid, target_stable_key, kind, value_json],
+			)
+			.unwrap();
+	}
+
+	#[test]
+	fn query_inferences_by_kind_empty_on_no_rows() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		let result = storage
+			.query_inferences_by_kind(&snap_uid, "hotspot_score")
+			.unwrap();
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn query_inferences_by_kind_returns_exact_rows() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		insert_inference(
+			&storage, "inf-1", &snap_uid,
+			"r1:src/core/service.ts:FILE", "hotspot_score",
+			r#"{"normalized_score":0.85}"#,
+		);
+		insert_inference(
+			&storage, "inf-2", &snap_uid,
+			"r1:src/core/model.ts:FILE", "hotspot_score",
+			r#"{"normalized_score":0.42}"#,
+		);
+
+		let result = storage
+			.query_inferences_by_kind(&snap_uid, "hotspot_score")
+			.unwrap();
+		assert_eq!(result.len(), 2);
+
+		let keys: Vec<&str> = result.iter().map(|r| r.target_stable_key.as_str()).collect();
+		assert!(keys.contains(&"r1:src/core/service.ts:FILE"));
+		assert!(keys.contains(&"r1:src/core/model.ts:FILE"));
+
+		let inf1 = result.iter().find(|r| r.target_stable_key.contains("service")).unwrap();
+		assert_eq!(inf1.value_json, r#"{"normalized_score":0.85}"#);
+	}
+
+	#[test]
+	fn query_inferences_by_kind_filters_by_kind() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		insert_inference(
+			&storage, "inf-1", &snap_uid,
+			"r1:src/core/service.ts:FILE", "hotspot_score",
+			r#"{"normalized_score":0.85}"#,
+		);
+		insert_inference(
+			&storage, "inf-2", &snap_uid,
+			"r1:src/core/service.ts:SYMBOL:serve", "framework_entrypoint",
+			r#"{"kind":"lambda"}"#,
+		);
+
+		let hotspots = storage
+			.query_inferences_by_kind(&snap_uid, "hotspot_score")
+			.unwrap();
+		assert_eq!(hotspots.len(), 1);
+		assert!(hotspots[0].target_stable_key.contains("FILE"));
+
+		let entrypoints = storage
+			.query_inferences_by_kind(&snap_uid, "framework_entrypoint")
+			.unwrap();
+		assert_eq!(entrypoints.len(), 1);
+		assert!(entrypoints[0].target_stable_key.contains("SYMBOL"));
+	}
+
+	#[test]
+	fn query_inferences_by_kind_filters_by_snapshot() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		storage
+			.connection()
+			.execute(
+				"INSERT INTO snapshots (snapshot_uid, repo_uid, status, kind, created_at)
+				 VALUES ('snap-other', 'r1', 'ready', 'full', '2024-01-02T00:00:00Z')",
+				[],
+			)
+			.unwrap();
+
+		insert_inference(
+			&storage, "inf-1", &snap_uid,
+			"r1:src/a.ts:FILE", "hotspot_score",
+			r#"{"normalized_score":0.70}"#,
+		);
+		insert_inference(
+			&storage, "inf-2", "snap-other",
+			"r1:src/b.ts:FILE", "hotspot_score",
+			r#"{"normalized_score":0.30}"#,
+		);
+
+		let result = storage
+			.query_inferences_by_kind(&snap_uid, "hotspot_score")
+			.unwrap();
+		assert_eq!(result.len(), 1);
+		assert!(result[0].target_stable_key.contains("a.ts"));
+
+		let other = storage
+			.query_inferences_by_kind("snap-other", "hotspot_score")
+			.unwrap();
+		assert_eq!(other.len(), 1);
+		assert!(other[0].target_stable_key.contains("b.ts"));
+	}
+
+	#[test]
+	fn query_inferences_by_kind_propagates_error_on_schema_corruption() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		storage
+			.connection()
+			.execute_batch("DROP TABLE inferences")
+			.unwrap();
+
+		let result = storage.query_inferences_by_kind(&snap_uid, "hotspot_score");
+		assert!(
+			result.is_err(),
+			"query_inferences_by_kind must propagate SQL error, got: {:?}",
 			result
 		);
 	}
