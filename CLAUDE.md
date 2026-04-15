@@ -140,6 +140,7 @@ rgr-rust imports    <db_path> <repo_uid> <file_path>   # File import chain (one 
 rgr-rust violations <db_path> <repo_uid>               # Boundary violation check (IMPORTS)
 rgr-rust gate       <db_path> <repo_uid> [--strict | --advisory]  # CI gate (4 methods, waivers, 3 modes)
 rgr-rust declare boundary <db_path> <repo_uid> <module> --forbids <target> [--reason <text>]
+rgr-rust declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
 rgr-rust dead       <db_path> <repo_uid> [kind]        # Unreferenced nodes
 rgr-rust cycles     <db_path> <repo_uid>               # Module-level IMPORTS cycles
 rgr-rust stats      <db_path> <repo_uid>               # Module structural metrics

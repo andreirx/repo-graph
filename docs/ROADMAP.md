@@ -122,8 +122,15 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   does not affect UID). JSON output with declaration_uid, kind,
   target, forbids, inserted. Proven end-to-end: declared boundary
   is visible to `violations` command.
-- Deferred: declare requirement, declare waiver, evidence,
-  obligations
+- `declare requirement`: Rust-34. Single-obligation requirement
+  per command. Required: --version, --obligation-id, --method,
+  --obligation. Optional: --target, --threshold, --operator.
+  Operator validated against `>=, >, <=, <, ==`. Threshold
+  validated as number. Identity: `(repo, req_id, version)` only —
+  obligation text/method/target do not affect UID. Idempotent.
+  Proven end-to-end: declared requirement visible to `gate`.
+- Deferred: declare waiver, multi-obligation requirements,
+  evidence, obligations
 - Deferred: measurement commands, table output, full edge-type set
 
 ### Multi-language graph engine

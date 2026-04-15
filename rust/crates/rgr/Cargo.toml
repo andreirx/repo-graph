@@ -27,6 +27,7 @@
 # Rust-29: complexity_threshold gate method (reads cyclomatic_complexity measurements).
 # Rust-31: hotspot_threshold gate method (reads hotspot_score inferences).
 # Rust-33: declare boundary CLI command (first governance write path).
+# Rust-34: declare requirement CLI command.
 #
 # No formatting-heavy UX.
 
