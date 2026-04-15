@@ -150,7 +150,14 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   `supersedes_uid` → deactivate old. Old missing or inactive
   returns `SupersedeError`. 8 new tests including active-query
   visibility and double-supersede rejection.
-- Deferred: declare supersede CLI (boundary, requirement, waiver),
+- `declare supersede boundary`: Rust-38. Reads old row via
+  `get_declaration_by_uid`, validates kind=boundary + active +
+  parseable MODULE target key. Inherits repo_uid and module_path
+  from old row. Builds replacement with new --forbids and optional
+  --reason. Calls `supersede_declaration` (Rust-37 substrate).
+  Proven end-to-end: old boundary produced violations, superseded
+  boundary to non-imported module eliminates violations.
+- Deferred: declare supersede requirement/waiver,
   multi-obligation requirements, evidence, obligations
 - Deferred: measurement commands, table output, full edge-type set
 
