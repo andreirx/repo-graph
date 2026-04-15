@@ -1,0 +1,40 @@
+//! Repo-level structural summary.
+//!
+//! Emits `MODULE_SUMMARY` unconditionally with snapshot-level
+//! totals: file count, symbol count, language list.
+//!
+//! Rust-42 deliberately uses raw snapshot counts here, NOT
+//! discovered module totals from the (still TS-only) module
+//! discovery layer. The aggregator pairs the signal with a
+//! `MODULE_DATA_UNAVAILABLE` limit so the agent can tell the
+//! difference between "no discovered modules" and "module
+//! discovery data is not queryable from Rust".
+//!
+//! The signal itself is NEVER suppressed by the limit — they
+//! are orthogonal. The signal says "here is what the snapshot
+//! contains", the limit says "there is a richer module catalog
+//! you cannot see from this path".
+
+use super::AggregatorOutput;
+use crate::dto::limit::{Limit, LimitCode};
+use crate::dto::signal::{ModuleSummaryEvidence, Signal};
+use crate::errors::AgentStorageError;
+use crate::storage_port::AgentStorageRead;
+
+pub fn aggregate<S: AgentStorageRead + ?Sized>(
+	storage: &S,
+	snapshot_uid: &str,
+) -> Result<AggregatorOutput, AgentStorageError> {
+	let summary = storage.compute_repo_summary(snapshot_uid)?;
+
+	let evidence = ModuleSummaryEvidence {
+		file_count: summary.file_count,
+		symbol_count: summary.symbol_count,
+		languages: summary.languages,
+	};
+
+	Ok(AggregatorOutput {
+		signals: vec![Signal::module_summary(evidence)],
+		limits: vec![Limit::from_code(LimitCode::ModuleDataUnavailable)],
+	})
+}

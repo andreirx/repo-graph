@@ -1,0 +1,63 @@
+# ── repo-graph-agent ─────────────────────────────────────────────
+#
+# Use-case crate for the agent orientation surface (`orient`,
+# `check`, `explain`). Pure Rust aggregation returning typed DTOs.
+# No CLI wiring. No binary target.
+#
+# Milestone scope (Rust-42):
+#   - crate skeleton
+#   - DTO contract (`rgr.agent.v1`)
+#   - `AgentStorageRead` port (policy-side read interface)
+#   - repo-level `orient(storage, repo_uid, None, budget)`
+#   - ranking, budget truncation, confidence, limits
+#   - typed signal evidence (no `serde_json::Value` escape hatch)
+#   - direct SQL fakes for use-case tests
+#
+# Explicit deferrals (see docs/architecture/agent-orientation-contract.md):
+#   - module/path focus (Rust-44)
+#   - symbol focus (Rust-45)
+#   - `check` and `explain` use cases
+#   - CLI wiring and binary rename (Rust-43)
+#   - GATE_* signal emission (blocked on gate.rs relocation — see
+#     docs/TECH-DEBT.md; Rust-42 emits GATE_UNAVAILABLE limit)
+#   - Daemon socket transport
+#
+# ── Architecture ──────────────────────────────────────────────────
+#
+# This crate is POLICY code. It follows the Clean Architecture
+# dependency rule: policy defines the interface, mechanism
+# implements it. Specifically:
+#
+#   - `repo-graph-agent` defines the `AgentStorageRead` trait.
+#     That trait lives in this crate, not in `repo-graph-storage`,
+#     because the policy layer owns the interface definition.
+#
+#   - `repo-graph-storage` (adapter) adds `repo-graph-agent` as a
+#     dependency and implements the trait on `StorageConnection`.
+#     The dependency direction is adapter → policy (outer → inner).
+#
+#   - `repo-graph-agent` does NOT depend on `repo-graph-storage`,
+#     `rusqlite`, or any tree-sitter/indexer crate. It has no
+#     knowledge of SQLite, SQL, or row mapping.
+#
+#   - `repo-graph-agent` does NOT depend on `repo-graph-trust`
+#     directly. Trust data reaches orient through the
+#     `AgentStorageRead::get_trust_summary` port method, which
+#     returns an agent-owned `AgentTrustSummary` DTO. The storage
+#     impl is responsible for assembling trust internally.
+#
+# This matches the exact pattern used by `repo-graph-trust` for
+# its `TrustStorageRead` port.
+
+[package]
+name         = "repo-graph-agent"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Use-case crate for the repo-graph agent orientation surface"
+publish      = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

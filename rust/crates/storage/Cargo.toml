@@ -139,6 +139,14 @@ repo-graph-trust = { path = "../trust" }
 # direction: adapter → policy (outer → inner).
 repo-graph-indexer = { path = "../indexer" }
 
+# Agent crate — added in Rust-42 so the storage crate (adapter)
+# can implement the AgentStorageRead trait defined by the agent
+# crate (policy). Same dependency direction: adapter → policy
+# (outer → inner). The storage adapter also uses its existing
+# trust dependency internally to assemble the trust summary
+# projection consumed by `get_trust_summary`.
+repo-graph-agent = { path = "../agent" }
+
 [dev-dependencies]
 # tempfile for tests that need a real file-backed SQLite database
 # in a unique temporary path. Added in R2-D when the connection
@@ -149,6 +157,12 @@ repo-graph-indexer = { path = "../indexer" }
 # Cleanup is automatic via Drop on the tempfile handle when the
 # test ends. No manual cleanup code needed.
 tempfile = "3"
+
+# The agent crate is already a normal dependency of this crate
+# for the AgentStorageRead impl. It is also listed here only so
+# that integration tests (under `tests/`) can import it by name;
+# this is a no-op for production builds but clarifies intent.
+repo-graph-agent = { path = "../agent" }
 
 # (R2-F may add walkdir for parity-fixture corpus discovery,
 # mirroring the detector crate's dev-dep pattern. Added per

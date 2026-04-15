@@ -362,13 +362,51 @@ No daemon-specific product semantics. The daemon is a delivery mechanism.
 ## Implementation Sequence
 
 1. `Rust-41`: This design doc (done).
-2. `Rust-42`: `orient` use-case module — pure Rust aggregation returning typed DTO. No CLI. Tested with deterministic fixtures.
+2. `Rust-42`: `orient` use-case module — pure Rust aggregation returning typed DTO. No CLI. Tested with deterministic fixtures. **(done — repo-level focus only; module/symbol focus deferred to Rust-44/45. GATE_* signals blocked on gate.rs relocation — see `docs/TECH-DEBT.md`.)**
 3. `Rust-43`: `rgr orient` CLI command — parse args, call use case, serialize, exit code.
-4. `Rust-44`: `check` use-case + CLI.
-5. `Rust-45`: `explain` use-case + CLI.
+4. `Rust-44`: `check` use-case + CLI. Module/path focus for `orient`.
+5. `Rust-45`: `explain` use-case + CLI. Symbol focus for `orient`.
 6. Binary rename: `rgr-rust` → `rgr`, `rgr` (TS) → `rgr-ts`.
 7. Evaluate: does the agent surface cover 80% of agent needs?
 8. Daemon: host the same use-case functions over a socket.
+
+### Rust-42 implementation notes (as shipped)
+
+- Crate: `repo-graph-agent` at `rust/crates/agent/`. Pure
+  policy layer — no dependency on `repo-graph-storage`,
+  `repo-graph-trust`, or any adapter crate.
+- Port: `AgentStorageRead` trait defined in
+  `rust/crates/agent/src/storage_port.rs`. Implemented on
+  `StorageConnection` in `rust/crates/storage/src/agent_impl.rs`.
+  Dependency direction is adapter → policy (same shape as
+  `TrustStorageRead` / `repo-graph-trust`).
+- Focus: repo-level only. Calling `orient(_, _, Some(_), _)`
+  returns `OrientError::FocusNotImplementedYet` — explicit
+  slice-limitation error, NOT a `focus.resolved = false`
+  domain failure. Contract reserves the latter shape for
+  ambiguous/no-match focus resolution.
+- Signal evidence: typed enum, manual `Serialize` impl, no
+  `serde_json::Value` escape hatch, no `#[serde(untagged)]`.
+- Per-code named constructors on `Signal` (no public raw
+  record constructor); category and severity are looked up
+  from `SignalCode::descriptor()` so aggregators cannot
+  override them.
+- Rust-42 limit codes emitted unconditionally:
+  `GATE_UNAVAILABLE`, `MODULE_DATA_UNAVAILABLE`,
+  `COMPLEXITY_UNAVAILABLE`.
+- `TRUST_STALE_SNAPSHOT` wording is deliberate: describes the
+  storage-internal stale parse-state, NOT a filesystem or git
+  comparison. See `docs/TECH-DEBT.md` ("Staleness wording
+  discipline").
+- `DEAD_CODE_EMIT_THRESHOLD = 1`, surfaced as a `const` at the
+  top of the `dead_code` aggregator for single-site tuning.
+- Tests: 36 unit tests inside `repo-graph-agent`, 44
+  integration tests in `rust/crates/agent/tests/` driven by an
+  in-memory `FakeAgentStorage` that implements the port, plus
+  7 adapter-side integration tests in
+  `rust/crates/storage/tests/agent_impl.rs` that exercise the
+  real SQLite path (including one end-to-end smoke test that
+  runs the full `orient` pipeline through a `StorageConnection`).
 
 ## Resolved Questions
 

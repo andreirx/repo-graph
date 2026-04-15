@@ -488,3 +488,133 @@ intentionally diverges.
   file` to detect file-level cycles. Rust hardcodes module-level.
 - **No staleness tracking for `index`/`refresh` commands.** Only
   read-side commands compute the `stale` field.
+
+## Rust agent use-case crate (`repo-graph-agent`) — Rust-42 scope
+
+Frozen at Rust-42: repo-level `orient` use case, typed DTOs,
+`AgentStorageRead` port, ranking, budget truncation, confidence
+derivation. No CLI (Rust-43), no `check`/`explain` (later slices),
+no module/symbol focus (Rust-44/45). See
+`docs/architecture/agent-orientation-contract.md` for the
+normative surface description.
+
+### Deferred items (explicit)
+
+- **Module, path, and symbol focus.** `orient(focus = Some(_))`
+  currently returns `OrientError::FocusNotImplementedYet`. This
+  is deliberately an error variant, not a silent degraded
+  response, so a caller that requests a focus area learns
+  immediately that their request is not honored. Module focus
+  ships in Rust-44, symbol focus in Rust-45.
+- **`check` and `explain` use cases.** Only `orient` is
+  implemented. The DTO envelope is shared; the aggregator
+  pipelines are not yet written.
+- **CLI wiring and binary rename.** Rust-42 ships no CLI
+  command. The `rgr-rust` binary does not expose `orient` yet.
+  Wiring and rename land together in Rust-43.
+- **GATE_* signal emission.** Blocked on the gate.rs
+  relocation item below. Rust-42 unconditionally emits the
+  `GATE_UNAVAILABLE` limit code with a summary pointing at
+  this entry.
+- **`COMPLEXITY_UNAVAILABLE`.** Cyclomatic complexity is not
+  produced by the Rust indexer; Rust-42 emits the limit code
+  unconditionally. Signal `HIGH_COMPLEXITY` is declared in the
+  enumeration but never constructed.
+- **`MODULE_DATA_UNAVAILABLE`.** Module discovery (Layer-1
+  catalog) is TS-only. The Rust `MODULE_SUMMARY` signal falls
+  back to raw snapshot totals (files, symbols, distinct file
+  languages). The limit is emitted unconditionally so the
+  agent can distinguish this fallback from a richer catalog.
+- **Next-action emission.** Rust-42's repo-level `next` list
+  is always empty. Structured `NextAction` records become
+  meaningful under module/symbol focus.
+- **Staleness wording discipline.** `TRUST_STALE_SNAPSHOT`
+  uses `get_stale_files` as its data source and describes the
+  storage-internal condition only (`"Snapshot has N stale
+  files recorded in storage."`). It does NOT claim that the
+  repository has changed since the last index — that would
+  require a filesystem or git comparison the use-case layer
+  intentionally does not perform. If a future slice adds a
+  `current_commit: Option<&str>` parameter, the wording and
+  the signal code should both be revisited so the distinction
+  between "parse-staleness" and "git-staleness" stays explicit.
+
+### Gate.rs relocation (blocking multiple slices)
+
+`gate.rs` currently lives inside the `rgr` binary crate at
+`rust/crates/rgr/src/gate.rs`. It contains obligation
+evaluation, waiver overlay, and gate reduction — pure policy
+code that the agent use-case layer needs in order to emit
+`GATE_PASS`, `GATE_FAIL`, and `GATE_INCOMPLETE` signals.
+
+Because a binary crate cannot be depended on, the `agent`
+crate has no way to call into `gate.rs` today. Rust-42
+therefore emits `GATE_UNAVAILABLE` as a limit code in every
+response and does not produce any gate signals.
+
+The relocation plan (not scheduled yet):
+
+1. Move `gate.rs` out of `rgr/src/` into a new library crate
+   `repo-graph-gate` (or a sub-module of `repo-graph-agent`,
+   TBD).
+2. Update `rgr/src/main.rs` to depend on the new crate for
+   the existing `gate` CLI command.
+3. Update `repo-graph-agent` to depend on the new crate and
+   add a `gate` aggregator that emits the three gate signals.
+4. Remove the `GATE_UNAVAILABLE` limit from the agent
+   pipeline (or downgrade it to only fire when the repo has
+   no requirement declarations at all).
+
+This relocation was deliberately kept out of Rust-42 to avoid
+mixing scope-expansion into the first agent slice.
+
+### Agent storage port narrowness
+
+The `AgentStorageRead` trait (defined in
+`rust/crates/agent/src/storage_port.rs`) is deliberately
+narrow: one method per orient data need, with agent-owned
+DTOs and a storage-agnostic `AgentStorageError` type. The
+trait will grow when `check`/`explain` ship. Each addition
+must stay narrow — no generic escape-hatch methods, no
+passing through of `StorageConnection`, no leaking of
+`rusqlite::Error` or `StorageError`.
+
+The `get_trust_summary` method is the one place in the trait
+that sits on top of a second policy crate (`repo-graph-trust`).
+The storage adapter calls `trust::assemble_trust_report`
+internally and projects the result into the agent-owned
+`AgentTrustSummary` DTO. If the trust surface gains new
+fields that orient wants to read, extend `AgentTrustSummary`
+— do NOT expose `TrustReport` through the port.
+
+### Signal evidence serialization
+
+`SignalEvidence` is a produce-only tagged enum with a hand-
+written `Serialize` impl that forwards to the inner variant
+struct with no discriminator tag. The `Signal` parent carries
+the `code` field which serves as the discriminator in the
+JSON output. Adding deserialization — for instance to consume
+signals on the daemon's client side — would require
+redesigning the discriminator, which is intentionally out of
+scope today. If/when that need arises, the options are:
+container-tagged serde (add a `kind` field inside
+`evidence`), internally-tagged serde, or a dedicated
+deserializer that routes by parent `code`.
+
+### Agent signal code coverage
+
+The enumeration in `SignalCode` is complete — every code the
+agent contract mentions has a variant — but only the codes
+the repo-level pipeline actually constructs have evidence
+variants and named constructors. The unused codes
+(`HighComplexity`, `HighFanOut`, `HighInstability`,
+`CallersSummary`, `CalleesSummary`, and the gate variants)
+are reserved for later slices. When they are wired up, each
+addition must:
+
+1. Add its evidence struct in `signal.rs`.
+2. Add a variant to `SignalEvidence`.
+3. Extend the manual `Serialize` match arm.
+4. Add a named constructor to `Signal`.
+5. Add a unit test asserting the code ↔ category ↔ severity
+   descriptor and the evidence variant match.
