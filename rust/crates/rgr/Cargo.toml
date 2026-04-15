@@ -29,6 +29,7 @@
 # Rust-33: declare boundary CLI command (first governance write path).
 # Rust-34: declare requirement CLI command.
 # Rust-35: declare waiver CLI command.
+# Rust-36: declare deactivate CLI command.
 #
 # No formatting-heavy UX.
 

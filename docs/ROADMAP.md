@@ -139,8 +139,13 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   waiver correctly ignored by gate.
   This completes the governance write surface: boundary,
   requirement, and waiver can all be authored from Rust CLI.
-- Deferred: multi-obligation requirements, declare deactivate,
-  declare supersede, evidence, obligations
+- `declare deactivate`: Rust-36. Soft-delete by UID. Idempotent:
+  nonexistent/already-deactivated UID returns `deactivated: false`,
+  exit 0. Proven end-to-end: deactivated boundary removes
+  violations, deactivated requirement removes gate obligations,
+  deactivated waiver restores gate failure.
+- Deferred: multi-obligation requirements, declare supersede,
+  evidence, obligations
 - Deferred: measurement commands, table output, full edge-type set
 
 ### Multi-language graph engine

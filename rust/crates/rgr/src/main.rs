@@ -17,6 +17,7 @@
 //!
 //!   rgr-rust declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]
 //!   rgr-rust declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
+//!   rgr-rust declare deactivate <db_path> <declaration_uid>
 //!
 //! Exit codes:
 //!   0 — success (gate: all pass)
@@ -1105,7 +1106,7 @@ fn run_stats(args: &[String]) -> ExitCode {
 fn run_declare(args: &[String]) -> ExitCode {
 	if args.is_empty() {
 		eprintln!("usage: rgr-rust declare <subcommand> ...");
-		eprintln!("subcommands: boundary, requirement, waiver");
+		eprintln!("subcommands: boundary, requirement, waiver, deactivate");
 		return ExitCode::from(1);
 	}
 
@@ -1113,9 +1114,10 @@ fn run_declare(args: &[String]) -> ExitCode {
 		"boundary" => run_declare_boundary(&args[1..]),
 		"requirement" => run_declare_requirement(&args[1..]),
 		"waiver" => run_declare_waiver(&args[1..]),
+		"deactivate" => run_declare_deactivate(&args[1..]),
 		other => {
 			eprintln!("unknown declare subcommand: {}", other);
-			eprintln!("subcommands: boundary, requirement, waiver");
+			eprintln!("subcommands: boundary, requirement, waiver, deactivate");
 			ExitCode::from(1)
 		}
 	}
@@ -1452,6 +1454,44 @@ fn run_declare_requirement(args: &[String]) -> ExitCode {
 				"req_id": req_id,
 				"version": version_num,
 				"inserted": result.inserted,
+			});
+			println!("{}", serde_json::to_string_pretty(&output).unwrap());
+			ExitCode::from(0)
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+fn run_declare_deactivate(args: &[String]) -> ExitCode {
+	if args.len() != 2 {
+		eprintln!("usage: rgr-rust declare deactivate <db_path> <declaration_uid>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let declaration_uid = &args[1];
+
+	if declaration_uid.trim().is_empty() {
+		eprintln!("error: declaration_uid must be non-empty");
+		return ExitCode::from(1);
+	}
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	match storage.deactivate_declaration(declaration_uid) {
+		Ok(rows) => {
+			let output = serde_json::json!({
+				"declaration_uid": declaration_uid,
+				"deactivated": rows > 0,
 			});
 			println!("{}", serde_json::to_string_pretty(&output).unwrap());
 			ExitCode::from(0)

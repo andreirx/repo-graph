@@ -142,6 +142,7 @@ rgr-rust gate       <db_path> <repo_uid> [--strict | --advisory]  # CI gate (4 m
 rgr-rust declare boundary <db_path> <repo_uid> <module> --forbids <target> [--reason <text>]
 rgr-rust declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
 rgr-rust declare waiver <db_path> <repo_uid> <req_id> --requirement-version <n> --obligation-id <id> --reason <text> [--expires-at <iso>] [--created-by <a>] [--rationale-category <c>] [--policy-basis <t>]
+rgr-rust declare deactivate <db_path> <declaration_uid>   # Soft-delete (idempotent)
 rgr-rust dead       <db_path> <repo_uid> [kind]        # Unreferenced nodes
 rgr-rust cycles     <db_path> <repo_uid>               # Module-level IMPORTS cycles
 rgr-rust stats      <db_path> <repo_uid>               # Module structural metrics
