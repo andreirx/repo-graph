@@ -129,8 +129,18 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   validated as number. Identity: `(repo, req_id, version)` only —
   obligation text/method/target do not affect UID. Idempotent.
   Proven end-to-end: declared requirement visible to `gate`.
-- Deferred: declare waiver, multi-obligation requirements,
-  evidence, obligations
+- `declare waiver`: Rust-35. Required: --requirement-version,
+  --obligation-id, --reason. Optional: --expires-at, --created-by,
+  --rationale-category, --policy-basis. Identity:
+  `(repo, req_id, requirement_version, obligation_id)` — reason
+  and optional fields do not affect UID. Idempotent. Proven
+  end-to-end: declare boundary + declare requirement + gate FAIL
+  + declare waiver + gate PASS (WAIVED with waiver_basis). Expired
+  waiver correctly ignored by gate.
+  This completes the governance write surface: boundary,
+  requirement, and waiver can all be authored from Rust CLI.
+- Deferred: multi-obligation requirements, declare deactivate,
+  declare supersede, evidence, obligations
 - Deferred: measurement commands, table output, full edge-type set
 
 ### Multi-language graph engine

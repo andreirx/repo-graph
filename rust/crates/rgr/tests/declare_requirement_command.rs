@@ -13,6 +13,7 @@
 //!  10. Inserted requirement visible to gate
 //!  11. Exact JSON shape
 //!  12. Missing DB => storage error, exit 2
+//!  13. Empty required flag value => usage error
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -232,7 +233,7 @@ fn declare_requirement_flag_as_value() {
 	]);
 	assert_eq!(output.status.code(), Some(1));
 	let stderr = String::from_utf8_lossy(&output.stderr);
-	assert!(stderr.contains("requires a value"), "stderr: {}", stderr);
+	assert!(stderr.contains("requires a"), "stderr: {}", stderr);
 }
 
 // -- 7. Insert success -----------------------------------------------
@@ -370,4 +371,24 @@ fn declare_requirement_missing_db() {
 	]);
 	assert_eq!(output.status.code(), Some(2), "missing DB => exit 2");
 	assert!(output.stdout.is_empty(), "no JSON on stdout for storage error");
+}
+
+// -- 13. Empty required flag value => usage error --------------------
+
+#[test]
+fn declare_requirement_empty_obligation_value() {
+	let (_r, _d, db) = build_db();
+	let db_str = db.to_str().unwrap();
+
+	let output = run_cmd(&[
+		"declare", "requirement", db_str, "r1", "REQ-001",
+		"--version", "1",
+		"--obligation-id", "obl-1",
+		"--method", "arch_violations",
+		"--obligation", "",
+	]);
+	assert_eq!(output.status.code(), Some(1), "empty --obligation => usage error");
+	assert!(output.stdout.is_empty());
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	assert!(stderr.contains("non-empty"), "stderr: {}", stderr);
 }

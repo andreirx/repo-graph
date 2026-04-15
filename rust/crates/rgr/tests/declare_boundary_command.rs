@@ -12,6 +12,7 @@
 //!   9. Exact JSON output shape
 //!  10. Flag token as --forbids value => usage error
 //!  11. Flag token as --reason value => usage error
+//!  12. Empty --forbids value => usage error
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -295,7 +296,7 @@ fn declare_boundary_flag_as_forbids_value() {
 	);
 	assert!(output.stdout.is_empty());
 	let stderr = String::from_utf8_lossy(&output.stderr);
-	assert!(stderr.contains("--forbids requires a value"), "stderr: {}", stderr);
+	assert!(stderr.contains("--forbids requires a"), "stderr: {}", stderr);
 }
 
 // -- 11. Flag token as --reason value => usage error -----------------
@@ -318,5 +319,22 @@ fn declare_boundary_flag_as_reason_value() {
 	);
 	assert!(output.stdout.is_empty());
 	let stderr = String::from_utf8_lossy(&output.stderr);
-	assert!(stderr.contains("--reason requires a value"), "stderr: {}", stderr);
+	assert!(stderr.contains("--reason requires a"), "stderr: {}", stderr);
+}
+
+// -- 12. Empty --forbids value => usage error ------------------------
+
+#[test]
+fn declare_boundary_empty_forbids_value() {
+	let (_r, _d, db) = build_declare_db();
+	let db_str = db.to_str().unwrap();
+
+	let output = run_cmd(&[
+		"declare", "boundary", db_str, "r1", "src/core",
+		"--forbids", "", "--reason", "test",
+	]);
+	assert_eq!(output.status.code(), Some(1), "empty --forbids => usage error");
+	assert!(output.stdout.is_empty());
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	assert!(stderr.contains("non-empty"), "stderr: {}", stderr);
 }
