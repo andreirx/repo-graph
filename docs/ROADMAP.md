@@ -163,8 +163,15 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   from old row. Builds replacement with new obligation. Proven
   end-to-end: old requirement targeting src/core (PASS) superseded
   to target src/adapters (FAIL) — gate sees replacement only.
-- Deferred: declare supersede waiver, multi-obligation
-  requirements, evidence, obligations
+- `declare supersede waiver`: Rust-40. Reads old row, validates
+  kind=waiver + active + parseable value_json with req_id,
+  requirement_version, obligation_id. Inherits identity from old
+  row. Builds replacement with new reason and optional fields.
+  Proven end-to-end: reason update visible in gate waiver_basis,
+  supersede to expired expiry restores gate failure.
+  This completes the declaration lifecycle surface: create,
+  deactivate, and supersede for all three governance kinds.
+- Deferred: multi-obligation requirements, evidence, obligations
 - Deferred: measurement commands, table output, full edge-type set
 
 ### Multi-language graph engine

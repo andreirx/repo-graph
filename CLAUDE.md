@@ -145,6 +145,7 @@ rgr-rust declare waiver <db_path> <repo_uid> <req_id> --requirement-version <n> 
 rgr-rust declare deactivate <db_path> <declaration_uid>   # Soft-delete (idempotent)
 rgr-rust declare supersede boundary <db_path> <old_uid> --forbids <target> [--reason <text>]
 rgr-rust declare supersede requirement <db_path> <old_uid> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
+rgr-rust declare supersede waiver <db_path> <old_uid> --reason <text> [--expires-at <iso>] [--created-by <a>] [--rationale-category <c>] [--policy-basis <t>]
 rgr-rust dead       <db_path> <repo_uid> [kind]        # Unreferenced nodes
 rgr-rust cycles     <db_path> <repo_uid>               # Module-level IMPORTS cycles
 rgr-rust stats      <db_path> <repo_uid>               # Module structural metrics
