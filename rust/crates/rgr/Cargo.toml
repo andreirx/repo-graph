@@ -31,6 +31,7 @@
 # Rust-35: declare waiver CLI command.
 # Rust-36: declare deactivate CLI command.
 # Rust-38: declare supersede boundary CLI command.
+# Rust-39: declare supersede requirement CLI command.
 #
 # No formatting-heavy UX.
 

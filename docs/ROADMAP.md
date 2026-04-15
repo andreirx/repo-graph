@@ -157,8 +157,14 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   --reason. Calls `supersede_declaration` (Rust-37 substrate).
   Proven end-to-end: old boundary produced violations, superseded
   boundary to non-imported module eliminates violations.
-- Deferred: declare supersede requirement/waiver,
-  multi-obligation requirements, evidence, obligations
+- `declare supersede requirement`: Rust-39. Reads old row,
+  validates kind=requirement + active + parseable value_json
+  with req_id and version. Inherits repo_uid, req_id, version
+  from old row. Builds replacement with new obligation. Proven
+  end-to-end: old requirement targeting src/core (PASS) superseded
+  to target src/adapters (FAIL) — gate sees replacement only.
+- Deferred: declare supersede waiver, multi-obligation
+  requirements, evidence, obligations
 - Deferred: measurement commands, table output, full edge-type set
 
 ### Multi-language graph engine
