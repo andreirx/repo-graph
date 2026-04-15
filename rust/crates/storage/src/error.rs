@@ -79,6 +79,17 @@ pub enum StorageError {
 		reason: String,
 	},
 
+	/// The target declaration for a supersede operation does not
+	/// exist or is already inactive. Supersede is an explicit
+	/// lifecycle transition that requires an active source.
+	///
+	/// Added in Rust-37 for `supersede_declaration`.
+	#[error("cannot supersede declaration {declaration_uid}: {reason}")]
+	SupersedeError {
+		declaration_uid: String,
+		reason: String,
+	},
+
 	/// A storage method that has been declared in the
 	/// `TrustStorageRead` trait but not yet implemented in the
 	/// adapter. Returns through the typed error channel instead

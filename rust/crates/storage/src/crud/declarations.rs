@@ -62,6 +62,31 @@ pub struct DeclarationInsertResult {
 	pub inserted: bool,
 }
 
+/// A declaration row read back from the database.
+///
+/// Used by `get_declaration_by_uid` to return the full stored
+/// state of a declaration (both active and inactive).
+#[derive(Debug, Clone)]
+pub struct DeclarationRow {
+	pub declaration_uid: String,
+	pub repo_uid: String,
+	pub target_stable_key: String,
+	pub kind: String,
+	pub value_json: String,
+	pub created_at: String,
+	pub created_by: Option<String>,
+	pub supersedes_uid: Option<String>,
+	pub is_active: bool,
+	pub authored_basis_json: Option<String>,
+}
+
+/// Result of a supersede operation.
+#[derive(Debug, Clone)]
+pub struct SupersedeResult {
+	pub old_declaration_uid: String,
+	pub new_declaration_uid: String,
+}
+
 impl StorageConnection {
 	/// Insert a declaration with a deterministic UID.
 	///
@@ -99,6 +124,129 @@ impl StorageConnection {
 		Ok(DeclarationInsertResult {
 			declaration_uid: uid,
 			inserted: rows_changed > 0,
+		})
+	}
+
+	/// Read a declaration by UID.
+	///
+	/// Returns `None` if the UID does not exist. Returns both
+	/// active and inactive declarations (the caller decides
+	/// whether to filter by `is_active`).
+	pub fn get_declaration_by_uid(
+		&self,
+		declaration_uid: &str,
+	) -> Result<Option<DeclarationRow>, StorageError> {
+		let result = self.connection().query_row(
+			"SELECT declaration_uid, repo_uid, target_stable_key, kind, value_json,
+			        created_at, created_by, supersedes_uid, is_active, authored_basis_json
+			 FROM declarations WHERE declaration_uid = ?",
+			rusqlite::params![declaration_uid],
+			|row| {
+				Ok(DeclarationRow {
+					declaration_uid: row.get(0)?,
+					repo_uid: row.get(1)?,
+					target_stable_key: row.get(2)?,
+					kind: row.get(3)?,
+					value_json: row.get(4)?,
+					created_at: row.get(5)?,
+					created_by: row.get(6)?,
+					supersedes_uid: row.get(7)?,
+					is_active: row.get(8)?,
+					authored_basis_json: row.get(9)?,
+				})
+			},
+		);
+		match result {
+			Ok(row) => Ok(Some(row)),
+			Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+			Err(e) => Err(StorageError::Sqlite(e)),
+		}
+	}
+
+	/// Supersede an active declaration with a new replacement.
+	///
+	/// Atomic transaction:
+	///   1. Verify old declaration exists and is active
+	///   2. Insert new declaration with fresh UUID v4 and
+	///      `supersedes_uid = old_uid`
+	///   3. Deactivate old declaration
+	///
+	/// The fresh UID is generated inside storage — callers do not
+	/// provide or control it. The `supersedes_uid` field on the
+	/// input is ignored and overridden with `old_uid`.
+	///
+	/// Errors:
+	///   - Old UID does not exist → `SupersedeError`
+	///   - Old UID exists but is inactive → `SupersedeError`
+	///   - SQL failure → `Sqlite`
+	pub fn supersede_declaration(
+		&mut self,
+		old_uid: &str,
+		new_decl: &DeclarationInsert,
+	) -> Result<SupersedeResult, StorageError> {
+		let tx = self.connection_mut().transaction()?;
+
+		// Step 1: verify old declaration exists and is active.
+		let old_active: Option<bool> = {
+			let result = tx.query_row(
+				"SELECT is_active FROM declarations WHERE declaration_uid = ?",
+				rusqlite::params![old_uid],
+				|row| row.get::<_, i32>(0).map(|v| v != 0),
+			);
+			match result {
+				Ok(active) => Some(active),
+				Err(rusqlite::Error::QueryReturnedNoRows) => None,
+				Err(e) => return Err(StorageError::Sqlite(e)),
+			}
+		};
+
+		match old_active {
+			None => {
+				return Err(StorageError::SupersedeError {
+					declaration_uid: old_uid.to_string(),
+					reason: "declaration does not exist".to_string(),
+				});
+			}
+			Some(false) => {
+				return Err(StorageError::SupersedeError {
+					declaration_uid: old_uid.to_string(),
+					reason: "declaration is already inactive".to_string(),
+				});
+			}
+			Some(true) => {} // proceed
+		}
+
+		// Step 2: insert new declaration with fresh UID.
+		let new_uid = uuid::Uuid::new_v4().to_string();
+		tx.execute(
+			"INSERT INTO declarations
+			 (declaration_uid, repo_uid, snapshot_uid, target_stable_key, kind,
+			  value_json, created_at, created_by, supersedes_uid, is_active, authored_basis_json)
+			 VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, 1, ?)",
+			rusqlite::params![
+				new_uid,
+				new_decl.repo_uid,
+				new_decl.target_stable_key,
+				new_decl.kind,
+				new_decl.value_json,
+				new_decl.created_at,
+				new_decl.created_by,
+				old_uid,  // forced supersedes_uid
+				new_decl.authored_basis_json,
+			],
+		)?;
+
+		// Step 3: deactivate old declaration.
+		tx.execute(
+			"UPDATE declarations SET is_active = 0 WHERE declaration_uid = ?",
+			rusqlite::params![old_uid],
+		)?;
+
+		tx.commit()?;
+
+		Ok(SupersedeResult {
+			old_declaration_uid: old_uid.to_string(),
+			new_declaration_uid: new_uid,
 		})
 	}
 
@@ -494,5 +642,210 @@ mod tests {
 		let decl = make_boundary_decl("r1", "src/core", "src/adapters");
 		let result = storage.insert_declaration(&decl);
 		assert!(result.is_err());
+	}
+
+	// ── Rust-37: get_declaration_by_uid ─────────────────────────
+
+	#[test]
+	fn get_declaration_by_uid_returns_none_for_missing() {
+		let storage = fresh_storage();
+		let result = storage.get_declaration_by_uid("nonexistent").unwrap();
+		assert!(result.is_none());
+	}
+
+	#[test]
+	fn get_declaration_by_uid_returns_full_row() {
+		let storage = fresh_storage();
+		setup_repo(&storage);
+
+		let decl = make_boundary_decl("r1", "src/core", "src/adapters");
+		let insert_result = storage.insert_declaration(&decl).unwrap();
+
+		let row = storage
+			.get_declaration_by_uid(&insert_result.declaration_uid)
+			.unwrap()
+			.expect("should find declaration");
+
+		assert_eq!(row.declaration_uid, insert_result.declaration_uid);
+		assert_eq!(row.repo_uid, "r1");
+		assert_eq!(row.kind, "boundary");
+		assert!(row.is_active);
+		assert!(row.supersedes_uid.is_none());
+	}
+
+	#[test]
+	fn get_declaration_by_uid_returns_inactive_rows() {
+		let storage = fresh_storage();
+		setup_repo(&storage);
+
+		let decl = make_boundary_decl("r1", "src/core", "src/adapters");
+		let insert_result = storage.insert_declaration(&decl).unwrap();
+		storage.deactivate_declaration(&insert_result.declaration_uid).unwrap();
+
+		let row = storage
+			.get_declaration_by_uid(&insert_result.declaration_uid)
+			.unwrap()
+			.expect("should find inactive declaration");
+
+		assert!(!row.is_active);
+	}
+
+	// ── Rust-37: supersede_declaration ──────────────────────────
+
+	#[test]
+	fn supersede_declaration_success() {
+		let mut storage = fresh_storage();
+		setup_repo(&storage);
+
+		let old_decl = make_boundary_decl("r1", "src/core", "src/adapters");
+		let old_result = storage.insert_declaration(&old_decl).unwrap();
+		assert!(old_result.inserted);
+
+		// Supersede with updated reason.
+		let new_decl = DeclarationInsert {
+			identity_key: boundary_identity_key("r1", "src/core", "src/adapters"),
+			repo_uid: "r1".to_string(),
+			target_stable_key: "r1:src/core:MODULE".to_string(),
+			kind: "boundary".to_string(),
+			value_json: r#"{"forbids":"src/adapters","reason":"clean architecture"}"#.to_string(),
+			created_at: "2024-06-01T00:00:00Z".to_string(),
+			created_by: Some("cli".to_string()),
+			supersedes_uid: None, // will be overridden
+			authored_basis_json: None,
+		};
+
+		let result = storage
+			.supersede_declaration(&old_result.declaration_uid, &new_decl)
+			.unwrap();
+
+		assert_eq!(result.old_declaration_uid, old_result.declaration_uid);
+		assert_ne!(result.new_declaration_uid, old_result.declaration_uid, "new UID must differ");
+
+		// Old is inactive.
+		let old_row = storage
+			.get_declaration_by_uid(&old_result.declaration_uid)
+			.unwrap()
+			.unwrap();
+		assert!(!old_row.is_active);
+
+		// New is active with supersedes_uid set.
+		let new_row = storage
+			.get_declaration_by_uid(&result.new_declaration_uid)
+			.unwrap()
+			.unwrap();
+		assert!(new_row.is_active);
+		assert_eq!(
+			new_row.supersedes_uid.as_deref(),
+			Some(old_result.declaration_uid.as_str()),
+		);
+		assert_eq!(new_row.value_json, r#"{"forbids":"src/adapters","reason":"clean architecture"}"#);
+	}
+
+	#[test]
+	fn supersede_declaration_old_missing_is_error() {
+		let mut storage = fresh_storage();
+		setup_repo(&storage);
+
+		let new_decl = make_boundary_decl("r1", "src/core", "src/adapters");
+		let result = storage.supersede_declaration("nonexistent-uid", &new_decl);
+
+		assert!(result.is_err());
+		let err = result.unwrap_err().to_string();
+		assert!(err.contains("does not exist"), "err: {}", err);
+	}
+
+	#[test]
+	fn supersede_declaration_old_inactive_is_error() {
+		let mut storage = fresh_storage();
+		setup_repo(&storage);
+
+		let old_decl = make_boundary_decl("r1", "src/core", "src/adapters");
+		let old_result = storage.insert_declaration(&old_decl).unwrap();
+		storage.deactivate_declaration(&old_result.declaration_uid).unwrap();
+
+		let new_decl = make_boundary_decl("r1", "src/core", "src/util");
+		let result = storage.supersede_declaration(&old_result.declaration_uid, &new_decl);
+
+		assert!(result.is_err());
+		let err = result.unwrap_err().to_string();
+		assert!(err.contains("already inactive"), "err: {}", err);
+	}
+
+	#[test]
+	fn supersede_declaration_active_queries_see_new_not_old() {
+		let mut storage = fresh_storage();
+		setup_repo(&storage);
+
+		let old_decl = make_boundary_decl("r1", "src/core", "src/adapters");
+		let old_result = storage.insert_declaration(&old_decl).unwrap();
+
+		// Before supersede: active query sees old.
+		let before = storage.get_active_boundary_declarations("r1").unwrap();
+		assert_eq!(before.len(), 1);
+		assert!(before[0].reason.is_none());
+
+		// Supersede with reason.
+		let new_decl = DeclarationInsert {
+			identity_key: boundary_identity_key("r1", "src/core", "src/adapters"),
+			repo_uid: "r1".to_string(),
+			target_stable_key: "r1:src/core:MODULE".to_string(),
+			kind: "boundary".to_string(),
+			value_json: r#"{"forbids":"src/adapters","reason":"updated policy"}"#.to_string(),
+			created_at: "2024-06-01T00:00:00Z".to_string(),
+			created_by: Some("cli".to_string()),
+			supersedes_uid: None,
+			authored_basis_json: None,
+		};
+		storage
+			.supersede_declaration(&old_result.declaration_uid, &new_decl)
+			.unwrap();
+
+		// After: active query sees only new row.
+		let after = storage.get_active_boundary_declarations("r1").unwrap();
+		assert_eq!(after.len(), 1);
+		assert_eq!(after[0].reason.as_deref(), Some("updated policy"));
+	}
+
+	#[test]
+	fn supersede_declaration_is_atomic_on_insert_failure() {
+		let mut storage = fresh_storage();
+		setup_repo(&storage);
+
+		let old_decl = make_boundary_decl("r1", "src/core", "src/adapters");
+		let old_result = storage.insert_declaration(&old_decl).unwrap();
+
+		// Build a replacement that references a nonexistent repo_uid.
+		// The INSERT will pass the active-state check (step 1) because
+		// the old row exists and is active, but fail at step 2 due to
+		// the FK constraint `repo_uid REFERENCES repos(repo_uid)`.
+		let bad_decl = DeclarationInsert {
+			identity_key: boundary_identity_key("nonexistent-repo", "src/core", "src/adapters"),
+			repo_uid: "nonexistent-repo".to_string(),
+			target_stable_key: "nonexistent-repo:src/core:MODULE".to_string(),
+			kind: "boundary".to_string(),
+			value_json: r#"{"forbids":"src/adapters"}"#.to_string(),
+			created_at: "2024-06-01T00:00:00Z".to_string(),
+			created_by: Some("cli".to_string()),
+			supersedes_uid: None,
+			authored_basis_json: None,
+		};
+
+		let result = storage.supersede_declaration(&old_result.declaration_uid, &bad_decl);
+		assert!(result.is_err(), "insert with bad repo_uid must fail");
+
+		// Old declaration must still be active — transaction rolled back.
+		let old_row = storage
+			.get_declaration_by_uid(&old_result.declaration_uid)
+			.unwrap()
+			.expect("old row must still exist");
+		assert!(
+			old_row.is_active,
+			"old declaration must remain active after failed supersede",
+		);
+
+		// No replacement row should exist.
+		let active = storage.get_active_boundary_declarations("r1").unwrap();
+		assert_eq!(active.len(), 1, "exactly one active boundary (the original)");
+		assert_eq!(active[0].boundary_module, "src/core");
 	}
 }

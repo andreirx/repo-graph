@@ -144,8 +144,14 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   exit 0. Proven end-to-end: deactivated boundary removes
   violations, deactivated requirement removes gate obligations,
   deactivated waiver restores gate failure.
-- Deferred: multi-obligation requirements, declare supersede,
-  evidence, obligations
+- `declare supersede substrate`: Rust-37. Storage-level
+  `get_declaration_by_uid` and `supersede_declaration`. Atomic
+  transaction: verify active → insert new (fresh UUID v4) with
+  `supersedes_uid` → deactivate old. Old missing or inactive
+  returns `SupersedeError`. 8 new tests including active-query
+  visibility and double-supersede rejection.
+- Deferred: declare supersede CLI (boundary, requirement, waiver),
+  multi-obligation requirements, evidence, obligations
 - Deferred: measurement commands, table output, full edge-type set
 
 ### Multi-language graph engine
