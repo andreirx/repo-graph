@@ -110,7 +110,13 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   Default operator `<=`. Evidence: max_hotspot_score, threshold.
   Strict parsing on malformed inference JSON. This completes the
   TS gate method set: all four methods are now ported to Rust.
-- Deferred: evidence, obligations, declare commands
+- `declare`: Rust-32 adds declaration write substrate in storage
+  crate. `insert_declaration` with deterministic UUID v5 UIDs
+  (idempotent, INSERT OR IGNORE). `deactivate_declaration` for
+  soft-delete. Supports boundary, requirement, waiver kinds.
+  Deliberate divergence from TS random UIDs (see TECH-DEBT.md).
+- Deferred: declare CLI commands (boundary, requirement, waiver),
+  evidence, obligations
 - Deferred: measurement commands, table output, full edge-type set
 
 ### Multi-language graph engine

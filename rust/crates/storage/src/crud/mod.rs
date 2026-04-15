@@ -86,6 +86,7 @@
 //!   does not. Per the user's R2-E lock, this is treated as
 //!   lookup semantics, not ordered-report semantics.
 
+pub mod declarations;
 pub mod edges;
 pub mod file_versions;
 pub mod files;

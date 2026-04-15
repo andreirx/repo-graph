@@ -463,6 +463,22 @@ intentionally diverges.
   The TS prototype should be aligned to match if/when TS is still
   actively maintained.
 
+- **Rust declaration UIDs are deterministic, TS uses random UUIDs (Rust-32).**
+  TS `declare` commands generate `uuidv4()` — a random UUID per
+  insert. Repeated declare runs create duplicate rows with different
+  UIDs. Rust uses UUID v5 (SHA-1 namespace hash) derived from the
+  semantic identity tuple `(kind, identity_key)` where identity_key
+  is constructed from typed policy fields:
+    - boundary: `{repo}:{module_path}:{forbids}`
+    - requirement: `{repo}:{req_id}:{version}`
+    - waiver: `{repo}:{req_id}:{requirement_version}:{obligation_id}`
+  This makes `insert_declaration` idempotent at the policy level:
+  the same logical policy object always produces the same UID, and
+  INSERT OR IGNORE prevents duplicates. Cosmetic changes to
+  `value_json` (reason text, obligation wording) do NOT alter the
+  UID — they are not policy identity. This is a deliberate
+  correction to the TS prototype's append-only-by-accident pattern.
+
 ### Known contract gaps
 
 - **`index` and `refresh` have no JSON output.** They print

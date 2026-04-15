@@ -115,7 +115,7 @@ thiserror = "2"
 # Only the `v4` feature is enabled (random-generated UUIDs). No
 # v1/v3/v5 namespace generators. This matches the TS surface
 # exactly (`randomUUID()` is v4 only).
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v5"] }
 
 # Classification crate — needed for SourceLocation type used in
 # ExtractedNode.location when implementing NodeStorePort (R5-F).
