@@ -14,6 +14,7 @@
 //!   rgr-rust stats   <db_path> <repo_uid>
 //!
 //!   rgr-rust gate    <db_path> <repo_uid> [--strict | --advisory]
+//!   rgr-rust orient  <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]
 //!
 //!   rgr-rust declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]
 //!   rgr-rust declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
@@ -22,7 +23,8 @@
 //! Exit codes:
 //!   0 — success (gate: all pass)
 //!   1 — usage error (gate: any fail)
-//!   2 — runtime error (gate: incomplete)
+//!   2 — runtime error (gate: incomplete; orient: focus-not-implemented,
+//!       storage failure, missing repo, missing snapshot)
 
 // Gate policy was relocated out of this binary crate into
 // `repo-graph-gate` during Rust-43A. The `run_gate` function
@@ -97,6 +99,7 @@ fn main() -> ExitCode {
 		"imports" => run_imports(&args[2..]),
 		"violations" => run_violations(&args[2..]),
 		"gate" => run_gate(&args[2..]),
+		"orient" => run_orient(&args[2..]),
 		"dead" => run_dead(&args[2..]),
 		"cycles" => run_cycles(&args[2..]),
 		"stats" => run_stats(&args[2..]),
@@ -120,6 +123,7 @@ fn print_usage() {
 	eprintln!("  rgr-rust imports <db_path> <repo_uid> <file_path>");
 	eprintln!("  rgr-rust violations <db_path> <repo_uid>");
 	eprintln!("  rgr-rust gate       <db_path> <repo_uid>");
+	eprintln!("  rgr-rust orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]");
 	eprintln!("  rgr-rust dead    <db_path> <repo_uid> [kind]");
 	eprintln!("  rgr-rust cycles  <db_path> <repo_uid>");
 	eprintln!("  rgr-rust stats   <db_path> <repo_uid>");
@@ -932,6 +936,188 @@ fn run_gate(args: &[String]) -> ExitCode {
 			ExitCode::from(2)
 		}
 	}
+}
+
+// ── orient command (Rust-43B) ────────────────────────────────────
+//
+// `rgr-rust orient <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]`
+//
+// First exposure of the agent orientation surface. Calls
+// `repo_graph_agent::orient` with a caller-supplied `now` drawn
+// from `utc_now_iso8601()`. Output is `rgr.agent.v1` JSON on
+// stdout, pretty-printed.
+//
+// Positional shape uses `<db_path> <repo_uid>` to match every
+// other Rust structural/governance command. The agent contract
+// target (`rgr orient <repo_name>`) assumes a repo registry that
+// the Rust CLI does not have yet; repo-name invocation is
+// deferred to the rename/registry slice (Rust-43C+).
+//
+// Exit codes:
+//   0 — success, JSON on stdout
+//   1 — usage error (missing args, unknown flag, unknown or
+//       missing budget value, repeated --budget, repeated
+//       --focus)
+//   2 — runtime error: missing DB, missing repo, missing
+//       snapshot, storage failure, focus-not-implemented (the
+//       focus value was syntactically valid but the runtime
+//       surface has not yet been implemented — Rust-44 for
+//       module/path focus, Rust-45 for symbol focus)
+//
+// No `--json` flag: output is always JSON. See the agent
+// orientation contract for the schema invariants.
+
+fn run_orient(args: &[String]) -> ExitCode {
+	// ── Parse args ───────────────────────────────────────────
+	let mut positional: Vec<&String> = Vec::new();
+	let mut budget_raw: Option<String> = None;
+	let mut focus_raw: Option<String> = None;
+
+	let mut i = 0;
+	while i < args.len() {
+		let arg = &args[i];
+		match arg.as_str() {
+			"--budget" => {
+				if budget_raw.is_some() {
+					eprintln!("error: --budget specified more than once");
+					print_orient_usage();
+					return ExitCode::from(1);
+				}
+				i += 1;
+				let value = match args.get(i) {
+					Some(v) => v,
+					None => {
+						eprintln!("error: --budget requires a value");
+						print_orient_usage();
+						return ExitCode::from(1);
+					}
+				};
+				// A value that begins with "--" is almost
+				// certainly the next flag, not the budget
+				// value. Rejecting it here beats emitting a
+				// "unknown budget value" diagnostic that
+				// confusingly echoes the flag name.
+				if value.starts_with("--") {
+					eprintln!("error: --budget requires a value, got flag: {}", value);
+					print_orient_usage();
+					return ExitCode::from(1);
+				}
+				budget_raw = Some(value.clone());
+			}
+			"--focus" => {
+				if focus_raw.is_some() {
+					eprintln!("error: --focus specified more than once");
+					print_orient_usage();
+					return ExitCode::from(1);
+				}
+				i += 1;
+				let value = match args.get(i) {
+					Some(v) => v,
+					None => {
+						eprintln!("error: --focus requires a value");
+						print_orient_usage();
+						return ExitCode::from(1);
+					}
+				};
+				// Same flag-as-value guard as --budget. Without
+				// this check `rgr-rust orient <db> <repo>
+				// --focus --bogus` would silently accept
+				// "--bogus" as a focus string and then exit
+				// through the FocusNotImplementedYet runtime
+				// path — a usage error masquerading as a
+				// runtime error.
+				if value.starts_with("--") {
+					eprintln!("error: --focus requires a value, got flag: {}", value);
+					print_orient_usage();
+					return ExitCode::from(1);
+				}
+				focus_raw = Some(value.clone());
+			}
+			flag if flag.starts_with("--") => {
+				eprintln!("error: unknown flag: {}", flag);
+				print_orient_usage();
+				return ExitCode::from(1);
+			}
+			_ => positional.push(arg),
+		}
+		i += 1;
+	}
+
+	if positional.len() != 2 {
+		print_orient_usage();
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(positional[0].as_str());
+	let repo_uid = positional[1].as_str();
+
+	// ── Validate budget ──────────────────────────────────────
+	//
+	// Strict: only "small", "medium", "large". No aliases, no
+	// case-insensitive matching. Default: small.
+	let budget = match budget_raw.as_deref() {
+		None => repo_graph_agent::Budget::Small,
+		Some("small") => repo_graph_agent::Budget::Small,
+		Some("medium") => repo_graph_agent::Budget::Medium,
+		Some("large") => repo_graph_agent::Budget::Large,
+		Some(other) => {
+			eprintln!(
+				"error: invalid --budget value: {} (expected small|medium|large)",
+				other
+			);
+			print_orient_usage();
+			return ExitCode::from(1);
+		}
+	};
+
+	// ── Open storage ─────────────────────────────────────────
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	// ── Call the use case ────────────────────────────────────
+	//
+	// `now` is the wall-clock timestamp used by the gate
+	// aggregator for waiver expiry comparison. The agent crate
+	// is clock-free by contract; this CLI wiring reads the
+	// system clock at the outermost boundary and passes it in.
+	// Reuses the existing `utc_now_iso8601` helper — do NOT
+	// invent another clock helper.
+	let now = utc_now_iso8601();
+	let focus = focus_raw.as_deref();
+
+	let result = match repo_graph_agent::orient(
+		&storage, repo_uid, focus, budget, &now,
+	) {
+		Ok(r) => r,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// ── Serialize and emit ───────────────────────────────────
+	match serde_json::to_string_pretty(&result) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::from(0)
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+fn print_orient_usage() {
+	eprintln!(
+		"usage: rgr-rust orient <db_path> <repo_uid> \
+		 [--budget small|medium|large] [--focus <string>]"
+	);
 }
 
 // ── dead command ─────────────────────────────────────────────────

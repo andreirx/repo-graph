@@ -421,12 +421,61 @@ mechanism.
 1. `Rust-41`: This design doc (done).
 2. `Rust-42`: `orient` use-case module — pure Rust aggregation returning typed DTO. No CLI. Tested with deterministic fixtures. **(done — repo-level focus only; module/symbol focus deferred to Rust-44/45.)**
 3. `Rust-43A`: gate.rs relocation — move gate policy out of the `rgr` binary crate into a new `repo-graph-gate` library crate. Add gate signal coverage (`GATE_PASS` / `GATE_FAIL` / `GATE_INCOMPLETE`) to the orient pipeline. Replace unconditional `GATE_UNAVAILABLE` limit with `GATE_NOT_CONFIGURED`. **(done — see `docs/TECH-DEBT.md` "Gate.rs relocation — CLOSED in Rust-43A" for details.)**
-4. `Rust-43B`: `rgr orient` CLI command — parse args, call use case, serialize, exit code.
-5. `Rust-43C`: Binary rename: `rgr-rust` → `rgr`, `rgr` (TS) → `rgr-ts`. May or may not ship with Rust-43B depending on diff size.
+4. `Rust-43B`: `rgr orient` CLI command — parse args, call use case, serialize, exit code. **(done — shipped under the current `rgr-rust` name with the `<db_path> <repo_uid>` positional shape; see "Rust-43B implementation notes" below. Repo-name invocation is deferred to Rust-43C+ because the Rust CLI has no repo registry yet.)**
+5. `Rust-43C`: Binary rename: `rgr-rust` → `rgr`, `rgr` (TS) → `rgr-ts`. Does NOT ship with Rust-43B. Reason: CLI command wiring and binary migration are separate risks; the rename touches ~20 files (test harnesses, docs, package metadata, TS bin config, existing workflows) and must stay reviewable in isolation.
 6. `Rust-44`: `check` use-case + CLI. Module/path focus for `orient`.
 7. `Rust-45`: `explain` use-case + CLI. Symbol focus for `orient`.
 8. Evaluate: does the agent surface cover 80% of agent needs?
 9. Daemon: host the same use-case functions over a socket.
+
+### Rust-43B implementation notes (as shipped)
+
+- New CLI command: `rgr-rust orient <db_path> <repo_uid>
+  [--budget small|medium|large] [--focus <string>]`.
+  Implemented in `rust/crates/rgr/src/main.rs::run_orient`.
+- **Positional shape divergence from the contract.** The
+  contract's target command is `rgr orient <repo_name>` with
+  `--db <path>` as an optional escape hatch for non-registered
+  repos. Rust has no repo registry yet. Until a registry slice
+  lands, `orient` takes the same `<db_path> <repo_uid>`
+  positional pair as every other Rust CLI command. This
+  divergence is temporary and tracked in `docs/TECH-DEBT.md`.
+- **Budget parsing is strict.** Default `small`. Accepted
+  values `small | medium | large`. No aliases. No
+  case-insensitive matching. Unknown value / missing value /
+  repeated flag all exit 1 (usage error).
+- **`--focus` accepts any string and exits 2.** The parser
+  recognizes the flag and propagates `OrientError::FocusNotImplementedYet`
+  as a runtime error. Exit 2 is correct — the command is
+  syntactically valid, only the runtime capability is not yet
+  implemented. Rust-44/45 will implement the use case without
+  touching the CLI grammar.
+- **Clock discipline.** The CLI reads the system clock at the
+  outermost boundary via `utc_now_iso8601()` (the existing
+  helper in `main.rs`) and passes the ISO 8601 string into
+  `repo_graph_agent::orient` as `now`. The agent crate remains
+  clock-free. Do not invent another clock helper.
+- **No `--json` flag.** Output is always JSON, pretty-printed.
+- **Exit codes**: 0 success, 1 usage error, 2 runtime error
+  (missing DB, missing repo, missing snapshot,
+  focus-not-implemented, storage failure, serialization
+  failure).
+- **Binary name unchanged.** Ships as `rgr-rust`. Rename to
+  `rgr` is Rust-43C.
+- **No repo registry.** `rgr-rust` still has no
+  `repo add` / `repo list` equivalent. Users invoke orient
+  with the same `<db_path> <repo_uid>` pair they use for
+  `cycles`, `dead`, `gate`, etc.
+- **Test coverage.** 16 integration tests in
+  `rust/crates/rgr/tests/orient_command.rs`. One end-to-end
+  smoke test indexes a tiny TS fixture via
+  `repo_graph_repo_index::compose::index_path` and asserts
+  the output JSON carries `schema = "rgr.agent.v1"`,
+  `command = "orient"`, repo-level focus, the always-emitted
+  `SNAPSHOT_INFO` and `MODULE_SUMMARY` signals, and the
+  `GATE_NOT_CONFIGURED` limit (because the fixture has no
+  active requirements). Full workspace: 1118 tests, 0
+  failures.
 
 ### Rust-43A implementation notes (as shipped)
 

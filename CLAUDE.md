@@ -139,6 +139,7 @@ rgr-rust path       <db_path> <repo_uid> <from> <to>   # Shortest path (CALLS+IM
 rgr-rust imports    <db_path> <repo_uid> <file_path>   # File import chain (one hop, IMPORTS)
 rgr-rust violations <db_path> <repo_uid>               # Boundary violation check (IMPORTS)
 rgr-rust gate       <db_path> <repo_uid> [--strict | --advisory]  # CI gate (4 methods, waivers, 3 modes)
+rgr-rust orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]  # Agent orientation surface (rgr.agent.v1)
 rgr-rust declare boundary <db_path> <repo_uid> <module> --forbids <target> [--reason <text>]
 rgr-rust declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
 rgr-rust declare waiver <db_path> <repo_uid> <req_id> --requirement-version <n> --obligation-id <id> --reason <text> [--expires-at <iso>] [--created-by <a>] [--rationale-category <c>] [--policy-basis <t>]
@@ -183,6 +184,17 @@ Known Rust CLI divergences from TS CLI:
 - `gate` waiver overlay: PASS obligations are not waivable (Rust-25
   deliberate correction — TS unconditionally marks WAIVED, Rust only
   suppresses non-PASS verdicts; see TECH-DEBT.md)
+- `orient` uses `<db_path> <repo_uid>` positional pair (Rust-43B
+  divergence). The agent orientation contract's target shape is
+  `rgr orient <repo_name>` with a repo registry, but the Rust CLI
+  has no registry yet. Repo-name invocation is deferred to the
+  binary rename / registry slice (Rust-43C+). The `<db_path>
+  <repo_uid>` shape matches every other Rust CLI command and keeps
+  `orient` consistent with the current surface.
+- `orient` has no module/path/symbol focus runtime (Rust-44/45).
+  The `--focus <string>` flag IS parsed and accepted — it exits
+  with code 2 and a `FocusNotImplementedYet` diagnostic. The flag
+  grammar is locked so Rust-44/45 only changes runtime behavior.
 
 ## Native dependency note
 

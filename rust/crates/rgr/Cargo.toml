@@ -33,6 +33,12 @@
 # Rust-38: declare supersede boundary CLI command.
 # Rust-39: declare supersede requirement CLI command.
 # Rust-40: declare supersede waiver CLI command.
+# Rust-43A: gate policy relocated into repo-graph-gate (separate crate).
+# Rust-43B: `orient <db_path> <repo_uid> [--budget ...] [--focus ...]`
+#           First exposure of the agent orientation surface.
+#           Uses <db_path> <repo_uid> positional pair to match the
+#           existing Rust CLI shape. Repo-name invocation is deferred
+#           to the rename/registry slice (Rust-43C+).
 #
 # No formatting-heavy UX.
 
@@ -50,6 +56,7 @@ name = "rgr-rust"
 path = "src/main.rs"
 
 [dependencies]
+repo-graph-agent = { path = "../agent" }
 repo-graph-gate = { path = "../gate" }
 repo-graph-repo-index = { path = "../repo-index" }
 repo-graph-storage = { path = "../storage" }

@@ -487,6 +487,7 @@ dependencies = [
 name = "repo-graph-rgr"
 version = "0.1.0"
 dependencies = [
+ "repo-graph-agent",
  "repo-graph-gate",
  "repo-graph-repo-index",
  "repo-graph-storage",
