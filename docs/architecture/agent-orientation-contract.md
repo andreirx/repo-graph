@@ -334,17 +334,74 @@ These appear as limit codes in the output:
 
 ## How This Runs Inside a Daemon Later
 
-The use-case layer is a set of pure functions:
+The use-case layer is a set of pure functions. Shipped
+shape (post Rust-43A, post P2 fix):
 
 ```rust
-fn orient(storage: &StorageConnection, repo_uid: &str, focus: Option<&str>, budget: Budget) -> OrientResult
-fn check(storage: &StorageConnection, repo_uid: &str) -> CheckResult
-fn explain(storage: &StorageConnection, repo_uid: &str, target: &str, budget: Budget) -> ExplainResult
+pub fn orient<S>(
+    storage: &S,
+    repo_uid: &str,
+    focus: Option<&str>,
+    budget: Budget,
+    now: &str,
+) -> Result<OrientResult, OrientError>
+where
+    S: AgentStorageRead + GateStorageRead + ?Sized;
+
+// Not yet implemented — shape locked for Rust-44+:
+pub fn check<S>(
+    storage: &S,
+    repo_uid: &str,
+    now: &str,
+) -> Result<CheckResult, CheckError>
+where
+    S: AgentStorageRead + GateStorageRead + ?Sized;
+
+pub fn explain<S>(
+    storage: &S,
+    repo_uid: &str,
+    target: &str,
+    budget: Budget,
+    now: &str,
+) -> Result<ExplainResult, ExplainError>
+where
+    S: AgentStorageRead + GateStorageRead + ?Sized;
 ```
 
-CLI calls these and serializes to JSON.
-Daemon later calls the same functions over a socket.
-No daemon-specific product semantics. The daemon is a delivery mechanism.
+Three contract invariants every caller must honor:
+
+1. **Storage is a policy port, not a concrete adapter.** The
+   generic bound `AgentStorageRead + GateStorageRead` is the
+   single handle requirement. `StorageConnection` (SQLite) in
+   production, a test fake in integration tests, a future
+   daemon-side proxy on a socket — all satisfy the bound.
+   Callers MUST NOT name `StorageConnection` in these
+   signatures; the concrete adapter is wired at the outermost
+   composition root only.
+
+2. **`now: &str` is mandatory and clock-explicit.** The agent
+   crate is clock-free. Every entry point takes an ISO 8601
+   timestamp supplied by the caller. Used internally for
+   waiver expiry comparison in the gate aggregator. Passing a
+   far-future or far-past sentinel silently distorts waiver
+   semantics — the P2 review in Rust-43A identified this
+   exact mistake and the fix removed the sentinel. Daemon
+   transport MUST read wall-clock time at the socket boundary
+   and pass it in; MUST NOT invent a default. CLI reads the
+   wall clock in `main.rs` via `utc_now_iso8601()` and passes
+   the result in.
+
+3. **Error surface is typed.** Each entry point returns its
+   own typed error (`OrientError`; future `CheckError`,
+   `ExplainError`). The daemon is expected to serialize these
+   to a stable wire format; the CLI prints them to stderr.
+   Neither layer invents error strings; the types are the
+   contract.
+
+CLI calls these and serializes to JSON. Daemon later calls the
+same functions over a socket with the same signatures. No
+daemon-specific product semantics. The daemon is a delivery
+mechanism.
 
 ## CLI Rename Plan
 
@@ -362,13 +419,71 @@ No daemon-specific product semantics. The daemon is a delivery mechanism.
 ## Implementation Sequence
 
 1. `Rust-41`: This design doc (done).
-2. `Rust-42`: `orient` use-case module — pure Rust aggregation returning typed DTO. No CLI. Tested with deterministic fixtures. **(done — repo-level focus only; module/symbol focus deferred to Rust-44/45. GATE_* signals blocked on gate.rs relocation — see `docs/TECH-DEBT.md`.)**
-3. `Rust-43`: `rgr orient` CLI command — parse args, call use case, serialize, exit code.
-4. `Rust-44`: `check` use-case + CLI. Module/path focus for `orient`.
-5. `Rust-45`: `explain` use-case + CLI. Symbol focus for `orient`.
-6. Binary rename: `rgr-rust` → `rgr`, `rgr` (TS) → `rgr-ts`.
-7. Evaluate: does the agent surface cover 80% of agent needs?
-8. Daemon: host the same use-case functions over a socket.
+2. `Rust-42`: `orient` use-case module — pure Rust aggregation returning typed DTO. No CLI. Tested with deterministic fixtures. **(done — repo-level focus only; module/symbol focus deferred to Rust-44/45.)**
+3. `Rust-43A`: gate.rs relocation — move gate policy out of the `rgr` binary crate into a new `repo-graph-gate` library crate. Add gate signal coverage (`GATE_PASS` / `GATE_FAIL` / `GATE_INCOMPLETE`) to the orient pipeline. Replace unconditional `GATE_UNAVAILABLE` limit with `GATE_NOT_CONFIGURED`. **(done — see `docs/TECH-DEBT.md` "Gate.rs relocation — CLOSED in Rust-43A" for details.)**
+4. `Rust-43B`: `rgr orient` CLI command — parse args, call use case, serialize, exit code.
+5. `Rust-43C`: Binary rename: `rgr-rust` → `rgr`, `rgr` (TS) → `rgr-ts`. May or may not ship with Rust-43B depending on diff size.
+6. `Rust-44`: `check` use-case + CLI. Module/path focus for `orient`.
+7. `Rust-45`: `explain` use-case + CLI. Symbol focus for `orient`.
+8. Evaluate: does the agent surface cover 80% of agent needs?
+9. Daemon: host the same use-case functions over a socket.
+
+### Rust-43A implementation notes (as shipped)
+
+- New crate: `repo-graph-gate` at `rust/crates/gate/`. Policy
+  layer. Depends on `serde` and `serde_json` only — no
+  dependency on `repo-graph-storage`, `repo-graph-agent`, or
+  any adapter crate.
+- Two-layer shape:
+    * `compute(input: GateInput) -> GateReport` — pure.
+    * `assemble(storage: &impl GateStorageRead, repo_uid,
+      snapshot_uid, mode, now) -> Result<GateReport, GateError>`
+      and `assemble_from_requirements(...)` for callers (like
+      the agent aggregator) that have already fetched
+      requirements.
+- Port: `GateStorageRead` with agent-style concrete
+  `GateStorageError`. Implemented on `StorageConnection` in
+  `rust/crates/storage/src/gate_impl.rs`.
+- Dependency edges: `agent → gate`, `storage → gate`,
+  `rgr → gate`. No reverse edges.
+- `rgr/src/main.rs::run_gate` now delegates the whole
+  pipeline to `repo_graph_gate::assemble` and formats
+  `GateError` via a `format_gate_error` helper so the
+  pre-relocation stderr wording is preserved. Every existing
+  `gate_command.rs` test passes unchanged.
+- `repo-graph-agent`:
+    * `orient_repo` widened to
+      `S: AgentStorageRead + GateStorageRead`.
+    * New `aggregators::gate` module consumes `GateReport`
+      and emits `GATE_PASS` / `GATE_FAIL` / `GATE_INCOMPLETE`
+      or the `GATE_NOT_CONFIGURED` limit when no requirements
+      exist.
+    * `LimitCode::GateUnavailable` removed; replaced by
+      `LimitCode::GateNotConfigured`. Summary text updated.
+    * `orient` always calls gate in `GateMode::Default`.
+      Strict/advisory are CLI gate surface concerns only.
+    * Gate signal evidence variants added to
+      `SignalEvidence`: `GatePassEvidence`, `GateFailEvidence`,
+      `GateIncompleteEvidence`. Named constructors match the
+      pattern of other signals.
+    * `SourceRef::GateAssemble` added and stringifies as
+      `"gate::assemble"` in the JSON output.
+- PASS-not-waivable divergence (Rust-25) preserved.
+- Malformed measurement / inference error strings preserved
+  verbatim via pre-parse helpers in `gate/src/assemble.rs`.
+- `orient()` takes `now: &str` as a required final parameter
+  (P2 fix, post Rust-43A). The agent crate never touches the
+  system clock; callers supply the ISO 8601 timestamp used
+  for waiver expiry comparison inside
+  `GateStorageRead::find_waivers`. An earlier draft used a
+  sentinel constant that silently distorted finite-expiry
+  waiver semantics; the sentinel was removed. Regression
+  tests in `orient_repo_gate.rs` pin the three expiry paths
+  (finite active, finite expired, perpetual).
+- Tests: 9 new agent integration tests in
+  `rust/crates/agent/tests/orient_repo_gate.rs`. 23 unit
+  tests in `repo-graph-gate` (14 compute, 5 assemble, 4 other).
+  Full workspace: 1099 tests passing, 0 failures.
 
 ### Rust-42 implementation notes (as shipped)
 

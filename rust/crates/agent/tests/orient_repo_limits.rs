@@ -1,47 +1,93 @@
 //! Limit emission tests.
 //!
-//! The repo-level orient pipeline MUST emit three static limit
-//! codes in every response (Rust-42 scope):
+//! Post-Rust-43A limit-code policy:
 //!
-//!   - MODULE_DATA_UNAVAILABLE (from module_summary aggregator)
-//!   - GATE_UNAVAILABLE (from orient_repo static append)
-//!   - COMPLEXITY_UNAVAILABLE (from orient_repo static append)
+//!   - MODULE_DATA_UNAVAILABLE — always emitted by the
+//!     module_summary aggregator. Module discovery data is not
+//!     queryable through the Rust storage path.
+//!   - COMPLEXITY_UNAVAILABLE — always emitted by the
+//!     orient_repo static append. The Rust indexer does not
+//!     produce cyclomatic complexity measurements.
+//!   - GATE_NOT_CONFIGURED — emitted ONLY when the repo has
+//!     no active requirement declarations. Present in a default
+//!     seeded fake (the fake has no seeded gate_requirements).
 //!
-//! These are unconditional because the underlying capabilities
-//! are unavailable on every Rust-42 response regardless of
-//! snapshot contents.
+//! GATE_UNAVAILABLE was removed in Rust-43A when gate policy was
+//! relocated into `repo-graph-gate`. Tests asserting its presence
+//! were rewritten to assert GATE_NOT_CONFIGURED or the absence
+//! of GATE_NOT_CONFIGURED as appropriate.
 
 mod common;
 
 use common::FakeAgentStorage;
 use repo_graph_agent::{orient, Budget, LimitCode};
+use repo_graph_gate::{GateObligation, GateRequirement};
 
-#[test]
-fn repo_orient_emits_gate_unavailable_limit() {
+fn seeded_with_requirements() -> FakeAgentStorage {
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
-
-	let result = orient(&fake, "r1", None, Budget::Large).unwrap();
-	let has_gate = result
-		.limits
-		.iter()
-		.any(|l| l.code == LimitCode::GateUnavailable);
-	assert!(has_gate, "GATE_UNAVAILABLE must be present in every response");
+	fake.gate_requirements.insert(
+		"r1".to_string(),
+		vec![GateRequirement {
+			req_id: "REQ-1".into(),
+			version: 1,
+			obligations: vec![GateObligation {
+				obligation_id: "o1".into(),
+				obligation: "core isolated".into(),
+				method: "arch_violations".into(),
+				target: Some("src/core".into()),
+				threshold: None,
+				operator: None,
+			}],
+		}],
+	);
+	fake
 }
 
 #[test]
-fn gate_unavailable_summary_mentions_shared_crate() {
+fn gate_not_configured_limit_emitted_when_no_requirements() {
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
 
-	let result = orient(&fake, "r1", None, Budget::Large).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
+	let has = result
+		.limits
+		.iter()
+		.any(|l| l.code == LimitCode::GateNotConfigured);
+	assert!(
+		has,
+		"GATE_NOT_CONFIGURED must be present when no requirements exist"
+	);
+}
+
+#[test]
+fn gate_not_configured_limit_absent_when_requirements_exist() {
+	let fake = seeded_with_requirements();
+	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
+	let has = result
+		.limits
+		.iter()
+		.any(|l| l.code == LimitCode::GateNotConfigured);
+	assert!(
+		!has,
+		"GATE_NOT_CONFIGURED must NOT be present when requirements exist; \
+		 gate signal covers the outcome instead"
+	);
+}
+
+#[test]
+fn gate_not_configured_summary_mentions_requirement_declarations() {
+	let mut fake = FakeAgentStorage::new();
+	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
+
+	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 	let gate = result
 		.limits
 		.iter()
-		.find(|l| l.code == LimitCode::GateUnavailable)
+		.find(|l| l.code == LimitCode::GateNotConfigured)
 		.unwrap();
 	assert!(
-		gate.summary.contains("shared library crate"),
+		gate.summary.contains("requirement declarations"),
 		"wording contract: {}",
 		gate.summary
 	);
@@ -52,7 +98,7 @@ fn repo_orient_emits_complexity_unavailable_limit() {
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
 
-	let result = orient(&fake, "r1", None, Budget::Large).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 	let has = result
 		.limits
 		.iter()
@@ -65,7 +111,7 @@ fn repo_orient_emits_module_data_unavailable_limit() {
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
 
-	let result = orient(&fake, "r1", None, Budget::Large).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 	let has = result
 		.limits
 		.iter()
@@ -78,7 +124,7 @@ fn limits_serialize_with_code_and_summary() {
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
 
-	let result = orient(&fake, "r1", None, Budget::Large).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 	let json = serde_json::to_value(&result).unwrap();
 	let limits = json["limits"].as_array().unwrap();
 	assert!(!limits.is_empty());
@@ -89,12 +135,23 @@ fn limits_serialize_with_code_and_summary() {
 }
 
 #[test]
-fn limits_truncated_on_small_budget() {
-	// Small cap for limits is 3. Rust-42 emits exactly 3 limits
-	// unconditionally, so no truncation on Small.
+fn limits_fit_small_budget_cap_with_gate_not_configured() {
+	// Small cap for limits is 3. Unseeded repo emits exactly
+	// 3 limits: MODULE_DATA_UNAVAILABLE, GATE_NOT_CONFIGURED,
+	// COMPLEXITY_UNAVAILABLE. No truncation.
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	assert_eq!(result.limits.len(), 3);
 	assert_eq!(result.limits_truncated, None);
+}
+
+#[test]
+fn limits_fit_small_budget_cap_without_gate_not_configured() {
+	// Seeding requirements removes GATE_NOT_CONFIGURED from
+	// the limit list. Remaining limits: MODULE_DATA_UNAVAILABLE,
+	// COMPLEXITY_UNAVAILABLE (exactly 2).
+	let fake = seeded_with_requirements();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
+	assert_eq!(result.limits.len(), 2);
 }

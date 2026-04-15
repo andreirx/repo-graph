@@ -36,6 +36,10 @@ pub enum SourceRef {
 	StorageComputeRepoSummary,
 	/// Port method: `AgentStorageRead::get_trust_summary`.
 	StorageGetTrustSummary,
+	/// Gate crate: `repo_graph_gate::assemble_from_requirements`.
+	/// Emitted by the agent gate aggregator for `GATE_PASS`,
+	/// `GATE_FAIL`, and `GATE_INCOMPLETE` signals.
+	GateAssemble,
 }
 
 impl SourceRef {
@@ -54,6 +58,7 @@ impl SourceRef {
 			Self::StorageGetStaleFiles => "storage::get_stale_files",
 			Self::StorageComputeRepoSummary => "storage::compute_repo_summary",
 			Self::StorageGetTrustSummary => "storage::get_trust_summary",
+			Self::GateAssemble => "gate::assemble",
 		}
 	}
 }

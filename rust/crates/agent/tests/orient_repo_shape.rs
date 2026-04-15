@@ -12,7 +12,7 @@ fn repo_orient_envelope_has_locked_schema_and_command() {
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
 
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 
 	assert_eq!(result.schema, ORIENT_SCHEMA);
 	assert_eq!(result.schema, "rgr.agent.v1");
@@ -27,7 +27,7 @@ fn repo_orient_focus_resolves_to_repo_without_input() {
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
 
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 
 	assert!(result.focus.resolved);
 	assert_eq!(
@@ -45,7 +45,7 @@ fn repo_orient_serializes_to_contract_shape() {
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
 
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	let json = serde_json::to_value(&result).unwrap();
 
 	assert_eq!(json["schema"], "rgr.agent.v1");
@@ -75,7 +75,7 @@ fn focus_arg_returns_error_not_focus_failure() {
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
 
-	let err = orient(&fake, "r1", Some("src/core"), Budget::Small).unwrap_err();
+	let err = orient(&fake, "r1", Some("src/core"), Budget::Small, common::TEST_NOW).unwrap_err();
 	match err {
 		OrientError::FocusNotImplementedYet { focus } => {
 			assert_eq!(focus, "src/core");
@@ -87,7 +87,7 @@ fn focus_arg_returns_error_not_focus_failure() {
 #[test]
 fn missing_repo_returns_no_repo_error() {
 	let fake = FakeAgentStorage::new();
-	let err = orient(&fake, "missing", None, Budget::Small).unwrap_err();
+	let err = orient(&fake, "missing", None, Budget::Small, common::TEST_NOW).unwrap_err();
 	match err {
 		OrientError::NoRepo { repo_uid } => assert_eq!(repo_uid, "missing"),
 		other => panic!("expected NoRepo, got {:?}", other),
@@ -105,7 +105,7 @@ fn missing_snapshot_returns_no_snapshot_error() {
 			name: "my-repo".into(),
 		},
 	);
-	let err = orient(&fake, "r1", None, Budget::Small).unwrap_err();
+	let err = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap_err();
 	match err {
 		OrientError::NoSnapshot { repo_uid } => assert_eq!(repo_uid, "r1"),
 		other => panic!("expected NoSnapshot, got {:?}", other),
@@ -118,7 +118,7 @@ fn storage_error_propagates_through_orient() {
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
 	*fake.force_error_on.borrow_mut() = Some("find_module_cycles");
 
-	let err = orient(&fake, "r1", None, Budget::Small).unwrap_err();
+	let err = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap_err();
 	match err {
 		OrientError::Storage(e) => {
 			assert_eq!(e.operation, "find_module_cycles");

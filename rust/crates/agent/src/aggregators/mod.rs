@@ -24,6 +24,7 @@
 pub mod boundary;
 pub mod cycles;
 pub mod dead_code;
+pub mod gate;
 pub mod module_summary;
 pub mod snapshot;
 pub mod trust;

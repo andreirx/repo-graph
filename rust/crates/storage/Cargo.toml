@@ -147,6 +147,14 @@ repo-graph-indexer = { path = "../indexer" }
 # projection consumed by `get_trust_summary`.
 repo-graph-agent = { path = "../agent" }
 
+# Gate crate — added in Rust-43A so the storage crate (adapter)
+# can implement the GateStorageRead trait defined by the gate
+# crate (policy). Same dependency direction: adapter → policy.
+# The `rgr` binary crate also depends on repo-graph-gate for
+# its `gate` CLI command, which calls `repo_graph_gate::assemble`
+# through the StorageConnection implementation added here.
+repo-graph-gate = { path = "../gate" }
+
 [dev-dependencies]
 # tempfile for tests that need a real file-backed SQLite database
 # in a unique temporary path. Added in R2-D when the connection

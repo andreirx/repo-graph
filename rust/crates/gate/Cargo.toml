@@ -1,0 +1,64 @@
+# ── repo-graph-gate ──────────────────────────────────────────────
+#
+# Gate policy crate. Obligation evaluation, waiver overlay, mode
+# reduction, and gate outcome reporting. This crate is the
+# single source of truth for gate product policy.
+#
+# Rust-43A scope:
+#   - Relocation of `rgr/src/gate.rs` into this crate.
+#   - Two-layer design:
+#       * `compute(input: GateInput) -> GateReport` — pure.
+#         No storage, no I/O, no time dependency beyond the
+#         caller-supplied `now` on the input.
+#       * `assemble(storage, ...) -> GateReport` — storage-
+#         backed orchestration that fetches raw evidence per
+#         obligation, assembles a `GateInput`, and delegates to
+#         `compute`.
+#   - `GateStorageRead` port (agent-style concrete error).
+#   - Gate-owned DTOs (`GateRequirement`, `GateObligation`,
+#     `GateWaiver`, `GateMeasurement`, `GateInference`,
+#     `GateBoundaryDeclaration`, `GateImportEdge`).
+#   - TS-compatible output shape (`GateReport`) — byte-stable
+#     with the pre-relocation `gate::GateResult` struct so the
+#     `rgr-rust gate` CLI command is unchanged.
+#   - Deliberate PASS-not-waivable divergence preserved
+#     (Rust-25). Do NOT realign to TS during the relocation.
+#
+# ── Architecture ──────────────────────────────────────────────────
+#
+# Policy layer. Clean Architecture dependency rule: policy owns
+# the interface (`GateStorageRead`); adapters implement it.
+#
+#   - `repo-graph-gate` defines `GateStorageRead`. Does NOT
+#     depend on `repo-graph-storage`, `rusqlite`, `repo-graph-agent`,
+#     or any adapter crate.
+#   - `repo-graph-storage` adds `repo-graph-gate` as a dependency
+#     and implements the trait on `StorageConnection`. Dependency
+#     direction is adapter → policy (outer → inner).
+#   - `repo-graph-agent` depends on `repo-graph-gate` (policy →
+#     policy) so its orient pipeline can call the gate compute
+#     layer through a shared storage handle.
+#   - `repo-graph-rgr` depends on `repo-graph-gate` for the
+#     existing `gate` CLI command.
+#
+# Dependency edges MUST NOT form a reverse edge from gate to
+# agent. Gate does not know about orientation.
+
+[package]
+name         = "repo-graph-gate"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Gate policy crate for repo-graph (obligation evaluation, waiver overlay, outcome reduction)"
+publish      = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+# serde_json is required because per-obligation evidence is
+# serialized as a polymorphic JSON object in the report output.
+# Keeping evidence as `serde_json::Value` preserves TS
+# compatibility (the TS report shape allows arbitrary JSON in
+# per-method evidence) and avoids prematurely freezing the
+# evidence schema before more gate methods are supported.
+serde_json = "1"

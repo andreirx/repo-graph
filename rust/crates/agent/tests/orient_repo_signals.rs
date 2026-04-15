@@ -30,7 +30,7 @@ fn find_signal<'a>(
 #[test]
 fn snapshot_info_is_always_emitted() {
 	let fake = seeded();
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	let sig = find_signal(&result, SignalCode::SnapshotInfo)
 		.expect("SNAPSHOT_INFO must be emitted");
 	match sig.evidence() {
@@ -55,7 +55,7 @@ fn module_summary_is_always_emitted_with_db_counts() {
 			languages: vec!["rust".into(), "typescript".into()],
 		},
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	let sig = find_signal(&result, SignalCode::ModuleSummary)
 		.expect("MODULE_SUMMARY must be emitted");
 	match sig.evidence() {
@@ -73,7 +73,7 @@ fn module_summary_is_always_emitted_with_db_counts() {
 #[test]
 fn import_cycles_not_emitted_when_none_exist() {
 	let fake = seeded();
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	assert!(
 		find_signal(&result, SignalCode::ImportCycles).is_none(),
 		"IMPORT_CYCLES must be omitted on zero-count"
@@ -92,7 +92,7 @@ fn import_cycles_emitted_with_top_3_evidence() {
 			AgentCycle { length: 4, modules: vec!["m8".into(), "m9".into(), "m10".into(), "m11".into()] },
 		],
 	);
-	let result = orient(&fake, "r1", None, Budget::Medium).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Medium, common::TEST_NOW).unwrap();
 	let sig = find_signal(&result, SignalCode::ImportCycles)
 		.expect("IMPORT_CYCLES must be emitted when count > 0");
 	match sig.evidence() {
@@ -109,7 +109,7 @@ fn import_cycles_emitted_with_top_3_evidence() {
 #[test]
 fn dead_code_not_emitted_when_none_exist() {
 	let fake = seeded();
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	assert!(find_signal(&result, SignalCode::DeadCode).is_none());
 }
 
@@ -126,7 +126,7 @@ fn dead_code_emitted_when_threshold_met() {
 			line_count: Some(5),
 		}],
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	let sig = find_signal(&result, SignalCode::DeadCode)
 		.expect("DEAD_CODE must fire at threshold 1");
 	match sig.evidence() {
@@ -182,7 +182,7 @@ fn dead_code_top_slice_is_sorted_by_size_descending() {
 			},
 		],
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	let sig = find_signal(&result, SignalCode::DeadCode).unwrap();
 	match sig.evidence() {
 		SignalEvidence::DeadCode(ev) => {
@@ -227,7 +227,7 @@ fn dead_code_top_slice_pushes_unknown_sizes_to_the_tail() {
 			},
 		],
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	let sig = find_signal(&result, SignalCode::DeadCode).unwrap();
 	match sig.evidence() {
 		SignalEvidence::DeadCode(ev) => {
@@ -244,7 +244,7 @@ fn dead_code_top_slice_pushes_unknown_sizes_to_the_tail() {
 #[test]
 fn boundary_violations_not_emitted_when_no_declarations() {
 	let fake = seeded();
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	assert!(find_signal(&result, SignalCode::BoundaryViolations).is_none());
 }
 
@@ -260,7 +260,7 @@ fn boundary_violations_not_emitted_when_declarations_have_no_edges() {
 		}],
 	);
 	// No edges seeded — declaration exists but nothing violates.
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	assert!(find_signal(&result, SignalCode::BoundaryViolations).is_none());
 }
 
@@ -292,7 +292,7 @@ fn boundary_violations_dedupe_by_source_and_target() {
 			target_file: "src/adapters/b.rs".into(),
 		}],
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	let sig = find_signal(&result, SignalCode::BoundaryViolations)
 		.expect("BOUNDARY_VIOLATIONS must fire");
 	match sig.evidence() {
@@ -339,7 +339,7 @@ fn boundary_violations_emitted_when_edges_cross_forbidden_path() {
 			},
 		],
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	let sig = find_signal(&result, SignalCode::BoundaryViolations)
 		.expect("BOUNDARY_VIOLATIONS must fire when edges exist");
 	match sig.evidence() {
@@ -359,7 +359,7 @@ fn boundary_violations_emitted_when_edges_cross_forbidden_path() {
 #[test]
 fn trust_low_resolution_not_emitted_when_rate_high() {
 	let fake = seeded(); // default is 0.90
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	assert!(find_signal(&result, SignalCode::TrustLowResolution).is_none());
 }
 
@@ -377,7 +377,7 @@ fn trust_low_resolution_emitted_below_threshold() {
 			enrichment_enriched: 9,
 		},
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	let sig = find_signal(&result, SignalCode::TrustLowResolution)
 		.expect("TRUST_LOW_RESOLUTION must fire below 0.20");
 	match sig.evidence() {
@@ -395,7 +395,7 @@ fn trust_low_resolution_emitted_below_threshold() {
 #[test]
 fn trust_stale_snapshot_not_emitted_when_stale_list_empty() {
 	let fake = seeded();
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	assert!(find_signal(&result, SignalCode::TrustStaleSnapshot).is_none());
 }
 
@@ -409,7 +409,7 @@ fn trust_stale_snapshot_emitted_with_exact_wording() {
 			AgentStaleFile { path: "src/b.rs".into() },
 		],
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	let sig = find_signal(&result, SignalCode::TrustStaleSnapshot)
 		.expect("TRUST_STALE_SNAPSHOT must fire when stale files exist");
 
@@ -452,7 +452,7 @@ fn trust_no_enrichment_emitted_when_eligible_but_not_applied() {
 			enrichment_enriched: 0,
 		},
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	let sig = find_signal(&result, SignalCode::TrustNoEnrichment)
 		.expect("TRUST_NO_ENRICHMENT must fire");
 	match sig.evidence() {
@@ -480,7 +480,7 @@ fn trust_no_enrichment_suppressed_when_eligible_is_zero() {
 			enrichment_enriched: 0,
 		},
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	assert!(
 		find_signal(&result, SignalCode::TrustNoEnrichment).is_none(),
 		"must suppress when eligible is zero"

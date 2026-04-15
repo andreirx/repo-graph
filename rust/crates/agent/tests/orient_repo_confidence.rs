@@ -39,7 +39,7 @@ fn high_confidence_when_rate_high_and_clean() {
 		},
 		false,
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	assert_eq!(result.confidence, Confidence::High);
 }
 
@@ -56,7 +56,7 @@ fn medium_confidence_when_rate_in_band() {
 		},
 		false,
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	assert_eq!(result.confidence, Confidence::Medium);
 }
 
@@ -73,7 +73,7 @@ fn low_confidence_when_rate_below_20_percent() {
 		},
 		false,
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	assert_eq!(result.confidence, Confidence::Low);
 }
 
@@ -90,7 +90,7 @@ fn high_rate_degrades_to_medium_when_stale() {
 		},
 		true,
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	assert_eq!(result.confidence, Confidence::Medium);
 }
 
@@ -107,7 +107,7 @@ fn high_rate_degrades_to_medium_when_enrichment_missing() {
 		},
 		false,
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	assert_eq!(result.confidence, Confidence::Medium);
 }
 
@@ -124,6 +124,6 @@ fn high_rate_stays_high_when_enrichment_not_applicable() {
 		},
 		false,
 	);
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	assert_eq!(result.confidence, Confidence::High);
 }

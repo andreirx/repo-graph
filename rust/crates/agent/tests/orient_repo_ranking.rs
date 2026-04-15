@@ -71,7 +71,7 @@ fn seed_with_all_signals() -> FakeAgentStorage {
 #[test]
 fn ranks_are_dense_and_one_based() {
 	let fake = seed_with_all_signals();
-	let result = orient(&fake, "r1", None, Budget::Large).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 	for (i, sig) in result.signals.iter().enumerate() {
 		assert_eq!(sig.rank(), (i + 1) as u32, "rank must be i+1");
 	}
@@ -80,7 +80,7 @@ fn ranks_are_dense_and_one_based() {
 #[test]
 fn severity_order_is_high_medium_low() {
 	let fake = seed_with_all_signals();
-	let result = orient(&fake, "r1", None, Budget::Large).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 
 	let mut prev: Option<Severity> = None;
 	for sig in &result.signals {
@@ -100,7 +100,7 @@ fn severity_order_is_high_medium_low() {
 #[test]
 fn first_signal_is_boundary_violations_high() {
 	let fake = seed_with_all_signals();
-	let result = orient(&fake, "r1", None, Budget::Large).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 
 	let first = result.signals.first().expect("at least one signal");
 	assert_eq!(first.severity(), Severity::High);
@@ -111,7 +111,7 @@ fn first_signal_is_boundary_violations_high() {
 #[test]
 fn within_medium_tier_trust_precedes_structure() {
 	let fake = seed_with_all_signals();
-	let result = orient(&fake, "r1", None, Budget::Large).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 
 	let medium_signals: Vec<_> = result
 		.signals
@@ -142,7 +142,7 @@ fn within_medium_tier_trust_precedes_structure() {
 #[test]
 fn informational_signals_land_at_the_tail() {
 	let fake = seed_with_all_signals();
-	let result = orient(&fake, "r1", None, Budget::Large).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 
 	let tail_two: Vec<_> = result
 		.signals

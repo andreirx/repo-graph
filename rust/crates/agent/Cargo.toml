@@ -61,3 +61,20 @@ publish      = false
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Gate crate — added in Rust-43A. The agent orient pipeline
+# emits GATE_PASS / GATE_FAIL / GATE_INCOMPLETE signals by
+# calling `repo_graph_gate::assemble_from_requirements`. This
+# is a policy → policy dependency; `repo-graph-gate` itself
+# has no dependency on this crate (no reverse edge).
+repo-graph-gate = { path = "../gate" }
+
+[dev-dependencies]
+# Agent integration tests use a fake `AgentStorageRead` that
+# ALSO implements `GateStorageRead`, so the fake needs visibility
+# into the gate crate's types (GateRequirement, etc.). Listing
+# it here keeps production builds unchanged — the dev-dep
+# declaration is a no-op for them because `repo-graph-gate` is
+# already a normal dependency above — but clarifies intent
+# for test readers.
+repo-graph-gate = { path = "../gate" }

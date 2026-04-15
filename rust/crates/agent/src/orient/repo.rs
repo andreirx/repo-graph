@@ -27,6 +27,8 @@
 use crate::aggregators;
 use crate::aggregators::AggregatorOutput;
 use crate::confidence::derive_repo_confidence;
+use repo_graph_gate::GateStorageRead;
+
 use crate::dto::budget::Budget;
 use crate::dto::envelope::{
 	Focus, OrientResult, ORIENT_COMMAND, ORIENT_SCHEMA,
@@ -37,10 +39,25 @@ use crate::errors::OrientError;
 use crate::ranking;
 use crate::storage_port::AgentStorageRead;
 
-pub fn orient_repo<S: AgentStorageRead + ?Sized>(
+/// Repo-level orient pipeline.
+///
+/// `now` is an ISO 8601 timestamp used by the gate aggregator to
+/// evaluate waiver expiry through `find_active_waivers`. The
+/// orient use case is clock-explicit: it never touches the
+/// system clock. Callers (CLI, daemon, tests) must supply a
+/// wall-clock value. A wrong `now` produces wrong gate outcomes
+/// at orient time, so this parameter is not optional.
+///
+/// See `docs/TECH-DEBT.md` and
+/// `docs/architecture/agent-orientation-contract.md` for the
+/// rationale; the previous `AGENT_NOW_SENTINEL` constant was
+/// removed in the P2 fix because a far-future or far-past
+/// sentinel silently mis-evaluates finite-expiry waivers.
+pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
 	storage: &S,
 	repo_uid: &str,
 	budget: Budget,
+	now: &str,
 ) -> Result<OrientResult, OrientError> {
 	// ── 1. Resolve repo identity. ────────────────────────────
 	let repo = storage
@@ -87,14 +104,27 @@ pub fn orient_repo<S: AgentStorageRead + ?Sized>(
 	let mod_out = aggregators::module_summary::aggregate(storage, &snapshot_uid)?;
 	merge(&mut all_signals, &mut all_limits, mod_out);
 
+	// gate — emits at most one of GATE_PASS / GATE_FAIL /
+	// GATE_INCOMPLETE, or the GATE_NOT_CONFIGURED limit when
+	// the repo has no active requirement declarations.
+	// Relocated from rgr/src/gate.rs in Rust-43A and called
+	// here through the GateStorageRead supertrait bound on S.
+	// `now` is forwarded directly to gate's waiver-expiry
+	// filter. See the function doc for the clock-explicit
+	// contract.
+	let gate_out = aggregators::gate::aggregate(
+		storage,
+		repo_uid,
+		&snapshot_uid,
+		now,
+	)?;
+	merge(&mut all_signals, &mut all_limits, gate_out);
+
 	// ── 4 & 5. Static limits from Rust-42 scope. ─────────────
-	// GATE_UNAVAILABLE is added unconditionally because gate
-	// policy has not been relocated into a library crate yet.
-	// See docs/TECH-DEBT.md.
-	all_limits.push(Limit::from_code(LimitCode::GateUnavailable));
 	// COMPLEXITY_UNAVAILABLE is added unconditionally because
 	// the Rust indexer does not emit cyclomatic measurements
-	// and Rust-42 does not attempt to synthesize them.
+	// and the agent pipeline does not attempt to synthesize
+	// them. Orient reports "unknown", never "none".
 	all_limits.push(Limit::from_code(LimitCode::ComplexityUnavailable));
 
 	// ── 7. Sort + rank. ──────────────────────────────────────

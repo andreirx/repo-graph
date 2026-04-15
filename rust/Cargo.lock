@@ -421,6 +421,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 name = "repo-graph-agent"
 version = "0.1.0"
 dependencies = [
+ "repo-graph-gate",
  "serde",
  "serde_json",
 ]
@@ -444,6 +445,14 @@ dependencies = [
  "thiserror",
  "toml",
  "walkdir",
+]
+
+[[package]]
+name = "repo-graph-gate"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -478,6 +487,7 @@ dependencies = [
 name = "repo-graph-rgr"
 version = "0.1.0"
 dependencies = [
+ "repo-graph-gate",
  "repo-graph-repo-index",
  "repo-graph-storage",
  "repo-graph-trust",
@@ -493,6 +503,7 @@ version = "0.1.0"
 dependencies = [
  "repo-graph-agent",
  "repo-graph-classification",
+ "repo-graph-gate",
  "repo-graph-indexer",
  "repo-graph-trust",
  "rusqlite",

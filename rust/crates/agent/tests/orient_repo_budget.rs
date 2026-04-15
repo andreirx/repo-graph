@@ -75,7 +75,7 @@ fn seed_many_signals() -> FakeAgentStorage {
 #[test]
 fn small_budget_truncates_eight_signals_to_five() {
 	let fake = seed_many_signals();
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 
 	assert_eq!(result.signals.len(), 5, "small cap = 5 signals");
 	assert_eq!(result.signals_truncated, Some(true));
@@ -86,7 +86,7 @@ fn small_budget_truncates_eight_signals_to_five() {
 #[test]
 fn medium_budget_fits_all_eight_signals() {
 	let fake = seed_many_signals();
-	let result = orient(&fake, "r1", None, Budget::Medium).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Medium, common::TEST_NOW).unwrap();
 
 	assert_eq!(result.signals.len(), 8);
 	assert_eq!(result.signals_truncated, None);
@@ -96,11 +96,13 @@ fn medium_budget_fits_all_eight_signals() {
 #[test]
 fn large_budget_fits_all_signals_and_all_limits() {
 	let fake = seed_many_signals();
-	let result = orient(&fake, "r1", None, Budget::Large).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 
 	assert_eq!(result.signals.len(), 8);
-	// 3 static limits: MODULE_DATA_UNAVAILABLE from module_summary,
-	// GATE_UNAVAILABLE and COMPLEXITY_UNAVAILABLE from orient_repo.
+	// 3 limits: MODULE_DATA_UNAVAILABLE from module_summary,
+	// COMPLEXITY_UNAVAILABLE from orient_repo's static append,
+	// and GATE_NOT_CONFIGURED from the gate aggregator (this
+	// seeded fake has no gate_requirements).
 	assert_eq!(result.limits.len(), 3);
 	assert!(!result.truncated);
 }
@@ -108,7 +110,7 @@ fn large_budget_fits_all_signals_and_all_limits() {
 #[test]
 fn truncated_sections_preserve_highest_ranked_signals() {
 	let fake = seed_many_signals();
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 
 	// The highest-ranked signal must survive truncation.
 	let first = result.signals.first().unwrap();
@@ -138,7 +140,7 @@ fn untruncated_response_has_no_truncation_metadata() {
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
 
-	let result = orient(&fake, "r1", None, Budget::Small).unwrap();
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	// Only MODULE_SUMMARY + SNAPSHOT_INFO will fire — 2 signals, under cap.
 	assert_eq!(result.signals.len(), 2);
 	assert_eq!(result.signals_truncated, None);

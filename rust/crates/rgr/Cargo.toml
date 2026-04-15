@@ -50,6 +50,7 @@ name = "rgr-rust"
 path = "src/main.rs"
 
 [dependencies]
+repo-graph-gate = { path = "../gate" }
 repo-graph-repo-index = { path = "../repo-index" }
 repo-graph-storage = { path = "../storage" }
 repo-graph-trust = { path = "../trust" }

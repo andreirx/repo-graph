@@ -489,12 +489,14 @@ intentionally diverges.
 - **No staleness tracking for `index`/`refresh` commands.** Only
   read-side commands compute the `stale` field.
 
-## Rust agent use-case crate (`repo-graph-agent`) — Rust-42 scope
+## Rust agent use-case crate (`repo-graph-agent`)
 
-Frozen at Rust-42: repo-level `orient` use case, typed DTOs,
-`AgentStorageRead` port, ranking, budget truncation, confidence
-derivation. No CLI (Rust-43), no `check`/`explain` (later slices),
-no module/symbol focus (Rust-44/45). See
+Current state: Rust-43A. Repo-level `orient` use case with
+typed DTOs, `AgentStorageRead` port, ranking, budget
+truncation, confidence derivation, AND gate signal coverage
+(`GATE_PASS` / `GATE_FAIL` / `GATE_INCOMPLETE`) via dependency
+on `repo-graph-gate`. No CLI (Rust-43B), no `check`/`explain`
+(later slices), no module/symbol focus (Rust-44/45). See
 `docs/architecture/agent-orientation-contract.md` for the
 normative surface description.
 
@@ -509,24 +511,21 @@ normative surface description.
 - **`check` and `explain` use cases.** Only `orient` is
   implemented. The DTO envelope is shared; the aggregator
   pipelines are not yet written.
-- **CLI wiring and binary rename.** Rust-42 ships no CLI
-  command. The `rgr-rust` binary does not expose `orient` yet.
-  Wiring and rename land together in Rust-43.
-- **GATE_* signal emission.** Blocked on the gate.rs
-  relocation item below. Rust-42 unconditionally emits the
-  `GATE_UNAVAILABLE` limit code with a summary pointing at
-  this entry.
+- **CLI wiring and binary rename.** Rust-43A relocated gate.
+  Rust-43B will add the `rgr orient` command; Rust-43C will
+  rename the binary. The `rgr-rust` binary does not expose
+  `orient` yet.
 - **`COMPLEXITY_UNAVAILABLE`.** Cyclomatic complexity is not
-  produced by the Rust indexer; Rust-42 emits the limit code
-  unconditionally. Signal `HIGH_COMPLEXITY` is declared in the
-  enumeration but never constructed.
+  produced by the Rust indexer; the agent pipeline emits the
+  limit code unconditionally. Signal `HIGH_COMPLEXITY` is
+  declared in the enumeration but never constructed.
 - **`MODULE_DATA_UNAVAILABLE`.** Module discovery (Layer-1
   catalog) is TS-only. The Rust `MODULE_SUMMARY` signal falls
   back to raw snapshot totals (files, symbols, distinct file
   languages). The limit is emitted unconditionally so the
   agent can distinguish this fallback from a richer catalog.
-- **Next-action emission.** Rust-42's repo-level `next` list
-  is always empty. Structured `NextAction` records become
+- **Next-action emission.** The repo-level `next` list is
+  always empty. Structured `NextAction` records become
   meaningful under module/symbol focus.
 - **Staleness wording discipline.** `TRUST_STALE_SNAPSHOT`
   uses `get_stale_files` as its data source and describes the
@@ -538,35 +537,92 @@ normative surface description.
   `current_commit: Option<&str>` parameter, the wording and
   the signal code should both be revisited so the distinction
   between "parse-staleness" and "git-staleness" stays explicit.
+- **`now` is a required parameter on `orient()`.** The
+  orient entry point takes `now: &str` as its final argument
+  and threads it through to the gate aggregator, which passes
+  it to `GateStorageRead::find_waivers` for lexicographic ISO
+  8601 expiry comparison. The agent crate is deliberately
+  clock-free: the function signature forces callers (CLI,
+  daemon, tests) to supply an explicit wall-clock value.
+  A previous draft used a constant `AGENT_NOW_SENTINEL`
+  (`"9999-12-31T23:59:59Z"`) which silently mis-evaluated
+  finite-expiry waivers — a far-future sentinel makes
+  `expires_at > now` false for every realistic expiry, so
+  every finite waiver appears already expired. The sentinel
+  was removed and replaced with this explicit parameter.
+  Regression tests in
+  `rust/crates/agent/tests/orient_repo_gate.rs`
+  (`finite_waiver_applies_before_expiry_at_orient_level`,
+  `finite_waiver_does_not_apply_after_expiry_at_orient_level`,
+  `perpetual_waiver_applies_regardless_of_now`) pin the
+  correct semantics.
 
-### Gate.rs relocation (blocking multiple slices)
+### Gate.rs relocation — CLOSED in Rust-43A
 
-`gate.rs` currently lives inside the `rgr` binary crate at
-`rust/crates/rgr/src/gate.rs`. It contains obligation
-evaluation, waiver overlay, and gate reduction — pure policy
-code that the agent use-case layer needs in order to emit
-`GATE_PASS`, `GATE_FAIL`, and `GATE_INCOMPLETE` signals.
+Prior state (Rust-42): `gate.rs` lived inside the `rgr` binary
+crate. The agent crate had no way to call it, so orient
+emitted `GATE_UNAVAILABLE` as a limit in every response.
 
-Because a binary crate cannot be depended on, the `agent`
-crate has no way to call into `gate.rs` today. Rust-42
-therefore emits `GATE_UNAVAILABLE` as a limit code in every
-response and does not produce any gate signals.
+Action taken (Rust-43A):
 
-The relocation plan (not scheduled yet):
+1. Created `rust/crates/gate/` as a new policy crate
+   `repo-graph-gate`. Two-layer design:
+   - `compute(input: GateInput) -> GateReport` — pure, no
+     I/O, no storage, no clock.
+   - `assemble(storage: &impl GateStorageRead, ...) -> GateReport`
+     and `assemble_from_requirements(...)` — thin
+     orchestration around storage reads, delegates to
+     `compute`.
+2. Defined `GateStorageRead` port (agent-style concrete error,
+   mirroring `AgentStorageRead`). Implemented on
+   `StorageConnection` in `rust/crates/storage/src/gate_impl.rs`.
+3. Defined gate-owned DTOs (`GateRequirement`,
+   `GateObligation`, `GateWaiver`, `GateMeasurement`,
+   `GateInference`, `GateBoundaryDeclaration`,
+   `GateImportEdge`). Gate does NOT import
+   `repo_graph_storage::queries::*`.
+4. `rgr/src/main.rs::run_gate` updated to call
+   `repo_graph_gate::assemble`. Deleted `rgr/src/gate.rs`.
+   Stderr wording preserved verbatim via a
+   `format_gate_error` helper in the CLI (the gate crate
+   itself has CLI-agnostic error types).
+5. Added `repo-graph-agent` dependency on
+   `repo-graph-gate`. `orient_repo`'s trait bound widened to
+   `S: AgentStorageRead + GateStorageRead`. New
+   `aggregators::gate` aggregator emits `GATE_PASS`,
+   `GATE_FAIL`, `GATE_INCOMPLETE` from `GateReport.outcome`
+   (always `GateMode::Default`).
+6. Replaced `LimitCode::GateUnavailable` with
+   `LimitCode::GateNotConfigured`. The new limit fires only
+   when the repo has no active requirements.
+7. Gate-crate dependency direction: `agent → gate`,
+   `storage → gate`, `rgr → gate`. NO reverse edge. Gate has
+   no knowledge of agent orientation.
 
-1. Move `gate.rs` out of `rgr/src/` into a new library crate
-   `repo-graph-gate` (or a sub-module of `repo-graph-agent`,
-   TBD).
-2. Update `rgr/src/main.rs` to depend on the new crate for
-   the existing `gate` CLI command.
-3. Update `repo-graph-agent` to depend on the new crate and
-   add a `gate` aggregator that emits the three gate signals.
-4. Remove the `GATE_UNAVAILABLE` limit from the agent
-   pipeline (or downgrade it to only fire when the repo has
-   no requirement declarations at all).
+Behavioral preservation guarantees:
 
-This relocation was deliberately kept out of Rust-42 to avoid
-mixing scope-expansion into the first agent slice.
+- Default / strict / advisory mode semantics are byte-
+  identical to pre-relocation `gate.rs`. Exit code tests in
+  `rust/crates/rgr/tests/gate_command.rs` pass unchanged.
+- PASS-not-waivable divergence (Rust-25) preserved. Tests
+  `pass_obligation_stays_pass_even_with_matching_waiver` in
+  `compute.rs` and `gate_pass_with_waiver_stays_pass` in
+  `gate_command.rs` both pass.
+- Malformed measurement/inference error strings preserved
+  verbatim: `"malformed coverage measurement for {}: ..."`,
+  `"coverage measurement for {} missing numeric \"value\" field"`,
+  and the equivalents for complexity and hotspot. These are
+  emitted from the new `assemble.rs` pre-parse helpers.
+
+Future gate work:
+
+- Storage integration tests for `GateStorageRead` on
+  `StorageConnection` currently reuse the `gate_command.rs`
+  CLI suite (which exercises the full pipeline). A
+  dedicated `rust/crates/storage/tests/gate_impl.rs` that
+  isolates the adapter layer was deliberately not added in
+  this slice to keep the diff focused; adding one is a
+  small follow-up.
 
 ### Agent storage port narrowness
 

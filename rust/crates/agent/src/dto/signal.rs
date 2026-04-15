@@ -214,6 +214,31 @@ impl Serialize for SignalCode {
 // slice that introduces module/symbol focus.
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GatePassEvidence {
+	pub pass_count: u64,
+	pub waived_count: u64,
+	pub total_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GateFailEvidence {
+	pub fail_count: u64,
+	pub total_count: u64,
+	/// Flat `"{req_id}/{obligation_id}"` identifiers for the
+	/// failing obligations. Agents consume this as a follow-up
+	/// lookup key; full per-obligation detail stays in the raw
+	/// gate report which the `gate` CLI command surfaces.
+	pub failing_obligations: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GateIncompleteEvidence {
+	pub missing_count: u64,
+	pub unsupported_count: u64,
+	pub total_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ImportCyclesEvidence {
 	pub cycle_count: u64,
 	pub cycles: Vec<CycleEvidence>,
@@ -298,6 +323,9 @@ pub struct SnapshotInfoEvidence {
 /// today.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SignalEvidence {
+	GatePass(GatePassEvidence),
+	GateFail(GateFailEvidence),
+	GateIncomplete(GateIncompleteEvidence),
 	ImportCycles(ImportCyclesEvidence),
 	TrustLowResolution(TrustLowResolutionEvidence),
 	TrustStaleSnapshot(TrustStaleSnapshotEvidence),
@@ -311,6 +339,9 @@ pub enum SignalEvidence {
 impl Serialize for SignalEvidence {
 	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
 		match self {
+			Self::GatePass(e) => e.serialize(serializer),
+			Self::GateFail(e) => e.serialize(serializer),
+			Self::GateIncomplete(e) => e.serialize(serializer),
 			Self::ImportCycles(e) => e.serialize(serializer),
 			Self::TrustLowResolution(e) => e.serialize(serializer),
 			Self::TrustStaleSnapshot(e) => e.serialize(serializer),
@@ -330,6 +361,9 @@ impl SignalEvidence {
 	#[cfg(test)]
 	pub(crate) fn variant_name(&self) -> &'static str {
 		match self {
+			Self::GatePass(_) => "GatePass",
+			Self::GateFail(_) => "GateFail",
+			Self::GateIncomplete(_) => "GateIncomplete",
 			Self::ImportCycles(_) => "ImportCycles",
 			Self::TrustLowResolution(_) => "TrustLowResolution",
 			Self::TrustStaleSnapshot(_) => "TrustStaleSnapshot",
@@ -411,6 +445,60 @@ impl Signal {
 	}
 
 	// ── Named constructors (one per emitted code) ────────────
+
+	pub fn gate_pass(evidence: GatePassEvidence) -> Self {
+		let summary = if evidence.total_count == 0 {
+			"Gate has no obligations; trivially passing.".to_string()
+		} else if evidence.waived_count == 0 {
+			format!(
+				"Gate passes: all {} obligation{} pass.",
+				evidence.total_count,
+				if evidence.total_count == 1 { "" } else { "s" }
+			)
+		} else {
+			format!(
+				"Gate passes: {} of {} obligation{} pass, {} waived.",
+				evidence.pass_count,
+				evidence.total_count,
+				if evidence.total_count == 1 { "" } else { "s" },
+				evidence.waived_count,
+			)
+		};
+		Self::build(
+			SignalCode::GatePass,
+			summary,
+			SignalEvidence::GatePass(evidence),
+			SourceRef::GateAssemble,
+		)
+	}
+
+	pub fn gate_fail(evidence: GateFailEvidence) -> Self {
+		let summary = format!(
+			"Gate fails: {} of {} obligation{} failing.",
+			evidence.fail_count,
+			evidence.total_count,
+			if evidence.total_count == 1 { "" } else { "s" }
+		);
+		Self::build(
+			SignalCode::GateFail,
+			summary,
+			SignalEvidence::GateFail(evidence),
+			SourceRef::GateAssemble,
+		)
+	}
+
+	pub fn gate_incomplete(evidence: GateIncompleteEvidence) -> Self {
+		let summary = format!(
+			"Gate incomplete: {} missing, {} unsupported (of {}).",
+			evidence.missing_count, evidence.unsupported_count, evidence.total_count
+		);
+		Self::build(
+			SignalCode::GateIncomplete,
+			summary,
+			SignalEvidence::GateIncomplete(evidence),
+			SourceRef::GateAssemble,
+		)
+	}
 
 	pub fn import_cycles(evidence: ImportCyclesEvidence) -> Self {
 		let summary = format!(

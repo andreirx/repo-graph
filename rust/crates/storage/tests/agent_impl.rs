@@ -294,7 +294,14 @@ fn orient_runs_over_real_storage_connection() {
 	insert_repo(&storage, "r1", "my-repo");
 	let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	let result = orient(&mut storage, "r1", None, Budget::Large).unwrap();
+	let result = orient(
+		&mut storage,
+		"r1",
+		None,
+		Budget::Large,
+		"2026-04-15T00:00:00Z",
+	)
+	.unwrap();
 	assert_eq!(result.schema, ORIENT_SCHEMA);
 	assert_eq!(result.repo, "my-repo");
 	assert_eq!(result.snapshot, snapshot_uid);

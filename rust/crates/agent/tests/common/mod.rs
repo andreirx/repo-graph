@@ -25,6 +25,18 @@ use repo_graph_agent::{
 	AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
 	AgentStorageError, AgentStorageRead, AgentTrustSummary,
 };
+use repo_graph_gate::{
+	GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
+	GateRequirement, GateStorageError, GateStorageRead, GateWaiver,
+};
+
+/// Shared fixed "now" for all agent integration tests.
+///
+/// Using a constant makes waiver expiry tests deterministic and
+/// prevents test drift as the real clock advances. Every test
+/// that does not care about expiry passes `TEST_NOW`. Expiry
+/// tests pass specific values relative to this anchor.
+pub const TEST_NOW: &str = "2026-04-15T00:00:00Z";
 
 #[derive(Default)]
 pub struct FakeAgentStorage {
@@ -38,9 +50,28 @@ pub struct FakeAgentStorage {
 		HashMap<(String, String, String), Vec<AgentImportEdge>>,
 	pub repo_summaries: HashMap<String, AgentRepoSummary>,
 	pub trust_summaries: HashMap<String, AgentTrustSummary>,
+
+	// ── Gate-port seed data (Rust-43A) ──────────────────────
+	//
+	// The fake implements BOTH `AgentStorageRead` and
+	// `GateStorageRead` because the orient pipeline's trait
+	// bound is `AgentStorageRead + GateStorageRead`. Each gate
+	// port method has its own seed field so tests can drive
+	// the gate aggregator independently of the agent port
+	// seeds.
+	pub gate_requirements: HashMap<String, Vec<GateRequirement>>,
+	pub gate_boundary_declarations: HashMap<String, Vec<GateBoundaryDeclaration>>,
+	pub gate_boundary_imports:
+		HashMap<(String, String, String), Vec<GateImportEdge>>,
+	pub gate_coverage: HashMap<String, Vec<GateMeasurement>>,
+	pub gate_complexity: HashMap<String, Vec<GateMeasurement>>,
+	pub gate_hotspots: HashMap<String, Vec<GateInference>>,
+	pub gate_waivers: HashMap<(String, String, i64, String), Vec<GateWaiver>>,
+
 	/// If set to the name of a port operation, the fake returns
 	/// `AgentStorageError` from that operation. Used to verify
-	/// error propagation.
+	/// error propagation. Shared between both traits — operation
+	/// identifiers are globally unique.
 	pub force_error_on: RefCell<Option<&'static str>>,
 }
 
@@ -220,5 +251,153 @@ impl AgentStorageRead for FakeAgentStorage {
 				enrichment_eligible: 0,
 				enrichment_enriched: 0,
 			}))
+	}
+}
+
+// ── Gate port impl (Rust-43A) ────────────────────────────────────
+//
+// Same fake type, distinct trait impl block for clarity. Each
+// method follows the same shape as the agent impl above:
+// check `force_error_on`, then look up in the gate_* seed map,
+// return cloned value or default empty.
+//
+// The gate port uses its own error type (`GateStorageError`),
+// distinct from `AgentStorageError`. This mirrors production
+// where the gate storage adapter and the agent storage adapter
+// produce distinct error types even though they both wrap
+// `StorageError` internally.
+
+impl FakeAgentStorage {
+	fn fail_if_forced_gate(
+		&self,
+		operation: &'static str,
+	) -> Result<(), GateStorageError> {
+		if let Some(op) = *self.force_error_on.borrow() {
+			if op == operation {
+				return Err(GateStorageError::new(
+					operation,
+					format!("forced failure on {}", operation),
+				));
+			}
+		}
+		Ok(())
+	}
+}
+
+impl GateStorageRead for FakeAgentStorage {
+	fn get_active_requirements(
+		&self,
+		repo_uid: &str,
+	) -> Result<Vec<GateRequirement>, GateStorageError> {
+		self.fail_if_forced_gate("get_active_requirements")?;
+		Ok(self
+			.gate_requirements
+			.get(repo_uid)
+			.cloned()
+			.unwrap_or_default())
+	}
+
+	fn get_boundary_declarations(
+		&self,
+		repo_uid: &str,
+	) -> Result<Vec<GateBoundaryDeclaration>, GateStorageError> {
+		self.fail_if_forced_gate("get_boundary_declarations")?;
+		Ok(self
+			.gate_boundary_declarations
+			.get(repo_uid)
+			.cloned()
+			.unwrap_or_default())
+	}
+
+	fn find_boundary_imports(
+		&self,
+		snapshot_uid: &str,
+		source_prefix: &str,
+		target_prefix: &str,
+	) -> Result<Vec<GateImportEdge>, GateStorageError> {
+		self.fail_if_forced_gate("find_boundary_imports")?;
+		let key = (
+			snapshot_uid.to_string(),
+			source_prefix.to_string(),
+			target_prefix.to_string(),
+		);
+		Ok(self
+			.gate_boundary_imports
+			.get(&key)
+			.cloned()
+			.unwrap_or_default())
+	}
+
+	fn get_coverage_measurements(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<GateMeasurement>, GateStorageError> {
+		self.fail_if_forced_gate("get_coverage_measurements")?;
+		Ok(self.gate_coverage.get(snapshot_uid).cloned().unwrap_or_default())
+	}
+
+	fn get_complexity_measurements(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<GateMeasurement>, GateStorageError> {
+		self.fail_if_forced_gate("get_complexity_measurements")?;
+		Ok(self
+			.gate_complexity
+			.get(snapshot_uid)
+			.cloned()
+			.unwrap_or_default())
+	}
+
+	fn get_hotspot_inferences(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<GateInference>, GateStorageError> {
+		self.fail_if_forced_gate("get_hotspot_inferences")?;
+		Ok(self.gate_hotspots.get(snapshot_uid).cloned().unwrap_or_default())
+	}
+
+	fn find_waivers(
+		&self,
+		repo_uid: &str,
+		req_id: &str,
+		req_version: i64,
+		obligation_id: &str,
+		now: &str,
+	) -> Result<Vec<GateWaiver>, GateStorageError> {
+		self.fail_if_forced_gate("find_waivers")?;
+		let key = (
+			repo_uid.to_string(),
+			req_id.to_string(),
+			req_version,
+			obligation_id.to_string(),
+		);
+		let all = self
+			.gate_waivers
+			.get(&key)
+			.cloned()
+			.unwrap_or_default();
+
+		// Apply expiry filtering exactly like the real SQL
+		// path in `StorageConnection::find_active_waivers`:
+		//
+		//   WHERE expires_at IS NULL OR expires_at > now
+		//
+		// Comparison is lexicographic over ISO 8601 strings.
+		// Waivers with no `expires_at` are always active.
+		// Waivers with `expires_at > now` are still active.
+		// Waivers with `expires_at <= now` are filtered out.
+		//
+		// The P2 review identified that the earlier fake
+		// ignored `now` entirely, which masked the orient
+		// sentinel bug. Real filtering here is how the
+		// agent-side tests catch any future regression.
+		let active: Vec<GateWaiver> = all
+			.into_iter()
+			.filter(|w| match &w.expires_at {
+				None => true,
+				Some(exp) => exp.as_str() > now,
+			})
+			.collect();
+		Ok(active)
 	}
 }

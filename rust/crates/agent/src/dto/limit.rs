@@ -27,12 +27,22 @@ use serde::{Serialize, Serializer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LimitCode {
-	/// Gate evaluation is unavailable because obligation
-	/// evaluation logic currently lives in the `rgr` binary crate
-	/// (`gate.rs`) and has not yet been relocated into a library
-	/// crate the agent can depend on. See
-	/// `docs/TECH-DEBT.md` — "gate.rs relocation".
-	GateUnavailable,
+	/// The repo has no active requirement declarations, so the
+	/// gate pipeline has nothing to evaluate. This is an
+	/// absence-of-configured-policy state, NOT a gate result.
+	/// It does not become a `GATE_PASS` (which would imply
+	/// obligations existed and all passed). It is a limit so
+	/// the agent can distinguish "gate not configured" from
+	/// "gate configured and passing".
+	///
+	/// Replaces the `GATE_UNAVAILABLE` code used during Rust-42,
+	/// which existed only because gate policy was trapped in the
+	/// `rgr` binary crate and could not be called from the agent
+	/// layer. After Rust-43A relocated gate into
+	/// `repo-graph-gate`, gate evaluation IS available — the
+	/// relevant "unavailable" state shifted from tooling to
+	/// policy configuration.
+	GateNotConfigured,
 
 	/// Module discovery data (Layer-1 discovered modules catalog)
 	/// is not yet queryable through the Rust storage path. The
@@ -49,7 +59,7 @@ pub enum LimitCode {
 impl LimitCode {
 	pub fn as_str(self) -> &'static str {
 		match self {
-			Self::GateUnavailable => "GATE_UNAVAILABLE",
+			Self::GateNotConfigured => "GATE_NOT_CONFIGURED",
 			Self::ModuleDataUnavailable => "MODULE_DATA_UNAVAILABLE",
 			Self::ComplexityUnavailable => "COMPLEXITY_UNAVAILABLE",
 		}
@@ -60,9 +70,9 @@ impl LimitCode {
 	/// contract change.
 	pub fn summary(self) -> &'static str {
 		match self {
-			Self::GateUnavailable => {
-				"Gate evaluation unavailable until gate policy is moved \
-				 into a shared library crate."
+			Self::GateNotConfigured => {
+				"No active requirement declarations. Gate has no \
+				 obligations to evaluate."
 			}
 			Self::ModuleDataUnavailable => {
 				"Module discovery data is not queryable through the Rust \
@@ -105,15 +115,15 @@ mod tests {
 
 	#[test]
 	fn limit_code_serializes_as_screaming_snake() {
-		let s = serde_json::to_string(&LimitCode::GateUnavailable).unwrap();
-		assert_eq!(s, "\"GATE_UNAVAILABLE\"");
+		let s = serde_json::to_string(&LimitCode::GateNotConfigured).unwrap();
+		assert_eq!(s, "\"GATE_NOT_CONFIGURED\"");
 	}
 
 	#[test]
 	fn limit_carries_canonical_summary() {
-		let l = Limit::from_code(LimitCode::GateUnavailable);
-		assert_eq!(l.code, LimitCode::GateUnavailable);
-		assert!(l.summary.contains("Gate evaluation"));
+		let l = Limit::from_code(LimitCode::GateNotConfigured);
+		assert_eq!(l.code, LimitCode::GateNotConfigured);
+		assert!(l.summary.contains("requirement declarations"));
 	}
 
 	#[test]

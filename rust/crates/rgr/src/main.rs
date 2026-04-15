@@ -24,10 +24,60 @@
 //!   1 — usage error (gate: any fail)
 //!   2 — runtime error (gate: incomplete)
 
-mod gate;
+// Gate policy was relocated out of this binary crate into
+// `repo-graph-gate` during Rust-43A. The `run_gate` function
+// below now calls into the new crate through the
+// `GateStorageRead` impl in `repo-graph-storage`. No local
+// `mod gate;` declaration.
 
 use std::path::Path;
 use std::process::ExitCode;
+
+/// Format a `GateError` using the stderr wording that the
+/// pre-relocation `rgr-rust gate` command produced. The
+/// relocation changed the error types (gate now returns
+/// `GateError` instead of free-form `String` diagnostics), but
+/// the CLI test suite pins specific substrings on stderr. This
+/// function adapts the new typed errors back to those strings
+/// without re-introducing policy coupling in the gate crate.
+///
+/// When a new operation is added to the gate port, its mapping
+/// goes here — not in the gate crate itself, which must stay
+/// CLI-agnostic.
+fn format_gate_error(err: &repo_graph_gate::GateError) -> String {
+	use repo_graph_gate::GateError;
+	match err {
+		GateError::Storage(e) => match e.operation {
+			"find_waivers" => format!("failed to read waivers: {}", e.message),
+			"get_boundary_declarations" => {
+				format!("failed to read boundary declarations: {}", e.message)
+			}
+			"find_boundary_imports" => {
+				format!("failed to query imports between paths: {}", e.message)
+			}
+			"get_coverage_measurements" => {
+				format!("failed to read coverage measurements: {}", e.message)
+			}
+			"get_complexity_measurements" => {
+				format!("failed to read complexity measurements: {}", e.message)
+			}
+			"get_hotspot_inferences" => {
+				format!("failed to read hotspot inferences: {}", e.message)
+			}
+			// `get_active_requirements` errors bubble up the
+			// StorageError's own Display text (which already
+			// contains the "malformed requirement ..." wording
+			// the old CLI printed).
+			_ => e.message.clone(),
+		},
+		// Malformed measurement/inference rows: the gate
+		// assemble layer built the diagnostic string verbatim
+		// to match the pre-relocation format
+		// ("malformed X measurement for Y: Z" etc.). Passing
+		// `reason` directly preserves that.
+		GateError::MalformedEvidence { reason, .. } => reason.clone(),
+	}
+}
 
 fn main() -> ExitCode {
 	let args: Vec<String> = std::env::args().collect();
@@ -786,11 +836,11 @@ fn run_gate(args: &[String]) -> ExitCode {
 	}
 
 	let mode = if strict {
-		gate::GateMode::Strict
+		repo_graph_gate::GateMode::Strict
 	} else if advisory {
-		gate::GateMode::Advisory
+		repo_graph_gate::GateMode::Advisory
 	} else {
-		gate::GateMode::Default
+		repo_graph_gate::GateMode::Default
 	};
 
 	let db_path = Path::new(positional[0]);
@@ -816,36 +866,33 @@ fn run_gate(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// Load active requirement declarations.
-	let requirements = match storage.get_active_requirement_declarations(repo_uid) {
-		Ok(r) => r,
-		Err(e) => {
-			eprintln!("error: {}", e);
-			return ExitCode::from(2);
-		}
-	};
-
 	// Current UTC time for waiver expiry comparison (ISO 8601).
 	let now = utc_now_iso8601();
 
-	// Evaluate obligations (with waiver overlay).
-	let obligations = match gate::evaluate_obligations(
+	// Delegate the entire gate pipeline (requirement load +
+	// obligation evaluation + waiver overlay + mode reduction)
+	// to the relocated `repo-graph-gate` crate. The
+	// `GateStorageRead` trait is implemented on
+	// `StorageConnection` in `repo-graph-storage::gate_impl`.
+	//
+	// Error formatting preserves the pre-relocation stderr
+	// wording used by `rgr-rust gate` so the test suite's
+	// regression assertions stay valid. New callers of the
+	// gate crate should use `GateError::Display` directly.
+	let report = match repo_graph_gate::assemble(
 		&storage,
-		&snapshot.snapshot_uid,
 		repo_uid,
-		&requirements,
+		&snapshot.snapshot_uid,
+		mode,
 		&now,
 	) {
-		Ok(o) => o,
+		Ok(r) => r,
 		Err(e) => {
-			eprintln!("error: {}", e);
+			eprintln!("error: {}", format_gate_error(&e));
 			return ExitCode::from(2);
 		}
 	};
-
-	// Reduce to gate outcome.
-	let gate_result = gate::reduce_to_gate_outcome(&obligations, mode);
-	let exit_code = gate_result.exit_code;
+	let exit_code = report.outcome.exit_code;
 
 	// Repo name for the report.
 	use repo_graph_storage::types::RepoRef;
@@ -864,13 +911,15 @@ fn run_gate(args: &[String]) -> ExitCode {
 		.unwrap_or(serde_json::Value::Null);
 
 	// Gate report JSON (TS-compatible shape, NOT QueryResult envelope).
+	// Field names and nesting preserved from the pre-relocation
+	// gate.rs output so `rgr-rust gate` consumers see no shape change.
 	let output = serde_json::json!({
 		"command": "gate",
 		"repo": repo_name,
 		"snapshot": snapshot.snapshot_uid,
 		"toolchain": toolchain,
-		"obligations": obligations,
-		"gate": gate_result,
+		"obligations": report.obligations,
+		"gate": report.outcome,
 	});
 
 	match serde_json::to_string_pretty(&output) {

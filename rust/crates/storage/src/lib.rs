@@ -162,6 +162,7 @@ pub(crate) mod diagnostic;
 pub mod error;
 pub mod migrations;
 mod agent_impl; // AgentStorageRead impl for StorageConnection (Rust-42)
+mod gate_impl; // GateStorageRead impl for StorageConnection (Rust-43A)
 mod indexer_impl; // SnapshotLifecyclePort + FileCatalogPort impl (R5-C)
 pub mod queries; // Read-side graph queries (R10+)
 mod trust_impl; // TrustStorageRead impl for StorageConnection (R4-E/F)
