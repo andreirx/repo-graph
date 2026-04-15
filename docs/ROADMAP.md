@@ -115,8 +115,15 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   (idempotent, INSERT OR IGNORE). `deactivate_declaration` for
   soft-delete. Supports boundary, requirement, waiver kinds.
   Deliberate divergence from TS random UIDs (see TECH-DEBT.md).
-- Deferred: declare CLI commands (boundary, requirement, waiver),
-  evidence, obligations
+- `declare boundary`: Rust-33 adds the first governance write
+  CLI command. `rgr-rust declare boundary <db> <repo> <module>
+  --forbids <target> [--reason <text>]`. Uses Rust-32 storage
+  substrate with semantic identity key. Idempotent (reason text
+  does not affect UID). JSON output with declaration_uid, kind,
+  target, forbids, inserted. Proven end-to-end: declared boundary
+  is visible to `violations` command.
+- Deferred: declare requirement, declare waiver, evidence,
+  obligations
 - Deferred: measurement commands, table output, full edge-type set
 
 ### Multi-language graph engine

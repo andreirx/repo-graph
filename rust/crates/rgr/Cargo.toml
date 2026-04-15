@@ -26,6 +26,7 @@
 # Rust-28: coverage_threshold gate method (reads line_coverage measurements).
 # Rust-29: complexity_threshold gate method (reads cyclomatic_complexity measurements).
 # Rust-31: hotspot_threshold gate method (reads hotspot_score inferences).
+# Rust-33: declare boundary CLI command (first governance write path).
 #
 # No formatting-heavy UX.
 
