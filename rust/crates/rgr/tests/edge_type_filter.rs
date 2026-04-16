@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn binary_path() -> PathBuf {
-	PathBuf::from(env!("CARGO_BIN_EXE_rgr-rust"))
+	PathBuf::from(env!("CARGO_BIN_EXE_rmap"))
 }
 
 /// Build a fixture that produces both CALLS and INSTANTIATES edges.

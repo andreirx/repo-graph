@@ -62,7 +62,7 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Shipped
 
-### Rust structural CLI (`rgr-rust-structural-v1`)
+### Rust structural CLI (`rmap-structural-v1`)
 - 10 commands: index, refresh, trust, callers, callees, path, imports, dead, cycles, stats
 - JSON-only output with TS-compatible QueryResult envelopes
 - Exact symbol resolution (SYMBOL-only, 3-step)
@@ -71,7 +71,7 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - Module-level cycle detection, structural metrics, dead-code analysis
 - Cross-runtime interop proven (19 tests: Rust writes, TS reads + formats)
 - Contract tests, envelope tests, per-command deterministic test matrices
-- Milestone doc: `docs/milestones/rgr-rust-structural-v1.md`
+- Milestone doc: `docs/milestones/rmap-structural-v1.md`
 - Built across Rust-7B through Rust-20 (14 slices)
 
 ### Rust governance CLI (post-v1)
@@ -116,7 +116,7 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   soft-delete. Supports boundary, requirement, waiver kinds.
   Deliberate divergence from TS random UIDs (see TECH-DEBT.md).
 - `declare boundary`: Rust-33 adds the first governance write
-  CLI command. `rgr-rust declare boundary <db> <repo> <module>
+  CLI command. `rmap declare boundary <db> <repo> <module>
   --forbids <target> [--reason <text>]`. Uses Rust-32 storage
   substrate with semantic identity key. Idempotent (reason text
   does not affect UID). JSON output with declaration_uid, kind,

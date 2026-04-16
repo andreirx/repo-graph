@@ -1,24 +1,24 @@
 //! Minimal Rust CLI for repo-graph.
 //!
 //! Commands:
-//!   rgr-rust index   <repo_path> <db_path>
-//!   rgr-rust refresh <repo_path> <db_path>
-//!   rgr-rust trust   <db_path> <repo_uid>
-//!   rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]
-//!   rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]
-//!   rgr-rust path    <db_path> <repo_uid> <from> <to>
-//!   rgr-rust imports <db_path> <repo_uid> <file_path>
-//!   rgr-rust violations <db_path> <repo_uid>
-//!   rgr-rust dead    <db_path> <repo_uid> [kind]
-//!   rgr-rust cycles  <db_path> <repo_uid>
-//!   rgr-rust stats   <db_path> <repo_uid>
+//!   rmap index   <repo_path> <db_path>
+//!   rmap refresh <repo_path> <db_path>
+//!   rmap trust   <db_path> <repo_uid>
+//!   rmap callers <db_path> <repo_uid> <symbol> [--edge-types <types>]
+//!   rmap callees <db_path> <repo_uid> <symbol> [--edge-types <types>]
+//!   rmap path    <db_path> <repo_uid> <from> <to>
+//!   rmap imports <db_path> <repo_uid> <file_path>
+//!   rmap violations <db_path> <repo_uid>
+//!   rmap dead    <db_path> <repo_uid> [kind]
+//!   rmap cycles  <db_path> <repo_uid>
+//!   rmap stats   <db_path> <repo_uid>
 //!
-//!   rgr-rust gate    <db_path> <repo_uid> [--strict | --advisory]
-//!   rgr-rust orient  <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]
+//!   rmap gate    <db_path> <repo_uid> [--strict | --advisory]
+//!   rmap orient  <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]
 //!
-//!   rgr-rust declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]
-//!   rgr-rust declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
-//!   rgr-rust declare deactivate <db_path> <declaration_uid>
+//!   rmap declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]
+//!   rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
+//!   rmap declare deactivate <db_path> <declaration_uid>
 //!
 //! Exit codes:
 //!   0 — success (gate: all pass)
@@ -36,7 +36,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 /// Format a `GateError` using the stderr wording that the
-/// pre-relocation `rgr-rust gate` command produced. The
+/// pre-relocation `rmap gate` command produced. The
 /// relocation changed the error types (gate now returns
 /// `GateError` instead of free-form `String` diagnostics), but
 /// the CLI test suite pins specific substrings on stderr. This
@@ -114,28 +114,28 @@ fn main() -> ExitCode {
 
 fn print_usage() {
 	eprintln!("usage:");
-	eprintln!("  rgr-rust index   <repo_path> <db_path>");
-	eprintln!("  rgr-rust refresh <repo_path> <db_path>");
-	eprintln!("  rgr-rust trust   <db_path> <repo_uid>");
-	eprintln!("  rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]");
-	eprintln!("  rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]");
-	eprintln!("  rgr-rust path    <db_path> <repo_uid> <from> <to>");
-	eprintln!("  rgr-rust imports <db_path> <repo_uid> <file_path>");
-	eprintln!("  rgr-rust violations <db_path> <repo_uid>");
-	eprintln!("  rgr-rust gate       <db_path> <repo_uid>");
-	eprintln!("  rgr-rust orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]");
-	eprintln!("  rgr-rust dead    <db_path> <repo_uid> [kind]");
-	eprintln!("  rgr-rust cycles  <db_path> <repo_uid>");
-	eprintln!("  rgr-rust stats   <db_path> <repo_uid>");
-	eprintln!("  rgr-rust declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]");
-	eprintln!("  rgr-rust declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]");
+	eprintln!("  rmap index   <repo_path> <db_path>");
+	eprintln!("  rmap refresh <repo_path> <db_path>");
+	eprintln!("  rmap trust   <db_path> <repo_uid>");
+	eprintln!("  rmap callers <db_path> <repo_uid> <symbol> [--edge-types <types>]");
+	eprintln!("  rmap callees <db_path> <repo_uid> <symbol> [--edge-types <types>]");
+	eprintln!("  rmap path    <db_path> <repo_uid> <from> <to>");
+	eprintln!("  rmap imports <db_path> <repo_uid> <file_path>");
+	eprintln!("  rmap violations <db_path> <repo_uid>");
+	eprintln!("  rmap gate       <db_path> <repo_uid>");
+	eprintln!("  rmap orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]");
+	eprintln!("  rmap dead    <db_path> <repo_uid> [kind]");
+	eprintln!("  rmap cycles  <db_path> <repo_uid>");
+	eprintln!("  rmap stats   <db_path> <repo_uid>");
+	eprintln!("  rmap declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]");
+	eprintln!("  rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]");
 }
 
 // ── index command ────────────────────────────────────────────────
 
 fn run_index(args: &[String]) -> ExitCode {
 	if args.len() != 2 {
-		eprintln!("usage: rgr-rust index <repo_path> <db_path>");
+		eprintln!("usage: rmap index <repo_path> <db_path>");
 		return ExitCode::from(1);
 	}
 
@@ -179,7 +179,7 @@ fn run_index(args: &[String]) -> ExitCode {
 
 fn run_refresh(args: &[String]) -> ExitCode {
 	if args.len() != 2 {
-		eprintln!("usage: rgr-rust refresh <repo_path> <db_path>");
+		eprintln!("usage: rmap refresh <repo_path> <db_path>");
 		return ExitCode::from(1);
 	}
 
@@ -223,7 +223,7 @@ fn run_refresh(args: &[String]) -> ExitCode {
 
 fn run_trust(args: &[String]) -> ExitCode {
 	if args.len() != 2 {
-		eprintln!("usage: rgr-rust trust <db_path> <repo_uid>");
+		eprintln!("usage: rmap trust <db_path> <repo_uid>");
 		return ExitCode::from(1);
 	}
 
@@ -299,12 +299,12 @@ fn run_callers(args: &[String]) -> ExitCode {
 		Ok(v) => v,
 		Err(e) => {
 			eprintln!("error: {}", e);
-			eprintln!("usage: rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]");
+			eprintln!("usage: rmap callers <db_path> <repo_uid> <symbol> [--edge-types <types>]");
 			return ExitCode::from(1);
 		}
 	};
 	if positional.len() != 3 {
-		eprintln!("usage: rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <types>]");
+		eprintln!("usage: rmap callers <db_path> <repo_uid> <symbol> [--edge-types <types>]");
 		return ExitCode::from(1);
 	}
 
@@ -398,12 +398,12 @@ fn run_callees(args: &[String]) -> ExitCode {
 		Ok(v) => v,
 		Err(e) => {
 			eprintln!("error: {}", e);
-			eprintln!("usage: rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]");
+			eprintln!("usage: rmap callees <db_path> <repo_uid> <symbol> [--edge-types <types>]");
 			return ExitCode::from(1);
 		}
 	};
 	if positional.len() != 3 {
-		eprintln!("usage: rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <types>]");
+		eprintln!("usage: rmap callees <db_path> <repo_uid> <symbol> [--edge-types <types>]");
 		return ExitCode::from(1);
 	}
 
@@ -494,7 +494,7 @@ fn run_callees(args: &[String]) -> ExitCode {
 
 fn run_path(args: &[String]) -> ExitCode {
 	if args.len() != 4 {
-		eprintln!("usage: rgr-rust path <db_path> <repo_uid> <from> <to>");
+		eprintln!("usage: rmap path <db_path> <repo_uid> <from> <to>");
 		return ExitCode::from(1);
 	}
 
@@ -613,7 +613,7 @@ fn run_path(args: &[String]) -> ExitCode {
 
 fn run_imports(args: &[String]) -> ExitCode {
 	if args.len() != 3 {
-		eprintln!("usage: rgr-rust imports <db_path> <repo_uid> <file_path>");
+		eprintln!("usage: rmap imports <db_path> <repo_uid> <file_path>");
 		return ExitCode::from(1);
 	}
 
@@ -699,7 +699,7 @@ fn run_imports(args: &[String]) -> ExitCode {
 
 fn run_violations(args: &[String]) -> ExitCode {
 	if args.len() != 2 {
-		eprintln!("usage: rgr-rust violations <db_path> <repo_uid>");
+		eprintln!("usage: rmap violations <db_path> <repo_uid>");
 		return ExitCode::from(1);
 	}
 
@@ -822,7 +822,7 @@ fn run_gate(args: &[String]) -> ExitCode {
 			"--advisory" => advisory = true,
 			_ if arg.starts_with('-') => {
 				eprintln!("error: unknown flag: {}", arg);
-				eprintln!("usage: rgr-rust gate <db_path> <repo_uid> [--strict | --advisory]");
+				eprintln!("usage: rmap gate <db_path> <repo_uid> [--strict | --advisory]");
 				return ExitCode::from(1);
 			}
 			_ => positional.push(arg),
@@ -830,7 +830,7 @@ fn run_gate(args: &[String]) -> ExitCode {
 	}
 
 	if positional.len() != 2 {
-		eprintln!("usage: rgr-rust gate <db_path> <repo_uid> [--strict | --advisory]");
+		eprintln!("usage: rmap gate <db_path> <repo_uid> [--strict | --advisory]");
 		return ExitCode::from(1);
 	}
 
@@ -880,7 +880,7 @@ fn run_gate(args: &[String]) -> ExitCode {
 	// `StorageConnection` in `repo-graph-storage::gate_impl`.
 	//
 	// Error formatting preserves the pre-relocation stderr
-	// wording used by `rgr-rust gate` so the test suite's
+	// wording used by `rmap gate` so the test suite's
 	// regression assertions stay valid. New callers of the
 	// gate crate should use `GateError::Display` directly.
 	let report = match repo_graph_gate::assemble(
@@ -916,7 +916,7 @@ fn run_gate(args: &[String]) -> ExitCode {
 
 	// Gate report JSON (TS-compatible shape, NOT QueryResult envelope).
 	// Field names and nesting preserved from the pre-relocation
-	// gate.rs output so `rgr-rust gate` consumers see no shape change.
+	// gate.rs output so `rmap gate` consumers see no shape change.
 	let output = serde_json::json!({
 		"command": "gate",
 		"repo": repo_name,
@@ -940,7 +940,7 @@ fn run_gate(args: &[String]) -> ExitCode {
 
 // ── orient command (Rust-43B) ────────────────────────────────────
 //
-// `rgr-rust orient <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]`
+// `rmap orient <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]`
 //
 // First exposure of the agent orientation surface. Calls
 // `repo_graph_agent::orient` with a caller-supplied `now` drawn
@@ -1020,7 +1020,7 @@ fn run_orient(args: &[String]) -> ExitCode {
 					}
 				};
 				// Same flag-as-value guard as --budget. Without
-				// this check `rgr-rust orient <db> <repo>
+				// this check `rmap orient <db> <repo>
 				// --focus --bogus` would silently accept
 				// "--bogus" as a focus string and then exit
 				// through the FocusNotImplementedYet runtime
@@ -1115,7 +1115,7 @@ fn run_orient(args: &[String]) -> ExitCode {
 
 fn print_orient_usage() {
 	eprintln!(
-		"usage: rgr-rust orient <db_path> <repo_uid> \
+		"usage: rmap orient <db_path> <repo_uid> \
 		 [--budget small|medium|large] [--focus <string>]"
 	);
 }
@@ -1124,7 +1124,7 @@ fn print_orient_usage() {
 
 fn run_dead(args: &[String]) -> ExitCode {
 	if args.len() < 2 || args.len() > 3 {
-		eprintln!("usage: rgr-rust dead <db_path> <repo_uid> [kind]");
+		eprintln!("usage: rmap dead <db_path> <repo_uid> [kind]");
 		return ExitCode::from(1);
 	}
 
@@ -1210,7 +1210,7 @@ fn run_dead(args: &[String]) -> ExitCode {
 
 fn run_cycles(args: &[String]) -> ExitCode {
 	if args.len() != 2 {
-		eprintln!("usage: rgr-rust cycles <db_path> <repo_uid>");
+		eprintln!("usage: rmap cycles <db_path> <repo_uid>");
 		return ExitCode::from(1);
 	}
 
@@ -1276,7 +1276,7 @@ fn run_cycles(args: &[String]) -> ExitCode {
 
 fn run_stats(args: &[String]) -> ExitCode {
 	if args.len() != 2 {
-		eprintln!("usage: rgr-rust stats <db_path> <repo_uid>");
+		eprintln!("usage: rmap stats <db_path> <repo_uid>");
 		return ExitCode::from(1);
 	}
 
@@ -1340,7 +1340,7 @@ fn run_stats(args: &[String]) -> ExitCode {
 
 fn run_declare(args: &[String]) -> ExitCode {
 	if args.is_empty() {
-		eprintln!("usage: rgr-rust declare <subcommand> ...");
+		eprintln!("usage: rmap declare <subcommand> ...");
 		eprintln!("subcommands: boundary, requirement, waiver, deactivate, supersede");
 		return ExitCode::from(1);
 	}
@@ -1404,7 +1404,7 @@ fn run_declare_boundary(args: &[String]) -> ExitCode {
 			}
 			other if other.starts_with('-') => {
 				eprintln!("error: unknown flag: {}", other);
-				eprintln!("usage: rgr-rust declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]");
+				eprintln!("usage: rmap declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]");
 				return ExitCode::from(1);
 			}
 			_ => positional.push(&args[i]),
@@ -1413,7 +1413,7 @@ fn run_declare_boundary(args: &[String]) -> ExitCode {
 	}
 
 	if positional.len() != 3 {
-		eprintln!("usage: rgr-rust declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]");
+		eprintln!("usage: rmap declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]");
 		return ExitCode::from(1);
 	}
 
@@ -1485,7 +1485,7 @@ fn run_declare_boundary(args: &[String]) -> ExitCode {
 const VALID_OPERATORS: &[&str] = &[">=", ">", "<=", "<", "=="];
 
 const DECLARE_REQUIREMENT_USAGE: &str =
-	"usage: rgr-rust declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]";
+	"usage: rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]";
 
 fn run_declare_requirement(args: &[String]) -> ExitCode {
 	let mut positional = Vec::new();
@@ -1703,7 +1703,7 @@ fn run_declare_requirement(args: &[String]) -> ExitCode {
 
 fn run_declare_deactivate(args: &[String]) -> ExitCode {
 	if args.len() != 2 {
-		eprintln!("usage: rgr-rust declare deactivate <db_path> <declaration_uid>");
+		eprintln!("usage: rmap declare deactivate <db_path> <declaration_uid>");
 		return ExitCode::from(1);
 	}
 
@@ -1740,7 +1740,7 @@ fn run_declare_deactivate(args: &[String]) -> ExitCode {
 }
 
 const DECLARE_WAIVER_USAGE: &str =
-	"usage: rgr-rust declare waiver <db_path> <repo_uid> <req_id> --requirement-version <n> --obligation-id <id> --reason <text> [--expires-at <iso>] [--created-by <actor>] [--rationale-category <cat>] [--policy-basis <text>]";
+	"usage: rmap declare waiver <db_path> <repo_uid> <req_id> --requirement-version <n> --obligation-id <id> --reason <text> [--expires-at <iso>] [--created-by <actor>] [--rationale-category <cat>] [--policy-basis <text>]";
 
 fn run_declare_waiver(args: &[String]) -> ExitCode {
 	let mut positional = Vec::new();
@@ -1925,7 +1925,7 @@ fn run_declare_waiver(args: &[String]) -> ExitCode {
 
 fn run_declare_supersede(args: &[String]) -> ExitCode {
 	if args.is_empty() {
-		eprintln!("usage: rgr-rust declare supersede <kind> ...");
+		eprintln!("usage: rmap declare supersede <kind> ...");
 		eprintln!("kinds: boundary, requirement, waiver");
 		return ExitCode::from(1);
 	}
@@ -1943,7 +1943,7 @@ fn run_declare_supersede(args: &[String]) -> ExitCode {
 }
 
 const SUPERSEDE_BOUNDARY_USAGE: &str =
-	"usage: rgr-rust declare supersede boundary <db_path> <old_declaration_uid> --forbids <target> [--reason <text>]";
+	"usage: rmap declare supersede boundary <db_path> <old_declaration_uid> --forbids <target> [--reason <text>]";
 
 fn run_declare_supersede_boundary(args: &[String]) -> ExitCode {
 	let mut positional = Vec::new();
@@ -2109,7 +2109,7 @@ fn run_declare_supersede_boundary(args: &[String]) -> ExitCode {
 }
 
 const SUPERSEDE_REQUIREMENT_USAGE: &str =
-	"usage: rgr-rust declare supersede requirement <db_path> <old_declaration_uid> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]";
+	"usage: rmap declare supersede requirement <db_path> <old_declaration_uid> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]";
 
 fn run_declare_supersede_requirement(args: &[String]) -> ExitCode {
 	let mut positional = Vec::new();
@@ -2330,7 +2330,7 @@ fn run_declare_supersede_requirement(args: &[String]) -> ExitCode {
 }
 
 const SUPERSEDE_WAIVER_USAGE: &str =
-	"usage: rgr-rust declare supersede waiver <db_path> <old_declaration_uid> --reason <text> [--expires-at <iso>] [--created-by <actor>] [--rationale-category <cat>] [--policy-basis <text>]";
+	"usage: rmap declare supersede waiver <db_path> <old_declaration_uid> --reason <text> [--expires-at <iso>] [--created-by <actor>] [--rationale-category <cat>] [--policy-basis <text>]";
 
 fn run_declare_supersede_waiver(args: &[String]) -> ExitCode {
 	let mut positional = Vec::new();

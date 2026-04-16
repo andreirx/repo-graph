@@ -20,7 +20,7 @@
 #     `GateBoundaryDeclaration`, `GateImportEdge`).
 #   - TS-compatible output shape (`GateReport`) — byte-stable
 #     with the pre-relocation `gate::GateResult` struct so the
-#     `rgr-rust gate` CLI command is unchanged.
+#     `rmap gate` CLI command is unchanged.
 #   - Deliberate PASS-not-waivable divergence preserved
 #     (Rust-25). Do NOT realign to TS during the relocation.
 #

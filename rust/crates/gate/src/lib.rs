@@ -5,7 +5,7 @@
 //! product policy.
 //!
 //! Relocated from `rgr/src/gate.rs` in Rust-43A so that both
-//! the `rgr-rust gate` CLI command and the
+//! the `rmap gate` CLI command and the
 //! `repo-graph-agent` orient aggregator can share the same
 //! gate implementation. See
 //! `docs/architecture/agent-orientation-contract.md` and

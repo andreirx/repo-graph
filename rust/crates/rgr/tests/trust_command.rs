@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn binary_path() -> PathBuf {
-	let mut path = PathBuf::from(env!("CARGO_BIN_EXE_rgr-rust"));
+	let mut path = PathBuf::from(env!("CARGO_BIN_EXE_rmap"));
 	// Fallback for older cargo versions.
 	if !path.exists() {
 		path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -21,7 +21,7 @@ fn binary_path() -> PathBuf {
 			.join("..")
 			.join("target")
 			.join("debug")
-			.join("rgr-rust");
+			.join("rmap");
 	}
 	path
 }

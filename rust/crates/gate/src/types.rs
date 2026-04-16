@@ -183,7 +183,7 @@ pub struct WaiverBasis {
 ///
 /// Field order and names are byte-compatible with the
 /// pre-relocation `gate::ObligationResult` so existing JSON
-/// output consumers of `rgr-rust gate` see no shape change.
+/// output consumers of `rmap gate` see no shape change.
 #[derive(Debug, Clone, Serialize)]
 pub struct ObligationEvaluation {
 	pub req_id: String,

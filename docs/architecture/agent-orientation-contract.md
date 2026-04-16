@@ -22,9 +22,9 @@ The agent should be able to orient on a codebase area in 1-3 commands, not 7-8. 
 
 ## Product Decisions (Locked)
 
-1. `rgr` is Rust. `rgr-ts` is legacy TypeScript. No long-lived `rgr-rust` name.
+1. **Two CLI binaries.** `rmap` is the Rust CLI — the primary binary for agent-facing commands and all new product surface. `rgr` is the TypeScript CLI — the original implementation, kept for TS-side parity checks and features not yet ported to Rust. `rgr` is NOT being renamed to `rgr-ts`. The two names are the permanent product names, not a migration waypoint.
 
-2. Agent commands use repo name. `--db <path>` is an optional escape hatch for non-registered repos, not the normal interface. Normal usage assumes `rgr repo add` was run.
+2. Agent commands use repo name. `--db <path>` is an optional escape hatch for non-registered repos, not the normal interface. Normal usage assumes `rmap repo add` was run (repo registry not yet implemented — see TECH-DEBT.md).
 
 3. JSON is the only output format for agent commands. No `--json` flag. Machine-first.
 
@@ -40,7 +40,7 @@ The agent should be able to orient on a codebase area in 1-3 commands, not 7-8. 
 
 ## Commands
 
-### `rgr orient <repo> [focus]`
+### `rmap orient <repo> [focus]`
 
 Primary orientation command. Answers: "What is this area, what matters about it, and what should I be careful about?"
 
@@ -49,11 +49,11 @@ Focus can be:
 - A path: `src/core`, `src/adapters/storage`
 - A symbol: `StorageConnection`, `evaluateObligation`
 
-### `rgr check <repo>`
+### `rmap check <repo>`
 
 Pre-action health check. Answers: "Can I trust this repo state before making changes?"
 
-### `rgr explain <repo> <target>`
+### `rmap explain <repo> <target>`
 
 Deep dive on a single entity. Answers: "Tell me everything the graph knows about this symbol/file/module."
 
@@ -405,27 +405,36 @@ same functions over a socket with the same signatures. No
 daemon-specific product semantics. The daemon is a delivery
 mechanism.
 
-## CLI Rename Plan
+## CLI Naming (Settled)
 
-### Immediate (with agent surface ship)
-- Rust binary name changes from `rgr-rust` to `rgr` in `Cargo.toml` `[[bin]]`.
-- `package.json` bin entry for TS CLI changes from `rgr` to `rgr-ts`.
-- CLAUDE.md updated: `rgr` refers to Rust, `rgr-ts` refers to TS.
-- Existing structural commands (`callers`, `callees`, etc.) remain under `rgr` as power-user escape hatches.
+**This is not a migration plan. This is the permanent naming
+decision.**
 
-### Deferred
-- Symlink or wrapper script for backward compatibility during transition.
-- TS parity test scripts updated to use `rgr-ts`.
-- Documentation sweep to replace `rgr-rust` references.
+| Binary | Language | Role | Status |
+|---|---|---|---|
+| `rmap` | Rust | Primary. All new product surface ships here. Agent-facing commands (`orient`, `check`, `explain`), structural graph queries, governance commands. | Active, shipping. |
+| `rgr` | TypeScript | Original implementation. Used for TS-side parity checks and features not yet ported to Rust. | Maintained, not renamed. |
+
+There is no `rgr-ts` rename planned. `rgr` stays `rgr`. The
+two binaries have distinct names so there is no ambiguity
+about which one an agent or script is invoking. Future daemon
+transport targets the `rmap` binary name.
+
+History: the Rust binary was originally named `rgr-rust`
+(Rust-7B through Rust-43B) with a plan to rename to `rgr` and
+push the TS CLI to `rgr-ts`. That plan was abandoned in
+Rust-43C in favor of the permanent `rmap` name, which has a
+stronger product mnemonic ("repo map") and eliminates the
+TS-side rename entirely.
 
 ## Implementation Sequence
 
 1. `Rust-41`: This design doc (done).
 2. `Rust-42`: `orient` use-case module — pure Rust aggregation returning typed DTO. No CLI. Tested with deterministic fixtures. **(done — repo-level focus only; module/symbol focus deferred to Rust-44/45.)**
 3. `Rust-43A`: gate.rs relocation — move gate policy out of the `rgr` binary crate into a new `repo-graph-gate` library crate. Add gate signal coverage (`GATE_PASS` / `GATE_FAIL` / `GATE_INCOMPLETE`) to the orient pipeline. Replace unconditional `GATE_UNAVAILABLE` limit with `GATE_NOT_CONFIGURED`. **(done — see `docs/TECH-DEBT.md` "Gate.rs relocation — CLOSED in Rust-43A" for details.)**
-4. `Rust-43B`: `rgr orient` CLI command — parse args, call use case, serialize, exit code. **(done — shipped under the current `rgr-rust` name with the `<db_path> <repo_uid>` positional shape; see "Rust-43B implementation notes" below. Repo-name invocation is deferred to Rust-43C+ because the Rust CLI has no repo registry yet.)**
+4. `Rust-43B`: `rmap orient` CLI command — parse args, call use case, serialize, exit code. **(done — shipped with the `<db_path> <repo_uid>` positional shape; see "Rust-43B implementation notes" below. Repo-name invocation is deferred to a registry slice because the Rust CLI has no repo registry yet.)**
 5. `Rust-43 F1/F2/F3 fix slice`: semantic correctness fix for the spike-discovered defects in the orient contract (DEAD_CODE gated on trust reliability, `EnrichmentState` three-state model, typed reliability axes in `AgentTrustSummary`). **(done — see "Rust-43 F1/F2/F3 fix slice implementation notes" below and `docs/spikes/2026-04-15-orient-on-repo-graph.md` for the before/after verification.)**
-6. `Rust-43C`: Binary rename: `rgr-rust` → `rgr`, `rgr` (TS) → `rgr-ts`. Does NOT ship with Rust-43B. Reason: CLI command wiring and binary migration are separate risks; the rename touches ~20 files (test harnesses, docs, package metadata, TS bin config, existing workflows) and must stay reviewable in isolation. Moved to after the F1/F2/F3 fix slice on the recommendation of the spike — do not freeze `rgr orient` as a public spell while the output shape is known to be misleading.
+6. `Rust-43C`: Binary rename: `rgr-rust` → `rmap`. **(done — binary, test harnesses, docs, and all references updated.)**
 6. `Rust-44`: `check` use-case + CLI. Module/path focus for `orient`.
 7. `Rust-45`: `explain` use-case + CLI. Symbol focus for `orient`.
 8. Evaluate: does the agent surface cover 80% of agent needs?
@@ -502,7 +511,7 @@ mechanism.
     `AgentReliabilityLevel` enum mapping. Reason strings
     pass through unchanged.
 - **Spike validation.** Re-ran
-  `rgr-rust orient /tmp/rgspike.db repo-graph --budget large`
+  `rmap orient /tmp/rgspike.db repo-graph --budget large`
   against the same database used in the spike. Before:
   DEAD_CODE ranked #1 with 2683 dead symbols. After:
   DEAD_CODE suppressed, `DEAD_CODE_UNRELIABLE` limit fires
@@ -521,11 +530,11 @@ mechanism.
 
 ### Rust-43B implementation notes (as shipped)
 
-- New CLI command: `rgr-rust orient <db_path> <repo_uid>
+- New CLI command: `rmap orient <db_path> <repo_uid>
   [--budget small|medium|large] [--focus <string>]`.
   Implemented in `rust/crates/rgr/src/main.rs::run_orient`.
 - **Positional shape divergence from the contract.** The
-  contract's target command is `rgr orient <repo_name>` with
+  contract's target command is `rmap orient <repo_name>` with
   `--db <path>` as an optional escape hatch for non-registered
   repos. Rust has no repo registry yet. Until a registry slice
   lands, `orient` takes the same `<db_path> <repo_uid>`
@@ -551,9 +560,9 @@ mechanism.
   (missing DB, missing repo, missing snapshot,
   focus-not-implemented, storage failure, serialization
   failure).
-- **Binary name unchanged.** Ships as `rgr-rust`. Rename to
-  `rgr` is Rust-43C.
-- **No repo registry.** `rgr-rust` still has no
+- **Binary name.** Originally shipped as `rgr-rust`. Renamed
+  to `rmap` in Rust-43C.
+- **No repo registry.** `rmap` still has no
   `repo add` / `repo list` equivalent. Users invoke orient
   with the same `<db_path> <repo_uid>` pair they use for
   `cycles`, `dead`, `gate`, etc.
@@ -669,4 +678,4 @@ mechanism.
 2. `explain` supports module-level targets (modules, files, and symbols).
 3. `next` section uses structured actions `{ kind, repo, target, reason }`, not shell strings.
 4. Three commands is the initial set. A fourth can be added if evaluation reveals a gap.
-5. Binary rename happens with the agent surface ship (Rust-43), not later.
+5. Binary naming settled in Rust-43C: Rust CLI is `rmap`, TS CLI stays `rgr`. No further rename planned. See "CLI Naming (Settled)" above.

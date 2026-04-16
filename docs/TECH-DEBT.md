@@ -408,10 +408,10 @@ NODE_MODULE_VERSION drift debt is also closed.
   This is its own substrate move. Recorded as the "next substrate
   slice" in the conversation roadmap.
 
-## Rust CLI (`rgr-rust`) — known divergences and deferred items
+## Rust CLI (`rmap`) — known divergences and deferred items
 
-Frozen at milestone `rgr-rust-structural-v1` (Rust-7B through Rust-20).
-See `docs/milestones/rgr-rust-structural-v1.md` for the full milestone
+Frozen at milestone `rmap-structural-v1` (Rust-7B through Rust-20).
+See `docs/milestones/rmap-structural-v1.md` for the full milestone
 document. This section tracks what is not yet ported and what
 intentionally diverges.
 
@@ -641,27 +641,25 @@ regression pins).
 - **`check` and `explain` use cases.** Only `orient` is
   implemented. The DTO envelope is shared; the aggregator
   pipelines are not yet written.
-- **Binary rename and repo registry deferred.** Rust-43A
-  relocated gate. Rust-43B added the `orient` CLI command
-  (shipped under the current `rgr-rust` binary name).
-  Rust-43C will rename the binary to `rgr` and the TS
-  `rgr` to `rgr-ts`. That slice is held separate because
-  the rename touches every test harness reference,
-  `package.json` bin entries, CLAUDE.md, and existing
-  workflows — it must stay reviewable in isolation.
+- **Binary renamed; repo registry deferred.** Rust-43A
+  relocated gate. Rust-43B added the `orient` CLI command.
+  Rust-43C renamed the binary from `rgr-rust` to `rmap`
+  (test harnesses, docs, CLAUDE.md all updated).
+  Repo registry (`rmap repo add` equivalent) is still
+  deferred.
 - **`orient` positional shape diverges from the contract.**
   The agent orientation contract specifies
-  `rgr orient <repo_name>` with an implicit repo registry
-  and `--db <path>` as an escape hatch. Rust-43B ships
-  `rgr-rust orient <db_path> <repo_uid>` because the Rust
-  CLI has no repo registry yet — no equivalent of
-  `rgr repo add`. Until a registry slice lands, every Rust
-  CLI command including `orient` takes the
+  `rmap orient <repo_name>` with an implicit repo registry
+  and `--db <path>` as an escape hatch. `rmap orient`
+  currently ships with `<db_path> <repo_uid>` because
+  `rmap` has no repo registry yet — no equivalent of
+  `rmap repo add`. Until a registry slice lands, every
+  `rmap` command including `orient` takes the
   `<db_path> <repo_uid>` pair. Repo-name invocation and the
   `--db` escape hatch will land together in the registry
-  slice (post Rust-43C).
+  slice.
 - **`--focus` CLI grammar is locked but runtime is
-  deferred.** The `rgr-rust orient --focus <string>` flag
+  deferred.** The `rmap orient --focus <string>` flag
   parses and validates, then exits 2 with a
   `FocusNotImplementedYet` diagnostic. Rust-44 (module/path)
   and Rust-45 (symbol) will implement the runtime without

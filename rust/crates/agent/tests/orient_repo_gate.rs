@@ -8,7 +8,7 @@
 //!
 //! The tests seed gate inputs via the `gate_*` fields on
 //! `FakeAgentStorage`. Outcomes are determined by the same gate
-//! policy compute path that the `rgr-rust gate` CLI command uses,
+//! policy compute path that the `rmap gate` CLI command uses,
 //! so passing agent tests here are strong evidence that CLI and
 //! agent consumers agree on the gate outcome.
 

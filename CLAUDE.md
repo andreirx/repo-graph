@@ -1,10 +1,14 @@
-# Repo-Graph (rgr)
+# Repo-Graph
 
 Deterministic code graph tool for analyzing codebases. Multi-language (TypeScript, Rust, Java, Python, C/C++). CLI over SQLite. Produces structured JSON for AI agent consumption.
 
+Two CLI binaries:
+- **`rmap`** — Rust CLI. The primary binary for agent-facing commands (`orient`, `check`, `explain`) and structural graph queries. All new product surface ships here.
+- **`rgr`** — TypeScript CLI. The original implementation. Still used for TS-side parity checks and features not yet ported to Rust. Not being renamed.
+
 ## What this is
 
-A CLI tool (`rgr`) that indexes source code repositories into a queryable graph stored in SQLite. Nodes are symbols, files, modules, endpoints. Edges are typed relationships (CALLS, IMPORTS, IMPLEMENTS, etc.). Every fact carries evidence and resolution (static/dynamic/inferred).
+A CLI tool that indexes source code repositories into a queryable graph stored in SQLite. Nodes are symbols, files, modules, endpoints. Edges are typed relationships (CALLS, IMPORTS, IMPLEMENTS, etc.). Every fact carries evidence and resolution (static/dynamic/inferred).
 
 Not a chatbot. Not a vector DB. A deterministic graph query engine.
 
@@ -102,7 +106,7 @@ runs `test:indexer:parity`. `test:all` transitively covers all six
 coverage in one command.
 
 `pnpm run test:interop` is a separate cross-runtime acceptance surface
-that builds the Rust `rgr-rust` binary, indexes a checked-in fixture
+that builds the Rust `rmap` binary, indexes a checked-in fixture
 repo into a temp SQLite file, then opens that file from the TS storage
 adapter and verifies real read-side operations succeed. It proves that
 Rust-written databases are consumable by the existing TS product layer.
@@ -118,38 +122,38 @@ indexing race) and therefore are not admissible as a deterministic
 acceptance baseline. Run them explicitly when investigating enrichment
 behavior; do not rely on them for slice closure evidence.
 
-## Rust CLI (`rgr-rust`)
+## Rust CLI (`rmap`)
 
-Milestone: `rgr-rust-structural-v1`. See `docs/milestones/rgr-rust-structural-v1.md`
+Milestone: `rmap-structural-v1`. See `docs/milestones/rmap-structural-v1.md`
 for full contracts, slice inventory, and deferred items.
 
-The Rust binary `rgr-rust` (crate `repo-graph-rgr`) is the Rust-side
+The Rust binary `rmap` (crate `repo-graph-rgr`) is the Rust-side
 CLI. It produces JSON-only output on stdout and uses stderr for errors.
 Exit codes: 0 success, 1 usage error, 2 runtime error.
 
 Commands (structural: Rust-7B through Rust-20, governance: Rust-22+):
 
 ```
-rgr-rust index      <repo_path> <db_path>              # Full index to SQLite
-rgr-rust refresh    <repo_path> <db_path>              # Delta refresh
-rgr-rust trust      <db_path> <repo_uid>               # Trust report
-rgr-rust callers    <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callers (one hop)
-rgr-rust callees    <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callees (one hop)
-rgr-rust path       <db_path> <repo_uid> <from> <to>   # Shortest path (CALLS+IMPORTS, depth 8)
-rgr-rust imports    <db_path> <repo_uid> <file_path>   # File import chain (one hop, IMPORTS)
-rgr-rust violations <db_path> <repo_uid>               # Boundary violation check (IMPORTS)
-rgr-rust gate       <db_path> <repo_uid> [--strict | --advisory]  # CI gate (4 methods, waivers, 3 modes)
-rgr-rust orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]  # Agent orientation surface (rgr.agent.v1)
-rgr-rust declare boundary <db_path> <repo_uid> <module> --forbids <target> [--reason <text>]
-rgr-rust declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
-rgr-rust declare waiver <db_path> <repo_uid> <req_id> --requirement-version <n> --obligation-id <id> --reason <text> [--expires-at <iso>] [--created-by <a>] [--rationale-category <c>] [--policy-basis <t>]
-rgr-rust declare deactivate <db_path> <declaration_uid>   # Soft-delete (idempotent)
-rgr-rust declare supersede boundary <db_path> <old_uid> --forbids <target> [--reason <text>]
-rgr-rust declare supersede requirement <db_path> <old_uid> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
-rgr-rust declare supersede waiver <db_path> <old_uid> --reason <text> [--expires-at <iso>] [--created-by <a>] [--rationale-category <c>] [--policy-basis <t>]
-rgr-rust dead       <db_path> <repo_uid> [kind]        # Unreferenced nodes
-rgr-rust cycles     <db_path> <repo_uid>               # Module-level IMPORTS cycles
-rgr-rust stats      <db_path> <repo_uid>               # Module structural metrics
+rmap index      <repo_path> <db_path>              # Full index to SQLite
+rmap refresh    <repo_path> <db_path>              # Delta refresh
+rmap trust      <db_path> <repo_uid>               # Trust report
+rmap callers    <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callers (one hop)
+rmap callees    <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callees (one hop)
+rmap path       <db_path> <repo_uid> <from> <to>   # Shortest path (CALLS+IMPORTS, depth 8)
+rmap imports    <db_path> <repo_uid> <file_path>   # File import chain (one hop, IMPORTS)
+rmap violations <db_path> <repo_uid>               # Boundary violation check (IMPORTS)
+rmap gate       <db_path> <repo_uid> [--strict | --advisory]  # CI gate (4 methods, waivers, 3 modes)
+rmap orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]  # Agent orientation surface (rgr.agent.v1)
+rmap declare boundary <db_path> <repo_uid> <module> --forbids <target> [--reason <text>]
+rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
+rmap declare waiver <db_path> <repo_uid> <req_id> --requirement-version <n> --obligation-id <id> --reason <text> [--expires-at <iso>] [--created-by <a>] [--rationale-category <c>] [--policy-basis <t>]
+rmap declare deactivate <db_path> <declaration_uid>   # Soft-delete (idempotent)
+rmap declare supersede boundary <db_path> <old_uid> --forbids <target> [--reason <text>]
+rmap declare supersede requirement <db_path> <old_uid> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
+rmap declare supersede waiver <db_path> <old_uid> --reason <text> [--expires-at <iso>] [--created-by <a>] [--rationale-category <c>] [--policy-basis <t>]
+rmap dead       <db_path> <repo_uid> [kind]        # Unreferenced nodes
+rmap cycles     <db_path> <repo_uid>               # Module-level IMPORTS cycles
+rmap stats      <db_path> <repo_uid>               # Module structural metrics
 ```
 
 Read-side commands (callers, callees, path, imports, violations, dead,
@@ -221,7 +225,7 @@ See `docs/architecture/measurement-model.txt` for the four-layer truth model.
 See `docs/architecture/versioning-model.txt` for toolchain provenance.
 See `docs/architecture/gate-contract.txt` for the normative gate/waiver/verdict contract.
 See `docs/architecture/annotations-contract.txt` for the normative provisional-annotations contract.
-See `docs/milestones/rgr-rust-structural-v1.md` for the Rust CLI structural milestone (commands, contracts, deferred items).
+See `docs/milestones/rmap-structural-v1.md` for the Rust CLI structural milestone (commands, contracts, deferred items).
 
 ## Conventions
 

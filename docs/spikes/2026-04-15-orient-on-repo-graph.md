@@ -1,4 +1,4 @@
-# Spike: `rgr-rust orient` on repo-graph itself
+# Spike: `rmap orient` on repo-graph itself
 
 **Date:** 2026-04-15
 **Slice context:** Candidate C in the post-Rust-43B sequence. Validation pass before Rust-43C rename.
@@ -6,15 +6,15 @@
 
 ## Method
 
-1. Built `rgr-rust` release binary.
+1. Built `rmap` release binary.
 2. Indexed this repo:
-   `rgr-rust index /Users/apple/Documents/APLICATII\ BIJUTERIE/repo-graph /tmp/rgspike.db`
+   `rmap index /Users/apple/Documents/APLICATII\ BIJUTERIE/repo-graph /tmp/rgspike.db`
    Result: `488 files, 3630 nodes, 2091 edges (4556 unresolved)`.
 3. Ran:
-   `rgr-rust orient /tmp/rgspike.db repo-graph --budget large`
+   `rmap orient /tmp/rgspike.db repo-graph --budget large`
    Captured the JSON at `/tmp/rgspike-orient.json` (exit 0, stderr empty,
    3231 bytes, 4 signals + 3 limits).
-4. Cross-checked with `rgr-rust trust /tmp/rgspike.db repo-graph` and
+4. Cross-checked with `rmap trust /tmp/rgspike.db repo-graph` and
    direct SQLite queries on the `inferences`, `declarations`, and
    `nodes` tables.
 
@@ -302,7 +302,7 @@ aggregator), the same spike was re-run against the same
 `/tmp/rgspike.db`:
 
 ```
-./target/release/rgr-rust orient /tmp/rgspike.db repo-graph --budget large
+./target/release/rmap orient /tmp/rgspike.db repo-graph --budget large
 ```
 
 ### Observed output (post-fix)

@@ -15,7 +15,7 @@
 //! Active declarations are deduplicated by
 //! `(source_module, forbidden_target)` BEFORE the storage is
 //! queried for violating edges. This matches the existing
-//! `rgr-rust violations` CLI command behavior (see
+//! `rmap violations` CLI command behavior (see
 //! `rust/crates/rgr/src/main.rs` `run_violations`) and prevents
 //! double-counting when legacy TS authoring, raw SQL seeding, or
 //! data migrations produce multiple active declarations that

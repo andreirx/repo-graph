@@ -18,7 +18,7 @@
 //! The agent orient pipeline always calls gate in
 //! `GateMode::Default`. Orient is a "what matters" synthesis
 //! surface, not a CI gate; strict/advisory modes are for the
-//! `rgr-rust gate` CLI command where the caller has explicit
+//! `rmap gate` CLI command where the caller has explicit
 //! intent about how to treat missing evidence.
 //!
 //! ── Storage boundary ─────────────────────────────────────────

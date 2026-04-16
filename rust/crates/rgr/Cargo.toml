@@ -48,11 +48,11 @@ version      = "0.1.0"
 edition      = "2021"
 rust-version = "1.93.0"
 license      = "MIT"
-description  = "Minimal Rust CLI for repo-graph indexing, trust, and graph queries"
+description  = "Minimal CLI (rmap) for repo-graph indexing, trust, and graph queries"
 publish      = false
 
 [[bin]]
-name = "rgr-rust"
+name = "rmap"
 path = "src/main.rs"
 
 [dependencies]

@@ -23,14 +23,14 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn binary_path() -> PathBuf {
-	PathBuf::from(env!("CARGO_BIN_EXE_rgr-rust"))
+	PathBuf::from(env!("CARGO_BIN_EXE_rmap"))
 }
 
 fn run_cmd(args: &[&str]) -> std::process::Output {
 	Command::new(binary_path())
 		.args(args)
 		.output()
-		.expect("failed to spawn rgr-rust")
+		.expect("failed to spawn rmap")
 }
 
 // ── Fixture: indexed TS repo ─────────────────────────────────────
@@ -82,7 +82,7 @@ fn orient_missing_args_usage_error() {
 	assert_eq!(output.status.code(), Some(1));
 	assert!(output.stdout.is_empty());
 	let stderr = String::from_utf8_lossy(&output.stderr);
-	assert!(stderr.contains("usage: rgr-rust orient"), "stderr: {}", stderr);
+	assert!(stderr.contains("usage: rmap orient"), "stderr: {}", stderr);
 }
 
 #[test]

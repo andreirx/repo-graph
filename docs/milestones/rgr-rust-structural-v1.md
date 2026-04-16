@@ -1,11 +1,11 @@
-# rgr-rust structural CLI v1
+# rmap structural CLI v1
 
 Milestone freeze for the Rust structural analysis CLI surface.
 Accumulated through Rust-7B to Rust-20 (14 slices).
 
 ## What shipped
 
-A standalone Rust binary (`rgr-rust`, crate `repo-graph-rgr`) that
+A standalone Rust binary (`rmap`, crate `repo-graph-rgr`) that
 indexes TypeScript/JavaScript codebases into SQLite and provides
 10 structural graph query commands. JSON-only output. Deterministic.
 Cross-runtime interop proven: databases written by Rust are consumable
@@ -17,16 +17,16 @@ Canonical command inventory. This is the single source of truth;
 `CLAUDE.md` mirrors this list.
 
 ```
-rgr-rust index   <repo_path> <db_path>                               # Full index to SQLite
-rgr-rust refresh <repo_path> <db_path>                               # Delta refresh (incremental)
-rgr-rust trust   <db_path> <repo_uid>                                # Extraction trust report
-rgr-rust callers <db_path> <repo_uid> <symbol> [--edge-types <t>]    # Direct callers (one hop)
-rgr-rust callees <db_path> <repo_uid> <symbol> [--edge-types <t>]    # Direct callees (one hop)
-rgr-rust path    <db_path> <repo_uid> <from> <to>                    # Shortest path (BFS)
-rgr-rust imports <db_path> <repo_uid> <file_path>                    # File import chain (one hop)
-rgr-rust dead    <db_path> <repo_uid> [kind]                         # Unreferenced nodes
-rgr-rust cycles  <db_path> <repo_uid>                                # Module-level IMPORTS cycles
-rgr-rust stats   <db_path> <repo_uid>                                # Module structural metrics
+rmap index   <repo_path> <db_path>                               # Full index to SQLite
+rmap refresh <repo_path> <db_path>                               # Delta refresh (incremental)
+rmap trust   <db_path> <repo_uid>                                # Extraction trust report
+rmap callers <db_path> <repo_uid> <symbol> [--edge-types <t>]    # Direct callers (one hop)
+rmap callees <db_path> <repo_uid> <symbol> [--edge-types <t>]    # Direct callees (one hop)
+rmap path    <db_path> <repo_uid> <from> <to>                    # Shortest path (BFS)
+rmap imports <db_path> <repo_uid> <file_path>                    # File import chain (one hop)
+rmap dead    <db_path> <repo_uid> [kind]                         # Unreferenced nodes
+rmap cycles  <db_path> <repo_uid>                                # Module-level IMPORTS cycles
+rmap stats   <db_path> <repo_uid>                                # Module structural metrics
 ```
 
 ## Contracts

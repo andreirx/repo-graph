@@ -19,7 +19,7 @@
 //!      DTOs. No storage types leak through the trait.
 //!
 //! This adapter is additive. It does not remove the existing
-//! storage query methods — the pre-relocation `rgr-rust gate`
+//! storage query methods — the pre-relocation `rmap gate`
 //! CLI still needed to work during the relocation commit, and
 //! the CLI's `run_gate` now calls into `repo_graph_gate`
 //! through this adapter.
