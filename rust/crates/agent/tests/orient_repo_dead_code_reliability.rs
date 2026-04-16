@@ -46,6 +46,7 @@ fn seed_some_dead_code(fake: &mut FakeAgentStorage) {
 			kind: "SYMBOL".into(),
 			file: Some("src/foo.rs".into()),
 			line_count: Some(5),
+			is_test: false,
 		}],
 	);
 }

@@ -10,9 +10,9 @@
 //!   1. Severity descending: High > Medium > Low.
 //!   2. Category ascending by `tie_break_ordinal`:
 //!      Gate > Boundary > Trust > Structure > Informational.
-//!   3. Code ascending by string representation — last-resort
-//!      tiebreaker so a snapshot with N dead code and M import
-//!      cycles always sorts deterministically.
+//!   3. Tier priority ascending by `SignalCode::tier_priority()` —
+//!      explicit per-code ordering within the same (severity,
+//!      category) bucket. Lower value = higher priority.
 //!
 //! Truncation is applied AFTER ranking so that the surviving
 //! signals are the highest-ranked ones, and `omitted_count`
@@ -46,8 +46,12 @@ pub fn sort_and_rank(signals: &mut Vec<Signal>) {
 					.tie_break_ordinal()
 					.cmp(&b.category().tie_break_ordinal())
 			})
-			// Code string ascending.
-			.then_with(|| a.code().as_str().cmp(b.code().as_str()))
+			// Explicit priority within the same tier.
+			.then_with(|| {
+				a.code()
+					.tier_priority()
+					.cmp(&b.code().tier_priority())
+			})
 	});
 
 	for (index, signal) in signals.iter_mut().enumerate() {

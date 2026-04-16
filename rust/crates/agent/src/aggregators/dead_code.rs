@@ -120,6 +120,7 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
 	sort_top_by_size(&mut dead);
 	let top_dead: Vec<DeadSymbolEvidence> = dead
 		.into_iter()
+		.filter(|d| !d.is_test)
 		.take(DEAD_CODE_TOP_N)
 		.map(|d| DeadSymbolEvidence {
 			symbol: d.symbol,
@@ -172,6 +173,7 @@ mod tests {
 			kind: "SYMBOL".to_string(),
 			file: file.map(|s| s.to_string()),
 			line_count,
+			is_test: false,
 		}
 	}
 

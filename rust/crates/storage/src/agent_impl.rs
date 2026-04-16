@@ -153,6 +153,7 @@ impl AgentStorageRead for StorageConnection {
 				kind: r.kind,
 				file: r.file,
 				line_count: r.line_count.and_then(|n| u64::try_from(n).ok()),
+				is_test: r.is_test,
 			})
 			.collect())
 	}

@@ -125,6 +125,7 @@ fn dead_code_emitted_when_threshold_met() {
 			kind: "SYMBOL".into(),
 			file: Some("src/foo.rs".into()),
 			line_count: Some(5),
+		is_test: false,
 		}],
 	);
 	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
@@ -159,6 +160,7 @@ fn dead_code_top_slice_is_sorted_by_size_descending() {
 				kind: "SYMBOL".into(),
 				file: Some("a.rs".into()),
 				line_count: Some(2),
+				is_test: false,
 			},
 			AgentDeadNode {
 				stable_key: "r1:b.rs:SYMBOL:bb".into(),
@@ -166,6 +168,7 @@ fn dead_code_top_slice_is_sorted_by_size_descending() {
 				kind: "SYMBOL".into(),
 				file: Some("b.rs".into()),
 				line_count: Some(50),
+				is_test: false,
 			},
 			AgentDeadNode {
 				stable_key: "r1:c.rs:SYMBOL:cc".into(),
@@ -173,6 +176,7 @@ fn dead_code_top_slice_is_sorted_by_size_descending() {
 				kind: "SYMBOL".into(),
 				file: Some("c.rs".into()),
 				line_count: Some(20),
+				is_test: false,
 			},
 			AgentDeadNode {
 				stable_key: "r1:d.rs:SYMBOL:dd".into(),
@@ -180,6 +184,7 @@ fn dead_code_top_slice_is_sorted_by_size_descending() {
 				kind: "SYMBOL".into(),
 				file: Some("d.rs".into()),
 				line_count: Some(100),
+				is_test: false,
 			},
 		],
 	);
@@ -218,6 +223,7 @@ fn dead_code_top_slice_pushes_unknown_sizes_to_the_tail() {
 				kind: "SYMBOL".into(),
 				file: Some("a.rs".into()),
 				line_count: None,
+				is_test: false,
 			},
 			AgentDeadNode {
 				stable_key: "r1:b.rs:SYMBOL:small".into(),
@@ -225,6 +231,7 @@ fn dead_code_top_slice_pushes_unknown_sizes_to_the_tail() {
 				kind: "SYMBOL".into(),
 				file: Some("b.rs".into()),
 				line_count: Some(1),
+				is_test: false,
 			},
 		],
 	);
@@ -235,6 +242,45 @@ fn dead_code_top_slice_pushes_unknown_sizes_to_the_tail() {
 			assert_eq!(ev.dead_count, 2);
 			assert_eq!(ev.top_dead[0].symbol, "small");
 			assert_eq!(ev.top_dead[1].symbol, "unknown_size");
+		}
+		other => panic!("wrong evidence variant: {:?}", other),
+	}
+}
+
+#[test]
+fn dead_code_top_dead_excludes_test_file_symbols() {
+	// F4: test-file symbols are excluded from the `top_dead`
+	// evidence slice but still count toward `dead_count`.
+	let mut fake = seeded();
+	fake.dead_nodes.insert(
+		"snap-1".into(),
+		vec![
+			AgentDeadNode {
+				stable_key: "r1:src/foo.rs:SYMBOL:prod_unused".into(),
+				symbol: "prod_unused".into(),
+				kind: "SYMBOL".into(),
+				file: Some("src/foo.rs".into()),
+				line_count: Some(10),
+				is_test: false,
+			},
+			AgentDeadNode {
+				stable_key: "r1:tests/bar.rs:SYMBOL:test_helper".into(),
+				symbol: "test_helper".into(),
+				kind: "SYMBOL".into(),
+				file: Some("tests/bar.rs".into()),
+				line_count: Some(20),
+				is_test: true,
+			},
+		],
+	);
+	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
+	let sig = find_signal(&result, SignalCode::DeadCode)
+		.expect("DEAD_CODE must fire — 2 dead symbols total");
+	match sig.evidence() {
+		SignalEvidence::DeadCode(ev) => {
+			assert_eq!(ev.dead_count, 2, "dead_count includes test-file symbols");
+			assert_eq!(ev.top_dead.len(), 1, "top_dead excludes test-file symbols");
+			assert_eq!(ev.top_dead[0].symbol, "prod_unused");
 		}
 		other => panic!("wrong evidence variant: {:?}", other),
 	}

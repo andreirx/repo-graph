@@ -55,6 +55,12 @@ pub enum LimitCode {
 	/// from a Rust-indexed repo.
 	ComplexityUnavailable,
 
+	/// Indexed languages may not cover the full repository. The
+	/// Rust indexer supports a narrower set of languages than the
+	/// file tree may contain. Files in unsupported languages are
+	/// not reflected in `MODULE_SUMMARY` counts.
+	LanguageCoveragePartial,
+
 	/// The `DEAD_CODE` signal was suppressed because the trust
 	/// layer's `reliability.dead_code` axis is not High. This
 	/// happens when extraction quality is insufficient for
@@ -81,6 +87,7 @@ impl LimitCode {
 			Self::GateNotConfigured => "GATE_NOT_CONFIGURED",
 			Self::ModuleDataUnavailable => "MODULE_DATA_UNAVAILABLE",
 			Self::ComplexityUnavailable => "COMPLEXITY_UNAVAILABLE",
+			Self::LanguageCoveragePartial => "LANGUAGE_COVERAGE_PARTIAL",
 			Self::DeadCodeUnreliable => "DEAD_CODE_UNRELIABLE",
 		}
 	}
@@ -102,6 +109,11 @@ impl LimitCode {
 			Self::ComplexityUnavailable => {
 				"Cyclomatic complexity measurements are not produced by \
 				 the Rust indexer. HIGH_COMPLEXITY cannot be emitted."
+			}
+			Self::LanguageCoveragePartial => {
+				"Indexed languages may not cover the full repository. \
+				 Files in languages the indexer does not support are \
+				 not reflected in MODULE_SUMMARY."
 			}
 			Self::DeadCodeUnreliable => {
 				"Dead-code signal suppressed: trust layer reports \

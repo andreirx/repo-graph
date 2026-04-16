@@ -120,6 +120,28 @@ fn repo_orient_emits_module_data_unavailable_limit() {
 }
 
 #[test]
+fn repo_orient_emits_language_coverage_partial_limit() {
+	let mut fake = FakeAgentStorage::new();
+	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
+
+	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
+	// LANGUAGE_COVERAGE_PARTIAL is defined but NOT emitted
+	// unconditionally. The F5 review identified that emitting
+	// it on every repo overclaims (a pure TS repo is fully
+	// covered). The limit is deferred until actual evidence of
+	// unsupported-language presence is available. Assert it is
+	// absent so the deferral sticks.
+	let has = result
+		.limits
+		.iter()
+		.any(|l| l.code == LimitCode::LanguageCoveragePartial);
+	assert!(
+		!has,
+		"LANGUAGE_COVERAGE_PARTIAL must NOT be emitted unconditionally"
+	);
+}
+
+#[test]
 fn limits_serialize_with_code_and_summary() {
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
@@ -138,7 +160,7 @@ fn limits_serialize_with_code_and_summary() {
 fn limits_fit_small_budget_cap_with_gate_not_configured() {
 	// Small cap for limits is 3. Unseeded repo emits exactly
 	// 3 limits: MODULE_DATA_UNAVAILABLE, GATE_NOT_CONFIGURED,
-	// COMPLEXITY_UNAVAILABLE. No truncation.
+	// COMPLEXITY_UNAVAILABLE. No truncation at cap 3.
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
 	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();

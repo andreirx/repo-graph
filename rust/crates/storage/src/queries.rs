@@ -222,6 +222,7 @@ pub struct DeadNodeResult {
 	pub file: Option<String>,
 	pub line: Option<i64>,
 	pub line_count: Option<i64>,
+	pub is_test: bool,
 }
 
 /// A single cycle (circular dependency path).
@@ -496,7 +497,8 @@ impl StorageConnection {
 				CASE WHEN n.line_end IS NOT NULL AND n.line_start IS NOT NULL
 				     THEN n.line_end - n.line_start + 1
 				     ELSE NULL
-				END AS line_count
+				END AS line_count,
+				COALESCE(f.is_test, 0) AS is_test
 			 FROM nodes n
 			 LEFT JOIN files f ON n.file_uid = f.file_uid
 			 WHERE n.snapshot_uid = ?1
@@ -544,6 +546,7 @@ impl StorageConnection {
 	fn map_dead_node_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeadNodeResult> {
 		let name: String = row.get(1)?;
 		let qualified_name: Option<String> = row.get(2)?;
+		let is_test_int: i64 = row.get(8)?;
 		Ok(DeadNodeResult {
 			stable_key: row.get(0)?,
 			symbol: qualified_name.unwrap_or(name),
@@ -552,6 +555,7 @@ impl StorageConnection {
 			file: row.get(5)?,
 			line: row.get(6)?,
 			line_count: row.get(7)?,
+			is_test: is_test_int != 0,
 		})
 	}
 

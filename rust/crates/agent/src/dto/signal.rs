@@ -168,6 +168,41 @@ impl SignalCode {
 		}
 	}
 
+	/// Explicit priority ordinal within the same
+	/// (severity, category) tier. Lower number = higher
+	/// priority in the ranking sort. Replaces the alphabetical
+	/// code-string tiebreaker from Rust-42.
+	///
+	/// Only codes that can co-exist in the same tier need
+	/// distinct values. Gate codes are mutually exclusive
+	/// (only one fires at a time), so they all share 0.
+	pub fn tier_priority(self) -> u8 {
+		match self {
+			// Gate (High): only one fires at a time.
+			Self::GatePass => 0,
+			Self::GateFail => 0,
+			Self::GateIncomplete => 0,
+			// Boundary (High): sole occupant.
+			Self::BoundaryViolations => 0,
+			// Trust (Medium): low-resolution most urgent.
+			Self::TrustLowResolution => 0,
+			Self::TrustStaleSnapshot => 1,
+			Self::TrustNoEnrichment => 2,
+			// Structure (Medium): cycles > dead > complexity.
+			Self::ImportCycles => 0,
+			Self::DeadCode => 1,
+			Self::HighComplexity => 2,
+			// Structure (Low): fan-out > instability > callers > callees.
+			Self::HighFanOut => 0,
+			Self::HighInstability => 1,
+			Self::CallersSummary => 2,
+			Self::CalleesSummary => 3,
+			// Informational (Low): summary > snapshot.
+			Self::ModuleSummary => 0,
+			Self::SnapshotInfo => 1,
+		}
+	}
+
 	/// Canonical (code, category, severity) triple.
 	///
 	/// Every signal code carries its category and default

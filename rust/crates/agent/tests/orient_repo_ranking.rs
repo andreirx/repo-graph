@@ -74,6 +74,7 @@ fn seed_with_all_signals() -> FakeAgentStorage {
 			kind: "SYMBOL".into(),
 			file: Some("src/foo.rs".into()),
 			line_count: Some(5),
+			is_test: false,
 		}],
 	);
 
@@ -149,6 +150,44 @@ fn within_medium_tier_trust_precedes_structure() {
 			);
 		}
 	}
+}
+
+#[test]
+fn import_cycles_ranks_before_dead_code_within_same_tier() {
+	// F6: both are (Medium, Structure) — tier_priority breaks
+	// the tie. IMPORT_CYCLES has priority 0, DEAD_CODE has
+	// priority 1.
+	let fake = seed_with_all_signals();
+	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
+
+	let structure_medium: Vec<_> = result
+		.signals
+		.iter()
+		.filter(|s| {
+			s.severity() == Severity::Medium
+				&& s.category() == SignalCategory::Structure
+		})
+		.collect();
+	assert!(
+		structure_medium.len() >= 2,
+		"fixture must produce both IMPORT_CYCLES and DEAD_CODE"
+	);
+	let cycles_rank = structure_medium
+		.iter()
+		.find(|s| s.code().as_str() == "IMPORT_CYCLES")
+		.expect("IMPORT_CYCLES must be present")
+		.rank();
+	let dead_rank = structure_medium
+		.iter()
+		.find(|s| s.code().as_str() == "DEAD_CODE")
+		.expect("DEAD_CODE must be present")
+		.rank();
+	assert!(
+		cycles_rank < dead_rank,
+		"IMPORT_CYCLES (rank {}) must rank before DEAD_CODE (rank {})",
+		cycles_rank,
+		dead_rank,
+	);
 }
 
 #[test]

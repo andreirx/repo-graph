@@ -33,6 +33,15 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
 		languages: summary.languages,
 	};
 
+	// LANGUAGE_COVERAGE_PARTIAL is defined as a LimitCode but
+	// NOT emitted here. The Rust-43 F5 review identified that
+	// emitting it unconditionally overclaims: a pure TypeScript
+	// repo fully covered by the indexer would incorrectly
+	// report partial language coverage. The limit should only
+	// fire when there is actual evidence of unsupported-language
+	// presence (e.g. a filesystem scan or a storage-side signal
+	// that the agent crate does not currently have). Deferred
+	// until that evidence is available. See docs/TECH-DEBT.md.
 	Ok(AggregatorOutput {
 		signals: vec![Signal::module_summary(evidence)],
 		limits: vec![Limit::from_code(LimitCode::ModuleDataUnavailable)],

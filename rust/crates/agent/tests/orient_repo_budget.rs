@@ -85,6 +85,7 @@ fn seed_many_signals() -> FakeAgentStorage {
 			kind: "SYMBOL".into(),
 			file: Some("src/foo.rs".into()),
 			line_count: Some(5),
+			is_test: false,
 		}],
 	);
 	// MODULE_SUMMARY and SNAPSHOT_INFO always emit → +2.
@@ -163,6 +164,8 @@ fn untruncated_response_has_no_truncation_metadata() {
 
 	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	// Only MODULE_SUMMARY + SNAPSHOT_INFO will fire — 2 signals, under cap.
+	// 3 limits (MODULE_DATA_UNAVAILABLE, GATE_NOT_CONFIGURED,
+	// COMPLEXITY_UNAVAILABLE), all under Small cap (3).
 	assert_eq!(result.signals.len(), 2);
 	assert_eq!(result.signals_truncated, None);
 	assert_eq!(result.signals_omitted_count, None);

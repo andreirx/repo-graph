@@ -111,6 +111,7 @@ pub struct AgentDeadNode {
 	pub kind: String,
 	pub file: Option<String>,
 	pub line_count: Option<u64>,
+	pub is_test: bool,
 }
 
 // ── Boundary declaration ─────────────────────────────────────────
