@@ -6,33 +6,40 @@
 //! signals: lossy signal truncation must not feed back into
 //! confidence.
 //!
-//! ── Rules (Rust-42, repo focus) ──────────────────────────────
+//! ── Rules (Rust-43 F2 fix) ───────────────────────────────────
 //!
 //! Inputs:
 //!   - call_resolution_rate: float in [0.0, 1.0]
 //!   - stale: bool — `true` iff `get_stale_files` returned a
 //!     non-empty list
-//!   - enrichment_applied: bool
+//!   - enrichment_state: `EnrichmentState` three-state enum
 //!
 //! Output tiers:
 //!
-//!   - high    — resolution rate > 0.50 AND not stale
-//!   - medium  — resolution rate in [0.20, 0.50] OR (stale AND
-//!               resolution rate > 0.20) OR (high-rate but
-//!               enrichment absent)
 //!   - low     — resolution rate < 0.20
+//!   - medium  — resolution rate in [0.20, 0.50]
+//!               OR rate > 0.50 AND stale
+//!               OR rate > 0.50 AND enrichment_state is NotRun
+//!   - high    — rate > 0.50 AND not stale AND enrichment
+//!               state is Ran or NotApplicable
 //!
-//! These rules directly encode the table in the agent
-//! orientation contract. The order of checks matters: low
-//! beats medium beats high, so we short-circuit from the worst
-//! case upward.
+//! The enrichment axis penalizes only `NotRun`. `Ran` and
+//! `NotApplicable` both indicate that enrichment is not a
+//! concern on this axis (either the phase completed, or there
+//! was nothing for it to do). The previous Rust-42 rule
+//! `!applied && eligible > 0` collapsed three distinct states
+//! into two and caused the F2 bug — see
+//! `docs/spikes/2026-04-15-orient-on-repo-graph.md`.
+//!
+//! Order of checks: low beats medium beats high. Short-circuit
+//! from the worst case upward.
 //!
 //! NOTE: focus-scoped "unresolved pressure" mentioned in the
 //! contract is a module/symbol-focus concern and does not apply
-//! to repo-level orient in Rust-42.
+//! to repo-level orient in the current scope.
 
 use crate::dto::envelope::Confidence;
-use crate::storage_port::AgentTrustSummary;
+use crate::storage_port::{AgentTrustSummary, EnrichmentState};
 
 pub fn derive_repo_confidence(
 	trust: &AgentTrustSummary,
@@ -49,41 +56,63 @@ pub fn derive_repo_confidence(
 	}
 
 	// Rate > 0.50 — potentially high, but degrade on stale or
-	// absent enrichment.
+	// unknown enrichment state.
 	if stale {
 		return Confidence::Medium;
 	}
 
-	if !trust.enrichment_applied && trust.enrichment_eligible > 0 {
-		return Confidence::Medium;
+	match trust.enrichment_state {
+		// Phase never ran. The agent cannot be confident that
+		// the call graph was ever enriched — degrade.
+		EnrichmentState::NotRun => Confidence::Medium,
+		// Phase executed (regardless of success count). No
+		// penalty on the enrichment axis.
+		EnrichmentState::Ran => Confidence::High,
+		// Phase executed with nothing to do. No penalty.
+		EnrichmentState::NotApplicable => Confidence::High,
 	}
-
-	Confidence::High
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::storage_port::{AgentReliabilityAxis, AgentReliabilityLevel};
 
-	fn ts(rate: f64, enriched: bool, eligible: u64) -> AgentTrustSummary {
+	fn reliable_axis() -> AgentReliabilityAxis {
+		AgentReliabilityAxis {
+			level: AgentReliabilityLevel::High,
+			reasons: Vec::new(),
+		}
+	}
+
+	fn ts(
+		rate: f64,
+		enrichment_state: EnrichmentState,
+		eligible: u64,
+	) -> AgentTrustSummary {
 		AgentTrustSummary {
 			call_resolution_rate: rate,
 			resolved_calls: 0,
 			unresolved_calls: 0,
-			enrichment_applied: enriched,
+			call_graph_reliability: reliable_axis(),
+			dead_code_reliability: reliable_axis(),
+			enrichment_state,
 			enrichment_eligible: eligible,
-			enrichment_enriched: if enriched { 1 } else { 0 },
+			enrichment_enriched: match enrichment_state {
+				EnrichmentState::Ran => 1,
+				_ => 0,
+			},
 		}
 	}
 
 	#[test]
 	fn low_below_20_percent() {
 		assert_eq!(
-			derive_repo_confidence(&ts(0.10, true, 10), false),
+			derive_repo_confidence(&ts(0.10, EnrichmentState::Ran, 10), false),
 			Confidence::Low
 		);
 		assert_eq!(
-			derive_repo_confidence(&ts(0.19, true, 10), false),
+			derive_repo_confidence(&ts(0.19, EnrichmentState::Ran, 10), false),
 			Confidence::Low
 		);
 	}
@@ -91,23 +120,23 @@ mod tests {
 	#[test]
 	fn medium_in_20_to_50_percent_band() {
 		assert_eq!(
-			derive_repo_confidence(&ts(0.20, true, 10), false),
+			derive_repo_confidence(&ts(0.20, EnrichmentState::Ran, 10), false),
 			Confidence::Medium
 		);
 		assert_eq!(
-			derive_repo_confidence(&ts(0.50, true, 10), false),
+			derive_repo_confidence(&ts(0.50, EnrichmentState::Ran, 10), false),
 			Confidence::Medium
 		);
 	}
 
 	#[test]
-	fn high_above_50_percent_clean() {
+	fn high_above_50_percent_clean_with_ran_enrichment() {
 		assert_eq!(
-			derive_repo_confidence(&ts(0.55, true, 10), false),
+			derive_repo_confidence(&ts(0.55, EnrichmentState::Ran, 10), false),
 			Confidence::High
 		);
 		assert_eq!(
-			derive_repo_confidence(&ts(0.99, true, 10), false),
+			derive_repo_confidence(&ts(0.99, EnrichmentState::Ran, 10), false),
 			Confidence::High
 		);
 	}
@@ -115,25 +144,37 @@ mod tests {
 	#[test]
 	fn high_rate_but_stale_degrades_to_medium() {
 		assert_eq!(
-			derive_repo_confidence(&ts(0.80, true, 10), true),
+			derive_repo_confidence(&ts(0.80, EnrichmentState::Ran, 10), true),
 			Confidence::Medium
 		);
 	}
 
 	#[test]
-	fn high_rate_but_no_enrichment_degrades_to_medium() {
+	fn high_rate_but_enrichment_not_run_degrades_to_medium() {
+		// Rust-43 F2 regression: previously called
+		// "high_rate_but_no_enrichment_degrades_to_medium" with
+		// `applied=false, eligible=10`. That combination is
+		// unreachable in the new model (the storage adapter
+		// maps `eligible > 0` to `Ran`, not `NotRun`). The
+		// meaningful degrade case is NotRun — phase never
+		// executed — which is what this test pins.
 		assert_eq!(
-			derive_repo_confidence(&ts(0.80, false, 10), false),
+			derive_repo_confidence(&ts(0.80, EnrichmentState::NotRun, 0), false),
 			Confidence::Medium
 		);
 	}
 
 	#[test]
-	fn high_rate_with_zero_enrichment_eligible_stays_high() {
-		// No eligible edges means enrichment is not applicable;
-		// absence is not a penalty in that case.
+	fn high_rate_with_not_applicable_enrichment_stays_high() {
+		// Replaces "high_rate_with_zero_enrichment_eligible_stays_high".
+		// Semantically identical case in the new model: the
+		// storage adapter maps `Some(es) where es.eligible == 0`
+		// to `NotApplicable`.
 		assert_eq!(
-			derive_repo_confidence(&ts(0.80, false, 0), false),
+			derive_repo_confidence(
+				&ts(0.80, EnrichmentState::NotApplicable, 0),
+				false
+			),
 			Confidence::High
 		);
 	}

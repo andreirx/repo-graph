@@ -223,6 +223,45 @@ pub struct TrustReport {
 	pub modules: Vec<ModuleTrustRow>,
 	pub caveats: Vec<String>,
 	pub diagnostics_available: bool,
+
+	/// Internal Rust-only counter exposing the number of
+	/// `CallsObjMethodNeedsTypeInfo` samples seen by the
+	/// enrichment phase.
+	///
+	/// This field is NOT serialized (`#[serde(skip)]`) — it
+	/// does not appear in TS parity fixtures or Rust-produced
+	/// JSON, so it does not affect the TrustReport wire
+	/// contract. `#[serde(default)]` makes Rust-side
+	/// deserialization of TS-produced JSON populate it as
+	/// `0`, which is the correct sentinel for "no information
+	/// about eligibility" when reading an external report.
+	///
+	/// ── Why this exists ──────────────────────────────────
+	///
+	/// `enrichment_status: Option<EnrichmentStatus>` alone
+	/// cannot distinguish three real-world states the agent
+	/// layer needs to tell apart:
+	///
+	///   1. No eligible samples at all → NotApplicable
+	///   2. Eligible samples but enrichment phase never ran
+	///      → NotRun
+	///   3. Phase ran on one or more eligible samples → Ran
+	///
+	/// The current `enrichment_status.is_some()` flag lumps
+	/// (1) and (2) together because both produce `None`. The
+	/// storage adapter (see
+	/// `rust/crates/storage/src/agent_impl.rs::get_trust_summary`)
+	/// reads this counter to disambiguate case (1) (counter
+	/// == 0) from case (2) (counter > 0 with
+	/// `enrichment_status.is_none()`).
+	///
+	/// Added after the Rust-43 spike review
+	/// (`docs/spikes/2026-04-15-orient-on-repo-graph.md`)
+	/// identified that the agent would incorrectly emit
+	/// `TRUST_NO_ENRICHMENT` and degrade confidence on repos
+	/// with zero eligible samples.
+	#[serde(skip, default)]
+	pub enrichment_eligible_count: u64,
 }
 
 #[cfg(test)]

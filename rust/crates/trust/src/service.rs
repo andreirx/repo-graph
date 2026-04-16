@@ -346,11 +346,20 @@ pub fn compute_trust_report(input: &TrustComputationInput) -> TrustReport {
 	});
 
 	// ── Phase 5: Blast radius + enrichment ───────────────────
-	let (unknown_calls_blast_radius, enrichment_status) =
+	//
+	// `enrichment_eligible_count` is returned alongside the
+	// `Option<EnrichmentStatus>` so downstream consumers can
+	// tell "no eligible samples" from "eligible samples but
+	// enrichment phase did not run". Both states currently
+	// collapse to `enrichment_status = None`; the counter is
+	// the disambiguator. Used by the agent storage adapter
+	// to map into `EnrichmentState::{NotApplicable, NotRun}`
+	// without ambiguity. See the field doc on `TrustReport`.
+	let (unknown_calls_blast_radius, enrichment_status, enrichment_eligible_count) =
 		if !input.all_classification_counts.is_empty() {
 			compute_blast_radius_and_enrichment(&input.unknown_calls_samples)
 		} else {
-			(None, None)
+			(None, None, 0)
 		};
 
 	// ── Phase 6: Module rows ─────────────────────────────────
@@ -444,6 +453,7 @@ pub fn compute_trust_report(input: &TrustComputationInput) -> TrustReport {
 		modules,
 		caveats,
 		diagnostics_available,
+		enrichment_eligible_count,
 	}
 }
 
@@ -461,6 +471,7 @@ fn compute_blast_radius_and_enrichment(
 ) -> (
 	Option<UnknownCallsBlastRadiusBreakdown>,
 	Option<EnrichmentStatus>,
+	u64,
 ) {
 	let mut breakdown = UnknownCallsBlastRadiusBreakdown {
 		low: 0,
@@ -530,6 +541,16 @@ fn compute_blast_radius_and_enrichment(
 	// Build enrichment status only if enrichment was actually run.
 	// Null = no enrichment markers found.
 	// Populated with enriched=0 = enrichment ran but resolved zero types.
+	//
+	// The returned `eligible_count` is the number of
+	// `CallsObjMethodNeedsTypeInfo` samples regardless of
+	// whether the enrichment phase ran. Downstream consumers
+	// use it alongside `enrichment_status.is_none()` to
+	// distinguish "no eligible samples at all" (count == 0)
+	// from "eligible samples existed but enrichment phase did
+	// not run" (count > 0, status == None). Without this
+	// counter the two states are indistinguishable through the
+	// public DTO.
 	let enrichment = if enrichment_was_run {
 		let mut top_types: Vec<EnrichmentTopType> = type_counts
 			.into_iter()
@@ -555,7 +576,7 @@ fn compute_blast_radius_and_enrichment(
 		None
 	};
 
-	(blast_radius, enrichment)
+	(blast_radius, enrichment, eligible_count)
 }
 
 // ── Layer 2: Storage-backed assembly ─────────────────────────────
@@ -911,7 +932,75 @@ mod tests {
 		}];
 
 		let report = compute_trust_report(&input);
+		// JSON-shape contract: enrichment_status is None when
+		// no sample carried the enrichment marker. Parity with
+		// TS is preserved by keeping this return shape
+		// unchanged.
 		assert!(report.enrichment_status.is_none());
+		// Internal disambiguator: the sample count is
+		// surfaced separately so downstream consumers can
+		// tell this case (eligible > 0, phase did not run)
+		// apart from the "no eligible samples at all" case.
+		// The counter is `#[serde(skip)]` and never enters
+		// the parity contract.
+		assert_eq!(
+			report.enrichment_eligible_count, 1,
+			"phase-did-not-run case must report its eligible count"
+		);
+	}
+
+	#[test]
+	fn enrichment_eligible_count_is_zero_when_no_samples_at_all() {
+		// Empty classification counts → upstream skips the
+		// compute function entirely. The counter must be 0 so
+		// the agent adapter maps this to NotApplicable, not
+		// NotRun. Regression pin for the spike-follow-up P2
+		// review: the previous behavior conflated this case
+		// with "phase did not run" and would have emitted a
+		// spurious TRUST_NO_ENRICHMENT signal plus a
+		// confidence penalty on repos with nothing to enrich.
+		let input = minimal_input();
+		let report = compute_trust_report(&input);
+		assert!(report.enrichment_status.is_none());
+		assert_eq!(report.enrichment_eligible_count, 0);
+	}
+
+	#[test]
+	fn enrichment_eligible_count_is_zero_when_samples_are_not_calls_obj_method() {
+		// Samples exist but NONE are in
+		// `CallsObjMethodNeedsTypeInfo`. The enrichment phase
+		// only counts that one category as eligible, so the
+		// counter stays 0, the status stays None, and the
+		// adapter correctly reports NotApplicable.
+		let mut input = minimal_input();
+		input.all_classification_counts = vec![ClassificationCountRow {
+			classification: UnresolvedEdgeClassification::Unknown,
+			count: 2,
+		}];
+		input.unknown_calls_samples = vec![
+			TrustUnresolvedEdgeSample {
+				category: UnresolvedEdgeCategory::CallsFunctionAmbiguousOrMissing,
+				basis_code: UnresolvedEdgeBasisCode::NoSupportingSignal,
+				source_node_visibility: None,
+				metadata_json: None,
+			},
+			TrustUnresolvedEdgeSample {
+				category: UnresolvedEdgeCategory::CallsThisMethodNeedsClassContext,
+				basis_code: UnresolvedEdgeBasisCode::NoSupportingSignal,
+				source_node_visibility: None,
+				metadata_json: None,
+			},
+		];
+
+		let report = compute_trust_report(&input);
+		assert!(
+			report.enrichment_status.is_none(),
+			"non-CallsObjMethodNeedsTypeInfo samples do not trigger status"
+		);
+		assert_eq!(
+			report.enrichment_eligible_count, 0,
+			"only CallsObjMethodNeedsTypeInfo samples increment the counter"
+		);
 	}
 
 	#[test]

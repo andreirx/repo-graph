@@ -10,7 +10,8 @@ mod common;
 use common::FakeAgentStorage;
 use repo_graph_agent::{
 	orient, AgentBoundaryDeclaration, AgentCycle, AgentDeadNode,
-	AgentImportEdge, AgentTrustSummary, Budget, Severity, SignalCategory,
+	AgentImportEdge, AgentReliabilityAxis, AgentReliabilityLevel,
+	AgentTrustSummary, Budget, EnrichmentState, Severity, SignalCategory,
 };
 
 fn seed_with_all_signals() -> FakeAgentStorage {
@@ -34,14 +35,25 @@ fn seed_with_all_signals() -> FakeAgentStorage {
 		}],
 	);
 
-	// TRUST_LOW_RESOLUTION (Medium, Trust category)
+	// TRUST_LOW_RESOLUTION (Medium, Trust category).
+	// Reliability axes are seeded `High` so DEAD_CODE still
+	// fires in this ranking fixture (the fake does not mirror
+	// the real trust crate's rules — see common::high_confidence_trust).
 	fake.trust_summaries.insert(
 		"snap-1".into(),
 		AgentTrustSummary {
 			call_resolution_rate: 0.10,
 			resolved_calls: 1,
 			unresolved_calls: 9,
-			enrichment_applied: true,
+			call_graph_reliability: AgentReliabilityAxis {
+				level: AgentReliabilityLevel::High,
+				reasons: Vec::new(),
+			},
+			dead_code_reliability: AgentReliabilityAxis {
+				level: AgentReliabilityLevel::High,
+				reasons: Vec::new(),
+			},
+			enrichment_state: EnrichmentState::Ran,
 			enrichment_eligible: 10,
 			enrichment_enriched: 9,
 		},

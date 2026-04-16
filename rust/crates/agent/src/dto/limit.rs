@@ -54,6 +54,25 @@ pub enum LimitCode {
 	/// Rust indexer. `HIGH_COMPLEXITY` is therefore never emitted
 	/// from a Rust-indexed repo.
 	ComplexityUnavailable,
+
+	/// The `DEAD_CODE` signal was suppressed because the trust
+	/// layer's `reliability.dead_code` axis is not High. This
+	/// happens when extraction quality is insufficient for
+	/// deletion decisions — typically because the call graph
+	/// has too many unresolved edges, or framework-liveness
+	/// inferences and entrypoint declarations are missing.
+	///
+	/// The reasons vector on the emitted `Limit` carries the
+	/// trust crate's own reason strings verbatim (e.g.
+	/// `"missing_entrypoint_declarations"`,
+	/// `"call_graph_reliability_low"`). The agent crate does
+	/// NOT synthesize reason vocabulary.
+	///
+	/// Introduced in the Rust-43 F1/F3 fix slice after the
+	/// spike on this repo showed 86% of symbols incorrectly
+	/// reported as dead. See
+	/// `docs/spikes/2026-04-15-orient-on-repo-graph.md`.
+	DeadCodeUnreliable,
 }
 
 impl LimitCode {
@@ -62,6 +81,7 @@ impl LimitCode {
 			Self::GateNotConfigured => "GATE_NOT_CONFIGURED",
 			Self::ModuleDataUnavailable => "MODULE_DATA_UNAVAILABLE",
 			Self::ComplexityUnavailable => "COMPLEXITY_UNAVAILABLE",
+			Self::DeadCodeUnreliable => "DEAD_CODE_UNRELIABLE",
 		}
 	}
 
@@ -83,6 +103,15 @@ impl LimitCode {
 				"Cyclomatic complexity measurements are not produced by \
 				 the Rust indexer. HIGH_COMPLEXITY cannot be emitted."
 			}
+			Self::DeadCodeUnreliable => {
+				"Dead-code signal suppressed: trust layer reports \
+				 dead_code_reliability is not High. The underlying \
+				 graph does not have enough entrypoint declarations, \
+				 framework-liveness inferences, or resolved call \
+				 edges to make deletion decisions reliable. See the \
+				 accompanying reasons list for the specific trust \
+				 axis that failed."
+			}
 		}
 	}
 }
@@ -94,18 +123,63 @@ impl Serialize for LimitCode {
 }
 
 /// One limit record in the output envelope.
+///
+/// Shape rules:
+///
+///   - `code` is a stable enumerated identifier.
+///   - `summary` is looked up from the code — callers cannot
+///     supply their own text. This keeps the per-code wording
+///     as a single-site contract.
+///   - `reasons` is a free-form list of human-readable strings
+///     describing WHY the limit fired. Most limits have no
+///     reasons and serialize without the field. Limits
+///     triggered by an upstream policy layer (notably
+///     `DEAD_CODE_UNRELIABLE`, which surfaces the trust
+///     crate's `reliability.dead_code.reasons` verbatim) carry
+///     the reasons through to the output envelope so an agent
+///     can display or match on them.
+///
+/// The `reasons` field is skipped during serialization when
+/// empty, preserving the pre-Rust-43-fix output shape for every
+/// limit that does not use it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Limit {
 	pub code: LimitCode,
 	pub summary: &'static str,
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	pub reasons: Vec<String>,
 }
 
 impl Limit {
 	/// Construct a limit record from a code. The summary is
 	/// looked up by the code — callers cannot supply their own
 	/// summary string, which is how the contract stays stable.
+	///
+	/// No reasons attached. Use
+	/// `from_code_with_reasons` when the limit needs to carry
+	/// upstream diagnostic strings.
 	pub fn from_code(code: LimitCode) -> Self {
-		Self { code, summary: code.summary() }
+		Self {
+			code,
+			summary: code.summary(),
+			reasons: Vec::new(),
+		}
+	}
+
+	/// Construct a limit record from a code with an attached
+	/// reasons list. Reasons are passed through verbatim — the
+	/// caller is responsible for the vocabulary. This is how
+	/// `DEAD_CODE_UNRELIABLE` surfaces the trust crate's
+	/// `reliability.dead_code.reasons` to the output envelope.
+	pub fn from_code_with_reasons(
+		code: LimitCode,
+		reasons: Vec<String>,
+	) -> Self {
+		Self {
+			code,
+			summary: code.summary(),
+			reasons,
+		}
 	}
 }
 

@@ -10,7 +10,8 @@ mod common;
 use common::FakeAgentStorage;
 use repo_graph_agent::{
 	orient, AgentBoundaryDeclaration, AgentCycle, AgentDeadNode,
-	AgentImportEdge, AgentStaleFile, AgentTrustSummary, Budget,
+	AgentImportEdge, AgentReliabilityAxis, AgentReliabilityLevel,
+	AgentStaleFile, AgentTrustSummary, Budget, EnrichmentState,
 };
 
 fn seed_many_signals() -> FakeAgentStorage {
@@ -34,14 +35,34 @@ fn seed_many_signals() -> FakeAgentStorage {
 			target_file: "src/adapters/b.rs".into(),
 		}],
 	);
-	// Trust low + no enrichment (2 signals from one summary + stale files (1 signal))
+	// Trust low-resolution (fires TRUST_LOW_RESOLUTION) plus
+	// NotRun enrichment (fires TRUST_NO_ENRICHMENT) plus
+	// stale files below (fires TRUST_STALE_SNAPSHOT).
+	//
+	// IMPORTANT: the reliability axes are seeded `High` here
+	// deliberately, even though a low call_resolution_rate
+	// would produce a Low trust axis in the real pipeline.
+	// This fake is driving the budget-truncation test, which
+	// needs exactly 8 emitted signals — including DEAD_CODE.
+	// The Rust-43 F1 fix gates DEAD_CODE on
+	// `dead_code_reliability.level == High`, so forcing High
+	// here preserves the signal count. Tests that exercise
+	// low reliability live in `orient_repo_dead_code_reliability.rs`.
 	fake.trust_summaries.insert(
 		"snap-1".into(),
 		AgentTrustSummary {
 			call_resolution_rate: 0.10,
 			resolved_calls: 1,
 			unresolved_calls: 9,
-			enrichment_applied: false,
+			call_graph_reliability: AgentReliabilityAxis {
+				level: AgentReliabilityLevel::High,
+				reasons: Vec::new(),
+			},
+			dead_code_reliability: AgentReliabilityAxis {
+				level: AgentReliabilityLevel::High,
+				reasons: Vec::new(),
+			},
+			enrichment_state: EnrichmentState::NotRun,
 			enrichment_eligible: 10,
 			enrichment_enriched: 0,
 		},

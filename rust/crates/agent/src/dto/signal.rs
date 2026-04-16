@@ -548,7 +548,7 @@ impl Signal {
 
 	pub fn trust_no_enrichment(evidence: TrustNoEnrichmentEvidence) -> Self {
 		let summary = String::from(
-			"No compiler enrichment applied; call graph resolution \
+			"Enrichment phase did not run; call graph resolution \
 			 relies on syntax-only extraction.",
 		);
 		Self::build(

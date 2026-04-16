@@ -22,8 +22,9 @@ use std::collections::HashMap;
 
 use repo_graph_agent::{
 	AgentBoundaryDeclaration, AgentCycle, AgentDeadNode, AgentImportEdge,
-	AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
-	AgentStorageError, AgentStorageRead, AgentTrustSummary,
+	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
+	AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead,
+	AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_gate::{
 	GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -37,6 +38,37 @@ use repo_graph_gate::{
 /// that does not care about expiry passes `TEST_NOW`. Expiry
 /// tests pass specific values relative to this anchor.
 pub const TEST_NOW: &str = "2026-04-15T00:00:00Z";
+
+/// Build a "high confidence" `AgentTrustSummary` fixture.
+///
+/// Default baseline that every existing test implicitly relies
+/// on. Call resolution rate is 90%, the call-graph and
+/// dead-code reliability axes are both High with empty reason
+/// vectors, and the enrichment phase is `Ran` with 9-of-10
+/// edges resolved. Tests that want to exercise low-reliability
+/// paths construct their own `AgentTrustSummary` directly.
+///
+/// NOT part of the `repo-graph-agent` public surface. This is
+/// a test-only helper in the shared `common` module so
+/// production code does not grow fixture constructors.
+pub fn high_confidence_trust() -> AgentTrustSummary {
+	AgentTrustSummary {
+		call_resolution_rate: 0.90,
+		resolved_calls: 90,
+		unresolved_calls: 10,
+		call_graph_reliability: AgentReliabilityAxis {
+			level: AgentReliabilityLevel::High,
+			reasons: Vec::new(),
+		},
+		dead_code_reliability: AgentReliabilityAxis {
+			level: AgentReliabilityLevel::High,
+			reasons: Vec::new(),
+		},
+		enrichment_state: EnrichmentState::Ran,
+		enrichment_eligible: 10,
+		enrichment_enriched: 9,
+	}
+}
 
 #[derive(Default)]
 pub struct FakeAgentStorage {
@@ -119,15 +151,7 @@ impl FakeAgentStorage {
 		);
 		self.trust_summaries.insert(
 			snapshot_uid.to_string(),
-			AgentTrustSummary {
-				// Default: high resolution, enrichment applied.
-				call_resolution_rate: 0.90,
-				resolved_calls: 90,
-				unresolved_calls: 10,
-				enrichment_applied: true,
-				enrichment_eligible: 10,
-				enrichment_enriched: 9,
-			},
+			high_confidence_trust(),
 		);
 	}
 
@@ -239,18 +263,19 @@ impl AgentStorageRead for FakeAgentStorage {
 		snapshot_uid: &str,
 	) -> Result<AgentTrustSummary, AgentStorageError> {
 		self.fail_if_forced("get_trust_summary")?;
+		// Default fallback when a test forgets to seed a trust
+		// summary. Uses `high_confidence_trust()` so the
+		// reliability axes are High — the Rust-43 F1 fix
+		// added the reliability gate on DEAD_CODE emission,
+		// and a fallback with Low reliability would break
+		// every existing test that does not care about the
+		// dead-code path. Tests that exercise Low reliability
+		// seed their own `AgentTrustSummary` directly.
 		Ok(self
 			.trust_summaries
 			.get(snapshot_uid)
 			.cloned()
-			.unwrap_or(AgentTrustSummary {
-				call_resolution_rate: 1.0,
-				resolved_calls: 0,
-				unresolved_calls: 0,
-				enrichment_applied: false,
-				enrichment_eligible: 0,
-				enrichment_enriched: 0,
-			}))
+			.unwrap_or_else(high_confidence_trust))
 	}
 }
 

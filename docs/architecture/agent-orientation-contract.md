@@ -146,8 +146,10 @@ Trust:
   Evidence: `{ resolution_rate, resolved_count, total_count }`
 - `TRUST_STALE_SNAPSHOT` — category: trust, severity: medium. Repo changed since last index.
   Evidence: `{ snapshot_age_seconds, snapshot_uid }`
-- `TRUST_NO_ENRICHMENT` — category: trust, severity: low. No compiler enrichment applied.
-  Evidence: `{ enrichment_status }`
+- `TRUST_NO_ENRICHMENT` — category: trust, severity: low. Enrichment phase did not run
+  on a snapshot with eligible work (`EnrichmentState::NotRun`). Does NOT fire when the
+  phase ran but resolved nothing (`Ran`), or when no eligible samples exist
+  (`NotApplicable`). Evidence: `{ enrichment_eligible, enrichment_enriched }`
 
 Structure:
 - `IMPORT_CYCLES` — category: structure, severity: medium. Module-level circular dependencies.
@@ -422,11 +424,100 @@ mechanism.
 2. `Rust-42`: `orient` use-case module — pure Rust aggregation returning typed DTO. No CLI. Tested with deterministic fixtures. **(done — repo-level focus only; module/symbol focus deferred to Rust-44/45.)**
 3. `Rust-43A`: gate.rs relocation — move gate policy out of the `rgr` binary crate into a new `repo-graph-gate` library crate. Add gate signal coverage (`GATE_PASS` / `GATE_FAIL` / `GATE_INCOMPLETE`) to the orient pipeline. Replace unconditional `GATE_UNAVAILABLE` limit with `GATE_NOT_CONFIGURED`. **(done — see `docs/TECH-DEBT.md` "Gate.rs relocation — CLOSED in Rust-43A" for details.)**
 4. `Rust-43B`: `rgr orient` CLI command — parse args, call use case, serialize, exit code. **(done — shipped under the current `rgr-rust` name with the `<db_path> <repo_uid>` positional shape; see "Rust-43B implementation notes" below. Repo-name invocation is deferred to Rust-43C+ because the Rust CLI has no repo registry yet.)**
-5. `Rust-43C`: Binary rename: `rgr-rust` → `rgr`, `rgr` (TS) → `rgr-ts`. Does NOT ship with Rust-43B. Reason: CLI command wiring and binary migration are separate risks; the rename touches ~20 files (test harnesses, docs, package metadata, TS bin config, existing workflows) and must stay reviewable in isolation.
+5. `Rust-43 F1/F2/F3 fix slice`: semantic correctness fix for the spike-discovered defects in the orient contract (DEAD_CODE gated on trust reliability, `EnrichmentState` three-state model, typed reliability axes in `AgentTrustSummary`). **(done — see "Rust-43 F1/F2/F3 fix slice implementation notes" below and `docs/spikes/2026-04-15-orient-on-repo-graph.md` for the before/after verification.)**
+6. `Rust-43C`: Binary rename: `rgr-rust` → `rgr`, `rgr` (TS) → `rgr-ts`. Does NOT ship with Rust-43B. Reason: CLI command wiring and binary migration are separate risks; the rename touches ~20 files (test harnesses, docs, package metadata, TS bin config, existing workflows) and must stay reviewable in isolation. Moved to after the F1/F2/F3 fix slice on the recommendation of the spike — do not freeze `rgr orient` as a public spell while the output shape is known to be misleading.
 6. `Rust-44`: `check` use-case + CLI. Module/path focus for `orient`.
 7. `Rust-45`: `explain` use-case + CLI. Symbol focus for `orient`.
 8. Evaluate: does the agent surface cover 80% of agent needs?
 9. Daemon: host the same use-case functions over a socket.
+
+### Rust-43 F1/F2/F3 fix slice implementation notes (as shipped)
+
+- **Trust as authority.** The trust crate already computes
+  `reliability.dead_code` as a composite axis that combines
+  call-graph reliability, missing entrypoint declarations,
+  registry pattern suspicion, and framework-heavy suspicion.
+  The agent crate does NOT re-derive these rules. The
+  dead-code aggregator reads
+  `trust.dead_code_reliability.level == High` as a
+  single-site gate.
+- **New agent DTOs:**
+  - `AgentReliabilityLevel { Low, Medium, High }`
+  - `AgentReliabilityAxis { level, reasons: Vec<String> }`
+  - `EnrichmentState { Ran, NotApplicable, NotRun }`
+- **`AgentTrustSummary` widening:** `call_graph_reliability`,
+  `dead_code_reliability`, `enrichment_state`. The old
+  `enrichment_applied: bool` was removed (it collapsed
+  "phase never ran" and "phase ran with nothing to do" into
+  a single boolean, which was the F2 bug).
+- **`Limit` widening:** new optional `reasons: Vec<String>`
+  field, serialized only when non-empty. Pre-existing
+  limits continue to serialize without the field.
+- **New limit code:** `LimitCode::DeadCodeUnreliable`. Fires
+  when `trust.dead_code_reliability.level != High`. Carries
+  the trust layer's reason vector verbatim. Falls back to
+  a stable `"dead_code_reliability_not_high"` string when
+  trust reports a non-High level with an empty reason vector
+  (defensive).
+- **Dead-code aggregator gate:** signature gained
+  `trust: &AgentTrustSummary`. If the level is not High,
+  emit the limit and no signal. Otherwise emit DEAD_CODE as
+  before. The agent crate's `orient_repo` passes the trust
+  summary by reference; the borrow checker accepts this
+  because `AggregatorOutput` merges happen via partial move
+  on `trust_result.output`.
+- **`TRUST_NO_ENRICHMENT` rule update:** fires iff
+  `enrichment_state == NotRun`. Previously the rule was
+  `!applied && eligible > 0`, which was unreachable in the
+  new storage mapping (`eligible > 0 → Ran`).
+- **Confidence rule update:** `NotRun` degrades high→medium
+  on the enrichment axis. `Ran` and `NotApplicable` are
+  silent on this axis. `stale` still degrades
+  independently.
+- **Storage adapter mapping:**
+  - `Option<EnrichmentStatus>` + `enrichment_eligible_count`
+    (the latter is the spike-follow-up P2 disambiguator —
+    a `#[serde(skip)]` field on `TrustReport` that exposes
+    the `CallsObjMethodNeedsTypeInfo` sample count even
+    when `enrichment_status == None`):
+    - `Some(es)` → `Ran` (phase executed on at least one
+      eligible sample; `enriched` count may be zero)
+    - `None` && `enrichment_eligible_count == 0` →
+      `NotApplicable` (no eligible samples at all)
+    - `None` && `enrichment_eligible_count > 0` → `NotRun`
+      (eligible samples existed but the phase never ran)
+    - The `Some(es) where es.eligible == 0` branch is
+      defensive and currently unreachable in trust code —
+      kept in the match for forward compatibility
+  - **Why both inputs are required.** `Option<EnrichmentStatus>`
+    alone collapses "no eligible samples" and "phase did
+    not run on eligible samples" into a single `None`. The
+    P2 review identified this as a false-positive source
+    for `TRUST_NO_ENRICHMENT` on snapshots with nothing to
+    enrich. Future CLI/daemon/adapter work MUST keep the
+    counter in the mapping; reverting to the
+    `Option`-only shape reintroduces the bug.
+  - `reliability.call_graph` and `reliability.dead_code`
+    project directly via `trust::ReliabilityLevel` →
+    `AgentReliabilityLevel` enum mapping. Reason strings
+    pass through unchanged.
+- **Spike validation.** Re-ran
+  `rgr-rust orient /tmp/rgspike.db repo-graph --budget large`
+  against the same database used in the spike. Before:
+  DEAD_CODE ranked #1 with 2683 dead symbols. After:
+  DEAD_CODE suppressed, `DEAD_CODE_UNRELIABLE` limit fires
+  with the trust reason `missing_entrypoint_declarations`,
+  IMPORT_CYCLES takes rank #1, TRUST_NO_ENRICHMENT now
+  visible at rank #2. The output is dramatically more
+  honest and more actionable. See
+  `docs/spikes/2026-04-15-orient-on-repo-graph.md` for the
+  full before/after diff.
+- **Test totals:** 7 new integration tests in
+  `rust/crates/agent/tests/orient_repo_dead_code_reliability.rs`.
+  Existing confidence tests rewritten around the new
+  three-state enum. Storage smoke test asserts the
+  empty-snapshot reliability gate. Full workspace: 1128
+  tests passing, 0 failures.
 
 ### Rust-43B implementation notes (as shipped)
 

@@ -1,12 +1,37 @@
 //! Dead-code aggregator.
 //!
 //! Calls `AgentStorageRead::find_dead_nodes` with SYMBOL filter
-//! and emits `DEAD_CODE` when `dead_count >= DEAD_CODE_EMIT_THRESHOLD`.
+//! and emits `DEAD_CODE` when the trust layer says dead-code
+//! reliability is High AND `dead_count >= DEAD_CODE_EMIT_THRESHOLD`.
 //!
-//! Threshold policy (Rust-42): emit on `>= 1`. The constant is
-//! at the top of the module so future slices can tune it as a
-//! single-site change. Do not invent a silent larger threshold
-//! — signal emission is a product statement, not a heuristic.
+//! ── Reliability gate (Rust-43 F1/F3 fix) ─────────────────────
+//!
+//! The trust crate computes `reliability.dead_code` as a
+//! composite axis score combining call-graph reliability,
+//! missing entrypoint declarations, registry pattern suspicion,
+//! and framework-heavy suspicion. If that composite is not
+//! `High`, the agent cannot honestly surface a `DEAD_CODE`
+//! signal — the count is dominated by unresolved calls and
+//! missing framework-liveness inferences rather than real
+//! dead code.
+//!
+//! When reliability is not High, this aggregator emits a
+//! `DEAD_CODE_UNRELIABLE` limit carrying the trust layer's
+//! own reason strings verbatim. No signal.
+//!
+//! The agent crate MUST NOT re-derive the reliability
+//! threshold logic. The trust layer is the authority. See
+//! `docs/spikes/2026-04-15-orient-on-repo-graph.md` for the
+//! spike that motivated this gate (repo-graph self-index
+//! reported 86% of symbols as dead — all noise).
+//!
+//! ── Emission threshold policy (Rust-42) ─────────────────────
+//!
+//! When reliability is High and at least one unreferenced
+//! symbol exists, emit the signal. The constant is at the top
+//! of the module so future slices can tune it as a single-site
+//! change. Do not invent a silent larger threshold — signal
+//! emission is a product statement, not a heuristic.
 //!
 //! ── top_dead ordering ────────────────────────────────────────
 //!
@@ -31,9 +56,12 @@
 //! not detection filtering.
 
 use super::AggregatorOutput;
+use crate::dto::limit::{Limit, LimitCode};
 use crate::dto::signal::{DeadCodeEvidence, DeadSymbolEvidence, Signal};
 use crate::errors::AgentStorageError;
-use crate::storage_port::{AgentDeadNode, AgentStorageRead};
+use crate::storage_port::{
+	AgentDeadNode, AgentReliabilityLevel, AgentStorageRead, AgentTrustSummary,
+};
 
 /// Minimum `dead_count` required to emit the signal.
 pub const DEAD_CODE_EMIT_THRESHOLD: usize = 1;
@@ -43,11 +71,44 @@ pub const DEAD_CODE_EMIT_THRESHOLD: usize = 1;
 /// is an output-compression constant, not a detection threshold.
 const DEAD_CODE_TOP_N: usize = 3;
 
+/// Fallback reason string used when the trust layer reports a
+/// non-High `dead_code_reliability` but somehow provides an
+/// empty `reasons` vector. This is a defensive fallback — the
+/// trust rules in the upstream crate always populate reasons
+/// when the level is not High, so reaching this fallback would
+/// indicate a trust-crate bug. The string is stable so agents
+/// can match on it.
+const FALLBACK_REASON_DEAD_CODE_RELIABILITY_NOT_HIGH: &str =
+	"dead_code_reliability_not_high";
+
 pub fn aggregate<S: AgentStorageRead + ?Sized>(
 	storage: &S,
 	snapshot_uid: &str,
 	repo_uid: &str,
+	trust: &AgentTrustSummary,
 ) -> Result<AggregatorOutput, AgentStorageError> {
+	// ── Reliability gate (F1/F3) ─────────────────────────────
+	//
+	// Read the trust layer's authoritative verdict. If the
+	// dead-code axis is not High, suppress the signal entirely
+	// and emit a limit carrying the trust reasons. Do NOT
+	// re-derive thresholds here.
+	if trust.dead_code_reliability.level != AgentReliabilityLevel::High {
+		let reasons = if trust.dead_code_reliability.reasons.is_empty() {
+			vec![FALLBACK_REASON_DEAD_CODE_RELIABILITY_NOT_HIGH.to_string()]
+		} else {
+			trust.dead_code_reliability.reasons.clone()
+		};
+		return Ok(AggregatorOutput {
+			signals: Vec::new(),
+			limits: vec![Limit::from_code_with_reasons(
+				LimitCode::DeadCodeUnreliable,
+				reasons,
+			)],
+		});
+	}
+
+	// ── Reliable path: proceed with signal emission ─────────
 	let mut dead = storage.find_dead_nodes(snapshot_uid, repo_uid, Some("SYMBOL"))?;
 
 	if dead.len() < DEAD_CODE_EMIT_THRESHOLD {

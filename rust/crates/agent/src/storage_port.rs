@@ -154,30 +154,108 @@ pub struct AgentRepoSummary {
 	pub languages: Vec<String>,
 }
 
+// ── Reliability axis (projection of trust axis scores) ──────────
+
+/// Three-state reliability level, mirror of `trust::ReliabilityLevel`.
+///
+/// The agent crate keeps its own enum (rather than re-exporting
+/// trust's) so the public surface of `repo-graph-agent` is
+/// independent of the trust crate. Storage adapters map trust's
+/// enum into this one at the port boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentReliabilityLevel {
+	Low,
+	Medium,
+	High,
+}
+
+/// One reliability axis score: a level plus human-readable
+/// reasons. Mirrors `trust::ReliabilityAxisScore`. Reasons are
+/// arbitrary free-form strings produced by the trust rules (e.g.
+/// `"missing_entrypoint_declarations"`,
+/// `"call_resolution_rate=22.2%_below_50%"`).
+///
+/// Downstream signal / limit emitters that carry reasons to the
+/// output envelope must copy them verbatim; the reason vocabulary
+/// is controlled by the trust crate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentReliabilityAxis {
+	pub level: AgentReliabilityLevel,
+	pub reasons: Vec<String>,
+}
+
+// ── Enrichment state ─────────────────────────────────────────────
+
+/// Three-state enrichment execution model.
+///
+/// Replaces the Rust-42-era `enrichment_applied: bool` field,
+/// which collapsed two distinct states ("phase never ran" vs
+/// "phase ran but had nothing to do") into one. The Rust indexer
+/// does not run a compiler enrichment phase; TS indexers may or
+/// may not, and may or may not have eligible edges. This enum
+/// distinguishes all three.
+///
+/// Variants:
+///
+///   - `Ran`: the enrichment phase executed with at least one
+///     eligible edge. The scalar `enrichment_enriched` count
+///     indicates how many were actually resolved (it may be
+///     zero — `Ran` is about phase execution, not success). Do
+///     NOT rename this variant to `Applied`: "applied" implies
+///     successful resolution, which is stronger than what the
+///     storage adapter can claim at this boundary.
+///
+///   - `NotApplicable`: the enrichment phase executed with
+///     zero eligible edges. Nothing to do. Confidence is NOT
+///     penalized on the enrichment axis in this state.
+///
+///   - `NotRun`: the enrichment phase did NOT execute. The
+///     indexer did not report any enrichment status at all. The
+///     confidence axis penalizes this state because the caller
+///     has no evidence that the call graph was ever enriched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnrichmentState {
+	Ran,
+	NotApplicable,
+	NotRun,
+}
+
 // ── Trust summary (projection) ───────────────────────────────────
 
 /// Narrow projection of the trust report for agent consumption.
 ///
 /// The agent crate does not depend on `repo-graph-trust`. The
-/// storage adapter implements this method by calling
+/// storage adapter implements `get_trust_summary` by calling
 /// `trust::assemble_trust_report` internally and projecting the
 /// result into this DTO. Only fields the orient use case reads
 /// are surfaced here — the full `TrustReport` carries much more.
 ///
-/// `call_resolution_rate` is in the range `[0.0, 1.0]`.
+/// ── Reliability axes (Rust-43 F1/F3 fix) ────────────────────
 ///
-/// `enrichment_applied` is the agent-facing boolean: `true` iff
-/// any compiler enrichment (TypeScript TypeChecker, rust-analyzer,
-/// etc.) produced at least one resolved edge. `enrichment_eligible`
-/// is the count of edges that were candidates for enrichment;
-/// when the eligible count is zero the agent layer treats
-/// enrichment as "not applicable" rather than "missing".
+/// `call_graph_reliability` and `dead_code_reliability` are
+/// projections of the trust crate's composite reliability axes.
+/// The agent orient pipeline uses `dead_code_reliability.level`
+/// as the single authoritative gate for whether the DEAD_CODE
+/// signal can be emitted. The trust layer already composes
+/// call-graph reliability, entrypoint declarations, registry
+/// pattern suspicion, and framework-heavy suspicion into this
+/// axis; the agent crate must NOT re-derive those rules.
+///
+/// ── Enrichment state (Rust-43 F2 fix) ───────────────────────
+///
+/// `enrichment_state` replaces the earlier boolean. See
+/// `EnrichmentState` docs for the three-state model.
+/// `enrichment_eligible` and `enrichment_enriched` remain as
+/// scalar counts for signal evidence (they are NOT the
+/// authoritative state — the enum is).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentTrustSummary {
 	pub call_resolution_rate: f64,
 	pub resolved_calls: u64,
 	pub unresolved_calls: u64,
-	pub enrichment_applied: bool,
+	pub call_graph_reliability: AgentReliabilityAxis,
+	pub dead_code_reliability: AgentReliabilityAxis,
+	pub enrichment_state: EnrichmentState,
 	pub enrichment_eligible: u64,
 	pub enrichment_enriched: u64,
 }

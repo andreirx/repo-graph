@@ -277,6 +277,173 @@ fn get_stale_files_maps_to_agent_paths() {
 	assert_eq!(stale[0].path, "src/stale.rs");
 }
 
+// ── Trust summary: enrichment state disambiguation (P2) ─────────
+//
+// Regression coverage for the spike-follow-up P2 review: when
+// the trust report has `enrichment_status = None`, the adapter
+// must distinguish "no eligible samples" (NotApplicable) from
+// "eligible samples but phase did not run" (NotRun). The
+// distinguishing signal is `TrustReport.enrichment_eligible_count`.
+//
+// These tests use the real `StorageConnection` impl of
+// `AgentStorageRead::get_trust_summary`, which is the call
+// path that exercises the disambiguator end-to-end. An empty
+// snapshot has zero eligible samples → `NotApplicable`.
+//
+// A NotRun case requires seeding an unresolved
+// `CallsObjMethodNeedsTypeInfo` edge, which is more involved
+// to fixture and is already covered by the spike re-run
+// captured in `docs/spikes/2026-04-15-orient-on-repo-graph.md`.
+// Here we pin the cheaper case that the storage adapter must
+// also handle correctly.
+
+#[test]
+fn empty_snapshot_maps_to_enrichment_state_not_applicable() {
+	use repo_graph_agent::EnrichmentState;
+
+	let (_tmp, mut storage) = open_temp_storage();
+	insert_repo(&storage, "r1", "my-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	let trust =
+		<StorageConnection as AgentStorageRead>::get_trust_summary(
+			&mut storage,
+			"r1",
+			&snapshot_uid,
+		)
+		.unwrap();
+
+	// Empty snapshot has zero CallsObjMethodNeedsTypeInfo
+	// samples. The adapter must NOT report NotRun (the
+	// pre-P2-fix bug) — it must report NotApplicable so the
+	// agent pipeline does not fire a spurious
+	// TRUST_NO_ENRICHMENT signal and does not penalize
+	// confidence on the enrichment axis.
+	assert_eq!(
+		trust.enrichment_state,
+		EnrichmentState::NotApplicable,
+		"empty snapshot must map to NotApplicable; pre-P2 the adapter \
+		 conflated this with NotRun and the spike re-run would have \
+		 reported a false positive"
+	);
+	assert_eq!(trust.enrichment_eligible, 0);
+	assert_eq!(trust.enrichment_enriched, 0);
+}
+
+#[test]
+fn snapshot_with_unresolved_obj_method_call_maps_to_enrichment_state_not_run() {
+	// The other branch of the P2 disambiguator. Seeds a
+	// `CallsObjMethodNeedsTypeInfo` unresolved edge with NO
+	// enrichment metadata. The trust layer's compute path will:
+	//
+	//   1. Count the row in `all_classification_counts`
+	//      (non-empty), so the blast/enrichment computation runs.
+	//   2. Sample it via `query_unresolved_edges(classification =
+	//      Unknown)` — the row's `classification` is `"unknown"`,
+	//      so it appears.
+	//   3. Find no `enrichment` key in `metadata_json` (NULL),
+	//      so `enrichment_was_run` stays false.
+	//   4. Return `enrichment_status = None`,
+	//      `enrichment_eligible_count = 1`.
+	//
+	// The adapter must then map this to `EnrichmentState::NotRun`
+	// — NOT `NotApplicable`. This is the actual code path that
+	// drives `TRUST_NO_ENRICHMENT` emission and the confidence
+	// penalty in production. Pre-P2 the adapter conflated this
+	// with `NotApplicable`; the regression at the manual spike
+	// caught it. This test pins the behavior in CI.
+	use repo_graph_agent::EnrichmentState;
+	use repo_graph_storage::types::GraphNode;
+
+	let dir = tempfile::tempdir().unwrap();
+	let db_path = dir.path().join("notrun.db");
+	let mut storage = StorageConnection::open(&db_path).unwrap();
+	insert_repo(&storage, "r1", "my-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	// Insert a SYMBOL node so the unresolved_edges
+	// `source_node_uid` foreign key resolves. The visibility
+	// is `"export"` so the trust sample carries a sensible
+	// blast-radius input — not strictly required for this
+	// test but matches realistic data.
+	storage
+		.insert_nodes(&[GraphNode {
+			node_uid: "n1".into(),
+			snapshot_uid: snapshot_uid.clone(),
+			repo_uid: "r1".into(),
+			stable_key: "r1:src/a.ts:caller:SYMBOL".into(),
+			kind: "SYMBOL".into(),
+			subtype: Some("FUNCTION".into()),
+			name: "caller".into(),
+			qualified_name: Some("src/a.ts:caller".into()),
+			file_uid: None,
+			parent_node_uid: None,
+			location: None,
+			signature: None,
+			visibility: Some("export".into()),
+			doc_comment: None,
+			metadata_json: None,
+		}])
+		.unwrap();
+
+	// Insert one unresolved edge directly via a parallel
+	// rusqlite connection. The storage crate has a private
+	// helper for this in trust_impl tests; integration tests
+	// do not have access to it, so the SQL is inlined here.
+	// Schema reference: migration_007.rs.
+	//
+	// Critical fields:
+	//   - category = "calls_obj_method_needs_type_info" so
+	//     trust counts it as enrichment-eligible.
+	//   - classification = "unknown" so trust's
+	//     `query_unresolved_edges(classification=Unknown)`
+	//     surfaces it as a sample.
+	//   - metadata_json = NULL so `enrichment_was_run` stays
+	//     false on the compute side, producing
+	//     `enrichment_status = None` with eligible_count = 1.
+	{
+		let raw = rusqlite::Connection::open(&db_path).unwrap();
+		raw.execute(
+			"INSERT INTO unresolved_edges \
+			 (edge_uid, snapshot_uid, repo_uid, source_node_uid, \
+			  target_key, type, resolution, extractor, \
+			  category, classification, classifier_version, \
+			  basis_code, observed_at) \
+			 VALUES (?, ?, 'r1', 'n1', \
+			  'target::key', 'CALLS', 'unresolved', 'ts-base:1', \
+			  'calls_obj_method_needs_type_info', 'unknown', 1, \
+			  'no_supporting_signal', '2025-01-01T00:00:00.000Z')",
+			rusqlite::params!["ue1", &snapshot_uid],
+		)
+		.unwrap();
+	}
+
+	// Adapter call.
+	let trust =
+		<StorageConnection as AgentStorageRead>::get_trust_summary(
+			&mut storage,
+			"r1",
+			&snapshot_uid,
+		)
+		.unwrap();
+
+	assert_eq!(
+		trust.enrichment_state,
+		EnrichmentState::NotRun,
+		"snapshot with eligible CallsObjMethodNeedsTypeInfo sample but no \
+		 enrichment metadata must map to NotRun. Pre-P2 the adapter could \
+		 not see this case (Option<EnrichmentStatus> alone collapsed it \
+		 with NotApplicable). The fix added `enrichment_eligible_count` to \
+		 the TrustReport so the adapter can disambiguate."
+	);
+	assert_eq!(
+		trust.enrichment_eligible, 1,
+		"the eligible count must be preserved through the adapter so \
+		 downstream consumers see the same value the trust layer computed"
+	);
+	assert_eq!(trust.enrichment_enriched, 0);
+}
+
 // ── end-to-end orient over real storage ──────────────────────────
 
 #[test]
@@ -288,7 +455,26 @@ fn orient_runs_over_real_storage_connection() {
 	// repo to keep the fixture trivial; signal correctness is
 	// covered by the agent crate's own test suite against the
 	// fake.
-	use repo_graph_agent::{orient, Budget, ORIENT_SCHEMA};
+	//
+	// ── Expected limit set on an empty snapshot (post Rust-43 F1 fix) ──
+	//
+	// An empty snapshot has zero entrypoint declarations, so
+	// the trust crate's `detect_missing_entrypoint_declarations`
+	// fires, which makes `reliability.dead_code.level = LOW`.
+	// The agent dead-code aggregator therefore emits
+	// `DEAD_CODE_UNRELIABLE` instead of a DEAD_CODE signal.
+	//
+	// Limits on this fixture (4 total):
+	//   1. MODULE_DATA_UNAVAILABLE (always)
+	//   2. GATE_NOT_CONFIGURED (no requirement declarations)
+	//   3. COMPLEXITY_UNAVAILABLE (always)
+	//   4. DEAD_CODE_UNRELIABLE (trust reports Low
+	//      dead_code_reliability → reliability gate fires)
+	//
+	// This is the smoke-test line of defense for F1: if the
+	// reliability gate ever regresses, the empty-snapshot
+	// path is the simplest reproducer.
+	use repo_graph_agent::{orient, Budget, LimitCode, ORIENT_SCHEMA};
 
 	let (_tmp, mut storage) = open_temp_storage();
 	insert_repo(&storage, "r1", "my-repo");
@@ -305,8 +491,44 @@ fn orient_runs_over_real_storage_connection() {
 	assert_eq!(result.schema, ORIENT_SCHEMA);
 	assert_eq!(result.repo, "my-repo");
 	assert_eq!(result.snapshot, snapshot_uid);
-	// Static limits always present.
-	assert_eq!(result.limits.len(), 3);
+
+	assert_eq!(
+		result.limits.len(),
+		4,
+		"empty snapshot must emit MODULE_DATA_UNAVAILABLE + \
+		 GATE_NOT_CONFIGURED + COMPLEXITY_UNAVAILABLE + \
+		 DEAD_CODE_UNRELIABLE; actual: {:?}",
+		result.limits.iter().map(|l| l.code).collect::<Vec<_>>()
+	);
+
+	// DEAD_CODE_UNRELIABLE must carry the trust reason
+	// verbatim. The exact reason string the trust crate
+	// produces for this fixture is
+	// "missing_entrypoint_declarations".
+	let dc_unreliable = result
+		.limits
+		.iter()
+		.find(|l| l.code == LimitCode::DeadCodeUnreliable)
+		.expect("DEAD_CODE_UNRELIABLE must fire on empty snapshot");
+	assert!(
+		dc_unreliable
+			.reasons
+			.iter()
+			.any(|r| r == "missing_entrypoint_declarations"),
+		"reasons must include trust's missing_entrypoint_declarations: {:?}",
+		dc_unreliable.reasons
+	);
+
+	// DEAD_CODE signal must NOT appear.
+	let has_dead_code_signal = result
+		.signals
+		.iter()
+		.any(|s| s.code() == repo_graph_agent::SignalCode::DeadCode);
+	assert!(
+		!has_dead_code_signal,
+		"DEAD_CODE signal must be suppressed when reliability is Low"
+	);
+
 	// At minimum MODULE_SUMMARY + SNAPSHOT_INFO fire.
 	assert!(result.signals.len() >= 2);
 }

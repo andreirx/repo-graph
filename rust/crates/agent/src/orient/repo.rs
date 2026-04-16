@@ -95,9 +95,21 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
 		aggregators::boundary::aggregate(storage, repo_uid, &snapshot_uid)?;
 	merge(&mut all_signals, &mut all_limits, boundary_out);
 
-	// dead_code
-	let dead_out =
-		aggregators::dead_code::aggregate(storage, &snapshot_uid, repo_uid)?;
+	// dead_code — reliability-gated. The aggregator reads the
+	// trust layer's composite `dead_code_reliability` verdict
+	// and suppresses the signal (emitting a
+	// DEAD_CODE_UNRELIABLE limit instead) when the level is
+	// not High. The agent crate does NOT re-derive the
+	// threshold logic; the trust crate is the authority. See
+	// the dead_code module doc for the rationale, and
+	// `docs/spikes/2026-04-15-orient-on-repo-graph.md` for the
+	// spike that motivated this gate.
+	let dead_out = aggregators::dead_code::aggregate(
+		storage,
+		&snapshot_uid,
+		repo_uid,
+		&trust_result.summary,
+	)?;
 	merge(&mut all_signals, &mut all_limits, dead_out);
 
 	// module_summary

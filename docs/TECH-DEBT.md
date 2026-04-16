@@ -500,8 +500,138 @@ on `repo-graph-gate`. No CLI (Rust-43B), no `check`/`explain`
 `docs/architecture/agent-orientation-contract.md` for the
 normative surface description.
 
+### Rust-43 F1/F2/F3 fix slice — CLOSED
+
+The repo-graph self-index spike
+(`docs/spikes/2026-04-15-orient-on-repo-graph.md`) exposed
+three semantic defects in the Rust-43B `orient` contract:
+
+- **F1:** The DEAD_CODE signal reported 86% of symbols as
+  dead on a Rust-indexed repo, because the Rust indexer does
+  not populate framework-liveness inferences and the
+  aggregator had no reliability gate. An agent reading that
+  output would prioritize mass deletion over investigation.
+- **F2:** TRUST_NO_ENRICHMENT was silently suppressed on
+  Rust-indexed repos because `enrichment_applied: bool`
+  collapsed "phase never ran" and "phase ran with zero
+  eligible edges" into one state.
+- **F3:** The DEAD_CODE aggregator had no coupling to trust
+  reliability, so the signal ranked at #1 (Medium severity)
+  regardless of call-graph quality.
+
+Action taken:
+
+1. New DTOs in the agent crate:
+   - `AgentReliabilityLevel { Low, Medium, High }`
+   - `AgentReliabilityAxis { level, reasons: Vec<String> }`
+   - `EnrichmentState { Ran, NotApplicable, NotRun }`
+2. `AgentTrustSummary` widened with `call_graph_reliability`,
+   `dead_code_reliability`, and `enrichment_state`. The old
+   `enrichment_applied: bool` was removed.
+3. New `LimitCode::DeadCodeUnreliable` with a static summary.
+   The `Limit` struct gained a `reasons: Vec<String>` field
+   (serialized only when non-empty, preserving backward
+   compatibility for every other limit).
+4. Dead-code aggregator signature gained
+   `trust: &AgentTrustSummary`. Emission is gated on
+   `trust.dead_code_reliability.level == High`. When the
+   level is not High, the aggregator emits
+   `DEAD_CODE_UNRELIABLE` carrying the trust layer's reason
+   vector verbatim (fallback: the stable string
+   `"dead_code_reliability_not_high"` if trust returned
+   empty reasons).
+5. Trust aggregator rule update: `TRUST_NO_ENRICHMENT`
+   fires iff `enrichment_state == NotRun`.
+6. Confidence derivation update: `NotRun` degrades
+   high→medium on the enrichment axis; `Ran` and
+   `NotApplicable` are silent on this axis.
+7. Storage adapter `get_trust_summary` projects the trust
+   crate's composite reliability axes into the agent DTO
+   without re-deriving any thresholds. The trust crate is
+   the authority.
+8. Tests: 7 new integration tests in
+   `rust/crates/agent/tests/orient_repo_dead_code_reliability.rs`
+   pin the reliable path, the Low/Medium/Low-reason-fallback
+   paths, the JSON shape of `reasons`, and the
+   `skip_serializing_if = "Vec::is_empty"` behavior.
+   Existing tests updated to construct the new DTO shape.
+   Storage-side smoke test asserts the empty-snapshot
+   reliability-gate case end-to-end.
+9. Spike re-run verified the fix on the same database
+   (`/tmp/rgspike.db`). See the spike document for the
+   before/after comparison.
+
+Zero workspace regressions: 1128 tests passing, 0 failures.
+
+#### P2 follow-up: enrichment state disambiguation
+
+The initial F1/F2/F3 fix mapped `Option<EnrichmentStatus>`
+directly: `None → NotRun`, `Some(_) → Ran` or `NotApplicable`
+based on `eligible > 0`. A code-review P2 identified that
+`None` from the trust layer covers THREE distinct cases:
+
+1. No eligible `CallsObjMethodNeedsTypeInfo` samples at all.
+2. Samples exist but none are in that category.
+3. Samples exist AND are in that category, but the
+   enrichment phase never ran.
+
+Cases 1 and 2 are `NotApplicable` semantically — no work for
+enrichment to do — but the pre-P2 adapter reported all three
+as `NotRun`, which would emit a spurious `TRUST_NO_ENRICHMENT`
+signal and degrade confidence on the enrichment axis for any
+repo with nothing to enrich.
+
+Fix:
+
+- Added a `#[serde(skip, default)] pub enrichment_eligible_count: u64`
+  field to `trust::types::TrustReport`. The field is internal
+  to the Rust trust crate and never serializes, so the TS
+  parity contract and existing fixtures are unchanged
+  (verified by running the trust parity harness).
+- `compute_blast_radius_and_enrichment` now returns a
+  3-tuple with the eligible count as its third element, and
+  `compute_trust_report` populates the new field from that
+  value. When `all_classification_counts.is_empty()` the
+  count is 0 (short-circuit path, no compute run).
+- The agent storage adapter reads the counter to disambiguate:
+  `None && count == 0 → NotApplicable`, `None && count > 0 →
+  NotRun`, `Some(_) → Ran`.
+
+Tests added:
+
+- 2 new trust unit tests pinning `enrichment_eligible_count`
+  at 0 for "no samples at all" and "samples present but none
+  are CallsObjMethodNeedsTypeInfo".
+- 1 updated trust unit test pinning the counter at 1 in the
+  "phase did not run" case.
+- 1 new storage integration test
+  (`empty_snapshot_maps_to_enrichment_state_not_applicable`)
+  that exercises the adapter through `StorageConnection` and
+  verifies the empty-snapshot mapping is `NotApplicable` (not
+  the pre-P2 `NotRun`).
+- The spike re-run on `/tmp/rgspike.db` produced identical
+  output to the post-F1/F2/F3 output, confirming that the
+  repo-graph self-index is legitimately in the `NotRun` state
+  (eligible samples exist, phase did not run). The P2 fix
+  did not alter this; it removed the false-positive case for
+  repos with nothing to enrich.
+
+Post-P2 workspace: 1131 tests passing, 0 failures (+3
+regression pins).
+
 ### Deferred items (explicit)
 
+- **Output-quality cleanup (F4/F5/F6).** Deferred to a
+  separate slice. Items: (F4) test-file filter on `top_dead`
+  when DEAD_CODE does fire, (F5) polyglot-blind
+  `MODULE_SUMMARY.languages` on non-TS indexed repos,
+  (F6) ranking tie-break between DEAD_CODE and
+  IMPORT_CYCLES in the Structure/Medium tier. None of these
+  block further slices but all would improve output quality.
+  The F2 fix also left a minor wording tweak on
+  `TRUST_NO_ENRICHMENT`'s summary — still says "No compiler
+  enrichment applied" when it should say "Enrichment phase
+  did not run" under the new NotRun semantics.
 - **Module, path, and symbol focus.** `orient(focus = Some(_))`
   currently returns `OrientError::FocusNotImplementedYet`. This
   is deliberately an error variant, not a silent degraded

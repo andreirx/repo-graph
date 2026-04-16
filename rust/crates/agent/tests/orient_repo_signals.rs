@@ -8,8 +8,9 @@ mod common;
 use common::FakeAgentStorage;
 use repo_graph_agent::{
 	orient, AgentBoundaryDeclaration, AgentCycle, AgentDeadNode,
-	AgentImportEdge, AgentRepoSummary, AgentStaleFile, AgentTrustSummary,
-	Budget, SignalCode, SignalEvidence,
+	AgentImportEdge, AgentReliabilityAxis, AgentReliabilityLevel,
+	AgentRepoSummary, AgentStaleFile, AgentTrustSummary, Budget,
+	EnrichmentState, SignalCode, SignalEvidence,
 };
 
 fn seeded() -> FakeAgentStorage {
@@ -372,7 +373,15 @@ fn trust_low_resolution_emitted_below_threshold() {
 			call_resolution_rate: 0.10,
 			resolved_calls: 1,
 			unresolved_calls: 9,
-			enrichment_applied: true,
+			call_graph_reliability: AgentReliabilityAxis {
+				level: AgentReliabilityLevel::High,
+				reasons: Vec::new(),
+			},
+			dead_code_reliability: AgentReliabilityAxis {
+				level: AgentReliabilityLevel::High,
+				reasons: Vec::new(),
+			},
+			enrichment_state: EnrichmentState::Ran,
 			enrichment_eligible: 10,
 			enrichment_enriched: 9,
 		},
@@ -439,7 +448,11 @@ fn trust_stale_snapshot_emitted_with_exact_wording() {
 // ── TRUST_NO_ENRICHMENT ─────────────────────────────────────────
 
 #[test]
-fn trust_no_enrichment_emitted_when_eligible_but_not_applied() {
+fn trust_no_enrichment_emitted_when_state_not_run() {
+	// Rust-43 F2: the signal fires iff the enrichment phase
+	// did not execute (`EnrichmentState::NotRun`). The old
+	// "eligible > 0 but not applied" rule was unreachable in
+	// the new mapping because eligible > 0 → Ran.
 	let mut fake = seeded();
 	fake.trust_summaries.insert(
 		"snap-1".into(),
@@ -447,17 +460,27 @@ fn trust_no_enrichment_emitted_when_eligible_but_not_applied() {
 			call_resolution_rate: 0.70,
 			resolved_calls: 70,
 			unresolved_calls: 30,
-			enrichment_applied: false,
-			enrichment_eligible: 30,
+			call_graph_reliability: AgentReliabilityAxis {
+				level: AgentReliabilityLevel::High,
+				reasons: Vec::new(),
+			},
+			dead_code_reliability: AgentReliabilityAxis {
+				level: AgentReliabilityLevel::High,
+				reasons: Vec::new(),
+			},
+			enrichment_state: EnrichmentState::NotRun,
+			enrichment_eligible: 0,
 			enrichment_enriched: 0,
 		},
 	);
 	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 	let sig = find_signal(&result, SignalCode::TrustNoEnrichment)
-		.expect("TRUST_NO_ENRICHMENT must fire");
+		.expect("TRUST_NO_ENRICHMENT must fire on NotRun");
 	match sig.evidence() {
 		SignalEvidence::TrustNoEnrichment(ev) => {
-			assert_eq!(ev.enrichment_eligible, 30);
+			// Evidence carries the scalar counts from storage,
+			// which are 0/0 in the NotRun case by mapping.
+			assert_eq!(ev.enrichment_eligible, 0);
 			assert_eq!(ev.enrichment_enriched, 0);
 		}
 		other => panic!("wrong evidence variant: {:?}", other),
@@ -465,9 +488,9 @@ fn trust_no_enrichment_emitted_when_eligible_but_not_applied() {
 }
 
 #[test]
-fn trust_no_enrichment_suppressed_when_eligible_is_zero() {
-	// When there are no eligible edges, enrichment is "not
-	// applicable" and must NOT emit a signal.
+fn trust_no_enrichment_suppressed_when_state_not_applicable() {
+	// Rust-43 F2: NotApplicable means the phase ran with zero
+	// eligible edges. No penalty, no signal.
 	let mut fake = seeded();
 	fake.trust_summaries.insert(
 		"snap-1".into(),
@@ -475,7 +498,15 @@ fn trust_no_enrichment_suppressed_when_eligible_is_zero() {
 			call_resolution_rate: 1.0,
 			resolved_calls: 0,
 			unresolved_calls: 0,
-			enrichment_applied: false,
+			call_graph_reliability: AgentReliabilityAxis {
+				level: AgentReliabilityLevel::High,
+				reasons: Vec::new(),
+			},
+			dead_code_reliability: AgentReliabilityAxis {
+				level: AgentReliabilityLevel::High,
+				reasons: Vec::new(),
+			},
+			enrichment_state: EnrichmentState::NotApplicable,
 			enrichment_eligible: 0,
 			enrichment_enriched: 0,
 		},

@@ -25,10 +25,34 @@
 
 use repo_graph_agent::{
 	AgentBoundaryDeclaration, AgentCycle, AgentDeadNode, AgentImportEdge,
-	AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
-	AgentStorageError, AgentStorageRead, AgentTrustSummary,
+	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
+	AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead,
+	AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_trust::service::assemble_trust_report;
+use repo_graph_trust::types::{
+	ReliabilityAxisScore as TrustAxisScore, ReliabilityLevel as TrustLevel,
+};
+
+/// Map the trust crate's `ReliabilityLevel` into the agent-owned
+/// enum. Keeps the agent public surface independent of trust.
+fn map_level(level: TrustLevel) -> AgentReliabilityLevel {
+	match level {
+		TrustLevel::HIGH => AgentReliabilityLevel::High,
+		TrustLevel::MEDIUM => AgentReliabilityLevel::Medium,
+		TrustLevel::LOW => AgentReliabilityLevel::Low,
+	}
+}
+
+/// Map a trust-crate reliability axis score into the agent
+/// DTO. Clones the reason strings verbatim — agents see the
+/// same vocabulary the trust crate produced.
+fn map_axis(axis: &TrustAxisScore) -> AgentReliabilityAxis {
+	AgentReliabilityAxis {
+		level: map_level(axis.level),
+		reasons: axis.reasons.clone(),
+	}
+}
 
 use crate::connection::StorageConnection;
 use crate::types::RepoRef;
@@ -255,17 +279,80 @@ impl AgentStorageRead for StorageConnection {
 		let unresolved_calls = report.summary.unresolved_calls;
 		let call_resolution_rate = report.summary.call_resolution_rate;
 
-		let (enrichment_eligible, enrichment_enriched, enrichment_applied) =
+		// Reliability axes (Rust-43 F1/F3 fix). The agent
+		// crate uses `dead_code_reliability.level` as the
+		// authoritative gate for the DEAD_CODE signal; it does
+		// NOT re-derive thresholds. `call_graph_reliability`
+		// is projected too for symmetry and future confidence
+		// rules.
+		let call_graph_reliability =
+			map_axis(&report.summary.reliability.call_graph);
+		let dead_code_reliability =
+			map_axis(&report.summary.reliability.dead_code);
+
+		// Enrichment state (Rust-43 F2 fix, revised after the
+		// spike-follow-up P2). Three-state mapping:
+		//
+		//   Ran:
+		//     `enrichment_status == Some(_)`. The phase
+		//     executed on at least one eligible sample. The
+		//     `enriched` count can be zero and that still
+		//     counts as Ran — the state is about phase
+		//     execution, not success.
+		//
+		//   NotRun:
+		//     `enrichment_status == None` AND
+		//     `report.enrichment_eligible_count > 0`. The
+		//     trust layer saw `CallsObjMethodNeedsTypeInfo`
+		//     samples but found no enrichment metadata on any
+		//     of them — the phase never ran on this snapshot.
+		//     This is the F2 case the spike fix targets.
+		//
+		//   NotApplicable:
+		//     `enrichment_status == None` AND
+		//     `report.enrichment_eligible_count == 0`. No
+		//     eligible samples. The enrichment phase has
+		//     nothing to do on this snapshot, so it is not a
+		//     penalty source on the confidence axis.
+		//
+		// The `enrichment_eligible_count` field is the
+		// disambiguator added after the spike-follow-up P2
+		// review: `Option<EnrichmentStatus>` alone could not
+		// distinguish "no eligible samples" from "eligible
+		// samples but phase did not run". Both collapsed to
+		// `None`, producing a false `NotRun` on repos with
+		// nothing to enrich.
+		//
+		// Some(es) with eligible == 0 is NOT reachable in the
+		// current trust code (the compute function only
+		// returns Some when `enrichment_was_run == true`,
+		// which requires at least one sample with an
+		// `enrichment` metadata marker, which only happens
+		// when eligible_count >= 1). The match below handles
+		// it defensively anyway.
+		let (enrichment_state, enrichment_eligible, enrichment_enriched) =
 			match &report.enrichment_status {
-				Some(es) => (es.eligible, es.enriched, es.enriched > 0),
-				None => (0, 0, false),
+				None if report.enrichment_eligible_count == 0 => {
+					(EnrichmentState::NotApplicable, 0, 0)
+				}
+				None => (
+					EnrichmentState::NotRun,
+					report.enrichment_eligible_count,
+					0,
+				),
+				Some(es) if es.eligible == 0 => {
+					(EnrichmentState::NotApplicable, 0, es.enriched)
+				}
+				Some(es) => (EnrichmentState::Ran, es.eligible, es.enriched),
 			};
 
 		Ok(AgentTrustSummary {
 			call_resolution_rate,
 			resolved_calls,
 			unresolved_calls,
-			enrichment_applied,
+			call_graph_reliability,
+			dead_code_reliability,
+			enrichment_state,
 			enrichment_eligible,
 			enrichment_enriched,
 		})

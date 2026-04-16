@@ -5,12 +5,14 @@
 //!   - `TRUST_LOW_RESOLUTION` when call resolution rate < 0.20
 //!   - `TRUST_STALE_SNAPSHOT` when `get_stale_files` returned
 //!     any files (see Sub-Decision B1 for wording discipline)
-//!   - `TRUST_NO_ENRICHMENT` when enrichment was not applied
-//!     AND at least one edge was eligible for enrichment
+//!   - `TRUST_NO_ENRICHMENT` when the enrichment phase did NOT
+//!     run (enrichment_state == NotRun). Not when the phase ran
+//!     and resolved nothing. Not when eligible count was zero.
 //!
 //! Returns both the aggregator output AND the raw
 //! `AgentTrustSummary` + stale flag, because the orient pipeline
-//! also needs them for confidence derivation. Returning them
+//! also needs them for confidence derivation and to gate the
+//! dead-code aggregator on trust reliability. Returning them
 //! avoids a second round-trip through the port.
 
 use super::AggregatorOutput;
@@ -19,7 +21,9 @@ use crate::dto::signal::{
 	TrustStaleSnapshotEvidence,
 };
 use crate::errors::AgentStorageError;
-use crate::storage_port::{AgentStorageRead, AgentTrustSummary};
+use crate::storage_port::{
+	AgentStorageRead, AgentTrustSummary, EnrichmentState,
+};
 
 /// Threshold below which call resolution rate is flagged as low.
 const LOW_RESOLUTION_THRESHOLD: f64 = 0.20;
@@ -63,10 +67,11 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
 		));
 	}
 
-	// TRUST_NO_ENRICHMENT — fires only if enrichment was
-	// applicable (eligible > 0) but not applied. When eligible
-	// is zero, enrichment is "not applicable" and we stay quiet.
-	if !summary.enrichment_applied && summary.enrichment_eligible > 0 {
+	// TRUST_NO_ENRICHMENT — fires iff the enrichment phase did
+	// not run. `Ran` (with any enriched count) and
+	// `NotApplicable` (phase executed with nothing to do) are
+	// both silent on this axis.
+	if summary.enrichment_state == EnrichmentState::NotRun {
 		signals.push(Signal::trust_no_enrichment(TrustNoEnrichmentEvidence {
 			enrichment_eligible: summary.enrichment_eligible,
 			enrichment_enriched: summary.enrichment_enriched,
