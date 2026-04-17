@@ -435,7 +435,7 @@ TS-side rename entirely.
 4. `Rust-43B`: `rmap orient` CLI command — parse args, call use case, serialize, exit code. **(done — shipped with the `<db_path> <repo_uid>` positional shape; see "Rust-43B implementation notes" below. Repo-name invocation is deferred to a registry slice because the Rust CLI has no repo registry yet.)**
 5. `Rust-43 F1/F2/F3 fix slice`: semantic correctness fix for the spike-discovered defects in the orient contract (DEAD_CODE gated on trust reliability, `EnrichmentState` three-state model, typed reliability axes in `AgentTrustSummary`). **(done — see "Rust-43 F1/F2/F3 fix slice implementation notes" below and `docs/spikes/2026-04-15-orient-on-repo-graph.md` for the before/after verification.)**
 6. `Rust-43C`: Binary rename: `rgr-rust` → `rmap`. **(done — binary, test harnesses, docs, and all references updated.)**
-6. `Rust-44`: `check` use-case + CLI. Module/path focus for `orient`.
+6. `Rust-44`: `check` use-case + CLI. Module/path focus for `orient`. **(done -- check use case and CLI shipped; see "Rust-44 check implementation notes" below. Module/path focus for orient also shipped in this slice.)**
 7. `Rust-45`: `explain` use-case + CLI. Symbol focus for `orient`.
 8. Evaluate: does the agent surface cover 80% of agent needs?
 9. Daemon: host the same use-case functions over a socket.
@@ -527,6 +527,49 @@ TS-side rename entirely.
   three-state enum. Storage smoke test asserts the
   empty-snapshot reliability gate. Full workspace: 1128
   tests passing, 0 failures.
+
+### Rust-44 check implementation notes (as shipped)
+
+- New CLI command: `rmap check <db_path> <repo_uid>`.
+  Implemented in `rust/crates/rgr/src/main.rs::run_check_cmd`.
+- **`check` is the pre-action trust/safety surface.** It answers
+  "can I trust this repo state before making changes?" with a
+  single verdict signal plus structured condition evidence.
+- **Signals emitted:** One verdict signal (`CHECK_PASS`,
+  `CHECK_FAIL`, or `CHECK_INCOMPLETE`) plus `SNAPSHOT_INFO`
+  when a snapshot exists. No orient-only signals (no
+  `MODULE_SUMMARY`, `DEAD_CODE`, `IMPORT_CYCLES`,
+  `BOUNDARY_VIOLATIONS`, `CALLERS_SUMMARY`, etc.).
+- **Verdict evidence carries structured condition entries.**
+  Each condition has `code`, `status` (pass/fail/incomplete),
+  and `summary`. Conditions evaluated: `SNAPSHOT_EXISTS`,
+  `INDEX_NOT_EMPTY`, `STALE_FILES`, `CALL_GRAPH_RELIABILITY`,
+  `DEAD_CODE_RELIABILITY`, `ENRICHMENT_STATE`, `GATE_STATUS`.
+- **Exit codes map to verdict:** 0 = CHECK_PASS, 1 = CHECK_FAIL,
+  2 = CHECK_INCOMPLETE. Missing repo or storage failure also
+  exits 2 (runtime error).
+- **Two explicit policy choices:**
+  - MEDIUM call-graph reliability is pass (not fail).
+  - Gate not configured (no requirements) is pass.
+- **Missing snapshot is not an error.** Unlike orient (which
+  requires a snapshot and returns `OrientError::NoSnapshot`),
+  check produces `CHECK_INCOMPLETE` with only the
+  `SNAPSHOT_EXISTS` condition when no snapshot exists.
+- **Does not replace `trust` or `gate` substrate commands.**
+  `check` is a higher-level composite surface; `trust` and
+  `gate` remain available for detailed investigation.
+- **Repo-level only.** Scoped check (file/path/symbol) is not
+  implemented.
+- **Positional shape divergence.** Same `<db_path> <repo_uid>`
+  shape as orient, pending repo registry.
+- **Clock discipline.** Reuses `utc_now_iso8601()` — same
+  pattern as orient.
+- **No `--json` flag.** Output is always JSON, pretty-printed.
+- **Test coverage.** 10 integration tests in
+  `rust/crates/rgr/tests/check_command.rs`. Covers usage
+  errors, runtime errors, envelope shape, exit code mapping,
+  orient-signal isolation, SNAPSHOT_INFO presence, and
+  condition structure.
 
 ### Rust-43B implementation notes (as shipped)
 

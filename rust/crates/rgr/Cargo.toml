@@ -39,6 +39,9 @@
 #           Uses <db_path> <repo_uid> positional pair to match the
 #           existing Rust CLI shape. Repo-name invocation is deferred
 #           to the rename/registry slice (Rust-43C+).
+# Rust-44:  `check <db_path> <repo_uid>`
+#           Pre-action trust/safety check. Exit codes map to
+#           verdict: 0 = pass, 1 = fail, 2 = incomplete.
 #
 # No formatting-heavy UX.
 

@@ -15,9 +15,8 @@ mod common;
 use common::{FakeAgentStorage, TEST_NOW};
 use repo_graph_agent::{
 	run_check, AgentReliabilityAxis, AgentReliabilityLevel,
-	AgentSnapshot, AgentStaleFile, AgentTrustSummary, CheckError,
-	EnrichmentState, SignalCode, SignalEvidence, CHECK_COMMAND,
-	ORIENT_SCHEMA,
+	AgentStaleFile, AgentTrustSummary, CheckError, EnrichmentState,
+	SignalCode, SignalEvidence, CHECK_COMMAND, ORIENT_SCHEMA,
 };
 use repo_graph_gate::{
 	GateBoundaryDeclaration, GateObligation, GateRequirement,

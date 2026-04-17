@@ -27,7 +27,7 @@ use crate::dto::signal::{
 	CheckConditionEvidence, CheckFailEvidence, CheckIncompleteEvidence,
 	CheckPassEvidence, Signal, SnapshotInfoEvidence,
 };
-use crate::errors::{AgentStorageError, CheckError};
+use crate::errors::CheckError;
 use crate::ranking;
 use crate::storage_port::AgentStorageRead;
 

@@ -144,6 +144,7 @@ rmap imports    <db_path> <repo_uid> <file_path>   # File import chain (one hop,
 rmap violations <db_path> <repo_uid>               # Boundary violation check (IMPORTS)
 rmap gate       <db_path> <repo_uid> [--strict | --advisory]  # CI gate (4 methods, waivers, 3 modes)
 rmap orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]  # Agent orientation surface (rgr.agent.v1)
+rmap check      <db_path> <repo_uid>                                                  # Pre-action trust/safety check
 rmap declare boundary <db_path> <repo_uid> <module> --forbids <target> [--reason <text>]
 rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
 rmap declare waiver <db_path> <repo_uid> <req_id> --requirement-version <n> --obligation-id <id> --reason <text> [--expires-at <iso>] [--created-by <a>] [--rationale-category <c>] [--policy-basis <t>]
@@ -195,10 +196,14 @@ Known Rust CLI divergences from TS CLI:
   binary rename / registry slice (Rust-43C+). The `<db_path>
   <repo_uid>` shape matches every other Rust CLI command and keeps
   `orient` consistent with the current surface.
-- `orient` has no module/path/symbol focus runtime (Rust-44/45).
-  The `--focus <string>` flag IS parsed and accepted — it exits
-  with code 2 and a `FocusNotImplementedYet` diagnostic. The flag
-  grammar is locked so Rust-44/45 only changes runtime behavior.
+- `orient --focus` supports file, path-area (subtree), and symbol
+  focus (shipped in Rust-44/45). Focus resolution precedence:
+  exact FILE path → path-area content / exact MODULE → stable key
+  (FILE/MODULE/SYMBOL) → exact symbol name → no_match. Symbol
+  stable keys that match SYMBOL nodes route to the symbol pipeline;
+  ambiguous symbol names return a bounded candidates array (max 5).
+  `FocusNotImplementedYet` is no longer returned for any supported
+  focus kind.
 
 ## Native dependency note
 

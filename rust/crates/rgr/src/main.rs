@@ -15,16 +15,18 @@
 //!
 //!   rmap gate    <db_path> <repo_uid> [--strict | --advisory]
 //!   rmap orient  <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]
+//!   rmap check   <db_path> <repo_uid>
 //!
 //!   rmap declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]
 //!   rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
 //!   rmap declare deactivate <db_path> <declaration_uid>
 //!
 //! Exit codes:
-//!   0 — success (gate: all pass)
-//!   1 — usage error (gate: any fail)
-//!   2 — runtime error (gate: incomplete; orient: focus-not-implemented,
-//!       storage failure, missing repo, missing snapshot)
+//!   0 — success (gate: all pass; check: pass)
+//!   1 — usage error (gate: any fail; check: fail)
+//!   2 — runtime error (gate: incomplete; check: incomplete;
+//!       orient: focus-not-implemented, storage failure,
+//!       missing repo, missing snapshot)
 
 // Gate policy was relocated out of this binary crate into
 // `repo-graph-gate` during Rust-43A. The `run_gate` function
@@ -100,6 +102,7 @@ fn main() -> ExitCode {
 		"violations" => run_violations(&args[2..]),
 		"gate" => run_gate(&args[2..]),
 		"orient" => run_orient(&args[2..]),
+		"check" => run_check_cmd(&args[2..]),
 		"dead" => run_dead(&args[2..]),
 		"cycles" => run_cycles(&args[2..]),
 		"stats" => run_stats(&args[2..]),
@@ -124,6 +127,7 @@ fn print_usage() {
 	eprintln!("  rmap violations <db_path> <repo_uid>");
 	eprintln!("  rmap gate       <db_path> <repo_uid>");
 	eprintln!("  rmap orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]");
+	eprintln!("  rmap check      <db_path> <repo_uid>");
 	eprintln!("  rmap dead    <db_path> <repo_uid> [kind]");
 	eprintln!("  rmap cycles  <db_path> <repo_uid>");
 	eprintln!("  rmap stats   <db_path> <repo_uid>");
@@ -1118,6 +1122,58 @@ fn print_orient_usage() {
 		"usage: rmap orient <db_path> <repo_uid> \
 		 [--budget small|medium|large] [--focus <string>]"
 	);
+}
+
+// ── check command ────────────────────────────────────────────────
+
+fn run_check_cmd(args: &[String]) -> ExitCode {
+	if args.len() != 2 {
+		eprintln!("usage: rmap check <db_path> <repo_uid>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	let now = utc_now_iso8601();
+
+	let result = match repo_graph_agent::run_check(&storage, repo_uid, &now) {
+		Ok(r) => r,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Map verdict to exit code.
+	// The verdict is the first signal with a Check category code.
+	let exit_code = result.signals.iter()
+		.find_map(|s| match s.code() {
+			repo_graph_agent::SignalCode::CheckPass => Some(0),
+			repo_graph_agent::SignalCode::CheckFail => Some(1),
+			repo_graph_agent::SignalCode::CheckIncomplete => Some(2),
+			_ => None,
+		})
+		.unwrap_or(2); // defensive: if no verdict signal found, treat as incomplete
+
+	match serde_json::to_string_pretty(&result) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::from(exit_code)
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
 }
 
 // ── dead command ─────────────────────────────────────────────────

@@ -638,9 +638,17 @@ regression pins).
   response, so a caller that requests a focus area learns
   immediately that their request is not honored. Module focus
   ships in Rust-44, symbol focus in Rust-45.
-- **`check` and `explain` use cases.** Only `orient` is
-  implemented. The DTO envelope is shared; the aggregator
-  pipelines are not yet written.
+- **`check` is repo-level only.** Scoped check (file/path/symbol
+  focus) is not implemented. Only whole-repo check is available.
+- **`check` does not expose individual condition exit codes.**
+  The CLI returns only the aggregate verdict exit code (0/1/2).
+  Individual condition pass/fail/incomplete status is available
+  in the JSON output only.
+- **`check` CLI uses `<db_path> <repo_uid>`.** Same temporary
+  positional shape as orient, pending repo registry.
+- **`explain` use case.** Only `orient` and `check` are
+  implemented. The DTO envelope is shared; the `explain`
+  aggregator pipeline is not yet written.
 - **Binary renamed; repo registry deferred.** Rust-43A
   relocated gate. Rust-43B added the `orient` CLI command.
   Rust-43C renamed the binary from `rgr-rust` to `rmap`
