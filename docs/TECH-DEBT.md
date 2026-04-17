@@ -831,3 +831,110 @@ addition must:
 4. Add a named constructor to `Signal`.
 5. Add a unit test asserting the code ↔ category ↔ severity
    descriptor and the evidence variant match.
+
+## State-Boundary Extraction (slice 1)
+
+Normative contract: `docs/architecture/state-boundary-contract.txt`.
+Milestone plan: `docs/milestones/rmap-state-boundaries-v1.md`.
+
+### Rust-only posture — TS parity gap
+
+State-boundary extraction ships Rust-first. The TypeScript extractor
+path (`src/adapters/extractors/*`) does NOT emit READS / WRITES
+edges with target kind DB_RESOURCE, FS_PATH, STATE, or BLOB. This
+is deliberate and documented here rather than papered over with a
+stub. CONFIG_KEY is not a state-boundary target in this slice on
+either runtime (see state-boundary-contract.txt §4.3, §5.6).
+
+Implications:
+
+- Databases indexed with `rgr repo index` (TS) will not contain
+  state-boundary edges; databases indexed with `rmap index` (Rust)
+  will.
+- Cross-runtime interop (`pnpm run test:interop`) verifies that the
+  TS storage adapter tolerates Rust-written databases containing
+  the three new `nodes.kind` values. It does NOT verify that TS
+  emits equivalent facts.
+- Any future product surface that needs state-boundary edges on
+  TS-indexed repos must either (a) re-index with `rmap`, or (b)
+  port the extractor logic. The canonical direction is (a) for
+  now; (b) is a planned future slice only if TS-indexed repos
+  must carry these facts.
+- Parity harness (`test/fixtures/parity-*`) has no state-boundary
+  fixture. A Rust-only parity harness entry (Rust-half only) is
+  acceptable; a TS-half stub is NOT acceptable (would misrepresent
+  feature availability).
+
+### Deferred items within the state-boundary program
+
+Not in slice 1. Each is its own planned future slice.
+
+- **Queue / event boundaries.** `EMITS`, `CONSUMES`, and the
+  `QUEUE` node kind. Kafka, SQS, SNS, RabbitMQ, Redis pub/sub.
+- **Config / env seam graph emission.** `CONFIG_KEY` node
+  emission, explicit config→resource wiring edges, cross-language
+  CONFIG_KEY identity normalization. Slice 1 carries config/env
+  provenance in edge evidence only (via `logical_name_source =
+  "env_key"`) and does NOT emit CONFIG_KEY nodes. See
+  state-boundary-contract.txt §5.6.
+- **SQL-string parsing.** Until this lands, DB targets are
+  `DB_RESOURCE` (logical-connection granularity). `TABLE` node
+  kind remains reserved.
+- **ORM / repository / DAO pattern inference.** Prisma, TypeORM,
+  JPA/Hibernate, SQLAlchemy, Diesel. Currently out of scope;
+  ORM call sites will NOT produce state-boundary edges until a
+  dedicated slice.
+- **GCP and Azure blob SDKs.** Only AWS S3 SDKs for Node, Java,
+  Python, Rust are in the slice-1 binding table.
+- **C++ DB, cache, and blob SDKs.** Only `std::filesystem` and
+  POSIX `open` / `fopen` ship in C++ for slice 1. Vendor-specific
+  C++ libraries are deferred.
+- **Type-enrichment-backed matching (Form B).** Receiver-type
+  resolution via TS TypeChecker / rust-analyzer / JDT-LS is
+  explicitly NOT used for state-boundary matching in slice 1.
+  Matcher form A (import-anchored call) only.
+- **Dynamic-target emission.** When the target is a parameter of
+  unknown provenance or a runtime-composed string, slice 1 emits
+  NOTHING (see contract §5.4). A later slice with value tracking
+  may fill this gap.
+- **Dedicated `rmap state` command.** No resource-node
+  enumeration CLI in slice 1. Agents use existing `callees` /
+  `callers` with `--edge-types READS,WRITES`.
+- **State-boundary reliability axis in trust report.** Current
+  trust reliability measures CALLS resolution. State-boundary
+  coverage reliability requires a ground-truth corpus; deferred.
+
+### Known gaps discovered during contract design
+
+- **Pre-existing READS / WRITES / EMITS / CONSUMES declared but
+  unused.** Before slice 1, these four edge types existed in the
+  canonical `EdgeType` enum (both TS `src/core/model/types.ts`
+  and Rust `rust/crates/storage/src/types.rs`) and in the CLI
+  edge-type filter list, but NO extractor emitted them. Similarly,
+  node kinds `STATE`, `TABLE`, `QUEUE`, `CONFIG_KEY` were declared
+  but unused. Slice 1 resolves this for READS / WRITES and for
+  STATE. CONFIG_KEY / EMITS / CONSUMES / QUEUE remain
+  declared-but-unused after slice 1: CONFIG_KEY waits on the
+  future config/env seam slice, EMITS / CONSUMES / QUEUE wait on
+  the queue-boundary slice. TABLE remains reserved pending SQL
+  parsing. This transitional state is not a defect; it documents
+  that the canonical vocabulary was designed ahead of
+  implementation.
+
+- **Schema column `nodes.kind` and `edges.type` have no CHECK
+  constraint or enumerated lookup table on either runtime
+  (verified at slice-1 design time).** Adding node kinds or edge
+  types therefore requires only enum-value additions in the TS
+  and Rust domain models; no SQL migration. This is a schema
+  property relied on by this slice and by any future vocabulary
+  expansion. If a CHECK constraint is ever introduced, the
+  impact on existing and future vocabulary-expansion slices
+  must be reassessed.
+
+- **Resource nodes have no inbound static edges by construction.**
+  Dead-code reducers MUST exclude resource kinds emitted by
+  state-boundary extraction (DB_RESOURCE, FS_PATH, STATE, BLOB)
+  to avoid mass false positives. Slice 1 enforces this in the
+  `rmap dead` path; future kind-filter additions to dead-code
+  must follow the same rule. CONFIG_KEY is outside this slice
+  and is handled by the config/env seam slice when it ships.

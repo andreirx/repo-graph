@@ -183,6 +183,9 @@ CREATE TABLE nodes (
                                             -- format: "<repo_uid>:<path>#<qualified_name>:<kind>"
   kind            TEXT NOT NULL,            -- MODULE | FILE | SYMBOL | ENDPOINT | EVENT_TOPIC
                                             -- | TABLE | CONFIG_KEY | TEST | STATE | QUEUE | JOB
+                                            -- | DB_RESOURCE | FS_PATH | BLOB
+                                            -- (last three added for state-boundary slice 1;
+                                            --  see docs/architecture/state-boundary-contract.txt)
   subtype         TEXT,                     -- FUNCTION | CLASS | METHOD | INTERFACE | TYPE_ALIAS
                                             -- | VARIABLE | CONSTANT | ENUM | ROUTE | LISTENER
                                             -- | COLUMN | FIELD | TEST_CASE | TEST_SUITE
@@ -446,8 +449,20 @@ Structural:
   INSTANTIATES     — code creates instance (new X)
 
 Data flow:
-  READS            — function reads variable/field
-  WRITES           — function writes/mutates variable/field
+  READS            — function reads variable/field OR function reads
+                     from an external state-boundary resource
+                     (target kind DB_RESOURCE | FS_PATH | STATE |
+                     BLOB). Semantic scope extended by state-boundary
+                     slice 1; see
+                     docs/architecture/state-boundary-contract.txt.
+                     CONFIG_KEY is NOT a state-boundary target
+                     in slice 1; it is reserved for a future
+                     config/env seam slice.
+  WRITES           — function writes/mutates variable/field OR
+                     function writes to an external state-boundary
+                     resource (target kind DB_RESOURCE | FS_PATH |
+                     STATE | BLOB). Semantic scope extended by
+                     state-boundary slice 1.
 
 Async/event:
   EMITS            — code publishes to event topic
@@ -513,13 +528,37 @@ kind: TEST
   subtypes: TEST_FILE | TEST_SUITE | TEST_CASE
 
 kind: STATE
-  subtypes: STATE_VALUE | STATE_FIELD
+  subtypes: STATE_VALUE | STATE_FIELD | CACHE
+  (CACHE added by state-boundary slice 1 for Redis / Memcached /
+   similar cache-client endpoints; see state-boundary-contract.txt.)
 
 kind: QUEUE
   subtypes: (none yet)
+  (Reserved for the queue / event-boundary slice. NOT emitted by
+   state-boundary extraction. See state-boundary-contract.txt §4.3.)
 
 kind: JOB
   subtypes: CRON | SCHEDULED_TASK | BACKGROUND_WORKER
+
+kind: DB_RESOURCE
+  subtypes: CONNECTION
+  (Added by state-boundary slice 1. Represents a logical database
+   endpoint / connection / data source, NOT a SQL table. `TABLE`
+   remains reserved for post-SQL-parsing table-level granularity.
+   See state-boundary-contract.txt §4.2, §5.)
+
+kind: FS_PATH
+  subtypes: FILE_PATH | DIRECTORY_PATH | LOGICAL
+  (Added by state-boundary slice 1. Represents a filesystem path or
+   config-derived logical filesystem resource. Does NOT overlap with
+   `FILE` kind, which continues to represent indexed source files.
+   See state-boundary-contract.txt §4.2, §5.)
+
+kind: BLOB
+  subtypes: BUCKET | CONTAINER | NAMESPACE
+  (Added by state-boundary slice 1. Represents an object-storage
+   endpoint: S3 bucket, Azure Blob container, GCP Storage namespace.
+   See state-boundary-contract.txt §4.2, §5.)
 
 
 ================================================================================

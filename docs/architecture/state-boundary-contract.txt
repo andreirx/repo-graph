@@ -1,0 +1,806 @@
+State-Boundary Contract — External State Touchpoints in the Graph
+===================================================================
+
+Status: NORMATIVE
+Date:   2026-04-17
+Scope:  Slice 1 — DB, FS, cache, blob/cloud-storage boundaries
+
+This document is the authoritative specification for how Repo-Graph
+represents a code symbol touching an external state boundary. All
+extractors, indexers, storage adapters, CLI surfaces, and agent
+consumers that emit or read state-boundary edges MUST conform to
+what this document describes. Other docs reference it; they do not
+restate its contents.
+
+State-boundary detection is the substrate for blast-radius reasoning
+over persistence, filesystem, cache, and object-storage side effects.
+
+The contract is ecosystem-neutral in DESIGN: stable-key shape, edge
+types, node kinds, matcher form, basis tags, and evidence structure
+are identical for any language whose extractor consumes the binding
+table. The contract does NOT, by itself, commit slice 1 to a
+specific set of languages. Language coverage in slice 1 is
+fork-dependent and is declared in the milestone document
+(`docs/milestones/rmap-state-boundaries-v1.md`, SB-0). Whenever a
+language is in scope for the selected fork, the normative rules
+below apply to it without exception.
+
+
+================================================================================
+1. PURPOSE AND SCOPE
+================================================================================
+
+A state-boundary touchpoint is a call site in application code that
+reads from or writes to an external resource whose identity is not a
+source file in the repository. The canonical examples are:
+
+  - database driver calls           (e.g. `pg.Client.query`)
+  - filesystem I/O                  (e.g. `fs.readFile`, `std::fs::File::open`)
+  - cache client calls              (e.g. `redis.Client.get/set`)
+  - cloud blob-storage calls        (e.g. AWS S3 `PutObjectCommand`)
+
+State-boundary extraction MAY derive a resource's logical name from
+nearby configuration / environment access (e.g. `os.environ["DATABASE_URL"]`)
+but MUST NOT emit companion CONFIG_KEY nodes or READS edges to config
+keys in slice 1. Config-key graph emission belongs to a separate
+config/env seam slice. See §5.6.
+
+Consumers of this contract:
+  - Language extractors emitting state-boundary edges
+  - Indexer pipelines producing resource-identity nodes
+  - CLI read surfaces filtering edges by type
+  - Agent surfaces (orient, explain, check) reporting touchpoints
+  - Governance rules referencing READS / WRITES verdicts
+
+Out of scope for this contract (deferred to later slices):
+  - Queue / event-flow boundaries (EMITS / CONSUMES / QUEUE node kind)
+  - Test detectors and test-only liveness classification
+  - Coverage-evidence ingestion
+  - Sanitizer-artifact ingestion
+  - SQL-string parsing and per-table granularity
+  - ORM and repository/DAO pattern inference
+  - Compiler/LSP type-enrichment for receiver resolution
+
+
+================================================================================
+2. TERMINOLOGY
+================================================================================
+
+boundary crossing         — a call in application code whose callee
+                            is a state-boundary API (stdlib or SDK).
+
+binding                   — a declarative entry in the shared binding
+                            table that associates a module-qualified
+                            callee with a resource kind and a
+                            read/write direction.
+
+logical name              — a stable textual identifier for the
+                            resource endpoint. Sourced, in precedence
+                            order: config/env key name, then stable
+                            literal identifier, then normalized literal
+                            path / bucket / container.
+
+resource node             — a graph node representing the external
+                            resource endpoint. Its stable key is
+                            defined in section 5.
+
+basis                     — a coarse tag describing how the binding
+                            was matched. One of {stdlib_api, sdk_call}
+                            in slice 1.
+
+binding key               — the textual identifier of the specific
+                            binding-table entry that matched (e.g.
+                            `aws-sdk:@aws-sdk/client-s3:PutObjectCommand`).
+                            Carried on edges for explanation.
+
+
+================================================================================
+3. EDGE TYPES
+================================================================================
+
+State-boundary touchpoints re-use two existing canonical edge types:
+
+  READS    — the source symbol reads from an external state resource
+  WRITES   — the source symbol writes to / mutates an external state
+             resource
+
+No new edge types are added in slice 1. The semantic scope of READS
+and WRITES is extended (see section 3.1). EMITS and CONSUMES are
+reserved for a later queue/event boundary slice and MUST NOT be
+produced by state-boundary extraction.
+
+3.1 Semantic scope extension
+----------------------------
+
+Before this slice, schema.txt documented:
+
+  READS   — function reads variable/field
+  WRITES  — function writes/mutates variable/field
+
+These descriptions remain valid. The state-boundary slice extends
+the scope of both edge types to additionally cover reads and writes
+across a state boundary, where the target is a resource node rather
+than a symbol. Concretely:
+
+  READS  target kinds: DB_RESOURCE, FS_PATH, STATE, BLOB
+  WRITES target kinds: DB_RESOURCE, FS_PATH, STATE, BLOB
+
+CONFIG_KEY is NOT a state-boundary target kind in slice 1. The
+node kind remains reserved in the canonical schema, but this slice
+does not emit edges to it. See §4.3 and §5.6.
+
+Field-level READS and WRITES (symbol→symbol) remain permissible and
+will be populated by future extraction work; they are not in scope
+for this slice. Consumers that filter by `edge.type` MUST also
+inspect `target.kind` when the distinction matters.
+
+3.2 Read/write classification rules
+-----------------------------------
+
+For slice 1 matching is Form A only (see section 6). Direction is a
+static property of the binding entry, not of the call:
+
+  - If the binding entry is tagged `write`, emit WRITES.
+  - If the binding entry is tagged `read`, emit READS.
+  - If the binding entry is tagged `read_write`, emit BOTH edges
+    from the same call site. This case covers APIs whose single
+    method performs a read-modify-write sequence (e.g. atomic
+    upserts, get-or-create, file-truncate-on-open).
+
+SQL-string inspection is explicitly out of scope. `db.query(sql)`
+resolves via the binding direction, which for generic query entry
+points is `read_write` (conservative: assume both until parsing
+lands in a later slice).
+
+
+================================================================================
+4. NODE KINDS
+================================================================================
+
+State-boundary targets produce nodes of the following kinds.
+
+4.1 Existing kinds re-used
+--------------------------
+
+  STATE       — cache endpoints (Redis, Memcached, etc.)
+                Subtype: `CACHE` (new subtype added by this slice;
+                STATE_VALUE / STATE_FIELD remain reserved).
+
+CONFIG_KEY is NOT re-used by state-boundary extraction in slice 1.
+See §4.3.
+
+4.2 New kinds introduced by this slice
+--------------------------------------
+
+  DB_RESOURCE — logical database endpoint (driver-level identity).
+                Represents a database / connection / data source,
+                not a table. SQL-table-level identity is deferred
+                until SQL-string parsing ships.
+                Subtypes (slice 1): `CONNECTION` (default).
+
+  FS_PATH     — filesystem path or logical filesystem resource.
+                Literal paths are normalized; relative paths remain
+                relative; absolute paths are preserved. Dynamic
+                targets that cannot be expressed as a stable logical
+                name produce no resource node (see section 5.4).
+                Subtypes (slice 1): `FILE_PATH`, `DIRECTORY_PATH`,
+                `LOGICAL` (for env-derived or config-derived names).
+
+  BLOB        — object-storage endpoint (bucket / container /
+                namespace). S3, Azure Blob, GCP Storage.
+                Subtypes (slice 1): `BUCKET`, `CONTAINER`,
+                `NAMESPACE`.
+
+4.3 Reserved-but-not-used in slice 1
+------------------------------------
+
+  TABLE       — reserved for post-SQL-parsing table-level granularity.
+                MUST NOT be emitted by slice 1 extraction. Existing
+                subtypes (TABLE/VIEW/MATERIALIZED_VIEW/COLLECTION)
+                stay reserved.
+
+  QUEUE       — reserved for the queue/event-boundary slice. MUST
+                NOT be emitted by slice 1 extraction.
+
+  CONFIG_KEY  — reserved for a separate config/env seam slice.
+                State-boundary extraction MUST NOT emit CONFIG_KEY
+                nodes or edges targeting CONFIG_KEY in slice 1. The
+                existing CONFIG_KEY subtype vocabulary (ENV_VAR,
+                FEATURE_FLAG, CONFIG_FILE_KEY, DI_BINDING) is
+                untouched by this slice. Config/env provenance that
+                influences logical-name selection is captured in
+                edge evidence only; see §5.6 and §8.
+
+4.4 Migration posture
+---------------------
+
+  - The `nodes.kind` column is TEXT with no CHECK constraint and no
+    enumerated lookup table on either the TS or Rust storage paths
+    (verified prior to slice 1). Adding DB_RESOURCE, FS_PATH, and
+    BLOB requires NO SQL migration.
+  - Required code-level updates:
+      * `src/core/model/types.ts` — extend NodeKind enum
+      * `rust/crates/storage/src/types.rs` — extend NodeKind enum
+      * Validate no JSON-schema / serde deserializer rejects
+        unknown kinds at the product boundary.
+  - `docs/architecture/schema.txt` section "NODE KINDS AND SUBTYPES"
+    MUST be updated to document the three new kinds and their slice-1
+    subtypes before implementation closes.
+
+
+================================================================================
+5. STABLE-KEY FORMAT
+================================================================================
+
+Resource-node stable keys follow the existing v2 stable-key
+convention (`<repo_uid>:<identifier>:<KIND>`, kind as suffix).
+
+5.1 Canonical shapes
+--------------------
+
+  DB resource:    <repo_uid>:db:<driver>:<logical_name>:DB_RESOURCE
+  Filesystem:     <repo_uid>:fs:<normalized_path_or_logical>:FS_PATH
+  Cache:          <repo_uid>:cache:<driver>:<logical_name>:STATE
+  Blob:           <repo_uid>:blob:<provider>:<logical_name>:BLOB
+
+The second segment is the resource-kind token. It MUST be one of
+{db, fs, cache, blob}. The final segment is the node kind
+(DB_RESOURCE, FS_PATH, STATE, BLOB).
+
+The `config` resource-kind token is reserved for a separate
+config/env seam slice and MUST NOT be produced by state-boundary
+extraction in slice 1.
+
+5.2 Examples
+------------
+
+  myservice:db:postgres:DATABASE_URL:DB_RESOURCE
+  myservice:db:mysql2:readreplica:DB_RESOURCE
+  myservice:fs:/etc/app/settings.yaml:FS_PATH
+  myservice:fs:CACHE_DIR:FS_PATH
+  myservice:cache:redis:REDIS_URL:STATE
+  myservice:blob:s3:artifacts-bucket:BLOB
+
+5.3 Logical-name precedence
+---------------------------
+
+When emitting a resource node the extractor MUST select the logical
+name in this order:
+
+  1. Config/env key name, if the connection string or endpoint is
+     read from an env var or named configuration key at or adjacent
+     to the call site. The key name (upper-case or exact case)
+     becomes the logical name.
+     Example: `new Client({ url: process.env.REDIS_URL })` →
+     logical name `REDIS_URL`.
+
+  2. Stable literal identifier, if the call site passes a string
+     literal that is a named resource (bucket name, database
+     filename, cache namespace).
+     Example: `new S3Client(...).send(new PutObjectCommand({
+     Bucket: "artifacts" }))` → logical name `artifacts`.
+
+  3. Normalized literal path / URL, if the target is a filesystem
+     path literal or a URL with a stable host/path component.
+     Paths are normalized by:
+       - collapsing `..` segments statically when safe
+       - preserving absolute vs relative distinction
+       - not resolving symlinks (no filesystem access during
+         extraction)
+
+5.4 Dynamic targets
+-------------------
+
+If the target cannot be resolved to any of the three precedence
+sources above (e.g. the connection string is a parameter of unknown
+provenance, or a concatenation of runtime values), the extractor
+MUST NOT emit a resource node or a state-boundary edge in slice 1.
+Per-call-site synthetic pseudo-resources are explicitly rejected
+as they pollute the identity space.
+
+Rationale: polluted identity cannot be cleanly walked back. A
+later slice that adds value-tracking or symbolic-execution support
+will fill this gap with real evidence rather than synthetic keys.
+
+5.5 Repo scoping
+----------------
+
+Resource nodes are repo-scoped (`<repo_uid>:...`) per the existing
+stable-key convention. Cross-repo resource identity (e.g. "every
+repo in this org that touches the same S3 bucket") is a separate
+problem and is not addressed by this contract.
+
+5.6 Config/env provenance is evidence-only (no companion nodes)
+---------------------------------------------------------------
+
+When a resource's logical name is derived from a configuration or
+environment key (§5.3 precedence rule 1), the extractor MUST:
+
+  - Use the key name as the logical-name component of the resource
+    node's stable key.
+  - Record the provenance in edge evidence via
+    `logical_name_source = "env_key"` (see §8).
+
+The extractor MUST NOT:
+
+  - Emit a companion CONFIG_KEY node for the source key.
+  - Emit a READS edge targeting a CONFIG_KEY node.
+  - Emit any edge (e.g. a hypothetical CONFIG→resource wiring
+    edge) from a CONFIG_KEY node to the resource node.
+
+Rationale: state-boundary extraction is a state-touchpoint slice,
+not a config-topology slice. Co-emission would:
+  - Mix two slice boundaries (state + config) at the extractor.
+  - Produce two READS edges per call site with different semantics
+    (config read vs resource read) but the same edge type, with
+    no explicit relation between the targets.
+  - Encode a graph shape that is hard to walk back cleanly when a
+    later config/env seam slice wants to model config as a
+    first-class boundary with explicit wiring edges.
+
+The config/env seam is a planned future slice. When it lands, it
+will own CONFIG_KEY node emission, any explicit config→resource
+wiring edges, and cross-language CONFIG_KEY identity normalization.
+State-boundary edges shipped by slice 1 will NOT need to be
+reinterpreted by that slice: their evidence already carries the
+config provenance fact, and a later pass can correlate on
+`logical_name_source = "env_key"` and the logical-name string.
+
+
+================================================================================
+6. MATCHER CONTRACT
+================================================================================
+
+Slice 1 permits exactly one matcher form.
+
+6.1 Form A — import-anchored call
+---------------------------------
+
+Conditions for emission:
+
+  1. The file that contains the call site has an import of module
+     `M` (by whatever import-binding mechanism the language uses:
+     `use M` in Rust, `import X from "M"` in TS, `import M` in
+     Python, fully-qualified class references in Java, `#include
+     <M>` in C++).
+  2. The call-site callee resolves to a symbol path that matches a
+     binding entry keyed on module `M` and symbol path `S`.
+  3. The resolution basis is one of {stdlib_api, sdk_call} per
+     section 7.
+
+When all three conditions hold, the extractor emits:
+
+  - A resource node with the stable key per section 5 (or finds
+    the existing one if another call site already emitted it in
+    the same snapshot).
+  - One or two edges (READS / WRITES / both) per section 3.2.
+
+6.2 Forms explicitly NOT permitted in slice 1
+---------------------------------------------
+
+  - Form B (type-anchored method): `obj.method()` where `obj`'s
+    type resolves via compiler/LSP enrichment.
+  - Form C (global symbol-pattern): matching by callee name alone,
+    without an import anchor.
+
+These are reserved for a later slice. Extractors that have access
+to richer resolution (e.g. TS TypeChecker, rust-analyzer) MUST NOT
+opportunistically emit state-boundary edges from them in slice 1.
+
+
+================================================================================
+7. BASIS TAGS
+================================================================================
+
+Every state-boundary edge carries a `basis` tag in its evidence.
+The slice-1 basis vocabulary:
+
+  stdlib_api   — the binding entry is a standard-library API
+                 (e.g. Rust `std::fs::File::open`, Node `fs.readFile`,
+                 Python `open`, Java `java.nio.file.Files.newBufferedReader`,
+                 C++ `std::filesystem::path` / POSIX `open`).
+
+  sdk_call     — the binding entry is a third-party SDK API
+                 (e.g. `pg.Client.query`, AWS SDK
+                 `PutObjectCommand`, `redis.createClient`).
+
+The basis tag is NOT the same as `edge.resolution`. Resolution remains
+the existing vocabulary {static, dynamic, inferred}. For slice 1
+state-boundary edges, resolution is `static` when both the import
+match and the logical name are literal, and `inferred` otherwise.
+
+Reserved-for-later basis tags (do not use in slice 1):
+  sql_literal, config_binding, type_enriched, symbol_pattern,
+  import_binding.
+
+
+================================================================================
+8. EVIDENCE SHAPE
+================================================================================
+
+State-boundary edges carry their binding-specific evidence in the
+existing `edges.metadata_json` column. No schema change.
+
+Required keys (all strings unless noted):
+
+  state_boundary_version   — integer, currently `1`.
+  basis                    — "stdlib_api" | "sdk_call"
+  binding_key              — the binding-table entry key that
+                             matched. Format:
+                             `<language>:<module>:<symbol_path>[:<direction>]`
+                             Example:
+                             `typescript:@aws-sdk/client-s3:PutObjectCommand:write`
+  direction                — "read" | "write" | "read_write"
+  logical_name_source      — "env_key" | "literal_identifier" |
+                             "normalized_path" | "normalized_url"
+
+Optional keys:
+
+  binding_notes            — free-text extractor notes (max 200
+                             chars, non-authoritative).
+
+The edge's callsite (`line_start`, `col_start`, `line_end`,
+`col_end`), `extractor`, and `resolution` columns retain their
+existing semantics. No new top-level edge columns are introduced.
+
+
+================================================================================
+9. BINDING TABLE CONTRACT
+================================================================================
+
+9.1 Location and format
+-----------------------
+
+The binding table lives in a single TOML file embedded at
+Rust-compile time via `include_str!`. Runtime hot-reload is
+explicitly not supported in slice 1. Canonical location:
+
+  rust/crates/state-bindings/bindings.toml
+
+9.2 Schema
+----------
+
+Each entry is a TOML table with the following keys:
+
+  language      — string, one of {rust, typescript, python, java, cpp}
+  module        — string, the import / use / include source
+  symbol_path   — string, the callee symbol path within the module
+  resource_kind — string, one of {db, fs, cache, blob}.
+                  The `config` value is reserved for a future
+                  config/env seam slice and MUST NOT appear in
+                  slice-1 binding entries.
+  driver        — string, free-form (e.g. "postgres", "redis", "s3")
+  direction     — string, one of {read, write, read_write}
+  basis         — string, one of {stdlib_api, sdk_call}
+  notes         — string, optional
+
+Example entry:
+
+  [[binding]]
+  language      = "typescript"
+  module        = "@aws-sdk/client-s3"
+  symbol_path   = "PutObjectCommand"
+  resource_kind = "blob"
+  driver        = "s3"
+  direction     = "write"
+  basis         = "sdk_call"
+  notes         = "Command wrapper; consumed by S3Client.send()."
+
+9.3 Coverage scope for slice 1
+------------------------------
+
+Binding-table coverage is split into TWO concerns:
+
+  (a) TABLE CONTENT — what entries the TOML file is permitted or
+      required to contain. Purely a data concern.
+
+  (b) EXTRACTOR CONSUMPTION — which of those entries are actually
+      consumed by a registered extractor to emit edges. This is
+      fork-dependent per the milestone's SB-0 decision.
+
+9.3.1 Table content (data)
+--------------------------
+
+The binding table MAY contain entries for any of the language /
+resource combinations listed in the reference coverage matrix below,
+irrespective of fork. Entries for a language whose extractor is not
+consuming the table under the selected fork remain in the file as
+forward-compatible data. They are not dead weight; a future
+extractor slice consumes them without any contract change.
+
+The binding table MUST contain entries sufficient to serve every
+extractor that is in scope for the selected fork. A fork that
+registers a language's extractor for state-boundary consumption
+MUST ship binding entries covering at least that language's row of
+the reference coverage matrix below.
+
+9.3.2 Reference coverage matrix
+-------------------------------
+
+This is the target per-language coverage when a language is in
+scope. It is the shape the table aims to reach across all forks;
+it is not a per-slice MUST beyond the fork-scoped subset.
+
+  Filesystem:
+    - Rust:       `std::fs` core read/write APIs
+    - Node:       `fs`, `node:fs`, `fs/promises`
+    - Python:     `open`, `pathlib.Path`, `os` (read/write families)
+    - Java:       `java.io.*`, `java.nio.file.*` (read/write families)
+    - C++:        `std::filesystem` read/write, POSIX `open`/`fopen`
+
+  Database drivers:
+    - Node:       `pg`, `mysql2`, `better-sqlite3`, `sqlite3`
+    - Rust:       `sqlx`, `tokio-postgres`, `rusqlite`
+    - Python:     `psycopg`, `psycopg2`, `sqlite3`
+    - Java:       JDBC `java.sql.DriverManager`, core `DataSource`
+                  call sites
+
+  Cache:
+    - Node:       `redis`, `ioredis`
+    - Rust:       `redis`
+    - Python:     `redis`
+    - Java:       Lettuce (`io.lettuce.core`), Jedis (`redis.clients.jedis`)
+
+  Blob:
+    - AWS S3 SDKs for Node (`@aws-sdk/client-s3`), Java
+      (`software.amazon.awssdk.services.s3`), Python (`boto3`
+      with client `"s3"`), Rust (`aws-sdk-s3`).
+
+9.3.3 Explicit exclusions
+-------------------------
+
+Regardless of fork, the following MUST NOT ship in any slice-1
+binding-table entry:
+
+  - ORM / repository / DAO abstractions
+  - GCP / Azure blob clients
+  - C++ DB, cache, and blob SDKs
+  - Queue / messaging / event-bus clients
+
+These are deferred to later slices with their own contracts or
+contract amendments.
+
+9.4 Entry review policy
+-----------------------
+
+Adding or modifying a binding entry after slice 1 freezes requires:
+
+  - A corresponding test in the state-extractor crate or a shared
+    fixture exercising the entry.
+  - The `state_boundary_version` remains `1` for additive entries.
+    Breaking changes (renaming `resource_kind` values, changing
+    the binding-key format) bump the version and require a
+    migration note in TECH-DEBT.md.
+
+
+================================================================================
+10. TS PARITY POSTURE
+================================================================================
+
+State-boundary extraction is shipped Rust-first. TS parity is
+explicitly deferred. Concretely:
+
+  - No TS-side extractor changes in slice 1.
+  - The TS read path (storage adapter, query surface) MUST tolerate
+    the new node kinds and edges without crashing. This is already
+    expected behavior because both `nodes.kind` and `edges.type`
+    are stored as TEXT with no validation at the DB boundary, but
+    it MUST be verified by the cross-runtime interop test
+    (`pnpm run test:interop`) before slice 1 closes.
+  - No TS-side parity fixture is introduced for this slice. No
+    parity-harness entry is added. The absence is recorded as an
+    explicit gap in TECH-DEBT.md rather than masked by a stub.
+
+When a TS parity slice becomes justified (e.g. when TS-side
+Spring parity is revisited), this contract remains authoritative
+for both runtimes.
+
+
+================================================================================
+11. CLI SURFACE IMPACT
+================================================================================
+
+No new standalone CLI command is introduced in slice 1. The only
+user-visible surface change:
+
+  - `rmap callers` and `rmap callees` `--edge-types` filter widens
+    to accept `READS` and `WRITES` in addition to `CALLS` and
+    `INSTANTIATES`. Unknown tokens remain usage errors (exit 1).
+  - `rmap path` remains hardcoded to CALLS + IMPORTS in slice 1.
+    State-boundary edges are not traversed by path. (Deferred.)
+  - `rmap imports`, `rmap dead`, `rmap cycles`, `rmap stats`
+    unchanged.
+
+A dedicated `rmap state` command is explicitly deferred. Agents
+needing to enumerate state touchpoints use existing `callees` with
+`--edge-types READS,WRITES` against a symbol, or query resource
+nodes by kind via a later, planned surface.
+
+
+================================================================================
+12. DEAD-CODE AND TRUST INTERACTIONS
+================================================================================
+
+12.1 Resource nodes and dead-code
+---------------------------------
+
+Resource nodes emitted by state-boundary extraction (kinds
+DB_RESOURCE, FS_PATH, STATE, BLOB) have no inbound static edges by
+construction. They MUST be excluded from dead-code computation.
+The `rmap dead` command's kind filter vocabulary SHOULD be
+extended accordingly; at minimum, dead-code reducers MUST NOT
+return these kinds as dead candidates.
+
+CONFIG_KEY is not emitted by this slice (see §4.3, §5.6) and its
+dead-code treatment is not specified here. The future config/env
+seam slice that emits CONFIG_KEY nodes is responsible for its own
+dead-code interaction rules.
+
+12.2 Trust reliability
+----------------------
+
+State-boundary edges are Form-A-only (import-anchored, high
+precision). They are NOT counted in the call-graph resolution
+rate (which measures CALLS edges). A future slice MAY introduce
+a separate reliability axis for state-boundary coverage once a
+ground-truth corpus is available.
+
+
+================================================================================
+13. VERSIONING
+================================================================================
+
+  state_boundary_version: 1
+
+This contract is version 1. Breaking changes to stable-key shape,
+edge-type semantics, node-kind additions (beyond the three in
+slice 1), or the binding-table schema require:
+
+  - A contract-version bump.
+  - A migration note in TECH-DEBT.md.
+  - A snapshot-compatibility decision (re-extract vs. forward-fix).
+
+Additive changes (new binding entries, new SDK coverage within
+existing kinds) do not bump the version.
+
+
+================================================================================
+14. REFERENCES
+================================================================================
+
+  - docs/architecture/schema.txt
+    Canonical schema, stable-key convention, node/edge vocabulary.
+
+  - docs/architecture/measurement-model.txt
+    Four-layer truth model. State-boundary edges are Facts (not
+    Measurements or Inferences).
+
+  - docs/architecture/versioning-model.txt
+    Toolchain and contract versioning.
+
+  - docs/milestones/rmap-state-boundaries-v1.md
+    Implementation plan, slice inventory, validation corpus.
+
+  - docs/TECH-DEBT.md
+    "State-Boundary Extraction — Rust-only parity gap" entry.
+
+
+================================================================================
+APPENDIX A — EXAMPLES
+================================================================================
+
+A.1 Node + AWS Lambda S3 write
+------------------------------
+
+Source (TypeScript):
+
+  import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+
+  export async function uploadReport(key: string, body: Buffer) {
+    const client = new S3Client({});
+    await client.send(new PutObjectCommand({
+      Bucket: "reports-prod",
+      Key: key,
+      Body: body,
+    }));
+  }
+
+Binding match:
+  language="typescript", module="@aws-sdk/client-s3",
+  symbol_path="PutObjectCommand", resource_kind="blob",
+  driver="s3", direction="write", basis="sdk_call"
+
+Resource node:
+  stable_key = "myservice:blob:s3:reports-prod:BLOB"
+  kind       = "BLOB"
+  subtype    = "BUCKET"
+
+Edge:
+  source  = symbol node for `uploadReport`
+  target  = the BLOB node above
+  type    = "WRITES"
+  resolution = "static"
+  metadata_json = {
+    "state_boundary_version": 1,
+    "basis": "sdk_call",
+    "binding_key": "typescript:@aws-sdk/client-s3:PutObjectCommand:write",
+    "direction": "write",
+    "logical_name_source": "literal_identifier"
+  }
+
+A.2 Rust stdlib FS read
+-----------------------
+
+Source:
+
+  use std::fs;
+
+  pub fn load_cert() -> std::io::Result<String> {
+      fs::read_to_string("/etc/app/server.crt")
+  }
+
+Resource node:
+  stable_key = "myservice:fs:/etc/app/server.crt:FS_PATH"
+  kind       = "FS_PATH"
+  subtype    = "FILE_PATH"
+
+Edge:
+  type = "READS"
+  metadata_json = {
+    "state_boundary_version": 1,
+    "basis": "stdlib_api",
+    "binding_key": "rust:std::fs:read_to_string:read",
+    "direction": "read",
+    "logical_name_source": "normalized_path"
+  }
+
+A.3 Dynamic target, no emission
+-------------------------------
+
+Source:
+
+  def load(path):
+      with open(path, "r") as f:
+          return f.read()
+
+`path` is a parameter of unknown provenance. No resource node is
+emitted. No state-boundary edge is emitted. The CALLS-level fact
+that `load` invokes `open` remains unchanged.
+
+A.4 Config-derived cache endpoint (evidence-only provenance)
+------------------------------------------------------------
+
+Source (Python):
+
+  import os
+  import redis
+
+  r = redis.Redis.from_url(os.environ["REDIS_URL"])
+
+Resource node (single node — no CONFIG_KEY companion):
+  stable_key = "myservice:cache:redis:REDIS_URL:STATE"
+  kind       = "STATE"
+  subtype    = "CACHE"
+
+Edge (single edge from the enclosing symbol):
+  source  = symbol node for the enclosing function / module
+  target  = the STATE node above
+  type    = "READS"
+  resolution = "inferred"
+     (inferred because the logical name is derived from an env
+      read rather than a literal resource identifier; see §7.)
+  metadata_json = {
+    "state_boundary_version": 1,
+    "basis": "sdk_call",
+    "binding_key": "python:redis:Redis.from_url:read_write",
+    "direction": "read_write",
+    "logical_name_source": "env_key"
+  }
+
+No CONFIG_KEY node is created. No READS edge targets
+`REDIS_URL` as a config key. The env-key provenance is captured
+entirely in evidence (`logical_name_source = "env_key"` plus the
+`REDIS_URL` substring in the stable key). A future config/env
+seam slice may emit CONFIG_KEY nodes and explicit wiring edges
+without needing to rewrite the edge produced here.
+
