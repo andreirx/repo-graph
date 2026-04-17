@@ -14,8 +14,11 @@
 //!   - `Some(stable_key)` that resolves to a FILE node →
 //!     file pipeline.
 //!   - `Some(stable_key)` that resolves to a SYMBOL node →
-//!     `OrientError::FocusNotImplementedYet` (deferred to
-//!     Rust-45).
+//!     symbol pipeline (`orient_symbol`).
+//!   - `Some(name)` that resolves to a single SYMBOL via name
+//!     lookup → symbol pipeline.
+//!   - `Some(name)` that resolves to multiple SYMBOLs →
+//!     ambiguous result with candidates.
 //!   - `Some(string)` that resolves to nothing → valid
 //!     `OrientResult` with `Focus::no_match`, zero signals,
 //!     zero limits.
@@ -23,17 +26,19 @@
 pub mod file;
 pub mod path;
 pub mod repo;
+pub mod symbol;
 
 use repo_graph_gate::GateStorageRead;
 
 use crate::dto::budget::Budget;
 use crate::dto::envelope::{
-	Focus, OrientResult, ORIENT_COMMAND, ORIENT_SCHEMA,
+	Focus, FocusCandidate, OrientResult, ResolvedKind,
+	ORIENT_COMMAND, ORIENT_SCHEMA,
 };
 use crate::dto::envelope::Confidence;
 use crate::errors::OrientError;
 use crate::storage_port::{
-	AgentFocusKind, AgentStorageRead,
+	AgentFocusCandidate, AgentFocusKind, AgentStorageRead,
 };
 
 /// Entry point for the orient use case.
@@ -135,9 +140,31 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
 	// ── 4. Try stable-key resolution. ────────────────────────
 	match storage.resolve_stable_key_focus(snapshot_uid, focus_str)? {
 		Some(candidate) if candidate.kind == AgentFocusKind::Symbol => {
-			Err(OrientError::FocusNotImplementedYet {
-				focus: focus_str.to_string(),
-			})
+			// SYMBOL by stable key — route to symbol pipeline.
+			let context =
+				storage.get_symbol_context(snapshot_uid, &candidate.stable_key)?;
+			match context {
+				Some(ctx) => symbol::orient_symbol(
+					storage,
+					&repo.name,
+					&snapshot,
+					&candidate.stable_key,
+					&ctx,
+					focus_str,
+					budget,
+					now,
+				),
+				None => {
+					// Stable key resolved but no context found —
+					// defensive: treat as no match.
+					Ok(build_no_match_result(
+						&repo.name,
+						&snapshot,
+						focus_str,
+						budget,
+					))
+				}
+			}
 		}
 		Some(candidate) if candidate.kind == AgentFocusKind::File => {
 			let file_path = candidate.file.as_deref().unwrap_or(focus_str);
@@ -166,8 +193,55 @@ fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
 			)
 		}
 		None => {
-			// No match — valid response with no data.
-			Ok(build_no_match_result(&repo.name, &snapshot, focus_str, budget))
+			// ── 5. Try symbol name resolution. ──────────────
+			let symbol_candidates =
+				storage.resolve_symbol_name(snapshot_uid, focus_str)?;
+			match symbol_candidates.len() {
+				0 => {
+					// No match — valid response with no data.
+					Ok(build_no_match_result(
+						&repo.name,
+						&snapshot,
+						focus_str,
+						budget,
+					))
+				}
+				1 => {
+					let candidate = &symbol_candidates[0];
+					let context = storage.get_symbol_context(
+						snapshot_uid,
+						&candidate.stable_key,
+					)?;
+					match context {
+						Some(ctx) => symbol::orient_symbol(
+							storage,
+							&repo.name,
+							&snapshot,
+							&candidate.stable_key,
+							&ctx,
+							focus_str,
+							budget,
+							now,
+						),
+						None => Ok(build_no_match_result(
+							&repo.name,
+							&snapshot,
+							focus_str,
+							budget,
+						)),
+					}
+				}
+				_ => {
+					// Ambiguous — return candidates, no signals.
+					Ok(build_ambiguous_result(
+						&repo.name,
+						&snapshot,
+						focus_str,
+						symbol_candidates,
+						budget,
+					))
+				}
+			}
 		}
 	}
 }
@@ -194,6 +268,50 @@ fn extract_path_from_candidate(
 		}
 	}
 	focus_str.to_string()
+}
+
+/// Build an `OrientResult` for the ambiguous case.
+///
+/// Multiple SYMBOL candidates matched the focus string. Return
+/// the candidates so the caller can disambiguate.
+fn build_ambiguous_result(
+	repo_name: &str,
+	snapshot: &crate::storage_port::AgentSnapshot,
+	focus_str: &str,
+	candidates: Vec<AgentFocusCandidate>,
+	_budget: Budget,
+) -> OrientResult {
+	let focus_candidates: Vec<FocusCandidate> = candidates
+		.into_iter()
+		.map(|c| FocusCandidate {
+			stable_key: c.stable_key,
+			file: c.file,
+			kind: ResolvedKind::Symbol,
+		})
+		.collect();
+
+	OrientResult {
+		schema: ORIENT_SCHEMA,
+		command: ORIENT_COMMAND,
+		repo: repo_name.to_string(),
+		snapshot: snapshot.snapshot_uid.clone(),
+		focus: Focus::ambiguous(focus_str, focus_candidates),
+		confidence: Confidence::High,
+
+		signals: Vec::new(),
+		signals_truncated: None,
+		signals_omitted_count: None,
+
+		limits: Vec::new(),
+		limits_truncated: None,
+		limits_omitted_count: None,
+
+		next: Vec::new(),
+		next_truncated: None,
+		next_omitted_count: None,
+
+		truncated: false,
+	}
 }
 
 /// Build an `OrientResult` for the no-match case.

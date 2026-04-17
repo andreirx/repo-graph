@@ -311,6 +311,50 @@ pub struct AgentPathResolution {
 	pub module_stable_key: Option<String>,
 }
 
+// ── Symbol context (Rust-45) ────────────────────────────────────
+
+/// Context for a resolved SYMBOL node: owning file, owning
+/// module (via OWNS edge), name, qualified name, subtype, and
+/// line_start. The owning module is the SINGLE source of truth
+/// for which module this symbol belongs to — downstream
+/// boundary/gate/cycle code reads from this context and does not
+/// rediscover module ownership.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSymbolContext {
+	pub file_path: Option<String>,
+	pub module_path: Option<String>,
+	pub module_stable_key: Option<String>,
+	pub name: String,
+	pub qualified_name: Option<String>,
+	pub subtype: Option<String>,
+	pub line_start: Option<u64>,
+}
+
+// ── Caller/callee rows (Rust-45) ────────────────────────────────
+
+/// One caller row enriched with module ownership. Used by the
+/// symbol pipeline's CALLERS_SUMMARY aggregator to group callers
+/// by module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentCallerRow {
+	pub stable_key: String,
+	pub name: String,
+	pub file: Option<String>,
+	pub module_path: Option<String>,
+	pub module_stable_key: Option<String>,
+}
+
+/// One callee row enriched with module ownership. Symmetric with
+/// `AgentCallerRow`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentCalleeRow {
+	pub stable_key: String,
+	pub name: String,
+	pub file: Option<String>,
+	pub module_path: Option<String>,
+	pub module_stable_key: Option<String>,
+}
+
 // ── Trait ────────────────────────────────────────────────────────
 
 /// The narrow read port the agent use-case layer needs from a
@@ -481,5 +525,48 @@ pub trait AgentStorageRead {
 		&self,
 		snapshot_uid: &str,
 		path_prefix: &str,
+	) -> Result<Vec<AgentCycle>, AgentStorageError>;
+
+	// ── Symbol-focus methods (Rust-45) ──────────────────────────
+
+	/// Resolve a symbol name to candidate nodes. Returns up to 5
+	/// candidates matching `name` with `kind = 'SYMBOL'`, sorted
+	/// by `stable_key` ascending.
+	fn resolve_symbol_name(
+		&self,
+		snapshot_uid: &str,
+		name: &str,
+	) -> Result<Vec<AgentFocusCandidate>, AgentStorageError>;
+
+	/// Get context for a resolved SYMBOL node: file, module
+	/// ownership (via OWNS edges), name, subtype, line_start.
+	fn get_symbol_context(
+		&self,
+		snapshot_uid: &str,
+		symbol_stable_key: &str,
+	) -> Result<Option<AgentSymbolContext>, AgentStorageError>;
+
+	/// Return direct callers of a symbol (CALLS edges only),
+	/// enriched with module ownership.
+	fn find_symbol_callers(
+		&self,
+		snapshot_uid: &str,
+		symbol_stable_key: &str,
+	) -> Result<Vec<AgentCallerRow>, AgentStorageError>;
+
+	/// Return direct callees of a symbol (CALLS edges only),
+	/// enriched with module ownership.
+	fn find_symbol_callees(
+		&self,
+		snapshot_uid: &str,
+		symbol_stable_key: &str,
+	) -> Result<Vec<AgentCalleeRow>, AgentStorageError>;
+
+	/// Return module-level dependency cycles that involve the
+	/// given module (exact qualified_name match, NOT prefix).
+	fn find_cycles_involving_module(
+		&self,
+		snapshot_uid: &str,
+		module_qualified_name: &str,
 	) -> Result<Vec<AgentCycle>, AgentStorageError>;
 }

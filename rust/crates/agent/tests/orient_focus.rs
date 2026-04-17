@@ -10,7 +10,7 @@ mod common;
 use common::FakeAgentStorage;
 use repo_graph_agent::{
 	orient, AgentFocusCandidate, AgentFocusKind, AgentPathResolution,
-	Budget, ResolvedKind,
+	AgentSymbolContext, Budget, ResolvedKind,
 };
 
 fn seeded() -> FakeAgentStorage {
@@ -202,10 +202,10 @@ fn focus_resolves_via_stable_key_for_module() {
 	assert_eq!(result.focus.resolved_path.as_deref(), Some("src/core"));
 }
 
-// ── Symbol rejection ────────────────────────────────────────────
+// ── Symbol resolution via stable key (Rust-45) ──────────────────
 
 #[test]
-fn focus_rejects_symbol_stable_key() {
+fn focus_resolves_symbol_via_stable_key() {
 	let mut fake = seeded();
 	fake.path_resolutions.insert(
 		("snap-1".into(), "r1:src/core/service.ts:SYMBOL:myFunc".into()),
@@ -227,19 +227,41 @@ fn focus_rejects_symbol_stable_key() {
 			file: Some("src/core/service.ts".into()),
 		},
 	);
-	let err = orient(
+	// Seed symbol context so the pipeline can run.
+	fake.symbol_contexts.insert(
+		(
+			"snap-1".into(),
+			"r1:src/core/service.ts:SYMBOL:myFunc".into(),
+		),
+		AgentSymbolContext {
+			file_path: Some("src/core/service.ts".into()),
+			module_path: None,
+			module_stable_key: None,
+			name: "myFunc".into(),
+			qualified_name: Some("myFunc".into()),
+			subtype: None,
+			line_start: Some(10),
+		},
+	);
+	let result = orient(
 		&fake,
 		"r1",
 		Some("r1:src/core/service.ts:SYMBOL:myFunc"),
 		Budget::Small,
 		common::TEST_NOW,
 	)
-	.unwrap_err();
+	.unwrap();
 
-	match err {
-		repo_graph_agent::OrientError::FocusNotImplementedYet { .. } => {}
-		other => panic!("expected FocusNotImplementedYet, got: {:?}", other),
-	}
+	assert!(result.focus.resolved, "symbol focus must resolve");
+	assert_eq!(result.focus.resolved_kind, Some(ResolvedKind::Symbol));
+	assert_eq!(
+		result.focus.resolved_key.as_deref(),
+		Some("r1:src/core/service.ts:SYMBOL:myFunc")
+	);
+	assert_eq!(
+		result.focus.resolved_path.as_deref(),
+		Some("src/core/service.ts")
+	);
 }
 
 // ── No match ────────────────────────────────────────────────────

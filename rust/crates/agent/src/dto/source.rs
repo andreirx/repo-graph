@@ -40,6 +40,10 @@ pub enum SourceRef {
 	/// Emitted by the agent gate aggregator for `GATE_PASS`,
 	/// `GATE_FAIL`, and `GATE_INCOMPLETE` signals.
 	GateAssemble,
+	/// Port method: `AgentStorageRead::find_symbol_callers`.
+	StorageFindSymbolCallers,
+	/// Port method: `AgentStorageRead::find_symbol_callees`.
+	StorageFindSymbolCallees,
 }
 
 impl SourceRef {
@@ -59,6 +63,8 @@ impl SourceRef {
 			Self::StorageComputeRepoSummary => "storage::compute_repo_summary",
 			Self::StorageGetTrustSummary => "storage::get_trust_summary",
 			Self::GateAssemble => "gate::assemble",
+			Self::StorageFindSymbolCallers => "storage::find_symbol_callers",
+			Self::StorageFindSymbolCallees => "storage::find_symbol_callees",
 		}
 	}
 }
@@ -91,6 +97,8 @@ mod tests {
 			SourceRef::StorageGetStaleFiles,
 			SourceRef::StorageComputeRepoSummary,
 			SourceRef::StorageGetTrustSummary,
+			SourceRef::StorageFindSymbolCallers,
+			SourceRef::StorageFindSymbolCallees,
 		] {
 			assert!(s.as_str().contains("::"));
 		}

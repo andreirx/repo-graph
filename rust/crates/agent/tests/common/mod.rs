@@ -21,11 +21,11 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use repo_graph_agent::{
-	AgentBoundaryDeclaration, AgentCycle, AgentDeadNode, AgentFocusCandidate,
-	AgentImportEdge, AgentPathResolution, AgentReliabilityAxis,
-	AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
-	AgentStaleFile, AgentStorageError, AgentStorageRead, AgentTrustSummary,
-	EnrichmentState,
+	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentCycle,
+	AgentDeadNode, AgentFocusCandidate, AgentImportEdge, AgentPathResolution,
+	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
+	AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead,
+	AgentSymbolContext, AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_gate::{
 	GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -97,6 +97,13 @@ pub struct FakeAgentStorage {
 	pub boundary_declarations_in_path:
 		HashMap<(String, String), Vec<AgentBoundaryDeclaration>>,
 	pub cycles_involving_path: HashMap<(String, String), Vec<AgentCycle>>,
+
+	// ── Symbol-focus seed data (Rust-45) ────────────────────
+	pub symbol_name_results: HashMap<(String, String), Vec<AgentFocusCandidate>>,
+	pub symbol_contexts: HashMap<(String, String), AgentSymbolContext>,
+	pub symbol_callers: HashMap<(String, String), Vec<AgentCallerRow>>,
+	pub symbol_callees: HashMap<(String, String), Vec<AgentCalleeRow>>,
+	pub cycles_involving_module: HashMap<(String, String), Vec<AgentCycle>>,
 
 	// ── Gate-port seed data (Rust-43A) ──────────────────────
 	//
@@ -405,6 +412,74 @@ impl AgentStorageRead for FakeAgentStorage {
 		let key = (snapshot_uid.to_string(), path_prefix.to_string());
 		Ok(self
 			.cycles_involving_path
+			.get(&key)
+			.cloned()
+			.unwrap_or_default())
+	}
+
+	// ── Symbol-focus methods (Rust-45) ──────────────────────
+
+	fn resolve_symbol_name(
+		&self,
+		snapshot_uid: &str,
+		name: &str,
+	) -> Result<Vec<AgentFocusCandidate>, AgentStorageError> {
+		self.fail_if_forced("resolve_symbol_name")?;
+		let key = (snapshot_uid.to_string(), name.to_string());
+		Ok(self
+			.symbol_name_results
+			.get(&key)
+			.cloned()
+			.unwrap_or_default())
+	}
+
+	fn get_symbol_context(
+		&self,
+		snapshot_uid: &str,
+		symbol_stable_key: &str,
+	) -> Result<Option<AgentSymbolContext>, AgentStorageError> {
+		self.fail_if_forced("get_symbol_context")?;
+		let key = (snapshot_uid.to_string(), symbol_stable_key.to_string());
+		Ok(self.symbol_contexts.get(&key).cloned())
+	}
+
+	fn find_symbol_callers(
+		&self,
+		snapshot_uid: &str,
+		symbol_stable_key: &str,
+	) -> Result<Vec<AgentCallerRow>, AgentStorageError> {
+		self.fail_if_forced("find_symbol_callers")?;
+		let key = (snapshot_uid.to_string(), symbol_stable_key.to_string());
+		Ok(self
+			.symbol_callers
+			.get(&key)
+			.cloned()
+			.unwrap_or_default())
+	}
+
+	fn find_symbol_callees(
+		&self,
+		snapshot_uid: &str,
+		symbol_stable_key: &str,
+	) -> Result<Vec<AgentCalleeRow>, AgentStorageError> {
+		self.fail_if_forced("find_symbol_callees")?;
+		let key = (snapshot_uid.to_string(), symbol_stable_key.to_string());
+		Ok(self
+			.symbol_callees
+			.get(&key)
+			.cloned()
+			.unwrap_or_default())
+	}
+
+	fn find_cycles_involving_module(
+		&self,
+		snapshot_uid: &str,
+		module_qualified_name: &str,
+	) -> Result<Vec<AgentCycle>, AgentStorageError> {
+		self.fail_if_forced("find_cycles_involving_module")?;
+		let key = (snapshot_uid.to_string(), module_qualified_name.to_string());
+		Ok(self
+			.cycles_involving_module
 			.get(&key)
 			.cloned()
 			.unwrap_or_default())

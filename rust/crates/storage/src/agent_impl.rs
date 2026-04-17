@@ -24,11 +24,12 @@
 //!      policy lives on the adapter side of this boundary.
 
 use repo_graph_agent::{
-	AgentBoundaryDeclaration, AgentCycle, AgentDeadNode, AgentFocusCandidate,
-	AgentFocusKind, AgentImportEdge, AgentPathResolution, AgentReliabilityAxis,
-	AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
-	AgentStaleFile, AgentStorageError, AgentStorageRead, AgentTrustSummary,
-	EnrichmentState,
+	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentCycle,
+	AgentDeadNode, AgentFocusCandidate, AgentFocusKind, AgentImportEdge,
+	AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel,
+	AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
+	AgentStorageError, AgentStorageRead, AgentSymbolContext,
+	AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_trust::service::assemble_trust_report;
 use repo_graph_trust::types::{
@@ -763,26 +764,305 @@ impl AgentStorageRead for StorageConnection {
 		snapshot_uid: &str,
 		path_prefix: &str,
 	) -> Result<Vec<AgentCycle>, AgentStorageError> {
-		// Run the full cycle query, then filter to only those
-		// cycles that involve at least one module whose name
-		// matches the prefix.
+		// Run the full cycle query, then filter to cycles where
+		// at least one module's qualified_name (full path) matches
+		// the prefix.
+		//
+		// `CycleNode.name` is the short display name (e.g.
+		// `seams`). The prefix check must use the full
+		// `qualified_name` (e.g. `src/core/seams`) because focus
+		// strings are repo-relative paths. The Rust-44 spike
+		// found that comparing short names against full paths
+		// almost never matched — e.g. the module at
+		// `src/core/seams` has short name `seams`, which does
+		// not start with `src/core/seams/`.
+		//
+		// The returned `AgentCycle.modules` also carries
+		// qualified_names so path-scoped cycle evidence shows
+		// full paths. The repo-level aggregator continues using
+		// short names through its own `find_module_cycles` path.
 		let all_cycles = self
 			.find_cycles(snapshot_uid, "module")
 			.map_err(map_err("find_cycles_involving_path"))?;
 
+		let conn = self.connection();
 		let filtered: Vec<AgentCycle> = all_cycles
 			.into_iter()
 			.filter_map(|c| {
-				let names: Vec<String> =
-					c.nodes.iter().map(|n| n.name.clone()).collect();
-				let involves_prefix = names.iter().any(|name| {
-					name == path_prefix
-						|| name.starts_with(&format!("{}/", path_prefix))
+				let qualified_names: Vec<String> = c
+					.nodes
+					.iter()
+					.map(|n| {
+						conn.query_row(
+							"SELECT qualified_name FROM nodes \
+							 WHERE node_uid = ?",
+							rusqlite::params![n.node_id],
+							|row| row.get::<_, Option<String>>(0),
+						)
+						.ok()
+						.flatten()
+						.unwrap_or_else(|| n.name.clone())
+					})
+					.collect();
+
+				let involves_prefix = qualified_names.iter().any(|qn| {
+					qn == path_prefix
+						|| qn.starts_with(&format!("{}/", path_prefix))
 				});
+
 				if involves_prefix {
 					Some(AgentCycle {
 						length: c.length,
-						modules: names,
+						modules: qualified_names,
+					})
+				} else {
+					None
+				}
+			})
+			.collect();
+
+		Ok(filtered)
+	}
+
+	// ── Symbol-focus methods (Rust-45) ──────────────────────────
+
+	fn resolve_symbol_name(
+		&self,
+		snapshot_uid: &str,
+		name: &str,
+	) -> Result<Vec<AgentFocusCandidate>, AgentStorageError> {
+		let conn = self.connection();
+		let mut stmt = conn
+			.prepare(
+				"SELECT n.stable_key, n.kind, f.path \
+				 FROM nodes n \
+				 LEFT JOIN files f ON n.file_uid = f.file_uid \
+				 WHERE n.snapshot_uid = ? AND n.kind = 'SYMBOL' AND n.name = ? \
+				 ORDER BY n.stable_key ASC \
+				 LIMIT 5",
+			)
+			.map_err(map_err("resolve_symbol_name"))?;
+
+		let rows = stmt
+			.query_map(
+				rusqlite::params![snapshot_uid, name],
+				|row| {
+					let sk: String = row.get(0)?;
+					let _kind_str: String = row.get(1)?;
+					let file: Option<String> = row.get(2)?;
+					Ok(AgentFocusCandidate {
+						stable_key: sk,
+						kind: AgentFocusKind::Symbol,
+						file,
+					})
+				},
+			)
+			.map_err(map_err("resolve_symbol_name"))?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(map_err("resolve_symbol_name"))
+	}
+
+	fn get_symbol_context(
+		&self,
+		snapshot_uid: &str,
+		symbol_stable_key: &str,
+	) -> Result<Option<AgentSymbolContext>, AgentStorageError> {
+		let result = self.connection().query_row(
+			"SELECT \
+				n.name, n.qualified_name, n.subtype, n.line_start, \
+				f.path AS file_path, \
+				mod_n.qualified_name AS module_path, \
+				mod_n.stable_key AS module_stable_key \
+			 FROM nodes n \
+			 LEFT JOIN files f ON n.file_uid = f.file_uid \
+			 LEFT JOIN nodes file_node ON file_node.file_uid = n.file_uid \
+				AND file_node.kind = 'FILE' \
+				AND file_node.snapshot_uid = n.snapshot_uid \
+			 LEFT JOIN edges own ON own.type = 'OWNS' \
+				AND own.target_node_uid = file_node.node_uid \
+				AND own.snapshot_uid = n.snapshot_uid \
+			 LEFT JOIN nodes mod_n ON own.source_node_uid = mod_n.node_uid \
+			 WHERE n.snapshot_uid = ? AND n.stable_key = ?",
+			rusqlite::params![snapshot_uid, symbol_stable_key],
+			|row| {
+				let name: String = row.get(0)?;
+				let qualified_name: Option<String> = row.get(1)?;
+				let subtype: Option<String> = row.get(2)?;
+				let line_start: Option<i64> = row.get(3)?;
+				let file_path: Option<String> = row.get(4)?;
+				let module_path: Option<String> = row.get(5)?;
+				let module_stable_key: Option<String> = row.get(6)?;
+				Ok(AgentSymbolContext {
+					file_path,
+					module_path,
+					module_stable_key,
+					name,
+					qualified_name,
+					subtype,
+					line_start: line_start.and_then(|n| u64::try_from(n).ok()),
+				})
+			},
+		);
+
+		match result {
+			Ok(ctx) => Ok(Some(ctx)),
+			Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+			Err(e) => Err(map_err("get_symbol_context")(e)),
+		}
+	}
+
+	fn find_symbol_callers(
+		&self,
+		snapshot_uid: &str,
+		symbol_stable_key: &str,
+	) -> Result<Vec<AgentCallerRow>, AgentStorageError> {
+		let conn = self.connection();
+		let mut stmt = conn
+			.prepare(
+				"SELECT \
+					caller.stable_key, caller.name, \
+					f.path AS file_path, \
+					mod_n.qualified_name AS module_path, \
+					mod_n.stable_key AS module_stable_key \
+				 FROM edges e \
+				 JOIN nodes caller ON e.source_node_uid = caller.node_uid \
+				 LEFT JOIN files f ON caller.file_uid = f.file_uid \
+				 LEFT JOIN nodes file_node ON file_node.file_uid = caller.file_uid \
+					AND file_node.kind = 'FILE' \
+					AND file_node.snapshot_uid = e.snapshot_uid \
+				 LEFT JOIN edges own ON own.type = 'OWNS' \
+					AND own.target_node_uid = file_node.node_uid \
+					AND own.snapshot_uid = e.snapshot_uid \
+				 LEFT JOIN nodes mod_n ON own.source_node_uid = mod_n.node_uid \
+				 WHERE e.snapshot_uid = ? \
+					AND e.type = 'CALLS' \
+					AND e.target_node_uid = ( \
+						SELECT node_uid FROM nodes \
+						WHERE snapshot_uid = ? AND stable_key = ? \
+						LIMIT 1 \
+					)",
+			)
+			.map_err(map_err("find_symbol_callers"))?;
+
+		let rows = stmt
+			.query_map(
+				rusqlite::params![
+					snapshot_uid,
+					snapshot_uid,
+					symbol_stable_key,
+				],
+				|row| {
+					Ok(AgentCallerRow {
+						stable_key: row.get(0)?,
+						name: row.get(1)?,
+						file: row.get(2)?,
+						module_path: row.get(3)?,
+						module_stable_key: row.get(4)?,
+					})
+				},
+			)
+			.map_err(map_err("find_symbol_callers"))?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(map_err("find_symbol_callers"))
+	}
+
+	fn find_symbol_callees(
+		&self,
+		snapshot_uid: &str,
+		symbol_stable_key: &str,
+	) -> Result<Vec<AgentCalleeRow>, AgentStorageError> {
+		let conn = self.connection();
+		let mut stmt = conn
+			.prepare(
+				"SELECT \
+					callee.stable_key, callee.name, \
+					f.path AS file_path, \
+					mod_n.qualified_name AS module_path, \
+					mod_n.stable_key AS module_stable_key \
+				 FROM edges e \
+				 JOIN nodes callee ON e.target_node_uid = callee.node_uid \
+				 LEFT JOIN files f ON callee.file_uid = f.file_uid \
+				 LEFT JOIN nodes file_node ON file_node.file_uid = callee.file_uid \
+					AND file_node.kind = 'FILE' \
+					AND file_node.snapshot_uid = e.snapshot_uid \
+				 LEFT JOIN edges own ON own.type = 'OWNS' \
+					AND own.target_node_uid = file_node.node_uid \
+					AND own.snapshot_uid = e.snapshot_uid \
+				 LEFT JOIN nodes mod_n ON own.source_node_uid = mod_n.node_uid \
+				 WHERE e.snapshot_uid = ? \
+					AND e.type = 'CALLS' \
+					AND e.source_node_uid = ( \
+						SELECT node_uid FROM nodes \
+						WHERE snapshot_uid = ? AND stable_key = ? \
+						LIMIT 1 \
+					)",
+			)
+			.map_err(map_err("find_symbol_callees"))?;
+
+		let rows = stmt
+			.query_map(
+				rusqlite::params![
+					snapshot_uid,
+					snapshot_uid,
+					symbol_stable_key,
+				],
+				|row| {
+					Ok(AgentCalleeRow {
+						stable_key: row.get(0)?,
+						name: row.get(1)?,
+						file: row.get(2)?,
+						module_path: row.get(3)?,
+						module_stable_key: row.get(4)?,
+					})
+				},
+			)
+			.map_err(map_err("find_symbol_callees"))?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(map_err("find_symbol_callees"))
+	}
+
+	fn find_cycles_involving_module(
+		&self,
+		snapshot_uid: &str,
+		module_qualified_name: &str,
+	) -> Result<Vec<AgentCycle>, AgentStorageError> {
+		// Same as find_cycles_involving_path but with exact match
+		// instead of prefix match.
+		let all_cycles = self
+			.find_cycles(snapshot_uid, "module")
+			.map_err(map_err("find_cycles_involving_module"))?;
+
+		let conn = self.connection();
+		let filtered: Vec<AgentCycle> = all_cycles
+			.into_iter()
+			.filter_map(|c| {
+				let qualified_names: Vec<String> = c
+					.nodes
+					.iter()
+					.map(|n| {
+						conn.query_row(
+							"SELECT qualified_name FROM nodes \
+							 WHERE node_uid = ?",
+							rusqlite::params![n.node_id],
+							|row| row.get::<_, Option<String>>(0),
+						)
+						.ok()
+						.flatten()
+						.unwrap_or_else(|| n.name.clone())
+					})
+					.collect();
+
+				// Exact match — NOT prefix matching.
+				let involves =
+					qualified_names.iter().any(|qn| qn == module_qualified_name);
+
+				if involves {
+					Some(AgentCycle {
+						length: c.length,
+						modules: qualified_names,
 					})
 				} else {
 					None

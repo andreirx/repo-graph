@@ -175,6 +175,43 @@ impl Focus {
 		}
 	}
 
+	/// Build a symbol-focus record. The focus resolved to an
+	/// exact SYMBOL node. `stable_key` is the node's stable key.
+	/// `file_path` is the repo-relative path if the symbol has a
+	/// file association (via `AgentSymbolContext`).
+	pub fn symbol(
+		input: &str,
+		stable_key: &str,
+		file_path: Option<&str>,
+	) -> Self {
+		Self {
+			input: Some(input.to_string()),
+			resolved: true,
+			resolved_kind: Some(ResolvedKind::Symbol),
+			resolved_key: Some(stable_key.to_string()),
+			resolved_path: file_path.map(|p| p.to_string()),
+			reason: None,
+			candidates: Vec::new(),
+		}
+	}
+
+	/// Build an ambiguous focus record. The focus matched
+	/// multiple candidates and cannot be resolved uniquely.
+	pub fn ambiguous(
+		input: &str,
+		candidates: Vec<FocusCandidate>,
+	) -> Self {
+		Self {
+			input: Some(input.to_string()),
+			resolved: false,
+			resolved_kind: None,
+			resolved_key: None,
+			resolved_path: None,
+			reason: Some(FocusFailureReason::Ambiguous),
+			candidates,
+		}
+	}
+
 	/// Build an unresolved focus record.
 	pub fn no_match(input: &str) -> Self {
 		Self {

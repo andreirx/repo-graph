@@ -40,10 +40,47 @@
 //! the day someone adds a deserialization path, and the contract
 //! is that `SignalEvidence` is produce-only today.
 
-use serde::ser::Serializer;
+use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 
 use crate::dto::source::SourceRef;
+
+// ── SignalScope ──────────────────────────────────────────────────
+
+/// Whether a signal is directly computed for the focused entity or
+/// inherited from its owning module context.
+///
+/// Serialization contract:
+///   - `Direct` — the `scope` field is ABSENT from JSON output.
+///     This preserves backward compatibility with all existing
+///     repo/path/file pipeline output.
+///   - `ModuleContext` — serialized as `"scope": "module_context"`.
+///     Only symbol-scoped orient emits this variant, for signals
+///     inherited from the owning module (boundary violations,
+///     import cycles, gate).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignalScope {
+	Direct,
+	ModuleContext,
+}
+
+impl SignalScope {
+	/// Returns `true` when the scope is `Direct`. Used by
+	/// `skip_serializing_if` to omit the field from JSON when
+	/// no scope annotation is needed (backward compat).
+	pub fn is_direct(self) -> bool {
+		matches!(self, Self::Direct)
+	}
+}
+
+impl Serialize for SignalScope {
+	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		match self {
+			Self::Direct => serializer.serialize_str("direct"),
+			Self::ModuleContext => serializer.serialize_str("module_context"),
+		}
+	}
+}
 
 // ── Severity ─────────────────────────────────────────────────────
 
@@ -345,6 +382,24 @@ pub struct SnapshotInfoEvidence {
 	pub created_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CallersSummaryEvidence {
+	pub count: u64,
+	pub top_modules: Vec<ModuleCountEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CalleesSummaryEvidence {
+	pub count: u64,
+	pub top_modules: Vec<ModuleCountEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ModuleCountEvidence {
+	pub module: String,
+	pub count: u64,
+}
+
 // ── SignalEvidence enum ──────────────────────────────────────────
 
 /// Typed evidence variants. Exactly one variant per signal code
@@ -369,6 +424,8 @@ pub enum SignalEvidence {
 	DeadCode(DeadCodeEvidence),
 	ModuleSummary(ModuleSummaryEvidence),
 	SnapshotInfo(SnapshotInfoEvidence),
+	CallersSummary(CallersSummaryEvidence),
+	CalleesSummary(CalleesSummaryEvidence),
 }
 
 impl Serialize for SignalEvidence {
@@ -385,6 +442,8 @@ impl Serialize for SignalEvidence {
 			Self::DeadCode(e) => e.serialize(serializer),
 			Self::ModuleSummary(e) => e.serialize(serializer),
 			Self::SnapshotInfo(e) => e.serialize(serializer),
+			Self::CallersSummary(e) => e.serialize(serializer),
+			Self::CalleesSummary(e) => e.serialize(serializer),
 		}
 	}
 }
@@ -407,6 +466,8 @@ impl SignalEvidence {
 			Self::DeadCode(_) => "DeadCode",
 			Self::ModuleSummary(_) => "ModuleSummary",
 			Self::SnapshotInfo(_) => "SnapshotInfo",
+			Self::CallersSummary(_) => "CallersSummary",
+			Self::CalleesSummary(_) => "CalleesSummary",
 		}
 	}
 }
@@ -427,7 +488,7 @@ impl SignalEvidence {
 /// Read access for callers goes through explicit accessor
 /// methods (`code()`, `rank()`, etc.) so tests can assert on the
 /// record without having to bypass privacy.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Signal {
 	pub(crate) code: SignalCode,
 	pub(crate) rank: u32,
@@ -436,6 +497,26 @@ pub struct Signal {
 	pub(crate) summary: String,
 	pub(crate) evidence: SignalEvidence,
 	pub(crate) source: SourceRef,
+	pub(crate) scope: SignalScope,
+}
+
+impl Serialize for Signal {
+	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		// Count fields: 7 base + 1 optional scope
+		let field_count = if self.scope.is_direct() { 7 } else { 8 };
+		let mut state = serializer.serialize_struct("Signal", field_count)?;
+		state.serialize_field("code", &self.code)?;
+		state.serialize_field("rank", &self.rank)?;
+		state.serialize_field("severity", &self.severity)?;
+		state.serialize_field("category", &self.category)?;
+		state.serialize_field("summary", &self.summary)?;
+		state.serialize_field("evidence", &self.evidence)?;
+		state.serialize_field("source", &self.source)?;
+		if !self.scope.is_direct() {
+			state.serialize_field("scope", &self.scope)?;
+		}
+		state.end()
+	}
 }
 
 impl Signal {
@@ -448,6 +529,7 @@ impl Signal {
 	pub fn summary(&self) -> &str { &self.summary }
 	pub fn evidence(&self) -> &SignalEvidence { &self.evidence }
 	pub fn source(&self) -> SourceRef { self.source }
+	pub fn scope(&self) -> SignalScope { self.scope }
 
 	/// Rank is assigned by the ranking pass after all signals
 	/// are collected. Callers must never set rank directly; this
@@ -455,6 +537,13 @@ impl Signal {
 	/// it.
 	pub(crate) fn set_rank(&mut self, rank: u32) {
 		self.rank = rank;
+	}
+
+	/// Mark this signal as inherited from the owning module
+	/// context. Returns self for chaining.
+	pub(crate) fn with_module_context(mut self) -> Self {
+		self.scope = SignalScope::ModuleContext;
+		self
 	}
 
 	// Internal constructor. Looks up descriptor for the code and
@@ -476,6 +565,7 @@ impl Signal {
 			summary,
 			evidence,
 			source,
+			scope: SignalScope::Direct,
 		}
 	}
 
@@ -649,6 +739,38 @@ impl Signal {
 			summary,
 			SignalEvidence::SnapshotInfo(evidence),
 			SourceRef::StorageGetLatestSnapshot,
+		)
+	}
+
+	pub fn callers_summary(evidence: CallersSummaryEvidence) -> Self {
+		let summary = format!(
+			"{} direct caller{} across {} module{}.",
+			evidence.count,
+			if evidence.count == 1 { "" } else { "s" },
+			evidence.top_modules.len(),
+			if evidence.top_modules.len() == 1 { "" } else { "s" },
+		);
+		Self::build(
+			SignalCode::CallersSummary,
+			summary,
+			SignalEvidence::CallersSummary(evidence),
+			SourceRef::StorageFindSymbolCallers,
+		)
+	}
+
+	pub fn callees_summary(evidence: CalleesSummaryEvidence) -> Self {
+		let summary = format!(
+			"{} direct callee{} across {} module{}.",
+			evidence.count,
+			if evidence.count == 1 { "" } else { "s" },
+			evidence.top_modules.len(),
+			if evidence.top_modules.len() == 1 { "" } else { "s" },
+		);
+		Self::build(
+			SignalCode::CalleesSummary,
+			summary,
+			SignalEvidence::CalleesSummary(evidence),
+			SourceRef::StorageFindSymbolCallees,
 		)
 	}
 }

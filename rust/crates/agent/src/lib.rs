@@ -73,10 +73,12 @@ pub use dto::{
 	},
 	limit::{Limit, LimitCode},
 	signal::{
-		BoundaryViolationEvidence, BoundaryViolationsEvidence, CycleEvidence,
+		BoundaryViolationEvidence, BoundaryViolationsEvidence,
+		CallersSummaryEvidence, CalleesSummaryEvidence, CycleEvidence,
 		DeadCodeEvidence, DeadSymbolEvidence, ImportCyclesEvidence,
-		ModuleSummaryEvidence, Severity, Signal, SignalCategory, SignalCode,
-		SignalEvidence, SnapshotInfoEvidence, TrustLowResolutionEvidence,
+		ModuleCountEvidence, ModuleSummaryEvidence, Severity, Signal,
+		SignalCategory, SignalCode, SignalEvidence, SignalScope,
+		SnapshotInfoEvidence, TrustLowResolutionEvidence,
 		TrustNoEnrichmentEvidence, TrustStaleSnapshotEvidence,
 	},
 	source::SourceRef,
@@ -84,8 +86,9 @@ pub use dto::{
 pub use errors::{AgentStorageError, OrientError};
 pub use orient::orient;
 pub use storage_port::{
-	AgentBoundaryDeclaration, AgentCycle, AgentDeadNode, AgentFocusCandidate,
-	AgentFocusKind, AgentImportEdge, AgentPathResolution, AgentReliabilityAxis,
-	AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
-	AgentStaleFile, AgentStorageRead, AgentTrustSummary, EnrichmentState,
+	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentCycle,
+	AgentDeadNode, AgentFocusCandidate, AgentFocusKind, AgentImportEdge,
+	AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel,
+	AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
+	AgentStorageRead, AgentSymbolContext, AgentTrustSummary, EnrichmentState,
 };
