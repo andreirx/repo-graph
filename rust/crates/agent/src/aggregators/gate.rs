@@ -37,7 +37,7 @@ use crate::dto::signal::{
 use crate::errors::{AgentStorageError, OrientError};
 use repo_graph_gate::{
 	assemble_from_requirements, GateError, GateMode, GateReport,
-	GateStorageRead,
+	GateRequirement, GateStorageRead,
 };
 
 pub fn aggregate<S: GateStorageRead + ?Sized>(
@@ -70,6 +70,96 @@ pub fn aggregate<S: GateStorageRead + ?Sized>(
 		GateMode::Default,
 		now,
 		requirements,
+	) {
+		Ok(r) => r,
+		Err(e) => return Err(map_gate_error(e)),
+	};
+
+	let signals = project_report(&report);
+
+	Ok(AggregatorOutput { signals, limits: Vec::new() })
+}
+
+/// Path-scoped gate aggregator.
+///
+/// Filters obligations by target prefix before calling the gate
+/// assembly. The filtering logic:
+///
+///   1. Fetch all requirements.
+///   2. If no requirements → `GATE_NOT_CONFIGURED` limit.
+///   3. Filter: keep only obligations where
+///      `target.starts_with("{prefix}/") || target == "{prefix}"`.
+///      Requirements with zero surviving obligations are dropped.
+///   4. If all requirements emptied → `GATE_NOT_APPLICABLE_TO_FOCUS`
+///      limit (requirements exist but none target this area).
+///   5. Otherwise → call `assemble_from_requirements` with the
+///      filtered list.
+pub fn aggregate_path<S: GateStorageRead + ?Sized>(
+	storage: &S,
+	repo_uid: &str,
+	snapshot_uid: &str,
+	now: &str,
+	path_prefix: &str,
+) -> Result<AggregatorOutput, OrientError> {
+	let requirements = storage
+		.get_active_requirements(repo_uid)
+		.map_err(|e| {
+			OrientError::Storage(AgentStorageError::new(
+				"get_active_requirements",
+				e.message,
+			))
+		})?;
+
+	if requirements.is_empty() {
+		return Ok(AggregatorOutput {
+			signals: Vec::new(),
+			limits: vec![Limit::from_code(LimitCode::GateNotConfigured)],
+		});
+	}
+
+	// Filter obligations by target prefix.
+	let filtered: Vec<GateRequirement> = requirements
+		.into_iter()
+		.filter_map(|req| {
+			let matching: Vec<_> = req
+				.obligations
+				.into_iter()
+				.filter(|o| {
+					match &o.target {
+						Some(t) => {
+							t == path_prefix
+								|| t.starts_with(&format!("{}/", path_prefix))
+						}
+						None => false,
+					}
+				})
+				.collect();
+			if matching.is_empty() {
+				None
+			} else {
+				Some(GateRequirement {
+					req_id: req.req_id,
+					version: req.version,
+					obligations: matching,
+				})
+			}
+		})
+		.collect();
+
+	if filtered.is_empty() {
+		return Ok(AggregatorOutput {
+			signals: Vec::new(),
+			limits: vec![Limit::from_code(LimitCode::GateNotApplicableToFocus)],
+		});
+	}
+
+	let report = match assemble_from_requirements(
+		storage,
+		repo_uid,
+		snapshot_uid,
+		GateMode::Default,
+		now,
+		filtered,
 	) {
 		Ok(r) => r,
 		Err(e) => return Err(map_gate_error(e)),

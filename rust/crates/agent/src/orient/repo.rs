@@ -158,7 +158,7 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
 		command: ORIENT_COMMAND,
 		repo: repo.name,
 		snapshot: snapshot_uid,
-		focus: Focus::repo(&repo.repo_uid),
+		focus: Focus::repo(),
 		confidence,
 
 		signals: all_signals,

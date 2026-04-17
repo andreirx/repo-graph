@@ -21,10 +21,11 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use repo_graph_agent::{
-	AgentBoundaryDeclaration, AgentCycle, AgentDeadNode, AgentImportEdge,
-	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
-	AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead,
-	AgentTrustSummary, EnrichmentState,
+	AgentBoundaryDeclaration, AgentCycle, AgentDeadNode, AgentFocusCandidate,
+	AgentImportEdge, AgentPathResolution, AgentReliabilityAxis,
+	AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
+	AgentStaleFile, AgentStorageError, AgentStorageRead, AgentTrustSummary,
+	EnrichmentState,
 };
 use repo_graph_gate::{
 	GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -82,6 +83,20 @@ pub struct FakeAgentStorage {
 		HashMap<(String, String, String), Vec<AgentImportEdge>>,
 	pub repo_summaries: HashMap<String, AgentRepoSummary>,
 	pub trust_summaries: HashMap<String, AgentTrustSummary>,
+
+	// ── Focus-resolution seed data (Rust-44) ────────────────
+	//
+	// Each new port method has its own seed field keyed by
+	// (snapshot_uid, path/key) or (repo_uid, prefix).
+	pub path_resolutions: HashMap<(String, String), AgentPathResolution>,
+	pub stable_key_candidates: HashMap<(String, String), AgentFocusCandidate>,
+	pub dead_nodes_in_path: HashMap<(String, String), Vec<AgentDeadNode>>,
+	pub dead_nodes_in_file: HashMap<(String, String), Vec<AgentDeadNode>>,
+	pub path_summaries: HashMap<(String, String), AgentRepoSummary>,
+	pub file_summaries: HashMap<(String, String), AgentRepoSummary>,
+	pub boundary_declarations_in_path:
+		HashMap<(String, String), Vec<AgentBoundaryDeclaration>>,
+	pub cycles_involving_path: HashMap<(String, String), Vec<AgentCycle>>,
 
 	// ── Gate-port seed data (Rust-43A) ──────────────────────
 	//
@@ -276,6 +291,123 @@ impl AgentStorageRead for FakeAgentStorage {
 			.get(snapshot_uid)
 			.cloned()
 			.unwrap_or_else(high_confidence_trust))
+	}
+
+	// ── Focus-resolution methods (Rust-44) ──────────────────
+
+	fn resolve_path_focus(
+		&self,
+		snapshot_uid: &str,
+		path: &str,
+	) -> Result<AgentPathResolution, AgentStorageError> {
+		self.fail_if_forced("resolve_path_focus")?;
+		let key = (snapshot_uid.to_string(), path.to_string());
+		Ok(self
+			.path_resolutions
+			.get(&key)
+			.cloned()
+			.unwrap_or(AgentPathResolution {
+				has_exact_file: false,
+				file_stable_key: None,
+				has_content_under_prefix: false,
+				module_stable_key: None,
+			}))
+	}
+
+	fn resolve_stable_key_focus(
+		&self,
+		snapshot_uid: &str,
+		stable_key: &str,
+	) -> Result<Option<AgentFocusCandidate>, AgentStorageError> {
+		self.fail_if_forced("resolve_stable_key_focus")?;
+		let key = (snapshot_uid.to_string(), stable_key.to_string());
+		Ok(self.stable_key_candidates.get(&key).cloned())
+	}
+
+	fn find_dead_nodes_in_path(
+		&self,
+		snapshot_uid: &str,
+		_repo_uid: &str,
+		path_prefix: &str,
+	) -> Result<Vec<AgentDeadNode>, AgentStorageError> {
+		self.fail_if_forced("find_dead_nodes_in_path")?;
+		let key = (snapshot_uid.to_string(), path_prefix.to_string());
+		Ok(self.dead_nodes_in_path.get(&key).cloned().unwrap_or_default())
+	}
+
+	fn find_dead_nodes_in_file(
+		&self,
+		snapshot_uid: &str,
+		_repo_uid: &str,
+		file_path: &str,
+	) -> Result<Vec<AgentDeadNode>, AgentStorageError> {
+		self.fail_if_forced("find_dead_nodes_in_file")?;
+		let key = (snapshot_uid.to_string(), file_path.to_string());
+		Ok(self.dead_nodes_in_file.get(&key).cloned().unwrap_or_default())
+	}
+
+	fn compute_path_summary(
+		&self,
+		snapshot_uid: &str,
+		path_prefix: &str,
+	) -> Result<AgentRepoSummary, AgentStorageError> {
+		self.fail_if_forced("compute_path_summary")?;
+		let key = (snapshot_uid.to_string(), path_prefix.to_string());
+		Ok(self
+			.path_summaries
+			.get(&key)
+			.cloned()
+			.unwrap_or(AgentRepoSummary {
+				file_count: 0,
+				symbol_count: 0,
+				languages: Vec::new(),
+			}))
+	}
+
+	fn compute_file_summary(
+		&self,
+		snapshot_uid: &str,
+		file_path: &str,
+	) -> Result<AgentRepoSummary, AgentStorageError> {
+		self.fail_if_forced("compute_file_summary")?;
+		let key = (snapshot_uid.to_string(), file_path.to_string());
+		Ok(self
+			.file_summaries
+			.get(&key)
+			.cloned()
+			.unwrap_or(AgentRepoSummary {
+				file_count: 0,
+				symbol_count: 0,
+				languages: Vec::new(),
+			}))
+	}
+
+	fn find_boundary_declarations_in_path(
+		&self,
+		repo_uid: &str,
+		path_prefix: &str,
+	) -> Result<Vec<AgentBoundaryDeclaration>, AgentStorageError> {
+		self.fail_if_forced("find_boundary_declarations_in_path")?;
+		let key = (repo_uid.to_string(), path_prefix.to_string());
+		Ok(self
+			.boundary_declarations_in_path
+			.get(&key)
+			.cloned()
+			.unwrap_or_default())
+	}
+
+	fn find_cycles_involving_path(
+		&self,
+		snapshot_uid: &str,
+		path_prefix: &str,
+	) -> Result<Vec<AgentCycle>, AgentStorageError> {
+		self.fail_if_forced("find_cycles_involving_path")?;
+		let key = (snapshot_uid.to_string(), path_prefix.to_string());
+		Ok(self
+			.cycles_involving_path
+			.get(&key)
+			.cloned()
+			.unwrap_or_default())
 	}
 }
 

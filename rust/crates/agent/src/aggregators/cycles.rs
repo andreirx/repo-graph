@@ -38,3 +38,34 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
 		limits: Vec::new(),
 	})
 }
+
+/// Path-scoped cycle aggregator.
+///
+/// Reads cycles involving modules under the given path prefix
+/// via `find_cycles_involving_path`. Same evidence construction
+/// as the repo-level `aggregate`.
+pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
+	storage: &S,
+	snapshot_uid: &str,
+	path_prefix: &str,
+) -> Result<AggregatorOutput, AgentStorageError> {
+	let cycles = storage.find_cycles_involving_path(snapshot_uid, path_prefix)?;
+
+	if cycles.is_empty() {
+		return Ok(AggregatorOutput::empty());
+	}
+
+	let cycle_count = cycles.len() as u64;
+	let top: Vec<CycleEvidence> = cycles
+		.into_iter()
+		.take(CYCLE_TOP_N)
+		.map(|c| CycleEvidence { length: c.length, modules: c.modules })
+		.collect();
+
+	let evidence = ImportCyclesEvidence { cycle_count, cycles: top };
+
+	Ok(AggregatorOutput {
+		signals: vec![Signal::import_cycles(evidence)],
+		limits: Vec::new(),
+	})
+}

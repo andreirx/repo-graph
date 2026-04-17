@@ -84,8 +84,8 @@ pub use dto::{
 pub use errors::{AgentStorageError, OrientError};
 pub use orient::orient;
 pub use storage_port::{
-	AgentBoundaryDeclaration, AgentCycle, AgentDeadNode, AgentImportEdge,
-	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
-	AgentSnapshot, AgentStaleFile, AgentStorageRead, AgentTrustSummary,
-	EnrichmentState,
+	AgentBoundaryDeclaration, AgentCycle, AgentDeadNode, AgentFocusCandidate,
+	AgentFocusKind, AgentImportEdge, AgentPathResolution, AgentReliabilityAxis,
+	AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
+	AgentStaleFile, AgentStorageRead, AgentTrustSummary, EnrichmentState,
 };

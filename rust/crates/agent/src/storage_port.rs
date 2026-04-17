@@ -261,6 +261,56 @@ pub struct AgentTrustSummary {
 	pub enrichment_enriched: u64,
 }
 
+// ── Focus resolution DTOs ────────────────────────────────────────
+
+/// What kind of graph entity a focus candidate resolved to.
+///
+/// Used by `resolve_stable_key_focus` to classify the matched
+/// node. The orient dispatcher routes to different pipelines
+/// (file vs path-area) based on this kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentFocusKind {
+	File,
+	Module,
+	Symbol,
+}
+
+/// A candidate entity returned by stable-key focus resolution.
+///
+/// `stable_key` is the graph-node stable key that matched.
+/// `kind` classifies the node. `file` is the repo-relative file
+/// path (via the files table join), if the node has a file
+/// association.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentFocusCandidate {
+	pub stable_key: String,
+	pub kind: AgentFocusKind,
+	pub file: Option<String>,
+}
+
+/// Result of resolving a path-based focus string against the
+/// snapshot's file and module graph.
+///
+/// The dispatcher checks these flags in order:
+///   1. `has_exact_file` → file pipeline
+///   2. `has_content_under_prefix` → path-area pipeline
+///   3. neither → fall through to stable-key resolution
+///
+/// `module_stable_key` is populated when a MODULE node exists
+/// whose `qualified_name` matches the path prefix exactly. It is
+/// `None` when there is content under the prefix but no MODULE
+/// node (e.g. a subdirectory that is not a module root).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentPathResolution {
+	pub has_exact_file: bool,
+	/// When `has_exact_file` is true, the stable key of the FILE
+	/// node. `None` if the file exists but the resolver could not
+	/// produce a key (defensive — should not happen in practice).
+	pub file_stable_key: Option<String>,
+	pub has_content_under_prefix: bool,
+	pub module_stable_key: Option<String>,
+}
+
 // ── Trait ────────────────────────────────────────────────────────
 
 /// The narrow read port the agent use-case layer needs from a
@@ -355,4 +405,81 @@ pub trait AgentStorageRead {
 		repo_uid: &str,
 		snapshot_uid: &str,
 	) -> Result<AgentTrustSummary, AgentStorageError>;
+
+	// ── Focus resolution (Rust-44) ──────────────────────────────
+
+	/// Resolve a path-based focus string against the snapshot.
+	///
+	/// Checks (1) whether the path names an exact FILE node,
+	/// (2) whether any file content exists under the prefix,
+	/// (3) whether a MODULE node exists at that path.
+	fn resolve_path_focus(
+		&self,
+		snapshot_uid: &str,
+		path: &str,
+	) -> Result<AgentPathResolution, AgentStorageError>;
+
+	/// Resolve a stable-key focus string against the snapshot.
+	///
+	/// Returns the matching node (with its kind and file) when
+	/// exactly one node has the given `stable_key`. Returns
+	/// `Ok(None)` when no match.
+	fn resolve_stable_key_focus(
+		&self,
+		snapshot_uid: &str,
+		stable_key: &str,
+	) -> Result<Option<AgentFocusCandidate>, AgentStorageError>;
+
+	/// Return dead nodes scoped to files under a path prefix.
+	///
+	/// Same exclusion layers as `find_dead_nodes` (incoming edges,
+	/// entrypoint declarations, framework-liveness inferences).
+	/// Path matching uses `{prefix}/` with trailing slash to avoid
+	/// prefix collisions.
+	fn find_dead_nodes_in_path(
+		&self,
+		snapshot_uid: &str,
+		repo_uid: &str,
+		path_prefix: &str,
+	) -> Result<Vec<AgentDeadNode>, AgentStorageError>;
+
+	/// Return dead nodes scoped to a single exact file.
+	///
+	/// Same exclusion layers as `find_dead_nodes`.
+	fn find_dead_nodes_in_file(
+		&self,
+		snapshot_uid: &str,
+		repo_uid: &str,
+		file_path: &str,
+	) -> Result<Vec<AgentDeadNode>, AgentStorageError>;
+
+	/// Structural summary scoped to files under a path prefix.
+	fn compute_path_summary(
+		&self,
+		snapshot_uid: &str,
+		path_prefix: &str,
+	) -> Result<AgentRepoSummary, AgentStorageError>;
+
+	/// Structural summary scoped to a single file.
+	fn compute_file_summary(
+		&self,
+		snapshot_uid: &str,
+		file_path: &str,
+	) -> Result<AgentRepoSummary, AgentStorageError>;
+
+	/// Return active boundary declarations where the source module
+	/// is under the given path prefix.
+	fn find_boundary_declarations_in_path(
+		&self,
+		repo_uid: &str,
+		path_prefix: &str,
+	) -> Result<Vec<AgentBoundaryDeclaration>, AgentStorageError>;
+
+	/// Return module-level dependency cycles that involve at least
+	/// one module under the given path prefix.
+	fn find_cycles_involving_path(
+		&self,
+		snapshot_uid: &str,
+		path_prefix: &str,
+	) -> Result<Vec<AgentCycle>, AgentStorageError>;
 }

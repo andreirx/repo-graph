@@ -24,10 +24,11 @@
 //!      policy lives on the adapter side of this boundary.
 
 use repo_graph_agent::{
-	AgentBoundaryDeclaration, AgentCycle, AgentDeadNode, AgentImportEdge,
-	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
-	AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead,
-	AgentTrustSummary, EnrichmentState,
+	AgentBoundaryDeclaration, AgentCycle, AgentDeadNode, AgentFocusCandidate,
+	AgentFocusKind, AgentImportEdge, AgentPathResolution, AgentReliabilityAxis,
+	AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
+	AgentStaleFile, AgentStorageError, AgentStorageRead, AgentTrustSummary,
+	EnrichmentState,
 };
 use repo_graph_trust::service::assemble_trust_report;
 use repo_graph_trust::types::{
@@ -68,6 +69,31 @@ fn map_err<E: std::fmt::Display>(
 	operation: &'static str,
 ) -> impl FnOnce(E) -> AgentStorageError {
 	move |e| AgentStorageError::new(operation, e.to_string())
+}
+
+// ── Agent-specific helpers ───────────────────────────────────────
+
+impl StorageConnection {
+	/// Map a dead-node row into an `AgentDeadNode` DTO. Used by the
+	/// `find_dead_nodes_in_path` and `find_dead_nodes_in_file`
+	/// trait implementations. Same column order as the queries in
+	/// the agent impl block.
+	fn map_dead_node_row_agent(
+		row: &rusqlite::Row<'_>,
+	) -> rusqlite::Result<AgentDeadNode> {
+		let name: String = row.get(1)?;
+		let qualified_name: Option<String> = row.get(2)?;
+		let line_count: Option<i64> = row.get(7)?;
+		let is_test_int: i64 = row.get(8)?;
+		Ok(AgentDeadNode {
+			stable_key: row.get(0)?,
+			symbol: qualified_name.unwrap_or(name),
+			kind: row.get(3)?,
+			file: row.get(5)?,
+			line_count: line_count.and_then(|n| u64::try_from(n).ok()),
+			is_test: is_test_int != 0,
+		})
+	}
 }
 
 // ── Impl ─────────────────────────────────────────────────────────
@@ -357,5 +383,413 @@ impl AgentStorageRead for StorageConnection {
 			enrichment_eligible,
 			enrichment_enriched,
 		})
+	}
+
+	// ── Focus resolution (Rust-44) ──────────────────────────────
+
+	fn resolve_path_focus(
+		&self,
+		snapshot_uid: &str,
+		path: &str,
+	) -> Result<AgentPathResolution, AgentStorageError> {
+		let conn = self.connection();
+
+		// Check exact FILE node: a node with kind='FILE' whose
+		// qualified_name matches the path, OR a file in the files
+		// table with that path.
+		let has_exact_file: bool = conn
+			.query_row(
+				"SELECT COUNT(*) FROM nodes n \
+				 JOIN files f ON n.file_uid = f.file_uid \
+				 WHERE n.snapshot_uid = ? AND n.kind = 'FILE' \
+				   AND f.path = ?",
+				rusqlite::params![snapshot_uid, path],
+				|row| row.get::<_, i64>(0),
+			)
+			.map(|c| c > 0)
+			.map_err(map_err("resolve_path_focus"))?;
+
+		// Check content under prefix: any FILE node whose file
+		// path starts with "{path}/".
+		let prefix_pattern = format!("{}/%", path);
+		let has_content_under_prefix: bool = conn
+			.query_row(
+				"SELECT COUNT(*) FROM nodes n \
+				 JOIN files f ON n.file_uid = f.file_uid \
+				 WHERE n.snapshot_uid = ? AND n.kind = 'FILE' \
+				   AND f.path LIKE ?",
+				rusqlite::params![snapshot_uid, prefix_pattern],
+				|row| row.get::<_, i64>(0),
+			)
+			.map(|c| c > 0)
+			.map_err(map_err("resolve_path_focus"))?;
+
+		// When has_exact_file, resolve the FILE node's stable key.
+		let file_stable_key: Option<String> = if has_exact_file {
+			conn.query_row(
+				"SELECT n.stable_key FROM nodes n \
+				 JOIN files f ON n.file_uid = f.file_uid \
+				 WHERE n.snapshot_uid = ? AND n.kind = 'FILE' \
+				   AND f.path = ?",
+				rusqlite::params![snapshot_uid, path],
+				|row| row.get(0),
+			)
+			.ok()
+		} else {
+			None
+		};
+
+		// Check MODULE node at exact path.
+		let module_stable_key: Option<String> = conn
+			.query_row(
+				"SELECT stable_key FROM nodes \
+				 WHERE snapshot_uid = ? AND kind = 'MODULE' \
+				   AND qualified_name = ?",
+				rusqlite::params![snapshot_uid, path],
+				|row| row.get(0),
+			)
+			.ok();
+
+		Ok(AgentPathResolution {
+			has_exact_file,
+			file_stable_key,
+			has_content_under_prefix,
+			module_stable_key,
+		})
+	}
+
+	fn resolve_stable_key_focus(
+		&self,
+		snapshot_uid: &str,
+		stable_key: &str,
+	) -> Result<Option<AgentFocusCandidate>, AgentStorageError> {
+		let result = self.connection().query_row(
+			"SELECT n.stable_key, n.kind, f.path \
+			 FROM nodes n \
+			 LEFT JOIN files f ON n.file_uid = f.file_uid \
+			 WHERE n.snapshot_uid = ? AND n.stable_key = ?",
+			rusqlite::params![snapshot_uid, stable_key],
+			|row| {
+				let sk: String = row.get(0)?;
+				let kind_str: String = row.get(1)?;
+				let file: Option<String> = row.get(2)?;
+				Ok((sk, kind_str, file))
+			},
+		);
+
+		match result {
+			Ok((sk, kind_str, file)) => {
+				let kind = match kind_str.as_str() {
+					"FILE" => AgentFocusKind::File,
+					"MODULE" => AgentFocusKind::Module,
+					_ => AgentFocusKind::Symbol,
+				};
+				Ok(Some(AgentFocusCandidate {
+					stable_key: sk,
+					kind,
+					file,
+				}))
+			}
+			Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+			Err(e) => Err(map_err("resolve_stable_key_focus")(e)),
+		}
+	}
+
+	fn find_dead_nodes_in_path(
+		&self,
+		snapshot_uid: &str,
+		repo_uid: &str,
+		path_prefix: &str,
+	) -> Result<Vec<AgentDeadNode>, AgentStorageError> {
+		let prefix_pattern = format!("{}/%", path_prefix);
+		let sql = format!(
+			"SELECT
+				n.stable_key, n.name, n.qualified_name, n.kind, n.subtype,
+				f.path AS file_path, n.line_start,
+				CASE WHEN n.line_end IS NOT NULL AND n.line_start IS NOT NULL
+				     THEN n.line_end - n.line_start + 1
+				     ELSE NULL
+				END AS line_count,
+				COALESCE(f.is_test, 0) AS is_test
+			 FROM nodes n
+			 LEFT JOIN files f ON n.file_uid = f.file_uid
+			 WHERE n.snapshot_uid = ?1
+			   AND n.kind = 'SYMBOL'
+			   AND (f.path LIKE ?3 OR f.path = ?4)
+			   AND n.node_uid NOT IN (
+			     SELECT e.target_node_uid FROM edges e
+			     WHERE e.snapshot_uid = ?1
+			       AND e.type IN ('IMPORTS', 'CALLS', 'IMPLEMENTS', 'INSTANTIATES',
+			                      'ROUTES_TO', 'REGISTERED_BY', 'TESTED_BY', 'COVERS')
+			   )
+			   AND n.stable_key NOT IN (
+			     SELECT d.target_stable_key FROM declarations d
+			     WHERE d.repo_uid = ?2
+			       AND d.kind = 'entrypoint'
+			       AND d.is_active = 1
+			       AND (d.snapshot_uid IS NULL OR d.snapshot_uid = ?1)
+			   )
+			   AND n.stable_key NOT IN (
+			     SELECT i.target_stable_key FROM inferences i
+			     WHERE i.snapshot_uid = ?1
+			       AND i.kind IN ('framework_entrypoint', 'spring_container_managed',
+			                      'pytest_test', 'pytest_fixture', 'linux_system_managed')
+			   )
+			 ORDER BY n.name ASC"
+		);
+
+		let conn = self.connection();
+		let mut stmt = conn
+			.prepare(&sql)
+			.map_err(map_err("find_dead_nodes_in_path"))?;
+
+		let rows = stmt
+			.query_map(
+				rusqlite::params![snapshot_uid, repo_uid, prefix_pattern, path_prefix],
+				Self::map_dead_node_row_agent,
+			)
+			.map_err(map_err("find_dead_nodes_in_path"))?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(map_err("find_dead_nodes_in_path"))
+	}
+
+	fn find_dead_nodes_in_file(
+		&self,
+		snapshot_uid: &str,
+		repo_uid: &str,
+		file_path: &str,
+	) -> Result<Vec<AgentDeadNode>, AgentStorageError> {
+		let sql = "SELECT
+				n.stable_key, n.name, n.qualified_name, n.kind, n.subtype,
+				f.path AS file_path, n.line_start,
+				CASE WHEN n.line_end IS NOT NULL AND n.line_start IS NOT NULL
+				     THEN n.line_end - n.line_start + 1
+				     ELSE NULL
+				END AS line_count,
+				COALESCE(f.is_test, 0) AS is_test
+			 FROM nodes n
+			 LEFT JOIN files f ON n.file_uid = f.file_uid
+			 WHERE n.snapshot_uid = ?1
+			   AND n.kind = 'SYMBOL'
+			   AND f.path = ?3
+			   AND n.node_uid NOT IN (
+			     SELECT e.target_node_uid FROM edges e
+			     WHERE e.snapshot_uid = ?1
+			       AND e.type IN ('IMPORTS', 'CALLS', 'IMPLEMENTS', 'INSTANTIATES',
+			                      'ROUTES_TO', 'REGISTERED_BY', 'TESTED_BY', 'COVERS')
+			   )
+			   AND n.stable_key NOT IN (
+			     SELECT d.target_stable_key FROM declarations d
+			     WHERE d.repo_uid = ?2
+			       AND d.kind = 'entrypoint'
+			       AND d.is_active = 1
+			       AND (d.snapshot_uid IS NULL OR d.snapshot_uid = ?1)
+			   )
+			   AND n.stable_key NOT IN (
+			     SELECT i.target_stable_key FROM inferences i
+			     WHERE i.snapshot_uid = ?1
+			       AND i.kind IN ('framework_entrypoint', 'spring_container_managed',
+			                      'pytest_test', 'pytest_fixture', 'linux_system_managed')
+			   )
+			 ORDER BY n.name ASC";
+
+		let conn = self.connection();
+		let mut stmt = conn
+			.prepare(sql)
+			.map_err(map_err("find_dead_nodes_in_file"))?;
+
+		let rows = stmt
+			.query_map(
+				rusqlite::params![snapshot_uid, repo_uid, file_path],
+				Self::map_dead_node_row_agent,
+			)
+			.map_err(map_err("find_dead_nodes_in_file"))?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(map_err("find_dead_nodes_in_file"))
+	}
+
+	fn compute_path_summary(
+		&self,
+		snapshot_uid: &str,
+		path_prefix: &str,
+	) -> Result<AgentRepoSummary, AgentStorageError> {
+		let conn = self.connection();
+		let prefix_pattern = format!("{}/%", path_prefix);
+
+		let file_count: i64 = conn
+			.query_row(
+				"SELECT COUNT(DISTINCT fv.file_uid) \
+				 FROM file_versions fv \
+				 JOIN files f ON fv.file_uid = f.file_uid \
+				 WHERE fv.snapshot_uid = ? \
+				   AND (f.path LIKE ? OR f.path = ?)",
+				rusqlite::params![snapshot_uid, prefix_pattern, path_prefix],
+				|row| row.get(0),
+			)
+			.map_err(map_err("compute_path_summary"))?;
+
+		let symbol_count: i64 = conn
+			.query_row(
+				"SELECT COUNT(*) FROM nodes n \
+				 JOIN files f ON n.file_uid = f.file_uid \
+				 WHERE n.snapshot_uid = ? AND n.kind = 'SYMBOL' \
+				   AND (f.path LIKE ? OR f.path = ?)",
+				rusqlite::params![snapshot_uid, prefix_pattern, path_prefix],
+				|row| row.get(0),
+			)
+			.map_err(map_err("compute_path_summary"))?;
+
+		let mut stmt = conn
+			.prepare(
+				"SELECT DISTINCT f.language \
+				 FROM files f \
+				 JOIN file_versions fv ON fv.file_uid = f.file_uid \
+				 WHERE fv.snapshot_uid = ? \
+				   AND f.language IS NOT NULL \
+				   AND (f.path LIKE ? OR f.path = ?) \
+				 ORDER BY f.language ASC",
+			)
+			.map_err(map_err("compute_path_summary"))?;
+		let rows = stmt
+			.query_map(
+				rusqlite::params![snapshot_uid, prefix_pattern, path_prefix],
+				|row| row.get::<_, String>(0),
+			)
+			.map_err(map_err("compute_path_summary"))?;
+		let mut languages: Vec<String> = Vec::new();
+		for row in rows {
+			languages.push(row.map_err(map_err("compute_path_summary"))?);
+		}
+
+		Ok(AgentRepoSummary {
+			file_count: file_count.max(0) as u64,
+			symbol_count: symbol_count.max(0) as u64,
+			languages,
+		})
+	}
+
+	fn compute_file_summary(
+		&self,
+		snapshot_uid: &str,
+		file_path: &str,
+	) -> Result<AgentRepoSummary, AgentStorageError> {
+		let conn = self.connection();
+
+		let file_count: i64 = conn
+			.query_row(
+				"SELECT COUNT(DISTINCT fv.file_uid) \
+				 FROM file_versions fv \
+				 JOIN files f ON fv.file_uid = f.file_uid \
+				 WHERE fv.snapshot_uid = ? \
+				   AND f.path = ?",
+				rusqlite::params![snapshot_uid, file_path],
+				|row| row.get(0),
+			)
+			.map_err(map_err("compute_file_summary"))?;
+
+		let symbol_count: i64 = conn
+			.query_row(
+				"SELECT COUNT(*) FROM nodes n \
+				 JOIN files f ON n.file_uid = f.file_uid \
+				 WHERE n.snapshot_uid = ? AND n.kind = 'SYMBOL' \
+				   AND f.path = ?",
+				rusqlite::params![snapshot_uid, file_path],
+				|row| row.get(0),
+			)
+			.map_err(map_err("compute_file_summary"))?;
+
+		let mut stmt = conn
+			.prepare(
+				"SELECT DISTINCT f.language \
+				 FROM files f \
+				 JOIN file_versions fv ON fv.file_uid = f.file_uid \
+				 WHERE fv.snapshot_uid = ? \
+				   AND f.language IS NOT NULL \
+				   AND f.path = ? \
+				 ORDER BY f.language ASC",
+			)
+			.map_err(map_err("compute_file_summary"))?;
+		let rows = stmt
+			.query_map(
+				rusqlite::params![snapshot_uid, file_path],
+				|row| row.get::<_, String>(0),
+			)
+			.map_err(map_err("compute_file_summary"))?;
+		let mut languages: Vec<String> = Vec::new();
+		for row in rows {
+			languages.push(row.map_err(map_err("compute_file_summary"))?);
+		}
+
+		Ok(AgentRepoSummary {
+			file_count: file_count.max(0) as u64,
+			symbol_count: symbol_count.max(0) as u64,
+			languages,
+		})
+	}
+
+	fn find_boundary_declarations_in_path(
+		&self,
+		repo_uid: &str,
+		path_prefix: &str,
+	) -> Result<Vec<AgentBoundaryDeclaration>, AgentStorageError> {
+		// Fetch all active boundary declarations, then filter
+		// by prefix. The SQL already parses the stable key to
+		// extract the module path; filtering in Rust is simpler
+		// than modifying the SQL extraction.
+		let all = self
+			.get_active_boundary_declarations(repo_uid)
+			.map_err(map_err("find_boundary_declarations_in_path"))?;
+
+		let filtered = all
+			.into_iter()
+			.filter(|d| {
+				d.boundary_module == path_prefix
+					|| d.boundary_module.starts_with(&format!("{}/", path_prefix))
+			})
+			.map(|d| AgentBoundaryDeclaration {
+				source_module: d.boundary_module,
+				forbidden_target: d.forbids,
+				reason: d.reason,
+			})
+			.collect();
+
+		Ok(filtered)
+	}
+
+	fn find_cycles_involving_path(
+		&self,
+		snapshot_uid: &str,
+		path_prefix: &str,
+	) -> Result<Vec<AgentCycle>, AgentStorageError> {
+		// Run the full cycle query, then filter to only those
+		// cycles that involve at least one module whose name
+		// matches the prefix.
+		let all_cycles = self
+			.find_cycles(snapshot_uid, "module")
+			.map_err(map_err("find_cycles_involving_path"))?;
+
+		let filtered: Vec<AgentCycle> = all_cycles
+			.into_iter()
+			.filter_map(|c| {
+				let names: Vec<String> =
+					c.nodes.iter().map(|n| n.name.clone()).collect();
+				let involves_prefix = names.iter().any(|name| {
+					name == path_prefix
+						|| name.starts_with(&format!("{}/", path_prefix))
+				});
+				if involves_prefix {
+					Some(AgentCycle {
+						length: c.length,
+						modules: names,
+					})
+				} else {
+					None
+				}
+			})
+			.collect();
+
+		Ok(filtered)
 	}
 }

@@ -47,3 +47,49 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
 		limits: vec![Limit::from_code(LimitCode::ModuleDataUnavailable)],
 	})
 }
+
+/// File-scoped module summary.
+///
+/// Uses `compute_file_summary` to produce counts scoped to a
+/// single file. Same output shape as the repo-level variant.
+pub fn aggregate_file<S: AgentStorageRead + ?Sized>(
+	storage: &S,
+	snapshot_uid: &str,
+	file_path: &str,
+) -> Result<AggregatorOutput, AgentStorageError> {
+	let summary = storage.compute_file_summary(snapshot_uid, file_path)?;
+
+	let evidence = ModuleSummaryEvidence {
+		file_count: summary.file_count,
+		symbol_count: summary.symbol_count,
+		languages: summary.languages,
+	};
+
+	Ok(AggregatorOutput {
+		signals: vec![Signal::module_summary(evidence)],
+		limits: vec![Limit::from_code(LimitCode::ModuleDataUnavailable)],
+	})
+}
+
+/// Path-scoped module summary.
+///
+/// Uses `compute_path_summary` to produce counts scoped to files
+/// under a path prefix. Same output shape as the repo-level variant.
+pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
+	storage: &S,
+	snapshot_uid: &str,
+	path_prefix: &str,
+) -> Result<AggregatorOutput, AgentStorageError> {
+	let summary = storage.compute_path_summary(snapshot_uid, path_prefix)?;
+
+	let evidence = ModuleSummaryEvidence {
+		file_count: summary.file_count,
+		symbol_count: summary.symbol_count,
+		languages: summary.languages,
+	};
+
+	Ok(AggregatorOutput {
+		signals: vec![Signal::module_summary(evidence)],
+		limits: vec![Limit::from_code(LimitCode::ModuleDataUnavailable)],
+	})
+}

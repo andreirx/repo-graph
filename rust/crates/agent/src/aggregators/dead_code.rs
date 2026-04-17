@@ -137,6 +137,110 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
 	})
 }
 
+/// File-scoped dead-code aggregator.
+///
+/// Same reliability gate and evidence construction as the
+/// repo-level `aggregate`, but reads dead nodes from a single
+/// file via `find_dead_nodes_in_file`.
+pub fn aggregate_file<S: AgentStorageRead + ?Sized>(
+	storage: &S,
+	snapshot_uid: &str,
+	repo_uid: &str,
+	file_path: &str,
+	trust: &AgentTrustSummary,
+) -> Result<AggregatorOutput, AgentStorageError> {
+	if trust.dead_code_reliability.level != AgentReliabilityLevel::High {
+		let reasons = if trust.dead_code_reliability.reasons.is_empty() {
+			vec![FALLBACK_REASON_DEAD_CODE_RELIABILITY_NOT_HIGH.to_string()]
+		} else {
+			trust.dead_code_reliability.reasons.clone()
+		};
+		return Ok(AggregatorOutput {
+			signals: Vec::new(),
+			limits: vec![Limit::from_code_with_reasons(
+				LimitCode::DeadCodeUnreliable,
+				reasons,
+			)],
+		});
+	}
+
+	let mut dead = storage.find_dead_nodes_in_file(snapshot_uid, repo_uid, file_path)?;
+
+	if dead.len() < DEAD_CODE_EMIT_THRESHOLD {
+		return Ok(AggregatorOutput::empty());
+	}
+
+	let dead_count = dead.len() as u64;
+	sort_top_by_size(&mut dead);
+	let top_dead: Vec<DeadSymbolEvidence> = dead
+		.into_iter()
+		.filter(|d| !d.is_test)
+		.take(DEAD_CODE_TOP_N)
+		.map(|d| DeadSymbolEvidence {
+			symbol: d.symbol,
+			file: d.file,
+			line_count: d.line_count,
+		})
+		.collect();
+
+	Ok(AggregatorOutput {
+		signals: vec![Signal::dead_code(DeadCodeEvidence { dead_count, top_dead })],
+		limits: Vec::new(),
+	})
+}
+
+/// Path-scoped dead-code aggregator.
+///
+/// Same reliability gate and evidence construction as the
+/// repo-level `aggregate`, but reads dead nodes under a path
+/// prefix via `find_dead_nodes_in_path`.
+pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
+	storage: &S,
+	snapshot_uid: &str,
+	repo_uid: &str,
+	path_prefix: &str,
+	trust: &AgentTrustSummary,
+) -> Result<AggregatorOutput, AgentStorageError> {
+	if trust.dead_code_reliability.level != AgentReliabilityLevel::High {
+		let reasons = if trust.dead_code_reliability.reasons.is_empty() {
+			vec![FALLBACK_REASON_DEAD_CODE_RELIABILITY_NOT_HIGH.to_string()]
+		} else {
+			trust.dead_code_reliability.reasons.clone()
+		};
+		return Ok(AggregatorOutput {
+			signals: Vec::new(),
+			limits: vec![Limit::from_code_with_reasons(
+				LimitCode::DeadCodeUnreliable,
+				reasons,
+			)],
+		});
+	}
+
+	let mut dead = storage.find_dead_nodes_in_path(snapshot_uid, repo_uid, path_prefix)?;
+
+	if dead.len() < DEAD_CODE_EMIT_THRESHOLD {
+		return Ok(AggregatorOutput::empty());
+	}
+
+	let dead_count = dead.len() as u64;
+	sort_top_by_size(&mut dead);
+	let top_dead: Vec<DeadSymbolEvidence> = dead
+		.into_iter()
+		.filter(|d| !d.is_test)
+		.take(DEAD_CODE_TOP_N)
+		.map(|d| DeadSymbolEvidence {
+			symbol: d.symbol,
+			file: d.file,
+			line_count: d.line_count,
+		})
+		.collect();
+
+	Ok(AggregatorOutput {
+		signals: vec![Signal::dead_code(DeadCodeEvidence { dead_count, top_dead })],
+		limits: Vec::new(),
+	})
+}
+
 /// Stable sort that orders dead nodes by descending `line_count`
 /// with `None` line counts pushed to the tail. Used to compute
 /// the `top_dead` evidence slice; does not mutate `dead_count`.

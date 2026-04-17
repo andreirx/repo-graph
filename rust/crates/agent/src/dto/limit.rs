@@ -79,6 +79,14 @@ pub enum LimitCode {
 	/// reported as dead. See
 	/// `docs/spikes/2026-04-15-orient-on-repo-graph.md`.
 	DeadCodeUnreliable,
+
+	/// Gate requirements exist but none of their obligations
+	/// target the focused path area. The gate pipeline has
+	/// nothing to evaluate within this scope. Distinct from
+	/// `GateNotConfigured` (which means no requirements exist
+	/// at all) and from gate signals (which evaluate specific
+	/// obligations).
+	GateNotApplicableToFocus,
 }
 
 impl LimitCode {
@@ -89,6 +97,7 @@ impl LimitCode {
 			Self::ComplexityUnavailable => "COMPLEXITY_UNAVAILABLE",
 			Self::LanguageCoveragePartial => "LANGUAGE_COVERAGE_PARTIAL",
 			Self::DeadCodeUnreliable => "DEAD_CODE_UNRELIABLE",
+			Self::GateNotApplicableToFocus => "GATE_NOT_APPLICABLE_TO_FOCUS",
 		}
 	}
 
@@ -123,6 +132,10 @@ impl LimitCode {
 				 edges to make deletion decisions reliable. See the \
 				 accompanying reasons list for the specific trust \
 				 axis that failed."
+			}
+			Self::GateNotApplicableToFocus => {
+				"Gate is configured but no obligations target the \
+				 focused area."
 			}
 		}
 	}

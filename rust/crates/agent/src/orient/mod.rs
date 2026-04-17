@@ -3,22 +3,38 @@
 //! `orient()` is the only function callers should ever use. It
 //! dispatches on the `focus` argument:
 //!
-//!   - `None` → repo-level pipeline (`orient_repo`), implemented
-//!     in Rust-42.
-//!   - `Some(_)` → returns `OrientError::FocusNotImplementedYet`.
-//!     Module focus ships in Rust-44, symbol focus in Rust-45.
-//!     This is deliberately an error, not a silent degrade: a
-//!     caller passing a focus string must know immediately that
-//!     their request was not honored.
+//!   - `None` → repo-level pipeline (`orient_repo`).
+//!   - `Some(path)` that resolves to an exact FILE node →
+//!     file pipeline (`orient_file`).
+//!   - `Some(path)` that resolves to a path area (directory
+//!     with content, optionally a MODULE node) → path pipeline
+//!     (`orient_path`).
+//!   - `Some(stable_key)` that resolves to a MODULE node →
+//!     path pipeline.
+//!   - `Some(stable_key)` that resolves to a FILE node →
+//!     file pipeline.
+//!   - `Some(stable_key)` that resolves to a SYMBOL node →
+//!     `OrientError::FocusNotImplementedYet` (deferred to
+//!     Rust-45).
+//!   - `Some(string)` that resolves to nothing → valid
+//!     `OrientResult` with `Focus::no_match`, zero signals,
+//!     zero limits.
 
+pub mod file;
+pub mod path;
 pub mod repo;
 
 use repo_graph_gate::GateStorageRead;
 
 use crate::dto::budget::Budget;
-use crate::dto::envelope::OrientResult;
+use crate::dto::envelope::{
+	Focus, OrientResult, ORIENT_COMMAND, ORIENT_SCHEMA,
+};
+use crate::dto::envelope::Confidence;
 use crate::errors::OrientError;
-use crate::storage_port::AgentStorageRead;
+use crate::storage_port::{
+	AgentFocusKind, AgentStorageRead,
+};
 
 /// Entry point for the orient use case.
 ///
@@ -45,8 +61,172 @@ pub fn orient<S: AgentStorageRead + GateStorageRead + ?Sized>(
 ) -> Result<OrientResult, OrientError> {
 	match focus {
 		None => repo::orient_repo(storage, repo_uid, budget, now),
-		Some(f) => Err(OrientError::FocusNotImplementedYet {
-			focus: f.to_string(),
-		}),
+		Some(focus_str) => orient_focused(storage, repo_uid, focus_str, budget, now),
+	}
+}
+
+/// Focus resolution and dispatch.
+///
+/// Resolves the focus string against the latest READY snapshot
+/// and routes to the appropriate pipeline. The repo and snapshot
+/// are resolved here (shared with the pipelines) so that each
+/// pipeline does not repeat the lookup.
+fn orient_focused<S: AgentStorageRead + GateStorageRead + ?Sized>(
+	storage: &S,
+	repo_uid: &str,
+	focus_str: &str,
+	budget: Budget,
+	now: &str,
+) -> Result<OrientResult, OrientError> {
+	// ── 1. Resolve repo identity. ────────────────────────────
+	let repo = storage
+		.get_repo(repo_uid)?
+		.ok_or_else(|| OrientError::NoRepo { repo_uid: repo_uid.to_string() })?;
+
+	// ── 2. Resolve snapshot. ─────────────────────────────────
+	let snapshot = storage
+		.get_latest_snapshot(repo_uid)?
+		.ok_or_else(|| OrientError::NoSnapshot {
+			repo_uid: repo_uid.to_string(),
+		})?;
+
+	let snapshot_uid = &snapshot.snapshot_uid;
+
+	// ── 3. Try path-based resolution first. ──────────────────
+	let resolution = storage.resolve_path_focus(snapshot_uid, focus_str)?;
+
+	if resolution.has_exact_file {
+		return file::orient_file(
+			storage,
+			&repo.name,
+			&snapshot,
+			focus_str,
+			resolution.file_stable_key.as_deref(),
+			budget,
+			now,
+		);
+	}
+
+	// Path-area focus fires when EITHER:
+	//   - files exist under the prefix (subtree has content), OR
+	//   - an exact MODULE node exists at this path (even if the
+	//     module currently has no descendant FILE nodes — the
+	//     module is a declared structural unit and the contract
+	//     says "exact path match -> FILE or MODULE").
+	//
+	// Without the `module_stable_key` check, a MODULE node with
+	// zero descendant files would fall through to stable-key
+	// resolution and then to no_match, which violates the
+	// documented precedence rule.
+	if resolution.has_content_under_prefix
+		|| resolution.module_stable_key.is_some()
+	{
+		return path::orient_path(
+			storage,
+			&repo.name,
+			&snapshot,
+			focus_str,
+			resolution.module_stable_key.as_deref(),
+			budget,
+			now,
+		);
+	}
+
+	// ── 4. Try stable-key resolution. ────────────────────────
+	match storage.resolve_stable_key_focus(snapshot_uid, focus_str)? {
+		Some(candidate) if candidate.kind == AgentFocusKind::Symbol => {
+			Err(OrientError::FocusNotImplementedYet {
+				focus: focus_str.to_string(),
+			})
+		}
+		Some(candidate) if candidate.kind == AgentFocusKind::File => {
+			let file_path = candidate.file.as_deref().unwrap_or(focus_str);
+			file::orient_file(
+				storage,
+				&repo.name,
+				&snapshot,
+				file_path,
+				Some(&candidate.stable_key),
+				budget,
+				now,
+			)
+		}
+		Some(candidate) => {
+			// MODULE by stable key — extract the path from the
+			// candidate or from the stable key itself.
+			let path = extract_path_from_candidate(&candidate, focus_str);
+			path::orient_path(
+				storage,
+				&repo.name,
+				&snapshot,
+				&path,
+				Some(&candidate.stable_key),
+				budget,
+				now,
+			)
+		}
+		None => {
+			// No match — valid response with no data.
+			Ok(build_no_match_result(&repo.name, &snapshot, focus_str, budget))
+		}
+	}
+}
+
+/// Extract a path from a MODULE focus candidate.
+///
+/// Tries the candidate's file field first (when a MODULE node
+/// has a file association, the file path is the module root).
+/// Falls back to parsing the stable key pattern
+/// `{repo}:{path}:MODULE` to extract the path portion.
+/// Last resort: uses the raw focus string.
+fn extract_path_from_candidate(
+	candidate: &crate::storage_port::AgentFocusCandidate,
+	focus_str: &str,
+) -> String {
+	if let Some(ref f) = candidate.file {
+		return f.clone();
+	}
+	// Try stable key pattern: {repo}:{path}:MODULE
+	let key = &candidate.stable_key;
+	if let Some(stripped) = key.strip_suffix(":MODULE") {
+		if let Some(colon) = stripped.find(':') {
+			return stripped[colon + 1..].to_string();
+		}
+	}
+	focus_str.to_string()
+}
+
+/// Build an `OrientResult` for the no-match case.
+///
+/// This is NOT an error — it is a valid response with
+/// `Focus::no_match`, zero signals, zero limits, and
+/// `truncated: false`.
+fn build_no_match_result(
+	repo_name: &str,
+	snapshot: &crate::storage_port::AgentSnapshot,
+	focus_str: &str,
+	_budget: Budget,
+) -> OrientResult {
+	OrientResult {
+		schema: ORIENT_SCHEMA,
+		command: ORIENT_COMMAND,
+		repo: repo_name.to_string(),
+		snapshot: snapshot.snapshot_uid.clone(),
+		focus: Focus::no_match(focus_str),
+		confidence: Confidence::High,
+
+		signals: Vec::new(),
+		signals_truncated: None,
+		signals_omitted_count: None,
+
+		limits: Vec::new(),
+		limits_truncated: None,
+		limits_omitted_count: None,
+
+		next: Vec::new(),
+		next_truncated: None,
+		next_omitted_count: None,
+
+		truncated: false,
 	}
 }

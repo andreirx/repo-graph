@@ -34,7 +34,11 @@ fn repo_orient_focus_resolves_to_repo_without_input() {
 		result.focus.resolved_kind,
 		Some(repo_graph_agent::ResolvedKind::Repo)
 	);
-	assert_eq!(result.focus.resolved_key.as_deref(), Some("r1"));
+	// Repo focus does not resolve to a graph node — both
+	// resolved_key and resolved_path must be None. The repo
+	// identity is on the envelope's top-level `repo` field.
+	assert!(result.focus.resolved_key.is_none());
+	assert!(result.focus.resolved_path.is_none());
 	assert!(result.focus.input.is_none());
 	assert!(result.focus.candidates.is_empty());
 	assert!(result.focus.reason.is_none());
@@ -53,10 +57,13 @@ fn repo_orient_serializes_to_contract_shape() {
 	assert_eq!(json["repo"], "my-repo");
 	assert_eq!(json["snapshot"], "snap-1");
 
-	// Focus shape per contract.
+	// Focus shape per contract. Repo focus omits input, key,
+	// path, and candidates.
 	assert_eq!(json["focus"]["resolved"], true);
 	assert_eq!(json["focus"]["resolved_kind"], "repo");
 	assert!(json["focus"].get("input").is_none());
+	assert!(json["focus"].get("resolved_key").is_none(), "repo focus must not have resolved_key");
+	assert!(json["focus"].get("resolved_path").is_none(), "repo focus must not have resolved_path");
 	assert!(json["focus"].get("candidates").is_none());
 
 	// Signals and limits are always arrays, even when empty.
@@ -68,20 +75,21 @@ fn repo_orient_serializes_to_contract_shape() {
 }
 
 #[test]
-fn focus_arg_returns_error_not_focus_failure() {
-	// Rust-42 does not implement module/path/symbol focus.
-	// The contract requires this to surface as an error, NOT as
-	// a `focus.resolved = false` degraded response.
+fn focus_arg_with_unknown_path_returns_no_match() {
+	// Rust-44 replaced the FocusNotImplementedYet error with
+	// real focus resolution. An unknown path now returns a valid
+	// OrientResult with focus.resolved = false and reason =
+	// no_match — this is a domain outcome, not an error.
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
 
-	let err = orient(&fake, "r1", Some("src/core"), Budget::Small, common::TEST_NOW).unwrap_err();
-	match err {
-		OrientError::FocusNotImplementedYet { focus } => {
-			assert_eq!(focus, "src/core");
-		}
-		other => panic!("expected FocusNotImplementedYet, got {:?}", other),
-	}
+	let result = orient(&fake, "r1", Some("src/core"), Budget::Small, common::TEST_NOW).unwrap();
+	assert!(!result.focus.resolved, "unknown path must not resolve");
+	assert_eq!(
+		result.focus.reason,
+		Some(repo_graph_agent::FocusFailureReason::NoMatch)
+	);
+	assert_eq!(result.focus.input.as_deref(), Some("src/core"));
 }
 
 #[test]

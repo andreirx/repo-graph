@@ -293,25 +293,29 @@ fn orient_missing_snapshot_runtime_error() {
 	);
 }
 
-// ── 4. Focus-not-implemented (exit 2) ───────────────────────────
+// ── 4. Focus resolution (Rust-44) ───────────────────────────────
 
 #[test]
-fn orient_focus_flag_exits_with_runtime_error() {
-	// CLI-4 acceptance: `--focus <value>` is syntactically
-	// valid but the runtime surface is not yet implemented.
-	// Exit 2 is correct (not 1: not a usage error).
+fn orient_focus_flag_returns_no_match_for_unknown_path() {
+	// Rust-44: focus resolution is now implemented. An unknown
+	// path produces a valid JSON response with
+	// `focus.resolved = false` and exit code 0 — this is a
+	// domain outcome, not an error.
 	let (_r, _d, db) = build_indexed_repo();
 	let output = run_cmd(&[
-		"orient", db.to_str().unwrap(), "r1", "--focus", "src/core",
+		"orient", db.to_str().unwrap(), "r1", "--focus", "nonexistent/path",
 	]);
-	assert_eq!(output.status.code(), Some(2));
-	assert!(output.stdout.is_empty());
-	let stderr = String::from_utf8_lossy(&output.stderr);
-	assert!(
-		stderr.contains("focus") && stderr.contains("not supported"),
-		"stderr should describe FocusNotImplementedYet: {}",
-		stderr
+	assert_eq!(
+		output.status.code(),
+		Some(0),
+		"focus no-match is exit 0, not an error. stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
 	);
+	assert!(!output.stdout.is_empty(), "must produce JSON output");
+	let json: serde_json::Value =
+		serde_json::from_slice(&output.stdout).expect("stdout must be valid JSON");
+	assert_eq!(json["focus"]["resolved"], false);
+	assert_eq!(json["focus"]["reason"], "no_match");
 }
 
 // ── 5. Default budget success path ──────────────────────────────

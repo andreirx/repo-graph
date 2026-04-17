@@ -112,6 +112,70 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
 	})
 }
 
+/// Path-scoped boundary aggregator.
+///
+/// Reads only boundary declarations whose source module is
+/// under the given path prefix (via
+/// `find_boundary_declarations_in_path`), then checks for
+/// violations the same way as the repo-level aggregator.
+pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
+	storage: &S,
+	repo_uid: &str,
+	snapshot_uid: &str,
+	path_prefix: &str,
+) -> Result<AggregatorOutput, AgentStorageError> {
+	let declarations = storage.find_boundary_declarations_in_path(repo_uid, path_prefix)?;
+
+	if declarations.is_empty() {
+		return Ok(AggregatorOutput::empty());
+	}
+
+	let unique = dedupe_declarations(declarations);
+
+	let mut per_rule: Vec<BoundaryViolationEvidence> = Vec::new();
+	let mut total_edges: u64 = 0;
+
+	for decl in unique {
+		let edges = storage.find_imports_between_paths(
+			snapshot_uid,
+			&decl.source_module,
+			&decl.forbidden_target,
+		)?;
+		if edges.is_empty() {
+			continue;
+		}
+		let edge_count = edges.len() as u64;
+		total_edges += edge_count;
+		per_rule.push(BoundaryViolationEvidence {
+			source_module: decl.source_module,
+			target_module: decl.forbidden_target,
+			edge_count,
+		});
+	}
+
+	if total_edges == 0 {
+		return Ok(AggregatorOutput::empty());
+	}
+
+	per_rule.sort_by(|a, b| {
+		b.edge_count
+			.cmp(&a.edge_count)
+			.then_with(|| a.source_module.cmp(&b.source_module))
+			.then_with(|| a.target_module.cmp(&b.target_module))
+	});
+	per_rule.truncate(VIOLATIONS_TOP_N);
+
+	let evidence = BoundaryViolationsEvidence {
+		violation_count: total_edges,
+		top_violations: per_rule,
+	};
+
+	Ok(AggregatorOutput {
+		signals: vec![Signal::boundary_violations(evidence)],
+		limits: Vec::new(),
+	})
+}
+
 /// Deduplicate a list of active boundary declarations by
 /// `(source_module, forbidden_target)`. First-seen wins — the
 /// `reason` carried by the surviving entry comes from the

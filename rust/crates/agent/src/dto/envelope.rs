@@ -60,13 +60,35 @@ pub struct FocusCandidate {
 
 /// Focus resolution outcome.
 ///
-/// The structure matches the contract shape exactly. At
-/// repo-level (Rust-42), every successful response carries
-/// `input: None`, `resolved: true`, `resolved_kind: Some(Repo)`,
-/// `resolved_key: Some(<repo_uid>)`, and empty `candidates`.
+/// ── Identity fields ─────────────────────────────────────────
 ///
-/// Module / file / symbol focus resolution ships in Rust-44+
-/// and will populate these fields with real data.
+/// Two identity fields serve different purposes:
+///
+///   - `resolved_key: Option<String>` — a graph-node stable
+///     key when the focus resolved to an exact FILE or MODULE
+///     node. `None` when the focus resolved to a path area
+///     without an exact MODULE node. Consumers MUST NOT treat
+///     this field as always-present: path-area focus is a valid
+///     resolution state with no backing graph node.
+///
+///   - `resolved_path: Option<String>` — the normalized
+///     repo-relative path for the resolved focus. Always
+///     present for FILE and MODULE/path-area resolution.
+///     Absent for repo-level focus (no path) and for
+///     unresolved focus. This is the canonical path string
+///     that downstream commands (explain, check, daemon
+///     transport) should use to re-issue a focus query.
+///
+/// ── History ─────────────────────────────────────────────────
+///
+/// Rust-42 shipped with `resolved_key` only, carrying the
+/// `repo_uid` for repo-level focus. The Rust-44 design review
+/// identified that `resolved_key` cannot carry raw input path
+/// strings for path-area focus without a MODULE node — doing
+/// so would make the field polymorphic in an unsafe way
+/// (sometimes a stable key, sometimes user input). Option 1
+/// was selected: add `resolved_path` as a separate field and
+/// keep `resolved_key` strictly nullable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Focus {
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -74,8 +96,16 @@ pub struct Focus {
 	pub resolved: bool,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub resolved_kind: Option<ResolvedKind>,
+	/// Graph-node stable key, if the focus resolved to an exact
+	/// node. `None` for repo-level focus and for path-area
+	/// focus that has no backing MODULE node.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub resolved_key: Option<String>,
+	/// Normalized repo-relative path for the resolved focus.
+	/// Present for FILE and MODULE/path-area resolution. Absent
+	/// for repo-level and unresolved focus.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub resolved_path: Option<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub reason: Option<FocusFailureReason>,
 	#[serde(skip_serializing_if = "Vec::is_empty")]
@@ -85,13 +115,75 @@ pub struct Focus {
 impl Focus {
 	/// Build a repo-level focus record for a successfully
 	/// loaded repo.
-	pub fn repo(repo_uid: &str) -> Self {
+	///
+	/// `resolved_key` is `None` because repo-level focus does
+	/// not resolve to a graph node. The repo identity is
+	/// carried on the envelope's top-level `repo` field; it
+	/// must not be duplicated into `resolved_key`, which is
+	/// reserved for graph-node stable keys.
+	pub fn repo() -> Self {
 		Self {
 			input: None,
 			resolved: true,
 			resolved_kind: Some(ResolvedKind::Repo),
-			resolved_key: Some(repo_uid.to_string()),
+			resolved_key: None,
+			resolved_path: None,
 			reason: None,
+			candidates: Vec::new(),
+		}
+	}
+
+	/// Build a file-focus record. The file resolved to an
+	/// exact FILE node. `stable_key` is optional because the
+	/// path-based resolution can confirm a file exists without
+	/// producing the node's stable key in all code paths. When
+	/// `None`, `resolved_key` is omitted from the JSON output
+	/// (same nullable contract as `path_area`).
+	pub fn file(
+		input: &str,
+		stable_key: Option<&str>,
+		path: &str,
+	) -> Self {
+		Self {
+			input: Some(input.to_string()),
+			resolved: true,
+			resolved_kind: Some(ResolvedKind::File),
+			resolved_key: stable_key.map(|k| k.to_string()),
+			resolved_path: Some(path.to_string()),
+			reason: None,
+			candidates: Vec::new(),
+		}
+	}
+
+	/// Build a module/path-area focus record. If the path
+	/// corresponds to an exact MODULE node, `module_stable_key`
+	/// carries its stable key. Otherwise `resolved_key` is None
+	/// and `resolved_path` alone identifies the area.
+	pub fn path_area(
+		input: &str,
+		module_stable_key: Option<&str>,
+		path: &str,
+	) -> Self {
+		Self {
+			input: Some(input.to_string()),
+			resolved: true,
+			resolved_kind: Some(ResolvedKind::Module),
+			resolved_key: module_stable_key.map(|k| k.to_string()),
+			resolved_path: Some(path.to_string()),
+			reason: None,
+			candidates: Vec::new(),
+		}
+	}
+
+	/// Build an unresolved focus record.
+	pub fn no_match(input: &str) -> Self {
+		Self {
+			input: Some(input.to_string()),
+			resolved: false,
+			resolved_kind: None,
+			resolved_key: None,
+			resolved_path: None,
+			reason: Some(FocusFailureReason::NoMatch),
 			candidates: Vec::new(),
 		}
 	}
@@ -178,14 +270,58 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn repo_focus_serializes_without_input() {
-		let f = Focus::repo("repo-uid-1");
+	fn repo_focus_serializes_without_input_key_or_path() {
+		let f = Focus::repo();
 		let s = serde_json::to_string(&f).unwrap();
 		assert!(!s.contains("\"input\""), "input must be omitted at repo-level: {}", s);
 		assert!(s.contains("\"resolved\":true"));
 		assert!(s.contains("\"resolved_kind\":\"repo\""));
-		assert!(s.contains("\"resolved_key\":\"repo-uid-1\""));
+		assert!(!s.contains("\"resolved_key\""), "repo focus must not emit resolved_key: {}", s);
+		assert!(!s.contains("\"resolved_path\""), "repo focus must not emit resolved_path: {}", s);
 		assert!(!s.contains("\"candidates\""), "empty candidates must be omitted: {}", s);
+	}
+
+	#[test]
+	fn file_focus_serializes_with_key_and_path() {
+		let f = Focus::file("src/core/service.ts", Some("r1:src/core/service.ts:FILE"), "src/core/service.ts");
+		let json = serde_json::to_value(&f).unwrap();
+		assert_eq!(json["resolved"], true);
+		assert_eq!(json["resolved_kind"], "file");
+		assert_eq!(json["resolved_key"], "r1:src/core/service.ts:FILE");
+		assert_eq!(json["resolved_path"], "src/core/service.ts");
+		assert_eq!(json["input"], "src/core/service.ts");
+	}
+
+	#[test]
+	fn path_area_focus_with_module_node_serializes_key_and_path() {
+		let f = Focus::path_area("src/core", Some("r1:src/core:MODULE"), "src/core");
+		let json = serde_json::to_value(&f).unwrap();
+		assert_eq!(json["resolved"], true);
+		assert_eq!(json["resolved_kind"], "module");
+		assert_eq!(json["resolved_key"], "r1:src/core:MODULE");
+		assert_eq!(json["resolved_path"], "src/core");
+	}
+
+	#[test]
+	fn path_area_focus_without_module_node_omits_key() {
+		let f = Focus::path_area("src/core", None, "src/core");
+		let json = serde_json::to_value(&f).unwrap();
+		assert_eq!(json["resolved"], true);
+		assert_eq!(json["resolved_kind"], "module");
+		assert!(json.get("resolved_key").is_none(), "path-area without MODULE node must not emit resolved_key");
+		assert_eq!(json["resolved_path"], "src/core");
+	}
+
+	#[test]
+	fn no_match_focus_omits_key_and_path() {
+		let f = Focus::no_match("nonexistent/path");
+		let json = serde_json::to_value(&f).unwrap();
+		assert_eq!(json["resolved"], false);
+		assert!(json.get("resolved_kind").is_none());
+		assert!(json.get("resolved_key").is_none());
+		assert!(json.get("resolved_path").is_none());
+		assert_eq!(json["reason"], "no_match");
+		assert_eq!(json["input"], "nonexistent/path");
 	}
 
 	#[test]
