@@ -154,3 +154,64 @@ impl From<AgentStorageError> for CheckError {
 		Self::Storage(e)
 	}
 }
+
+// ── Explain use-case error ──────────────────────────────────────
+
+/// Errors returned by `run_explain()`.
+///
+/// Same pattern as `OrientError`: storage failure, missing repo,
+/// missing snapshot are all errors. Missing focus is a valid
+/// response (empty result with `Focus::no_match`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExplainError {
+	/// The storage port failed.
+	Storage(AgentStorageError),
+
+	/// The given `repo_uid` does not exist in storage.
+	NoRepo { repo_uid: String },
+
+	/// The repo exists but has no READY snapshot.
+	NoSnapshot { repo_uid: String },
+}
+
+impl fmt::Display for ExplainError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Storage(e) => write!(f, "{}", e),
+			Self::NoRepo { repo_uid } => {
+				write!(f, "repo not found: {}", repo_uid)
+			}
+			Self::NoSnapshot { repo_uid } => {
+				write!(
+					f,
+					"no READY snapshot for repo: {}. index the repo first.",
+					repo_uid
+				)
+			}
+		}
+	}
+}
+
+impl std::error::Error for ExplainError {}
+
+impl From<AgentStorageError> for ExplainError {
+	fn from(e: AgentStorageError) -> Self {
+		Self::Storage(e)
+	}
+}
+
+impl From<OrientError> for ExplainError {
+	fn from(e: OrientError) -> Self {
+		match e {
+			OrientError::Storage(s) => Self::Storage(s),
+			OrientError::NoRepo { repo_uid } => Self::NoRepo { repo_uid },
+			OrientError::NoSnapshot { repo_uid } => Self::NoSnapshot { repo_uid },
+			OrientError::FocusNotImplementedYet { .. } => {
+				Self::Storage(AgentStorageError::new(
+					"explain",
+					"focus type not supported",
+				))
+			}
+		}
+	}
+}

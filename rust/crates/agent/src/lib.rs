@@ -60,6 +60,7 @@ pub mod check;
 pub mod confidence;
 pub mod dto;
 pub mod errors;
+pub mod explain;
 pub mod orient;
 pub mod ranking;
 pub mod storage_port;
@@ -70,8 +71,8 @@ pub use dto::{
 	budget::Budget,
 	envelope::{
 		Confidence, Focus, FocusCandidate, FocusFailureReason, NextAction,
-		NextKind, OrientResult, ResolvedKind, CHECK_COMMAND, ORIENT_COMMAND,
-		ORIENT_SCHEMA,
+		NextKind, OrientResult, ResolvedKind, CHECK_COMMAND, EXPLAIN_COMMAND,
+		ORIENT_COMMAND, ORIENT_SCHEMA,
 	},
 	limit::{Limit, LimitCode},
 	signal::{
@@ -79,9 +80,19 @@ pub use dto::{
 		CallersSummaryEvidence, CalleesSummaryEvidence,
 		CheckConditionEvidence, CheckFailEvidence,
 		CheckIncompleteEvidence, CheckPassEvidence, CycleEvidence,
-		DeadCodeEvidence, DeadSymbolEvidence, ImportCyclesEvidence,
-		ModuleCountEvidence, ModuleSummaryEvidence, Severity, Signal,
-		SignalCategory, SignalCode, SignalEvidence, SignalScope,
+		DeadCodeEvidence, DeadSymbolEvidence,
+		ExplainBoundaryEvidence, ExplainCalleeItem,
+		ExplainCalleesEvidence, ExplainCallerItem,
+		ExplainCallersEvidence, ExplainCyclesEvidence,
+		ExplainDeadEvidence, ExplainDeadItem, ExplainFileItem,
+		ExplainFilesEvidence, ExplainGateEvidence, ExplainGateItem,
+		ExplainIdentityEvidence, ExplainImportItem,
+		ExplainImportsEvidence, ExplainMeasurementItem,
+		ExplainMeasurementsEvidence, ExplainSymbolItem,
+		ExplainSymbolsEvidence, ExplainTrustEvidence,
+		ImportCyclesEvidence, ModuleCountEvidence,
+		ModuleSummaryEvidence, Severity, Signal, SignalCategory,
+		SignalCode, SignalEvidence, SignalScope,
 		SnapshotInfoEvidence, TrustLowResolutionEvidence,
 		TrustNoEnrichmentEvidence, TrustStaleSnapshotEvidence,
 	},
@@ -91,12 +102,15 @@ pub use check::{
 	run_check, CheckInput, CheckResult, CheckVerdict, ConditionCode,
 	ConditionResult, ConditionStatus, GateOutcomeForCheck,
 };
-pub use errors::{AgentStorageError, CheckError, OrientError};
+pub use errors::{AgentStorageError, CheckError, ExplainError, OrientError};
+pub use explain::run_explain;
 pub use orient::orient;
 pub use storage_port::{
 	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentCycle,
-	AgentDeadNode, AgentFocusCandidate, AgentFocusKind, AgentImportEdge,
-	AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel,
-	AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
-	AgentStorageRead, AgentSymbolContext, AgentTrustSummary, EnrichmentState,
+	AgentDeadNode, AgentFileEntry, AgentFocusCandidate, AgentFocusKind,
+	AgentImportEdge, AgentImportEntry, AgentPathResolution,
+	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo,
+	AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageRead,
+	AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary,
+	EnrichmentState,
 };

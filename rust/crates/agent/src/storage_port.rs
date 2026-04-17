@@ -569,4 +569,57 @@ pub trait AgentStorageRead {
 		snapshot_uid: &str,
 		module_qualified_name: &str,
 	) -> Result<Vec<AgentCycle>, AgentStorageError>;
+
+	// ── Explain-focus methods ───────────────────────────────────
+
+	/// List SYMBOL nodes in a specific file, ordered by line_start
+	/// ascending then name ascending.
+	fn list_symbols_in_file(
+		&self,
+		snapshot_uid: &str,
+		file_path: &str,
+	) -> Result<Vec<AgentSymbolEntry>, AgentStorageError>;
+
+	/// List files under a path prefix (or at exact path), ordered
+	/// by path ascending. Each entry includes a symbol count and
+	/// is_test flag.
+	fn list_files_in_path(
+		&self,
+		snapshot_uid: &str,
+		path_prefix: &str,
+	) -> Result<Vec<AgentFileEntry>, AgentStorageError>;
+
+	/// Return distinct target file paths imported by a source file
+	/// via IMPORTS edges.
+	fn find_file_imports(
+		&self,
+		snapshot_uid: &str,
+		file_path: &str,
+	) -> Result<Vec<AgentImportEntry>, AgentStorageError>;
+}
+
+// ── Explain DTOs ────────────────────────────────────────────────
+
+/// One SYMBOL node entry in a file listing (explain surface).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSymbolEntry {
+	pub stable_key: String,
+	pub name: String,
+	pub qualified_name: Option<String>,
+	pub subtype: Option<String>,
+	pub line_start: Option<u64>,
+}
+
+/// One file entry under a path prefix (explain surface).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentFileEntry {
+	pub path: String,
+	pub symbol_count: u64,
+	pub is_test: bool,
+}
+
+/// One import target file (explain surface).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentImportEntry {
+	pub target_file: String,
 }

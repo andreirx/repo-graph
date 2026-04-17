@@ -103,6 +103,7 @@ fn main() -> ExitCode {
 		"gate" => run_gate(&args[2..]),
 		"orient" => run_orient(&args[2..]),
 		"check" => run_check_cmd(&args[2..]),
+		"explain" => run_explain_cmd(&args[2..]),
 		"dead" => run_dead(&args[2..]),
 		"cycles" => run_cycles(&args[2..]),
 		"stats" => run_stats(&args[2..]),
@@ -128,6 +129,7 @@ fn print_usage() {
 	eprintln!("  rmap gate       <db_path> <repo_uid>");
 	eprintln!("  rmap orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]");
 	eprintln!("  rmap check      <db_path> <repo_uid>");
+	eprintln!("  rmap explain    <db_path> <repo_uid> <target> [--budget medium|large]");
 	eprintln!("  rmap dead    <db_path> <repo_uid> [kind]");
 	eprintln!("  rmap cycles  <db_path> <repo_uid>");
 	eprintln!("  rmap stats   <db_path> <repo_uid>");
@@ -1174,6 +1176,112 @@ fn run_check_cmd(args: &[String]) -> ExitCode {
 			ExitCode::from(2)
 		}
 	}
+}
+
+// ── explain command ──────────────────────────────────────────────
+
+fn run_explain_cmd(args: &[String]) -> ExitCode {
+	// Parse positional args and optional --budget flag.
+	let mut positional: Vec<&String> = Vec::new();
+	let mut budget_raw: Option<String> = None;
+
+	let mut i = 0;
+	while i < args.len() {
+		let arg = &args[i];
+		match arg.as_str() {
+			"--budget" => {
+				if budget_raw.is_some() {
+					eprintln!("error: --budget specified more than once");
+					print_explain_usage();
+					return ExitCode::from(1);
+				}
+				i += 1;
+				let value = match args.get(i) {
+					Some(v) => v,
+					None => {
+						eprintln!("error: --budget requires a value");
+						print_explain_usage();
+						return ExitCode::from(1);
+					}
+				};
+				if value.starts_with("--") {
+					eprintln!("error: --budget requires a value, got flag: {}", value);
+					print_explain_usage();
+					return ExitCode::from(1);
+				}
+				budget_raw = Some(value.clone());
+			}
+			flag if flag.starts_with("--") => {
+				eprintln!("error: unknown flag: {}", flag);
+				print_explain_usage();
+				return ExitCode::from(1);
+			}
+			_ => positional.push(arg),
+		}
+		i += 1;
+	}
+
+	if positional.len() != 3 {
+		print_explain_usage();
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(positional[0].as_str());
+	let repo_uid = positional[1].as_str();
+	let target = positional[2].as_str();
+
+	// Budget: default medium, accept medium or large only.
+	let budget = match budget_raw.as_deref() {
+		None => repo_graph_agent::Budget::Medium,
+		Some("medium") => repo_graph_agent::Budget::Medium,
+		Some("large") => repo_graph_agent::Budget::Large,
+		Some(other) => {
+			eprintln!(
+				"error: invalid --budget value: {} (expected medium|large)",
+				other
+			);
+			print_explain_usage();
+			return ExitCode::from(1);
+		}
+	};
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	let now = utc_now_iso8601();
+
+	let result = match repo_graph_agent::run_explain(
+		&storage, repo_uid, target, budget, &now,
+	) {
+		Ok(r) => r,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	match serde_json::to_string_pretty(&result) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::from(0)
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+fn print_explain_usage() {
+	eprintln!(
+		"usage: rmap explain <db_path> <repo_uid> <target> \
+		 [--budget medium|large]"
+	);
 }
 
 // ── dead command ─────────────────────────────────────────────────

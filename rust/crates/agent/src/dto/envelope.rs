@@ -305,6 +305,9 @@ pub const ORIENT_COMMAND: &str = "orient";
 /// Stable command identifier for `check`.
 pub const CHECK_COMMAND: &str = "check";
 
+/// Stable command identifier for `explain`.
+pub const EXPLAIN_COMMAND: &str = "explain";
+
 #[cfg(test)]
 mod tests {
 	use super::*;

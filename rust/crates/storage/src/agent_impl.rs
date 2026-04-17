@@ -25,10 +25,11 @@
 
 use repo_graph_agent::{
 	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentCycle,
-	AgentDeadNode, AgentFocusCandidate, AgentFocusKind, AgentImportEdge,
-	AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel,
-	AgentRepo, AgentRepoSummary, AgentSnapshot, AgentStaleFile,
-	AgentStorageError, AgentStorageRead, AgentSymbolContext,
+	AgentDeadNode, AgentFileEntry, AgentFocusCandidate, AgentFocusKind,
+	AgentImportEdge, AgentImportEntry, AgentPathResolution,
+	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo,
+	AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageError,
+	AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
 	AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_trust::service::assemble_trust_report;
@@ -1071,5 +1072,125 @@ impl AgentStorageRead for StorageConnection {
 			.collect();
 
 		Ok(filtered)
+	}
+
+	// ── Explain-focus methods ──────────────────────────────────────
+
+	fn list_symbols_in_file(
+		&self,
+		snapshot_uid: &str,
+		file_path: &str,
+	) -> Result<Vec<AgentSymbolEntry>, AgentStorageError> {
+		let conn = self.connection();
+		let mut stmt = conn
+			.prepare(
+				"SELECT n.stable_key, n.name, n.qualified_name, n.subtype, n.line_start \
+				 FROM nodes n \
+				 JOIN files f ON n.file_uid = f.file_uid \
+				 WHERE n.snapshot_uid = ? AND n.kind = 'SYMBOL' AND f.path = ? \
+				 ORDER BY n.line_start ASC, n.name ASC",
+			)
+			.map_err(map_err("list_symbols_in_file"))?;
+
+		let rows = stmt
+			.query_map(
+				rusqlite::params![snapshot_uid, file_path],
+				|row| {
+					let line_start: Option<i64> = row.get(4)?;
+					Ok(AgentSymbolEntry {
+						stable_key: row.get(0)?,
+						name: row.get(1)?,
+						qualified_name: row.get(2)?,
+						subtype: row.get(3)?,
+						line_start: line_start.and_then(|n| u64::try_from(n).ok()),
+					})
+				},
+			)
+			.map_err(map_err("list_symbols_in_file"))?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(map_err("list_symbols_in_file"))
+	}
+
+	fn list_files_in_path(
+		&self,
+		snapshot_uid: &str,
+		path_prefix: &str,
+	) -> Result<Vec<AgentFileEntry>, AgentStorageError> {
+		let conn = self.connection();
+		let prefix_pattern = format!("{}/%", path_prefix);
+
+		let mut stmt = conn
+			.prepare(
+				"SELECT f.path, \
+				   (SELECT COUNT(*) FROM nodes n2 \
+				    WHERE n2.file_uid = f.file_uid \
+				      AND n2.kind = 'SYMBOL' \
+				      AND n2.snapshot_uid = ?1) AS symbol_count, \
+				   f.is_test \
+				 FROM files f \
+				 JOIN file_versions fv ON fv.file_uid = f.file_uid \
+				 WHERE fv.snapshot_uid = ?2 \
+				   AND (f.path LIKE ?3 OR f.path = ?4) \
+				 ORDER BY f.path ASC",
+			)
+			.map_err(map_err("list_files_in_path"))?;
+
+		let rows = stmt
+			.query_map(
+				rusqlite::params![
+					snapshot_uid,
+					snapshot_uid,
+					prefix_pattern,
+					path_prefix,
+				],
+				|row| {
+					let sym_count: i64 = row.get(1)?;
+					let is_test_int: i64 = row.get(2)?;
+					Ok(AgentFileEntry {
+						path: row.get(0)?,
+						symbol_count: sym_count.max(0) as u64,
+						is_test: is_test_int != 0,
+					})
+				},
+			)
+			.map_err(map_err("list_files_in_path"))?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(map_err("list_files_in_path"))
+	}
+
+	fn find_file_imports(
+		&self,
+		snapshot_uid: &str,
+		file_path: &str,
+	) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
+		let conn = self.connection();
+		let mut stmt = conn
+			.prepare(
+				"SELECT DISTINCT tgt_f.path AS target_file \
+				 FROM edges e \
+				 JOIN nodes src_n ON e.source_node_uid = src_n.node_uid \
+				 JOIN files src_f ON src_n.file_uid = src_f.file_uid \
+				 JOIN nodes tgt_n ON e.target_node_uid = tgt_n.node_uid \
+				 JOIN files tgt_f ON tgt_n.file_uid = tgt_f.file_uid \
+				 WHERE e.snapshot_uid = ? AND e.type = 'IMPORTS' AND src_f.path = ? \
+				 ORDER BY tgt_f.path ASC",
+			)
+			.map_err(map_err("find_file_imports"))?;
+
+		let rows = stmt
+			.query_map(
+				rusqlite::params![snapshot_uid, file_path],
+				|row| {
+					Ok(AgentImportEntry {
+						target_file: row.get(0)?,
+					})
+				},
+			)
+			.map_err(map_err("find_file_imports"))?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(map_err("find_file_imports"))
 	}
 }

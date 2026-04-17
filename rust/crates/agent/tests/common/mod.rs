@@ -22,10 +22,11 @@ use std::collections::HashMap;
 
 use repo_graph_agent::{
 	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentCycle,
-	AgentDeadNode, AgentFocusCandidate, AgentImportEdge, AgentPathResolution,
-	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
-	AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead,
-	AgentSymbolContext, AgentTrustSummary, EnrichmentState,
+	AgentDeadNode, AgentFileEntry, AgentFocusCandidate, AgentImportEdge,
+	AgentImportEntry, AgentPathResolution, AgentReliabilityAxis,
+	AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
+	AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext,
+	AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_gate::{
 	GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -104,6 +105,11 @@ pub struct FakeAgentStorage {
 	pub symbol_callers: HashMap<(String, String), Vec<AgentCallerRow>>,
 	pub symbol_callees: HashMap<(String, String), Vec<AgentCalleeRow>>,
 	pub cycles_involving_module: HashMap<(String, String), Vec<AgentCycle>>,
+
+	// ── Explain-focus seed data ─────────────────────────────
+	pub symbols_in_file: HashMap<(String, String), Vec<AgentSymbolEntry>>,
+	pub files_in_path: HashMap<(String, String), Vec<AgentFileEntry>>,
+	pub file_imports: HashMap<(String, String), Vec<AgentImportEntry>>,
 
 	// ── Gate-port seed data (Rust-43A) ──────────────────────
 	//
@@ -480,6 +486,50 @@ impl AgentStorageRead for FakeAgentStorage {
 		let key = (snapshot_uid.to_string(), module_qualified_name.to_string());
 		Ok(self
 			.cycles_involving_module
+			.get(&key)
+			.cloned()
+			.unwrap_or_default())
+	}
+
+	// ── Explain-focus methods ──────────────────────────────────
+
+	fn list_symbols_in_file(
+		&self,
+		snapshot_uid: &str,
+		file_path: &str,
+	) -> Result<Vec<AgentSymbolEntry>, AgentStorageError> {
+		self.fail_if_forced("list_symbols_in_file")?;
+		let key = (snapshot_uid.to_string(), file_path.to_string());
+		Ok(self
+			.symbols_in_file
+			.get(&key)
+			.cloned()
+			.unwrap_or_default())
+	}
+
+	fn list_files_in_path(
+		&self,
+		snapshot_uid: &str,
+		path_prefix: &str,
+	) -> Result<Vec<AgentFileEntry>, AgentStorageError> {
+		self.fail_if_forced("list_files_in_path")?;
+		let key = (snapshot_uid.to_string(), path_prefix.to_string());
+		Ok(self
+			.files_in_path
+			.get(&key)
+			.cloned()
+			.unwrap_or_default())
+	}
+
+	fn find_file_imports(
+		&self,
+		snapshot_uid: &str,
+		file_path: &str,
+	) -> Result<Vec<AgentImportEntry>, AgentStorageError> {
+		self.fail_if_forced("find_file_imports")?;
+		let key = (snapshot_uid.to_string(), file_path.to_string());
+		Ok(self
+			.file_imports
 			.get(&key)
 			.cloned()
 			.unwrap_or_default())

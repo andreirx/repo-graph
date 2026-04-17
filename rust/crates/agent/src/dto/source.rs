@@ -48,6 +48,8 @@ pub enum SourceRef {
 	/// Emitted by `CHECK_PASS`, `CHECK_FAIL`, `CHECK_INCOMPLETE`
 	/// signals.
 	CheckReducer,
+	/// Explain use case: symbol/file/path explain pipeline.
+	ExplainPipeline,
 }
 
 impl SourceRef {
@@ -70,6 +72,7 @@ impl SourceRef {
 			Self::StorageFindSymbolCallers => "storage::find_symbol_callers",
 			Self::StorageFindSymbolCallees => "storage::find_symbol_callees",
 			Self::CheckReducer => "check::reducer",
+			Self::ExplainPipeline => "explain::pipeline",
 		}
 	}
 }
@@ -105,6 +108,7 @@ mod tests {
 			SourceRef::StorageFindSymbolCallers,
 			SourceRef::StorageFindSymbolCallees,
 			SourceRef::CheckReducer,
+			SourceRef::ExplainPipeline,
 		] {
 			assert!(s.as_str().contains("::"));
 		}

@@ -25,8 +25,8 @@
 
 use repo_graph_agent::AgentStorageRead;
 use repo_graph_storage::types::{
-	CreateSnapshotInput, FileVersion, GraphEdge, GraphNode, Repo, TrackedFile,
-	UpdateSnapshotStatusInput,
+	CreateSnapshotInput, FileVersion, GraphEdge, GraphNode, Repo,
+	SourceLocation, TrackedFile, UpdateSnapshotStatusInput,
 };
 use repo_graph_storage::StorageConnection;
 
@@ -831,4 +831,356 @@ fn get_stale_files_returns_only_stale_not_ok() {
 		stale_after.iter().map(|s| &s.path).collect::<Vec<_>>()
 	);
 	assert_eq!(stale_after[0].path, "src/stale_file.rs");
+}
+
+// ── Explain port methods ────────────────────────────────────────────
+
+#[test]
+fn list_symbols_in_file_returns_ordered_entries() {
+	let (_tmp, mut storage) = open_temp_storage();
+	insert_repo(&storage, "r1", "my-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	// Seed a file.
+	storage
+		.upsert_files(&[TrackedFile {
+			file_uid: "f1".into(),
+			repo_uid: "r1".into(),
+			path: "src/service.ts".into(),
+			language: Some("typescript".into()),
+			is_test: false,
+			is_generated: false,
+			is_excluded: false,
+		}])
+		.unwrap();
+	storage
+		.upsert_file_versions(&[FileVersion {
+			snapshot_uid: snapshot_uid.clone(),
+			file_uid: "f1".into(),
+			content_hash: "h1".into(),
+			ast_hash: None,
+			extractor: None,
+			parse_status: "ok".into(),
+			size_bytes: Some(100),
+			line_count: Some(20),
+			indexed_at: "2026-04-15T00:00:00Z".into(),
+		}])
+		.unwrap();
+
+	// Seed two SYMBOL nodes in the file (line 10 and line 5).
+	storage
+		.insert_nodes(&[
+			GraphNode {
+				node_uid: "n1".into(),
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: "r1".into(),
+				stable_key: "r1:src/service.ts:beta:SYMBOL".into(),
+				kind: "SYMBOL".into(),
+				subtype: Some("FUNCTION".into()),
+				name: "beta".into(),
+				qualified_name: Some("src/service.ts:beta".into()),
+				file_uid: Some("f1".into()),
+				parent_node_uid: None,
+				location: Some(SourceLocation {
+					line_start: 10,
+					col_start: 0,
+					line_end: 15,
+					col_end: 0,
+				}),
+				signature: None,
+				visibility: Some("export".into()),
+				doc_comment: None,
+				metadata_json: None,
+			},
+			GraphNode {
+				node_uid: "n2".into(),
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: "r1".into(),
+				stable_key: "r1:src/service.ts:alpha:SYMBOL".into(),
+				kind: "SYMBOL".into(),
+				subtype: Some("CLASS".into()),
+				name: "alpha".into(),
+				qualified_name: Some("src/service.ts:alpha".into()),
+				file_uid: Some("f1".into()),
+				parent_node_uid: None,
+				location: Some(SourceLocation {
+					line_start: 5,
+					col_start: 0,
+					line_end: 8,
+					col_end: 0,
+				}),
+				signature: None,
+				visibility: Some("export".into()),
+				doc_comment: None,
+				metadata_json: None,
+			},
+		])
+		.unwrap();
+
+	let symbols =
+		<StorageConnection as AgentStorageRead>::list_symbols_in_file(
+			&mut storage,
+			&snapshot_uid,
+			"src/service.ts",
+		)
+		.unwrap();
+
+	assert_eq!(symbols.len(), 2);
+	// Ordered by line_start ASC: alpha (5) before beta (10).
+	assert_eq!(symbols[0].name, "alpha");
+	assert_eq!(symbols[0].subtype.as_deref(), Some("CLASS"));
+	assert_eq!(symbols[0].line_start, Some(5));
+	assert_eq!(symbols[1].name, "beta");
+	assert_eq!(symbols[1].subtype.as_deref(), Some("FUNCTION"));
+	assert_eq!(symbols[1].line_start, Some(10));
+}
+
+#[test]
+fn list_files_in_path_returns_files_under_prefix() {
+	let (_tmp, mut storage) = open_temp_storage();
+	insert_repo(&storage, "r1", "my-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	// Seed two files under src/core and one under src/adapters.
+	storage
+		.upsert_files(&[
+			TrackedFile {
+				file_uid: "f1".into(),
+				repo_uid: "r1".into(),
+				path: "src/core/model.ts".into(),
+				language: Some("typescript".into()),
+				is_test: false,
+				is_generated: false,
+				is_excluded: false,
+			},
+			TrackedFile {
+				file_uid: "f2".into(),
+				repo_uid: "r1".into(),
+				path: "src/core/service.ts".into(),
+				language: Some("typescript".into()),
+				is_test: false,
+				is_generated: false,
+				is_excluded: false,
+			},
+			TrackedFile {
+				file_uid: "f3".into(),
+				repo_uid: "r1".into(),
+				path: "src/adapters/storage.ts".into(),
+				language: Some("typescript".into()),
+				is_test: false,
+				is_generated: false,
+				is_excluded: false,
+			},
+		])
+		.unwrap();
+	storage
+		.upsert_file_versions(&[
+			FileVersion {
+				snapshot_uid: snapshot_uid.clone(),
+				file_uid: "f1".into(),
+				content_hash: "h1".into(),
+				ast_hash: None,
+				extractor: None,
+				parse_status: "ok".into(),
+				size_bytes: Some(100),
+				line_count: Some(10),
+				indexed_at: "2026-04-15T00:00:00Z".into(),
+			},
+			FileVersion {
+				snapshot_uid: snapshot_uid.clone(),
+				file_uid: "f2".into(),
+				content_hash: "h2".into(),
+				ast_hash: None,
+				extractor: None,
+				parse_status: "ok".into(),
+				size_bytes: Some(200),
+				line_count: Some(20),
+				indexed_at: "2026-04-15T00:00:00Z".into(),
+			},
+			FileVersion {
+				snapshot_uid: snapshot_uid.clone(),
+				file_uid: "f3".into(),
+				content_hash: "h3".into(),
+				ast_hash: None,
+				extractor: None,
+				parse_status: "ok".into(),
+				size_bytes: Some(50),
+				line_count: Some(5),
+				indexed_at: "2026-04-15T00:00:00Z".into(),
+			},
+		])
+		.unwrap();
+
+	let files =
+		<StorageConnection as AgentStorageRead>::list_files_in_path(
+			&mut storage,
+			&snapshot_uid,
+			"src/core",
+		)
+		.unwrap();
+
+	assert_eq!(files.len(), 2, "only files under src/core");
+	// Ordered by path ASC.
+	assert_eq!(files[0].path, "src/core/model.ts");
+	assert_eq!(files[1].path, "src/core/service.ts");
+	// symbol_count is 0 since we did not seed nodes.
+	assert_eq!(files[0].symbol_count, 0);
+	assert!(!files[0].is_test);
+}
+
+#[test]
+fn find_file_imports_returns_distinct_targets() {
+	let (_tmp, mut storage) = open_temp_storage();
+	insert_repo(&storage, "r1", "my-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	// Seed two files.
+	storage
+		.upsert_files(&[
+			TrackedFile {
+				file_uid: "f1".into(),
+				repo_uid: "r1".into(),
+				path: "src/a.ts".into(),
+				language: Some("typescript".into()),
+				is_test: false,
+				is_generated: false,
+				is_excluded: false,
+			},
+			TrackedFile {
+				file_uid: "f2".into(),
+				repo_uid: "r1".into(),
+				path: "src/b.ts".into(),
+				language: Some("typescript".into()),
+				is_test: false,
+				is_generated: false,
+				is_excluded: false,
+			},
+		])
+		.unwrap();
+	storage
+		.upsert_file_versions(&[
+			FileVersion {
+				snapshot_uid: snapshot_uid.clone(),
+				file_uid: "f1".into(),
+				content_hash: "h1".into(),
+				ast_hash: None,
+				extractor: None,
+				parse_status: "ok".into(),
+				size_bytes: Some(10),
+				line_count: Some(2),
+				indexed_at: "2026-04-15T00:00:00Z".into(),
+			},
+			FileVersion {
+				snapshot_uid: snapshot_uid.clone(),
+				file_uid: "f2".into(),
+				content_hash: "h2".into(),
+				ast_hash: None,
+				extractor: None,
+				parse_status: "ok".into(),
+				size_bytes: Some(10),
+				line_count: Some(2),
+				indexed_at: "2026-04-15T00:00:00Z".into(),
+			},
+		])
+		.unwrap();
+
+	// Seed nodes in both files.
+	storage
+		.insert_nodes(&[
+			GraphNode {
+				node_uid: "n1".into(),
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: "r1".into(),
+				stable_key: "r1:src/a.ts:foo:SYMBOL".into(),
+				kind: "SYMBOL".into(),
+				subtype: Some("FUNCTION".into()),
+				name: "foo".into(),
+				qualified_name: None,
+				file_uid: Some("f1".into()),
+				parent_node_uid: None,
+				location: None,
+				signature: None,
+				visibility: None,
+				doc_comment: None,
+				metadata_json: None,
+			},
+			GraphNode {
+				node_uid: "n2".into(),
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: "r1".into(),
+				stable_key: "r1:src/b.ts:bar:SYMBOL".into(),
+				kind: "SYMBOL".into(),
+				subtype: Some("FUNCTION".into()),
+				name: "bar".into(),
+				qualified_name: None,
+				file_uid: Some("f2".into()),
+				parent_node_uid: None,
+				location: None,
+				signature: None,
+				visibility: None,
+				doc_comment: None,
+				metadata_json: None,
+			},
+			// Second node in f1 to create a duplicate import target.
+			GraphNode {
+				node_uid: "n3".into(),
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: "r1".into(),
+				stable_key: "r1:src/a.ts:baz:SYMBOL".into(),
+				kind: "SYMBOL".into(),
+				subtype: Some("FUNCTION".into()),
+				name: "baz".into(),
+				qualified_name: None,
+				file_uid: Some("f1".into()),
+				parent_node_uid: None,
+				location: None,
+				signature: None,
+				visibility: None,
+				doc_comment: None,
+				metadata_json: None,
+			},
+		])
+		.unwrap();
+
+	// Two IMPORTS edges from a.ts nodes -> b.ts node.
+	storage
+		.insert_edges(&[
+			GraphEdge {
+				edge_uid: "e1".into(),
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: "r1".into(),
+				source_node_uid: "n1".into(),
+				target_node_uid: "n2".into(),
+				edge_type: "IMPORTS".into(),
+				resolution: "static".into(),
+				extractor: "ts-base:1".into(),
+				location: None,
+				metadata_json: None,
+			},
+			GraphEdge {
+				edge_uid: "e2".into(),
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: "r1".into(),
+				source_node_uid: "n3".into(),
+				target_node_uid: "n2".into(),
+				edge_type: "IMPORTS".into(),
+				resolution: "static".into(),
+				extractor: "ts-base:1".into(),
+				location: None,
+				metadata_json: None,
+			},
+		])
+		.unwrap();
+
+	let imports =
+		<StorageConnection as AgentStorageRead>::find_file_imports(
+			&mut storage,
+			&snapshot_uid,
+			"src/a.ts",
+		)
+		.unwrap();
+
+	// Two edges but they both target the same file → 1 distinct result.
+	assert_eq!(imports.len(), 1, "DISTINCT must deduplicate same target file");
+	assert_eq!(imports[0].target_file, "src/b.ts");
 }

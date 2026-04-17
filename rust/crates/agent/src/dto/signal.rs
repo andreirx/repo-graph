@@ -122,6 +122,7 @@ pub enum SignalCategory {
 	Trust,
 	Structure,
 	Informational,
+	Explain,
 }
 
 impl SignalCategory {
@@ -133,11 +134,13 @@ impl SignalCategory {
 			Self::Trust => "trust",
 			Self::Structure => "structure",
 			Self::Informational => "informational",
+			Self::Explain => "explain",
 		}
 	}
 
 	/// Tie-breaking ordering. Lower return value wins (sorts
 	/// earlier in the output). Check first, informational last.
+	/// Explain sorts after informational.
 	pub fn tie_break_ordinal(self) -> u8 {
 		match self {
 			Self::Check => 0,
@@ -146,6 +149,7 @@ impl SignalCategory {
 			Self::Trust => 3,
 			Self::Structure => 4,
 			Self::Informational => 5,
+			Self::Explain => 6,
 		}
 	}
 }
@@ -188,6 +192,19 @@ pub enum SignalCode {
 	// Informational
 	ModuleSummary,
 	SnapshotInfo,
+	// Explain
+	ExplainIdentity,
+	ExplainCallers,
+	ExplainCallees,
+	ExplainImports,
+	ExplainSymbols,
+	ExplainFiles,
+	ExplainDead,
+	ExplainCycles,
+	ExplainBoundary,
+	ExplainGate,
+	ExplainTrust,
+	ExplainMeasurements,
 }
 
 impl SignalCode {
@@ -212,6 +229,18 @@ impl SignalCode {
 			Self::CalleesSummary => "CALLEES_SUMMARY",
 			Self::ModuleSummary => "MODULE_SUMMARY",
 			Self::SnapshotInfo => "SNAPSHOT_INFO",
+			Self::ExplainIdentity => "EXPLAIN_IDENTITY",
+			Self::ExplainCallers => "EXPLAIN_CALLERS",
+			Self::ExplainCallees => "EXPLAIN_CALLEES",
+			Self::ExplainImports => "EXPLAIN_IMPORTS",
+			Self::ExplainSymbols => "EXPLAIN_SYMBOLS",
+			Self::ExplainFiles => "EXPLAIN_FILES",
+			Self::ExplainDead => "EXPLAIN_DEAD",
+			Self::ExplainCycles => "EXPLAIN_CYCLES",
+			Self::ExplainBoundary => "EXPLAIN_BOUNDARY",
+			Self::ExplainGate => "EXPLAIN_GATE",
+			Self::ExplainTrust => "EXPLAIN_TRUST",
+			Self::ExplainMeasurements => "EXPLAIN_MEASUREMENTS",
 		}
 	}
 
@@ -251,6 +280,19 @@ impl SignalCode {
 			// Informational (Low): summary > snapshot.
 			Self::ModuleSummary => 0,
 			Self::SnapshotInfo => 1,
+			// Explain (Low): fixed section order by tier_priority.
+			Self::ExplainIdentity => 0,
+			Self::ExplainCallers => 1,
+			Self::ExplainCallees => 2,
+			Self::ExplainImports => 3,
+			Self::ExplainSymbols => 4,
+			Self::ExplainFiles => 5,
+			Self::ExplainDead => 6,
+			Self::ExplainCycles => 7,
+			Self::ExplainBoundary => 8,
+			Self::ExplainGate => 9,
+			Self::ExplainTrust => 10,
+			Self::ExplainMeasurements => 11,
 		}
 	}
 
@@ -284,6 +326,18 @@ impl SignalCode {
 			Self::CalleesSummary => (Structure, Low),
 			Self::ModuleSummary => (Informational, Low),
 			Self::SnapshotInfo => (Informational, Low),
+			Self::ExplainIdentity => (Explain, Low),
+			Self::ExplainCallers => (Explain, Low),
+			Self::ExplainCallees => (Explain, Low),
+			Self::ExplainImports => (Explain, Low),
+			Self::ExplainSymbols => (Explain, Low),
+			Self::ExplainFiles => (Explain, Low),
+			Self::ExplainDead => (Explain, Low),
+			Self::ExplainCycles => (Explain, Low),
+			Self::ExplainBoundary => (Explain, Low),
+			Self::ExplainGate => (Explain, Low),
+			Self::ExplainTrust => (Explain, Low),
+			Self::ExplainMeasurements => (Explain, Low),
 		}
 	}
 }
@@ -450,6 +504,209 @@ pub struct CheckIncompleteEvidence {
 	pub passing: Vec<CheckConditionEvidence>,
 }
 
+// ── Explain evidence structs ────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExplainIdentityEvidence {
+	pub target_kind: String,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub path: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub stable_key: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub name: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub subtype: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub line_start: Option<u64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub language: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub is_test: Option<bool>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub module_path: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub file_count: Option<u64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub symbol_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainCallerItem {
+	pub stable_key: String,
+	pub name: String,
+	pub module: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainCallersEvidence {
+	pub count: u64,
+	pub top_modules: Vec<ModuleCountEvidence>,
+	pub items: Vec<ExplainCallerItem>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_truncated: Option<bool>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_omitted_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainCalleeItem {
+	pub stable_key: String,
+	pub name: String,
+	pub module: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainCalleesEvidence {
+	pub count: u64,
+	pub top_modules: Vec<ModuleCountEvidence>,
+	pub items: Vec<ExplainCalleeItem>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_truncated: Option<bool>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_omitted_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainImportItem {
+	pub target_file: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainImportsEvidence {
+	pub count: u64,
+	pub items: Vec<ExplainImportItem>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_truncated: Option<bool>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_omitted_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainSymbolItem {
+	pub name: String,
+	pub subtype: Option<String>,
+	pub line_start: Option<u64>,
+	pub is_dead: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainSymbolsEvidence {
+	pub count: u64,
+	pub items: Vec<ExplainSymbolItem>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_truncated: Option<bool>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_omitted_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainFileItem {
+	pub path: String,
+	pub symbol_count: u64,
+	pub is_test: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainFilesEvidence {
+	pub count: u64,
+	pub items: Vec<ExplainFileItem>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_truncated: Option<bool>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_omitted_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainDeadItem {
+	pub symbol: String,
+	pub file: Option<String>,
+	pub line_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainDeadEvidence {
+	pub count: u64,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub is_target_dead: Option<bool>,
+	pub reliability_level: String,
+	/// When `reliability_level` is not `"high"`, these reasons
+	/// explain WHY dead-code data is unreliable. Sourced from
+	/// `trust.dead_code_reliability.reasons`. The agent sees
+	/// both the data and the caveat. Empty when HIGH.
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	pub reliability_reasons: Vec<String>,
+	pub items: Vec<ExplainDeadItem>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_truncated: Option<bool>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_omitted_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainCyclesEvidence {
+	pub count: u64,
+	pub items: Vec<CycleEvidence>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_truncated: Option<bool>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_omitted_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainBoundaryEvidence {
+	pub violation_count: u64,
+	pub items: Vec<BoundaryViolationEvidence>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_truncated: Option<bool>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_omitted_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainGateItem {
+	pub req_id: String,
+	pub obligation_id: String,
+	pub method: String,
+	pub effective_verdict: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplainGateEvidence {
+	pub outcome: String,
+	pub obligation_count: u64,
+	pub items: Vec<ExplainGateItem>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_truncated: Option<bool>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_omitted_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExplainTrustEvidence {
+	pub call_resolution_rate: f64,
+	pub call_graph_reliability: String,
+	pub dead_code_reliability: String,
+	pub enrichment_state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExplainMeasurementItem {
+	pub kind: String,
+	pub aggregation: String,
+	pub value: f64,
+	pub subject_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExplainMeasurementsEvidence {
+	pub items: Vec<ExplainMeasurementItem>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_truncated: Option<bool>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub items_omitted_count: Option<u64>,
+}
+
 // ── SignalEvidence enum ──────────────────────────────────────────
 
 /// Typed evidence variants. Exactly one variant per signal code
@@ -479,6 +736,18 @@ pub enum SignalEvidence {
 	SnapshotInfo(SnapshotInfoEvidence),
 	CallersSummary(CallersSummaryEvidence),
 	CalleesSummary(CalleesSummaryEvidence),
+	ExplainIdentity(ExplainIdentityEvidence),
+	ExplainCallers(ExplainCallersEvidence),
+	ExplainCallees(ExplainCalleesEvidence),
+	ExplainImports(ExplainImportsEvidence),
+	ExplainSymbols(ExplainSymbolsEvidence),
+	ExplainFiles(ExplainFilesEvidence),
+	ExplainDead(ExplainDeadEvidence),
+	ExplainCycles(ExplainCyclesEvidence),
+	ExplainBoundary(ExplainBoundaryEvidence),
+	ExplainGate(ExplainGateEvidence),
+	ExplainTrust(ExplainTrustEvidence),
+	ExplainMeasurements(ExplainMeasurementsEvidence),
 }
 
 impl Serialize for SignalEvidence {
@@ -500,6 +769,18 @@ impl Serialize for SignalEvidence {
 			Self::SnapshotInfo(e) => e.serialize(serializer),
 			Self::CallersSummary(e) => e.serialize(serializer),
 			Self::CalleesSummary(e) => e.serialize(serializer),
+			Self::ExplainIdentity(e) => e.serialize(serializer),
+			Self::ExplainCallers(e) => e.serialize(serializer),
+			Self::ExplainCallees(e) => e.serialize(serializer),
+			Self::ExplainImports(e) => e.serialize(serializer),
+			Self::ExplainSymbols(e) => e.serialize(serializer),
+			Self::ExplainFiles(e) => e.serialize(serializer),
+			Self::ExplainDead(e) => e.serialize(serializer),
+			Self::ExplainCycles(e) => e.serialize(serializer),
+			Self::ExplainBoundary(e) => e.serialize(serializer),
+			Self::ExplainGate(e) => e.serialize(serializer),
+			Self::ExplainTrust(e) => e.serialize(serializer),
+			Self::ExplainMeasurements(e) => e.serialize(serializer),
 		}
 	}
 }
@@ -527,6 +808,18 @@ impl SignalEvidence {
 			Self::SnapshotInfo(_) => "SnapshotInfo",
 			Self::CallersSummary(_) => "CallersSummary",
 			Self::CalleesSummary(_) => "CalleesSummary",
+			Self::ExplainIdentity(_) => "ExplainIdentity",
+			Self::ExplainCallers(_) => "ExplainCallers",
+			Self::ExplainCallees(_) => "ExplainCallees",
+			Self::ExplainImports(_) => "ExplainImports",
+			Self::ExplainSymbols(_) => "ExplainSymbols",
+			Self::ExplainFiles(_) => "ExplainFiles",
+			Self::ExplainDead(_) => "ExplainDead",
+			Self::ExplainCycles(_) => "ExplainCycles",
+			Self::ExplainBoundary(_) => "ExplainBoundary",
+			Self::ExplainGate(_) => "ExplainGate",
+			Self::ExplainTrust(_) => "ExplainTrust",
+			Self::ExplainMeasurements(_) => "ExplainMeasurements",
 		}
 	}
 }
@@ -875,6 +1168,177 @@ impl Signal {
 			summary,
 			SignalEvidence::CalleesSummary(evidence),
 			SourceRef::StorageFindSymbolCallees,
+		)
+	}
+
+	// ── Explain constructors ────────────────────────────────────
+
+	pub fn explain_identity(evidence: ExplainIdentityEvidence) -> Self {
+		let summary = format!(
+			"Identity: {} target.",
+			evidence.target_kind,
+		);
+		Self::build(
+			SignalCode::ExplainIdentity,
+			summary,
+			SignalEvidence::ExplainIdentity(evidence),
+			SourceRef::ExplainPipeline,
+		)
+	}
+
+	pub fn explain_callers(evidence: ExplainCallersEvidence) -> Self {
+		let summary = format!(
+			"{} direct caller{}.",
+			evidence.count,
+			if evidence.count == 1 { "" } else { "s" },
+		);
+		Self::build(
+			SignalCode::ExplainCallers,
+			summary,
+			SignalEvidence::ExplainCallers(evidence),
+			SourceRef::ExplainPipeline,
+		)
+	}
+
+	pub fn explain_callees(evidence: ExplainCalleesEvidence) -> Self {
+		let summary = format!(
+			"{} direct callee{}.",
+			evidence.count,
+			if evidence.count == 1 { "" } else { "s" },
+		);
+		Self::build(
+			SignalCode::ExplainCallees,
+			summary,
+			SignalEvidence::ExplainCallees(evidence),
+			SourceRef::ExplainPipeline,
+		)
+	}
+
+	pub fn explain_imports(evidence: ExplainImportsEvidence) -> Self {
+		let summary = format!(
+			"{} imported file{}.",
+			evidence.count,
+			if evidence.count == 1 { "" } else { "s" },
+		);
+		Self::build(
+			SignalCode::ExplainImports,
+			summary,
+			SignalEvidence::ExplainImports(evidence),
+			SourceRef::ExplainPipeline,
+		)
+	}
+
+	pub fn explain_symbols(evidence: ExplainSymbolsEvidence) -> Self {
+		let summary = format!(
+			"{} symbol{} in file.",
+			evidence.count,
+			if evidence.count == 1 { "" } else { "s" },
+		);
+		Self::build(
+			SignalCode::ExplainSymbols,
+			summary,
+			SignalEvidence::ExplainSymbols(evidence),
+			SourceRef::ExplainPipeline,
+		)
+	}
+
+	pub fn explain_files(evidence: ExplainFilesEvidence) -> Self {
+		let summary = format!(
+			"{} file{} in path.",
+			evidence.count,
+			if evidence.count == 1 { "" } else { "s" },
+		);
+		Self::build(
+			SignalCode::ExplainFiles,
+			summary,
+			SignalEvidence::ExplainFiles(evidence),
+			SourceRef::ExplainPipeline,
+		)
+	}
+
+	pub fn explain_dead(evidence: ExplainDeadEvidence) -> Self {
+		let summary = format!(
+			"{} unreferenced symbol{}.",
+			evidence.count,
+			if evidence.count == 1 { "" } else { "s" },
+		);
+		Self::build(
+			SignalCode::ExplainDead,
+			summary,
+			SignalEvidence::ExplainDead(evidence),
+			SourceRef::ExplainPipeline,
+		)
+	}
+
+	pub fn explain_cycles(evidence: ExplainCyclesEvidence) -> Self {
+		let summary = format!(
+			"{} import cycle{}.",
+			evidence.count,
+			if evidence.count == 1 { "" } else { "s" },
+		);
+		Self::build(
+			SignalCode::ExplainCycles,
+			summary,
+			SignalEvidence::ExplainCycles(evidence),
+			SourceRef::ExplainPipeline,
+		)
+	}
+
+	pub fn explain_boundary(evidence: ExplainBoundaryEvidence) -> Self {
+		let summary = format!(
+			"{} boundary violation{}.",
+			evidence.violation_count,
+			if evidence.violation_count == 1 { "" } else { "s" },
+		);
+		Self::build(
+			SignalCode::ExplainBoundary,
+			summary,
+			SignalEvidence::ExplainBoundary(evidence),
+			SourceRef::ExplainPipeline,
+		)
+	}
+
+	pub fn explain_gate(evidence: ExplainGateEvidence) -> Self {
+		let summary = format!(
+			"Gate {}: {} obligation{}.",
+			evidence.outcome,
+			evidence.obligation_count,
+			if evidence.obligation_count == 1 { "" } else { "s" },
+		);
+		Self::build(
+			SignalCode::ExplainGate,
+			summary,
+			SignalEvidence::ExplainGate(evidence),
+			SourceRef::ExplainPipeline,
+		)
+	}
+
+	pub fn explain_trust(evidence: ExplainTrustEvidence) -> Self {
+		let summary = format!(
+			"Trust: {:.0}% call resolution, {} call graph, {} dead code.",
+			evidence.call_resolution_rate * 100.0,
+			evidence.call_graph_reliability,
+			evidence.dead_code_reliability,
+		);
+		Self::build(
+			SignalCode::ExplainTrust,
+			summary,
+			SignalEvidence::ExplainTrust(evidence),
+			SourceRef::ExplainPipeline,
+		)
+	}
+
+	pub fn explain_measurements(evidence: ExplainMeasurementsEvidence) -> Self {
+		let summary = format!(
+			"{} measurement{}.",
+			evidence.items.len(),
+			if evidence.items.len() == 1 { "" } else { "s" },
+		);
+		Self::build(
+			SignalCode::ExplainMeasurements,
+			summary,
+			SignalEvidence::ExplainMeasurements(evidence),
+			SourceRef::ExplainPipeline,
 		)
 	}
 }
