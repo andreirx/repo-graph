@@ -302,6 +302,9 @@ pub const ORIENT_SCHEMA: &str = "rgr.agent.v1";
 /// Stable command identifier for `orient`.
 pub const ORIENT_COMMAND: &str = "orient";
 
+/// Stable command identifier for `check`.
+pub const CHECK_COMMAND: &str = "check";
+
 #[cfg(test)]
 mod tests {
 	use super::*;

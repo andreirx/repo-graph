@@ -25,7 +25,8 @@
 
 use repo_graph_agent::AgentStorageRead;
 use repo_graph_storage::types::{
-	CreateSnapshotInput, FileVersion, Repo, TrackedFile, UpdateSnapshotStatusInput,
+	CreateSnapshotInput, FileVersion, GraphEdge, GraphNode, Repo, TrackedFile,
+	UpdateSnapshotStatusInput,
 };
 use repo_graph_storage::StorageConnection;
 
@@ -531,4 +532,303 @@ fn orient_runs_over_real_storage_connection() {
 
 	// At minimum MODULE_SUMMARY + SNAPSHOT_INFO fire.
 	assert!(result.signals.len() >= 2);
+}
+
+// ── Characterization: trust reliability axes on empty snapshot ──
+//
+// Pins the adapter seam behavior that `check` will reduce. These
+// are NOT tests of check — they pin what the adapter currently
+// returns when the trust crate processes specific data shapes.
+
+#[test]
+fn trust_reliability_axes_on_empty_snapshot() {
+	// Characterization: get_trust_summary on a READY snapshot with
+	// zero files/nodes/edges. Pins the trust crate's behavior for
+	// the empty-data case so check can rely on these values.
+	use repo_graph_agent::{
+		AgentReliabilityLevel, EnrichmentState,
+	};
+
+	let (_tmp, mut storage) = open_temp_storage();
+	insert_repo(&storage, "r1", "my-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	let trust =
+		<StorageConnection as AgentStorageRead>::get_trust_summary(
+			&mut storage,
+			"r1",
+			&snapshot_uid,
+		)
+		.unwrap();
+
+	// call_graph_reliability: trust rule returns HIGH when total
+	// calls = 0 (no data to be unreliable about).
+	assert_eq!(
+		trust.call_graph_reliability.level,
+		AgentReliabilityLevel::High,
+		"empty snapshot call_graph_reliability must be High \
+		 (trust returns HIGH when total=0)"
+	);
+
+	// dead_code_reliability: trust rule fires
+	// missing_entrypoint_declarations when active_entrypoint_count
+	// = 0, which downgrades dead_code to LOW.
+	assert_eq!(
+		trust.dead_code_reliability.level,
+		AgentReliabilityLevel::Low,
+		"empty snapshot dead_code_reliability must be Low \
+		 (missing_entrypoint_declarations fires when active_entrypoint_count=0)"
+	);
+
+	// call_resolution_rate: trust defaults to 1.0 when total
+	// calls = 0 (no unresolved data → nothing to penalize).
+	assert!(
+		(trust.call_resolution_rate - 1.0).abs() < f64::EPSILON,
+		"empty snapshot call_resolution_rate must be 1.0 (no-data default); \
+		 actual: {}",
+		trust.call_resolution_rate
+	);
+
+	// enrichment_state: already tested separately, but pin it
+	// alongside the reliability axes for completeness.
+	assert_eq!(
+		trust.enrichment_state,
+		EnrichmentState::NotApplicable,
+		"empty snapshot enrichment_state must be NotApplicable"
+	);
+}
+
+// ── Characterization: trust reliability axes with call data ─────
+
+#[test]
+fn trust_reliability_axes_with_call_data() {
+	// Characterization: get_trust_summary on a snapshot with
+	// resolved CALLS edges AND extraction diagnostics recording
+	// unresolved calls. Pins the non-trivial reliability
+	// computation path.
+	//
+	// The trust crate reads `resolved_calls` from
+	// `count_edges_by_type(snapshot_uid, "CALLS")` (the edges
+	// table) and `unresolved_calls` from
+	// `ExtractionDiagnostics.unresolved_breakdown` (the
+	// `extraction_diagnostics_json` column on snapshots). Both
+	// must be seeded for a non-trivial call_resolution_rate.
+	use repo_graph_agent::AgentReliabilityLevel;
+
+	let dir = tempfile::tempdir().unwrap();
+	let db_path = dir.path().join("trust_calls.db");
+	let mut storage = StorageConnection::open(&db_path).unwrap();
+	insert_repo(&storage, "r1", "my-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	// Insert two SYMBOL nodes so the CALLS edge has valid
+	// source/target references.
+	storage
+		.insert_nodes(&[
+			GraphNode {
+				node_uid: "n1".into(),
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: "r1".into(),
+				stable_key: "r1:src/a.ts:caller:SYMBOL".into(),
+				kind: "SYMBOL".into(),
+				subtype: Some("FUNCTION".into()),
+				name: "caller".into(),
+				qualified_name: Some("src/a.ts:caller".into()),
+				file_uid: None,
+				parent_node_uid: None,
+				location: None,
+				signature: None,
+				visibility: Some("export".into()),
+				doc_comment: None,
+				metadata_json: None,
+			},
+			GraphNode {
+				node_uid: "n2".into(),
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: "r1".into(),
+				stable_key: "r1:src/b.ts:callee:SYMBOL".into(),
+				kind: "SYMBOL".into(),
+				subtype: Some("FUNCTION".into()),
+				name: "callee".into(),
+				qualified_name: Some("src/b.ts:callee".into()),
+				file_uid: None,
+				parent_node_uid: None,
+				location: None,
+				signature: None,
+				visibility: Some("export".into()),
+				doc_comment: None,
+				metadata_json: None,
+			},
+		])
+		.unwrap();
+
+	// Insert one resolved CALLS edge. This drives
+	// `resolved_calls = 1` through `count_edges_by_type`.
+	storage
+		.insert_edges(&[GraphEdge {
+			edge_uid: "e1".into(),
+			snapshot_uid: snapshot_uid.clone(),
+			repo_uid: "r1".into(),
+			source_node_uid: "n1".into(),
+			target_node_uid: "n2".into(),
+			edge_type: "CALLS".into(),
+			resolution: "static".into(),
+			extractor: "ts-base:1".into(),
+			location: None,
+			metadata_json: None,
+		}])
+		.unwrap();
+
+	// Seed extraction diagnostics with 1 unresolved call in a
+	// CALLS-family category. The trust crate reads unresolved
+	// calls from this JSON, not from the unresolved_edges table.
+	{
+		let raw = rusqlite::Connection::open(&db_path).unwrap();
+		let diagnostics_json = serde_json::json!({
+			"diagnostics_version": 1,
+			"edges_total": 2,
+			"unresolved_total": 1,
+			"unresolved_breakdown": {
+				"calls_function_ambiguous_or_missing": 1
+			}
+		});
+		raw.execute(
+			"UPDATE snapshots SET extraction_diagnostics_json = ? \
+			 WHERE snapshot_uid = ?",
+			rusqlite::params![diagnostics_json.to_string(), &snapshot_uid],
+		)
+		.unwrap();
+	}
+
+	let trust =
+		<StorageConnection as AgentStorageRead>::get_trust_summary(
+			&mut storage,
+			"r1",
+			&snapshot_uid,
+		)
+		.unwrap();
+
+	// call_resolution_rate: 1 resolved / (1 resolved + 1
+	// unresolved) = 0.5. Must be between 0 and 1 (not the
+	// empty-default 1.0).
+	assert!(
+		trust.call_resolution_rate > 0.0 && trust.call_resolution_rate < 1.0,
+		"call_resolution_rate with mixed resolved/unresolved must be \
+		 between 0 and 1; actual: {}",
+		trust.call_resolution_rate
+	);
+	assert!(
+		(trust.call_resolution_rate - 0.5).abs() < f64::EPSILON,
+		"expected call_resolution_rate = 0.5 (1 resolved, 1 unresolved \
+		 internal-like); actual: {}",
+		trust.call_resolution_rate
+	);
+
+	// call_graph_reliability: the trust rule uses rate < 0.5 →
+	// LOW, rate <= 0.85 → MEDIUM, rate > 0.85 → HIGH. At exactly
+	// 0.5, the rate is not < 0.5, so it falls into MEDIUM.
+	assert_eq!(
+		trust.call_graph_reliability.level,
+		AgentReliabilityLevel::Medium,
+		"call_graph_reliability at 50% resolution rate must be Medium"
+	);
+
+	// dead_code_reliability: still no entrypoints → LOW.
+	assert_eq!(
+		trust.dead_code_reliability.level,
+		AgentReliabilityLevel::Low,
+		"dead_code_reliability must still be Low (no entrypoints seeded)"
+	);
+}
+
+// ── Characterization: stale-files filtering ─────────────────────
+
+#[test]
+fn get_stale_files_returns_only_stale_not_ok() {
+	// Characterization: pin that get_stale_files returns only rows
+	// whose parse_status = 'stale', and that adding an 'ok' file
+	// does not inflate the stale count.
+	let (_tmp, mut storage) = open_temp_storage();
+	insert_repo(&storage, "r1", "my-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	// Seed one file with parse_status = 'stale'.
+	storage
+		.upsert_files(&[TrackedFile {
+			file_uid: "f1".into(),
+			repo_uid: "r1".into(),
+			path: "src/stale_file.rs".into(),
+			language: Some("rust".into()),
+			is_test: false,
+			is_generated: false,
+			is_excluded: false,
+		}])
+		.unwrap();
+	storage
+		.upsert_file_versions(&[FileVersion {
+			snapshot_uid: snapshot_uid.clone(),
+			file_uid: "f1".into(),
+			content_hash: "h1".into(),
+			ast_hash: None,
+			extractor: None,
+			parse_status: "stale".into(),
+			size_bytes: Some(10),
+			line_count: Some(2),
+			indexed_at: "2026-04-15T00:00:00Z".into(),
+		}])
+		.unwrap();
+
+	// First call: exactly 1 stale file.
+	let stale = <StorageConnection as AgentStorageRead>::get_stale_files(
+		&mut storage,
+		&snapshot_uid,
+	)
+	.unwrap();
+	assert_eq!(
+		stale.len(),
+		1,
+		"must return exactly 1 stale file before adding ok file"
+	);
+	assert_eq!(stale[0].path, "src/stale_file.rs");
+
+	// Seed a second file with parse_status = 'ok'.
+	storage
+		.upsert_files(&[TrackedFile {
+			file_uid: "f2".into(),
+			repo_uid: "r1".into(),
+			path: "src/ok_file.rs".into(),
+			language: Some("rust".into()),
+			is_test: false,
+			is_generated: false,
+			is_excluded: false,
+		}])
+		.unwrap();
+	storage
+		.upsert_file_versions(&[FileVersion {
+			snapshot_uid: snapshot_uid.clone(),
+			file_uid: "f2".into(),
+			content_hash: "h2".into(),
+			ast_hash: None,
+			extractor: None,
+			parse_status: "ok".into(),
+			size_bytes: Some(20),
+			line_count: Some(5),
+			indexed_at: "2026-04-15T00:00:00Z".into(),
+		}])
+		.unwrap();
+
+	// Second call: still exactly 1 stale file.
+	let stale_after = <StorageConnection as AgentStorageRead>::get_stale_files(
+		&mut storage,
+		&snapshot_uid,
+	)
+	.unwrap();
+	assert_eq!(
+		stale_after.len(),
+		1,
+		"stale count must not increase when an 'ok' file is added; \
+		 actual stale files: {:?}",
+		stale_after.iter().map(|s| &s.path).collect::<Vec<_>>()
+	);
+	assert_eq!(stale_after[0].path, "src/stale_file.rs");
 }

@@ -56,6 +56,7 @@
 //! The only external dependencies are `serde` and `serde_json`.
 
 pub mod aggregators;
+pub mod check;
 pub mod confidence;
 pub mod dto;
 pub mod errors;
@@ -69,12 +70,15 @@ pub use dto::{
 	budget::Budget,
 	envelope::{
 		Confidence, Focus, FocusCandidate, FocusFailureReason, NextAction,
-		NextKind, OrientResult, ResolvedKind, ORIENT_COMMAND, ORIENT_SCHEMA,
+		NextKind, OrientResult, ResolvedKind, CHECK_COMMAND, ORIENT_COMMAND,
+		ORIENT_SCHEMA,
 	},
 	limit::{Limit, LimitCode},
 	signal::{
 		BoundaryViolationEvidence, BoundaryViolationsEvidence,
-		CallersSummaryEvidence, CalleesSummaryEvidence, CycleEvidence,
+		CallersSummaryEvidence, CalleesSummaryEvidence,
+		CheckConditionEvidence, CheckFailEvidence,
+		CheckIncompleteEvidence, CheckPassEvidence, CycleEvidence,
 		DeadCodeEvidence, DeadSymbolEvidence, ImportCyclesEvidence,
 		ModuleCountEvidence, ModuleSummaryEvidence, Severity, Signal,
 		SignalCategory, SignalCode, SignalEvidence, SignalScope,
@@ -83,7 +87,11 @@ pub use dto::{
 	},
 	source::SourceRef,
 };
-pub use errors::{AgentStorageError, OrientError};
+pub use check::{
+	run_check, CheckInput, CheckResult, CheckVerdict, ConditionCode,
+	ConditionResult, ConditionStatus, GateOutcomeForCheck,
+};
+pub use errors::{AgentStorageError, CheckError, OrientError};
 pub use orient::orient;
 pub use storage_port::{
 	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentCycle,

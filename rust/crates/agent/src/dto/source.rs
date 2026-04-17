@@ -44,6 +44,10 @@ pub enum SourceRef {
 	StorageFindSymbolCallers,
 	/// Port method: `AgentStorageRead::find_symbol_callees`.
 	StorageFindSymbolCallees,
+	/// Check use case: two-phase reducer (`check::check`).
+	/// Emitted by `CHECK_PASS`, `CHECK_FAIL`, `CHECK_INCOMPLETE`
+	/// signals.
+	CheckReducer,
 }
 
 impl SourceRef {
@@ -65,6 +69,7 @@ impl SourceRef {
 			Self::GateAssemble => "gate::assemble",
 			Self::StorageFindSymbolCallers => "storage::find_symbol_callers",
 			Self::StorageFindSymbolCallees => "storage::find_symbol_callees",
+			Self::CheckReducer => "check::reducer",
 		}
 	}
 }
@@ -99,6 +104,7 @@ mod tests {
 			SourceRef::StorageGetTrustSummary,
 			SourceRef::StorageFindSymbolCallers,
 			SourceRef::StorageFindSymbolCallees,
+			SourceRef::CheckReducer,
 		] {
 			assert!(s.as_str().contains("::"));
 		}

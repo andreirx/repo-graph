@@ -482,3 +482,125 @@ fn storage_error_maps_to_gate_storage_error() {
 		"message must contain the storage error diagnostic"
 	);
 }
+
+// ── Characterization: gate assembly end-to-end ──────────────────
+//
+// Pins the full `repo_graph_gate::assemble` call path through the
+// real `StorageConnection`. These are NOT per-method tests (those
+// exist above) — they characterize the assembled GateReport shape
+// that `check` will consume.
+
+#[test]
+fn gate_assembly_with_boundary_and_requirement_produces_expected_report() {
+	// Characterization: seeds a repo + snapshot + boundary
+	// declaration + requirement declaration targeting the boundary
+	// module, then calls `repo_graph_gate::assemble` and asserts
+	// the GateReport has the expected obligation count, outcome,
+	// and exit code.
+	use repo_graph_gate::{assemble, GateMode};
+
+	let (_tmp, storage) = open_temp_storage();
+	insert_repo(&storage, "r1", "test-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	// Seed boundary: src/core forbids src/adapters.
+	insert_boundary_declaration(
+		&storage,
+		"r1",
+		"src/core",
+		"src/adapters",
+		Some("clean architecture"),
+	);
+
+	// Seed requirement with one arch_violations obligation
+	// targeting src/core.
+	insert_requirement_declaration(&storage, "r1", "REQ-1", 1);
+
+	let report = assemble(
+		&storage,
+		"r1",
+		&snapshot_uid,
+		GateMode::Default,
+		"2026-04-15T00:00:00Z",
+	)
+	.unwrap();
+
+	// One obligation from the seeded requirement.
+	assert_eq!(
+		report.obligations.len(),
+		1,
+		"must have exactly 1 obligation from the seeded requirement"
+	);
+
+	// The obligation is arch_violations with target src/core. With
+	// no actual IMPORTS edges violating the boundary, the computed
+	// verdict should be PASS.
+	let obl = &report.obligations[0];
+	assert_eq!(obl.req_id, "REQ-1");
+	assert_eq!(obl.method, "arch_violations");
+	assert_eq!(
+		obl.computed_verdict,
+		repo_graph_gate::Verdict::PASS,
+		"no violation edges seeded, so arch_violations must PASS"
+	);
+	assert_eq!(
+		obl.effective_verdict,
+		repo_graph_gate::EffectiveVerdict::PASS,
+		"no waiver needed for PASS → effective must also be PASS"
+	);
+
+	// Outcome: pass, exit_code 0.
+	assert_eq!(
+		report.outcome.outcome, "pass",
+		"all obligations PASS → outcome must be 'pass'"
+	);
+	assert_eq!(
+		report.outcome.exit_code, 0,
+		"all obligations PASS → exit_code must be 0"
+	);
+	assert_eq!(report.outcome.counts.total, 1);
+	assert_eq!(report.outcome.counts.pass, 1);
+	assert_eq!(report.outcome.counts.fail, 0);
+}
+
+#[test]
+fn gate_assembly_with_no_requirements_produces_empty_pass_report() {
+	// Characterization: seeds a repo + snapshot with NO
+	// declarations, then calls `repo_graph_gate::assemble`. The
+	// report must have zero obligations and outcome = "pass" with
+	// exit_code = 0.
+	use repo_graph_gate::{assemble, GateMode};
+
+	let (_tmp, storage) = open_temp_storage();
+	insert_repo(&storage, "r1", "test-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	let report = assemble(
+		&storage,
+		"r1",
+		&snapshot_uid,
+		GateMode::Default,
+		"2026-04-15T00:00:00Z",
+	)
+	.unwrap();
+
+	assert_eq!(
+		report.obligations.len(),
+		0,
+		"no requirements seeded → zero obligations"
+	);
+	assert_eq!(
+		report.outcome.outcome, "pass",
+		"zero obligations → outcome must be 'pass'"
+	);
+	assert_eq!(
+		report.outcome.exit_code, 0,
+		"zero obligations → exit_code must be 0"
+	);
+	assert_eq!(report.outcome.counts.total, 0);
+	assert_eq!(report.outcome.counts.pass, 0);
+	assert_eq!(report.outcome.counts.fail, 0);
+	assert_eq!(report.outcome.counts.waived, 0);
+	assert_eq!(report.outcome.counts.missing_evidence, 0);
+	assert_eq!(report.outcome.counts.unsupported, 0);
+}

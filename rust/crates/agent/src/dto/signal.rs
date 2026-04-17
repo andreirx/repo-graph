@@ -112,10 +112,11 @@ impl Serialize for Severity {
 // ── Category ─────────────────────────────────────────────────────
 
 /// Signal category. Ranking breaks ties within a severity tier
-/// by category order: gate > boundary > trust > structure >
+/// by category order: check > gate > boundary > trust > structure >
 /// informational.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignalCategory {
+	Check,
 	Gate,
 	Boundary,
 	Trust,
@@ -126,6 +127,7 @@ pub enum SignalCategory {
 impl SignalCategory {
 	pub fn as_str(self) -> &'static str {
 		match self {
+			Self::Check => "check",
 			Self::Gate => "gate",
 			Self::Boundary => "boundary",
 			Self::Trust => "trust",
@@ -135,14 +137,15 @@ impl SignalCategory {
 	}
 
 	/// Tie-breaking ordering. Lower return value wins (sorts
-	/// earlier in the output). Gate first, informational last.
+	/// earlier in the output). Check first, informational last.
 	pub fn tie_break_ordinal(self) -> u8 {
 		match self {
-			Self::Gate => 0,
-			Self::Boundary => 1,
-			Self::Trust => 2,
-			Self::Structure => 3,
-			Self::Informational => 4,
+			Self::Check => 0,
+			Self::Gate => 1,
+			Self::Boundary => 2,
+			Self::Trust => 3,
+			Self::Structure => 4,
+			Self::Informational => 5,
 		}
 	}
 }
@@ -161,6 +164,10 @@ impl Serialize for SignalCategory {
 /// enumeration stays complete and ranking is exhaustive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignalCode {
+	// Check verdicts
+	CheckPass,
+	CheckFail,
+	CheckIncomplete,
 	// Governance
 	GatePass,
 	GateFail,
@@ -186,6 +193,9 @@ pub enum SignalCode {
 impl SignalCode {
 	pub fn as_str(self) -> &'static str {
 		match self {
+			Self::CheckPass => "CHECK_PASS",
+			Self::CheckFail => "CHECK_FAIL",
+			Self::CheckIncomplete => "CHECK_INCOMPLETE",
 			Self::GatePass => "GATE_PASS",
 			Self::GateFail => "GATE_FAIL",
 			Self::GateIncomplete => "GATE_INCOMPLETE",
@@ -215,6 +225,10 @@ impl SignalCode {
 	/// (only one fires at a time), so they all share 0.
 	pub fn tier_priority(self) -> u8 {
 		match self {
+			// Check: only one fires at a time.
+			Self::CheckPass => 0,
+			Self::CheckFail => 0,
+			Self::CheckIncomplete => 0,
 			// Gate (High): only one fires at a time.
 			Self::GatePass => 0,
 			Self::GateFail => 0,
@@ -251,6 +265,9 @@ impl SignalCode {
 		use SignalCategory::*;
 		use Severity::*;
 		match self {
+			Self::CheckPass => (Check, Low),
+			Self::CheckFail => (Check, High),
+			Self::CheckIncomplete => (Check, Medium),
 			Self::GatePass => (Gate, Low),
 			Self::GateFail => (Gate, High),
 			Self::GateIncomplete => (Gate, Medium),
@@ -400,6 +417,39 @@ pub struct ModuleCountEvidence {
 	pub count: u64,
 }
 
+// ── Check condition evidence ─────────────────────────────────────
+
+/// One evaluated condition, serialized into check signal evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CheckConditionEvidence {
+	pub code: String,
+	pub status: String,
+	pub summary: String,
+}
+
+/// Evidence for `CHECK_PASS`: all conditions passed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CheckPassEvidence {
+	pub conditions: Vec<CheckConditionEvidence>,
+}
+
+/// Evidence for `CHECK_FAIL`: at least one condition failed, none
+/// incomplete.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CheckFailEvidence {
+	pub fail_conditions: Vec<CheckConditionEvidence>,
+	pub passing: Vec<CheckConditionEvidence>,
+}
+
+/// Evidence for `CHECK_INCOMPLETE`: at least one condition
+/// incomplete (takes precedence over fail).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CheckIncompleteEvidence {
+	pub incomplete_conditions: Vec<CheckConditionEvidence>,
+	pub fail_conditions: Vec<CheckConditionEvidence>,
+	pub passing: Vec<CheckConditionEvidence>,
+}
+
 // ── SignalEvidence enum ──────────────────────────────────────────
 
 /// Typed evidence variants. Exactly one variant per signal code
@@ -413,6 +463,9 @@ pub struct ModuleCountEvidence {
 /// today.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SignalEvidence {
+	CheckPass(CheckPassEvidence),
+	CheckFail(CheckFailEvidence),
+	CheckIncomplete(CheckIncompleteEvidence),
 	GatePass(GatePassEvidence),
 	GateFail(GateFailEvidence),
 	GateIncomplete(GateIncompleteEvidence),
@@ -431,6 +484,9 @@ pub enum SignalEvidence {
 impl Serialize for SignalEvidence {
 	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
 		match self {
+			Self::CheckPass(e) => e.serialize(serializer),
+			Self::CheckFail(e) => e.serialize(serializer),
+			Self::CheckIncomplete(e) => e.serialize(serializer),
 			Self::GatePass(e) => e.serialize(serializer),
 			Self::GateFail(e) => e.serialize(serializer),
 			Self::GateIncomplete(e) => e.serialize(serializer),
@@ -455,6 +511,9 @@ impl SignalEvidence {
 	#[cfg(test)]
 	pub(crate) fn variant_name(&self) -> &'static str {
 		match self {
+			Self::CheckPass(_) => "CheckPass",
+			Self::CheckFail(_) => "CheckFail",
+			Self::CheckIncomplete(_) => "CheckIncomplete",
 			Self::GatePass(_) => "GatePass",
 			Self::GateFail(_) => "GateFail",
 			Self::GateIncomplete(_) => "GateIncomplete",
@@ -570,6 +629,51 @@ impl Signal {
 	}
 
 	// ── Named constructors (one per emitted code) ────────────
+
+	pub fn check_pass(evidence: CheckPassEvidence) -> Self {
+		let n = evidence.conditions.len();
+		let summary = format!(
+			"Check passes: all {} condition{} pass.",
+			n,
+			if n == 1 { "" } else { "s" }
+		);
+		Self::build(
+			SignalCode::CheckPass,
+			summary,
+			SignalEvidence::CheckPass(evidence),
+			SourceRef::CheckReducer,
+		)
+	}
+
+	pub fn check_fail(evidence: CheckFailEvidence) -> Self {
+		let n = evidence.fail_conditions.len();
+		let summary = format!(
+			"Check fails: {} condition{} failing.",
+			n,
+			if n == 1 { "" } else { "s" }
+		);
+		Self::build(
+			SignalCode::CheckFail,
+			summary,
+			SignalEvidence::CheckFail(evidence),
+			SourceRef::CheckReducer,
+		)
+	}
+
+	pub fn check_incomplete(evidence: CheckIncompleteEvidence) -> Self {
+		let n = evidence.incomplete_conditions.len();
+		let summary = format!(
+			"Check incomplete: {} condition{} missing data.",
+			n,
+			if n == 1 { "" } else { "s" }
+		);
+		Self::build(
+			SignalCode::CheckIncomplete,
+			summary,
+			SignalEvidence::CheckIncomplete(evidence),
+			SourceRef::CheckReducer,
+		)
+	}
 
 	pub fn gate_pass(evidence: GatePassEvidence) -> Self {
 		let summary = if evidence.total_count == 0 {
@@ -835,7 +939,11 @@ mod tests {
 	}
 
 	#[test]
-	fn category_tie_break_order_is_gate_first() {
+	fn category_tie_break_order_is_check_first() {
+		assert!(
+			SignalCategory::Check.tie_break_ordinal()
+				< SignalCategory::Gate.tie_break_ordinal()
+		);
 		assert!(
 			SignalCategory::Gate.tie_break_ordinal()
 				< SignalCategory::Boundary.tie_break_ordinal()

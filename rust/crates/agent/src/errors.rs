@@ -117,3 +117,40 @@ impl From<AgentStorageError> for OrientError {
 		Self::Storage(e)
 	}
 }
+
+// ── Check use-case error ────────────────────────────────────────
+
+/// Errors returned by `run_check()`.
+///
+/// Distinct from `OrientError` because check has different failure
+/// semantics: missing snapshot is NOT an error (it produces
+/// `CHECK_INCOMPLETE`), whereas orient requires a snapshot.
+/// `NoRepo` IS an error because there is no repo identity to
+/// populate the envelope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckError {
+	/// The storage port failed.
+	Storage(AgentStorageError),
+
+	/// The given `repo_uid` does not exist in storage.
+	NoRepo { repo_uid: String },
+}
+
+impl fmt::Display for CheckError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Storage(e) => write!(f, "{}", e),
+			Self::NoRepo { repo_uid } => {
+				write!(f, "repo not found: {}", repo_uid)
+			}
+		}
+	}
+}
+
+impl std::error::Error for CheckError {}
+
+impl From<AgentStorageError> for CheckError {
+	fn from(e: AgentStorageError) -> Self {
+		Self::Storage(e)
+	}
+}
