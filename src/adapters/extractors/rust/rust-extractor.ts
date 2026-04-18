@@ -149,7 +149,15 @@ export class RustExtractor implements ExtractorPort {
 			this.visitTopLevel(child, ctx);
 		}
 
-		return { nodes, edges, metrics, importBindings };
+		return {
+			nodes,
+			edges,
+			metrics,
+			importBindings,
+			// TS-side ResolvedCallsite population deferred per
+			// Fork-1 posture.
+			resolvedCallsites: [],
+		};
 
 		} finally {
 			tree.delete();
@@ -240,6 +248,7 @@ export class RustExtractor implements ExtractorPort {
 				isRelative,
 				location,
 				isTypeOnly: false, // Rust `use` imports both types and values
+				importedName: null,
 			});
 
 			// IMPORTS edge. Target key uses the module specifier path.

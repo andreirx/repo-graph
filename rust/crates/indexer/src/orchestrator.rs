@@ -1234,6 +1234,7 @@ mod tests {
 				edges: vec![],
 				metrics: BTreeMap::new(),
 				import_bindings: vec![],
+				resolved_callsites: vec![],
 			})
 		}
 	}

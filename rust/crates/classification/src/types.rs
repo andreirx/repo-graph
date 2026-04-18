@@ -119,6 +119,37 @@ pub struct ImportBinding {
 	/// `{ type X }` is NOT detected and yields `is_type_only:
 	/// false`.
 	pub is_type_only: bool,
+	/// Original exported symbol name for named imports.
+	///
+	/// Populated for named imports so that alias resolution works
+	/// downstream:
+	/// - `import { readFile } from "fs"`
+	///   → `identifier = "readFile"`, `imported_name = Some("readFile")`
+	/// - `import { readFile as rf } from "fs"`
+	///   → `identifier = "rf"`, `imported_name = Some("readFile")`
+	///
+	/// `None` for default imports (`import fs from "fs"`) and
+	/// namespace imports (`import * as fs from "fs"`) because
+	/// those patterns bring in the whole module surface; the
+	/// actual symbol is determined at the call site by the
+	/// member expression, not by the import statement.
+	///
+	/// TS-side note: under the Fork-1 state-boundary posture,
+	/// TS-codebase extractors (`src/adapters/extractors/*`)
+	/// populate this as `null` on every binding. Full TS-side
+	/// population is a deferred follow-on. The field is present
+	/// in the contract for symmetry; Rust-side consumers
+	/// (`state-extractor`) are the only ones populating it
+	/// today.
+	///
+	/// Serde: `#[serde(default, skip_serializing_if =
+	/// "Option::is_none")]` keeps this additive-transparent for
+	/// the existing cross-runtime parity harness
+	/// (`test/ts-extractor-parity/ts-extractor-parity.test.ts`),
+	/// which projects `ImportBinding` to a fixed field set
+	/// excluding this field.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub imported_name: Option<String>,
 }
 
 /// Classification-local input type for the unresolved-edge
@@ -860,12 +891,16 @@ mod tests {
 			is_relative: true,
 			location: None,
 			is_type_only: false,
+			imported_name: None,
 		};
 		let s = serde_json::to_string(&ib).unwrap();
 		assert!(s.contains("\"isRelative\":true"));
 		assert!(s.contains("\"isTypeOnly\":false"));
 		assert!(!s.contains("\"is_relative\""));
 		assert!(!s.contains("\"is_type_only\""));
+		// None importedName is skipped from serialized output
+		// (contract §serde: skip_serializing_if = Option::is_none).
+		assert!(!s.contains("importedName"));
 	}
 
 	#[test]

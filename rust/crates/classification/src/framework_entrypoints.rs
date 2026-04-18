@@ -98,6 +98,7 @@ mod tests {
 			is_relative: false,
 			location: None,
 			is_type_only: true,
+			imported_name: None,
 		}
 	}
 
@@ -108,6 +109,7 @@ mod tests {
 			is_relative: false,
 			location: None,
 			is_type_only: false,
+			imported_name: None,
 		}
 	}
 
@@ -118,6 +120,7 @@ mod tests {
 			is_relative: false,
 			location: None,
 			is_type_only: false,
+			imported_name: None,
 		}
 	}
 

@@ -150,7 +150,15 @@ export class JavaExtractor implements ExtractorPort {
 			this.visitTopLevel(child, ctx, null);
 		}
 
-		return { nodes, edges, metrics, importBindings };
+		return {
+			nodes,
+			edges,
+			metrics,
+			importBindings,
+			// TS-side ResolvedCallsite population deferred per
+			// Fork-1 posture.
+			resolvedCallsites: [],
+		};
 
 		} finally {
 			tree.delete();
@@ -270,6 +278,7 @@ export class JavaExtractor implements ExtractorPort {
 			isRelative: false,
 			location,
 			isTypeOnly: false,
+			importedName: null,
 		});
 
 		// IMPORTS edge. Target key is the full import path.

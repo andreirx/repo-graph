@@ -296,8 +296,93 @@ pub struct ExtractedMetrics {
 	pub max_nesting_depth: u32,
 }
 
+/// Classification of a call site's positional argument 0 payload.
+///
+/// Added by SB-3-pre for state-boundary integration. The variant
+/// carries the extracted value directly: the state-boundary layer
+/// uses the payload plus the binding table to build the target
+/// resource's stable key.
+///
+/// Slice-scoped on purpose: this covers only the argument-0 forms
+/// SB-3 ships (string literal; `process.env.NAME` member read).
+/// It is NOT the final universal call-argument model; object-
+/// property extraction, constructor configs, and positional
+/// beyond index 0 are reserved for later slices with their own
+/// types.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Arg0Payload {
+	/// Argument 0 is a string literal. Carries the literal text
+	/// (quotes stripped).
+	StringLiteral {
+		/// The literal string value.
+		value: String,
+	},
+	/// Argument 0 is a `process.env.NAME` member read. Carries
+	/// the env-key name (the `NAME` part of `process.env.NAME`).
+	EnvKeyRead {
+		/// The env-key identifier (e.g. `"DATABASE_URL"`).
+		key_name: String,
+	},
+}
+
+/// A call-site fact with the callee resolved to a (module,
+/// symbol) pair via the file's import bindings, plus a
+/// classification of argument 0's payload.
+///
+/// Added by SB-3-pre. Produced by the ts-extractor for every call
+/// expression whose callee resolves via an import binding AND
+/// whose arg 0 matches one of the patterns captured by
+/// `Arg0Payload`. Consumed by `state-extractor` downstream; no
+/// state-boundary-specific filtering in the extractor itself
+/// (filtering happens at the binding-table match layer).
+///
+/// Narrow by design: only the fields SB-3 actually needs. The
+/// generic `CALLS` edge on `ExtractedEdge` is unchanged and
+/// remains the cross-runtime parity surface for call-graph
+/// analysis; `ResolvedCallsite` is a Rust-only extractor-output
+/// channel under the Fork-1 posture (TS population is deferred).
+///
+/// Slice-1 limitation: top-level calls at module scope do NOT
+/// produce `ResolvedCallsite` facts. The `enclosing_symbol_node_uid`
+/// field is typed as "enclosing SYMBOL node UID" by contract; the
+/// call-extraction pipeline uses the FILE node UID as the caller
+/// for top-level statements, which would violate the contract.
+/// Top-level state touches remain visible as generic CALLS edges.
+/// Widening the contract to accept file-rooted sources is deferred
+/// pending a real consumer need for file-rooted state-boundary
+/// edges (currently none).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedCallsite {
+	/// `node_uid` of the symbol containing the call site.
+	pub enclosing_symbol_node_uid: String,
+	/// Resolved source module of the callee, via import
+	/// bindings. Matches the `specifier` of one of the file's
+	/// `import_bindings`.
+	pub resolved_module: String,
+	/// Resolved exported-symbol path within `resolved_module`.
+	/// For named imports with an alias, this is the ORIGINAL
+	/// exported name (via `ImportBinding.imported_name`), not
+	/// the local alias.
+	pub resolved_symbol: String,
+	/// Classification of argument 0's payload.
+	pub arg0_payload: Arg0Payload,
+	/// Source location of the call expression.
+	pub source_location: SourceLocation,
+}
+
 /// The result of extracting a single file. Mirrors
 /// `ExtractionResult` from `src/core/ports/extractor.ts`.
+///
+/// Cross-runtime parity: every field of this struct has a
+/// corresponding field on the TS `ExtractionResult` interface.
+/// `resolved_callsites` / `resolvedCallsites` was added by
+/// SB-3-pre and is structurally present on both runtimes; only
+/// the Rust `ts-extractor` populates it today, but the port
+/// contract remains unified (TS extractors return empty arrays
+/// under the Fork-1 posture). See
+/// `docs/TECH-DEBT.md` for the TS-side deferred population note.
 pub struct ExtractionResult {
 	/// FILE node + all symbol nodes found in this file.
 	pub nodes: Vec<ExtractedNode>,
@@ -308,6 +393,12 @@ pub struct ExtractionResult {
 	pub metrics: BTreeMap<String, ExtractedMetrics>,
 	/// Import statement bindings found in this file.
 	pub import_bindings: Vec<ImportBinding>,
+	/// Resolved callsite facts for state-boundary integration
+	/// (SB-3-pre). Present on both runtimes' `ExtractionResult`
+	/// contract; populated by the Rust `ts-extractor` under
+	/// Fork 1, empty for all other extractors. See
+	/// `ResolvedCallsite` docs.
+	pub resolved_callsites: Vec<ResolvedCallsite>,
 }
 
 // ── Indexer input/output types ──────────────────────────────────

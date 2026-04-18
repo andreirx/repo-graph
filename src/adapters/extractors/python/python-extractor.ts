@@ -164,6 +164,11 @@ export class PythonExtractor implements ExtractorPort {
 			edges: ctx.edges,
 			metrics: ctx.metrics,
 			importBindings: ctx.importBindings,
+			// TS-side ResolvedCallsite population deferred per
+			// Fork-1 posture. See TECH-DEBT.md and the
+			// ResolvedCallsite docstring in
+			// src/core/ports/extractor.ts.
+			resolvedCallsites: [],
 		};
 
 		} finally {
@@ -260,6 +265,7 @@ export class PythonExtractor implements ExtractorPort {
 					isRelative: false,
 					location: locationFromNode(node),
 					isTypeOnly: false,
+					importedName: null,
 				});
 			} else if (child.type === "aliased_import") {
 				const nameNode = child.childForFieldName("name");
@@ -274,6 +280,7 @@ export class PythonExtractor implements ExtractorPort {
 						isRelative: false,
 						location: locationFromNode(node),
 						isTypeOnly: false,
+						importedName: null,
 					});
 				}
 			}
@@ -318,6 +325,7 @@ export class PythonExtractor implements ExtractorPort {
 					isRelative,
 					location: locationFromNode(node),
 					isTypeOnly: false,
+					importedName: null,
 				});
 			} else if (child.type === "aliased_import") {
 				const nameNode = child.childForFieldName("name");
@@ -330,6 +338,7 @@ export class PythonExtractor implements ExtractorPort {
 						isRelative,
 						location: locationFromNode(node),
 						isTypeOnly: false,
+						importedName: null,
 					});
 				}
 			}

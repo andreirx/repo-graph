@@ -661,6 +661,7 @@ mod tests {
 			is_relative: false,
 			location: None,
 			is_type_only: false,
+			imported_name: None,
 		}];
 		fs.package_dependencies = PackageDependencySet {
 			names: vec!["lodash".into()],
@@ -684,6 +685,7 @@ mod tests {
 			is_relative: true,
 			location: None,
 			is_type_only: false,
+			imported_name: None,
 		}];
 		let v = classify_unresolved_edge(
 			&edge("helper"),
@@ -704,6 +706,7 @@ mod tests {
 			is_relative: false,
 			location: None,
 			is_type_only: false,
+			imported_name: None,
 		}];
 		fs.tsconfig_aliases = TsconfigAliases {
 			entries: vec![TsconfigAliasEntry {

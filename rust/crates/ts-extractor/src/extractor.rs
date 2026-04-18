@@ -7,8 +7,8 @@ use repo_graph_classification::types::{
 };
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::types::{
-	EdgeType, ExtractionResult, ExtractedEdge, ExtractedNode, NodeKind,
-	NodeSubtype, Resolution, Visibility,
+	Arg0Payload, EdgeType, ExtractionResult, ExtractedEdge, ExtractedNode,
+	NodeKind, NodeSubtype, Resolution, ResolvedCallsite, Visibility,
 };
 
 use crate::builtins::ts_js_runtime_builtins;
@@ -155,6 +155,7 @@ impl ExtractorPort for TsExtractor {
 			}],
 			edges: Vec::new(),
 			import_bindings: Vec::new(),
+			resolved_callsites: Vec::new(),
 			metrics: BTreeMap::new(),
 			exported_names: std::collections::HashSet::new(),
 			file_scope_bindings: std::collections::HashMap::new(),
@@ -252,6 +253,7 @@ impl ExtractorPort for TsExtractor {
 			edges: ctx.edges,
 			metrics: ctx.metrics,
 			import_bindings: ctx.import_bindings,
+			resolved_callsites: ctx.resolved_callsites,
 		})
 	}
 }
@@ -268,6 +270,7 @@ struct ExtractionCtx<'a> {
 	nodes: Vec<ExtractedNode>,
 	edges: Vec<ExtractedEdge>,
 	import_bindings: Vec<ImportBinding>,
+	resolved_callsites: Vec<repo_graph_indexer::types::ResolvedCallsite>,
 	metrics: BTreeMap<String, repo_graph_indexer::types::ExtractedMetrics>,
 	exported_names: std::collections::HashSet<String>,
 	// Receiver type binding state:
@@ -1246,13 +1249,14 @@ fn extract_import(
 		if child.kind() != "import_clause" {
 			continue;
 		}
-		for ident in collect_local_identifiers(&child, source) {
+		for (ident, imported) in collect_local_identifiers(&child, source) {
 			import_bindings.push(ImportBinding {
 				identifier: ident,
 				specifier: raw_path.to_string(),
 				is_relative,
 				location: Some(location),
 				is_type_only,
+				imported_name: imported,
 			});
 		}
 	}
@@ -1289,41 +1293,64 @@ fn extract_import(
 	});
 }
 
-/// Collect local identifier names from an `import_clause` node.
+/// Collect local identifier names from an `import_clause` node,
+/// paired with the original exported symbol name (if any).
 ///
-/// Handles default, namespace, and named imports (with aliases).
+/// Returns `(identifier, imported_name)` tuples:
+///
+/// - Default import `import X from "m"` → `("X", None)`.
+/// - Namespace import `import * as X from "m"` → `("X", None)`.
+/// - Named import `import { X } from "m"` → `("X", Some("X"))`.
+/// - Named import with alias `import { X as Y } from "m"` →
+///   `("Y", Some("X"))`.
+///
+/// Default and namespace imports carry `None` because they bring
+/// in the whole module surface; the actual symbol comes from the
+/// member expression at the call site.
+///
 /// Mirror of `collectLocalIdentifiers` from `ts-extractor.ts:1691`.
-fn collect_local_identifiers(import_clause: &tree_sitter::Node, source: &[u8]) -> Vec<String> {
+fn collect_local_identifiers(
+	import_clause: &tree_sitter::Node,
+	source: &[u8],
+) -> Vec<(String, Option<String>)> {
 	let mut identifiers = Vec::new();
 	let mut cursor = import_clause.walk();
 	for child in import_clause.children(&mut cursor) {
 		match child.kind() {
 			"identifier" => {
-				// Default import: `import X from "m"`
-				identifiers.push(child.utf8_text(source).unwrap_or("").to_string());
+				// Default import: `import X from "m"`.
+				let ident = child.utf8_text(source).unwrap_or("").to_string();
+				identifiers.push((ident, None));
 			}
 			"namespace_import" => {
-				// `import * as ns from "m"`
+				// `import * as ns from "m"`.
 				let mut ns_cursor = child.walk();
 				for n in child.children(&mut ns_cursor) {
 					if n.kind() == "identifier" {
-						identifiers.push(n.utf8_text(source).unwrap_or("").to_string());
+						let ident = n.utf8_text(source).unwrap_or("").to_string();
+						identifiers.push((ident, None));
 						break;
 					}
 				}
 			}
 			"named_imports" => {
-				// `import { a, b as c } from "m"`
+				// `import { a, b as c } from "m"`.
 				let mut named_cursor = child.walk();
 				for spec in child.children(&mut named_cursor) {
 					if spec.kind() != "import_specifier" {
 						continue;
 					}
-					let alias = spec.child_by_field_name("alias");
-					let name = spec.child_by_field_name("name");
-					let local = alias.or(name);
-					if let Some(n) = local {
-						identifiers.push(n.utf8_text(source).unwrap_or("").to_string());
+					let name_node = spec.child_by_field_name("name");
+					let alias_node = spec.child_by_field_name("alias");
+					let exported_name = name_node
+						.map(|n| n.utf8_text(source).unwrap_or("").to_string());
+					// Local name: alias if present, otherwise the
+					// exported name.
+					let local = alias_node.or(name_node).map(|n| {
+						n.utf8_text(source).unwrap_or("").to_string()
+					});
+					if let Some(ident) = local {
+						identifiers.push((ident, exported_name));
 					}
 				}
 			}
@@ -1661,6 +1688,41 @@ fn extract_calls_from_single_node(
 					});
 				}
 			}
+
+			// SB-3-pre: emit a ResolvedCallsite alongside the
+			// CALLS edge when the callee resolves to a
+			// (module, symbol) via import bindings AND arg[0]
+			// matches one of the slice-1 payload patterns.
+			//
+			// This side-channel does NOT replace the CALLS
+			// edge; it is an additional structured fact
+			// consumed by state-extractor. The CALLS edge's
+			// shape is unchanged (preserves cross-runtime
+			// parity).
+			//
+			// Top-level-call suppression: `ResolvedCallsite`'s
+			// contract says `enclosing_symbol_node_uid` is a
+			// SYMBOL node's UID. Top-level statements in the
+			// call-extraction pipeline pass the FILE node UID
+			// as the caller. Emitting a ResolvedCallsite in
+			// that case would stamp a FILE UID into a field
+			// typed as "enclosing symbol." Slice-1 choice:
+			// suppress these. Top-level state touches remain
+			// visible as CALLS edges; they do not produce
+			// state-boundary edges. Documented in the
+			// `ResolvedCallsite` docstring as a slice-1
+			// limitation.
+			if caller_node_uid != ctx.file_node_uid {
+				if let Some(resolved) = try_resolve_callsite(
+					node,
+					&fn_node,
+					source,
+					caller_node_uid,
+					&ctx.import_bindings,
+				) {
+					ctx.resolved_callsites.push(resolved);
+				}
+			}
 		}
 	}
 
@@ -1699,6 +1761,164 @@ fn get_call_target_name(fn_node: &tree_sitter::Node, source: &[u8]) -> Option<St
 			let obj_text = object.utf8_text(source).unwrap_or("");
 			let prop_text = property.utf8_text(source).unwrap_or("");
 			Some(format!("{}.{}", obj_text, prop_text))
+		}
+		_ => None,
+	}
+}
+
+// ── SB-3-pre: resolved-callsite extraction ──────────────────────
+//
+// Produces `ResolvedCallsite` facts for call expressions whose
+// callee resolves to a (module, symbol) pair via the file's
+// import bindings AND whose argument 0 matches one of the
+// slice-1 payload patterns (string literal OR `process.env.NAME`
+// member read).
+//
+// Non-matching calls produce no ResolvedCallsite; they remain
+// represented as plain CALLS edges only. state-extractor filters
+// further via the binding table.
+
+/// Attempt to build a `ResolvedCallsite` from a call-expression
+/// AST node. Returns `None` if callee-resolution or arg-0
+/// classification fails.
+fn try_resolve_callsite(
+	call_node: &tree_sitter::Node,
+	fn_node: &tree_sitter::Node,
+	source: &[u8],
+	enclosing_symbol_node_uid: &str,
+	import_bindings: &[ImportBinding],
+) -> Option<ResolvedCallsite> {
+	let (resolved_module, resolved_symbol) =
+		resolve_callee_via_imports(fn_node, source, import_bindings)?;
+	let arg0_payload = classify_arg0_payload(call_node, source)?;
+	Some(ResolvedCallsite {
+		enclosing_symbol_node_uid: enclosing_symbol_node_uid.to_string(),
+		resolved_module,
+		resolved_symbol,
+		arg0_payload,
+		source_location: location_from_node(call_node),
+	})
+}
+
+/// Resolve the callee AST node to a `(module, symbol)` pair via
+/// the file's import bindings.
+///
+/// Supported patterns:
+/// - Bare identifier (`readFile(...)`): matches a named import
+///   binding by local identifier; resolves via `imported_name`
+///   if aliased, else the identifier is the symbol.
+/// - Member expression (`fs.readFile(...)`): matches a default or
+///   namespace import binding by object identifier; the property
+///   becomes the symbol.
+///
+/// Returns `None` when no binding anchors the callee, or when
+/// the callee shape is outside the supported patterns.
+fn resolve_callee_via_imports(
+	fn_node: &tree_sitter::Node,
+	source: &[u8],
+	import_bindings: &[ImportBinding],
+) -> Option<(String, String)> {
+	match fn_node.kind() {
+		"identifier" => {
+			let ident = fn_node.utf8_text(source).ok()?.to_string();
+			// Look up a named-import binding whose local
+			// identifier matches. Only named imports resolve
+			// this way (they have imported_name populated);
+			// a default / namespace binding that happens to
+			// share the identifier would have imported_name =
+			// None and we do NOT resolve those at the bare-
+			// identifier callsite (a default import is only
+			// called via member access in JS/TS).
+			let binding = import_bindings
+				.iter()
+				.find(|b| b.identifier == ident && b.imported_name.is_some())?;
+			let symbol = binding
+				.imported_name
+				.clone()
+				.expect("checked is_some() above");
+			Some((binding.specifier.clone(), symbol))
+		}
+		"member_expression" => {
+			let object = fn_node.child_by_field_name("object")?;
+			let property = fn_node.child_by_field_name("property")?;
+			// The object itself must be a plain identifier
+			// corresponding to an import binding. Deeper
+			// member expressions (e.g., `a.b.c()`) are out of
+			// slice-1 scope.
+			if object.kind() != "identifier" {
+				return None;
+			}
+			let obj_text = object.utf8_text(source).ok()?.to_string();
+			let prop_text = property.utf8_text(source).ok()?.to_string();
+			// The binding must be a default or namespace
+			// import (imported_name = None). A named import
+			// called via member access (`named.method()`)
+			// would be the named symbol itself reached
+			// through its own methods — not in slice-1 scope.
+			let binding = import_bindings
+				.iter()
+				.find(|b| b.identifier == obj_text && b.imported_name.is_none())?;
+			Some((binding.specifier.clone(), prop_text))
+		}
+		_ => None,
+	}
+}
+
+/// Classify the argument-0 payload of a call expression.
+///
+/// Supported patterns (SB-3-pre):
+/// - String literal: `foo("bar")` → `StringLiteral { value: "bar" }`.
+/// - `process.env.NAME` member read:
+///   `foo(process.env.DATABASE_URL)` →
+///   `EnvKeyRead { key_name: "DATABASE_URL" }`.
+///
+/// Returns `None` for any other shape (variable reference,
+/// template literal, computed expression, missing argument, etc.).
+fn classify_arg0_payload(
+	call_node: &tree_sitter::Node,
+	source: &[u8],
+) -> Option<Arg0Payload> {
+	let args_node = call_node.child_by_field_name("arguments")?;
+	// tree-sitter's `arguments` node contains `(` + args + `)`.
+	// Iterate its named children to find arg index 0.
+	let mut cursor = args_node.walk();
+	let mut arg0: Option<tree_sitter::Node> = None;
+	for child in args_node.children(&mut cursor) {
+		if child.is_named() {
+			arg0 = Some(child);
+			break;
+		}
+	}
+	let arg0 = arg0?;
+	match arg0.kind() {
+		"string" => {
+			// tree-sitter's string node wraps quoted content.
+			// Strip outer quotes by reading string_fragment if
+			// present, else fall back to slicing the literal.
+			let literal_text = arg0.utf8_text(source).ok()?;
+			let stripped = literal_text
+				.trim_matches(|c| c == '\'' || c == '"' || c == '`')
+				.to_string();
+			Some(Arg0Payload::StringLiteral { value: stripped })
+		}
+		"member_expression" => {
+			// Pattern: `process.env.NAME`.
+			let object = arg0.child_by_field_name("object")?;
+			let property = arg0.child_by_field_name("property")?;
+			// The object must itself be `process.env`.
+			if object.kind() != "member_expression" {
+				return None;
+			}
+			let inner_object = object.child_by_field_name("object")?;
+			let inner_property = object.child_by_field_name("property")?;
+			if inner_object.utf8_text(source).ok()? != "process" {
+				return None;
+			}
+			if inner_property.utf8_text(source).ok()? != "env" {
+				return None;
+			}
+			let key_name = property.utf8_text(source).ok()?.to_string();
+			Some(Arg0Payload::EnvKeyRead { key_name })
 		}
 		_ => None,
 	}
@@ -1940,6 +2160,12 @@ mod tests {
 		assert_eq!(result.import_bindings[0].specifier, "./types");
 		assert!(result.import_bindings[0].is_relative);
 		assert!(!result.import_bindings[0].is_type_only);
+		// Named import without alias: imported_name equals the
+		// local identifier (original exported name).
+		assert_eq!(
+			result.import_bindings[0].imported_name.as_deref(),
+			Some("Foo")
+		);
 	}
 
 	#[test]
@@ -1960,6 +2186,9 @@ mod tests {
 		assert_eq!(result.import_bindings[0].identifier, "express");
 		assert_eq!(result.import_bindings[0].specifier, "express");
 		assert!(!result.import_bindings[0].is_relative);
+		// Default import: imported_name is None (no specific
+		// exported symbol; the whole module surface is imported).
+		assert_eq!(result.import_bindings[0].imported_name, None);
 	}
 
 	#[test]
@@ -1987,9 +2216,20 @@ mod tests {
 		);
 
 		assert_eq!(result.import_bindings.len(), 2);
-		// Alias takes priority.
+		// Alias takes priority for local identifier.
 		assert_eq!(result.import_bindings[0].identifier, "bar");
 		assert_eq!(result.import_bindings[1].identifier, "baz");
+		// Aliased import preserves the original exported name.
+		assert_eq!(
+			result.import_bindings[0].imported_name.as_deref(),
+			Some("foo"),
+			"aliased import must preserve original exported name"
+		);
+		// Non-aliased named import: imported_name equals local name.
+		assert_eq!(
+			result.import_bindings[1].imported_name.as_deref(),
+			Some("baz")
+		);
 	}
 
 	#[test]
@@ -2004,6 +2244,10 @@ mod tests {
 
 		assert_eq!(result.import_bindings.len(), 1);
 		assert_eq!(result.import_bindings[0].identifier, "utils");
+		// Namespace import: imported_name is None (whole module
+		// surface; symbol comes from member expression at call
+		// site).
+		assert_eq!(result.import_bindings[0].imported_name, None);
 	}
 
 	#[test]
@@ -2768,5 +3012,280 @@ mod tests {
 		// 1 + for_in + if = 3
 		assert_eq!(m.cyclomatic_complexity, 3);
 		assert_eq!(m.max_nesting_depth, 2);
+	}
+
+	// ══════════════════════════════════════════════════════════════
+	//  SB-3-pre: ResolvedCallsite extraction
+	// ══════════════════════════════════════════════════════════════
+
+	#[test]
+	fn resolved_callsite_named_import_with_string_literal_arg0() {
+		let mut ext = TsExtractor::new();
+		ext.initialize().unwrap();
+		let result = extract_ok(
+			&ext,
+			r#"
+import { readFile } from "fs";
+export function load() {
+  readFile("/etc/config", () => {});
+}
+"#,
+			"src/load.ts",
+		);
+
+		assert_eq!(result.resolved_callsites.len(), 1);
+		let rc = &result.resolved_callsites[0];
+		assert_eq!(rc.resolved_module, "fs");
+		assert_eq!(rc.resolved_symbol, "readFile");
+		match &rc.arg0_payload {
+			Arg0Payload::StringLiteral { value } => {
+				assert_eq!(value, "/etc/config");
+			}
+			other => panic!("expected StringLiteral, got {:?}", other),
+		}
+	}
+
+	#[test]
+	fn resolved_callsite_aliased_named_import_recovers_original_symbol() {
+		let mut ext = TsExtractor::new();
+		ext.initialize().unwrap();
+		let result = extract_ok(
+			&ext,
+			r#"
+import { readFile as rf } from "fs";
+export function load() {
+  rf("/etc/config", () => {});
+}
+"#,
+			"src/load.ts",
+		);
+
+		assert_eq!(result.resolved_callsites.len(), 1);
+		let rc = &result.resolved_callsites[0];
+		// resolved_symbol is the ORIGINAL exported name, not the
+		// local alias.
+		assert_eq!(rc.resolved_module, "fs");
+		assert_eq!(rc.resolved_symbol, "readFile");
+	}
+
+	#[test]
+	fn resolved_callsite_default_import_member_call() {
+		let mut ext = TsExtractor::new();
+		ext.initialize().unwrap();
+		let result = extract_ok(
+			&ext,
+			r#"
+import fs from "fs";
+export function load() {
+  fs.readFile("/etc/config", () => {});
+}
+"#,
+			"src/load.ts",
+		);
+
+		assert_eq!(result.resolved_callsites.len(), 1);
+		let rc = &result.resolved_callsites[0];
+		assert_eq!(rc.resolved_module, "fs");
+		assert_eq!(rc.resolved_symbol, "readFile");
+	}
+
+	#[test]
+	fn resolved_callsite_namespace_import_member_call() {
+		let mut ext = TsExtractor::new();
+		ext.initialize().unwrap();
+		let result = extract_ok(
+			&ext,
+			r#"
+import * as fs from "fs";
+export function load() {
+  fs.readFile("/etc/config", () => {});
+}
+"#,
+			"src/load.ts",
+		);
+
+		assert_eq!(result.resolved_callsites.len(), 1);
+		let rc = &result.resolved_callsites[0];
+		assert_eq!(rc.resolved_module, "fs");
+		assert_eq!(rc.resolved_symbol, "readFile");
+	}
+
+	#[test]
+	fn resolved_callsite_env_key_read_arg0() {
+		let mut ext = TsExtractor::new();
+		ext.initialize().unwrap();
+		let result = extract_ok(
+			&ext,
+			r#"
+import { readFile } from "fs";
+export function load() {
+  readFile(process.env.CACHE_DIR, () => {});
+}
+"#,
+			"src/load.ts",
+		);
+
+		assert_eq!(result.resolved_callsites.len(), 1);
+		let rc = &result.resolved_callsites[0];
+		match &rc.arg0_payload {
+			Arg0Payload::EnvKeyRead { key_name } => {
+				assert_eq!(key_name, "CACHE_DIR");
+			}
+			other => panic!("expected EnvKeyRead, got {:?}", other),
+		}
+	}
+
+	#[test]
+	fn no_resolved_callsite_when_callee_is_unresolved_identifier() {
+		let mut ext = TsExtractor::new();
+		ext.initialize().unwrap();
+		let result = extract_ok(
+			&ext,
+			r#"
+export function load() {
+  somethingNotImported("/etc/config");
+}
+"#,
+			"src/load.ts",
+		);
+		assert!(
+			result.resolved_callsites.is_empty(),
+			"unresolved callee must not produce a ResolvedCallsite"
+		);
+	}
+
+	#[test]
+	fn no_resolved_callsite_when_arg0_is_variable_reference() {
+		let mut ext = TsExtractor::new();
+		ext.initialize().unwrap();
+		let result = extract_ok(
+			&ext,
+			r#"
+import { readFile } from "fs";
+export function load(path: string) {
+  readFile(path, () => {});
+}
+"#,
+			"src/load.ts",
+		);
+		assert!(
+			result.resolved_callsites.is_empty(),
+			"non-literal, non-env arg0 must not produce a ResolvedCallsite"
+		);
+	}
+
+	#[test]
+	fn no_resolved_callsite_for_non_process_env_member_reads() {
+		let mut ext = TsExtractor::new();
+		ext.initialize().unwrap();
+		let result = extract_ok(
+			&ext,
+			r#"
+import { readFile } from "fs";
+const config = { CACHE_DIR: "/tmp" };
+export function load() {
+  readFile(config.CACHE_DIR, () => {});
+}
+"#,
+			"src/load.ts",
+		);
+		assert!(
+			result.resolved_callsites.is_empty(),
+			"non-process.env member reads must not produce a ResolvedCallsite"
+		);
+	}
+
+	#[test]
+	fn multiple_resolved_callsites_in_same_function() {
+		let mut ext = TsExtractor::new();
+		ext.initialize().unwrap();
+		let result = extract_ok(
+			&ext,
+			r#"
+import { readFile, writeFile } from "fs";
+export function io() {
+  readFile("/etc/in", () => {});
+  writeFile("/etc/out", "data", () => {});
+}
+"#,
+			"src/io.ts",
+		);
+
+		assert_eq!(result.resolved_callsites.len(), 2);
+		let symbols: Vec<&str> = result
+			.resolved_callsites
+			.iter()
+			.map(|rc| rc.resolved_symbol.as_str())
+			.collect();
+		assert!(symbols.contains(&"readFile"));
+		assert!(symbols.contains(&"writeFile"));
+	}
+
+	#[test]
+	fn top_level_call_does_not_produce_resolved_callsite() {
+		// SB-3-pre slice-1 limitation: the call-extraction
+		// pipeline uses the FILE node UID as the caller for
+		// top-level statements. `ResolvedCallsite.enclosing_symbol_node_uid`
+		// is contractually a SYMBOL node UID; to honor the
+		// contract, top-level calls MUST NOT produce a
+		// `ResolvedCallsite`. The CALLS edge is still emitted
+		// normally (rooted at the FILE node).
+		let mut ext = TsExtractor::new();
+		ext.initialize().unwrap();
+		let result = extract_ok(
+			&ext,
+			r#"
+import { readFile } from "fs";
+readFile("/etc/config", () => {});
+"#,
+			"src/top.ts",
+		);
+
+		// The CALLS edge for the top-level call still exists
+		// (rooted at the FILE node).
+		let calls_edges: Vec<&ExtractedEdge> = result
+			.edges
+			.iter()
+			.filter(|e| e.edge_type == EdgeType::Calls)
+			.collect();
+		assert!(
+			!calls_edges.is_empty(),
+			"top-level call must still produce a CALLS edge"
+		);
+
+		// But no ResolvedCallsite, per slice-1 limitation.
+		assert!(
+			result.resolved_callsites.is_empty(),
+			"top-level calls must NOT produce ResolvedCallsite facts"
+		);
+	}
+
+	#[test]
+	fn resolved_callsite_enclosing_symbol_is_containing_function() {
+		let mut ext = TsExtractor::new();
+		ext.initialize().unwrap();
+		let result = extract_ok(
+			&ext,
+			r#"
+import { readFile } from "fs";
+export function load() {
+  readFile("/etc/config", () => {});
+}
+"#,
+			"src/load.ts",
+		);
+
+		// Look up the `load` function node.
+		let load_fn = result
+			.nodes
+			.iter()
+			.find(|n| n.name == "load")
+			.expect("load function node");
+		assert_eq!(result.resolved_callsites.len(), 1);
+		assert_eq!(
+			result.resolved_callsites[0].enclosing_symbol_node_uid,
+			load_fn.node_uid,
+			"ResolvedCallsite's enclosing_symbol_node_uid must match the containing function's node_uid"
+		);
 	}
 }

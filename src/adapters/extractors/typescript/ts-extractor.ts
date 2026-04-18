@@ -137,7 +137,15 @@ export class TypeScriptExtractor implements ExtractorPort {
 			}
 		}
 
-		return { nodes, edges, metrics, importBindings };
+		return {
+			nodes,
+			edges,
+			metrics,
+			importBindings,
+			// TS-side ResolvedCallsite population deferred per
+			// Fork-1 posture.
+			resolvedCallsites: [],
+		};
 
 		} finally {
 			tree.delete();
@@ -209,6 +217,11 @@ export class TypeScriptExtractor implements ExtractorPort {
 					isRelative,
 					location,
 					isTypeOnly,
+					// TS-side `importedName` population deferred
+					// per Fork-1 posture. See field doc in
+					// src/core/ports/extractor.ts and
+					// docs/TECH-DEBT.md.
+					importedName: null,
 				});
 			}
 		}

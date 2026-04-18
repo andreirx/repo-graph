@@ -877,6 +877,83 @@ Not in slice 1. Each is its own planned future slice.
   provenance in edge evidence only (via `logical_name_source =
   "env_key"`) and does NOT emit CONFIG_KEY nodes. See
   state-boundary-contract.txt §5.6.
+
+### TS-side `importedName` population deferred (SB-3-pre)
+
+`ImportBinding.importedName` (TS interface in
+`src/core/ports/extractor.ts`; Rust struct in
+`rust/crates/classification/src/types.rs`) stores the original
+exported symbol name for named imports:
+
+- `import { readFile } from "fs"` → `importedName = "readFile"`.
+- `import { readFile as rf } from "fs"` → `importedName =
+  "readFile"`, `identifier = "rf"`.
+- `import fs from "fs"` (default) → `importedName = null`.
+- `import * as fs from "fs"` (namespace) → `importedName = null`.
+
+**Rust populated.** `rust/crates/ts-extractor/src/extractor.rs`
+populates this correctly for all four patterns. Covered by unit
+tests.
+
+**TS NOT populated.** All five TS extractors
+(`src/adapters/extractors/{typescript,python,rust,java,cpp}/`)
+pass `importedName: null` unconditionally. This is a deliberate
+Fork-1 posture: TS-side state-boundary emission is deferred, so
+no current TS consumer needs the resolved original-symbol name.
+
+**Parity impact.** Cross-runtime parity harness
+(`test/ts-extractor-parity/ts-extractor-parity.test.ts:88-100`)
+projects `ImportBinding` to a fixed field set that does NOT
+include `importedName`. The Rust serde attribute
+`#[serde(default, skip_serializing_if = "Option::is_none")]`
+additionally keeps absent values invisible on the wire for
+`None` cases. Net effect: no parity harness impact, no
+serialization drift.
+
+**Follow-on slice.** When TS-side state-boundary emission is
+prioritized (or any other TS consumer needs resolved original-
+symbol names), ship a dedicated slice that ports the Rust
+alias-resolution logic to each TS extractor. Until then, TS
+consumers of `ImportBinding` must treat `importedName` as
+potentially null.
+
+### `ResolvedCallsite` population is Rust-only (SB-3-pre)
+
+`ExtractionResult.resolvedCallsites` / `resolved_callsites` is
+structurally present on BOTH runtimes (TS `src/core/ports/extractor.ts`
+and Rust `rust/crates/indexer/src/types.rs` at the
+`ExtractionResult` boundary). Z-a (see SB-3-pre locks) kept the
+extractor-port contract unified across runtimes.
+
+POPULATION is Rust-only:
+
+- Rust `ts-extractor` populates `resolved_callsites` for call
+  expressions that match Form-A resolution and slice-1 arg-0
+  patterns.
+- Every TS extractor
+  (`src/adapters/extractors/{typescript,python,rust,java,cpp}/`)
+  returns `resolvedCallsites: []` under the Fork-1 posture.
+
+Port-contract invariant: a consumer reading `ExtractionResult`
+sees the same field set regardless of producer runtime. Under
+Fork 1, TS-sourced `resolvedCallsites` is uniformly empty; this
+is a population gap, not a contract split. When TS-side state-
+boundary emission opens, the port already carries the field —
+only the TS extractor logic needs to land.
+
+The type is slice-scoped:
+
+- `Arg0Payload` variants `StringLiteral` / `EnvKeyRead` are the
+  only slice-1 argument-0 patterns (both runtimes).
+- Object-property extraction (e.g., `{Bucket: "x"}`), constructor
+  tracking (`new Client({...})`), and argument positions beyond
+  0 are intentionally out of scope and will land in their own
+  future slices with their own typed additions to `Arg0Payload`
+  OR new sibling types.
+- The name `Arg0Payload` carries the slice scope in its name
+  (not `CallArgumentModel` or `UniversalArgumentShape`) to
+  prevent future expansion from silently inheriting a name that
+  claims more than it delivers.
 - **SQL-string parsing.** Until this lands, DB targets are
   `DB_RESOURCE` (logical-connection granularity). `TABLE` node
   kind remains reserved.

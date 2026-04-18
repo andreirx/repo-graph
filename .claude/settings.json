@@ -1,0 +1,12 @@
+{
+	"permissions": {
+		"allow": [
+			"Bash(rgr graph *)",
+			"Bash(rgr boundary *)",
+			"Bash(rgr trust *)",
+			"Bash(npm ls *)",
+			"Bash(npm audit *)",
+			"Bash(npm view *)"
+		]
+	}
+}

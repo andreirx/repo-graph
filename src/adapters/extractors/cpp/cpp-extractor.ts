@@ -152,6 +152,9 @@ export class CppExtractor implements ExtractorPort {
 			edges: ctx.edges,
 			metrics: ctx.metrics,
 			importBindings: ctx.importBindings,
+			// TS-side ResolvedCallsite population deferred per
+			// Fork-1 posture.
+			resolvedCallsites: [],
 		};
 
 		} finally {
@@ -259,6 +262,7 @@ export class CppExtractor implements ExtractorPort {
 			isRelative: !isSystem,
 			location: locationFromNode(node),
 			isTypeOnly: false,
+			importedName: null,
 		});
 	}
 

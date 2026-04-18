@@ -1038,6 +1038,7 @@ mod tests {
 				is_relative: true,
 				location: None,
 				is_type_only: false,
+				imported_name: Some("classifyMedia".into()),
 			}],
 		)]
 		.into_iter()
