@@ -115,6 +115,19 @@ pub enum NodeKind {
 /// Node subtype. Mirror of `NodeSubtype` from
 /// `src/core/model/types.ts:72`. Exactly matches the TS
 /// contract — no Rust-only additions, no omissions.
+///
+/// The enum is a single flat vocabulary; context for ambiguous
+/// variants comes from the parent `NodeKind`. For example,
+/// `Namespace` is valid as a MODULE subtype AND as a BLOB
+/// subtype (GCP Storage namespace); readers interpret it per
+/// the containing node's kind.
+///
+/// The state-boundary slice-1 additions (SB-2-pre-2) are at the
+/// end of the enum: `Connection`, `FilePath`, `DirectoryPath`,
+/// `Logical`, `Cache`, `Bucket`, `Container`. The pre-existing
+/// `Namespace` variant is reused for the BLOB-namespace case
+/// (single serialized form `"NAMESPACE"` in both MODULE and
+/// BLOB contexts).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum NodeSubtype {
@@ -150,6 +163,34 @@ pub enum NodeSubtype {
 	// TEST subtypes
 	TestSuite,
 	TestCase,
+	// ── State-boundary slice 1 (SB-2-pre-2) ─────────────────
+	// Resource-kind subtypes. Not emitted by any extractor
+	// under slice 1 directly — emission ships in SB-2 via the
+	// `state-extractor` crate. Canonical vocabulary is pinned
+	// here so state-extractor can select from a stable set.
+	/// DB_RESOURCE subtype — logical database connection /
+	/// data source. Serialized as `"CONNECTION"`.
+	Connection,
+	/// FS_PATH subtype — literal filesystem file path.
+	/// Serialized as `"FILE_PATH"`.
+	FilePath,
+	/// FS_PATH subtype — literal filesystem directory path.
+	/// Serialized as `"DIRECTORY_PATH"`.
+	DirectoryPath,
+	/// FS_PATH subtype — logical (config/env-derived) FS
+	/// resource name rather than a concrete path.
+	/// Serialized as `"LOGICAL"`.
+	Logical,
+	/// STATE subtype — cache endpoint (Redis, Memcached, etc.).
+	/// Serialized as `"CACHE"`. The pre-existing STATE
+	/// subtypes (`STATE_VALUE`, `STATE_FIELD`) remain reserved.
+	Cache,
+	/// BLOB subtype — object-storage bucket (S3 bucket, GCP
+	/// Storage bucket). Serialized as `"BUCKET"`.
+	Bucket,
+	/// BLOB subtype — Azure Blob Storage container (and
+	/// similarly-named providers). Serialized as `"CONTAINER"`.
+	Container,
 }
 
 /// Visibility of a symbol. Mirror of `Visibility` from

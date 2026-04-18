@@ -112,6 +112,27 @@ export const NodeSubtype = {
 	// TEST subtypes
 	TEST_SUITE: "TEST_SUITE",
 	TEST_CASE: "TEST_CASE",
+	// ── State-boundary slice 1 (SB-2-pre-2) ───────────────────────────────
+	// Resource-kind subtypes. Not emitted by any TS extractor under Fork 1
+	// (the Rust runtime emits these via the future `state-extractor` in SB-2).
+	// TS consumers are READ-only today. The pre-existing NAMESPACE entry is
+	// reused for BLOB-namespace contexts (single shared string value).
+	// DB_RESOURCE subtype — logical database connection / data source.
+	CONNECTION: "CONNECTION",
+	// FS_PATH subtype — literal filesystem file path.
+	FILE_PATH: "FILE_PATH",
+	// FS_PATH subtype — literal filesystem directory path.
+	DIRECTORY_PATH: "DIRECTORY_PATH",
+	// FS_PATH subtype — logical (config/env-derived) FS resource name.
+	LOGICAL: "LOGICAL",
+	// STATE subtype — cache endpoint (Redis, Memcached, etc.). The existing
+	// STATE_VALUE / STATE_FIELD subtypes remain reserved.
+	CACHE: "CACHE",
+	// BLOB subtype — object-storage bucket.
+	BUCKET: "BUCKET",
+	// BLOB subtype — Azure Blob Storage container (and similarly-named
+	// providers).
+	CONTAINER: "CONTAINER",
 } as const;
 
 export type NodeSubtype = (typeof NodeSubtype)[keyof typeof NodeSubtype];

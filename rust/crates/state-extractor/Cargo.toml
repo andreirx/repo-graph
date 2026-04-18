@@ -1,0 +1,58 @@
+# ── repo-graph-state-extractor ────────────────────────────────────
+#
+# Adapter crate that applies `state-bindings` policy to extractor
+# call-site facts and produces `ExtractedNode` / `ExtractedEdge`
+# data for the indexer pipeline.
+#
+# Position in the G1a split
+# (`docs/milestones/rmap-state-boundaries-v1.md` "Crate layout"):
+#
+#   state-bindings   — pure policy (binding table, matcher,
+#                      stable-key builders).
+#   state-extractor  — this crate. Adapter over call-site facts
+#                      into extracted graph facts.
+#   ts-extractor     — language-specific AST/source fact producer
+#                      (consumes state-extractor in SB-3).
+#   indexer/storage  — orchestration + persistence.
+#
+# Dependency rule (SB-2.2 narrowing):
+#
+#   - `state-bindings`: used for binding-table, matcher, stable-
+#     keys, `ImportView`, `CalleePath`. Policy substrate.
+#   - `repo-graph-indexer`: used ONLY for output DTOs
+#     (`ExtractedNode`, `ExtractedEdge`, `NodeKind`, `NodeSubtype`,
+#     `EdgeType`, `Resolution`). NOT for inputs, routing, or
+#     extractor-specific parsing.
+#   - `repo-graph-classification`: used transitively for
+#     `SourceLocation` (a pure data type shared across the
+#     extractor layer).
+#   - `serde` + `serde_json`: evidence struct serialization
+#     (contract §8 writes JSON into `edges.metadata_json`).
+#   - `uuid`: node/edge UID generation, matching workspace
+#     convention (`uuid::Uuid::new_v4()`).
+#
+# SB-2 scope: emission API, resource-node dedup (in-memory per
+# snapshot), typed evidence struct, synthetic-fixture unit tests.
+# Prerequisite vocabulary lands in SB-2-pre (NodeKind) and
+# SB-2-pre-2 (NodeSubtype); both already shipped before this
+# crate appears. Language integration is SB-3; real-corpus
+# validation is SB-4.
+
+[package]
+name         = "repo-graph-state-extractor"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "State-boundary extractor adapter (slice 1 SB-2: emission, dedup, evidence)"
+publish      = false
+
+[dependencies]
+repo-graph-state-bindings = { path = "../state-bindings" }
+repo-graph-indexer        = { path = "../indexer" }
+repo-graph-classification = { path = "../classification" }
+
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+uuid = { version = "1", features = ["v4"] }

@@ -508,6 +508,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-state-extractor"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-classification",
+ "repo-graph-indexer",
+ "repo-graph-state-bindings",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "repo-graph-storage"
 version = "0.1.0"
 dependencies = [

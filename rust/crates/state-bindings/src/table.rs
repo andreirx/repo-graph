@@ -27,7 +27,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::basis::Basis;
@@ -104,7 +104,7 @@ impl ResourceKind {
 /// `read_write` is the honest representation for generic entry
 /// points (e.g. `db.query(sql)`) where slice 1 does not parse the
 /// SQL to determine direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
 	/// The binding reads from the external resource. Emits a

@@ -27,6 +27,7 @@ members = [
     "crates/repo-index",
     "crates/rgr",
     "crates/state-bindings",
+    "crates/state-extractor",
     "crates/storage",
     "crates/trust",
     "crates/ts-extractor",
