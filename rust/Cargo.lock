@@ -514,6 +514,7 @@ dependencies = [
  "repo-graph-classification",
  "repo-graph-indexer",
  "repo-graph-state-bindings",
+ "repo-graph-ts-extractor",
  "serde",
  "serde_json",
  "uuid",

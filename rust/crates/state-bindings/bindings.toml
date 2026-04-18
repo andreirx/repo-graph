@@ -1,26 +1,236 @@
-# State-boundary binding table — slice 1 probe entry.
+# State-boundary binding table — SB-3 FS-only matrix.
 #
-# SB-1 ships a single binding entry to exercise the loader, schema
-# validator, stable-key policy, and Form-A matcher. Production
-# binding entries for the TS/JS stack land in SB-3 alongside the
-# ts-extractor integration.
+# Scope: Node.js filesystem stdlib APIs under four canonical
+# module specifiers. Every entry is `basis = "stdlib_api"` and
+# `driver = "node-fs"`.
 #
-# DO NOT expand this file during SB-1. The probe entry is
-# slice-relevant (TS AWS S3 Put) so the loader pipeline is
-# exercised against production-shaped data without turning SB-1
-# into the binding-table authoring slice.
+# Why four modules: Node.js resolves `"fs"` and `"node:"-prefixed
+# `"node:fs"` to the SAME built-in. Both specifiers are idiomatic
+# in modern TS/JS; `"node:"` is the explicit-protocol form. Same
+# applies to `"fs/promises"` and `"node:fs/promises"`. Slice-1
+# matching is exact per contract §6.1, so we ship exact rows for
+# every canonical specifier. Module-specifier normalization
+# (`node:fs` → `fs`) is a separate substrate decision and is NOT
+# part of this slice (see SB-3 lock 3-impl.4).
 #
-# Entry fields follow contract §9.2. Validation rules are
-# enforced by `table::load_str`. Any violation fails the build
-# (the embedded file is validated at first access of
-# `BindingTable::load_embedded`).
+# Explicitly deferred for SB-3 (enforced by SB-3.5 + SB-3.7):
+#   - SDK clients (`@aws-sdk/client-s3`, `pg`, `mysql2`, `redis`,
+#     etc.): need object-property extraction and/or constructor
+#     tracking, neither of which SB-3 ships.
+#   - Metadata-only FS ops (`readdir`, `stat`, `access`,
+#     `realpath`, etc.): out of scope for slice 1; file content
+#     touchpoints only.
+#   - `open` / `openSync` / `fs.promises.open`: direction is
+#     flag-dependent (r/w/a); without flag parsing, a single
+#     direction would be misleading. Deferred.
+
+# ── fs ─────────────────────────────────────────────────────────
 
 [[binding]]
 language      = "typescript"
-module        = "@aws-sdk/client-s3"
-symbol_path   = "PutObjectCommand"
-resource_kind = "blob"
-driver        = "s3"
+module        = "fs"
+symbol_path   = "readFile"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "fs"
+symbol_path   = "readFileSync"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "fs"
+symbol_path   = "writeFile"
+resource_kind = "fs"
+driver        = "node-fs"
 direction     = "write"
-basis         = "sdk_call"
-notes         = "SB-1 probe entry. Full TS/JS table populated in SB-3."
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "fs"
+symbol_path   = "writeFileSync"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "fs"
+symbol_path   = "appendFile"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "fs"
+symbol_path   = "appendFileSync"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "fs"
+symbol_path   = "createReadStream"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "fs"
+symbol_path   = "createWriteStream"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "write"
+basis         = "stdlib_api"
+
+# ── node:fs ────────────────────────────────────────────────────
+#
+# Explicit-protocol spelling of `fs`. Resolves to the same
+# built-in; full parity with `fs` entries.
+
+[[binding]]
+language      = "typescript"
+module        = "node:fs"
+symbol_path   = "readFile"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "node:fs"
+symbol_path   = "readFileSync"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "node:fs"
+symbol_path   = "writeFile"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "node:fs"
+symbol_path   = "writeFileSync"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "node:fs"
+symbol_path   = "appendFile"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "node:fs"
+symbol_path   = "appendFileSync"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "node:fs"
+symbol_path   = "createReadStream"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "node:fs"
+symbol_path   = "createWriteStream"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "write"
+basis         = "stdlib_api"
+
+# ── fs/promises ────────────────────────────────────────────────
+
+[[binding]]
+language      = "typescript"
+module        = "fs/promises"
+symbol_path   = "readFile"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "fs/promises"
+symbol_path   = "writeFile"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "fs/promises"
+symbol_path   = "appendFile"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "write"
+basis         = "stdlib_api"
+
+# ── node:fs/promises ───────────────────────────────────────────
+#
+# Explicit-protocol spelling of `fs/promises`.
+
+[[binding]]
+language      = "typescript"
+module        = "node:fs/promises"
+symbol_path   = "readFile"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "node:fs/promises"
+symbol_path   = "writeFile"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "typescript"
+module        = "node:fs/promises"
+symbol_path   = "appendFile"
+resource_kind = "fs"
+driver        = "node-fs"
+direction     = "write"
+basis         = "stdlib_api"

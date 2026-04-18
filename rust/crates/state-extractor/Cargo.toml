@@ -56,3 +56,8 @@ serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+# End-to-end tests run ts-extractor against synthetic source and
+# feed the output through the TS adapter + emitter. SB-3 scope.
+repo-graph-ts-extractor = { path = "../ts-extractor" }

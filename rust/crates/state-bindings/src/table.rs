@@ -412,32 +412,40 @@ impl BindingTable {
 mod tests {
 	use super::*;
 
-	/// Inline smoke test: confirms the embedded probe file parses
-	/// and is shaped as expected. Comprehensive coverage
-	/// (rejection paths, duplicates, long notes, bad variants)
-	/// lives in `tests/table.rs`.
+	/// Inline smoke test: confirms the embedded FS matrix parses
+	/// and contains canonical fs/node:fs/fs/promises/node:fs/promises
+	/// entries. Comprehensive coverage (rejection paths,
+	/// duplicates, long notes, bad variants) lives in
+	/// `tests/table.rs`.
 	#[test]
-	fn embedded_probe_table_parses() {
+	fn embedded_fs_matrix_parses() {
 		let table = BindingTable::load_embedded();
-		assert_eq!(table.len(), 1, "probe table must ship exactly one entry");
-		let e = &table.entries()[0];
-		assert_eq!(e.language, Language::Typescript);
-		assert_eq!(e.module, "@aws-sdk/client-s3");
-		assert_eq!(e.symbol_path, "PutObjectCommand");
-		assert_eq!(e.resource_kind, ResourceKind::Blob);
-		assert_eq!(e.driver, "s3");
-		assert_eq!(e.direction, Direction::Write);
-		assert_eq!(e.basis, Basis::SdkCall);
-		assert!(e.notes.is_some(), "probe entry includes notes");
+		// Every embedded entry is TS/FS/stdlib.
+		for e in table.entries() {
+			assert_eq!(e.language, Language::Typescript);
+			assert_eq!(e.resource_kind, ResourceKind::Fs);
+			assert_eq!(e.basis, Basis::StdlibApi);
+			assert_eq!(e.driver, "node-fs");
+		}
+		// All four canonical module specifiers must be present.
+		let modules: std::collections::HashSet<&str> =
+			table.entries().iter().map(|e| e.module.as_str()).collect();
+		assert!(modules.contains("fs"));
+		assert!(modules.contains("node:fs"));
+		assert!(modules.contains("fs/promises"));
+		assert!(modules.contains("node:fs/promises"));
 	}
 
 	#[test]
 	fn binding_key_composes_per_contract() {
+		// Use `fs::readFile:read` as the canonical shape pin.
 		let table = BindingTable::load_embedded();
-		let e = &table.entries()[0];
-		assert_eq!(
-			e.binding_key(),
-			"typescript:@aws-sdk/client-s3:PutObjectCommand:write"
-		);
+		let e = table
+			.entries()
+			.iter()
+			.find(|b| b.module == "fs" && b.symbol_path == "readFile")
+			.expect("fs:readFile must exist in the FS matrix");
+		assert_eq!(e.binding_key(), "typescript:fs:readFile:read");
+		assert_eq!(e.direction, Direction::Read);
 	}
 }

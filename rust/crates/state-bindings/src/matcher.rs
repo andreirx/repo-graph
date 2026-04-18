@@ -152,58 +152,53 @@ pub fn match_form_a<'t>(
 mod tests {
 	use super::*;
 
-	/// Build a single-entry probe table for inline matcher smoke
-	/// coverage. Cross-cutting match / no-match cases live in
-	/// `tests/matcher.rs`.
-	fn probe_table() -> BindingTable {
-		// The embedded bindings.toml ships exactly the probe
-		// entry; reuse it rather than duplicating TOML in tests.
+	/// Load the embedded FS matrix. Cross-cutting match / no-match
+	/// cases live in `tests/matcher.rs`; inline tests exercise
+	/// one canonical entry (`fs:readFile`) for smoke coverage.
+	fn embedded_table() -> BindingTable {
 		BindingTable::load_embedded().clone()
 	}
 
 	#[test]
-	fn matches_probe_entry_when_import_and_callee_align() {
-		let table = probe_table();
+	fn matches_fs_read_file_when_import_and_callee_align() {
+		let table = embedded_table();
 		let imports = vec![ImportView {
-			module_path: "@aws-sdk/client-s3".to_string(),
-			imported_symbol: "PutObjectCommand".to_string(),
+			module_path: "fs".to_string(),
+			imported_symbol: "readFile".to_string(),
 			import_alias: None,
 		}];
 		let callee = CalleePath {
-			resolved_module: Some("@aws-sdk/client-s3".to_string()),
-			resolved_symbol: "PutObjectCommand".to_string(),
+			resolved_module: Some("fs".to_string()),
+			resolved_symbol: "readFile".to_string(),
 		};
 		let result = match_form_a(&imports, &callee, &table, Language::Typescript);
-		let m = result.expect("probe entry must match");
-		assert_eq!(m.binding.driver, "s3");
-		assert_eq!(
-			m.binding_key,
-			"typescript:@aws-sdk/client-s3:PutObjectCommand:write"
-		);
+		let m = result.expect("fs:readFile must match");
+		assert_eq!(m.binding.driver, "node-fs");
+		assert_eq!(m.binding_key, "typescript:fs:readFile:read");
 	}
 
 	#[test]
 	fn no_match_without_import() {
-		let table = probe_table();
+		let table = embedded_table();
 		let imports: Vec<ImportView> = vec![];
 		let callee = CalleePath {
-			resolved_module: Some("@aws-sdk/client-s3".to_string()),
-			resolved_symbol: "PutObjectCommand".to_string(),
+			resolved_module: Some("fs".to_string()),
+			resolved_symbol: "readFile".to_string(),
 		};
 		assert!(match_form_a(&imports, &callee, &table, Language::Typescript).is_none());
 	}
 
 	#[test]
 	fn no_match_when_callee_not_resolved() {
-		let table = probe_table();
+		let table = embedded_table();
 		let imports = vec![ImportView {
-			module_path: "@aws-sdk/client-s3".to_string(),
-			imported_symbol: "PutObjectCommand".to_string(),
+			module_path: "fs".to_string(),
+			imported_symbol: "readFile".to_string(),
 			import_alias: None,
 		}];
 		let callee = CalleePath {
 			resolved_module: None,
-			resolved_symbol: "PutObjectCommand".to_string(),
+			resolved_symbol: "readFile".to_string(),
 		};
 		assert!(match_form_a(&imports, &callee, &table, Language::Typescript).is_none());
 	}

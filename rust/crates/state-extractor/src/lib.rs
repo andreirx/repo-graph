@@ -8,11 +8,10 @@
 //! split is spelled out in the milestone
 //! (`docs/milestones/rmap-state-boundaries-v1.md`).
 //!
-//! Slice-1 scope (SB-2): emission API, in-memory resource-node
-//! dedup, typed evidence struct, synthetic-fixture unit tests.
-//! No language integration (SB-3), no corpus validation (SB-4),
-//! no config/env seam graph emission (deferred slice), no queue/
-//! event boundaries (deferred slice).
+//! Slice-1 scope: SB-2 ships emission, dedup, evidence;
+//! SB-3 ships the TS-language adapter and the FS-only binding
+//! table. Real-corpus validation is SB-4. Config/env seam, queue
+//! boundaries, SDK/DB/Cache extraction are deferred slices.
 //!
 //! Module map:
 //!
@@ -21,6 +20,10 @@
 //!   `EmittedFacts`, `EmitError`).
 //! - `evidence` — `StateBoundaryEvidence` struct +
 //!   `LogicalNameSource` enum + versioning constant.
+//! - `languages::typescript` — adapter that converts
+//!   ts-extractor `ResolvedCallsite` facts into
+//!   `StateBoundaryCallsite` inputs and drives the emitter
+//!   (SB-3).
 //!
 //! Design locks (recorded in
 //! `docs/milestones/rmap-state-boundaries-v1.md` SB-2 section):
@@ -43,6 +46,7 @@
 
 pub mod emit;
 pub mod evidence;
+pub mod languages;
 
 // Re-export the most commonly used surface at the crate root.
 pub use emit::{

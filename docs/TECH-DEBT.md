@@ -917,6 +917,48 @@ alias-resolution logic to each TS extractor. Until then, TS
 consumers of `ImportBinding` must treat `importedName` as
 potentially null.
 
+### SB-3 binding-table coverage is FS-only
+
+Slice SB-3 ships the state-extractor TS integration plus a
+binding table restricted to Node.js filesystem stdlib APIs. The
+milestone-listed SDK/DB/Cache modules are NOT in the SB-3 binding
+table. Reasons and scope:
+
+**Not in SB-3** (deferred to SB-3-next and beyond):
+
+- AWS SDK S3 (`@aws-sdk/client-s3`): the identifying payload is
+  `{Bucket: "..."}` inside a `new PutObjectCommand(...)` argument
+  — an object-property pattern. SB-3's arg-0 classifier only
+  handles string literals and `process.env.NAME` member reads.
+  Object-property extraction is SB-3-next scope.
+- Database drivers (`pg`, `mysql2`, `better-sqlite3`, `sqlite3`):
+  the resource identity is at client CONSTRUCTION (e.g. `new
+  Client({connectionString: ...})`), not at the `.query()`
+  call. SB-3 does not track constructor arguments. Constructor
+  tracking is SB-3-next-next scope.
+- Redis clients (`redis`, `ioredis`): same pattern as DB drivers
+  — `createClient({url: ...})` or `new Redis({host, port})` at
+  construction. Deferred to constructor-tracking slice.
+- FS metadata-only ops (`readdir`, `stat`, `access`, `realpath`,
+  etc.): out of slice-1 scope (content touchpoints only).
+  Deferred pending a consumer need.
+- `fs.open` / `fs.openSync` / `fs.promises.open`: direction is
+  flag-dependent (`r`/`w`/`a`/...). Without flag parsing a
+  single `direction` would misrepresent the call. Deferred.
+
+**Shipped in SB-3** binding-table coverage:
+
+- `fs`, `node:fs`: `readFile`, `readFileSync`, `writeFile`,
+  `writeFileSync`, `appendFile`, `appendFileSync`,
+  `createReadStream`, `createWriteStream` (8 symbols × 2
+  specifiers = 16 entries).
+- `fs/promises`, `node:fs/promises`: `readFile`, `writeFile`,
+  `appendFile` (3 symbols × 2 specifiers = 6 entries).
+
+Total: 22 binding entries. Exact module matching; module-
+specifier normalization (e.g. `node:fs` → `fs`) is a separate
+substrate decision and is NOT part of SB-3.
+
 ### `ResolvedCallsite` population is Rust-only (SB-3-pre)
 
 `ExtractionResult.resolvedCallsites` / `resolved_callsites` is
