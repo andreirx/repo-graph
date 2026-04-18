@@ -1,0 +1,50 @@
+# ── repo-graph-state-bindings ─────────────────────────────────────
+#
+# State-boundary policy crate. Pure substrate: binding-table schema,
+# TOML loader, stable-key builders, Form-A matcher primitives, and
+# basis-tag enum.
+#
+# This crate is the first half of the G1a split (see
+# `docs/milestones/rmap-state-boundaries-v1.md` "Crate layout"):
+#
+#   state-bindings   — this crate. Policy only. No extractor deps.
+#   state-extractor  — later slice. Consumes state-bindings and
+#                      integrates with ts-extractor to emit graph
+#                      nodes and edges.
+#
+# Under the hood this crate owns:
+#
+#   - the binding-table data contract (contract §9.2)
+#   - stable-key builders for four resource kinds (contract §5.1)
+#   - Form-A matcher (contract §6.1)
+#   - validated newtypes enforcing invariants at construction
+#
+# NOT in scope:
+#   - graph node or edge emission
+#   - extractor integration
+#   - storage / SQLite
+#   - language-specific parsing
+#
+# Dependency rule: this crate has zero repo-graph workspace
+# dependencies. It is pure policy sitting above every extractor.
+
+[package]
+name         = "repo-graph-state-bindings"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "State-boundary binding table, matcher, and stable-key policy (slice 1 substrate)"
+publish      = false
+
+[dependencies]
+# TOML 1.0 parser. Matches the version pinned by repo-graph-detectors
+# to avoid parser divergence across the Rust workspace.
+toml = "0.8"
+
+# Serde derive for typed deserialization of binding-table entries.
+serde = { version = "1", features = ["derive"] }
+
+# Typed error enum for validation failures. Each variant carries
+# enough context to point at the offending binding row or field.
+thiserror = "2"

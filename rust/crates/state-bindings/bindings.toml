@@ -1,0 +1,26 @@
+# State-boundary binding table — slice 1 probe entry.
+#
+# SB-1 ships a single binding entry to exercise the loader, schema
+# validator, stable-key policy, and Form-A matcher. Production
+# binding entries for the TS/JS stack land in SB-3 alongside the
+# ts-extractor integration.
+#
+# DO NOT expand this file during SB-1. The probe entry is
+# slice-relevant (TS AWS S3 Put) so the loader pipeline is
+# exercised against production-shaped data without turning SB-1
+# into the binding-table authoring slice.
+#
+# Entry fields follow contract §9.2. Validation rules are
+# enforced by `table::load_str`. Any violation fails the build
+# (the embedded file is validated at first access of
+# `BindingTable::load_embedded`).
+
+[[binding]]
+language      = "typescript"
+module        = "@aws-sdk/client-s3"
+symbol_path   = "PutObjectCommand"
+resource_kind = "blob"
+driver        = "s3"
+direction     = "write"
+basis         = "sdk_call"
+notes         = "SB-1 probe entry. Full TS/JS table populated in SB-3."

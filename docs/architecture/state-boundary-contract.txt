@@ -251,6 +251,18 @@ The `config` resource-kind token is reserved for a separate
 config/env seam slice and MUST NOT be produced by state-boundary
 extraction in slice 1.
 
+Parsing semantics note — FS stable keys.
+Filesystem stable-key payloads MAY contain `:` characters
+(Windows drive-letter absolute paths `C:\Windows\path`, URI-style
+references such as `file:///etc/config`, etc.). Parsers MUST NOT
+naively split FS stable keys on every `:`. The path payload is
+delimited by the fixed prefix `<repo_uid>:fs:` and the fixed
+suffix `:FS_PATH`. Any well-formed FS stable key has exactly
+those bookends; the payload is whatever lies between them. This
+is a property of FS keys specifically — the other three
+resource-kind shapes (`db`, `cache`, `blob`) do not permit `:`
+in their interior segments and remain naive-split-safe.
+
 5.2 Examples
 ------------
 

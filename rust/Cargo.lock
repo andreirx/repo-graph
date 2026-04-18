@@ -499,6 +499,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-state-bindings"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
 name = "repo-graph-storage"
 version = "0.1.0"
 dependencies = [
