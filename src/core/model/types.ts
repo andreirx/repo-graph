@@ -63,6 +63,16 @@ export const NodeKind = {
 	STATE: "STATE",
 	QUEUE: "QUEUE",
 	JOB: "JOB",
+	// ── State-boundary slice 1 (SB-2-pre) ───────────────────────────────────
+	// Canonical vocabulary for state-boundary resource nodes. See
+	// `docs/architecture/state-boundary-contract.txt` §4.2 for the semantic
+	// definitions. These kinds are NOT emitted by any TS extractor under Fork 1.
+	// On the Rust runtime, emission begins in SB-3 once `state-extractor`
+	// ships. On the TS runtime, emission is deferred entirely under the
+	// Rust-only posture. TS consumers of these kinds are READ-only today.
+	DB_RESOURCE: "DB_RESOURCE",
+	FS_PATH: "FS_PATH",
+	BLOB: "BLOB",
 } as const;
 
 export type NodeKind = (typeof NodeKind)[keyof typeof NodeKind];

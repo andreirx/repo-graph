@@ -78,6 +78,14 @@ pub enum Resolution {
 
 /// Node kind. Mirror of `NodeKind` from
 /// `src/core/model/types.ts:54`.
+///
+/// The last three variants (`DbResource`, `FsPath`, `Blob`) were
+/// added by SB-2-pre as canonical vocabulary for the state-
+/// boundary slice. See
+/// `docs/architecture/state-boundary-contract.txt` §4.2 for the
+/// semantic definitions. These kinds are NOT emitted by any
+/// extractor yet; emission begins in SB-3 once `state-extractor`
+/// ships.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum NodeKind {
@@ -92,6 +100,16 @@ pub enum NodeKind {
 	State,
 	Queue,
 	Job,
+	/// Logical database endpoint (driver-level identity). Added
+	/// by SB-2-pre. Serialized as `"DB_RESOURCE"`.
+	DbResource,
+	/// Filesystem path or logical filesystem resource. Added by
+	/// SB-2-pre. Serialized as `"FS_PATH"`.
+	FsPath,
+	/// Object-storage endpoint (S3 bucket, Azure Blob container,
+	/// GCP Storage namespace). Added by SB-2-pre. Serialized as
+	/// `"BLOB"`.
+	Blob,
 }
 
 /// Node subtype. Mirror of `NodeSubtype` from
