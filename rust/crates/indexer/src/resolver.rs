@@ -201,6 +201,19 @@ fn resolve_target(
 		EdgeType::Implements => {
 			resolve_named_target(&edge.target_key, &index.nodes_by_name, edge.edge_type)
 		}
+		// State-boundary edges (SB-4-pre): target_key is a stable
+		// key (e.g. `myservice:fs:/etc/app.yaml:FS_PATH`), not a
+		// symbol name. Try stable-key lookup first; fall back to
+		// name resolution for any non-state-boundary READS/WRITES
+		// edges that may use symbol names as target_key in the
+		// future.
+		EdgeType::Reads | EdgeType::Writes => {
+			if let Some(node) = index.nodes_by_stable_key.get(&edge.target_key) {
+				Some(node.node_uid.clone())
+			} else {
+				resolve_named_target(&edge.target_key, &index.nodes_by_name, edge.edge_type)
+			}
+		}
 		_ => resolve_named_target(&edge.target_key, &index.nodes_by_name, edge.edge_type),
 	}
 }

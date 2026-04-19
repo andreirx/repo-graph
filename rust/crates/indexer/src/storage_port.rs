@@ -387,13 +387,36 @@ pub struct CopyForwardInput {
 	pub file_uids: Vec<String>,
 }
 
+/// Identity of a null-file (resource) node copied forward.
+/// Used by the orchestrator to dedup hook-emitted resource nodes
+/// against carried-forward ones.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopiedResourceNodeKey {
+	/// The stable_key of the copied node.
+	pub stable_key: String,
+	/// The `kind` column value (e.g. `"FS_PATH"`).
+	pub kind: String,
+	/// The `subtype` column value (e.g. `"FILE_PATH"`).
+	pub subtype: Option<String>,
+	/// The `name` column value.
+	pub name: String,
+}
+
 /// Result counts from the copy-forward operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CopyForwardResult {
+	/// Count of file-owned nodes copied.
 	pub nodes_copied: u64,
+	/// Count of extraction edges copied.
 	pub extraction_edges_copied: u64,
+	/// Count of file signals copied.
 	pub file_signals_copied: u64,
+	/// Count of file versions copied.
 	pub file_versions_copied: u64,
+	/// Resource nodes (file_uid IS NULL) copied from the parent
+	/// snapshot. Populated by SB-4-pre Fix B so the orchestrator
+	/// can dedup hook-emitted resource nodes against them.
+	pub copied_resource_node_keys: Vec<CopiedResourceNodeKey>,
 }
 
 // ── DeltaCopyPort (R5-H) ────────────────────────────────────────

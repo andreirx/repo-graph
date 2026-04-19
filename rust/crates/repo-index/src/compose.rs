@@ -227,12 +227,18 @@ pub fn index_into_storage(
 		..IndexOptions::default()
 	};
 
+	// State-boundary hook: wired at the composition root (SB-4-pre).
+	// Constructs the hook; on invalid repo_uid it degrades
+	// gracefully (diagnostic, no emission, no abort).
+	let mut sb_hook = crate::state_boundary_hook::StateBoundaryHook::new(repo_uid);
+
 	let mut result = orchestrator::index_repo(
 		storage,
 		&mut extractors,
 		repo_uid,
 		&prepared.file_inputs,
 		&mut idx_options,
+		Some(&mut sb_hook),
 	)
 	.map_err(|e| ComposeError::Index(format!("{}", e)))?;
 
@@ -287,12 +293,16 @@ pub fn refresh_into_storage(
 		..IndexOptions::default()
 	};
 
+	// State-boundary hook (symmetric with index path — SB-4-pre.8).
+	let mut sb_hook = crate::state_boundary_hook::StateBoundaryHook::new(repo_uid);
+
 	let mut result = orchestrator::refresh_repo(
 		storage,
 		&mut extractors,
 		repo_uid,
 		&prepared.file_inputs,
 		&mut idx_options,
+		Some(&mut sb_hook),
 	)
 	.map_err(|e| ComposeError::Index(format!("{}", e)))?;
 

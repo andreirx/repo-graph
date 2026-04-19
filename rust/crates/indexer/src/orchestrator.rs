@@ -139,6 +139,7 @@ pub fn index_repo<S: IndexerStoragePort>(
 	repo_uid: &str,
 	files: &[FileInput],
 	options: &mut IndexOptions,
+	hook: Option<&mut dyn crate::hook::ExtractionResultHook>,
 ) -> Result<IndexResult, IndexError<S::StorageError>> {
 	let start = std::time::Instant::now();
 
@@ -189,7 +190,9 @@ pub fn index_repo<S: IndexerStoragePort>(
 	let created_at = snapshot.created_at.clone();
 	let progress = &mut options.on_progress;
 	let all_file_paths: Vec<String> = files.iter().map(|f| f.rel_path.clone()).collect();
-	match run_pipeline(storage, extractors, repo_uid, &snap_uid, files, &all_file_paths, &snapshot_signals, &routing_table, &created_at, options.edge_batch_size, progress, start) {
+	// Full index: no copy-forward, so no copied resource keys.
+	let empty_resource_keys: HashMap<String, crate::storage_port::CopiedResourceNodeKey> = HashMap::new();
+	match run_pipeline(storage, extractors, repo_uid, &snap_uid, files, &all_file_paths, &snapshot_signals, &routing_table, &created_at, options.edge_batch_size, progress, start, hook, &empty_resource_keys) {
 		Ok(result) => Ok(result),
 		Err(storage_err) => {
 			// Best-effort: transition to FAILED. If this also fails,
@@ -224,6 +227,8 @@ fn run_pipeline<S: IndexerStoragePort>(
 	edge_batch_size: Option<usize>,
 	progress: &mut Option<crate::types::ProgressCallback>,
 	start: std::time::Instant,
+	mut hook: Option<&mut dyn crate::hook::ExtractionResultHook>,
+	copied_resource_keys: &HashMap<String, crate::storage_port::CopiedResourceNodeKey>,
 ) -> Result<IndexResult, S::StorageError> {
 	let now_iso = created_at.to_string();
 	let total_files = files.len() as u64;
@@ -326,6 +331,15 @@ fn run_pipeline<S: IndexerStoragePort>(
 			}
 		};
 
+		// Hook: hand off the extraction result for any hook
+		// processing (e.g. state-boundary emission) BEFORE moving
+		// nodes/edges into accumulators. The hook borrows `result`
+		// immutably; it accumulates internally and drains at
+		// snapshot close (below).
+		if let Some(ref mut h) = hook {
+			h.on_extraction_result(repo_uid, snap_uid, &file_uid, &file.rel_path, &result);
+		}
+
 		nodes_total += result.nodes.len() as u64;
 		all_nodes.extend(result.nodes);
 
@@ -373,6 +387,101 @@ fn run_pipeline<S: IndexerStoragePort>(
 					.as_ref()
 					.map(|t| serde_json::to_string(t).unwrap_or_default()),
 			});
+		}
+	}
+
+	// Drain hook extras before phase-1 persistence so
+	// hook-produced nodes + edges are included in the same
+	// persistence batch. Diagnostics are rendered to stderr.
+	if let Some(h) = hook {
+		let extras = h.drain_snapshot_extras();
+
+		// ── Edge attribution (Fix B.1) ──────────────────────
+		// Derive source_file_uid for hook-drained edges from the
+		// source symbol's file_uid. This ensures copy-forward
+		// preserves state-boundary edges for unchanged files.
+		let node_to_file: std::collections::HashMap<&str, &str> = all_nodes
+			.iter()
+			.filter_map(|n| {
+				n.file_uid
+					.as_deref()
+					.map(|f| (n.node_uid.as_str(), f))
+			})
+			.collect();
+
+		for extra_edge in extras.edges {
+			let source_file = node_to_file
+				.get(extra_edge.source_node_uid.as_str())
+				.map(|f| f.to_string());
+			all_extraction_edges.push(ExtractionEdgeRow {
+				edge_uid: extra_edge.edge_uid,
+				snapshot_uid: extra_edge.snapshot_uid,
+				repo_uid: extra_edge.repo_uid,
+				source_node_uid: extra_edge.source_node_uid,
+				target_key: extra_edge.target_key,
+				edge_type: extra_edge.edge_type,
+				resolution: extra_edge.resolution,
+				extractor: extra_edge.extractor,
+				line_start: extra_edge.location.map(|l| l.line_start),
+				col_start: extra_edge.location.map(|l| l.col_start),
+				line_end: extra_edge.location.map(|l| l.line_end),
+				col_end: extra_edge.location.map(|l| l.col_end),
+				metadata_json: extra_edge.metadata_json,
+				source_file_uid: source_file,
+			});
+		}
+
+		// ── Resource-node dedup against copy-forward (Fix B.3) ──
+		// If refresh copied null-file resource nodes from the
+		// parent snapshot, the hook may emit the same stable_key
+		// for changed files that reference the same resource.
+		// Dedup: first-wins (copy-forward wins), fail loudly on
+		// identity mismatch (kind/subtype/name differ). The
+		// `copied_resource_keys` set is empty for full index
+		// (no copy-forward) so this loop is a no-op there.
+		let mut deduped_nodes: Vec<ExtractedNode> = Vec::with_capacity(extras.nodes.len());
+		for node in extras.nodes {
+			if let Some(existing) = copied_resource_keys.get(node.stable_key.as_str()) {
+				// Check identity match.
+				let node_kind_str = serde_json::to_value(&node.kind)
+					.ok()
+					.and_then(|v| v.as_str().map(|s| s.to_string()))
+					.unwrap_or_default();
+				let node_subtype_str = node.subtype.as_ref().and_then(|st| {
+					serde_json::to_value(st)
+						.ok()
+						.and_then(|v| v.as_str().map(|s| s.to_string()))
+				});
+				if node_kind_str != existing.kind
+					|| node_subtype_str.as_deref() != existing.subtype.as_deref()
+					|| node.name != existing.name
+				{
+					eprintln!(
+						"[state-boundary] IDENTITY MISMATCH: stable_key {:?} \
+						 carried forward as ({}, {:?}, {:?}) but hook emitted \
+						 ({}, {:?}, {:?}). Skipping hook node; this is a bug.",
+						node.stable_key,
+						existing.kind, existing.subtype, existing.name,
+						node_kind_str, node_subtype_str, node.name,
+					);
+				}
+				// Skip: copy-forward wins.
+			} else {
+				deduped_nodes.push(node);
+			}
+		}
+		if !deduped_nodes.is_empty() {
+			nodes_total += deduped_nodes.len() as u64;
+			all_nodes.extend(deduped_nodes);
+		}
+
+		for diag in &extras.diagnostics {
+			eprintln!(
+				"[state-boundary] {}: {} (file: {})",
+				diag.code,
+				diag.message,
+				diag.file_path.as_deref().unwrap_or("-"),
+			);
 		}
 	}
 
@@ -834,6 +943,7 @@ pub fn refresh_repo<S: IndexerStoragePort>(
 	repo_uid: &str,
 	current_files: &[FileInput],
 	options: &mut IndexOptions,
+	hook: Option<&mut dyn crate::hook::ExtractionResultHook>,
 ) -> Result<IndexResult, IndexError<S::StorageError>> {
 	// Check for a parent snapshot.
 	let parent = storage
@@ -843,7 +953,7 @@ pub fn refresh_repo<S: IndexerStoragePort>(
 		Some(p) if p.status == SnapshotStatus::Ready => p,
 		_ => {
 			// No ready parent → fall back to full index.
-			return index_repo(storage, extractors, repo_uid, current_files, options);
+			return index_repo(storage, extractors, repo_uid, current_files, options, hook);
 		}
 	};
 
@@ -870,7 +980,7 @@ pub fn refresh_repo<S: IndexerStoragePort>(
 
 	// If nothing to copy, fall back to full index.
 	if plan.files_to_copy.is_empty() {
-		return index_repo(storage, extractors, repo_uid, current_files, options);
+		return index_repo(storage, extractors, repo_uid, current_files, options, hook);
 	}
 
 	// Initialize extractors.
@@ -978,6 +1088,17 @@ pub fn refresh_repo<S: IndexerStoragePort>(
 	let mut all_file_paths: Vec<String> = plan.files_to_copy.clone();
 	all_file_paths.extend(plan.files_to_extract.iter().cloned());
 
+	// Build resource-node dedup keys from copy-forward result
+	// (SB-4-pre Fix B). Used by `run_pipeline` to prevent
+	// inserting duplicate resource nodes that the hook may
+	// re-emit for resources also referenced by unchanged files.
+	let copied_resource_keys: HashMap<String, crate::storage_port::CopiedResourceNodeKey> =
+		copy_result
+			.copied_resource_node_keys
+			.iter()
+			.map(|k| (k.stable_key.clone(), k.clone()))
+			.collect();
+
 	let progress = &mut options.on_progress;
 	let start = std::time::Instant::now();
 	match run_pipeline(
@@ -993,6 +1114,8 @@ pub fn refresh_repo<S: IndexerStoragePort>(
 		options.edge_batch_size,
 		progress,
 		start,
+		hook,
+		&copied_resource_keys,
 	) {
 		Ok(mut result) => {
 			// Adjust node count to include copied nodes (which
@@ -1263,6 +1386,7 @@ mod tests {
 			"r1",
 			&files,
 			&mut IndexOptions::default(),
+			None,
 		)
 		.unwrap();
 
@@ -1307,6 +1431,7 @@ mod tests {
 			"r1",
 			&files,
 			&mut IndexOptions::default(),
+			None,
 		)
 		.unwrap();
 
@@ -1348,6 +1473,7 @@ mod tests {
 			"r1",
 			&files,
 			&mut IndexOptions::default(),
+			None,
 		)
 		.unwrap();
 
@@ -1383,6 +1509,7 @@ mod tests {
 			"r1",
 			&files,
 			&mut IndexOptions::default(),
+			None,
 		)
 		.unwrap();
 
@@ -1423,7 +1550,7 @@ mod tests {
 		let mut storage = MockStorage::default();
 		let mut ext = FailingExtractor::new();
 		let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ext];
-		let result = index_repo(&mut storage, &mut extractors, "r1", &[], &mut IndexOptions::default());
+		let result = index_repo(&mut storage, &mut extractors, "r1", &[], &mut IndexOptions::default(), None);
 		match result {
 			Err(IndexError::ExtractorInit { extractor_name, .. }) => {
 				assert_eq!(extractor_name, "failing:1");
@@ -1501,7 +1628,7 @@ mod tests {
 			tsconfig_aliases: None,
 		}];
 
-		let result = index_repo(&mut storage, &mut extractors, "r1", &files, &mut IndexOptions::default());
+		let result = index_repo(&mut storage, &mut extractors, "r1", &files, &mut IndexOptions::default(), None);
 		assert!(matches!(result, Err(IndexError::Storage(_))));
 
 		// Snapshot must have been transitioned to FAILED.
@@ -1545,6 +1672,7 @@ mod tests {
 			"r1",
 			&files,
 			&mut opts,
+			None,
 		)
 		.unwrap();
 
@@ -1592,6 +1720,7 @@ mod tests {
 			"r1",
 			&files,
 			&mut IndexOptions::default(),
+			None,
 		)
 		.unwrap();
 
@@ -1635,6 +1764,7 @@ mod tests {
 			"r1",
 			&files_v1,
 			&mut IndexOptions::default(),
+			None,
 		)
 		.unwrap();
 
@@ -1672,6 +1802,7 @@ mod tests {
 			"r1",
 			&files_v2,
 			&mut IndexOptions::default(),
+			None,
 		)
 		.unwrap();
 

@@ -917,6 +917,34 @@ alias-resolution logic to each TS extractor. Until then, TS
 consumers of `ImportBinding` must treat `importedName` as
 potentially null.
 
+### Refresh stale-orphan resource nodes (SB-4-pre Fix B)
+
+`rmap refresh` (incremental re-index) copies resource nodes
+(`file_uid IS NULL`, kinds `DB_RESOURCE` / `FS_PATH` / `BLOB` /
+`STATE`) from the parent snapshot unconditionally. If a resource
+was referenced ONLY by a file that was subsequently changed or
+deleted, the resource node persists as a stale orphan in the
+refresh snapshot. It is not reachable from any symbol via
+READS/WRITES edges (the old edges belonged to the changed file
+and are NOT copy-forwarded), but it occupies the graph as an
+unreferenced node.
+
+Workaround: run `rmap index` (full re-index) to produce a clean
+graph without stale orphans.
+
+Root cause: copy-forward cannot determine which resource nodes
+are still referenced without re-running state-boundary extraction
+on ALL files, which defeats the performance benefit of delta
+refresh. Correct fix requires either:
+- persisting resolved_callsites for delta reuse, or
+- a post-copy GC pass that prunes unreferenced resource nodes
+
+Both are deferred to a dedicated delta-aware state-boundary
+slice. The stale-orphan behavior is pinned by a test
+(`refresh_mixed_unchanged_and_changed_files` in
+`repo-index/tests/state_boundary_integration.rs`) so that an
+unintentional fix or regression is detected.
+
 ### SB-3 binding-table coverage is FS-only
 
 Slice SB-3 ships the state-extractor TS integration plus a

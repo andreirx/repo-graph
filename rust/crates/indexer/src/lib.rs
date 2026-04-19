@@ -92,6 +92,7 @@
 //! sub-trait as it is defined.
 
 pub mod extractor_port;
+pub mod hook;
 pub mod invalidation;
 pub mod orchestrator;
 pub mod resolver;

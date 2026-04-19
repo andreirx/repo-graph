@@ -473,6 +473,8 @@ dependencies = [
  "ignore",
  "repo-graph-classification",
  "repo-graph-indexer",
+ "repo-graph-state-bindings",
+ "repo-graph-state-extractor",
  "repo-graph-storage",
  "repo-graph-trust",
  "repo-graph-ts-extractor",

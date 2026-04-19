@@ -794,6 +794,102 @@ impl DeltaCopyPort for StorageConnection {
 			}
 		}
 
+		// 1b. Copy resource nodes with file_uid IS NULL (SB-4-pre
+		//      Fix B). These are snapshot-scoped deduped artifacts
+		//      from state-boundary extraction. They don't belong
+		//      to any file, so the file-owned copy (1) misses them.
+		//      Report their identity for orchestrator dedup.
+		{
+			// Restrict to state-boundary resource kinds. Other
+			// null-file_uid nodes (e.g. MODULE) are recreated by
+			// Phase 2 of the indexer and must NOT be copied
+			// forward (they would collide on the unique
+			// (snapshot_uid, stable_key) constraint).
+			//
+			// For STATE: only carry forward cache resources
+			// (subtype = 'CACHE'). The STATE kind is shared with
+			// non-resource uses (STATE_VALUE, STATE_FIELD); a
+			// blanket `kind = 'STATE'` would overmatch future
+			// null-file STATE producers outside the state-boundary
+			// model.
+			let null_select = "SELECT node_uid, stable_key, kind, subtype, name, \
+				qualified_name, parent_node_uid, \
+				line_start, col_start, line_end, col_end, \
+				signature, visibility, doc_comment, metadata_json \
+				FROM nodes WHERE snapshot_uid = ? AND file_uid IS NULL \
+				AND (kind IN ('DB_RESOURCE', 'FS_PATH', 'BLOB') \
+				     OR (kind = 'STATE' AND subtype = 'CACHE'))";
+			let mut stmt = tx.prepare(null_select)?;
+			struct NullNodeRow {
+				old_uid: String,
+				stable_key: String,
+				kind: String,
+				subtype: Option<String>,
+				name: String,
+				qualified_name: Option<String>,
+				parent_node_uid: Option<String>,
+				line_start: Option<i64>,
+				col_start: Option<i64>,
+				line_end: Option<i64>,
+				col_end: Option<i64>,
+				signature: Option<String>,
+				visibility: Option<String>,
+				doc_comment: Option<String>,
+				metadata_json: Option<String>,
+			}
+			let rows: Vec<NullNodeRow> = stmt
+				.query_map([&input.from_snapshot_uid], |row| {
+					Ok(NullNodeRow {
+						old_uid: row.get(0)?,
+						stable_key: row.get(1)?,
+						kind: row.get(2)?,
+						subtype: row.get(3)?,
+						name: row.get(4)?,
+						qualified_name: row.get(5)?,
+						parent_node_uid: row.get(6)?,
+						line_start: row.get(7)?,
+						col_start: row.get(8)?,
+						line_end: row.get(9)?,
+						col_end: row.get(10)?,
+						signature: row.get(11)?,
+						visibility: row.get(12)?,
+						doc_comment: row.get(13)?,
+						metadata_json: row.get(14)?,
+					})
+				})?
+				.collect::<Result<Vec<_>, _>>()?;
+			drop(stmt);
+
+			let mut insert_stmt = tx.prepare(
+				"INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, \
+				 stable_key, kind, subtype, name, qualified_name, \
+				 file_uid, parent_node_uid, line_start, col_start, \
+				 line_end, col_end, signature, visibility, \
+				 doc_comment, metadata_json) \
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			)?;
+			for r in &rows {
+				let new_uid = uuid::Uuid::new_v4().to_string();
+				node_uid_map.insert(r.old_uid.clone(), new_uid.clone());
+				insert_stmt.execute(rusqlite::params![
+					new_uid, input.to_snapshot_uid, input.repo_uid,
+					r.stable_key, r.kind, r.subtype, r.name,
+					r.qualified_name, r.parent_node_uid,
+					r.line_start, r.col_start, r.line_end, r.col_end,
+					r.signature, r.visibility, r.doc_comment, r.metadata_json,
+				])?;
+				result.nodes_copied += 1;
+				result.copied_resource_node_keys.push(
+					repo_graph_indexer::storage_port::CopiedResourceNodeKey {
+						stable_key: r.stable_key.clone(),
+						kind: r.kind.clone(),
+						subtype: r.subtype.clone(),
+						name: r.name.clone(),
+					},
+				);
+			}
+		}
+
 		// 2. Copy extraction_edges with remapped source_node_uids.
 		{
 			let select_sql = format!(
