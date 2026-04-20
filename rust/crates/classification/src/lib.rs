@@ -271,6 +271,7 @@ pub(crate) mod blast_radius;
 pub(crate) mod boundary_matcher;
 pub(crate) mod framework_boundary;
 pub(crate) mod framework_entrypoints;
+pub mod module_edges;
 pub(crate) mod signals;
 pub mod types;
 pub(crate) mod unresolved_classifier;
