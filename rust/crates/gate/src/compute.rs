@@ -19,9 +19,9 @@
 //! ── Method coverage ─────────────────────────────────────────
 //!
 //! Supported: `arch_violations`, `coverage_threshold`,
-//! `complexity_threshold`, `hotspot_threshold`. All other
-//! methods return UNSUPPORTED. Adding a new method is a
-//! two-step change:
+//! `complexity_threshold`, `hotspot_threshold`,
+//! `module_violations`. All other methods return UNSUPPORTED.
+//! Adding a new method is a two-step change:
 //!
 //!   1. Extend `MethodEvidence` with a new variant.
 //!   2. Handle the new variant inside `evaluate_obligation`.
@@ -86,6 +86,19 @@ pub enum MethodEvidence {
 	HotspotThreshold {
 		target: Option<String>,
 		matching_inferences: Vec<PolicyMeasurement>,
+	},
+
+	/// `module_violations` evidence: pre-evaluated boundary
+	/// violation counts from RS-MG-4. PASS if violations_count
+	/// is zero, FAIL otherwise. Stale count is informational.
+	///
+	/// Always repo-wide. The `target` field on the obligation is
+	/// ignored — `module_violations` evaluates ALL discovered-
+	/// module boundaries. If scoped evaluation is needed, it
+	/// requires a separate method with explicit design.
+	ModuleViolations {
+		violations_count: usize,
+		stale_declarations_count: usize,
 	},
 
 	/// Obligation's `target` was absent where the method
@@ -294,6 +307,13 @@ fn evaluate_obligation(
 				target.is_some(),
 			);
 		}
+
+		MethodEvidence::ModuleViolations {
+			violations_count,
+			stale_declarations_count,
+		} => {
+			evaluate_module_violations(&mut eval, violations_count, stale_declarations_count);
+		}
 	}
 
 	eval
@@ -404,6 +424,26 @@ fn evaluate_complexity_threshold(
 		"threshold": threshold,
 		"operator": op,
 		"functions_measured": matching.len(),
+	});
+}
+
+// ── module_violations ─────────────────────────────────────────────
+
+fn evaluate_module_violations(
+	eval: &mut ObligationEvaluation,
+	violations_count: usize,
+	stale_declarations_count: usize,
+) {
+	let verdict = if violations_count == 0 {
+		Verdict::PASS
+	} else {
+		Verdict::FAIL
+	};
+	eval.computed_verdict = verdict;
+	eval.effective_verdict = verdict.into();
+	eval.evidence = serde_json::json!({
+		"violations_count": violations_count,
+		"stale_declarations_count": stale_declarations_count,
 	});
 }
 
@@ -937,5 +977,81 @@ mod tests {
 		assert_eq!(report.outcome.outcome, "pass");
 		assert_eq!(report.outcome.exit_code, 0);
 		assert_eq!(report.outcome.counts.total, 0);
+	}
+
+	// ── module_violations ──
+
+	#[test]
+	fn module_violations_pass_with_zero_violations() {
+		let r = req("REQ-1", 1, vec![obl("o1", "module_violations", None, None)]);
+		let mut input = empty_input(vec![r], GateMode::Default);
+		input.method_evidence.insert(
+			key("REQ-1", 1, "o1"),
+			MethodEvidence::ModuleViolations {
+				violations_count: 0,
+				stale_declarations_count: 0,
+			},
+		);
+		let report = compute(input);
+		assert_eq!(report.obligations[0].computed_verdict, Verdict::PASS);
+		assert_eq!(report.outcome.outcome, "pass");
+		assert_eq!(report.outcome.exit_code, 0);
+	}
+
+	#[test]
+	fn module_violations_fail_when_violations_exist() {
+		let r = req("REQ-1", 1, vec![obl("o1", "module_violations", None, None)]);
+		let mut input = empty_input(vec![r], GateMode::Default);
+		input.method_evidence.insert(
+			key("REQ-1", 1, "o1"),
+			MethodEvidence::ModuleViolations {
+				violations_count: 3,
+				stale_declarations_count: 1,
+			},
+		);
+		let report = compute(input);
+		assert_eq!(report.obligations[0].computed_verdict, Verdict::FAIL);
+		assert_eq!(report.obligations[0].evidence["violations_count"], 3);
+		assert_eq!(report.obligations[0].evidence["stale_declarations_count"], 1);
+		assert_eq!(report.outcome.exit_code, 1);
+	}
+
+	#[test]
+	fn module_violations_pass_with_only_stale_declarations() {
+		// Stale declarations alone do not cause FAIL.
+		let r = req("REQ-1", 1, vec![obl("o1", "module_violations", None, None)]);
+		let mut input = empty_input(vec![r], GateMode::Default);
+		input.method_evidence.insert(
+			key("REQ-1", 1, "o1"),
+			MethodEvidence::ModuleViolations {
+				violations_count: 0,
+				stale_declarations_count: 5,
+			},
+		);
+		let report = compute(input);
+		assert_eq!(report.obligations[0].computed_verdict, Verdict::PASS);
+		assert_eq!(report.obligations[0].evidence["stale_declarations_count"], 5);
+		assert_eq!(report.outcome.outcome, "pass");
+	}
+
+	#[test]
+	fn module_violations_ignores_target_field_on_obligation() {
+		// module_violations is repo-wide. Even if the obligation
+		// has a target field, it is ignored — the storage adapter
+		// evaluates all discovered-module boundaries.
+		let r = req("REQ-1", 1, vec![obl("o1", "module_violations", Some("packages/app"), None)]);
+		let mut input = empty_input(vec![r], GateMode::Default);
+		input.method_evidence.insert(
+			key("REQ-1", 1, "o1"),
+			MethodEvidence::ModuleViolations {
+				violations_count: 0,
+				stale_declarations_count: 0,
+			},
+		);
+		let report = compute(input);
+		// Target is preserved in the evaluation output for
+		// transparency, but it does not affect the verdict.
+		assert_eq!(report.obligations[0].target, Some("packages/app".into()));
+		assert_eq!(report.obligations[0].computed_verdict, Verdict::PASS);
 	}
 }

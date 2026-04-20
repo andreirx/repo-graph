@@ -98,6 +98,25 @@ pub struct GateInference {
 	pub value_json: String,
 }
 
+/// Evaluated module boundary violations evidence (RS-MG-8).
+///
+/// Pre-computed by the storage adapter using RS-MG-1 through RS-MG-4
+/// support modules from the classification crate. The gate compute
+/// layer receives only the summary counts needed for verdict
+/// determination.
+///
+/// Note: `stale_declarations_count` is informational only. Stale
+/// declarations do not cause FAIL — they indicate boundaries
+/// referencing modules that no longer exist in the snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GateModuleViolationEvidence {
+	/// Total count of discovered-module boundary violations.
+	/// PASS if 0, FAIL if > 0.
+	pub violations_count: usize,
+	/// Count of stale boundary declarations (informational).
+	pub stale_declarations_count: usize,
+}
+
 /// One active waiver matching a specific
 /// `(req_id, req_version, obligation_id)` tuple. First-matching
 /// waiver wins at the overlay step.

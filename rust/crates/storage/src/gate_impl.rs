@@ -26,8 +26,17 @@
 
 use repo_graph_gate::{
 	GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
-	GateObligation, GateRequirement, GateStorageError, GateStorageRead,
-	GateWaiver,
+	GateModuleViolationEvidence, GateObligation, GateRequirement, GateStorageError,
+	GateStorageRead, GateWaiver,
+};
+
+use repo_graph_classification::boundary_evaluator::evaluate_module_boundaries;
+use repo_graph_classification::boundary_parser::{
+	parse_discovered_module_boundaries, RawBoundaryDeclaration,
+};
+use repo_graph_classification::module_edges::{
+	derive_module_dependency_edges, FileOwnershipFact, ModuleEdgeDerivationInput, ModuleRef,
+	ResolvedImportFact,
 };
 
 use crate::connection::StorageConnection;
@@ -182,5 +191,88 @@ impl GateStorageRead for StorageConnection {
 				policy_basis: w.policy_basis,
 			})
 			.collect())
+	}
+
+	fn evaluate_module_violations(
+		&self,
+		repo_uid: &str,
+		snapshot_uid: &str,
+	) -> Result<GateModuleViolationEvidence, GateStorageError> {
+		// RS-MG-8: Evaluate discovered-module boundary violations.
+		//
+		// Always repo-wide. Orchestrates RS-MG-1 through RS-MG-4:
+		// 1. Build module identity index
+		// 2. Derive cross-module edges
+		// 3. Parse boundary declarations
+		// 4. Evaluate violations
+
+		// RS-MG-1: Load module candidates and build identity index
+		let module_candidates = self
+			.get_module_candidates_for_snapshot(snapshot_uid)
+			.map_err(map_err("evaluate_module_violations"))?;
+
+		let module_index = self
+			.build_module_index_by_canonical_path(snapshot_uid)
+			.map_err(map_err("evaluate_module_violations"))?;
+
+		// RS-MG-2: Load imports + ownership and derive edges
+		let imports = self
+			.get_resolved_imports_for_snapshot(snapshot_uid)
+			.map_err(map_err("evaluate_module_violations"))?;
+
+		let ownership = self
+			.get_file_ownership_for_snapshot(snapshot_uid)
+			.map_err(map_err("evaluate_module_violations"))?;
+
+		let derivation_input = ModuleEdgeDerivationInput {
+			imports: imports
+				.into_iter()
+				.map(|i| ResolvedImportFact {
+					source_file_uid: i.source_file_uid,
+					target_file_uid: i.target_file_uid,
+				})
+				.collect(),
+			ownership: ownership
+				.into_iter()
+				.map(|o| FileOwnershipFact {
+					file_uid: o.file_uid,
+					module_uid: o.module_candidate_uid,
+				})
+				.collect(),
+			modules: module_candidates
+				.iter()
+				.map(|m| ModuleRef {
+					module_uid: m.module_candidate_uid.clone(),
+					canonical_path: m.canonical_root_path.clone(),
+				})
+				.collect(),
+		};
+
+		let edges = derive_module_dependency_edges(derivation_input)
+			.map_err(|e| GateStorageError::new("evaluate_module_violations", e.to_string()))?;
+
+		// RS-MG-3: Load and parse boundary declarations
+		let raw_boundaries = self
+			.get_active_boundary_declarations_for_repo(repo_uid)
+			.map_err(map_err("evaluate_module_violations"))?;
+
+		let raw_boundary_decls: Vec<RawBoundaryDeclaration> = raw_boundaries
+			.into_iter()
+			.map(|b| RawBoundaryDeclaration {
+				declaration_uid: b.declaration_uid,
+				value_json: b.value_json,
+			})
+			.collect();
+
+		let parsed_boundaries = parse_discovered_module_boundaries(&raw_boundary_decls)
+			.map_err(|e| GateStorageError::new("evaluate_module_violations", e.to_string()))?;
+
+		// RS-MG-4: Evaluate violations (repo-wide, no filtering)
+		let evaluation = evaluate_module_boundaries(&parsed_boundaries, &edges.edges, &module_index);
+
+		Ok(GateModuleViolationEvidence {
+			violations_count: evaluation.violations.len(),
+			stale_declarations_count: evaluation.stale_declarations.len(),
+		})
 	}
 }

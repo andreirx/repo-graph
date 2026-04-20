@@ -53,6 +53,13 @@
 #           Declare discovered-module boundary from Rust CLI.
 #           Exact resolution by canonicalRootPath or moduleKey.
 #           Completes Rust write path for module governance.
+# RS-MG-8:  `module_violations` gate method.
+#           Evaluates discovered-module boundaries via gate policy layer.
+#           Uses RS-MG-1 through RS-MG-4 support modules for evaluation.
+#           Always repo-wide (target field on obligation is ignored).
+#           PASS = 0 violations, FAIL = >0 violations.
+#           Stale declarations are informational only (do not cause FAIL).
+#           Waivable like other gate methods.
 #
 # No formatting-heavy UX.
 

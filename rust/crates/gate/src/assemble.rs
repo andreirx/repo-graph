@@ -330,6 +330,19 @@ pub fn assemble_from_requirements<S: GateStorageRead + ?Sized>(
 					}
 				}
 
+				"module_violations" => {
+					// Repo-wide only. The `target` field on the obligation
+					// is ignored. threshold is not used.
+					let evidence = storage.evaluate_module_violations(
+						repo_uid,
+						snapshot_uid,
+					)?;
+					MethodEvidence::ModuleViolations {
+						violations_count: evidence.violations_count,
+						stale_declarations_count: evidence.stale_declarations_count,
+					}
+				}
+
 				_ => MethodEvidence::UnsupportedMethod,
 			};
 
@@ -374,7 +387,8 @@ mod tests {
 	use crate::storage_port::GateStorageRead;
 	use crate::types::{
 		GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
-		GateObligation, GateRequirement, GateWaiver, Verdict,
+		GateModuleViolationEvidence, GateObligation, GateRequirement, GateWaiver,
+		Verdict,
 	};
 	use std::cell::RefCell;
 
@@ -387,6 +401,7 @@ mod tests {
 		pub complexity: Vec<GateMeasurement>,
 		pub hotspots: Vec<GateInference>,
 		pub waivers: std::collections::HashMap<(String, i64, String), Vec<GateWaiver>>,
+		pub module_violations: GateModuleViolationEvidence,
 		pub force_error_on: RefCell<Option<&'static str>>,
 	}
 
@@ -464,6 +479,15 @@ mod tests {
 				.get(&(req_id.to_string(), req_version, obligation_id.to_string()))
 				.cloned()
 				.unwrap_or_default())
+		}
+
+		fn evaluate_module_violations(
+			&self,
+			_repo_uid: &str,
+			_snapshot_uid: &str,
+		) -> Result<GateModuleViolationEvidence, GateStorageError> {
+			self.fail("evaluate_module_violations")?;
+			Ok(self.module_violations.clone())
 		}
 	}
 
@@ -610,6 +634,68 @@ mod tests {
 				.unwrap_err();
 		match err {
 			GateError::Storage(e) => assert_eq!(e.operation, "get_boundary_declarations"),
+			other => panic!("expected Storage, got {:?}", other),
+		}
+	}
+
+	// ── module_violations ──
+
+	#[test]
+	fn assemble_module_violations_pass_with_zero_violations() {
+		let mut fake = FakeStorage::default();
+		fake.requirements = vec![GateRequirement {
+			req_id: "REQ-1".into(),
+			version: 1,
+			obligations: vec![make_obl("o1", "module_violations", None, None)],
+		}];
+		fake.module_violations = GateModuleViolationEvidence {
+			violations_count: 0,
+			stale_declarations_count: 0,
+		};
+
+		let report =
+			assemble(&fake, "r1", "snap-1", GateMode::Default, "2026-04-15T00:00:00Z")
+				.unwrap();
+		assert_eq!(report.obligations[0].computed_verdict, Verdict::PASS);
+		assert_eq!(report.outcome.outcome, "pass");
+	}
+
+	#[test]
+	fn assemble_module_violations_fail_when_violations_exist() {
+		let mut fake = FakeStorage::default();
+		fake.requirements = vec![GateRequirement {
+			req_id: "REQ-1".into(),
+			version: 1,
+			obligations: vec![make_obl("o1", "module_violations", None, None)],
+		}];
+		fake.module_violations = GateModuleViolationEvidence {
+			violations_count: 2,
+			stale_declarations_count: 1,
+		};
+
+		let report =
+			assemble(&fake, "r1", "snap-1", GateMode::Default, "2026-04-15T00:00:00Z")
+				.unwrap();
+		assert_eq!(report.obligations[0].computed_verdict, Verdict::FAIL);
+		assert_eq!(report.obligations[0].evidence["violations_count"], 2);
+		assert_eq!(report.outcome.outcome, "fail");
+	}
+
+	#[test]
+	fn assemble_module_violations_propagates_storage_error() {
+		let mut fake = FakeStorage::default();
+		fake.requirements = vec![GateRequirement {
+			req_id: "REQ-1".into(),
+			version: 1,
+			obligations: vec![make_obl("o1", "module_violations", None, None)],
+		}];
+		*fake.force_error_on.borrow_mut() = Some("evaluate_module_violations");
+
+		let err =
+			assemble(&fake, "r1", "snap-1", GateMode::Default, "2026-04-15T00:00:00Z")
+				.unwrap_err();
+		match err {
+			GateError::Storage(e) => assert_eq!(e.operation, "evaluate_module_violations"),
 			other => panic!("expected Storage, got {:?}", other),
 		}
 	}

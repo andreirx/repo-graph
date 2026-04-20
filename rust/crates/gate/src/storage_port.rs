@@ -26,7 +26,7 @@
 use crate::errors::GateStorageError;
 use crate::types::{
 	GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
-	GateRequirement, GateWaiver,
+	GateModuleViolationEvidence, GateRequirement, GateWaiver,
 };
 
 /// Narrow read port for the gate policy layer.
@@ -95,4 +95,27 @@ pub trait GateStorageRead {
 		obligation_id: &str,
 		now: &str,
 	) -> Result<Vec<GateWaiver>, GateStorageError>;
+
+	/// Evaluate discovered-module boundary violations (RS-MG-8).
+	///
+	/// The storage adapter implements this using RS-MG-1 through
+	/// RS-MG-4 support modules from the classification crate:
+	///
+	///   1. Load module candidates and build identity index (RS-MG-1)
+	///   2. Load imports + ownership and derive edges (RS-MG-2)
+	///   3. Load and parse boundary declarations (RS-MG-3)
+	///   4. Evaluate violations (RS-MG-4)
+	///
+	/// Always repo-wide. Evaluates ALL discovered-module boundaries
+	/// for the repo. If scoped evaluation is needed, it requires a
+	/// separate method with explicit design.
+	///
+	/// Returns summary counts only — the gate compute layer does
+	/// not need individual violation details for verdict
+	/// determination.
+	fn evaluate_module_violations(
+		&self,
+		repo_uid: &str,
+		snapshot_uid: &str,
+	) -> Result<GateModuleViolationEvidence, GateStorageError>;
 }

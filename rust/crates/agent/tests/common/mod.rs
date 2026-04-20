@@ -30,7 +30,8 @@ use repo_graph_agent::{
 };
 use repo_graph_gate::{
 	GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
-	GateRequirement, GateStorageError, GateStorageRead, GateWaiver,
+	GateModuleViolationEvidence, GateRequirement, GateStorageError, GateStorageRead,
+	GateWaiver,
 };
 
 /// Shared fixed "now" for all agent integration tests.
@@ -681,5 +682,16 @@ impl GateStorageRead for FakeAgentStorage {
 			})
 			.collect();
 		Ok(active)
+	}
+
+	fn evaluate_module_violations(
+		&self,
+		_repo_uid: &str,
+		_snapshot_uid: &str,
+	) -> Result<GateModuleViolationEvidence, GateStorageError> {
+		self.fail_if_forced_gate("evaluate_module_violations")?;
+		// Default: no module violations. Tests that need violations
+		// should set up explicit module data in FakeAgentStorage.
+		Ok(GateModuleViolationEvidence::default())
 	}
 }

@@ -43,6 +43,14 @@
 #
 # Dependency edges MUST NOT form a reverse edge from gate to
 # agent. Gate does not know about orientation.
+#
+# RS-MG-8: Added `module_violations` gate method.
+#   - Evaluates discovered-module boundary violations via gate policy.
+#   - Storage adapter orchestrates RS-MG-1 through RS-MG-4 support modules.
+#   - Always repo-wide (target field on obligation is ignored).
+#   - PASS = 0 violations, FAIL = >0 violations.
+#   - Stale declarations informational only (no FAIL).
+#   - Method is waivable like other gate methods.
 
 [package]
 name         = "repo-graph-gate"

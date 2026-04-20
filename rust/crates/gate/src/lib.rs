@@ -40,11 +40,11 @@
 //! ── Supported methods ─────────────────────────────────────
 //!
 //! `arch_violations`, `coverage_threshold`,
-//! `complexity_threshold`, `hotspot_threshold`. All others
-//! return UNSUPPORTED. Extending the method set is a
-//! two-location change: add a `MethodEvidence` variant in
-//! `compute.rs`, extend the assembly dispatch in
-//! `assemble.rs`.
+//! `complexity_threshold`, `hotspot_threshold`,
+//! `module_violations`. All others return UNSUPPORTED.
+//! Extending the method set is a two-location change: add a
+//! `MethodEvidence` variant in `compute.rs`, extend the
+//! assembly dispatch in `assemble.rs`.
 
 pub mod assemble;
 pub mod compute;
@@ -60,7 +60,7 @@ pub use errors::{GateError, GateStorageError};
 pub use storage_port::GateStorageRead;
 pub use types::{
 	EffectiveVerdict, GateBoundaryDeclaration, GateCounts, GateImportEdge,
-	GateInference, GateMeasurement, GateMode, GateObligation, GateOutcome,
-	GateReport, GateRequirement, GateWaiver, ObligationEvaluation, Verdict,
-	WaiverBasis,
+	GateInference, GateMeasurement, GateMode, GateModuleViolationEvidence,
+	GateObligation, GateOutcome, GateReport, GateRequirement, GateWaiver,
+	ObligationEvaluation, Verdict, WaiverBasis,
 };
