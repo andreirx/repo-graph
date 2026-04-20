@@ -1,0 +1,162 @@
+Module Graph — Architectural Contract
+=====================================
+
+Status: NORMATIVE
+Date:   2026-04-20
+Scope:  MG-1 (edge derivation), MG-2 (policy), MG-3 (CLI)
+
+This document specifies how module-to-module dependency edges are derived
+from the file-level import graph and how policy is evaluated over those edges.
+
+
+================================================================================
+1. DERIVATION MODEL
+================================================================================
+
+Module dependency edges are derived from:
+  - IMPORTS edges (file/symbol level)
+  - Module file ownership (module_file_ownership table)
+  - Module candidates (module_candidates table)
+
+Derivation rule:
+  For each resolved IMPORTS edge (nodeA -> nodeB):
+    fileA = file containing nodeA
+    fileB = file containing nodeB
+    moduleA = owning module of fileA (via module_file_ownership)
+    moduleB = owning module of fileB (via module_file_ownership)
+    if moduleA exists AND moduleB exists AND moduleA != moduleB:
+      emit ModuleDependencyEdge(moduleA -> moduleB)
+
+Key constraints:
+  - File ownership based, not symbol ownership
+  - Cross-module edges only (intra-module excluded)
+  - Resolved imports only (unresolved excluded)
+
+
+================================================================================
+2. EDGE SEMANTICS
+================================================================================
+
+Direction:
+  A -> B means "A depends on B"
+  - A file in module A imports a file/symbol in module B
+  - A has an outbound dependency on B
+  - B has an inbound dependency from A
+
+Fan-out (outbound):
+  - Edges where this module is the source
+  - What this module depends on
+
+Fan-in (inbound):
+  - Edges where this module is the target
+  - What depends on this module
+
+
+================================================================================
+3. AGGREGATION
+================================================================================
+
+Multiple file-level IMPORTS edges between the same module pair collapse
+into a single ModuleDependencyEdge with aggregated counts:
+
+  ModuleDependencyEdge {
+    sourceModuleUid: string      // module containing importing files
+    targetModuleUid: string      // module containing imported files
+    importCount: number          // total IMPORTS edges (A -> B)
+    sourceFileCount: number      // distinct files in A that import from B
+  }
+
+
+================================================================================
+4. PERSISTENCE MODEL
+================================================================================
+
+Slice 1: Query-time derivation only.
+
+Rationale:
+  - Edge semantics are still being established
+  - Persisting derived edges would freeze schema before model is proven
+  - Pure derivation algorithm is the stable support module
+  - Persistence is a later optimization if profiling proves necessary
+
+Clean architecture shape:
+  - core: pure deriveModuleDependencyEdges(...)
+  - adapter/query: load IMPORTS + ownership + candidates, run derivation
+  - later: optional persisted snapshot-scoped module edges behind same port
+
+
+================================================================================
+5. EXCLUSIONS
+================================================================================
+
+5.1 Unresolved imports
+--------------------
+Unresolved IMPORTS edges (target file/symbol unknown) are excluded from
+module dependency edges.
+
+Rationale:
+  - Module edges should be high-confidence facts
+  - Unresolved imports belong in diagnostics/trust, not canonical graph
+  - Mixing unresolved heuristics corrupts violation results
+
+5.2 Intra-module imports
+------------------------
+Imports within the same module are excluded from module dependency edges.
+
+Rationale:
+  - Module graph is about architectural boundaries
+  - Intra-module imports are implementation detail
+  - Violations only make sense across module boundaries
+
+If needed later, intra-module density can be a separate metric.
+
+
+================================================================================
+6. POLICY LAYER (MG-2)
+================================================================================
+
+Boundary declarations:
+  - Target discovered module candidates (by moduleKey or canonicalRootPath)
+  - NOT directory MODULE nodes (legacy)
+
+Violation definition:
+  A violation exists when:
+    - Boundary declaration: moduleA forbids moduleB
+    - Derived edge exists: moduleA -> moduleB
+
+Policy evaluation is separate from edge derivation:
+  - Takes derived edges as input
+  - Evaluates boundary constraints
+  - Produces violation set
+
+
+================================================================================
+7. CLI SURFACE (MG-3)
+================================================================================
+
+Planned commands:
+  - rgr modules deps <repo> [<module>]  -- show outbound/inbound dependencies
+  - rgr arch violations <repo>          -- extended for discovered modules
+
+Planned rollups:
+  - Module-level fan-in/fan-out in rgr modules list
+
+
+================================================================================
+8. SLICE INVENTORY
+================================================================================
+
+MG-1: Edge derivation (support module)
+  - Pure deriveModuleDependencyEdges(...) in src/core/modules/
+  - Input: IMPORTS edges, file ownership, module candidates
+  - Output: ModuleDependencyEdge[]
+  - No persistence, no CLI
+
+MG-2: Policy / violations
+  - Boundary declarations target discovered modules
+  - Violation detection over derived edges
+  - Builds on MG-1 output
+
+MG-3: CLI / reporting
+  - User-facing commands
+  - Module-level metrics in rollups
