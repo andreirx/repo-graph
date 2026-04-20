@@ -24,6 +24,8 @@
 //!   rmap resource readers <db_path> <repo_uid> <resource_stable_key>
 //!   rmap resource writers <db_path> <repo_uid> <resource_stable_key>
 //!
+//!   rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]
+//!
 //! Exit codes:
 //!   0 — success (gate: all pass; check: pass)
 //!   1 — usage error (gate: any fail; check: fail)
@@ -112,6 +114,7 @@ fn main() -> ExitCode {
 		"stats" => run_stats(&args[2..]),
 		"declare" => run_declare(&args[2..]),
 		"resource" => run_resource(&args[2..]),
+		"modules" => run_modules(&args[2..]),
 		other => {
 			eprintln!("unknown command: {}", other);
 			print_usage();
@@ -141,6 +144,7 @@ fn print_usage() {
 	eprintln!("  rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]");
 	eprintln!("  rmap resource readers <db_path> <repo_uid> <resource_stable_key>");
 	eprintln!("  rmap resource writers <db_path> <repo_uid> <resource_stable_key>");
+	eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
 }
 
 // ── index command ────────────────────────────────────────────────
@@ -2891,6 +2895,302 @@ fn run_resource_writers(args: &[String]) -> ExitCode {
 			ExitCode::from(2)
 		}
 	}
+}
+
+// ── modules command ──────────────────────────────────────────────
+
+fn run_modules(args: &[String]) -> ExitCode {
+	if args.is_empty() {
+		eprintln!("usage:");
+		eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
+		return ExitCode::from(1);
+	}
+
+	match args[0].as_str() {
+		"deps" => run_modules_deps(&args[1..]),
+		other => {
+			eprintln!("unknown modules subcommand: {}", other);
+			eprintln!("usage:");
+			eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
+			ExitCode::from(1)
+		}
+	}
+}
+
+/// Direction filter for module deps command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DepsDirection {
+	/// Show all cross-module edges (default).
+	All,
+	/// Show only edges where the specified module is the source.
+	Outbound,
+	/// Show only edges where the specified module is the target.
+	Inbound,
+}
+
+fn run_modules_deps(args: &[String]) -> ExitCode {
+	// Parse args: <db_path> <repo_uid> [module] [--outbound|--inbound]
+	let (positional, direction) = match parse_deps_args(args) {
+		Ok(v) => v,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			eprintln!("usage: rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
+			return ExitCode::from(1);
+		}
+	};
+
+	if positional.len() < 2 || positional.len() > 3 {
+		eprintln!("usage: rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&positional[0]);
+	let repo_uid = &positional[1];
+	let module_filter: Option<&str> = positional.get(2).map(|s| s.as_str());
+
+	// Direction flag requires module filter
+	if direction != DepsDirection::All && module_filter.is_none() {
+		eprintln!("error: --outbound and --inbound require a module argument");
+		eprintln!("usage: rmap modules deps <db_path> <repo_uid> <module> --outbound");
+		return ExitCode::from(1);
+	}
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(snap)) => snap,
+		Ok(None) => {
+			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Load module candidates
+	let modules = match storage.get_module_candidates_for_snapshot(&snapshot.snapshot_uid) {
+		Ok(m) => m,
+		Err(e) => {
+			eprintln!("error: failed to load module candidates: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Resolve module filter argument against discovered modules.
+	// Resolution precedence: canonical_root_path exact → module_key exact.
+	// Unknown module → error (not empty results).
+	let resolved_module_path: Option<String> = match module_filter {
+		Some(filter) => {
+			// Try canonical_root_path exact match first
+			let by_path = modules.iter().find(|m| m.canonical_root_path == filter);
+			if let Some(m) = by_path {
+				Some(m.canonical_root_path.clone())
+			} else {
+				// Try module_key exact match
+				let by_key = modules.iter().find(|m| m.module_key == filter);
+				if let Some(m) = by_key {
+					Some(m.canonical_root_path.clone())
+				} else {
+					eprintln!("error: module not found: {}", filter);
+					eprintln!(
+						"hint: use canonical path (e.g., 'packages/app') or module key"
+					);
+					return ExitCode::from(1);
+				}
+			}
+		}
+		None => None,
+	};
+
+	// Load resolved imports
+	let imports = match storage.get_resolved_imports_for_snapshot(&snapshot.snapshot_uid) {
+		Ok(i) => i,
+		Err(e) => {
+			eprintln!("error: failed to load imports: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Load file ownership
+	let ownership = match storage.get_file_ownership_for_snapshot(&snapshot.snapshot_uid) {
+		Ok(o) => o,
+		Err(e) => {
+			eprintln!("error: failed to load file ownership: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Convert to classification DTOs
+	use repo_graph_classification::module_edges::{
+		derive_module_dependency_edges, FileOwnershipFact, ModuleEdgeDerivationInput,
+		ModuleRef, ResolvedImportFact,
+	};
+
+	let import_facts: Vec<ResolvedImportFact> = imports
+		.into_iter()
+		.map(|i| ResolvedImportFact {
+			source_file_uid: i.source_file_uid,
+			target_file_uid: i.target_file_uid,
+		})
+		.collect();
+
+	let ownership_facts: Vec<FileOwnershipFact> = ownership
+		.into_iter()
+		.map(|o| FileOwnershipFact {
+			file_uid: o.file_uid,
+			module_uid: o.module_candidate_uid,
+		})
+		.collect();
+
+	let module_refs: Vec<ModuleRef> = modules
+		.iter()
+		.map(|m| ModuleRef {
+			module_uid: m.module_candidate_uid.clone(),
+			canonical_path: m.canonical_root_path.clone(),
+		})
+		.collect();
+
+	let input = ModuleEdgeDerivationInput {
+		imports: import_facts,
+		ownership: ownership_facts,
+		modules: module_refs,
+	};
+
+	// Derive edges
+	let derivation_result = match derive_module_dependency_edges(input) {
+		Ok(r) => r,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Filter by resolved module path if specified
+	let filtered_edges: Vec<_> = match &resolved_module_path {
+		Some(module_path) => {
+			derivation_result
+				.edges
+				.into_iter()
+				.filter(|e| match direction {
+					DepsDirection::All => {
+						e.source_canonical_path == *module_path
+							|| e.target_canonical_path == *module_path
+					}
+					DepsDirection::Outbound => e.source_canonical_path == *module_path,
+					DepsDirection::Inbound => e.target_canonical_path == *module_path,
+				})
+				.collect()
+		}
+		None => derivation_result.edges,
+	};
+
+	// Build JSON output
+	let results: Vec<serde_json::Value> = filtered_edges
+		.iter()
+		.map(|e| {
+			serde_json::json!({
+				"source": e.source_canonical_path,
+				"target": e.target_canonical_path,
+				"import_count": e.import_count,
+				"source_file_count": e.source_file_count,
+			})
+		})
+		.collect();
+
+	let count = results.len();
+
+	// Build extra fields for envelope
+	let mut extra = serde_json::Map::new();
+	if let Some(ref m) = resolved_module_path {
+		extra.insert("module".to_string(), serde_json::Value::String(m.clone()));
+	}
+	extra.insert(
+		"direction".to_string(),
+		serde_json::Value::String(match direction {
+			DepsDirection::All => "all".to_string(),
+			DepsDirection::Outbound => "outbound".to_string(),
+			DepsDirection::Inbound => "inbound".to_string(),
+		}),
+	);
+	extra.insert(
+		"diagnostics".to_string(),
+		serde_json::json!({
+			"imports_total": derivation_result.diagnostics.imports_total,
+			"imports_cross_module": derivation_result.diagnostics.imports_cross_module,
+			"imports_intra_module": derivation_result.diagnostics.imports_intra_module,
+			"imports_source_unowned": derivation_result.diagnostics.imports_source_unowned,
+			"imports_target_unowned": derivation_result.diagnostics.imports_target_unowned,
+		}),
+	);
+
+	let output = match build_envelope(
+		&storage,
+		"modules deps",
+		repo_uid,
+		&snapshot,
+		serde_json::to_value(&results).unwrap(),
+		count,
+		extra,
+	) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+/// Parse --outbound / --inbound flags from args.
+fn parse_deps_args(args: &[String]) -> Result<(Vec<String>, DepsDirection), String> {
+	let mut positional = Vec::new();
+	let mut direction = DepsDirection::All;
+	let mut direction_set = false;
+
+	for arg in args {
+		match arg.as_str() {
+			"--outbound" => {
+				if direction_set {
+					return Err("cannot specify both --outbound and --inbound".to_string());
+				}
+				direction = DepsDirection::Outbound;
+				direction_set = true;
+			}
+			"--inbound" => {
+				if direction_set {
+					return Err("cannot specify both --outbound and --inbound".to_string());
+				}
+				direction = DepsDirection::Inbound;
+				direction_set = true;
+			}
+			other if other.starts_with("--") => {
+				return Err(format!("unknown flag: {}", other));
+			}
+			_ => {
+				positional.push(arg.clone());
+			}
+		}
+	}
+
+	Ok((positional, direction))
 }
 
 /// Extract module path from a MODULE stable key: `{repo}:{path}:MODULE`

@@ -268,6 +268,7 @@
 //!       with the two framework-detection functions.
 
 pub(crate) mod blast_radius;
+pub mod boundary_evaluator;
 pub(crate) mod boundary_matcher;
 pub mod boundary_parser;
 pub(crate) mod framework_boundary;

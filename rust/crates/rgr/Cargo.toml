@@ -42,6 +42,9 @@
 # Rust-44:  `check <db_path> <repo_uid>`
 #           Pre-action trust/safety check. Exit codes map to
 #           verdict: 0 = pass, 1 = fail, 2 = incomplete.
+# RS-MG-5:  `modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]`
+#           Cross-module dependency edges from discovered modules.
+#           Consumes module_candidates + module_file_ownership from TS indexer.
 #
 # No formatting-heavy UX.
 
@@ -60,6 +63,7 @@ path = "src/main.rs"
 
 [dependencies]
 repo-graph-agent = { path = "../agent" }
+repo-graph-classification = { path = "../classification" }
 repo-graph-gate = { path = "../gate" }
 repo-graph-repo-index = { path = "../repo-index" }
 repo-graph-storage = { path = "../storage" }
