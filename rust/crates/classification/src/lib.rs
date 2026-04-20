@@ -269,6 +269,7 @@
 
 pub(crate) mod blast_radius;
 pub(crate) mod boundary_matcher;
+pub mod boundary_parser;
 pub(crate) mod framework_boundary;
 pub(crate) mod framework_entrypoints;
 pub mod module_edges;

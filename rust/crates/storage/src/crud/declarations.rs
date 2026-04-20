@@ -265,6 +265,53 @@ impl StorageConnection {
 		)?;
 		Ok(rows)
 	}
+
+	/// Read all active boundary declarations for a repository.
+	///
+	/// Returns raw `DeclarationRow` with `value_json` intact.
+	/// The classification layer is responsible for:
+	/// - Parsing JSON
+	/// - Filtering by selectorDomain
+	/// - Validating payload structure
+	///
+	/// Order is deterministic: sorted by `declaration_uid` ascending.
+	pub fn get_active_boundary_declarations_for_repo(
+		&self,
+		repo_uid: &str,
+	) -> Result<Vec<DeclarationRow>, StorageError> {
+		let conn = self.connection();
+		let mut stmt = conn.prepare(
+			"SELECT declaration_uid, repo_uid, target_stable_key, kind,
+			        value_json, created_at, created_by, supersedes_uid,
+			        is_active, authored_basis_json
+			 FROM declarations
+			 WHERE repo_uid = ?
+			   AND kind = 'boundary'
+			   AND is_active = 1
+			 ORDER BY declaration_uid ASC",
+		)?;
+
+		let rows = stmt.query_map([repo_uid], |row| {
+			Ok(DeclarationRow {
+				declaration_uid: row.get(0)?,
+				repo_uid: row.get(1)?,
+				target_stable_key: row.get(2)?,
+				kind: row.get(3)?,
+				value_json: row.get(4)?,
+				created_at: row.get(5)?,
+				created_by: row.get(6)?,
+				supersedes_uid: row.get(7)?,
+				is_active: row.get::<_, i32>(8)? == 1,
+				authored_basis_json: row.get(9)?,
+			})
+		})?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			results.push(row?);
+		}
+		Ok(results)
+	}
 }
 
 /// Derive a deterministic UUID v5 from declaration identity.
@@ -847,5 +894,77 @@ mod tests {
 		let active = storage.get_active_boundary_declarations("r1").unwrap();
 		assert_eq!(active.len(), 1, "exactly one active boundary (the original)");
 		assert_eq!(active[0].boundary_module, "src/core");
+	}
+
+	// ── RS-MG-3: get_active_boundary_declarations_for_repo ──────
+
+	#[test]
+	fn get_active_boundary_declarations_for_repo_returns_empty() {
+		let storage = fresh_storage();
+		setup_repo(&storage);
+
+		let result = storage
+			.get_active_boundary_declarations_for_repo("r1")
+			.unwrap();
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn get_active_boundary_declarations_for_repo_returns_raw_rows() {
+		let storage = fresh_storage();
+		setup_repo(&storage);
+
+		let decl = make_boundary_decl("r1", "src/core", "src/adapters");
+		storage.insert_declaration(&decl).unwrap();
+
+		let result = storage
+			.get_active_boundary_declarations_for_repo("r1")
+			.unwrap();
+
+		assert_eq!(result.len(), 1);
+		assert_eq!(result[0].repo_uid, "r1");
+		assert_eq!(result[0].kind, "boundary");
+		assert!(result[0].is_active);
+		// Raw value_json preserved
+		assert!(result[0].value_json.contains("forbids"));
+	}
+
+	#[test]
+	fn get_active_boundary_declarations_for_repo_excludes_inactive() {
+		let storage = fresh_storage();
+		setup_repo(&storage);
+
+		let decl = make_boundary_decl("r1", "src/core", "src/adapters");
+		let insert_result = storage.insert_declaration(&decl).unwrap();
+		storage
+			.deactivate_declaration(&insert_result.declaration_uid)
+			.unwrap();
+
+		let result = storage
+			.get_active_boundary_declarations_for_repo("r1")
+			.unwrap();
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn get_active_boundary_declarations_for_repo_excludes_other_kinds() {
+		let storage = fresh_storage();
+		setup_repo(&storage);
+
+		// Insert boundary
+		let boundary = make_boundary_decl("r1", "src/core", "src/adapters");
+		storage.insert_declaration(&boundary).unwrap();
+
+		// Insert requirement
+		let req = make_requirement_decl("r1", "REQ-001", 1);
+		storage.insert_declaration(&req).unwrap();
+
+		let result = storage
+			.get_active_boundary_declarations_for_repo("r1")
+			.unwrap();
+
+		// Only boundary, not requirement
+		assert_eq!(result.len(), 1);
+		assert_eq!(result[0].kind, "boundary");
 	}
 }
