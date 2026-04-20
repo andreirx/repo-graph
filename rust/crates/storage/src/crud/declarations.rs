@@ -335,10 +335,27 @@ fn deterministic_uid(kind: &str, identity_key: &str) -> String {
 // Pure functions that build identity keys from typed fields.
 // Exported for use by CLI declare commands (Rust-33+).
 
-/// Build the identity key for a boundary declaration.
+/// Build the identity key for a legacy directory-module boundary declaration.
 /// Identity: `(repo, module_path, forbids)`.
+///
+/// WARNING: Do NOT use this for discovered-module boundaries. Use
+/// `discovered_module_boundary_identity_key` instead to avoid UID
+/// collisions between legacy and discovered-module policy.
 pub fn boundary_identity_key(repo_uid: &str, module_path: &str, forbids: &str) -> String {
 	format!("{}:{}:{}", repo_uid, module_path, forbids)
+}
+
+/// Build the identity key for a discovered-module boundary declaration.
+/// Identity: `(discovered_module, repo, source_path, target_path)`.
+///
+/// Includes selector domain prefix to prevent UID collisions with legacy
+/// directory-module boundaries that may share the same path tuple.
+pub fn discovered_module_boundary_identity_key(
+	repo_uid: &str,
+	source_path: &str,
+	target_path: &str,
+) -> String {
+	format!("discovered_module:{}:{}:{}", repo_uid, source_path, target_path)
 }
 
 /// Build the identity key for a requirement declaration.

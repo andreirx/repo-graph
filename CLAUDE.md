@@ -159,6 +159,7 @@ rmap resource readers <db_path> <repo_uid> <resource_stable_key>  # Symbols with
 rmap resource writers <db_path> <repo_uid> <resource_stable_key>  # Symbols with WRITES edges to resource
 rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]  # Cross-module dependency edges
 rmap modules violations <db_path> <repo_uid>  # Discovered-module boundary violations
+rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]  # Declare discovered-module boundary
 ```
 
 Read-side commands (callers, callees, path, imports, violations, dead,

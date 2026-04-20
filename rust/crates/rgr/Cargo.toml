@@ -49,6 +49,10 @@
 #           Discovered-module boundary violation check.
 #           Exit 0: no violations, Exit 1: violations, Exit 2: runtime error.
 #           Stale declarations do not force exit 1.
+# RS-MG-7:  `modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]`
+#           Declare discovered-module boundary from Rust CLI.
+#           Exact resolution by canonicalRootPath or moduleKey.
+#           Completes Rust write path for module governance.
 #
 # No formatting-heavy UX.
 
