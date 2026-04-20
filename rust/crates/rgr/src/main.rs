@@ -25,13 +25,14 @@
 //!   rmap resource writers <db_path> <repo_uid> <resource_stable_key>
 //!
 //!   rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]
+//!   rmap modules violations <db_path> <repo_uid>
 //!
 //! Exit codes:
-//!   0 — success (gate: all pass; check: pass)
-//!   1 — usage error (gate: any fail; check: fail)
+//!   0 — success (gate: all pass; check: pass; modules violations: no violations)
+//!   1 — usage error (gate: any fail; check: fail; modules violations: violations found)
 //!   2 — runtime error (gate: incomplete; check: incomplete;
 //!       orient: focus-not-implemented, storage failure,
-//!       missing repo, missing snapshot)
+//!       missing repo, missing snapshot, boundary parse failure)
 
 // Gate policy was relocated out of this binary crate into
 // `repo-graph-gate` during Rust-43A. The `run_gate` function
@@ -145,6 +146,7 @@ fn print_usage() {
 	eprintln!("  rmap resource readers <db_path> <repo_uid> <resource_stable_key>");
 	eprintln!("  rmap resource writers <db_path> <repo_uid> <resource_stable_key>");
 	eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
+	eprintln!("  rmap modules violations <db_path> <repo_uid>");
 }
 
 // ── index command ────────────────────────────────────────────────
@@ -2903,15 +2905,18 @@ fn run_modules(args: &[String]) -> ExitCode {
 	if args.is_empty() {
 		eprintln!("usage:");
 		eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
+		eprintln!("  rmap modules violations <db_path> <repo_uid>");
 		return ExitCode::from(1);
 	}
 
 	match args[0].as_str() {
 		"deps" => run_modules_deps(&args[1..]),
+		"violations" => run_modules_violations(&args[1..]),
 		other => {
 			eprintln!("unknown modules subcommand: {}", other);
 			eprintln!("usage:");
 			eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
+			eprintln!("  rmap modules violations <db_path> <repo_uid>");
 			ExitCode::from(1)
 		}
 	}
@@ -3191,6 +3196,242 @@ fn parse_deps_args(args: &[String]) -> Result<(Vec<String>, DepsDirection), Stri
 	}
 
 	Ok((positional, direction))
+}
+
+// ── modules violations command ───────────────────────────────────
+
+fn run_modules_violations(args: &[String]) -> ExitCode {
+	if args.len() != 2 {
+		eprintln!("usage: rmap modules violations <db_path> <repo_uid>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(snap)) => snap,
+		Ok(None) => {
+			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// 1. Load module candidates
+	let modules = match storage.get_module_candidates_for_snapshot(&snapshot.snapshot_uid) {
+		Ok(m) => m,
+		Err(e) => {
+			eprintln!("error: failed to load module candidates: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// 2. Load active boundary declarations
+	let declarations = match storage.get_active_boundary_declarations_for_repo(repo_uid) {
+		Ok(d) => d,
+		Err(e) => {
+			eprintln!("error: failed to load boundary declarations: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// 3. Convert to parser input and parse discovered-module boundaries
+	use repo_graph_classification::boundary_parser::{
+		parse_discovered_module_boundaries, RawBoundaryDeclaration,
+	};
+
+	let raw_boundaries: Vec<RawBoundaryDeclaration> = declarations
+		.iter()
+		.map(|d| RawBoundaryDeclaration {
+			declaration_uid: d.declaration_uid.clone(),
+			value_json: d.value_json.clone(),
+		})
+		.collect();
+
+	let parsed_boundaries = match parse_discovered_module_boundaries(&raw_boundaries) {
+		Ok(b) => b,
+		Err(e) => {
+			// Parse failure is exit code 2 — do not degrade
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// 4. Load imports and file ownership for edge derivation
+	let imports = match storage.get_resolved_imports_for_snapshot(&snapshot.snapshot_uid) {
+		Ok(i) => i,
+		Err(e) => {
+			eprintln!("error: failed to load imports: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	let ownership = match storage.get_file_ownership_for_snapshot(&snapshot.snapshot_uid) {
+		Ok(o) => o,
+		Err(e) => {
+			eprintln!("error: failed to load file ownership: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// 5. Derive module edges
+	use repo_graph_classification::module_edges::{
+		derive_module_dependency_edges, FileOwnershipFact, ModuleEdgeDerivationInput,
+		ModuleRef, ResolvedImportFact,
+	};
+
+	let import_facts: Vec<ResolvedImportFact> = imports
+		.into_iter()
+		.map(|i| ResolvedImportFact {
+			source_file_uid: i.source_file_uid,
+			target_file_uid: i.target_file_uid,
+		})
+		.collect();
+
+	let ownership_facts: Vec<FileOwnershipFact> = ownership
+		.into_iter()
+		.map(|o| FileOwnershipFact {
+			file_uid: o.file_uid,
+			module_uid: o.module_candidate_uid,
+		})
+		.collect();
+
+	let module_refs: Vec<ModuleRef> = modules
+		.iter()
+		.map(|m| ModuleRef {
+			module_uid: m.module_candidate_uid.clone(),
+			canonical_path: m.canonical_root_path.clone(),
+		})
+		.collect();
+
+	let derivation_input = ModuleEdgeDerivationInput {
+		imports: import_facts,
+		ownership: ownership_facts,
+		modules: module_refs,
+	};
+
+	let derivation_result = match derive_module_dependency_edges(derivation_input) {
+		Ok(r) => r,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// 6. Build module index for stale detection
+	use std::collections::HashMap;
+	let module_index: HashMap<String, String> = modules
+		.iter()
+		.map(|m| {
+			(
+				m.canonical_root_path.clone(),
+				m.module_candidate_uid.clone(),
+			)
+		})
+		.collect();
+
+	// 7. Evaluate boundaries
+	use repo_graph_classification::boundary_evaluator::{
+		evaluate_module_boundaries, StaleSide,
+	};
+
+	let evaluation = evaluate_module_boundaries(
+		&parsed_boundaries,
+		&derivation_result.edges,
+		&module_index,
+	);
+
+	// 8. Build JSON output — preserve evaluator order exactly
+	let violations_json: Vec<serde_json::Value> = evaluation
+		.violations
+		.iter()
+		.map(|v| {
+			serde_json::json!({
+				"declaration_uid": v.declaration_uid,
+				"source": v.source_canonical_path,
+				"target": v.target_canonical_path,
+				"import_count": v.import_count,
+				"source_file_count": v.source_file_count,
+				"reason": v.reason,
+			})
+		})
+		.collect();
+
+	let stale_json: Vec<serde_json::Value> = evaluation
+		.stale_declarations
+		.iter()
+		.map(|s| {
+			serde_json::json!({
+				"declaration_uid": s.declaration_uid,
+				"stale_side": match s.stale_side {
+					StaleSide::Source => "source",
+					StaleSide::Target => "target",
+					StaleSide::Both => "both",
+				},
+				"missing_paths": s.missing_paths,
+			})
+		})
+		.collect();
+
+	let violation_count = evaluation.violations.len();
+	let stale_count = evaluation.stale_declarations.len();
+
+	let results = serde_json::json!({
+		"violations": violations_json,
+		"stale_declarations": stale_json,
+	});
+
+	// Build envelope with count and stale_count
+	let mut extra = serde_json::Map::new();
+	extra.insert(
+		"stale_count".to_string(),
+		serde_json::Value::Number(stale_count.into()),
+	);
+
+	let output = match build_envelope(
+		&storage,
+		"modules violations",
+		repo_uid,
+		&snapshot,
+		results,
+		violation_count,
+		extra,
+	) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			// Exit code: 0 if no violations, 1 if violations
+			// stale_declarations alone do not force exit 1
+			if violation_count > 0 {
+				ExitCode::from(1)
+			} else {
+				ExitCode::SUCCESS
+			}
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
 }
 
 /// Extract module path from a MODULE stable key: `{repo}:{path}:MODULE`

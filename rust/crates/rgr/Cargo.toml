@@ -45,6 +45,10 @@
 # RS-MG-5:  `modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]`
 #           Cross-module dependency edges from discovered modules.
 #           Consumes module_candidates + module_file_ownership from TS indexer.
+# RS-MG-6:  `modules violations <db_path> <repo_uid>`
+#           Discovered-module boundary violation check.
+#           Exit 0: no violations, Exit 1: violations, Exit 2: runtime error.
+#           Stale declarations do not force exit 1.
 #
 # No formatting-heavy UX.
 
