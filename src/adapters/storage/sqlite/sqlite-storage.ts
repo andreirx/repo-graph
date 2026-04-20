@@ -1422,6 +1422,37 @@ export class SqliteStorage implements StoragePort {
 		}));
 	}
 
+	/**
+	 * Query resolved IMPORTS edges with source/target file UIDs.
+	 *
+	 * Returns only edges where both source and target nodes have a file_uid.
+	 * Used for module dependency edge derivation.
+	 *
+	 * See docs/architecture/module-graph-contract.txt.
+	 */
+	queryResolvedImportsWithFiles(snapshotUid: string): Array<{
+		sourceFileUid: string;
+		targetFileUid: string;
+	}> {
+		const rows = this.db.prepare(`
+			SELECT
+				src.file_uid AS source_file_uid,
+				tgt.file_uid AS target_file_uid
+			FROM edges e
+			JOIN nodes src ON e.source_node_uid = src.node_uid
+			JOIN nodes tgt ON e.target_node_uid = tgt.node_uid
+			WHERE e.snapshot_uid = ?
+			  AND e.type = 'IMPORTS'
+			  AND src.file_uid IS NOT NULL
+			  AND tgt.file_uid IS NOT NULL
+		`).all(snapshotUid) as Array<Record<string, unknown>>;
+
+		return rows.map((r) => ({
+			sourceFileUid: r.source_file_uid as string,
+			targetFileUid: r.target_file_uid as string,
+		}));
+	}
+
 	queryModuleCandidateRollups(snapshotUid: string): ModuleCandidateRollup[] {
 		const rows = this.db.prepare(`
 			SELECT

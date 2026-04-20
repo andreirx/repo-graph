@@ -133,7 +133,10 @@ export function deriveModuleDependencyEdges(
 	}
 
 	// Track edge aggregation: (sourceModule, targetModule) -> { importCount, sourceFiles }
-	const edgeMap = new Map<string, { importCount: number; sourceFiles: Set<string> }>();
+	const edgeMap = new Map<
+		string,
+		{ importCount: number; sourceFiles: Set<string> }
+	>();
 
 	// Mutable diagnostics counters.
 	let sourceNoFile = 0;

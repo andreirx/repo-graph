@@ -14,22 +14,31 @@
 import { describe, expect, it } from "vitest";
 import {
 	deriveModuleDependencyEdges,
+	type FileOwnershipMapping,
 	type ImportEdgeInput,
 	type NodeFileMapping,
-	type FileOwnershipMapping,
 } from "../../../src/core/modules/module-dependency-edges.js";
 
 // ── Test helpers ───────────────────────────────────────────────────
 
-function makeEdge(sourceNodeUid: string, targetNodeUid: string): ImportEdgeInput {
+function makeEdge(
+	sourceNodeUid: string,
+	targetNodeUid: string,
+): ImportEdgeInput {
 	return { sourceNodeUid, targetNodeUid };
 }
 
-function makeNodeFile(nodeUid: string, fileUid: string | null): NodeFileMapping {
+function makeNodeFile(
+	nodeUid: string,
+	fileUid: string | null,
+): NodeFileMapping {
 	return { nodeUid, fileUid };
 }
 
-function makeOwnership(fileUid: string, moduleCandidateUid: string): FileOwnershipMapping {
+function makeOwnership(
+	fileUid: string,
+	moduleCandidateUid: string,
+): FileOwnershipMapping {
 	return { fileUid, moduleCandidateUid };
 }
 
@@ -183,9 +192,7 @@ describe("deriveModuleDependencyEdges — missing data", () => {
 				// node-orphan not in nodeFiles
 				makeNodeFile("node-b", "file-b"),
 			],
-			fileOwnership: [
-				makeOwnership("file-b", "module-core"),
-			],
+			fileOwnership: [makeOwnership("file-b", "module-core")],
 		});
 
 		expect(result.edges).toHaveLength(0);
@@ -199,9 +206,7 @@ describe("deriveModuleDependencyEdges — missing data", () => {
 				makeNodeFile("node-a", "file-a"),
 				// node-orphan not in nodeFiles
 			],
-			fileOwnership: [
-				makeOwnership("file-a", "module-api"),
-			],
+			fileOwnership: [makeOwnership("file-a", "module-api")],
 		});
 
 		expect(result.edges).toHaveLength(0);
@@ -249,9 +254,7 @@ describe("deriveModuleDependencyEdges — missing data", () => {
 				makeNodeFile("node-a", null), // explicit null
 				makeNodeFile("node-b", "file-b"),
 			],
-			fileOwnership: [
-				makeOwnership("file-b", "module-core"),
-			],
+			fileOwnership: [makeOwnership("file-b", "module-core")],
 		});
 
 		expect(result.edges).toHaveLength(0);
@@ -265,8 +268,8 @@ describe("deriveModuleDependencyEdges — diagnostics", () => {
 	it("reports complete diagnostics for mixed scenario", () => {
 		const result = deriveModuleDependencyEdges({
 			importsEdges: [
-				makeEdge("node-a", "node-b"),      // cross-module
-				makeEdge("node-c", "node-d"),      // intra-module
+				makeEdge("node-a", "node-b"), // cross-module
+				makeEdge("node-c", "node-d"), // intra-module
 				makeEdge("node-orphan", "node-b"), // source no file
 				makeEdge("node-a", "node-orphan"), // target no file
 				makeEdge("node-unowned", "node-b"), // source no module
@@ -320,10 +323,14 @@ describe("deriveModuleDependencyEdges — bidirectional", () => {
 		expect(result.edges).toHaveLength(2);
 
 		const apiToCore = result.edges.find(
-			(e) => e.sourceModuleUid === "module-api" && e.targetModuleUid === "module-core"
+			(e) =>
+				e.sourceModuleUid === "module-api" &&
+				e.targetModuleUid === "module-core",
 		);
 		const coreToApi = result.edges.find(
-			(e) => e.sourceModuleUid === "module-core" && e.targetModuleUid === "module-api"
+			(e) =>
+				e.sourceModuleUid === "module-core" &&
+				e.targetModuleUid === "module-api",
 		);
 
 		expect(apiToCore).toBeDefined();
