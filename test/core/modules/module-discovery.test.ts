@@ -329,3 +329,149 @@ describe("discoverModules — normalization", () => {
 		expect(result.evidence).toHaveLength(2);
 	});
 });
+
+// ── Kind precedence (multi-kind ownership) ─────────────────────────
+
+import { assignFileOwnershipForCandidates } from "../../../src/core/modules/module-discovery.js";
+import type { ModuleCandidate } from "../../../src/core/modules/module-candidate.js";
+
+function makeCandidate(overrides: Partial<ModuleCandidate> & { canonicalRootPath: string }): ModuleCandidate {
+	return {
+		moduleCandidateUid: `candidate-${overrides.canonicalRootPath}`,
+		snapshotUid: SNAPSHOT_UID,
+		repoUid: REPO_UID,
+		moduleKey: `${REPO_UID}:${overrides.canonicalRootPath}:DISCOVERED_MODULE`,
+		moduleKind: "declared",
+		confidence: 0.95,
+		displayName: null,
+		metadataJson: null,
+		...overrides,
+	};
+}
+
+describe("assignFileOwnershipForCandidates — kind precedence", () => {
+	it("prefers declared over operational when roots are equal", () => {
+		const declaredCandidate = makeCandidate({
+			canonicalRootPath: "packages/api",
+			moduleKind: "declared",
+			moduleCandidateUid: "declared-api",
+		});
+		const operationalCandidate = makeCandidate({
+			canonicalRootPath: "packages/api",
+			moduleKind: "operational",
+			moduleCandidateUid: "operational-api",
+		});
+
+		const ownership = assignFileOwnershipForCandidates(
+			[operationalCandidate, declaredCandidate], // Order shouldn't matter
+			[makeFile("packages/api/src/index.ts")],
+			SNAPSHOT_UID,
+			REPO_UID,
+		);
+
+		expect(ownership).toHaveLength(1);
+		expect(ownership[0].moduleCandidateUid).toBe("declared-api");
+	});
+
+	it("prefers declared over inferred when roots are equal", () => {
+		const declaredCandidate = makeCandidate({
+			canonicalRootPath: "packages/api",
+			moduleKind: "declared",
+			moduleCandidateUid: "declared-api",
+		});
+		const inferredCandidate = makeCandidate({
+			canonicalRootPath: "packages/api",
+			moduleKind: "inferred",
+			moduleCandidateUid: "inferred-api",
+		});
+
+		const ownership = assignFileOwnershipForCandidates(
+			[inferredCandidate, declaredCandidate],
+			[makeFile("packages/api/src/index.ts")],
+			SNAPSHOT_UID,
+			REPO_UID,
+		);
+
+		expect(ownership).toHaveLength(1);
+		expect(ownership[0].moduleCandidateUid).toBe("declared-api");
+	});
+
+	it("prefers operational over inferred when roots are equal", () => {
+		const operationalCandidate = makeCandidate({
+			canonicalRootPath: "packages/api",
+			moduleKind: "operational",
+			moduleCandidateUid: "operational-api",
+		});
+		const inferredCandidate = makeCandidate({
+			canonicalRootPath: "packages/api",
+			moduleKind: "inferred",
+			moduleCandidateUid: "inferred-api",
+		});
+
+		const ownership = assignFileOwnershipForCandidates(
+			[inferredCandidate, operationalCandidate],
+			[makeFile("packages/api/src/index.ts")],
+			SNAPSHOT_UID,
+			REPO_UID,
+		);
+
+		expect(ownership).toHaveLength(1);
+		expect(ownership[0].moduleCandidateUid).toBe("operational-api");
+	});
+
+	it("longer prefix wins over kind precedence", () => {
+		// More specific root should win even if it's operational.
+		const declaredRoot = makeCandidate({
+			canonicalRootPath: "packages",
+			moduleKind: "declared",
+			moduleCandidateUid: "declared-packages",
+		});
+		const operationalSpecific = makeCandidate({
+			canonicalRootPath: "packages/api",
+			moduleKind: "operational",
+			moduleCandidateUid: "operational-api",
+		});
+
+		const ownership = assignFileOwnershipForCandidates(
+			[declaredRoot, operationalSpecific],
+			[makeFile("packages/api/src/index.ts")],
+			SNAPSHOT_UID,
+			REPO_UID,
+		);
+
+		expect(ownership).toHaveLength(1);
+		// operational-api has longer prefix, so it wins.
+		expect(ownership[0].moduleCandidateUid).toBe("operational-api");
+	});
+
+	it("handles mixed candidates with different roots correctly", () => {
+		const declaredApi = makeCandidate({
+			canonicalRootPath: "packages/api",
+			moduleKind: "declared",
+			moduleCandidateUid: "declared-api",
+		});
+		const operationalCli = makeCandidate({
+			canonicalRootPath: "tools/cli",
+			moduleKind: "operational",
+			moduleCandidateUid: "operational-cli",
+		});
+
+		const ownership = assignFileOwnershipForCandidates(
+			[declaredApi, operationalCli],
+			[
+				makeFile("packages/api/src/index.ts"),
+				makeFile("tools/cli/main.ts"),
+			],
+			SNAPSHOT_UID,
+			REPO_UID,
+		);
+
+		expect(ownership).toHaveLength(2);
+
+		const apiOwnership = ownership.find((o) => o.fileUid.includes("packages/api"));
+		const cliOwnership = ownership.find((o) => o.fileUid.includes("tools/cli"));
+
+		expect(apiOwnership!.moduleCandidateUid).toBe("declared-api");
+		expect(cliOwnership!.moduleCandidateUid).toBe("operational-cli");
+	});
+});

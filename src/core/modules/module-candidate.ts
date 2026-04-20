@@ -20,10 +20,14 @@
 // ── Module candidate ───────────────────────────────────────────────
 
 /**
- * Coarse module kind. Kept intentionally small in slice 1.
- * Finer evidence distinctions live in ModuleCandidateEvidence rows.
+ * Coarse module kind. Three-tier confidence ladder.
+ *
+ * Precedence order (for ownership tiebreaks):
+ *   declared > operational > inferred
+ *
+ * See docs/architecture/module-discovery-layers.txt for the full contract.
  */
-export type ModuleKind = "declared";
+export type ModuleKind = "declared" | "operational" | "inferred";
 
 /**
  * A discovered module candidate — one per detected module root.
@@ -56,24 +60,39 @@ export interface ModuleCandidate {
 
 /**
  * Source type: which build system / manifest type produced this evidence.
+ *
+ * Layer 1 (declared): manifest-based sources
+ * Layer 2 (operational): surface promotion sources
  */
 export type EvidenceSourceType =
+	// Layer 1: declared module evidence
 	| "package_json_workspaces"
 	| "pnpm_workspace_yaml"
 	| "cargo_workspace"
 	| "cargo_crate"
 	| "gradle_settings"
-	| "pyproject_toml";
+	| "pyproject_toml"
+	// Layer 2: operational module evidence (surface promotion)
+	| "surface_promotion_cli"
+	| "surface_promotion_service"
+	| "surface_promotion_web_app"
+	| "surface_promotion_worker";
 
 /**
  * Evidence kind: what the evidence item asserts.
+ *
+ * Layer 1: manifest-derived assertions
+ * Layer 2: surface-promotion assertions
  */
 export type EvidenceKind =
-	| "workspace_member"    // listed as a member in a workspace manifest
-	| "workspace_root"      // is itself the workspace root
-	| "crate_root"          // Cargo.toml declares a crate at this path
-	| "subproject"          // Gradle settings includes this project
-	| "package_root";       // pyproject.toml declares a package here
+	// Layer 1: declared module evidence
+	| "workspace_member"       // listed as a member in a workspace manifest
+	| "workspace_root"         // is itself the workspace root
+	| "crate_root"             // Cargo.toml declares a crate at this path
+	| "subproject"             // Gradle settings includes this project
+	| "package_root"           // pyproject.toml declares a package here
+	// Layer 2: operational module evidence
+	| "operational_entrypoint"; // promoted from unattached surface
 
 /**
  * One evidence item supporting a module candidate.

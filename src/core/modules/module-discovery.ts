@@ -10,14 +10,15 @@
  * Responsibilities:
  *   - Deduplicates module candidates by root path
  *   - Merges evidence from multiple sources for the same root
- *   - Assigns file ownership by root containment (longest prefix match)
+ *   - Assigns file ownership with kind-precedence tiebreaks
  *   - Computes aggregate confidence per candidate from evidence items
  *   - Generates stable module keys anchored by repo-relative root path
  *
- * Slice 1 constraints:
- *   - Declared modules only (manifest/workspace evidence)
- *   - Single owner per file (longest-prefix-match wins)
- *   - Additive — does not replace or interact with directory MODULE nodes
+ * Ownership algorithm (see docs/architecture/module-discovery-layers.txt §5):
+ *   - Longest-prefix match on file path vs candidate root
+ *   - Kind precedence tiebreak for equal roots: declared > operational > inferred
+ *
+ * Additive: does not replace or interact with directory MODULE nodes.
  */
 
 import { v4 as uuidv4 } from "uuid";
@@ -27,6 +28,7 @@ import {
 	type ModuleCandidate,
 	type ModuleCandidateEvidence,
 	type ModuleFileOwnership,
+	type ModuleKind,
 } from "./module-candidate.js";
 import type { DiscoveredModuleRoot } from "./manifest-detectors.js";
 
@@ -135,14 +137,25 @@ export function discoverModules(input: ModuleDiscoveryInput): ModuleDiscoveryRes
 // ── File ownership assignment ──────────────────────────────────────
 
 /**
- * Assign each tracked file to its closest declared module candidate.
+ * Kind precedence for ownership tiebreaks.
+ * Lower value = stronger precedence.
  *
- * Uses longest-prefix match on the file path against candidate root
- * paths. If a file is not under any candidate root, it gets no
- * ownership row (unowned files are expected in slice 1).
+ * See docs/architecture/module-discovery-layers.txt §5.
+ */
+const KIND_PRECEDENCE: Record<ModuleKind, number> = {
+	declared: 0,
+	operational: 1,
+	inferred: 2,
+};
+
+/**
+ * Assign each tracked file to its owning module candidate.
  *
- * In slice 1, each file has at most one owner (the most specific
- * containing module root).
+ * Algorithm:
+ *   1. Longest-prefix match on file path against candidate root paths
+ *   2. Kind precedence tiebreak for equal roots (declared > operational > inferred)
+ *
+ * See docs/architecture/module-discovery-layers.txt §5 for the full contract.
  */
 function assignFileOwnership(
 	candidates: ModuleCandidate[],
@@ -152,10 +165,14 @@ function assignFileOwnership(
 ): ModuleFileOwnership[] {
 	if (candidates.length === 0) return [];
 
-	// Sort candidates by root path length descending for longest-prefix-first.
-	const sorted = [...candidates].sort(
-		(a, b) => b.canonicalRootPath.length - a.canonicalRootPath.length,
-	);
+	// Sort candidates by:
+	//   1. Root path length descending (longest prefix first)
+	//   2. Kind precedence ascending (declared > operational > inferred)
+	const sorted = [...candidates].sort((a, b) => {
+		const lengthDiff = b.canonicalRootPath.length - a.canonicalRootPath.length;
+		if (lengthDiff !== 0) return lengthDiff;
+		return KIND_PRECEDENCE[a.moduleKind] - KIND_PRECEDENCE[b.moduleKind];
+	});
 
 	const ownership: ModuleFileOwnership[] = [];
 
@@ -173,8 +190,9 @@ function assignFileOwnership(
 			assignmentKind: "root_containment",
 			confidence: owner.confidence,
 			basisJson: JSON.stringify({
-				rule: "longest_prefix_match",
+				rule: "longest_prefix_kind_precedence",
 				rootPath: owner.canonicalRootPath,
+				moduleKind: owner.moduleKind,
 			}),
 		});
 	}
@@ -199,6 +217,26 @@ function findOwner(
 		}
 	}
 	return null;
+}
+
+// ── Exported ownership computation ─────────────────────────────────
+
+/**
+ * Compute file ownership for a set of candidates.
+ *
+ * Exported for use by the indexer when adding operational modules
+ * after declared modules have already been processed.
+ *
+ * Uses the same kind-precedence-aware longest-prefix algorithm as
+ * the internal assignFileOwnership function.
+ */
+export function assignFileOwnershipForCandidates(
+	candidates: ModuleCandidate[],
+	trackedFiles: TrackedFile[],
+	snapshotUid: string,
+	repoUid: string,
+): ModuleFileOwnership[] {
+	return assignFileOwnership(candidates, trackedFiles, snapshotUid, repoUid);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────

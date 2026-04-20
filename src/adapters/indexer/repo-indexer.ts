@@ -78,8 +78,9 @@ import { readPythonDependencies } from "../config/python-deps-reader.js";
 import { readTsconfigAliases } from "../config/tsconfig-reader.js";
 import type { AnnotationsPort } from "../../core/ports/annotations.js";
 import type { ModuleDiscoveryPort } from "../../core/ports/discovery.js";
-import { discoverModules } from "../../core/modules/module-discovery.js";
-import { discoverSurfaces } from "../../core/runtime/surface-discovery.js";
+import { discoverModules, assignFileOwnershipForCandidates } from "../../core/modules/module-discovery.js";
+import { promoteUnattachedSurfaces } from "../../core/modules/operational-promotion.js";
+import { discoverSurfaces, type SurfaceDiscoveryResult } from "../../core/runtime/surface-discovery.js";
 import { enrichTopology } from "../../core/topology/topology-enrichment.js";
 import { detectEnvAccesses } from "../../core/seams/env-detectors.js";
 import { linkEnvDependencies } from "../../core/seams/env-linkage.js";
@@ -1058,144 +1059,212 @@ export class RepoIndexer implements IndexerPort {
 		repoUid: string,
 		fileSignalsCache: Map<string, FileSignals>,
 	): Promise<void> {
-		// Module discovery.
+		// Module and surface discovery pipeline.
+		// Runs even when no declared modules exist (Layer 2 operational promotion).
 		if (this.discovery) {
+			// 1. Discover declared modules (Layer 1). May be empty.
 			const discoveredRoots = await this.discovery.discoverDeclaredModules(
 				repo.rootPath, repoUid,
 			);
+
+			let declaredCandidates: import("../../core/modules/module-candidate.js").ModuleCandidate[] = [];
+
 			if (discoveredRoots.length > 0) {
 				const moduleResult = discoverModules({
 					repoUid, snapshotUid: snapshot.snapshotUid, discoveredRoots, trackedFiles,
 				});
 				if (moduleResult.candidates.length > 0) {
+					// Persist declared modules and evidence.
 					this.storage.insertModuleCandidates(moduleResult.candidates);
 					this.storage.insertModuleCandidateEvidence(moduleResult.evidence);
-					this.storage.insertModuleFileOwnership(moduleResult.ownership);
+					declaredCandidates = moduleResult.candidates;
+				}
+			}
 
-					// Surface discovery — runs after module candidates are persisted.
-					// Reads the same manifests as module discovery. Links surfaces
-					// to existing module candidates by root path.
-					const detectedSurfaces = await this.detectProjectSurfaces(
-						repo.rootPath,
-						moduleResult.candidates,
+			// 2. Detect surfaces repo-wide (independent of declared modules).
+			// Surfaces may exist at roots that have no declared module.
+			const detectedSurfaces = await this.detectProjectSurfaces(
+				repo.rootPath,
+			);
+
+			let allCandidates = declaredCandidates;
+			let allSurfaces: SurfaceDiscoveryResult['surfaces'] = [];
+			let allSurfaceEvidence: SurfaceDiscoveryResult['evidence'] = [];
+
+			if (detectedSurfaces.length > 0) {
+				// 3. Link surfaces to declared modules.
+				const surfaceResult = discoverSurfaces({
+					repoUid,
+					snapshotUid: snapshot.snapshotUid,
+					detectedSurfaces,
+					moduleCandidates: declaredCandidates,
+				});
+
+				// 4. Layer 2: Promote unattached surfaces to operational modules.
+				// Surfaces at roots with no declared module become operational candidates.
+				if (surfaceResult.unattachedSurfaces.length > 0) {
+					const existingRoots = new Set(
+						declaredCandidates.map((c) => c.canonicalRootPath),
 					);
-					if (detectedSurfaces.length > 0) {
-						const surfaceResult = discoverSurfaces({
+					const promotionResult = promoteUnattachedSurfaces({
+						repoUid,
+						snapshotUid: snapshot.snapshotUid,
+						unattachedSurfaces: surfaceResult.unattachedSurfaces,
+						existingRoots,
+					});
+
+					if (promotionResult.candidates.length > 0) {
+						// Persist operational modules and evidence.
+						this.storage.insertModuleCandidates(promotionResult.candidates);
+						this.storage.insertModuleCandidateEvidence(promotionResult.evidence);
+
+						// Merge candidates for ownership computation.
+						allCandidates = [...declaredCandidates, ...promotionResult.candidates];
+
+						// 5. Re-link surfaces with extended candidate set.
+						// Previously unattached surfaces should now attach.
+						const relinkResult = discoverSurfaces({
 							repoUid,
 							snapshotUid: snapshot.snapshotUid,
 							detectedSurfaces,
-							moduleCandidates: moduleResult.candidates,
+							moduleCandidates: allCandidates,
 						});
-						if (surfaceResult.surfaces.length > 0) {
-							this.storage.insertProjectSurfaces(surfaceResult.surfaces);
-							this.storage.insertProjectSurfaceEvidence(surfaceResult.evidence);
 
-							// Topology enrichment: config roots and entrypoints.
-							// Companion configs resolved here (adapter layer, filesystem).
-							const companionConfigs = this.resolveCompanionConfigs(
-								surfaceResult.surfaces,
-								repo.rootPath,
-							);
-							const topology = enrichTopology({
-								repoUid,
-								snapshotUid: snapshot.snapshotUid,
-								surfaces: surfaceResult.surfaces,
-								evidence: surfaceResult.evidence,
-								companionConfigs,
-							});
-							if (topology.configRoots.length > 0) {
-								this.storage.insertSurfaceConfigRoots(topology.configRoots);
-							}
-							if (topology.entrypoints.length > 0) {
-								this.storage.insertSurfaceEntrypoints(topology.entrypoints);
-							}
-						}
-					// Operational seam detection: env vars + filesystem mutations.
-					// Read each source file once, run all seam detectors,
-					// link to surfaces via existing ownership.
-					{
-						const allDetectedEnv: import("../../core/seams/env-dependency.js").DetectedEnvDependency[] = [];
-						const allDetectedFs: import("../../core/seams/fs-mutation.js").DetectedFsMutation[] = [];
-						for (const relPath of filePaths) {
-							// Skip test files: seam contract is about runtime
-							// behavior of operational surfaces, not test code.
-							// File ownership is unchanged; only this pipeline
-							// filters. Explicit test-surface reporting would
-							// be a separate feature.
-							if (isTestFile(relPath)) continue;
-							let content: string;
-							try {
-								content = await readFile(join(repo.rootPath, relPath), "utf-8");
-							} catch { continue; }
-							if (content.length > MAX_FILE_SIZE_BYTES) continue;
-							allDetectedEnv.push(...detectEnvAccesses(content, relPath));
-							allDetectedFs.push(...detectFsMutations(content, relPath));
-						}
+						allSurfaces = relinkResult.surfaces;
+						allSurfaceEvidence = relinkResult.evidence;
+					} else {
+						// No promotion occurred, use original results.
+						allSurfaces = surfaceResult.surfaces;
+						allSurfaceEvidence = surfaceResult.evidence;
+					}
+				} else {
+					// No unattached surfaces, use original results.
+					allSurfaces = surfaceResult.surfaces;
+					allSurfaceEvidence = surfaceResult.evidence;
+				}
+			}
 
-						if (allDetectedEnv.length > 0 || allDetectedFs.length > 0) {
-							// Build file → surface mapping from ownership + surfaces.
-							const ownership = this.storage.queryModuleFileOwnership(snapshot.snapshotUid);
-							const allSurfaces = this.storage.queryProjectSurfaces(snapshot.snapshotUid);
+			// 6. Compute ownership for ALL candidates (declared + operational).
+			// Only run if we have candidates.
+			if (allCandidates.length > 0) {
+				const allOwnership = assignFileOwnershipForCandidates(
+					allCandidates,
+					trackedFiles,
+					snapshot.snapshotUid,
+					repoUid,
+				);
+				this.storage.insertModuleFileOwnership(allOwnership);
+			}
 
-							// Module → surfaces lookup.
-							const moduleToSurfaces = new Map<string, string[]>();
-							for (const s of allSurfaces) {
-								const list = moduleToSurfaces.get(s.moduleCandidateUid) ?? [];
-								list.push(s.projectSurfaceUid);
-								moduleToSurfaces.set(s.moduleCandidateUid, list);
-							}
+			// 7. Persist surfaces and continue with topology enrichment.
+			if (allSurfaces.length > 0) {
+				this.storage.insertProjectSurfaces(allSurfaces);
+				this.storage.insertProjectSurfaceEvidence(allSurfaceEvidence);
 
-							// File → surfaces via ownership → module → surfaces.
-							// A file may be owned by multiple modules; accumulate
-							// (not overwrite) and dedupe surface UIDs per file.
-							const fileToSurfaces = new Map<string, string[]>();
-							for (const o of ownership) {
-								const filePath = o.fileUid.startsWith(repoUid + ":")
-									? o.fileUid.slice(repoUid.length + 1)
-									: o.fileUid;
-								const moduleSurfaces = moduleToSurfaces.get(o.moduleCandidateUid);
-								if (!moduleSurfaces) continue;
-								const existing = fileToSurfaces.get(filePath);
-								if (existing) {
-									for (const sUid of moduleSurfaces) {
-										if (!existing.includes(sUid)) {
-											existing.push(sUid);
-										}
-									}
-								} else {
-									fileToSurfaces.set(filePath, [...moduleSurfaces]);
+				// Topology enrichment: config roots and entrypoints.
+				// Companion configs resolved here (adapter layer, filesystem).
+				const companionConfigs = this.resolveCompanionConfigs(
+					allSurfaces,
+					repo.rootPath,
+				);
+				const topology = enrichTopology({
+					repoUid,
+					snapshotUid: snapshot.snapshotUid,
+					surfaces: allSurfaces,
+					evidence: allSurfaceEvidence,
+					companionConfigs,
+				});
+				if (topology.configRoots.length > 0) {
+					this.storage.insertSurfaceConfigRoots(topology.configRoots);
+				}
+				if (topology.entrypoints.length > 0) {
+					this.storage.insertSurfaceEntrypoints(topology.entrypoints);
+				}
+			}
+
+			// 8. Operational seam detection: env vars + filesystem mutations.
+			// Read each source file once, run all seam detectors,
+			// link to surfaces via existing ownership.
+			{
+				const allDetectedEnv: import("../../core/seams/env-dependency.js").DetectedEnvDependency[] = [];
+				const allDetectedFs: import("../../core/seams/fs-mutation.js").DetectedFsMutation[] = [];
+				for (const relPath of filePaths) {
+					// Skip test files: seam contract is about runtime
+					// behavior of operational surfaces, not test code.
+					// File ownership is unchanged; only this pipeline
+					// filters. Explicit test-surface reporting would
+					// be a separate feature.
+					if (isTestFile(relPath)) continue;
+					let content: string;
+					try {
+						content = await readFile(join(repo.rootPath, relPath), "utf-8");
+					} catch { continue; }
+					if (content.length > MAX_FILE_SIZE_BYTES) continue;
+					allDetectedEnv.push(...detectEnvAccesses(content, relPath));
+					allDetectedFs.push(...detectFsMutations(content, relPath));
+				}
+
+				if (allDetectedEnv.length > 0 || allDetectedFs.length > 0) {
+					// Build file → surface mapping from ownership + surfaces.
+					const ownership = this.storage.queryModuleFileOwnership(snapshot.snapshotUid);
+					const queriedSurfaces = this.storage.queryProjectSurfaces(snapshot.snapshotUid);
+
+					// Module → surfaces lookup.
+					const moduleToSurfaces = new Map<string, string[]>();
+					for (const s of queriedSurfaces) {
+						const list = moduleToSurfaces.get(s.moduleCandidateUid) ?? [];
+						list.push(s.projectSurfaceUid);
+						moduleToSurfaces.set(s.moduleCandidateUid, list);
+					}
+
+					// File → surfaces via ownership → module → surfaces.
+					// A file may be owned by multiple modules; accumulate
+					// (not overwrite) and dedupe surface UIDs per file.
+					const fileToSurfaces = new Map<string, string[]>();
+					for (const o of ownership) {
+						const filePath = o.fileUid.startsWith(repoUid + ":")
+							? o.fileUid.slice(repoUid.length + 1)
+							: o.fileUid;
+						const moduleSurfaces = moduleToSurfaces.get(o.moduleCandidateUid);
+						if (!moduleSurfaces) continue;
+						const existing = fileToSurfaces.get(filePath);
+						if (existing) {
+							for (const sUid of moduleSurfaces) {
+								if (!existing.includes(sUid)) {
+									existing.push(sUid);
 								}
 							}
-
-							if (allDetectedEnv.length > 0) {
-								const envResult = linkEnvDependencies({
-									repoUid,
-									snapshotUid: snapshot.snapshotUid,
-									detectedAccesses: allDetectedEnv,
-									fileToSurfaces,
-								});
-								if (envResult.dependencies.length > 0) {
-									this.storage.insertSurfaceEnvDependencies(envResult.dependencies);
-									this.storage.insertSurfaceEnvEvidence(envResult.evidence);
-								}
-							}
-
-							if (allDetectedFs.length > 0) {
-								const fsResult = linkFsMutations({
-									repoUid,
-									snapshotUid: snapshot.snapshotUid,
-									detectedMutations: allDetectedFs,
-									fileToSurfaces,
-								});
-								if (fsResult.identities.length > 0) {
-									this.storage.insertSurfaceFsMutations(fsResult.identities);
-								}
-								if (fsResult.evidence.length > 0) {
-									this.storage.insertSurfaceFsMutationEvidence(fsResult.evidence);
-								}
-							}
+						} else {
+							fileToSurfaces.set(filePath, [...moduleSurfaces]);
 						}
 					}
+
+					if (allDetectedEnv.length > 0) {
+						const envResult = linkEnvDependencies({
+							repoUid,
+							snapshotUid: snapshot.snapshotUid,
+							detectedAccesses: allDetectedEnv,
+							fileToSurfaces,
+						});
+						if (envResult.dependencies.length > 0) {
+							this.storage.insertSurfaceEnvDependencies(envResult.dependencies);
+							this.storage.insertSurfaceEnvEvidence(envResult.evidence);
+						}
+					}
+
+					if (allDetectedFs.length > 0) {
+						const fsResult = linkFsMutations({
+							repoUid,
+							snapshotUid: snapshot.snapshotUid,
+							detectedMutations: allDetectedFs,
+							fileToSurfaces,
+						});
+						if (fsResult.identities.length > 0) {
+							this.storage.insertSurfaceFsMutations(fsResult.identities);
+						}
+						if (fsResult.evidence.length > 0) {
+							this.storage.insertSurfaceFsMutationEvidence(fsResult.evidence);
+						}
 					}
 				}
 			}
@@ -1547,44 +1616,78 @@ export class RepoIndexer implements IndexerPort {
 	}
 
 	/**
-	 * Detect project surfaces from manifests at module candidate roots.
-	 * Reads the manifest file for each module candidate and runs the
-	 * appropriate surface detector.
+	 * Detect project surfaces from all manifest files in the repo.
+	 *
+	 * Scans the entire repo for manifest files (package.json, Cargo.toml,
+	 * pyproject.toml) and runs the appropriate surface detector on each.
+	 * This is independent of module candidates — surfaces may exist at
+	 * roots that have no declared module (Layer 2 promotion candidates).
 	 */
 	private async detectProjectSurfaces(
-		rootPath: string,
-		moduleCandidates: import("../../core/modules/module-candidate.js").ModuleCandidate[],
+		repoRootPath: string,
 	): Promise<DetectedSurface[]> {
 		const results: DetectedSurface[] = [];
 
-		for (const mc of moduleCandidates) {
-			const absRoot = mc.canonicalRootPath === "."
-				? rootPath
-				: join(rootPath, mc.canonicalRootPath);
-			const relPrefix = mc.canonicalRootPath === "." ? "" : mc.canonicalRootPath + "/";
+		// Scan for manifest files directly (not in filePaths which only has source files).
+		const manifestFiles = await this.findManifestFiles(repoRootPath);
 
-			// package.json
+		for (const relPath of manifestFiles) {
+			const absPath = join(repoRootPath, relPath);
+			let content: string;
 			try {
-				const content = await readFile(join(absRoot, "package.json"), "utf-8");
-				const relPath = `${relPrefix}package.json`.replace(/^\//, "");
+				content = await readFile(absPath, "utf-8");
+			} catch {
+				continue; // File unreadable, skip.
+			}
+
+			if (relPath.endsWith("package.json")) {
 				results.push(...detectPackageJsonSurfaces(content, relPath));
-			} catch { /* no package.json */ }
-
-			// Cargo.toml
-			try {
-				const content = await readFile(join(absRoot, "Cargo.toml"), "utf-8");
-				const relPath = `${relPrefix}Cargo.toml`.replace(/^\//, "");
+			} else if (relPath.endsWith("Cargo.toml")) {
 				results.push(...detectCargoSurfaces(content, relPath));
-			} catch { /* no Cargo.toml */ }
-
-			// pyproject.toml
-			try {
-				const content = await readFile(join(absRoot, "pyproject.toml"), "utf-8");
-				const relPath = `${relPrefix}pyproject.toml`.replace(/^\//, "");
+			} else if (relPath.endsWith("pyproject.toml")) {
 				results.push(...detectPyprojectSurfaces(content, relPath));
-			} catch { /* no pyproject.toml */ }
+			}
 		}
 
+		return results;
+	}
+
+	/**
+	 * Find all manifest files in the repo (package.json, Cargo.toml, pyproject.toml).
+	 * Returns repo-relative paths. Respects .gitignore.
+	 */
+	private async findManifestFiles(rootPath: string): Promise<string[]> {
+		const results: string[] = [];
+		const ig = await loadGitignore(rootPath);
+
+		const walk = async (dir: string) => {
+			let entries: import("node:fs").Dirent[];
+			try {
+				entries = await readdir(dir, { withFileTypes: true });
+			} catch {
+				return;
+			}
+			for (const entry of entries) {
+				if (entry.isDirectory()) {
+					if (ALWAYS_EXCLUDED.has(entry.name)) continue;
+					const relDir = relative(rootPath, join(dir, entry.name));
+					if (ig.ignores(relDir + "/")) continue;
+					// Skip Python virtualenvs
+					if (existsSync(join(dir, entry.name, "pyvenv.cfg"))) continue;
+					await walk(join(dir, entry.name));
+				} else if (
+					entry.name === "package.json" ||
+					entry.name === "Cargo.toml" ||
+					entry.name === "pyproject.toml"
+				) {
+					const relPath = toPosixPath(relative(rootPath, join(dir, entry.name)));
+					if (ig.ignores(relPath)) continue;
+					results.push(relPath);
+				}
+			}
+		};
+
+		await walk(rootPath);
 		return results;
 	}
 

@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "description": "A CLI tool with bin entry but no name (triggers Layer 2 promotion)",
+  "bin": {
+    "mycli": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc"
+  }
+}

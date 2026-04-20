@@ -385,3 +385,104 @@ describe("module discovery integration — rollups and queries", () => {
 		provider.close();
 	});
 });
+
+// ── Layer 2: Operational promotion (zero declared modules) ─────────
+
+const STANDALONE_CLI_FIXTURE = join(
+	import.meta.dirname,
+	"../../fixtures/standalone-cli",
+);
+
+describe("module discovery integration — Layer 2 operational promotion", () => {
+	it("promotes CLI surface to operational module when no declared modules exist", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "standalone-cli-test";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "standalone-cli",
+			rootPath: STANDALONE_CLI_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const candidates = storage.queryModuleCandidates(result.snapshotUid);
+		const evidence = storage.queryAllModuleCandidateEvidence(result.snapshotUid);
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+
+		// Should have one operational module candidate (promoted from CLI surface).
+		expect(candidates).toHaveLength(1);
+		expect(candidates[0].moduleKind).toBe("operational");
+		expect(candidates[0].canonicalRootPath).toBe(".");
+		// Confidence capped at Layer 2 ceiling (0.85).
+		expect(candidates[0].confidence).toBeLessThanOrEqual(0.85);
+
+		// Should have evidence from surface promotion.
+		expect(evidence.length).toBeGreaterThanOrEqual(1);
+		expect(evidence[0].sourceType).toBe("surface_promotion_cli");
+		expect(evidence[0].evidenceKind).toBe("operational_entrypoint");
+
+		// Should have attached surface (CLI).
+		expect(surfaces.length).toBeGreaterThanOrEqual(1);
+		const cliSurface = surfaces.find((s) => s.surfaceKind === "cli");
+		expect(cliSurface).toBeDefined();
+		expect(cliSurface!.moduleCandidateUid).toBe(candidates[0].moduleCandidateUid);
+
+		// Should have file ownership rows.
+		const ownership = storage.queryModuleFileOwnership(result.snapshotUid);
+		expect(ownership.length).toBeGreaterThanOrEqual(1);
+		// All owned files should belong to the operational module.
+		for (const o of ownership) {
+			expect(o.moduleCandidateUid).toBe(candidates[0].moduleCandidateUid);
+		}
+
+		provider.close();
+	});
+
+	it("produces no candidates when repo has no manifests", async () => {
+		// Edge case: repo with only source files, no package.json/Cargo.toml/pyproject.toml.
+		// The fixture for this would be empty or source-only, but we can test
+		// with an empty temp directory.
+		const { storage, provider } = setupDb();
+		const REPO_UID = "empty-repo-test";
+		const emptyFixture = join(tmpdir(), `rgr-empty-${randomUUID()}`);
+		const { mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+		mkdirSync(emptyFixture, { recursive: true });
+		// Add a source file but no manifest.
+		mkdirSync(join(emptyFixture, "src"), { recursive: true });
+		writeFileSync(join(emptyFixture, "src/main.ts"), "export const x = 1;");
+
+		try {
+			storage.addRepo({
+				repoUid: REPO_UID,
+				name: "empty-repo",
+				rootPath: emptyFixture,
+				defaultBranch: "main",
+				createdAt: new Date().toISOString(),
+				metadataJson: null,
+			});
+
+			const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+			const result = await indexer.indexRepo(REPO_UID);
+
+			// Should have no module candidates (no manifests = no declared, no surfaces = no operational).
+			const candidates = storage.queryModuleCandidates(result.snapshotUid);
+			expect(candidates).toHaveLength(0);
+
+			// Should have no surfaces.
+			const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+			expect(surfaces).toHaveLength(0);
+
+			// Should have no ownership rows.
+			const ownership = storage.queryModuleFileOwnership(result.snapshotUid);
+			expect(ownership).toHaveLength(0);
+		} finally {
+			rmSync(emptyFixture, { recursive: true, force: true });
+			provider.close();
+		}
+	});
+});

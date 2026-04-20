@@ -1,0 +1,409 @@
+Module Discovery Layers — Architectural Contract
+================================================
+
+Status: NORMATIVE
+Date:   2026-04-20
+Scope:  Layer 1 (shipped), Layer 2 (this slice), Layer 3 (future)
+
+This document is the authoritative specification for how Repo-Graph
+discovers and classifies module candidates across three confidence
+tiers. All module discovery orchestrators, ownership algorithms, and
+CLI surfaces MUST conform to what this document describes.
+
+
+================================================================================
+1. LAYER DEFINITIONS
+================================================================================
+
+Module discovery operates in three layers, each with distinct evidence
+sources and confidence characteristics.
+
+Layer 1: Declared Modules
+-------------------------
+Modules explicitly declared in build system manifests or workspace
+configurations.
+
+Evidence sources:
+  - package.json workspaces
+  - pnpm-workspace.yaml
+  - Cargo.toml (workspace members + crate roots)
+  - settings.gradle / settings.gradle.kts
+  - pyproject.toml ([project] + [tool.poetry])
+
+ModuleKind: "declared"
+Confidence range: 0.90–1.0
+Status: SHIPPED
+
+Layer 2: Operational Modules
+----------------------------
+Modules promoted from unattached project surfaces. These are
+directories with concrete entrypoint/runtime evidence but no
+declared manifest.
+
+Evidence sources:
+  - Unattached surfaces with kind in {cli, backend_service, web_app, worker}
+  - Entrypoint files (bin targets, main exports, service bootstraps)
+  - Framework dependency signals with deploy implications
+
+ModuleKind: "operational"
+Confidence range: 0.70–0.85
+Status: THIS SLICE
+
+Layer 3: Inferred Modules
+-------------------------
+Modules discovered through graph analysis and structural clustering.
+Weaker, more heuristic-based.
+
+Evidence sources (planned):
+  - High internal IMPORTS cohesion, low external coupling
+  - Directory structure patterns
+  - Kbuild/obj-y parsing for Linux kernel
+  - __init__.py as weak evidence
+
+ModuleKind: "inferred"
+Confidence range: 0.40–0.65
+Status: FUTURE
+
+
+================================================================================
+2. CONFIDENCE LADDER
+================================================================================
+
+The confidence ladder establishes a total ordering across module kinds:
+
+  declared (0.90–1.0) > operational (0.70–0.85) > inferred (0.40–0.65)
+
+This ordering is used for:
+  - File ownership precedence (see section 5)
+  - Display/ranking in CLI output
+  - Agent orientation prioritization
+
+Confidence values within a layer may vary based on evidence strength,
+but a declared module at 0.90 always outranks an operational module
+at 0.85 for ownership purposes.
+
+
+================================================================================
+3. PROMOTION CRITERIA (Layer 2)
+================================================================================
+
+An unattached surface is eligible for promotion to operational module
+if and only if ALL of the following hold:
+
+3.1 Surface kind constraint
+---------------------------
+Surface kind MUST be one of:
+  - cli
+  - backend_service
+  - web_app
+  - worker
+
+Surface kind MUST NOT be:
+  - library (libraries require declared packaging to be modules)
+  - infra_root (infrastructure is not a code module)
+  - test_harness (test infrastructure is not a standalone module)
+
+3.2 Evidence confidence constraint
+----------------------------------
+At least one evidence item on the surface MUST have confidence >= 0.70.
+
+3.3 Exclusions
+--------------
+The following do NOT qualify for promotion:
+  - Directories with only generic structural patterns
+  - Directories that "look busy" or have many imports
+  - Directories containing src/ without entrypoint evidence
+  - Any pattern that would be Layer 3 (inferred) evidence
+
+
+================================================================================
+4. AGGREGATE CONFIDENCE COMPUTATION
+================================================================================
+
+When promoting an unattached surface to an operational module, the
+module confidence is computed as follows:
+
+4.1 Single promoting surface
+----------------------------
+If one surface promotes a root:
+
+  module_confidence = min(
+      max(evidence.confidence for evidence in surface.evidence),
+      0.85  # Layer 2 ceiling
+  )
+
+The maximum evidence confidence is used, clamped to the Layer 2
+ceiling of 0.85.
+
+4.2 Multiple promoting surfaces (same root)
+-------------------------------------------
+If multiple unattached surfaces share the same root path and all
+qualify for promotion:
+
+  module_confidence = min(
+      max(
+          max(e.confidence for e in s.evidence)
+          for s in qualifying_surfaces
+      ),
+      0.85
+  )
+
+All surfaces contribute evidence to the single promoted module.
+The strongest evidence confidence wins, clamped to 0.85.
+
+4.3 Evidence preservation
+-------------------------
+The aggregate computation MUST NOT discard individual evidence
+confidences. Both values are persisted:
+
+  - ModuleCandidate.confidence: aggregate module confidence (4.1/4.2)
+  - ModuleCandidateEvidence.confidence: raw evidence confidence
+
+This preserves provenance for audit and downstream consumers.
+
+
+================================================================================
+5. OWNERSHIP RULES
+================================================================================
+
+File ownership determines which module candidate owns each file in
+the snapshot.
+
+5.1 Base algorithm: longest-prefix match
+----------------------------------------
+For each file, find the module candidate whose canonicalRootPath is
+the longest prefix of the file path.
+
+5.2 Kind precedence (equal roots)
+---------------------------------
+If two candidates have the SAME canonicalRootPath, the stronger
+module kind wins:
+
+  declared > operational > inferred
+
+This prevents a weaker operational candidate from stealing ownership
+from a declared module on equal scope.
+
+5.3 Kind precedence (nested roots)
+----------------------------------
+Kind precedence does NOT override specificity. A more specific root
+always wins regardless of kind:
+
+  operational module at "packages/api" owns "packages/api/src/index.ts"
+  even if declared module at "." exists
+
+The longest-prefix rule is primary. Kind precedence is the tiebreaker.
+
+5.4 Scope constraint
+--------------------
+Operational modules MUST NOT synthesize ownership beyond their
+promoted root. Only files under the promoted root participate.
+
+No "surface reaches across repo" ownership leakage.
+
+
+================================================================================
+6. DEDUP RULE
+================================================================================
+
+Promotion dedup occurs BEFORE persistence, not at storage insert.
+
+6.1 Exact-root collision
+------------------------
+If the promoted root exactly matches an existing module candidate
+root (from Layer 1 or earlier Layer 2 promotion in the same pass):
+
+  - Do NOT create an operational module
+  - Record diagnostic: promotion_skipped_existing_root
+  - The surface remains unattached (no re-linkage)
+
+6.2 Rationale
+-------------
+Root collision is orchestration overlap, not normal business data.
+Storage-level dedup would hide this overlap. Semantic pre-persistence
+skip makes the decision explicit and auditable.
+
+
+================================================================================
+7. RE-LINKAGE
+================================================================================
+
+After promotion, surfaces MUST be linked to their promoting modules
+in the same indexing pass.
+
+7.1 Same-pass completion
+------------------------
+The sequence is:
+  1. Run surface discovery (surfaces attach to existing candidates)
+  2. Collect unattached surfaces
+  3. Run operational promotion (create operational candidates)
+  4. Re-link: attach previously unattached surfaces to new candidates
+  5. Persist all candidates, evidence, surfaces, ownership
+
+7.2 Consistency guarantee
+-------------------------
+A snapshot is internally consistent:
+  - Every promoted module has at least one attached surface
+  - No surface that justified a promoted module remains unattached
+  - Ownership is computed with all candidates (declared + operational)
+
+7.3 Idempotency
+---------------
+Same inputs produce same outputs in one pass. No dependence on
+previous index state for promotion decisions.
+
+
+================================================================================
+8. OPERATIONAL ROOT DERIVATION
+================================================================================
+
+The promoted module's canonicalRootPath MUST be derived explicitly,
+not heuristically.
+
+8.1 Primary rule: surface rootPath
+----------------------------------
+The operational module root is exactly the promoting surface's
+rootPath field.
+
+  surface.rootPath -> ModuleCandidate.canonicalRootPath
+
+8.2 Surface rootPath derivation (existing)
+------------------------------------------
+Surface detectors derive rootPath from manifest location:
+
+  - package.json at "packages/api/package.json" -> rootPath = "packages/api"
+  - Cargo.toml at "crates/foo/Cargo.toml" -> rootPath = "crates/foo"
+  - pyproject.toml at "services/auth/pyproject.toml" -> rootPath = "services/auth"
+
+For manifests at repo root:
+  - package.json at "package.json" -> rootPath = "."
+
+8.3 Examples
+------------
+
+Example 1: CLI entrypoint without workspace membership
+  - packages/cli/package.json exists with bin field
+  - packages/cli is NOT in root workspace
+  - Surface detected: kind=cli, rootPath="packages/cli"
+  - Surface is unattached (no declared module at packages/cli)
+  - Promotion: operational module at rootPath="packages/cli"
+
+Example 2: Backend service with framework dep
+  - services/api/package.json exists with express dependency
+  - services/api is NOT in any workspace
+  - Surface detected: kind=backend_service, rootPath="services/api"
+  - Promotion: operational module at rootPath="services/api"
+
+Example 3: Collision with declared module
+  - packages/web/package.json exists
+  - packages/web IS in root workspace (declared module exists)
+  - Surface detected: kind=web_app, rootPath="packages/web"
+  - Surface attaches to declared module (not unattached)
+  - No promotion occurs
+
+Example 4: Library-only surface
+  - packages/utils/package.json exists with main field only
+  - packages/utils is NOT in workspace
+  - Surface detected: kind=library, rootPath="packages/utils"
+  - Surface kind = library -> does NOT qualify for promotion
+  - Surface remains unattached, no module created
+
+8.4 Prohibited derivations
+--------------------------
+The following are NOT permitted for root derivation:
+  - Entrypoint parent directory (guessing from file location)
+  - Nearest common ancestor of surface evidence files
+  - Any heuristic directory climbing
+
+Root comes from surface.rootPath, which comes from manifest location.
+
+
+================================================================================
+9. EVIDENCE TYPES
+================================================================================
+
+New evidence source types for Layer 2:
+
+  EvidenceSourceType:
+    - "surface_promotion_cli"
+    - "surface_promotion_service"
+    - "surface_promotion_web_app"
+    - "surface_promotion_worker"
+
+New evidence kind:
+
+  EvidenceKind:
+    - "operational_entrypoint"
+
+The evidence payload MUST include:
+  - promoting_surface_kind: the surface kind that triggered promotion
+  - original_evidence: array of surface evidence items (preserved)
+
+
+================================================================================
+10. DIAGNOSTICS
+================================================================================
+
+The promotion orchestrator MUST emit the following counters:
+
+  - surfaces_evaluated: total unattached surfaces considered
+  - surfaces_promoted: surfaces that created operational modules
+  - surfaces_skipped_kind: skipped due to surface kind constraint
+  - surfaces_skipped_confidence: skipped due to evidence confidence
+  - promotion_skipped_existing_root: skipped due to root collision
+
+These counters are returned from the promotion function and may be
+persisted in extraction diagnostics for audit.
+
+
+================================================================================
+11. SCHEMA IMPACT
+================================================================================
+
+No SQL migration required.
+
+  - module_candidates.module_kind is TEXT (no CHECK constraint)
+  - Adding "operational" value requires only enum extension in code:
+    - src/core/modules/module-candidate.ts: ModuleKind type
+    - rust/crates/indexer/src/types.rs: ModuleKind enum (if Rust uses it)
+
+  - Evidence source types are TEXT in module_candidate_evidence
+  - Adding new source types requires only enum extension
+
+
+================================================================================
+12. REFERENCES
+================================================================================
+
+  - docs/ROADMAP.md: Module discovery expansion (Layer 2 + Layer 3)
+  - docs/VISION.md: Architectural understanding layer
+  - src/core/modules/module-candidate.ts: Layer 1 model
+  - src/core/modules/module-discovery.ts: Layer 1 orchestrator
+  - src/core/runtime/project-surface.ts: Surface model
+  - src/core/runtime/surface-discovery.ts: Surface orchestrator
+
+
+================================================================================
+APPENDIX A — DECISION LOG
+================================================================================
+
+Q1: File ownership for operational modules
+  Lock: longest-prefix with kind precedence (declared > operational > inferred)
+  Rationale: operational modules must participate in ownership or
+  Layer 2 stays decorative
+
+Q2: Dedup rule
+  Lock: skip promotion pre-persistence on exact-root collision
+  Rationale: root collision is orchestration overlap, not normal data
+
+Q3: Surface re-linkage
+  Lock: immediate same-pass re-linkage
+  Rationale: snapshot must be internally consistent
+
+Q4: Aggregate confidence computation
+  Lock: max evidence confidence clamped to Layer 2 ceiling (0.85)
+  Rationale: explicit rule prevents policy drift during implementation
+
+Q5: Operational root derivation
+  Lock: surface.rootPath exactly, no heuristics
+  Rationale: ownership and dedup stability require deterministic roots

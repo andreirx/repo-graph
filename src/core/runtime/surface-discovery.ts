@@ -5,10 +5,9 @@
  * to existing module candidates. Produces ProjectSurface[] and
  * ProjectSurfaceEvidence[] for persistence.
  *
- * Policy: only persist surfaces linked to an existing module candidate.
- * If no module candidate exists for a detected surface's root path,
- * the surface is dropped. This is documented as a known limitation
- * (TECH-DEBT) — unattached surface handling is deferred.
+ * Policy: surfaces link to existing module candidates by root path.
+ * Unattached surfaces (no matching candidate) are returned separately
+ * for Layer 2 operational promotion. See operational-promotion.ts.
  *
  * No filesystem access. No storage calls. No side effects.
  */
@@ -35,8 +34,10 @@ export interface SurfaceDiscoveryInput {
 export interface SurfaceDiscoveryResult {
 	surfaces: ProjectSurface[];
 	evidence: ProjectSurfaceEvidence[];
-	/** Count of surfaces dropped because no module candidate matched. */
-	unattachedDropped: number;
+	/** Surfaces with no matching module candidate (for Layer 2 promotion). */
+	unattachedSurfaces: DetectedSurface[];
+	/** Count of unattached surfaces (convenience, equals unattachedSurfaces.length). */
+	unattachedCount: number;
 }
 
 // ── Orchestrator ───────────────────────────────────────────────────
@@ -56,13 +57,14 @@ export function discoverSurfaces(input: SurfaceDiscoveryInput): SurfaceDiscovery
 
 	const surfaces: ProjectSurface[] = [];
 	const evidence: ProjectSurfaceEvidence[] = [];
-	let unattachedDropped = 0;
+	const unattachedSurfaces: DetectedSurface[] = [];
 
 	for (const detected of detectedSurfaces) {
 		// Find the owning module candidate by root path match.
 		const candidate = candidateByRoot.get(detected.rootPath);
 		if (!candidate) {
-			unattachedDropped++;
+			// Collect for Layer 2 promotion instead of dropping.
+			unattachedSurfaces.push(detected);
 			continue;
 		}
 
@@ -98,5 +100,10 @@ export function discoverSurfaces(input: SurfaceDiscoveryInput): SurfaceDiscovery
 		}
 	}
 
-	return { surfaces, evidence, unattachedDropped };
+	return {
+		surfaces,
+		evidence,
+		unattachedSurfaces,
+		unattachedCount: unattachedSurfaces.length,
+	};
 }

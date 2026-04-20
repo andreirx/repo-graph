@@ -49,6 +49,23 @@ The end-state runtime is a **long-lived daemon** holding the current repo state 
 - trend databases or archaeology (useful later, not core)
 - WAL-heavy retained state
 
+**Architectural rule: git owns history, repo-graph owns current-state structure.**
+
+Git is the canonical historical truth store. Repo-graph is the canonical
+structured current-state truth store. Delta indexing is a recomputation
+strategy for current-state truth, not a substitute history system.
+
+Implications:
+- Delta indexing optimizes the refresh path for current-state computation.
+  It does not accumulate archival snapshots as product history.
+- Any "what changed" query compares current vs baseline (HEAD, parent
+  commit, tag), not a retained snapshot timeline.
+- Snapshot retention policy biases toward latest full + minimal transient
+  comparison state. A future `rmap clean` command should prune stale
+  snapshots, not preserve them as history.
+- Longitudinal analysis (trend, drift, archaeology) uses git-backed
+  re-extraction on demand, not retained graph snapshots.
+
 The current SQLite design is the transition mechanism. It is useful now for persistence and query infrastructure. It is not the conceptual center of the end-state architecture. The daemon's in-memory model will become the conceptual center.
 
 ## Value Frontier
@@ -186,26 +203,33 @@ layer is the primary value frontier.
    next step toward complete module truth. Agents need this for
    orientation in multi-surface repos (backend/frontend/admin/infra).
 
-2. **Boundary/seam expansion.** Why now: HTTP and CLI boundaries are
-   shipped. State boundaries (database, filesystem, cache) are the
-   next high-value seam class. Agents need to know which modules
-   read/write which resources.
+2. **Module graph: edges and violations.** Why now: discovered modules
+   need user-facing value. Module dependency edges, cross-module
+   violation checks, per-module rollups turn discovery into enforceable
+   structure.
 
-3. **Runtime/build environment model.** Why now: without this, an agent
+3. **Boundary/seam expansion.** Why now: HTTP and CLI boundaries are
+   shipped. State boundaries slice 1 (FS-only) shipped. SDK/DB/cache
+   state boundaries, queue/event boundaries, and config/env seam are
+   the next high-value seam classes.
+
+4. **Runtime/build environment model.** Why now: without this, an agent
    knows what a module contains but not how it runs. Compile context,
    deployment target, and runtime configuration are critical for
    correct reasoning about changes.
 
-4. **Delta indexing completion.** Why now: 77-minute full index on Linux
-   is not operationally viable. Delta refresh slice 1 is shipped.
-   Config-file tracking, scoped postpasses, and large-repo validation
-   remain.
-
 5. **Long-lived daemon with in-memory graph.** Why now: eliminates
    cold-start overhead, enables concurrent queries, provides the
-   correct runtime model for fast agent orientation.
+   correct runtime model for fast agent orientation. Build after the
+   module/update model is stable.
 
-6. **Registry/framework liveness edges.** Why now: without these,
+6. **Delta indexing completion.** Infrastructure optimization, not
+   product capability. Delta refresh slice 1 is shipped. Remaining:
+   config-file tracking, scoped postpasses, large-repo validation.
+   Design explicitly as ephemeral current-state accelerator — no
+   archival snapshot accumulation. Git owns history.
+
+7. **Registry/framework liveness edges.** Why now: without these,
    dead-code detection on plugin-driven codebases is unsafe. Largest
    known soundness gap in the extraction layer.
 

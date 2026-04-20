@@ -416,6 +416,23 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   8 integration (monorepo workspace + mixed-lang + rollups + owned files).
 - Validated on repo-graph: 9 candidates, 10 evidence items, 228 ownership rows.
 
+### Module discovery Layer 2 — operational modules
+- Three-tier module kind: declared > operational > inferred.
+- Layer 2 promotion: unattached project surfaces promote to operational
+  module candidates when surface kind in {cli, backend_service, web_app, worker}
+  and max evidence confidence >= 0.70.
+- Confidence ceiling: Layer 2 modules capped at 0.85 (Layer 1 reaches 1.0).
+- Exact-root collision dedup: surfaces at existing declared roots are not promoted.
+- Same-pass re-linkage: after promotion, surfaces re-link to extended candidate set.
+- Kind-precedence tiebreak: when declared and operational candidates share root,
+  declared wins for file ownership (longest-prefix still primary).
+- Pure orchestrator: `promoteUnattachedSurfaces` in `src/core/modules/operational-promotion.ts`.
+- `assignFileOwnershipForCandidates` exported for pipeline use.
+- PromotionDiagnostics: surfacesEvaluated, surfacesPromoted, surfacesSkippedKind,
+  surfacesSkippedConfidence, promotionSkippedExistingRoot.
+- 28 unit tests: 23 operational-promotion, 5 kind-precedence ownership.
+- Contract: docs/architecture/module-discovery-layers.txt.
+
 ### Module graph and file-to-module ownership (feature slice 1)
 - `rgr modules list <repo>` — catalog with rollups (file count, symbol count,
   test files, evidence count, languages, has-directory-module).
@@ -472,10 +489,56 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ## Next (in priority order)
 
-### 1. Delta indexing support module
+### 1. Module discovery expansion (Layer 3)
+Extend the shipped Layer 1 (declared) and Layer 2 (operational) with:
+- Layer 3: inferred modules (graph clustering, structural patterns)
+- Kbuild/obj-y parsing for Linux kernel module boundaries
+- `__init__.py` as weaker evidence (not declared-tier)
+
+**Why this is #1:**
+- Deepens the actual product model, not just refresh speed.
+- Improves how the system understands architecture.
+- Feeds module graph, violations, trust, and orientation work.
+- Layer 3 enables code-only repos (no manifests) to have module structure.
+
+### 2. Module graph — dependency edges and violations
+User-facing implementation on top of discovered modules:
+- module dependency edges derived from discovered module ownership
+- cross-module violation checks
+- per-module rollups for dead code, boundaries, blast radius
+- `rgr arch violations <repo>` augmented with discovered-module policy
+
+**Why this is #2:**
+- Turns discovered modules into enforceable structure.
+- Direct user-facing value on top of module discovery.
+- Closer to the core product than faster refresh.
+
+### 3. Long-lived analysis daemon + daemon-backed CLI
+Two-part item: support module (warmed runtime) + feature (CLI client).
+
+Support: warmed runtime that eliminates repeated CLI bootstrap cost
+(WASM grammar load, extractor initialization, SQLite open, migration
+checks). Provides warm parser pool, prepared SQLite statements,
+request routing (JSON-RPC over Unix socket), three concurrency lanes
+(query/index/maintenance), per-repo write locks, snapshot pinning,
+progress streaming, cancellation tokens.
+
+Feature: CLI becomes a thin client (connect, send request, render
+response). Auto-start daemon on first command if absent. Progress
+rendering via stderr. Fallback to direct execution if daemon unavailable.
+
+**Why this is #3:**
+- Only worth it once the module/update model is settled.
+- Otherwise it hardens an unstable execution boundary.
+
+### 4. Delta indexing support module (infrastructure)
+**Architectural principle:** Git owns historical truth. Repo-graph owns
+structured current-state truth. Delta indexing is a recomputation
+strategy for current-state truth, not a substitute history system.
+
 Full indexing (77 min on Linux) is a bootstrap path, not operational
 flow. Delta indexing changes the amount of work, not just the startup
-cost.
+cost. But it is infrastructure optimization, not product capability.
 
 **Support module: delta invalidation planner**
 - determine what changed (git diff, working-tree diff)
@@ -498,46 +561,18 @@ cost.
 - carry forward unchanged nodes, edges, file signals, module candidates
 - explicit trust metadata: what was reused vs recomputed vs widened
 
-**Why this is #1:**
-- 77-minute full index is not operationally viable for iterative work
-- module discovery (just shipped) provides better invalidation scoping
-  (file-to-module ownership, manifest change detection)
-- daemon only improves startup/flow; delta indexing reduces total work
-- C/C++ header fan-out and compile context changes need explicit
-  invalidation semantics, not just file-level diff
+**Design constraints:**
+- Explicitly ephemeral: optimize current-state recomputation only.
+- No archival snapshot accumulation as product history.
+- Retention policy biases toward latest snapshot plus minimal transient
+  comparison state. A future `rmap clean` command prunes stale snapshots.
+- Longitudinal analysis uses git-backed re-extraction on demand, not
+  retained graph snapshots.
 
 **Special considerations for C/C++:**
 - header changes have wide blast radius
 - compile_commands.json changes can invalidate per-TU resolution
 - macro-heavy code may require conservative widening
-
-### 2. Module discovery expansion (Layer 2 + Layer 3)
-Extend the shipped Layer 1 (declared/manifest) module discovery with:
-- Layer 2: operational modules (entrypoints, deploy surfaces)
-- Layer 3: inferred modules (graph clustering, structural patterns)
-- Kbuild/obj-y parsing for Linux kernel module boundaries
-- `__init__.py` as weaker evidence (not declared-tier)
-
-### 3. Module graph — dependency edges and violations
-User-facing implementation on top of discovered modules:
-- module dependency edges derived from discovered module ownership
-- cross-module violation checks
-- per-module rollups for dead code, boundaries, blast radius
-- `rgr arch violations <repo>` augmented with discovered-module policy
-
-### 4. Long-lived analysis daemon + daemon-backed CLI
-Two-part item: support module (warmed runtime) + feature (CLI client).
-
-Support: warmed runtime that eliminates repeated CLI bootstrap cost
-(WASM grammar load, extractor initialization, SQLite open, migration
-checks). Provides warm parser pool, prepared SQLite statements,
-request routing (JSON-RPC over Unix socket), three concurrency lanes
-(query/index/maintenance), per-repo write locks, snapshot pinning,
-progress streaming, cancellation tokens.
-
-Feature: CLI becomes a thin client (connect, send request, render
-response). Auto-start daemon on first command if absent. Progress
-rendering via stderr. Fallback to direct execution if daemon unavailable.
 
 ### 5. Sharded indexing architecture
 The streaming pipeline handles Linux-scale repos in a single pass
