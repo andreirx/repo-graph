@@ -869,6 +869,18 @@ describe("getModuleDependencyGraph — filter", () => {
 			}),
 		).toThrow("outboundOnly and inboundOnly filters require moduleKey");
 	});
+
+	it("throws when both outboundOnly and inboundOnly are set", () => {
+		const { snap, moduleCore } = setupThreeModuleGraph();
+
+		expect(() =>
+			getModuleDependencyGraph(storage, snap.snapshotUid, {
+				moduleKey: moduleCore.moduleKey,
+				outboundOnly: true,
+				inboundOnly: true,
+			}),
+		).toThrow("outboundOnly and inboundOnly are mutually exclusive");
+	});
 });
 
 // ── Enrichment ─────────────────────────────────────────────────────

@@ -189,6 +189,12 @@ export function getModuleDependencyGraph(
 				"outboundOnly and inboundOnly filters require moduleKey to be set",
 			);
 		}
+		// Directional flags are mutually exclusive.
+		if (filter.outboundOnly && filter.inboundOnly) {
+			throw new Error(
+				"outboundOnly and inboundOnly are mutually exclusive",
+			);
+		}
 
 		if (filter.moduleKey) {
 			const filterKey = filter.moduleKey;
