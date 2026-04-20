@@ -752,6 +752,64 @@ pub struct UpdateSnapshotStatusInput {
 	pub completed_at: Option<String>,
 }
 
+// ── Module Candidates (RS-MG-1) ────────────────────────────────────
+
+/// Discovered module candidate. Mirrors the `module_candidates` table
+/// from migration 011-module-candidates.
+///
+/// SQL table:
+/// ```sql
+/// CREATE TABLE IF NOT EXISTS module_candidates (
+///   module_candidate_uid  TEXT PRIMARY KEY,
+///   snapshot_uid          TEXT NOT NULL,
+///   repo_uid              TEXT NOT NULL,
+///   module_key            TEXT NOT NULL,
+///   module_kind           TEXT NOT NULL,
+///   canonical_root_path   TEXT NOT NULL,
+///   confidence            REAL NOT NULL,
+///   display_name          TEXT,
+///   metadata_json         TEXT,
+///   UNIQUE (snapshot_uid, module_key)
+/// );
+/// ```
+///
+/// This is a read-only DTO for Rust. The TS indexer is the producer;
+/// Rust `rmap` commands are consumers. The `canonical_root_path` field
+/// is the stable identity anchor for boundary evaluation and module
+/// edge derivation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleCandidate {
+	pub module_candidate_uid: String,
+	pub snapshot_uid: String,
+	pub repo_uid: String,
+	pub module_key: String,
+	pub module_kind: String,
+	pub canonical_root_path: String,
+	pub confidence: f64,
+	pub display_name: Option<String>,
+	pub metadata_json: Option<String>,
+}
+
+impl ModuleCandidate {
+	/// Construct a `ModuleCandidate` from a rusqlite row.
+	///
+	/// Looks up columns by SQL column name (snake_case).
+	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+		Ok(Self {
+			module_candidate_uid: row.get("module_candidate_uid")?,
+			snapshot_uid: row.get("snapshot_uid")?,
+			repo_uid: row.get("repo_uid")?,
+			module_key: row.get("module_key")?,
+			module_kind: row.get("module_kind")?,
+			canonical_root_path: row.get("canonical_root_path")?,
+			confidence: row.get("confidence")?,
+			display_name: row.get("display_name")?,
+			metadata_json: row.get("metadata_json")?,
+		})
+	}
+}
+
 // ── Tests ──────────────────────────────────────────────────────────
 //
 // R2-B unit tests cover the pure-logic helper

@@ -90,6 +90,7 @@ pub mod declarations;
 pub mod edges;
 pub mod file_versions;
 pub mod files;
+pub mod module_candidates;
 pub mod nodes;
 pub mod repos;
 pub mod snapshots;
