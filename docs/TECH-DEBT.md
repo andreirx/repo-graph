@@ -945,6 +945,31 @@ slice. The stale-orphan behavior is pinned by a test
 `repo-index/tests/state_boundary_integration.rs`) so that an
 unintentional fix or regression is detected.
 
+### `rmap dead` excludes resource kinds — TS divergence (SB-5)
+
+`rmap dead` (Rust `find_dead_nodes` in `storage/src/queries.rs`)
+excludes resource node kinds (FS_PATH, DB_RESOURCE, BLOB, STATE+CACHE)
+from the dead-node result set. This is correct behavior: resource
+nodes have no inbound static edges by construction (they are targets
+of READS/WRITES edges, not sources), so they would appear as mass
+false positives without this exclusion.
+
+**TS divergence:** The TypeScript `findDeadNodes` implementation
+(`src/adapters/storage/sqlite/sqlite-storage.ts`) does NOT yet have
+this exclusion. This creates a cross-runtime query behavior split:
+
+- `rmap dead amodx` excludes resource nodes.
+- `rgr graph dead amodx` includes resource nodes (if any exist).
+
+Impact: TS CLI users may see resource nodes in dead results on
+databases that contain state-boundary facts (i.e., Rust-indexed DBs
+opened via TS CLI). This is a documentation/awareness gap, not a
+data-loss bug.
+
+**Fix path:** Either (a) port the exclusion to the TS `findDeadNodes`
+query, or (b) accept the divergence and document it in CLI help text.
+Option (a) is preferred for query-surface consistency.
+
 ### SB-3 binding-table coverage is FS-only
 
 Slice SB-3 ships the state-extractor TS integration plus a

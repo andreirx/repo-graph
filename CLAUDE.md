@@ -152,9 +152,11 @@ rmap declare deactivate <db_path> <declaration_uid>   # Soft-delete (idempotent)
 rmap declare supersede boundary <db_path> <old_uid> --forbids <target> [--reason <text>]
 rmap declare supersede requirement <db_path> <old_uid> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
 rmap declare supersede waiver <db_path> <old_uid> --reason <text> [--expires-at <iso>] [--created-by <a>] [--rationale-category <c>] [--policy-basis <t>]
-rmap dead       <db_path> <repo_uid> [kind]        # Unreferenced nodes
+rmap dead       <db_path> <repo_uid> [kind]        # Unreferenced nodes (excludes resource kinds)
 rmap cycles     <db_path> <repo_uid>               # Module-level IMPORTS cycles
 rmap stats      <db_path> <repo_uid>               # Module structural metrics
+rmap resource readers <db_path> <repo_uid> <resource_stable_key>  # Symbols with READS edges to resource
+rmap resource writers <db_path> <repo_uid> <resource_stable_key>  # Symbols with WRITES edges to resource
 ```
 
 Read-side commands (callers, callees, path, imports, violations, dead,
@@ -177,7 +179,7 @@ Symbol resolution (callers, callees) uses exact match only:
 stable_key, then qualified_name, then name. SYMBOL kind only.
 
 Known Rust CLI divergences from TS CLI:
-- `--edge-types` on callers/callees accepts CALLS and INSTANTIATES only (TS accepts all 18 edge types)
+- `--edge-types` on callers/callees accepts CALLS, INSTANTIATES, READS, WRITES only (TS accepts all 18 edge types)
 - No `--min-lines` filter on dead
 - No `--json` flag (always JSON, no table format)
 - No `graph metrics` command yet

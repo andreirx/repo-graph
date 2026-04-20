@@ -16,7 +16,10 @@
 //! Rust-25: `find_active_waivers`.
 //! Rust-27: `query_measurements_by_kind`.
 //! Rust-30: `query_inferences_by_kind`.
+//! SB-5: `resolve_resource` + `find_resource_readers` + `find_resource_writers`;
+//!       `find_dead_nodes` excludes resource kinds (FS_PATH, DB_RESOURCE, BLOB, STATE+CACHE).
 
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 use crate::connection::StorageConnection;
@@ -264,6 +267,34 @@ pub struct ModuleStatsResult {
 	pub symbol_count: i64,
 }
 
+/// A resolved resource node from a resource lookup query.
+///
+/// SB-5: Used by `rmap resource readers/writers` commands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolvedResource {
+	pub stable_key: String,
+	pub name: String,
+	pub kind: String,
+	pub subtype: Option<String>,
+}
+
+/// A symbol that accesses a resource (reader or writer).
+///
+/// SB-5: Used by `rmap resource readers/writers` commands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceAccessorResult {
+	pub stable_key: String,
+	pub name: String,
+	pub qualified_name: Option<String>,
+	pub kind: String,
+	pub subtype: Option<String>,
+	pub file: Option<String>,
+	pub line: Option<i64>,
+	pub column: Option<i64>,
+	pub edge_type: String,
+	pub resolution: String,
+}
+
 /// Error when resolving a symbol query.
 #[derive(Debug)]
 pub enum SymbolResolveError {
@@ -281,6 +312,33 @@ impl std::fmt::Display for SymbolResolveError {
 			Self::NotFound => write!(f, "symbol not found"),
 			Self::Ambiguous(keys) => {
 				write!(f, "ambiguous symbol, matches: {}", keys.join(", "))
+			}
+			Self::Storage(e) => write!(f, "storage error: {}", e),
+		}
+	}
+}
+
+/// Error when resolving a resource query.
+///
+/// SB-5: Resource resolution is exact stable_key only. Unlike symbol
+/// resolution, there is no name/qualified_name fallback.
+#[derive(Debug)]
+pub enum ResourceResolveError {
+	/// No match found for the given stable_key.
+	NotFound,
+	/// The stable_key exists but does not refer to a resource node.
+	/// Contains the actual kind found.
+	NotAResource(String),
+	/// Storage error.
+	Storage(StorageError),
+}
+
+impl std::fmt::Display for ResourceResolveError {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::NotFound => write!(f, "resource not found"),
+			Self::NotAResource(kind) => {
+				write!(f, "not a resource node (kind: {})", kind)
 			}
 			Self::Storage(e) => write!(f, "storage error: {}", e),
 		}
@@ -461,17 +519,165 @@ impl StorageConnection {
 			.map_err(StorageError::from)
 	}
 
+	// ── Resource queries (SB-5) ──────────────────────────────────────
+
+	/// Resolve a resource stable_key to a `ResolvedResource`.
+	///
+	/// Resolution is exact stable_key match only (no name fallback).
+	/// Returns `NotAResource` if the node exists but is not a resource
+	/// kind (FS_PATH, DB_RESOURCE, BLOB, or STATE+CACHE).
+	pub fn resolve_resource(
+		&self,
+		snapshot_uid: &str,
+		stable_key: &str,
+	) -> Result<ResolvedResource, ResourceResolveError> {
+		let sql = "SELECT stable_key, name, kind, subtype
+		           FROM nodes
+		           WHERE snapshot_uid = ?
+		             AND stable_key = ?";
+		let mut stmt = self
+			.connection()
+			.prepare(sql)
+			.map_err(|e| ResourceResolveError::Storage(e.into()))?;
+
+		let result: Option<(String, String, String, Option<String>)> = stmt
+			.query_row(rusqlite::params![snapshot_uid, stable_key], |row| {
+				Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+			})
+			.optional()
+			.map_err(|e| ResourceResolveError::Storage(e.into()))?;
+
+		let Some((sk, name, kind, subtype)) = result else {
+			return Err(ResourceResolveError::NotFound);
+		};
+
+		// Validate resource kind.
+		let is_resource = matches!(kind.as_str(), "FS_PATH" | "DB_RESOURCE" | "BLOB")
+			|| (kind == "STATE" && subtype.as_deref() == Some("CACHE"));
+
+		if !is_resource {
+			return Err(ResourceResolveError::NotAResource(kind));
+		}
+
+		Ok(ResolvedResource {
+			stable_key: sk,
+			name,
+			kind,
+			subtype,
+		})
+	}
+
+	/// Find symbols that read from a resource (READS edges to the resource).
+	///
+	/// Returns symbols (source nodes) that have READS edges pointing to
+	/// the given resource stable_key.
+	pub fn find_resource_readers(
+		&self,
+		snapshot_uid: &str,
+		resource_stable_key: &str,
+	) -> Result<Vec<ResourceAccessorResult>, StorageError> {
+		let sql = "SELECT
+				n.stable_key, n.name, n.qualified_name, n.kind, n.subtype,
+				f.path AS file_path, n.line_start, n.col_start,
+				e.type AS edge_type, e.resolution
+			 FROM edges e
+			 JOIN nodes target_n ON e.target_node_uid = target_n.node_uid
+			 JOIN nodes n ON e.source_node_uid = n.node_uid
+			 LEFT JOIN files f ON n.file_uid = f.file_uid
+			 WHERE target_n.snapshot_uid = ?
+			   AND target_n.stable_key = ?
+			   AND e.snapshot_uid = ?
+			   AND e.type = 'READS'
+			   AND n.kind = 'SYMBOL'
+			 ORDER BY n.name ASC, f.path ASC";
+
+		let mut stmt = self.connection().prepare(sql)?;
+		let rows = stmt.query_map(
+			rusqlite::params![snapshot_uid, resource_stable_key, snapshot_uid],
+			|row| {
+				Ok(ResourceAccessorResult {
+					stable_key: row.get(0)?,
+					name: row.get(1)?,
+					qualified_name: row.get(2)?,
+					kind: row.get(3)?,
+					subtype: row.get(4)?,
+					file: row.get(5)?,
+					line: row.get(6)?,
+					column: row.get(7)?,
+					edge_type: row.get(8)?,
+					resolution: row.get(9)?,
+				})
+			},
+		)?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(StorageError::from)
+	}
+
+	/// Find symbols that write to a resource (WRITES edges to the resource).
+	///
+	/// Returns symbols (source nodes) that have WRITES edges pointing to
+	/// the given resource stable_key.
+	pub fn find_resource_writers(
+		&self,
+		snapshot_uid: &str,
+		resource_stable_key: &str,
+	) -> Result<Vec<ResourceAccessorResult>, StorageError> {
+		let sql = "SELECT
+				n.stable_key, n.name, n.qualified_name, n.kind, n.subtype,
+				f.path AS file_path, n.line_start, n.col_start,
+				e.type AS edge_type, e.resolution
+			 FROM edges e
+			 JOIN nodes target_n ON e.target_node_uid = target_n.node_uid
+			 JOIN nodes n ON e.source_node_uid = n.node_uid
+			 LEFT JOIN files f ON n.file_uid = f.file_uid
+			 WHERE target_n.snapshot_uid = ?
+			   AND target_n.stable_key = ?
+			   AND e.snapshot_uid = ?
+			   AND e.type = 'WRITES'
+			   AND n.kind = 'SYMBOL'
+			 ORDER BY n.name ASC, f.path ASC";
+
+		let mut stmt = self.connection().prepare(sql)?;
+		let rows = stmt.query_map(
+			rusqlite::params![snapshot_uid, resource_stable_key, snapshot_uid],
+			|row| {
+				Ok(ResourceAccessorResult {
+					stable_key: row.get(0)?,
+					name: row.get(1)?,
+					qualified_name: row.get(2)?,
+					kind: row.get(3)?,
+					subtype: row.get(4)?,
+					file: row.get(5)?,
+					line: row.get(6)?,
+					column: row.get(7)?,
+					edge_type: row.get(8)?,
+					resolution: row.get(9)?,
+				})
+			},
+		)?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(StorageError::from)
+	}
+
 	/// Find dead nodes — nodes with no incoming reference edges.
 	///
-	/// Mirrors the TS `findDeadNodes` algorithm exactly:
+	/// Based on the TS `findDeadNodes` algorithm with one intentional
+	/// divergence (SB-5): resource kinds are excluded.
+	///
+	/// Steps:
 	///   1. Select all nodes in the snapshot.
 	///   2. Exclude nodes that are targets of reference edges
 	///      (IMPORTS, CALLS, IMPLEMENTS, INSTANTIATES, ROUTES_TO,
 	///      REGISTERED_BY, TESTED_BY, COVERS).
 	///   3. Exclude declared entrypoints (declarations table).
 	///   4. Exclude framework-liveness inferences.
-	///   5. Optional: filter by node kind (e.g., "SYMBOL").
-	///   6. ORDER BY name ASC.
+	///   5. **SB-5 divergence**: Exclude resource kinds (FS_PATH,
+	///      DB_RESOURCE, BLOB, STATE+CACHE). The TS implementation
+	///      does not yet have this exclusion.
+	///   6. Optional: filter by node kind (e.g., "SYMBOL").
+	///   7. ORDER BY name ASC.
 	///
 	/// The declarations and inferences subqueries operate on tables
 	/// that exist in every Rust-migrated DB (created by migration 001).
@@ -522,6 +728,8 @@ impl StorageConnection {
 			       AND i.kind IN ('framework_entrypoint', 'spring_container_managed',
 			                      'pytest_test', 'pytest_fixture', 'linux_system_managed')
 			   )
+			   AND n.kind NOT IN ('FS_PATH', 'DB_RESOURCE', 'BLOB')
+			   AND NOT (n.kind = 'STATE' AND n.subtype = 'CACHE')
 			 ORDER BY n.name ASC"
 		);
 
@@ -2108,6 +2316,263 @@ mod tests {
 			result.is_err(),
 			"query_inferences_by_kind must propagate SQL error, got: {:?}",
 			result
+		);
+	}
+
+	// ── SB-5: Resource resolution tests ──────────────────────────
+
+	fn insert_raw_node_with_subtype(
+		storage: &StorageConnection,
+		snapshot_uid: &str,
+		node_uid: &str,
+		stable_key: &str,
+		name: &str,
+		kind: &str,
+		subtype: Option<&str>,
+	) {
+		storage
+			.connection()
+			.execute(
+				"INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, name, kind, subtype)
+				 VALUES (?, ?, 'r1', ?, ?, ?, ?)",
+				rusqlite::params![node_uid, snapshot_uid, stable_key, name, kind, subtype],
+			)
+			.unwrap();
+	}
+
+	#[test]
+	fn resolve_resource_accepts_fs_path_node() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+		insert_raw_node_with_subtype(
+			&storage,
+			&snap_uid,
+			"n-res-1",
+			"r1:fs:/etc/config:FS_PATH",
+			"/etc/config",
+			"FS_PATH",
+			Some("FILE_PATH"),
+		);
+
+		let result = storage.resolve_resource(&snap_uid, "r1:fs:/etc/config:FS_PATH");
+		assert!(result.is_ok(), "FS_PATH must resolve: {:?}", result);
+		let res = result.unwrap();
+		assert_eq!(res.kind, "FS_PATH");
+		assert_eq!(res.subtype.as_deref(), Some("FILE_PATH"));
+	}
+
+	#[test]
+	fn resolve_resource_accepts_db_resource_node() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+		insert_raw_node_with_subtype(
+			&storage,
+			&snap_uid,
+			"n-res-2",
+			"r1:db:postgres://host/db:DB_RESOURCE",
+			"db:postgres://host/db",
+			"DB_RESOURCE",
+			Some("CONNECTION"),
+		);
+
+		let result = storage.resolve_resource(&snap_uid, "r1:db:postgres://host/db:DB_RESOURCE");
+		assert!(result.is_ok(), "DB_RESOURCE must resolve: {:?}", result);
+	}
+
+	#[test]
+	fn resolve_resource_accepts_state_cache_node() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+		insert_raw_node_with_subtype(
+			&storage,
+			&snap_uid,
+			"n-res-3",
+			"r1:state:redis-cache:STATE",
+			"redis-cache",
+			"STATE",
+			Some("CACHE"),
+		);
+
+		let result = storage.resolve_resource(&snap_uid, "r1:state:redis-cache:STATE");
+		assert!(result.is_ok(), "STATE+CACHE must resolve: {:?}", result);
+	}
+
+	#[test]
+	fn resolve_resource_rejects_symbol_node() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+		insert_raw_node(
+			&storage,
+			&snap_uid,
+			"n-sym-x",
+			"r1:src/a.ts#foo:SYMBOL:FUNCTION",
+			"foo",
+			"SYMBOL",
+		);
+
+		let result = storage.resolve_resource(&snap_uid, "r1:src/a.ts#foo:SYMBOL:FUNCTION");
+		assert!(
+			matches!(result, Err(ResourceResolveError::NotAResource(_))),
+			"SYMBOL must be rejected by resolve_resource: {:?}",
+			result
+		);
+	}
+
+	#[test]
+	fn resolve_resource_rejects_state_non_cache_subtype() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+		insert_raw_node_with_subtype(
+			&storage,
+			&snap_uid,
+			"n-res-4",
+			"r1:state:session:STATE",
+			"session",
+			"STATE",
+			Some("SESSION"), // Not CACHE
+		);
+
+		let result = storage.resolve_resource(&snap_uid, "r1:state:session:STATE");
+		assert!(
+			matches!(result, Err(ResourceResolveError::NotAResource(_))),
+			"STATE+non-CACHE must be rejected: {:?}",
+			result
+		);
+	}
+
+	#[test]
+	fn resolve_resource_returns_not_found_for_missing_key() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		let result = storage.resolve_resource(&snap_uid, "nonexistent:key");
+		assert!(
+			matches!(result, Err(ResourceResolveError::NotFound)),
+			"missing key must return NotFound: {:?}",
+			result
+		);
+	}
+
+	// ── SB-5: Resource readers/writers tests ─────────────────────
+
+	fn insert_raw_edge(
+		storage: &StorageConnection,
+		snapshot_uid: &str,
+		edge_uid: &str,
+		source_node_uid: &str,
+		target_node_uid: &str,
+		edge_type: &str,
+	) {
+		storage
+			.connection()
+			.execute(
+				"INSERT INTO edges (edge_uid, snapshot_uid, repo_uid, source_node_uid, target_node_uid, type, resolution, extractor)
+				 VALUES (?, ?, 'r1', ?, ?, ?, 'static', 'test')",
+				rusqlite::params![edge_uid, snapshot_uid, source_node_uid, target_node_uid, edge_type],
+			)
+			.unwrap();
+	}
+
+	#[test]
+	fn find_resource_readers_returns_only_symbols() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		// Resource node
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-res", "r1:fs:config:FS_PATH",
+			"config", "FS_PATH", Some("FILE_PATH"),
+		);
+		// Symbol reader
+		insert_raw_node(&storage, &snap_uid, "n-sym", "r1:a.ts#read:SYMBOL:FUNCTION", "read", "SYMBOL");
+		// File node (should be excluded even if edge exists)
+		insert_raw_node(&storage, &snap_uid, "n-file", "r1:a.ts:FILE", "a.ts", "FILE");
+
+		// READS edge from symbol
+		insert_raw_edge(&storage, &snap_uid, "e1", "n-sym", "n-res", "READS");
+		// READS edge from file (would be bug if emitted, but test query exclusion)
+		insert_raw_edge(&storage, &snap_uid, "e2", "n-file", "n-res", "READS");
+
+		let readers = storage.find_resource_readers(&snap_uid, "r1:fs:config:FS_PATH").unwrap();
+		assert_eq!(readers.len(), 1, "only SYMBOL nodes should be returned");
+		assert_eq!(readers[0].kind, "SYMBOL");
+		assert_eq!(readers[0].name, "read");
+	}
+
+	#[test]
+	fn find_resource_writers_returns_only_symbols() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-res", "r1:fs:log:FS_PATH",
+			"log", "FS_PATH", Some("FILE_PATH"),
+		);
+		insert_raw_node(&storage, &snap_uid, "n-sym", "r1:b.ts#write:SYMBOL:FUNCTION", "write", "SYMBOL");
+
+		insert_raw_edge(&storage, &snap_uid, "e1", "n-sym", "n-res", "WRITES");
+
+		let writers = storage.find_resource_writers(&snap_uid, "r1:fs:log:FS_PATH").unwrap();
+		assert_eq!(writers.len(), 1);
+		assert_eq!(writers[0].edge_type, "WRITES");
+	}
+
+	// ── SB-5: Dead-node resource exclusion tests ─────────────────
+
+	#[test]
+	fn find_dead_nodes_excludes_resource_kinds() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		// FS_PATH (should be excluded)
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-fs", "r1:fs:file:FS_PATH",
+			"file", "FS_PATH", Some("FILE_PATH"),
+		);
+		// DB_RESOURCE (should be excluded)
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-db", "r1:db:conn:DB_RESOURCE",
+			"conn", "DB_RESOURCE", Some("CONNECTION"),
+		);
+		// BLOB (should be excluded)
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-blob", "r1:blob:bucket:BLOB",
+			"bucket", "BLOB", Some("BUCKET"),
+		);
+		// STATE+CACHE (should be excluded)
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-cache", "r1:state:cache:STATE",
+			"cache", "STATE", Some("CACHE"),
+		);
+		// STATE+SESSION (should NOT be excluded - only CACHE is)
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-session", "r1:state:session:STATE",
+			"session", "STATE", Some("SESSION"),
+		);
+		// SYMBOL (should NOT be excluded)
+		insert_raw_node(&storage, &snap_uid, "n-sym", "r1:a.ts#orphan:SYMBOL:FUNCTION", "orphan", "SYMBOL");
+
+		let dead = storage.find_dead_nodes(&snap_uid, "r1", None).unwrap();
+
+		let kinds: Vec<&str> = dead.iter().map(|d| d.kind.as_str()).collect();
+		assert!(
+			!kinds.contains(&"FS_PATH"),
+			"FS_PATH should be excluded from dead: {:?}",
+			kinds
+		);
+		assert!(
+			!kinds.contains(&"DB_RESOURCE"),
+			"DB_RESOURCE should be excluded from dead: {:?}",
+			kinds
+		);
+		assert!(
+			!kinds.contains(&"BLOB"),
+			"BLOB should be excluded from dead: {:?}",
+			kinds
+		);
+		// STATE should only be excluded if subtype=CACHE
+		let state_nodes: Vec<_> = dead.iter().filter(|d| d.kind == "STATE").collect();
+		assert!(
+			state_nodes.iter().all(|d| d.subtype.as_deref() != Some("CACHE")),
+			"STATE+CACHE should be excluded, but other STATE subtypes included: {:?}",
+			state_nodes
+		);
+
+		assert!(
+			kinds.contains(&"SYMBOL"),
+			"SYMBOL should be included in dead: {:?}",
+			kinds
 		);
 	}
 }

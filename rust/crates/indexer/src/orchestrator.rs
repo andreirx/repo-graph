@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, HashMap};
 use repo_graph_classification::classify_unresolved_edge;
 use repo_graph_classification::types::{
 	FileSignals, PackageDependencySet, RuntimeBuiltinsSet, SnapshotSignals,
-	TsconfigAliases,
+	SourceLocation, TsconfigAliases,
 };
 
 use crate::extractor_port::{ExtractorError, ExtractorPort};
@@ -604,7 +604,12 @@ fn run_pipeline<S: IndexerStoragePort>(
 				edge_type: e.edge_type,
 				resolution: e.resolution,
 				extractor: e.extractor.clone(),
-				location: None, // Position data not needed for resolution
+				location: e.line_start.map(|ls| SourceLocation {
+					line_start: ls,
+					col_start: e.col_start.unwrap_or(0),
+					line_end: e.line_end.unwrap_or(ls),
+					col_end: e.col_end.unwrap_or(0),
+				}),
 				metadata_json: e.metadata_json.clone(),
 			})
 			.collect();
