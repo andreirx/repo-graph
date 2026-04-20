@@ -174,6 +174,20 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - Deferred: multi-obligation requirements, evidence, obligations
 - Deferred: measurement commands, table output, full edge-type set
 
+### State-boundary extraction (`rmap-state-boundaries-v1`)
+- Fork 1 (TS-only) delivered: TS/TSX/JS/JSX state-boundary edges
+- New node kinds: DB_RESOURCE, FS_PATH, BLOB, STATE+CACHE subtype
+- Edge types: READS, WRITES (targeting resource nodes)
+- Form A matcher: import-anchored calls with literal arguments
+- Binding table: TS/JS entries for fs, node:fs, fs/promises,
+  node:fs/promises (stdlib FS only). SDK/DB/cache entries deferred
+  pending object-property extraction and constructor tracking.
+- CLI: `--edge-types READS,WRITES` on callers/callees, resource kinds
+  excluded from `rmap dead`, `rmap resource readers/writers` commands
+- Contract frozen at `state_boundary_version: 1`
+- Milestone doc: `docs/milestones/rmap-state-boundaries-v1.md`
+- Built across SB-0 through SB-6 (7 slices, plus SB-3-pre prerequisite)
+
 ### Multi-language graph engine
 - TypeScript/JavaScript extractor (tree-sitter, syntax-only)
 - Rust extractor (tree-sitter-rust)
@@ -614,68 +628,27 @@ jdtls is operational but fragile. The remaining issues are not polish:
 - Protocol/client completeness
 - Operational determinism on large repos
 
-### 13. Storage/state boundary model
-A component interacts with persisted or semi-persisted state through
-a storage mechanism. This is a STATE boundary, distinct from the
-interaction boundaries (HTTP, CLI) already modeled. Agents can grep
-for individual file reads or SQL queries; they cannot cheaply maintain
-normalized resource identities, read/write directionality, confidence,
-cross-language storage coupling, or historic repeatability across
-many queries. The indexer can.
+### 13. State-boundary expansion (post-slice-1)
+Slice 1 shipped (see Shipped section above). Remaining work:
 
-Mechanisms (new `BoundaryMechanism` variants):
-- `filesystem` — file read/write/append/delete
-- `database_sql` — SQL table read/write/migrate (SQLite, Postgres, MySQL)
-- `database_nosql` — document/collection access (MongoDB, DynamoDB)
-- `cache` — key/value read/write (Redis, Memcached)
-- `object_store` — bucket/object read/write (S3, GCS, Azure Blob)
+**Language coverage (blocked on extractors):**
+- Java state-boundary coverage — blocked on Java Rust-workspace extractor
+- Python state-boundary coverage — blocked on Python Rust-workspace extractor
+- Rust-language state-boundary coverage — blocked on Rust-language Rust-workspace extractor
+- C++ state-boundary coverage — blocked on C++ Rust-workspace extractor
 
-Roles (richer than HTTP/CLI provider/consumer):
-- resource definition / schema owner
-- reader
-- writer
-- migrator
+**Feature expansion:**
+- Queue/event boundaries: EMITS, CONSUMES, QUEUE node kind (Kafka, SQS, SNS, RabbitMQ)
+- Config/env seam: CONFIG_KEY graph emission, explicit config→resource wiring edges
+- SQL-string parsing: table-level DB granularity, TABLE node kind
+- ORM/repository pattern inference (Prisma, JPA, SQLAlchemy, TypeORM)
+- GCP/Azure blob coverage
+- Form B matching (type-enriched receiver resolution)
+- Dedicated `rmap state` command for resource enumeration
+- TS-runtime parity
 
-Provider/resource facts:
-- file path or path pattern
-- DB table / collection / key prefix / bucket prefix
-- schema/migration identifier
-- ownership module
-- declared resource kind
-
-Consumer interaction facts:
-- operation: read / write / append / delete / migrate / enumerate
-- resource address: normalized path/table/key
-- confidence: literal path > resolved constant > pattern > dynamic
-
-Why a separate mechanism family, not an extension of HTTP/CLI:
-- HTTP/CLI are interaction boundaries (request/response, command/exit)
-- storage is a state boundary (read/write to persisted data)
-- the semantics are different: directionality (read vs write),
-  schema coupling, migration lineage, orphaned resource detection
-- flattening them would lose the operational distinction
-
-Best first slice:
-- Filesystem literal-path reads/writes in TS/JS
-  (`readFile`, `writeFile`, `open`, `createReadStream`, etc.)
-- Only literal or file-local-resolved paths (reuse FileLocalStringResolver)
-- Classify operation: read/write/append/delete
-- Higher-value but harder: SQL table access from literal query strings
-
-What this unlocks:
-- which modules read vs write which resources
-- which storage resources are shared across components
-- which writes have no known readers
-- which reads depend on external state no in-repo writer maintains
-- which changes affect persistence contracts or operational data flow
-- which repos/components couple through filesystem, DB, cache, or
-  object-store boundaries
-
-Design constraint: do not start this before the current boundary model
-(HTTP + CLI) is mature. The fact table schema supports it already
-(mechanism is extensible). The matcher strategy pattern supports it.
-The CLI query surfaces support it. The new work is extraction adapters
-and a resource-centric (not call-centric) matching model.
+See `docs/milestones/rmap-state-boundaries-v1.md` §Deferred for the full
+SB-next-* inventory.
 
 ## Deferred
 

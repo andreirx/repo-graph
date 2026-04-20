@@ -1,7 +1,7 @@
 # rmap state boundaries v1
 
-Status: ACTIVE. SB-0 closed 2026-04-17, Fork 1 locked. SB-1 is
-the next slice.
+Status: CLOSED. All slices (SB-0 through SB-6) shipped 2026-04-20.
+Fork 1 (TS-only) delivered. Contract frozen at version 1.
 
 Normative contract: `docs/architecture/state-boundary-contract.txt`.
 That contract is authoritative for all data and emission decisions.
@@ -147,12 +147,12 @@ discipline.
 | Slice | Status | Content |
 |-------|--------|---------|
 | SB-0  | Closed | Extractor-ownership inventory and Fork-1 selection. See `rmap-state-boundaries-sb-0.md`. |
-| SB-1  | Next   | `state-bindings` crate: binding table loader, TOML schema validator, stable-key builders, basis tag enum, matcher primitives. Unit tests only. No extractor integration. |
-| SB-2  | Planned | `state-extractor` crate skeleton: emission API, resource-node dedup (in-memory per snapshot), evidence shape. Consumes `state-bindings`. Unit tests with synthetic fixtures. Cross-runtime interop test case added for the three new node kinds (`DB_RESOURCE`, `FS_PATH`, `BLOB`). |
-| SB-3  | Planned | Integrate `state-extractor` with `rust/crates/ts-extractor`. Ship TS/JS binding entries: `fs`, `node:fs`, `fs/promises` (stdlib), `@aws-sdk/client-s3` (SDK blob), `pg`, `mysql2`, `better-sqlite3`, `sqlite3` (SDK db), `redis`, `ioredis` (SDK cache). Verify `ts-extractor`'s import-binding resolver surfaces the imported symbol path at sufficient fidelity for Form-A matching; if insufficient, an extractor-side prerequisite slice is triggered before SB-3 closes. |
-| SB-4  | Planned | Validate on the user's Node/AWS repo. Validate on the user's React/Next repo. Spot-check and record closure evidence per "Acceptance criteria". |
-| SB-5  | Planned | Widen `rmap callers` / `rmap callees` `--edge-types` to accept `READS` and `WRITES`. Exclude resource kinds (`DB_RESOURCE`, `FS_PATH`, `STATE`, `BLOB`) from `rmap dead`. Update per-command tests. |
-| SB-6  | Planned | Closure: re-verify `schema.txt` and `TECH-DEBT.md` (already pre-updated at contract-design time); amend with any implementation-discovered corrections. Update `docs/ROADMAP.md` to reflect slice 1 shipped under Fork 1. Freeze contract at `state_boundary_version: 1`. |
+| SB-1  | Closed | `state-bindings` crate: binding table loader, TOML schema validator, stable-key builders, basis tag enum, matcher primitives. Unit tests only. No extractor integration. |
+| SB-2  | Closed | `state-extractor` crate skeleton: emission API, resource-node dedup (in-memory per snapshot), evidence shape. Consumes `state-bindings`. Unit tests with synthetic fixtures. Cross-runtime interop test case added for the three new node kinds (`DB_RESOURCE`, `FS_PATH`, `BLOB`). |
+| SB-3  | Closed | Integrate `state-extractor` with `rust/crates/ts-extractor`. Ship TS/JS binding entries: `fs`, `node:fs`, `fs/promises`, `node:fs/promises` (stdlib FS only). SDK/DB/cache entries deferred — see TECH-DEBT.md §SB-3 for rationale (object-property extraction and constructor tracking not implemented in slice 1). Prerequisite SB-3-pre landed `imported_name` and `ResolvedCallsite` enrichment in ts-extractor. |
+| SB-4  | Closed | Validate on the user's Node/AWS repo (amodx). React/Next validation deferred — no FS touchpoints in scope on available React corpus. Spot-check and record closure evidence per "Acceptance criteria". |
+| SB-5  | Closed | Widen `rmap callers` / `rmap callees` `--edge-types` to accept `READS` and `WRITES`. Exclude resource kinds (`DB_RESOURCE`, `FS_PATH`, `STATE`, `BLOB`) from `rmap dead`. Added `rmap resource readers/writers` commands. Update per-command tests. |
+| SB-6  | Closed | Closure: re-verify `schema.txt` and `TECH-DEBT.md` (already pre-updated at contract-design time); amend with any implementation-discovered corrections. Update `docs/ROADMAP.md` to reflect slice 1 shipped under Fork 1. Freeze contract at `state_boundary_version: 1`. |
 
 Slice numbering is SB-* (state boundaries) to avoid collision
 with the structural Rust-N numbering of the prior milestone.
@@ -285,23 +285,47 @@ Tracked here for visibility; each becomes its own future slice.
   `state-extractor` logic to TS adapters, or formally declare
   Rust-only parity permanent).
 
-## Open questions (to be answered during implementation)
+## Closure evidence (2026-04-20)
 
-- SB-1: exactly which TOML deserializer crate to use (`toml`
-  vs `basic-toml`). Either is acceptable; choice is
-  implementation detail.
-- SB-2: whether resource-node dedup uses a per-snapshot hash
-  map in-memory or defers to the storage adapter's unique
-  index on `(snapshot_uid, stable_key)`. Both viable; prefer
-  in-memory dedup to avoid per-call round-trips.
-- SB-3: whether `rust/crates/ts-extractor`'s import-binding
-  resolver surfaces the imported symbol path at sufficient
-  fidelity for Form-A matching. Inspect early in SB-3; if
-  insufficient, a prerequisite extractor-side slice precedes
-  state-boundary edge emission from TS sources. This is the
-  principal known unknown.
+Validated on amodx corpus (Node + AWS Lambda repo). React/Next
+corpus deferred — no in-scope FS touchpoints (uses path.join(),
+which is out of Form-A scope per contract §5.4).
 
-These are implementation-local and do not affect the contract.
+- **State-boundary edges:** 1 WRITES edge
+- **Resource nodes:** 1 FS_PATH node
+- **Basis distribution:** 1 stdlib_api (fs.writeFileSync)
+- **Dynamic-target drop count:** 0 (no suppressions observed)
+- **In-scope detection rate:** 100% — all Form-A-scope call sites
+  (literal-argument fs calls) were detected. The corpus has
+  extensive `path.join()` usage which is correctly out of scope
+  (dynamic target, no emission per contract §5.4).
+
+Spot-checked edge:
+
+| File | Line | Binding Key | Resource Node |
+|------|------|-------------|---------------|
+| `packages/client/src/common/file.ts` | 15 | `typescript:fs:writeFileSync:write` | `amodx:fs:./build/manifest.json:FS_PATH` |
+
+CLI surface verified:
+
+- `rmap callers --edge-types READS,WRITES` accepts the new types
+- `rmap callees --edge-types READS,WRITES` accepts the new types
+- `rmap dead` excludes resource kinds (FS_PATH, DB_RESOURCE, BLOB, STATE+CACHE)
+- `rmap resource readers <stable_key>` returns SYMBOL nodes with READS edges
+- `rmap resource writers <stable_key>` returns SYMBOL nodes with WRITES edges
+
+Cross-runtime interop (`pnpm run test:interop`) passed — TS storage
+adapter reads Rust-written databases containing the new node kinds
+without error.
+
+## Open questions (resolved)
+
+- SB-1: Used `toml` crate (standard choice, well-maintained).
+- SB-2: Used in-memory HashMap dedup per snapshot as planned.
+- SB-3: `ts-extractor`'s import-binding resolver required
+  prerequisite enrichment. SB-3-pre shipped `imported_name`
+  population and `ResolvedCallsite` data model before SB-3
+  integration. See TECH-DEBT.md §SB-3-pre for the port contract.
 
 ## Non-goals
 

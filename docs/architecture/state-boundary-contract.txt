@@ -1,9 +1,16 @@
 State-Boundary Contract — External State Touchpoints in the Graph
 ===================================================================
 
-Status: NORMATIVE
+Status: NORMATIVE — FROZEN at version 1 (2026-04-20)
 Date:   2026-04-17
 Scope:  Slice 1 — DB, FS, cache, blob/cloud-storage boundaries
+
+VERSION FREEZE NOTE (2026-04-20):
+This contract is frozen at state_boundary_version: 1 per milestone
+closure. Breaking changes to stable-key shape, edge-type semantics,
+node-kind additions, or binding-table schema require a contract-
+version bump (see §13). Additive changes (new binding entries, new
+SDK coverage within existing kinds) do not bump the version.
 
 This document is the authoritative specification for how Repo-Graph
 represents a code symbol touching an external state boundary. All
