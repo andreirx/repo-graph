@@ -1,4 +1,17 @@
+import type { BoundaryDeclarationValue } from "./boundary-selector.js";
 import { DeclarationKind } from "./types.js";
+
+// Re-export boundary selector types for convenience.
+export type { BoundaryDeclarationValue } from "./boundary-selector.js";
+export {
+	type BoundarySelectorDomain,
+	type DiscoveredModuleBoundaryValue,
+	type DiscoveredModuleIdentity,
+	type DirectoryModuleBoundaryValue,
+	isDiscoveredModuleBoundary,
+	isDirectoryModuleBoundary,
+	parseBoundaryValue,
+} from "./boundary-selector.js";
 
 /**
  * Storage-level declaration entity.
@@ -34,10 +47,8 @@ export interface ModuleDeclarationValue {
 	owner?: string;
 }
 
-export interface BoundaryDeclarationValue {
-	forbids: string;
-	reason?: string;
-}
+// BoundaryDeclarationValue is now defined in boundary-selector.ts
+// and re-exported above.
 
 export interface EntrypointDeclarationValue {
 	type: "route_handler" | "event_listener" | "cron_job" | "public_export";
@@ -328,7 +339,53 @@ const requiredFieldValidators: Record<
 		}
 	},
 	[DeclarationKind.BOUNDARY]: (obj) => {
-		requireString(obj, "forbids", "boundary");
+		// Boundary declarations have two forms based on selectorDomain.
+		// - directory_module (legacy): requires forbids as string
+		// - discovered_module: requires source.canonicalRootPath and forbids.canonicalRootPath
+		// Missing domain is backwards-compatible legacy; explicit unknown is corrupted policy.
+		const domain = obj.selectorDomain as string | undefined;
+		if (
+			domain !== undefined &&
+			domain !== "directory_module" &&
+			domain !== "discovered_module"
+		) {
+			throw new DeclarationValidationError(
+				"boundary",
+				`unknown selectorDomain: ${domain} (expected "directory_module" or "discovered_module")`,
+			);
+		}
+		if (domain === "discovered_module") {
+			// Validate discovered module boundary
+			if (typeof obj.source !== "object" || obj.source === null) {
+				throw new DeclarationValidationError(
+					"boundary",
+					"discovered_module boundary requires source object",
+				);
+			}
+			if (typeof obj.forbids !== "object" || obj.forbids === null) {
+				throw new DeclarationValidationError(
+					"boundary",
+					"discovered_module boundary requires forbids object",
+				);
+			}
+			const source = obj.source as Record<string, unknown>;
+			const forbids = obj.forbids as Record<string, unknown>;
+			if (typeof source.canonicalRootPath !== "string") {
+				throw new DeclarationValidationError(
+					"boundary",
+					"discovered_module boundary source requires canonicalRootPath",
+				);
+			}
+			if (typeof forbids.canonicalRootPath !== "string") {
+				throw new DeclarationValidationError(
+					"boundary",
+					"discovered_module boundary forbids requires canonicalRootPath",
+				);
+			}
+		} else {
+			// Directory module boundary (default)
+			requireString(obj, "forbids", "boundary");
+		}
 	},
 	[DeclarationKind.ENTRYPOINT]: (obj) => {
 		requireString(obj, "type", "entrypoint");

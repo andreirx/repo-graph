@@ -1,11 +1,16 @@
 /**
- * CLI integration tests for `rgr modules deps`.
+ * CLI integration tests for `rgr modules deps` and `rgr modules boundary`.
  *
  * Tests the module dependency graph command:
  *   - JSON envelope structure
  *   - Cross-module edge detection
  *   - Module filtering (--outbound, --inbound)
  *   - Error handling
+ *
+ * Tests the module boundary declaration command:
+ *   - Declaration creation with exact module resolution
+ *   - Persistence of canonicalRootPath identity
+ *   - Error handling for unknown modules
  */
 
 import { join } from "node:path";
@@ -285,5 +290,138 @@ describe("modules deps — error handling", () => {
 
 		const errJson = r.json();
 		expect(errJson.error).toMatch(/mutually exclusive/i);
+	});
+});
+
+// ── modules boundary ──────────────────────────────────────────────
+
+describe("modules boundary — declaration", () => {
+	it("creates boundary declaration with --json output", async () => {
+		// Get valid module paths from the dependency graph.
+		const depsResult = await h.run("modules", "deps", "module-deps-repo");
+		const json = depsResult.json();
+		const results = json.results as Array<Record<string, unknown>>;
+		if (results.length === 0) return;
+
+		const sourcePath = results[0].source_root_path as string;
+		const targetPath = results[0].target_root_path as string;
+
+		const r = await h.run(
+			"modules",
+			"boundary",
+			"module-deps-repo",
+			sourcePath,
+			"--forbids",
+			targetPath,
+			"--reason",
+			"test boundary",
+			"--json",
+		);
+
+		expect(r.exitCode).toBe(0);
+		const result = r.json();
+		expect(result.declaration_uid).toBeDefined();
+		expect(result.source_root_path).toBe(sourcePath);
+		expect(result.target_root_path).toBe(targetPath);
+	});
+
+	it("creates boundary declaration with human-readable output", async () => {
+		const depsResult = await h.run("modules", "deps", "module-deps-repo");
+		const json = depsResult.json();
+		const results = json.results as Array<Record<string, unknown>>;
+		if (results.length === 0) return;
+
+		const sourcePath = results[0].source_root_path as string;
+		const targetPath = results[0].target_root_path as string;
+
+		const r = await h.run(
+			"modules",
+			"boundary",
+			"module-deps-repo",
+			sourcePath,
+			"--forbids",
+			targetPath,
+		);
+
+		expect(r.exitCode).toBe(0);
+		expect(r.stdout).toContain("Created boundary");
+		expect(r.stdout).toContain(sourcePath);
+		expect(r.stdout).toContain(targetPath);
+		expect(r.stdout).toContain("Declaration UID");
+	});
+});
+
+describe("modules boundary — error handling", () => {
+	it("returns error for unknown repo", async () => {
+		const r = await h.run(
+			"modules",
+			"boundary",
+			"nonexistent-repo",
+			"some-module",
+			"--forbids",
+			"other-module",
+		);
+		expect(r.exitCode).toBe(1);
+		expect(r.stderr).toMatch(/not found|not indexed/i);
+	});
+
+	it("returns error for unknown source module", async () => {
+		const r = await h.run(
+			"modules",
+			"boundary",
+			"module-deps-repo",
+			"nonexistent-source",
+			"--forbids",
+			"packages/core",
+			"--json",
+		);
+		expect(r.exitCode).toBe(1);
+		const result = r.json();
+		expect(result.error).toMatch(/source module not found/i);
+	});
+
+	it("returns error for unknown target module", async () => {
+		// Get a valid source module.
+		const depsResult = await h.run("modules", "deps", "module-deps-repo");
+		const json = depsResult.json();
+		const results = json.results as Array<Record<string, unknown>>;
+		if (results.length === 0) return;
+
+		const sourcePath = results[0].source_root_path as string;
+
+		const r = await h.run(
+			"modules",
+			"boundary",
+			"module-deps-repo",
+			sourcePath,
+			"--forbids",
+			"nonexistent-target",
+			"--json",
+		);
+		expect(r.exitCode).toBe(1);
+		const result = r.json();
+		expect(result.error).toMatch(/target module not found/i);
+	});
+
+	it("returns error for self-referential boundary", async () => {
+		const depsResult = await h.run("modules", "deps", "module-deps-repo");
+		const json = depsResult.json();
+		const results = json.results as Array<Record<string, unknown>>;
+		if (results.length === 0) return;
+
+		const modulePath = results[0].source_root_path as string;
+
+		const r = await h.run(
+			"modules",
+			"boundary",
+			"module-deps-repo",
+			modulePath,
+			"--forbids",
+			modulePath, // same as source
+			"--json",
+		);
+		expect(r.exitCode).toBe(1);
+		const result = r.json();
+		expect(result.error).toMatch(/must be different/i);
 	});
 });

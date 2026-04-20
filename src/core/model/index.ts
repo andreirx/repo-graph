@@ -1,7 +1,11 @@
 export type {
 	BoundaryDeclarationValue,
+	BoundarySelectorDomain,
 	Declaration,
 	DeclarationValueMap,
+	DiscoveredModuleBoundaryValue,
+	DiscoveredModuleIdentity,
+	DirectoryModuleBoundaryValue,
 	EntrypointDeclarationValue,
 	InvariantDeclarationValue,
 	MaturityDeclarationValue,
@@ -13,6 +17,9 @@ export type {
 } from "./declaration.js";
 export {
 	DeclarationValidationError,
+	isDiscoveredModuleBoundary,
+	isDirectoryModuleBoundary,
+	parseBoundaryValue,
 	parseDeclarationValue,
 } from "./declaration.js";
 export type { GraphEdge } from "./edge.js";

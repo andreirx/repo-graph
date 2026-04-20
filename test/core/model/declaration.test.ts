@@ -453,3 +453,58 @@ describe("parseDeclarationValue WAIVER validation", () => {
 		).toThrow(DeclarationValidationError);
 	});
 });
+
+describe("parseDeclarationValue BOUNDARY validation", () => {
+	it("accepts directory_module boundary with explicit selectorDomain", () => {
+		const value = {
+			selectorDomain: "directory_module",
+			forbids: "src/db",
+			reason: "test",
+		};
+		expect(() =>
+			parseDeclarationValue(DeclarationKind.BOUNDARY, JSON.stringify(value)),
+		).not.toThrow();
+	});
+
+	it("accepts directory_module boundary without selectorDomain (legacy)", () => {
+		const value = { forbids: "src/db" };
+		expect(() =>
+			parseDeclarationValue(DeclarationKind.BOUNDARY, JSON.stringify(value)),
+		).not.toThrow();
+	});
+
+	it("accepts discovered_module boundary with valid structure", () => {
+		const value = {
+			selectorDomain: "discovered_module",
+			source: { canonicalRootPath: "packages/app" },
+			forbids: { canonicalRootPath: "packages/db" },
+		};
+		expect(() =>
+			parseDeclarationValue(DeclarationKind.BOUNDARY, JSON.stringify(value)),
+		).not.toThrow();
+	});
+
+	it("rejects explicit but unrecognized selectorDomain", () => {
+		const value = {
+			selectorDomain: "bogus",
+			forbids: "src/db",
+		};
+		expect(() =>
+			parseDeclarationValue(DeclarationKind.BOUNDARY, JSON.stringify(value)),
+		).toThrow(DeclarationValidationError);
+		expect(() =>
+			parseDeclarationValue(DeclarationKind.BOUNDARY, JSON.stringify(value)),
+		).toThrow('unknown selectorDomain: bogus');
+	});
+
+	it("rejects typo in selectorDomain", () => {
+		const value = {
+			selectorDomain: "discovered_modules", // plural typo
+			source: { canonicalRootPath: "packages/app" },
+			forbids: { canonicalRootPath: "packages/db" },
+		};
+		expect(() =>
+			parseDeclarationValue(DeclarationKind.BOUNDARY, JSON.stringify(value)),
+		).toThrow('unknown selectorDomain: discovered_modules');
+	});
+});

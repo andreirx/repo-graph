@@ -11,12 +11,17 @@
  *   rgr modules files <repo> <module>    — files owned by a module
  */
 
+import { randomUUID } from "node:crypto";
 import type { Command } from "commander";
 import {
 	type EnrichedModuleDependencyEdge,
 	getModuleDependencyGraph,
 	type ModuleDependencyStorageQueries,
 } from "../../adapters/query/module-dependency-query.js";
+import {
+	DeclarationKind,
+	type DiscoveredModuleBoundaryValue,
+} from "../../core/model/index.js";
 import type { SurfaceEnvEvidence } from "../../core/seams/env-dependency.js";
 import type { SurfaceFsMutationEvidence } from "../../core/seams/fs-mutation.js";
 import {
@@ -690,6 +695,139 @@ export function registerModulesCommands(
 				process.stdout.write(JSON.stringify(output, null, 2) + "\n");
 			},
 		);
+
+	// ── boundary ───────────────────────────────────────────────────
+
+	modules
+		.command("boundary <repo> <source-module>")
+		.description("Declare a boundary constraint between discovered modules")
+		.requiredOption(
+			"--forbids <target-module>",
+			"Module that source must not depend on",
+		)
+		.option("--reason <text>", "Why this boundary exists")
+		.option("--json", "JSON output")
+		.action(
+			(
+				repoRef: string,
+				sourceModuleQuery: string,
+				opts: {
+					forbids: string;
+					reason?: string;
+					json?: boolean;
+				},
+			) => {
+				const ctx = getCtx();
+				const resolved = resolveRepoAndSnapshot(ctx, repoRef);
+				if (!resolved) {
+					outputBoundaryError(
+						opts.json,
+						`Repository not found or not indexed: ${repoRef}`,
+					);
+					process.exitCode = 1;
+					return;
+				}
+				const { repo, snapshotUid } = resolved;
+
+				// Resolve source module — exact identity resolution only.
+				const candidates = ctx.storage.queryModuleCandidates(snapshotUid);
+
+				const sourceMatch = candidates.find(
+					(c) =>
+						c.moduleKey === sourceModuleQuery ||
+						c.canonicalRootPath === sourceModuleQuery,
+				);
+				if (!sourceMatch) {
+					outputBoundaryError(
+						opts.json,
+						`Source module not found: ${sourceModuleQuery}`,
+					);
+					process.exitCode = 1;
+					return;
+				}
+
+				// Resolve target module — exact identity resolution only.
+				const targetMatch = candidates.find(
+					(c) =>
+						c.moduleKey === opts.forbids ||
+						c.canonicalRootPath === opts.forbids,
+				);
+				if (!targetMatch) {
+					outputBoundaryError(
+						opts.json,
+						`Target module not found: ${opts.forbids}`,
+					);
+					process.exitCode = 1;
+					return;
+				}
+
+				// Prevent self-referential boundaries.
+				if (sourceMatch.moduleCandidateUid === targetMatch.moduleCandidateUid) {
+					outputBoundaryError(
+						opts.json,
+						"Source and target modules must be different",
+					);
+					process.exitCode = 1;
+					return;
+				}
+
+				// Build declaration payload — store canonicalRootPath, not moduleKey.
+				const value: DiscoveredModuleBoundaryValue = {
+					selectorDomain: "discovered_module",
+					source: { canonicalRootPath: sourceMatch.canonicalRootPath },
+					forbids: { canonicalRootPath: targetMatch.canonicalRootPath },
+					...(opts.reason && { reason: opts.reason }),
+				};
+
+				// Generate stable key for indexing.
+				// Format: {repoUid}:{sourceRootPath}:DISCOVERED_MODULE_BOUNDARY
+				const targetStableKey = `${repo.repoUid}:${sourceMatch.canonicalRootPath}:DISCOVERED_MODULE_BOUNDARY`;
+
+				const declarationUid = randomUUID();
+				const declaration = {
+					declarationUid,
+					repoUid: repo.repoUid,
+					snapshotUid: null, // repo-wide, not snapshot-scoped
+					targetStableKey,
+					kind: DeclarationKind.BOUNDARY,
+					valueJson: JSON.stringify(value),
+					createdAt: new Date().toISOString(),
+					createdBy: null,
+					supersedesUid: null,
+					isActive: true,
+					authoredBasisJson: null,
+				};
+
+				ctx.storage.insertDeclaration(declaration);
+
+				if (opts.json) {
+					process.stdout.write(
+						JSON.stringify(
+							{
+								declaration_uid: declarationUid,
+								source_root_path: sourceMatch.canonicalRootPath,
+								target_root_path: targetMatch.canonicalRootPath,
+							},
+							null,
+							2,
+						) + "\n",
+					);
+				} else {
+					process.stdout.write(
+						`Created boundary: ${sourceMatch.canonicalRootPath} forbids ${targetMatch.canonicalRootPath}\n`,
+					);
+					process.stdout.write(`Declaration UID: ${declarationUid}\n`);
+				}
+			},
+		);
+}
+
+function outputBoundaryError(json: boolean | undefined, message: string): void {
+	if (json) {
+		process.stdout.write(JSON.stringify({ error: message }, null, 2) + "\n");
+	} else {
+		process.stderr.write(message + "\n");
+	}
 }
 
 // ── Module dependency edge formatter ──────────────────────────────
