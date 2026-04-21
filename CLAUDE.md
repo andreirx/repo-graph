@@ -157,6 +157,7 @@ rmap cycles     <db_path> <repo_uid>               # Module-level IMPORTS cycles
 rmap stats      <db_path> <repo_uid>               # Module structural metrics
 rmap resource readers <db_path> <repo_uid> <resource_stable_key>  # Symbols with READS edges to resource
 rmap resource writers <db_path> <repo_uid> <resource_stable_key>  # Symbols with WRITES edges to resource
+rmap modules list <db_path> <repo_uid>  # Module catalog (discovered modules sorted by path)
 rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]  # Cross-module dependency edges
 rmap modules violations <db_path> <repo_uid>  # Discovered-module boundary violations
 rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]  # Declare discovered-module boundary

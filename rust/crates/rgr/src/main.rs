@@ -24,6 +24,7 @@
 //!   rmap resource readers <db_path> <repo_uid> <resource_stable_key>
 //!   rmap resource writers <db_path> <repo_uid> <resource_stable_key>
 //!
+//!   rmap modules list <db_path> <repo_uid>
 //!   rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]
 //!   rmap modules violations <db_path> <repo_uid>
 //!   rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]
@@ -146,6 +147,7 @@ fn print_usage() {
 	eprintln!("  rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]");
 	eprintln!("  rmap resource readers <db_path> <repo_uid> <resource_stable_key>");
 	eprintln!("  rmap resource writers <db_path> <repo_uid> <resource_stable_key>");
+	eprintln!("  rmap modules list <db_path> <repo_uid>");
 	eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
 	eprintln!("  rmap modules violations <db_path> <repo_uid>");
 	eprintln!("  rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]");
@@ -2906,6 +2908,7 @@ fn run_resource_writers(args: &[String]) -> ExitCode {
 fn run_modules(args: &[String]) -> ExitCode {
 	if args.is_empty() {
 		eprintln!("usage:");
+		eprintln!("  rmap modules list <db_path> <repo_uid>");
 		eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
 		eprintln!("  rmap modules violations <db_path> <repo_uid>");
 		eprintln!("  rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]");
@@ -2913,12 +2916,14 @@ fn run_modules(args: &[String]) -> ExitCode {
 	}
 
 	match args[0].as_str() {
+		"list" => run_modules_list(&args[1..]),
 		"deps" => run_modules_deps(&args[1..]),
 		"violations" => run_modules_violations(&args[1..]),
 		"boundary" => run_modules_boundary(&args[1..]),
 		other => {
 			eprintln!("unknown modules subcommand: {}", other);
 			eprintln!("usage:");
+			eprintln!("  rmap modules list <db_path> <repo_uid>");
 			eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
 			eprintln!("  rmap modules violations <db_path> <repo_uid>");
 			eprintln!("  rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]");
@@ -2926,6 +2931,105 @@ fn run_modules(args: &[String]) -> ExitCode {
 		}
 	}
 }
+
+// ── modules list command ─────────────────────────────────────────
+
+/// Output DTO for `modules list` command.
+///
+/// Dedicated CLI output shape — does not expose storage internals
+/// like `snapshot_uid`, `repo_uid`, or `metadata_json`.
+#[derive(serde::Serialize)]
+struct ModuleListEntry {
+	module_uid: String,
+	module_key: String,
+	canonical_root_path: String,
+	module_kind: String,
+	display_name: Option<String>,
+	confidence: f64,
+}
+
+fn run_modules_list(args: &[String]) -> ExitCode {
+	if args.len() != 2 {
+		eprintln!("usage: rmap modules list <db_path> <repo_uid>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(snap)) => snap,
+		Ok(None) => {
+			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Load module candidates (already sorted by canonical_root_path)
+	let modules = match storage.get_module_candidates_for_snapshot(&snapshot.snapshot_uid) {
+		Ok(m) => m,
+		Err(e) => {
+			eprintln!("error: failed to load module candidates: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Map to output DTO
+	let results: Vec<ModuleListEntry> = modules
+		.into_iter()
+		.map(|m| ModuleListEntry {
+			module_uid: m.module_candidate_uid,
+			module_key: m.module_key,
+			canonical_root_path: m.canonical_root_path,
+			module_kind: m.module_kind,
+			display_name: m.display_name,
+			confidence: m.confidence,
+		})
+		.collect();
+
+	let count = results.len();
+
+	let output = match build_envelope(
+		&storage,
+		"modules list",
+		repo_uid,
+		&snapshot,
+		serde_json::to_value(&results).unwrap(),
+		count,
+		serde_json::Map::new(),
+	) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+// ── modules deps command ─────────────────────────────────────────
 
 /// Direction filter for module deps command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

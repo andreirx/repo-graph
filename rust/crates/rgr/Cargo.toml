@@ -54,6 +54,9 @@
 #           Exact resolution by canonicalRootPath or moduleKey.
 #           Completes Rust write path for module governance.
 # RS-MG-8:  `module_violations` gate method.
+# RS-MG-9:  `modules list <db_path> <repo_uid>`
+#           Module catalog surface. Lists all discovered modules for a repo.
+#           Sorted by canonical_root_path. No rollups (file counts, evidence).
 #           Evaluates discovered-module boundaries via gate policy layer.
 #           Uses RS-MG-1 through RS-MG-4 support modules for evaluation.
 #           Always repo-wide (target field on obligation is ignored).
