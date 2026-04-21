@@ -23,6 +23,7 @@ members = [
     "crates/classification",
     "crates/detectors",
     "crates/gate",
+    "crates/git",
     "crates/indexer",
     "crates/repo-index",
     "crates/rgr",

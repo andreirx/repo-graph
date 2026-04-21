@@ -137,6 +137,21 @@ headers and inline comments in the codebase (authoritative source).
 | RS-MG-13a | weighted_neighbors.rs — weighted neighbor aggregation (classification crate) |
 | RS-MG-13b | `modules show` command — module briefing with weighted neighbors and inline violations |
 
+## Post-v1 additions (RS-MS series)
+
+Measurement support. Query-time by default, no automatic persistence.
+Git is the authoritative history source. TS implementation is reference, not spec.
+
+| Slice | Content |
+|-------|---------|
+| RS-MS-0 | Architecture decision: query-time default, explicit anchor opt-in later |
+| RS-MS-1 | `repo-graph-git` crate: `get_file_churn(repo_path, window)` |
+| RS-MS-2 | `rmap churn` command: query-time per-file git churn for indexed files |
+
+Locked sequence (not yet shipped):
+- RS-MS-3: `rmap hotspots` command
+- Review usefulness before continuing
+
 Commands added:
 ```
 rmap modules list <db_path> <repo_uid>
@@ -162,7 +177,7 @@ Summary:
 - Table output format: not ported (JSON only)
 - Module/symbol fallback on imports: not ported (file paths only)
 - Governance commands (gate, evidence, declare, etc.): partially ported (violations shipped)
-- Measurement commands (churn, hotspots, risk, coverage): not ported
+- Measurement commands (churn, hotspots, risk, coverage): in progress (RS-MS series)
 - Catalog commands (surfaces, docs): not ported (modules shipped)
 
 ## Next phase candidates

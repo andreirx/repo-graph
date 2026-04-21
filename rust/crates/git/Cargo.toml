@@ -1,0 +1,42 @@
+# ── repo-graph-git ─────────────────────────────────────────────────
+#
+# External mechanism boundary for git operations. Wraps git CLI
+# behind a typed Rust interface.
+#
+# RS-MS-1: Initial crate with file churn extraction.
+#
+# Contract:
+#   - Git is authoritative for history
+#   - This crate provides derived analytical views, not primary facts
+#   - All paths returned are repo-relative, forward-slash normalized
+#   - No persistence — callers decide what to do with results
+#
+# Rename handling (RS-MS-1):
+#   - Rename detection disabled (--no-renames)
+#   - Each path is the literal path at that commit
+#   - No --follow, no rename continuity
+#   - Rename-aware history is deferred
+#
+# Binary file handling:
+#   - Binary changes → 0 lines_changed
+#   - Commits still counted
+#
+# Dependency discipline:
+#   - std only for RS-MS-1
+#   - No async (git CLI is blocking, fast enough)
+#   - No external crates beyond workspace error patterns
+
+[package]
+name         = "repo-graph-git"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Git CLI wrapper for repo-graph analytical surfaces"
+publish      = false
+
+[dependencies]
+# None for RS-MS-1 — std::process::Command only
+
+[dev-dependencies]
+tempfile = "3"

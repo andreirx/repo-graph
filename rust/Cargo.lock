@@ -456,6 +456,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-git"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "repo-graph-indexer"
 version = "0.1.0"
 dependencies = [
@@ -492,6 +499,7 @@ dependencies = [
  "repo-graph-agent",
  "repo-graph-classification",
  "repo-graph-gate",
+ "repo-graph-git",
  "repo-graph-repo-index",
  "repo-graph-storage",
  "repo-graph-trust",

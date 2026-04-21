@@ -28,6 +28,35 @@ This means:
 
 The CLI is the agent's primary interface. Every output shape decision should pass the test: "Does this help an AI agent reason about the codebase without unnecessary follow-up commands?"
 
+## Design principle: TS as prior art, not spec
+
+The TypeScript implementation is the original prototype. It is:
+- **Evidence** of what worked in practice
+- **Prior art** showing proven computations and data shapes
+- **Reference** for parity where parity is explicitly required
+
+It is **not** automatically the spec for Rust development.
+
+The spec for new Rust surfaces comes from:
+1. **Current product goals** — what does the Rust CLI need to accomplish?
+2. **Current architecture boundaries** — where do responsibilities live in the Rust crate graph?
+3. **Agent-usefulness requirements** — what helps an AI agent make decisions?
+4. **Explicit contracts chosen now** — not inherited assumptions from TS
+
+When porting or extending:
+- Read TS to understand what exists
+- Question whether the TS design was optimal or just first
+- Design for Rust's current needs, using TS as input
+- Do not default to "mirror TS" without explicit justification
+
+Common traps to avoid:
+- Assuming TS persistence patterns are correct for Rust
+- Porting TS storage schemas without questioning freshness/invalidation models
+- Treating TS command shapes as contracts when they were exploratory
+- Anchoring on TS slice boundaries when Rust architecture suggests different cuts
+
+When in doubt: stop and make an explicit architectural decision rather than defaulting to TS behavior.
+
 ## Architecture
 
 Clean Architecture. Dependency rule: inward only.
@@ -161,6 +190,7 @@ rmap violations <db_path> <repo_uid>               # Unified boundary violations
 rmap gate       <db_path> <repo_uid> [--strict | --advisory]  # CI gate (4 methods, waivers, 3 modes)
 rmap orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]  # Agent orientation surface (rgr.agent.v1)
 rmap check      <db_path> <repo_uid>                                                  # Pre-action trust/safety check
+rmap churn      <db_path> <repo_uid> [--since <expr>]                                 # Query-time per-file git churn (default: 90.days.ago)
 rmap declare boundary <db_path> <repo_uid> <module> --forbids <target> [--reason <text>]
 rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
 rmap declare waiver <db_path> <repo_uid> <req_id> --requirement-version <n> --obligation-id <id> --reason <text> [--expires-at <iso>] [--created-by <a>] [--rationale-category <c>] [--policy-basis <t>]
@@ -249,6 +279,11 @@ Known Rust CLI divergences from TS CLI:
   Unknown module exits 1 (not 2). Same degradation contract as
   `modules list`: on policy parse failure, `violation_count: null`,
   `violations: null`, `rollups_degraded: true`.
+- Measurement commands (`churn`, `hotspots`, `risk`): designed for
+  query-time computation, not persistence-first. Git is the
+  authoritative history source. `repo-graph-git` crate wraps git CLI.
+  TS implementation is reference, not spec. Explicit anchoring for
+  gate integration is a future opt-in, not automatic. (RS-MS-0 lock)
 
 ## Native dependency note
 

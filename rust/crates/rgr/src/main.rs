@@ -16,6 +16,7 @@
 //!   rmap gate    <db_path> <repo_uid> [--strict | --advisory]
 //!   rmap orient  <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]
 //!   rmap check   <db_path> <repo_uid>
+//!   rmap churn   <db_path> <repo_uid> [--since <expr>]
 //!
 //!   rmap declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]
 //!   rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
@@ -112,6 +113,7 @@ fn main() -> ExitCode {
 		"gate" => run_gate(&args[2..]),
 		"orient" => run_orient(&args[2..]),
 		"check" => run_check_cmd(&args[2..]),
+		"churn" => run_churn(&args[2..]),
 		"explain" => run_explain_cmd(&args[2..]),
 		"dead" => run_dead(&args[2..]),
 		"cycles" => run_cycles(&args[2..]),
@@ -140,6 +142,7 @@ fn print_usage() {
 	eprintln!("  rmap gate       <db_path> <repo_uid>");
 	eprintln!("  rmap orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]");
 	eprintln!("  rmap check      <db_path> <repo_uid>");
+	eprintln!("  rmap churn      <db_path> <repo_uid> [--since <expr>]");
 	eprintln!("  rmap explain    <db_path> <repo_uid> <target> [--budget medium|large]");
 	eprintln!("  rmap dead    <db_path> <repo_uid> [kind]");
 	eprintln!("  rmap cycles  <db_path> <repo_uid>");
@@ -1601,6 +1604,163 @@ fn run_stats(args: &[String]) -> ExitCode {
 			ExitCode::from(2)
 		}
 	}
+}
+
+// ── churn command ────────────────────────────────────────────────
+//
+// RS-MS-2: Query-time per-file git churn for indexed files.
+// No persistence. Git is the authoritative history source.
+
+/// Output row for churn command.
+#[derive(serde::Serialize)]
+struct ChurnRow {
+	file_path: String,
+	commit_count: u64,
+	lines_changed: u64,
+}
+
+fn run_churn(args: &[String]) -> ExitCode {
+	// Parse args: <db_path> <repo_uid> [--since <expr>]
+	// Default --since: 90.days.ago
+	let (db_path, repo_uid, since) = match parse_churn_args(args) {
+		Ok(parsed) => parsed,
+		Err(msg) => {
+			eprintln!("{}", msg);
+			return ExitCode::from(1);
+		}
+	};
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(snap)) => snap,
+		Ok(None) => {
+			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Get repo for root_path (needed to invoke git)
+	use repo_graph_storage::types::RepoRef;
+	let repo = match storage.get_repo(&RepoRef::Uid(repo_uid.to_string())) {
+		Ok(Some(r)) => r,
+		Ok(None) => {
+			eprintln!("error: repo not found: {}", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Get indexed files for filtering
+	let indexed_files = match storage.get_files_by_repo(repo_uid) {
+		Ok(files) => files,
+		Err(e) => {
+			eprintln!("error: failed to read indexed files: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	let indexed_paths: std::collections::HashSet<&str> =
+		indexed_files.iter().map(|f| f.path.as_str()).collect();
+
+	// Call git crate for churn
+	use repo_graph_git::{get_file_churn, ChurnWindow};
+	let window = ChurnWindow::new(&since);
+	let repo_path = Path::new(&repo.root_path);
+
+	let raw_churn = match get_file_churn(repo_path, &window) {
+		Ok(c) => c,
+		Err(e) => {
+			eprintln!("error: git churn failed: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Filter to indexed files only, preserving git crate ordering
+	let results: Vec<ChurnRow> = raw_churn
+		.into_iter()
+		.filter(|entry| indexed_paths.contains(entry.file_path.as_str()))
+		.map(|entry| ChurnRow {
+			file_path: entry.file_path,
+			commit_count: entry.commit_count,
+			lines_changed: entry.lines_changed,
+		})
+		.collect();
+
+	// Build envelope with extra `since` field
+	let count = results.len();
+	let mut extra = serde_json::Map::new();
+	extra.insert("since".to_string(), serde_json::Value::String(since.clone()));
+
+	let output = match build_envelope(
+		&storage,
+		"churn",
+		repo_uid,
+		&snapshot,
+		serde_json::to_value(&results).unwrap(),
+		count,
+		extra,
+	) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+/// Parse churn command args.
+/// Returns (db_path, repo_uid, since).
+fn parse_churn_args(args: &[String]) -> Result<(&Path, &str, String), String> {
+	if args.len() < 2 {
+		return Err("usage: rmap churn <db_path> <repo_uid> [--since <expr>]".to_string());
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+
+	// Default window
+	let mut since = "90.days.ago".to_string();
+
+	// Parse optional --since flag
+	let mut i = 2;
+	while i < args.len() {
+		if args[i] == "--since" {
+			if i + 1 >= args.len() {
+				return Err("--since requires a value".to_string());
+			}
+			since = args[i + 1].clone();
+			i += 2;
+		} else {
+			return Err(format!("unknown argument: {}", args[i]));
+		}
+	}
+
+	Ok((db_path, repo_uid, since))
 }
 
 // ── declare command ──────────────────────────────────────────────
