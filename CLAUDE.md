@@ -157,7 +157,7 @@ rmap cycles     <db_path> <repo_uid>               # Module-level IMPORTS cycles
 rmap stats      <db_path> <repo_uid>               # Module structural metrics
 rmap resource readers <db_path> <repo_uid> <resource_stable_key>  # Symbols with READS edges to resource
 rmap resource writers <db_path> <repo_uid> <resource_stable_key>  # Symbols with WRITES edges to resource
-rmap modules list <db_path> <repo_uid>  # Module catalog (discovered modules sorted by path)
+rmap modules list <db_path> <repo_uid>  # Module catalog with per-module rollups (sorted by path)
 rmap modules files <db_path> <repo_uid> <module>  # Files owned by a module (sorted by path)
 rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]  # Cross-module dependency edges
 rmap modules violations <db_path> <repo_uid>  # Discovered-module boundary violations
@@ -215,6 +215,15 @@ Known Rust CLI divergences from TS CLI:
   ambiguous symbol names return a bounded candidates array (max 5).
   `FocusNotImplementedYet` is no longer returned for any supported
   focus kind.
+- `modules list` envelope includes `rollups_degraded` (boolean) and
+  `warnings` (string array). When discovered-module boundary policy
+  parsing fails, the catalog still returns (exit 0) with
+  `rollups_degraded: true`, a warning message, and `violation_count:
+  null` on each module. Other rollup fields (file counts, dependency
+  counts, dead symbol counts) remain populated. This is deliberate:
+  the catalog is an orientation surface and must survive policy
+  corruption. The `modules violations` and `violations` commands
+  remain strict — malformed policy exits 2 there.
 
 ## Native dependency note
 

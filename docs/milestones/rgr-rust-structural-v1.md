@@ -114,6 +114,37 @@ Rounded to 2 decimal places. Modules with file_count=0 excluded.
   missing DB, repo not found, symbol not found, exact results,
   envelope shape
 
+## Post-v1 additions (RS-MG series)
+
+Module graph support shipped after v1 freeze. Slice IDs match Cargo.toml
+headers and inline comments in the codebase (authoritative source).
+
+| Slice | Content |
+|-------|---------|
+| RS-MG-1 | Module candidate CRUD (storage/crud/module_candidates.rs) |
+| RS-MG-2 | Module edge derivation: pure policy (classification/module_edges.rs) + storage queries (storage/crud/module_edges_support.rs) |
+| RS-MG-3 | Boundary declaration loading and parsing (storage/crud/declarations.rs, classification/boundary_parser.rs) |
+| RS-MG-4 | Boundary violation evaluator — pure policy (classification/boundary_evaluator.rs) |
+| RS-MG-5 | `modules deps` command |
+| RS-MG-6 | `modules violations` command |
+| RS-MG-7 | `modules boundary` declaration command |
+| RS-MG-8 | `module_violations` gate method (gate crate + storage adapter) |
+| RS-MG-9 | `modules list` command |
+| RS-MG-10 | Unified `violations` command (declared + discovered-module) |
+| RS-MG-11 | `modules files` command |
+| RS-MG-12a | module_rollup.rs — pure rollup aggregator (classification crate) |
+| RS-MG-12b | Per-module rollups in `modules list` output |
+
+Commands added:
+```
+rmap modules list <db_path> <repo_uid>
+rmap modules files <db_path> <repo_uid> <module>
+rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]
+rmap modules violations <db_path> <repo_uid>
+rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]
+rmap violations <db_path> <repo_uid>
+```
+
 ## Deferred (not shipped in v1)
 
 See `docs/TECH-DEBT.md` section "Rust CLI" for the full list.
@@ -127,9 +158,9 @@ Summary:
 - `graph versions` command: not ported
 - Table output format: not ported (JSON only)
 - Module/symbol fallback on imports: not ported (file paths only)
-- Governance commands (gate, evidence, violations, declare, etc.): not ported
+- Governance commands (gate, evidence, declare, etc.): partially ported (violations shipped)
 - Measurement commands (churn, hotspots, risk, coverage): not ported
-- Catalog commands (modules, surfaces, docs, boundary): not ported
+- Catalog commands (surfaces, docs): not ported (modules shipped)
 
 ## Next phase candidates
 

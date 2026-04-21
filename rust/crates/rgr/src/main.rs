@@ -3028,14 +3028,29 @@ fn run_modules(args: &[String]) -> ExitCode {
 ///
 /// Dedicated CLI output shape — does not expose storage internals
 /// like `snapshot_uid`, `repo_uid`, or `metadata_json`.
+///
+/// RS-MG-12b: Extended with rollup fields for per-module stats.
 #[derive(serde::Serialize)]
 struct ModuleListEntry {
+	// Identity fields
 	module_uid: String,
 	module_key: String,
 	canonical_root_path: String,
 	module_kind: String,
 	display_name: Option<String>,
 	confidence: f64,
+	// Rollup fields (RS-MG-12b)
+	owned_file_count: u64,
+	owned_test_file_count: u64,
+	outbound_dependency_count: u64,
+	outbound_import_count: u64,
+	inbound_dependency_count: u64,
+	inbound_import_count: u64,
+	/// `None` when policy-derived rollups are unavailable (parse failure).
+	/// `Some(0)` means zero violations; `None` means unknown.
+	violation_count: Option<u64>,
+	dead_symbol_count: u64,
+	dead_test_symbol_count: u64,
 }
 
 fn run_modules_list(args: &[String]) -> ExitCode {
@@ -3067,7 +3082,7 @@ fn run_modules_list(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// Load module candidates (already sorted by canonical_root_path)
+	// ── Step 1: Load module candidates ────────────────────────────
 	let modules = match storage.get_module_candidates_for_snapshot(&snapshot.snapshot_uid) {
 		Ok(m) => m,
 		Err(e) => {
@@ -3076,20 +3091,234 @@ fn run_modules_list(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// Map to output DTO
+	// If no modules, return early with empty result
+	if modules.is_empty() {
+		// Empty modules → no degradation, no warnings
+		let mut empty_extra = serde_json::Map::new();
+		empty_extra.insert("rollups_degraded".to_string(), serde_json::Value::Bool(false));
+		empty_extra.insert("warnings".to_string(), serde_json::Value::Array(vec![]));
+
+		let output = match build_envelope(
+			&storage,
+			"modules list",
+			repo_uid,
+			&snapshot,
+			serde_json::Value::Array(vec![]),
+			0,
+			empty_extra,
+		) {
+			Ok(v) => v,
+			Err(e) => {
+				eprintln!("error: {}", e);
+				return ExitCode::from(2);
+			}
+		};
+		match serde_json::to_string_pretty(&output) {
+			Ok(json) => {
+				println!("{}", json);
+				return ExitCode::SUCCESS;
+			}
+			Err(e) => {
+				eprintln!("error: {}", e);
+				return ExitCode::from(2);
+			}
+		}
+	}
+
+	// ── Step 2: Load data for rollup computation ──────────────────
+
+	// 2a. Owned files with is_test flag
+	let owned_files = match storage.get_owned_files_for_rollup(&snapshot.snapshot_uid) {
+		Ok(f) => f,
+		Err(e) => {
+			eprintln!("error: failed to load owned files: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// 2b. Resolved imports for edge derivation
+	let imports = match storage.get_resolved_imports_for_snapshot(&snapshot.snapshot_uid) {
+		Ok(i) => i,
+		Err(e) => {
+			eprintln!("error: failed to load imports: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// 2c. File ownership for edge derivation
+	let ownership = match storage.get_file_ownership_for_snapshot(&snapshot.snapshot_uid) {
+		Ok(o) => o,
+		Err(e) => {
+			eprintln!("error: failed to load file ownership: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// 2d. Dead nodes (SYMBOL kind only)
+	let dead_nodes = match storage.find_dead_nodes(&snapshot.snapshot_uid, repo_uid, Some("SYMBOL"))
+	{
+		Ok(d) => d,
+		Err(e) => {
+			eprintln!("error: failed to load dead nodes: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// 2e. Module boundary violations (advisory — catalog survives policy corruption)
+	let (violations_eval, violations_warning): (Option<ModuleBoundaryEvaluation>, Option<String>) =
+		match evaluate_discovered_module_violations(&storage, repo_uid, &snapshot.snapshot_uid) {
+			Ok(e) => (Some(e), None),
+			Err(msg) => (
+				None,
+				Some(format!("discovered-module violation rollups unavailable: {}", msg)),
+			),
+		};
+
+	// ── Step 3: Derive module edges ───────────────────────────────
+	use repo_graph_classification::module_edges::{
+		derive_module_dependency_edges, FileOwnershipFact, ModuleEdgeDerivationInput,
+		ModuleRef, ResolvedImportFact,
+	};
+
+	let module_refs: Vec<ModuleRef> = modules
+		.iter()
+		.map(|m| ModuleRef {
+			module_uid: m.module_candidate_uid.clone(),
+			canonical_path: m.canonical_root_path.clone(),
+		})
+		.collect();
+
+	let import_facts: Vec<ResolvedImportFact> = imports
+		.into_iter()
+		.map(|i| ResolvedImportFact {
+			source_file_uid: i.source_file_uid,
+			target_file_uid: i.target_file_uid,
+		})
+		.collect();
+
+	let ownership_facts: Vec<FileOwnershipFact> = ownership
+		.into_iter()
+		.map(|o| FileOwnershipFact {
+			file_uid: o.file_uid,
+			module_uid: o.module_candidate_uid,
+		})
+		.collect();
+
+	let edge_input = ModuleEdgeDerivationInput {
+		imports: import_facts,
+		ownership: ownership_facts,
+		modules: module_refs.clone(),
+	};
+
+	let edge_result = match derive_module_dependency_edges(edge_input) {
+		Ok(r) => r,
+		Err(e) => {
+			eprintln!("error: failed to derive module edges: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+	let edges = edge_result.edges;
+
+	// ── Step 4: Compute rollups ───────────────────────────────────
+	use repo_graph_classification::module_rollup::{
+		compute_module_rollups, DeadNodeFact, ModuleRollupInput, OwnedFileFact,
+	};
+
+	let owned_file_facts: Vec<OwnedFileFact> = owned_files
+		.into_iter()
+		.map(|f| OwnedFileFact {
+			file_path: f.file_path,
+			module_uid: f.module_candidate_uid,
+			is_test: f.is_test,
+		})
+		.collect();
+
+	let dead_node_facts: Vec<DeadNodeFact> = dead_nodes
+		.into_iter()
+		.filter_map(|d| {
+			d.file.map(|file_path| DeadNodeFact {
+				file_path,
+				is_test: d.is_test,
+			})
+		})
+		.collect();
+
+	// When violations are unavailable, pass empty vec — rollups will compute
+	// violation_count as 0, but we'll override to None in the output.
+	let violations_for_rollup = violations_eval
+		.as_ref()
+		.map(|e| e.violations.clone())
+		.unwrap_or_default();
+
+	let rollup_input = ModuleRollupInput {
+		modules: module_refs,
+		owned_files: owned_file_facts,
+		edges,
+		violations: violations_for_rollup,
+		dead_nodes: dead_node_facts,
+	};
+
+	let rollups = match compute_module_rollups(&rollup_input) {
+		Ok(r) => r,
+		Err(e) => {
+			eprintln!("error: failed to compute rollups: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// ── Step 5: Build rollup lookup by module_uid ─────────────────
+	use std::collections::HashMap;
+	let rollup_map: HashMap<&str, &repo_graph_classification::module_rollup::ModuleRollup> =
+		rollups.iter().map(|r| (r.module_uid.as_str(), r)).collect();
+
+	// ── Step 6: Merge module identity with rollup stats ───────────
+	// violation_count is None when violations_eval failed (policy unavailable)
+	let violations_available = violations_eval.is_some();
+
 	let results: Vec<ModuleListEntry> = modules
 		.into_iter()
-		.map(|m| ModuleListEntry {
-			module_uid: m.module_candidate_uid,
-			module_key: m.module_key,
-			canonical_root_path: m.canonical_root_path,
-			module_kind: m.module_kind,
-			display_name: m.display_name,
-			confidence: m.confidence,
+		.map(|m| {
+			let rollup = rollup_map.get(m.module_candidate_uid.as_str());
+			ModuleListEntry {
+				module_uid: m.module_candidate_uid,
+				module_key: m.module_key,
+				canonical_root_path: m.canonical_root_path,
+				module_kind: m.module_kind,
+				display_name: m.display_name,
+				confidence: m.confidence,
+				// Rollup fields — default to 0 if rollup missing (shouldn't happen)
+				owned_file_count: rollup.map_or(0, |r| r.owned_file_count),
+				owned_test_file_count: rollup.map_or(0, |r| r.owned_test_file_count),
+				outbound_dependency_count: rollup.map_or(0, |r| r.outbound_dependency_count),
+				outbound_import_count: rollup.map_or(0, |r| r.outbound_import_count),
+				inbound_dependency_count: rollup.map_or(0, |r| r.inbound_dependency_count),
+				inbound_import_count: rollup.map_or(0, |r| r.inbound_import_count),
+				// None when policy parsing failed; Some(count) when available
+				violation_count: if violations_available {
+					Some(rollup.map_or(0, |r| r.violation_count))
+				} else {
+					None
+				},
+				dead_symbol_count: rollup.map_or(0, |r| r.dead_symbol_count),
+				dead_test_symbol_count: rollup.map_or(0, |r| r.dead_test_symbol_count),
+			}
 		})
 		.collect();
 
 	let count = results.len();
+
+	// Build extra envelope fields for degradation status
+	let mut extra_fields = serde_json::Map::new();
+	extra_fields.insert(
+		"rollups_degraded".to_string(),
+		serde_json::Value::Bool(!violations_available),
+	);
+
+	let warnings: Vec<String> = violations_warning.into_iter().collect();
+	extra_fields.insert(
+		"warnings".to_string(),
+		serde_json::to_value(&warnings).unwrap(),
+	);
 
 	let output = match build_envelope(
 		&storage,
@@ -3098,7 +3327,7 @@ fn run_modules_list(args: &[String]) -> ExitCode {
 		&snapshot,
 		serde_json::to_value(&results).unwrap(),
 		count,
-		serde_json::Map::new(),
+		extra_fields,
 	) {
 		Ok(v) => v,
 		Err(e) => {

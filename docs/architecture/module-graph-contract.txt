@@ -138,8 +138,13 @@ Planned commands:
   - rgr modules deps <repo> [<module>]  -- show outbound/inbound dependencies
   - rgr arch violations <repo>          -- extended for discovered modules
 
-Planned rollups:
-  - Module-level fan-in/fan-out in rgr modules list
+Rollups (shipped RS-MG-12):
+  - Module-level rollups in `rmap modules list`:
+    - owned_file_count, owned_test_file_count
+    - outbound_dependency_count, outbound_import_count (breadth vs weight)
+    - inbound_dependency_count, inbound_import_count (breadth vs weight)
+    - violation_count
+    - dead_symbol_count, dead_test_symbol_count
 
 
 ================================================================================

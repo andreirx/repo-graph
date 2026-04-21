@@ -33,6 +33,19 @@
 #   - new framework detectors beyond Express routes and Lambda
 #     handlers
 #
+# ── Post-R3 additions ───────────────────────────────────────────────
+#
+# RS-MG-2:  module_edges.rs — pure module edge derivation from
+#           resolved imports + file ownership. No DB access.
+# RS-MG-4:  boundary_evaluator.rs — discovered-module boundary
+#           violation evaluator. Pure policy, no DB access.
+# RS-MG-12a: module_rollup.rs — per-module rollup aggregator.
+#           Inputs: modules, owned_files, edges, violations, dead_nodes.
+#           Outputs: per-module stats (file counts, dependency counts,
+#           violation count, dead symbol counts). Test/non-test split.
+#           Duplicate ownership rejected (same contract as RS-MG-2).
+#           Pure policy, no DB access.
+#
 # Operating model: O-C zipper. Mirrors the discipline used in the
 # Rust-1 detector substrate port and the Rust-2 storage substrate
 # port. The TS implementation is the source of truth for behavior;

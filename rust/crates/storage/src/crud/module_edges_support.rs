@@ -150,6 +150,56 @@ impl StorageConnection {
 		}
 		Ok(results)
 	}
+
+	/// Read all owned files for a snapshot with is_test flag.
+	///
+	/// Joins module_file_ownership with files to return the fields
+	/// needed for rollup computation: file_path, module_candidate_uid, is_test.
+	///
+	/// Order is deterministic: sorted by (file_path, module_candidate_uid).
+	///
+	/// Unlike `get_file_ownership_for_snapshot` (which returns file_uid),
+	/// this method returns file_path for direct use in rollup aggregation
+	/// where dead nodes are attributed by path.
+	pub fn get_owned_files_for_rollup(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<OwnedFileForRollup>, StorageError> {
+		let conn = self.connection();
+		let mut stmt = conn.prepare(
+			"SELECT f.path, o.module_candidate_uid, f.is_test
+			 FROM module_file_ownership o
+			 JOIN files f ON o.file_uid = f.file_uid
+			 WHERE o.snapshot_uid = ?
+			 ORDER BY f.path ASC, o.module_candidate_uid ASC",
+		)?;
+
+		let rows = stmt.query_map([snapshot_uid], |row| {
+			let is_test_int: i64 = row.get("is_test")?;
+			Ok(OwnedFileForRollup {
+				file_path: row.get("path")?,
+				module_candidate_uid: row.get("module_candidate_uid")?,
+				is_test: is_test_int == 1,
+			})
+		})?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			results.push(row?);
+		}
+		Ok(results)
+	}
+}
+
+/// A file ownership fact for rollup computation.
+///
+/// Minimal DTO combining file identity (path, is_test) with module
+/// ownership. Used by `get_owned_files_for_rollup`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedFileForRollup {
+	pub file_path: String,
+	pub module_candidate_uid: String,
+	pub is_test: bool,
 }
 
 /// A file owned by a module with ownership metadata.
@@ -718,5 +768,80 @@ mod tests {
 			.get_files_for_module(&snap2.snapshot_uid, "mc-1")
 			.expect("query");
 		assert!(result2.is_empty());
+	}
+
+	// ── get_owned_files_for_rollup tests ───────────────────────────
+
+	#[test]
+	fn get_owned_files_for_rollup_returns_empty_for_empty_snapshot() {
+		let conn = fresh_storage();
+		let (_, snapshot_uid) = setup_test_snapshot(&conn);
+
+		let result = conn
+			.get_owned_files_for_rollup(&snapshot_uid)
+			.expect("query");
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn get_owned_files_for_rollup_returns_all_owned_files() {
+		let mut conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		// Create modules
+		insert_module_candidate(&conn, "mc-app", &snapshot_uid, &repo_uid, "packages/app");
+		insert_module_candidate(&conn, "mc-core", &snapshot_uid, &repo_uid, "packages/core");
+
+		// Create files
+		let file_app = make_file(&repo_uid, "packages/app/index.ts");
+		let file_core = make_file(&repo_uid, "packages/core/lib.ts");
+		conn.upsert_files(&[file_app.clone(), file_core.clone()])
+			.expect("upsert files");
+
+		// Create ownership
+		insert_file_ownership(&conn, &snapshot_uid, &repo_uid, &file_app.file_uid, "mc-app");
+		insert_file_ownership(&conn, &snapshot_uid, &repo_uid, &file_core.file_uid, "mc-core");
+
+		let result = conn
+			.get_owned_files_for_rollup(&snapshot_uid)
+			.expect("query");
+
+		assert_eq!(result.len(), 2);
+		// Sorted by path
+		assert_eq!(result[0].file_path, "packages/app/index.ts");
+		assert_eq!(result[0].module_candidate_uid, "mc-app");
+		assert_eq!(result[1].file_path, "packages/core/lib.ts");
+		assert_eq!(result[1].module_candidate_uid, "mc-core");
+	}
+
+	#[test]
+	fn get_owned_files_for_rollup_includes_is_test_flag() {
+		let mut conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		insert_module_candidate(&conn, "mc-app", &snapshot_uid, &repo_uid, "packages/app");
+
+		// Create non-test and test files
+		let mut file_src = make_file(&repo_uid, "packages/app/service.ts");
+		file_src.is_test = false;
+		let mut file_test = make_file(&repo_uid, "packages/app/service.test.ts");
+		file_test.is_test = true;
+		conn.upsert_files(&[file_src.clone(), file_test.clone()])
+			.expect("upsert files");
+
+		insert_file_ownership(&conn, &snapshot_uid, &repo_uid, &file_src.file_uid, "mc-app");
+		insert_file_ownership(&conn, &snapshot_uid, &repo_uid, &file_test.file_uid, "mc-app");
+
+		let result = conn
+			.get_owned_files_for_rollup(&snapshot_uid)
+			.expect("query");
+
+		assert_eq!(result.len(), 2);
+		// Sorted by path
+		let src = result.iter().find(|r| r.file_path.contains("service.ts") && !r.file_path.contains(".test.")).unwrap();
+		let test = result.iter().find(|r| r.file_path.contains(".test.")).unwrap();
+
+		assert!(!src.is_test);
+		assert!(test.is_test);
 	}
 }

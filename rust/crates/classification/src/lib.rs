@@ -274,6 +274,7 @@ pub mod boundary_parser;
 pub(crate) mod framework_boundary;
 pub(crate) mod framework_entrypoints;
 pub mod module_edges;
+pub mod module_rollup;
 pub(crate) mod signals;
 pub mod types;
 pub(crate) mod unresolved_classifier;
