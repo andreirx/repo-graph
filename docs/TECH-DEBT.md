@@ -1110,3 +1110,65 @@ The type is slice-scoped:
   `rmap dead` path; future kind-filter additions to dead-code
   must follow the same rule. CONFIG_KEY is outside this slice
   and is handled by the config/env seam slice when it ships.
+
+## Measurement Commands (`rmap churn`, `rmap hotspots`)
+
+### Hotspots — validated for v1 (RS-MS-3d)
+
+Signal quality validated on repo-graph (2026-04-21):
+
+- **Head quality (triage-relevant).** Top 20: 19 production files, 1
+  test file. Top 50: 45 production files, 5 test files. No
+  generated/vendor/build contamination in the head.
+- **Ranked production files are correct.** Extractors, storage,
+  indexer, CLI orchestration files surface appropriately.
+- **Test files in results are not scoring defects.** A high-churn,
+  high-complexity test file IS a hotspot by definition. Whether to
+  hide them is a view-policy issue, not a correctness fix.
+
+Formula: `hotspot_score = lines_changed × sum_complexity`. No change
+required from validation.
+
+### Deferred: `--exclude-tests` filter
+
+Test files appear in hotspot results by design. The `is_test` metadata
+IS persisted (checked: 225 files flagged in repo-graph). A
+`--exclude-tests` filter is implementable using real metadata, not
+heuristics. Deferred as a presentation filter, not a correctness issue.
+
+### Deferred: `--exclude-generated` filter
+
+No `is_generated` metadata is currently populated. Do not add this
+filter until "generated" can be defined from real persisted metadata.
+Heuristic path-based detection (e.g., `*/generated/*`) is explicitly
+rejected as unreliable.
+
+### Coverage import — not operational
+
+**TS coverage import broken.** `rgr graph coverage` exists but format
+detection fails on any Istanbul report > 4KB. Bug: `canHandle()` in
+`src/adapters/importers/coverage-registry.ts` tries to JSON.parse the
+first 4KB of the file, which fails when truncated.
+
+**Rust has no coverage import.** No `rmap coverage` command.
+
+**No coverage measurements exist.** Database contains only complexity
+metrics (`cyclomatic_complexity`, `max_nesting_depth`, `parameter_count`).
+
+### RS-MS-4 (`rmap risk`) — blocked
+
+Risk formula: `risk = hotspot_score × (1 - coverage)`.
+
+Without coverage data, risk is either null (no ranking) or degrades to
+hotspots (if `coverage = 0`). This is semantic collapse, not graceful
+degradation. Coverage is a defining term of risk, not optional garnish.
+
+**Gate decision (2026-04-21):** Do not ship `rmap risk` until Rust has
+its own coverage import surface and measurements are validated. TS
+coverage repair is not the dependency path — Rust should implement its
+own importer.
+
+Prerequisite sequence:
+1. RS-MS-4-prereq: Rust coverage import (`rmap coverage <db> <repo> <report>`)
+2. Validate coverage measurements exist and match indexed file paths
+3. RS-MS-4: `rmap risk` command

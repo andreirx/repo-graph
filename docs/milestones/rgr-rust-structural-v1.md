@@ -149,10 +149,27 @@ Git is the authoritative history source. TS implementation is reference, not spe
 | RS-MS-2 | `rmap churn` command: query-time per-file git churn for indexed files |
 | RS-MS-3a | `hotspot_scorer.rs` in classification crate: pure scorer support module |
 | RS-MS-3b | `rmap hotspots` command: churn × complexity (lines_changed * sum_complexity) |
+| RS-MS-3c | Complexity metrics persistence: ts-extractor computes, compose layer persists to measurements table |
+| RS-MS-3d | **Validated**: hotspots signal quality confirmed on real repos (top 20: 95% production files, no generated/vendor contamination) |
 
 Locked sequence (review before continuing):
-- RS-MS-4: `rmap risk` command (if hotspots proves useful)
+- RS-MS-4-prereq: Rust coverage import surface (`rmap coverage <db> <repo> <report>`)
+- Validate coverage measurements exist and match indexed file paths
+- RS-MS-4: `rmap risk` command (blocked until coverage is real)
 - Explicit anchor option for gate integration (deferred)
+
+**RS-MS-4 gate decision (2026-04-21):**
+Risk without coverage is semantic collapse, not graceful degradation. Coverage
+is a defining term of the risk formula (`risk = hotspot × (1 - coverage)`), not
+optional garnish. Shipping risk with null/zero coverage would produce either no
+ranking or a misleading duplicate of hotspots. Do not ship RS-MS-4 until Rust
+has its own coverage import surface and measurements are validated.
+
+**TS coverage import note:** The existing TS importer (`rgr graph coverage`) has
+a format detection bug: `canHandle()` tries to JSON.parse the first 4KB of the
+report, which fails on any Istanbul file where the first entry exceeds 4KB. This
+confirms TS is not a reliable spec source for coverage import. Rust should
+implement its own importer, not depend on TS repair.
 
 Commands added:
 ```

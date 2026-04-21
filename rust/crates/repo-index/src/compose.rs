@@ -202,6 +202,72 @@ fn persist_read_failures(
 	Ok(())
 }
 
+// ── Post-index metrics persistence ───────────────────────────────
+
+/// Persist metrics (complexity, parameter_count, nesting) from extraction.
+///
+/// RS-MS-3c-prereq: Called after index_repo or refresh_repo returns.
+/// Converts ExtractedMetrics to MeasurementInput and batch-inserts.
+fn persist_metrics(
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	snapshot_uid: &str,
+	metrics: &std::collections::BTreeMap<String, repo_graph_indexer::types::ExtractedMetrics>,
+) -> Result<(), ComposeError> {
+	if metrics.is_empty() {
+		return Ok(());
+	}
+
+	let now = "2025-01-01T00:00:00.000Z"; // Placeholder timestamp
+	let source = "indexer:0.1.0";
+
+	let mut measurements: Vec<repo_graph_storage::types::MeasurementInput> = Vec::new();
+
+	for (stable_key, m) in metrics {
+		// cyclomatic_complexity
+		measurements.push(repo_graph_storage::types::MeasurementInput {
+			measurement_uid: format!("{}-cc-{}", snapshot_uid, stable_key),
+			snapshot_uid: snapshot_uid.into(),
+			repo_uid: repo_uid.into(),
+			target_stable_key: stable_key.clone(),
+			kind: "cyclomatic_complexity".into(),
+			value_json: format!(r#"{{"value":{}}}"#, m.cyclomatic_complexity),
+			source: source.into(),
+			created_at: now.into(),
+		});
+
+		// parameter_count
+		measurements.push(repo_graph_storage::types::MeasurementInput {
+			measurement_uid: format!("{}-pc-{}", snapshot_uid, stable_key),
+			snapshot_uid: snapshot_uid.into(),
+			repo_uid: repo_uid.into(),
+			target_stable_key: stable_key.clone(),
+			kind: "parameter_count".into(),
+			value_json: format!(r#"{{"value":{}}}"#, m.parameter_count),
+			source: source.into(),
+			created_at: now.into(),
+		});
+
+		// max_nesting_depth
+		measurements.push(repo_graph_storage::types::MeasurementInput {
+			measurement_uid: format!("{}-mnd-{}", snapshot_uid, stable_key),
+			snapshot_uid: snapshot_uid.into(),
+			repo_uid: repo_uid.into(),
+			target_stable_key: stable_key.clone(),
+			kind: "max_nesting_depth".into(),
+			value_json: format!(r#"{{"value":{}}}"#, m.max_nesting_depth),
+			source: source.into(),
+			created_at: now.into(),
+		});
+	}
+
+	storage
+		.insert_measurements(&measurements)
+		.map_err(ComposeError::Storage)?;
+
+	Ok(())
+}
+
 // ── Full index ───────────────────────────────────────────────────
 
 /// Index a repo from disk into an existing StorageConnection.
@@ -249,6 +315,9 @@ pub fn index_into_storage(
 		&prepared.read_failed_paths,
 		&mut result,
 	)?;
+
+	// RS-MS-3c-prereq: Persist metrics (complexity, params, nesting).
+	persist_metrics(storage, repo_uid, &result.snapshot_uid, &result.metrics)?;
 
 	Ok(result)
 }
@@ -313,6 +382,9 @@ pub fn refresh_into_storage(
 		&prepared.read_failed_paths,
 		&mut result,
 	)?;
+
+	// RS-MS-3c-prereq: Persist metrics (complexity, params, nesting).
+	persist_metrics(storage, repo_uid, &result.snapshot_uid, &result.metrics)?;
 
 	Ok(result)
 }
@@ -443,5 +515,53 @@ mod tests {
 		assert_eq!(result.nodes_total, 4);
 		assert_eq!(result.edges_total, 4);
 		assert_eq!(result.edges_unresolved, 0);
+	}
+
+	#[test]
+	fn index_into_storage_persists_metrics() {
+		let fixture = make_fixture_repo();
+		let mut storage = StorageConnection::open_in_memory().unwrap();
+
+		let result = index_into_storage(
+			fixture.path(),
+			&mut storage,
+			"r1",
+			&ComposeOptions::default(),
+		)
+		.unwrap();
+
+		// The fixture has `serve` function in server.ts which should have metrics.
+		// Verify metrics are in the result.
+		assert!(
+			!result.metrics.is_empty(),
+			"expected metrics for functions in fixture; got empty metrics map"
+		);
+
+		// Verify metrics are persisted to storage.
+		let cc_rows = storage
+			.query_measurements_by_kind(&result.snapshot_uid, "cyclomatic_complexity")
+			.unwrap();
+		assert!(
+			!cc_rows.is_empty(),
+			"expected cyclomatic_complexity measurements persisted; got none"
+		);
+
+		// All three metric kinds should be persisted.
+		let pc_rows = storage
+			.query_measurements_by_kind(&result.snapshot_uid, "parameter_count")
+			.unwrap();
+		let mnd_rows = storage
+			.query_measurements_by_kind(&result.snapshot_uid, "max_nesting_depth")
+			.unwrap();
+		assert_eq!(
+			cc_rows.len(),
+			pc_rows.len(),
+			"cyclomatic_complexity and parameter_count counts must match"
+		);
+		assert_eq!(
+			cc_rows.len(),
+			mnd_rows.len(),
+			"cyclomatic_complexity and max_nesting_depth counts must match"
+		);
 	}
 }

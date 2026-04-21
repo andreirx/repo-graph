@@ -451,6 +451,13 @@ pub struct IndexResult {
 	pub unresolved_breakdown: BTreeMap<String, u64>,
 	pub duration_ms: u64,
 	pub orphaned_declarations: u64,
+	/// Per-symbol metrics from extraction.
+	///
+	/// RS-MS-3c-prereq: Accumulated from all extraction results.
+	/// Keyed by symbol stable_key, containing cyclomatic_complexity,
+	/// parameter_count, and max_nesting_depth. Persisted by the
+	/// compose layer after index_repo returns.
+	pub metrics: BTreeMap<String, ExtractedMetrics>,
 }
 
 /// Progress event during indexing.

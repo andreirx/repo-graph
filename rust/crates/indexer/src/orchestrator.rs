@@ -251,6 +251,9 @@ fn run_pipeline<S: IndexerStoragePort>(
 	let mut skipped_oversized: u64 = 0;
 	let mut files_read_failed: u64 = 0;
 	let mut nodes_total: u64 = 0;
+	// RS-MS-3c-prereq: Accumulate metrics from all extraction results.
+	let mut all_metrics: std::collections::BTreeMap<String, crate::types::ExtractedMetrics> =
+		std::collections::BTreeMap::new();
 
 	for (file_idx, file) in files.iter().enumerate() {
 		emit(crate::types::IndexPhase::Extracting, file_idx as u64 + 1, total_files, Some(file.rel_path.clone()));
@@ -342,6 +345,9 @@ fn run_pipeline<S: IndexerStoragePort>(
 
 		nodes_total += result.nodes.len() as u64;
 		all_nodes.extend(result.nodes);
+
+		// RS-MS-3c-prereq: Accumulate metrics from this file's extraction.
+		all_metrics.extend(result.metrics);
 
 		for edge in &result.edges {
 			all_extraction_edges.push(ExtractionEdgeRow {
@@ -725,6 +731,7 @@ fn run_pipeline<S: IndexerStoragePort>(
 		unresolved_breakdown,
 		duration_ms,
 		orphaned_declarations: 0,
+		metrics: all_metrics,
 	})
 }
 

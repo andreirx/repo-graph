@@ -810,6 +810,28 @@ impl ModuleCandidate {
 	}
 }
 
+// ── Measurement input ───────────────────────────────────────────────
+
+/// Input for batch measurement insertion.
+///
+/// RS-MS-3c-prereq: Used by the compose layer to persist metrics
+/// computed during extraction. Mirrors the TS `Measurement` write
+/// shape from `src/core/ports/storage.ts`.
+///
+/// Unlike `MeasurementRow` (read-side, subset of columns),
+/// `MeasurementInput` includes all columns needed for INSERT.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeasurementInput {
+	pub measurement_uid: String,
+	pub snapshot_uid: String,
+	pub repo_uid: String,
+	pub target_stable_key: String,
+	pub kind: String,
+	pub value_json: String,
+	pub source: String,
+	pub created_at: String,
+}
+
 // ── Tests ──────────────────────────────────────────────────────────
 //
 // R2-B unit tests cover the pure-logic helper
