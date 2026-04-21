@@ -718,6 +718,13 @@ fn run_imports(args: &[String]) -> ExitCode {
 }
 
 // ── violations command ───────────────────────────────────────────
+//
+// Unified architectural violations surface. Evaluates both:
+// - Declared directory-boundary violations (legacy)
+// - Discovered-module boundary violations (RS-MG integration)
+//
+// Output shape has separate sections for each policy substrate.
+// Exit code is preserved from pre-integration behavior (always 0 on success).
 
 fn run_violations(args: &[String]) -> ExitCode {
 	if args.len() != 2 {
@@ -748,7 +755,9 @@ fn run_violations(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// Load active boundary declarations.
+	// ── Section 1: Declared boundary violations (legacy) ─────────
+
+	// Load active boundary declarations (directory-level MODULE targets).
 	let boundaries = match storage.get_active_boundary_declarations(repo_uid) {
 		Ok(b) => b,
 		Err(e) => {
@@ -769,7 +778,7 @@ fn run_violations(args: &[String]) -> ExitCode {
 
 	// For each unique rule, find violating IMPORTS edges.
 	use repo_graph_storage::queries::BoundaryViolation;
-	let mut violations: Vec<BoundaryViolation> = Vec::new();
+	let mut declared_violations: Vec<BoundaryViolation> = Vec::new();
 
 	// Sort rules for deterministic output.
 	let mut rules: Vec<_> = rule_map.into_values().collect();
@@ -789,7 +798,7 @@ fn run_violations(args: &[String]) -> ExitCode {
 		};
 
 		for edge in &edges {
-			violations.push(BoundaryViolation {
+			declared_violations.push(BoundaryViolation {
 				boundary_module: boundary_module.clone(),
 				forbidden_module: forbids.clone(),
 				reason: reason.clone(),
@@ -800,16 +809,90 @@ fn run_violations(args: &[String]) -> ExitCode {
 		}
 	}
 
-	// JSON to stdout (TS-compatible QueryResult envelope).
-	let count = violations.len();
+	// ── Section 2: Discovered-module boundary violations ─────────
+
+	let discovered_evaluation =
+		match evaluate_discovered_module_violations(&storage, repo_uid, &snapshot.snapshot_uid) {
+			Ok(e) => e,
+			Err(msg) => {
+				eprintln!("error: {}", msg);
+				return ExitCode::from(2);
+			}
+		};
+
+	// Convert discovered violations to JSON
+	use repo_graph_classification::boundary_evaluator::StaleSide;
+
+	let discovered_violations_json: Vec<serde_json::Value> = discovered_evaluation
+		.violations
+		.iter()
+		.map(|v| {
+			serde_json::json!({
+				"declaration_uid": v.declaration_uid,
+				"source": v.source_canonical_path,
+				"target": v.target_canonical_path,
+				"import_count": v.import_count,
+				"source_file_count": v.source_file_count,
+				"reason": v.reason,
+			})
+		})
+		.collect();
+
+	let stale_declarations_json: Vec<serde_json::Value> = discovered_evaluation
+		.stale_declarations
+		.iter()
+		.map(|s| {
+			serde_json::json!({
+				"declaration_uid": s.declaration_uid,
+				"stale_side": match s.stale_side {
+					StaleSide::Source => "source",
+					StaleSide::Target => "target",
+					StaleSide::Both => "both",
+				},
+				"missing_paths": s.missing_paths,
+			})
+		})
+		.collect();
+
+	// ── Build unified output ─────────────────────────────────────
+
+	let declared_count = declared_violations.len();
+	let discovered_count = discovered_evaluation.violations.len();
+	let stale_count = discovered_evaluation.stale_declarations.len();
+	let total_count = declared_count + discovered_count;
+
+	let results = serde_json::json!({
+		"declared_boundary_violations": serde_json::to_value(&declared_violations).unwrap(),
+		"discovered_module_violations": discovered_violations_json,
+	});
+
+	// Build extra fields for envelope
+	let mut extra = serde_json::Map::new();
+	extra.insert(
+		"declared_boundary_count".to_string(),
+		serde_json::Value::Number(declared_count.into()),
+	);
+	extra.insert(
+		"discovered_module_count".to_string(),
+		serde_json::Value::Number(discovered_count.into()),
+	);
+	extra.insert(
+		"stale_declarations".to_string(),
+		serde_json::Value::Array(stale_declarations_json),
+	);
+	extra.insert(
+		"stale_count".to_string(),
+		serde_json::Value::Number(stale_count.into()),
+	);
+
 	let output = match build_envelope(
 		&storage,
 		"arch violations",
 		repo_uid,
 		&snapshot,
-		serde_json::to_value(&violations).unwrap(),
-		count,
-		serde_json::Map::new(),
+		results,
+		total_count,
+		extra,
 	) {
 		Ok(v) => v,
 		Err(e) => {
@@ -821,6 +904,8 @@ fn run_violations(args: &[String]) -> ExitCode {
 	match serde_json::to_string_pretty(&output) {
 		Ok(json) => {
 			println!("{}", json);
+			// Preserve legacy exit behavior: always 0 on success
+			// Exit code change (fail on violations) is a separate contract slice
 			ExitCode::SUCCESS
 		}
 		Err(e) => {
@@ -3307,56 +3392,30 @@ fn parse_deps_args(args: &[String]) -> Result<(Vec<String>, DepsDirection), Stri
 	Ok((positional, direction))
 }
 
-// ── modules violations command ───────────────────────────────────
+// ── discovered-module violation helper ───────────────────────────
+//
+// Shared orchestration for discovered-module boundary evaluation.
+// Used by both `modules violations` and unified `violations` commands.
+// Returns the evaluation result or an error string for CLI display.
 
-fn run_modules_violations(args: &[String]) -> ExitCode {
-	if args.len() != 2 {
-		eprintln!("usage: rmap modules violations <db_path> <repo_uid>");
-		return ExitCode::from(1);
-	}
+use repo_graph_classification::boundary_evaluator::ModuleBoundaryEvaluation;
 
-	let db_path = Path::new(&args[0]);
-	let repo_uid = &args[1];
-
-	let storage = match open_storage(db_path) {
-		Ok(s) => s,
-		Err(msg) => {
-			eprintln!("error: {}", msg);
-			return ExitCode::from(2);
-		}
-	};
-
-	let snapshot = match storage.get_latest_snapshot(repo_uid) {
-		Ok(Some(snap)) => snap,
-		Ok(None) => {
-			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
-			return ExitCode::from(2);
-		}
-		Err(e) => {
-			eprintln!("error: {}", e);
-			return ExitCode::from(2);
-		}
-	};
-
+fn evaluate_discovered_module_violations(
+	storage: &repo_graph_storage::StorageConnection,
+	repo_uid: &str,
+	snapshot_uid: &str,
+) -> Result<ModuleBoundaryEvaluation, String> {
 	// 1. Load module candidates
-	let modules = match storage.get_module_candidates_for_snapshot(&snapshot.snapshot_uid) {
-		Ok(m) => m,
-		Err(e) => {
-			eprintln!("error: failed to load module candidates: {}", e);
-			return ExitCode::from(2);
-		}
-	};
+	let modules = storage
+		.get_module_candidates_for_snapshot(snapshot_uid)
+		.map_err(|e| format!("failed to load module candidates: {}", e))?;
 
-	// 2. Load active boundary declarations
-	let declarations = match storage.get_active_boundary_declarations_for_repo(repo_uid) {
-		Ok(d) => d,
-		Err(e) => {
-			eprintln!("error: failed to load boundary declarations: {}", e);
-			return ExitCode::from(2);
-		}
-	};
+	// 2. Load active boundary declarations (discovered-module style)
+	let declarations = storage
+		.get_active_boundary_declarations_for_repo(repo_uid)
+		.map_err(|e| format!("failed to load boundary declarations: {}", e))?;
 
-	// 3. Convert to parser input and parse discovered-module boundaries
+	// 3. Parse discovered-module boundaries
 	use repo_graph_classification::boundary_parser::{
 		parse_discovered_module_boundaries, RawBoundaryDeclaration,
 	};
@@ -3369,31 +3428,17 @@ fn run_modules_violations(args: &[String]) -> ExitCode {
 		})
 		.collect();
 
-	let parsed_boundaries = match parse_discovered_module_boundaries(&raw_boundaries) {
-		Ok(b) => b,
-		Err(e) => {
-			// Parse failure is exit code 2 — do not degrade
-			eprintln!("error: {}", e);
-			return ExitCode::from(2);
-		}
-	};
+	let parsed_boundaries =
+		parse_discovered_module_boundaries(&raw_boundaries).map_err(|e| e.to_string())?;
 
 	// 4. Load imports and file ownership for edge derivation
-	let imports = match storage.get_resolved_imports_for_snapshot(&snapshot.snapshot_uid) {
-		Ok(i) => i,
-		Err(e) => {
-			eprintln!("error: failed to load imports: {}", e);
-			return ExitCode::from(2);
-		}
-	};
+	let imports = storage
+		.get_resolved_imports_for_snapshot(snapshot_uid)
+		.map_err(|e| format!("failed to load imports: {}", e))?;
 
-	let ownership = match storage.get_file_ownership_for_snapshot(&snapshot.snapshot_uid) {
-		Ok(o) => o,
-		Err(e) => {
-			eprintln!("error: failed to load file ownership: {}", e);
-			return ExitCode::from(2);
-		}
-	};
+	let ownership = storage
+		.get_file_ownership_for_snapshot(snapshot_uid)
+		.map_err(|e| format!("failed to load file ownership: {}", e))?;
 
 	// 5. Derive module edges
 	use repo_graph_classification::module_edges::{
@@ -3431,13 +3476,8 @@ fn run_modules_violations(args: &[String]) -> ExitCode {
 		modules: module_refs,
 	};
 
-	let derivation_result = match derive_module_dependency_edges(derivation_input) {
-		Ok(r) => r,
-		Err(e) => {
-			eprintln!("error: {}", e);
-			return ExitCode::from(2);
-		}
-	};
+	let derivation_result =
+		derive_module_dependency_edges(derivation_input).map_err(|e| e.to_string())?;
 
 	// 6. Build module index for stale detection
 	use std::collections::HashMap;
@@ -3452,15 +3492,59 @@ fn run_modules_violations(args: &[String]) -> ExitCode {
 		.collect();
 
 	// 7. Evaluate boundaries
-	use repo_graph_classification::boundary_evaluator::{
-		evaluate_module_boundaries, StaleSide,
-	};
+	use repo_graph_classification::boundary_evaluator::evaluate_module_boundaries;
 
 	let evaluation = evaluate_module_boundaries(
 		&parsed_boundaries,
 		&derivation_result.edges,
 		&module_index,
 	);
+
+	Ok(evaluation)
+}
+
+// ── modules violations command ───────────────────────────────────
+
+fn run_modules_violations(args: &[String]) -> ExitCode {
+	if args.len() != 2 {
+		eprintln!("usage: rmap modules violations <db_path> <repo_uid>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(snap)) => snap,
+		Ok(None) => {
+			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Use shared helper for discovered-module evaluation
+	let evaluation =
+		match evaluate_discovered_module_violations(&storage, repo_uid, &snapshot.snapshot_uid) {
+			Ok(e) => e,
+			Err(msg) => {
+				eprintln!("error: {}", msg);
+				return ExitCode::from(2);
+			}
+		};
+
+	use repo_graph_classification::boundary_evaluator::StaleSide;
 
 	// 8. Build JSON output — preserve evaluator order exactly
 	let violations_json: Vec<serde_json::Value> = evaluation

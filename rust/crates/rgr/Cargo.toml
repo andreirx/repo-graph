@@ -54,15 +54,22 @@
 #           Exact resolution by canonicalRootPath or moduleKey.
 #           Completes Rust write path for module governance.
 # RS-MG-8:  `module_violations` gate method.
-# RS-MG-9:  `modules list <db_path> <repo_uid>`
-#           Module catalog surface. Lists all discovered modules for a repo.
-#           Sorted by canonical_root_path. No rollups (file counts, evidence).
 #           Evaluates discovered-module boundaries via gate policy layer.
 #           Uses RS-MG-1 through RS-MG-4 support modules for evaluation.
 #           Always repo-wide (target field on obligation is ignored).
 #           PASS = 0 violations, FAIL = >0 violations.
 #           Stale declarations are informational only (do not cause FAIL).
 #           Waivable like other gate methods.
+# RS-MG-9:  `modules list <db_path> <repo_uid>`
+#           Module catalog surface. Lists all discovered modules for a repo.
+#           Sorted by canonical_root_path. No rollups (file counts, evidence).
+# RS-MG-10: Integrate discovered-module policy into `rmap violations`.
+#           Output now includes two sections:
+#             - declared_boundary_violations (legacy directory boundaries)
+#             - discovered_module_violations (discovered-module boundaries)
+#           Counts: declared_boundary_count, discovered_module_count, stale_count.
+#           stale_declarations are informational only.
+#           Exit semantics unchanged (always 0 on success).
 #
 # No formatting-heavy UX.
 

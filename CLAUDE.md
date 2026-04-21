@@ -141,7 +141,7 @@ rmap callers    <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct c
 rmap callees    <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callees (one hop)
 rmap path       <db_path> <repo_uid> <from> <to>   # Shortest path (CALLS+IMPORTS, depth 8)
 rmap imports    <db_path> <repo_uid> <file_path>   # File import chain (one hop, IMPORTS)
-rmap violations <db_path> <repo_uid>               # Boundary violation check (IMPORTS)
+rmap violations <db_path> <repo_uid>               # Unified boundary violations (declared + discovered-module)
 rmap gate       <db_path> <repo_uid> [--strict | --advisory]  # CI gate (4 methods, waivers, 3 modes)
 rmap orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]  # Agent orientation surface (rgr.agent.v1)
 rmap check      <db_path> <repo_uid>                                                  # Pre-action trust/safety check
@@ -195,6 +195,10 @@ Known Rust CLI divergences from TS CLI:
 - `gate` waiver overlay: PASS obligations are not waivable (Rust-25
   deliberate correction — TS unconditionally marks WAIVED, Rust only
   suppresses non-PASS verdicts; see TECH-DEBT.md)
+- `violations` output shape (RS-MG-10): `results` is an object with
+  `declared_boundary_violations` and `discovered_module_violations`
+  sections, plus `stale_declarations` and counts for each. TS uses
+  a flat array. Exit semantics unchanged (always 0 on success).
 - `orient` uses `<db_path> <repo_uid>` positional pair (Rust-43B
   divergence). The agent orientation contract's target shape is
   `rgr orient <repo_name>` with a repo registry, but the Rust CLI

@@ -234,9 +234,10 @@ fn declare_boundary_visible_to_violations() {
 	let count = violations["count"].as_i64().unwrap();
 	assert!(count > 0, "boundary should produce at least one violation");
 
-	let results = violations["results"].as_array().unwrap();
+	// Access declared boundary violations from new output structure
+	let declared = violations["results"]["declared_boundary_violations"].as_array().unwrap();
 	assert!(
-		results.iter().any(|v| {
+		declared.iter().any(|v| {
 			v["source_file"].as_str().unwrap().contains("adapters/store")
 				&& v["target_file"].as_str().unwrap().contains("core/service")
 		}),

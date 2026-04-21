@@ -1,14 +1,25 @@
 //! Deterministic tests for the `violations` command.
 //!
+//! Output shape (post RS-MG integration):
+//!   results: {
+//!     declared_boundary_violations: [...],
+//!     discovered_module_violations: [...]
+//!   }
+//!   stale_declarations: [...]
+//!   count: total (declared + discovered)
+//!   declared_boundary_count: N
+//!   discovered_module_count: N
+//!   stale_count: N
+//!
 //! Test matrix:
 //!   1. Usage error
 //!   2. Missing DB / open failure
 //!   3. Repo not found / no READY snapshot
-//!   4. No declarations => empty result
-//!   5. Declaration exists but no violating imports => empty result
+//!   4. No declarations => empty results in both sections
+//!   5. Declaration exists but no violating imports => empty results
 //!   6. Exact violation result with raw-SQL boundary declarations
 //!   7. Duplicate boundary declarations produce deduplicated violations
-//!   8. Envelope contract
+//!   8. Envelope contract (updated for new shape)
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -220,12 +231,17 @@ fn violations_exact_results() {
 	assert!(output.stderr.is_empty());
 
 	let result = parse_json(&output);
-	assert_eq!(result["count"], 1, "expected 1 violation, got: {}", result);
 
-	let violations = result["results"].as_array().unwrap();
-	assert_eq!(violations.len(), 1);
+	// Total count is declared + discovered
+	assert_eq!(result["count"], 1, "expected 1 total violation, got: {}", result);
+	assert_eq!(result["declared_boundary_count"], 1);
+	assert_eq!(result["discovered_module_count"], 0);
 
-	let v = &violations[0];
+	// Access declared violations via the new structure
+	let declared = result["results"]["declared_boundary_violations"].as_array().unwrap();
+	assert_eq!(declared.len(), 1);
+
+	let v = &declared[0];
 	assert_eq!(v["boundary_module"], "src/adapters");
 	assert_eq!(v["forbidden_module"], "src/core");
 	assert_eq!(v["reason"], "adapters must not depend on core");
@@ -239,6 +255,10 @@ fn violations_exact_results() {
 		"target should be service.ts, got: {}",
 		v["target_file"]
 	);
+
+	// Discovered section should be empty
+	let discovered = result["results"]["discovered_module_violations"].as_array().unwrap();
+	assert!(discovered.is_empty());
 }
 
 // -- 7. Duplicate declarations produce deduplicated violations --------
@@ -275,12 +295,13 @@ fn violations_dedup_duplicate_declarations() {
 
 	let result = parse_json(&output);
 	// Should still produce exactly 1 violation (store.ts → service.ts),
-	// not 2 (one per declaration).
+	// not 2 (one per declaration). Check declared section.
 	assert_eq!(
-		result["count"], 1,
+		result["declared_boundary_count"], 1,
 		"duplicate declarations must be deduplicated, got: {}",
 		result
 	);
+	assert_eq!(result["count"], 1, "total count should be 1");
 }
 
 // -- 8. Envelope contract ---------------------------------------------
@@ -313,6 +334,78 @@ fn violations_envelope_contract() {
 		result["basis_commit"].is_null() || result["basis_commit"].is_string()
 	);
 	assert!(result["stale"].is_boolean());
-	assert!(result["results"].is_array());
+
+	// Updated output shape: results is an object with two sections
+	assert!(result["results"].is_object(), "results must be object");
+	assert!(
+		result["results"]["declared_boundary_violations"].is_array(),
+		"declared_boundary_violations must be array"
+	);
+	assert!(
+		result["results"]["discovered_module_violations"].is_array(),
+		"discovered_module_violations must be array"
+	);
+
+	// Count fields
 	assert!(result["count"].is_number());
+	assert!(result["declared_boundary_count"].is_number());
+	assert!(result["discovered_module_count"].is_number());
+	assert!(result["stale_count"].is_number());
+	assert!(result["stale_declarations"].is_array());
+}
+
+// -- 9. Discovered-module violations integration ----------------------
+//
+// These tests verify the structural integration of discovered-module
+// policy into the unified violations command. Full end-to-end testing
+// of discovered-module violation detection is covered by:
+// - modules violations command tests (in the modules test suite)
+// - gate module_violations method tests
+//
+// Here we verify:
+// 1. The discovered section exists and is empty when no modules exist
+// 2. Both policy substrates can coexist
+
+#[test]
+fn violations_discovered_section_empty_when_no_modules() {
+	let (_r, _d, db) = build_violations_db();
+	let db_str = db.to_str().unwrap();
+
+	// No module candidates exist, so discovered_module_violations should be empty
+	let output = run_cmd(&["violations", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(0));
+
+	let result = parse_json(&output);
+
+	assert_eq!(result["discovered_module_count"], 0);
+	let discovered = result["results"]["discovered_module_violations"].as_array().unwrap();
+	assert!(discovered.is_empty());
+}
+
+// Note: Stale declaration detection is tested by the `modules violations`
+// command tests. The unified violations command uses the same evaluation
+// helper, so stale behavior is covered there.
+
+#[test]
+fn violations_both_sections_independent() {
+	let (_r, _d, db) = build_violations_db();
+	let db_str = db.to_str().unwrap();
+
+	// Set up declared boundary (legacy style) - this will produce a violation
+	insert_boundary_declaration(&db, "r1", "src/adapters", "src/core", None);
+
+	// Run violations command
+	let output = run_cmd(&["violations", db_str, "r1"]);
+	assert_eq!(output.status.code(), Some(0));
+
+	let result = parse_json(&output);
+
+	// Should have declared violation but no discovered (no modules set up)
+	assert_eq!(result["declared_boundary_count"], 1);
+	assert_eq!(result["discovered_module_count"], 0);
+	assert_eq!(result["count"], 1, "total is declared only");
+
+	// Both sections should exist
+	assert!(result["results"]["declared_boundary_violations"].is_array());
+	assert!(result["results"]["discovered_module_violations"].is_array());
 }
