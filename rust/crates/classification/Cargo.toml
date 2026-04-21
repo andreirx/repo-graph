@@ -50,6 +50,10 @@
 #           Output: WeightedNeighbors { outbound, inbound } with per-neighbor
 #           import_count and source_file_count. Sorted descending by
 #           import_count, then ascending by module_uid. Pure policy.
+# RS-MS-3a: hotspot_scorer.rs — pure hotspot scorer.
+#           Input: churn data, complexity data (both per-file).
+#           Output: hotspot entries with score = lines_changed * sum_complexity.
+#           Only files with BOTH inputs included. Sorted by score desc.
 #
 # Operating model: O-C zipper. Mirrors the discipline used in the
 # Rust-1 detector substrate port and the Rust-2 storage substrate

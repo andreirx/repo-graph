@@ -46,6 +46,12 @@
 #           Query-time per-file git churn for indexed files.
 #           Default window: 90.days.ago. No persistence.
 #           Git is the authoritative history source.
+# RS-MS-3a: hotspot_scorer.rs in classification crate.
+#           Pure support module: compute_hotspots(churn, complexity).
+# RS-MS-3b: `hotspots <db_path> <repo_uid> [--since <expr>]`
+#           Query-time hotspot analysis (churn × complexity).
+#           Formula: lines_changed * sum_complexity. No normalization.
+#           Only files with BOTH churn AND complexity included.
 # RS-MG-5:  `modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]`
 #           Cross-module dependency edges from discovered modules.
 #           Consumes module_candidates + module_file_ownership from TS indexer.

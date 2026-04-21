@@ -203,6 +203,16 @@ pub struct MeasurementRow {
 	pub value_json: String,
 }
 
+/// Per-file summed complexity from symbol measurements.
+///
+/// RS-MS-3: Joins measurements → nodes → files to aggregate
+/// cyclomatic_complexity measurements by file.
+#[derive(Debug, Clone)]
+pub struct FileComplexityRow {
+	pub file_path: String,
+	pub sum_complexity: u64,
+}
+
 /// An inference row read from the `inferences` table.
 ///
 /// Mirrors TS `InferenceRow` from `core/ports/storage.ts`, but
@@ -1553,6 +1563,43 @@ impl StorageConnection {
 			.map_err(StorageError::from)
 	}
 
+	/// Sum cyclomatic_complexity measurements per file via proper join.
+	///
+	/// RS-MS-3a: Joins measurements → nodes → files to aggregate
+	/// symbol-level complexity measurements by containing file. This
+	/// avoids parsing stable_key strings (which have format
+	/// `{repo}:{path}#{symbol}:SYMBOL:{kind}`).
+	///
+	/// Returns only files that have at least one complexity measurement.
+	/// The TS adapter uses `nodes.file_uid` for this join rather than
+	/// parsing the `#` delimiter from stable keys.
+	pub fn query_complexity_by_file(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<FileComplexityRow>, StorageError> {
+		let mut stmt = self.connection().prepare(
+			"SELECT f.path, SUM(CAST(JSON_EXTRACT(m.value_json, '$.value') AS INTEGER)) AS sum_complexity
+			 FROM measurements m
+			 JOIN nodes n ON m.target_stable_key = n.stable_key AND m.snapshot_uid = n.snapshot_uid
+			 JOIN files f ON n.file_uid = f.file_uid
+			 WHERE m.snapshot_uid = ? AND m.kind = 'cyclomatic_complexity'
+			 GROUP BY f.path",
+		)?;
+
+		let rows = stmt.query_map(
+			rusqlite::params![snapshot_uid],
+			|row| {
+				Ok(FileComplexityRow {
+					file_path: row.get(0)?,
+					sum_complexity: row.get::<_, i64>(1)? as u64,
+				})
+			},
+		)?;
+
+		rows.collect::<Result<Vec<_>, _>>()
+			.map_err(StorageError::from)
+	}
+
 	pub fn find_imports_between_paths(
 		&self,
 		snapshot_uid: &str,
@@ -2175,6 +2222,91 @@ mod tests {
 			"query_measurements_by_kind must propagate SQL error, got: {:?}",
 			result
 		);
+	}
+
+	// ── RS-MS-3a: query_complexity_by_file ──────────────────────
+
+	/// Helper: insert a node and file for complexity tests.
+	fn insert_file_and_symbol(
+		storage: &StorageConnection,
+		snapshot_uid: &str,
+		repo_uid: &str,
+		file_path: &str,
+		symbol_name: &str,
+	) -> String {
+		let file_uid = format!("{}:{}", repo_uid, file_path);
+		let stable_key = format!("{}:{}#{}:SYMBOL:FUNCTION", repo_uid, file_path, symbol_name);
+		let node_uid = format!("node-{}", symbol_name);
+
+		// Insert file if not exists
+		let _ = storage.connection().execute(
+			"INSERT OR IGNORE INTO files (file_uid, repo_uid, path, language, is_test)
+			 VALUES (?, ?, ?, 'typescript', 0)",
+			rusqlite::params![file_uid, repo_uid, file_path],
+		);
+
+		// Insert node
+		storage.connection().execute(
+			"INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, kind, subtype, name, file_uid)
+			 VALUES (?, ?, ?, ?, 'SYMBOL', 'FUNCTION', ?, ?)",
+			rusqlite::params![node_uid, snapshot_uid, repo_uid, stable_key, symbol_name, file_uid],
+		).unwrap();
+
+		stable_key
+	}
+
+	#[test]
+	fn query_complexity_by_file_sums_symbols_per_file() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		// Two symbols in same file
+		let key1 = insert_file_and_symbol(&storage, &snap_uid, "r1", "src/service.ts", "foo");
+		let key2 = insert_file_and_symbol(&storage, &snap_uid, "r1", "src/service.ts", "bar");
+		// One symbol in different file
+		let key3 = insert_file_and_symbol(&storage, &snap_uid, "r1", "src/util.ts", "helper");
+
+		// Insert complexity measurements
+		insert_measurement(&storage, "m1", &snap_uid, &key1, "cyclomatic_complexity", r#"{"value":5}"#);
+		insert_measurement(&storage, "m2", &snap_uid, &key2, "cyclomatic_complexity", r#"{"value":3}"#);
+		insert_measurement(&storage, "m3", &snap_uid, &key3, "cyclomatic_complexity", r#"{"value":7}"#);
+
+		let result = storage.query_complexity_by_file(&snap_uid).unwrap();
+		assert_eq!(result.len(), 2);
+
+		// Find each file's entry
+		let service = result.iter().find(|r| r.file_path == "src/service.ts").unwrap();
+		let util = result.iter().find(|r| r.file_path == "src/util.ts").unwrap();
+
+		// src/service.ts should have 5 + 3 = 8
+		assert_eq!(service.sum_complexity, 8);
+		// src/util.ts should have 7
+		assert_eq!(util.sum_complexity, 7);
+	}
+
+	#[test]
+	fn query_complexity_by_file_empty_on_no_measurements() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		// Insert file and symbol but no measurements
+		insert_file_and_symbol(&storage, &snap_uid, "r1", "src/service.ts", "foo");
+
+		let result = storage.query_complexity_by_file(&snap_uid).unwrap();
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn query_complexity_by_file_ignores_other_measurement_kinds() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		let key = insert_file_and_symbol(&storage, &snap_uid, "r1", "src/service.ts", "foo");
+
+		// Insert complexity + coverage
+		insert_measurement(&storage, "m1", &snap_uid, &key, "cyclomatic_complexity", r#"{"value":5}"#);
+		insert_measurement(&storage, "m2", &snap_uid, &key, "line_coverage", r#"{"value":0.85}"#);
+
+		let result = storage.query_complexity_by_file(&snap_uid).unwrap();
+		assert_eq!(result.len(), 1);
+		assert_eq!(result[0].sum_complexity, 5);
 	}
 
 	// ── Rust-30: query_inferences_by_kind ───────────────────────

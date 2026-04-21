@@ -191,6 +191,7 @@ rmap gate       <db_path> <repo_uid> [--strict | --advisory]  # CI gate (4 metho
 rmap orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]  # Agent orientation surface (rgr.agent.v1)
 rmap check      <db_path> <repo_uid>                                                  # Pre-action trust/safety check
 rmap churn      <db_path> <repo_uid> [--since <expr>]                                 # Query-time per-file git churn (default: 90.days.ago)
+rmap hotspots   <db_path> <repo_uid> [--since <expr>]                                 # Hotspots: churn × complexity (lines_changed * sum_complexity)
 rmap declare boundary <db_path> <repo_uid> <module> --forbids <target> [--reason <text>]
 rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
 rmap declare waiver <db_path> <repo_uid> <req_id> --requirement-version <n> --obligation-id <id> --reason <text> [--expires-at <iso>] [--created-by <a>] [--rationale-category <c>] [--policy-basis <t>]

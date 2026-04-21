@@ -273,6 +273,7 @@ pub(crate) mod boundary_matcher;
 pub mod boundary_parser;
 pub(crate) mod framework_boundary;
 pub(crate) mod framework_entrypoints;
+pub mod hotspot_scorer;
 pub mod module_edges;
 pub mod module_rollup;
 pub(crate) mod signals;

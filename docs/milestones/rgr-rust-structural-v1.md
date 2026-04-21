@@ -147,10 +147,12 @@ Git is the authoritative history source. TS implementation is reference, not spe
 | RS-MS-0 | Architecture decision: query-time default, explicit anchor opt-in later |
 | RS-MS-1 | `repo-graph-git` crate: `get_file_churn(repo_path, window)` |
 | RS-MS-2 | `rmap churn` command: query-time per-file git churn for indexed files |
+| RS-MS-3a | `hotspot_scorer.rs` in classification crate: pure scorer support module |
+| RS-MS-3b | `rmap hotspots` command: churn × complexity (lines_changed * sum_complexity) |
 
-Locked sequence (not yet shipped):
-- RS-MS-3: `rmap hotspots` command
-- Review usefulness before continuing
+Locked sequence (review before continuing):
+- RS-MS-4: `rmap risk` command (if hotspots proves useful)
+- Explicit anchor option for gate integration (deferred)
 
 Commands added:
 ```
