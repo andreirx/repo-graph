@@ -70,6 +70,17 @@
 #           Counts: declared_boundary_count, discovered_module_count, stale_count.
 #           stale_declarations are informational only.
 #           Exit semantics unchanged (always 0 on success).
+# RS-MG-11: `modules files <db_path> <repo_uid> <module>`
+#           File ownership surface. Lists files owned by a specific module.
+#           Module resolution: canonical_root_path exact → module_key exact → error.
+#           Output: file_uid, path, language, assignment_kind, confidence.
+#           Sorted by path. Standard envelope with module identity in extras.
+#           Output now includes two sections:
+#             - declared_boundary_violations (legacy directory boundaries)
+#             - discovered_module_violations (discovered-module boundaries)
+#           Counts: declared_boundary_count, discovered_module_count, stale_count.
+#           stale_declarations are informational only.
+#           Exit semantics unchanged (always 0 on success).
 #
 # No formatting-heavy UX.
 

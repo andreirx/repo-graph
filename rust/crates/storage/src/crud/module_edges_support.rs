@@ -107,6 +107,62 @@ impl StorageConnection {
 		}
 		Ok(results)
 	}
+
+	/// Read files owned by a specific module candidate.
+	///
+	/// Joins module_file_ownership with files to return ownership
+	/// details plus file metadata. Order is deterministic: sorted by
+	/// file path.
+	///
+	/// Returns empty Vec if the module has no owned files.
+	pub fn get_files_for_module(
+		&self,
+		snapshot_uid: &str,
+		module_candidate_uid: &str,
+	) -> Result<Vec<ModuleFileEntry>, StorageError> {
+		let conn = self.connection();
+		let mut stmt = conn.prepare(
+			"SELECT f.file_uid, f.path, f.language,
+			        o.assignment_kind, o.confidence
+			 FROM module_file_ownership o
+			 JOIN files f ON o.file_uid = f.file_uid
+			 WHERE o.snapshot_uid = ?
+			   AND o.module_candidate_uid = ?
+			 ORDER BY f.path ASC",
+		)?;
+
+		let rows = stmt.query_map(
+			rusqlite::params![snapshot_uid, module_candidate_uid],
+			|row| {
+				Ok(ModuleFileEntry {
+					file_uid: row.get("file_uid")?,
+					path: row.get("path")?,
+					language: row.get("language")?,
+					assignment_kind: row.get("assignment_kind")?,
+					confidence: row.get("confidence")?,
+				})
+			},
+		)?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			results.push(row?);
+		}
+		Ok(results)
+	}
+}
+
+/// A file owned by a module with ownership metadata.
+///
+/// Combines data from the `files` table (path, language) with
+/// ownership metadata from `module_file_ownership` (assignment_kind, confidence).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModuleFileEntry {
+	pub file_uid: String,
+	pub path: String,
+	pub language: Option<String>,
+	pub assignment_kind: String,
+	pub confidence: f64,
 }
 
 #[cfg(test)]
@@ -506,6 +562,160 @@ mod tests {
 		// Snapshot 2 has no ownership
 		let result2 = conn
 			.get_file_ownership_for_snapshot(&snap2.snapshot_uid)
+			.expect("query");
+		assert!(result2.is_empty());
+	}
+
+	// ── get_files_for_module tests ─────────────────────────────────
+
+	#[test]
+	fn get_files_for_module_returns_empty_for_empty_module() {
+		let conn = fresh_storage();
+		let (_, snapshot_uid) = setup_test_snapshot(&conn);
+
+		let result = conn
+			.get_files_for_module(&snapshot_uid, "nonexistent-module")
+			.expect("query");
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn get_files_for_module_returns_owned_files() {
+		let mut conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		// Create module
+		insert_module_candidate(&conn, "mc-app", &snapshot_uid, &repo_uid, "packages/app");
+
+		// Create files
+		let file_a = make_file(&repo_uid, "packages/app/index.ts");
+		let file_b = make_file(&repo_uid, "packages/app/utils.ts");
+		conn.upsert_files(&[file_a.clone(), file_b.clone()])
+			.expect("upsert files");
+
+		// Create ownership
+		insert_file_ownership(&conn, &snapshot_uid, &repo_uid, &file_a.file_uid, "mc-app");
+		insert_file_ownership(&conn, &snapshot_uid, &repo_uid, &file_b.file_uid, "mc-app");
+
+		let result = conn
+			.get_files_for_module(&snapshot_uid, "mc-app")
+			.expect("query");
+
+		assert_eq!(result.len(), 2);
+		// Sorted by path
+		assert_eq!(result[0].path, "packages/app/index.ts");
+		assert_eq!(result[1].path, "packages/app/utils.ts");
+	}
+
+	#[test]
+	fn get_files_for_module_includes_all_fields() {
+		let mut conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		// Create module
+		insert_module_candidate(&conn, "mc-core", &snapshot_uid, &repo_uid, "packages/core");
+
+		// Create file with language
+		let mut file = make_file(&repo_uid, "packages/core/lib.ts");
+		file.language = Some("typescript".to_string());
+		conn.upsert_files(std::slice::from_ref(&file)).expect("upsert file");
+
+		// Create ownership
+		insert_file_ownership(&conn, &snapshot_uid, &repo_uid, &file.file_uid, "mc-core");
+
+		let result = conn
+			.get_files_for_module(&snapshot_uid, "mc-core")
+			.expect("query");
+
+		assert_eq!(result.len(), 1);
+		let entry = &result[0];
+		assert_eq!(entry.file_uid, file.file_uid);
+		assert_eq!(entry.path, "packages/core/lib.ts");
+		assert_eq!(entry.language, Some("typescript".to_string()));
+		assert_eq!(entry.assignment_kind, "manifest");
+		assert!((entry.confidence - 1.0).abs() < f64::EPSILON);
+	}
+
+	#[test]
+	fn get_files_for_module_only_returns_files_for_specified_module() {
+		let mut conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		// Create two modules
+		insert_module_candidate(&conn, "mc-app", &snapshot_uid, &repo_uid, "packages/app");
+		insert_module_candidate(&conn, "mc-core", &snapshot_uid, &repo_uid, "packages/core");
+
+		// Create files
+		let file_app = make_file(&repo_uid, "packages/app/index.ts");
+		let file_core = make_file(&repo_uid, "packages/core/lib.ts");
+		conn.upsert_files(&[file_app.clone(), file_core.clone()])
+			.expect("upsert files");
+
+		// Assign to different modules
+		insert_file_ownership(&conn, &snapshot_uid, &repo_uid, &file_app.file_uid, "mc-app");
+		insert_file_ownership(&conn, &snapshot_uid, &repo_uid, &file_core.file_uid, "mc-core");
+
+		// Query for app module only
+		let result = conn
+			.get_files_for_module(&snapshot_uid, "mc-app")
+			.expect("query");
+
+		assert_eq!(result.len(), 1);
+		assert_eq!(result[0].path, "packages/app/index.ts");
+	}
+
+	#[test]
+	fn get_files_for_module_is_scoped_to_snapshot() {
+		let mut conn = fresh_storage();
+		let repo = make_repo("test-repo");
+		conn.add_repo(&repo).expect("add repo");
+
+		// Create two snapshots
+		let snap1 = conn
+			.create_snapshot(&CreateSnapshotInput {
+				repo_uid: repo.repo_uid.clone(),
+				kind: "full".to_string(),
+				basis_ref: None,
+				basis_commit: None,
+				parent_snapshot_uid: None,
+				label: None,
+				toolchain_json: None,
+			})
+			.expect("create snapshot 1");
+
+		let snap2 = conn
+			.create_snapshot(&CreateSnapshotInput {
+				repo_uid: repo.repo_uid.clone(),
+				kind: "full".to_string(),
+				basis_ref: None,
+				basis_commit: None,
+				parent_snapshot_uid: None,
+				label: None,
+				toolchain_json: None,
+			})
+			.expect("create snapshot 2");
+
+		// Set up module and file in snapshot 1 only
+		insert_module_candidate(&conn, "mc-1", &snap1.snapshot_uid, &repo.repo_uid, "pkg");
+		let file = make_file(&repo.repo_uid, "pkg/index.ts");
+		conn.upsert_files(std::slice::from_ref(&file)).expect("upsert file");
+		insert_file_ownership(
+			&conn,
+			&snap1.snapshot_uid,
+			&repo.repo_uid,
+			&file.file_uid,
+			"mc-1",
+		);
+
+		// Snapshot 1 has files for module
+		let result1 = conn
+			.get_files_for_module(&snap1.snapshot_uid, "mc-1")
+			.expect("query");
+		assert_eq!(result1.len(), 1);
+
+		// Snapshot 2 has no files for this module
+		let result2 = conn
+			.get_files_for_module(&snap2.snapshot_uid, "mc-1")
 			.expect("query");
 		assert!(result2.is_empty());
 	}
