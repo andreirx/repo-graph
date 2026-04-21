@@ -276,6 +276,7 @@ pub(crate) mod framework_entrypoints;
 pub mod module_edges;
 pub mod module_rollup;
 pub(crate) mod signals;
+pub mod weighted_neighbors;
 pub mod types;
 pub(crate) mod unresolved_classifier;
 

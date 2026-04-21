@@ -12,6 +12,22 @@ A CLI tool that indexes source code repositories into a queryable graph stored i
 
 Not a chatbot. Not a vector DB. A deterministic graph query engine.
 
+## Design principle: AI agent perspective
+
+When designing command output shapes and support module interfaces, always ask:
+
+**"What would I want to know as an AI agent? What would help me reason about this code? How would I write the query?"**
+
+This means:
+- **Normalized vectors over opaque maps.** An agent needs to iterate, filter, and correlate. Maps hide structure; vectors expose it.
+- **Exact identities over path strings.** An agent needs stable references for follow-up commands. Include `module_uid`, `module_key`, `canonical_root_path` — not just one.
+- **Weighted edges over plain neighbor lists.** An agent needs to know "who" and "how strongly." Include `import_count`, `source_file_count` per neighbor.
+- **Inline violations, not counts alone.** Violations are priority signals. Forcing a second command is friction.
+- **Explicit degradation state.** `null` means unknown; empty means known-zero. An agent must distinguish "no violations" from "violations unavailable."
+- **Deterministic ordering.** An agent may diff outputs across runs. Sort by meaningful keys (import weight, then path or UID).
+
+The CLI is the agent's primary interface. Every output shape decision should pass the test: "Does this help an AI agent reason about the codebase without unnecessary follow-up commands?"
+
 ## Architecture
 
 Clean Architecture. Dependency rule: inward only.
@@ -158,6 +174,7 @@ rmap stats      <db_path> <repo_uid>               # Module structural metrics
 rmap resource readers <db_path> <repo_uid> <resource_stable_key>  # Symbols with READS edges to resource
 rmap resource writers <db_path> <repo_uid> <resource_stable_key>  # Symbols with WRITES edges to resource
 rmap modules list <db_path> <repo_uid>  # Module catalog with per-module rollups (sorted by path)
+rmap modules show <db_path> <repo_uid> <module>  # Module briefing: identity, rollups, weighted neighbors, violations
 rmap modules files <db_path> <repo_uid> <module>  # Files owned by a module (sorted by path)
 rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]  # Cross-module dependency edges
 rmap modules violations <db_path> <repo_uid>  # Discovered-module boundary violations
@@ -224,6 +241,14 @@ Known Rust CLI divergences from TS CLI:
   the catalog is an orientation surface and must survive policy
   corruption. The `modules violations` and `violations` commands
   remain strict — malformed policy exits 2 there.
+- `modules show` is a module briefing (not list). Output shape differs
+  from the standard QueryResult envelope: no `results`/`count`, instead
+  `module` (identity), `rollups`, `outbound_dependencies` (weighted),
+  `inbound_dependencies` (weighted), `violations` (source-side only).
+  Resolution: `canonical_root_path` exact, then `module_key` exact.
+  Unknown module exits 1 (not 2). Same degradation contract as
+  `modules list`: on policy parse failure, `violation_count: null`,
+  `violations: null`, `rollups_degraded: true`.
 
 ## Native dependency note
 

@@ -134,10 +134,13 @@ headers and inline comments in the codebase (authoritative source).
 | RS-MG-11 | `modules files` command |
 | RS-MG-12a | module_rollup.rs — pure rollup aggregator (classification crate) |
 | RS-MG-12b | Per-module rollups in `modules list` output |
+| RS-MG-13a | weighted_neighbors.rs — weighted neighbor aggregation (classification crate) |
+| RS-MG-13b | `modules show` command — module briefing with weighted neighbors and inline violations |
 
 Commands added:
 ```
 rmap modules list <db_path> <repo_uid>
+rmap modules show <db_path> <repo_uid> <module>
 rmap modules files <db_path> <repo_uid> <module>
 rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]
 rmap modules violations <db_path> <repo_uid>

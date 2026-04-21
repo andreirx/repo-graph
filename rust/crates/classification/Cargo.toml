@@ -45,6 +45,11 @@
 #           violation count, dead symbol counts). Test/non-test split.
 #           Duplicate ownership rejected (same contract as RS-MG-2).
 #           Pure policy, no DB access.
+# RS-MG-13a: weighted_neighbors.rs — weighted neighbor aggregation.
+#           Input: focal module_uid, derived module edges.
+#           Output: WeightedNeighbors { outbound, inbound } with per-neighbor
+#           import_count and source_file_count. Sorted descending by
+#           import_count, then ascending by module_uid. Pure policy.
 #
 # Operating model: O-C zipper. Mirrors the discipline used in the
 # Rust-1 detector substrate port and the Rust-2 storage substrate
