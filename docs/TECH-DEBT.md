@@ -150,6 +150,31 @@
     not on Linux or other large repos.
 - **No clangd/libclang enrichment** for receiver-type resolution yet.
 
+## Symbol Identity — Stable Key Contract
+
+- **Duplicate symbol disambiguation (`:dupN` suffix):** The Rust TS/JS
+  extractor assigns stable keys using the pattern `repo:file#name:SYMBOL:subtype`.
+  When the same `(name, subtype)` appears multiple times in a file (common in
+  test files with repeated `function Component()` or `const container`), the
+  extractor appends `:dup2`, `:dup3`, etc. to subsequent occurrences.
+- **Occurrence-order sensitivity:** The `:dupN` ordinal is assigned by AST
+  preorder traversal during extraction. This means:
+  - Inserting an earlier same-name symbol in a file can renumber later duplicates.
+  - Cross-snapshot symbol identity is not preserved when same-name symbols
+    are added/removed/reordered.
+  - This is a practical collision fix, not a semantic identity model.
+- **Acceptable for current use cases:** Indexing, hotspots, and graph queries
+  work correctly because each snapshot has internally consistent keys. The
+  limitation matters for:
+  - Cross-snapshot symbol tracking (e.g., "did this function's complexity
+    change between commits?")
+  - Incremental delta refresh where unchanged files might reference symbols
+    whose keys shifted in changed files (this case is rare in practice).
+- **Not yet fixed:** A proper semantic identity model would require scope-
+  qualified names (e.g., `describe_block.it_block.Component`) or content
+  hashing. Deferred until cross-snapshot symbol tracking becomes a product
+  requirement.
+
 ## Coverage / Churn Import
 
 - File filtering uses repo-level file inventory (getFilesByRepo), not
