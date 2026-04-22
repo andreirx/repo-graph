@@ -7,10 +7,10 @@ validation targets.
 
 **In scope:**
 - FILE nodes
-- SYMBOL: functions, structs, enums, typedefs
+- SYMBOL: functions (definitions only), structs, enums, typedefs
 - IMPORTS edges from `#include` directives
-- CALLS edges from direct function call sites
-- Cyclomatic complexity metrics
+- CALLS edges from direct function call sites (plain identifiers only)
+- Cyclomatic complexity metrics (definitions only)
 - `:dupN` stable-key disambiguation (port from ts-extractor)
 
 **Out of scope (explicitly deferred):**
@@ -19,6 +19,126 @@ validation targets.
 - Function pointer call resolution
 - Header/source ownership policy
 - compile_commands.json integration
+- Typedef-aware semantic resolution
+- Linker-level cross-TU symbol resolution
+
+## Locked Decisions
+
+### 1. Declaration vs Definition
+
+**Definitions only.** Function declarations/prototypes do NOT create symbol nodes.
+
+- Symbol nodes created only for `function_definition`, not `declaration`
+- Headers with only prototypes: no function symbols, only FILE + includes
+- Complexity computed only on definitions
+
+Reason: Otherwise headers duplicate almost every function symbol, muddying
+callers/callees and complexity attribution.
+
+### 2. Header Handling
+
+- `.h` files ARE indexed as FILE nodes
+- `#include` edges ARE extracted from headers
+- Complexity computed only from function definitions (wherever they appear)
+
+Reason: Include graphs depend heavily on headers. Many C repos encode
+architecture in header layering.
+
+### 3. Anonymous Type Naming
+
+Explicit stable-key rules for anonymous types:
+
+| Form | Stable Key |
+|------|------------|
+| Named struct | `repo:file#MyStruct:SYMBOL:STRUCT` |
+| Anonymous struct | `repo:file#anon_struct:SYMBOL:STRUCT[:dupN]` |
+| Named enum | `repo:file#Status:SYMBOL:ENUM` |
+| Anonymous enum | `repo:file#anon_enum:SYMBOL:ENUM[:dupN]` |
+
+Do NOT derive names from parser text fragments. Use explicit `anon_*` prefix.
+
+### 4. CALLS Scope (Tight)
+
+Include:
+- Call expressions where callee is a plain identifier: `foo()`, `bar(x, y)`
+
+Exclude / mark unresolved:
+- Function pointer calls: `ptr()`, `(*fn)()`
+- Macro-generated calls (not syntactically visible as calls)
+- Member/dereference calls through pointers: `obj->method()`
+
+Reason: Honest graph quality over fake precision.
+
+### 5. `#include` Resolution
+
+- Extract IMPORTS edges from all `#include` directives
+- Local includes (`"foo.h"`): `isRelative=true`, attempt exact path match
+- System includes (`<stdio.h>`): `isRelative=false`, keep as external/unresolved
+- NO build-system search path emulation
+- NO compile_commands.json dependency
+- Resolution succeeds only when included path maps to an indexed file
+
+### 6. Complexity Rules (Pinned)
+
+Cyclomatic complexity for C v1:
+
+| Construct | Increment |
+|-----------|-----------|
+| Base | +1 |
+| `if` | +1 |
+| `else if` | +1 |
+| `for` | +1 |
+| `while` | +1 |
+| `do while` | +1 |
+| `case` | +1 |
+| `default` | +0 (no increment) |
+| `switch` | +0 (cases counted individually) |
+| `&&` | +1 |
+| `\|\|` | +1 |
+| `?:` (ternary) | +1 |
+| `goto` | +1 |
+
+This is pinned before cross-language comparisons start.
+
+### 7. Preprocessing Policy
+
+**Source-truth semantics, NOT compiler-truth.**
+
+- Parse source text as-is with tree-sitter-c
+- Do NOT expand macros
+- Do NOT evaluate `#ifdef` / `#ifndef` / `#if`
+- Extract only syntactically visible code in checked-out file contents
+- Code inside `#ifdef` blocks is parsed if syntactically valid C
+
+### 8. File Extensions
+
+**In scope:**
+- `.c`
+- `.h`
+
+**Out of scope:**
+- `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hxx`, `.h++` (C++ extensions)
+- `.inc` files: excluded unless explicitly added to path policy later
+
+### 9. Duplicate-Name Stability Caveat
+
+`:dupN` disambiguation is:
+- Deterministic within one file snapshot
+- Occurrence-order-sensitive (AST preorder)
+- Inserting an earlier same-name symbol renumbers later duplicates
+
+**This is technical debt on cross-snapshot symbol identity.** Documented now,
+not deferred to discovery.
+
+### 10. AI-Agent Usefulness Goal
+
+For an AI agent, C v1 must make these queries useful on `sqlite`:
+- `rmap hotspots` — top churn × complexity files
+- `rmap callers` / `rmap callees` — for directly called functions
+- Include-layer understanding via IMPORTS edges
+- `rmap dead` — only if graph quality supports it; otherwise mark low-confidence
+
+Implementation stays aligned with actual use, not extractor completeness.
 
 ## Crate Structure
 
@@ -128,16 +248,32 @@ C++ sequence (after C validation):
 2. C++ extractor v1 — separate `cpp-extractor` crate
 3. C++ validation — repos TBD
 
+## Validation Fixtures (Before Real Repos)
+
+Create focused extractor tests before jumping to `sqlite`:
+
+1. **Duplicate same-name functions** — repeated `static` functions in one file
+2. **Header + source** — prototype in `.h`, definition in `.c`, only definition creates symbol
+3. **Nested control flow** — verify complexity calculation
+4. **Local vs system include** — `"foo.h"` vs `<stdio.h>` edge differences
+5. **Function pointer exclusion** — `ptr()` marked unresolved, not as CALLS
+6. **Anonymous struct/enum** — `anon_struct`, `anon_enum` naming
+7. **Macro-heavy file** — parses partially, extracts what's visible
+8. **Multiple definitions same name** — `:dupN` disambiguation
+
+These tests will save time before the first real large-repo run.
+
 ## Implementation Substeps
 
 1. **Crate skeleton** — Cargo.toml, lib.rs, tree-sitter-c dependency
 2. **Parser setup** — initialize tree-sitter, parse C source
 3. **FILE node extraction** — one per file
-4. **Function extraction** — function_definition → SYMBOL:FUNCTION
-5. **Struct/enum/typedef extraction** — tagged types
+4. **Function extraction** — function_definition only (not declarations)
+5. **Struct/enum/typedef extraction** — tagged types, anonymous naming
 6. **Include extraction** — preproc_include → IMPORTS edge
-7. **Call extraction** — call_expression → CALLS edge
-8. **Complexity metrics** — cyclomatic complexity
+7. **Call extraction** — plain identifier calls only, exclude function pointers
+8. **Complexity metrics** — cyclomatic complexity per pinned rules
 9. **Stable-key disambiguation** — :dupN for duplicates
-10. **Integration** — wire into compose.rs, route C files
-11. **Validation** — sqlite, nginx, swupdate
+10. **Validation fixtures** — unit tests per fixture list above
+11. **Integration** — wire into compose.rs, route `.c`/`.h` files
+12. **Validation** — sqlite, nginx, swupdate
