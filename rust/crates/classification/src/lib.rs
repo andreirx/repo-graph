@@ -275,6 +275,7 @@ pub(crate) mod framework_boundary;
 pub(crate) mod framework_entrypoints;
 pub mod hotspot_scorer;
 pub mod module_edges;
+pub mod risk_scorer;
 pub mod module_rollup;
 pub(crate) mod signals;
 pub mod weighted_neighbors;

@@ -193,6 +193,7 @@ rmap check      <db_path> <repo_uid>                                            
 rmap churn      <db_path> <repo_uid> [--since <expr>]                                 # Query-time per-file git churn (default: 90.days.ago)
 rmap hotspots   <db_path> <repo_uid> [--since <expr>]                                 # Hotspots: churn × complexity (lines_changed * sum_complexity)
 rmap coverage   <db_path> <repo_uid> <coverage_json_path>                            # Import Istanbul/c8 coverage (file-level line_coverage)
+rmap risk       <db_path> <repo_uid> [--since <expr>]                                # Risk: hotspot × coverage gap (files with BOTH only)
 rmap declare boundary <db_path> <repo_uid> <module> --forbids <target> [--reason <text>]
 rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
 rmap declare waiver <db_path> <repo_uid> <req_id> --requirement-version <n> --obligation-id <id> --reason <text> [--expires-at <iso>] [--created-by <a>] [--rationale-category <c>] [--policy-basis <t>]

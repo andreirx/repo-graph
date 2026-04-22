@@ -57,6 +57,12 @@
 #           Delete-before-insert for idempotency.
 #           Exact path matching after repo-root-relative normalization.
 #           line_coverage only, file-level, stores value+covered+total.
+# RS-MS-4:  `risk <db_path> <repo_uid> [--since <expr>]`
+#           Query-time risk analysis: hotspot × coverage gap.
+#           Formula: risk_score = hotspot_score * (1 - line_coverage).
+#           Only files with BOTH hotspot AND coverage are included.
+#           Missing coverage = excluded (NOT degraded to risk = hotspot).
+#           Complete triage chain: hotspots → coverage → risk.
 # RS-MG-5:  `modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]`
 #           Cross-module dependency edges from discovered modules.
 #           Consumes module_candidates + module_file_ownership from TS indexer.
