@@ -1082,6 +1082,18 @@ fn gate_coverage_threshold_missing_value_field_aborts() {
 
 // ── Rust-29: complexity_threshold tests ────────────────────────────
 
+/// Delete all complexity measurements for a snapshot.
+/// Required because RS-MS-3c-prereq now auto-persists complexity
+/// during indexing, and tests need controlled measurement state.
+fn clear_complexity(db_path: &std::path::Path, snapshot_uid: &str) {
+	let conn = rusqlite::Connection::open(db_path).unwrap();
+	conn.execute(
+		"DELETE FROM measurements WHERE snapshot_uid = ? AND kind = 'cyclomatic_complexity'",
+		rusqlite::params![snapshot_uid],
+	)
+	.unwrap();
+}
+
 /// Insert a cyclomatic_complexity measurement row for a symbol.
 fn insert_complexity(
 	db_path: &std::path::Path,
@@ -1109,6 +1121,9 @@ fn gate_complexity_threshold_passes() {
 	let (_r, _d, db) = build_gate_db();
 	let db_str = db.to_str().unwrap();
 	let snap = get_snapshot_uid(&db);
+
+	// Clear auto-persisted complexity from indexing (RS-MS-3c-prereq)
+	clear_complexity(&db, &snap);
 
 	// CC=4 and CC=7, max=7, threshold=10, <= => PASS
 	insert_complexity(&db, "cc-1", &snap, "r1", "r1:src/core/service.ts:SYMBOL:serve", 4.0);
@@ -1166,6 +1181,10 @@ fn gate_complexity_threshold_fails() {
 fn gate_complexity_threshold_missing_data() {
 	let (_r, _d, db) = build_gate_db();
 	let db_str = db.to_str().unwrap();
+	let snap = get_snapshot_uid(&db);
+
+	// Clear auto-persisted complexity from indexing (RS-MS-3c-prereq)
+	clear_complexity(&db, &snap);
 
 	insert_requirement(
 		&db, "req-1", "r1", "REQ-001", 1,
@@ -1209,6 +1228,9 @@ fn gate_complexity_threshold_evidence_shape() {
 	let (_r, _d, db) = build_gate_db();
 	let db_str = db.to_str().unwrap();
 	let snap = get_snapshot_uid(&db);
+
+	// Clear auto-persisted complexity from indexing (RS-MS-3c-prereq)
+	clear_complexity(&db, &snap);
 
 	// CC=10 exactly, threshold=10, <= => PASS (boundary)
 	insert_complexity(&db, "cc-1", &snap, "r1", "r1:src/core/service.ts:SYMBOL:serve", 10.0);

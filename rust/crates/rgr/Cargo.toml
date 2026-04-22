@@ -52,6 +52,11 @@
 #           Query-time hotspot analysis (churn × complexity).
 #           Formula: lines_changed * sum_complexity. No normalization.
 #           Only files with BOTH churn AND complexity included.
+# RS-MS-4-prereq: `coverage <db_path> <repo_uid> <coverage_json_path>`
+#           Import Istanbul/c8 coverage-final.json into measurements.
+#           Delete-before-insert for idempotency.
+#           Exact path matching after repo-root-relative normalization.
+#           line_coverage only, file-level, stores value+covered+total.
 # RS-MG-5:  `modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]`
 #           Cross-module dependency edges from discovered modules.
 #           Consumes module_candidates + module_file_ownership from TS indexer.
@@ -114,6 +119,7 @@ path = "src/main.rs"
 [dependencies]
 repo-graph-agent = { path = "../agent" }
 repo-graph-classification = { path = "../classification" }
+repo-graph-coverage = { path = "../coverage" }
 repo-graph-gate = { path = "../gate" }
 repo-graph-git = { path = "../git" }
 repo-graph-repo-index = { path = "../repo-index" }
@@ -121,6 +127,7 @@ repo-graph-storage = { path = "../storage" }
 repo-graph-trust = { path = "../trust" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"

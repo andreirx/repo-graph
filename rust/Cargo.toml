@@ -21,6 +21,7 @@ resolver = "2"
 members = [
     "crates/agent",
     "crates/classification",
+    "crates/coverage",
     "crates/detectors",
     "crates/gate",
     "crates/git",
