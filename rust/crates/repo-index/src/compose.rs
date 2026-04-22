@@ -18,6 +18,7 @@ use repo_graph_indexer::routing;
 use repo_graph_indexer::storage_port::SnapshotLifecyclePort;
 use repo_graph_indexer::types::{IndexOptions, IndexResult};
 use repo_graph_storage::StorageConnection;
+use repo_graph_c_extractor::CExtractor;
 use repo_graph_ts_extractor::TsExtractor;
 
 use crate::config::RepoConfigContext;
@@ -279,14 +280,19 @@ pub fn index_into_storage(
 ) -> Result<IndexResult, ComposeError> {
 	let prepared = prepare_repo_inputs(repo_path)?;
 
-	let mut extractor = TsExtractor::new();
-	extractor
+	let mut ts_extractor = TsExtractor::new();
+	ts_extractor
 		.initialize()
-		.map_err(|e| ComposeError::ExtractorInit(e.to_string()))?;
+		.map_err(|e| ComposeError::ExtractorInit(format!("ts: {}", e)))?;
+
+	let mut c_extractor = CExtractor::new();
+	c_extractor
+		.initialize()
+		.map_err(|e| ComposeError::ExtractorInit(format!("c: {}", e)))?;
 
 	ensure_repo(storage, repo_uid, repo_path)?;
 
-	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut extractor];
+	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor];
 	let mut idx_options = IndexOptions {
 		basis_commit: options.basis_commit.clone(),
 		edge_batch_size: options.edge_batch_size,
@@ -348,14 +354,19 @@ pub fn refresh_into_storage(
 ) -> Result<IndexResult, ComposeError> {
 	let prepared = prepare_repo_inputs(repo_path)?;
 
-	let mut extractor = TsExtractor::new();
-	extractor
+	let mut ts_extractor = TsExtractor::new();
+	ts_extractor
 		.initialize()
-		.map_err(|e| ComposeError::ExtractorInit(e.to_string()))?;
+		.map_err(|e| ComposeError::ExtractorInit(format!("ts: {}", e)))?;
+
+	let mut c_extractor = CExtractor::new();
+	c_extractor
+		.initialize()
+		.map_err(|e| ComposeError::ExtractorInit(format!("c: {}", e)))?;
 
 	ensure_repo(storage, repo_uid, repo_path)?;
 
-	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut extractor];
+	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor];
 	let mut idx_options = IndexOptions {
 		basis_commit: options.basis_commit.clone(),
 		edge_batch_size: options.edge_batch_size,

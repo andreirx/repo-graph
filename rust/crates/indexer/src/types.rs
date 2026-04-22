@@ -136,6 +136,7 @@ pub enum NodeSubtype {
 	Class,
 	Method,
 	Interface,
+	Struct,
 	TypeAlias,
 	Variable,
 	Constant,

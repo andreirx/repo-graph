@@ -76,16 +76,18 @@ pub fn get_extension(file_path: &str) -> &str {
 /// Mirror of `detectLanguage` from `repo-indexer.ts:2888`.
 ///
 /// Note: the TS version only returns non-null for JS/TS family
-/// files. Other languages (Rust, Java, Python, C, C++) return
-/// `null` in TS and `None` here. The `language` field on
-/// `TrackedFile` reflects this: it is `Some("typescript")` etc.
-/// for JS/TS files and `None` for other languages.
+/// files. The Rust version extends this to C/C++ to support the
+/// native extractors. The `language` field on `TrackedFile` is
+/// `Some("typescript")`, `Some("c")`, etc. for supported
+/// languages, and `None` for languages without extractors.
 pub fn detect_language(file_path: &str) -> Option<&'static str> {
 	match get_extension(file_path) {
 		".ts" => Some("typescript"),
 		".tsx" => Some("tsx"),
 		".js" => Some("javascript"),
 		".jsx" => Some("jsx"),
+		".c" | ".h" => Some("c"),
+		".cpp" | ".cc" | ".cxx" | ".hpp" | ".hxx" => Some("cpp"),
 		_ => None,
 	}
 }

@@ -50,6 +50,7 @@ repo-graph-indexer = { path = "../indexer" }
 repo-graph-storage = { path = "../storage" }
 repo-graph-trust = { path = "../trust" }
 repo-graph-ts-extractor = { path = "../ts-extractor" }
+repo-graph-c-extractor = { path = "../c-extractor" }
 repo-graph-classification = { path = "../classification" }
 # State-boundary composition wiring (SB-4-pre).
 repo-graph-state-bindings  = { path = "../state-bindings" }

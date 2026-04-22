@@ -427,6 +427,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-c-extractor"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-classification",
+ "repo-graph-indexer",
+ "serde",
+ "serde_json",
+ "tree-sitter",
+ "tree-sitter-c",
+ "uuid",
+]
+
+[[package]]
 name = "repo-graph-classification"
 version = "0.1.0"
 dependencies = [
@@ -487,6 +500,7 @@ name = "repo-graph-repo-index"
 version = "0.1.0"
 dependencies = [
  "ignore",
+ "repo-graph-c-extractor",
  "repo-graph-classification",
  "repo-graph-indexer",
  "repo-graph-state-bindings",
@@ -834,6 +848,16 @@ dependencies = [
  "regex",
  "regex-syntax",
  "streaming-iterator",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-c"
+version = "0.23.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "afd2b1bf1585dc2ef6d69e87d01db8adb059006649dd5f96f31aa789ee6e9c71"
+dependencies = [
+ "cc",
  "tree-sitter-language",
 ]
 

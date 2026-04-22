@@ -32,7 +32,8 @@ use repo_graph_classification::types::{
 
 use crate::extractor_port::{ExtractorError, ExtractorPort};
 use crate::resolver::{
-	build_file_resolution_map, get_module_path, resolve_edges, ResolverIndex,
+	build_file_resolution_map, build_per_file_include_resolution, get_module_path,
+	resolve_edges, ResolverIndex,
 };
 use crate::routing::{self, detect_language, is_test_file, MAX_FILE_SIZE_BYTES};
 use crate::storage_port::{
@@ -534,13 +535,14 @@ fn run_pipeline<S: IndexerStoragePort>(
 	let resolver_nodes = storage.query_resolver_nodes(snap_uid)?;
 	// Use the FULL file set for resolution context.
 	let file_resolution_map = build_file_resolution_map(all_file_paths, repo_uid);
+	let per_file_include_map = build_per_file_include_resolution(all_file_paths, repo_uid);
 
 	let mut index = ResolverIndex {
 		nodes_by_stable_key: HashMap::new(),
 		nodes_by_name: HashMap::new(),
 		node_uid_to_file_uid: HashMap::new(),
 		file_resolution: file_resolution_map,
-		per_file_include_resolution: HashMap::new(),
+		per_file_include_resolution: per_file_include_map,
 		stable_key_to_uid: HashMap::new(),
 		file_to_module: HashMap::new(),
 	};

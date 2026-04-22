@@ -20,6 +20,7 @@
 resolver = "2"
 members = [
     "crates/agent",
+    "crates/c-extractor",
     "crates/classification",
     "crates/coverage",
     "crates/detectors",

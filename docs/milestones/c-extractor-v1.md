@@ -62,10 +62,15 @@ Do NOT derive names from parser text fragments. Use explicit `anon_*` prefix.
 Include:
 - Call expressions where callee is a plain identifier: `foo()`, `bar(x, y)`
 
-Exclude / mark unresolved:
+Exclude (no edge emitted):
 - Function pointer calls: `ptr()`, `(*fn)()`
 - Macro-generated calls (not syntactically visible as calls)
 - Member/dereference calls through pointers: `obj->method()`
+
+These are excluded entirely, NOT emitted as unresolved edges. Without type
+resolution, the target is unknowable; emitting an edge with an unresolvable
+target adds noise without adding value. The call site evidence is lost, but
+the graph remains honest about what it can and cannot resolve.
 
 Reason: Honest graph quality over fake precision.
 
@@ -182,14 +187,15 @@ Target key: the include path (e.g., `stdio.h`, `myheader.h`)
 
 ```c
 int main() {
-    foo();           // target_key = "foo"
-    bar(1, 2);       // target_key = "bar"
-    ptr->method();   // UNRESOLVED (function pointer)
+    foo();           // target_key = "foo" → CALLS edge emitted
+    bar(1, 2);       // target_key = "bar" → CALLS edge emitted
+    ptr->method();   // excluded, no edge emitted (see CALLS Scope)
 }
 ```
 
-Direct identifier calls only. Function pointer calls and macro-generated
-calls are marked unresolved. Honest about what can't be resolved syntactically.
+Direct identifier calls only. Function pointer calls, member-based calls, and
+macro-generated calls are excluded entirely (no edge emitted). See CALLS Scope
+(section 4) for rationale.
 
 ## Stable Key Contract
 
@@ -256,7 +262,7 @@ Create focused extractor tests before jumping to `sqlite`:
 2. **Header + source** — prototype in `.h`, definition in `.c`, only definition creates symbol
 3. **Nested control flow** — verify complexity calculation
 4. **Local vs system include** — `"foo.h"` vs `<stdio.h>` edge differences
-5. **Function pointer exclusion** — `ptr()` marked unresolved, not as CALLS
+5. **Function pointer exclusion** — `ptr()` excluded entirely, no edge emitted
 6. **Anonymous struct/enum** — `anon_struct`, `anon_enum` naming
 7. **Macro-heavy file** — parses partially, extracts what's visible
 8. **Multiple definitions same name** — `:dupN` disambiguation

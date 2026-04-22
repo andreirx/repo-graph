@@ -561,6 +561,67 @@ pub fn build_file_resolution_map(
 	map
 }
 
+/// Build the per-file include resolution map for C/C++ files.
+///
+/// For each C/C++ source file, maps bare header names to their
+/// stable keys based on the source file's directory. This enables
+/// resolving `#include "helper.h"` from `src/core/main.c` to
+/// `src/core/helper.h` if that header exists.
+///
+/// Outer key: source file UID (e.g., `r1:src/core/main.c`)
+/// Inner key: bare header name (e.g., `helper.h`)
+/// Value: resolved stable key (e.g., `r1:src/core/helper.h:FILE`)
+pub fn build_per_file_include_resolution(
+	file_paths: &[String],
+	repo_uid: &str,
+) -> HashMap<String, HashMap<String, String>> {
+	let mut result: HashMap<String, HashMap<String, String>> = HashMap::new();
+
+	// Collect all header files by directory.
+	// Key: directory path (e.g., "src/core")
+	// Value: Vec of (basename, full_path) for headers in that dir
+	let mut headers_by_dir: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
+
+	for path in file_paths {
+		if path.ends_with(".h") || path.ends_with(".hpp") || path.ends_with(".hxx") {
+			let dir = get_module_path(path).unwrap_or("");
+			let basename = path.rsplit('/').next().unwrap_or(path);
+			headers_by_dir.entry(dir).or_default().push((basename, path.as_str()));
+		}
+	}
+
+	// For each C/C++ file (source AND header), build its include resolution map.
+	// Headers can also have #include directives that need resolution.
+	for path in file_paths {
+		let is_c_file = path.ends_with(".c")
+			|| path.ends_with(".cpp")
+			|| path.ends_with(".cc")
+			|| path.ends_with(".cxx")
+			|| path.ends_with(".h")
+			|| path.ends_with(".hpp")
+			|| path.ends_with(".hxx");
+
+		if is_c_file {
+			let file_uid = format!("{}:{}", repo_uid, path);
+			let source_dir = get_module_path(path).unwrap_or("");
+
+			// Collect headers accessible from this file's directory.
+			if let Some(headers) = headers_by_dir.get(source_dir) {
+				let mut file_map = HashMap::new();
+				for (basename, header_path) in headers {
+					let header_stable_key = format!("{}:{}:FILE", repo_uid, header_path);
+					file_map.insert((*basename).to_string(), header_stable_key);
+				}
+				if !file_map.is_empty() {
+					result.insert(file_uid, file_map);
+				}
+			}
+		}
+	}
+
+	result
+}
+
 /// Strip the file extension, but ONLY for the JS/TS family
 /// (`.ts`, `.tsx`, `.js`, `.jsx`). Other extensions are left
 /// intact. This mirrors the TS `stripExtension` at
@@ -1062,5 +1123,57 @@ mod tests {
 
 		assert_eq!(result.resolved.len(), 1);
 		assert_eq!(result.resolved[0].target_node_uid, "fn_media");
+	}
+
+	// ── build_per_file_include_resolution ────────────────────
+
+	#[test]
+	fn per_file_include_resolution_same_directory() {
+		let paths = vec![
+			"src/core/main.c".to_string(),
+			"src/core/helper.c".to_string(),
+			"src/core/helper.h".to_string(),
+			"src/core/types.h".to_string(),
+		];
+		let map = build_per_file_include_resolution(&paths, "r1");
+
+		// main.c should have helper.h and types.h in its include map.
+		let main_map = map.get("r1:src/core/main.c").expect("main.c should be in map");
+		assert_eq!(
+			main_map.get("helper.h"),
+			Some(&"r1:src/core/helper.h:FILE".to_string())
+		);
+		assert_eq!(
+			main_map.get("types.h"),
+			Some(&"r1:src/core/types.h:FILE".to_string())
+		);
+
+		// helper.c should also have helper.h in its include map.
+		let helper_map = map.get("r1:src/core/helper.c").expect("helper.c should be in map");
+		assert_eq!(
+			helper_map.get("helper.h"),
+			Some(&"r1:src/core/helper.h:FILE".to_string())
+		);
+
+		// helper.h (a header) should also have types.h in its include map.
+		// Headers can include other headers in the same directory.
+		let header_map = map.get("r1:src/core/helper.h").expect("helper.h should be in map");
+		assert_eq!(
+			header_map.get("types.h"),
+			Some(&"r1:src/core/types.h:FILE".to_string())
+		);
+	}
+
+	#[test]
+	fn per_file_include_resolution_different_directory() {
+		let paths = vec![
+			"src/main.c".to_string(),
+			"include/helper.h".to_string(),
+		];
+		let map = build_per_file_include_resolution(&paths, "r1");
+
+		// main.c is in src/, header is in include/ — should NOT resolve.
+		// (No compile_commands.json integration in v1.)
+		assert!(map.get("r1:src/main.c").is_none());
 	}
 }
