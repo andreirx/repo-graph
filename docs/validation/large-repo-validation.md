@@ -213,20 +213,28 @@ Validation stopped here. Two repos (react, typescript) provide sufficient eviden
 
 ### Follow-Up Items
 
-**P1: Hotspot presentation filtering**
+**P1: C extractor (Rust)**
+- Unblocks sqlite, nginx, swupdate as real validation targets
+- These are closer to systems/architecture questions that matter
+- Proves Rust architecture generalizes beyond JS/TS
+- v1 scope: structural extraction (files, functions, includes, complexity)
+- Do NOT block on deep C semantics (macros, preprocessor, typedef resolution)
+
+**P2: Hotspot presentation filtering**
 - Not formula changes
 - View-policy controls for known noise sources (test baselines, generated paths)
 - Improves top-of-list working set for AI agent consumption
 
-**P2: Unresolved-edge reduction**
-- Now validated as the most important product-quality constraint
+**P3: Unresolved-edge reduction**
+- Important product-quality constraint for JS/TS
 - Evidence: consistent ~55-60% rate across two large repos
-- Investment justified by real measurement, not speculation
+- Investment justified, but after C extractor unblocks new validation surface
 
-**P3: Extractor ports (deferred)**
-- C extractor → unblocks sqlite, nginx, swupdate
-- Java extractor → unblocks kafka, hadoop
-- Lower priority than graph-quality improvements on current surface
+**P4: Java extractor (Rust)**
+- Unblocks kafka, hadoop
+- Lower priority than C — those repos are huge layered systems
+- Combines extractor maturity with scaling questions (harder to interpret)
+- Do after C validation complete
 
 ### Why Validation Stopped Here
 
