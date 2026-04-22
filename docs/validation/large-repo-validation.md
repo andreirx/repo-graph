@@ -174,3 +174,65 @@ resolve syntactically.
 - TypeScript confirms hotspot signal generalizes to large TS-first codebases
 - Test baseline pollution is a data quality issue, not extractor failure
 - Unresolved rate ~60% appears stable across large TS repos
+
+---
+
+## Conclusions (2026-04-22)
+
+Validation stopped here. Two repos (react, typescript) provide sufficient evidence.
+
+### Validated Operating Envelope
+
+**Rust `rmap` large-repo support for JS/TS is real:**
+- react: 4,345 files, 18s
+- typescript: 39,264 files, 75s
+- Throughput: ~500 files/sec (release build)
+- DB size: scales linearly (~17 KB/file average)
+
+**Hotspot signal is useful:**
+- react: strong head quality (React compiler, RSC, reconciler)
+- typescript: credible head quality (compiler utilities, core modules)
+- Top files are exactly what an engineer or agent would inspect first
+
+**Unresolved-edge rate is now a stable pattern:**
+- react: 55.9%
+- typescript: 60.3%
+- This is characteristic of large TS repos, not a one-off quirk
+
+### Identified Limitations
+
+1. **Test baseline pollution** — generated test output files surface in raw
+   hotspot rankings due to high line counts. View-policy filtering needed.
+
+2. **Unresolved-edge rate ~55-60%** — syntax-only extraction cannot resolve
+   dynamic patterns, type-only imports, internal API factories. This is the
+   primary graph-quality constraint for Rust on large TS repos.
+
+3. **Non-JS validation blocked** — C/Java/Python/Rust extractors are TS-only.
+   sqlite, nginx, kafka, hadoop, swupdate await Rust extractor ports.
+
+### Follow-Up Items
+
+**P1: Hotspot presentation filtering**
+- Not formula changes
+- View-policy controls for known noise sources (test baselines, generated paths)
+- Improves top-of-list working set for AI agent consumption
+
+**P2: Unresolved-edge reduction**
+- Now validated as the most important product-quality constraint
+- Evidence: consistent ~55-60% rate across two large repos
+- Investment justified by real measurement, not speculation
+
+**P3: Extractor ports (deferred)**
+- C extractor → unblocks sqlite, nginx, swupdate
+- Java extractor → unblocks kafka, hadoop
+- Lower priority than graph-quality improvements on current surface
+
+### Why Validation Stopped Here
+
+Additional JS/TS repos (next.js, webpack, angular) would:
+- Measure the same extractor maturity zone
+- Mostly reconfirm the same pattern
+- Consume time without changing the architectural picture
+
+The validation has provided enough evidence to justify next decisions.
