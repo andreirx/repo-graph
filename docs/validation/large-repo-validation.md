@@ -3,14 +3,35 @@
 Validation runs against real-world open-source repositories.
 Purpose: stress-test indexing, measurement quality, and CLI ergonomics at scale.
 
-## Validation Sequence (planned)
+## Scope
 
-1. `react` — JS/TS-heavy, modern ecosystem
-2. `sqlite` — compact systems code (C)
-3. `nginx` — systems code (C)
-4. `kafka` — Java, architecture-heavy
-5. `swupdate` — embedded/safety-critical (C)
-6. `hadoop` — very large, multi-package (Java)
+**Track A: Rust `rmap` validation (JS/TS repos only)**
+
+The Rust CLI currently has only the TS/JS extractor. Large-repo validation
+for `rmap` applies only to JS/TS codebases.
+
+Validation targets:
+1. `react` — JSX-heavy, modern ecosystem (done)
+2. `typescript` — large TS-first codebase, compiler architecture
+3. `next.js` — framework, mixed patterns
+4. `webpack` — bundler, plugin architecture
+5. `angular` — framework, heavy decorators
+
+**Track B: Extractor gaps (blocked repos)**
+
+These repos cannot validate `rmap` until Rust extractors are ported.
+They are roadmap evidence, not validation targets.
+
+| Repo | Blocked by | Language |
+|------|------------|----------|
+| `sqlite` | missing Rust C extractor | C |
+| `nginx` | missing Rust C extractor | C |
+| `kafka` | missing Rust Java extractor | Java |
+| `hadoop` | missing Rust Java extractor | Java |
+| `swupdate` | missing Rust C extractor | C |
+
+Do NOT use `rgr` (TS CLI) as a proxy for `rmap` validation. That answers
+"is the TS extractor mature?" not "is the Rust product ready?"
 
 ---
 
@@ -93,3 +114,63 @@ disambiguation in the Rust TS/JS extractor.
 - Risk analysis not tested (depends on coverage)
 - Module graph not explored
 - No framework detector for React patterns (would require JSX-aware extraction)
+
+---
+
+## typescript
+
+**Date:** 2026-04-22
+**Commit:** `55423abe4d029017f19b6e4c32097591994836b4`
+**Branch:** `main`
+**Clone:** full (with history)
+
+### Metrics
+
+| Metric | Value |
+|--------|-------|
+| Files indexed | 39,264 |
+| Nodes total | 326,469 |
+| Edges resolved | 62,670 |
+| Edges unresolved | 95,330 |
+| Unresolved rate | 60.3% |
+| DB size | 674 MB |
+| Indexing time | 75s (release build) |
+| Complexity measurements | 58,924 |
+| Files with hotspots | 10,326 |
+
+### Hotspot Head Quality
+
+Raw hotspot ranking is polluted by test baseline files (`tests/baselines/reference/*.js`)
+which are generated output with high line counts but low complexity. Filtering by
+path prefix gives clean signal.
+
+**Top hotspots (excluding test baselines):**
+
+| Rank | File | Hotspot Score |
+|------|------|---------------|
+| 1 | src/compiler/utilities.ts | 339,624 |
+| 2 | src/harness/fourslashImpl.ts | 81,528 |
+| 3 | src/compiler/commandLineParser.ts | ~50K |
+| 4 | src/compiler/moduleNameResolver.ts | high |
+| 5 | src/compiler/core.ts | high |
+| 6 | src/server/editorServices.ts | high |
+| 7 | src/compiler/program.ts | high |
+| 8 | src/compiler/binder.ts | high |
+
+### Assessment
+
+**Indexing scale:** Strong. 39K files in 75s (~530 files/sec).
+
+**Runtime:** No memory issues at 674 MB DB.
+
+**Hotspot signal:** Credible for core compiler code. Test baselines pollute raw
+rankings. An agent filtering `src/compiler/` or `src/services/` gets clean signal.
+
+**Unresolved rate (60.3%):** Slightly higher than React. TypeScript uses internal
+API patterns (factory functions, type-only imports, namespace merging) that don't
+resolve syntactically.
+
+**Interpretation:**
+- TypeScript confirms hotspot signal generalizes to large TS-first codebases
+- Test baseline pollution is a data quality issue, not extractor failure
+- Unresolved rate ~60% appears stable across large TS repos
