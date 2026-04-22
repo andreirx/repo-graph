@@ -162,6 +162,7 @@ impl ExtractorPort for TsExtractor {
 			class_bindings: None,
 			enclosing_class_name: None,
 			member_types: std::collections::HashMap::new(),
+			stable_key_counts: std::collections::HashMap::new(),
 		};
 
 		// ── Walk top-level statements ─────────────────────────
@@ -282,6 +283,43 @@ struct ExtractionCtx<'a> {
 	enclosing_class_name: Option<String>,
 	/// Interface/class member type map for 3-part chain resolution.
 	member_types: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+	/// Tracks usage count for each base stable_key to detect duplicates.
+	/// Key: base stable_key (without :dupN suffix)
+	/// Value: count of occurrences seen so far (1 = first, 2 = second, etc.)
+	stable_key_counts: std::collections::HashMap<String, u32>,
+}
+
+impl<'a> ExtractionCtx<'a> {
+	/// Generate a stable_key for a symbol, with duplicate disambiguation.
+	///
+	/// If this is the first symbol with this (name, subtype) in the file,
+	/// returns the base key. If duplicate, appends :dup{N} where N is the
+	/// occurrence ordinal (2, 3, ...).
+	///
+	/// This ensures collision-free keys while preserving readability:
+	/// - First `Component` → `repo:file#Component:SYMBOL:FUNCTION`
+	/// - Second `Component` → `repo:file#Component:SYMBOL:FUNCTION:dup2`
+	/// - Third `Component` → `repo:file#Component:SYMBOL:FUNCTION:dup3`
+	fn make_stable_key(&mut self, name: &str, subtype: &NodeSubtype) -> String {
+		let subtype_str = serde_json::to_value(subtype)
+			.ok()
+			.and_then(|v| v.as_str().map(|s| s.to_string()))
+			.unwrap_or_else(|| format!("{:?}", subtype));
+
+		let base_key = format!(
+			"{}:{}#{}:SYMBOL:{}",
+			self.repo_uid, self.file_path, name, subtype_str
+		);
+
+		let count = self.stable_key_counts.entry(base_key.clone()).or_insert(0);
+		*count += 1;
+
+		if *count == 1 {
+			base_key
+		} else {
+			format!("{}:dup{}", base_key, count)
+		}
+	}
 }
 
 // ── Common helpers ───────────────────────────────────────────────
@@ -326,6 +364,7 @@ fn extract_doc_comment(node: &tree_sitter::Node, source: &[u8]) -> Option<String
 }
 
 /// Build a SYMBOL node with the standard stable_key format.
+/// Uses ctx.make_stable_key() for duplicate disambiguation.
 fn make_symbol_node(
 	name: &str,
 	subtype: NodeSubtype,
@@ -333,18 +372,9 @@ fn make_symbol_node(
 	signature: Option<String>,
 	node: &tree_sitter::Node,
 	source: &[u8],
-	ctx: &ExtractionCtx,
+	ctx: &mut ExtractionCtx,
 ) -> ExtractedNode {
-	// Subtype must be SCREAMING_SNAKE_CASE in the stable_key,
-	// matching the TS format. Use serde serialization.
-	let subtype_str = serde_json::to_value(&subtype)
-		.ok()
-		.and_then(|v| v.as_str().map(|s| s.to_string()))
-		.unwrap_or_else(|| format!("{:?}", subtype));
-	let stable_key = format!(
-		"{}:{}#{}:SYMBOL:{}",
-		ctx.repo_uid, ctx.file_path, name, subtype_str
-	);
+	let stable_key = ctx.make_stable_key(name, &subtype);
 	ExtractedNode {
 		node_uid: uuid::Uuid::new_v4().to_string(),
 		snapshot_uid: ctx.snapshot_uid.into(),
@@ -625,14 +655,7 @@ fn extract_method(
 		format!("{}{}", name, p.utf8_text(source).unwrap_or("()"))
 	});
 
-	let subtype_str = serde_json::to_value(&subtype)
-		.ok()
-		.and_then(|v| v.as_str().map(|s| s.to_string()))
-		.unwrap_or_else(|| format!("{:?}", subtype));
-	let stable_key = format!(
-		"{}:{}#{}:SYMBOL:{}",
-		ctx.repo_uid, ctx.file_path, qualified_name, subtype_str
-	);
+	let stable_key = ctx.make_stable_key(&qualified_name, &subtype);
 
 	let method_node = ExtractedNode {
 		node_uid: uuid::Uuid::new_v4().to_string(),
@@ -686,14 +709,7 @@ fn extract_property(
 	let name = name_node.utf8_text(source).unwrap_or("");
 	let qualified_name = format!("{}.{}", parent_class_name, name);
 
-	let subtype_str = serde_json::to_value(&NodeSubtype::Property)
-		.ok()
-		.and_then(|v| v.as_str().map(|s| s.to_string()))
-		.unwrap_or("PROPERTY".into());
-	let stable_key = format!(
-		"{}:{}#{}:SYMBOL:{}",
-		ctx.repo_uid, ctx.file_path, qualified_name, subtype_str
-	);
+	let stable_key = ctx.make_stable_key(&qualified_name, &NodeSubtype::Property);
 
 	ctx.nodes.push(ExtractedNode {
 		node_uid: uuid::Uuid::new_v4().to_string(),
@@ -874,19 +890,13 @@ fn extract_interface_method(
 		format!("{}{}", name, p.utf8_text(source).unwrap_or("()"))
 	});
 
-	let subtype_str = serde_json::to_value(&subtype)
-		.ok()
-		.and_then(|v| v.as_str().map(|s| s.to_string()))
-		.unwrap_or_else(|| format!("{:?}", subtype));
+	let stable_key = ctx.make_stable_key(&qualified_name, &subtype);
 
 	ctx.nodes.push(ExtractedNode {
 		node_uid: uuid::Uuid::new_v4().to_string(),
 		snapshot_uid: ctx.snapshot_uid.into(),
 		repo_uid: ctx.repo_uid.into(),
-		stable_key: format!(
-			"{}:{}#{}:SYMBOL:{}",
-			ctx.repo_uid, ctx.file_path, qualified_name, subtype_str
-		),
+		stable_key,
 		kind: NodeKind::Symbol,
 		subtype: Some(subtype),
 		name: name.into(),
@@ -915,19 +925,13 @@ fn extract_interface_property(
 	let name = name_node.utf8_text(source).unwrap_or("");
 	let qualified_name = format!("{}.{}", parent_name, name);
 
-	let subtype_str = serde_json::to_value(&NodeSubtype::Property)
-		.ok()
-		.and_then(|v| v.as_str().map(|s| s.to_string()))
-		.unwrap_or("PROPERTY".into());
+	let stable_key = ctx.make_stable_key(&qualified_name, &NodeSubtype::Property);
 
 	ctx.nodes.push(ExtractedNode {
 		node_uid: uuid::Uuid::new_v4().to_string(),
 		snapshot_uid: ctx.snapshot_uid.into(),
 		repo_uid: ctx.repo_uid.into(),
-		stable_key: format!(
-			"{}:{}#{}:SYMBOL:{}",
-			ctx.repo_uid, ctx.file_path, qualified_name, subtype_str
-		),
+		stable_key,
 		kind: NodeKind::Symbol,
 		subtype: Some(NodeSubtype::Property),
 		name: name.into(),
@@ -1187,9 +1191,10 @@ fn extract_type_alias(
 	};
 	let name = name_node.utf8_text(source).unwrap_or("");
 	let visibility = if exported { Visibility::Export } else { Visibility::Private };
-	ctx.nodes.push(make_symbol_node(
+	let type_alias_node = make_symbol_node(
 		name, NodeSubtype::TypeAlias, visibility, None, node, source, ctx,
-	));
+	);
+	ctx.nodes.push(type_alias_node);
 }
 
 fn extract_enum(
@@ -1204,9 +1209,10 @@ fn extract_enum(
 	};
 	let name = name_node.utf8_text(source).unwrap_or("");
 	let visibility = if exported { Visibility::Export } else { Visibility::Private };
-	ctx.nodes.push(make_symbol_node(
+	let enum_node = make_symbol_node(
 		name, NodeSubtype::Enum, visibility, None, node, source, ctx,
-	));
+	);
+	ctx.nodes.push(enum_node);
 }
 
 // ── Import extraction ────────────────────────────────────────────
@@ -3286,6 +3292,126 @@ export function load() {
 			result.resolved_callsites[0].enclosing_symbol_node_uid,
 			load_fn.node_uid,
 			"ResolvedCallsite's enclosing_symbol_node_uid must match the containing function's node_uid"
+		);
+	}
+
+	// ── Duplicate stable_key disambiguation ──────────────────────
+
+	#[test]
+	fn duplicate_functions_get_disambiguated_stable_keys() {
+		let mut ext = TsExtractor::new();
+		ext.initialize().unwrap();
+		// Two functions with the same name in the same file (common in test files).
+		let result = extract_ok(
+			&ext,
+			r#"
+function Component() { return 1; }
+function Component() { return 2; }
+function Component() { return 3; }
+"#,
+			"src/test.ts",
+		);
+
+		let component_nodes: Vec<_> = result
+			.nodes
+			.iter()
+			.filter(|n| n.name == "Component" && n.kind == NodeKind::Symbol)
+			.collect();
+
+		assert_eq!(component_nodes.len(), 3, "should extract all three Component functions");
+
+		// Collect stable_keys and verify they are unique.
+		let stable_keys: Vec<&str> = component_nodes.iter().map(|n| n.stable_key.as_str()).collect();
+		let unique_keys: std::collections::HashSet<&str> = stable_keys.iter().cloned().collect();
+		assert_eq!(unique_keys.len(), 3, "all stable_keys must be unique");
+
+		// Verify the disambiguation pattern: first has no suffix, others have :dupN.
+		assert!(
+			stable_keys.iter().any(|k| k.ends_with("#Component:SYMBOL:FUNCTION")),
+			"first occurrence should have no :dup suffix"
+		);
+		assert!(
+			stable_keys.iter().any(|k| k.ends_with("#Component:SYMBOL:FUNCTION:dup2")),
+			"second occurrence should have :dup2 suffix"
+		);
+		assert!(
+			stable_keys.iter().any(|k| k.ends_with("#Component:SYMBOL:FUNCTION:dup3")),
+			"third occurrence should have :dup3 suffix"
+		);
+	}
+
+	#[test]
+	fn duplicate_constants_get_disambiguated_stable_keys() {
+		let mut ext = TsExtractor::new();
+		ext.initialize().unwrap();
+		// Two constants with the same name (common in describe blocks).
+		let result = extract_ok(
+			&ext,
+			r#"
+const container = document.getElementById("a");
+const container = document.getElementById("b");
+"#,
+			"src/test.ts",
+		);
+
+		let container_nodes: Vec<_> = result
+			.nodes
+			.iter()
+			.filter(|n| n.name == "container" && n.kind == NodeKind::Symbol)
+			.collect();
+
+		assert_eq!(container_nodes.len(), 2, "should extract both container constants");
+
+		let stable_keys: Vec<&str> = container_nodes.iter().map(|n| n.stable_key.as_str()).collect();
+		let unique_keys: std::collections::HashSet<&str> = stable_keys.iter().cloned().collect();
+		assert_eq!(unique_keys.len(), 2, "all stable_keys must be unique");
+
+		assert!(
+			stable_keys.iter().any(|k| k.ends_with("#container:SYMBOL:CONSTANT")),
+			"first occurrence should have no :dup suffix"
+		);
+		assert!(
+			stable_keys.iter().any(|k| k.ends_with("#container:SYMBOL:CONSTANT:dup2")),
+			"second occurrence should have :dup2 suffix"
+		);
+	}
+
+	#[test]
+	fn different_subtypes_do_not_collide() {
+		let mut ext = TsExtractor::new();
+		ext.initialize().unwrap();
+		// A function and a constant with the same name should NOT collide.
+		let result = extract_ok(
+			&ext,
+			r#"
+function Thing() {}
+const Thing = 42;
+"#,
+			"src/test.ts",
+		);
+
+		let thing_nodes: Vec<_> = result
+			.nodes
+			.iter()
+			.filter(|n| n.name == "Thing" && n.kind == NodeKind::Symbol)
+			.collect();
+
+		assert_eq!(thing_nodes.len(), 2);
+
+		// Different subtypes = different base keys, no disambiguation needed.
+		let stable_keys: Vec<&str> = thing_nodes.iter().map(|n| n.stable_key.as_str()).collect();
+		assert!(
+			stable_keys.iter().any(|k| k.ends_with("#Thing:SYMBOL:FUNCTION")),
+			"function Thing should have FUNCTION subtype"
+		);
+		assert!(
+			stable_keys.iter().any(|k| k.ends_with("#Thing:SYMBOL:CONSTANT")),
+			"const Thing should have CONSTANT subtype"
+		);
+		// Neither should have :dup suffix since they have different base keys.
+		assert!(
+			!stable_keys.iter().any(|k| k.contains(":dup")),
+			"different subtypes should not trigger disambiguation"
 		);
 	}
 }
