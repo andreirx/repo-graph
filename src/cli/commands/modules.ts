@@ -48,68 +48,106 @@ export function registerModulesCommands(
 		.command("list <repo>")
 		.description("List discovered module candidates with rollup statistics")
 		.option("--json", "JSON output")
-		.action((repoRef: string, opts: { json?: boolean }) => {
-			const ctx = getCtx();
-			const resolved = resolveRepoAndSnapshot(ctx, repoRef);
-			if (!resolved) {
-				outputError(
-					opts.json,
-					`Repository not found or not indexed: ${repoRef}`,
-				);
-				process.exitCode = 1;
-				return;
-			}
-			const { snapshotUid } = resolved;
+		.option(
+			"--kind <kind>",
+			"Filter by module kind (declared, operational, inferred)",
+		)
+		.option(
+			"--source <source>",
+			"Filter by evidence source type (kbuild, directory_structure, package_json_workspaces, etc.)",
+		)
+		.action(
+			(
+				repoRef: string,
+				opts: { json?: boolean; kind?: string; source?: string },
+			) => {
+				const ctx = getCtx();
+				const resolved = resolveRepoAndSnapshot(ctx, repoRef);
+				if (!resolved) {
+					outputError(
+						opts.json,
+						`Repository not found or not indexed: ${repoRef}`,
+					);
+					process.exitCode = 1;
+					return;
+				}
+				const { snapshotUid } = resolved;
 
-			const rollups = ctx.storage.queryModuleCandidateRollups(snapshotUid);
+				let rollups = ctx.storage.queryModuleCandidateRollups(snapshotUid);
 
-			if (rollups.length === 0) {
-				if (opts.json) {
-					process.stdout.write(JSON.stringify([]));
-				} else {
-					process.stdout.write(
-						"No discovered modules. Index with manifest/workspace detection enabled.\n",
+				// Apply --kind filter.
+				if (opts.kind) {
+					const validKinds = ["declared", "operational", "inferred"];
+					if (!validKinds.includes(opts.kind)) {
+						outputError(
+							opts.json,
+							`Invalid --kind value: ${opts.kind}. Valid values: ${validKinds.join(", ")}`,
+						);
+						process.exitCode = 1;
+						return;
+					}
+					rollups = rollups.filter((r) => r.moduleKind === opts.kind);
+				}
+
+				// Apply --source filter.
+				if (opts.source) {
+					rollups = rollups.filter((r) =>
+						r.evidenceSources.includes(opts.source!),
 					);
 				}
-				return;
-			}
 
-			if (opts.json) {
-				process.stdout.write(JSON.stringify(rollups, null, 2));
-				return;
-			}
+				if (rollups.length === 0) {
+					if (opts.json) {
+						process.stdout.write(JSON.stringify([]));
+					} else {
+						const filterMsg =
+							opts.kind || opts.source
+								? " (with current filters)"
+								: ". Index with manifest/workspace detection enabled";
+						process.stdout.write(`No discovered modules${filterMsg}.\n`);
+					}
+					return;
+				}
 
-			// Human-readable table.
-			const header = padRow([
-				"MODULE",
-				"NAME",
-				"KIND",
-				"CONF",
-				"FILES",
-				"SYMBOLS",
-				"TESTS",
-				"EVIDENCE",
-				"LANGS",
-				"DIR_MOD",
-			]);
-			process.stdout.write(header + "\n");
+				if (opts.json) {
+					process.stdout.write(JSON.stringify(rollups, null, 2));
+					return;
+				}
 
-			for (const r of rollups) {
-				const row = padRow([
-					r.canonicalRootPath,
-					r.displayName ?? "-",
-					r.moduleKind,
-					r.confidence.toFixed(2),
-					String(r.fileCount),
-					String(r.symbolCount),
-					String(r.testFileCount),
-					String(r.evidenceCount),
-					r.languages || "-",
-					r.hasDirectoryModule ? "yes" : "no",
+				// Human-readable table: original rollup columns + Layer 3 provenance.
+				const header = padRowList([
+					"MODULE",
+					"NAME",
+					"KIND",
+					"CONF",
+					"FILES",
+					"SYMBOLS",
+					"TESTS",
+					"EVIDENCE",
+					"SOURCES",
+					"LANGS",
+					"DIR_MOD",
 				]);
-				process.stdout.write(row + "\n");
-			}
-		});
+				process.stdout.write(header + "\n");
+
+				for (const r of rollups) {
+					const row = padRowList([
+						r.canonicalRootPath,
+						r.displayName ?? "-",
+						r.moduleKind,
+						r.confidence.toFixed(2),
+						String(r.fileCount),
+						String(r.symbolCount),
+						String(r.testFileCount),
+						String(r.evidenceCount),
+						r.evidenceSources.join(",") || "-",
+						r.languages || "-",
+						r.hasDirectoryModule ? "yes" : "no",
+					]);
+					process.stdout.write(row + "\n");
+				}
+			},
+		);
 
 	// ── evidence ────────────────────────────────────────────────────
 
@@ -915,6 +953,20 @@ function outputError(json: boolean | undefined, message: string): void {
 function padRow(cols: string[]): string {
 	// Fixed widths per column for readable output.
 	const widths = [35, 25, 12, 6, 7, 9, 6, 9, 20, 8];
+	return cols
+		.map((c, i) => {
+			const w = widths[i] ?? 20;
+			return c.length > w ? c.slice(0, w - 1) + "~" : c.padEnd(w);
+		})
+		.join("  ");
+}
+
+/**
+ * Pad row for `modules list` with original rollup + Layer 3 provenance.
+ * Columns: MODULE, NAME, KIND, CONF, FILES, SYMBOLS, TESTS, EVIDENCE, SOURCES, LANGS, DIR_MOD
+ */
+function padRowList(cols: string[]): string {
+	const widths = [28, 16, 11, 6, 6, 8, 6, 9, 26, 16, 8];
 	return cols
 		.map((c, i) => {
 			const w = widths[i] ?? 20;

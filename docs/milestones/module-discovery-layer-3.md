@@ -297,6 +297,7 @@ Design slice complete:
 - [x] A1: Wire into module discovery orchestrator (scanner + indexer integration)
 - [x] B1: Directory detector (pure function)
 - [x] B1: Wire into orchestrator and validate A1+B1 precedence
+- [x] CLI: Layer 3 module visibility (`modules list` provenance exposure + filters)
 - [ ] C1: Design Source C (after A/B validation)
 
 ## Shipped (A1)
@@ -471,12 +472,54 @@ This is corroborating evidence, not conflict. The orchestrator correctly:
 file ownership tiebreaks at the same root, they are equivalent. In practice,
 overlapping roots merge into a single candidate, so there's no tiebreak.
 
+## Shipped (CLI Visibility)
+
+### Layer 3 Module Visibility (2026-04-23)
+
+Makes inferred modules visible, inspectable, and distinguishable from
+declared/operational modules.
+
+**Storage changes (`ModuleCandidateRollup`):**
+- `evidenceSources: string[]` — distinct evidence source types
+- `primarySource: string | null` — highest-confidence source
+- `isInferred: boolean` — convenience for moduleKind === "inferred"
+
+**SQL query updates:**
+- Aggregates evidence sources via `GROUP_CONCAT(DISTINCT source_type ORDER BY source_type)`
+- Derives primary source from highest-confidence evidence item, alphabetical tie-breaker
+- Deterministic ordering ensures stable JSON/table output across runs
+
+**CLI changes (`modules list`):**
+- Preserved original columns: SYMBOLS, TESTS, LANGS, DIR_MOD
+- Added provenance column: SOURCES
+- Full fields in JSON output: evidenceSources, primarySource, isInferred
+- `--kind <kind>` filter: declared, operational, inferred
+- `--source <source>` filter: kbuild, directory_structure, package_json_workspaces, etc.
+
+**Language detection expanded:**
+Extended `detectLanguage()` to recognize all extractor-supported languages:
+c, cpp, rust, java, python, go (in addition to typescript, tsx, javascript, jsx).
+Required for B1 directory coherence on non-JS/TS repos.
+
+**Example output:**
+```
+MODULE        NAME   KIND      CONF  FILES  SYMBOLS  TESTS  EVIDENCE  SOURCES                     LANGS       DIR_MOD
+src/core      core   inferred  0.70  5      9        0      1         directory_structure         typescript  yes
+drivers/net   net    inferred  0.90  5      5        0      2         directory_structure,kbuild  c           yes
+```
+
+Overlapping A1+B1 modules show both sources (alphabetical order), primary is kbuild
+(confidence 0.9 > 0.7).
+
+**Tests:**
+- 17 tests in `test/cli/modules-list.test.ts` (B1 visibility)
+- 10 tests in `test/cli/modules-list-overlap.test.ts` (A1+B1 corroboration)
+
 ## Deferred Items
 
 - Graph clustering design (C1 slice, after A/B validation)
 - Diagnostic persistence (schema + storage)
 - Migration schema for inferred modules
-- CLI changes for Layer 3 modules
 - Confidence calibration study
 - GNU Makefile detector (Source A expansion)
 - CMake detector (Source A expansion)

@@ -1467,7 +1467,9 @@ export class SqliteStorage implements StoragePort {
 				COALESCE(symbols.symbol_count, 0) AS symbol_count,
 				COALESCE(evidence.evidence_count, 0) AS evidence_count,
 				COALESCE(ownership.languages, '') AS languages,
-				CASE WHEN dir_mod.node_uid IS NOT NULL THEN 1 ELSE 0 END AS has_directory_module
+				CASE WHEN dir_mod.node_uid IS NOT NULL THEN 1 ELSE 0 END AS has_directory_module,
+				COALESCE(evidence.evidence_sources, '') AS evidence_sources,
+				evidence.primary_source AS primary_source
 			FROM module_candidates mc
 			LEFT JOIN (
 				SELECT
@@ -1490,7 +1492,20 @@ export class SqliteStorage implements StoragePort {
 				GROUP BY mfo.module_candidate_uid
 			) symbols ON symbols.module_candidate_uid = mc.module_candidate_uid
 			LEFT JOIN (
-				SELECT module_candidate_uid, COUNT(*) AS evidence_count
+				SELECT
+					module_candidate_uid,
+					COUNT(*) AS evidence_count,
+					-- Deterministic ordering: alphabetical by source_type
+					GROUP_CONCAT(DISTINCT source_type ORDER BY source_type) AS evidence_sources,
+					(
+						-- Primary source: highest confidence, alphabetical tie-breaker
+						SELECT source_type
+						FROM module_candidate_evidence e2
+						WHERE e2.module_candidate_uid = module_candidate_evidence.module_candidate_uid
+						  AND e2.snapshot_uid = module_candidate_evidence.snapshot_uid
+						ORDER BY e2.confidence DESC, e2.source_type ASC
+						LIMIT 1
+					) AS primary_source
 				FROM module_candidate_evidence
 				WHERE snapshot_uid = ?
 				GROUP BY module_candidate_uid
@@ -1503,20 +1518,28 @@ export class SqliteStorage implements StoragePort {
 			ORDER BY mc.canonical_root_path
 		`).all(snapshotUid, snapshotUid, snapshotUid, snapshotUid) as Array<Record<string, unknown>>;
 
-		return rows.map((r) => ({
-			moduleCandidateUid: r.module_candidate_uid as string,
-			moduleKey: r.module_key as string,
-			canonicalRootPath: r.canonical_root_path as string,
-			displayName: (r.display_name as string) ?? null,
-			moduleKind: r.module_kind as string,
-			confidence: r.confidence as number,
-			fileCount: r.file_count as number,
-			symbolCount: r.symbol_count as number,
-			testFileCount: r.test_file_count as number,
-			evidenceCount: r.evidence_count as number,
-			languages: (r.languages as string) ?? "",
-			hasDirectoryModule: (r.has_directory_module as number) === 1,
-		}));
+		return rows.map((r) => {
+			const moduleKind = r.module_kind as string;
+			const evidenceSourcesStr = (r.evidence_sources as string) ?? "";
+			return {
+				moduleCandidateUid: r.module_candidate_uid as string,
+				moduleKey: r.module_key as string,
+				canonicalRootPath: r.canonical_root_path as string,
+				displayName: (r.display_name as string) ?? null,
+				moduleKind,
+				confidence: r.confidence as number,
+				fileCount: r.file_count as number,
+				symbolCount: r.symbol_count as number,
+				testFileCount: r.test_file_count as number,
+				evidenceCount: r.evidence_count as number,
+				languages: (r.languages as string) ?? "",
+				hasDirectoryModule: (r.has_directory_module as number) === 1,
+				// Layer 3 visibility fields
+				evidenceSources: evidenceSourcesStr ? evidenceSourcesStr.split(",") : [],
+				primarySource: (r.primary_source as string) ?? null,
+				isInferred: moduleKind === "inferred",
+			};
+		});
 	}
 
 	queryModuleOwnedFiles(

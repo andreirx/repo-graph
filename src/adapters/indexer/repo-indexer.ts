@@ -3028,14 +3028,41 @@ function sha256Hex(content: string): string {
 function detectLanguage(filePath: string): string | null {
 	const ext = getExtension(filePath);
 	switch (ext) {
+		// TypeScript
 		case ".ts":
 			return "typescript";
 		case ".tsx":
 			return "tsx";
+		// JavaScript
 		case ".js":
 			return "javascript";
 		case ".jsx":
 			return "jsx";
+		// C/C++
+		case ".c":
+			return "c";
+		case ".h":
+			return "c";
+		case ".cpp":
+		case ".cc":
+		case ".cxx":
+			return "cpp";
+		case ".hpp":
+		case ".hh":
+		case ".hxx":
+			return "cpp";
+		// Rust
+		case ".rs":
+			return "rust";
+		// Java
+		case ".java":
+			return "java";
+		// Python
+		case ".py":
+			return "python";
+		// Go
+		case ".go":
+			return "go";
 		default:
 			return null;
 	}

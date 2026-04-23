@@ -1155,6 +1155,26 @@ export interface ModuleCandidateRollup {
 	languages: string;
 	/** Whether a directory MODULE node exists with this root path. */
 	hasDirectoryModule: boolean;
+
+	// ── Layer 3 visibility fields ──────────────────────────────────────
+
+	/**
+	 * Distinct evidence source types for this module.
+	 * Examples: ["kbuild"], ["directory_structure"], ["kbuild", "directory_structure"].
+	 * Empty array if no evidence (should not happen for valid candidates).
+	 */
+	evidenceSources: string[];
+
+	/**
+	 * The highest-confidence evidence source type, or null if no evidence.
+	 * For overlapping A1+B1 modules, this is "kbuild" (confidence 0.9 > 0.7).
+	 */
+	primarySource: string | null;
+
+	/**
+	 * True if moduleKind === "inferred". Convenience for filtering/display.
+	 */
+	isInferred: boolean;
 }
 
 /**
