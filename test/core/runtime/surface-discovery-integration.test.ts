@@ -40,6 +40,16 @@ const DOCKERFILE_APP_FIXTURE = join(
 	"../../fixtures/dockerfile-app",
 );
 
+const COMPOSE_MULTISERVICE_FIXTURE = join(
+	import.meta.dirname,
+	"../../fixtures/compose-multiservice",
+);
+
+const DOCKERFILE_PLUS_COMPOSE_FIXTURE = join(
+	import.meta.dirname,
+	"../../fixtures/dockerfile-plus-compose",
+);
+
 let extractor: TypeScriptExtractor;
 let scanner: ManifestScanner;
 
@@ -349,6 +359,182 @@ describe("surface discovery integration — dockerfile", () => {
 		const payload = JSON.parse(dockerEvidence[0].payloadJson!);
 		expect(payload.baseImage).toBe("node:20-alpine");
 		expect(payload.baseRuntimeKind).toBe("node");
+
+		provider.close();
+	});
+});
+
+// ── compose-multiservice fixture ───────────────────────────────────
+
+describe("surface discovery integration — docker-compose", () => {
+	it("produces distinct surfaces for each compose service", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "surface-compose-multi";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "compose-multiservice",
+			rootPath: COMPOSE_MULTISERVICE_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+
+		// Should have 3 compose service surfaces
+		const composeSurfaces = surfaces.filter((s) => s.sourceType === "docker_compose");
+		expect(composeSurfaces).toHaveLength(3);
+
+		// Service names should be distinct
+		const serviceNames = composeSurfaces
+			.map((s) => JSON.parse(s.metadataJson!).serviceName)
+			.sort();
+		expect(serviceNames).toEqual(["api", "redis", "worker"]);
+
+		provider.close();
+	});
+
+	it("each compose service has distinct stableSurfaceKey", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "surface-compose-keys";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "compose-multiservice",
+			rootPath: COMPOSE_MULTISERVICE_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+		const composeSurfaces = surfaces.filter((s) => s.sourceType === "docker_compose");
+
+		// All stableSurfaceKeys must be unique
+		const keys = composeSurfaces.map((s) => s.stableSurfaceKey);
+		expect(new Set(keys).size).toBe(keys.length);
+
+		provider.close();
+	});
+
+	it("compose services have correct sourceSpecificId (serviceName)", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "surface-compose-identity";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "compose-multiservice",
+			rootPath: COMPOSE_MULTISERVICE_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+		const apiSurface = surfaces.find(
+			(s) => s.sourceType === "docker_compose" && s.displayName === "api",
+		);
+
+		expect(apiSurface).toBeDefined();
+		expect(apiSurface!.sourceSpecificId).toBe("api");
+
+		provider.close();
+	});
+
+	it("image-only compose service produces lower confidence surface", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "surface-compose-image";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "compose-multiservice",
+			rootPath: COMPOSE_MULTISERVICE_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+		const redisSurface = surfaces.find(
+			(s) => s.sourceType === "docker_compose" && s.displayName === "redis",
+		);
+
+		expect(redisSurface).toBeDefined();
+		// Image-only should have lower confidence than build services
+		expect(redisSurface!.confidence).toBeLessThan(0.85);
+
+		provider.close();
+	});
+});
+
+// ── dockerfile-plus-compose fixture ────────────────────────────────
+
+describe("surface discovery integration — dockerfile plus compose", () => {
+	it("Dockerfile and compose.yml at same root produce distinct surfaces", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "surface-docker-compose";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "dockerfile-plus-compose",
+			rootPath: DOCKERFILE_PLUS_COMPOSE_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+
+		// Should have both dockerfile and compose surfaces
+		const dockerfileSurface = surfaces.find((s) => s.sourceType === "dockerfile");
+		const composeSurface = surfaces.find((s) => s.sourceType === "docker_compose");
+
+		expect(dockerfileSurface).toBeDefined();
+		expect(composeSurface).toBeDefined();
+
+		// They should have different stableSurfaceKeys
+		expect(dockerfileSurface!.stableSurfaceKey).not.toBe(composeSurface!.stableSurfaceKey);
+
+		provider.close();
+	});
+
+	it("both surfaces have runtimeKind = container", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "surface-both-container";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "dockerfile-plus-compose",
+			rootPath: DOCKERFILE_PLUS_COMPOSE_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+		const containerSurfaces = surfaces.filter((s) => s.runtimeKind === "container");
+
+		// Both dockerfile and compose surfaces should be containers
+		expect(containerSurfaces.length).toBeGreaterThanOrEqual(2);
 
 		provider.close();
 	});

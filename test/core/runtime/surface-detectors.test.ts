@@ -12,9 +12,11 @@
 import { describe, expect, it } from "vitest";
 import {
 	detectCargoSurfaces,
+	detectComposeSurfaces,
 	detectDockerfileSurfaces,
 	detectPackageJsonSurfaces,
 	detectPyprojectSurfaces,
+	type ComposeFileInput,
 } from "../../../src/core/runtime/surface-detectors.js";
 
 // ── package.json ───────────────────────────────────────────────────
@@ -567,5 +569,281 @@ CMD ["npm", "run", "custom-script"]
 		// Unknown script falls through to default backend_service with lower confidence
 		expect(surfaces[0].surfaceKind).toBe("backend_service");
 		expect(surfaces[0].confidence).toBe(0.70);
+	});
+});
+
+// ── Docker Compose ─────────────────────────────────────────────────
+
+describe("detectComposeSurfaces", () => {
+	it("produces one surface per service", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{ name: "api", image: "node:20", buildContext: null, dockerfile: null, containerName: null, command: ["npm", "start"], entrypoint: null, ports: ["3000:3000"], envVars: [], profiles: [], dependsOn: [] },
+				{ name: "worker", image: "node:20", buildContext: null, dockerfile: null, containerName: null, command: ["npm", "run", "worker"], entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+				{ name: "redis", image: "redis:7-alpine", buildContext: null, dockerfile: null, containerName: null, command: null, entrypoint: null, ports: ["6379:6379"], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		expect(surfaces).toHaveLength(3);
+		expect(surfaces.map((s) => s.displayName).sort()).toEqual(["api", "redis", "worker"]);
+	});
+
+	it("sets sourceType to docker_compose", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{ name: "api", image: "node:20", buildContext: null, dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		expect(surfaces[0].sourceType).toBe("docker_compose");
+	});
+
+	it("sets runtimeKind to container", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{ name: "api", image: "node:20", buildContext: null, dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		expect(surfaces[0].runtimeKind).toBe("container");
+	});
+
+	it("sets serviceName for identity", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{ name: "my-service", image: "node:20", buildContext: null, dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		expect(surfaces[0].serviceName).toBe("my-service");
+	});
+
+	it("resolves rootPath from build context", () => {
+		const input: ComposeFileInput = {
+			filePath: "services/docker-compose.yml",
+			services: [
+				{ name: "api", image: null, buildContext: "./api", dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		expect(surfaces[0].rootPath).toBe("services/api");
+	});
+
+	it("resolves rootPath from build context with parent traversal", () => {
+		const input: ComposeFileInput = {
+			filePath: "infra/compose/docker-compose.yml",
+			services: [
+				{ name: "api", image: null, buildContext: "../../services/api", dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		expect(surfaces[0].rootPath).toBe("services/api");
+	});
+
+	it("uses compose directory as rootPath for image-only services", () => {
+		const input: ComposeFileInput = {
+			filePath: "infra/docker-compose.yml",
+			services: [
+				{ name: "redis", image: "redis:7", buildContext: null, dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		expect(surfaces[0].rootPath).toBe("infra");
+	});
+
+	it("has higher confidence for build services than image-only", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{ name: "api", image: null, buildContext: ".", dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+				{ name: "redis", image: "redis:7", buildContext: null, dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		const api = surfaces.find((s) => s.displayName === "api")!;
+		const redis = surfaces.find((s) => s.displayName === "redis")!;
+		expect(api.confidence).toBeGreaterThan(redis.confidence);
+	});
+
+	it("resolves dockerfilePath from build context", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{ name: "api", image: null, buildContext: "./api", dockerfile: "Dockerfile.prod", command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		expect(surfaces[0].dockerfilePath).toBe("api/Dockerfile.prod");
+	});
+
+	it("uses default Dockerfile when not specified in build", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{ name: "api", image: null, buildContext: "./api", dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		expect(surfaces[0].dockerfilePath).toBe("api/Dockerfile");
+	});
+
+	it("infers baseRuntimeKind from image", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{ name: "api", image: "node:20-alpine", buildContext: null, dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		const payload = surfaces[0].evidence[0].payload as Record<string, unknown>;
+		expect(payload.baseRuntimeKind).toBe("node");
+	});
+
+	it("infers surfaceKind from command", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{ name: "api", image: "node:20", buildContext: null, dockerfile: null, containerName: null, command: ["npm", "start"], entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		expect(surfaces[0].surfaceKind).toBe("backend_service");
+	});
+
+	it("records ports and dependsOn in evidence", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{ name: "api", image: "node:20", buildContext: null, dockerfile: null, containerName: null, command: null, entrypoint: null, ports: ["3000:3000", "9229:9229"], envVars: [], profiles: [], dependsOn: ["db", "redis"] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		const payload = surfaces[0].evidence[0].payload as Record<string, unknown>;
+		expect(payload.ports).toEqual(["3000:3000", "9229:9229"]);
+		expect(payload.dependsOn).toEqual(["db", "redis"]);
+	});
+
+	it("handles root compose file (filePath without directory)", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{ name: "api", image: null, buildContext: ".", dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		expect(surfaces[0].rootPath).toBe(".");
+		expect(surfaces[0].dockerfilePath).toBe("Dockerfile");
+	});
+
+	it("skips services with external build context that escapes repo root", () => {
+		const input: ComposeFileInput = {
+			filePath: "infra/docker-compose.yml",
+			services: [
+				{ name: "external", image: null, buildContext: "../../outside-repo", dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		// External build context services are skipped entirely
+		expect(surfaces).toHaveLength(0);
+	});
+
+	it("skips services with external build context from repo root", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{ name: "external", image: null, buildContext: "../sibling-repo", dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		// External build context services are skipped entirely
+		expect(surfaces).toHaveLength(0);
+	});
+
+	it("keeps valid in-repo services when others are external", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{ name: "external", image: null, buildContext: "../outside", dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+				{ name: "api", image: null, buildContext: "./api", dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		// Only the in-repo service should be kept
+		expect(surfaces).toHaveLength(1);
+		expect(surfaces[0].displayName).toBe("api");
+		expect(surfaces[0].rootPath).toBe("api");
+	});
+
+	it("resolves valid build context with parent traversal", () => {
+		const input: ComposeFileInput = {
+			filePath: "infra/docker-compose.yml",
+			services: [
+				{ name: "api", image: null, buildContext: "../services/api", dockerfile: null, containerName: null, command: null, entrypoint: null, ports: [], envVars: [], profiles: [], dependsOn: [] },
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		expect(surfaces).toHaveLength(1);
+		expect(surfaces[0].rootPath).toBe("services/api");
+		expect(surfaces[0].dockerfilePath).toBe("services/api/Dockerfile");
+	});
+
+	it("includes containerName, envVars, and profiles in evidence", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{
+					name: "api",
+					image: "node:20",
+					buildContext: null,
+					dockerfile: null,
+					containerName: "my-api-container",
+					command: null,
+					entrypoint: null,
+					ports: [],
+					envVars: ["NODE_ENV", "PORT", "DATABASE_URL"],
+					profiles: ["dev", "production"],
+					dependsOn: [],
+				},
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		expect(surfaces).toHaveLength(1);
+
+		const payload = surfaces[0].evidence[0].payload as Record<string, unknown>;
+		expect(payload.containerName).toBe("my-api-container");
+		expect(payload.envVars).toEqual(["NODE_ENV", "PORT", "DATABASE_URL"]);
+		expect(payload.profiles).toEqual(["dev", "production"]);
+
+		const metadata = surfaces[0].metadata as Record<string, unknown>;
+		expect(metadata.containerName).toBe("my-api-container");
+		expect(metadata.envVars).toEqual(["NODE_ENV", "PORT", "DATABASE_URL"]);
+		expect(metadata.profiles).toEqual(["dev", "production"]);
+	});
+
+	it("uses containerName as displayName when available", () => {
+		const input: ComposeFileInput = {
+			filePath: "docker-compose.yml",
+			services: [
+				{
+					name: "api",
+					image: "node:20",
+					buildContext: null,
+					dockerfile: null,
+					containerName: "custom-api-name",
+					command: null,
+					entrypoint: null,
+					ports: [],
+					envVars: [],
+					profiles: [],
+					dependsOn: [],
+				},
+			],
+		};
+		const surfaces = detectComposeSurfaces(input);
+		expect(surfaces[0].displayName).toBe("custom-api-name");
 	});
 });

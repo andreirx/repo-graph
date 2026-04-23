@@ -899,3 +899,205 @@ function inferBaseRuntime(baseImage: string): RuntimeKind {
 	// alpine, ubuntu, debian, centos, fedora, etc.
 	return "unknown";
 }
+
+// ── Docker Compose detector ────────────────────────────────────────
+
+/**
+ * Input DTO for a compose service.
+ * Core defines this interface; adapter layer provides the data.
+ */
+export interface ComposeServiceInput {
+	/** Service name (key in the services map). */
+	name: string;
+	/** Image to use (if image-only service). */
+	image: string | null;
+	/** Build context path (relative to compose file, null if image-only). */
+	buildContext: string | null;
+	/** Dockerfile path (relative to build context). */
+	dockerfile: string | null;
+	/** Container name override (if specified). */
+	containerName: string | null;
+	/** Command override (if specified). */
+	command: string[] | null;
+	/** Entrypoint override (if specified). */
+	entrypoint: string[] | null;
+	/** Ports exposed. */
+	ports: string[];
+	/** Environment variable names (not values). */
+	envVars: string[];
+	/** Profiles this service belongs to. */
+	profiles: string[];
+	/** Dependencies (depends_on). */
+	dependsOn: string[];
+}
+
+/**
+ * Input DTO for a compose file.
+ */
+export interface ComposeFileInput {
+	/** Repo-relative path to the compose file. */
+	filePath: string;
+	/** Services in the compose file. */
+	services: ComposeServiceInput[];
+}
+
+/**
+ * Detect project surfaces from a docker-compose file.
+ *
+ * Each service becomes one surface:
+ *   - sourceType = "docker_compose"
+ *   - runtimeKind = "container"
+ *   - serviceName required for identity
+ *
+ * Build services (with build context):
+ *   - rootPath = build context resolved relative to compose file
+ *   - Higher confidence (0.85)
+ *   - Skipped if build context escapes repo root (external)
+ *
+ * Image-only services:
+ *   - rootPath = compose file directory
+ *   - Lower confidence (0.70)
+ */
+export function detectComposeSurfaces(
+	input: ComposeFileInput,
+): DetectedSurface[] {
+	const surfaces: DetectedSurface[] = [];
+	const composeDir = input.filePath.includes("/")
+		? input.filePath.slice(0, input.filePath.lastIndexOf("/"))
+		: ".";
+
+	for (const service of input.services) {
+		const hasBuild = service.buildContext !== null;
+		const hasImage = service.image !== null;
+
+		// Compute rootPath: build context or compose file directory.
+		let rootPath: string;
+		if (hasBuild && service.buildContext) {
+			const resolved = resolvePath(composeDir, service.buildContext);
+			if (resolved === null) {
+				// Build context escapes repo root — skip this service.
+				// We cannot analyze code outside the repo, and attaching
+				// to compose directory would create false module ownership.
+				continue;
+			}
+			rootPath = resolved;
+		} else {
+			rootPath = composeDir;
+		}
+
+		// Compute dockerfilePath for evidence (if build specifies dockerfile).
+		let dockerfilePath: string | null = null;
+		if (hasBuild) {
+			if (service.dockerfile) {
+				dockerfilePath = resolvePath(rootPath, service.dockerfile);
+			} else {
+				// Default Dockerfile in build context.
+				dockerfilePath = resolvePath(rootPath, "Dockerfile");
+			}
+		}
+
+		// Infer surface kind from command/entrypoint.
+		const { surfaceKind, confidence: cmdConfidence } = inferDockerfileSurfaceKind(
+			service.entrypoint,
+			service.command,
+		);
+
+		// Base confidence: build services higher than image-only.
+		const baseConfidence = hasBuild ? 0.85 : 0.70;
+		// If command/entrypoint gave a strong signal, use it; otherwise use base.
+		const confidence = cmdConfidence > 0.70 ? cmdConfidence : baseConfidence;
+
+		// Infer base runtime from image.
+		const baseRuntimeKind = hasImage ? inferBaseRuntime(service.image!) : "unknown";
+
+		surfaces.push({
+			surfaceKind,
+			displayName: service.containerName ?? service.name,
+			rootPath,
+			entrypointPath: null,
+			buildSystem: "unknown",
+			runtimeKind: "container",
+			confidence,
+			evidence: [{
+				sourceType: "docker_compose",
+				sourcePath: input.filePath,
+				evidenceKind: "container_config",
+				confidence,
+				payload: {
+					serviceName: service.name,
+					containerName: service.containerName,
+					image: service.image,
+					buildContext: service.buildContext,
+					dockerfile: service.dockerfile,
+					ports: service.ports,
+					envVars: service.envVars,
+					profiles: service.profiles,
+					dependsOn: service.dependsOn,
+					baseRuntimeKind,
+				},
+			}],
+			metadata: {
+				serviceName: service.name,
+				containerName: service.containerName,
+				image: service.image,
+				buildContext: service.buildContext,
+				dockerfilePath,
+				ports: service.ports,
+				envVars: service.envVars,
+				profiles: service.profiles,
+				dependsOn: service.dependsOn,
+				baseRuntimeKind,
+			},
+			// Identity fields
+			sourceType: "docker_compose",
+			serviceName: service.name,
+			dockerfilePath: dockerfilePath ?? undefined,
+		});
+	}
+
+	return surfaces;
+}
+
+/**
+ * Resolve a relative path against a base directory.
+ * "services/api" + "../shared" → "services/shared"
+ * "." + "./app" → "app"
+ *
+ * Returns null if the path escapes the repo root (too many ".." components).
+ * This prevents mapping external paths back onto repo root incorrectly.
+ */
+function resolvePath(base: string, relative: string): string | null {
+	// Normalize "./" prefix.
+	let rel = relative.startsWith("./") ? relative.slice(2) : relative;
+
+	// Handle "." base — any ".." escapes the repo.
+	if (base === ".") {
+		if (rel.startsWith("..")) {
+			return null; // Escapes repo root.
+		}
+		return rel || ".";
+	}
+
+	// Simple case: no .. navigation.
+	if (!rel.startsWith("..")) {
+		return `${base}/${rel}`.replace(/\/+/g, "/").replace(/\/$/, "");
+	}
+
+	// Handle .. navigation with escape detection.
+	const baseParts = base.split("/").filter((p) => p && p !== ".");
+	const relParts = rel.split("/").filter((p) => p);
+
+	for (const part of relParts) {
+		if (part === "..") {
+			if (baseParts.length === 0) {
+				// Would escape repo root.
+				return null;
+			}
+			baseParts.pop();
+		} else if (part !== ".") {
+			baseParts.push(part);
+		}
+	}
+
+	return baseParts.length > 0 ? baseParts.join("/") : ".";
+}

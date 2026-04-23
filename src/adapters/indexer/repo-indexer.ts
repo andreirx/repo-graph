@@ -89,11 +89,17 @@ import { detectFsMutations } from "../../core/seams/fs-mutation-detectors.js";
 import { linkFsMutations } from "../../core/seams/fs-mutation-linkage.js";
 import {
 	detectCargoSurfaces,
+	detectComposeSurfaces,
 	detectDockerfileSurfaces,
 	detectPackageJsonSurfaces,
 	detectPyprojectSurfaces,
+	type ComposeServiceInput,
 	type DetectedSurface,
 } from "../../core/runtime/surface-detectors.js";
+import {
+	isComposeFileName,
+	parseComposeFile,
+} from "../compose/compose-parser.js";
 import {
 	buildInvalidationPlan,
 	type CurrentFileState,
@@ -1700,6 +1706,28 @@ export class RepoIndexer implements IndexerPort {
 				results.push(...detectPyprojectSurfaces(content, relPath));
 			} else if (isDockerfilePath(relPath)) {
 				results.push(...detectDockerfileSurfaces(content, relPath));
+			} else if (isComposePath(relPath)) {
+				const composeFile = parseComposeFile(content, relPath);
+				if (composeFile) {
+					// Convert adapter DTO to core input shape.
+					const input = {
+						filePath: composeFile.filePath,
+						services: composeFile.services.map((s): ComposeServiceInput => ({
+							name: s.name,
+							image: s.image,
+							buildContext: s.build?.context ?? null,
+							dockerfile: s.build?.dockerfile ?? null,
+							containerName: s.containerName,
+							command: s.command,
+							entrypoint: s.entrypoint,
+							ports: s.ports,
+							envVars: s.envVars,
+							profiles: s.profiles,
+							dependsOn: s.dependsOn,
+						})),
+					};
+					results.push(...detectComposeSurfaces(input));
+				}
 			}
 		}
 
@@ -1733,7 +1761,8 @@ export class RepoIndexer implements IndexerPort {
 					entry.name === "package.json" ||
 					entry.name === "Cargo.toml" ||
 					entry.name === "pyproject.toml" ||
-					isDockerfileName(entry.name)
+					isDockerfileName(entry.name) ||
+					isComposeFileName(entry.name)
 				) {
 					const relPath = toPosixPath(relative(rootPath, join(dir, entry.name)));
 					if (ig.ignores(relPath)) continue;
@@ -3137,6 +3166,16 @@ function isDockerfilePath(relPath: string): boolean {
 		? relPath.slice(relPath.lastIndexOf("/") + 1)
 		: relPath;
 	return isDockerfileName(name);
+}
+
+/**
+ * Check if a path ends with a compose file pattern.
+ */
+function isComposePath(relPath: string): boolean {
+	const name = relPath.includes("/")
+		? relPath.slice(relPath.lastIndexOf("/") + 1)
+		: relPath;
+	return isComposeFileName(name);
 }
 
 function toPosixPath(p: string): string {

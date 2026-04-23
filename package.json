@@ -50,7 +50,8 @@
     "ignore": "^7.0.5",
     "typescript": "^6.0.2",
     "uuid": "^13.0.0",
-    "web-tree-sitter": "^0.26.7"
+    "web-tree-sitter": "^0.26.7",
+    "yaml": "^2.8.3"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
