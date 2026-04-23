@@ -295,8 +295,8 @@ Design slice complete:
 
 - [x] A1: Kbuild detector implemented and validated on Linux kernel
 - [x] A1: Wire into module discovery orchestrator (scanner + indexer integration)
-- [x] B1: Directory detector (pure function, not wired)
-- [ ] B1: Wire into orchestrator and validate A1+B1 precedence
+- [x] B1: Directory detector (pure function)
+- [x] B1: Wire into orchestrator and validate A1+B1 precedence
 - [ ] C1: Design Source C (after A/B validation)
 
 ## Shipped (A1)
@@ -418,13 +418,61 @@ The detector correctly returns 0 for repos that don't follow anchored-root
 conventions (sqlite, swupdate) and detects clean modular structure where
 it exists (nginx, repo-graph).
 
-**Not wired yet:** The detector is pure. Orchestrator integration and
-A1+B1 precedence validation is the next step.
+### B1 Wiring (2026-04-23)
+
+Wired into indexer: `src/adapters/indexer/repo-indexer.ts`
+
+The directory detector is called directly from the indexer (no port/adapter
+needed — it's pure and takes TrackedFile[] which the indexer already has).
+
+**Dependency on discovery port:**
+- Layer 1 (declared) + A1 (build-system): require `ModuleDiscoveryPort` injection
+- B1 (directory): runs unconditionally — only needs `TrackedFile[]`
+
+This ensures B1 operates even when no discovery adapter is injected (e.g., in
+test harnesses that skip filesystem-dependent discovery).
+
+**Regression test:** `test/adapters/indexer/repo-indexer.test.ts` includes
+a dedicated test that instantiates `RepoIndexer` without a `ModuleDiscoveryPort`,
+indexes a fixture with `src/core/` containing 5 coherent files, and asserts
+that a `directory_structure` module candidate is persisted with evidence kind
+`directory_pattern`. This guards against accidentally moving B1 back inside
+the discovery-port guard.
+
+**Integration point:** After A1 (Kbuild), before orchestrator:
+```
+1. Layer 1: discoverDeclaredModules() → declaredRoots
+2. Layer 3A: discoverBuildSystemModules() → buildSystemRoots (A1)
+3. Layer 3B: detectDirectoryModules(trackedFiles) → directoryRoots (B1)
+4. Combine: [...declaredRoots, ...buildSystemRoots, ...directoryRoots]
+5. discoverModules() → candidates, evidence, ownership
+```
+
+**A1+B1 Precedence Validation (Linux kernel):**
+
+| Metric | Value |
+|--------|-------|
+| A1 (Kbuild) modules | 703 |
+| B1 (Directory) modules | 117 |
+| Overlapping roots | 36 |
+| Combined candidates | 781 |
+| Evidence items | 820 |
+
+Overlapping roots (e.g., `drivers/net`, `drivers/gpu`) get:
+- **2 evidence items** (one from A1, one from B1)
+- **Confidence 0.9** (max of A1:0.9, B1:0.7)
+
+This is corroborating evidence, not conflict. The orchestrator correctly:
+- Merges evidence from multiple sources
+- Uses max confidence
+- Preserves both evidence items for auditability
+
+**Kind precedence:** Both A1 and B1 produce `moduleKind: "inferred"`. For
+file ownership tiebreaks at the same root, they are equivalent. In practice,
+overlapping roots merge into a single candidate, so there's no tiebreak.
 
 ## Deferred Items
 
-- B1 wiring into orchestrator (next step)
-- A1+B1 precedence validation (next step)
 - Graph clustering design (C1 slice, after A/B validation)
 - Diagnostic persistence (schema + storage)
 - Migration schema for inferred modules

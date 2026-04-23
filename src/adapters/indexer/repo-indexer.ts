@@ -79,6 +79,7 @@ import { readTsconfigAliases } from "../config/tsconfig-reader.js";
 import type { AnnotationsPort } from "../../core/ports/annotations.js";
 import type { ModuleDiscoveryPort } from "../../core/ports/discovery.js";
 import { discoverModules, assignFileOwnershipForCandidates } from "../../core/modules/module-discovery.js";
+import { detectDirectoryModules } from "../../core/modules/detectors/directory-detector.js";
 import { promoteUnattachedSurfaces } from "../../core/modules/operational-promotion.js";
 import { discoverSurfaces, type SurfaceDiscoveryResult } from "../../core/runtime/surface-discovery.js";
 import { enrichTopology } from "../../core/topology/topology-enrichment.js";
@@ -1061,44 +1062,61 @@ export class RepoIndexer implements IndexerPort {
 	): Promise<void> {
 		// Module and surface discovery pipeline.
 		// Runs even when no declared modules exist (Layer 2 operational promotion).
+
+		// Collect discovered roots from all sources.
+		let allDiscoveredRoots: import("../../core/modules/manifest-detectors.js").DiscoveredModuleRoot[] = [];
+
+		// Layer 1 + Layer 3A require the discovery port (filesystem access).
 		if (this.discovery) {
 			// 1. Discover declared modules (Layer 1). May be empty.
 			const declaredRoots = await this.discovery.discoverDeclaredModules(
 				repo.rootPath, repoUid,
 			);
+			allDiscoveredRoots.push(...declaredRoots);
 
 			// 1b. Discover build-system-derived modules (Layer 3A). May be empty.
 			// Only runs if the adapter implements the optional method.
 			// Build-system modules have moduleKind: "inferred".
-			let buildSystemRoots: import("../../core/modules/manifest-detectors.js").DiscoveredModuleRoot[] = [];
 			if (this.discovery.discoverBuildSystemModules) {
 				const buildSystemResult = await this.discovery.discoverBuildSystemModules(
 					repo.rootPath, repoUid,
 				);
-				buildSystemRoots = buildSystemResult.modules;
+				allDiscoveredRoots.push(...buildSystemResult.modules);
 				// Diagnostics are ephemeral in A1 — not persisted.
 				// Future: persist to dedicated diagnostic table.
 			}
+		}
 
-			// Combine all discovered roots for orchestrator.
-			// Kind precedence is handled by discoverModules():
-			// declared > operational > inferred.
-			const allDiscoveredRoots = [...declaredRoots, ...buildSystemRoots];
+		// 1c. Discover directory-structure modules (Layer 3B). May be empty.
+		// Pure function — no filesystem access needed, uses tracked files.
+		// Runs regardless of whether the discovery port is configured.
+		// Directory modules have moduleKind: "inferred", confidence 0.7.
+		const directoryResult = detectDirectoryModules(trackedFiles);
+		allDiscoveredRoots.push(...directoryResult.modules);
+		// Stats are ephemeral — not persisted.
 
-			let manifestCandidates: import("../../core/modules/module-candidate.js").ModuleCandidate[] = [];
+		// Kind precedence is handled by discoverModules():
+		// declared > operational > inferred.
+		// Within inferred, overlapping roots merge evidence and use max confidence
+		// (A1: 0.9, B1: 0.7 → candidate gets 0.9).
 
-			if (allDiscoveredRoots.length > 0) {
-				const moduleResult = discoverModules({
-					repoUid, snapshotUid: snapshot.snapshotUid,
-					discoveredRoots: allDiscoveredRoots, trackedFiles,
-				});
-				if (moduleResult.candidates.length > 0) {
-					// Persist module candidates (declared + inferred) and evidence.
-					this.storage.insertModuleCandidates(moduleResult.candidates);
-					this.storage.insertModuleCandidateEvidence(moduleResult.evidence);
-					manifestCandidates = moduleResult.candidates;
-				}
+		let manifestCandidates: import("../../core/modules/module-candidate.js").ModuleCandidate[] = [];
+
+		if (allDiscoveredRoots.length > 0) {
+			const moduleResult = discoverModules({
+				repoUid, snapshotUid: snapshot.snapshotUid,
+				discoveredRoots: allDiscoveredRoots, trackedFiles,
+			});
+			if (moduleResult.candidates.length > 0) {
+				// Persist module candidates (declared + inferred) and evidence.
+				this.storage.insertModuleCandidates(moduleResult.candidates);
+				this.storage.insertModuleCandidateEvidence(moduleResult.evidence);
+				manifestCandidates = moduleResult.candidates;
 			}
+		}
+
+		// Surface discovery and Layer 2 promotion require the discovery port.
+		if (this.discovery) {
 
 			// 2. Detect surfaces repo-wide (independent of declared modules).
 			// Surfaces may exist at roots that have no declared module.

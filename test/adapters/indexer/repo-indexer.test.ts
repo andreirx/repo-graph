@@ -603,3 +603,85 @@ describe("filterByEdgeAffinity", () => {
 		expect(result.length).toBe(2);
 	});
 });
+
+// ── B1 directory module discovery regression ───────────────────────────
+//
+// Verifies that Layer 3B (directory-structure inference) runs even when
+// no ModuleDiscoveryPort is injected. This is a regression guard: a future
+// refactor must not accidentally move B1 inside the discovery-port guard.
+
+describe("B1 directory module discovery without discovery port", () => {
+	const B1_FIXTURES_ROOT = join(
+		import.meta.dirname,
+		"../../fixtures/directory-module-b1",
+	);
+	const B1_REPO_UID = "b1-fixture-repo";
+
+	let b1Storage: SqliteStorage;
+	let b1Provider: SqliteConnectionProvider;
+	let b1Extractor: TypeScriptExtractor;
+	let b1Indexer: RepoIndexer;
+	let b1DbPath: string;
+
+	beforeEach(async () => {
+		b1DbPath = join(tmpdir(), `rgr-b1-test-${randomUUID()}.db`);
+		b1Provider = new SqliteConnectionProvider(b1DbPath);
+		b1Provider.initialize();
+		b1Storage = new SqliteStorage(b1Provider.getDatabase());
+		b1Extractor = new TypeScriptExtractor();
+		await b1Extractor.initialize();
+
+		// Instantiate RepoIndexer WITHOUT a discovery port.
+		// This is the contract under test: B1 must run regardless.
+		b1Indexer = new RepoIndexer(b1Storage, b1Extractor);
+
+		b1Storage.addRepo({
+			repoUid: B1_REPO_UID,
+			name: "b1-fixture-repo",
+			rootPath: B1_FIXTURES_ROOT,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+	});
+
+	afterEach(() => {
+		b1Provider.close();
+		try {
+			unlinkSync(b1DbPath);
+		} catch {
+			// ignore
+		}
+	});
+
+	it("persists directory_structure module candidate for src/core when no discovery port is injected", async () => {
+		const result = await b1Indexer.indexRepo(B1_REPO_UID);
+
+		// The fixture has 5 .ts files under src/core/ — meets threshold.
+		expect(result.filesTotal).toBe(5);
+
+		// Query module candidates.
+		const candidates = b1Storage.queryModuleCandidates(result.snapshotUid);
+
+		// Find the src/core candidate (directory-inferred).
+		const srcCoreCandidate = candidates.find(
+			(c) => c.canonicalRootPath === "src/core",
+		);
+		expect(srcCoreCandidate).toBeDefined();
+		expect(srcCoreCandidate!.moduleKind).toBe("inferred");
+
+		// Query evidence for this candidate.
+		const evidence = b1Storage.queryModuleCandidateEvidence(
+			srcCoreCandidate!.moduleCandidateUid,
+		);
+		expect(evidence.length).toBeGreaterThanOrEqual(1);
+
+		// At least one evidence item must be directory_structure / directory_pattern.
+		const directoryEvidence = evidence.find(
+			(e) => e.sourceType === "directory_structure",
+		);
+		expect(directoryEvidence).toBeDefined();
+		expect(directoryEvidence!.evidenceKind).toBe("directory_pattern");
+		expect(directoryEvidence!.confidence).toBe(0.7);
+	});
+});
