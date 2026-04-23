@@ -25,8 +25,8 @@ They are roadmap evidence, not validation targets.
 | Repo | Blocked by | Language |
 |------|------------|----------|
 | `sqlite` | **validated** — operational | C |
-| `swupdate` | **validated** — operational (v1.1 include resolver) | C |
-| `nginx` | deferred — awaiting v1.1 validation | C |
+| `swupdate` | **validated** — operational (v1.2, conventional roots) | C |
+| `nginx` | **validated** — operational (v1.2, requires explicit `--include-root`) | C |
 | `kafka` | missing Rust Java extractor | Java |
 | `hadoop` | missing Rust Java extractor | Java |
 
@@ -403,9 +403,170 @@ Key features:
 
 ---
 
-## Conclusions (2026-04-22, updated for v1.1 include resolver)
+## nginx
 
-Four repos validated: react, typescript (JS/TS), sqlite, swupdate (C).
+**Date:** 2026-04-23
+**Commit:** shallow clone (depth 1)
+**Branch:** master
+**Clone location:** `../legacy-codebases/nginx/`
+
+### Metrics (from `rmap trust`)
+
+| Metric | Value |
+|--------|-------|
+| Files indexed | 396 |
+| Nodes total | 4,388 |
+| Edges resolved | 9,533 |
+| Edges unresolved | 13,012 |
+| call_resolution_rate | 42.5% |
+| call_graph reliability | LOW |
+| import_graph reliability | LOW |
+| suspicious_zero_connectivity modules | **13** |
+| unresolved_imports | 1,079 |
+
+### Validation Results
+
+| Test | Result | Notes |
+|------|--------|-------|
+| Index completes | PASS | 396 files, 4388 nodes, no failures |
+| Language coverage | PASS | C files indexed correctly |
+| Topology | **FAIL** | 0 modules with any connectivity |
+| Trust honest | PASS | Correctly reports LOW, flags `alias_resolution_suspicion` |
+| Hotspots credible | PARTIAL | Core files surface, but shallow clone limits churn accuracy |
+| Direct navigation | PASS | callers/callees produce real local structure |
+
+### Root Cause: Angle-Bracket Local Includes
+
+nginx uses **angle-bracket includes for local headers**:
+
+```c
+#include <ngx_config.h>   // local header, not system
+#include <ngx_core.h>     // local header, not system
+```
+
+This is build-system style. nginx expects `-I src/core -I src/event` from
+its configure script. The C extractor v1.1 only resolves **quoted includes**
+(`"foo.h"`), explicitly skipping angle-bracket includes as system headers.
+
+This is NOT a failure of the v1.1 conventional-roots approach. It is a
+different include style entirely:
+
+- **swupdate**: quoted includes (`"util.h"`) → v1.1 works
+- **nginx**: angle-bracket includes (`<ngx_core.h>`) → v1.1 has no effect
+
+### Hotspot Quality (limited evidence)
+
+| Rank | File | Sum Complexity | Hotspot Score |
+|------|------|----------------|---------------|
+| 1 | src/http/ngx_http_upstream.c | 1,113 | 8,130,465 |
+| 2 | src/http/ngx_http_core_module.c | 665 | 3,616,935 |
+| 3 | src/http/v2/ngx_http_v2.c | 696 | 3,528,720 |
+| 4 | src/http/modules/ngx_http_proxy_module.c | 621 | 3,344,706 |
+| 5 | src/http/ngx_http_request.c | 632 | 2,629,120 |
+
+These are core nginx files. The ranking is structurally suggestive.
+
+**Caveat:** Shallow clone (depth 1) means `commit_count=1` for all files.
+The hotspot scores are based on line counts, not real historical churn.
+This is structural validation only, not hotspot-history validation.
+
+### Caller/Callee Quality
+
+`ngx_http_process_request` callers:
+- `ngx_http_process_request_headers` (request.c)
+- `ngx_http_process_request_line` (request.c)
+- `ngx_http_v2_run_request` (v2/ngx_http_v2.c)
+- `ngx_http_v3_process_request` (v3/ngx_http_v3_request.c)
+
+`ngx_http_process_request` callees:
+- `ngx_http_finalize_request` (4 calls)
+- `ngx_http_handler` (core_module.c)
+
+Direct function navigation produces useful local results despite topology collapse.
+
+### Comparison to Prior C Repos
+
+| Metric | sqlite | swupdate v1.1 | nginx |
+|--------|--------|---------------|-------|
+| call_resolution_rate | 53.2% | 38.2% | 42.5% |
+| suspicious_zero_connectivity | 0 | 0 | **13** |
+| Module topology | Works | Works | **Collapsed** |
+| Hotspots | Credible | Credible | Structural only |
+| callers/callees | Useful | Useful | Useful |
+
+### Assessment
+
+**Indexing:** PASS. 396 files, 4,388 nodes, no parse failures.
+
+**Hotspot signal:** PARTIAL. Core nginx files surface, but shallow clone
+means scores are line-count-based, not history-validated.
+
+**Direct-call navigation:** PASS. Callers/callees return useful local results.
+
+**Module topology:** FAIL. All 13 C modules have zero connectivity. The
+include graph is completely collapsed.
+
+**Trust honesty:** PASS. Trust report correctly identifies the problem:
+`alias_resolution_suspicion` triggered with 13 suspicious modules.
+
+### Verdict
+
+C v1.1 does NOT generalize to nginx. The failure mode is specific:
+**angle-bracket local includes are not resolved.**
+
+The extractor remains useful for:
+- File/function triage (hotspots surface core files)
+- Direct navigation (callers/callees work)
+
+The extractor is NOT useful for:
+- Module topology (completely collapsed)
+- Change impact (no import graph)
+- Architectural analysis (no cross-module edges)
+
+### v1.2 Results (angle-bracket resolution shipped)
+
+v1.2 shipped: angle-bracket includes now attempt resolution via configured
+and conventional roots. Same-dir remains quote-only.
+
+**Without explicit roots:** no improvement (nginx has no conventional root dirs)
+
+**With explicit roots (`--include-root src/core --include-root src/event ...`):**
+
+| Metric | v1.1 | v1.2 (with roots) |
+|--------|------|-------------------|
+| Resolved edges | 9,533 | **10,344** |
+| Unresolved imports | 1,079 | **294** |
+| Zero-connectivity modules | 13 | **0** |
+| `src/core` fan_in | 0 | **13** |
+| `alias_resolution_suspicion` | triggered | **false** |
+
+v1.2 works correctly. nginx requires explicit `--include-root` flags because
+it doesn't follow conventional root patterns (`include/`, `inc/`). Each nginx
+module directory (`src/core/`, `src/event/`, `src/http/`) must be declared.
+
+### Practical Guidance for nginx-style repos
+
+```bash
+rmap index ./nginx ./nginx.db \
+  --include-root src/core \
+  --include-root src/event \
+  --include-root src/http \
+  --include-root src/os/unix \
+  --include-root src/stream \
+  --include-root src/mail
+```
+
+This is the expected UX for build-system-heavy C repos. The CLI provides the
+same information that would come from `compile_commands.json` or configure
+output.
+
+See `docs/milestones/c-include-resolution-v1.2.md` for design.
+
+---
+
+## Conclusions (2026-04-23, updated for v1.2 angle-bracket resolution)
+
+Five repos validated: react, typescript (JS/TS), sqlite, swupdate, nginx (C).
 
 ### Validated Operating Envelope
 
@@ -415,30 +576,44 @@ Four repos validated: react, typescript (JS/TS), sqlite, swupdate (C).
 - Throughput: ~500 files/sec (release build)
 - DB size: scales linearly (~17 KB/file average)
 
-**Rust `rmap` C support (v1.1): both repos operational**
+**Rust `rmap` C support (v1.1): two include styles, two outcomes**
 
-sqlite (disciplined C):
-- call_resolution_rate: 53.2%, call_graph: MEDIUM
-- Hotspots, callers/callees operational
-- Graph completeness partial but usable
+Quoted-include layouts (swupdate, sqlite):
+- v1.1 conventional roots resolver works
+- Module topology operational
+- Call graph partial but usable (macro patterns expected)
 
-swupdate (embedded-style C, v1.1):
-- call_resolution_rate: 38.2%, call_graph: LOW (macro-heavy, expected)
-- Module topology: OPERATIONAL (v1.1 conventional roots resolver)
-- Zero-connectivity C modules: 0 (was 15 in v1.0)
-- `include` module fan_in: 15 (all C modules connect correctly)
+Angle-bracket-include layouts (nginx):
+- v1.1 has NO effect (angle-brackets skipped as system)
+- Module topology collapsed (13 zero-connectivity modules)
+- Direct navigation (callers/callees) still works
+- Hotspots still surface core files
+
+| Repo | Include Style | v1.2 Topology | Config Required |
+|------|---------------|---------------|-----------------|
+| sqlite | quoted | Works | none |
+| swupdate | quoted | Works | none (uses conventional `include/`) |
+| nginx | angle-bracket | **Works** | `--include-root` per module dir |
+
+**v1.2 is validated for both quoted and angle-bracket C layouts.**
+
+nginx requires explicit `--include-root` flags because it doesn't use
+conventional root directories. This is expected UX for build-system-heavy
+C projects.
 
 **Hotspot signal is useful across languages:**
 - react: strong head quality (React compiler, RSC, reconciler)
 - typescript: credible head quality (compiler utilities, core modules)
 - sqlite: credible head quality (btree, vdbe, fts5 core)
 - swupdate: credible after filtering vendored libs (hawkbit, diskpart, curl)
+- nginx: structural only (shallow clone limits churn accuracy)
 
 **Unresolved-edge rate patterns:**
 - JS/TS: ~55-60% (type-only imports, dynamic patterns)
 - C (sqlite): 47% internal calls unresolved
 - C (swupdate): 62% internal calls unresolved
-- swupdate call-graph degradation is fundamental: macro-heavy patterns (ERROR, MG_*, TRACE)
+- C (nginx): 58% internal calls unresolved
+- Call-graph degradation is fundamental C behavior: macro patterns (ERROR, TRACE, MG_*, ngx_*)
 
 ### Identified Limitations
 
@@ -451,10 +626,13 @@ swupdate (embedded-style C, v1.1):
 3. **Conditional compilation (C)** — C v1 does not expand macros or evaluate
    `#ifdef` blocks. Functions in alternate code paths are not extracted.
 
-4. **Macro call patterns (C)** — ERROR(), TRACE(), MG_*() macros look like
-   function calls but don't resolve. This is expected C behavior.
+4. **Macro call patterns (C)** — ERROR(), TRACE(), MG_*(), ngx_*() macros look
+   like function calls but don't resolve. This is expected C behavior.
 
-5. **Java/Python/Rust extractors blocked** — kafka, hadoop, swupdate (Rust
+5. **Angle-bracket local includes (C)** — nginx uses `<ngx_core.h>` for local
+   headers. v1.1 skips these as system includes. **Blocks nginx topology.**
+
+6. **Java/Python/Rust extractors blocked** — kafka, hadoop, swupdate (Rust
    portions) await Rust extractor ports.
 
 ### Follow-Up Items
@@ -471,14 +649,25 @@ swupdate (embedded-style C, v1.1):
 - Conventional roots resolver shipped: `include/`, `inc/`, `src/include/`
 - swupdate: 0 zero-connectivity C modules (was 15)
 - CLI option: `rmap index --include-root <path>` for project-specific roots
-- Ambiguity detection: `ImportsAmbiguousMatch` category (no matches in test repos)
+- Ambiguity detection: `ImportsAmbiguousMatch` category
 
-**P1: nginx validation (C)**
-- Now unblocked by v1.1 include resolver
-- Will test generalization of conventional roots approach
-- If nginx works, v1.1 is validated for general C projects
+**DONE: nginx validation (C)**
+- Initial: topology collapsed (13 zero-connectivity modules)
+- Root cause: angle-bracket local includes (`<ngx_core.h>`)
+- v1.2 fix: angle-bracket includes now resolve via configured/conventional roots
+- With explicit `--include-root` flags: topology restored (0 zero-connectivity)
+- `src/core` fan_in=13, all modules connected
 
-**P2: Hotspot presentation filtering**
+**DONE: Angle-bracket local include resolution (v1.2)**
+- Separate delimiter syntax from semantic origin
+- Apply same resolution policy to both quoted and angle-bracket forms
+- Same-dir remains quote-only
+- True system headers stay unresolved (no local match)
+- Ambiguity detection unchanged
+- nginx requires explicit `--include-root` (no conventional root dirs)
+- swupdate unchanged (uses quoted includes with conventional roots)
+
+**P1: Hotspot presentation filtering**
 - View-policy controls for vendored libs, test baselines, generated paths
 - Improves top-of-list working set for AI agent consumption
 
@@ -490,11 +679,14 @@ swupdate (embedded-style C, v1.1):
 - Unblocks kafka, hadoop
 - Lower priority — those repos are huge layered systems
 
-### Validation Status (post-v1.1)
+### Validation Status (post-v1.2)
 
-v1.1 conventional roots resolver shipped. swupdate now shows correct module
-topology (0 zero-connectivity C modules). nginx validation is unblocked.
+**v1.2 is validated for both quoted and angle-bracket C layouts.**
 
-Call-graph completeness remains LOW on swupdate (38%) due to macro patterns —
-this is expected C behavior, not a resolver bug. The resolver cannot make
-`ERROR()`, `TRACE()`, `MG_*()` look like real function calls.
+- swupdate: works with conventional roots (no config needed)
+- nginx: works with explicit `--include-root` flags
+
+The next slice is P1: hotspot presentation filtering.
+
+Call-graph completeness remains LOW across all C repos (38-53%) due to macro
+patterns — this is expected C behavior, not a resolver bug.

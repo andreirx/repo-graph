@@ -1,10 +1,21 @@
 //! C/C++ include resolution policy — pure deterministic resolution
 //! of `#include` directives to indexed header files.
 //!
-//! Resolution order (per c-include-resolution-v1.1.md):
-//! 1. Same-directory (v1.0 behavior)
+//! Resolution order (per c-include-resolution-v1.2.md):
+//!
+//! For **quoted** includes (`"foo.h"`):
+//! 1. Same-directory (source file's directory)
 //! 2. Configured roots (explicit, user-declared)
 //! 3. Conventional roots (heuristic: include/, inc/, src/include/)
+//!
+//! For **angle-bracket** includes (`<foo.h>`):
+//! 1. Configured roots (skip same-directory)
+//! 2. Conventional roots
+//!
+//! v1.2 change: angle-bracket includes are now resolved against local
+//! headers. The `is_system_include` flag controls same-dir behavior,
+//! not whether resolution is attempted. If resolution fails, the
+//! include is classified as system/external by outcome.
 //!
 //! All functions are PURE. No I/O, no storage access.
 
@@ -93,30 +104,27 @@ impl IncludeResolver {
         indexed_files: &HashSet<String>,
         repo_uid: &str,
     ) -> IncludeResolution {
-        // System includes are not resolved locally.
-        if is_system_include {
-            return IncludeResolution {
-                status: ResolutionStatus::Unresolved,
-                target_stable_key: None,
-                candidates: Vec::new(),
-            };
-        }
-
+        // v1.2: Both quoted and angle-bracket includes attempt resolution.
+        // Same-dir is skipped for angle-bracket (is_system_include=true).
         let mut candidates: Vec<String> = Vec::new();
 
-        // Step 1: Same-directory resolution.
-        let source_dir = get_directory(source_file_path);
-        let same_dir_path = join_path(source_dir, include_specifier);
-        let normalized = normalize_path(&same_dir_path);
+        // Step 1: Same-directory resolution (quoted includes only).
+        // Angle-bracket includes skip same-dir — they conventionally imply
+        // "search paths, not source locality."
+        if !is_system_include {
+            let source_dir = get_directory(source_file_path);
+            let same_dir_path = join_path(source_dir, include_specifier);
+            let normalized = normalize_path(&same_dir_path);
 
-        if indexed_files.contains(&normalized) {
-            // Same-directory match is authoritative — return immediately.
-            let stable_key = format!("{}:{}:FILE", repo_uid, normalized);
-            return IncludeResolution {
-                status: ResolutionStatus::Resolved,
-                target_stable_key: Some(stable_key),
-                candidates: Vec::new(),
-            };
+            if indexed_files.contains(&normalized) {
+                // Same-directory match is authoritative — return immediately.
+                let stable_key = format!("{}:{}:FILE", repo_uid, normalized);
+                return IncludeResolution {
+                    status: ResolutionStatus::Resolved,
+                    target_stable_key: Some(stable_key),
+                    candidates: Vec::new(),
+                };
+            }
         }
 
         // Step 2: Configured roots (checked before conventional).
@@ -559,25 +567,138 @@ mod tests {
         assert!(result.candidates.contains(&"r1:inc/config.h:FILE".to_string()));
     }
 
-    // ── System includes ──────────────────────────────────────────
+    // ── Angle-bracket includes (v1.2) ─────────────────────────────
 
     #[test]
-    fn system_include_unresolved() {
+    fn angle_bracket_resolves_via_conventional_root() {
+        // v1.2: <ngx_core.h> should resolve if it exists in conventional root.
+        let resolver = IncludeResolver::with_defaults();
+        let indexed = make_indexed_files(&[
+            "src/http/request.c",
+            "include/ngx_core.h",
+        ]);
+
+        let result = resolver.resolve(
+            "src/http/request.c",
+            "ngx_core.h",
+            true,  // angle-bracket include
+            &indexed,
+            "nginx",
+        );
+
+        assert_eq!(result.status, ResolutionStatus::Resolved);
+        assert_eq!(result.target_stable_key, Some("nginx:include/ngx_core.h:FILE".to_string()));
+    }
+
+    #[test]
+    fn angle_bracket_skips_same_dir() {
+        // v1.2: <foo.h> should NOT check same directory.
+        // Only quoted "foo.h" checks same-dir.
         let resolver = IncludeResolver::with_defaults();
         let indexed = make_indexed_files(&[
             "src/main.c",
-            "include/stdio.h",  // even if we have it locally
+            "src/foo.h",  // same dir as source
+            // no include/foo.h
+        ]);
+
+        let result = resolver.resolve(
+            "src/main.c",
+            "foo.h",
+            true,  // angle-bracket skips same-dir
+            &indexed,
+            "r1",
+        );
+
+        // Should NOT resolve — same-dir not checked for angle-bracket.
+        assert_eq!(result.status, ResolutionStatus::Unresolved);
+    }
+
+    #[test]
+    fn angle_bracket_unresolved_when_no_local_match() {
+        // v1.2: <stdio.h> stays unresolved if no local header matches.
+        let resolver = IncludeResolver::with_defaults();
+        let indexed = make_indexed_files(&[
+            "src/main.c",
+            // no stdio.h anywhere
         ]);
 
         let result = resolver.resolve(
             "src/main.c",
             "stdio.h",
-            true,  // system include
+            true,  // angle-bracket
             &indexed,
             "r1",
         );
 
         assert_eq!(result.status, ResolutionStatus::Unresolved);
+    }
+
+    #[test]
+    fn angle_bracket_resolves_if_local_header_exists() {
+        // v1.2: even <stdio.h> resolves if someone vendored it locally.
+        let resolver = IncludeResolver::with_defaults();
+        let indexed = make_indexed_files(&[
+            "src/main.c",
+            "include/stdio.h",  // vendored locally
+        ]);
+
+        let result = resolver.resolve(
+            "src/main.c",
+            "stdio.h",
+            true,  // angle-bracket
+            &indexed,
+            "r1",
+        );
+
+        // Resolves because local header exists in conventional root.
+        assert_eq!(result.status, ResolutionStatus::Resolved);
+        assert_eq!(result.target_stable_key, Some("r1:include/stdio.h:FILE".to_string()));
+    }
+
+    #[test]
+    fn angle_bracket_ambiguous_when_multiple_matches() {
+        // v1.2: ambiguity detection applies to angle-bracket too.
+        let resolver = IncludeResolver::with_defaults();
+        let indexed = make_indexed_files(&[
+            "src/main.c",
+            "include/config.h",
+            "inc/config.h",
+        ]);
+
+        let result = resolver.resolve(
+            "src/main.c",
+            "config.h",
+            true,  // angle-bracket
+            &indexed,
+            "r1",
+        );
+
+        assert_eq!(result.status, ResolutionStatus::Ambiguous);
+        assert!(result.candidates.contains(&"r1:include/config.h:FILE".to_string()));
+        assert!(result.candidates.contains(&"r1:inc/config.h:FILE".to_string()));
+    }
+
+    #[test]
+    fn quoted_still_checks_same_dir_first() {
+        // v1.2: quoted includes still check same-dir first.
+        let resolver = IncludeResolver::with_defaults();
+        let indexed = make_indexed_files(&[
+            "src/main.c",
+            "src/foo.h",       // same dir
+            "include/foo.h",   // also in conventional root
+        ]);
+
+        let result = resolver.resolve(
+            "src/main.c",
+            "foo.h",
+            false,  // quoted — checks same-dir
+            &indexed,
+            "r1",
+        );
+
+        // Same-dir wins (authoritative, returns immediately).
+        assert_eq!(result.status, ResolutionStatus::Resolved);
+        assert_eq!(result.target_stable_key, Some("r1:src/foo.h:FILE".to_string()));
     }
 
     // ── No sibling magic ─────────────────────────────────────────

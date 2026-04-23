@@ -137,8 +137,8 @@ fn main() -> ExitCode {
 
 fn print_usage() {
 	eprintln!("usage:");
-	eprintln!("  rmap index   <repo_path> <db_path>");
-	eprintln!("  rmap refresh <repo_path> <db_path>");
+	eprintln!("  rmap index   <repo_path> <db_path> [--include-root <path>]...");
+	eprintln!("  rmap refresh <repo_path> <db_path> [--include-root <path>]...");
 	eprintln!("  rmap trust   <db_path> <repo_uid>");
 	eprintln!("  rmap callers <db_path> <repo_uid> <symbol> [--edge-types <types>]");
 	eprintln!("  rmap callees <db_path> <repo_uid> <symbol> [--edge-types <types>]");
@@ -149,7 +149,7 @@ fn print_usage() {
 	eprintln!("  rmap orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]");
 	eprintln!("  rmap check      <db_path> <repo_uid>");
 	eprintln!("  rmap churn      <db_path> <repo_uid> [--since <expr>]");
-	eprintln!("  rmap hotspots   <db_path> <repo_uid> [--since <expr>]");
+	eprintln!("  rmap hotspots   <db_path> <repo_uid> [--since <expr>] [--exclude-tests] [--exclude-vendored]");
 	eprintln!("  rmap coverage   <db_path> <repo_uid> <report_path>");
 	eprintln!("  rmap explain    <db_path> <repo_uid> <target> [--budget medium|large]");
 	eprintln!("  rmap dead    <db_path> <repo_uid> [kind]");
@@ -1837,20 +1837,100 @@ struct HotspotRow {
 	hotspot_score: u64,
 }
 
-fn run_hotspots(args: &[String]) -> ExitCode {
-	// Parse args: same as churn
-	let (db_path, repo_uid, since) = match parse_churn_args(args) {
-		Ok(parsed) => parsed,
-		Err(msg) => {
-			// Adjust usage message for hotspots
-			if msg.contains("churn") {
-				eprintln!("usage: rmap hotspots <db_path> <repo_uid> [--since <expr>]");
-			} else {
-				eprintln!("{}", msg);
+/// Filtering metadata for hotspots output.
+#[derive(serde::Serialize)]
+struct HotspotFiltering {
+	exclude_tests: bool,
+	exclude_vendored: bool,
+	excluded_count: usize,
+	excluded_tests_count: usize,
+	excluded_vendored_count: usize,
+}
+
+/// Vendored directory segments (exact match only).
+const VENDORED_SEGMENTS: &[&str] = &[
+	"vendor", "vendors", "third_party", "third-party",
+	"external", "deps", "node_modules",
+];
+
+/// Check if path contains a vendored directory segment.
+fn is_vendored_path(path: &str) -> bool {
+	path.split('/')
+		.any(|segment| {
+			let lower = segment.to_lowercase();
+			VENDORED_SEGMENTS.contains(&lower.as_str())
+		})
+}
+
+/// Parsed hotspot command arguments.
+struct HotspotArgs<'a> {
+	db_path: &'a Path,
+	repo_uid: &'a str,
+	since: String,
+	exclude_tests: bool,
+	exclude_vendored: bool,
+}
+
+/// Parse hotspots command args.
+fn parse_hotspot_args(args: &[String]) -> Result<HotspotArgs<'_>, String> {
+	if args.len() < 2 {
+		return Err("usage: rmap hotspots <db_path> <repo_uid> [--since <expr>] [--exclude-tests] [--exclude-vendored]".to_string());
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+
+	let mut since = "90.days.ago".to_string();
+	let mut exclude_tests = false;
+	let mut exclude_vendored = false;
+
+	let mut i = 2;
+	while i < args.len() {
+		match args[i].as_str() {
+			"--since" => {
+				if i + 1 >= args.len() {
+					return Err("--since requires a value".to_string());
+				}
+				since = args[i + 1].clone();
+				i += 2;
 			}
+			"--exclude-tests" => {
+				exclude_tests = true;
+				i += 1;
+			}
+			"--exclude-vendored" => {
+				exclude_vendored = true;
+				i += 1;
+			}
+			_ => {
+				return Err(format!("unknown argument: {}", args[i]));
+			}
+		}
+	}
+
+	Ok(HotspotArgs {
+		db_path,
+		repo_uid,
+		since,
+		exclude_tests,
+		exclude_vendored,
+	})
+}
+
+fn run_hotspots(args: &[String]) -> ExitCode {
+	let parsed = match parse_hotspot_args(args) {
+		Ok(p) => p,
+		Err(msg) => {
+			eprintln!("{}", msg);
 			return ExitCode::from(1);
 		}
 	};
+
+	let db_path = parsed.db_path;
+	let repo_uid = parsed.repo_uid;
+	let since = parsed.since;
+	let exclude_tests = parsed.exclude_tests;
+	let exclude_vendored = parsed.exclude_vendored;
 
 	let storage = match open_storage(db_path) {
 		Ok(s) => s,
@@ -1949,17 +2029,49 @@ fn run_hotspots(args: &[String]) -> ExitCode {
 		&complexity_inputs,
 	);
 
-	// Convert to output rows
+	// Build file_path → is_test lookup
+	let test_files: std::collections::HashSet<&str> = indexed_files
+		.iter()
+		.filter(|f| f.is_test)
+		.map(|f| f.path.as_str())
+		.collect();
+
+	// Apply filtering and count exclusions
+	let mut excluded_tests_count = 0usize;
+	let mut excluded_vendored_count = 0usize;
+	let mut excluded_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+
 	let results: Vec<HotspotRow> = hotspots
 		.into_iter()
-		.map(|h| HotspotRow {
-			file_path: h.file_path,
-			commit_count: h.commit_count,
-			lines_changed: h.lines_changed,
-			sum_complexity: h.sum_complexity,
-			hotspot_score: h.hotspot_score,
+		.filter_map(|h| {
+			let is_test = test_files.contains(h.file_path.as_str());
+			let is_vendored = is_vendored_path(&h.file_path);
+
+			let exclude_as_test = exclude_tests && is_test;
+			let exclude_as_vendored = exclude_vendored && is_vendored;
+
+			if exclude_as_test {
+				excluded_tests_count += 1;
+			}
+			if exclude_as_vendored {
+				excluded_vendored_count += 1;
+			}
+			if exclude_as_test || exclude_as_vendored {
+				excluded_paths.insert(h.file_path.clone());
+				return None;
+			}
+
+			Some(HotspotRow {
+				file_path: h.file_path,
+				commit_count: h.commit_count,
+				lines_changed: h.lines_changed,
+				sum_complexity: h.sum_complexity,
+				hotspot_score: h.hotspot_score,
+			})
 		})
 		.collect();
+
+	let excluded_count = excluded_paths.len();
 
 	// Build envelope
 	let count = results.len();
@@ -1969,6 +2081,21 @@ fn run_hotspots(args: &[String]) -> ExitCode {
 		"formula".to_string(),
 		serde_json::Value::String("lines_changed * sum_complexity".to_string()),
 	);
+
+	// Add filtering metadata only when filters are active
+	if exclude_tests || exclude_vendored {
+		let filtering = HotspotFiltering {
+			exclude_tests,
+			exclude_vendored,
+			excluded_count,
+			excluded_tests_count,
+			excluded_vendored_count,
+		};
+		extra.insert(
+			"filtering".to_string(),
+			serde_json::to_value(&filtering).unwrap(),
+		);
+	}
 
 	let output = match build_envelope(
 		&storage,

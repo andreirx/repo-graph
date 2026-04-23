@@ -561,3 +561,347 @@ fn hotspots_score_is_lines_times_complexity() {
 	// sum_complexity should be 3 + 4 = 7
 	assert_eq!(sum_complexity, 7, "sum_complexity should aggregate multiple symbols");
 }
+
+// ── 10. Filtering: no flags = no filtering field ─────────────────
+
+#[test]
+fn hotspots_no_flags_omits_filtering_field() {
+	let (_dir, db_path, _repo_path) = build_repo_with_git_history();
+	let snapshot_uid = get_snapshot_uid(&db_path, "test-repo");
+
+	insert_complexity_measurement(
+		&db_path,
+		&snapshot_uid,
+		"test-repo",
+		"index.ts",
+		"greet",
+		5,
+	);
+
+	let output = Command::new(binary_path())
+		.args([
+			"hotspots",
+			db_path.to_str().unwrap(),
+			"test-repo",
+			"--since",
+			"1.year.ago",
+		])
+		.output()
+		.unwrap();
+
+	assert_eq!(output.status.code(), Some(0));
+
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+	// `filtering` field must be absent when no flags
+	assert!(
+		result.get("filtering").is_none(),
+		"filtering field must be omitted when no flags active"
+	);
+}
+
+// ── 11. Filtering: --exclude-tests ───────────────────────────────
+
+#[test]
+fn hotspots_exclude_tests_removes_test_files() {
+	let dir = tempfile::tempdir().unwrap();
+	let db_path = dir.path().join("test.db");
+	let repo_path = dir.path().join("repo");
+
+	std::fs::create_dir_all(&repo_path).unwrap();
+
+	std::process::Command::new("git")
+		.args(["init"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git init");
+
+	std::process::Command::new("git")
+		.args(["config", "user.email", "test@example.com"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git config email");
+
+	std::process::Command::new("git")
+		.args(["config", "user.name", "Test"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git config name");
+
+	// Create two files: one regular, one test
+	std::fs::write(repo_path.join("src.ts"), "export const x = 1;\n").unwrap();
+	std::fs::write(repo_path.join("src.test.ts"), "test('x', () => {});\n").unwrap();
+
+	std::process::Command::new("git")
+		.args(["add", "-A"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git add");
+
+	std::process::Command::new("git")
+		.args(["commit", "-m", "initial"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git commit");
+
+	use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+	index_path(&repo_path, &db_path, "test-repo", &ComposeOptions::default()).unwrap();
+
+	let snapshot_uid = get_snapshot_uid(&db_path, "test-repo");
+
+	// Insert complexity for both files
+	insert_complexity_measurement(&db_path, &snapshot_uid, "test-repo", "src.ts", "x", 5);
+	insert_complexity_measurement(&db_path, &snapshot_uid, "test-repo", "src.test.ts", "test", 3);
+
+	// Verify is_test is set for the test file (scanner sets it based on path)
+	let conn = rusqlite::Connection::open(&db_path).unwrap();
+	let is_test: i64 = conn
+		.query_row(
+			"SELECT is_test FROM files WHERE path = 'src.test.ts'",
+			[],
+			|row| row.get(0),
+		)
+		.unwrap();
+	assert_eq!(is_test, 1, "src.test.ts should have is_test=1");
+
+	// Run with --exclude-tests
+	let output = Command::new(binary_path())
+		.args([
+			"hotspots",
+			db_path.to_str().unwrap(),
+			"test-repo",
+			"--since",
+			"1.year.ago",
+			"--exclude-tests",
+		])
+		.output()
+		.unwrap();
+
+	assert_eq!(
+		output.status.code(),
+		Some(0),
+		"stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+	// Check filtering metadata
+	let filtering = result.get("filtering").expect("filtering field must be present");
+	assert_eq!(filtering["exclude_tests"], true);
+	assert_eq!(filtering["exclude_vendored"], false);
+	assert!(filtering["excluded_tests_count"].as_u64().unwrap() >= 1);
+
+	// Check that test file is excluded from results
+	let results = result["results"].as_array().unwrap();
+	for row in results {
+		let path = row["file_path"].as_str().unwrap();
+		assert!(
+			!path.contains(".test."),
+			"test file should be excluded: {}",
+			path
+		);
+	}
+}
+
+// ── 12. Filtering: --exclude-vendored (segment matching) ─────────
+
+#[test]
+fn hotspots_exclude_vendored_uses_segment_matching() {
+	let dir = tempfile::tempdir().unwrap();
+	let db_path = dir.path().join("test.db");
+	let repo_path = dir.path().join("repo");
+
+	std::fs::create_dir_all(repo_path.join("vendor")).unwrap();
+	std::fs::create_dir_all(repo_path.join("src/mydeps")).unwrap();
+
+	std::process::Command::new("git")
+		.args(["init"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git init");
+
+	std::process::Command::new("git")
+		.args(["config", "user.email", "test@example.com"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git config email");
+
+	std::process::Command::new("git")
+		.args(["config", "user.name", "Test"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git config name");
+
+	// vendor/lib.ts should be excluded (exact segment match)
+	std::fs::write(repo_path.join("vendor/lib.ts"), "export const v = 1;\n").unwrap();
+	// src/mydeps/util.ts should NOT be excluded (mydeps != deps)
+	std::fs::write(repo_path.join("src/mydeps/util.ts"), "export const u = 1;\n").unwrap();
+
+	std::process::Command::new("git")
+		.args(["add", "-A"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git add");
+
+	std::process::Command::new("git")
+		.args(["commit", "-m", "initial"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git commit");
+
+	use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+	index_path(&repo_path, &db_path, "test-repo", &ComposeOptions::default()).unwrap();
+
+	let snapshot_uid = get_snapshot_uid(&db_path, "test-repo");
+
+	insert_complexity_measurement(&db_path, &snapshot_uid, "test-repo", "vendor/lib.ts", "v", 5);
+	insert_complexity_measurement(&db_path, &snapshot_uid, "test-repo", "src/mydeps/util.ts", "u", 5);
+
+	let output = Command::new(binary_path())
+		.args([
+			"hotspots",
+			db_path.to_str().unwrap(),
+			"test-repo",
+			"--since",
+			"1.year.ago",
+			"--exclude-vendored",
+		])
+		.output()
+		.unwrap();
+
+	assert_eq!(
+		output.status.code(),
+		Some(0),
+		"stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+	let filtering = result.get("filtering").expect("filtering field must be present");
+	assert_eq!(filtering["exclude_vendored"], true);
+	assert_eq!(
+		filtering["excluded_vendored_count"].as_u64().unwrap(),
+		1,
+		"only vendor/lib.ts should be excluded"
+	);
+
+	// Verify results
+	let results = result["results"].as_array().unwrap();
+	let paths: Vec<&str> = results.iter().map(|r| r["file_path"].as_str().unwrap()).collect();
+
+	assert!(
+		!paths.contains(&"vendor/lib.ts"),
+		"vendor/lib.ts should be excluded"
+	);
+	assert!(
+		paths.contains(&"src/mydeps/util.ts"),
+		"src/mydeps/util.ts should NOT be excluded (mydeps != deps)"
+	);
+}
+
+// ── 13. Filtering: combined flags with overlap ───────────────────
+
+#[test]
+fn hotspots_combined_filters_with_overlap() {
+	let dir = tempfile::tempdir().unwrap();
+	let db_path = dir.path().join("test.db");
+	let repo_path = dir.path().join("repo");
+
+	std::fs::create_dir_all(repo_path.join("vendor")).unwrap();
+	std::fs::create_dir_all(repo_path.join("src")).unwrap();
+
+	std::process::Command::new("git")
+		.args(["init"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git init");
+
+	std::process::Command::new("git")
+		.args(["config", "user.email", "test@example.com"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git config email");
+
+	std::process::Command::new("git")
+		.args(["config", "user.name", "Test"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git config name");
+
+	// vendor/lib.test.ts - matches BOTH filters (overlap case)
+	std::fs::write(repo_path.join("vendor/lib.test.ts"), "test('v', () => {});\n").unwrap();
+	// src/main.ts - matches neither
+	std::fs::write(repo_path.join("src/main.ts"), "export const m = 1;\n").unwrap();
+	// src/main.test.ts - test only
+	std::fs::write(repo_path.join("src/main.test.ts"), "test('m', () => {});\n").unwrap();
+
+	std::process::Command::new("git")
+		.args(["add", "-A"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git add");
+
+	std::process::Command::new("git")
+		.args(["commit", "-m", "initial"])
+		.current_dir(&repo_path)
+		.output()
+		.expect("git commit");
+
+	use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+	index_path(&repo_path, &db_path, "test-repo", &ComposeOptions::default()).unwrap();
+
+	let snapshot_uid = get_snapshot_uid(&db_path, "test-repo");
+
+	insert_complexity_measurement(&db_path, &snapshot_uid, "test-repo", "vendor/lib.test.ts", "v", 5);
+	insert_complexity_measurement(&db_path, &snapshot_uid, "test-repo", "src/main.ts", "m", 5);
+	insert_complexity_measurement(&db_path, &snapshot_uid, "test-repo", "src/main.test.ts", "mt", 5);
+
+	let output = Command::new(binary_path())
+		.args([
+			"hotspots",
+			db_path.to_str().unwrap(),
+			"test-repo",
+			"--since",
+			"1.year.ago",
+			"--exclude-tests",
+			"--exclude-vendored",
+		])
+		.output()
+		.unwrap();
+
+	assert_eq!(
+		output.status.code(),
+		Some(0),
+		"stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+	let filtering = result.get("filtering").expect("filtering field must be present");
+	assert_eq!(filtering["exclude_tests"], true);
+	assert_eq!(filtering["exclude_vendored"], true);
+
+	// Per-filter counts: vendor/lib.test.ts increments BOTH
+	let excluded_tests = filtering["excluded_tests_count"].as_u64().unwrap();
+	let excluded_vendored = filtering["excluded_vendored_count"].as_u64().unwrap();
+	let excluded_total = filtering["excluded_count"].as_u64().unwrap();
+
+	// vendor/lib.test.ts (both) + src/main.test.ts (test only) = 2 test matches
+	assert_eq!(excluded_tests, 2, "two files match test filter");
+	// vendor/lib.test.ts only
+	assert_eq!(excluded_vendored, 1, "one file matches vendored filter");
+	// Union: vendor/lib.test.ts + src/main.test.ts = 2 unique files
+	assert_eq!(excluded_total, 2, "two unique files excluded (union)");
+
+	// Only src/main.ts should remain
+	let results = result["results"].as_array().unwrap();
+	assert_eq!(results.len(), 1);
+	assert_eq!(results[0]["file_path"], "src/main.ts");
+}
