@@ -63,6 +63,7 @@ export interface ModuleCandidate {
  *
  * Layer 1 (declared): manifest-based sources
  * Layer 2 (operational): surface promotion sources
+ * Layer 3 (inferred): build-system / structural / graph sources
  */
 export type EvidenceSourceType =
 	// Layer 1: declared module evidence
@@ -76,13 +77,16 @@ export type EvidenceSourceType =
 	| "surface_promotion_cli"
 	| "surface_promotion_service"
 	| "surface_promotion_web_app"
-	| "surface_promotion_worker";
+	| "surface_promotion_worker"
+	// Layer 3: build-system derived evidence
+	| "kbuild";
 
 /**
  * Evidence kind: what the evidence item asserts.
  *
  * Layer 1: manifest-derived assertions
  * Layer 2: surface-promotion assertions
+ * Layer 3: build-system / structural / graph assertions
  */
 export type EvidenceKind =
 	// Layer 1: declared module evidence
@@ -92,7 +96,9 @@ export type EvidenceKind =
 	| "subproject"             // Gradle settings includes this project
 	| "package_root"           // pyproject.toml declares a package here
 	// Layer 2: operational module evidence
-	| "operational_entrypoint"; // promoted from unattached surface
+	| "operational_entrypoint" // promoted from unattached surface
+	// Layer 3: build-system evidence
+	| "kbuild_subdir";         // obj-y/obj-m directory assignment in Kbuild/Makefile
 
 /**
  * One evidence item supporting a module candidate.
