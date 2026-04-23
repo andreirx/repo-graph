@@ -1,0 +1,6 @@
+# Dockerfile with no explicit command
+# Relies on base image CMD or docker run command
+FROM alpine:3.19
+
+RUN apk add --no-cache curl
+COPY scripts /scripts

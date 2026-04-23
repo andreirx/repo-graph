@@ -1,0 +1,20 @@
+# Multi-stage build: Rust binary
+# Builder stage - has its own ENTRYPOINT that should be ignored
+FROM rust:1.75 AS builder
+
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+RUN cargo build --release
+
+# This ENTRYPOINT should be ignored (not final stage)
+ENTRYPOINT ["cargo", "test"]
+
+# Final stage - this is what matters
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/myserver /usr/local/bin/
+
+ENTRYPOINT ["/usr/local/bin/myserver"]
+CMD ["--port", "8080"]

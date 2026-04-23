@@ -4,17 +4,22 @@
  * Take parsed manifest content and return detected project surfaces
  * with evidence. No file I/O.
  *
- * Slice 1 detectors:
+ * Phase 0 detectors:
  *   - package.json: bin → cli, main/exports → library, scripts → build system
  *   - package.json: framework deps → web_app/backend_service signals
  *   - Cargo.toml: [[bin]] → cli, [lib] → library
  *   - pyproject.toml: [project.scripts] → cli
  *
- * NOT in slice 1:
- *   - Dockerfile/docker-compose → container/service detection
+ * Phase 1A detectors:
+ *   - Dockerfile → container surface (backend_service or cli)
+ *   - docker-compose → container surfaces per service
+ *
+ * NOT yet implemented:
  *   - Terraform/Pulumi/Helm → infra_root
  *   - Gradle application plugin
  *   - Worker/queue detection (requires deeper analysis)
+ *   - Makefile/CMake targets
+ *   - Workspace member detection (separate module discovery track)
  */
 
 import type {
@@ -494,4 +499,403 @@ function detectFrameworkFromDeps(
 	}
 
 	return null;
+}
+
+// ── Dockerfile detector ────────────────────────────────────────────
+
+/**
+ * Detect project surface from a Dockerfile.
+ *
+ * Parsing strategy:
+ *   - Line-oriented, no shell expansion or build arg substitution
+ *   - Multi-stage: only final FROM stage is considered
+ *   - ENTRYPOINT and CMD in final stage determine surfaceKind
+ *
+ * Surface kind inference:
+ *   - Explicit ENTRYPOINT/CMD with long-running patterns → backend_service (0.85)
+ *   - Explicit ENTRYPOINT/CMD with one-shot patterns → cli (0.80)
+ *   - No ENTRYPOINT/CMD → backend_service with lower confidence (0.60)
+ *
+ * Runtime:
+ *   - runtimeKind is always "container"
+ *   - Base image runtime (node, python, rust, etc.) stored in metadata
+ */
+export function detectDockerfileSurfaces(
+	content: string,
+	manifestRelPath: string,
+): DetectedSurface[] {
+	const dir = manifestRelPath.includes("/")
+		? manifestRelPath.slice(0, manifestRelPath.lastIndexOf("/"))
+		: ".";
+
+	// Parse Dockerfile instructions in final stage only.
+	const parsed = parseDockerfileFinalStage(content);
+	if (!parsed) {
+		// No FROM instruction found — not a valid Dockerfile.
+		return [];
+	}
+
+	// Infer surface kind from ENTRYPOINT/CMD.
+	const { surfaceKind, confidence } = inferDockerfileSurfaceKind(
+		parsed.entrypoint,
+		parsed.cmd,
+	);
+
+	// Infer base runtime from final FROM image.
+	const baseRuntimeKind = inferBaseRuntime(parsed.baseImage);
+
+	return [{
+		surfaceKind,
+		displayName: null,
+		rootPath: dir,
+		entrypointPath: null,
+		buildSystem: "unknown",
+		runtimeKind: "container",
+		confidence,
+		evidence: [{
+			sourceType: "dockerfile",
+			sourcePath: manifestRelPath,
+			evidenceKind: "container_config",
+			confidence,
+			payload: {
+				baseImage: parsed.baseImage,
+				baseRuntimeKind,
+				entrypoint: parsed.entrypoint,
+				cmd: parsed.cmd,
+				stageCount: parsed.stageCount,
+			},
+		}],
+		metadata: {
+			baseImage: parsed.baseImage,
+			baseRuntimeKind,
+			entrypoint: parsed.entrypoint,
+			cmd: parsed.cmd,
+		},
+		// Identity fields
+		sourceType: "dockerfile",
+		dockerfilePath: manifestRelPath,
+	}];
+}
+
+/**
+ * Parsed Dockerfile final stage information.
+ */
+interface DockerfileParsed {
+	baseImage: string;
+	entrypoint: string[] | null;
+	cmd: string[] | null;
+	stageCount: number;
+}
+
+/**
+ * Parse Dockerfile and extract final stage information.
+ *
+ * Multi-stage handling:
+ *   - Counts FROM instructions to determine stage count
+ *   - Only ENTRYPOINT/CMD after the last FROM are considered
+ *
+ * Returns null if no FROM instruction found.
+ */
+function parseDockerfileFinalStage(content: string): DockerfileParsed | null {
+	const lines = content.split("\n");
+
+	let stageCount = 0;
+	let baseImage: string | null = null;
+	let entrypoint: string[] | null = null;
+	let cmd: string[] | null = null;
+
+	for (const rawLine of lines) {
+		const line = rawLine.trim();
+
+		// Skip comments and empty lines.
+		if (line.startsWith("#") || line === "") {
+			continue;
+		}
+
+		// Handle line continuations (trailing backslash).
+		// For simplicity, we don't join continued lines — we just parse
+		// the instruction keyword from the first line.
+
+		const upperLine = line.toUpperCase();
+
+		if (upperLine.startsWith("FROM ")) {
+			// New stage — reset entrypoint/cmd, capture base image.
+			stageCount++;
+			entrypoint = null;
+			cmd = null;
+			// Extract image name: skip flags (--platform=...), stop before AS.
+			baseImage = parseFromInstruction(line);
+		} else if (upperLine.startsWith("ENTRYPOINT ")) {
+			entrypoint = parseDockerInstruction(line, "ENTRYPOINT");
+		} else if (upperLine.startsWith("CMD ")) {
+			cmd = parseDockerInstruction(line, "CMD");
+		}
+	}
+
+	if (stageCount === 0 || baseImage === null) {
+		return null;
+	}
+
+	return { baseImage, entrypoint, cmd, stageCount };
+}
+
+/**
+ * Parse FROM instruction to extract the image name.
+ *
+ * Syntax: FROM [--platform=<platform>] <image> [AS <name>]
+ *
+ * Skips any leading flags (--platform, etc.) and stops before AS.
+ * Returns null if no valid image token found.
+ */
+function parseFromInstruction(line: string): string | null {
+	// Remove "FROM " prefix.
+	const afterFrom = line.slice(5).trim();
+	const tokens = afterFrom.split(/\s+/);
+
+	for (let i = 0; i < tokens.length; i++) {
+		const token = tokens[i];
+
+		// Skip flags (--platform=..., --platform ...).
+		if (token.startsWith("--")) {
+			// If flag doesn't contain '=', next token is the value — skip it too.
+			if (!token.includes("=") && i + 1 < tokens.length) {
+				i++;
+			}
+			continue;
+		}
+
+		// Stop before AS (case-insensitive).
+		if (token.toUpperCase() === "AS") {
+			break;
+		}
+
+		// First non-flag, non-AS token is the image.
+		return token;
+	}
+
+	return null;
+}
+
+/**
+ * Parse ENTRYPOINT or CMD instruction value.
+ *
+ * Supports:
+ *   - JSON form: ENTRYPOINT ["executable", "arg1"]
+ *   - Shell form: ENTRYPOINT executable arg1 (converted to array)
+ *
+ * Returns null if parsing fails.
+ */
+function parseDockerInstruction(line: string, instruction: string): string[] | null {
+	// Remove instruction keyword.
+	const value = line.slice(instruction.length).trim();
+
+	if (value.startsWith("[")) {
+		// JSON form.
+		try {
+			const parsed = JSON.parse(value);
+			if (Array.isArray(parsed) && parsed.every((e) => typeof e === "string")) {
+				return parsed;
+			}
+		} catch {
+			// Fall through to shell form parsing.
+		}
+	}
+
+	// Shell form — split on whitespace (simplified, no quote handling).
+	const parts = value.split(/\s+/).filter((p) => p.length > 0);
+	return parts.length > 0 ? parts : null;
+}
+
+/**
+ * Infer surfaceKind from ENTRYPOINT and CMD.
+ *
+ * Token-level matching to avoid false positives from substring scans.
+ * Examines:
+ *   - Executable basename (first token, path stripped)
+ *   - Subcommand (second token for package managers)
+ *   - Flag tokens (--help, --version)
+ *
+ * Confidence:
+ *   - Explicit ENTRYPOINT/CMD with clear pattern → 0.85 (service) or 0.80 (cli)
+ *   - Explicit ENTRYPOINT/CMD with unclear pattern → 0.70 (default to service)
+ *   - No ENTRYPOINT/CMD → 0.60 (default to service)
+ */
+function inferDockerfileSurfaceKind(
+	entrypoint: string[] | null,
+	cmd: string[] | null,
+): { surfaceKind: SurfaceKind; confidence: number } {
+	if (!entrypoint && !cmd) {
+		// No explicit command — default to backend_service with low confidence.
+		return { surfaceKind: "backend_service", confidence: 0.60 };
+	}
+
+	// Combine ENTRYPOINT and CMD for analysis.
+	const fullCommand = [...(entrypoint ?? []), ...(cmd ?? [])];
+	if (fullCommand.length === 0) {
+		return { surfaceKind: "backend_service", confidence: 0.60 };
+	}
+
+	// Normalize tokens to lowercase.
+	const tokens = fullCommand.map((t) => t.toLowerCase());
+
+	// Extract executable basename from first token (strip path).
+	const executable = getBasename(tokens[0]);
+
+	// Check for CLI flag tokens anywhere (exact match).
+	const cliFlags = new Set(["--help", "-h", "--version", "-v", "help", "version"]);
+	for (const token of tokens) {
+		if (cliFlags.has(token)) {
+			return { surfaceKind: "cli", confidence: 0.80 };
+		}
+	}
+
+	// Service executables — exact match on basename.
+	const serviceExecutables = new Set([
+		"gunicorn", "uvicorn", "nginx", "httpd", "apache2",
+		"supervisord", "daphne", "hypercorn",
+	]);
+	if (serviceExecutables.has(executable)) {
+		return { surfaceKind: "backend_service", confidence: 0.85 };
+	}
+
+	// Package manager + subcommand patterns.
+	if (tokens.length >= 2) {
+		const subcommand = tokens[1];
+
+		// Direct service subcommands (no script name needed).
+		// npm start, yarn start, pnpm start, flask run
+		const directServiceSubcommands: Record<string, Set<string>> = {
+			npm: new Set(["start"]),
+			yarn: new Set(["start"]),
+			pnpm: new Set(["start"]),
+			flask: new Set(["run"]),
+		};
+		if (directServiceSubcommands[executable]?.has(subcommand)) {
+			return { surfaceKind: "backend_service", confidence: 0.85 };
+		}
+
+		// Direct CLI subcommands (no script name needed).
+		const directCliSubcommands: Record<string, Set<string>> = {
+			npm: new Set(["test", "install", "build", "lint", "ci"]),
+			yarn: new Set(["test", "install", "build", "lint"]),
+			pnpm: new Set(["test", "install", "build", "lint"]),
+		};
+		if (directCliSubcommands[executable]?.has(subcommand)) {
+			return { surfaceKind: "cli", confidence: 0.80 };
+		}
+
+		// "run" subcommand requires inspecting the script name (third token).
+		// npm run <script>, yarn run <script>, pnpm run <script>, bun run <script>
+		const runSubcommandPMs = new Set(["npm", "yarn", "pnpm", "bun"]);
+		if (runSubcommandPMs.has(executable) && subcommand === "run" && tokens.length >= 3) {
+			const scriptName = tokens[2];
+			// Service-like script names.
+			const serviceScripts = new Set(["start", "serve", "server", "dev", "develop", "watch"]);
+			if (serviceScripts.has(scriptName)) {
+				return { surfaceKind: "backend_service", confidence: 0.85 };
+			}
+			// CLI-like script names.
+			const cliScripts = new Set(["build", "test", "lint", "check", "typecheck", "format", "migrate", "ci"]);
+			if (cliScripts.has(scriptName)) {
+				return { surfaceKind: "cli", confidence: 0.80 };
+			}
+			// Unknown script — ambiguous, fall through to later heuristics.
+		}
+
+		// python -m <module> requires inspecting the module name (third token).
+		if (executable === "python" && subcommand === "-m" && tokens.length >= 3) {
+			const moduleName = tokens[2];
+			// Service-like modules.
+			const serviceModules = new Set(["http.server", "flask", "uvicorn", "gunicorn", "hypercorn"]);
+			if (serviceModules.has(moduleName)) {
+				return { surfaceKind: "backend_service", confidence: 0.85 };
+			}
+			// CLI-like modules.
+			const cliModules = new Set(["pytest", "unittest", "pip", "build", "mypy", "black", "ruff", "pylint"]);
+			if (cliModules.has(moduleName)) {
+				return { surfaceKind: "cli", confidence: 0.80 };
+			}
+			// Unknown module — ambiguous, fall through.
+		}
+	}
+
+	// Service-indicating subcommands at any position (exact token match).
+	const serviceSubcommands = new Set(["serve", "server", "start", "daemon", "listen", "worker"]);
+	for (const token of tokens.slice(1)) {
+		if (serviceSubcommands.has(token)) {
+			return { surfaceKind: "backend_service", confidence: 0.85 };
+		}
+	}
+
+	// CLI-indicating subcommands at any position (exact token match).
+	const cliSubcommands = new Set(["build", "test", "migrate", "init", "setup", "install", "compile", "lint", "check"]);
+	for (const token of tokens.slice(1)) {
+		if (cliSubcommands.has(token)) {
+			return { surfaceKind: "cli", confidence: 0.80 };
+		}
+	}
+
+	// Unclear pattern — default to backend_service.
+	return { surfaceKind: "backend_service", confidence: 0.70 };
+}
+
+/**
+ * Extract basename from a path (strips directory component).
+ * "/usr/local/bin/node" → "node"
+ * "python3" → "python3"
+ */
+function getBasename(path: string): string {
+	const lastSlash = path.lastIndexOf("/");
+	return lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
+}
+
+/**
+ * Infer base runtime from Docker image name.
+ *
+ * Maps common base images to RuntimeKind values.
+ * Returns "unknown" for unrecognized images.
+ */
+function inferBaseRuntime(baseImage: string): RuntimeKind {
+	const image = baseImage.toLowerCase();
+
+	// Node.js variants.
+	if (image.startsWith("node:") || image.includes("/node:") ||
+		image === "node" || image.startsWith("node-")) {
+		return "node";
+	}
+
+	// Python variants.
+	if (image.startsWith("python:") || image.includes("/python:") ||
+		image === "python" || image.startsWith("python-")) {
+		return "python";
+	}
+
+	// Rust variants.
+	if (image.startsWith("rust:") || image.includes("/rust:") ||
+		image === "rust" || image.startsWith("rust-")) {
+		return "rust_native";
+	}
+
+	// JVM variants (Java, Kotlin, etc.).
+	if (image.startsWith("openjdk:") || image.startsWith("eclipse-temurin:") ||
+		image.startsWith("amazoncorretto:") || image.startsWith("adoptopenjdk:") ||
+		image.includes("/openjdk:") || image.includes("java")) {
+		return "jvm";
+	}
+
+	// Bun runtime.
+	if (image.startsWith("oven/bun:") || image === "oven/bun" ||
+		image.startsWith("bun:")) {
+		return "bun";
+	}
+
+	// Deno runtime.
+	if (image.startsWith("denoland/deno:") || image === "denoland/deno" ||
+		image.startsWith("deno:")) {
+		return "deno";
+	}
+
+	// Generic Linux bases — unknown runtime.
+	// alpine, ubuntu, debian, centos, fedora, etc.
+	return "unknown";
 }

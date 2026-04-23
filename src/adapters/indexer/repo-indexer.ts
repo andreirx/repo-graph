@@ -89,6 +89,7 @@ import { detectFsMutations } from "../../core/seams/fs-mutation-detectors.js";
 import { linkFsMutations } from "../../core/seams/fs-mutation-linkage.js";
 import {
 	detectCargoSurfaces,
+	detectDockerfileSurfaces,
 	detectPackageJsonSurfaces,
 	detectPyprojectSurfaces,
 	type DetectedSurface,
@@ -1697,6 +1698,8 @@ export class RepoIndexer implements IndexerPort {
 				results.push(...detectCargoSurfaces(content, relPath));
 			} else if (relPath.endsWith("pyproject.toml")) {
 				results.push(...detectPyprojectSurfaces(content, relPath));
+			} else if (isDockerfilePath(relPath)) {
+				results.push(...detectDockerfileSurfaces(content, relPath));
 			}
 		}
 
@@ -1729,7 +1732,8 @@ export class RepoIndexer implements IndexerPort {
 				} else if (
 					entry.name === "package.json" ||
 					entry.name === "Cargo.toml" ||
-					entry.name === "pyproject.toml"
+					entry.name === "pyproject.toml" ||
+					isDockerfileName(entry.name)
 				) {
 					const relPath = toPosixPath(relative(rootPath, join(dir, entry.name)));
 					if (ig.ignores(relPath)) continue;
@@ -3112,6 +3116,27 @@ function stripExtension(filePath: string): string {
 		return filePath.slice(0, dot);
 	}
 	return filePath;
+}
+
+/**
+ * Check if a filename matches Dockerfile naming conventions.
+ * Patterns: Dockerfile, Dockerfile.*, *.Dockerfile
+ */
+function isDockerfileName(name: string): boolean {
+	if (name === "Dockerfile") return true;
+	if (name.startsWith("Dockerfile.")) return true;
+	if (name.endsWith(".Dockerfile")) return true;
+	return false;
+}
+
+/**
+ * Check if a path ends with a Dockerfile pattern.
+ */
+function isDockerfilePath(relPath: string): boolean {
+	const name = relPath.includes("/")
+		? relPath.slice(relPath.lastIndexOf("/") + 1)
+		: relPath;
+	return isDockerfileName(name);
 }
 
 function toPosixPath(p: string): string {

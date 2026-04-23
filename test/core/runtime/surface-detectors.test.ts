@@ -12,6 +12,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	detectCargoSurfaces,
+	detectDockerfileSurfaces,
 	detectPackageJsonSurfaces,
 	detectPyprojectSurfaces,
 } from "../../../src/core/runtime/surface-detectors.js";
@@ -284,5 +285,287 @@ requires = ["setuptools"]
 `;
 		const surfaces = detectPyprojectSurfaces(content, "pyproject.toml");
 		expect(surfaces).toHaveLength(0);
+	});
+});
+
+// ── Dockerfile ─────────────────────────────────────────────────────
+
+describe("detectDockerfileSurfaces", () => {
+	it("detects backend_service from CMD with npm start", () => {
+		const content = `FROM node:20-alpine
+WORKDIR /app
+COPY . .
+CMD ["npm", "start"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		const surface = surfaces[0];
+		expect(surface.surfaceKind).toBe("backend_service");
+		expect(surface.runtimeKind).toBe("container");
+		expect(surface.sourceType).toBe("dockerfile");
+		expect(surface.dockerfilePath).toBe("Dockerfile");
+		expect(surface.confidence).toBeGreaterThanOrEqual(0.85);
+	});
+
+	it("detects backend_service from ENTRYPOINT with gunicorn", () => {
+		const content = `FROM python:3.11-slim
+WORKDIR /app
+COPY . .
+ENTRYPOINT ["gunicorn", "--bind", "0.0.0.0:8000"]
+CMD ["app:application"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "services/api/Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		const surface = surfaces[0];
+		expect(surface.surfaceKind).toBe("backend_service");
+		expect(surface.rootPath).toBe("services/api");
+		expect(surface.dockerfilePath).toBe("services/api/Dockerfile");
+		// Check metadata for base runtime
+		expect(surface.metadata).toBeDefined();
+		expect((surface.metadata as Record<string, unknown>).baseRuntimeKind).toBe("python");
+	});
+
+	it("detects cli from ENTRYPOINT with --help", () => {
+		const content = `FROM node:20-alpine
+WORKDIR /app
+COPY . .
+ENTRYPOINT ["node", "cli.js"]
+CMD ["--help"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		const surface = surfaces[0];
+		expect(surface.surfaceKind).toBe("cli");
+		expect(surface.confidence).toBeGreaterThanOrEqual(0.80);
+	});
+
+	it("uses final stage only in multi-stage builds", () => {
+		const content = `FROM rust:1.75 AS builder
+WORKDIR /app
+COPY . .
+RUN cargo build --release
+ENTRYPOINT ["cargo", "test"]
+
+FROM debian:bookworm-slim
+COPY --from=builder /app/target/release/myserver /usr/local/bin/
+ENTRYPOINT ["/usr/local/bin/myserver"]
+CMD ["--port", "8080"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		const surface = surfaces[0];
+		// Final stage has "myserver" which doesn't match CLI patterns
+		// but contains "server" in path, defaults to backend_service
+		expect(surface.surfaceKind).toBe("backend_service");
+		// Evidence should show stage count
+		expect(surface.evidence[0].payload).toBeDefined();
+		const payload = surface.evidence[0].payload as Record<string, unknown>;
+		expect(payload.stageCount).toBe(2);
+		// Base image is final FROM, not builder
+		expect(payload.baseImage).toBe("debian:bookworm-slim");
+	});
+
+	it("defaults to backend_service with low confidence when no CMD/ENTRYPOINT", () => {
+		const content = `FROM alpine:3.19
+RUN apk add --no-cache curl
+COPY scripts /scripts
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		const surface = surfaces[0];
+		expect(surface.surfaceKind).toBe("backend_service");
+		expect(surface.confidence).toBe(0.60);
+	});
+
+	it("returns empty for invalid Dockerfile (no FROM)", () => {
+		const content = `# This is not a valid Dockerfile
+RUN echo "hello"
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(0);
+	});
+
+	it("handles shell form ENTRYPOINT", () => {
+		const content = `FROM python:3.11
+ENTRYPOINT python server.py --port 8080
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		const surface = surfaces[0];
+		expect(surface.surfaceKind).toBe("backend_service");
+		const payload = surface.evidence[0].payload as Record<string, unknown>;
+		// Shell form gets split into array
+		expect(payload.entrypoint).toEqual(["python", "server.py", "--port", "8080"]);
+	});
+
+	it("infers base runtime from common images", () => {
+		const testCases: Array<{ image: string; expected: string }> = [
+			{ image: "node:20-alpine", expected: "node" },
+			{ image: "python:3.11-slim", expected: "python" },
+			{ image: "rust:1.75", expected: "rust_native" },
+			{ image: "openjdk:17", expected: "jvm" },
+			{ image: "eclipse-temurin:21", expected: "jvm" },
+			{ image: "oven/bun:latest", expected: "bun" },
+			{ image: "denoland/deno:latest", expected: "deno" },
+			{ image: "alpine:3.19", expected: "unknown" },
+			{ image: "ubuntu:22.04", expected: "unknown" },
+		];
+
+		for (const { image, expected } of testCases) {
+			const content = `FROM ${image}\nCMD ["echo", "test"]`;
+			const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+			expect(surfaces).toHaveLength(1);
+			const payload = surfaces[0].evidence[0].payload as Record<string, unknown>;
+			expect(payload.baseRuntimeKind).toBe(expected);
+		}
+	});
+
+	it("provides correct identity fields", () => {
+		const content = `FROM node:20
+CMD ["npm", "start"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "apps/web/Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		const surface = surfaces[0];
+		expect(surface.sourceType).toBe("dockerfile");
+		expect(surface.dockerfilePath).toBe("apps/web/Dockerfile");
+		expect(surface.rootPath).toBe("apps/web");
+	});
+
+	it("handles comments and blank lines", () => {
+		const content = `# Build stage
+FROM node:20
+
+# Install deps
+WORKDIR /app
+
+# Copy files
+COPY . .
+
+# Start the server
+CMD ["npm", "start"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		expect(surfaces[0].surfaceKind).toBe("backend_service");
+	});
+
+	it("parses FROM with --platform flag correctly", () => {
+		const content = `FROM --platform=linux/amd64 node:20-alpine AS base
+WORKDIR /app
+CMD ["npm", "start"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		const payload = surfaces[0].evidence[0].payload as Record<string, unknown>;
+		// Should extract node:20-alpine, not --platform=linux/amd64
+		expect(payload.baseImage).toBe("node:20-alpine");
+		expect(payload.baseRuntimeKind).toBe("node");
+	});
+
+	it("parses FROM with --platform flag without equals sign", () => {
+		const content = `FROM --platform linux/arm64 python:3.11
+CMD ["python", "-m", "http.server"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		const payload = surfaces[0].evidence[0].payload as Record<string, unknown>;
+		expect(payload.baseImage).toBe("python:3.11");
+		expect(payload.baseRuntimeKind).toBe("python");
+	});
+
+	it("does not match service patterns as substrings in paths", () => {
+		// /usr/local/bin/myserver should NOT match "server" as substring
+		// observer should NOT match "serve" as substring
+		const content = `FROM alpine:3.19
+ENTRYPOINT ["/usr/local/bin/observer"]
+CMD ["--config", "/etc/observer.yaml"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		// Should be backend_service with lower confidence (unclear pattern)
+		// NOT 0.85 from false "serve" substring match
+		expect(surfaces[0].confidence).toBe(0.70);
+	});
+
+	it("matches service executables exactly by basename", () => {
+		const content = `FROM python:3.11
+ENTRYPOINT ["gunicorn", "--bind", "0.0.0.0:8000", "app:app"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		expect(surfaces[0].surfaceKind).toBe("backend_service");
+		expect(surfaces[0].confidence).toBe(0.85);
+	});
+
+	it("matches service subcommands as exact tokens", () => {
+		// "serve" as a subcommand should match
+		const content = `FROM node:20
+ENTRYPOINT ["npx", "serve", "-s", "build"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		expect(surfaces[0].surfaceKind).toBe("backend_service");
+		expect(surfaces[0].confidence).toBe(0.85);
+	});
+
+	it("classifies npm run build as CLI, not service", () => {
+		const content = `FROM node:20
+CMD ["npm", "run", "build"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		expect(surfaces[0].surfaceKind).toBe("cli");
+		expect(surfaces[0].confidence).toBe(0.80);
+	});
+
+	it("classifies npm run start as service", () => {
+		const content = `FROM node:20
+CMD ["npm", "run", "start"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		expect(surfaces[0].surfaceKind).toBe("backend_service");
+		expect(surfaces[0].confidence).toBe(0.85);
+	});
+
+	it("classifies yarn run lint as CLI", () => {
+		const content = `FROM node:20
+CMD ["yarn", "run", "lint"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		expect(surfaces[0].surfaceKind).toBe("cli");
+	});
+
+	it("classifies python -m pytest as CLI", () => {
+		const content = `FROM python:3.11
+CMD ["python", "-m", "pytest"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		expect(surfaces[0].surfaceKind).toBe("cli");
+		expect(surfaces[0].confidence).toBe(0.80);
+	});
+
+	it("classifies python -m http.server as service", () => {
+		const content = `FROM python:3.11
+CMD ["python", "-m", "http.server"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		expect(surfaces[0].surfaceKind).toBe("backend_service");
+		expect(surfaces[0].confidence).toBe(0.85);
+	});
+
+	it("classifies unknown npm run script as ambiguous (falls through)", () => {
+		const content = `FROM node:20
+CMD ["npm", "run", "custom-script"]
+`;
+		const surfaces = detectDockerfileSurfaces(content, "Dockerfile");
+		expect(surfaces).toHaveLength(1);
+		// Unknown script falls through to default backend_service with lower confidence
+		expect(surfaces[0].surfaceKind).toBe("backend_service");
+		expect(surfaces[0].confidence).toBe(0.70);
 	});
 });

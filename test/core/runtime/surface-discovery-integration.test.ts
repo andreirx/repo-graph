@@ -35,6 +35,11 @@ const MIXED_LANG_FIXTURE = join(
 	"../../fixtures/mixed-lang",
 );
 
+const DOCKERFILE_APP_FIXTURE = join(
+	import.meta.dirname,
+	"../../fixtures/dockerfile-app",
+);
+
 let extractor: TypeScriptExtractor;
 let scanner: ManifestScanner;
 
@@ -205,6 +210,145 @@ describe("surface discovery integration — mixed-lang", () => {
 		const backend = surfaces.find((s) => s.surfaceKind === "backend_service");
 		expect(backend).toBeDefined();
 		expect(backend!.runtimeKind).toBe("node");
+
+		provider.close();
+	});
+});
+
+// ── dockerfile-app fixture ─────────────────────────────────────────
+
+describe("surface discovery integration — dockerfile", () => {
+	it("detects container surface from Dockerfile", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "surface-dockerfile";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "dockerfile-app",
+			rootPath: DOCKERFILE_APP_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+
+		// Should have a container surface from Dockerfile.
+		const containerSurface = surfaces.find(
+			(s) => s.sourceType === "dockerfile" && s.runtimeKind === "container",
+		);
+		expect(containerSurface).toBeDefined();
+		expect(containerSurface!.surfaceKind).toBe("backend_service");
+
+		provider.close();
+	});
+
+	it("persists correct identity fields for Dockerfile surface", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "surface-docker-identity";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "dockerfile-app",
+			rootPath: DOCKERFILE_APP_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+		const containerSurface = surfaces.find((s) => s.sourceType === "dockerfile");
+
+		expect(containerSurface).toBeDefined();
+		// sourceType must be "dockerfile"
+		expect(containerSurface!.sourceType).toBe("dockerfile");
+		// sourceSpecificId should be the Dockerfile path
+		expect(containerSurface!.sourceSpecificId).toBe("Dockerfile");
+		// stableSurfaceKey must be present and 32 chars (128 bits)
+		expect(containerSurface!.stableSurfaceKey).toBeDefined();
+		expect(containerSurface!.stableSurfaceKey).toHaveLength(32);
+
+		provider.close();
+	});
+
+	it("produces deterministic identity on re-index", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "surface-docker-deterministic";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "dockerfile-app",
+			rootPath: DOCKERFILE_APP_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+
+		// First index
+		const result1 = await indexer.indexRepo(REPO_UID);
+		const surfaces1 = storage.queryProjectSurfaces(result1.snapshotUid);
+		const docker1 = surfaces1.find((s) => s.sourceType === "dockerfile");
+
+		// Second index
+		const result2 = await indexer.indexRepo(REPO_UID);
+		const surfaces2 = storage.queryProjectSurfaces(result2.snapshotUid);
+		const docker2 = surfaces2.find((s) => s.sourceType === "dockerfile");
+
+		// Both exist
+		expect(docker1).toBeDefined();
+		expect(docker2).toBeDefined();
+
+		// stableSurfaceKey must be identical across snapshots
+		expect(docker2!.stableSurfaceKey).toBe(docker1!.stableSurfaceKey);
+
+		// projectSurfaceUid differs (snapshot-scoped)
+		expect(docker2!.projectSurfaceUid).not.toBe(docker1!.projectSurfaceUid);
+
+		provider.close();
+	});
+
+	it("persists evidence with container_config kind", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "surface-docker-evidence";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "dockerfile-app",
+			rootPath: DOCKERFILE_APP_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+		const dockerSurface = surfaces.find((s) => s.sourceType === "dockerfile");
+		expect(dockerSurface).toBeDefined();
+
+		const allEvidence = storage.queryAllProjectSurfaceEvidence(result.snapshotUid);
+		const dockerEvidence = allEvidence.filter(
+			(e) => e.projectSurfaceUid === dockerSurface!.projectSurfaceUid,
+		);
+
+		expect(dockerEvidence.length).toBeGreaterThanOrEqual(1);
+		expect(dockerEvidence[0].sourceType).toBe("dockerfile");
+		expect(dockerEvidence[0].evidenceKind).toBe("container_config");
+		expect(dockerEvidence[0].sourcePath).toBe("Dockerfile");
+
+		// Evidence payload should contain base image info
+		const payload = JSON.parse(dockerEvidence[0].payloadJson!);
+		expect(payload.baseImage).toBe("node:20-alpine");
+		expect(payload.baseRuntimeKind).toBe("node");
 
 		provider.close();
 	});
