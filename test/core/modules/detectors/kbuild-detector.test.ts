@@ -157,19 +157,44 @@ describe("detectKbuildModules — nested paths", () => {
 // ── Diagnostics ────────────────────────────────────────────────────
 
 describe("detectKbuildModules — diagnostics", () => {
-	it("records skipped conditionals", () => {
+	it("skips assignments inside conditional blocks", () => {
 		const content = `
 ifeq ($(CONFIG_FOO),y)
 obj-y += foo/
 endif
 `;
 		const result = detectKbuildModules(content, "Makefile");
-		// foo/ should still be detected (we parse all obj-y, even inside conditionals)
-		expect(result.modules).toHaveLength(1);
-		// But we record that we saw conditionals
+		// foo/ must NOT be detected — it's inside a conditional block (D1: out of scope)
+		expect(result.modules).toHaveLength(0);
+		// Record diagnostics for the conditional structure
 		expect(result.diagnostics.some((d) => d.kind === "skipped_conditional")).toBe(
 			true,
 		);
+		// Record diagnostic for the skipped assignment
+		expect(
+			result.diagnostics.some((d) => d.kind === "skipped_inside_conditional"),
+		).toBe(true);
+	});
+
+	it("tracks nested conditional depth correctly", () => {
+		const content = `
+obj-y += before/
+ifeq ($(CONFIG_FOO),y)
+  ifdef CONFIG_BAR
+    obj-y += nested/
+  endif
+  obj-y += inner/
+endif
+obj-y += after/
+`;
+		const result = detectKbuildModules(content, "Makefile");
+		// Only before/ and after/ should be detected (outside conditionals)
+		expect(result.modules).toHaveLength(2);
+		expect(result.modules.map((m) => m.displayName)).toEqual(["before", "after"]);
+		// nested/ and inner/ skipped
+		expect(
+			result.diagnostics.filter((d) => d.kind === "skipped_inside_conditional"),
+		).toHaveLength(2);
 	});
 
 	it("records skipped variable references", () => {

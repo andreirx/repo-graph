@@ -35,7 +35,11 @@ export interface KbuildParseResult {
 
 export interface KbuildDiagnostic {
 	line: number;
-	kind: "skipped_conditional" | "skipped_variable" | "malformed_assignment";
+	kind:
+		| "skipped_conditional"
+		| "skipped_inside_conditional"
+		| "skipped_variable"
+		| "malformed_assignment";
 	text: string;
 }
 
@@ -64,6 +68,12 @@ export function detectKbuildModules(
 
 	const lines = content.split("\n");
 
+	// Track conditional block nesting depth.
+	// While depth > 0, assignments are inside a conditional block and must be skipped.
+	// This implements D1 "do NOT parse conditionals" — we skip the entire block,
+	// not just the directive lines.
+	let conditionalDepth = 0;
+
 	for (let i = 0; i < lines.length; i++) {
 		const rawLine = lines[i];
 		const line = rawLine.trim();
@@ -72,15 +82,34 @@ export function detectKbuildModules(
 		// Skip empty lines and comments
 		if (!line || line.startsWith("#")) continue;
 
-		// Skip conditionals (not in minimal scope)
+		// Track conditional block boundaries
 		if (
 			line.startsWith("ifeq") ||
 			line.startsWith("ifneq") ||
 			line.startsWith("ifdef") ||
-			line.startsWith("ifndef") ||
-			line.startsWith("else") ||
-			line.startsWith("endif")
+			line.startsWith("ifndef")
 		) {
+			conditionalDepth++;
+			diagnostics.push({
+				line: lineNum,
+				kind: "skipped_conditional",
+				text: line.slice(0, 60),
+			});
+			continue;
+		}
+
+		if (line.startsWith("endif")) {
+			if (conditionalDepth > 0) conditionalDepth--;
+			diagnostics.push({
+				line: lineNum,
+				kind: "skipped_conditional",
+				text: line.slice(0, 60),
+			});
+			continue;
+		}
+
+		// "else" does not change depth, just record it
+		if (line.startsWith("else")) {
 			diagnostics.push({
 				line: lineNum,
 				kind: "skipped_conditional",
@@ -100,6 +129,18 @@ export function detectKbuildModules(
 		);
 
 		if (!objMatch) continue;
+
+		// Skip assignments inside conditional blocks (D1: conditionals out of scope).
+		// We record a diagnostic but do not emit modules — their existence depends
+		// on Kconfig evaluation which we do not perform.
+		if (conditionalDepth > 0) {
+			diagnostics.push({
+				line: lineNum,
+				kind: "skipped_inside_conditional",
+				text: line.slice(0, 60),
+			});
+			continue;
+		}
 
 		const assignments = objMatch[1];
 

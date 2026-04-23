@@ -331,11 +331,16 @@ Pure function implementation: `src/core/modules/detectors/kbuild-detector.ts`
 | kernel/Makefile | 21 |
 | lib/Makefile | 19 |
 | security/Makefile | 13 |
-| Total (11 Makefiles) | **411** |
+| Total (11 Makefiles) | **410** |
 
-The detector correctly identifies subdirectory module boundaries from
-Kbuild-style Makefiles. Object file assignments (`.o`) are correctly
-ignored as they are not module boundaries.
+The detector correctly:
+- Identifies subdirectory module boundaries from obj-y/obj-m assignments
+- Ignores object file assignments (`.o`) — not module boundaries
+- Skips assignments inside conditional blocks (ifeq/ifdef) — 8 skipped
+- Records conditional directive lines as diagnostics — 36 recorded
+
+Conditional block tracking ensures HIGH confidence is only assigned to
+modules whose existence does not depend on Kconfig evaluation.
 
 ## Deferred Items
 
