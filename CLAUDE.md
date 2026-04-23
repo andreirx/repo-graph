@@ -321,6 +321,7 @@ See `docs/milestones/rmap-structural-v1.md` for the Rust CLI structural mileston
 - All CLI output supports `--json`. Default is human-readable tables.
 - Tests use fixture codebases in `test/fixtures/` with known-good expected graphs.
 - No emojis in code or output.
+- External validation repos live in `../legacy-codebases/` (sibling to repo-graph), not `/tmp/`.
 
 ## IMPORTANT: Use rgr For Every Structural Change
 

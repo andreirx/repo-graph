@@ -169,13 +169,34 @@ fn print_usage() {
 // ── index command ────────────────────────────────────────────────
 
 fn run_index(args: &[String]) -> ExitCode {
-	if args.len() != 2 {
-		eprintln!("usage: rmap index <repo_path> <db_path>");
+	// Parse options and positional args.
+	let mut include_roots: Vec<String> = Vec::new();
+	let mut positional: Vec<&String> = Vec::new();
+	let mut i = 0;
+	while i < args.len() {
+		if args[i] == "--include-root" {
+			if i + 1 >= args.len() {
+				eprintln!("error: --include-root requires a path argument");
+				return ExitCode::from(1);
+			}
+			include_roots.push(args[i + 1].clone());
+			i += 2;
+		} else if args[i].starts_with("--") {
+			eprintln!("error: unknown option: {}", args[i]);
+			return ExitCode::from(1);
+		} else {
+			positional.push(&args[i]);
+			i += 1;
+		}
+	}
+
+	if positional.len() != 2 {
+		eprintln!("usage: rmap index <repo_path> <db_path> [--include-root <path>]...");
 		return ExitCode::from(1);
 	}
 
-	let repo_path = Path::new(&args[0]);
-	let db_path = Path::new(&args[1]);
+	let repo_path = Path::new(positional[0]);
+	let db_path = Path::new(positional[1]);
 
 	if !repo_path.is_dir() {
 		eprintln!(
@@ -191,7 +212,11 @@ fn run_index(args: &[String]) -> ExitCode {
 		.unwrap_or("repo");
 
 	use repo_graph_repo_index::compose::{index_path, ComposeOptions};
-	match index_path(repo_path, db_path, repo_uid, &ComposeOptions::default()) {
+	let options = ComposeOptions {
+		c_include_roots: include_roots,
+		..ComposeOptions::default()
+	};
+	match index_path(repo_path, db_path, repo_uid, &options) {
 		Ok(result) => {
 			eprintln!(
 				"indexed {} files, {} nodes, {} edges ({} unresolved) → {}",
@@ -213,13 +238,34 @@ fn run_index(args: &[String]) -> ExitCode {
 // ── refresh command ──────────────────────────────────────────────
 
 fn run_refresh(args: &[String]) -> ExitCode {
-	if args.len() != 2 {
-		eprintln!("usage: rmap refresh <repo_path> <db_path>");
+	// Parse options and positional args.
+	let mut include_roots: Vec<String> = Vec::new();
+	let mut positional: Vec<&String> = Vec::new();
+	let mut i = 0;
+	while i < args.len() {
+		if args[i] == "--include-root" {
+			if i + 1 >= args.len() {
+				eprintln!("error: --include-root requires a path argument");
+				return ExitCode::from(1);
+			}
+			include_roots.push(args[i + 1].clone());
+			i += 2;
+		} else if args[i].starts_with("--") {
+			eprintln!("error: unknown option: {}", args[i]);
+			return ExitCode::from(1);
+		} else {
+			positional.push(&args[i]);
+			i += 1;
+		}
+	}
+
+	if positional.len() != 2 {
+		eprintln!("usage: rmap refresh <repo_path> <db_path> [--include-root <path>]...");
 		return ExitCode::from(1);
 	}
 
-	let repo_path = Path::new(&args[0]);
-	let db_path = Path::new(&args[1]);
+	let repo_path = Path::new(positional[0]);
+	let db_path = Path::new(positional[1]);
 
 	if !repo_path.is_dir() {
 		eprintln!(
@@ -235,7 +281,11 @@ fn run_refresh(args: &[String]) -> ExitCode {
 		.unwrap_or("repo");
 
 	use repo_graph_repo_index::compose::{refresh_path, ComposeOptions};
-	match refresh_path(repo_path, db_path, repo_uid, &ComposeOptions::default()) {
+	let options = ComposeOptions {
+		c_include_roots: include_roots,
+		..ComposeOptions::default()
+	};
+	match refresh_path(repo_path, db_path, repo_uid, &options) {
 		Ok(result) => {
 			eprintln!(
 				"refreshed {} files, {} nodes, {} edges ({} unresolved) → {}",

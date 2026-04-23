@@ -50,6 +50,9 @@ impl std::fmt::Display for ComposeError {
 pub struct ComposeOptions {
 	pub basis_commit: Option<String>,
 	pub edge_batch_size: Option<usize>,
+	/// C/C++ include roots (configured via `--include-root`).
+	/// Searched in order before conventional roots.
+	pub c_include_roots: Vec<String>,
 }
 
 impl Default for ComposeOptions {
@@ -57,6 +60,7 @@ impl Default for ComposeOptions {
 		Self {
 			basis_commit: None,
 			edge_batch_size: None,
+			c_include_roots: Vec::new(),
 		}
 	}
 }
@@ -296,6 +300,7 @@ pub fn index_into_storage(
 	let mut idx_options = IndexOptions {
 		basis_commit: options.basis_commit.clone(),
 		edge_batch_size: options.edge_batch_size,
+		c_include_roots: options.c_include_roots.clone(),
 		..IndexOptions::default()
 	};
 
@@ -370,6 +375,7 @@ pub fn refresh_into_storage(
 	let mut idx_options = IndexOptions {
 		basis_commit: options.basis_commit.clone(),
 		edge_batch_size: options.edge_batch_size,
+		c_include_roots: options.c_include_roots.clone(),
 		..IndexOptions::default()
 	};
 

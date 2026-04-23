@@ -426,6 +426,10 @@ pub struct IndexOptions {
 	pub edge_batch_size: Option<usize>,
 	/// Optional progress callback. Called for each phase transition.
 	pub on_progress: Option<ProgressCallback>,
+	/// C/C++ include roots (repo-relative paths). If non-empty,
+	/// these are checked BEFORE conventional roots (include/, inc/,
+	/// src/include/). Per c-include-resolution-v1.1.md.
+	pub c_include_roots: Vec<String>,
 }
 
 impl Default for IndexOptions {
@@ -436,6 +440,7 @@ impl Default for IndexOptions {
 			basis_commit: None,
 			edge_batch_size: None,
 			on_progress: None,
+			c_include_roots: Vec::new(),
 		}
 	}
 }

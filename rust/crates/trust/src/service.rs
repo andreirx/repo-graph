@@ -133,6 +133,7 @@ pub struct TrustComputationInput {
 pub(crate) fn human_label_for_category(category: &str) -> String {
 	match category {
 		"imports_file_not_found" => "IMPORTS (file not found)".into(),
+		"imports_ambiguous_match" => "IMPORTS (ambiguous match)".into(),
 		"instantiates_class_not_found" => "INSTANTIATES (class not found)".into(),
 		"implements_interface_not_found" => "IMPLEMENTS (interface not found)".into(),
 		"calls_this_wildcard_method_needs_type_info" => {

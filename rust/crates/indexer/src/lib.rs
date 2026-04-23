@@ -93,6 +93,7 @@
 
 pub mod extractor_port;
 pub mod hook;
+pub mod include_resolver;
 pub mod invalidation;
 pub mod orchestrator;
 pub mod resolver;

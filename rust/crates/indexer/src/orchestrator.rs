@@ -31,6 +31,7 @@ use repo_graph_classification::types::{
 };
 
 use crate::extractor_port::{ExtractorError, ExtractorPort};
+use crate::include_resolver::{build_include_resolution_map, IncludeResolverConfig};
 use crate::resolver::{
 	build_file_resolution_map, build_per_file_include_resolution, get_module_path,
 	resolve_edges, ResolverIndex,
@@ -193,7 +194,7 @@ pub fn index_repo<S: IndexerStoragePort>(
 	let all_file_paths: Vec<String> = files.iter().map(|f| f.rel_path.clone()).collect();
 	// Full index: no copy-forward, so no copied resource keys.
 	let empty_resource_keys: HashMap<String, crate::storage_port::CopiedResourceNodeKey> = HashMap::new();
-	match run_pipeline(storage, extractors, repo_uid, &snap_uid, files, &all_file_paths, &snapshot_signals, &routing_table, &created_at, options.edge_batch_size, progress, start, hook, &empty_resource_keys) {
+	match run_pipeline(storage, extractors, repo_uid, &snap_uid, files, &all_file_paths, &snapshot_signals, &routing_table, &created_at, options.edge_batch_size, progress, start, hook, &empty_resource_keys, &options.c_include_roots) {
 		Ok(result) => Ok(result),
 		Err(storage_err) => {
 			// Best-effort: transition to FAILED. If this also fails,
@@ -230,6 +231,7 @@ fn run_pipeline<S: IndexerStoragePort>(
 	start: std::time::Instant,
 	mut hook: Option<&mut dyn crate::hook::ExtractionResultHook>,
 	copied_resource_keys: &HashMap<String, crate::storage_port::CopiedResourceNodeKey>,
+	c_include_roots: &[String],
 ) -> Result<IndexResult, S::StorageError> {
 	let now_iso = created_at.to_string();
 	let total_files = files.len() as u64;
@@ -537,6 +539,13 @@ fn run_pipeline<S: IndexerStoragePort>(
 	let file_resolution_map = build_file_resolution_map(all_file_paths, repo_uid);
 	let per_file_include_map = build_per_file_include_resolution(all_file_paths, repo_uid);
 
+	// v1.1: Build include resolver with configured + conventional roots.
+	let include_config = IncludeResolverConfig {
+		configured_roots: c_include_roots.to_vec(),
+		conventional_roots: vec!["include", "inc", "src/include"],
+	};
+	let include_resolution_map = build_include_resolution_map(all_file_paths, repo_uid, &include_config);
+
 	let mut index = ResolverIndex {
 		nodes_by_stable_key: HashMap::new(),
 		nodes_by_name: HashMap::new(),
@@ -545,6 +554,7 @@ fn run_pipeline<S: IndexerStoragePort>(
 		per_file_include_resolution: per_file_include_map,
 		stable_key_to_uid: HashMap::new(),
 		file_to_module: HashMap::new(),
+		include_resolver: Some(include_resolution_map),
 	};
 
 	for node in &resolver_nodes {
@@ -1130,6 +1140,7 @@ pub fn refresh_repo<S: IndexerStoragePort>(
 		start,
 		hook,
 		&copied_resource_keys,
+		&options.c_include_roots,
 	) {
 		Ok(mut result) => {
 			// Adjust node count to include copied nodes (which

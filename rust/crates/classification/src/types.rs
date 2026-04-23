@@ -224,6 +224,9 @@ pub struct ClassifierEdgeInput {
 #[serde(rename_all = "snake_case")]
 pub enum UnresolvedEdgeCategory {
 	ImportsFileNotFound,
+	/// Multiple indexed headers match the include specifier exactly.
+	/// C/C++ v1.1: ambiguity from conventional/configured root overlap.
+	ImportsAmbiguousMatch,
 	InstantiatesClassNotFound,
 	ImplementsInterfaceNotFound,
 	CallsThisWildcardMethodNeedsTypeInfo,
@@ -253,11 +256,9 @@ impl UnresolvedEdgeCategory {
 
 	/// True iff this category is in the IMPORTS family.
 	///
-	/// Mirrors the TS `IMPORTS_CATEGORIES` constant. Currently
-	/// singleton; future import-family categories would be added
-	/// here and in the TS source in sync.
+	/// Mirrors the TS `IMPORTS_CATEGORIES` constant.
 	pub fn is_imports_category(self) -> bool {
-		matches!(self, Self::ImportsFileNotFound)
+		matches!(self, Self::ImportsFileNotFound | Self::ImportsAmbiguousMatch)
 	}
 }
 

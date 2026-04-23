@@ -19,9 +19,22 @@
 
 use std::collections::HashMap;
 
-use repo_graph_classification::types::{ImportBinding, SourceLocation};
+use repo_graph_classification::types::{ImportBinding, SourceLocation, UnresolvedEdgeCategory};
 
+use crate::include_resolver::{IncludeResolutionMap, ResolutionStatus};
 use crate::types::{EdgeType, ExtractedEdge, Resolution};
+
+// ── Resolution outcome ───────────────────────────────────────────
+
+/// Result of attempting to resolve an edge target.
+enum TargetResolution {
+	/// Target resolved to a node UID.
+	Resolved(String),
+	/// Target could not be resolved.
+	Unresolved,
+	/// Multiple candidates matched exactly (C/C++ include ambiguity).
+	Ambiguous(Vec<String>),
+}
 
 // ── Resolver types ───────────────────────────────────────────────
 
@@ -54,13 +67,16 @@ pub struct ResolverIndex {
 	pub node_uid_to_file_uid: HashMap<String, String>,
 	/// Extensionless stable-key → full stable-key with extension.
 	pub file_resolution: HashMap<String, String>,
-	/// Per-TU C/C++ include → header stable-key.
+	/// Per-TU C/C++ include → header stable-key (v1.0 same-dir only).
 	/// Outer key is source file UID.
+	/// DEPRECATED: Use include_resolver for v1.1+ resolution.
 	pub per_file_include_resolution: HashMap<String, HashMap<String, String>>,
 	/// Stable-key → node UID (for module-edge creation).
 	pub stable_key_to_uid: HashMap<String, String>,
 	/// File node UID → module stable-key (for module-edge creation).
 	pub file_to_module: HashMap<String, String>,
+	/// v1.1 include resolver with conventional + configured roots.
+	pub include_resolver: Option<IncludeResolutionMap>,
 }
 
 /// A resolved edge — the symbolic `target_key` has been replaced
@@ -124,36 +140,51 @@ pub fn resolve_edges(
 	let mut resolved_import_pairs = Vec::new();
 
 	for edge in edges {
-		let target_node_uid = resolve_target(edge, index, import_bindings_by_file);
+		let resolution_outcome = resolve_target(edge, index, import_bindings_by_file);
 
-		if let Some(uid) = target_node_uid {
-			if edge.edge_type == EdgeType::Imports {
-				resolved_import_pairs
-					.push((edge.source_node_uid.clone(), uid.clone()));
+		match resolution_outcome {
+			TargetResolution::Resolved(uid) => {
+				if edge.edge_type == EdgeType::Imports {
+					resolved_import_pairs
+						.push((edge.source_node_uid.clone(), uid.clone()));
+				}
+				resolved.push(ResolvedEdge {
+					edge_uid: edge.edge_uid.clone(),
+					snapshot_uid: edge.snapshot_uid.clone(),
+					repo_uid: edge.repo_uid.clone(),
+					source_node_uid: edge.source_node_uid.clone(),
+					target_node_uid: uid,
+					edge_type: edge.edge_type,
+					resolution: edge.resolution,
+					extractor: edge.extractor.clone(),
+					location: edge.location,
+					metadata_json: edge.metadata_json.clone(),
+				});
 			}
-			resolved.push(ResolvedEdge {
-				edge_uid: edge.edge_uid.clone(),
-				snapshot_uid: edge.snapshot_uid.clone(),
-				repo_uid: edge.repo_uid.clone(),
-				source_node_uid: edge.source_node_uid.clone(),
-				target_node_uid: uid,
-				edge_type: edge.edge_type,
-				resolution: edge.resolution,
-				extractor: edge.extractor.clone(),
-				location: edge.location,
-				metadata_json: edge.metadata_json.clone(),
-			});
-		} else {
-			let category = categorize_unresolved_edge(edge);
-			let source_file_uid = index
-				.node_uid_to_file_uid
-				.get(&edge.source_node_uid)
-				.cloned();
-			still_unresolved.push(CategorizedUnresolvedEdge {
-				edge: edge.clone(),
-				category,
-				source_file_uid,
-			});
+			TargetResolution::Ambiguous(_candidates) => {
+				// C/C++ include matched multiple headers exactly.
+				let source_file_uid = index
+					.node_uid_to_file_uid
+					.get(&edge.source_node_uid)
+					.cloned();
+				still_unresolved.push(CategorizedUnresolvedEdge {
+					edge: edge.clone(),
+					category: UnresolvedEdgeCategory::ImportsAmbiguousMatch,
+					source_file_uid,
+				});
+			}
+			TargetResolution::Unresolved => {
+				let category = categorize_unresolved_edge(edge);
+				let source_file_uid = index
+					.node_uid_to_file_uid
+					.get(&edge.source_node_uid)
+					.cloned();
+				still_unresolved.push(CategorizedUnresolvedEdge {
+					edge: edge.clone(),
+					category,
+					source_file_uid,
+				});
+			}
 		}
 	}
 
@@ -170,23 +201,61 @@ fn resolve_target(
 	edge: &ExtractedEdge,
 	index: &ResolverIndex,
 	import_bindings_by_file: Option<&HashMap<String, Vec<ImportBinding>>>,
-) -> Option<String> {
+) -> TargetResolution {
 	match edge.edge_type {
 		EdgeType::Imports => {
 			let source_file_uid = index
 				.node_uid_to_file_uid
 				.get(&edge.source_node_uid);
+
+			// v1.1: Try new include resolver first for C/C++ includes.
+			if let Some(ref include_resolver) = index.include_resolver {
+				if let Some(fuid) = source_file_uid {
+					// Extract file path from file UID (repo:path format).
+					if let Some(colon_pos) = fuid.find(':') {
+						let source_path = &fuid[colon_pos + 1..];
+						// Detect system include: C extractor sets metadata_json=None for system includes.
+						let is_system = edge.metadata_json.is_none();
+						let resolution = include_resolver.resolve(
+							source_path,
+							&edge.target_key,
+							is_system,
+						);
+						match resolution.status {
+							ResolutionStatus::Resolved => {
+								if let Some(ref stable_key) = resolution.target_stable_key {
+									if let Some(node) = index.nodes_by_stable_key.get(stable_key) {
+										return TargetResolution::Resolved(node.node_uid.clone());
+									}
+								}
+							}
+							ResolutionStatus::Ambiguous => {
+								// Multiple exact matches — do not fall through.
+								return TargetResolution::Ambiguous(resolution.candidates);
+							}
+							ResolutionStatus::Unresolved => {
+								// Fall through to v1.0 stages.
+							}
+						}
+					}
+				}
+			}
+
+			// Fallback: v1.0 same-directory resolution + other stages.
 			let tu_includes = source_file_uid
 				.and_then(|fuid| index.per_file_include_resolution.get(fuid));
-			resolve_import_target(
+			match resolve_import_target(
 				&edge.target_key,
 				&index.nodes_by_stable_key,
 				&index.file_resolution,
 				&edge.repo_uid,
 				tu_includes,
-			)
+			) {
+				Some(uid) => TargetResolution::Resolved(uid),
+				None => TargetResolution::Unresolved,
+			}
 		}
-		EdgeType::Calls => resolve_call_target(
+		EdgeType::Calls => option_to_resolution(resolve_call_target(
 			&edge.target_key,
 			&edge.source_node_uid,
 			&index.nodes_by_stable_key,
@@ -194,12 +263,12 @@ fn resolve_target(
 			&index.file_resolution,
 			import_bindings_by_file,
 			&index.node_uid_to_file_uid,
-		),
+		)),
 		EdgeType::Instantiates => {
-			resolve_named_target(&edge.target_key, &index.nodes_by_name, edge.edge_type)
+			option_to_resolution(resolve_named_target(&edge.target_key, &index.nodes_by_name, edge.edge_type))
 		}
 		EdgeType::Implements => {
-			resolve_named_target(&edge.target_key, &index.nodes_by_name, edge.edge_type)
+			option_to_resolution(resolve_named_target(&edge.target_key, &index.nodes_by_name, edge.edge_type))
 		}
 		// State-boundary edges (SB-4-pre): target_key is a stable
 		// key (e.g. `myservice:fs:/etc/app.yaml:FS_PATH`), not a
@@ -209,12 +278,20 @@ fn resolve_target(
 		// future.
 		EdgeType::Reads | EdgeType::Writes => {
 			if let Some(node) = index.nodes_by_stable_key.get(&edge.target_key) {
-				Some(node.node_uid.clone())
+				TargetResolution::Resolved(node.node_uid.clone())
 			} else {
-				resolve_named_target(&edge.target_key, &index.nodes_by_name, edge.edge_type)
+				option_to_resolution(resolve_named_target(&edge.target_key, &index.nodes_by_name, edge.edge_type))
 			}
 		}
-		_ => resolve_named_target(&edge.target_key, &index.nodes_by_name, edge.edge_type),
+		_ => option_to_resolution(resolve_named_target(&edge.target_key, &index.nodes_by_name, edge.edge_type)),
+	}
+}
+
+/// Convert Option<String> to TargetResolution.
+fn option_to_resolution(opt: Option<String>) -> TargetResolution {
+	match opt {
+		Some(uid) => TargetResolution::Resolved(uid),
+		None => TargetResolution::Unresolved,
 	}
 }
 
@@ -876,6 +953,7 @@ mod tests {
 			per_file_include_resolution: HashMap::new(),
 			stable_key_to_uid: HashMap::new(),
 			file_to_module: HashMap::new(),
+			include_resolver: None,
 		};
 		index
 			.nodes_by_stable_key
@@ -907,6 +985,7 @@ mod tests {
 			per_file_include_resolution: HashMap::new(),
 			stable_key_to_uid: HashMap::new(),
 			file_to_module: HashMap::new(),
+			include_resolver: None,
 		};
 		index
 			.nodes_by_name
@@ -933,6 +1012,7 @@ mod tests {
 			per_file_include_resolution: HashMap::new(),
 			stable_key_to_uid: HashMap::new(),
 			file_to_module: HashMap::new(),
+			include_resolver: None,
 		};
 		index
 			.nodes_by_name
@@ -972,6 +1052,7 @@ mod tests {
 			per_file_include_resolution: HashMap::new(),
 			stable_key_to_uid: HashMap::new(),
 			file_to_module: HashMap::new(),
+			include_resolver: None,
 		};
 		index
 			.nodes_by_stable_key
@@ -1007,6 +1088,7 @@ mod tests {
 			per_file_include_resolution: HashMap::new(),
 			stable_key_to_uid: HashMap::new(),
 			file_to_module: HashMap::new(),
+			include_resolver: None,
 		};
 		index
 			.nodes_by_stable_key
@@ -1048,6 +1130,7 @@ mod tests {
 			per_file_include_resolution: HashMap::new(),
 			stable_key_to_uid: HashMap::new(),
 			file_to_module: HashMap::new(),
+			include_resolver: None,
 		};
 		index
 			.nodes_by_stable_key
@@ -1088,6 +1171,7 @@ mod tests {
 			per_file_include_resolution: HashMap::new(),
 			stable_key_to_uid: HashMap::new(),
 			file_to_module: HashMap::new(),
+			include_resolver: None,
 		};
 		index
 			.nodes_by_name
