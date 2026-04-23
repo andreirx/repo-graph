@@ -204,8 +204,18 @@ export function deriveModuleDependencyEdges(
 		});
 	}
 
-	// Sort by importCount descending for deterministic output.
-	edges.sort((a, b) => b.importCount - a.importCount);
+	// Sort for deterministic output:
+	// 1. importCount DESC (most important edges first)
+	// 2. sourceModuleUid ASC (stable tie-breaker)
+	// 3. targetModuleUid ASC (stable tie-breaker)
+	edges.sort((a, b) => {
+		if (b.importCount !== a.importCount) {
+			return b.importCount - a.importCount;
+		}
+		const srcCmp = a.sourceModuleUid.localeCompare(b.sourceModuleUid);
+		if (srcCmp !== 0) return srcCmp;
+		return a.targetModuleUid.localeCompare(b.targetModuleUid);
+	});
 
 	return {
 		edges,

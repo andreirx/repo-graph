@@ -337,3 +337,127 @@ describe("deriveModuleDependencyEdges — bidirectional", () => {
 		expect(coreToApi).toBeDefined();
 	});
 });
+
+// ── Deterministic ordering ─────────────────────────────────────────
+
+describe("deriveModuleDependencyEdges — deterministic ordering", () => {
+	it("sorts by importCount DESC, then sourceModuleUid ASC, then targetModuleUid ASC", () => {
+		// Create edges with equal importCount to test tie-breaking.
+		// Input order is deliberately non-sorted to verify sorting.
+		const result = deriveModuleDependencyEdges({
+			importsEdges: [
+				// module-z -> module-a (1 import)
+				makeEdge("node-z1", "node-a1"),
+				// module-a -> module-z (1 import)
+				makeEdge("node-a2", "node-z2"),
+				// module-m -> module-b (1 import)
+				makeEdge("node-m1", "node-b1"),
+				// module-a -> module-b (2 imports - should be first due to count)
+				makeEdge("node-a3", "node-b2"),
+				makeEdge("node-a4", "node-b3"),
+			],
+			nodeFiles: [
+				makeNodeFile("node-z1", "file-z1"),
+				makeNodeFile("node-a1", "file-a1"),
+				makeNodeFile("node-a2", "file-a2"),
+				makeNodeFile("node-z2", "file-z2"),
+				makeNodeFile("node-m1", "file-m1"),
+				makeNodeFile("node-b1", "file-b1"),
+				makeNodeFile("node-a3", "file-a3"),
+				makeNodeFile("node-b2", "file-b2"),
+				makeNodeFile("node-a4", "file-a4"),
+				makeNodeFile("node-b3", "file-b3"),
+			],
+			fileOwnership: [
+				makeOwnership("file-z1", "module-z"),
+				makeOwnership("file-a1", "module-a"),
+				makeOwnership("file-a2", "module-a"),
+				makeOwnership("file-z2", "module-z"),
+				makeOwnership("file-m1", "module-m"),
+				makeOwnership("file-b1", "module-b"),
+				makeOwnership("file-a3", "module-a"),
+				makeOwnership("file-b2", "module-b"),
+				makeOwnership("file-a4", "module-a"),
+				makeOwnership("file-b3", "module-b"),
+			],
+		});
+
+		expect(result.edges).toHaveLength(4);
+
+		// Expected order:
+		// 1. module-a -> module-b (importCount=2)
+		// 2. module-a -> module-z (importCount=1, source "a" < "m" < "z")
+		// 3. module-m -> module-b (importCount=1, source "m")
+		// 4. module-z -> module-a (importCount=1, source "z")
+
+		expect(result.edges[0].sourceModuleUid).toBe("module-a");
+		expect(result.edges[0].targetModuleUid).toBe("module-b");
+		expect(result.edges[0].importCount).toBe(2);
+
+		expect(result.edges[1].sourceModuleUid).toBe("module-a");
+		expect(result.edges[1].targetModuleUid).toBe("module-z");
+		expect(result.edges[1].importCount).toBe(1);
+
+		expect(result.edges[2].sourceModuleUid).toBe("module-m");
+		expect(result.edges[2].targetModuleUid).toBe("module-b");
+		expect(result.edges[2].importCount).toBe(1);
+
+		expect(result.edges[3].sourceModuleUid).toBe("module-z");
+		expect(result.edges[3].targetModuleUid).toBe("module-a");
+		expect(result.edges[3].importCount).toBe(1);
+	});
+
+	it("is stable when inputs arrive in different order", () => {
+		// Same logical edges, different input order
+		const inputA = {
+			importsEdges: [
+				makeEdge("n1", "n2"),
+				makeEdge("n3", "n4"),
+			],
+			nodeFiles: [
+				makeNodeFile("n1", "f1"),
+				makeNodeFile("n2", "f2"),
+				makeNodeFile("n3", "f3"),
+				makeNodeFile("n4", "f4"),
+			],
+			fileOwnership: [
+				makeOwnership("f1", "mod-b"),
+				makeOwnership("f2", "mod-a"),
+				makeOwnership("f3", "mod-c"),
+				makeOwnership("f4", "mod-a"),
+			],
+		};
+
+		const inputB = {
+			importsEdges: [
+				makeEdge("n3", "n4"), // swapped order
+				makeEdge("n1", "n2"),
+			],
+			nodeFiles: [
+				makeNodeFile("n3", "f3"), // swapped order
+				makeNodeFile("n4", "f4"),
+				makeNodeFile("n1", "f1"),
+				makeNodeFile("n2", "f2"),
+			],
+			fileOwnership: [
+				makeOwnership("f3", "mod-c"), // swapped order
+				makeOwnership("f4", "mod-a"),
+				makeOwnership("f1", "mod-b"),
+				makeOwnership("f2", "mod-a"),
+			],
+		};
+
+		const resultA = deriveModuleDependencyEdges(inputA);
+		const resultB = deriveModuleDependencyEdges(inputB);
+
+		// Both should produce identical output
+		expect(resultA.edges).toHaveLength(2);
+		expect(resultB.edges).toHaveLength(2);
+
+		// Same order: mod-b->mod-a, then mod-c->mod-a (alphabetical source)
+		expect(resultA.edges[0].sourceModuleUid).toBe(resultB.edges[0].sourceModuleUid);
+		expect(resultA.edges[0].targetModuleUid).toBe(resultB.edges[0].targetModuleUid);
+		expect(resultA.edges[1].sourceModuleUid).toBe(resultB.edges[1].sourceModuleUid);
+		expect(resultA.edges[1].targetModuleUid).toBe(resultB.edges[1].targetModuleUid);
+	});
+});
