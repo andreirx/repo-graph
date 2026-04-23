@@ -30,6 +30,8 @@ import type { UnresolvedEdge } from "./extractor.js";
 import type {
 	ModuleCandidate,
 	ModuleCandidateEvidence,
+	ModuleDiscoveryDiagnostic,
+	ModuleDiscoveryDiagnosticInput,
 	ModuleFileOwnership,
 } from "../modules/module-candidate.js";
 import type {
@@ -375,6 +377,17 @@ export interface StoragePort {
 		limit?: number,
 	): ModuleOwnedFileRow[];
 
+	/** Persist module discovery diagnostics (batch). Idempotent by UID. */
+	insertModuleDiscoveryDiagnostics(
+		diagnostics: ModuleDiscoveryDiagnosticInput[],
+	): void;
+
+	/** Query module discovery diagnostics for a snapshot with optional filters. */
+	queryModuleDiscoveryDiagnostics(
+		snapshotUid: string,
+		filters?: ModuleDiscoveryDiagnosticFilters,
+	): ModuleDiscoveryDiagnostic[];
+
 	// ── Delta indexing copy-forward ──────────────────────────────────
 	//
 	// Copy unchanged files' artifacts from parent to child snapshot.
@@ -648,6 +661,9 @@ export interface StoragePort {
 
 	/** Insert measurements (batch). */
 	insertMeasurements(measurements: Measurement[]): void;
+
+	// ── Module discovery diagnostics ───────────────────────────────────
+
 }
 
 // ── Input types ──────────────────────────────────────────────────────────
@@ -1208,4 +1224,14 @@ export interface ModuleOwnedFileRow {
 	isTest: boolean;
 	assignmentKind: string;
 	confidence: number;
+}
+
+/**
+ * Filters for querying module discovery diagnostics.
+ */
+export interface ModuleDiscoveryDiagnosticFilters {
+	/** Filter by source type (e.g., "kbuild"). */
+	sourceType?: string;
+	/** Filter by diagnostic kind (e.g., "skipped_config_gated"). */
+	diagnosticKind?: string;
 }

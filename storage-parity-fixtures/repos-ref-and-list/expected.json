@@ -2385,6 +2385,78 @@
           "dflt_value": null,
           "pk": 0
         }
+      ],
+      "module_discovery_diagnostics": [
+        {
+          "dflt_value": null,
+          "name": "diagnostic_kind",
+          "notnull": true,
+          "pk": 0,
+          "type": "TEXT"
+        },
+        {
+          "dflt_value": null,
+          "name": "diagnostic_uid",
+          "notnull": false,
+          "pk": 1,
+          "type": "TEXT"
+        },
+        {
+          "dflt_value": null,
+          "name": "file_path",
+          "notnull": true,
+          "pk": 0,
+          "type": "TEXT"
+        },
+        {
+          "dflt_value": null,
+          "name": "line",
+          "notnull": false,
+          "pk": 0,
+          "type": "INTEGER"
+        },
+        {
+          "dflt_value": null,
+          "name": "message",
+          "notnull": true,
+          "pk": 0,
+          "type": "TEXT"
+        },
+        {
+          "dflt_value": null,
+          "name": "metadata_json",
+          "notnull": false,
+          "pk": 0,
+          "type": "TEXT"
+        },
+        {
+          "dflt_value": null,
+          "name": "raw_text",
+          "notnull": false,
+          "pk": 0,
+          "type": "TEXT"
+        },
+        {
+          "dflt_value": null,
+          "name": "severity",
+          "notnull": true,
+          "pk": 0,
+          "type": "TEXT"
+        },
+        {
+          "dflt_value": null,
+          "name": "snapshot_uid",
+          "notnull": true,
+          "pk": 0,
+          "type": "TEXT"
+        },
+        {
+          "dflt_value": null,
+          "name": "source_type",
+          "notnull": true,
+          "pk": 0,
+          "type": "TEXT"
+        }
       ]
     },
     "indexes": [
@@ -2419,6 +2491,9 @@
       "idx_fs_mut_evidence_surface",
       "idx_inferences_kind",
       "idx_inferences_target",
+      "idx_mdd_snapshot",
+      "idx_mdd_snapshot_kind",
+      "idx_mdd_snapshot_source",
       "idx_measurements_kind",
       "idx_measurements_target",
       "idx_module_candidates_snapshot",
@@ -2546,6 +2621,11 @@
         "version": 16,
         "name": "016-fs-mutations",
         "applied_at": "<TIMESTAMP>"
+      },
+      {
+        "applied_at": "<TIMESTAMP>",
+        "name": "017-module-discovery-diagnostics",
+        "version": 17
       }
     ]
   }

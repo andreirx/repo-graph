@@ -1082,8 +1082,22 @@ export class RepoIndexer implements IndexerPort {
 					repo.rootPath, repoUid,
 				);
 				allDiscoveredRoots.push(...buildSystemResult.modules);
-				// Diagnostics are ephemeral in A1 — not persisted.
-				// Future: persist to dedicated diagnostic table.
+
+				// Persist diagnostics for auditability.
+				if (buildSystemResult.diagnostics.length > 0) {
+					const diagnosticInputs = buildSystemResult.diagnostics.map((d) => ({
+						snapshotUid: snapshot.snapshotUid,
+						sourceType: d.sourceType as "kbuild",
+						diagnosticKind: d.kind as import("../../core/modules/module-candidate.js").DiagnosticKind,
+						filePath: d.filePath,
+						line: d.line ?? null,
+						rawText: d.rawText ?? null,
+						message: d.message,
+						severity: d.severity,
+						metadataJson: null,
+					}));
+					this.storage.insertModuleDiscoveryDiagnostics(diagnosticInputs);
+				}
 			}
 		}
 

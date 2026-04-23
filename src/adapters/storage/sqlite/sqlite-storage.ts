@@ -70,13 +70,19 @@ import type {
 } from "../../../core/diagnostics/unresolved-edge-classification.js";
 import type {
 	AssignmentKind,
+	DiagnosticKind,
+	DiagnosticSeverity,
+	DiagnosticSourceType,
 	EvidenceKind,
 	EvidenceSourceType,
 	ModuleCandidate,
 	ModuleCandidateEvidence,
+	ModuleDiscoveryDiagnostic,
+	ModuleDiscoveryDiagnosticInput,
 	ModuleFileOwnership,
 	ModuleKind,
 } from "../../../core/modules/module-candidate.js";
+import { buildDiagnosticUid } from "../../../core/modules/module-candidate.js";
 import type {
 	BuildSystem,
 	ProjectSurface,
@@ -1419,6 +1425,72 @@ export class SqliteStorage implements StoragePort {
 			assignmentKind: r.assignment_kind as AssignmentKind,
 			confidence: r.confidence as number,
 			basisJson: (r.basis_json as string) ?? null,
+		}));
+	}
+
+	// ── Module Discovery Diagnostics ──────────────────────────────────
+
+	insertModuleDiscoveryDiagnostics(
+		diagnostics: ModuleDiscoveryDiagnosticInput[],
+	): void {
+		if (diagnostics.length === 0) return;
+		const stmt = this.db.prepare(
+			`INSERT OR IGNORE INTO module_discovery_diagnostics
+			 (diagnostic_uid, snapshot_uid, source_type, diagnostic_kind,
+			  file_path, line, raw_text, message, severity, metadata_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		const insertAll = this.db.transaction(() => {
+			for (const d of diagnostics) {
+				const uid = buildDiagnosticUid(d);
+				stmt.run(
+					uid,
+					d.snapshotUid,
+					d.sourceType,
+					d.diagnosticKind,
+					d.filePath,
+					d.line,
+					d.rawText,
+					d.message,
+					d.severity,
+					d.metadataJson,
+				);
+			}
+		});
+		insertAll();
+	}
+
+	queryModuleDiscoveryDiagnostics(
+		snapshotUid: string,
+		filters?: { sourceType?: string; diagnosticKind?: string },
+	): ModuleDiscoveryDiagnostic[] {
+		let sql = `SELECT * FROM module_discovery_diagnostics WHERE snapshot_uid = ?`;
+		const params: unknown[] = [snapshotUid];
+
+		if (filters?.sourceType) {
+			sql += ` AND source_type = ?`;
+			params.push(filters.sourceType);
+		}
+		if (filters?.diagnosticKind) {
+			sql += ` AND diagnostic_kind = ?`;
+			params.push(filters.diagnosticKind);
+		}
+		sql += ` ORDER BY file_path, line`;
+
+		const rows = this.db.prepare(sql).all(...params) as Array<
+			Record<string, unknown>
+		>;
+		return rows.map((r) => ({
+			diagnosticUid: r.diagnostic_uid as string,
+			snapshotUid: r.snapshot_uid as string,
+			sourceType: r.source_type as DiagnosticSourceType,
+			diagnosticKind: r.diagnostic_kind as DiagnosticKind,
+			filePath: r.file_path as string,
+			line: (r.line as number) ?? null,
+			rawText: (r.raw_text as string) ?? null,
+			message: r.message as string,
+			severity: r.severity as DiagnosticSeverity,
+			metadataJson: (r.metadata_json as string) ?? null,
 		}));
 	}
 

@@ -415,6 +415,8 @@ rgr modules list repo-graph              # Module catalog with rollups (files, s
 rgr modules show repo-graph <module>     # Full detail: identity, surfaces, files, topology, env+fs rollup
 rgr modules evidence repo-graph <module> # Evidence items for a module
 rgr modules files repo-graph <module>    # Files owned by a module
+rgr modules diagnostics repo-graph       # Module discovery diagnostics (skipped patterns, parse issues)
+rgr modules diagnostics repo-graph --source kbuild --kind skipped_config_gated  # Filtered diagnostics
 
 # Project surfaces (operational characterization)
 rgr surfaces list repo-graph             # Surface catalog: kind, build, runtime, entrypoints, configs

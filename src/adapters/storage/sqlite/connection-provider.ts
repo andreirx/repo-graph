@@ -40,6 +40,7 @@ import { runMigration013 } from "./migrations/013-project-surfaces.js";
 import { runMigration014 } from "./migrations/014-topology-links.js";
 import { runMigration015 } from "./migrations/015-env-dependencies.js";
 import { runMigration016 } from "./migrations/016-fs-mutations.js";
+import { runMigration017 } from "./migrations/017-module-discovery-diagnostics.js";
 
 export class SqliteConnectionProvider {
 	private db: Database.Database | null = null;
@@ -91,6 +92,7 @@ export class SqliteConnectionProvider {
 			if (maxVersion < 14) runMigration014(this.db!);
 			if (maxVersion < 15) runMigration015(this.db!);
 			if (maxVersion < 16) runMigration016(this.db!);
+			if (maxVersion < 17) runMigration017(this.db!);
 		});
 		runIncremental();
 	}

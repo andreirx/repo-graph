@@ -858,6 +858,120 @@ export function registerModulesCommands(
 				}
 			},
 		);
+
+	// ── diagnostics ────────────────────────────────────────────────
+
+	modules
+		.command("diagnostics <repo>")
+		.description("List module discovery diagnostics (skipped patterns, parse issues)")
+		.option("--json", "JSON output")
+		.option("--source <source>", "Filter by source type (e.g., kbuild)")
+		.option(
+			"--kind <kind>",
+			"Filter by diagnostic kind (skipped_conditional, skipped_config_gated, etc.)",
+		)
+		.action(
+			(
+				repoRef: string,
+				opts: { json?: boolean; source?: string; kind?: string },
+			) => {
+				const ctx = getCtx();
+				const resolved = resolveRepoAndSnapshot(ctx, repoRef);
+				if (!resolved) {
+					outputDiagnosticsError(
+						opts.json,
+						`Repository not found or not indexed: ${repoRef}`,
+					);
+					process.exitCode = 1;
+					return;
+				}
+				const { repo, snapshotUid } = resolved;
+
+				const filters: { sourceType?: string; diagnosticKind?: string } = {};
+				if (opts.source) filters.sourceType = opts.source;
+				if (opts.kind) filters.diagnosticKind = opts.kind;
+
+				const diagnostics = ctx.storage.queryModuleDiscoveryDiagnostics(
+					snapshotUid,
+					Object.keys(filters).length > 0 ? filters : undefined,
+				);
+
+				if (opts.json) {
+					const output = {
+						repo: repo.name,
+						snapshot: snapshotUid,
+						filters: Object.keys(filters).length > 0 ? filters : null,
+						count: diagnostics.length,
+						diagnostics: diagnostics.map((d) => ({
+							uid: d.diagnosticUid,
+							source_type: d.sourceType,
+							kind: d.diagnosticKind,
+							file: d.filePath,
+							line: d.line,
+							message: d.message,
+							severity: d.severity,
+							raw_text: d.rawText,
+						})),
+					};
+					process.stdout.write(JSON.stringify(output, null, 2) + "\n");
+					return;
+				}
+
+				// Table output
+				if (diagnostics.length === 0) {
+					process.stdout.write("No diagnostics found.\n");
+					return;
+				}
+
+				const header = padRowDiagnostics([
+					"SOURCE",
+					"FILE",
+					"LINE",
+					"KIND",
+					"SEVERITY",
+					"MESSAGE",
+				]);
+				process.stdout.write(header + "\n");
+				process.stdout.write("-".repeat(header.length) + "\n");
+
+				for (const d of diagnostics) {
+					process.stdout.write(
+						padRowDiagnostics([
+							d.sourceType,
+							truncate(d.filePath, 38),
+							d.line?.toString() ?? "-",
+							d.diagnosticKind,
+							d.severity,
+							truncate(d.message, 45),
+						]) + "\n",
+					);
+				}
+
+				process.stdout.write(`\nTotal: ${diagnostics.length} diagnostics\n`);
+			},
+		);
+}
+
+function outputDiagnosticsError(
+	json: boolean | undefined,
+	message: string,
+): void {
+	if (json) {
+		process.stdout.write(JSON.stringify({ error: message }, null, 2) + "\n");
+	} else {
+		process.stderr.write(message + "\n");
+	}
+}
+
+function padRowDiagnostics(cols: string[]): string {
+	// Columns: SOURCE, FILE, LINE, KIND, SEVERITY, MESSAGE
+	const widths = [10, 40, 6, 24, 10, 48];
+	return cols
+		.map((c, i) => {
+			const w = widths[i] ?? 20;
+			return c.length > w ? c.slice(0, w - 1) + "~" : c.padEnd(w);
+		})
+		.join("  ");
 }
 
 function outputBoundaryError(json: boolean | undefined, message: string): void {

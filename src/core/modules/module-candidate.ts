@@ -14,8 +14,10 @@
  *
  * moduleKey format: `{repoUid}:{canonicalRootPath}:DISCOVERED_MODULE`
  *
- * Zero external dependencies. Pure domain model.
+ * No npm dependencies. Uses Node standard library only (crypto for hashing).
  */
+
+import { createHash } from "node:crypto";
 
 // ── Module candidate ───────────────────────────────────────────────
 
@@ -151,6 +153,76 @@ export interface ModuleFileOwnership {
 	readonly basisJson: string | null;
 }
 
+// ── Module discovery diagnostics ───────────────────────────────────
+
+/**
+ * Source type for diagnostics — which detector produced this diagnostic.
+ * Maps to EvidenceSourceType values that produce diagnostics.
+ */
+export type DiagnosticSourceType = "kbuild";
+
+/**
+ * Diagnostic kind — what was skipped or flagged.
+ * Kbuild kinds match the detector's internal diagnostic taxonomy.
+ */
+export type DiagnosticKind =
+	// Kbuild diagnostic kinds
+	| "skipped_conditional"        // ifeq/ifdef/etc block start/end
+	| "skipped_inside_conditional" // obj-y/m assignment inside conditional
+	| "skipped_config_gated"       // obj-$(CONFIG_...) assignment
+	| "skipped_variable"           // unexpanded variable in assignment
+	| "malformed_assignment";      // unparseable syntax
+
+/**
+ * Diagnostic severity.
+ * - info: intentionally out-of-scope evidence (D1 exclusions)
+ * - warning: malformed or ambiguous input worth investigating
+ */
+export type DiagnosticSeverity = "info" | "warning";
+
+/**
+ * Persisted module discovery diagnostic.
+ * Audit evidence for why certain build-system patterns were not
+ * converted to module candidates.
+ */
+export interface ModuleDiscoveryDiagnostic {
+	/** Unique identifier for this diagnostic row. */
+	readonly diagnosticUid: string;
+	readonly snapshotUid: string;
+	/** Which detector produced this diagnostic. */
+	readonly sourceType: DiagnosticSourceType;
+	/** Diagnostic category. */
+	readonly diagnosticKind: DiagnosticKind;
+	/** Repo-relative path to the source file. */
+	readonly filePath: string;
+	/** Line number (1-based) if applicable. */
+	readonly line: number | null;
+	/** Raw text that triggered the diagnostic (truncated). */
+	readonly rawText: string | null;
+	/** Human-readable description. */
+	readonly message: string;
+	/** Severity level. */
+	readonly severity: DiagnosticSeverity;
+	/** Optional structured metadata (JSON-serialized). */
+	readonly metadataJson: string | null;
+}
+
+/**
+ * Input for inserting module discovery diagnostics.
+ * Excludes diagnosticUid (computed by storage layer).
+ */
+export interface ModuleDiscoveryDiagnosticInput {
+	readonly snapshotUid: string;
+	readonly sourceType: DiagnosticSourceType;
+	readonly diagnosticKind: DiagnosticKind;
+	readonly filePath: string;
+	readonly line: number | null;
+	readonly rawText: string | null;
+	readonly message: string;
+	readonly severity: DiagnosticSeverity;
+	readonly metadataJson: string | null;
+}
+
 // ── Factory helpers ────────────────────────────────────────────────
 
 /**
@@ -158,4 +230,29 @@ export interface ModuleFileOwnership {
  */
 export function buildModuleKey(repoUid: string, canonicalRootPath: string): string {
 	return `${repoUid}:${canonicalRootPath}:DISCOVERED_MODULE`;
+}
+
+/**
+ * Build a deterministic diagnostic UID.
+ * SHA-256 hash over: snapshotUid, sourceType, diagnosticKind, filePath, line, rawText.
+ * This ensures the same diagnostic doesn't get inserted twice.
+ *
+ * Uses 128-bit truncation (32 hex chars) for collision safety on large repos.
+ * Birthday collision probability ~50% at 2^64 items — effectively impossible.
+ */
+export function buildDiagnosticUid(input: ModuleDiscoveryDiagnosticInput): string {
+	// Use JSON.stringify for unambiguous field encoding.
+	// Raw `|` join is ambiguous when fields contain `|` characters.
+	const parts = [
+		input.snapshotUid,
+		input.sourceType,
+		input.diagnosticKind,
+		input.filePath,
+		input.line,
+		input.rawText,
+	];
+	const str = JSON.stringify(parts);
+	const hash = createHash("sha256").update(str).digest("hex");
+	// Truncate to 128 bits (32 hex chars) for reasonable UID length
+	return `diag:${hash.slice(0, 32)}`;
 }

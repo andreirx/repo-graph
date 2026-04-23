@@ -22,18 +22,25 @@ import type { DiscoveredModuleRoot } from "../modules/manifest-detectors.js";
 
 /**
  * Diagnostic from build-system module discovery.
- * Ephemeral — not persisted to storage in A1.
- * TODO: persistence is deferred debt (see module-discovery-layer-3.md).
+ *
+ * Contains all fields needed for persistence. The indexer transforms
+ * these into ModuleDiscoveryDiagnosticInput for storage.
  */
 export interface BuildSystemDiagnostic {
+	/** Which detector produced this diagnostic (e.g., "kbuild"). */
+	sourceType: string;
 	/** Source file that produced this diagnostic. */
 	filePath: string;
 	/** Line number (1-based) if applicable. */
 	line?: number;
-	/** Diagnostic category. */
+	/** Diagnostic category (e.g., "skipped_config_gated"). */
 	kind: string;
+	/** Raw text of the line that triggered the diagnostic (truncated). */
+	rawText?: string;
 	/** Human-readable description. */
 	message: string;
+	/** Severity: info (D1 exclusions) or warning (parse issues). */
+	severity: "info" | "warning";
 }
 
 /**
@@ -78,7 +85,7 @@ export interface ModuleDiscoveryPort {
 	 * Sources: Kbuild, Makefile (future: CMake, GNU Makefile).
 	 *
 	 * Returns modules with `moduleKind: "inferred"`.
-	 * Diagnostics are ephemeral (not persisted in A1).
+	 * Diagnostics are persisted to module_discovery_diagnostics table.
 	 *
 	 * @param rootPath - Absolute path to the repository root.
 	 * @param repoUid - Repository UID (for evidence attribution).

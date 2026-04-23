@@ -514,11 +514,35 @@ Overlapping A1+B1 modules show both sources (alphabetical order), primary is kbu
 **Tests:**
 - 17 tests in `test/cli/modules-list.test.ts` (B1 visibility)
 - 10 tests in `test/cli/modules-list-overlap.test.ts` (A1+B1 corroboration)
+- 13 tests in `test/core/modules/module-discovery-diagnostics.test.ts` (UID + storage)
+- 10 tests in `test/cli/modules-diagnostics.test.ts` (CLI visibility)
+
+## Shipped: Diagnostic Persistence Slice
+
+Diagnostics from module discovery (e.g., skipped conditionals, CONFIG_* gated
+assignments) are now persisted to SQLite and queryable via CLI.
+
+**Schema:**
+- Migration 017: `module_discovery_diagnostics` table
+- Fields: `diagnostic_uid`, `snapshot_uid`, `source_type`, `diagnostic_kind`,
+  `file_path`, `line`, `raw_text`, `message`, `severity`, `metadata_json`
+- Indexes: by snapshot, by (snapshot, source_type), by (snapshot, diagnostic_kind)
+- UID is deterministic: hash of (snapshotUid, sourceType, diagnosticKind,
+  filePath, line, rawText). Duplicate inserts are no-ops.
+
+**CLI:**
+- `rgr modules diagnostics <repo>` — list all diagnostics
+- `--source <type>` filter (e.g., `--source kbuild`)
+- `--kind <kind>` filter (e.g., `--kind skipped_config_gated`)
+- `--json` output
+
+**Tests:**
+- 13 tests in `test/core/modules/module-discovery-diagnostics.test.ts`
+- 10 tests in `test/cli/modules-diagnostics.test.ts`
 
 ## Deferred Items
 
 - Graph clustering design (C1 slice, after A/B validation)
-- Diagnostic persistence (schema + storage)
 - Migration schema for inferred modules
 - Confidence calibration study
 - GNU Makefile detector (Source A expansion)

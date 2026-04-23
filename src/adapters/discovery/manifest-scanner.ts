@@ -144,12 +144,7 @@ export class ManifestScanner implements ModuleDiscoveryPort {
 		_repoUid: string,
 	): Promise<BuildSystemDiscoveryResult> {
 		const allModules: DiscoveredModuleRoot[] = [];
-		const allDiagnostics: Array<{
-			filePath: string;
-			line?: number;
-			kind: string;
-			message: string;
-		}> = [];
+		const allDiagnostics: BuildSystemDiscoveryResult["diagnostics"] = [];
 		let filesScanned = 0;
 		let filesWithModules = 0;
 
@@ -179,10 +174,13 @@ export class ManifestScanner implements ModuleDiscoveryPort {
 			// Convert Kbuild diagnostics to the port's diagnostic format.
 			for (const diag of result.diagnostics) {
 				allDiagnostics.push({
+					sourceType: "kbuild",
 					filePath: relPath,
 					line: diag.line,
 					kind: diag.kind,
-					message: diag.text,
+					rawText: diag.text.slice(0, 200), // Truncate for storage
+					message: this.formatKbuildDiagnosticMessage(diag.kind, diag.text),
+					severity: diag.kind === "malformed_assignment" ? "warning" : "info",
 				});
 			}
 		}
@@ -278,6 +276,26 @@ export class ManifestScanner implements ModuleDiscoveryPort {
 			}
 
 			await this.walkForKbuildFiles(rootPath, absDir, result, depth + 1, maxDepth);
+		}
+	}
+
+	/**
+	 * Format a human-readable message for a Kbuild diagnostic.
+	 */
+	private formatKbuildDiagnosticMessage(kind: string, _rawText: string): string {
+		switch (kind) {
+			case "skipped_conditional":
+				return "Skipped: conditional directive (ifeq/ifdef/else/endif)";
+			case "skipped_inside_conditional":
+				return "Skipped: assignment inside conditional block";
+			case "skipped_config_gated":
+				return "Skipped: CONFIG_* gated assignment (requires Kconfig resolution)";
+			case "skipped_variable":
+				return "Skipped: unexpanded variable in assignment";
+			case "malformed_assignment":
+				return "Warning: malformed or unparseable assignment syntax";
+			default:
+				return `Skipped: ${kind}`;
 		}
 	}
 
