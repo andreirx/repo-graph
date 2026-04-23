@@ -41,6 +41,7 @@ import { runMigration014 } from "./migrations/014-topology-links.js";
 import { runMigration015 } from "./migrations/015-env-dependencies.js";
 import { runMigration016 } from "./migrations/016-fs-mutations.js";
 import { runMigration017 } from "./migrations/017-module-discovery-diagnostics.js";
+import { runMigration018 } from "./migrations/018-surface-identity.js";
 
 export class SqliteConnectionProvider {
 	private db: Database.Database | null = null;
@@ -70,7 +71,7 @@ export class SqliteConnectionProvider {
 		});
 		runInitial();
 
-		// Migrations 002+: incremental, check schema_migrations before acting.
+		// Migrations 002-017: incremental, check schema_migrations before acting.
 		const runIncremental = this.db.transaction(() => {
 			const maxVersion = (
 				this.db!
@@ -95,6 +96,16 @@ export class SqliteConnectionProvider {
 			if (maxVersion < 17) runMigration017(this.db!);
 		});
 		runIncremental();
+
+		// Migration 018: FK-safe table rebuild.
+		// Runs OUTSIDE the transaction because PRAGMA foreign_keys
+		// cannot be changed within a transaction in SQLite.
+		const maxVersionPost = (
+			this.db
+				.prepare("SELECT MAX(version) as v FROM schema_migrations")
+				.get() as { v: number }
+		).v;
+		if (maxVersionPost < 18) runMigration018(this.db);
 	}
 
 	/**

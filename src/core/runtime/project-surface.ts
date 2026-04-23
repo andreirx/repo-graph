@@ -87,14 +87,40 @@ export interface ProjectSurface {
 	readonly confidence: number;
 	/** Structured runtime/build context (JSON-serialized). */
 	readonly metadataJson: string | null;
+
+	// ── Identity fields (nullable for legacy compatibility) ────────────
+	/**
+	 * Primary source type for this surface.
+	 * NULL for legacy rows (pre-migration 018). Required for new rows.
+	 */
+	readonly sourceType: SurfaceEvidenceSourceType | null;
+	/**
+	 * Source-specific identity string (e.g., "binName:entrypoint", "serviceName").
+	 * NULL for legacy rows. Required for new rows.
+	 */
+	readonly sourceSpecificId: string | null;
+	/**
+	 * Snapshot-independent stable identity key (128-bit hex).
+	 * NULL for legacy rows. Required for new rows.
+	 * Used for cross-snapshot comparison and deduplication.
+	 */
+	readonly stableSurfaceKey: string | null;
 }
 
 // ── Evidence ───────────────────────────────────────────────────────
 
 /**
  * Evidence source type for project surface detection.
+ *
+ * Phase 0 (implemented):
+ *   package_json_bin, package_json_main, cargo_bin_target, cargo_lib_target,
+ *   pyproject_scripts, pyproject_entry_points, framework_dependency
+ *
+ * Phase 1 (enum reserved, detectors not implemented):
+ *   dockerfile, docker_compose, makefile_target, workspace types
  */
 export type SurfaceEvidenceSourceType =
+	// ── Package ecosystems (Phase 0) ───────────────────────────────────
 	| "package_json_bin"
 	| "package_json_scripts"
 	| "package_json_main"
@@ -104,24 +130,55 @@ export type SurfaceEvidenceSourceType =
 	| "gradle_application_plugin"
 	| "pyproject_scripts"
 	| "pyproject_entry_points"
+	| "framework_dependency"
+	// ── Container/service (Phase 1) ────────────────────────────────────
 	| "dockerfile"
 	| "docker_compose"
+	// ── Build systems (Phase 1) ────────────────────────────────────────
+	| "makefile_target"
+	| "cmake_target"
+	// ── Workspace/monorepo (Phase 1) ───────────────────────────────────
+	| "pnpm_workspace"
+	| "npm_workspaces"
+	| "yarn_workspaces"
+	| "lerna_json"
+	| "nx_json"
+	| "rush_json"
+	| "cargo_workspace"
+	// ── Infra/config (Phase 1) ─────────────────────────────────────────
 	| "terraform_root"
+	| "pulumi_yaml"
+	| "helm_chart"
+	// ── Compilation (Phase 1) ──────────────────────────────────────────
 	| "compile_commands"
-	| "tsconfig_outdir"
-	| "framework_dependency";
+	| "tsconfig_outdir";
 
 /**
  * What the evidence item asserts about the surface.
+ *
+ * Phase 0 (implemented):
+ *   binary_entrypoint, main_export, framework_signal
+ *
+ * Phase 1 (enum reserved, not yet used):
+ *   container_config, workspace_member, workspace_root, etc.
  */
 export type SurfaceEvidenceKind =
+	// ── Entrypoint/export (Phase 0) ────────────────────────────────────
 	| "binary_entrypoint"
 	| "script_command"
 	| "main_export"
 	| "framework_signal"
+	// ── Build/deploy (Phase 1) ─────────────────────────────────────────
 	| "build_target"
 	| "deploy_config"
+	| "container_config"
+	// ── Workspace (Phase 1) ────────────────────────────────────────────
+	| "workspace_root"
+	| "workspace_member"
+	// ── Infrastructure (Phase 1) ───────────────────────────────────────
 	| "infra_config"
+	| "infra_module"
+	// ── Testing/compilation (Phase 1) ──────────────────────────────────
 	| "test_config"
 	| "compile_config";
 

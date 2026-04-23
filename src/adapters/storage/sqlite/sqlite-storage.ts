@@ -1766,14 +1766,50 @@ export class SqliteStorage implements StoragePort {
 
 	// ── Project Surfaces ───────────────────────────────────────────
 
+	/**
+	 * Insert project surfaces.
+	 *
+	 * Validates that all new surfaces have non-null identity fields
+	 * (sourceType, sourceSpecificId, stableSurfaceKey). The database
+	 * columns are nullable for migrated legacy rows, but new inserts
+	 * must provide identity for the Phase 0 contract.
+	 *
+	 * @throws Error if any surface has null identity fields
+	 */
 	insertProjectSurfaces(surfaces: ProjectSurface[]): void {
 		if (surfaces.length === 0) return;
+
+		// Validate identity fields for new inserts.
+		// Database columns are nullable for legacy rows (migration 018),
+		// but new surfaces must have explicit identity.
+		for (const s of surfaces) {
+			if (s.sourceType === null) {
+				throw new Error(
+					`insertProjectSurfaces: surface ${s.projectSurfaceUid} has null sourceType. ` +
+					`New surfaces must have explicit identity fields. This is a caller bug.`,
+				);
+			}
+			if (s.sourceSpecificId === null) {
+				throw new Error(
+					`insertProjectSurfaces: surface ${s.projectSurfaceUid} has null sourceSpecificId. ` +
+					`New surfaces must have explicit identity fields. This is a caller bug.`,
+				);
+			}
+			if (s.stableSurfaceKey === null) {
+				throw new Error(
+					`insertProjectSurfaces: surface ${s.projectSurfaceUid} has null stableSurfaceKey. ` +
+					`New surfaces must have explicit identity fields. This is a caller bug.`,
+				);
+			}
+		}
+
 		const stmt = this.db.prepare(
 			`INSERT OR REPLACE INTO project_surfaces
 			 (project_surface_uid, snapshot_uid, repo_uid, module_candidate_uid,
 			  surface_kind, display_name, root_path, entrypoint_path,
-			  build_system, runtime_kind, confidence, metadata_json)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			  build_system, runtime_kind, confidence, metadata_json,
+			  source_type, source_specific_id, stable_surface_key)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		);
 		const insertAll = this.db.transaction(() => {
 			for (const s of surfaces) {
@@ -1781,6 +1817,7 @@ export class SqliteStorage implements StoragePort {
 					s.projectSurfaceUid, s.snapshotUid, s.repoUid, s.moduleCandidateUid,
 					s.surfaceKind, s.displayName, s.rootPath, s.entrypointPath,
 					s.buildSystem, s.runtimeKind, s.confidence, s.metadataJson,
+					s.sourceType, s.sourceSpecificId, s.stableSurfaceKey,
 				);
 			}
 		});
@@ -1825,6 +1862,10 @@ export class SqliteStorage implements StoragePort {
 			runtimeKind: r.runtime_kind as RuntimeKind,
 			confidence: r.confidence as number,
 			metadataJson: (r.metadata_json as string) ?? null,
+			// Identity fields (nullable for legacy compatibility)
+			sourceType: (r.source_type as SurfaceEvidenceSourceType) ?? null,
+			sourceSpecificId: (r.source_specific_id as string) ?? null,
+			stableSurfaceKey: (r.stable_surface_key as string) ?? null,
 		}));
 	}
 

@@ -30,6 +30,10 @@ import type {
 /**
  * Lightweight detection result. The orchestrator enriches this
  * with UIDs, snapshot context, and module linkage.
+ *
+ * Identity fields (sourceType + source-specific fields) are required
+ * for stable surface key computation. New detected surfaces must have
+ * explicit identity evidence.
  */
 export interface DetectedSurface {
 	surfaceKind: SurfaceKind;
@@ -41,6 +45,37 @@ export interface DetectedSurface {
 	confidence: number;
 	evidence: DetectedSurfaceEvidence[];
 	metadata: Record<string, unknown> | null;
+
+	// ── Identity fields (required for stable key computation) ──────────
+	/**
+	 * Primary source type for this surface. Required.
+	 * Determines how sourceSpecificId is computed.
+	 */
+	sourceType: SurfaceEvidenceSourceType;
+
+	// ── Source-specific identity fields (populate based on sourceType) ─
+
+	// Phase 0 identity fields
+	/** For package_json_bin, cargo_bin_target: the binary name. */
+	binName?: string;
+	/** For framework_dependency: the framework name (e.g., "express", "react"). */
+	frameworkName?: string;
+	/** For pyproject_scripts: the script/entrypoint name. */
+	scriptName?: string;
+	/** For docker_compose: the service name. Required when sourceType is docker_compose. */
+	serviceName?: string;
+	/** For dockerfile: path to the Dockerfile. Required when sourceType is dockerfile. */
+	dockerfilePath?: string;
+
+	// Phase 1 identity fields (reserved, detectors not implemented)
+	/** For makefile_target, cmake_target: path to Makefile/CMakeLists.txt. */
+	makefilePath?: string;
+	/** For workspace source types: workspace member name or path. */
+	workspaceName?: string;
+	/** For helm_chart: chart name. */
+	chartName?: string;
+	/** For terraform_root, pulumi_yaml: infra module path. */
+	infraModulePath?: string;
 }
 
 export interface DetectedSurfaceEvidence {
@@ -114,6 +149,9 @@ export function detectPackageJsonSurfaces(
 					payload: { binName, binPath },
 				}],
 				metadata: null,
+				// Identity fields
+				sourceType: "package_json_bin",
+				binName,
 			});
 		}
 	}
@@ -144,6 +182,8 @@ export function detectPackageJsonSurfaces(
 				},
 			}],
 			metadata: null,
+			// Identity fields
+			sourceType: "package_json_main",
 		});
 	}
 
@@ -206,6 +246,7 @@ export function detectCargoSurfaces(
 
 	// CLI surface: explicit [[bin]] or implicit src/main.rs convention.
 	if (hasBinSection || content.includes("src/main.rs")) {
+		const effectiveBinName = binName ?? crateName ?? "default";
 		surfaces.push({
 			surfaceKind: "cli",
 			displayName: binName ?? crateName,
@@ -217,13 +258,16 @@ export function detectCargoSurfaces(
 			runtimeKind: "rust_native",
 			confidence: hasBinSection ? 0.95 : 0.80,
 			evidence: [{
-				sourceType: hasBinSection ? "cargo_bin_target" : "cargo_bin_target",
+				sourceType: "cargo_bin_target",
 				sourcePath: manifestRelPath,
 				evidenceKind: "binary_entrypoint",
 				confidence: hasBinSection ? 0.95 : 0.80,
 				payload: { binName, binPath, convention: hasBinSection ? "explicit_bin" : "src_main_rs" },
 			}],
 			metadata: null,
+			// Identity fields
+			sourceType: "cargo_bin_target",
+			binName: effectiveBinName,
 		});
 	}
 
@@ -245,6 +289,8 @@ export function detectCargoSurfaces(
 				payload: { convention: hasLibSection ? "explicit_lib" : "src_lib_rs" },
 			}],
 			metadata: null,
+			// Identity fields
+			sourceType: "cargo_lib_target",
 		});
 	}
 
@@ -317,6 +363,9 @@ export function detectPyprojectSurfaces(
 				payload: { scriptName: ep.name, target: ep.target },
 			}],
 			metadata: null,
+			// Identity fields
+			sourceType: "pyproject_scripts",
+			scriptName: ep.name,
 		});
 	}
 
@@ -338,6 +387,8 @@ export function detectPyprojectSurfaces(
 				payload: { packageName },
 			}],
 			metadata: null,
+			// Identity fields
+			sourceType: "pyproject_entry_points",
 		});
 	}
 
@@ -408,6 +459,9 @@ function detectFrameworkFromDeps(
 					payload: { framework: fw },
 				}],
 				metadata: { framework: fw },
+				// Identity fields
+				sourceType: "framework_dependency",
+				frameworkName: fw,
 			};
 		}
 	}
@@ -432,6 +486,9 @@ function detectFrameworkFromDeps(
 					payload: { framework: fw },
 				}],
 				metadata: { framework: fw },
+				// Identity fields
+				sourceType: "framework_dependency",
+				frameworkName: fw,
 			};
 		}
 	}

@@ -1576,6 +1576,27 @@
           "pk": 0
         },
         {
+          "name": "source_specific_id",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "source_type",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "stable_surface_key",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
           "name": "surface_kind",
           "type": "TEXT",
           "notnull": true,
@@ -2520,6 +2541,7 @@
       "idx_project_surface_evidence_surface",
       "idx_project_surfaces_module",
       "idx_project_surfaces_snapshot",
+      "idx_project_surfaces_stable_key",
       "idx_repos_root_path",
       "idx_snapshots_repo",
       "idx_staged_edges_snapshot",
@@ -2706,6 +2728,11 @@
         "applied_at": "<TIMESTAMP>",
         "name": "017-module-discovery-diagnostics",
         "version": 17
+      },
+      {
+        "applied_at": "<TIMESTAMP>",
+        "name": "018-surface-identity",
+        "version": 18
       }
     ],
     "snapshots": [
