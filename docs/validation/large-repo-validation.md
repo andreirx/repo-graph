@@ -401,6 +401,30 @@ Key features:
 - Ambiguity detection: multiple exact matches categorized as `ImportsAmbiguousMatch`
 - CLI option: `rmap index --include-root <path>` for project-specific roots
 
+### Hotspot Filtering Validation (2026-04-23)
+
+Validates `--exclude-tests` and `--exclude-vendored` presentation filtering.
+
+| Filter | Raw Count | Filtered Count | Excluded |
+|--------|-----------|----------------|----------|
+| (none) | 125 | 125 | — |
+| `--exclude-tests` | 125 | 115 | 10 test files |
+| `--exclude-vendored` | 125 | 125 | 0 (no standard vendored segments) |
+| both | 125 | 115 | 10 |
+
+**Key observation:** `mongoose/` is NOT excluded by `--exclude-vendored`.
+This is correct — `mongoose` is not a standard vendored segment. swupdate
+uses it as an embedded library with project-specific naming. Config-based
+exclusion rules (deferred) would be needed to exclude it.
+
+mongoose files remain in filtered output:
+- `mongoose/mongoose.c`
+- `mongoose/mongoose.h`
+- `mongoose/mongoose_interface.c`
+- `mongoose/mongoose_multipart.c`
+
+Test files correctly excluded (e.g., `test/test_mongoose_upload.c`).
+
 ---
 
 ## nginx
@@ -561,6 +585,25 @@ same information that would come from `compile_commands.json` or configure
 output.
 
 See `docs/milestones/c-include-resolution-v1.2.md` for design.
+
+### Hotspot Filtering Validation (2026-04-23)
+
+Validates `--exclude-tests` and `--exclude-vendored` presentation filtering.
+
+| Filter | Raw Count | Filtered Count | Excluded |
+|--------|-----------|----------------|----------|
+| (none) | 276 | 276 | — |
+| `--exclude-tests` | 276 | 276 | 0 |
+| `--exclude-vendored` | 276 | 276 | 0 |
+| both | 276 | 276 | 0 |
+
+nginx has no files matching either filter:
+- **No standard test paths:** nginx tests live outside the main source tree
+  or use non-standard naming (no `.test.`, `.spec.`, `tests/`, `__tests__/`)
+- **No standard vendored segments:** no `vendor/`, `third_party/`, `deps/`
+
+This is the expected neutral baseline. The `filtering` field is correctly
+present when flags are active, with honest zero counts.
 
 ---
 

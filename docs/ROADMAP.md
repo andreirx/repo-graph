@@ -385,6 +385,37 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - Emitted as `linux_system_managed` inferences. Suppresses false dead-code
   reports for kernel-managed symbols.
 
+### C include resolution v1.2 (angle-bracket + configured roots)
+- **v1.1** (conventional roots): same-dir → configured → conventional
+  (`include/`, `inc/`, `src/include/`). Works for quoted-include codebases
+  (swupdate, sqlite).
+- **v1.2** (angle-bracket): both quoted and angle-bracket includes attempt
+  resolution. Same-dir remains quote-only. Angle-bracket proceeds to
+  configured/conventional roots.
+- CLI: `--include-root <path>` for project-specific include directories.
+- Validated on nginx: requires explicit roots (`--include-root src/core`
+  etc.) because nginx has no conventional root directories.
+- nginx v1.2 results: zero-connectivity modules 13→0, unresolved imports
+  1,079→294, `src/core` fan_in 0→13.
+- Trust labeling: ambiguous matches labeled `IMPORTS (ambiguous match)`.
+- See `docs/milestones/c-include-resolution-v1.2.md` for design.
+
+### Hotspot presentation filtering
+- `--exclude-tests`: removes files with `is_test=true` (scanner-persisted
+  metadata from path patterns: `.test.`, `.spec.`, `tests/`, `__tests__/`).
+- `--exclude-vendored`: removes files under vendored path segments (exact
+  segment match: `vendor`, `vendors`, `third_party`, `third-party`,
+  `external`, `deps`, `node_modules`).
+- View-policy only: filtering applied after scoring, before output.
+  Stored measurements unchanged.
+- Explicit opt-in: raw mode (no flags) is default, returns all hotspots.
+- Output envelope includes `filtering` metadata when flags active (omitted
+  when no flags). Per-filter counts: `excluded_tests_count`,
+  `excluded_vendored_count`, `excluded_count` (union).
+- Validated on swupdate (10 test files excluded, mongoose/ NOT excluded —
+  correct, not a standard segment) and nginx (neutral baseline, 0 excluded).
+- See `docs/milestones/hotspot-presentation-filtering.md` for design.
+
 ### Compiler enrichment
 - `rgr enrich <repo>`: post-index receiver-type resolution
 - TypeScript: via `ts.Program` / `TypeChecker` (~81% enrichment rate)
