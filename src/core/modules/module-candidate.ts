@@ -79,7 +79,9 @@ export type EvidenceSourceType =
 	| "surface_promotion_web_app"
 	| "surface_promotion_worker"
 	// Layer 3: build-system derived evidence
-	| "kbuild";
+	| "kbuild"
+	// Layer 3: directory-structure inferred evidence
+	| "directory_structure";
 
 /**
  * Evidence kind: what the evidence item asserts.
@@ -98,7 +100,9 @@ export type EvidenceKind =
 	// Layer 2: operational module evidence
 	| "operational_entrypoint" // promoted from unattached surface
 	// Layer 3: build-system evidence
-	| "kbuild_subdir";         // obj-y/obj-m directory assignment in Kbuild/Makefile
+	| "kbuild_subdir"          // obj-y/obj-m directory assignment in Kbuild/Makefile
+	// Layer 3: directory-structure evidence
+	| "directory_pattern";     // immediate child of anchored root with file threshold
 
 /**
  * One evidence item supporting a module candidate.

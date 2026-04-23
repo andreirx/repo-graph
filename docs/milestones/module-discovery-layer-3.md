@@ -295,8 +295,8 @@ Design slice complete:
 
 - [x] A1: Kbuild detector implemented and validated on Linux kernel
 - [x] A1: Wire into module discovery orchestrator (scanner + indexer integration)
-- [ ] B1: Directory detector
-- [ ] B1: Validate interactions and precedence
+- [x] B1: Directory detector (pure function, not wired)
+- [ ] B1: Wire into orchestrator and validate A1+B1 precedence
 - [ ] C1: Design Source C (after A/B validation)
 
 ## Shipped (A1)
@@ -379,9 +379,52 @@ targets), 0 modules discovered (no obj-y/obj-m). No false positives.
 
 **Adapter Tests:** 6 tests in `test/adapters/discovery/manifest-scanner.test.ts`
 
+## Shipped (B1)
+
+### Directory Detector (2026-04-23)
+
+Pure function implementation: `src/core/modules/detectors/directory-detector.ts`
+
+**Scope (minimal, as locked):**
+- Immediate children of anchored roots only
+- Anchored roots: `src/`, `lib/`, `pkg/`, `internal/`, `drivers/`, `arch/`
+- File count threshold: >= 5
+- Language coherence threshold: >= 80%
+- Excluded segments: test/, vendor/, third_party/, node_modules/, etc.
+
+**NOT implemented (as locked):**
+- Deep recursive inference (would explode into junk modules)
+- Adaptive thresholds
+- Config-based rules
+- Automatic boundary/forbids inference
+
+**Schema additions:**
+- `EvidenceSourceType: "directory_structure"`
+- `EvidenceKind: "directory_pattern"`
+- Coherence validation updated for `inferred/directory_structure`
+
+**Unit tests:** 35 tests in `test/core/modules/detectors/directory-detector.test.ts`
+
+**Real-repo validation:**
+
+| Repo | Files | Modules | Notes |
+|------|-------|---------|-------|
+| sqlite | 2,202 | 0 | Flat `src/` - no subdirectories |
+| swupdate | 384 | 0 | Non-standard roots (core/, handlers/) |
+| nginx | 511 | 6 | src/core, src/event, src/http, src/mail, src/os, src/stream |
+| repo-graph | 1,187 | 3 | src/adapters, src/cli, src/core |
+
+The detector correctly returns 0 for repos that don't follow anchored-root
+conventions (sqlite, swupdate) and detects clean modular structure where
+it exists (nginx, repo-graph).
+
+**Not wired yet:** The detector is pure. Orchestrator integration and
+A1+B1 precedence validation is the next step.
+
 ## Deferred Items
 
-- Directory detector implementation (B1 slice)
+- B1 wiring into orchestrator (next step)
+- A1+B1 precedence validation (next step)
 - Graph clustering design (C1 slice, after A/B validation)
 - Diagnostic persistence (schema + storage)
 - Migration schema for inferred modules

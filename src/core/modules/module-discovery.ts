@@ -308,6 +308,7 @@ const VALID_KIND_SOURCE_PAIRS: Record<ModuleKind, ReadonlySet<EvidenceSourceType
 	]),
 	inferred: new Set<EvidenceSourceType>([
 		"kbuild",
+		"directory_structure",
 	]),
 };
 
