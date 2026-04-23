@@ -282,6 +282,12 @@ Known Rust CLI divergences from TS CLI:
   Unknown module exits 1 (not 2). Same degradation contract as
   `modules list`: on policy parse failure, `violation_count: null`,
   `violations: null`, `rollups_degraded: true`.
+- `modules violations` is canonical for discovered-module boundary
+  violations. TS CLI does not have an equivalent command (`rgr arch
+  violations` uses a different selector domain). Output includes
+  `diagnostics` object reporting derivation counts (imports_edges_total,
+  imports_source_no_module, imports_target_no_module, etc.) so callers
+  can detect degraded graphs where ownership gaps suppress violations.
 - Measurement commands (`churn`, `hotspots`, `risk`): designed for
   query-time computation, not persistence-first. Git is the
   authoritative history source. `repo-graph-git` crate wraps git CLI.

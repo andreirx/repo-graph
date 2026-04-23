@@ -105,15 +105,17 @@ boundary declaration forbids it.
 
 ### 7. Does the CLI distinguish "no violations" from "cannot evaluate because graph is degraded"?
 
-**PARTIAL.**
+**YES.**
 
 - Rust `rmap modules violations`: exit 0 on success, exit 2 on load failure
 - Stale declarations (module no longer exists) are reported separately
-- Diagnostics are NOT included in violations output envelope
+- Diagnostics object included in output envelope:
+  - `imports_edges_total`, `imports_cross_module`, `imports_intra_module`
+  - `imports_source_no_module`, `imports_target_no_module` — detect missing ownership
+  - `imports_source_no_file`, `imports_target_no_file` — always 0 in Rust (storage pre-filters)
 
-**Gap:** The violations command does not report module-edge derivation
-diagnostics (unowned files, no-file nodes). If 50% of imports lack
-module owners, the violation count is artificially low with no warning.
+Callers can detect degraded graphs by checking `imports_source_no_module > 0`
+or `imports_target_no_module > 0`.
 
 ### 8. Are results deterministic across runs?
 
@@ -161,23 +163,45 @@ current schema (migration 017). Out of scope for this audit.
 
 ## Product Gaps Found
 
-### Gap 1: Violations command lacks derivation diagnostics (P3)
+### Gap 1: Violations command lacks derivation diagnostics (P3) — **RESOLVED**
 
-`rmap modules violations` does not report how many imports were excluded
-due to missing file ownership. A degraded graph produces fewer violations
-silently.
+**Resolved:** Added `diagnostics` object to `rmap modules violations` output:
+```json
+{
+  "diagnostics": {
+    "imports_edges_total": 123,
+    "imports_source_no_file": 0,
+    "imports_target_no_file": 0,
+    "imports_source_no_module": 4,
+    "imports_target_no_module": 9,
+    "imports_intra_module": 88,
+    "imports_cross_module": 22
+  }
+}
+```
 
-**Recommendation:** Add diagnostics section to violations output envelope,
-matching the deps command structure.
+Note: `imports_source_no_file` and `imports_target_no_file` are always 0 in
+the Rust CLI because the storage layer pre-filters edges where nodes lack
+file_uid. The TS implementation tracks these separately.
 
-### Gap 2: No TS CLI `modules violations` command (P3)
+Tests added: `modules_violations_diagnostics_healthy` and
+`modules_violations_diagnostics_degraded` verify diagnostics in normal
+and degraded (missing ownership) cases. 11 tests pass.
 
-The Rust CLI has `rmap modules violations`. The TS CLI does not expose
-module boundary violations directly — only `rgr arch violations` (which
-uses different selector domain).
+### Gap 2: No TS CLI `modules violations` command (P4) — **DOCUMENTED**
 
-**Recommendation:** Either add `rgr modules violations` for parity, or
-document that `rmap` is the canonical surface for module violations.
+The Rust CLI `rmap modules violations` is canonical for discovered-module
+boundary violations. The TS CLI does not expose a dedicated command.
+
+**Canonical surfaces:**
+- `rmap modules violations` — discovered-module boundary violations (Rust)
+- `rgr modules deps` — cross-module dependency inspection (TS)
+- `rgr modules boundary` — declare discovered-module boundaries (TS)
+- `rgr arch violations` — NOT equivalent; uses directory_module selector domain
+
+**Accepted:** Adding `rgr modules violations` is deferred. The Rust CLI is
+authoritative for governance/violation reporting. TS CLI remains the
+dependency-inspection and declaration surface.
 
 ### Gap 3: No fixture with boundary declaration producing violation (P2) — **RESOLVED**
 
@@ -211,28 +235,27 @@ Two tests added: `sorts deterministically with tie-breakers` and
 
 ## Decision
 
-**PRODUCTION-READY** for:
+**PRODUCTION-READY.** All P2/P3 gaps resolved or documented:
 - Module dependency edge derivation
 - Cross-module import counting
 - Module kind preservation
 - Diagnostics for degraded derivation
 - Boundary violation detection (end-to-end tested)
 - Deterministic edge ordering (both TS and Rust)
+- Derivation diagnostics in violations output
+- Rust CLI documented as canonical for violation reporting
 
-**Remaining P3 gaps (acceptable for production):**
-- Gap 1: Violations command lacks derivation diagnostics
-- Gap 2: No TS CLI `modules violations` (Rust is canonical)
-
-Gaps 3 and 4 (P2 blockers) have been resolved.
+**Accepted/deferred (not blockers):**
+- No TS CLI `modules violations` — Rust is canonical, TS handles deps/declarations
 
 ## Repair Backlog
 
 | Priority | Item | Status |
 |----------|------|--------|
-| P2 | Add module boundary violation E2E test | **DONE** — 9 Rust CLI tests (temp repo + SQL seeding) |
+| P2 | Add module boundary violation E2E test | **DONE** — 11 Rust CLI tests (temp repo + SQL seeding) |
 | P2 | Add path tie-breaker to TS edge sorting | **DONE** — 2 new tests |
-| P3 | Add derivation diagnostics to `rmap modules violations` | Open |
-| P4 | Document Rust CLI as canonical violations surface | Open |
+| P3 | Add derivation diagnostics to `rmap modules violations` | **DONE** — diagnostics object in output |
+| P4 | Document Rust CLI as canonical violations surface | **DONE** — documented in audit |
 
 ## Test Summary
 
@@ -241,6 +264,6 @@ Gaps 3 and 4 (P2 blockers) have been resolved.
 - **TS module dependency query adapter:** 17 tests pass
 - **TS CLI modules deps:** 18 tests pass
 - **Rust classification module tests:** 32 tests pass
-- **Rust CLI modules violations tests:** 9 tests pass (new E2E suite)
+- **Rust CLI modules violations tests:** 11 tests pass (+2 diagnostics tests)
 
-Total focused tests: **106 pass**.
+Total focused tests: **108 pass**.

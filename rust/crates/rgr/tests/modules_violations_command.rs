@@ -568,4 +568,128 @@ fn modules_violations_envelope_contract() {
 	// Count fields
 	assert!(result["count"].is_number());
 	assert!(result["stale_count"].is_number());
+
+	// Diagnostics must be present with all required fields
+	assert!(result["diagnostics"].is_object(), "diagnostics must be object");
+	let diag = &result["diagnostics"];
+	assert!(diag["imports_edges_total"].is_number(), "imports_edges_total");
+	assert!(diag["imports_source_no_file"].is_number(), "imports_source_no_file");
+	assert!(diag["imports_target_no_file"].is_number(), "imports_target_no_file");
+	assert!(diag["imports_source_no_module"].is_number(), "imports_source_no_module");
+	assert!(diag["imports_target_no_module"].is_number(), "imports_target_no_module");
+	assert!(diag["imports_intra_module"].is_number(), "imports_intra_module");
+	assert!(diag["imports_cross_module"].is_number(), "imports_cross_module");
+}
+
+// ── 9. Diagnostics with healthy graph ────────────────────────────
+
+#[test]
+fn modules_violations_diagnostics_healthy() {
+	let (_r, _d, db) = build_workspace_db();
+	let snapshot_uid = get_snapshot_uid(&db, "r1");
+
+	// Insert both module candidates
+	insert_module_candidate(
+		&db,
+		&snapshot_uid,
+		"r1",
+		"mc-app",
+		"npm:@fixture/app",
+		"packages/app",
+		"npm_package",
+		Some("@fixture/app"),
+		0.95,
+	);
+	insert_module_candidate(
+		&db,
+		&snapshot_uid,
+		"r1",
+		"mc-core",
+		"npm:@fixture/core",
+		"packages/core",
+		"npm_package",
+		Some("@fixture/core"),
+		0.95,
+	);
+
+	// Insert file ownership for both modules
+	insert_file_ownership_for_module(&db, &snapshot_uid, "r1", "mc-app", "packages/app/");
+	insert_file_ownership_for_module(&db, &snapshot_uid, "r1", "mc-core", "packages/core/");
+
+	let db_str = db.to_str().unwrap();
+	let output = run_cmd(&["modules", "violations", db_str, "r1"]);
+	assert_eq!(
+		output.status.code(),
+		Some(0),
+		"stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let result = parse_json(&output);
+	let diag = &result["diagnostics"];
+
+	// Healthy graph: no missing ownership
+	assert_eq!(diag["imports_source_no_file"], 0);
+	assert_eq!(diag["imports_target_no_file"], 0);
+	assert_eq!(diag["imports_source_no_module"], 0);
+	assert_eq!(diag["imports_target_no_module"], 0);
+
+	// Should have some imports (at least the cross-module one from app->core)
+	let total = diag["imports_edges_total"].as_u64().unwrap();
+	let cross = diag["imports_cross_module"].as_u64().unwrap();
+	assert!(total >= 1, "should have at least 1 import edge, got {}", total);
+	assert!(cross >= 1, "should have at least 1 cross-module import, got {}", cross);
+}
+
+// ── 10. Diagnostics with degraded graph ──────────────────────────
+
+#[test]
+fn modules_violations_diagnostics_degraded() {
+	let (_r, _d, db) = build_workspace_db();
+	let snapshot_uid = get_snapshot_uid(&db, "r1");
+
+	// Insert only the app module candidate (NOT core)
+	insert_module_candidate(
+		&db,
+		&snapshot_uid,
+		"r1",
+		"mc-app",
+		"npm:@fixture/app",
+		"packages/app",
+		"npm_package",
+		Some("@fixture/app"),
+		0.95,
+	);
+
+	// Insert file ownership ONLY for app (core files have no module owner)
+	insert_file_ownership_for_module(&db, &snapshot_uid, "r1", "mc-app", "packages/app/");
+
+	let db_str = db.to_str().unwrap();
+	let output = run_cmd(&["modules", "violations", db_str, "r1"]);
+	assert_eq!(
+		output.status.code(),
+		Some(0),
+		"stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let result = parse_json(&output);
+	let diag = &result["diagnostics"];
+
+	// Degraded graph: app imports from core, but core files have no module owner
+	// The import edge exists (file->file), but target file has no module owner
+	let target_no_module = diag["imports_target_no_module"].as_u64().unwrap();
+	assert!(
+		target_no_module >= 1,
+		"expected imports_target_no_module >= 1 (core files unowned), got {}",
+		target_no_module
+	);
+
+	// Cross-module should be 0 because target lacks module ownership
+	let cross = diag["imports_cross_module"].as_u64().unwrap();
+	assert_eq!(
+		cross, 0,
+		"cross-module should be 0 when target has no module owner, got {}",
+		cross
+	);
 }

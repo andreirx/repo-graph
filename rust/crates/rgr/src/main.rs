@@ -874,9 +874,9 @@ fn run_violations(args: &[String]) -> ExitCode {
 
 	// ── Section 2: Discovered-module boundary violations ─────────
 
-	let discovered_evaluation =
+	let discovered_result =
 		match evaluate_discovered_module_violations(&storage, repo_uid, &snapshot.snapshot_uid) {
-			Ok(e) => e,
+			Ok(r) => r,
 			Err(msg) => {
 				eprintln!("error: {}", msg);
 				return ExitCode::from(2);
@@ -886,7 +886,8 @@ fn run_violations(args: &[String]) -> ExitCode {
 	// Convert discovered violations to JSON
 	use repo_graph_classification::boundary_evaluator::StaleSide;
 
-	let discovered_violations_json: Vec<serde_json::Value> = discovered_evaluation
+	let discovered_violations_json: Vec<serde_json::Value> = discovered_result
+		.evaluation
 		.violations
 		.iter()
 		.map(|v| {
@@ -901,7 +902,8 @@ fn run_violations(args: &[String]) -> ExitCode {
 		})
 		.collect();
 
-	let stale_declarations_json: Vec<serde_json::Value> = discovered_evaluation
+	let stale_declarations_json: Vec<serde_json::Value> = discovered_result
+		.evaluation
 		.stale_declarations
 		.iter()
 		.map(|s| {
@@ -920,8 +922,8 @@ fn run_violations(args: &[String]) -> ExitCode {
 	// ── Build unified output ─────────────────────────────────────
 
 	let declared_count = declared_violations.len();
-	let discovered_count = discovered_evaluation.violations.len();
-	let stale_count = discovered_evaluation.stale_declarations.len();
+	let discovered_count = discovered_result.evaluation.violations.len();
+	let stale_count = discovered_result.evaluation.stale_declarations.len();
 	let total_count = declared_count + discovered_count;
 
 	let results = serde_json::json!({
@@ -4185,7 +4187,7 @@ fn run_modules_list(args: &[String]) -> ExitCode {
 	// 2e. Module boundary violations (advisory — catalog survives policy corruption)
 	let (violations_eval, violations_warning): (Option<ModuleBoundaryEvaluation>, Option<String>) =
 		match evaluate_discovered_module_violations(&storage, repo_uid, &snapshot.snapshot_uid) {
-			Ok(e) => (Some(e), None),
+			Ok(r) => (Some(r.evaluation), None),
 			Err(msg) => (
 				None,
 				Some(format!("discovered-module violation rollups unavailable: {}", msg)),
@@ -4535,7 +4537,7 @@ fn run_modules_show(args: &[String]) -> ExitCode {
 	// ── Step 4: Evaluate violations (advisory) ────────────────────
 	let (violations_eval, violations_warning): (Option<ModuleBoundaryEvaluation>, Option<String>) =
 		match evaluate_discovered_module_violations(&storage, repo_uid, &snapshot.snapshot_uid) {
-			Ok(e) => (Some(e), None),
+			Ok(r) => (Some(r.evaluation), None),
 			Err(msg) => (
 				None,
 				Some(format!(
@@ -5233,15 +5235,26 @@ fn parse_deps_args(args: &[String]) -> Result<(Vec<String>, DepsDirection), Stri
 //
 // Shared orchestration for discovered-module boundary evaluation.
 // Used by both `modules violations` and unified `violations` commands.
-// Returns the evaluation result or an error string for CLI display.
+// Returns the evaluation result plus derivation diagnostics.
 
 use repo_graph_classification::boundary_evaluator::ModuleBoundaryEvaluation;
+use repo_graph_classification::module_edges::ModuleEdgeDiagnostics;
+
+/// Result of discovered-module violations evaluation.
+///
+/// Bundles the boundary evaluation with edge derivation diagnostics so callers
+/// can report graph degradation (e.g., missing module ownership) alongside
+/// violation results.
+struct DiscoveredModuleViolationsResult {
+	evaluation: ModuleBoundaryEvaluation,
+	diagnostics: ModuleEdgeDiagnostics,
+}
 
 fn evaluate_discovered_module_violations(
 	storage: &repo_graph_storage::StorageConnection,
 	repo_uid: &str,
 	snapshot_uid: &str,
-) -> Result<ModuleBoundaryEvaluation, String> {
+) -> Result<DiscoveredModuleViolationsResult, String> {
 	// 1. Load module candidates
 	let modules = storage
 		.get_module_candidates_for_snapshot(snapshot_uid)
@@ -5337,7 +5350,10 @@ fn evaluate_discovered_module_violations(
 		&module_index,
 	);
 
-	Ok(evaluation)
+	Ok(DiscoveredModuleViolationsResult {
+		evaluation,
+		diagnostics: derivation_result.diagnostics,
+	})
 }
 
 // ── modules violations command ───────────────────────────────────
@@ -5372,9 +5388,9 @@ fn run_modules_violations(args: &[String]) -> ExitCode {
 	};
 
 	// Use shared helper for discovered-module evaluation
-	let evaluation =
+	let result =
 		match evaluate_discovered_module_violations(&storage, repo_uid, &snapshot.snapshot_uid) {
-			Ok(e) => e,
+			Ok(r) => r,
 			Err(msg) => {
 				eprintln!("error: {}", msg);
 				return ExitCode::from(2);
@@ -5384,7 +5400,8 @@ fn run_modules_violations(args: &[String]) -> ExitCode {
 	use repo_graph_classification::boundary_evaluator::StaleSide;
 
 	// 8. Build JSON output — preserve evaluator order exactly
-	let violations_json: Vec<serde_json::Value> = evaluation
+	let violations_json: Vec<serde_json::Value> = result
+		.evaluation
 		.violations
 		.iter()
 		.map(|v| {
@@ -5399,7 +5416,8 @@ fn run_modules_violations(args: &[String]) -> ExitCode {
 		})
 		.collect();
 
-	let stale_json: Vec<serde_json::Value> = evaluation
+	let stale_json: Vec<serde_json::Value> = result
+		.evaluation
 		.stale_declarations
 		.iter()
 		.map(|s| {
@@ -5415,20 +5433,35 @@ fn run_modules_violations(args: &[String]) -> ExitCode {
 		})
 		.collect();
 
-	let violation_count = evaluation.violations.len();
-	let stale_count = evaluation.stale_declarations.len();
+	let violation_count = result.evaluation.violations.len();
+	let stale_count = result.evaluation.stale_declarations.len();
+
+	// Build diagnostics JSON
+	// Note: imports_source_no_file and imports_target_no_file are always 0 in Rust
+	// because the storage query (get_resolved_imports_for_snapshot) pre-filters
+	// edges where nodes lack file_uid. The TS implementation tracks these separately.
+	let diagnostics_json = serde_json::json!({
+		"imports_edges_total": result.diagnostics.imports_total,
+		"imports_source_no_file": 0,
+		"imports_target_no_file": 0,
+		"imports_source_no_module": result.diagnostics.imports_source_unowned,
+		"imports_target_no_module": result.diagnostics.imports_target_unowned,
+		"imports_intra_module": result.diagnostics.imports_intra_module,
+		"imports_cross_module": result.diagnostics.imports_cross_module,
+	});
 
 	let results = serde_json::json!({
 		"violations": violations_json,
 		"stale_declarations": stale_json,
 	});
 
-	// Build envelope with count and stale_count
+	// Build envelope with count, stale_count, and diagnostics
 	let mut extra = serde_json::Map::new();
 	extra.insert(
 		"stale_count".to_string(),
 		serde_json::Value::Number(stale_count.into()),
 	);
+	extra.insert("diagnostics".to_string(), diagnostics_json);
 
 	let output = match build_envelope(
 		&storage,
