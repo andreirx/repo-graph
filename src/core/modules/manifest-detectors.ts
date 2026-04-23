@@ -22,7 +22,7 @@
  *   - graph-based inference
  */
 
-import type { EvidenceKind, EvidenceSourceType } from "./module-candidate.js";
+import type { EvidenceKind, EvidenceSourceType, ModuleKind } from "./module-candidate.js";
 
 // ── Detector output ────────────────────────────────────────────────
 
@@ -30,12 +30,26 @@ import type { EvidenceKind, EvidenceSourceType } from "./module-candidate.js";
  * A discovered module root from a manifest detector.
  * Lightweight intermediate type — the orchestrator enriches this
  * into full ModuleCandidate + evidence + ownership rows.
+ *
+ * The detector owns the semantic classification:
+ *   - declared: package manager manifests (package.json, Cargo.toml, etc.)
+ *   - operational: surface promotion (CLI, service, web app, worker)
+ *   - inferred: build-system (Kbuild) or structural patterns
+ *
+ * The orchestrator validates coherence but does not derive moduleKind.
  */
 export interface DiscoveredModuleRoot {
 	/** Repo-relative path of the module root directory. */
 	rootPath: string;
 	/** Human-facing name from the manifest (package name, crate name, etc.). */
 	displayName: string | null;
+	/**
+	 * Module classification. Set by the detector, not derived by orchestrator.
+	 * - declared: from package manager manifests
+	 * - operational: from surface promotion
+	 * - inferred: from build-system or structural analysis
+	 */
+	moduleKind: ModuleKind;
 	/** Evidence source type. */
 	sourceType: EvidenceSourceType;
 	/** Repo-relative path to the manifest file that declared this module. */
@@ -128,6 +142,7 @@ export function detectPackageJsonRoot(
 	return {
 		rootPath: dir,
 		displayName: name,
+		moduleKind: "declared",
 		sourceType: "package_json_workspaces",
 		sourcePath: manifestRelPath,
 		evidenceKind: "package_root",
@@ -267,6 +282,7 @@ export function detectCargoManifest(
 		crateRoot = {
 			rootPath: dir,
 			displayName: crateName,
+			moduleKind: "declared",
 			sourceType: "cargo_crate",
 			sourcePath: manifestRelPath,
 			evidenceKind: "crate_root",
@@ -313,6 +329,7 @@ export function detectGradleSettings(
 			results.push({
 				rootPath: projectPath,
 				displayName: projectPath.split("/").pop() ?? projectPath,
+				moduleKind: "declared",
 				sourceType: "gradle_settings",
 				sourcePath: manifestRelPath,
 				evidenceKind: "subproject",
@@ -385,6 +402,7 @@ export function detectPyprojectToml(
 	return {
 		rootPath: dir,
 		displayName: packageName,
+		moduleKind: "declared",
 		sourceType: "pyproject_toml",
 		sourcePath: manifestRelPath,
 		evidenceKind: "package_root",

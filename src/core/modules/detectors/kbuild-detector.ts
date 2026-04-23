@@ -39,6 +39,7 @@ export interface KbuildDiagnostic {
 		| "skipped_conditional"
 		| "skipped_inside_conditional"
 		| "skipped_variable"
+		| "skipped_config_gated"
 		| "malformed_assignment";
 	text: string;
 }
@@ -118,17 +119,31 @@ export function detectKbuildModules(
 			continue;
 		}
 
-		// Match obj-y and obj-m assignments (with optional CONFIG variable)
-		// Patterns:
+		// D1 scope: only obj-y and obj-m assignments.
+		// obj-$(CONFIG_...) is config-gated and out of scope.
+		// Patterns matched:
 		//   obj-y += dir/
 		//   obj-y := dir/
-		//   obj-$(CONFIG_FOO) += dir/
 		//   obj-m += dir/
 		const objMatch = line.match(
-			/^obj-(?:y|m|\$\([^)]+\))\s*(?:\+?=|:=)\s*(.+)$/,
+			/^obj-(?:y|m)\s*(?:\+?=|:=)\s*(.+)$/,
 		);
 
-		if (!objMatch) continue;
+		// Check for config-gated assignments (out of D1 scope).
+		// These depend on Kconfig evaluation which we do not perform.
+		if (!objMatch) {
+			const configMatch = line.match(
+				/^obj-\$\([^)]+\)\s*(?:\+?=|:=)\s*.+$/,
+			);
+			if (configMatch) {
+				diagnostics.push({
+					line: lineNum,
+					kind: "skipped_config_gated",
+					text: line.slice(0, 60),
+				});
+			}
+			continue;
+		}
 
 		// Skip assignments inside conditional blocks (D1: conditionals out of scope).
 		// We record a diagnostic but do not emit modules — their existence depends
@@ -184,18 +199,14 @@ export function detectKbuildModules(
 			if (seen.has(fullPath)) continue;
 			seen.add(fullPath);
 
-			// Determine assignment type for evidence
-			const isBuiltin = line.includes("obj-y");
-			const isModule = line.includes("obj-m");
-			const assignmentType = isBuiltin
-				? "obj-y"
-				: isModule
-					? "obj-m"
-					: "obj-$(CONFIG)";
+			// Determine assignment type for evidence.
+			// D1 scope: only obj-y (built-in) and obj-m (loadable module).
+			const assignmentType = line.includes("obj-y") ? "obj-y" : "obj-m";
 
 			modules.push({
 				rootPath: fullPath,
 				displayName: subdir, // Use directory name as display name
+				moduleKind: "inferred", // Layer 3A: build-system derived
 				sourceType: "kbuild",
 				sourcePath: makefileRelPath,
 				evidenceKind: "kbuild_subdir",

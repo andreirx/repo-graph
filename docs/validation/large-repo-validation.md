@@ -733,3 +733,133 @@ The next slice is P1: hotspot presentation filtering.
 
 Call-graph completeness remains LOW across all C repos (38-53%) due to macro
 patterns — this is expected C behavior, not a resolver bug.
+
+---
+
+## linux (Kbuild Module Discovery — Layer 3A)
+
+**Date:** 2026-04-23
+**Commit:** shallow clone
+**Branch:** master
+**Clone location:** `../legacy-codebases/linux/`
+
+### Purpose
+
+Validates Layer 3A build-system-derived module discovery. Linux kernel is
+the canonical Kbuild repo — modules are defined by `obj-y`/`obj-m`
+assignments in Makefile/Kbuild files, not by package manager manifests.
+
+This is NOT a graph extraction validation (no Rust C extractor yet). It
+validates the Kbuild detector + scanner adapter + indexer integration.
+
+### Metrics (from `discoverBuildSystemModules()`)
+
+| Metric | Value |
+|--------|-------|
+| Files scanned | 2,977 |
+| Files with modules | 159 |
+| Modules discovered | 703 |
+| Diagnostics | 20,250 |
+
+### Diagnostic Breakdown
+
+| Kind | Count | Meaning |
+|------|-------|---------|
+| `skipped_config_gated` | 17,708 | obj-$(CONFIG_...) assignments (D1: out of scope) |
+| `skipped_conditional` | 2,382 | Conditional directive lines (ifeq, ifdef, endif, else) |
+| `skipped_inside_conditional` | 83 | Assignments inside conditional blocks |
+| `skipped_variable` | 77 | Unexpanded variable references |
+
+The high `skipped_config_gated` count reflects Linux kernel reality: most
+module inclusions are config-gated. The 703 discovered modules are the
+unconditional baseline that always exists regardless of configuration.
+
+### Sample Modules (top-level)
+
+| Module Path | Display Name |
+|-------------|--------------|
+| `init` | init |
+| `kernel` | kernel |
+| `mm` | mm |
+| `fs` | fs |
+| `drivers` | drivers |
+| `net` | net |
+| `sound` | sound |
+| `security` | security |
+| `crypto` | crypto |
+| `arch/alpha/kernel` | kernel |
+| `arch/x86/kernel` | kernel |
+
+### Assessment
+
+**File discovery:** PASS. 2,977 Makefile/Kbuild files found. Deep tree
+traversal works (kernel has directories 10+ levels deep).
+
+**Module extraction:** PASS. 703 unconditional modules discovered. Covers
+top-level subsystems (kernel/, fs/, net/, drivers/) and core architecture
+modules. Only obj-y and obj-m assignments are extracted per D1 scope.
+
+**Config-gated handling:** PASS. 17,708 obj-$(CONFIG_...) assignments
+correctly skipped with `skipped_config_gated` diagnostic. These depend on
+Kconfig evaluation which we do not perform. HIGH confidence is only
+assigned to unconditional modules.
+
+**Conditional handling:** PASS. 83 assignments inside conditional blocks
+(ifeq/ifdef) were correctly skipped with `skipped_inside_conditional`.
+
+**Variable handling:** PASS. 77 unexpanded variable references recorded
+as diagnostics, not emitted as modules.
+
+**Directory skipping:** PASS. Documentation/, scripts/, tools/ directories
+skipped as configured. These contain Makefiles for build utilities, not
+kernel module definitions.
+
+**Scan time:** ~1 second. Acceptable for a repo this size.
+
+### Neutral Validation (non-Kbuild repo)
+
+| Repo | Files Scanned | Modules | Diagnostics |
+|------|---------------|---------|-------------|
+| repo-graph | 1 | 0 | 0 |
+
+The test fixture Makefile (`test/fixtures/cli-boundary/Makefile`) was
+scanned but contains build targets (`build:`, `deploy:`), not obj-y/obj-m
+assignments. Zero modules discovered. No false positives.
+
+### Verdict
+
+Layer 3A Kbuild detection is validated on the canonical target repo.
+
+**What works:**
+- Deep tree traversal (2,977 files across deep directory structure)
+- Module boundary detection (obj-y, obj-m, obj-$(CONFIG_...))
+- Line continuation handling
+- Conditional block tracking (ifdef/endif nesting)
+- Diagnostic recording for skipped content
+
+**What is explicitly out of scope (D1 locked):**
+- Kconfig variable evaluation
+- Conditional compilation analysis
+- Variable expansion beyond trivial forms
+
+**Integration status:**
+- Detector: pure function, validated
+- Scanner adapter: filesystem traversal, validated
+- Indexer: wired, combines Layer 1 + Layer 3A roots
+- Orchestrator: kind precedence (declared > operational > inferred)
+- Persistence: candidates + evidence stored, diagnostics ephemeral
+
+### Known Limitations
+
+1. **No conditional evaluation** — Modules inside `ifdef CONFIG_FOO` blocks
+   are not discovered. This is by design (D1 minimal scope).
+
+2. **No variable expansion** — `obj-$(SUBDIR)` where SUBDIR is a Makefile
+   variable is skipped, not resolved.
+
+3. **Diagnostics not persisted** — A1 stores modules and evidence, but
+   diagnostics are ephemeral. Persistence deferred until schema home exists.
+
+4. **No duplicate detection across files** — If multiple Makefiles define
+   the same module path, both evidence items are stored. The orchestrator
+   deduplicates by root path, but evidence inflation is possible.

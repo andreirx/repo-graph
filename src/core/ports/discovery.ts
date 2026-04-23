@@ -18,6 +18,41 @@
 
 import type { DiscoveredModuleRoot } from "../modules/manifest-detectors.js";
 
+// ── Build-system discovery result ──────────────────────────────────
+
+/**
+ * Diagnostic from build-system module discovery.
+ * Ephemeral — not persisted to storage in A1.
+ * TODO: persistence is deferred debt (see module-discovery-layer-3.md).
+ */
+export interface BuildSystemDiagnostic {
+	/** Source file that produced this diagnostic. */
+	filePath: string;
+	/** Line number (1-based) if applicable. */
+	line?: number;
+	/** Diagnostic category. */
+	kind: string;
+	/** Human-readable description. */
+	message: string;
+}
+
+/**
+ * Result of build-system module discovery.
+ * Includes both discovered modules and diagnostics for auditability.
+ */
+export interface BuildSystemDiscoveryResult {
+	/** Discovered module roots. */
+	modules: DiscoveredModuleRoot[];
+	/** Diagnostics (skipped conditionals, variables, parse issues). */
+	diagnostics: BuildSystemDiagnostic[];
+	/** Number of eligible files scanned. */
+	filesScanned: number;
+	/** Number of files that produced at least one module. */
+	filesWithModules: number;
+}
+
+// ── Discovery port ─────────────────────────────────────────────────
+
 /**
  * Discovers declared module roots in a repository.
  *
@@ -26,7 +61,8 @@ import type { DiscoveredModuleRoot } from "../modules/manifest-detectors.js";
  */
 export interface ModuleDiscoveryPort {
 	/**
-	 * Scan the repository for declared module roots.
+	 * Scan the repository for declared module roots (Layer 1).
+	 * Sources: package.json, Cargo.toml, settings.gradle, pyproject.toml.
 	 *
 	 * @param rootPath - Absolute path to the repository root.
 	 * @param repoUid - Repository UID (for file UID construction).
@@ -36,4 +72,20 @@ export interface ModuleDiscoveryPort {
 		rootPath: string,
 		repoUid: string,
 	): Promise<DiscoveredModuleRoot[]>;
+
+	/**
+	 * Scan the repository for build-system-derived modules (Layer 3A).
+	 * Sources: Kbuild, Makefile (future: CMake, GNU Makefile).
+	 *
+	 * Returns modules with `moduleKind: "inferred"`.
+	 * Diagnostics are ephemeral (not persisted in A1).
+	 *
+	 * @param rootPath - Absolute path to the repository root.
+	 * @param repoUid - Repository UID (for evidence attribution).
+	 * @returns Discovery result with modules, diagnostics, and scan stats.
+	 */
+	discoverBuildSystemModules?(
+		rootPath: string,
+		repoUid: string,
+	): Promise<BuildSystemDiscoveryResult>;
 }

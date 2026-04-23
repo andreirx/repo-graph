@@ -198,3 +198,136 @@ version = "0.1.0"
 		expect(coreCrate!.displayName).toBe("core-crate");
 	});
 });
+
+// ── Kbuild module discovery (Layer 3A) ─────────────────────────────
+
+describe("ManifestScanner — discoverBuildSystemModules", () => {
+	it("discovers Kbuild subdirectory modules from obj-y assignments", async () => {
+		const root = makeTempRepo();
+
+		writeFile(root, "Makefile", `# Top-level Makefile
+obj-y += drivers/
+obj-y += fs/
+`);
+		mkdirSync(join(root, "drivers"), { recursive: true });
+		mkdirSync(join(root, "fs"), { recursive: true });
+
+		const result = await scanner.discoverBuildSystemModules(root, "test-repo");
+
+		expect(result.filesScanned).toBe(1);
+		expect(result.filesWithModules).toBe(1);
+		expect(result.modules.length).toBe(2);
+
+		const paths = result.modules.map((m) => m.rootPath).sort();
+		expect(paths).toEqual(["drivers", "fs"]);
+
+		// All modules should have moduleKind: "inferred".
+		for (const m of result.modules) {
+			expect(m.moduleKind).toBe("inferred");
+			expect(m.sourceType).toBe("kbuild");
+			expect(m.confidence).toBe(0.9);
+		}
+	});
+
+	it("discovers nested Kbuild modules in subdirectories", async () => {
+		const root = makeTempRepo();
+
+		// Root Makefile
+		writeFile(root, "Makefile", `obj-y += kernel/\n`);
+
+		// Nested Makefile
+		writeFile(root, "kernel/Makefile", `obj-y += sched/
+obj-y += irq/
+`);
+
+		mkdirSync(join(root, "kernel/sched"), { recursive: true });
+		mkdirSync(join(root, "kernel/irq"), { recursive: true });
+
+		const result = await scanner.discoverBuildSystemModules(root, "test-repo");
+
+		expect(result.filesScanned).toBe(2);
+		expect(result.filesWithModules).toBe(2);
+
+		const paths = result.modules.map((m) => m.rootPath).sort();
+		expect(paths).toEqual(["kernel", "kernel/irq", "kernel/sched"]);
+	});
+
+	it("handles Kbuild files (not just Makefile)", async () => {
+		const root = makeTempRepo();
+
+		// Use Kbuild filename instead of Makefile
+		writeFile(root, "drivers/Kbuild", `obj-y += gpio/
+obj-m += usb/
+`);
+
+		mkdirSync(join(root, "drivers/gpio"), { recursive: true });
+		mkdirSync(join(root, "drivers/usb"), { recursive: true });
+
+		const result = await scanner.discoverBuildSystemModules(root, "test-repo");
+
+		expect(result.modules.length).toBe(2);
+
+		const paths = result.modules.map((m) => m.rootPath).sort();
+		expect(paths).toEqual(["drivers/gpio", "drivers/usb"]);
+	});
+
+	it("records diagnostics for skipped conditionals", async () => {
+		const root = makeTempRepo();
+
+		writeFile(root, "Makefile", `obj-y += always/
+ifdef CONFIG_FOO
+obj-y += conditional/
+endif
+`);
+
+		mkdirSync(join(root, "always"), { recursive: true });
+		mkdirSync(join(root, "conditional"), { recursive: true });
+
+		const result = await scanner.discoverBuildSystemModules(root, "test-repo");
+
+		// Only "always" should be discovered (conditional skipped).
+		expect(result.modules.length).toBe(1);
+		expect(result.modules[0].rootPath).toBe("always");
+
+		// Should have diagnostics for the conditional.
+		expect(result.diagnostics.length).toBeGreaterThanOrEqual(2);
+		const kinds = result.diagnostics.map((d) => d.kind);
+		expect(kinds).toContain("skipped_conditional");
+		expect(kinds).toContain("skipped_inside_conditional");
+	});
+
+	it("returns empty results for non-Kbuild repo", async () => {
+		const root = makeTempRepo();
+
+		// A typical JS project — no Makefile/Kbuild
+		writeFile(root, "package.json", JSON.stringify({ name: "js-app" }));
+		writeFile(root, "src/index.ts", "export const x = 1;");
+
+		const result = await scanner.discoverBuildSystemModules(root, "test-repo");
+
+		expect(result.modules.length).toBe(0);
+		expect(result.diagnostics.length).toBe(0);
+		expect(result.filesScanned).toBe(0);
+		expect(result.filesWithModules).toBe(0);
+	});
+
+	it("skips Documentation and scripts directories", async () => {
+		const root = makeTempRepo();
+
+		writeFile(root, "Makefile", `obj-y += kernel/\n`);
+		// These should be skipped
+		writeFile(root, "Documentation/Makefile", `obj-y += ignored/\n`);
+		writeFile(root, "scripts/Makefile", `obj-y += ignored/\n`);
+
+		mkdirSync(join(root, "kernel"), { recursive: true });
+		mkdirSync(join(root, "Documentation/ignored"), { recursive: true });
+		mkdirSync(join(root, "scripts/ignored"), { recursive: true });
+
+		const result = await scanner.discoverBuildSystemModules(root, "test-repo");
+
+		// Only kernel should be discovered.
+		expect(result.modules.length).toBe(1);
+		expect(result.modules[0].rootPath).toBe("kernel");
+		expect(result.filesScanned).toBe(1);
+	});
+});

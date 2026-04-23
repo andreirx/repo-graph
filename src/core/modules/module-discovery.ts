@@ -25,6 +25,7 @@ import { v4 as uuidv4 } from "uuid";
 import type { TrackedFile } from "../model/index.js";
 import {
 	buildModuleKey,
+	type EvidenceSourceType,
 	type ModuleCandidate,
 	type ModuleCandidateEvidence,
 	type ModuleFileOwnership,
@@ -57,6 +58,11 @@ export interface ModuleDiscoveryResult {
  */
 export function discoverModules(input: ModuleDiscoveryInput): ModuleDiscoveryResult {
 	const { repoUid, snapshotUid, discoveredRoots, trackedFiles } = input;
+
+	// Validate moduleKind/sourceType coherence on all inputs.
+	for (const root of discoveredRoots) {
+		validateModuleKindCoherence(root);
+	}
 
 	// 1. Group discovered roots by canonical root path.
 	//    Multiple evidence items may point to the same root
@@ -94,12 +100,17 @@ export function discoverModules(input: ModuleDiscoveryInput): ModuleDiscoveryRes
 		// Aggregate confidence: max of evidence confidences.
 		const maxConfidence = Math.max(...group.roots.map((r) => r.confidence));
 
+		// Determine moduleKind using precedence: declared > operational > inferred.
+		// If multiple roots with different kinds point to the same path,
+		// the strongest kind wins for the candidate.
+		const moduleKind = resolveModuleKind(group.roots);
+
 		candidates.push({
 			moduleCandidateUid: candidateUid,
 			snapshotUid,
 			repoUid,
 			moduleKey,
-			moduleKind: "declared",
+			moduleKind,
 			canonicalRootPath: rootPath,
 			confidence: maxConfidence,
 			displayName: group.displayName,
@@ -248,4 +259,74 @@ function normalizeRootPath(path: string): string {
 	let p = path.replace(/\/+$/, "");
 	if (p === "" || p === ".") return ".";
 	return p;
+}
+
+/**
+ * Resolve the winning moduleKind from multiple roots at the same path.
+ * Uses precedence: declared > operational > inferred.
+ */
+function resolveModuleKind(roots: DiscoveredModuleRoot[]): ModuleKind {
+	// If any root is declared, the candidate is declared.
+	// If any root is operational (and none declared), the candidate is operational.
+	// Otherwise, inferred.
+	let hasDeclared = false;
+	let hasOperational = false;
+
+	for (const root of roots) {
+		if (root.moduleKind === "declared") hasDeclared = true;
+		else if (root.moduleKind === "operational") hasOperational = true;
+	}
+
+	if (hasDeclared) return "declared";
+	if (hasOperational) return "operational";
+	return "inferred";
+}
+
+// ── Coherence validation ───────────────────────────────────────────
+
+/**
+ * Valid moduleKind/sourceType pairs.
+ *
+ * The detector owns classification. The orchestrator validates coherence
+ * to catch misconfigurations early. This is a whitelist — unknown pairs
+ * fail loudly.
+ */
+const VALID_KIND_SOURCE_PAIRS: Record<ModuleKind, ReadonlySet<EvidenceSourceType>> = {
+	declared: new Set<EvidenceSourceType>([
+		"package_json_workspaces",
+		"pnpm_workspace_yaml",
+		"cargo_workspace",
+		"cargo_crate",
+		"gradle_settings",
+		"pyproject_toml",
+	]),
+	operational: new Set<EvidenceSourceType>([
+		"surface_promotion_cli",
+		"surface_promotion_service",
+		"surface_promotion_web_app",
+		"surface_promotion_worker",
+	]),
+	inferred: new Set<EvidenceSourceType>([
+		"kbuild",
+	]),
+};
+
+/**
+ * Validate that moduleKind and sourceType are coherent.
+ * Throws if the pair is invalid.
+ */
+function validateModuleKindCoherence(root: DiscoveredModuleRoot): void {
+	const validSources = VALID_KIND_SOURCE_PAIRS[root.moduleKind];
+	if (!validSources) {
+		throw new Error(
+			`Unknown moduleKind: ${root.moduleKind} (sourceType: ${root.sourceType}, path: ${root.rootPath})`,
+		);
+	}
+	if (!validSources.has(root.sourceType)) {
+		throw new Error(
+			`Incoherent moduleKind/sourceType: ${root.moduleKind}/${root.sourceType} ` +
+			`(path: ${root.rootPath}). Valid sourceTypes for ${root.moduleKind}: ` +
+			`[${[...validSources].join(", ")}]`,
+		);
+	}
 }

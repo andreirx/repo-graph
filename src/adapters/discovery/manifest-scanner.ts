@@ -21,7 +21,10 @@
 import { existsSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { join, relative, dirname } from "node:path";
-import type { ModuleDiscoveryPort } from "../../core/ports/discovery.js";
+import type {
+	BuildSystemDiscoveryResult,
+	ModuleDiscoveryPort,
+} from "../../core/ports/discovery.js";
 import type { DiscoveredModuleRoot } from "../../core/modules/manifest-detectors.js";
 import {
 	detectCargoManifest,
@@ -31,6 +34,7 @@ import {
 	detectPnpmWorkspace,
 	detectPyprojectToml,
 } from "../../core/modules/manifest-detectors.js";
+import { detectKbuildModules } from "../../core/modules/detectors/kbuild-detector.js";
 
 export class ManifestScanner implements ModuleDiscoveryPort {
 	async discoverDeclaredModules(
@@ -91,6 +95,7 @@ export class ManifestScanner implements ModuleDiscoveryPort {
 					results.push({
 						rootPath: memberPath,
 						displayName: memberName,
+						moduleKind: "declared",
 						sourceType: "cargo_workspace",
 						sourcePath: relPath,
 						evidenceKind: "workspace_member",
@@ -130,6 +135,150 @@ export class ManifestScanner implements ModuleDiscoveryPort {
 		}
 
 		return results;
+	}
+
+	// ── Build-system module discovery (Layer 3A) ─────────────────
+
+	async discoverBuildSystemModules(
+		rootPath: string,
+		_repoUid: string,
+	): Promise<BuildSystemDiscoveryResult> {
+		const allModules: DiscoveredModuleRoot[] = [];
+		const allDiagnostics: Array<{
+			filePath: string;
+			line?: number;
+			kind: string;
+			message: string;
+		}> = [];
+		let filesScanned = 0;
+		let filesWithModules = 0;
+
+		// Find all Kbuild/Makefile files in the repo.
+		// Use deeper traversal (10 levels) than manifest scanner (4 levels)
+		// because kernel-style repos have deep directory structures.
+		const kbuildFiles = await this.findKbuildFiles(rootPath);
+
+		for (const relPath of kbuildFiles) {
+			const absPath = join(rootPath, relPath);
+			let content: string;
+			try {
+				content = await readFile(absPath, "utf-8");
+			} catch {
+				continue;
+			}
+
+			filesScanned++;
+
+			const result = detectKbuildModules(content, relPath);
+
+			if (result.modules.length > 0) {
+				filesWithModules++;
+				allModules.push(...result.modules);
+			}
+
+			// Convert Kbuild diagnostics to the port's diagnostic format.
+			for (const diag of result.diagnostics) {
+				allDiagnostics.push({
+					filePath: relPath,
+					line: diag.line,
+					kind: diag.kind,
+					message: diag.text,
+				});
+			}
+		}
+
+		return {
+			modules: allModules,
+			diagnostics: allDiagnostics,
+			filesScanned,
+			filesWithModules,
+		};
+	}
+
+	/**
+	 * Find Kbuild/Makefile files in the repository.
+	 *
+	 * Uses deeper traversal (10 levels) than manifest scanning because
+	 * kernel-style repos have deep directory structures (e.g.,
+	 * drivers/gpu/drm/amd/display/dc/core/).
+	 */
+	private async findKbuildFiles(rootPath: string): Promise<string[]> {
+		const result: string[] = [];
+
+		// Check root-level files first.
+		if (existsSync(join(rootPath, "Makefile"))) {
+			result.push("Makefile");
+		}
+		if (existsSync(join(rootPath, "Kbuild"))) {
+			result.push("Kbuild");
+		}
+
+		// Walk subdirectories for nested Kbuild/Makefile files.
+		await this.walkForKbuildFiles(rootPath, rootPath, result, 0, 10);
+
+		return result;
+	}
+
+	private async walkForKbuildFiles(
+		rootPath: string,
+		dir: string,
+		result: string[],
+		depth: number,
+		maxDepth: number,
+	): Promise<void> {
+		if (depth >= maxDepth) return;
+
+		let entries: import("node:fs").Dirent[];
+		try {
+			entries = await readdir(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+
+		for (const entry of entries) {
+			if (!entry.isDirectory()) continue;
+			const name = entry.name;
+
+			// Skip common non-source directories.
+			// Same exclusions as manifest scanning, plus kernel-specific
+			// directories that don't contain Kbuild module definitions.
+			if (
+				name === "node_modules" ||
+				name === ".git" ||
+				name === "target" ||
+				name === "build" ||
+				name === "dist" ||
+				name === ".gradle" ||
+				name === "__pycache__" ||
+				name === ".venv" ||
+				name === "venv" ||
+				name === "Documentation" ||  // Kernel docs, no module defs
+				name === "scripts" ||        // Build scripts, not modules
+				name === "tools"             // Kernel tools, separate from main tree
+			) continue;
+
+			const absDir = join(dir, name);
+			const relDir = relative(rootPath, absDir);
+
+			// Check for Kbuild/Makefile in this directory.
+			const makefilePath = join(absDir, "Makefile");
+			const kbuildPath = join(absDir, "Kbuild");
+
+			if (existsSync(makefilePath)) {
+				const relPath = join(relDir, "Makefile");
+				if (!result.includes(relPath)) {
+					result.push(relPath);
+				}
+			}
+			if (existsSync(kbuildPath)) {
+				const relPath = join(relDir, "Kbuild");
+				if (!result.includes(relPath)) {
+					result.push(relPath);
+				}
+			}
+
+			await this.walkForKbuildFiles(rootPath, absDir, result, depth + 1, maxDepth);
+		}
 	}
 
 	// ── JS workspace processing ────────────────────────────────────
@@ -198,6 +347,7 @@ export class ManifestScanner implements ModuleDiscoveryPort {
 				results.push({
 					rootPath: memberPath,
 					displayName: memberName,
+					moduleKind: "declared",
 					sourceType: "package_json_workspaces",
 					sourcePath: "package.json",
 					evidenceKind: "workspace_member",
@@ -210,6 +360,7 @@ export class ManifestScanner implements ModuleDiscoveryPort {
 				results.push({
 					rootPath: memberPath,
 					displayName: memberName,
+					moduleKind: "declared",
 					sourceType: "pnpm_workspace_yaml",
 					sourcePath: manifests.pnpmWorkspace!,
 					evidenceKind: "workspace_member",

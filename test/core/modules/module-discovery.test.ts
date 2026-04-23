@@ -34,6 +34,7 @@ function makeFile(path: string): TrackedFile {
 function makeRoot(overrides: Partial<DiscoveredModuleRoot> & { rootPath: string }): DiscoveredModuleRoot {
 	return {
 		displayName: null,
+		moduleKind: "declared",
 		sourceType: "package_json_workspaces",
 		sourcePath: "package.json",
 		evidenceKind: "workspace_member",

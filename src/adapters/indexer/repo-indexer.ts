@@ -1063,21 +1063,40 @@ export class RepoIndexer implements IndexerPort {
 		// Runs even when no declared modules exist (Layer 2 operational promotion).
 		if (this.discovery) {
 			// 1. Discover declared modules (Layer 1). May be empty.
-			const discoveredRoots = await this.discovery.discoverDeclaredModules(
+			const declaredRoots = await this.discovery.discoverDeclaredModules(
 				repo.rootPath, repoUid,
 			);
 
-			let declaredCandidates: import("../../core/modules/module-candidate.js").ModuleCandidate[] = [];
+			// 1b. Discover build-system-derived modules (Layer 3A). May be empty.
+			// Only runs if the adapter implements the optional method.
+			// Build-system modules have moduleKind: "inferred".
+			let buildSystemRoots: import("../../core/modules/manifest-detectors.js").DiscoveredModuleRoot[] = [];
+			if (this.discovery.discoverBuildSystemModules) {
+				const buildSystemResult = await this.discovery.discoverBuildSystemModules(
+					repo.rootPath, repoUid,
+				);
+				buildSystemRoots = buildSystemResult.modules;
+				// Diagnostics are ephemeral in A1 — not persisted.
+				// Future: persist to dedicated diagnostic table.
+			}
 
-			if (discoveredRoots.length > 0) {
+			// Combine all discovered roots for orchestrator.
+			// Kind precedence is handled by discoverModules():
+			// declared > operational > inferred.
+			const allDiscoveredRoots = [...declaredRoots, ...buildSystemRoots];
+
+			let manifestCandidates: import("../../core/modules/module-candidate.js").ModuleCandidate[] = [];
+
+			if (allDiscoveredRoots.length > 0) {
 				const moduleResult = discoverModules({
-					repoUid, snapshotUid: snapshot.snapshotUid, discoveredRoots, trackedFiles,
+					repoUid, snapshotUid: snapshot.snapshotUid,
+					discoveredRoots: allDiscoveredRoots, trackedFiles,
 				});
 				if (moduleResult.candidates.length > 0) {
-					// Persist declared modules and evidence.
+					// Persist module candidates (declared + inferred) and evidence.
 					this.storage.insertModuleCandidates(moduleResult.candidates);
 					this.storage.insertModuleCandidateEvidence(moduleResult.evidence);
-					declaredCandidates = moduleResult.candidates;
+					manifestCandidates = moduleResult.candidates;
 				}
 			}
 
@@ -1087,7 +1106,7 @@ export class RepoIndexer implements IndexerPort {
 				repo.rootPath,
 			);
 
-			let allCandidates = declaredCandidates;
+			let allCandidates = manifestCandidates;
 			let allSurfaces: SurfaceDiscoveryResult['surfaces'] = [];
 			let allSurfaceEvidence: SurfaceDiscoveryResult['evidence'] = [];
 
@@ -1097,14 +1116,14 @@ export class RepoIndexer implements IndexerPort {
 					repoUid,
 					snapshotUid: snapshot.snapshotUid,
 					detectedSurfaces,
-					moduleCandidates: declaredCandidates,
+					moduleCandidates: manifestCandidates,
 				});
 
 				// 4. Layer 2: Promote unattached surfaces to operational modules.
 				// Surfaces at roots with no declared module become operational candidates.
 				if (surfaceResult.unattachedSurfaces.length > 0) {
 					const existingRoots = new Set(
-						declaredCandidates.map((c) => c.canonicalRootPath),
+						manifestCandidates.map((c) => c.canonicalRootPath),
 					);
 					const promotionResult = promoteUnattachedSurfaces({
 						repoUid,
@@ -1119,7 +1138,7 @@ export class RepoIndexer implements IndexerPort {
 						this.storage.insertModuleCandidateEvidence(promotionResult.evidence);
 
 						// Merge candidates for ownership computation.
-						allCandidates = [...declaredCandidates, ...promotionResult.candidates];
+						allCandidates = [...manifestCandidates, ...promotionResult.candidates];
 
 						// 5. Re-link surfaces with extended candidate set.
 						// Previously unattached surfaces should now attach.

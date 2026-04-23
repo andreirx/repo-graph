@@ -4,7 +4,7 @@
  * Pure function tests — no filesystem, no storage. Tests cover:
  *   - obj-y directory assignments
  *   - obj-m directory assignments
- *   - obj-$(CONFIG_...) conditional assignments
+ *   - obj-$(CONFIG_...) config-gated assignments (D1: skipped with diagnostic)
  *   - Line continuation handling
  *   - Nested Makefile path resolution
  *   - Skipped conditionals (diagnostics)
@@ -83,26 +83,37 @@ describe("detectKbuildModules — obj-m", () => {
 	});
 });
 
-// ── obj-$(CONFIG_...) detection ────────────────────────────────────
+// ── obj-$(CONFIG_...) skipping (D1: out of scope) ──────────────────
 
-describe("detectKbuildModules — conditional", () => {
-	it("detects obj-$(CONFIG_...) directory assignment", () => {
+describe("detectKbuildModules — config-gated", () => {
+	it("skips obj-$(CONFIG_...) assignments with diagnostic", () => {
 		const content = `obj-$(CONFIG_ACPI) += acpi/`;
 		const result = detectKbuildModules(content, "drivers/Makefile");
-		expect(result.modules).toHaveLength(1);
-		expect(result.modules[0].rootPath).toBe("drivers/acpi");
-		const payload = result.modules[0].payload as { assignmentType: string };
-		expect(payload.assignmentType).toBe("obj-$(CONFIG)");
+		// D1 scope: obj-$(CONFIG_...) is config-gated, must be skipped
+		expect(result.modules).toHaveLength(0);
+		expect(result.diagnostics.some((d) => d.kind === "skipped_config_gated")).toBe(true);
 	});
 
-	it("handles multiple CONFIG patterns", () => {
+	it("skips multiple CONFIG patterns with diagnostics", () => {
 		const content = `
 obj-$(CONFIG_PCI) += pci/
 obj-$(CONFIG_USB) += usb/
 obj-$(CONFIG_NET) += net/
 `;
 		const result = detectKbuildModules(content, "drivers/Makefile");
-		expect(result.modules).toHaveLength(3);
+		expect(result.modules).toHaveLength(0);
+		expect(result.diagnostics.filter((d) => d.kind === "skipped_config_gated")).toHaveLength(3);
+	});
+
+	it("detects obj-y but skips obj-$(CONFIG_...) in same file", () => {
+		const content = `
+obj-y += always/
+obj-$(CONFIG_FOO) += conditional/
+`;
+		const result = detectKbuildModules(content, "Makefile");
+		expect(result.modules).toHaveLength(1);
+		expect(result.modules[0].rootPath).toBe("always");
+		expect(result.diagnostics.some((d) => d.kind === "skipped_config_gated")).toBe(true);
 	});
 });
 
@@ -128,13 +139,24 @@ obj-y += cache/ \\
 // ── Deduplication ──────────────────────────────────────────────────
 
 describe("detectKbuildModules — deduplication", () => {
-	it("deduplicates repeated directory references", () => {
+	it("deduplicates repeated obj-y directory references", () => {
+		const content = `
+obj-y += core/
+obj-y += core/
+`;
+		const result = detectKbuildModules(content, "Makefile");
+		expect(result.modules).toHaveLength(1);
+	});
+
+	it("obj-y emits module even if same path appears in skipped CONFIG line", () => {
+		// obj-$(CONFIG_FOO) is skipped, obj-y is detected
 		const content = `
 obj-y += core/
 obj-$(CONFIG_FOO) += core/
 `;
 		const result = detectKbuildModules(content, "Makefile");
 		expect(result.modules).toHaveLength(1);
+		expect(result.diagnostics.some((d) => d.kind === "skipped_config_gated")).toBe(true);
 	});
 });
 
@@ -249,7 +271,7 @@ obj-y  :=  bus/
 // ── Real Linux kernel snippets ─────────────────────────────────────
 
 describe("detectKbuildModules — real kernel patterns", () => {
-	it("parses drivers/Makefile style", () => {
+	it("parses drivers/Makefile style (obj-y only, CONFIG skipped)", () => {
 		const content = `
 # SPDX-License-Identifier: GPL-2.0
 obj-y				+= cache/
@@ -261,12 +283,16 @@ obj-$(CONFIG_GPIOLIB)		+= gpio/
 obj-y				+= pwm/
 `;
 		const result = detectKbuildModules(content, "drivers/Makefile");
-		expect(result.modules.length).toBeGreaterThanOrEqual(7);
-		expect(result.modules.map((m) => m.displayName)).toContain("cache");
-		expect(result.modules.map((m) => m.displayName)).toContain("gpio");
+		// D1 scope: only obj-y modules detected (5), obj-$(CONFIG_...) skipped (2)
+		expect(result.modules).toHaveLength(5);
+		expect(result.modules.map((m) => m.displayName)).toEqual([
+			"cache", "irqchip", "bus", "phy", "pwm",
+		]);
+		// CONFIG-gated lines recorded as diagnostics
+		expect(result.diagnostics.filter((d) => d.kind === "skipped_config_gated")).toHaveLength(2);
 	});
 
-	it("parses crypto/Makefile style with mixed obj-y and object files", () => {
+	it("parses crypto/Makefile style with CONFIG object files", () => {
 		const content = `
 obj-$(CONFIG_CRYPTO) += crypto.o
 crypto-y := api.o cipher.o
@@ -274,8 +300,11 @@ obj-$(CONFIG_CRYPTO_ALGAPI2) += crypto_algapi.o
 obj-$(CONFIG_CRYPTO_AEAD2) += aead.o
 `;
 		const result = detectKbuildModules(content, "crypto/Makefile");
-		// Only directory assignments, not .o files
+		// No directory assignments, all are .o object files
+		// CONFIG lines are skipped (D1: out of scope)
 		expect(result.modules).toHaveLength(0);
+		// All obj-$(CONFIG_...) lines recorded as skipped
+		expect(result.diagnostics.filter((d) => d.kind === "skipped_config_gated")).toHaveLength(3);
 	});
 });
 

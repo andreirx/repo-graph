@@ -294,7 +294,7 @@ Design slice complete:
 ## Progress
 
 - [x] A1: Kbuild detector implemented and validated on Linux kernel
-- [ ] A1: Wire into module discovery orchestrator
+- [x] A1: Wire into module discovery orchestrator (scanner + indexer integration)
 - [ ] B1: Directory detector
 - [ ] B1: Validate interactions and precedence
 - [ ] C1: Design Source C (after A/B validation)
@@ -307,51 +307,88 @@ Pure function implementation: `src/core/modules/detectors/kbuild-detector.ts`
 
 **Scope (minimal, as locked):**
 - `obj-y` directory assignments
-- `obj-m` directory assignments  
-- `obj-$(CONFIG_...)` directory assignments
+- `obj-m` directory assignments
 - Line continuation handling
 - Nested path resolution
 
 **NOT implemented (as locked):**
-- Conditionals (ifeq, ifdef) — skipped with diagnostic
-- Kconfig variable resolution
-- Variable expansion — skipped with diagnostic
+- `obj-$(CONFIG_...)` assignments — skipped with `skipped_config_gated` diagnostic
+- Conditionals (ifeq, ifdef) — skipped with `skipped_conditional` diagnostic
+- Assignments inside conditionals — skipped with `skipped_inside_conditional` diagnostic
+- Variable expansion — skipped with `skipped_variable` diagnostic
 
-**Unit tests:** 25 tests in `test/core/modules/detectors/kbuild-detector.test.ts`
+**Unit tests:** 28 tests in `test/core/modules/detectors/kbuild-detector.test.ts`
 
-**Linux kernel validation:**
+**Linux kernel validation (D1-compliant):**
 
-| Makefile | Modules Detected |
-|----------|------------------|
-| drivers/Makefile | 153 |
-| fs/Makefile | 76 |
-| net/Makefile | 71 |
-| samples/Makefile | 25 |
-| sound/Makefile | 25 |
-| kernel/Makefile | 21 |
-| lib/Makefile | 19 |
-| security/Makefile | 13 |
-| Total (11 Makefiles) | **410** |
+| Metric | Value |
+|--------|-------|
+| Files scanned | 2,977 |
+| Files with modules | 159 |
+| **Modules discovered** | **703** |
+| skipped_config_gated | 17,708 |
+| skipped_conditional | 2,382 |
+| skipped_inside_conditional | 83 |
+| skipped_variable | 77 |
 
 The detector correctly:
-- Identifies subdirectory module boundaries from obj-y/obj-m assignments
+- Identifies subdirectory module boundaries from obj-y/obj-m assignments only
+- Skips obj-$(CONFIG_...) assignments (D1: Kconfig resolution out of scope)
+- Skips assignments inside conditional blocks (ifeq/ifdef)
 - Ignores object file assignments (`.o`) — not module boundaries
-- Skips assignments inside conditional blocks (ifeq/ifdef) — 8 skipped
-- Records conditional directive lines as diagnostics — 36 recorded
+- Records all skipped content as diagnostics for auditability
 
-Conditional block tracking ensures HIGH confidence is only assigned to
-modules whose existence does not depend on Kconfig evaluation.
+The 703 discovered modules are the unconditional baseline — modules whose
+existence does not depend on Kconfig evaluation. This is the D1 minimal
+scope: highest confidence, cleanest validation target.
+
+### Orchestrator Integration (2026-04-23)
+
+Wired Kbuild discovery into the module discovery pipeline:
+
+**Discovery Port (`src/core/ports/discovery.ts`):**
+- Added `BuildSystemDiscoveryResult` interface (modules + diagnostics + stats)
+- Added optional `discoverBuildSystemModules()` method to `ModuleDiscoveryPort`
+
+**Scanner Adapter (`src/adapters/discovery/manifest-scanner.ts`):**
+- Implements `discoverBuildSystemModules()`
+- Finds Makefile/Kbuild files (depth 10 for deep kernel trees)
+- Skips Documentation/, scripts/, tools/ directories
+- Returns modules, diagnostics, scan statistics
+
+**Indexer (`src/adapters/indexer/repo-indexer.ts`):**
+- Calls `discoverBuildSystemModules()` if adapter implements it
+- Combines Layer 1 (declared) + Layer 3A (inferred) roots
+- Single `discoverModules()` call handles kind precedence
+- Diagnostics ephemeral (not persisted in A1)
+
+**Full-repo Validation:**
+
+| Repo | Files Scanned | Modules | Diagnostics | Result |
+|------|---------------|---------|-------------|--------|
+| Linux kernel | 2977 | 703 | 20,250 | ✓ Positive |
+| repo-graph | 1 | 0 | 0 | ✓ Neutral |
+
+Linux kernel: deep tree traversal works (2977 files). D1 scope enforced:
+703 unconditional modules discovered (obj-y/obj-m only). 17,708 config-gated
+assignments (obj-$(CONFIG_...)) correctly skipped. 83 inside-conditional
+skipped. 77 unexpanded variables skipped.
+
+Non-Kbuild repo (repo-graph): 1 Makefile scanned (test fixture with build
+targets), 0 modules discovered (no obj-y/obj-m). No false positives.
+
+**Adapter Tests:** 6 tests in `test/adapters/discovery/manifest-scanner.test.ts`
 
 ## Deferred Items
 
 - Directory detector implementation (B1 slice)
 - Graph clustering design (C1 slice, after A/B validation)
-- Orchestrator integration (wire Kbuild detector into module discovery)
+- Diagnostic persistence (schema + storage)
 - Migration schema for inferred modules
-- CLI changes
+- CLI changes for Layer 3 modules
 - Confidence calibration study
-- GNU Makefile detector
-- CMake detector
+- GNU Makefile detector (Source A expansion)
+- CMake detector (Source A expansion)
 
 ## Risk Assessment
 
