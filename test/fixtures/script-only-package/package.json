@@ -1,0 +1,10 @@
+{
+  "name": "script-only-pkg",
+  "version": "1.0.0",
+  "description": "Package with scripts only - no bin, main, exports, or framework deps",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest",
+    "lint": "eslint ."
+  }
+}

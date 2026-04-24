@@ -4,10 +4,30 @@ Design slice for extending the existing project surface infrastructure with
 Dockerfile, docker-compose, Makefile detection, and richer package.json
 script extraction.
 
-**Status:** DESIGN ONLY. Do not implement until model and persistence
-boundary are reviewed.
+**Status:** PARTIAL IMPLEMENTATION.
+- Phase 0 (identity infrastructure): SHIPPED. Migration 018, identity
+  helpers, DetectedSurface identity fields.
+- Phase 1A (container detectors): SHIPPED. Dockerfile and docker-compose
+  detectors implemented and wired.
+- Phase 1B (script-only fallback): SHIPPED. Package.json script-only
+  fallback for packages with operational scripts but no bin/main/exports.
+- Rust CLI parity: SHIPPED. `rmap surfaces list/show` with filters,
+  module enrichment, evidence count, ambiguity handling.
+- **Next slice:** Makefile detector (Phase 1 item 11).
 
-**Revision:** 10 (2026-04-23)
+**Revision:** 11 (2026-04-24)
+
+### Corrections in Rev 11
+
+1. **Script-only fallback shipped:** Implemented and tested `detectScriptOnlyFallback()`
+   in surface-detectors.ts. Packages with scripts but no bin/main/exports/framework
+   deps now produce a low-confidence surface.
+
+2. **Test fixtures added:** `script-only-package/` and `script-only-service/` fixtures
+   for integration testing.
+
+3. **Phase 1 items 7-10 marked SHIPPED:** Updated status for script-only fallback,
+   Dockerfile detector, docker-compose adapter, and docker-compose detector.
 
 ### Corrections in Rev 10
 
@@ -1344,10 +1364,13 @@ eroded by compatibility escapes.
 
 ### Phase 1: Detectors
 
-7. **Package.json script-only fallback** — update existing detector + unit tests
-8. **Dockerfile detector** — pure function + unit tests
-9. **docker-compose adapter** — YAML parsing to typed DTO
-10. **docker-compose core detector** — pure function over DTO + unit tests
+7. **Package.json script-only fallback** — SHIPPED. Low-confidence surface
+   generation for packages with operational scripts but no explicit entrypoints.
+   Service scripts (start/dev/serve) → backend_service (0.55); build scripts
+   (build/test/lint) → library (0.50). Unit and integration tests added.
+8. **Dockerfile detector** — SHIPPED. Pure function + unit tests.
+9. **docker-compose adapter** — SHIPPED. YAML parsing to typed DTO.
+10. **docker-compose core detector** — SHIPPED. Pure function over DTO + unit tests.
 11. **Makefile detector** — pure function + unit tests
 12. **Workspace adapter** — YAML/JSON parsing + glob expansion
 13. **Workspace core detector** — pure function over DTO + unit tests

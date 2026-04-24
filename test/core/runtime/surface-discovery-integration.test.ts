@@ -50,6 +50,16 @@ const DOCKERFILE_PLUS_COMPOSE_FIXTURE = join(
 	"../../fixtures/dockerfile-plus-compose",
 );
 
+const SCRIPT_ONLY_PACKAGE_FIXTURE = join(
+	import.meta.dirname,
+	"../../fixtures/script-only-package",
+);
+
+const SCRIPT_ONLY_SERVICE_FIXTURE = join(
+	import.meta.dirname,
+	"../../fixtures/script-only-service",
+);
+
 let extractor: TypeScriptExtractor;
 let scanner: ManifestScanner;
 
@@ -535,6 +545,176 @@ describe("surface discovery integration — dockerfile plus compose", () => {
 
 		// Both dockerfile and compose surfaces should be containers
 		expect(containerSurfaces.length).toBeGreaterThanOrEqual(2);
+
+		provider.close();
+	});
+});
+
+// ── script-only-package fixture ────────────────────────────────────
+
+describe("surface discovery integration — script-only fallback", () => {
+	it("script-only build package creates library surface via fallback", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "script-only-build";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "script-only-package",
+			rootPath: SCRIPT_ONLY_PACKAGE_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+
+		// Should detect exactly one script fallback surface
+		const scriptSurfaces = surfaces.filter((s) => s.sourceType === "package_json_scripts");
+		expect(scriptSurfaces).toHaveLength(1);
+
+		const libSurface = scriptSurfaces[0];
+		expect(libSurface.surfaceKind).toBe("library");
+		expect(libSurface.confidence).toBe(0.50);
+		expect(libSurface.runtimeKind).toBe("node");
+
+		// Metadata should indicate fallback reason
+		const meta = JSON.parse(libSurface.metadataJson!);
+		expect(meta.fallbackReason).toBe("script_only_package");
+
+		provider.close();
+	});
+
+	it("script-only service package creates backend_service surface via fallback", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "script-only-service";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "script-only-service",
+			rootPath: SCRIPT_ONLY_SERVICE_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+
+		// Should detect exactly one script fallback surface
+		const scriptSurfaces = surfaces.filter((s) => s.sourceType === "package_json_scripts");
+		expect(scriptSurfaces).toHaveLength(1);
+
+		const serviceSurface = scriptSurfaces[0];
+		expect(serviceSurface.surfaceKind).toBe("backend_service");
+		expect(serviceSurface.confidence).toBe(0.55);
+		expect(serviceSurface.runtimeKind).toBe("node");
+
+		provider.close();
+	});
+
+	it("script fallback surface has valid identity fields", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "script-only-identity";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "script-only-package",
+			rootPath: SCRIPT_ONLY_PACKAGE_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+		const scriptSurface = surfaces.find((s) => s.sourceType === "package_json_scripts");
+
+		expect(scriptSurface).toBeDefined();
+		// sourceType must be package_json_scripts
+		expect(scriptSurface!.sourceType).toBe("package_json_scripts");
+		// sourceSpecificId should be the module root
+		expect(scriptSurface!.sourceSpecificId).toBeDefined();
+		// stableSurfaceKey must be present and 32 chars
+		expect(scriptSurface!.stableSurfaceKey).toBeDefined();
+		expect(scriptSurface!.stableSurfaceKey).toHaveLength(32);
+
+		provider.close();
+	});
+
+	it("script fallback produces deterministic identity on re-index", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "script-only-deterministic";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "script-only-package",
+			rootPath: SCRIPT_ONLY_PACKAGE_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+
+		// First index
+		const result1 = await indexer.indexRepo(REPO_UID);
+		const surfaces1 = storage.queryProjectSurfaces(result1.snapshotUid);
+		const script1 = surfaces1.find((s) => s.sourceType === "package_json_scripts");
+
+		// Second index
+		const result2 = await indexer.indexRepo(REPO_UID);
+		const surfaces2 = storage.queryProjectSurfaces(result2.snapshotUid);
+		const script2 = surfaces2.find((s) => s.sourceType === "package_json_scripts");
+
+		// Both exist
+		expect(script1).toBeDefined();
+		expect(script2).toBeDefined();
+
+		// stableSurfaceKey must be identical across snapshots
+		expect(script2!.stableSurfaceKey).toBe(script1!.stableSurfaceKey);
+
+		provider.close();
+	});
+
+	it("script fallback surface has evidence items", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "script-only-evidence";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "script-only-package",
+			rootPath: SCRIPT_ONLY_PACKAGE_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+		const scriptSurface = surfaces.find((s) => s.sourceType === "package_json_scripts");
+		expect(scriptSurface).toBeDefined();
+
+		const allEvidence = storage.queryAllProjectSurfaceEvidence(result.snapshotUid);
+		const scriptEvidence = allEvidence.filter(
+			(e) => e.projectSurfaceUid === scriptSurface!.projectSurfaceUid,
+		);
+
+		// Should have evidence for each classified script
+		expect(scriptEvidence.length).toBeGreaterThanOrEqual(1);
+
+		// Evidence should have script_command kind
+		const scriptEv = scriptEvidence.find((e) => e.evidenceKind === "script_command");
+		expect(scriptEv).toBeDefined();
+		expect(scriptEv!.sourceType).toBe("package_json_scripts");
 
 		provider.close();
 	});

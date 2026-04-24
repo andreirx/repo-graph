@@ -524,33 +524,99 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   false positives, detector externalization, jdtls live-test gating, Node
   version pinning, node:sqlite evaluation).
 
+### Module discovery expansion (Layer 3 partial)
+- **Layer 3 A1: Kbuild detector** — obj-y, obj-m, xxx-objs patterns for Linux
+  kernel module boundaries. Pure detector, wired to indexer. Produces
+  `kbuild` module candidates with evidence.
+- **Layer 3 B1: directory detector** — heuristic module boundaries from
+  directory structure (src/, lib/, packages/ with files). Pure detector,
+  lower confidence than manifest-based. Fills gaps in repos without
+  workspace manifests.
+- **Module discovery diagnostics** — persisted via migration 017. Tracks
+  skipped patterns, parse failures, confidence adjustments. CLI surface
+  via `rgr modules diagnostics`.
+- **Module CLI provenance visibility** — `source_type` and evidence chain
+  exposed in `modules list` and `modules show` output.
+- Deferred to future slice: Layer 3 C1 graph clustering, `__init__.py`
+  evidence, GNU Makefile/CMake module discovery.
+
+### Module graph — dependency edges and violations
+- Cross-module IMPORTS edge derivation from file ownership.
+- `rmap modules deps` command with `--outbound` / `--inbound` filters.
+- `rmap modules violations` command for discovered-module boundary violations.
+- `rmap violations` unified output includes both declared and discovered
+  module violations in separate sections.
+- Module boundary declarations via `rmap modules boundary` (semantic alias
+  for `rmap declare boundary` with module-key target).
+- Weighted neighbor computation (`import_count`, `source_file_count`) for
+  `modules show` output.
+- Violation diagnostics (`imports_edges_total`, `imports_source_no_module`,
+  etc.) for degraded graph detection.
+- P2/P3/P4 bug closeout: rollup degradation handling, policy parse failure
+  recovery, deterministic ordering.
+
+### Runtime/build Phase 0 — identity infrastructure
+- Migration 018: `source_type`, `source_specific_id`, `stable_surface_key`
+  columns on `project_surfaces` table. FK-safe table rebuild.
+- `computeStableKey()` and `computeSourceSpecificId()` pure functions in
+  `src/core/runtime/surface-identity.ts`.
+- `DetectedSurface` now requires `sourceType` and source-specific identity
+  fields. Nullable only on legacy persisted `ProjectSurface` rows.
+- Fixture repair: existing detectors updated with explicit identity fields.
+
+### Runtime/build Phase 1A — container detectors
+- **Dockerfile detector** — `backend_service` or `cli` surface with
+  `container` runtime. Base image runtime in evidence payload as
+  `baseRuntimeKind`. CMD/ENTRYPOINT extraction.
+- **docker-compose detector** — per-service surfaces from YAML. Service
+  name as identity. Build context and image evidence.
+- Indexer wiring: `detectDockerfileSurfaces()` and `detectDockerComposeSurfaces()`
+  called during surface discovery pass.
+- Validated on test fixtures.
+
+### Runtime/build Phase 1B — script-only fallback
+- **Package.json script-only fallback** — packages with `scripts` but no
+  bin/main/exports/framework deps now produce a low-confidence surface.
+- Detection order preserved: bin → main/exports → framework deps → scripts fallback.
+- Fallback rules:
+  - `scripts.start`/`dev`/`serve`/`server` → `backend_service`, confidence 0.55
+  - Only build/test/lint scripts → `library`, confidence 0.50
+- Evidence: one item per relevant script with `script_command` kind.
+- Metadata includes `fallbackReason: "script_only_package"`.
+- Unit tests (7) and integration tests (5) with dedicated fixtures.
+
+### Rust CLI surfaces parity
+- `rmap surfaces list` — surface catalog with filters (`--kind`, `--runtime`,
+  `--source`, `--module`). Module enrichment via JOIN. Evidence count.
+  Deterministic ordering.
+- `rmap surfaces show` — surface detail with module ref, evidence items,
+  parsed metadata. Multi-strategy surface ref resolution (UID, UID prefix,
+  stable key, stable key prefix, display name). Ambiguity handling.
+- Repo-ref resolution: supports UID, name, or root_path.
+- 22 CLI regression tests covering filters, ambiguity, legacy NULL fields,
+  invalid metadata preservation.
+
 ## Next (in priority order)
 
-### 1. Module discovery expansion (Layer 3)
-Extend the shipped Layer 1 (declared) and Layer 2 (operational) with:
-- Layer 3: inferred modules (graph clustering, structural patterns)
-- Kbuild/obj-y parsing for Linux kernel module boundaries
-- `__init__.py` as weaker evidence (not declared-tier)
+### 1. Runtime/build v1 continuation
+Complete the runtime/build model with remaining detectors.
+
+**Next slice: Makefile/CMake target detection**
+- Detect build targets from Makefile and CMakeLists.txt.
+- Surface kind inference: `cli` for executable targets, `library` for lib targets.
+- Build system: `make` or `cmake`.
+- Evidence: target name, source files, dependencies.
+
+**Also deferred in this track:**
+- Infra roots (Terraform, Pulumi, Helm)
+- Workspace detector (separate module discovery track)
 
 **Why this is #1:**
-- Deepens the actual product model, not just refresh speed.
-- Improves how the system understands architecture.
-- Feeds module graph, violations, trust, and orientation work.
-- Layer 3 enables code-only repos (no manifests) to have module structure.
+- Runtime/build model is the active partially-complete product area.
+- Makefile/CMake detection extends surface coverage to C/C++ and polyglot repos.
+- Smaller and safer than adding infra-root detection.
 
-### 2. Module graph — dependency edges and violations
-User-facing implementation on top of discovered modules:
-- module dependency edges derived from discovered module ownership
-- cross-module violation checks
-- per-module rollups for dead code, boundaries, blast radius
-- `rgr arch violations <repo>` augmented with discovered-module policy
-
-**Why this is #2:**
-- Turns discovered modules into enforceable structure.
-- Direct user-facing value on top of module discovery.
-- Closer to the core product than faster refresh.
-
-### 3. Agentic quality-control surface
+### 2. Agentic quality-control surface (unchanged from prior roadmap)
 Turn existing metric storage and gate primitives into an operational
 agent-control loop. This is not a generic linter surface. It is the
 repo-graph version of maintainability control: deterministic measurements,
@@ -619,7 +685,7 @@ gates.
   contain legacy violations; preventing new damage is the first operational
   control.
 
-### 4. Long-lived analysis daemon + daemon-backed CLI
+### 3. Long-lived analysis daemon + daemon-backed CLI
 Two-part item: support module (warmed runtime) + feature (CLI client).
 
 Support: warmed runtime that eliminates repeated CLI bootstrap cost
@@ -637,7 +703,7 @@ rendering via stderr. Fallback to direct execution if daemon unavailable.
 - Only worth it once the module/update model is settled.
 - Otherwise it hardens an unstable execution boundary.
 
-### 5. Delta indexing support module (infrastructure)
+### 4. Delta indexing support module (infrastructure)
 **Architectural principle:** Git owns historical truth. Repo-graph owns
 structured current-state truth. Delta indexing is a recomputation
 strategy for current-state truth, not a substitute history system.
@@ -680,7 +746,7 @@ cost. But it is infrastructure optimization, not product capability.
 - compile_commands.json changes can invalidate per-TU resolution
 - macro-heavy code may require conservative widening
 
-### 6. Sharded indexing architecture
+### 5. Sharded indexing architecture
 The streaming pipeline handles Linux-scale repos in a single pass
 (77 min, exit 0). Sharding is the next scaling tier for:
 - reducing peak memory further (bounded by shard, not snapshot)
@@ -705,7 +771,7 @@ Same pattern as Clang tooling, LSIF pipelines, large code intelligence.
 - All shards in same logical snapshot
 - Module/subsystem aggregation happens last
 
-### 7. C/C++ semantic maturation
+### 6. C/C++ semantic maturation
 The syntax-only first slice + compile_commands.json reader + Linux
 system detector are shipped. Next maturation steps:
 - Header/source ownership: which .h belongs to which translation unit
@@ -718,7 +784,7 @@ Remaining system/framework detectors:
 - IOCTL/shared-memory boundary extraction
 - Driver registration patterns beyond platform_driver
 
-### 8. CLI progress rendering
+### 7. CLI progress rendering
 The indexer emits progress events via callback. The CLI layer should
 render them to stderr. stdout remains reserved for final `--json`
 output. Not implemented yet — indexing runs silently until completion.
@@ -728,7 +794,7 @@ Options:
 - `--progress=jsonl` for machine-readable progress stream
 - daemon progress streaming (once daemon exists)
 
-### 9. Dead-code confidence stratification
+### 8. Dead-code confidence stratification
 Stop presenting every zero-caller symbol as equally dead. Add evidence
 quality to dead-symbol reports.
 
@@ -739,7 +805,7 @@ Labels:
 - `imported_but_call_unresolved` — symbol is imported elsewhere but the
   call resolution did not connect
 
-### 10. CLI boundary expansion (remaining)
+### 9. CLI boundary expansion (remaining)
 Shell and Makefile consumer extraction shipped. Remaining adapters:
 - CI configs (`.github/workflows/*.yml`, `.gitlab-ci.yml`)
 - Dockerfiles (`ENTRYPOINT`, `CMD`) — deferred further
@@ -751,25 +817,25 @@ Also:
 - Barrel-cycle normalization: separate export-only/barrel cycles from
   logic cycles in cycle reporting
 
-### 11. Trust overlay on structural queries
+### 10. Trust overlay on structural queries
 Surface evidence quality on query output. Examples:
 - "0 callers, low confidence: module has 4042 unresolved CALLS"
 - "dead symbol candidate, low confidence: imported in 2 files but call
   target unresolved"
 Turns raw graph limitations into explicit epistemic status.
 
-### 12. Rust framework detectors
+### 11. Rust framework detectors
 Actix-web, Axum, Rocket, Warp route handlers. Same pattern as Express
 detection: post-classification pass, receiver-provenance gated. Also
 enables Rust HTTP boundary provider extraction for the boundary model.
 
-### 13. Java semantic enrichment operationalization
+### 12. Java semantic enrichment operationalization
 jdtls is operational but fragile. The remaining issues are not polish:
 - Cold-start/workspace reliability
 - Protocol/client completeness
 - Operational determinism on large repos
 
-### 14. State-boundary expansion (post-slice-1)
+### 13. State-boundary expansion (post-slice-1)
 Slice 1 shipped (see Shipped section above). Remaining work:
 
 **Language coverage (blocked on extractors):**

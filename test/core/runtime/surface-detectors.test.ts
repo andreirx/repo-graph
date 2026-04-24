@@ -142,6 +142,136 @@ describe("detectPackageJsonSurfaces", () => {
 		const surfaces = detectPackageJsonSurfaces("{broken", "package.json");
 		expect(surfaces).toHaveLength(0);
 	});
+
+	// ── Script-only fallback tests ─────────────────────────────────────
+
+	it("script-only build/test package creates one library surface", () => {
+		const content = JSON.stringify({
+			name: "build-tools",
+			version: "1.0.0",
+			scripts: {
+				build: "tsc",
+				test: "vitest",
+				lint: "eslint .",
+			},
+		});
+		const surfaces = detectPackageJsonSurfaces(content, "package.json");
+		expect(surfaces).toHaveLength(1);
+		const lib = surfaces[0];
+		expect(lib.surfaceKind).toBe("library");
+		expect(lib.confidence).toBe(0.50);
+		expect(lib.sourceType).toBe("package_json_scripts");
+		expect(lib.entrypointPath).toBeNull();
+		expect(lib.displayName).toBe("build-tools");
+		expect(lib.metadata).toBeDefined();
+		const meta = lib.metadata as Record<string, unknown>;
+		expect(meta.fallbackReason).toBe("script_only_package");
+	});
+
+	it("script-only start/dev package creates one backend_service surface", () => {
+		const content = JSON.stringify({
+			name: "local-server",
+			version: "1.0.0",
+			scripts: {
+				start: "node server.js",
+				dev: "nodemon server.js",
+			},
+		});
+		const surfaces = detectPackageJsonSurfaces(content, "package.json");
+		expect(surfaces).toHaveLength(1);
+		const svc = surfaces[0];
+		expect(svc.surfaceKind).toBe("backend_service");
+		expect(svc.confidence).toBe(0.55);
+		expect(svc.sourceType).toBe("package_json_scripts");
+		expect(svc.displayName).toBe("local-server");
+	});
+
+	it("package with bin does not get duplicate script fallback surface", () => {
+		// bin creates a CLI surface; script fallback should NOT run
+		const content = JSON.stringify({
+			name: "cli-with-scripts",
+			version: "1.0.0",
+			bin: "./dist/cli.js",
+			scripts: {
+				start: "node dist/cli.js",
+				build: "tsc",
+			},
+		});
+		const surfaces = detectPackageJsonSurfaces(content, "package.json");
+		// Only the bin-based CLI surface, no script fallback
+		expect(surfaces).toHaveLength(1);
+		expect(surfaces[0].surfaceKind).toBe("cli");
+		expect(surfaces[0].sourceType).toBe("package_json_bin");
+	});
+
+	it("package with main does not get script fallback", () => {
+		const content = JSON.stringify({
+			name: "lib-with-scripts",
+			version: "1.0.0",
+			main: "./dist/index.js",
+			scripts: {
+				build: "tsc",
+				test: "vitest",
+			},
+		});
+		const surfaces = detectPackageJsonSurfaces(content, "package.json");
+		expect(surfaces).toHaveLength(1);
+		expect(surfaces[0].surfaceKind).toBe("library");
+		expect(surfaces[0].sourceType).toBe("package_json_main");
+	});
+
+	it("package with framework deps does not get script fallback", () => {
+		const content = JSON.stringify({
+			name: "express-app",
+			version: "1.0.0",
+			dependencies: { express: "^4.0.0" },
+			scripts: {
+				start: "node server.js",
+			},
+		});
+		const surfaces = detectPackageJsonSurfaces(content, "package.json");
+		// Framework dep creates backend_service, no script fallback needed
+		expect(surfaces).toHaveLength(1);
+		expect(surfaces[0].surfaceKind).toBe("backend_service");
+		expect(surfaces[0].sourceType).toBe("framework_dependency");
+	});
+
+	it("service scripts take precedence over build scripts in fallback", () => {
+		const content = JSON.stringify({
+			name: "mixed-scripts",
+			version: "1.0.0",
+			scripts: {
+				start: "node server.js",
+				build: "tsc",
+				test: "vitest",
+			},
+		});
+		const surfaces = detectPackageJsonSurfaces(content, "package.json");
+		expect(surfaces).toHaveLength(1);
+		// start script → backend_service (0.55), not library (0.50)
+		expect(surfaces[0].surfaceKind).toBe("backend_service");
+		expect(surfaces[0].confidence).toBe(0.55);
+	});
+
+	it("script fallback includes evidence for each relevant script", () => {
+		const content = JSON.stringify({
+			name: "scripts-pkg",
+			version: "1.0.0",
+			scripts: {
+				build: "tsc",
+				test: "vitest",
+				format: "prettier --write", // not a classified script
+			},
+		});
+		const surfaces = detectPackageJsonSurfaces(content, "package.json");
+		expect(surfaces).toHaveLength(1);
+		// Evidence for build and test, but not format
+		expect(surfaces[0].evidence).toHaveLength(2);
+		const roles = surfaces[0].evidence.map(
+			(e) => (e.payload as Record<string, unknown>).scriptName
+		);
+		expect(roles.sort()).toEqual(["build", "test"]);
+	});
 });
 
 // ── Cargo.toml ─────────────────────────────────────────────────────

@@ -1,0 +1,890 @@
+here's a reddit post [How 40-year-old metrics can help us make agentic code more maintainable
+
+Discussion
+Still, the whole lexicon has the grainy authority of a Bigfoot photograph. For a field that claims to love precision, software engineering has a remarkable habit of naming its worst structural failures like a frightened village describing the woods.
+Agentic coding workflows are exposing a gap in how we talk about code quality.
+
+The term “Code smell” worked reasonably well as human shorthand because experienced developers could fill in ambiguity with context, memory, judgment, and most importantly, experience.
+
+Agents cannot.
+
+In agentic workflows, vague feedback like “this feels messy” gets compiled into more plausible-looking code, often with the same structural problems hidden underneath.
+
+If agents are writing a meaningful share of our code, then instinct and review alone are not enough. We need external, computable quality signals.
+
+I built a linter around this very philosophy. However, the bigger point is the workflow pattern, not the linter itself. There is nothing to be purchased, and there is no intent to promote or encourage the use of any tool.
+
+I am now simply urging others to consider exploring the topic so we can preserve code maintainability before it is too late.
+
+I wrote up the argument in the linked article below. I would love for others to give it a read, so the use of such approaches can be explored further.
+
+Since I cannot link my article, I will include the full write-up below.
+
+If you do not wish to read, STOP HERE.
+
+Agentic Smells: From Qualitative to Quantitative
+
+Introduction
+
+Every developer has had the same experience at least once. You pull down code someone else wrote and something is off. The tests pass, the function returns the right type, and the PR description is coherent.
+
+Yet, the code is shaped in a way no experienced developer would have shaped it, and still, you cannot quite say exactly what is wrong.
+
+Code Smells
+
+That feeling has a name.
+
+Our discipline calls it a code smell, a term coined by Kent Beck for his chapter in Fowler's Refactoring (1999). A smell, as Beck described it, is a characteristic of source code that hints at a deeper problem.
+
+The olfactory metaphor is honest. By its own choice of word, it admits that the thing being named resists precise description. Fowler catalogued twenty-two of them at the time, each named for the symptom rather than the structural cause.
+
+Still, the whole lexicon has the grainy authority of a Bigfoot photograph. For a field that claims to love precision, software engineering has a remarkable habit of naming its worst structural failures like a frightened village describing the woods: Code smell. God Class. Shotgun Surgery.
+
+No one really objects, because the language earns its melodrama. The experience is melodramatic. A drop in the gut. The stench of rot. The dawning realization that someone built this in an afternoon and you will spend the next two sprints proving, gently and with citations, that it cannot be allowed to remain on planet earth.
+
+For Those Who Cannot Smell
+
+The irony is that "code smell" was already a blurry term for humans. It worked only because experienced developers were supplying everything the phrase left unsaid: memory, repetition, scar tissue, taste. They could smell rot before they could describe it.
+
+An agent cannot.
+
+In an agentic workflow, ambiguity does not remain ambiguous. It gets compiled. A human says, "this feels messy" or "this function is doing too much," and the model returns something that is often not less messy, but merely more presentable: messy, but wearing glasses and a fake mustache.
+
+The Changing Landscape
+
+An agent can dump hundreds or thousands of lines of plausible-looking code into a diff before the human reviewer has finished their coffee. If careful review costs as much as writing the code in the first place, then the promised productivity gains collapse the moment the advice is followed seriously.
+
+The psychology is worse. Visible successes train trust. Invisible failures train trust even more effectively. What remains is often not review so much as ceremony.
+
+Ceremonial review works because humans are easily reassured by the appearance of rigor. A passing test suite (we did not read). A summary that sounds confident. A few hundred new lines of code. All whose mere existence now passes for evidence of progress.
+
+The whole process begins to become less like engineering and more like hiding a dog’s medication in a piece of cheese.
+
+From Qualitative to Quantitative
+
+The proposed fix is not a better synonym for messy. It is not a more elegant way to tell a model that a class feels bloated or a boundary feels wrong.
+
+That only widens the interpretation space and asks the same system that produced the ambiguity to resolve it in its own favor.
+
+What agents need is something harsher.
+
+They need a signal that is computable, externally enforced, and too specific to negotiate with.
+
+“This feels off” is conversation. “Cognitive Complexity 26, threshold 15” is arithmetic.
+
+Ask an agent to fix a "smell" and it will often produce a different smell. Ask it to bring Cognitive Complexity below a threshold and you get refactors that satisfy the metric, not a guess at what the user meant.
+
+Those metrics must exist outside the agent’s own control surface. A model grading itself in natural language is just trial by self-chatter and spent tokens. A metric computed by external tooling is a fixed referent the agent cannot sweet-talk, reinterpret, or quietly omit.
+
+Agreement is cheap. Arithmetic is not.
+
+The Research Was Already There
+
+None of this requires inventing a new science. The field has already spent decades reducing “this feels wrong” into concrete measurements:
+
+Cyclomatic Complexity gave us path count in 1976.
+Halstead counted operators and operands in 1977 to estimate information content and difficulty.
+NPath in 1988 caught combinatorial path explosion that cyclomatic complexity can underreport.
+The CK suite in 1994 translated class size, coupling, and inheritance structure into arithmetic.
+Distance from the Main Sequence pulled package-level architectural drift into a single scalar on a scale between the Zone of Pain and the Zone of Uselessnes.
+Hotspot analysis combined complexity with churn over time.
+Cognitive Complexity got us closer than anything else to formalizing the feeling of code that is hard to read, not just hard to execute.
+This work has been sitting in papers and textbooks for forty years: precise, computable, and mostly ignored until a problem arrived that finally made it necessary.
+
+The field spent decades building ways to measure code quality. Then it built systems capable of producing code at industrial scale. Then it connected the two with a markdown file.
+
+What Cannot Be Measured
+
+Not every smell survives this translation. Some still require human taste, judgment, or interpretation of intent.
+
+That is fine. The claim is not that every smell can be reduced to arithmetic.
+
+The claim is that the computable subset is large enough to enforce the constraints agents are least equipped to enforce on their own.
+
+Why Not Just Use SonarQube?
+
+Traditional analysis tools assume a human-operated workflow:
+
+slower startup
+heavier configuration
+language-specific engines
+reports shaped for dashboards
+This fits conventional pipelines. It fits badly inside an agent loop, where the useful tools must meet the minimum UX expectations of typical agentic tooling.
+
+Various primitive command-line tools already exist that fit this shape:
+
+git for provenance and history
+fd for file-system discovery
+ripgrep for token-level searching
+tree-sitter for language/SDK symbol parsing
+All of these have agent-friendly properties: fast, composable, token-friendly, and cheap enough to call repeatedly.
+
+The Tool
+
+All of this converges on a simple requirement: agents need a quality signal they cannot negotiate with.
+
+That is what I created slop for. slop was implemented as a code-quality linter for codebases where AI agents write most of the diffs.
+
+It does not invent new math. It revives old, battle-tested metrics and recalibrates them for a different pace of change, one where:
+
+files can jump hundreds of lines in a week,
+complexity can compound inside a single session, and
+the old assumption, “another human will review this carefully,”
+...no longer holds by default.
+
+A Worked Example
+
+I pointed this metric suite at its own source code with default thresholds. It failed immediately: ten violations, one advisory, exit code 1.
+
+i. The Linter Output
+
+complexity
+
+  cyclomatic
+
+    slop/engine.py:16 run_lint — CCX 17 exceeds 10
+    slop/rules/architecture.py:27 run_distance — CCX 14 exceeds 10
+    slop/cli.py:122 main — CCX 11 exceeds 10
+
+  cognitive
+
+    slop/engine.py:16 run_lint — CogC 26 exceeds 15
+    slop/rules/architecture.py:27 run_distance — CogC 20 exceeds 15
+    slop/cli.py:357 cmd_doctor — CogC 16 exceeds 15
+
+halstead
+
+  slop/engine.py:16 run_lint — Volume 1763 exceeds 1500
+  slop/engine.py:16 run_lint — Difficulty 30.9 exceeds 30
+
+npath
+
+  slop/cli.py:122 main — NPath 1024 exceeds 400
+  slop/engine.py:16 run_lint — NPath 450 exceeds 400
+ii. What This Actually Shows
+
+The interesting part was not that something failed. It was how the metrics agreed.
+
+run_lint() was flagged five different ways:
+
+cyclomatic complexity,
+cognitive complexity,
+Halstead volume,
+Halstead difficulty,
+and NPath.
+Different measurements, different formulas, same function.
+
+None of the refactors that followed were especially impressive. This is precisely the point. The problem was not that the code required unusual brilliance to fix. The problem was that it had been allowed to remain in a shape that experienced developers should distrust on sight.
+
+NPath 1024 provides a quintessential example. That is not an aesthetic complaint. It implies a branching structure so large that full path coverage would require an absurd testing burden.
+
+No serious team would choose that shape on purpose. The danger was not that the code was broken. The danger was that it already worked well enough to be left alone.
+
+iii. Before and After the Refactor
+
+Function	Metric	Before	After	Default threshold
+run_lint	CCX	17	9	10
+run_lint	CogC	26	13	15
+run_lint	Volume	1763	1034	1500
+run_lint	Difficulty	30.9	18.0	30
+run_lint	NPath	450	14	400
+run_distance	CCX	14	8	10
+run_distance	CogC	20	10	15
+main	CCX	11	4	10
+main	NPath	1024	8	400
+cmd_doctor	CogC	16	6	15
+Ten violations before. Zero after. All tests still green. But once again, this the point.
+
+The tests were never the issue. The code already worked.
+
+The issue was that the structure had drifted into shapes that had now become a seeding point for propogation of structurally irresposible code by future agents.
+
+Why This Matters More Than Ever
+
+None of the refactors above were especially novel. They were the sort of things an experienced reviewer would often flag immediately. The if-chain wanted to be a dispatch table. The orchestration function wanted to be three smaller functions. The complexity was not invisible. It was merely unmeasured long enough to feel normal.
+
+That is the real danger of capable agentic tooling.
+
+It does not eliminate structural drift. It lowers the friction required to produce it and wraps the result in enough surface coherence to be trusted.
+
+We then ask humans to supervise at a volume that makes meaningful review economically unstable. By the time the failure is obvious, it is usually compound, distributed, and difficult to attribute cleanly until a catastrophic failure occurs.
+
+Code smell was a useful human interface for judgment. Agents need something harsher. They need arithmetic.
+
+Closing
+
+The field already solved most of the hard part. The metrics exist. The papers exist. What changed is the environment.
+
+Code is now produced at a pace, and merged under a style of confidence, that the old human workarounds can no longer absorb.
+
+That is the case for reviving these measurements now: not as academic relics or dashboard furniture, but as control surfaces. As external constraints. As the difference between asking an agent to “clean this up” and forcing it to collide with something it cannot reinterpret.
+
+The metrics are old. The problem is not.
+
+So it's time we started asking ourselves:
+
+Did the model get worse, or did we stop asking it to be better?
+Academic References
+
+Topic	Source
+Code smells	Fowler, M. Refactoring: Improving the Design of Existing Code. Addison-Wesley, 1999.
+Cyclomatic Complexity	McCabe, T. J. “A Complexity Measure.” IEEE Transactions on Software Engineering, 1976.
+Halstead Metrics	Halstead, M. H. Elements of Software Science. Elsevier, 1977.
+NPath Complexity	Nejmeh, B. A. “NPATH: A Measure of Execution Path Complexity and Its Applications.” Communications of the ACM, 1988.
+CK Metric Suite	Chidamber, S. R., and Kemerer, C. F. “A Metrics Suite for Object Oriented Design.” IEEE Transactions on Software Engineering, 1994.
+Main Sequence / Package Metrics	Martin, R. C. “OO Design Quality Metrics: An Analysis of Dependencies.” 1994; see also Agile Software Development, Principles, Patterns, and Practices, 2002.
+Dependency Cycles / ADP lineage	Lakos, J. Large-Scale C++ Software Design. Addison-Wesley, 1996.
+Hotspots / Change Coupling	Tornhill, A. Your Code as a Crime Scene. Pragmatic Bookshelf, 2015.
+Cognitive Complexity	Campbell, G. A. “Cognitive Complexity.” SonarSource white paper, 2018.
+Automation and supervision failure	Bainbridge, L. “Ironies of Automation.” Automatica, 1983.] - is there anything useful in there for repo-graph?
+
+----
+
+Yes. Useful, but mostly as product validation and prioritization, not as a new idea.
+
+`repo-graph` already contains the core architecture the post argues for:
+
+- deterministic external analysis
+- stored measurements
+- agent-facing JSON surfaces
+- graph facts separated from unresolved observations
+- measurements separated from policies and assessments
+- CI/gate concepts
+- hotspot/churn/coverage direction
+- architectural cycle detection
+
+The useful parts for `repo-graph` are these.
+
+## 1. Turn complexity metrics into a first-class agent control surface
+
+Current indexed measurements include:
+
+- `cyclomatic_complexity`
+- `max_nesting_depth`
+- `parameter_count`
+- `line_coverage`
+- package version/name metadata
+
+Current gap:
+
+- no cognitive complexity
+- no NPath
+- no Halstead
+- no explicit threshold policy enforcement over these metrics as a normal pre-action gate
+
+The post’s strongest point is not “use metrics.” `repo-graph` already does that. The stronger point is:
+
+> agents need non-negotiable arithmetic constraints in their loop.
+
+For `repo-graph`, that maps directly to:
+
+```text
+rgr check
+rgr gate
+rgr orient
+rgr graph metrics
+rgr trend
+```
+
+The missing product move is making complexity violations appear as priority signals in `check`, `orient`, and `gate`, not just as a separate query.
+
+## 2. Current repo data already shows real targets
+
+Latest index:
+
+- files: 605
+- nodes: 8024
+- resolved edges: 8120
+- unresolved edges: 25320
+
+Top current TypeScript complexity findings:
+
+| Symbol | File | CC | Depth |
+|---|---:|---:|---:|
+| `RepoIndexer.runPostpasses` | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/src/adapters/indexer/repo-indexer.ts:1062` | 92 | 6 |
+| `validateRecord` | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/src/core/seams/detectors/loader.ts:236` | 49 | 3 |
+| `maskCommentsCStyle` | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/src/core/seams/comment-masker.ts:57` | 38 | 4 |
+| `computeSourceSpecificId` | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/src/core/runtime/surface-identity.ts:138` | 36 | 2 |
+| `extractHttpClientRequests` | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/src/adapters/extractors/typescript/http-client-extractor.ts:57` | 34 | 5 |
+
+Aggregate counts under `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/src`:
+
+- measured functions: 761
+- CC > 10: 117
+- CC > 20: 26
+- nesting depth > 4: 16
+- parameter count > 5: 15
+- function length > 100 lines: 53
+
+That is enough evidence to justify metric-based pre-merge pressure.
+
+## 3. Add cognitive complexity before Halstead
+
+Priority order for `repo-graph`:
+
+1. Cognitive complexity
+2. NPath
+3. Function length
+4. Existing cyclomatic complexity
+5. Existing nesting depth
+6. Existing parameter count
+7. Halstead later, if needed
+
+Reasoning:
+
+- Cyclomatic complexity catches branch count.
+- Cognitive complexity catches human/agent readability pressure better.
+- NPath catches combinatorial path explosion.
+- Halstead is computable but noisier and less directly actionable for refactoring.
+
+Halstead can become academic furniture if exposed too early. Cognitive and NPath produce better agent instructions.
+
+## 4. Make thresholds policy, not hardcoded linter constants
+
+This already fits `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/architecture/measurement-model.txt`.
+
+Correct layer split:
+
+```text
+Measurement:
+  RepoIndexer.runPostpasses cyclomatic_complexity = 92
+
+Policy:
+  max cyclomatic_complexity for production code = 15
+
+Assessment:
+  FAIL, severity high, target runPostpasses
+
+Waiver:
+  temporarily suppress gate failure, without erasing the measurement
+```
+
+That preserves repo-graph’s truth model.
+
+Do not bake thresholds into extractor logic. Extractors should measure. Gates should judge.
+
+## 5. Add “new damage” gates before absolute cleanup gates
+
+A direct threshold gate would currently fail hard because existing code has many violations.
+
+Better product shape:
+
+```text
+Mode A: report-only
+Mode B: no new violations
+Mode C: no worsened violations
+Mode D: strict threshold
+```
+
+This supports mature product work without forcing immediate large refactors.
+
+Example:
+
+```text
+Existing:
+  runPostpasses CC 92
+
+Allowed:
+  refactor to 70
+  leave unchanged with waiver
+
+Forbidden:
+  increase to 93
+  add a new CC 40 function
+```
+
+This is more useful for agentic workflows than a pure global threshold.
+
+## 6. Use metrics as `orient` and `check` signals
+
+The post’s “control surface” language maps strongly to `repo-graph`.
+
+Good `rgr orient`/`rgr check` output should include:
+
+```json
+{
+  "complexity_risks": [
+    {
+      "target": "RepoIndexer.runPostpasses",
+      "file": "src/adapters/indexer/repo-indexer.ts",
+      "line": 1062,
+      "metrics": {
+        "cyclomatic_complexity": 92,
+        "max_nesting_depth": 6
+      },
+      "policy_status": "fail",
+      "recommended_action": "avoid adding branches; extract policy-specific collaborators"
+    }
+  ]
+}
+```
+
+Important: recommendation text is secondary. The metric and target identity are primary.
+
+## 7. Combine complexity with churn and coverage
+
+The post’s hotspot section is especially relevant.
+
+A lone high-complexity function is a risk.
+
+A high-complexity function that changes often is a higher risk.
+
+A high-complexity function that changes often and has weak coverage is a gate candidate.
+
+Repo-graph already has the conceptual model:
+
+```text
+complexity measurement
++ churn measurement
++ coverage measurement
+= risk assessment
+```
+
+That should become a product-grade path.
+
+## 8. Use metrics to protect Clean Architecture boundaries
+
+Metrics should not replace architecture checks.
+
+For `repo-graph`, useful combined gates are:
+
+```text
+core/:
+  strict dependency rule
+  low unresolved tolerance
+  lower complexity threshold
+  no framework imports
+
+adapters/:
+  higher complexity tolerance
+  external dependency allowed
+  clear port implementation boundary
+
+cli/:
+  orchestration allowed
+  dispatch-table preferred over large branching
+  no business policy
+```
+
+This prevents metric gaming. A low-complexity adapter leaking into core is still an architectural violation.
+
+## 9. Current cycle findings matter more than most smell language
+
+Current module cycle output shows 6 cycles, including:
+
+- `classification <-> ports`
+- `runtime <-> modules`
+- `indexer <-> src`
+- `typescript <-> src`
+- `detectors <-> seams`
+
+Some may be artifacts of module discovery granularity, but cycles are exactly the kind of external arithmetic signal the post argues for. They should be surfaced as architecture-critical before generic smell language.
+
+## 10. Product implication
+
+The post validates this direction:
+
+> `repo-graph` should not become “a linter.” It should become the system of record that stores measurements, policies, assessments, waivers, evidence, and trend.
+
+That is stronger than a standalone metric linter.
+
+Concrete useful backlog from the post:
+
+1. Add cognitive complexity measurement.
+2. Add NPath measurement.
+3. Add function length as a stored measurement.
+4. Add policy declarations for thresholds.
+5. Add assessment generation from measurements + policies.
+6. Add “no new/worsened complexity violations” gate mode.
+7. Expose top complexity risks in `rgr check` and `rgr orient`.
+8. Combine complexity with churn and coverage in `rgr risk`.
+9. Keep Halstead deferred unless there is a specific consumer.
+10. Treat metric waivers as policy overlays, never as erased facts.
+
+Bottom line:
+
+The post is useful because it describes exactly the agent-facing control loop `repo-graph` is already architecturally positioned to own. The missing work is not philosophical. It is productizing the metrics already present into gates, trends, policies, and agent-orientation surfaces.
+
+----
+
+Updated:
+
+- `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/VISION.md`
+- `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/ROADMAP.md`
+
+Changes made:
+
+- Added **Agentic Quality Control** to the vision.
+- Defined metric-based constraints as an agent control surface.
+- Preserved the four-layer truth model:
+  - measurements
+  - policies
+  - assessments
+  - waivers
+- Added cognitive complexity, NPath, function length, no-new/worsened-quality gates.
+- Updated current product truth table.
+- Updated near-term agent roadmap.
+- Added roadmap priority item: **Agentic quality-control surface**.
+- Deferred Halstead metrics explicitly.
+- Corrected stale Vision wording: unresolved edges are now documented as persisted with category/classification/basis.
+
+Validation:
+
+- Ran `git diff --check` on both docs.
+- No whitespace or patch errors.
+
+Assumption documented by placement:
+
+- Inserted quality-control work as roadmap priority #3, after module discovery and module graph, before daemon work. Rationale: it directly constrains agent-authored diffs and uses existing measurement/gate architecture without requiring the daemon first.
+
+----
+
+do the new clis make sense for you as an agent? would they provide signal? do we have a clear path to get to this functionality?
+
+----
+
+Yes.
+
+They make sense as agent CLIs if they answer operational questions, not if they become metric dashboards.
+
+## Agent signal quality
+
+High signal:
+
+```text
+rgr orient
+```
+
+Useful before editing. It should answer:
+
+- what module/surface am I touching
+- what boundaries constrain it
+- what existing high-risk structures are nearby
+- what quality violations already exist
+- what not to worsen
+
+High signal:
+
+```text
+rgr check
+```
+
+Useful after editing, before handoff. It should answer:
+
+- did I introduce a new structural violation
+- did I worsen an existing metric
+- did I cross an architecture boundary
+- did I reduce trust or increase unresolved pressure
+- is the result comparable to baseline
+
+High signal:
+
+```text
+rgr gate
+```
+
+Useful for CI and hard enforcement. It should answer:
+
+- pass/fail/incomplete
+- computed verdict
+- effective verdict
+- waiver basis
+- policy basis
+- exact measured evidence
+
+Medium-high signal:
+
+```text
+rgr risk
+```
+
+Useful for prioritization. It should combine:
+
+```text
+complexity × churn × coverage gap × boundary violations × trust degradation
+```
+
+Low signal if isolated:
+
+```text
+rgr graph metrics
+```
+
+Useful as raw inspection, but not sufficient as an agent control surface. An agent needs ranking, deltas, policy verdicts, and next-action constraints.
+
+## What would provide real signal
+
+For an agent, this is useful:
+
+```json
+{
+  "target": "RepoIndexer.runPostpasses",
+  "file": "src/adapters/indexer/repo-indexer.ts",
+  "line": 1062,
+  "status": "existing_violation",
+  "metrics": {
+    "cyclomatic_complexity": 92,
+    "cognitive_complexity": 134,
+    "npath": 18432,
+    "function_length": 514
+  },
+  "policy": {
+    "max_cyclomatic_complexity": 15,
+    "mode": "no_new_or_worsened"
+  },
+  "computed_verdict": "FAIL",
+  "effective_verdict": "WAIVED",
+  "constraint": "do_not_add_branches_or_length_to_this_function"
+}
+```
+
+This is weak:
+
+```json
+{
+  "cyclomatic_complexity": 92
+}
+```
+
+Raw metrics alone require interpretation. The product value is the interpreted control surface.
+
+## Clear implementation path
+
+Yes. The path is clean because it fits existing architecture.
+
+### Current substrate already exists
+
+Already present:
+
+- `measurements` table
+- AST-derived metrics
+- gate model
+- waiver model
+- declarations
+- inferences
+- snapshot provenance
+- module graph direction
+- risk/hotspot direction
+- `rmap orient`
+- `rmap check`
+- `rgr graph metrics`
+
+Missing pieces are additive.
+
+## Recommended build sequence
+
+### Phase 1 — strengthen measurements
+
+Add:
+
+- `function_length`
+- `cognitive_complexity`
+- `npath_complexity`
+
+Under the hood:
+
+- Extractors compute deterministic AST measurements.
+- Measurements are stored as facts.
+- No policy decisions inside extractors.
+- Every metric source gets a version identifier.
+
+Maturity: `MATURE` target for TypeScript first, `PROTOTYPE` for other languages until independently validated.
+
+### Phase 2 — define quality policies
+
+Add declaration kinds or extend existing requirement obligations for:
+
+- max cyclomatic complexity
+- max cognitive complexity
+- max NPath
+- max function length
+- max nesting depth
+- max parameter count
+
+Under the hood:
+
+```text
+measurement fact + policy declaration = assessment
+```
+
+Measurements remain immutable facts. Policies are human-authored. Assessments are derived.
+
+### Phase 3 — add assessment generation
+
+Produce quality assessments with:
+
+- target stable key
+- measured value
+- threshold
+- operator
+- computed verdict
+- source metric version
+- snapshot UID
+- policy declaration UID
+
+This can be query-time first, persisted later if trend/performance requires it.
+
+### Phase 4 — add baseline comparison
+
+Needed for no-new/worsened mode.
+
+Compare current snapshot against baseline:
+
+```text
+same target identity
+same metric kind
+same metric source/version
+same policy
+```
+
+If not comparable:
+
+```text
+NOT_COMPARABLE
+```
+
+Do not fake trends.
+
+### Phase 5 — wire `check`
+
+`check` should become the agent’s pre-handoff command.
+
+Minimum useful output:
+
+- new violations
+- worsened violations
+- touched modules
+- touched boundaries
+- risk deltas
+- trust degradation
+- required waivers
+
+### Phase 6 — wire `orient`
+
+`orient` should show constraints before action.
+
+Minimum useful output:
+
+- module ownership
+- boundary rules
+- highest-risk local functions
+- open violations in focused area
+- existing waivers
+- “do not worsen” constraints
+
+### Phase 7 — wire `gate`
+
+`gate` enforces policy.
+
+Modes:
+
+```text
+report_only
+no_new_or_worsened
+strict
+advisory
+```
+
+Exit semantics must remain explicit:
+
+```text
+0 pass
+1 fail
+2 incomplete / not comparable / missing evidence
+```
+
+## Main architectural decision before implementation
+
+Assessment persistence.
+
+### Option A — query-time assessments first
+
+Pros:
+
+- simpler
+- avoids stale assessment rows
+- easier to evolve formulas
+- good for early maturity
+
+Cons:
+
+- repeated computation
+- harder historical audit
+- trend comparison needs recomputation
+
+### Option B — persisted assessments immediately
+
+Pros:
+
+- better audit trail
+- faster repeated queries
+- easier CI evidence preservation
+
+Cons:
+
+- schema heavier
+- invalidation rules required
+- formula/version migration required earlier
+
+Correct initial choice for product integrity: **query-time assessments first, persisted assessments after contracts stabilize**.
+
+## Risks
+
+### Metric gaming
+
+Agents may split functions mechanically to satisfy thresholds.
+
+Mitigation:
+
+- combine metrics with module coupling, churn, test coverage, and boundary rules
+- expose risk vector, not only individual thresholds
+
+### False precision
+
+Cognitive complexity and NPath are useful but still approximations.
+
+Mitigation:
+
+- label them as deterministic measurements, not absolute quality truth
+- keep policies explicit and waiverable
+
+### Baseline identity instability
+
+Function stable keys can shift under duplicate-symbol cases.
+
+Mitigation:
+
+- start with current stable keys
+- mark duplicate-sensitive comparisons as lower confidence or not comparable
+- improve semantic identity later if trend accuracy becomes blocked
+
+### Overloading `gate`
+
+Gate should enforce; it should not become an exploratory dashboard.
+
+Mitigation:
+
+- `orient`: before work
+- `check`: before handoff
+- `risk`: prioritization
+- `gate`: enforcement
+
+## Bottom line
+
+The CLIs make sense.
+
+They provide signal if they expose:
+
+```text
+raw measurement
++ policy
++ computed verdict
++ effective verdict
++ baseline delta
++ evidence
++ waiver basis
+```
+
+They do not provide enough signal if they only print metric tables.
+
+The path is clear and additive. No architecture inversion is required. The work fits the existing Clean Architecture split: extractors measure, declarations define policy, use cases assess, gates enforce, CLI presents.

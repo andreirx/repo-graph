@@ -198,6 +198,21 @@ export function detectPackageJsonSurfaces(
 		surfaces.push(frameworkSurface);
 	}
 
+	// 4. Script-only fallback — if no surfaces were produced from bin/main/framework,
+	//    check for operational scripts and create a low-confidence surface.
+	if (surfaces.length === 0 && Object.keys(scripts).length > 0) {
+		const scriptFallback = detectScriptOnlyFallback(
+			scripts,
+			pkgName,
+			dir,
+			manifestRelPath,
+			buildSystem,
+		);
+		if (scriptFallback) {
+			surfaces.push(scriptFallback);
+		}
+	}
+
 	return surfaces;
 }
 
@@ -499,6 +514,86 @@ function detectFrameworkFromDeps(
 	}
 
 	return null;
+}
+
+/**
+ * Script-only fallback — produces a low-confidence surface when a package.json
+ * has scripts but no bin, main/exports, or framework deps.
+ *
+ * Detection rules:
+ *   - If scripts.start, scripts.dev, scripts.serve, or scripts.server exists:
+ *     → backend_service surface, confidence 0.55
+ *   - Else if scripts.build, scripts.test, scripts.lint, or scripts.typecheck exists:
+ *     → library surface, confidence 0.50
+ *   - Else: null (no meaningful scripts)
+ *
+ * The low confidence (0.50-0.55) signals that the surface kind is inferred
+ * from scripts alone, not from explicit entrypoint declarations.
+ */
+function detectScriptOnlyFallback(
+	scripts: Record<string, string>,
+	pkgName: string | null,
+	dir: string,
+	manifestRelPath: string,
+	buildSystem: BuildSystem,
+): DetectedSurface | null {
+	// Classify scripts by role.
+	const serviceScripts = ["start", "dev", "serve", "server"];
+	const buildScripts = ["build", "test", "lint", "typecheck", "check", "compile"];
+
+	const hasServiceScript = serviceScripts.some(s => s in scripts);
+
+	// Determine which scripts are present.
+	const scriptRoles: Record<string, string> = {};
+	for (const name of serviceScripts) {
+		if (name in scripts) scriptRoles[name] = "service";
+	}
+	for (const name of buildScripts) {
+		if (name in scripts) scriptRoles[name] = "build";
+	}
+
+	// Build evidence for each relevant script.
+	const evidence: DetectedSurfaceEvidence[] = [];
+	for (const [scriptName, command] of Object.entries(scripts)) {
+		const role = scriptRoles[scriptName];
+		if (role) {
+			evidence.push({
+				sourceType: "package_json_scripts",
+				sourcePath: manifestRelPath,
+				evidenceKind: "script_command",
+				confidence: hasServiceScript ? 0.55 : 0.50,
+				payload: { scriptName, command, role },
+			});
+		}
+	}
+
+	if (evidence.length === 0) {
+		return null;
+	}
+
+	// Determine surface kind.
+	const surfaceKind: SurfaceKind = hasServiceScript ? "backend_service" : "library";
+	const confidence = hasServiceScript ? 0.55 : 0.50;
+
+	return {
+		surfaceKind,
+		displayName: pkgName,
+		rootPath: dir,
+		entrypointPath: null, // Script-only packages have no explicit entrypoint
+		buildSystem,
+		runtimeKind: "node",
+		confidence,
+		evidence,
+		metadata: {
+			fallbackReason: "script_only_package",
+			scripts: Object.fromEntries(
+				Object.entries(scripts).filter(([name]) => name in scriptRoles)
+			),
+			scriptRoles,
+		},
+		// Identity fields
+		sourceType: "package_json_scripts",
+	};
 }
 
 // ── Dockerfile detector ────────────────────────────────────────────
