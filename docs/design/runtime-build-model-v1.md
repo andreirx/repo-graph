@@ -15,9 +15,25 @@ script extraction.
   one surface per explicit target, identity via `makefilePath:targetName`.
 - Rust CLI parity: SHIPPED. `rmap surfaces list/show` with filters,
   module enrichment, evidence count, ambiguity handling.
-- **Next slice:** Workspace adapter or CMake File API design.
+- **v1 COMPLETE.** See `docs/validation/runtime-build-v1-closeout.md`.
+- **Deferred:** CMake File API (requires execution boundary design),
+  workspace membership (belongs in module discovery enrichment, not surfaces),
+  infra roots (separate deployment-surface slice).
 
-**Revision:** 12 (2026-04-24)
+**Revision:** 13 (2026-04-24)
+
+### Corrections in Rev 13
+
+1. **v1 closeout complete:** Runtime/build v1 is a coherent stopping point.
+   Closeout validation report at `docs/validation/runtime-build-v1-closeout.md`.
+
+2. **Workspace membership reclassified:** Workspace manifests (pnpm-workspace.yaml,
+   npm workspaces, lerna.json) belong in module discovery enrichment, not runtime/build
+   surfaces. Q3 answer revised to reflect this architectural decision.
+
+3. **Deferred items explicit:** CMake File API requires execution boundary design.
+   Infra roots (Terraform, Pulumi, Helm) are a separate deployment-surface slice.
+   Neither is v1 scope.
 
 ### Corrections in Rev 12
 
@@ -290,16 +306,18 @@ rgr surfaces evidence <repo> <surface>  — evidence items
 
 ## v1 Scope
 
-### In Scope
+### In Scope (SHIPPED)
 
 1. **Dockerfile detection** — `cli` or `backend_service` surface with `container` runtime
 2. **docker-compose.yaml detection** — multi-service orchestration, per-service surfaces
 3. **Makefile detection** — `make` build system, target extraction
 4. **Package.json scripts extraction** — named scripts as evidence, not just build-system inference
-5. **Workspace ownership** — pnpm-workspace.yaml, lerna.json, npm workspaces
 
 ### Explicitly Deferred
 
+- **Workspace membership** — pnpm-workspace.yaml, lerna.json, npm workspaces belong
+  in **module discovery enrichment**, not runtime/build surfaces. Workspace manifests
+  describe module topology, not runtime characteristics. See v1 closeout and Q3.
 - **CMakeLists.txt detection:** CMake is a language with functions, variables,
   generator expressions, imported targets, and toolchain context. Parsing it
   as declarative data produces false confidence. Known-good solution is the
@@ -744,64 +762,24 @@ Document these limitations explicitly:
 
 ### Workspace Detector
 
-**Architecture:** Split into adapter and core layers (same as docker-compose).
+> **DEFERRED (v1 closeout).** Workspace membership has been reclassified as
+> module discovery enrichment, not a runtime/build surface. The design below
+> was drafted before this reclassification and is preserved for reference only.
+> See `docs/validation/runtime-build-v1-closeout.md` and Q3 in the Appendix.
+>
+> **Correct architecture:** Workspace manifests should enrich **module candidate
+> evidence** (Layer 1 discovery), not produce or attach to surfaces. The workspace
+> root is metadata/context on module candidates, not a surface property.
 
-**Sources:**
-- `pnpm-workspace.yaml` — packages field
-- `package.json` — workspaces field (npm/yarn)
-- `lerna.json` — packages field
+~~**Architecture:** Split into adapter and core layers (same as docker-compose).~~
 
-**Adapter responsibilities:**
-1. Parse YAML/JSON manifest
-2. Extract glob patterns
-3. Expand globs against filesystem to resolve actual member paths
-4. Pass resolved members to core as typed DTO
+~~**Sources:**~~
+- ~~`pnpm-workspace.yaml` — packages field~~
+- ~~`package.json` — workspaces field (npm/yarn)~~
+- ~~`lerna.json` — packages field~~
 
-**Adapter output (DTO passed to core):**
-
-```typescript
-interface WorkspaceManifest {
-  manifestRelPath: string;
-  workspaceType: "pnpm" | "npm" | "yarn" | "lerna";
-  patterns: string[];            // Raw patterns from manifest: ["packages/*", "apps/**"]
-  resolvedMembers: string[];     // Adapter-resolved paths: ["packages/foo", "packages/bar", "apps/web"]
-}
-```
-
-**Core pure function signature:**
-
-```typescript
-function detectWorkspaceEvidence(
-  manifest: WorkspaceManifest,
-): WorkspaceEvidenceItem[]
-
-interface WorkspaceEvidenceItem {
-  memberRootPath: string;        // "packages/foo"
-  workspaceRoot: string;         // "."
-  workspaceType: string;         // "pnpm"
-  matchedPattern: string;        // "packages/*"
-}
-```
-
-**Note:** The core detector does NOT produce surfaces. It produces evidence
-items that are attached to existing surfaces during orchestration. The
-`memberRootPath` links to a module candidate's `canonicalRootPath`, and
-evidence is attached to that module's surface.
-
-**Evidence payload (on each member package's surface):**
-
-```json
-{
-  "workspaceRoot": ".",
-  "workspaceType": "pnpm",
-  "matchedPattern": "packages/*"
-}
-```
-
-**Why patterns are in the adapter output:** The adapter expands globs and
-determines which pattern matched each member. The core layer receives both
-the resolved paths AND the pattern that matched, so evidence can record
-provenance without the core needing filesystem access.
+This section is obsolete. Workspace detection belongs in the module discovery
+track (`src/core/modules/`), not runtime/build surfaces (`src/core/runtime/`).
 
 ---
 
@@ -1344,15 +1322,17 @@ rgr surfaces list <repo> --build make           # Filter by build system
 rgr surfaces list <repo> --kind backend_service # Filter by surface kind
 ```
 
-### Rust CLI Parity (Future)
+### Rust CLI Parity (SHIPPED)
 
 ```
-rmap surfaces list <db_path> <repo_uid>
-rmap surfaces show <db_path> <repo_uid> <surface_uid>
+rmap surfaces list <db_path> <repo_uid> [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>]
+rmap surfaces show <db_path> <repo_uid> <surface_ref>
 ```
 
-The Rust CLI does not exist for surfaces yet. This is out of scope for v1
-design. The TS CLI remains canonical for surface queries.
+Rust CLI surfaces commands are shipped and documented in `docs/milestones/rmap-structural-v1.md`.
+Features: filters (kind, runtime, source, module), module enrichment via JOIN, evidence count,
+multi-strategy surface ref resolution (UID, UID prefix, stable key, display name), ambiguity handling.
+22 CLI regression tests.
 
 ---
 
@@ -1366,9 +1346,12 @@ design. The TS CLI remains canonical for surface queries.
 | simple-dockerfile | 1 (backend_service/container) | Dockerfile FROM/CMD, baseRuntimeKind in payload |
 | compose-multiservice | 3+ (per docker-compose service) | docker-compose services |
 | c-project-make | 1 (library or cli/native_c_cpp) | Makefile .PHONY targets |
-| pnpm-monorepo | N (per workspace package) | pnpm-workspace.yaml + package.json |
+| makefile-basic | 3 (build, test, install) | Makefile explicit targets |
 | script-only-package | 1 (library, confidence 0.50) | package.json scripts only, no bin/main/exports |
 | bin-aliases | 2 (cli: foo, cli: bar) | two bin names pointing to same script |
+
+> **Note:** `pnpm-monorepo` removed. Workspace membership is module discovery
+> enrichment, not surface production. See v1 closeout.
 
 ### Fixture Creation Required
 
@@ -1379,8 +1362,8 @@ Create test fixtures in `test/fixtures/`:
 3. `dockerfile-plus-compose/` — Dockerfile + docker-compose.yaml at same root, Compose builds from local Dockerfile
 4. `c-project-make/` — C project with Makefile, .PHONY targets
 5. `bin-aliases/` — package.json with `bin: { "foo": "./cli.js", "bar": "./cli.js" }`
-6. `pnpm-monorepo/` — pnpm workspace with 3 packages
-7. `script-only-package/` — package.json with scripts.build and scripts.test, no bin/main/exports
+6. `script-only-package/` — package.json with scripts.build and scripts.test, no bin/main/exports
+7. `makefile-basic/` — Makefile with build/test/install targets (SHIPPED)
 
 ### Success Criteria
 
@@ -1581,14 +1564,18 @@ The surface links to an existing module. It does not create a module.
 
 ### Q3: Should workspace membership be a property of the surface or the module?
 
-**Current answer:** Workspace membership is surface evidence.
-A `package.json` surface in a monorepo gets evidence items indicating
-workspace membership. The module candidate itself is unaware of workspace
-structure.
+**Revised answer (v1 closeout):** Workspace membership belongs in module
+discovery enrichment, not runtime/build surfaces.
 
-**Rationale:** Workspace structure is an operational concern, not an
-identity concern. A module's identity (canonical_root_path, module_key)
-is stable regardless of workspace configuration.
+Workspace manifests (pnpm-workspace.yaml, npm workspaces, lerna.json) describe
+module topology, not runtime characteristics. The correct design:
+- Workspace manifests enrich **module candidate evidence** (Layer 1 discovery)
+- Package-local detectors produce **surfaces** (runtime/build)
+- Workspace root is metadata/context attached to module candidates
+
+This question was answered incorrectly in early design iterations. The v1
+closeout explicitly reclassifies workspace membership as module discovery
+work, not runtime/build surface work. See `docs/validation/runtime-build-v1-closeout.md`.
 
 ---
 
@@ -1653,14 +1640,17 @@ only. Intermediate stages are not modeled.
 
 ### TD-3: YAML Parser Dependency
 
-The docker-compose and pnpm-workspace detectors require a YAML parser at
-the adapter layer. This adds a runtime dependency:
+The docker-compose detector requires a YAML parser at the adapter layer.
+This adds a runtime dependency:
 - TS: `yaml` npm package (or built-in if using Bun)
 - Rust: `serde_yaml` crate
 
 This is intentional. Line-based YAML extraction is not product-grade.
 The dependency is isolated to the adapter layer; core detection functions
 receive typed DTOs and have no YAML dependency.
+
+> **Note:** pnpm-workspace.yaml parsing belongs in module discovery, not
+> runtime/build. See v1 closeout.
 
 ---
 

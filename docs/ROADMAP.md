@@ -608,26 +608,18 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - 22 CLI regression tests covering filters, ambiguity, legacy NULL fields,
   invalid metadata preservation.
 
+### Runtime/build v1 closeout
+- **Status:** COMPLETE. 196 tests passing.
+- **Closeout doc:** `docs/validation/runtime-build-v1-closeout.md`
+- **Deferred items (explicitly not v1):**
+  - CMake File API: requires execution boundary design (running `cmake -B`)
+  - Workspace membership: module discovery enrichment, not runtime surface
+  - Infra roots (Terraform, Pulumi, Helm): separate deployment-surface slice
+  - Makefile diagnostics persistence: tech debt for v2
+
 ## Next (in priority order)
 
-### 1. Runtime/build v1 continuation
-Complete the runtime/build model with remaining detectors.
-
-**Makefile v1 shipped.** See Phase 1C above.
-
-**Next options (choose one):**
-- **Workspace adapter** — pnpm-workspace.yaml, npm workspaces, lerna.json
-- **CMake File API design** — read generated metadata after `cmake -B build`
-
-**Explicitly deferred:**
-- Infra roots (Terraform, Pulumi, Helm)
-
-**Why Makefile shipped first:**
-- Makefile has line-based rules; CMake is a language with generator expressions.
-- Known-good CMake approach is File API, not regex parsing.
-- Makefile v1 delivered C/C++ polyglot coverage without false confidence.
-
-### 2. Agentic quality-control surface (unchanged from prior roadmap)
+### 1. Agentic quality-control surface
 Turn existing metric storage and gate primitives into an operational
 agent-control loop. This is not a generic linter surface. It is the
 repo-graph version of maintainability control: deterministic measurements,
@@ -687,7 +679,7 @@ gates.
 6. Surface top risks in `check` and `orient`.
 7. Combine complexity with churn/coverage in risk prioritization.
 
-**Why this is #3:**
+**Why this is #1:**
 - It directly constrains agent-authored diffs with arithmetic.
 - It uses repo-graph's existing four-layer truth model instead of inventing a
   separate linter architecture.
@@ -696,7 +688,7 @@ gates.
   contain legacy violations; preventing new damage is the first operational
   control.
 
-### 3. Long-lived analysis daemon + daemon-backed CLI
+### 2. Long-lived analysis daemon + daemon-backed CLI
 Two-part item: support module (warmed runtime) + feature (CLI client).
 
 Support: warmed runtime that eliminates repeated CLI bootstrap cost
@@ -710,11 +702,11 @@ Feature: CLI becomes a thin client (connect, send request, render
 response). Auto-start daemon on first command if absent. Progress
 rendering via stderr. Fallback to direct execution if daemon unavailable.
 
-**Why this is #4:**
+**Why this is #2:**
 - Only worth it once the module/update model is settled.
 - Otherwise it hardens an unstable execution boundary.
 
-### 4. Delta indexing support module (infrastructure)
+### 3. Delta indexing support module (infrastructure)
 **Architectural principle:** Git owns historical truth. Repo-graph owns
 structured current-state truth. Delta indexing is a recomputation
 strategy for current-state truth, not a substitute history system.
@@ -757,7 +749,7 @@ cost. But it is infrastructure optimization, not product capability.
 - compile_commands.json changes can invalidate per-TU resolution
 - macro-heavy code may require conservative widening
 
-### 5. Sharded indexing architecture
+### 4. Sharded indexing architecture
 The streaming pipeline handles Linux-scale repos in a single pass
 (77 min, exit 0). Sharding is the next scaling tier for:
 - reducing peak memory further (bounded by shard, not snapshot)
@@ -782,7 +774,7 @@ Same pattern as Clang tooling, LSIF pipelines, large code intelligence.
 - All shards in same logical snapshot
 - Module/subsystem aggregation happens last
 
-### 6. C/C++ semantic maturation
+### 5. C/C++ semantic maturation
 The syntax-only first slice + compile_commands.json reader + Linux
 system detector are shipped. Next maturation steps:
 - Header/source ownership: which .h belongs to which translation unit
@@ -795,7 +787,7 @@ Remaining system/framework detectors:
 - IOCTL/shared-memory boundary extraction
 - Driver registration patterns beyond platform_driver
 
-### 7. CLI progress rendering
+### 6. CLI progress rendering
 The indexer emits progress events via callback. The CLI layer should
 render them to stderr. stdout remains reserved for final `--json`
 output. Not implemented yet — indexing runs silently until completion.
@@ -805,7 +797,7 @@ Options:
 - `--progress=jsonl` for machine-readable progress stream
 - daemon progress streaming (once daemon exists)
 
-### 8. Dead-code confidence stratification
+### 7. Dead-code confidence stratification
 Stop presenting every zero-caller symbol as equally dead. Add evidence
 quality to dead-symbol reports.
 
@@ -816,7 +808,7 @@ Labels:
 - `imported_but_call_unresolved` — symbol is imported elsewhere but the
   call resolution did not connect
 
-### 9. CLI boundary expansion (remaining)
+### 8. CLI boundary expansion (remaining)
 Shell and Makefile consumer extraction shipped. Remaining adapters:
 - CI configs (`.github/workflows/*.yml`, `.gitlab-ci.yml`)
 - Dockerfiles (`ENTRYPOINT`, `CMD`) — deferred further
@@ -828,25 +820,25 @@ Also:
 - Barrel-cycle normalization: separate export-only/barrel cycles from
   logic cycles in cycle reporting
 
-### 10. Trust overlay on structural queries
+### 9. Trust overlay on structural queries
 Surface evidence quality on query output. Examples:
 - "0 callers, low confidence: module has 4042 unresolved CALLS"
 - "dead symbol candidate, low confidence: imported in 2 files but call
   target unresolved"
 Turns raw graph limitations into explicit epistemic status.
 
-### 11. Rust framework detectors
+### 10. Rust framework detectors
 Actix-web, Axum, Rocket, Warp route handlers. Same pattern as Express
 detection: post-classification pass, receiver-provenance gated. Also
 enables Rust HTTP boundary provider extraction for the boundary model.
 
-### 12. Java semantic enrichment operationalization
+### 11. Java semantic enrichment operationalization
 jdtls is operational but fragile. The remaining issues are not polish:
 - Cold-start/workspace reliability
 - Protocol/client completeness
 - Operational determinism on large repos
 
-### 13. State-boundary expansion (post-slice-1)
+### 12. State-boundary expansion (post-slice-1)
 Slice 1 shipped (see Shipped section above). Remaining work:
 
 **Language coverage (blocked on extractors):**
