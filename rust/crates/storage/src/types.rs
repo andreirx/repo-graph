@@ -832,6 +832,134 @@ pub struct MeasurementInput {
 	pub created_at: String,
 }
 
+// ── Project Surfaces ───────────────────────────────────────────────
+
+/// Discovered project surface. Mirrors the `project_surfaces` table
+/// from migration 013-project-surfaces + 018-surface-identity.
+///
+/// Surfaces describe how modules are operationalized: CLI tools,
+/// libraries, backend services, etc. One module can have multiple
+/// surfaces (e.g., a library surface plus a CLI surface).
+///
+/// SQL table (post-migration 018):
+/// ```sql
+/// CREATE TABLE project_surfaces (
+///   project_surface_uid    TEXT PRIMARY KEY,
+///   snapshot_uid           TEXT NOT NULL,
+///   repo_uid               TEXT NOT NULL,
+///   module_candidate_uid   TEXT NOT NULL,
+///   surface_kind           TEXT NOT NULL,
+///   display_name           TEXT,
+///   root_path              TEXT NOT NULL,
+///   entrypoint_path        TEXT,
+///   build_system           TEXT NOT NULL,
+///   runtime_kind           TEXT NOT NULL,
+///   confidence             REAL NOT NULL,
+///   metadata_json          TEXT,
+///   source_type            TEXT,           -- migration 018
+///   source_specific_id     TEXT,           -- migration 018
+///   stable_surface_key     TEXT,           -- migration 018
+///   UNIQUE (snapshot_uid, stable_surface_key)
+/// );
+/// ```
+///
+/// This is a read-only DTO for Rust. The TS indexer is the producer;
+/// Rust `rmap` commands are consumers. The `stable_surface_key` is
+/// the snapshot-independent identity (nullable for legacy rows).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSurface {
+	pub project_surface_uid: String,
+	pub snapshot_uid: String,
+	pub repo_uid: String,
+	pub module_candidate_uid: String,
+	pub surface_kind: String,
+	pub display_name: Option<String>,
+	pub root_path: String,
+	pub entrypoint_path: Option<String>,
+	pub build_system: String,
+	pub runtime_kind: String,
+	pub confidence: f64,
+	pub metadata_json: Option<String>,
+	// Identity columns (migration 018) — nullable for legacy rows
+	pub source_type: Option<String>,
+	pub source_specific_id: Option<String>,
+	pub stable_surface_key: Option<String>,
+}
+
+impl ProjectSurface {
+	/// Construct a `ProjectSurface` from a rusqlite row.
+	///
+	/// Looks up columns by SQL column name (snake_case).
+	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+		Ok(Self {
+			project_surface_uid: row.get("project_surface_uid")?,
+			snapshot_uid: row.get("snapshot_uid")?,
+			repo_uid: row.get("repo_uid")?,
+			module_candidate_uid: row.get("module_candidate_uid")?,
+			surface_kind: row.get("surface_kind")?,
+			display_name: row.get("display_name")?,
+			root_path: row.get("root_path")?,
+			entrypoint_path: row.get("entrypoint_path")?,
+			build_system: row.get("build_system")?,
+			runtime_kind: row.get("runtime_kind")?,
+			confidence: row.get("confidence")?,
+			metadata_json: row.get("metadata_json")?,
+			source_type: row.get("source_type")?,
+			source_specific_id: row.get("source_specific_id")?,
+			stable_surface_key: row.get("stable_surface_key")?,
+		})
+	}
+}
+
+/// Evidence item for a project surface. Mirrors the
+/// `project_surface_evidence` table from migration 013.
+///
+/// SQL table:
+/// ```sql
+/// CREATE TABLE project_surface_evidence (
+///   project_surface_evidence_uid  TEXT PRIMARY KEY,
+///   project_surface_uid           TEXT NOT NULL,
+///   snapshot_uid                  TEXT NOT NULL,
+///   repo_uid                      TEXT NOT NULL,
+///   source_type                   TEXT NOT NULL,
+///   source_path                   TEXT NOT NULL,
+///   evidence_kind                 TEXT NOT NULL,
+///   confidence                    REAL NOT NULL,
+///   payload_json                  TEXT
+/// );
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSurfaceEvidence {
+	pub project_surface_evidence_uid: String,
+	pub project_surface_uid: String,
+	pub snapshot_uid: String,
+	pub repo_uid: String,
+	pub source_type: String,
+	pub source_path: String,
+	pub evidence_kind: String,
+	pub confidence: f64,
+	pub payload_json: Option<String>,
+}
+
+impl ProjectSurfaceEvidence {
+	/// Construct a `ProjectSurfaceEvidence` from a rusqlite row.
+	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+		Ok(Self {
+			project_surface_evidence_uid: row.get("project_surface_evidence_uid")?,
+			project_surface_uid: row.get("project_surface_uid")?,
+			snapshot_uid: row.get("snapshot_uid")?,
+			repo_uid: row.get("repo_uid")?,
+			source_type: row.get("source_type")?,
+			source_path: row.get("source_path")?,
+			evidence_kind: row.get("evidence_kind")?,
+			confidence: row.get("confidence")?,
+			payload_json: row.get("payload_json")?,
+		})
+	}
+}
+
 // ── Tests ──────────────────────────────────────────────────────────
 //
 // R2-B unit tests cover the pure-logic helper

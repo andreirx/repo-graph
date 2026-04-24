@@ -17,7 +17,7 @@
 //!
 //! ── Locked slice contract ─────────────────────────────────────
 //!
-//! Migration boundary (R2-C scope): all 16 TypeScript migrations
+//! Migration boundary (R2-C scope): all 18 TypeScript migrations
 //! (`001-initial.ts` through `016-fs-mutations.ts`) are hand-ported
 //! to Rust as the schema boundary. The Rust crate produces a
 //! fully-migrated database on `open()`, regardless of which

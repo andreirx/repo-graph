@@ -212,10 +212,12 @@ rmap modules files <db_path> <repo_uid> <module>  # Files owned by a module (sor
 rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]  # Cross-module dependency edges
 rmap modules violations <db_path> <repo_uid>  # Discovered-module boundary violations
 rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]  # Declare discovered-module boundary
+rmap surfaces list <db_path> <repo_uid> [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>]  # Surface catalog
+rmap surfaces show <db_path> <repo_uid> <surface_ref>  # Surface detail with evidence
 ```
 
 Read-side commands (callers, callees, path, imports, violations, dead,
-cycles, stats, modules list, modules files, modules deps, modules violations) emit a TS-compatible QueryResult JSON envelope:
+cycles, stats, modules list, modules files, modules deps, modules violations, surfaces list) emit a TS-compatible QueryResult JSON envelope:
 
 ```json
 {

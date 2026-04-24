@@ -104,6 +104,14 @@ pub enum StorageError {
 	#[error("storage method not yet implemented: {0}")]
 	NotImplemented(String),
 
+	/// A migration failed with a migration-specific error that is
+	/// not a raw SQLite error. Used for migration-level invariant
+	/// violations like FK check failures after table rebuild.
+	///
+	/// Added for migration 018 (surface identity table rebuild).
+	#[error("migration error: {0}")]
+	Migration(String),
+
 	/// `insert_nodes` detected two or more nodes in the input
 	/// batch that share the same `stable_key`. This is an
 	/// identity-model defect — either an extractor bug

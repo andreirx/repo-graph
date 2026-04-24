@@ -127,6 +127,31 @@ impl StorageConnection {
 			None => Ok(None),
 		}
 	}
+
+	/// Resolve a module by `module_candidate_uid`.
+	///
+	/// Returns `None` if no module with that UID exists in the database.
+	/// Used by surfaces show to look up the owning module when we have
+	/// the surface's `module_candidate_uid` FK reference.
+	pub fn get_module_by_uid(
+		&self,
+		module_candidate_uid: &str,
+	) -> Result<Option<ModuleCandidate>, StorageError> {
+		let conn = self.connection();
+		let mut stmt = conn.prepare(
+			"SELECT module_candidate_uid, snapshot_uid, repo_uid, module_key,
+			        module_kind, canonical_root_path, confidence, display_name,
+			        metadata_json
+			 FROM module_candidates
+			 WHERE module_candidate_uid = ?",
+		)?;
+
+		let mut rows = stmt.query([module_candidate_uid])?;
+		match rows.next()? {
+			Some(row) => Ok(Some(ModuleCandidate::from_row(row)?)),
+			None => Ok(None),
+		}
+	}
 }
 
 #[cfg(test)]
@@ -450,5 +475,68 @@ mod tests {
 			.get_module_candidates_for_snapshot(&snap2.snapshot_uid)
 			.expect("query");
 		assert!(result2.is_empty());
+	}
+
+	#[test]
+	fn get_module_by_uid_returns_none_for_missing() {
+		let conn = fresh_storage();
+		let (_repo_uid, _snapshot_uid) = setup_test_snapshot(&conn);
+
+		let result = conn
+			.get_module_by_uid("nonexistent-uid")
+			.expect("query");
+		assert!(result.is_none());
+	}
+
+	#[test]
+	fn get_module_by_uid_returns_exact_match() {
+		let conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		insert_module_candidate(
+			&conn,
+			"mc-core-unique-uid",
+			&snapshot_uid,
+			&repo_uid,
+			"npm:@test/core",
+			"packages/core",
+			"npm_package",
+			Some("@test/core"),
+		);
+
+		let result = conn
+			.get_module_by_uid("mc-core-unique-uid")
+			.expect("query");
+
+		assert!(result.is_some());
+		let module = result.unwrap();
+		assert_eq!(module.module_candidate_uid, "mc-core-unique-uid");
+		assert_eq!(module.module_key, "npm:@test/core");
+		assert_eq!(module.canonical_root_path, "packages/core");
+	}
+
+	#[test]
+	fn get_module_by_uid_does_not_require_snapshot_uid() {
+		// P2-2 fix: surfaces show passes module_candidate_uid to lookup.
+		// The method should not require snapshot_uid since UIDs are globally unique.
+		let conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		insert_module_candidate(
+			&conn,
+			"mc-abc123",
+			&snapshot_uid,
+			&repo_uid,
+			"npm:@test/lib",
+			"packages/lib",
+			"npm_package",
+			None,
+		);
+
+		// Note: get_module_by_uid does NOT take snapshot_uid parameter.
+		// This is correct because module_candidate_uid is a primary key.
+		let result = conn.get_module_by_uid("mc-abc123").expect("query");
+		assert!(result.is_some());
+		assert_eq!(result.unwrap().module_candidate_uid, "mc-abc123");
 	}
 }

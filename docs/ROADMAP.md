@@ -21,6 +21,12 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   false dead-code reports on glamCRM. Also fixes Lambda entrypoint suppression in `findDeadNodes`.
 - **Imported free-function call resolution:** TS/JS import-binding-assisted call
   resolution. repo-graph call_resolution_rate improved from ~15% to 33%.
+- **Agentic quality-control substrate:** measurement storage, AST-derived
+  cyclomatic complexity, nesting depth, parameter count, coverage, churn,
+  hotspots, risk, and gate threshold methods exist. Missing product layer:
+  cognitive complexity, NPath, function length as stored measurement,
+  policy-backed quality assessments, no-new/worsened-quality gate mode,
+  and first-class exposure in `orient`/`check`.
 - **Streaming/batched indexing pipeline:** Linux kernel indexes successfully.
   - Resolver index built from row-at-a-time DB iterator (no bulk `.all()`).
   - Staged edges resolved in cursor-based batches (10K default).
@@ -544,7 +550,76 @@ User-facing implementation on top of discovered modules:
 - Direct user-facing value on top of module discovery.
 - Closer to the core product than faster refresh.
 
-### 3. Long-lived analysis daemon + daemon-backed CLI
+### 3. Agentic quality-control surface
+Turn existing metric storage and gate primitives into an operational
+agent-control loop. This is not a generic linter surface. It is the
+repo-graph version of maintainability control: deterministic measurements,
+declarative policies, derived assessments, explicit waivers, and trend-aware
+gates.
+
+**Support module: metric expansion**
+- Cognitive complexity for TypeScript/JavaScript first, using a documented
+  tree-sitter counting rule set. This complements cyclomatic complexity by
+  measuring readability pressure, nesting penalties, and control-flow breaks.
+- NPath complexity for TypeScript/JavaScript first, to catch combinatorial
+  execution-path explosion that cyclomatic complexity can underreport.
+- Function length as a stored measurement (`function_length`), derived from
+  node line ranges, not from ad hoc query code.
+- Measurement version/source identifiers for every new metric so deltas can
+  reject non-comparable snapshots.
+
+**Support module: policy evaluation**
+- Declare quality policies over measurements without hardcoding thresholds
+  into extractors.
+- Supported initial policy kinds:
+  - max cyclomatic complexity
+  - max cognitive complexity
+  - max NPath
+  - max function length
+  - max nesting depth
+  - max parameter count
+- Policies produce assessments. They do not mutate measurements.
+- Waivers suppress effective gate failure only. They do not erase the computed
+  violation.
+
+**Feature: no-new/worsened-quality gate**
+- Baseline-aware mode that fails only when a change introduces a new violation
+  or worsens an existing violation.
+- Strict threshold mode remains available for repositories ready to enforce
+  absolute limits.
+- Report-only mode remains available for calibration and adoption.
+- Comparability rules are mandatory: if metric source/version differs between
+  compared states, return NOT_COMPARABLE rather than fake a trend.
+
+**Feature: agent-facing surfaces**
+- `rgr check` should include top complexity/risk deltas before an agent hands
+  off a change.
+- `rgr orient` should include current quality-risk hotspots for the focused
+  module/symbol.
+- `rgr risk` should combine complexity + churn + coverage gap + boundary
+  violations into prioritized risk assessments.
+- JSON output must expose raw measurements, applied policy, computed verdict,
+  effective verdict, and waiver basis separately.
+
+**Adoption order**
+1. Store `function_length`.
+2. Add cognitive complexity.
+3. Add NPath.
+4. Add quality-policy declarations and assessment helpers.
+5. Add no-new/worsened-quality gate mode.
+6. Surface top risks in `check` and `orient`.
+7. Combine complexity with churn/coverage in risk prioritization.
+
+**Why this is #3:**
+- It directly constrains agent-authored diffs with arithmetic.
+- It uses repo-graph's existing four-layer truth model instead of inventing a
+  separate linter architecture.
+- It prevents structural drift while module/boundary/runtime work continues.
+- It is safer than a global cleanup gate because existing repositories often
+  contain legacy violations; preventing new damage is the first operational
+  control.
+
+### 4. Long-lived analysis daemon + daemon-backed CLI
 Two-part item: support module (warmed runtime) + feature (CLI client).
 
 Support: warmed runtime that eliminates repeated CLI bootstrap cost
@@ -558,11 +633,11 @@ Feature: CLI becomes a thin client (connect, send request, render
 response). Auto-start daemon on first command if absent. Progress
 rendering via stderr. Fallback to direct execution if daemon unavailable.
 
-**Why this is #3:**
+**Why this is #4:**
 - Only worth it once the module/update model is settled.
 - Otherwise it hardens an unstable execution boundary.
 
-### 4. Delta indexing support module (infrastructure)
+### 5. Delta indexing support module (infrastructure)
 **Architectural principle:** Git owns historical truth. Repo-graph owns
 structured current-state truth. Delta indexing is a recomputation
 strategy for current-state truth, not a substitute history system.
@@ -605,7 +680,7 @@ cost. But it is infrastructure optimization, not product capability.
 - compile_commands.json changes can invalidate per-TU resolution
 - macro-heavy code may require conservative widening
 
-### 5. Sharded indexing architecture
+### 6. Sharded indexing architecture
 The streaming pipeline handles Linux-scale repos in a single pass
 (77 min, exit 0). Sharding is the next scaling tier for:
 - reducing peak memory further (bounded by shard, not snapshot)
@@ -630,7 +705,7 @@ Same pattern as Clang tooling, LSIF pipelines, large code intelligence.
 - All shards in same logical snapshot
 - Module/subsystem aggregation happens last
 
-### 6. C/C++ semantic maturation
+### 7. C/C++ semantic maturation
 The syntax-only first slice + compile_commands.json reader + Linux
 system detector are shipped. Next maturation steps:
 - Header/source ownership: which .h belongs to which translation unit
@@ -643,7 +718,7 @@ Remaining system/framework detectors:
 - IOCTL/shared-memory boundary extraction
 - Driver registration patterns beyond platform_driver
 
-### 7. CLI progress rendering
+### 8. CLI progress rendering
 The indexer emits progress events via callback. The CLI layer should
 render them to stderr. stdout remains reserved for final `--json`
 output. Not implemented yet — indexing runs silently until completion.
@@ -653,7 +728,7 @@ Options:
 - `--progress=jsonl` for machine-readable progress stream
 - daemon progress streaming (once daemon exists)
 
-### 8. Dead-code confidence stratification
+### 9. Dead-code confidence stratification
 Stop presenting every zero-caller symbol as equally dead. Add evidence
 quality to dead-symbol reports.
 
@@ -664,7 +739,7 @@ Labels:
 - `imported_but_call_unresolved` — symbol is imported elsewhere but the
   call resolution did not connect
 
-### 9. CLI boundary expansion (remaining)
+### 10. CLI boundary expansion (remaining)
 Shell and Makefile consumer extraction shipped. Remaining adapters:
 - CI configs (`.github/workflows/*.yml`, `.gitlab-ci.yml`)
 - Dockerfiles (`ENTRYPOINT`, `CMD`) — deferred further
@@ -676,25 +751,25 @@ Also:
 - Barrel-cycle normalization: separate export-only/barrel cycles from
   logic cycles in cycle reporting
 
-### 10. Trust overlay on structural queries
+### 11. Trust overlay on structural queries
 Surface evidence quality on query output. Examples:
 - "0 callers, low confidence: module has 4042 unresolved CALLS"
 - "dead symbol candidate, low confidence: imported in 2 files but call
   target unresolved"
 Turns raw graph limitations into explicit epistemic status.
 
-### 11. Rust framework detectors
+### 12. Rust framework detectors
 Actix-web, Axum, Rocket, Warp route handlers. Same pattern as Express
 detection: post-classification pass, receiver-provenance gated. Also
 enables Rust HTTP boundary provider extraction for the boundary model.
 
-### 12. Java semantic enrichment operationalization
+### 13. Java semantic enrichment operationalization
 jdtls is operational but fragile. The remaining issues are not polish:
 - Cold-start/workspace reliability
 - Protocol/client completeness
 - Operational determinism on large repos
 
-### 13. State-boundary expansion (post-slice-1)
+### 14. State-boundary expansion (post-slice-1)
 Slice 1 shipped (see Shipped section above). Remaining work:
 
 **Language coverage (blocked on extractors):**
@@ -717,6 +792,12 @@ See `docs/milestones/rmap-state-boundaries-v1.md` §Deferred for the full
 SB-next-* inventory.
 
 ## Deferred
+
+### Halstead metrics
+Computable and historically established, but lower priority than cognitive
+complexity and NPath for the current agent-control loop. Halstead can be added
+later if a concrete consumer needs volume/difficulty vocabulary. Until then,
+avoid expanding the metric set just because the formula is available.
 
 ### Entrypoint declarations (operational)
 `rgr declare entrypoint` on the 6 smoke repos would lift dead-code

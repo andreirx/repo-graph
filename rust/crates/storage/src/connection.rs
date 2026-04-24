@@ -36,7 +36,7 @@
 //!
 //! 1. `open(path)` or `open_in_memory()` → opens the SQLite
 //!    connection, applies WAL + foreign_keys pragmas via the
-//!    migration runner, applies all 16 migrations. Returns
+//!    migration runner, applies all 18 migrations. Returns
 //!    `Ok(StorageConnection)` on success.
 //!
 //! 2. The migration runner is called via
@@ -79,7 +79,7 @@ use crate::migrations::run_migrations;
 /// Owned, fully-initialized connection to a storage database.
 ///
 /// Construction via `open(path)` or `open_in_memory()` opens the
-/// underlying SQLite connection AND runs all 16 migrations
+/// underlying SQLite connection AND runs all 18 migrations
 /// before returning. A successfully-constructed
 /// `StorageConnection` is guaranteed to be backed by a database
 /// at the latest schema version. There is no uninitialized
@@ -274,7 +274,7 @@ mod tests {
 		let storage = StorageConnection::open_in_memory()
 			.expect("open_in_memory must succeed");
 
-		// Verify all 16 migrations have been applied by checking
+		// Verify all 18 migrations have been applied by checking
 		// the schema_migrations table count.
 		let count: i64 = storage
 			.connection()
@@ -283,8 +283,8 @@ mod tests {
 			})
 			.expect("query schema_migrations");
 		assert_eq!(
-			count, 16,
-			"open_in_memory must run all 16 migrations before returning"
+			count, 18,
+			"open_in_memory must run all 18 migrations before returning"
 		);
 	}
 
@@ -330,7 +330,7 @@ mod tests {
 				|row| row.get(0),
 			)
 			.unwrap();
-		// 16 migrations introduce 31 tables (per the
+		// 18 migrations introduce 32 tables (per the
 		// schema_dump_includes_all_expected_tables test in
 		// migrations/mod.rs). The exact count is not asserted
 		// here to avoid duplicating that test's contract.
@@ -363,7 +363,7 @@ mod tests {
 				row.get(0)
 			})
 			.unwrap();
-		assert_eq!(count, 16);
+		assert_eq!(count, 18);
 	}
 
 	#[test]
@@ -406,7 +406,7 @@ mod tests {
 			"row written in first session must persist across re-open"
 		);
 
-		// Verify schema_migrations still has exactly 16 rows
+		// Verify schema_migrations still has exactly 18 rows
 		// (re-open did not duplicate any).
 		let migration_count: i64 = storage_again
 			.connection()
@@ -415,7 +415,7 @@ mod tests {
 			})
 			.unwrap();
 		assert_eq!(
-			migration_count, 16,
+			migration_count, 18,
 			"re-open must not duplicate schema_migrations rows"
 		);
 	}
@@ -448,7 +448,7 @@ mod tests {
 				row.get(0)
 			})
 			.unwrap();
-		assert_eq!(count, 16);
+		assert_eq!(count, 18);
 	}
 
 	#[test]

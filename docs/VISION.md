@@ -78,9 +78,51 @@ The highest-value, slowest-changing substrate is not the raw code graph. It is t
 
 **3. Runtime/build environment** — how each module runs, what config defines it, what build system owns it, what deployment surface it belongs to, what compile context applies.
 
-These three layers change slowly relative to code. They are expensive for an agent to reconstruct from scratch. They are cheap to maintain incrementally. And they are what an agent needs first when orienting in a codebase.
+**4. Agentic quality control surface** — deterministic measurements, policy thresholds, assessments, waivers, and trend deltas that constrain agent-authored changes with arithmetic instead of vague review language. This includes complexity, size, coverage, churn, hotspot, risk, and architecture-boundary signals.
+
+The first three layers change slowly relative to code. They are expensive for an agent to reconstruct from scratch. They are cheap to maintain incrementally. And they are what an agent needs first when orienting in a codebase.
+
+The fourth layer changes more often because measurements are snapshot-scoped, but its policies are slow-changing engineering intent. It is the control surface that prevents agents from quietly increasing structural risk while producing plausible-looking diffs.
 
 The extraction layer (symbols, imports, calls) is the necessary foundation. But the value is in the architectural interpretation built on top of it.
+
+## Agentic Quality Control
+
+Agentic coding changes the failure mode of maintainability. A human reviewer can often interpret vague feedback like "this function is doing too much" because the reviewer supplies experience, memory, and architectural context. An agent cannot reliably infer those unstated constraints. Ambiguous quality feedback expands the interpretation space and often produces code that is more presentable without being structurally better.
+
+Repo-graph must therefore expose external, computable, non-negotiable quality signals:
+
+- function and module complexity
+- cognitive complexity
+- NPath / path explosion
+- function length and size pressure
+- parameter count and nesting depth
+- coverage and coverage gaps
+- churn and hotspot pressure
+- architecture cycles and boundary violations
+- unresolved-edge pressure and trust degradation
+
+These signals are not a replacement for engineering judgment. They define the computable subset of maintainability risk that agents are least equipped to enforce on their own.
+
+The product boundary is important:
+
+- Extractors and graph passes produce **measurements**.
+- Human-authored thresholds and exceptions are **policies**.
+- Gate/readiness verdicts are **assessments** derived from measurements plus policies.
+- Waivers suppress gate failure only as an effective verdict. They never erase computed facts.
+
+This follows the four-layer truth model in `docs/architecture/measurement-model.txt`.
+
+The long-term agent loop is:
+
+1. Agent asks `orient` before changing code.
+2. Repo-graph returns architectural context plus current quality-risk signals.
+3. Agent changes code.
+4. Agent asks `check` before handing off.
+5. Repo-graph reports new or worsened structural risks as arithmetic facts.
+6. `gate` enforces policy according to the selected mode.
+
+The primary control mode should be **no new or worsened damage** before strict global cleanup. Existing large systems often contain legacy violations. The first operational win is preventing agents from making them worse while allowing planned refactors to reduce them over time.
 
 ## Strategic Position
 
@@ -121,10 +163,10 @@ This section is the operational contract for implementation agents working on re
 | Area | Shipped | Partial | Future |
 |------|---------|---------|--------|
 | Structural graph | IMPORTS, CALLS extraction; callers/callees/path/dead/cycles | Call graph recall on SDK/functional patterns | Framework extractors (Express, NestJS) |
-| Measurements | Graph stats, AST metrics, coverage, churn, hotspots, risk | Coverage/churn snapshot-tight filtering | Custom measurement kinds |
+| Measurements | Graph stats, cyclomatic complexity, nesting depth, parameter count, coverage, churn, hotspots, risk | Coverage/churn snapshot-tight filtering; complexity surfaced mostly through dedicated metric queries | Cognitive complexity, NPath, function length, policy-backed quality assessments |
 | Declarations | module, boundary, entrypoint, invariant, requirement, obligation, waiver | `supersedes_uid` lineage exposure | Policy/gate-mode versioning |
 | Verdicts | 5-state effective model (computed + effective + WAIVED) | — | Persisted verification records |
-| Gate | `rgr gate` with 3 modes, 3 exit codes, waiver overlay | — | CI integration examples |
+| Gate | `rgr gate` with 3 modes, 3 exit codes, waiver overlay | Complexity/coverage/hotspot thresholds exist but are not yet a complete agent pre-action control loop | No-new/worsened-quality gate mode; CI integration examples |
 | Versioning | Toolchain provenance, obligation_id identity, version-scoped waivers | Extracted domain versions (package.json only) | Contract/API/migration versions |
 | Trust reporting | v1-validation-report.txt (prose) | — | Machine-queryable trust boundaries |
 | Dead-code confidence | Graph orphan detection | Registry/plugin liveness not modeled | REGISTERED_BY, RENDERS_BLOCK edges |
@@ -166,7 +208,7 @@ Normative contracts:
 |----------|------------------|------------|
 | Deterministic | IMPORTS edges, structural node identity, measurements from AST/graph | high — replay-reproducible |
 | Inferred | Hotspot scores, risk scores, dead-code candidates | medium — formula-dependent |
-| Unresolved | Ambiguous calls (multiple candidates), dynamic dispatch, SDK methods | tracked but not persisted |
+| Unresolved | Ambiguous calls (multiple candidates), dynamic dispatch, SDK methods | tracked and persisted with category/classification/basis |
 | Snapshot-scoped | Nodes, edges, per-function metrics | correct within snapshot |
 | Repo-scoped, not snapshot-tight | Coverage import, churn import (filtered against repo-level file inventory) | known limitation — see measurement-model.txt |
 | Framework-opaque | Registry/plugin/extension-driven call paths | not modeled — use `declare entrypoint` to suppress false positives |
@@ -208,28 +250,37 @@ layer is the primary value frontier.
    violation checks, per-module rollups turn discovery into enforceable
    structure.
 
-3. **Boundary/seam expansion.** Why now: HTTP and CLI boundaries are
+3. **Agentic quality control surface.** Why now: agents need external
+   arithmetic constraints in the edit loop, not only human-readable
+   smell language. Cognitive complexity, NPath, function length,
+   threshold policies, and no-new/worsened-quality gates turn existing
+   measurements into enforceable structural control. This is built on
+   the existing four-layer truth model: measurements stay factual,
+   policies stay declarative, assessments derive verdicts, waivers
+   suppress effective failure only.
+
+4. **Boundary/seam expansion.** Why now: HTTP and CLI boundaries are
    shipped. State boundaries slice 1 (FS-only) shipped. SDK/DB/cache
    state boundaries, queue/event boundaries, and config/env seam are
    the next high-value seam classes.
 
-4. **Runtime/build environment model.** Why now: without this, an agent
+5. **Runtime/build environment model.** Why now: without this, an agent
    knows what a module contains but not how it runs. Compile context,
    deployment target, and runtime configuration are critical for
    correct reasoning about changes.
 
-5. **Long-lived daemon with in-memory graph.** Why now: eliminates
+6. **Long-lived daemon with in-memory graph.** Why now: eliminates
    cold-start overhead, enables concurrent queries, provides the
    correct runtime model for fast agent orientation. Build after the
    module/update model is stable.
 
-6. **Delta indexing completion.** Infrastructure optimization, not
+7. **Delta indexing completion.** Infrastructure optimization, not
    product capability. Delta refresh slice 1 is shipped. Remaining:
    config-file tracking, scoped postpasses, large-repo validation.
    Design explicitly as ephemeral current-state accelerator — no
    archival snapshot accumulation. Git owns history.
 
-7. **Registry/framework liveness edges.** Why now: without these,
+8. **Registry/framework liveness edges.** Why now: without these,
    dead-code detection on plugin-driven codebases is unsafe. Largest
    known soundness gap in the extraction layer.
 
@@ -253,8 +304,10 @@ layer is the primary value frontier.
 - `supersedes_uid` lineage not exposed in `declare list --json` output
 
 **Current product priority:**
-Module/boundary/runtime substrate — the architectural understanding
-layer that makes agents effective. See Horizon 1 above.
+Module/boundary/runtime substrate plus the agentic quality-control
+surface. The architectural layer tells agents where they are operating.
+The quality-control layer constrains what structural damage they are
+allowed to introduce. See Horizon 1 above.
 
 **What is NOT next:**
 - Fleet / cross-repo features (Horizon 3)

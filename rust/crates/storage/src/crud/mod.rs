@@ -94,6 +94,7 @@ pub mod measurements;
 pub mod module_candidates;
 pub mod module_edges_support;
 pub mod nodes;
+pub mod project_surfaces;
 pub mod repos;
 pub mod snapshots;
 
@@ -110,7 +111,7 @@ pub(crate) mod test_helpers {
 		FileVersion, GraphEdge, GraphNode, Repo, SourceLocation, TrackedFile,
 	};
 
-	/// Open a fresh in-memory `StorageConnection` with all 16
+	/// Open a fresh in-memory `StorageConnection` with all 18
 	/// migrations applied.
 	pub fn fresh_storage() -> StorageConnection {
 		StorageConnection::open_in_memory().expect("open_in_memory")
