@@ -1,0 +1,58 @@
+# ── repo-graph-java-extractor ────────────────────────────────────────
+#
+# Concrete ExtractorPort adapter for Java files using native tree-sitter.
+#
+# Slice scope (Java v1):
+#   - Implements ExtractorPort from repo-graph-indexer
+#   - Uses tree-sitter-java grammar
+#   - Produces ExtractedNode, ExtractedEdge, ImportBinding, metrics
+#   - Advertises language: ["java"]
+#
+# Architecture:
+#   - This crate is an OUTER-LAYER ADAPTER. It depends on the
+#     indexer policy crate's ExtractorPort trait and DTOs.
+#   - Does NOT depend on storage, classification logic, or trust.
+#   - Owns grammar loading, parser lifecycle, and syntax-tree traversal.
+#
+# Design doc: docs/design/java-rust-extractor-v1.md
+#
+# NOT in scope:
+#   - Overload call resolution (requires type solver)
+#   - Inheritance dispatch (requires class hierarchy)
+#   - Spring/CDI annotation semantics (separate detector layer)
+#   - Maven/Gradle dependency resolution
+
+[package]
+name         = "repo-graph-java-extractor"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Java tree-sitter extractor for repo-graph"
+publish      = false
+
+[dependencies]
+# Indexer crate — for ExtractorPort, ExtractedNode, ExtractedEdge,
+# ExtractedMetrics, ExtractionResult, domain enums.
+repo-graph-indexer = { path = "../indexer" }
+
+# Classification crate — for ImportBinding, RuntimeBuiltinsSet,
+# SourceLocation types used in ExtractorPort interface.
+repo-graph-classification = { path = "../classification" }
+
+# tree-sitter — native Rust binding. No WASM, no runtime grammar
+# loading. Grammars compiled as C libraries, linked statically.
+tree-sitter = "0.24"
+
+# tree-sitter-java — Java grammar.
+tree-sitter-java = "0.23"
+
+# Serde for metadata JSON serialization.
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+
+# UUID v4 for node/edge UID generation.
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+walkdir = "2"

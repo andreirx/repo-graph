@@ -19,6 +19,7 @@ use repo_graph_indexer::storage_port::SnapshotLifecyclePort;
 use repo_graph_indexer::types::{IndexOptions, IndexResult};
 use repo_graph_storage::StorageConnection;
 use repo_graph_c_extractor::CExtractor;
+use repo_graph_java_extractor::JavaExtractor;
 use repo_graph_ts_extractor::TsExtractor;
 
 use crate::config::RepoConfigContext;
@@ -294,9 +295,14 @@ pub fn index_into_storage(
 		.initialize()
 		.map_err(|e| ComposeError::ExtractorInit(format!("c: {}", e)))?;
 
+	let mut java_extractor = JavaExtractor::new();
+	java_extractor
+		.initialize()
+		.map_err(|e| ComposeError::ExtractorInit(format!("java: {}", e)))?;
+
 	ensure_repo(storage, repo_uid, repo_path)?;
 
-	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor];
+	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut java_extractor];
 	let mut idx_options = IndexOptions {
 		basis_commit: options.basis_commit.clone(),
 		edge_batch_size: options.edge_batch_size,
@@ -369,9 +375,14 @@ pub fn refresh_into_storage(
 		.initialize()
 		.map_err(|e| ComposeError::ExtractorInit(format!("c: {}", e)))?;
 
+	let mut java_extractor = JavaExtractor::new();
+	java_extractor
+		.initialize()
+		.map_err(|e| ComposeError::ExtractorInit(format!("java: {}", e)))?;
+
 	ensure_repo(storage, repo_uid, repo_path)?;
 
-	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor];
+	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut java_extractor];
 	let mut idx_options = IndexOptions {
 		basis_commit: options.basis_commit.clone(),
 		edge_batch_size: options.edge_batch_size,
@@ -579,6 +590,150 @@ mod tests {
 			cc_rows.len(),
 			mnd_rows.len(),
 			"cyclomatic_complexity and max_nesting_depth counts must match"
+		);
+	}
+
+	// ── Java extractor integration ───────────────────────────────
+
+	fn make_java_fixture_repo() -> tempfile::TempDir {
+		let dir = tempfile::tempdir().unwrap();
+		let root = dir.path();
+
+		fs::create_dir_all(root.join("src/main/java/com/example")).unwrap();
+		fs::write(
+			root.join("src/main/java/com/example/App.java"),
+			r#"package com.example;
+
+import java.util.List;
+
+public class App {
+    private String name;
+
+    public App(String name) {
+        this.name = name;
+    }
+
+    public void run() {
+        System.out.println("Hello " + name);
+    }
+
+    public static void main(String[] args) {
+        App app = new App("World");
+        app.run();
+    }
+}
+"#,
+		)
+		.unwrap();
+		fs::write(
+			root.join("src/main/java/com/example/Service.java"),
+			r#"package com.example;
+
+public interface Service {
+    void execute();
+}
+"#,
+		)
+		.unwrap();
+
+		dir
+	}
+
+	#[test]
+	fn index_java_extracts_file_and_symbol_nodes() {
+		let fixture = make_java_fixture_repo();
+		let mut storage = StorageConnection::open_in_memory().unwrap();
+
+		let result = index_into_storage(
+			fixture.path(),
+			&mut storage,
+			"java-test",
+			&ComposeOptions::default(),
+		)
+		.unwrap();
+
+		// Should have indexed 2 Java files
+		assert_eq!(result.files_total, 2, "files_total");
+
+		use repo_graph_indexer::storage_port::NodeStorePort;
+		let nodes = NodeStorePort::query_all_nodes(&storage, &result.snapshot_uid).unwrap();
+		let stable_keys: Vec<&str> = nodes.iter().map(|n| n.stable_key.as_str()).collect();
+
+		// FILE nodes for both Java files
+		assert!(
+			stable_keys.iter().any(|k| k.contains("App.java:FILE")),
+			"expected App.java FILE node; got keys: {:?}",
+			stable_keys
+		);
+		assert!(
+			stable_keys.iter().any(|k| k.contains("Service.java:FILE")),
+			"expected Service.java FILE node; got keys: {:?}",
+			stable_keys
+		);
+
+		// SYMBOL nodes: class App, interface Service, methods
+		assert!(
+			stable_keys.iter().any(|k| k.contains("#App:SYMBOL:CLASS")),
+			"expected App CLASS symbol; got keys: {:?}",
+			stable_keys
+		);
+		assert!(
+			stable_keys.iter().any(|k| k.contains("#Service:SYMBOL:INTERFACE")),
+			"expected Service INTERFACE symbol; got keys: {:?}",
+			stable_keys
+		);
+		assert!(
+			stable_keys.iter().any(|k| k.contains("#App.run:SYMBOL:METHOD")),
+			"expected App.run METHOD symbol; got keys: {:?}",
+			stable_keys
+		);
+		assert!(
+			stable_keys.iter().any(|k| k.contains("#App.main:SYMBOL:METHOD")),
+			"expected App.main METHOD symbol; got keys: {:?}",
+			stable_keys
+		);
+
+		// Constructor
+		assert!(
+			stable_keys.iter().any(|k| k.contains("#App:SYMBOL:CONSTRUCTOR")),
+			"expected App CONSTRUCTOR symbol; got keys: {:?}",
+			stable_keys
+		);
+
+		// Field (uses PROPERTY subtype, consistent with TS extractor)
+		assert!(
+			stable_keys.iter().any(|k| k.contains("#App.name:SYMBOL:PROPERTY")),
+			"expected App.name PROPERTY symbol; got keys: {:?}",
+			stable_keys
+		);
+	}
+
+	#[test]
+	fn index_java_persists_metrics() {
+		let fixture = make_java_fixture_repo();
+		let mut storage = StorageConnection::open_in_memory().unwrap();
+
+		let result = index_into_storage(
+			fixture.path(),
+			&mut storage,
+			"java-test",
+			&ComposeOptions::default(),
+		)
+		.unwrap();
+
+		// Java methods should have metrics
+		assert!(
+			!result.metrics.is_empty(),
+			"expected metrics for Java methods; got empty metrics map"
+		);
+
+		// Verify metrics persisted
+		let cc_rows = storage
+			.query_measurements_by_kind(&result.snapshot_uid, "cyclomatic_complexity")
+			.unwrap();
+		assert!(
+			!cc_rows.is_empty(),
+			"expected cyclomatic_complexity measurements for Java methods; got none"
 		);
 	}
 }

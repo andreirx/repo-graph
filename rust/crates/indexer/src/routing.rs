@@ -86,6 +86,7 @@ pub fn detect_language(file_path: &str) -> Option<&'static str> {
 		".tsx" => Some("tsx"),
 		".js" => Some("javascript"),
 		".jsx" => Some("jsx"),
+		".java" => Some("java"),
 		".c" | ".h" => Some("c"),
 		".cpp" | ".cc" | ".cxx" | ".hpp" | ".hxx" => Some("cpp"),
 		_ => None,
@@ -306,6 +307,11 @@ mod tests {
 	#[test]
 	fn detect_language_tsx() {
 		assert_eq!(detect_language("src/App.tsx"), Some("tsx"));
+	}
+
+	#[test]
+	fn detect_language_java() {
+		assert_eq!(detect_language("src/main/java/Foo.java"), Some("java"));
 	}
 
 	#[test]

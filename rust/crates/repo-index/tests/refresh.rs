@@ -246,3 +246,138 @@ fn refresh_respects_exclusions() {
 		"node_modules excluded in refresh"
 	);
 }
+
+// ── 5. Java refresh integration ──────────────────────────────────
+
+fn make_java_repo(dir: &std::path::Path) {
+	fs::create_dir_all(dir.join("src/main/java/com/example")).unwrap();
+	fs::write(
+		dir.join("src/main/java/com/example/App.java"),
+		r#"package com.example;
+
+public class App {
+    public void run() {
+        System.out.println("v1");
+    }
+}
+"#,
+	)
+	.unwrap();
+	fs::write(
+		dir.join("src/main/java/com/example/Service.java"),
+		r#"package com.example;
+
+public interface Service {
+    void execute();
+}
+"#,
+	)
+	.unwrap();
+}
+
+#[test]
+fn refresh_java_copies_unchanged_and_reextracts_changed() {
+	let dir = tempfile::tempdir().unwrap();
+	make_java_repo(dir.path());
+
+	let mut storage = StorageConnection::open_in_memory().unwrap();
+
+	// Phase 1: full index.
+	let r1 = index_into_storage(
+		dir.path(),
+		&mut storage,
+		"java-r1",
+		&ComposeOptions::default(),
+	)
+	.unwrap();
+	assert_eq!(r1.files_total, 2, "initial Java files");
+	let snap1_uid = r1.snapshot_uid.clone();
+
+	// Verify initial extraction produced Java symbols.
+	use repo_graph_indexer::storage_port::NodeStorePort;
+	let nodes1 = NodeStorePort::query_all_nodes(&storage, &snap1_uid).unwrap();
+	let keys1: Vec<&str> = nodes1.iter().map(|n| n.stable_key.as_str()).collect();
+	assert!(
+		keys1.iter().any(|k| k.contains("#App:SYMBOL:CLASS")),
+		"App class must exist after initial index"
+	);
+	assert!(
+		keys1.iter().any(|k| k.contains("#Service:SYMBOL:INTERFACE")),
+		"Service interface must exist after initial index"
+	);
+
+	// Phase 2: modify App.java, keep Service.java unchanged.
+	fs::write(
+		dir.path().join("src/main/java/com/example/App.java"),
+		r#"package com.example;
+
+public class App {
+    public void run() {
+        System.out.println("v2");
+    }
+
+    public void newMethod() {}
+}
+"#,
+	)
+	.unwrap();
+
+	// Phase 3: refresh.
+	let r2 = refresh_into_storage(
+		dir.path(),
+		&mut storage,
+		"java-r1",
+		&ComposeOptions::default(),
+	)
+	.unwrap();
+
+	let snap2 = storage.get_snapshot(&r2.snapshot_uid).unwrap().unwrap();
+	assert_eq!(snap2.status, "ready");
+	assert_eq!(snap2.kind, "refresh");
+	assert_eq!(r2.files_total, 2, "both Java files in refresh");
+
+	// Verify nodes from both files present.
+	let nodes2 = NodeStorePort::query_all_nodes(&storage, &r2.snapshot_uid).unwrap();
+	let keys2: Vec<&str> = nodes2.iter().map(|n| n.stable_key.as_str()).collect();
+
+	assert!(
+		keys2.iter().any(|k| k.contains("App.java:FILE")),
+		"changed App.java FILE present"
+	);
+	assert!(
+		keys2.iter().any(|k| k.contains("Service.java:FILE")),
+		"unchanged Service.java FILE present (copy-forward)"
+	);
+	assert!(
+		keys2.iter().any(|k| k.contains("#App:SYMBOL:CLASS")),
+		"App class present"
+	);
+	assert!(
+		keys2.iter().any(|k| k.contains("#Service:SYMBOL:INTERFACE")),
+		"Service interface present (copy-forward)"
+	);
+	// New method from modified file.
+	assert!(
+		keys2.iter().any(|k| k.contains("#App.newMethod:SYMBOL:METHOD")),
+		"newMethod from modified App.java must exist"
+	);
+
+	// Prove delta: unchanged file hash identical, changed file hash differs.
+	use repo_graph_indexer::storage_port::FileCatalogPort;
+	let hashes1 = FileCatalogPort::query_file_version_hashes(&storage, &snap1_uid).unwrap();
+	let hashes2 = FileCatalogPort::query_file_version_hashes(&storage, &r2.snapshot_uid).unwrap();
+
+	let svc_hash_1 = hashes1.get("java-r1:src/main/java/com/example/Service.java").unwrap();
+	let svc_hash_2 = hashes2.get("java-r1:src/main/java/com/example/Service.java").unwrap();
+	assert_eq!(
+		svc_hash_1, svc_hash_2,
+		"unchanged Service.java must have identical hash (copy-forward proof)"
+	);
+
+	let app_hash_1 = hashes1.get("java-r1:src/main/java/com/example/App.java").unwrap();
+	let app_hash_2 = hashes2.get("java-r1:src/main/java/com/example/App.java").unwrap();
+	assert_ne!(
+		app_hash_1, app_hash_2,
+		"changed App.java must have different hash (re-extraction proof)"
+	);
+}

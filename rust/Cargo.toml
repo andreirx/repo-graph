@@ -22,6 +22,7 @@ members = [
     "crates/agent",
     "crates/c-extractor",
     "crates/classification",
+    "crates/java-extractor",
     "crates/coverage",
     "crates/detectors",
     "crates/gate",
