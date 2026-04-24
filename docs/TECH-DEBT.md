@@ -514,6 +514,53 @@ intentionally diverges.
 - **No staleness tracking for `index`/`refresh` commands.** Only
   read-side commands compute the `stale` field.
 
+## Module Resolution Dual-Path Model
+
+**Current state:** The Rust CLI's `modules *` commands now use a
+unified `ModuleQueryContext` helper (in `rgr/src/module_resolution.rs`)
+that abstracts over two different backing representations:
+
+- **TS path:** `module_candidates` table + `module_file_ownership` table
+- **Rust path:** `nodes` table (kind='MODULE') + `edges` table (type='OWNS')
+
+The fallback logic is application-level normalization policy, not raw
+storage truth. It lives in the CLI layer, not storage CRUD, to preserve
+honest method semantics in the storage adapter.
+
+### Structural limitations
+
+- **Rust directory modules are synthesized compatibility projections,
+  not full module-candidate parity.** The Rust indexer creates MODULE
+  nodes for directories containing files. These lack metadata that
+  TS-indexed module candidates have (module_kind, display_name,
+  metadata_json carry less information).
+
+- **`modules files` returns degraded output on Rust-indexed repos.**
+  The fallback path provides `file_path` and `is_test` but not
+  `language`, real `assignment_kind` (hardcoded to "inferred"),
+  or real `confidence` (hardcoded to 1.0). The detailed file
+  metadata lives only in the `module_file_ownership` table which
+  the Rust indexer does not populate.
+
+- **Dual persistence model remains until unified module read model.**
+  The ideal fix is for the Rust indexer to populate the same
+  `module_candidates` and `module_file_ownership` tables as the
+  TS indexer. Until then, the CLI fallback bridges the gap.
+
+### Commands using ModuleQueryContext
+
+All `modules *` commands now use the unified context:
+- `modules list` — catalog with rollups
+- `modules show` — module briefing
+- `modules files` — files owned by module
+- `modules deps` — cross-module dependency edges
+- `modules violations` — discovered-module boundary violations
+- `modules boundary` — declare discovered-module boundary
+
+The shared `evaluate_discovered_module_violations` helper also uses
+the context, ensuring consistency between `modules list` violation
+rollups and `modules violations` output.
+
 ## Rust agent use-case crate (`repo-graph-agent`)
 
 Current state: Rust-43A. Repo-level `orient` use case with

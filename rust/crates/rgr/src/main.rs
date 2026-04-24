@@ -49,6 +49,7 @@
 // `mod gate;` declaration.
 
 mod coverage;
+mod module_resolution;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -4108,16 +4109,19 @@ fn run_modules_list(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// ── Step 1: Load module candidates ────────────────────────────
-	let modules = match storage.get_module_candidates_for_snapshot(&snapshot.snapshot_uid) {
-		Ok(m) => m,
+	// ── Step 1: Load module context (with fallback) ──────────────
+	// ModuleQueryContext handles fallback from TS tables to Rust nodes/edges.
+	use crate::module_resolution::ModuleQueryContext;
+	let ctx = match ModuleQueryContext::load(&storage, &snapshot.snapshot_uid) {
+		Ok(c) => c,
 		Err(e) => {
-			eprintln!("error: failed to load module candidates: {}", e);
+			eprintln!("error: failed to load module context: {}", e);
 			return ExitCode::from(2);
 		}
 	};
+	let modules = ctx.modules;
 
-	// If no modules, return early with empty result
+	// If still no modules, return early with empty result
 	if modules.is_empty() {
 		// Empty modules → no degradation, no warnings
 		let mut empty_extra = serde_json::Map::new();
@@ -4153,14 +4157,8 @@ fn run_modules_list(args: &[String]) -> ExitCode {
 
 	// ── Step 2: Load data for rollup computation ──────────────────
 
-	// 2a. Owned files with is_test flag
-	let owned_files = match storage.get_owned_files_for_rollup(&snapshot.snapshot_uid) {
-		Ok(f) => f,
-		Err(e) => {
-			eprintln!("error: failed to load owned files: {}", e);
-			return ExitCode::from(2);
-		}
-	};
+	// 2a. Owned files with is_test flag (from context, fallback already applied)
+	let owned_files = ctx.owned_files;
 
 	// 2b. Resolved imports for edge derivation
 	let imports = match storage.get_resolved_imports_for_snapshot(&snapshot.snapshot_uid) {
@@ -4171,14 +4169,8 @@ fn run_modules_list(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// 2c. File ownership for edge derivation
-	let ownership = match storage.get_file_ownership_for_snapshot(&snapshot.snapshot_uid) {
-		Ok(o) => o,
-		Err(e) => {
-			eprintln!("error: failed to load file ownership: {}", e);
-			return ExitCode::from(2);
-		}
-	};
+	// 2c. File ownership for edge derivation (from context, fallback already applied)
+	let ownership = ctx.ownership;
 
 	// 2d. Dead nodes (SYMBOL kind only)
 	let dead_nodes = match storage.find_dead_nodes(&snapshot.snapshot_uid, repo_uid, Some("SYMBOL"))
@@ -4462,31 +4454,26 @@ fn run_modules_show(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// ── Step 1: Load module candidates ────────────────────────────
-	let modules = match storage.get_module_candidates_for_snapshot(&snapshot.snapshot_uid) {
-		Ok(m) => m,
+	// ── Step 1: Load module context (with fallback) ──────────────
+	use crate::module_resolution::ModuleQueryContext;
+	let ctx = match ModuleQueryContext::load(&storage, &snapshot.snapshot_uid) {
+		Ok(c) => c,
 		Err(e) => {
-			eprintln!("error: failed to load module candidates: {}", e);
+			eprintln!("error: failed to load module context: {}", e);
 			return ExitCode::from(2);
 		}
 	};
 
 	// ── Step 2: Resolve module argument ───────────────────────────
-	// Resolution: canonical_root_path exact → module_key exact → exit 1
-	let resolved_module = {
-		let by_path = modules.iter().find(|m| m.canonical_root_path == *module_arg);
-		if let Some(m) = by_path {
-			m.clone()
-		} else {
-			let by_key = modules.iter().find(|m| m.module_key == *module_arg);
-			if let Some(m) = by_key {
-				m.clone()
-			} else {
-				eprintln!("error: module not found: {}", module_arg);
-				return ExitCode::from(1); // Exit 1 for resolution failure
-			}
+	// Resolution: canonical_root_path exact → module_key exact → module_uid exact → exit 1
+	let resolved_module = match ctx.resolve_module(module_arg) {
+		Some(m) => m.clone(),
+		None => {
+			eprintln!("error: module not found: {}", module_arg);
+			return ExitCode::from(1); // Exit 1 for resolution failure
 		}
 	};
+	let modules = ctx.modules;
 
 	// Build module identity lookup for enrichment
 	let module_identity_map: std::collections::HashMap<&str, ModuleIdentity> = modules
@@ -4507,26 +4494,14 @@ fn run_modules_show(args: &[String]) -> ExitCode {
 		.collect();
 
 	// ── Step 3: Load data for computation ─────────────────────────
-	let owned_files = match storage.get_owned_files_for_rollup(&snapshot.snapshot_uid) {
-		Ok(f) => f,
-		Err(e) => {
-			eprintln!("error: failed to load owned files: {}", e);
-			return ExitCode::from(2);
-		}
-	};
+	// Owned files and ownership from context (fallback already applied)
+	let owned_files = ctx.owned_files;
+	let ownership = ctx.ownership;
 
 	let imports = match storage.get_resolved_imports_for_snapshot(&snapshot.snapshot_uid) {
 		Ok(i) => i,
 		Err(e) => {
 			eprintln!("error: failed to load imports: {}", e);
-			return ExitCode::from(2);
-		}
-	};
-
-	let ownership = match storage.get_file_ownership_for_snapshot(&snapshot.snapshot_uid) {
-		Ok(o) => o,
-		Err(e) => {
-			eprintln!("error: failed to load file ownership: {}", e);
 			return ExitCode::from(2);
 		}
 	};
@@ -4866,40 +4841,47 @@ fn run_modules_files(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// Load module candidates for resolution
-	let modules = match storage.get_module_candidates_for_snapshot(&snapshot.snapshot_uid) {
-		Ok(m) => m,
+	// Load module context (with fallback)
+	use crate::module_resolution::ModuleQueryContext;
+	let ctx = match ModuleQueryContext::load(&storage, &snapshot.snapshot_uid) {
+		Ok(c) => c,
 		Err(e) => {
-			eprintln!("error: failed to load module candidates: {}", e);
+			eprintln!("error: failed to load module context: {}", e);
 			return ExitCode::from(2);
 		}
 	};
 
-	// Resolve module argument: canonical_root_path exact → module_key exact → error
-	let resolved_module = {
-		// Try canonical_root_path exact match first
-		let by_path = modules.iter().find(|m| m.canonical_root_path == *module_arg);
-		if let Some(m) = by_path {
-			m
-		} else {
-			// Try module_key exact match
-			let by_key = modules.iter().find(|m| m.module_key == *module_arg);
-			if let Some(m) = by_key {
-				m
-			} else {
-				eprintln!("error: module not found: {}", module_arg);
-				eprintln!("hint: use canonical path (e.g., 'packages/app') or module key");
-				return ExitCode::from(1);
-			}
+	// Resolve module argument
+	let resolved_module = match ctx.resolve_module(module_arg) {
+		Some(m) => m.clone(),
+		None => {
+			eprintln!("error: module not found: {}", module_arg);
+			eprintln!("hint: use canonical path (e.g., 'packages/app') or module key");
+			return ExitCode::from(1);
 		}
 	};
 
-	// Load files for the resolved module
+	// Load files for the resolved module.
+	// First try the detailed query (TS-indexed repos).
+	// If empty, fall back to context's owned files (Rust-indexed repos, degraded metadata).
 	let files = match storage.get_files_for_module(
 		&snapshot.snapshot_uid,
 		&resolved_module.module_candidate_uid,
 	) {
-		Ok(f) => f,
+		Ok(f) if !f.is_empty() => f,
+		Ok(_) => {
+			// Fallback: use context's files_for_module (degraded: no language/assignment_kind/confidence)
+			ctx.files_for_module(&resolved_module.module_candidate_uid)
+				.into_iter()
+				.map(|of| repo_graph_storage::crud::module_edges_support::ModuleFileEntry {
+					file_uid: of.file_uid.clone(),
+					path: of.file_path.clone(),
+					language: None,
+					assignment_kind: "inferred".to_string(),
+					confidence: 1.0,
+				})
+				.collect()
+		}
 		Err(e) => {
 			eprintln!("error: failed to load module files: {}", e);
 			return ExitCode::from(2);
@@ -5019,40 +5001,31 @@ fn run_modules_deps(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// Load module candidates
-	let modules = match storage.get_module_candidates_for_snapshot(&snapshot.snapshot_uid) {
-		Ok(m) => m,
+	// Load module context (with fallback)
+	use crate::module_resolution::ModuleQueryContext;
+	let ctx = match ModuleQueryContext::load(&storage, &snapshot.snapshot_uid) {
+		Ok(c) => c,
 		Err(e) => {
-			eprintln!("error: failed to load module candidates: {}", e);
+			eprintln!("error: failed to load module context: {}", e);
 			return ExitCode::from(2);
 		}
 	};
 
 	// Resolve module filter argument against discovered modules.
-	// Resolution precedence: canonical_root_path exact → module_key exact.
+	// Resolution precedence: canonical_root_path exact → module_key exact → module_uid exact.
 	// Unknown module → error (not empty results).
 	let resolved_module_path: Option<String> = match module_filter {
-		Some(filter) => {
-			// Try canonical_root_path exact match first
-			let by_path = modules.iter().find(|m| m.canonical_root_path == filter);
-			if let Some(m) = by_path {
-				Some(m.canonical_root_path.clone())
-			} else {
-				// Try module_key exact match
-				let by_key = modules.iter().find(|m| m.module_key == filter);
-				if let Some(m) = by_key {
-					Some(m.canonical_root_path.clone())
-				} else {
-					eprintln!("error: module not found: {}", filter);
-					eprintln!(
-						"hint: use canonical path (e.g., 'packages/app') or module key"
-					);
-					return ExitCode::from(1);
-				}
+		Some(filter) => match ctx.resolve_module(filter) {
+			Some(m) => Some(m.canonical_root_path.clone()),
+			None => {
+				eprintln!("error: module not found: {}", filter);
+				eprintln!("hint: use canonical path (e.g., 'packages/app') or module key");
+				return ExitCode::from(1);
 			}
-		}
+		},
 		None => None,
 	};
+	let modules = ctx.modules;
 
 	// Load resolved imports
 	let imports = match storage.get_resolved_imports_for_snapshot(&snapshot.snapshot_uid) {
@@ -5063,14 +5036,8 @@ fn run_modules_deps(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// Load file ownership
-	let ownership = match storage.get_file_ownership_for_snapshot(&snapshot.snapshot_uid) {
-		Ok(o) => o,
-		Err(e) => {
-			eprintln!("error: failed to load file ownership: {}", e);
-			return ExitCode::from(2);
-		}
-	};
+	// File ownership from context (fallback already applied)
+	let ownership = ctx.ownership;
 
 	// Convert to classification DTOs
 	use repo_graph_classification::module_edges::{
@@ -5261,10 +5228,11 @@ fn evaluate_discovered_module_violations(
 	repo_uid: &str,
 	snapshot_uid: &str,
 ) -> Result<DiscoveredModuleViolationsResult, String> {
-	// 1. Load module candidates
-	let modules = storage
-		.get_module_candidates_for_snapshot(snapshot_uid)
-		.map_err(|e| format!("failed to load module candidates: {}", e))?;
+	// 1. Load module context (with fallback)
+	use crate::module_resolution::ModuleQueryContext;
+	let ctx = ModuleQueryContext::load(storage, snapshot_uid)
+		.map_err(|e| format!("failed to load module context: {}", e))?;
+	let modules = ctx.modules;
 
 	// 2. Load active boundary declarations (discovered-module style)
 	let declarations = storage
@@ -5287,14 +5255,13 @@ fn evaluate_discovered_module_violations(
 	let parsed_boundaries =
 		parse_discovered_module_boundaries(&raw_boundaries).map_err(|e| e.to_string())?;
 
-	// 4. Load imports and file ownership for edge derivation
+	// 4. Load imports for edge derivation (separate query)
+	// File ownership from context (fallback already applied)
 	let imports = storage
 		.get_resolved_imports_for_snapshot(snapshot_uid)
 		.map_err(|e| format!("failed to load imports: {}", e))?;
 
-	let ownership = storage
-		.get_file_ownership_for_snapshot(snapshot_uid)
-		.map_err(|e| format!("failed to load file ownership: {}", e))?;
+	let ownership = ctx.ownership;
 
 	// 5. Derive module edges
 	use repo_graph_classification::module_edges::{
@@ -5560,18 +5527,19 @@ fn run_modules_boundary(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// Load module candidates for resolution
-	let modules = match storage.get_module_candidates_for_snapshot(&snapshot.snapshot_uid) {
-		Ok(m) => m,
+	// Load module context (with fallback)
+	use crate::module_resolution::ModuleQueryContext;
+	let ctx = match ModuleQueryContext::load(&storage, &snapshot.snapshot_uid) {
+		Ok(c) => c,
 		Err(e) => {
-			eprintln!("error: failed to load module candidates: {}", e);
+			eprintln!("error: failed to load module context: {}", e);
 			return ExitCode::from(2);
 		}
 	};
 
-	// Resolve source module (canonicalRootPath → moduleKey precedence)
-	let source_path = match resolve_module_to_path(&modules, source_arg) {
-		Some(p) => p,
+	// Resolve source module
+	let source_path = match ctx.resolve_module(source_arg) {
+		Some(m) => m.canonical_root_path.clone(),
 		None => {
 			eprintln!("error: source module not found: {}", source_arg);
 			eprintln!("hint: use canonical path (e.g., 'packages/app') or module key");
@@ -5580,8 +5548,8 @@ fn run_modules_boundary(args: &[String]) -> ExitCode {
 	};
 
 	// Resolve target module
-	let target_path = match resolve_module_to_path(&modules, &forbids) {
-		Some(p) => p,
+	let target_path = match ctx.resolve_module(&forbids) {
+		Some(m) => m.canonical_root_path.clone(),
 		None => {
 			eprintln!("error: target module not found: {}", forbids);
 			eprintln!("hint: use canonical path (e.g., 'packages/core') or module key");
@@ -5658,23 +5626,6 @@ fn run_modules_boundary(args: &[String]) -> ExitCode {
 			ExitCode::from(2)
 		}
 	}
-}
-
-/// Resolve a module argument to its canonical path.
-/// Resolution precedence: canonical_root_path exact → module_key exact.
-fn resolve_module_to_path(
-	modules: &[repo_graph_storage::types::ModuleCandidate],
-	arg: &str,
-) -> Option<String> {
-	// Try canonical_root_path exact match first
-	if let Some(m) = modules.iter().find(|m| m.canonical_root_path == arg) {
-		return Some(m.canonical_root_path.clone());
-	}
-	// Try module_key exact match
-	if let Some(m) = modules.iter().find(|m| m.module_key == arg) {
-		return Some(m.canonical_root_path.clone());
-	}
-	None
 }
 
 /// Parse --forbids and --reason flags from boundary command args.

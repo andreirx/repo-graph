@@ -152,6 +152,62 @@ impl StorageConnection {
 			None => Ok(None),
 		}
 	}
+
+	/// Fallback: get MODULE nodes from the nodes table when
+	/// `module_candidates` is empty.
+	///
+	/// The Rust indexer creates MODULE kind nodes in the nodes table
+	/// but does not populate the `module_candidates` table. This method
+	/// provides a fallback path for `modules list` to work with
+	/// Rust-indexed repos.
+	///
+	/// Returns MODULE nodes converted to `ModuleCandidate` format with:
+	/// - `module_candidate_uid` = node_uid
+	/// - `module_key` = stable_key
+	/// - `canonical_root_path` = qualified_name
+	/// - `module_kind` = "directory" (derived from directory structure)
+	/// - `display_name` = name
+	/// - `confidence` = 1.0
+	pub fn get_module_nodes_as_candidates(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<ModuleCandidate>, StorageError> {
+		let conn = self.connection();
+		let mut stmt = conn.prepare(
+			"SELECT node_uid, snapshot_uid, repo_uid, stable_key,
+			        name, qualified_name
+			 FROM nodes
+			 WHERE snapshot_uid = ? AND kind = 'MODULE'
+			 ORDER BY qualified_name ASC",
+		)?;
+
+		let rows = stmt.query_map([snapshot_uid], |row| {
+			let node_uid: String = row.get("node_uid")?;
+			let snapshot_uid: String = row.get("snapshot_uid")?;
+			let repo_uid: String = row.get("repo_uid")?;
+			let stable_key: String = row.get("stable_key")?;
+			let name: String = row.get("name")?;
+			let qualified_name: Option<String> = row.get("qualified_name")?;
+
+			Ok(ModuleCandidate {
+				module_candidate_uid: node_uid,
+				snapshot_uid,
+				repo_uid,
+				module_key: stable_key,
+				module_kind: "directory".to_string(),
+				canonical_root_path: qualified_name.unwrap_or_default(),
+				confidence: 1.0,
+				display_name: Some(name),
+				metadata_json: None,
+			})
+		})?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			results.push(row?);
+		}
+		Ok(results)
+	}
 }
 
 #[cfg(test)]
@@ -538,5 +594,128 @@ mod tests {
 		let result = conn.get_module_by_uid("mc-abc123").expect("query");
 		assert!(result.is_some());
 		assert_eq!(result.unwrap().module_candidate_uid, "mc-abc123");
+	}
+
+	// ── Fallback tests for Rust-indexed repos ────────────────────────
+
+	/// Insert a MODULE node directly for fallback testing.
+	fn insert_module_node(
+		conn: &StorageConnection,
+		node_uid: &str,
+		snapshot_uid: &str,
+		repo_uid: &str,
+		stable_key: &str,
+		name: &str,
+		qualified_name: &str,
+	) {
+		conn.connection()
+			.execute(
+				"INSERT INTO nodes
+				 (node_uid, snapshot_uid, repo_uid, stable_key, kind, name, qualified_name)
+				 VALUES (?, ?, ?, ?, 'MODULE', ?, ?)",
+				rusqlite::params![
+					node_uid,
+					snapshot_uid,
+					repo_uid,
+					stable_key,
+					name,
+					qualified_name,
+				],
+			)
+			.expect("insert module node");
+	}
+
+	#[test]
+	fn get_module_nodes_as_candidates_returns_empty_for_empty_snapshot() {
+		let conn = fresh_storage();
+		let (_, snapshot_uid) = setup_test_snapshot(&conn);
+
+		let result = conn
+			.get_module_nodes_as_candidates(&snapshot_uid)
+			.expect("query");
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn get_module_nodes_as_candidates_returns_module_nodes() {
+		let conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		insert_module_node(
+			&conn,
+			"mod-node-1",
+			&snapshot_uid,
+			&repo_uid,
+			"test:src/core:MODULE",
+			"core",
+			"src/core",
+		);
+		insert_module_node(
+			&conn,
+			"mod-node-2",
+			&snapshot_uid,
+			&repo_uid,
+			"test:src/utils:MODULE",
+			"utils",
+			"src/utils",
+		);
+
+		let result = conn
+			.get_module_nodes_as_candidates(&snapshot_uid)
+			.expect("query");
+
+		assert_eq!(result.len(), 2);
+		// Sorted by qualified_name (canonical_root_path)
+		assert_eq!(result[0].canonical_root_path, "src/core");
+		assert_eq!(result[0].module_candidate_uid, "mod-node-1");
+		assert_eq!(result[0].module_key, "test:src/core:MODULE");
+		assert_eq!(result[0].module_kind, "directory");
+		assert_eq!(result[0].display_name, Some("core".to_string()));
+		assert!((result[0].confidence - 1.0).abs() < f64::EPSILON);
+
+		assert_eq!(result[1].canonical_root_path, "src/utils");
+		assert_eq!(result[1].module_candidate_uid, "mod-node-2");
+	}
+
+	#[test]
+	fn get_module_nodes_as_candidates_ignores_non_module_nodes() {
+		let conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		// Insert a MODULE node
+		insert_module_node(
+			&conn,
+			"mod-node",
+			&snapshot_uid,
+			&repo_uid,
+			"test:src:MODULE",
+			"src",
+			"src",
+		);
+
+		// Insert a FILE node (should be ignored)
+		conn.connection()
+			.execute(
+				"INSERT INTO nodes
+				 (node_uid, snapshot_uid, repo_uid, stable_key, kind, name, qualified_name)
+				 VALUES (?, ?, ?, ?, 'FILE', ?, ?)",
+				rusqlite::params![
+					"file-node",
+					snapshot_uid,
+					repo_uid,
+					"test:src/main.java:FILE",
+					"main.java",
+					"src/main.java",
+				],
+			)
+			.expect("insert file node");
+
+		let result = conn
+			.get_module_nodes_as_candidates(&snapshot_uid)
+			.expect("query");
+
+		// Only the MODULE node should be returned
+		assert_eq!(result.len(), 1);
+		assert_eq!(result[0].module_candidate_uid, "mod-node");
 	}
 }

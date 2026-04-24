@@ -38,9 +38,10 @@ fn fixture_path() -> PathBuf {
 }
 
 /// Build a temp DB by indexing the classifier-repo fixture.
-/// Note: The Rust indexer does not produce module candidates;
-/// those are produced by the TS indexer. This creates a valid
-/// indexed repo without module candidates.
+/// Note: The Rust indexer produces MODULE nodes (directory-based)
+/// but does not populate the module_candidates table (which is
+/// produced by the TS indexer). The `modules list` command falls
+/// back to querying MODULE nodes when module_candidates is empty.
 fn build_indexed_db() -> (tempfile::TempDir, PathBuf) {
 	let dir = tempfile::tempdir().unwrap();
 	let db_path = dir.path().join("test.db");
@@ -174,10 +175,15 @@ fn modules_list_repo_not_found() {
 	);
 }
 
-// ── 4. Empty result ──────────────────────────────────────────────
+// ── 4. Fallback to directory-based MODULE nodes ─────────────────
+//
+// When no module_candidates exist (TS-indexed), the CLI falls back
+// to querying MODULE nodes from the nodes table. The Rust indexer
+// creates directory-based MODULE nodes for each directory containing
+// files, so a Rust-indexed repo will have at least one module.
 
 #[test]
-fn modules_list_empty_result() {
+fn modules_list_fallback_to_module_nodes() {
 	let (_dir, db_path) = build_indexed_db();
 
 	let output = Command::new(binary_path())
@@ -193,7 +199,7 @@ fn modules_list_empty_result() {
 	assert_eq!(
 		output.status.code(),
 		Some(0),
-		"empty result is success, stderr: {}",
+		"fallback result is success, stderr: {}",
 		String::from_utf8_lossy(&output.stderr)
 	);
 
@@ -209,8 +215,13 @@ fn modules_list_empty_result() {
 
 	assert_eq!(result["command"], "modules list");
 	assert_eq!(result["repo"], "test-repo");
-	assert_eq!(result["count"], 0);
-	assert!(result["results"].as_array().unwrap().is_empty());
+	// Rust indexer creates MODULE nodes for directories with files.
+	// The classifier-repo fixture has src/ directory, so 1 module.
+	assert_eq!(result["count"], 1);
+	let modules = result["results"].as_array().expect("results is array");
+	assert_eq!(modules.len(), 1);
+	// The module should be the src directory
+	assert_eq!(modules[0]["canonical_root_path"], "src");
 }
 
 // ── 5. Non-empty result with exact field assertions ──────────────

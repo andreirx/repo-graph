@@ -108,6 +108,92 @@ impl StorageConnection {
 		Ok(results)
 	}
 
+	/// Fallback: derive file ownership from OWNS edges.
+	///
+	/// The Rust indexer creates OWNS edges (MODULE → FILE) in the edges
+	/// table but does not populate `module_file_ownership`. This method
+	/// provides a fallback path for rollup computation.
+	///
+	/// Returns ownership facts derived from OWNS edges where:
+	/// - source_node is kind = 'MODULE'
+	/// - target_node is kind = 'FILE'
+	pub fn get_file_ownership_from_owns_edges(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<FileOwnership>, StorageError> {
+		let conn = self.connection();
+		let mut stmt = conn.prepare(
+			"SELECT f.file_uid, m.node_uid AS module_uid
+			 FROM edges e
+			 JOIN nodes m ON e.source_node_uid = m.node_uid
+			 JOIN nodes f ON e.target_node_uid = f.node_uid
+			 WHERE e.snapshot_uid = ?
+			   AND e.type = 'OWNS'
+			   AND m.kind = 'MODULE'
+			   AND f.kind = 'FILE'
+			 ORDER BY f.file_uid ASC, m.node_uid ASC",
+		)?;
+
+		let rows = stmt.query_map([snapshot_uid], |row| {
+			Ok(FileOwnership {
+				file_uid: row.get("file_uid")?,
+				module_candidate_uid: row.get("module_uid")?,
+			})
+		})?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			results.push(row?);
+		}
+		Ok(results)
+	}
+
+	/// Fallback: get owned files for rollup from OWNS edges.
+	///
+	/// Similar to `get_owned_files_for_rollup` but queries OWNS edges
+	/// instead of `module_file_ownership` table.
+	///
+	/// Derives file path from FILE node's qualified_name and is_test
+	/// from the files table via file_uid.
+	pub fn get_owned_files_from_owns_edges(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<OwnedFileForRollup>, StorageError> {
+		let conn = self.connection();
+		// Join FILE node to files table via file_uid to get is_test.
+		// FILE node's qualified_name is the repo-relative path.
+		// FILE node's file_uid is the file identity (for modules files command).
+		let mut stmt = conn.prepare(
+			"SELECT f.file_uid, f.qualified_name AS path, m.node_uid AS module_uid, fi.is_test
+			 FROM edges e
+			 JOIN nodes m ON e.source_node_uid = m.node_uid
+			 JOIN nodes f ON e.target_node_uid = f.node_uid
+			 LEFT JOIN files fi ON f.file_uid = fi.file_uid
+			 WHERE e.snapshot_uid = ?
+			   AND e.type = 'OWNS'
+			   AND m.kind = 'MODULE'
+			   AND f.kind = 'FILE'
+			   AND f.qualified_name IS NOT NULL
+			 ORDER BY f.qualified_name ASC, m.node_uid ASC",
+		)?;
+
+		let rows = stmt.query_map([snapshot_uid], |row| {
+			let is_test_int: Option<i64> = row.get("is_test").ok();
+			Ok(OwnedFileForRollup {
+				file_uid: row.get("file_uid")?,
+				file_path: row.get("path")?,
+				module_candidate_uid: row.get("module_uid")?,
+				is_test: is_test_int.unwrap_or(0) == 1,
+			})
+		})?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			results.push(row?);
+		}
+		Ok(results)
+	}
+
 	/// Read files owned by a specific module candidate.
 	///
 	/// Joins module_file_ownership with files to return ownership
@@ -154,20 +240,16 @@ impl StorageConnection {
 	/// Read all owned files for a snapshot with is_test flag.
 	///
 	/// Joins module_file_ownership with files to return the fields
-	/// needed for rollup computation: file_path, module_candidate_uid, is_test.
+	/// needed for rollup computation: file_uid, file_path, module_candidate_uid, is_test.
 	///
 	/// Order is deterministic: sorted by (file_path, module_candidate_uid).
-	///
-	/// Unlike `get_file_ownership_for_snapshot` (which returns file_uid),
-	/// this method returns file_path for direct use in rollup aggregation
-	/// where dead nodes are attributed by path.
 	pub fn get_owned_files_for_rollup(
 		&self,
 		snapshot_uid: &str,
 	) -> Result<Vec<OwnedFileForRollup>, StorageError> {
 		let conn = self.connection();
 		let mut stmt = conn.prepare(
-			"SELECT f.path, o.module_candidate_uid, f.is_test
+			"SELECT f.file_uid, f.path, o.module_candidate_uid, f.is_test
 			 FROM module_file_ownership o
 			 JOIN files f ON o.file_uid = f.file_uid
 			 WHERE o.snapshot_uid = ?
@@ -177,6 +259,7 @@ impl StorageConnection {
 		let rows = stmt.query_map([snapshot_uid], |row| {
 			let is_test_int: i64 = row.get("is_test")?;
 			Ok(OwnedFileForRollup {
+				file_uid: row.get("file_uid")?,
 				file_path: row.get("path")?,
 				module_candidate_uid: row.get("module_candidate_uid")?,
 				is_test: is_test_int == 1,
@@ -193,10 +276,11 @@ impl StorageConnection {
 
 /// A file ownership fact for rollup computation.
 ///
-/// Minimal DTO combining file identity (path, is_test) with module
-/// ownership. Used by `get_owned_files_for_rollup`.
+/// Minimal DTO combining file identity (path, is_test, file_uid) with module
+/// ownership. Used by `get_owned_files_for_rollup` and fallback queries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnedFileForRollup {
+	pub file_uid: String,
 	pub file_path: String,
 	pub module_candidate_uid: String,
 	pub is_test: bool,
@@ -843,5 +927,251 @@ mod tests {
 
 		assert!(!src.is_test);
 		assert!(test.is_test);
+	}
+
+	// ── OWNS edge fallback tests ───────────────────────────────────
+
+	use crate::types::{GraphEdge, GraphNode};
+
+	fn make_module_node(
+		node_uid: &str,
+		snapshot_uid: &str,
+		repo_uid: &str,
+		module_key: &str,
+		canonical_path: &str,
+	) -> GraphNode {
+		GraphNode {
+			node_uid: node_uid.to_string(),
+			snapshot_uid: snapshot_uid.to_string(),
+			repo_uid: repo_uid.to_string(),
+			stable_key: format!("{}:{}:MODULE", repo_uid, canonical_path),
+			kind: "MODULE".to_string(),
+			subtype: None,
+			name: module_key.to_string(),
+			qualified_name: Some(canonical_path.to_string()),
+			file_uid: None,
+			parent_node_uid: None,
+			location: None,
+			signature: None,
+			visibility: None,
+			doc_comment: None,
+			metadata_json: None,
+		}
+	}
+
+	fn make_file_node(
+		node_uid: &str,
+		snapshot_uid: &str,
+		repo_uid: &str,
+		file_path: &str,
+		file_uid: &str,
+	) -> GraphNode {
+		GraphNode {
+			node_uid: node_uid.to_string(),
+			snapshot_uid: snapshot_uid.to_string(),
+			repo_uid: repo_uid.to_string(),
+			stable_key: format!("{}:{}:FILE", repo_uid, file_path),
+			kind: "FILE".to_string(),
+			subtype: None,
+			name: file_path.split('/').last().unwrap_or(file_path).to_string(),
+			qualified_name: Some(file_path.to_string()),
+			file_uid: Some(file_uid.to_string()),
+			parent_node_uid: None,
+			location: None,
+			signature: None,
+			visibility: None,
+			doc_comment: None,
+			metadata_json: None,
+		}
+	}
+
+	fn make_owns_edge(
+		edge_uid: &str,
+		snapshot_uid: &str,
+		repo_uid: &str,
+		module_node_uid: &str,
+		file_node_uid: &str,
+	) -> GraphEdge {
+		GraphEdge {
+			edge_uid: edge_uid.to_string(),
+			snapshot_uid: snapshot_uid.to_string(),
+			repo_uid: repo_uid.to_string(),
+			source_node_uid: module_node_uid.to_string(),
+			target_node_uid: file_node_uid.to_string(),
+			edge_type: "OWNS".to_string(),
+			resolution: "static".to_string(),
+			extractor: "test".to_string(),
+			location: None,
+			metadata_json: None,
+		}
+	}
+
+	#[test]
+	fn get_file_ownership_from_owns_edges_returns_empty_for_empty_snapshot() {
+		let conn = fresh_storage();
+		let (_, snapshot_uid) = setup_test_snapshot(&conn);
+
+		let result = conn
+			.get_file_ownership_from_owns_edges(&snapshot_uid)
+			.expect("query");
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn get_file_ownership_from_owns_edges_returns_ownership() {
+		let mut conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		// Create MODULE node
+		let module_node =
+			make_module_node("mod-1", &snapshot_uid, &repo_uid, "app", "packages/app");
+
+		// Create file record (required for FK constraint on nodes.file_uid)
+		let file_record = make_file(&repo_uid, "packages/app/index.ts");
+		conn.upsert_files(std::slice::from_ref(&file_record))
+			.expect("upsert file");
+
+		// Create FILE node with matching file_uid
+		let file = make_file_node(
+			"file-1",
+			&snapshot_uid,
+			&repo_uid,
+			"packages/app/index.ts",
+			&file_record.file_uid,
+		);
+
+		conn.insert_nodes(&[module_node, file]).expect("insert nodes");
+
+		// Create OWNS edge: module -> file
+		let owns = make_owns_edge("owns-1", &snapshot_uid, &repo_uid, "mod-1", "file-1");
+		conn.insert_edges(&[owns]).expect("insert edge");
+
+		let result = conn
+			.get_file_ownership_from_owns_edges(&snapshot_uid)
+			.expect("query");
+
+		assert_eq!(result.len(), 1);
+		// The result.file_uid is the FILE node's file_uid field (reference to files table)
+		assert_eq!(result[0].file_uid, file_record.file_uid);
+		assert_eq!(result[0].module_candidate_uid, "mod-1");
+	}
+
+	#[test]
+	fn get_file_ownership_from_owns_edges_excludes_non_owns_edges() {
+		let mut conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		let module_node =
+			make_module_node("mod-1", &snapshot_uid, &repo_uid, "app", "packages/app");
+
+		// Create file record (required for FK constraint on nodes.file_uid)
+		let file_record = make_file(&repo_uid, "packages/app/index.ts");
+		conn.upsert_files(std::slice::from_ref(&file_record))
+			.expect("upsert file");
+
+		let file = make_file_node(
+			"file-1",
+			&snapshot_uid,
+			&repo_uid,
+			"packages/app/index.ts",
+			&file_record.file_uid,
+		);
+		conn.insert_nodes(&[module_node, file]).expect("insert nodes");
+
+		// Create IMPORTS edge (not OWNS)
+		let mut edge = make_owns_edge("edge-1", &snapshot_uid, &repo_uid, "mod-1", "file-1");
+		edge.edge_type = "IMPORTS".to_string();
+		conn.insert_edges(&[edge]).expect("insert edge");
+
+		let result = conn
+			.get_file_ownership_from_owns_edges(&snapshot_uid)
+			.expect("query");
+
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn get_owned_files_from_owns_edges_returns_empty_for_empty_snapshot() {
+		let conn = fresh_storage();
+		let (_, snapshot_uid) = setup_test_snapshot(&conn);
+
+		let result = conn
+			.get_owned_files_from_owns_edges(&snapshot_uid)
+			.expect("query");
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn get_owned_files_from_owns_edges_returns_all_fields() {
+		let mut conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		// Create MODULE node
+		let module_node =
+			make_module_node("mod-1", &snapshot_uid, &repo_uid, "app", "packages/app");
+
+		// Create file in files table (for is_test lookup)
+		let file_record = make_file(&repo_uid, "packages/app/service.ts");
+		conn.upsert_files(std::slice::from_ref(&file_record))
+			.expect("upsert file");
+
+		// Create FILE node with matching file_uid
+		let file_node = make_file_node(
+			"file-1",
+			&snapshot_uid,
+			&repo_uid,
+			"packages/app/service.ts",
+			&file_record.file_uid,
+		);
+
+		conn.insert_nodes(&[module_node, file_node]).expect("insert nodes");
+
+		// Create OWNS edge
+		let owns = make_owns_edge("owns-1", &snapshot_uid, &repo_uid, "mod-1", "file-1");
+		conn.insert_edges(&[owns]).expect("insert edge");
+
+		let result = conn
+			.get_owned_files_from_owns_edges(&snapshot_uid)
+			.expect("query");
+
+		assert_eq!(result.len(), 1);
+		assert_eq!(result[0].file_path, "packages/app/service.ts");
+		assert_eq!(result[0].module_candidate_uid, "mod-1");
+		assert!(!result[0].is_test);
+	}
+
+	#[test]
+	fn get_owned_files_from_owns_edges_preserves_is_test() {
+		let mut conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		let module_node =
+			make_module_node("mod-1", &snapshot_uid, &repo_uid, "app", "packages/app");
+
+		// Create test file
+		let mut file_record = make_file(&repo_uid, "packages/app/service.test.ts");
+		file_record.is_test = true;
+		conn.upsert_files(std::slice::from_ref(&file_record))
+			.expect("upsert file");
+
+		let file_node = make_file_node(
+			"file-1",
+			&snapshot_uid,
+			&repo_uid,
+			"packages/app/service.test.ts",
+			&file_record.file_uid,
+		);
+
+		conn.insert_nodes(&[module_node, file_node]).expect("insert nodes");
+
+		let owns = make_owns_edge("owns-1", &snapshot_uid, &repo_uid, "mod-1", "file-1");
+		conn.insert_edges(&[owns]).expect("insert edge");
+
+		let result = conn
+			.get_owned_files_from_owns_edges(&snapshot_uid)
+			.expect("query");
+
+		assert_eq!(result.len(), 1);
+		assert!(result[0].is_test);
 	}
 }
