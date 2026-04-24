@@ -165,7 +165,7 @@ This section is the operational contract for implementation agents working on re
 | Structural graph | IMPORTS, CALLS extraction; callers/callees/path/dead/cycles | Call graph recall on SDK/functional patterns | Framework extractors (Express, NestJS) |
 | Module discovery | Layer 1 (declared), Layer 2 (operational), Layer 3 A1 (Kbuild), Layer 3 B1 (directory); modules list/show/files/deps/violations | Layer 3 C1 graph clustering; `__init__.py` evidence | GNU Makefile/CMake module discovery |
 | Module graph | Cross-module IMPORTS edges; weighted neighbors; boundary violations; diagnostics | — | Per-module dead-code rollups |
-| Runtime/build | Phase 0 identity; Dockerfile, docker-compose detectors; package.json script-only fallback; `rmap surfaces list/show` | Makefile/CMake targets | Infra roots (Terraform, Pulumi, Helm) |
+| Runtime/build | Phase 0 identity; Dockerfile, docker-compose detectors; package.json script-only fallback; Makefile v1; `rmap surfaces list/show` | Workspace adapter; CMake File API | Infra roots (Terraform, Pulumi, Helm) |
 | Measurements | Graph stats, cyclomatic complexity, nesting depth, parameter count, coverage, churn, hotspots, risk | Coverage/churn snapshot-tight filtering; complexity surfaced mostly through dedicated metric queries | Cognitive complexity, NPath, function length, policy-backed quality assessments |
 | Declarations | module, boundary, entrypoint, invariant, requirement, obligation, waiver | `supersedes_uid` lineage exposure | Policy/gate-mode versioning |
 | Verdicts | 5-state effective model (computed + effective + WAIVED) | — | Persisted verification records |

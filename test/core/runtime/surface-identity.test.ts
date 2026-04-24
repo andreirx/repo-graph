@@ -366,9 +366,72 @@ describe("computeSourceSpecificId", () => {
 		expect(() =>
 			computeSourceSpecificId({
 				sourceType: "makefile_target",
+				targetName: "build",
 				rootPath: ".",
 			}),
 		).toThrow(MissingIdentityFieldError);
+
+		try {
+			computeSourceSpecificId({
+				sourceType: "makefile_target",
+				targetName: "build",
+				rootPath: ".",
+			});
+		} catch (e) {
+			const err = e as MissingIdentityFieldError;
+			expect(err.sourceType).toBe("makefile_target");
+			expect(err.missingField).toBe("makefilePath");
+		}
+	});
+
+	it("throws MissingIdentityFieldError when makefile_target lacks targetName", () => {
+		expect(() =>
+			computeSourceSpecificId({
+				sourceType: "makefile_target",
+				makefilePath: "./Makefile",
+				rootPath: ".",
+			}),
+		).toThrow(MissingIdentityFieldError);
+
+		try {
+			computeSourceSpecificId({
+				sourceType: "makefile_target",
+				makefilePath: "./Makefile",
+				rootPath: ".",
+			});
+		} catch (e) {
+			const err = e as MissingIdentityFieldError;
+			expect(err.sourceType).toBe("makefile_target");
+			expect(err.missingField).toBe("targetName");
+		}
+	});
+
+	it("computes makefile_target identity with makefilePath:targetName", () => {
+		const build = computeSourceSpecificId({
+			sourceType: "makefile_target",
+			makefilePath: "./Makefile",
+			targetName: "build",
+			rootPath: ".",
+		});
+		const test = computeSourceSpecificId({
+			sourceType: "makefile_target",
+			makefilePath: "./Makefile",
+			targetName: "test",
+			rootPath: ".",
+		});
+		const install = computeSourceSpecificId({
+			sourceType: "makefile_target",
+			makefilePath: "./Makefile",
+			targetName: "install",
+			rootPath: ".",
+		});
+
+		// Same Makefile, different targets → distinct IDs
+		expect(build).toBe("./Makefile:build");
+		expect(test).toBe("./Makefile:test");
+		expect(install).toBe("./Makefile:install");
+		expect(build).not.toBe(test);
+		expect(test).not.toBe(install);
 	});
 
 	it("throws MissingIdentityFieldError when pnpm_workspace lacks workspaceName", () => {
@@ -399,11 +462,13 @@ describe("computeSourceSpecificId", () => {
 	});
 
 	it("computes Phase 1 identity when required fields are provided", () => {
+		// makefile_target requires both makefilePath AND targetName
 		expect(computeSourceSpecificId({
 			sourceType: "makefile_target",
 			makefilePath: "./Makefile",
+			targetName: "all",
 			rootPath: ".",
-		})).toBe("./Makefile");
+		})).toBe("./Makefile:all");
 
 		expect(computeSourceSpecificId({
 			sourceType: "pnpm_workspace",
@@ -510,6 +575,42 @@ describe("computeStableSurfaceKey", () => {
 		const key = computeStableSurfaceKey(input);
 		expect(key).toHaveLength(32);
 		expect(/^[0-9a-f]+$/.test(key)).toBe(true);
+	});
+
+	it("produces distinct keys for different Makefile targets in same file", () => {
+		// Critical identity test: same Makefile with build and test must produce
+		// two distinct stableSurfaceKey values. If they collapse, surfaces merge.
+		const base = {
+			repoUid: "my-repo",
+			moduleCanonicalRootPath: ".",
+			sourceType: "makefile_target" as const,
+		};
+
+		const buildKey = computeStableSurfaceKey({
+			...base,
+			surfaceKind: "library",
+			sourceSpecificId: "./Makefile:build",
+		});
+		const testKey = computeStableSurfaceKey({
+			...base,
+			surfaceKind: "cli",
+			sourceSpecificId: "./Makefile:test",
+		});
+		const installKey = computeStableSurfaceKey({
+			...base,
+			surfaceKind: "cli",
+			sourceSpecificId: "./Makefile:install",
+		});
+
+		// All three must be distinct
+		expect(buildKey).not.toBe(testKey);
+		expect(testKey).not.toBe(installKey);
+		expect(buildKey).not.toBe(installKey);
+
+		// All are valid hex strings of correct length
+		expect(buildKey).toHaveLength(32);
+		expect(testKey).toHaveLength(32);
+		expect(installKey).toHaveLength(32);
 	});
 });
 

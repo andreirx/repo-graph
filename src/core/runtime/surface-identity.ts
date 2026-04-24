@@ -87,8 +87,10 @@ export interface SourceSpecificIdInput {
 	dockerfilePath?: string;
 
 	// ── Phase 1 identity fields (reserved) ─────────────────────────────
-	/** For makefile_target, cmake_target: path to Makefile/CMakeLists.txt. */
+	/** For makefile_target: path to Makefile. */
 	makefilePath?: string;
+	/** For makefile_target: target name (required for identity). */
+	targetName?: string;
 	/** For workspace source types: workspace member name or path. */
 	workspaceName?: string;
 	/** For helm_chart: chart name. */
@@ -199,9 +201,21 @@ export function computeSourceSpecificId(input: SourceSpecificIdInput): string {
 
 		// ── Phase 1 source types (enum reserved, strict validation) ───────
 
-		case "makefile_target":
+		case "makefile_target": {
+			// Makefile targets: both makefilePath AND targetName are REQUIRED
+			// Multiple targets from the same Makefile must produce distinct keys
+			if (!input.makefilePath) {
+				throw new MissingIdentityFieldError(sourceType, "makefilePath", rootPath);
+			}
+			if (!input.targetName) {
+				throw new MissingIdentityFieldError(sourceType, "targetName", rootPath);
+			}
+			return `${input.makefilePath}:${input.targetName}`;
+		}
+
 		case "cmake_target": {
-			// Build targets: makefilePath is REQUIRED
+			// CMake targets: deferred, but enum reserved
+			// When implemented, will require cmake File API metadata, not source parsing
 			if (!input.makefilePath) {
 				throw new MissingIdentityFieldError(sourceType, "makefilePath", rootPath);
 			}

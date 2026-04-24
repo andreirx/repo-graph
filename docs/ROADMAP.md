@@ -585,6 +585,18 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - Metadata includes `fallbackReason: "script_only_package"`.
 - Unit tests (7) and integration tests (5) with dedicated fixtures.
 
+### Runtime/build Phase 1C — Makefile v1
+- **Makefile target detection** — conservative parsing, one surface per target.
+- Identity: `makefilePath:targetName` prevents collapse of multiple targets.
+- Recognized: `Makefile`, `makefile`, `GNUmakefile`. `*.mk` excluded.
+- Target classification:
+  - CLI targets: `run`, `serve`, `test`, `lint`, `install`, `deploy`, etc.
+  - Library targets: `all`, `build`, `lib`, `static`, `shared`, etc.
+  - Skipped: `clean`, `distclean`, pattern rules, variable-derived targets.
+- RuntimeKind: `native_c_cpp` if C/C++ signals, else `node`/`python`/`unknown`.
+- Diagnostics returned but not persisted (tech debt).
+- Unit tests (20) and integration tests (5) with `makefile-basic/` fixture.
+
 ### Rust CLI surfaces parity
 - `rmap surfaces list` — surface catalog with filters (`--kind`, `--runtime`,
   `--source`, `--module`). Module enrichment via JOIN. Evidence count.
@@ -601,20 +613,19 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 ### 1. Runtime/build v1 continuation
 Complete the runtime/build model with remaining detectors.
 
-**Next slice: Makefile/CMake target detection**
-- Detect build targets from Makefile and CMakeLists.txt.
-- Surface kind inference: `cli` for executable targets, `library` for lib targets.
-- Build system: `make` or `cmake`.
-- Evidence: target name, source files, dependencies.
+**Makefile v1 shipped.** See Phase 1C above.
 
-**Also deferred in this track:**
+**Next options (choose one):**
+- **Workspace adapter** — pnpm-workspace.yaml, npm workspaces, lerna.json
+- **CMake File API design** — read generated metadata after `cmake -B build`
+
+**Explicitly deferred:**
 - Infra roots (Terraform, Pulumi, Helm)
-- Workspace detector (separate module discovery track)
 
-**Why this is #1:**
-- Runtime/build model is the active partially-complete product area.
-- Makefile/CMake detection extends surface coverage to C/C++ and polyglot repos.
-- Smaller and safer than adding infra-root detection.
+**Why Makefile shipped first:**
+- Makefile has line-based rules; CMake is a language with generator expressions.
+- Known-good CMake approach is File API, not regex parsing.
+- Makefile v1 delivered C/C++ polyglot coverage without false confidence.
 
 ### 2. Agentic quality-control surface (unchanged from prior roadmap)
 Turn existing metric storage and gate primitives into an operational

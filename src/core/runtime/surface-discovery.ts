@@ -100,8 +100,9 @@ export function discoverSurfaces(input: SurfaceDiscoveryInput): SurfaceDiscovery
 			scriptName: detected.scriptName,
 			serviceName: detected.serviceName,
 			dockerfilePath: detected.dockerfilePath,
-			// Phase 1 identity fields (reserved, detectors not implemented)
+			// Phase 1 identity fields
 			makefilePath: detected.makefilePath,
+			targetName: detected.targetName,
 			workspaceName: detected.workspaceName,
 			chartName: detected.chartName,
 			infraModulePath: detected.infraModulePath,

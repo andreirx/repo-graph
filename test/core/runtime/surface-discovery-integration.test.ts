@@ -60,6 +60,11 @@ const SCRIPT_ONLY_SERVICE_FIXTURE = join(
 	"../../fixtures/script-only-service",
 );
 
+const MAKEFILE_BASIC_FIXTURE = join(
+	import.meta.dirname,
+	"../../fixtures/makefile-basic",
+);
+
 let extractor: TypeScriptExtractor;
 let scanner: ManifestScanner;
 
@@ -715,6 +720,168 @@ describe("surface discovery integration — script-only fallback", () => {
 		const scriptEv = scriptEvidence.find((e) => e.evidenceKind === "script_command");
 		expect(scriptEv).toBeDefined();
 		expect(scriptEv!.sourceType).toBe("package_json_scripts");
+
+		provider.close();
+	});
+});
+
+// ── makefile-basic fixture ─────────────────────────────────────────
+
+describe("surface discovery integration — Makefile", () => {
+	it("detects multiple targets as distinct surfaces", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "makefile-multi";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "makefile-basic",
+			rootPath: MAKEFILE_BASIC_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+
+		// Should have 3 makefile_target surfaces: build, test, install
+		const makefileSurfaces = surfaces.filter((s) => s.sourceType === "makefile_target");
+		expect(makefileSurfaces).toHaveLength(3);
+
+		const names = makefileSurfaces.map((s) => s.displayName).sort();
+		expect(names).toEqual(["build", "install", "test"]);
+
+		provider.close();
+	});
+
+	it("Makefile targets have distinct stableSurfaceKey values", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "makefile-keys";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "makefile-basic",
+			rootPath: MAKEFILE_BASIC_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+		const makefileSurfaces = surfaces.filter((s) => s.sourceType === "makefile_target");
+
+		// All stableSurfaceKeys must be unique
+		const keys = makefileSurfaces.map((s) => s.stableSurfaceKey);
+		expect(new Set(keys).size).toBe(keys.length);
+
+		provider.close();
+	});
+
+	it("build target is library, test/install targets are cli", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "makefile-kinds";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "makefile-basic",
+			rootPath: MAKEFILE_BASIC_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+
+		const buildSurface = surfaces.find(
+			(s) => s.sourceType === "makefile_target" && s.displayName === "build",
+		);
+		const testSurface = surfaces.find(
+			(s) => s.sourceType === "makefile_target" && s.displayName === "test",
+		);
+		const installSurface = surfaces.find(
+			(s) => s.sourceType === "makefile_target" && s.displayName === "install",
+		);
+
+		expect(buildSurface).toBeDefined();
+		expect(buildSurface!.surfaceKind).toBe("library");
+
+		expect(testSurface).toBeDefined();
+		expect(testSurface!.surfaceKind).toBe("cli");
+
+		expect(installSurface).toBeDefined();
+		expect(installSurface!.surfaceKind).toBe("cli");
+
+		provider.close();
+	});
+
+	it("Makefile surfaces have correct buildSystem and runtimeKind", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "makefile-meta";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "makefile-basic",
+			rootPath: MAKEFILE_BASIC_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+		const makefileSurface = surfaces.find((s) => s.sourceType === "makefile_target");
+
+		expect(makefileSurface).toBeDefined();
+		expect(makefileSurface!.buildSystem).toBe("make");
+		// Fixture has .c files → native_c_cpp
+		expect(makefileSurface!.runtimeKind).toBe("native_c_cpp");
+
+		provider.close();
+	});
+
+	it("Makefile surface evidence has build_target kind", async () => {
+		const { storage, provider } = setupDb();
+		const REPO_UID = "makefile-evidence";
+
+		storage.addRepo({
+			repoUid: REPO_UID,
+			name: "makefile-basic",
+			rootPath: MAKEFILE_BASIC_FIXTURE,
+			defaultBranch: "main",
+			createdAt: new Date().toISOString(),
+			metadataJson: null,
+		});
+
+		const indexer = new RepoIndexer(storage, extractor, undefined, scanner);
+		const result = await indexer.indexRepo(REPO_UID);
+
+		const surfaces = storage.queryProjectSurfaces(result.snapshotUid);
+		const makefileSurface = surfaces.find((s) => s.sourceType === "makefile_target");
+		expect(makefileSurface).toBeDefined();
+
+		const allEvidence = storage.queryAllProjectSurfaceEvidence(result.snapshotUid);
+		const makefileEvidence = allEvidence.filter(
+			(e) => e.projectSurfaceUid === makefileSurface!.projectSurfaceUid,
+		);
+
+		expect(makefileEvidence.length).toBeGreaterThanOrEqual(1);
+		expect(makefileEvidence[0].sourceType).toBe("makefile_target");
+		expect(makefileEvidence[0].evidenceKind).toBe("build_target");
+
+		// Evidence payload contains target info
+		const payload = JSON.parse(makefileEvidence[0].payloadJson!);
+		expect(payload.targetName).toBeDefined();
+		expect(payload.makefilePath).toBe("Makefile");
 
 		provider.close();
 	});

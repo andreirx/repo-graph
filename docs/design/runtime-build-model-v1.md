@@ -11,11 +11,33 @@ script extraction.
   detectors implemented and wired.
 - Phase 1B (script-only fallback): SHIPPED. Package.json script-only
   fallback for packages with operational scripts but no bin/main/exports.
+- Phase 1C (Makefile v1): SHIPPED. Conservative Makefile target detection,
+  one surface per explicit target, identity via `makefilePath:targetName`.
 - Rust CLI parity: SHIPPED. `rmap surfaces list/show` with filters,
   module enrichment, evidence count, ambiguity handling.
-- **Next slice:** Makefile detector (Phase 1 item 11).
+- **Next slice:** Workspace adapter or CMake File API design.
 
-**Revision:** 11 (2026-04-24)
+**Revision:** 12 (2026-04-24)
+
+### Corrections in Rev 12
+
+1. **Makefile identity fix:** `makefile_target` sourceSpecificId must include
+   `targetName`, not just `makefilePath`. Multiple targets from one Makefile
+   must produce distinct surfaces. Identity: `makefilePath:targetName`.
+
+2. **CMake explicitly deferred:** CMake parsing is complex (generator expressions,
+   imported targets, toolchain context). Known-good solution is CMake File API
+   over generated build metadata. Do not parse CMakeLists.txt as if declarative.
+
+3. **Makefile v1 implementation shipped:** Conservative detector with explicit
+   target parsing only. Unknown targets skipped (design decision: avoid surface
+   pollution). Diagnostics returned but not persisted in v1.
+
+4. **DetectedSurface interface extension:** Added `targetName?: string` for
+   Makefile target identity. Also added to `SourceSpecificIdInput`.
+
+5. **Indexer wiring:** `isMakefileName()` recognizes `Makefile`, `makefile`,
+   `GNUmakefile`. `*.mk` files excluded (typically included, not standalone).
 
 ### Corrections in Rev 11
 
@@ -278,9 +300,13 @@ rgr surfaces evidence <repo> <surface>  — evidence items
 
 ### Explicitly Deferred
 
+- **CMakeLists.txt detection:** CMake is a language with functions, variables,
+  generator expressions, imported targets, and toolchain context. Parsing it
+  as declarative data produces false confidence. Known-good solution is the
+  **CMake File API** which reads generated build metadata after cmake configure.
+  Do not regex CMakeLists.txt as if it were a manifest.
 - Gradle application plugin detection (requires Groovy/Kotlin DSL parsing)
 - Maven pom.xml plugin detection (requires XML parsing with POM inheritance)
-- CMakeLists.txt detection (complex variable expansion)
 - Daemon detection (requires runtime analysis or explicit annotations)
 - Kubernetes manifests (too distant from code-level surface)
 - Terraform/Pulumi/Helm (existing enum value, but detector deferred)
@@ -532,9 +558,13 @@ function detectDockerComposeSurfaces(
 }
 ```
 
-### Makefile Detector
+### Makefile Detector v1
 
-**Input:** Makefile content, repo-relative path.
+**Status:** SHIPPED.
+
+**Scope constraint:** Makefile-only in this slice. CMake deferred.
+
+**Input:** Makefile content as string, repo-relative path.
 
 **Pure function signature:**
 
@@ -545,37 +575,172 @@ function detectMakefileSurfaces(
 ): DetectedSurface[]
 ```
 
-**Detection rules:**
+#### v1 Parsing Constraints
 
-1. Extract `.PHONY:` targets — these are named build commands.
-2. Extract explicit rules: `<target>: <deps>`.
-3. A Makefile produces ONE surface with `buildSystem: "make"`:
-   - If targets include `install` or produce a binary → `surfaceKind: "cli"`
-   - If targets are only `build`, `test`, `clean` → `surfaceKind: "library"`
-   - Default: `surfaceKind: "library"`, `runtimeKind: "native_c_cpp"`
+Conservative target extraction only. No shell execution, no variable expansion,
+no recursive make traversal.
 
-4. Language inference:
-   - If Makefile references `.c`, `.cpp`, `.h` → `runtimeKind: "native_c_cpp"`
-   - If Makefile references `.rs` → defer to Cargo.toml detection
-   - If Makefile references `.go` → `runtimeKind: "unknown"` (Go has its own build)
+**What v1 parses:**
 
-**Confidence rules:**
+1. **Explicit target rules:** Lines matching `target: deps` where `target` is a
+   literal name (no `$(VAR)` or `${VAR}` expansion).
 
-| Signal | Confidence |
-|--------|------------|
-| .PHONY with build/test/install | 0.80 |
-| Makefile exists, minimal rules | 0.60 |
-| Wrapper Makefile (calls cargo/npm) | 0.50 |
+2. **`.PHONY` declarations:** Lines matching `.PHONY: target1 target2 ...`
 
-**Evidence payload:**
+3. **Comment lines:** Lines starting with `#` are ignored.
 
-```json
-{
-  "phonyTargets": ["build", "test", "install", "clean"],
-  "defaultTarget": "all",
-  "inferredLanguage": "c_cpp"
+4. **Line continuations:** `\` at end of line joins with next line.
+
+**What v1 skips (with diagnostic):**
+
+1. **Variable-derived targets:** `$(TARGET): deps` or `${NAME}: deps`
+   - Emit diagnostic: `skipped_dynamic_target`
+
+2. **Pattern rules:** `%.o: %.c` or `%: %.in`
+   - Emit diagnostic: `skipped_pattern_rule`
+
+3. **Special targets:** `.DEFAULT`, `.SUFFIXES`, `.PRECIOUS`, etc.
+   - These are control targets, not build surfaces
+
+4. **Included Makefiles:** `include foo.mk` or `-include optional.mk`
+   - v1 does not resolve includes
+   - Emit diagnostic: `skipped_include_directive`
+
+5. **Conditional blocks:** `ifeq`, `ifdef`, `ifndef`, `else`, `endif`
+   - v1 does not evaluate conditionals
+   - Targets inside conditionals are extracted if they are explicit
+
+#### Surface Generation Rules
+
+**Critical identity rule:** Each detected target produces ONE surface. Multiple
+targets from the same Makefile produce multiple surfaces with distinct
+`stableSurfaceKey` values. The identity tuple is `(makefilePath, targetName)`.
+
+**Surface kind classification:**
+
+| Target Name Pattern | surfaceKind | Confidence | Classification Reason |
+|---------------------|-------------|------------|----------------------|
+| `run`, `serve`, `start`, `dev` | `cli` | 0.65 | Runnable service target |
+| `test`, `check`, `lint`, `format` | `cli` | 0.65 | Test/quality tool |
+| `install`, `deploy`, `migrate` | `cli` | 0.65 | Deployment action |
+| `all`, `build`, `default` | `library` | 0.55 | Primary build target |
+| `lib`, `static`, `shared`, `archive` | `library` | 0.55 | Library build target |
+| `clean`, `distclean`, `mostlyclean` | (skip) | — | Not a build surface |
+| Other explicit targets | (skip) | — | Unknown target, avoid surface pollution |
+
+**Confidence modifiers:**
+
+| Condition | Modifier |
+|-----------|----------|
+| Target is `.PHONY` | +0.10 |
+| Target has no dependencies | -0.10 |
+
+**Skipped targets (no surface produced):**
+
+- `clean`, `distclean`, `mostlyclean`, `realclean` — cleanup, not build
+- Targets starting with `.` (special targets)
+- Variable-derived targets
+- Pattern rules
+
+#### runtimeKind Inference
+
+| Signal in Makefile | runtimeKind | Confidence |
+|--------------------|-------------|------------|
+| References `.c`, `.cpp`, `.h`, `.cc` | `native_c_cpp` | 0.70 |
+| References `.go` files | `unknown` | — (Go has its own build) |
+| References `.rs` files | `unknown` | — (defer to Cargo.toml) |
+| `CC =`, `CXX =`, `gcc`, `g++`, `clang` | `native_c_cpp` | 0.75 |
+| No language signals | `unknown` | — |
+
+**buildSystem:** Always `"make"` for Makefile-sourced surfaces.
+
+#### Identity Fields
+
+```typescript
+interface DetectedSurface {
+  // ... standard fields ...
+  sourceType: "makefile_target";
+  makefilePath: string;   // Required: repo-relative path to Makefile
+  targetName: string;     // Required: target name (e.g., "build", "test")
 }
 ```
+
+**sourceSpecificId computation:**
+
+```typescript
+case "makefile_target":
+  if (!detected.targetName) {
+    throw new Error("makefile_target requires targetName");
+  }
+  return `${detected.makefilePath}:${detected.targetName}`;
+```
+
+#### Evidence Schema
+
+One evidence item per detected target:
+
+```typescript
+interface MakefileTargetEvidence {
+  sourceType: "makefile_target";
+  sourcePath: string;              // Makefile path
+  evidenceKind: "build_target";
+  confidence: number;
+  payload: {
+    makefilePath: string;
+    targetName: string;
+    dependencies: string[];        // Literal deps from rule
+    isPhony: boolean;
+    classificationReason: string;  // "runnable_service" | "build_target" | "unknown"
+    skippedDynamic: false;         // Always false for detected targets
+  };
+}
+```
+
+#### Diagnostic Output
+
+For unsupported patterns, emit diagnostic items (not errors):
+
+```typescript
+interface MakefileDetectionDiagnostic {
+  makefilePath: string;
+  kind: "skipped_dynamic_target" | "skipped_pattern_rule" | "skipped_include_directive";
+  line: number;
+  rawLine: string;
+  reason: string;
+}
+```
+
+Diagnostics are collected but do not prevent surface detection. They inform
+callers that the Makefile contains constructs v1 cannot fully model.
+
+#### Technical Debt (v1)
+
+Document these limitations explicitly:
+
+1. **No variable expansion:** Targets like `$(BINARIES): ...` are skipped.
+2. **No included Makefile resolution:** `include common.mk` is noted but not followed.
+3. **No shell semantic analysis:** Recipe commands are not parsed.
+4. **No recursive make traversal:** `$(MAKE) -C subdir` is not followed.
+5. **No conditional evaluation:** `ifeq`/`ifdef` blocks are not resolved.
+6. **No CMake support:** CMake requires CMake File API, not source parsing.
+
+#### Tests Required
+
+**Unit tests:**
+
+1. Explicit target `build: deps` → one `library` surface
+2. `.PHONY: test` → one `cli` surface with `isPhony: true`
+3. Multiple targets in same Makefile → distinct `stableSurfaceKey` values
+4. Variable-derived target `$(FOO): bar` → no surface, diagnostic emitted
+5. Pattern rule `%.o: %.c` → no surface, diagnostic emitted
+6. `clean` target → no surface (skipped)
+7. No explicit targets → no surfaces
+
+**Integration tests:**
+
+1. Fixture `makefile-basic/` with `Makefile` containing `build`, `test`, `install`
+   → three distinct surfaces
+2. Existing package.json/Dockerfile/compose tests unchanged (regression)
 
 ### Workspace Detector
 
@@ -669,7 +834,7 @@ other surfaces under the same module. The identity tuple varies by source:
 | package.json scripts-only | `root_path` (fallback surface) |
 | Dockerfile | `source_path` (path to the Dockerfile) |
 | docker-compose service | `source_path` + `service_name` |
-| Makefile | `source_path` (path to the Makefile) |
+| Makefile target | `source_path` + `target_name` |
 | Cargo.toml bin | `bin_name` + `entrypoint_path` |
 | Cargo.toml lib | `root_path` (library surface) |
 
@@ -730,7 +895,11 @@ function computeSourceSpecificId(detected: DetectedSurface): string {
       return detected.dockerfilePath ?? detected.rootPath;
     
     case "makefile_target":
-      return detected.makefilePath ?? detected.rootPath;
+      // Target name is part of identity to prevent collapse
+      if (!detected.targetName) {
+        throw new Error("makefile_target requires targetName");
+      }
+      return `${detected.makefilePath}:${detected.targetName}`;
     
     case "framework_dependency":
       return `framework:${detected.frameworkName}`;
@@ -755,6 +924,7 @@ interface DetectedSurface {
   serviceName?: string;        // docker-compose service name
   dockerfilePath?: string;     // path to Dockerfile
   makefilePath?: string;       // path to Makefile
+  targetName?: string;         // Makefile target name (required for makefile_target)
   frameworkName?: string;      // framework name
 }
 ```
@@ -1371,9 +1541,13 @@ eroded by compatibility escapes.
 8. **Dockerfile detector** — SHIPPED. Pure function + unit tests.
 9. **docker-compose adapter** — SHIPPED. YAML parsing to typed DTO.
 10. **docker-compose core detector** — SHIPPED. Pure function over DTO + unit tests.
-11. **Makefile detector** — pure function + unit tests
+11. **Makefile detector v1** — SHIPPED. Pure function, conservative parsing,
+    one surface per explicit target. No variable expansion, no CMake. Identity:
+    `makefilePath:targetName`. Diagnostics returned but not persisted in v1.
 12. **Workspace adapter** — YAML/JSON parsing + glob expansion
 13. **Workspace core detector** — pure function over DTO + unit tests
+14. **CMake detector** — DEFERRED. Requires CMake File API over generated metadata,
+    not source parsing. Do not parse CMakeLists.txt as if declarative.
 
 ### Phase 2: Integration
 
@@ -1420,13 +1594,56 @@ is stable regardless of workspace configuration.
 
 ## Technical Debt Notes
 
-### TD-1: Makefile Variable Expansion
+### TD-1: Makefile v1 Limitations
 
-Makefiles can use variables (`$(CC)`, `$(SRCS)`). The v1 detector does
-NOT expand variables. It extracts literal target names and .PHONY lists.
+The Makefile detector v1 is deliberately conservative:
 
-This means some inference (e.g., "compiles C files") may be inaccurate
-if sources are specified via variables.
+1. **No variable expansion:** Targets like `$(BINARIES): ...` are skipped.
+   Diagnostic emitted: `skipped_dynamic_target`.
+
+2. **No included Makefile resolution:** `include common.mk` is noted but
+   not followed. Diagnostic emitted: `skipped_include_directive`.
+
+3. **No shell semantic analysis:** Recipe commands are not parsed. We cannot
+   infer what a target actually does from its shell commands.
+
+4. **No recursive make traversal:** `$(MAKE) -C subdir` is not followed.
+   Subdirectory Makefiles must be discovered separately.
+
+5. **No conditional evaluation:** `ifeq`/`ifdef` blocks are not resolved.
+   Targets inside conditionals are extracted if they are explicit.
+
+6. **No pattern rule semantics:** `%.o: %.c` is skipped. We detect explicit
+   targets only.
+
+These limitations are intentional for v1. The alternative—partial variable
+expansion with unknown accuracy—produces false confidence. Better to be
+conservative and emit diagnostics.
+
+**Future path:** v2 could integrate with make's `--print-data-base` to get
+resolved target and dependency information. This requires make execution
+(not pure parsing) and is deferred.
+
+### TD-1B: CMake Deferred
+
+CMake is not a build system config file; it is a language with:
+- Functions and macros
+- Generator expressions (`$<TARGET_FILE:foo>`)
+- Imported targets (`find_package` + `target_link_libraries`)
+- Toolchain files and platform conditionals
+- Multi-configuration generators (Debug/Release)
+
+Parsing `CMakeLists.txt` as if it were declarative data produces false
+confidence. The known-good solution is the **CMake File API** which reads
+metadata generated after `cmake -B build` (the configure step).
+
+This requires:
+1. Running cmake configure (or finding existing build directory)
+2. Reading `.cmake/api/v1/reply/` JSON files
+3. Extracting target information from generated metadata
+
+This is a fundamentally different approach than source parsing. Deferred
+until runtime/build model demonstrates demand.
 
 ### TD-2: Dockerfile Multi-Stage Complexity
 

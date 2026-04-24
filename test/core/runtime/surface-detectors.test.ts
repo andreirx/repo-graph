@@ -14,9 +14,11 @@ import {
 	detectCargoSurfaces,
 	detectComposeSurfaces,
 	detectDockerfileSurfaces,
+	detectMakefileSurfaces,
 	detectPackageJsonSurfaces,
 	detectPyprojectSurfaces,
 	type ComposeFileInput,
+	type MakefileDetectionResult,
 } from "../../../src/core/runtime/surface-detectors.js";
 
 // ── package.json ───────────────────────────────────────────────────
@@ -975,5 +977,365 @@ describe("detectComposeSurfaces", () => {
 		};
 		const surfaces = detectComposeSurfaces(input);
 		expect(surfaces[0].displayName).toBe("custom-api-name");
+	});
+});
+
+// ── Makefile ───────────────────────────────────────────────────────
+
+describe("detectMakefileSurfaces", () => {
+	it("detects explicit build target as library surface", () => {
+		const content = `
+all: main.o utils.o
+	gcc -o myapp main.o utils.o
+
+build: src/main.c
+	gcc -c src/main.c
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+		expect(result.surfaces.length).toBeGreaterThanOrEqual(1);
+
+		const buildSurface = result.surfaces.find((s) => s.displayName === "build");
+		expect(buildSurface).toBeDefined();
+		expect(buildSurface!.surfaceKind).toBe("library");
+		expect(buildSurface!.buildSystem).toBe("make");
+		expect(buildSurface!.sourceType).toBe("makefile_target");
+		expect(buildSurface!.targetName).toBe("build");
+	});
+
+	it("detects .PHONY test target as cli surface", () => {
+		const content = `
+.PHONY: test
+
+test: build
+	./run_tests.sh
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+		expect(result.surfaces).toHaveLength(1);
+
+		const testSurface = result.surfaces[0];
+		expect(testSurface.surfaceKind).toBe("cli");
+		expect(testSurface.displayName).toBe("test");
+
+		const payload = testSurface.evidence[0].payload as Record<string, unknown>;
+		expect(payload.isPhony).toBe(true);
+	});
+
+	it("skips clean target (no surface produced)", () => {
+		const content = `
+clean:
+	rm -rf build/
+
+distclean: clean
+	rm -rf deps/
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+		expect(result.surfaces).toHaveLength(0);
+	});
+
+	it("skips pattern rule with diagnostic", () => {
+		const content = `
+%.o: %.c
+	gcc -c $< -o $@
+
+build: main.o
+	gcc -o app main.o
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+
+		// build target should still be detected
+		expect(result.surfaces.length).toBeGreaterThanOrEqual(1);
+
+		// pattern rule should emit diagnostic
+		const patternDiag = result.diagnostics.find((d) => d.kind === "skipped_pattern_rule");
+		expect(patternDiag).toBeDefined();
+		expect(patternDiag!.reason).toContain("Pattern rules");
+	});
+
+	it("skips variable-derived target with diagnostic", () => {
+		const content = `
+TARGET = myapp
+
+$(TARGET): main.o
+	gcc -o $(TARGET) main.o
+
+build: $(TARGET)
+	echo "Built"
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+
+		// variable target emits diagnostic
+		const varDiag = result.diagnostics.find((d) => d.kind === "skipped_dynamic_target");
+		expect(varDiag).toBeDefined();
+		expect(varDiag!.reason).toContain("Variable-derived");
+
+		// build target still detected
+		const buildSurface = result.surfaces.find((s) => s.displayName === "build");
+		expect(buildSurface).toBeDefined();
+	});
+
+	it("multiple literal targets produce distinct surfaces", () => {
+		const content = `
+.PHONY: build test install
+
+build: src/main.c
+	gcc -o app src/main.c
+
+test: build
+	./run_tests.sh
+
+install: build
+	cp app /usr/local/bin/
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+
+		// Should have 3 distinct surfaces
+		expect(result.surfaces).toHaveLength(3);
+
+		const names = result.surfaces.map((s) => s.displayName).sort();
+		expect(names).toEqual(["build", "install", "test"]);
+
+		// Each has distinct targetName for identity
+		const targetNames = result.surfaces.map((s) => s.targetName).sort();
+		expect(targetNames).toEqual(["build", "install", "test"]);
+	});
+
+	it("same Makefile build/test produce distinct stableSurfaceKey (via targetName)", () => {
+		const content = `
+build: src/main.c
+	gcc -o app src/main.c
+
+test: build
+	./run_tests.sh
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+
+		const buildSurface = result.surfaces.find((s) => s.displayName === "build");
+		const testSurface = result.surfaces.find((s) => s.displayName === "test");
+
+		expect(buildSurface).toBeDefined();
+		expect(testSurface).toBeDefined();
+
+		// Both have makefilePath and targetName for identity
+		expect(buildSurface!.makefilePath).toBe("Makefile");
+		expect(buildSurface!.targetName).toBe("build");
+		expect(testSurface!.makefilePath).toBe("Makefile");
+		expect(testSurface!.targetName).toBe("test");
+
+		// Identity fields are distinct → distinct stableSurfaceKey
+		expect(buildSurface!.targetName).not.toBe(testSurface!.targetName);
+	});
+
+	it("evidence payload contains targetName and dependencies", () => {
+		const content = `
+build: main.o utils.o lib.a
+	gcc -o app main.o utils.o -L. -llib
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+		expect(result.surfaces).toHaveLength(1);
+
+		const evidence = result.surfaces[0].evidence[0];
+		expect(evidence.sourceType).toBe("makefile_target");
+		expect(evidence.evidenceKind).toBe("build_target");
+
+		const payload = evidence.payload as Record<string, unknown>;
+		expect(payload.targetName).toBe("build");
+		expect(payload.dependencies).toEqual(["main.o", "utils.o", "lib.a"]);
+		expect(payload.makefilePath).toBe("Makefile");
+		expect(payload.skippedDynamic).toBe(false);
+	});
+
+	it("unknown target is skipped (design decision: avoid pollution)", () => {
+		const content = `
+custom_target: deps
+	./do_something.sh
+
+build: src/main.c
+	gcc -o app src/main.c
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+
+		// Only build should produce surface
+		expect(result.surfaces).toHaveLength(1);
+		expect(result.surfaces[0].displayName).toBe("build");
+
+		// No surface for custom_target (unknown)
+		const customSurface = result.surfaces.find((s) => s.displayName === "custom_target");
+		expect(customSurface).toBeUndefined();
+	});
+
+	it("infers native_c_cpp runtime from .c/.cpp references", () => {
+		const content = `
+build: main.c utils.cpp
+	g++ -o app main.c utils.cpp
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+		expect(result.surfaces).toHaveLength(1);
+		expect(result.surfaces[0].runtimeKind).toBe("native_c_cpp");
+	});
+
+	it("infers node runtime from npm/node commands", () => {
+		const content = `
+build:
+	npm run build
+
+test:
+	npm test
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+		expect(result.surfaces.length).toBeGreaterThanOrEqual(1);
+		expect(result.surfaces[0].runtimeKind).toBe("node");
+	});
+
+	it("returns unknown runtime when no language signals", () => {
+		const content = `
+build:
+	./build.sh
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+		expect(result.surfaces).toHaveLength(1);
+		expect(result.surfaces[0].runtimeKind).toBe("unknown");
+	});
+
+	it("handles nested Makefile path", () => {
+		const content = `
+build: src/main.c
+	gcc -o app src/main.c
+`;
+		const result = detectMakefileSurfaces(content, "src/backend/Makefile");
+		expect(result.surfaces).toHaveLength(1);
+		expect(result.surfaces[0].rootPath).toBe("src/backend");
+		expect(result.surfaces[0].makefilePath).toBe("src/backend/Makefile");
+	});
+
+	it("emits diagnostic for include directive", () => {
+		const content = `
+include common.mk
+
+build: src/main.c
+	gcc -o app src/main.c
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+
+		const includeDiag = result.diagnostics.find((d) => d.kind === "skipped_include_directive");
+		expect(includeDiag).toBeDefined();
+		expect(includeDiag!.reason).toContain("not resolved");
+
+		// build target still detected
+		expect(result.surfaces).toHaveLength(1);
+	});
+
+	it("emits diagnostic for suffix rule", () => {
+		const content = `
+.c.o:
+	gcc -c $<
+
+build: main.o
+	gcc -o app main.o
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+
+		const suffixDiag = result.diagnostics.find((d) => d.kind === "skipped_suffix_rule");
+		expect(suffixDiag).toBeDefined();
+
+		// build target still detected
+		expect(result.surfaces).toHaveLength(1);
+	});
+
+	it("handles multiple targets on one rule line", () => {
+		const content = `
+build test: deps
+	./do_both.sh
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+
+		// Both build and test should be detected as separate surfaces
+		expect(result.surfaces).toHaveLength(2);
+		const names = result.surfaces.map((s) => s.displayName).sort();
+		expect(names).toEqual(["build", "test"]);
+	});
+
+	it("phony modifier increases confidence", () => {
+		const content = `
+.PHONY: test
+
+test:
+	./test.sh
+
+build:
+	./build.sh
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+
+		const testSurface = result.surfaces.find((s) => s.displayName === "test");
+		const buildSurface = result.surfaces.find((s) => s.displayName === "build");
+
+		expect(testSurface).toBeDefined();
+		expect(buildSurface).toBeDefined();
+
+		// test is .PHONY, build is not
+		// Base: test=0.65, build=0.55
+		// .PHONY adds 0.10, no deps subtracts 0.10
+		// test: 0.65 + 0.10 - 0.10 = 0.65
+		// build: 0.55 - 0.10 = 0.45
+		expect(testSurface!.confidence).toBeCloseTo(0.65, 2);
+		expect(buildSurface!.confidence).toBeCloseTo(0.45, 2);
+	});
+
+	it("returns empty surfaces for Makefile with only special targets", () => {
+		const content = `
+.PHONY: clean
+.DEFAULT_GOAL := all
+
+clean:
+	rm -rf build/
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+		expect(result.surfaces).toHaveLength(0);
+	});
+
+	it("handles line continuations", () => {
+		const content = `
+build: main.c \\
+       utils.c \\
+       lib.c
+	gcc -o app main.c utils.c lib.c
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+		expect(result.surfaces).toHaveLength(1);
+
+		const payload = result.surfaces[0].evidence[0].payload as Record<string, unknown>;
+		const deps = payload.dependencies as string[];
+		expect(deps).toContain("main.c");
+		expect(deps).toContain("utils.c");
+		expect(deps).toContain("lib.c");
+	});
+
+	it("skips target-specific variable assignments", () => {
+		// Lines like "test: CFLAGS += -DTEST" are variable assignments, not targets.
+		// The colon is the target separator but the post-colon part is an assignment.
+		const content = `
+test: CFLAGS += -DTEST
+test: main.c
+	./run_tests
+
+build: CC := gcc
+build: main.o utils.o
+	$(CC) -o app main.o utils.o
+
+release: OPTIMIZE ?= -O3
+`;
+		const result = detectMakefileSurfaces(content, "Makefile");
+		// Should only produce surfaces for the actual targets, not the variable assignments.
+		// test → cli (test/quality), build → library (build target)
+		// release only has a variable assignment line, so no surface for it.
+		expect(result.surfaces).toHaveLength(2);
+
+		const names = result.surfaces.map((s) => s.targetName).sort();
+		expect(names).toEqual(["build", "test"]);
+
+		// Variable assignment lines are classified as "other" and silently skipped.
+		// No diagnostic is emitted for them (design decision: unknown targets don't
+		// pollute diagnostics either).
+		// The key assertion is that we got exactly 2 surfaces, not 5.
 	});
 });

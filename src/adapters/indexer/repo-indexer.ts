@@ -91,6 +91,7 @@ import {
 	detectCargoSurfaces,
 	detectComposeSurfaces,
 	detectDockerfileSurfaces,
+	detectMakefileSurfaces,
 	detectPackageJsonSurfaces,
 	detectPyprojectSurfaces,
 	type ComposeServiceInput,
@@ -1728,6 +1729,12 @@ export class RepoIndexer implements IndexerPort {
 					};
 					results.push(...detectComposeSurfaces(input));
 				}
+			} else if (isMakefilePath(relPath)) {
+				// Makefile v1: conservative target extraction, diagnostics ignored for now.
+				// TODO: Persist diagnostics via existing diagnostics model if schema fits.
+				const makefileResult = detectMakefileSurfaces(content, relPath);
+				results.push(...makefileResult.surfaces);
+				// Diagnostics are available in makefileResult.diagnostics but not persisted in v1.
 			}
 		}
 
@@ -1762,7 +1769,8 @@ export class RepoIndexer implements IndexerPort {
 					entry.name === "Cargo.toml" ||
 					entry.name === "pyproject.toml" ||
 					isDockerfileName(entry.name) ||
-					isComposeFileName(entry.name)
+					isComposeFileName(entry.name) ||
+					isMakefileName(entry.name)
 				) {
 					const relPath = toPosixPath(relative(rootPath, join(dir, entry.name)));
 					if (ig.ignores(relPath)) continue;
@@ -3176,6 +3184,31 @@ function isComposePath(relPath: string): boolean {
 		? relPath.slice(relPath.lastIndexOf("/") + 1)
 		: relPath;
 	return isComposeFileName(name);
+}
+
+/**
+ * Check if a filename matches Makefile naming conventions.
+ * Patterns: Makefile, makefile, GNUmakefile
+ *
+ * Note: *.mk files are NOT included by default. They are typically
+ * included Makefiles, not standalone entry points. If needed, they
+ * can be detected separately, but v1 only detects primary Makefiles.
+ */
+function isMakefileName(name: string): boolean {
+	if (name === "Makefile") return true;
+	if (name === "makefile") return true;
+	if (name === "GNUmakefile") return true;
+	return false;
+}
+
+/**
+ * Check if a path ends with a Makefile pattern.
+ */
+function isMakefilePath(relPath: string): boolean {
+	const name = relPath.includes("/")
+		? relPath.slice(relPath.lastIndexOf("/") + 1)
+		: relPath;
+	return isMakefileName(name);
 }
 
 function toPosixPath(p: string): string {

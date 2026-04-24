@@ -72,9 +72,11 @@ export interface DetectedSurface {
 	/** For dockerfile: path to the Dockerfile. Required when sourceType is dockerfile. */
 	dockerfilePath?: string;
 
-	// Phase 1 identity fields (reserved, detectors not implemented)
-	/** For makefile_target, cmake_target: path to Makefile/CMakeLists.txt. */
+	// Phase 1 identity fields
+	/** For makefile_target: path to Makefile. Required when sourceType is makefile_target. */
 	makefilePath?: string;
+	/** For makefile_target: target name. Required when sourceType is makefile_target. */
+	targetName?: string;
 	/** For workspace source types: workspace member name or path. */
 	workspaceName?: string;
 	/** For helm_chart: chart name. */
@@ -1195,4 +1197,370 @@ function resolvePath(base: string, relative: string): string | null {
 	}
 
 	return baseParts.length > 0 ? baseParts.join("/") : ".";
+}
+
+// ── Makefile detector ──────────────────────────────────────────────
+
+/**
+ * Makefile detection diagnostic — emitted for unsupported patterns.
+ *
+ * Diagnostics are part of the support module contract. Callers should
+ * persist or surface these, not silently discard them.
+ */
+export interface MakefileDetectionDiagnostic {
+	makefilePath: string;
+	kind:
+		| "skipped_dynamic_target"
+		| "skipped_pattern_rule"
+		| "skipped_suffix_rule"
+		| "skipped_include_directive";
+	line: number;
+	rawLine: string;
+	reason: string;
+}
+
+/**
+ * Makefile detection result — surfaces and diagnostics separated.
+ *
+ * Diagnostics inform callers about unsupported constructs. They do not
+ * prevent surface detection.
+ */
+export interface MakefileDetectionResult {
+	surfaces: DetectedSurface[];
+	diagnostics: MakefileDetectionDiagnostic[];
+}
+
+// ── Target classification ──────────────────────────────────────────
+
+/** Runnable CLI targets: test, lint, install, deploy, etc. */
+const MAKEFILE_CLI_TARGETS = new Set([
+	"run", "serve", "start", "dev",
+	"test", "check", "lint", "format",
+	"install", "deploy", "migrate",
+]);
+
+/** Build/library targets: all, build, lib, etc. */
+const MAKEFILE_LIBRARY_TARGETS = new Set([
+	"all", "build", "default",
+	"lib", "library", "static", "shared", "release", "debug",
+]);
+
+/** Maintenance targets: skipped, not surfaces. */
+const MAKEFILE_SKIP_TARGETS = new Set([
+	"clean", "distclean", "mostlyclean", "realclean", "clobber",
+]);
+
+type MakefileTargetClassification = {
+	surfaceKind: SurfaceKind;
+	confidence: number;
+	reason: string;
+} | null;
+
+function classifyMakefileTarget(targetName: string): MakefileTargetClassification {
+	// Skip maintenance targets
+	if (MAKEFILE_SKIP_TARGETS.has(targetName)) {
+		return null;
+	}
+
+	// Skip special targets (start with .)
+	if (targetName.startsWith(".")) {
+		return null;
+	}
+
+	// CLI targets
+	if (MAKEFILE_CLI_TARGETS.has(targetName)) {
+		return {
+			surfaceKind: "cli",
+			confidence: 0.65,
+			reason: "runnable_target",
+		};
+	}
+
+	// Library/build targets
+	if (MAKEFILE_LIBRARY_TARGETS.has(targetName)) {
+		return {
+			surfaceKind: "library",
+			confidence: 0.55,
+			reason: "build_target",
+		};
+	}
+
+	// Unknown targets: skip in v1 to avoid surface pollution
+	// (Design decision locked: skip, not low-confidence library)
+	return null;
+}
+
+// ── Runtime kind inference ─────────────────────────────────────────
+
+function inferMakefileRuntimeKind(content: string): RuntimeKind {
+	// C/C++ patterns
+	const cPatterns = [
+		/\.(c|cc|cpp|cxx|h|hpp|hxx)\b/,
+		/\b(CC|CXX)\s*[:?]?=/,
+		/\b(gcc|g\+\+|clang|clang\+\+)\b/,
+	];
+	for (const pattern of cPatterns) {
+		if (pattern.test(content)) {
+			return "native_c_cpp";
+		}
+	}
+
+	// Node patterns
+	const nodePatterns = [
+		/\b(node|npm|pnpm|yarn|npx)\b/,
+	];
+	for (const pattern of nodePatterns) {
+		if (pattern.test(content)) {
+			return "node";
+		}
+	}
+
+	// Python patterns
+	const pythonPatterns = [
+		/\b(python|python3|pip|pip3)\b/,
+	];
+	for (const pattern of pythonPatterns) {
+		if (pattern.test(content)) {
+			return "python";
+		}
+	}
+
+	return "unknown";
+}
+
+// ── Line parsing ───────────────────────────────────────────────────
+
+interface ParsedMakefileLine {
+	kind: "target" | "phony" | "include" | "pattern" | "suffix" | "variable_target" | "other";
+	targets?: string[];
+	dependencies?: string[];
+	rawLine: string;
+	lineNumber: number;
+}
+
+function parseMakefileLine(line: string, lineNumber: number): ParsedMakefileLine {
+	const rawLine = line;
+	const trimmed = line.trim();
+
+	// Skip empty lines and comments
+	if (!trimmed || trimmed.startsWith("#")) {
+		return { kind: "other", rawLine, lineNumber };
+	}
+
+	// .PHONY: target1 target2
+	const phonyMatch = trimmed.match(/^\.PHONY\s*:\s*(.+)$/);
+	if (phonyMatch) {
+		const targets = phonyMatch[1].split(/\s+/).filter(Boolean);
+		return { kind: "phony", targets, rawLine, lineNumber };
+	}
+
+	// include directive
+	if (trimmed.match(/^-?include\s+/)) {
+		return { kind: "include", rawLine, lineNumber };
+	}
+
+	// Pattern rule: %.o: %.c or %: %.in
+	if (trimmed.includes("%") && trimmed.includes(":")) {
+		return { kind: "pattern", rawLine, lineNumber };
+	}
+
+	// Suffix rule: .c.o:
+	if (trimmed.match(/^\.[a-z]+\.[a-z]+\s*:/i)) {
+		return { kind: "suffix", rawLine, lineNumber };
+	}
+
+	// Target rule: target: deps
+	const targetMatch = trimmed.match(/^([^:=]+):\s*(.*)$/);
+	if (targetMatch) {
+		const targetPart = targetMatch[1].trim();
+		const depsPart = targetMatch[2].trim();
+
+		// Target-specific variable assignment: test: CFLAGS += -DTEST
+		// Patterns: VAR =, VAR +=, VAR :=, VAR ?=, VAR !=
+		// These are metadata, not build surfaces. Skip silently (not a diagnostic).
+		if (depsPart.match(/^[A-Za-z_][A-Za-z0-9_]*\s*[:+?!]?=/)) {
+			return { kind: "other", rawLine, lineNumber };
+		}
+
+		// Variable-derived target: $(TARGET): or ${TARGET}:
+		if (targetPart.includes("$(") || targetPart.includes("${")) {
+			return { kind: "variable_target", rawLine, lineNumber };
+		}
+
+		// Multiple targets on one rule: build test: deps
+		const targets = targetPart.split(/\s+/).filter(Boolean);
+
+		// All targets must be static literals (no variables)
+		for (const t of targets) {
+			if (t.includes("$(") || t.includes("${") || t.includes("$")) {
+				return { kind: "variable_target", rawLine, lineNumber };
+			}
+		}
+
+		const dependencies = depsPart
+			.split(/\s+/)
+			.filter(Boolean)
+			.filter(d => !d.startsWith("$(") && !d.startsWith("${"));
+
+		return { kind: "target", targets, dependencies, rawLine, lineNumber };
+	}
+
+	return { kind: "other", rawLine, lineNumber };
+}
+
+/**
+ * Detect project surfaces from a Makefile.
+ *
+ * v1 constraints:
+ * - Conservative parsing: explicit targets only
+ * - No variable expansion
+ * - No shell execution
+ * - No included Makefile resolution
+ * - No recursive make traversal
+ *
+ * Each detected target produces one surface. Multiple targets from
+ * the same Makefile produce multiple surfaces with distinct stableSurfaceKey.
+ *
+ * Unknown targets are skipped (design decision: avoid surface pollution).
+ */
+export function detectMakefileSurfaces(
+	content: string,
+	makefilePath: string,
+): MakefileDetectionResult {
+	const surfaces: DetectedSurface[] = [];
+	const diagnostics: MakefileDetectionDiagnostic[] = [];
+
+	const dir = makefilePath.includes("/")
+		? makefilePath.slice(0, makefilePath.lastIndexOf("/"))
+		: ".";
+
+	// Join continuation lines
+	const joinedContent = content.replace(/\\\n/g, " ");
+	const lines = joinedContent.split("\n");
+
+	// Track .PHONY targets
+	const phonyTargets = new Set<string>();
+
+	// First pass: collect .PHONY declarations
+	for (let i = 0; i < lines.length; i++) {
+		const parsed = parseMakefileLine(lines[i], i + 1);
+		if (parsed.kind === "phony" && parsed.targets) {
+			for (const t of parsed.targets) {
+				phonyTargets.add(t);
+			}
+		}
+	}
+
+	// Infer runtime kind once for the whole file
+	const runtimeKind = inferMakefileRuntimeKind(content);
+
+	// Track seen targets to avoid duplicates
+	const seenTargets = new Set<string>();
+
+	// Second pass: extract targets and emit diagnostics
+	for (let i = 0; i < lines.length; i++) {
+		const parsed = parseMakefileLine(lines[i], i + 1);
+
+		switch (parsed.kind) {
+			case "pattern":
+				diagnostics.push({
+					makefilePath,
+					kind: "skipped_pattern_rule",
+					line: parsed.lineNumber,
+					rawLine: parsed.rawLine,
+					reason: "Pattern rules (%.o: %.c) are not supported in v1",
+				});
+				break;
+
+			case "suffix":
+				diagnostics.push({
+					makefilePath,
+					kind: "skipped_suffix_rule",
+					line: parsed.lineNumber,
+					rawLine: parsed.rawLine,
+					reason: "Suffix rules (.c.o:) are not supported in v1",
+				});
+				break;
+
+			case "include":
+				diagnostics.push({
+					makefilePath,
+					kind: "skipped_include_directive",
+					line: parsed.lineNumber,
+					rawLine: parsed.rawLine,
+					reason: "Included Makefiles are not resolved in v1",
+				});
+				break;
+
+			case "variable_target":
+				diagnostics.push({
+					makefilePath,
+					kind: "skipped_dynamic_target",
+					line: parsed.lineNumber,
+					rawLine: parsed.rawLine,
+					reason: "Variable-derived targets are not supported in v1",
+				});
+				break;
+
+			case "target":
+				if (!parsed.targets) break;
+				for (const targetName of parsed.targets) {
+					// Skip if already seen
+					if (seenTargets.has(targetName)) continue;
+					seenTargets.add(targetName);
+
+					// Classify target
+					const classification = classifyMakefileTarget(targetName);
+					if (!classification) continue;
+
+					const isPhony = phonyTargets.has(targetName);
+					let confidence = classification.confidence;
+
+					// Confidence modifiers
+					if (isPhony) confidence += 0.10;
+					if (!parsed.dependencies || parsed.dependencies.length === 0) {
+						confidence -= 0.10;
+					}
+
+					// Clamp confidence
+					confidence = Math.max(0.1, Math.min(1.0, confidence));
+
+					surfaces.push({
+						surfaceKind: classification.surfaceKind,
+						displayName: targetName,
+						rootPath: dir,
+						entrypointPath: null,
+						buildSystem: "make",
+						runtimeKind,
+						confidence,
+						evidence: [{
+							sourceType: "makefile_target",
+							sourcePath: makefilePath,
+							evidenceKind: "build_target",
+							confidence,
+							payload: {
+								makefilePath,
+								targetName,
+								dependencies: parsed.dependencies ?? [],
+								isPhony,
+								classificationReason: classification.reason,
+								skippedDynamic: false,
+							},
+						}],
+						metadata: {
+							targetName,
+							isPhony,
+							dependencies: parsed.dependencies ?? [],
+						},
+						// Identity fields
+						sourceType: "makefile_target",
+						makefilePath,
+						targetName,
+					});
+				}
+				break;
+		}
+	}
+
+	return { surfaces, diagnostics };
 }
