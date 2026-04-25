@@ -79,6 +79,17 @@ pub enum StorageError {
 		reason: String,
 	},
 
+	/// A quality_policy declaration's `value_json` has a structural
+	/// invariant violation. Quality policies are authored governance
+	/// inputs; malformed active policies must fail loudly (not silently
+	/// disappear from evaluation). Follows the same principle as
+	/// `MalformedRequirement`.
+	#[error("malformed quality_policy declaration {declaration_uid}: {reason}")]
+	MalformedQualityPolicy {
+		declaration_uid: String,
+		reason: String,
+	},
+
 	/// The target declaration for a supersede operation does not
 	/// exist or is already inactive. Supersede is an explicit
 	/// lifecycle transition that requires an active source.

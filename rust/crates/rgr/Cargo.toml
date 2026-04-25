@@ -128,6 +128,7 @@ repo-graph-classification = { path = "../classification" }
 repo-graph-coverage = { path = "../coverage" }
 repo-graph-gate = { path = "../gate" }
 repo-graph-git = { path = "../git" }
+repo-graph-quality-policy = { path = "../quality-policy" }
 repo-graph-repo-index = { path = "../repo-index" }
 repo-graph-storage = { path = "../storage" }
 repo-graph-trust = { path = "../trust" }

@@ -191,6 +191,19 @@ pub struct WaiverDeclaration {
 	pub policy_basis: Option<String>,
 }
 
+/// A quality policy declaration row from the `declarations` table.
+///
+/// Parsed from rows where `kind='quality_policy'`. The `payload` is
+/// deserialized from `value_json` at the storage layer using the
+/// already-defined `QualityPolicyPayload` type.
+#[derive(Debug, Clone)]
+pub struct QualityPolicyDeclaration {
+	/// The `declaration_uid` of the policy row.
+	pub declaration_uid: String,
+	/// The parsed policy payload.
+	pub payload: crate::types::QualityPolicyPayload,
+}
+
 /// A measurement row read from the `measurements` table.
 ///
 /// Mirrors TS `queryMeasurementsByKind` return shape:
@@ -1508,6 +1521,61 @@ impl StorageConnection {
 		Ok(results)
 	}
 
+	/// Query active quality_policy declarations for a repo.
+	///
+	/// Returns all active quality_policy declarations ordered by
+	/// created_at DESC (most recent first). The `value_json` is
+	/// deserialized into `QualityPolicyPayload`.
+	///
+	/// **Structural validation only.** This method validates JSON
+	/// structure (can the blob deserialize into `QualityPolicyPayload`?)
+	/// but NOT semantic validity (is the measurement kind in the Phase A
+	/// set? Is the threshold finite?). Callers MUST validate results
+	/// using `repo_graph_quality_policy::validate_quality_policy_payload`
+	/// before evaluation. The storage layer does not depend on the
+	/// quality-policy crate to avoid circular dependencies.
+	///
+	/// Errors:
+	/// - `MalformedQualityPolicy` if value_json cannot be parsed
+	///   as a valid `QualityPolicyPayload` (structural error).
+	pub fn get_active_quality_policy_declarations(
+		&self,
+		repo_uid: &str,
+	) -> Result<Vec<QualityPolicyDeclaration>, StorageError> {
+		let mut stmt = self.connection().prepare(
+			"SELECT declaration_uid, value_json
+			 FROM declarations
+			 WHERE repo_uid = ? AND kind = 'quality_policy' AND is_active = 1
+			 ORDER BY created_at DESC",
+		)?;
+
+		let rows = stmt.query_map(rusqlite::params![repo_uid], |row| {
+			let uid: String = row.get(0)?;
+			let value_json: String = row.get(1)?;
+			Ok((uid, value_json))
+		})?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			let (declaration_uid, value_json) = row.map_err(StorageError::from)?;
+
+			let payload: crate::types::QualityPolicyPayload =
+				serde_json::from_str(&value_json).map_err(|e| {
+					StorageError::MalformedQualityPolicy {
+						declaration_uid: declaration_uid.clone(),
+						reason: format!("malformed value_json: {}", e),
+					}
+				})?;
+
+			results.push(QualityPolicyDeclaration {
+				declaration_uid,
+				payload,
+			});
+		}
+
+		Ok(results)
+	}
+
 	/// Read measurements by kind for a snapshot.
 	///
 	/// Mirrors TS `queryMeasurementsByKind` (sqlite-storage.ts).
@@ -1817,6 +1885,7 @@ fn canonicalize_cycle(uids: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::crud::test_helpers::fresh_storage;
 	use crate::StorageConnection;
 
 	/// Insert a minimal node directly so resolve_symbol can be tested
@@ -2762,5 +2831,215 @@ mod tests {
 			"SYMBOL should be included in dead: {:?}",
 			kinds
 		);
+	}
+
+	// ── get_active_quality_policy_declarations tests ──────────────────
+
+	#[test]
+	fn get_active_quality_policy_declarations_empty_when_none() {
+		use crate::crud::test_helpers::make_repo;
+		let storage = fresh_storage();
+		storage.add_repo(&make_repo("r1")).unwrap();
+		let result = storage
+			.get_active_quality_policy_declarations("r1")
+			.unwrap();
+		assert!(result.is_empty());
+	}
+
+	#[test]
+	fn get_active_quality_policy_declarations_returns_parsed_payload() {
+		use crate::crud::declarations::{quality_policy_identity_key, DeclarationInsert};
+		use crate::crud::test_helpers::make_repo;
+		use crate::types::{QualityPolicyKind, QualityPolicySeverity};
+
+		let storage = fresh_storage();
+		storage.add_repo(&make_repo("r1")).unwrap();
+
+		// Insert a valid quality_policy declaration.
+		let payload = serde_json::json!({
+			"policy_id": "QP-001",
+			"version": 1,
+			"scope_clauses": [],
+			"measurement_kind": "cognitive_complexity",
+			"policy_kind": "absolute_max",
+			"threshold": 15.0,
+			"severity": "fail",
+			"description": "Max cognitive complexity"
+		});
+
+		let decl = DeclarationInsert {
+			identity_key: quality_policy_identity_key("r1", "QP-001", 1),
+			repo_uid: "r1".to_string(),
+			target_stable_key: "r1:REPO".to_string(),
+			kind: "quality_policy".to_string(),
+			value_json: payload.to_string(),
+			created_at: "2025-01-01T00:00:00Z".to_string(),
+			created_by: Some("test".to_string()),
+			supersedes_uid: None,
+			authored_basis_json: None,
+		};
+
+		let result = storage.insert_declaration(&decl).unwrap();
+		assert!(result.inserted);
+
+		let policies = storage
+			.get_active_quality_policy_declarations("r1")
+			.unwrap();
+		assert_eq!(policies.len(), 1);
+		assert_eq!(policies[0].declaration_uid, result.declaration_uid);
+		assert_eq!(policies[0].payload.policy_id, "QP-001");
+		assert_eq!(policies[0].payload.version, 1);
+		assert_eq!(policies[0].payload.measurement_kind, "cognitive_complexity");
+		assert_eq!(policies[0].payload.policy_kind, QualityPolicyKind::AbsoluteMax);
+		assert_eq!(policies[0].payload.threshold, 15.0);
+		assert_eq!(policies[0].payload.severity, QualityPolicySeverity::Fail);
+	}
+
+	#[test]
+	fn get_active_quality_policy_declarations_excludes_inactive() {
+		use crate::crud::declarations::{quality_policy_identity_key, DeclarationInsert};
+		use crate::crud::test_helpers::make_repo;
+
+		let storage = fresh_storage();
+		storage.add_repo(&make_repo("r1")).unwrap();
+
+		// Insert two declarations.
+		let payload1 = serde_json::json!({
+			"policy_id": "QP-001",
+			"version": 1,
+			"scope_clauses": [],
+			"measurement_kind": "cognitive_complexity",
+			"policy_kind": "absolute_max",
+			"threshold": 15.0,
+			"severity": "fail"
+		});
+
+		let decl1 = DeclarationInsert {
+			identity_key: quality_policy_identity_key("r1", "QP-001", 1),
+			repo_uid: "r1".to_string(),
+			target_stable_key: "r1:REPO".to_string(),
+			kind: "quality_policy".to_string(),
+			value_json: payload1.to_string(),
+			created_at: "2025-01-01T00:00:00Z".to_string(),
+			created_by: Some("test".to_string()),
+			supersedes_uid: None,
+			authored_basis_json: None,
+		};
+
+		let result1 = storage.insert_declaration(&decl1).unwrap();
+		assert!(result1.inserted);
+
+		// Deactivate the first one.
+		let _ = storage.deactivate_declaration(&result1.declaration_uid);
+
+		// Insert a second active one.
+		let payload2 = serde_json::json!({
+			"policy_id": "QP-002",
+			"version": 1,
+			"scope_clauses": [],
+			"measurement_kind": "function_length",
+			"policy_kind": "absolute_max",
+			"threshold": 50.0,
+			"severity": "advisory"
+		});
+
+		let decl2 = DeclarationInsert {
+			identity_key: quality_policy_identity_key("r1", "QP-002", 1),
+			repo_uid: "r1".to_string(),
+			target_stable_key: "r1:REPO".to_string(),
+			kind: "quality_policy".to_string(),
+			value_json: payload2.to_string(),
+			created_at: "2025-01-01T00:00:01Z".to_string(),
+			created_by: Some("test".to_string()),
+			supersedes_uid: None,
+			authored_basis_json: None,
+		};
+
+		let result2 = storage.insert_declaration(&decl2).unwrap();
+		assert!(result2.inserted);
+
+		// Query should only return the active one.
+		let policies = storage
+			.get_active_quality_policy_declarations("r1")
+			.unwrap();
+		assert_eq!(policies.len(), 1);
+		assert_eq!(policies[0].payload.policy_id, "QP-002");
+	}
+
+	#[test]
+	fn get_active_quality_policy_declarations_errors_on_malformed_json() {
+		use crate::crud::test_helpers::make_repo;
+		let storage = fresh_storage();
+		storage.add_repo(&make_repo("r1")).unwrap();
+
+		// Insert a declaration with malformed value_json.
+		storage
+			.connection()
+			.execute(
+				"INSERT INTO declarations (declaration_uid, repo_uid, target_stable_key, kind, value_json, created_at, is_active)
+				 VALUES ('d1', 'r1', 'r1:REPO', 'quality_policy', 'not valid json', '2025-01-01T00:00:00Z', 1)",
+				[],
+			)
+			.unwrap();
+
+		let result = storage.get_active_quality_policy_declarations("r1");
+		assert!(result.is_err());
+		let err = result.unwrap_err();
+		assert!(
+			format!("{}", err).contains("malformed quality_policy declaration"),
+			"expected MalformedQualityPolicy, got: {}",
+			err
+		);
+	}
+
+	#[test]
+	fn get_active_quality_policy_declarations_passes_semantic_invalid_payloads() {
+		// This test documents that storage performs structural validation only.
+		// A payload with an unknown measurement_kind is semantically invalid
+		// but structurally valid JSON that deserializes to QualityPolicyPayload.
+		// Callers must use repo_graph_quality_policy::validate_quality_policy_payload
+		// to catch semantic errors.
+		use crate::crud::declarations::{quality_policy_identity_key, DeclarationInsert};
+		use crate::crud::test_helpers::make_repo;
+
+		let storage = fresh_storage();
+		storage.add_repo(&make_repo("r1")).unwrap();
+
+		// Insert a declaration with an invalid measurement_kind.
+		// "bogus_metric" is not in the Phase A supported set.
+		let payload = serde_json::json!({
+			"policy_id": "QP-BAD",
+			"version": 1,
+			"scope_clauses": [],
+			"measurement_kind": "bogus_metric",
+			"policy_kind": "absolute_max",
+			"threshold": 15.0,
+			"severity": "fail"
+		});
+
+		let decl = DeclarationInsert {
+			identity_key: quality_policy_identity_key("r1", "QP-BAD", 1),
+			repo_uid: "r1".to_string(),
+			target_stable_key: "r1:REPO".to_string(),
+			kind: "quality_policy".to_string(),
+			value_json: payload.to_string(),
+			created_at: "2025-01-01T00:00:00Z".to_string(),
+			created_by: Some("test".to_string()),
+			supersedes_uid: None,
+			authored_basis_json: None,
+		};
+
+		storage.insert_declaration(&decl).unwrap();
+
+		// Storage returns the payload — structural validation passes.
+		let policies = storage
+			.get_active_quality_policy_declarations("r1")
+			.unwrap();
+		assert_eq!(policies.len(), 1);
+		assert_eq!(policies[0].payload.measurement_kind, "bogus_metric");
+
+		// Consumer must validate semantically. This is documented in the
+		// method doc comment and is the caller's responsibility.
+		// The quality-policy crate provides validate_quality_policy_payload().
 	}
 }

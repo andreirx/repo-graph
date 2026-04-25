@@ -575,6 +575,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-quality-policy"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-storage",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "repo-graph-repo-index"
 version = "0.1.0"
 dependencies = [
@@ -605,6 +614,7 @@ dependencies = [
  "repo-graph-coverage",
  "repo-graph-gate",
  "repo-graph-git",
+ "repo-graph-quality-policy",
  "repo-graph-repo-index",
  "repo-graph-storage",
  "repo-graph-trust",

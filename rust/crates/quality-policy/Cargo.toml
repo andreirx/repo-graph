@@ -1,0 +1,48 @@
+# ── repo-graph-quality-policy ───────────────────────────────────────
+#
+# Support module for quality policy domain logic.
+#
+# This crate provides:
+#   - SupportedMeasurementKind: typed enum of all measurement kinds
+#     that quality policies can target
+#   - Validation for QualityPolicyPayload declarations
+#   - Domain error types for validation failures
+#
+# Operating model: This is a SUPPORT module, not storage or CLI.
+# It contains pure domain logic consumed by:
+#   - The CLI layer (rmap declare quality-policy)
+#   - The gate/check commands (policy evaluation)
+#   - The orient command (policy display)
+#
+# Dependencies:
+#   - repo-graph-storage: for QualityPolicyPayload, QualityPolicyKind,
+#     ScopeClauseKind, etc. (DTOs defined there)
+#   - serde: for Serialize/Deserialize on domain types
+#   - thiserror: for structured error types
+#
+# NOT in scope:
+#   - Database access (storage handles persistence)
+#   - CLI parsing (rgr crate handles command structure)
+#   - Assessment computation (separate slice)
+
+[package]
+name         = "repo-graph-quality-policy"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Quality policy domain validation for repo-graph"
+publish      = false
+
+[dependencies]
+# Storage types: QualityPolicyPayload, QualityPolicyKind, etc.
+repo-graph-storage = { path = "../storage" }
+
+# Serde for the domain types that need serialization.
+serde = { version = "1", features = ["derive"] }
+
+# Structured errors for validation failures.
+thiserror = "2"
+
+[dev-dependencies]
+# None yet — validation tests use inline fixtures.

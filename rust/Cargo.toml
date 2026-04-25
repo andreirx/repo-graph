@@ -28,6 +28,7 @@ members = [
     "crates/gate",
     "crates/git",
     "crates/indexer",
+    "crates/quality-policy",
     "crates/repo-index",
     "crates/rgr",
     "crates/state-bindings",
