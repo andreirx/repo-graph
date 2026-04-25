@@ -49,11 +49,19 @@
   under the same vendor root. This is a fundamental limitation of
   matching build coordinates against source imports without JAR manifest
   or transitive dependency resolution. Documented as approximate.
-- **Spring framework detectors (first slice shipped):** `@Component`, `@Service`,
-  `@Repository`, `@Configuration`, `@RestController`, `@Controller`, `@Bean`
-  detected via regex line scanning with comment-line filtering. Emitted as
-  `spring_container_managed` inferences. Suppresses class-level dead-code false
-  positives. Known gaps:
+- **Spring framework-liveness classifier (shipped, both TS and Rust):**
+  `@Component`, `@Service`, `@Repository`, `@Configuration`, `@RestController`,
+  `@Controller` (class-level), `@Bean` (method-level) detected. Emitted as
+  `spring_container_managed` inferences. Suppresses dead-code false positives
+  for container-managed symbols.
+  **Rust implementation (post-extraction classifier):** reads `metadata_json.annotations`
+  from Java extractor output (`repo-graph-classification::spring_liveness`),
+  runs during index/refresh (`repo-graph-repo-index::compose`), persists to
+  `inferences` table. Pure classifier — no storage dependency.
+  **TS implementation (detector hook):** regex line scanning with comment-line filtering.
+  Known gaps (both implementations):
+  - **Direct annotation match only.** Meta-annotations not expanded (e.g.,
+    `@SpringBootApplication` ≠ `@Configuration` without transitive resolution).
   - Methods inside container-managed classes still show dead (handler methods have
     no Java-caller inbound edges; Spring dispatcher invokes them at runtime).
   - Plain classes instantiated only by `@Bean` factories remain dead until the `new`

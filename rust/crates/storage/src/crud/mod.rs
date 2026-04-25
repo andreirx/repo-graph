@@ -90,6 +90,7 @@ pub mod declarations;
 pub mod edges;
 pub mod file_versions;
 pub mod files;
+pub mod inferences;
 pub mod measurements;
 pub mod module_candidates;
 pub mod module_edges_support;

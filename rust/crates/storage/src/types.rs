@@ -832,6 +832,29 @@ pub struct MeasurementInput {
 	pub created_at: String,
 }
 
+// ── Inference input ────────────────────────────────────────────────
+
+/// Input for batch inference insertion.
+///
+/// Used by the compose layer to persist framework-liveness inferences
+/// (e.g., `spring_container_managed`, `framework_entrypoint`) computed
+/// during or after extraction.
+///
+/// Maps directly to the `inferences` table schema (001-initial.sql).
+#[derive(Debug, Clone, PartialEq)]
+pub struct InferenceInput {
+	pub inference_uid: String,
+	pub snapshot_uid: String,
+	pub repo_uid: String,
+	pub target_stable_key: String,
+	pub kind: String,
+	pub value_json: String,
+	pub confidence: f64,
+	pub basis_json: String,
+	pub extractor: String,
+	pub created_at: String,
+}
+
 // ── Project Surfaces ───────────────────────────────────────────────
 
 /// Discovered project surface. Mirrors the `project_surfaces` table

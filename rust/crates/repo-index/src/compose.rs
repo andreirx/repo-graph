@@ -17,6 +17,8 @@ use repo_graph_indexer::orchestrator::{self, FileInput};
 use repo_graph_indexer::routing;
 use repo_graph_indexer::storage_port::SnapshotLifecyclePort;
 use repo_graph_indexer::types::{IndexOptions, IndexResult};
+use repo_graph_classification::spring_liveness::{classify_spring_liveness, SpringNodeInput};
+use repo_graph_storage::types::InferenceInput;
 use repo_graph_storage::StorageConnection;
 use repo_graph_c_extractor::CExtractor;
 use repo_graph_java_extractor::JavaExtractor;
@@ -274,6 +276,81 @@ fn persist_metrics(
 	Ok(())
 }
 
+// ── Post-index Spring liveness inference ─────────────────────────
+
+/// Persist Spring framework-liveness inferences from extraction.
+///
+/// Queries all nodes from the snapshot, projects Java SYMBOL nodes
+/// with metadata_json to SpringNodeInput, runs the Spring liveness
+/// classifier, and persists the resulting inferences.
+///
+/// This enables dead-code suppression for Spring container-managed
+/// symbols (@Service, @Component, @Repository, @Controller,
+/// @RestController, @Configuration classes; @Bean methods).
+fn persist_spring_liveness_inferences(
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	snapshot_uid: &str,
+) -> Result<(), ComposeError> {
+	// Query all nodes for the snapshot
+	let nodes = storage
+		.query_all_nodes(snapshot_uid)
+		.map_err(ComposeError::Storage)?;
+
+	// Project to SpringNodeInput — only SYMBOL nodes with metadata
+	let inputs: Vec<SpringNodeInput> = nodes
+		.iter()
+		.filter(|n| n.kind == "SYMBOL" && n.metadata_json.is_some())
+		.map(|n| SpringNodeInput {
+			stable_key: n.stable_key.clone(),
+			kind: n.kind.clone(),
+			subtype: n.subtype.clone(),
+			metadata_json: n.metadata_json.clone(),
+		})
+		.collect();
+
+	if inputs.is_empty() {
+		return Ok(());
+	}
+
+	// Run classifier
+	let classified = classify_spring_liveness(&inputs);
+
+	if classified.is_empty() {
+		return Ok(());
+	}
+
+	// Convert to InferenceInput
+	// Use real ISO timestamp and version consistent with Rust indexer
+	let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+	let extractor = "indexer:1.0.0"; // Match INDEXER_VERSION in orchestrator.rs
+
+	let inferences: Vec<InferenceInput> = classified
+		.iter()
+		.enumerate()
+		.map(|(i, inf)| InferenceInput {
+			inference_uid: format!("{}-spring-{}", snapshot_uid, i),
+			snapshot_uid: snapshot_uid.to_string(),
+			repo_uid: repo_uid.to_string(),
+			target_stable_key: inf.target_stable_key.clone(),
+			kind: inf.kind.clone(),
+			value_json: inf.value_json.clone(),
+			confidence: inf.confidence,
+			basis_json: inf.basis_json.clone(),
+			extractor: extractor.to_string(),
+			created_at: now.clone(),
+		})
+		.collect();
+
+	// Atomic replace: delete + insert in a single transaction.
+	// If insert fails, the old inference set survives (transaction rollback).
+	storage
+		.replace_inferences_by_kind(snapshot_uid, &["spring_container_managed"], &inferences)
+		.map_err(ComposeError::Storage)?;
+
+	Ok(())
+}
+
 // ── Full index ───────────────────────────────────────────────────
 
 /// Index a repo from disk into an existing StorageConnection.
@@ -335,6 +412,9 @@ pub fn index_into_storage(
 
 	// RS-MS-3c-prereq: Persist metrics (complexity, params, nesting).
 	persist_metrics(storage, repo_uid, &result.snapshot_uid, &result.metrics)?;
+
+	// Persist Spring framework-liveness inferences for dead-code suppression.
+	persist_spring_liveness_inferences(storage, repo_uid, &result.snapshot_uid)?;
 
 	Ok(result)
 }
@@ -413,6 +493,9 @@ pub fn refresh_into_storage(
 
 	// RS-MS-3c-prereq: Persist metrics (complexity, params, nesting).
 	persist_metrics(storage, repo_uid, &result.snapshot_uid, &result.metrics)?;
+
+	// Persist Spring framework-liveness inferences for dead-code suppression.
+	persist_spring_liveness_inferences(storage, repo_uid, &result.snapshot_uid)?;
 
 	Ok(result)
 }
@@ -734,6 +817,192 @@ public interface Service {
 		assert!(
 			!cc_rows.is_empty(),
 			"expected cyclomatic_complexity measurements for Java methods; got none"
+		);
+	}
+
+	// ── Spring liveness inference integration ────────────────────
+
+	fn make_spring_fixture_repo() -> tempfile::TempDir {
+		let dir = tempfile::tempdir().unwrap();
+		let root = dir.path();
+
+		fs::create_dir_all(root.join("src/main/java/com/example")).unwrap();
+
+		// @Service class — should be inferred as spring_container_managed
+		fs::write(
+			root.join("src/main/java/com/example/UserService.java"),
+			r#"package com.example;
+
+import org.springframework.stereotype.Service;
+
+@Service
+public class UserService {
+    public void process() {
+        System.out.println("Processing...");
+    }
+}
+"#,
+		)
+		.unwrap();
+
+		// @RestController — should be inferred as spring_container_managed
+		fs::write(
+			root.join("src/main/java/com/example/ApiController.java"),
+			r#"package com.example;
+
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.GetMapping;
+
+@RestController
+public class ApiController {
+    @GetMapping("/health")
+    public String health() {
+        return "ok";
+    }
+}
+"#,
+		)
+		.unwrap();
+
+		// Plain class (no Spring annotation) — should NOT be inferred
+		fs::write(
+			root.join("src/main/java/com/example/PlainHelper.java"),
+			r#"package com.example;
+
+public class PlainHelper {
+    public static void help() {
+        System.out.println("Helping...");
+    }
+}
+"#,
+		)
+		.unwrap();
+
+		// @Configuration with @Bean method — both should be inferred
+		fs::write(
+			root.join("src/main/java/com/example/AppConfig.java"),
+			r#"package com.example;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Bean;
+
+@Configuration
+public class AppConfig {
+    @Bean
+    public String appName() {
+        return "MyApp";
+    }
+}
+"#,
+		)
+		.unwrap();
+
+		dir
+	}
+
+	#[test]
+	fn index_spring_produces_container_managed_inferences() {
+		let fixture = make_spring_fixture_repo();
+		let mut storage = StorageConnection::open_in_memory().unwrap();
+
+		let result = index_into_storage(
+			fixture.path(),
+			&mut storage,
+			"spring-test",
+			&ComposeOptions::default(),
+		)
+		.unwrap();
+
+		// Should have indexed 4 Java files
+		assert_eq!(result.files_total, 4, "files_total");
+
+		// Query Spring inferences
+		let inferences = storage
+			.query_inferences_by_kind(&result.snapshot_uid, "spring_container_managed")
+			.unwrap();
+
+		// Should have inferences for:
+		// - UserService (@Service)
+		// - ApiController (@RestController)
+		// - AppConfig (@Configuration)
+		// - AppConfig.appName (@Bean)
+		assert_eq!(
+			inferences.len(),
+			4,
+			"expected 4 spring_container_managed inferences; got {}",
+			inferences.len()
+		);
+
+		let targets: Vec<&str> = inferences
+			.iter()
+			.map(|i| i.target_stable_key.as_str())
+			.collect();
+
+		assert!(
+			targets.iter().any(|t| t.contains("UserService:SYMBOL:CLASS")),
+			"expected UserService inference; targets: {:?}",
+			targets
+		);
+		assert!(
+			targets.iter().any(|t| t.contains("ApiController:SYMBOL:CLASS")),
+			"expected ApiController inference; targets: {:?}",
+			targets
+		);
+		assert!(
+			targets.iter().any(|t| t.contains("AppConfig:SYMBOL:CLASS")),
+			"expected AppConfig inference; targets: {:?}",
+			targets
+		);
+		assert!(
+			targets.iter().any(|t| t.contains("appName:SYMBOL:METHOD")),
+			"expected appName @Bean inference; targets: {:?}",
+			targets
+		);
+
+		// PlainHelper should NOT have an inference
+		assert!(
+			!targets.iter().any(|t| t.contains("PlainHelper")),
+			"PlainHelper should not have spring inference; targets: {:?}",
+			targets
+		);
+	}
+
+	#[test]
+	fn index_spring_inferences_idempotent_on_reindex() {
+		let fixture = make_spring_fixture_repo();
+		let mut storage = StorageConnection::open_in_memory().unwrap();
+
+		// First index
+		let result1 = index_into_storage(
+			fixture.path(),
+			&mut storage,
+			"spring-test",
+			&ComposeOptions::default(),
+		)
+		.unwrap();
+
+		let inferences1 = storage
+			.query_inferences_by_kind(&result1.snapshot_uid, "spring_container_managed")
+			.unwrap();
+
+		// Second index (creates new snapshot)
+		let result2 = index_into_storage(
+			fixture.path(),
+			&mut storage,
+			"spring-test",
+			&ComposeOptions::default(),
+		)
+		.unwrap();
+
+		let inferences2 = storage
+			.query_inferences_by_kind(&result2.snapshot_uid, "spring_container_managed")
+			.unwrap();
+
+		// Both should have same count
+		assert_eq!(
+			inferences1.len(),
+			inferences2.len(),
+			"inference counts must match across re-index"
 		);
 	}
 }
