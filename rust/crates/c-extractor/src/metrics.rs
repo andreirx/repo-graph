@@ -120,6 +120,10 @@ pub fn compute_function_metrics(
         cyclomatic_complexity: complexity,
         parameter_count: param_count,
         max_nesting_depth: max_depth,
+        // Phase A: function_length and cognitive_complexity are TS/JS-only.
+        // C/C++ support deferred to cross-language rollout.
+        function_length: None,
+        cognitive_complexity: None,
     }
 }
 

@@ -192,6 +192,7 @@ rmap orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <str
 rmap check      <db_path> <repo_uid>                                                  # Pre-action trust/safety check
 rmap churn      <db_path> <repo_uid> [--since <expr>]                                 # Query-time per-file git churn (default: 90.days.ago)
 rmap hotspots   <db_path> <repo_uid> [--since <expr>]                                 # Hotspots: churn × complexity (lines_changed * sum_complexity)
+rmap metrics    <db_path> <repo_uid> [--kind <k>] [--limit <n>] [--sort <f>]         # Query measurements (function_length, cognitive_complexity, etc.)
 rmap coverage   <db_path> <repo_uid> <coverage_json_path>                            # Import Istanbul/c8 coverage (file-level line_coverage)
 rmap risk       <db_path> <repo_uid> [--since <expr>]                                # Risk: hotspot × coverage gap (files with BOTH only)
 rmap declare boundary <db_path> <repo_uid> <module> --forbids <target> [--reason <text>]

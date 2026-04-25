@@ -289,12 +289,26 @@ pub struct ExtractedEdge {
 }
 
 /// Per-function metrics produced by an extractor.
+///
+/// `function_length` and `cognitive_complexity` are optional because
+/// cross-language support is not yet implemented. When `None`, the
+/// compose layer does not persist these measurement kinds. This avoids
+/// storing false facts (e.g., `function_length = 0`) for languages that
+/// have not implemented the metric computation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtractedMetrics {
 	pub cyclomatic_complexity: u32,
 	pub parameter_count: u32,
 	pub max_nesting_depth: u32,
+	/// Line count of full function node span (signature + body).
+	/// Computed as `line_end - line_start + 1`.
+	/// `None` when the extractor does not compute this metric.
+	pub function_length: Option<u32>,
+	/// Sonar-style cognitive complexity (nesting-penalized).
+	/// Deferred items: recursion penalty, early-return penalty.
+	/// `None` when the extractor does not compute this metric.
+	pub cognitive_complexity: Option<u32>,
 }
 
 /// Classification of a call site's positional argument 0 payload.

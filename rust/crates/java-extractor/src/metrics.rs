@@ -35,6 +35,10 @@ pub fn compute_method_metrics(
         cyclomatic_complexity: complexity,
         parameter_count: param_count,
         max_nesting_depth: max_depth,
+        // Phase A: function_length and cognitive_complexity are TS/JS-only.
+        // Java support deferred to cross-language rollout.
+        function_length: None,
+        cognitive_complexity: None,
     }
 }
 

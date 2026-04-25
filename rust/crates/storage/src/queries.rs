@@ -203,6 +203,17 @@ pub struct MeasurementRow {
 	pub value_json: String,
 }
 
+/// Extended measurement row for CLI queries.
+///
+/// Includes kind and source for display purposes.
+#[derive(Debug, Clone)]
+pub struct MeasurementRowExtended {
+	pub target_stable_key: String,
+	pub kind: String,
+	pub value_json: String,
+	pub source: String,
+}
+
 /// Per-file summed complexity from symbol measurements.
 ///
 /// RS-MS-3: Joins measurements → nodes → files to aggregate
@@ -1528,6 +1539,51 @@ impl StorageConnection {
 
 		rows.collect::<Result<Vec<_>, _>>()
 			.map_err(StorageError::from)
+	}
+
+	/// Query measurements with optional kind filter.
+	///
+	/// Phase A CLI: returns extended rows with kind and source for display.
+	/// If `kind_filter` is `Some`, filters by that kind; otherwise returns all.
+	/// Results sorted by (kind, target_stable_key) for consistent CLI output.
+	pub fn query_measurements_extended(
+		&self,
+		snapshot_uid: &str,
+		kind_filter: Option<&str>,
+	) -> Result<Vec<MeasurementRowExtended>, StorageError> {
+		let row_mapper = |row: &rusqlite::Row| {
+			Ok(MeasurementRowExtended {
+				target_stable_key: row.get(0)?,
+				kind: row.get(1)?,
+				value_json: row.get(2)?,
+				source: row.get(3)?,
+			})
+		};
+
+		match kind_filter {
+			Some(kind) => {
+				let mut stmt = self.connection().prepare(
+					"SELECT target_stable_key, kind, value_json, source
+					 FROM measurements
+					 WHERE snapshot_uid = ? AND kind = ?
+					 ORDER BY kind, target_stable_key",
+				)?;
+				let rows = stmt.query_map(rusqlite::params![snapshot_uid, kind], row_mapper)?;
+				let result = rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from);
+				result
+			}
+			None => {
+				let mut stmt = self.connection().prepare(
+					"SELECT target_stable_key, kind, value_json, source
+					 FROM measurements
+					 WHERE snapshot_uid = ?
+					 ORDER BY kind, target_stable_key",
+				)?;
+				let rows = stmt.query_map(rusqlite::params![snapshot_uid], row_mapper)?;
+				let result = rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from);
+				result
+			}
+		}
 	}
 
 	/// Read inferences by kind for a snapshot.

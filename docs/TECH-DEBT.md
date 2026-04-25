@@ -466,7 +466,9 @@ intentionally diverges.
   (default 8) and `--edge-types CALLS,IMPORTS`. Rust (Rust-19)
   hardcodes both defaults. Also, TS accepts FILE/MODULE stable
   keys via `resolveSymbolKey`; Rust is symbol-only at both endpoints.
-- **`graph metrics`.** Not ported.
+- **`graph metrics`.** Partially ported. `rmap metrics` queries
+  measurements by kind with sorting and limit. Does not include
+  `--module` aggregate mode (TS `rgr graph metrics --module`).
 - **`graph versions`.** Not ported.
 - **Table output format.** Rust is JSON-only. No human-readable
   tables. No `--json` flag (always JSON).
@@ -1233,7 +1235,8 @@ first 4KB of the file, which fails when truncated.
 **Rust has no coverage import.** No `rmap coverage` command.
 
 **No coverage measurements exist.** Database contains only complexity
-metrics (`cyclomatic_complexity`, `max_nesting_depth`, `parameter_count`).
+metrics (`cyclomatic_complexity`, `max_nesting_depth`, `parameter_count`,
+`function_length`, `cognitive_complexity`).
 
 ### RS-MS-4 (`rmap risk`) — blocked
 
@@ -1252,3 +1255,28 @@ Prerequisite sequence:
 1. RS-MS-4-prereq: Rust coverage import (`rmap coverage <db> <repo> <report>`)
 2. Validate coverage measurements exist and match indexed file paths
 3. RS-MS-4: `rmap risk` command
+
+### Quality Control Phase A — limitations (2026-04-25)
+
+`function_length` and `cognitive_complexity` measurements are now
+computed for TS/JS functions. Known limitations:
+
+- **Recursion penalty deferred.** Cognitive complexity does not add +1
+  for recursive calls. Precise detection requires call resolution which
+  is incomplete (especially for `this.method()` patterns). Sonar adds
+  this penalty. Phase A defers rather than implement partial detection.
+
+- **Early return penalty deferred.** Cognitive complexity does not
+  penalize early returns. Sonar adds +1 for `return` statements that
+  are not at the end of a function. This requires control-flow analysis
+  beyond tree-sitter AST walking.
+
+- **TS/JS only.** Java, Rust, Python, C/C++ extractors return 0 for
+  `function_length` and `cognitive_complexity`. Cross-language rollout
+  is Phase B scope.
+
+- **No file-level aggregates.** Per-function measurements only. File or
+  module aggregates (sum, max, avg) are query-time computation via
+  `rmap metrics`, not persisted measurements.
+
+See `docs/architecture/quality-control-phase-a.md` for full spec.

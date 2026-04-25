@@ -267,6 +267,34 @@ fn persist_metrics(
 			source: source.into(),
 			created_at: now.into(),
 		});
+
+		// function_length (Phase A) — only persist if computed
+		if let Some(fl) = m.function_length {
+			measurements.push(repo_graph_storage::types::MeasurementInput {
+				measurement_uid: format!("{}-fl-{}", snapshot_uid, stable_key),
+				snapshot_uid: snapshot_uid.into(),
+				repo_uid: repo_uid.into(),
+				target_stable_key: stable_key.clone(),
+				kind: "function_length".into(),
+				value_json: format!(r#"{{"value":{}}}"#, fl),
+				source: source.into(),
+				created_at: now.into(),
+			});
+		}
+
+		// cognitive_complexity (Phase A) — only persist if computed
+		if let Some(cog) = m.cognitive_complexity {
+			measurements.push(repo_graph_storage::types::MeasurementInput {
+				measurement_uid: format!("{}-cog-{}", snapshot_uid, stable_key),
+				snapshot_uid: snapshot_uid.into(),
+				repo_uid: repo_uid.into(),
+				target_stable_key: stable_key.clone(),
+				kind: "cognitive_complexity".into(),
+				value_json: format!(r#"{{"value":{}}}"#, cog),
+				source: source.into(),
+				created_at: now.into(),
+			});
+		}
 	}
 
 	storage

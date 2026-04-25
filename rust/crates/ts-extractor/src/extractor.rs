@@ -475,7 +475,7 @@ fn extract_function(
 
 		ctx.metrics.insert(
 			fn_stable_key,
-			crate::metrics::compute_function_metrics(&body, params.as_ref()),
+			crate::metrics::compute_function_metrics(node, &body, params.as_ref()),
 		);
 	}
 }
@@ -533,11 +533,25 @@ fn extract_lexical_declaration(
 		);
 
 		let var_node_uid = graph_node.node_uid.clone();
+		let var_stable_key = graph_node.stable_key.clone();
 		ctx.nodes.push(graph_node);
 
-		// Extract calls from initializer.
+		// Extract calls from initializer and compute metrics for function-likes.
 		if let Some(value) = child.child_by_field_name("value") {
 			extract_calls_from_node(&value, source, &var_node_uid, ctx, None, None);
+
+			// Compute metrics for arrow functions and function expressions.
+			if is_function_like {
+				// Get body: statement_block for block bodies, or the expression for concise arrows
+				let body = value.child_by_field_name("body");
+				let params = value.child_by_field_name("parameters");
+				if let Some(body) = body {
+					ctx.metrics.insert(
+						var_stable_key.clone(),
+						crate::metrics::compute_function_metrics(&value, &body, params.as_ref()),
+					);
+				}
+			}
 		}
 
 		// Build file-scope type binding for this variable.
@@ -689,7 +703,7 @@ fn extract_method(
 
 		ctx.metrics.insert(
 			method_stable_key,
-			crate::metrics::compute_function_metrics(&body, params.as_ref()),
+			crate::metrics::compute_function_metrics(node, &body, params.as_ref()),
 		);
 	}
 }
