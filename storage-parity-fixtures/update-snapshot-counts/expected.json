@@ -2476,6 +2476,78 @@
           "pk": 0,
           "type": "TEXT"
         }
+      ],
+      "quality_assessments": [
+        {
+          "name": "assessment_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "name": "baseline_snapshot_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "computed_verdict",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "measurements_evaluated",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "new_violations",
+          "type": "INTEGER",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "policy_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "snapshot_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "violations_json",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "worsened_violations",
+          "type": "INTEGER",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        }
       ]
     },
     "indexes": [
@@ -2530,6 +2602,8 @@
       "idx_project_surfaces_module",
       "idx_project_surfaces_snapshot",
       "idx_project_surfaces_stable_key",
+      "idx_quality_assessments_policy",
+      "idx_quality_assessments_snapshot",
       "idx_repos_root_path",
       "idx_snapshots_repo",
       "idx_staged_edges_snapshot",
@@ -2789,6 +2863,11 @@
         "applied_at": "<TIMESTAMP>",
         "name": "018-surface-identity",
         "version": 18
+      },
+      {
+        "applied_at": "<TIMESTAMP>",
+        "name": "019-quality-assessments",
+        "version": 19
       }
     ],
     "snapshots": [

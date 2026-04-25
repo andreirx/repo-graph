@@ -375,6 +375,30 @@ pub fn waiver_identity_key(
 	format!("{}:{}:{}:{}", repo_uid, req_id, requirement_version, obligation_id)
 }
 
+/// Build the identity key for a quality policy declaration.
+/// Identity: `(repo, policy_id, version)`.
+///
+/// Quality policies use the same deterministic UID pattern as other
+/// declarations. The UID is derived from `(kind, identity_key)` where
+/// kind is `quality_policy`.
+pub fn quality_policy_identity_key(repo_uid: &str, policy_id: &str, version: i64) -> String {
+	format!("{}:{}:{}", repo_uid, policy_id, version)
+}
+
+/// Build the identity key for a quality policy waiver declaration.
+/// Identity: `(repo, policy_id, policy_version, target_stable_key)`.
+///
+/// Per-symbol granularity: each waiver targets a specific symbol that
+/// would otherwise violate the policy. No bulk policy-level waivers.
+pub fn quality_policy_waiver_identity_key(
+	repo_uid: &str,
+	policy_id: &str,
+	policy_version: i64,
+	target_stable_key: &str,
+) -> String {
+	format!("{}:{}:{}:{}", repo_uid, policy_id, policy_version, target_stable_key)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -691,6 +715,37 @@ mod tests {
 	fn waiver_identity_key_encodes_all_fields() {
 		let key = waiver_identity_key("r1", "REQ-001", 1, "obl-1");
 		assert_eq!(key, "r1:REQ-001:1:obl-1");
+	}
+
+	#[test]
+	fn quality_policy_identity_key_encodes_all_fields() {
+		let key = quality_policy_identity_key("r1", "QP-001", 1);
+		assert_eq!(key, "r1:QP-001:1");
+	}
+
+	#[test]
+	fn quality_policy_identity_key_varies_on_version() {
+		let v1 = quality_policy_identity_key("r1", "QP-001", 1);
+		let v2 = quality_policy_identity_key("r1", "QP-001", 2);
+		assert_ne!(v1, v2);
+	}
+
+	#[test]
+	fn quality_policy_waiver_identity_key_encodes_all_fields() {
+		let key = quality_policy_waiver_identity_key(
+			"r1",
+			"QP-001",
+			1,
+			"r1:src/foo.ts#bar:SYMBOL:FUNCTION",
+		);
+		assert_eq!(key, "r1:QP-001:1:r1:src/foo.ts#bar:SYMBOL:FUNCTION");
+	}
+
+	#[test]
+	fn quality_policy_waiver_identity_key_varies_on_target() {
+		let w1 = quality_policy_waiver_identity_key("r1", "QP-001", 1, "target-a");
+		let w2 = quality_policy_waiver_identity_key("r1", "QP-001", 1, "target-b");
+		assert_ne!(w1, w2);
 	}
 
 	// ── schema corruption ───────────────────────────────────────

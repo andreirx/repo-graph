@@ -112,7 +112,7 @@ pub(crate) mod test_helpers {
 		FileVersion, GraphEdge, GraphNode, Repo, SourceLocation, TrackedFile,
 	};
 
-	/// Open a fresh in-memory `StorageConnection` with all 18
+	/// Open a fresh in-memory `StorageConnection` with all 19
 	/// migrations applied.
 	pub fn fresh_storage() -> StorageConnection {
 		StorageConnection::open_in_memory().expect("open_in_memory")

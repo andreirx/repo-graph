@@ -101,8 +101,9 @@ pub mod migration_015;
 pub mod migration_016;
 pub mod migration_017;
 pub mod migration_018;
+pub mod migration_019;
 
-/// Apply all 18 storage migrations to the given connection.
+/// Apply all 19 storage migrations to the given connection.
 ///
 /// Sets connection-level pragmas, runs migration 001
 /// unconditionally (idempotent via `CREATE TABLE IF NOT EXISTS`),
@@ -204,6 +205,9 @@ pub fn run_migrations(conn: &mut Connection) -> Result<(), StorageError> {
 	}
 	if max_version < 18 {
 		migration_018::run(conn)?;
+	}
+	if max_version < 19 {
+		migration_019::run(conn)?;
 	}
 
 	Ok(())
@@ -323,7 +327,7 @@ mod tests {
 	// ── Category 1: Schema creation parity ────────────────────
 
 	#[test]
-	fn run_migrations_applies_all_eighteen_migrations() {
+	fn run_migrations_applies_all_nineteen_migrations() {
 		let mut conn = fresh_conn();
 		run_migrations(&mut conn).expect("run all migrations");
 
@@ -333,7 +337,7 @@ mod tests {
 				row.get(0)
 			})
 			.unwrap();
-		assert_eq!(count, 18, "expected 18 migration rows after full run");
+		assert_eq!(count, 19, "expected 19 migration rows after full run");
 	}
 
 	#[test]
@@ -391,6 +395,8 @@ mod tests {
 			"surface_fs_mutation_evidence",
 			// 017-module-discovery-diagnostics
 			"module_discovery_diagnostics",
+			// 019-quality-assessments
+			"quality_assessments",
 		];
 
 		for table in expected_tables {
@@ -405,7 +411,7 @@ mod tests {
 	// ── Category 2: Migration version progression parity ─────
 
 	#[test]
-	fn schema_migrations_records_versions_one_through_eighteen_in_order() {
+	fn schema_migrations_records_versions_one_through_nineteen_in_order() {
 		let mut conn = fresh_conn();
 		run_migrations(&mut conn).expect("run all migrations");
 
@@ -439,6 +445,7 @@ mod tests {
 			(16, "016-fs-mutations"),
 			(17, "017-module-discovery-diagnostics"),
 			(18, "018-surface-identity"),
+			(19, "019-quality-assessments"),
 		];
 
 		assert_eq!(rows.len(), expected.len());
@@ -454,13 +461,13 @@ mod tests {
 		run_migrations(&mut conn).expect("first run");
 		run_migrations(&mut conn).expect("second run must not error");
 
-		// Still exactly 18 rows.
+		// Still exactly 19 rows.
 		let count: i64 = conn
 			.query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
 				row.get(0)
 			})
 			.unwrap();
-		assert_eq!(count, 18, "re-run must not duplicate schema_migrations rows");
+		assert_eq!(count, 19, "re-run must not duplicate schema_migrations rows");
 
 		// Each version still appears exactly once.
 		let mut stmt = conn

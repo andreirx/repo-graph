@@ -983,6 +983,422 @@ impl ProjectSurfaceEvidence {
 	}
 }
 
+// ── Quality Policy Types ───────────────────────────────────────────
+//
+// Quality policy declarations and assessments per quality-policy-design.md.
+// Policies are threshold rules over measurements. Assessments are the
+// result of applying policies to measurements.
+
+/// Policy kind determines both evaluation semantics and the implicit
+/// comparison operator.
+///
+/// Operator derivation (no separate operator field):
+/// - `absolute_max`, `no_new`, `no_worsened` → `<=` (value must not exceed threshold)
+/// - `absolute_min` → `>=` (value must meet or exceed threshold)
+///
+/// Comparative kinds (`no_new`, `no_worsened`) require a baseline snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityPolicyKind {
+	/// Every measurement must satisfy `value <= threshold`.
+	AbsoluteMax,
+	/// Every measurement must satisfy `value >= threshold`.
+	AbsoluteMin,
+	/// Only newly introduced targets are evaluated. New targets must
+	/// satisfy `value <= threshold`. Existing targets are ignored.
+	NoNew,
+	/// Only existing violators are evaluated. Existing violators
+	/// (`value > threshold` in baseline) may not increase. New targets
+	/// and non-violating existing targets are ignored.
+	NoWorsened,
+}
+
+impl QualityPolicyKind {
+	/// Return the comparison operator implied by this policy kind.
+	/// Used for verdict computation: pass if `value <op> threshold`.
+	pub fn operator(&self) -> ComparisonOperator {
+		match self {
+			QualityPolicyKind::AbsoluteMax => ComparisonOperator::LessOrEqual,
+			QualityPolicyKind::AbsoluteMin => ComparisonOperator::GreaterOrEqual,
+			QualityPolicyKind::NoNew => ComparisonOperator::LessOrEqual,
+			QualityPolicyKind::NoWorsened => ComparisonOperator::LessOrEqual,
+		}
+	}
+
+	/// Whether this policy kind requires a baseline snapshot for evaluation.
+	pub fn requires_baseline(&self) -> bool {
+		matches!(self, QualityPolicyKind::NoNew | QualityPolicyKind::NoWorsened)
+	}
+
+	/// Parse from string (matches serde snake_case convention).
+	pub fn from_str(s: &str) -> Option<Self> {
+		match s {
+			"absolute_max" => Some(QualityPolicyKind::AbsoluteMax),
+			"absolute_min" => Some(QualityPolicyKind::AbsoluteMin),
+			"no_new" => Some(QualityPolicyKind::NoNew),
+			"no_worsened" => Some(QualityPolicyKind::NoWorsened),
+			_ => None,
+		}
+	}
+
+	/// Serialize to string (matches serde snake_case convention).
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			QualityPolicyKind::AbsoluteMax => "absolute_max",
+			QualityPolicyKind::AbsoluteMin => "absolute_min",
+			QualityPolicyKind::NoNew => "no_new",
+			QualityPolicyKind::NoWorsened => "no_worsened",
+		}
+	}
+}
+
+/// Comparison operator for threshold evaluation.
+///
+/// Derived from `QualityPolicyKind`, never stored separately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComparisonOperator {
+	LessOrEqual,
+	GreaterOrEqual,
+}
+
+impl ComparisonOperator {
+	/// Evaluate the comparison: `value <op> threshold`.
+	pub fn evaluate(&self, value: f64, threshold: f64) -> bool {
+		match self {
+			ComparisonOperator::LessOrEqual => value <= threshold,
+			ComparisonOperator::GreaterOrEqual => value >= threshold,
+		}
+	}
+
+	/// Returns true if `current` is worse than `baseline` according to
+	/// this operator's direction. Used for `no_worsened` evaluation.
+	///
+	/// For `<=` (max-direction): worse means current > baseline.
+	/// For `>=` (min-direction): worse means current < baseline.
+	pub fn is_worse(&self, current: f64, baseline: f64) -> bool {
+		match self {
+			ComparisonOperator::LessOrEqual => current > baseline,
+			ComparisonOperator::GreaterOrEqual => current < baseline,
+		}
+	}
+}
+
+/// Policy severity determines gate impact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityPolicySeverity {
+	/// Gate-blocking: FAIL contributes to non-zero exit code.
+	Fail,
+	/// Informational: FAIL reported but does not block gate.
+	Advisory,
+}
+
+impl QualityPolicySeverity {
+	pub fn from_str(s: &str) -> Option<Self> {
+		match s {
+			"fail" => Some(QualityPolicySeverity::Fail),
+			"advisory" => Some(QualityPolicySeverity::Advisory),
+			_ => None,
+		}
+	}
+
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			QualityPolicySeverity::Fail => "fail",
+			QualityPolicySeverity::Advisory => "advisory",
+		}
+	}
+}
+
+/// Scope clause kind — closed set per design lock.
+///
+/// Enforces valid clause types at the type level, preventing invalid
+/// values from surviving JSON deserialization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScopeClauseKind {
+	/// Filter to measurements in files under this module path.
+	Module,
+	/// Filter to measurements in matching files (exact or glob).
+	File,
+	/// Filter to measurements on symbols of this kind (node subtype).
+	SymbolKind,
+}
+
+impl ScopeClauseKind {
+	pub fn from_str(s: &str) -> Option<Self> {
+		match s {
+			"module" => Some(ScopeClauseKind::Module),
+			"file" => Some(ScopeClauseKind::File),
+			"symbol_kind" => Some(ScopeClauseKind::SymbolKind),
+			_ => None,
+		}
+	}
+
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			ScopeClauseKind::Module => "module",
+			ScopeClauseKind::File => "file",
+			ScopeClauseKind::SymbolKind => "symbol_kind",
+		}
+	}
+}
+
+/// A single scope filter clause. All clauses are ANDed.
+///
+/// Empty clause list = repo-wide (no filtering).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ScopeClause {
+	/// Clause kind — enforced as closed enum.
+	#[serde(rename = "type")]
+	pub clause_kind: ScopeClauseKind,
+	/// Selector value: path prefix for module, path/glob for file,
+	/// node subtype for symbol_kind.
+	pub selector: String,
+}
+
+impl ScopeClause {
+	pub fn new(clause_kind: ScopeClauseKind, selector: impl Into<String>) -> Self {
+		Self {
+			clause_kind,
+			selector: selector.into(),
+		}
+	}
+
+	/// Parse from CLI format: "type:selector".
+	pub fn parse(s: &str) -> Option<Self> {
+		let (kind_str, selector) = s.split_once(':')?;
+		if kind_str.is_empty() || selector.is_empty() {
+			return None;
+		}
+		let clause_kind = ScopeClauseKind::from_str(kind_str)?;
+		Some(Self::new(clause_kind, selector))
+	}
+}
+
+/// Quality policy declaration payload (stored in value_json).
+///
+/// Parsed from and serialized to JSON for the declarations table.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct QualityPolicyPayload {
+	/// Human-readable policy ID (e.g., "QP-001").
+	pub policy_id: String,
+	/// Monotonic version for supersede.
+	pub version: i64,
+	/// Target scope (AND of all clauses; empty = repo-wide).
+	pub scope_clauses: Vec<ScopeClause>,
+	/// Bound measurement kind (e.g., "cognitive_complexity").
+	pub measurement_kind: String,
+	/// Policy kind determines operator and evaluation scope.
+	pub policy_kind: QualityPolicyKind,
+	/// Threshold value (always required).
+	pub threshold: f64,
+	/// Gate impact: fail (blocking) or advisory (informational).
+	pub severity: QualityPolicySeverity,
+	/// Optional description.
+	pub description: Option<String>,
+}
+
+/// Assessment verdict states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AssessmentVerdict {
+	/// All evaluated measurements satisfy threshold.
+	Pass,
+	/// One or more measurements violate threshold.
+	Fail,
+	/// No measurements match policy scope.
+	NotApplicable,
+	/// Baseline required but unavailable or incompatible.
+	NotComparable,
+}
+
+impl AssessmentVerdict {
+	pub fn from_str(s: &str) -> Option<Self> {
+		match s {
+			"PASS" => Some(AssessmentVerdict::Pass),
+			"FAIL" => Some(AssessmentVerdict::Fail),
+			"NOT_APPLICABLE" => Some(AssessmentVerdict::NotApplicable),
+			"NOT_COMPARABLE" => Some(AssessmentVerdict::NotComparable),
+			_ => None,
+		}
+	}
+
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			AssessmentVerdict::Pass => "PASS",
+			AssessmentVerdict::Fail => "FAIL",
+			AssessmentVerdict::NotApplicable => "NOT_APPLICABLE",
+			AssessmentVerdict::NotComparable => "NOT_COMPARABLE",
+		}
+	}
+}
+
+/// A single violation in an assessment.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AssessmentViolation {
+	/// The symbol that violates the policy.
+	pub target_stable_key: String,
+	/// The measured value that caused the violation.
+	pub measurement_value: f64,
+	/// The threshold the value failed to meet.
+	pub threshold: f64,
+	/// For `no_worsened`: the baseline value (None for absolute policies).
+	pub baseline_value: Option<f64>,
+}
+
+/// A quality assessment row from the database.
+///
+/// Maps to the `quality_assessments` table (migration 019).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityAssessmentRow {
+	pub assessment_uid: String,
+	pub snapshot_uid: String,
+	pub policy_uid: String,
+	pub baseline_snapshot_uid: Option<String>,
+	pub computed_verdict: String,
+	pub measurements_evaluated: i64,
+	pub violations_json: String,
+	pub new_violations: Option<i64>,
+	pub worsened_violations: Option<i64>,
+	pub created_at: String,
+}
+
+impl QualityAssessmentRow {
+	/// Construct from a rusqlite row.
+	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+		Ok(Self {
+			assessment_uid: row.get("assessment_uid")?,
+			snapshot_uid: row.get("snapshot_uid")?,
+			policy_uid: row.get("policy_uid")?,
+			baseline_snapshot_uid: row.get("baseline_snapshot_uid")?,
+			computed_verdict: row.get("computed_verdict")?,
+			measurements_evaluated: row.get("measurements_evaluated")?,
+			violations_json: row.get("violations_json")?,
+			new_violations: row.get("new_violations")?,
+			worsened_violations: row.get("worsened_violations")?,
+			created_at: row.get("created_at")?,
+		})
+	}
+
+	/// Parse violations from JSON.
+	pub fn violations(&self) -> Result<Vec<AssessmentViolation>, serde_json::Error> {
+		serde_json::from_str(&self.violations_json)
+	}
+
+	/// Parse verdict from string.
+	pub fn verdict(&self) -> Option<AssessmentVerdict> {
+		AssessmentVerdict::from_str(&self.computed_verdict)
+	}
+}
+
+/// Input for inserting a quality assessment.
+#[derive(Debug, Clone)]
+pub struct QualityAssessmentInput {
+	pub assessment_uid: String,
+	pub snapshot_uid: String,
+	pub policy_uid: String,
+	pub baseline_snapshot_uid: Option<String>,
+	pub computed_verdict: AssessmentVerdict,
+	pub measurements_evaluated: i64,
+	pub violations: Vec<AssessmentViolation>,
+	pub new_violations: Option<i64>,
+	pub worsened_violations: Option<i64>,
+	pub created_at: String,
+}
+
+/// Error when building an assessment UID with mismatched policy kind and baseline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssessmentUidError {
+	/// Comparative policy requires a baseline but none was provided.
+	BaselineRequired { policy_kind: QualityPolicyKind },
+	/// Absolute policy must not have a baseline.
+	BaselineNotAllowed { policy_kind: QualityPolicyKind },
+}
+
+impl std::fmt::Display for AssessmentUidError {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			AssessmentUidError::BaselineRequired { policy_kind } => {
+				write!(
+					f,
+					"policy kind '{}' requires a baseline snapshot",
+					policy_kind.as_str()
+				)
+			}
+			AssessmentUidError::BaselineNotAllowed { policy_kind } => {
+				write!(
+					f,
+					"policy kind '{}' must not have a baseline snapshot",
+					policy_kind.as_str()
+				)
+			}
+		}
+	}
+}
+
+impl std::error::Error for AssessmentUidError {}
+
+impl QualityAssessmentInput {
+	/// Build a deterministic assessment UID.
+	///
+	/// For absolute policies (`absolute_max`, `absolute_min`):
+	///   `{snapshot_uid}-qpa-{policy_uid}`
+	///   Baseline must be None.
+	///
+	/// For comparative policies (`no_new`, `no_worsened`):
+	///   `{snapshot_uid}-qpa-{policy_uid}-vs-{baseline_snapshot_uid}`
+	///   Baseline must be Some.
+	///
+	/// Returns `Err` if the policy kind and baseline presence are inconsistent.
+	/// This enforces the design invariant that baseline is part of identity
+	/// for comparative policies and must not appear for absolute policies.
+	pub fn build_uid(
+		snapshot_uid: &str,
+		policy_uid: &str,
+		policy_kind: QualityPolicyKind,
+		baseline_snapshot_uid: Option<&str>,
+	) -> Result<String, AssessmentUidError> {
+		let requires_baseline = policy_kind.requires_baseline();
+		match (requires_baseline, baseline_snapshot_uid) {
+			(true, Some(baseline)) => {
+				Ok(format!("{}-qpa-{}-vs-{}", snapshot_uid, policy_uid, baseline))
+			}
+			(true, None) => Err(AssessmentUidError::BaselineRequired { policy_kind }),
+			(false, None) => Ok(format!("{}-qpa-{}", snapshot_uid, policy_uid)),
+			(false, Some(_)) => Err(AssessmentUidError::BaselineNotAllowed { policy_kind }),
+		}
+	}
+}
+
+/// Quality policy waiver payload (stored in value_json).
+///
+/// Per-symbol granularity: waives a specific violation, not the entire policy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct QualityPolicyWaiverPayload {
+	/// The policy this waiver applies to.
+	pub policy_id: String,
+	/// The policy version this waiver was created against.
+	pub policy_version: i64,
+	/// The specific symbol being waived.
+	pub target_stable_key: String,
+	/// Reason for the waiver.
+	pub reason: String,
+	/// Optional expiration date (ISO 8601).
+	pub expires_at: Option<String>,
+	/// Optional author.
+	pub created_by: Option<String>,
+	/// Optional rationale category (e.g., "legacy", "third_party").
+	pub rationale_category: Option<String>,
+	/// Optional policy basis (e.g., "TL-approved").
+	pub policy_basis: Option<String>,
+}
+
 // ── Tests ──────────────────────────────────────────────────────────
 //
 // R2-B unit tests cover the pure-logic helper
@@ -1326,5 +1742,206 @@ mod tests {
 		};
 		let json = serde_json::to_string(&node).unwrap();
 		assert!(json.contains("\"location\":null"));
+	}
+
+	// ── Quality Policy Types ──────────────────────────────────────
+
+	#[test]
+	fn quality_policy_kind_operator_derivation() {
+		assert_eq!(
+			QualityPolicyKind::AbsoluteMax.operator(),
+			ComparisonOperator::LessOrEqual
+		);
+		assert_eq!(
+			QualityPolicyKind::AbsoluteMin.operator(),
+			ComparisonOperator::GreaterOrEqual
+		);
+		assert_eq!(
+			QualityPolicyKind::NoNew.operator(),
+			ComparisonOperator::LessOrEqual
+		);
+		assert_eq!(
+			QualityPolicyKind::NoWorsened.operator(),
+			ComparisonOperator::LessOrEqual
+		);
+	}
+
+	#[test]
+	fn quality_policy_kind_requires_baseline() {
+		assert!(!QualityPolicyKind::AbsoluteMax.requires_baseline());
+		assert!(!QualityPolicyKind::AbsoluteMin.requires_baseline());
+		assert!(QualityPolicyKind::NoNew.requires_baseline());
+		assert!(QualityPolicyKind::NoWorsened.requires_baseline());
+	}
+
+	#[test]
+	fn quality_policy_kind_roundtrip() {
+		for kind in [
+			QualityPolicyKind::AbsoluteMax,
+			QualityPolicyKind::AbsoluteMin,
+			QualityPolicyKind::NoNew,
+			QualityPolicyKind::NoWorsened,
+		] {
+			let s = kind.as_str();
+			let parsed = QualityPolicyKind::from_str(s);
+			assert_eq!(parsed, Some(kind), "roundtrip failed for {:?}", kind);
+		}
+	}
+
+	#[test]
+	fn comparison_operator_evaluate() {
+		assert!(ComparisonOperator::LessOrEqual.evaluate(10.0, 20.0));
+		assert!(ComparisonOperator::LessOrEqual.evaluate(20.0, 20.0));
+		assert!(!ComparisonOperator::LessOrEqual.evaluate(21.0, 20.0));
+
+		assert!(ComparisonOperator::GreaterOrEqual.evaluate(20.0, 10.0));
+		assert!(ComparisonOperator::GreaterOrEqual.evaluate(10.0, 10.0));
+		assert!(!ComparisonOperator::GreaterOrEqual.evaluate(9.0, 10.0));
+	}
+
+	#[test]
+	fn comparison_operator_is_worse() {
+		// LessOrEqual: worse means current > baseline (value went up)
+		assert!(ComparisonOperator::LessOrEqual.is_worse(25.0, 20.0));
+		assert!(!ComparisonOperator::LessOrEqual.is_worse(20.0, 20.0));
+		assert!(!ComparisonOperator::LessOrEqual.is_worse(15.0, 20.0));
+
+		// GreaterOrEqual: worse means current < baseline (value went down)
+		assert!(ComparisonOperator::GreaterOrEqual.is_worse(75.0, 80.0));
+		assert!(!ComparisonOperator::GreaterOrEqual.is_worse(80.0, 80.0));
+		assert!(!ComparisonOperator::GreaterOrEqual.is_worse(85.0, 80.0));
+	}
+
+	#[test]
+	fn scope_clause_parse_valid() {
+		let clause = ScopeClause::parse("module:src/core").unwrap();
+		assert_eq!(clause.clause_kind, ScopeClauseKind::Module);
+		assert_eq!(clause.selector, "src/core");
+
+		let clause = ScopeClause::parse("symbol_kind:METHOD").unwrap();
+		assert_eq!(clause.clause_kind, ScopeClauseKind::SymbolKind);
+		assert_eq!(clause.selector, "METHOD");
+	}
+
+	#[test]
+	fn scope_clause_kind_roundtrip() {
+		for kind in [
+			ScopeClauseKind::Module,
+			ScopeClauseKind::File,
+			ScopeClauseKind::SymbolKind,
+		] {
+			let s = kind.as_str();
+			let parsed = ScopeClauseKind::from_str(s);
+			assert_eq!(parsed, Some(kind), "roundtrip failed for {:?}", kind);
+		}
+	}
+
+	#[test]
+	fn scope_clause_parse_invalid() {
+		assert!(ScopeClause::parse("").is_none());
+		assert!(ScopeClause::parse("no-colon").is_none());
+		assert!(ScopeClause::parse(":empty_type").is_none());
+		assert!(ScopeClause::parse("module:").is_none());
+		assert!(ScopeClause::parse("invalid_type:value").is_none());
+	}
+
+	#[test]
+	fn assessment_verdict_roundtrip() {
+		for verdict in [
+			AssessmentVerdict::Pass,
+			AssessmentVerdict::Fail,
+			AssessmentVerdict::NotApplicable,
+			AssessmentVerdict::NotComparable,
+		] {
+			let s = verdict.as_str();
+			let parsed = AssessmentVerdict::from_str(s);
+			assert_eq!(parsed, Some(verdict), "roundtrip failed for {:?}", verdict);
+		}
+	}
+
+	#[test]
+	fn assessment_uid_absolute_policy() {
+		let uid = QualityAssessmentInput::build_uid(
+			"snap-1",
+			"policy-1",
+			QualityPolicyKind::AbsoluteMax,
+			None,
+		)
+		.unwrap();
+		assert_eq!(uid, "snap-1-qpa-policy-1");
+	}
+
+	#[test]
+	fn assessment_uid_comparative_policy() {
+		let uid = QualityAssessmentInput::build_uid(
+			"snap-2",
+			"policy-1",
+			QualityPolicyKind::NoNew,
+			Some("snap-1"),
+		)
+		.unwrap();
+		assert_eq!(uid, "snap-2-qpa-policy-1-vs-snap-1");
+	}
+
+	#[test]
+	fn assessment_uid_absolute_policy_with_baseline_is_error() {
+		let result = QualityAssessmentInput::build_uid(
+			"snap-1",
+			"policy-1",
+			QualityPolicyKind::AbsoluteMax,
+			Some("baseline"),
+		);
+		assert!(matches!(
+			result,
+			Err(AssessmentUidError::BaselineNotAllowed { .. })
+		));
+	}
+
+	#[test]
+	fn assessment_uid_comparative_policy_without_baseline_is_error() {
+		let result = QualityAssessmentInput::build_uid(
+			"snap-1",
+			"policy-1",
+			QualityPolicyKind::NoWorsened,
+			None,
+		);
+		assert!(matches!(
+			result,
+			Err(AssessmentUidError::BaselineRequired { .. })
+		));
+	}
+
+	#[test]
+	fn quality_policy_payload_serializes_correctly() {
+		let policy = QualityPolicyPayload {
+			policy_id: "QP-001".into(),
+			version: 1,
+			scope_clauses: vec![ScopeClause::new(ScopeClauseKind::Module, "src/core")],
+			measurement_kind: "cognitive_complexity".into(),
+			policy_kind: QualityPolicyKind::AbsoluteMax,
+			threshold: 25.0,
+			severity: QualityPolicySeverity::Fail,
+			description: Some("Limit complexity".into()),
+		};
+		let json = serde_json::to_string(&policy).unwrap();
+		assert!(json.contains("\"policy_id\":\"QP-001\""));
+		assert!(json.contains("\"policy_kind\":\"absolute_max\""));
+		assert!(json.contains("\"severity\":\"fail\""));
+		assert!(json.contains("\"threshold\":25"));
+		assert!(json.contains("\"type\":\"module\""));
+	}
+
+	#[test]
+	fn assessment_violation_serializes_correctly() {
+		let violation = AssessmentViolation {
+			target_stable_key: "r1:src/foo.ts#bar:SYMBOL:FUNCTION".into(),
+			measurement_value: 30.0,
+			threshold: 25.0,
+			baseline_value: Some(28.0),
+		};
+		let json = serde_json::to_string(&violation).unwrap();
+		assert!(json.contains("\"target_stable_key\":"));
+		assert!(json.contains("\"measurement_value\":30"));
+		assert!(json.contains("\"baseline_value\":28"));
 	}
 }
