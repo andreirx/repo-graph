@@ -1,0 +1,28 @@
+[package]
+name = "repo-graph-doc-facts"
+version = "0.1.0"
+edition = "2021"
+description = "Documentation semantic fact extraction for repo-graph"
+license = "MIT"
+publish = false
+
+[dependencies]
+# YAML frontmatter parsing for generated doc detection and
+# structured metadata extraction.
+serde_yaml = "0.9"
+serde = { version = "1", features = ["derive"] }
+
+# Regex for keyword pattern extraction. Lazy compilation via
+# `regex::Regex::new` is fine for the expected workload (dozens
+# of doc files per repo, not thousands).
+regex = "1"
+
+# SHA-256 for content hash computation. Each doc file is hashed
+# once at read time; all facts from that file share the hash.
+sha2 = "0.10"
+
+# Error handling
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

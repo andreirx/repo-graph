@@ -132,6 +132,7 @@ path = "src/main.rs"
 repo-graph-agent = { path = "../agent" }
 repo-graph-classification = { path = "../classification" }
 repo-graph-coverage = { path = "../coverage" }
+repo-graph-doc-facts = { path = "../doc-facts" }
 repo-graph-gate = { path = "../gate" }
 repo-graph-git = { path = "../git" }
 repo-graph-quality-policy = { path = "../quality-policy" }

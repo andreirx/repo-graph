@@ -16,6 +16,7 @@
 //!   rmap gate    <db_path> <repo_uid> [--strict | --advisory]
 //!   rmap orient  <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]
 //!   rmap check   <db_path> <repo_uid>
+//!   rmap docs    <db_path> <repo_uid>
 //!   rmap churn    <db_path> <repo_uid> [--since <expr>]
 //!   rmap hotspots <db_path> <repo_uid> [--since <expr>]
 //!   rmap assess   <db_path> <repo_uid> [--baseline <snapshot_uid>]
@@ -133,6 +134,7 @@ fn main() -> ExitCode {
 		"cycles" => run_cycles(&args[2..]),
 		"stats" => run_stats(&args[2..]),
 		"declare" => run_declare(&args[2..]),
+		"docs" => run_docs(&args[2..]),
 		"resource" => run_resource(&args[2..]),
 		"modules" => run_modules(&args[2..]),
 		"surfaces" => run_surfaces(&args[2..]),
@@ -162,6 +164,7 @@ fn print_usage() {
 	eprintln!("  rmap coverage   <db_path> <repo_uid> <report_path>");
 	eprintln!("  rmap assess     <db_path> <repo_uid> [--baseline <snapshot_uid>]");
 	eprintln!("  rmap explain    <db_path> <repo_uid> <target> [--budget medium|large]");
+	eprintln!("  rmap docs       <db_path> <repo_uid>");
 	eprintln!("  rmap dead    <db_path> <repo_uid> [kind]");
 	eprintln!("  rmap cycles  <db_path> <repo_uid>");
 	eprintln!("  rmap stats   <db_path> <repo_uid>");
@@ -1578,6 +1581,131 @@ fn print_explain_usage() {
 		"usage: rmap explain <db_path> <repo_uid> <target> \
 		 [--budget medium|large]"
 	);
+}
+
+// ── docs command ─────────────────────────────────────────────────
+
+fn run_docs(args: &[String]) -> ExitCode {
+	if args.len() != 2 {
+		eprintln!("usage: rmap docs <db_path> <repo_uid>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+
+	let mut storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Get repo to find root_path
+	use repo_graph_storage::types::RepoRef;
+	let repo = match storage.get_repo(&RepoRef::Uid(repo_uid.to_string())) {
+		Ok(Some(r)) => r,
+		Ok(None) => {
+			eprintln!("error: repo '{}' not found", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	let repo_path = Path::new(&repo.root_path);
+
+	// Extract semantic facts from documentation
+	let extraction_result = match repo_graph_doc_facts::extract_semantic_facts(repo_path) {
+		Ok(r) => r,
+		Err(e) => {
+			eprintln!("error: extraction failed: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Map ExtractedFact to NewSemanticFact
+	let new_facts: Vec<repo_graph_storage::crud::semantic_facts::NewSemanticFact> =
+		extraction_result
+			.facts
+			.iter()
+			.map(|f| map_extracted_to_storage(repo_uid, f))
+			.collect();
+
+	// Replace facts in storage atomically
+	let replace_result = match storage.replace_semantic_facts_for_repo(repo_uid, &new_facts) {
+		Ok(r) => r,
+		Err(e) => {
+			eprintln!("error: storage failed: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Build counts by fact kind
+	let mut counts_by_kind: std::collections::HashMap<String, usize> =
+		std::collections::HashMap::new();
+	for fact in &extraction_result.facts {
+		*counts_by_kind
+			.entry(fact.fact_kind.as_str().to_string())
+			.or_insert(0) += 1;
+	}
+
+	// Build files by kind
+	let mut files_by_kind: std::collections::HashMap<String, usize> =
+		std::collections::HashMap::new();
+	for (kind, count) in &extraction_result.files_by_kind {
+		files_by_kind.insert(kind.as_str().to_string(), *count);
+	}
+
+	// Build JSON output
+	let output = serde_json::json!({
+		"command": "docs",
+		"repo": repo_uid,
+		"repo_path": repo.root_path,
+		"files_scanned": extraction_result.files_scanned,
+		"files_by_kind": files_by_kind,
+		"facts_extracted": extraction_result.facts.len(),
+		"facts_inserted": replace_result.inserted,
+		"facts_deleted": replace_result.deleted,
+		"counts_by_kind": counts_by_kind,
+		"generated_docs_count": extraction_result.generated_docs_count,
+		"warnings": extraction_result.warnings.iter()
+			.map(|w| serde_json::json!({
+				"file": w.file,
+				"message": w.message
+			}))
+			.collect::<Vec<_>>()
+	});
+
+	println!("{}", serde_json::to_string_pretty(&output).unwrap());
+	ExitCode::from(0)
+}
+
+/// Map an ExtractedFact to a NewSemanticFact for storage.
+fn map_extracted_to_storage(
+	repo_uid: &str,
+	fact: &repo_graph_doc_facts::ExtractedFact,
+) -> repo_graph_storage::crud::semantic_facts::NewSemanticFact {
+	repo_graph_storage::crud::semantic_facts::NewSemanticFact {
+		repo_uid: repo_uid.to_string(),
+		fact_kind: fact.fact_kind.as_str().to_string(),
+		subject_ref: fact.subject_ref.clone(),
+		subject_ref_kind: fact.subject_ref_kind.as_str().to_string(),
+		object_ref: fact.object_ref.clone(),
+		object_ref_kind: fact.object_ref_kind.map(|k| k.as_str().to_string()),
+		source_file: fact.source_file.clone(),
+		source_line_start: fact.line_start.map(|n| n as i64),
+		source_line_end: fact.line_end.map(|n| n as i64),
+		source_text_excerpt: fact.excerpt.clone(),
+		content_hash: fact.content_hash.clone(),
+		extraction_method: fact.extraction_method.as_str().to_string(),
+		confidence: fact.confidence,
+		generated: fact.generated,
+		doc_kind: fact.doc_kind.as_str().to_string(),
+	}
 }
 
 // ── dead command ─────────────────────────────────────────────────
