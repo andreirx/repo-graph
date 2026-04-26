@@ -24,14 +24,22 @@ This intelligence is invisible to the current graph. An agent cannot know from s
 - Facts are advisory, not authoritative
 - Confidence levels distinguish explicit statements from inferences
 
+**V1 is discovery-oriented, not archival.**
+
+- Read documentation/config files live from disk at extraction time
+- Persist only extracted semantic facts, not full doc text
+- Source of truth is the live repo files, not stored blobs
+- Optimized for current-state discovery, not historical replay
+
 ## Scope
 
-### In scope (v1)
+### In scope (v1) — current-state discovery
 
-1. **Documentation detection** - find and parse doc files
+1. **Live doc reading** - read docs from disk at extraction time
    - README.md, ARCHITECTURE.md, CONTRIBUTING.md
    - Module-level docs (package README, Cargo.toml description)
-   - Inline doc comments (optional, lower priority)
+   - Config files (docker-compose.yml, .env.*)
+   - Generated MAP.md files (with lower confidence)
 
 2. **Relationship extraction** - explicit statements
    - `replacement_for`: "X replaces Y"
@@ -43,18 +51,26 @@ This intelligence is invisible to the current graph. An agent cannot know from s
    - Environment surfaces from docker-compose, .env files, deploy configs
    - Per-environment feature flags or configuration differences
 
-4. **Provenance tracking**
-   - Source file, line range
-   - Extraction method (pattern match, keyword, explicit marker)
-   - Confidence level
-   - Extraction date
+4. **Minimal provenance** - facts only, no blobs
+   - Source file, line range, short excerpt
+   - Content hash for staleness detection
+   - Extraction method and confidence
+   - Generated vs authored flag
 
 ### Out of scope (v1)
 
-- Javadoc/Doxygen XML ingestion (future enhancement)
+- Full doc text persistence (read live, store facts only)
+- Historical replay / re-extraction from stored docs
+- Javadoc/Doxygen XML ingestion
 - Natural language understanding (beyond pattern matching)
 - Cross-repo relationship detection
-- Automated staleness detection against code changes
+- Inline doc comment extraction (deferred)
+
+### Deferred to v2 (only if needed)
+
+- Raw doc text persistence for archival
+- Re-extraction without filesystem access
+- Snapshot-based doc versioning
 
 ## Data Model
 
@@ -64,34 +80,58 @@ This intelligence is invisible to the current graph. An agent cannot know from s
 semantic_facts table
 --------------------
 fact_uid: TEXT PRIMARY KEY
-snapshot_uid: TEXT FK
-repo_uid: TEXT FK
+repo_uid: TEXT NOT NULL FK
 
-fact_kind: TEXT  -- 'replacement_for', 'alternative_to', 'deprecated_by', 
-                 -- 'migration_path', 'environment_surface', 'operational_constraint'
+fact_kind: TEXT NOT NULL  -- 'replacement_for', 'alternative_to', 'deprecated_by', 
+                          -- 'migration_path', 'environment_surface', 'operational_constraint'
 
 -- Subject reference (typed for query-time resolution)
-subject_ref: TEXT           -- the reference value (path, key, name, or text)
-subject_ref_kind: TEXT      -- 'module', 'symbol', 'file', 'environment', 'text'
+subject_ref: TEXT NOT NULL      -- the reference value (path, key, name, or text)
+subject_ref_kind: TEXT NOT NULL -- 'module', 'symbol', 'file', 'environment', 'text'
 
 -- Object reference (typed, nullable for some fact kinds)
-object_ref: TEXT            -- the reference value (nullable)
-object_ref_kind: TEXT       -- 'module', 'symbol', 'file', 'environment', 'text' (nullable)
+object_ref: TEXT                -- the reference value (nullable)
+object_ref_kind: TEXT           -- 'module', 'symbol', 'file', 'environment', 'text' (nullable)
 
--- Evidence
-source_file: TEXT      -- relative path to doc file
+-- Provenance (minimal, not full doc text)
+source_file: TEXT NOT NULL      -- relative path to doc/config file
 source_line_start: INTEGER
 source_line_end: INTEGER
-source_text: TEXT      -- the actual text that was matched
+source_text_excerpt: TEXT       -- short excerpt of matched text (not full doc)
+content_hash: TEXT NOT NULL     -- hash of source file at extraction time
 
 -- Quality
-extraction_method: TEXT  -- 'explicit_marker', 'keyword_pattern', 'config_parse'
-confidence: REAL         -- 0.0-1.0
-generated: BOOLEAN       -- true if from generated doc (MAP.md), false if authored
+extraction_method: TEXT NOT NULL -- 'explicit_marker', 'keyword_pattern', 'config_parse'
+confidence: REAL NOT NULL        -- 0.0-1.0
+generated: INTEGER NOT NULL      -- 1 if from generated doc (MAP.md), 0 if authored
+doc_kind: TEXT NOT NULL          -- 'readme', 'architecture', 'config', 'inline_comment', 'map'
 
 -- Timestamps
-extracted_at: TEXT       -- ISO 8601
+extracted_at: TEXT NOT NULL      -- ISO 8601
 ```
+
+**Key design choices:**
+
+1. **No snapshot_uid.** Docs are read live from disk, not from indexed snapshots.
+   The command extracts current-state semantics from the working tree. Pretending
+   snapshot-tight coupling exists when it does not would be dishonest.
+
+2. **No full doc text storage.** Only extracted facts and minimal provenance are
+   persisted. `content_hash` enables staleness detection without storing blobs.
+
+3. **Repo-scoped identity.** `repo_uid` is the primary anchor. Facts represent
+   current-state discovery for a repository, not historical snapshots.
+
+### Update Semantics
+
+Each `rmap docs` run **replaces all semantic_facts for that repo_uid**.
+
+- Not append-forever
+- Not versioned per run
+- Not preserving old facts
+
+This is current-state discovery, not history. The command answers: "what semantic
+facts exist in the documentation right now?" Old facts are discarded on re-extraction.
 
 ### Reference Kinds
 
@@ -104,6 +144,16 @@ extracted_at: TEXT       -- ISO 8601
 | `text` | Free-form text (e.g. constraint description) | No resolution, stored as-is |
 
 The ref_kind fields enable typed resolution at query time without eager binding during extraction.
+
+### Doc Kinds
+
+| Kind | Source |
+|------|--------|
+| `readme` | README.md, README |
+| `architecture` | ARCHITECTURE.md, CONTRIBUTING.md, design docs |
+| `config` | docker-compose.yml, .env.*, deploy configs |
+| `inline_comment` | JSDoc, Javadoc, rustdoc (future) |
+| `map` | Generated MAP.md files (lower confidence) |
 
 ### Fact Kinds
 
@@ -169,12 +219,31 @@ Parse structured configs:
 ### Storage
 
 - New table: `semantic_facts` (migration 020, after quality_assessments)
-- Indexes on (snapshot_uid, fact_kind), (repo_uid, subject_ref, subject_ref_kind)
+- Indexes on (repo_uid, fact_kind), (repo_uid, subject_ref, subject_ref_kind)
+- No snapshot_uid — this is repo-scoped current-state extraction
+- Each run deletes existing facts for repo_uid before inserting new ones
 
 ### CLI
 
 - `rmap docs <db> <repo> [path]` - extract and persist semantic facts
-- Output: count of facts extracted by kind
+- Separate command, NOT part of `rmap index`
+- Reads docs/config live from disk
+- Output: count of facts extracted by kind, grouped by doc_kind
+
+### Extraction flow
+
+```
+rmap docs <db> <repo>
+  1. Delete existing semantic_facts for repo_uid
+  2. Find doc files (README, ARCHITECTURE, docker-compose, .env.*, MAP.md)
+  3. Read each file from disk (live from working tree)
+  4. Compute content_hash per file
+  5. Run extractors (explicit markers, keyword patterns, config parsers)
+  6. Insert new facts with minimal provenance
+  7. Report summary (facts by kind, by doc_kind)
+```
+
+This is idempotent: running twice produces the same result (assuming docs unchanged).
 
 ### Query integration (future)
 
@@ -208,20 +277,35 @@ This keeps authored documentation distinguished from synthesized documentation.
 - This layer does not affect structural queries (callers, callees, etc.)
 - This layer is advisory - agents decide how to weight the evidence
 - This layer does not attempt NLP beyond pattern matching
+- This layer does not store full documentation text (v1)
+- This layer does not support historical replay without filesystem (v1)
+- This layer does not auto-run during indexing (v1)
 
-## Open Questions
+## Decisions Made
 
-1. Should semantic facts be per-snapshot or per-repo?
-   - Per-snapshot: facts can change with doc changes
-   - Per-repo: facts are more stable, less churn
-   - **Recommendation**: per-snapshot, like all other extracted facts
+1. **Repo-scoped, not snapshot-scoped**
+   - No snapshot_uid in the data model
+   - repo_uid is the sole identity anchor
+   - Facts represent current-state discovery from working tree
+   - No false impression of snapshot-tight coupling
 
-2. Should we resolve subject_ref/object_ref to actual graph entities?
-   - Pro: enables graph traversal from semantic facts
-   - Con: adds coupling, may not always resolve
-   - **Recommendation**: store as text, resolve at query time (lazy)
+2. **Replace semantics on each run**
+   - `rmap docs` deletes existing facts for repo_uid before inserting
+   - Not append-forever, not versioned per run
+   - Current-state discovery, not history
 
-3. Should `rmap docs` run automatically during `rmap index`?
-   - Pro: always fresh
-   - Con: adds indexing time, may not be wanted
-   - **Recommendation**: separate command initially, optional auto-run later
+3. **Lazy resolution with typed references**
+   - Store subject_ref/object_ref as typed text (with ref_kind)
+   - Resolve to graph entities at query time
+   - No eager binding during extraction
+
+4. **Separate command, not auto-run**
+   - `rmap docs` is a distinct command
+   - Not part of `rmap index`
+   - Keeps extraction cost and failure modes isolated
+
+5. **Live read, minimal persistence**
+   - Read docs from disk at extraction time
+   - Do NOT store full doc text
+   - Persist only facts + provenance (excerpt, hash, line range)
+   - Optimized for discovery, not archival

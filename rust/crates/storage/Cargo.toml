@@ -104,17 +104,20 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # typed failure modes to upstream crates.
 thiserror = "2"
 
-# UUID v4 generation for migration 004's obligation_id backfill.
-# The TS migration calls `randomUUID()` from node:crypto, which
-# returns RFC 4122 v4 UUIDs. The Rust `uuid` crate is the
-# canonical equivalent. Locked at R2-C decision D-C2: must match
-# the TS UUID format because the backfilled IDs become permanent
+# UUID generation for storage identity surfaces.
+#
+# v4 (random): migration 004's obligation_id backfill. The TS
+# migration calls `randomUUID()` from node:crypto, which returns
+# RFC 4122 v4 UUIDs. Locked at R2-C decision D-C2: must match the
+# TS UUID format because the backfilled IDs become permanent
 # identifiers in the database, used as reference targets by waiver
 # declarations.
 #
-# Only the `v4` feature is enabled (random-generated UUIDs). No
-# v1/v3/v5 namespace generators. This matches the TS surface
-# exactly (`randomUUID()` is v4 only).
+# v5 (deterministic): semantic_facts.fact_uid derivation. Uses a
+# fixed namespace UUID and hashes the semantic identity tuple
+# (repo_uid, fact_kind, refs, location, doc_kind) to produce
+# stable IDs across extraction runs. Enables idempotent replace
+# semantics for `rmap docs`.
 uuid = { version = "1", features = ["v4", "v5"] }
 
 # Classification crate — needed for SourceLocation type used in

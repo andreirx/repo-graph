@@ -97,6 +97,7 @@ pub mod module_edges_support;
 pub mod nodes;
 pub mod project_surfaces;
 pub mod repos;
+pub mod semantic_facts;
 pub mod snapshots;
 
 #[cfg(test)]

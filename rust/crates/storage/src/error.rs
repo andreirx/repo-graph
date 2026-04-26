@@ -129,6 +129,11 @@ pub enum StorageError {
 	#[error("serialization error: {0}")]
 	SerializationError(String),
 
+	/// An argument to a storage method violated a documented invariant.
+	/// Used for precondition checks that are not SQLite-level constraints.
+	#[error("invalid argument: {0}")]
+	InvalidArgument(String),
+
 	/// A measurement's `value_json` could not be parsed as a numeric value.
 	///
 	/// Measurements are expected to have `{ "value": <number> }` in
