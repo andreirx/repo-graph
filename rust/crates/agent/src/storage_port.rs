@@ -596,6 +596,25 @@ pub trait AgentStorageRead {
 		snapshot_uid: &str,
 		file_path: &str,
 	) -> Result<Vec<AgentImportEntry>, AgentStorageError>;
+
+	// ── Documentation inventory (docs-primary pivot) ────────────────
+
+	/// Discover documentation files from the repo's filesystem.
+	///
+	/// Implementation: the storage adapter reads `repo_path` from
+	/// the repos table, then calls
+	/// `repo_graph_doc_facts::discover_doc_inventory(repo_path, false)`
+	/// and projects entries into `AgentDocEntry`.
+	///
+	/// Returns an empty vector when the repo path is inaccessible
+	/// or the repo has no documentation files. Does NOT return an
+	/// error for missing files — docs are optional and their absence
+	/// is valid (the orient contract says "works on repos with zero
+	/// semantic hints").
+	fn get_doc_inventory(
+		&self,
+		repo_uid: &str,
+	) -> Result<Vec<AgentDocEntry>, AgentStorageError>;
 }
 
 // ── Explain DTOs ────────────────────────────────────────────────
@@ -622,4 +641,22 @@ pub struct AgentFileEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentImportEntry {
 	pub target_file: String,
+}
+
+// ── Documentation inventory ─────────────────────────────────────────
+
+/// A documentation file from live filesystem discovery.
+///
+/// Docs are primary orientation data. This struct comes from
+/// `discover_doc_inventory` in the doc-facts crate, projected
+/// through the storage adapter. The agent crate does not access
+/// the filesystem directly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentDocEntry {
+	/// Path relative to repo root.
+	pub path: String,
+	/// Document kind: "readme", "architecture", "config", "map".
+	pub kind: String,
+	/// Whether this is a generated document (e.g., MAP.md from rgistr).
+	pub generated: bool,
 }

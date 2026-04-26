@@ -298,6 +298,8 @@ fn build_ambiguous_result(
 		focus: Focus::ambiguous(focus_str, focus_candidates),
 		confidence: Confidence::High,
 
+		documentation: None,
+
 		signals: Vec::new(),
 		signals_truncated: None,
 		signals_omitted_count: None,
@@ -332,6 +334,8 @@ fn build_no_match_result(
 		snapshot: snapshot.snapshot_uid.clone(),
 		focus: Focus::no_match(focus_str),
 		confidence: Confidence::High,
+
+		documentation: None,
 
 		signals: Vec::new(),
 		signals_truncated: None,

@@ -681,62 +681,114 @@ loop.
 - Absolute threshold policies are operational; trend-aware policies complete
   the story for legacy codebases where cleanup is gradual.
 
-### 2. Documentation-derived semantic facts
-Semantic evidence layer derived from documentation, comments, and
-configuration files. Distinct from graph extraction: this is not
-AST-based symbol/edge extraction but contextual intelligence that
-augments graph facts with human-authored intent and deployment context.
+### 2. Documentation inventory and retrieval
+Documentation files are first-class orientation evidence. The docs
+themselves are the data — not a narrow ontology of extracted facts.
 
-**Not graph extraction.** This layer provides:
-- Migration/rewrite/replacement relationships stated in docs
-- Environment surface detection (local/dev/stage/prod configs)
-- Implementation alternative relationships (e.g., "Java backend vs
-  TS serverless are alternatives to each other")
-- Deprecation notices and migration paths
-- Operational constraints not visible in code structure
+**Primary documentation surface:**
+- Discover authored and generated documentation files
+- Classify lightly (readme, architecture, config, map)
+- Detect generated vs authored (frontmatter-based, content-authoritative)
+- Expose documentation inventory to agents
+- Surface relevant doc file paths in `orient` and `explain`
+- Let agents read the actual docs for full context
 
 **Evidence sources:**
 - README.md files (repo-level and module-level)
 - ARCHITECTURE.md, CONTRIBUTING.md, design docs
-- Inline doc comments (JSDoc, Javadoc, rustdoc, docstrings)
 - Configuration files (docker-compose.yml, .env.*, deployment manifests)
-- Optional: Doxygen/Javadoc generated documentation
+- Generated MAP.md files (marked with lower confidence)
 
-**Semantic fact kinds:**
-- `replacement_for`: "module A is the replacement for module B"
-- `alternative_to`: "module A and module B are alternative implementations"
-- `deprecated_by`: "symbol X is deprecated in favor of Y"
-- `environment_surface`: "this surface runs in production environment"
-- `migration_path`: "migrate from X to Y via these steps"
-- `operational_constraint`: "must not be called from hot path"
+**Why docs are primary:**
+- Documentation preserves nuance, qualifiers, rationale, and exceptions
+- Forcing docs into fixed fact kinds loses critical context
+- An agent's best answer is often "here are the 3 relevant docs" with
+  excerpts, not a compressed relational tuple
+- The information already exists; preserving it costs less than lossy
+  extraction
 
-**Confidence and provenance:**
-- Every fact carries source attribution (file, line range, extraction date)
-- Confidence levels: explicit (stated in doc) > inferred (pattern match)
-- Version tracking: doc facts can become stale; re-extraction updates
-- Conflict detection: contradictory facts from different sources flagged
-
-**Why this matters:**
-- An agent reasoning about module A cannot know from the graph that
-  module B exists as an alternative or replacement unless documentation
-  says so.
-- Environment-specific behavior (feature flags, stage-only endpoints)
-  is invisible to static extraction but explicit in config docs.
-- Migration/deprecation paths guide refactoring decisions that pure
-  structure cannot inform.
+**Secondary documentation hints (shipped, auxiliary only):**
+- `semantic_facts` table exists for optional derived hints
+- Used for ranking, filtering, and quick environment detection
+- Not the canonical documentation representation
+- Fact kinds: `replacement_for`, `alternative_to`, `deprecated_by`,
+  `migration_path`, `environment_surface`
+- Lower confidence than reading the actual doc
 
 **Design constraints:**
-- Read-only: this layer does not modify code, only augments understanding.
-- Probabilistic: doc-derived facts are advisory, not authoritative.
-- Separate storage: `semantic_facts` table, not mixed with graph edges.
-- Query integration: `orient` and `check` surface relevant semantic
-  facts when reasoning about a module/symbol.
+- Docs inventory is the primary agent surface
+- Semantic facts are auxiliary hints for ranking/filtering
+- `orient` surfaces relevant doc paths first, semantic hints second
+- Agents read the docs; they do not rely on extracted fact summaries
+- See `docs/design/documentation-semantic-facts.md` for the secondary
+  extraction layer design
 
 **Adoption order:**
-1. README/ARCHITECTURE.md parser for explicit relationship markers
-2. Environment surface detection from config files
-3. Deprecation notice extraction from doc comments
-4. Optional Doxygen/Javadoc XML ingestion for existing doc builds
+1. Documentation inventory surface (`rmap docs list`)
+2. Orient integration: `documentation.relevant_files[]` section
+3. Semantic facts demoted to optional `documentation_hints`
+4. Explain integration: doc excerpts and file references
+
+**Implementation constraints (binding):**
+
+1. **`rmap docs list` must NOT derive from semantic_facts.**
+   It must use documentation inventory (live discovery or persisted).
+   Repos with docs but no extracted facts must still show their docs.
+
+2. **Introduce a pure `DocInventoryEntry` DTO** for shared use:
+   - `path: String`
+   - `kind: DocKind`
+   - `generated: bool`
+   - `content_hash: Option<String>`
+   - (maybe `title: Option<String>` later)
+   Used by `docs list`, `orient`, and future persisted inventory.
+
+3. **`content_hash` is optional in list output.**
+   Do not force eager hashing unless already cheap in the chosen path.
+
+4. **In orient, each relevant doc must include a relevance reason:**
+   ```json
+   {
+     "path": "src/core/README.md",
+     "kind": "readme",
+     "generated": false,
+     "reason": "module_path_match"
+   }
+   ```
+   Reason values: `repo_root_doc`, `module_path_match`, `doc_kind_architecture`,
+   `generated_map_for_target`, `config_relevance`.
+
+5. **Rank authored docs above generated docs.**
+   Architecture/README before generated MAP when both are relevant.
+
+6. **Keep relevance rules simple and structural in v1:**
+   - Repo root README/ARCHITECTURE always relevant at repo scope
+   - Docs under matching module/path are relevant
+   - Generated MAP in matching path is relevant but lower-ranked
+   - Config docs relevant for environment/build orientation
+   Do NOT add text search, embeddings, or fuzzy matching in this slice.
+
+7. **Add a pure helper for doc relevance selection.**
+   Do not inline relevance logic in CLI handlers. Pure function:
+   `select_relevant_docs(inventory, focus_context) -> ranked_docs`
+
+8. **Validate on real repos:** glamCRM, amodx, hexmanos.
+   - Does `docs list` show actual useful docs?
+   - Does `orient` point to the right docs first?
+   - Are generated MAPs present but not overpowering authored docs?
+   - Do repos with no semantic_facts still show their docs correctly?
+
+9. **CLI decision: Option B chosen.**
+   - Rename current `rmap docs` to `rmap docs extract`
+   - Add `rmap docs list` as inventory surface
+   - `docs` becomes a command family: `docs list`, `docs extract`
+   - No compatibility alias (clean break)
+   - Update parser, tests, docs, examples in same slice
+
+10. **V1 inventory may use live filesystem discovery.**
+    Persisted inventory is a future optimization slice.
+    But do NOT fake inventory from semantic_fact rows — that inverts
+    the primary/secondary relationship.
 
 ### 3. Long-lived analysis daemon + daemon-backed CLI
 Two-part item: support module (warmed runtime) + feature (CLI client).

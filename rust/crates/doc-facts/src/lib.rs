@@ -46,6 +46,95 @@ pub enum DocFactsError {
     NotADirectory(String),
 }
 
+/// Documentation inventory entry (primary documentation surface).
+///
+/// This is the shared DTO for `docs list`, `orient`, and future
+/// persisted inventory. Docs are primary; semantic facts are secondary.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DocInventoryEntry {
+    /// Path relative to repo root.
+    pub path: String,
+    /// Classified document kind.
+    pub kind: String,
+    /// Whether this is a generated document (e.g., MAP.md from rgistr).
+    pub generated: bool,
+    /// SHA-256 hash of content (optional, computed on demand).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+}
+
+/// Result of documentation inventory discovery.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DocInventoryResult {
+    /// Discovered documentation files.
+    pub entries: Vec<DocInventoryEntry>,
+    /// Files matched by doc kind.
+    pub counts_by_kind: HashMap<String, usize>,
+    /// Generated docs encountered.
+    pub generated_count: usize,
+}
+
+/// Discover documentation inventory without extracting semantic facts.
+///
+/// This is the primary documentation surface. Returns doc file paths,
+/// kinds, and generated flags. Content hashing is optional.
+///
+/// For semantic fact extraction, use `extract_semantic_facts` instead.
+pub fn discover_doc_inventory(
+    repo_path: &Path,
+    compute_hashes: bool,
+) -> Result<DocInventoryResult, DocFactsError> {
+    if !repo_path.is_dir() {
+        return Err(DocFactsError::NotADirectory(
+            repo_path.display().to_string(),
+        ));
+    }
+
+    let mut doc_files = discovery::discover_doc_files(repo_path);
+
+    // Optionally read and hash content
+    if compute_hashes {
+        for doc in &mut doc_files {
+            let _ = read_and_hash(doc);
+        }
+    }
+
+    // Update generated flag from content analysis when content is available
+    for doc in &mut doc_files {
+        if let Some(content) = &doc.content {
+            match classification::get_generated_from_frontmatter(content) {
+                Some(explicit) => doc.generated = explicit,
+                None => doc.generated = false,
+            }
+        }
+    }
+
+    // Build entries
+    let entries: Vec<DocInventoryEntry> = doc_files
+        .iter()
+        .map(|f| DocInventoryEntry {
+            path: f.relative_path.clone(),
+            kind: f.kind.as_str().to_string(),
+            generated: f.generated,
+            content_hash: f.content_hash.clone(),
+        })
+        .collect();
+
+    // Count by kind
+    let mut counts_by_kind: HashMap<String, usize> = HashMap::new();
+    for entry in &entries {
+        *counts_by_kind.entry(entry.kind.clone()).or_insert(0) += 1;
+    }
+
+    let generated_count = entries.iter().filter(|e| e.generated).count();
+
+    Ok(DocInventoryResult {
+        entries,
+        counts_by_kind,
+        generated_count,
+    })
+}
+
 /// Extract semantic facts from a repository's documentation.
 ///
 /// This is the top-level facade that orchestrates:

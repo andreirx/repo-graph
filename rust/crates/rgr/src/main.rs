@@ -16,7 +16,8 @@
 //!   rmap gate    <db_path> <repo_uid> [--strict | --advisory]
 //!   rmap orient  <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]
 //!   rmap check   <db_path> <repo_uid>
-//!   rmap docs    <db_path> <repo_uid>
+//!   rmap docs list    <db_path> <repo_uid>
+//!   rmap docs extract <db_path> <repo_uid>
 //!   rmap churn    <db_path> <repo_uid> [--since <expr>]
 //!   rmap hotspots <db_path> <repo_uid> [--since <expr>]
 //!   rmap assess   <db_path> <repo_uid> [--baseline <snapshot_uid>]
@@ -134,7 +135,7 @@ fn main() -> ExitCode {
 		"cycles" => run_cycles(&args[2..]),
 		"stats" => run_stats(&args[2..]),
 		"declare" => run_declare(&args[2..]),
-		"docs" => run_docs(&args[2..]),
+		"docs" => run_docs_family(&args[2..]),
 		"resource" => run_resource(&args[2..]),
 		"modules" => run_modules(&args[2..]),
 		"surfaces" => run_surfaces(&args[2..]),
@@ -164,7 +165,8 @@ fn print_usage() {
 	eprintln!("  rmap coverage   <db_path> <repo_uid> <report_path>");
 	eprintln!("  rmap assess     <db_path> <repo_uid> [--baseline <snapshot_uid>]");
 	eprintln!("  rmap explain    <db_path> <repo_uid> <target> [--budget medium|large]");
-	eprintln!("  rmap docs       <db_path> <repo_uid>");
+	eprintln!("  rmap docs list    <db_path> <repo_uid>");
+	eprintln!("  rmap docs extract <db_path> <repo_uid>");
 	eprintln!("  rmap dead    <db_path> <repo_uid> [kind]");
 	eprintln!("  rmap cycles  <db_path> <repo_uid>");
 	eprintln!("  rmap stats   <db_path> <repo_uid>");
@@ -1583,11 +1585,105 @@ fn print_explain_usage() {
 	);
 }
 
-// ── docs command ─────────────────────────────────────────────────
+// ── docs command family ──────────────────────────────────────────
+//
+// docs is a command family:
+//   docs list    — documentation inventory (primary surface)
+//   docs extract — semantic fact extraction (secondary hints)
+//
+// Docs are primary; semantic_facts are secondary derived hints.
 
-fn run_docs(args: &[String]) -> ExitCode {
+fn run_docs_family(args: &[String]) -> ExitCode {
+	if args.is_empty() {
+		print_docs_usage();
+		return ExitCode::from(1);
+	}
+
+	match args[0].as_str() {
+		"list" => run_docs_list(&args[1..]),
+		"extract" => run_docs_extract(&args[1..]),
+		other => {
+			eprintln!("unknown docs subcommand: {}", other);
+			print_docs_usage();
+			ExitCode::from(1)
+		}
+	}
+}
+
+fn print_docs_usage() {
+	eprintln!("usage:");
+	eprintln!("  rmap docs list    <db_path> <repo_uid>  — documentation inventory");
+	eprintln!("  rmap docs extract <db_path> <repo_uid>  — extract semantic hints");
+}
+
+/// List documentation inventory (primary documentation surface).
+///
+/// Returns doc file paths, kinds, and generated flags. Does NOT
+/// derive from semantic_facts — uses live filesystem discovery.
+fn run_docs_list(args: &[String]) -> ExitCode {
 	if args.len() != 2 {
-		eprintln!("usage: rmap docs <db_path> <repo_uid>");
+		eprintln!("usage: rmap docs list <db_path> <repo_uid>");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(msg) => {
+			eprintln!("error: {}", msg);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Get repo to find root_path
+	use repo_graph_storage::types::RepoRef;
+	let repo = match storage.get_repo(&RepoRef::Uid(repo_uid.to_string())) {
+		Ok(Some(r)) => r,
+		Ok(None) => {
+			eprintln!("error: repo '{}' not found", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	let repo_path = Path::new(&repo.root_path);
+
+	// Discover documentation inventory (live filesystem, not semantic_facts)
+	let inventory = match repo_graph_doc_facts::discover_doc_inventory(repo_path, true) {
+		Ok(r) => r,
+		Err(e) => {
+			eprintln!("error: discovery failed: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Build JSON output
+	let output = serde_json::json!({
+		"command": "docs list",
+		"repo": repo_uid,
+		"repo_path": repo.root_path,
+		"entries": inventory.entries,
+		"count": inventory.entries.len(),
+		"counts_by_kind": inventory.counts_by_kind,
+		"generated_count": inventory.generated_count
+	});
+
+	println!("{}", serde_json::to_string_pretty(&output).unwrap());
+	ExitCode::from(0)
+}
+
+/// Extract semantic facts from documentation (secondary hints).
+///
+/// Populates semantic_facts table with derived hints for ranking
+/// and filtering. The docs themselves remain the primary data.
+fn run_docs_extract(args: &[String]) -> ExitCode {
+	if args.len() != 2 {
+		eprintln!("usage: rmap docs extract <db_path> <repo_uid>");
 		return ExitCode::from(1);
 	}
 
@@ -1662,7 +1758,7 @@ fn run_docs(args: &[String]) -> ExitCode {
 
 	// Build JSON output
 	let output = serde_json::json!({
-		"command": "docs",
+		"command": "docs extract",
 		"repo": repo_uid,
 		"repo_path": repo.root_path,
 		"files_scanned": extraction_result.files_scanned,

@@ -27,11 +27,12 @@
 use crate::aggregators;
 use crate::aggregators::AggregatorOutput;
 use crate::confidence::derive_repo_confidence;
+use crate::doc_relevance::{DocEntry, DocFocusContext, select_relevant_docs};
 use repo_graph_gate::GateStorageRead;
 
 use crate::dto::budget::Budget;
 use crate::dto::envelope::{
-	Focus, OrientResult, ORIENT_COMMAND, ORIENT_SCHEMA,
+	DocumentationSection, Focus, OrientResult, ORIENT_COMMAND, ORIENT_SCHEMA,
 };
 use crate::dto::limit::{Limit, LimitCode};
 use crate::dto::signal::Signal;
@@ -150,7 +151,15 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
 	let confidence =
 		derive_repo_confidence(&trust_result.summary, trust_result.stale);
 
-	// ── 10. Build envelope. ──────────────────────────────────
+	// ── 10. Documentation (docs-primary pivot). ──────────────
+	//
+	// Docs are primary orientation data. Retrieve inventory from
+	// storage (live filesystem discovery via doc-facts crate),
+	// select relevant docs for repo-level focus, build section.
+	// Empty inventory is valid — works on repos with zero docs.
+	let documentation = build_documentation_section(storage, repo_uid);
+
+	// ── 11. Build envelope. ──────────────────────────────────
 	let truncated_any = sig_tx.truncated || lim_tx.truncated;
 
 	Ok(OrientResult {
@@ -160,6 +169,8 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
 		snapshot: snapshot_uid,
 		focus: Focus::repo(),
 		confidence,
+
+		documentation,
 
 		signals: all_signals,
 		signals_truncated: sig_tx.truncated.then_some(true),
@@ -180,4 +191,48 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
 fn merge(signals: &mut Vec<Signal>, limits: &mut Vec<Limit>, out: AggregatorOutput) {
 	signals.extend(out.signals);
 	limits.extend(out.limits);
+}
+
+/// Build the documentation section for repo-level orient.
+///
+/// Retrieves doc inventory from storage, selects relevant docs for
+/// repo-level focus, and builds `DocumentationSection`. Returns
+/// `None` if no relevant docs (valid state — docs are optional).
+fn build_documentation_section<S: AgentStorageRead + ?Sized>(
+	storage: &S,
+	repo_uid: &str,
+) -> Option<DocumentationSection> {
+	// Get doc inventory from storage (may fail or be empty).
+	let agent_entries = match storage.get_doc_inventory(repo_uid) {
+		Ok(entries) => entries,
+		Err(_) => return None, // Graceful degradation: no docs section.
+	};
+
+	if agent_entries.is_empty() {
+		return None;
+	}
+
+	// Convert to doc_relevance::DocEntry.
+	let inventory: Vec<DocEntry> = agent_entries
+		.into_iter()
+		.map(|e| DocEntry {
+			path: e.path,
+			kind: e.kind,
+			generated: e.generated,
+		})
+		.collect();
+
+	// Select relevant docs for repo-level focus.
+	let focus = DocFocusContext::repo();
+	let relevant = select_relevant_docs(&inventory, &focus);
+
+	if relevant.is_empty() {
+		return None;
+	}
+
+	let count = relevant.len();
+	Some(DocumentationSection {
+		relevant_files: relevant,
+		count,
+	})
 }

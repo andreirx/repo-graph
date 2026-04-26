@@ -1,6 +1,27 @@
 # Documentation-Derived Semantic Facts
 
-Design document for the semantic evidence layer in repo-graph.
+Design document for the **secondary** semantic hints layer in repo-graph.
+
+## Architectural Position
+
+**This layer is auxiliary, not primary.**
+
+The primary documentation surface in repo-graph is the documentation
+inventory: discovering doc files, classifying them, and surfacing
+relevant file paths to agents. Agents then read the actual docs.
+
+This semantic facts layer extracts **derived hints** from documentation
+for ranking, filtering, and quick lookups. It is useful but lossy.
+It does not replace the documentation itself.
+
+**Correct mental model:**
+- Primary: docs inventory → agent reads docs → full context preserved
+- Secondary: semantic facts → hints for ranking/filtering → lossy summaries
+
+**Anti-pattern this design avoids:**
+Treating extracted semantic facts as THE documentation layer. That
+would lose nuance, qualifiers, rationale, and exceptions that exist
+in the actual documentation text.
 
 ## Problem Statement
 
@@ -14,15 +35,21 @@ Repo-graph extracts structural facts from code (symbols, edges, modules, measure
 
 This intelligence is invisible to the current graph. An agent cannot know from structure alone that "module A is being replaced by module B" or "service X runs only in production".
 
+**However:** the solution is NOT to reduce docs into a narrow ontology and pretend that is the documentation layer. The solution is:
+
+1. **Primary:** Surface relevant doc file paths; let agents read them
+2. **Secondary:** Extract semantic hints for ranking and filtering
+
 ## Design Principle
 
-**This is a semantic evidence layer, not graph extraction.**
+**This is a secondary hints layer, not the documentation product.**
 
 - It does not produce nodes/edges in the core graph
 - It does not affect call/import resolution
-- It produces queryable facts with explicit provenance
-- Facts are advisory, not authoritative
+- It produces queryable hints with explicit provenance
+- Hints are advisory, not authoritative
 - Confidence levels distinguish explicit statements from inferences
+- **The actual docs remain the canonical source of documentation truth**
 
 **V1 is discovery-oriented, not archival.**
 
@@ -247,9 +274,17 @@ This is idempotent: running twice produces the same result (assuming docs unchan
 
 ### Query integration (future)
 
-- `rmap orient` could surface relevant semantic facts for focused module
-- `rmap check` could warn about deprecated code usage
-- `rmap explain` could include semantic context
+Primary documentation surface (docs inventory):
+- `rmap docs list` surfaces doc file paths, kinds, generated/authored flags
+- `rmap orient` includes `documentation.relevant_files[]` as primary section
+- `rmap explain` includes doc file references and excerpts
+
+Secondary hints (semantic facts):
+- `rmap orient` may include `documentation_hints.semantic_facts[]` as optional
+- `rmap check` could warn about deprecated code usage via hints
+- Semantic facts are ranking/filtering aids, not the main documentation output
+
+**The agent reads the actual docs.** Semantic facts help locate and rank them.
 
 ## Ingestion of Generated Docs
 
@@ -273,6 +308,7 @@ This keeps authored documentation distinguished from synthesized documentation.
 
 ## Non-Goals
 
+- **This layer does not replace documentation inventory as the primary surface**
 - This layer does not replace or modify the core graph
 - This layer does not affect structural queries (callers, callees, etc.)
 - This layer is advisory - agents decide how to weight the evidence
@@ -280,6 +316,102 @@ This keeps authored documentation distinguished from synthesized documentation.
 - This layer does not store full documentation text (v1)
 - This layer does not support historical replay without filesystem (v1)
 - This layer does not auto-run during indexing (v1)
+- **Semantic facts are NOT the canonical documentation representation**
+- **Agents should read actual docs, not rely solely on extracted facts**
+
+## Two Distinct Surfaces (architectural lock)
+
+This section prevents future implementers from conflating the two
+documentation surfaces. They have different purposes and different
+rules. Do not "improve" one using the rules of the other.
+
+### Documentation Inventory Surface
+
+**Purpose:** Discovery and surfacing of doc files for agent reading.
+
+**Characteristics:**
+- Primary surface — docs are first-class data
+- Lightweight classification only (path/name patterns)
+- `generated` flag is an **advisory workflow hint**, not semantic truth
+- Path-based convention is sufficient (e.g., `MAP.md` => generated)
+- No content adjudication required for inventory
+- Docs are meant to be read by the agent, not pre-filtered
+
+**`generated` flag semantics:**
+- Advisory provenance hint from workflow/path convention
+- NOT a hard trust downgrade for ranking
+- Mild tie-breaker only, not dominant ranking factor
+- Agent determines document value by reading content
+
+**Correct ranking rule:**
+- Rank by structural relevance first (path match > root doc)
+- Prefer authored vs generated only as a mild tie-breaker
+- A generated `MAP.md` for `src/core/service` may be more useful
+  than a repo-root authored README for that specific focus
+
+### Semantic Fact Extraction Surface
+
+**Purpose:** Secondary derived hints for ranking/filtering.
+
+**Characteristics:**
+- Secondary surface — hints are lossy summaries
+- May inspect content (frontmatter, keyword patterns)
+- May use content signals for confidence adjustment
+- Still not canonical documentation truth
+- Confidence affects hint trust, not document existence
+
+**Content analysis here is valid** because semantic facts are derived
+hints, not inventory classification. The distinction:
+- Inventory: "these docs exist, here are workflow hints"
+- Semantic facts: "these hints were extracted from doc content"
+
+### Why This Lock Exists
+
+Without this explicit split, implementers oscillate between:
+- "improve inventory by adding content-authoritative detection"
+- "simplify semantic facts to match inventory's lightweight model"
+
+Both are wrong. The surfaces serve different purposes and should
+remain distinct. Inventory is for discovery; semantic facts are for
+derived hints. Do not merge their concerns.
+
+## Implementation Constraints (binding)
+
+These constraints prevent drift back to treating semantic facts as primary.
+
+1. **`rmap docs list` must NOT derive from semantic_facts.**
+   Documentation inventory is the source. Repos with docs but no
+   extracted facts must still show their docs.
+
+2. **Shared DTO:** `DocInventoryEntry` with path, kind, generated,
+   optional content_hash. Used by docs list, orient, and future
+   persisted inventory.
+
+3. **Orient surfaces docs with relevance reasons:**
+   ```json
+   {"path": "...", "kind": "readme", "generated": false, "reason": "module_path_match"}
+   ```
+
+4. **Structural relevance first, provenance second.**
+   Ranking: path match (200) >> root doc (100) >> config (80).
+   Authored vs generated is a mild tie-breaker (-5), not a filter.
+   A generated MAP.md for the focus path outranks a root README.
+
+5. **Relevance rules are simple and structural in v1.**
+   No text search, embeddings, or fuzzy matching.
+
+6. **Pure relevance selector function.**
+   `select_relevant_docs(inventory, focus) -> ranked_docs`
+   Do not inline in CLI handlers.
+
+7. **Real-repo validation required:** glamCRM, amodx, hexmanos.
+   Key proof: repos with no semantic_facts still show their docs.
+
+8. **CLI decision required before implementation:**
+   - Option A: Keep `rmap docs` as extract, add `rmap docs list`
+   - Option B: Rename to `rmap docs extract`, make `docs` a command family
+
+See `docs/ROADMAP.md` §2 for full constraint list.
 
 ## Decisions Made
 

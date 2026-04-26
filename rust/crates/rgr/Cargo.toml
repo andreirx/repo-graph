@@ -113,8 +113,16 @@
 #           measurements and persists assessments atomically. Returns JSON
 #           with counts by verdict. Exit 0 on success.
 #
-# RS-DF-1:  `docs <db_path> <repo_uid>`
-#           Extract semantic facts from documentation files.
+# RS-DF-1:  `docs` command family — documentation inventory and semantic hints
+#
+#           `docs list <db_path> <repo_uid>` (PRIMARY)
+#           Documentation inventory surface. Lists doc file paths, kinds,
+#           generated flags, optional content hashes. Uses live filesystem
+#           discovery, NOT semantic_facts. Docs are primary.
+#           JSON output: entries[], count, counts_by_kind, generated_count.
+#
+#           `docs extract <db_path> <repo_uid>` (SECONDARY)
+#           Extract semantic hints from documentation files.
 #           Reads live from disk: README.md, ARCHITECTURE.md, docker-compose.yml,
 #           .env.*, MAP.md. Repo-scoped replace semantics (deletes existing
 #           facts for repo before inserting new ones). Extracts:
@@ -124,10 +132,11 @@
 #           Uses deterministic UUID v5 for fact identity. Generated docs
 #           (MAP.md with generated_by frontmatter) receive lower confidence.
 #           Content-authoritative: path alone does not mark as generated.
-#           Exit 0 on success, 1 on usage error, 2 on runtime error.
 #           JSON output: command, repo, files_scanned, facts_extracted,
 #           counts_by_kind, generated_docs_count.
+#
 #           Design: docs/design/documentation-semantic-facts.md
+#           Exit 0 on success, 1 on usage error, 2 on runtime error.
 #
 # No formatting-heavy UX.
 

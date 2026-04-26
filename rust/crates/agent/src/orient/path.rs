@@ -17,11 +17,12 @@
 use crate::aggregators;
 use crate::aggregators::AggregatorOutput;
 use crate::confidence::derive_repo_confidence;
+use crate::doc_relevance::{DocEntry, DocFocusContext, select_relevant_docs};
 use repo_graph_gate::GateStorageRead;
 
 use crate::dto::budget::Budget;
 use crate::dto::envelope::{
-	Focus, OrientResult, ORIENT_COMMAND, ORIENT_SCHEMA,
+	DocumentationSection, Focus, OrientResult, ORIENT_COMMAND, ORIENT_SCHEMA,
 };
 use crate::dto::limit::{Limit, LimitCode};
 use crate::dto::signal::Signal;
@@ -116,6 +117,9 @@ pub fn orient_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
 	let confidence =
 		derive_repo_confidence(&trust_result.summary, trust_result.stale);
 
+	// ── documentation (docs-primary pivot) ──────────────────
+	let documentation = build_documentation_section(storage, repo_uid, path_prefix);
+
 	// ── envelope ────────────────────────────────────────────
 	let truncated_any = sig_tx.truncated || lim_tx.truncated;
 
@@ -126,6 +130,8 @@ pub fn orient_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
 		snapshot: snapshot_uid.clone(),
 		focus: Focus::path_area(path_prefix, module_stable_key, path_prefix),
 		confidence,
+
+		documentation,
 
 		signals: all_signals,
 		signals_truncated: sig_tx.truncated.then_some(true),
@@ -150,4 +156,42 @@ fn merge(
 ) {
 	signals.extend(out.signals);
 	limits.extend(out.limits);
+}
+
+/// Build the documentation section for path-scoped orient.
+fn build_documentation_section<S: AgentStorageRead + ?Sized>(
+	storage: &S,
+	repo_uid: &str,
+	path_prefix: &str,
+) -> Option<DocumentationSection> {
+	let agent_entries = match storage.get_doc_inventory(repo_uid) {
+		Ok(entries) => entries,
+		Err(_) => return None,
+	};
+
+	if agent_entries.is_empty() {
+		return None;
+	}
+
+	let inventory: Vec<DocEntry> = agent_entries
+		.into_iter()
+		.map(|e| DocEntry {
+			path: e.path,
+			kind: e.kind,
+			generated: e.generated,
+		})
+		.collect();
+
+	let focus = DocFocusContext::path(path_prefix);
+	let relevant = select_relevant_docs(&inventory, &focus);
+
+	if relevant.is_empty() {
+		return None;
+	}
+
+	let count = relevant.len();
+	Some(DocumentationSection {
+		relevant_files: relevant,
+		count,
+	})
 }

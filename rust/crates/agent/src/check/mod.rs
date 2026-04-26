@@ -139,6 +139,8 @@ pub fn run_check<S: AgentStorageRead + GateStorageRead + ?Sized>(
 		focus: Focus::repo(),
 		confidence,
 
+		documentation: None,
+
 		signals,
 		signals_truncated: None,
 		signals_omitted_count: None,

@@ -78,7 +78,9 @@ The highest-value, slowest-changing substrate is not the raw code graph. It is t
 
 **3. Runtime/build environment** — how each module runs, what config defines it, what build system owns it, what deployment surface it belongs to, what compile context applies.
 
-**4. Agentic quality control surface** — deterministic measurements, policy thresholds, assessments, waivers, and trend deltas that constrain agent-authored changes with arithmetic instead of vague review language. This includes complexity, size, coverage, churn, hotspot, risk, and architecture-boundary signals.
+**4. Documentation as first-class evidence** — human-authored documentation files (README, ARCHITECTURE, design docs) are orientation artifacts, not raw material for extraction pipelines. The docs themselves are the data. Structured extraction (semantic facts) is secondary — useful for ranking and filtering, but not a replacement for reading the actual documentation. An agent's best answer to "what does this module do?" is often the relevant doc file path, not a compressed relational tuple.
+
+**5. Agentic quality control surface** — deterministic measurements, policy thresholds, assessments, waivers, and trend deltas that constrain agent-authored changes with arithmetic instead of vague review language. This includes complexity, size, coverage, churn, hotspot, risk, and architecture-boundary signals.
 
 The first three layers change slowly relative to code. They are expensive for an agent to reconstruct from scratch. They are cheap to maintain incrementally. And they are what an agent needs first when orienting in a codebase.
 

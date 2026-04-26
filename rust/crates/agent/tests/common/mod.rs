@@ -22,11 +22,11 @@ use std::collections::HashMap;
 
 use repo_graph_agent::{
 	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentCycle,
-	AgentDeadNode, AgentFileEntry, AgentFocusCandidate, AgentImportEdge,
-	AgentImportEntry, AgentPathResolution, AgentReliabilityAxis,
-	AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
-	AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext,
-	AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
+	AgentDeadNode, AgentDocEntry, AgentFileEntry, AgentFocusCandidate,
+	AgentImportEdge, AgentImportEntry, AgentPathResolution,
+	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
+	AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead,
+	AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_gate::{
 	GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
@@ -128,6 +128,9 @@ pub struct FakeAgentStorage {
 	pub gate_complexity: HashMap<String, Vec<GateMeasurement>>,
 	pub gate_hotspots: HashMap<String, Vec<GateInference>>,
 	pub gate_waivers: HashMap<(String, String, i64, String), Vec<GateWaiver>>,
+
+	// ── Documentation inventory seed data (docs-primary pivot) ──
+	pub doc_inventory: HashMap<String, Vec<AgentDocEntry>>,
 
 	/// If set to the name of a port operation, the fake returns
 	/// `AgentStorageError` from that operation. Used to verify
@@ -532,6 +535,18 @@ impl AgentStorageRead for FakeAgentStorage {
 		Ok(self
 			.file_imports
 			.get(&key)
+			.cloned()
+			.unwrap_or_default())
+	}
+
+	fn get_doc_inventory(
+		&self,
+		repo_uid: &str,
+	) -> Result<Vec<AgentDocEntry>, AgentStorageError> {
+		self.fail_if_forced("get_doc_inventory")?;
+		Ok(self
+			.doc_inventory
+			.get(repo_uid)
 			.cloned()
 			.unwrap_or_default())
 	}

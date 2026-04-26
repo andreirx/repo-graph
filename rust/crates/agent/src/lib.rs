@@ -58,6 +58,7 @@
 pub mod aggregators;
 pub mod check;
 pub mod confidence;
+pub mod doc_relevance;
 pub mod dto;
 pub mod errors;
 pub mod explain;
@@ -67,12 +68,14 @@ pub mod storage_port;
 
 // ── Public surface (locked at Rust-42) ────────────────────────
 
+pub use doc_relevance::{DocEntry, DocFocusContext, select_relevant_docs};
 pub use dto::{
 	budget::Budget,
 	envelope::{
-		Confidence, Focus, FocusCandidate, FocusFailureReason, NextAction,
-		NextKind, OrientResult, ResolvedKind, CHECK_COMMAND, EXPLAIN_COMMAND,
-		ORIENT_COMMAND, ORIENT_SCHEMA,
+		Confidence, DocRelevanceReason, DocumentationSection, Focus,
+		FocusCandidate, FocusFailureReason, NextAction, NextKind,
+		OrientResult, RelevantDoc, ResolvedKind, CHECK_COMMAND,
+		EXPLAIN_COMMAND, ORIENT_COMMAND, ORIENT_SCHEMA,
 	},
 	limit::{Limit, LimitCode},
 	signal::{
@@ -107,8 +110,8 @@ pub use explain::run_explain;
 pub use orient::orient;
 pub use storage_port::{
 	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentCycle,
-	AgentDeadNode, AgentFileEntry, AgentFocusCandidate, AgentFocusKind,
-	AgentImportEdge, AgentImportEntry, AgentPathResolution,
+	AgentDeadNode, AgentDocEntry, AgentFileEntry, AgentFocusCandidate,
+	AgentFocusKind, AgentImportEdge, AgentImportEntry, AgentPathResolution,
 	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo,
 	AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageRead,
 	AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary,

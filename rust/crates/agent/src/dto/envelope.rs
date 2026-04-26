@@ -259,6 +259,53 @@ pub struct NextAction {
 	pub reason: String,
 }
 
+// ── Documentation ─────────────────────────────────────────────────
+
+/// Reason a doc was selected as relevant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocRelevanceReason {
+	/// Repo-level doc (root README, ARCHITECTURE)
+	RepoRootDoc,
+	/// Doc under a matching module/path prefix
+	ModulePathMatch,
+	/// Architecture doc relevant to focus
+	ArchitectureDoc,
+	/// Config doc relevant for environment context
+	ConfigRelevance,
+	/// Generated MAP for the target module/path
+	GeneratedMapForTarget,
+}
+
+/// A relevant documentation file surfaced by orient.
+///
+/// Docs are primary; semantic facts are secondary derived hints.
+/// This struct represents the primary documentation surface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RelevantDoc {
+	/// Path relative to repo root.
+	pub path: String,
+	/// Document kind (readme, architecture, config, map).
+	pub kind: String,
+	/// Whether this is a generated document (e.g., MAP.md from rgistr).
+	pub generated: bool,
+	/// Why this doc was selected as relevant.
+	pub reason: DocRelevanceReason,
+}
+
+/// Documentation section in orient output.
+///
+/// Primary documentation surface: relevant file paths for the agent
+/// to read. Semantic facts (hints) are optional and secondary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DocumentationSection {
+	/// Relevant documentation files, ranked by relevance.
+	/// Authored docs rank above generated docs.
+	pub relevant_files: Vec<RelevantDoc>,
+	/// Count of relevant docs (convenience).
+	pub count: usize,
+}
+
 // ── Envelope ──────────────────────────────────────────────────────
 
 /// Top-level `orient` result envelope.
@@ -273,6 +320,11 @@ pub struct OrientResult {
 	pub snapshot: String,
 	pub focus: Focus,
 	pub confidence: Confidence,
+
+	/// Primary documentation surface: relevant files for the agent to read.
+	/// Docs are first-class orientation evidence.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub documentation: Option<DocumentationSection>,
 
 	pub signals: Vec<Signal>,
 	#[serde(skip_serializing_if = "Option::is_none")]

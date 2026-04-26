@@ -158,6 +158,14 @@ repo-graph-agent = { path = "../agent" }
 # through the StorageConnection implementation added here.
 repo-graph-gate = { path = "../gate" }
 
+# Doc-facts crate — added for the docs-primary pivot. The storage
+# adapter's `get_doc_inventory` method calls
+# `discover_doc_inventory(repo_path, false)` to perform live
+# filesystem discovery of documentation files. The agent crate
+# does not access the filesystem directly; the storage adapter
+# handles the boundary crossing.
+repo-graph-doc-facts = { path = "../doc-facts" }
+
 [dev-dependencies]
 # tempfile for tests that need a real file-backed SQLite database
 # in a unique temporary path. Added in R2-D when the connection

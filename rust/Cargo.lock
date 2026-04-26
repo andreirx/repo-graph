@@ -683,6 +683,7 @@ version = "0.1.0"
 dependencies = [
  "repo-graph-agent",
  "repo-graph-classification",
+ "repo-graph-doc-facts",
  "repo-graph-gate",
  "repo-graph-indexer",
  "repo-graph-trust",

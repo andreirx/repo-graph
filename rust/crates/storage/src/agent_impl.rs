@@ -23,10 +23,12 @@
 //!      agent crate does NOT depend on `repo-graph-trust`; trust
 //!      policy lives on the adapter side of this boundary.
 
+use std::path::Path;
+
 use repo_graph_agent::{
 	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentCycle,
-	AgentDeadNode, AgentFileEntry, AgentFocusCandidate, AgentFocusKind,
-	AgentImportEdge, AgentImportEntry, AgentPathResolution,
+	AgentDeadNode, AgentDocEntry, AgentFileEntry, AgentFocusCandidate,
+	AgentFocusKind, AgentImportEdge, AgentImportEntry, AgentPathResolution,
 	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo,
 	AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageError,
 	AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
@@ -1192,5 +1194,52 @@ impl AgentStorageRead for StorageConnection {
 
 		rows.collect::<Result<Vec<_>, _>>()
 			.map_err(map_err("find_file_imports"))
+	}
+
+	// ── Documentation inventory (docs-primary pivot) ───────────────
+
+	fn get_doc_inventory(
+		&self,
+		repo_uid: &str,
+	) -> Result<Vec<AgentDocEntry>, AgentStorageError> {
+		// 1. Look up root_path from the repos table.
+		let conn = self.connection();
+		let repo_path: Option<String> = conn
+			.query_row(
+				"SELECT root_path FROM repos WHERE repo_uid = ?",
+				rusqlite::params![repo_uid],
+				|row| row.get(0),
+			)
+			.map_err(map_err("get_doc_inventory"))?;
+
+		let repo_path = match repo_path {
+			Some(p) => p,
+			None => return Ok(Vec::new()), // No repo_path → empty inventory.
+		};
+
+		// 2. Call discover_doc_inventory from doc-facts crate.
+		let path = Path::new(&repo_path);
+		if !path.is_dir() {
+			// Path is not a directory → graceful empty result.
+			return Ok(Vec::new());
+		}
+
+		let result = match repo_graph_doc_facts::discover_doc_inventory(path, false) {
+			Ok(r) => r,
+			Err(_) => return Ok(Vec::new()), // Discovery failed → empty.
+		};
+
+		// 3. Map entries to AgentDocEntry.
+		let entries = result
+			.entries
+			.into_iter()
+			.map(|e| AgentDocEntry {
+				path: e.path,
+				kind: e.kind,
+				generated: e.generated,
+			})
+			.collect();
+
+		Ok(entries)
 	}
 }
