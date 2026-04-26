@@ -1253,6 +1253,78 @@
           "pk": 0
         }
       ],
+      "module_discovery_diagnostics": [
+        {
+          "name": "diagnostic_kind",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "diagnostic_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "name": "file_path",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "message",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "metadata_json",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "raw_text",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "severity",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "snapshot_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "source_type",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
       "module_file_ownership": [
         {
           "name": "assignment_kind",
@@ -1604,6 +1676,78 @@
           "pk": 0
         }
       ],
+      "quality_assessments": [
+        {
+          "name": "assessment_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "name": "baseline_snapshot_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "computed_verdict",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "measurements_evaluated",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "new_violations",
+          "type": "INTEGER",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "policy_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "snapshot_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "violations_json",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "worsened_violations",
+          "type": "INTEGER",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
       "repos": [
         {
           "name": "created_at",
@@ -1669,6 +1813,127 @@
           "notnull": false,
           "dflt_value": null,
           "pk": 1
+        }
+      ],
+      "semantic_facts": [
+        {
+          "name": "confidence",
+          "type": "REAL",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "content_hash",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "doc_kind",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "extracted_at",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "extraction_method",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "fact_kind",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "fact_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "name": "generated",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "name": "object_ref",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "object_ref_kind",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "repo_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "source_file",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "source_line_end",
+          "type": "INTEGER",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "source_line_start",
+          "type": "INTEGER",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "source_text_excerpt",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "subject_ref",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "subject_ref_kind",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
         }
       ],
       "snapshots": [
@@ -2416,150 +2681,6 @@
           "dflt_value": null,
           "pk": 0
         }
-      ],
-      "module_discovery_diagnostics": [
-        {
-          "dflt_value": null,
-          "name": "diagnostic_kind",
-          "notnull": true,
-          "pk": 0,
-          "type": "TEXT"
-        },
-        {
-          "dflt_value": null,
-          "name": "diagnostic_uid",
-          "notnull": false,
-          "pk": 1,
-          "type": "TEXT"
-        },
-        {
-          "dflt_value": null,
-          "name": "file_path",
-          "notnull": true,
-          "pk": 0,
-          "type": "TEXT"
-        },
-        {
-          "dflt_value": null,
-          "name": "line",
-          "notnull": false,
-          "pk": 0,
-          "type": "INTEGER"
-        },
-        {
-          "dflt_value": null,
-          "name": "message",
-          "notnull": true,
-          "pk": 0,
-          "type": "TEXT"
-        },
-        {
-          "dflt_value": null,
-          "name": "metadata_json",
-          "notnull": false,
-          "pk": 0,
-          "type": "TEXT"
-        },
-        {
-          "dflt_value": null,
-          "name": "raw_text",
-          "notnull": false,
-          "pk": 0,
-          "type": "TEXT"
-        },
-        {
-          "dflt_value": null,
-          "name": "severity",
-          "notnull": true,
-          "pk": 0,
-          "type": "TEXT"
-        },
-        {
-          "dflt_value": null,
-          "name": "snapshot_uid",
-          "notnull": true,
-          "pk": 0,
-          "type": "TEXT"
-        },
-        {
-          "dflt_value": null,
-          "name": "source_type",
-          "notnull": true,
-          "pk": 0,
-          "type": "TEXT"
-        }
-      ],
-      "quality_assessments": [
-        {
-          "name": "assessment_uid",
-          "type": "TEXT",
-          "notnull": false,
-          "dflt_value": null,
-          "pk": 1
-        },
-        {
-          "name": "baseline_snapshot_uid",
-          "type": "TEXT",
-          "notnull": false,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "computed_verdict",
-          "type": "TEXT",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "created_at",
-          "type": "TEXT",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "measurements_evaluated",
-          "type": "INTEGER",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "new_violations",
-          "type": "INTEGER",
-          "notnull": false,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "policy_uid",
-          "type": "TEXT",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "snapshot_uid",
-          "type": "TEXT",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "violations_json",
-          "type": "TEXT",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "worsened_violations",
-          "type": "INTEGER",
-          "notnull": false,
-          "dflt_value": null,
-          "pk": 0
-        }
       ]
     },
     "indexes": [
@@ -2617,6 +2738,10 @@
       "idx_quality_assessments_policy",
       "idx_quality_assessments_snapshot",
       "idx_repos_root_path",
+      "idx_semantic_facts_doc",
+      "idx_semantic_facts_kind",
+      "idx_semantic_facts_repo",
+      "idx_semantic_facts_subject",
       "idx_snapshots_repo",
       "idx_staged_edges_snapshot",
       "idx_staged_edges_source",
@@ -2799,19 +2924,24 @@
         "applied_at": "<TIMESTAMP>"
       },
       {
-        "applied_at": "<TIMESTAMP>",
+        "version": 17,
         "name": "017-module-discovery-diagnostics",
-        "version": 17
+        "applied_at": "<TIMESTAMP>"
       },
       {
-        "applied_at": "<TIMESTAMP>",
+        "version": 18,
         "name": "018-surface-identity",
-        "version": 18
+        "applied_at": "<TIMESTAMP>"
       },
       {
-        "applied_at": "<TIMESTAMP>",
+        "version": 19,
         "name": "019-quality-assessments",
-        "version": 19
+        "applied_at": "<TIMESTAMP>"
+      },
+      {
+        "version": 20,
+        "name": "020-semantic-facts",
+        "applied_at": "<TIMESTAMP>"
       }
     ],
     "snapshots": [

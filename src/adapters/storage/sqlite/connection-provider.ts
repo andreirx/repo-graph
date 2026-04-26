@@ -42,6 +42,8 @@ import { runMigration015 } from "./migrations/015-env-dependencies.js";
 import { runMigration016 } from "./migrations/016-fs-mutations.js";
 import { runMigration017 } from "./migrations/017-module-discovery-diagnostics.js";
 import { runMigration018 } from "./migrations/018-surface-identity.js";
+import { runMigration019 } from "./migrations/019-quality-assessments.js";
+import { runMigration020 } from "./migrations/020-semantic-facts.js";
 
 export class SqliteConnectionProvider {
 	private db: Database.Database | null = null;
@@ -106,6 +108,15 @@ export class SqliteConnectionProvider {
 				.get() as { v: number }
 		).v;
 		if (maxVersionPost < 18) runMigration018(this.db);
+
+		// Migrations 019-020: simple CREATE TABLE, no FK rebuild needed.
+		const maxVersionPost2 = (
+			this.db
+				.prepare("SELECT MAX(version) as v FROM schema_migrations")
+				.get() as { v: number }
+		).v;
+		if (maxVersionPost2 < 19) runMigration019(this.db);
+		if (maxVersionPost2 < 20) runMigration020(this.db);
 	}
 
 	/**

@@ -113,6 +113,22 @@
 #           measurements and persists assessments atomically. Returns JSON
 #           with counts by verdict. Exit 0 on success.
 #
+# RS-DF-1:  `docs <db_path> <repo_uid>`
+#           Extract semantic facts from documentation files.
+#           Reads live from disk: README.md, ARCHITECTURE.md, docker-compose.yml,
+#           .env.*, MAP.md. Repo-scoped replace semantics (deletes existing
+#           facts for repo before inserting new ones). Extracts:
+#           - replacement_for, alternative_to, deprecated_by, migration_path
+#             from explicit markers (<!-- rg:* -->) and keyword patterns
+#           - environment_surface from docker-compose services and .env files
+#           Uses deterministic UUID v5 for fact identity. Generated docs
+#           (MAP.md with generated_by frontmatter) receive lower confidence.
+#           Content-authoritative: path alone does not mark as generated.
+#           Exit 0 on success, 1 on usage error, 2 on runtime error.
+#           JSON output: command, repo, files_scanned, facts_extracted,
+#           counts_by_kind, generated_docs_count.
+#           Design: docs/design/documentation-semantic-facts.md
+#
 # No formatting-heavy UX.
 
 [package]
