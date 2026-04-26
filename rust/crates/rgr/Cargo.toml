@@ -107,6 +107,12 @@
 #           Same degradation contract as modules list.
 #           Consumes RS-MG-13a weighted_neighbors support from classification crate.
 #
+# QP-Step-6: `assess <db_path> <repo_uid> [--baseline <snapshot_uid>]`
+#           Quality policy assessment command. Full-snapshot recomputation:
+#           evaluates all active quality policies against target snapshot
+#           measurements and persists assessments atomically. Returns JSON
+#           with counts by verdict. Exit 0 on success.
+#
 # No formatting-heavy UX.
 
 [package]
@@ -129,6 +135,7 @@ repo-graph-coverage = { path = "../coverage" }
 repo-graph-gate = { path = "../gate" }
 repo-graph-git = { path = "../git" }
 repo-graph-quality-policy = { path = "../quality-policy" }
+repo-graph-quality-policy-runner = { path = "../quality-policy-runner" }
 repo-graph-repo-index = { path = "../repo-index" }
 repo-graph-storage = { path = "../storage" }
 repo-graph-trust = { path = "../trust" }

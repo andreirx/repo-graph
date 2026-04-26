@@ -31,4 +31,13 @@ pub enum RunnerError {
     /// baseline snapshot UID was supplied.
     #[error("baseline snapshot required: {0} policies require baseline")]
     BaselineRequired(usize),
+
+    /// Baseline snapshot is invalid.
+    ///
+    /// The provided baseline snapshot either:
+    /// - Does not exist
+    /// - Belongs to a different repository
+    /// - Is not in READY status
+    #[error("baseline snapshot invalid: {reason}")]
+    BaselineInvalid { reason: String },
 }

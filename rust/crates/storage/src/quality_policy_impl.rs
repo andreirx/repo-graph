@@ -14,9 +14,14 @@
 use crate::connection::StorageConnection;
 use crate::error::StorageError;
 use crate::quality_policy_port::{EnrichedMeasurement, LoadedPolicy, QualityPolicyStoragePort};
-use crate::types::QualityAssessmentInput;
+use crate::types::{QualityAssessmentInput, Snapshot};
 
 impl QualityPolicyStoragePort for StorageConnection {
+    fn get_snapshot(&self, snapshot_uid: &str) -> Result<Option<Snapshot>, StorageError> {
+        // Delegate to existing CRUD method.
+        StorageConnection::get_snapshot(self, snapshot_uid)
+    }
+
     fn load_active_quality_policies(
         &self,
         repo_uid: &str,

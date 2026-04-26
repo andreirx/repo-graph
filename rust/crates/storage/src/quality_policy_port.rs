@@ -12,7 +12,7 @@
 //! The runner crate depends on storage and uses this trait.
 
 use crate::error::StorageError;
-use crate::types::{QualityAssessmentInput, QualityPolicyPayload};
+use crate::types::{QualityAssessmentInput, QualityPolicyPayload, Snapshot};
 
 /// A measurement row enriched with scope metadata for policy evaluation.
 ///
@@ -60,6 +60,12 @@ pub struct LoadedPolicy {
 /// Implemented by `StorageConnection`. The runner uses this trait
 /// to load policies, measurements, and persist assessments.
 pub trait QualityPolicyStoragePort {
+    /// Look up a snapshot by UID.
+    ///
+    /// Returns `Ok(None)` if not found, `Ok(Some(Snapshot))` on hit.
+    /// Used for baseline validation before comparative policy evaluation.
+    fn get_snapshot(&self, snapshot_uid: &str) -> Result<Option<Snapshot>, StorageError>;
+
     /// Load all active quality policy declarations for a repository.
     ///
     /// Returns parsed `QualityPolicyPayload` values with their UIDs.

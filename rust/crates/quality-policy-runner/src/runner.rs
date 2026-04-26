@@ -103,6 +103,11 @@ impl<P: QualityPolicyStoragePort> QualityPolicyRunner<P> {
             return Err(RunnerError::BaselineRequired(baseline_required_count));
         }
 
+        // Step 4b: Validate baseline snapshot if provided.
+        if let Some(baseline_uid) = baseline_snapshot_uid {
+            self.validate_baseline(baseline_uid, repo_uid)?;
+        }
+
         // Step 5: Collect distinct measurement kinds needed.
         let required_kinds = self.collect_required_kinds(&validated_policies);
 
@@ -187,6 +192,49 @@ impl<P: QualityPolicyStoragePort> QualityPolicyRunner<P> {
             .iter()
             .map(|p| p.payload.measurement_kind.clone())
             .collect()
+    }
+
+    /// Validate baseline snapshot exists, belongs to the repo, and is ready.
+    ///
+    /// Guards against:
+    /// - Nonexistent baseline UIDs (typos, stale references)
+    /// - Cross-repo baseline mixing (foreign snapshot used for comparison)
+    /// - Non-ready baselines (incomplete indexing)
+    fn validate_baseline(
+        &self,
+        baseline_uid: &str,
+        expected_repo_uid: &str,
+    ) -> Result<(), RunnerError> {
+        let snapshot = self.port.get_snapshot(baseline_uid)?;
+
+        let snapshot = match snapshot {
+            Some(s) => s,
+            None => {
+                return Err(RunnerError::BaselineInvalid {
+                    reason: format!("snapshot '{}' does not exist", baseline_uid),
+                });
+            }
+        };
+
+        if snapshot.repo_uid != expected_repo_uid {
+            return Err(RunnerError::BaselineInvalid {
+                reason: format!(
+                    "snapshot '{}' belongs to repo '{}', expected '{}'",
+                    baseline_uid, snapshot.repo_uid, expected_repo_uid
+                ),
+            });
+        }
+
+        if snapshot.status != "ready" {
+            return Err(RunnerError::BaselineInvalid {
+                reason: format!(
+                    "snapshot '{}' has status '{}', expected 'ready'",
+                    baseline_uid, snapshot.status
+                ),
+            });
+        }
+
+        Ok(())
     }
 
     /// Convert enriched measurements to pure-engine facts.
@@ -402,6 +450,7 @@ mod tests {
     };
     use repo_graph_storage::types::{
         QualityAssessmentInput, QualityPolicyKind, QualityPolicyPayload, QualityPolicySeverity,
+        Snapshot,
     };
     use std::cell::RefCell;
 
@@ -410,6 +459,8 @@ mod tests {
         policies: Vec<LoadedPolicy>,
         current_measurements: Vec<EnrichedMeasurement>,
         baseline_measurements: Option<Vec<EnrichedMeasurement>>,
+        /// Snapshots keyed by UID for get_snapshot lookups.
+        snapshots: std::collections::HashMap<String, Snapshot>,
         persisted: RefCell<Vec<QualityAssessmentInput>>,
     }
 
@@ -419,6 +470,7 @@ mod tests {
                 policies: vec![],
                 current_measurements: vec![],
                 baseline_measurements: None,
+                snapshots: std::collections::HashMap::new(),
                 persisted: RefCell::new(vec![]),
             }
         }
@@ -437,9 +489,18 @@ mod tests {
             self.baseline_measurements = Some(measurements);
             self
         }
+
+        fn with_snapshot(mut self, snapshot: Snapshot) -> Self {
+            self.snapshots.insert(snapshot.snapshot_uid.clone(), snapshot);
+            self
+        }
     }
 
     impl QualityPolicyStoragePort for MockPort {
+        fn get_snapshot(&self, snapshot_uid: &str) -> Result<Option<Snapshot>, StorageError> {
+            Ok(self.snapshots.get(snapshot_uid).cloned())
+        }
+
         fn load_active_quality_policies(
             &self,
             _repo_uid: &str,
@@ -504,6 +565,26 @@ mod tests {
             value,
             file_path: file_path.map(|s| s.to_string()),
             symbol_kind: symbol_kind.map(|s| s.to_string()),
+        }
+    }
+
+    fn make_snapshot(uid: &str, repo_uid: &str, status: &str) -> Snapshot {
+        Snapshot {
+            snapshot_uid: uid.to_string(),
+            repo_uid: repo_uid.to_string(),
+            parent_snapshot_uid: None,
+            kind: "full".to_string(),
+            basis_ref: None,
+            basis_commit: None,
+            dirty_hash: None,
+            status: status.to_string(),
+            files_total: 0,
+            nodes_total: 0,
+            edges_total: 0,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            completed_at: None,
+            label: None,
+            toolchain_json: None,
         }
     }
 
@@ -631,10 +712,14 @@ mod tests {
             Some("FUNCTION"),
         );
 
+        // Create a valid baseline snapshot (same repo, ready status).
+        let baseline_snapshot = make_snapshot("snap-baseline", "r1", "ready");
+
         let port = MockPort::new()
             .with_policies(vec![policy])
             .with_current_measurements(vec![current_measurement])
-            .with_baseline_measurements(vec![baseline_measurement]);
+            .with_baseline_measurements(vec![baseline_measurement])
+            .with_snapshot(baseline_snapshot);
 
         let mut runner = QualityPolicyRunner::new(port);
 
@@ -646,6 +731,94 @@ mod tests {
         assert_eq!(result.baseline_required_count, 1);
         // No new violators → PASS
         assert_eq!(result.pass_count, 1);
+    }
+
+    #[test]
+    fn assess_snapshot_baseline_nonexistent() {
+        let policy = make_policy(
+            "p1",
+            QualityPolicyKind::NoNew,
+            "cyclomatic_complexity",
+            10.0,
+        );
+
+        // No snapshot registered — baseline lookup will return None.
+        let port = MockPort::new().with_policies(vec![policy]);
+
+        let mut runner = QualityPolicyRunner::new(port);
+
+        let err = runner
+            .assess_snapshot("r1", "snap1", Some("nonexistent-baseline"))
+            .expect_err("should fail");
+
+        match err {
+            RunnerError::BaselineInvalid { reason } => {
+                assert!(reason.contains("does not exist"), "reason: {}", reason);
+            }
+            _ => panic!("expected BaselineInvalid error, got: {:?}", err),
+        }
+    }
+
+    #[test]
+    fn assess_snapshot_baseline_wrong_repo() {
+        let policy = make_policy(
+            "p1",
+            QualityPolicyKind::NoNew,
+            "cyclomatic_complexity",
+            10.0,
+        );
+
+        // Baseline snapshot belongs to different repo.
+        let wrong_repo_snapshot = make_snapshot("snap-baseline", "other-repo", "ready");
+
+        let port = MockPort::new()
+            .with_policies(vec![policy])
+            .with_snapshot(wrong_repo_snapshot);
+
+        let mut runner = QualityPolicyRunner::new(port);
+
+        let err = runner
+            .assess_snapshot("r1", "snap1", Some("snap-baseline"))
+            .expect_err("should fail");
+
+        match err {
+            RunnerError::BaselineInvalid { reason } => {
+                assert!(reason.contains("belongs to repo"), "reason: {}", reason);
+                assert!(reason.contains("other-repo"), "reason: {}", reason);
+            }
+            _ => panic!("expected BaselineInvalid error, got: {:?}", err),
+        }
+    }
+
+    #[test]
+    fn assess_snapshot_baseline_not_ready() {
+        let policy = make_policy(
+            "p1",
+            QualityPolicyKind::NoNew,
+            "cyclomatic_complexity",
+            10.0,
+        );
+
+        // Baseline snapshot is still building.
+        let building_snapshot = make_snapshot("snap-baseline", "r1", "building");
+
+        let port = MockPort::new()
+            .with_policies(vec![policy])
+            .with_snapshot(building_snapshot);
+
+        let mut runner = QualityPolicyRunner::new(port);
+
+        let err = runner
+            .assess_snapshot("r1", "snap1", Some("snap-baseline"))
+            .expect_err("should fail");
+
+        match err {
+            RunnerError::BaselineInvalid { reason } => {
+                assert!(reason.contains("status"), "reason: {}", reason);
+                assert!(reason.contains("building"), "reason: {}", reason);
+            }
+            _ => panic!("expected BaselineInvalid error, got: {:?}", err),
+        }
     }
 
     #[test]
