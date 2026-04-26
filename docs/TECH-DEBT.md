@@ -230,6 +230,43 @@
   since the v4 spot-check (100% precision on 96 sampled edges). Rust-specific
   precision has not been formally measured.
 
+### Framework detection without proportion gating (P1)
+
+**Discovered:** 2026-04-26 during Hadoop large-repo validation
+**Trigger:** Hadoop repo (14K Java files) contains a React UI subproject
+**Symptom:** `nextjs_app_router_detected` triggers in trust report
+**Root cause:** Single `layout.tsx` file at
+`hadoop-yarn-project/.../src/main/webapp/src/app/routes/layout.tsx` matches
+the Next.js pattern detector.
+
+**Impact:** Trust degradation (`framework_heavy_suspicion: true`) applies
+repo-wide when only one small subproject matches. A Java repo gets framework
+downgrade warnings for having any React UI code.
+
+**Required fix:** Framework detection needs proportion/majority gating. Options:
+1. Threshold: trigger only when >X% of files match the framework pattern
+2. Language scoping: apply framework detectors only to files of matching language
+3. Subtree isolation: detect framework patterns per subtree, not repo-wide
+
+**Workaround:** None. Trust report shows misleading framework_heavy_suspicion.
+
+### Vendored code pollution in hotspot rankings (P2)
+
+**Discovered:** 2026-04-22 during swupdate validation
+**Trigger:** swupdate repo embeds `mongoose/mongoose.c` (vendored HTTP library)
+**Symptom:** `mongoose/mongoose.c` (complexity 5129) dominates hotspot rankings
+**Root cause:** No automatic vendored-code exclusion in raw hotspot computation
+
+**Impact:** Agent steering degraded — top-ranked files are irrelevant vendored
+code, not actual project hotspots.
+
+**Mitigation:** `--exclude-vendored` presentation flag (excludes standard paths
+like `vendor/`, `third_party/`). Does NOT exclude project-specific vendored
+paths like `mongoose/`.
+
+**Required fix:** Config-driven vendored path patterns. Allow projects to declare
+custom vendored directories that should be excluded from hotspot rankings.
+
 ## Boundary Interaction Model
 
 ### HTTP provider extractor (Spring)

@@ -5,33 +5,52 @@ Purpose: stress-test indexing, measurement quality, and CLI ergonomics at scale.
 
 ## Scope
 
-**Track A: Rust `rmap` validation (JS/TS repos only)**
+**Track A: Rust `rmap` validation**
 
-The Rust CLI currently has only the TS/JS extractor. Large-repo validation
-for `rmap` applies only to JS/TS codebases.
+Rust CLI has extractors for JS/TS, C, and Java. Large-repo validation covers
+all three language families.
 
-Validation targets:
-1. `react` — JSX-heavy, modern ecosystem (done)
-2. `typescript` — large TS-first codebase, compiler architecture
-3. `next.js` — framework, mixed patterns
-4. `webpack` — bundler, plugin architecture
-5. `angular` — framework, heavy decorators
+Validation targets by language:
 
-**Track B: Extractor gaps (blocked repos)**
+**JS/TS:**
+1. `react` — JSX-heavy, modern ecosystem (validated)
+2. `typescript` — large TS-first codebase, compiler architecture (validated)
 
-These repos cannot validate `rmap` until Rust extractors are ported.
-They are roadmap evidence, not validation targets.
+**C:**
+1. `sqlite` — classic C, conventional includes (validated)
+2. `swupdate` — embedded C, conventional roots (validated)
+3. `nginx` — build-system-heavy, angle-bracket includes (validated with `--include-root`)
 
-| Repo | Blocked by | Language |
-|------|------------|----------|
-| `sqlite` | **validated** — operational | C |
-| `swupdate` | **validated** — operational (v1.2, conventional roots) | C |
-| `nginx` | **validated** — operational (v1.2, requires explicit `--include-root`) | C |
-| `kafka` | missing Rust Java extractor | Java |
-| `hadoop` | missing Rust Java extractor | Java |
+**Java:**
+1. `spring-petclinic` — small Spring Boot app, framework-heavy (validated)
+2. `kafka` — large-scale distributed system, 6K files (validated)
+3. `hadoop` — massive-scale, 14K files, polyglot subprojects (validated)
 
-Do NOT use `rgr` (TS CLI) as a proxy for `rmap` validation. That answers
-"is the TS extractor mature?" not "is the Rust product ready?"
+**Track B: Current validation status**
+
+| Repo | Status | Language | Notes |
+|------|--------|----------|-------|
+| `react` | **validated** | JS/TS | hotspots credible, 55% unresolved |
+| `typescript` | **validated** | JS/TS | hotspots credible, 60% unresolved |
+| `sqlite` | **validated** | C | MEDIUM call graph (53%), hotspots accurate |
+| `swupdate` | **validated** | C | topology works, LOW call graph (38%) |
+| `nginx` | **validated** | C | requires `--include-root`, topology restored |
+| `spring-petclinic` | **validated** | Java | metrics work, graph degraded (22% call) |
+| `kafka` | **validated** | Java | metrics work at scale, graph degraded (17% call) |
+| `hadoop` | **validated** | Java | metrics work at scale, graph degraded (16% call) |
+| `linux` | **validated** | Kbuild | module discovery only, not graph |
+
+**Important distinction:**
+
+Java repos are **operationally validated** for:
+- Indexing at industrial scale (257K nodes in 3 min)
+- Metrics extraction (complexity measurements accurate)
+- Quality policy assessment (sub-second on 100K+ nodes)
+
+Java repos are **NOT validated** for:
+- Dependency graph completeness (15-22% call resolution)
+- Module topology (collapsed due to import resolution limits)
+- callers/callees accuracy (results are incomplete)
 
 ---
 
@@ -863,3 +882,301 @@ Layer 3A Kbuild detection is validated on the canonical target repo.
 4. **No duplicate detection across files** — If multiple Makefiles define
    the same module path, both evidence items are stored. The orchestrator
    deduplicates by root path, but evidence inflation is possible.
+
+---
+
+## spring-petclinic (Java — Small Framework App)
+
+**Date:** 2026-04-26
+**Commit:** shallow clone
+**Branch:** main
+**Clone location:** `../legacy-codebases/spring-petclinic/`
+
+### Metrics
+
+| Metric | Value |
+|--------|-------|
+| Files indexed | 47 |
+| Nodes total | 359 |
+| Edges resolved | 332 |
+| Edges unresolved | 1,396 |
+| call_resolution_rate | 21.8% |
+| call_graph reliability | LOW |
+| import_graph reliability | LOW |
+| suspicious_zero_connectivity_modules | 10 |
+
+### Unresolved Breakdown
+
+| Category | Count |
+|----------|-------|
+| CALLS obj.method (needs type info) | 652 |
+| IMPORTS (file not found) | 427 |
+| CALLS function (ambiguous or missing) | 252 |
+| INSTANTIATES (class not found) | 36 |
+
+### Assessment
+
+**Indexing:** PASS. 47 files, 359 nodes, no parse failures.
+
+**Metrics:** PASS. Complexity measurements accurate. Top complexity:
+`I18nPropertiesSyncTest.checkNonInternationalizedStrings` (14).
+
+**Quality policy loop:** PASS. Declared policy (cyclomatic_complexity <= 10),
+assessed, correctly detected FAIL verdict.
+
+**Call graph:** DEGRADED. 21.8% resolution. Java method calls with receiver
+types (`obj.method()`) require type inference not available in syntax-only
+extraction.
+
+**Module topology:** COLLAPSED. All 10 modules show zero connectivity
+(fan_in=0, fan_out=0). This is the expected Java import resolution limitation.
+
+**Dead code:** NOT TRUSTWORTHY. Framework-managed classes (Spring @Controller,
+@Repository, @Service) appear as dead code. Framework liveness detection not
+yet implemented for Spring.
+
+### Verdict
+
+Spring-petclinic validates that:
+- Java indexing works
+- Java metrics work
+- Quality policy assessment works
+
+It does NOT validate graph completeness. Java graph surfaces remain structurally
+degraded until type-aware enrichment is implemented.
+
+---
+
+## kafka (Java — Industrial Scale)
+
+**Date:** 2026-04-26
+**Commit:** shallow clone
+**Branch:** trunk
+**Clone location:** `../legacy-codebases/kafka/`
+
+### Metrics
+
+| Metric | Value |
+|--------|-------|
+| Files indexed | 6,055 |
+| Nodes total | 117,130 |
+| Edges resolved | 153,888 |
+| Edges unresolved | 647,114 |
+| call_resolution_rate | 17.4% |
+| call_graph reliability | LOW |
+| import_graph reliability | LOW |
+| suspicious_zero_connectivity_modules | 476 |
+| Indexing time | 1m 36s (release build) |
+
+### Top Complexity (from `rmap metrics`)
+
+| Function | Complexity |
+|----------|------------|
+| AbstractRequest.doParseRequest | 92 |
+| AbstractResponse.parseResponse | 92 |
+| RequestConvertToJson.request | 92 |
+| RequestConvertToJson.response | 92 |
+| FieldSpec.fieldDefault | 53 |
+| ConfigCommand.checkArgs | 43 |
+| JsonConverter.asConnectSchema | 42 |
+
+These are Kafka protocol dispatch methods with large switch statements — the
+expected complexity hotspots.
+
+### Quality Policy Test
+
+```bash
+rmap declare quality-policy kafka.db kafka QP-MAX-COMPLEXITY \
+  --measurement cyclomatic_complexity --policy-kind absolute_max --threshold 30
+rmap assess kafka.db kafka
+```
+
+Result: FAIL (functions exceed threshold). Assessment time: 0.38s on 117K nodes.
+
+### Assessment
+
+**Indexing scale:** PASS. 6,055 files, 117K nodes in 96 seconds.
+
+**Metrics:** PASS. Complexity measurements accurate. Top hotspots are genuine
+Kafka infrastructure methods.
+
+**Quality policy:** PASS. Assessment loop works at industrial scale (sub-second).
+
+**Call graph:** DEGRADED. 17.4% resolution. Same limitation as spring-petclinic
+but at 100x scale.
+
+**Module topology:** COLLAPSED. 476 modules with zero connectivity.
+
+### Verdict
+
+Kafka proves:
+- Java extraction scales to industrial repos (117K nodes)
+- Metrics remain accurate at scale
+- Quality policy assessment is viable at scale
+
+Graph completeness limitations are unchanged from spring-petclinic.
+
+---
+
+## hadoop (Java — Massive Scale)
+
+**Date:** 2026-04-26
+**Commit:** shallow clone
+**Branch:** trunk
+**Clone location:** `../legacy-codebases/hadoop/`
+
+### Metrics
+
+| Metric | Value |
+|--------|-------|
+| Files indexed | 13,962 |
+| Nodes total | 257,025 |
+| Edges resolved | 210,503 |
+| Edges unresolved | 1,019,158 |
+| call_resolution_rate | 15.6% |
+| call_graph reliability | LOW |
+| import_graph reliability | LOW |
+| Indexing time | 3m 02s (release build) |
+
+### Top Complexity (from `rmap metrics`)
+
+| Function | Complexity |
+|----------|------------|
+| RouterClientMetrics.incInvokedMethod | 110 |
+| DFSAdmin.run | 105 |
+| URI_FUNC (uriparser C) | 102 |
+| FSEditLogLoader.applyEditLogOp | 101 |
+| test_libhdfs_ops.c main | 97 |
+| CLI.run (mapreduce) | 94 |
+
+Hadoop includes native C code (uriparser, lz4) which also appears in metrics.
+Java complexity hotspots are admin CLI dispatch methods.
+
+### Quality Policy Test
+
+```bash
+rmap declare quality-policy hadoop.db hadoop QP-COMPLEXITY \
+  --measurement cyclomatic_complexity --policy-kind absolute_max --threshold 50
+rmap assess hadoop.db hadoop
+```
+
+Result: FAIL (functions exceed threshold). Assessment time: 0.49s on 257K nodes.
+
+### Known Defect: Framework Detector False Positive
+
+Hadoop triggers `nextjs_app_router_detected` in the trust report. Root cause:
+
+```
+hadoop-yarn-project/hadoop-yarn/hadoop-yarn-capacity-scheduler-ui/src/main/webapp/src/app/routes/layout.tsx
+```
+
+Hadoop contains a React UI subproject in YARN Capacity Scheduler. The framework
+detector correctly identifies Next.js-style patterns but incorrectly applies
+repo-wide degradation.
+
+**This is a product defect.** A 13,962-file Java repo should not have its
+framework_heavy_suspicion triggered because one UI folder has React code.
+
+**Required fix:** Framework detection needs proportion gating — trigger only
+when the pattern represents a significant portion of the repo, not when a
+single subproject matches.
+
+### Assessment
+
+**Indexing scale:** PASS. 13,962 files, 257K nodes in 182 seconds.
+
+**Metrics:** PASS. Complexity measurements accurate. Polyglot content (Java + C)
+correctly measured.
+
+**Quality policy:** PASS. Assessment loop works at massive scale (sub-second).
+
+**Call graph:** DEGRADED. 15.6% resolution.
+
+**Framework detection:** DEFECTIVE. False positive from UI subproject.
+
+### Verdict
+
+Hadoop proves:
+- Java extraction scales to massive repos (257K nodes)
+- Polyglot repos (Java + C) index correctly
+- Quality policy assessment remains sub-second at massive scale
+
+Graph completeness limitations are unchanged. Framework detector needs fix.
+
+---
+
+## Java Validation Summary (2026-04-26)
+
+Three Java repos validated at different scales:
+
+| Repo | Files | Nodes | Call Resolution | Metrics | Assess |
+|------|-------|-------|-----------------|---------|--------|
+| spring-petclinic | 47 | 359 | 21.8% | PASS | PASS |
+| kafka | 6,055 | 117K | 17.4% | PASS | PASS |
+| hadoop | 13,962 | 257K | 15.6% | PASS | PASS |
+
+### What Java validation proves
+
+1. **Indexing scales** — 257K nodes in 3 minutes is operationally viable.
+
+2. **Metrics are accurate** — Complexity hotspots match known reality
+   (protocol dispatch, CLI handlers, admin methods).
+
+3. **Quality policy loop works at scale** — Sub-second assessment on 100K+ nodes.
+
+4. **Graph completeness is fundamentally limited** — 15-22% call resolution.
+   This is a structural limitation of syntax-only extraction for Java.
+
+### What Java does NOT validate
+
+1. **Dependency truth** — Module topology is collapsed. callers/callees
+   return incomplete results.
+
+2. **Dead code detection** — Framework-managed classes appear as dead.
+   Not trustworthy without Spring/framework liveness detection.
+
+3. **Change impact** — Without import graph, propagation analysis is
+   incomplete.
+
+### Java maturity assessment
+
+| Surface | Maturity | Notes |
+|---------|----------|-------|
+| Indexing | MATURE | Scales to 250K+ nodes |
+| Metrics | MATURE | Accurate across scales |
+| Quality policy | MATURE | Sub-second at scale |
+| Call graph | PROTOTYPE | 15-22% resolution |
+| Module topology | PROTOTYPE | Collapsed |
+| Dead code | PROTOTYPE | Framework false positives |
+
+**Summary:** Java is operationally validated for metrics and quality policy
+assessment. It is NOT validated for dependency graph completeness.
+
+---
+
+## Known Defects Exposed by Large-Repo Validation
+
+### D1: Framework detection without proportion gating
+
+**Trigger:** Hadoop (Java repo with React UI subproject)
+**Symptom:** `nextjs_app_router_detected` triggers on 14K-file Java repo
+**Root cause:** Single `layout.tsx` file under `/app/` path
+**Impact:** Trust degradation applies repo-wide when only one subproject matches
+**Required fix:** Framework detection needs majority/proportion logic
+
+### D2: Vendored code pollution in hotspot rankings
+
+**Trigger:** swupdate (mongoose vendored library)
+**Symptom:** `mongoose/mongoose.c` appears in top hotspots
+**Root cause:** No automatic vendored-code exclusion
+**Impact:** Agent steering degraded by irrelevant files in top rankings
+**Mitigation:** `--exclude-vendored` flag (presentation filter)
+**Required fix:** Config-driven vendored path patterns
+
+### D3: Java module topology collapsed
+
+**Trigger:** All Java repos
+**Symptom:** All modules show fan_in=0, fan_out=0
+**Root cause:** Java import resolution requires package/classpath awareness
+**Impact:** Module stats, change impact unusable for Java
+**Status:** Known limitation, not scheduled for fix (requires type-aware enrichment)
