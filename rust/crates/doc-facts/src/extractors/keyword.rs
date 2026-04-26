@@ -5,6 +5,15 @@
 //! - "deprecated in favor of Y" / "use Y instead"
 //! - "alternative to Y" / "X or Y can be used"
 //! - "migrate from X to Y"
+//!
+//! ## Extraction quality controls
+//!
+//! To reduce false positives, we:
+//! 1. Skip lines inside fenced code blocks
+//! 2. Skip table rows (lines starting with `|`)
+//! 3. Reject generic nouns as subject/object (field, value, data, content, etc.)
+//! 4. Require subject/object to look module-like (path, identifier, PascalCase)
+//! 5. Only emit `deprecated_by` when a credible replacement target exists
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -60,13 +69,10 @@ static PATTERNS: LazyLock<Vec<PatternDef>> = LazyLock::new(|| {
             subject_group: 0,
             object_group: 1,
         },
-        // "X is deprecated" (no replacement specified)
-        PatternDef {
-            regex: Regex::new(r"(?i)\b(\S+)\s+is\s+deprecated\b").unwrap(),
-            fact_kind: FactKind::DeprecatedBy,
-            subject_group: 1,
-            object_group: 0, // no object
-        },
+        // NOTE: "X is deprecated" pattern REMOVED.
+        // Without a replacement target, emitting deprecated_by is noise.
+        // Patterns like "field is deprecated" or "this API is deprecated"
+        // have no actionable replacement reference for graph steering.
         // "alternative to Y"
         PatternDef {
             regex: Regex::new(r"(?i)\balternative\s+to\s+(\S+)").unwrap(),
@@ -104,8 +110,28 @@ pub fn extract(doc: &DocFile, content: &str, content_hash: &str) -> Vec<Extracte
     let confidence = compute_confidence(ExtractionMethod::KeywordPattern, doc.generated);
     let doc_subject = infer_subject_from_doc(doc);
 
+    // Track fenced code block state
+    let mut in_code_block = false;
+
     for (line_num, line) in content.lines().enumerate() {
         let line_number = (line_num + 1) as u32;
+
+        // Toggle code block state on fence markers
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+
+        // Skip lines inside code blocks
+        if in_code_block {
+            continue;
+        }
+
+        // Skip table rows (markdown tables start with |)
+        if trimmed.starts_with('|') {
+            continue;
+        }
 
         for pattern in PATTERNS.iter() {
             for cap in pattern.regex.captures_iter(line) {
@@ -168,8 +194,14 @@ pub fn extract(doc: &DocFile, content: &str, content_hash: &str) -> Vec<Extracte
 }
 
 /// Clean a reference string (remove punctuation, quotes, etc.)
+///
+/// Preserves characters that are valid in module/package references:
+/// - `-` and `_` for identifiers (e.g., `new-auth`, `old_client`)
+/// - `/` for paths (e.g., `src/auth`)
+/// - `@` for scoped packages (e.g., `@scope/pkg`)
+/// - `:` for namespaces (e.g., `crate::module`)
 fn clean_reference(s: &str) -> String {
-    s.trim_matches(|c: char| c.is_ascii_punctuation() && c != '-' && c != '_' && c != '/')
+    s.trim_matches(|c: char| c.is_ascii_punctuation() && c != '-' && c != '_' && c != '/' && c != '@' && c != ':')
         .to_string()
 }
 
@@ -179,10 +211,26 @@ fn is_false_positive(subject: &str, object: Option<&str>) -> bool {
 
     // Skip common words that aren't module/symbol names
     let skip_words = [
-        "this", "that", "it", "the", "a", "an", "is", "are", "was", "were",
-        "be", "been", "being", "have", "has", "had", "do", "does", "did",
-        "will", "would", "could", "should", "may", "might", "must",
-        "can", "need", "want", "like", "use", "make", "get", "set",
+        // Pronouns and articles
+        "this", "that", "it", "the", "a", "an",
+        // Auxiliary verbs
+        "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did",
+        "will", "would", "could", "should", "may", "might", "must", "can",
+        // Common verbs
+        "need", "want", "like", "use", "make", "get", "set",
+        // Generic nouns (high false positive rate in real repos)
+        "field", "fields", "value", "values", "data", "content", "entire",
+        "name", "names", "id", "ids", "key", "keys", "type", "types",
+        "json", "string", "number", "boolean", "array", "object",
+        "file", "files", "path", "paths", "url", "urls",
+        "option", "options", "config", "configuration", "setting", "settings",
+        "method", "methods", "function", "functions", "property", "properties",
+        "parameter", "parameters", "argument", "arguments", "variable", "variables",
+        "input", "inputs", "output", "outputs", "result", "results",
+        "item", "items", "element", "elements", "entry", "entries",
+        "old", "new", "previous", "current", "default", "custom",
+        "all", "any", "some", "none", "other", "each", "every",
     ];
 
     if skip_words.contains(&lower_subject.as_str()) {
@@ -202,6 +250,60 @@ fn is_false_positive(subject: &str, object: Option<&str>) -> bool {
         return true;
     }
 
+    // Require subject/object to look module-like
+    if !looks_module_like(subject) {
+        return true;
+    }
+    if let Some(obj) = object {
+        if !looks_module_like(obj) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Check if a reference looks like a module/symbol name.
+///
+/// Valid patterns:
+/// - Repo root: "." (valid repo-relative reference)
+/// - Path-like: contains `/` (e.g., "src/auth", "legacy-service")
+/// - Identifier with separator: contains `-` or `_` (e.g., "old-auth", "new_client")
+/// - MixedCase: has both upper and lower (e.g., "NewClient", "GraphQL", "gRPC")
+/// - Package-like: contains `@` or `:` (e.g., "@scope/pkg", "crate::module")
+/// - Short all-caps: ≤6 chars, typical tech acronym (e.g., "REST", "JSON")
+///
+/// Invalid patterns:
+/// - All lowercase single word (e.g., "data", "field") — caught by stoplist
+/// - Long all-caps (likely prose emphasis, e.g., "IMPORTANT", "WARNING")
+fn looks_module_like(s: &str) -> bool {
+    // Repo root reference
+    if s == "." {
+        return true;
+    }
+    // Path-like
+    if s.contains('/') {
+        return true;
+    }
+    // Package/namespace marker
+    if s.contains('@') || s.contains("::") {
+        return true;
+    }
+    // Identifier with separator
+    if s.contains('-') || s.contains('_') {
+        return true;
+    }
+    // MixedCase: has both uppercase and lowercase (PascalCase, camelCase, gRPC-style)
+    let has_upper = s.chars().any(|c| c.is_ascii_uppercase());
+    let has_lower = s.chars().any(|c| c.is_ascii_lowercase());
+    if has_upper && has_lower {
+        return true;
+    }
+    // Short all-caps: likely tech acronym (REST, JSON, API, SQL)
+    if has_upper && !has_lower && s.len() <= 6 {
+        return true;
+    }
+    // All else rejected
     false
 }
 
@@ -269,14 +371,15 @@ mod tests {
     #[test]
     fn extract_deprecated_in_favor() {
         let doc = make_doc("README.md");
-        // Note: "API is deprecated" and "deprecated in favor of" both match
+        // "deprecated in favor of NewAPI" matches, "module is deprecated" pattern removed
         let content = "This module is deprecated in favor of NewAPI.";
 
         let facts = extract(&doc, content, "hash");
 
-        // Both patterns match: "module is deprecated" and "deprecated in favor of NewAPI"
-        assert_eq!(facts.len(), 2);
-        assert!(facts.iter().all(|f| f.fact_kind == FactKind::DeprecatedBy));
+        // Only "deprecated in favor of" matches (pattern without replacement was removed)
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].fact_kind, FactKind::DeprecatedBy);
+        assert_eq!(facts[0].object_ref, Some("NewAPI".to_string()));
     }
 
     #[test]
@@ -336,5 +439,133 @@ mod tests {
         let facts = extract(&doc, content, "hash");
 
         assert_eq!(facts.len(), 2);
+    }
+
+    #[test]
+    fn skip_code_blocks() {
+        let doc = make_doc("README.md");
+        let content = r#"
+Some intro text.
+
+```rust
+// new-auth replaces old-auth
+let x = 1;
+```
+
+After the code block.
+"#;
+
+        let facts = extract(&doc, content, "hash");
+
+        // Pattern inside code block should be skipped
+        assert!(facts.is_empty());
+    }
+
+    #[test]
+    fn skip_table_rows() {
+        let doc = make_doc("README.md");
+        let content = r#"
+| new-api replaces old-api | description |
+| --- | --- |
+"#;
+
+        let facts = extract(&doc, content, "hash");
+
+        // Pattern inside table should be skipped
+        assert!(facts.is_empty());
+    }
+
+    #[test]
+    fn skip_generic_nouns() {
+        let doc = make_doc("README.md");
+        // "JSON replaces entire content" - both "entire" and "content" are generic
+        let content = "JSON replaces entire content.";
+
+        let facts = extract(&doc, content, "hash");
+
+        // "entire" is in stoplist, should be filtered
+        assert!(facts.is_empty());
+    }
+
+    #[test]
+    fn accept_tech_acronyms() {
+        let doc = make_doc("docs/migration.md");
+        let content = "To migrate from REST to GraphQL, follow these steps.";
+
+        let facts = extract(&doc, content, "hash");
+
+        // REST (short all-caps) and GraphQL (PascalCase) both pass looks_module_like
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].fact_kind, FactKind::MigrationPath);
+        assert_eq!(facts[0].subject_ref, "REST");
+        assert_eq!(facts[0].object_ref, Some("GraphQL".to_string()));
+    }
+
+    #[test]
+    fn reject_lowercase_words() {
+        let doc = make_doc("README.md");
+        // "data replaces content" - both are lowercase single words
+        let content = "data replaces content.";
+
+        let facts = extract(&doc, content, "hash");
+
+        // Both "data" and "content" are in stoplist
+        assert!(facts.is_empty());
+    }
+
+    #[test]
+    fn clean_reference_preserves_scoped_packages() {
+        // Scoped packages should preserve @
+        assert_eq!(clean_reference("@scope/pkg"), "@scope/pkg");
+        assert_eq!(clean_reference("@org/module"), "@org/module");
+
+        // Namespaces should preserve ::
+        assert_eq!(clean_reference("crate::module"), "crate::module");
+        assert_eq!(clean_reference("std::collections::HashMap"), "std::collections::HashMap");
+
+        // Still strips other punctuation
+        assert_eq!(clean_reference("\"module\""), "module");
+        assert_eq!(clean_reference("(pkg)"), "pkg");
+        assert_eq!(clean_reference("value."), "value");
+    }
+
+    #[test]
+    fn looks_module_like_validation() {
+        // Repo root
+        assert!(looks_module_like("."));
+
+        // Path-like
+        assert!(looks_module_like("src/auth"));
+        assert!(looks_module_like("legacy-service/client"));
+
+        // Identifier with separator
+        assert!(looks_module_like("new-auth"));
+        assert!(looks_module_like("old_client"));
+
+        // MixedCase (PascalCase, camelCase, gRPC-style)
+        assert!(looks_module_like("NewClient"));
+        assert!(looks_module_like("GraphQL"));
+        assert!(looks_module_like("gRPC"));
+        assert!(looks_module_like("camelCase"));
+
+        // Package-like
+        assert!(looks_module_like("@scope/pkg"));
+        assert!(looks_module_like("crate::module"));
+
+        // Short all-caps (tech acronyms)
+        assert!(looks_module_like("REST"));
+        assert!(looks_module_like("JSON"));
+        assert!(looks_module_like("API"));
+        assert!(looks_module_like("SQL"));
+
+        // Invalid: lowercase single word
+        assert!(!looks_module_like("data"));
+        assert!(!looks_module_like("field"));
+        assert!(!looks_module_like("content"));
+
+        // Invalid: long all-caps (prose emphasis)
+        assert!(!looks_module_like("IMPORTANT"));
+        assert!(!looks_module_like("WARNING"));
+        assert!(!looks_module_like("DEPRECATED"));
     }
 }

@@ -160,12 +160,18 @@ impl StorageConnection {
             |row| row.get::<_, String>(0),
         )?;
 
+        // Sort by confidence descending so highest-quality evidence is inserted first
+        let mut sorted_facts: Vec<_> = facts.iter().collect();
+        sorted_facts.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+
         let mut inserted = 0;
-        for fact in facts {
+        for fact in sorted_facts {
             let fact_uid = derive_fact_uid(fact);
-            tx.execute(
+            // INSERT OR IGNORE: deduplicate facts with same semantic identity.
+            // Sorted by confidence, so highest-quality evidence wins.
+            let rows = tx.execute(
                 r#"
-                INSERT INTO semantic_facts (
+                INSERT OR IGNORE INTO semantic_facts (
                     fact_uid, repo_uid, fact_kind,
                     subject_ref, subject_ref_kind,
                     object_ref, object_ref_kind,
@@ -195,7 +201,7 @@ impl StorageConnection {
                     now,
                 ],
             )?;
-            inserted += 1;
+            inserted += rows;
         }
 
         tx.commit()?;
@@ -233,7 +239,10 @@ impl StorageConnection {
             params![repo_uid],
         )?;
 
-        // Insert new facts
+        // Insert new facts, sorted by confidence descending.
+        // This ensures that when INSERT OR IGNORE deduplicates, the
+        // highest-confidence extraction method wins rather than
+        // depending on arbitrary extractor iteration order.
         let now = tx.query_row(
             "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
             [],
@@ -241,11 +250,17 @@ impl StorageConnection {
         )?;
         let mut inserted = 0;
 
-        for fact in facts {
+        // Sort by confidence descending so highest-quality evidence is inserted first
+        let mut sorted_facts: Vec<_> = facts.iter().collect();
+        sorted_facts.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+
+        for fact in sorted_facts {
             let fact_uid = derive_fact_uid(fact);
-            tx.execute(
+            // INSERT OR IGNORE: deduplicate facts with same semantic identity.
+            // Sorted by confidence, so highest-quality evidence wins.
+            let rows = tx.execute(
                 r#"
-                INSERT INTO semantic_facts (
+                INSERT OR IGNORE INTO semantic_facts (
                     fact_uid, repo_uid, fact_kind,
                     subject_ref, subject_ref_kind,
                     object_ref, object_ref_kind,
@@ -275,7 +290,7 @@ impl StorageConnection {
                     now,
                 ],
             )?;
-            inserted += 1;
+            inserted += rows;
         }
 
         tx.commit()?;
@@ -662,34 +677,66 @@ mod tests {
         assert_eq!(uuid.get_version_num(), 5, "must be UUID v5");
     }
 
-    // ── P2 fix: atomic insert rollback ───────────────────────────
+    // ── INSERT OR IGNORE deduplication ────────────────────────────
 
     #[test]
-    fn insert_batch_is_atomic_on_duplicate_key() {
+    fn insert_batch_deduplicates_silently() {
         let mut conn = setup_conn();
 
         // Insert one fact
         let fact1 = make_fact("r1", "replacement_for", "module-a");
-        conn.insert_semantic_facts(&[fact1.clone()]).unwrap();
+        let inserted1 = conn.insert_semantic_facts(&[fact1.clone()]).unwrap();
+        assert_eq!(inserted1, 1);
         assert_eq!(conn.get_semantic_facts_for_repo("r1").unwrap().len(), 1);
 
-        // Try to insert a batch where the second fact has the same identity
-        // (same derived uid) - this should fail due to PRIMARY KEY constraint
+        // Insert a batch where one fact is new and one is duplicate.
+        // INSERT OR IGNORE: duplicate is silently ignored, new one inserted.
         let batch = vec![
-            make_fact("r1", "replacement_for", "module-b"), // new, would succeed
-            fact1.clone(), // duplicate, will fail
+            make_fact("r1", "replacement_for", "module-b"), // new
+            fact1.clone(), // duplicate - will be ignored
         ];
 
-        let result = conn.insert_semantic_facts(&batch);
-        assert!(result.is_err(), "duplicate key should fail");
+        let inserted2 = conn.insert_semantic_facts(&batch).unwrap();
+        assert_eq!(inserted2, 1, "only non-duplicate should be inserted");
 
-        // Atomicity: neither should be inserted
+        // Both original and new fact should exist
         let facts = conn.get_semantic_facts_for_repo("r1").unwrap();
+        assert_eq!(facts.len(), 2, "should have 2 unique facts");
+
+        let subjects: Vec<_> = facts.iter().map(|f| &f.subject_ref).collect();
+        assert!(subjects.contains(&&"module-a".to_string()));
+        assert!(subjects.contains(&&"module-b".to_string()));
+    }
+
+    #[test]
+    fn deduplication_keeps_highest_confidence() {
+        let mut conn = setup_conn();
+
+        // Create two facts with same semantic identity but different confidence.
+        // The identity tuple excludes confidence, so they'll have the same fact_uid.
+        let mut low_conf = make_fact("r1", "replacement_for", "module-a");
+        low_conf.confidence = 0.5;
+        low_conf.extraction_method = "keyword_pattern".to_string();
+
+        let mut high_conf = make_fact("r1", "replacement_for", "module-a");
+        high_conf.confidence = 0.9;
+        high_conf.extraction_method = "explicit_marker".to_string();
+
+        // Insert low-confidence first, then high-confidence second.
+        // The sort-by-confidence-descending should ensure high wins.
+        let batch = vec![low_conf.clone(), high_conf.clone()];
+        let inserted = conn.insert_semantic_facts(&batch).unwrap();
+        assert_eq!(inserted, 1, "duplicates should be deduplicated");
+
+        let facts = conn.get_semantic_facts_for_repo("r1").unwrap();
+        assert_eq!(facts.len(), 1);
         assert_eq!(
-            facts.len(),
-            1,
-            "batch insert must be atomic - rollback on failure"
+            facts[0].confidence, 0.9,
+            "highest confidence should win regardless of input order"
         );
-        assert_eq!(facts[0].subject_ref, "module-a", "original fact unchanged");
+        assert_eq!(
+            facts[0].extraction_method, "explicit_marker",
+            "extraction method should match highest-confidence fact"
+        );
     }
 }
