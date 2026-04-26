@@ -123,6 +123,25 @@ pub enum StorageError {
 	#[error("migration error: {0}")]
 	Migration(String),
 
+	/// JSON serialization failed for a value being written to storage.
+	/// This should be rare since most serialized values are well-typed
+	/// structs that always serialize successfully.
+	#[error("serialization error: {0}")]
+	SerializationError(String),
+
+	/// A measurement's `value_json` could not be parsed as a numeric value.
+	///
+	/// Measurements are expected to have `{ "value": <number> }` in
+	/// `value_json`. If the value is missing, not numeric, or the JSON
+	/// is malformed, this error is raised during enrichment.
+	///
+	/// Added for quality policy assessment enrichment (QP-Step-5).
+	#[error("measurement parse error for {target_stable_key}: {reason}")]
+	MeasurementParseError {
+		target_stable_key: String,
+		reason: String,
+	},
+
 	/// `insert_nodes` detected two or more nodes in the input
 	/// batch that share the same `stable_key`. This is an
 	/// identity-model defect — either an extractor bug

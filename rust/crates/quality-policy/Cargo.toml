@@ -7,6 +7,7 @@
 #     that quality policies can target
 #   - Validation for QualityPolicyPayload declarations
 #   - Domain error types for validation failures
+#   - Pure assessment engine: evaluate policies against measurement facts
 #
 # Operating model: This is a SUPPORT module, not storage or CLI.
 # It contains pure domain logic consumed by:
@@ -19,11 +20,11 @@
 #     ScopeClauseKind, etc. (DTOs defined there)
 #   - serde: for Serialize/Deserialize on domain types
 #   - thiserror: for structured error types
+#   - glob: for file scope pattern matching
 #
 # NOT in scope:
 #   - Database access (storage handles persistence)
 #   - CLI parsing (rgr crate handles command structure)
-#   - Assessment computation (separate slice)
 
 [package]
 name         = "repo-graph-quality-policy"
@@ -43,6 +44,9 @@ serde = { version = "1", features = ["derive"] }
 
 # Structured errors for validation failures.
 thiserror = "2"
+
+# Glob pattern matching for file scope clauses.
+glob = "0.3"
 
 [dev-dependencies]
 # None yet — validation tests use inline fixtures.

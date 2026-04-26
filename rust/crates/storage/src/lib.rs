@@ -164,6 +164,8 @@ pub mod migrations;
 mod agent_impl; // AgentStorageRead impl for StorageConnection (Rust-42)
 mod gate_impl; // GateStorageRead impl for StorageConnection (Rust-43A)
 mod indexer_impl; // SnapshotLifecyclePort + FileCatalogPort impl (R5-C)
+pub mod quality_policy_port; // Quality policy storage port (QP-Step-5)
+mod quality_policy_impl; // QualityPolicyStoragePort impl for StorageConnection
 pub mod queries; // Read-side graph queries (R10+)
 mod trust_impl; // TrustStorageRead impl for StorageConnection (R4-E/F)
 pub mod types;

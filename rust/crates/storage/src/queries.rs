@@ -1576,6 +1576,228 @@ impl StorageConnection {
 		Ok(results)
 	}
 
+	// ── Quality Assessment CRUD ────────────────────────────────────────
+
+	/// Insert quality assessments in batch.
+	///
+	/// Each assessment must have a deterministic `assessment_uid` built via
+	/// `QualityAssessmentInput::build_uid`. The UID encodes (snapshot, policy,
+	/// baseline) identity.
+	///
+	/// Violations are serialized to JSON in `violations_json`.
+	///
+	/// The batch is atomic: either all assessments are inserted, or none are
+	/// (on any failure, the transaction rolls back).
+	pub fn insert_quality_assessments(
+		&mut self,
+		assessments: &[crate::types::QualityAssessmentInput],
+	) -> Result<usize, StorageError> {
+		let tx = self.connection_mut().transaction()?;
+
+		let mut stmt = tx.prepare(
+			"INSERT INTO quality_assessments (
+				assessment_uid, snapshot_uid, policy_uid, baseline_snapshot_uid,
+				computed_verdict, measurements_evaluated, violations_json,
+				new_violations, worsened_violations, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		)?;
+
+		let mut count = 0;
+		for input in assessments {
+			let violations_json = serde_json::to_string(&input.violations)
+				.map_err(|e| StorageError::SerializationError(e.to_string()))?;
+
+			stmt.execute(rusqlite::params![
+				input.assessment_uid,
+				input.snapshot_uid,
+				input.policy_uid,
+				input.baseline_snapshot_uid,
+				input.computed_verdict.as_str(),
+				input.measurements_evaluated,
+				violations_json,
+				input.new_violations,
+				input.worsened_violations,
+				input.created_at,
+			])?;
+			count += 1;
+		}
+
+		drop(stmt);
+		tx.commit()?;
+
+		Ok(count)
+	}
+
+	/// Replace all assessments for a snapshot atomically.
+	///
+	/// Deletes existing assessments for the snapshot, then inserts the new set.
+	/// Use this for recomputation — assessments are derived facts that can be
+	/// regenerated deterministically.
+	///
+	/// The transaction ensures atomicity: either all old assessments are
+	/// replaced with all new ones, or nothing changes.
+	///
+	/// # Panics
+	///
+	/// Panics if any input assessment has a `snapshot_uid` that does not match
+	/// the `snapshot_uid` parameter. This is a programming error — the caller
+	/// must build assessments with the correct snapshot identity.
+	pub fn replace_quality_assessments_for_snapshot(
+		&mut self,
+		snapshot_uid: &str,
+		assessments: &[crate::types::QualityAssessmentInput],
+	) -> Result<usize, StorageError> {
+		// Input invariant: all assessments must be for the target snapshot.
+		for input in assessments {
+			assert_eq!(
+				input.snapshot_uid, snapshot_uid,
+				"replace_quality_assessments_for_snapshot: input assessment {} has snapshot_uid '{}', expected '{}'",
+				input.assessment_uid, input.snapshot_uid, snapshot_uid
+			);
+		}
+
+		let tx = self.connection_mut().transaction()?;
+
+		// Delete existing assessments for this snapshot.
+		tx.execute(
+			"DELETE FROM quality_assessments WHERE snapshot_uid = ?",
+			rusqlite::params![snapshot_uid],
+		)?;
+
+		// Insert new assessments.
+		let mut stmt = tx.prepare(
+			"INSERT INTO quality_assessments (
+				assessment_uid, snapshot_uid, policy_uid, baseline_snapshot_uid,
+				computed_verdict, measurements_evaluated, violations_json,
+				new_violations, worsened_violations, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		)?;
+
+		let mut count = 0;
+		for input in assessments {
+			let violations_json = serde_json::to_string(&input.violations)
+				.map_err(|e| StorageError::SerializationError(e.to_string()))?;
+
+			stmt.execute(rusqlite::params![
+				input.assessment_uid,
+				input.snapshot_uid,
+				input.policy_uid,
+				input.baseline_snapshot_uid,
+				input.computed_verdict.as_str(),
+				input.measurements_evaluated,
+				violations_json,
+				input.new_violations,
+				input.worsened_violations,
+				input.created_at,
+			])?;
+			count += 1;
+		}
+
+		drop(stmt);
+		tx.commit()?;
+
+		Ok(count)
+	}
+
+	/// Query all assessments for a snapshot.
+	///
+	/// Returns assessments ordered by (policy_uid, baseline_snapshot_uid,
+	/// assessment_uid) for deterministic output. NULLs in baseline_snapshot_uid
+	/// sort first (absolute policies before comparative ones for the same policy).
+	pub fn get_quality_assessments_for_snapshot(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<crate::types::QualityAssessmentRow>, StorageError> {
+		let mut stmt = self.connection().prepare(
+			"SELECT assessment_uid, snapshot_uid, policy_uid, baseline_snapshot_uid,
+					computed_verdict, measurements_evaluated, violations_json,
+					new_violations, worsened_violations, created_at
+			 FROM quality_assessments
+			 WHERE snapshot_uid = ?
+			 ORDER BY policy_uid, baseline_snapshot_uid NULLS FIRST, assessment_uid",
+		)?;
+
+		let rows = stmt.query_map(rusqlite::params![snapshot_uid], |row| {
+			crate::types::QualityAssessmentRow::from_row(row)
+		})?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			results.push(row.map_err(StorageError::from)?);
+		}
+
+		Ok(results)
+	}
+
+	/// Get a single assessment by UID.
+	///
+	/// Returns `None` if not found.
+	pub fn get_quality_assessment(
+		&self,
+		assessment_uid: &str,
+	) -> Result<Option<crate::types::QualityAssessmentRow>, StorageError> {
+		let mut stmt = self.connection().prepare(
+			"SELECT assessment_uid, snapshot_uid, policy_uid, baseline_snapshot_uid,
+					computed_verdict, measurements_evaluated, violations_json,
+					new_violations, worsened_violations, created_at
+			 FROM quality_assessments
+			 WHERE assessment_uid = ?",
+		)?;
+
+		let row = stmt
+			.query_row(rusqlite::params![assessment_uid], |row| {
+				crate::types::QualityAssessmentRow::from_row(row)
+			})
+			.optional()?;
+
+		Ok(row)
+	}
+
+	/// Query assessments filtered by verdict.
+	///
+	/// Returns assessments ordered by (policy_uid, baseline_snapshot_uid,
+	/// assessment_uid) for deterministic output. NULLs in baseline_snapshot_uid
+	/// sort first.
+	pub fn get_quality_assessments_by_verdict(
+		&self,
+		snapshot_uid: &str,
+		verdict: crate::types::AssessmentVerdict,
+	) -> Result<Vec<crate::types::QualityAssessmentRow>, StorageError> {
+		let mut stmt = self.connection().prepare(
+			"SELECT assessment_uid, snapshot_uid, policy_uid, baseline_snapshot_uid,
+					computed_verdict, measurements_evaluated, violations_json,
+					new_violations, worsened_violations, created_at
+			 FROM quality_assessments
+			 WHERE snapshot_uid = ? AND computed_verdict = ?
+			 ORDER BY policy_uid, baseline_snapshot_uid NULLS FIRST, assessment_uid",
+		)?;
+
+		let rows = stmt.query_map(rusqlite::params![snapshot_uid, verdict.as_str()], |row| {
+			crate::types::QualityAssessmentRow::from_row(row)
+		})?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			results.push(row.map_err(StorageError::from)?);
+		}
+
+		Ok(results)
+	}
+
+	/// Delete all assessments for a snapshot.
+	///
+	/// Used when a snapshot is recomputed or removed.
+	pub fn delete_quality_assessments_for_snapshot(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<usize, StorageError> {
+		let count = self.connection().execute(
+			"DELETE FROM quality_assessments WHERE snapshot_uid = ?",
+			rusqlite::params![snapshot_uid],
+		)?;
+		Ok(count)
+	}
+
 	/// Read measurements by kind for a snapshot.
 	///
 	/// Mirrors TS `queryMeasurementsByKind` (sqlite-storage.ts).
@@ -3041,5 +3263,406 @@ mod tests {
 		// Consumer must validate semantically. This is documented in the
 		// method doc comment and is the caller's responsibility.
 		// The quality-policy crate provides validate_quality_policy_payload().
+	}
+
+	// ── Quality Assessment CRUD tests ──────────────────────────────────
+
+	#[test]
+	fn insert_quality_assessments_basic() {
+		use crate::types::{AssessmentVerdict, QualityAssessmentInput};
+
+		let mut storage = fresh_storage();
+
+		// Create repo + snapshot (required by FK)
+		storage
+			.connection()
+			.execute_batch(
+				"INSERT INTO repos (repo_uid, name, root_path, created_at)
+				 VALUES ('r1', 'test-repo', '/tmp/r1', '2025-01-01T00:00:00Z');
+				 INSERT INTO snapshots (snapshot_uid, repo_uid, status, kind, created_at)
+				 VALUES ('snap1', 'r1', 'ready', 'full', '2025-01-01T00:00:00Z');",
+			)
+			.unwrap();
+
+		let input = QualityAssessmentInput {
+			assessment_uid: "snap1-qpa-policy1".to_string(),
+			snapshot_uid: "snap1".to_string(),
+			policy_uid: "policy1".to_string(),
+			baseline_snapshot_uid: None,
+			computed_verdict: AssessmentVerdict::Pass,
+			measurements_evaluated: 10,
+			violations: vec![],
+			new_violations: None,
+			worsened_violations: None,
+			created_at: "2025-01-01T00:00:00Z".to_string(),
+		};
+
+		let count = storage.insert_quality_assessments(&[input]).unwrap();
+		assert_eq!(count, 1);
+
+		// Verify it was inserted
+		let result = storage.get_quality_assessment("snap1-qpa-policy1").unwrap();
+		assert!(result.is_some());
+		let row = result.unwrap();
+		assert_eq!(row.computed_verdict, "PASS");
+		assert_eq!(row.measurements_evaluated, 10);
+	}
+
+	#[test]
+	fn insert_quality_assessments_with_violations() {
+		use crate::types::{AssessmentVerdict, AssessmentViolation, QualityAssessmentInput};
+
+		let mut storage = fresh_storage();
+
+		storage
+			.connection()
+			.execute_batch(
+				"INSERT INTO repos (repo_uid, name, root_path, created_at)
+				 VALUES ('r1', 'test-repo', '/tmp/r1', '2025-01-01T00:00:00Z');
+				 INSERT INTO snapshots (snapshot_uid, repo_uid, status, kind, created_at)
+				 VALUES ('snap1', 'r1', 'ready', 'full', '2025-01-01T00:00:00Z');",
+			)
+			.unwrap();
+
+		let violations = vec![
+			AssessmentViolation {
+				target_stable_key: "sym1".to_string(),
+				measurement_value: 25.0,
+				threshold: 15.0,
+				baseline_value: None,
+			},
+			AssessmentViolation {
+				target_stable_key: "sym2".to_string(),
+				measurement_value: 30.0,
+				threshold: 15.0,
+				baseline_value: Some(20.0),
+			},
+		];
+
+		let input = QualityAssessmentInput {
+			assessment_uid: "snap1-qpa-policy1".to_string(),
+			snapshot_uid: "snap1".to_string(),
+			policy_uid: "policy1".to_string(),
+			baseline_snapshot_uid: None,
+			computed_verdict: AssessmentVerdict::Fail,
+			measurements_evaluated: 10,
+			violations: violations.clone(),
+			new_violations: Some(1),
+			worsened_violations: Some(1),
+			created_at: "2025-01-01T00:00:00Z".to_string(),
+		};
+
+		storage.insert_quality_assessments(&[input]).unwrap();
+
+		let row = storage
+			.get_quality_assessment("snap1-qpa-policy1")
+			.unwrap()
+			.unwrap();
+
+		// Parse violations back
+		let parsed_violations = row.violations().unwrap();
+		assert_eq!(parsed_violations.len(), 2);
+		assert_eq!(parsed_violations[0].target_stable_key, "sym1");
+		assert_eq!(parsed_violations[1].baseline_value, Some(20.0));
+	}
+
+	#[test]
+	fn replace_quality_assessments_for_snapshot_atomic() {
+		use crate::types::{AssessmentVerdict, QualityAssessmentInput};
+
+		let mut storage = fresh_storage();
+
+		storage
+			.connection()
+			.execute_batch(
+				"INSERT INTO repos (repo_uid, name, root_path, created_at)
+				 VALUES ('r1', 'test-repo', '/tmp/r1', '2025-01-01T00:00:00Z');
+				 INSERT INTO snapshots (snapshot_uid, repo_uid, status, kind, created_at)
+				 VALUES ('snap1', 'r1', 'ready', 'full', '2025-01-01T00:00:00Z');",
+			)
+			.unwrap();
+
+		// Insert initial assessment
+		let initial = QualityAssessmentInput {
+			assessment_uid: "snap1-qpa-policy1".to_string(),
+			snapshot_uid: "snap1".to_string(),
+			policy_uid: "policy1".to_string(),
+			baseline_snapshot_uid: None,
+			computed_verdict: AssessmentVerdict::Fail,
+			measurements_evaluated: 5,
+			violations: vec![],
+			new_violations: None,
+			worsened_violations: None,
+			created_at: "2025-01-01T00:00:00Z".to_string(),
+		};
+		storage.insert_quality_assessments(&[initial]).unwrap();
+
+		// Replace with new assessments
+		let replacement = vec![
+			QualityAssessmentInput {
+				assessment_uid: "snap1-qpa-policy1".to_string(),
+				snapshot_uid: "snap1".to_string(),
+				policy_uid: "policy1".to_string(),
+				baseline_snapshot_uid: None,
+				computed_verdict: AssessmentVerdict::Pass, // Changed
+				measurements_evaluated: 10,
+				violations: vec![],
+				new_violations: None,
+				worsened_violations: None,
+				created_at: "2025-01-02T00:00:00Z".to_string(),
+			},
+			QualityAssessmentInput {
+				assessment_uid: "snap1-qpa-policy2".to_string(),
+				snapshot_uid: "snap1".to_string(),
+				policy_uid: "policy2".to_string(),
+				baseline_snapshot_uid: None,
+				computed_verdict: AssessmentVerdict::NotApplicable,
+				measurements_evaluated: 0,
+				violations: vec![],
+				new_violations: None,
+				worsened_violations: None,
+				created_at: "2025-01-02T00:00:00Z".to_string(),
+			},
+		];
+
+		let count = storage
+			.replace_quality_assessments_for_snapshot("snap1", &replacement)
+			.unwrap();
+		assert_eq!(count, 2);
+
+		// Verify the old assessment is updated and new one exists
+		let all = storage.get_quality_assessments_for_snapshot("snap1").unwrap();
+		assert_eq!(all.len(), 2);
+
+		let p1 = all.iter().find(|r| r.policy_uid == "policy1").unwrap();
+		assert_eq!(p1.computed_verdict, "PASS");
+		assert_eq!(p1.measurements_evaluated, 10);
+
+		let p2 = all.iter().find(|r| r.policy_uid == "policy2").unwrap();
+		assert_eq!(p2.computed_verdict, "NOT_APPLICABLE");
+	}
+
+	#[test]
+	fn get_quality_assessments_for_snapshot_orders_by_policy() {
+		use crate::types::{AssessmentVerdict, QualityAssessmentInput};
+
+		let mut storage = fresh_storage();
+
+		storage
+			.connection()
+			.execute_batch(
+				"INSERT INTO repos (repo_uid, name, root_path, created_at)
+				 VALUES ('r1', 'test-repo', '/tmp/r1', '2025-01-01T00:00:00Z');
+				 INSERT INTO snapshots (snapshot_uid, repo_uid, status, kind, created_at)
+				 VALUES ('snap1', 'r1', 'ready', 'full', '2025-01-01T00:00:00Z');",
+			)
+			.unwrap();
+
+		// Insert in reverse order
+		let inputs = vec![
+			QualityAssessmentInput {
+				assessment_uid: "snap1-qpa-z-policy".to_string(),
+				snapshot_uid: "snap1".to_string(),
+				policy_uid: "z-policy".to_string(),
+				baseline_snapshot_uid: None,
+				computed_verdict: AssessmentVerdict::Pass,
+				measurements_evaluated: 1,
+				violations: vec![],
+				new_violations: None,
+				worsened_violations: None,
+				created_at: "2025-01-01T00:00:00Z".to_string(),
+			},
+			QualityAssessmentInput {
+				assessment_uid: "snap1-qpa-a-policy".to_string(),
+				snapshot_uid: "snap1".to_string(),
+				policy_uid: "a-policy".to_string(),
+				baseline_snapshot_uid: None,
+				computed_verdict: AssessmentVerdict::Fail,
+				measurements_evaluated: 2,
+				violations: vec![],
+				new_violations: None,
+				worsened_violations: None,
+				created_at: "2025-01-01T00:00:00Z".to_string(),
+			},
+		];
+
+		storage.insert_quality_assessments(&inputs).unwrap();
+
+		let results = storage.get_quality_assessments_for_snapshot("snap1").unwrap();
+		assert_eq!(results.len(), 2);
+		assert_eq!(results[0].policy_uid, "a-policy"); // alphabetically first
+		assert_eq!(results[1].policy_uid, "z-policy");
+	}
+
+	#[test]
+	fn get_quality_assessments_by_verdict_filters_correctly() {
+		use crate::types::{AssessmentVerdict, QualityAssessmentInput};
+
+		let mut storage = fresh_storage();
+
+		storage
+			.connection()
+			.execute_batch(
+				"INSERT INTO repos (repo_uid, name, root_path, created_at)
+				 VALUES ('r1', 'test-repo', '/tmp/r1', '2025-01-01T00:00:00Z');
+				 INSERT INTO snapshots (snapshot_uid, repo_uid, status, kind, created_at)
+				 VALUES ('snap1', 'r1', 'ready', 'full', '2025-01-01T00:00:00Z');",
+			)
+			.unwrap();
+
+		let inputs = vec![
+			QualityAssessmentInput {
+				assessment_uid: "snap1-qpa-policy1".to_string(),
+				snapshot_uid: "snap1".to_string(),
+				policy_uid: "policy1".to_string(),
+				baseline_snapshot_uid: None,
+				computed_verdict: AssessmentVerdict::Pass,
+				measurements_evaluated: 1,
+				violations: vec![],
+				new_violations: None,
+				worsened_violations: None,
+				created_at: "2025-01-01T00:00:00Z".to_string(),
+			},
+			QualityAssessmentInput {
+				assessment_uid: "snap1-qpa-policy2".to_string(),
+				snapshot_uid: "snap1".to_string(),
+				policy_uid: "policy2".to_string(),
+				baseline_snapshot_uid: None,
+				computed_verdict: AssessmentVerdict::Fail,
+				measurements_evaluated: 2,
+				violations: vec![],
+				new_violations: None,
+				worsened_violations: None,
+				created_at: "2025-01-01T00:00:00Z".to_string(),
+			},
+			QualityAssessmentInput {
+				assessment_uid: "snap1-qpa-policy3".to_string(),
+				snapshot_uid: "snap1".to_string(),
+				policy_uid: "policy3".to_string(),
+				baseline_snapshot_uid: None,
+				computed_verdict: AssessmentVerdict::Fail,
+				measurements_evaluated: 3,
+				violations: vec![],
+				new_violations: None,
+				worsened_violations: None,
+				created_at: "2025-01-01T00:00:00Z".to_string(),
+			},
+		];
+
+		storage.insert_quality_assessments(&inputs).unwrap();
+
+		let fails = storage
+			.get_quality_assessments_by_verdict("snap1", AssessmentVerdict::Fail)
+			.unwrap();
+		assert_eq!(fails.len(), 2);
+
+		let passes = storage
+			.get_quality_assessments_by_verdict("snap1", AssessmentVerdict::Pass)
+			.unwrap();
+		assert_eq!(passes.len(), 1);
+		assert_eq!(passes[0].policy_uid, "policy1");
+	}
+
+	#[test]
+	fn delete_quality_assessments_for_snapshot_clears_all() {
+		use crate::types::{AssessmentVerdict, QualityAssessmentInput};
+
+		let mut storage = fresh_storage();
+
+		storage
+			.connection()
+			.execute_batch(
+				"INSERT INTO repos (repo_uid, name, root_path, created_at)
+				 VALUES ('r1', 'test-repo', '/tmp/r1', '2025-01-01T00:00:00Z');
+				 INSERT INTO snapshots (snapshot_uid, repo_uid, status, kind, created_at)
+				 VALUES ('snap1', 'r1', 'ready', 'full', '2025-01-01T00:00:00Z'),
+				        ('snap2', 'r1', 'ready', 'full', '2025-01-02T00:00:00Z');",
+			)
+			.unwrap();
+
+		let inputs = vec![
+			QualityAssessmentInput {
+				assessment_uid: "snap1-qpa-policy1".to_string(),
+				snapshot_uid: "snap1".to_string(),
+				policy_uid: "policy1".to_string(),
+				baseline_snapshot_uid: None,
+				computed_verdict: AssessmentVerdict::Pass,
+				measurements_evaluated: 1,
+				violations: vec![],
+				new_violations: None,
+				worsened_violations: None,
+				created_at: "2025-01-01T00:00:00Z".to_string(),
+			},
+			QualityAssessmentInput {
+				assessment_uid: "snap2-qpa-policy1".to_string(),
+				snapshot_uid: "snap2".to_string(),
+				policy_uid: "policy1".to_string(),
+				baseline_snapshot_uid: None,
+				computed_verdict: AssessmentVerdict::Fail,
+				measurements_evaluated: 2,
+				violations: vec![],
+				new_violations: None,
+				worsened_violations: None,
+				created_at: "2025-01-02T00:00:00Z".to_string(),
+			},
+		];
+
+		storage.insert_quality_assessments(&inputs).unwrap();
+
+		// Delete snap1 assessments
+		let deleted = storage
+			.delete_quality_assessments_for_snapshot("snap1")
+			.unwrap();
+		assert_eq!(deleted, 1);
+
+		// snap1 should be empty
+		let snap1 = storage.get_quality_assessments_for_snapshot("snap1").unwrap();
+		assert!(snap1.is_empty());
+
+		// snap2 should still have its assessment
+		let snap2 = storage.get_quality_assessments_for_snapshot("snap2").unwrap();
+		assert_eq!(snap2.len(), 1);
+	}
+
+	#[test]
+	fn comparative_assessment_with_baseline() {
+		use crate::types::{AssessmentVerdict, QualityAssessmentInput};
+
+		let mut storage = fresh_storage();
+
+		storage
+			.connection()
+			.execute_batch(
+				"INSERT INTO repos (repo_uid, name, root_path, created_at)
+				 VALUES ('r1', 'test-repo', '/tmp/r1', '2025-01-01T00:00:00Z');
+				 INSERT INTO snapshots (snapshot_uid, repo_uid, status, kind, created_at)
+				 VALUES ('snap1', 'r1', 'ready', 'full', '2025-01-01T00:00:00Z'),
+				        ('snap2', 'r1', 'ready', 'full', '2025-01-02T00:00:00Z');",
+			)
+			.unwrap();
+
+		let input = QualityAssessmentInput {
+			assessment_uid: "snap2-qpa-policy1-vs-snap1".to_string(),
+			snapshot_uid: "snap2".to_string(),
+			policy_uid: "policy1".to_string(),
+			baseline_snapshot_uid: Some("snap1".to_string()),
+			computed_verdict: AssessmentVerdict::Pass,
+			measurements_evaluated: 5,
+			violations: vec![],
+			new_violations: Some(0),
+			worsened_violations: Some(0),
+			created_at: "2025-01-02T00:00:00Z".to_string(),
+		};
+
+		storage.insert_quality_assessments(&[input]).unwrap();
+
+		let row = storage
+			.get_quality_assessment("snap2-qpa-policy1-vs-snap1")
+			.unwrap()
+			.unwrap();
+
+		assert_eq!(row.baseline_snapshot_uid, Some("snap1".to_string()));
+		assert_eq!(row.new_violations, Some(0));
+		assert_eq!(row.worsened_violations, Some(0));
 	}
 }

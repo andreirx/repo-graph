@@ -1,6 +1,9 @@
-//! Quality policy domain validation.
+//! Quality policy domain logic: validation and assessment.
 //!
-//! This module provides pure domain logic for quality policy declarations:
+//! This crate provides pure domain logic for quality policy declarations
+//! and evaluation:
+//!
+//! # Declaration Validation
 //!
 //! - [`SupportedMeasurementKind`]: Typed enum of measurement kinds that
 //!   quality policies can target. Limited to the **Phase A set** — kinds
@@ -11,6 +14,17 @@
 //!
 //! - [`PolicyValidationError`]: Structured error enum for all validation
 //!   failures.
+//!
+//! # Policy Assessment
+//!
+//! - [`assess::evaluate_policies`]: Batch evaluation of policies against
+//!   measurement facts. Pure function, no storage access.
+//!
+//! - [`assess::MeasurementFact`]: Typed measurement input with scope metadata.
+//!
+//! - [`assess::PolicyAssessment`]: Evaluation result with verdict and violations.
+//!
+//! - [`assess::AssessmentVerdict`]: Pass/Fail/NotApplicable/NotComparable.
 //!
 //! # Design Rationale
 //!
@@ -36,6 +50,12 @@
 //! (would create a dependency cycle). The storage layer is schema-stable;
 //! semantic validation belongs to the domain layer.
 //!
+//! # Scope Matching Semantics
+//!
+//! - `module:path` — repo-relative path prefix with `/` boundary
+//! - `file:pattern` — full repo-relative glob (not basename)
+//! - `symbol_kind:KIND` — exact canonical string match (case-insensitive)
+//!
 //! # Measurement Kinds (Phase A)
 //!
 //! Only measurement kinds that are **currently persisted** are supported.
@@ -53,6 +73,8 @@
 //! Future kinds (module structural, churn, etc.) will be added when their
 //! measurement pipelines are implemented. See `docs/architecture/measurement-model.txt`
 //! for the full roadmap.
+
+pub mod assess;
 
 use repo_graph_storage::types::{QualityPolicyKind, QualityPolicyPayload};
 use serde::{Deserialize, Serialize};

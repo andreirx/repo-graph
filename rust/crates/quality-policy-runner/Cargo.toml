@@ -1,0 +1,55 @@
+# ── repo-graph-quality-policy-runner ────────────────────────────────
+#
+# Use-case orchestration for quality policy assessment.
+#
+# This crate is the APPLICATION LAYER for quality policy evaluation.
+# It orchestrates the flow:
+#   1. Load active quality policies from storage
+#   2. Validate loaded policies (semantic validation)
+#   3. Collect distinct measurement kinds required
+#   4. Load current snapshot measurements
+#   5. Load baseline measurements if any policy requires baseline
+#   6. Enrich storage rows into MeasurementFact DTOs
+#   7. Evaluate via repo-graph-quality-policy (pure domain)
+#   8. Persist assessments atomically
+#
+# This crate does NOT contain:
+#   - Pure domain rules (quality-policy crate)
+#   - SQL or storage internals (storage crate)
+#   - CLI parsing (rgr crate)
+#
+# Dependencies:
+#   - repo-graph-quality-policy: pure assessment engine
+#   - repo-graph-storage: types only (DTOs, error types)
+#
+# Operating model:
+#   - Defines a trait (port) for storage access
+#   - Storage crate provides the impl
+#   - Runner is injected with trait impl at composition time (rgr main)
+#
+# Definition of done:
+#   - Full-snapshot assessment orchestration
+#   - Invalid policies fail loudly at use-case boundary
+#   - One end-to-end test proves load → evaluate → persist
+
+[package]
+name         = "repo-graph-quality-policy-runner"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Quality policy assessment orchestration for repo-graph"
+publish      = false
+
+[dependencies]
+# Pure domain assessment engine.
+repo-graph-quality-policy = { path = "../quality-policy" }
+
+# Storage types: DTOs, error types. No direct SQL dependency.
+repo-graph-storage = { path = "../storage" }
+
+# Structured errors.
+thiserror = "2"
+
+[dev-dependencies]
+# None yet — tests will be integration-style with mock port impl.

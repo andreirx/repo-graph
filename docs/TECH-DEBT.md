@@ -1280,3 +1280,30 @@ computed for TS/JS functions. Known limitations:
   `rmap metrics`, not persisted measurements.
 
 See `docs/architecture/quality-control-phase-a.md` for full spec.
+
+### Quality Policy Runner — architectural debt (2026-04-26)
+
+The `QualityPolicyStoragePort` trait lives in `repo-graph-storage` instead
+of in `repo-graph-quality-policy-runner`. This inverts the Clean Architecture
+dependency rule: the application/use-case crate depends on an adapter-owned
+abstraction instead of owning its own boundary contract.
+
+**Why this happened:** Circular crate dependency prevention.
+- `repo-graph-quality-policy` depends on `repo-graph-storage` (for DTOs)
+- `repo-graph-quality-policy-runner` depends on both
+- If the port trait lived in `runner`, `storage` would need to depend on `runner`
+  to implement it, creating a cycle.
+
+**Consequences:**
+- The runner boundary is pinned to storage semantics and cannot evolve independently
+- Error types are storage-native (`StorageError`), not use-case-specific
+- The port DTOs (`EnrichedMeasurement`, `LoadedPolicy`) are storage-owned
+
+**Correct resolution (deferred):** Create a separate `repo-graph-quality-policy-ports`
+crate containing only the port trait and its DTOs. Both `runner` and `storage`
+depend on `ports`. This adds one crate but restores the dependency rule.
+
+**Pragmatic acceptance:** The current design works and the coupling is
+narrow (3 methods). The debt is documented; resolution can be prioritized
+when the port interface needs to evolve or when a second storage backend
+appears.
