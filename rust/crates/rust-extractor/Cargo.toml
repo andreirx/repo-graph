@@ -1,0 +1,62 @@
+# -- repo-graph-rust-extractor --------------------------------------
+#
+# Concrete ExtractorPort adapter for Rust source files using native
+# tree-sitter.
+#
+# Slice scope (Rust extractor v1):
+#   - Implements ExtractorPort from repo-graph-indexer
+#   - Uses tree-sitter-rust grammar
+#   - Produces ExtractedNode, ExtractedEdge, ImportBinding
+#   - Advertises language: ["rust"]
+#   - No metrics in v1 (matches TS-side rust-extractor)
+#
+# Architecture:
+#   - This crate is an OUTER-LAYER ADAPTER. It depends on the
+#     indexer policy crate's ExtractorPort trait and DTOs.
+#   - Does NOT depend on storage, classification logic, or trust.
+#   - Owns grammar loading, parser lifecycle, and syntax-tree traversal.
+#
+# Behavioral contract mirrors the TS RustExtractor at:
+#   src/adapters/extractors/rust/rust-extractor.ts
+#
+# NOT in scope:
+#   - Complexity metrics (deferred)
+#   - Attribute metadata extraction (framework detection slice)
+#   - Macro expansion or proc-macro analysis
+#   - Type inference or trait resolution
+
+[package]
+name         = "repo-graph-rust-extractor"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Rust tree-sitter extractor for repo-graph"
+publish      = false
+
+[dependencies]
+# Indexer crate -- for ExtractorPort, ExtractedNode, ExtractedEdge,
+# ExtractedMetrics, ExtractionResult, domain enums.
+repo-graph-indexer = { path = "../indexer" }
+
+# Classification crate -- for ImportBinding, RuntimeBuiltinsSet,
+# SourceLocation types used in ExtractorPort interface.
+repo-graph-classification = { path = "../classification" }
+
+# tree-sitter -- native Rust binding. No WASM, no runtime grammar
+# loading. Grammars compiled as C libraries, linked statically.
+tree-sitter = "0.24"
+
+# tree-sitter-rust -- Rust grammar.
+# Using 0.23 to match tree-sitter 0.24 ABI compatibility.
+tree-sitter-rust = "0.23"
+
+# Serde for metadata JSON serialization.
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+
+# UUID v4 for node/edge UID generation.
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+walkdir = "2"

@@ -33,6 +33,7 @@ members = [
     "crates/quality-policy-runner",
     "crates/repo-index",
     "crates/rgr",
+    "crates/rust-extractor",
     "crates/state-bindings",
     "crates/state-extractor",
     "crates/storage",

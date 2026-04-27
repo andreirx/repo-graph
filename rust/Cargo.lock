@@ -621,6 +621,7 @@ dependencies = [
  "repo-graph-classification",
  "repo-graph-indexer",
  "repo-graph-java-extractor",
+ "repo-graph-rust-extractor",
  "repo-graph-state-bindings",
  "repo-graph-state-extractor",
  "repo-graph-storage",
@@ -653,6 +654,20 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+]
+
+[[package]]
+name = "repo-graph-rust-extractor"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-classification",
+ "repo-graph-indexer",
+ "serde",
+ "serde_json",
+ "tree-sitter",
+ "tree-sitter-rust",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]
@@ -1017,6 +1032,16 @@ name = "tree-sitter-language"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
+
+[[package]]
+name = "tree-sitter-rust"
+version = "0.23.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca8ccb3e3a3495c8a943f6c3fd24c3804c471fd7f4f16087623c7fa4c0068e8a"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
 
 [[package]]
 name = "tree-sitter-typescript"

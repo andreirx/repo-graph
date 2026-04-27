@@ -18,10 +18,12 @@ use repo_graph_indexer::routing;
 use repo_graph_indexer::storage_port::SnapshotLifecyclePort;
 use repo_graph_indexer::types::{IndexOptions, IndexResult};
 use repo_graph_classification::spring_liveness::{classify_spring_liveness, SpringNodeInput};
+use repo_graph_classification::types::{PackageDependencySet, TsconfigAliases};
 use repo_graph_storage::types::InferenceInput;
 use repo_graph_storage::StorageConnection;
 use repo_graph_c_extractor::CExtractor;
 use repo_graph_java_extractor::JavaExtractor;
+use repo_graph_rust_extractor::RustExtractor;
 use repo_graph_ts_extractor::TsExtractor;
 
 use crate::config::RepoConfigContext;
@@ -93,8 +95,33 @@ pub fn prepare_repo_inputs(
 	for file in &scanned {
 		match file {
 			ScannedFile::Ok(ok) => {
-				let pkg_deps = config_ctx.resolve_package_deps(&ok.rel_path, repo_path);
-				let tsconfig = config_ctx.resolve_tsconfig_aliases(&ok.rel_path, repo_path);
+				// Language-aware dependency resolution — explicit per language.
+				// Only the owning manifest type is resolved per language.
+				// No language-specific fallback: Java/C/C++ files receive empty
+				// signals until dedicated manifest readers exist for those languages.
+				// This prevents mixed-repo contamination where a nearby package.json
+				// would wrongly appear as dependency context for a Java or C file.
+				let language = routing::detect_language(&ok.rel_path);
+				let empty_deps = PackageDependencySet { names: vec![] };
+				let empty_tsconfig = TsconfigAliases { entries: vec![] };
+				let (pkg_deps, tsconfig) = match language {
+					Some("rust") => {
+						// Rust: Cargo.toml. tsconfig not applicable.
+						let cargo_deps = config_ctx.resolve_cargo_deps(&ok.rel_path, repo_path);
+						(cargo_deps, empty_tsconfig)
+					}
+					Some("typescript" | "tsx" | "javascript" | "jsx") => {
+						// JS/TS: package.json + tsconfig.json.
+						let pkg = config_ctx.resolve_package_deps(&ok.rel_path, repo_path);
+						let ts = config_ctx.resolve_tsconfig_aliases(&ok.rel_path, repo_path);
+						(pkg, ts)
+					}
+					_ => {
+						// Java, C, C++, unknown: no manifest reader implemented yet.
+						// Return empty rather than inheriting a nearby package.json.
+						(empty_deps, empty_tsconfig)
+					}
+				};
 
 				file_inputs.push(FileInput {
 					rel_path: ok.rel_path.clone(),
@@ -405,9 +432,14 @@ pub fn index_into_storage(
 		.initialize()
 		.map_err(|e| ComposeError::ExtractorInit(format!("java: {}", e)))?;
 
+	let mut rust_extractor = RustExtractor::new();
+	rust_extractor
+		.initialize()
+		.map_err(|e| ComposeError::ExtractorInit(format!("rust: {}", e)))?;
+
 	ensure_repo(storage, repo_uid, repo_path)?;
 
-	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut java_extractor];
+	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut java_extractor, &mut rust_extractor];
 	let mut idx_options = IndexOptions {
 		basis_commit: options.basis_commit.clone(),
 		edge_batch_size: options.edge_batch_size,
@@ -488,9 +520,14 @@ pub fn refresh_into_storage(
 		.initialize()
 		.map_err(|e| ComposeError::ExtractorInit(format!("java: {}", e)))?;
 
+	let mut rust_extractor = RustExtractor::new();
+	rust_extractor
+		.initialize()
+		.map_err(|e| ComposeError::ExtractorInit(format!("rust: {}", e)))?;
+
 	ensure_repo(storage, repo_uid, repo_path)?;
 
-	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut java_extractor];
+	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut java_extractor, &mut rust_extractor];
 	let mut idx_options = IndexOptions {
 		basis_commit: options.basis_commit.clone(),
 		edge_batch_size: options.edge_batch_size,

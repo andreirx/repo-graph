@@ -1,0 +1,14 @@
+# Fixture Cargo.toml for Rust extractor testing.
+# Used by repo-index integration tests.
+
+[package]
+name = "simple-crate"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+
+[dev-dependencies]
+tempfile = "3"

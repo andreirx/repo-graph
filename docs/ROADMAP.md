@@ -197,10 +197,16 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
 ### Multi-language graph engine
 - TypeScript/JavaScript extractor (tree-sitter, syntax-only)
-- Rust extractor (tree-sitter-rust)
+- Rust extractor: TS-side (tree-sitter-rust) for `rgr`, Rust-side (native
+  tree-sitter) for `rmap`. Both share extraction scope: structs, enums,
+  traits, impl methods, functions, consts, statics, type aliases, use
+  imports, call edges, implements edges.
 - Java extractor (tree-sitter-java)
 - Multi-extractor indexer: routes files by extension
 - Language-aware manifest isolation (.rs → Cargo.toml, .java → build.gradle, .ts → package.json)
+- **Cargo dependency resolution (Slice A):** `rmap index` resolves nearest-
+  ancestor Cargo.toml for Rust files. Hyphen-to-underscore normalization.
+  Handles dependencies, dev-dependencies, build-dependencies sections.
 - Java overload disambiguation via parameter type signatures in stable keys
 - Gradle dependency reader (Groovy + Kotlin DSL) with 2-segment prefix heuristic
 

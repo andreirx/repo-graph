@@ -1,5 +1,6 @@
-//! Config readers — package.json dependencies and tsconfig.json
-//! path aliases, with nearest-ancestor directory lookup.
+//! Config readers — package.json dependencies, tsconfig.json
+//! path aliases, and Cargo.toml dependencies, with nearest-ancestor
+//! directory lookup.
 //!
 //! Mirrors the TS indexer's `resolveNearestPackageDeps` and
 //! `resolveNearestTsconfigAliases` from `repo-indexer.ts`.
@@ -7,6 +8,13 @@
 //! Lookup rule (locked): walk from file's parent directory upward
 //! to repo root. First matching config file wins. Cached by
 //! directory so sibling files resolve in O(1).
+//!
+//! ## Cargo.toml dependency resolution (Rust-A3)
+//!
+//! For `.rs` files, resolves nearest owning Cargo.toml. Extracts
+//! dependency names from [dependencies], [dev-dependencies],
+//! [build-dependencies]. Sorted unique names, hyphen-normalized
+//! to match Rust's `foo-bar` → `foo_bar` crate naming convention.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
@@ -16,10 +24,12 @@ use repo_graph_classification::types::{PackageDependencySet, TsconfigAliasEntry,
 /// Pre-computed config context for a repo. Caches config lookups
 /// by directory so each directory is resolved at most once.
 pub struct RepoConfigContext {
-	/// Directory → PackageDependencySet cache.
+	/// Directory → PackageDependencySet cache (for JS/TS via package.json).
 	pkg_cache: HashMap<String, PackageDependencySet>,
 	/// Directory → TsconfigAliases cache.
 	tsconfig_cache: HashMap<String, TsconfigAliases>,
+	/// Directory → PackageDependencySet cache (for Rust via Cargo.toml).
+	cargo_cache: HashMap<String, PackageDependencySet>,
 }
 
 impl RepoConfigContext {
@@ -29,6 +39,7 @@ impl RepoConfigContext {
 		Self {
 			pkg_cache: HashMap::new(),
 			tsconfig_cache: HashMap::new(),
+			cargo_cache: HashMap::new(),
 		}
 	}
 
@@ -123,6 +134,51 @@ impl RepoConfigContext {
 		self.tsconfig_cache.insert(dir, empty.clone());
 		empty
 	}
+
+	/// Resolve Cargo dependencies for a Rust file.
+	/// Walks from file's directory upward to repo root.
+	/// Returns normalized dependency names (hyphen → underscore).
+	pub fn resolve_cargo_deps(
+		&mut self,
+		file_rel_path: &str,
+		repo_root: &Path,
+	) -> PackageDependencySet {
+		let empty = PackageDependencySet { names: vec![] };
+		let dir = parent_dir(file_rel_path);
+
+		let mut probe = dir.clone();
+		loop {
+			if let Some(cached) = self.cargo_cache.get(&probe) {
+				let result = cached.clone();
+				self.cargo_cache.insert(dir.clone(), result.clone());
+				return result;
+			}
+
+			let abs_dir = if probe.is_empty() {
+				repo_root.to_path_buf()
+			} else {
+				repo_root.join(&probe)
+			};
+			let cargo_path = abs_dir.join("Cargo.toml");
+			if cargo_path.exists() {
+				let deps = std::fs::read_to_string(&cargo_path)
+					.ok()
+					.and_then(|content| extract_cargo_dependencies(&content))
+					.unwrap_or_else(|| empty.clone());
+				self.cargo_cache.insert(probe.clone(), deps.clone());
+				self.cargo_cache.insert(dir.clone(), deps.clone());
+				return deps;
+			}
+
+			if probe.is_empty() {
+				break;
+			}
+			probe = parent_dir(&probe);
+		}
+
+		self.cargo_cache.insert(dir, empty.clone());
+		empty
+	}
 }
 
 /// Get the parent directory of a repo-relative path.
@@ -151,6 +207,88 @@ pub fn extract_package_dependencies(content: &str) -> Option<PackageDependencySe
 				names.insert(key.clone());
 			}
 		}
+	}
+
+	Some(PackageDependencySet {
+		names: names.into_iter().collect(),
+	})
+}
+
+// ── Cargo.toml reader ────────────────────────────────────────────
+
+/// Extract dependency names from Cargo.toml content.
+/// Reads [dependencies], [dev-dependencies], [build-dependencies].
+/// Returns sorted unique names with hyphen normalization.
+///
+/// **Hyphen normalization:** Cargo allows both `foo-bar` and `foo_bar`
+/// in dependency names, but Rust code uses underscores in `use` statements.
+/// The classifier expects the underscore form for matching, so this
+/// function normalizes hyphens to underscores in the returned set.
+///
+/// TOML parsing note: Uses basic line parsing, not a full TOML parser,
+/// to avoid adding a TOML dependency. Handles:
+///   - `name = "version"` inline deps
+///   - `name = { version = "X" }` table deps
+///   - `[dependencies.name]` sub-tables
+/// Does NOT handle:
+///   - Renamed deps (`foo = { package = "actual-name" }`)
+///   - Workspace deps (`foo.workspace = true`)
+///   - Target-specific deps (`[target.'cfg(...)'.dependencies]`)
+/// These are edge cases for classification; the primary use is
+/// identifying external crate names for import bucketing.
+pub fn extract_cargo_dependencies(content: &str) -> Option<PackageDependencySet> {
+	let mut names = BTreeSet::new();
+	let mut current_section = "";
+
+	for line in content.lines() {
+		let line = line.trim();
+
+		// Track section headers.
+		if line.starts_with('[') && line.ends_with(']') {
+			current_section = &line[1..line.len() - 1];
+			// Handle sub-table syntax: [dependencies.foo] → dep name "foo".
+			for prefix in &["dependencies.", "dev-dependencies.", "build-dependencies."] {
+				if let Some(dep_name) = current_section.strip_prefix(prefix) {
+					// Normalize hyphen to underscore.
+					names.insert(dep_name.replace('-', "_"));
+				}
+			}
+			continue;
+		}
+
+		// Only process lines in dependency sections.
+		// Note: target-specific deps ([target.'cfg(...)'.dependencies]) are NOT
+		// supported by this simple line parser.
+		let is_dep_section = current_section == "dependencies"
+			|| current_section == "dev-dependencies"
+			|| current_section == "build-dependencies"
+			|| current_section.starts_with("dependencies.")
+			|| current_section.starts_with("dev-dependencies.")
+			|| current_section.starts_with("build-dependencies.");
+
+		if !is_dep_section {
+			continue;
+		}
+
+		// Skip sub-table lines like [dependencies.foo].
+		if current_section.contains('.') {
+			continue;
+		}
+
+		// Parse `name = "version"` or `name = { ... }`.
+		if let Some(eq_pos) = line.find('=') {
+			let key = line[..eq_pos].trim();
+			// Skip empty keys or non-identifier keys.
+			if key.is_empty() || key.contains(' ') || key.contains('[') {
+				continue;
+			}
+			// Normalize hyphen to underscore.
+			names.insert(key.replace('-', "_"));
+		}
+	}
+
+	if names.is_empty() {
+		return None;
 	}
 
 	Some(PackageDependencySet {
@@ -482,5 +620,145 @@ mod tests {
 		let aliases = ctx.resolve_tsconfig_aliases("src/index.ts", root);
 		assert_eq!(aliases.entries.len(), 1);
 		assert_eq!(aliases.entries[0].pattern, "@/*");
+	}
+
+	// ── extract_cargo_dependencies ───────────────────────────
+
+	#[test]
+	fn extracts_cargo_all_dep_sections() {
+		let content = r#"
+[package]
+name = "my-crate"
+version = "0.1.0"
+
+[dependencies]
+serde = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+cc = "1.0"
+"#;
+		let deps = extract_cargo_dependencies(content).unwrap();
+		assert!(deps.names.contains(&"serde".to_string()));
+		assert!(deps.names.contains(&"tokio".to_string()));
+		assert!(deps.names.contains(&"tempfile".to_string()));
+		assert!(deps.names.contains(&"cc".to_string()));
+	}
+
+	#[test]
+	fn cargo_normalizes_hyphen_to_underscore() {
+		let content = r#"
+[dependencies]
+my-crate = "1.0"
+some_other = "2.0"
+"#;
+		let deps = extract_cargo_dependencies(content).unwrap();
+		// Both should be normalized to underscore form.
+		assert!(
+			deps.names.contains(&"my_crate".to_string()),
+			"hyphenated dep should be normalized: {:?}",
+			deps.names
+		);
+		assert!(deps.names.contains(&"some_other".to_string()));
+	}
+
+	#[test]
+	fn cargo_handles_subtable_syntax() {
+		let content = r#"
+[package]
+name = "foo"
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[dependencies.tokio]
+version = "1.0"
+"#;
+		let deps = extract_cargo_dependencies(content).unwrap();
+		assert!(deps.names.contains(&"serde".to_string()));
+		assert!(deps.names.contains(&"tokio".to_string()));
+	}
+
+	#[test]
+	fn cargo_target_specific_deps_not_extracted() {
+		// Target-specific dependencies like [target.'cfg(unix)'.dependencies]
+		// are NOT extracted by the simple line parser. This is a known
+		// limitation documented in the function. The primary use case is
+		// identifying external crate names for import classification, and
+		// target-specific deps are edge cases.
+		let content = r#"
+[package]
+name = "foo"
+
+[target.'cfg(unix)'.dependencies]
+nix = "0.26"
+"#;
+		// Should return None since there are no standard dependency sections.
+		assert!(extract_cargo_dependencies(content).is_none());
+	}
+
+	#[test]
+	fn cargo_returns_none_for_no_deps() {
+		let content = r#"
+[package]
+name = "lib"
+version = "0.1.0"
+"#;
+		assert!(extract_cargo_dependencies(content).is_none());
+	}
+
+	#[test]
+	fn cargo_returns_sorted_unique() {
+		let content = r#"
+[dependencies]
+zebra = "1"
+alpha = "1"
+
+[dev-dependencies]
+alpha = "2"
+"#;
+		let deps = extract_cargo_dependencies(content).unwrap();
+		assert_eq!(deps.names, vec!["alpha", "zebra"]);
+	}
+
+	// ── RepoConfigContext for Cargo ──────────────────────────
+
+	#[test]
+	fn nearest_ancestor_cargo_toml() {
+		let dir = tempfile::tempdir().unwrap();
+		let root = dir.path();
+
+		// Root Cargo.toml.
+		fs::write(root.join("Cargo.toml"), r#"
+[package]
+name = "workspace"
+
+[dependencies]
+serde = "1"
+"#).unwrap();
+
+		// Nested crate Cargo.toml.
+		fs::create_dir_all(root.join("crates/api")).unwrap();
+		fs::write(root.join("crates/api/Cargo.toml"), r#"
+[package]
+name = "api"
+
+[dependencies]
+tokio = "1"
+"#).unwrap();
+
+		let mut ctx = RepoConfigContext::new();
+
+		// File in root → gets root deps.
+		let root_deps = ctx.resolve_cargo_deps("src/lib.rs", root);
+		assert_eq!(root_deps.names, vec!["serde"]);
+
+		// File in crates/api → gets nested deps.
+		let api_deps = ctx.resolve_cargo_deps("crates/api/src/lib.rs", root);
+		assert_eq!(api_deps.names, vec!["tokio"]);
 	}
 }

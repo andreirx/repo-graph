@@ -52,6 +52,7 @@ repo-graph-trust = { path = "../trust" }
 repo-graph-ts-extractor = { path = "../ts-extractor" }
 repo-graph-c-extractor = { path = "../c-extractor" }
 repo-graph-java-extractor = { path = "../java-extractor" }
+repo-graph-rust-extractor = { path = "../rust-extractor" }
 repo-graph-classification = { path = "../classification" }
 # State-boundary composition wiring (SB-4-pre).
 repo-graph-state-bindings  = { path = "../state-bindings" }

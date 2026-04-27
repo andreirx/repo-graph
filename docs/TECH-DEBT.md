@@ -21,6 +21,7 @@
 
 ## Extraction — Rust
 
+### Rust TS-side extractor (used by `rgr` TypeScript CLI)
 - Rust extractor indexes: structs, enums, traits, impl methods, functions,
   constants, statics, type aliases. `use` declarations produce IMPORTS edges +
   import bindings. Method/function calls produce CALLS edges.
@@ -34,12 +35,48 @@
 - **No Rust framework detectors yet:** Actix-web, Axum, Rocket, Warp routes
   are unmodeled. Same gap as pre-Express TS had.
 
+### Rust-side extractor (used by `rmap` Rust CLI) — Slice A
+- **New in Slice A:** Native tree-sitter-rust extractor in
+  `rust/crates/rust-extractor/`. Uses tree-sitter 0.24 with tree-sitter-rust
+  0.23 grammar. Same extraction scope as TS-side extractor.
+- 29 unit tests covering: FILE nodes, SYMBOL extraction (functions, structs,
+  enums, traits, impl methods, consts, statics, type aliases), IMPORTS edges,
+  CALLS edges, IMPLEMENTS edges, visibility handling, doc comment extraction,
+  `#[cfg(...)]` deduplication.
+- **Wildcard imports not tracked:** `use foo::*` produces no ImportBinding
+  record. This is intentional — wildcard imports bring in an indeterminate
+  set of symbols at parse time. For dependency analysis, use Cargo.toml deps.
+- **Cargo dependency resolution:** Nearest-ancestor Cargo.toml lookup with
+  hyphen-to-underscore normalization. Handles [dependencies], [dev-dependencies],
+  [build-dependencies], and [dependencies.name] sub-table syntax. Does NOT
+  handle target-specific deps (`[target.'cfg(...)'.dependencies]`), renamed
+  deps, or workspace deps — these are edge cases for import classification.
+- **Language-isolated dependency dispatch (compose.rs):** `prepare_repo_inputs`
+  uses an explicit 3-arm match on detected language to prevent cross-language
+  signal contamination in mixed-language repos. Rust files receive only
+  Cargo.toml deps; TS/JS/TSX/JSX files receive only package.json + tsconfig;
+  all other languages (Java, C, C++, unknown) receive empty signals until
+  dedicated manifest readers exist for those languages. This is intentional
+  isolation, not a defect. The behavior is pinned by the
+  `mixed_lang_language_isolation` integration test
+  (`rust/crates/repo-index/tests/integration.rs`).
+- **No Gradle reader on the Rust side:** Java files indexed by `rmap` receive
+  `package_dependencies_json = null` (no build dependency signals). The
+  TS-side extractor path (`rgr`) has a working Gradle reader. On the Rust
+  path, Java import classification uses only the symbols visible to tree-sitter
+  with no external package context. A Rust Gradle reader (build.gradle /
+  build.gradle.kts parser) is required to close this gap. Until it lands,
+  Java CALLS edges to external library types on Rust-indexed repos will not
+  classify against Gradle-declared coordinates.
+
 ## Extraction — Java
 
 - Java extractor (tree-sitter-java) indexes: classes, interfaces, enums,
   methods, constructors, fields, annotation types. Overloads disambiguated
   by parameter type signatures in stable keys.
 - Gradle dependency reader parses build.gradle / build.gradle.kts.
+  **TS path only** (`rgr`). The Rust path (`rmap`) has no Gradle reader;
+  see "No Gradle reader on the Rust side" under Extraction — Rust above.
 - **Gradle-to-Java-package namespace gap:** Maven group IDs (e.g.
   `org.springframework.boot`) do not directly correspond to Java package
   paths (e.g. `org.springframework.web.bind.annotation`). The classifier
