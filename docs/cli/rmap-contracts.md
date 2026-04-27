@@ -94,6 +94,73 @@ Query-time computation, not persistence-first.
 - TS implementation is reference, not spec
 - Explicit anchoring for gate integration is future opt-in, not automatic
 
+### `dead` — Per-Result Dead-Confidence
+
+Every dead-code result carries explicit confidence tiering:
+
+```json
+{
+  "results": [
+    {
+      "stable_key": "r1:src/utils.ts:SYMBOL:helper",
+      "symbol": "helper",
+      "kind": "SYMBOL",
+      "file": "src/utils.ts",
+      "is_test": false,
+      "trust": {
+        "dead_confidence": "HIGH",
+        "reasons": []
+      }
+    },
+    {
+      "stable_key": "r1:src/server.ts:SYMBOL:unused",
+      "symbol": "unused",
+      "kind": "SYMBOL",
+      "file": "src/server.ts",
+      "is_test": false,
+      "trust": {
+        "dead_confidence": "LOW",
+        "reasons": ["framework_opaque", "registry_pattern_suspicion"]
+      }
+    }
+  ],
+  "trust": {
+    "summary_scope": "repo_snapshot",
+    "graph_basis": "CALLS+IMPORTS",
+    "reliability": { ... }
+  }
+}
+```
+
+**Two separate layers:**
+
+1. **Top-level trust summary** — repo/snapshot-level context (reliability axes,
+   degradation flags, caveats). Always present when trust can be assembled.
+
+2. **Per-result `trust.dead_confidence`** — candidate-specific confidence tier.
+   Every result carries this; no Option A hiding for dead-code because it is
+   destructive-action-adjacent.
+
+**Confidence tiers (v1):**
+
+- `HIGH` — structurally dead with no significant counter-signal
+- `MEDIUM` — orphaned but repo has some unresolved pressure
+- `LOW` — known opacity pattern or strong liveness uncertainty
+
+**Stable reason vocabulary:**
+
+- `framework_opaque` — framework-heavy suspicion triggered
+- `registry_pattern_suspicion` — registry/plugin/DI patterns detected
+- `missing_entrypoint_declarations` — no entrypoint declarations declared
+- `unresolved_call_pressure` — call-graph reliability degraded
+- `unresolved_import_pressure` — import-graph reliability degraded
+- `trust_unavailable` — trust assembly failed; confidence cannot be assessed
+
+**Important:** This is evidence-tiering under current repo trust, NOT proof
+of symbol-local liveness. LOW confidence means "don't trust this deadness
+claim strongly" due to repo-level opacity, not "we traced this symbol and
+found it's alive."
+
 ## JSON-Only Output
 
 `rmap` always produces JSON on stdout. There is no `--json` flag because

@@ -92,14 +92,25 @@ impl TrustOverlaySummary {
 
 // ── Per-result trust markers ─────────────────────────────────────
 //
-// These types are designed for per-result confidence markers but are
-// not yet wired into CLI output. They remain pub(crate) until command
-// contracts actually emit them.
+// Dead-confidence stratification: explicit per-candidate confidence
+// tiers surfaced in `rmap dead` output. This is evidence-tiering under
+// current repo trust, NOT proof of symbol-local liveness.
+//
+// The confidence reflects what the graph can say about the candidate
+// given the repo's overall trust profile. LOW confidence means "don't
+// trust this deadness claim strongly" due to framework/registry/plugin
+// opacity or high unresolved pressure — not "we traced the symbol and
+// found it's alive."
 
 /// Confidence tier for per-result trust markers.
+///
+/// Three tiers only (v1). Do not overfit.
+/// - HIGH: structurally dead with no significant counter-signal
+/// - MEDIUM: orphaned but repo has some unresolved pressure
+/// - LOW: known opacity pattern or strong liveness uncertainty
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub(crate) enum ResultConfidence {
+pub enum ResultConfidence {
     High,
     Medium,
     Low,
@@ -107,11 +118,21 @@ pub(crate) enum ResultConfidence {
 
 /// Per-result trust marker for dead-code candidates.
 ///
-/// Only included when confidence is not HIGH or when there are
-/// specific reasons for concern. Absent marker = high confidence.
+/// Every dead result carries this marker (no Option A hiding for dead).
+/// Dead-code is destructive-action-adjacent; agents should never infer
+/// "missing means high confidence."
+///
+/// The reasons are stable vocabulary:
+/// - `framework_opaque`
+/// - `registry_pattern_suspicion`
+/// - `missing_entrypoint_declarations`
+/// - `unresolved_call_pressure`
+/// - `unresolved_import_pressure`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct DeadResultTrust {
-    pub confidence: ResultConfidence,
+pub struct DeadResultTrust {
+    /// Confidence tier: HIGH, MEDIUM, or LOW.
+    pub dead_confidence: ResultConfidence,
+    /// Reasons for degraded confidence. Empty when HIGH.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub reasons: Vec<String>,
 }
@@ -138,19 +159,29 @@ pub(crate) struct EdgeResultTrust {
 /// Assess confidence for a dead-code candidate based on repo-level
 /// trust signals.
 ///
-/// This is Option A: only produce markers when degraded. Returns
-/// `None` when confidence is HIGH with no caveats.
+/// **Important:** This is evidence-tiering under current repo trust,
+/// NOT proof of symbol-local liveness. The confidence reflects what
+/// the graph can say about this candidate given the repo's trust
+/// profile.
 ///
-/// Currently pub(crate) — not wired into CLI dead command output yet.
-#[allow(dead_code)] // Reserved for future per-result trust markers
-pub(crate) fn assess_dead_confidence(
+/// For dead-code, we always return a marker (no Option A hiding).
+/// Dead-code is destructive-action-adjacent — agents should never
+/// have to infer "missing means high confidence."
+///
+/// The `_symbol_stable_key` parameter is reserved for future
+/// symbol-local evidence (e.g., known plugin registration patterns).
+/// Currently unused because v1 confidence is repo-level.
+pub fn assess_dead_confidence(
     trust_report: &TrustReport,
     _symbol_stable_key: &str,
-) -> Option<DeadResultTrust> {
+) -> DeadResultTrust {
     let dead_code_level = trust_report.summary.reliability.dead_code.level;
     let mut reasons = Vec::new();
 
-    // Collect reasons from triggered downgrades
+    // ── Collect reasons from triggered downgrades ────────────────
+    //
+    // These are explicit "don't trust dead strongly here" signals.
+
     if trust_report
         .summary
         .triggered_downgrades
@@ -159,6 +190,7 @@ pub(crate) fn assess_dead_confidence(
     {
         reasons.push("framework_opaque".to_string());
     }
+
     if trust_report
         .summary
         .triggered_downgrades
@@ -167,6 +199,7 @@ pub(crate) fn assess_dead_confidence(
     {
         reasons.push("registry_pattern_suspicion".to_string());
     }
+
     if trust_report
         .summary
         .triggered_downgrades
@@ -176,24 +209,51 @@ pub(crate) fn assess_dead_confidence(
         reasons.push("missing_entrypoint_declarations".to_string());
     }
 
-    // Check call graph reliability for unresolved pressure
+    // ── Check graph reliability for unresolved pressure ──────────
+    //
+    // Unresolved pressure weakens confidence that zero-caller means
+    // actually-dead. The caller might exist but be unresolved.
+
     if trust_report.summary.reliability.call_graph.level != ReliabilityLevel::HIGH {
         reasons.push("unresolved_call_pressure".to_string());
     }
 
-    // Map reliability level to confidence
-    let confidence = match dead_code_level {
-        ReliabilityLevel::HIGH => ResultConfidence::High,
-        ReliabilityLevel::MEDIUM => ResultConfidence::Medium,
-        ReliabilityLevel::LOW => ResultConfidence::Low,
-    };
-
-    // Option A: only return marker when degraded
-    if confidence == ResultConfidence::High && reasons.is_empty() {
-        return None;
+    if trust_report.summary.reliability.import_graph.level != ReliabilityLevel::HIGH {
+        reasons.push("unresolved_import_pressure".to_string());
     }
 
-    Some(DeadResultTrust { confidence, reasons })
+    // ── Map reliability level to confidence tier ─────────────────
+    //
+    // Conservative v1 reduction:
+    // - dead_code LOW → candidate LOW
+    // - dead_code MEDIUM → candidate MEDIUM
+    // - dead_code HIGH → candidate HIGH (unless degradation reasons)
+
+    let confidence = match dead_code_level {
+        ReliabilityLevel::LOW => ResultConfidence::Low,
+        ReliabilityLevel::MEDIUM => ResultConfidence::Medium,
+        ReliabilityLevel::HIGH => {
+            // Even if dead_code axis is HIGH, framework/registry/entrypoint
+            // degradation reasons still lower the candidate confidence.
+            if reasons.iter().any(|r| {
+                r == "framework_opaque"
+                    || r == "registry_pattern_suspicion"
+                    || r == "missing_entrypoint_declarations"
+            }) {
+                ResultConfidence::Low
+            } else if !reasons.is_empty() {
+                // Unresolved pressure only → MEDIUM
+                ResultConfidence::Medium
+            } else {
+                ResultConfidence::High
+            }
+        }
+    };
+
+    DeadResultTrust {
+        dead_confidence: confidence,
+        reasons,
+    }
 }
 
 #[cfg(test)]
@@ -292,24 +352,82 @@ mod tests {
     }
 
     #[test]
-    fn dead_confidence_returns_none_when_high() {
+    fn dead_confidence_returns_high_when_clean() {
         let report = minimal_report();
         let result = assess_dead_confidence(&report, "some::symbol");
-        assert!(result.is_none());
+
+        assert_eq!(result.dead_confidence, ResultConfidence::High);
+        assert!(result.reasons.is_empty());
     }
 
     #[test]
-    fn dead_confidence_returns_marker_when_degraded() {
+    fn dead_confidence_returns_low_with_framework_suspicion() {
         let mut report = minimal_report();
         report.summary.triggered_downgrades.framework_heavy_suspicion.triggered = true;
         report.summary.reliability.dead_code.level = ReliabilityLevel::LOW;
 
         let result = assess_dead_confidence(&report, "some::symbol");
-        assert!(result.is_some());
 
-        let trust = result.unwrap();
-        assert_eq!(trust.confidence, ResultConfidence::Low);
-        assert!(trust.reasons.contains(&"framework_opaque".to_string()));
+        assert_eq!(result.dead_confidence, ResultConfidence::Low);
+        assert!(result.reasons.contains(&"framework_opaque".to_string()));
+    }
+
+    #[test]
+    fn dead_confidence_returns_low_with_registry_suspicion() {
+        let mut report = minimal_report();
+        report.summary.triggered_downgrades.registry_pattern_suspicion.triggered = true;
+        report.summary.reliability.dead_code.level = ReliabilityLevel::LOW;
+
+        let result = assess_dead_confidence(&report, "some::symbol");
+
+        assert_eq!(result.dead_confidence, ResultConfidence::Low);
+        assert!(result.reasons.contains(&"registry_pattern_suspicion".to_string()));
+    }
+
+    #[test]
+    fn dead_confidence_returns_low_with_missing_entrypoints() {
+        let mut report = minimal_report();
+        report.summary.triggered_downgrades.missing_entrypoint_declarations.triggered = true;
+        report.summary.reliability.dead_code.level = ReliabilityLevel::LOW;
+
+        let result = assess_dead_confidence(&report, "some::symbol");
+
+        assert_eq!(result.dead_confidence, ResultConfidence::Low);
+        assert!(result.reasons.contains(&"missing_entrypoint_declarations".to_string()));
+    }
+
+    #[test]
+    fn dead_confidence_returns_medium_with_unresolved_pressure() {
+        let mut report = minimal_report();
+        report.summary.reliability.call_graph.level = ReliabilityLevel::MEDIUM;
+        // dead_code is still HIGH but call_graph is degraded
+
+        let result = assess_dead_confidence(&report, "some::symbol");
+
+        assert_eq!(result.dead_confidence, ResultConfidence::Medium);
+        assert!(result.reasons.contains(&"unresolved_call_pressure".to_string()));
+    }
+
+    #[test]
+    fn dead_confidence_includes_import_pressure_reason() {
+        let mut report = minimal_report();
+        report.summary.reliability.import_graph.level = ReliabilityLevel::MEDIUM;
+
+        let result = assess_dead_confidence(&report, "some::symbol");
+
+        assert!(result.reasons.contains(&"unresolved_import_pressure".to_string()));
+    }
+
+    #[test]
+    fn dead_confidence_framework_suspicion_forces_low_even_with_high_dead_code_axis() {
+        let mut report = minimal_report();
+        // dead_code axis is HIGH but framework suspicion is triggered
+        report.summary.triggered_downgrades.framework_heavy_suspicion.triggered = true;
+
+        let result = assess_dead_confidence(&report, "some::symbol");
+
+        // Should be LOW because framework suspicion overrides
+        assert_eq!(result.dead_confidence, ResultConfidence::Low);
     }
 
     #[test]

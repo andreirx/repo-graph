@@ -166,8 +166,12 @@ pub use service::{
 pub use storage_port::TrustStorageRead;
 
 // Trust overlay for query surfaces (inline trust in responses).
-// Note: per-result markers (DeadResultTrust, EdgeResultTrust,
-// assess_dead_confidence, ResultConfidence) are pub(crate) until
-// command contracts actually emit them. Currently only repo-level
-// TrustOverlaySummary is wired into CLI output.
-pub use overlay::TrustOverlaySummary;
+//
+// Two layers:
+// 1. TrustOverlaySummary — repo/snapshot-level trust context
+// 2. DeadResultTrust — per-candidate dead-code confidence
+//
+// EdgeResultTrust remains pub(crate) until callers/callees contracts emit it.
+pub use overlay::{
+    assess_dead_confidence, DeadResultTrust, ResultConfidence, TrustOverlaySummary,
+};

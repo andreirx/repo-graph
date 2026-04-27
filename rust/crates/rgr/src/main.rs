@@ -1909,6 +1909,28 @@ fn map_extracted_to_storage(
 
 // ── dead command ─────────────────────────────────────────────────
 
+/// CLI output DTO for dead-code results with per-result trust.
+///
+/// Wraps the storage DeadNodeResult and adds a local trust section.
+/// Every dead result carries explicit confidence — no Option A hiding.
+#[derive(serde::Serialize)]
+struct DeadNodeOutput {
+	stable_key: String,
+	symbol: String,
+	kind: String,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	subtype: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	file: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	line: Option<i64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	line_count: Option<i64>,
+	is_test: bool,
+	/// Per-result dead-code confidence.
+	trust: repo_graph_trust::DeadResultTrust,
+}
+
 fn run_dead(args: &[String]) -> ExitCode {
 	if args.len() < 2 || args.len() > 3 {
 		eprintln!("usage: rmap dead <db_path> <repo_uid> [kind]");
@@ -1954,7 +1976,7 @@ fn run_dead(args: &[String]) -> ExitCode {
 	};
 
 	// Find dead nodes.
-	let dead = match storage.find_dead_nodes(
+	let dead_nodes = match storage.find_dead_nodes(
 		&snapshot.snapshot_uid,
 		repo_uid,
 		kind_filter,
@@ -1966,26 +1988,87 @@ fn run_dead(args: &[String]) -> ExitCode {
 		}
 	};
 
+	// ── Assemble trust report for dead-confidence assessment ─────
+	//
+	// We need the full trust report to compute per-result confidence.
+	// This is repo-level evidence, not symbol-local proof.
+	let toolchain_json = snapshot.toolchain_json.as_deref();
+	let basis_commit = snapshot.basis_commit.as_deref();
+
+	let trust_report = match repo_graph_trust::assemble_trust_report(
+		&storage,
+		repo_uid,
+		&snapshot.snapshot_uid,
+		basis_commit,
+		toolchain_json,
+	) {
+		Ok(r) => Some(r),
+		Err(e) => {
+			eprintln!("warning: failed to assemble trust report: {}", e);
+			None
+		}
+	};
+
+	// ── Build enriched output with per-result dead confidence ────
+	//
+	// Every dead result carries explicit confidence. For repos where
+	// trust assembly failed, we default to LOW with a reason — missing
+	// trust evidence should DEGRADE confidence, not silently claim certainty.
+	// This is the surface meant to prevent unsafe deletion decisions.
+	let dead_output: Vec<DeadNodeOutput> = dead_nodes
+		.into_iter()
+		.map(|node| {
+			let per_result_trust = match &trust_report {
+				Some(report) => {
+					repo_graph_trust::assess_dead_confidence(report, &node.stable_key)
+				}
+				None => {
+					// Fallback: trust assembly failed → LOW confidence.
+					// Missing trust evidence is NOT a reason to claim certainty.
+					// Agents should treat these candidates with maximum caution.
+					repo_graph_trust::DeadResultTrust {
+						dead_confidence: repo_graph_trust::ResultConfidence::Low,
+						reasons: vec!["trust_unavailable".to_string()],
+					}
+				}
+			};
+
+			DeadNodeOutput {
+				stable_key: node.stable_key,
+				symbol: node.symbol,
+				kind: node.kind,
+				subtype: node.subtype,
+				file: node.file,
+				line: node.line,
+				line_count: node.line_count,
+				is_test: node.is_test,
+				trust: per_result_trust,
+			}
+		})
+		.collect();
+
 	// JSON to stdout (TS-compatible QueryResult envelope).
-	let count = dead.len();
+	let count = dead_output.len();
 	let mut extra = serde_json::Map::new();
 	extra.insert("kind_filter".to_string(), serde_json::json!(kind_filter));
 
-	// Trust overlay (Option A: only when repo has degradations).
-	// Dead-code reliability is especially relevant here since
-	// registry/plugin liveness is not modeled.
-	if let Some(trust) = compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS+IMPORTS") {
-		// For dead, always include trust if dead_code reliability is not HIGH,
-		// or if there are any degradation flags or caveats.
-		let dead_code_degraded = trust.reliability.dead_code.level != repo_graph_trust::types::ReliabilityLevel::HIGH;
-		if dead_code_degraded || trust.has_degradation() || !trust.caveats.is_empty() {
-			extra.insert("trust".to_string(), serde_json::to_value(&trust).unwrap());
-		}
+	// ── Top-level trust summary (repo-level context) ─────────────
+	//
+	// Keep both layers:
+	// 1. Top-level trust summary (repo/snapshot health context)
+	// 2. Per-result dead_confidence (candidate-specific)
+	//
+	// For dead, we always include the top-level summary if trust is
+	// available (degraded or not) because agents need repo context
+	// to interpret per-result confidence.
+	if let Some(ref report) = trust_report {
+		let overlay = repo_graph_trust::TrustOverlaySummary::from_report(report, "CALLS+IMPORTS");
+		extra.insert("trust".to_string(), serde_json::to_value(&overlay).unwrap());
 	}
 
 	let output = match build_envelope(
 		&storage, "graph dead", repo_uid, &snapshot,
-		serde_json::to_value(&dead).unwrap(), count, extra,
+		serde_json::to_value(&dead_output).unwrap(), count, extra,
 	) {
 		Ok(v) => v,
 		Err(e) => {

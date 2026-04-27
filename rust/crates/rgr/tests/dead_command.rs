@@ -347,3 +347,145 @@ fn dead_kind_filter_symbol() {
 	// serve is alive — must not appear.
 	assert!(!dead_names.contains(&"serve"));
 }
+
+// -- 7. Per-result trust.dead_confidence ---------------------------------
+
+#[test]
+fn dead_results_include_per_result_trust() {
+	let (_repo_dir, _db_dir, db_path) = build_indexed_db();
+
+	let output = Command::new(binary_path())
+		.args([
+			"dead",
+			db_path.to_str().unwrap(),
+			"r1",
+			"SYMBOL",
+		])
+		.output()
+		.unwrap();
+
+	assert_eq!(
+		output.status.code(),
+		Some(0),
+		"stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+	let results = result["results"].as_array().unwrap();
+
+	// Every dead result must have a trust section with dead_confidence.
+	for r in results {
+		assert!(
+			r["trust"].is_object(),
+			"every dead result must have trust section, got: {}",
+			r
+		);
+		let trust = &r["trust"];
+		assert!(
+			trust["dead_confidence"].is_string(),
+			"trust must have dead_confidence field, got: {}",
+			trust
+		);
+		let confidence = trust["dead_confidence"].as_str().unwrap();
+		assert!(
+			confidence == "HIGH" || confidence == "MEDIUM" || confidence == "LOW",
+			"dead_confidence must be HIGH/MEDIUM/LOW, got: {}",
+			confidence
+		);
+	}
+}
+
+#[test]
+fn dead_output_includes_top_level_trust_summary() {
+	let (_repo_dir, _db_dir, db_path) = build_indexed_db();
+
+	let output = Command::new(binary_path())
+		.args([
+			"dead",
+			db_path.to_str().unwrap(),
+			"r1",
+		])
+		.output()
+		.unwrap();
+
+	assert_eq!(
+		output.status.code(),
+		Some(0),
+		"stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+	// Top-level trust summary should be present (always for dead).
+	assert!(
+		result["trust"].is_object(),
+		"dead output must have top-level trust summary, got keys: {:?}",
+		result.as_object().map(|o| o.keys().collect::<Vec<_>>())
+	);
+
+	let trust = &result["trust"];
+	assert_eq!(
+		trust["summary_scope"], "repo_snapshot",
+		"top-level trust must have summary_scope = repo_snapshot"
+	);
+	assert_eq!(
+		trust["graph_basis"], "CALLS+IMPORTS",
+		"dead uses CALLS+IMPORTS graph basis"
+	);
+	assert!(
+		trust["reliability"].is_object(),
+		"trust must have reliability axes"
+	);
+}
+
+#[test]
+fn dead_confidence_reasons_are_stable_vocabulary() {
+	// Build a fixture that will likely have unresolved pressure.
+	let (_repo_dir, _db_dir, db_path) = build_indexed_db();
+
+	let output = Command::new(binary_path())
+		.args([
+			"dead",
+			db_path.to_str().unwrap(),
+			"r1",
+			"SYMBOL",
+		])
+		.output()
+		.unwrap();
+
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+	let results = result["results"].as_array().unwrap();
+
+	// Valid reason vocabulary.
+	let valid_reasons = [
+		"framework_opaque",
+		"registry_pattern_suspicion",
+		"missing_entrypoint_declarations",
+		"unresolved_call_pressure",
+		"unresolved_import_pressure",
+		"trust_unavailable",
+	];
+
+	for r in results {
+		let trust = &r["trust"];
+		// reasons may be absent (skip_serializing_if empty) or an array.
+		if let Some(reasons) = trust.get("reasons") {
+			if let Some(arr) = reasons.as_array() {
+				for reason in arr {
+					let reason_str = reason.as_str().unwrap();
+					assert!(
+						valid_reasons.contains(&reason_str),
+						"unknown reason vocabulary: {}, expected one of: {:?}",
+						reason_str,
+						valid_reasons
+					);
+				}
+			}
+		}
+	}
+}

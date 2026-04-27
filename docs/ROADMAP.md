@@ -640,42 +640,79 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   - Infra roots (Terraform, Pulumi, Helm): separate deployment-surface slice
   - Makefile diagnostics persistence: tech debt for v2
 
-## Next (in priority order)
+## Next
+
+### Near-term execution sequence
+
+This section reflects dependency-aware execution order, not strategic
+importance ranking. Strategic priorities (quality-control, daemon, delta
+indexing) are listed below in their own sections, but this sequence is
+what actually gets built next.
+
+**Correctness of read surfaces and trust contracts precedes daemonization.**
+Daemon hardens the execution boundary; trust/quality contracts must stabilize
+first.
+
+1. **Trust overlay on read surfaces** — DONE
+   Inline trust summary in callers, callees, path, dead, modules show,
+   orient, explain. Option A: only present when degraded.
+
+2. **Dead-confidence stratification** — DONE
+   Every dead-code candidate now carries explicit confidence tier (HIGH,
+   MEDIUM, LOW) with reasons. Two layers: top-level repo trust summary
+   and per-result dead_confidence. See `docs/cli/rmap-contracts.md` for
+   output contract.
+
+3. **No-new / no-worsened quality gate mode**
+   Baseline-aware gate mode that fails only when a change introduces a new
+   violation or worsens an existing one. Comparability rules mandatory:
+   metric source/version mismatch returns NOT_COMPARABLE.
+
+4. **Agent-facing quality/risk surfacing in `rmap check` and `rmap orient`**
+   `check` should include top complexity/risk deltas before agent hands off.
+   `orient` should include current quality-risk hotspots for focused scope.
+
+5. **Long-lived daemon** (see #3 below)
+   Only after read contracts and trust model are stable.
+
+6. **Seam expansion** (event/pubsub, persistence/schema, DI, registry/plugin)
+   Architectural extraction, not feature work.
+
+---
 
 ### 1. Agentic quality-control surface (remaining)
+
 Quality-policy declarations, assessments, and baseline validation are
 shipped (see Shipped section). Remaining work completes the agent-control
 loop.
 
-**Support module: metric expansion**
-- NPath complexity for TypeScript/JavaScript first, to catch combinatorial
-  execution-path explosion that cyclomatic complexity can underreport.
-- Measurement version/source identifiers for every new metric so deltas can
-  reject non-comparable snapshots.
+**Trust/correctness surfacing** (execution items 1-2 above)
+- Trust overlay on read surfaces — DONE
+- Dead-confidence stratification — DONE
 
-**Feature: no-new/worsened-quality gate mode**
-- Baseline-aware mode that fails only when a change introduces a new violation
-  or worsens an existing violation.
-- Comparability rules are mandatory: if metric source/version differs between
-  compared states, return NOT_COMPARABLE rather than fake a trend.
-- The policy infrastructure (`no_new`, `no_worsened` kinds) exists; the gate
-  mode integration and CLI flag (`--no-new`, `--no-worsened`) remain.
+**Trend-aware quality enforcement** (execution item 3)
+- No-new/worsened-quality gate mode: baseline-aware mode that fails only
+  when a change introduces a new violation or worsens an existing one.
+- Comparability rules are mandatory: if metric source/version differs
+  between compared states, return NOT_COMPARABLE rather than fake a trend.
+- The policy infrastructure (`no_new`, `no_worsened` kinds) exists; the
+  gate mode integration and CLI flag (`--no-new`, `--no-worsened`) remain.
 
-**Feature: agent-facing surface integration**
-- `rmap check` should include top complexity/risk deltas before an agent hands
-  off a change.
-- `rmap orient` should include current quality-risk hotspots for the focused
-  module/symbol.
+**Agent-facing surface integration** (execution item 4)
+- `rmap check` should include top complexity/risk deltas before an agent
+  hands off a change.
+- `rmap orient` should include current quality-risk hotspots for the
+  focused module/symbol.
 - `rmap risk` should combine complexity + churn + coverage gap + boundary
   violations into prioritized risk assessments.
 
-**Remaining adoption order**
-1. Add NPath complexity.
-2. Wire no-new/worsened-quality gate mode.
-3. Surface top risks in `check` and `orient`.
-4. Combine complexity with churn/coverage in risk prioritization.
+**Support module: metric expansion** (deferred until needed)
+- NPath complexity for TypeScript/JavaScript first, to catch combinatorial
+  execution-path explosion that cyclomatic complexity can underreport.
+- Measurement version/source identifiers for every new metric so deltas
+  can reject non-comparable snapshots.
 
-**Why this remains #1:**
+**Why this remains strategically #1:**
 - It directly constrains agent-authored diffs with arithmetic.
 - It prevents structural drift while module/boundary/runtime work continues.
 - Absolute threshold policies are operational; trend-aware policies complete
@@ -747,9 +784,16 @@ Feature: CLI becomes a thin client (connect, send request, render
 response). Auto-start daemon on first command if absent. Progress
 rendering via stderr. Fallback to direct execution if daemon unavailable.
 
-**Why this is #2:**
-- Only worth it once the module/update model is settled.
-- Otherwise it hardens an unstable execution boundary.
+**Dependency constraint:**
+Daemonization hardens the execution boundary. The trust/quality read
+contracts must stabilize first:
+- Trust overlay on read surfaces — DONE
+- Dead-confidence stratification — must complete
+- No-new/worsened gate mode — must complete
+- Agent-facing quality/risk surfacing — must complete
+
+Only then does daemon work begin. This is correctness-before-latency
+sequencing.
 
 ### 4. Delta indexing support module (infrastructure)
 **Architectural principle:** Git owns historical truth. Repo-graph owns
@@ -842,16 +886,15 @@ Options:
 - `--progress=jsonl` for machine-readable progress stream
 - daemon progress streaming (once daemon exists)
 
-### 8. Dead-code confidence stratification
-Stop presenting every zero-caller symbol as equally dead. Add evidence
-quality to dead-symbol reports.
+### 8. Dead-code confidence stratification — DONE
+**See execution sequence item #2 at top of Next section.**
 
-Labels:
-- `dead_high_confidence` — zero callers, zero imports, no unresolved pressure
-- `dead_low_confidence` — zero resolved callers, but imported in files with
-  high unresolved CALLS mass
-- `imported_but_call_unresolved` — symbol is imported elsewhere but the
-  call resolution did not connect
+Implemented. Every `rmap dead` result now carries:
+- `trust.dead_confidence`: HIGH, MEDIUM, or LOW
+- `trust.reasons[]`: stable vocabulary of degradation signals
+
+Top-level repo trust summary retained alongside per-result confidence.
+See `docs/cli/rmap-contracts.md` for full output contract.
 
 ### 9. CLI boundary expansion (remaining)
 Shell and Makefile consumer extraction shipped. Remaining adapters:
@@ -865,12 +908,18 @@ Also:
 - Barrel-cycle normalization: separate export-only/barrel cycles from
   logic cycles in cycle reporting
 
-### 10. Trust overlay on structural queries
-Surface evidence quality on query output. Examples:
-- "0 callers, low confidence: module has 4042 unresolved CALLS"
-- "dead symbol candidate, low confidence: imported in 2 files but call
-  target unresolved"
-Turns raw graph limitations into explicit epistemic status.
+### 10. Trust overlay on structural queries — DONE
+**See execution sequence item #1 at top of Next section.**
+
+Inline trust summary in callers, callees, path, dead, modules show,
+orient, explain. Option A: only present when degraded. Includes:
+- `summary_scope: "repo_snapshot"` for repo-level context
+- `graph_basis` (CALLS, IMPORTS, CALLS+IMPORTS)
+- `reliability` axes (call_graph, dead_code, import_graph, change_impact)
+- `degradation_flags` and `caveats` when non-HIGH
+
+Per-result markers (dead confidence, edge confidence) designed but
+reserved for dead-confidence stratification slice.
 
 ### 11. Rust framework detectors
 Actix-web, Axum, Rocket, Warp route handlers. Same pattern as Express
