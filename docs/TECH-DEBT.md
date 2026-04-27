@@ -1358,8 +1358,6 @@ For intentional contract differences (design decisions), see
 
 - **No `--min-lines` filter on dead:** Not implemented.
 
-- **No `--json` flag:** Always JSON output. No table format option.
-
 - **No `graph metrics` command:** Not ported yet.
 
 - **`path` command:** Symbol-only endpoints, CALLS+IMPORTS fixed, max-depth 8

@@ -32,7 +32,7 @@ Implementation details (SQL, migration mechanics, storage internals)
 live elsewhere.
 
 Consumers of this contract:
-  - CI pipelines invoking `rgr gate`
+  - CI pipelines invoking `rmap gate` (Rust, primary) or `rgr gate` (TS)
   - Agents reading `graph obligations` / `evidence` / `gate` JSON output
   - Integrators building on top of repo-graph as a governance layer
 

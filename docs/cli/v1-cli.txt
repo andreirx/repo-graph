@@ -1,3 +1,18 @@
+================================================================================
+LEGACY DOCUMENT — TypeScript CLI (`rgr`)
+================================================================================
+
+This document describes the original TypeScript CLI (`rgr`). The TypeScript
+CLI remains operational but is no longer the primary binary.
+
+**Primary CLI:** `rmap` (Rust). All new product surface ships there.
+**Canonical contracts:** `docs/cli/rmap-contracts.md`
+
+Use this document for TS-side parity checks and features not yet ported.
+Do not treat this as the authoritative contract for agent-facing commands.
+
+================================================================================
+
 V1 CLI — Reduced Scope
 =======================
 

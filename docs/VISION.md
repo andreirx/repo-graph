@@ -168,13 +168,14 @@ This section is the operational contract for implementation agents working on re
 | Module discovery | Layer 1 (declared), Layer 2 (operational), Layer 3 A1 (Kbuild), Layer 3 B1 (directory); modules list/show/files/deps/violations | Layer 3 C1 graph clustering; `__init__.py` evidence | GNU Makefile/CMake module discovery |
 | Module graph | Cross-module IMPORTS edges; weighted neighbors; boundary violations; diagnostics | — | Per-module dead-code rollups |
 | Runtime/build | Phase 0 identity; Dockerfile, docker-compose detectors; package.json script-only fallback; Makefile v1; `rmap surfaces list/show` | CMake File API | Infra roots (Terraform, Pulumi, Helm) |
-| Measurements | Graph stats, cyclomatic complexity, nesting depth, parameter count, coverage, churn, hotspots, risk | Coverage/churn snapshot-tight filtering; complexity surfaced mostly through dedicated metric queries | Cognitive complexity, NPath, function length, policy-backed quality assessments |
+| Measurements | Graph stats, cyclomatic complexity, cognitive complexity, nesting depth, parameter count, function length, coverage, churn, hotspots, risk; `rmap declare quality-policy`, `rmap assess` | Coverage/churn snapshot-tight filtering | NPath complexity, no-new/worsened-quality gate mode |
 | Declarations | module, boundary, entrypoint, invariant, requirement, obligation, waiver | `supersedes_uid` lineage exposure | Policy/gate-mode versioning |
 | Verdicts | 5-state effective model (computed + effective + WAIVED) | — | Persisted verification records |
-| Gate | `rgr gate` with 3 modes, 3 exit codes, waiver overlay | Complexity/coverage/hotspot thresholds exist but are not yet a complete agent pre-action control loop | No-new/worsened-quality gate mode; CI integration examples |
+| Gate | `rmap gate` with 3 modes, 3 exit codes, waiver overlay | Complexity/coverage/hotspot thresholds exist but are not yet a complete agent pre-action control loop | No-new/worsened-quality gate mode; CI integration examples |
 | Versioning | Toolchain provenance, obligation_id identity, version-scoped waivers | Extracted domain versions (package.json only) | Contract/API/migration versions |
 | Trust reporting | v1-validation-report.txt (prose) | — | Machine-queryable trust boundaries |
 | Dead-code confidence | Graph orphan detection | Registry/plugin liveness not modeled | REGISTERED_BY, RENDERS_BLOCK edges |
+| Documentation | `rmap docs list` inventory; `rmap orient` relevant-docs section; generated flag (path-advisory); semantic facts extraction | Explain integration | Persisted inventory, doc-anchored semantic search |
 | Cross-repo | — | — | Fleet supergraph, drift detection |
 
 ### Agent Priorities

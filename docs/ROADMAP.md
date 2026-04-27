@@ -681,72 +681,37 @@ loop.
 - Absolute threshold policies are operational; trend-aware policies complete
   the story for legacy codebases where cleanup is gradual.
 
-### 2. Documentation inventory and retrieval
+### 2. Documentation inventory (shipped + remaining)
 Documentation files are first-class orientation evidence. The docs
 themselves are the data — not a narrow ontology of extracted facts.
 
-**Primary documentation surface:**
-- Discover authored and generated documentation files
-- Classify lightly (readme, architecture, config, map)
-- Detect generated vs authored (frontmatter-based, content-authoritative)
-- Expose documentation inventory to agents
-- Surface relevant doc file paths in `orient` and `explain`
-- Let agents read the actual docs for full context
+**Shipped:**
+- `rmap docs list` — documentation inventory surface (live discovery)
+- `rmap docs extract` — semantic hints extraction (secondary layer)
+- `rmap orient` — `documentation.relevant_files[]` section with ranked docs
+- `DocInventoryEntry` DTO shared across inventory surfaces
+- Generated flag: path-based advisory hint only (MAP.md → generated)
+- Relevance tiering: exact match > descendant > ancestor > root doc
+- Semantic facts stored but demoted to secondary hints
 
-**Evidence sources:**
-- README.md files (repo-level and module-level)
-- ARCHITECTURE.md, CONTRIBUTING.md, design docs
-- Configuration files (docker-compose.yml, .env.*, deployment manifests)
-- Generated MAP.md files (marked with lower confidence)
+**Documentation model (binding):**
+- **Docs inventory is PRIMARY.** Surface doc file paths; let agents read them.
+- **Generated flag is ADVISORY.** Path-convention hint, not semantic truth.
+  A generated MAP.md for a module may be more useful than a root README.
+- **Semantic facts are SECONDARY.** Useful for ranking/filtering, never
+  canonical. Repos with docs but no semantic_facts still show their docs.
+- See `docs/design/documentation-semantic-facts.md` §Two Distinct Surfaces.
 
-**Why docs are primary:**
-- Documentation preserves nuance, qualifiers, rationale, and exceptions
-- Forcing docs into fixed fact kinds loses critical context
-- An agent's best answer is often "here are the 3 relevant docs" with
-  excerpts, not a compressed relational tuple
-- The information already exists; preserving it costs less than lossy
-  extraction
+**Remaining:**
+- `rmap explain` integration: doc excerpts and file references
+- Persisted inventory (optimization, currently live filesystem discovery)
 
-**Secondary documentation hints (shipped, auxiliary only):**
-- `semantic_facts` table exists for optional derived hints
-- Used for ranking, filtering, and quick environment detection
-- Not the canonical documentation representation
-- Fact kinds: `replacement_for`, `alternative_to`, `deprecated_by`,
-  `migration_path`, `environment_surface`
-- Lower confidence than reading the actual doc
-
-**Design constraints:**
-- Docs inventory is the primary agent surface
-- Semantic facts are auxiliary hints for ranking/filtering
-- `orient` surfaces relevant doc paths first, semantic hints second
-- Agents read the docs; they do not rely on extracted fact summaries
-- See `docs/design/documentation-semantic-facts.md` for the secondary
-  extraction layer design
-
-**Adoption order:**
-1. Documentation inventory surface (`rmap docs list`)
-2. Orient integration: `documentation.relevant_files[]` section
-3. Semantic facts demoted to optional `documentation_hints`
-4. Explain integration: doc excerpts and file references
-
-**Implementation constraints (binding):**
+**Implementation constraints (still binding):**
 
 1. **`rmap docs list` must NOT derive from semantic_facts.**
-   It must use documentation inventory (live discovery or persisted).
-   Repos with docs but no extracted facts must still show their docs.
+   It uses documentation inventory (live discovery or future persistence).
 
-2. **Introduce a pure `DocInventoryEntry` DTO** for shared use:
-   - `path: String`
-   - `kind: DocKind`
-   - `generated: bool`
-   - `content_hash: Option<String>`
-   - (maybe `title: Option<String>` later)
-   Used by `docs list`, `orient`, and future persisted inventory.
-
-3. **`content_hash` is optional in list output.**
-   Do not force eager hashing unless already cheap in the chosen path.
-
-4. **In orient, each relevant doc must include a relevance reason:**
+2. **In orient, each relevant doc includes a relevance reason:**
    ```json
    {
      "path": "src/core/README.md",
@@ -755,40 +720,18 @@ themselves are the data — not a narrow ontology of extracted facts.
      "reason": "module_path_match"
    }
    ```
-   Reason values: `repo_root_doc`, `module_path_match`, `doc_kind_architecture`,
-   `generated_map_for_target`, `config_relevance`.
 
-5. **Rank authored docs above generated docs.**
-   Architecture/README before generated MAP when both are relevant.
+3. **Relevance tiering (structural, not fuzzy):**
+   - Tier 1 (exact match): doc path matches focus exactly
+   - Tier 2 (descendant): doc is under the focused path
+   - Tier 3 (ancestor): doc is an ancestor of the focused path
+   - Tier 5 (root): repo-root docs as fallback
+   - Within tiers: authored > generated (mild tie-breaker only)
 
-6. **Keep relevance rules simple and structural in v1:**
-   - Repo root README/ARCHITECTURE always relevant at repo scope
-   - Docs under matching module/path are relevant
-   - Generated MAP in matching path is relevant but lower-ranked
-   - Config docs relevant for environment/build orientation
-   Do NOT add text search, embeddings, or fuzzy matching in this slice.
-
-7. **Add a pure helper for doc relevance selection.**
-   Do not inline relevance logic in CLI handlers. Pure function:
-   `select_relevant_docs(inventory, focus_context) -> ranked_docs`
-
-8. **Validate on real repos:** glamCRM, amodx, hexmanos.
-   - Does `docs list` show actual useful docs?
-   - Does `orient` point to the right docs first?
-   - Are generated MAPs present but not overpowering authored docs?
-   - Do repos with no semantic_facts still show their docs correctly?
-
-9. **CLI decision: Option B chosen.**
-   - Rename current `rmap docs` to `rmap docs extract`
-   - Add `rmap docs list` as inventory surface
-   - `docs` becomes a command family: `docs list`, `docs extract`
-   - No compatibility alias (clean break)
-   - Update parser, tests, docs, examples in same slice
-
-10. **V1 inventory may use live filesystem discovery.**
-    Persisted inventory is a future optimization slice.
-    But do NOT fake inventory from semantic_fact rows — that inverts
-    the primary/secondary relationship.
+4. **Generated flag is path-based only in inventory layer.**
+   Content-based frontmatter detection belongs in semantic-fact extraction,
+   not inventory classification. Do NOT add content-authoritative detection
+   to the inventory surface.
 
 ### 3. Long-lived analysis daemon + daemon-backed CLI
 Two-part item: support module (warmed runtime) + feature (CLI client).
