@@ -25,10 +25,12 @@
 //! through this adapter.
 
 use repo_graph_gate::{
-	GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
-	GateModuleViolationEvidence, GateObligation, GateRequirement, GateStorageError,
-	GateStorageRead, GateWaiver,
+	GateAssessmentState, GateAssessmentVerdict, GateBoundaryDeclaration, GateImportEdge,
+	GateInference, GateMeasurement, GateModuleViolationEvidence, GateObligation,
+	GateQualityAssessmentFact, GateQualityPolicyKind, GateQualityPolicySeverity,
+	GateRequirement, GateStorageError, GateStorageRead, GateWaiver,
 };
+use std::collections::HashMap;
 
 use repo_graph_classification::boundary_evaluator::evaluate_module_boundaries;
 use repo_graph_classification::boundary_parser::{
@@ -275,4 +277,158 @@ impl GateStorageRead for StorageConnection {
 			stale_declarations_count: evaluation.stale_declarations.len(),
 		})
 	}
+
+	fn get_quality_assessment_facts_for_gate(
+		&self,
+		repo_uid: &str,
+		snapshot_uid: &str,
+	) -> Result<Vec<GateQualityAssessmentFact>, GateStorageError> {
+		// Step 1: Load active quality-policy declarations (typed).
+		let policies = self
+			.get_active_quality_policy_declarations(repo_uid)
+			.map_err(map_err("get_quality_assessment_facts_for_gate"))?;
+
+		// Step 2: Load assessment rows for this snapshot.
+		let assessments = self
+			.get_quality_assessments_for_snapshot(snapshot_uid)
+			.map_err(map_err("get_quality_assessment_facts_for_gate"))?;
+
+		// Step 3: Build lookup of assessments by policy_uid.
+		//
+		// Invariant: For gate purposes, exactly one assessment should exist
+		// per (policy_uid, snapshot_uid). Multiple rows indicate:
+		//   - Storage corruption
+		//   - Multiple baselines computed without cleanup
+		//   - Assessment pipeline bug
+		//
+		// Rather than silently pick one and hide ambiguity, fail fast so the
+		// problem is surfaced. This is an enforcement surface.
+		let mut assessment_lookup: HashMap<&str, &crate::types::QualityAssessmentRow> =
+			HashMap::new();
+		for assessment in &assessments {
+			if assessment_lookup.contains_key(assessment.policy_uid.as_str()) {
+				return Err(GateStorageError::new(
+					"get_quality_assessment_facts_for_gate",
+					format!(
+						"multiple assessment rows for policy_uid={} in snapshot={}; \
+						 gate requires exactly one assessment per policy",
+						assessment.policy_uid, snapshot_uid
+					),
+				));
+			}
+			assessment_lookup.insert(&assessment.policy_uid, assessment);
+		}
+
+		// Step 4: Build one fact per active policy.
+		let mut facts = Vec::with_capacity(policies.len());
+		for policy in &policies {
+			let assessment = assessment_lookup.get(policy.declaration_uid.as_str());
+
+			// Map policy_kind from storage to gate-owned enum.
+			let policy_kind = map_policy_kind(&policy.payload.policy_kind);
+
+			// Map severity from storage to gate-owned enum.
+			let severity = map_severity(&policy.payload.severity);
+
+			if let Some(assessment) = assessment {
+				// Assessment exists - map to fact with Present state.
+				// Validate stored data; malformed rows are storage corruption.
+				let computed_verdict = map_verdict(&assessment.computed_verdict)
+					.map_err(|reason| {
+						GateStorageError::new(
+							"get_quality_assessment_facts_for_gate",
+							format!(
+								"malformed assessment row {}: {}",
+								assessment.assessment_uid, reason
+							),
+						)
+					})?;
+
+				let violations_count = parse_violations_count(&assessment.violations_json)
+					.map_err(|reason| {
+						GateStorageError::new(
+							"get_quality_assessment_facts_for_gate",
+							format!(
+								"malformed assessment row {}: {}",
+								assessment.assessment_uid, reason
+							),
+						)
+					})?;
+
+				facts.push(GateQualityAssessmentFact {
+					policy_uid: policy.declaration_uid.clone(),
+					policy_id: policy.payload.policy_id.clone(),
+					policy_version: policy.payload.version,
+					policy_kind,
+					severity,
+					assessment_state: GateAssessmentState::Present,
+					computed_verdict: Some(computed_verdict),
+					baseline_snapshot_uid: assessment.baseline_snapshot_uid.clone(),
+					measurements_evaluated: Some(assessment.measurements_evaluated),
+					violations_count: Some(violations_count),
+				});
+			} else {
+				// No assessment - fact with Missing state.
+				facts.push(GateQualityAssessmentFact {
+					policy_uid: policy.declaration_uid.clone(),
+					policy_id: policy.payload.policy_id.clone(),
+					policy_version: policy.payload.version,
+					policy_kind,
+					severity,
+					assessment_state: GateAssessmentState::Missing,
+					computed_verdict: None,
+					baseline_snapshot_uid: None,
+					measurements_evaluated: None,
+					violations_count: None,
+				});
+			}
+		}
+
+		// Sort by policy_id for deterministic output.
+		facts.sort_by(|a, b| a.policy_id.cmp(&b.policy_id));
+
+		Ok(facts)
+	}
+}
+
+// ── Mapping helpers for quality-policy types ────────────────────────
+
+fn map_policy_kind(kind: &crate::types::QualityPolicyKind) -> GateQualityPolicyKind {
+	match kind {
+		crate::types::QualityPolicyKind::AbsoluteMax => GateQualityPolicyKind::AbsoluteMax,
+		crate::types::QualityPolicyKind::AbsoluteMin => GateQualityPolicyKind::AbsoluteMin,
+		crate::types::QualityPolicyKind::NoNew => GateQualityPolicyKind::NoNew,
+		crate::types::QualityPolicyKind::NoWorsened => GateQualityPolicyKind::NoWorsened,
+	}
+}
+
+fn map_severity(severity: &crate::types::QualityPolicySeverity) -> GateQualityPolicySeverity {
+	match severity {
+		crate::types::QualityPolicySeverity::Fail => GateQualityPolicySeverity::Fail,
+		crate::types::QualityPolicySeverity::Advisory => GateQualityPolicySeverity::Advisory,
+	}
+}
+
+/// Parse verdict string into gate enum. Returns error for unknown values.
+///
+/// Gate is an enforcement surface. Malformed stored data must fail
+/// loudly, not be silently normalized into plausible values.
+fn map_verdict(verdict_str: &str) -> Result<GateAssessmentVerdict, String> {
+	match verdict_str {
+		"PASS" => Ok(GateAssessmentVerdict::Pass),
+		"FAIL" => Ok(GateAssessmentVerdict::Fail),
+		"NOT_APPLICABLE" => Ok(GateAssessmentVerdict::NotApplicable),
+		"NOT_COMPARABLE" => Ok(GateAssessmentVerdict::NotComparable),
+		other => Err(format!("unknown computed_verdict '{}'", other)),
+	}
+}
+
+/// Parse violations JSON array and return count. Returns error for malformed JSON.
+///
+/// Gate is an enforcement surface. Malformed stored data must fail
+/// loudly, not be silently normalized into plausible values.
+fn parse_violations_count(violations_json: &str) -> Result<usize, String> {
+	serde_json::from_str::<Vec<serde_json::Value>>(violations_json)
+		.map(|arr| arr.len())
+		.map_err(|e| format!("invalid violations_json: {}", e))
 }

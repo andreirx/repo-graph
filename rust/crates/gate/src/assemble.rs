@@ -170,12 +170,17 @@ pub fn assemble_from_requirements<S: GateStorageRead + ?Sized>(
 	now: &str,
 	requirements: Vec<GateRequirement>,
 ) -> Result<GateReport, GateError> {
+	// Fetch quality-policy assessment facts up front.
+	let quality_assessment_facts =
+		storage.get_quality_assessment_facts_for_gate(repo_uid, snapshot_uid)?;
+
 	let mut input = GateInput {
 		requirements,
 		mode,
 		now: now.to_string(),
 		method_evidence: std::collections::HashMap::new(),
 		matching_waivers: std::collections::HashMap::new(),
+		quality_assessment_facts,
 	};
 
 	// Pre-fetch per-method caches that are shared across
@@ -488,6 +493,17 @@ mod tests {
 		) -> Result<GateModuleViolationEvidence, GateStorageError> {
 			self.fail("evaluate_module_violations")?;
 			Ok(self.module_violations.clone())
+		}
+
+		fn get_quality_assessment_facts_for_gate(
+			&self,
+			_repo_uid: &str,
+			_snapshot_uid: &str,
+		) -> Result<Vec<crate::types::GateQualityAssessmentFact>, GateStorageError> {
+			self.fail("get_quality_assessment_facts_for_gate")?;
+			// FakeStorage returns empty by default — tests that need
+			// quality assessments must set up the storage explicitly.
+			Ok(vec![])
 		}
 	}
 

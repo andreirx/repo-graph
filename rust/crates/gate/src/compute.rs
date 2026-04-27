@@ -31,7 +31,9 @@
 use std::collections::HashMap;
 
 use crate::types::{
-	EffectiveVerdict, GateCounts, GateMode, GateObligation, GateOutcome,
+	EffectiveVerdict, GateAssessmentState, GateAssessmentVerdict, GateCounts,
+	GateMode, GateObligation, GateOutcome, GateQualityAssessmentEvaluation,
+	GateQualityAssessmentFact, GateQualityCounts, GateQualityPolicySeverity,
 	GateReport, GateRequirement, GateWaiver, ObligationEvaluation, Verdict,
 	WaiverBasis,
 };
@@ -153,6 +155,12 @@ pub struct PolicyMeasurement {
 /// `matching_waivers` is similarly keyed. A missing key is
 /// treated as "no waivers match", which is indistinguishable
 /// from an empty vec for overlay purposes.
+///
+/// `quality_assessment_facts` contains one entry per active
+/// quality-policy declaration. The storage adapter joins
+/// declarations with assessment rows and produces enriched facts.
+/// Missing assessments are represented with `assessment_state =
+/// Missing`.
 #[derive(Debug, Clone)]
 pub struct GateInput {
 	pub requirements: Vec<GateRequirement>,
@@ -160,6 +168,8 @@ pub struct GateInput {
 	pub now: String,
 	pub method_evidence: HashMap<ObligationKey, MethodEvidence>,
 	pub matching_waivers: HashMap<ObligationKey, Vec<GateWaiver>>,
+	/// Quality-policy assessment facts (one per active policy).
+	pub quality_assessment_facts: Vec<GateQualityAssessmentFact>,
 }
 
 /// Composite key identifying one obligation. `i64` version
@@ -189,6 +199,13 @@ impl ObligationKey {
 /// the pre-fetched method evidence, applies waiver overlay, and
 /// reduces the verdict list to a `GateOutcome` using the
 /// input's `mode`. Returns a fully-populated `GateReport`.
+///
+/// Quality-policy assessments are processed separately and
+/// contribute to the final outcome based on severity:
+/// - Missing → incomplete (exit 2)
+/// - NOT_COMPARABLE → incomplete (exit 2)
+/// - FAIL + severity=Fail → fail (exit 1)
+/// - FAIL + severity=Advisory → non-blocking (reported only)
 pub fn compute(input: GateInput) -> GateReport {
 	let mut evaluations: Vec<ObligationEvaluation> = Vec::new();
 
@@ -212,10 +229,18 @@ pub fn compute(input: GateInput) -> GateReport {
 		}
 	}
 
-	let outcome = reduce_outcome(&evaluations, input.mode);
+	// Convert quality-policy facts into evaluations.
+	let quality_assessments: Vec<GateQualityAssessmentEvaluation> = input
+		.quality_assessment_facts
+		.iter()
+		.map(GateQualityAssessmentEvaluation::from)
+		.collect();
+
+	let outcome = reduce_outcome(&evaluations, &input.quality_assessment_facts, input.mode);
 
 	GateReport {
 		obligations: evaluations,
+		quality_assessments,
 		outcome,
 	}
 }
@@ -518,7 +543,11 @@ fn apply_waiver_overlay(eval: &mut ObligationEvaluation, waivers: &[GateWaiver])
 
 // ── Outcome reduction ────────────────────────────────────────────
 
-fn reduce_outcome(evals: &[ObligationEvaluation], mode: GateMode) -> GateOutcome {
+fn reduce_outcome(
+	evals: &[ObligationEvaluation],
+	quality_facts: &[GateQualityAssessmentFact],
+	mode: GateMode,
+) -> GateOutcome {
 	let mut counts = GateCounts {
 		total: evals.len(),
 		pass: 0,
@@ -538,28 +567,80 @@ fn reduce_outcome(evals: &[ObligationEvaluation], mode: GateMode) -> GateOutcome
 		}
 	}
 
-	let has_fail = counts.fail > 0;
-	let has_incomplete = counts.missing_evidence > 0 || counts.unsupported > 0;
+	// Count quality-policy assessments.
+	let mut quality_counts = GateQualityCounts {
+		total: quality_facts.len(),
+		..Default::default()
+	};
+
+	for fact in quality_facts {
+		match fact.assessment_state {
+			GateAssessmentState::Missing => {
+				quality_counts.missing += 1;
+			}
+			GateAssessmentState::Present => {
+				match fact.computed_verdict {
+					Some(GateAssessmentVerdict::Pass) => {
+						quality_counts.pass += 1;
+					}
+					Some(GateAssessmentVerdict::Fail) => {
+						match fact.severity {
+							GateQualityPolicySeverity::Fail => {
+								quality_counts.fail += 1;
+							}
+							GateQualityPolicySeverity::Advisory => {
+								quality_counts.advisory_fail += 1;
+							}
+						}
+					}
+					Some(GateAssessmentVerdict::NotApplicable) => {
+						quality_counts.not_applicable += 1;
+					}
+					Some(GateAssessmentVerdict::NotComparable) => {
+						quality_counts.not_comparable += 1;
+					}
+					None => {
+						// Present state with no verdict is a storage inconsistency.
+						// Treat as missing to surface the problem.
+						quality_counts.missing += 1;
+					}
+				}
+			}
+		}
+	}
+
+	// Obligation-level signals.
+	let has_obl_fail = counts.fail > 0;
+	let has_obl_incomplete = counts.missing_evidence > 0 || counts.unsupported > 0;
+
+	// Quality-level signals.
+	// - missing: no assessment computed
+	// - not_comparable: comparative policy without baseline
+	// - fail: severity=Fail failures (gate-blocking)
+	// Advisory failures do NOT contribute to blocking.
+	let has_quality_fail = quality_counts.fail > 0;
+	let has_quality_incomplete =
+		quality_counts.missing > 0 || quality_counts.not_comparable > 0;
 
 	let (outcome, exit_code) = match mode {
 		GateMode::Default => {
-			if has_fail {
+			if has_obl_fail || has_quality_fail {
 				("fail", 1)
-			} else if has_incomplete {
+			} else if has_obl_incomplete || has_quality_incomplete {
 				("incomplete", 2)
 			} else {
 				("pass", 0)
 			}
 		}
 		GateMode::Strict => {
-			if has_fail || has_incomplete {
+			if has_obl_fail || has_obl_incomplete || has_quality_fail || has_quality_incomplete {
 				("fail", 1)
 			} else {
 				("pass", 0)
 			}
 		}
 		GateMode::Advisory => {
-			if has_fail {
+			if has_obl_fail || has_quality_fail {
 				("fail", 1)
 			} else {
 				("pass", 0)
@@ -572,6 +653,7 @@ fn reduce_outcome(evals: &[ObligationEvaluation], mode: GateMode) -> GateOutcome
 		exit_code,
 		mode: mode.as_str().to_string(),
 		counts,
+		quality_counts,
 	}
 }
 
@@ -617,6 +699,7 @@ mod tests {
 			now: "2026-04-15T00:00:00Z".to_string(),
 			method_evidence: HashMap::new(),
 			matching_waivers: HashMap::new(),
+			quality_assessment_facts: Vec::new(),
 		}
 	}
 
@@ -1053,5 +1136,180 @@ mod tests {
 		// transparency, but it does not affect the verdict.
 		assert_eq!(report.obligations[0].target, Some("packages/app".into()));
 		assert_eq!(report.obligations[0].computed_verdict, Verdict::PASS);
+	}
+
+	// ── quality-policy assessment tests ──
+
+	fn quality_fact(
+		policy_id: &str,
+		state: GateAssessmentState,
+		verdict: Option<GateAssessmentVerdict>,
+		severity: GateQualityPolicySeverity,
+	) -> GateQualityAssessmentFact {
+		GateQualityAssessmentFact {
+			policy_uid: format!("uid-{policy_id}"),
+			policy_id: policy_id.to_string(),
+			policy_version: 1,
+			policy_kind: crate::types::GateQualityPolicyKind::AbsoluteMax,
+			severity,
+			assessment_state: state,
+			computed_verdict: verdict,
+			baseline_snapshot_uid: None,
+			measurements_evaluated: Some(10),
+			violations_count: if verdict == Some(GateAssessmentVerdict::Fail) {
+				Some(3)
+			} else {
+				Some(0)
+			},
+		}
+	}
+
+	#[test]
+	fn quality_assessment_pass_contributes_to_pass_outcome() {
+		let mut input = empty_input(vec![], GateMode::Default);
+		input.quality_assessment_facts = vec![quality_fact(
+			"QP-001",
+			GateAssessmentState::Present,
+			Some(GateAssessmentVerdict::Pass),
+			GateQualityPolicySeverity::Fail,
+		)];
+		let report = compute(input);
+		assert_eq!(report.outcome.outcome, "pass");
+		assert_eq!(report.outcome.exit_code, 0);
+		assert_eq!(report.outcome.quality_counts.total, 1);
+		assert_eq!(report.outcome.quality_counts.pass, 1);
+		assert_eq!(report.quality_assessments.len(), 1);
+		assert_eq!(report.quality_assessments[0].policy_id, "QP-001");
+	}
+
+	#[test]
+	fn quality_assessment_fail_blocking_causes_fail_exit_1() {
+		let mut input = empty_input(vec![], GateMode::Default);
+		input.quality_assessment_facts = vec![quality_fact(
+			"QP-001",
+			GateAssessmentState::Present,
+			Some(GateAssessmentVerdict::Fail),
+			GateQualityPolicySeverity::Fail,
+		)];
+		let report = compute(input);
+		assert_eq!(report.outcome.outcome, "fail");
+		assert_eq!(report.outcome.exit_code, 1);
+		assert_eq!(report.outcome.quality_counts.fail, 1);
+		assert_eq!(report.outcome.quality_counts.advisory_fail, 0);
+	}
+
+	#[test]
+	fn quality_assessment_fail_advisory_does_not_block() {
+		let mut input = empty_input(vec![], GateMode::Default);
+		input.quality_assessment_facts = vec![quality_fact(
+			"QP-001",
+			GateAssessmentState::Present,
+			Some(GateAssessmentVerdict::Fail),
+			GateQualityPolicySeverity::Advisory,
+		)];
+		let report = compute(input);
+		// Advisory failures are reported but do not block gate.
+		assert_eq!(report.outcome.outcome, "pass");
+		assert_eq!(report.outcome.exit_code, 0);
+		assert_eq!(report.outcome.quality_counts.fail, 0);
+		assert_eq!(report.outcome.quality_counts.advisory_fail, 1);
+	}
+
+	#[test]
+	fn quality_assessment_missing_causes_incomplete_exit_2() {
+		let mut input = empty_input(vec![], GateMode::Default);
+		input.quality_assessment_facts = vec![quality_fact(
+			"QP-001",
+			GateAssessmentState::Missing,
+			None,
+			GateQualityPolicySeverity::Fail,
+		)];
+		let report = compute(input);
+		assert_eq!(report.outcome.outcome, "incomplete");
+		assert_eq!(report.outcome.exit_code, 2);
+		assert_eq!(report.outcome.quality_counts.missing, 1);
+	}
+
+	#[test]
+	fn quality_assessment_not_comparable_causes_incomplete_exit_2() {
+		let mut input = empty_input(vec![], GateMode::Default);
+		input.quality_assessment_facts = vec![quality_fact(
+			"QP-001",
+			GateAssessmentState::Present,
+			Some(GateAssessmentVerdict::NotComparable),
+			GateQualityPolicySeverity::Fail,
+		)];
+		let report = compute(input);
+		assert_eq!(report.outcome.outcome, "incomplete");
+		assert_eq!(report.outcome.exit_code, 2);
+		assert_eq!(report.outcome.quality_counts.not_comparable, 1);
+	}
+
+	#[test]
+	fn quality_assessment_not_applicable_is_non_blocking() {
+		let mut input = empty_input(vec![], GateMode::Default);
+		input.quality_assessment_facts = vec![quality_fact(
+			"QP-001",
+			GateAssessmentState::Present,
+			Some(GateAssessmentVerdict::NotApplicable),
+			GateQualityPolicySeverity::Fail,
+		)];
+		let report = compute(input);
+		assert_eq!(report.outcome.outcome, "pass");
+		assert_eq!(report.outcome.exit_code, 0);
+		assert_eq!(report.outcome.quality_counts.not_applicable, 1);
+	}
+
+	#[test]
+	fn quality_fail_takes_precedence_over_obligation_missing() {
+		// If both obligations have missing evidence (exit 2) AND
+		// quality has blocking fail (exit 1), fail wins.
+		let r = req("REQ-1", 1, vec![obl("o1", "arch_violations", Some("src/core"), None)]);
+		let mut input = empty_input(vec![r], GateMode::Default);
+		input.method_evidence.insert(
+			key("REQ-1", 1, "o1"),
+			MethodEvidence::ArchViolations {
+				target: "src/core".into(),
+				per_boundary_counts: vec![],
+				has_any_boundary_for_target: false,
+			},
+		);
+		input.quality_assessment_facts = vec![quality_fact(
+			"QP-001",
+			GateAssessmentState::Present,
+			Some(GateAssessmentVerdict::Fail),
+			GateQualityPolicySeverity::Fail,
+		)];
+		let report = compute(input);
+		assert_eq!(report.outcome.outcome, "fail");
+		assert_eq!(report.outcome.exit_code, 1);
+	}
+
+	#[test]
+	fn strict_mode_promotes_quality_incomplete_to_fail() {
+		let mut input = empty_input(vec![], GateMode::Strict);
+		input.quality_assessment_facts = vec![quality_fact(
+			"QP-001",
+			GateAssessmentState::Missing,
+			None,
+			GateQualityPolicySeverity::Fail,
+		)];
+		let report = compute(input);
+		assert_eq!(report.outcome.outcome, "fail");
+		assert_eq!(report.outcome.exit_code, 1);
+	}
+
+	#[test]
+	fn advisory_mode_ignores_quality_incomplete() {
+		let mut input = empty_input(vec![], GateMode::Advisory);
+		input.quality_assessment_facts = vec![quality_fact(
+			"QP-001",
+			GateAssessmentState::Missing,
+			None,
+			GateQualityPolicySeverity::Fail,
+		)];
+		let report = compute(input);
+		assert_eq!(report.outcome.outcome, "pass");
+		assert_eq!(report.outcome.exit_code, 0);
 	}
 }

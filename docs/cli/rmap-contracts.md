@@ -30,6 +30,80 @@ Rationale: allowing PASS-waiver conflated "no evidence" with "suppressed."
 A PASS verdict means the obligation is satisfied; there is nothing to waive.
 (Rust-25 deliberate correction.)
 
+### `gate` — Quality-Policy Assessment Integration
+
+Gate consumes pre-computed quality-policy assessments and reduces them into
+the gate outcome. Quality assessments are reported separately from obligations
+because they have different verdict semantics.
+
+**Report shape:**
+
+```json
+{
+  "obligations": [ /* requirement-based evaluations */ ],
+  "quality_assessments": [
+    {
+      "policy_id": "QP-001",
+      "policy_version": 1,
+      "policy_kind": "no_new",
+      "severity": "fail",
+      "assessment_state": "present",
+      "computed_verdict": "PASS",
+      "is_comparative": true,
+      "violations_count": 0
+    }
+  ],
+  "outcome": {
+    "outcome": "pass",
+    "exit_code": 0,
+    "mode": "default",
+    "counts": { /* obligation counts */ },
+    "quality_counts": {
+      "total": 1,
+      "pass": 1,
+      "fail": 0,
+      "advisory_fail": 0,
+      "missing": 0,
+      "not_comparable": 0,
+      "not_applicable": 0
+    }
+  }
+}
+```
+
+**Verdict semantics:**
+
+| Assessment State | Verdict | Severity | Exit Code |
+|-----------------|---------|----------|-----------|
+| Missing | N/A | Any | 2 (incomplete) |
+| Present | NOT_COMPARABLE | Any | 2 (incomplete) |
+| Present | FAIL | `fail` | 1 (fail) |
+| Present | FAIL | `advisory` | 0 (reported only) |
+| Present | PASS | Any | 0 (pass) |
+| Present | NOT_APPLICABLE | Any | 0 (pass) |
+
+**Key semantics:**
+
+1. **Missing assessment = incomplete.** Active quality-policy without computed
+   assessment is treated as missing required evidence.
+
+2. **NOT_COMPARABLE = incomplete.** Comparative policies (`no_new`,
+   `no_worsened`) without a baseline snapshot return NOT_COMPARABLE. This
+   blocks gate until a baseline is established.
+
+3. **Severity determines blocking.** `severity: fail` assessments with FAIL
+   verdict block gate. `severity: advisory` assessments are reported but do
+   not affect exit code.
+
+4. **No waiver overlay.** Quality-policy waivers are explicitly deferred.
+   Quality assessments do not participate in the waiver system.
+
+**Mode interaction:**
+
+- `default`: Missing/NOT_COMPARABLE = exit 2; FAIL(blocking) = exit 1
+- `strict`: Missing/NOT_COMPARABLE/FAIL(blocking) = exit 1
+- `advisory`: Missing/NOT_COMPARABLE ignored; FAIL(blocking) = exit 1
+
 ### `violations` — Output Shape
 
 `results` is an object with explicit sections:

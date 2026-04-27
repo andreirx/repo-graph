@@ -483,6 +483,193 @@ fn storage_error_maps_to_gate_storage_error() {
 	);
 }
 
+// ── 8. Quality assessment facts projection ──────────────────────
+
+fn insert_quality_policy_declaration(
+	storage: &StorageConnection,
+	repo_uid: &str,
+	policy_id: &str,
+	version: i64,
+	policy_kind: &str,
+	severity: &str,
+) -> String {
+	use repo_graph_storage::crud::declarations::DeclarationInsert;
+	let value = serde_json::json!({
+		"policy_id": policy_id,
+		"version": version,
+		"scope_clauses": [],
+		"measurement_kind": "cognitive_complexity",
+		"policy_kind": policy_kind,
+		"threshold": 15.0,
+		"severity": severity,
+		"description": null,
+	});
+	let identity_key = format!("{}:quality_policy:{}:{}", repo_uid, policy_id, version);
+	let target_key = format!("{}:quality_policy:{}:{}", repo_uid, policy_id, version);
+	let result = storage
+		.insert_declaration(&DeclarationInsert {
+			identity_key,
+			repo_uid: repo_uid.to_string(),
+			target_stable_key: target_key,
+			kind: "quality_policy".to_string(),
+			value_json: value.to_string(),
+			created_at: "2026-04-15T00:00:00Z".to_string(),
+			created_by: Some("test".to_string()),
+			supersedes_uid: None,
+			authored_basis_json: None,
+		})
+		.unwrap();
+	result.declaration_uid
+}
+
+#[test]
+fn quality_assessment_facts_returns_one_fact_per_active_policy() {
+	let (_tmp, storage) = open_temp_storage();
+	insert_repo(&storage, "r1", "test-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	// Insert two quality policies.
+	insert_quality_policy_declaration(&storage, "r1", "QP-001", 1, "absolute_max", "fail");
+	insert_quality_policy_declaration(&storage, "r1", "QP-002", 1, "no_new", "advisory");
+
+	// No assessments yet — both should be Missing.
+	let facts = <StorageConnection as GateStorageRead>::get_quality_assessment_facts_for_gate(
+		&storage, "r1", &snapshot_uid,
+	)
+	.unwrap();
+
+	assert_eq!(facts.len(), 2, "one fact per active policy");
+
+	// Facts are sorted by policy_id.
+	assert_eq!(facts[0].policy_id, "QP-001");
+	assert_eq!(facts[0].policy_version, 1);
+	assert_eq!(facts[0].policy_kind, repo_graph_gate::GateQualityPolicyKind::AbsoluteMax);
+	assert_eq!(facts[0].severity, repo_graph_gate::GateQualityPolicySeverity::Fail);
+	assert_eq!(facts[0].assessment_state, repo_graph_gate::GateAssessmentState::Missing);
+	assert!(facts[0].computed_verdict.is_none());
+
+	assert_eq!(facts[1].policy_id, "QP-002");
+	assert_eq!(facts[1].policy_kind, repo_graph_gate::GateQualityPolicyKind::NoNew);
+	assert_eq!(facts[1].severity, repo_graph_gate::GateQualityPolicySeverity::Advisory);
+	assert_eq!(facts[1].assessment_state, repo_graph_gate::GateAssessmentState::Missing);
+}
+
+#[test]
+fn quality_assessment_facts_joins_with_assessment_rows() {
+	use repo_graph_storage::types::{AssessmentVerdict, QualityAssessmentInput};
+
+	let (_tmp, mut storage) = open_temp_storage();
+	insert_repo(&storage, "r1", "test-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	// Insert a quality policy.
+	let policy_uid = insert_quality_policy_declaration(
+		&storage, "r1", "QP-001", 1, "absolute_max", "fail",
+	);
+
+	// Insert an assessment for this policy.
+	let assessment_uid = format!("{}-qpa-{}", snapshot_uid, policy_uid);
+	storage
+		.replace_quality_assessments_for_snapshot(
+			&snapshot_uid,
+			&[QualityAssessmentInput {
+				assessment_uid: assessment_uid.clone(),
+				snapshot_uid: snapshot_uid.clone(),
+				policy_uid: policy_uid.clone(),
+				baseline_snapshot_uid: None,
+				computed_verdict: AssessmentVerdict::Fail,
+				measurements_evaluated: 10,
+				violations: vec![
+					repo_graph_storage::types::AssessmentViolation {
+						target_stable_key: "r1:src/foo.ts#bar:SYMBOL:FUNCTION".into(),
+						measurement_value: 20.0,
+						threshold: 15.0,
+						baseline_value: None,
+					},
+					repo_graph_storage::types::AssessmentViolation {
+						target_stable_key: "r1:src/foo.ts#baz:SYMBOL:FUNCTION".into(),
+						measurement_value: 25.0,
+						threshold: 15.0,
+						baseline_value: None,
+					},
+				],
+				new_violations: None,
+				worsened_violations: None,
+				created_at: "2026-04-15T00:00:00Z".to_string(),
+			}],
+		)
+		.unwrap();
+
+	let facts = <StorageConnection as GateStorageRead>::get_quality_assessment_facts_for_gate(
+		&storage, "r1", &snapshot_uid,
+	)
+	.unwrap();
+
+	assert_eq!(facts.len(), 1);
+	let fact = &facts[0];
+
+	assert_eq!(fact.policy_id, "QP-001");
+	assert_eq!(fact.assessment_state, repo_graph_gate::GateAssessmentState::Present);
+	assert_eq!(
+		fact.computed_verdict,
+		Some(repo_graph_gate::GateAssessmentVerdict::Fail)
+	);
+	assert_eq!(fact.measurements_evaluated, Some(10));
+	assert_eq!(fact.violations_count, Some(2));
+	assert!(fact.baseline_snapshot_uid.is_none());
+}
+
+#[test]
+fn quality_assessment_facts_comparative_policy_shows_baseline() {
+	use repo_graph_storage::types::{AssessmentVerdict, QualityAssessmentInput};
+
+	let (_tmp, mut storage) = open_temp_storage();
+	insert_repo(&storage, "r1", "test-repo");
+	let baseline_uid = create_ready_snapshot(&storage, "r1");
+	let head_uid = create_ready_snapshot(&storage, "r1");
+
+	// Insert a comparative policy.
+	let policy_uid = insert_quality_policy_declaration(
+		&storage, "r1", "QP-002", 1, "no_worsened", "fail",
+	);
+
+	// Insert an assessment with baseline.
+	let assessment_uid = format!("{}-qpa-{}-vs-{}", head_uid, policy_uid, baseline_uid);
+	storage
+		.replace_quality_assessments_for_snapshot(
+			&head_uid,
+			&[QualityAssessmentInput {
+				assessment_uid,
+				snapshot_uid: head_uid.clone(),
+				policy_uid: policy_uid.clone(),
+				baseline_snapshot_uid: Some(baseline_uid.clone()),
+				computed_verdict: AssessmentVerdict::Pass,
+				measurements_evaluated: 5,
+				violations: vec![],
+				new_violations: None,
+				worsened_violations: Some(0),
+				created_at: "2026-04-15T00:00:00Z".to_string(),
+			}],
+		)
+		.unwrap();
+
+	let facts = <StorageConnection as GateStorageRead>::get_quality_assessment_facts_for_gate(
+		&storage, "r1", &head_uid,
+	)
+	.unwrap();
+
+	assert_eq!(facts.len(), 1);
+	let fact = &facts[0];
+
+	assert_eq!(fact.policy_kind, repo_graph_gate::GateQualityPolicyKind::NoWorsened);
+	assert_eq!(fact.assessment_state, repo_graph_gate::GateAssessmentState::Present);
+	assert_eq!(
+		fact.computed_verdict,
+		Some(repo_graph_gate::GateAssessmentVerdict::Pass)
+	);
+	assert_eq!(fact.baseline_snapshot_uid.as_deref(), Some(baseline_uid.as_str()));
+}
+
 // ── Characterization: gate assembly end-to-end ──────────────────
 //
 // Pins the full `repo_graph_gate::assemble` call path through the

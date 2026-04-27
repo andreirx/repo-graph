@@ -50,6 +50,8 @@ It treats unresolved structure as first-class data. That allows:
 
 Repo-graph is not a chat layer and not a generic code indexer.
 
+Repo-graph is a machine-readable engineering protocol for agents, not just a binary with commands. The protocol surface design is documented in `docs/VISION.md` under "Protocol Surface Verification Standard."
+
 This is alpha. It will break. But it is a sound way to feed a large codebase to an LLM.
 
 Its role is to be a deterministic system of record for engineering intelligence:

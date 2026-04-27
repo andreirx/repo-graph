@@ -709,4 +709,15 @@ impl GateStorageRead for FakeAgentStorage {
 		// should set up explicit module data in FakeAgentStorage.
 		Ok(GateModuleViolationEvidence::default())
 	}
+
+	fn get_quality_assessment_facts_for_gate(
+		&self,
+		_repo_uid: &str,
+		_snapshot_uid: &str,
+	) -> Result<Vec<repo_graph_gate::GateQualityAssessmentFact>, GateStorageError> {
+		self.fail_if_forced_gate("get_quality_assessment_facts_for_gate")?;
+		// Default: no quality policies. Tests that need quality-policy
+		// assessments should extend FakeAgentStorage with quality data.
+		Ok(vec![])
+	}
 }

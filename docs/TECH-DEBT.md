@@ -1318,6 +1318,29 @@ computed for TS/JS functions. Known limitations:
 
 See `docs/architecture/quality-control-phase-a.md` for full spec.
 
+### Quality-Policy Gate Integration — waiver overlay deferred (2026-04-27)
+
+Quality-policy assessments are integrated into the gate outcome. Gate
+consumes pre-computed assessments and reduces them into the unified verdict.
+Quality assessments are reported separately in `GateReport.quality_assessments`.
+
+**Deferred: waiver overlay for quality policies.**
+
+Quality-policy assessments do NOT participate in the waiver system. A FAIL
+assessment with severity=Fail blocks the gate regardless of waiver presence.
+The waiver infrastructure exists for requirement-based obligations but has
+no quality-policy support.
+
+Resolution path:
+1. Define waiver target semantics for quality policies (policy_id? policy_uid?)
+2. Extend `GateStorageRead` with quality-waiver fetch
+3. Extend `reduce_outcome` with quality waiver overlay
+4. Decide whether PASS assessments with waivers stay PASS (Rust-25 semantics)
+
+Priority: Low. No customer demand. Quality policies are comparative
+(`no_new`, `no_worsened`) so waivers would typically apply to specific
+violations, not to the policy-level verdict.
+
 ### Quality Policy Runner — architectural debt (2026-04-26)
 
 The `QualityPolicyStoragePort` trait lives in `repo-graph-storage` instead

@@ -139,6 +139,132 @@ It should own the layer that vendors are structurally less likely to prioritize:
 
 This keeps repo-graph useful even if major AI platforms provide built-in code indexing.
 
+## Protocol Surface Verification Standard
+
+  Repo-graph is not a binary with commands. It is a machine-readable engineering protocol for agents.
+
+  A tool does not transmit intent by existing. It transmits intent only through a usable protocol surface. If an
+  agent only has a binary name and a list of command lines, most of the policy is invisible.
+
+  Repo-graph must teach agents through three layers. All three are required. If any layer is missing, the product is
+  incomplete regardless of technical correctness.
+
+  ### Layer 1: Command Naming
+
+  Commands must be named by workflow role, not technical mechanism.
+
+  The command taxonomy must imply the agent lifecycle:
+
+  - `orient` — safe starting point before acting
+  - `check` — validation before handoff
+  - `gate` — policy enforcement with exit codes
+  - `dead` / `trust` / `callers` / `callees` — focused investigation
+
+  If the tool only exposed low-level graph commands, an agent would not know which command is the safe starting
+  point, which command carries policy meaning, or which command is destructive-action-adjacent.
+
+  **Verification question:** Does the command taxonomy imply the orient → check → gate → investigate lifecycle
+  without external explanation?
+
+  ### Layer 2: Output Contracts
+
+  The agent learns what matters from the JSON it sees. Output contracts must encode policy semantics explicitly.
+
+  Bad output teaches nothing:
+
+  ```json
+  {
+    "failures": 4
+  }
+
+  The agent does not know: inherited or new? comparable or not? safe to proceed or blocked? what to optimize?
+
+  Good output teaches the policy:
+
+  {
+    "mode": "no_worsened",
+    "counts": {
+      "new_fail": 0,
+      "worsened_fail": 1,
+      "unchanged_fail": 3,
+      "improved_but_failing": 2,
+      "not_comparable": 0
+    }
+  }
+
+  This teaches the agent immediately:
+
+  - unchanged debt is not the target
+  - worsened debt is the blocking issue
+  - improvement is recognized
+  - comparison is valid
+
+  The optimization target becomes visible through:
+
+  - field names
+  - verdict categories
+  - counts with semantic meaning
+  - reasons with provenance
+  - trust and confidence markers
+
+  Verification question: Can an agent learn the optimization target by reading the JSON output alone, without
+  external documentation?
+
+  Layer 3: External Workflow Instructions
+
+  A generic agent with only a command list will still not know:
+
+  - when to call orient
+  - when to call check
+  - whether gate is required before handoff
+  - whether dead should be trusted strongly in this repo
+  - which commands are canonical vs legacy
+
+  This layer must come from the surrounding system:
+
+  - CLAUDE.md for Claude Code agents
+  - AGENTS.md for generic agent consumption
+  - agent runtime prompts
+  - orchestration wrappers
+
+  The tool gives structured evidence. The outer instructions tell the agent when and why to use it.
+
+  Verification question: Do we provide canonical documentation that tells consumer agents when and why to call each
+  command?
+
+  Implementation Acceptance Criteria
+
+  When shipping a command or output surface, verify all three layers:
+
+  ┌──────────────────┬────────────────────────────────────────┬──────────────────────────────────────────────────┐
+  │      Layer       │                Delivers                │                     Fails if                     │
+  ├──────────────────┼────────────────────────────────────────┼──────────────────────────────────────────────────┤
+  │ Command naming   │ Workflow role is obvious from name     │ Agent must guess whether command is              │
+  │                  │                                        │ safe/destructive/policy-carrying                 │
+  ├──────────────────┼────────────────────────────────────────┼──────────────────────────────────────────────────┤
+  │ Output contract  │ JSON encodes inherited vs new,         │ Agent sees raw counts without semantic           │
+  │                  │ comparable vs not, confidence, reasons │ categories                                       │
+  ├──────────────────┼────────────────────────────────────────┼──────────────────────────────────────────────────┤
+  │ External         │ Canonical doc exists for consumer      │ Consumer agent must reverse-engineer workflow    │
+  │ instructions     │ agent integration                      │ from CLI help alone                              │
+  └──────────────────┴────────────────────────────────────────┴──────────────────────────────────────────────────┘
+
+  A command that passes technical tests but fails protocol-surface verification is not shippable.
+
+  What This Means For Implementation Agents
+
+  When working on repo-graph:
+
+  1. New commands must have names that imply their workflow role
+  2. New JSON output must encode policy semantics, not just raw data
+  3. Consumer-facing commands must have corresponding entries in the agent instruction surface (to be maintained
+  separately)
+  4. Changes to output shape require contract documentation updates
+  5. The question "can an agent learn the optimization target from this output?" must be answerable with yes
+
+  This is the verification standard. Use it to judge whether implementation work is complete.
+
+
 ## Vision Statement
 
 Build the system of record for software engineering decisions and evidence.

@@ -219,7 +219,7 @@ pub struct ObligationEvaluation {
 	pub waiver_basis: Option<WaiverBasis>,
 }
 
-/// Per-verdict counts in the final reduction.
+/// Per-verdict counts in the final reduction (obligations).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GateCounts {
 	pub total: usize,
@@ -228,6 +228,29 @@ pub struct GateCounts {
 	pub waived: usize,
 	pub missing_evidence: usize,
 	pub unsupported: usize,
+}
+
+/// Per-verdict counts for quality-policy assessments.
+///
+/// Separate from `GateCounts` because quality assessments have
+/// different verdict semantics (NOT_APPLICABLE, NOT_COMPARABLE)
+/// and severity-based blocking behavior.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+pub struct GateQualityCounts {
+	/// Total quality policies evaluated.
+	pub total: usize,
+	/// PASS verdicts.
+	pub pass: usize,
+	/// FAIL verdicts with severity=Fail (gate-blocking).
+	pub fail: usize,
+	/// FAIL verdicts with severity=Advisory (non-blocking).
+	pub advisory_fail: usize,
+	/// Missing assessments (no assessment row for active policy).
+	pub missing: usize,
+	/// NOT_COMPARABLE verdicts (comparative policy without baseline).
+	pub not_comparable: usize,
+	/// NOT_APPLICABLE verdicts (treated as non-blocking pass).
+	pub not_applicable: usize,
 }
 
 /// Reduced gate outcome. `outcome` is a short string
@@ -240,6 +263,8 @@ pub struct GateOutcome {
 	pub exit_code: i32,
 	pub mode: String,
 	pub counts: GateCounts,
+	/// Quality-policy assessment counts (separate domain).
+	pub quality_counts: GateQualityCounts,
 }
 
 /// Full gate report. Produced by `compute` and returned by
@@ -249,9 +274,16 @@ pub struct GateOutcome {
 /// The report includes both the reduced outcome and the full
 /// list of per-obligation evaluations, so agents/CLIs can drill
 /// into individual verdicts without re-running evaluation.
+///
+/// Quality assessments are reported separately from obligations
+/// because they have different verdict semantics and severity-
+/// based blocking behavior. Both contribute to the single
+/// reduced `outcome`.
 #[derive(Debug, Clone, Serialize)]
 pub struct GateReport {
 	pub obligations: Vec<ObligationEvaluation>,
+	/// Quality-policy assessment evaluations (separate domain).
+	pub quality_assessments: Vec<GateQualityAssessmentEvaluation>,
 	pub outcome: GateOutcome,
 }
 
@@ -282,6 +314,167 @@ impl GateMode {
 			Self::Default => "default",
 			Self::Strict => "strict",
 			Self::Advisory => "advisory",
+		}
+	}
+}
+
+// ── Quality-Policy Assessment Types (Gate-Owned) ─────────────────────
+
+/// Assessment state: whether an assessment row exists for a policy.
+///
+/// Gate needs to distinguish "no assessment computed" from "assessment
+/// computed with specific verdict" to detect missing required assessments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GateAssessmentState {
+	/// Assessment row exists for this policy + snapshot.
+	Present,
+	/// No assessment row found (assessment not run or stale).
+	Missing,
+}
+
+impl GateAssessmentState {
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Present => "present",
+			Self::Missing => "missing",
+		}
+	}
+}
+
+/// Quality-policy kind (gate-owned mirror of storage enum).
+///
+/// Gate needs this for reporting and to understand whether the
+/// policy is comparative (requires baseline).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GateQualityPolicyKind {
+	AbsoluteMax,
+	AbsoluteMin,
+	NoNew,
+	NoWorsened,
+}
+
+impl GateQualityPolicyKind {
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::AbsoluteMax => "absolute_max",
+			Self::AbsoluteMin => "absolute_min",
+			Self::NoNew => "no_new",
+			Self::NoWorsened => "no_worsened",
+		}
+	}
+
+	/// Whether this policy kind requires a baseline snapshot.
+	pub fn is_comparative(self) -> bool {
+		matches!(self, Self::NoNew | Self::NoWorsened)
+	}
+}
+
+/// Quality-policy severity (gate-owned mirror of storage enum).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GateQualityPolicySeverity {
+	/// Gate-blocking: FAIL contributes to non-zero exit code.
+	Fail,
+	/// Informational: FAIL reported but does not block gate.
+	Advisory,
+}
+
+impl GateQualityPolicySeverity {
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Fail => "fail",
+			Self::Advisory => "advisory",
+		}
+	}
+}
+
+/// Quality-assessment computed verdict (gate-owned mirror).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum GateAssessmentVerdict {
+	Pass,
+	Fail,
+	NotApplicable,
+	NotComparable,
+}
+
+impl GateAssessmentVerdict {
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Pass => "PASS",
+			Self::Fail => "FAIL",
+			Self::NotApplicable => "NOT_APPLICABLE",
+			Self::NotComparable => "NOT_COMPARABLE",
+		}
+	}
+}
+
+/// Enriched quality-assessment fact for gate consumption.
+///
+/// One entry per active quality-policy declaration. The storage adapter
+/// joins declarations with assessment rows and produces this DTO.
+///
+/// If no assessment exists for a policy, `assessment_state = Missing`
+/// and the verdict/count fields are `None`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GateQualityAssessmentFact {
+	// ── Policy identity (from declaration) ──
+	/// Storage-assigned declaration UID.
+	pub policy_uid: String,
+	/// Human-readable policy ID (e.g., "QP-001").
+	pub policy_id: String,
+	/// Policy version.
+	pub policy_version: i64,
+	/// Policy kind (determines comparative vs absolute).
+	pub policy_kind: GateQualityPolicyKind,
+	/// Severity (determines gate-blocking vs advisory).
+	pub severity: GateQualityPolicySeverity,
+
+	// ── Assessment state ──
+	/// Whether an assessment row exists.
+	pub assessment_state: GateAssessmentState,
+
+	// ── Assessment data (present only when state = Present) ──
+	/// Computed verdict from the assessment.
+	pub computed_verdict: Option<GateAssessmentVerdict>,
+	/// Baseline snapshot UID (for comparative assessments).
+	pub baseline_snapshot_uid: Option<String>,
+	/// Count of measurements evaluated.
+	pub measurements_evaluated: Option<i64>,
+	/// Count of violations found.
+	pub violations_count: Option<usize>,
+}
+
+/// Evaluated quality-assessment result in the gate report.
+///
+/// Separate from `ObligationEvaluation` to preserve domain boundaries.
+/// Quality assessments and generic obligations reduce to one outcome
+/// but report separately.
+#[derive(Debug, Clone, Serialize)]
+pub struct GateQualityAssessmentEvaluation {
+	pub policy_id: String,
+	pub policy_version: i64,
+	pub policy_kind: String,
+	pub severity: String,
+	pub assessment_state: String,
+	pub computed_verdict: Option<String>,
+	pub is_comparative: bool,
+	pub violations_count: Option<usize>,
+}
+
+impl From<&GateQualityAssessmentFact> for GateQualityAssessmentEvaluation {
+	fn from(fact: &GateQualityAssessmentFact) -> Self {
+		Self {
+			policy_id: fact.policy_id.clone(),
+			policy_version: fact.policy_version,
+			policy_kind: fact.policy_kind.as_str().to_string(),
+			severity: fact.severity.as_str().to_string(),
+			assessment_state: fact.assessment_state.as_str().to_string(),
+			computed_verdict: fact.computed_verdict.map(|v| v.as_str().to_string()),
+			is_comparative: fact.policy_kind.is_comparative(),
+			violations_count: fact.violations_count,
 		}
 	}
 }

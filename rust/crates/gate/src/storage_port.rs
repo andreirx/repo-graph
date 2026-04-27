@@ -26,7 +26,7 @@
 use crate::errors::GateStorageError;
 use crate::types::{
 	GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
-	GateModuleViolationEvidence, GateRequirement, GateWaiver,
+	GateModuleViolationEvidence, GateQualityAssessmentFact, GateRequirement, GateWaiver,
 };
 
 /// Narrow read port for the gate policy layer.
@@ -118,4 +118,28 @@ pub trait GateStorageRead {
 		repo_uid: &str,
 		snapshot_uid: &str,
 	) -> Result<GateModuleViolationEvidence, GateStorageError>;
+
+	/// Return enriched quality-assessment facts for gate consumption.
+	///
+	/// Joins active quality-policy declarations for the repo with
+	/// assessment rows for the snapshot. Returns one entry per active
+	/// policy.
+	///
+	/// If no assessment exists for a policy, the entry has
+	/// `assessment_state = Missing` — this enables gate to detect
+	/// missing required assessments rather than silently passing.
+	///
+	/// The storage adapter:
+	///   1. Loads active quality-policy declarations (typed)
+	///   2. Loads assessment rows for the snapshot
+	///   3. Joins by policy_uid
+	///   4. Maps to gate-owned DTOs
+	///
+	/// Gate does NOT parse declaration JSON — storage provides all
+	/// required fields in the DTO.
+	fn get_quality_assessment_facts_for_gate(
+		&self,
+		repo_uid: &str,
+		snapshot_uid: &str,
+	) -> Result<Vec<GateQualityAssessmentFact>, GateStorageError>;
 }
