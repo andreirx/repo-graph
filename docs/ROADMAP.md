@@ -21,14 +21,13 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   false dead-code reports on glamCRM. Also fixes Lambda entrypoint suppression in `findDeadNodes`.
 - **Imported free-function call resolution:** TS/JS import-binding-assisted call
   resolution. repo-graph call_resolution_rate improved from ~15% to 33%.
-- **Agentic quality-control substrate:** measurement storage, AST-derived
+- **Quality discovery substrate:** measurement storage, AST-derived
   cyclomatic complexity, cognitive complexity, nesting depth, parameter count,
-  function length, coverage, churn, hotspots, risk, and gate threshold methods
-  exist. Quality-policy declarations and policy-backed assessments shipped
-  (`rmap declare quality-policy`, `rmap assess`). Missing product layer:
-  NPath complexity, no-new/worsened-quality gate mode, first-class exposure
-  in `orient`/`check`, and risk prioritization combining complexity with
-  churn/coverage/boundary violations.
+  function length, coverage, churn, hotspots, risk. Quality-policy declarations
+  and policy-backed assessments shipped as governance substrate
+  (`rmap declare quality-policy`, `rmap assess`). Missing discovery layer:
+  snapshot-to-snapshot quality diff, quality delta surfacing in `orient`/`check`,
+  risk prioritization combining complexity with churn/coverage/boundary violations.
 - **Streaming/batched indexing pipeline:** Linux kernel indexes successfully.
   - Resolver index built from row-at-a-time DB iterator (no bulk `.all()`).
   - Staged edges resolved in cursor-based batches (10K default).
@@ -599,7 +598,10 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - Diagnostics returned but not persisted (tech debt).
 - Unit tests (20) and integration tests (5) with `makefile-basic/` fixture.
 
-### Quality policy assessment surface
+### Quality policy assessment surface (governance substrate)
+Available governance/enforcement substrate. Not the primary product surface.
+See `docs/VISION.md` §Absolute Priority for discovery-first positioning.
+
 - `rmap declare quality-policy` — policy declarations over measurements.
   Supported policy kinds: `absolute_max`, `absolute_min`, `no_new`,
   `no_worsened`. Supported measurements: `cognitive_complexity`,
@@ -616,9 +618,10 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   `kind='quality_policy'` (shared declaration lifecycle with boundary,
   requirement, waiver kinds). `quality_assessments` is the dedicated
   assessment result table with FK to snapshot and policy declaration.
-- Deferred: quality-policy waiver overlay into gate/effective verdict
-  flow. Computed verdict is persisted; waiver suppression of effective
-  verdict is not yet wired.
+
+This is the enforcement substrate for teams that need CI blocking and
+formal compliance workflows. Discovery (snapshot diff, quality delta
+surfacing, risk prioritization) is the primary product direction.
 
 ### Rust CLI surfaces parity
 - `rmap surfaces list` — surface catalog with filters (`--kind`, `--runtime`,
@@ -645,13 +648,12 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 ### Near-term execution sequence
 
 This section reflects dependency-aware execution order, not strategic
-importance ranking. Strategic priorities (quality-control, daemon, delta
+importance ranking. Strategic priorities (quality discovery, daemon, delta
 indexing) are listed below in their own sections, but this sequence is
 what actually gets built next.
 
-**Correctness of read surfaces and trust contracts precedes daemonization.**
-Daemon hardens the execution boundary; trust/quality contracts must stabilize
-first.
+**Discovery surfaces precede enforcement refinement.**
+The agent needs to see what changed before it needs gate verdicts.
 
 1. **Trust overlay on read surfaces** — DONE
    Inline trust summary in callers, callees, path, dead, modules show,
@@ -663,42 +665,50 @@ first.
    and per-result dead_confidence. See `docs/cli/rmap-contracts.md` for
    output contract.
 
-3. **No-new / no-worsened quality gate mode**
-   Baseline-aware gate mode that fails only when a change introduces a new
-   violation or worsens an existing one. Comparability rules mandatory:
-   metric source/version mismatch returns NOT_COMPARABLE.
+3. **Snapshot-to-snapshot quality diff**
+   Compare two snapshots and surface what changed: new violations, worsened
+   measurements, improved measurements. This is discovery, not enforcement.
+   The agent learns "3 functions got more complex" not "gate pass/fail."
 
-4. **Agent-facing quality/risk surfacing in `rmap check` and `rmap orient`**
+4. **Quality delta surfacing in `rmap check` and `rmap orient`**
    `check` should include top complexity/risk deltas before agent hands off.
    `orient` should include current quality-risk hotspots for focused scope.
+   Focus-aware discovery: relevant quality signals for the code being touched.
 
-5. **Long-lived daemon** (see #3 below)
-   Only after read contracts and trust model are stable.
+5. **Comparability/identity caveats in diff output**
+   When snapshots are non-comparable (metric version mismatch, identity
+   drift), surface that explicitly. Honest comparison > forced verdict.
 
-6. **Seam expansion** (event/pubsub, persistence/schema, DI, registry/plugin)
+6. **Long-lived daemon** (see #3 below)
+   Only after discovery surfaces are stable.
+
+7. **Seam expansion** (event/pubsub, persistence/schema, DI, registry/plugin)
    Architectural extraction, not feature work.
 
 ---
 
-### 1. Agentic quality-control surface (remaining)
+### 1. Quality discovery surface (remaining)
+
+**The goal is discovery, not enforcement.** See `docs/VISION.md` §Absolute
+Priority. The agent needs to see what changed, what got worse, and where
+the risks are. Policy enforcement exists as available substrate.
 
 Quality-policy declarations, assessments, and baseline validation are
-shipped (see Shipped section). Remaining work completes the agent-control
-loop.
+shipped (see Shipped section). This is available governance substrate,
+not the primary next frontier.
 
-**Trust/correctness surfacing** (execution items 1-2 above)
+**Trust/correctness surfacing** (execution items 1-2)
 - Trust overlay on read surfaces — DONE
 - Dead-confidence stratification — DONE
 
-**Trend-aware quality enforcement** (execution item 3)
-- No-new/worsened-quality gate mode: baseline-aware mode that fails only
-  when a change introduces a new violation or worsens an existing one.
-- Comparability rules are mandatory: if metric source/version differs
-  between compared states, return NOT_COMPARABLE rather than fake a trend.
-- The policy infrastructure (`no_new`, `no_worsened` kinds) exists; the
-  gate mode integration and CLI flag (`--no-new`, `--no-worsened`) remain.
+**Quality discovery** (execution items 3-5)
+- Snapshot-to-snapshot quality diff: compare two snapshots, surface deltas.
+- Quality delta surfacing in `check` and `orient`: what got worse, what
+  got better, what is risky in the current scope.
+- Comparability/identity caveats: when snapshots are non-comparable,
+  surface that explicitly rather than forcing a verdict.
 
-**Agent-facing surface integration** (execution item 4)
+**Agent-facing surface integration**
 - `rmap check` should include top complexity/risk deltas before an agent
   hands off a change.
 - `rmap orient` should include current quality-risk hotspots for the
@@ -706,17 +716,21 @@ loop.
 - `rmap risk` should combine complexity + churn + coverage gap + boundary
   violations into prioritized risk assessments.
 
-**Support module: metric expansion** (deferred until needed)
-- NPath complexity for TypeScript/JavaScript first, to catch combinatorial
-  execution-path explosion that cyclomatic complexity can underreport.
-- Measurement version/source identifiers for every new metric so deltas
-  can reject non-comparable snapshots.
+**Available governance substrate** (shipped, not expanding)
+- Quality-policy declarations (`rmap declare quality-policy`)
+- Policy-backed assessments (`rmap assess`)
+- Comparative policies (`no_new`, `no_worsened` kinds)
+- Gate integration for CI blocking (works, not primary)
 
-**Why this remains strategically #1:**
-- It directly constrains agent-authored diffs with arithmetic.
-- It prevents structural drift while module/boundary/runtime work continues.
-- Absolute threshold policies are operational; trend-aware policies complete
-  the story for legacy codebases where cleanup is gradual.
+**Support module: metric expansion** (deferred until needed)
+- NPath complexity for combinatorial path explosion detection.
+- Measurement version/source identifiers for comparison rejection.
+
+**Why discovery is strategically #1:**
+- Agents need to see what changed before deciding what to do.
+- "3 functions got more complex" is actionable discovery.
+- "gate fail" is not actionable without the underlying discovery.
+- Risk prioritization helps agents focus on what matters.
 
 ### 2. Documentation inventory (shipped + remaining)
 Documentation files are first-class orientation evidence. The docs
@@ -785,12 +799,12 @@ response). Auto-start daemon on first command if absent. Progress
 rendering via stderr. Fallback to direct execution if daemon unavailable.
 
 **Dependency constraint:**
-Daemonization hardens the execution boundary. The trust/quality read
-contracts must stabilize first:
+Daemonization hardens the execution boundary. The discovery surfaces
+must stabilize first:
 - Trust overlay on read surfaces — DONE
-- Dead-confidence stratification — must complete
-- No-new/worsened gate mode — must complete
-- Agent-facing quality/risk surfacing — must complete
+- Dead-confidence stratification — DONE
+- Snapshot-to-snapshot quality diff — must complete
+- Quality delta surfacing in check/orient — must complete
 
 Only then does daemon work begin. This is correctness-before-latency
 sequencing.

@@ -1,5 +1,36 @@
 # Repo-Graph Vision
 
+## Absolute Priority: Discovery Over Enforcement
+
+**Discovery is the primary product goal. Enforcement is secondary.**
+
+Discovery means:
+- what exists now
+- what changed since baseline
+- what got worse
+- what got better
+- what is risky
+- where to look first
+
+Enforcement means:
+- policy declarations
+- gate verdicts
+- waiver semantics
+- audit trails
+- CI blocking behavior
+
+The enforcement machinery exists and works. It is not the core value proposition. An agent doing discovery needs measurements, snapshots, diffs, surfacing, and prioritization. It does not need increasingly elaborate policy-reduction logic.
+
+**Product priority order:**
+1. Structural discovery (modules, boundaries, seams, dependencies)
+2. Quality discovery (measurements, comparisons, risk ranking)
+3. Change discovery (what's new, what's worsened, what's improved)
+4. Enforcement (gate pass/fail, policy compliance) — useful but not primary
+
+When making product decisions, optimize for discovery clarity first. Do not add enforcement complexity that obscures discovery value.
+
+**Implication for CLI output:** A discovery-first CLI answers "what should the agent notice?" not "should CI block?" If output collapses too much meaning into pass/fail verdicts, it has failed as a discovery surface even if enforcement logic is correct.
+
 ## Core Direction
 
 Repo-graph is a deterministic engineering intelligence system, not a chat layer and not a generic code indexer.
@@ -88,11 +119,11 @@ The fourth layer changes more often because measurements are snapshot-scoped, bu
 
 The extraction layer (symbols, imports, calls) is the necessary foundation. But the value is in the architectural interpretation built on top of it.
 
-## Agentic Quality Control
+## Agentic Quality Discovery
 
 Agentic coding changes the failure mode of maintainability. A human reviewer can often interpret vague feedback like "this function is doing too much" because the reviewer supplies experience, memory, and architectural context. An agent cannot reliably infer those unstated constraints. Ambiguous quality feedback expands the interpretation space and often produces code that is more presentable without being structurally better.
 
-Repo-graph must therefore expose external, computable, non-negotiable quality signals:
+Repo-graph must therefore expose external, computable quality signals:
 
 - function and module complexity
 - cognitive complexity
@@ -104,27 +135,32 @@ Repo-graph must therefore expose external, computable, non-negotiable quality si
 - architecture cycles and boundary violations
 - unresolved-edge pressure and trust degradation
 
-These signals are not a replacement for engineering judgment. They define the computable subset of maintainability risk that agents are least equipped to enforce on their own.
+These signals are not a replacement for engineering judgment. They define the computable subset of maintainability risk that agents can reason about.
 
-The product boundary is important:
+**The primary value is discovery, not enforcement.**
 
-- Extractors and graph passes produce **measurements**.
-- Human-authored thresholds and exceptions are **policies**.
-- Gate/readiness verdicts are **assessments** derived from measurements plus policies.
-- Waivers suppress gate failure only as an effective verdict. They never erase computed facts.
+An agent needs to know:
+- what is the current quality state
+- what changed since baseline
+- what got worse (and by how much)
+- what got better
+- where the highest-risk areas are
+- what is inherited debt vs newly introduced
 
-This follows the four-layer truth model in `docs/architecture/measurement-model.txt`.
+This is answered by measurements and comparisons, not by policy verdicts.
 
-The long-term agent loop is:
+The enforcement layer (policies, assessments, gate verdicts, waivers) exists and works. It is useful for CI integration and formal compliance workflows. But it is secondary to the discovery surface. If an agent must run `gate` to learn what worsened, the product has failed at discovery.
+
+**The discovery-first agent loop:**
 
 1. Agent asks `orient` before changing code.
-2. Repo-graph returns architectural context plus current quality-risk signals.
+2. Repo-graph returns architectural context plus current quality signals.
 3. Agent changes code.
-4. Agent asks `check` before handing off.
-5. Repo-graph reports new or worsened structural risks as arithmetic facts.
-6. `gate` enforces policy according to the selected mode.
+4. Agent asks `check` to see what changed structurally and qualitatively.
+5. Repo-graph reports deltas: new risks, worsened measurements, improved measurements.
+6. Agent decides whether to proceed based on visible facts.
 
-The primary control mode should be **no new or worsened damage** before strict global cleanup. Existing large systems often contain legacy violations. The first operational win is preventing agents from making them worse while allowing planned refactors to reduce them over time.
+The gate/policy layer is available for teams that want hard enforcement. It is not the primary interaction model.
 
 ## Strategic Position
 
@@ -132,10 +168,12 @@ Repo-graph should not race platform vendors on generic local indexing features.
 It should own the layer that vendors are structurally less likely to prioritize:
 
 - portability across tools, agents, and model vendors
-- deterministic evidence trails
-- policy and governance enforcement
+- deterministic structural and quality discovery
+- cross-snapshot comparison and change visibility
 - cross-repo and fleet-level intelligence
-- auditable traceability from intent to runtime evidence
+- architectural understanding that persists across sessions
+
+Policy enforcement and auditable traceability are available for teams that need them. They are not the primary strategic differentiator.
 
 This keeps repo-graph useful even if major AI platforms provide built-in code indexing.
 
@@ -382,14 +420,13 @@ layer is the primary value frontier.
    violation checks, per-module rollups turn discovery into enforceable
    structure.
 
-3. **Agentic quality control surface.** Why now: agents need external
-   arithmetic constraints in the edit loop, not only human-readable
-   smell language. Cognitive complexity, NPath, function length,
-   threshold policies, and no-new/worsened-quality gates turn existing
-   measurements into enforceable structural control. This is built on
-   the existing four-layer truth model: measurements stay factual,
-   policies stay declarative, assessments derive verdicts, waivers
-   suppress effective failure only.
+3. **Quality discovery surface.** Why now: agents need to see what
+   changed qualitatively between snapshots. Complexity deltas, new
+   hotspots, worsened measurements, improved measurements, risk
+   ranking. This is discovery, not enforcement. The agent learns
+   "3 functions got more complex" and "1 file became a hotspot"
+   rather than "gate pass/fail." Policy enforcement exists for CI
+   integration but is secondary to discovery visibility.
 
 4. **Boundary/seam expansion.** Why now: HTTP and CLI boundaries are
    shipped. State boundaries slice 1 (FS-only) shipped. SDK/DB/cache
@@ -436,10 +473,11 @@ layer is the primary value frontier.
 - `supersedes_uid` lineage not exposed in `declare list --json` output
 
 **Current product priority:**
-Module/boundary/runtime substrate plus the agentic quality-control
-surface. The architectural layer tells agents where they are operating.
-The quality-control layer constrains what structural damage they are
-allowed to introduce. See Horizon 1 above.
+Module/boundary/runtime substrate plus quality discovery surface.
+The architectural layer tells agents where they are operating.
+The quality discovery layer tells agents what changed, what got
+worse, and where the risks are. Enforcement (gate/policy) exists
+but is secondary to discovery visibility.
 
 **What is NOT next:**
 - Fleet / cross-repo features (Horizon 3)

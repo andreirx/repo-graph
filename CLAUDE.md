@@ -6,8 +6,12 @@ Two CLI binaries: `rmap` (Rust, primary) and `rgr` (TypeScript, legacy).
 
 ## Mission
 
+**Discovery is the primary goal.** See `docs/VISION.md` §Absolute Priority.
+
 Current-state agentic discovery. Not history accumulation. Not vector search.
-The graph answers: "What exists now? Who calls what? What violates what?"
+The graph answers: "What exists now? What changed? What is risky? Where should I look?"
+
+Enforcement (policies, gate verdicts, waivers) exists as available substrate, not product center.
 
 ## Mandatory Architecture Rules
 
@@ -41,7 +45,7 @@ After changing code:
 
 - Correct first. Fast is a given with agentic coding.
 - No silent contract drift. If output shape changes, update contracts.
-- No hidden gate semantics. Every verdict must be explainable.
+- Discovery surfaces must be clear. An agent should see what changed, not just pass/fail.
 - No mixing extracted fact with inferred hint. Keep provenance clear.
 
 ## Testing Expectations
@@ -75,15 +79,14 @@ After changing code:
 
 | Topic | Location |
 |-------|----------|
-| Long-term direction | `docs/VISION.md` |
+| Vision and priorities | `docs/VISION.md` |
 | What's shipped/next | `docs/ROADMAP.md` |
 | Known limitations | `docs/TECH-DEBT.md` |
-| CLI contract (TS) | `docs/cli/v1-cli.txt` |
 | CLI contract (Rust) | `docs/cli/rmap-contracts.md` |
+| CLI contract (TS) | `docs/cli/v1-cli.txt` |
 | Database schema | `docs/architecture/schema.txt` |
 | Folder layout | `docs/architecture/project-structure.txt` |
 | Measurement model | `docs/architecture/measurement-model.txt` |
-| Gate/waiver contract | `docs/architecture/gate-contract.txt` |
 | Rust milestone | `docs/milestones/rmap-structural-v1.md` |
 
 ## Commands (Quick Reference)
@@ -99,23 +102,27 @@ pnpm run test:all           # Full TS + Rust acceptance
 pnpm run lint               # Run Biome linter
 pnpm run lint:fix           # Auto-fix
 
-# Before editing (rmap uses <db_path> <repo_uid>)
+# Discovery (rmap uses <db_path> <repo_uid>)
+rmap orient ./repo-graph.db repo-graph --focus "src/core"
+rmap explain ./repo-graph.db repo-graph "src/core/some-file.ts"
+rmap check ./repo-graph.db repo-graph
+rmap trust ./repo-graph.db repo-graph
+
+# Structural queries
 rmap callers ./repo-graph.db repo-graph <symbol>
 rmap callees ./repo-graph.db repo-graph <symbol>
 rmap imports ./repo-graph.db repo-graph <file>
-rmap trust ./repo-graph.db repo-graph
 
 # After editing
 rmap refresh ./repo-graph ./repo-graph.db
-rmap dead ./repo-graph.db repo-graph SYMBOL
 ```
 
-For full command reference, see `docs/cli/v1-cli.txt`.
+For full command reference, see `docs/cli/rmap-contracts.md`.
 
 ## Conventions
 
 - Use `pnpm` not npm.
-- All CLI output supports `--json`. Default is human-readable tables.
+- `rmap` (Rust) outputs JSON only. `rgr` (TS) supports `--json` with human-readable default.
 - No emojis in code or output.
 - Relative paths in DB, never absolute.
 - TEXT UIDs everywhere, no auto-increment integers.
