@@ -136,6 +136,7 @@
 //!     DTO-completeness exception, not a general invitation to
 //!     port display helpers.
 
+pub mod overlay;
 pub(crate) mod rules;
 pub mod service;
 pub mod storage_port;
@@ -163,3 +164,10 @@ pub use service::{
 	TrustComputationInput,
 };
 pub use storage_port::TrustStorageRead;
+
+// Trust overlay for query surfaces (inline trust in responses).
+// Note: per-result markers (DeadResultTrust, EdgeResultTrust,
+// assess_dead_confidence, ResultConfidence) are pub(crate) until
+// command contracts actually emit them. Currently only repo-level
+// TrustOverlaySummary is wired into CLI output.
+pub use overlay::TrustOverlaySummary;

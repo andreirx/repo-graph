@@ -471,6 +471,14 @@ fn run_callers(args: &[String]) -> ExitCode {
 	let count = callers.len();
 	let mut extra = serde_json::Map::new();
 	extra.insert("target".to_string(), serde_json::to_value(&target).unwrap());
+
+	// Trust overlay (Option A: only when repo has degradations).
+	if let Some(trust) = compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS") {
+		if trust.has_degradation() || !trust.caveats.is_empty() {
+			extra.insert("trust".to_string(), serde_json::to_value(&trust).unwrap());
+		}
+	}
+
 	let output = match build_envelope(
 		&storage, "graph callers", repo_uid, &snapshot,
 		serde_json::to_value(&callers).unwrap(), count, extra,
@@ -570,6 +578,14 @@ fn run_callees(args: &[String]) -> ExitCode {
 	let count = callees.len();
 	let mut extra = serde_json::Map::new();
 	extra.insert("target".to_string(), serde_json::to_value(&target).unwrap());
+
+	// Trust overlay (Option A: only when repo has degradations).
+	if let Some(trust) = compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS") {
+		if trust.has_degradation() || !trust.caveats.is_empty() {
+			extra.insert("trust".to_string(), serde_json::to_value(&trust).unwrap());
+		}
+	}
+
 	let output = match build_envelope(
 		&storage, "graph callees", repo_uid, &snapshot,
 		serde_json::to_value(&callees).unwrap(), count, extra,
@@ -684,6 +700,15 @@ fn run_path(args: &[String]) -> ExitCode {
 	// JSON to stdout (TS-compatible QueryResult envelope).
 	// TS wraps the single PathResult in a 1-element array.
 	let count = if path_result.found { 1 } else { 0 };
+
+	// Trust overlay (Option A: only when repo has degradations).
+	let mut extra = serde_json::Map::new();
+	if let Some(trust) = compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS+IMPORTS") {
+		if trust.has_degradation() || !trust.caveats.is_empty() {
+			extra.insert("trust".to_string(), serde_json::to_value(&trust).unwrap());
+		}
+	}
+
 	let output = match build_envelope(
 		&storage,
 		"graph path",
@@ -691,7 +716,7 @@ fn run_path(args: &[String]) -> ExitCode {
 		&snapshot,
 		serde_json::json!([path_result]),
 		count,
-		serde_json::Map::new(),
+		extra,
 	) {
 		Ok(v) => v,
 		Err(e) => {
@@ -1290,8 +1315,47 @@ fn run_orient(args: &[String]) -> ExitCode {
 		}
 	};
 
+	// ── Trust overlay (Option A: only when degraded) ─────────
+	// Orient uses CALLS+IMPORTS for comprehensive graph analysis.
+	// Use the exact snapshot from the result to ensure consistency
+	// (avoid race with concurrent indexing).
+	let snapshot = match storage.get_snapshot(&result.snapshot) {
+		Ok(Some(snap)) => snap,
+		Ok(None) | Err(_) => {
+			// Snapshot unavailable — emit result without trust overlay.
+			match serde_json::to_string_pretty(&result) {
+				Ok(json) => {
+					println!("{}", json);
+					return ExitCode::from(0);
+				}
+				Err(e) => {
+					eprintln!("error: {}", e);
+					return ExitCode::from(2);
+				}
+			}
+		}
+	};
+
+	// Convert result to mutable JSON Value to add trust field.
+	let mut output = match serde_json::to_value(&result) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Add trust section if degraded (briefing surface pattern).
+	if let Some(trust) = compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS+IMPORTS") {
+		if trust.has_degradation() || !trust.caveats.is_empty() {
+			if let serde_json::Value::Object(ref mut map) = output {
+				map.insert("trust".to_string(), serde_json::to_value(&trust).unwrap());
+			}
+		}
+	}
+
 	// ── Serialize and emit ───────────────────────────────────
-	match serde_json::to_string_pretty(&result) {
+	match serde_json::to_string_pretty(&output) {
 		Ok(json) => {
 			println!("{}", json);
 			ExitCode::from(0)
@@ -1566,7 +1630,46 @@ fn run_explain_cmd(args: &[String]) -> ExitCode {
 		}
 	};
 
-	match serde_json::to_string_pretty(&result) {
+	// ── Trust overlay (Option A: only when degraded) ─────────
+	// Explain uses CALLS+IMPORTS for comprehensive graph analysis.
+	// Use the exact snapshot from the result to ensure consistency
+	// (avoid race with concurrent indexing).
+	let snapshot = match storage.get_snapshot(&result.snapshot) {
+		Ok(Some(snap)) => snap,
+		Ok(None) | Err(_) => {
+			// Snapshot unavailable — emit result without trust overlay.
+			match serde_json::to_string_pretty(&result) {
+				Ok(json) => {
+					println!("{}", json);
+					return ExitCode::from(0);
+				}
+				Err(e) => {
+					eprintln!("error: {}", e);
+					return ExitCode::from(2);
+				}
+			}
+		}
+	};
+
+	// Convert result to mutable JSON Value to add trust field.
+	let mut output = match serde_json::to_value(&result) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Add trust section if degraded (briefing surface pattern).
+	if let Some(trust) = compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS+IMPORTS") {
+		if trust.has_degradation() || !trust.caveats.is_empty() {
+			if let serde_json::Value::Object(ref mut map) = output {
+				map.insert("trust".to_string(), serde_json::to_value(&trust).unwrap());
+			}
+		}
+	}
+
+	match serde_json::to_string_pretty(&output) {
 		Ok(json) => {
 			println!("{}", json);
 			ExitCode::from(0)
@@ -1867,6 +1970,19 @@ fn run_dead(args: &[String]) -> ExitCode {
 	let count = dead.len();
 	let mut extra = serde_json::Map::new();
 	extra.insert("kind_filter".to_string(), serde_json::json!(kind_filter));
+
+	// Trust overlay (Option A: only when repo has degradations).
+	// Dead-code reliability is especially relevant here since
+	// registry/plugin liveness is not modeled.
+	if let Some(trust) = compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS+IMPORTS") {
+		// For dead, always include trust if dead_code reliability is not HIGH,
+		// or if there are any degradation flags or caveats.
+		let dead_code_degraded = trust.reliability.dead_code.level != repo_graph_trust::types::ReliabilityLevel::HIGH;
+		if dead_code_degraded || trust.has_degradation() || !trust.caveats.is_empty() {
+			extra.insert("trust".to_string(), serde_json::to_value(&trust).unwrap());
+		}
+	}
+
 	let output = match build_envelope(
 		&storage, "graph dead", repo_uid, &snapshot,
 		serde_json::to_value(&dead).unwrap(), count, extra,
@@ -5619,6 +5735,14 @@ fn run_modules_show(args: &[String]) -> ExitCode {
 		serde_json::to_value(&warnings).unwrap(),
 	);
 
+	// Trust overlay (Option A: only when repo has degradations).
+	// Module dependencies are import-based, so graph_basis = "IMPORTS".
+	if let Some(trust) = compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "IMPORTS") {
+		if trust.has_degradation() || !trust.caveats.is_empty() {
+			extra_fields.insert("trust".to_string(), serde_json::to_value(&trust).unwrap());
+		}
+	}
+
 	// Build envelope (no results array for show — module is the main content)
 	let output = match build_envelope(
 		&storage,
@@ -6692,6 +6816,39 @@ fn build_envelope(
 	}
 
 	Ok(envelope)
+}
+
+// ── Trust overlay helpers ────────────────────────────────────────
+
+/// Compute a trust overlay summary for query surface envelopes.
+///
+/// Returns `None` if the trust report cannot be assembled (e.g.,
+/// missing diagnostics). Errors are logged to stderr but do not
+/// fail the command.
+fn compute_trust_overlay_for_snapshot(
+	storage: &repo_graph_storage::StorageConnection,
+	repo_uid: &str,
+	snapshot: &repo_graph_storage::types::Snapshot,
+	graph_basis: &str,
+) -> Option<repo_graph_trust::TrustOverlaySummary> {
+	use repo_graph_trust::{assemble_trust_report, TrustOverlaySummary};
+
+	let toolchain_json = snapshot.toolchain_json.as_deref();
+	let basis_commit = snapshot.basis_commit.as_deref();
+
+	match assemble_trust_report(
+		storage,
+		repo_uid,
+		&snapshot.snapshot_uid,
+		basis_commit,
+		toolchain_json,
+	) {
+		Ok(report) => Some(TrustOverlaySummary::from_report(&report, graph_basis)),
+		Err(e) => {
+			eprintln!("warning: failed to assemble trust overlay: {}", e);
+			None
+		}
+	}
 }
 
 // ── surfaces command ─────────────────────────────────────────────
