@@ -1344,3 +1344,31 @@ depend on `ports`. This adds one crate but restores the dependency rule.
 narrow (3 methods). The debt is documented; resolution can be prioritized
 when the port interface needs to evolve or when a second storage backend
 appears.
+
+## Rust CLI (`rmap`) — Temporary Gaps
+
+The Rust CLI is the primary binary. These are temporary gaps to be closed,
+not intentional design differences.
+
+For intentional contract differences (design decisions), see
+`docs/cli/rmap-contracts.md`.
+
+- **`--edge-types` on callers/callees:** Accepts CALLS, INSTANTIATES, READS,
+  WRITES only. TS accepts all 18 edge types.
+
+- **No `--min-lines` filter on dead:** Not implemented.
+
+- **No `--json` flag:** Always JSON output. No table format option.
+
+- **No `graph metrics` command:** Not ported yet.
+
+- **`path` command:** Symbol-only endpoints, CALLS+IMPORTS fixed, max-depth 8
+  fixed. No `--edge-types` or `--max-depth` flags.
+
+- **`imports` command:** One-hop only (no `--depth`), file paths only (no
+  module/symbol fallback).
+
+- **`trust` command envelope:** Does not use QueryResult wrapper. Has own
+  report shape (matching TS).
+
+- **`index` and `refresh`:** Use stderr for progress, no JSON output.

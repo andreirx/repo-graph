@@ -1,484 +1,128 @@
 # Repo-Graph
 
-Deterministic code graph tool for analyzing codebases. Multi-language (TypeScript, Rust, Java, Python, C/C++). CLI over SQLite. Produces structured JSON for AI agent consumption.
+Deterministic code graph tool for AI agent consumption. Multi-language. CLI over SQLite.
 
-Two CLI binaries:
-- **`rmap`** — Rust CLI. The primary binary for agent-facing commands (`orient`, `check`, `explain`) and structural graph queries. All new product surface ships here.
-- **`rgr`** — TypeScript CLI. The original implementation. Still used for TS-side parity checks and features not yet ported to Rust. Not being renamed.
+Two CLI binaries: `rmap` (Rust, primary) and `rgr` (TypeScript, legacy).
 
-## What this is
+## Mission
 
-A CLI tool that indexes source code repositories into a queryable graph stored in SQLite. Nodes are symbols, files, modules, endpoints. Edges are typed relationships (CALLS, IMPORTS, IMPLEMENTS, etc.). Every fact carries evidence and resolution (static/dynamic/inferred).
+Current-state agentic discovery. Not history accumulation. Not vector search.
+The graph answers: "What exists now? Who calls what? What violates what?"
 
-Not a chatbot. Not a vector DB. A deterministic graph query engine.
+## Mandatory Architecture Rules
 
-## Design principle: AI agent perspective
+1. **Dependency rule:** inward only. Core never imports adapters or CLI.
+2. **Support module first:** build support libraries, then implement features using them.
+3. **Storage is adapter:** domain logic never lives in storage or CLI layers.
+4. **Docs are primary:** documentation inventory is the primary surface; semantic facts are secondary derived hints.
+5. **Deterministic output:** same input → same output. No randomness, no order jitter.
+6. **Explicit degradation:** `null` = unknown, empty = known-zero. Never conflate.
 
-When designing command output shapes and support module interfaces, always ask:
+## Implementation Workflow
 
-**"What would I want to know as an AI agent? What would help me reason about this code? How would I write the query?"**
+Before changing code:
+1. Read relevant design docs in `docs/architecture/` or `docs/design/`.
+2. Use `rmap` to understand callers, callees, imports of what you're touching.
+3. Confirm which support module owns the logic vs. which adapter/CLI wires it.
 
-This means:
-- **Normalized vectors over opaque maps.** An agent needs to iterate, filter, and correlate. Maps hide structure; vectors expose it.
-- **Exact identities over path strings.** An agent needs stable references for follow-up commands. Include `module_uid`, `module_key`, `canonical_root_path` — not just one.
-- **Weighted edges over plain neighbor lists.** An agent needs to know "who" and "how strongly." Include `import_count`, `source_file_count` per neighbor.
-- **Inline violations, not counts alone.** Violations are priority signals. Forcing a second command is friction.
-- **Explicit degradation state.** `null` means unknown; empty means known-zero. An agent must distinguish "no violations" from "violations unavailable."
-- **Deterministic ordering.** An agent may diff outputs across runs. Sort by meaningful keys (import weight, then path or UID).
+Build order:
+1. Support module (pure domain logic, tested in isolation)
+2. Storage port + adapter implementation
+3. Feature wiring in CLI
+4. Tests (unit → integration → smoke on real repos)
+5. Documentation updates
 
-The CLI is the agent's primary interface. Every output shape decision should pass the test: "Does this help an AI agent reason about the codebase without unnecessary follow-up commands?"
+After changing code:
+1. Run relevant test suite (`pnpm test`, `cargo test -p <crate>`).
+2. Re-index with `rmap refresh ./repo-graph ./repo-graph.db`.
+3. Document any debt immediately in `docs/TECH-DEBT.md`.
 
-## Design principle: TS as prior art, not spec
+## Quality Bar
 
-The TypeScript implementation is the original prototype. It is:
-- **Evidence** of what worked in practice
-- **Prior art** showing proven computations and data shapes
-- **Reference** for parity where parity is explicitly required
+- Correct first. Fast is a given with agentic coding.
+- No silent contract drift. If output shape changes, update contracts.
+- No hidden gate semantics. Every verdict must be explainable.
+- No mixing extracted fact with inferred hint. Keep provenance clear.
 
-It is **not** automatically the spec for Rust development.
+## Testing Expectations
 
-The spec for new Rust surfaces comes from:
-1. **Current product goals** — what does the Rust CLI need to accomplish?
-2. **Current architecture boundaries** — where do responsibilities live in the Rust crate graph?
-3. **Agent-usefulness requirements** — what helps an AI agent make decisions?
-4. **Explicit contracts chosen now** — not inherited assumptions from TS
+- Unit tests for pure functions and support modules.
+- Integration tests against fixture repos in `test/fixtures/`.
+- Smoke validation on real repos before declaring slice complete.
 
-When porting or extending:
-- Read TS to understand what exists
-- Question whether the TS design was optimal or just first
-- Design for Rust's current needs, using TS as input
-- Do not default to "mirror TS" without explicit justification
+**Validation repos** (use for smoke runs, document results in slice notes):
+- Internal: `repo-graph`, `../amodx`, `../glamCRM`, `../hexmanos`
+- External: `../legacy-codebases/spring-petclinic`, `sqlite`, `nginx`, `swupdate`, `linux`
 
-Common traps to avoid:
-- Assuming TS persistence patterns are correct for Rust
-- Porting TS storage schemas without questioning freshness/invalidation models
-- Treating TS command shapes as contracts when they were exploratory
-- Anchoring on TS slice boundaries when Rust architecture suggests different cuts
+## Documentation and Debt Recording
 
-When in doubt: stop and make an explicit architectural decision rather than defaulting to TS behavior.
+- Record technical debt immediately in `docs/TECH-DEBT.md`.
+- Record Rust CLI temporary gaps in `docs/TECH-DEBT.md`.
+- Record Rust CLI intentional contracts in `docs/cli/rmap-contracts.md`.
+- Update `docs/ROADMAP.md` when shipping or deferring features.
+- Do not accumulate slice history in CLAUDE.md.
 
-## Architecture
+## Forbidden Patterns
 
-Clean Architecture. Dependency rule: inward only.
+- Do not put domain logic in CLI handlers or storage adapters.
+- Do not erase computed facts under policy overlays — overlay, don't replace.
+- Do not treat documentation as semantic facts only — docs are primary evidence.
+- Do not use history accumulation as product center — current-state discovery only.
+- Do not default to "mirror TS" without explicit justification.
+- Do not store summaries of obvious code — store surprises, constraints, hazards.
 
-```
-src/core/model/          Domain entities (Node, Edge, Snapshot, Declaration). Zero external deps.
-src/core/ports/          Interfaces (StoragePort, ExtractorPort, IndexerPort). Implemented by adapters.
-src/core/classification/ Unresolved-edge classifier, blast-radius derivation, framework-boundary detection, boundary matcher (HTTP + CLI).
-src/core/trust/          Trust reporting: reliability rules, service orchestrator.
-src/adapters/extractors/ Tree-sitter extractors: typescript/, rust/, java/, python/, cpp/.
-src/adapters/enrichment/ Post-index semantic enrichment: TS TypeChecker, Rust rust-analyzer LSP.
-src/adapters/config/     Config readers: tsconfig-reader, cargo-reader, gradle-reader, python-deps-reader.
-src/adapters/storage/    SQLite storage (migrations 001-008).
-src/adapters/indexer/    Multi-language indexer: file routing, edge resolution, classification.
-src/cli/                 Commander-based CLI. Depends on ports, not adapters directly.
-src/main.ts              Composition root. Wires all extractors and adapters.
-```
+## Canonical Doc Map
 
-Nothing in `core/` imports from `adapters/` or `cli/`.
+| Topic | Location |
+|-------|----------|
+| Long-term direction | `docs/VISION.md` |
+| What's shipped/next | `docs/ROADMAP.md` |
+| Known limitations | `docs/TECH-DEBT.md` |
+| CLI contract (TS) | `docs/cli/v1-cli.txt` |
+| CLI contract (Rust) | `docs/cli/rmap-contracts.md` |
+| Database schema | `docs/architecture/schema.txt` |
+| Folder layout | `docs/architecture/project-structure.txt` |
+| Measurement model | `docs/architecture/measurement-model.txt` |
+| Gate/waiver contract | `docs/architecture/gate-contract.txt` |
+| Rust milestone | `docs/milestones/rmap-structural-v1.md` |
 
-## Key design decisions
+## Commands (Quick Reference)
 
-Read `docs/architecture/` for full context. Summary:
+```bash
+# Build and test
+pnpm run build              # Build TypeScript
+pnpm run test               # TS tests (includes CLI integration)
+pnpm run test:rust          # All Rust crates
+pnpm run test:all           # Full TS + Rust acceptance
 
-- **SQLite is the local backend.** Portable schema designed for future Postgres central backend.
-- **TEXT UIDs everywhere.** No auto-increment integers as identity. Globally portable.
-- **Relative paths.** All file paths in the DB are repo-relative. Never absolute.
-- **Four data categories:** Facts (nodes/edges, confidence 1.0), Measurements (deterministic metrics), Declarations (human-supplied), Inferences (computed, carry confidence). Stored in separate tables.
-- **18 canonical edge types.** Each edge has a `resolution` (static/dynamic/inferred) and `extractor` (name:version).
-- **Framework extractors are the differentiation** (planned v2). Base Tree-sitter extraction is commodity. Express/NestJS/Spring route extraction will capture edges invisible to import analysis.
+# Lint
+pnpm run lint               # Run Biome linter
+pnpm run lint:fix           # Auto-fix
 
-## Commands
+# Before editing (rmap uses <db_path> <repo_uid>)
+rmap callers ./repo-graph.db repo-graph <symbol>
+rmap callees ./repo-graph.db repo-graph <symbol>
+rmap imports ./repo-graph.db repo-graph <file>
+rmap trust ./repo-graph.db repo-graph
 
-```
-pnpm run build                Build TypeScript
-pnpm run test                 Build + run all default TS tests (includes CLI integration)
-pnpm run test:int             Run TS integration tests only (test/adapters)
-pnpm run test:cli             Build + run CLI integration tests only (test/cli)
-pnpm run test:rust                   Run ALL Rust workspace crates (detectors + storage + classification + trust + indexer + ts-extractor + repo-index + rgr)
-pnpm run test:parity                 Run the detector cross-runtime parity harness (TS half + Rust half)
-pnpm run test:storage:parity         Run the storage cross-runtime parity harness (TS half + Rust half)
-pnpm run test:classification:parity  Run the classification cross-runtime parity harness (TS half + Rust half)
-pnpm run test:trust:parity           Run the trust cross-runtime parity harness (TS half + Rust half)
-pnpm run test:indexer:parity         Run the indexer cross-runtime parity harness (TS half + Rust half)
-pnpm run test:ts-extractor:parity   Run the ts-extractor cross-runtime parity harness (TS half + Rust half)
-pnpm run test:interop                Run the cross-runtime DB interop test (Rust writes SQLite, TS reads)
-pnpm run test:all                    Composite acceptance: full default TS suite + full Rust workspace
-pnpm run test:live            Run live external-tool integration tests (test/live, opt-in)
-pnpm run lint                 Run Biome linter
-pnpm run lint:fix             Auto-fix lint issues
-```
-
-The Rust scripts (`test:rust`, `test:parity`, `test:storage:parity`,
-`test:classification:parity`, `test:trust:parity`,
-`test:indexer:parity`, `test:ts-extractor:parity`, `test:interop`,
-`test:all`) shell out to `cargo` and require a Rust toolchain. The
-pinned channel lives in `rust/rust-toolchain.toml`. If `cargo` is not
-on PATH the scripts fail fast with an actionable error pointing at
-rustup. TS-only contributors who never touch the Rust crates can
-ignore these scripts; `pnpm test` remains unchanged and does not
-require cargo.
-
-`test:rust` runs `cargo test --workspace` which executes every Rust
-crate's unit tests + integration tests, including all six parity test
-files (`rust/crates/detectors/tests/parity.rs`,
-`rust/crates/storage/tests/parity.rs`,
-`rust/crates/classification/tests/parity.rs`,
-`rust/crates/trust/tests/parity.rs`,
-`rust/crates/indexer/tests/parity.rs`, and
-`rust/crates/ts-extractor/tests/parity.rs`). The dedicated
-`test:parity`, `test:storage:parity`, `test:classification:parity`,
-`test:trust:parity`, `test:indexer:parity`, and
-`test:ts-extractor:parity` scripts are for targeted cross-runtime
-verification: each runs BOTH the TS half (via vitest against the
-corresponding shared fixture corpus) AND the Rust half (via the
-qualified `cargo test -p <crate> --test parity` invocation). They
-share the same cargo-guard prefix.
-
-The six parity surfaces (detector parity in `parity-fixtures/`,
-storage parity in `storage-parity-fixtures/`, classification parity
-in `classification-parity-fixtures/`, trust parity in
-`trust-parity-fixtures/`, indexer parity in
-`indexer-parity-fixtures/`, ts-extractor parity in
-`ts-extractor-parity-fixtures/`) are deliberately independent scripts.
-A detector-code change runs `test:parity` for fast feedback without
-paying the storage, classification, trust, indexer, or extractor harness
-cost; a storage-code change runs `test:storage:parity`; a
-classification-code change runs `test:classification:parity`; a
-trust-code change runs `test:trust:parity`; an indexer-code change
-runs `test:indexer:parity`. `test:all` transitively covers all six
-(via `test` + `test:rust`) for contributors who want comprehensive
-coverage in one command.
-
-`pnpm run test:interop` is a separate cross-runtime acceptance surface
-that builds the Rust `rmap` binary, indexes a checked-in fixture
-repo into a temp SQLite file, then opens that file from the TS storage
-adapter and verifies real read-side operations succeed. It proves that
-Rust-written databases are consumable by the existing TS product layer.
-
-`pnpm run test:live` is a peer surface that runs the live external-tool
-integration tests under `test/live/` (currently jdtls and rust-analyzer
-hover-resolver tests). These are EXCLUDED from `pnpm run test` and
-`pnpm run test:all` because their pass/fail depends on external language
-servers being installed AND in a healthy workspace state. They self-skip
-gracefully when the required tool is missing from PATH, but they cannot
-detect tool-state corruption (jdtls workspace drift, rust-analyzer
-indexing race) and therefore are not admissible as a deterministic
-acceptance baseline. Run them explicitly when investigating enrichment
-behavior; do not rely on them for slice closure evidence.
-
-## Rust CLI (`rmap`)
-
-Milestone: `rmap-structural-v1`. See `docs/milestones/rmap-structural-v1.md`
-for full contracts, slice inventory, and deferred items.
-
-The Rust binary `rmap` (crate `repo-graph-rgr`) is the Rust-side
-CLI. It produces JSON-only output on stdout and uses stderr for errors.
-Exit codes: 0 success, 1 usage error, 2 runtime error.
-
-Commands (structural: Rust-7B through Rust-20, governance: Rust-22+):
-
-```
-rmap index      <repo_path> <db_path>              # Full index to SQLite
-rmap refresh    <repo_path> <db_path>              # Delta refresh
-rmap trust      <db_path> <repo_uid>               # Trust report
-rmap callers    <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callers (one hop)
-rmap callees    <db_path> <repo_uid> <symbol> [--edge-types <types>]  # Direct callees (one hop)
-rmap path       <db_path> <repo_uid> <from> <to>   # Shortest path (CALLS+IMPORTS, depth 8)
-rmap imports    <db_path> <repo_uid> <file_path>   # File import chain (one hop, IMPORTS)
-rmap violations <db_path> <repo_uid>               # Unified boundary violations (declared + discovered-module)
-rmap gate       <db_path> <repo_uid> [--strict | --advisory]  # CI gate (4 methods, waivers, 3 modes)
-rmap orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]  # Agent orientation surface (rgr.agent.v1)
-rmap check      <db_path> <repo_uid>                                                  # Pre-action trust/safety check
-rmap churn      <db_path> <repo_uid> [--since <expr>]                                 # Query-time per-file git churn (default: 90.days.ago)
-rmap hotspots   <db_path> <repo_uid> [--since <expr>]                                 # Hotspots: churn × complexity (lines_changed * sum_complexity)
-rmap metrics    <db_path> <repo_uid> [--kind <k>] [--limit <n>] [--sort <f>]         # Query measurements (function_length, cognitive_complexity, etc.)
-rmap coverage   <db_path> <repo_uid> <coverage_json_path>                            # Import Istanbul/c8 coverage (file-level line_coverage)
-rmap risk       <db_path> <repo_uid> [--since <expr>]                                # Risk: hotspot × coverage gap (files with BOTH only)
-rmap docs list    <db_path> <repo_uid>                                               # Documentation inventory (primary surface)
-rmap docs extract <db_path> <repo_uid>                                               # Extract semantic hints (secondary)
-rmap declare boundary <db_path> <repo_uid> <module> --forbids <target> [--reason <text>]
-rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
-rmap declare waiver <db_path> <repo_uid> <req_id> --requirement-version <n> --obligation-id <id> --reason <text> [--expires-at <iso>] [--created-by <a>] [--rationale-category <c>] [--policy-basis <t>]
-rmap declare deactivate <db_path> <declaration_uid>   # Soft-delete (idempotent)
-rmap declare supersede boundary <db_path> <old_uid> --forbids <target> [--reason <text>]
-rmap declare supersede requirement <db_path> <old_uid> --obligation-id <id> --method <m> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
-rmap declare supersede waiver <db_path> <old_uid> --reason <text> [--expires-at <iso>] [--created-by <a>] [--rationale-category <c>] [--policy-basis <t>]
-rmap dead       <db_path> <repo_uid> [kind]        # Unreferenced nodes (excludes resource kinds)
-rmap cycles     <db_path> <repo_uid>               # Module-level IMPORTS cycles
-rmap stats      <db_path> <repo_uid>               # Module structural metrics
-rmap resource readers <db_path> <repo_uid> <resource_stable_key>  # Symbols with READS edges to resource
-rmap resource writers <db_path> <repo_uid> <resource_stable_key>  # Symbols with WRITES edges to resource
-rmap modules list <db_path> <repo_uid>  # Module catalog with per-module rollups (sorted by path)
-rmap modules show <db_path> <repo_uid> <module>  # Module briefing: identity, rollups, weighted neighbors, violations
-rmap modules files <db_path> <repo_uid> <module>  # Files owned by a module (sorted by path)
-rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]  # Cross-module dependency edges
-rmap modules violations <db_path> <repo_uid>  # Discovered-module boundary violations
-rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]  # Declare discovered-module boundary
-rmap surfaces list <db_path> <repo_uid> [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>]  # Surface catalog
-rmap surfaces show <db_path> <repo_uid> <surface_ref>  # Surface detail with evidence
+# After editing
+rmap refresh ./repo-graph ./repo-graph.db
+rmap dead ./repo-graph.db repo-graph SYMBOL
 ```
 
-Read-side commands (callers, callees, path, imports, violations, dead,
-cycles, stats, modules list, modules files, modules deps, modules violations, surfaces list) emit a TS-compatible QueryResult JSON envelope:
-
-```json
-{
-  "command": "graph <cmd>",
-  "repo": "<repo name>",
-  "snapshot": "<snapshot_uid>",
-  "snapshot_scope": "full" | "incremental",
-  "basis_commit": "<hash>" | null,
-  "results": [...],
-  "count": N,
-  "stale": true | false
-}
-```
-
-Symbol resolution (callers, callees) uses exact match only:
-stable_key, then qualified_name, then name. SYMBOL kind only.
-
-Known Rust CLI divergences from TS CLI:
-- `--edge-types` on callers/callees accepts CALLS, INSTANTIATES, READS, WRITES only (TS accepts all 18 edge types)
-- No `--min-lines` filter on dead
-- No `--json` flag (always JSON, no table format)
-- No `graph metrics` command yet
-- `path` is symbol-only endpoints, CALLS+IMPORTS fixed, max-depth 8 fixed (no `--edge-types` or `--max-depth`)
-- `imports` is one-hop only (no `--depth`), file paths only (no module/symbol fallback)
-- `trust` command envelope does not use the QueryResult wrapper
-  (trust has its own report shape, matching TS)
-- `index` and `refresh` use stderr for progress, no JSON output
-- `gate` waiver overlay: PASS obligations are not waivable (Rust-25
-  deliberate correction — TS unconditionally marks WAIVED, Rust only
-  suppresses non-PASS verdicts; see TECH-DEBT.md)
-- `violations` output shape (RS-MG-10): `results` is an object with
-  `declared_boundary_violations` and `discovered_module_violations`
-  sections, plus `stale_declarations` and counts for each. TS uses
-  a flat array. Exit semantics unchanged (always 0 on success).
-- `orient` uses `<db_path> <repo_uid>` positional pair (Rust-43B
-  divergence). The agent orientation contract's target shape is
-  `rgr orient <repo_name>` with a repo registry, but the Rust CLI
-  has no registry yet. Repo-name invocation is deferred to the
-  binary rename / registry slice (Rust-43C+). The `<db_path>
-  <repo_uid>` shape matches every other Rust CLI command and keeps
-  `orient` consistent with the current surface.
-- `orient --focus` supports file, path-area (subtree), and symbol
-  focus (shipped in Rust-44/45). Focus resolution precedence:
-  exact FILE path → path-area content / exact MODULE → stable key
-  (FILE/MODULE/SYMBOL) → exact symbol name → no_match. Symbol
-  stable keys that match SYMBOL nodes route to the symbol pipeline;
-  ambiguous symbol names return a bounded candidates array (max 5).
-  `FocusNotImplementedYet` is no longer returned for any supported
-  focus kind.
-- `modules list` envelope includes `rollups_degraded` (boolean) and
-  `warnings` (string array). When discovered-module boundary policy
-  parsing fails, the catalog still returns (exit 0) with
-  `rollups_degraded: true`, a warning message, and `violation_count:
-  null` on each module. Other rollup fields (file counts, dependency
-  counts, dead symbol counts) remain populated. This is deliberate:
-  the catalog is an orientation surface and must survive policy
-  corruption. The `modules violations` and `violations` commands
-  remain strict — malformed policy exits 2 there.
-- `modules show` is a module briefing (not list). Output shape differs
-  from the standard QueryResult envelope: no `results`/`count`, instead
-  `module` (identity), `rollups`, `outbound_dependencies` (weighted),
-  `inbound_dependencies` (weighted), `violations` (source-side only).
-  Resolution: `canonical_root_path` exact, then `module_key` exact.
-  Unknown module exits 1 (not 2). Same degradation contract as
-  `modules list`: on policy parse failure, `violation_count: null`,
-  `violations: null`, `rollups_degraded: true`.
-- `modules violations` is canonical for discovered-module boundary
-  violations. TS CLI does not have an equivalent command (`rgr arch
-  violations` uses a different selector domain). Output includes
-  `diagnostics` object reporting derivation counts (imports_edges_total,
-  imports_source_no_module, imports_target_no_module, etc.) so callers
-  can detect degraded graphs where ownership gaps suppress violations.
-- Measurement commands (`churn`, `hotspots`, `risk`): designed for
-  query-time computation, not persistence-first. Git is the
-  authoritative history source. `repo-graph-git` crate wraps git CLI.
-  TS implementation is reference, not spec. Explicit anchoring for
-  gate integration is a future opt-in, not automatic. (RS-MS-0 lock)
-
-## Native dependency note
-
-`better-sqlite3` is a native Node.js addon. The compiled binary is keyed to the **active Node ABI** at rebuild time, not to the version it was first installed with.
-
-This repo pins Node `v22.21.1` via `.nvmrc` and `.tool-versions`. `package.json` declares `engines.node: ">=22 <23"` as the safety envelope (NODE_MODULE_VERSION 127 across all v22.x). Run `nvm use` (or your version manager equivalent) before any install or rebuild to align with the pinned version.
-
-If you switch Node versions afterward (e.g. `nvm use 24`), the binary becomes invalid and produces `NODE_MODULE_VERSION` mismatch errors. Fix:
-
-```
-pnpm rebuild better-sqlite3
-```
-
-The rebuild only fixes the binary for whichever Node is active when you run it. Switching Node again requires another rebuild. **If the binary was built under a different Node, run `nvm use && pnpm rebuild better-sqlite3` before running tests or invoking the CLI** — otherwise the failure surfaces inside test output or `rgr` invocation, not at install time.
-
-## Reference docs
-
-See `docs/ROADMAP.md` for the product roadmap (what is shipped, what is next, what is deferred).
-See `docs/TECH-DEBT.md` for known limitations and test-scope debt.
-See `docs/cli/v1-cli.txt` for the CLI command surface.
-See `docs/architecture/schema.txt` for the database schema.
-See `docs/architecture/project-structure.txt` for the folder layout.
-See `docs/architecture/measurement-model.txt` for the four-layer truth model.
-See `docs/architecture/versioning-model.txt` for toolchain provenance.
-See `docs/architecture/gate-contract.txt` for the normative gate/waiver/verdict contract.
-See `docs/architecture/annotations-contract.txt` for the normative provisional-annotations contract.
-See `docs/milestones/rmap-structural-v1.md` for the Rust CLI structural milestone (commands, contracts, deferred items).
+For full command reference, see `docs/cli/v1-cli.txt`.
 
 ## Conventions
 
 - Use `pnpm` not npm.
 - All CLI output supports `--json`. Default is human-readable tables.
-- Tests use fixture codebases in `test/fixtures/` with known-good expected graphs.
 - No emojis in code or output.
-- External validation repos live in `../legacy-codebases/` (sibling to repo-graph), not `/tmp/`.
+- Relative paths in DB, never absolute.
+- TEXT UIDs everywhere, no auto-increment integers.
 
-## IMPORTANT: Use rgr For Every Structural Change
+## Native Dependency Note
 
-**MANDATORY.** Before modifying any file in this codebase, use `rgr` to understand what you are touching. After completing work, re-index and verify.
-
-This is not optional. Every session that skipped rgr produced avoidable mistakes: missed callers, broken stable-key contracts, wrong file counts, undetected regressions. Every session that used rgr caught issues earlier and produced cleaner code.
-
-**Before making changes:**
-- `rgr graph callers repo-graph <symbol>` — who depends on what you're changing?
-- `rgr graph callees repo-graph <symbol>` — what does it call?
-- `rgr graph imports repo-graph <file>` — what does this file import?
-- `rgr graph stats repo-graph` — module stability/abstraction before touching it
-- `rgr trust repo-graph` — current extraction quality baseline
-
-**After making changes:**
-- `rgr repo refresh repo-graph` — re-index to pick up new code
-- `rgr boundary summary repo-graph` — verify boundary facts if boundary code changed
-- `rgr graph dead repo-graph --kind SYMBOL` — check for new dead symbols
-
-**In every response, include a brief rgr usage report:**
-- What queries were run
-- What was learned from them
-- What the alternative would have been (grep, reading files, guessing)
-- Whether rgr saved time or caught something grep would have missed
-
-Known rgr limitations on this codebase:
-- Type-only imports (`import type { X }`) are invisible to the import graph
-- `obj.method()` calls with unresolved receiver types show as unresolved
-- Import-binding-assisted resolution helps but aliased imports are not yet resolved
-- Framework-liveness inferences suppress some dead-code false positives but not all
-
-If rgr is not on PATH, register it: `ln -sf "$(pwd)/dist/cli/index.js" /usr/local/bin/rgr`
-
-Commands reference:
-
+`better-sqlite3` is keyed to Node ABI. If you switch Node versions:
 ```bash
-# Repository management
-rgr repo add .                           # Register this repo
-rgr repo index repo-graph                # Full index (<1s)
-rgr repo status repo-graph               # Current snapshot, toolchain provenance
-rgr repo refresh repo-graph              # Delta refresh (reuses unchanged files)
-rgr repo list                            # All registered repos
-rgr repo remove repo-graph               # Unregister
-
-# Structural graph queries
-rgr graph callers repo-graph <symbol>    # Who calls this?
-rgr graph callers repo-graph <symbol> --edge-types CALLS,INSTANTIATES
-rgr graph callees repo-graph <symbol>    # What does this call?
-rgr graph imports repo-graph <file>      # Import chain
-rgr graph path repo-graph <from> <to>    # Shortest path between two symbols
-rgr graph dead repo-graph --kind SYMBOL  # Unreferenced exported symbols
-rgr graph cycles repo-graph              # Module-level dependency cycles
-
-# Architecture & governance
-rgr arch violations repo-graph           # IMPORTS edges crossing forbidden boundaries
-rgr graph obligations repo-graph         # Evaluate obligations (five-state: PASS/FAIL/MISSING/UNSUPPORTED/WAIVED)
-rgr evidence repo-graph                  # Verification status report (computed + effective verdicts, waiver basis)
-rgr gate repo-graph                      # CI gate: five-state verdicts, three modes, structured exit code
-rgr gate repo-graph --strict             # Strict mode: exit 1 on FAIL/MISSING/UNSUPPORTED
-rgr gate repo-graph --advisory           # Advisory mode: exit 1 only on FAIL
-rgr trend repo-graph                     # Snapshot-to-snapshot health delta (latest vs parent)
-rgr change impact repo-graph             # Modules affected by changes (reverse IMPORTS only)
-rgr change impact repo-graph --staged    # Diff staged changes instead of working tree vs basis
-rgr change impact repo-graph --since main --max-depth 3
-rgr trust repo-graph                     # Extraction trust report: reliability levels + downgrade flags
-rgr docs repo-graph .                    # Repo-level provisional annotations (README, package description)
-rgr docs repo-graph src/core             # Module-level annotations via path match
-
-# Boundary interactions (HTTP + CLI command)
-rgr boundary summary repo-graph          # Aggregate counts: providers, consumers, links, match rates
-rgr boundary providers repo-graph        # List boundary provider facts
-rgr boundary consumers repo-graph        # List boundary consumer facts
-rgr boundary links repo-graph            # List matched provider-consumer links (derived)
-rgr boundary unmatched repo-graph        # Providers/consumers with no matched link
-rgr boundary providers repo-graph --mechanism http --limit 20
-rgr boundary providers repo-graph --mechanism cli_command
-rgr boundary unmatched repo-graph --side consumers
-
-# Quality measurements
-rgr graph stats repo-graph               # Module structural metrics (fan-in/out, instability)
-rgr graph metrics repo-graph --limit 10  # Top complex functions (cyclomatic complexity)
-rgr graph metrics repo-graph --module    # Per-module complexity aggregates
-rgr graph versions repo-graph            # Extracted domain versions (package.json)
-rgr graph churn repo-graph --since 90.days.ago  # Per-file git churn
-rgr graph hotspots repo-graph            # Churn x complexity ranking
-rgr graph coverage repo-graph ./coverage/coverage-final.json  # Import Istanbul/c8 coverage
-rgr graph risk repo-graph                # Under-tested hotspots (hotspot x coverage gap)
-
-# Discovered modules (manifest/workspace-detected)
-rgr modules list repo-graph              # Module catalog with rollups (files, symbols, evidence)
-rgr modules show repo-graph <module>     # Full detail: identity, surfaces, files, topology, env+fs rollup
-rgr modules evidence repo-graph <module> # Evidence items for a module
-rgr modules files repo-graph <module>    # Files owned by a module
-rgr modules diagnostics repo-graph       # Module discovery diagnostics (skipped patterns, parse issues)
-rgr modules diagnostics repo-graph --source kbuild --kind skipped_config_gated  # Filtered diagnostics
-
-# Project surfaces (operational characterization)
-rgr surfaces list repo-graph             # Surface catalog: kind, build, runtime, entrypoints, configs
-rgr surfaces show repo-graph <surface>   # Full detail: module, build, runtime, config roots, entrypoints, evidence, env deps, fs mutations
-rgr surfaces evidence repo-graph <surface> # Evidence items for a surface
-
-# Declarations
-rgr declare module repo-graph src/core --purpose "domain model" --maturity MATURE
-rgr declare boundary repo-graph src/core --forbids src/adapters
-rgr declare entrypoint repo-graph <symbol> --type public_export
-rgr declare invariant repo-graph <symbol> "must not fail silently"
-rgr declare requirement repo-graph src/core --req-id REQ-001 --objective "..."
-rgr declare obligation repo-graph REQ-001 --obligation "..." --method arch_violations --target src/core
-rgr declare waiver repo-graph REQ-001 --obligation-id <id> --requirement-version 2 --reason "..."
-rgr declare list repo-graph --kind requirement
-rgr declare list repo-graph --kind waiver
-rgr declare remove repo-graph <uid>
+nvm use && pnpm rebuild better-sqlite3
 ```
-
-Slash commands (`.claude/commands/`):
-- `/investigate-symbol <repo> <SymbolName>` — callers, callees, dead-code, cycles
-- `/repo-overview <path>` — index + structural health overview
-- `/assess-health <repo>` — full quality health report (structure, complexity, hotspots, risk)
-- `/verify-requirements <repo>` — evaluate requirement obligations (PASS/FAIL/MISSING)
-
-Agent skill docs (`docs/skills/`):
-- `investigate-symbol.txt` — detailed investigation workflow
-- `assess-code-health.txt` — full health report workflow with all measurement steps
-- `verify-requirements.txt` — requirement obligation verification workflow
-
-rgr uses syntax-only extraction (tree-sitter) with optional compiler enrichment (`rgr enrich`). Import graphs are accurate. Call graphs resolve well on class-heavy architectures; weaker on SDK-heavy or functional patterns. Compiler enrichment resolves ~80-85% of unknown receiver types (TypeScript via TypeChecker, Rust via rust-analyzer). When callee results look incomplete, read the source directly or run `rgr enrich`.
-
-Trust boundaries for `graph dead`:
-- On clean-architecture codebases with explicit call/import graphs: high confidence.
-- On registry/plugin-driven architectures (CMS renderers, extension registries, render maps, string-key dispatch): treat results as "graph orphans," not deletion candidates. These codebases wire liveness through channels the graph does not yet model.
-- Spring container-managed classes (`@Component`, `@Service`, `@Repository`, `@Configuration`, `@RestController`, `@Bean`) are automatically suppressed from dead-code results via framework-liveness inferences.
-- Lambda exported handler functions are suppressed via `framework_entrypoint` inferences.
-- Use `declare entrypoint` to suppress known live nodes that appear as false positives.
-
-`arch violations` checks IMPORTS edges only. It does not check CALLS edges (call graph resolution is architecture-sensitive). The import graph is the trustworthy substrate for policy enforcement.
-
-When you find architectural breadcrumbs, comments, or docs in the repo:
-- Do not copy them into repo-graph blindly.
-- First verify them against current code.
-- If the claim is still true and operationally useful, store the distilled fact in rgr as a declaration.
-- Prefer short, canonical facts over prose.
-- Treat rgr as the system of record for verified architectural facts, with source files/docs serving as evidence.
-- If a breadcrumb conflicts with code, trust code and report the drift.
-
-HOWEVER - Only store a fact in rgr if it would help a future agent make a better design/debugging decision without rereading the same code.
-Store surprises, constraints, hazards, and architectural intent.
-Don’t store summaries of obvious code.
-
-

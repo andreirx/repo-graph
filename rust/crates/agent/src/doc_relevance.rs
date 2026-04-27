@@ -6,26 +6,30 @@
 //! ## Design principles
 //!
 //! - Docs are primary; semantic facts are secondary derived hints
-//! - Structural relevance dominates ranking (path match >> root doc)
+//! - Structural relevance dominates ranking via explicit tiers
 //! - `generated` flag is a mild tie-breaker, not a strong penalty
 //! - Every doc includes a relevance reason
 //! - Works on repos with zero semantic hints
 //! - Does NOT derive from semantic_facts — uses doc inventory directly
 //!
-//! ## Relevance rules (v1, structural only)
+//! ## Relevance tiers (explicit, not alphabetical)
 //!
-//! 1. Repo root README/ARCHITECTURE always relevant at repo scope
-//! 2. Docs under matching module/path prefix are relevant
-//! 3. Generated MAP in matching path is relevant (mild rank penalty)
-//! 4. Config docs relevant for environment/build orientation
+//! Priority is assigned by structural tier, then kind, then provenance:
 //!
-//! ## Ranking rationale
+//! | Tier | Priority | Description |
+//! |------|----------|-------------|
+//! | 1 | 300+ | Exact directory match (doc in same dir as focus) |
+//! | 2 | 250+ | Descendant doc (doc inside focus subtree) |
+//! | 3 | 200+ | Ancestor doc (doc in parent dir of focus) |
+//! | 4 | 150+ | Architecture doc in ancestor path |
+//! | 5 | 100+ | Repo-root fallback |
+//! | 6 | 80+ | Config docs in relevant scope |
 //!
-//! A generated MAP.md for `src/core/service` may be more useful than
-//! a repo-root authored README for that specific focus. Structural
-//! relevance (path match = 200 points) dominates over authored vs
-//! generated distinction (5 point penalty). Authored preference is
-//! a tie-breaker, not a filter.
+//! Within each tier: +30 architecture, +20 readme, +10 map, +5 config.
+//! Authored gets +0, generated gets -5 (mild tie-breaker).
+//!
+//! This ensures exact-match local docs always outrank ancestor docs,
+//! regardless of alphabetical order.
 //!
 //! No text search, embeddings, or fuzzy matching in v1.
 
@@ -121,6 +125,19 @@ pub fn select_relevant_docs(
     results.into_iter().map(|(doc, _)| doc).collect()
 }
 
+/// Match type for doc-to-focus relationship.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DocMatchType {
+    /// Doc is in the exact same directory as focus.
+    ExactDirectory,
+    /// Doc is inside the focus subtree (descendant).
+    Descendant,
+    /// Doc is in a parent directory of focus (ancestor).
+    Ancestor,
+    /// No structural match.
+    None,
+}
+
 /// Evaluate a single doc's relevance to the focus context.
 ///
 /// Returns `Some((RelevantDoc, priority))` if relevant, `None` if not.
@@ -135,7 +152,7 @@ fn evaluate_doc_relevance(
 
     // Mild tie-breaker: prefer authored over generated, but structural
     // relevance dominates. -5 penalty is small enough that a path-matching
-    // generated doc (200+) still outranks a root-level authored doc (100+).
+    // generated doc (300+) still outranks a root-level authored doc (100+).
     let generated_penalty = if generated { -5 } else { 0 };
 
     match focus.kind {
@@ -160,26 +177,68 @@ fn evaluate_doc_relevance(
         }
 
         ResolvedKind::Module | ResolvedKind::File | ResolvedKind::Symbol => {
-            let focus_path = focus.path.as_deref()?;
+            let raw_focus_path = focus.path.as_deref()?;
 
-            // Exact path match or parent directory match
-            if doc_matches_path(path, focus_path) {
-                let reason = if generated && kind == "map" {
-                    DocRelevanceReason::GeneratedMapForTarget
-                } else {
-                    DocRelevanceReason::ModulePathMatch
-                };
-                let priority = 200 + base_priority_for_kind(kind) + generated_penalty;
-                return Some((make_doc(entry, reason), priority));
+            // For file/symbol focus, extract the parent directory.
+            // For module focus, use the path as-is.
+            let focus_path = match focus.kind {
+                ResolvedKind::File | ResolvedKind::Symbol => {
+                    // Extract parent directory from file path
+                    if let Some(pos) = raw_focus_path.rfind('/') {
+                        &raw_focus_path[..pos]
+                    } else {
+                        "" // root-level file
+                    }
+                }
+                _ => raw_focus_path,
+            };
+
+            // Determine structural match type
+            let match_type = classify_doc_match(path, focus_path);
+
+            match match_type {
+                DocMatchType::ExactDirectory => {
+                    // Tier 1: exact directory match (highest priority)
+                    let reason = if generated && kind == "map" {
+                        DocRelevanceReason::GeneratedMapForTarget
+                    } else {
+                        DocRelevanceReason::ModulePathMatch
+                    };
+                    let priority = 300 + base_priority_for_kind(kind) + generated_penalty;
+                    return Some((make_doc(entry, reason), priority));
+                }
+                DocMatchType::Descendant => {
+                    // Tier 2: doc inside focus subtree
+                    let reason = if generated && kind == "map" {
+                        DocRelevanceReason::GeneratedMapForTarget
+                    } else {
+                        DocRelevanceReason::ModulePathMatch
+                    };
+                    let priority = 250 + base_priority_for_kind(kind) + generated_penalty;
+                    return Some((make_doc(entry, reason), priority));
+                }
+                DocMatchType::Ancestor => {
+                    // Tier 3: doc in parent directory
+                    let reason = if generated && kind == "map" {
+                        DocRelevanceReason::GeneratedMapForTarget
+                    } else {
+                        DocRelevanceReason::ModulePathMatch
+                    };
+                    let priority = 200 + base_priority_for_kind(kind) + generated_penalty;
+                    return Some((make_doc(entry, reason), priority));
+                }
+                DocMatchType::None => {
+                    // Not a direct path match, check other relevance rules
+                }
             }
 
-            // Architecture docs in ancestor paths are still relevant
+            // Architecture docs in ancestor paths are still relevant (tier 4)
             if kind == "architecture" && is_ancestor_doc(path, focus_path) {
                 let priority = 150 + generated_penalty;
                 return Some((make_doc(entry, DocRelevanceReason::ArchitectureDoc), priority));
             }
 
-            // Repo-root docs are always somewhat relevant
+            // Repo-root docs are always somewhat relevant (tier 5)
             if is_repo_root_doc(path) {
                 let reason = if kind == "architecture" {
                     DocRelevanceReason::ArchitectureDoc
@@ -190,7 +249,7 @@ fn evaluate_doc_relevance(
                 return Some((make_doc(entry, reason), priority));
             }
 
-            // Config docs may be relevant for environment context
+            // Config docs may be relevant for environment context (tier 6)
             if kind == "config" && config_relevant_to_path(path, focus_path) {
                 let priority = 80 + generated_penalty;
                 return Some((make_doc(entry, DocRelevanceReason::ConfigRelevance), priority));
@@ -229,8 +288,10 @@ fn base_priority_for_kind(kind: &str) -> i32 {
     }
 }
 
-/// Check if a doc path matches or is a parent of the focus path.
-fn doc_matches_path(doc_path: &str, focus_path: &str) -> bool {
+/// Classify the structural relationship between a doc and the focus path.
+///
+/// Returns the match type which determines the priority tier.
+fn classify_doc_match(doc_path: &str, focus_path: &str) -> DocMatchType {
     // Extract doc's directory
     let doc_dir = if let Some(pos) = doc_path.rfind('/') {
         &doc_path[..pos]
@@ -238,29 +299,35 @@ fn doc_matches_path(doc_path: &str, focus_path: &str) -> bool {
         "" // root-level doc
     };
 
-    // Exact directory match
+    // Exact directory match: doc is in the same directory as focus
     if doc_dir == focus_path {
-        return true;
+        return DocMatchType::ExactDirectory;
     }
 
-    // Doc is in the focus directory
-    if focus_path.starts_with(doc_dir) && !doc_dir.is_empty() {
-        // Check it's a proper prefix (not just substring)
-        let remainder = &focus_path[doc_dir.len()..];
-        if remainder.starts_with('/') || remainder.is_empty() {
-            return true;
-        }
-    }
-
-    // Focus is in the doc's directory
+    // Descendant: doc is inside the focus subtree
+    // e.g., focus="ext/wasm", doc_dir="ext/wasm/api"
     if doc_dir.starts_with(focus_path) {
         let remainder = &doc_dir[focus_path.len()..];
         if remainder.starts_with('/') || remainder.is_empty() {
-            return true;
+            return DocMatchType::Descendant;
         }
     }
 
-    false
+    // Ancestor: doc is in a parent directory of focus
+    // e.g., focus="ext/wasm", doc_dir="ext"
+    if !doc_dir.is_empty() && focus_path.starts_with(doc_dir) {
+        let remainder = &focus_path[doc_dir.len()..];
+        if remainder.starts_with('/') || remainder.is_empty() {
+            return DocMatchType::Ancestor;
+        }
+    }
+
+    // Root-level docs are ancestors of everything
+    if doc_dir.is_empty() {
+        return DocMatchType::Ancestor;
+    }
+
+    DocMatchType::None
 }
 
 /// Check if doc is in an ancestor directory of focus.
@@ -335,12 +402,11 @@ mod tests {
 
         // Should include: src/core/README.md, src/core/MAP.md, README.md
         // Should NOT include: src/other/README.md
-        // Structural relevance dominates: path-match (200+) beats root (100+)
-        // even when path-match is generated
+        // Tier 1 exact-match (300+) beats tier 5 root (100+)
         assert_eq!(result.len(), 3);
-        assert_eq!(result[0].path, "src/core/README.md"); // path match, authored (220)
+        assert_eq!(result[0].path, "src/core/README.md"); // exact match, authored (320)
         assert_eq!(result[0].reason, DocRelevanceReason::ModulePathMatch);
-        assert_eq!(result[1].path, "src/core/MAP.md"); // path match, generated (205)
+        assert_eq!(result[1].path, "src/core/MAP.md"); // exact match, generated (305)
         assert!(result[1].generated);
         assert_eq!(result[2].path, "README.md"); // root doc (120)
     }
@@ -397,5 +463,44 @@ mod tests {
 
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].path, "src/core/README.md"); // path match
+    }
+
+    #[test]
+    fn exact_match_outranks_ancestor_match() {
+        // This test verifies the fix for the sqlite ext/wasm ranking bug:
+        // ext/wasm/README.md (exact) must rank above ext/README.md (ancestor)
+        let inventory = vec![
+            doc("ext/README.md", "readme", false),       // ancestor
+            doc("ext/wasm/README.md", "readme", false),  // exact match
+            doc("ext/wasm/api/README.md", "readme", false), // descendant
+        ];
+
+        let focus = DocFocusContext::path("ext/wasm");
+        let result = select_relevant_docs(&inventory, &focus);
+
+        assert_eq!(result.len(), 3);
+        // Tier 1: exact match (300+)
+        assert_eq!(result[0].path, "ext/wasm/README.md");
+        // Tier 2: descendant (250+)
+        assert_eq!(result[1].path, "ext/wasm/api/README.md");
+        // Tier 3: ancestor (200+)
+        assert_eq!(result[2].path, "ext/README.md");
+    }
+
+    #[test]
+    fn descendant_docs_outrank_ancestor_docs() {
+        let inventory = vec![
+            doc("src/README.md", "readme", false),           // ancestor
+            doc("src/core/README.md", "readme", false),      // exact
+            doc("src/core/model/README.md", "readme", false), // descendant
+        ];
+
+        let focus = DocFocusContext::path("src/core");
+        let result = select_relevant_docs(&inventory, &focus);
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].path, "src/core/README.md");      // exact (320)
+        assert_eq!(result[1].path, "src/core/model/README.md"); // descendant (270)
+        assert_eq!(result[2].path, "src/README.md");           // ancestor (220)
     }
 }

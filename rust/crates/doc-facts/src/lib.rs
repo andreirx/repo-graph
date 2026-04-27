@@ -79,6 +79,16 @@ pub struct DocInventoryResult {
 /// This is the primary documentation surface. Returns doc file paths,
 /// kinds, and generated flags. Content hashing is optional.
 ///
+/// ## Generated flag semantics
+///
+/// The `generated` flag is determined by **path convention only**:
+/// - `MAP.md` files are marked generated (workflow convention)
+/// - All other doc files are marked as authored
+///
+/// This is an advisory workflow hint, not semantic truth. Content-based
+/// frontmatter detection (e.g., `generated: true` in YAML) belongs in
+/// the semantic-fact extraction layer, not the inventory layer.
+///
 /// For semantic fact extraction, use `extract_semantic_facts` instead.
 pub fn discover_doc_inventory(
     repo_path: &Path,
@@ -92,22 +102,17 @@ pub fn discover_doc_inventory(
 
     let mut doc_files = discovery::discover_doc_files(repo_path);
 
-    // Optionally read and hash content
+    // Optionally read and hash content (for staleness detection)
     if compute_hashes {
         for doc in &mut doc_files {
             let _ = read_and_hash(doc);
         }
     }
 
-    // Update generated flag from content analysis when content is available
-    for doc in &mut doc_files {
-        if let Some(content) = &doc.content {
-            match classification::get_generated_from_frontmatter(content) {
-                Some(explicit) => doc.generated = explicit,
-                None => doc.generated = false,
-            }
-        }
-    }
+    // NOTE: generated flag is path-based only (set in discover_doc_files).
+    // Content-based frontmatter override was removed to unify behavior
+    // between `docs list` and `orient`. See architectural lock in
+    // docs/design/documentation-semantic-facts.md.
 
     // Build entries
     let entries: Vec<DocInventoryEntry> = doc_files
