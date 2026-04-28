@@ -631,6 +631,15 @@ pub fn build_file_resolution_map(
 				&path[..path.len() - "/index.ts".len()]
 			};
 			let dir_key = format!("{}:{}:FILE", repo_uid, dir_path);
+			map.entry(dir_key).or_insert_with(|| stable_key.clone());
+		}
+
+		// Python package directory shortcut:
+		// "src/core/__init__.py" → "src/core" maps to the package init.
+		// This enables `from .core import X` to resolve to the package.
+		if path.ends_with("/__init__.py") {
+			let dir_path = &path[..path.len() - "/__init__.py".len()];
+			let dir_key = format!("{}:{}:FILE", repo_uid, dir_path);
 			map.entry(dir_key).or_insert(stable_key);
 		}
 	}
@@ -699,17 +708,14 @@ pub fn build_per_file_include_resolution(
 	result
 }
 
-/// Strip the file extension, but ONLY for the JS/TS family
-/// (`.ts`, `.tsx`, `.js`, `.jsx`). Other extensions are left
-/// intact. This mirrors the TS `stripExtension` at
-/// `repo-indexer.ts:2926` which only strips these four.
+/// Strip the file extension for languages that use extensionless
+/// import specifiers: JS/TS family and Python.
 ///
-/// The narrowing is intentional: extensionless import resolution
-/// (e.g., `import "./utils"` resolving to `utils.ts`) is a
-/// JS/TS ecosystem convention. Other languages (Rust, Python,
-/// Java, C/C++) do not use extensionless import specifiers, so
-/// synthesizing extensionless keys for `.rs`, `.py`, etc. would
-/// create false resolution paths that the TS indexer does not.
+/// - `.ts`, `.tsx`, `.js`, `.jsx`: JS/TS ecosystem
+/// - `.py`: Python (`from .service import X` → `./service`)
+///
+/// Other extensions (`.rs`, `.java`, `.c`, `.h`) are left intact
+/// because those languages do not use extensionless import paths.
 fn strip_extension(path: &str) -> &str {
 	let dot_pos = match path.rfind('.') {
 		Some(p) => p,
@@ -717,7 +723,7 @@ fn strip_extension(path: &str) -> &str {
 	};
 	let ext = &path[dot_pos..];
 	match ext {
-		".ts" | ".tsx" | ".js" | ".jsx" => &path[..dot_pos],
+		".ts" | ".tsx" | ".js" | ".jsx" | ".py" => &path[..dot_pos],
 		_ => path,
 	}
 }
@@ -907,6 +913,34 @@ mod tests {
 		);
 	}
 
+	#[test]
+	fn file_resolution_python_extensionless() {
+		let paths = vec!["src/service.py".to_string()];
+		let map = build_file_resolution_map(&paths, "r1");
+		// Exact key.
+		assert_eq!(
+			map.get("r1:src/service.py:FILE"),
+			Some(&"r1:src/service.py:FILE".to_string())
+		);
+		// Extensionless (Python imports don't include .py).
+		assert_eq!(
+			map.get("r1:src/service:FILE"),
+			Some(&"r1:src/service.py:FILE".to_string())
+		);
+	}
+
+	#[test]
+	fn file_resolution_python_init_shortcut() {
+		// Python package: `from .core import X` should resolve to __init__.py
+		let paths = vec!["src/core/__init__.py".to_string()];
+		let map = build_file_resolution_map(&paths, "r1");
+		// Directory shortcut → package init file.
+		assert_eq!(
+			map.get("r1:src/core:FILE"),
+			Some(&"r1:src/core/__init__.py:FILE".to_string())
+		);
+	}
+
 	// ── strip_extension ──────────────────────────────────────
 
 	#[test]
@@ -925,10 +959,16 @@ mod tests {
 	}
 
 	#[test]
-	fn strip_ext_preserves_non_jsts_extensions() {
-		// Rust, Python, Java, C/C++ extensions are NOT stripped.
+	fn strip_ext_python() {
+		// Python uses extensionless imports, so .py is stripped.
+		assert_eq!(strip_extension("src/app.py"), "src/app");
+		assert_eq!(strip_extension("src/utils/__init__.py"), "src/utils/__init__");
+	}
+
+	#[test]
+	fn strip_ext_preserves_other_extensions() {
+		// Rust, Java, C/C++ extensions are NOT stripped.
 		assert_eq!(strip_extension("src/main.rs"), "src/main.rs");
-		assert_eq!(strip_extension("src/app.py"), "src/app.py");
 		assert_eq!(strip_extension("src/Foo.java"), "src/Foo.java");
 		assert_eq!(strip_extension("src/util.h"), "src/util.h");
 		assert_eq!(strip_extension("src/util.cpp"), "src/util.cpp");

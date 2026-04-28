@@ -122,6 +122,15 @@
 
 - Python extractor (tree-sitter-python): functions, classes, methods, constructors,
   variables, imports, calls, complexity metrics. Syntax-only.
+- **Import resolution (Rust `rmap` path):** relative and absolute local imports
+  resolve correctly. `from .service import X` and `from src.service import X`
+  both resolve to the target `.py` file. Stdlib imports (json, typing, os)
+  remain unresolved (correct behavior — no local file exists).
+  - Relative imports emit repo-scoped stable keys at extraction time.
+  - `__init__.py` package resolution: `from .pkg import X` resolves to
+    `pkg/__init__.py` when the package exists.
+  - TS-side extractor does NOT have this resolution; it uses the legacy
+    dotted specifier form.
 - Dependency reader: pyproject.toml + requirements.txt. PEP 508 parsing.
 - **Package-name-to-import-specifier gap:** `pyyaml` → `import yaml`,
   `beautifulsoup4` → `import bs4`. Exact name matches work; mismatches

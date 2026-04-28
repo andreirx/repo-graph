@@ -23,6 +23,7 @@ use repo_graph_storage::types::InferenceInput;
 use repo_graph_storage::StorageConnection;
 use repo_graph_c_extractor::CExtractor;
 use repo_graph_java_extractor::JavaExtractor;
+use repo_graph_python_extractor::PythonExtractor;
 use repo_graph_rust_extractor::RustExtractor;
 use repo_graph_ts_extractor::TsExtractor;
 
@@ -432,6 +433,11 @@ pub fn index_into_storage(
 		.initialize()
 		.map_err(|e| ComposeError::ExtractorInit(format!("java: {}", e)))?;
 
+	let mut python_extractor = PythonExtractor::new();
+	python_extractor
+		.initialize()
+		.map_err(|e| ComposeError::ExtractorInit(format!("python: {}", e)))?;
+
 	let mut rust_extractor = RustExtractor::new();
 	rust_extractor
 		.initialize()
@@ -439,7 +445,7 @@ pub fn index_into_storage(
 
 	ensure_repo(storage, repo_uid, repo_path)?;
 
-	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut java_extractor, &mut rust_extractor];
+	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut java_extractor, &mut python_extractor, &mut rust_extractor];
 	let mut idx_options = IndexOptions {
 		basis_commit: options.basis_commit.clone(),
 		edge_batch_size: options.edge_batch_size,
@@ -520,6 +526,11 @@ pub fn refresh_into_storage(
 		.initialize()
 		.map_err(|e| ComposeError::ExtractorInit(format!("java: {}", e)))?;
 
+	let mut python_extractor = PythonExtractor::new();
+	python_extractor
+		.initialize()
+		.map_err(|e| ComposeError::ExtractorInit(format!("python: {}", e)))?;
+
 	let mut rust_extractor = RustExtractor::new();
 	rust_extractor
 		.initialize()
@@ -527,7 +538,7 @@ pub fn refresh_into_storage(
 
 	ensure_repo(storage, repo_uid, repo_path)?;
 
-	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut java_extractor, &mut rust_extractor];
+	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut java_extractor, &mut python_extractor, &mut rust_extractor];
 	let mut idx_options = IndexOptions {
 		basis_commit: options.basis_commit.clone(),
 		edge_batch_size: options.edge_batch_size,

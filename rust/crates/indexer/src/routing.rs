@@ -88,6 +88,7 @@ pub fn detect_language(file_path: &str) -> Option<&'static str> {
 		".js" => Some("javascript"),
 		".jsx" => Some("jsx"),
 		".java" => Some("java"),
+		".py" => Some("python"),
 		".rs" => Some("rust"),
 		".c" | ".h" => Some("c"),
 		".cpp" | ".cc" | ".cxx" | ".hpp" | ".hxx" => Some("cpp"),
@@ -322,8 +323,8 @@ mod tests {
 	}
 
 	#[test]
-	fn detect_language_none_for_python() {
-		assert_eq!(detect_language("src/app.py"), None);
+	fn detect_language_python() {
+		assert_eq!(detect_language("src/app.py"), Some("python"));
 	}
 
 	// ── language_to_extensions ────────────────────────────────

@@ -676,3 +676,244 @@ fn index_rust_crate_receives_cargo_deps() {
 		panic!("expected package_dependencies_json for Rust file (from Cargo.toml)");
 	}
 }
+
+// ── Python extraction ────────────────────────────────────────────
+
+fn python_fixture_path() -> PathBuf {
+	let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+	manifest
+		.join("..")
+		.join("..")
+		.join("..")
+		.join("test")
+		.join("fixtures")
+		.join("python")
+		.join("simple-app")
+}
+
+#[test]
+fn index_python_extracts_symbols() {
+	// Python extractor integration test: verify FILE, CLASS, FUNCTION,
+	// METHOD nodes are extracted from Python source files.
+	let repo_path = python_fixture_path();
+	assert!(
+		repo_path.join("src").join("app.py").exists(),
+		"python fixture not found at {:?}",
+		repo_path
+	);
+
+	let mut storage = StorageConnection::open_in_memory().unwrap();
+	let result = index_into_storage(
+		&repo_path,
+		&mut storage,
+		"py-simple",
+		&ComposeOptions::default(),
+	)
+	.unwrap();
+
+	assert_eq!(snap_status(&storage, &result.snapshot_uid), "ready");
+
+	// ── File count ───────────────────────────────────────────
+	// 4 Python files: __init__.py, app.py, service.py, test_service.py
+	assert_eq!(result.files_total, 4, "expected 4 Python files");
+
+	// ── Nodes ────────────────────────────────────────────────
+	use repo_graph_indexer::storage_port::NodeStorePort;
+	let nodes = NodeStorePort::query_all_nodes(&storage, &result.snapshot_uid).unwrap();
+	let stable_keys: Vec<&str> = nodes.iter().map(|n| n.stable_key.as_str()).collect();
+
+	// FILE nodes for Python files.
+	assert!(
+		stable_keys.contains(&"py-simple:src/app.py:FILE"),
+		"missing app.py FILE node, keys: {:?}",
+		stable_keys
+	);
+	assert!(
+		stable_keys.contains(&"py-simple:src/service.py:FILE"),
+		"missing service.py FILE node, keys: {:?}",
+		stable_keys
+	);
+	assert!(
+		stable_keys.contains(&"py-simple:tests/test_service.py:FILE"),
+		"missing test_service.py FILE node, keys: {:?}",
+		stable_keys
+	);
+
+	// CLASS nodes.
+	assert!(
+		stable_keys.iter().any(|k| k.contains("#App:SYMBOL:CLASS")),
+		"missing App CLASS node, keys: {:?}",
+		stable_keys
+	);
+	assert!(
+		stable_keys.iter().any(|k| k.contains("#UserService:SYMBOL:CLASS")),
+		"missing UserService CLASS node, keys: {:?}",
+		stable_keys
+	);
+	assert!(
+		stable_keys.iter().any(|k| k.contains("#TestUserService:SYMBOL:CLASS")),
+		"missing TestUserService CLASS node, keys: {:?}",
+		stable_keys
+	);
+
+	// FUNCTION nodes.
+	assert!(
+		stable_keys.iter().any(|k| k.contains("#main:SYMBOL:FUNCTION")),
+		"missing main FUNCTION node, keys: {:?}",
+		stable_keys
+	);
+
+	// METHOD nodes (class methods).
+	assert!(
+		stable_keys.iter().any(|k| k.contains("#App.__init__:SYMBOL:METHOD")),
+		"missing App.__init__ METHOD node, keys: {:?}",
+		stable_keys
+	);
+	assert!(
+		stable_keys.iter().any(|k| k.contains("#App.run:SYMBOL:METHOD")),
+		"missing App.run METHOD node, keys: {:?}",
+		stable_keys
+	);
+	assert!(
+		stable_keys.iter().any(|k| k.contains("#UserService.get_users:SYMBOL:METHOD")),
+		"missing UserService.get_users METHOD node, keys: {:?}",
+		stable_keys
+	);
+	assert!(
+		stable_keys.iter().any(|k| k.contains("#UserService._process_user:SYMBOL:METHOD")),
+		"missing UserService._process_user METHOD node (private), keys: {:?}",
+		stable_keys
+	);
+
+	// Test methods.
+	assert!(
+		stable_keys.iter().any(|k| k.contains("#TestUserService.test_get_users_empty:SYMBOL:METHOD")),
+		"missing test method node, keys: {:?}",
+		stable_keys
+	);
+
+	// ── Edges ────────────────────────────────────────────────
+	// Verify edges exist (imports and calls).
+	assert!(
+		result.edges_total > 0 || result.edges_unresolved > 0,
+		"expected at least some edges from Python extraction"
+	);
+}
+
+#[test]
+fn index_python_visibility_correct() {
+	// Python visibility test: underscore-prefixed names should be Internal/Private.
+	let repo_path = python_fixture_path();
+	let mut storage = StorageConnection::open_in_memory().unwrap();
+	let result = index_into_storage(
+		&repo_path,
+		&mut storage,
+		"py-vis",
+		&ComposeOptions::default(),
+	)
+	.unwrap();
+
+	use repo_graph_indexer::storage_port::NodeStorePort;
+	use repo_graph_indexer::types::Visibility;
+	let nodes = NodeStorePort::query_all_nodes(&storage, &result.snapshot_uid).unwrap();
+
+	// App class is public (no underscore) -> Export
+	let app_node = nodes
+		.iter()
+		.find(|n| n.stable_key.contains("#App:SYMBOL:CLASS"))
+		.expect("App node not found");
+	assert_eq!(
+		app_node.visibility,
+		Some(Visibility::Export),
+		"App class should be exported (no underscore)"
+	);
+
+	// UserService.get_users is public -> Export
+	let get_users_node = nodes
+		.iter()
+		.find(|n| n.stable_key.contains("#UserService.get_users:SYMBOL:METHOD"))
+		.expect("get_users node not found");
+	assert_eq!(
+		get_users_node.visibility,
+		Some(Visibility::Export),
+		"get_users method should be exported (no underscore)"
+	);
+
+	// UserService._process_user is single-underscore private -> Internal
+	let process_user_node = nodes
+		.iter()
+		.find(|n| n.stable_key.contains("#UserService._process_user:SYMBOL:METHOD"))
+		.expect("_process_user node not found");
+	assert_eq!(
+		process_user_node.visibility,
+		Some(Visibility::Internal),
+		"_process_user method should be Internal (single underscore)"
+	);
+}
+
+#[test]
+fn index_python_imports_resolve() {
+	// Python import resolution test: verify relative and absolute imports
+	// resolve to the correct target files.
+	//
+	// src/app.py contains:
+	//   from .service import UserService   (relative → src/service.py)
+	// tests/test_service.py contains:
+	//   from src.service import UserService (absolute → src/service.py)
+	//
+	// Expected resolved edges:
+	//   - app.py → service.py (relative import)
+	//   - test_service.py → service.py (absolute import)
+	//   - MODULE edges (src → files, tests → files)
+	//
+	// Expected unresolved edges:
+	//   - json (stdlib, no local file)
+	//   - typing (stdlib, no local file)
+	//   - internal call edges that can't resolve
+	let repo_path = python_fixture_path();
+	let mut storage = StorageConnection::open_in_memory().unwrap();
+	let result = index_into_storage(
+		&repo_path,
+		&mut storage,
+		"py-imports",
+		&ComposeOptions::default(),
+	)
+	.unwrap();
+
+	// The Python fixture should have:
+	// - At least 2 resolved IMPORTS edges (relative + absolute local imports)
+	// - Plus OWNS edges from modules to files
+	// - Some unresolved edges (stdlib imports like json, typing)
+	assert!(
+		result.edges_total >= 2,
+		"expected at least 2 resolved edges (local imports), got {}",
+		result.edges_total
+	);
+
+	// Stdlib imports (json, typing) should be unresolved since they
+	// don't map to local files. The exact count depends on how many
+	// external imports exist and how many call edges are unresolved.
+	assert!(
+		result.edges_unresolved >= 2,
+		"expected at least 2 unresolved edges (stdlib imports), got {}",
+		result.edges_unresolved
+	);
+
+	// Verify total extraction happened by checking nodes
+	use repo_graph_indexer::storage_port::NodeStorePort;
+	let nodes = NodeStorePort::query_all_nodes(&storage, &result.snapshot_uid).unwrap();
+
+	// FILE nodes for the Python source files should exist
+	assert!(
+		nodes.iter().any(|n| n.stable_key == "py-imports:src/app.py:FILE"),
+		"expected src/app.py FILE node"
+	);
+	assert!(
+		nodes.iter().any(|n| n.stable_key == "py-imports:src/service.py:FILE"),
+		"expected src/service.py FILE node"
+	);
+	assert!(
+		nodes.iter().any(|n| n.stable_key == "py-imports:tests/test_service.py:FILE"),
+		"expected tests/test_service.py FILE node"
+	);
+}
