@@ -75,9 +75,16 @@ export class LMStudioAdapter extends BaseLLMAdapter {
   }
 
   private buildRequestBody(prompt: string, options?: LLMRequestOptions): object {
+    const messages: Array<{ role: string; content: string }> = [];
+
+    if (options?.systemPrompt) {
+      messages.push({ role: 'system', content: options.systemPrompt });
+    }
+    messages.push({ role: 'user', content: prompt });
+
     const body: Record<string, unknown> = {
       model: this.model,
-      messages: [{ role: 'user', content: prompt }],
+      messages,
       stream: true,
       temperature: options?.temperature ?? 0.3
     };

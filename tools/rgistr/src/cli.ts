@@ -19,18 +19,19 @@ const program = new Command();
 program
   .name('rgistr')
   .description('Recursive Gist Runner - Generate hierarchical MAP.md documentation via LLM')
-  .version('0.1.0');
+  .version('0.2.0');
 
 program
   .command('generate')
   .description('Generate MAP.md files for a codebase')
-  .argument('<path>', 'Path to the codebase root')
+  .argument('<path>', 'Path to the codebase root (or subtree)')
   .option('-a, --adapter <type>', 'LLM adapter: lmstudio, ollama, openai', 'lmstudio')
   .option('-m, --model <name>', 'Model name (required for ollama/openai)')
   .option('-e, --endpoint <url>', 'Custom endpoint URL')
   .option('--api-key <key>', 'API key (for openai, or use OPENAI_API_KEY env)')
   .option('-d, --max-depth <n>', 'Maximum recursion depth (-1 = unlimited)', '-1')
   .option('-o, --output <filename>', 'Output filename', 'MAP.md')
+  .option('--repo-root <path>', 'Repository root for path provenance (defaults to target path)')
   .option('--force', 'Force regeneration even if MAP.md exists', false)
   .option('--dry-run', 'Show what would be generated without writing', false)
   .action(async (targetPath, opts) => {
@@ -61,13 +62,29 @@ program
       }
       console.log(`Connected to ${llm.adapterName}/${llm.modelName}`);
 
+      // Resolve repo root for path provenance
+      const repoRoot = opts.repoRoot ? path.resolve(opts.repoRoot) : rootPath;
+
+      // Validate that target is under repo root
+      const relativeToRoot = path.relative(repoRoot, rootPath);
+      if (relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
+        console.error(`Error: Target path must be under --repo-root`);
+        console.error(`  Target: ${rootPath}`);
+        console.error(`  Repo root: ${repoRoot}`);
+        process.exit(1);
+      }
+
       // Run generation
       console.log(`\nGenerating MAP.md files for: ${rootPath}`);
+      if (repoRoot !== rootPath) {
+        console.log(`Repo root for path provenance: ${repoRoot}`);
+      }
       console.log(`Adapter: ${llm.adapterName}, Model: ${llm.modelName}`);
       console.log(`Output: ${opts.output}, Force: ${opts.force}, Dry-run: ${opts.dryRun}\n`);
 
       const results = await generate({
         llm,
+        repoRoot,
         config: {
           rootPath,
           maxDepth: parseInt(opts.maxDepth, 10),
@@ -78,12 +95,13 @@ program
         onProgress: (status) => {
           if (status.phase === 'scanning') {
             process.stdout.write('Scanning...\r');
-          } else if (status.phase === 'generating') {
+          } else if (status.phase === 'generating-files' || status.phase === 'generating-folders') {
             const pct = status.total > 0
               ? Math.round((status.processed / status.total) * 100)
               : 0;
+            const phaseLabel = status.phase === 'generating-files' ? 'files' : 'folders';
             process.stdout.write(
-              `[${pct}%] ${status.processed}/${status.total} - ${status.current || ''}\r`
+              `[${pct}%] ${status.processed}/${status.total} (${phaseLabel}) - ${status.current || ''}\r`
             );
           }
         }

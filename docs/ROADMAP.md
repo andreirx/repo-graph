@@ -49,7 +49,16 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
     in this run). High unresolved rate expected without build-system context.
 - **Framework detection:** Express routes, Lambda handlers, Spring beans, pytest tests/fixtures,
   Linux kernel system patterns (module_init, platform_driver, GCC constructor/destructor).
-  `findDeadNodes` consults all framework-liveness inferences.
+  Framework detectors suppress false positives in internal dead-code substrate; they are
+  NOT sufficient for public dead-code claims (see Dead-code surface withdrawal below).
+- **Dead-code surface withdrawal:** All public dead-code vocabulary removed from `rmap`.
+  `rmap dead` disabled, `DEAD_CODE` signal removed from orient, `DEAD_CODE_RELIABILITY`
+  removed from check. Internal substrate preserved. Reintroduction blocked on measured
+  execution evidence (line or function coverage). See `docs/TECH-DEBT.md` for policy.
+- **Native Python extraction in `rmap`:** Rust-side tree-sitter-python extractor with
+  Python import resolution through shared file-resolution model. Extracts functions,
+  classes, methods, imports, calls. TS-side broader scope (constructors, variables,
+  complexity metrics) not yet ported.
 - **CLI boundary model:** HTTP + cli_command mechanisms. Commander providers, package.json
   script consumers, shell script consumers, Makefile recipe consumers. Binary-prefix matching.
 - **Module discovery:** Declared modules detected from manifests/workspaces
@@ -201,6 +210,11 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   tree-sitter) for `rmap`. Both share extraction scope: structs, enums,
   traits, impl methods, functions, consts, statics, type aliases, use
   imports, call edges, implements edges.
+- Python extractor: TS-side (tree-sitter-python) for `rgr`, Rust-side (native
+  tree-sitter) for `rmap`. Rust-side scope: functions, classes, methods,
+  imports, calls. Python import resolution through shared file-resolution
+  model. TS-side has broader scope (constructors, variables, complexity
+  metrics) not yet ported to Rust.
 - Java extractor (tree-sitter-java)
 - Multi-extractor indexer: routes files by extension
 - Language-aware manifest isolation (.rs → Cargo.toml, .java → build.gradle, .ts → package.json)
@@ -649,6 +663,22 @@ surfacing, risk prioritization) is the primary product direction.
   - Infra roots (Terraform, Pulumi, Helm): separate deployment-surface slice
   - Makefile diagnostics persistence: tech debt for v2
 
+### Dead-code surface withdrawal (Option D)
+- **Status:** COMPLETE. All public dead-code vocabulary removed from `rmap`.
+- Public surfaces withdrawn:
+  - `rmap dead` command disabled (returns exit 2)
+  - `DEAD_CODE` signal removed from orient
+  - `DEAD_CODE_UNRELIABLE` limit removed from orient
+  - `DEAD_CODE_RELIABILITY` condition removed from check
+  - `dead_code_reliability` field removed from explain trust evidence
+  - `dead_code` field hidden from trust JSON output
+- Internal substrate preserved for future coverage-backed reintroduction
+- Framework detectors and entrypoint declarations remain active for liveness
+  suppression in the internal substrate
+- **Binding policy:** Public dead-code surfaces blocked until measured
+  execution evidence (line or function coverage) exists in the Rust product
+  path. See `docs/TECH-DEBT.md` §Dead-code surface withdrawal for full policy.
+
 ## Next
 
 ### Near-term execution sequence
@@ -975,6 +1005,34 @@ See `docs/milestones/rmap-state-boundaries-v1.md` §Deferred for the full
 SB-next-* inventory.
 
 ## Deferred
+
+### Dead-code public surface reintroduction (blocked)
+**Status:** Blocked on coverage-backed evidence.
+
+Public dead-code surfaces (`rmap dead`, `DEAD_CODE` signal, `DEAD_CODE_RELIABILITY`
+check condition) are withdrawn and must NOT be reintroduced from structural graph
+heuristics alone.
+
+**Mandatory prerequisite:** Measured execution evidence in the Rust product path.
+- Line coverage (lcov, cobertura), OR
+- Function/call coverage (llvm-cov function-level)
+
+**What does NOT unblock this:**
+- Framework entrypoint detection (Spring, React, Axum, FastAPI)
+- Entrypoint declarations (`rmap declare entrypoint`)
+- Structural orphan analysis (no inbound edges)
+- Trust reliability improvements
+
+Framework detectors and entrypoint declarations are valuable for:
+- Orientation (understanding what symbols are framework-managed)
+- Liveness suppression (reducing false positives in internal substrate)
+- Discovery (what is structurally isolated)
+
+They are NOT sufficient proof of deadness. The distinction:
+- **`rmap orphans`** (future): "not currently referenced in the graph we built"
+- **`rmap dead`** (blocked): "unexecuted under measured scenarios"
+
+See `docs/TECH-DEBT.md` §Dead-code surface withdrawal for the full policy.
 
 ### Halstead metrics
 Computable and historically established, but lower priority than cognitive

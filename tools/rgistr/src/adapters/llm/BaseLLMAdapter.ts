@@ -13,6 +13,7 @@ export interface LLMRequestOptions {
   maxTokens?: number;
   expectsJSON?: boolean;
   temperature?: number;
+  systemPrompt?: string;
 }
 
 /**
@@ -73,7 +74,8 @@ export abstract class BaseLLMAdapter implements ILLMAdapter {
       const raw = await this.performComplete(prompt, {
         maxTokens: options?.maxTokens,
         expectsJSON,
-        temperature: options?.temperature
+        temperature: options?.temperature,
+        systemPrompt: options?.systemPrompt
       });
 
       if (!raw || raw.trim().length === 0) {

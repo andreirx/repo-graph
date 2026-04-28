@@ -33,4 +33,6 @@ export interface CompletionOptions {
   expectsJSON?: boolean;
   /** Temperature for sampling (0.0 - 1.0) */
   temperature?: number;
+  /** System prompt for instruction-tuned models */
+  systemPrompt?: string;
 }

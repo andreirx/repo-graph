@@ -1,6 +1,6 @@
 {
   "name": "rgistr",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Recursive Gist Runner - Hierarchical documentation synthesis via LLM",
   "type": "module",
   "main": "dist/cli.js",

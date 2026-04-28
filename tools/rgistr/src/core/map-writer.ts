@@ -1,6 +1,11 @@
 /**
  * MAP.md file writer.
  * Handles frontmatter generation and file output.
+ *
+ * File naming conventions:
+ * - Folder MAPs: MAP.md (in the folder)
+ * - File MAPs: {basename}_{ext}_MAP.md (in the same folder as the source)
+ *   e.g., generator.ts -> generator_ts_MAP.md
  */
 
 import * as fs from 'node:fs/promises';
@@ -8,15 +13,33 @@ import * as path from 'node:path';
 import matter from 'gray-matter';
 import type { MapFrontmatter } from './types.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
+
+/**
+ * Generate MAP filename for a source file.
+ * e.g., "generator.ts" -> "generator_ts_MAP.md"
+ */
+export function fileMapFilename(sourceFilename: string): string {
+  const ext = path.extname(sourceFilename);
+  const base = path.basename(sourceFilename, ext);
+  const extWithoutDot = ext.slice(1); // remove leading dot
+  return `${base}_${extWithoutDot}_MAP.md`;
+}
+
+/**
+ * Check if a filename is a file MAP (matches pattern *_*_MAP.md).
+ */
+export function isFileMapFilename(filename: string): boolean {
+  return /^.+_.+_MAP\.md$/.test(filename);
+}
 
 export interface WriteMapOptions {
-  /** Absolute path to the folder where MAP.md should be written */
+  /** Absolute path to the folder where MAP should be written */
   folderPath: string;
   /** Generated summary content (markdown body) */
   content: string;
-  /** Scope of this MAP (v0.1.0: always 'folder') */
-  scope: 'folder';
+  /** Scope of this MAP */
+  scope: 'file' | 'folder' | 'repo';
   /** Path relative to repo root */
   relativePath: string;
   /** Adapter name used */
@@ -29,12 +52,16 @@ export interface WriteMapOptions {
   synthesisBasis: 'code_only' | 'code_and_graph' | 'code_graph_and_docs';
   /** Confidence level */
   confidence: 'high' | 'medium' | 'low';
-  /** Child MAP.md paths (for folder scopes) */
+  /** Child folder MAP.md paths (for folder scope) */
   childMaps?: string[];
-  /** Source files summarized (for file scope) */
+  /** Source files in folder (for folder scope) */
   sourceFiles?: string[];
-  /** Output filename (default: MAP.md) */
+  /** File MAPs used in synthesis (for folder scope) */
+  fileMaps?: string[];
+  /** Output filename (default: MAP.md for folders, computed for files) */
   filename?: string;
+  /** Original source filename (for file scope - avoids underscore parsing issues) */
+  sourceFilename?: string;
 }
 
 /**
@@ -54,12 +81,22 @@ export async function writeMap(options: WriteMapOptions): Promise<string> {
     confidence: options.confidence
   };
 
+  // File-scope metadata
+  if (options.sourceFilename) {
+    frontmatter.source_filename = options.sourceFilename;
+  }
+
+  // Folder-scope metadata
   if (options.childMaps && options.childMaps.length > 0) {
     frontmatter.child_maps = options.childMaps;
   }
 
   if (options.sourceFiles && options.sourceFiles.length > 0) {
     frontmatter.source_files = options.sourceFiles;
+  }
+
+  if (options.fileMaps && options.fileMaps.length > 0) {
+    frontmatter.file_maps = options.fileMaps;
   }
 
   const filename = options.filename || 'MAP.md';

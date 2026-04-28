@@ -56,3 +56,9 @@ coverage/
 # Logs
 *.log
 npm-debug.log*
+
+# rgistr generated summaries (local discovery artifacts, not committed)
+# File-scope MAPs: {basename}_{ext}_MAP.md
+*_*_MAP.md
+# Folder-scope MAPs in rgistr tool output areas
+tools/rgistr/**/MAP.md

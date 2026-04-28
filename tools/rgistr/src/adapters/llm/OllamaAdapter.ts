@@ -49,6 +49,10 @@ export class OllamaAdapter extends BaseLLMAdapter {
       }
     };
 
+    if (options?.systemPrompt) {
+      body.system = options.systemPrompt;
+    }
+
     if (options?.expectsJSON) {
       body.format = 'json';
     }

@@ -813,11 +813,41 @@ investigation.
 - Trust crate's `dead_code_reliability` axis computation
 - All dead-code related storage queries and trust computations
 
-**Reintroduction conditions:** Same as `rmap dead` command (see below):
+**Reintroduction requirements — BINDING POLICY:**
 
-1. Coverage import surface operational on Rust side, OR
-2. Framework entrypoint detection mature for Spring/React/Axum/FastAPI, OR
-3. Entrypoint declaration workflow established and adopted
+Public dead-code surfaces (`rmap dead`, `DEAD_CODE` signal, `DEAD_CODE_RELIABILITY`
+condition) must NOT be reintroduced from structural graph heuristics alone.
+
+**Mandatory evidence floor:** Measured execution evidence must exist in the Rust
+product path before any dead-code claim resurfaces. Accepted evidence classes:
+- Line coverage (e.g., lcov, cobertura), OR
+- Function/call coverage (e.g., llvm-cov function-level)
+
+The exact ingestion mechanism and coverage source format are unspecified pending
+roadmap commitment. The product requirement is the evidence class, not the
+implementation mechanism.
+
+**What is NOT sufficient for dead-code reintroduction:**
+- Framework entrypoint detection (Spring, React, Axum, FastAPI, etc.)
+- Entrypoint declarations (`rmap declare entrypoint`)
+- Structural graph orphan analysis (no inbound edges)
+- Trust reliability axes alone
+
+These signals improve discovery and liveness understanding. They suppress false
+positives in the internal substrate. They are NOT proof of deadness.
+
+**Architectural distinction (binding):**
+- **Orphans / structurally unreferenced:** May be reintroduced as a separate
+  heuristic discovery surface (`rmap orphans`). Explicit framing: "not currently
+  referenced in the graph we built." Useful for orientation, not deletion.
+- **Dead code:** Requires runtime measurement evidence. Framing: "unexecuted
+  under measured scenarios AND structurally weakly connected." Actionable for
+  cleanup decisions.
+
+This distinction is central to repo-graph's agent-facing product model:
+- **Discovery surfaces:** What exists, what changed, what is structurally isolated
+- **Runtime-liveness hints:** Framework detection, entrypoint declarations
+- **Coverage-backed deadness claims:** Only with measured execution evidence
 
 When reintroducing, restore:
 

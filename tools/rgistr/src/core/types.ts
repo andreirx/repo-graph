@@ -5,9 +5,6 @@
 /**
  * MAP.md frontmatter contract.
  * Machine-readable metadata for generated documentation.
- *
- * NOTE: v0.1.0 only generates 'folder' scope. File, module, and repo
- * scopes are reserved for future versions but not yet implemented.
  */
 export interface MapFrontmatter {
   /** Tool that generated this file */
@@ -22,10 +19,11 @@ export interface MapFrontmatter {
   basis_commit: string | null;
   /**
    * Scope kind.
-   * v0.1.0: only 'folder' is generated.
-   * Reserved: 'file', 'module', 'repo' (future work).
+   * - 'file': single source file summary
+   * - 'folder': folder summary synthesized from children
+   * - 'repo': reserved for repo-level summary
    */
-  scope: 'folder';
+  scope: 'file' | 'folder' | 'repo';
   /** Path relative to repo root */
   path: string;
   /** ISO 8601 timestamp */
@@ -34,10 +32,82 @@ export interface MapFrontmatter {
   synthesis_basis: 'code_only' | 'code_and_graph' | 'code_graph_and_docs';
   /** Confidence level: high (authored docs exist), medium (graph context), low (code only) */
   confidence: 'high' | 'medium' | 'low';
-  /** List of child MAP.md files that were used as input */
+  /** List of child MAP.md files that were used as input (for folder scope) */
   child_maps?: string[];
-  /** List of source files summarized */
+  /** List of source files summarized (for folder scope) */
   source_files?: string[];
+  /** List of file MAPs used in synthesis (for folder scope) */
+  file_maps?: string[];
+  /** Original source filename (for file scope - avoids underscore parsing issues) */
+  source_filename?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Graph Context Adapter Interface
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Compact graph context for a scope.
+ * This is the seam between rgistr and repo-graph.
+ *
+ * The adapter populates this from rmap (or returns null for code_only mode).
+ * The DTO is designed to be token-efficient and stable.
+ */
+export interface GraphContext {
+  /** Scope kind this context applies to */
+  scope_kind: 'file' | 'folder';
+  /** Path relative to repo root */
+  scope_path: string;
+  /** Top symbols defined in this scope */
+  symbols?: Array<{
+    name: string;
+    kind: string;  // 'function', 'class', 'const', etc.
+    exported: boolean;
+  }>;
+  /** Compact imports summary (not full list) */
+  imports_summary?: string;
+  /** Compact exports summary */
+  exports_summary?: string;
+  /** Summary of callers/callees relationships */
+  callers_callees_summary?: string;
+  /** Owning module if detected */
+  owning_module?: string;
+  /** Relevant authored docs */
+  relevant_docs?: string[];
+  /** Boundary/seam information */
+  boundary_summary?: string;
+  /** Runtime/build context if available */
+  runtime_build_summary?: string;
+  /** Trust/degradation markers */
+  trust_markers?: Record<string, string>;
+}
+
+/**
+ * Adapter interface for graph context injection.
+ *
+ * Implementations:
+ * - NullGraphContextAdapter: returns null (code_only mode)
+ * - RmapGraphContextAdapter: shells out to `rmap context` (future)
+ */
+export interface IGraphContextAdapter {
+  /**
+   * Get graph context for a scope.
+   * Returns null if not available.
+   */
+  getContext(
+    scopeKind: 'file' | 'folder',
+    scopePath: string
+  ): Promise<GraphContext | null>;
+
+  /**
+   * Check if the adapter is available.
+   */
+  isAvailable(): Promise<boolean>;
+
+  /**
+   * Adapter name for frontmatter.
+   */
+  readonly name: string;
 }
 
 /**
@@ -46,8 +116,8 @@ export interface MapFrontmatter {
 export interface MapGenerationResult {
   /** Path where MAP.md was written */
   path: string;
-  /** Scope kind (v0.1.0: always 'folder') */
-  scope: 'folder';
+  /** Scope kind */
+  scope: 'file' | 'folder' | 'repo';
   /** Whether generation succeeded */
   success: boolean;
   /** Error message if failed */
