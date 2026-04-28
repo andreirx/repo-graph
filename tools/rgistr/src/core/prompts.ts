@@ -233,7 +233,7 @@ export function folderPrompt(
   parts.push('Recommended order for reading this folder.');
   parts.push('');
   parts.push('# Uncertainty');
-  parts.push('What remains unclear from child summaries alone. Write "None" if confident.');
+  parts.push('Architecturally relevant uncertainties from child summaries. Aggregate, do not dismiss.');
   parts.push('```');
   parts.push('');
   parts.push('Rules:');
@@ -242,6 +242,9 @@ export function folderPrompt(
   parts.push('- If a child is a seam/stub/placeholder, preserve that status.');
   parts.push('- Use exact filenames/folder names.');
   parts.push('- Key Components should be selective, not exhaustive.');
+  parts.push('- Uncertainty: if any child reports uncertainty about external types, caller context,');
+  parts.push('  or undefined interfaces, carry forward the most architecturally relevant ones.');
+  parts.push('  Only write "None" if child summaries contain no meaningful unresolved uncertainty.');
   parts.push('');
 
   parts.push('─'.repeat(60));

@@ -57,9 +57,6 @@ export interface GenerationStatus {
   errors: number;
 }
 
-/** Maximum files to summarize individually in a folder */
-const MAX_INDIVIDUAL_FILES = 8;
-
 /** Maximum file size for whole-file summarization (bytes) - use digest above this */
 const MAX_FILE_SIZE_WHOLE = 100 * 1024; // 100KB
 
@@ -91,13 +88,11 @@ export async function generate(options: GeneratorOptions): Promise<MapGeneration
   // Get git commit for provenance
   const basisCommit = await getGitCommit(config.rootPath);
 
-  // Count total work items
+  // Count total work items (all eligible files + all folders)
   let totalFiles = 0;
   for (const folder of folders) {
     const codeFiles = getCodeFiles(folder);
-    if (codeFiles.length <= MAX_INDIVIDUAL_FILES) {
-      totalFiles += codeFiles.length;
-    }
+    totalFiles += codeFiles.length;
   }
   const totalFolders = folders.length;
   const total = totalFiles + totalFolders;
@@ -110,51 +105,49 @@ export async function generate(options: GeneratorOptions): Promise<MapGeneration
   for (const folder of folders) {
     const codeFiles = getCodeFiles(folder);
 
-    // Only generate individual file MAPs for manageable folders
-    if (codeFiles.length <= MAX_INDIVIDUAL_FILES) {
-      for (const file of codeFiles) {
-        // Skip large files
-        if (file.size > MAX_FILE_SIZE_FOR_SUMMARY) continue;
+    // Generate file MAPs for all eligible source files
+    for (const file of codeFiles) {
+      // Skip files exceeding absolute size limit
+      if (file.size > MAX_FILE_SIZE_FOR_SUMMARY) continue;
 
-        const fileMapName = fileMapFilename(path.basename(file.path));
-        const fileMapPath = path.join(folder.path, fileMapName);
+      const fileMapName = fileMapFilename(path.basename(file.path));
+      const fileMapPath = path.join(folder.path, fileMapName);
 
-        // Check freshness
-        if (!config.force) {
-          const fresh = await isMapFresh(fileMapPath, [file.path]);
-          if (fresh) continue;
-        }
-
-        onProgress?.({
-          phase: 'generating-files',
-          current: file.relativePath,
-          processed,
-          total,
-          errors: results.filter(r => !r.success).length
-        });
-
-        try {
-          const result = await generateFileMap(file, folder.path, {
-            llm,
-            graphAdapter,
-            rootPath: config.rootPath,
-            repoRoot: effectiveRepoRoot,
-            basisCommit,
-            synthesisBasis,
-            dryRun: config.dryRun
-          });
-          results.push(result);
-        } catch (error) {
-          results.push({
-            path: fileMapPath,
-            scope: 'file',
-            success: false,
-            error: error instanceof Error ? error.message : String(error)
-          });
-        }
-
-        processed++;
+      // Check freshness
+      if (!config.force) {
+        const fresh = await isMapFresh(fileMapPath, [file.path]);
+        if (fresh) continue;
       }
+
+      onProgress?.({
+        phase: 'generating-files',
+        current: file.relativePath,
+        processed,
+        total,
+        errors: results.filter(r => !r.success).length
+      });
+
+      try {
+        const result = await generateFileMap(file, folder.path, {
+          llm,
+          graphAdapter,
+          rootPath: config.rootPath,
+          repoRoot: effectiveRepoRoot,
+          basisCommit,
+          synthesisBasis,
+          dryRun: config.dryRun
+        });
+        results.push(result);
+      } catch (error) {
+        results.push({
+          path: fileMapPath,
+          scope: 'file',
+          success: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+
+      processed++;
     }
   }
 
@@ -385,60 +378,31 @@ async function generateFolderMap(
     }
   }
 
-  // If no file MAPs exist but we have code files, summarize them inline
+  // Fallback: if no file MAPs exist but we have code files (e.g., all skipped due to size),
+  // provide a minimal grouped summary at folder synthesis stage
   if (fileSummaries.length === 0 && codeFiles.length > 0) {
-    if (codeFiles.length <= MAX_INDIVIDUAL_FILES) {
-      // Summarize each file inline (for folders without file MAPs)
-      for (const file of codeFiles) {
-        const content = await fs.readFile(file.path, 'utf-8');
-        const ext = path.extname(file.path).slice(1);
-        const language = detectLanguage(ext);
-
-        let prompt: string;
-        if (file.size <= MAX_FILE_SIZE_WHOLE) {
-          prompt = filePromptWhole(file.relativePath, content, language, synthesisBasis);
-        } else {
-          const digest = await digestFile(file.path, file.relativePath);
-          prompt = filePromptDigest(digest, synthesisBasis);
-        }
-
-        const response = await llm.complete(prompt, {
-          maxTokens: 4000,
-          temperature: 0.3,
-          systemPrompt: SYSTEM_PROMPT
-        });
-        const summary = parseFileSummary(response);
-        fileSummaries.push({
-          name: path.basename(file.path),
-          isFolder: false,
-          summary: summary.purpose
-        });
-      }
-    } else {
-      // Large folder - group summary
-      const filesInfo = await Promise.all(codeFiles.map(async f => {
-        const digest = await digestFile(f.path, f.relativePath);
-        return {
-          name: path.basename(f.path),
-          language: digest.language,
-          exports: digest.exports,
-          lineCount: digest.lineCount
-        };
-      }));
-      const prompt = fileGroupPrompt(filesInfo);
-      const response = await llm.complete(prompt, {
-        maxTokens: 2000,
-        temperature: 0.3,
-        systemPrompt: SYSTEM_PROMPT
-      });
-      // Extract collective purpose from markdown
-      const collectivePurpose = extractSection(response, 'Collective Purpose');
-      fileSummaries.push({
-        name: `[${codeFiles.length} files]`,
-        isFolder: false,
-        summary: collectivePurpose || 'Multiple code files in this folder.'
-      });
-    }
+    const filesInfo = await Promise.all(codeFiles.map(async f => {
+      const digest = await digestFile(f.path, f.relativePath);
+      return {
+        name: path.basename(f.path),
+        language: digest.language,
+        exports: digest.exports,
+        lineCount: digest.lineCount
+      };
+    }));
+    const prompt = fileGroupPrompt(filesInfo);
+    const response = await llm.complete(prompt, {
+      maxTokens: 2000,
+      temperature: 0.3,
+      systemPrompt: SYSTEM_PROMPT
+    });
+    // Extract collective purpose from markdown
+    const collectivePurpose = extractSection(response, 'Collective Purpose');
+    fileSummaries.push({
+      name: `[${codeFiles.length} files - no individual MAPs due to size]`,
+      isFolder: false,
+      summary: collectivePurpose || 'Multiple code files in this folder.'
+    });
   }
 
   // Generate folder summary
