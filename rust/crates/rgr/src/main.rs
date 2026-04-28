@@ -9,7 +9,6 @@
 //!   rmap path    <db_path> <repo_uid> <from> <to>
 //!   rmap imports <db_path> <repo_uid> <file_path>
 //!   rmap violations <db_path> <repo_uid>
-//!   rmap dead    <db_path> <repo_uid> [kind]
 //!   rmap cycles  <db_path> <repo_uid>
 //!   rmap stats   <db_path> <repo_uid>
 //!
@@ -167,7 +166,6 @@ fn print_usage() {
 	eprintln!("  rmap explain    <db_path> <repo_uid> <target> [--budget medium|large]");
 	eprintln!("  rmap docs list    <db_path> <repo_uid>");
 	eprintln!("  rmap docs extract <db_path> <repo_uid>");
-	eprintln!("  rmap dead    <db_path> <repo_uid> [kind]");
 	eprintln!("  rmap cycles  <db_path> <repo_uid>");
 	eprintln!("  rmap stats   <db_path> <repo_uid>");
 	eprintln!("  rmap declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]");
@@ -1913,6 +1911,10 @@ fn map_extracted_to_storage(
 ///
 /// Wraps the storage DeadNodeResult and adds a local trust section.
 /// Every dead result carries explicit confidence — no Option A hiding.
+///
+/// NOTE: Struct is kept for reintroduction of the dead-code surface.
+/// The `dead` command is currently disabled; see run_dead() comment.
+#[allow(dead_code)]
 #[derive(serde::Serialize)]
 struct DeadNodeOutput {
 	stable_key: String,
@@ -1931,162 +1933,63 @@ struct DeadNodeOutput {
 	trust: repo_graph_trust::DeadResultTrust,
 }
 
-fn run_dead(args: &[String]) -> ExitCode {
-	if args.len() < 2 || args.len() > 3 {
-		eprintln!("usage: rmap dead <db_path> <repo_uid> [kind]");
-		return ExitCode::from(1);
-	}
-
-	let db_path = Path::new(&args[0]);
-	let repo_uid = &args[1];
-	let kind_filter = args.get(2).map(|s| s.as_str());
-
-	// Validate kind filter against known node kinds.
-	const VALID_KINDS: &[&str] = &["SYMBOL", "FILE", "MODULE"];
-	if let Some(kind) = kind_filter {
-		if !VALID_KINDS.contains(&kind) {
-			eprintln!(
-				"error: unknown kind '{}', expected one of: {}",
-				kind,
-				VALID_KINDS.join(", ")
-			);
-			return ExitCode::from(1);
-		}
-	}
-
-	let storage = match open_storage(db_path) {
-		Ok(s) => s,
-		Err(msg) => {
-			eprintln!("error: {}", msg);
-			return ExitCode::from(2);
-		}
-	};
-
-	// Latest READY snapshot (same rule as callers/callees/trust).
-	let snapshot = match storage.get_latest_snapshot(repo_uid) {
-		Ok(Some(snap)) => snap,
-		Ok(None) => {
-			eprintln!("error: no snapshot found for repo '{}'", repo_uid);
-			return ExitCode::from(2);
-		}
-		Err(e) => {
-			eprintln!("error: {}", e);
-			return ExitCode::from(2);
-		}
-	};
-
-	// Find dead nodes.
-	let dead_nodes = match storage.find_dead_nodes(
-		&snapshot.snapshot_uid,
-		repo_uid,
-		kind_filter,
-	) {
-		Ok(d) => d,
-		Err(e) => {
-			eprintln!("error: {}", e);
-			return ExitCode::from(2);
-		}
-	};
-
-	// ── Assemble trust report for dead-confidence assessment ─────
+fn run_dead(_args: &[String]) -> ExitCode {
+	// ══════════════════════════════════════════════════════════════════
+	// DELIBERATELY DISABLED — 2026-04-27
 	//
-	// We need the full trust report to compute per-result confidence.
-	// This is repo-level evidence, not symbol-local proof.
-	let toolchain_json = snapshot.toolchain_json.as_deref();
-	let basis_commit = snapshot.basis_commit.as_deref();
-
-	let trust_report = match repo_graph_trust::assemble_trust_report(
-		&storage,
-		repo_uid,
-		&snapshot.snapshot_uid,
-		basis_commit,
-		toolchain_json,
-	) {
-		Ok(r) => Some(r),
-		Err(e) => {
-			eprintln!("warning: failed to assemble trust report: {}", e);
-			None
-		}
-	};
-
-	// ── Build enriched output with per-result dead confidence ────
+	// The `dead` command is removed from the CLI surface because:
 	//
-	// Every dead result carries explicit confidence. For repos where
-	// trust assembly failed, we default to LOW with a reason — missing
-	// trust evidence should DEGRADE confidence, not silently claim certainty.
-	// This is the surface meant to prevent unsafe deletion decisions.
-	let dead_output: Vec<DeadNodeOutput> = dead_nodes
-		.into_iter()
-		.map(|node| {
-			let per_result_trust = match &trust_report {
-				Some(report) => {
-					repo_graph_trust::assess_dead_confidence(report, &node.stable_key)
-				}
-				None => {
-					// Fallback: trust assembly failed → LOW confidence.
-					// Missing trust evidence is NOT a reason to claim certainty.
-					// Agents should treat these candidates with maximum caution.
-					repo_graph_trust::DeadResultTrust {
-						dead_confidence: repo_graph_trust::ResultConfidence::Low,
-						reasons: vec!["trust_unavailable".to_string()],
-					}
-				}
-			};
-
-			DeadNodeOutput {
-				stable_key: node.stable_key,
-				symbol: node.symbol,
-				kind: node.kind,
-				subtype: node.subtype,
-				file: node.file,
-				line: node.line,
-				line_count: node.line_count,
-				is_test: node.is_test,
-				trust: per_result_trust,
-			}
-		})
-		.collect();
-
-	// JSON to stdout (TS-compatible QueryResult envelope).
-	let count = dead_output.len();
-	let mut extra = serde_json::Map::new();
-	extra.insert("kind_filter".to_string(), serde_json::json!(kind_filter));
-
-	// ── Top-level trust summary (repo-level context) ─────────────
+	// 1. Current signal quality produces 85-95% false positive rates
+	//    on real-world codebases (smoke-run validation 2026-04-27).
 	//
-	// Keep both layers:
-	// 1. Top-level trust summary (repo/snapshot health context)
-	// 2. Per-result dead_confidence (candidate-specific)
+	// 2. Missing framework detectors (Spring, React, Axum, FastAPI)
+	//    cause all runtime-owned symbols to appear dead.
 	//
-	// For dead, we always include the top-level summary if trust is
-	// available (degraded or not) because agents need repo context
-	// to interpret per-result confidence.
-	if let Some(ref report) = trust_report {
-		let overlay = repo_graph_trust::TrustOverlaySummary::from_report(report, "CALLS+IMPORTS");
-		extra.insert("trust".to_string(), serde_json::to_value(&overlay).unwrap());
-	}
+	// 3. Missing entrypoint declarations cause all entry symbols to
+	//    appear dead.
+	//
+	// 4. A misleading "dead" label is worse than no label — it directs
+	//    agents toward the wrong investigation frontier.
+	//
+	// The underlying substrate is preserved:
+	// - storage::find_dead_nodes() still works
+	// - trust::assess_dead_confidence() still works
+	// - tests pinning current behavior remain
+	//
+	// This surface will be reintroduced as TWO separate commands:
+	//
+	// 1. `rmap orphans` — structural graph orphans, no deadness claim
+	// 2. `rmap dead` — coverage-backed + framework-liveness-backed,
+	//    much stronger evidence required
+	//
+	// See docs/TECH-DEBT.md for the full rationale and reintroduction
+	// criteria.
+	// ══════════════════════════════════════════════════════════════════
 
-	let output = match build_envelope(
-		&storage, "graph dead", repo_uid, &snapshot,
-		serde_json::to_value(&dead_output).unwrap(), count, extra,
-	) {
-		Ok(v) => v,
-		Err(e) => {
-			eprintln!("error: {}", e);
-			return ExitCode::from(2);
-		}
-	};
+	eprintln!("error: `rmap dead` is disabled");
+	eprintln!();
+	eprintln!("Dead-code detection is not available in rmap because current");
+	eprintln!("signal quality produces high false-positive rates (85-95% on");
+	eprintln!("real codebases). Using this output would mislead agents into");
+	eprintln!("investigating or deleting live code.");
+	eprintln!();
+	eprintln!("Root causes:");
+	eprintln!("  - Missing framework detectors (Spring, React, Axum, FastAPI)");
+	eprintln!("  - Missing entrypoint declarations");
+	eprintln!("  - No coverage-backed evidence");
+	eprintln!();
+	eprintln!("Alternative discovery commands that work:");
+	eprintln!("  rmap callers  - trace who calls a symbol");
+	eprintln!("  rmap callees  - trace what a symbol calls");
+	eprintln!("  rmap imports  - trace file imports");
+	eprintln!("  rmap orient   - repo overview with trust signals");
+	eprintln!("  rmap trust    - detailed reliability report");
+	eprintln!();
+	eprintln!("Dead-code surface will be reintroduced when:");
+	eprintln!("  - Framework entrypoint detection is mature, OR");
+	eprintln!("  - Coverage-backed evidence is available");
 
-	match serde_json::to_string_pretty(&output) {
-		Ok(json) => {
-			println!("{}", json);
-			ExitCode::SUCCESS
-		}
-		Err(e) => {
-			eprintln!("error: {}", e);
-			ExitCode::from(2)
-		}
-	}
+	ExitCode::from(2)
 }
 
 // ── cycles command ───────────────────────────────────────────────

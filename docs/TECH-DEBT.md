@@ -1413,10 +1413,54 @@ not intentional design differences.
 For intentional contract differences (design decisions), see
 `docs/cli/rmap-contracts.md`.
 
+### `dead` command deliberately disabled (2026-04-27)
+
+**Status:** Removed from CLI surface. Command exists but returns exit 2.
+
+**Reason:** Smoke-run validation on 5 real-world codebases (hexmanos,
+zap-engine, amodx, glamCRM, zap-squad) showed 85-95% false positive
+rates. A misleading "dead" label is worse than no label — it directs
+agents toward the wrong investigation frontier.
+
+**Root causes:**
+- No Spring framework detector (Java beans appear dead)
+- No React entrypoint detection (components appear dead)
+- No Rust framework detector (Axum/Actix handlers appear dead)
+- No Python framework detector (FastAPI/Django handlers appear dead)
+- No entrypoint declarations in any tested repo
+- No coverage-backed evidence
+
+**Underlying substrate preserved:**
+- `storage::find_dead_nodes()` works
+- `trust::assess_dead_confidence()` works
+- `DeadNodeOutput` DTO kept for reintroduction
+- Tests remain
+
+**Reintroduction plan:** Split into two separate products:
+
+1. **`rmap orphans`** — Pure graph heuristic. No deadness claim.
+   "Not currently referenced in the graph we built."
+   Useful for orientation, NOT deletion.
+
+2. **`rmap dead`** — Requires stronger evidence:
+   - Coverage-backed (executed vs not-executed under measured scenarios), OR
+   - Framework-liveness-backed (entrypoint/handler detection mature), OR
+   - Explicit entrypoint declarations
+   
+   Meaning: "Unexecuted AND structurally weakly connected."
+
+**Criteria for reintroduction:**
+- Framework entrypoint detection mature for at least one of:
+  Spring, React, Axum, FastAPI, OR
+- Coverage import surface operational on Rust side, OR
+- Entrypoint declaration workflow established and adopted
+
+See `docs/cli/rmap-contracts.md` for contract details.
+
+### Other temporary gaps
+
 - **`--edge-types` on callers/callees:** Accepts CALLS, INSTANTIATES, READS,
   WRITES only. TS accepts all 18 edge types.
-
-- **No `--min-lines` filter on dead:** Not implemented.
 
 - **No `graph metrics` command:** Not ported yet.
 

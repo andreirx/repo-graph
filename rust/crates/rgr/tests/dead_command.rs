@@ -1,6 +1,17 @@
 //! Deterministic tests for the `dead` command.
 //!
-//! Test matrix:
+//! STATUS: COMMAND DISABLED as of 2026-04-27.
+//!
+//! The CLI surface is disabled due to 85-95% false positive rates on real
+//! codebases. Historical contract tests are preserved (ignored) to aid
+//! reintroduction. They verify the correct envelope shape, kind filtering,
+//! per-result trust, and other contract properties that must hold when
+//! the surface is restored.
+//!
+//! To re-enable: remove `#[ignore]` from each test after the command is
+//! reintroduced (see `run_dead` in main.rs for criteria).
+//!
+//! Test matrix (when enabled):
 //!   1. Usage error
 //!   2. Missing DB / open failure
 //!   3. Repo not found / no READY snapshot
@@ -11,6 +22,55 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+
+// ═══════════════════════════════════════════════════════════════════════
+// ACTIVE TEST: Verifies the command is properly disabled.
+// This test is NOT ignored — it pins the intentional disabled behavior.
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn dead_command_is_disabled() {
+	// The dead command should exit 2 regardless of arguments.
+	let output = Command::new(binary_path())
+		.args(["dead", "/any.db", "any"])
+		.output()
+		.unwrap();
+
+	assert_eq!(
+		output.status.code(),
+		Some(2),
+		"dead command should exit 2 (disabled), got: {:?}",
+		output.status.code()
+	);
+
+	// Stdout should be empty (no JSON output).
+	assert!(
+		output.stdout.is_empty(),
+		"dead command should produce no stdout"
+	);
+
+	// Stderr should contain the disabled message.
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	assert!(
+		stderr.contains("`rmap dead` is disabled"),
+		"expected disabled message in stderr, got: {}",
+		stderr
+	);
+	assert!(
+		stderr.contains("false-positive"),
+		"expected false-positive explanation in stderr, got: {}",
+		stderr
+	);
+	assert!(
+		stderr.contains("callers"),
+		"expected alternative commands in stderr, got: {}",
+		stderr
+	);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// IGNORED TESTS: Historical contract tests for reintroduction.
+// ═══════════════════════════════════════════════════════════════════════
 
 fn binary_path() -> PathBuf {
 	PathBuf::from(env!("CARGO_BIN_EXE_rmap"))
@@ -85,6 +145,7 @@ fn build_indexed_db() -> (tempfile::TempDir, tempfile::TempDir, PathBuf) {
 // -- 1. Usage error ---------------------------------------------------
 
 #[test]
+#[ignore = "dead command disabled - see module doc"]
 fn dead_usage_error() {
 	let output = Command::new(binary_path())
 		.args(["dead"])
@@ -100,6 +161,7 @@ fn dead_usage_error() {
 // -- 2. Missing DB ----------------------------------------------------
 
 #[test]
+#[ignore = "dead command disabled - see module doc"]
 fn dead_missing_db() {
 	let output = Command::new(binary_path())
 		.args(["dead", "/nonexistent.db", "r1"])
@@ -115,6 +177,7 @@ fn dead_missing_db() {
 // -- 3. Repo not found ------------------------------------------------
 
 #[test]
+#[ignore = "dead command disabled - see module doc"]
 fn dead_repo_not_found() {
 	let (_repo_dir, _db_dir, db_path) = build_indexed_db();
 
@@ -136,6 +199,7 @@ fn dead_repo_not_found() {
 // -- 4. Invalid kind filter -------------------------------------------
 
 #[test]
+#[ignore = "dead command disabled - see module doc"]
 fn dead_invalid_kind_is_usage_error() {
 	let (_repo_dir, _db_dir, db_path) = build_indexed_db();
 
@@ -162,6 +226,7 @@ fn dead_invalid_kind_is_usage_error() {
 // -- 5. Empty result (all symbols referenced) -------------------------
 
 #[test]
+#[ignore = "dead command disabled - see module doc"]
 fn dead_empty_when_all_referenced() {
 	// Build a minimal fixture where every symbol is referenced.
 	let repo_dir = tempfile::tempdir().unwrap();
@@ -224,6 +289,7 @@ fn dead_empty_when_all_referenced() {
 // -- 5. Exact dead symbols on known fixture ---------------------------
 
 #[test]
+#[ignore = "dead command disabled - see module doc"]
 fn dead_exact_results() {
 	let (_repo_dir, _db_dir, db_path) = build_indexed_db();
 
@@ -292,6 +358,7 @@ fn dead_exact_results() {
 // -- 6. Kind filter narrows to SYMBOL only ----------------------------
 
 #[test]
+#[ignore = "dead command disabled - see module doc"]
 fn dead_kind_filter_symbol() {
 	let (_repo_dir, _db_dir, db_path) = build_indexed_db();
 
@@ -351,6 +418,7 @@ fn dead_kind_filter_symbol() {
 // -- 7. Per-result trust.dead_confidence ---------------------------------
 
 #[test]
+#[ignore = "dead command disabled - see module doc"]
 fn dead_results_include_per_result_trust() {
 	let (_repo_dir, _db_dir, db_path) = build_indexed_db();
 
@@ -398,6 +466,7 @@ fn dead_results_include_per_result_trust() {
 }
 
 #[test]
+#[ignore = "dead command disabled - see module doc"]
 fn dead_output_includes_top_level_trust_summary() {
 	let (_repo_dir, _db_dir, db_path) = build_indexed_db();
 
@@ -443,6 +512,7 @@ fn dead_output_includes_top_level_trust_summary() {
 }
 
 #[test]
+#[ignore = "dead command disabled - see module doc"]
 fn dead_confidence_reasons_are_stable_vocabulary() {
 	// Build a fixture that will likely have unresolved pressure.
 	let (_repo_dir, _db_dir, db_path) = build_indexed_db();
