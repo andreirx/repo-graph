@@ -21,10 +21,6 @@
         "level": "HIGH",
         "reasons": []
       },
-      "dead_code": {
-        "level": "HIGH",
-        "reasons": []
-      },
       "change_impact": {
         "level": "HIGH",
         "reasons": []

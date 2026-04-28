@@ -9,9 +9,9 @@ mod common;
 
 use common::FakeAgentStorage;
 use repo_graph_agent::{
-	orient, AgentBoundaryDeclaration, AgentCycle, AgentDeadNode,
-	AgentImportEdge, AgentReliabilityAxis, AgentReliabilityLevel,
-	AgentTrustSummary, Budget, EnrichmentState, Severity, SignalCategory,
+	orient, AgentBoundaryDeclaration, AgentCycle, AgentImportEdge,
+	AgentReliabilityAxis, AgentReliabilityLevel, AgentTrustSummary,
+	Budget, EnrichmentState, Severity, SignalCategory,
 };
 
 fn seed_with_all_signals() -> FakeAgentStorage {
@@ -36,9 +36,6 @@ fn seed_with_all_signals() -> FakeAgentStorage {
 	);
 
 	// TRUST_LOW_RESOLUTION (Medium, Trust category).
-	// Reliability axes are seeded `High` so DEAD_CODE still
-	// fires in this ranking fixture (the fake does not mirror
-	// the real trust crate's rules — see common::high_confidence_trust).
 	fake.trust_summaries.insert(
 		"snap-1".into(),
 		AgentTrustSummary {
@@ -65,18 +62,7 @@ fn seed_with_all_signals() -> FakeAgentStorage {
 		vec![AgentCycle { length: 2, modules: vec!["m1".into(), "m2".into()] }],
 	);
 
-	// DEAD_CODE (Medium, Structure)
-	fake.dead_nodes.insert(
-		"snap-1".into(),
-		vec![AgentDeadNode {
-			stable_key: "r1:src/foo.rs:SYMBOL:unused".into(),
-			symbol: "unused".into(),
-			kind: "SYMBOL".into(),
-			file: Some("src/foo.rs".into()),
-			line_count: Some(5),
-			is_test: false,
-		}],
-	);
+	// DEAD_CODE surface withdrawn — no dead_nodes seeding.
 
 	fake
 }
@@ -152,43 +138,9 @@ fn within_medium_tier_trust_precedes_structure() {
 	}
 }
 
-#[test]
-fn import_cycles_ranks_before_dead_code_within_same_tier() {
-	// F6: both are (Medium, Structure) — tier_priority breaks
-	// the tie. IMPORT_CYCLES has priority 0, DEAD_CODE has
-	// priority 1.
-	let fake = seed_with_all_signals();
-	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
-
-	let structure_medium: Vec<_> = result
-		.signals
-		.iter()
-		.filter(|s| {
-			s.severity() == Severity::Medium
-				&& s.category() == SignalCategory::Structure
-		})
-		.collect();
-	assert!(
-		structure_medium.len() >= 2,
-		"fixture must produce both IMPORT_CYCLES and DEAD_CODE"
-	);
-	let cycles_rank = structure_medium
-		.iter()
-		.find(|s| s.code().as_str() == "IMPORT_CYCLES")
-		.expect("IMPORT_CYCLES must be present")
-		.rank();
-	let dead_rank = structure_medium
-		.iter()
-		.find(|s| s.code().as_str() == "DEAD_CODE")
-		.expect("DEAD_CODE must be present")
-		.rank();
-	assert!(
-		cycles_rank < dead_rank,
-		"IMPORT_CYCLES (rank {}) must rank before DEAD_CODE (rank {})",
-		cycles_rank,
-		dead_rank,
-	);
-}
+// import_cycles_ranks_before_dead_code_within_same_tier — test removed.
+// Dead-code surface withdrawn. No DEAD_CODE signal to compare against
+// IMPORT_CYCLES within the Structure/Medium tier.
 
 #[test]
 fn informational_signals_land_at_the_tail() {

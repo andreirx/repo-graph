@@ -107,39 +107,7 @@ pub fn evaluate_conditions(input: &CheckInput) -> Vec<ConditionResult> {
 		}
 	}
 
-	// ── 5. DEAD_CODE_RELIABILITY ────────────────────────────
-	match input.dead_code_reliability {
-		Some(AgentReliabilityLevel::High) => {
-			results.push(ConditionResult {
-				code: ConditionCode::DeadCodeReliability,
-				status: ConditionStatus::Pass,
-				summary: "Dead-code reliability is HIGH.".to_string(),
-			});
-		}
-		Some(AgentReliabilityLevel::Medium) => {
-			results.push(ConditionResult {
-				code: ConditionCode::DeadCodeReliability,
-				status: ConditionStatus::Fail,
-				summary: "Dead-code reliability is MEDIUM.".to_string(),
-			});
-		}
-		Some(AgentReliabilityLevel::Low) => {
-			results.push(ConditionResult {
-				code: ConditionCode::DeadCodeReliability,
-				status: ConditionStatus::Fail,
-				summary: "Dead-code reliability is LOW.".to_string(),
-			});
-		}
-		None => {
-			results.push(ConditionResult {
-				code: ConditionCode::DeadCodeReliability,
-				status: ConditionStatus::Incomplete,
-				summary: "Dead-code reliability data unavailable.".to_string(),
-			});
-		}
-	}
-
-	// ── 6. ENRICHMENT_STATE ─────────────────────────────────
+	// ── 5. ENRICHMENT_STATE ─────────────────────────────────
 	match input.enrichment_state {
 		Some(EnrichmentState::Ran) => {
 			results.push(ConditionResult {

@@ -102,23 +102,8 @@ pub fn orient_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
 		all_signals.push(Signal::callees_summary(evidence));
 	}
 
-	// ── dead_code (symbol-scoped) ───────────────────────────
-	//
-	// Check if THIS symbol is dead by looking at the file's
-	// dead list. The reliability gate is applied first (same
-	// as file/path pipelines). If reliable, look up the file's
-	// dead nodes and check if the symbol's stable_key appears.
-	if let Some(ref file_path) = context.file_path {
-		let dead_check = check_symbol_dead(
-			storage,
-			snapshot_uid,
-			repo_uid,
-			file_path,
-			symbol_stable_key,
-			&trust_result.summary,
-		)?;
-		merge(&mut all_signals, &mut all_limits, dead_check);
-	}
+	// dead_code signal removed: `rmap dead` surface is disabled.
+	// Internal substrate preserved in storage, but not surfaced.
 
 	// ── inherited module-context signals ────────────────────
 	if let Some(ref module_path) = context.module_path {
@@ -266,77 +251,6 @@ fn group_by_module<'a>(
 	});
 	entries.truncate(TOP_MODULES_N);
 	entries
-}
-
-// ── Dead-code check for a single symbol ─────────────────────────
-
-use crate::storage_port::{AgentReliabilityLevel, AgentTrustSummary};
-
-/// Check if a specific symbol is dead by querying the file's dead
-/// node list and looking for the symbol's stable_key.
-///
-/// Applies the same reliability gate as the file/path dead_code
-/// aggregators. When dead_code_reliability is not High, emits
-/// DEAD_CODE_UNRELIABLE limit and no signal.
-fn check_symbol_dead<S: AgentStorageRead + ?Sized>(
-	storage: &S,
-	snapshot_uid: &str,
-	repo_uid: &str,
-	file_path: &str,
-	symbol_stable_key: &str,
-	trust: &AgentTrustSummary,
-) -> Result<AggregatorOutput, AgentStorageError> {
-	// Reliability gate.
-	if trust.dead_code_reliability.level != AgentReliabilityLevel::High {
-		let reasons = if trust.dead_code_reliability.reasons.is_empty() {
-			vec!["dead_code_reliability_not_high".to_string()]
-		} else {
-			trust.dead_code_reliability.reasons.clone()
-		};
-		return Ok(AggregatorOutput {
-			signals: Vec::new(),
-			limits: vec![Limit::from_code_with_reasons(
-				LimitCode::DeadCodeUnreliable,
-				reasons,
-			)],
-		});
-	}
-
-	// Query the file's dead nodes.
-	let dead = storage.find_dead_nodes_in_file(
-		snapshot_uid,
-		repo_uid,
-		file_path,
-	)?;
-
-	// Check if the focused symbol's stable_key is among the dead.
-	let is_dead = dead.iter().any(|d| d.stable_key == symbol_stable_key);
-
-	if !is_dead {
-		return Ok(AggregatorOutput::empty());
-	}
-
-	// Build evidence for this single dead symbol.
-	use crate::dto::signal::{DeadCodeEvidence, DeadSymbolEvidence};
-
-	let dead_sym = dead
-		.iter()
-		.find(|d| d.stable_key == symbol_stable_key)
-		.unwrap();
-
-	let evidence = DeadCodeEvidence {
-		dead_count: 1,
-		top_dead: vec![DeadSymbolEvidence {
-			symbol: dead_sym.symbol.clone(),
-			file: dead_sym.file.clone(),
-			line_count: dead_sym.line_count,
-		}],
-	};
-
-	Ok(AggregatorOutput {
-		signals: vec![Signal::dead_code(evidence)],
-		limits: Vec::new(),
-	})
 }
 
 // ── Boundary aggregator for exact module match ──────────────────

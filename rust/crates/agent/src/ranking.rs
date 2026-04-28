@@ -93,8 +93,9 @@ fn truncate_vec<T>(v: &mut Vec<T>, cap: usize) -> TruncationOutcome {
 mod tests {
 	use super::*;
 	use crate::dto::signal::{
-		BoundaryViolationsEvidence, DeadCodeEvidence, ImportCyclesEvidence,
+		BoundaryViolationsEvidence, ImportCyclesEvidence,
 		ModuleSummaryEvidence, SnapshotInfoEvidence,
+		TrustLowResolutionEvidence,
 	};
 
 	fn make_signals() -> Vec<Signal> {
@@ -111,9 +112,10 @@ mod tests {
 				symbol_count: 1,
 				languages: vec![],
 			}),
-			Signal::dead_code(DeadCodeEvidence {
-				dead_count: 1,
-				top_dead: vec![],
+			Signal::trust_low_resolution(TrustLowResolutionEvidence {
+				resolution_rate: 0.5,
+				resolved_count: 50,
+				total_count: 100,
 			}),
 			Signal::boundary_violations(BoundaryViolationsEvidence {
 				violation_count: 1,
@@ -169,10 +171,11 @@ mod tests {
 	#[test]
 	fn truncate_respects_small_cap() {
 		let mut s = make_signals();
-		// Add a 6th signal — same as dead_code so we have 6.
-		s.push(Signal::dead_code(DeadCodeEvidence {
-			dead_count: 2,
-			top_dead: vec![],
+		// Add a 6th signal so we have 6.
+		s.push(Signal::trust_low_resolution(TrustLowResolutionEvidence {
+			resolution_rate: 0.4,
+			resolved_count: 40,
+			total_count: 100,
 		}));
 		sort_and_rank(&mut s);
 		let outcome = truncate_signals(&mut s, Budget::Small);

@@ -177,14 +177,10 @@ fn build_caveats(
 			call_graph_level
 		));
 	}
-	if dead_code_level != ReliabilityLevel::HIGH {
-		caveats.push(format!(
-			"Dead-code reliability is {:?} on this repo. \
-			 Treat `graph dead` results as 'graph orphans' requiring human arbitration, \
-			 not deletion candidates.",
-			dead_code_level
-		));
-	}
+	// Dead-code caveat removed: `rmap dead` surface is disabled.
+	// Internal dead_code_reliability computation is preserved for
+	// future use but not surfaced to users.
+	let _ = dead_code_level;
 	if import_graph_level != ReliabilityLevel::HIGH {
 		caveats.push(format!(
 			"Import-graph reliability is {:?}. \
@@ -1168,7 +1164,7 @@ mod tests {
 
 		let report = compute_trust_report(&input);
 		assert!(report.caveats.iter().any(|c| c.contains("Call-graph reliability is LOW")));
-		assert!(report.caveats.iter().any(|c| c.contains("Dead-code reliability is LOW")));
+		// Dead-code caveat removed: `rmap dead` surface is disabled.
 	}
 
 	// ── Call resolution rate edge case ────────────────────────

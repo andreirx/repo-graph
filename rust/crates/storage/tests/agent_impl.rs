@@ -457,25 +457,17 @@ fn orient_runs_over_real_storage_connection() {
 	// covered by the agent crate's own test suite against the
 	// fake.
 	//
-	// ── Expected limit set on an empty snapshot (post Rust-43 F1 fix) ──
+	// ── Expected limit set on an empty snapshot ──
 	//
-	// An empty snapshot has zero entrypoint declarations, so
-	// the trust crate's `detect_missing_entrypoint_declarations`
-	// fires, which makes `reliability.dead_code.level = LOW`.
-	// The agent dead-code aggregator therefore emits
-	// `DEAD_CODE_UNRELIABLE` instead of a DEAD_CODE signal.
-	//
-	// Limits on this fixture (4 total):
+	// Limits on this fixture (3 total):
 	//   1. MODULE_DATA_UNAVAILABLE (always)
 	//   2. GATE_NOT_CONFIGURED (no requirement declarations)
 	//   3. COMPLEXITY_UNAVAILABLE (always)
-	//   4. DEAD_CODE_UNRELIABLE (trust reports Low
-	//      dead_code_reliability → reliability gate fires)
 	//
-	// This is the smoke-test line of defense for F1: if the
-	// reliability gate ever regresses, the empty-snapshot
-	// path is the simplest reproducer.
-	use repo_graph_agent::{orient, Budget, LimitCode, ORIENT_SCHEMA};
+	// Dead-code surface is withdrawn — no DEAD_CODE signal or
+	// DEAD_CODE_UNRELIABLE limit. Internal substrate preserved
+	// but not surfaced to orient output.
+	use repo_graph_agent::{orient, Budget, ORIENT_SCHEMA};
 
 	let (_tmp, mut storage) = open_temp_storage();
 	insert_repo(&storage, "r1", "my-repo");
@@ -495,40 +487,27 @@ fn orient_runs_over_real_storage_connection() {
 
 	assert_eq!(
 		result.limits.len(),
-		4,
+		3,
 		"empty snapshot must emit MODULE_DATA_UNAVAILABLE + \
-		 GATE_NOT_CONFIGURED + COMPLEXITY_UNAVAILABLE + \
-		 DEAD_CODE_UNRELIABLE; actual: {:?}",
+		 GATE_NOT_CONFIGURED + COMPLEXITY_UNAVAILABLE; actual: {:?}",
 		result.limits.iter().map(|l| l.code).collect::<Vec<_>>()
 	);
 
-	// DEAD_CODE_UNRELIABLE must carry the trust reason
-	// verbatim. The exact reason string the trust crate
-	// produces for this fixture is
-	// "missing_entrypoint_declarations".
-	let dc_unreliable = result
-		.limits
-		.iter()
-		.find(|l| l.code == LimitCode::DeadCodeUnreliable)
-		.expect("DEAD_CODE_UNRELIABLE must fire on empty snapshot");
-	assert!(
-		dc_unreliable
-			.reasons
-			.iter()
-			.any(|r| r == "missing_entrypoint_declarations"),
-		"reasons must include trust's missing_entrypoint_declarations: {:?}",
-		dc_unreliable.reasons
-	);
-
-	// DEAD_CODE signal must NOT appear.
-	let has_dead_code_signal = result
-		.signals
-		.iter()
-		.any(|s| s.code() == repo_graph_agent::SignalCode::DeadCode);
-	assert!(
-		!has_dead_code_signal,
-		"DEAD_CODE signal must be suppressed when reliability is Low"
-	);
+	// No dead-code vocabulary should appear in limits or signals.
+	for limit in &result.limits {
+		assert!(
+			!limit.code.as_str().contains("DEAD"),
+			"no dead-code limit should appear: {}",
+			limit.code.as_str()
+		);
+	}
+	for signal in &result.signals {
+		assert!(
+			!signal.code().as_str().contains("DEAD"),
+			"no dead-code signal should appear: {}",
+			signal.code().as_str()
+		);
+	}
 
 	// At minimum MODULE_SUMMARY + SNAPSHOT_INFO fire.
 	assert!(result.signals.len() >= 2);

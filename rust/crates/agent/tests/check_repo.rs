@@ -174,6 +174,7 @@ fn call_graph_medium_everything_pass() {
 				level: AgentReliabilityLevel::Medium,
 				reasons: Vec::new(),
 			},
+			// dead_code_reliability: internal substrate only
 			dead_code_reliability: AgentReliabilityAxis {
 				level: AgentReliabilityLevel::High,
 				reasons: Vec::new(),
@@ -206,56 +207,7 @@ fn call_graph_medium_everything_pass() {
 	}
 }
 
-// ── 5. dead_code_reliability_non_high_produces_fail ────────────
-
-#[test]
-fn dead_code_reliability_non_high_produces_fail() {
-	let mut fake = seeded();
-	fake.trust_summaries.insert(
-		"snap-1".into(),
-		AgentTrustSummary {
-			call_resolution_rate: 0.90,
-			resolved_calls: 90,
-			unresolved_calls: 10,
-			call_graph_reliability: AgentReliabilityAxis {
-				level: AgentReliabilityLevel::High,
-				reasons: Vec::new(),
-			},
-			dead_code_reliability: AgentReliabilityAxis {
-				level: AgentReliabilityLevel::Low,
-				reasons: vec!["test".into()],
-			},
-			enrichment_state: EnrichmentState::Ran,
-			enrichment_eligible: 10,
-			enrichment_enriched: 9,
-		},
-	);
-
-	let result = run_check(&fake, "r1", TEST_NOW).unwrap();
-
-	let sig = find_signal(&result, SignalCode::CheckFail)
-		.expect("expected CHECK_FAIL signal");
-	match sig.evidence() {
-		SignalEvidence::CheckFail(ev) => {
-			let codes: Vec<&str> = ev
-				.fail_conditions
-				.iter()
-				.map(|c| c.code.as_str())
-				.collect();
-			assert!(
-				codes.contains(&"DEAD_CODE_RELIABILITY"),
-				"expected DEAD_CODE_RELIABILITY in fail: {:?}",
-				codes
-			);
-		}
-		other => panic!(
-			"expected CheckFail evidence, got {:?}",
-			other
-		),
-	}
-}
-
-// ── 6. enrichment_not_run_produces_fail ────────────────────────
+// ── 5. enrichment_not_run_produces_fail ────────────────────────
 
 #[test]
 fn enrichment_not_run_produces_fail() {

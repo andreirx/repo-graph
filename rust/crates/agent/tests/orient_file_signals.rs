@@ -9,9 +9,8 @@ mod common;
 
 use common::FakeAgentStorage;
 use repo_graph_agent::{
-	orient, AgentBoundaryDeclaration, AgentCycle, AgentDeadNode,
-	AgentPathResolution, AgentRepoSummary, Budget, LimitCode, SignalCode,
-	SignalEvidence,
+	orient, AgentBoundaryDeclaration, AgentCycle, AgentPathResolution,
+	AgentRepoSummary, Budget, LimitCode, SignalCode, SignalEvidence,
 };
 use repo_graph_gate::{GateObligation, GateRequirement};
 
@@ -46,39 +45,8 @@ fn find_limit<'a>(
 }
 
 // ── DEAD_CODE scoped to file ────────────────────────────────────
-
-#[test]
-fn file_focus_dead_code_scoped_to_exact_file() {
-	let mut fake = seeded_with_file_focus();
-	fake.dead_nodes_in_file.insert(
-		("snap-1".into(), "src/core/service.ts".into()),
-		vec![AgentDeadNode {
-			stable_key: "r1:src/core/service.ts:SYMBOL:unused".into(),
-			symbol: "unused".into(),
-			kind: "SYMBOL".into(),
-			file: Some("src/core/service.ts".into()),
-			line_count: Some(10),
-			is_test: false,
-		}],
-	);
-	let result = orient(
-		&fake,
-		"r1",
-		Some("src/core/service.ts"),
-		Budget::Small,
-		common::TEST_NOW,
-	)
-	.unwrap();
-
-	let sig = find_signal(&result, SignalCode::DeadCode)
-		.expect("DEAD_CODE must be emitted for file-scoped dead nodes");
-	match sig.evidence() {
-		SignalEvidence::DeadCode(ev) => {
-			assert_eq!(ev.dead_count, 1);
-		}
-		other => panic!("wrong evidence variant: {:?}", other),
-	}
-}
+// Test removed: dead-code surface withdrawn.
+// See orient_repo_dead_code_reliability.rs for withdrawal regression tests.
 
 // ── MODULE_SUMMARY scoped to file ───────────────────────────────
 

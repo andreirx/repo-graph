@@ -183,7 +183,8 @@ pub enum SignalCode {
 	TrustNoEnrichment,
 	// Structure
 	ImportCycles,
-	DeadCode,
+	// DeadCode — surface withdrawn. Internal substrate preserved.
+	// See docs/TECH-DEBT.md for reintroduction conditions.
 	HighComplexity,
 	HighFanOut,
 	HighInstability,
@@ -199,7 +200,6 @@ pub enum SignalCode {
 	ExplainImports,
 	ExplainSymbols,
 	ExplainFiles,
-	ExplainDead,
 	ExplainCycles,
 	ExplainBoundary,
 	ExplainGate,
@@ -221,7 +221,6 @@ impl SignalCode {
 			Self::TrustStaleSnapshot => "TRUST_STALE_SNAPSHOT",
 			Self::TrustNoEnrichment => "TRUST_NO_ENRICHMENT",
 			Self::ImportCycles => "IMPORT_CYCLES",
-			Self::DeadCode => "DEAD_CODE",
 			Self::HighComplexity => "HIGH_COMPLEXITY",
 			Self::HighFanOut => "HIGH_FAN_OUT",
 			Self::HighInstability => "HIGH_INSTABILITY",
@@ -235,7 +234,6 @@ impl SignalCode {
 			Self::ExplainImports => "EXPLAIN_IMPORTS",
 			Self::ExplainSymbols => "EXPLAIN_SYMBOLS",
 			Self::ExplainFiles => "EXPLAIN_FILES",
-			Self::ExplainDead => "EXPLAIN_DEAD",
 			Self::ExplainCycles => "EXPLAIN_CYCLES",
 			Self::ExplainBoundary => "EXPLAIN_BOUNDARY",
 			Self::ExplainGate => "EXPLAIN_GATE",
@@ -268,10 +266,9 @@ impl SignalCode {
 			Self::TrustLowResolution => 0,
 			Self::TrustStaleSnapshot => 1,
 			Self::TrustNoEnrichment => 2,
-			// Structure (Medium): cycles > dead > complexity.
+			// Structure (Medium): cycles > complexity.
 			Self::ImportCycles => 0,
-			Self::DeadCode => 1,
-			Self::HighComplexity => 2,
+			Self::HighComplexity => 1,
 			// Structure (Low): fan-out > instability > callers > callees.
 			Self::HighFanOut => 0,
 			Self::HighInstability => 1,
@@ -287,12 +284,11 @@ impl SignalCode {
 			Self::ExplainImports => 3,
 			Self::ExplainSymbols => 4,
 			Self::ExplainFiles => 5,
-			Self::ExplainDead => 6,
-			Self::ExplainCycles => 7,
-			Self::ExplainBoundary => 8,
-			Self::ExplainGate => 9,
-			Self::ExplainTrust => 10,
-			Self::ExplainMeasurements => 11,
+			Self::ExplainCycles => 6,
+			Self::ExplainBoundary => 7,
+			Self::ExplainGate => 8,
+			Self::ExplainTrust => 9,
+			Self::ExplainMeasurements => 10,
 		}
 	}
 
@@ -318,7 +314,6 @@ impl SignalCode {
 			Self::TrustStaleSnapshot => (Trust, Medium),
 			Self::TrustNoEnrichment => (Trust, Low),
 			Self::ImportCycles => (Structure, Medium),
-			Self::DeadCode => (Structure, Medium),
 			Self::HighComplexity => (Structure, Medium),
 			Self::HighFanOut => (Structure, Low),
 			Self::HighInstability => (Structure, Low),
@@ -332,7 +327,6 @@ impl SignalCode {
 			Self::ExplainImports => (Explain, Low),
 			Self::ExplainSymbols => (Explain, Low),
 			Self::ExplainFiles => (Explain, Low),
-			Self::ExplainDead => (Explain, Low),
 			Self::ExplainCycles => (Explain, Low),
 			Self::ExplainBoundary => (Explain, Low),
 			Self::ExplainGate => (Explain, Low),
@@ -425,18 +419,9 @@ pub struct BoundaryViolationEvidence {
 	pub edge_count: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct DeadCodeEvidence {
-	pub dead_count: u64,
-	pub top_dead: Vec<DeadSymbolEvidence>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct DeadSymbolEvidence {
-	pub symbol: String,
-	pub file: Option<String>,
-	pub line_count: Option<u64>,
-}
+// DeadCodeEvidence, DeadSymbolEvidence — removed.
+// Surface withdrawn; internal substrate preserved.
+// See docs/TECH-DEBT.md for reintroduction conditions.
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ModuleSummaryEvidence {
@@ -587,7 +572,6 @@ pub struct ExplainSymbolItem {
 	pub name: String,
 	pub subtype: Option<String>,
 	pub line_start: Option<u64>,
-	pub is_dead: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -611,32 +595,6 @@ pub struct ExplainFileItem {
 pub struct ExplainFilesEvidence {
 	pub count: u64,
 	pub items: Vec<ExplainFileItem>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub items_truncated: Option<bool>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub items_omitted_count: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ExplainDeadItem {
-	pub symbol: String,
-	pub file: Option<String>,
-	pub line_count: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ExplainDeadEvidence {
-	pub count: u64,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub is_target_dead: Option<bool>,
-	pub reliability_level: String,
-	/// When `reliability_level` is not `"high"`, these reasons
-	/// explain WHY dead-code data is unreliable. Sourced from
-	/// `trust.dead_code_reliability.reasons`. The agent sees
-	/// both the data and the caveat. Empty when HIGH.
-	#[serde(skip_serializing_if = "Vec::is_empty")]
-	pub reliability_reasons: Vec<String>,
-	pub items: Vec<ExplainDeadItem>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub items_truncated: Option<bool>,
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -686,7 +644,7 @@ pub struct ExplainGateEvidence {
 pub struct ExplainTrustEvidence {
 	pub call_resolution_rate: f64,
 	pub call_graph_reliability: String,
-	pub dead_code_reliability: String,
+	// dead_code_reliability — removed. Surface withdrawn.
 	pub enrichment_state: String,
 }
 
@@ -731,7 +689,7 @@ pub enum SignalEvidence {
 	TrustStaleSnapshot(TrustStaleSnapshotEvidence),
 	TrustNoEnrichment(TrustNoEnrichmentEvidence),
 	BoundaryViolations(BoundaryViolationsEvidence),
-	DeadCode(DeadCodeEvidence),
+	// DeadCode — variant removed. Surface withdrawn.
 	ModuleSummary(ModuleSummaryEvidence),
 	SnapshotInfo(SnapshotInfoEvidence),
 	CallersSummary(CallersSummaryEvidence),
@@ -742,7 +700,6 @@ pub enum SignalEvidence {
 	ExplainImports(ExplainImportsEvidence),
 	ExplainSymbols(ExplainSymbolsEvidence),
 	ExplainFiles(ExplainFilesEvidence),
-	ExplainDead(ExplainDeadEvidence),
 	ExplainCycles(ExplainCyclesEvidence),
 	ExplainBoundary(ExplainBoundaryEvidence),
 	ExplainGate(ExplainGateEvidence),
@@ -764,7 +721,6 @@ impl Serialize for SignalEvidence {
 			Self::TrustStaleSnapshot(e) => e.serialize(serializer),
 			Self::TrustNoEnrichment(e) => e.serialize(serializer),
 			Self::BoundaryViolations(e) => e.serialize(serializer),
-			Self::DeadCode(e) => e.serialize(serializer),
 			Self::ModuleSummary(e) => e.serialize(serializer),
 			Self::SnapshotInfo(e) => e.serialize(serializer),
 			Self::CallersSummary(e) => e.serialize(serializer),
@@ -775,7 +731,6 @@ impl Serialize for SignalEvidence {
 			Self::ExplainImports(e) => e.serialize(serializer),
 			Self::ExplainSymbols(e) => e.serialize(serializer),
 			Self::ExplainFiles(e) => e.serialize(serializer),
-			Self::ExplainDead(e) => e.serialize(serializer),
 			Self::ExplainCycles(e) => e.serialize(serializer),
 			Self::ExplainBoundary(e) => e.serialize(serializer),
 			Self::ExplainGate(e) => e.serialize(serializer),
@@ -803,7 +758,6 @@ impl SignalEvidence {
 			Self::TrustStaleSnapshot(_) => "TrustStaleSnapshot",
 			Self::TrustNoEnrichment(_) => "TrustNoEnrichment",
 			Self::BoundaryViolations(_) => "BoundaryViolations",
-			Self::DeadCode(_) => "DeadCode",
 			Self::ModuleSummary(_) => "ModuleSummary",
 			Self::SnapshotInfo(_) => "SnapshotInfo",
 			Self::CallersSummary(_) => "CallersSummary",
@@ -814,7 +768,6 @@ impl SignalEvidence {
 			Self::ExplainImports(_) => "ExplainImports",
 			Self::ExplainSymbols(_) => "ExplainSymbols",
 			Self::ExplainFiles(_) => "ExplainFiles",
-			Self::ExplainDead(_) => "ExplainDead",
 			Self::ExplainCycles(_) => "ExplainCycles",
 			Self::ExplainBoundary(_) => "ExplainBoundary",
 			Self::ExplainGate(_) => "ExplainGate",
@@ -1095,19 +1048,8 @@ impl Signal {
 		)
 	}
 
-	pub fn dead_code(evidence: DeadCodeEvidence) -> Self {
-		let summary = format!(
-			"{} unreferenced symbol{} detected.",
-			evidence.dead_count,
-			if evidence.dead_count == 1 { "" } else { "s" }
-		);
-		Self::build(
-			SignalCode::DeadCode,
-			summary,
-			SignalEvidence::DeadCode(evidence),
-			SourceRef::StorageFindDeadNodes,
-		)
-	}
+	// Signal::dead_code() — constructor removed. Surface withdrawn.
+	// See docs/TECH-DEBT.md for reintroduction conditions.
 
 	pub fn module_summary(evidence: ModuleSummaryEvidence) -> Self {
 		let summary = format!(
@@ -1256,20 +1198,6 @@ impl Signal {
 		)
 	}
 
-	pub fn explain_dead(evidence: ExplainDeadEvidence) -> Self {
-		let summary = format!(
-			"{} unreferenced symbol{}.",
-			evidence.count,
-			if evidence.count == 1 { "" } else { "s" },
-		);
-		Self::build(
-			SignalCode::ExplainDead,
-			summary,
-			SignalEvidence::ExplainDead(evidence),
-			SourceRef::ExplainPipeline,
-		)
-	}
-
 	pub fn explain_cycles(evidence: ExplainCyclesEvidence) -> Self {
 		let summary = format!(
 			"{} import cycle{}.",
@@ -1315,10 +1243,9 @@ impl Signal {
 
 	pub fn explain_trust(evidence: ExplainTrustEvidence) -> Self {
 		let summary = format!(
-			"Trust: {:.0}% call resolution, {} call graph, {} dead code.",
+			"Trust: {:.0}% call resolution, {} call graph.",
 			evidence.call_resolution_rate * 100.0,
 			evidence.call_graph_reliability,
-			evidence.dead_code_reliability,
 		);
 		Self::build(
 			SignalCode::ExplainTrust,
@@ -1392,10 +1319,7 @@ mod tests {
 			SignalCode::TrustLowResolution.descriptor(),
 			(SignalCategory::Trust, Severity::Medium),
 		);
-		assert_eq!(
-			SignalCode::DeadCode.descriptor(),
-			(SignalCategory::Structure, Severity::Medium),
-		);
+		// SignalCode::DeadCode — removed. Surface withdrawn.
 		assert_eq!(
 			SignalCode::SnapshotInfo.descriptor(),
 			(SignalCategory::Informational, Severity::Low),
@@ -1451,15 +1375,7 @@ mod tests {
 		assert_eq!(s.evidence.variant_name(), "BoundaryViolations");
 	}
 
-	#[test]
-	fn constructor_invariant_dead_code() {
-		let s = Signal::dead_code(DeadCodeEvidence {
-			dead_count: 1,
-			top_dead: vec![],
-		});
-		assert_eq!(s.code, SignalCode::DeadCode);
-		assert_eq!(s.evidence.variant_name(), "DeadCode");
-	}
+	// constructor_invariant_dead_code — test removed. Surface withdrawn.
 
 	#[test]
 	fn constructor_invariant_module_summary() {

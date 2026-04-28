@@ -63,6 +63,7 @@ pub fn high_confidence_trust() -> AgentTrustSummary {
 			level: AgentReliabilityLevel::High,
 			reasons: Vec::new(),
 		},
+		// dead_code_reliability: internal substrate, not in public surface
 		dead_code_reliability: AgentReliabilityAxis {
 			level: AgentReliabilityLevel::High,
 			reasons: Vec::new(),

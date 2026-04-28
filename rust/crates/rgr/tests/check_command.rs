@@ -150,8 +150,16 @@ fn check_envelope_shape() {
 
 #[test]
 fn check_exit_code_reflects_verdict() {
-	// On the tiny repo, check produces CHECK_FAIL (dead_code_reliability
-	// LOW + enrichment NotRun). Exit code must be 1.
+	// On the tiny repo, check produces CHECK_PASS. The fixture has:
+	// - snapshot exists (pass)
+	// - files > 0 (pass)
+	// - no stale files (pass)
+	// - call_graph_reliability (advisory, always pass in check)
+	// - enrichment NotApplicable (pass, no eligible edges)
+	// - gate not configured (pass)
+	//
+	// Note: dead_code_reliability was removed from check conditions
+	// as part of the dead-code surface withdrawal (Option D).
 	let (_r, _d, db) = build_indexed_repo();
 	let output = run_cmd(&["check", db.to_str().unwrap(), "r1"]);
 
@@ -175,18 +183,18 @@ fn check_exit_code_reflects_verdict() {
 		check_verdicts
 	);
 
-	// For this fixture, the verdict should be CHECK_FAIL.
+	// For this fixture, the verdict should be CHECK_PASS.
 	assert_eq!(
-		check_verdicts[0], "CHECK_FAIL",
-		"tiny fixture should produce CHECK_FAIL, got: {}",
+		check_verdicts[0], "CHECK_PASS",
+		"tiny fixture should produce CHECK_PASS, got: {}",
 		check_verdicts[0]
 	);
 
-	// Exit code should be 1 (fail).
+	// Exit code should be 0 (pass).
 	assert_eq!(
 		output.status.code(),
-		Some(1),
-		"CHECK_FAIL must exit 1"
+		Some(0),
+		"CHECK_PASS must exit 0"
 	);
 }
 

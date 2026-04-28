@@ -68,7 +68,6 @@ mod tests {
 			files_total: 42,
 			stale_file_count: 0,
 			call_graph_reliability: Some(AgentReliabilityLevel::High),
-			dead_code_reliability: Some(AgentReliabilityLevel::High),
 			enrichment_state: Some(EnrichmentState::Ran),
 			gate_outcome: Some(GateOutcomeForCheck::Pass),
 		}
@@ -106,7 +105,6 @@ mod tests {
 			files_total: 0,
 			stale_file_count: 0,
 			call_graph_reliability: None,
-			dead_code_reliability: None,
 			enrichment_state: None,
 			gate_outcome: None,
 		};
@@ -158,39 +156,7 @@ mod tests {
 		assert_eq!(result.verdict, CheckVerdict::Pass);
 	}
 
-	// ── 7. dead_code_medium_is_fail ─────────────────────────
-
-	#[test]
-	fn dead_code_medium_is_fail() {
-		let mut input = all_pass_input();
-		input.dead_code_reliability = Some(AgentReliabilityLevel::Medium);
-		let result = check(&input);
-		assert_eq!(result.verdict, CheckVerdict::Fail);
-		let dc = result
-			.conditions
-			.iter()
-			.find(|c| c.code == ConditionCode::DeadCodeReliability)
-			.unwrap();
-		assert_eq!(dc.status, ConditionStatus::Fail);
-	}
-
-	// ── 8. dead_code_low_is_fail ────────────────────────────
-
-	#[test]
-	fn dead_code_low_is_fail() {
-		let mut input = all_pass_input();
-		input.dead_code_reliability = Some(AgentReliabilityLevel::Low);
-		let result = check(&input);
-		assert_eq!(result.verdict, CheckVerdict::Fail);
-		let dc = result
-			.conditions
-			.iter()
-			.find(|c| c.code == ConditionCode::DeadCodeReliability)
-			.unwrap();
-		assert_eq!(dc.status, ConditionStatus::Fail);
-	}
-
-	// ── 9. enrichment_not_run ───────────────────────────────
+	// ── 7. enrichment_not_run ───────────────────────────────
 
 	#[test]
 	fn enrichment_not_run() {
@@ -312,10 +278,6 @@ mod tests {
 			ConditionCode::CallGraphReliability.as_str(),
 			"CALL_GRAPH_RELIABILITY"
 		);
-		assert_eq!(
-			ConditionCode::DeadCodeReliability.as_str(),
-			"DEAD_CODE_RELIABILITY"
-		);
 		assert_eq!(ConditionCode::EnrichmentState.as_str(), "ENRICHMENT_STATE");
 		assert_eq!(ConditionCode::GateStatus.as_str(), "GATE_STATUS");
 	}
@@ -329,7 +291,6 @@ mod tests {
 			files_total: 0,
 			stale_file_count: 0,
 			call_graph_reliability: None,
-			dead_code_reliability: None,
 			enrichment_state: None,
 			gate_outcome: None,
 		};
@@ -346,8 +307,8 @@ mod tests {
 		let result = check(&all_pass_input());
 		assert_eq!(
 			result.conditions.len(),
-			7,
-			"Expected 7 conditions when snapshot exists, got {}",
+			6,
+			"Expected 6 conditions when snapshot exists, got {}",
 			result.conditions.len(),
 		);
 		let codes: Vec<ConditionCode> =
@@ -359,7 +320,6 @@ mod tests {
 				ConditionCode::IndexNotEmpty,
 				ConditionCode::StaleFiles,
 				ConditionCode::CallGraphReliability,
-				ConditionCode::DeadCodeReliability,
 				ConditionCode::EnrichmentState,
 				ConditionCode::GateStatus,
 			],

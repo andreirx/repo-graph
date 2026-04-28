@@ -311,45 +311,8 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
 		}));
 	}
 
-	// ── EXPLAIN_DEAD (symbol-scoped) ────────────────────────
-	let trust = storage.get_trust_summary(repo_uid, snapshot_uid)?;
-	let reliability_level = match trust.dead_code_reliability.level {
-		AgentReliabilityLevel::High => "high",
-		AgentReliabilityLevel::Medium => "medium",
-		AgentReliabilityLevel::Low => "low",
-	}
-	.to_string();
-
-	if let Some(ref file_path) = context.file_path {
-		let dead = storage.find_dead_nodes_in_file(
-			snapshot_uid, repo_uid, file_path,
-		)?;
-		let is_target_dead =
-			dead.iter().any(|d| d.stable_key == symbol_stable_key);
-		let dead_count = if is_target_dead { 1 } else { 0 };
-		signals.push(Signal::explain_dead(ExplainDeadEvidence {
-			count: dead_count,
-			is_target_dead: Some(is_target_dead),
-			reliability_level: reliability_level.clone(),
-			reliability_reasons: trust.dead_code_reliability.reasons.clone(),
-			items: if is_target_dead {
-				dead.iter()
-					.filter(|d| d.stable_key == symbol_stable_key)
-					.map(|d| ExplainDeadItem {
-						symbol: d.symbol.clone(),
-						file: d.file.clone(),
-						line_count: d.line_count,
-					})
-					.collect()
-			} else {
-				Vec::new()
-			},
-			items_truncated: None,
-			items_omitted_count: None,
-		}));
-	}
-
 	// ── Inherited module-context signals ────────────────────
+	let trust = storage.get_trust_summary(repo_uid, snapshot_uid)?;
 	if let Some(ref module_path) = context.module_path {
 		// EXPLAIN_CYCLES
 		let cycles = storage.find_cycles_involving_module(
@@ -526,13 +489,6 @@ fn explain_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
 	// ── EXPLAIN_SYMBOLS ─────────────────────────────────────
 	let trust = storage.get_trust_summary(repo_uid, snapshot_uid)?;
 	let symbols = storage.list_symbols_in_file(snapshot_uid, file_path)?;
-	let dead_nodes = storage.find_dead_nodes_in_file(
-		snapshot_uid, repo_uid, file_path,
-	)?;
-	let dead_keys: std::collections::HashSet<&str> = dead_nodes
-		.iter()
-		.map(|d| d.stable_key.as_str())
-		.collect();
 
 	if !symbols.is_empty() {
 		let count = symbols.len() as u64;
@@ -542,42 +498,11 @@ fn explain_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
 				name: s.name.clone(),
 				subtype: s.subtype.clone(),
 				line_start: s.line_start,
-				is_dead: dead_keys.contains(s.stable_key.as_str()),
 			})
 			.collect();
 		let (trunc, omitted) = truncate_items(&mut items, cap);
 		signals.push(Signal::explain_symbols(ExplainSymbolsEvidence {
 			count,
-			items,
-			items_truncated: trunc,
-			items_omitted_count: omitted,
-		}));
-	}
-
-	// ── EXPLAIN_DEAD (file-scoped) ──────────────────────────
-	let reliability_level = match trust.dead_code_reliability.level {
-		AgentReliabilityLevel::High => "high",
-		AgentReliabilityLevel::Medium => "medium",
-		AgentReliabilityLevel::Low => "low",
-	}
-	.to_string();
-
-	{
-		let count = dead_nodes.len() as u64;
-		let mut items: Vec<ExplainDeadItem> = dead_nodes
-			.iter()
-			.map(|d| ExplainDeadItem {
-				symbol: d.symbol.clone(),
-				file: d.file.clone(),
-				line_count: d.line_count,
-			})
-			.collect();
-		let (trunc, omitted) = truncate_items(&mut items, cap);
-		signals.push(Signal::explain_dead(ExplainDeadEvidence {
-			count,
-			is_target_dead: None,
-			reliability_level,
-			reliability_reasons: trust.dead_code_reliability.reasons.clone(),
 			items,
 			items_truncated: trunc,
 			items_omitted_count: omitted,
@@ -683,41 +608,8 @@ fn explain_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
 		}));
 	}
 
-	// ── EXPLAIN_DEAD (path-scoped) ──────────────────────────
-	let trust = storage.get_trust_summary(repo_uid, snapshot_uid)?;
-	let reliability_level = match trust.dead_code_reliability.level {
-		AgentReliabilityLevel::High => "high",
-		AgentReliabilityLevel::Medium => "medium",
-		AgentReliabilityLevel::Low => "low",
-	}
-	.to_string();
-
-	let dead = storage.find_dead_nodes_in_path(
-		snapshot_uid, repo_uid, path_prefix,
-	)?;
-	{
-		let count = dead.len() as u64;
-		let mut items: Vec<ExplainDeadItem> = dead
-			.iter()
-			.map(|d| ExplainDeadItem {
-				symbol: d.symbol.clone(),
-				file: d.file.clone(),
-				line_count: d.line_count,
-			})
-			.collect();
-		let (trunc, omitted) = truncate_items(&mut items, cap);
-		signals.push(Signal::explain_dead(ExplainDeadEvidence {
-			count,
-			is_target_dead: None,
-			reliability_level,
-			reliability_reasons: trust.dead_code_reliability.reasons.clone(),
-			items,
-			items_truncated: trunc,
-			items_omitted_count: omitted,
-		}));
-	}
-
 	// ── EXPLAIN_CYCLES ──────────────────────────────────────
+	let trust = storage.get_trust_summary(repo_uid, snapshot_uid)?;
 	let cycles = storage.find_cycles_involving_path(
 		snapshot_uid, path_prefix,
 	)?;
@@ -860,11 +752,7 @@ fn build_trust_signal(
 			AgentReliabilityLevel::Medium => "medium".to_string(),
 			AgentReliabilityLevel::Low => "low".to_string(),
 		},
-		dead_code_reliability: match trust.dead_code_reliability.level {
-			AgentReliabilityLevel::High => "high".to_string(),
-			AgentReliabilityLevel::Medium => "medium".to_string(),
-			AgentReliabilityLevel::Low => "low".to_string(),
-		},
+		// dead_code_reliability — removed. Surface withdrawn.
 		enrichment_state: match trust.enrichment_state {
 			EnrichmentState::Ran => "ran".to_string(),
 			EnrichmentState::NotApplicable => "not_applicable".to_string(),

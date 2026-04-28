@@ -71,7 +71,6 @@ pub fn run_check<S: AgentStorageRead + GateStorageRead + ?Sized>(
 				files_total: 0,
 				stale_file_count: 0,
 				call_graph_reliability: None,
-				dead_code_reliability: None,
 				enrichment_state: None,
 				gate_outcome: None,
 			};
@@ -100,7 +99,6 @@ pub fn run_check<S: AgentStorageRead + GateStorageRead + ?Sized>(
 				files_total: snapshot.files_total,
 				stale_file_count: stale_files.len() as u64,
 				call_graph_reliability: Some(trust.call_graph_reliability.level),
-				dead_code_reliability: Some(trust.dead_code_reliability.level),
 				enrichment_state: Some(trust.enrichment_state),
 				gate_outcome: Some(gate_outcome),
 			};

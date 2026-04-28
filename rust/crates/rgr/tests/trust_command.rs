@@ -178,10 +178,11 @@ fn trust_success_produces_valid_report() {
 		"call graph reliability should be LOW for 0% resolution"
 	);
 
-	// Dead code reliability should be LOW (missing entrypoints + low call graph).
-	assert_eq!(
-		summary["reliability"]["dead_code"]["level"], "LOW",
-		"dead code reliability"
+	// Dead code reliability withdrawn from public surface.
+	// The field is omitted from JSON output via #[serde(skip_serializing)].
+	assert!(
+		summary["reliability"]["dead_code"].is_null(),
+		"dead_code must not appear in public trust output"
 	);
 
 	// Caveats should include at least the permanent cycle caveat

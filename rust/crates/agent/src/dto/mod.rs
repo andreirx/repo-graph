@@ -18,9 +18,10 @@ pub use envelope::{
 pub use limit::{Limit, LimitCode};
 pub use signal::{
 	BoundaryViolationEvidence, BoundaryViolationsEvidence, CycleEvidence,
-	DeadCodeEvidence, DeadSymbolEvidence, ImportCyclesEvidence,
-	ModuleSummaryEvidence, Severity, Signal, SignalCategory, SignalCode,
-	SignalEvidence, SnapshotInfoEvidence, TrustLowResolutionEvidence,
-	TrustNoEnrichmentEvidence, TrustStaleSnapshotEvidence,
+	// DeadCodeEvidence, DeadSymbolEvidence — removed. Surface withdrawn.
+	ImportCyclesEvidence, ModuleSummaryEvidence, Severity, Signal,
+	SignalCategory, SignalCode, SignalEvidence, SnapshotInfoEvidence,
+	TrustLowResolutionEvidence, TrustNoEnrichmentEvidence,
+	TrustStaleSnapshotEvidence,
 };
 pub use source::SourceRef;

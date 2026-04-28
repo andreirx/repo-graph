@@ -784,6 +784,55 @@ Tests added:
 Post-P2 workspace: 1131 tests passing, 0 failures (+3
 regression pins).
 
+### Dead-code surface withdrawal (Option D) — 2026-04-28
+
+**Status:** Public surfaces removed. Internal substrate preserved.
+
+The dead-code surface (`DEAD_CODE` signal, `DEAD_CODE_UNRELIABLE` limit,
+`dead_code_reliability` in explain trust evidence) is withdrawn from all
+user-facing `rmap` outputs:
+
+- `orient` emits no `DEAD_CODE` signal regardless of reliability level
+- `orient` emits no `DEAD_CODE_UNRELIABLE` limit regardless of reliability
+- `check` does not evaluate `DEAD_CODE_RELIABILITY` condition (removed from check reducer)
+- `explain` trust evidence omits `dead_code_reliability` field
+- `trust` command omits `dead_code` field from JSON output (via `#[serde(skip_serializing)]`)
+- JSON output contains no `DEAD_CODE` or `dead_code` vocabulary
+
+**Why withdrawn:** Self-index spike showed 86% of symbols flagged as dead
+on repo-graph. Without coverage-backed evidence or mature framework-liveness
+detection, the surface misleads agents toward mass deletion instead of
+investigation.
+
+**What is preserved (internal substrate):**
+
+- `AgentTrustSummary.dead_code_reliability` field (internal use only)
+- `find_dead_nodes` storage query
+- `dead_code::aggregate()` function (returns empty output, logic preserved)
+- `AgentDeadNode` DTO
+- Trust crate's `dead_code_reliability` axis computation
+- All dead-code related storage queries and trust computations
+
+**Reintroduction conditions:** Same as `rmap dead` command (see below):
+
+1. Coverage import surface operational on Rust side, OR
+2. Framework entrypoint detection mature for Spring/React/Axum/FastAPI, OR
+3. Entrypoint declaration workflow established and adopted
+
+When reintroducing, restore:
+
+1. `SignalCode::DeadCode` variant (removed from enum)
+2. `Signal::dead_code()` constructor
+3. `DeadCodeEvidence` / `DeadSymbolEvidence` structs
+4. `SignalEvidence::DeadCode` variant
+5. `LimitCode::DeadCodeUnreliable` variant
+6. `ConditionCode::DeadCodeReliability` variant in check/types.rs
+7. `dead_code_reliability` field in `CheckInput`
+8. Dead-code evaluation section in check/evaluate.rs
+9. `dead_code_reliability` field in `ExplainTrustEvidence`
+10. Remove `#[serde(skip_serializing)]` from trust `dead_code` field
+11. Re-enable `dead_code::aggregate()` to emit signals when reliability is High
+
 ### Deferred items (explicit)
 
 - **Output-quality cleanup (F4/F5/F6).** Deferred to a

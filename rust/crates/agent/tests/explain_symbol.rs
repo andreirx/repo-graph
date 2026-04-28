@@ -70,22 +70,6 @@ fn explain_symbol_has_trust_section() {
 }
 
 #[test]
-fn explain_symbol_has_dead_section() {
-	let mut fake = FakeAgentStorage::new();
-	seed_symbol_repo(&mut fake);
-
-	let result = run_explain(&fake, "r1", "MyService", Budget::Medium, TEST_NOW)
-		.unwrap();
-
-	let codes: Vec<_> = result.signals.iter().map(|s| s.code()).collect();
-	assert!(
-		codes.contains(&SignalCode::ExplainDead),
-		"must have EXPLAIN_DEAD, got: {:?}",
-		codes
-	);
-}
-
-#[test]
 fn explain_symbol_no_file_only_sections() {
 	let mut fake = FakeAgentStorage::new();
 	seed_symbol_repo(&mut fake);

@@ -86,6 +86,20 @@ pub struct ReliabilityAxisScore {
 	pub reasons: Vec<String>,
 }
 
+impl Default for ReliabilityAxisScore {
+	/// Default: HIGH with no reasons.
+	///
+	/// Used when deserializing JSON that omits the dead_code axis
+	/// (post-withdrawal). HIGH is the safest assumption: if data
+	/// is missing, don't claim degraded reliability.
+	fn default() -> Self {
+		Self {
+			level: ReliabilityLevel::HIGH,
+			reasons: Vec::new(),
+		}
+	}
+}
+
 /// A downgrade trigger. Mirror of `DowngradeTrigger` from
 /// `types.ts:51`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,10 +120,24 @@ pub struct TrustDowngrades {
 
 /// The four reliability axes. Mirror of `TrustReliability` from
 /// `types.ts:63`.
+///
+/// ── Dead-code axis suppression ───────────────────────────────────
+///
+/// The `dead_code` axis is preserved internally for future
+/// coverage-backed or heuristic reintroduction, but is NOT
+/// serialized to user-facing JSON output. The `rmap dead` surface
+/// is withdrawn; exposing `dead_code` in `rmap trust` would leak
+/// the withdrawn concept. Internal computation continues; public
+/// serialization stops.
+///
+/// If this axis is reintroduced, remove `skip_serializing` and
+/// update `docs/cli/rmap-contracts.md`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrustReliability {
 	pub import_graph: ReliabilityAxisScore,
 	pub call_graph: ReliabilityAxisScore,
+	/// Internal-only. Not serialized to user-facing output.
+	#[serde(skip_serializing, default)]
 	pub dead_code: ReliabilityAxisScore,
 	pub change_impact: ReliabilityAxisScore,
 }

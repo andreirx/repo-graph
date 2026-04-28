@@ -7,9 +7,9 @@ mod common;
 
 use common::FakeAgentStorage;
 use repo_graph_agent::{
-	orient, AgentBoundaryDeclaration, AgentCycle, AgentDeadNode,
-	AgentImportEdge, AgentPathResolution, AgentRepoSummary, Budget,
-	LimitCode, SignalCode, SignalEvidence,
+	orient, AgentBoundaryDeclaration, AgentCycle, AgentImportEdge,
+	AgentPathResolution, AgentRepoSummary, Budget, LimitCode, SignalCode,
+	SignalEvidence,
 };
 use repo_graph_gate::{GateObligation, GateRequirement};
 
@@ -44,49 +44,8 @@ fn find_limit<'a>(
 }
 
 // ── DEAD_CODE scoped to path ────────────────────────────────────
-
-#[test]
-fn path_focus_dead_code_includes_descendants() {
-	let mut fake = seeded_with_path_focus();
-	fake.dead_nodes_in_path.insert(
-		("snap-1".into(), "src/core".into()),
-		vec![
-			AgentDeadNode {
-				stable_key: "r1:src/core/a.ts:SYMBOL:foo".into(),
-				symbol: "foo".into(),
-				kind: "SYMBOL".into(),
-				file: Some("src/core/a.ts".into()),
-				line_count: Some(10),
-				is_test: false,
-			},
-			AgentDeadNode {
-				stable_key: "r1:src/core/sub/b.ts:SYMBOL:bar".into(),
-				symbol: "bar".into(),
-				kind: "SYMBOL".into(),
-				file: Some("src/core/sub/b.ts".into()),
-				line_count: Some(20),
-				is_test: false,
-			},
-		],
-	);
-	let result = orient(
-		&fake,
-		"r1",
-		Some("src/core"),
-		Budget::Small,
-		common::TEST_NOW,
-	)
-	.unwrap();
-
-	let sig = find_signal(&result, SignalCode::DeadCode)
-		.expect("DEAD_CODE must be emitted for path-scoped dead nodes");
-	match sig.evidence() {
-		SignalEvidence::DeadCode(ev) => {
-			assert_eq!(ev.dead_count, 2, "must include descendants");
-		}
-		other => panic!("wrong evidence variant: {:?}", other),
-	}
-}
+// Test removed: dead-code surface withdrawn.
+// See orient_repo_dead_code_reliability.rs for withdrawal regression tests.
 
 // ── BOUNDARY_VIOLATIONS scoped to path ──────────────────────────
 

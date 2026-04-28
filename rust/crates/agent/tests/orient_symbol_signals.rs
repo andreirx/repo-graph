@@ -8,7 +8,7 @@ mod common;
 use common::FakeAgentStorage;
 use repo_graph_agent::{
 	orient, AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow,
-	AgentCycle, AgentDeadNode, AgentFocusCandidate, AgentFocusKind,
+	AgentCycle, AgentFocusCandidate, AgentFocusKind,
 	AgentImportEdge, AgentSymbolContext, Budget, LimitCode, SignalCode,
 	SignalScope,
 };
@@ -259,84 +259,7 @@ fn callers_with_unknown_module_grouped_as_unknown() {
 	}
 }
 
-// ── 8. Symbol dead code fires when symbol is dead ──────────────
-
-#[test]
-fn symbol_dead_code_fires_when_symbol_is_dead() {
-	let mut fake = seeded_symbol();
-	let sk = "r1:src/core/service.ts:SYMBOL:doWork";
-
-	// Seed file-level dead nodes containing our symbol.
-	fake.dead_nodes_in_file.insert(
-		("snap-1".into(), "src/core/service.ts".into()),
-		vec![AgentDeadNode {
-			stable_key: sk.into(),
-			symbol: "doWork".into(),
-			kind: "SYMBOL".into(),
-			file: Some("src/core/service.ts".into()),
-			line_count: Some(20),
-			is_test: false,
-		}],
-	);
-
-	let result = orient(
-		&fake,
-		"r1",
-		Some("doWork"),
-		Budget::Large,
-		common::TEST_NOW,
-	)
-	.unwrap();
-
-	let dead_sig = result
-		.signals
-		.iter()
-		.find(|s| s.code() == SignalCode::DeadCode);
-	assert!(
-		dead_sig.is_some(),
-		"DEAD_CODE must fire when symbol is in dead list"
-	);
-}
-
-// ── 9. Symbol dead code absent when symbol is alive ────────────
-
-#[test]
-fn symbol_dead_code_absent_when_symbol_is_alive() {
-	let mut fake = seeded_symbol();
-
-	// File has dead nodes but NOT our symbol.
-	fake.dead_nodes_in_file.insert(
-		("snap-1".into(), "src/core/service.ts".into()),
-		vec![AgentDeadNode {
-			stable_key: "r1:src/core/service.ts:SYMBOL:otherFn".into(),
-			symbol: "otherFn".into(),
-			kind: "SYMBOL".into(),
-			file: Some("src/core/service.ts".into()),
-			line_count: Some(5),
-			is_test: false,
-		}],
-	);
-
-	let result = orient(
-		&fake,
-		"r1",
-		Some("doWork"),
-		Budget::Large,
-		common::TEST_NOW,
-	)
-	.unwrap();
-
-	let dead_sig = result
-		.signals
-		.iter()
-		.find(|s| s.code() == SignalCode::DeadCode);
-	assert!(
-		dead_sig.is_none(),
-		"DEAD_CODE must not fire when symbol is alive (not in dead list)"
-	);
-}
-
-// ── 10. Inherited boundary violations have module_context scope ──
+// ── 8. Inherited boundary violations have module_context scope ──
 
 #[test]
 fn inherited_boundary_violations_have_module_context_scope() {

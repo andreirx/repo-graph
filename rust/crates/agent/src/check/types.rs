@@ -41,7 +41,6 @@ pub enum ConditionCode {
 	IndexNotEmpty,
 	StaleFiles,
 	CallGraphReliability,
-	DeadCodeReliability,
 	EnrichmentState,
 	GateStatus,
 }
@@ -53,7 +52,6 @@ impl ConditionCode {
 			Self::IndexNotEmpty => "INDEX_NOT_EMPTY",
 			Self::StaleFiles => "STALE_FILES",
 			Self::CallGraphReliability => "CALL_GRAPH_RELIABILITY",
-			Self::DeadCodeReliability => "DEAD_CODE_RELIABILITY",
 			Self::EnrichmentState => "ENRICHMENT_STATE",
 			Self::GateStatus => "GATE_STATUS",
 		}
@@ -85,8 +83,6 @@ pub struct CheckInput {
 	pub stale_file_count: u64,
 	/// Trust call-graph reliability level. None if no snapshot.
 	pub call_graph_reliability: Option<AgentReliabilityLevel>,
-	/// Trust dead-code reliability level. None if no snapshot.
-	pub dead_code_reliability: Option<AgentReliabilityLevel>,
 	/// Enrichment execution state. None if no snapshot.
 	pub enrichment_state: Option<EnrichmentState>,
 	/// Gate outcome projection. None if no snapshot or gate not

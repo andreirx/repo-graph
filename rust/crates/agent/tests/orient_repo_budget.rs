@@ -9,16 +9,27 @@ mod common;
 
 use common::FakeAgentStorage;
 use repo_graph_agent::{
-	orient, AgentBoundaryDeclaration, AgentCycle, AgentDeadNode,
-	AgentImportEdge, AgentReliabilityAxis, AgentReliabilityLevel,
-	AgentStaleFile, AgentTrustSummary, Budget, EnrichmentState,
+	orient, AgentBoundaryDeclaration, AgentCycle, AgentImportEdge,
+	AgentReliabilityAxis, AgentReliabilityLevel, AgentStaleFile,
+	AgentTrustSummary, Budget, EnrichmentState,
 };
 
 fn seed_many_signals() -> FakeAgentStorage {
 	let mut fake = FakeAgentStorage::new();
 	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
 
-	// 6 signal-producing conditions to exceed the small cap (5).
+	// Signal-producing conditions to exceed the small cap (5).
+	//
+	// Dead-code surface is withdrawn, so we need 7 signals total:
+	// - BOUNDARY_VIOLATIONS (1)
+	// - TRUST_LOW_RESOLUTION (1)
+	// - TRUST_NO_ENRICHMENT (1)
+	// - TRUST_STALE_SNAPSHOT (1)
+	// - IMPORT_CYCLES (1)
+	// - MODULE_SUMMARY (1)
+	// - SNAPSHOT_INFO (1)
+	// Total = 7.
+
 	// Boundary (1)
 	fake.boundary_declarations.insert(
 		"r1".into(),
@@ -38,16 +49,6 @@ fn seed_many_signals() -> FakeAgentStorage {
 	// Trust low-resolution (fires TRUST_LOW_RESOLUTION) plus
 	// NotRun enrichment (fires TRUST_NO_ENRICHMENT) plus
 	// stale files below (fires TRUST_STALE_SNAPSHOT).
-	//
-	// IMPORTANT: the reliability axes are seeded `High` here
-	// deliberately, even though a low call_resolution_rate
-	// would produce a Low trust axis in the real pipeline.
-	// This fake is driving the budget-truncation test, which
-	// needs exactly 8 emitted signals — including DEAD_CODE.
-	// The Rust-43 F1 fix gates DEAD_CODE on
-	// `dead_code_reliability.level == High`, so forcing High
-	// here preserves the signal count. Tests that exercise
-	// low reliability live in `orient_repo_dead_code_reliability.rs`.
 	fake.trust_summaries.insert(
 		"snap-1".into(),
 		AgentTrustSummary {
@@ -76,41 +77,30 @@ fn seed_many_signals() -> FakeAgentStorage {
 		"snap-1".into(),
 		vec![AgentCycle { length: 2, modules: vec!["m1".into(), "m2".into()] }],
 	);
-	// Dead code (1)
-	fake.dead_nodes.insert(
-		"snap-1".into(),
-		vec![AgentDeadNode {
-			stable_key: "r1:src/foo.rs:SYMBOL:unused".into(),
-			symbol: "unused".into(),
-			kind: "SYMBOL".into(),
-			file: Some("src/foo.rs".into()),
-			line_count: Some(5),
-			is_test: false,
-		}],
-	);
+	// Dead code surface withdrawn — no dead_nodes seeding.
 	// MODULE_SUMMARY and SNAPSHOT_INFO always emit → +2.
-	// Total emitted = 1 + 2 + 1 + 1 + 1 + 2 = 8.
+	// Total emitted = 1 + 3 + 1 + 2 = 7.
 
 	fake
 }
 
 #[test]
-fn small_budget_truncates_eight_signals_to_five() {
+fn small_budget_truncates_seven_signals_to_five() {
 	let fake = seed_many_signals();
 	let result = orient(&fake, "r1", None, Budget::Small, common::TEST_NOW).unwrap();
 
 	assert_eq!(result.signals.len(), 5, "small cap = 5 signals");
 	assert_eq!(result.signals_truncated, Some(true));
-	assert_eq!(result.signals_omitted_count, Some(3));
+	assert_eq!(result.signals_omitted_count, Some(2));
 	assert!(result.truncated, "top-level truncated must be true");
 }
 
 #[test]
-fn medium_budget_fits_all_eight_signals() {
+fn medium_budget_fits_all_seven_signals() {
 	let fake = seed_many_signals();
 	let result = orient(&fake, "r1", None, Budget::Medium, common::TEST_NOW).unwrap();
 
-	assert_eq!(result.signals.len(), 8);
+	assert_eq!(result.signals.len(), 7);
 	assert_eq!(result.signals_truncated, None);
 	assert_eq!(result.signals_omitted_count, None);
 }
@@ -120,7 +110,7 @@ fn large_budget_fits_all_signals_and_all_limits() {
 	let fake = seed_many_signals();
 	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 
-	assert_eq!(result.signals.len(), 8);
+	assert_eq!(result.signals.len(), 7);
 	// 3 limits: MODULE_DATA_UNAVAILABLE from module_summary,
 	// COMPLEXITY_UNAVAILABLE from orient_repo's static append,
 	// and GATE_NOT_CONFIGURED from the gate aggregator (this

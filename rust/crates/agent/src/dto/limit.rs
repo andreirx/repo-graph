@@ -61,24 +61,8 @@ pub enum LimitCode {
 	/// not reflected in `MODULE_SUMMARY` counts.
 	LanguageCoveragePartial,
 
-	/// The `DEAD_CODE` signal was suppressed because the trust
-	/// layer's `reliability.dead_code` axis is not High. This
-	/// happens when extraction quality is insufficient for
-	/// deletion decisions — typically because the call graph
-	/// has too many unresolved edges, or framework-liveness
-	/// inferences and entrypoint declarations are missing.
-	///
-	/// The reasons vector on the emitted `Limit` carries the
-	/// trust crate's own reason strings verbatim (e.g.
-	/// `"missing_entrypoint_declarations"`,
-	/// `"call_graph_reliability_low"`). The agent crate does
-	/// NOT synthesize reason vocabulary.
-	///
-	/// Introduced in the Rust-43 F1/F3 fix slice after the
-	/// spike on this repo showed 86% of symbols incorrectly
-	/// reported as dead. See
-	/// `docs/spikes/2026-04-15-orient-on-repo-graph.md`.
-	DeadCodeUnreliable,
+	// DeadCodeUnreliable — removed. Surface withdrawn.
+	// See docs/TECH-DEBT.md for reintroduction conditions.
 
 	/// Gate requirements exist but none of their obligations
 	/// target the focused path area. The gate pipeline has
@@ -96,7 +80,6 @@ impl LimitCode {
 			Self::ModuleDataUnavailable => "MODULE_DATA_UNAVAILABLE",
 			Self::ComplexityUnavailable => "COMPLEXITY_UNAVAILABLE",
 			Self::LanguageCoveragePartial => "LANGUAGE_COVERAGE_PARTIAL",
-			Self::DeadCodeUnreliable => "DEAD_CODE_UNRELIABLE",
 			Self::GateNotApplicableToFocus => "GATE_NOT_APPLICABLE_TO_FOCUS",
 		}
 	}
@@ -124,15 +107,6 @@ impl LimitCode {
 				 Files in languages the indexer does not support are \
 				 not reflected in MODULE_SUMMARY."
 			}
-			Self::DeadCodeUnreliable => {
-				"Dead-code signal suppressed: trust layer reports \
-				 dead_code_reliability is not High. The underlying \
-				 graph does not have enough entrypoint declarations, \
-				 framework-liveness inferences, or resolved call \
-				 edges to make deletion decisions reliable. See the \
-				 accompanying reasons list for the specific trust \
-				 axis that failed."
-			}
 			Self::GateNotApplicableToFocus => {
 				"Gate is configured but no obligations target the \
 				 focused area."
@@ -158,11 +132,9 @@ impl Serialize for LimitCode {
 ///   - `reasons` is a free-form list of human-readable strings
 ///     describing WHY the limit fired. Most limits have no
 ///     reasons and serialize without the field. Limits
-///     triggered by an upstream policy layer (notably
-///     `DEAD_CODE_UNRELIABLE`, which surfaces the trust
-///     crate's `reliability.dead_code.reasons` verbatim) carry
-///     the reasons through to the output envelope so an agent
-///     can display or match on them.
+///     triggered by an upstream policy layer carry the reasons
+///     through to the output envelope so an agent can display
+///     or match on them.
 ///
 /// The `reasons` field is skipped during serialization when
 /// empty, preserving the pre-Rust-43-fix output shape for every
@@ -193,9 +165,7 @@ impl Limit {
 
 	/// Construct a limit record from a code with an attached
 	/// reasons list. Reasons are passed through verbatim — the
-	/// caller is responsible for the vocabulary. This is how
-	/// `DEAD_CODE_UNRELIABLE` surfaces the trust crate's
-	/// `reliability.dead_code.reasons` to the output envelope.
+	/// caller is responsible for the vocabulary.
 	pub fn from_code_with_reasons(
 		code: LimitCode,
 		reasons: Vec<String>,

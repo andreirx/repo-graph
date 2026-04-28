@@ -126,22 +126,6 @@ fn explain_path_has_files_when_present() {
 }
 
 #[test]
-fn explain_path_has_dead_section() {
-	let mut fake = FakeAgentStorage::new();
-	seed_path_repo(&mut fake);
-
-	let result = run_explain(&fake, "r1", "src/core", Budget::Medium, TEST_NOW)
-		.unwrap();
-
-	let codes: Vec<_> = result.signals.iter().map(|s| s.code()).collect();
-	assert!(
-		codes.contains(&SignalCode::ExplainDead),
-		"must have EXPLAIN_DEAD, got: {:?}",
-		codes
-	);
-}
-
-#[test]
 fn explain_path_files_truncated_at_cap() {
 	let mut fake = FakeAgentStorage::new();
 	seed_path_repo(&mut fake);
