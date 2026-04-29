@@ -47,6 +47,7 @@ export interface FileSummarySchema {
   key_symbols: string[];
   notable_dependencies: string[];
   likely_change_reasons: string[];
+  policy_signals: string[];
   reading_hint: string;
   uncertainty: string | null;
 }
@@ -56,6 +57,7 @@ export interface FolderSummarySchema {
   structure: string;
   key_components: string[];
   seams: string[];
+  policy_seams: string[];
   reading_order: string;
   uncertainty: string | null;
 }
@@ -96,6 +98,15 @@ export function filePromptWhole(
   parts.push('# Reading Hint');
   parts.push('Where to start reading and what matters most.');
   parts.push('');
+  parts.push('# Policy Signals');
+  parts.push('If this file participates in cross-layer policy, note:');
+  parts.push('- status/error translation functions (mapping low-level codes to higher-level outcomes)');
+  parts.push('- retry/resume/restart behavior (backoff, cache replay, partial-transfer continuation)');
+  parts.push('- default policy definitions (constants, default structs, config overrides)');
+  parts.push('- orchestration/supervisory loops (polling, retry loops, event loops)');
+  parts.push('- result-fate patterns (return values ignored, collapsed, or weakly used)');
+  parts.push('Write "None" if no policy-bearing code is evident.');
+  parts.push('');
   parts.push('# Uncertainty');
   parts.push('What cannot be determined from the provided evidence. Write "None" if confident.');
   parts.push('```');
@@ -105,6 +116,8 @@ export function filePromptWhole(
   parts.push('- If the file is primarily a seam/stub/interface/null implementation, say that explicitly.');
   parts.push('- If not yet wired into runtime behavior, say so.');
   parts.push('- Do not claim callers, ownership, or runtime role unless evidence supports it.');
+  parts.push('- For Policy Signals: be conservative. Use "appears to" or "contains" rather than "controls all".');
+  parts.push('  Only report what is visible in this file.');
   parts.push('');
 
   parts.push('─'.repeat(60));
@@ -149,10 +162,12 @@ export function filePromptDigest(
   parts.push('# Notable Dependencies');
   parts.push('# Likely Change Reasons');
   parts.push('# Reading Hint');
+  parts.push('# Policy Signals');
   parts.push('# Uncertainty');
   parts.push('```');
   parts.push('');
   parts.push('Important: You were NOT given the full file. Be conservative. Note limitations in Uncertainty.');
+  parts.push('For Policy Signals: only note patterns visible in provided excerpts.');
   parts.push('');
 
   parts.push('─'.repeat(60));
@@ -229,6 +244,14 @@ export function folderPrompt(
   parts.push('# Seams');
   parts.push('- interfaces, adapters, boundaries supported by child evidence');
   parts.push('');
+  parts.push('# Policy Seams');
+  parts.push('Cross-layer policy behavior aggregated from child summaries:');
+  parts.push('- status/error translation points');
+  parts.push('- retry/resume/restart loci');
+  parts.push('- default policy definitions and override points');
+  parts.push('- orchestration loops that consume or ignore child results');
+  parts.push('Write "None" if no policy-bearing code reported by children.');
+  parts.push('');
   parts.push('# Reading Order');
   parts.push('Recommended order for reading this folder.');
   parts.push('');
@@ -242,6 +265,8 @@ export function folderPrompt(
   parts.push('- If a child is a seam/stub/placeholder, preserve that status.');
   parts.push('- Use exact filenames/folder names.');
   parts.push('- Key Components should be selective, not exhaustive.');
+  parts.push('- Policy Seams: aggregate policy signals from children. If multiple children participate');
+  parts.push('  in the same policy flow (e.g., error translation in one, retry loop in another), note that.');
   parts.push('- Uncertainty: if any child reports uncertainty about external types, caller context,');
   parts.push('  or undefined interfaces, carry forward the most architecturally relevant ones.');
   parts.push('  Only write "None" if child summaries contain no meaningful unresolved uncertainty.');
@@ -419,6 +444,7 @@ export function parseFileSummary(markdown: string): FileSummarySchema {
     key_symbols: extractBullets(markdown, 'Key Symbols'),
     notable_dependencies: extractBullets(markdown, 'Notable Dependencies'),
     likely_change_reasons: extractBullets(markdown, 'Likely Change Reasons'),
+    policy_signals: extractBullets(markdown, 'Policy Signals'),
     reading_hint: extractSection(markdown, 'Reading Hint') || '',
     uncertainty: extractSection(markdown, 'Uncertainty')
   };
@@ -433,6 +459,7 @@ export function parseFolderSummary(markdown: string): FolderSummarySchema {
     structure: extractSection(markdown, 'Structure') || '',
     key_components: extractBullets(markdown, 'Key Components'),
     seams: extractBullets(markdown, 'Seams'),
+    policy_seams: extractBullets(markdown, 'Policy Seams'),
     reading_order: extractSection(markdown, 'Reading Order') || '',
     uncertainty: extractSection(markdown, 'Uncertainty')
   };
@@ -477,6 +504,12 @@ export function renderFileSummary(summary: FileSummarySchema): string {
     parts.push('');
   }
 
+  if (summary.policy_signals.length > 0) {
+    parts.push('# Policy Signals');
+    summary.policy_signals.forEach(s => parts.push(`- ${s}`));
+    parts.push('');
+  }
+
   if (summary.uncertainty) {
     parts.push('# Uncertainty');
     parts.push(summary.uncertainty);
@@ -507,6 +540,12 @@ export function renderFolderSummary(summary: FolderSummarySchema): string {
   if (summary.seams.length > 0) {
     parts.push('# Seams');
     summary.seams.forEach(s => parts.push(`- ${s}`));
+    parts.push('');
+  }
+
+  if (summary.policy_seams.length > 0) {
+    parts.push('# Policy Seams');
+    summary.policy_seams.forEach(s => parts.push(`- ${s}`));
     parts.push('');
   }
 
