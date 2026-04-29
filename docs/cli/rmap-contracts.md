@@ -204,6 +204,110 @@ This surface will be split into TWO separate commands:
 
 See `docs/TECH-DEBT.md` for full rationale
 
+### `policy` — Policy-Facts Discovery
+
+Query extracted policy-facts from C source files. Facts are populated
+automatically during `rmap index` / `rmap refresh`.
+
+**Usage:**
+
+```
+rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER] [--file <path>]
+```
+
+**Supported kinds:**
+
+- `STATUS_MAPPING` (default): Status/error code translation functions.
+  Functions that switch on an input status and return an output status.
+  PF-1 scope. See `docs/slices/pf-1-status-mapping.md`.
+
+- `BEHAVIORAL_MARKER`: Behavioral patterns in control flow.
+  - `RETRY_LOOP`: loops with sleep/delay calls (retry with backoff)
+  - `RESUME_OFFSET`: curl `CURLOPT_RESUME_FROM*` patterns
+  PF-2 scope. See `docs/slices/pf-2-behavioral-marker.md`.
+
+**Output (STATUS_MAPPING):**
+
+```json
+{
+  "repo": "swupdate",
+  "snapshot": "swupdate/2026-04-29T...",
+  "kind": "STATUS_MAPPING",
+  "facts": [
+    {
+      "symbol_key": "swupdate:corelib/server_utils.c#map_channel_retcode:SYMBOL:FUNCTION",
+      "function_name": "map_channel_retcode",
+      "file_path": "corelib/server_utils.c",
+      "line_start": 72,
+      "line_end": 98,
+      "source_type": "channel_op_res_t",
+      "target_type": "server_op_res_t",
+      "mappings": [
+        { "inputs": ["CHANNEL_ENONET", "CHANNEL_EAGAIN"], "output": "SERVER_EAGAIN" },
+        { "inputs": ["CHANNEL_OK"], "output": "SERVER_OK" }
+      ],
+      "default_output": "SERVER_EERR"
+    }
+  ],
+  "count": 1
+}
+```
+
+**Output (BEHAVIORAL_MARKER):**
+
+```json
+{
+  "repo": "swupdate",
+  "snapshot": "swupdate/2026-04-29T...",
+  "kind": "BEHAVIORAL_MARKER",
+  "facts": [
+    {
+      "symbol_key": "swupdate:corelib/channel_curl.c#channel_get_file:SYMBOL:FUNCTION",
+      "function_name": "channel_get_file",
+      "file_path": "corelib/channel_curl.c",
+      "line_start": 1359,
+      "line_end": 1364,
+      "kind": "RETRY_LOOP",
+      "evidence": {
+        "type": "retry_loop",
+        "loop_kind": "for",
+        "sleep_call": "sleep",
+        "delay_ms": 1000,
+        "max_attempts": 4,
+        "break_condition": "file_handle > 0"
+      }
+    },
+    {
+      "symbol_key": "swupdate:corelib/channel_curl.c#channel_get_file:SYMBOL:FUNCTION",
+      "function_name": "channel_get_file",
+      "file_path": "corelib/channel_curl.c",
+      "line_start": 1437,
+      "line_end": 1439,
+      "kind": "RESUME_OFFSET",
+      "evidence": {
+        "type": "resume_offset",
+        "api_call": "curl_easy_setopt",
+        "option_name": "CURLOPT_RESUME_FROM_LARGE",
+        "offset_source": "total_bytes_downloaded"
+      }
+    }
+  ],
+  "count": 2
+}
+```
+
+**Exit codes:**
+
+- 0: success (facts found)
+- 1: no facts found (not an error, just empty)
+- 2: runtime error (invalid args, DB error, missing repo/snapshot)
+
+**Scope:**
+
+- C files only (.c, .h)
+- C++ is explicitly out of scope for PF-1/PF-2
+- Languages other than C deferred
+
 ## JSON-Only Output
 
 `rmap` always produces JSON on stdout. There is no `--json` flag because

@@ -4,16 +4,16 @@
 //! This module implements the policy-facts storage port traits on top of
 //! the storage adapter's rusqlite connection.
 //!
-//! PF-1 scope: STATUS_MAPPING facts only.
-//!
-//! **Schema:** Uses the `status_mappings` table added by migration 021.
+//! **Schema:**
+//! - PF-1: `status_mappings` table (migration 021)
+//! - PF-2: `behavioral_markers` table (migration 022)
 //!
 //! **Error handling:** All methods propagate errors through the
 //! `PolicyFactsStorageError` type defined by the policy-facts crate.
 
 use repo_graph_policy_facts::{
-    CaseMapping, PolicyFactsStorageError, PolicyFactsStorageRead, PolicyFactsStorageWrite,
-    StatusMapping,
+    BehavioralMarker, CaseMapping, MarkerEvidence, MarkerKind, PolicyFactsStorageError,
+    PolicyFactsStorageRead, PolicyFactsStorageWrite, StatusMapping,
 };
 use rusqlite::params;
 use uuid::Uuid;
@@ -95,6 +95,78 @@ impl PolicyFactsStorageWrite for StorageConnection {
             .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
 
         Ok(mappings.len())
+    }
+
+    fn insert_behavioral_markers(
+        &mut self,
+        snapshot_uid: &str,
+        markers: &[BehavioralMarker],
+    ) -> Result<usize, PolicyFactsStorageError> {
+        // Verify snapshot exists before starting transaction.
+        let snapshot_exists: bool = self
+            .connection()
+            .query_row(
+                "SELECT 1 FROM snapshots WHERE snapshot_uid = ?",
+                [snapshot_uid],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if !snapshot_exists {
+            return Err(PolicyFactsStorageError::SnapshotNotFound(
+                snapshot_uid.to_string(),
+            ));
+        }
+
+        // Atomic replace: delete + insert in a single transaction.
+        let tx = self
+            .connection_mut()
+            .transaction()
+            .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+        // Delete existing markers for this snapshot.
+        tx.execute(
+            "DELETE FROM behavioral_markers WHERE snapshot_uid = ?",
+            [snapshot_uid],
+        )
+        .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+        // Insert new markers.
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO behavioral_markers (
+                        uid, snapshot_uid, symbol_key, function_name, file_path,
+                        line_start, line_end, kind, evidence_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                )
+                .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+            for marker in markers {
+                let uid = uuid::Uuid::new_v4().to_string();
+                let kind_str = marker.kind.to_string();
+                let evidence_json = serde_json::to_string(&marker.evidence)
+                    .map_err(|e| PolicyFactsStorageError::JsonError(e.to_string()))?;
+
+                stmt.execute(params![
+                    uid,
+                    snapshot_uid,
+                    marker.symbol_key,
+                    marker.function_name,
+                    marker.file_path,
+                    marker.line_start,
+                    marker.line_end,
+                    kind_str,
+                    evidence_json,
+                ])
+                .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+            }
+        }
+
+        tx.commit()
+            .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+        Ok(markers.len())
     }
 }
 
@@ -206,12 +278,111 @@ impl PolicyFactsStorageRead for StorageConnection {
 
         Ok(count as usize)
     }
+
+    fn query_behavioral_markers(
+        &self,
+        snapshot_uid: &str,
+        file_filter: Option<&str>,
+        kind_filter: Option<MarkerKind>,
+    ) -> Result<Vec<BehavioralMarker>, PolicyFactsStorageError> {
+        let conn = self.connection();
+
+        // Build query dynamically based on filters
+        let mut sql = String::from(
+            "SELECT symbol_key, function_name, file_path, line_start, line_end,
+                    kind, evidence_json
+             FROM behavioral_markers
+             WHERE snapshot_uid = ?",
+        );
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> =
+            vec![Box::new(snapshot_uid.to_string())];
+
+        if let Some(prefix) = file_filter {
+            sql.push_str(" AND file_path LIKE ?");
+            params.push(Box::new(format!("{}%", prefix)));
+        }
+
+        if let Some(kind) = kind_filter {
+            sql.push_str(" AND kind = ?");
+            params.push(Box::new(kind.to_string()));
+        }
+
+        sql.push_str(" ORDER BY file_path, line_start");
+
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+
+        let rows = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                let symbol_key: String = row.get(0)?;
+                let function_name: String = row.get(1)?;
+                let file_path: String = row.get(2)?;
+                let line_start: u32 = row.get(3)?;
+                let line_end: u32 = row.get(4)?;
+                let kind_str: String = row.get(5)?;
+                let evidence_json: String = row.get(6)?;
+
+                Ok((
+                    symbol_key,
+                    function_name,
+                    file_path,
+                    line_start,
+                    line_end,
+                    kind_str,
+                    evidence_json,
+                ))
+            })
+            .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+        let mut results = Vec::new();
+        for row_result in rows {
+            let (symbol_key, function_name, file_path, line_start, line_end, kind_str, evidence_json) =
+                row_result.map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+            let kind: MarkerKind = kind_str
+                .parse()
+                .map_err(|e: String| PolicyFactsStorageError::JsonError(e))?;
+
+            let evidence: MarkerEvidence = serde_json::from_str(&evidence_json)
+                .map_err(|e| PolicyFactsStorageError::JsonError(e.to_string()))?;
+
+            results.push(BehavioralMarker {
+                symbol_key,
+                function_name,
+                file_path,
+                line_start,
+                line_end,
+                kind,
+                evidence,
+            });
+        }
+
+        Ok(results)
+    }
+
+    fn count_behavioral_markers(&self, snapshot_uid: &str) -> Result<usize, PolicyFactsStorageError> {
+        let conn = self.connection();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM behavioral_markers WHERE snapshot_uid = ?",
+                [snapshot_uid],
+                |row| row.get(0),
+            )
+            .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+        Ok(count as usize)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::StorageConnection;
+    use repo_graph_policy_facts::{BehavioralMarker, MarkerKind};
 
     fn create_test_db() -> StorageConnection {
         let mut conn = StorageConnection::open_in_memory().unwrap();
@@ -380,5 +551,265 @@ mod tests {
     fn count_status_mappings_empty() {
         let conn = create_test_db();
         assert_eq!(conn.count_status_mappings("snap-1").unwrap(), 0);
+    }
+
+    // =========================================================================
+    // BEHAVIORAL_MARKER tests
+    // =========================================================================
+
+    #[test]
+    fn insert_and_query_behavioral_markers() {
+        use repo_graph_policy_facts::MarkerEvidence;
+
+        let mut conn = create_test_db();
+
+        let markers = vec![
+            BehavioralMarker {
+                symbol_key: "test-repo:file.c#retry_func:SYMBOL:FUNCTION".to_string(),
+                function_name: "retry_func".to_string(),
+                file_path: "file.c".to_string(),
+                line_start: 10,
+                line_end: 25,
+                kind: MarkerKind::RetryLoop,
+                evidence: MarkerEvidence::RetryLoop {
+                    loop_kind: "for".to_string(),
+                    sleep_call: Some("sleep".to_string()),
+                    delay_ms: Some(1000),
+                    max_attempts: Some(3),
+                    break_condition: Some("result > 0".to_string()),
+                },
+            },
+            BehavioralMarker {
+                symbol_key: "test-repo:file.c#download_func:SYMBOL:FUNCTION".to_string(),
+                function_name: "download_func".to_string(),
+                file_path: "file.c".to_string(),
+                line_start: 50,
+                line_end: 50,
+                kind: MarkerKind::ResumeOffset,
+                evidence: MarkerEvidence::ResumeOffset {
+                    api_call: "curl_easy_setopt".to_string(),
+                    option_name: Some("CURLOPT_RESUME_FROM_LARGE".to_string()),
+                    offset_source: Some("offset".to_string()),
+                },
+            },
+        ];
+
+        let count = conn.insert_behavioral_markers("snap-1", &markers).unwrap();
+        assert_eq!(count, 2);
+
+        let results = conn
+            .query_behavioral_markers("snap-1", None, None)
+            .unwrap();
+        assert_eq!(results.len(), 2);
+
+        // Results should be sorted by file_path, line_start
+        assert_eq!(results[0].function_name, "retry_func");
+        assert_eq!(results[0].line_start, 10);
+        assert_eq!(results[1].function_name, "download_func");
+        assert_eq!(results[1].line_start, 50);
+    }
+
+    #[test]
+    fn query_behavioral_markers_with_kind_filter() {
+        use repo_graph_policy_facts::MarkerEvidence;
+
+        let mut conn = create_test_db();
+
+        let markers = vec![
+            BehavioralMarker {
+                symbol_key: "test-repo:file.c#func1:SYMBOL:FUNCTION".to_string(),
+                function_name: "func1".to_string(),
+                file_path: "file.c".to_string(),
+                line_start: 10,
+                line_end: 20,
+                kind: MarkerKind::RetryLoop,
+                evidence: MarkerEvidence::RetryLoop {
+                    loop_kind: "while".to_string(),
+                    sleep_call: Some("sleep".to_string()),
+                    delay_ms: None,
+                    max_attempts: None,
+                    break_condition: None,
+                },
+            },
+            BehavioralMarker {
+                symbol_key: "test-repo:file.c#func2:SYMBOL:FUNCTION".to_string(),
+                function_name: "func2".to_string(),
+                file_path: "file.c".to_string(),
+                line_start: 30,
+                line_end: 30,
+                kind: MarkerKind::ResumeOffset,
+                evidence: MarkerEvidence::ResumeOffset {
+                    api_call: "curl_easy_setopt".to_string(),
+                    option_name: Some("CURLOPT_RESUME_FROM".to_string()),
+                    offset_source: None,
+                },
+            },
+        ];
+
+        conn.insert_behavioral_markers("snap-1", &markers).unwrap();
+
+        // Filter by RETRY_LOOP
+        let retry_results = conn
+            .query_behavioral_markers("snap-1", None, Some(MarkerKind::RetryLoop))
+            .unwrap();
+        assert_eq!(retry_results.len(), 1);
+        assert_eq!(retry_results[0].kind, MarkerKind::RetryLoop);
+
+        // Filter by RESUME_OFFSET
+        let resume_results = conn
+            .query_behavioral_markers("snap-1", None, Some(MarkerKind::ResumeOffset))
+            .unwrap();
+        assert_eq!(resume_results.len(), 1);
+        assert_eq!(resume_results[0].kind, MarkerKind::ResumeOffset);
+    }
+
+    #[test]
+    fn query_behavioral_markers_with_file_filter() {
+        use repo_graph_policy_facts::MarkerEvidence;
+
+        let mut conn = create_test_db();
+
+        let markers = vec![
+            BehavioralMarker {
+                symbol_key: "test-repo:src/a.c#func:SYMBOL:FUNCTION".to_string(),
+                function_name: "func".to_string(),
+                file_path: "src/a.c".to_string(),
+                line_start: 10,
+                line_end: 20,
+                kind: MarkerKind::RetryLoop,
+                evidence: MarkerEvidence::RetryLoop {
+                    loop_kind: "for".to_string(),
+                    sleep_call: Some("sleep".to_string()),
+                    delay_ms: None,
+                    max_attempts: None,
+                    break_condition: None,
+                },
+            },
+            BehavioralMarker {
+                symbol_key: "test-repo:lib/b.c#func:SYMBOL:FUNCTION".to_string(),
+                function_name: "func".to_string(),
+                file_path: "lib/b.c".to_string(),
+                line_start: 10,
+                line_end: 20,
+                kind: MarkerKind::RetryLoop,
+                evidence: MarkerEvidence::RetryLoop {
+                    loop_kind: "while".to_string(),
+                    sleep_call: Some("usleep".to_string()),
+                    delay_ms: None,
+                    max_attempts: None,
+                    break_condition: None,
+                },
+            },
+        ];
+
+        conn.insert_behavioral_markers("snap-1", &markers).unwrap();
+
+        // Filter by src/ prefix
+        let results = conn
+            .query_behavioral_markers("snap-1", Some("src/"), None)
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, "src/a.c");
+    }
+
+    #[test]
+    fn insert_behavioral_markers_replaces_existing() {
+        use repo_graph_policy_facts::MarkerEvidence;
+
+        let mut conn = create_test_db();
+
+        let markers1 = vec![BehavioralMarker {
+            symbol_key: "test-repo:file.c#old:SYMBOL:FUNCTION".to_string(),
+            function_name: "old".to_string(),
+            file_path: "file.c".to_string(),
+            line_start: 1,
+            line_end: 10,
+            kind: MarkerKind::RetryLoop,
+            evidence: MarkerEvidence::RetryLoop {
+                loop_kind: "for".to_string(),
+                sleep_call: Some("sleep".to_string()),
+                delay_ms: None,
+                max_attempts: None,
+                break_condition: None,
+            },
+        }];
+
+        conn.insert_behavioral_markers("snap-1", &markers1).unwrap();
+        assert_eq!(conn.count_behavioral_markers("snap-1").unwrap(), 1);
+
+        // Insert new set - should replace
+        let markers2 = vec![
+            BehavioralMarker {
+                symbol_key: "test-repo:file.c#new1:SYMBOL:FUNCTION".to_string(),
+                function_name: "new1".to_string(),
+                file_path: "file.c".to_string(),
+                line_start: 1,
+                line_end: 10,
+                kind: MarkerKind::RetryLoop,
+                evidence: MarkerEvidence::RetryLoop {
+                    loop_kind: "while".to_string(),
+                    sleep_call: Some("sleep".to_string()),
+                    delay_ms: None,
+                    max_attempts: None,
+                    break_condition: None,
+                },
+            },
+            BehavioralMarker {
+                symbol_key: "test-repo:file.c#new2:SYMBOL:FUNCTION".to_string(),
+                function_name: "new2".to_string(),
+                file_path: "file.c".to_string(),
+                line_start: 20,
+                line_end: 20,
+                kind: MarkerKind::ResumeOffset,
+                evidence: MarkerEvidence::ResumeOffset {
+                    api_call: "curl_easy_setopt".to_string(),
+                    option_name: None,
+                    offset_source: None,
+                },
+            },
+        ];
+
+        conn.insert_behavioral_markers("snap-1", &markers2).unwrap();
+        assert_eq!(conn.count_behavioral_markers("snap-1").unwrap(), 2);
+
+        let results = conn
+            .query_behavioral_markers("snap-1", None, None)
+            .unwrap();
+        assert!(results.iter().all(|m| m.function_name != "old"));
+    }
+
+    #[test]
+    fn insert_behavioral_markers_fails_for_missing_snapshot() {
+        use repo_graph_policy_facts::MarkerEvidence;
+
+        let mut conn = create_test_db();
+
+        let markers = vec![BehavioralMarker {
+            symbol_key: "test:file.c#f:SYMBOL:FUNCTION".to_string(),
+            function_name: "f".to_string(),
+            file_path: "file.c".to_string(),
+            line_start: 1,
+            line_end: 5,
+            kind: MarkerKind::RetryLoop,
+            evidence: MarkerEvidence::RetryLoop {
+                loop_kind: "for".to_string(),
+                sleep_call: Some("sleep".to_string()),
+                delay_ms: None,
+                max_attempts: None,
+                break_condition: None,
+            },
+        }];
+
+        let result = conn.insert_behavioral_markers("nonexistent", &markers);
+        assert!(matches!(
+            result,
+            Err(PolicyFactsStorageError::SnapshotNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn count_behavioral_markers_empty() {
+        let conn = create_test_db();
+        assert_eq!(conn.count_behavioral_markers("snap-1").unwrap(), 0);
     }
 }

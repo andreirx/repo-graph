@@ -1021,10 +1021,10 @@ source-anchor provenance, or queryability.
 - Cross-layer edge materialization in the graph
 
 **Extraction families (C-first proving ground):**
-- `status_mapping`: function transforms one status/error code to another
+- `status_mapping`: function transforms one status/error code to another — **SHIPPED (PF-1)**
+- `behavioral_marker`: retry loops, resume offsets — **SHIPPED (PF-2)**
 - `branch_outcome`: switch/match arm produces specific result/action
 - `return_fate`: function result is ignored, propagated, or transformed
-- `behavioral_marker`: retry loops, backoff, timeout handling
 - `default_provenance`: where default values originate and propagate
 
 **Design constraints:**
@@ -1034,7 +1034,19 @@ source-anchor provenance, or queryability.
 - Stored in graph for programmatic queries
 - C/C++ as proving ground (swupdate codebase)
 
-**Status:** Design phase. Design doc at `docs/design/policy-facts-support-module.md`.
+**Shipped slices:**
+- **PF-1 (STATUS_MAPPING):** Status/error code translation functions.
+  `rmap policy <db> <repo> --kind STATUS_MAPPING`. Validated on swupdate
+  (map_channel_retcode, channel_map_curl_error, channel_map_http_code).
+- **PF-2 (BEHAVIORAL_MARKER):** Retry loops and resume offsets.
+  `rmap policy <db> <repo> --kind BEHAVIORAL_MARKER`. Detects RETRY_LOOP
+  (loops with sleep/delay) and RESUME_OFFSET (curl CURLOPT_RESUME_FROM*).
+  Validated on swupdate channel_get_file (2 retry loops + 1 resume offset).
+
+**Next:** PF-3 (RETURN_FATE), PF-4+ (BRANCH_OUTCOME, DEFAULT_PROVENANCE).
+
+See slice docs: `docs/slices/pf-1-status-mapping.md`, `docs/slices/pf-2-behavioral-marker.md`.
+Design doc: `docs/design/policy-facts-support-module.md`.
 
 ## Deferred
 

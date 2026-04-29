@@ -1,9 +1,12 @@
 //! Validation tests against swupdate corelib.
 //!
-//! These tests validate STATUS_MAPPING extraction on the real swupdate codebase
-//! as specified in docs/slices/pf-1-status-mapping.md.
+//! These tests validate policy-fact extraction on the real swupdate codebase:
+//! - PF-1: STATUS_MAPPING (docs/slices/pf-1-status-mapping.md)
+//! - PF-2: BEHAVIORAL_MARKER (docs/slices/pf-2-behavioral-marker.md)
 
+use repo_graph_policy_facts::extractors::behavioral_marker::extract_behavioral_markers;
 use repo_graph_policy_facts::extractors::status_mapping::extract_status_mappings;
+use repo_graph_policy_facts::{MarkerEvidence, MarkerKind};
 use std::path::Path;
 
 fn parse_c_file(source: &str) -> tree_sitter::Tree {
@@ -264,5 +267,266 @@ fn test_no_false_positives_in_corelib() {
         total_mappings >= 3,
         "Missing expected mappings (got {})",
         total_mappings
+    );
+}
+
+// =============================================================================
+// PF-2: BEHAVIORAL_MARKER validation
+// =============================================================================
+
+#[test]
+fn test_channel_get_file_retry_loops() {
+    let source = match read_swupdate_file("corelib/channel_curl.c") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: swupdate not found at expected path");
+            return;
+        }
+    };
+
+    let tree = parse_c_file(&source);
+    let markers =
+        extract_behavioral_markers(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+
+    // Filter to channel_get_file function markers
+    let channel_get_file_markers: Vec<_> = markers
+        .iter()
+        .filter(|m| m.function_name == "channel_get_file")
+        .collect();
+
+    // Should have at least 2 RETRY_LOOP markers (IPC retry + download retry)
+    let retry_loops: Vec<_> = channel_get_file_markers
+        .iter()
+        .filter(|m| m.kind == MarkerKind::RetryLoop)
+        .collect();
+
+    assert_eq!(
+        retry_loops.len(),
+        2,
+        "expected exactly 2 RETRY_LOOP markers in channel_get_file, got {}",
+        retry_loops.len()
+    );
+
+    eprintln!(
+        "channel_get_file RETRY_LOOP markers: {} found",
+        retry_loops.len()
+    );
+    for m in &retry_loops {
+        if let MarkerEvidence::RetryLoop {
+            loop_kind,
+            sleep_call,
+            delay_ms,
+            max_attempts,
+            ..
+        } = &m.evidence
+        {
+            eprintln!(
+                "  lines {}-{}: {} loop, sleep={:?}, delay_ms={:?}, max_attempts={:?}",
+                m.line_start, m.line_end, loop_kind, sleep_call, delay_ms, max_attempts
+            );
+        }
+    }
+
+    // ── IPC retry loop validation ─────────────────────────────────────────
+    // Pattern: for (int retries = 3; retries >= 0; retries--) { ... sleep(1); }
+    let ipc_retry = retry_loops.iter().find(|m| {
+        if let MarkerEvidence::RetryLoop {
+            loop_kind,
+            delay_ms,
+            max_attempts,
+            ..
+        } = &m.evidence
+        {
+            loop_kind == "for" && *delay_ms == Some(1000) && *max_attempts == Some(4)
+        } else {
+            false
+        }
+    });
+
+    assert!(
+        ipc_retry.is_some(),
+        "IPC retry loop not found: expected for loop with delay_ms=1000, max_attempts=4"
+    );
+
+    // ── Download retry loop validation ────────────────────────────────────
+    // Pattern: do { ... sleep(channel_data->retry_sleep); } while (...)
+    let download_retry = retry_loops.iter().find(|m| {
+        if let MarkerEvidence::RetryLoop { loop_kind, .. } = &m.evidence {
+            loop_kind == "do_while"
+        } else {
+            false
+        }
+    });
+
+    assert!(
+        download_retry.is_some(),
+        "download retry do-while loop not found"
+    );
+
+    // Download retry has dynamic delay (should be None)
+    if let MarkerEvidence::RetryLoop { delay_ms, .. } = &download_retry.unwrap().evidence {
+        assert_eq!(
+            *delay_ms, None,
+            "download retry delay should be None (dynamic)"
+        );
+    }
+}
+
+#[test]
+fn test_channel_get_file_resume_offset() {
+    let source = match read_swupdate_file("corelib/channel_curl.c") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: swupdate not found at expected path");
+            return;
+        }
+    };
+
+    let tree = parse_c_file(&source);
+    let markers =
+        extract_behavioral_markers(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+
+    // Filter to channel_get_file function markers
+    let channel_get_file_markers: Vec<_> = markers
+        .iter()
+        .filter(|m| m.function_name == "channel_get_file")
+        .collect();
+
+    // Should have at least 1 RESUME_OFFSET marker
+    let resume_offsets: Vec<_> = channel_get_file_markers
+        .iter()
+        .filter(|m| m.kind == MarkerKind::ResumeOffset)
+        .collect();
+
+    assert_eq!(
+        resume_offsets.len(),
+        1,
+        "expected exactly 1 RESUME_OFFSET marker in channel_get_file, got {}",
+        resume_offsets.len()
+    );
+
+    eprintln!(
+        "channel_get_file RESUME_OFFSET markers: {} found",
+        resume_offsets.len()
+    );
+
+    // Validate the RESUME_OFFSET marker
+    let resume = resume_offsets[0];
+    if let MarkerEvidence::ResumeOffset {
+        api_call,
+        option_name,
+        offset_source,
+    } = &resume.evidence
+    {
+        assert_eq!(api_call, "curl_easy_setopt", "api_call mismatch");
+        assert_eq!(
+            option_name.as_deref(),
+            Some("CURLOPT_RESUME_FROM_LARGE"),
+            "option_name mismatch"
+        );
+        eprintln!(
+            "  line {}: {} with {} offset={}",
+            resume.line_start,
+            api_call,
+            option_name.as_deref().unwrap_or("?"),
+            offset_source.as_deref().unwrap_or("?")
+        );
+    } else {
+        panic!("expected ResumeOffset evidence");
+    }
+}
+
+#[test]
+fn test_no_false_positive_behavioral_markers() {
+    // Verify curl_init and downloader functions don't produce markers
+    let source = match read_swupdate_file("corelib/channel_curl.c") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: swupdate not found at expected path");
+            return;
+        }
+    };
+
+    let tree = parse_c_file(&source);
+    let markers =
+        extract_behavioral_markers(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+
+    // channel_curl_init should NOT have markers (setup function, no retry/resume)
+    let init_markers: Vec<_> = markers
+        .iter()
+        .filter(|m| m.function_name == "channel_curl_init")
+        .collect();
+
+    assert!(
+        init_markers.is_empty(),
+        "channel_curl_init should not produce behavioral markers, got: {:?}",
+        init_markers
+            .iter()
+            .map(|m| format!("{:?}", m.kind))
+            .collect::<Vec<_>>()
+    );
+
+    eprintln!("Behavioral marker counts by function:");
+    let mut by_func: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for m in &markers {
+        *by_func.entry(&m.function_name).or_insert(0) += 1;
+    }
+    for (func, count) in by_func {
+        eprintln!("  {}: {}", func, count);
+    }
+}
+
+#[test]
+fn test_behavioral_marker_count_channel_get_file() {
+    // PF-2 acceptance: channel_get_file produces 3 markers (2 RETRY_LOOP + 1 RESUME_OFFSET)
+    let source = match read_swupdate_file("corelib/channel_curl.c") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: swupdate not found at expected path");
+            return;
+        }
+    };
+
+    let tree = parse_c_file(&source);
+    let markers =
+        extract_behavioral_markers(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+
+    let channel_get_file_markers: Vec<_> = markers
+        .iter()
+        .filter(|m| m.function_name == "channel_get_file")
+        .collect();
+
+    let retry_count = channel_get_file_markers
+        .iter()
+        .filter(|m| m.kind == MarkerKind::RetryLoop)
+        .count();
+    let resume_count = channel_get_file_markers
+        .iter()
+        .filter(|m| m.kind == MarkerKind::ResumeOffset)
+        .count();
+
+    eprintln!(
+        "channel_get_file: {} RETRY_LOOP + {} RESUME_OFFSET = {} total",
+        retry_count,
+        resume_count,
+        channel_get_file_markers.len()
+    );
+
+    // Acceptance criteria from PF-2 spec - exact counts to catch overmatching
+    assert_eq!(
+        retry_count, 2,
+        "expected exactly 2 RETRY_LOOP markers, got {}",
+        retry_count
+    );
+    assert_eq!(
+        resume_count, 1,
+        "expected exactly 1 RESUME_OFFSET marker, got {}",
+        resume_count
+    );
+    assert_eq!(
+        channel_get_file_markers.len(),
+        3,
+        "expected exactly 3 behavioral markers (2 RETRY_LOOP + 1 RESUME_OFFSET), got {}",
+        channel_get_file_markers.len()
     );
 }

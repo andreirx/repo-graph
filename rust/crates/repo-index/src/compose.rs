@@ -20,6 +20,7 @@ use repo_graph_indexer::types::{IndexOptions, IndexResult};
 use repo_graph_classification::spring_liveness::{classify_spring_liveness, SpringNodeInput};
 use repo_graph_classification::types::{PackageDependencySet, TsconfigAliases};
 use repo_graph_policy_facts::{
+    extractors::behavioral_marker::extract_behavioral_markers,
     extractors::status_mapping::extract_status_mappings,
     PolicyFactsStorageWrite,
 };
@@ -424,7 +425,8 @@ fn persist_spring_liveness_inferences(
 /// the C extractor carries policy-fact output directly. See
 /// `docs/TECH-DEBT.md` entry "PF-1 temporary re-parse postpass".
 ///
-/// Returns the number of STATUS_MAPPING facts persisted.
+/// Returns the total number of policy facts persisted
+/// (STATUS_MAPPING + BEHAVIORAL_MARKER).
 fn persist_policy_facts(
 	storage: &mut StorageConnection,
 	repo_uid: &str,
@@ -439,11 +441,13 @@ fn persist_policy_facts(
 		.map_err(|e| ComposeError::ExtractorInit(format!("policy-facts C parser: {}", e)))?;
 
 	let mut all_mappings = Vec::new();
+	let mut all_markers = Vec::new();
 
 	for file in file_inputs {
-		// PF-1 scope: C files only (.c and .h).
-		// C++ (.cpp, .hpp, .cc, .cxx) is explicitly out of scope for PF-1.
+		// Policy-facts scope: C files only (.c and .h).
+		// C++ (.cpp, .hpp, .cc, .cxx) is explicitly out of scope.
 		// See docs/slices/pf-1-status-mapping.md "What PF-1 Does NOT Include".
+		// See docs/slices/pf-2-behavioral-marker.md "Non-Goals".
 		let is_c_file = file.rel_path.ends_with(".c") || file.rel_path.ends_with(".h");
 
 		if !is_c_file {
@@ -456,27 +460,44 @@ fn persist_policy_facts(
 			None => continue, // Parse failed, skip.
 		};
 
-		// Extract STATUS_MAPPING facts.
+		// PF-1: Extract STATUS_MAPPING facts.
 		let mappings = extract_status_mappings(
 			&tree,
 			file.content.as_bytes(),
 			&file.rel_path,
 			repo_uid,
 		);
-
 		all_mappings.extend(mappings);
+
+		// PF-2: Extract BEHAVIORAL_MARKER facts.
+		let markers = extract_behavioral_markers(
+			&tree,
+			file.content.as_bytes(),
+			&file.rel_path,
+			repo_uid,
+		);
+		all_markers.extend(markers);
 	}
 
-	if all_mappings.is_empty() {
-		return Ok(0);
+	let mut total_count = 0;
+
+	// Persist STATUS_MAPPING facts.
+	if !all_mappings.is_empty() {
+		let count = storage
+			.insert_status_mappings(snapshot_uid, &all_mappings)
+			.map_err(|e| ComposeError::Index(format!("policy-facts storage: {}", e)))?;
+		total_count += count;
 	}
 
-	// Persist via the storage port.
-	let count = storage
-		.insert_status_mappings(snapshot_uid, &all_mappings)
-		.map_err(|e| ComposeError::Index(format!("policy-facts storage: {}", e)))?;
+	// Persist BEHAVIORAL_MARKER facts.
+	if !all_markers.is_empty() {
+		let count = storage
+			.insert_behavioral_markers(snapshot_uid, &all_markers)
+			.map_err(|e| ComposeError::Index(format!("policy-facts storage: {}", e)))?;
+		total_count += count;
+	}
 
-	Ok(count)
+	Ok(total_count)
 }
 
 // ── Full index ───────────────────────────────────────────────────

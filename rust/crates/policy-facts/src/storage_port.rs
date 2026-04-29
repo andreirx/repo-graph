@@ -1,13 +1,16 @@
 //! Storage port for policy-facts persistence.
 //!
-//! Defines the port traits for reading and writing STATUS_MAPPING facts.
+//! Defines the port traits for reading and writing policy-facts:
+//! - STATUS_MAPPING (PF-1)
+//! - BEHAVIORAL_MARKER (PF-2)
+//!
 //! The storage adapter crate implements these traits.
 //!
 //! This follows Clean Architecture: the domain crate (policy-facts)
 //! defines the port, the adapter crate (storage) implements it.
 //! Dependency direction: adapter → domain (outer → inner).
 
-use crate::types::StatusMapping;
+use crate::types::{BehavioralMarker, MarkerKind, StatusMapping};
 
 /// Error type for policy-facts storage operations.
 ///
@@ -49,7 +52,7 @@ impl std::fmt::Display for PolicyFactsStorageError {
 
 impl std::error::Error for PolicyFactsStorageError {}
 
-/// Port trait for writing STATUS_MAPPING facts to storage.
+/// Port trait for writing policy-facts to storage.
 ///
 /// Implemented by the storage adapter. The indexer calls this during
 /// C file extraction to persist extracted facts.
@@ -70,9 +73,26 @@ pub trait PolicyFactsStorageWrite {
         snapshot_uid: &str,
         mappings: &[StatusMapping],
     ) -> Result<usize, PolicyFactsStorageError>;
+
+    /// Insert BEHAVIORAL_MARKER facts for a snapshot.
+    ///
+    /// Replaces any existing BEHAVIORAL_MARKER facts for the same snapshot.
+    /// Returns the count of facts inserted.
+    ///
+    /// # Arguments
+    /// * `snapshot_uid` - Snapshot identity
+    /// * `markers` - Extracted BehavioralMarker facts
+    ///
+    /// # Errors
+    /// Returns error if the snapshot doesn't exist or database operation fails.
+    fn insert_behavioral_markers(
+        &mut self,
+        snapshot_uid: &str,
+        markers: &[BehavioralMarker],
+    ) -> Result<usize, PolicyFactsStorageError>;
 }
 
-/// Port trait for reading STATUS_MAPPING facts from storage.
+/// Port trait for reading policy-facts from storage.
 ///
 /// Implemented by the storage adapter. The CLI and agent use this to
 /// query persisted facts.
@@ -98,6 +118,33 @@ pub trait PolicyFactsStorageRead {
     ///
     /// More efficient than query + len when only count is needed.
     fn count_status_mappings(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<usize, PolicyFactsStorageError>;
+
+    /// Query BEHAVIORAL_MARKER facts for a snapshot.
+    ///
+    /// # Arguments
+    /// * `snapshot_uid` - Snapshot identity
+    /// * `file_filter` - Optional file path prefix filter
+    /// * `kind_filter` - Optional marker kind filter
+    ///
+    /// # Returns
+    /// Vector of BehavioralMarker facts, sorted by file_path then line_start.
+    ///
+    /// # Errors
+    /// Returns error if database operation fails.
+    fn query_behavioral_markers(
+        &self,
+        snapshot_uid: &str,
+        file_filter: Option<&str>,
+        kind_filter: Option<MarkerKind>,
+    ) -> Result<Vec<BehavioralMarker>, PolicyFactsStorageError>;
+
+    /// Count BEHAVIORAL_MARKER facts for a snapshot.
+    ///
+    /// More efficient than query + len when only count is needed.
+    fn count_behavioral_markers(
         &self,
         snapshot_uid: &str,
     ) -> Result<usize, PolicyFactsStorageError>;

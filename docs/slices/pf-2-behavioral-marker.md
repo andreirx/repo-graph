@@ -1,6 +1,6 @@
 # PF-2: BEHAVIORAL_MARKER Extraction
 
-Status: DESIGN
+Status: COMPLETE
 Scope: BEHAVIORAL_MARKER only. Scoped to RETRY_LOOP and RESUME_OFFSET markers.
 
 ## Goal
@@ -377,17 +377,17 @@ Unit tests in `rust/crates/policy-facts/src/extractors/behavioral_marker.rs`.
 
 ## Acceptance Criteria
 
-- [ ] `rmap policy swupdate.db swupdate --kind BEHAVIORAL_MARKER` returns 3+ facts
-- [ ] channel_get_file produces 2 RETRY_LOOP markers (IPC retry + download retry)
-- [ ] channel_get_file produces 1 RESUME_OFFSET marker
-- [ ] IPC RETRY_LOOP: loop_kind="for", sleep_call="sleep", delay_ms=1000, max_attempts=4
-- [ ] Download RETRY_LOOP: loop_kind="do_while", sleep_call="sleep", delay_ms=None
-- [ ] RESUME_OFFSET: api_call="curl_easy_setopt", option_name="CURLOPT_RESUME_FROM_LARGE"
-- [ ] No false positives on channel_curl_init, download_from_url, suricatta_wait
-- [ ] Unit tests cover: loop detection, sleep-call matching, curl option
+- [x] `rmap policy swupdate.db swupdate --kind BEHAVIORAL_MARKER` returns 3+ facts
+- [x] channel_get_file produces 2 RETRY_LOOP markers (IPC retry + download retry)
+- [x] channel_get_file produces 1 RESUME_OFFSET marker
+- [x] IPC RETRY_LOOP: loop_kind="for", sleep_call="sleep", delay_ms=1000, max_attempts=4
+- [x] Download RETRY_LOOP: loop_kind="do_while", sleep_call="sleep", delay_ms=None
+- [x] RESUME_OFFSET: api_call="curl_easy_setopt", option_name="CURLOPT_RESUME_FROM_LARGE"
+- [x] No false positives on channel_curl_init, download_from_url, suricatta_wait
+- [x] Unit tests cover: loop detection, sleep-call matching, curl option
       detection, nested loop handling, preprocessor-guarded code
-- [ ] Storage migration 022 and round-trip verified
-- [ ] CLI `--kind BEHAVIORAL_MARKER` filter works
+- [x] Storage migration 022 and round-trip verified
+- [x] CLI `--kind BEHAVIORAL_MARKER` filter works
 
 ## What PF-2 Does NOT Include
 
