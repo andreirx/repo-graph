@@ -38,6 +38,8 @@
 //!   rmap surfaces list <db_path> <repo_uid> [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>]
 //!   rmap surfaces show <db_path> <repo_uid> <surface_ref>
 //!
+//!   rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING] [--file <path>]
+//!
 //! Exit codes:
 //!   0 — success (gate: all pass; check: pass; modules violations: no violations)
 //!   1 — usage error (gate: any fail; check: fail; modules violations: violations found)
@@ -138,6 +140,7 @@ fn main() -> ExitCode {
 		"resource" => run_resource(&args[2..]),
 		"modules" => run_modules(&args[2..]),
 		"surfaces" => run_surfaces(&args[2..]),
+		"policy" => run_policy(&args[2..]),
 		other => {
 			eprintln!("unknown command: {}", other);
 			print_usage();
@@ -180,6 +183,7 @@ fn print_usage() {
 	eprintln!("  rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]");
 	eprintln!("  rmap surfaces list <db_path> <repo_uid> [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>]");
 	eprintln!("  rmap surfaces show <db_path> <repo_uid> <surface_ref>");
+	eprintln!("  rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING] [--file <path>]");
 }
 
 // ── index command ────────────────────────────────────────────────
@@ -7266,6 +7270,126 @@ fn run_surfaces_show(args: &[String]) -> ExitCode {
 		Ok(json) => {
 			println!("{}", json);
 			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+// ── policy command (PF-1) ────────────────────────────────────────
+
+/// Query STATUS_MAPPING policy facts from storage.
+///
+/// PF-1: STATUS_MAPPING extraction from C files.
+/// Facts are populated automatically during `rmap index` / `rmap refresh`
+/// via the policy-facts postpass in repo-index composition.
+fn run_policy(args: &[String]) -> ExitCode {
+	// Parse args: <db_path> <repo_uid> [--kind STATUS_MAPPING] [--file <path>]
+	if args.len() < 2 {
+		eprintln!("usage: rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING] [--file <path>]");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_uid = &args[1];
+
+	// Parse optional args.
+	let mut kind_filter: Option<&str> = None;
+	let mut file_filter: Option<&str> = None;
+	let mut i = 2;
+	while i < args.len() {
+		match args[i].as_str() {
+			"--kind" => {
+				if i + 1 >= args.len() {
+					eprintln!("error: --kind requires an argument");
+					return ExitCode::from(1);
+				}
+				kind_filter = Some(&args[i + 1]);
+				i += 2;
+			}
+			"--file" => {
+				if i + 1 >= args.len() {
+					eprintln!("error: --file requires an argument");
+					return ExitCode::from(1);
+				}
+				file_filter = Some(&args[i + 1]);
+				i += 2;
+			}
+			other => {
+				eprintln!("error: unknown option: {}", other);
+				return ExitCode::from(1);
+			}
+		}
+	}
+
+	// For PF-1, only STATUS_MAPPING is supported.
+	if let Some(k) = kind_filter {
+		if k != "STATUS_MAPPING" {
+			eprintln!("error: unsupported policy kind: {} (PF-1 supports STATUS_MAPPING only)", k);
+			return ExitCode::from(1);
+		}
+	}
+
+	// Open storage.
+	let storage = match repo_graph_storage::StorageConnection::open(db_path) {
+		Ok(s) => s,
+		Err(e) => {
+			eprintln!("error: failed to open database: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Get latest snapshot.
+	let snapshot = match storage.get_latest_snapshot(repo_uid) {
+		Ok(Some(s)) => s,
+		Ok(None) => {
+			eprintln!("error: no snapshot for repo '{}'", repo_uid);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("error: failed to query snapshot: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Query policy facts.
+	use repo_graph_policy_facts::PolicyFactsStorageRead;
+	let mappings = match storage.query_status_mappings(&snapshot.snapshot_uid, file_filter) {
+		Ok(m) => m,
+		Err(e) => {
+			eprintln!("error: failed to query policy facts: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Build output per spec.
+	#[derive(serde::Serialize)]
+	struct PolicyOutput {
+		repo: String,
+		snapshot: String,
+		kind: String,
+		facts: Vec<repo_graph_policy_facts::StatusMapping>,
+		count: usize,
+	}
+
+	let output = PolicyOutput {
+		repo: repo_uid.to_string(),
+		snapshot: snapshot.snapshot_uid.clone(),
+		kind: "STATUS_MAPPING".to_string(),
+		count: mappings.len(),
+		facts: mappings,
+	};
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			if output.count == 0 {
+				ExitCode::from(1) // No facts found
+			} else {
+				ExitCode::SUCCESS
+			}
 		}
 		Err(e) => {
 			eprintln!("error: {}", e);

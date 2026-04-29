@@ -19,6 +19,10 @@ use repo_graph_indexer::storage_port::SnapshotLifecyclePort;
 use repo_graph_indexer::types::{IndexOptions, IndexResult};
 use repo_graph_classification::spring_liveness::{classify_spring_liveness, SpringNodeInput};
 use repo_graph_classification::types::{PackageDependencySet, TsconfigAliases};
+use repo_graph_policy_facts::{
+    extractors::status_mapping::extract_status_mappings,
+    PolicyFactsStorageWrite,
+};
 use repo_graph_storage::types::InferenceInput;
 use repo_graph_storage::StorageConnection;
 use repo_graph_c_extractor::CExtractor;
@@ -407,6 +411,74 @@ fn persist_spring_liveness_inferences(
 	Ok(())
 }
 
+// ── Post-index policy-facts extraction ───────────────────────────
+
+/// Extract and persist STATUS_MAPPING policy facts from C files.
+///
+/// PF-1 TEMPORARY postpass: Re-parses C files after extraction to
+/// extract STATUS_MAPPING facts. This duplicates the tree-sitter
+/// parsing work already done by the C extractor.
+///
+/// **TECH DEBT:** This re-parse approach is explicitly temporary.
+/// The target architecture is extraction-time integration where
+/// the C extractor carries policy-fact output directly. See
+/// `docs/TECH-DEBT.md` entry "PF-1 temporary re-parse postpass".
+///
+/// Returns the number of STATUS_MAPPING facts persisted.
+fn persist_policy_facts(
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	snapshot_uid: &str,
+	file_inputs: &[FileInput],
+) -> Result<usize, ComposeError> {
+	// Initialize tree-sitter parser for C.
+	let mut parser = tree_sitter::Parser::new();
+	let c_language: tree_sitter::Language = tree_sitter_c::LANGUAGE.into();
+	parser
+		.set_language(&c_language)
+		.map_err(|e| ComposeError::ExtractorInit(format!("policy-facts C parser: {}", e)))?;
+
+	let mut all_mappings = Vec::new();
+
+	for file in file_inputs {
+		// PF-1 scope: C files only (.c and .h).
+		// C++ (.cpp, .hpp, .cc, .cxx) is explicitly out of scope for PF-1.
+		// See docs/slices/pf-1-status-mapping.md "What PF-1 Does NOT Include".
+		let is_c_file = file.rel_path.ends_with(".c") || file.rel_path.ends_with(".h");
+
+		if !is_c_file {
+			continue;
+		}
+
+		// Parse the file.
+		let tree = match parser.parse(&file.content, None) {
+			Some(t) => t,
+			None => continue, // Parse failed, skip.
+		};
+
+		// Extract STATUS_MAPPING facts.
+		let mappings = extract_status_mappings(
+			&tree,
+			file.content.as_bytes(),
+			&file.rel_path,
+			repo_uid,
+		);
+
+		all_mappings.extend(mappings);
+	}
+
+	if all_mappings.is_empty() {
+		return Ok(0);
+	}
+
+	// Persist via the storage port.
+	let count = storage
+		.insert_status_mappings(snapshot_uid, &all_mappings)
+		.map_err(|e| ComposeError::Index(format!("policy-facts storage: {}", e)))?;
+
+	Ok(count)
+}
+
 // ── Full index ───────────────────────────────────────────────────
 
 /// Index a repo from disk into an existing StorageConnection.
@@ -481,6 +553,10 @@ pub fn index_into_storage(
 
 	// Persist Spring framework-liveness inferences for dead-code suppression.
 	persist_spring_liveness_inferences(storage, repo_uid, &result.snapshot_uid)?;
+
+	// PF-1: Extract and persist STATUS_MAPPING policy facts from C files.
+	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
+	persist_policy_facts(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
 	Ok(result)
 }
@@ -572,6 +648,10 @@ pub fn refresh_into_storage(
 
 	// Persist Spring framework-liveness inferences for dead-code suppression.
 	persist_spring_liveness_inferences(storage, repo_uid, &result.snapshot_uid)?;
+
+	// PF-1: Extract and persist STATUS_MAPPING policy facts from C files.
+	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
+	persist_policy_facts(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
 	Ok(result)
 }

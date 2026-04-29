@@ -204,6 +204,35 @@
     not on Linux or other large repos.
 - **No clangd/libclang enrichment** for receiver-type resolution yet.
 
+## Policy Facts — PF-1 STATUS_MAPPING
+
+- **PF-1 temporary re-parse postpass (TECH DEBT):** STATUS_MAPPING extraction
+  from C files is implemented as a postpass in `repo-graph-repo-index::compose.rs`
+  that re-parses C files after the main extraction completes. This duplicates
+  the tree-sitter parsing work already done by the C extractor.
+  - **Why temporary:** The target architecture is extraction-time integration
+    where the C extractor carries policy-fact output directly, eliminating the
+    duplicate parse.
+  - **Why accepted now:** PF-1 must populate automatically during `rmap index`
+    so that `rmap policy` queries current-state discovery facts without a second
+    manual pipeline. Re-parsing is acceptable as temporary debt; hidden manual
+    extraction is not.
+  - **Migration path:** When the Rust C extractor (`repo-graph-c-extractor`)
+    is extended to output policy facts alongside nodes/edges, the postpass can
+    be removed and STATUS_MAPPING extraction happens at extraction time.
+  - **Files affected:**
+    - `rust/crates/repo-index/src/compose.rs`: `persist_policy_facts()` postpass
+    - `rust/crates/repo-index/Cargo.toml`: tree-sitter deps for re-parse
+  - **Tracking:** This entry. Remove when migration to extraction-time integration
+    is complete.
+- **Switch discriminant limitation:** PF-1 detects switches on any qualifying
+  parameter, including pointer dereference (`*param`). Nested switches, multiple
+  switches in the same function, and complex discriminant expressions (e.g.,
+  `param->field`) are not handled.
+- **No cross-language coverage:** STATUS_MAPPING extraction is C-only in PF-1.
+  Similar patterns exist in Rust (`From`/`Into` impls with match) and Java
+  (enum switch methods) but are not extracted.
+
 ## Symbol Identity — Stable Key Contract
 
 - **Duplicate symbol disambiguation (`:dupN` suffix):** The Rust TS/JS
@@ -1562,3 +1591,50 @@ See `docs/cli/rmap-contracts.md` for contract details.
   report shape (matching TS).
 
 - **`index` and `refresh`:** Use stderr for progress, no JSON output.
+
+## rgistr Policy Hints (2026-04-28)
+
+### What shipped
+
+rgistr MAP generation now includes two advisory sections:
+
+- **Policy Signals (file-level):** Status/error translation functions, retry loops,
+  default policy constants, orchestration loops, result-fate patterns.
+- **Policy Seams (folder-level):** Aggregated policy signals from child files
+  identifying cross-layer policy propagation points.
+
+These sections are LLM-generated advisory hints, NOT deterministic extraction.
+
+### What this is NOT
+
+This is discovery compression for agent orientation. It does NOT provide:
+
+- Deterministic extraction guarantees
+- Source-anchor provenance (line numbers, AST nodes)
+- Programmatic queryability (not in SQLite, not structured)
+- Cross-file policy flow tracing
+- Contract-level reproducibility
+
+### Next slice: policy-facts support module
+
+The policy-hints surface reveals the gap but does not close it. A deterministic
+policy-facts support module for `rmap` requires:
+
+1. AST-anchored extraction of status translation patterns
+2. Control-flow analysis for retry/restart behavior
+3. Return-fate tracking (ignored, propagated, transformed)
+4. Default-provenance extraction from config parsing
+5. Cross-layer edge materialization in the graph
+
+Design doc: `docs/design/policy-facts-support-module.md`.
+
+### Validation evidence
+
+Policy Signals verified on swupdate/corelib regeneration:
+- `server_utils_c_MAP.md`: "map_channel_retcode contains status/error translation
+  functions mapping channel_op_res_t codes to server_op_res_t codes"
+- `channel_curl_c_MAP.md`: "channel_get_file() contains retry loop with sleep and
+  resume" and default policy constants identified
+
+The hints surface the correct architectural seams. They do not provide the
+provenance or queryability that a support module would deliver.

@@ -593,6 +593,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-policy-facts"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tree-sitter",
+ "tree-sitter-c",
+]
+
+[[package]]
 name = "repo-graph-python-extractor"
 version = "0.1.0"
 dependencies = [
@@ -635,6 +645,7 @@ dependencies = [
  "repo-graph-classification",
  "repo-graph-indexer",
  "repo-graph-java-extractor",
+ "repo-graph-policy-facts",
  "repo-graph-python-extractor",
  "repo-graph-rust-extractor",
  "repo-graph-state-bindings",
@@ -646,6 +657,8 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "tree-sitter",
+ "tree-sitter-c",
  "walkdir",
 ]
 
@@ -659,6 +672,7 @@ dependencies = [
  "repo-graph-doc-facts",
  "repo-graph-gate",
  "repo-graph-git",
+ "repo-graph-policy-facts",
  "repo-graph-quality-policy",
  "repo-graph-quality-policy-runner",
  "repo-graph-repo-index",
@@ -716,6 +730,7 @@ dependencies = [
  "repo-graph-doc-facts",
  "repo-graph-gate",
  "repo-graph-indexer",
+ "repo-graph-policy-facts",
  "repo-graph-trust",
  "rusqlite",
  "serde",

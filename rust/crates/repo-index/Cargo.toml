@@ -58,6 +58,11 @@ repo-graph-classification = { path = "../classification" }
 # State-boundary composition wiring (SB-4-pre).
 repo-graph-state-bindings  = { path = "../state-bindings" }
 repo-graph-state-extractor = { path = "../state-extractor" }
+# Policy-facts extraction (PF-1).
+# TEMPORARY: Re-parses C files as a postpass. Target architecture is
+# extraction-time integration when C extractor carries policy-fact output.
+# See docs/TECH-DEBT.md: "PF-1 temporary re-parse postpass".
+repo-graph-policy-facts = { path = "../policy-facts" }
 
 # Filesystem walking.
 walkdir = "2"
@@ -73,6 +78,11 @@ serde_json = { version = "1" }
 
 # Timestamps for inference provenance.
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+
+# Tree-sitter for PF-1 policy-facts re-parse postpass (TEMPORARY).
+# See docs/TECH-DEBT.md: "PF-1 temporary re-parse postpass".
+tree-sitter = "0.24"
+tree-sitter-c = "0.23"
 
 [dev-dependencies]
 tempfile = "3"

@@ -1004,6 +1004,38 @@ Slice 1 shipped (see Shipped section above). Remaining work:
 See `docs/milestones/rmap-state-boundaries-v1.md` §Deferred for the full
 SB-next-* inventory.
 
+### 14. Policy-facts support module (design phase)
+Cross-layer policy propagation extraction: status translation patterns,
+retry/restart behavior, return-fate tracking, default-provenance extraction.
+
+**Gap identified:** rgistr MAP generation now surfaces policy signals as
+advisory LLM-generated hints (Policy Signals, Policy Seams). This reveals
+the architectural need but does not provide deterministic extraction,
+source-anchor provenance, or queryability.
+
+**Support module scope:**
+- AST-anchored extraction of status/error translation functions
+- Control-flow analysis for retry loops with backoff/resume
+- Return-fate tracking (result ignored, propagated, transformed)
+- Default-provenance extraction from config parsing patterns
+- Cross-layer edge materialization in the graph
+
+**Extraction families (C-first proving ground):**
+- `status_mapping`: function transforms one status/error code to another
+- `branch_outcome`: switch/match arm produces specific result/action
+- `return_fate`: function result is ignored, propagated, or transformed
+- `behavioral_marker`: retry loops, backoff, timeout handling
+- `default_provenance`: where default values originate and propagate
+
+**Design constraints:**
+- Pure support module first, then `rmap policy` CLI surface
+- Deterministic extraction (same input → same output)
+- Source-anchor provenance (line numbers, AST node references)
+- Stored in graph for programmatic queries
+- C/C++ as proving ground (swupdate codebase)
+
+**Status:** Design phase. Design doc at `docs/design/policy-facts-support-module.md`.
+
 ## Deferred
 
 ### Dead-code public surface reintroduction (blocked)

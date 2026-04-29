@@ -159,6 +159,7 @@ repo-graph-classification = { path = "../classification" }
 repo-graph-coverage = { path = "../coverage" }
 repo-graph-doc-facts = { path = "../doc-facts" }
 repo-graph-gate = { path = "../gate" }
+repo-graph-policy-facts = { path = "../policy-facts" }
 repo-graph-git = { path = "../git" }
 repo-graph-quality-policy = { path = "../quality-policy" }
 repo-graph-quality-policy-runner = { path = "../quality-policy-runner" }

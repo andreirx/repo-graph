@@ -2671,6 +2671,85 @@
           "dflt_value": null,
           "pk": 0
         }
+      ],
+      "status_mappings": [
+        {
+          "name": "default_output",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "file_path",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "function_name",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "line_end",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "line_start",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "mappings_json",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "snapshot_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "source_type",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "symbol_key",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "target_type",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
+        }
       ]
     },
     "indexes": [
@@ -2735,6 +2814,9 @@
       "idx_snapshots_repo",
       "idx_staged_edges_snapshot",
       "idx_staged_edges_source",
+      "idx_status_mappings_file",
+      "idx_status_mappings_snapshot",
+      "idx_status_mappings_types",
       "idx_surface_config_roots_snapshot",
       "idx_surface_config_roots_surface",
       "idx_surface_entrypoints_snapshot",
@@ -2861,6 +2943,11 @@
       {
         "version": 20,
         "name": "020-semantic-facts",
+        "applied_at": "<TIMESTAMP>"
+      },
+      {
+        "version": 21,
+        "name": "021-status-mappings",
         "applied_at": "<TIMESTAMP>"
       }
     ]

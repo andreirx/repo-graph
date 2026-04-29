@@ -166,6 +166,11 @@ repo-graph-gate = { path = "../gate" }
 # handles the boundary crossing.
 repo-graph-doc-facts = { path = "../doc-facts" }
 
+# Policy-facts crate — added for PF-1 STATUS_MAPPING slice. The
+# storage adapter implements the PolicyFactsStorageRead/Write traits
+# defined by the policy-facts crate.
+repo-graph-policy-facts = { path = "../policy-facts" }
+
 [dev-dependencies]
 # tempfile for tests that need a real file-backed SQLite database
 # in a unique temporary path. Added in R2-D when the connection

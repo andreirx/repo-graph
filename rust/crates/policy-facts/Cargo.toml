@@ -1,0 +1,44 @@
+# ── repo-graph-policy-facts ─────────────────────────────────────────
+#
+# Policy-facts extraction support module for repo-graph.
+#
+# Extracts cross-layer policy propagation patterns from source code:
+#   - STATUS_MAPPING: status/error translation functions
+#
+# Design: docs/design/policy-facts-support-module.md
+# Slice spec: docs/slices/pf-1-status-mapping.md
+#
+# Architecture:
+#   - Pure support module: defines DTOs and extractor logic
+#   - No storage ownership: defines storage port, adapter implements
+#   - Language-specific extractors: C-first (PF-1), others later
+#
+# PF-1 scope (STATUS_MAPPING only):
+#   - C status/error translation functions
+#   - Enum-to-enum and numeric-to-enum mappings
+#   - Top-level switch on first parameter
+#   - Fallthrough case grouping
+#   - Expression returns preserved as text
+#
+# NOT in PF-1:
+#   - BEHAVIORAL_MARKER, RETURN_FATE, BRANCH_OUTCOME, DEFAULT_PROVENANCE
+#   - C++ or other languages
+#   - Nested switch extraction
+#   - Semantic reduction of expressions
+
+[package]
+name         = "repo-graph-policy-facts"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.70.0"
+license      = "MIT"
+description  = "Policy-facts extraction for repo-graph"
+publish      = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tree-sitter = "0.24"
+tree-sitter-c = "0.23"
+
+[dev-dependencies]
