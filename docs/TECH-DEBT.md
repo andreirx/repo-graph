@@ -147,8 +147,28 @@
 
 ## Extraction — C/C++
 
+### TS-side C/C++ extractor (`rgr`)
+
 - C/C++ extractor (tree-sitter-c + tree-sitter-cpp): functions, structs, classes,
   typedefs, enums, namespaces, methods, constructors, #include, CALLS, complexity.
+- Handles both `.c/.h` (C grammar) and `.cpp/.hpp/.cc/.cxx` (C++ grammar).
+
+### Rust-side C extractor (`rmap`)
+
+- Native tree-sitter-c extractor for `.c/.h` files only.
+- Functions, structs, enums, typedefs, #include, CALLS, complexity.
+- Validated on swupdate, buildroot, Linux kernel.
+
+### Rust-side C++ extractor (`rmap`) — NOT YET IMPLEMENTED
+
+- **C++ files (`.cpp/.hpp/.cc/.cxx`) are explicitly excluded** from `rmap` indexing.
+- `compose.rs` skips C++ extensions with an explicit out-of-scope comment.
+- Design doc for Rust-primary C++ support: `docs/milestones/cpp-extractor-v1.md`
+- Planned scope: namespaces, classes, methods, constructors, inheritance,
+  plus `extern "C"` linkage detection as first-class C ABI boundary evidence.
+
+### Shared limitations (both runtimes)
+
 - **Syntax-only, no compile_commands.json integration.** Header search paths
   are not resolved — `#include "util.h"` does not resolve to a FILE node
   unless the path matches the repo-relative filename exactly.

@@ -21,13 +21,36 @@ understood and changed safely:
 This is Feathers-driven product logic. Multi-language support exists to feed this
 relationship substrate. It is not a collection of unrelated per-language extractors.
 
+## Strategic language tracks
+
+Two primary tracks feed the relationship substrate:
+
+**Server/systems track:**
+- TypeScript/JavaScript
+- Rust
+- Python
+- Java
+- C
+- C++
+
+**Mobile/client track:**
+- Objective-C
+- Objective-C++
+- Swift
+- Kotlin
+- Dart
+
+Later: Go, Scala.
+
+These are strategic priorities, not shipped capability claims. See "Current state"
+for what is actually operational.
+
 ## Current state (as of last commit)
 
 - **1464 tests** across 78 test files.
-- **Product language direction:** TypeScript/JavaScript + Rust + Python + Java + C + C++ are the
-  primary stack. Later: Go, Scala, Kotlin.
-- **Rust primary-path language maturity:** TS/JS, Rust, Java, Python, and C are operational in
-  `rmap`. C++ remains strategically important but not yet at equivalent Rust-primary maturity.
+- **Shipped language support:** TS/JS, Rust, Java, Python, and C are operational in
+  `rmap`. C++ syntax extraction exists on TS-side (`rgr`) but not yet on Rust-primary
+  path (`rmap`). Mobile track languages are not yet implemented.
 - **Enrichment:** TS (~81%), Rust (~85%), Java (operational but fragile). All three wired.
 - **Classifier version:** 6.
   - v4: language-aware imports
@@ -969,14 +992,31 @@ Same pattern as Clang tooling, LSIF pipelines, large code intelligence.
 - Module/subsystem aggregation happens last
 
 ### 6. C/C++ semantic maturation
-The syntax-only first slice + compile_commands.json reader + Linux
-system detector are shipped. Next maturation steps:
-- Rust-primary C++ extraction/parity. C++ is strategically in-scope, but the
-  Rust product path is not yet at equivalent maturity to C.
-- Header/source ownership: which .h belongs to which translation unit
-- Clangd/libclang enrichment for receiver-type resolution (same
-  architectural pattern as TS TypeChecker / Rust rust-analyzer)
-- #include resolution against actual file paths (not just specifiers)
+The syntax-only C extractor + compile_commands.json reader + Linux
+system detector are shipped. C++ is strategically in-scope but Rust-primary
+maturity is behind C.
+
+**Next concrete slice: Rust-primary C++ syntax extraction with C ABI boundary evidence**
+
+Design doc: `docs/milestones/cpp-extractor-v1.md`
+
+Scope:
+- Separate `cpp-extractor` crate (tree-sitter-cpp)
+- `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx` routing
+- Namespaces, classes, methods, constructors, destructors
+- IMPLEMENTS edges from inheritance
+- `extern "C"` linkage detection as symbol/file metadata
+- Parity with TS-side `cpp-extractor.ts`
+
+This slice treats C++ not as a language badge but as a source of legacy-code
+relationships — especially C/C++ interop boundaries, ABI seams, wrapper/glue
+modules, and mixed-language ownership patterns.
+
+**Layer 2 (future):** compile_commands.json integration for C++ (already
+exists for C), header/source ownership heuristics.
+
+**Layer 3 (future):** Clangd/libclang enrichment for receiver-type resolution
+(same architectural pattern as TS TypeChecker / rust-analyzer / jdtls).
 
 Remaining system/framework detectors:
 - RTOS task/thread registration (FreeRTOS, Zephyr)
@@ -1182,12 +1222,148 @@ Why later:
   multi-extractor indexer, manifest routing, trust/reporting, and the
   boundary-interaction model. Semantic enrichment would likely use `gopls`.
 
-### Kotlin / Scala extractors
-Later than Java, and later than the primary stack above.
+### Mobile and native client track
+
+Mobile codebases introduce relationship classes distinct from server code:
+- lifecycle entrypoints (AppDelegate, Activity, Fragment, Service)
+- UI navigation/routes
+- dependency injection containers
+- persistence boundaries
+- permissions / platform capability boundaries
+- native/managed interop boundaries (bridging headers, JNI, platform channels)
+- background job / service / worker boundaries
+- FFI seams
+
+These are exactly the kind of relationships repo-graph should surface.
+
+**Priority order:**
+
+#### 1. Objective-C / Objective-C++ (highest leverage)
+
+**Objective-C++ is a bridge-layer priority.** It connects the server/systems track
+(C/C++) with the mobile/client track (Apple). `.mm` files often host the most
+important interop seams in Apple repos — where C/C++ libraries meet Apple app code.
+
+Why first:
+- shares ecosystem with C/C++
+- directly intersects existing native systems direction
+- `extern "C"` / ABI seam thinking extends naturally into Obj-C++
+- Clang/LLVM ecosystem is strongest here
+- `.mm` (Objective-C++) files are often the real bridge layer in Apple codebases
+- extracting Objective-C++ gives you interop seam intelligence, not just another language badge
+
+Target relationship classes:
+- Objective-C / Swift lifecycle entrypoints
+- AppDelegate / SceneDelegate / UIApplicationMain
+- UIKit / SwiftUI navigation surfaces
+- Objective-C protocols / categories
+- bridging headers
+- Swift <-> Objective-C interop
+- Objective-C++ / C++ bridge layers
+- C ABI edges in Apple-native repos
+
+Tooling path: tree-sitter-objc + libclang for semantic enrichment.
+
+#### 2. Kotlin (explicit, not vague)
+
+Why second:
+- Android is too common to leave vague
+- JVM/Gradle context already exists from Java work
+- Kotlin introduces mobile-specific boundary and lifecycle patterns
+
+Target relationship classes:
+- Activity / Fragment / Service / BroadcastReceiver entrypoints
+- navigation graphs
+- DI entrypoints (Hilt, Koin, Dagger)
+- Room / persistence seams
+- WorkManager / background execution
+- JNI boundaries
+- Kotlin <-> Java ownership and call surfaces
+
+Tooling path: tree-sitter-kotlin + existing Gradle reader. Semantic enrichment
+via kotlin-compiler or IntelliJ platform APIs.
+
+#### 3. Swift (ecosystem-aware tooling path)
+
+Why third:
+- major iOS codebases
+- strong interop story with Objective-C and C/C++
+- tooling path needs deliberate choice (not just tree-sitter)
+
+Tooling path: tree-sitter-swift for syntax, but SourceKit-LSP or libSwiftAST
+for semantic enrichment. Apple's tooling is more closed than LLVM/Clang.
+
+#### 4. Dart / Flutter (after native mobile substrate)
+
+Why fourth:
+- Flutter adds its own boundary model distinct from native
+- widget tree, routes, platform channels, Dart FFI, plugin seams
+
+Target relationship classes:
+- widget entrypoints
+- route / navigation surfaces
+- state-management seams (Provider, Bloc, Riverpod)
+- platform channels
+- FFI boundaries
+- plugin registration seams
+
+Tooling path: tree-sitter-dart + Dart analyzer for semantic enrichment.
+
+### LLVM/Clang ecosystem integration
+
+The LLVM/Clang ecosystem provides tooling beyond tree-sitter that is directly
+useful for repo-graph, especially on the native/mobile track.
+
+**Immediate value (Layer 2 build-context):**
+
+- **compile_commands.json** — already relevant for C/C++, also matters for
+  Objective-C, Objective-C++, mixed native/mobile modules. Provides include
+  paths, defines, translation-unit context.
+
+- **libclang / Clang AST** — more valuable than tree-sitter once you need
+  resolved declarations, selectors, protocols/categories, linkage/interop
+  details, trustworthy symbol boundaries in native code. Objective-C and
+  Objective-C++ benefit most.
+
+**Enrichment (Layer 3):**
+
+- **clangd** — semantic lookup, resolved call targets, type-aware navigation,
+  receiver/type resolution. Same architectural role as TS TypeChecker,
+  rust-analyzer, jdtls.
+
+**Imported evidence (measurement/risk layer):**
+
+- **llvm-cov** — highest immediate value. Line coverage, function coverage,
+  coverage-backed dead/liveness claims, risk weighting, stale/untested area
+  discovery. This is the prerequisite for reintroducing dead-code public
+  surfaces (see TECH-DEBT.md §Dead-code surface withdrawal).
+
+- **sanitizer findings** (ASan, UBSan, TSan) — useful as imported runtime
+  evidence, risk weighting, hotspot enrichment, validation signals. NOT as
+  primary structural discovery or substitute for graph extraction.
+  - ASan: memory safety failures, use-after-free, buffer overflow zones
+  - UBSan: undefined-behavior hotspots, integer/shift/null issues
+  - TSan: concurrency hazard evidence
+
+- **clang-tidy / Clang Static Analyzer** — imported findings for structural
+  smells, ownership hazards, unsafe patterns, modernization pressure. Fits
+  repo-graph as risk evidence, not graph truth.
+
+**Priority for LLVM integration:**
+
+1. `llvm-cov` import path (coverage-backed liveness)
+2. `compile_commands.json` for C++ / Objective-C (already have reader)
+3. ASan / UBSan findings import
+4. TSan findings import
+5. clang-tidy / static analyzer import
+6. libclang / clangd semantic enrichment
+
+### Scala extractor
+
+Later than Java and later than the mobile track.
 
 Why later:
-- They reuse some JVM build-context scaffolding (Gradle/Maven), but they are not "free"
-  extensions of Java support.
-- Current product pressure is higher on Python and C/C++ legacy-code coverage.
-- Add only after Java operationalization, Rust-primary C++ maturation, and the daemon/shared-db
-  path are in place.
+- Reuses JVM build-context scaffolding but is not a "free" Java extension
+- Current product pressure is higher on mobile and C/C++ legacy-code coverage
+- Add only after Java operationalization, mobile track progress, and the
+  daemon/shared-db path are in place

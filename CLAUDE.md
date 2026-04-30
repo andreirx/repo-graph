@@ -38,7 +38,9 @@ relationship substrate, not separate products.
 
 ## Language Direction
 
-Primary product language stack:
+Two primary tracks:
+
+**Server/systems track:**
 - TypeScript/JavaScript
 - Rust
 - Python
@@ -46,13 +48,21 @@ Primary product language stack:
 - C
 - C++
 
-Later, when the primary stack is mature:
+**Mobile/client track:**
+- Objective-C
+- Objective-C++
+- Swift
+- Kotlin
+- Dart
+
+Later, when the primary tracks are mature:
 - Go
 - Scala
-- Kotlin
 
-Rust-primary maturity is not uniform across this stack. Do not claim parity where it
-does not exist yet, especially for C++.
+Rust-primary maturity is not uniform across these tracks. Do not claim parity where it
+does not exist yet, especially for C++ and the mobile track.
+
+See `docs/ROADMAP.md` §Mobile and native client track for priority order and tooling paths.
 
 ## Mandatory Architecture Rules
 
