@@ -169,16 +169,37 @@ fn callees_envelope_contract() {
 
 // ── dead envelope ───────────────────────────────────────────────
 
+/// Dead command is deliberately disabled (2026-04-27) due to high
+/// false-positive rates. This test verifies the disabled contract:
+/// - Exit code 2 (runtime error / not available)
+/// - Error message on stderr
+/// - No JSON on stdout
+///
+/// When the dead surface is reintroduced with coverage-backed or
+/// framework-liveness-backed evidence, this test should be restored
+/// to verify the QueryResult envelope shape.
 #[test]
 fn dead_envelope_contract() {
 	let (_r, _d, db) = build_fixture_db();
 	let db_str = db.to_str().unwrap();
 
-	let result = run_success(&["dead", db_str, "r1", "SYMBOL"]);
-	assert_envelope(&result, "graph dead");
+	let output = Command::new(binary_path())
+		.args(["dead", db_str, "r1", "SYMBOL"])
+		.output()
+		.unwrap();
 
-	// Command-specific field: kind_filter must be present.
-	assert_eq!(result["kind_filter"], "SYMBOL");
+	assert_eq!(
+		output.status.code(),
+		Some(2),
+		"dead command should exit 2 (disabled), got: {:?}",
+		output.status.code()
+	);
+
+	let stderr = String::from_utf8_lossy(&output.stderr);
+	assert!(
+		stderr.contains("rmap dead` is disabled"),
+		"stderr should explain disabled state"
+	);
 }
 
 // ── cycles envelope ─────────────────────────────────────────────
