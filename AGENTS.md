@@ -13,6 +13,40 @@ The graph answers: "What exists now? What changed? What is risky? Where should I
 
 Enforcement (policies, gate verdicts, waivers) exists as available substrate, not product center.
 
+## Core Business Logic Center
+
+The stable product center is **legacy-code relationship modeling**.
+
+Primary relationship families:
+- seams and enabling points
+- sensing/separation barriers
+- module and boundary relationships
+- state/resource touchpoints
+- policy propagation relationships
+- testability constraints
+- migration/replacement relationships
+
+This is Feathers-driven product logic. Languages are evidence sources for the same
+relationship substrate, not separate products.
+
+## Language Direction
+
+Primary product language stack:
+- TypeScript/JavaScript
+- Rust
+- Python
+- Java
+- C
+- C++
+
+Later, when the primary stack is mature:
+- Go
+- Scala
+- Kotlin
+
+Rust-primary maturity is not uniform across this stack. Do not claim parity where it
+does not exist yet, especially for C++.
+
 ## Mandatory Architecture Rules
 
 1. **Dependency rule:** inward only. Core never imports adapters or CLI.
@@ -21,6 +55,8 @@ Enforcement (policies, gate verdicts, waivers) exists as available substrate, no
 4. **Docs are primary:** documentation inventory is the primary surface; semantic facts are secondary derived hints.
 5. **Deterministic output:** same input → same output. No randomness, no order jitter.
 6. **Explicit degradation:** `null` = unknown, empty = known-zero. Never conflate.
+7. **Document-first authored knowledge:** discovery-oriented human/agent knowledge should live in documentation first; DB projections are secondary.
+8. **Daemon is coordination authority:** for shared multi-agent use, the daemon arbitrates read/write access to repo databases; clients must not stomp over the SQLite file directly.
 
 ## Implementation Workflow
 
@@ -47,6 +83,8 @@ After changing code:
 - No silent contract drift. If output shape changes, update contracts.
 - Discovery surfaces must be clear. An agent should see what changed, not just pass/fail.
 - No mixing extracted fact with inferred hint. Keep provenance clear.
+- Prefer cheap deterministic measurements when they sharpen discovery: LOC, coverage,
+  complexity, churn, hotspot, boundary pressure.
 
 ## Testing Expectations
 
@@ -75,6 +113,7 @@ and validation runs must follow this protocol.
 - Do not put domain logic in CLI handlers or storage adapters.
 - Do not erase computed facts under policy overlays — overlay, don't replace.
 - Do not treat documentation as semantic facts only — docs are primary evidence.
+- Do not trap discovery-oriented authored knowledge only inside opaque DB rows.
 - Do not use history accumulation as product center — current-state discovery only.
 - Do not default to "mirror TS" without explicit justification.
 - Do not store summaries of obvious code — store surprises, constraints, hazards.
