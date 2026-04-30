@@ -376,6 +376,163 @@ calls show `null`. The `summary.by_fate` counts are sorted alphabetically
 - C++ is explicitly out of scope for PF-1/PF-2
 - Languages other than C deferred
 
+### `boundaries` — Boundary Interaction Discovery
+
+Query extracted boundary interaction surfaces from C source files. Surfaces
+are populated automatically during `rmap index` / `rmap refresh`.
+
+**Scope (Slice 1A):** Local IPC mechanisms only. This slice covers:
+- Unix domain sockets (AF_UNIX)
+- Named pipes / FIFOs (mkfifo)
+- Anonymous pipes (pipe, pipe2)
+- POSIX shared memory (shm_open, mmap MAP_SHARED)
+- POSIX message queues (mq_open)
+
+**Explicit exclusions (Slice 1A):**
+- TCP/UDP sockets (Slice 1B — requires scope heuristics)
+- Serial/CAN (Slice 2 — inter_device scope)
+- MQTT/ZeroMQ/D-Bus (Slice 3 — library wrappers)
+- I2C/SPI/USB (Slice 4 — low-level device protocols)
+
+**Commands:**
+
+```
+rmap boundaries list <db_path> <repo_uid> [filters...]
+rmap boundaries show <db_path> <repo_uid> <surface_uid>
+rmap boundaries summary <db_path> <repo_uid>
+```
+
+**List filters:**
+
+| Filter | Values | Description |
+|--------|--------|-------------|
+| `--kind` | unix_socket, named_pipe, anonymous_pipe, shared_memory, message_queue | Channel mechanism type |
+| `--scope` | inter_process, inter_device, unknown | Boundary crossing scope |
+| `--direction` | provider, consumer, bidirectional | Role in the interaction |
+| `--family` | socket, pipe, shared_memory, message_queue | Protocol family |
+| `--file` | path | Exact source file match |
+| `--file-prefix` | prefix | Source file path prefix |
+| `--symbol` | key | Enclosing symbol stable key (exact match) |
+
+**Output (list):**
+
+```json
+{
+  "command": "boundaries list",
+  "repo": "swupdate",
+  "snapshot": "swupdate/2026-04-30T...",
+  "results": [
+    {
+      "surfaceUid": "bi:swupdate:core/network_utils.c:58:13:unix_socket:bidirectional",
+      "sourceFile": "core/network_utils.c",
+      "lineStart": 58,
+      "lineEnd": 58,
+      "channelKind": "unix_socket",
+      "boundaryScope": "inter_process",
+      "direction": "bidirectional",
+      "protocolFamily": "socket",
+      "protocol": "unix",
+      "interactionPattern": "stream",
+      "symbolStableKey": "swupdate:core/network_utils.c#listener_create:SYMBOL:FUNCTION",
+      "confidence": 0.95,
+      "basis": "api_call",
+      "channelCount": 1
+    }
+  ],
+  "count": 1,
+  "stale": false
+}
+```
+
+**Output (show):**
+
+```json
+{
+  "surfaceUid": "bi:swupdate:core/network_utils.c:58:13:unix_socket:bidirectional",
+  "snapshotUid": "swupdate/2026-04-30T.../a86b5e96",
+  "repoUid": "swupdate",
+  "boundaryScope": "inter_process",
+  "channelKind": "unix_socket",
+  "direction": "bidirectional",
+  "protocol": "unix",
+  "protocolFamily": "socket",
+  "interactionPattern": "stream",
+  "endpointLocality": "same_host_named",
+  "symbolStableKey": "swupdate:core/network_utils.c#listener_create:SYMBOL:FUNCTION",
+  "sourceFile": "core/network_utils.c",
+  "lineStart": 58,
+  "lineEnd": 58,
+  "colStart": 13,
+  "colEnd": 38,
+  "extractor": "c-ipc:0.1.0",
+  "basis": "api_call",
+  "confidence": 0.95,
+  "evidenceJson": "{ ... binding table match evidence ... }",
+  "channels": [
+    {
+      "channelUid": "ch:bi:swupdate:...:6210e6e330d84b58",
+      "channelKind": "unix_socket",
+      "channelIdentity": "core/network_utils.c:58"
+    }
+  ]
+}
+```
+
+**Output (summary):**
+
+```json
+{
+  "command": "boundaries summary",
+  "repo": "swupdate",
+  "snapshot": "swupdate/2026-04-30T...",
+  "summary": {
+    "totalSurfaces": 14,
+    "totalChannels": 14,
+    "byChannelKind": [
+      { "channelKind": "unix_socket", "count": 5 },
+      { "channelKind": "anonymous_pipe", "count": 6 }
+    ],
+    "byBoundaryScope": [
+      { "boundaryScope": "inter_process", "count": 14 }
+    ],
+    "byDirection": [
+      { "direction": "bidirectional", "count": 13 },
+      { "direction": "provider", "count": 1 }
+    ],
+    "byProtocolFamily": [
+      { "protocolFamily": "socket", "count": 5 },
+      { "protocolFamily": "pipe", "count": 7 }
+    ],
+    "byBasis": [
+      { "basis": "api_call", "count": 14 }
+    ],
+    "filesWithBoundaries": [
+      "core/network_utils.c",
+      "core/notifier.c",
+      "ipc/network_ipc.c"
+    ]
+  }
+}
+```
+
+**Exit codes:**
+
+- 0: success (surfaces found)
+- 1: no surfaces found (not an error, just empty)
+- 2: runtime error (invalid args, DB error, missing repo/snapshot)
+
+**Architecture notes:**
+
+- Two-level model: surfaces (Level 1) + channel details (Level 2)
+- Surfaces capture the architectural relationship (what/where)
+- Channel details capture mechanism-specific addressing
+- `endpointLocality` distinct from `boundaryScope` — locality is what can
+  be determined from the code, scope is the architectural classification
+- Shared memory surfaces require dual projection (boundary + state) per
+  the design doc, but state projection is not yet implemented
+
+**Design doc:** `docs/design/boundary-interaction-ipc-device.md`
+
 ## JSON-Only Output
 
 `rmap` always produces JSON on stdout. There is no `--json` flag because

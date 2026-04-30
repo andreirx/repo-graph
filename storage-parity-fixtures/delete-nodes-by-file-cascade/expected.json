@@ -185,6 +185,213 @@
           "pk": 0
         }
       ],
+      "behavioral_markers": [
+        {
+          "name": "evidence_json",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "file_path",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "function_name",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "line_end",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "line_start",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "snapshot_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "symbol_key",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
+        }
+      ],
+      "boundary_channel_details": [
+        {
+          "name": "baud_rate",
+          "type": "INTEGER",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "can_extended",
+          "type": "INTEGER",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "can_id",
+          "type": "INTEGER",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "channel_identity",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "channel_kind",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "channel_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "name": "frame_format",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "i2c_address",
+          "type": "INTEGER",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "metadata_json",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "mqueue_name",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "payload_contract",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "pipe_context",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "pipe_path",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "serial_device",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "shm_key",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "socket_path",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "spi_device",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "surface_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "tcp_endpoint",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "udp_endpoint",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
       "boundary_consumer_facts": [
         {
           "name": "address",
@@ -293,6 +500,148 @@
         },
         {
           "name": "source_file",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
+      "boundary_interaction_surfaces": [
+        {
+          "name": "basis",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "boundary_scope",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "channel_kind",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "col_end",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "col_start",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "confidence",
+          "type": "REAL",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "direction",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "endpoint_locality",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "evidence_json",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "extractor",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "interaction_pattern",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "line_end",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "line_start",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "protocol",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "protocol_family",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "repo_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "snapshot_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "source_file",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "surface_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "name": "symbol_stable_key",
           "type": "TEXT",
           "notnull": true,
           "dflt_value": null,
@@ -1746,6 +2095,85 @@
           "pk": 0
         }
       ],
+      "return_fates": [
+        {
+          "name": "callee_key",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "callee_name",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "caller_key",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "caller_name",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "col",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "evidence_json",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "fate",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "file_path",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "snapshot_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
+        }
+      ],
       "schema_migrations": [
         {
           "name": "applied_at",
@@ -2102,6 +2530,85 @@
           "notnull": true,
           "dflt_value": null,
           "pk": 0
+        }
+      ],
+      "status_mappings": [
+        {
+          "name": "default_output",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "file_path",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "function_name",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "line_end",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "line_start",
+          "type": "INTEGER",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "mappings_json",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "snapshot_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "source_type",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "symbol_key",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "target_type",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
         }
       ],
       "surface_config_roots": [
@@ -2635,85 +3142,6 @@
           "dflt_value": null,
           "pk": 0
         }
-      ],
-      "status_mappings": [
-        {
-          "name": "default_output",
-          "type": "TEXT",
-          "notnull": false,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "file_path",
-          "type": "TEXT",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "function_name",
-          "type": "TEXT",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "line_end",
-          "type": "INTEGER",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "line_start",
-          "type": "INTEGER",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "mappings_json",
-          "type": "TEXT",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "snapshot_uid",
-          "type": "TEXT",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "source_type",
-          "type": "TEXT",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "symbol_key",
-          "type": "TEXT",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "target_type",
-          "type": "TEXT",
-          "notnull": true,
-          "dflt_value": null,
-          "pk": 0
-        },
-        {
-          "name": "uid",
-          "type": "TEXT",
-          "notnull": false,
-          "dflt_value": null,
-          "pk": 1
-        }
       ]
     },
     "indexes": [
@@ -2723,6 +3151,17 @@
       "idx_bc_facts_snapshot_caller",
       "idx_bc_facts_snapshot_matcher_key",
       "idx_bc_facts_snapshot_mechanism",
+      "idx_bcd_channel_identity",
+      "idx_bcd_channel_kind",
+      "idx_bcd_surface",
+      "idx_behavioral_markers_file",
+      "idx_behavioral_markers_kind",
+      "idx_behavioral_markers_snapshot",
+      "idx_bis_snapshot_file",
+      "idx_bis_snapshot_kind",
+      "idx_bis_snapshot_protocol",
+      "idx_bis_snapshot_scope",
+      "idx_bis_snapshot_symbol",
       "idx_bl_consumer",
       "idx_bl_provider",
       "idx_bl_snapshot",
@@ -2771,6 +3210,10 @@
       "idx_quality_assessments_policy",
       "idx_quality_assessments_snapshot",
       "idx_repos_root_path",
+      "idx_return_fates_callee",
+      "idx_return_fates_fate",
+      "idx_return_fates_file",
+      "idx_return_fates_snapshot",
       "idx_semantic_facts_doc",
       "idx_semantic_facts_kind",
       "idx_semantic_facts_repo",
@@ -2991,6 +3434,21 @@
       {
         "version": 21,
         "name": "021-status-mappings",
+        "applied_at": "<TIMESTAMP>"
+      },
+      {
+        "version": 22,
+        "name": "022-behavioral-markers",
+        "applied_at": "<TIMESTAMP>"
+      },
+      {
+        "version": 23,
+        "name": "023-return-fates",
+        "applied_at": "<TIMESTAMP>"
+      },
+      {
+        "version": 24,
+        "name": "024-boundary-interactions",
         "applied_at": "<TIMESTAMP>"
       }
     ],

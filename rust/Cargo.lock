@@ -713,6 +713,7 @@ name = "repo-graph-rgr"
 version = "0.1.0"
 dependencies = [
  "repo-graph-agent",
+ "repo-graph-boundary-interaction",
  "repo-graph-classification",
  "repo-graph-coverage",
  "repo-graph-doc-facts",

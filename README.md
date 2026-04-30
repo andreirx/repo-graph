@@ -1,73 +1,64 @@
 # repo-graph
 
-Deterministic code-graph discovery for AI agents.
+Deterministic code-graph discovery substrate for AI agents.
 
-`repo-graph` indexes source code into a queryable graph and surfaces what an agent needs to understand before changing code: module structure, boundaries, dependencies, documentation, trust levels, and quality signals. It is built for real repositories where "best effort" graph output is not enough.
+`repo-graph` indexes source code into a queryable graph and surfaces what an agent needs before changing code: module structure, boundaries, seams, dependencies, documentation inventory, trust levels, and quality signals. It is built for real repositories where unresolved structure, mixed languages, and architectural drift must remain visible.
 
-## What This Tool Does
+## Product center
 
-**Discovery, not enforcement.** The primary goal is helping agents understand codebases, not blocking CI pipelines.
+**Discovery is the primary goal. Enforcement is secondary.**
 
-At index time:
-1. Parses source files into `FILE` and `SYMBOL` nodes
-2. Emits graph edges: `IMPORTS`, `CALLS`, `INSTANTIATES`, `IMPLEMENTS`
-3. Preserves unresolved references instead of dropping them
-4. Classifies unresolved edges into semantic buckets
-5. Computes trust and reliability surfaces over the snapshot
+Repo-graph exists to model the relationships that determine how legacy systems can be understood and changed safely:
+- modules and ownership
+- boundaries and seams
+- state and resource touchpoints
+- runtime/build surfaces
+- quality and risk signals
+- documentation inventory as orientation evidence
 
-After indexing, agents can:
-- **Orient** before changing code (`rmap orient`)
-- **Explain** unfamiliar areas with bounded deep-dives (`rmap explain`)
-- **Check** structural impact after changes (`rmap check`)
-- Query callers, callees, paths, cycles, dead nodes
-- Surface documentation inventory for focused areas
-- See quality measurements and risk signals
-- Understand trust levels and graph reliability
+Repo-graph is not a documentation authoring system. It is the deterministic discovery substrate that lets an agent:
+1. orient with `rmap`
+2. inspect existing docs
+3. write or repair docs in the target repo if needed
+4. implement with docs plus graph facts
+5. re-index and re-check after changes
 
 ## Primary CLI: `rmap`
 
-The Rust CLI (`rmap`) is the primary binary. All commands use `<db_path> <repo_uid>` positional arguments:
+The Rust CLI (`rmap`) is the primary binary. Commands use explicit positional arguments:
 
 ```bash
 rmap <command> <db_path> <repo_uid> [options]
 ```
 
-### Discovery Commands
+### Discovery workflow
 
 ```bash
-# Before changing code: understand the area
+# Orient before changing code
 rmap orient ./repo.db my-repo --focus "src/core/auth"
 
-# Deep-dive on unfamiliar code
+# Deep-dive on an unfamiliar file
 rmap explain ./repo.db my-repo "src/core/auth/session.ts"
 
-# After changing code: see structural impact
+# Check structural and quality impact after changes
 rmap check ./repo.db my-repo
 
-# Documentation for focused area
+# Surface documentation inventory
 rmap docs list ./repo.db my-repo
 ```
 
-### Structural Queries
+### Structural queries
 
 ```bash
-# Graph traversal
 rmap callers ./repo.db my-repo "AuthService.validate"
 rmap callees ./repo.db my-repo "AuthService.validate"
-rmap path ./repo.db my-repo "src/api/handler.ts" "src/db/connection.ts"
-
-# Dead code and cycles
-rmap dead ./repo.db my-repo SYMBOL
-rmap cycles ./repo.db my-repo
-
-# Trust and reliability
+rmap imports ./repo.db my-repo "src/core/auth/session.ts"
 rmap trust ./repo.db my-repo
 ```
 
-### Quality Discovery
+### Quality discovery
 
 ```bash
-# Measurements
 rmap churn ./repo.db my-repo --since "2 weeks ago"
 rmap hotspots ./repo.db my-repo
 rmap risk ./repo.db my-repo
@@ -76,64 +67,85 @@ rmap risk ./repo.db my-repo
 ### Indexing
 
 ```bash
-# Index a repository
+# Full index
 rmap index ./path/to/repo ./repo.db
 
-# Re-index after changes
+# Incremental refresh
 rmap refresh ./path/to/repo ./repo.db
 ```
 
-## Languages
+## Current shipped language support
 
-Implemented extractors:
+Operational in `rmap`:
 - TypeScript / JavaScript
 - Rust
 - Java
 - Python
-- C / C++
+- C
+- C++
 
-All use tree-sitter for syntax extraction. Semantic enrichment available for TS (TypeScript compiler), Rust (rust-analyzer), and Java (jdtls).
+Current strategic mobile/client track:
+- Objective-C
+- Objective-C++
+- Swift
+- Kotlin
+- Dart
 
-## Trust Model
+Those mobile/client languages are roadmap items, not shipped Rust-primary capability.
+
+## What `rmap` surfaces today
+
+At index time, repo-graph:
+1. parses source files into `FILE` and `SYMBOL` nodes
+2. emits structural edges such as `IMPORTS`, `CALLS`, `INSTANTIATES`, `IMPLEMENTS`
+3. preserves unresolved references instead of dropping them
+4. classifies unresolved edges into semantic buckets
+5. computes trust and quality-related snapshot signals
+6. inventories documentation files as first-class orientation evidence
+
+Shipped structural and discovery areas include:
+- modules and module ownership
+- HTTP / CLI boundary surfaces
+- state-boundary extraction
+- C++ extraction with `extern "C"` ABI-boundary evidence
+- local IPC boundary extraction in indexing/storage for C (Slice 1A)
+- quality measurements: complexity, cognitive complexity, nesting, parameter count, function length, coverage, churn, hotspots, risk
+
+Important current limitation:
+- local IPC boundary facts are indexed and stored, but not yet exposed through a finished public `rmap boundaries ...` CLI surface
+
+## Trust model
 
 The trust system exists because an indexed graph is not automatically trustworthy.
 
 `rmap trust` reports:
-- Unresolved edge classification counts
-- Call-graph reliability tier (HIGH, MEDIUM, LOW)
-- Downgrade triggers and caveats
-- Enrichment coverage
-
-Unresolved edges are classified into:
-- `external_library_candidate` — likely points outside repo
-- `internal_candidate` — likely points to repo-internal code
-- `framework_boundary_candidate` — matches framework registration pattern
-- `unknown` — no defensible signal
+- unresolved edge classification counts
+- call-graph reliability tier
+- downgrade triggers and caveats
+- enrichment coverage
 
 Unknowns are surfaced, not erased.
 
-## Governance Substrate (Secondary)
+## Quality and governance
 
-Quality-policy declarations and gate evaluation exist for teams that need CI blocking and formal compliance workflows. This is available infrastructure, not the primary product surface.
+Quality-policy declarations, assessments, and gate evaluation exist for teams that need hard enforcement, but they are not the product center.
 
 ```bash
-# Declare policies
 rmap declare quality-policy ./repo.db my-repo QP-001 \
-  --policy-kind absolute_max --measurement cyclomatic_complexity \
-  --threshold 15 --severity fail
+  --policy-kind absolute_max \
+  --measurement cyclomatic_complexity \
+  --threshold 15 \
+  --severity fail
 
-# Evaluate policies
 rmap assess ./repo.db my-repo
-
-# CI gate (when needed)
 rmap gate ./repo.db my-repo
 ```
 
-See `docs/cli/rmap-contracts.md` for full governance CLI contract.
+See `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/cli/rmap-contracts.md` for the governance CLI contract.
 
 ## Legacy CLI: `rgr`
 
-The TypeScript CLI (`rgr`) remains for features not yet ported to Rust. It uses a repo registry pattern:
+The TypeScript CLI (`rgr`) remains for TS-side parity checks and features not yet ported to Rust.
 
 ```bash
 rgr repo add ./path/to/repo --name my-repo
@@ -141,63 +153,71 @@ rgr repo index my-repo
 rgr enrich my-repo
 ```
 
+## Current non-goals and cautions
+
+- Public dead-code claims are withdrawn until coverage-backed evidence is integrated. Do not treat old dead-code expectations as current product behavior.
+- SQLite is the current persistence mechanism, not the conceptual end-state center.
+- The long-term runtime direction is a daemon that coordinates many-reader/few-writer shared access for multiple AI agents.
+
 ## Installation
 
 Requirements:
-- Node.js 20+ (for TS CLI and grammars)
-- Rust toolchain (for `rmap`)
+- Node.js 20+
+- Rust toolchain
 - `pnpm`
 
 ```bash
-# TypeScript CLI
+# TypeScript side
 pnpm install
 pnpm rebuild better-sqlite3
 pnpm build
 
-# Rust CLI
+# Rust side
 cd rust && cargo build --release
 ```
 
-For semantic enrichment, ensure language servers are on PATH:
-- Rust: `rust-analyzer` (`rustup component add rust-analyzer`)
+For semantic enrichment, ensure language tooling is available where applicable:
+- Rust: `rust-analyzer`
 - Java: `jdtls`
 
-## Architecture
+## Architecture summary
 
-Two CLI binaries with shared SQLite storage:
-- `rmap` (Rust) — primary, agent-facing commands
-- `rgr` (TypeScript) — enrichment, boundary extraction, legacy features
+Two CLI binaries share SQLite storage today:
+- `rmap` (Rust) — primary, agent-facing product surface
+- `rgr` (TypeScript) — legacy / parity / not-yet-ported surfaces
 
-Storage is SQLite. Each command takes an explicit `<db_path>` argument.
+Core rules:
+- discovery surfaces are primary
+- unresolved structure is first-class data
+- storage is an adapter, not the business-logic center
+- documentation inventory is primary orientation evidence
+- trust and degradation are explicit
 
-Core architectural rules:
-- Discovery surfaces are primary
-- Computed facts and human declarations are separate
-- Unresolved structure is first-class data
-- Trust reporting is explicit, not hidden
+The long-term architecture direction is a long-lived daemon with an in-memory current-state graph. SQLite remains the transitional persistence/query adapter until that runtime is built.
 
-## Documentation
+## Documentation map
 
 | Topic | Location |
-|-------|----------|
-| Vision and priorities | `docs/VISION.md` |
-| Roadmap | `docs/ROADMAP.md` |
-| Known limitations | `docs/TECH-DEBT.md` |
-| Rust CLI contract | `docs/cli/rmap-contracts.md` |
-| TS CLI reference | `docs/cli/v1-cli.txt` |
-| Database schema | `docs/architecture/schema.txt` |
+|---|---|
+| Vision and priorities | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/VISION.md` |
+| Roadmap | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/ROADMAP.md` |
+| Known limitations / debt | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/TECH-DEBT.md` |
+| Rust CLI contract | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/cli/rmap-contracts.md` |
+| TS CLI reference | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/cli/v1-cli.txt` |
+| Database schema | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/architecture/schema.txt` |
+| Test protocol | `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/testing/rmap-test-protocol.md` |
 
 ## Development
 
 ```bash
 # Build
-pnpm build                    # TypeScript
-cd rust && cargo build        # Rust
+pnpm build
+cd rust && cargo build
 
 # Test
-pnpm test                     # TS tests
-pnpm run test:rust            # Rust tests
-pnpm run test:all             # Full acceptance
+pnpm test
+pnpm run test:rust
+pnpm run test:all
 
 # Lint
 pnpm lint

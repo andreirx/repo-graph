@@ -81,5 +81,8 @@ pub fn print_usage() {
     eprintln!("  rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]");
     eprintln!("  rmap surfaces list <db_path> <repo_uid> [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>]");
     eprintln!("  rmap surfaces show <db_path> <repo_uid> <surface_ref>");
+    eprintln!("  rmap boundaries list <db_path> <repo_uid> [--kind <kind>] [--scope <scope>] [--direction <dir>] [--family <fam>] [--file <path>] [--symbol <key>]");
+    eprintln!("  rmap boundaries show <db_path> <repo_uid> <surface_uid>");
+    eprintln!("  rmap boundaries summary <db_path> <repo_uid>");
     eprintln!("  rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER] [--file <path>]");
 }

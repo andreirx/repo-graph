@@ -155,6 +155,7 @@ path = "src/main.rs"
 
 [dependencies]
 repo-graph-agent = { path = "../agent" }
+repo-graph-boundary-interaction = { path = "../boundary-interaction" }
 repo-graph-classification = { path = "../classification" }
 repo-graph-coverage = { path = "../coverage" }
 repo-graph-doc-facts = { path = "../doc-facts" }

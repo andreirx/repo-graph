@@ -58,6 +58,9 @@ for what is actually operational.
 - **Boundary interaction model:** HTTP slice shipped (Spring + Express providers, TS consumers).
   - glamCRM: 97 providers, 85 consumers, 80 links (82.5% provider, 94.1% consumer match rate)
   - fraktag: 47 providers, 42 consumers, 41 links (70.2% provider, 97.6% consumer match rate)
+  Local IPC slice (BI-1A) shipped: Unix sockets, named/anonymous pipes, shared memory,
+  message queues. C extractor + `rmap boundaries` CLI surface. Validated on swupdate
+  (14 surfaces across 12 files).
 - **Spring framework detectors:** container-managed bean liveness via `@Component`, `@Service`,
   `@Repository`, `@Configuration`, `@RestController`, `@Controller`, `@Bean`. Suppresses 93
   false dead-code reports on glamCRM. Also fixes Lambda entrypoint suppression in `findDeadNodes`.
@@ -343,6 +346,33 @@ for what is actually operational.
 - CLI surface: `rgr boundary summary|providers|consumers|links|unmatched`.
 - Validated on glamCRM: 97 providers, 85 consumers, 80 links, 82.5%/94.1% match rates.
 - Validated on fraktag: 47 providers, 42 consumers, 41 links, 70.2%/97.6% match rates.
+
+### Boundary interaction model (Local IPC slice — BI-1A)
+- Two-level model: BoundaryInteractionSurface (Level 1) + ChannelDetail (Level 2).
+- Surfaces capture architectural relationships (what/where); channels capture
+  mechanism-specific addressing (socket paths, shm keys, pipe descriptors).
+- Storage: `boundary_interaction_surfaces`, `boundary_channel_details` tables.
+- C extractor: binding-table-driven detection for POSIX IPC APIs.
+- Slice 1A scope (local IPC):
+  - Unix domain sockets (socket AF_UNIX, bind, connect, listen, accept)
+  - Named pipes / FIFOs (mkfifo, open O_WRONLY|O_RDONLY)
+  - Anonymous pipes (pipe, pipe2)
+  - POSIX shared memory (shm_open, mmap MAP_SHARED)
+  - POSIX message queues (mq_open, mq_send, mq_receive)
+- CLI surface: `rmap boundaries list|show|summary` with filters.
+  - `--kind` (unix_socket, named_pipe, shared_memory, message_queue, anonymous_pipe)
+  - `--scope` (inter_process, inter_device, unknown)
+  - `--direction` (provider, consumer, bidirectional)
+  - `--family` (socket, pipe, shared_memory, message_queue)
+  - `--file`, `--file-prefix` (path filtering)
+- Validated on swupdate: 14 surfaces across 12 files (5 Unix sockets, 6 anonymous
+  pipes, 1 named pipe, 2 shared memory).
+- Design doc: `docs/design/boundary-interaction-ipc-device.md`.
+- Explicit exclusions (deferred to later slices):
+  - TCP/UDP sockets (Slice 1B — requires scope heuristics)
+  - Serial/CAN (Slice 2 — inter_device scope)
+  - MQTT/ZeroMQ/D-Bus (Slice 3 — library wrappers)
+  - I2C/SPI/USB (Slice 4 — low-level device protocols)
 
 ### CLI boundary model (first slice)
 - Mechanism: `cli_command` — second boundary mechanism after HTTP.

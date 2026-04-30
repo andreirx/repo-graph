@@ -17,6 +17,7 @@
 //! - `surface` — `BoundaryInteractionSurface` (Level 1 architectural fact).
 //! - `channel` — `ChannelDetail` (Level 2 mechanism-specific fact).
 //! - `table` — binding-table schema, TOML loader, validator.
+//! - `query` — read-side DTOs and `BoundaryInteractionReadPort` trait.
 //!
 //! ## Slice scope (BI-1A: Local IPC)
 //!
@@ -51,12 +52,19 @@
 #![warn(missing_docs)]
 
 pub mod channel;
+pub mod query;
 pub mod surface;
 pub mod table;
 pub mod types;
 
 // Re-export the most commonly used types at the crate root.
 pub use channel::ChannelDetail;
+pub use query::{
+    BasisCount, BoundaryInteractionChannelView, BoundaryInteractionDetail,
+    BoundaryInteractionFilter, BoundaryInteractionListItem, BoundaryInteractionReadError,
+    BoundaryInteractionReadPort, BoundaryInteractionSummary, DirectionCount, FamilyCount,
+    KindCount, ScopeCount,
+};
 pub use surface::BoundaryInteractionSurface;
 pub use types::{
     BoundaryScope, ChannelKind, Direction, EndpointLocality, InteractionBasis, InteractionPattern,

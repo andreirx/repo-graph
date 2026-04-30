@@ -1,0 +1,904 @@
+//! Boundary interaction read port implementation for `StorageConnection`.
+//!
+//! Implements `BoundaryInteractionReadPort` from the boundary-interaction crate.
+//! This is the read-side counterpart to boundary_interaction_impl.rs (write-side).
+//!
+//! ## Determinism
+//!
+//! All queries are sorted by (source_file, line_start, col_start) to ensure
+//! deterministic output per the project's "same input → same output" rule.
+
+use rusqlite::OptionalExtension;
+
+use crate::connection::StorageConnection;
+
+use repo_graph_boundary_interaction::{
+    BasisCount, BoundaryInteractionChannelView, BoundaryInteractionDetail,
+    BoundaryInteractionFilter, BoundaryInteractionListItem, BoundaryInteractionReadError,
+    BoundaryInteractionReadPort, BoundaryInteractionSummary, BoundaryScope, ChannelKind,
+    Direction, DirectionCount, EndpointLocality, FamilyCount, InteractionBasis,
+    InteractionPattern, KindCount, ProtocolFamily, ScopeCount,
+};
+
+impl BoundaryInteractionReadPort for StorageConnection {
+    fn list_boundary_interactions(
+        &self,
+        snapshot_uid: &str,
+        filter: &BoundaryInteractionFilter,
+    ) -> Result<Vec<BoundaryInteractionListItem>, BoundaryInteractionReadError> {
+        // Build dynamic WHERE clause based on filter.
+        let mut conditions = vec!["bis.snapshot_uid = ?1".to_string()];
+        let mut param_index = 2;
+
+        // Channel kind filter
+        if filter.channel_kind.is_some() {
+            conditions.push(format!("bis.channel_kind = ?{}", param_index));
+            param_index += 1;
+        }
+
+        // Boundary scope filter
+        if filter.boundary_scope.is_some() {
+            conditions.push(format!("bis.boundary_scope = ?{}", param_index));
+            param_index += 1;
+        }
+
+        // Direction filter
+        if filter.direction.is_some() {
+            conditions.push(format!("bis.direction = ?{}", param_index));
+            param_index += 1;
+        }
+
+        // Protocol family filter
+        if filter.protocol_family.is_some() {
+            conditions.push(format!("bis.protocol_family = ?{}", param_index));
+            param_index += 1;
+        }
+
+        // File filter (exact match)
+        if filter.file.is_some() {
+            conditions.push(format!("bis.source_file = ?{}", param_index));
+            param_index += 1;
+        }
+
+        // File prefix filter
+        if filter.file_prefix.is_some() {
+            conditions.push(format!("bis.source_file LIKE ?{}", param_index));
+            param_index += 1;
+        }
+
+        // Symbol filter
+        if filter.symbol.is_some() {
+            conditions.push(format!("bis.symbol_stable_key = ?{}", param_index));
+            param_index += 1;
+        }
+
+        // Min confidence filter
+        if filter.min_confidence.is_some() {
+            conditions.push(format!("bis.confidence >= ?{}", param_index));
+            // param_index += 1; // Not needed, last parameter
+        }
+
+        let where_clause = conditions.join(" AND ");
+
+        // Query with channel count subquery
+        let sql = format!(
+            "SELECT
+                bis.surface_uid,
+                bis.source_file,
+                bis.line_start,
+                bis.line_end,
+                bis.channel_kind,
+                bis.boundary_scope,
+                bis.direction,
+                bis.protocol_family,
+                bis.protocol,
+                bis.interaction_pattern,
+                bis.symbol_stable_key,
+                bis.confidence,
+                bis.basis,
+                (SELECT COUNT(*) FROM boundary_channel_details WHERE surface_uid = bis.surface_uid) as channel_count
+            FROM boundary_interaction_surfaces bis
+            WHERE {}
+            ORDER BY bis.source_file ASC, bis.line_start ASC, bis.col_start ASC",
+            where_clause
+        );
+
+        let conn = self.connection();
+        let mut stmt = conn.prepare(&sql).map_err(map_storage_error)?;
+
+        // Bind parameters dynamically
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(snapshot_uid.to_string())];
+
+        if let Some(ref kind) = filter.channel_kind {
+            params_vec.push(Box::new(kind.as_str().to_string()));
+        }
+        if let Some(ref scope) = filter.boundary_scope {
+            params_vec.push(Box::new(scope.as_str().to_string()));
+        }
+        if let Some(ref dir) = filter.direction {
+            params_vec.push(Box::new(dir.as_str().to_string()));
+        }
+        if let Some(ref family) = filter.protocol_family {
+            params_vec.push(Box::new(family.as_str().to_string()));
+        }
+        if let Some(ref file) = filter.file {
+            params_vec.push(Box::new(file.clone()));
+        }
+        if let Some(ref prefix) = filter.file_prefix {
+            params_vec.push(Box::new(format!("{}%", prefix)));
+        }
+        if let Some(ref symbol) = filter.symbol {
+            params_vec.push(Box::new(symbol.clone()));
+        }
+        if let Some(min_conf) = filter.min_confidence {
+            params_vec.push(Box::new(min_conf));
+        }
+
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+
+        // Query into raw rows first, then parse enum values outside the closure
+        // to properly propagate parse errors.
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                Ok(RawListRow {
+                    surface_uid: row.get(0)?,
+                    source_file: row.get(1)?,
+                    line_start: row.get(2)?,
+                    line_end: row.get(3)?,
+                    channel_kind: row.get(4)?,
+                    boundary_scope: row.get(5)?,
+                    direction: row.get(6)?,
+                    protocol_family: row.get(7)?,
+                    protocol: row.get(8)?,
+                    interaction_pattern: row.get(9)?,
+                    symbol_stable_key: row.get(10)?,
+                    confidence: row.get(11)?,
+                    basis: row.get(12)?,
+                    channel_count: row.get(13)?,
+                })
+            })
+            .map_err(map_storage_error)?;
+
+        let mut results = Vec::new();
+        for row_result in rows {
+            let raw = row_result.map_err(map_storage_error)?;
+            results.push(BoundaryInteractionListItem {
+                surface_uid: raw.surface_uid,
+                source_file: raw.source_file,
+                line_start: raw.line_start,
+                line_end: raw.line_end,
+                channel_kind: parse_channel_kind(&raw.channel_kind)?,
+                boundary_scope: parse_boundary_scope(&raw.boundary_scope)?,
+                direction: parse_direction(&raw.direction)?,
+                protocol_family: parse_protocol_family(&raw.protocol_family)?,
+                protocol: raw.protocol,
+                interaction_pattern: parse_interaction_pattern(&raw.interaction_pattern)?,
+                symbol_stable_key: raw.symbol_stable_key,
+                confidence: raw.confidence,
+                basis: parse_interaction_basis(&raw.basis)?,
+                channel_count: raw.channel_count,
+            });
+        }
+
+        Ok(results)
+    }
+
+    fn get_boundary_interaction_detail(
+        &self,
+        surface_uid: &str,
+    ) -> Result<Option<BoundaryInteractionDetail>, BoundaryInteractionReadError> {
+        let conn = self.connection();
+
+        // Query surface
+        let surface_opt: Option<SurfaceRow> = conn
+            .query_row(
+                "SELECT
+                    surface_uid, snapshot_uid, repo_uid,
+                    boundary_scope, channel_kind, direction,
+                    protocol, protocol_family, interaction_pattern,
+                    endpoint_locality, symbol_stable_key, source_file,
+                    line_start, line_end, col_start, col_end,
+                    extractor, basis, confidence, evidence_json
+                FROM boundary_interaction_surfaces
+                WHERE surface_uid = ?",
+                [surface_uid],
+                |row| {
+                    Ok(SurfaceRow {
+                        surface_uid: row.get(0)?,
+                        snapshot_uid: row.get(1)?,
+                        repo_uid: row.get(2)?,
+                        boundary_scope: row.get(3)?,
+                        channel_kind: row.get(4)?,
+                        direction: row.get(5)?,
+                        protocol: row.get(6)?,
+                        protocol_family: row.get(7)?,
+                        interaction_pattern: row.get(8)?,
+                        endpoint_locality: row.get(9)?,
+                        symbol_stable_key: row.get(10)?,
+                        source_file: row.get(11)?,
+                        line_start: row.get(12)?,
+                        line_end: row.get(13)?,
+                        col_start: row.get(14)?,
+                        col_end: row.get(15)?,
+                        extractor: row.get(16)?,
+                        basis: row.get(17)?,
+                        confidence: row.get(18)?,
+                        evidence_json: row.get(19)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(map_storage_error)?;
+
+        let surface = match surface_opt {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        // Query channels into raw rows, then parse enum values outside closure
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    channel_uid, channel_kind, channel_identity,
+                    socket_path, tcp_endpoint, udp_endpoint,
+                    can_id, i2c_address, spi_device, serial_device,
+                    shm_key, pipe_path, pipe_context, mqueue_name,
+                    baud_rate, can_extended, frame_format, payload_contract,
+                    metadata_json
+                FROM boundary_channel_details
+                WHERE surface_uid = ?
+                ORDER BY channel_identity ASC",
+            )
+            .map_err(map_storage_error)?;
+
+        let channel_rows = stmt
+            .query_map([surface_uid], |row| {
+                Ok(RawChannelRow {
+                    channel_uid: row.get(0)?,
+                    channel_kind: row.get(1)?,
+                    channel_identity: row.get(2)?,
+                    socket_path: row.get(3)?,
+                    tcp_endpoint: row.get(4)?,
+                    udp_endpoint: row.get(5)?,
+                    can_id: row.get(6)?,
+                    i2c_address: row.get(7)?,
+                    spi_device: row.get(8)?,
+                    serial_device: row.get(9)?,
+                    shm_key: row.get(10)?,
+                    pipe_path: row.get(11)?,
+                    pipe_context: row.get(12)?,
+                    mqueue_name: row.get(13)?,
+                    baud_rate: row.get(14)?,
+                    can_extended: row.get(15)?,
+                    frame_format: row.get(16)?,
+                    payload_contract: row.get(17)?,
+                    metadata_json: row.get(18)?,
+                })
+            })
+            .map_err(map_storage_error)?;
+
+        let mut channels = Vec::new();
+        for row_result in channel_rows {
+            let raw = row_result.map_err(map_storage_error)?;
+            channels.push(BoundaryInteractionChannelView {
+                channel_uid: raw.channel_uid,
+                channel_kind: parse_channel_kind(&raw.channel_kind)?,
+                channel_identity: raw.channel_identity,
+                socket_path: raw.socket_path,
+                tcp_endpoint: raw.tcp_endpoint,
+                udp_endpoint: raw.udp_endpoint,
+                can_id: raw.can_id,
+                i2c_address: raw.i2c_address,
+                spi_device: raw.spi_device,
+                serial_device: raw.serial_device,
+                shm_key: raw.shm_key,
+                pipe_path: raw.pipe_path,
+                pipe_context: raw.pipe_context,
+                mqueue_name: raw.mqueue_name,
+                baud_rate: raw.baud_rate,
+                can_extended: raw.can_extended,
+                frame_format: raw.frame_format,
+                payload_contract: raw.payload_contract,
+                metadata_json: raw.metadata_json,
+            });
+        }
+
+        Ok(Some(BoundaryInteractionDetail {
+            surface_uid: surface.surface_uid,
+            snapshot_uid: surface.snapshot_uid,
+            repo_uid: surface.repo_uid,
+            boundary_scope: parse_boundary_scope(&surface.boundary_scope)?,
+            channel_kind: parse_channel_kind(&surface.channel_kind)?,
+            direction: parse_direction(&surface.direction)?,
+            protocol: surface.protocol,
+            protocol_family: parse_protocol_family(&surface.protocol_family)?,
+            interaction_pattern: parse_interaction_pattern(&surface.interaction_pattern)?,
+            endpoint_locality: parse_endpoint_locality(&surface.endpoint_locality)?,
+            symbol_stable_key: surface.symbol_stable_key,
+            source_file: surface.source_file,
+            line_start: surface.line_start,
+            line_end: surface.line_end,
+            col_start: surface.col_start,
+            col_end: surface.col_end,
+            extractor: surface.extractor,
+            basis: parse_interaction_basis(&surface.basis)?,
+            confidence: surface.confidence,
+            evidence_json: surface.evidence_json,
+            channels,
+        }))
+    }
+
+    fn get_boundary_interaction_summary(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<BoundaryInteractionSummary, BoundaryInteractionReadError> {
+        let conn = self.connection();
+
+        // Total surfaces
+        let total_surfaces: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM boundary_interaction_surfaces WHERE snapshot_uid = ?",
+                [snapshot_uid],
+                |row| row.get(0),
+            )
+            .map_err(map_storage_error)?;
+
+        // Total channels
+        let total_channels: i64 = conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM boundary_channel_details bcd
+                 JOIN boundary_interaction_surfaces bis ON bcd.surface_uid = bis.surface_uid
+                 WHERE bis.snapshot_uid = ?",
+                [snapshot_uid],
+                |row| row.get(0),
+            )
+            .map_err(map_storage_error)?;
+
+        // By channel kind
+        let by_channel_kind = query_count_by(
+            conn,
+            "channel_kind",
+            snapshot_uid,
+            parse_channel_kind,
+            |kind, count| KindCount {
+                channel_kind: kind,
+                count,
+            },
+        )?;
+
+        // By boundary scope
+        let by_boundary_scope = query_count_by(
+            conn,
+            "boundary_scope",
+            snapshot_uid,
+            parse_boundary_scope,
+            |scope, count| ScopeCount {
+                boundary_scope: scope,
+                count,
+            },
+        )?;
+
+        // By direction
+        let by_direction = query_count_by(
+            conn,
+            "direction",
+            snapshot_uid,
+            parse_direction,
+            |dir, count| DirectionCount {
+                direction: dir,
+                count,
+            },
+        )?;
+
+        // By protocol family
+        let by_protocol_family = query_count_by(
+            conn,
+            "protocol_family",
+            snapshot_uid,
+            parse_protocol_family,
+            |family, count| FamilyCount {
+                protocol_family: family,
+                count,
+            },
+        )?;
+
+        // By basis
+        let by_basis = query_count_by(
+            conn,
+            "basis",
+            snapshot_uid,
+            parse_interaction_basis,
+            |basis, count| BasisCount { basis, count },
+        )?;
+
+        // Files with boundaries (distinct, sorted)
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT source_file
+                 FROM boundary_interaction_surfaces
+                 WHERE snapshot_uid = ?
+                 ORDER BY source_file ASC",
+            )
+            .map_err(map_storage_error)?;
+
+        let file_rows = stmt
+            .query_map([snapshot_uid], |row| row.get::<_, String>(0))
+            .map_err(map_storage_error)?;
+
+        let mut files_with_boundaries = Vec::new();
+        for row_result in file_rows {
+            files_with_boundaries.push(row_result.map_err(map_storage_error)?);
+        }
+
+        Ok(BoundaryInteractionSummary {
+            total_surfaces: total_surfaces as usize,
+            total_channels: total_channels as usize,
+            by_channel_kind,
+            by_boundary_scope,
+            by_direction,
+            by_protocol_family,
+            by_basis,
+            files_with_boundaries,
+        })
+    }
+}
+
+// ── Helper types ─────────────────────────────────────────────────────
+
+/// Internal raw row type for list queries.
+/// Holds string values before enum parsing so errors can be propagated.
+struct RawListRow {
+    surface_uid: String,
+    source_file: String,
+    line_start: u32,
+    line_end: u32,
+    channel_kind: String,
+    boundary_scope: String,
+    direction: String,
+    protocol_family: String,
+    protocol: String,
+    interaction_pattern: String,
+    symbol_stable_key: String,
+    confidence: f64,
+    basis: String,
+    channel_count: u32,
+}
+
+/// Internal row type for surface queries.
+struct SurfaceRow {
+    surface_uid: String,
+    snapshot_uid: String,
+    repo_uid: String,
+    boundary_scope: String,
+    channel_kind: String,
+    direction: String,
+    protocol: String,
+    protocol_family: String,
+    interaction_pattern: String,
+    endpoint_locality: String,
+    symbol_stable_key: String,
+    source_file: String,
+    line_start: u32,
+    line_end: u32,
+    col_start: u32,
+    col_end: u32,
+    extractor: String,
+    basis: String,
+    confidence: f64,
+    evidence_json: String,
+}
+
+/// Internal raw row type for channel queries.
+struct RawChannelRow {
+    channel_uid: String,
+    channel_kind: String,
+    channel_identity: String,
+    socket_path: Option<String>,
+    tcp_endpoint: Option<String>,
+    udp_endpoint: Option<String>,
+    can_id: Option<u32>,
+    i2c_address: Option<u8>,
+    spi_device: Option<String>,
+    serial_device: Option<String>,
+    shm_key: Option<String>,
+    pipe_path: Option<String>,
+    pipe_context: Option<String>,
+    mqueue_name: Option<String>,
+    baud_rate: Option<u32>,
+    can_extended: Option<bool>,
+    frame_format: Option<String>,
+    payload_contract: Option<String>,
+    metadata_json: Option<String>,
+}
+
+// ── Parse helpers ────────────────────────────────────────────────────
+//
+// All parse helpers return Result to surface schema drift or corrupt rows
+// instead of silently coercing to fallback values. This follows the
+// explicit-degradation rule: `null` = unknown, empty = known-zero, but
+// unrecognized stored values = read error.
+
+fn parse_channel_kind(s: &str) -> Result<ChannelKind, BoundaryInteractionReadError> {
+    match s {
+        "unix_socket" => Ok(ChannelKind::UnixSocket),
+        "named_pipe" => Ok(ChannelKind::NamedPipe),
+        "anonymous_pipe" => Ok(ChannelKind::AnonymousPipe),
+        "shared_memory" => Ok(ChannelKind::SharedMemory),
+        "message_queue" => Ok(ChannelKind::MessageQueue),
+        "tcp_socket" => Ok(ChannelKind::TcpSocket),
+        "udp_socket" => Ok(ChannelKind::UdpSocket),
+        "serial_port" => Ok(ChannelKind::SerialPort),
+        "can_message" => Ok(ChannelKind::CanMessage),
+        "mqtt_topic" => Ok(ChannelKind::MqttTopic),
+        "dbus_interface" => Ok(ChannelKind::DbusInterface),
+        "zeromq_socket" => Ok(ChannelKind::ZeromqSocket),
+        "i2c_device" => Ok(ChannelKind::I2cDevice),
+        "spi_device" => Ok(ChannelKind::SpiDevice),
+        "usb_endpoint" => Ok(ChannelKind::UsbEndpoint),
+        "ble_characteristic" => Ok(ChannelKind::BleCharacteristic),
+        "modbus_register" => Ok(ChannelKind::ModbusRegister),
+        "custom_protocol" => Ok(ChannelKind::CustomProtocol),
+        other => Err(BoundaryInteractionReadError::Storage(format!(
+            "unrecognized channel_kind: '{}'",
+            other
+        ))),
+    }
+}
+
+fn parse_boundary_scope(s: &str) -> Result<BoundaryScope, BoundaryInteractionReadError> {
+    match s {
+        "inter_process" => Ok(BoundaryScope::InterProcess),
+        "inter_device" => Ok(BoundaryScope::InterDevice),
+        "unknown" => Ok(BoundaryScope::Unknown),
+        other => Err(BoundaryInteractionReadError::Storage(format!(
+            "unrecognized boundary_scope: '{}'",
+            other
+        ))),
+    }
+}
+
+fn parse_direction(s: &str) -> Result<Direction, BoundaryInteractionReadError> {
+    match s {
+        "provider" => Ok(Direction::Provider),
+        "consumer" => Ok(Direction::Consumer),
+        "bidirectional" => Ok(Direction::Bidirectional),
+        other => Err(BoundaryInteractionReadError::Storage(format!(
+            "unrecognized direction: '{}'",
+            other
+        ))),
+    }
+}
+
+fn parse_protocol_family(s: &str) -> Result<ProtocolFamily, BoundaryInteractionReadError> {
+    match s {
+        "socket" => Ok(ProtocolFamily::Socket),
+        "pipe" => Ok(ProtocolFamily::Pipe),
+        "shared_memory" => Ok(ProtocolFamily::SharedMemory),
+        "message_queue" => Ok(ProtocolFamily::MessageQueue),
+        "serial" => Ok(ProtocolFamily::Serial),
+        "bus" => Ok(ProtocolFamily::Bus),
+        "message_broker" => Ok(ProtocolFamily::MessageBroker),
+        "usb" => Ok(ProtocolFamily::Usb),
+        "bluetooth" => Ok(ProtocolFamily::Bluetooth),
+        "custom" => Ok(ProtocolFamily::Custom),
+        other => Err(BoundaryInteractionReadError::Storage(format!(
+            "unrecognized protocol_family: '{}'",
+            other
+        ))),
+    }
+}
+
+fn parse_interaction_pattern(s: &str) -> Result<InteractionPattern, BoundaryInteractionReadError> {
+    match s {
+        "request_response" => Ok(InteractionPattern::RequestResponse),
+        "publish_subscribe" => Ok(InteractionPattern::PublishSubscribe),
+        "stream" => Ok(InteractionPattern::Stream),
+        "fire_and_forget" => Ok(InteractionPattern::FireAndForget),
+        "shared_state" => Ok(InteractionPattern::SharedState),
+        other => Err(BoundaryInteractionReadError::Storage(format!(
+            "unrecognized interaction_pattern: '{}'",
+            other
+        ))),
+    }
+}
+
+fn parse_endpoint_locality(s: &str) -> Result<EndpointLocality, BoundaryInteractionReadError> {
+    match s {
+        "loopback" => Ok(EndpointLocality::Loopback),
+        "same_host_named" => Ok(EndpointLocality::SameHostNamed),
+        "remote_literal" => Ok(EndpointLocality::RemoteLiteral),
+        "unknown" => Ok(EndpointLocality::Unknown),
+        other => Err(BoundaryInteractionReadError::Storage(format!(
+            "unrecognized endpoint_locality: '{}'",
+            other
+        ))),
+    }
+}
+
+fn parse_interaction_basis(s: &str) -> Result<InteractionBasis, BoundaryInteractionReadError> {
+    match s {
+        "api_call" => Ok(InteractionBasis::ApiCall),
+        "wrapper_call" => Ok(InteractionBasis::WrapperCall),
+        "annotation" => Ok(InteractionBasis::Annotation),
+        "convention" => Ok(InteractionBasis::Convention),
+        "declaration" => Ok(InteractionBasis::Declaration),
+        "inferred" => Ok(InteractionBasis::Inferred),
+        other => Err(BoundaryInteractionReadError::Storage(format!(
+            "unrecognized interaction_basis: '{}'",
+            other
+        ))),
+    }
+}
+
+// ── Error mapping ────────────────────────────────────────────────────
+
+fn map_storage_error(e: impl std::fmt::Display) -> BoundaryInteractionReadError {
+    BoundaryInteractionReadError::Storage(e.to_string())
+}
+
+// ── Count-by helper ──────────────────────────────────────────────────
+
+fn query_count_by<T, F, M>(
+    conn: &rusqlite::Connection,
+    column: &str,
+    snapshot_uid: &str,
+    parse: F,
+    map: M,
+) -> Result<Vec<T>, BoundaryInteractionReadError>
+where
+    F: Fn(&str) -> Result<T::Key, BoundaryInteractionReadError>,
+    M: Fn(T::Key, usize) -> T,
+    T: CountItem,
+{
+    let sql = format!(
+        "SELECT {}, COUNT(*) as cnt
+         FROM boundary_interaction_surfaces
+         WHERE snapshot_uid = ?
+         GROUP BY {}
+         ORDER BY {} ASC",
+        column, column, column
+    );
+
+    let mut stmt = conn.prepare(&sql).map_err(map_storage_error)?;
+
+    let rows = stmt
+        .query_map([snapshot_uid], |row| {
+            let key: String = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            Ok((key, count as usize))
+        })
+        .map_err(map_storage_error)?;
+
+    let mut results = Vec::new();
+    for row_result in rows {
+        let (key, count) = row_result.map_err(map_storage_error)?;
+        results.push(map(parse(&key)?, count));
+    }
+
+    Ok(results)
+}
+
+/// Trait for count items with associated key type.
+trait CountItem {
+    type Key;
+}
+
+impl CountItem for KindCount {
+    type Key = ChannelKind;
+}
+
+impl CountItem for ScopeCount {
+    type Key = BoundaryScope;
+}
+
+impl CountItem for DirectionCount {
+    type Key = Direction;
+}
+
+impl CountItem for FamilyCount {
+    type Key = ProtocolFamily;
+}
+
+impl CountItem for BasisCount {
+    type Key = InteractionBasis;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use repo_graph_boundary_interaction::{
+        surface::SurfaceBuilder, ChannelDetail, InteractionBasis as Basis,
+    };
+
+    fn create_test_db() -> StorageConnection {
+        let mut conn = StorageConnection::open_in_memory().unwrap();
+
+        conn.connection_mut()
+            .execute_batch(
+                "INSERT INTO repos (repo_uid, name, root_path, created_at)
+                 VALUES ('test-repo', 'Test', '/tmp/test', datetime('now'));
+                 INSERT INTO snapshots (snapshot_uid, repo_uid, kind, status, created_at)
+                 VALUES ('snap-1', 'test-repo', 'full', 'ready', datetime('now'));",
+            )
+            .unwrap();
+
+        conn
+    }
+
+    fn insert_test_surface(conn: &mut StorageConnection, file: &str, line: u32) {
+        let surface = SurfaceBuilder::new()
+            .snapshot_uid("snap-1")
+            .repo_uid("test-repo")
+            .boundary_scope(BoundaryScope::InterProcess)
+            .channel_kind(ChannelKind::UnixSocket)
+            .direction(Direction::Provider)
+            .protocol("unix")
+            .interaction_pattern(InteractionPattern::Stream)
+            .endpoint_locality(EndpointLocality::SameHostNamed)
+            .symbol_stable_key(format!("test-repo:{}#fn:SYMBOL:function", file))
+            .source_file(file)
+            .location(line, line + 5, 5, 50)
+            .extractor("c-ipc:0.1.0")
+            .basis(Basis::ApiCall)
+            .build()
+            .unwrap();
+
+        conn.insert_boundary_surfaces(&[surface]).unwrap();
+    }
+
+    #[test]
+    fn list_returns_sorted_results() {
+        let mut conn = create_test_db();
+
+        // Insert in non-sorted order
+        insert_test_surface(&mut conn, "src/z.c", 100);
+        insert_test_surface(&mut conn, "src/a.c", 50);
+        insert_test_surface(&mut conn, "src/a.c", 30);
+
+        let filter = BoundaryInteractionFilter::new();
+        let results = conn.list_boundary_interactions("snap-1", &filter).unwrap();
+
+        assert_eq!(results.len(), 3);
+        // Should be sorted by file, then line
+        assert_eq!(results[0].source_file, "src/a.c");
+        assert_eq!(results[0].line_start, 30);
+        assert_eq!(results[1].source_file, "src/a.c");
+        assert_eq!(results[1].line_start, 50);
+        assert_eq!(results[2].source_file, "src/z.c");
+    }
+
+    #[test]
+    fn list_with_file_filter() {
+        let mut conn = create_test_db();
+
+        insert_test_surface(&mut conn, "src/server.c", 100);
+        insert_test_surface(&mut conn, "src/client.c", 50);
+
+        let filter = BoundaryInteractionFilter::new().with_file("src/server.c");
+        let results = conn.list_boundary_interactions("snap-1", &filter).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].source_file, "src/server.c");
+    }
+
+    #[test]
+    fn list_with_file_prefix_filter() {
+        let mut conn = create_test_db();
+
+        insert_test_surface(&mut conn, "src/server.c", 100);
+        insert_test_surface(&mut conn, "src/client.c", 50);
+        insert_test_surface(&mut conn, "lib/util.c", 25);
+
+        let filter = BoundaryInteractionFilter::new().with_file_prefix("src/");
+        let results = conn.list_boundary_interactions("snap-1", &filter).unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|r| r.source_file.starts_with("src/")));
+    }
+
+    #[test]
+    fn get_detail_returns_none_for_missing() {
+        let conn = create_test_db();
+
+        let result = conn
+            .get_boundary_interaction_detail("non-existent")
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn get_detail_includes_channels() {
+        let mut conn = create_test_db();
+
+        let surface = SurfaceBuilder::new()
+            .snapshot_uid("snap-1")
+            .repo_uid("test-repo")
+            .boundary_scope(BoundaryScope::InterProcess)
+            .channel_kind(ChannelKind::UnixSocket)
+            .direction(Direction::Provider)
+            .protocol("unix")
+            .interaction_pattern(InteractionPattern::Stream)
+            .endpoint_locality(EndpointLocality::SameHostNamed)
+            .symbol_stable_key("test-repo:src/server.c#fn:SYMBOL:function")
+            .source_file("src/server.c")
+            .location(100, 105, 5, 50)
+            .extractor("c-ipc:0.1.0")
+            .basis(Basis::ApiCall)
+            .build()
+            .unwrap();
+
+        let surface_uid = surface.surface_uid.clone();
+        conn.insert_boundary_surfaces(&[surface]).unwrap();
+
+        let channel = ChannelDetail {
+            channel_uid: ChannelDetail::build_uid(&surface_uid, "/var/run/app.sock"),
+            surface_uid: surface_uid.clone(),
+            channel_kind: ChannelKind::UnixSocket,
+            channel_identity: "/var/run/app.sock".to_string(),
+            socket_path: Some("/var/run/app.sock".to_string()),
+            tcp_endpoint: None,
+            udp_endpoint: None,
+            can_id: None,
+            i2c_address: None,
+            spi_device: None,
+            serial_device: None,
+            shm_key: None,
+            pipe_path: None,
+            pipe_context: None,
+            mqueue_name: None,
+            baud_rate: None,
+            can_extended: None,
+            frame_format: None,
+            payload_contract: None,
+            metadata_json: None,
+        };
+        conn.insert_boundary_channels(&[channel]).unwrap();
+
+        let detail = conn
+            .get_boundary_interaction_detail(&surface_uid)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(detail.channels.len(), 1);
+        assert_eq!(
+            detail.channels[0].socket_path.as_deref(),
+            Some("/var/run/app.sock")
+        );
+    }
+
+    #[test]
+    fn summary_counts_correctly() {
+        let mut conn = create_test_db();
+
+        insert_test_surface(&mut conn, "src/a.c", 10);
+        insert_test_surface(&mut conn, "src/b.c", 20);
+        insert_test_surface(&mut conn, "src/b.c", 30);
+
+        let summary = conn.get_boundary_interaction_summary("snap-1").unwrap();
+
+        assert_eq!(summary.total_surfaces, 3);
+        assert_eq!(summary.files_with_boundaries.len(), 2);
+        assert_eq!(summary.files_with_boundaries[0], "src/a.c");
+        assert_eq!(summary.files_with_boundaries[1], "src/b.c");
+
+        // All are unix_socket
+        assert_eq!(summary.by_channel_kind.len(), 1);
+        assert_eq!(summary.by_channel_kind[0].channel_kind, ChannelKind::UnixSocket);
+        assert_eq!(summary.by_channel_kind[0].count, 3);
+    }
+
+    #[test]
+    fn empty_snapshot_returns_empty_results() {
+        let conn = create_test_db();
+
+        let filter = BoundaryInteractionFilter::new();
+        let results = conn.list_boundary_interactions("snap-1", &filter).unwrap();
+        assert!(results.is_empty());
+
+        let summary = conn.get_boundary_interaction_summary("snap-1").unwrap();
+        assert_eq!(summary.total_surfaces, 0);
+        assert_eq!(summary.total_channels, 0);
+        assert!(summary.files_with_boundaries.is_empty());
+    }
+}

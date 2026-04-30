@@ -18,6 +18,7 @@
 //! Command families use shared infrastructure from `crate::cli`.
 
 mod assess;
+mod boundaries;
 mod dead;
 mod declare;
 mod docs;
@@ -33,6 +34,7 @@ mod surfaces;
 mod trust;
 
 pub use assess::run_assess;
+pub use boundaries::run_boundaries;
 pub use dead::run_dead;
 pub use declare::run_declare;
 pub use docs::run_docs;
