@@ -593,6 +593,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-module-queries"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-classification",
+ "repo-graph-storage",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "repo-graph-policy-facts"
 version = "0.1.0"
 dependencies = [
@@ -672,6 +681,7 @@ dependencies = [
  "repo-graph-doc-facts",
  "repo-graph-gate",
  "repo-graph-git",
+ "repo-graph-module-queries",
  "repo-graph-policy-facts",
  "repo-graph-quality-policy",
  "repo-graph-quality-policy-runner",

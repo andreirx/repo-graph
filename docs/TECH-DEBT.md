@@ -638,16 +638,26 @@ intentionally diverges.
 
 ## Module Resolution Dual-Path Model
 
-**Current state:** The Rust CLI's `modules *` commands now use a
-unified `ModuleQueryContext` helper (in `rgr/src/module_resolution.rs`)
-that abstracts over two different backing representations:
+**Current state:** Module graph loading and edge derivation are now
+consolidated in the `repo-graph-module-queries` support crate. CLI
+handlers are thin adapters that consume preloaded facts.
+
+The crate provides:
+- `ModuleQueryContext` — abstracts over TS/Rust backing stores
+- `ModuleGraphFacts` — bundled context + edges + diagnostics + module_refs
+- `load_module_graph_facts()` — single-load orchestration
+- `evaluate_violations_from_facts()` — violation evaluation on preloaded facts
+
+### Backing representations
+
+Two storage paths are unified at query time:
 
 - **TS path:** `module_candidates` table + `module_file_ownership` table
 - **Rust path:** `nodes` table (kind='MODULE') + `edges` table (type='OWNS')
 
 The fallback logic is application-level normalization policy, not raw
-storage truth. It lives in the CLI layer, not storage CRUD, to preserve
-honest method semantics in the storage adapter.
+storage truth. It lives in the support crate (not storage CRUD) to
+preserve honest method semantics in the storage adapter.
 
 ### Structural limitations
 
@@ -667,21 +677,38 @@ honest method semantics in the storage adapter.
 - **Dual persistence model remains until unified module read model.**
   The ideal fix is for the Rust indexer to populate the same
   `module_candidates` and `module_file_ownership` tables as the
-  TS indexer. Until then, the CLI fallback bridges the gap.
+  TS indexer. Until then, the support crate fallback bridges the gap.
 
-### Commands using ModuleQueryContext
+### Commands using preloaded facts
 
-All `modules *` commands now use the unified context:
-- `modules list` — catalog with rollups
-- `modules show` — module briefing
-- `modules files` — files owned by module
-- `modules deps` — cross-module dependency edges
-- `modules violations` — discovered-module boundary violations
-- `modules boundary` — declare discovered-module boundary
+Commands that need module graph + violations now call
+`load_module_graph_facts()` once, then pass `&facts` to downstream
+consumers:
 
-The shared `evaluate_discovered_module_violations` helper also uses
-the context, ensuring consistency between `modules list` violation
-rollups and `modules violations` output.
+- `modules list` — uses facts for catalog + violation rollups
+- `modules show` — uses facts for module briefing + violations
+- `modules deps` — filters `facts.edges` directly
+- `modules violations` — passes facts to `evaluate_violations_from_facts()`
+- `rmap violations` — same preloaded-facts pattern
+
+Commands that need context only (no edges/violations) use
+`ModuleQueryContext::load()` directly:
+
+- `modules files` — resolves module, queries file ownership
+- `modules boundary` — resolves source/target modules, inserts declaration
+
+### Previous duplication (resolved)
+
+Before Slice 12 P2 fix, module edge derivation was duplicated:
+1. Each CLI command loaded module graph independently
+2. Advisory violations helper re-queried the graph for rollups
+3. `modules violations` and `modules list` could produce inconsistent
+   violation counts due to timing differences
+
+Now all graph loading flows through `load_module_graph_facts()`. The
+shared `evaluate_violations_from_facts()` operates on the same
+preloaded facts used by callers, eliminating duplicate queries and
+ensuring consistency.
 
 ## Rust agent use-case crate (`repo-graph-agent`)
 

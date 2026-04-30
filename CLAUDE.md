@@ -54,6 +54,10 @@ After changing code:
 - Integration tests against fixture repos in `test/fixtures/`.
 - Smoke validation on real repos before declaring slice complete.
 
+**Test protocol:** See `docs/testing/rmap-test-protocol.md` for canonical DB
+locations, command templates, and verification report requirements. All smoke
+and validation runs must follow this protocol.
+
 **Validation repos** (use for smoke runs, document results in slice notes):
 - Internal: `repo-graph`, `../amodx`, `../glamCRM`, `../hexmanos`
 - External: `../legacy-codebases/spring-petclinic`, `sqlite`, `nginx`, `swupdate`, `linux`
@@ -88,6 +92,7 @@ After changing code:
 | Folder layout | `docs/architecture/project-structure.txt` |
 | Measurement model | `docs/architecture/measurement-model.txt` |
 | Rust milestone | `docs/milestones/rmap-structural-v1.md` |
+| Test protocol | `docs/testing/rmap-test-protocol.md` |
 
 ## Commands (Quick Reference)
 

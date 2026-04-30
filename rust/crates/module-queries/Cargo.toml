@@ -1,0 +1,13 @@
+[package]
+name = "repo-graph-module-queries"
+version = "0.1.0"
+edition = "2021"
+description = "Module graph query orchestration for repo-graph"
+
+[dependencies]
+repo-graph-storage = { path = "../storage" }
+repo-graph-classification = { path = "../classification" }
+thiserror = "1.0"
+
+[dev-dependencies]
+# No dev-dependencies yet - tested via rgr integration tests

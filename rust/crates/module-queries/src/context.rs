@@ -1,6 +1,6 @@
-//! Module resolution helper for CLI commands.
+//! Module query context with unified read model.
 //!
-//! This module provides a unified read model for module data that abstracts
+//! Provides a unified read model for module data that abstracts
 //! over two different backing representations:
 //!
 //! - **TS path**: `module_candidates` table + `module_file_ownership` table
@@ -9,12 +9,6 @@
 //! The fallback logic is application-level normalization policy, not raw
 //! storage truth. Keeping it here (not in storage CRUD) preserves honest
 //! method semantics in the storage layer.
-//!
-//! ## Technical Debt
-//!
-//! Rust directory modules are synthesized compatibility projections, not full
-//! module-candidate parity. The dual persistence model remains until a unified
-//! module read model exists at the indexer level.
 
 use repo_graph_storage::crud::module_edges_support::{FileOwnership, OwnedFileForRollup};
 use repo_graph_storage::error::StorageError;
@@ -26,8 +20,7 @@ use repo_graph_storage::StorageConnection;
 /// All module commands should consume this context instead of raw storage
 /// queries. The context handles fallback logic internally and presents a
 /// unified view regardless of backing representation.
-#[derive(Debug)]
-#[allow(dead_code)] // Some fields/methods reserved for future use
+#[derive(Debug, Clone)]
 pub struct ModuleQueryContext {
     /// All modules in the snapshot (normalized from either backing model).
     pub modules: Vec<ModuleCandidate>,
@@ -124,43 +117,11 @@ impl ModuleQueryContext {
         files.sort_by(|a, b| a.file_path.cmp(&b.file_path));
         files
     }
-
-    /// Get file ownership entries for a specific module.
-    ///
-    /// Returns ownership entries filtered to the given module_candidate_uid.
-    pub fn ownership_for_module(&self, module_uid: &str) -> Vec<&FileOwnership> {
-        self.ownership
-            .iter()
-            .filter(|o| o.module_candidate_uid == module_uid)
-            .collect()
-    }
-
-    /// Count files owned by each module.
-    ///
-    /// Returns a map of module_candidate_uid → (source_file_count, test_file_count).
-    pub fn file_counts_by_module(&self) -> std::collections::HashMap<String, (usize, usize)> {
-        let mut counts: std::collections::HashMap<String, (usize, usize)> =
-            std::collections::HashMap::new();
-
-        for file in &self.owned_files {
-            let entry = counts.entry(file.module_candidate_uid.clone()).or_default();
-            if file.is_test {
-                entry.1 += 1;
-            } else {
-                entry.0 += 1;
-            }
-        }
-
-        counts
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // Note: Full integration tests are in the command test files.
-    // Unit tests here focus on resolution logic.
 
     fn make_module(uid: &str, path: &str, key: &str) -> ModuleCandidate {
         ModuleCandidate {
@@ -266,37 +227,5 @@ mod tests {
         assert_eq!(files.len(), 2);
         assert_eq!(files[0].file_path, "src/core/a.ts");
         assert_eq!(files[1].file_path, "src/core/c.ts");
-    }
-
-    #[test]
-    fn file_counts_by_module_separates_test_and_source() {
-        let ctx = ModuleQueryContext {
-            modules: vec![],
-            ownership: vec![],
-            owned_files: vec![
-                OwnedFileForRollup {
-                    file_uid: "f1".to_string(),
-                    file_path: "src/core/a.ts".to_string(),
-                    module_candidate_uid: "m1".to_string(),
-                    is_test: false,
-                },
-                OwnedFileForRollup {
-                    file_uid: "f2".to_string(),
-                    file_path: "src/core/b.ts".to_string(),
-                    module_candidate_uid: "m1".to_string(),
-                    is_test: false,
-                },
-                OwnedFileForRollup {
-                    file_uid: "f3".to_string(),
-                    file_path: "src/core/a.test.ts".to_string(),
-                    module_candidate_uid: "m1".to_string(),
-                    is_test: true,
-                },
-            ],
-            is_fallback: false,
-        };
-
-        let counts = ctx.file_counts_by_module();
-        assert_eq!(counts.get("m1"), Some(&(2, 1))); // 2 source, 1 test
     }
 }

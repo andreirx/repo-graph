@@ -29,6 +29,7 @@ members = [
     "crates/git",
     "crates/indexer",
     "crates/java-extractor",
+    "crates/module-queries",
     "crates/policy-facts",
     "crates/python-extractor",
     "crates/quality-policy",
