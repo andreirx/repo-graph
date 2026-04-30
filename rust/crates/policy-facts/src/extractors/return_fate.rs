@@ -112,7 +112,33 @@ pub fn extract_return_fates(
         }
     }
 
-    results
+    // Dedup by (caller_key, line, col).
+    //
+    // Method chains like `target()->NewWritableFile(...)` create nested
+    // call_expressions with the same start position. Both inner (`target()`)
+    // and outer (`...->NewWritableFile(...)`) get classified, but only the
+    // outer call's return value is actually used.
+    //
+    // Strategy: for duplicate keys, keep the entry with the longer callee_name.
+    // The outer call in a chain has the final method name (e.g., "NewWritableFile"
+    // vs "target"), which is semantically the "real" callee whose return fate matters.
+    let mut deduped: HashMap<(String, u32, u32), ReturnFate> = HashMap::new();
+    for fate in results {
+        let key = (fate.caller_key.clone(), fate.line, fate.column);
+        match deduped.entry(key) {
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(fate);
+            }
+            std::collections::hash_map::Entry::Occupied(mut e) => {
+                // Keep the one with longer callee_name (outer method in a chain)
+                if fate.callee_name.len() > e.get().callee_name.len() {
+                    e.insert(fate);
+                }
+            }
+        }
+    }
+
+    deduped.into_values().collect()
 }
 
 /// Build a registry of function names to stable keys for this file.
@@ -1254,5 +1280,96 @@ void test(struct server *s) {
             None,
             "vtable call should have callee_key = None"
         );
+    }
+}
+
+#[cfg(test)]
+mod duplicate_diagnosis {
+    use super::*;
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    #[test]
+    #[ignore] // Run with: cargo test -p repo-graph-policy-facts duplicate_diagnosis -- --ignored --nocapture
+    fn diagnose_leveldb_duplicates() {
+        let leveldb_path = Path::new("/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb");
+        
+        if !leveldb_path.exists() {
+            println!("leveldb not found at {:?}, skipping", leveldb_path);
+            return;
+        }
+        
+        // Initialize parser
+        let mut parser = tree_sitter::Parser::new();
+        let c_language: tree_sitter::Language = tree_sitter_c::LANGUAGE.into();
+        parser.set_language(&c_language).unwrap();
+        
+        // Find all .c and .h files
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(leveldb_path).unwrap().flatten() {
+            collect_c_files(&entry.path(), &mut files);
+        }
+        
+        println!("Found {} C/H files in leveldb", files.len());
+        
+        let mut all_keys: HashMap<(String, u32, u32), Vec<(String, String, String)>> = HashMap::new();
+        
+        for path in &files {
+            let rel_path = path.strip_prefix(leveldb_path).unwrap().to_string_lossy().to_string();
+            
+            let content = match std::fs::read_to_string(path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            
+            let tree = match parser.parse(&content, None) {
+                Some(t) => t,
+                None => continue,
+            };
+            
+            let fates = extract_return_fates(&tree, content.as_bytes(), &rel_path, "leveldb");
+            
+            for fate in fates {
+                let key = (fate.caller_key.clone(), fate.line, fate.column);
+                all_keys.entry(key).or_default().push((
+                    fate.callee_name.clone(),
+                    format!("{:?}", fate.fate),
+                    fate.file_path.clone(),
+                ));
+            }
+        }
+        
+        // Report duplicates
+        let mut dup_count = 0;
+        for ((caller_key, line, col), entries) in &all_keys {
+            if entries.len() > 1 {
+                dup_count += 1;
+                println!("\n=== DUPLICATE #{} ===", dup_count);
+                println!("Key: caller_key={}, line={}, col={}", caller_key, line, col);
+                for (callee, fate, file) in entries {
+                    println!("  - callee={}, fate={}, file={}", callee, fate, file);
+                }
+            }
+        }
+        
+        println!("\n=== SUMMARY ===");
+        println!("Total unique (caller_key, line, col) keys: {}", all_keys.len());
+        println!("Duplicate keys: {}", dup_count);
+        
+        assert_eq!(dup_count, 0, "Found {} duplicate keys", dup_count);
+    }
+    
+    fn collect_c_files(path: &Path, files: &mut Vec<std::path::PathBuf>) {
+        if path.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(path) {
+                for entry in entries.flatten() {
+                    collect_c_files(&entry.path(), files);
+                }
+            }
+        } else if let Some(ext) = path.extension() {
+            if ext == "c" || ext == "h" {
+                files.push(path.to_path_buf());
+            }
+        }
     }
 }

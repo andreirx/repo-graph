@@ -257,29 +257,24 @@
 
 ## Policy Facts — PF-3 RETURN_FATE
 
-- **Duplicate key constraint violation on some C repos:** The return_fates
-  extractor produces duplicate records for the same (caller_key, line, col)
-  combination in certain C codebases. This triggers a UNIQUE constraint
-  violation during `rmap index`.
-  - **Root cause:** Not yet diagnosed. Mismatch between PF-3 extraction
-    semantics (may emit multiple facts per call site) and storage identity
-    contract (one row per `(snapshot_uid, caller_key, line, col)`). Could be:
-    same call visited through two AST paths, macro/preprocessor structure
-    causing duplicate logical capture, or classification branches emitting
-    separate facts for one call site.
-  - **Affected repos:** leveldb, duckdb, poco — any repo with C code that
-    triggers duplicate extraction.
-  - **Workaround:** None. Indexing hard-fails.
-  - **Fix priority:** High — blocks C++ tier-1 end-to-end validation on mixed
-    C/C++ repos. C++ extractor itself is shipped; this is now the validation gate.
-  - **Diagnosis path:**
-    1. Reproduce on leveldb
-    2. Log exact duplicate `(caller_key, line, col)` pairs before insert
-    3. Inspect whether duplicates differ in callee_key, callee_name, fate, evidence_json
-    4. Decide fix layer: extractor dedup, compose-layer dedup, or storage contract change
-  - **Design choice required:** If duplicates are semantically identical, dedup in
-    extractor (Option A). If duplicates are intentionally distinct facts per site,
-    widen storage uniqueness to include callee_key or fate (Option B). Do not guess.
+- **Method chain dedup:** C++ method chains like `target()->Method()` create
+  nested call_expressions with the same start position. Both inner and outer
+  calls were being classified, causing duplicate (caller_key, line, col) records
+  that violated the storage UNIQUE constraint.
+  - **Root cause:** .h files containing C++ code parsed by tree-sitter-c.
+    Method chaining creates nested call_expressions sharing the same start.
+  - **Fix:** Extractor dedup before returning results. For duplicate keys,
+    keeps the entry with the longer callee_name.
+  - **Heuristic limitation:** "Keep longer callee_name" assumes the outer method
+    in a chain is the semantically relevant callee. This is a containment
+    heuristic, not a universal truth. Counterexamples:
+    - `get_status()->code` where inner `get_status()` is the interesting call
+    - Chains where both calls have equal-length names
+    The heuristic works for observed patterns (leveldb, poco, duckdb) but may
+    misclassify edge cases. A more robust approach would track AST nesting depth
+    and prefer the outermost call_expression, but that requires additional
+    traversal state.
+  - **Validated on:** leveldb (133 files), poco (3267 files), duckdb (5109 files).
 
 ## Symbol Identity — Stable Key Contract
 
