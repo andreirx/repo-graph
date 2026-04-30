@@ -812,6 +812,11 @@ not the primary next frontier.
 Documentation files are first-class orientation evidence. The docs
 themselves are the data — not a narrow ontology of extracted facts.
 
+**Workflow target:**
+- repo-graph finds relevant docs and exposes when facts/doc context should be reviewed
+- the agent using repo-graph writes or repairs documentation in the target repo
+- repo-graph should reduce raw-file archaeology, not become the authoring system itself
+
 **Shipped:**
 - `rmap docs list` — documentation inventory surface (live discovery)
 - `rmap docs extract` — semantic hints extraction (secondary layer)

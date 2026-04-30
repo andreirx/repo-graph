@@ -13,6 +13,13 @@ The graph answers: "What exists now? What changed? What is risky? Where should I
 
 Enforcement (policies, gate verdicts, waivers) exists as available substrate, not product center.
 
+Repo-graph does not own documentation authoring for downstream repos. It owns the
+deterministic discovery substrate that lets an AI agent:
+- orient quickly
+- detect missing/stale documentation
+- write or repair docs in the target repo
+- rely on docs plus `rmap` instead of repeated raw file archaeology
+
 ## Core Business Logic Center
 
 The stable product center is **legacy-code relationship modeling**.

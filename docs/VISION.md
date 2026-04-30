@@ -111,6 +111,13 @@ The highest-value, slowest-changing substrate is not the raw code graph. It is t
 
 **4. Documentation as first-class evidence** — human-authored documentation files (README, ARCHITECTURE, design docs) are orientation artifacts, not raw material for extraction pipelines. The docs themselves are the data. Structured extraction (semantic facts) is secondary — useful for ranking and filtering, but not a replacement for reading the actual documentation. An agent's best answer to "what does this module do?" is often the relevant doc file path, not a compressed relational tuple.
 
+Repo-graph is **not** a documentation authoring system. Its role is to make documentation
+authoring and repair easier for the agent using it:
+- find what exists
+- find what is missing
+- detect when docs likely drift from facts
+- give the agent enough compact, deterministic orientation to write or repair docs in the target repo
+
 **5. Agentic quality control surface** — deterministic measurements, policy thresholds, assessments, waivers, and trend deltas that constrain agent-authored changes with arithmetic instead of vague review language. This includes complexity, size, coverage, churn, hotspot, risk, and architecture-boundary signals.
 
 The first three layers change slowly relative to code. They are expensive for an agent to reconstruct from scratch. They are cheap to maintain incrementally. And they are what an agent needs first when orienting in a codebase.
@@ -155,10 +162,12 @@ The enforcement layer (policies, assessments, gate verdicts, waivers) exists and
 
 1. Agent asks `orient` before changing code.
 2. Repo-graph returns architectural context plus current quality signals.
-3. Agent changes code.
-4. Agent asks `check` to see what changed structurally and qualitatively.
-5. Repo-graph reports deltas: new risks, worsened measurements, improved measurements.
-6. Agent decides whether to proceed based on visible facts.
+3. Agent checks documentation inventory and reads the relevant docs.
+4. If documentation is missing or stale, the agent writes or repairs docs in the target repo.
+5. Agent changes code using repo-graph facts plus compact written docs for orientation.
+6. Agent asks `check` to see what changed structurally and qualitatively.
+7. Repo-graph reports deltas: new risks, worsened measurements, improved measurements.
+8. Agent decides whether to proceed based on visible facts.
 
 The gate/policy layer is available for teams that want hard enforcement. It is not the primary interaction model.
 
@@ -395,6 +404,18 @@ When adding a capability, follow this order. Do not collapse steps.
 4. **Tests.** Unit tests for pure helpers. Integration tests for storage. End-to-end CLI tests.
 5. **Contract docs.** Update `v1-cli.txt` for CLI-visible changes. Update normative docs if the contract surface changed. Update architecture summary docs (schema, project-structure, measurement-model, versioning-model) with links back to normative docs.
 6. **Limitations and debt.** Record every assumption, every divergence from the proposal, every deferred cleanup. Do not leave these uncommitted.
+
+### Enabled External Workflow
+
+Repo-graph should enable this external agent workflow:
+
+1. Use `rmap orient` / structural queries for deterministic discovery.
+2. Use `rmap docs list` and related surfaces to find relevant existing documentation.
+3. Write missing documentation in the target repo or repair stale documentation so the repo becomes easier to re-orient later.
+4. Use compact written documentation plus repo-graph facts for focused work instead of repeating raw file archaeology.
+5. Re-index or re-query after changes to confirm facts and docs still align.
+
+Repo-graph owns the discovery substrate for this loop. The agent using repo-graph owns the actual documentation writing.
 
 ### Decision Rules
 
