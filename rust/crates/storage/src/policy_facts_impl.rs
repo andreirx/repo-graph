@@ -7,13 +7,15 @@
 //! **Schema:**
 //! - PF-1: `status_mappings` table (migration 021)
 //! - PF-2: `behavioral_markers` table (migration 022)
+//! - PF-3: `return_fates` table (migration 023)
 //!
 //! **Error handling:** All methods propagate errors through the
 //! `PolicyFactsStorageError` type defined by the policy-facts crate.
 
 use repo_graph_policy_facts::{
-    BehavioralMarker, CaseMapping, MarkerEvidence, MarkerKind, PolicyFactsStorageError,
-    PolicyFactsStorageRead, PolicyFactsStorageWrite, StatusMapping,
+    BehavioralMarker, CaseMapping, FateEvidence, FateKind, MarkerEvidence, MarkerKind,
+    PolicyFactsStorageError, PolicyFactsStorageRead, PolicyFactsStorageWrite, ReturnFate,
+    StatusMapping,
 };
 use rusqlite::params;
 use uuid::Uuid;
@@ -167,6 +169,80 @@ impl PolicyFactsStorageWrite for StorageConnection {
             .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
 
         Ok(markers.len())
+    }
+
+    fn insert_return_fates(
+        &mut self,
+        snapshot_uid: &str,
+        fates: &[ReturnFate],
+    ) -> Result<usize, PolicyFactsStorageError> {
+        // Verify snapshot exists before starting transaction.
+        let snapshot_exists: bool = self
+            .connection()
+            .query_row(
+                "SELECT 1 FROM snapshots WHERE snapshot_uid = ?",
+                [snapshot_uid],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if !snapshot_exists {
+            return Err(PolicyFactsStorageError::SnapshotNotFound(
+                snapshot_uid.to_string(),
+            ));
+        }
+
+        // Atomic replace: delete + insert in a single transaction.
+        let tx = self
+            .connection_mut()
+            .transaction()
+            .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+        // Delete existing fates for this snapshot.
+        tx.execute(
+            "DELETE FROM return_fates WHERE snapshot_uid = ?",
+            [snapshot_uid],
+        )
+        .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+        // Insert new fates.
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO return_fates (
+                        uid, snapshot_uid, callee_key, callee_name, caller_key,
+                        caller_name, file_path, line, col, fate, evidence_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                )
+                .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+            for fate in fates {
+                let uid = uuid::Uuid::new_v4().to_string();
+                let fate_str = fate.fate.to_string();
+                let evidence_json = serde_json::to_string(&fate.evidence)
+                    .map_err(|e| PolicyFactsStorageError::JsonError(e.to_string()))?;
+
+                stmt.execute(params![
+                    uid,
+                    snapshot_uid,
+                    fate.callee_key,
+                    fate.callee_name,
+                    fate.caller_key,
+                    fate.caller_name,
+                    fate.file_path,
+                    fate.line,
+                    fate.column,
+                    fate_str,
+                    evidence_json,
+                ])
+                .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+            }
+        }
+
+        tx.commit()
+            .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+        Ok(fates.len())
     }
 }
 
@@ -376,13 +452,132 @@ impl PolicyFactsStorageRead for StorageConnection {
 
         Ok(count as usize)
     }
+
+    fn query_return_fates(
+        &self,
+        snapshot_uid: &str,
+        file_filter: Option<&str>,
+        callee_filter: Option<&str>,
+        fate_filter: Option<FateKind>,
+    ) -> Result<Vec<ReturnFate>, PolicyFactsStorageError> {
+        let conn = self.connection();
+
+        // Build query dynamically based on filters
+        let mut sql = String::from(
+            "SELECT callee_key, callee_name, caller_key, caller_name, file_path,
+                    line, col, fate, evidence_json
+             FROM return_fates
+             WHERE snapshot_uid = ?",
+        );
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> =
+            vec![Box::new(snapshot_uid.to_string())];
+
+        if let Some(prefix) = file_filter {
+            sql.push_str(" AND file_path LIKE ?");
+            params.push(Box::new(format!("{}%", prefix)));
+        }
+
+        if let Some(callee) = callee_filter {
+            sql.push_str(" AND callee_name = ?");
+            params.push(Box::new(callee.to_string()));
+        }
+
+        if let Some(fate) = fate_filter {
+            sql.push_str(" AND fate = ?");
+            params.push(Box::new(fate.to_string()));
+        }
+
+        sql.push_str(" ORDER BY file_path, line, col");
+
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+
+        let rows = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                let callee_key: Option<String> = row.get(0)?;
+                let callee_name: String = row.get(1)?;
+                let caller_key: String = row.get(2)?;
+                let caller_name: String = row.get(3)?;
+                let file_path: String = row.get(4)?;
+                let line: u32 = row.get(5)?;
+                let column: u32 = row.get(6)?;
+                let fate_str: String = row.get(7)?;
+                let evidence_json: String = row.get(8)?;
+
+                Ok((
+                    callee_key,
+                    callee_name,
+                    caller_key,
+                    caller_name,
+                    file_path,
+                    line,
+                    column,
+                    fate_str,
+                    evidence_json,
+                ))
+            })
+            .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+        let mut results = Vec::new();
+        for row_result in rows {
+            let (
+                callee_key,
+                callee_name,
+                caller_key,
+                caller_name,
+                file_path,
+                line,
+                column,
+                fate_str,
+                evidence_json,
+            ) = row_result.map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+            let fate: FateKind = fate_str
+                .parse()
+                .map_err(|e: String| PolicyFactsStorageError::JsonError(e))?;
+
+            let evidence: FateEvidence = serde_json::from_str(&evidence_json)
+                .map_err(|e| PolicyFactsStorageError::JsonError(e.to_string()))?;
+
+            results.push(ReturnFate {
+                callee_key,
+                callee_name,
+                caller_key,
+                caller_name,
+                file_path,
+                line,
+                column,
+                fate,
+                evidence,
+            });
+        }
+
+        Ok(results)
+    }
+
+    fn count_return_fates(&self, snapshot_uid: &str) -> Result<usize, PolicyFactsStorageError> {
+        let conn = self.connection();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM return_fates WHERE snapshot_uid = ?",
+                [snapshot_uid],
+                |row| row.get(0),
+            )
+            .map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+
+        Ok(count as usize)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::StorageConnection;
-    use repo_graph_policy_facts::{BehavioralMarker, MarkerKind};
+    use repo_graph_policy_facts::{BehavioralMarker, FateKind, MarkerKind, ReturnFate};
 
     fn create_test_db() -> StorageConnection {
         let mut conn = StorageConnection::open_in_memory().unwrap();
@@ -811,5 +1006,257 @@ mod tests {
     fn count_behavioral_markers_empty() {
         let conn = create_test_db();
         assert_eq!(conn.count_behavioral_markers("snap-1").unwrap(), 0);
+    }
+
+    // =========================================================================
+    // RETURN_FATE tests
+    // =========================================================================
+
+    #[test]
+    fn insert_and_query_return_fates() {
+        use repo_graph_policy_facts::FateEvidence;
+
+        let mut conn = create_test_db();
+
+        let fates = vec![
+            ReturnFate {
+                callee_key: None,
+                callee_name: "get_status".to_string(),
+                caller_key: "test-repo:file.c#main:SYMBOL:FUNCTION".to_string(),
+                caller_name: "main".to_string(),
+                file_path: "file.c".to_string(),
+                line: 10,
+                column: 5,
+                fate: FateKind::Checked,
+                evidence: FateEvidence::Checked {
+                    check_kind: "if".to_string(),
+                    operator: Some("==".to_string()),
+                    compared_to: Some("OK".to_string()),
+                },
+            },
+            ReturnFate {
+                callee_key: Some("test-repo:lib.c#helper:SYMBOL:FUNCTION".to_string()),
+                callee_name: "helper".to_string(),
+                caller_key: "test-repo:file.c#main:SYMBOL:FUNCTION".to_string(),
+                caller_name: "main".to_string(),
+                file_path: "file.c".to_string(),
+                line: 20,
+                column: 8,
+                fate: FateKind::Stored,
+                evidence: FateEvidence::Stored {
+                    variable_name: "result".to_string(),
+                    immediately_checked: false,
+                },
+            },
+        ];
+
+        let count = conn.insert_return_fates("snap-1", &fates).unwrap();
+        assert_eq!(count, 2);
+
+        let results = conn
+            .query_return_fates("snap-1", None, None, None)
+            .unwrap();
+        assert_eq!(results.len(), 2);
+
+        // Results should be sorted by file_path, line, col
+        assert_eq!(results[0].line, 10);
+        assert_eq!(results[1].line, 20);
+    }
+
+    #[test]
+    fn query_return_fates_with_fate_filter() {
+        use repo_graph_policy_facts::FateEvidence;
+
+        let mut conn = create_test_db();
+
+        let fates = vec![
+            ReturnFate {
+                callee_key: None,
+                callee_name: "func1".to_string(),
+                caller_key: "test:file.c#caller:SYMBOL:FUNCTION".to_string(),
+                caller_name: "caller".to_string(),
+                file_path: "file.c".to_string(),
+                line: 10,
+                column: 5,
+                fate: FateKind::Ignored,
+                evidence: FateEvidence::Ignored {
+                    explicit_void_cast: false,
+                },
+            },
+            ReturnFate {
+                callee_key: None,
+                callee_name: "func2".to_string(),
+                caller_key: "test:file.c#caller:SYMBOL:FUNCTION".to_string(),
+                caller_name: "caller".to_string(),
+                file_path: "file.c".to_string(),
+                line: 20,
+                column: 5,
+                fate: FateKind::Stored,
+                evidence: FateEvidence::Stored {
+                    variable_name: "x".to_string(),
+                    immediately_checked: false,
+                },
+            },
+        ];
+
+        conn.insert_return_fates("snap-1", &fates).unwrap();
+
+        // Filter by IGNORED
+        let ignored = conn
+            .query_return_fates("snap-1", None, None, Some(FateKind::Ignored))
+            .unwrap();
+        assert_eq!(ignored.len(), 1);
+        assert_eq!(ignored[0].fate, FateKind::Ignored);
+
+        // Filter by STORED
+        let stored = conn
+            .query_return_fates("snap-1", None, None, Some(FateKind::Stored))
+            .unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].fate, FateKind::Stored);
+    }
+
+    #[test]
+    fn query_return_fates_with_callee_filter() {
+        use repo_graph_policy_facts::FateEvidence;
+
+        let mut conn = create_test_db();
+
+        let fates = vec![
+            ReturnFate {
+                callee_key: None,
+                callee_name: "get_status".to_string(),
+                caller_key: "test:file.c#caller:SYMBOL:FUNCTION".to_string(),
+                caller_name: "caller".to_string(),
+                file_path: "file.c".to_string(),
+                line: 10,
+                column: 5,
+                fate: FateKind::Checked,
+                evidence: FateEvidence::Checked {
+                    check_kind: "if".to_string(),
+                    operator: None,
+                    compared_to: None,
+                },
+            },
+            ReturnFate {
+                callee_key: None,
+                callee_name: "do_work".to_string(),
+                caller_key: "test:file.c#caller:SYMBOL:FUNCTION".to_string(),
+                caller_name: "caller".to_string(),
+                file_path: "file.c".to_string(),
+                line: 20,
+                column: 5,
+                fate: FateKind::Ignored,
+                evidence: FateEvidence::Ignored {
+                    explicit_void_cast: true,
+                },
+            },
+        ];
+
+        conn.insert_return_fates("snap-1", &fates).unwrap();
+
+        // Filter by callee name
+        let results = conn
+            .query_return_fates("snap-1", None, Some("get_status"), None)
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].callee_name, "get_status");
+    }
+
+    #[test]
+    fn insert_return_fates_replaces_existing() {
+        use repo_graph_policy_facts::FateEvidence;
+
+        let mut conn = create_test_db();
+
+        let fates1 = vec![ReturnFate {
+            callee_key: None,
+            callee_name: "old_func".to_string(),
+            caller_key: "test:file.c#caller:SYMBOL:FUNCTION".to_string(),
+            caller_name: "caller".to_string(),
+            file_path: "file.c".to_string(),
+            line: 10,
+            column: 5,
+            fate: FateKind::Ignored,
+            evidence: FateEvidence::Ignored {
+                explicit_void_cast: false,
+            },
+        }];
+
+        conn.insert_return_fates("snap-1", &fates1).unwrap();
+        assert_eq!(conn.count_return_fates("snap-1").unwrap(), 1);
+
+        // Insert new set - should replace
+        let fates2 = vec![
+            ReturnFate {
+                callee_key: None,
+                callee_name: "new_func1".to_string(),
+                caller_key: "test:file.c#caller:SYMBOL:FUNCTION".to_string(),
+                caller_name: "caller".to_string(),
+                file_path: "file.c".to_string(),
+                line: 10,
+                column: 5,
+                fate: FateKind::Stored,
+                evidence: FateEvidence::Stored {
+                    variable_name: "x".to_string(),
+                    immediately_checked: false,
+                },
+            },
+            ReturnFate {
+                callee_key: None,
+                callee_name: "new_func2".to_string(),
+                caller_key: "test:file.c#caller:SYMBOL:FUNCTION".to_string(),
+                caller_name: "caller".to_string(),
+                file_path: "file.c".to_string(),
+                line: 20,
+                column: 5,
+                fate: FateKind::Propagated,
+                evidence: FateEvidence::Propagated {
+                    wrapped: false,
+                    wrapper: None,
+                },
+            },
+        ];
+
+        conn.insert_return_fates("snap-1", &fates2).unwrap();
+        assert_eq!(conn.count_return_fates("snap-1").unwrap(), 2);
+
+        let results = conn
+            .query_return_fates("snap-1", None, None, None)
+            .unwrap();
+        assert!(results.iter().all(|f| f.callee_name != "old_func"));
+    }
+
+    #[test]
+    fn insert_return_fates_fails_for_missing_snapshot() {
+        use repo_graph_policy_facts::FateEvidence;
+
+        let mut conn = create_test_db();
+
+        let fates = vec![ReturnFate {
+            callee_key: None,
+            callee_name: "func".to_string(),
+            caller_key: "test:file.c#caller:SYMBOL:FUNCTION".to_string(),
+            caller_name: "caller".to_string(),
+            file_path: "file.c".to_string(),
+            line: 10,
+            column: 5,
+            fate: FateKind::Ignored,
+            evidence: FateEvidence::Ignored {
+                explicit_void_cast: false,
+            },
+        }];
+
+        let result = conn.insert_return_fates("nonexistent", &fates);
+        assert!(matches!(
+            result,
+            Err(PolicyFactsStorageError::SnapshotNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn count_return_fates_empty() {
+        let conn = create_test_db();
+        assert_eq!(conn.count_return_fates("snap-1").unwrap(), 0);
     }
 }

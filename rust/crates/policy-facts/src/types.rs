@@ -2,6 +2,7 @@
 //!
 //! PF-1: STATUS_MAPPING
 //! PF-2: BEHAVIORAL_MARKER (RETRY_LOOP, RESUME_OFFSET)
+//! PF-3: RETURN_FATE (IGNORED, CHECKED, PROPAGATED, TRANSFORMED, STORED)
 
 use serde::{Deserialize, Serialize};
 
@@ -184,6 +185,163 @@ impl std::str::FromStr for MarkerKind {
             "RETRY_LOOP" => Ok(MarkerKind::RetryLoop),
             "RESUME_OFFSET" => Ok(MarkerKind::ResumeOffset),
             _ => Err(format!("unknown marker kind: {}", s)),
+        }
+    }
+}
+
+// =============================================================================
+// PF-3: RETURN_FATE
+// =============================================================================
+
+/// What happens to a function's return value at a specific call site.
+///
+/// Extracted from C call expressions by analyzing the immediate AST context.
+/// Classification uses innermost-context-first precedence: assignment contexts
+/// take priority over condition contexts.
+///
+/// See `docs/slices/pf-3-return-fate.md` for extraction rules.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReturnFate {
+    /// Stable key of the called function (callee).
+    /// None if callee is unresolved (e.g., function pointer, vtable call).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub callee_key: Option<String>,
+
+    /// Callee function name as it appears in source.
+    pub callee_name: String,
+
+    /// Stable key of the calling function (caller).
+    /// Format: `{repo}:{file}#{name}:SYMBOL:FUNCTION`
+    pub caller_key: String,
+
+    /// Caller function name (for display).
+    pub caller_name: String,
+
+    /// Source file path (repo-relative).
+    pub file_path: String,
+
+    /// Line number of the call expression (1-indexed).
+    pub line: u32,
+
+    /// Column of the call expression start (0-indexed).
+    pub column: u32,
+
+    /// Classification of what happens to the return value.
+    pub fate: FateKind,
+
+    /// Additional context depending on fate kind.
+    pub evidence: FateEvidence,
+}
+
+/// Classification of what happens to a function's return value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum FateKind {
+    /// Return value discarded. Call is a statement expression.
+    Ignored,
+
+    /// Return value immediately tested in if/switch/ternary/while/for condition.
+    Checked,
+
+    /// Return value directly returned from caller.
+    Propagated,
+
+    /// Return value passed to another function call as argument.
+    Transformed,
+
+    /// Return value assigned to a variable (fate unknown without dataflow).
+    Stored,
+}
+
+/// Kind-specific evidence for a return fate classification.
+///
+/// Tagged union: serializes with a `type` discriminator field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum FateEvidence {
+    /// Evidence for IGNORED fate.
+    #[serde(rename = "ignored")]
+    Ignored {
+        /// True if the call is cast to void: `(void)func()`.
+        explicit_void_cast: bool,
+    },
+
+    /// Evidence for CHECKED fate.
+    #[serde(rename = "checked")]
+    Checked {
+        /// The kind of check: "if", "switch", "ternary", "while", "for".
+        check_kind: String,
+
+        /// The comparison operator if simple binary check.
+        /// e.g., "==", "!=", "<", ">=". None if complex expression.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        operator: Option<String>,
+
+        /// The compared-to value if simple literal or identifier.
+        /// e.g., "0", "NULL", "CHANNEL_OK". None if complex.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        compared_to: Option<String>,
+    },
+
+    /// Evidence for PROPAGATED fate.
+    #[serde(rename = "propagated")]
+    Propagated {
+        /// True if wrapped in a transformation before return.
+        /// e.g., `return map_result(func())` vs `return func()`.
+        wrapped: bool,
+
+        /// Wrapper function name if wrapped.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        wrapper: Option<String>,
+    },
+
+    /// Evidence for TRANSFORMED fate.
+    #[serde(rename = "transformed")]
+    Transformed {
+        /// The function receiving this result as an argument.
+        receiver_name: String,
+
+        /// Which argument position (0-indexed).
+        argument_index: u32,
+    },
+
+    /// Evidence for STORED fate.
+    #[serde(rename = "stored")]
+    Stored {
+        /// Variable name receiving the assignment.
+        variable_name: String,
+
+        /// True if assignment is inside a condition expression.
+        /// e.g., `if ((x = func()) != OK)` -> immediately_checked = true.
+        /// Simple assignment `x = func();` -> immediately_checked = false.
+        /// Does NOT track next-statement usage (requires dataflow).
+        immediately_checked: bool,
+    },
+}
+
+impl std::fmt::Display for FateKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FateKind::Ignored => write!(f, "IGNORED"),
+            FateKind::Checked => write!(f, "CHECKED"),
+            FateKind::Propagated => write!(f, "PROPAGATED"),
+            FateKind::Transformed => write!(f, "TRANSFORMED"),
+            FateKind::Stored => write!(f, "STORED"),
+        }
+    }
+}
+
+impl std::str::FromStr for FateKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_uppercase().as_str() {
+            "IGNORED" => Ok(FateKind::Ignored),
+            "CHECKED" => Ok(FateKind::Checked),
+            "PROPAGATED" => Ok(FateKind::Propagated),
+            "TRANSFORMED" => Ok(FateKind::Transformed),
+            "STORED" => Ok(FateKind::Stored),
+            _ => Err(format!("unknown fate kind: {}", s)),
         }
     }
 }
@@ -376,5 +534,207 @@ mod tests {
         );
 
         assert!("UNKNOWN".parse::<MarkerKind>().is_err());
+    }
+
+    // =========================================================================
+    // PF-3: RETURN_FATE tests
+    // =========================================================================
+
+    #[test]
+    fn return_fate_ignored_serializes_correctly() {
+        let fate = ReturnFate {
+            callee_key: None, // unresolved
+            callee_name: "install_update".to_string(),
+            caller_key: "swupdate:suricatta/suricatta.c#start_suricatta:SYMBOL:FUNCTION".to_string(),
+            caller_name: "start_suricatta".to_string(),
+            file_path: "suricatta/suricatta.c".to_string(),
+            line: 351,
+            column: 4,
+            fate: FateKind::Ignored,
+            evidence: FateEvidence::Ignored {
+                explicit_void_cast: false,
+            },
+        };
+
+        let json = serde_json::to_string_pretty(&fate).unwrap();
+        assert!(json.contains("\"fate\": \"IGNORED\""));
+        assert!(json.contains("\"type\": \"ignored\""));
+        assert!(json.contains("\"explicit_void_cast\": false"));
+        // callee_key should be omitted when None
+        assert!(!json.contains("callee_key"));
+
+        // Round-trip
+        let parsed: ReturnFate = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, fate);
+    }
+
+    #[test]
+    fn return_fate_checked_serializes_correctly() {
+        let fate = ReturnFate {
+            callee_key: Some(
+                "swupdate:corelib/channel_curl.c#channel_get_file:SYMBOL:FUNCTION".to_string(),
+            ),
+            callee_name: "channel_get_file".to_string(),
+            caller_key: "swupdate:corelib/downloader.c#download_from_url:SYMBOL:FUNCTION"
+                .to_string(),
+            caller_name: "download_from_url".to_string(),
+            file_path: "corelib/downloader.c".to_string(),
+            line: 234,
+            column: 12,
+            fate: FateKind::Checked,
+            evidence: FateEvidence::Checked {
+                check_kind: "if".to_string(),
+                operator: Some("!=".to_string()),
+                compared_to: Some("CHANNEL_OK".to_string()),
+            },
+        };
+
+        let json = serde_json::to_string_pretty(&fate).unwrap();
+        assert!(json.contains("\"fate\": \"CHECKED\""));
+        assert!(json.contains("\"check_kind\": \"if\""));
+        assert!(json.contains("\"operator\": \"!=\""));
+        assert!(json.contains("\"compared_to\": \"CHANNEL_OK\""));
+        assert!(json.contains("callee_key")); // present when Some
+
+        // Round-trip
+        let parsed: ReturnFate = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, fate);
+    }
+
+    #[test]
+    fn return_fate_propagated_serializes_correctly() {
+        let fate = ReturnFate {
+            callee_key: Some(
+                "swupdate:corelib/server_utils.c#map_channel_retcode:SYMBOL:FUNCTION".to_string(),
+            ),
+            callee_name: "map_channel_retcode".to_string(),
+            caller_key: "swupdate:suricatta/server_hawkbit.c#check_for_update:SYMBOL:FUNCTION"
+                .to_string(),
+            caller_name: "check_for_update".to_string(),
+            file_path: "suricatta/server_hawkbit.c".to_string(),
+            line: 567,
+            column: 9,
+            fate: FateKind::Propagated,
+            evidence: FateEvidence::Propagated {
+                wrapped: false,
+                wrapper: None,
+            },
+        };
+
+        let json = serde_json::to_string_pretty(&fate).unwrap();
+        assert!(json.contains("\"fate\": \"PROPAGATED\""));
+        assert!(json.contains("\"wrapped\": false"));
+        // wrapper should be omitted when None
+        assert!(!json.contains("wrapper"));
+
+        // Round-trip
+        let parsed: ReturnFate = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, fate);
+    }
+
+    #[test]
+    fn return_fate_transformed_serializes_correctly() {
+        let fate = ReturnFate {
+            callee_key: None,
+            callee_name: "get_status".to_string(),
+            caller_key: "test:file.c#caller:SYMBOL:FUNCTION".to_string(),
+            caller_name: "caller".to_string(),
+            file_path: "file.c".to_string(),
+            line: 100,
+            column: 20,
+            fate: FateKind::Transformed,
+            evidence: FateEvidence::Transformed {
+                receiver_name: "process_result".to_string(),
+                argument_index: 0,
+            },
+        };
+
+        let json = serde_json::to_string_pretty(&fate).unwrap();
+        assert!(json.contains("\"fate\": \"TRANSFORMED\""));
+        assert!(json.contains("\"receiver_name\": \"process_result\""));
+        assert!(json.contains("\"argument_index\": 0"));
+
+        // Round-trip
+        let parsed: ReturnFate = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, fate);
+    }
+
+    #[test]
+    fn return_fate_stored_serializes_correctly() {
+        let fate = ReturnFate {
+            callee_key: None,
+            callee_name: "curl_easy_perform".to_string(),
+            caller_key: "swupdate:corelib/channel_curl.c#channel_get_file:SYMBOL:FUNCTION"
+                .to_string(),
+            caller_name: "channel_get_file".to_string(),
+            file_path: "corelib/channel_curl.c".to_string(),
+            line: 1455,
+            column: 10,
+            fate: FateKind::Stored,
+            evidence: FateEvidence::Stored {
+                variable_name: "curlrc".to_string(),
+                immediately_checked: false,
+            },
+        };
+
+        let json = serde_json::to_string_pretty(&fate).unwrap();
+        assert!(json.contains("\"fate\": \"STORED\""));
+        assert!(json.contains("\"variable_name\": \"curlrc\""));
+        assert!(json.contains("\"immediately_checked\": false"));
+
+        // Round-trip
+        let parsed: ReturnFate = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, fate);
+    }
+
+    #[test]
+    fn return_fate_stored_immediately_checked() {
+        // Test the compound-assignment-in-condition pattern
+        // if ((result = func()) != OK)
+        let fate = ReturnFate {
+            callee_key: None,
+            callee_name: "map_channel_retcode".to_string(),
+            caller_key: "test:file.c#caller:SYMBOL:FUNCTION".to_string(),
+            caller_name: "caller".to_string(),
+            file_path: "file.c".to_string(),
+            line: 577,
+            column: 8,
+            fate: FateKind::Stored,
+            evidence: FateEvidence::Stored {
+                variable_name: "result".to_string(),
+                immediately_checked: true,
+            },
+        };
+
+        let json = serde_json::to_string_pretty(&fate).unwrap();
+        assert!(json.contains("\"immediately_checked\": true"));
+
+        // Round-trip
+        let parsed: ReturnFate = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, fate);
+    }
+
+    #[test]
+    fn fate_kind_display_and_parse() {
+        assert_eq!(format!("{}", FateKind::Ignored), "IGNORED");
+        assert_eq!(format!("{}", FateKind::Checked), "CHECKED");
+        assert_eq!(format!("{}", FateKind::Propagated), "PROPAGATED");
+        assert_eq!(format!("{}", FateKind::Transformed), "TRANSFORMED");
+        assert_eq!(format!("{}", FateKind::Stored), "STORED");
+
+        assert_eq!("IGNORED".parse::<FateKind>().unwrap(), FateKind::Ignored);
+        assert_eq!("ignored".parse::<FateKind>().unwrap(), FateKind::Ignored);
+        assert_eq!("Checked".parse::<FateKind>().unwrap(), FateKind::Checked);
+        assert_eq!(
+            "PROPAGATED".parse::<FateKind>().unwrap(),
+            FateKind::Propagated
+        );
+        assert_eq!(
+            "transformed".parse::<FateKind>().unwrap(),
+            FateKind::Transformed
+        );
+        assert_eq!("STORED".parse::<FateKind>().unwrap(), FateKind::Stored);
+
+        assert!("UNKNOWN".parse::<FateKind>().is_err());
     }
 }

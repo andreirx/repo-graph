@@ -16,11 +16,21 @@
 //! - RETRY_LOOP: loops with sleep/delay that retry operations
 //! - RESUME_OFFSET: curl CURLOPT_RESUME_FROM* patterns
 //!
+//! ## PF-3: RETURN_FATE
+//!
+//! Return value fate classification at call sites:
+//! - IGNORED: call result discarded
+//! - CHECKED: result tested in condition
+//! - PROPAGATED: result returned from caller
+//! - TRANSFORMED: result passed to another function
+//! - STORED: result assigned to variable
+//!
 //! ## Design
 //!
 //! See `docs/design/policy-facts-support-module.md` for architecture.
 //! See `docs/slices/pf-1-status-mapping.md` for STATUS_MAPPING spec.
 //! See `docs/slices/pf-2-behavioral-marker.md` for BEHAVIORAL_MARKER spec.
+//! See `docs/slices/pf-3-return-fate.md` for RETURN_FATE spec.
 //!
 //! ## Usage
 //!
@@ -36,4 +46,7 @@ pub mod extractors;
 pub mod storage_port;
 
 pub use storage_port::{PolicyFactsStorageError, PolicyFactsStorageRead, PolicyFactsStorageWrite};
-pub use types::{BehavioralMarker, CaseMapping, MarkerEvidence, MarkerKind, StatusMapping};
+pub use types::{
+    BehavioralMarker, CaseMapping, FateEvidence, FateKind, MarkerEvidence, MarkerKind,
+    ReturnFate, StatusMapping,
+};

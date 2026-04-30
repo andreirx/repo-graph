@@ -3,6 +3,7 @@
 //! Defines the port traits for reading and writing policy-facts:
 //! - STATUS_MAPPING (PF-1)
 //! - BEHAVIORAL_MARKER (PF-2)
+//! - RETURN_FATE (PF-3)
 //!
 //! The storage adapter crate implements these traits.
 //!
@@ -10,7 +11,7 @@
 //! defines the port, the adapter crate (storage) implements it.
 //! Dependency direction: adapter → domain (outer → inner).
 
-use crate::types::{BehavioralMarker, MarkerKind, StatusMapping};
+use crate::types::{BehavioralMarker, FateKind, MarkerKind, ReturnFate, StatusMapping};
 
 /// Error type for policy-facts storage operations.
 ///
@@ -90,6 +91,23 @@ pub trait PolicyFactsStorageWrite {
         snapshot_uid: &str,
         markers: &[BehavioralMarker],
     ) -> Result<usize, PolicyFactsStorageError>;
+
+    /// Insert RETURN_FATE facts for a snapshot.
+    ///
+    /// Replaces any existing RETURN_FATE facts for the same snapshot.
+    /// Returns the count of facts inserted.
+    ///
+    /// # Arguments
+    /// * `snapshot_uid` - Snapshot identity
+    /// * `fates` - Extracted ReturnFate facts
+    ///
+    /// # Errors
+    /// Returns error if the snapshot doesn't exist or database operation fails.
+    fn insert_return_fates(
+        &mut self,
+        snapshot_uid: &str,
+        fates: &[ReturnFate],
+    ) -> Result<usize, PolicyFactsStorageError>;
 }
 
 /// Port trait for reading policy-facts from storage.
@@ -145,6 +163,35 @@ pub trait PolicyFactsStorageRead {
     ///
     /// More efficient than query + len when only count is needed.
     fn count_behavioral_markers(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<usize, PolicyFactsStorageError>;
+
+    /// Query RETURN_FATE facts for a snapshot.
+    ///
+    /// # Arguments
+    /// * `snapshot_uid` - Snapshot identity
+    /// * `file_filter` - Optional file path prefix filter
+    /// * `callee_filter` - Optional callee name filter
+    /// * `fate_filter` - Optional fate kind filter
+    ///
+    /// # Returns
+    /// Vector of ReturnFate facts, sorted by file_path then line.
+    ///
+    /// # Errors
+    /// Returns error if database operation fails.
+    fn query_return_fates(
+        &self,
+        snapshot_uid: &str,
+        file_filter: Option<&str>,
+        callee_filter: Option<&str>,
+        fate_filter: Option<FateKind>,
+    ) -> Result<Vec<ReturnFate>, PolicyFactsStorageError>;
+
+    /// Count RETURN_FATE facts for a snapshot.
+    ///
+    /// More efficient than query + len when only count is needed.
+    fn count_return_fates(
         &self,
         snapshot_uid: &str,
     ) -> Result<usize, PolicyFactsStorageError>;

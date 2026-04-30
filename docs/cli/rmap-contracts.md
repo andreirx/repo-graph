@@ -212,19 +212,32 @@ automatically during `rmap index` / `rmap refresh`.
 **Usage:**
 
 ```
-rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER] [--file <path>]
+rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER|RETURN_FATE] [--file <path>] [--callee <name>] [--fate <kind>]
 ```
 
 **Supported kinds:**
 
 - `STATUS_MAPPING` (default): Status/error code translation functions.
   Functions that switch on an input status and return an output status.
-  PF-1 scope. See `docs/slices/pf-1-status-mapping.md`.
+  PF-1 scope. See `docs/shipped/policy-facts/pf-1-status-mapping.md`.
 
 - `BEHAVIORAL_MARKER`: Behavioral patterns in control flow.
   - `RETRY_LOOP`: loops with sleep/delay calls (retry with backoff)
   - `RESUME_OFFSET`: curl `CURLOPT_RESUME_FROM*` patterns
-  PF-2 scope. See `docs/slices/pf-2-behavioral-marker.md`.
+  PF-2 scope. See `docs/shipped/policy-facts/pf-2-behavioral-marker.md`.
+
+- `RETURN_FATE`: What happens to function return values at each call site.
+  - `IGNORED`: return value discarded
+  - `CHECKED`: return value tested in condition
+  - `PROPAGATED`: return value returned from caller
+  - `TRANSFORMED`: return value passed to another function
+  - `STORED`: return value assigned to variable
+  PF-3 scope. See `docs/shipped/policy-facts/pf-3-return-fate.md`.
+
+**Filters (RETURN_FATE only):**
+
+- `--callee <name>`: filter by callee function name
+- `--fate <kind>`: filter by fate kind (IGNORED, CHECKED, PROPAGATED, TRANSFORMED, STORED)
 
 **Output (STATUS_MAPPING):**
 
@@ -295,6 +308,61 @@ rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER] [--fi
   "count": 2
 }
 ```
+
+**Output (RETURN_FATE):**
+
+```json
+{
+  "repo": "swupdate",
+  "snapshot": "swupdate/2026-04-29T...",
+  "kind": "RETURN_FATE",
+  "facts": [
+    {
+      "callee_key": "swupdate:corelib/channel_curl.c#channel_map_curl_error:SYMBOL:FUNCTION",
+      "callee_name": "channel_map_curl_error",
+      "caller_key": "swupdate:corelib/channel_curl.c#channel_get_file:SYMBOL:FUNCTION",
+      "caller_name": "channel_get_file",
+      "file_path": "corelib/channel_curl.c",
+      "line": 1456,
+      "column": 12,
+      "fate": "STORED",
+      "evidence": {
+        "type": "stored",
+        "variable_name": "result",
+        "immediately_checked": false
+      }
+    },
+    {
+      "callee_key": null,
+      "callee_name": "install_update",
+      "caller_key": "swupdate:suricatta/suricatta.c#start_suricatta:SYMBOL:FUNCTION",
+      "caller_name": "start_suricatta",
+      "file_path": "suricatta/suricatta.c",
+      "line": 351,
+      "column": 4,
+      "fate": "IGNORED",
+      "evidence": {
+        "type": "ignored",
+        "explicit_void_cast": false
+      }
+    }
+  ],
+  "count": 2,
+  "summary": {
+    "by_fate": {
+      "CHECKED": 69,
+      "IGNORED": 126,
+      "PROPAGATED": 7,
+      "STORED": 79,
+      "TRANSFORMED": 15
+    }
+  }
+}
+```
+
+Note: `callee_key` is resolved for same-file direct calls. Cross-file and vtable
+calls show `null`. The `summary.by_fate` counts are sorted alphabetically
+(deterministic output).
 
 **Exit codes:**
 

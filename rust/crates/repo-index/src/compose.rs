@@ -21,6 +21,7 @@ use repo_graph_classification::spring_liveness::{classify_spring_liveness, Sprin
 use repo_graph_classification::types::{PackageDependencySet, TsconfigAliases};
 use repo_graph_policy_facts::{
     extractors::behavioral_marker::extract_behavioral_markers,
+    extractors::return_fate::extract_return_fates,
     extractors::status_mapping::extract_status_mappings,
     PolicyFactsStorageWrite,
 };
@@ -414,11 +415,11 @@ fn persist_spring_liveness_inferences(
 
 // ── Post-index policy-facts extraction ───────────────────────────
 
-/// Extract and persist STATUS_MAPPING policy facts from C files.
+/// Extract and persist policy facts from C files.
 ///
-/// PF-1 TEMPORARY postpass: Re-parses C files after extraction to
-/// extract STATUS_MAPPING facts. This duplicates the tree-sitter
-/// parsing work already done by the C extractor.
+/// TEMPORARY postpass: Re-parses C files after extraction to
+/// extract policy facts. This duplicates the tree-sitter parsing
+/// work already done by the C extractor.
 ///
 /// **TECH DEBT:** This re-parse approach is explicitly temporary.
 /// The target architecture is extraction-time integration where
@@ -426,7 +427,7 @@ fn persist_spring_liveness_inferences(
 /// `docs/TECH-DEBT.md` entry "PF-1 temporary re-parse postpass".
 ///
 /// Returns the total number of policy facts persisted
-/// (STATUS_MAPPING + BEHAVIORAL_MARKER).
+/// (STATUS_MAPPING + BEHAVIORAL_MARKER + RETURN_FATE).
 fn persist_policy_facts(
 	storage: &mut StorageConnection,
 	repo_uid: &str,
@@ -442,12 +443,14 @@ fn persist_policy_facts(
 
 	let mut all_mappings = Vec::new();
 	let mut all_markers = Vec::new();
+	let mut all_fates = Vec::new();
 
 	for file in file_inputs {
 		// Policy-facts scope: C files only (.c and .h).
 		// C++ (.cpp, .hpp, .cc, .cxx) is explicitly out of scope.
 		// See docs/slices/pf-1-status-mapping.md "What PF-1 Does NOT Include".
 		// See docs/slices/pf-2-behavioral-marker.md "Non-Goals".
+		// See docs/slices/pf-3-return-fate.md "Non-Goals".
 		let is_c_file = file.rel_path.ends_with(".c") || file.rel_path.ends_with(".h");
 
 		if !is_c_file {
@@ -477,6 +480,15 @@ fn persist_policy_facts(
 			repo_uid,
 		);
 		all_markers.extend(markers);
+
+		// PF-3: Extract RETURN_FATE facts.
+		let fates = extract_return_fates(
+			&tree,
+			file.content.as_bytes(),
+			&file.rel_path,
+			repo_uid,
+		);
+		all_fates.extend(fates);
 	}
 
 	let mut total_count = 0;
@@ -493,6 +505,14 @@ fn persist_policy_facts(
 	if !all_markers.is_empty() {
 		let count = storage
 			.insert_behavioral_markers(snapshot_uid, &all_markers)
+			.map_err(|e| ComposeError::Index(format!("policy-facts storage: {}", e)))?;
+		total_count += count;
+	}
+
+	// Persist RETURN_FATE facts.
+	if !all_fates.is_empty() {
+		let count = storage
+			.insert_return_fates(snapshot_uid, &all_fates)
 			.map_err(|e| ComposeError::Index(format!("policy-facts storage: {}", e)))?;
 		total_count += count;
 	}

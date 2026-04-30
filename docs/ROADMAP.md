@@ -4,10 +4,30 @@ Operational product roadmap. Ordered by engineering priority, not aspiration.
 See `docs/VISION.md` for long-term direction and horizon model.
 See `docs/TECH-DEBT.md` for known limitations and test gaps.
 
+## Strategic center
+
+The stable product center is **legacy-code relationship discovery**.
+
+Repo-graph exists to model the relationships that determine how legacy systems can be
+understood and changed safely:
+- seams and enabling points
+- sensing and separation barriers
+- module and boundary relationships
+- state/resource touchpoints
+- policy-propagation paths
+- testability constraints
+- migration/replacement relationships
+
+This is Feathers-driven product logic. Multi-language support exists to feed this
+relationship substrate. It is not a collection of unrelated per-language extractors.
+
 ## Current state (as of last commit)
 
 - **1464 tests** across 78 test files.
-- **Languages:** TypeScript/JavaScript + Rust + Java + Python + C/C++. Five-extractor indexer.
+- **Product language direction:** TypeScript/JavaScript + Rust + Python + Java + C + C++ are the
+  primary stack. Later: Go, Scala, Kotlin.
+- **Rust primary-path language maturity:** TS/JS, Rust, Java, Python, and C are operational in
+  `rmap`. C++ remains strategically important but not yet at equivalent Rust-primary maturity.
 - **Enrichment:** TS (~81%), Rust (~85%), Java (operational but fragile). All three wired.
 - **Classifier version:** 6.
   - v4: language-aware imports
@@ -28,6 +48,8 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   (`rmap declare quality-policy`, `rmap assess`). Missing discovery layer:
   snapshot-to-snapshot quality diff, quality delta surfacing in `orient`/`check`,
   risk prioritization combining complexity with churn/coverage/boundary violations.
+  LOC/SLOC-style size measurement is still missing from the surfaced discovery set even
+  though it is cheap and deterministic.
 - **Streaming/batched indexing pipeline:** Linux kernel indexes successfully.
   - Resolver index built from row-at-a-time DB iterator (no bulk `.all()`).
   - Staged edges resolved in cursor-based batches (10K default).
@@ -43,7 +65,8 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
 - **Repo set:** amodx, fraktag, glamCRM, repo-graph, mempalace, glam-scrapers,
   unelte, swupdate, buildroot, C++11 Deep Dives, **Linux kernel**.
   - TS-only, TS+Rust, TS+Java, Python, C/C++, mixed multi-language.
-  - C/C++ validated on swupdate (208 files, 3422 nodes) and buildroot (645 files, 5249 nodes).
+  - C validated strongly on swupdate (208 files, 3422 nodes) and buildroot (645 files, 5249 nodes).
+    C++ is strategically in-scope but still behind C on the Rust-primary path.
   - Linux kernel: 63,701 files, 1,045,482 nodes, 2,045,964 resolved edges,
     2,775,402 unresolved edges. Indexed in 77 min. Syntax-only (no compile_commands.json
     in this run). High unresolved rate expected without build-system context.
@@ -59,6 +82,13 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   Python import resolution through shared file-resolution model. Extracts functions,
   classes, methods, imports, calls. TS-side broader scope (constructors, variables,
   complexity metrics) not yet ported.
+- **Documentation-first direction:** docs inventory is primary orientation evidence. Current
+  discovery-oriented authored knowledge is still split between documents and declaration rows.
+  Direction: hand-discovered architectural knowledge should move toward document-backed items,
+  with DB projections kept for indexing, query acceleration, and governance substrate.
+- **Daemon purpose clarified:** the daemon is not just warmed startup. It is the future
+  multi-agent coordination authority for shared repo databases, with many readers, fewer
+  writers, and daemon-owned synchronization over SQLite access.
 - **CLI boundary model:** HTTP + cli_command mechanisms. Commander providers, package.json
   script consumers, shell script consumers, Makefile recipe consumers. Binary-prefix matching.
 - **Module discovery:** Declared modules detected from manifests/workspaces
@@ -187,6 +217,10 @@ See `docs/TECH-DEBT.md` for known limitations and test gaps.
   supersede to expired expiry restores gate failure.
   This completes the declaration lifecycle surface: create,
   deactivate, and supersede for all three governance kinds.
+- Binding direction: declaration rows remain the governance/enforcement
+  substrate. Discovery-oriented authored architectural knowledge should
+  not keep expanding as opaque DB-only declarations when a document-backed
+  surface is more appropriate.
 - Deferred: multi-obligation requirements, evidence, obligations
 - Deferred: measurement commands, table output, full edge-type set
 
@@ -715,10 +749,14 @@ The agent needs to see what changed before it needs gate verdicts.
    When snapshots are non-comparable (metric version mismatch, identity
    drift), surface that explicitly. Honest comparison > forced verdict.
 
-6. **Long-lived daemon** (see #3 below)
+6. **Document-backed authored relationship items**
+   Hand-discovered architectural knowledge should become readable documentation
+   with anchors/references, not keep expanding as opaque DB-only declarations.
+
+7. **Long-lived daemon** (see #3 below)
    Only after discovery surfaces are stable.
 
-7. **Seam expansion** (event/pubsub, persistence/schema, DI, registry/plugin)
+8. **Seam expansion** (event/pubsub, persistence/schema, DI, registry/plugin)
    Architectural extraction, not feature work.
 
 ---
@@ -758,9 +796,11 @@ not the primary next frontier.
 - Comparative policies (`no_new`, `no_worsened` kinds)
 - Gate integration for CI blocking (works, not primary)
 
-**Support module: metric expansion** (deferred until needed)
-- NPath complexity for combinatorial path explosion detection.
-- Measurement version/source identifiers for comparison rejection.
+**Support module: metric expansion**
+- Near-term cheap deterministic addition: LOC/SLOC measurements at
+  file/function/module granularity for spotting oversized legacy units.
+- Deferred until needed: NPath complexity for combinatorial path explosion detection.
+- Deferred until needed: measurement version/source identifiers for comparison rejection.
 
 **Why discovery is strategically #1:**
 - Agents need to see what changed before deciding what to do.
@@ -792,6 +832,9 @@ themselves are the data — not a narrow ontology of extracted facts.
 **Remaining:**
 - `rmap explain` integration: doc excerpts and file references
 - Persisted inventory (optimization, currently live filesystem discovery)
+- Document-backed authored relationship items with anchors/references for
+  hand-discovered seams, migrations, replacements, constraints, and other
+  architectural knowledge that should be readable in git outside the DB
 
 **Implementation constraints (still binding):**
 
@@ -821,14 +864,20 @@ themselves are the data — not a narrow ontology of extracted facts.
    to the inventory surface.
 
 ### 3. Long-lived analysis daemon + daemon-backed CLI
-Two-part item: support module (warmed runtime) + feature (CLI client).
+Two-part item: support module (multi-agent coordination runtime) + feature (CLI client).
 
-Support: warmed runtime that eliminates repeated CLI bootstrap cost
-(WASM grammar load, extractor initialization, SQLite open, migration
-checks). Provides warm parser pool, prepared SQLite statements,
-request routing (JSON-RPC over Unix socket), three concurrency lanes
-(query/index/maintenance), per-repo write locks, snapshot pinning,
-progress streaming, cancellation tokens.
+Support: daemon-owned runtime for shared repo databases. It must solve:
+- many concurrent AI-agent reads
+- fewer writes/refreshes
+- readers-writer coordination above SQLite
+- daemon-owned DB handles/queues so clients do not stomp over each other
+
+It also eliminates repeated CLI bootstrap cost (WASM grammar load,
+extractor initialization, SQLite open, migration checks). Runtime
+components: prepared SQLite statements, request routing (JSON-RPC over
+Unix socket), three concurrency lanes (query/index/maintenance),
+per-repo write locks, snapshot pinning, progress streaming,
+cancellation tokens.
 
 Feature: CLI becomes a thin client (connect, send request, render
 response). Auto-start daemon on first command if absent. Progress
@@ -843,7 +892,8 @@ must stabilize first:
 - Quality delta surfacing in check/orient — must complete
 
 Only then does daemon work begin. This is correctness-before-latency
-sequencing.
+sequencing. The purpose is multi-agent correctness first, warm-runtime
+latency second.
 
 ### 4. Delta indexing support module (infrastructure)
 **Architectural principle:** Git owns historical truth. Repo-graph owns
@@ -916,6 +966,8 @@ Same pattern as Clang tooling, LSIF pipelines, large code intelligence.
 ### 6. C/C++ semantic maturation
 The syntax-only first slice + compile_commands.json reader + Linux
 system detector are shipped. Next maturation steps:
+- Rust-primary C++ extraction/parity. C++ is strategically in-scope, but the
+  Rust product path is not yet at equivalent maturity to C.
 - Header/source ownership: which .h belongs to which translation unit
 - Clangd/libclang enrichment for receiver-type resolution (same
   architectural pattern as TS TypeChecker / Rust rust-analyzer)
@@ -1116,7 +1168,7 @@ pyright/mypy for type inference. Follows the same enrichment adapter pattern.
 ### Go extractor
 Useful, but lower priority than Python and C/C++ given the current repo set.
 Add only after the primary language stack is mature:
-TypeScript/JavaScript + Rust + Python + C/C++.
+TypeScript/JavaScript + Rust + Python + Java + C/C++.
 
 Why later:
 - Current demand is exploratory rather than product-critical.
@@ -1124,3 +1176,13 @@ Why later:
 - When added, it will reuse the shared scaffolding:
   multi-extractor indexer, manifest routing, trust/reporting, and the
   boundary-interaction model. Semantic enrichment would likely use `gopls`.
+
+### Kotlin / Scala extractors
+Later than Java, and later than the primary stack above.
+
+Why later:
+- They reuse some JVM build-context scaffolding (Gradle/Maven), but they are not "free"
+  extensions of Java support.
+- Current product pressure is higher on Python and C/C++ legacy-code coverage.
+- Add only after Java operationalization, Rust-primary C++ maturation, and the daemon/shared-db
+  path are in place.

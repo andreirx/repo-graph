@@ -2,15 +2,17 @@
 //!
 //! PF-1: STATUS_MAPPING extraction from C files.
 //! PF-2: BEHAVIORAL_MARKER extraction from C files.
+//! PF-3: RETURN_FATE extraction from C files.
 //!
 //! Facts are populated automatically during `rmap index` / `rmap refresh`
 //! via the policy-facts postpass in repo-index composition.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
 
 use crate::cli::open_storage;
-use repo_graph_policy_facts::{BehavioralMarker, StatusMapping};
+use repo_graph_policy_facts::{BehavioralMarker, FateKind, ReturnFate, StatusMapping};
 
 // ── DTOs ─────────────────────────────────────────────────────────
 
@@ -34,20 +36,37 @@ struct BehavioralMarkerOutput {
     count: usize,
 }
 
+/// Output envelope for RETURN_FATE facts.
+#[derive(serde::Serialize)]
+struct ReturnFateOutput {
+    repo: String,
+    snapshot: String,
+    kind: String,
+    facts: Vec<ReturnFate>,
+    count: usize,
+    summary: ReturnFateSummary,
+}
+
+/// Summary statistics for RETURN_FATE output.
+#[derive(serde::Serialize)]
+struct ReturnFateSummary {
+    by_fate: BTreeMap<String, usize>,
+}
+
 // ── Command handler ──────────────────────────────────────────────
 
 /// Run the `rmap policy` command.
 ///
-/// Usage: `rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER] [--file <path>]`
+/// Usage: `rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER|RETURN_FATE] [--file <path>] [--callee <name>] [--fate <IGNORED|CHECKED|...>]`
 ///
 /// Exit codes:
 /// - 0: success (facts found)
 /// - 1: no facts found (not an error, just empty)
 /// - 2: runtime error (invalid args, DB error, missing repo/snapshot)
 pub fn run_policy(args: &[String]) -> ExitCode {
-    // Parse args: <db_path> <repo_uid> [--kind ...] [--file <path>]
+    // Parse args: <db_path> <repo_uid> [--kind ...] [--file <path>] [--callee <name>] [--fate <kind>]
     if args.len() < 2 {
-        eprintln!("usage: rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER] [--file <path>]");
+        eprintln!("usage: rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER|RETURN_FATE] [--file <path>] [--callee <name>] [--fate <IGNORED|CHECKED|PROPAGATED|TRANSFORMED|STORED>]");
         return ExitCode::from(1);
     }
 
@@ -57,6 +76,8 @@ pub fn run_policy(args: &[String]) -> ExitCode {
     // Parse optional args.
     let mut kind_filter: Option<String> = None;
     let mut file_filter: Option<&str> = None;
+    let mut callee_filter: Option<&str> = None;
+    let mut fate_filter: Option<FateKind> = None;
     let mut i = 2;
     while i < args.len() {
         match args[i].as_str() {
@@ -76,6 +97,31 @@ pub fn run_policy(args: &[String]) -> ExitCode {
                 file_filter = Some(&args[i + 1]);
                 i += 2;
             }
+            "--callee" => {
+                if i + 1 >= args.len() {
+                    eprintln!("error: --callee requires an argument");
+                    return ExitCode::from(1);
+                }
+                callee_filter = Some(&args[i + 1]);
+                i += 2;
+            }
+            "--fate" => {
+                if i + 1 >= args.len() {
+                    eprintln!("error: --fate requires an argument");
+                    return ExitCode::from(1);
+                }
+                match args[i + 1].to_uppercase().parse::<FateKind>() {
+                    Ok(f) => fate_filter = Some(f),
+                    Err(_) => {
+                        eprintln!(
+                            "error: invalid fate kind: {} (supported: IGNORED, CHECKED, PROPAGATED, TRANSFORMED, STORED)",
+                            args[i + 1]
+                        );
+                        return ExitCode::from(1);
+                    }
+                }
+                i += 2;
+            }
             other => {
                 eprintln!("error: unknown option: {}", other);
                 return ExitCode::from(1);
@@ -85,9 +131,9 @@ pub fn run_policy(args: &[String]) -> ExitCode {
 
     // Validate kind filter.
     let kind = kind_filter.as_deref().unwrap_or("STATUS_MAPPING");
-    if kind != "STATUS_MAPPING" && kind != "BEHAVIORAL_MARKER" {
+    if kind != "STATUS_MAPPING" && kind != "BEHAVIORAL_MARKER" && kind != "RETURN_FATE" {
         eprintln!(
-            "error: unsupported policy kind: {} (supported: STATUS_MAPPING, BEHAVIORAL_MARKER)",
+            "error: unsupported policy kind: {} (supported: STATUS_MAPPING, BEHAVIORAL_MARKER, RETURN_FATE)",
             kind
         );
         return ExitCode::from(1);
@@ -158,6 +204,38 @@ pub fn run_policy(args: &[String]) -> ExitCode {
                 kind: "BEHAVIORAL_MARKER".to_string(),
                 count: markers.len(),
                 facts: markers,
+            };
+
+            output_json(&output, output.count)
+        }
+        "RETURN_FATE" => {
+            // Query RETURN_FATE facts.
+            let fates = match storage.query_return_fates(
+                &snapshot.snapshot_uid,
+                file_filter,
+                callee_filter,
+                fate_filter,
+            ) {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("error: failed to query policy facts: {}", e);
+                    return ExitCode::from(2);
+                }
+            };
+
+            // Build summary by fate kind.
+            let mut by_fate: BTreeMap<String, usize> = BTreeMap::new();
+            for fate in &fates {
+                *by_fate.entry(fate.fate.to_string()).or_insert(0) += 1;
+            }
+
+            let output = ReturnFateOutput {
+                repo: repo_uid.to_string(),
+                snapshot: snapshot.snapshot_uid.clone(),
+                kind: "RETURN_FATE".to_string(),
+                count: fates.len(),
+                facts: fates,
+                summary: ReturnFateSummary { by_fate },
             };
 
             output_json(&output, output.count)

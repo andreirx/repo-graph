@@ -3,10 +3,12 @@
 //! These tests validate policy-fact extraction on the real swupdate codebase:
 //! - PF-1: STATUS_MAPPING (docs/slices/pf-1-status-mapping.md)
 //! - PF-2: BEHAVIORAL_MARKER (docs/slices/pf-2-behavioral-marker.md)
+//! - PF-3: RETURN_FATE (docs/slices/pf-3-return-fate.md)
 
 use repo_graph_policy_facts::extractors::behavioral_marker::extract_behavioral_markers;
+use repo_graph_policy_facts::extractors::return_fate::extract_return_fates;
 use repo_graph_policy_facts::extractors::status_mapping::extract_status_mappings;
-use repo_graph_policy_facts::{MarkerEvidence, MarkerKind};
+use repo_graph_policy_facts::{FateEvidence, FateKind, MarkerEvidence, MarkerKind};
 use std::path::Path;
 
 fn parse_c_file(source: &str) -> tree_sitter::Tree {
@@ -35,6 +37,7 @@ fn read_swupdate_file(relative_path: &str) -> Option<String> {
     }
     None
 }
+
 
 #[test]
 fn test_map_channel_retcode() {
@@ -529,4 +532,427 @@ fn test_behavioral_marker_count_channel_get_file() {
         "expected exactly 3 behavioral markers (2 RETRY_LOOP + 1 RESUME_OFFSET), got {}",
         channel_get_file_markers.len()
     );
+}
+
+// =============================================================================
+// PF-3: RETURN_FATE validation
+// =============================================================================
+
+#[test]
+fn test_return_fate_channel_curl() {
+    let source = match read_swupdate_file("corelib/channel_curl.c") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: swupdate not found at expected path");
+            return;
+        }
+    };
+
+    let tree = parse_c_file(&source);
+    let fates =
+        extract_return_fates(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+
+    // Should have many fates (this is a large file with many calls)
+    assert!(
+        fates.len() > 10,
+        "expected >10 RETURN_FATE facts in channel_curl.c, got {}",
+        fates.len()
+    );
+
+    // Print summary by fate kind
+    let mut by_fate: std::collections::HashMap<FateKind, usize> = std::collections::HashMap::new();
+    for fate in &fates {
+        *by_fate.entry(fate.fate).or_insert(0) += 1;
+    }
+    eprintln!("channel_curl.c RETURN_FATE counts by kind:");
+    for (kind, count) in &by_fate {
+        eprintln!("  {}: {}", kind, count);
+    }
+
+    // Should have all fate kinds represented (IGNORED, CHECKED, STORED, etc.)
+    assert!(
+        by_fate.contains_key(&FateKind::Ignored),
+        "expected IGNORED fates in channel_curl.c"
+    );
+    assert!(
+        by_fate.contains_key(&FateKind::Stored),
+        "expected STORED fates in channel_curl.c"
+    );
+}
+
+#[test]
+fn test_return_fate_channel_get_file_curl_perform() {
+    // channel_get_file calls curl_easy_perform and assigns result to curlrc
+    let source = match read_swupdate_file("corelib/channel_curl.c") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: swupdate not found at expected path");
+            return;
+        }
+    };
+
+    let tree = parse_c_file(&source);
+    let fates =
+        extract_return_fates(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+
+    // Find curl_easy_perform calls in channel_get_file
+    let curl_perform_fates: Vec<_> = fates
+        .iter()
+        .filter(|f| f.callee_name == "curl_easy_perform" && f.caller_name == "channel_get_file")
+        .collect();
+
+    assert!(
+        !curl_perform_fates.is_empty(),
+        "expected curl_easy_perform call in channel_get_file"
+    );
+
+    // Should be STORED (curlrc = curl_easy_perform(...))
+    let first = &curl_perform_fates[0];
+    eprintln!(
+        "curl_easy_perform in channel_get_file: line {}, fate {:?}",
+        first.line, first.fate
+    );
+
+    assert_eq!(
+        first.fate,
+        FateKind::Stored,
+        "curl_easy_perform result should be STORED, got {:?}",
+        first.fate
+    );
+
+    if let FateEvidence::Stored { variable_name, .. } = &first.evidence {
+        eprintln!("  stored in variable: {}", variable_name);
+    }
+}
+
+#[test]
+fn test_return_fate_channel_map_curl_error() {
+    // channel_get_file calls channel_map_curl_error and stores result
+    let source = match read_swupdate_file("corelib/channel_curl.c") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: swupdate not found at expected path");
+            return;
+        }
+    };
+
+    let tree = parse_c_file(&source);
+    let fates =
+        extract_return_fates(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+
+    // Find channel_map_curl_error calls in channel_get_file
+    let map_error_fates: Vec<_> = fates
+        .iter()
+        .filter(|f| {
+            f.callee_name == "channel_map_curl_error" && f.caller_name == "channel_get_file"
+        })
+        .collect();
+
+    assert!(
+        !map_error_fates.is_empty(),
+        "expected channel_map_curl_error call in channel_get_file"
+    );
+
+    // Should be STORED (result = channel_map_curl_error(curlrc))
+    for fate in &map_error_fates {
+        eprintln!(
+            "channel_map_curl_error in channel_get_file: line {}, fate {:?}",
+            fate.line, fate.fate
+        );
+    }
+
+    assert!(
+        map_error_fates.iter().any(|f| f.fate == FateKind::Stored),
+        "channel_map_curl_error should have at least one STORED fate"
+    );
+}
+
+#[test]
+fn test_return_fate_no_void_functions() {
+    // Verify printf/free/memcpy don't produce RETURN_FATE facts
+    let source = match read_swupdate_file("corelib/channel_curl.c") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: swupdate not found at expected path");
+            return;
+        }
+    };
+
+    let tree = parse_c_file(&source);
+    let fates =
+        extract_return_fates(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+
+    // None of these should appear as callees
+    let void_functions = ["printf", "fprintf", "free", "memcpy", "memset", "strcpy"];
+
+    for void_fn in &void_functions {
+        let matches: Vec<_> = fates.iter().filter(|f| f.callee_name == *void_fn).collect();
+        assert!(
+            matches.is_empty(),
+            "void function {} should not produce RETURN_FATE facts, got {} facts",
+            void_fn,
+            matches.len()
+        );
+    }
+}
+
+// ============================================================================
+// PF-3 RETURN_FATE: Locked proving-ground validation targets
+// ============================================================================
+
+#[test]
+fn test_return_fate_suricatta_vtable_ignored() {
+    // Line 351 in suricatta/suricatta.c: server->install_update()
+    // This is a vtable call that should be IGNORED with callee_key = None
+    let source = match read_swupdate_file("suricatta/suricatta.c") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: swupdate not found at expected path");
+            return;
+        }
+    };
+
+    let tree = parse_c_file(&source);
+    let fates = extract_return_fates(&tree, source.as_bytes(), "suricatta/suricatta.c", "swupdate");
+
+    // Find server->install_update() call in start_suricatta
+    let install_update_fates: Vec<_> = fates
+        .iter()
+        .filter(|f| f.callee_name == "install_update" && f.caller_name == "start_suricatta")
+        .collect();
+
+    assert!(
+        !install_update_fates.is_empty(),
+        "expected install_update call in start_suricatta"
+    );
+
+    let fate = &install_update_fates[0];
+    eprintln!(
+        "install_update in start_suricatta: line {}, fate {:?}, callee_key {:?}",
+        fate.line, fate.fate, fate.callee_key
+    );
+
+    // Verify: IGNORED fate
+    assert_eq!(
+        fate.fate,
+        FateKind::Ignored,
+        "server->install_update() should be IGNORED (fire-and-forget)"
+    );
+
+    // Verify: callee_key is None (vtable call)
+    assert_eq!(
+        fate.callee_key, None,
+        "vtable call should have callee_key = None"
+    );
+
+    // Verify: explicit_void_cast = false (raw ignore)
+    if let FateEvidence::Ignored { explicit_void_cast } = &fate.evidence {
+        assert!(
+            !explicit_void_cast,
+            "install_update is not explicitly cast to void"
+        );
+    } else {
+        panic!("expected Ignored evidence");
+    }
+}
+
+#[test]
+fn test_return_fate_simple_stored_pattern() {
+    // Test STORED with immediately_checked = false using channel_curl.c
+    //
+    // Note: server_hawkbit.c has many STRINGIFY macros with embedded JSON
+    // that confuse tree-sitter. We use channel_curl.c instead, which is
+    // cleanly parseable and contains simple assignment patterns.
+    //
+    // Line 1455 in channel_curl.c: curlrc = curl_easy_perform(...)
+    // This is a simple assignment - STORED with immediately_checked = false
+    let source = match read_swupdate_file("corelib/channel_curl.c") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: swupdate not found at expected path");
+            return;
+        }
+    };
+
+    let tree = parse_c_file(&source);
+    let fates = extract_return_fates(
+        &tree,
+        source.as_bytes(),
+        "corelib/channel_curl.c",
+        "swupdate",
+    );
+
+    // Find curl_easy_perform calls that are STORED (simple assignment)
+    let stored_curl_perform: Vec<_> = fates
+        .iter()
+        .filter(|f| {
+            f.callee_name == "curl_easy_perform"
+                && f.fate == FateKind::Stored
+                && f.caller_name == "channel_get_file"
+        })
+        .collect();
+
+    assert!(
+        !stored_curl_perform.is_empty(),
+        "expected STORED curl_easy_perform call in channel_get_file"
+    );
+
+    let fate = &stored_curl_perform[0];
+    eprintln!(
+        "curl_easy_perform at line {}: fate {:?}, evidence {:?}",
+        fate.line, fate.fate, fate.evidence
+    );
+
+    // Verify: STORED fate (simple assignment)
+    assert_eq!(
+        fate.fate,
+        FateKind::Stored,
+        "curlrc = curl_easy_perform(...) should be STORED"
+    );
+
+    // This is a simple assignment (curlrc = curl_easy_perform(...))
+    // NOT in a condition, so immediately_checked = false
+    if let FateEvidence::Stored {
+        variable_name,
+        immediately_checked,
+    } = &fate.evidence
+    {
+        assert_eq!(variable_name, "curlrc", "should be stored in 'curlrc'");
+        assert!(
+            !immediately_checked,
+            "simple assignment should have immediately_checked = false"
+        );
+    } else {
+        panic!("expected Stored evidence");
+    }
+}
+
+#[test]
+fn test_return_fate_map_channel_retcode_compound_checked_577() {
+    // Line 577 in server_hawkbit.c: if ((result = map_channel_retcode(...)) != SERVER_OK)
+    // Compound assignment in condition - STORED with immediately_checked = true
+    let source = match read_swupdate_file("suricatta/server_hawkbit.c") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: swupdate not found at expected path");
+            return;
+        }
+    };
+
+    let tree = parse_c_file(&source);
+    let fates = extract_return_fates(
+        &tree,
+        source.as_bytes(),
+        "suricatta/server_hawkbit.c",
+        "swupdate",
+    );
+
+    // Find map_channel_retcode call at line 577 (allow +/- 2 lines for version drift)
+    let line_577_fates: Vec<_> = fates
+        .iter()
+        .filter(|f| f.callee_name == "map_channel_retcode" && (575..=579).contains(&f.line))
+        .collect();
+
+    assert!(
+        !line_577_fates.is_empty(),
+        "expected map_channel_retcode call around line 577, got fates at lines: {:?}",
+        fates
+            .iter()
+            .filter(|f| f.callee_name == "map_channel_retcode")
+            .map(|f| f.line)
+            .collect::<Vec<_>>()
+    );
+
+    let fate = &line_577_fates[0];
+    eprintln!(
+        "map_channel_retcode at line {}: fate {:?}, evidence {:?}",
+        fate.line, fate.fate, fate.evidence
+    );
+
+    // Verify: STORED fate (assignment takes precedence over condition)
+    assert_eq!(
+        fate.fate,
+        FateKind::Stored,
+        "if ((result = map_channel_retcode(...)) != ...) should be STORED, not CHECKED"
+    );
+
+    // Verify: immediately_checked = true (compound-assignment-in-condition)
+    if let FateEvidence::Stored {
+        variable_name,
+        immediately_checked,
+    } = &fate.evidence
+    {
+        assert_eq!(variable_name, "result", "should be stored in 'result'");
+        assert!(
+            *immediately_checked,
+            "compound-assignment-in-condition should have immediately_checked = true"
+        );
+    } else {
+        panic!("expected Stored evidence");
+    }
+}
+
+#[test]
+fn test_return_fate_map_channel_retcode_compound_checked_632() {
+    // Line 632 in server_hawkbit.c: if ((result = map_channel_retcode(...)) != SERVER_OK)
+    // Same compound-assignment-in-condition pattern
+    let source = match read_swupdate_file("suricatta/server_hawkbit.c") {
+        Some(s) => s,
+        None => {
+            eprintln!("SKIP: swupdate not found at expected path");
+            return;
+        }
+    };
+
+    let tree = parse_c_file(&source);
+    let fates = extract_return_fates(
+        &tree,
+        source.as_bytes(),
+        "suricatta/server_hawkbit.c",
+        "swupdate",
+    );
+
+    // Find map_channel_retcode call at line 632 (allow +/- 2 lines for version drift)
+    let line_632_fates: Vec<_> = fates
+        .iter()
+        .filter(|f| f.callee_name == "map_channel_retcode" && (630..=634).contains(&f.line))
+        .collect();
+
+    assert!(
+        !line_632_fates.is_empty(),
+        "expected map_channel_retcode call around line 632, got fates at lines: {:?}",
+        fates
+            .iter()
+            .filter(|f| f.callee_name == "map_channel_retcode")
+            .map(|f| f.line)
+            .collect::<Vec<_>>()
+    );
+
+    let fate = &line_632_fates[0];
+    eprintln!(
+        "map_channel_retcode at line {}: fate {:?}, evidence {:?}",
+        fate.line, fate.fate, fate.evidence
+    );
+
+    // Verify: STORED fate
+    assert_eq!(
+        fate.fate,
+        FateKind::Stored,
+        "if ((result = map_channel_retcode(...)) != ...) should be STORED"
+    );
+
+    // Verify: immediately_checked = true
+    if let FateEvidence::Stored {
+        variable_name,
+        immediately_checked,
+    } = &fate.evidence
+    {
+        assert_eq!(variable_name, "result", "should be stored in 'result'");
+        assert!(
+            *immediately_checked,
+            "compound-assignment-in-condition should have immediately_checked = true"
+        );
+    } else {
+        panic!("expected Stored evidence");
+    }
 }
