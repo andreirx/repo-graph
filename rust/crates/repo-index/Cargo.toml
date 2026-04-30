@@ -51,6 +51,7 @@ repo-graph-storage = { path = "../storage" }
 repo-graph-trust = { path = "../trust" }
 repo-graph-ts-extractor = { path = "../ts-extractor" }
 repo-graph-c-extractor = { path = "../c-extractor" }
+repo-graph-cpp-extractor = { path = "../cpp-extractor" }
 repo-graph-java-extractor = { path = "../java-extractor" }
 repo-graph-python-extractor = { path = "../python-extractor" }
 repo-graph-rust-extractor = { path = "../rust-extractor" }

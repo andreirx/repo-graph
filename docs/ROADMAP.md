@@ -48,9 +48,11 @@ for what is actually operational.
 ## Current state (as of last commit)
 
 - **1464 tests** across 78 test files.
-- **Shipped language support:** TS/JS, Rust, Java, Python, and C are operational in
-  `rmap`. C++ syntax extraction exists on TS-side (`rgr`) but not yet on Rust-primary
-  path (`rmap`). Mobile track languages are not yet implemented.
+- **Shipped language support:** TS/JS, Rust, Java, Python, C are fully operational in
+  `rmap`. C++ extractor is shipped and internally validated; end-to-end validation on
+  mixed C/C++ repos (leveldb, duckdb, poco) is blocked by PF-3 RETURN_FATE duplicate-record
+  failure in the C policy-facts postpass. Mobile track languages (Objective-C, Swift,
+  Kotlin, Dart) are not yet implemented.
 - **Enrichment:** TS (~81%), Rust (~85%), Java (operational but fragile). All three wired.
 - **Classifier version:** 6.
   - v4: language-aware imports
@@ -89,7 +91,10 @@ for what is actually operational.
   unelte, swupdate, buildroot, C++11 Deep Dives, **Linux kernel**.
   - TS-only, TS+Rust, TS+Java, Python, C/C++, mixed multi-language.
   - C validated strongly on swupdate (208 files, 3422 nodes) and buildroot (645 files, 5249 nodes).
-    C++ is strategically in-scope but still behind C on the Rust-primary path.
+  - C++ extractor shipped: classes, methods, constructors, destructors, namespace-qualified
+    names, extern "C" linkage metadata, file-level C ABI boundary statistics. Validated on
+    pure-C++ repos (C++11 Deep Dives: 165 files, 1106 nodes). Tier-1 mixed C/C++ validation
+    repos (leveldb, duckdb, poco) cloned but indexing blocked by PF-3 duplicate-record bug.
   - Linux kernel: 63,701 files, 1,045,482 nodes, 2,045,964 resolved edges,
     2,775,402 unresolved edges. Indexed in 77 min. Syntax-only (no compile_commands.json
     in this run). High unresolved rate expected without build-system context.

@@ -159,13 +159,15 @@
 - Functions, structs, enums, typedefs, #include, CALLS, complexity.
 - Validated on swupdate, buildroot, Linux kernel.
 
-### Rust-side C++ extractor (`rmap`) — NOT YET IMPLEMENTED
+### Rust-side C++ extractor (`rmap`)
 
-- **C++ files (`.cpp/.hpp/.cc/.cxx`) are explicitly excluded** from `rmap` indexing.
-- `compose.rs` skips C++ extensions with an explicit out-of-scope comment.
-- Design doc for Rust-primary C++ support: `docs/milestones/cpp-extractor-v1.md`
-- Planned scope: namespaces, classes, methods, constructors, inheritance,
-  plus `extern "C"` linkage detection as first-class C ABI boundary evidence.
+- Native tree-sitter-cpp extractor for `.cpp/.hpp/.cc/.cxx/.hxx` files.
+- Namespaces, classes, structs, enums, methods, constructors, destructors.
+- Namespace-qualified names (e.g., `ui::Widget::display`).
+- IMPLEMENTS edges from base class clauses.
+- `extern "C"` linkage detection: symbol-level metadata and file-level C ABI statistics.
+- Design doc: `docs/milestones/cpp-extractor-v1.md`
+- Validated on C++11 Deep Dives repo (165 files, 1106 nodes).
 
 ### Shared limitations (both runtimes)
 
@@ -252,6 +254,32 @@
 - **No cross-language coverage:** STATUS_MAPPING extraction is C-only in PF-1.
   Similar patterns exist in Rust (`From`/`Into` impls with match) and Java
   (enum switch methods) but are not extracted.
+
+## Policy Facts — PF-3 RETURN_FATE
+
+- **Duplicate key constraint violation on some C repos:** The return_fates
+  extractor produces duplicate records for the same (caller_key, line, col)
+  combination in certain C codebases. This triggers a UNIQUE constraint
+  violation during `rmap index`.
+  - **Root cause:** Not yet diagnosed. Mismatch between PF-3 extraction
+    semantics (may emit multiple facts per call site) and storage identity
+    contract (one row per `(snapshot_uid, caller_key, line, col)`). Could be:
+    same call visited through two AST paths, macro/preprocessor structure
+    causing duplicate logical capture, or classification branches emitting
+    separate facts for one call site.
+  - **Affected repos:** leveldb, duckdb, poco — any repo with C code that
+    triggers duplicate extraction.
+  - **Workaround:** None. Indexing hard-fails.
+  - **Fix priority:** High — blocks C++ tier-1 end-to-end validation on mixed
+    C/C++ repos. C++ extractor itself is shipped; this is now the validation gate.
+  - **Diagnosis path:**
+    1. Reproduce on leveldb
+    2. Log exact duplicate `(caller_key, line, col)` pairs before insert
+    3. Inspect whether duplicates differ in callee_key, callee_name, fate, evidence_json
+    4. Decide fix layer: extractor dedup, compose-layer dedup, or storage contract change
+  - **Design choice required:** If duplicates are semantically identical, dedup in
+    extractor (Option A). If duplicates are intentionally distinct facts per site,
+    widen storage uniqueness to include callee_key or fate (Option B). Do not guess.
 
 ## Symbol Identity — Stable Key Contract
 

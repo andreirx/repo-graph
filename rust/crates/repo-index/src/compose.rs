@@ -28,6 +28,7 @@ use repo_graph_policy_facts::{
 use repo_graph_storage::types::InferenceInput;
 use repo_graph_storage::StorageConnection;
 use repo_graph_c_extractor::CExtractor;
+use repo_graph_cpp_extractor::CppExtractor;
 use repo_graph_java_extractor::JavaExtractor;
 use repo_graph_python_extractor::PythonExtractor;
 use repo_graph_rust_extractor::RustExtractor;
@@ -541,6 +542,11 @@ pub fn index_into_storage(
 		.initialize()
 		.map_err(|e| ComposeError::ExtractorInit(format!("c: {}", e)))?;
 
+	let mut cpp_extractor = CppExtractor::new();
+	cpp_extractor
+		.initialize()
+		.map_err(|e| ComposeError::ExtractorInit(format!("cpp: {}", e)))?;
+
 	let mut java_extractor = JavaExtractor::new();
 	java_extractor
 		.initialize()
@@ -558,7 +564,7 @@ pub fn index_into_storage(
 
 	ensure_repo(storage, repo_uid, repo_path)?;
 
-	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut java_extractor, &mut python_extractor, &mut rust_extractor];
+	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut cpp_extractor, &mut java_extractor, &mut python_extractor, &mut rust_extractor];
 	let mut idx_options = IndexOptions {
 		basis_commit: options.basis_commit.clone(),
 		edge_batch_size: options.edge_batch_size,
@@ -638,6 +644,11 @@ pub fn refresh_into_storage(
 		.initialize()
 		.map_err(|e| ComposeError::ExtractorInit(format!("c: {}", e)))?;
 
+	let mut cpp_extractor = CppExtractor::new();
+	cpp_extractor
+		.initialize()
+		.map_err(|e| ComposeError::ExtractorInit(format!("cpp: {}", e)))?;
+
 	let mut java_extractor = JavaExtractor::new();
 	java_extractor
 		.initialize()
@@ -655,7 +666,7 @@ pub fn refresh_into_storage(
 
 	ensure_repo(storage, repo_uid, repo_path)?;
 
-	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut java_extractor, &mut python_extractor, &mut rust_extractor];
+	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut cpp_extractor, &mut java_extractor, &mut python_extractor, &mut rust_extractor];
 	let mut idx_options = IndexOptions {
 		basis_commit: options.basis_commit.clone(),
 		edge_batch_size: options.edge_batch_size,

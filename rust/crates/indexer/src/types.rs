@@ -144,6 +144,7 @@ pub enum NodeSubtype {
 	EnumMember,
 	Property,
 	Constructor,
+	Destructor,
 	Getter,
 	Setter,
 	// FILE subtypes
