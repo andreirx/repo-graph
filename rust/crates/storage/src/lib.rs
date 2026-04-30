@@ -162,6 +162,7 @@ pub(crate) mod diagnostic;
 pub mod error;
 pub mod migrations;
 mod agent_impl; // AgentStorageRead impl for StorageConnection (Rust-42)
+mod boundary_interaction_impl; // Boundary interaction storage (BI-1A)
 mod gate_impl; // GateStorageRead impl for StorageConnection (Rust-43A)
 mod indexer_impl; // SnapshotLifecyclePort + FileCatalogPort impl (R5-C)
 pub mod quality_policy_port; // Quality policy storage port (QP-Step-5)

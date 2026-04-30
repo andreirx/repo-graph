@@ -1,0 +1,18 @@
+[package]
+name = "repo-graph-boundary-interaction"
+version = "0.1.0"
+edition = "2021"
+description = "Boundary interaction policy substrate for IPC and inter-device communication"
+license = "MIT"
+publish = false
+
+[dependencies]
+# Zero workspace dependencies — this is a policy crate.
+# Both boundary-interaction-extractor and future tooling can consume
+# these types without pulling in indexer or storage concerns.
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+toml = "0.8"
+
+[dev-dependencies]
+serde_json = "1.0"

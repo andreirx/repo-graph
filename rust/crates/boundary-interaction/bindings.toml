@@ -1,0 +1,302 @@
+# Boundary Interaction Binding Table — Slice 1A: Local IPC
+#
+# Contract: docs/design/boundary-interaction-ipc-device.md section 7
+#
+# This table defines which C API calls indicate boundary interactions.
+# Extractors use this to recognize IPC patterns and emit boundary facts.
+#
+# Slice 1A scope:
+#   - Unix domain sockets (AF_UNIX)
+#   - Named pipes / FIFOs
+#   - Anonymous pipes
+#   - POSIX shared memory
+#   - POSIX message queues
+#
+# All mechanisms in this slice have unambiguous inter_process scope.
+
+# ════════════════════════════════════════════════════════════════════════
+# UNIX DOMAIN SOCKETS
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: socket(AF_UNIX, ...) followed by bind/connect/listen
+# The socket() call alone is setup; direction comes from bind vs connect.
+# Scope: always inter_process (Unix sockets are local by definition)
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "socket"
+role = "setup"
+channel_kind = "unix_socket"
+scope_heuristic = "arg_family"
+interaction_pattern = "stream"
+basis = "api_call"
+arg_index = 0
+notes = "Socket creation. Check arg0 for AF_UNIX to classify as Unix socket."
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "bind"
+role = "provider"
+channel_kind = "unix_socket"
+scope_heuristic = "sockaddr"
+interaction_pattern = "stream"
+basis = "api_call"
+arg_index = 1
+notes = "Bind socket to address. For Unix sockets, arg1 sockaddr_un contains path."
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "listen"
+role = "provider"
+channel_kind = "unix_socket"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "stream"
+basis = "api_call"
+notes = "Mark socket as passive listener. Confirms provider role."
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "accept"
+role = "provider"
+channel_kind = "unix_socket"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "stream"
+basis = "api_call"
+notes = "Accept incoming connection. Provider side."
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "connect"
+role = "consumer"
+channel_kind = "unix_socket"
+scope_heuristic = "sockaddr"
+interaction_pattern = "stream"
+basis = "api_call"
+arg_index = 1
+notes = "Connect to remote socket. For Unix sockets, arg1 contains path."
+
+# ════════════════════════════════════════════════════════════════════════
+# NAMED PIPES (FIFOs)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: mkfifo() creates the FIFO, open() accesses it
+# Direction: O_RDONLY = consumer, O_WRONLY = provider, O_RDWR = bidirectional
+# Scope: always inter_process (FIFOs are local by definition)
+
+[[binding]]
+language = "c"
+api_family = "posix_pipe"
+function = "mkfifo"
+role = "provider"
+channel_kind = "named_pipe"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "stream"
+basis = "api_call"
+arg_index = 0
+notes = "Create named pipe. Arg0 is path."
+
+[[binding]]
+language = "c"
+api_family = "posix_pipe"
+function = "mknod"
+role = "provider"
+channel_kind = "named_pipe"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "stream"
+basis = "api_call"
+arg_index = 0
+notes = "Create special file (can be FIFO with S_IFIFO mode). Arg0 is path."
+
+# ════════════════════════════════════════════════════════════════════════
+# ANONYMOUS PIPES
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: pipe() or pipe2() creates a pair of file descriptors
+# Direction: bidirectional at creation, read/write ops determine data flow
+# Scope: always inter_process (used for parent-child IPC)
+
+[[binding]]
+language = "c"
+api_family = "posix_pipe"
+function = "pipe"
+role = "bidirectional"
+channel_kind = "anonymous_pipe"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "stream"
+basis = "api_call"
+notes = "Create anonymous pipe pair. Returns read fd in [0], write fd in [1]."
+
+[[binding]]
+language = "c"
+api_family = "posix_pipe"
+function = "pipe2"
+role = "bidirectional"
+channel_kind = "anonymous_pipe"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "stream"
+basis = "api_call"
+notes = "Create anonymous pipe pair with flags. Linux extension."
+
+# ════════════════════════════════════════════════════════════════════════
+# POSIX SHARED MEMORY
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: shm_open() creates/opens, mmap() maps to memory
+# Direction: O_CREAT = provider, otherwise consumer; mmap PROT determines r/w
+# Scope: always inter_process
+# NOTE: Requires dual projection per design doc section 4.4
+
+[[binding]]
+language = "c"
+api_family = "posix_shm"
+function = "shm_open"
+role = "bidirectional"
+channel_kind = "shared_memory"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+arg_index = 0
+notes = "Open/create shared memory object. Arg0 is name (starts with /). DUAL PROJECTION REQUIRED."
+
+[[binding]]
+language = "c"
+api_family = "posix_shm"
+function = "shm_unlink"
+role = "provider"
+channel_kind = "shared_memory"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+arg_index = 0
+notes = "Remove shared memory object. Arg0 is name."
+
+[[binding]]
+language = "c"
+api_family = "posix_shm"
+function = "mmap"
+role = "bidirectional"
+channel_kind = "shared_memory"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Map shared memory. Check for MAP_SHARED flag. DUAL PROJECTION REQUIRED."
+
+[[binding]]
+language = "c"
+api_family = "posix_shm"
+function = "munmap"
+role = "bidirectional"
+channel_kind = "shared_memory"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Unmap shared memory region."
+
+# ════════════════════════════════════════════════════════════════════════
+# POSIX MESSAGE QUEUES
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: mq_open() creates/opens, mq_send/mq_receive for data
+# Direction: O_CREAT = provider, send = provider, receive = consumer
+# Scope: always inter_process
+
+[[binding]]
+language = "c"
+api_family = "posix_mqueue"
+function = "mq_open"
+role = "bidirectional"
+channel_kind = "message_queue"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "Open/create message queue. Arg0 is name (starts with /)."
+
+[[binding]]
+language = "c"
+api_family = "posix_mqueue"
+function = "mq_send"
+role = "send"
+channel_kind = "message_queue"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+notes = "Send message to queue."
+
+[[binding]]
+language = "c"
+api_family = "posix_mqueue"
+function = "mq_receive"
+role = "receive"
+channel_kind = "message_queue"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+notes = "Receive message from queue."
+
+[[binding]]
+language = "c"
+api_family = "posix_mqueue"
+function = "mq_timedsend"
+role = "send"
+channel_kind = "message_queue"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+notes = "Send message with timeout."
+
+[[binding]]
+language = "c"
+api_family = "posix_mqueue"
+function = "mq_timedreceive"
+role = "receive"
+channel_kind = "message_queue"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+notes = "Receive message with timeout."
+
+[[binding]]
+language = "c"
+api_family = "posix_mqueue"
+function = "mq_close"
+role = "bidirectional"
+channel_kind = "message_queue"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+notes = "Close message queue descriptor."
+
+[[binding]]
+language = "c"
+api_family = "posix_mqueue"
+function = "mq_unlink"
+role = "provider"
+channel_kind = "message_queue"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "Remove message queue. Arg0 is name."

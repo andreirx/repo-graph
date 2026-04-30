@@ -19,7 +19,11 @@
 //!
 //! See `docs/milestones/c-extractor-v1.md` for full design decisions.
 
+pub mod boundary_detector;
 mod extractor;
 mod metrics;
 
+pub use boundary_detector::{
+    extract_boundary_calls, is_boundary_function, MmapFlags, RawBoundaryCall, SocketFamily,
+};
 pub use extractor::CExtractor;

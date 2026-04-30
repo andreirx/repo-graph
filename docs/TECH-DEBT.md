@@ -1662,6 +1662,66 @@ See `docs/cli/rmap-contracts.md` for contract details.
 
 - **`index` and `refresh`:** Use stderr for progress, no JSON output.
 
+## Boundary Interaction Extraction — Slice 1A (Local IPC)
+
+Policy crate: `rust/crates/boundary-interaction/`
+Extractor crate: `rust/crates/boundary-interaction-extractor/`
+Design doc: `docs/design/boundary-interaction-ipc-device.md`
+
+### Binding resolution is function-name-only (future extensibility debt)
+
+`BindingTable::find_by_function(language, function_name)` returns the first
+matching entry for a given language and function name. This works for Slice 1A
+because each function name maps to exactly one channel kind (e.g., `bind` →
+`unix_socket`, `shm_open` → `shared_memory`).
+
+**Becomes insufficient when:**
+
+- Multiple slices use the same function names with different channel kinds
+  (e.g., `bind` for Unix sockets vs TCP sockets vs CAN sockets).
+- The same function name appears in different API families with different
+  semantics (e.g., POSIX `mmap` vs some SDK's `mmap` wrapper).
+- Language-specific overloads need disambiguation (e.g., Python `socket.bind`
+  vs C `bind`).
+
+**Not a blocker for Slice 1A** because guard predicates (`socket_family`,
+`mmap_flags`, `mknod_mode`) reject mismatches at the emitter level, not at
+binding lookup.
+
+**Required before Slice 1B (Network IPC) or Slice 2 (Inter-Device):**
+
+Either:
+1. **Compound binding key:** `find_by_function(language, function, api_family)`
+   with explicit API family passed from the extractor.
+2. **Multi-match with context filtering:** `find_all_by_function(language, function)`
+   returns all candidates; emitter filters by callsite evidence.
+3. **Binding precedence rules:** Higher-specificity bindings shadow lower ones.
+
+The guard predicate pattern from Slice 1A is the template: binding lookup
+proposes candidates, emitter rejects based on callsite evidence. The debt is
+ensuring the lookup returns all viable candidates when function names overlap.
+
+### Extractor contract: conservative field population
+
+The C-extractor integration contract (established 2026-04-30):
+
+- **`socket_family`**: Only when confidently derived from `socket()` arg0 or
+  equivalent tracked context. Do not guess.
+- **`mmap_flags`**: Only when `MAP_SHARED` vs `MAP_PRIVATE` can be determined
+  from arg4. Unresolved expressions → `None`.
+- **`mknod_mode`**: Only when mode bits are actually extracted from arg2.
+  Unresolved expressions → `None`.
+- **`extracted_argument`**: Only when normalized channel identity is known.
+  **Critical for `bind`/`connect`**: Only populate when the argument is a
+  Unix socket path (`sockaddr_un`), not generic IP:port text or unresolved
+  sockaddr rendering. The emitter accepts `bind`/`connect` without
+  `socket_family` if `extracted_argument.is_some()` — this is safe ONLY if
+  `extracted_argument` means Unix socket path evidence.
+
+If the extractor cannot prove a field's value, it MUST leave the field unset
+(`None`) and let the emitter decline to emit. No generic argument text
+masquerading as channel identity.
+
 ## rgistr Policy Hints (2026-04-28)
 
 ### What shipped

@@ -106,8 +106,9 @@ pub mod migration_020;
 pub mod migration_021;
 pub mod migration_022;
 pub mod migration_023;
+pub mod migration_024;
 
-/// Apply all 23 storage migrations to the given connection.
+/// Apply all 24 storage migrations to the given connection.
 ///
 /// Sets connection-level pragmas, runs migration 001
 /// unconditionally (idempotent via `CREATE TABLE IF NOT EXISTS`),
@@ -224,6 +225,9 @@ pub fn run_migrations(conn: &mut Connection) -> Result<(), StorageError> {
 	}
 	if max_version < 23 {
 		migration_023::run(conn)?;
+	}
+	if max_version < 24 {
+		migration_024::run(conn)?;
 	}
 
 	Ok(())
@@ -343,7 +347,7 @@ mod tests {
 	// ── Category 1: Schema creation parity ────────────────────
 
 	#[test]
-	fn run_migrations_applies_all_twenty_three_migrations() {
+	fn run_migrations_applies_all_twenty_four_migrations() {
 		let mut conn = fresh_conn();
 		run_migrations(&mut conn).expect("run all migrations");
 
@@ -353,7 +357,7 @@ mod tests {
 				row.get(0)
 			})
 			.unwrap();
-		assert_eq!(count, 23, "expected 23 migration rows after full run");
+		assert_eq!(count, 24, "expected 24 migration rows after full run");
 	}
 
 	#[test]
@@ -421,6 +425,9 @@ mod tests {
 			"behavioral_markers",
 			// 023-return-fates
 			"return_fates",
+			// 024-boundary-interactions
+			"boundary_interaction_surfaces",
+			"boundary_channel_details",
 		];
 
 		for table in expected_tables {
@@ -435,7 +442,7 @@ mod tests {
 	// ── Category 2: Migration version progression parity ─────
 
 	#[test]
-	fn schema_migrations_records_versions_one_through_twenty_three_in_order() {
+	fn schema_migrations_records_versions_one_through_twenty_four_in_order() {
 		let mut conn = fresh_conn();
 		run_migrations(&mut conn).expect("run all migrations");
 
@@ -474,6 +481,7 @@ mod tests {
 			(21, "021-status-mappings"),
 			(22, "022-behavioral-markers"),
 			(23, "023-return-fates"),
+			(24, "024-boundary-interactions"),
 		];
 
 		assert_eq!(rows.len(), expected.len());
@@ -495,7 +503,7 @@ mod tests {
 				row.get(0)
 			})
 			.unwrap();
-		assert_eq!(count, 23, "re-run must not duplicate schema_migrations rows");
+		assert_eq!(count, 24, "re-run must not duplicate schema_migrations rows");
 
 		// Each version still appears exactly once.
 		let mut stmt = conn

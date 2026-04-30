@@ -171,6 +171,11 @@ repo-graph-doc-facts = { path = "../doc-facts" }
 # defined by the policy-facts crate.
 repo-graph-policy-facts = { path = "../policy-facts" }
 
+# Boundary-interaction crate — added for BI-1A Local IPC slice. The
+# storage adapter uses BoundaryInteractionSurface and ChannelDetail
+# types for the boundary interaction persistence methods.
+repo-graph-boundary-interaction = { path = "../boundary-interaction" }
+
 [dev-dependencies]
 # tempfile for tests that need a real file-backed SQLite database
 # in a unique temporary path. Added in R2-D when the connection

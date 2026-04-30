@@ -20,6 +20,8 @@
 resolver = "2"
 members = [
     "crates/agent",
+    "crates/boundary-interaction",
+    "crates/boundary-interaction-extractor",
     "crates/c-extractor",
     "crates/classification",
     "crates/cpp-extractor",

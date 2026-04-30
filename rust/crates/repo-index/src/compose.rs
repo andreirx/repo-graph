@@ -25,6 +25,14 @@ use repo_graph_policy_facts::{
     extractors::status_mapping::extract_status_mappings,
     PolicyFactsStorageWrite,
 };
+use repo_graph_boundary_interaction::table::Language as BiLanguage;
+use repo_graph_boundary_interaction_extractor::emit::{
+    BoundaryCallsite, BoundaryInteractionEmitter, EmitterContext, MmapFlags, SocketFamily,
+};
+use repo_graph_c_extractor::{
+    extract_boundary_calls, MmapFlags as RawMmapFlags, RawBoundaryCall,
+    SocketFamily as RawSocketFamily,
+};
 use repo_graph_storage::types::InferenceInput;
 use repo_graph_storage::StorageConnection;
 use repo_graph_c_extractor::CExtractor;
@@ -521,6 +529,137 @@ fn persist_policy_facts(
 	Ok(total_count)
 }
 
+/// BI-1A: Extract and persist boundary interaction facts from C files.
+///
+/// TEMPORARY postpass: Re-parses C files after extraction to detect
+/// IPC boundary calls. This duplicates the tree-sitter parsing work
+/// already done by the C extractor.
+///
+/// **TECH DEBT:** Same architecture as PF-1 postpass. Target is
+/// extraction-time integration. See `docs/TECH-DEBT.md` entry
+/// "Boundary Interaction Extraction — Slice 1A".
+///
+/// Returns the number of surfaces persisted.
+fn persist_boundary_interactions(
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	snapshot_uid: &str,
+	file_inputs: &[FileInput],
+) -> Result<usize, ComposeError> {
+	// Initialize tree-sitter parser for C.
+	let mut parser = tree_sitter::Parser::new();
+	let c_language: tree_sitter::Language = tree_sitter_c::LANGUAGE.into();
+	parser
+		.set_language(&c_language)
+		.map_err(|e| ComposeError::ExtractorInit(format!("boundary-interaction C parser: {}", e)))?;
+
+	// Create emitter context.
+	let context = EmitterContext {
+		snapshot_uid: snapshot_uid.to_string(),
+		repo_uid: repo_uid.to_string(),
+		extractor: "c-ipc:0.1.0".to_string(),
+	};
+	let mut emitter = BoundaryInteractionEmitter::new(context);
+
+	for file in file_inputs {
+		// Boundary interaction scope: C files only (.c and .h).
+		let is_c_file = file.rel_path.ends_with(".c") || file.rel_path.ends_with(".h");
+		if !is_c_file {
+			continue;
+		}
+
+		// Parse the file.
+		let tree = match parser.parse(&file.content, None) {
+			Some(t) => t,
+			None => continue, // Parse failed, skip.
+		};
+
+		// Extract raw boundary calls.
+		let raw_calls = extract_boundary_calls(
+			&tree.root_node(),
+			file.content.as_bytes(),
+			&file.rel_path,
+		);
+
+		// Convert to BoundaryCallsite and emit.
+		for raw in raw_calls {
+			let callsite = convert_raw_to_callsite(&raw, &file.rel_path, repo_uid);
+			// try_emit returns:
+			//   Ok(Some(_)) - surface emitted
+			//   Ok(None) - no binding matched OR guard predicate rejected
+			//   Err(_) - emission logic error (bug in code)
+			if let Err(e) = emitter.try_emit(&callsite) {
+				return Err(ComposeError::Index(format!(
+					"boundary-interaction emitter failed at {}:{}: {}",
+					file.rel_path, raw.location.line_start, e
+				)));
+			}
+		}
+	}
+
+	// Collect emitted facts.
+	let surfaces: Vec<_> = emitter.surfaces().cloned().collect();
+	let channels: Vec<_> = emitter.channels().cloned().collect();
+
+	if surfaces.is_empty() {
+		return Ok(0);
+	}
+
+	// Persist to storage.
+	let surface_count = storage
+		.insert_boundary_surfaces(&surfaces)
+		.map_err(|e| ComposeError::Index(format!("boundary-interaction storage: {}", e)))?;
+
+	storage
+		.insert_boundary_channels(&channels)
+		.map_err(|e| ComposeError::Index(format!("boundary-interaction storage: {}", e)))?;
+
+	Ok(surface_count)
+}
+
+/// Convert a raw boundary call to a BoundaryCallsite for the emitter.
+fn convert_raw_to_callsite(raw: &RawBoundaryCall, file_path: &str, repo_uid: &str) -> BoundaryCallsite {
+	// Build enclosing symbol stable key.
+	let enclosing_symbol_key = if raw.enclosing_function.is_empty() {
+		format!("{}:{}:FILE", repo_uid, file_path)
+	} else {
+		format!(
+			"{}:{}#{}:SYMBOL:FUNCTION",
+			repo_uid, file_path, raw.enclosing_function
+		)
+	};
+
+	BoundaryCallsite {
+		language: BiLanguage::C,
+		function_name: raw.function_name.clone(),
+		location: raw.location.clone(),
+		source_file: file_path.to_string(),
+		enclosing_symbol_key,
+		extracted_argument: raw.extracted_argument.clone(),
+		argument_index: raw.argument_index,
+		raw_argument_text: None,
+		socket_family: raw.socket_family.map(convert_socket_family),
+		mmap_flags: raw.mmap_flags.map(convert_mmap_flags),
+		mknod_mode: raw.mknod_mode,
+	}
+}
+
+fn convert_socket_family(raw: RawSocketFamily) -> SocketFamily {
+	match raw {
+		RawSocketFamily::Unix => SocketFamily::Unix,
+		RawSocketFamily::Inet => SocketFamily::Inet,
+		RawSocketFamily::Inet6 => SocketFamily::Inet6,
+		RawSocketFamily::Can => SocketFamily::Can,
+	}
+}
+
+fn convert_mmap_flags(raw: RawMmapFlags) -> MmapFlags {
+	match raw {
+		RawMmapFlags::Shared => MmapFlags::Shared,
+		RawMmapFlags::Private => MmapFlags::Private,
+	}
+}
+
 // ── Full index ───────────────────────────────────────────────────
 
 /// Index a repo from disk into an existing StorageConnection.
@@ -604,6 +743,10 @@ pub fn index_into_storage(
 	// PF-1: Extract and persist STATUS_MAPPING policy facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
 	persist_policy_facts(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
+
+	// BI-1A: Extract and persist boundary interaction facts from C files.
+	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
+	persist_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
 	Ok(result)
 }
@@ -704,6 +847,10 @@ pub fn refresh_into_storage(
 	// PF-1: Extract and persist STATUS_MAPPING policy facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
 	persist_policy_facts(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
+
+	// BI-1A: Extract and persist boundary interaction facts from C files.
+	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
+	persist_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
 	Ok(result)
 }

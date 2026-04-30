@@ -64,6 +64,11 @@ repo-graph-state-extractor = { path = "../state-extractor" }
 # extraction-time integration when C extractor carries policy-fact output.
 # See docs/TECH-DEBT.md: "PF-1 temporary re-parse postpass".
 repo-graph-policy-facts = { path = "../policy-facts" }
+# Boundary-interaction extraction (BI-1A).
+# TEMPORARY: Re-parses C files as a postpass. Same architecture as PF-1.
+# See docs/TECH-DEBT.md: "Boundary Interaction Extraction — Slice 1A".
+repo-graph-boundary-interaction = { path = "../boundary-interaction" }
+repo-graph-boundary-interaction-extractor = { path = "../boundary-interaction-extractor" }
 
 # Filesystem walking.
 walkdir = "2"

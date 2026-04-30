@@ -1,0 +1,23 @@
+[package]
+name = "repo-graph-boundary-interaction-extractor"
+version = "0.1.0"
+edition = "2021"
+description = "Boundary interaction extraction adapter for IPC and inter-device communication"
+license = "MIT"
+publish = false
+
+[dependencies]
+# Policy substrate
+repo-graph-boundary-interaction = { path = "../boundary-interaction" }
+
+# Extraction output types (for bridging to ExtractedNode/ExtractedEdge if needed)
+repo-graph-classification = { path = "../classification" }
+
+# Serialization for evidence structs
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+
+[dev-dependencies]

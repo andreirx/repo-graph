@@ -498,6 +498,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-boundary-interaction"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "toml",
+]
+
+[[package]]
+name = "repo-graph-boundary-interaction-extractor"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-boundary-interaction",
+ "repo-graph-classification",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "repo-graph-c-extractor"
 version = "0.1.0"
 dependencies = [
@@ -663,6 +684,8 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "ignore",
+ "repo-graph-boundary-interaction",
+ "repo-graph-boundary-interaction-extractor",
  "repo-graph-c-extractor",
  "repo-graph-classification",
  "repo-graph-cpp-extractor",
@@ -750,6 +773,7 @@ name = "repo-graph-storage"
 version = "0.1.0"
 dependencies = [
  "repo-graph-agent",
+ "repo-graph-boundary-interaction",
  "repo-graph-classification",
  "repo-graph-doc-facts",
  "repo-graph-gate",
