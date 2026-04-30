@@ -65,7 +65,61 @@ Retained DBs must:
 - Include date in filename
 - Be explicitly named in the verification report
 
-## Command Templates
+## Script Wrappers
+
+Use these scripts instead of raw cargo commands. They enforce correct
+manifest paths, package names, and DB locations.
+
+### Unit/Integration Tests
+
+```bash
+# All tests for repo-graph-rgr
+./scripts/test-rgr-crate.sh
+
+# Specific test file
+./scripts/test-rgr-crate.sh --test modules_list_command
+
+# Filter within tests
+./scripts/test-rgr-crate.sh -- envelope_contract
+```
+
+### Integration Tests (by name)
+
+```bash
+# Run specific integration test files
+./scripts/test-rgr-integration.sh modules_list_command
+./scripts/test-rgr-integration.sh envelope_contract check_command
+```
+
+### Single Repo Smoke
+
+```bash
+# Smoke a single command on a repo
+./scripts/smoke-rmap.sh <task> <repo-path> <command> [args...]
+
+# Examples
+./scripts/smoke-rmap.sh slice-12 . trust
+./scripts/smoke-rmap.sh pf-2 ../legacy-codebases/swupdate policy --kind BEHAVIORAL_MARKER
+./scripts/smoke-rmap.sh modules-test . modules list
+```
+
+### Validation Repos Smoke
+
+```bash
+# Run on all validation repos with default commands (trust, modules, check)
+./scripts/smoke-validation-repos.sh <task>
+
+# Run specific commands on all validation repos
+./scripts/smoke-validation-repos.sh <task> trust orient check
+
+# Examples
+./scripts/smoke-validation-repos.sh slice-12
+./scripts/smoke-validation-repos.sh quality-gate trust check orient
+```
+
+## Manual Command Templates
+
+For cases where scripts are insufficient.
 
 ### Setup
 
@@ -98,13 +152,6 @@ cargo run --manifest-path "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph
 cargo run --manifest-path "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust/Cargo.toml" \
   -p repo-graph-rgr -- \
   <command> /private/tmp/repo-graph-tests/<task>/repo-graph.db repo-graph [args...]
-```
-
-### Unit/integration tests
-
-```bash
-cd "/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/rust"
-cargo test -p <crate> -- <filter>
 ```
 
 ### Cleanup
@@ -150,21 +197,51 @@ Agents must never:
 
 ## Validation Repos
 
-Standard validation targets (paths relative to repo-graph parent):
+Hybrid inventory model: internal repos are explicitly listed, legacy repos
+are discovered dynamically from a bucket directory.
+
+### Internal repos (explicit)
 
 | Repo | Path | DB name |
 |------|------|---------|
 | repo-graph | `.` | `repo-graph.db` |
 | amodx | `../amodx` | `amodx.db` |
-| glamCRM | `../glamCRM` | `glamcrm.db` |
+| glamCRM | `../glamCRM` | `glamCRM.db` |
 | hexmanos | `../hexmanos` | `hexmanos.db` |
-| spring-petclinic | `../legacy-codebases/spring-petclinic` | `spring-petclinic.db` |
-| swupdate | external | `swupdate.db` |
+| zap-engine | `../zap-engine` | `zap-engine.db` |
+
+### Legacy repos (discovered)
+
+Bucket path: `../legacy-codebases/`
+
+Discovery rules:
+- directories only
+- hidden entries skipped (`.git`, `.cache`, etc.)
+- sorted lexicographically
+
+To add a legacy repo: drop it into `../legacy-codebases/`. No script edit needed.
+
+Current typical contents: `spring-petclinic`, `swupdate`, `sqlite`, `nginx`, `linux`, etc.
 
 Full path example for swupdate validation:
 ```
 /private/tmp/repo-graph-tests/pf-2-swupdate/swupdate.db
 ```
+
+### Running validation smoke
+
+Use the `smoke-validation-repos.sh` script:
+
+```bash
+# Default commands (trust, modules, check) on all repos (internal + discovered legacy)
+./scripts/smoke-validation-repos.sh slice-12
+
+# Specific commands
+./scripts/smoke-validation-repos.sh quality-gate trust orient check
+```
+
+The script indexes each repo if needed, runs the specified commands,
+and reports pass/fail summary.
 
 ## Run Logging
 
