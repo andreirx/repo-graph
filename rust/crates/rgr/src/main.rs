@@ -42,6 +42,10 @@
 //!   rmap boundaries show <db_path> <repo_uid> <surface_uid>
 //!   rmap boundaries summary <db_path> <repo_uid>
 //!
+//!   rmap contracts list <db_path> <repo_uid> [--kind protobuf]
+//!   rmap contracts show <db_path> <repo_uid> <file_path>
+//!   rmap contracts elements <db_path> <repo_uid> [--kind message|enum|service|method|field] [--file <path>]
+//!
 //!   rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER] [--file <path>]
 //!
 //! Exit codes:
@@ -63,10 +67,11 @@ mod coverage;
 
 use cli::print_usage;
 use commands::{
-    run_assess, run_boundaries, run_callers, run_callees, run_check_cmd, run_churn, run_coverage,
-    run_cycles, run_dead, run_declare, run_docs, run_explain_cmd, run_gate, run_hotspots,
-    run_imports, run_index, run_metrics, run_modules, run_orient, run_path, run_policy,
-    run_refresh, run_resource, run_risk, run_stats, run_surfaces, run_trust, run_violations,
+    run_assess, run_boundaries, run_callers, run_callees, run_check_cmd, run_churn, run_contracts,
+    run_coverage, run_cycles, run_dead, run_declare, run_docs, run_explain_cmd, run_gate,
+    run_hotspots, run_imports, run_index, run_metrics, run_modules, run_orient, run_path,
+    run_policy, run_refresh, run_resource, run_risk, run_stats, run_surfaces, run_trust,
+    run_violations,
 };
 use std::process::ExitCode;
 
@@ -106,6 +111,7 @@ fn main() -> ExitCode {
 		"modules" => run_modules(&args[2..]),
 		"surfaces" => run_surfaces(&args[2..]),
 		"boundaries" => run_boundaries(&args[2..]),
+		"contracts" => run_contracts(&args[2..]),
 		"policy" => run_policy(&args[2..]),
 		other => {
 			eprintln!("unknown command: {}", other);

@@ -68,5 +68,5 @@ pub use query::{
 pub use surface::BoundaryInteractionSurface;
 pub use types::{
     BoundaryScope, ChannelKind, Direction, EndpointLocality, InteractionBasis, InteractionPattern,
-    ProtocolFamily,
+    ProtocolFamily, TransportClass,
 };

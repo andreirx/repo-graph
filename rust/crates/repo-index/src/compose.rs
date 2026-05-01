@@ -14,6 +14,7 @@ use std::path::Path;
 
 use repo_graph_indexer::extractor_port::ExtractorPort;
 use repo_graph_indexer::orchestrator::{self, FileInput};
+use repo_graph_indexer::proto_indexer::ProtoFileInput;
 use repo_graph_indexer::routing;
 use repo_graph_indexer::storage_port::SnapshotLifecyclePort;
 use repo_graph_indexer::types::{IndexOptions, IndexResult};
@@ -92,13 +93,19 @@ impl Default for ComposeOptions {
 /// Carries both readable files and read-failed paths so callers
 /// can handle the read-failure contract correctly.
 pub struct PreparedRepoInputs {
-	/// Readable files with config attached, ready for the orchestrator.
+	/// Readable source files with config attached, ready for the orchestrator.
 	pub file_inputs: Vec<FileInput>,
 	/// Paths that were discovered but could not be read.
 	pub read_failed_paths: Vec<String>,
+	/// Contract files (e.g., .proto) for the contract indexing subpipeline.
+	pub contract_file_inputs: Vec<ProtoFileInput>,
 }
 
 /// Scan the repo, resolve config per file, assemble typed FileInput.
+///
+/// Files are partitioned into:
+/// - `file_inputs`: source files for the language extraction pipeline
+/// - `contract_file_inputs`: contract files (e.g., .proto) for the contract pipeline
 pub fn prepare_repo_inputs(
 	repo_path: &Path,
 ) -> Result<PreparedRepoInputs, ComposeError> {
@@ -106,11 +113,24 @@ pub fn prepare_repo_inputs(
 	let mut config_ctx = RepoConfigContext::new();
 
 	let mut file_inputs = Vec::new();
+	let mut contract_file_inputs = Vec::new();
 	let mut read_failed_paths = Vec::new();
 
 	for file in &scanned {
 		match file {
 			ScannedFile::Ok(ok) => {
+				// Check for contract file extension first (e.g., .proto).
+				// Contract files go to the contract pipeline, not language extraction.
+				let ext = routing::get_extension(&ok.rel_path);
+				if routing::is_contract_extension(ext) {
+					contract_file_inputs.push(ProtoFileInput {
+						rel_path: ok.rel_path.clone(),
+						content: ok.content.clone(),
+						content_hash: ok.content_hash.clone(),
+					});
+					continue;
+				}
+
 				// Language-aware dependency resolution — explicit per language.
 				// Only the owning manifest type is resolved per language.
 				// No language-specific fallback: Java/C/C++ files receive empty
@@ -166,6 +186,7 @@ pub fn prepare_repo_inputs(
 	Ok(PreparedRepoInputs {
 		file_inputs,
 		read_failed_paths,
+		contract_file_inputs,
 	})
 }
 
@@ -721,6 +742,7 @@ pub fn index_into_storage(
 		&mut extractors,
 		repo_uid,
 		&prepared.file_inputs,
+		&prepared.contract_file_inputs,
 		&mut idx_options,
 		Some(&mut sb_hook),
 	)
@@ -825,6 +847,7 @@ pub fn refresh_into_storage(
 		&mut extractors,
 		repo_uid,
 		&prepared.file_inputs,
+		&prepared.contract_file_inputs,
 		&mut idx_options,
 		Some(&mut sb_hook),
 	)

@@ -103,6 +103,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "contract-schema"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -605,7 +613,9 @@ dependencies = [
 name = "repo-graph-indexer"
 version = "0.1.0"
 dependencies = [
+ "contract-schema",
  "repo-graph-classification",
+ "repo-graph-proto-parser",
  "serde",
  "serde_json",
  "uuid",
@@ -643,6 +653,17 @@ dependencies = [
  "serde_json",
  "tree-sitter",
  "tree-sitter-c",
+]
+
+[[package]]
+name = "repo-graph-proto-parser"
+version = "0.1.0"
+dependencies = [
+ "contract-schema",
+ "serde",
+ "serde_json",
+ "tree-sitter",
+ "tree-sitter-proto",
 ]
 
 [[package]]
@@ -1121,6 +1142,16 @@ name = "tree-sitter-language"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
+
+[[package]]
+name = "tree-sitter-proto"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e4360b434b5980fc397137ef29e1988619fef4159ac86fa7ac5777d459d3924"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
 
 [[package]]
 name = "tree-sitter-python"

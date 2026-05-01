@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::{
     BoundaryScope, ChannelKind, Direction, EndpointLocality, InteractionBasis, InteractionPattern,
-    ProtocolFamily,
+    ProtocolFamily, TransportClass,
 };
 
 /// Level 1 boundary interaction fact.
@@ -63,6 +63,21 @@ pub struct BoundaryInteractionSurface {
 
     /// Role of this symbol in the interaction.
     pub direction: Direction,
+
+    /// Transport mechanism class (orthogonal to scope).
+    /// Added by multi-track boundary detection (migration 025).
+    /// Optional for backward compatibility with BI-1A surfaces.
+    pub transport_class: Option<TransportClass>,
+
+    /// How the boundary fact was discovered.
+    /// Added by multi-track boundary detection (migration 025).
+    /// Optional for backward compatibility with BI-1A surfaces.
+    pub provenance: Option<String>,
+
+    /// Basis for confidence assessment.
+    /// Added by multi-track boundary detection (migration 025).
+    /// Optional for backward compatibility with BI-1A surfaces.
+    pub confidence_basis: Option<String>,
 
     // ── Protocol ──────────────────────────────────────────────────
     /// Low-level protocol identifier (e.g., "unix", "tcp", "shm").
@@ -205,6 +220,9 @@ pub struct SurfaceBuilder {
     boundary_scope: Option<BoundaryScope>,
     channel_kind: Option<ChannelKind>,
     direction: Option<Direction>,
+    transport_class: Option<TransportClass>,
+    provenance: Option<String>,
+    confidence_basis: Option<String>,
     protocol: Option<String>,
     interaction_pattern: Option<InteractionPattern>,
     endpoint_locality: Option<EndpointLocality>,
@@ -253,6 +271,24 @@ impl SurfaceBuilder {
     /// Set direction.
     pub fn direction(mut self, dir: Direction) -> Self {
         self.direction = Some(dir);
+        self
+    }
+
+    /// Set transport class (optional, for multi-track boundary detection).
+    pub fn transport_class(mut self, class: TransportClass) -> Self {
+        self.transport_class = Some(class);
+        self
+    }
+
+    /// Set provenance (optional, for multi-track boundary detection).
+    pub fn provenance(mut self, prov: impl Into<String>) -> Self {
+        self.provenance = Some(prov.into());
+        self
+    }
+
+    /// Set confidence basis (optional, for multi-track boundary detection).
+    pub fn confidence_basis(mut self, basis: impl Into<String>) -> Self {
+        self.confidence_basis = Some(basis.into());
         self
     }
 
@@ -356,6 +392,9 @@ impl SurfaceBuilder {
             boundary_scope: self.boundary_scope.ok_or("boundary_scope is required")?,
             channel_kind,
             direction,
+            transport_class: self.transport_class,
+            provenance: self.provenance,
+            confidence_basis: self.confidence_basis,
             protocol: self.protocol.ok_or("protocol is required")?,
             protocol_family,
             interaction_pattern: self

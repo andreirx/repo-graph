@@ -19,6 +19,7 @@
 
 mod assess;
 mod boundaries;
+mod contracts;
 mod dead;
 mod declare;
 mod docs;
@@ -35,6 +36,7 @@ mod trust;
 
 pub use assess::run_assess;
 pub use boundaries::run_boundaries;
+pub use contracts::run_contracts;
 pub use dead::run_dead;
 pub use declare::run_declare;
 pub use docs::run_docs;

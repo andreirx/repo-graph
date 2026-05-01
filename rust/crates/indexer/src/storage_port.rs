@@ -487,3 +487,104 @@ where
 {
 	type StorageError = E;
 }
+
+// ── Proto schema store (CS-1) ────────────────────────────────────
+
+/// Input for inserting a contract schema file.
+///
+/// Represents a parsed IDL file (e.g., `.proto`) ready for persistence.
+/// The indexer builds this from `ProtoFile` + snapshot context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtoSchemaInput {
+	/// Unique identifier for this schema (deterministic, based on path + content).
+	pub schema_uid: String,
+
+	/// Snapshot this schema belongs to.
+	pub snapshot_uid: String,
+
+	/// Repository this schema belongs to.
+	pub repo_uid: String,
+
+	/// Schema kind ("protobuf", "grpc", etc.).
+	pub schema_kind: String,
+
+	/// Repo-relative path to the IDL file.
+	pub file_path: String,
+
+	/// Package namespace (e.g., "api.v1").
+	pub package_name: Option<String>,
+
+	/// Syntax version ("proto2", "proto3").
+	pub syntax_version: Option<String>,
+
+	/// SHA-256 hash of file content for cache invalidation.
+	pub content_hash: String,
+
+	/// JSON array of imported file paths.
+	pub imports_json: Option<String>,
+
+	/// JSON object of file-level options.
+	pub options_json: Option<String>,
+
+	/// Extractor identifier (e.g., "proto-parser:0.1.0").
+	pub extractor: String,
+}
+
+/// Input for inserting a contract element.
+///
+/// Represents a named element within a schema file (message, enum,
+/// service, method, field, enum_value).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtoElementInput {
+	/// Unique identifier for this element.
+	pub element_uid: String,
+
+	/// Schema this element belongs to.
+	pub schema_uid: String,
+
+	/// Element kind ("message", "enum", "service", "method", "field", "enum_value").
+	pub element_kind: String,
+
+	/// Short name without package prefix.
+	pub name: String,
+
+	/// Fully qualified name (package.OuterMessage.InnerMessage).
+	pub full_name: String,
+
+	/// Parent element UID for nested elements (None for top-level).
+	pub parent_element_uid: Option<String>,
+
+	/// Source line where element starts.
+	pub line_start: Option<u32>,
+
+	/// Source line where element ends.
+	pub line_end: Option<u32>,
+
+	/// Element-specific details as JSON.
+	pub metadata_json: Option<String>,
+}
+
+/// Storage port for proto schema write operations (CS-1).
+///
+/// The indexer (policy) owns this interface. The storage crate (adapter)
+/// implements it. Write-only — read operations for CLI queries are
+/// defined separately in the storage crate's `ContractSchemaStoragePort`.
+pub trait ProtoSchemaStorePort {
+	/// Error type for storage operations.
+	type Error: std::fmt::Debug + std::fmt::Display;
+
+	/// Insert a contract schema. Uses INSERT OR IGNORE for idempotency.
+	fn insert_proto_schema(
+		&mut self,
+		input: &ProtoSchemaInput,
+	) -> Result<(), Self::Error>;
+
+	/// Insert multiple contract elements.
+	///
+	/// Elements should be ordered such that parents come before children
+	/// (for nested messages/enums). Uses INSERT OR IGNORE.
+	fn insert_proto_elements(
+		&mut self,
+		elements: &[ProtoElementInput],
+	) -> Result<usize, Self::Error>;
+}

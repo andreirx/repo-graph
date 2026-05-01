@@ -1182,6 +1182,56 @@ source-anchor provenance, or queryability.
 See slice docs: `docs/slices/pf-1-status-mapping.md`, `docs/slices/pf-2-behavioral-marker.md`.
 Design doc: `docs/design/policy-facts-support-module.md`.
 
+### 15. Multi-track boundary detection (design phase)
+
+Two-track architecture for boundary detection over a unified model:
+
+**Track A: Raw Transport**
+- BI-1B: TCP/UDP sockets (scope heuristics, endpoint extraction)
+- BI-1C: SharedArrayBuffer (JS/TS worker boundaries)
+- BI-1D: Process signals (POSIX signal send/handle)
+
+**Track B: Schema-Backed RPC**
+- CS-1: Protobuf schema extraction (.proto parser)
+- CS-2: Generated code provenance mapping
+- GR-1: gRPC server detection (registration, handlers)
+- GR-2: gRPC client detection (stubs, invocations)
+- GR-3: gRPC provider/consumer linking
+- ER-1: eRPC IDL extraction (future)
+
+**Message Broker Track (after A+B):**
+- MB-1: RabbitMQ / AMQP basic detection
+- MB-2: Kafka topic detection
+- MB-3: NATS / Redis pub-sub detection
+- MB-4: Cloud broker detection (future: SQS, SNS, Pub/Sub, EventBridge)
+
+**Confirmed implementation order:**
+1. CS-1 (Protobuf schema) — COMPLETE (full dual-pipeline, CLI wired, smoke tested)
+2. CS-2 (Generated code mapping)
+3. GR-1 (gRPC server)
+4. GR-2 (gRPC client)
+5. GR-3 (gRPC linking)
+6. BI-1B (TCP/UDP sockets)
+7. BI-1D (Process signals)
+8. BI-1C (SharedArrayBuffer)
+9. MB-1 (RabbitMQ/AMQP)
+10. MB-2 (Kafka)
+11. MB-3 (NATS/Redis) — start
+
+**Shared infrastructure:**
+- Contract/IDL substrate module (`repo-graph-contract-schema`)
+- Storage schema extension (contract_schemas, contract_elements, boundary_contracts)
+- Transport expansion module (channel kinds, scope heuristics)
+
+**Detection maturity ladder:**
+1. Mechanism presence (cheap, broad)
+2. Boundary surfaces (provider/consumer roles, channel identity)
+3. Contract association (message/service/layout crossing boundary)
+4. Provider/consumer linking (cross-language edges)
+
+Design doc: `docs/design/boundary-detection-multitrack.md`.
+Slice docs: `docs/slices/bi-*.md`, `docs/slices/cs-*.md`, `docs/slices/gr-*.md`, `docs/slices/mb-*.md`.
+
 ## Deferred
 
 ### Dead-code public surface reintroduction (blocked)

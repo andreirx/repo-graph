@@ -422,6 +422,16 @@ impl BoundaryInteractionEmitter {
         let protocol = protocol_for_channel_kind(binding.channel_kind);
         let protocol_family = ProtocolFamily::from(binding.channel_kind);
 
+        // Track A surfaces derive transport_class from channel_kind
+        let transport_class = binding.channel_kind.default_transport_class();
+
+        // Provenance identifies the evidence source for Track A:
+        // format is "api:<family>:<function>" to distinguish from Track B schema-backed
+        let provenance = format!("api:{}:{}", binding.api_family, callsite.function_name);
+
+        // Confidence basis explains the default confidence derivation
+        let confidence_basis = format!("{}-match", binding.basis.as_str());
+
         Ok(BoundaryInteractionSurface {
             surface_uid,
             snapshot_uid: self.context.snapshot_uid.clone(),
@@ -429,6 +439,9 @@ impl BoundaryInteractionEmitter {
             boundary_scope: scope,
             channel_kind: binding.channel_kind,
             direction,
+            transport_class: Some(transport_class),
+            provenance: Some(provenance),
+            confidence_basis: Some(confidence_basis),
             protocol: protocol.to_string(),
             protocol_family,
             interaction_pattern: binding.interaction_pattern,
@@ -544,6 +557,10 @@ fn protocol_for_channel_kind(kind: ChannelKind) -> &'static str {
         ChannelKind::AnonymousPipe => "pipe",
         ChannelKind::SharedMemory => "shm",
         ChannelKind::MessageQueue => "mqueue",
+        ChannelKind::SharedArrayBuffer => "sab",
+        ChannelKind::GrpcChannel => "grpc",
+        ChannelKind::ProtobufStream => "protobuf",
+        ChannelKind::ErpcChannel => "erpc",
         ChannelKind::SerialPort => "serial",
         ChannelKind::CanMessage => "can",
         ChannelKind::MqttTopic => "mqtt",

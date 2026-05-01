@@ -21,6 +21,7 @@ resolver = "2"
 members = [
     "crates/agent",
     "crates/boundary-interaction",
+    "crates/contract-schema",
     "crates/boundary-interaction-extractor",
     "crates/c-extractor",
     "crates/classification",
@@ -34,6 +35,7 @@ members = [
     "crates/java-extractor",
     "crates/module-queries",
     "crates/policy-facts",
+    "crates/proto-parser",
     "crates/python-extractor",
     "crates/quality-policy",
     "crates/quality-policy-runner",

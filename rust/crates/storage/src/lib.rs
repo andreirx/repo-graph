@@ -157,6 +157,8 @@
 //! R24:  `get_active_requirement_declarations`.
 
 pub mod connection;
+pub mod contract_schema_port; // Contract schema storage port (CS-1)
+mod contract_schema_impl; // ContractSchemaStoragePort impl for StorageConnection
 pub mod crud;
 pub(crate) mod diagnostic;
 pub mod error;
@@ -166,6 +168,7 @@ mod boundary_interaction_impl; // Boundary interaction write storage (BI-1A)
 mod boundary_interaction_read_impl; // Boundary interaction read port (BI-1A)
 mod gate_impl; // GateStorageRead impl for StorageConnection (Rust-43A)
 mod indexer_impl; // SnapshotLifecyclePort + FileCatalogPort impl (R5-C)
+mod proto_schema_impl; // ProtoSchemaStorePort impl for StorageConnection (CS-1)
 pub mod quality_policy_port; // Quality policy storage port (QP-Step-5)
 mod quality_policy_impl; // QualityPolicyStoragePort impl for StorageConnection
 pub mod queries; // Read-side graph queries (R10+)

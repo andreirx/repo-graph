@@ -506,6 +506,129 @@
           "pk": 0
         }
       ],
+      "boundary_contracts": [
+        {
+          "name": "association_basis",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "association_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "name": "confidence",
+          "type": "REAL",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "contract_element_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "contract_kind",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "evidence_json",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "surface_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
+      "boundary_interaction_links": [
+        {
+          "name": "confidence",
+          "type": "REAL",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "consumer_surface_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "contract_element_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "evidence_json",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "link_kind",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "link_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "name": "match_basis",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "materialized_at",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "provider_surface_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "snapshot_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
       "boundary_interaction_surfaces": [
         {
           "name": "basis",
@@ -546,6 +669,13 @@
           "name": "confidence",
           "type": "REAL",
           "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "confidence_basis",
+          "type": "TEXT",
+          "notnull": false,
           "dflt_value": null,
           "pk": 0
         },
@@ -613,6 +743,13 @@
           "pk": 0
         },
         {
+          "name": "provenance",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
           "name": "repo_uid",
           "type": "TEXT",
           "notnull": true,
@@ -644,6 +781,13 @@
           "name": "symbol_stable_key",
           "type": "TEXT",
           "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "transport_class",
+          "type": "TEXT",
+          "notnull": false,
           "dflt_value": null,
           "pk": 0
         }
@@ -823,6 +967,157 @@
           "name": "source_file",
           "type": "TEXT",
           "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
+      "contract_elements": [
+        {
+          "name": "element_kind",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "element_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "name": "full_name",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "line_end",
+          "type": "INTEGER",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "line_start",
+          "type": "INTEGER",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "metadata_json",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "parent_element_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "schema_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
+      "contract_schemas": [
+        {
+          "name": "content_hash",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "extractor",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "file_path",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "imports_json",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "options_json",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "package_name",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "parsed_at",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "repo_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "schema_kind",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "schema_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "name": "snapshot_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "syntax_version",
+          "type": "TEXT",
+          "notnull": false,
           "dflt_value": null,
           "pk": 0
         }
@@ -1290,6 +1585,71 @@
         },
         {
           "name": "repo_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
+      "generated_code_mappings": [
+        {
+          "name": "confidence",
+          "type": "REAL",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "generated_file",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "generated_symbol_key",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "language",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "mapping_basis",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "mapping_uid",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "name": "metadata_json",
+          "type": "TEXT",
+          "notnull": false,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "schema_element_uid",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "name": "snapshot_uid",
           "type": "TEXT",
           "notnull": true,
           "dflt_value": null,
@@ -3148,15 +3508,22 @@
       "idx_annotations_kind",
       "idx_annotations_target",
       "idx_artifacts_snapshot",
+      "idx_bc_contract_element",
+      "idx_bc_contract_kind",
       "idx_bc_facts_snapshot_caller",
       "idx_bc_facts_snapshot_matcher_key",
       "idx_bc_facts_snapshot_mechanism",
+      "idx_bc_surface",
       "idx_bcd_channel_identity",
       "idx_bcd_channel_kind",
       "idx_bcd_surface",
       "idx_behavioral_markers_file",
       "idx_behavioral_markers_kind",
       "idx_behavioral_markers_snapshot",
+      "idx_bil_consumer",
+      "idx_bil_contract",
+      "idx_bil_provider",
+      "idx_bil_snapshot",
       "idx_bis_snapshot_file",
       "idx_bis_snapshot_kind",
       "idx_bis_snapshot_protocol",
@@ -3168,6 +3535,13 @@
       "idx_bp_facts_snapshot_handler",
       "idx_bp_facts_snapshot_matcher_key",
       "idx_bp_facts_snapshot_mechanism",
+      "idx_ce_full_name",
+      "idx_ce_kind",
+      "idx_ce_parent",
+      "idx_ce_schema",
+      "idx_cs_snapshot_file",
+      "idx_cs_snapshot_kind",
+      "idx_cs_snapshot_package",
       "idx_declarations_active",
       "idx_declarations_target",
       "idx_edges_snapshot_dst",
@@ -3185,6 +3559,10 @@
       "idx_fs_mut_evidence_identity",
       "idx_fs_mut_evidence_snapshot",
       "idx_fs_mut_evidence_surface",
+      "idx_gcm_language",
+      "idx_gcm_schema_element",
+      "idx_gcm_snapshot",
+      "idx_gcm_symbol",
       "idx_inferences_kind",
       "idx_inferences_target",
       "idx_mdd_snapshot",
@@ -3449,6 +3827,11 @@
       {
         "version": 24,
         "name": "024-boundary-interactions",
+        "applied_at": "<TIMESTAMP>"
+      },
+      {
+        "version": 25,
+        "name": "025-contract-schema",
         "applied_at": "<TIMESTAMP>"
       }
     ],

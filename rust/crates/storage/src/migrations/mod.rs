@@ -107,8 +107,9 @@ pub mod migration_021;
 pub mod migration_022;
 pub mod migration_023;
 pub mod migration_024;
+pub mod migration_025;
 
-/// Apply all 24 storage migrations to the given connection.
+/// Apply all 25 storage migrations to the given connection.
 ///
 /// Sets connection-level pragmas, runs migration 001
 /// unconditionally (idempotent via `CREATE TABLE IF NOT EXISTS`),
@@ -229,6 +230,9 @@ pub fn run_migrations(conn: &mut Connection) -> Result<(), StorageError> {
 	if max_version < 24 {
 		migration_024::run(conn)?;
 	}
+	if max_version < 25 {
+		migration_025::run(conn)?;
+	}
 
 	Ok(())
 }
@@ -347,17 +351,17 @@ mod tests {
 	// ── Category 1: Schema creation parity ────────────────────
 
 	#[test]
-	fn run_migrations_applies_all_twenty_four_migrations() {
+	fn run_migrations_applies_all_twenty_five_migrations() {
 		let mut conn = fresh_conn();
 		run_migrations(&mut conn).expect("run all migrations");
 
-		// schema_migrations table exists and contains rows 1..=23
+		// schema_migrations table exists and contains rows 1..=25
 		let count: i64 = conn
 			.query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
 				row.get(0)
 			})
 			.unwrap();
-		assert_eq!(count, 24, "expected 24 migration rows after full run");
+		assert_eq!(count, 25, "expected 25 migration rows after full run");
 	}
 
 	#[test]
@@ -428,6 +432,12 @@ mod tests {
 			// 024-boundary-interactions
 			"boundary_interaction_surfaces",
 			"boundary_channel_details",
+			// 025-contract-schema
+			"contract_schemas",
+			"contract_elements",
+			"generated_code_mappings",
+			"boundary_contracts",
+			"boundary_interaction_links",
 		];
 
 		for table in expected_tables {
@@ -442,7 +452,7 @@ mod tests {
 	// ── Category 2: Migration version progression parity ─────
 
 	#[test]
-	fn schema_migrations_records_versions_one_through_twenty_four_in_order() {
+	fn schema_migrations_records_versions_one_through_twenty_five_in_order() {
 		let mut conn = fresh_conn();
 		run_migrations(&mut conn).expect("run all migrations");
 
@@ -482,6 +492,7 @@ mod tests {
 			(22, "022-behavioral-markers"),
 			(23, "023-return-fates"),
 			(24, "024-boundary-interactions"),
+			(25, "025-contract-schema"),
 		];
 
 		assert_eq!(rows.len(), expected.len());
@@ -497,13 +508,13 @@ mod tests {
 		run_migrations(&mut conn).expect("first run");
 		run_migrations(&mut conn).expect("second run must not error");
 
-		// Still exactly 23 rows.
+		// Still exactly 25 rows.
 		let count: i64 = conn
 			.query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
 				row.get(0)
 			})
 			.unwrap();
-		assert_eq!(count, 24, "re-run must not duplicate schema_migrations rows");
+		assert_eq!(count, 25, "re-run must not duplicate schema_migrations rows");
 
 		// Each version still appears exactly once.
 		let mut stmt = conn

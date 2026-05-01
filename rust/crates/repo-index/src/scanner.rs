@@ -100,9 +100,11 @@ pub fn scan_repo(repo_path: &Path) -> Result<Vec<ScannedFile>, ScanError> {
 			continue;
 		}
 
-		// Check source extension.
+		// Check source or contract extension.
+		// Source files go to language extractors; contract files (e.g., .proto)
+		// go to the contract indexing subpipeline. Both are admitted by the scanner.
 		let ext = routing::get_extension(&rel_path);
-		if !routing::is_source_extension(ext) {
+		if !routing::is_source_extension(ext) && !routing::is_contract_extension(ext) {
 			continue;
 		}
 

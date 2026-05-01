@@ -1768,3 +1768,38 @@ Policy Signals verified on swupdate/corelib regeneration:
 
 The hints surface the correct architectural seams. They do not provide the
 provenance or queryability that a support module would deliver.
+
+## Contract Schema Extraction (CS-1)
+
+### Current state
+
+- Parser: `contract-schema` crate with tree-sitter-proto parsing (proto2 + proto3)
+- Storage: `contract_schemas` + `contract_elements` tables, `ProtoSchemaStorePort`
+- Scanner: admits both source and contract extensions (`is_source_extension() || is_contract_extension()`)
+- Orchestrator: Dual-pipeline architecture wired (`index_repo`/`refresh_repo`
+  accept `contract_files` parameter, run proto indexing under shared snapshot
+  lifecycle)
+- File inventory: Contract files tracked in `tracked_files`/`file_versions`,
+  included in `files_total` and `all_file_paths`
+- Parse status: File versions reflect actual parse outcome (`Parsed` vs `Failed`)
+  based on `parse_failures` from proto indexer
+- Compose layer: `prepare_repo_inputs()` partitions files via
+  `routing::is_contract_extension()`, passes contract files to orchestrator
+- Failure semantics: `ContractIndexResult.storage_error` surfaces all storage-level
+  failures explicitly (schema storage + file catalog writes)
+
+### CLI surface
+
+`rmap contracts list/show/elements` commands wired in `commands/contracts.rs`.
+Read-side queries via `ContractSchemaStoragePort`.
+
+### Validation needed
+
+The full pipeline is wired but not yet smoke-tested on real repos with `.proto`
+files. Need to run `rmap index` on a repo with protos and verify:
+- `contract_schemas` table populated
+- `contract_elements` table populated
+- `tracked_files` contains `.proto` entries
+- `IndexResult.contracts` reports correct counts
+
+See `docs/slices/cs-1-protobuf-schema.md` for full spec.

@@ -20,6 +20,10 @@ pub const MAX_FILE_SIZE_BYTES: usize = 1_000_000;
 
 /// Check whether a file extension is in the supported source set.
 /// Mirror of `ALL_SOURCE_EXTENSIONS` from `repo-indexer.ts:174`.
+///
+/// Source files produce nodes/edges/signals via language extractors.
+/// Contract files (proto, IDL) are handled separately — see
+/// `is_contract_extension()`.
 pub fn is_source_extension(ext: &str) -> bool {
 	matches!(
 		ext,
@@ -33,6 +37,37 @@ pub fn is_source_extension(ext: &str) -> bool {
 			| ".cc" | ".cxx"
 			| ".hxx"
 	)
+}
+
+// ── Contract file detection ──────────────────────────────────────
+
+/// Contract file kind for schema-backed RPC and IDL files.
+///
+/// Contract files produce schema facts (schemas, elements), NOT
+/// nodes/edges like source files. They are routed to the contract
+/// indexing subpipeline, not the language extractor routing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContractKind {
+	/// Protocol Buffers (.proto)
+	Protobuf,
+	// Future: Thrift, FlatBuffers, Cap'n Proto, eRPC IDL, etc.
+}
+
+/// Check whether a file extension is a contract/IDL file.
+///
+/// Contract files are NOT routed through language extractors.
+/// They produce schema facts via the contract indexing subpipeline.
+pub fn is_contract_extension(ext: &str) -> bool {
+	matches!(ext, ".proto")
+}
+
+/// Detect the contract kind for a file path based on its extension.
+/// Returns `None` for non-contract files.
+pub fn detect_contract_kind(file_path: &str) -> Option<ContractKind> {
+	match get_extension(file_path) {
+		".proto" => Some(ContractKind::Protobuf),
+		_ => None,
+	}
 }
 
 /// Check whether a directory name is always excluded from scanning.
@@ -515,6 +550,33 @@ mod tests {
 	}
 
 	// ── build_extension_routing_table ─────────────────────────
+
+	// ── contract detection ───────────────────────────────────
+
+	#[test]
+	fn contract_extension_proto() {
+		assert!(is_contract_extension(".proto"));
+	}
+
+	#[test]
+	fn contract_extension_not_source() {
+		// .proto is NOT a source extension
+		assert!(!is_source_extension(".proto"));
+	}
+
+	#[test]
+	fn detect_contract_kind_proto() {
+		assert_eq!(
+			detect_contract_kind("api/v1/user.proto"),
+			Some(ContractKind::Protobuf)
+		);
+	}
+
+	#[test]
+	fn detect_contract_kind_not_contract() {
+		assert_eq!(detect_contract_kind("src/main.rs"), None);
+		assert_eq!(detect_contract_kind("src/index.ts"), None);
+	}
 
 	#[test]
 	fn routing_table_maps_extensions_to_extractor_index() {

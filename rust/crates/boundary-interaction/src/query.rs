@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::{
     BoundaryScope, ChannelKind, Direction, EndpointLocality, InteractionBasis, InteractionPattern,
-    ProtocolFamily,
+    ProtocolFamily, TransportClass,
 };
 
 // ── Filter DTO ───────────────────────────────────────────────────────
@@ -147,6 +147,21 @@ pub struct BoundaryInteractionListItem {
     /// Role in the interaction.
     pub direction: Direction,
 
+    /// Transport class (Track B extension).
+    /// `None` for surfaces extracted before migration 025.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport_class: Option<TransportClass>,
+
+    /// Evidence provenance (e.g., "grpc-stub:UserService.GetUser").
+    /// `None` for surfaces extracted before migration 025.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
+
+    /// Human-readable confidence basis (e.g., "schema-type-match").
+    /// `None` for surfaces extracted before migration 025.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence_basis: Option<String>,
+
     /// Protocol family.
     pub protocol_family: ProtocolFamily,
 
@@ -196,6 +211,22 @@ pub struct BoundaryInteractionDetail {
 
     /// Role in the interaction.
     pub direction: Direction,
+
+    // ── Transport classification (Track B extension) ─────────────
+    /// Transport class: raw socket, raw IPC, schema-RPC, etc.
+    /// `None` for surfaces extracted before migration 025.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport_class: Option<TransportClass>,
+
+    /// Evidence provenance (e.g., "grpc-stub:UserService.GetUser").
+    /// `None` for surfaces extracted before migration 025.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
+
+    /// Human-readable confidence basis (e.g., "schema-type-match").
+    /// `None` for surfaces extracted before migration 025.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence_basis: Option<String>,
 
     // ── Protocol ──────────────────────────────────────────────────
     /// Low-level protocol identifier.
@@ -522,6 +553,9 @@ mod tests {
             channel_kind: ChannelKind::UnixSocket,
             boundary_scope: BoundaryScope::InterProcess,
             direction: Direction::Provider,
+            transport_class: Some(TransportClass::RawIpc),
+            provenance: Some("api:posix:bind".to_string()),
+            confidence_basis: Some("api_call-match".to_string()),
             protocol_family: ProtocolFamily::Socket,
             protocol: "unix".to_string(),
             interaction_pattern: InteractionPattern::Stream,

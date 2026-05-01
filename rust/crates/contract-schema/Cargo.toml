@@ -1,0 +1,13 @@
+[package]
+name = "contract-schema"
+version = "0.1.0"
+edition = "2021"
+description = "Contract/IDL schema substrate for repo-graph boundary detection"
+license = "MIT"
+publish = false
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]

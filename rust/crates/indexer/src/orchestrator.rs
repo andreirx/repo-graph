@@ -43,8 +43,9 @@ use crate::storage_port::{
 	UpdateSnapshotStatusInput,
 };
 use crate::types::{
-	EdgeType, IndexOptions, IndexResult, NodeKind, NodeSubtype,
-	ParseStatus, Resolution, SnapshotKind, SnapshotStatus, ExtractedNode,
+	ContractIndexResult, ContractParseFailure, EdgeType, IndexOptions, IndexResult,
+	NodeKind, NodeSubtype, ParseStatus, Resolution, SnapshotKind, SnapshotStatus,
+	ExtractedNode,
 };
 
 // ── Constants ────────────────────────────────────────────────────
@@ -127,19 +128,25 @@ pub struct FileInput {
 ///   - Scanning the filesystem
 ///   - Reading file content + computing hashes
 ///   - Filtering by include/exclude patterns
-///   - Providing only source-extension files
+///   - Partitioning files into source files and contract files
 ///   - Computing per-file package deps and tsconfig aliases
+///
+/// Contract files (`.proto`, etc.) are handled by a separate
+/// subpipeline that produces schema facts, NOT nodes/edges.
+/// Pass contract files via the `contract_files` parameter.
+/// Both pipelines run under the same snapshot lifecycle.
 ///
 /// Fatal errors (storage or extractor-init failures) abort the
 /// pipeline. On any fatal error after snapshot creation, the
 /// snapshot is transitioned to FAILED before returning.
 /// Non-fatal errors (per-file extraction failures, oversized
 /// files) are recorded in the snapshot diagnostics.
-pub fn index_repo<S: IndexerStoragePort>(
+pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort>(
 	storage: &mut S,
 	extractors: &mut [&mut dyn ExtractorPort],
 	repo_uid: &str,
 	files: &[FileInput],
+	contract_files: &[crate::proto_indexer::ProtoFileInput],
 	options: &mut IndexOptions,
 	hook: Option<&mut dyn crate::hook::ExtractionResultHook>,
 ) -> Result<IndexResult, IndexError<S::StorageError>> {
@@ -191,11 +198,113 @@ pub fn index_repo<S: IndexerStoragePort>(
 	// to FAILED before returning the error.
 	let created_at = snapshot.created_at.clone();
 	let progress = &mut options.on_progress;
-	let all_file_paths: Vec<String> = files.iter().map(|f| f.rel_path.clone()).collect();
+	// Include both source and contract files in all_file_paths for accurate
+	// files_total count and module-node creation.
+	let mut all_file_paths: Vec<String> = files.iter().map(|f| f.rel_path.clone()).collect();
+	all_file_paths.extend(contract_files.iter().map(|f| f.rel_path.clone()));
 	// Full index: no copy-forward, so no copied resource keys.
 	let empty_resource_keys: HashMap<String, crate::storage_port::CopiedResourceNodeKey> = HashMap::new();
 	match run_pipeline(storage, extractors, repo_uid, &snap_uid, files, &all_file_paths, &snapshot_signals, &routing_table, &created_at, options.edge_batch_size, progress, start, hook, &empty_resource_keys, &options.c_include_roots) {
-		Ok(result) => Ok(result),
+		Ok(mut result) => {
+			// ── Contract schema extraction (CS-1+) ───────────────
+			// Run after source extraction but still under the same
+			// snapshot lifecycle. Contract files produce schema facts,
+			// not nodes/edges.
+			if !contract_files.is_empty() {
+				// Index proto schemas first so we know which files failed parsing.
+				let proto_result = crate::proto_indexer::index_proto_files(
+					storage,
+					repo_uid,
+					&snap_uid,
+					contract_files,
+				);
+
+				// Build set of failed file paths for accurate parse_status.
+				let failed_paths: std::collections::HashSet<&str> = match &proto_result {
+					Ok(r) => r.parse_failures.iter().map(|f| f.file_path.as_str()).collect(),
+					Err(_) => std::collections::HashSet::new(),
+				};
+
+				// Track contract files in the file catalog with accurate parse_status.
+				let contract_tracked: Vec<TrackedFile> = contract_files
+					.iter()
+					.map(|f| TrackedFile {
+						file_uid: format!("{}:{}", repo_uid, f.rel_path),
+						repo_uid: repo_uid.to_string(),
+						path: f.rel_path.clone(),
+						language: None,
+						is_test: false,
+						is_generated: false,
+						is_excluded: false,
+					})
+					.collect();
+				let contract_versions: Vec<FileVersion> = contract_files
+					.iter()
+					.map(|f| {
+						let parse_status = if failed_paths.contains(f.rel_path.as_str()) {
+							ParseStatus::Failed
+						} else {
+							ParseStatus::Parsed
+						};
+						FileVersion {
+							snapshot_uid: snap_uid.clone(),
+							file_uid: format!("{}:{}", repo_uid, f.rel_path),
+							content_hash: f.content_hash.clone(),
+							ast_hash: None,
+							extractor: Some("contract-schema".to_string()),
+							parse_status,
+							size_bytes: Some(f.content.len() as u64),
+							line_count: Some(f.content.lines().count() as u64),
+							indexed_at: created_at.clone(),
+						}
+					})
+					.collect();
+
+				// Track file catalog errors explicitly.
+				let mut catalog_errors: Vec<String> = Vec::new();
+				if let Err(e) = storage.upsert_files(&contract_tracked) {
+					catalog_errors.push(format!("upsert_files: {}", e));
+				}
+				if let Err(e) = storage.upsert_file_versions(&contract_versions) {
+					catalog_errors.push(format!("upsert_file_versions: {}", e));
+				}
+
+				// Build result with all errors surfaced.
+				match proto_result {
+					Ok(pr) => {
+						let storage_error = if catalog_errors.is_empty() {
+							None
+						} else {
+							Some(catalog_errors.join("; "))
+						};
+						result.contracts = Some(ContractIndexResult {
+							schemas_indexed: pr.schemas_indexed,
+							elements_indexed: pr.elements_indexed,
+							parse_failures: pr
+								.parse_failures
+								.into_iter()
+								.map(|f| ContractParseFailure {
+									file_path: f.file_path,
+									error: f.error,
+								})
+								.collect(),
+							storage_error,
+						});
+					}
+					Err(schema_err) => {
+						// Schema storage failed. Combine with any catalog errors.
+						catalog_errors.insert(0, format!("schema_storage: {}", schema_err));
+						result.contracts = Some(ContractIndexResult {
+							schemas_indexed: 0,
+							elements_indexed: 0,
+							parse_failures: vec![],
+							storage_error: Some(catalog_errors.join("; ")),
+						});
+					}
+				}
+			}
+			Ok(result)
+		}
 		Err(storage_err) => {
 			// Best-effort: transition to FAILED. If this also fails,
 			// we still return the original error.
@@ -743,6 +852,7 @@ fn run_pipeline<S: IndexerStoragePort>(
 		unresolved_breakdown,
 		duration_ms,
 		orphaned_declarations: 0,
+		contracts: None, // Filled by index_repo after contract subpipeline
 		metrics: all_metrics,
 	})
 }
@@ -960,12 +1070,16 @@ fn build_extraction_diagnostics(
 ///   - No parent snapshot exists
 ///   - Nothing would be copied forward (all files changed/new)
 ///
+/// Contract files (`.proto`, etc.) are always re-indexed on refresh
+/// (no delta optimization for contract schemas yet).
+///
 /// Mirror of `refreshRepo` from `repo-indexer.ts`.
-pub fn refresh_repo<S: IndexerStoragePort>(
+pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort>(
 	storage: &mut S,
 	extractors: &mut [&mut dyn ExtractorPort],
 	repo_uid: &str,
 	current_files: &[FileInput],
+	contract_files: &[crate::proto_indexer::ProtoFileInput],
 	options: &mut IndexOptions,
 	hook: Option<&mut dyn crate::hook::ExtractionResultHook>,
 ) -> Result<IndexResult, IndexError<S::StorageError>> {
@@ -977,7 +1091,7 @@ pub fn refresh_repo<S: IndexerStoragePort>(
 		Some(p) if p.status == SnapshotStatus::Ready => p,
 		_ => {
 			// No ready parent → fall back to full index.
-			return index_repo(storage, extractors, repo_uid, current_files, options, hook);
+			return index_repo(storage, extractors, repo_uid, current_files, contract_files, options, hook);
 		}
 	};
 
@@ -1004,7 +1118,7 @@ pub fn refresh_repo<S: IndexerStoragePort>(
 
 	// If nothing to copy, fall back to full index.
 	if plan.files_to_copy.is_empty() {
-		return index_repo(storage, extractors, repo_uid, current_files, options, hook);
+		return index_repo(storage, extractors, repo_uid, current_files, contract_files, options, hook);
 	}
 
 	// Initialize extractors.
@@ -1107,10 +1221,11 @@ pub fn refresh_repo<S: IndexerStoragePort>(
 		})
 		.collect();
 
-	// Build the FULL file path set: copied + to-extract.
-	// This is used for module-node creation and resolution context.
+	// Build the FULL file path set: copied + to-extract + contract files.
+	// This is used for module-node creation, resolution context, and files_total.
 	let mut all_file_paths: Vec<String> = plan.files_to_copy.clone();
 	all_file_paths.extend(plan.files_to_extract.iter().cloned());
+	all_file_paths.extend(contract_files.iter().map(|f| f.rel_path.clone()));
 
 	// Build resource-node dedup keys from copy-forward result
 	// (SB-4-pre Fix B). Used by `run_pipeline` to prevent
@@ -1146,6 +1261,104 @@ pub fn refresh_repo<S: IndexerStoragePort>(
 			// Adjust node count to include copied nodes (which
 			// run_pipeline didn't extract but are in the snapshot).
 			result.nodes_total += copy_result.nodes_copied;
+
+			// ── Contract schema extraction (CS-1+) ───────────────
+			// Contract files are always re-indexed on refresh (no
+			// delta optimization for contract schemas yet).
+			if !contract_files.is_empty() {
+				// Index proto schemas first so we know which files failed parsing.
+				let proto_result = crate::proto_indexer::index_proto_files(
+					storage,
+					repo_uid,
+					&snap_uid,
+					contract_files,
+				);
+
+				// Build set of failed file paths for accurate parse_status.
+				let failed_paths: std::collections::HashSet<&str> = match &proto_result {
+					Ok(r) => r.parse_failures.iter().map(|f| f.file_path.as_str()).collect(),
+					Err(_) => std::collections::HashSet::new(),
+				};
+
+				// Track contract files in the file catalog with accurate parse_status.
+				let contract_tracked: Vec<TrackedFile> = contract_files
+					.iter()
+					.map(|f| TrackedFile {
+						file_uid: format!("{}:{}", repo_uid, f.rel_path),
+						repo_uid: repo_uid.to_string(),
+						path: f.rel_path.clone(),
+						language: None,
+						is_test: false,
+						is_generated: false,
+						is_excluded: false,
+					})
+					.collect();
+				let contract_versions: Vec<FileVersion> = contract_files
+					.iter()
+					.map(|f| {
+						let parse_status = if failed_paths.contains(f.rel_path.as_str()) {
+							ParseStatus::Failed
+						} else {
+							ParseStatus::Parsed
+						};
+						FileVersion {
+							snapshot_uid: snap_uid.clone(),
+							file_uid: format!("{}:{}", repo_uid, f.rel_path),
+							content_hash: f.content_hash.clone(),
+							ast_hash: None,
+							extractor: Some("contract-schema".to_string()),
+							parse_status,
+							size_bytes: Some(f.content.len() as u64),
+							line_count: Some(f.content.lines().count() as u64),
+							indexed_at: created_at.clone(),
+						}
+					})
+					.collect();
+
+				// Track file catalog errors explicitly.
+				let mut catalog_errors: Vec<String> = Vec::new();
+				if let Err(e) = storage.upsert_files(&contract_tracked) {
+					catalog_errors.push(format!("upsert_files: {}", e));
+				}
+				if let Err(e) = storage.upsert_file_versions(&contract_versions) {
+					catalog_errors.push(format!("upsert_file_versions: {}", e));
+				}
+
+				// Build result with all errors surfaced.
+				match proto_result {
+					Ok(pr) => {
+						let storage_error = if catalog_errors.is_empty() {
+							None
+						} else {
+							Some(catalog_errors.join("; "))
+						};
+						result.contracts = Some(ContractIndexResult {
+							schemas_indexed: pr.schemas_indexed,
+							elements_indexed: pr.elements_indexed,
+							parse_failures: pr
+								.parse_failures
+								.into_iter()
+								.map(|f| ContractParseFailure {
+									file_path: f.file_path,
+									error: f.error,
+								})
+								.collect(),
+							storage_error,
+						});
+					}
+					Err(schema_err) => {
+						// Schema storage failed. Combine with any catalog errors.
+						catalog_errors.insert(0, format!("schema_storage: {}", schema_err));
+						result.contracts = Some(ContractIndexResult {
+							schemas_indexed: 0,
+							elements_indexed: 0,
+							parse_failures: vec![],
+							storage_error: Some(catalog_errors.join("; ")),
+						});
+					}
+				}
+			}
+
 			Ok(result)
 		}
 		Err(storage_err) => {
@@ -1327,6 +1540,22 @@ mod tests {
 		}
 	}
 
+	impl crate::storage_port::ProtoSchemaStorePort for MockStorage {
+		type Error = String;
+		fn insert_proto_schema(
+			&mut self,
+			_input: &crate::storage_port::ProtoSchemaInput,
+		) -> Result<(), String> {
+			Ok(())
+		}
+		fn insert_proto_elements(
+			&mut self,
+			elements: &[crate::storage_port::ProtoElementInput],
+		) -> Result<usize, String> {
+			Ok(elements.len())
+		}
+	}
+
 	// ── Mock extractor ───────────────────────────────────────
 
 	struct MockExtractor {
@@ -1410,6 +1639,7 @@ mod tests {
 			&mut extractors,
 			"r1",
 			&files,
+			&[],
 			&mut IndexOptions::default(),
 			None,
 		)
@@ -1455,6 +1685,7 @@ mod tests {
 			&mut extractors,
 			"r1",
 			&files,
+			&[],
 			&mut IndexOptions::default(),
 			None,
 		)
@@ -1497,6 +1728,7 @@ mod tests {
 			&mut extractors,
 			"r1",
 			&files,
+			&[],
 			&mut IndexOptions::default(),
 			None,
 		)
@@ -1533,6 +1765,7 @@ mod tests {
 			&mut extractors,
 			"r1",
 			&files,
+			&[],
 			&mut IndexOptions::default(),
 			None,
 		)
@@ -1575,7 +1808,7 @@ mod tests {
 		let mut storage = MockStorage::default();
 		let mut ext = FailingExtractor::new();
 		let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ext];
-		let result = index_repo(&mut storage, &mut extractors, "r1", &[], &mut IndexOptions::default(), None);
+		let result = index_repo(&mut storage, &mut extractors, "r1", &[], &[], &mut IndexOptions::default(), None);
 		match result {
 			Err(IndexError::ExtractorInit { extractor_name, .. }) => {
 				assert_eq!(extractor_name, "failing:1");
@@ -1639,6 +1872,11 @@ mod tests {
 				Ok(crate::storage_port::CopyForwardResult::default())
 			}
 		}
+		impl crate::storage_port::ProtoSchemaStorePort for FailOnInsertNodes {
+			type Error = String;
+			fn insert_proto_schema(&mut self, i: &crate::storage_port::ProtoSchemaInput) -> Result<(), String> { self.inner.insert_proto_schema(i) }
+			fn insert_proto_elements(&mut self, e: &[crate::storage_port::ProtoElementInput]) -> Result<usize, String> { self.inner.insert_proto_elements(e) }
+		}
 
 		let mut storage = FailOnInsertNodes::default();
 		let mut ext = MockExtractor::new(vec!["typescript".into()]);
@@ -1653,7 +1891,7 @@ mod tests {
 			tsconfig_aliases: None,
 		}];
 
-		let result = index_repo(&mut storage, &mut extractors, "r1", &files, &mut IndexOptions::default(), None);
+		let result = index_repo(&mut storage, &mut extractors, "r1", &files, &[], &mut IndexOptions::default(), None);
 		assert!(matches!(result, Err(IndexError::Storage(_))));
 
 		// Snapshot must have been transitioned to FAILED.
@@ -1696,6 +1934,7 @@ mod tests {
 			&mut extractors,
 			"r1",
 			&files,
+			&[],
 			&mut opts,
 			None,
 		)
@@ -1744,6 +1983,7 @@ mod tests {
 			&mut extractors,
 			"r1",
 			&files,
+			&[],
 			&mut IndexOptions::default(),
 			None,
 		)
@@ -1788,6 +2028,7 @@ mod tests {
 			&mut extractors,
 			"r1",
 			&files_v1,
+			&[],
 			&mut IndexOptions::default(),
 			None,
 		)
@@ -1826,6 +2067,7 @@ mod tests {
 			&mut extractors,
 			"r1",
 			&files_v2,
+			&[],
 			&mut IndexOptions::default(),
 			None,
 		)

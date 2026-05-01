@@ -17,7 +17,7 @@ use repo_graph_boundary_interaction::{
     BoundaryInteractionFilter, BoundaryInteractionListItem, BoundaryInteractionReadError,
     BoundaryInteractionReadPort, BoundaryInteractionSummary, BoundaryScope, ChannelKind,
     Direction, DirectionCount, EndpointLocality, FamilyCount, InteractionBasis,
-    InteractionPattern, KindCount, ProtocolFamily, ScopeCount,
+    InteractionPattern, KindCount, ProtocolFamily, ScopeCount, TransportClass,
 };
 
 impl BoundaryInteractionReadPort for StorageConnection {
@@ -90,6 +90,9 @@ impl BoundaryInteractionReadPort for StorageConnection {
                 bis.channel_kind,
                 bis.boundary_scope,
                 bis.direction,
+                bis.transport_class,
+                bis.provenance,
+                bis.confidence_basis,
                 bis.protocol_family,
                 bis.protocol,
                 bis.interaction_pattern,
@@ -148,13 +151,16 @@ impl BoundaryInteractionReadPort for StorageConnection {
                     channel_kind: row.get(4)?,
                     boundary_scope: row.get(5)?,
                     direction: row.get(6)?,
-                    protocol_family: row.get(7)?,
-                    protocol: row.get(8)?,
-                    interaction_pattern: row.get(9)?,
-                    symbol_stable_key: row.get(10)?,
-                    confidence: row.get(11)?,
-                    basis: row.get(12)?,
-                    channel_count: row.get(13)?,
+                    transport_class: row.get(7)?,
+                    provenance: row.get(8)?,
+                    confidence_basis: row.get(9)?,
+                    protocol_family: row.get(10)?,
+                    protocol: row.get(11)?,
+                    interaction_pattern: row.get(12)?,
+                    symbol_stable_key: row.get(13)?,
+                    confidence: row.get(14)?,
+                    basis: row.get(15)?,
+                    channel_count: row.get(16)?,
                 })
             })
             .map_err(map_storage_error)?;
@@ -170,6 +176,13 @@ impl BoundaryInteractionReadPort for StorageConnection {
                 channel_kind: parse_channel_kind(&raw.channel_kind)?,
                 boundary_scope: parse_boundary_scope(&raw.boundary_scope)?,
                 direction: parse_direction(&raw.direction)?,
+                transport_class: raw
+                    .transport_class
+                    .as_deref()
+                    .map(parse_transport_class)
+                    .transpose()?,
+                provenance: raw.provenance,
+                confidence_basis: raw.confidence_basis,
                 protocol_family: parse_protocol_family(&raw.protocol_family)?,
                 protocol: raw.protocol,
                 interaction_pattern: parse_interaction_pattern(&raw.interaction_pattern)?,
@@ -195,6 +208,7 @@ impl BoundaryInteractionReadPort for StorageConnection {
                 "SELECT
                     surface_uid, snapshot_uid, repo_uid,
                     boundary_scope, channel_kind, direction,
+                    transport_class, provenance, confidence_basis,
                     protocol, protocol_family, interaction_pattern,
                     endpoint_locality, symbol_stable_key, source_file,
                     line_start, line_end, col_start, col_end,
@@ -210,20 +224,23 @@ impl BoundaryInteractionReadPort for StorageConnection {
                         boundary_scope: row.get(3)?,
                         channel_kind: row.get(4)?,
                         direction: row.get(5)?,
-                        protocol: row.get(6)?,
-                        protocol_family: row.get(7)?,
-                        interaction_pattern: row.get(8)?,
-                        endpoint_locality: row.get(9)?,
-                        symbol_stable_key: row.get(10)?,
-                        source_file: row.get(11)?,
-                        line_start: row.get(12)?,
-                        line_end: row.get(13)?,
-                        col_start: row.get(14)?,
-                        col_end: row.get(15)?,
-                        extractor: row.get(16)?,
-                        basis: row.get(17)?,
-                        confidence: row.get(18)?,
-                        evidence_json: row.get(19)?,
+                        transport_class: row.get(6)?,
+                        provenance: row.get(7)?,
+                        confidence_basis: row.get(8)?,
+                        protocol: row.get(9)?,
+                        protocol_family: row.get(10)?,
+                        interaction_pattern: row.get(11)?,
+                        endpoint_locality: row.get(12)?,
+                        symbol_stable_key: row.get(13)?,
+                        source_file: row.get(14)?,
+                        line_start: row.get(15)?,
+                        line_end: row.get(16)?,
+                        col_start: row.get(17)?,
+                        col_end: row.get(18)?,
+                        extractor: row.get(19)?,
+                        basis: row.get(20)?,
+                        confidence: row.get(21)?,
+                        evidence_json: row.get(22)?,
                     })
                 },
             )
@@ -310,6 +327,13 @@ impl BoundaryInteractionReadPort for StorageConnection {
             boundary_scope: parse_boundary_scope(&surface.boundary_scope)?,
             channel_kind: parse_channel_kind(&surface.channel_kind)?,
             direction: parse_direction(&surface.direction)?,
+            transport_class: surface
+                .transport_class
+                .as_deref()
+                .map(parse_transport_class)
+                .transpose()?,
+            provenance: surface.provenance,
+            confidence_basis: surface.confidence_basis,
             protocol: surface.protocol,
             protocol_family: parse_protocol_family(&surface.protocol_family)?,
             interaction_pattern: parse_interaction_pattern(&surface.interaction_pattern)?,
@@ -456,6 +480,9 @@ struct RawListRow {
     channel_kind: String,
     boundary_scope: String,
     direction: String,
+    transport_class: Option<String>,
+    provenance: Option<String>,
+    confidence_basis: Option<String>,
     protocol_family: String,
     protocol: String,
     interaction_pattern: String,
@@ -473,6 +500,9 @@ struct SurfaceRow {
     boundary_scope: String,
     channel_kind: String,
     direction: String,
+    transport_class: Option<String>,
+    provenance: Option<String>,
+    confidence_basis: Option<String>,
     protocol: String,
     protocol_family: String,
     interaction_pattern: String,
@@ -528,6 +558,10 @@ fn parse_channel_kind(s: &str) -> Result<ChannelKind, BoundaryInteractionReadErr
         "message_queue" => Ok(ChannelKind::MessageQueue),
         "tcp_socket" => Ok(ChannelKind::TcpSocket),
         "udp_socket" => Ok(ChannelKind::UdpSocket),
+        "shared_array_buffer" => Ok(ChannelKind::SharedArrayBuffer),
+        "grpc_channel" => Ok(ChannelKind::GrpcChannel),
+        "protobuf_stream" => Ok(ChannelKind::ProtobufStream),
+        "erpc_channel" => Ok(ChannelKind::ErpcChannel),
         "serial_port" => Ok(ChannelKind::SerialPort),
         "can_message" => Ok(ChannelKind::CanMessage),
         "mqtt_topic" => Ok(ChannelKind::MqttTopic),
@@ -548,6 +582,7 @@ fn parse_channel_kind(s: &str) -> Result<ChannelKind, BoundaryInteractionReadErr
 
 fn parse_boundary_scope(s: &str) -> Result<BoundaryScope, BoundaryInteractionReadError> {
     match s {
+        "intra_process" => Ok(BoundaryScope::IntraProcess),
         "inter_process" => Ok(BoundaryScope::InterProcess),
         "inter_device" => Ok(BoundaryScope::InterDevice),
         "unknown" => Ok(BoundaryScope::Unknown),
@@ -576,6 +611,7 @@ fn parse_protocol_family(s: &str) -> Result<ProtocolFamily, BoundaryInteractionR
         "pipe" => Ok(ProtocolFamily::Pipe),
         "shared_memory" => Ok(ProtocolFamily::SharedMemory),
         "message_queue" => Ok(ProtocolFamily::MessageQueue),
+        "rpc" => Ok(ProtocolFamily::Rpc),
         "serial" => Ok(ProtocolFamily::Serial),
         "bus" => Ok(ProtocolFamily::Bus),
         "message_broker" => Ok(ProtocolFamily::MessageBroker),
@@ -626,6 +662,20 @@ fn parse_interaction_basis(s: &str) -> Result<InteractionBasis, BoundaryInteract
         "inferred" => Ok(InteractionBasis::Inferred),
         other => Err(BoundaryInteractionReadError::Storage(format!(
             "unrecognized interaction_basis: '{}'",
+            other
+        ))),
+    }
+}
+
+fn parse_transport_class(s: &str) -> Result<TransportClass, BoundaryInteractionReadError> {
+    match s {
+        "raw_socket" => Ok(TransportClass::RawSocket),
+        "raw_ipc" => Ok(TransportClass::RawIpc),
+        "schema_rpc" => Ok(TransportClass::SchemaRpc),
+        "message_broker" => Ok(TransportClass::MessageBroker),
+        "custom_protocol" => Ok(TransportClass::CustomProtocol),
+        other => Err(BoundaryInteractionReadError::Storage(format!(
+            "unrecognized transport_class: '{}'",
             other
         ))),
     }

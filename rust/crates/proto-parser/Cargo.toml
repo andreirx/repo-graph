@@ -1,0 +1,56 @@
+# ── repo-graph-proto-parser ───────────────────────────────────────
+#
+# Protocol Buffers schema parser using tree-sitter-proto.
+#
+# Parses .proto files (proto2 and proto3) into the domain model
+# defined in repo-graph-contract-schema. This is an outer-layer
+# syntax adapter — the contract-schema crate owns the stable
+# business-logic types, this crate owns the tree-sitter integration.
+#
+# Slice scope (CS-1: Protobuf schema extraction):
+#   - Proto2 and proto3 syntax parsing
+#   - Package/message/enum/service/method extraction
+#   - Field extraction with type/label/number
+#   - Nested message/enum handling
+#   - Import statement tracking
+#   - Option extraction (java_package, go_package, etc.)
+#   - Line/column source anchoring
+#
+# Architecture:
+#   - This crate is an OUTER-LAYER ADAPTER
+#   - Depends on contract-schema for output types (ProtoFile, etc.)
+#   - Owns grammar loading, parser lifecycle, syntax-tree traversal
+#   - Pure parsing — no storage, no CLI, no repo orchestration
+#
+# NOT in scope (later slices):
+#   - Import resolution across files (CS-2)
+#   - Generated code mapping (CS-2)
+#   - gRPC-specific detection (GR-1, GR-2)
+#   - Schema validation/linting
+#   - Buf/protoc integration
+
+[package]
+name         = "repo-graph-proto-parser"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.70.0"
+license      = "MIT"
+description  = "Protocol Buffers schema parser for repo-graph using tree-sitter"
+publish      = false
+
+[dependencies]
+# Domain types — ProtoFile, ProtoMessage, etc.
+contract-schema = { path = "../contract-schema" }
+
+# tree-sitter — native Rust binding
+tree-sitter = "0.24"
+
+# tree-sitter-proto — proto2/proto3 grammar
+# Using 0.2 for tree-sitter 0.24 compatibility (0.4 requires tree-sitter 0.25+)
+tree-sitter-proto = "0.2"
+
+# Serde for metadata JSON serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]

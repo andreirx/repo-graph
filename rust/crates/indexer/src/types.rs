@@ -460,6 +460,36 @@ impl Default for IndexOptions {
 	}
 }
 
+/// Result of contract schema extraction (CS-1+).
+///
+/// Reported as a subfield of `IndexResult` when contract files
+/// were included in the indexing operation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContractIndexResult {
+	/// Number of schema files (e.g., .proto) successfully parsed.
+	pub schemas_indexed: usize,
+	/// Number of elements (messages, enums, services, etc.) stored.
+	pub elements_indexed: usize,
+	/// Files that failed to parse.
+	pub parse_failures: Vec<ContractParseFailure>,
+	/// Storage-level error during contract indexing.
+	/// When `Some(...)`, the contract pipeline failed after parsing.
+	/// `schemas_indexed` and `elements_indexed` may be partial or zero.
+	/// This is explicit degradation, not silent failure.
+	pub storage_error: Option<String>,
+}
+
+/// A contract file that failed to parse.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContractParseFailure {
+	/// The file path.
+	pub file_path: String,
+	/// The error message.
+	pub error: String,
+}
+
 /// Result of an indexing operation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -472,6 +502,10 @@ pub struct IndexResult {
 	pub unresolved_breakdown: BTreeMap<String, u64>,
 	pub duration_ms: u64,
 	pub orphaned_declarations: u64,
+	/// Contract schema extraction results (CS-1+). Present when
+	/// contract files were indexed as part of this operation.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub contracts: Option<ContractIndexResult>,
 	/// Per-symbol metrics from extraction.
 	///
 	/// RS-MS-3c-prereq: Accumulated from all extraction results.

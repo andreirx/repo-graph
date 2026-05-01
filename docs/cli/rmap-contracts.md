@@ -533,6 +533,205 @@ rmap boundaries summary <db_path> <repo_uid>
 
 **Design doc:** `docs/design/boundary-interaction-ipc-device.md`
 
+### `contracts` — Contract Schema Discovery
+
+Query extracted contract schemas (protobuf files) and their elements. Schemas
+are populated automatically during `rmap index` / `rmap refresh`.
+
+**Scope (CS-1):** Protobuf schema extraction only. This slice covers:
+- Proto2 and Proto3 syntax parsing
+- Package/namespace extraction
+- Message, enum, service, method elements
+- Nested message/enum handling
+- Import statement tracking (resolution deferred)
+- Option extraction (java_package, go_package, etc.)
+- Line/column source anchoring
+
+**Explicit exclusions (CS-1):**
+- Import resolution across files (future slice)
+- Generated code mapping (CS-2)
+- gRPC-specific detection (GR-1, GR-2, GR-3)
+- Other IDL formats (OpenAPI, GraphQL, Thrift — future)
+
+**Commands:**
+
+```
+rmap contracts list <db_path> <repo_uid> [--kind protobuf]
+rmap contracts show <db_path> <repo_uid> <file_path>
+rmap contracts elements <db_path> <repo_uid> [--kind message|enum|service|method|field] [--file <path>]
+```
+
+**List filters:**
+
+| Filter | Values | Description |
+|--------|--------|-------------|
+| `--kind` | protobuf | Contract schema type (only protobuf supported) |
+
+**Elements filters:**
+
+| Filter | Values | Description |
+|--------|--------|-------------|
+| `--kind` | message, enum, service, method, field | Element type filter |
+| `--file` | path | Exact source file match |
+
+**Output (list):**
+
+```json
+{
+  "command": "contracts list",
+  "repo": "myrepo",
+  "snapshot": "myrepo/2026-05-01T.../a86b5e96",
+  "snapshot_scope": "full",
+  "basis_commit": null,
+  "results": [
+    {
+      "schema_uid": "proto-myrepo:api/v1/user.proto:820819b3",
+      "file_path": "api/v1/user.proto",
+      "schema_kind": "protobuf",
+      "package_name": "api.v1",
+      "syntax_version": "proto3",
+      "parsed_at": "2026-05-01T10:30:00Z"
+    }
+  ],
+  "count": 1,
+  "stale": false
+}
+```
+
+**Output (show):**
+
+```json
+{
+  "command": "contracts show",
+  "repo": "myrepo",
+  "snapshot": "myrepo/2026-05-01T.../a86b5e96",
+  "snapshot_scope": "full",
+  "basis_commit": null,
+  "results": {
+    "schema_uid": "proto-myrepo:api/v1/user.proto:820819b3",
+    "file_path": "api/v1/user.proto",
+    "schema_kind": "protobuf",
+    "package_name": "api.v1",
+    "syntax_version": "proto3",
+    "content_hash": "820819b3...",
+    "extractor": "proto-parser:0.1.0",
+    "parsed_at": "2026-05-01T10:30:00Z",
+    "elements": [
+      {
+        "element_uid": "elem-proto-myrepo:...:User",
+        "element_kind": "message",
+        "name": "User",
+        "full_name": "api.v1.User",
+        "parent_element_uid": null,
+        "line_start": 10,
+        "line_end": 25,
+        "metadata": {
+          "fields_count": 5
+        }
+      },
+      {
+        "element_uid": "elem-proto-myrepo:...:User.id",
+        "element_kind": "field",
+        "name": "id",
+        "full_name": "api.v1.User.id",
+        "parent_element_uid": "elem-proto-myrepo:...:User",
+        "line_start": 12,
+        "line_end": 12,
+        "metadata": {
+          "number": 1,
+          "label": "optional",
+          "type_name": "string",
+          "type_kind": "scalar"
+        }
+      },
+      {
+        "element_uid": "elem-proto-myrepo:...:UserService",
+        "element_kind": "service",
+        "name": "UserService",
+        "full_name": "api.v1.UserService",
+        "parent_element_uid": null,
+        "line_start": 30,
+        "line_end": 45,
+        "metadata": {
+          "methods_count": 2
+        }
+      },
+      {
+        "element_uid": "elem-proto-myrepo:...:GetUser",
+        "element_kind": "method",
+        "name": "GetUser",
+        "full_name": "api.v1.UserService.GetUser",
+        "parent_element_uid": "elem-proto-myrepo:...:UserService",
+        "line_start": 32,
+        "line_end": 35,
+        "metadata": {
+          "input_type": "api.v1.GetUserRequest",
+          "output_type": "api.v1.GetUserResponse",
+          "client_streaming": false,
+          "server_streaming": false
+        }
+      }
+    ]
+  },
+  "count": 1,
+  "stale": false
+}
+```
+
+**Output (elements):**
+
+```json
+{
+  "command": "contracts elements",
+  "repo": "myrepo",
+  "snapshot": "myrepo/2026-05-01T.../a86b5e96",
+  "snapshot_scope": "full",
+  "basis_commit": null,
+  "results": [
+    {
+      "element_uid": "elem-proto-myrepo:...:User",
+      "schema_uid": "proto-myrepo:api/v1/user.proto:820819b3",
+      "file_path": "api/v1/user.proto",
+      "element_kind": "message",
+      "name": "User",
+      "full_name": "api.v1.User",
+      "line_start": 10
+    }
+  ],
+  "count": 1,
+  "filter_kind": "message",
+  "stale": false
+}
+```
+
+**Element metadata by kind:**
+
+| Kind | Metadata fields |
+|------|-----------------|
+| message | `fields_count`, `oneofs`, `reserved_numbers`, `reserved_names` |
+| field | `number`, `label`, `type_name`, `type_kind`, `default_value` |
+| enum | `values_count` |
+| service | `methods_count` |
+| method | `input_type`, `output_type`, `client_streaming`, `server_streaming` |
+
+**Exit codes:**
+
+- 0: success (schemas/elements found)
+- 1: usage error
+- 2: runtime error (DB error, missing repo/snapshot, schema not found)
+
+**Architecture notes:**
+
+- Dual-pipeline architecture: contract files are indexed in parallel with
+  source files under the same snapshot lifecycle
+- Contract files are tracked in the file catalog (`tracked_files`,
+  `file_versions`) alongside source files
+- `files_total` includes both source and contract files
+- Parse failures are surfaced via `ContractIndexResult.storage_error` and
+  reflected in `file_versions.parse_status`
+
+**Design doc:** `docs/slices/cs-1-protobuf-schema.md`
+
 ## JSON-Only Output
 
 `rmap` always produces JSON on stdout. There is no `--json` flag because

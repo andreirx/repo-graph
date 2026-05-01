@@ -96,6 +96,7 @@ pub mod hook;
 pub mod include_resolver;
 pub mod invalidation;
 pub mod orchestrator;
+pub mod proto_indexer;
 pub mod resolver;
 pub mod routing;
 pub mod storage_port;
@@ -104,8 +105,9 @@ pub mod types;
 // ── Public re-exports ────────────────────────────────────────
 
 pub use extractor_port::{ExtractorError, ExtractorPort};
+pub use proto_indexer::{index_proto_files, ProtoFileInput, ProtoIndexResult, ProtoParseFailure};
 pub use storage_port::{
 	DeltaCopyPort, EdgeStorePort, FileCatalogPort, FileSignalPort,
-	IndexerStoragePort, NodeStorePort, SnapshotLifecyclePort,
-	UnresolvedEdgePort,
+	IndexerStoragePort, NodeStorePort, ProtoElementInput, ProtoSchemaInput,
+	ProtoSchemaStorePort, SnapshotLifecyclePort, UnresolvedEdgePort,
 };

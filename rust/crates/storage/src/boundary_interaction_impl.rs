@@ -36,11 +36,12 @@ impl StorageConnection {
             "INSERT OR IGNORE INTO boundary_interaction_surfaces (
                 surface_uid, snapshot_uid, repo_uid,
                 boundary_scope, channel_kind, direction,
+                transport_class, provenance, confidence_basis,
                 protocol, protocol_family, interaction_pattern,
                 endpoint_locality,
                 symbol_stable_key, source_file, line_start, line_end, col_start, col_end,
                 extractor, basis, confidence, evidence_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )?;
 
         let mut inserted = 0;
@@ -52,6 +53,9 @@ impl StorageConnection {
                 surface.boundary_scope.as_str(),
                 surface.channel_kind.as_str(),
                 surface.direction.as_str(),
+                surface.transport_class.map(|tc| tc.as_str()),
+                surface.provenance,
+                surface.confidence_basis,
                 surface.protocol,
                 surface.protocol_family.as_str(),
                 surface.interaction_pattern.as_str(),

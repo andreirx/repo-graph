@@ -49,6 +49,13 @@ publish      = false
 # UnresolvedEdgeCategory, classifier functions. Policy → policy.
 repo-graph-classification = { path = "../classification" }
 
+# Contract schema crate — domain types for proto parsing (ProtoMessage,
+# ProtoSyntax, etc.). Policy → policy.
+contract-schema = { path = "../contract-schema" }
+
+# Proto parser — tree-sitter integration for .proto files. CS-1.
+repo-graph-proto-parser = { path = "../proto-parser" }
+
 # Serde for DTO derives on the parity boundary.
 serde = { version = "1", features = ["derive"] }
 

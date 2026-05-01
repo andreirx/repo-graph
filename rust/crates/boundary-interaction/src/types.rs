@@ -16,10 +16,21 @@ use serde::{Deserialize, Serialize};
 /// The same mechanism (e.g., TCP socket) can be used for inter-process
 /// (loopback) or inter-device (remote host) communication.
 ///
+/// `boundary_scope` and `transport_class` are orthogonal dimensions:
+/// - `boundary_scope` answers: "What physical/process boundary does this cross?"
+/// - `transport_class` answers: "What kind of mechanism carries this interaction?"
+///
 /// Contract: design doc section 4.1.
+/// Extended by: `docs/design/boundary-detection-multitrack.md`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BoundaryScope {
+    /// Same OS process, different execution contexts.
+    /// Examples: SharedArrayBuffer between main thread and Web Worker,
+    /// thread-shared memory, V8 isolates.
+    /// Added for multi-track boundary detection (BI-1C).
+    IntraProcess,
+
     /// Cross-process on same host (IPC).
     /// Examples: Unix sockets, pipes, shared memory, loopback TCP.
     InterProcess,
@@ -31,19 +42,69 @@ pub enum BoundaryScope {
     /// Scope cannot be determined statically.
     /// Examples: TCP to config-sourced address, dynamic endpoint.
     Unknown,
-    // NOTE: `InProcess` is reserved per design doc section 4.1.
-    // It is deliberately NOT included in v1 to avoid muddying
-    // semantics with call graph / state boundary overlap.
 }
 
 impl BoundaryScope {
     /// SQL/storage string representation.
     pub const fn as_str(self) -> &'static str {
         match self {
+            BoundaryScope::IntraProcess => "intra_process",
             BoundaryScope::InterProcess => "inter_process",
             BoundaryScope::InterDevice => "inter_device",
             BoundaryScope::Unknown => "unknown",
         }
+    }
+}
+
+// ── Transport class ───────────────────────────────────────────────────
+
+/// Transport mechanism class — orthogonal to boundary scope.
+///
+/// Answers: "What kind of mechanism carries this interaction?"
+/// This is distinct from `BoundaryScope` which answers where the
+/// boundary is crossed.
+///
+/// Examples:
+/// - gRPC call over TCP to remote host: scope=inter_device, class=schema_rpc
+/// - gRPC call over Unix socket to local service: scope=inter_process, class=schema_rpc
+/// - Raw TCP socket to localhost: scope=inter_process, class=raw_socket
+/// - SharedArrayBuffer: scope=intra_process, class=raw_ipc
+///
+/// Contract: `docs/design/boundary-detection-multitrack.md`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransportClass {
+    /// Bare TCP/UDP/Unix socket without higher-level framing.
+    RawSocket,
+
+    /// Pipes, shared memory, message queues.
+    RawIpc,
+
+    /// Contract-backed RPC: protobuf, gRPC, eRPC.
+    SchemaRpc,
+
+    /// Message broker: Kafka, RabbitMQ, etc. (future).
+    MessageBroker,
+
+    /// Application-specific protocol framing.
+    CustomProtocol,
+}
+
+impl TransportClass {
+    /// SQL/storage string representation.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            TransportClass::RawSocket => "raw_socket",
+            TransportClass::RawIpc => "raw_ipc",
+            TransportClass::SchemaRpc => "schema_rpc",
+            TransportClass::MessageBroker => "message_broker",
+            TransportClass::CustomProtocol => "custom_protocol",
+        }
+    }
+
+    /// Whether this transport class is contract/schema-backed.
+    pub const fn is_schema_backed(self) -> bool {
+        matches!(self, TransportClass::SchemaRpc)
     }
 }
 
@@ -156,12 +217,30 @@ pub enum ChannelKind {
     /// POSIX message queue (mq_open).
     MessageQueue,
 
-    // ── Slice 1B: Generic sockets (deferred) ──────────────────────
+    // ── Slice 1B: Generic sockets ───────────────────────────────────
     /// TCP socket (AF_INET/AF_INET6 + SOCK_STREAM).
     TcpSocket,
 
     /// UDP socket (AF_INET/AF_INET6 + SOCK_DGRAM).
     UdpSocket,
+
+    // ── Slice 1C: SharedArrayBuffer (JS/TS worker boundaries) ─────
+    /// SharedArrayBuffer for JS/TS worker communication.
+    /// Scope: intra_process (same OS process, different execution contexts).
+    SharedArrayBuffer,
+
+    // ── Track B: Schema-backed RPC ────────────────────────────────
+    /// gRPC channel (protobuf + HTTP/2).
+    /// Transport class: schema_rpc.
+    GrpcChannel,
+
+    /// Raw protobuf stream (without gRPC transport).
+    /// Transport class: schema_rpc.
+    ProtobufStream,
+
+    /// Embedded RPC (eRPC) channel.
+    /// Transport class: schema_rpc.
+    ErpcChannel,
 
     // ── Slice 2: Serial/CAN (deferred) ────────────────────────────
     /// Serial port (/dev/tty*, COM*).
@@ -211,6 +290,10 @@ impl ChannelKind {
             ChannelKind::MessageQueue => "message_queue",
             ChannelKind::TcpSocket => "tcp_socket",
             ChannelKind::UdpSocket => "udp_socket",
+            ChannelKind::SharedArrayBuffer => "shared_array_buffer",
+            ChannelKind::GrpcChannel => "grpc_channel",
+            ChannelKind::ProtobufStream => "protobuf_stream",
+            ChannelKind::ErpcChannel => "erpc_channel",
             ChannelKind::SerialPort => "serial_port",
             ChannelKind::CanMessage => "can_message",
             ChannelKind::MqttTopic => "mqtt_topic",
@@ -237,10 +320,68 @@ impl ChannelKind {
         )
     }
 
+    /// Whether this channel kind is in scope for Slice 1B (TCP/UDP sockets).
+    pub const fn is_slice_1b(self) -> bool {
+        matches!(self, ChannelKind::TcpSocket | ChannelKind::UdpSocket)
+    }
+
+    /// Whether this channel kind is in scope for Slice 1C (SharedArrayBuffer).
+    pub const fn is_slice_1c(self) -> bool {
+        matches!(self, ChannelKind::SharedArrayBuffer)
+    }
+
+    /// Whether this channel kind is schema-backed RPC (Track B).
+    pub const fn is_schema_backed(self) -> bool {
+        matches!(
+            self,
+            ChannelKind::GrpcChannel | ChannelKind::ProtobufStream | ChannelKind::ErpcChannel
+        )
+    }
+
     /// Whether this channel kind requires dual projection (boundary + state).
-    /// Currently only shared memory per design doc section 4.4.
+    /// SharedMemory and SharedArrayBuffer both represent shared state.
     pub const fn requires_dual_projection(self) -> bool {
-        matches!(self, ChannelKind::SharedMemory)
+        matches!(
+            self,
+            ChannelKind::SharedMemory | ChannelKind::SharedArrayBuffer
+        )
+    }
+
+    /// Default transport class for this channel kind.
+    pub const fn default_transport_class(self) -> TransportClass {
+        match self {
+            // Raw sockets
+            ChannelKind::UnixSocket
+            | ChannelKind::TcpSocket
+            | ChannelKind::UdpSocket => TransportClass::RawSocket,
+
+            // Raw IPC
+            ChannelKind::NamedPipe
+            | ChannelKind::AnonymousPipe
+            | ChannelKind::SharedMemory
+            | ChannelKind::MessageQueue
+            | ChannelKind::SharedArrayBuffer => TransportClass::RawIpc,
+
+            // Schema-backed RPC
+            ChannelKind::GrpcChannel
+            | ChannelKind::ProtobufStream
+            | ChannelKind::ErpcChannel => TransportClass::SchemaRpc,
+
+            // Message brokers
+            ChannelKind::MqttTopic
+            | ChannelKind::DbusInterface
+            | ChannelKind::ZeromqSocket => TransportClass::MessageBroker,
+
+            // Custom/other
+            ChannelKind::SerialPort
+            | ChannelKind::CanMessage
+            | ChannelKind::I2cDevice
+            | ChannelKind::SpiDevice
+            | ChannelKind::UsbEndpoint
+            | ChannelKind::BleCharacteristic
+            | ChannelKind::ModbusRegister
+            | ChannelKind::CustomProtocol => TransportClass::CustomProtocol,
+        }
     }
 }
 
@@ -258,11 +399,14 @@ pub enum ProtocolFamily {
     /// Pipe-based (named, anonymous).
     Pipe,
 
-    /// Shared memory.
+    /// Shared memory (POSIX shm, mmap, SharedArrayBuffer).
     SharedMemory,
 
     /// Message queue.
     MessageQueue,
+
+    /// Schema-backed RPC (gRPC, protobuf, eRPC).
+    Rpc,
 
     /// Serial communication.
     Serial,
@@ -291,6 +435,7 @@ impl ProtocolFamily {
             ProtocolFamily::Pipe => "pipe",
             ProtocolFamily::SharedMemory => "shared_memory",
             ProtocolFamily::MessageQueue => "message_queue",
+            ProtocolFamily::Rpc => "rpc",
             ProtocolFamily::Serial => "serial",
             ProtocolFamily::Bus => "bus",
             ProtocolFamily::MessageBroker => "message_broker",
@@ -308,8 +453,13 @@ impl From<ChannelKind> for ProtocolFamily {
                 ProtocolFamily::Socket
             }
             ChannelKind::NamedPipe | ChannelKind::AnonymousPipe => ProtocolFamily::Pipe,
-            ChannelKind::SharedMemory => ProtocolFamily::SharedMemory,
+            ChannelKind::SharedMemory | ChannelKind::SharedArrayBuffer => {
+                ProtocolFamily::SharedMemory
+            }
             ChannelKind::MessageQueue => ProtocolFamily::MessageQueue,
+            ChannelKind::GrpcChannel | ChannelKind::ProtobufStream | ChannelKind::ErpcChannel => {
+                ProtocolFamily::Rpc
+            }
             ChannelKind::SerialPort => ProtocolFamily::Serial,
             ChannelKind::CanMessage | ChannelKind::I2cDevice | ChannelKind::SpiDevice => {
                 ProtocolFamily::Bus
@@ -417,12 +567,28 @@ mod tests {
     #[test]
     fn boundary_scope_serializes_snake_case() {
         assert_eq!(
+            serde_json::to_string(&BoundaryScope::IntraProcess).unwrap(),
+            "\"intra_process\""
+        );
+        assert_eq!(
             serde_json::to_string(&BoundaryScope::InterProcess).unwrap(),
             "\"inter_process\""
         );
         assert_eq!(
             serde_json::to_string(&BoundaryScope::InterDevice).unwrap(),
             "\"inter_device\""
+        );
+    }
+
+    #[test]
+    fn transport_class_serializes_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&TransportClass::RawSocket).unwrap(),
+            "\"raw_socket\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TransportClass::SchemaRpc).unwrap(),
+            "\"schema_rpc\""
         );
     }
 
@@ -435,9 +601,61 @@ mod tests {
     }
 
     #[test]
+    fn channel_kind_slice_1b_subset() {
+        assert!(ChannelKind::TcpSocket.is_slice_1b());
+        assert!(ChannelKind::UdpSocket.is_slice_1b());
+        assert!(!ChannelKind::UnixSocket.is_slice_1b());
+    }
+
+    #[test]
+    fn channel_kind_slice_1c_subset() {
+        assert!(ChannelKind::SharedArrayBuffer.is_slice_1c());
+        assert!(!ChannelKind::SharedMemory.is_slice_1c());
+    }
+
+    #[test]
+    fn channel_kind_schema_backed() {
+        assert!(ChannelKind::GrpcChannel.is_schema_backed());
+        assert!(ChannelKind::ProtobufStream.is_schema_backed());
+        assert!(ChannelKind::ErpcChannel.is_schema_backed());
+        assert!(!ChannelKind::TcpSocket.is_schema_backed());
+        assert!(!ChannelKind::UnixSocket.is_schema_backed());
+    }
+
+    #[test]
     fn shared_memory_requires_dual_projection() {
         assert!(ChannelKind::SharedMemory.requires_dual_projection());
+        assert!(ChannelKind::SharedArrayBuffer.requires_dual_projection());
         assert!(!ChannelKind::UnixSocket.requires_dual_projection());
+        assert!(!ChannelKind::GrpcChannel.requires_dual_projection());
+    }
+
+    #[test]
+    fn channel_kind_default_transport_class() {
+        assert_eq!(
+            ChannelKind::TcpSocket.default_transport_class(),
+            TransportClass::RawSocket
+        );
+        assert_eq!(
+            ChannelKind::UnixSocket.default_transport_class(),
+            TransportClass::RawSocket
+        );
+        assert_eq!(
+            ChannelKind::SharedMemory.default_transport_class(),
+            TransportClass::RawIpc
+        );
+        assert_eq!(
+            ChannelKind::SharedArrayBuffer.default_transport_class(),
+            TransportClass::RawIpc
+        );
+        assert_eq!(
+            ChannelKind::GrpcChannel.default_transport_class(),
+            TransportClass::SchemaRpc
+        );
+        assert_eq!(
+            ChannelKind::MqttTopic.default_transport_class(),
+            TransportClass::MessageBroker
+        );
     }
 
     #[test]
@@ -453,6 +671,14 @@ mod tests {
         assert_eq!(
             ProtocolFamily::from(ChannelKind::SharedMemory),
             ProtocolFamily::SharedMemory
+        );
+        assert_eq!(
+            ProtocolFamily::from(ChannelKind::SharedArrayBuffer),
+            ProtocolFamily::SharedMemory
+        );
+        assert_eq!(
+            ProtocolFamily::from(ChannelKind::GrpcChannel),
+            ProtocolFamily::Rpc
         );
     }
 
