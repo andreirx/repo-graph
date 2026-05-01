@@ -86,7 +86,7 @@ fn docs_usage_error_exit_1() {
 #[test]
 fn docs_missing_db_exit_2() {
     let output = Command::new(binary_path())
-        .args(["docs", "/nonexistent/path.db", "repo"])
+        .args(["docs", "extract", "/nonexistent/path.db", "repo"])
         .output()
         .unwrap();
 
@@ -105,6 +105,7 @@ fn docs_repo_not_found_exit_2() {
     let output = Command::new(binary_path())
         .args([
             "docs",
+            "extract",
             db_path.to_str().unwrap(),
             "nonexistent-repo",
         ])
@@ -130,6 +131,7 @@ fn docs_success_extracts_markers() {
     let output = Command::new(binary_path())
         .args([
             "docs",
+            "extract",
             db_path.to_str().unwrap(),
             "test-repo",
         ])
@@ -155,7 +157,7 @@ fn docs_success_extracts_markers() {
         .unwrap_or_else(|e| panic!("stdout is not valid JSON: {}\nstdout: {}", e, stdout));
 
     // ── Field assertions ─────────────────────────────────────
-    assert_eq!(result["command"], "docs");
+    assert_eq!(result["command"], "docs extract");
     assert_eq!(result["repo"], "test-repo");
 
     // Should have scanned at least the README
@@ -187,10 +189,11 @@ fn docs_success_extracts_markers() {
 fn docs_facts_persist_in_storage() {
     let (_dir, db_path, _repo_path) = build_indexed_db_with_docs();
 
-    // Run docs command
+    // Run docs extract command
     let output = Command::new(binary_path())
         .args([
             "docs",
+            "extract",
             db_path.to_str().unwrap(),
             "test-repo",
         ])

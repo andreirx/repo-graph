@@ -365,8 +365,13 @@ for what is actually operational.
   - `--direction` (provider, consumer, bidirectional)
   - `--family` (socket, pipe, shared_memory, message_queue)
   - `--file`, `--file-prefix` (path filtering)
-- Validated on swupdate: 14 surfaces across 12 files (5 Unix sockets, 6 anonymous
-  pipes, 1 named pipe, 2 shared memory).
+  - `--symbol` (enclosing symbol stable key exact match)
+- Validated on:
+  - swupdate: 14 surfaces (5 unix_socket, 6 anonymous_pipe, 1 named_pipe, 2 shared_memory)
+  - sqlite: 7 surfaces (7 anonymous_pipe)
+  - nginx: 7 surfaces (6 shared_memory, 1 anonymous_pipe)
+- Maturity: MATURE (22 CLI tests, read-side port trait, explicit-degradation on
+  unknown enum values, deterministic ordering).
 - Design doc: `docs/design/boundary-interaction-ipc-device.md`.
 - Explicit exclusions (deferred to later slices):
   - TCP/UDP sockets (Slice 1B — requires scope heuristics)
