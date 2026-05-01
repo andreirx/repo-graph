@@ -1,6 +1,6 @@
 # CS-2A: Java Generated-Code Provenance Mapping
 
-Status: IMPLEMENTATION COMPLETE (pending validation)
+Status: VALIDATED (index path only; refresh path has known limitation)
 Depends: CS-1 (Protobuf Schema Extraction)
 Track: B (Schema-Backed RPC)
 
@@ -234,10 +234,22 @@ Store mappings above confidence floor with explicit basis.
 
 ## Validation
 
-Use hadoop repo:
-- 81 proto files with java_package options
-- Generated Java code checked in
-- Validate mapping coverage and accuracy
+### Hadoop validation (completed 2026-05-01)
+
+Results:
+- 28 mappings found from 3 checked-in generated Java files
+- 28/28 high-confidence (0.95 exact_option_match)
+- 0 false positives above 0.75 confidence
+
+Note: Hadoop has 81 proto files but only 3 generated Java files checked in
+(in `proto2-generated` directories). The remaining protos generate code at
+build time only (gitignored `target/` directories). This limits validation
+coverage but confirms mapping accuracy for the available files.
+
+Files mapped:
+- `ProtobufRpcEngineProtos.java` → 1 mapping
+- `TestProtosLegacy.java` → 20 mappings
+- `TestRpcServiceProtosLegacy.java` → 7 mappings
 
 ## Deliverables
 
@@ -285,13 +297,17 @@ Use hadoop repo:
   - None/empty returns empty
   - Success with counts
   - Individual and multiple error surfacing
-- Integration tests with fixture protos + generated Java [PENDING]
-- Hadoop validation [PENDING]
+- Integration tests with fixture protos + generated Java [DONE - in contracts_command.rs]
+- Hadoop validation [DONE - 28 mappings, 0 false positives]
 
 ## Success Criteria
 
-- Java generated classes correctly mapped to schema elements
-- Confidence scores reflect mapping quality
-- Basis explicitly recorded for each mapping
-- CLI usages query returns accurate results
-- 0 false positives above 0.75 confidence on hadoop validation
+- Java generated classes correctly mapped to schema elements [VERIFIED]
+- Confidence scores reflect mapping quality [VERIFIED - all 0.95]
+- Basis explicitly recorded for each mapping [VERIFIED - exact_option_match]
+- CLI usages query returns accurate results [VERIFIED - index path]
+- 0 false positives above 0.75 confidence on hadoop validation [VERIFIED - 0/28]
+
+Note: Success criteria verified on `rmap index` path only. The `rmap refresh`
+path has a known limitation where contract schemas are not copied forward
+to the new snapshot. See TECH-DEBT.md "Contract schemas not copied forward".

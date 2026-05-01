@@ -224,6 +224,16 @@
     copied forward for unchanged files.
   - **Large-repo delta refresh not validated:** verified on repo-graph (235 files),
     not on Linux or other large repos.
+  - **Contract schemas not copied forward:** `contract_schemas` and `contract_elements`
+    tables are keyed by snapshot_uid. On delta refresh, unchanged proto files are not
+    re-parsed, but their schema data is not copied forward to the new snapshot_uid.
+    Result: `rmap contracts list/elements/usages` queries against the current snapshot
+    return empty results even though the data exists keyed to the previous snapshot.
+    Discovered during hadoop validation (2026-05-01). Fix requires either:
+    1. Copy-forward logic for contract tables during refresh, or
+    2. Schema query to union current and parent snapshot data, or
+    3. Re-parse all proto files on refresh (defeats delta win)
+    Workaround: use `rmap index` instead of `rmap refresh` when contract queries needed.
 - **No clangd/libclang enrichment** for receiver-type resolution yet.
 
 ## Policy Facts — PF-1 STATUS_MAPPING
