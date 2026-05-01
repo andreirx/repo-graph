@@ -1646,6 +1646,13 @@
           "pk": 0
         },
         {
+          "name": "created_at",
+          "type": "TEXT",
+          "notnull": true,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
           "name": "generated_file",
           "type": "TEXT",
           "notnull": true,
@@ -3869,6 +3876,11 @@
       {
         "version": 25,
         "name": "025-contract-schema",
+        "applied_at": "<TIMESTAMP>"
+      },
+      {
+        "version": 26,
+        "name": "026-gcm-created-at",
         "applied_at": "<TIMESTAMP>"
       }
     ],

@@ -32,6 +32,7 @@ pub fn run_contracts(args: &[String]) -> ExitCode {
 		"list" => run_contracts_list(&args[1..]),
 		"show" => run_contracts_show(&args[1..]),
 		"elements" => run_contracts_elements(&args[1..]),
+		"usages" => run_contracts_usages(&args[1..]),
 		other => {
 			eprintln!("unknown contracts subcommand: {}", other);
 			print_contracts_usage();
@@ -45,6 +46,7 @@ fn print_contracts_usage() {
 	eprintln!("  rmap contracts list <db_path> <repo_uid> [--kind protobuf]");
 	eprintln!("  rmap contracts show <db_path> <repo_uid> <file_path>");
 	eprintln!("  rmap contracts elements <db_path> <repo_uid> [--kind message|enum|service|method|field] [--file <path>]");
+	eprintln!("  rmap contracts usages <db_path> <repo_uid> [--element <element_uid>] [--min-confidence <0.0-1.0>]");
 }
 
 // ── contracts list command ───────────────────────────────────────
@@ -472,6 +474,174 @@ fn run_contracts_elements(args: &[String]) -> ExitCode {
 	let output = match build_envelope(
 		&storage,
 		"contracts elements",
+		&repo_uid,
+		&snapshot,
+		serde_json::to_value(&results).unwrap(),
+		count,
+		extra,
+	) {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	match serde_json::to_string_pretty(&output) {
+		Ok(json) => {
+			println!("{}", json);
+			ExitCode::SUCCESS
+		}
+		Err(e) => {
+			eprintln!("error: {}", e);
+			ExitCode::from(2)
+		}
+	}
+}
+
+// ── contracts usages command ─────────────────────────────────────
+
+/// Output DTO for `contracts usages` command.
+#[derive(serde::Serialize)]
+struct GeneratedCodeMappingEntry {
+	mapping_uid: String,
+	schema_element_uid: String,
+	element_name: Option<String>,
+	element_full_name: Option<String>,
+	generated_symbol_key: String,
+	language: String,
+	generated_file: String,
+	mapping_basis: String,
+	confidence: f64,
+	evidence: Option<serde_json::Value>,
+}
+
+fn run_contracts_usages(args: &[String]) -> ExitCode {
+	// Parse args: <db_path> <repo_uid> [--element <element_uid>] [--min-confidence <value>]
+	if args.len() < 2 {
+		eprintln!("usage: rmap contracts usages <db_path> <repo_uid> [--element <element_uid>] [--min-confidence <0.0-1.0>]");
+		return ExitCode::from(1);
+	}
+
+	let db_path = Path::new(&args[0]);
+	let repo_ref = &args[1];
+
+	// Parse optional filters
+	let mut element_filter: Option<String> = None;
+	let mut min_confidence: f64 = 0.0;
+	let mut i = 2;
+	while i < args.len() {
+		match args[i].as_str() {
+			"--element" => {
+				if i + 1 >= args.len() {
+					eprintln!("--element requires a value");
+					return ExitCode::from(1);
+				}
+				element_filter = Some(args[i + 1].clone());
+				i += 2;
+			}
+			"--min-confidence" => {
+				if i + 1 >= args.len() {
+					eprintln!("--min-confidence requires a value");
+					return ExitCode::from(1);
+				}
+				match args[i + 1].parse::<f64>() {
+					Ok(v) if (0.0..=1.0).contains(&v) => min_confidence = v,
+					_ => {
+						eprintln!("--min-confidence must be a number between 0.0 and 1.0");
+						return ExitCode::from(1);
+					}
+				}
+				i += 2;
+			}
+			other => {
+				eprintln!("unknown option: {}", other);
+				return ExitCode::from(1);
+			}
+		}
+	}
+
+	// Open storage
+	let storage = match open_storage(db_path) {
+		Ok(s) => s,
+		Err(e) => {
+			eprintln!("storage error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Resolve repo
+	let repo_uid = match resolve_repo_ref(&storage, repo_ref) {
+		Ok(r) => r,
+		Err(e) => {
+			eprintln!("{}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Get latest snapshot
+	let snapshot = match storage.get_latest_snapshot(&repo_uid) {
+		Ok(Some(s)) => s,
+		Ok(None) => {
+			eprintln!("no snapshot found for repo '{}'", repo_ref);
+			return ExitCode::from(2);
+		}
+		Err(e) => {
+			eprintln!("storage error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	use repo_graph_storage::contract_schema_port::ContractSchemaStoragePort;
+
+	// Query mappings
+	let mappings = match storage.list_generated_code_mappings(
+		&snapshot.snapshot_uid,
+		element_filter.as_deref(),
+	) {
+		Ok(m) => m,
+		Err(e) => {
+			eprintln!("query error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	// Filter by min confidence and build results
+	let mut results: Vec<GeneratedCodeMappingEntry> = Vec::new();
+	for mapping in mappings {
+		if mapping.confidence < min_confidence {
+			continue;
+		}
+
+		results.push(GeneratedCodeMappingEntry {
+			mapping_uid: mapping.mapping_uid,
+			schema_element_uid: mapping.schema_element_uid,
+			element_name: None, // Element lookup by UID deferred
+			element_full_name: None,
+			generated_symbol_key: mapping.generated_symbol_key,
+			language: mapping.language,
+			generated_file: mapping.generated_file,
+			mapping_basis: mapping.mapping_basis,
+			confidence: mapping.confidence,
+			evidence: mapping.metadata_json.and_then(|s| serde_json::from_str(&s).ok()),
+		});
+	}
+
+	let count = results.len();
+	let mut extra = serde_json::Map::new();
+	if let Some(ref e) = element_filter {
+		extra.insert("filter_element".to_string(), serde_json::Value::String(e.clone()));
+	}
+	if min_confidence > 0.0 {
+		extra.insert(
+			"filter_min_confidence".to_string(),
+			serde_json::json!(min_confidence),
+		);
+	}
+
+	let output = match build_envelope(
+		&storage,
+		"contracts usages",
 		&repo_uid,
 		&snapshot,
 		serde_json::to_value(&results).unwrap(),

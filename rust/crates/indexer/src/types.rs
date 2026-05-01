@@ -490,6 +490,37 @@ pub struct ContractParseFailure {
 	pub error: String,
 }
 
+/// Result of generated code mapping (CS-2A: Java).
+///
+/// Surfaces mapping statistics and any failures for explicit
+/// degradation reporting. Not just stderr.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedCodeMappingResult {
+	/// Number of mappings persisted.
+	pub mappings_persisted: usize,
+	/// Number of high-confidence mappings (>= 0.75).
+	pub high_confidence_count: usize,
+	/// Query error when reading contract elements.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub element_query_error: Option<String>,
+	/// Query error when reading Java symbols.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub symbol_query_error: Option<String>,
+	/// Storage error when persisting mappings.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub storage_error: Option<String>,
+}
+
+impl GeneratedCodeMappingResult {
+	/// Returns true if any error occurred during mapping.
+	pub fn has_error(&self) -> bool {
+		self.element_query_error.is_some()
+			|| self.symbol_query_error.is_some()
+			|| self.storage_error.is_some()
+	}
+}
+
 /// Result of an indexing operation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -506,6 +537,10 @@ pub struct IndexResult {
 	/// contract files were indexed as part of this operation.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub contracts: Option<ContractIndexResult>,
+	/// Generated code mapping results (CS-2A). Present when Java
+	/// generated code mapping ran during this operation.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub generated_code_mappings: Option<GeneratedCodeMappingResult>,
 	/// Per-symbol metrics from extraction.
 	///
 	/// RS-MS-3c-prereq: Accumulated from all extraction results.

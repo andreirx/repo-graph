@@ -169,6 +169,8 @@ mod boundary_interaction_read_impl; // Boundary interaction read port (BI-1A)
 mod gate_impl; // GateStorageRead impl for StorageConnection (Rust-43A)
 mod indexer_impl; // SnapshotLifecyclePort + FileCatalogPort impl (R5-C)
 mod proto_schema_impl; // ProtoSchemaStorePort impl for StorageConnection (CS-1)
+mod generated_code_mapping_impl; // GeneratedCodeMappingStorePort impl (CS-2A)
+mod generated_code_mapping_read_impl; // GeneratedCodeMappingReadPort impl (CS-2A)
 pub mod quality_policy_port; // Quality policy storage port (QP-Step-5)
 mod quality_policy_impl; // QualityPolicyStoragePort impl for StorageConnection
 pub mod queries; // Read-side graph queries (R10+)

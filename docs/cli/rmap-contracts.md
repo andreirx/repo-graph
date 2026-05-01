@@ -58,6 +58,53 @@ This surfaces `ContractIndexResult` (schemas_indexed, elements_indexed,
 parse_failures, storage_error) at the exact point the system knows the truth,
 without requiring post-hoc database queries.
 
+### `index` / `refresh` — Generated Code Mapping Summary (CS-2A)
+
+When contract schemas are indexed and Java generated code exists, the indexing
+output includes a mapping summary line after the contract summary:
+
+```
+indexed 14043 files, 257045 nodes, 210503 edges (1019158 unresolved) → snapshot_uid
+  contracts: 81 schemas, 4973 elements
+  mappings: 156 persisted (142 high-confidence)
+```
+
+**Failure reporting:**
+
+If element query fails (e.g., missing contract_elements table):
+```
+  mappings: 0 persisted (0 high-confidence) (element query failed)
+    element query: no such table: contract_elements
+```
+
+If Java symbol query fails:
+```
+  mappings: 0 persisted (0 high-confidence) (symbol query failed)
+    symbol query: query timeout
+```
+
+If storage fails during mapping persistence:
+```
+  mappings: 5 persisted (3 high-confidence) (storage failed)
+    storage: disk full
+```
+
+If multiple errors occur:
+```
+  mappings: 0 persisted (0 high-confidence) (symbol query failed, storage failed)
+    symbol query: timeout
+    storage: connection lost
+```
+
+**No mappings line** is printed when:
+- No contract schemas were indexed
+- No Java symbols exist in the repo
+- Zero mappings were produced and no errors occurred
+
+This surfaces `GeneratedCodeMappingResult` (mappings_persisted, high_confidence_count,
+element_query_error, symbol_query_error, storage_error) for explicit degradation
+reporting rather than silent failure.
+
 ### `gate` — Waiver Overlay
 
 PASS obligations are **not waivable**.
@@ -586,9 +633,17 @@ are populated automatically during `rmap index` / `rmap refresh`.
 - Option extraction (java_package, go_package, etc.)
 - Line/column source anchoring
 
-**Explicit exclusions (CS-1):**
+**CS-2A scope (Java generated code mapping):**
+- Maps checked-in Java generated protobuf artifacts to schema elements
+- Top-level elements only (messages, enums, services)
+- Explicit confidence tiers with basis tracking
+- Java proto and gRPC file detection
+
+**Explicit exclusions (CS-2A):**
+- Field/method-level mapping (future)
+- Kotlin/Swift/other language mapping (future)
+- Build-output inference (checks repo files only)
 - Import resolution across files (future slice)
-- Generated code mapping (CS-2)
 - gRPC-specific detection (GR-1, GR-2, GR-3)
 - Other IDL formats (OpenAPI, GraphQL, Thrift — future)
 
@@ -598,6 +653,7 @@ are populated automatically during `rmap index` / `rmap refresh`.
 rmap contracts list <db_path> <repo_uid> [--kind protobuf]
 rmap contracts show <db_path> <repo_uid> <file_path>
 rmap contracts elements <db_path> <repo_uid> [--kind message|enum|service|method|field] [--file <path>]
+rmap contracts usages <db_path> <repo_uid> [--element <element_uid>] [--min-confidence <0.0-1.0>]
 ```
 
 **List filters:**
@@ -742,6 +798,61 @@ rmap contracts elements <db_path> <repo_uid> [--kind message|enum|service|method
   "stale": false
 }
 ```
+
+**Usages filters (CS-2A):**
+
+| Filter | Values | Description |
+|--------|--------|-------------|
+| `--element` | element_uid | Filter by specific schema element |
+| `--min-confidence` | 0.0-1.0 | Minimum confidence threshold (default: 0.0) |
+
+**Output (usages):**
+
+```json
+{
+  "command": "contracts usages",
+  "repo": "hadoop",
+  "snapshot": "hadoop/2026-05-01T.../a86b5e96",
+  "snapshot_scope": "full",
+  "basis_commit": null,
+  "results": [
+    {
+      "mapping_uid": "map-1234...",
+      "schema_element_uid": "elem-proto-hadoop:...:RequestHeaderProto",
+      "element_name": null,
+      "element_full_name": null,
+      "generated_symbol_key": "hadoop:proto2-generated/.../ProtobufRpcEngineProtos.java:RequestHeaderProto:CLASS",
+      "language": "java",
+      "generated_file": "proto2-generated/org/apache/hadoop/ipc/protobuf/ProtobufRpcEngineProtos.java",
+      "mapping_basis": "exact_option_match",
+      "confidence": 0.95,
+      "evidence": {
+        "proto_package": "hadoop.common",
+        "java_package_option": "org.apache.hadoop.ipc.protobuf",
+        "java_outer_classname_option": "ProtobufRpcEngineProtos",
+        "java_package_actual": "org.apache.hadoop.ipc.protobuf",
+        "java_outer_class_actual": "ProtobufRpcEngineProtos",
+        "schema_element_name": "RequestHeaderProto",
+        "java_class_name": "RequestHeaderProto"
+      }
+    }
+  ],
+  "count": 1,
+  "filter_element": null,
+  "filter_min_confidence": null,
+  "stale": false
+}
+```
+
+**Mapping basis confidence tiers:**
+
+| Basis | Confidence | Description |
+|-------|------------|-------------|
+| `exact_option_match` | 0.95 | java_package + java_outer_classname match proto options |
+| `option_package_match` | 0.90 | java_package matches, classname follows filename convention |
+| `filename_convention` | 0.85 | Generated file pattern + symbol name match |
+| `symbol_normalized_match` | 0.75 | Symbol name normalizes to schema element |
+| `weak_wrapper_match` | 0.50 | Partial match via outer class wrapper |
 
 **Element metadata by kind:**
 

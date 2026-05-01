@@ -213,4 +213,50 @@ pub trait ContractSchemaStoragePort {
 
     /// Count contract elements for a snapshot.
     fn count_elements(&self, snapshot_uid: &str) -> Result<usize, StorageError>;
+
+    /// List generated code mappings for a snapshot.
+    ///
+    /// Optionally filter by element UID.
+    fn list_generated_code_mappings(
+        &self,
+        snapshot_uid: &str,
+        element_uid_filter: Option<&str>,
+    ) -> Result<Vec<GeneratedCodeMappingRow>, StorageError>;
+
+    /// Count generated code mappings for a snapshot.
+    fn count_generated_code_mappings(&self, snapshot_uid: &str) -> Result<usize, StorageError>;
+}
+
+/// Stored generated code mapping row.
+#[derive(Debug, Clone)]
+pub struct GeneratedCodeMappingRow {
+    /// Unique mapping identifier.
+    pub mapping_uid: String,
+
+    /// Snapshot UID.
+    pub snapshot_uid: String,
+
+    /// Schema element UID.
+    pub schema_element_uid: String,
+
+    /// Stable key of the generated code symbol.
+    pub generated_symbol_key: String,
+
+    /// Language of the generated code.
+    pub language: String,
+
+    /// Path to the generated file.
+    pub generated_file: String,
+
+    /// Mapping basis (confidence tier).
+    pub mapping_basis: String,
+
+    /// Confidence score (0.0 - 1.0).
+    pub confidence: f64,
+
+    /// Additional evidence as JSON.
+    pub metadata_json: Option<String>,
+
+    /// Timestamp when mapping was created.
+    pub created_at: String,
 }

@@ -105,7 +105,8 @@ pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
             generated_file TEXT NOT NULL,            -- Repo-relative path to generated file
             mapping_basis TEXT NOT NULL,             -- 'file_pattern', 'name_transform', 'import_trace', etc.
             confidence REAL NOT NULL,
-            metadata_json TEXT
+            metadata_json TEXT,
+            created_at TEXT NOT NULL
         );
 
         CREATE INDEX IF NOT EXISTS idx_gcm_snapshot

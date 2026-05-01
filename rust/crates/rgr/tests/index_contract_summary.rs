@@ -1,12 +1,14 @@
 //! Tests for contract indexing summary in `rmap index` / `rmap refresh`.
 //!
 //! CS-1: Validates the contract summary line on index/refresh output.
+//! CS-2A: Validates the generated code mapping summary line.
 //!
 //! Test matrix:
 //!   1. No contract files - no summary line
 //!   2. Successful contract indexing - summary with counts
 //!   3. Parse failures - summary with failure count and details
 //!   4. Combined scenarios
+//!   5. Generated code mappings - summary with counts (CS-2A)
 
 use std::fs::{self, File};
 use std::io::Write;
@@ -342,3 +344,194 @@ fn index_multiple_protos_aggregates_counts() {
         stderr
     );
 }
+
+// ======================================================================
+// 5. GENERATED CODE MAPPING SUMMARY (CS-2A)
+// ======================================================================
+
+/// Create a repo with proto + Java generated code.
+fn create_repo_with_proto_and_java(dir: &std::path::Path) {
+    // Proto file with java_package option
+    let proto = dir.join("api.proto");
+    let mut f = File::create(&proto).unwrap();
+    writeln!(f, r#"syntax = "proto3";"#).unwrap();
+    writeln!(f, r#"package api.v1;"#).unwrap();
+    writeln!(f, r#"option java_package = "com.example.api";"#).unwrap();
+    writeln!(f, r#"option java_outer_classname = "ApiProtos";"#).unwrap();
+    writeln!(f).unwrap();
+    writeln!(f, r#"message User {{"#).unwrap();
+    writeln!(f, r#"  string id = 1;"#).unwrap();
+    writeln!(f, r#"}}"#).unwrap();
+    writeln!(f).unwrap();
+    writeln!(f, r#"service UserService {{"#).unwrap();
+    writeln!(f, r#"  rpc GetUser(User) returns (User);"#).unwrap();
+    writeln!(f, r#"}}"#).unwrap();
+
+    // Simulate generated Java file (outer class pattern)
+    let java_dir = dir.join("com/example/api");
+    fs::create_dir_all(&java_dir).unwrap();
+
+    let java_protos = java_dir.join("ApiProtos.java");
+    let mut f = File::create(&java_protos).unwrap();
+    writeln!(f, "package com.example.api;").unwrap();
+    writeln!(f, "public final class ApiProtos {{").unwrap();
+    writeln!(f, "  public static final class User extends com.google.protobuf.GeneratedMessageV3 {{}}").unwrap();
+    writeln!(f, "}}").unwrap();
+
+    // Simulate gRPC generated file
+    let grpc_java = java_dir.join("UserServiceGrpc.java");
+    let mut f = File::create(&grpc_java).unwrap();
+    writeln!(f, "package com.example.api;").unwrap();
+    writeln!(f, "public final class UserServiceGrpc {{").unwrap();
+    writeln!(f, "  public static abstract class UserServiceImplBase {{}}").unwrap();
+    writeln!(f, "  public static final class UserServiceBlockingStub {{}}").unwrap();
+    writeln!(f, "}}").unwrap();
+}
+
+#[test]
+fn index_no_java_no_mapping_summary() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_repo_with_protos(&repo_path); // proto but no Java
+
+    let db_path = dir.path().join("test.db");
+
+    let output = Command::new(binary_path())
+        .args([
+            "index",
+            repo_path.to_str().unwrap(),
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Should have contracts line
+    assert!(
+        stderr.contains("contracts:"),
+        "missing contracts line in: {}",
+        stderr
+    );
+    // Should NOT have mappings line (no Java code)
+    assert!(
+        !stderr.contains("mappings:"),
+        "unexpected mappings line in: {}",
+        stderr
+    );
+}
+
+#[test]
+fn index_with_proto_and_java_shows_mapping_summary() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_repo_with_proto_and_java(&repo_path);
+
+    let db_path = dir.path().join("test.db");
+
+    let output = Command::new(binary_path())
+        .args([
+            "index",
+            repo_path.to_str().unwrap(),
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Should have contracts line
+    assert!(
+        stderr.contains("contracts:"),
+        "missing contracts line in: {}",
+        stderr
+    );
+    // Should have mappings line
+    assert!(
+        stderr.contains("mappings:"),
+        "missing mappings line in: {}",
+        stderr
+    );
+    // Should show persisted count
+    assert!(
+        stderr.contains("persisted"),
+        "missing 'persisted' in: {}",
+        stderr
+    );
+    // Should show high-confidence count
+    assert!(
+        stderr.contains("high-confidence"),
+        "missing 'high-confidence' in: {}",
+        stderr
+    );
+    // Should NOT show any failure indicators
+    assert!(
+        !stderr.contains("failed"),
+        "unexpected 'failed' in: {}",
+        stderr
+    );
+}
+
+#[test]
+fn index_mapping_summary_format() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_repo_with_proto_and_java(&repo_path);
+
+    let db_path = dir.path().join("test.db");
+
+    let output = Command::new(binary_path())
+        .args([
+            "index",
+            repo_path.to_str().unwrap(),
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let lines: Vec<&str> = stderr.lines().collect();
+
+    // Should have at least 3 lines (main + contracts + mappings)
+    assert!(
+        lines.len() >= 3,
+        "expected at least 3 lines, got {} lines:\n{}",
+        lines.len(),
+        stderr
+    );
+
+    // Find the mappings line
+    let mappings_line = lines.iter().find(|l| l.contains("mappings:"));
+    assert!(
+        mappings_line.is_some(),
+        "missing mappings line in: {}",
+        stderr
+    );
+
+    let mappings_line = mappings_line.unwrap();
+
+    // Mappings line should be indented
+    assert!(
+        mappings_line.starts_with("  mappings:"),
+        "mappings line should be indented: {}",
+        mappings_line
+    );
+
+    // Format: "  mappings: N persisted (M high-confidence)"
+    assert!(
+        mappings_line.contains("persisted") && mappings_line.contains("high-confidence"),
+        "mappings line should contain counts: {}",
+        mappings_line
+    );
+}
+
+// Note: refresh mapping summary test is deferred because delta indexing
+// may not preserve Java symbol metadata in all cases. The index path is
+// the primary surface and is tested above. See TECH-DEBT.md for tracking.

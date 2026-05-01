@@ -7,7 +7,7 @@ use rusqlite::{params, OptionalExtension, Row};
 use crate::connection::StorageConnection;
 use crate::contract_schema_port::{
     ContractElementInput, ContractElementRow, ContractSchemaInput, ContractSchemaRow,
-    ContractSchemaStoragePort,
+    ContractSchemaStoragePort, GeneratedCodeMappingRow,
 };
 use crate::error::StorageError;
 
@@ -283,6 +283,76 @@ impl ContractSchemaStoragePort for StorageConnection {
             JOIN contract_schemas cs ON ce.schema_uid = cs.schema_uid
             WHERE cs.snapshot_uid = ?
             "#,
+            params![snapshot_uid],
+            |row: &Row<'_>| row.get(0),
+        )?;
+        Ok(count as usize)
+    }
+
+    fn list_generated_code_mappings(
+        &self,
+        snapshot_uid: &str,
+        element_uid_filter: Option<&str>,
+    ) -> Result<Vec<GeneratedCodeMappingRow>, StorageError> {
+        let conn = self.connection();
+
+        fn map_row(row: &Row<'_>) -> rusqlite::Result<GeneratedCodeMappingRow> {
+            Ok(GeneratedCodeMappingRow {
+                mapping_uid: row.get(0)?,
+                snapshot_uid: row.get(1)?,
+                schema_element_uid: row.get(2)?,
+                generated_symbol_key: row.get(3)?,
+                language: row.get(4)?,
+                generated_file: row.get(5)?,
+                mapping_basis: row.get(6)?,
+                confidence: row.get(7)?,
+                metadata_json: row.get(8)?,
+                created_at: row.get(9)?,
+            })
+        }
+
+        let mut result = Vec::new();
+
+        match element_uid_filter {
+            Some(element_uid) => {
+                let mut stmt = conn.prepare(
+                    r#"
+                    SELECT mapping_uid, snapshot_uid, schema_element_uid, generated_symbol_key,
+                           language, generated_file, mapping_basis, confidence, metadata_json, created_at
+                    FROM generated_code_mappings
+                    WHERE snapshot_uid = ? AND schema_element_uid = ?
+                    ORDER BY confidence DESC, generated_file
+                    "#,
+                )?;
+                let rows = stmt.query_map(params![snapshot_uid, element_uid], map_row)?;
+                for row in rows {
+                    result.push(row?);
+                }
+            }
+            None => {
+                let mut stmt = conn.prepare(
+                    r#"
+                    SELECT mapping_uid, snapshot_uid, schema_element_uid, generated_symbol_key,
+                           language, generated_file, mapping_basis, confidence, metadata_json, created_at
+                    FROM generated_code_mappings
+                    WHERE snapshot_uid = ?
+                    ORDER BY confidence DESC, generated_file
+                    "#,
+                )?;
+                let rows = stmt.query_map(params![snapshot_uid], map_row)?;
+                for row in rows {
+                    result.push(row?);
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn count_generated_code_mappings(&self, snapshot_uid: &str) -> Result<usize, StorageError> {
+        let conn = self.connection();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM generated_code_mappings WHERE snapshot_uid = ?",
             params![snapshot_uid],
             |row: &Row<'_>| row.get(0),
         )?;

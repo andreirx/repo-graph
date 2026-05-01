@@ -66,6 +66,9 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # (module nodes, module edges, OWNS edges).
 uuid = { version = "1", features = ["v4"] }
 
+# SHA-256 for deterministic UID generation (generated code mappings).
+sha2 = "0.10"
+
 [dev-dependencies]
 # walkdir for parity-fixture corpus discovery (R5-I).
 walkdir = "2"

@@ -1803,3 +1803,33 @@ files. Need to run `rmap index` on a repo with protos and verify:
 - `IndexResult.contracts` reports correct counts
 
 See `docs/slices/cs-1-protobuf-schema.md` for full spec.
+
+## Generated Code Mapping (CS-2A)
+
+### Current state
+
+- Mapper: `java_code_mapper` module matches Java generated protobuf/gRPC classes
+  to schema elements via java_package/java_outer_classname options and naming conventions
+- Storage: `generated_code_mappings` table with confidence tiers and mapping basis
+- Integration: Runs after contract indexing + source extraction in orchestrator
+- CLI: `rmap contracts usages` command surfaces mappings with filters
+
+### Delta refresh limitation
+
+**Refresh mapping test deferred:** The adapter-level test for mapping summary on
+`rmap refresh` is deferred because delta indexing may not preserve Java symbol
+metadata in all cases.
+
+- **Root cause:** Delta refresh only re-extracts changed files. If Java generated
+  files are unchanged but proto files changed (or vice versa), the symbol query
+  for mapping may return incomplete results.
+- **Impact:** Index path works correctly; refresh path may undercount mappings
+  when symbol metadata from unchanged files is not fully preserved.
+- **Mitigation:** The `index` path (full indexing) is the primary surface and is
+  fully tested. Use `rmap index` rather than `rmap refresh` when mapping accuracy
+  is critical.
+- **Fix path:** Delta indexing needs to copy forward Java symbol metadata for
+  unchanged files, or the mapper needs to query symbols from both current
+  extraction and copied-forward data.
+
+See `docs/slices/cs-2a-java-generated-code-mapping.md` for full spec.

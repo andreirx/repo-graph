@@ -72,6 +72,7 @@ pub fn run_index(args: &[String]) -> ExitCode {
                 result.snapshot_uid,
             );
             print_contract_summary(&result.contracts);
+            print_mapping_summary(&result.generated_code_mappings);
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -130,10 +131,67 @@ fn format_contract_summary(
     lines
 }
 
+/// Print generated code mapping summary to stderr.
+fn print_mapping_summary(mappings: &Option<repo_graph_indexer::types::GeneratedCodeMappingResult>) {
+    for line in format_mapping_summary(mappings) {
+        eprintln!("{}", line);
+    }
+}
+
+/// Format generated code mapping summary as lines (testable).
+fn format_mapping_summary(
+    mappings: &Option<repo_graph_indexer::types::GeneratedCodeMappingResult>,
+) -> Vec<String> {
+    let Some(m) = mappings else {
+        return Vec::new();
+    };
+
+    // Skip if no mapping activity and no errors
+    if m.mappings_persisted == 0 && !m.has_error() {
+        return Vec::new();
+    }
+
+    let mut lines = Vec::new();
+
+    // Build error suffix
+    let errors: Vec<&str> = [
+        m.element_query_error.as_ref().map(|_| "element query failed"),
+        m.symbol_query_error.as_ref().map(|_| "symbol query failed"),
+        m.storage_error.as_ref().map(|_| "storage failed"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    let status = if errors.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", errors.join(", "))
+    };
+
+    lines.push(format!(
+        "  mappings: {} persisted ({} high-confidence){}",
+        m.mappings_persisted, m.high_confidence_count, status
+    ));
+
+    // Show error details if any
+    if let Some(ref err) = m.element_query_error {
+        lines.push(format!("    element query: {}", err));
+    }
+    if let Some(ref err) = m.symbol_query_error {
+        lines.push(format!("    symbol query: {}", err));
+    }
+    if let Some(ref err) = m.storage_error {
+        lines.push(format!("    storage: {}", err));
+    }
+
+    lines
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use repo_graph_indexer::types::{ContractIndexResult, ContractParseFailure};
+    use repo_graph_indexer::types::{ContractIndexResult, ContractParseFailure, GeneratedCodeMappingResult};
 
     #[test]
     fn format_none_returns_empty() {
@@ -244,6 +302,73 @@ mod tests {
         assert!(lines[0].contains("(8 failed)"));
         assert!(lines[6].contains("... and 3 more failures"));
     }
+
+    // ── Generated code mapping summary tests ─────────────────────
+
+    #[test]
+    fn format_mapping_none_returns_empty() {
+        let lines = format_mapping_summary(&None);
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn format_mapping_zero_activity_no_errors_returns_empty() {
+        let result = GeneratedCodeMappingResult {
+            mappings_persisted: 0,
+            high_confidence_count: 0,
+            element_query_error: None,
+            symbol_query_error: None,
+            storage_error: None,
+        };
+        let lines = format_mapping_summary(&Some(result));
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn format_mapping_success_no_errors() {
+        let result = GeneratedCodeMappingResult {
+            mappings_persisted: 10,
+            high_confidence_count: 7,
+            element_query_error: None,
+            symbol_query_error: None,
+            storage_error: None,
+        };
+        let lines = format_mapping_summary(&Some(result));
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0], "  mappings: 10 persisted (7 high-confidence)");
+    }
+
+    #[test]
+    fn format_mapping_with_element_query_error() {
+        let result = GeneratedCodeMappingResult {
+            mappings_persisted: 0,
+            high_confidence_count: 0,
+            element_query_error: Some("no such table".to_string()),
+            symbol_query_error: None,
+            storage_error: None,
+        };
+        let lines = format_mapping_summary(&Some(result));
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("element query failed"));
+        assert_eq!(lines[1], "    element query: no such table");
+    }
+
+    #[test]
+    fn format_mapping_with_multiple_errors() {
+        let result = GeneratedCodeMappingResult {
+            mappings_persisted: 5,
+            high_confidence_count: 3,
+            element_query_error: None,
+            symbol_query_error: Some("timeout".to_string()),
+            storage_error: Some("disk full".to_string()),
+        };
+        let lines = format_mapping_summary(&Some(result));
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].contains("symbol query failed"));
+        assert!(lines[0].contains("storage failed"));
+        assert_eq!(lines[1], "    symbol query: timeout");
+        assert_eq!(lines[2], "    storage: disk full");
+    }
 }
 
 /// Run the `rmap refresh` command.
@@ -313,6 +438,7 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
                 result.snapshot_uid,
             );
             print_contract_summary(&result.contracts);
+            print_mapping_summary(&result.generated_code_mappings);
             ExitCode::SUCCESS
         }
         Err(e) => {

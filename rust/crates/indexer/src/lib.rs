@@ -95,6 +95,7 @@ pub mod extractor_port;
 pub mod hook;
 pub mod include_resolver;
 pub mod invalidation;
+pub mod java_code_mapper;
 pub mod orchestrator;
 pub mod proto_indexer;
 pub mod resolver;
@@ -106,8 +107,13 @@ pub mod types;
 
 pub use extractor_port::{ExtractorError, ExtractorPort};
 pub use proto_indexer::{index_proto_files, ProtoFileInput, ProtoIndexResult, ProtoParseFailure};
+pub use java_code_mapper::{
+	find_java_mappings, ContractElementContext, GeneratedCodeMapping, JavaSymbol,
+	MappingBasis, MappingEvidence, ProtoOptions,
+};
 pub use storage_port::{
 	DeltaCopyPort, EdgeStorePort, FileCatalogPort, FileSignalPort,
+	GeneratedCodeMappingInput, GeneratedCodeMappingReadPort, GeneratedCodeMappingStorePort,
 	IndexerStoragePort, NodeStorePort, ProtoElementInput, ProtoSchemaInput,
 	ProtoSchemaStorePort, SnapshotLifecyclePort, UnresolvedEdgePort,
 };

@@ -1207,7 +1207,7 @@ Two-track architecture for boundary detection over a unified model:
 
 **Confirmed implementation order:**
 1. CS-1 (Protobuf schema) — COMPLETE (full dual-pipeline, CLI wired, smoke tested)
-2. CS-2 (Generated code mapping)
+2. CS-2A (Java generated code mapping) — IMPLEMENTATION COMPLETE (pending hadoop validation)
 3. GR-1 (gRPC server)
 4. GR-2 (gRPC client)
 5. GR-3 (gRPC linking)

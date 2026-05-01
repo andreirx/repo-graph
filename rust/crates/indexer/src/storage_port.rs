@@ -588,3 +588,90 @@ pub trait ProtoSchemaStorePort {
 		elements: &[ProtoElementInput],
 	) -> Result<usize, Self::Error>;
 }
+
+// ── Generated Code Mapping Port (CS-2A) ─────────────────────────────
+
+/// Input for inserting a generated code mapping.
+#[derive(Debug, Clone)]
+pub struct GeneratedCodeMappingInput {
+	/// Unique mapping identifier.
+	pub mapping_uid: String,
+
+	/// Snapshot this mapping belongs to.
+	pub snapshot_uid: String,
+
+	/// Schema element UID (references contract_elements).
+	pub schema_element_uid: String,
+
+	/// Stable key of the generated code symbol.
+	pub generated_symbol_key: String,
+
+	/// Language of the generated code.
+	pub language: String,
+
+	/// Path to the generated file.
+	pub generated_file: String,
+
+	/// Mapping basis (confidence tier).
+	pub mapping_basis: String,
+
+	/// Confidence score (0.0 - 1.0).
+	pub confidence: f64,
+
+	/// Additional evidence as JSON.
+	pub metadata_json: Option<String>,
+}
+
+/// Storage port for generated code mapping write operations (CS-2A).
+///
+/// The indexer (policy) owns this interface. The storage crate (adapter)
+/// implements it.
+pub trait GeneratedCodeMappingStorePort {
+	/// Error type for storage operations.
+	type Error: std::fmt::Debug + std::fmt::Display;
+
+	/// Insert generated code mappings.
+	///
+	/// Uses INSERT OR IGNORE for idempotency. Returns count of rows inserted.
+	fn insert_generated_code_mappings(
+		&mut self,
+		mappings: &[GeneratedCodeMappingInput],
+	) -> Result<usize, Self::Error>;
+
+	/// Delete all generated code mappings for a snapshot.
+	///
+	/// Called before re-indexing to avoid stale mappings.
+	fn delete_generated_code_mappings_for_snapshot(
+		&mut self,
+		snapshot_uid: &str,
+	) -> Result<(), Self::Error>;
+}
+
+// ── Generated Code Mapping Read Port (CS-2A) ─────────────────────────
+
+/// Read port for java code mapping query data (CS-2A).
+///
+/// Provides the data needed by `java_code_mapper::find_java_mappings()`.
+pub trait GeneratedCodeMappingReadPort {
+	/// Error type for storage operations.
+	type Error: std::fmt::Debug + std::fmt::Display;
+
+	/// Query contract elements with their schema options.
+	///
+	/// Returns top-level elements (message, enum, service) with joined
+	/// schema options needed for java mapping.
+	fn query_contract_elements_with_options(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<crate::java_code_mapper::ContractElementContext>, Self::Error>;
+
+	/// Query Java CLASS/INTERFACE symbols from the indexed snapshot.
+	///
+	/// Returns symbols needed for generated-code mapping. Filters to
+	/// - language = 'java'
+	/// - subtype IN ('CLASS', 'INTERFACE')
+	fn query_java_symbols(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<crate::java_code_mapper::JavaSymbol>, Self::Error>;
+}

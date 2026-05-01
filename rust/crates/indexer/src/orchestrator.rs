@@ -141,7 +141,7 @@ pub struct FileInput {
 /// snapshot is transitioned to FAILED before returning.
 /// Non-fatal errors (per-file extraction failures, oversized
 /// files) are recorded in the snapshot diagnostics.
-pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort>(
+pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort>(
 	storage: &mut S,
 	extractors: &mut [&mut dyn ExtractorPort],
 	repo_uid: &str,
@@ -300,6 +300,16 @@ pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStoreP
 							parse_failures: vec![],
 							storage_error: Some(catalog_errors.join("; ")),
 						});
+					}
+				}
+
+				// ── Java generated-code mapping (CS-2A) ──────────────
+				// Run after contract indexing succeeds. Maps Java symbols
+				// to proto schema elements. Skip if no schemas indexed.
+				if let Some(ref contracts) = result.contracts {
+					if contracts.schemas_indexed > 0 && contracts.storage_error.is_none() {
+						let mapping_result = run_java_mapping(storage, &snap_uid);
+						result.generated_code_mappings = Some(mapping_result);
 					}
 				}
 			}
@@ -853,6 +863,7 @@ fn run_pipeline<S: IndexerStoragePort>(
 		duration_ms,
 		orphaned_declarations: 0,
 		contracts: None, // Filled by index_repo after contract subpipeline
+		generated_code_mappings: None, // Filled by index_repo after Java mapping
 		metrics: all_metrics,
 	})
 }
@@ -1060,6 +1071,112 @@ fn build_extraction_diagnostics(
 	})
 }
 
+// ── Java generated-code mapping (CS-2A) ──────────────────────────
+
+/// Run Java generated-code mapping after contract indexing.
+///
+/// Queries persisted contract elements and Java symbols, runs the
+/// mapper, and persists resulting mappings.
+///
+/// Returns a `GeneratedCodeMappingResult` for explicit degradation
+/// reporting in `IndexResult`. Errors are surfaced, not swallowed.
+fn run_java_mapping<S>(
+	storage: &mut S,
+	snapshot_uid: &str,
+) -> crate::types::GeneratedCodeMappingResult
+where
+	S: crate::storage_port::GeneratedCodeMappingStorePort
+		+ crate::storage_port::GeneratedCodeMappingReadPort,
+	<S as crate::storage_port::GeneratedCodeMappingStorePort>::Error: std::fmt::Display,
+	<S as crate::storage_port::GeneratedCodeMappingReadPort>::Error: std::fmt::Display,
+{
+	let mut result = crate::types::GeneratedCodeMappingResult {
+		mappings_persisted: 0,
+		high_confidence_count: 0,
+		element_query_error: None,
+		symbol_query_error: None,
+		storage_error: None,
+	};
+
+	// Query contract elements with proto options
+	let elements = match storage.query_contract_elements_with_options(snapshot_uid) {
+		Ok(e) => e,
+		Err(err) => {
+			result.element_query_error = Some(format!("{}", err));
+			return result;
+		}
+	};
+
+	if elements.is_empty() {
+		return result;
+	}
+
+	// Query Java symbols
+	let symbols = match storage.query_java_symbols(snapshot_uid) {
+		Ok(s) => s,
+		Err(err) => {
+			result.symbol_query_error = Some(format!("{}", err));
+			return result;
+		}
+	};
+
+	if symbols.is_empty() {
+		return result;
+	}
+
+	// Run the mapper
+	let mappings = crate::java_code_mapper::find_java_mappings(&elements, &symbols);
+
+	if mappings.is_empty() {
+		return result;
+	}
+
+	// Count high-confidence mappings
+	result.high_confidence_count = mappings
+		.iter()
+		.filter(|m| m.basis.confidence() >= crate::java_code_mapper::CONFIDENCE_PREFERRED)
+		.count();
+
+	// Convert to storage input format
+	// UID is deterministic: hash of (snapshot_uid, schema_element_uid, generated_symbol_key)
+	let storage_mappings: Vec<crate::storage_port::GeneratedCodeMappingInput> = mappings
+		.iter()
+		.map(|m| {
+			use sha2::{Sha256, Digest};
+			let uid_input = format!(
+				"{}:{}:{}",
+				snapshot_uid, m.schema_element_uid, m.generated_symbol_key
+			);
+			let hash = Sha256::digest(uid_input.as_bytes());
+			// Take first 32 hex chars (16 bytes) for a compact but stable UID
+			let mapping_uid = format!("map-{:032x}", u128::from_be_bytes(hash[..16].try_into().unwrap()));
+			crate::storage_port::GeneratedCodeMappingInput {
+				mapping_uid,
+				snapshot_uid: snapshot_uid.to_string(),
+				schema_element_uid: m.schema_element_uid.clone(),
+				generated_symbol_key: m.generated_symbol_key.clone(),
+				language: "java".to_string(),
+				generated_file: m.generated_file.clone(),
+				mapping_basis: m.basis.as_str().to_string(),
+				confidence: m.basis.confidence(),
+				metadata_json: serde_json::to_string(&m.evidence).ok(),
+			}
+		})
+		.collect();
+
+	// Persist mappings
+	match storage.insert_generated_code_mappings(&storage_mappings) {
+		Ok(count) => {
+			result.mappings_persisted = count;
+		}
+		Err(err) => {
+			result.storage_error = Some(format!("{}", err));
+		}
+	}
+
+	result
+}
+
 // ── Refresh/delta indexing ────────────────────────────────────────
 
 /// Run a delta/refresh index. Compares current files against
@@ -1074,7 +1191,7 @@ fn build_extraction_diagnostics(
 /// (no delta optimization for contract schemas yet).
 ///
 /// Mirror of `refreshRepo` from `repo-indexer.ts`.
-pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort>(
+pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort>(
 	storage: &mut S,
 	extractors: &mut [&mut dyn ExtractorPort],
 	repo_uid: &str,
@@ -1357,6 +1474,16 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 						});
 					}
 				}
+
+				// ── Java generated-code mapping (CS-2A) ──────────────
+				// Run after contract indexing succeeds. Maps Java symbols
+				// to proto schema elements. Skip if no schemas indexed.
+				if let Some(ref contracts) = result.contracts {
+					if contracts.schemas_indexed > 0 && contracts.storage_error.is_none() {
+						let mapping_result = run_java_mapping(storage, &snap_uid);
+						result.generated_code_mappings = Some(mapping_result);
+					}
+				}
 			}
 
 			Ok(result)
@@ -1553,6 +1680,38 @@ mod tests {
 			elements: &[crate::storage_port::ProtoElementInput],
 		) -> Result<usize, String> {
 			Ok(elements.len())
+		}
+	}
+
+	impl crate::storage_port::GeneratedCodeMappingStorePort for MockStorage {
+		type Error = String;
+		fn insert_generated_code_mappings(
+			&mut self,
+			mappings: &[crate::storage_port::GeneratedCodeMappingInput],
+		) -> Result<usize, String> {
+			Ok(mappings.len())
+		}
+		fn delete_generated_code_mappings_for_snapshot(
+			&mut self,
+			_snapshot_uid: &str,
+		) -> Result<(), String> {
+			Ok(())
+		}
+	}
+
+	impl crate::storage_port::GeneratedCodeMappingReadPort for MockStorage {
+		type Error = String;
+		fn query_contract_elements_with_options(
+			&self,
+			_snapshot_uid: &str,
+		) -> Result<Vec<crate::java_code_mapper::ContractElementContext>, String> {
+			Ok(vec![])
+		}
+		fn query_java_symbols(
+			&self,
+			_snapshot_uid: &str,
+		) -> Result<Vec<crate::java_code_mapper::JavaSymbol>, String> {
+			Ok(vec![])
 		}
 	}
 
@@ -1876,6 +2035,16 @@ mod tests {
 			type Error = String;
 			fn insert_proto_schema(&mut self, i: &crate::storage_port::ProtoSchemaInput) -> Result<(), String> { self.inner.insert_proto_schema(i) }
 			fn insert_proto_elements(&mut self, e: &[crate::storage_port::ProtoElementInput]) -> Result<usize, String> { self.inner.insert_proto_elements(e) }
+		}
+		impl crate::storage_port::GeneratedCodeMappingStorePort for FailOnInsertNodes {
+			type Error = String;
+			fn insert_generated_code_mappings(&mut self, m: &[crate::storage_port::GeneratedCodeMappingInput]) -> Result<usize, String> { self.inner.insert_generated_code_mappings(m) }
+			fn delete_generated_code_mappings_for_snapshot(&mut self, s: &str) -> Result<(), String> { self.inner.delete_generated_code_mappings_for_snapshot(s) }
+		}
+		impl crate::storage_port::GeneratedCodeMappingReadPort for FailOnInsertNodes {
+			type Error = String;
+			fn query_contract_elements_with_options(&self, s: &str) -> Result<Vec<crate::java_code_mapper::ContractElementContext>, String> { self.inner.query_contract_elements_with_options(s) }
+			fn query_java_symbols(&self, s: &str) -> Result<Vec<crate::java_code_mapper::JavaSymbol>, String> { self.inner.query_java_symbols(s) }
 		}
 
 		let mut storage = FailOnInsertNodes::default();
