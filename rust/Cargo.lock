@@ -740,6 +740,7 @@ dependencies = [
  "repo-graph-doc-facts",
  "repo-graph-gate",
  "repo-graph-git",
+ "repo-graph-indexer",
  "repo-graph-module-queries",
  "repo-graph-policy-facts",
  "repo-graph-quality-policy",

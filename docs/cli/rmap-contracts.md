@@ -19,6 +19,45 @@ until a registry slice ships.
 
 ## Command-Specific Contracts
 
+### `index` / `refresh` — Contract Indexing Summary
+
+When contract files (e.g., `.proto`) are present, the indexing output includes
+a contract summary line:
+
+```
+indexed 14043 files, 257045 nodes, 210503 edges (1019158 unresolved) → snapshot_uid
+  contracts: 81 schemas, 4973 elements
+```
+
+**Failure reporting:**
+
+If contract files fail to parse:
+```
+  contracts: 79 schemas, 4500 elements (2 failed)
+    FAILED: path/to/bad.proto: parse error at line 5
+    FAILED: other.proto: unexpected token
+```
+
+If storage fails during contract indexing:
+```
+  contracts: 81 schemas, 4973 elements (storage error: connection failed)
+```
+
+If both parse failures and storage error occur:
+```
+  contracts: 79 schemas, 4500 elements (2 failed, storage error: connection failed)
+    FAILED: path/to/bad.proto: parse error at line 5
+    FAILED: other.proto: unexpected token
+```
+
+**No contract line** is printed when:
+- No contract files exist in the repo
+- Contract indexing produced zero schemas
+
+This surfaces `ContractIndexResult` (schemas_indexed, elements_indexed,
+parse_failures, storage_error) at the exact point the system knows the truth,
+without requiring post-hoc database queries.
+
 ### `gate` — Waiver Overlay
 
 PASS obligations are **not waivable**.

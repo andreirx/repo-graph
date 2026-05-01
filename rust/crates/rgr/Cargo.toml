@@ -161,6 +161,7 @@ repo-graph-coverage = { path = "../coverage" }
 repo-graph-doc-facts = { path = "../doc-facts" }
 repo-graph-gate = { path = "../gate" }
 repo-graph-git = { path = "../git" }
+repo-graph-indexer = { path = "../indexer" }
 repo-graph-module-queries = { path = "../module-queries" }
 repo-graph-policy-facts = { path = "../policy-facts" }
 repo-graph-quality-policy = { path = "../quality-policy" }
