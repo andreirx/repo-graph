@@ -1843,3 +1843,43 @@ metadata in all cases.
   extraction and copied-forward data.
 
 See `docs/slices/cs-2a-java-generated-code-mapping.md` for full spec.
+
+## gRPC Implementation Hints (GR-1A)
+
+### Current state
+
+- Detector: `grpc_impl_hint` module finds Java classes extending `*Grpc.*ImplBase`
+  and links them to proto services via CS-2A mappings
+- Storage: `boundary_interaction_surfaces` (hints) + `boundary_contracts` (associations)
+- Integration: Runs after CS-2A in orchestrator; gated on `mappings_persisted > 0`
+- Explicit degradation: `GrpcImplHintResult` in `IndexResult`
+
+### Visibility gap (read-side incomplete)
+
+**Partial CLI visibility:** Hints appear in `rmap boundaries list --kind grpc_channel`
+but with incomplete evidence:
+
+- **Exposed:** `channel_kind`, `transport_class`, `provenance`, `confidence_basis`,
+  `symbol_stable_key`, `source_file`, location
+- **NOT exposed:** `evidence_json` (only in `BoundaryInteractionDetail`, not list view)
+- **NOT exposed:** `boundary_contracts` associations — proto service identity is stored
+  but not queryable through the boundary read path
+
+**Impact:** An agent can find "gRPC provider hint at this class" but cannot determine
+"it corresponds to proto service X" without direct DB query.
+
+**Fix path:** Extend `BoundaryInteractionReadPort` to join `boundary_contracts` and
+expose contract element identity in the list/detail views.
+
+### Test gap
+
+No `rmap boundaries` CLI test proves GR-1A hints are visible. Current tests stop at
+storage/indexer layers. End-to-end adapter-level test needed.
+
+### CLI summary gap
+
+`rmap index` and `rmap refresh` stderr summaries (via `print_mapping_summary()`) do not
+include GR-1A counts. The `GrpcImplHintResult` is present in library-level `IndexResult`
+but not surfaced in CLI output.
+
+See `docs/slices/gr-1a-java-grpc-server.md` for full spec.

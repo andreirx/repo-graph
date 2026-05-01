@@ -35,6 +35,32 @@ When making product decisions, optimize for discovery clarity first. Do not add 
 
 Repo-graph is a deterministic engineering intelligence system, not a chat layer and not a generic code indexer.
 
+### Orientation, Not Oracle
+
+The purpose of repo-graph is to help an AI agent **look in the right places, open the right
+files, and ask the right questions** — not to do all the analytical work for the agent.
+
+Repo-graph is an orientation substrate, not an exhaustive answer engine. It tells the agent
+where to look and what to notice. The agent still reads the actual source files, understands
+the domain, and makes engineering decisions.
+
+Example: "Who uses this shared memory buffer?" Repo-graph surfaces the files that touch
+IPC primitives, the boundary facts that indicate shared-memory usage, and the symbols
+involved. It does not guarantee a complete answer — the agent must open those files and
+verify. If repo-graph can surface more precise information (callers, consumers, exact
+call sites), it will. But the primary contract is orientation: narrow the search space,
+highlight what matters, let the agent do the final reasoning.
+
+This principle matters because:
+- Exhaustive static analysis is expensive and often impossible without runtime information
+- Agents are good at reading and reasoning when pointed to the right place
+- Over-promising completeness undermines trust when edge cases are missed
+- Orientation scales; oracle-style completeness does not
+
+The value is in making the agent faster and more accurate, not in replacing agent cognition.
+
+### Primary Use Case
+
 The primary use case is **fast AI agent orientation on the current state of a codebase.** An agent working on a repo needs to immediately understand:
 
 - what modules exist and what they own

@@ -1194,7 +1194,9 @@ Two-track architecture for boundary detection over a unified model:
 **Track B: Schema-Backed RPC**
 - CS-1: Protobuf schema extraction (.proto parser)
 - CS-2: Generated code provenance mapping
-- GR-1: gRPC server detection (registration, handlers)
+- GR-1A: gRPC server implementation hints (ImplBase inheritance)
+- GR-1B: gRPC server registration proof (addService, bindService)
+- GR-1C: gRPC server endpoint evidence (bind address, port)
 - GR-2: gRPC client detection (stubs, invocations)
 - GR-3: gRPC provider/consumer linking
 - ER-1: eRPC IDL extraction (future)
@@ -1207,10 +1209,16 @@ Two-track architecture for boundary detection over a unified model:
 
 **Confirmed implementation order:**
 1. CS-1 (Protobuf schema) — COMPLETE (full dual-pipeline, CLI wired, smoke tested)
-2. CS-2A (Java generated code mapping) — IMPLEMENTATION COMPLETE (pending hadoop validation)
-3. GR-1 (gRPC server)
-4. GR-2 (gRPC client)
-5. GR-3 (gRPC linking)
+2. CS-2A (Java generated code mapping) — COMPLETE (validated on Hadoop: 28 mappings, 0 false positives)
+3. GR-1A (gRPC server impl hints) — INTEGRATED, VISIBILITY GAP
+   - Orchestrator wiring complete (after CS-2A in index/refresh)
+   - Explicit degradation in IndexResult.grpc_impl_hints
+   - **Gap:** boundary_contracts not exposed through rmap boundaries read path
+   - **Gap:** No CLI test coverage for GR-1A visibility
+   - Smoke validation pending
+4. GR-1B (gRPC server registration proof) — pending
+5. GR-2 (gRPC client)
+6. GR-3 (gRPC linking)
 6. BI-1B (TCP/UDP sockets)
 7. BI-1D (Process signals)
 8. BI-1C (SharedArrayBuffer)

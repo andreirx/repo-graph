@@ -8,6 +8,14 @@ Deterministic code-graph discovery substrate for AI agents.
 
 **Discovery is the primary goal. Enforcement is secondary.**
 
+### Orientation, not oracle
+
+Repo-graph helps an AI agent **look in the right places, open the right files, and ask the right questions**. It does not replace agent cognition or guarantee exhaustive answers.
+
+The product narrows the search space and highlights what matters. The agent reads the actual files and makes the final engineering decisions. If repo-graph can surface more precise information (exact callers, boundary consumers, call sites), it will — but the primary contract is orientation, not completeness.
+
+### What repo-graph models
+
 Repo-graph exists to model the relationships that determine how legacy systems can be understood and changed safely:
 - modules and ownership
 - boundaries and seams

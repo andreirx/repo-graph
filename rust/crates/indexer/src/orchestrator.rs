@@ -141,7 +141,7 @@ pub struct FileInput {
 /// snapshot is transitioned to FAILED before returning.
 /// Non-fatal errors (per-file extraction failures, oversized
 /// files) are recorded in the snapshot diagnostics.
-pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort>(
+pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort + crate::storage_port::GrpcImplHintReadPort + crate::storage_port::GrpcImplHintStorePort>(
 	storage: &mut S,
 	extractors: &mut [&mut dyn ExtractorPort],
 	repo_uid: &str,
@@ -310,6 +310,21 @@ pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStoreP
 					if contracts.schemas_indexed > 0 && contracts.storage_error.is_none() {
 						let mapping_result = run_java_mapping(storage, &snap_uid);
 						result.generated_code_mappings = Some(mapping_result);
+					}
+				}
+
+				// ── gRPC impl hint detection (GR-1A) ─────────────────
+				// Run after CS-2A mapping. Detects Java classes extending
+				// *ImplBase and links them to proto services via CS-2A.
+				// Skip if no generated code mappings were produced.
+				if let Some(ref mappings) = result.generated_code_mappings {
+					if mappings.mappings_persisted > 0 && !mappings.has_error() {
+						let hint_result = crate::grpc_impl_hint::run_grpc_impl_hint_detection(
+							storage,
+							&snap_uid,
+							repo_uid,
+						);
+						result.grpc_impl_hints = Some(hint_result);
 					}
 				}
 			}
@@ -864,6 +879,7 @@ fn run_pipeline<S: IndexerStoragePort>(
 		orphaned_declarations: 0,
 		contracts: None, // Filled by index_repo after contract subpipeline
 		generated_code_mappings: None, // Filled by index_repo after Java mapping
+		grpc_impl_hints: None, // Filled by index_repo after GR-1A detection
 		metrics: all_metrics,
 	})
 }
@@ -1191,7 +1207,7 @@ where
 /// (no delta optimization for contract schemas yet).
 ///
 /// Mirror of `refreshRepo` from `repo-indexer.ts`.
-pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort>(
+pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort + crate::storage_port::GrpcImplHintReadPort + crate::storage_port::GrpcImplHintStorePort>(
 	storage: &mut S,
 	extractors: &mut [&mut dyn ExtractorPort],
 	repo_uid: &str,
@@ -1484,6 +1500,21 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 						result.generated_code_mappings = Some(mapping_result);
 					}
 				}
+
+				// ── gRPC impl hint detection (GR-1A) ─────────────────
+				// Run after CS-2A mapping. Detects Java classes extending
+				// *ImplBase and links them to proto services via CS-2A.
+				// Skip if no generated code mappings were produced.
+				if let Some(ref mappings) = result.generated_code_mappings {
+					if mappings.mappings_persisted > 0 && !mappings.has_error() {
+						let hint_result = crate::grpc_impl_hint::run_grpc_impl_hint_detection(
+							storage,
+							&snap_uid,
+							repo_uid,
+						);
+						result.grpc_impl_hints = Some(hint_result);
+					}
+				}
 			}
 
 			Ok(result)
@@ -1712,6 +1743,38 @@ mod tests {
 			_snapshot_uid: &str,
 		) -> Result<Vec<crate::java_code_mapper::JavaSymbol>, String> {
 			Ok(vec![])
+		}
+	}
+
+	impl crate::storage_port::GrpcImplHintReadPort for MockStorage {
+		type Error = String;
+		fn query_impl_base_extensions(
+			&self,
+			_snapshot_uid: &str,
+		) -> Result<Vec<crate::grpc_impl_hint::ImplBaseExtensionInput>, String> {
+			Ok(vec![])
+		}
+		fn query_impl_base_mappings(
+			&self,
+			_snapshot_uid: &str,
+		) -> Result<Vec<crate::grpc_impl_hint::ImplBaseMappingInput>, String> {
+			Ok(vec![])
+		}
+	}
+
+	impl crate::storage_port::GrpcImplHintStorePort for MockStorage {
+		type Error = String;
+		fn insert_grpc_impl_surfaces(
+			&mut self,
+			_surfaces: &[crate::storage_port::GrpcImplSurfaceInput],
+		) -> Result<usize, String> {
+			Ok(0)
+		}
+		fn insert_grpc_impl_contracts(
+			&mut self,
+			_contracts: &[crate::storage_port::GrpcImplContractInput],
+		) -> Result<usize, String> {
+			Ok(0)
 		}
 	}
 
@@ -2045,6 +2108,16 @@ mod tests {
 			type Error = String;
 			fn query_contract_elements_with_options(&self, s: &str) -> Result<Vec<crate::java_code_mapper::ContractElementContext>, String> { self.inner.query_contract_elements_with_options(s) }
 			fn query_java_symbols(&self, s: &str) -> Result<Vec<crate::java_code_mapper::JavaSymbol>, String> { self.inner.query_java_symbols(s) }
+		}
+		impl crate::storage_port::GrpcImplHintReadPort for FailOnInsertNodes {
+			type Error = String;
+			fn query_impl_base_extensions(&self, s: &str) -> Result<Vec<crate::grpc_impl_hint::ImplBaseExtensionInput>, String> { self.inner.query_impl_base_extensions(s) }
+			fn query_impl_base_mappings(&self, s: &str) -> Result<Vec<crate::grpc_impl_hint::ImplBaseMappingInput>, String> { self.inner.query_impl_base_mappings(s) }
+		}
+		impl crate::storage_port::GrpcImplHintStorePort for FailOnInsertNodes {
+			type Error = String;
+			fn insert_grpc_impl_surfaces(&mut self, surfaces: &[crate::storage_port::GrpcImplSurfaceInput]) -> Result<usize, String> { self.inner.insert_grpc_impl_surfaces(surfaces) }
+			fn insert_grpc_impl_contracts(&mut self, contracts: &[crate::storage_port::GrpcImplContractInput]) -> Result<usize, String> { self.inner.insert_grpc_impl_contracts(contracts) }
 		}
 
 		let mut storage = FailOnInsertNodes::default();

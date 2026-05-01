@@ -92,6 +92,7 @@
 //! sub-trait as it is defined.
 
 pub mod extractor_port;
+pub mod grpc_impl_hint;
 pub mod hook;
 pub mod include_resolver;
 pub mod invalidation;
@@ -114,6 +115,12 @@ pub use java_code_mapper::{
 pub use storage_port::{
 	DeltaCopyPort, EdgeStorePort, FileCatalogPort, FileSignalPort,
 	GeneratedCodeMappingInput, GeneratedCodeMappingReadPort, GeneratedCodeMappingStorePort,
+	GrpcImplContractInput, GrpcImplHintReadPort, GrpcImplHintStorePort, GrpcImplSurfaceInput,
 	IndexerStoragePort, NodeStorePort, ProtoElementInput, ProtoSchemaInput,
 	ProtoSchemaStorePort, SnapshotLifecyclePort, UnresolvedEdgePort,
+};
+pub use grpc_impl_hint::{
+	find_grpc_impl_hints, generate_association_uid, generate_surface_uid,
+	run_grpc_impl_hint_detection, GrpcImplHint, GrpcImplHintResult,
+	ImplBaseExtensionInput, ImplBaseMappingInput,
 };

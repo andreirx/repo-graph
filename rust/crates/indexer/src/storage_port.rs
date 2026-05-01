@@ -675,3 +675,74 @@ pub trait GeneratedCodeMappingReadPort {
 		snapshot_uid: &str,
 	) -> Result<Vec<crate::java_code_mapper::JavaSymbol>, Self::Error>;
 }
+
+// ── gRPC Implementation Hint Port (GR-1A) ────────────────────────────
+
+/// Read port for gRPC implementation hint detection (GR-1A).
+///
+/// Provides queries for detecting Java classes that extend `*Grpc.*ImplBase`
+/// and linking them to proto services via CS-2A mappings.
+pub trait GrpcImplHintReadPort {
+	/// Error type for storage operations.
+	type Error: std::fmt::Debug + std::fmt::Display;
+
+	/// Query Java classes that extend *Grpc.*ImplBase.
+	///
+	/// Returns IMPLEMENTS edges where target matches `*ImplBase` pattern.
+	fn query_impl_base_extensions(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<crate::grpc_impl_hint::ImplBaseExtensionInput>, Self::Error>;
+
+	/// Query CS-2A mappings for ImplBase classes.
+	///
+	/// Returns generated_code_mappings where symbol contains `ImplBase`.
+	fn query_impl_base_mappings(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<crate::grpc_impl_hint::ImplBaseMappingInput>, Self::Error>;
+}
+
+/// Write port for gRPC implementation hint storage (GR-1A).
+///
+/// Persists boundary surfaces and contracts for detected gRPC server hints.
+pub trait GrpcImplHintStorePort {
+	/// Error type for storage operations.
+	type Error: std::fmt::Debug + std::fmt::Display;
+
+	/// Insert boundary interaction surfaces for gRPC impl hints.
+	fn insert_grpc_impl_surfaces(
+		&mut self,
+		surfaces: &[GrpcImplSurfaceInput],
+	) -> Result<usize, Self::Error>;
+
+	/// Insert boundary contracts linking hints to proto services.
+	fn insert_grpc_impl_contracts(
+		&mut self,
+		contracts: &[GrpcImplContractInput],
+	) -> Result<usize, Self::Error>;
+}
+
+/// Input for inserting a gRPC impl hint surface.
+#[derive(Debug, Clone)]
+pub struct GrpcImplSurfaceInput {
+	pub surface_uid: String,
+	pub snapshot_uid: String,
+	pub repo_uid: String,
+	pub symbol_stable_key: String,
+	pub source_file: String,
+	pub line_start: i64,
+	pub line_end: i64,
+	pub col_start: i64,
+	pub col_end: i64,
+	pub evidence_json: String,
+}
+
+/// Input for inserting a gRPC impl hint contract association.
+#[derive(Debug, Clone)]
+pub struct GrpcImplContractInput {
+	pub association_uid: String,
+	pub surface_uid: String,
+	pub contract_element_uid: String,
+	pub evidence_json: String,
+}

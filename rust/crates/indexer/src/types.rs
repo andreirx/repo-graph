@@ -541,6 +541,10 @@ pub struct IndexResult {
 	/// generated code mapping ran during this operation.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub generated_code_mappings: Option<GeneratedCodeMappingResult>,
+	/// gRPC implementation hint results (GR-1A). Present when gRPC
+	/// hint detection ran during this operation.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub grpc_impl_hints: Option<crate::grpc_impl_hint::GrpcImplHintResult>,
 	/// Per-symbol metrics from extraction.
 	///
 	/// RS-MS-3c-prereq: Accumulated from all extraction results.

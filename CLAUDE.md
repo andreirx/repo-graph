@@ -11,6 +11,16 @@ Two CLI binaries: `rmap` (Rust, primary) and `rgr` (TypeScript, legacy).
 Current-state agentic discovery. Not history accumulation. Not vector search.
 The graph answers: "What exists now? What changed? What is risky? Where should I look?"
 
+### Orientation, Not Oracle
+
+Repo-graph helps an AI agent **look in the right places, open the right files, and ask
+the right questions**. It does not replace agent cognition or guarantee exhaustive answers.
+
+The product narrows the search space and highlights what matters. The agent reads the
+actual files and makes the final engineering decisions. If repo-graph can surface more
+precise information (exact callers, boundary consumers, call sites), it will — but the
+primary contract is orientation, not completeness.
+
 Enforcement (policies, gate verdicts, waivers) exists as available substrate, not product center.
 
 Repo-graph does not own documentation authoring for downstream repos. It owns the
