@@ -13,7 +13,7 @@ use rusqlite::OptionalExtension;
 use crate::connection::StorageConnection;
 
 use repo_graph_boundary_interaction::{
-    BasisCount, BoundaryInteractionChannelView, BoundaryInteractionDetail,
+    BasisCount, BoundaryContractView, BoundaryInteractionChannelView, BoundaryInteractionDetail,
     BoundaryInteractionFilter, BoundaryInteractionListItem, BoundaryInteractionReadError,
     BoundaryInteractionReadPort, BoundaryInteractionSummary, BoundaryScope, ChannelKind,
     Direction, DirectionCount, EndpointLocality, FamilyCount, InteractionBasis,
@@ -80,7 +80,11 @@ impl BoundaryInteractionReadPort for StorageConnection {
 
         let where_clause = conditions.join(" AND ");
 
-        // Query with channel count subquery
+        // Query with channel count subquery and contract association LEFT JOIN.
+        // For list view, we pick the first contract (by MIN association_uid) for orientation.
+        // Both contract_name and contract_kind come from the same row to avoid
+        // synthesizing an impossible pair when multiple associations exist.
+        // Full contract list is available in detail view.
         let sql = format!(
             "SELECT
                 bis.surface_uid,
@@ -99,8 +103,23 @@ impl BoundaryInteractionReadPort for StorageConnection {
                 bis.symbol_stable_key,
                 bis.confidence,
                 bis.basis,
-                (SELECT COUNT(*) FROM boundary_channel_details WHERE surface_uid = bis.surface_uid) as channel_count
+                (SELECT COUNT(*) FROM boundary_channel_details WHERE surface_uid = bis.surface_uid) as channel_count,
+                bc_first.contract_name,
+                bc_first.contract_kind
             FROM boundary_interaction_surfaces bis
+            LEFT JOIN (
+                SELECT
+                    bc.surface_uid,
+                    ce.full_name as contract_name,
+                    bc.contract_kind
+                FROM boundary_contracts bc
+                LEFT JOIN contract_elements ce ON bc.contract_element_uid = ce.element_uid
+                WHERE bc.association_uid = (
+                    SELECT MIN(bc2.association_uid)
+                    FROM boundary_contracts bc2
+                    WHERE bc2.surface_uid = bc.surface_uid
+                )
+            ) bc_first ON bc_first.surface_uid = bis.surface_uid
             WHERE {}
             ORDER BY bis.source_file ASC, bis.line_start ASC, bis.col_start ASC",
             where_clause
@@ -161,6 +180,8 @@ impl BoundaryInteractionReadPort for StorageConnection {
                     confidence: row.get(14)?,
                     basis: row.get(15)?,
                     channel_count: row.get(16)?,
+                    contract_name: row.get(17)?,
+                    contract_kind: row.get(18)?,
                 })
             })
             .map_err(map_storage_error)?;
@@ -190,6 +211,8 @@ impl BoundaryInteractionReadPort for StorageConnection {
                 confidence: raw.confidence,
                 basis: parse_interaction_basis(&raw.basis)?,
                 channel_count: raw.channel_count,
+                contract_name: raw.contract_name,
+                contract_kind: raw.contract_kind,
             });
         }
 
@@ -320,6 +343,52 @@ impl BoundaryInteractionReadPort for StorageConnection {
             });
         }
 
+        // Query contract associations (Track B: schema-backed RPC)
+        let mut contract_stmt = conn
+            .prepare(
+                "SELECT
+                    bc.association_uid,
+                    bc.contract_element_uid,
+                    bc.contract_kind,
+                    ce.full_name as contract_name,
+                    bc.association_basis,
+                    bc.confidence,
+                    bc.evidence_json
+                FROM boundary_contracts bc
+                LEFT JOIN contract_elements ce ON bc.contract_element_uid = ce.element_uid
+                WHERE bc.surface_uid = ?
+                ORDER BY bc.association_uid ASC",
+            )
+            .map_err(map_storage_error)?;
+
+        let contract_rows = contract_stmt
+            .query_map([surface_uid], |row| {
+                Ok(RawContractRow {
+                    association_uid: row.get(0)?,
+                    contract_element_uid: row.get(1)?,
+                    contract_kind: row.get(2)?,
+                    contract_name: row.get(3)?,
+                    association_basis: row.get(4)?,
+                    confidence: row.get(5)?,
+                    evidence_json: row.get(6)?,
+                })
+            })
+            .map_err(map_storage_error)?;
+
+        let mut contracts = Vec::new();
+        for row_result in contract_rows {
+            let raw = row_result.map_err(map_storage_error)?;
+            contracts.push(BoundaryContractView {
+                association_uid: raw.association_uid,
+                contract_element_uid: raw.contract_element_uid,
+                contract_kind: raw.contract_kind,
+                contract_name: raw.contract_name,
+                association_basis: raw.association_basis,
+                confidence: raw.confidence,
+                evidence_json: raw.evidence_json,
+            });
+        }
+
         Ok(Some(BoundaryInteractionDetail {
             surface_uid: surface.surface_uid,
             snapshot_uid: surface.snapshot_uid,
@@ -349,6 +418,7 @@ impl BoundaryInteractionReadPort for StorageConnection {
             confidence: surface.confidence,
             evidence_json: surface.evidence_json,
             channels,
+            contracts,
         }))
     }
 
@@ -490,6 +560,9 @@ struct RawListRow {
     confidence: f64,
     basis: String,
     channel_count: u32,
+    // Contract orientation (Track B)
+    contract_name: Option<String>,
+    contract_kind: Option<String>,
 }
 
 /// Internal row type for surface queries.
@@ -540,6 +613,17 @@ struct RawChannelRow {
     frame_format: Option<String>,
     payload_contract: Option<String>,
     metadata_json: Option<String>,
+}
+
+/// Internal raw row type for contract association queries (Track B).
+struct RawContractRow {
+    association_uid: String,
+    contract_element_uid: Option<String>,
+    contract_kind: String,
+    contract_name: Option<String>,
+    association_basis: String,
+    confidence: f64,
+    evidence_json: Option<String>,
 }
 
 // ── Parse helpers ────────────────────────────────────────────────────
@@ -950,5 +1034,229 @@ mod tests {
         assert_eq!(summary.total_surfaces, 0);
         assert_eq!(summary.total_channels, 0);
         assert!(summary.files_with_boundaries.is_empty());
+    }
+
+    // ── Contract association tests (Track B / GR-1A) ─────────────────────
+
+    #[test]
+    fn list_shows_contract_name_when_contract_association_exists() {
+        let mut conn = create_test_db();
+
+        // Create a gRPC-style surface with contract association
+        let surface = SurfaceBuilder::new()
+            .snapshot_uid("snap-1")
+            .repo_uid("test-repo")
+            .boundary_scope(BoundaryScope::Unknown)
+            .channel_kind(ChannelKind::GrpcChannel)
+            .direction(Direction::Provider)
+            .protocol("grpc")
+            .transport_class(TransportClass::SchemaRpc)
+            .interaction_pattern(InteractionPattern::RequestResponse)
+            .endpoint_locality(EndpointLocality::Unknown)
+            .symbol_stable_key("test-repo:src/GreeterImpl.java#GreeterImpl:SYMBOL:class")
+            .source_file("src/GreeterImpl.java")
+            .location(10, 50, 1, 1)
+            .extractor("grpc_impl_hint_java")
+            .basis(Basis::Inferred)
+            .build()
+            .unwrap();
+
+        let surface_uid = surface.surface_uid.clone();
+        conn.insert_boundary_surfaces(&[surface]).unwrap();
+
+        // Create contract schema and element
+        conn.connection_mut()
+            .execute_batch(&format!(
+                "INSERT INTO contract_schemas (schema_uid, snapshot_uid, repo_uid, schema_kind, file_path, package_name, content_hash, extractor, parsed_at)
+                 VALUES ('cs-1', 'snap-1', 'test-repo', 'protobuf', 'api/v1/greeter.proto', 'api.v1', 'abc123', 'proto-parser:0.1.0', datetime('now'));
+                 INSERT INTO contract_elements (element_uid, schema_uid, element_kind, name, full_name)
+                 VALUES ('ce-greeter', 'cs-1', 'service', 'Greeter', 'api.v1.Greeter');
+                 INSERT INTO boundary_contracts (association_uid, surface_uid, contract_element_uid, contract_kind, association_basis, confidence)
+                 VALUES ('bc-1', '{}', 'ce-greeter', 'grpc_service', 'generated_code_mapping', 0.95);",
+                surface_uid
+            ))
+            .unwrap();
+
+        // List should show contract info
+        let filter = BoundaryInteractionFilter::new();
+        let results = conn.list_boundary_interactions("snap-1", &filter).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].contract_name.as_deref(), Some("api.v1.Greeter"));
+        assert_eq!(results[0].contract_kind.as_deref(), Some("grpc_service"));
+    }
+
+    #[test]
+    fn list_shows_none_for_contract_when_no_association() {
+        let mut conn = create_test_db();
+
+        // Plain IPC surface with no contract
+        insert_test_surface(&mut conn, "src/ipc.c", 100);
+
+        let filter = BoundaryInteractionFilter::new();
+        let results = conn.list_boundary_interactions("snap-1", &filter).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].contract_name.is_none());
+        assert!(results[0].contract_kind.is_none());
+    }
+
+    #[test]
+    fn list_shows_row_consistent_contract_when_multiple_associations() {
+        let mut conn = create_test_db();
+
+        // Create a gRPC surface
+        let surface = SurfaceBuilder::new()
+            .snapshot_uid("snap-1")
+            .repo_uid("test-repo")
+            .boundary_scope(BoundaryScope::Unknown)
+            .channel_kind(ChannelKind::GrpcChannel)
+            .direction(Direction::Provider)
+            .protocol("grpc")
+            .transport_class(TransportClass::SchemaRpc)
+            .interaction_pattern(InteractionPattern::RequestResponse)
+            .endpoint_locality(EndpointLocality::Unknown)
+            .symbol_stable_key("test-repo:src/MultiImpl.java#MultiImpl:SYMBOL:class")
+            .source_file("src/MultiImpl.java")
+            .location(10, 50, 1, 1)
+            .extractor("grpc_impl_hint_java")
+            .basis(Basis::Inferred)
+            .build()
+            .unwrap();
+
+        let surface_uid = surface.surface_uid.clone();
+        conn.insert_boundary_surfaces(&[surface]).unwrap();
+
+        // Create TWO contract elements with DIFFERENT kinds and names.
+        // The key test: ensure list picks fields from the SAME row (by MIN association_uid).
+        // - bc-aaa → ce-alpha → full_name="alpha.Service", kind="grpc_service"
+        // - bc-zzz → ce-zeta → full_name="zeta.Handler", kind="grpc_method"
+        // List should show ("alpha.Service", "grpc_service") from bc-aaa,
+        // NOT ("alpha.Service", "grpc_method") which would be a cross-row synthesis.
+        conn.connection_mut()
+            .execute_batch(&format!(
+                "INSERT INTO contract_schemas (schema_uid, snapshot_uid, repo_uid, schema_kind, file_path, package_name, content_hash, extractor, parsed_at)
+                 VALUES ('cs-multi', 'snap-1', 'test-repo', 'protobuf', 'api/multi.proto', 'api', 'abc123', 'proto-parser:0.1.0', datetime('now'));
+                 INSERT INTO contract_elements (element_uid, schema_uid, element_kind, name, full_name)
+                 VALUES ('ce-alpha', 'cs-multi', 'service', 'AlphaService', 'alpha.Service');
+                 INSERT INTO contract_elements (element_uid, schema_uid, element_kind, name, full_name)
+                 VALUES ('ce-zeta', 'cs-multi', 'method', 'ZetaHandler', 'zeta.Handler');
+                 INSERT INTO boundary_contracts (association_uid, surface_uid, contract_element_uid, contract_kind, association_basis, confidence)
+                 VALUES ('bc-aaa', '{}', 'ce-alpha', 'grpc_service', 'generated_code_mapping', 0.95);
+                 INSERT INTO boundary_contracts (association_uid, surface_uid, contract_element_uid, contract_kind, association_basis, confidence)
+                 VALUES ('bc-zzz', '{}', 'ce-zeta', 'grpc_method', 'generated_code_mapping', 0.90);",
+                surface_uid, surface_uid
+            ))
+            .unwrap();
+
+        let filter = BoundaryInteractionFilter::new();
+        let results = conn.list_boundary_interactions("snap-1", &filter).unwrap();
+
+        assert_eq!(results.len(), 1);
+        // Must be from the SAME row (bc-aaa, the MIN association_uid)
+        assert_eq!(
+            results[0].contract_name.as_deref(),
+            Some("alpha.Service"),
+            "contract_name should come from bc-aaa row"
+        );
+        assert_eq!(
+            results[0].contract_kind.as_deref(),
+            Some("grpc_service"),
+            "contract_kind should come from bc-aaa row, NOT grpc_method from bc-zzz"
+        );
+    }
+
+    #[test]
+    fn detail_includes_contract_associations() {
+        let mut conn = create_test_db();
+
+        // Create surface
+        let surface = SurfaceBuilder::new()
+            .snapshot_uid("snap-1")
+            .repo_uid("test-repo")
+            .boundary_scope(BoundaryScope::Unknown)
+            .channel_kind(ChannelKind::GrpcChannel)
+            .direction(Direction::Provider)
+            .protocol("grpc")
+            .transport_class(TransportClass::SchemaRpc)
+            .interaction_pattern(InteractionPattern::RequestResponse)
+            .endpoint_locality(EndpointLocality::Unknown)
+            .symbol_stable_key("test-repo:src/GreeterImpl.java#GreeterImpl:SYMBOL:class")
+            .source_file("src/GreeterImpl.java")
+            .location(10, 50, 1, 1)
+            .extractor("grpc_impl_hint_java")
+            .basis(Basis::Inferred)
+            .build()
+            .unwrap();
+
+        let surface_uid = surface.surface_uid.clone();
+        conn.insert_boundary_surfaces(&[surface]).unwrap();
+
+        // Create contract schema, element, and association
+        conn.connection_mut()
+            .execute_batch(&format!(
+                "INSERT INTO contract_schemas (schema_uid, snapshot_uid, repo_uid, schema_kind, file_path, package_name, content_hash, extractor, parsed_at)
+                 VALUES ('cs-1', 'snap-1', 'test-repo', 'protobuf', 'api/v1/greeter.proto', 'api.v1', 'abc123', 'proto-parser:0.1.0', datetime('now'));
+                 INSERT INTO contract_elements (element_uid, schema_uid, element_kind, name, full_name)
+                 VALUES ('ce-greeter', 'cs-1', 'service', 'Greeter', 'api.v1.Greeter');
+                 INSERT INTO boundary_contracts (association_uid, surface_uid, contract_element_uid, contract_kind, association_basis, confidence, evidence_json)
+                 VALUES ('bc-1', '{}', 'ce-greeter', 'grpc_service', 'generated_code_mapping', 0.95, '{{\"mapping_uid\":\"m1\"}}');",
+                surface_uid
+            ))
+            .unwrap();
+
+        // Detail should include contracts
+        let detail = conn
+            .get_boundary_interaction_detail(&surface_uid)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(detail.contracts.len(), 1);
+        assert_eq!(detail.contracts[0].association_uid, "bc-1");
+        assert_eq!(
+            detail.contracts[0].contract_element_uid.as_deref(),
+            Some("ce-greeter")
+        );
+        assert_eq!(detail.contracts[0].contract_kind, "grpc_service");
+        assert_eq!(
+            detail.contracts[0].contract_name.as_deref(),
+            Some("api.v1.Greeter")
+        );
+        assert_eq!(detail.contracts[0].association_basis, "generated_code_mapping");
+        assert!((detail.contracts[0].confidence - 0.95).abs() < 0.001);
+        assert!(detail.contracts[0].evidence_json.is_some());
+    }
+
+    #[test]
+    fn detail_returns_empty_contracts_when_no_association() {
+        let mut conn = create_test_db();
+
+        // Plain IPC surface
+        let surface = SurfaceBuilder::new()
+            .snapshot_uid("snap-1")
+            .repo_uid("test-repo")
+            .boundary_scope(BoundaryScope::InterProcess)
+            .channel_kind(ChannelKind::UnixSocket)
+            .direction(Direction::Provider)
+            .protocol("unix")
+            .interaction_pattern(InteractionPattern::Stream)
+            .endpoint_locality(EndpointLocality::SameHostNamed)
+            .symbol_stable_key("test-repo:src/ipc.c#main:SYMBOL:function")
+            .source_file("src/ipc.c")
+            .location(100, 105, 5, 50)
+            .extractor("c-ipc:0.1.0")
+            .basis(Basis::ApiCall)
+            .build()
+            .unwrap();
+
+        let surface_uid = surface.surface_uid.clone();
+        conn.insert_boundary_surfaces(&[surface]).unwrap();
+
+        let detail = conn
+            .get_boundary_interaction_detail(&surface_uid)
+            .unwrap()
+            .unwrap();
+
+        assert!(detail.contracts.is_empty());
     }
 }

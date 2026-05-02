@@ -82,6 +82,115 @@ The long-term direction is to become the portable, queryable substrate for:
 
 The central bet is simple: generic "code understanding" will be commoditized, but high-assurance, traceable, versioned engineering intelligence across repositories will remain valuable and under-served.
 
+## Product Layer Model
+
+Repo-graph capabilities form a dependency stack. Each layer has distinct certainty
+guarantees and depends on the layers below it.
+
+**Core doctrine:** Inner layers pursue deterministic extracted truth. Outer layers
+may surface partial, source-anchored orientation hints with explicit degradation,
+unknowns, and confidence limits.
+
+### Layer 0 — Deterministic Extraction Substrate
+
+The non-negotiable foundation. Everything else depends on this being correct.
+
+- File inventory and language routing
+- Symbol extraction (functions, classes, methods, structs, enums, etc.)
+- Structural edges: IMPORTS, CALLS, INSTANTIATES, IMPLEMENTS
+- Unresolved edge preservation with semantic classification
+- Manifest/build/registry inputs
+- Stable keys and source anchoring
+
+**Certainty:** Extracted fact. Deterministic. Reproducible from source.
+
+### Layer 1 — Deterministic Architectural Substrate
+
+What agents need first for orientation. Still core truth.
+
+- Callers / callees / imports query surfaces
+- Declared modules and manifest-backed ownership
+- Documentation inventory as primary evidence
+- Trust and degradation reporting
+- Quality measurements (complexity, nesting, parameters, function length)
+- Change-impact primitives
+
+**Certainty:** Extracted fact. Agents may rely on these for decision-making.
+
+### Layer 2 — Derived Architecture
+
+Combines extracted fact with bounded inference. Important but interpretive.
+
+- Inferred and operational modules (entrypoints, deploy surfaces)
+- Module dependency graph and cross-module edges
+- Runtime/build surface discovery
+- Seam and boundary rollups
+- Risk, hotspot, and churn overlays
+
+**Certainty:** Interpretation with explicit basis. Document inference rules.
+One step removed from raw extraction.
+
+### Layer 3 — Outer Orientation Hints
+
+Useful but not product center. High-false-positive domains by nature.
+
+- Framework detectors (Express, Spring, pytest, NestJS, etc.)
+- HTTP provider/consumer surface linking
+- gRPC hints and contract linking
+- IPC / socket / signal / shared-memory detection
+- Message-broker and event-bus detection
+- Policy propagation markers (STATUS_MAPPING, RETURN_FATE, BEHAVIORAL_MARKER)
+- Generated-code mapping
+
+**Certainty:** Evidence-backed hints with explicit unknowns. These help agents
+open the right files and ask the right questions. They do not claim exhaustive
+coverage of the domain they surface.
+
+### Layer 4 — Governance Overlay
+
+Constrains agent action. Must never redefine lower-layer truth.
+
+- Declarations (module, boundary, entrypoint, requirement, obligation, waiver)
+- Quality policies and thresholds
+- Assessments combining measurements with policy
+- Gate verdicts and exit codes
+- Waivers and exception recording
+
+**Certainty:** Policy is explicit human or team intent. Computed facts are always
+preserved alongside effective (waiver-adjusted) facts. Governance overlays truth;
+it never erases extraction results.
+
+### Dependency Rules
+
+1. **Layer N requires Layer N-1.** A framework detector without symbol extraction
+   is noise. An IPC surface without stable keys is unanchored.
+
+2. **Certainty claims must match layer.** Layer 0–1 may claim "this is the call
+   graph." Layer 3 may only claim "these files likely contain IPC usage."
+
+3. **Outer layers must surface unknowns.** "5 HTTP providers detected, 2 with
+   unresolved consumers" is honest. Raw counts without coverage or confidence
+   markers are overclaims.
+
+4. **Governance never replaces extraction.** A waiver suppresses a gate failure;
+   it does not delete the underlying measurement. Both computed and effective
+   states must be queryable.
+
+5. **Maturity tracking must be layer-specific.** "C++ shipped" means Layer 0
+   extraction works. It does not imply Layer 3 C++ framework detection exists.
+
+### Why This Matters
+
+Without this model, product docs blur deterministic substrate with orientation
+hints. That erodes trust. An agent that treats Layer 3 IPC detection as Layer 0
+call-graph fact will make incorrect decisions when the heuristic misses cases.
+
+The layer model forces honest capability claims:
+- Layer 0–1: "This is what we extracted. It is deterministic."
+- Layer 2: "This is what we inferred. Here is the basis."
+- Layer 3: "This is what we noticed. Coverage is partial. Open the files."
+- Layer 4: "This is what policy says. Underlying facts are preserved."
+
 ## Operational Architecture
 
 The end-state runtime is a **long-lived daemon** holding the current repo state in memory. Not SQLite-first. Not snapshot-history-first.
@@ -131,7 +240,7 @@ The highest-value, slowest-changing substrate is not the raw code graph. It is t
 
 **1. Modules** — declared, operational, and inferred module boundaries. File ownership. Inter-module relationships. This is the primary orientation layer for agents.
 
-**2. Boundaries and seams** — API providers/consumers (HTTP, gRPC, CLI). State boundaries (database, filesystem, cache). Event/queue boundaries. Framework entrypoints. Service/plugin seams. External system touchpoints.
+**2. Boundaries and seams** — abstract seam relationships are core product value: API provider/consumer structure, state boundaries, event/queue boundaries, service/plugin seams, external system touchpoints. Concrete mechanism detectors (HTTP, gRPC, CLI, database, filesystem, cache, framework entrypoints) are evidence tracks with varying certainty — they feed the seam model but are not themselves Layer 0/1 substrate.
 
 **3. Runtime/build environment** — how each module runs, what config defines it, what build system owns it, what deployment surface it belongs to, what compile context applies.
 

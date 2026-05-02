@@ -320,10 +320,10 @@ Indexer (8 tests):
    - CLI-level: NOT yet surfaced in `rmap index`/`refresh` stderr summary
      (current summary only shows CS-1/CS-2A, not GR-1A)
 
-### Partial: CLI visibility
+### Complete: CLI visibility (2026-05-01)
 
-Hints are stored in `boundary_interaction_surfaces` and `boundary_contracts` tables.
-Existing `rmap boundaries` command exposes **partial** information:
+Hints stored in `boundary_interaction_surfaces` and `boundary_contracts` tables.
+`rmap boundaries` command exposes all GR-1A information:
 
 **Exposed via `rmap boundaries list`**:
 - `channel_kind = grpc_channel`
@@ -331,18 +331,27 @@ Existing `rmap boundaries` command exposes **partial** information:
 - `provenance = inferred`
 - `confidence_basis = extends_impl_base`
 - `symbol_stable_key`, `source_file`, location
+- `contract_name` — proto service full name (e.g., "api.v1.Greeter")
+- `contract_kind` — association type (e.g., "grpc_service")
 
-**NOT exposed**:
-- `evidence_json` — only in `BoundaryInteractionDetail`, not `BoundaryInteractionListItem`
-- `boundary_contracts` associations — read path doesn't join contract elements
-- Proto service identity — stored but not queryable through boundary surface
+**Exposed via `rmap boundaries show <surface_uid>`**:
+- All surface fields including `evidence_json`
+- `contracts` array with full association details:
+  - `associationUid`, `contractElementUid`, `contractKind`
+  - `contractName` (proto service full name)
+  - `associationBasis`, `confidence`, `evidenceJson`
 
-**Visibility gap**: An agent can find "there's a gRPC provider hint at this class" but
-cannot see "it corresponds to proto service X" without direct DB query or new read-side work.
+**Changes**:
+- `BoundaryInteractionListItem` extended with `contract_name`, `contract_kind` fields
+- `BoundaryInteractionDetail` extended with `contracts: Vec<BoundaryContractView>`
+- `BoundaryContractView` DTO added to boundary-interaction crate
+- Storage read path joins `boundary_contracts` + `contract_elements` tables
+- List query uses MIN(association_uid) row selection to ensure contract fields come from
+  the same row (avoids synthesizing impossible pairs when surface has multiple contracts)
+- 5 new unit tests in storage crate for contract read path (including row-consistency test)
+- 2 new CLI integration tests in rgr crate proving GR-1A visibility
 
 ### Pending
 
 1. **Smoke validation**: Real gRPC repo test (grpc-java examples or similar)
-2. **Contract visibility**: Extend boundary read path to join `boundary_contracts`
-3. **CLI test coverage**: No `rmap boundaries` test proves GR-1A hints visible
-4. **CLI summary**: `rmap index`/`refresh` stderr summary doesn't include GR-1A counts
+2. **CLI summary**: `rmap index`/`refresh` stderr summary doesn't include GR-1A counts

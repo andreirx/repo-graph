@@ -1853,33 +1853,15 @@ See `docs/slices/cs-2a-java-generated-code-mapping.md` for full spec.
 - Storage: `boundary_interaction_surfaces` (hints) + `boundary_contracts` (associations)
 - Integration: Runs after CS-2A in orchestrator; gated on `mappings_persisted > 0`
 - Explicit degradation: `GrpcImplHintResult` in `IndexResult`
+- CLI visibility: Full contract info exposed in `rmap boundaries list/show`
+  - List: `contract_name`, `contract_kind` fields
+  - Show: `contracts` array with full association details
+- Test coverage: 4 storage unit tests + 2 CLI integration tests
 
-### Visibility gap (read-side incomplete)
+### Pending
 
-**Partial CLI visibility:** Hints appear in `rmap boundaries list --kind grpc_channel`
-but with incomplete evidence:
-
-- **Exposed:** `channel_kind`, `transport_class`, `provenance`, `confidence_basis`,
-  `symbol_stable_key`, `source_file`, location
-- **NOT exposed:** `evidence_json` (only in `BoundaryInteractionDetail`, not list view)
-- **NOT exposed:** `boundary_contracts` associations — proto service identity is stored
-  but not queryable through the boundary read path
-
-**Impact:** An agent can find "gRPC provider hint at this class" but cannot determine
-"it corresponds to proto service X" without direct DB query.
-
-**Fix path:** Extend `BoundaryInteractionReadPort` to join `boundary_contracts` and
-expose contract element identity in the list/detail views.
-
-### Test gap
-
-No `rmap boundaries` CLI test proves GR-1A hints are visible. Current tests stop at
-storage/indexer layers. End-to-end adapter-level test needed.
-
-### CLI summary gap
-
-`rmap index` and `rmap refresh` stderr summaries (via `print_mapping_summary()`) do not
-include GR-1A counts. The `GrpcImplHintResult` is present in library-level `IndexResult`
-but not surfaced in CLI output.
+1. **Smoke validation**: Real gRPC repo test (grpc-java examples or similar)
+2. **CLI summary**: `rmap index`/`rmap refresh` stderr summaries do not include GR-1A counts.
+   `GrpcImplHintResult` is in library-level `IndexResult` but not surfaced in CLI output.
 
 See `docs/slices/gr-1a-java-grpc-server.md` for full spec.

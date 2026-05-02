@@ -1210,12 +1210,13 @@ Two-track architecture for boundary detection over a unified model:
 **Confirmed implementation order:**
 1. CS-1 (Protobuf schema) — COMPLETE (full dual-pipeline, CLI wired, smoke tested)
 2. CS-2A (Java generated code mapping) — COMPLETE (validated on Hadoop: 28 mappings, 0 false positives)
-3. GR-1A (gRPC server impl hints) — INTEGRATED, VISIBILITY GAP
+3. GR-1A (gRPC server impl hints) — IMPLEMENTED, PENDING VALIDATION
    - Orchestrator wiring complete (after CS-2A in index/refresh)
    - Explicit degradation in IndexResult.grpc_impl_hints
-   - **Gap:** boundary_contracts not exposed through rmap boundaries read path
-   - **Gap:** No CLI test coverage for GR-1A visibility
-   - Smoke validation pending
+   - Contract visibility: boundary_contracts exposed through rmap boundaries list/show
+   - CLI test coverage: 2 integration tests proving contract fields visible in JSON output
+   - **Pending:** smoke validation on real gRPC repo
+   - **Pending:** CLI summary counts in rmap index/refresh stderr
 4. GR-1B (gRPC server registration proof) — pending
 5. GR-2 (gRPC client)
 6. GR-3 (gRPC linking)

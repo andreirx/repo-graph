@@ -582,3 +582,172 @@ fn boundaries_summary_envelope_contract() {
     assert!(result["summary"]["byDirection"].is_array());
     assert!(result["summary"]["byProtocolFamily"].is_array());
 }
+
+// ══════════════════════════════════════════════════════════════════
+// 8. CONTRACT ASSOCIATION VISIBILITY (GR-1A)
+// ══════════════════════════════════════════════════════════════════
+
+/// Create a DB with a gRPC boundary surface and contract association.
+/// This simulates the GR-1A output: a Java class extending *ImplBase
+/// linked to a proto service via boundary_contracts.
+fn build_indexed_db_with_contract() -> (tempfile::TempDir, PathBuf, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+
+    // Create DB with migrations by opening via StorageConnection
+    {
+        let _conn = repo_graph_storage::connection::StorageConnection::open(&db_path).unwrap();
+    }
+
+    // Reopen with rusqlite to insert test data directly
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute_batch(
+            r#"
+            INSERT INTO repos (repo_uid, name, root_path, created_at)
+            VALUES ('test-repo', 'Test', '/tmp/test', datetime('now'));
+
+            INSERT INTO snapshots (snapshot_uid, repo_uid, kind, status, created_at)
+            VALUES ('snap-1', 'test-repo', 'full', 'ready', datetime('now'));
+
+            -- Create contract schema and element (CS-1 output)
+            INSERT INTO contract_schemas (
+                schema_uid, snapshot_uid, repo_uid, schema_kind, file_path,
+                package_name, content_hash, extractor, parsed_at
+            ) VALUES (
+                'cs-greeter', 'snap-1', 'test-repo', 'protobuf', 'api/v1/greeter.proto',
+                'api.v1', 'abc123', 'proto-parser:0.1.0', datetime('now')
+            );
+
+            INSERT INTO contract_elements (
+                element_uid, schema_uid, element_kind, name, full_name
+            ) VALUES (
+                'ce-greeter-svc', 'cs-greeter', 'service', 'Greeter', 'api.v1.Greeter'
+            );
+
+            -- Create boundary surface (GR-1A output)
+            INSERT INTO boundary_interaction_surfaces (
+                surface_uid, snapshot_uid, repo_uid,
+                boundary_scope, channel_kind, direction,
+                transport_class, provenance, confidence_basis,
+                protocol, protocol_family, interaction_pattern,
+                endpoint_locality, symbol_stable_key, source_file,
+                line_start, line_end, col_start, col_end,
+                extractor, basis, confidence, evidence_json
+            ) VALUES (
+                'surf-greeter-impl', 'snap-1', 'test-repo',
+                'unknown', 'grpc_channel', 'provider',
+                'schema_rpc', 'inferred', 'extends_impl_base',
+                'grpc', 'rpc', 'request_response',
+                'unknown', 'test-repo:src/GreeterImpl.java#GreeterImpl:SYMBOL:class',
+                'src/GreeterImpl.java',
+                10, 50, 1, 1,
+                'grpc_impl_hint_java', 'inferred', 0.85,
+                '{"impl_base_target":"GreeterGrpc.GreeterImplBase"}'
+            );
+
+            -- Create contract association (GR-1A output)
+            INSERT INTO boundary_contracts (
+                association_uid, surface_uid, contract_element_uid,
+                contract_kind, association_basis, confidence, evidence_json
+            ) VALUES (
+                'bc-greeter', 'surf-greeter-impl', 'ce-greeter-svc',
+                'grpc_service', 'generated_code_mapping', 0.95,
+                '{"mapping_uid":"m-greeter"}'
+            );
+            "#,
+        )
+        .unwrap();
+
+    let surface_uid = "surf-greeter-impl".to_string();
+    (dir, db_path, surface_uid)
+}
+
+#[test]
+fn boundaries_list_shows_contract_name_for_grpc_hint() {
+    let (_dir, db_path, _surface_uid) = build_indexed_db_with_contract();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "test-repo",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, got: {}\nstderr: {}",
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {}\nstdout: {}", e, stdout));
+
+    assert_eq!(result["count"], 1);
+    let item = &result["results"][0];
+
+    // Verify GR-1A fields visible
+    assert_eq!(item["channelKind"], "grpc_channel");
+    assert_eq!(item["transportClass"], "schema_rpc");
+    assert_eq!(item["confidenceBasis"], "extends_impl_base");
+
+    // Verify contract fields visible (GR-1A contract association)
+    assert_eq!(
+        item["contractName"], "api.v1.Greeter",
+        "contract_name should be visible in list output"
+    );
+    assert_eq!(
+        item["contractKind"], "grpc_service",
+        "contract_kind should be visible in list output"
+    );
+}
+
+#[test]
+fn boundaries_show_includes_contracts_for_grpc_hint() {
+    let (_dir, db_path, surface_uid) = build_indexed_db_with_contract();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "show",
+            db_path.to_str().unwrap(),
+            "test-repo",
+            &surface_uid,
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, got: {}\nstderr: {}",
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Verify surface fields (show outputs the detail directly, no envelope)
+    assert_eq!(result["channelKind"], "grpc_channel");
+    assert_eq!(result["transportClass"], "schema_rpc");
+
+    // Verify contracts array present
+    let contracts = result["contracts"].as_array()
+        .expect("contracts should be an array");
+    assert_eq!(contracts.len(), 1, "should have 1 contract association");
+
+    let contract = &contracts[0];
+    assert_eq!(contract["associationUid"], "bc-greeter");
+    assert_eq!(contract["contractElementUid"], "ce-greeter-svc");
+    assert_eq!(contract["contractKind"], "grpc_service");
+    assert_eq!(contract["contractName"], "api.v1.Greeter");
+    assert_eq!(contract["associationBasis"], "generated_code_mapping");
+    assert!((contract["confidence"].as_f64().unwrap() - 0.95).abs() < 0.001);
+}

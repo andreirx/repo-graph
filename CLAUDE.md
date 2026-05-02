@@ -46,6 +46,26 @@ Primary relationship families:
 This is Feathers-driven product logic. Languages are evidence sources for the same
 relationship substrate, not separate products.
 
+## Product Layer Stack
+
+| Layer | Name | Certainty | Examples |
+|-------|------|-----------|----------|
+| 0 | Extraction substrate | Extracted fact | Files, symbols, IMPORTS, CALLS, stable keys |
+| 1 | Architectural substrate | Extracted fact | Callers/callees, declared modules, docs inventory, trust |
+| 2 | Derived architecture | Bounded inference | Inferred modules, runtime surfaces, risk overlays |
+| 3 | Orientation hints | Evidence-backed hints | Framework detectors, IPC detection, gRPC links |
+| 4 | Governance | Policy overlay | Declarations, assessments, gate, waivers |
+
+Inner layers (0–1) = deterministic fact. Outer layers (2–3) = partial hints with explicit unknowns. Layer 4 overlays but never erases.
+
+### Layer Rules
+
+1. Never build Layer N before Layer N-1 is queryable.
+2. Never describe Layer 3 heuristics as Layer 0 truth.
+3. Layer 3 surfaces must include explicit unknowns.
+4. Layer 4 overlays, never replaces underlying fact.
+5. Maturity claims must specify layer.
+
 ## Language Direction
 
 Two primary tracks:

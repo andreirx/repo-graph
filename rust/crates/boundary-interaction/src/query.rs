@@ -182,6 +182,18 @@ pub struct BoundaryInteractionListItem {
 
     /// Number of associated channel details.
     pub channel_count: u32,
+
+    // ── Contract association (Track B orientation) ────────────────
+    /// Primary contract name (for orientation).
+    /// Shows the first associated contract's full_name (e.g., "api.v1.Greeter").
+    /// None if no contract association exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_name: Option<String>,
+
+    /// Primary contract kind (e.g., "grpc_service").
+    /// None if no contract association exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_kind: Option<String>,
 }
 
 // ── Detail DTO ───────────────────────────────────────────────────────
@@ -277,6 +289,12 @@ pub struct BoundaryInteractionDetail {
     // ── Channel details ───────────────────────────────────────────
     /// Associated channel details (Level 2 facts).
     pub channels: Vec<BoundaryInteractionChannelView>,
+
+    // ── Contract associations (Track B) ───────────────────────────
+    /// Associated contract elements (schema-backed RPC).
+    /// Empty for raw IPC surfaces without contract associations.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub contracts: Vec<BoundaryContractView>,
 }
 
 /// Channel detail view for inclusion in BoundaryInteractionDetail.
@@ -359,6 +377,49 @@ pub struct BoundaryInteractionChannelView {
     /// Additional metadata JSON.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata_json: Option<String>,
+}
+
+// ── Contract association DTO ─────────────────────────────────────────
+
+/// Contract association view for boundary interaction detail.
+///
+/// Surfaces the contract element associated with a boundary surface,
+/// typically for schema-backed RPC like gRPC. A single surface may have
+/// multiple contract associations.
+///
+/// ## GR-1A context
+///
+/// For gRPC server implementation hints (GR-1A), this links the boundary
+/// surface (the Java class extending *ImplBase) to the proto service
+/// element (from contract_elements via CS-2A mapping).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoundaryContractView {
+    /// Association primary key.
+    pub association_uid: String,
+
+    /// Contract element UID (FK to contract_elements).
+    /// None if the association exists but element was deleted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_element_uid: Option<String>,
+
+    /// Contract kind (e.g., "grpc_service", "protobuf_message").
+    pub contract_kind: String,
+
+    /// Contract element fully qualified name (e.g., "api.v1.Greeter").
+    /// None if element was deleted or not joined.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_name: Option<String>,
+
+    /// How the association was established.
+    pub association_basis: String,
+
+    /// Association confidence score.
+    pub confidence: f64,
+
+    /// Evidence JSON (optional, for detailed provenance).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_json: Option<String>,
 }
 
 // ── Summary DTO ──────────────────────────────────────────────────────
@@ -563,6 +624,8 @@ mod tests {
             confidence: 0.95,
             basis: InteractionBasis::ApiCall,
             channel_count: 1,
+            contract_name: None,
+            contract_kind: None,
         };
 
         let json = serde_json::to_string(&item).unwrap();

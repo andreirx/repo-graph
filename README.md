@@ -14,6 +14,22 @@ Repo-graph helps an AI agent **look in the right places, open the right files, a
 
 The product narrows the search space and highlights what matters. The agent reads the actual files and makes the final engineering decisions. If repo-graph can surface more precise information (exact callers, boundary consumers, call sites), it will — but the primary contract is orientation, not completeness.
 
+### Product layers
+
+Repo-graph capabilities form a dependency tree. Later layers require earlier layers. Each layer has a distinct certainty contract.
+
+**Layer 0 — Extraction substrate.** The non-negotiable core. File inventory, language routing, symbol extraction, structural edges (IMPORTS, CALLS, INSTANTIATES, IMPLEMENTS), unresolved edge preservation, manifest inputs, stable keys. Certainty: extracted fact, deterministic, reproducible.
+
+**Layer 1 — Architectural substrate.** What agents need first for orientation. Callers/callees/imports queries, declared modules, documentation inventory, trust reporting, quality measurements, change-impact primitives. Certainty: extracted fact, deterministic.
+
+**Layer 2 — Derived architecture.** Combines fact with bounded inference. Inferred modules, module dependency graph, runtime/build surfaces, seam rollups, risk/hotspot/churn overlays. Certainty: interpretation with explicit basis — useful but one step removed from raw extraction.
+
+**Layer 3 — Orientation hints.** Useful but not product center. Framework detectors, HTTP surfaces, gRPC hints, IPC/socket/signal detection, message-broker detection, policy propagation markers. Certainty: evidence-backed hints with explicit unknowns and confidence limits.
+
+**Layer 4 — Governance overlay.** Constrains action, never redefines lower-layer truth. Declarations, quality policies, assessments, gate verdicts, waivers. Certainty: policy overlays fact — computed truth is always preserved alongside effective (waiver-adjusted) truth.
+
+**Doctrine:** Inner layers (0–1) pursue deterministic extracted truth. Outer layers (2–3) surface partial, source-anchored hints with explicit unknowns. Governance (4) overlays fact but never erases it.
+
 ### What repo-graph models
 
 Repo-graph exists to model the relationships that determine how legacy systems can be understood and changed safely:
@@ -103,24 +119,43 @@ Those mobile/client languages are roadmap items, not shipped Rust-primary capabi
 
 ## What `rmap` surfaces today
 
+Capabilities are organized by product layer. Inner layers are extracted facts; outer layers are derived or partial.
+
+### Layer 0-1: Extraction substrate (shipped)
+
 At index time, repo-graph:
 1. parses source files into `FILE` and `SYMBOL` nodes
-2. emits structural edges such as `IMPORTS`, `CALLS`, `INSTANTIATES`, `IMPLEMENTS`
+2. emits structural edges: `IMPORTS`, `CALLS`, `INSTANTIATES`, `IMPLEMENTS`
 3. preserves unresolved references instead of dropping them
 4. classifies unresolved edges into semantic buckets
-5. computes trust and quality-related snapshot signals
+5. computes quality measurements: complexity, cognitive complexity, nesting, parameter count, function length
 6. inventories documentation files as first-class orientation evidence
+7. extracts C++ symbols with `extern "C"` ABI-boundary linkage detection
+8. extracts local IPC boundary facts for C (indexed and stored)
 
-Shipped structural and discovery areas include:
-- modules and module ownership
-- HTTP / CLI boundary surfaces
-- state-boundary extraction
-- C++ extraction with `extern "C"` ABI-boundary evidence
-- local IPC boundary extraction in indexing/storage for C (Slice 1A)
-- quality measurements: complexity, cognitive complexity, nesting, parameter count, function length, coverage, churn, hotspots, risk
+### Layer 2: Derived architecture (partial)
 
-Important current limitation:
-- local IPC boundary facts are indexed and stored, but not yet exposed through a finished public `rmap boundaries ...` CLI surface
+Schema support exists but Rust indexer population is incomplete:
+- module inference (`module_candidates`) — TS path populates, Rust path emits compatibility MODULE nodes only
+- HTTP/CLI boundary surfaces (`project_surfaces`) — partial population
+- state-boundary extraction (resource nodes + READS/WRITES) — schema exists, not populated
+- contract schemas (`contract_schemas`) — schema exists, not populated
+
+### Layer 3: Orientation hints (mixed maturity)
+
+Specialized evidence tracks with varying implementation state:
+- local IPC boundary surfaces — shipped (BI-1A), public CLI via `rmap boundaries list/show/summary`
+- HTTP boundary model — documented as mature
+- policy facts (RETURN_FATE, STATUS_MAPPING) — implemented
+- contract/protobuf substrate — exists
+- framework detectors — partial, some TS-only
+- broader IPC link inference — roadmap
+
+### Current Rust-primary visibility gaps
+
+- Module inference is TS-side only; Rust indexer does not emit `module_candidates`
+- Some boundary contract linking remains incomplete
+- Enrichment passes not yet ported to Rust
 
 ## Trust model
 

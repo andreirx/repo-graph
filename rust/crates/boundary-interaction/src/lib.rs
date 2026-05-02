@@ -60,7 +60,7 @@ pub mod types;
 // Re-export the most commonly used types at the crate root.
 pub use channel::ChannelDetail;
 pub use query::{
-    BasisCount, BoundaryInteractionChannelView, BoundaryInteractionDetail,
+    BasisCount, BoundaryContractView, BoundaryInteractionChannelView, BoundaryInteractionDetail,
     BoundaryInteractionFilter, BoundaryInteractionListItem, BoundaryInteractionReadError,
     BoundaryInteractionReadPort, BoundaryInteractionSummary, DirectionCount, FamilyCount,
     KindCount, ScopeCount,
