@@ -1191,15 +1191,15 @@ Two-track architecture for boundary detection over a unified model:
 - BI-1C: SharedArrayBuffer (JS/TS worker boundaries)
 - BI-1D: Process signals (POSIX signal send/handle)
 
-**Track B: Schema-Backed RPC**
-- CS-1: Protobuf schema extraction (.proto parser)
-- CS-2: Generated code provenance mapping
-- GR-1A: gRPC server implementation hints (ImplBase inheritance)
-- GR-1B: gRPC server registration proof (addService, bindService)
-- GR-1C: gRPC server endpoint evidence (bind address, port)
-- GR-2A: gRPC client stub hints (newBlockingStub, newFutureStub, newStub)
-- GR-2B: gRPC client endpoint evidence (channel host, port)
-- GR-3: gRPC provider/consumer linking
+**Track B: Schema-Backed RPC** — ORIENTATION-SUFFICIENT
+- CS-1: Protobuf schema extraction (.proto parser) — COMPLETE
+- CS-2: Generated code provenance mapping — COMPLETE
+- GR-1A: gRPC server implementation hints (ImplBase inheritance) — FIXTURE-VALIDATED
+- GR-1B: gRPC server registration proof (addService, bindService) — COMPLETE
+- GR-2A: gRPC client stub hints (newBlockingStub, newFutureStub, newStub) — FIXTURE-VALIDATED
+- GR-1C: gRPC server endpoint evidence (bind address, port) — DEFERRED
+- GR-2B: gRPC client endpoint evidence (channel host, port) — DEFERRED
+- GR-3: gRPC provider/consumer linking — DEFERRED (GR-3A implemented but unwired)
 - ER-1: eRPC IDL extraction (future)
 
 **Message Broker Track (after A+B):**
@@ -1244,14 +1244,35 @@ Two-track architecture for boundary detection over a unified model:
    - Fixture: `grpc-java-minimal` extended with `HelloWorldClient.java` and stub classes
    - Full indexed fixture run validates: extractor → CS-2A → GR-2A → CLI
    - **Same substrate assumption as GR-1A** (requires generated stubs)
-6. GR-2B (gRPC client endpoint evidence) — PLANNED
-7. GR-3 (gRPC linking)
-6. BI-1B (TCP/UDP sockets)
+**── gRPC Track: ORIENTATION-SUFFICIENT ──**
+
+The Java gRPC track has reached orientation sufficiency:
+- Schema extraction (CS-1)
+- Generated-code provenance (CS-2A)
+- Provider hints (GR-1A)
+- Registration strengthening (GR-1B)
+- Consumer hints (GR-2A)
+
+This is sufficient as an orientation substrate. An agent can:
+- Identify gRPC servers and clients
+- See which proto services they reference
+- Navigate to the relevant code
+
+**Deferred depth slices** (return only if real-repo navigation proves insufficient):
+- GR-1C (server endpoint evidence) — deferred
+- GR-2B (client endpoint evidence) — deferred
+- GR-3A (contract-based linking) — implemented but CLI/fixture pending, deferred
+- GR-3B (endpoint-aligned linking) — deferred
+- GR-3C (method-level linking) — deferred
+
+**── Breadth-First: Next Mechanism Families ──**
+
+6. BI-1B (TCP/UDP sockets) — NEXT
 7. BI-1D (Process signals)
-8. BI-1C (SharedArrayBuffer)
-9. MB-1 (RabbitMQ/AMQP)
-10. MB-2 (Kafka)
-11. MB-3 (NATS/Redis) — start
+8. BI-1C (SharedArrayBuffer / worker boundaries)
+9. MB-1 (RabbitMQ/AMQP basic detection)
+10. MB-2 (Kafka topic detection)
+11. MB-3 (NATS/Redis pub-sub)
 
 **Shared infrastructure:**
 - Contract/IDL substrate module (`repo-graph-contract-schema`)

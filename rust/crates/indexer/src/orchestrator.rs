@@ -141,7 +141,7 @@ pub struct FileInput {
 /// snapshot is transitioned to FAILED before returning.
 /// Non-fatal errors (per-file extraction failures, oversized
 /// files) are recorded in the snapshot diagnostics.
-pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort + crate::storage_port::GrpcImplHintReadPort + crate::storage_port::GrpcImplHintStorePort + crate::storage_port::GrpcRegistrationProofPort + crate::storage_port::GrpcClientHintReadPort + crate::storage_port::GrpcClientHintStorePort>(
+pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort + crate::storage_port::GrpcImplHintReadPort + crate::storage_port::GrpcImplHintStorePort + crate::storage_port::GrpcRegistrationProofPort + crate::storage_port::GrpcClientHintReadPort + crate::storage_port::GrpcClientHintStorePort + crate::storage_port::GrpcLinkReadPort + crate::storage_port::GrpcLinkStorePort>(
 	storage: &mut S,
 	extractors: &mut [&mut dyn ExtractorPort],
 	repo_uid: &str,
@@ -350,6 +350,27 @@ pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStoreP
 							repo_uid,
 						);
 						result.grpc_client_hints = Some(client_hint_result);
+
+						// ── gRPC link detection (GR-3A) ───────────────────
+						// Run after GR-1A and GR-2A. Links provider and consumer
+						// surfaces when both reference the same proto service.
+						// Requires at least one provider and one consumer hint.
+						let has_providers = result.grpc_impl_hints
+							.as_ref()
+							.map(|h| h.hints_emitted > 0)
+							.unwrap_or(false);
+						let has_consumers = result.grpc_client_hints
+							.as_ref()
+							.map(|h| h.hints_emitted > 0)
+							.unwrap_or(false);
+
+						if has_providers && has_consumers {
+							let link_result = crate::grpc_link::run_grpc_link_detection(
+								storage,
+								&snap_uid,
+							);
+							result.grpc_links = Some(link_result);
+						}
 					}
 				}
 			}
@@ -907,6 +928,7 @@ fn run_pipeline<S: IndexerStoragePort>(
 		grpc_impl_hints: None, // Filled by index_repo after GR-1A detection
 		grpc_registration_proof: None, // Filled by index_repo after GR-1B detection
 		grpc_client_hints: None, // Filled by index_repo after GR-2A detection
+		grpc_links: None, // Filled by index_repo after GR-3A detection
 		metrics: all_metrics,
 	})
 }
@@ -1234,7 +1256,7 @@ where
 /// (no delta optimization for contract schemas yet).
 ///
 /// Mirror of `refreshRepo` from `repo-indexer.ts`.
-pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort + crate::storage_port::GrpcImplHintReadPort + crate::storage_port::GrpcImplHintStorePort + crate::storage_port::GrpcRegistrationProofPort + crate::storage_port::GrpcClientHintReadPort + crate::storage_port::GrpcClientHintStorePort>(
+pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort + crate::storage_port::GrpcImplHintReadPort + crate::storage_port::GrpcImplHintStorePort + crate::storage_port::GrpcRegistrationProofPort + crate::storage_port::GrpcClientHintReadPort + crate::storage_port::GrpcClientHintStorePort + crate::storage_port::GrpcLinkReadPort + crate::storage_port::GrpcLinkStorePort>(
 	storage: &mut S,
 	extractors: &mut [&mut dyn ExtractorPort],
 	repo_uid: &str,
@@ -1565,6 +1587,27 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 							repo_uid,
 						);
 						result.grpc_client_hints = Some(client_hint_result);
+
+						// ── gRPC link detection (GR-3A) ───────────────────
+						// Run after GR-1A and GR-2A. Links provider and consumer
+						// surfaces when both reference the same proto service.
+						// Requires at least one provider and one consumer hint.
+						let has_providers = result.grpc_impl_hints
+							.as_ref()
+							.map(|h| h.hints_emitted > 0)
+							.unwrap_or(false);
+						let has_consumers = result.grpc_client_hints
+							.as_ref()
+							.map(|h| h.hints_emitted > 0)
+							.unwrap_or(false);
+
+						if has_providers && has_consumers {
+							let link_result = crate::grpc_link::run_grpc_link_detection(
+								storage,
+								&snap_uid,
+							);
+							result.grpc_links = Some(link_result);
+						}
 					}
 				}
 			}
@@ -1882,6 +1925,30 @@ mod tests {
 		fn insert_grpc_client_contracts(
 			&mut self,
 			_contracts: &[crate::storage_port::GrpcClientContractInput],
+		) -> Result<usize, String> {
+			Ok(0)
+		}
+	}
+	impl crate::storage_port::GrpcLinkReadPort for MockStorage {
+		type Error = String;
+		fn query_provider_surfaces_with_contracts(
+			&self,
+			_snapshot_uid: &str,
+		) -> Result<Vec<crate::storage_port::SurfaceWithContract>, String> {
+			Ok(vec![])
+		}
+		fn query_consumer_surfaces_with_contracts(
+			&self,
+			_snapshot_uid: &str,
+		) -> Result<Vec<crate::storage_port::SurfaceWithContract>, String> {
+			Ok(vec![])
+		}
+	}
+	impl crate::storage_port::GrpcLinkStorePort for MockStorage {
+		type Error = String;
+		fn insert_boundary_interaction_links(
+			&mut self,
+			_links: &[crate::storage_port::BoundaryInteractionLinkInput],
 		) -> Result<usize, String> {
 			Ok(0)
 		}
@@ -2243,6 +2310,15 @@ mod tests {
 			type Error = String;
 			fn insert_grpc_client_surfaces(&mut self, surfaces: &[crate::storage_port::GrpcClientSurfaceInput]) -> Result<usize, String> { self.inner.insert_grpc_client_surfaces(surfaces) }
 			fn insert_grpc_client_contracts(&mut self, contracts: &[crate::storage_port::GrpcClientContractInput]) -> Result<usize, String> { self.inner.insert_grpc_client_contracts(contracts) }
+		}
+		impl crate::storage_port::GrpcLinkReadPort for FailOnInsertNodes {
+			type Error = String;
+			fn query_provider_surfaces_with_contracts(&self, s: &str) -> Result<Vec<crate::storage_port::SurfaceWithContract>, String> { self.inner.query_provider_surfaces_with_contracts(s) }
+			fn query_consumer_surfaces_with_contracts(&self, s: &str) -> Result<Vec<crate::storage_port::SurfaceWithContract>, String> { self.inner.query_consumer_surfaces_with_contracts(s) }
+		}
+		impl crate::storage_port::GrpcLinkStorePort for FailOnInsertNodes {
+			type Error = String;
+			fn insert_boundary_interaction_links(&mut self, links: &[crate::storage_port::BoundaryInteractionLinkInput]) -> Result<usize, String> { self.inner.insert_boundary_interaction_links(links) }
 		}
 
 		let mut storage = FailOnInsertNodes::default();

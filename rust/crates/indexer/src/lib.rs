@@ -94,6 +94,7 @@
 pub mod extractor_port;
 pub mod grpc_client_hint;
 pub mod grpc_impl_hint;
+pub mod grpc_link;
 pub mod grpc_registration_proof;
 pub mod hook;
 pub mod include_resolver;
@@ -134,3 +135,10 @@ pub use grpc_impl_hint::{
 	ImplBaseExtensionInput, ImplBaseMappingInput,
 };
 pub use grpc_registration_proof::{run_grpc_registration_proof, GrpcRegistrationProofResult};
+pub use grpc_link::{
+	find_grpc_links, run_grpc_link_detection,
+	GrpcLink, GrpcLinkResult,
+};
+pub use storage_port::{
+	BoundaryInteractionLinkInput, GrpcLinkReadPort, GrpcLinkStorePort, SurfaceWithContract,
+};

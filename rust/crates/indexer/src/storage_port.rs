@@ -928,3 +928,90 @@ pub struct GrpcClientContractInput {
 	pub contract_element_uid: String,
 	pub evidence_json: String,
 }
+
+// ── GR-3A: Contract-based provider/consumer linking port ─────────────────────
+
+/// Read port for gRPC link detection (GR-3A).
+///
+/// Provides queries for finding provider and consumer surfaces that share
+/// the same proto service contract, enabling contract-based linking.
+pub trait GrpcLinkReadPort {
+	/// Error type for storage operations.
+	type Error: std::fmt::Debug + std::fmt::Display;
+
+	/// Query provider surfaces with gRPC service contracts.
+	///
+	/// Returns surfaces where:
+	/// - direction = 'provider'
+	/// - transport_class = 'schema_rpc'
+	/// - has boundary_contracts association with contract_kind = 'grpc_service'
+	fn query_provider_surfaces_with_contracts(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<SurfaceWithContract>, Self::Error>;
+
+	/// Query consumer surfaces with gRPC service contracts.
+	///
+	/// Returns surfaces where:
+	/// - direction = 'consumer'
+	/// - transport_class = 'schema_rpc'
+	/// - has boundary_contracts association with contract_kind = 'grpc_service'
+	fn query_consumer_surfaces_with_contracts(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<SurfaceWithContract>, Self::Error>;
+}
+
+/// Write port for gRPC link storage (GR-3A).
+///
+/// Persists boundary interaction links between provider and consumer surfaces.
+pub trait GrpcLinkStorePort {
+	/// Error type for storage operations.
+	type Error: std::fmt::Debug + std::fmt::Display;
+
+	/// Insert boundary interaction links.
+	fn insert_boundary_interaction_links(
+		&mut self,
+		links: &[BoundaryInteractionLinkInput],
+	) -> Result<usize, Self::Error>;
+}
+
+/// A surface with its contract association (GR-3A input).
+#[derive(Debug, Clone)]
+pub struct SurfaceWithContract {
+	/// Surface UID
+	pub surface_uid: String,
+	/// Contract element UID (proto service)
+	pub contract_element_uid: String,
+	/// Contract element full name (e.g., "helloworld.Greeter")
+	pub contract_full_name: String,
+	/// Surface direction ("provider" or "consumer")
+	pub direction: String,
+	/// Source file for evidence
+	pub source_file: String,
+	/// Interaction basis (e.g., "impl_extension", "stub_creation")
+	pub basis: String,
+}
+
+/// Input for inserting a boundary interaction link.
+#[derive(Debug, Clone)]
+pub struct BoundaryInteractionLinkInput {
+	/// Unique link identifier (deterministic)
+	pub link_uid: String,
+	/// Snapshot UID
+	pub snapshot_uid: String,
+	/// Provider surface UID
+	pub provider_surface_uid: String,
+	/// Consumer surface UID
+	pub consumer_surface_uid: String,
+	/// Link kind ("contract_match_only" for GR-3A)
+	pub link_kind: String,
+	/// Contract element UID (proto service)
+	pub contract_element_uid: String,
+	/// Match basis ("contract" for GR-3A)
+	pub match_basis: String,
+	/// Confidence score (0.80 for contract-only match)
+	pub confidence: f64,
+	/// Evidence JSON
+	pub evidence_json: String,
+}

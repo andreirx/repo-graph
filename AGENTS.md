@@ -23,6 +23,18 @@ primary contract is orientation, not completeness.
 
 Enforcement (policies, gate verdicts, waivers) exists as available substrate, not product center.
 
+### Breadth First
+
+AI agents figure things out themselves. Repo-graph provides orientation surfaces, not exhaustive answers.
+
+Product strategy: **breadth first, not depth first.**
+
+1. Surface minimal hints across all identified useful directions.
+2. Improve depth only when real-repo navigation proves hints insufficient.
+3. Do not polish one feature while others remain invisible.
+
+A shallow signal that exists beats a deep signal that doesn't. Agents can compensate for thin data; they cannot compensate for absent data.
+
 Repo-graph does not own documentation authoring for downstream repos. It owns the
 deterministic discovery substrate that lets an AI agent:
 - orient quickly

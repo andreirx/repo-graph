@@ -1,109 +1,121 @@
 # GR-3: gRPC Provider/Consumer Linking
 
-Status: PLANNED
-Depends: GR-1 (Server Detection), GR-2 (Client Detection)
+Status: DEFERRED (GR-3A implemented but CLI/fixture pending — depth work, not breadth priority)
+Depends: GR-1A (Server Hints), GR-2A (Client Hints), CS-2A (Generated Code Mapping)
 Track: B (Schema-Backed RPC)
+
+**Deferral rationale (2026-05-04):** The gRPC track has reached orientation sufficiency
+with CS-1, CS-2A, GR-1A, GR-1B, GR-2A. Further work (GR-3, GR-2B, GR-1C) is depth work.
+Breadth-first product strategy: move to next mechanism family (BI-1B TCP/UDP sockets).
+Return to GR-3 only if real-repo navigation proves the existing hints insufficient.
 
 ## Objective
 
-Link gRPC clients to servers: match consumer stubs to provider implementations
-based on service contracts and channel identity. This produces cross-component
-and cross-language boundary links.
+Link gRPC provider surfaces (GR-1A) to consumer surfaces (GR-2A) when both
+reference the same proto service contract. This surfaces the structural
+relationship: "these two code locations appear to communicate via the same
+gRPC service."
 
-## Why This Matters
+**This is a hint, not connection proof.**
 
-Provider/consumer linking is the highest-value outcome of boundary detection:
-- "This Python client calls this Java server"
-- "This service method is consumed by these 5 clients"
-- "This service has no consumers (dead boundary?)"
-- "This client targets a service we don't implement (external dependency)"
+It surfaces:
+- "this provider and consumer appear to belong to the same proto service"
+- candidate link for agent inspection
 
-## Scope
+NOT:
+- definite network path
+- deployed communication proof
+- live runtime topology
+
+## Phased Implementation
+
+### GR-3A (this slice): Contract-Based Linking
+- Match by shared proto service contract only
+- Hint-grade confidence (0.80)
+- No endpoint matching required
+
+### GR-3B (future): Endpoint-Aligned Linking
+- Requires GR-2B (client endpoint) and GR-1C (server endpoint)
+- Higher confidence (0.90+) when endpoints align
+- Port matching, host resolution
+
+### GR-3C (future): Method-Level Linking
+- Link specific RPC calls to handlers
+- Requires method-level extraction
+
+## GR-3A Scope
 
 ### In scope
-- Intra-repo linking (client and server in same repo)
-- Service-level matching (contract-based)
-- Method-level matching (RPC-based)
-- Cross-language linking
-- Unmatched consumer reporting (external dependencies)
-- Unmatched provider reporting (unused services)
+- Link provider surface to consumer surface when:
+  - Both have `boundary_contracts` associations
+  - Both point to the same `contract_element_uid` (proto service)
+  - Both are `schema_rpc` transport class
+- Emit deterministic linking artifact to `boundary_interaction_links`
+- Evidence: shared contract element
+- Match basis: `contract`
+- Link kind: `contract_match_only`
+- Hint-grade confidence (0.80)
 
-### Out of scope
-- Cross-repo linking (requires multi-repo indexing)
-- Runtime service discovery (Consul, etcd, etc.)
-- Load balancer resolution
-- Network topology inference
+### Out of scope (GR-3A)
+- Endpoint reconciliation (GR-3B)
+- Host/port matching (GR-3B)
+- Method-level linking (GR-3C)
+- Cross-repo linking
+- Same-process vs remote proof
+- Runtime service discovery
 
-## Linking Strategy
+## GR-3A Detection Logic
 
-### Level 1: Contract-Based Matching
-
-Match by protobuf service identity:
-
-```
-Server implements: package.MyService
-Client uses stub: package.MyService
-
--> Match if same service full_name
-```
-
-This works regardless of:
-- Language difference
-- File location
-- Endpoint configuration
-
-### Level 2: Endpoint-Based Matching
-
-When both have literal endpoints:
-
-```
-Server binds: 0.0.0.0:50051
-Client targets: localhost:50051
-
--> Match if ports align and server binds INADDR_ANY
+### Query providers with contracts
+```sql
+SELECT 
+    bis.surface_uid,
+    bc.contract_element_uid,
+    ce.full_name AS contract_name,
+    bis.basis AS provider_basis
+FROM boundary_interaction_surfaces bis
+JOIN boundary_contracts bc ON bc.surface_uid = bis.surface_uid
+JOIN contract_elements ce ON ce.element_uid = bc.contract_element_uid
+WHERE bis.snapshot_uid = ?
+  AND bis.direction = 'provider'
+  AND bis.transport_class = 'schema_rpc'
+  AND bc.contract_kind = 'grpc_service'
 ```
 
-Endpoint matching adds confidence but is not required.
-
-### Level 3: Method-Level Linking
-
-Within a service match, link specific method calls:
-
+### Query consumers with contracts
+```sql
+SELECT 
+    bis.surface_uid,
+    bc.contract_element_uid,
+    ce.full_name AS contract_name,
+    bis.basis AS consumer_basis
+FROM boundary_interaction_surfaces bis
+JOIN boundary_contracts bc ON bc.surface_uid = bis.surface_uid
+JOIN contract_elements ce ON ce.element_uid = bc.contract_element_uid
+WHERE bis.snapshot_uid = ?
+  AND bis.direction = 'consumer'
+  AND bis.transport_class = 'schema_rpc'
+  AND bc.contract_kind = 'grpc_service'
 ```
-Server implements: MyService.GetUser, MyService.CreateUser
-Client calls: stub.GetUser()
 
--> Link client call to server handler
-```
+### Join by contract
+For each `(provider, consumer)` pair sharing the same `contract_element_uid`:
+- Generate deterministic `link_uid`
+- Insert into `boundary_interaction_links` with:
+  - `link_kind = 'contract_match_only'`
+  - `match_basis = 'contract'`
+  - `confidence = 0.80`
 
-## Link Classification
+## Link Classification (GR-3A)
 
-| Scenario | Classification |
-|----------|---------------|
-| Server + Client, same repo | `internal_link` |
-| Server only, no client | `exposed_boundary` |
-| Client only, no server | `external_dependency` |
-| Client + Server, endpoint mismatch | `contract_match_only` |
+| Scenario | link_kind |
+|----------|-----------|
+| Provider + Consumer, same contract | `contract_match_only` |
 
-## Matching Algorithm
-
-```
-1. Group all gRPC servers by service full_name
-2. Group all gRPC clients by service full_name
-
-3. For each service full_name:
-   - If servers exist and clients exist:
-     - Create link records between each client/server pair
-     - Link at method level where calls match handlers
-   - If servers exist but no clients:
-     - Mark servers as exposed_boundary
-   - If clients exist but no servers:
-     - Mark clients as external_dependency
-
-4. For clients with literal endpoints:
-   - Check if any server binds that endpoint
-   - Add endpoint_match_confidence if aligned
-```
+Future slices (GR-3B) will add:
+- `internal_link` (when endpoints also match)
+- Exposed boundary reporting
+- External dependency reporting
 
 ## Storage Schema
 
@@ -244,3 +256,56 @@ rmap boundaries unmatched <db> <repo>
 - External dependencies detected
 - Confidence scores meaningful
 - CLI queries useful
+
+## Implementation Notes (2026-05-04)
+
+### GR-3A Implementation
+
+Files added/modified:
+- `rust/crates/indexer/src/grpc_link.rs` — NEW: Detection logic and orchestration
+- `rust/crates/indexer/src/storage_port.rs` — Added `GrpcLinkReadPort`, `GrpcLinkStorePort` traits, DTOs
+- `rust/crates/indexer/src/lib.rs` — Module and re-exports
+- `rust/crates/indexer/src/types.rs` — Added `grpc_links` field to `IndexResult`
+- `rust/crates/indexer/src/orchestrator.rs` — Wired GR-3A after GR-1A and GR-2A
+- `rust/crates/storage/src/grpc_impl_hint_port_impl.rs` — Port implementations for StorageConnection
+
+Key implementation details:
+- Queries provider surfaces where `direction='provider'`, `transport_class='schema_rpc'`, `contract_kind='grpc_service'`
+- Queries consumer surfaces where `direction='consumer'`, `transport_class='schema_rpc'`, `contract_kind='grpc_service'`
+- Joins by `contract_element_uid` to find matching (provider, consumer) pairs
+- Links emitted with `link_kind='contract_match_only'`, `match_basis='contract'`, `confidence=0.80`
+- Link UID is deterministic: hash of `snapshot_uid:provider_surface_uid:consumer_surface_uid:contract_element_uid`
+  - **Critical:** includes `contract_element_uid` so multi-service pairs produce distinct links
+- Evidence JSON includes: contract_full_name, provider_file, consumer_file, provider_basis, consumer_basis
+
+**Orchestration wiring:**
+- Runs after GR-1A (provider hints) and GR-2A (consumer hints) complete
+- Only runs if both GR-1A and GR-2A emitted at least one hint
+- Uses same storage connection (no new DB transaction)
+
+**Tests added:**
+- `grpc_link::tests::find_links_matches_by_contract` — basic contract matching
+- `grpc_link::tests::find_links_no_match_different_contracts` — different contracts, no links
+- `grpc_link::tests::find_links_multiple_consumers_one_provider` — N:1 links
+- `grpc_link::tests::find_links_multiple_providers_one_consumer` — 1:N links
+- `grpc_link::tests::find_links_multi_service_pair_produces_distinct_links` — multi-service pairs
+- `grpc_link::tests::link_uid_is_deterministic` — UID stability (includes contract in identity)
+- `grpc_link::tests::link_uid_starts_with_prefix` — UID format
+- `gr3a_query_provider_surfaces_with_contracts` — storage port test
+- `gr3a_query_consumer_surfaces_with_contracts` — storage port test
+- `gr3a_end_to_end_link_detection` — full chain test
+- `gr3a_no_links_without_matching_contracts` — negative test
+- `gr3a_link_is_idempotent` — INSERT OR IGNORE behavior
+
+**Pending:**
+- CLI command `rmap boundaries links` (GR-3A has no CLI exposure yet)
+- Fixture validation test with real indexed grpc-java-minimal run
+- Cross-language fixture test (Java server + Python/TS client)
+
+### What GR-3A Does NOT Do
+
+- Does NOT extract endpoint information (GR-2B, GR-1C scope)
+- Does NOT match host:port (GR-3B scope)
+- Does NOT link individual RPC method calls (GR-3C scope)
+- Does NOT detect exposed/unmatched boundaries (GR-3B scope)
+- Does NOT work cross-repo

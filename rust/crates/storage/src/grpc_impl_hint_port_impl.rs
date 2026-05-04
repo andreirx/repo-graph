@@ -377,6 +377,144 @@ impl repo_graph_indexer::storage_port::GrpcClientHintStorePort for StorageConnec
     }
 }
 
+// ── GR-3A: Link port implementation ────────────────────────────────────
+
+impl repo_graph_indexer::storage_port::GrpcLinkReadPort for StorageConnection {
+    type Error = StorageError;
+
+    fn query_provider_surfaces_with_contracts(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<repo_graph_indexer::storage_port::SurfaceWithContract>, StorageError> {
+        let conn = self.connection();
+
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT
+                bis.surface_uid,
+                bc.contract_element_uid,
+                ce.full_name AS contract_full_name,
+                bis.direction,
+                bis.source_file,
+                bis.basis
+            FROM boundary_interaction_surfaces bis
+            JOIN boundary_contracts bc ON bc.surface_uid = bis.surface_uid
+            JOIN contract_elements ce ON ce.element_uid = bc.contract_element_uid
+            WHERE bis.snapshot_uid = ?
+              AND bis.direction = 'provider'
+              AND bis.transport_class = 'schema_rpc'
+              AND bc.contract_kind = 'grpc_service'
+            "#,
+        )?;
+
+        let rows = stmt.query_map(rusqlite::params![snapshot_uid], |row| {
+            Ok(repo_graph_indexer::storage_port::SurfaceWithContract {
+                surface_uid: row.get(0)?,
+                contract_element_uid: row.get(1)?,
+                contract_full_name: row.get(2)?,
+                direction: row.get(3)?,
+                source_file: row.get(4)?,
+                basis: row.get(5)?,
+            })
+        })?;
+
+        let mut surfaces = Vec::new();
+        for row_result in rows {
+            surfaces.push(row_result?);
+        }
+
+        Ok(surfaces)
+    }
+
+    fn query_consumer_surfaces_with_contracts(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<repo_graph_indexer::storage_port::SurfaceWithContract>, StorageError> {
+        let conn = self.connection();
+
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT
+                bis.surface_uid,
+                bc.contract_element_uid,
+                ce.full_name AS contract_full_name,
+                bis.direction,
+                bis.source_file,
+                bis.basis
+            FROM boundary_interaction_surfaces bis
+            JOIN boundary_contracts bc ON bc.surface_uid = bis.surface_uid
+            JOIN contract_elements ce ON ce.element_uid = bc.contract_element_uid
+            WHERE bis.snapshot_uid = ?
+              AND bis.direction = 'consumer'
+              AND bis.transport_class = 'schema_rpc'
+              AND bc.contract_kind = 'grpc_service'
+            "#,
+        )?;
+
+        let rows = stmt.query_map(rusqlite::params![snapshot_uid], |row| {
+            Ok(repo_graph_indexer::storage_port::SurfaceWithContract {
+                surface_uid: row.get(0)?,
+                contract_element_uid: row.get(1)?,
+                contract_full_name: row.get(2)?,
+                direction: row.get(3)?,
+                source_file: row.get(4)?,
+                basis: row.get(5)?,
+            })
+        })?;
+
+        let mut surfaces = Vec::new();
+        for row_result in rows {
+            surfaces.push(row_result?);
+        }
+
+        Ok(surfaces)
+    }
+}
+
+impl repo_graph_indexer::storage_port::GrpcLinkStorePort for StorageConnection {
+    type Error = StorageError;
+
+    fn insert_boundary_interaction_links(
+        &mut self,
+        links: &[repo_graph_indexer::storage_port::BoundaryInteractionLinkInput],
+    ) -> Result<usize, StorageError> {
+        if links.is_empty() {
+            return Ok(0);
+        }
+
+        let conn = self.connection_mut();
+        let mut stmt = conn.prepare(
+            r#"
+            INSERT OR IGNORE INTO boundary_interaction_links (
+                link_uid, snapshot_uid,
+                provider_surface_uid, consumer_surface_uid,
+                link_kind, contract_element_uid,
+                match_basis, confidence, evidence_json,
+                materialized_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            "#,
+        )?;
+
+        let mut inserted = 0;
+        for link in links {
+            let result = stmt.execute(rusqlite::params![
+                link.link_uid,
+                link.snapshot_uid,
+                link.provider_surface_uid,
+                link.consumer_surface_uid,
+                link.link_kind,
+                link.contract_element_uid,
+                link.match_basis,
+                link.confidence,
+                link.evidence_json,
+            ])?;
+            inserted += result;
+        }
+
+        Ok(inserted)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1067,5 +1205,278 @@ mod tests {
 
         assert!(!result.has_error());
         assert_eq!(result.hints_emitted, 0, "No hints without matching CS-2A mapping");
+    }
+
+    // ── GR-3A: Provider/consumer linking tests ────────────────────────
+
+    /// Sets up a GR-3A test scenario with:
+    /// - Provider surface (GR-1A output)
+    /// - Consumer surface (GR-2A output)
+    /// - Both linked to same proto service via boundary_contracts
+    fn setup_linking_scenario() -> StorageConnection {
+        let mut conn = setup_test_db_with_mapping();
+
+        // Insert provider surface (GR-1A output)
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO boundary_interaction_surfaces (
+                    surface_uid, snapshot_uid, repo_uid,
+                    boundary_scope, channel_kind, direction,
+                    transport_class, provenance, confidence_basis,
+                    protocol, protocol_family, interaction_pattern,
+                    endpoint_locality,
+                    symbol_stable_key, source_file, line_start, line_end, col_start, col_end,
+                    extractor, basis, confidence, evidence_json
+                ) VALUES (
+                    'provider-1', 's1', 'r1',
+                    'unknown', 'grpc_channel', 'provider',
+                    'schema_rpc', 'inferred', 'extends_impl_base',
+                    'grpc', 'rpc', 'unknown', 'unknown',
+                    'r1:Server.java#GreeterImpl:SYMBOL:CLASS',
+                    'src/Server.java', 10, 50, 1, 1,
+                    'grpc_impl_hint_java', 'extends_impl_base', 0.85,
+                    '{"impl_base":"GreeterGrpc.GreeterImplBase"}'
+                )"#,
+                [],
+            )
+            .unwrap();
+
+        // Insert consumer surface (GR-2A output)
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO boundary_interaction_surfaces (
+                    surface_uid, snapshot_uid, repo_uid,
+                    boundary_scope, channel_kind, direction,
+                    transport_class, provenance, confidence_basis,
+                    protocol, protocol_family, interaction_pattern,
+                    endpoint_locality,
+                    symbol_stable_key, source_file, line_start, line_end, col_start, col_end,
+                    extractor, basis, confidence, evidence_json
+                ) VALUES (
+                    'consumer-1', 's1', 'r1',
+                    'unknown', 'grpc_channel', 'consumer',
+                    'schema_rpc', 'inferred', 'stub_creation',
+                    'grpc', 'rpc', 'unknown', 'unknown',
+                    'r1:Client.java#HelloWorldClient.init:SYMBOL:METHOD',
+                    'src/Client.java', 20, 20, 5, 5,
+                    'grpc_client_hint_java', 'stub_creation', 0.85,
+                    '{"grpc_class":"GreeterGrpc","stub_method":"newBlockingStub"}'
+                )"#,
+                [],
+            )
+            .unwrap();
+
+        // Link provider to proto service via boundary_contracts
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO boundary_contracts (
+                    association_uid, surface_uid, contract_element_uid,
+                    contract_kind, association_basis, confidence, evidence_json
+                ) VALUES (
+                    'bc-provider-1', 'provider-1', 'ce1',
+                    'grpc_service', 'generated_code_mapping', 0.85, '{}'
+                )"#,
+                [],
+            )
+            .unwrap();
+
+        // Link consumer to same proto service via boundary_contracts
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO boundary_contracts (
+                    association_uid, surface_uid, contract_element_uid,
+                    contract_kind, association_basis, confidence, evidence_json
+                ) VALUES (
+                    'bc-consumer-1', 'consumer-1', 'ce1',
+                    'grpc_service', 'generated_code_mapping', 0.85, '{}'
+                )"#,
+                [],
+            )
+            .unwrap();
+
+        conn
+    }
+
+    #[test]
+    fn gr3a_query_provider_surfaces_with_contracts() {
+        let conn = setup_linking_scenario();
+
+        let providers: Vec<repo_graph_indexer::storage_port::SurfaceWithContract> =
+            repo_graph_indexer::storage_port::GrpcLinkReadPort::query_provider_surfaces_with_contracts(&conn, "s1").unwrap();
+
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].surface_uid, "provider-1");
+        assert_eq!(providers[0].contract_element_uid, "ce1");
+        assert_eq!(providers[0].contract_full_name, "example.Greeter");
+        assert_eq!(providers[0].direction, "provider");
+    }
+
+    #[test]
+    fn gr3a_query_consumer_surfaces_with_contracts() {
+        let conn = setup_linking_scenario();
+
+        let consumers: Vec<repo_graph_indexer::storage_port::SurfaceWithContract> =
+            repo_graph_indexer::storage_port::GrpcLinkReadPort::query_consumer_surfaces_with_contracts(&conn, "s1").unwrap();
+
+        assert_eq!(consumers.len(), 1);
+        assert_eq!(consumers[0].surface_uid, "consumer-1");
+        assert_eq!(consumers[0].contract_element_uid, "ce1");
+        assert_eq!(consumers[0].contract_full_name, "example.Greeter");
+        assert_eq!(consumers[0].direction, "consumer");
+    }
+
+    #[test]
+    fn gr3a_end_to_end_link_detection() {
+        use repo_graph_indexer::run_grpc_link_detection;
+
+        let mut conn = setup_linking_scenario();
+
+        // Run the full detection pipeline
+        let result = run_grpc_link_detection(&mut conn, "s1");
+
+        // Verify no errors
+        assert!(
+            !result.has_error(),
+            "Detection had errors: provider={:?}, consumer={:?}, link={:?}",
+            result.provider_query_error,
+            result.consumer_query_error,
+            result.link_storage_error
+        );
+
+        // Verify counts
+        assert_eq!(result.providers_queried, 1);
+        assert_eq!(result.consumers_queried, 1);
+        assert_eq!(result.links_emitted, 1, "Expected 1 link");
+
+        // Verify link was stored
+        let (link_kind, match_basis, confidence, contract_uid): (String, String, f64, String) = conn
+            .connection()
+            .query_row(
+                r#"SELECT link_kind, match_basis, confidence, contract_element_uid
+                   FROM boundary_interaction_links WHERE snapshot_uid = 's1'"#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+
+        assert_eq!(link_kind, "contract_match_only");
+        assert_eq!(match_basis, "contract");
+        assert!((confidence - 0.80).abs() < 0.001, "GR-3A confidence = 0.80");
+        assert_eq!(contract_uid, "ce1");
+    }
+
+    #[test]
+    fn gr3a_no_links_without_matching_contracts() {
+        use repo_graph_indexer::run_grpc_link_detection;
+
+        let mut conn = setup_test_db_with_mapping();
+
+        // Insert provider surface for one service
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO boundary_interaction_surfaces (
+                    surface_uid, snapshot_uid, repo_uid,
+                    boundary_scope, channel_kind, direction,
+                    transport_class, provenance, confidence_basis,
+                    protocol, protocol_family, interaction_pattern,
+                    endpoint_locality,
+                    symbol_stable_key, source_file,
+                    line_start, line_end, col_start, col_end,
+                    extractor, basis, confidence, evidence_json
+                ) VALUES (
+                    'provider-1', 's1', 'r1',
+                    'unknown', 'grpc_channel', 'provider',
+                    'schema_rpc', 'inferred', 'extends_impl_base',
+                    'grpc', 'rpc', 'unknown', 'unknown',
+                    'key1', 'Server.java',
+                    10, 50, 1, 1,
+                    'grpc_impl_hint_java', 'extends_impl_base', 0.85, '{}'
+                )"#,
+                [],
+            )
+            .unwrap();
+
+        // Insert a different contract element for consumer
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO contract_elements (
+                    element_uid, schema_uid, element_kind, name, full_name
+                ) VALUES ('ce2', 'cs1', 'service', 'OtherService', 'example.OtherService')"#,
+                [],
+            )
+            .unwrap();
+
+        // Insert consumer surface for different service
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO boundary_interaction_surfaces (
+                    surface_uid, snapshot_uid, repo_uid,
+                    boundary_scope, channel_kind, direction,
+                    transport_class, provenance, confidence_basis,
+                    protocol, protocol_family, interaction_pattern,
+                    endpoint_locality,
+                    symbol_stable_key, source_file,
+                    line_start, line_end, col_start, col_end,
+                    extractor, basis, confidence, evidence_json
+                ) VALUES (
+                    'consumer-1', 's1', 'r1',
+                    'unknown', 'grpc_channel', 'consumer',
+                    'schema_rpc', 'inferred', 'stub_creation',
+                    'grpc', 'rpc', 'unknown', 'unknown',
+                    'key2', 'Client.java',
+                    20, 20, 1, 1,
+                    'grpc_client_hint_java', 'stub_creation', 0.85, '{}'
+                )"#,
+                [],
+            )
+            .unwrap();
+
+        // Link provider to ce1, consumer to ce2 (different contracts)
+        conn.connection_mut()
+            .execute_batch(
+                r#"
+                INSERT INTO boundary_contracts (association_uid, surface_uid, contract_element_uid, contract_kind, association_basis, confidence, evidence_json)
+                VALUES ('bc1', 'provider-1', 'ce1', 'grpc_service', 'generated_code_mapping', 0.85, '{}');
+                INSERT INTO boundary_contracts (association_uid, surface_uid, contract_element_uid, contract_kind, association_basis, confidence, evidence_json)
+                VALUES ('bc2', 'consumer-1', 'ce2', 'grpc_service', 'generated_code_mapping', 0.85, '{}');
+                "#,
+            )
+            .unwrap();
+
+        let result = run_grpc_link_detection(&mut conn, "s1");
+
+        assert!(!result.has_error());
+        assert_eq!(result.providers_queried, 1);
+        assert_eq!(result.consumers_queried, 1);
+        assert_eq!(result.links_emitted, 0, "No links for different contracts");
+    }
+
+    #[test]
+    fn gr3a_link_is_idempotent() {
+        use repo_graph_indexer::run_grpc_link_detection;
+
+        let mut conn = setup_linking_scenario();
+
+        // Run detection twice
+        let result1 = run_grpc_link_detection(&mut conn, "s1");
+        let result2 = run_grpc_link_detection(&mut conn, "s1");
+
+        // First run inserts
+        assert_eq!(result1.links_emitted, 1);
+
+        // Second run is idempotent (INSERT OR IGNORE → 0 inserted)
+        assert!(!result2.has_error());
+        assert_eq!(result2.links_emitted, 0, "Idempotent: second run inserts 0");
+
+        // Total in DB should still be 1
+        let count: i64 = conn
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM boundary_interaction_links WHERE snapshot_uid = 's1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }

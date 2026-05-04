@@ -553,6 +553,10 @@ pub struct IndexResult {
 	/// stub detection ran during this operation.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub grpc_client_hints: Option<crate::grpc_client_hint::GrpcClientHintResult>,
+	/// gRPC link results (GR-3A). Present when provider/consumer
+	/// contract-based linking ran during this operation.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub grpc_links: Option<crate::grpc_link::GrpcLinkResult>,
 	/// Per-symbol metrics from extraction.
 	///
 	/// RS-MS-3c-prereq: Accumulated from all extraction results.
