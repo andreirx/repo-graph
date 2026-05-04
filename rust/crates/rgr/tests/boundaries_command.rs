@@ -2143,3 +2143,256 @@ fn boundaries_list_amqp_no_detection_without_import() {
         result["count"]
     );
 }
+
+// ══════════════════════════════════════════════════════════════════
+// 12. MB-2A: KAFKA FILTER TESTS
+// ══════════════════════════════════════════════════════════════════
+
+/// Create a minimal repo with TS files containing kafkajs code.
+fn create_test_repo_with_kafka(dir: &std::path::Path) {
+    // Producer: send
+    let producer_ts = dir.join("producer.ts");
+    let mut f = File::create(&producer_ts).unwrap();
+    writeln!(f, "import {{ Kafka }} from 'kafkajs';").unwrap();
+    writeln!(f, "async function main() {{").unwrap();
+    writeln!(f, "    const kafka = new Kafka({{ brokers: ['localhost:9092'] }});").unwrap();
+    writeln!(f, "    const producer = kafka.producer();").unwrap();
+    writeln!(f, "    await producer.send({{ topic: 'orders', messages: [] }});").unwrap();
+    writeln!(f, "}}").unwrap();
+
+    // Consumer: subscribe only (run is NOT detected — no topic evidence)
+    let consumer_ts = dir.join("consumer.ts");
+    let mut f = File::create(&consumer_ts).unwrap();
+    writeln!(f, "import {{ Kafka }} from 'kafkajs';").unwrap();
+    writeln!(f, "async function main() {{").unwrap();
+    writeln!(f, "    const kafka = new Kafka({{ brokers: ['localhost:9092'] }});").unwrap();
+    writeln!(f, "    const consumer = kafka.consumer({{ groupId: 'billing' }});").unwrap();
+    writeln!(f, "    await consumer.subscribe({{ topic: 'orders' }});").unwrap();
+    writeln!(f, "    await consumer.run({{ eachMessage: async () => {{}} }});").unwrap();
+    writeln!(f, "}}").unwrap();
+}
+
+/// Build a temp DB by indexing a repo with Kafka code.
+fn build_indexed_db_with_kafka() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_test_repo_with_kafka(&repo_path);
+
+    let db_path = dir.path().join("kafka_test.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "kafka-test-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 2, "expected 2 TS fixture files");
+
+    (dir, db_path, repo_path)
+}
+
+#[test]
+fn boundaries_list_filter_kind_kafka_topic_works() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_kafka();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "kafka-test-repo",
+            "--kind",
+            "kafka_topic",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected in envelope
+    assert_eq!(result["filter_kind"], "kafka_topic");
+
+    // Should find Kafka surfaces:
+    // producer.ts: send = 1 (with topic evidence)
+    // consumer.ts: subscribe = 1 (with topic evidence)
+    // consumer.ts: run = 0 (NO topic evidence — intentionally excluded)
+    // Total: 2 surfaces
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(
+        count, 2,
+        "expected 2 kafka_topic surfaces (1 send, 1 subscribe — run excluded); got {}",
+        count
+    );
+
+    // All results should be kafka_topic
+    for item in result["results"].as_array().unwrap() {
+        assert_eq!(
+            item["channelKind"], "kafka_topic",
+            "all filtered results should be kafka_topic"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_filter_kind_kafka_alias_works() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_kafka();
+
+    // "kafka" is the alias for "kafka_topic"
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "kafka-test-repo",
+            "--kind",
+            "kafka",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected (alias maps to kafka_topic)
+    assert_eq!(result["filter_kind"], "kafka_topic");
+
+    // Same count as kafka_topic
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(count, 2, "kafka alias should yield same results as kafka_topic");
+}
+
+#[test]
+fn boundaries_list_kafka_provider_consumer_directions() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_kafka();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "kafka-test-repo",
+            "--kind",
+            "kafka_topic",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let surfaces = result["results"].as_array().unwrap();
+
+    // Count by direction
+    let providers: Vec<_> = surfaces
+        .iter()
+        .filter(|s| s["direction"].as_str() == Some("provider"))
+        .collect();
+    let consumers: Vec<_> = surfaces
+        .iter()
+        .filter(|s| s["direction"].as_str() == Some("consumer"))
+        .collect();
+
+    // Expected:
+    // - 1 provider: send (producer.ts)
+    // - 1 consumer: subscribe (consumer.ts)
+    // Note: run() is NOT detected — no topic evidence
+    assert_eq!(
+        providers.len(),
+        1,
+        "expected 1 provider surface (send)"
+    );
+    assert_eq!(
+        consumers.len(),
+        1,
+        "expected 1 consumer surface (subscribe only — run excluded)"
+    );
+}
+
+#[test]
+fn boundaries_list_kafka_no_detection_without_import() {
+    // Create a repo with Kafka-like method names but NO kafkajs import
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+
+    // File with send/subscribe/run but NO kafkajs import
+    let fake_ts = repo_path.join("fake_kafka.ts");
+    let mut f = File::create(&fake_ts).unwrap();
+    writeln!(f, "// No kafkajs import - these should NOT be detected").unwrap();
+    writeln!(f, "const producer = {{").unwrap();
+    writeln!(f, "    send: (x: any) => console.log(x),").unwrap();
+    writeln!(f, "}};").unwrap();
+    writeln!(f, "const consumer = {{").unwrap();
+    writeln!(f, "    subscribe: (x: any) => console.log(x),").unwrap();
+    writeln!(f, "    run: (x: any) => console.log(x),").unwrap();
+    writeln!(f, "}};").unwrap();
+    writeln!(f, "producer.send({{ topic: 'test' }});").unwrap();
+    writeln!(f, "consumer.subscribe({{ topic: 'test' }});").unwrap();
+    writeln!(f, "consumer.run({{ eachMessage: () => {{}} }});").unwrap();
+
+    let db_path = dir.path().join("fake_kafka.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "fake-kafka-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 1, "expected 1 TS fixture file");
+
+    // Query for Kafka surfaces - should find NONE
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "fake-kafka-repo",
+            "--kind",
+            "kafka_topic",
+        ])
+        .output()
+        .unwrap();
+
+    // Exit code 1 for "no results found"
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "expected exit 1 (no results) for fake Kafka without kafkajs import, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Count should be 0 - the import guard prevents false positives
+    assert_eq!(
+        result["count"], 0,
+        "P1 regression: generic .send/.subscribe/.run without kafkajs import \
+         should NOT emit Kafka surfaces. Got count: {}",
+        result["count"]
+    );
+}

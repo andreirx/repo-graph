@@ -43,8 +43,8 @@ use repo_graph_java_extractor::JavaExtractor;
 use repo_graph_python_extractor::PythonExtractor;
 use repo_graph_rust_extractor::RustExtractor;
 use repo_graph_ts_extractor::{
-    extract_amqp_boundary_calls, extract_ts_boundary_calls, RawAmqpBoundaryCall,
-    RawTsBoundaryCall, TsExtractor,
+    extract_amqp_boundary_calls, extract_kafka_boundary_calls, extract_ts_boundary_calls,
+    RawAmqpBoundaryCall, RawKafkaBoundaryCall, RawTsBoundaryCall, TsExtractor,
 };
 
 use crate::config::RepoConfigContext;
@@ -787,6 +787,23 @@ fn persist_ts_boundary_interactions(
 				)));
 			}
 		}
+
+		// Extract Kafka boundary calls (MB-2A).
+		let kafka_calls = extract_kafka_boundary_calls(
+			&tree.root_node(),
+			file.content.as_bytes(),
+			&file.rel_path,
+		);
+
+		for raw in kafka_calls {
+			let callsite = convert_kafka_raw_to_callsite(&raw, &file.rel_path, repo_uid);
+			if let Err(e) = emitter.try_emit(&callsite) {
+				return Err(ComposeError::Index(format!(
+					"boundary-interaction emitter failed at {}:{}: {}",
+					file.rel_path, raw.location.line_start, e
+				)));
+			}
+		}
 	}
 
 	// Collect emitted facts.
@@ -864,6 +881,41 @@ fn convert_amqp_raw_to_callsite(raw: &RawAmqpBoundaryCall, file_path: &str, repo
 		argument_index: Some(0), // First argument is typically queue/exchange
 		raw_argument_text: None,
 		// AMQP doesn't use socket/mmap semantics
+		socket_family: None,
+		socket_type: None,
+		mmap_flags: None,
+		mknod_mode: None,
+	}
+}
+
+/// Convert a raw Kafka boundary call to a BoundaryCallsite for the emitter.
+fn convert_kafka_raw_to_callsite(raw: &RawKafkaBoundaryCall, file_path: &str, repo_uid: &str) -> BoundaryCallsite {
+	// Build enclosing symbol stable key.
+	let enclosing_symbol_key = if raw.enclosing_function.is_empty() {
+		format!("{}:{}:FILE", repo_uid, file_path)
+	} else {
+		format!(
+			"{}:{}#{}:SYMBOL:FUNCTION",
+			repo_uid, file_path, raw.enclosing_function
+		)
+	};
+
+	// Build extracted argument from topic or topics[0].
+	// Priority: topic > topics[0] (for the main channel identity).
+	let extracted_argument = raw.topic.clone().or_else(|| {
+		raw.topics.as_ref().and_then(|t| t.first().cloned())
+	});
+
+	BoundaryCallsite {
+		language: BiLanguage::TypeScript,
+		function_name: raw.function_name.clone(),
+		location: raw.location.clone(),
+		source_file: file_path.to_string(),
+		enclosing_symbol_key,
+		extracted_argument,
+		argument_index: Some(0), // First argument is typically the options object with topic
+		raw_argument_text: None,
+		// Kafka doesn't use socket/mmap semantics
 		socket_family: None,
 		socket_type: None,
 		mmap_flags: None,

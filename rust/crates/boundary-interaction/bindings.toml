@@ -890,3 +890,64 @@ interaction_pattern = "fire_and_forget"
 basis = "api_call"
 arg_index = 0
 notes = "channel.bindQueue(queue, exchange, routingKey) - bind queue to exchange. Arg0 is queue name."
+
+# ════════════════════════════════════════════════════════════════════════
+# KAFKA (MB-2A)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: kafkajs direct library usage in JavaScript/TypeScript.
+# Shipped patterns: producer.send, consumer.subscribe.
+#
+# Triple scope guard in detector (kafka_detector.rs):
+#   1. File must have direct kafkajs import/require
+#   2. Receiver must be assigned from *.producer() or *.consumer() factory
+#   3. Call must have extractable topic argument
+#
+# NOT detected (deferred):
+#   - consumer.run() — no topic evidence
+#   - producer.sendBatch() — nested topicMessages[].topic extraction not implemented
+#
+# Scope: unknown by default (broker endpoint may be local or remote).
+# Transport: message_broker.
+# Interaction: publish_subscribe (Kafka is strongly pub/sub shaped).
+#
+# Contract: docs/slices/mb-2a-kafka-topic.md
+
+# ── Producer patterns ─────────────────────────────────────────────────
+
+[[binding]]
+language = "typescript"
+api_family = "kafkajs"
+function = "send"
+role = "provider"
+channel_kind = "kafka_topic"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "publish_subscribe"
+basis = "api_call"
+arg_index = 0
+notes = "producer.send({ topic, messages }) - publish to single topic. Arg0.topic is topic name."
+
+# NOTE: producer.sendBatch() is intentionally NOT bound here.
+# The kafkajs sendBatch API uses { topicMessages: [{ topic, messages }, ...] }
+# where topics are nested inside an array. Current extraction only looks for
+# top-level topic. Deferred until nested topic extraction is implemented.
+
+# ── Consumer patterns ─────────────────────────────────────────────────
+
+[[binding]]
+language = "typescript"
+api_family = "kafkajs"
+function = "subscribe"
+role = "consumer"
+channel_kind = "kafka_topic"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "publish_subscribe"
+basis = "api_call"
+arg_index = 0
+notes = "consumer.subscribe({ topic }) or consumer.subscribe({ topics: [...] }) - subscribe to topic(s). Arg0.topic or arg0.topics."
+
+# NOTE: consumer.run() is intentionally NOT bound here.
+# It provides no topic evidence and is excluded from detection.
+# Future work may correlate run() with subscribe() for callback enrichment.

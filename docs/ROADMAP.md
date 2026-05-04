@@ -70,6 +70,11 @@ for what is actually operational.
   AMQP/RabbitMQ detection (MB-1A) shipped: amqplib patterns (sendToQueue, publish,
   consume, assertQueue, assertExchange, bindQueue). Channel kind `amqp_queue`,
   protocol family `message_broker`. Validated on rabbitmq-tutorials (31 surfaces).
+  Kafka detection (MB-2A) shipped: kafkajs patterns (send, subscribe) with triple
+  scope guard (import + receiver provenance + topic evidence). Channel kind
+  `kafka_topic`, interaction pattern `publish_subscribe`. Receiver provenance
+  tracks `*.producer()` and `*.consumer()` factory assignments in same file.
+  Deferred: `sendBatch` (nested topic extraction), `run()` (no topic evidence).
 - **Spring framework detectors:** container-managed bean liveness via `@Component`, `@Service`,
   `@Repository`, `@Configuration`, `@RestController`, `@Controller`, `@Bean`. Suppresses 93
   false dead-code reports on glamCRM. Also fixes Lambda entrypoint suppression in `findDeadNodes`.
@@ -1332,7 +1337,30 @@ This is sufficient as an orientation substrate. An agent can:
    - Validation: rabbitmq-tutorials/javascript-nodejs (31 surfaces across 12 files)
    - Tests: 10 unit tests (amqp_detector), 3 integration tests (mb_1a_amqp.rs)
    - Deferred: Spring AMQP (@RabbitListener, RabbitTemplate), Python pika, Go amqp
-10. MB-2 (Kafka topic detection)
+10. MB-2A (Kafka topic detection) — SHIPPED
+    - TS/JS kafkajs patterns: send, subscribe
+    - Channel kind: `kafka_topic` (protocol family: `message_broker`)
+    - Interaction pattern: `publish_subscribe` (unlike AMQP fire_and_forget)
+    - Scope: unknown (broker endpoint may be local or remote)
+    - Direction: provider (send), consumer (subscribe)
+    - Scope guards (triple):
+      1. Import presence guard: file must have direct `kafkajs` import/require
+      2. Receiver provenance guard: receiver must be assigned from `*.producer()`
+         or `*.consumer()` factory call in same file
+      3. Topic evidence guard: call must have extractable topic argument
+    - Provenance tracking scope (deliberately narrow):
+      - Same file only, direct assignment only, direct receiver identifier only
+      - No interprocedural flow, no wrapper inference, no alias tracking
+    - Intentionally NOT detected (deferred):
+      - `producer.sendBatch()` — nested `topicMessages[].topic` extraction not implemented
+      - `consumer.run()` — no topic evidence, deferred for subscribe() correlation
+    - CLI: `rmap boundaries list --kind kafka_topic` (aliases: kafka)
+    - Fixture: test/fixtures/kafka-basic/ (producer.ts, consumer.ts)
+    - Tests: 25 unit tests (kafka_detector), 4 integration tests (mb_2a_kafka.rs),
+      4 CLI adapter tests (boundaries_command.rs)
+    - Deferred: Java kafka-clients, Spring Kafka, Python kafka, topic linking,
+      run() correlation with subscribe(), cross-file receiver tracking,
+      sendBatch nested topicMessages extraction
 11. MB-3 (NATS/Redis pub-sub)
 
 **Shared infrastructure:**

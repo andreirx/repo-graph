@@ -272,6 +272,12 @@ pub enum ChannelKind {
     /// Scope: unknown by default (broker endpoint may be local or remote).
     AmqpQueue,
 
+    // ── MB-2A: Kafka ───────────────────────────────────────────────
+    /// Kafka topic (direct kafkajs).
+    /// Transport class: message_broker.
+    /// Scope: unknown by default (broker endpoint may be local or remote).
+    KafkaTopic,
+
     // ── Slice 3: Library wrappers (deferred) ──────────────────────
     /// MQTT topic.
     MqttTopic,
@@ -319,6 +325,7 @@ impl ChannelKind {
             ChannelKind::ProtobufStream => "protobuf_stream",
             ChannelKind::ErpcChannel => "erpc_channel",
             ChannelKind::AmqpQueue => "amqp_queue",
+            ChannelKind::KafkaTopic => "kafka_topic",
             ChannelKind::SerialPort => "serial_port",
             ChannelKind::CanMessage => "can_message",
             ChannelKind::MqttTopic => "mqtt_topic",
@@ -405,6 +412,7 @@ impl ChannelKind {
 
             // Message brokers
             ChannelKind::AmqpQueue
+            | ChannelKind::KafkaTopic
             | ChannelKind::MqttTopic
             | ChannelKind::DbusInterface
             | ChannelKind::ZeromqSocket => TransportClass::MessageBroker,
@@ -507,6 +515,7 @@ impl From<ChannelKind> for ProtocolFamily {
                 ProtocolFamily::Bus
             }
             ChannelKind::AmqpQueue
+            | ChannelKind::KafkaTopic
             | ChannelKind::MqttTopic
             | ChannelKind::DbusInterface
             | ChannelKind::ZeromqSocket => ProtocolFamily::MessageBroker,

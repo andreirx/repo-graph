@@ -1786,6 +1786,75 @@ masquerading as channel identity.
 - RPC vs pub/sub pattern detection
 - Exchange type surfacing
 
+## Boundary Interaction Extraction — MB-2A (Kafka)
+
+### Current state
+
+- **kafkajs only:** Direct kafkajs API usage in TS/JS. Framework wrappers
+  (NestJS, TypeORM, etc.) not detected.
+- **Scope guards (triple):**
+  1. Import presence guard: File must have direct `kafkajs` import/require
+  2. Receiver provenance guard: Receiver must be assigned from `*.producer()`
+     or `*.consumer()` factory call in same file
+  3. Topic evidence guard: Call must have extractable topic argument
+- **Detected patterns:** `send({ topic, ... })`, `subscribe({ topic })`,
+  `subscribe({ topics: [...] })`.
+- **Intentionally NOT detected:** `consumer.run({ eachMessage, eachBatch })`.
+  This call provides no topic evidence and would overclaim consumer surfaces.
+  Correlation with subscribe() is deferred to future work.
+- **No Java kafka-clients:** kafka-clients patterns not detected.
+- **No Spring Kafka:** @KafkaListener, KafkaTemplate not detected.
+- **No Python kafka:** confluent-kafka, aiokafka not detected.
+
+### Receiver provenance tracking scope (deliberately narrow)
+
+The receiver provenance guard tracks same-file, direct factory assignments:
+- `const producer = kafka.producer()` → tracks `producer` as valid producer receiver
+- `const consumer = kafka.consumer({...})` → tracks `consumer` as valid consumer receiver
+
+What is NOT tracked (by design):
+- Cross-file receivers (receiver assigned in another file)
+- Wrapper functions (function that returns producer/consumer)
+- Object property assignments (`this.producer = kafka.producer()`)
+- Destructured assignments
+- Alias chains (`const p = producer; p.send(...)`)
+
+This keeps detection local and deterministic. Broader tracking would require
+interprocedural dataflow analysis, which is out of scope for syntax-only extraction.
+
+### Known limitations
+
+- **boundaryScope always "unknown":** Broker topology cannot be inferred from
+  code. Would require config analysis.
+- **Topic names extracted but not linked:** Topics are captured in evidence but
+  producer/consumer pairing across files is not performed.
+- **Consumer group ID not yet extracted:** groupId is visible in consumer config
+  but not yet surfaced in evidence.
+- **Partition/offset semantics not modeled:** Consumer position, rebalance,
+  commit patterns are out of scope.
+- **run() not correlated with subscribe():** A file with both subscribe() and
+  run() emits only the subscribe() surface. Future work could enrich subscribe()
+  surfaces with callback evidence from associated run() calls.
+- **Cross-file receivers not tracked:** If producer/consumer is assigned in one
+  file and used in another, detection fails. This is intentional — cross-file
+  dataflow is out of scope for syntax-only extraction.
+- **sendBatch intentionally deferred:** The kafkajs `sendBatch` API uses
+  `{ topicMessages: [{ topic, messages }, ...] }` structure where topics are
+  nested inside an array. Current extraction only looks for `topic` at the top
+  level of the first object argument. `sendBatch` is intentionally excluded from
+  detection until nested topic extraction is implemented. No binding exists.
+
+### Deferred to MB-2B/2C
+
+- Java kafka-clients detection
+- Spring Kafka detection (@KafkaListener, KafkaTemplate)
+- Python Kafka clients (confluent-kafka, aiokafka)
+- Topic-based producer/consumer linking
+- Consumer group ID extraction
+- Partition assignment patterns
+- run() correlation: enrich subscribe() surfaces with callback mode evidence
+- Cross-file receiver tracking (would require dataflow analysis)
+
 ## rgistr Policy Hints (2026-04-28)
 
 ### What shipped

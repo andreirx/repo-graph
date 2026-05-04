@@ -54,8 +54,10 @@ mod builtins;
 pub mod amqp_detector;
 pub mod boundary_detector;
 mod extractor;
+pub mod kafka_detector;
 mod metrics;
 
 pub use amqp_detector::{extract_amqp_boundary_calls, is_amqp_boundary_pattern, RawAmqpBoundaryCall};
 pub use boundary_detector::{extract_ts_boundary_calls, is_boundary_pattern, RawTsBoundaryCall};
 pub use extractor::TsExtractor;
+pub use kafka_detector::{extract_kafka_boundary_calls, is_kafka_boundary_pattern, RawKafkaBoundaryCall};

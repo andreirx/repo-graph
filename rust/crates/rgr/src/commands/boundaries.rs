@@ -408,10 +408,11 @@ fn parse_channel_kind(s: &str) -> Result<ChannelKind, String> {
         "udp_socket" | "udpsocket" | "udp" => Ok(ChannelKind::UdpSocket),
         "shared_array_buffer" | "sharedarraybuffer" | "sab" | "atomics" => Ok(ChannelKind::SharedArrayBuffer),
         "amqp_queue" | "amqpqueue" | "amqp" | "rabbitmq" => Ok(ChannelKind::AmqpQueue),
+        "kafka_topic" | "kafkatopic" | "kafka" => Ok(ChannelKind::KafkaTopic),
         "serial_port" | "serialport" | "serial" => Ok(ChannelKind::SerialPort),
         "can_message" | "canmessage" | "can" => Ok(ChannelKind::CanMessage),
         other => Err(format!(
-            "unknown channel kind: {} (try: unix_socket, named_pipe, shared_memory, shared_array_buffer, amqp_queue, ...)",
+            "unknown channel kind: {} (try: unix_socket, named_pipe, shared_memory, shared_array_buffer, amqp_queue, kafka_topic, ...)",
             other
         )),
     }

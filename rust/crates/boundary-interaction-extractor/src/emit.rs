@@ -408,6 +408,9 @@ impl BoundaryInteractionEmitter {
             // AMQP queue (MB-1A) — no guards needed, all detection is pattern-based
             ChannelKind::AmqpQueue => true,
 
+            // Kafka topic (MB-2A) — no guards needed, all detection is pattern-based
+            ChannelKind::KafkaTopic => true,
+
             // Future slice channel kinds — not yet supported, decline
             _ => false,
         }
@@ -666,6 +669,7 @@ fn protocol_for_channel_kind(kind: ChannelKind) -> &'static str {
         ChannelKind::ProcessSignal => "signal",
         ChannelKind::SharedArrayBuffer => "sab",
         ChannelKind::AmqpQueue => "amqp",
+        ChannelKind::KafkaTopic => "kafka",
         ChannelKind::GrpcChannel => "grpc",
         ChannelKind::ProtobufStream => "protobuf",
         ChannelKind::ErpcChannel => "erpc",
