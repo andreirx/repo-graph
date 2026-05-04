@@ -614,6 +614,7 @@ name = "repo-graph-indexer"
 version = "0.1.0"
 dependencies = [
  "contract-schema",
+ "regex",
  "repo-graph-classification",
  "repo-graph-proto-parser",
  "serde",

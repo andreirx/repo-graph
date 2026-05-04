@@ -174,6 +174,271 @@ impl StorageConnection {
 
         Ok(inserted)
     }
+
+    // ── GR-1B: Registration proof queries ─────────────────────────────────
+
+    /// Query for addService/bindService calls in Java files.
+    ///
+    /// Finds CALLS edges where target_key contains "addService(" or "bindService(".
+    /// Returns the source method, file, line, and the raw call pattern.
+    ///
+    /// GR-1B uses this to find registration sites and match them to GR-1A surfaces.
+    pub fn query_add_service_calls_raw(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<AddServiceCall>, StorageError> {
+        let conn = self.connection();
+
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT
+                n.stable_key AS source_method_key,
+                n.name AS source_method_name,
+                f.path AS source_file,
+                ee.line_start,
+                ee.target_key AS call_pattern
+            FROM extraction_edges ee
+            JOIN nodes n ON ee.source_node_uid = n.node_uid
+            JOIN files f ON n.file_uid = f.file_uid
+            WHERE ee.snapshot_uid = ?
+              AND ee.type = 'CALLS'
+              AND (ee.target_key LIKE '%addService(%' OR ee.target_key LIKE '%bindService(%')
+              AND f.language = 'java'
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![snapshot_uid], |row| {
+            Ok(AddServiceCall {
+                source_method_key: row.get(0)?,
+                source_method_name: row.get(1)?,
+                source_file: row.get(2)?,
+                line_start: row.get(3)?,
+                call_pattern: row.get(4)?,
+            })
+        })?;
+
+        let mut calls = Vec::new();
+        for row_result in rows {
+            calls.push(row_result?);
+        }
+
+        Ok(calls)
+    }
+
+    /// Find GR-1A boundary surfaces by implementation class name and source file.
+    ///
+    /// Used by GR-1B to match addService arguments to existing surfaces.
+    ///
+    /// **Matching strategy (disambiguation):**
+    /// 1. First try same-file match: surface in the same source file as the registration
+    ///    (handles inner class pattern, most common for gRPC)
+    /// 2. If no same-file match, fall back to any file with that class name
+    ///    (handles separate-file implementations, with documented ambiguity risk)
+    ///
+    /// Delimiter-aware matching prevents `GreeterImpl` from matching `MyGreeterImpl`.
+    pub fn find_grpc_impl_surface_by_class(
+        &self,
+        snapshot_uid: &str,
+        class_name: &str,
+    ) -> Result<Option<GrpcImplSurface>, StorageError> {
+        // This is the legacy signature without source_file context.
+        // Delegate to the full signature with None for source_file.
+        self.find_grpc_impl_surface_by_class_in_context(snapshot_uid, class_name, None)
+    }
+
+    /// Find GR-1A boundary surfaces by class name with source file context.
+    ///
+    /// **Matching strategy:**
+    /// 1. If `registration_source_file` provided, try same-file match first (inner class pattern)
+    /// 2. Fall back to cross-file match, but ONLY if exactly one surface matches
+    /// 3. If multiple surfaces match the class name across files, return None (refuse to boost)
+    ///
+    /// This prevents false-positive boosts when multiple classes share the same simple name.
+    pub fn find_grpc_impl_surface_by_class_in_context(
+        &self,
+        snapshot_uid: &str,
+        class_name: &str,
+        registration_source_file: Option<&str>,
+    ) -> Result<Option<GrpcImplSurface>, StorageError> {
+        let conn = self.connection();
+
+        // Delimiter-aware exact match patterns:
+        // - #ClassName:SYMBOL:CLASS (top-level class after path)
+        // - .ClassName:SYMBOL:CLASS (inner class after container)
+        let pattern_toplevel = format!("%#{}:SYMBOL:CLASS", class_name);
+        let pattern_inner = format!("%.{}:SYMBOL:CLASS", class_name);
+
+        // Strategy 1: Try same-file match first (if source file context provided)
+        if let Some(src_file) = registration_source_file {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT
+                    surface_uid,
+                    symbol_stable_key,
+                    source_file,
+                    confidence,
+                    evidence_json
+                FROM boundary_interaction_surfaces
+                WHERE snapshot_uid = ?
+                  AND extractor = 'grpc_impl_hint_java'
+                  AND source_file = ?
+                  AND (symbol_stable_key LIKE ? OR symbol_stable_key LIKE ?)
+                ORDER BY surface_uid ASC
+                LIMIT 1
+                "#,
+            )?;
+
+            let mut rows = stmt.query(params![snapshot_uid, src_file, pattern_toplevel, pattern_inner])?;
+
+            if let Some(row) = rows.next()? {
+                return Ok(Some(GrpcImplSurface {
+                    surface_uid: row.get(0)?,
+                    symbol_stable_key: row.get(1)?,
+                    source_file: row.get(2)?,
+                    confidence: row.get(3)?,
+                    evidence_json: row.get(4)?,
+                }));
+            }
+        }
+
+        // Strategy 2: Fall back to any-file match, but only if unambiguous
+        // Query without LIMIT to detect ambiguity
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT
+                surface_uid,
+                symbol_stable_key,
+                source_file,
+                confidence,
+                evidence_json
+            FROM boundary_interaction_surfaces
+            WHERE snapshot_uid = ?
+              AND extractor = 'grpc_impl_hint_java'
+              AND (symbol_stable_key LIKE ? OR symbol_stable_key LIKE ?)
+            ORDER BY surface_uid ASC
+            "#,
+        )?;
+
+        let mut rows = stmt.query(params![snapshot_uid, pattern_toplevel, pattern_inner])?;
+
+        // Collect all matches to detect ambiguity
+        let first_match = match rows.next()? {
+            Some(row) => Some(GrpcImplSurface {
+                surface_uid: row.get(0)?,
+                symbol_stable_key: row.get(1)?,
+                source_file: row.get(2)?,
+                confidence: row.get(3)?,
+                evidence_json: row.get(4)?,
+            }),
+            None => return Ok(None),
+        };
+
+        // Check if there's a second match (ambiguity)
+        if rows.next()?.is_some() {
+            // Ambiguous: multiple surfaces share the same class name across files.
+            // Refuse to boost — caller should record this as degradation.
+            return Ok(None);
+        }
+
+        // Unambiguous single match
+        Ok(first_match)
+    }
+
+    /// Boost confidence for a GR-1A surface and append registration evidence.
+    ///
+    /// GR-1B calls this when it finds a registration site for an implementation.
+    /// - Raises confidence from 0.85 to 0.90
+    /// - Appends registration site to evidence_json
+    ///
+    /// Returns true if the update affected a row.
+    pub fn boost_grpc_impl_confidence(
+        &mut self,
+        surface_uid: &str,
+        registration_site: &RegistrationSite,
+    ) -> Result<bool, StorageError> {
+        let conn = self.connection_mut();
+
+        // First, get current evidence_json
+        let current_evidence: Option<String> = conn.query_row(
+            "SELECT evidence_json FROM boundary_interaction_surfaces WHERE surface_uid = ?",
+            params![surface_uid],
+            |row| row.get(0),
+        )?;
+
+        // Parse and update evidence
+        let new_evidence = merge_registration_evidence(current_evidence.as_deref(), registration_site);
+
+        // Update confidence and evidence
+        let updated = conn.execute(
+            r#"
+            UPDATE boundary_interaction_surfaces
+            SET confidence = 0.90,
+                basis = 'extends_impl_base_registered',
+                evidence_json = ?
+            WHERE surface_uid = ?
+              AND extractor = 'grpc_impl_hint_java'
+            "#,
+            params![new_evidence, surface_uid],
+        )?;
+
+        Ok(updated > 0)
+    }
+}
+
+/// An addService/bindService call site.
+#[derive(Debug, Clone)]
+pub struct AddServiceCall {
+    pub source_method_key: String,
+    pub source_method_name: String,
+    pub source_file: String,
+    pub line_start: Option<i64>,
+    pub call_pattern: String,
+}
+
+/// A GR-1A boundary surface (minimal fields for GR-1B matching).
+#[derive(Debug, Clone)]
+pub struct GrpcImplSurface {
+    pub surface_uid: String,
+    pub symbol_stable_key: String,
+    pub source_file: String,
+    pub confidence: f64,
+    pub evidence_json: Option<String>,
+}
+
+/// Registration site evidence for GR-1B.
+#[derive(Debug, Clone)]
+pub struct RegistrationSite {
+    pub file: String,
+    pub line: i64,
+    pub method: String,
+    pub pattern: String,
+}
+
+/// Merge registration evidence into existing evidence_json.
+fn merge_registration_evidence(current: Option<&str>, site: &RegistrationSite) -> String {
+    use serde_json::{json, Value};
+
+    let mut evidence: Value = current
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_else(|| json!({}));
+
+    // Ensure registration_sites is an array
+    let sites = evidence
+        .as_object_mut()
+        .unwrap()
+        .entry("registration_sites")
+        .or_insert_with(|| json!([]));
+
+    if let Some(arr) = sites.as_array_mut() {
+        arr.push(json!({
+            "file": site.file,
+            "line": site.line,
+            "method": site.method,
+            "pattern": site.pattern
+        }));
+    }
+
+    serde_json::to_string(&evidence).unwrap_or_else(|_| "{}".to_string())
 }
 
 /// A boundary-to-contract association.

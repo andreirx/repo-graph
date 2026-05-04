@@ -93,6 +93,7 @@
 
 pub mod extractor_port;
 pub mod grpc_impl_hint;
+pub mod grpc_registration_proof;
 pub mod hook;
 pub mod include_resolver;
 pub mod invalidation;
@@ -113,14 +114,16 @@ pub use java_code_mapper::{
 	MappingBasis, MappingEvidence, ProtoOptions,
 };
 pub use storage_port::{
-	DeltaCopyPort, EdgeStorePort, FileCatalogPort, FileSignalPort,
+	AddServiceCallInput, DeltaCopyPort, EdgeStorePort, FileCatalogPort, FileSignalPort,
 	GeneratedCodeMappingInput, GeneratedCodeMappingReadPort, GeneratedCodeMappingStorePort,
 	GrpcImplContractInput, GrpcImplHintReadPort, GrpcImplHintStorePort, GrpcImplSurfaceInput,
-	IndexerStoragePort, NodeStorePort, ProtoElementInput, ProtoSchemaInput,
-	ProtoSchemaStorePort, SnapshotLifecyclePort, UnresolvedEdgePort,
+	GrpcImplSurfaceMatch, GrpcRegistrationProofPort, IndexerStoragePort, NodeStorePort,
+	ProtoElementInput, ProtoSchemaInput, ProtoSchemaStorePort, RegistrationSiteInput,
+	SnapshotLifecyclePort, UnresolvedEdgePort,
 };
 pub use grpc_impl_hint::{
 	find_grpc_impl_hints, generate_association_uid, generate_surface_uid,
 	run_grpc_impl_hint_detection, GrpcImplHint, GrpcImplHintResult,
 	ImplBaseExtensionInput, ImplBaseMappingInput,
 };
+pub use grpc_registration_proof::{run_grpc_registration_proof, GrpcRegistrationProofResult};

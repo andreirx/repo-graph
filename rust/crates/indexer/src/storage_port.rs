@@ -746,3 +746,75 @@ pub struct GrpcImplContractInput {
 	pub contract_element_uid: String,
 	pub evidence_json: String,
 }
+
+// ── GR-1B: Registration proof port ────────────────────────────────────
+
+/// Read/write port for gRPC registration proof (GR-1B).
+///
+/// Detects `addService()` / `bindService()` calls and boosts confidence
+/// of matching GR-1A surfaces. This is hint-strengthening, not a new surface.
+pub trait GrpcRegistrationProofPort {
+	/// Error type for storage operations.
+	type Error: std::fmt::Debug + std::fmt::Display;
+
+	/// Query for addService/bindService calls in Java files.
+	///
+	/// Returns call sites where target contains `addService(` or `bindService(`.
+	fn query_add_service_calls(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<AddServiceCallInput>, Self::Error>;
+
+	/// Find a GR-1A surface by implementation class name with source file context.
+	///
+	/// Used to match addService arguments to existing surfaces.
+	///
+	/// When `registration_source_file` is provided:
+	/// 1. First try same-file match (inner class pattern, most common)
+	/// 2. Fall back to any-file match if no same-file match
+	///
+	/// This disambiguates when multiple classes share the same simple name.
+	fn find_grpc_impl_surface_by_class(
+		&self,
+		snapshot_uid: &str,
+		class_name: &str,
+		registration_source_file: Option<&str>,
+	) -> Result<Option<GrpcImplSurfaceMatch>, Self::Error>;
+
+	/// Boost confidence for a GR-1A surface and append registration evidence.
+	///
+	/// Raises confidence from 0.85 to 0.90 and adds registration site info.
+	fn boost_grpc_impl_confidence(
+		&mut self,
+		surface_uid: &str,
+		registration_site: &RegistrationSiteInput,
+	) -> Result<bool, Self::Error>;
+}
+
+/// An addService/bindService call site (GR-1B input).
+#[derive(Debug, Clone)]
+pub struct AddServiceCallInput {
+	pub source_method_key: String,
+	pub source_method_name: String,
+	pub source_file: String,
+	pub line_start: Option<i64>,
+	pub call_pattern: String,
+}
+
+/// A matched GR-1A surface (minimal fields for GR-1B).
+#[derive(Debug, Clone)]
+pub struct GrpcImplSurfaceMatch {
+	pub surface_uid: String,
+	pub symbol_stable_key: String,
+	pub source_file: String,
+	pub confidence: f64,
+}
+
+/// Registration site evidence (GR-1B input).
+#[derive(Debug, Clone)]
+pub struct RegistrationSiteInput {
+	pub file: String,
+	pub line: i64,
+	pub method: String,
+	pub pattern: String,
+}

@@ -751,3 +751,174 @@ fn boundaries_show_includes_contracts_for_grpc_hint() {
     assert_eq!(contract["associationBasis"], "generated_code_mapping");
     assert!((contract["confidence"].as_f64().unwrap() - 0.95).abs() < 0.001);
 }
+
+// ── GR-1B: Registration proof tests ─────────────────────────────────
+
+/// Build a test DB with a GR-1B boosted surface (confidence 0.90, registration_sites in evidence).
+fn build_indexed_db_with_gr1b_boost() -> (tempfile::TempDir, PathBuf, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+
+    // Create DB with migrations via StorageConnection
+    {
+        let _conn = repo_graph_storage::connection::StorageConnection::open(&db_path).unwrap();
+    }
+
+    // Reopen with rusqlite to insert test data
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute_batch(
+            r#"
+            INSERT INTO repos (repo_uid, name, root_path, created_at)
+            VALUES ('test-repo', 'test-repo', '/test', datetime('now'));
+
+            INSERT INTO snapshots (snapshot_uid, repo_uid, kind, status, created_at)
+            VALUES ('snap-1', 'test-repo', 'full', 'ready', datetime('now'));
+
+            INSERT INTO files (file_uid, repo_uid, path, language)
+            VALUES ('f1', 'test-repo', 'src/HelloWorldServer.java', 'java');
+
+            -- GR-1B boosted surface: confidence 0.90, basis extends_impl_base_registered
+            INSERT INTO boundary_interaction_surfaces (
+                surface_uid, snapshot_uid, repo_uid,
+                boundary_scope, channel_kind, direction,
+                transport_class, provenance, confidence_basis,
+                protocol, protocol_family, interaction_pattern,
+                endpoint_locality, symbol_stable_key, source_file,
+                line_start, line_end, col_start, col_end,
+                extractor, basis, confidence, evidence_json
+            ) VALUES (
+                'surf-greeter-boosted', 'snap-1', 'test-repo',
+                'unknown', 'grpc_channel', 'provider',
+                'schema_rpc', 'inferred', 'extends_impl_base',
+                'grpc', 'rpc', 'unknown',
+                'unknown', 'test-repo:src/HelloWorldServer.java#HelloWorldServer.GreeterImpl:SYMBOL:CLASS',
+                'src/HelloWorldServer.java',
+                34, 34, 29, 29,
+                'grpc_impl_hint_java', 'extends_impl_base_registered', 0.90,
+                '{"impl_base_target":"GreeterGrpc.GreeterImplBase","registration_sites":[{"file":"src/HelloWorldServer.java","line":18,"method":"start","pattern":"addService(new GreeterImpl())"}]}'
+            );
+
+            -- Contract schema and element for the service
+            INSERT INTO contract_schemas (
+                schema_uid, snapshot_uid, repo_uid, schema_kind, file_path,
+                package_name, content_hash, extractor, parsed_at
+            ) VALUES (
+                'cs-greeter', 'snap-1', 'test-repo', 'protobuf', 'helloworld.proto',
+                'helloworld', 'hash123', 'proto-parser:0.1.0', datetime('now')
+            );
+
+            INSERT INTO contract_elements (
+                element_uid, schema_uid, element_kind, name, full_name
+            ) VALUES (
+                'ce-greeter-svc', 'cs-greeter', 'service', 'Greeter', 'helloworld.Greeter'
+            );
+
+            -- Contract association
+            INSERT INTO boundary_contracts (
+                association_uid, surface_uid, contract_element_uid,
+                contract_kind, association_basis, confidence, evidence_json
+            ) VALUES (
+                'bc-greeter-boost', 'surf-greeter-boosted', 'ce-greeter-svc',
+                'grpc_service', 'generated_code_mapping', 0.90,
+                '{"mapping_uid":"m-greeter"}'
+            );
+            "#,
+        )
+        .unwrap();
+
+    let surface_uid = "surf-greeter-boosted".to_string();
+    (dir, db_path, surface_uid)
+}
+
+#[test]
+fn boundaries_list_shows_gr1b_boosted_confidence() {
+    let (_dir, db_path, _surface_uid) = build_indexed_db_with_gr1b_boost();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "test-repo",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, got: {}\nstderr: {}",
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {}\nstdout: {}", e, stdout));
+
+    assert_eq!(result["count"], 1);
+    let item = &result["results"][0];
+
+    // GR-1B boosted confidence should be 0.90
+    let confidence = item["confidence"].as_f64().unwrap();
+    assert!(
+        (confidence - 0.90).abs() < 0.001,
+        "GR-1B boosted confidence should be 0.90, got {}",
+        confidence
+    );
+
+    // basis should map to extends_impl_base (even though stored as extends_impl_base_registered)
+    assert_eq!(item["basis"], "extends_impl_base");
+}
+
+#[test]
+fn boundaries_show_includes_registration_sites_for_gr1b() {
+    let (_dir, db_path, surface_uid) = build_indexed_db_with_gr1b_boost();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "show",
+            db_path.to_str().unwrap(),
+            "test-repo",
+            &surface_uid,
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, got: {}\nstderr: {}",
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // GR-1B boosted confidence
+    let confidence = result["confidence"].as_f64().unwrap();
+    assert!(
+        (confidence - 0.90).abs() < 0.001,
+        "GR-1B boosted confidence should be 0.90, got {}",
+        confidence
+    );
+
+    // evidenceJson should contain registration_sites
+    let evidence_json_str = result["evidenceJson"].as_str()
+        .expect("evidenceJson should be a string");
+    let evidence: serde_json::Value = serde_json::from_str(evidence_json_str)
+        .expect("evidenceJson should be valid JSON");
+
+    let registration_sites = evidence["registration_sites"].as_array()
+        .expect("registration_sites should be an array");
+    assert_eq!(registration_sites.len(), 1, "should have 1 registration site");
+
+    let site = &registration_sites[0];
+    assert_eq!(site["file"], "src/HelloWorldServer.java");
+    assert_eq!(site["line"], 18);
+    assert_eq!(site["method"], "start");
+    assert_eq!(site["pattern"], "addService(new GreeterImpl())");
+}

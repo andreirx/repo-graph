@@ -141,7 +141,7 @@ pub struct FileInput {
 /// snapshot is transitioned to FAILED before returning.
 /// Non-fatal errors (per-file extraction failures, oversized
 /// files) are recorded in the snapshot diagnostics.
-pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort + crate::storage_port::GrpcImplHintReadPort + crate::storage_port::GrpcImplHintStorePort>(
+pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort + crate::storage_port::GrpcImplHintReadPort + crate::storage_port::GrpcImplHintStorePort + crate::storage_port::GrpcRegistrationProofPort>(
 	storage: &mut S,
 	extractors: &mut [&mut dyn ExtractorPort],
 	repo_uid: &str,
@@ -325,6 +325,20 @@ pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStoreP
 							repo_uid,
 						);
 						result.grpc_impl_hints = Some(hint_result);
+
+						// ── gRPC registration proof (GR-1B) ─────────────
+						// Run after GR-1A. Detects addService/bindService calls
+						// and boosts confidence of matching GR-1A surfaces.
+						// Skip if no GR-1A hints were produced.
+						if let Some(ref hints) = result.grpc_impl_hints {
+							if hints.hints_emitted > 0 {
+								let proof_result = crate::grpc_registration_proof::run_grpc_registration_proof(
+									storage,
+									&snap_uid,
+								);
+								result.grpc_registration_proof = Some(proof_result);
+							}
+						}
 					}
 				}
 			}
@@ -880,6 +894,7 @@ fn run_pipeline<S: IndexerStoragePort>(
 		contracts: None, // Filled by index_repo after contract subpipeline
 		generated_code_mappings: None, // Filled by index_repo after Java mapping
 		grpc_impl_hints: None, // Filled by index_repo after GR-1A detection
+		grpc_registration_proof: None, // Filled by index_repo after GR-1B detection
 		metrics: all_metrics,
 	})
 }
@@ -1207,7 +1222,7 @@ where
 /// (no delta optimization for contract schemas yet).
 ///
 /// Mirror of `refreshRepo` from `repo-indexer.ts`.
-pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort + crate::storage_port::GrpcImplHintReadPort + crate::storage_port::GrpcImplHintStorePort>(
+pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort + crate::storage_port::GrpcImplHintReadPort + crate::storage_port::GrpcImplHintStorePort + crate::storage_port::GrpcRegistrationProofPort>(
 	storage: &mut S,
 	extractors: &mut [&mut dyn ExtractorPort],
 	repo_uid: &str,
@@ -1513,6 +1528,20 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 							repo_uid,
 						);
 						result.grpc_impl_hints = Some(hint_result);
+
+						// ── gRPC registration proof (GR-1B) ─────────────
+						// Run after GR-1A. Detects addService/bindService calls
+						// and boosts confidence of matching GR-1A surfaces.
+						// Skip if no GR-1A hints were produced.
+						if let Some(ref hints) = result.grpc_impl_hints {
+							if hints.hints_emitted > 0 {
+								let proof_result = crate::grpc_registration_proof::run_grpc_registration_proof(
+									storage,
+									&snap_uid,
+								);
+								result.grpc_registration_proof = Some(proof_result);
+							}
+						}
 					}
 				}
 			}
@@ -1775,6 +1804,31 @@ mod tests {
 			_contracts: &[crate::storage_port::GrpcImplContractInput],
 		) -> Result<usize, String> {
 			Ok(0)
+		}
+	}
+
+	impl crate::storage_port::GrpcRegistrationProofPort for MockStorage {
+		type Error = String;
+		fn query_add_service_calls(
+			&self,
+			_snapshot_uid: &str,
+		) -> Result<Vec<crate::storage_port::AddServiceCallInput>, String> {
+			Ok(vec![])
+		}
+		fn find_grpc_impl_surface_by_class(
+			&self,
+			_snapshot_uid: &str,
+			_class_name: &str,
+			_registration_source_file: Option<&str>,
+		) -> Result<Option<crate::storage_port::GrpcImplSurfaceMatch>, String> {
+			Ok(None)
+		}
+		fn boost_grpc_impl_confidence(
+			&mut self,
+			_surface_uid: &str,
+			_registration_site: &crate::storage_port::RegistrationSiteInput,
+		) -> Result<bool, String> {
+			Ok(false)
 		}
 	}
 
@@ -2118,6 +2172,12 @@ mod tests {
 			type Error = String;
 			fn insert_grpc_impl_surfaces(&mut self, surfaces: &[crate::storage_port::GrpcImplSurfaceInput]) -> Result<usize, String> { self.inner.insert_grpc_impl_surfaces(surfaces) }
 			fn insert_grpc_impl_contracts(&mut self, contracts: &[crate::storage_port::GrpcImplContractInput]) -> Result<usize, String> { self.inner.insert_grpc_impl_contracts(contracts) }
+		}
+		impl crate::storage_port::GrpcRegistrationProofPort for FailOnInsertNodes {
+			type Error = String;
+			fn query_add_service_calls(&self, s: &str) -> Result<Vec<crate::storage_port::AddServiceCallInput>, String> { self.inner.query_add_service_calls(s) }
+			fn find_grpc_impl_surface_by_class(&self, s: &str, c: &str, f: Option<&str>) -> Result<Option<crate::storage_port::GrpcImplSurfaceMatch>, String> { self.inner.find_grpc_impl_surface_by_class(s, c, f) }
+			fn boost_grpc_impl_confidence(&mut self, s: &str, r: &crate::storage_port::RegistrationSiteInput) -> Result<bool, String> { self.inner.boost_grpc_impl_confidence(s, r) }
 		}
 
 		let mut storage = FailOnInsertNodes::default();

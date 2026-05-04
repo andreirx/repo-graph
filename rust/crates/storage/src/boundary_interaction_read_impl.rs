@@ -716,6 +716,7 @@ fn parse_interaction_pattern(s: &str) -> Result<InteractionPattern, BoundaryInte
         "stream" => Ok(InteractionPattern::Stream),
         "fire_and_forget" => Ok(InteractionPattern::FireAndForget),
         "shared_state" => Ok(InteractionPattern::SharedState),
+        "unknown" => Ok(InteractionPattern::Unknown),
         other => Err(BoundaryInteractionReadError::Storage(format!(
             "unrecognized interaction_pattern: '{}'",
             other
@@ -744,6 +745,9 @@ fn parse_interaction_basis(s: &str) -> Result<InteractionBasis, BoundaryInteract
         "convention" => Ok(InteractionBasis::Convention),
         "declaration" => Ok(InteractionBasis::Declaration),
         "inferred" => Ok(InteractionBasis::Inferred),
+        "extends_impl_base" => Ok(InteractionBasis::ExtendsImplBase),
+        // GR-1B: boosted basis when registration proof found
+        "extends_impl_base_registered" => Ok(InteractionBasis::ExtendsImplBase),
         other => Err(BoundaryInteractionReadError::Storage(format!(
             "unrecognized interaction_basis: '{}'",
             other

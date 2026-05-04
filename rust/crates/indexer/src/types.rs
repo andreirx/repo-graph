@@ -545,6 +545,10 @@ pub struct IndexResult {
 	/// hint detection ran during this operation.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub grpc_impl_hints: Option<crate::grpc_impl_hint::GrpcImplHintResult>,
+	/// gRPC registration proof results (GR-1B). Present when GR-1B
+	/// ran to boost confidence of GR-1A surfaces.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub grpc_registration_proof: Option<crate::grpc_registration_proof::GrpcRegistrationProofResult>,
 	/// Per-symbol metrics from extraction.
 	///
 	/// RS-MS-3c-prereq: Accumulated from all extraction results.

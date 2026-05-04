@@ -172,6 +172,10 @@ pub enum InteractionPattern {
     /// Used for shared memory — requires dual projection per design
     /// doc section 4.4.
     SharedState,
+
+    /// Unknown pattern (used for hint-grade surfaces where pattern cannot
+    /// be determined, e.g., GR-1A implementation hints).
+    Unknown,
 }
 
 impl InteractionPattern {
@@ -183,6 +187,7 @@ impl InteractionPattern {
             InteractionPattern::Stream => "stream",
             InteractionPattern::FireAndForget => "fire_and_forget",
             InteractionPattern::SharedState => "shared_state",
+            InteractionPattern::Unknown => "unknown",
         }
     }
 }
@@ -532,6 +537,11 @@ pub enum InteractionBasis {
 
     /// Heuristic-derived (low confidence).
     Inferred,
+
+    /// Class extends generated ImplBase (gRPC server implementation pattern).
+    /// Used by GR-1A: confidence is moderate (0.85) because the inheritance
+    /// pattern is strong evidence but we lack runtime proof.
+    ExtendsImplBase,
 }
 
 impl InteractionBasis {
@@ -544,6 +554,7 @@ impl InteractionBasis {
             InteractionBasis::Convention => "convention",
             InteractionBasis::Declaration => "declaration",
             InteractionBasis::Inferred => "inferred",
+            InteractionBasis::ExtendsImplBase => "extends_impl_base",
         }
     }
 
@@ -556,6 +567,7 @@ impl InteractionBasis {
             InteractionBasis::Convention => 0.70,
             InteractionBasis::Declaration => 1.0,
             InteractionBasis::Inferred => 0.50,
+            InteractionBasis::ExtendsImplBase => 0.85,
         }
     }
 }

@@ -1,6 +1,6 @@
 # Repo-Graph
 
-Deterministic code graph tool for AI agent consumption. Multi-language. CLI over SQLite.
+Deterministic code graph tool for AI agent consumption. Multi-language.
 
 Two CLI binaries: `rmap` (Rust, primary) and `rgr` (TypeScript, legacy).
 
@@ -103,7 +103,7 @@ See `docs/ROADMAP.md` §Mobile and native client track for priority order and to
 5. **Deterministic output:** same input → same output. No randomness, no order jitter.
 6. **Explicit degradation:** `null` = unknown, empty = known-zero. Never conflate.
 7. **Document-first authored knowledge:** discovery-oriented human/agent knowledge should live in documentation first; DB projections are secondary.
-8. **Daemon is coordination authority:** for shared multi-agent use, the daemon arbitrates read/write access to repo databases; clients must not stomp over the SQLite file directly.
+8. **Daemon is coordination authority:** for shared multi-agent use, the daemon arbitrates read/write access to repo databases; clients must not bypass the daemon for direct storage access.
 
 ## Implementation Workflow
 
@@ -120,7 +120,7 @@ Build order:
 5. Documentation updates
 
 After changing code:
-1. Run relevant test suite (`pnpm test`, `cargo test -p <crate>`).
+1. Run relevant test suite (`cargo test -p <crate>`).
 2. Re-index with `rmap refresh ./repo-graph ./repo-graph.db`.
 3. Document any debt immediately in `docs/TECH-DEBT.md`.
 
@@ -173,7 +173,7 @@ and validation runs must follow this protocol.
 | What's shipped/next | `docs/ROADMAP.md` |
 | Known limitations | `docs/TECH-DEBT.md` |
 | CLI contract (Rust) | `docs/cli/rmap-contracts.md` |
-| CLI contract (TS) | `docs/cli/v1-cli.txt` |
+| TS prototype (legacy) | `docs/ts-prototype.md` |
 | Database schema | `docs/architecture/schema.txt` |
 | Folder layout | `docs/architecture/project-structure.txt` |
 | Measurement model | `docs/architecture/measurement-model.txt` |
@@ -184,14 +184,9 @@ and validation runs must follow this protocol.
 
 ```bash
 # Build and test
-pnpm run build              # Build TypeScript
-pnpm run test               # TS tests (includes CLI integration)
-pnpm run test:rust          # All Rust crates
-pnpm run test:all           # Full TS + Rust acceptance
-
-# Lint
-pnpm run lint               # Run Biome linter
-pnpm run lint:fix           # Auto-fix
+cd rust && cargo build
+cargo test -p <crate>       # Test specific crate
+cargo test --workspace      # All Rust crates
 
 # Discovery (rmap uses <db_path> <repo_uid>)
 rmap orient ./repo-graph.db repo-graph --focus "src/core"
@@ -212,15 +207,9 @@ For full command reference, see `docs/cli/rmap-contracts.md`.
 
 ## Conventions
 
-- Use `pnpm` not npm.
-- `rmap` (Rust) outputs JSON only. `rgr` (TS) supports `--json` with human-readable default.
+- `rmap` outputs JSON only.
 - No emojis in code or output.
 - Relative paths in DB, never absolute.
 - TEXT UIDs everywhere, no auto-increment integers.
 
-## Native Dependency Note
-
-`better-sqlite3` is keyed to Node ABI. If you switch Node versions:
-```bash
-nvm use && pnpm rebuild better-sqlite3
-```
+For TypeScript prototype commands and conventions, see `docs/ts-prototype.md`.

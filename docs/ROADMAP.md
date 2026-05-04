@@ -1210,14 +1210,27 @@ Two-track architecture for boundary detection over a unified model:
 **Confirmed implementation order:**
 1. CS-1 (Protobuf schema) — COMPLETE (full dual-pipeline, CLI wired, smoke tested)
 2. CS-2A (Java generated code mapping) — COMPLETE (validated on Hadoop: 28 mappings, 0 false positives)
-3. GR-1A (gRPC server impl hints) — IMPLEMENTED, PENDING VALIDATION
+3. GR-1A (gRPC server impl hints) — FIXTURE-VALIDATED
+   - Detects `*ImplBase` inheritance pattern in Java gRPC implementations
    - Orchestrator wiring complete (after CS-2A in index/refresh)
    - Explicit degradation in IndexResult.grpc_impl_hints
    - Contract visibility: boundary_contracts exposed through rmap boundaries list/show
    - CLI test coverage: 2 integration tests proving contract fields visible in JSON output
-   - **Pending:** smoke validation on real gRPC repo
-   - **Pending:** CLI summary counts in rmap index/refresh stderr
-4. GR-1B (gRPC server registration proof) — pending
+   - **Fixture-validated:** grpc-java-minimal (1 impl, correct contract association)
+   - **Spot-checked:** open-source grpc-java/examples — 0 hints because generated
+     `*Grpc.java` files absent from repo snapshot
+   - **Substrate assumption:** Requires generated stub files to be present in indexed tree.
+     Projects that generate stubs at build time (Gradle/Maven) without checking them in
+     will show 0 hints until post-build indexing.
+   - **Pending:** Validation on post-build grpc-java with generated stubs present
+4. GR-1B (gRPC server registration proof) — FIXTURE-VALIDATED
+   - Option A (hint-strengthening) implemented
+   - Detects `addService()` / `bindService()` calls in Java
+   - Matches registered class to existing GR-1A surface
+   - Boosts confidence from 0.85 → 0.90
+   - Appends `registration_sites` array to evidence_json
+   - **Validated:** grpc-java-minimal fixture (confidence = 0.9, registration_sites present)
+   - Same substrate assumption as GR-1A (requires generated stubs)
 5. GR-2 (gRPC client)
 6. GR-3 (gRPC linking)
 6. BI-1B (TCP/UDP sockets)

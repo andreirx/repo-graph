@@ -154,6 +154,64 @@ impl GrpcImplHintStorePort for StorageConnection {
     }
 }
 
+// ── GR-1B: Registration proof port implementation ─────────────────────
+
+impl repo_graph_indexer::storage_port::GrpcRegistrationProofPort for StorageConnection {
+    type Error = StorageError;
+
+    fn query_add_service_calls(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<repo_graph_indexer::storage_port::AddServiceCallInput>, StorageError> {
+        let storage_results = self.query_add_service_calls_raw(snapshot_uid)?;
+
+        Ok(storage_results
+            .into_iter()
+            .map(|call| repo_graph_indexer::storage_port::AddServiceCallInput {
+                source_method_key: call.source_method_key,
+                source_method_name: call.source_method_name,
+                source_file: call.source_file,
+                line_start: call.line_start,
+                call_pattern: call.call_pattern,
+            })
+            .collect())
+    }
+
+    fn find_grpc_impl_surface_by_class(
+        &self,
+        snapshot_uid: &str,
+        class_name: &str,
+        registration_source_file: Option<&str>,
+    ) -> Result<Option<repo_graph_indexer::storage_port::GrpcImplSurfaceMatch>, StorageError> {
+        let result = self.find_grpc_impl_surface_by_class_in_context(
+            snapshot_uid,
+            class_name,
+            registration_source_file,
+        )?;
+
+        Ok(result.map(|s| repo_graph_indexer::storage_port::GrpcImplSurfaceMatch {
+            surface_uid: s.surface_uid,
+            symbol_stable_key: s.symbol_stable_key,
+            source_file: s.source_file,
+            confidence: s.confidence,
+        }))
+    }
+
+    fn boost_grpc_impl_confidence(
+        &mut self,
+        surface_uid: &str,
+        registration_site: &repo_graph_indexer::storage_port::RegistrationSiteInput,
+    ) -> Result<bool, StorageError> {
+        let site = crate::grpc_impl_hint_impl::RegistrationSite {
+            file: registration_site.file.clone(),
+            line: registration_site.line,
+            method: registration_site.method.clone(),
+            pattern: registration_site.pattern.clone(),
+        };
+        self.boost_grpc_impl_confidence(surface_uid, &site)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
