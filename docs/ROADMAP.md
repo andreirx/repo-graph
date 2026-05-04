@@ -1197,7 +1197,8 @@ Two-track architecture for boundary detection over a unified model:
 - GR-1A: gRPC server implementation hints (ImplBase inheritance)
 - GR-1B: gRPC server registration proof (addService, bindService)
 - GR-1C: gRPC server endpoint evidence (bind address, port)
-- GR-2: gRPC client detection (stubs, invocations)
+- GR-2A: gRPC client stub hints (newBlockingStub, newFutureStub, newStub)
+- GR-2B: gRPC client endpoint evidence (channel host, port)
 - GR-3: gRPC provider/consumer linking
 - ER-1: eRPC IDL extraction (future)
 
@@ -1223,16 +1224,28 @@ Two-track architecture for boundary detection over a unified model:
      Projects that generate stubs at build time (Gradle/Maven) without checking them in
      will show 0 hints until post-build indexing.
    - **Pending:** Validation on post-build grpc-java with generated stubs present
-4. GR-1B (gRPC server registration proof) — FIXTURE-VALIDATED
+4. GR-1B (gRPC server registration proof) — COMPLETE
    - Option A (hint-strengthening) implemented
-   - Detects `addService()` / `bindService()` calls in Java
-   - Matches registered class to existing GR-1A surface
+   - Detects `addService(new Impl())` inline instantiation in Java
+   - Same-file-first disambiguation + refuse-on-ambiguity (no false positives)
    - Boosts confidence from 0.85 → 0.90
    - Appends `registration_sites` array to evidence_json
-   - **Validated:** grpc-java-minimal fixture (confidence = 0.9, registration_sites present)
+   - CLI adapter tests verify boosted confidence and registration evidence
    - Same substrate assumption as GR-1A (requires generated stubs)
-5. GR-2 (gRPC client)
-6. GR-3 (gRPC linking)
+5. GR-2A (gRPC client stub hints) — FIXTURE-VALIDATED
+   - Detects `*Grpc.newBlockingStub`, `*Grpc.newFutureStub`, `*Grpc.newStub` in Java
+   - Links to proto service via CS-2A mappings (join through contract_elements by service name)
+   - Direction = consumer (symmetric to GR-1A's provider)
+   - Hint-grade confidence (0.85), basis = stub_creation
+   - Orchestrator wiring complete (after CS-2A, parallel to GR-1A)
+   - Refuse-on-ambiguity when multiple proto services share same simple name
+   - Surface UID includes grpc_class + line_start for distinct call sites
+   - Unit tests (11) + storage integration tests (3) + CLI adapter tests (3) + fixture validation test (1)
+   - Fixture: `grpc-java-minimal` extended with `HelloWorldClient.java` and stub classes
+   - Full indexed fixture run validates: extractor → CS-2A → GR-2A → CLI
+   - **Same substrate assumption as GR-1A** (requires generated stubs)
+6. GR-2B (gRPC client endpoint evidence) — PLANNED
+7. GR-3 (gRPC linking)
 6. BI-1B (TCP/UDP sockets)
 7. BI-1D (Process signals)
 8. BI-1C (SharedArrayBuffer)

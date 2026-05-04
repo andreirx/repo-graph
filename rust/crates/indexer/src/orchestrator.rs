@@ -141,7 +141,7 @@ pub struct FileInput {
 /// snapshot is transitioned to FAILED before returning.
 /// Non-fatal errors (per-file extraction failures, oversized
 /// files) are recorded in the snapshot diagnostics.
-pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort + crate::storage_port::GrpcImplHintReadPort + crate::storage_port::GrpcImplHintStorePort + crate::storage_port::GrpcRegistrationProofPort>(
+pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort + crate::storage_port::GrpcImplHintReadPort + crate::storage_port::GrpcImplHintStorePort + crate::storage_port::GrpcRegistrationProofPort + crate::storage_port::GrpcClientHintReadPort + crate::storage_port::GrpcClientHintStorePort>(
 	storage: &mut S,
 	extractors: &mut [&mut dyn ExtractorPort],
 	repo_uid: &str,
@@ -339,6 +339,17 @@ pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStoreP
 								result.grpc_registration_proof = Some(proof_result);
 							}
 						}
+
+						// ── gRPC client hint detection (GR-2A) ───────────
+						// Run after CS-2A mapping. Detects gRPC client stub
+						// creations (*Grpc.newBlockingStub, etc.) and links
+						// them to proto services via CS-2A.
+						let client_hint_result = crate::grpc_client_hint::run_grpc_client_hint_detection(
+							storage,
+							&snap_uid,
+							repo_uid,
+						);
+						result.grpc_client_hints = Some(client_hint_result);
 					}
 				}
 			}
@@ -895,6 +906,7 @@ fn run_pipeline<S: IndexerStoragePort>(
 		generated_code_mappings: None, // Filled by index_repo after Java mapping
 		grpc_impl_hints: None, // Filled by index_repo after GR-1A detection
 		grpc_registration_proof: None, // Filled by index_repo after GR-1B detection
+		grpc_client_hints: None, // Filled by index_repo after GR-2A detection
 		metrics: all_metrics,
 	})
 }
@@ -1222,7 +1234,7 @@ where
 /// (no delta optimization for contract schemas yet).
 ///
 /// Mirror of `refreshRepo` from `repo-indexer.ts`.
-pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort + crate::storage_port::GrpcImplHintReadPort + crate::storage_port::GrpcImplHintStorePort + crate::storage_port::GrpcRegistrationProofPort>(
+pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStorePort + crate::storage_port::GeneratedCodeMappingStorePort + crate::storage_port::GeneratedCodeMappingReadPort + crate::storage_port::GrpcImplHintReadPort + crate::storage_port::GrpcImplHintStorePort + crate::storage_port::GrpcRegistrationProofPort + crate::storage_port::GrpcClientHintReadPort + crate::storage_port::GrpcClientHintStorePort>(
 	storage: &mut S,
 	extractors: &mut [&mut dyn ExtractorPort],
 	repo_uid: &str,
@@ -1542,6 +1554,17 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 								result.grpc_registration_proof = Some(proof_result);
 							}
 						}
+
+						// ── gRPC client hint detection (GR-2A) ───────────
+						// Run after CS-2A mapping. Detects gRPC client stub
+						// creations (*Grpc.newBlockingStub, etc.) and links
+						// them to proto services via CS-2A.
+						let client_hint_result = crate::grpc_client_hint::run_grpc_client_hint_detection(
+							storage,
+							&snap_uid,
+							repo_uid,
+						);
+						result.grpc_client_hints = Some(client_hint_result);
 					}
 				}
 			}
@@ -1829,6 +1852,38 @@ mod tests {
 			_registration_site: &crate::storage_port::RegistrationSiteInput,
 		) -> Result<bool, String> {
 			Ok(false)
+		}
+	}
+
+	impl crate::storage_port::GrpcClientHintReadPort for MockStorage {
+		type Error = String;
+		fn query_grpc_stub_creations(
+			&self,
+			_snapshot_uid: &str,
+		) -> Result<Vec<crate::storage_port::StubCreationInput>, String> {
+			Ok(vec![])
+		}
+		fn query_grpc_service_mappings(
+			&self,
+			_snapshot_uid: &str,
+		) -> Result<Vec<crate::storage_port::GrpcServiceMappingInput>, String> {
+			Ok(vec![])
+		}
+	}
+
+	impl crate::storage_port::GrpcClientHintStorePort for MockStorage {
+		type Error = String;
+		fn insert_grpc_client_surfaces(
+			&mut self,
+			_surfaces: &[crate::storage_port::GrpcClientSurfaceInput],
+		) -> Result<usize, String> {
+			Ok(0)
+		}
+		fn insert_grpc_client_contracts(
+			&mut self,
+			_contracts: &[crate::storage_port::GrpcClientContractInput],
+		) -> Result<usize, String> {
+			Ok(0)
 		}
 	}
 
@@ -2178,6 +2233,16 @@ mod tests {
 			fn query_add_service_calls(&self, s: &str) -> Result<Vec<crate::storage_port::AddServiceCallInput>, String> { self.inner.query_add_service_calls(s) }
 			fn find_grpc_impl_surface_by_class(&self, s: &str, c: &str, f: Option<&str>) -> Result<Option<crate::storage_port::GrpcImplSurfaceMatch>, String> { self.inner.find_grpc_impl_surface_by_class(s, c, f) }
 			fn boost_grpc_impl_confidence(&mut self, s: &str, r: &crate::storage_port::RegistrationSiteInput) -> Result<bool, String> { self.inner.boost_grpc_impl_confidence(s, r) }
+		}
+		impl crate::storage_port::GrpcClientHintReadPort for FailOnInsertNodes {
+			type Error = String;
+			fn query_grpc_stub_creations(&self, s: &str) -> Result<Vec<crate::storage_port::StubCreationInput>, String> { self.inner.query_grpc_stub_creations(s) }
+			fn query_grpc_service_mappings(&self, s: &str) -> Result<Vec<crate::storage_port::GrpcServiceMappingInput>, String> { self.inner.query_grpc_service_mappings(s) }
+		}
+		impl crate::storage_port::GrpcClientHintStorePort for FailOnInsertNodes {
+			type Error = String;
+			fn insert_grpc_client_surfaces(&mut self, surfaces: &[crate::storage_port::GrpcClientSurfaceInput]) -> Result<usize, String> { self.inner.insert_grpc_client_surfaces(surfaces) }
+			fn insert_grpc_client_contracts(&mut self, contracts: &[crate::storage_port::GrpcClientContractInput]) -> Result<usize, String> { self.inner.insert_grpc_client_contracts(contracts) }
 		}
 
 		let mut storage = FailOnInsertNodes::default();

@@ -453,6 +453,81 @@ pub struct BoundaryContract {
     pub evidence_json: Option<String>,
 }
 
+// ── GR-2A: Client stub creation queries ───────────────────────────────
+
+/// A gRPC client stub creation site.
+#[derive(Debug, Clone)]
+pub struct StubCreationCall {
+    /// Stable key of the method/class creating the stub
+    pub creator_stable_key: String,
+    /// Name of the creator (method or class)
+    pub creator_name: String,
+    /// Source file path
+    pub source_file: String,
+    /// Line number
+    pub line_start: Option<i64>,
+    /// Column number
+    pub col_start: Option<i64>,
+    /// The raw call pattern (e.g., "GreeterGrpc.newBlockingStub(channel)")
+    pub call_pattern: String,
+}
+
+impl StorageConnection {
+    /// Query for gRPC stub creation calls in Java files.
+    ///
+    /// Finds CALLS edges where target_key matches `*Grpc.newBlockingStub`,
+    /// `*Grpc.newFutureStub`, or `*Grpc.newStub` patterns.
+    ///
+    /// GR-2A uses this to find client stub creations.
+    pub fn query_grpc_stub_creations_raw(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<StubCreationCall>, StorageError> {
+        let conn = self.connection();
+
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT
+                n.stable_key AS creator_key,
+                n.name AS creator_name,
+                f.path AS source_file,
+                ee.line_start,
+                ee.col_start,
+                ee.target_key AS call_pattern
+            FROM extraction_edges ee
+            JOIN nodes n ON ee.source_node_uid = n.node_uid
+            JOIN files f ON n.file_uid = f.file_uid
+            WHERE ee.snapshot_uid = ?
+              AND ee.type = 'CALLS'
+              AND f.language = 'java'
+              AND (
+                ee.target_key LIKE '%Grpc.newBlockingStub%'
+                OR ee.target_key LIKE '%Grpc.newFutureStub%'
+                OR ee.target_key LIKE '%Grpc.newStub(%'
+              )
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![snapshot_uid], |row| {
+            Ok(StubCreationCall {
+                creator_stable_key: row.get(0)?,
+                creator_name: row.get(1)?,
+                source_file: row.get(2)?,
+                line_start: row.get(3)?,
+                col_start: row.get(4)?,
+                call_pattern: row.get(5)?,
+            })
+        })?;
+
+        let mut calls = Vec::new();
+        for row_result in rows {
+            calls.push(row_result?);
+        }
+
+        Ok(calls)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

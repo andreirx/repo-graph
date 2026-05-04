@@ -31,5 +31,65 @@ public final class GreeterGrpc {
         }
     }
 
-    // Stub classes elided for fixture
+    // ── Client stub classes ─────────────────────────────────────────────
+
+    /**
+     * Creates a new blocking-style stub.
+     * GR-2A detection target: calls to this method produce consumer hints.
+     */
+    public static GreeterBlockingStub newBlockingStub(io.grpc.Channel channel) {
+        return new GreeterBlockingStub(channel);
+    }
+
+    /**
+     * Creates a new ListenableFuture-style stub.
+     */
+    public static GreeterFutureStub newFutureStub(io.grpc.Channel channel) {
+        return new GreeterFutureStub(channel);
+    }
+
+    /**
+     * Creates a new async stub.
+     */
+    public static GreeterStub newStub(io.grpc.Channel channel) {
+        return new GreeterStub(channel);
+    }
+
+    /**
+     * Blocking stub for synchronous RPC calls.
+     */
+    public static final class GreeterBlockingStub {
+        private final io.grpc.Channel channel;
+
+        private GreeterBlockingStub(io.grpc.Channel channel) {
+            this.channel = channel;
+        }
+
+        public HelloReply sayHello(HelloRequest request) {
+            // Implementation elided for fixture
+            return null;
+        }
+    }
+
+    /**
+     * ListenableFuture stub for async RPC calls.
+     */
+    public static final class GreeterFutureStub {
+        private final io.grpc.Channel channel;
+
+        private GreeterFutureStub(io.grpc.Channel channel) {
+            this.channel = channel;
+        }
+    }
+
+    /**
+     * Async stub with StreamObserver callbacks.
+     */
+    public static final class GreeterStub {
+        private final io.grpc.Channel channel;
+
+        private GreeterStub(io.grpc.Channel channel) {
+            this.channel = channel;
+        }
+    }
 }

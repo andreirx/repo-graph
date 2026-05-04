@@ -1,6 +1,6 @@
 # GR-1B: Java gRPC Server Registration Proof
 
-Status: FIXTURE-VALIDATED
+Status: COMPLETE
 Depends: GR-1A (gRPC server impl hints)
 Track: B (Schema-Backed RPC)
 

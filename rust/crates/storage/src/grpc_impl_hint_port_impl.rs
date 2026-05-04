@@ -212,6 +212,171 @@ impl repo_graph_indexer::storage_port::GrpcRegistrationProofPort for StorageConn
     }
 }
 
+// ── GR-2A: Client hint port implementation ────────────────────────────────
+
+impl repo_graph_indexer::storage_port::GrpcClientHintReadPort for StorageConnection {
+    type Error = StorageError;
+
+    fn query_grpc_stub_creations(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<repo_graph_indexer::storage_port::StubCreationInput>, StorageError> {
+        let storage_results = self.query_grpc_stub_creations_raw(snapshot_uid)?;
+
+        Ok(storage_results
+            .into_iter()
+            .map(|call| repo_graph_indexer::storage_port::StubCreationInput {
+                creator_stable_key: call.creator_stable_key,
+                creator_name: call.creator_name,
+                source_file: call.source_file,
+                line_start: call.line_start.unwrap_or(0),
+                col_start: call.col_start.unwrap_or(0),
+                call_pattern: call.call_pattern,
+            })
+            .collect())
+    }
+
+    fn query_grpc_service_mappings(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<repo_graph_indexer::storage_port::GrpcServiceMappingInput>, StorageError> {
+        // Query proto service elements that have at least one CS-2A mapping
+        // to a gRPC stub class. Join contract_elements with generated_code_mappings.
+        //
+        // This fixes the inner-class problem: CS-2A maps inner classes like
+        // GreeterImplBase, GreeterBlockingStub, etc. — all pointing to the same
+        // service element. We group by service to get one row per service.
+        let conn = self.connection();
+
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT
+                ce.element_uid AS service_element_uid,
+                ce.name AS service_name,
+                MIN(gcm.mapping_uid) AS mapping_uid,
+                MAX(gcm.confidence) AS confidence
+            FROM contract_elements ce
+            JOIN generated_code_mappings gcm ON gcm.schema_element_uid = ce.element_uid
+            WHERE gcm.snapshot_uid = ?
+              AND ce.element_kind = 'service'
+              AND gcm.generated_symbol_key LIKE '%Grpc%'
+            GROUP BY ce.element_uid, ce.name
+            "#,
+        )?;
+
+        let rows = stmt.query_map(rusqlite::params![snapshot_uid], |row| {
+            Ok(repo_graph_indexer::storage_port::GrpcServiceMappingInput {
+                service_element_uid: row.get(0)?,
+                service_name: row.get(1)?,
+                mapping_uid: row.get(2)?,
+                confidence: row.get(3)?,
+            })
+        })?;
+
+        let mut services = Vec::new();
+        for row_result in rows {
+            services.push(row_result?);
+        }
+
+        Ok(services)
+    }
+}
+
+impl repo_graph_indexer::storage_port::GrpcClientHintStorePort for StorageConnection {
+    type Error = StorageError;
+
+    fn insert_grpc_client_surfaces(
+        &mut self,
+        surfaces: &[repo_graph_indexer::storage_port::GrpcClientSurfaceInput],
+    ) -> Result<usize, StorageError> {
+        if surfaces.is_empty() {
+            return Ok(0);
+        }
+
+        let conn = self.connection_mut();
+        let mut stmt = conn.prepare(
+            r#"
+            INSERT OR IGNORE INTO boundary_interaction_surfaces (
+                surface_uid, snapshot_uid, repo_uid,
+                boundary_scope, channel_kind, direction,
+                transport_class, provenance, confidence_basis,
+                protocol, protocol_family, interaction_pattern,
+                endpoint_locality,
+                symbol_stable_key, source_file, line_start, line_end, col_start, col_end,
+                extractor, basis, confidence, evidence_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )?;
+
+        let mut inserted = 0;
+        for surface in surfaces {
+            let result = stmt.execute(rusqlite::params![
+                surface.surface_uid,
+                surface.snapshot_uid,
+                surface.repo_uid,
+                "unknown",             // boundary_scope - unknown until endpoint proven
+                "grpc_channel",        // channel_kind (matches ChannelKind::GrpcChannel)
+                "consumer",            // direction - CLIENT stub creation
+                "schema_rpc",          // transport_class
+                "inferred",            // provenance - hint-grade
+                "stub_creation",       // confidence_basis
+                "grpc",                // protocol
+                "rpc",                 // protocol_family
+                "unknown",             // interaction_pattern
+                "unknown",             // endpoint_locality
+                surface.symbol_stable_key,
+                surface.source_file,
+                surface.line_start,
+                surface.line_end,
+                surface.col_start,
+                surface.col_end,
+                "grpc_client_hint_java", // extractor
+                "stub_creation",       // basis
+                0.85f64,               // confidence - hint-grade
+                surface.evidence_json,
+            ])?;
+            inserted += result;
+        }
+
+        Ok(inserted)
+    }
+
+    fn insert_grpc_client_contracts(
+        &mut self,
+        contracts: &[repo_graph_indexer::storage_port::GrpcClientContractInput],
+    ) -> Result<usize, StorageError> {
+        if contracts.is_empty() {
+            return Ok(0);
+        }
+
+        let conn = self.connection_mut();
+        let mut stmt = conn.prepare(
+            r#"
+            INSERT OR IGNORE INTO boundary_contracts (
+                association_uid, surface_uid, contract_element_uid,
+                contract_kind, association_basis, confidence, evidence_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )?;
+
+        let mut inserted = 0;
+        for contract in contracts {
+            let result = stmt.execute(rusqlite::params![
+                contract.association_uid,
+                contract.surface_uid,
+                contract.contract_element_uid,
+                "grpc_service",            // contract_kind
+                "generated_code_mapping",  // association_basis - via CS-2A
+                0.85f64,                   // confidence - inherited from CS-2A
+                contract.evidence_json,
+            ])?;
+            inserted += result;
+        }
+
+        Ok(inserted)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -634,5 +799,273 @@ mod tests {
         assert!(!result.has_error());
         assert_eq!(result.hints_emitted, 0, "No hints without matching CS-2A mapping");
         assert_eq!(result.contracts_emitted, 0);
+    }
+
+    // ── GR-2A: Client stub hint tests ─────────────────────────────────
+
+    /// Sets up a GR-2A test scenario with:
+    /// - Client class node
+    /// - CALLS edge to GreeterGrpc.newBlockingStub
+    /// - Contract schema + element (proto service)
+    /// - CS-2A mappings linking gRPC inner classes (ImplBase, BlockingStub, etc.) to proto service
+    ///
+    /// This mirrors real CS-2A output: CS-2A maps inner classes, not the outer Grpc class.
+    fn setup_client_scenario() -> StorageConnection {
+        let mut conn = setup_test_db_with_mapping();
+
+        // Add a client file
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO files (file_uid, repo_uid, path, language)
+                   VALUES ('f2', 'r1', 'src/HelloWorldClient.java', 'java')"#,
+                [],
+            )
+            .unwrap();
+
+        // Insert client class node
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO nodes (
+                    node_uid, snapshot_uid, repo_uid, stable_key, kind, subtype,
+                    name, qualified_name, file_uid
+                ) VALUES (
+                    'n-client', 's1', 'r1',
+                    'r1:src/HelloWorldClient.java#HelloWorldClient.init:SYMBOL:METHOD',
+                    'SYMBOL', 'METHOD',
+                    'init', 'com.example.HelloWorldClient.init', 'f2'
+                )"#,
+                [],
+            )
+            .unwrap();
+
+        // Insert CALLS edge for stub creation
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO extraction_edges (
+                    edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key,
+                    type, resolution, extractor, line_start, col_start
+                ) VALUES (
+                    'e-stub', 's1', 'r1', 'n-client',
+                    'GreeterGrpc.newBlockingStub(channel)',
+                    'CALLS', 'STATIC', 'java-core:0.1.0', 20, 5
+                )"#,
+                [],
+            )
+            .unwrap();
+
+        // Insert CS-2A mappings for gRPC inner classes (real CS-2A output shape).
+        // CS-2A maps inner classes like GreeterImplBase, GreeterBlockingStub, etc.
+        // to the proto service element. All point to the same service.
+        conn.connection_mut()
+            .execute_batch(
+                r#"
+                INSERT INTO generated_code_mappings (
+                    mapping_uid, snapshot_uid, schema_element_uid, generated_symbol_key,
+                    language, generated_file, mapping_basis, confidence, created_at
+                ) VALUES
+                    ('map-implbase', 's1', 'ce1',
+                     'r1:build/gen/GreeterGrpc.java#GreeterGrpc.GreeterImplBase:SYMBOL:CLASS',
+                     'java', 'build/gen/GreeterGrpc.java',
+                     'filename_convention', 0.85, datetime('now')),
+                    ('map-blocking', 's1', 'ce1',
+                     'r1:build/gen/GreeterGrpc.java#GreeterGrpc.GreeterBlockingStub:SYMBOL:CLASS',
+                     'java', 'build/gen/GreeterGrpc.java',
+                     'filename_convention', 0.85, datetime('now')),
+                    ('map-future', 's1', 'ce1',
+                     'r1:build/gen/GreeterGrpc.java#GreeterGrpc.GreeterFutureStub:SYMBOL:CLASS',
+                     'java', 'build/gen/GreeterGrpc.java',
+                     'filename_convention', 0.85, datetime('now'));
+                "#,
+            )
+            .unwrap();
+
+        conn
+    }
+
+    #[test]
+    fn gr2a_end_to_end_client_stub_detection() {
+        use repo_graph_indexer::run_grpc_client_hint_detection;
+
+        let mut conn = setup_client_scenario();
+
+        // Run the full detection pipeline
+        let result = run_grpc_client_hint_detection(&mut conn, "s1", "r1");
+
+        // Verify no errors
+        assert!(
+            !result.has_error(),
+            "Detection had errors: creation={:?}, map={:?}, surf={:?}, contract={:?}",
+            result.creation_query_error,
+            result.mapping_query_error,
+            result.surface_storage_error,
+            result.contract_storage_error
+        );
+
+        // Verify hints were emitted
+        assert_eq!(result.hints_emitted, 1, "Expected 1 client hint");
+        assert_eq!(result.contracts_emitted, 1, "Expected 1 contract");
+
+        // Verify surface was stored with correct semantics
+        let (boundary_scope, channel_kind, direction, basis, confidence): (
+            String,
+            String,
+            String,
+            String,
+            f64,
+        ) = conn
+            .connection()
+            .query_row(
+                r#"SELECT boundary_scope, channel_kind, direction, basis, confidence
+                   FROM boundary_interaction_surfaces
+                   WHERE snapshot_uid = 's1' AND extractor = 'grpc_client_hint_java'"#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+
+        assert_eq!(boundary_scope, "unknown", "Hint-grade: scope unknown");
+        assert_eq!(channel_kind, "grpc_channel");
+        assert_eq!(direction, "consumer", "Client stub = consumer direction");
+        assert_eq!(basis, "stub_creation");
+        assert!((confidence - 0.85).abs() < 0.001);
+
+        // Verify evidence contains stub info
+        let evidence_json: String = conn
+            .connection()
+            .query_row(
+                r#"SELECT evidence_json FROM boundary_interaction_surfaces
+                   WHERE snapshot_uid = 's1' AND extractor = 'grpc_client_hint_java'"#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert!(evidence_json.contains("\"grpc_class\":\"GreeterGrpc\""));
+        assert!(evidence_json.contains("\"stub_method\":\"newBlockingStub\""));
+        assert!(evidence_json.contains("\"stub_type\":\"blocking\""));
+    }
+
+    #[test]
+    fn gr2a_different_stub_types_detected() {
+        let mut conn = setup_test_db_with_mapping();
+
+        // Add client file
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO files (file_uid, repo_uid, path, language)
+                   VALUES ('f2', 'r1', 'src/Client.java', 'java')"#,
+                [],
+            )
+            .unwrap();
+
+        // Insert client node
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO nodes (
+                    node_uid, snapshot_uid, repo_uid, stable_key, kind, subtype,
+                    name, file_uid
+                ) VALUES (
+                    'n1', 's1', 'r1', 'r1:Client.java#Client:SYMBOL:CLASS',
+                    'SYMBOL', 'CLASS', 'Client', 'f2'
+                )"#,
+                [],
+            )
+            .unwrap();
+
+        // Insert CALLS edges for all stub types
+        conn.connection_mut()
+            .execute_batch(
+                r#"
+                INSERT INTO extraction_edges (
+                    edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key,
+                    type, resolution, extractor, line_start
+                ) VALUES
+                    ('e1', 's1', 'r1', 'n1', 'GreeterGrpc.newBlockingStub(ch)', 'CALLS', 'STATIC', 'java-core:0.1.0', 10),
+                    ('e2', 's1', 'r1', 'n1', 'GreeterGrpc.newFutureStub(ch)', 'CALLS', 'STATIC', 'java-core:0.1.0', 11),
+                    ('e3', 's1', 'r1', 'n1', 'GreeterGrpc.newStub(ch)', 'CALLS', 'STATIC', 'java-core:0.1.0', 12);
+                "#,
+            )
+            .unwrap();
+
+        // Insert CS-2A mappings for gRPC inner classes (real CS-2A output shape)
+        conn.connection_mut()
+            .execute_batch(
+                r#"
+                INSERT INTO generated_code_mappings (
+                    mapping_uid, snapshot_uid, schema_element_uid, generated_symbol_key,
+                    language, generated_file, mapping_basis, confidence, created_at
+                ) VALUES
+                    ('map-impl', 's1', 'ce1',
+                     'r1:GreeterGrpc.java#GreeterGrpc.GreeterImplBase:SYMBOL:CLASS',
+                     'java', 'GreeterGrpc.java', 'filename_convention', 0.85, datetime('now')),
+                    ('map-stub', 's1', 'ce1',
+                     'r1:GreeterGrpc.java#GreeterGrpc.GreeterBlockingStub:SYMBOL:CLASS',
+                     'java', 'GreeterGrpc.java', 'filename_convention', 0.85, datetime('now'));
+                "#,
+            )
+            .unwrap();
+
+        use repo_graph_indexer::run_grpc_client_hint_detection;
+        let result = run_grpc_client_hint_detection(&mut conn, "s1", "r1");
+
+        assert!(!result.has_error());
+        assert_eq!(result.hints_emitted, 3, "All three stub types detected");
+        assert_eq!(result.contracts_emitted, 3);
+    }
+
+    #[test]
+    fn gr2a_no_hints_without_grpc_mapping() {
+        let mut conn = setup_test_db();
+
+        // Add client file
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO files (file_uid, repo_uid, path, language)
+                   VALUES ('f2', 'r1', 'src/Client.java', 'java')"#,
+                [],
+            )
+            .unwrap();
+
+        // Insert client node
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO nodes (
+                    node_uid, snapshot_uid, repo_uid, stable_key, kind, subtype,
+                    name, file_uid
+                ) VALUES (
+                    'n1', 's1', 'r1', 'r1:Client.java#Client:SYMBOL:CLASS',
+                    'SYMBOL', 'CLASS', 'Client', 'f2'
+                )"#,
+                [],
+            )
+            .unwrap();
+
+        // Insert CALLS edge to stub creation (but no CS-2A mapping)
+        conn.connection_mut()
+            .execute(
+                r#"INSERT INTO extraction_edges (
+                    edge_uid, snapshot_uid, repo_uid, source_node_uid, target_key,
+                    type, resolution, extractor
+                ) VALUES (
+                    'e1', 's1', 'r1', 'n1', 'UnknownGrpc.newBlockingStub(ch)',
+                    'CALLS', 'STATIC', 'java-core:0.1.0'
+                )"#,
+                [],
+            )
+            .unwrap();
+
+        use repo_graph_indexer::run_grpc_client_hint_detection;
+        let result = run_grpc_client_hint_detection(&mut conn, "s1", "r1");
+
+        assert!(!result.has_error());
+        assert_eq!(result.hints_emitted, 0, "No hints without matching CS-2A mapping");
     }
 }

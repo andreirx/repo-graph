@@ -549,6 +549,10 @@ pub struct IndexResult {
 	/// ran to boost confidence of GR-1A surfaces.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub grpc_registration_proof: Option<crate::grpc_registration_proof::GrpcRegistrationProofResult>,
+	/// gRPC client hint results (GR-2A). Present when gRPC client
+	/// stub detection ran during this operation.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub grpc_client_hints: Option<crate::grpc_client_hint::GrpcClientHintResult>,
 	/// Per-symbol metrics from extraction.
 	///
 	/// RS-MS-3c-prereq: Accumulated from all extraction results.

@@ -748,6 +748,8 @@ fn parse_interaction_basis(s: &str) -> Result<InteractionBasis, BoundaryInteract
         "extends_impl_base" => Ok(InteractionBasis::ExtendsImplBase),
         // GR-1B: boosted basis when registration proof found
         "extends_impl_base_registered" => Ok(InteractionBasis::ExtendsImplBase),
+        // GR-2A: gRPC client stub creation
+        "stub_creation" => Ok(InteractionBasis::StubCreation),
         other => Err(BoundaryInteractionReadError::Storage(format!(
             "unrecognized interaction_basis: '{}'",
             other

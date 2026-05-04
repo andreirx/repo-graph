@@ -542,6 +542,11 @@ pub enum InteractionBasis {
     /// Used by GR-1A: confidence is moderate (0.85) because the inheritance
     /// pattern is strong evidence but we lack runtime proof.
     ExtendsImplBase,
+
+    /// Code creates a gRPC client stub (newBlockingStub, newFutureStub, newStub).
+    /// Used by GR-2A: confidence is moderate (0.85) because stub creation
+    /// is strong evidence of client intent but we lack runtime proof.
+    StubCreation,
 }
 
 impl InteractionBasis {
@@ -555,6 +560,7 @@ impl InteractionBasis {
             InteractionBasis::Declaration => "declaration",
             InteractionBasis::Inferred => "inferred",
             InteractionBasis::ExtendsImplBase => "extends_impl_base",
+            InteractionBasis::StubCreation => "stub_creation",
         }
     }
 
@@ -568,6 +574,7 @@ impl InteractionBasis {
             InteractionBasis::Declaration => 1.0,
             InteractionBasis::Inferred => 0.50,
             InteractionBasis::ExtendsImplBase => 0.85,
+            InteractionBasis::StubCreation => 0.85,
         }
     }
 }

@@ -818,3 +818,113 @@ pub struct RegistrationSiteInput {
 	pub method: String,
 	pub pattern: String,
 }
+
+// ── GR-2A: Client stub hint port ──────────────────────────────────────────
+
+/// Read port for gRPC client stub hint detection (GR-2A).
+///
+/// Provides queries for detecting gRPC client stub creations
+/// (`*Grpc.newBlockingStub`, `*Grpc.newFutureStub`, `*Grpc.newStub`)
+/// and linking them to proto services via CS-2A mappings.
+pub trait GrpcClientHintReadPort {
+	/// Error type for storage operations.
+	type Error: std::fmt::Debug + std::fmt::Display;
+
+	/// Query gRPC stub creation calls in Java files.
+	///
+	/// Returns CALLS edges where target matches `*Grpc.newBlockingStub`,
+	/// `*Grpc.newFutureStub`, or `*Grpc.newStub` patterns.
+	fn query_grpc_stub_creations(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<StubCreationInput>, Self::Error>;
+
+	/// Query proto services that have CS-2A gRPC mappings.
+	///
+	/// Returns service contract_elements that have at least one CS-2A mapping
+	/// to a gRPC stub class. The mapping may be to any inner class (ImplBase,
+	/// BlockingStub, etc.) — we only need the service identity.
+	fn query_grpc_service_mappings(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<GrpcServiceMappingInput>, Self::Error>;
+}
+
+/// Write port for gRPC client stub hint storage (GR-2A).
+///
+/// Persists boundary surfaces and contracts for detected gRPC client hints.
+pub trait GrpcClientHintStorePort {
+	/// Error type for storage operations.
+	type Error: std::fmt::Debug + std::fmt::Display;
+
+	/// Insert boundary interaction surfaces for gRPC client hints.
+	fn insert_grpc_client_surfaces(
+		&mut self,
+		surfaces: &[GrpcClientSurfaceInput],
+	) -> Result<usize, Self::Error>;
+
+	/// Insert boundary contracts linking client hints to proto services.
+	fn insert_grpc_client_contracts(
+		&mut self,
+		contracts: &[GrpcClientContractInput],
+	) -> Result<usize, Self::Error>;
+}
+
+/// A gRPC stub creation site (GR-2A input).
+#[derive(Debug, Clone)]
+pub struct StubCreationInput {
+	/// Stable key of the method/class creating the stub
+	pub creator_stable_key: String,
+	/// Name of the creator (method or class)
+	pub creator_name: String,
+	/// Source file path
+	pub source_file: String,
+	/// Line number
+	pub line_start: i64,
+	/// Column number
+	pub col_start: i64,
+	/// The raw call pattern (e.g., "GreeterGrpc.newBlockingStub(channel)")
+	pub call_pattern: String,
+}
+
+/// A proto service with CS-2A gRPC mapping (GR-2A input).
+///
+/// Represents a proto service element that has at least one CS-2A mapping
+/// to generated gRPC stub classes. The join goes through contract_elements
+/// to avoid the inner-class ambiguity problem (CS-2A maps inner classes
+/// like `GreeterImplBase`, `GreeterBlockingStub`, etc., not the outer `GreeterGrpc`).
+#[derive(Debug, Clone)]
+pub struct GrpcServiceMappingInput {
+	/// The proto service element UID
+	pub service_element_uid: String,
+	/// The proto service name (e.g., "Greeter", "UserService")
+	pub service_name: String,
+	/// A representative mapping UID (evidence of CS-2A linkage)
+	pub mapping_uid: String,
+	/// Best confidence among mappings to this service
+	pub confidence: f64,
+}
+
+/// Input for inserting a gRPC client hint surface.
+#[derive(Debug, Clone)]
+pub struct GrpcClientSurfaceInput {
+	pub surface_uid: String,
+	pub snapshot_uid: String,
+	pub repo_uid: String,
+	pub symbol_stable_key: String,
+	pub source_file: String,
+	pub line_start: i64,
+	pub line_end: i64,
+	pub col_start: i64,
+	pub col_end: i64,
+	pub evidence_json: String,
+}
+
+/// Input for inserting a gRPC client hint contract association.
+#[derive(Debug, Clone)]
+pub struct GrpcClientContractInput {
+	pub association_uid: String,
+	pub surface_uid: String,
+	pub contract_element_uid: String,
+	pub evidence_json: String,
+}

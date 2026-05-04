@@ -922,3 +922,397 @@ fn boundaries_show_includes_registration_sites_for_gr1b() {
     assert_eq!(site["method"], "start");
     assert_eq!(site["pattern"], "addService(new GreeterImpl())");
 }
+
+// ── GR-2A: Client stub hint tests ───────────────────────────────────
+
+/// Build a test DB with a GR-2A client stub surface (direction=consumer, basis=stub_creation).
+fn build_indexed_db_with_gr2a_client() -> (tempfile::TempDir, PathBuf, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+
+    // Create DB with migrations via StorageConnection
+    {
+        let _conn = repo_graph_storage::connection::StorageConnection::open(&db_path).unwrap();
+    }
+
+    // Reopen with rusqlite to insert test data
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute_batch(
+            r#"
+            INSERT INTO repos (repo_uid, name, root_path, created_at)
+            VALUES ('test-repo', 'test-repo', '/test', datetime('now'));
+
+            INSERT INTO snapshots (snapshot_uid, repo_uid, kind, status, created_at)
+            VALUES ('snap-1', 'test-repo', 'full', 'ready', datetime('now'));
+
+            INSERT INTO files (file_uid, repo_uid, path, language)
+            VALUES ('f1', 'test-repo', 'src/HelloWorldClient.java', 'java');
+
+            -- GR-2A client stub surface: direction=consumer, basis=stub_creation
+            INSERT INTO boundary_interaction_surfaces (
+                surface_uid, snapshot_uid, repo_uid,
+                boundary_scope, channel_kind, direction,
+                transport_class, provenance, confidence_basis,
+                protocol, protocol_family, interaction_pattern,
+                endpoint_locality, symbol_stable_key, source_file,
+                line_start, line_end, col_start, col_end,
+                extractor, basis, confidence, evidence_json
+            ) VALUES (
+                'surf-greeter-client', 'snap-1', 'test-repo',
+                'unknown', 'grpc_channel', 'consumer',
+                'schema_rpc', 'inferred', 'stub_creation',
+                'grpc', 'rpc', 'unknown',
+                'unknown', 'test-repo:src/HelloWorldClient.java#HelloWorldClient.init:SYMBOL:METHOD',
+                'src/HelloWorldClient.java',
+                20, 20, 5, 5,
+                'grpc_client_hint_java', 'stub_creation', 0.85,
+                '{"grpc_class":"GreeterGrpc","stub_method":"newBlockingStub","stub_type":"blocking","proto_service_name":"Greeter","mapping_uid":"m-greeter","mapping_confidence":0.85}'
+            );
+
+            -- Contract schema and element for the service
+            INSERT INTO contract_schemas (
+                schema_uid, snapshot_uid, repo_uid, schema_kind, file_path,
+                package_name, content_hash, extractor, parsed_at
+            ) VALUES (
+                'cs-greeter', 'snap-1', 'test-repo', 'protobuf', 'helloworld.proto',
+                'helloworld', 'hash123', 'proto-parser:0.1.0', datetime('now')
+            );
+
+            INSERT INTO contract_elements (
+                element_uid, schema_uid, element_kind, name, full_name
+            ) VALUES (
+                'ce-greeter-svc', 'cs-greeter', 'service', 'Greeter', 'helloworld.Greeter'
+            );
+
+            -- Contract association
+            INSERT INTO boundary_contracts (
+                association_uid, surface_uid, contract_element_uid,
+                contract_kind, association_basis, confidence, evidence_json
+            ) VALUES (
+                'bc-greeter-client', 'surf-greeter-client', 'ce-greeter-svc',
+                'grpc_service', 'generated_code_mapping', 0.85,
+                '{"mapping_uid":"m-greeter"}'
+            );
+            "#,
+        )
+        .unwrap();
+
+    let surface_uid = "surf-greeter-client".to_string();
+    (dir, db_path, surface_uid)
+}
+
+#[test]
+fn boundaries_list_shows_gr2a_consumer_direction() {
+    let (_dir, db_path, _surface_uid) = build_indexed_db_with_gr2a_client();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "test-repo",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, got: {}\nstderr: {}",
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {}\nstdout: {}", e, stdout));
+
+    assert_eq!(result["count"], 1);
+    let item = &result["results"][0];
+
+    // GR-2A: direction should be consumer (client side)
+    assert_eq!(
+        item["direction"], "consumer",
+        "GR-2A client stub should have direction=consumer"
+    );
+
+    // GR-2A: basis should be stub_creation
+    assert_eq!(
+        item["basis"], "stub_creation",
+        "GR-2A client stub should have basis=stub_creation"
+    );
+
+    // Confidence should be 0.85 (hint-grade)
+    let confidence = item["confidence"].as_f64().unwrap();
+    assert!(
+        (confidence - 0.85).abs() < 0.001,
+        "GR-2A client stub confidence should be 0.85, got {}",
+        confidence
+    );
+
+    // Channel kind should be grpc_channel
+    assert_eq!(
+        item["channelKind"], "grpc_channel",
+        "GR-2A client stub should have channelKind=grpc_channel"
+    );
+}
+
+#[test]
+fn boundaries_show_includes_stub_info_for_gr2a() {
+    let (_dir, db_path, surface_uid) = build_indexed_db_with_gr2a_client();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "show",
+            db_path.to_str().unwrap(),
+            "test-repo",
+            &surface_uid,
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, got: {}\nstderr: {}",
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Verify direction=consumer
+    assert_eq!(result["direction"], "consumer");
+
+    // evidenceJson should contain stub info
+    let evidence_json_str = result["evidenceJson"].as_str()
+        .expect("evidenceJson should be a string");
+    let evidence: serde_json::Value = serde_json::from_str(evidence_json_str)
+        .expect("evidenceJson should be valid JSON");
+
+    // Verify stub-specific fields
+    assert_eq!(evidence["grpc_class"], "GreeterGrpc");
+    assert_eq!(evidence["stub_method"], "newBlockingStub");
+    assert_eq!(evidence["stub_type"], "blocking");
+    assert_eq!(evidence["proto_service_name"], "Greeter");
+}
+
+#[test]
+fn boundaries_show_includes_gr2a_contract_association() {
+    let (_dir, db_path, surface_uid) = build_indexed_db_with_gr2a_client();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "show",
+            db_path.to_str().unwrap(),
+            "test-repo",
+            &surface_uid,
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, got: {}\nstderr: {}",
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Verify contract association is present in show output
+    let contracts = result["contracts"].as_array()
+        .expect("contracts should be an array in show output");
+
+    assert_eq!(contracts.len(), 1, "should have 1 contract association");
+
+    let contract = &contracts[0];
+    assert_eq!(contract["contractElementUid"], "ce-greeter-svc");
+    assert_eq!(contract["contractKind"], "grpc_service");
+    assert_eq!(contract["contractName"], "helloworld.Greeter");
+}
+
+// ══════════════════════════════════════════════════════════════════
+// GR-2A FIXTURE VALIDATION: Real indexed fixture run
+// ══════════════════════════════════════════════════════════════════
+
+/// Index the real grpc-java-minimal fixture and validate the full GR-2A chain:
+/// 1. Java extractor emits CALLS edge for GreeterGrpc.newBlockingStub
+/// 2. CS-2A maps GreeterBlockingStub to proto service
+/// 3. GR-2A joins to produce consumer hint
+/// 4. CLI surfaces show direction=consumer, basis=stub_creation
+///
+/// This is the real fixture validation - not synthetic DB seeding.
+#[test]
+fn gr2a_fixture_validated_full_indexed_run() {
+    // Locate the grpc-java-minimal fixture
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fixture_path = manifest
+        .join("..")
+        .join("..")
+        .join("..")
+        .join("test")
+        .join("fixtures")
+        .join("grpc-java-minimal");
+
+    assert!(
+        fixture_path.join("src/main/java/io/grpc/examples/helloworld/HelloWorldClient.java").exists(),
+        "HelloWorldClient.java fixture not found at {:?}",
+        fixture_path
+    );
+
+    // Create temp DB and index the fixture
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("grpc-fixture.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &fixture_path,
+        &db_path,
+        "grpc-java-minimal",
+        &ComposeOptions::default(),
+    )
+    .expect("fixture indexing should succeed");
+
+    // ── Layer 0: Extraction proof ────────────────────────────────────
+    // Verify Java files were indexed (5 Java files in fixture)
+    assert!(
+        result.files_total >= 5,
+        "expected at least 5 Java files, got {}",
+        result.files_total
+    );
+
+    // ── GR-2A: Boundary surfaces via CLI ─────────────────────────────
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "grpc-java-minimal",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "boundaries list should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // boundaries list returns "results" array
+    let surfaces = result["results"].as_array()
+        .expect("results should be an array");
+
+    // Find the GR-2A consumer surface (from HelloWorldClient)
+    let client_surface = surfaces.iter().find(|s| {
+        s["direction"].as_str() == Some("consumer")
+            && s["basis"].as_str() == Some("stub_creation")
+    });
+
+    assert!(
+        client_surface.is_some(),
+        "expected to find GR-2A consumer surface with basis=stub_creation in boundaries list.\n\
+         All surfaces: {:?}",
+        surfaces
+    );
+
+    let client = client_surface.unwrap();
+
+    // Verify GR-2A surface semantics
+    assert_eq!(client["direction"], "consumer", "GR-2A should emit direction=consumer");
+    assert_eq!(client["channelKind"], "grpc_channel", "should be grpc_channel");
+    assert_eq!(client["transportClass"], "schema_rpc", "should be schema_rpc");
+    assert_eq!(client["basis"], "stub_creation", "basis should be stub_creation");
+    assert_eq!(client["protocol"], "grpc", "protocol should be grpc");
+
+    // Verify confidence is hint-grade
+    let confidence = client["confidence"].as_f64().unwrap_or(0.0);
+    assert!(
+        (confidence - 0.85).abs() < 0.01,
+        "confidence should be 0.85 (hint-grade), got {}",
+        confidence
+    );
+
+    // Verify source file points to HelloWorldClient
+    let source_file = client["sourceFile"].as_str().unwrap_or("");
+    assert!(
+        source_file.contains("HelloWorldClient.java"),
+        "source file should be HelloWorldClient.java, got: {}",
+        source_file
+    );
+
+    // ── GR-2A: Contract association proof ────────────────────────────
+    // Get surface_uid and verify contract link via show command
+    let surface_uid = client["surfaceUid"].as_str()
+        .expect("surface should have surfaceUid");
+
+    let show_output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "show",
+            db_path.to_str().unwrap(),
+            "grpc-java-minimal",
+            surface_uid,
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        show_output.status.code(),
+        Some(0),
+        "boundaries show should succeed"
+    );
+
+    let show_stdout = String::from_utf8_lossy(&show_output.stdout);
+    let show_result: serde_json::Value = serde_json::from_str(&show_stdout)
+        .unwrap_or_else(|e| panic!("show output not valid JSON: {}\nstdout: {}", e, show_stdout));
+
+    // Verify evidence contains stub info
+    let evidence_json_str = show_result["evidenceJson"].as_str()
+        .expect("show should include evidenceJson");
+    let evidence: serde_json::Value = serde_json::from_str(evidence_json_str)
+        .expect("evidenceJson should be valid JSON");
+
+    assert_eq!(evidence["grpc_class"], "GreeterGrpc", "grpc_class in evidence");
+    assert_eq!(evidence["stub_method"], "newBlockingStub", "stub_method in evidence");
+    assert_eq!(evidence["stub_type"], "blocking", "stub_type in evidence");
+
+    // Verify contract association to proto service
+    let contracts = show_result["contracts"].as_array();
+    assert!(
+        contracts.is_some() && !contracts.unwrap().is_empty(),
+        "GR-2A surface should have contract association to proto service.\n\
+         show_result: {:?}",
+        show_result
+    );
+
+    let contract = &contracts.unwrap()[0];
+    assert_eq!(contract["contractKind"], "grpc_service", "contract kind should be grpc_service");
+
+    // Contract name should reference Greeter service
+    let contract_name = contract["contractName"].as_str().unwrap_or("");
+    assert!(
+        contract_name.contains("Greeter"),
+        "contract should link to Greeter service, got: {}",
+        contract_name
+    );
+
+    println!("GR-2A fixture validation PASSED:");
+    println!("  - HelloWorldClient.java indexed");
+    println!("  - CALLS edge to GreeterGrpc.newBlockingStub detected");
+    println!("  - CS-2A mapping to proto service present");
+    println!("  - GR-2A consumer surface emitted (confidence={:.2})", confidence);
+    println!("  - Contract association to Greeter service verified");
+}
