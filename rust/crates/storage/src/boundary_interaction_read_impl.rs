@@ -644,6 +644,7 @@ fn parse_channel_kind(s: &str) -> Result<ChannelKind, BoundaryInteractionReadErr
         "tcp_socket" => Ok(ChannelKind::TcpSocket),
         "udp_socket" => Ok(ChannelKind::UdpSocket),
         "shared_array_buffer" => Ok(ChannelKind::SharedArrayBuffer),
+        "amqp_queue" => Ok(ChannelKind::AmqpQueue),
         "grpc_channel" => Ok(ChannelKind::GrpcChannel),
         "protobuf_stream" => Ok(ChannelKind::ProtobufStream),
         "erpc_channel" => Ok(ChannelKind::ErpcChannel),

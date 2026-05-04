@@ -89,6 +89,8 @@ chrono = { version = "0.4", default-features = false, features = ["std", "clock"
 # See docs/TECH-DEBT.md: "PF-1 temporary re-parse postpass".
 tree-sitter = "0.24"
 tree-sitter-c = "0.23"
+# Tree-sitter for BI-1C SharedArrayBuffer/Worker boundary detection (TEMPORARY).
+tree-sitter-typescript = "0.23"
 
 [dev-dependencies]
 tempfile = "3"

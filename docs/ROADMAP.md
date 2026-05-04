@@ -67,6 +67,9 @@ for what is actually operational.
   Later ops (bind, listen, connect, send, recv, sendto, recvfrom) lack family/type
   context propagation, so provider/consumer roles are not yet surfaced. CLI supports
   `--kind tcp` and `--kind udp` filters.
+  AMQP/RabbitMQ detection (MB-1A) shipped: amqplib patterns (sendToQueue, publish,
+  consume, assertQueue, assertExchange, bindQueue). Channel kind `amqp_queue`,
+  protocol family `message_broker`. Validated on rabbitmq-tutorials (31 surfaces).
 - **Spring framework detectors:** container-managed bean liveness via `@Component`, `@Service`,
   `@Repository`, `@Configuration`, `@RestController`, `@Controller`, `@Bean`. Suppresses 93
   false dead-code reports on glamCRM. Also fixes Lambda entrypoint suppression in `findDeadNodes`.
@@ -1305,8 +1308,30 @@ This is sufficient as an orientation substrate. An agent can:
      `c-extractor/src/boundary_detector.rs`, `rgr/src/commands/boundaries.rs`
    - Tests: 8 signal extraction tests, 3 integration tests
    - CLI: `rmap boundaries list --kind signal`, `rmap boundaries list --family signal`
-8. BI-1C (SharedArrayBuffer / worker boundaries)
-9. MB-1 (RabbitMQ/AMQP basic detection)
+8. BI-1C (SharedArrayBuffer / Atomics boundaries) — SHIPPED
+   - TS/JS binding table with 12 patterns (SharedArrayBuffer + 11 Atomics.* methods)
+   - Scope: intra_process (same OS process, different V8 isolates)
+   - Direction: provider (SAB allocation, Atomics.notify), consumer (Atomics.wait),
+     bidirectional (Atomics.store/load/add/sub/and/or/xor/exchange/compareExchange)
+   - **Option A applied:** Worker and postMessage NOT detected (no SAB correlation
+     possible without dataflow). This prevents false SAB claims in worker-heavy repos.
+   - CLI: `rmap boundaries list --kind shared_array_buffer` (aliases: sab, atomics)
+   - Fixture: test/fixtures/shared-array-buffer/ (main.ts, worker.ts)
+   - Tests: 9 unit tests (boundary_detector), 3 integration tests (bi_shared_array_buffer.rs),
+     4 CLI adapter tests (boundaries_command.rs)
+   - Deferred: BI-1E (Web Worker) slice for general worker patterns with `web_worker` channel kind
+9. MB-1A (RabbitMQ/AMQP basic detection) — SHIPPED
+   - TS/JS binding table with 6 amqplib patterns: sendToQueue, publish, consume,
+     assertQueue, assertExchange, bindQueue
+   - Channel kind: `amqp_queue` (protocol family: `message_broker`)
+   - Scope: unknown (broker topology not inferrable without config)
+   - Direction: provider (sendToQueue, publish), consumer (consume),
+     bidirectional (assertQueue, assertExchange, bindQueue)
+   - CLI: `rmap boundaries list --kind amqp_queue` (aliases: amqp, rabbitmq)
+   - Fixture: test/fixtures/amqp-basic/ (producer.ts, consumer.ts, publisher.ts)
+   - Validation: rabbitmq-tutorials/javascript-nodejs (31 surfaces across 12 files)
+   - Tests: 10 unit tests (amqp_detector), 3 integration tests (mb_1a_amqp.rs)
+   - Deferred: Spring AMQP (@RabbitListener, RabbitTemplate), Python pika, Go amqp
 10. MB-2 (Kafka topic detection)
 11. MB-3 (NATS/Redis pub-sub)
 

@@ -266,6 +266,12 @@ pub enum ChannelKind {
     /// CAN bus message (AF_CAN).
     CanMessage,
 
+    // ── MB-1A: AMQP / RabbitMQ ──────────────────────────────────────
+    /// AMQP queue (RabbitMQ, direct amqplib).
+    /// Transport class: message_broker.
+    /// Scope: unknown by default (broker endpoint may be local or remote).
+    AmqpQueue,
+
     // ── Slice 3: Library wrappers (deferred) ──────────────────────
     /// MQTT topic.
     MqttTopic,
@@ -312,6 +318,7 @@ impl ChannelKind {
             ChannelKind::GrpcChannel => "grpc_channel",
             ChannelKind::ProtobufStream => "protobuf_stream",
             ChannelKind::ErpcChannel => "erpc_channel",
+            ChannelKind::AmqpQueue => "amqp_queue",
             ChannelKind::SerialPort => "serial_port",
             ChannelKind::CanMessage => "can_message",
             ChannelKind::MqttTopic => "mqtt_topic",
@@ -361,6 +368,11 @@ impl ChannelKind {
         )
     }
 
+    /// Whether this channel kind is in scope for MB-1A (AMQP / RabbitMQ).
+    pub const fn is_mb_1a(self) -> bool {
+        matches!(self, ChannelKind::AmqpQueue)
+    }
+
     /// Whether this channel kind requires dual projection (boundary + state).
     /// SharedMemory and SharedArrayBuffer both represent shared state.
     pub const fn requires_dual_projection(self) -> bool {
@@ -392,7 +404,8 @@ impl ChannelKind {
             | ChannelKind::ErpcChannel => TransportClass::SchemaRpc,
 
             // Message brokers
-            ChannelKind::MqttTopic
+            ChannelKind::AmqpQueue
+            | ChannelKind::MqttTopic
             | ChannelKind::DbusInterface
             | ChannelKind::ZeromqSocket => TransportClass::MessageBroker,
 
@@ -493,9 +506,10 @@ impl From<ChannelKind> for ProtocolFamily {
             ChannelKind::CanMessage | ChannelKind::I2cDevice | ChannelKind::SpiDevice => {
                 ProtocolFamily::Bus
             }
-            ChannelKind::MqttTopic | ChannelKind::DbusInterface | ChannelKind::ZeromqSocket => {
-                ProtocolFamily::MessageBroker
-            }
+            ChannelKind::AmqpQueue
+            | ChannelKind::MqttTopic
+            | ChannelKind::DbusInterface
+            | ChannelKind::ZeromqSocket => ProtocolFamily::MessageBroker,
             ChannelKind::UsbEndpoint => ProtocolFamily::Usb,
             ChannelKind::BleCharacteristic => ProtocolFamily::Bluetooth,
             ChannelKind::ModbusRegister | ChannelKind::CustomProtocol => ProtocolFamily::Custom,

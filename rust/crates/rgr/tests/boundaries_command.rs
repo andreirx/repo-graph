@@ -1599,3 +1599,547 @@ fn gr2a_fixture_validated_full_indexed_run() {
     println!("  - GR-2A consumer surface emitted (confidence={:.2})", confidence);
     println!("  - Contract association to Greeter service verified");
 }
+
+// ══════════════════════════════════════════════════════════════════
+// 10. BI-1C: SHAREDARRAYBUFFER/WORKER FILTER TESTS
+// ══════════════════════════════════════════════════════════════════
+
+/// Create a minimal repo with TS files containing SharedArrayBuffer/Worker code.
+fn create_test_repo_with_sab(dir: &std::path::Path) {
+    // Main thread: creates SAB and uses Atomics
+    // Note: Worker and postMessage do NOT emit SAB surfaces (Option A decision)
+    let main_ts = dir.join("main.ts");
+    let mut f = File::create(&main_ts).unwrap();
+    writeln!(f, "const sab = new SharedArrayBuffer(1024);").unwrap();
+    writeln!(f, "const view = new Int32Array(sab);").unwrap();
+    writeln!(f, "Atomics.store(view, 0, 0);").unwrap();
+    writeln!(f, "Atomics.notify(view, 0, 1);").unwrap();
+
+    // Worker: consumes SAB with Atomics
+    let worker_ts = dir.join("worker.ts");
+    let mut f = File::create(&worker_ts).unwrap();
+    writeln!(f, "const view = new Int32Array(self.buffer);").unwrap();
+    writeln!(f, "Atomics.wait(view, 0, 0);").unwrap();
+    writeln!(f, "const val = Atomics.load(view, 0);").unwrap();
+    writeln!(f, "Atomics.store(view, 1, val * 2);").unwrap();
+}
+
+/// Build a temp DB by indexing a repo with SharedArrayBuffer code.
+fn build_indexed_db_with_sab() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_test_repo_with_sab(&repo_path);
+
+    let db_path = dir.path().join("sab_test.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "sab-test-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 2, "expected 2 TS fixture files");
+
+    (dir, db_path, repo_path)
+}
+
+#[test]
+fn boundaries_list_filter_kind_shared_array_buffer_works() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_sab();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "sab-test-repo",
+            "--kind",
+            "shared_array_buffer",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected in envelope
+    assert_eq!(result["filter_kind"], "shared_array_buffer");
+
+    // Should find SharedArrayBuffer surfaces
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert!(
+        count >= 6,
+        "expected at least 6 shared_array_buffer surfaces; got {}",
+        count
+    );
+
+    // All results should be shared_array_buffer
+    for item in result["results"].as_array().unwrap() {
+        assert_eq!(
+            item["channelKind"], "shared_array_buffer",
+            "all filtered results should be shared_array_buffer"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_filter_kind_sab_alias_works() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_sab();
+
+    // "sab" is the alias for "shared_array_buffer"
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "sab-test-repo",
+            "--kind",
+            "sab",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected (alias maps to shared_array_buffer)
+    assert_eq!(result["filter_kind"], "shared_array_buffer");
+
+    // Same count as shared_array_buffer
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert!(count >= 6, "sab alias should yield SharedArrayBuffer results");
+}
+
+#[test]
+fn boundaries_list_filter_family_shared_memory_includes_sab() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_sab();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "sab-test-repo",
+            "--family",
+            "shared_memory",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected in envelope
+    assert_eq!(result["filter_family"], "shared_memory");
+
+    // Should find surfaces (SAB maps to shared_memory family)
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert!(count >= 6, "expected SharedArrayBuffer surfaces in shared_memory family");
+
+    // All results should have protocolFamily=shared_memory
+    for item in result["results"].as_array().unwrap() {
+        assert_eq!(
+            item["protocolFamily"], "shared_memory",
+            "all filtered results should have protocolFamily=shared_memory"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_sab_has_intra_process_scope() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_sab();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "sab-test-repo",
+            "--kind",
+            "shared_array_buffer",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let surfaces = result["results"].as_array().unwrap();
+
+    // All SharedArrayBuffer surfaces should have boundaryScope=intra_process
+    // (same OS process, different V8 isolates)
+    for s in surfaces {
+        assert_eq!(
+            s["boundaryScope"], "intra_process",
+            "SharedArrayBuffer surfaces should have intra_process scope, got: {:?}",
+            s
+        );
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 11. MB-1A: AMQP / RABBITMQ FILTER TESTS
+// ══════════════════════════════════════════════════════════════════
+
+/// Create a minimal repo with TS files containing amqplib code.
+fn create_test_repo_with_amqp(dir: &std::path::Path) {
+    // Producer: assertQueue + sendToQueue
+    let producer_ts = dir.join("producer.ts");
+    let mut f = File::create(&producer_ts).unwrap();
+    writeln!(f, "import amqp from 'amqplib';").unwrap();
+    writeln!(f, "async function main() {{").unwrap();
+    writeln!(f, "    const conn = await amqp.connect('amqp://localhost');").unwrap();
+    writeln!(f, "    const channel = await conn.createChannel();").unwrap();
+    writeln!(f, "    await channel.assertQueue('hello', {{ durable: true }});").unwrap();
+    writeln!(f, "    channel.sendToQueue('hello', Buffer.from('msg'));").unwrap();
+    writeln!(f, "}}").unwrap();
+
+    // Consumer: assertQueue + consume
+    let consumer_ts = dir.join("consumer.ts");
+    let mut f = File::create(&consumer_ts).unwrap();
+    writeln!(f, "import amqp from 'amqplib';").unwrap();
+    writeln!(f, "async function main() {{").unwrap();
+    writeln!(f, "    const conn = await amqp.connect('amqp://localhost');").unwrap();
+    writeln!(f, "    const channel = await conn.createChannel();").unwrap();
+    writeln!(f, "    await channel.assertQueue('hello', {{ durable: true }});").unwrap();
+    writeln!(f, "    channel.consume('hello', (msg) => console.log(msg));").unwrap();
+    writeln!(f, "}}").unwrap();
+}
+
+/// Build a temp DB by indexing a repo with AMQP code.
+fn build_indexed_db_with_amqp() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_test_repo_with_amqp(&repo_path);
+
+    let db_path = dir.path().join("amqp_test.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "amqp-test-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 2, "expected 2 TS fixture files");
+
+    (dir, db_path, repo_path)
+}
+
+#[test]
+fn boundaries_list_filter_kind_amqp_queue_works() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_amqp();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "amqp-test-repo",
+            "--kind",
+            "amqp_queue",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected in envelope
+    assert_eq!(result["filter_kind"], "amqp_queue");
+
+    // Should find AMQP surfaces:
+    // producer.ts: assertQueue + sendToQueue = 2
+    // consumer.ts: assertQueue + consume = 2
+    // Total: 4 surfaces
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(
+        count, 4,
+        "expected 4 amqp_queue surfaces (2 per file); got {}",
+        count
+    );
+
+    // All results should be amqp_queue
+    for item in result["results"].as_array().unwrap() {
+        assert_eq!(
+            item["channelKind"], "amqp_queue",
+            "all filtered results should be amqp_queue"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_filter_kind_amqp_alias_works() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_amqp();
+
+    // "amqp" is the alias for "amqp_queue"
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "amqp-test-repo",
+            "--kind",
+            "amqp",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected (alias maps to amqp_queue)
+    assert_eq!(result["filter_kind"], "amqp_queue");
+
+    // Same count as amqp_queue
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(count, 4, "amqp alias should yield same results as amqp_queue");
+}
+
+#[test]
+fn boundaries_list_filter_kind_rabbitmq_alias_works() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_amqp();
+
+    // "rabbitmq" is the alias for "amqp_queue"
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "amqp-test-repo",
+            "--kind",
+            "rabbitmq",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected (alias maps to amqp_queue)
+    assert_eq!(result["filter_kind"], "amqp_queue");
+
+    // Same count as amqp_queue
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(count, 4, "rabbitmq alias should yield same results as amqp_queue");
+}
+
+#[test]
+fn boundaries_list_filter_family_message_broker_includes_amqp() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_amqp();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "amqp-test-repo",
+            "--family",
+            "message_broker",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected in envelope
+    assert_eq!(result["filter_family"], "message_broker");
+
+    // Should find AMQP surfaces (amqp_queue maps to message_broker family)
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(count, 4, "expected 4 surfaces in message_broker family");
+
+    // All results should have protocolFamily=message_broker
+    for item in result["results"].as_array().unwrap() {
+        assert_eq!(
+            item["protocolFamily"], "message_broker",
+            "all filtered results should have protocolFamily=message_broker"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_amqp_provider_consumer_directions() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_amqp();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "amqp-test-repo",
+            "--kind",
+            "amqp_queue",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let surfaces = result["results"].as_array().unwrap();
+
+    // Count by direction
+    let providers: Vec<_> = surfaces
+        .iter()
+        .filter(|s| s["direction"].as_str() == Some("provider"))
+        .collect();
+    let consumers: Vec<_> = surfaces
+        .iter()
+        .filter(|s| s["direction"].as_str() == Some("consumer"))
+        .collect();
+    let bidirectional: Vec<_> = surfaces
+        .iter()
+        .filter(|s| s["direction"].as_str() == Some("bidirectional"))
+        .collect();
+
+    // Expected:
+    // - 1 provider: sendToQueue (producer.ts)
+    // - 1 consumer: consume (consumer.ts)
+    // - 2 bidirectional: assertQueue (producer.ts + consumer.ts)
+    assert_eq!(
+        providers.len(),
+        1,
+        "expected 1 provider surface (sendToQueue)"
+    );
+    assert_eq!(
+        consumers.len(),
+        1,
+        "expected 1 consumer surface (consume)"
+    );
+    assert_eq!(
+        bidirectional.len(),
+        2,
+        "expected 2 bidirectional surfaces (assertQueue)"
+    );
+}
+
+#[test]
+fn boundaries_list_amqp_no_detection_without_import() {
+    // Create a repo with AMQP-like method names but NO amqplib import
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+
+    // File with publish/consume/assertQueue but NO amqplib import
+    let fake_ts = repo_path.join("fake_broker.ts");
+    let mut f = File::create(&fake_ts).unwrap();
+    writeln!(f, "// No amqplib import - these should NOT be detected").unwrap();
+    writeln!(f, "const bus = {{").unwrap();
+    writeln!(f, "    publish: (x: string) => console.log(x),").unwrap();
+    writeln!(f, "    consume: (x: string) => console.log(x),").unwrap();
+    writeln!(f, "    assertQueue: (x: string) => console.log(x),").unwrap();
+    writeln!(f, "}};").unwrap();
+    writeln!(f, "bus.publish('hello');").unwrap();
+    writeln!(f, "bus.consume('world');").unwrap();
+    writeln!(f, "bus.assertQueue('queue');").unwrap();
+
+    let db_path = dir.path().join("fake_amqp.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "fake-amqp-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 1, "expected 1 TS fixture file");
+
+    // Query for AMQP surfaces - should find NONE
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "fake-amqp-repo",
+            "--kind",
+            "amqp_queue",
+        ])
+        .output()
+        .unwrap();
+
+    // Exit code 1 for "no results found"
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "expected exit 1 (no results) for fake AMQP without amqplib import, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Count should be 0 - the import guard prevents false positives
+    assert_eq!(
+        result["count"], 0,
+        "P1 regression: generic .publish/.consume/.assertQueue without amqplib import \
+         should NOT emit AMQP surfaces. Got count: {}",
+        result["count"]
+    );
+}

@@ -406,10 +406,12 @@ fn parse_channel_kind(s: &str) -> Result<ChannelKind, String> {
         "process_signal" | "processsignal" | "signal" => Ok(ChannelKind::ProcessSignal),
         "tcp_socket" | "tcpsocket" | "tcp" => Ok(ChannelKind::TcpSocket),
         "udp_socket" | "udpsocket" | "udp" => Ok(ChannelKind::UdpSocket),
+        "shared_array_buffer" | "sharedarraybuffer" | "sab" | "atomics" => Ok(ChannelKind::SharedArrayBuffer),
+        "amqp_queue" | "amqpqueue" | "amqp" | "rabbitmq" => Ok(ChannelKind::AmqpQueue),
         "serial_port" | "serialport" | "serial" => Ok(ChannelKind::SerialPort),
         "can_message" | "canmessage" | "can" => Ok(ChannelKind::CanMessage),
         other => Err(format!(
-            "unknown channel kind: {} (try: unix_socket, named_pipe, shared_memory, ...)",
+            "unknown channel kind: {} (try: unix_socket, named_pipe, shared_memory, shared_array_buffer, amqp_queue, ...)",
             other
         )),
     }
@@ -417,11 +419,12 @@ fn parse_channel_kind(s: &str) -> Result<ChannelKind, String> {
 
 fn parse_boundary_scope(s: &str) -> Result<BoundaryScope, String> {
     match s.to_lowercase().as_str() {
+        "intra_process" | "intraprocess" | "thread" => Ok(BoundaryScope::IntraProcess),
         "inter_process" | "interprocess" | "ipc" => Ok(BoundaryScope::InterProcess),
         "inter_device" | "interdevice" | "device" => Ok(BoundaryScope::InterDevice),
         "unknown" => Ok(BoundaryScope::Unknown),
         other => Err(format!(
-            "unknown boundary scope: {} (try: inter_process, inter_device, unknown)",
+            "unknown boundary scope: {} (try: intra_process, inter_process, inter_device, unknown)",
             other
         )),
     }

@@ -728,6 +728,7 @@ dependencies = [
  "tempfile",
  "tree-sitter",
  "tree-sitter-c",
+ "tree-sitter-typescript",
  "walkdir",
 ]
 

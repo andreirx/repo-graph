@@ -1,0 +1,27 @@
+// MB-1A fixture: AMQP producer
+// Expected: 2 amqp_queue surfaces (assertQueue, sendToQueue)
+
+import amqp from 'amqplib';
+
+async function main() {
+    const connection = await amqp.connect('amqp://localhost');
+    const channel = await connection.createChannel();
+
+    const queue = 'hello';
+    const msg = 'Hello World!';
+
+    await channel.assertQueue(queue, {
+        durable: true,
+        arguments: { 'x-queue-type': 'quorum' }
+    });
+    channel.sendToQueue(queue, Buffer.from(msg));
+
+    console.log(" [x] Sent %s", msg);
+
+    setTimeout(function() {
+        connection.close();
+        process.exit(0);
+    }, 500);
+}
+
+main();

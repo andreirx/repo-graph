@@ -33,6 +33,9 @@ pub enum Language {
     Rust,
     /// Python source files (future).
     Python,
+    /// TypeScript/JavaScript source files.
+    /// Covers .ts, .tsx, .js, .jsx extensions.
+    TypeScript,
 }
 
 impl Language {
@@ -43,6 +46,7 @@ impl Language {
             Language::Cpp => "cpp",
             Language::Rust => "rust",
             Language::Python => "python",
+            Language::TypeScript => "typescript",
         }
     }
 }

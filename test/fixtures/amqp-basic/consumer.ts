@@ -1,0 +1,26 @@
+// MB-1A fixture: AMQP consumer
+// Expected: 2 amqp_queue surfaces (assertQueue, consume)
+
+import amqp from 'amqplib';
+
+async function main() {
+    const connection = await amqp.connect('amqp://localhost');
+    const channel = await connection.createChannel();
+
+    const queue = 'hello';
+
+    await channel.assertQueue(queue, {
+        durable: true,
+        arguments: { 'x-queue-type': 'quorum' }
+    });
+
+    console.log(" [*] Waiting for messages in %s. To exit press CTRL+C", queue);
+
+    channel.consume(queue, function(msg) {
+        console.log(" [x] Received %s", msg?.content.toString());
+    }, {
+        noAck: true
+    });
+}
+
+main();

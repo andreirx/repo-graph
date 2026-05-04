@@ -42,7 +42,10 @@ use repo_graph_cpp_extractor::CppExtractor;
 use repo_graph_java_extractor::JavaExtractor;
 use repo_graph_python_extractor::PythonExtractor;
 use repo_graph_rust_extractor::RustExtractor;
-use repo_graph_ts_extractor::TsExtractor;
+use repo_graph_ts_extractor::{
+    extract_amqp_boundary_calls, extract_ts_boundary_calls, RawAmqpBoundaryCall,
+    RawTsBoundaryCall, TsExtractor,
+};
 
 use crate::config::RepoConfigContext;
 use crate::scanner::{self, ScannedFile};
@@ -692,6 +695,182 @@ fn convert_mmap_flags(raw: RawMmapFlags) -> MmapFlags {
 	}
 }
 
+/// BI-1C: Extract and persist boundary interaction facts from TS/JS files.
+///
+/// Detects SharedArrayBuffer, Worker, postMessage, and Atomics patterns.
+///
+/// TEMPORARY postpass: Re-parses TS/JS files after extraction to detect
+/// worker boundary calls. Target is extraction-time integration.
+///
+/// Returns the number of surfaces persisted.
+fn persist_ts_boundary_interactions(
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	snapshot_uid: &str,
+	file_inputs: &[FileInput],
+) -> Result<usize, ComposeError> {
+	// Initialize tree-sitter parser for TS/JS.
+	let mut parser = tree_sitter::Parser::new();
+	let ts_language: tree_sitter::Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+	let tsx_language: tree_sitter::Language = tree_sitter_typescript::LANGUAGE_TSX.into();
+
+	// Create emitter context.
+	let context = EmitterContext {
+		snapshot_uid: snapshot_uid.to_string(),
+		repo_uid: repo_uid.to_string(),
+		extractor: "ts-worker:0.1.0".to_string(),
+	};
+	let mut emitter = BoundaryInteractionEmitter::new(context);
+
+	for file in file_inputs {
+		// Boundary interaction scope: TS/JS files only.
+		let is_ts = file.rel_path.ends_with(".ts")
+			|| file.rel_path.ends_with(".tsx")
+			|| file.rel_path.ends_with(".js")
+			|| file.rel_path.ends_with(".jsx");
+		if !is_ts {
+			continue;
+		}
+
+		// Select grammar based on extension.
+		let language = if file.rel_path.ends_with(".tsx") || file.rel_path.ends_with(".jsx") {
+			&tsx_language
+		} else {
+			&ts_language
+		};
+
+		parser
+			.set_language(language)
+			.map_err(|e| ComposeError::ExtractorInit(format!("boundary-interaction TS parser: {}", e)))?;
+
+		// Parse the file.
+		let tree = match parser.parse(&file.content, None) {
+			Some(t) => t,
+			None => continue, // Parse failed, skip.
+		};
+
+		// Extract SharedArrayBuffer/Atomics boundary calls (BI-1C).
+		let raw_calls = extract_ts_boundary_calls(
+			&tree.root_node(),
+			file.content.as_bytes(),
+			&file.rel_path,
+		);
+
+		// Convert to BoundaryCallsite and emit.
+		for raw in raw_calls {
+			let callsite = convert_ts_raw_to_callsite(&raw, &file.rel_path, repo_uid);
+			// try_emit returns:
+			//   Ok(Some(_)) - surface emitted
+			//   Ok(None) - no binding matched
+			//   Err(_) - emission logic error
+			if let Err(e) = emitter.try_emit(&callsite) {
+				return Err(ComposeError::Index(format!(
+					"boundary-interaction emitter failed at {}:{}: {}",
+					file.rel_path, raw.location.line_start, e
+				)));
+			}
+		}
+
+		// Extract AMQP/RabbitMQ boundary calls (MB-1A).
+		let amqp_calls = extract_amqp_boundary_calls(
+			&tree.root_node(),
+			file.content.as_bytes(),
+			&file.rel_path,
+		);
+
+		for raw in amqp_calls {
+			let callsite = convert_amqp_raw_to_callsite(&raw, &file.rel_path, repo_uid);
+			if let Err(e) = emitter.try_emit(&callsite) {
+				return Err(ComposeError::Index(format!(
+					"boundary-interaction emitter failed at {}:{}: {}",
+					file.rel_path, raw.location.line_start, e
+				)));
+			}
+		}
+	}
+
+	// Collect emitted facts.
+	let surfaces: Vec<_> = emitter.surfaces().cloned().collect();
+	let channels: Vec<_> = emitter.channels().cloned().collect();
+
+	if surfaces.is_empty() {
+		return Ok(0);
+	}
+
+	// Persist to storage.
+	let surface_count = storage
+		.insert_boundary_surfaces(&surfaces)
+		.map_err(|e| ComposeError::Index(format!("boundary-interaction storage: {}", e)))?;
+
+	storage
+		.insert_boundary_channels(&channels)
+		.map_err(|e| ComposeError::Index(format!("boundary-interaction storage: {}", e)))?;
+
+	Ok(surface_count)
+}
+
+/// Convert a raw TS boundary call to a BoundaryCallsite for the emitter.
+fn convert_ts_raw_to_callsite(raw: &RawTsBoundaryCall, file_path: &str, repo_uid: &str) -> BoundaryCallsite {
+	// Build enclosing symbol stable key.
+	let enclosing_symbol_key = if raw.enclosing_function.is_empty() {
+		format!("{}:{}:FILE", repo_uid, file_path)
+	} else {
+		format!(
+			"{}:{}#{}:SYMBOL:FUNCTION",
+			repo_uid, file_path, raw.enclosing_function
+		)
+	};
+
+	BoundaryCallsite {
+		language: BiLanguage::TypeScript,
+		function_name: raw.function_name.clone(),
+		location: raw.location.clone(),
+		source_file: file_path.to_string(),
+		enclosing_symbol_key,
+		extracted_argument: raw.extracted_argument.clone(),
+		argument_index: None,
+		raw_argument_text: None,
+		// TS SAB/Worker detection doesn't use socket/mmap semantics
+		socket_family: None,
+		socket_type: None,
+		mmap_flags: None,
+		mknod_mode: None,
+	}
+}
+
+/// Convert a raw AMQP boundary call to a BoundaryCallsite for the emitter.
+fn convert_amqp_raw_to_callsite(raw: &RawAmqpBoundaryCall, file_path: &str, repo_uid: &str) -> BoundaryCallsite {
+	// Build enclosing symbol stable key.
+	let enclosing_symbol_key = if raw.enclosing_function.is_empty() {
+		format!("{}:{}:FILE", repo_uid, file_path)
+	} else {
+		format!(
+			"{}:{}#{}:SYMBOL:FUNCTION",
+			repo_uid, file_path, raw.enclosing_function
+		)
+	};
+
+	// Build extracted argument from queue/exchange/routing-key.
+	// Priority: queue_name > exchange_name (for the main channel identity).
+	let extracted_argument = raw.queue_name.clone().or_else(|| raw.exchange_name.clone());
+
+	BoundaryCallsite {
+		language: BiLanguage::TypeScript,
+		function_name: raw.function_name.clone(),
+		location: raw.location.clone(),
+		source_file: file_path.to_string(),
+		enclosing_symbol_key,
+		extracted_argument,
+		argument_index: Some(0), // First argument is typically queue/exchange
+		raw_argument_text: None,
+		// AMQP doesn't use socket/mmap semantics
+		socket_family: None,
+		socket_type: None,
+		mmap_flags: None,
+		mknod_mode: None,
+	}
+}
+
 // ── Full index ───────────────────────────────────────────────────
 
 /// Index a repo from disk into an existing StorageConnection.
@@ -780,6 +959,10 @@ pub fn index_into_storage(
 	// BI-1A: Extract and persist boundary interaction facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
 	persist_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
+
+	// BI-1C: Extract and persist boundary interaction facts from TS/JS files.
+	// SharedArrayBuffer, Worker, postMessage, Atomics patterns.
+	persist_ts_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
 	Ok(result)
 }
@@ -885,6 +1068,10 @@ pub fn refresh_into_storage(
 	// BI-1A: Extract and persist boundary interaction facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
 	persist_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
+
+	// BI-1C: Extract and persist boundary interaction facts from TS/JS files.
+	// SharedArrayBuffer, Worker, postMessage, Atomics patterns.
+	persist_ts_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
 	Ok(result)
 }

@@ -629,3 +629,264 @@ interaction_pattern = "fire_and_forget"
 basis = "api_call"
 arg_index = 1
 notes = "Create fd for signal handling (Linux). Arg0 is fd, arg1 is sigset. Scope unknown: receives both inter-process and intra-process signals."
+
+# ════════════════════════════════════════════════════════════════════════
+# SHAREDARRAYBUFFER / ATOMICS BOUNDARIES (BI-1C)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: SharedArrayBuffer creation and Atomics.* synchronization calls.
+#
+# Scope: intra_process (same OS process, different V8 isolates/execution contexts)
+# Transport: raw_ipc (SharedArrayBuffer is fundamentally shared memory)
+# Interaction: shared_state (concurrent access to same memory region)
+#
+# NOTE: Worker and postMessage are NOT included here. They indicate worker
+# communication but are not provably SAB-related without dataflow analysis.
+# A future BI-1E (Web Worker) slice may cover general worker patterns.
+#
+# NOTE: Requires dual projection per design doc section 4.4 (boundary + state)
+
+# ── SharedArrayBuffer creation ────────────────────────────────────────
+
+[[binding]]
+language = "typescript"
+api_family = "atomics"
+function = "SharedArrayBuffer"
+role = "provider"
+channel_kind = "shared_array_buffer"
+scope_heuristic = "fixed"
+fixed_scope = "intra_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "SharedArrayBuffer allocation. Provider role: creates the shared memory region. DUAL PROJECTION REQUIRED."
+
+# ── Atomics synchronization ───────────────────────────────────────────
+
+[[binding]]
+language = "typescript"
+api_family = "atomics"
+function = "Atomics.wait"
+role = "consumer"
+channel_kind = "shared_array_buffer"
+scope_heuristic = "fixed"
+fixed_scope = "intra_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Atomics.wait - blocking wait for value change. Consumer role: waits for signal from provider."
+
+[[binding]]
+language = "typescript"
+api_family = "atomics"
+function = "Atomics.notify"
+role = "provider"
+channel_kind = "shared_array_buffer"
+scope_heuristic = "fixed"
+fixed_scope = "intra_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Atomics.notify - wake waiting threads. Provider role: signals consumers."
+
+[[binding]]
+language = "typescript"
+api_family = "atomics"
+function = "Atomics.load"
+role = "bidirectional"
+channel_kind = "shared_array_buffer"
+scope_heuristic = "fixed"
+fixed_scope = "intra_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Atomics.load - atomic read. Bidirectional: indicates shared memory access."
+
+[[binding]]
+language = "typescript"
+api_family = "atomics"
+function = "Atomics.store"
+role = "bidirectional"
+channel_kind = "shared_array_buffer"
+scope_heuristic = "fixed"
+fixed_scope = "intra_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Atomics.store - atomic write. Bidirectional: indicates shared memory access."
+
+[[binding]]
+language = "typescript"
+api_family = "atomics"
+function = "Atomics.add"
+role = "bidirectional"
+channel_kind = "shared_array_buffer"
+scope_heuristic = "fixed"
+fixed_scope = "intra_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Atomics.add - atomic add. Bidirectional: indicates shared memory access."
+
+[[binding]]
+language = "typescript"
+api_family = "atomics"
+function = "Atomics.sub"
+role = "bidirectional"
+channel_kind = "shared_array_buffer"
+scope_heuristic = "fixed"
+fixed_scope = "intra_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Atomics.sub - atomic subtract. Bidirectional: indicates shared memory access."
+
+[[binding]]
+language = "typescript"
+api_family = "atomics"
+function = "Atomics.and"
+role = "bidirectional"
+channel_kind = "shared_array_buffer"
+scope_heuristic = "fixed"
+fixed_scope = "intra_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Atomics.and - atomic bitwise AND. Bidirectional: indicates shared memory access."
+
+[[binding]]
+language = "typescript"
+api_family = "atomics"
+function = "Atomics.or"
+role = "bidirectional"
+channel_kind = "shared_array_buffer"
+scope_heuristic = "fixed"
+fixed_scope = "intra_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Atomics.or - atomic bitwise OR. Bidirectional: indicates shared memory access."
+
+[[binding]]
+language = "typescript"
+api_family = "atomics"
+function = "Atomics.xor"
+role = "bidirectional"
+channel_kind = "shared_array_buffer"
+scope_heuristic = "fixed"
+fixed_scope = "intra_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Atomics.xor - atomic bitwise XOR. Bidirectional: indicates shared memory access."
+
+[[binding]]
+language = "typescript"
+api_family = "atomics"
+function = "Atomics.compareExchange"
+role = "bidirectional"
+channel_kind = "shared_array_buffer"
+scope_heuristic = "fixed"
+fixed_scope = "intra_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Atomics.compareExchange - atomic CAS. Bidirectional: indicates shared memory access."
+
+[[binding]]
+language = "typescript"
+api_family = "atomics"
+function = "Atomics.exchange"
+role = "bidirectional"
+channel_kind = "shared_array_buffer"
+scope_heuristic = "fixed"
+fixed_scope = "intra_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Atomics.exchange - atomic swap. Bidirectional: indicates shared memory access."
+
+# ════════════════════════════════════════════════════════════════════════
+# AMQP / RABBITMQ (MB-1A)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: amqplib direct library usage in JavaScript/TypeScript.
+# Patterns: sendToQueue, publish, consume, assertQueue, assertExchange, bindQueue.
+#
+# Scope: unknown by default (broker endpoint may be local or remote).
+# Transport: message_broker.
+# Interaction: fire_and_forget (no direct reply expected on same channel).
+#
+# Contract: docs/slices/mb-1a-rabbitmq-amqp.md
+
+# ── Publisher patterns ────────────────────────────────────────────────
+
+[[binding]]
+language = "typescript"
+api_family = "amqplib"
+function = "sendToQueue"
+role = "provider"
+channel_kind = "amqp_queue"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "channel.sendToQueue(queue, msg) - direct queue publish. Arg0 is queue name."
+
+[[binding]]
+language = "typescript"
+api_family = "amqplib"
+function = "publish"
+role = "provider"
+channel_kind = "amqp_queue"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "channel.publish(exchange, routingKey, msg) - exchange publish. Arg0 is exchange, arg1 is routing key."
+
+# ── Consumer patterns ─────────────────────────────────────────────────
+
+[[binding]]
+language = "typescript"
+api_family = "amqplib"
+function = "consume"
+role = "consumer"
+channel_kind = "amqp_queue"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "channel.consume(queue, handler, options) - consume from queue. Arg0 is queue name."
+
+# ── Declaration patterns (secondary priority) ─────────────────────────
+
+[[binding]]
+language = "typescript"
+api_family = "amqplib"
+function = "assertQueue"
+role = "bidirectional"
+channel_kind = "amqp_queue"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "channel.assertQueue(queue, options) - declare queue. Arg0 is queue name."
+
+[[binding]]
+language = "typescript"
+api_family = "amqplib"
+function = "assertExchange"
+role = "bidirectional"
+channel_kind = "amqp_queue"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "channel.assertExchange(exchange, type, options) - declare exchange. Arg0 is exchange name."
+
+[[binding]]
+language = "typescript"
+api_family = "amqplib"
+function = "bindQueue"
+role = "bidirectional"
+channel_kind = "amqp_queue"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "channel.bindQueue(queue, exchange, routingKey) - bind queue to exchange. Arg0 is queue name."

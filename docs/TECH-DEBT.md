@@ -1750,6 +1750,42 @@ If the extractor cannot prove a field's value, it MUST leave the field unset
 (`None`) and let the emitter decline to emit. No generic argument text
 masquerading as channel identity.
 
+## Boundary Interaction Extraction — MB-1A (RabbitMQ/AMQP)
+
+### Current state
+
+- **amqplib only:** Direct amqplib API usage in TS/JS. Framework wrappers
+  (NestJS @RabbitSubscriber, TypeORM, etc.) not detected.
+- **Import presence guard:** File must have direct `amqplib` import/require to
+  emit any AMQP surfaces. Generic `.publish()/.consume()/.assertQueue()` on
+  non-amqplib objects are NOT detected. This prevents false positives in
+  codebases using generic method names.
+- **No Spring AMQP:** @RabbitListener, RabbitTemplate not detected.
+- **No Python pika:** pika patterns not detected.
+- **No Go amqp:** streadway/amqp and rabbitmq/amqp091-go not detected.
+
+### Known limitations
+
+- **boundaryScope always "unknown":** Broker topology (single-node vs cluster,
+  local vs remote) cannot be inferred from code. Would require config analysis.
+- **interactionPattern always "fire_and_forget":** RPC pattern (correlationId,
+  replyTo) not yet detected. The rpc_client.js and rpc_server.js fixtures use
+  RPC pattern but are not distinguished from simple pub/sub.
+- **Queue/exchange names not extracted as channel identity:** The `assertQueue`
+  and `assertExchange` calls contain queue/exchange names, but these are not
+  yet extracted as channel identity (would enable cross-repo linking).
+- **No fanout/direct/topic exchange type differentiation:** Exchange type is
+  in the assertExchange args but not extracted or surfaced.
+
+### Deferred to MB-1B/1C
+
+- Spring AMQP detection (Java)
+- Python pika detection
+- Go amqp detection
+- Queue/exchange name extraction as channel identity
+- RPC vs pub/sub pattern detection
+- Exchange type surfacing
+
 ## rgistr Policy Hints (2026-04-28)
 
 ### What shipped

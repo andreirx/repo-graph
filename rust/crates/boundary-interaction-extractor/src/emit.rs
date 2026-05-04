@@ -402,6 +402,12 @@ impl BoundaryInteractionEmitter {
             // Anonymous pipes, message queues, process signals — no guards needed
             ChannelKind::AnonymousPipe | ChannelKind::MessageQueue | ChannelKind::ProcessSignal => true,
 
+            // SharedArrayBuffer (BI-1C) — no guards needed, all detection is pattern-based
+            ChannelKind::SharedArrayBuffer => true,
+
+            // AMQP queue (MB-1A) — no guards needed, all detection is pattern-based
+            ChannelKind::AmqpQueue => true,
+
             // Future slice channel kinds — not yet supported, decline
             _ => false,
         }
@@ -659,6 +665,7 @@ fn protocol_for_channel_kind(kind: ChannelKind) -> &'static str {
         ChannelKind::MessageQueue => "mqueue",
         ChannelKind::ProcessSignal => "signal",
         ChannelKind::SharedArrayBuffer => "sab",
+        ChannelKind::AmqpQueue => "amqp",
         ChannelKind::GrpcChannel => "grpc",
         ChannelKind::ProtobufStream => "protobuf",
         ChannelKind::ErpcChannel => "erpc",

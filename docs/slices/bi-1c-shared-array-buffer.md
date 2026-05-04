@@ -1,14 +1,14 @@
-# BI-1C: SharedArrayBuffer and Worker Boundaries
+# BI-1C: SharedArrayBuffer and Atomics Boundaries
 
-Status: PLANNED
+Status: SHIPPED
 Depends: BI-1A (shipped)
 Track: A (Raw Transport)
 
 ## Objective
 
-Detect SharedArrayBuffer usage in JavaScript/TypeScript as a boundary
-interaction mechanism. SAB enables shared-memory concurrency between
-the main thread and Web Workers, requiring synchronization discipline.
+Detect SharedArrayBuffer allocation and Atomics synchronization usage in
+JavaScript/TypeScript as boundary interaction mechanisms. This surfaces
+where shared-memory concurrency exists in a codebase.
 
 ## Problem Context
 
@@ -23,17 +23,26 @@ This is the JS/TS equivalent of POSIX shared memory in native code.
 ## Scope
 
 ### In scope
-- SharedArrayBuffer allocation sites
-- Worker creation with SAB transfer
-- Atomics usage patterns
-- TypedArray views over SAB
-- Main thread vs worker role detection
-- postMessage transfer patterns
+- SharedArrayBuffer allocation sites (`new SharedArrayBuffer(...)`)
+- Atomics usage patterns (`Atomics.wait`, `Atomics.notify`, `Atomics.store`, etc.)
 
-### Out of scope
-- Worker thread creation without SAB (regular message passing)
-- WebAssembly shared memory (future extension)
-- Node.js worker_threads (could extend this slice)
+### Explicitly out of scope (Option A decision)
+- Worker creation (`new Worker(...)`) — generic worker spawning, no SAB correlation
+- postMessage calls (`worker.postMessage(...)`) — generic message passing, no SAB in args proven
+- Worker reception (`onmessage` handler) — would require dataflow to prove SAB received
+- TypedArray views over SAB — tracked via SAB allocation, not view creation
+
+**Why not Worker/postMessage?** Labeling any `new Worker()` or `postMessage()` as
+a SharedArrayBuffer boundary overclaims. Most workers use regular message passing
+without SAB. Proving SAB transfer requires dataflow analysis (tracking which variable
+is passed to postMessage), which is out of scope for breadth-first hints.
+
+A future BI-1E (Web Worker) slice may cover general worker patterns with a separate
+`web_worker` channel kind.
+
+### Also out of scope (future extensions)
+- WebAssembly shared memory
+- Node.js worker_threads
 
 ## Channel Kind
 
@@ -55,41 +64,25 @@ SharedArrayBuffer is fundamentally shared state, not message passing.
 // Main thread allocates
 const sab = new SharedArrayBuffer(1024);
 
-// Typed array view
+// Typed array view (not tracked directly — SAB allocation is the signal)
 const view = new Int32Array(sab);
-```
-
-### Worker Transfer
-
-```typescript
-// Main thread sends to worker
-worker.postMessage({ buffer: sab }, [sab]);
-
-// Or without transfer list (shared, not transferred)
-worker.postMessage({ buffer: sab });
 ```
 
 ### Atomics Usage
 
 ```typescript
 // Synchronization primitives
-Atomics.wait(view, index, value);
-Atomics.notify(view, index, count);
-Atomics.load(view, index);
-Atomics.store(view, index, value);
-Atomics.add(view, index, value);
-Atomics.compareExchange(view, index, expected, replacement);
-```
-
-### Worker Reception
-
-```typescript
-// In worker
-self.onmessage = (e) => {
-  const sab = e.data.buffer;
-  const view = new Int32Array(sab);
-  // Use Atomics for synchronization
-};
+Atomics.wait(view, index, value);      // consumer — waits for signal
+Atomics.notify(view, index, count);    // provider — wakes waiters
+Atomics.load(view, index);             // bidirectional — reads shared state
+Atomics.store(view, index, value);     // bidirectional — writes shared state
+Atomics.add(view, index, value);       // bidirectional
+Atomics.sub(view, index, value);       // bidirectional
+Atomics.and(view, index, value);       // bidirectional
+Atomics.or(view, index, value);        // bidirectional
+Atomics.xor(view, index, value);       // bidirectional
+Atomics.exchange(view, index, value);  // bidirectional
+Atomics.compareExchange(view, index, expected, replacement); // bidirectional
 ```
 
 ## Boundary Model Mapping
@@ -115,18 +108,17 @@ fundamentally different from Unix shared memory between separate processes.
 
 ## Role Detection
 
-**Provider (allocator):**
-- `new SharedArrayBuffer(size)`
-- First `postMessage` sender of a SAB
+**Provider:**
+- `new SharedArrayBuffer(size)` — creates shared memory region
+- `Atomics.notify(view, index, count)` — signals waiting consumers
 
-**Consumer (receiver):**
-- `onmessage` handler receiving SAB
-- Worker accessing SAB without allocating
+**Consumer:**
+- `Atomics.wait(view, index, value)` — blocks until signaled
 
 **Bidirectional:**
-- When both roles coexist in same file/symbol
+- `Atomics.load/store/add/sub/and/or/xor/exchange/compareExchange` — shared state access
 
-## Dual Projection
+## Dual Projection (future)
 
 SharedArrayBuffer creates BOTH:
 1. **Boundary interaction fact** (channel between contexts)
@@ -138,38 +130,31 @@ The state projection should create:
 
 This requires coordination with the state-boundary model.
 
-## Implementation Approach
+## Implementation (shipped)
 
-### Phase 1: Boundary Detection
-- Detect SAB allocation
-- Detect postMessage with SAB
-- Detect onmessage receiving SAB
-- Classify provider/consumer roles
-- Emit `BoundaryInteractionSurface` facts
+### What is detected
+- SAB allocation (`new SharedArrayBuffer(...)`)
+- Atomics synchronization calls
+- Enclosing function context for stable keys
 
-### Phase 2: State Projection
-- Detect TypedArray views over SAB
-- Detect Atomics operations
-- Emit `STATE` nodes with SHARED_BUFFER subtype
-- Emit READS/WRITES edges
+### What is NOT detected (Option A)
+- Worker creation — no SAB correlation
+- postMessage — no SAB in arguments proven
+- TypedArray view creation — tracked via SAB allocation
+- onmessage handlers — would require dataflow
 
-### Phase 3: Synchronization Evidence
-- Detect Atomics.wait/notify patterns
-- Annotate surfaces with synchronization evidence
-- Flag unsynchronized access as potential hazard
+## Binding Table (shipped)
 
-## Binding Table
-
-| Language | Pattern | Detection |
+| Language | Pattern | Direction |
 |----------|---------|-----------|
-| typescript | `new SharedArrayBuffer` | Allocation (provider) |
-| typescript | `postMessage(*, [sab])` | Transfer (provider→consumer) |
-| typescript | `new Worker(*)` | Worker creation context |
-| typescript | `onmessage = *` | Message handler (potential consumer) |
-| typescript | `Atomics.wait` | Synchronization wait |
-| typescript | `Atomics.notify` | Synchronization signal |
-| typescript | `Atomics.load/store/add/...` | Atomic operation |
-| typescript | `new Int32Array(sab)` | View creation |
+| typescript | `new SharedArrayBuffer(...)` | provider |
+| typescript | `Atomics.wait(...)` | consumer |
+| typescript | `Atomics.notify(...)` | provider |
+| typescript | `Atomics.load(...)` | bidirectional |
+| typescript | `Atomics.store(...)` | bidirectional |
+| typescript | `Atomics.add/sub/and/or/xor(...)` | bidirectional |
+| typescript | `Atomics.exchange(...)` | bidirectional |
+| typescript | `Atomics.compareExchange(...)` | bidirectional |
 
 ## Evidence Structure
 
@@ -177,34 +162,31 @@ This requires coordination with the state-boundary model.
 {
   "version": 1,
   "mechanism": "SharedArrayBuffer",
-  "allocation_site": "src/main.ts:42",
-  "buffer_size": 1024,
-  "transfer_targets": ["worker.ts"],
-  "atomics_usage": true,
-  "sync_primitives": ["wait", "notify"],
-  "typed_array_views": ["Int32Array", "Float64Array"]
+  "function_name": "Atomics.wait",
+  "enclosing_function": "processData"
 }
 ```
 
-## Test Matrix
+## Test Matrix (shipped)
 
-1. SAB allocation detection
-2. postMessage transfer detection
-3. Worker onmessage reception detection
-4. Atomics usage detection
-5. TypedArray view detection
-6. Provider/consumer role classification
-7. Dual projection (boundary + state)
-8. Multiple workers sharing same SAB
+1. SAB allocation detection (`new SharedArrayBuffer(...)`)
+2. Atomics.wait/notify/load/store/add/sub/and/or/xor/exchange/compareExchange detection
+3. Provider/consumer/bidirectional role classification
+4. Enclosing function context extraction
+5. Negative tests: Worker/postMessage do NOT emit SAB surfaces
 
-## Validation Repos
+## Validation
 
-- Any repo using SharedArrayBuffer for worker communication
-- Consider creating a dedicated fixture
+- Dedicated fixture: `test/fixtures/shared-array-buffer/`
+  - `main.ts`: SAB allocation + Atomics.store + Atomics.notify
+  - `worker.ts`: Atomics.wait + Atomics.load + Atomics.store
+- 9 unit tests (boundary_detector.rs)
+- 3 integration tests (bi_shared_array_buffer.rs)
+- 4 CLI adapter tests (boundaries_command.rs)
 
-## Node.js Extension (Future)
+## Future Extensions
 
-Node.js `worker_threads` with SharedArrayBuffer:
+### Node.js worker_threads
 
 ```javascript
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
@@ -218,23 +200,29 @@ if (isMainThread) {
 }
 ```
 
-This follows the same pattern and can reuse the same detection logic.
+Same Atomics detection applies; worker_threads-specific patterns could
+be added as additional bindings.
 
-## Deliverables
+### BI-1E: Web Worker slice (deferred)
 
-- SAB allocation detector in TS extractor
-- postMessage/onmessage pattern detection
-- Atomics usage detection
-- Role classification logic
-- Dual projection to boundary + state models
-- CLI filter support (`--kind shared_array_buffer`)
-- 15+ integration tests
+General worker detection with separate `web_worker` channel kind:
+- `new Worker(...)`
+- `postMessage(...)`
+- `onmessage` handlers
 
-## Success Criteria
+This would NOT claim SAB usage — just worker communication presence.
+
+## Deliverables (shipped)
+
+- SAB/Atomics detector in `ts-extractor/src/boundary_detector.rs`
+- 12 binding table entries in `boundary-interaction/bindings.toml`
+- Integration through `repo-index/src/compose.rs`
+- CLI filter support (`--kind shared_array_buffer`, `--kind sab`, `--kind atomics`)
+- Fixture + 16 total tests
+
+## Success Criteria (met)
 
 - SAB allocation sites detected
-- Worker transfer patterns detected
-- Provider/consumer roles correctly classified
-- Atomics usage captured in evidence
-- Dual projection working (boundary + state facts)
-- TypedArray view tracking
+- Atomics synchronization patterns detected
+- Provider/consumer/bidirectional roles correctly classified
+- Worker/postMessage correctly NOT detected (Option A semantic honesty)
