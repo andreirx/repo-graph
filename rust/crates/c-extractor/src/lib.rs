@@ -25,5 +25,6 @@ mod metrics;
 
 pub use boundary_detector::{
     extract_boundary_calls, is_boundary_function, MmapFlags, RawBoundaryCall, SocketFamily,
+    SocketType,
 };
 pub use extractor::CExtractor;

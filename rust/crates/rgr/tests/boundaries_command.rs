@@ -1140,6 +1140,289 @@ fn boundaries_show_includes_gr2a_contract_association() {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// 9. BI-1D: PROCESS SIGNAL FILTER TESTS
+// ══════════════════════════════════════════════════════════════════
+
+/// Create a minimal repo with C files containing signal sending and handling code.
+fn create_test_repo_with_signals(dir: &std::path::Path) {
+    // Signal sender: kill() and raise()
+    let sender = dir.join("signal_sender.c");
+    let mut f = File::create(&sender).unwrap();
+    writeln!(f, "#include <signal.h>").unwrap();
+    writeln!(f, "#include <sys/types.h>").unwrap();
+    writeln!(f, "void send_shutdown(pid_t child) {{").unwrap();
+    writeln!(f, "    kill(child, SIGTERM);").unwrap();
+    writeln!(f, "}}").unwrap();
+    writeln!(f, "void self_signal(void) {{").unwrap();
+    writeln!(f, "    raise(SIGUSR1);").unwrap();
+    writeln!(f, "}}").unwrap();
+
+    // Signal handler: signal() and sigaction()
+    let handler = dir.join("signal_handler.c");
+    let mut f = File::create(&handler).unwrap();
+    writeln!(f, "#include <signal.h>").unwrap();
+    writeln!(f, "void term_handler(int sig) {{ }}").unwrap();
+    writeln!(f, "void int_handler(int sig) {{ }}").unwrap();
+    writeln!(f, "void setup(void) {{").unwrap();
+    writeln!(f, "    signal(SIGTERM, term_handler);").unwrap();
+    writeln!(f, "    struct sigaction act;").unwrap();
+    writeln!(f, "    sigaction(SIGINT, &act, NULL);").unwrap();
+    writeln!(f, "}}").unwrap();
+}
+
+/// Build a temp DB by indexing a repo with signal-related C code.
+fn build_indexed_db_with_signals() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_test_repo_with_signals(&repo_path);
+
+    let db_path = dir.path().join("signal_test.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "signal-test-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 2, "expected 2 C fixture files");
+
+    (dir, db_path, repo_path)
+}
+
+#[test]
+fn boundaries_list_filter_kind_process_signal_works() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_signals();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "signal-test-repo",
+            "--kind",
+            "process_signal",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected in envelope
+    assert_eq!(result["filter_kind"], "process_signal");
+
+    // Should find 4 signal surfaces (2 sender + 2 handler)
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(
+        count, 4,
+        "expected 4 process_signal surfaces (kill, raise, signal, sigaction)"
+    );
+
+    // All results should be process_signal
+    for item in result["results"].as_array().unwrap() {
+        assert_eq!(
+            item["channelKind"], "process_signal",
+            "all filtered results should be process_signal"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_filter_kind_signal_alias_works() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_signals();
+
+    // "signal" is the alias for "process_signal"
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "signal-test-repo",
+            "--kind",
+            "signal",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected (alias maps to process_signal)
+    assert_eq!(result["filter_kind"], "process_signal");
+
+    // Same count as process_signal
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(count, 4, "signal alias should yield same results as process_signal");
+}
+
+#[test]
+fn boundaries_list_filter_family_signal_works() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_signals();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "signal-test-repo",
+            "--family",
+            "signal",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected in envelope
+    assert_eq!(result["filter_family"], "signal");
+
+    // Should find 4 signal surfaces
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(count, 4, "expected 4 surfaces in signal family");
+
+    // All results should have protocolFamily=signal
+    for item in result["results"].as_array().unwrap() {
+        assert_eq!(
+            item["protocolFamily"], "signal",
+            "all filtered results should have protocolFamily=signal"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_signal_provider_consumer_directions() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_signals();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "signal-test-repo",
+            "--kind",
+            "process_signal",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let surfaces = result["results"].as_array().unwrap();
+
+    // Count provider vs consumer
+    let providers: Vec<_> = surfaces
+        .iter()
+        .filter(|s| s["direction"].as_str() == Some("provider"))
+        .collect();
+    let consumers: Vec<_> = surfaces
+        .iter()
+        .filter(|s| s["direction"].as_str() == Some("consumer"))
+        .collect();
+
+    // 2 providers: kill(), raise()
+    assert_eq!(
+        providers.len(),
+        2,
+        "expected 2 provider surfaces (kill, raise)"
+    );
+
+    // 2 consumers: signal(), sigaction()
+    assert_eq!(
+        consumers.len(),
+        2,
+        "expected 2 consumer surfaces (signal, sigaction)"
+    );
+
+    // Provider sources should be signal_sender.c
+    for p in &providers {
+        let src = p["sourceFile"].as_str().unwrap_or("");
+        assert!(
+            src.contains("signal_sender.c"),
+            "provider should be from signal_sender.c, got: {}",
+            src
+        );
+    }
+
+    // Consumer sources should be signal_handler.c
+    for c in &consumers {
+        let src = c["sourceFile"].as_str().unwrap_or("");
+        assert!(
+            src.contains("signal_handler.c"),
+            "consumer should be from signal_handler.c, got: {}",
+            src
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_signal_consumer_has_unknown_scope() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_signals();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "signal-test-repo",
+            "--kind",
+            "process_signal",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let surfaces = result["results"].as_array().unwrap();
+
+    // Consumer surfaces (signal, sigaction) should have boundaryScope=unknown
+    // because they can receive signals from both kill (inter_process) and raise (intra_process)
+    let consumers: Vec<_> = surfaces
+        .iter()
+        .filter(|s| s["direction"].as_str() == Some("consumer"))
+        .collect();
+
+    for c in &consumers {
+        assert_eq!(
+            c["boundaryScope"], "unknown",
+            "consumer signal surfaces should have boundaryScope=unknown (P1 fix), got: {:?}",
+            c
+        );
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════
 // GR-2A FIXTURE VALIDATION: Real indexed fixture run
 // ══════════════════════════════════════════════════════════════════
 

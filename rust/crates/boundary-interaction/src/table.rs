@@ -257,7 +257,7 @@ impl BindingTable {
     pub fn load_str(source: &str) -> Result<Self, TableError> {
         let raw: RawBindingTable = toml::from_str(source)?;
         let mut entries = Vec::with_capacity(raw.binding.len());
-        let mut seen: HashSet<(Language, String)> = HashSet::new();
+        let mut seen: HashSet<(Language, String, ChannelKind)> = HashSet::new();
 
         for (index, raw_entry) in raw.binding.into_iter().enumerate() {
             // Validate non-empty fields
@@ -291,12 +291,18 @@ impl BindingTable {
                 }
             }
 
-            // Check for duplicates
-            let dedup_key = (raw_entry.language, raw_entry.function.clone());
+            // Check for duplicates: (language, function, channel_kind) must be unique.
+            // This allows multiple bindings for the same function with different channel_kinds
+            // (e.g., socket → unix_socket, socket → tcp_socket, socket → udp_socket).
+            let dedup_key = (raw_entry.language, raw_entry.function.clone(), raw_entry.channel_kind);
             if !seen.insert(dedup_key.clone()) {
                 let first = entries
                     .iter()
-                    .position(|e: &BindingEntry| e.language == raw_entry.language && e.function == raw_entry.function)
+                    .position(|e: &BindingEntry| {
+                        e.language == raw_entry.language
+                            && e.function == raw_entry.function
+                            && e.channel_kind == raw_entry.channel_kind
+                    })
                     .expect("seen implies entry exists");
                 return Err(TableError::Duplicate {
                     language: raw_entry.language,
@@ -348,11 +354,18 @@ impl BindingTable {
         self.entries.is_empty()
     }
 
-    /// Find entries matching a function name for a given language.
-    pub fn find_by_function(&self, language: Language, function: &str) -> Option<&BindingEntry> {
+    /// Find all entries matching a function name for a given language.
+    ///
+    /// Returns all candidate bindings in TOML declaration order. Multiple
+    /// bindings can exist for the same function when they differ by channel_kind
+    /// (e.g., `socket` → `unix_socket`, `socket` → `tcp_socket`).
+    ///
+    /// The caller must use context-based guards to select the appropriate binding.
+    pub fn find_by_function(&self, language: Language, function: &str) -> Vec<&BindingEntry> {
         self.entries
             .iter()
-            .find(|e| e.language == language && e.function == function)
+            .filter(|e| e.language == language && e.function == function)
+            .collect()
     }
 
     /// Find all entries for an API family.
@@ -422,6 +435,7 @@ basis = "api_call"
 
     #[test]
     fn duplicate_detection() {
+        // Duplicates are now detected by (language, function, channel_kind)
         let toml = r#"
 [[binding]]
 language = "c"
@@ -446,5 +460,53 @@ basis = "api_call"
 
         let result = BindingTable::load_str(toml);
         assert!(matches!(result, Err(TableError::Duplicate { .. })));
+    }
+
+    #[test]
+    fn multi_binding_same_function_different_channel_kinds() {
+        // Same function with different channel_kinds is allowed
+        let toml = r#"
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "socket"
+role = "setup"
+channel_kind = "unix_socket"
+scope_heuristic = "arg_family"
+interaction_pattern = "stream"
+basis = "api_call"
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "socket"
+role = "setup"
+channel_kind = "tcp_socket"
+scope_heuristic = "arg_family"
+interaction_pattern = "stream"
+basis = "api_call"
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "socket"
+role = "setup"
+channel_kind = "udp_socket"
+scope_heuristic = "arg_family"
+interaction_pattern = "datagram"
+basis = "api_call"
+"#;
+
+        let table = BindingTable::load_str(toml).expect("should parse");
+        assert_eq!(table.len(), 3);
+
+        // find_by_function returns all candidates
+        let candidates = table.find_by_function(Language::C, "socket");
+        assert_eq!(candidates.len(), 3);
+
+        // Order is preserved (TOML declaration order)
+        assert_eq!(candidates[0].channel_kind, ChannelKind::UnixSocket);
+        assert_eq!(candidates[1].channel_kind, ChannelKind::TcpSocket);
+        assert_eq!(candidates[2].channel_kind, ChannelKind::UdpSocket);
     }
 }

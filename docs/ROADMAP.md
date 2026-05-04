@@ -61,6 +61,12 @@ for what is actually operational.
   Local IPC slice (BI-1A) shipped: Unix sockets, named/anonymous pipes, shared memory,
   message queues. C extractor + `rmap boundaries` CLI surface. Validated on swupdate
   (14 surfaces across 12 files).
+  TCP/UDP socket presence hints (BI-1B partial): multi-binding table, socket_type
+  extraction (SOCK_STREAM, SOCK_DGRAM), guard predicates for AF_INET/AF_INET6.
+  Current limitation: only socket() calls emit surfaces (direction = bidirectional).
+  Later ops (bind, listen, connect, send, recv, sendto, recvfrom) lack family/type
+  context propagation, so provider/consumer roles are not yet surfaced. CLI supports
+  `--kind tcp` and `--kind udp` filters.
 - **Spring framework detectors:** container-managed bean liveness via `@Component`, `@Service`,
   `@Repository`, `@Configuration`, `@RestController`, `@Controller`, `@Bean`. Suppresses 93
   false dead-code reports on glamCRM. Also fixes Lambda entrypoint suppression in `findDeadNodes`.
@@ -373,8 +379,10 @@ for what is actually operational.
 - Maturity: MATURE (22 CLI tests, read-side port trait, explicit-degradation on
   unknown enum values, deterministic ordering).
 - Design doc: `docs/design/boundary-interaction-ipc-device.md`.
+- BI-1B (TCP/UDP sockets): Partial. Detects socket() with AF_INET/AF_INET6 +
+  SOCK_STREAM (TCP) or SOCK_DGRAM (UDP). Direction is bidirectional (setup only).
+  Provider/consumer roles require fd→family/type tracking not yet implemented.
 - Explicit exclusions (deferred to later slices):
-  - TCP/UDP sockets (Slice 1B — requires scope heuristics)
   - Serial/CAN (Slice 2 — inter_device scope)
   - MQTT/ZeroMQ/D-Bus (Slice 3 — library wrappers)
   - I2C/SPI/USB (Slice 4 — low-level device protocols)
@@ -1187,9 +1195,9 @@ Design doc: `docs/design/policy-facts-support-module.md`.
 Two-track architecture for boundary detection over a unified model:
 
 **Track A: Raw Transport**
-- BI-1B: TCP/UDP sockets (scope heuristics, endpoint extraction)
+- BI-1B: TCP/UDP sockets — PARTIAL (socket() presence only, role detection pending)
 - BI-1C: SharedArrayBuffer (JS/TS worker boundaries)
-- BI-1D: Process signals (POSIX signal send/handle)
+- BI-1D: Process signals (POSIX signal send/handle) — SHIPPED (C API, direction, signal names)
 
 **Track B: Schema-Backed RPC** — ORIENTATION-SUFFICIENT
 - CS-1: Protobuf schema extraction (.proto parser) — COMPLETE
@@ -1197,9 +1205,11 @@ Two-track architecture for boundary detection over a unified model:
 - GR-1A: gRPC server implementation hints (ImplBase inheritance) — FIXTURE-VALIDATED
 - GR-1B: gRPC server registration proof (addService, bindService) — COMPLETE
 - GR-2A: gRPC client stub hints (newBlockingStub, newFutureStub, newStub) — FIXTURE-VALIDATED
+- GR-3A: gRPC contract-based linking — IMPLEMENTED (CLI pending)
 - GR-1C: gRPC server endpoint evidence (bind address, port) — DEFERRED
 - GR-2B: gRPC client endpoint evidence (channel host, port) — DEFERRED
-- GR-3: gRPC provider/consumer linking — DEFERRED (GR-3A implemented but unwired)
+- GR-3B: gRPC endpoint-aligned linking — DEFERRED
+- GR-3C: gRPC method-level linking — DEFERRED
 - ER-1: eRPC IDL extraction (future)
 
 **Message Broker Track (after A+B):**
@@ -1246,29 +1256,55 @@ Two-track architecture for boundary detection over a unified model:
    - **Same substrate assumption as GR-1A** (requires generated stubs)
 **── gRPC Track: ORIENTATION-SUFFICIENT ──**
 
-The Java gRPC track has reached orientation sufficiency:
-- Schema extraction (CS-1)
-- Generated-code provenance (CS-2A)
-- Provider hints (GR-1A)
-- Registration strengthening (GR-1B)
-- Consumer hints (GR-2A)
+The Java gRPC track has reached orientation sufficiency. Implemented slices:
+- CS-1 (schema extraction)
+- CS-2A (generated-code provenance)
+- GR-1A (server hints)
+- GR-1B (registration strengthening)
+- GR-2A (client hints)
+- GR-3A (contract-based linking)
 
 This is sufficient as an orientation substrate. An agent can:
 - Identify gRPC servers and clients
 - See which proto services they reference
+- See which providers and consumers share contracts
 - Navigate to the relevant code
 
-**Deferred depth slices** (return only if real-repo navigation proves insufficient):
-- GR-1C (server endpoint evidence) — deferred
-- GR-2B (client endpoint evidence) — deferred
-- GR-3A (contract-based linking) — implemented but CLI/fixture pending, deferred
-- GR-3B (endpoint-aligned linking) — deferred
-- GR-3C (method-level linking) — deferred
+**Deferred depth slices** (endpoint/topology refinement — return only if real-repo navigation proves insufficient):
+- GR-1C (server endpoint evidence)
+- GR-2B (client endpoint evidence)
+- GR-3B (endpoint-aligned linking)
+- GR-3C (method-level linking)
 
 **── Breadth-First: Next Mechanism Families ──**
 
-6. BI-1B (TCP/UDP sockets) — NEXT
-7. BI-1D (Process signals)
+6. BI-1B (TCP/UDP sockets) — PARTIAL
+   - Multi-binding table architecture: `(language, function, channel_kind)` uniqueness
+   - Binding candidates evaluated in TOML declaration order (Unix sockets first)
+   - Socket type extraction: SOCK_STREAM, SOCK_DGRAM, SOCK_RAW, SOCK_SEQPACKET
+   - Guard predicates: AF_INET/AF_INET6 + SOCK_STREAM → tcp_socket, SOCK_DGRAM → udp_socket
+   - Disambiguation: bind/connect refuse when socket_type unavailable (no TCP-by-precedence)
+   - `InteractionPattern::Datagram` added for UDP semantics
+   - Files: `boundary-interaction/src/types.rs`, `boundary-interaction/bindings.toml`,
+     `boundary-interaction/src/table.rs`, `boundary-interaction-extractor/src/emit.rs`,
+     `c-extractor/src/boundary_detector.rs`, `repo-index/src/compose.rs`,
+     `storage/src/boundary_interaction_read_impl.rs`
+   - Tests: 7 socket_type extraction tests, 10 emitter guard tests (incl. disambiguation)
+   - **Current output:** socket() presence only (direction = bidirectional)
+   - **Limitation:** bind/listen/connect/send/recv/sendto/recvfrom lack family/type
+     context propagation — provider/consumer roles not surfaced
+   - **Pending:** fd→family/type tracking to propagate context to later socket ops
+   - CLI: `rmap boundaries list --kind tcp`, `rmap boundaries list --kind udp`
+7. BI-1D (Process signals) — SHIPPED
+   - C signal API detection: kill, killpg, raise, sigqueue, pthread_kill (senders)
+   - C signal handler detection: signal, sigaction, sigwait, sigwaitinfo, sigtimedwait, signalfd
+   - Direction: provider for senders, consumer for handlers
+   - Signal name extraction as channel identity (SIGTERM, SIGUSR1, etc.)
+   - Scope: inter_process (kill), intra_process (raise)
+   - Files: `boundary-interaction/src/types.rs`, `boundary-interaction/bindings.toml`,
+     `c-extractor/src/boundary_detector.rs`, `rgr/src/commands/boundaries.rs`
+   - Tests: 8 signal extraction tests, 3 integration tests
+   - CLI: `rmap boundaries list --kind signal`, `rmap boundaries list --family signal`
 8. BI-1C (SharedArrayBuffer / worker boundaries)
 9. MB-1 (RabbitMQ/AMQP basic detection)
 10. MB-2 (Kafka topic detection)

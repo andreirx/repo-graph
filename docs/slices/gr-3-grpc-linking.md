@@ -1,13 +1,14 @@
 # GR-3: gRPC Provider/Consumer Linking
 
-Status: DEFERRED (GR-3A implemented but CLI/fixture pending — depth work, not breadth priority)
+Status: GR-3A IMPLEMENTED (CLI pending), GR-3B/GR-3C DEFERRED
 Depends: GR-1A (Server Hints), GR-2A (Client Hints), CS-2A (Generated Code Mapping)
 Track: B (Schema-Backed RPC)
 
-**Deferral rationale (2026-05-04):** The gRPC track has reached orientation sufficiency
-with CS-1, CS-2A, GR-1A, GR-1B, GR-2A. Further work (GR-3, GR-2B, GR-1C) is depth work.
+**Track status (2026-05-04):** The gRPC track has reached orientation sufficiency.
+Implemented: CS-1, CS-2A, GR-1A, GR-1B, GR-2A, GR-3A.
+Deferred depth slices: GR-1C, GR-2B, GR-3B, GR-3C.
 Breadth-first product strategy: move to next mechanism family (BI-1B TCP/UDP sockets).
-Return to GR-3 only if real-repo navigation proves the existing hints insufficient.
+Return to deeper gRPC slices only if real-repo navigation proves the existing hints insufficient.
 
 ## Objective
 

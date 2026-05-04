@@ -1,8 +1,49 @@
 # BI-1D: Process Signal Detection
 
-Status: PLANNED
+Status: SHIPPED (Core C Support)
 Depends: BI-1A (foundation), TransportClass foundation
 Track: A (Raw Transport)
+
+## What Shipped
+
+C signal API detection with direction and signal name extraction:
+
+**Signal senders (direction=provider):**
+- `kill(pid, sig)` - sends signal to process
+- `killpg(pgrp, sig)` - sends to process group
+- `raise(sig)` - sends signal to self
+- `sigqueue(pid, sig, val)` - sends with payload
+- `pthread_kill(thread, sig)` - sends to thread
+
+**Signal handlers (direction=consumer):**
+- `signal(sig, handler)` - legacy handler registration
+- `sigaction(sig, act, oldact)` - modern handler registration
+- `sigwait(set, sig)` - blocking wait for signal
+- `sigwaitinfo(set, info)` - blocking wait with info
+- `sigtimedwait(set, info, timeout)` - blocking wait with timeout
+- `signalfd(fd, mask, flags)` - fd-based signal handling (Linux)
+
+**Extracted context:**
+- Signal names (SIGTERM, SIGINT, SIGUSR1, etc.) as channel identity
+- Numeric signal values when used directly (e.g., `kill(pid, 9)`)
+- Scope:
+  - `inter_process` for kill/killpg/sigqueue (known cross-process)
+  - `intra_process` for raise (known self-signal)
+  - `unknown` for handlers (signal/sigaction/sigwait receive both)
+
+**CLI:**
+- `rmap boundaries list --kind signal` - filter by process_signal
+- `rmap boundaries list --family signal` - filter by signal protocol family
+
+**Test Coverage:**
+- 8 c-extractor unit tests (signal detection, name parsing)
+- 3 repo-index integration tests (fixture validation)
+- 5 rgr CLI adapter tests (filter, direction, scope verification)
+
+**Deferred:**
+- Python signal detection (os.kill, signal.signal)
+- Rust signal detection (libc::kill, signal-hook, tokio::signal)
+- Cross-process linking (sender-to-handler correlation)
 
 ## Objective
 

@@ -163,7 +163,12 @@ pub enum InteractionPattern {
     PublishSubscribe,
 
     /// Continuous stream (ordered sequence of messages).
+    /// Used for TCP sockets, Unix domain sockets (SOCK_STREAM), named pipes.
     Stream,
+
+    /// Datagram (unordered, unreliable message boundaries preserved).
+    /// Used for UDP sockets, Unix domain sockets (SOCK_DGRAM).
+    Datagram,
 
     /// Fire and forget (no acknowledgment expected).
     FireAndForget,
@@ -185,6 +190,7 @@ impl InteractionPattern {
             InteractionPattern::RequestResponse => "request_response",
             InteractionPattern::PublishSubscribe => "publish_subscribe",
             InteractionPattern::Stream => "stream",
+            InteractionPattern::Datagram => "datagram",
             InteractionPattern::FireAndForget => "fire_and_forget",
             InteractionPattern::SharedState => "shared_state",
             InteractionPattern::Unknown => "unknown",
@@ -221,6 +227,12 @@ pub enum ChannelKind {
 
     /// POSIX message queue (mq_open).
     MessageQueue,
+
+    // ── Slice 1D: Process signals ─────────────────────────────────────
+    /// POSIX signal (kill, signal, sigaction).
+    /// Scope: inter_process for kill(), intra_process for raise().
+    /// Transport class: raw_ipc.
+    ProcessSignal,
 
     // ── Slice 1B: Generic sockets ───────────────────────────────────
     /// TCP socket (AF_INET/AF_INET6 + SOCK_STREAM).
@@ -293,6 +305,7 @@ impl ChannelKind {
             ChannelKind::AnonymousPipe => "anonymous_pipe",
             ChannelKind::SharedMemory => "shared_memory",
             ChannelKind::MessageQueue => "message_queue",
+            ChannelKind::ProcessSignal => "process_signal",
             ChannelKind::TcpSocket => "tcp_socket",
             ChannelKind::UdpSocket => "udp_socket",
             ChannelKind::SharedArrayBuffer => "shared_array_buffer",
@@ -330,6 +343,11 @@ impl ChannelKind {
         matches!(self, ChannelKind::TcpSocket | ChannelKind::UdpSocket)
     }
 
+    /// Whether this channel kind is in scope for Slice 1D (process signals).
+    pub const fn is_slice_1d(self) -> bool {
+        matches!(self, ChannelKind::ProcessSignal)
+    }
+
     /// Whether this channel kind is in scope for Slice 1C (SharedArrayBuffer).
     pub const fn is_slice_1c(self) -> bool {
         matches!(self, ChannelKind::SharedArrayBuffer)
@@ -365,6 +383,7 @@ impl ChannelKind {
             | ChannelKind::AnonymousPipe
             | ChannelKind::SharedMemory
             | ChannelKind::MessageQueue
+            | ChannelKind::ProcessSignal
             | ChannelKind::SharedArrayBuffer => TransportClass::RawIpc,
 
             // Schema-backed RPC
@@ -410,6 +429,9 @@ pub enum ProtocolFamily {
     /// Message queue.
     MessageQueue,
 
+    /// Process signals (POSIX signals).
+    Signal,
+
     /// Schema-backed RPC (gRPC, protobuf, eRPC).
     Rpc,
 
@@ -440,6 +462,7 @@ impl ProtocolFamily {
             ProtocolFamily::Pipe => "pipe",
             ProtocolFamily::SharedMemory => "shared_memory",
             ProtocolFamily::MessageQueue => "message_queue",
+            ProtocolFamily::Signal => "signal",
             ProtocolFamily::Rpc => "rpc",
             ProtocolFamily::Serial => "serial",
             ProtocolFamily::Bus => "bus",
@@ -462,6 +485,7 @@ impl From<ChannelKind> for ProtocolFamily {
                 ProtocolFamily::SharedMemory
             }
             ChannelKind::MessageQueue => ProtocolFamily::MessageQueue,
+            ChannelKind::ProcessSignal => ProtocolFamily::Signal,
             ChannelKind::GrpcChannel | ChannelKind::ProtobufStream | ChannelKind::ErpcChannel => {
                 ProtocolFamily::Rpc
             }

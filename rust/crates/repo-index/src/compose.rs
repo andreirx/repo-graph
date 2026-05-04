@@ -29,10 +29,11 @@ use repo_graph_policy_facts::{
 use repo_graph_boundary_interaction::table::Language as BiLanguage;
 use repo_graph_boundary_interaction_extractor::emit::{
     BoundaryCallsite, BoundaryInteractionEmitter, EmitterContext, MmapFlags, SocketFamily,
+    SocketType,
 };
 use repo_graph_c_extractor::{
     extract_boundary_calls, MmapFlags as RawMmapFlags, RawBoundaryCall,
-    SocketFamily as RawSocketFamily,
+    SocketFamily as RawSocketFamily, SocketType as RawSocketType,
 };
 use repo_graph_storage::types::InferenceInput;
 use repo_graph_storage::StorageConnection;
@@ -660,6 +661,7 @@ fn convert_raw_to_callsite(raw: &RawBoundaryCall, file_path: &str, repo_uid: &st
 		argument_index: raw.argument_index,
 		raw_argument_text: None,
 		socket_family: raw.socket_family.map(convert_socket_family),
+		socket_type: raw.socket_type.map(convert_socket_type),
 		mmap_flags: raw.mmap_flags.map(convert_mmap_flags),
 		mknod_mode: raw.mknod_mode,
 	}
@@ -671,6 +673,15 @@ fn convert_socket_family(raw: RawSocketFamily) -> SocketFamily {
 		RawSocketFamily::Inet => SocketFamily::Inet,
 		RawSocketFamily::Inet6 => SocketFamily::Inet6,
 		RawSocketFamily::Can => SocketFamily::Can,
+	}
+}
+
+fn convert_socket_type(raw: RawSocketType) -> SocketType {
+	match raw {
+		RawSocketType::Stream => SocketType::Stream,
+		RawSocketType::Datagram => SocketType::Datagram,
+		RawSocketType::Raw => SocketType::Raw,
+		RawSocketType::SeqPacket => SocketType::SeqPacket,
 	}
 }
 

@@ -1,18 +1,25 @@
-# Boundary Interaction Binding Table — Slice 1A: Local IPC
+# Boundary Interaction Binding Table
 #
 # Contract: docs/design/boundary-interaction-ipc-device.md section 7
 #
 # This table defines which C API calls indicate boundary interactions.
 # Extractors use this to recognize IPC patterns and emit boundary facts.
 #
-# Slice 1A scope:
+# Slice 1A scope (local IPC, inter_process):
 #   - Unix domain sockets (AF_UNIX)
 #   - Named pipes / FIFOs
 #   - Anonymous pipes
 #   - POSIX shared memory
 #   - POSIX message queues
 #
-# All mechanisms in this slice have unambiguous inter_process scope.
+# BI-1B scope (raw sockets, unknown/inter_device):
+#   - TCP sockets (AF_INET/AF_INET6 + SOCK_STREAM)
+#   - UDP sockets (AF_INET/AF_INET6 + SOCK_DGRAM)
+#
+# IMPORTANT: Binding order matters. For functions with multiple channel_kind
+# candidates (e.g., socket → unix_socket, tcp_socket, udp_socket), candidates
+# are evaluated in TOML declaration order. List Unix sockets first so AF_UNIX
+# takes precedence.
 
 # ════════════════════════════════════════════════════════════════════════
 # UNIX DOMAIN SOCKETS
@@ -81,6 +88,170 @@ interaction_pattern = "stream"
 basis = "api_call"
 arg_index = 1
 notes = "Connect to remote socket. For Unix sockets, arg1 contains path."
+
+# ════════════════════════════════════════════════════════════════════════
+# TCP SOCKETS (BI-1B)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: socket(AF_INET/AF_INET6, SOCK_STREAM, ...) followed by bind/connect/listen
+# Scope: unknown by default — may be inter_process (loopback) or inter_device (remote)
+# The emitter must analyze endpoint literals for loopback hints (127.0.0.1, ::1)
+#
+# Listed AFTER Unix sockets so AF_UNIX takes precedence in multi-candidate selection.
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "socket"
+role = "setup"
+channel_kind = "tcp_socket"
+scope_heuristic = "arg_family"
+interaction_pattern = "stream"
+basis = "api_call"
+arg_index = 0
+notes = "Socket creation. Requires AF_INET/AF_INET6 + SOCK_STREAM for TCP."
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "bind"
+role = "provider"
+channel_kind = "tcp_socket"
+scope_heuristic = "sockaddr"
+interaction_pattern = "stream"
+basis = "api_call"
+arg_index = 1
+notes = "Bind socket to address. For TCP, arg1 sockaddr_in contains IP:port."
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "listen"
+role = "provider"
+channel_kind = "tcp_socket"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "stream"
+basis = "api_call"
+notes = "Mark socket as passive listener. Confirms provider role."
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "accept"
+role = "provider"
+channel_kind = "tcp_socket"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "stream"
+basis = "api_call"
+notes = "Accept incoming connection. Provider side."
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "connect"
+role = "consumer"
+channel_kind = "tcp_socket"
+scope_heuristic = "sockaddr"
+interaction_pattern = "stream"
+basis = "api_call"
+arg_index = 1
+notes = "Connect to remote socket. For TCP, arg1 contains IP:port."
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "send"
+role = "send"
+channel_kind = "tcp_socket"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "stream"
+basis = "api_call"
+notes = "Send data on connected TCP socket."
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "recv"
+role = "receive"
+channel_kind = "tcp_socket"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "stream"
+basis = "api_call"
+notes = "Receive data on connected TCP socket."
+
+# ════════════════════════════════════════════════════════════════════════
+# UDP SOCKETS (BI-1B)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: socket(AF_INET/AF_INET6, SOCK_DGRAM, ...) followed by bind/sendto/recvfrom
+# Scope: unknown by default — may be inter_process (loopback) or inter_device (remote)
+# UDP typically uses sendto/recvfrom instead of connect.
+#
+# Listed AFTER Unix and TCP sockets.
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "socket"
+role = "setup"
+channel_kind = "udp_socket"
+scope_heuristic = "arg_family"
+interaction_pattern = "datagram"
+basis = "api_call"
+arg_index = 0
+notes = "Socket creation. Requires AF_INET/AF_INET6 + SOCK_DGRAM for UDP."
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "bind"
+role = "provider"
+channel_kind = "udp_socket"
+scope_heuristic = "sockaddr"
+interaction_pattern = "datagram"
+basis = "api_call"
+arg_index = 1
+notes = "Bind socket to address. For UDP, arg1 sockaddr_in contains IP:port."
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "connect"
+role = "consumer"
+channel_kind = "udp_socket"
+scope_heuristic = "sockaddr"
+interaction_pattern = "datagram"
+basis = "api_call"
+arg_index = 1
+notes = "Connect UDP socket (sets default destination)."
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "sendto"
+role = "send"
+channel_kind = "udp_socket"
+scope_heuristic = "sockaddr"
+interaction_pattern = "datagram"
+basis = "api_call"
+arg_index = 4
+notes = "Send datagram to specified address."
+
+[[binding]]
+language = "c"
+api_family = "posix_socket"
+function = "recvfrom"
+role = "receive"
+channel_kind = "udp_socket"
+scope_heuristic = "sockaddr"
+interaction_pattern = "datagram"
+basis = "api_call"
+arg_index = 4
+notes = "Receive datagram and source address."
 
 # ════════════════════════════════════════════════════════════════════════
 # NAMED PIPES (FIFOs)
@@ -300,3 +471,161 @@ interaction_pattern = "fire_and_forget"
 basis = "api_call"
 arg_index = 0
 notes = "Remove message queue. Arg0 is name."
+
+# ════════════════════════════════════════════════════════════════════════
+# PROCESS SIGNALS (BI-1D)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: kill/raise/sigqueue for senders, signal/sigaction for handlers
+# Scope: inter_process for kill (PID != self), intra_process for raise
+# Direction: provider for senders, consumer for handlers
+# Interaction: fire_and_forget (signals are inherently async, no response)
+#
+# Channel identity: signal name/number (SIGTERM, SIGUSR1, etc.)
+
+# ── Signal senders ────────────────────────────────────────────────────
+
+[[binding]]
+language = "c"
+api_family = "posix_signal"
+function = "kill"
+role = "provider"
+channel_kind = "process_signal"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 1
+notes = "Send signal to process. Arg0 is PID, arg1 is signal number."
+
+[[binding]]
+language = "c"
+api_family = "posix_signal"
+function = "killpg"
+role = "provider"
+channel_kind = "process_signal"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 1
+notes = "Send signal to process group. Arg0 is PGRP, arg1 is signal number."
+
+[[binding]]
+language = "c"
+api_family = "posix_signal"
+function = "raise"
+role = "provider"
+channel_kind = "process_signal"
+scope_heuristic = "fixed"
+fixed_scope = "intra_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "Send signal to self. Arg0 is signal number. Intra-process only."
+
+[[binding]]
+language = "c"
+api_family = "posix_signal"
+function = "sigqueue"
+role = "provider"
+channel_kind = "process_signal"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 1
+notes = "Send signal with payload. Arg0 is PID, arg1 is signal number."
+
+[[binding]]
+language = "c"
+api_family = "posix_signal"
+function = "pthread_kill"
+role = "provider"
+channel_kind = "process_signal"
+scope_heuristic = "fixed"
+fixed_scope = "intra_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 1
+notes = "Send signal to thread. Arg0 is thread, arg1 is signal number."
+
+# ── Signal handlers/receivers ─────────────────────────────────────────
+
+[[binding]]
+language = "c"
+api_family = "posix_signal"
+function = "signal"
+role = "consumer"
+channel_kind = "process_signal"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "Register signal handler (legacy). Arg0 is signal number. Scope unknown: handler receives both inter-process (kill) and intra-process (raise) signals."
+
+[[binding]]
+language = "c"
+api_family = "posix_signal"
+function = "sigaction"
+role = "consumer"
+channel_kind = "process_signal"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "Register signal handler (modern). Arg0 is signal number. Scope unknown: handler receives both inter-process and intra-process signals."
+
+[[binding]]
+language = "c"
+api_family = "posix_signal"
+function = "sigwait"
+role = "consumer"
+channel_kind = "process_signal"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "Blocking wait for signal. Arg0 is sigset. Scope unknown: receives both inter-process and intra-process signals."
+
+[[binding]]
+language = "c"
+api_family = "posix_signal"
+function = "sigwaitinfo"
+role = "consumer"
+channel_kind = "process_signal"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "Blocking wait for signal with info. Arg0 is sigset. Scope unknown: receives both inter-process and intra-process signals."
+
+[[binding]]
+language = "c"
+api_family = "posix_signal"
+function = "sigtimedwait"
+role = "consumer"
+channel_kind = "process_signal"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "Blocking wait for signal with timeout. Arg0 is sigset. Scope unknown: receives both inter-process and intra-process signals."
+
+[[binding]]
+language = "c"
+api_family = "posix_signal"
+function = "signalfd"
+role = "consumer"
+channel_kind = "process_signal"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 1
+notes = "Create fd for signal handling (Linux). Arg0 is fd, arg1 is sigset. Scope unknown: receives both inter-process and intra-process signals."

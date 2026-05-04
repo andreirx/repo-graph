@@ -82,8 +82,12 @@ pub struct BoundaryCallsite {
     pub raw_argument_text: Option<String>,
 
     /// Socket address family if known (AF_UNIX, AF_INET, etc.).
-    /// Required for socket/bind/connect/listen/accept to match Slice 1A.
+    /// Required for socket/bind/connect/listen/accept.
     pub socket_family: Option<SocketFamily>,
+
+    /// Socket type if known (SOCK_STREAM, SOCK_DGRAM, etc.).
+    /// Required for TCP vs UDP disambiguation when family is AF_INET/AF_INET6.
+    pub socket_type: Option<SocketType>,
 
     /// mmap flags (MAP_SHARED, MAP_PRIVATE, etc.).
     /// Required for mmap() to emit as shared memory.
@@ -119,6 +123,21 @@ pub enum SocketFamily {
     Inet6,
     /// CAN bus (AF_CAN).
     Can,
+    /// Unknown/other.
+    Unknown,
+}
+
+/// Socket type for TCP vs UDP disambiguation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SocketType {
+    /// Stream socket (SOCK_STREAM) — TCP for AF_INET/AF_INET6.
+    Stream,
+    /// Datagram socket (SOCK_DGRAM) — UDP for AF_INET/AF_INET6.
+    Datagram,
+    /// Raw socket (SOCK_RAW).
+    Raw,
+    /// Sequential packet (SOCK_SEQPACKET).
+    SeqPacket,
     /// Unknown/other.
     Unknown,
 }
@@ -187,25 +206,35 @@ impl BoundaryInteractionEmitter {
     /// Returns `Ok(Some(facts))` if a binding matched and facts were emitted.
     /// Returns `Ok(None)` if:
     /// - No binding matched the function name
-    /// - A binding matched but the callsite context doesn't qualify (e.g.,
-    ///   socket() with AF_INET instead of AF_UNIX for Slice 1A)
+    /// - All candidate bindings were rejected by context guards
+    ///
+    /// When multiple candidate bindings exist for the same function (e.g.,
+    /// `socket` → unix_socket, tcp_socket, udp_socket), candidates are
+    /// evaluated in TOML declaration order. The first candidate that passes
+    /// `binding_matches_context` is used.
     ///
     /// Returns `Err` only on actual emission failures.
     pub fn try_emit(&mut self, callsite: &BoundaryCallsite) -> Result<Option<EmittedFacts>, EmitError> {
-        // Look up binding by function name
-        let binding = match self
+        // Look up all candidate bindings by function name
+        let candidates = self
             .binding_table
-            .find_by_function(callsite.language, &callsite.function_name)
+            .find_by_function(callsite.language, &callsite.function_name);
+
+        if candidates.is_empty() {
+            return Ok(None); // Not a boundary interaction
+        }
+
+        // Evaluate candidates in order, use the first one that passes context guards.
+        // This provides deterministic selection: TOML declaration order is the
+        // precedence order. Unix sockets are listed first, so they take precedence
+        // when socket family is AF_UNIX.
+        let binding = match candidates
+            .into_iter()
+            .find(|b| self.binding_matches_context(b, callsite))
         {
             Some(b) => b,
-            None => return Ok(None), // Not a boundary interaction
+            None => return Ok(None), // No candidate passed context guards
         };
-
-        // Guard predicate: reject binding if callsite context doesn't match.
-        // This prevents emitting Unix socket facts for AF_INET sockets, etc.
-        if !self.binding_matches_context(binding, callsite) {
-            return Ok(None); // Binding doesn't apply to this callsite
-        }
 
         // Determine scope and locality from heuristics
         let (scope, locality) = self.determine_scope_and_locality(binding, callsite);
@@ -246,6 +275,7 @@ impl BoundaryInteractionEmitter {
     /// callsite evidence. It prevents:
     ///
     /// - Emitting `unix_socket` facts for `socket(AF_INET, ...)` calls
+    /// - Emitting `tcp_socket` facts for `socket(AF_UNIX, ...)` calls
     /// - Emitting `shared_memory` facts for `mmap(..., MAP_PRIVATE, ...)` calls
     /// - Emitting `named_pipe` facts for `mknod(..., mode_without_S_IFIFO, ...)` calls
     ///
@@ -256,7 +286,7 @@ impl BoundaryInteractionEmitter {
             ChannelKind::UnixSocket => {
                 match callsite.socket_family {
                     Some(SocketFamily::Unix) => true,
-                    Some(_) => false, // AF_INET, AF_INET6, AF_CAN — not Slice 1A
+                    Some(_) => false, // AF_INET, AF_INET6, AF_CAN — not Unix socket
                     None => {
                         // No family evidence. For socket(), reject.
                         // For bind/connect/listen/accept, the family was determined
@@ -265,10 +295,79 @@ impl BoundaryInteractionEmitter {
                             false // Can't classify without family
                         } else {
                             // For bind/connect, require extracted_argument (the path)
-                            // as weak evidence this is a Unix socket operation
-                            callsite.extracted_argument.is_some()
+                            // as weak evidence this is a Unix socket operation.
+                            // Path-like arguments (starting with / or relative) suggest Unix socket.
+                            callsite.extracted_argument.as_ref().map_or(false, |arg| {
+                                arg.starts_with('/') || arg.starts_with('.')
+                            })
                         }
                     }
+                }
+            }
+
+            // TCP socket bindings require (AF_INET or AF_INET6) AND SOCK_STREAM
+            //
+            // Disambiguation rules for non-socket() calls:
+            // - listen/accept: TCP-only (UDP doesn't use them) — accept without type evidence
+            // - send/recv: TCP-only in binding table — accept without type evidence
+            // - bind/connect: shared by TCP/UDP — require socket_type to disambiguate
+            ChannelKind::TcpSocket => {
+                let family_ok = matches!(
+                    callsite.socket_family,
+                    Some(SocketFamily::Inet) | Some(SocketFamily::Inet6)
+                );
+                let type_ok = matches!(callsite.socket_type, Some(SocketType::Stream));
+
+                match callsite.function_name.as_str() {
+                    "socket" => {
+                        // For socket(), require both family and type evidence
+                        family_ok && type_ok
+                    }
+                    "listen" | "accept" | "send" | "recv" => {
+                        // TCP-only functions: accept with family evidence alone
+                        // listen/accept are semantically TCP (UDP doesn't use them)
+                        // send/recv are TCP-only in binding table
+                        family_ok
+                    }
+                    "bind" | "connect" => {
+                        // Ambiguous functions shared by TCP and UDP.
+                        // Require socket_type to disambiguate. Without it, refuse to
+                        // classify to avoid TCP-by-precedence false positives.
+                        family_ok && type_ok
+                    }
+                    _ => false,
+                }
+            }
+
+            // UDP socket bindings require (AF_INET or AF_INET6) AND SOCK_DGRAM
+            //
+            // Disambiguation rules for non-socket() calls:
+            // - sendto/recvfrom: UDP-only in binding table — accept without type evidence
+            // - bind/connect: shared by TCP/UDP — require socket_type to disambiguate
+            ChannelKind::UdpSocket => {
+                let family_ok = matches!(
+                    callsite.socket_family,
+                    Some(SocketFamily::Inet) | Some(SocketFamily::Inet6)
+                );
+                let type_ok = matches!(callsite.socket_type, Some(SocketType::Datagram));
+
+                match callsite.function_name.as_str() {
+                    "socket" => {
+                        // For socket(), require both family and type evidence
+                        family_ok && type_ok
+                    }
+                    "sendto" | "recvfrom" => {
+                        // UDP-characteristic functions: accept with family evidence alone
+                        // sendto/recvfrom are UDP-only in binding table
+                        family_ok
+                    }
+                    "bind" | "connect" => {
+                        // Ambiguous functions shared by TCP and UDP.
+                        // Require socket_type to disambiguate. Without it, refuse to
+                        // classify to avoid UDP hints for TCP sockets.
+                        family_ok && type_ok
+                    }
+                    _ => false,
                 }
             }
 
@@ -300,13 +399,14 @@ impl BoundaryInteractionEmitter {
                 }
             }
 
-            // Anonymous pipes, message queues — no guards needed
-            ChannelKind::AnonymousPipe | ChannelKind::MessageQueue => true,
+            // Anonymous pipes, message queues, process signals — no guards needed
+            ChannelKind::AnonymousPipe | ChannelKind::MessageQueue | ChannelKind::ProcessSignal => true,
 
             // Future slice channel kinds — not yet supported, decline
             _ => false,
         }
     }
+
 
     /// Determine boundary scope and endpoint locality from binding and callsite.
     fn determine_scope_and_locality(
@@ -557,6 +657,7 @@ fn protocol_for_channel_kind(kind: ChannelKind) -> &'static str {
         ChannelKind::AnonymousPipe => "pipe",
         ChannelKind::SharedMemory => "shm",
         ChannelKind::MessageQueue => "mqueue",
+        ChannelKind::ProcessSignal => "signal",
         ChannelKind::SharedArrayBuffer => "sab",
         ChannelKind::GrpcChannel => "grpc",
         ChannelKind::ProtobufStream => "protobuf",
@@ -604,6 +705,7 @@ mod tests {
             argument_index: Some(1),
             raw_argument_text: Some("&addr".to_string()),
             socket_family: Some(SocketFamily::Unix),
+            socket_type: Some(SocketType::Stream),
             mmap_flags: None,
             mknod_mode: None,
         }
@@ -642,6 +744,7 @@ mod tests {
             argument_index: None,
             raw_argument_text: None,
             socket_family: None,
+            socket_type: None,
             mmap_flags: None,
             mknod_mode: None,
         };
@@ -681,6 +784,7 @@ mod tests {
             argument_index: Some(0),
             raw_argument_text: Some("\"/my_shared_mem\"".to_string()),
             socket_family: None,
+            socket_type: None,
             mmap_flags: None, // shm_open doesn't need mmap_flags
             mknod_mode: None,
         };
@@ -721,6 +825,7 @@ mod tests {
             argument_index: Some(0),
             raw_argument_text: None,
             socket_family: None,
+            socket_type: None,
             mmap_flags: None, // shm_open doesn't need mmap_flags
             mknod_mode: None,
         };
@@ -735,7 +840,8 @@ mod tests {
     // These verify the false-positive rejection logic.
 
     #[test]
-    fn socket_with_af_inet_is_rejected() {
+    fn socket_with_af_inet_no_type_is_rejected() {
+        // AF_INET without socket_type cannot be classified as TCP or UDP
         let mut emitter = BoundaryInteractionEmitter::new(test_context());
         let callsite = BoundaryCallsite {
             language: Language::C,
@@ -751,7 +857,8 @@ mod tests {
             extracted_argument: None,
             argument_index: None,
             raw_argument_text: None,
-            socket_family: Some(SocketFamily::Inet), // AF_INET — not Slice 1A
+            socket_family: Some(SocketFamily::Inet), // AF_INET
+            socket_type: None, // No type evidence — can't classify as TCP or UDP
             mmap_flags: None,
             mknod_mode: None,
         };
@@ -759,7 +866,7 @@ mod tests {
         let result = emitter.try_emit(&callsite).unwrap();
         assert!(
             result.is_none(),
-            "socket(AF_INET) should not emit — not Slice 1A scope"
+            "socket(AF_INET) without SOCK_STREAM/SOCK_DGRAM should not emit"
         );
     }
 
@@ -781,6 +888,7 @@ mod tests {
             argument_index: None,
             raw_argument_text: None,
             socket_family: Some(SocketFamily::Unix), // AF_UNIX — Slice 1A
+            socket_type: Some(SocketType::Stream),
             mmap_flags: None,
             mknod_mode: None,
         };
@@ -811,6 +919,7 @@ mod tests {
             argument_index: None,
             raw_argument_text: None,
             socket_family: None, // Unknown family
+            socket_type: None,
             mmap_flags: None,
             mknod_mode: None,
         };
@@ -840,6 +949,7 @@ mod tests {
             argument_index: None,
             raw_argument_text: None,
             socket_family: None,
+            socket_type: None,
             mmap_flags: Some(MmapFlags::Private), // MAP_PRIVATE — not shared memory
             mknod_mode: None,
         };
@@ -869,6 +979,7 @@ mod tests {
             argument_index: None,
             raw_argument_text: None,
             socket_family: None,
+            socket_type: None,
             mmap_flags: Some(MmapFlags::Shared), // MAP_SHARED — is shared memory
             mknod_mode: None,
         };
@@ -901,6 +1012,7 @@ mod tests {
             argument_index: None,
             raw_argument_text: None,
             socket_family: None,
+            socket_type: None,
             mmap_flags: None, // No flag evidence
             mknod_mode: None,
         };
@@ -930,6 +1042,7 @@ mod tests {
             argument_index: Some(0),
             raw_argument_text: None,
             socket_family: None,
+            socket_type: None,
             mmap_flags: None,
             mknod_mode: Some(0o020666), // S_IFCHR (character device), not S_IFIFO
         };
@@ -959,6 +1072,7 @@ mod tests {
             argument_index: Some(0),
             raw_argument_text: None,
             socket_family: None,
+            socket_type: None,
             mmap_flags: None,
             mknod_mode: Some(S_IFIFO | 0o666), // S_IFIFO — is a FIFO
         };
@@ -989,6 +1103,7 @@ mod tests {
             argument_index: Some(0),
             raw_argument_text: None,
             socket_family: None,
+            socket_type: None,
             mmap_flags: None,
             mknod_mode: None, // mkfifo doesn't need mode guard
         };
@@ -1003,7 +1118,7 @@ mod tests {
 
     #[test]
     fn bind_with_unix_path_but_no_family_emits() {
-        // bind/connect can emit if extracted_argument is present,
+        // bind/connect can emit if extracted_argument looks like a Unix socket path,
         // even without explicit socket_family (weak evidence)
         let mut emitter = BoundaryInteractionEmitter::new(test_context());
         let callsite = BoundaryCallsite {
@@ -1021,6 +1136,7 @@ mod tests {
             argument_index: Some(1),
             raw_argument_text: None,
             socket_family: None, // No explicit family, but we have a path
+            socket_type: None,
             mmap_flags: None,
             mknod_mode: None,
         };
@@ -1050,6 +1166,7 @@ mod tests {
             argument_index: None,
             raw_argument_text: None,
             socket_family: None, // No family evidence
+            socket_type: None,
             mmap_flags: None,
             mknod_mode: None,
         };
@@ -1059,5 +1176,290 @@ mod tests {
             result.is_none(),
             "bind() without family or path evidence should not emit"
         );
+    }
+
+    // ── BI-1B TCP/UDP socket tests ────────────────────────────────────
+
+    #[test]
+    fn socket_with_af_inet_sock_stream_emits_tcp() {
+        let mut emitter = BoundaryInteractionEmitter::new(test_context());
+        let callsite = BoundaryCallsite {
+            language: Language::C,
+            function_name: "socket".to_string(),
+            location: SourceLocation {
+                line_start: 50,
+                line_end: 50,
+                col_start: 5,
+                col_end: 40,
+            },
+            source_file: "src/net.c".to_string(),
+            enclosing_symbol_key: "test-repo:src/net.c#connect_server:SYMBOL:function".to_string(),
+            extracted_argument: None,
+            argument_index: None,
+            raw_argument_text: None,
+            socket_family: Some(SocketFamily::Inet),
+            socket_type: Some(SocketType::Stream), // SOCK_STREAM = TCP
+            mmap_flags: None,
+            mknod_mode: None,
+        };
+
+        let result = emitter.try_emit(&callsite).unwrap();
+        assert!(
+            result.is_some(),
+            "socket(AF_INET, SOCK_STREAM) should emit as tcp_socket"
+        );
+        assert_eq!(result.unwrap().surface.channel_kind, ChannelKind::TcpSocket);
+    }
+
+    #[test]
+    fn socket_with_af_inet_sock_dgram_emits_udp() {
+        let mut emitter = BoundaryInteractionEmitter::new(test_context());
+        let callsite = BoundaryCallsite {
+            language: Language::C,
+            function_name: "socket".to_string(),
+            location: SourceLocation {
+                line_start: 50,
+                line_end: 50,
+                col_start: 5,
+                col_end: 40,
+            },
+            source_file: "src/net.c".to_string(),
+            enclosing_symbol_key: "test-repo:src/net.c#send_broadcast:SYMBOL:function".to_string(),
+            extracted_argument: None,
+            argument_index: None,
+            raw_argument_text: None,
+            socket_family: Some(SocketFamily::Inet),
+            socket_type: Some(SocketType::Datagram), // SOCK_DGRAM = UDP
+            mmap_flags: None,
+            mknod_mode: None,
+        };
+
+        let result = emitter.try_emit(&callsite).unwrap();
+        assert!(
+            result.is_some(),
+            "socket(AF_INET, SOCK_DGRAM) should emit as udp_socket"
+        );
+        assert_eq!(result.unwrap().surface.channel_kind, ChannelKind::UdpSocket);
+    }
+
+    #[test]
+    fn socket_with_af_inet6_sock_stream_emits_tcp() {
+        let mut emitter = BoundaryInteractionEmitter::new(test_context());
+        let callsite = BoundaryCallsite {
+            language: Language::C,
+            function_name: "socket".to_string(),
+            location: SourceLocation {
+                line_start: 50,
+                line_end: 50,
+                col_start: 5,
+                col_end: 40,
+            },
+            source_file: "src/net.c".to_string(),
+            enclosing_symbol_key: "test-repo:src/net.c#connect_server:SYMBOL:function".to_string(),
+            extracted_argument: None,
+            argument_index: None,
+            raw_argument_text: None,
+            socket_family: Some(SocketFamily::Inet6),
+            socket_type: Some(SocketType::Stream), // SOCK_STREAM = TCP
+            mmap_flags: None,
+            mknod_mode: None,
+        };
+
+        let result = emitter.try_emit(&callsite).unwrap();
+        assert!(
+            result.is_some(),
+            "socket(AF_INET6, SOCK_STREAM) should emit as tcp_socket"
+        );
+        assert_eq!(result.unwrap().surface.channel_kind, ChannelKind::TcpSocket);
+    }
+
+    #[test]
+    fn multi_candidate_socket_selects_unix_for_af_unix() {
+        // When socket() is called with AF_UNIX, it should match the unix_socket
+        // binding even though tcp_socket and udp_socket bindings also exist
+        let mut emitter = BoundaryInteractionEmitter::new(test_context());
+        let callsite = BoundaryCallsite {
+            language: Language::C,
+            function_name: "socket".to_string(),
+            location: SourceLocation {
+                line_start: 50,
+                line_end: 50,
+                col_start: 5,
+                col_end: 40,
+            },
+            source_file: "src/ipc.c".to_string(),
+            enclosing_symbol_key: "test-repo:src/ipc.c#start_ipc:SYMBOL:function".to_string(),
+            extracted_argument: None,
+            argument_index: None,
+            raw_argument_text: None,
+            socket_family: Some(SocketFamily::Unix),
+            socket_type: Some(SocketType::Stream),
+            mmap_flags: None,
+            mknod_mode: None,
+        };
+
+        let result = emitter.try_emit(&callsite).unwrap();
+        assert!(result.is_some());
+        assert_eq!(
+            result.unwrap().surface.channel_kind,
+            ChannelKind::UnixSocket,
+            "AF_UNIX should select unix_socket binding, not tcp_socket"
+        );
+    }
+
+    #[test]
+    fn bind_without_socket_type_refuses_to_classify() {
+        // bind() without socket_type cannot disambiguate TCP vs UDP.
+        // Must refuse to classify to avoid TCP-by-precedence false positives.
+        let mut emitter = BoundaryInteractionEmitter::new(test_context());
+        let callsite = BoundaryCallsite {
+            language: Language::C,
+            function_name: "bind".to_string(),
+            location: SourceLocation {
+                line_start: 100,
+                line_end: 100,
+                col_start: 5,
+                col_end: 50,
+            },
+            source_file: "src/server.c".to_string(),
+            enclosing_symbol_key: "test-repo:src/server.c#start:SYMBOL:function".to_string(),
+            extracted_argument: Some("0.0.0.0:8080".to_string()), // IP endpoint
+            argument_index: Some(1),
+            raw_argument_text: None,
+            socket_family: Some(SocketFamily::Inet),
+            socket_type: None, // Without type, can't disambiguate TCP vs UDP
+            mmap_flags: None,
+            mknod_mode: None,
+        };
+
+        let result = emitter.try_emit(&callsite).unwrap();
+        assert!(
+            result.is_none(),
+            "bind() without socket_type should refuse — can't disambiguate TCP vs UDP"
+        );
+    }
+
+    #[test]
+    fn bind_with_sock_stream_emits_tcp() {
+        // bind() with SOCK_STREAM evidence should emit as TCP socket
+        let mut emitter = BoundaryInteractionEmitter::new(test_context());
+        let callsite = BoundaryCallsite {
+            language: Language::C,
+            function_name: "bind".to_string(),
+            location: SourceLocation {
+                line_start: 100,
+                line_end: 100,
+                col_start: 5,
+                col_end: 50,
+            },
+            source_file: "src/server.c".to_string(),
+            enclosing_symbol_key: "test-repo:src/server.c#start:SYMBOL:function".to_string(),
+            extracted_argument: Some("0.0.0.0:8080".to_string()),
+            argument_index: Some(1),
+            raw_argument_text: None,
+            socket_family: Some(SocketFamily::Inet),
+            socket_type: Some(SocketType::Stream), // SOCK_STREAM → TCP
+            mmap_flags: None,
+            mknod_mode: None,
+        };
+
+        let result = emitter.try_emit(&callsite).unwrap();
+        assert!(result.is_some(), "bind() with SOCK_STREAM should emit as TCP");
+        assert_eq!(result.unwrap().surface.channel_kind, ChannelKind::TcpSocket);
+    }
+
+    #[test]
+    fn bind_with_sock_dgram_emits_udp() {
+        // bind() with SOCK_DGRAM evidence should emit as UDP socket
+        let mut emitter = BoundaryInteractionEmitter::new(test_context());
+        let callsite = BoundaryCallsite {
+            language: Language::C,
+            function_name: "bind".to_string(),
+            location: SourceLocation {
+                line_start: 100,
+                line_end: 100,
+                col_start: 5,
+                col_end: 50,
+            },
+            source_file: "src/server.c".to_string(),
+            enclosing_symbol_key: "test-repo:src/server.c#start:SYMBOL:function".to_string(),
+            extracted_argument: Some("0.0.0.0:5353".to_string()),
+            argument_index: Some(1),
+            raw_argument_text: None,
+            socket_family: Some(SocketFamily::Inet),
+            socket_type: Some(SocketType::Datagram), // SOCK_DGRAM → UDP
+            mmap_flags: None,
+            mknod_mode: None,
+        };
+
+        let result = emitter.try_emit(&callsite).unwrap();
+        assert!(result.is_some(), "bind() with SOCK_DGRAM should emit as UDP");
+        assert_eq!(result.unwrap().surface.channel_kind, ChannelKind::UdpSocket);
+    }
+
+    #[test]
+    fn listen_emits_tcp_without_socket_type() {
+        // listen() is TCP-only (UDP doesn't use listen/accept)
+        // Should emit with family evidence alone
+        let mut emitter = BoundaryInteractionEmitter::new(test_context());
+        let callsite = BoundaryCallsite {
+            language: Language::C,
+            function_name: "listen".to_string(),
+            location: SourceLocation {
+                line_start: 110,
+                line_end: 110,
+                col_start: 5,
+                col_end: 30,
+            },
+            source_file: "src/server.c".to_string(),
+            enclosing_symbol_key: "test-repo:src/server.c#start:SYMBOL:function".to_string(),
+            extracted_argument: None,
+            argument_index: None,
+            raw_argument_text: None,
+            socket_family: Some(SocketFamily::Inet),
+            socket_type: None, // listen is TCP-only, doesn't need type evidence
+            mmap_flags: None,
+            mknod_mode: None,
+        };
+
+        let result = emitter.try_emit(&callsite).unwrap();
+        assert!(
+            result.is_some(),
+            "listen() with AF_INET should emit as TCP (listen is TCP-only)"
+        );
+        assert_eq!(result.unwrap().surface.channel_kind, ChannelKind::TcpSocket);
+    }
+
+    #[test]
+    fn sendto_emits_udp_without_socket_type() {
+        // sendto() is UDP-characteristic (UDP-only in binding table)
+        // Should emit with family evidence alone
+        let mut emitter = BoundaryInteractionEmitter::new(test_context());
+        let callsite = BoundaryCallsite {
+            language: Language::C,
+            function_name: "sendto".to_string(),
+            location: SourceLocation {
+                line_start: 120,
+                line_end: 120,
+                col_start: 5,
+                col_end: 60,
+            },
+            source_file: "src/client.c".to_string(),
+            enclosing_symbol_key: "test-repo:src/client.c#send_packet:SYMBOL:function".to_string(),
+            extracted_argument: Some("192.168.1.1:5353".to_string()),
+            argument_index: Some(4),
+            raw_argument_text: None,
+            socket_family: Some(SocketFamily::Inet),
+            socket_type: None, // sendto is UDP-only in table, doesn't need type evidence
+            mmap_flags: None,
+            mknod_mode: None,
+        };
+
+        let result = emitter.try_emit(&callsite).unwrap();
+        assert!(
+            result.is_some(),
+            "sendto() with AF_INET should emit as UDP (sendto is UDP-only in binding table)"
+        );
+        assert_eq!(result.unwrap().surface.channel_kind, ChannelKind::UdpSocket);
     }
 }

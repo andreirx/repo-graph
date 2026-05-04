@@ -1,8 +1,45 @@
 # BI-1B: TCP/UDP Socket Detection
 
-Status: PLANNED
+Status: PARTIAL (PRESENCE HINTS SHIPPED)
 Depends: BI-1A (shipped), storage schema migration
 Track: A (Raw Transport)
+
+## What Shipped
+
+Presence hints only. The system detects `socket(AF_INET, SOCK_STREAM)` and
+`socket(AF_INET, SOCK_DGRAM)` calls and emits surfaces with correct channel_kind
+(`tcp_socket` / `udp_socket`) and protocol (`tcp` / `udp`).
+
+**Shipped capabilities:**
+- TCP socket detection: `socket(AF_INET/AF_INET6, SOCK_STREAM)` → `tcp_socket`
+- UDP socket detection: `socket(AF_INET/AF_INET6, SOCK_DGRAM)` → `udp_socket`
+- TCP-only function classification: `listen`, `accept`, `send`, `recv`
+- UDP-only function classification: `sendto`, `recvfrom`
+- Multi-binding table with guard predicates (prevents TCP-by-precedence)
+- InteractionPattern::Datagram for UDP surfaces
+
+**All emitted surfaces have direction=bidirectional** because:
+1. `socket()` creates a socket — neither provider nor consumer yet
+2. Role semantics depend on subsequent operations (`bind+listen` vs `connect`)
+3. Current extractor processes files independently — no fd tracking across calls
+
+## Deferred
+
+Role detection (provider vs consumer) requires fd tracking: linking `bind()` and
+`listen()` calls back to the socket descriptor created by `socket()`. This is
+documented as depth work in `docs/TECH-DEBT.md` §fd tracking.
+
+**Deferred capabilities:**
+- Direction classification: provider (bind+listen) vs consumer (connect)
+- Endpoint extraction: host:port from bind/connect arguments
+- Scope classification: inter_process (loopback) vs inter_device (remote)
+- Endpoint locality: SameHostNamed vs Remote
+
+These require either:
+- fd tracking within function scope (moderate complexity)
+- Cross-function dataflow analysis (high complexity)
+
+Per breadth-first strategy: presence hints are useful now; depth work deferred.
 
 ## Objective
 

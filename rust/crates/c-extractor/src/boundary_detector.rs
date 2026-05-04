@@ -26,6 +26,19 @@ pub enum SocketFamily {
     Can,
 }
 
+/// Socket type detected from function arguments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SocketType {
+    /// SOCK_STREAM — TCP for AF_INET/AF_INET6, or stream-mode Unix socket.
+    Stream,
+    /// SOCK_DGRAM — UDP for AF_INET/AF_INET6, or datagram-mode Unix socket.
+    Datagram,
+    /// SOCK_RAW — raw socket access.
+    Raw,
+    /// SOCK_SEQPACKET — sequential packet socket.
+    SeqPacket,
+}
+
 /// mmap sharing flags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MmapFlags {
@@ -54,6 +67,10 @@ pub struct RawBoundaryCall {
     /// Only populated when syntactically provable from argument.
     pub socket_family: Option<SocketFamily>,
 
+    /// Socket type if this is a socket() call.
+    /// Only populated when syntactically provable from argument.
+    pub socket_type: Option<SocketType>,
+
     /// mmap flags if this is an mmap call.
     /// Only populated when MAP_SHARED or MAP_PRIVATE is syntactically present.
     pub mmap_flags: Option<MmapFlags>,
@@ -76,6 +93,11 @@ const SOCKET_OP_FUNCTIONS: &[&str] = &["bind", "connect", "listen", "accept", "s
 const PIPE_FUNCTIONS: &[&str] = &["pipe", "pipe2", "mkfifo", "mknod"];
 const SHM_FUNCTIONS: &[&str] = &["shm_open", "shm_unlink", "mmap", "munmap"];
 const MQUEUE_FUNCTIONS: &[&str] = &["mq_open", "mq_close", "mq_unlink", "mq_send", "mq_receive"];
+/// Signal-related functions for BI-1D.
+const SIGNAL_FUNCTIONS: &[&str] = &[
+    "kill", "killpg", "raise", "sigqueue", "pthread_kill",
+    "signal", "sigaction", "sigwait", "sigwaitinfo", "sigtimedwait", "signalfd",
+];
 
 /// Check if a function name is a boundary interaction candidate.
 pub fn is_boundary_function(name: &str) -> bool {
@@ -84,6 +106,7 @@ pub fn is_boundary_function(name: &str) -> bool {
         || PIPE_FUNCTIONS.contains(&name)
         || SHM_FUNCTIONS.contains(&name)
         || MQUEUE_FUNCTIONS.contains(&name)
+        || SIGNAL_FUNCTIONS.contains(&name)
 }
 
 /// Extract boundary calls from a parsed C file.
@@ -190,6 +213,7 @@ fn try_extract_boundary_call(
         location,
         enclosing_function: enclosing_function.to_string(),
         socket_family: None,
+        socket_type: None,
         mmap_flags: None,
         mknod_mode: None,
         extracted_argument: None,
@@ -199,9 +223,12 @@ fn try_extract_boundary_call(
     // Extract context based on function type
     match function_name.as_str() {
         "socket" => {
-            // socket(domain, type, protocol) — domain is arg0
+            // socket(domain, type, protocol) — domain is arg0, type is arg1
             if let Some(arg0) = args.first() {
                 call.socket_family = parse_socket_family(arg0);
+            }
+            if args.len() > 1 {
+                call.socket_type = parse_socket_type(&args[1]);
             }
         }
 
@@ -288,6 +315,49 @@ fn try_extract_boundary_call(
             // Can't extract channel identity without tracking
         }
 
+        // ── BI-1D: Signal functions ────────────────────────────────────
+        "kill" | "killpg" | "sigqueue" | "pthread_kill" => {
+            // Signal is arg1 for these functions
+            if args.len() > 1 {
+                let signal_name = parse_signal_name(&args[1]);
+                if let Some(name) = signal_name {
+                    call.extracted_argument = Some(name);
+                    call.argument_index = Some(1);
+                }
+            }
+        }
+
+        "raise" => {
+            // raise(sig) — signal is arg0
+            if let Some(arg0) = args.first() {
+                if let Some(name) = parse_signal_name(arg0) {
+                    call.extracted_argument = Some(name);
+                    call.argument_index = Some(0);
+                }
+            }
+        }
+
+        "signal" | "sigaction" => {
+            // signal(sig, handler), sigaction(sig, act, oldact) — signal is arg0
+            if let Some(arg0) = args.first() {
+                if let Some(name) = parse_signal_name(arg0) {
+                    call.extracted_argument = Some(name);
+                    call.argument_index = Some(0);
+                }
+            }
+        }
+
+        "sigwait" | "sigwaitinfo" | "sigtimedwait" => {
+            // sigwait(set, sig) — sigset is arg0, but we can't easily extract
+            // the signal from a sigset. Leave extracted_argument empty.
+            // Channel identity will be the callsite location.
+        }
+
+        "signalfd" => {
+            // signalfd(fd, mask, flags) — sigset is arg1
+            // Same issue as sigwait — sigset is not a single signal
+        }
+
         _ => {}
     }
 
@@ -325,6 +395,43 @@ fn parse_socket_family(arg: &str) -> Option<SocketFamily> {
         "AF_INET6" | "PF_INET6" => Some(SocketFamily::Inet6),
         "AF_CAN" | "PF_CAN" => Some(SocketFamily::Can),
         _ => None, // Unknown or variable — decline
+    }
+}
+
+/// Parse socket type from an argument string.
+/// Only recognizes explicit macro identifiers.
+/// Handles both direct use and bitwise-OR with flags (e.g., SOCK_STREAM | SOCK_NONBLOCK).
+fn parse_socket_type(arg: &str) -> Option<SocketType> {
+    let arg = arg.trim();
+
+    // Check for SOCK_* macros, handling bitwise-OR expressions
+    // SOCK_NONBLOCK and SOCK_CLOEXEC are flags, not types
+    let has_stream = arg.contains("SOCK_STREAM");
+    let has_dgram = arg.contains("SOCK_DGRAM");
+    let has_raw = arg.contains("SOCK_RAW");
+    let has_seqpacket = arg.contains("SOCK_SEQPACKET");
+
+    // Count type indicators (not flags)
+    let type_count = [has_stream, has_dgram, has_raw, has_seqpacket]
+        .iter()
+        .filter(|&&b| b)
+        .count();
+
+    // Ambiguous if multiple types present
+    if type_count != 1 {
+        return None;
+    }
+
+    if has_stream {
+        Some(SocketType::Stream)
+    } else if has_dgram {
+        Some(SocketType::Datagram)
+    } else if has_raw {
+        Some(SocketType::Raw)
+    } else if has_seqpacket {
+        Some(SocketType::SeqPacket)
+    } else {
+        None // Should not reach here given type_count == 1
     }
 }
 
@@ -376,6 +483,50 @@ fn extract_string_literal(arg: &str) -> Option<String> {
     } else {
         None // Not a string literal
     }
+}
+
+/// Parse signal name from an argument string.
+/// Recognizes standard POSIX signal names (SIGxxx).
+/// Returns the signal name if recognized, None otherwise.
+fn parse_signal_name(arg: &str) -> Option<String> {
+    let arg = arg.trim();
+
+    // Known POSIX signal names
+    const SIGNAL_NAMES: &[&str] = &[
+        "SIGABRT", "SIGALRM", "SIGBUS", "SIGCHLD", "SIGCONT",
+        "SIGFPE", "SIGHUP", "SIGILL", "SIGINT", "SIGKILL",
+        "SIGPIPE", "SIGQUIT", "SIGSEGV", "SIGSTOP", "SIGTERM",
+        "SIGTSTP", "SIGTTIN", "SIGTTOU", "SIGUSR1", "SIGUSR2",
+        "SIGPOLL", "SIGPROF", "SIGSYS", "SIGTRAP", "SIGURG",
+        "SIGVTALRM", "SIGXCPU", "SIGXFSZ",
+        // Linux-specific
+        "SIGPWR", "SIGSTKFLT", "SIGWINCH",
+        // Aliases
+        "SIGCLD", "SIGIO",
+    ];
+
+    // Check for direct signal name match
+    for &sig in SIGNAL_NAMES {
+        if arg == sig {
+            return Some(sig.to_string());
+        }
+    }
+
+    // Check if arg contains a signal name (for expressions like SIGTERM | SA_RESTART)
+    // Take the first signal name found
+    for &sig in SIGNAL_NAMES {
+        if arg.contains(sig) {
+            return Some(sig.to_string());
+        }
+    }
+
+    // If arg is a numeric literal, return it as-is
+    // This handles cases like kill(pid, 9)
+    if arg.chars().all(|c| c.is_ascii_digit()) {
+        return Some(arg.to_string());
+    }
+
+    None // Unknown or variable — decline
 }
 
 fn extract_function_name_from_declarator(declarator: &tree_sitter::Node, src: &[u8]) -> String {
@@ -649,5 +800,243 @@ mod tests {
         assert_eq!(calls[0].function_name, "socket");
         assert_eq!(calls[1].function_name, "bind");
         assert_eq!(calls[2].function_name, "listen");
+    }
+
+    // ── Socket type extraction tests (BI-1B) ──────────────────────────
+
+    #[test]
+    fn socket_extracts_sock_stream() {
+        let source = r#"
+            void tcp_client() {
+                int fd = socket(AF_INET, SOCK_STREAM, 0);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].socket_family, Some(SocketFamily::Inet));
+        assert_eq!(calls[0].socket_type, Some(SocketType::Stream));
+    }
+
+    #[test]
+    fn socket_extracts_sock_dgram() {
+        let source = r#"
+            void udp_client() {
+                int fd = socket(AF_INET, SOCK_DGRAM, 0);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].socket_family, Some(SocketFamily::Inet));
+        assert_eq!(calls[0].socket_type, Some(SocketType::Datagram));
+    }
+
+    #[test]
+    fn socket_extracts_sock_raw() {
+        let source = r#"
+            void raw_socket() {
+                int fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].socket_type, Some(SocketType::Raw));
+    }
+
+    #[test]
+    fn socket_extracts_sock_seqpacket() {
+        let source = r#"
+            void seqpacket_server() {
+                int fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].socket_family, Some(SocketFamily::Unix));
+        assert_eq!(calls[0].socket_type, Some(SocketType::SeqPacket));
+    }
+
+    #[test]
+    fn socket_with_flags_extracts_type() {
+        // SOCK_STREAM | SOCK_NONBLOCK is a common pattern
+        let source = r#"
+            void nonblocking_server() {
+                int fd = socket(AF_INET6, SOCK_STREAM | SOCK_NONBLOCK, 0);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].socket_family, Some(SocketFamily::Inet6));
+        assert_eq!(calls[0].socket_type, Some(SocketType::Stream));
+    }
+
+    #[test]
+    fn socket_with_variable_type_has_none() {
+        let source = r#"
+            void dynamic_socket(int type) {
+                int fd = socket(AF_INET, type, 0);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].socket_family, Some(SocketFamily::Inet));
+        assert_eq!(calls[0].socket_type, None); // Can't determine type from variable
+    }
+
+    #[test]
+    fn unix_socket_stream_extracts_both() {
+        let source = r#"
+            void unix_server() {
+                int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].socket_family, Some(SocketFamily::Unix));
+        assert_eq!(calls[0].socket_type, Some(SocketType::Stream));
+    }
+
+    // ── BI-1D: Signal detection tests ─────────────────────────────────
+
+    #[test]
+    fn kill_extracts_signal_name() {
+        let source = r#"
+            void send_term() {
+                kill(pid, SIGTERM);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "kill");
+        assert_eq!(calls[0].extracted_argument, Some("SIGTERM".to_string()));
+        assert_eq!(calls[0].argument_index, Some(1));
+    }
+
+    #[test]
+    fn raise_extracts_signal_name() {
+        let source = r#"
+            void self_signal() {
+                raise(SIGUSR1);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "raise");
+        assert_eq!(calls[0].extracted_argument, Some("SIGUSR1".to_string()));
+        assert_eq!(calls[0].argument_index, Some(0));
+    }
+
+    #[test]
+    fn signal_extracts_handler_registration() {
+        let source = r#"
+            void setup_handler() {
+                signal(SIGINT, my_handler);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "signal");
+        assert_eq!(calls[0].extracted_argument, Some("SIGINT".to_string()));
+        assert_eq!(calls[0].argument_index, Some(0));
+    }
+
+    #[test]
+    fn sigaction_extracts_signal_name() {
+        let source = r#"
+            void setup_sigaction() {
+                struct sigaction act;
+                sigaction(SIGTERM, &act, NULL);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "sigaction");
+        assert_eq!(calls[0].extracted_argument, Some("SIGTERM".to_string()));
+        assert_eq!(calls[0].argument_index, Some(0));
+    }
+
+    #[test]
+    fn kill_with_numeric_signal() {
+        let source = r#"
+            void send_signal_9() {
+                kill(pid, 9);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "kill");
+        assert_eq!(calls[0].extracted_argument, Some("9".to_string()));
+    }
+
+    #[test]
+    fn pthread_kill_extracts_signal() {
+        let source = r#"
+            void cancel_thread() {
+                pthread_kill(thread, SIGUSR2);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "pthread_kill");
+        assert_eq!(calls[0].extracted_argument, Some("SIGUSR2".to_string()));
+        assert_eq!(calls[0].argument_index, Some(1));
+    }
+
+    #[test]
+    fn sigqueue_extracts_signal() {
+        let source = r#"
+            void send_with_data() {
+                union sigval val;
+                sigqueue(pid, SIGUSR1, val);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "sigqueue");
+        assert_eq!(calls[0].extracted_argument, Some("SIGUSR1".to_string()));
+    }
+
+    #[test]
+    fn sigwait_is_detected() {
+        let source = r#"
+            void wait_for_signal() {
+                sigset_t set;
+                int sig;
+                sigwait(&set, &sig);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "sigwait");
+        // sigwait takes a sigset, not a single signal, so extracted_argument is None
+        assert_eq!(calls[0].extracted_argument, None);
+    }
+
+    #[test]
+    fn kill_with_variable_signal_has_none() {
+        let source = r#"
+            void send_dynamic(int sig) {
+                kill(pid, sig);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "kill");
+        assert_eq!(calls[0].extracted_argument, None); // Variable, can't extract
     }
 }

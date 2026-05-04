@@ -1678,38 +1678,56 @@ Policy crate: `rust/crates/boundary-interaction/`
 Extractor crate: `rust/crates/boundary-interaction-extractor/`
 Design doc: `docs/design/boundary-interaction-ipc-device.md`
 
-### Binding resolution is function-name-only (future extensibility debt)
+### Multi-binding resolution (resolved 2026-05-04)
 
-`BindingTable::find_by_function(language, function_name)` returns the first
-matching entry for a given language and function name. This works for Slice 1A
-because each function name maps to exactly one channel kind (e.g., `bind` →
-`unix_socket`, `shm_open` → `shared_memory`).
+`BindingTable::find_by_function(language, function_name)` now returns all
+matching entries for a given language and function name. The uniqueness
+constraint changed from `(language, function)` to `(language, function, channel_kind)`.
 
-**Becomes insufficient when:**
+The emitter evaluates candidates in TOML declaration order and uses guard
+predicates to select the appropriate binding based on callsite evidence.
 
-- Multiple slices use the same function names with different channel kinds
-  (e.g., `bind` for Unix sockets vs TCP sockets vs CAN sockets).
-- The same function name appears in different API families with different
-  semantics (e.g., POSIX `mmap` vs some SDK's `mmap` wrapper).
-- Language-specific overloads need disambiguation (e.g., Python `socket.bind`
-  vs C `bind`).
+**Files changed:**
+- `boundary-interaction/src/table.rs`: dedup key, `find_by_function` returns Vec
+- `boundary-interaction/bindings.toml`: TCP/UDP entries added after Unix socket
+- `boundary-interaction-extractor/src/emit.rs`: multi-candidate evaluation
 
-**Not a blocker for Slice 1A** because guard predicates (`socket_family`,
-`mmap_flags`, `mknod_mode`) reject mismatches at the emitter level, not at
-binding lookup.
+## Boundary Interaction Extraction — BI-1B (TCP/UDP Sockets)
 
-**Required before Slice 1B (Network IPC) or Slice 2 (Inter-Device):**
+### fd→family/type context propagation not implemented
 
-Either:
-1. **Compound binding key:** `find_by_function(language, function, api_family)`
-   with explicit API family passed from the extractor.
-2. **Multi-match with context filtering:** `find_all_by_function(language, function)`
-   returns all candidates; emitter filters by callsite evidence.
-3. **Binding precedence rules:** Higher-specificity bindings shadow lower ones.
+**Status:** Known limitation, blocking provider/consumer role detection for TCP/UDP.
 
-The guard predicate pattern from Slice 1A is the template: binding lookup
-proposes candidates, emitter rejects based on callsite evidence. The debt is
-ensuring the lookup returns all viable candidates when function names overlap.
+**Problem:** The C extractor extracts `socket_family` and `socket_type` from
+`socket(AF_INET, SOCK_STREAM, 0)` calls because the evidence is in the arguments.
+But later operations (`bind`, `listen`, `connect`, `send`, `recv`, `sendto`,
+`recvfrom`) operate on file descriptors, not family/type constants.
+
+**Current behavior:**
+- `socket()` calls emit as `tcp_socket` or `udp_socket` with `direction = bidirectional`
+- Later operations decline to emit because guards require family/type evidence
+- Result: socket presence hints only, no provider/consumer roles
+
+**What would be needed:**
+1. **Intra-function fd tracking:** Track `int fd = socket(AF_INET, SOCK_STREAM, 0)`
+   and propagate family/type to later uses of `fd` in the same function.
+2. **Cross-function fd tracking:** If `fd` is passed to another function, propagate
+   context through call graph (much harder).
+3. **Compiler-assisted:** Use clangd or similar to resolve types and track fd flow.
+
+**Why this is hard:**
+- C has no socket type system — `int fd` carries no semantic info
+- fd can be stored in struct fields, arrays, global variables
+- fd can be returned from helper functions
+- fd can be duplicated, closed, and reused
+
+**Acceptable current state:**
+- Socket presence hints are still useful for orientation
+- Agent sees "this function uses TCP sockets" even without provider/consumer role
+- Full role detection is a depth slice, not required for breadth-first orientation
+
+**Unblocks:** Nothing — this is a known limitation, not a P1 correctness bug.
+**Deferred to:** BI-1B-depth (fd tracking) or compiler-assisted extraction.
 
 ### Extractor contract: conservative field population
 
