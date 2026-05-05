@@ -436,6 +436,58 @@ Run on:
 - one medium repo with oversized files
 - one legacy repo with very large C/C++ translation units
 
+## Packaging and Releaseability Constraint
+
+**Non-functional product constraint:** rgistr must be architected for future
+downloadable release artifacts (GitHub Actions builds distributable binaries
+for `rmap` and `rgistr`).
+
+### What this constrains now
+
+1. **No dev-environment assumptions in product architecture**
+   - Local defaults are fine; hard assumptions are not
+   - No fixed localhost ports as truth
+   - No repo-relative writable paths assumed
+   - No hidden dependence on local Node tooling beyond packaged runtime
+
+2. **Backend discovery must be runtime-configurable**
+   - Discovery/probing must work from: packaged binary, CI, local workstation
+   - Endpoints from config/env/defaults
+   - No adapter that assumes "LM Studio always means `:1234`" as hard rule
+   - Flavor metadata must be explicit in discovery output
+
+3. **Stable machine-facing output**
+   - Deterministic exit codes
+   - Machine-readable discovery report
+   - Machine-readable provider/model selection report
+   - Explicit version/build metadata
+   - Required for: GitHub Actions smoke, release verification, issue triage
+
+4. **Dependency footprint matters**
+   - Support modules must be: pure, transport-neutral, easy to bundle
+   - Avoid: multiple near-identical adapters, backend-specific branching
+     spread everywhere, packaging-time conditional logic in core policy
+
+### Adapter architecture decision
+
+**Resolved:** Single `OpenAICompatibleAdapter` with flavor profiles.
+
+Rationale:
+- Differences between LM Studio, MLX server, and llama.cpp are flavor metadata,
+  not transport-level divergence
+- Matches design doc's "one transport family" rule
+- Smaller adapter surface, less duplication
+- Easier packaging and release testing
+- Easier discovery/reporting (one transport family owns one contract)
+
+Implementation shape:
+- `OpenAICompatibleAdapter` — one transport-family adapter
+- `OpenAICompatibleProbe` — probe/discovery layer
+- `BackendFlavor = lmstudio | mlx | llamacpp` — flavor enum
+- Flavor profile: default base URL, probe behavior, capability quirks, labeling
+
+This keeps one transport family without collapsing into spaghetti.
+
 ## Assumptions
 
 1. `rgistr` remains a separate tool from repo-graph.

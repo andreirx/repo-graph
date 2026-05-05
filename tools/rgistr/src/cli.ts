@@ -175,6 +175,55 @@ program
     }
   });
 
+program
+  .command('discover')
+  .description('Discover available LLM providers and models')
+  .option('--json', 'Output as JSON for machine consumption', false)
+  .option('--local-only', 'Skip cloud providers', false)
+  .option('--cloud-only', 'Skip local providers', false)
+  .option('--timeout <ms>', 'Probe timeout in milliseconds', '5000')
+  .action(async (opts) => {
+    // Validate timeout argument
+    const timeoutMs = parseInt(opts.timeout, 10);
+    if (Number.isNaN(timeoutMs) || timeoutMs <= 0) {
+      console.error(`Error: --timeout must be a positive integer, got: ${opts.timeout}`);
+      process.exit(2);
+    }
+
+    // Validate contradictory flags
+    if (opts.localOnly && opts.cloudOnly) {
+      console.error('Error: --local-only and --cloud-only are mutually exclusive');
+      process.exit(2);
+    }
+
+    // Dynamic import to avoid loading discovery module for other commands
+    const { discoverProviders, formatDiscoveryReport, formatDiscoveryReportJSON } =
+      await import('./support/discovery/index.js');
+
+    try {
+      const report = await discoverProviders({
+        localOnly: opts.localOnly,
+        cloudOnly: opts.cloudOnly,
+        probeTimeoutMs: timeoutMs,
+      });
+
+      if (opts.json) {
+        console.log(formatDiscoveryReportJSON(report));
+      } else {
+        console.log(formatDiscoveryReport(report));
+      }
+
+      // Exit with error if no providers available
+      if (report.availableProviders.length === 0) {
+        process.exit(1);
+      }
+
+    } catch (error) {
+      console.error('Discovery failed:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
 function createAdapter(opts: {
   adapter: string;
   model?: string;
