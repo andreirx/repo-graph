@@ -653,6 +653,7 @@ fn parse_channel_kind(s: &str) -> Result<ChannelKind, BoundaryInteractionReadErr
         "erpc_channel" => Ok(ChannelKind::ErpcChannel),
         "serial_port" => Ok(ChannelKind::SerialPort),
         "can_message" => Ok(ChannelKind::CanMessage),
+        "inter_core_channel" => Ok(ChannelKind::InterCoreChannel),
         "mqtt_topic" => Ok(ChannelKind::MqttTopic),
         "dbus_interface" => Ok(ChannelKind::DbusInterface),
         "zeromq_socket" => Ok(ChannelKind::ZeromqSocket),
@@ -702,6 +703,7 @@ fn parse_protocol_family(s: &str) -> Result<ProtocolFamily, BoundaryInteractionR
         "message_queue" => Ok(ProtocolFamily::MessageQueue),
         "signal" => Ok(ProtocolFamily::Signal),
         "semaphore" => Ok(ProtocolFamily::Semaphore),
+        "inter_core" => Ok(ProtocolFamily::InterCore),
         "rpc" => Ok(ProtocolFamily::Rpc),
         "serial" => Ok(ProtocolFamily::Serial),
         "bus" => Ok(ProtocolFamily::Bus),
@@ -725,6 +727,7 @@ fn parse_interaction_pattern(s: &str) -> Result<InteractionPattern, BoundaryInte
         "fire_and_forget" => Ok(InteractionPattern::FireAndForget),
         "shared_state" => Ok(InteractionPattern::SharedState),
         "synchronization" => Ok(InteractionPattern::Synchronization),
+        "message_passing" => Ok(InteractionPattern::MessagePassing),
         "unknown" => Ok(InteractionPattern::Unknown),
         other => Err(BoundaryInteractionReadError::Storage(format!(
             "unrecognized interaction_pattern: '{}'",

@@ -3586,3 +3586,285 @@ fn boundaries_list_mixed_semaphores_both_families_detected() {
     assert_eq!(sysv_count, 3, "expected 3 SysV semaphore surfaces");
     assert_eq!(posix_count, 3, "expected 3 POSIX named semaphore surfaces");
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// BI-EM-1: INTER-CORE MESSAGING CLI ADAPTER TESTS
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Create a test repo with mailbox usage.
+fn create_test_repo_with_mailbox(dir: &std::path::Path) {
+    let src = dir.join("mailbox_user.c");
+    let mut f = File::create(&src).unwrap();
+    writeln!(f, "#include <linux/mailbox_client.h>").unwrap();
+    writeln!(f, "void use_mailbox() {{").unwrap();
+    writeln!(f, "    mbox_request_channel(&client, 0);").unwrap();
+    writeln!(f, "    mbox_send_message(chan, data);").unwrap();
+    writeln!(f, "    mbox_free_channel(chan);").unwrap();
+    writeln!(f, "}}").unwrap();
+}
+
+/// Create a test repo with RPMsg usage.
+fn create_test_repo_with_rpmsg(dir: &std::path::Path) {
+    let src = dir.join("rpmsg_user.c");
+    let mut f = File::create(&src).unwrap();
+    writeln!(f, "#include <linux/rpmsg.h>").unwrap();
+    writeln!(f, "void use_rpmsg() {{").unwrap();
+    writeln!(f, "    rpmsg_create_ept(rpdev, cb, NULL, 0);").unwrap();
+    writeln!(f, "    rpmsg_send(ept, data, len);").unwrap();
+    writeln!(f, "    rpmsg_destroy_ept(ept);").unwrap();
+    writeln!(f, "}}").unwrap();
+}
+
+/// Create a test repo with both mailbox and RPMsg usage.
+fn create_test_repo_with_inter_core(dir: &std::path::Path) {
+    create_test_repo_with_mailbox(dir);
+    create_test_repo_with_rpmsg(dir);
+}
+
+/// Build a DB with both mailbox and RPMsg surfaces.
+fn build_indexed_db_with_inter_core() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_test_repo_with_inter_core(&repo_path);
+
+    let db_path = dir.path().join("test.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "inter-core-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 2);
+
+    (dir, db_path, repo_path)
+}
+
+#[test]
+fn boundaries_list_inter_core_channel_kind_filter() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_inter_core();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "inter-core-repo",
+            "--kind",
+            "inter_core_channel",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Should have 6 surfaces: 3 mailbox + 3 rpmsg
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(
+        count, 6,
+        "expected 6 inter_core_channel surfaces; got {}",
+        count
+    );
+
+    // Verify all are inter_core_channel
+    let surfaces = result["results"].as_array().unwrap();
+    for surface in surfaces {
+        assert_eq!(
+            surface["channelKind"], "inter_core_channel",
+            "expected inter_core_channel channel kind"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_inter_core_alias_works() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_inter_core();
+
+    // Test using "inter_core" alias instead of "inter_core_channel"
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "inter-core-repo",
+            "--kind",
+            "inter_core",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0 with --kind inter_core alias; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(
+        result["count"], 6,
+        "expected 6 surfaces with --kind inter_core; got {}",
+        result["count"]
+    );
+}
+
+#[test]
+fn boundaries_list_inter_core_has_unknown_scope() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_inter_core();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "inter-core-repo",
+            "--kind",
+            "inter_core_channel",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    // All inter_core_channel surfaces should have unknown scope
+    // (per BI-EM-1 design: same-SoC inter-core doesn't fit inter_process or inter_device)
+    let surfaces = result["results"].as_array().unwrap();
+    for surface in surfaces {
+        assert_eq!(
+            surface["boundaryScope"], "unknown",
+            "inter_core_channel surfaces should have unknown scope"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_inter_core_has_message_passing_or_fire_and_forget() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_inter_core();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "inter-core-repo",
+            "--kind",
+            "inter_core_channel",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    // All inter_core_channel surfaces should have message_passing or fire_and_forget
+    let surfaces = result["results"].as_array().unwrap();
+    for surface in surfaces {
+        let pattern = surface["interactionPattern"].as_str().unwrap_or("");
+        assert!(
+            pattern == "message_passing" || pattern == "fire_and_forget",
+            "inter_core_channel surfaces should have message_passing or fire_and_forget; got {}",
+            pattern
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_inter_core_mixed_directions() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_inter_core();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "inter-core-repo",
+            "--kind",
+            "inter_core_channel",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    let surfaces = result["results"].as_array().unwrap();
+
+    // Count directions
+    let provider_count = surfaces.iter().filter(|s| s["direction"] == "provider").count();
+    let bidirectional_count = surfaces.iter().filter(|s| s["direction"] == "bidirectional").count();
+
+    // Mailbox: mbox_send_message = provider (1), mbox_request_channel + mbox_free_channel = bidirectional (2)
+    // RPMsg: rpmsg_send = provider (1), rpmsg_create_ept + rpmsg_destroy_ept = bidirectional (2)
+    // Total: provider=2, bidirectional=4
+    assert_eq!(provider_count, 2, "expected 2 provider surfaces");
+    assert_eq!(bidirectional_count, 4, "expected 4 bidirectional surfaces");
+}
+
+#[test]
+fn boundaries_list_inter_core_both_families_detected() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_inter_core();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "inter-core-repo",
+            "--kind",
+            "inter_core_channel",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    let surfaces = result["results"].as_array().unwrap();
+    assert_eq!(surfaces.len(), 6, "expected 6 total inter_core_channel surfaces");
+
+    // Count by provenance to verify both mailbox and rpmsg are detected
+    let mailbox_count = surfaces
+        .iter()
+        .filter(|s| {
+            s["provenance"]
+                .as_str()
+                .map(|p| p.contains(":mailbox:"))
+                .unwrap_or(false)
+        })
+        .count();
+    let rpmsg_count = surfaces
+        .iter()
+        .filter(|s| {
+            s["provenance"]
+                .as_str()
+                .map(|p| p.contains(":rpmsg:"))
+                .unwrap_or(false)
+        })
+        .count();
+
+    assert_eq!(mailbox_count, 3, "expected 3 mailbox surfaces");
+    assert_eq!(rpmsg_count, 3, "expected 3 rpmsg surfaces");
+}

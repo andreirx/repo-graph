@@ -106,6 +106,28 @@ const SYSV_MSGQ_FUNCTIONS: &[&str] = &["msgget", "msgsnd", "msgrcv", "msgctl"];
 const SYSV_SEM_FUNCTIONS: &[&str] = &["semget", "semop", "semtimedop", "semctl"];
 /// Named POSIX semaphore functions for BI-LX-3.
 const POSIX_NAMED_SEM_FUNCTIONS: &[&str] = &["sem_open", "sem_close", "sem_unlink"];
+/// Mailbox framework functions for BI-EM-1.
+const MAILBOX_FUNCTIONS: &[&str] = &[
+    "mbox_request_channel",
+    "mbox_request_channel_byname",
+    "mbox_free_channel",
+    "mbox_send_message",
+    "mbox_client_txdone",
+    "mbox_client_peek_data",
+];
+/// RPMsg functions for BI-EM-1.
+/// Note: rpmsg_recv does not exist in Linux kernel API. Receive is callback-based
+/// via the rpmsg_rx_cb_t callback passed to rpmsg_create_ept().
+const RPMSG_FUNCTIONS: &[&str] = &[
+    "rpmsg_create_ept",
+    "rpmsg_destroy_ept",
+    "rpmsg_send",
+    "rpmsg_sendto",
+    "rpmsg_send_offchannel",
+    "rpmsg_trysend",
+    "rpmsg_trysendto",
+    "rpmsg_register_device",
+];
 
 /// Check if a function name is a boundary interaction candidate.
 pub fn is_boundary_function(name: &str) -> bool {
@@ -119,6 +141,8 @@ pub fn is_boundary_function(name: &str) -> bool {
         || SYSV_MSGQ_FUNCTIONS.contains(&name)
         || SYSV_SEM_FUNCTIONS.contains(&name)
         || POSIX_NAMED_SEM_FUNCTIONS.contains(&name)
+        || MAILBOX_FUNCTIONS.contains(&name)
+        || RPMSG_FUNCTIONS.contains(&name)
 }
 
 /// Extract boundary calls from a parsed C file.
@@ -414,6 +438,34 @@ fn try_extract_boundary_call(
                 }
             }
             // sem_close takes descriptor, cannot extract name without tracking
+        }
+
+        // ── BI-EM-1: Mailbox framework functions ──────────────────────────
+        "mbox_request_channel" | "mbox_free_channel" | "mbox_send_message"
+        | "mbox_client_txdone" | "mbox_client_peek_data" => {
+            // mbox_request_channel(client, name, ...) — no name extraction needed
+            // These are kernel APIs; channel identity is typically from device tree
+            // Just detect the call for boundary surface emission.
+        }
+
+        "mbox_request_channel_byname" => {
+            // mbox_request_channel_byname(client, name, ...) — name is arg1
+            if args.len() > 1 {
+                if let Some(name) = extract_string_literal(&args[1]) {
+                    call.extracted_argument = Some(name);
+                    call.argument_index = Some(1);
+                }
+            }
+        }
+
+        // ── BI-EM-1: RPMsg functions ──────────────────────────────────────
+        // Note: rpmsg_recv does not exist in Linux kernel API. Receive is callback-based.
+        "rpmsg_create_ept" | "rpmsg_destroy_ept" | "rpmsg_send" | "rpmsg_sendto"
+        | "rpmsg_send_offchannel" | "rpmsg_trysend" | "rpmsg_trysendto"
+        | "rpmsg_register_device" => {
+            // RPMsg endpoint/device lifecycle and messaging functions.
+            // Endpoint names may be embedded in struct fields (not easily extractable).
+            // Just detect the call for boundary surface emission.
         }
 
         _ => {}
@@ -1220,5 +1272,97 @@ mod tests {
         assert_eq!(calls[1].function_name, "semop");
         assert_eq!(calls[2].function_name, "semop");
         assert_eq!(calls[3].function_name, "semctl");
+    }
+
+    // ── BI-EM-1: Mailbox and RPMsg tests ──────────────────────────────────
+
+    #[test]
+    fn mbox_request_channel_is_detected() {
+        let source = r#"
+            void init_mailbox() {
+                mbox_request_channel(&client, 0);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "mbox_request_channel");
+    }
+
+    #[test]
+    fn mbox_request_channel_byname_extracts_name() {
+        let source = r#"
+            void init_mailbox() {
+                mbox_request_channel_byname(&client, "mcu-mbox");
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "mbox_request_channel_byname");
+        assert_eq!(calls[0].extracted_argument, Some("mcu-mbox".to_string()));
+        assert_eq!(calls[0].argument_index, Some(1));
+    }
+
+    #[test]
+    fn mbox_send_message_is_detected() {
+        let source = r#"
+            void send_to_mcu() {
+                mbox_send_message(chan, data);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "mbox_send_message");
+    }
+
+    #[test]
+    fn rpmsg_create_ept_is_detected() {
+        let source = r#"
+            void init_rpmsg() {
+                rpmsg_create_ept(rpdev, callback, NULL, RPMSG_ADDR_ANY);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "rpmsg_create_ept");
+    }
+
+    #[test]
+    fn rpmsg_send_is_detected() {
+        let source = r#"
+            void send_message() {
+                rpmsg_send(ept, data, len);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "rpmsg_send");
+    }
+
+    #[test]
+    fn multiple_inter_core_calls() {
+        let source = r#"
+            void inter_core_comm() {
+                mbox_request_channel(&client, 0);
+                mbox_send_message(chan, data);
+                mbox_free_channel(chan);
+                rpmsg_create_ept(rpdev, cb, NULL, 0);
+                rpmsg_send(ept, data, len);
+                rpmsg_destroy_ept(ept);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 6);
+        assert_eq!(calls[0].function_name, "mbox_request_channel");
+        assert_eq!(calls[1].function_name, "mbox_send_message");
+        assert_eq!(calls[2].function_name, "mbox_free_channel");
+        assert_eq!(calls[3].function_name, "rpmsg_create_ept");
+        assert_eq!(calls[4].function_name, "rpmsg_send");
+        assert_eq!(calls[5].function_name, "rpmsg_destroy_ept");
     }
 }

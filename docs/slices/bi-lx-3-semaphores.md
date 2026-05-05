@@ -1,6 +1,6 @@
 # BI-LX-3: SysV and Named POSIX Semaphores Detection
 
-**Status:** PLANNED  
+**Status:** SHIPPED  
 **Slice:** BI-LX-3  
 **Family:** Linux IPC  
 **Language:** C (first)

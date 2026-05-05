@@ -836,7 +836,7 @@ quality diff, policy-fact depth, and TCP/UDP role refinement.
 |-------|--------|-----------|--------|
 | BI-LX-1 | SysV shared memory | shmget, shmat, shmdt, shmctl | **SHIPPED** |
 | BI-LX-2 | SysV message queues | msgget, msgsnd, msgrcv, msgctl | **SHIPPED** |
-| BI-LX-3 | SysV + named POSIX semaphores | semget, semop, semctl, sem_open, sem_close, sem_unlink | **NEXT** |
+| BI-LX-3 | SysV + named POSIX semaphores | semget, semop, semctl, sem_open, sem_close, sem_unlink | **SHIPPED** |
 | BI-LX-4 | memfd_create | memfd_create | queued |
 
 Note: BI-LX-3 covers SysV semaphores plus named POSIX semaphores. Unnamed POSIX
@@ -847,21 +847,22 @@ correlation is available — otherwise thread synchronization would be misclassi
 
 - `docs/slices/bi-lx-1-sysv-shared-memory.md` — SHIPPED
 - `docs/slices/bi-lx-2-sysv-message-queues.md` — SHIPPED
-- `docs/slices/bi-lx-3-semaphores.md` — PLANNED
+- `docs/slices/bi-lx-3-semaphores.md` — SHIPPED
+- `docs/slices/bi-em-1-inter-core-mailbox.md` — SHIPPED
 
 **After BI-LX:**
 
 | Slice | Family | Description | Status |
 |-------|--------|-------------|--------|
-| BI-EM-1 | Inter-core messaging | Mailbox + RPMsg messaging APIs (no remoteproc lifecycle) | PLANNED |
+| BI-EM-1 | Inter-core messaging | Mailbox + RPMsg messaging APIs (no remoteproc lifecycle) | **SHIPPED** |
 | BI-EM-2 | ~~DMA / descriptor-ring~~ | ~~dma_alloc_*, descriptor setup~~ | **WITHDRAWN** |
 
 **BI-EM-2 withdrawal:** DMA API usage is hardware I/O plumbing, not software-to-software
 boundary interaction. Concept deferred to future hardware-resource hints track.
 See `docs/slices/bi-em-2-dma-descriptor-rings.md` for rationale.
 
-BI-EM-1 is embedded/accelerator-focused and depends on real-repo validation
-targets (Linux kernel drivers, NXP BSPs, OpenAMP repos).
+BI-EM-1 smoke validated against Linux kernel drivers/rpmsg + drivers/mailbox.
+See `smoke-runs/2026-05-05T14-30-08Z/` (protocol v3 compliant).
 
 ---
 
@@ -1289,11 +1290,11 @@ Two-track architecture for boundary detection over a unified model:
 **Track A-LX: Linux IPC (priority track)**
 - BI-LX-1: SysV shared memory (shmget, shmat, shmdt, shmctl) — SHIPPED
 - BI-LX-2: SysV message queues (msgget, msgsnd, msgrcv, msgctl) — SHIPPED
-- BI-LX-3: SysV + named POSIX semaphores (semget, semop, sem_open, etc.) — **NEXT**
+- BI-LX-3: SysV + named POSIX semaphores (semget, semop, sem_open, etc.) — **SHIPPED**
 - BI-LX-4: memfd_create — queued
 
-**Track A-EM: Embedded/Inter-core (future)**
-- BI-EM-1: Inter-core messaging (mailbox + RPMsg, no remoteproc) — PLANNED
+**Track A-EM: Embedded/Inter-core**
+- BI-EM-1: Inter-core messaging (mailbox + RPMsg, no remoteproc) — **SHIPPED**
 - ~~BI-EM-2: DMA / descriptor-ring~~ — WITHDRAWN (not boundary interaction)
 
 **Track B: Schema-Backed RPC** — ORIENTATION-SUFFICIENT

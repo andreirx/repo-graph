@@ -1,6 +1,6 @@
 # BI-EM-1: Inter-Core Messaging Detection (Mailbox / RPMsg)
 
-**Status:** PLANNED  
+**Status:** SHIPPED  
 **Slice:** BI-EM-1  
 **Family:** Embedded / Inter-Core  
 **Language:** C (first)
@@ -35,8 +35,11 @@ virtio/shared memory. It provides named endpoints for message exchange.
 Key APIs:
 - `rpmsg_create_ept()` / `rpmsg_destroy_ept()` — endpoint lifecycle
 - `rpmsg_send()` / `rpmsg_trysend()` — send message
-- `rpmsg_recv()` — receive (or callback-based)
+- Receive is callback-based via `rpmsg_rx_cb_t` passed to `rpmsg_create_ept()`
 - `rpmsg_register_device()` — device registration
+
+Note: There is no `rpmsg_recv()` API in the Linux kernel. Receive handling is
+entirely callback-driven through the endpoint creation.
 
 ### Remoteproc (Excluded)
 
@@ -66,15 +69,17 @@ with data-plane semantics.
 
 | Function | Role | Notes |
 |----------|------|-------|
-| `rpmsg_create_ept` | setup | Create endpoint |
+| `rpmsg_create_ept` | setup | Create endpoint (receive via callback) |
 | `rpmsg_destroy_ept` | teardown | Destroy endpoint |
 | `rpmsg_send` | provider | Send message |
 | `rpmsg_sendto` | provider | Send to specific address |
 | `rpmsg_send_offchannel` | provider | Send via specific src/dst |
 | `rpmsg_trysend` | provider | Non-blocking send |
 | `rpmsg_trysendto` | provider | Non-blocking send to address |
-| `rpmsg_recv` | consumer | Receive message (if not callback) |
 | `rpmsg_register_device` | setup | Register RPMsg device |
+
+Note: RPMsg receive is callback-based. There is no `rpmsg_recv()` function in the
+Linux kernel API. The `rpmsg_rx_cb_t` callback is registered at endpoint creation.
 
 **In scope:**
 - C syntax-level detection of mailbox/RPMsg messaging APIs
@@ -134,10 +139,9 @@ proves useful enough to justify schema expansion.
 | `mbox_send_message` | `provider` | Sends to remote |
 | `mbox_client_txdone` | `provider` | TX completion |
 | `mbox_client_peek_data` | `consumer` | Check for inbound data |
-| `rpmsg_create_ept` | `bidirectional` | Creates endpoint |
+| `rpmsg_create_ept` | `bidirectional` | Creates endpoint (receive via callback) |
 | `rpmsg_destroy_ept` | `bidirectional` | Destroys endpoint |
 | `rpmsg_send*` | `provider` | Sends message |
-| `rpmsg_recv` | `consumer` | Receives message |
 | `rpmsg_register_device` | `bidirectional` | Device registration |
 
 ## Evidence Payload
@@ -361,18 +365,6 @@ notes = "Non-blocking send to address."
 [[binding]]
 language = "c"
 api_family = "rpmsg"
-function = "rpmsg_recv"
-role = "consumer"
-channel_kind = "inter_core_channel"
-scope_heuristic = "fixed"
-fixed_scope = "unknown"
-interaction_pattern = "message_passing"
-basis = "api_call"
-notes = "Receive message via RPMsg."
-
-[[binding]]
-language = "c"
-api_family = "rpmsg"
 function = "rpmsg_register_device"
 role = "bidirectional"
 channel_kind = "inter_core_channel"
@@ -393,11 +385,13 @@ const MAILBOX_FUNCTIONS: &[&str] = &[
     "mbox_free_channel", "mbox_send_message",
     "mbox_client_txdone", "mbox_client_peek_data",
 ];
+// Note: rpmsg_recv does not exist in Linux kernel API.
+// Receive is callback-based via rpmsg_rx_cb_t passed to rpmsg_create_ept().
 const RPMSG_FUNCTIONS: &[&str] = &[
     "rpmsg_create_ept", "rpmsg_destroy_ept",
     "rpmsg_send", "rpmsg_sendto", "rpmsg_send_offchannel",
     "rpmsg_trysend", "rpmsg_trysendto",
-    "rpmsg_recv", "rpmsg_register_device",
+    "rpmsg_register_device",
 ];
 ```
 
@@ -463,6 +457,16 @@ drivers/mailbox/
 - Properties verified: channel_kind, scope=unknown, direction
 - No obvious false positives
 - `smoke-runs/` artifacts produced
+
+### Validation Complete
+
+**Smoke run:** `smoke-runs/2026-05-05T14-30-08Z/`
+
+Results:
+- 39 inter_core_channel surfaces detected in Linux kernel subset (drivers/rpmsg + drivers/mailbox)
+- 13 files with boundaries
+- Both mailbox and RPMsg API families detected
+- Protocol-compliant (v3): `00-meta.json` with generator provenance, `boundaries-list.json` (pure JSON), `92-tool-latency.json`
 
 ## Claims
 

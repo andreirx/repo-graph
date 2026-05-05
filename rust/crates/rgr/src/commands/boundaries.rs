@@ -413,8 +413,9 @@ fn parse_channel_kind(s: &str) -> Result<ChannelKind, String> {
         "nats_subject" | "natssubject" | "nats" => Ok(ChannelKind::NatsSubject),
         "serial_port" | "serialport" | "serial" => Ok(ChannelKind::SerialPort),
         "can_message" | "canmessage" | "can" => Ok(ChannelKind::CanMessage),
+        "inter_core_channel" | "intercorechannel" | "inter_core" => Ok(ChannelKind::InterCoreChannel),
         other => Err(format!(
-            "unknown channel kind: {} (try: unix_socket, named_pipe, shared_memory, shared_array_buffer, amqp_queue, kafka_topic, nats_subject, ...)",
+            "unknown channel kind: {} (try: unix_socket, named_pipe, shared_memory, inter_core_channel, ...)",
             other
         )),
     }
@@ -453,6 +454,7 @@ fn parse_protocol_family(s: &str) -> Result<ProtocolFamily, String> {
         "message_queue" | "messagequeue" | "mq" => Ok(ProtocolFamily::MessageQueue),
         "signal" | "signals" | "process_signal" => Ok(ProtocolFamily::Signal),
         "semaphore" | "sem" => Ok(ProtocolFamily::Semaphore),
+        "inter_core" | "intercore" => Ok(ProtocolFamily::InterCore),
         "serial" => Ok(ProtocolFamily::Serial),
         "bus" => Ok(ProtocolFamily::Bus),
         "message_broker" | "messagebroker" | "broker" => Ok(ProtocolFamily::MessageBroker),

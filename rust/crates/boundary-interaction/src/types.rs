@@ -182,6 +182,11 @@ pub enum InteractionPattern {
     /// Used for IPC synchronization mechanisms.
     Synchronization,
 
+    /// Generic message passing (point-to-point or endpoint-based).
+    /// Used for inter-core messaging (mailbox, RPMsg) where the pattern
+    /// is neither stream nor pub/sub but discrete message exchange.
+    MessagePassing,
+
     /// Unknown pattern (used for hint-grade surfaces where pattern cannot
     /// be determined, e.g., GR-1A implementation hints).
     Unknown,
@@ -198,6 +203,7 @@ impl InteractionPattern {
             InteractionPattern::FireAndForget => "fire_and_forget",
             InteractionPattern::SharedState => "shared_state",
             InteractionPattern::Synchronization => "synchronization",
+            InteractionPattern::MessagePassing => "message_passing",
             InteractionPattern::Unknown => "unknown",
         }
     }
@@ -277,6 +283,13 @@ pub enum ChannelKind {
     /// CAN bus message (AF_CAN).
     CanMessage,
 
+    // ── BI-EM-1: Inter-core messaging ─────────────────────────────────
+    /// Inter-core communication channel (mailbox, RPMsg).
+    /// Used for heterogeneous multi-core SoCs (MPU + MCU, Linux + RTOS).
+    /// Scope: unknown (same-SoC inter-core doesn't fit inter_process or inter_device).
+    /// Transport class: raw_ipc.
+    InterCoreChannel,
+
     // ── MB-1A: AMQP / RabbitMQ ──────────────────────────────────────
     /// AMQP queue (RabbitMQ, direct amqplib).
     /// Transport class: message_broker.
@@ -347,6 +360,7 @@ impl ChannelKind {
             ChannelKind::NatsSubject => "nats_subject",
             ChannelKind::SerialPort => "serial_port",
             ChannelKind::CanMessage => "can_message",
+            ChannelKind::InterCoreChannel => "inter_core_channel",
             ChannelKind::MqttTopic => "mqtt_topic",
             ChannelKind::DbusInterface => "dbus_interface",
             ChannelKind::ZeromqSocket => "zeromq_socket",
@@ -384,6 +398,11 @@ impl ChannelKind {
     /// Whether this channel kind is in scope for BI-LX-3 (semaphores).
     pub const fn is_bi_lx_3(self) -> bool {
         matches!(self, ChannelKind::Semaphore)
+    }
+
+    /// Whether this channel kind is in scope for BI-EM-1 (inter-core messaging).
+    pub const fn is_bi_em_1(self) -> bool {
+        matches!(self, ChannelKind::InterCoreChannel)
     }
 
     /// Whether this channel kind is in scope for Slice 1C (SharedArrayBuffer).
@@ -428,7 +447,8 @@ impl ChannelKind {
             | ChannelKind::MessageQueue
             | ChannelKind::Semaphore
             | ChannelKind::ProcessSignal
-            | ChannelKind::SharedArrayBuffer => TransportClass::RawIpc,
+            | ChannelKind::SharedArrayBuffer
+            | ChannelKind::InterCoreChannel => TransportClass::RawIpc,
 
             // Schema-backed RPC
             ChannelKind::GrpcChannel
@@ -482,6 +502,9 @@ pub enum ProtocolFamily {
     /// Semaphores (SysV, POSIX named).
     Semaphore,
 
+    /// Inter-core messaging (mailbox, RPMsg).
+    InterCore,
+
     /// Schema-backed RPC (gRPC, protobuf, eRPC).
     Rpc,
 
@@ -514,6 +537,7 @@ impl ProtocolFamily {
             ProtocolFamily::MessageQueue => "message_queue",
             ProtocolFamily::Signal => "signal",
             ProtocolFamily::Semaphore => "semaphore",
+            ProtocolFamily::InterCore => "inter_core",
             ProtocolFamily::Rpc => "rpc",
             ProtocolFamily::Serial => "serial",
             ProtocolFamily::Bus => "bus",
@@ -537,6 +561,7 @@ impl From<ChannelKind> for ProtocolFamily {
             }
             ChannelKind::MessageQueue => ProtocolFamily::MessageQueue,
             ChannelKind::Semaphore => ProtocolFamily::Semaphore,
+            ChannelKind::InterCoreChannel => ProtocolFamily::InterCore,
             ChannelKind::ProcessSignal => ProtocolFamily::Signal,
             ChannelKind::GrpcChannel | ChannelKind::ProtobufStream | ChannelKind::ErpcChannel => {
                 ProtocolFamily::Rpc

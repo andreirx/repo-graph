@@ -612,6 +612,191 @@ arg_index = 0
 notes = "Remove named semaphore. Arg0 is name."
 
 # ════════════════════════════════════════════════════════════════════════
+# MAILBOX FRAMEWORK (BI-EM-1)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Hardware mailbox controllers for inter-core communication.
+# Linux kernel mailbox framework: drivers/mailbox/
+# Scope: unknown (same-SoC inter-core doesn't fit inter_process or inter_device)
+
+[[binding]]
+language = "c"
+api_family = "mailbox"
+function = "mbox_request_channel"
+role = "bidirectional"
+channel_kind = "inter_core_channel"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "message_passing"
+basis = "api_call"
+notes = "Request mailbox channel from controller."
+
+[[binding]]
+language = "c"
+api_family = "mailbox"
+function = "mbox_request_channel_byname"
+role = "bidirectional"
+channel_kind = "inter_core_channel"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "message_passing"
+basis = "api_call"
+arg_index = 1
+notes = "Request mailbox channel by name. Arg1 is name."
+
+[[binding]]
+language = "c"
+api_family = "mailbox"
+function = "mbox_free_channel"
+role = "bidirectional"
+channel_kind = "inter_core_channel"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "message_passing"
+basis = "api_call"
+notes = "Release mailbox channel."
+
+[[binding]]
+language = "c"
+api_family = "mailbox"
+function = "mbox_send_message"
+role = "provider"
+channel_kind = "inter_core_channel"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+notes = "Send message/doorbell to remote core."
+
+[[binding]]
+language = "c"
+api_family = "mailbox"
+function = "mbox_client_txdone"
+role = "provider"
+channel_kind = "inter_core_channel"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+notes = "TX completion notification."
+
+[[binding]]
+language = "c"
+api_family = "mailbox"
+function = "mbox_client_peek_data"
+role = "consumer"
+channel_kind = "inter_core_channel"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "message_passing"
+basis = "api_call"
+notes = "Check for pending inbound data."
+
+# ════════════════════════════════════════════════════════════════════════
+# RPMSG - Remote Processor Messaging (BI-EM-1)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Higher-level protocol for inter-core messaging built on virtio/shared memory.
+# Linux kernel RPMsg: drivers/rpmsg/
+# Scope: unknown (same-SoC inter-core doesn't fit inter_process or inter_device)
+
+[[binding]]
+language = "c"
+api_family = "rpmsg"
+function = "rpmsg_create_ept"
+role = "bidirectional"
+channel_kind = "inter_core_channel"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "message_passing"
+basis = "api_call"
+notes = "Create RPMsg endpoint."
+
+[[binding]]
+language = "c"
+api_family = "rpmsg"
+function = "rpmsg_destroy_ept"
+role = "bidirectional"
+channel_kind = "inter_core_channel"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "message_passing"
+basis = "api_call"
+notes = "Destroy RPMsg endpoint."
+
+[[binding]]
+language = "c"
+api_family = "rpmsg"
+function = "rpmsg_send"
+role = "provider"
+channel_kind = "inter_core_channel"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "message_passing"
+basis = "api_call"
+notes = "Send message via RPMsg."
+
+[[binding]]
+language = "c"
+api_family = "rpmsg"
+function = "rpmsg_sendto"
+role = "provider"
+channel_kind = "inter_core_channel"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "message_passing"
+basis = "api_call"
+notes = "Send message to specific RPMsg address."
+
+[[binding]]
+language = "c"
+api_family = "rpmsg"
+function = "rpmsg_send_offchannel"
+role = "provider"
+channel_kind = "inter_core_channel"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "message_passing"
+basis = "api_call"
+notes = "Send via specific src/dst."
+
+[[binding]]
+language = "c"
+api_family = "rpmsg"
+function = "rpmsg_trysend"
+role = "provider"
+channel_kind = "inter_core_channel"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "message_passing"
+basis = "api_call"
+notes = "Non-blocking RPMsg send."
+
+[[binding]]
+language = "c"
+api_family = "rpmsg"
+function = "rpmsg_trysendto"
+role = "provider"
+channel_kind = "inter_core_channel"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "message_passing"
+basis = "api_call"
+notes = "Non-blocking send to address."
+
+[[binding]]
+language = "c"
+api_family = "rpmsg"
+function = "rpmsg_register_device"
+role = "bidirectional"
+channel_kind = "inter_core_channel"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "message_passing"
+basis = "api_call"
+notes = "Register RPMsg device with subsystem."
+
+# ════════════════════════════════════════════════════════════════════════
 # POSIX MESSAGE QUEUES
 # ════════════════════════════════════════════════════════════════════════
 #

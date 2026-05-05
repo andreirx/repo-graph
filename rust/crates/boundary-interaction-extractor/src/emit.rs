@@ -431,11 +431,12 @@ impl BoundaryInteractionEmitter {
                 }
             }
 
-            // Anonymous pipes, message queues, semaphores, process signals — no guards needed
+            // Anonymous pipes, message queues, semaphores, process signals, inter-core — no guards needed
             ChannelKind::AnonymousPipe
             | ChannelKind::MessageQueue
             | ChannelKind::Semaphore
-            | ChannelKind::ProcessSignal => true,
+            | ChannelKind::ProcessSignal
+            | ChannelKind::InterCoreChannel => true,
 
             // SharedArrayBuffer (BI-1C) — no guards needed, all detection is pattern-based
             ChannelKind::SharedArrayBuffer => true,
@@ -716,6 +717,7 @@ fn protocol_for_channel_kind(kind: ChannelKind) -> &'static str {
         ChannelKind::ErpcChannel => "erpc",
         ChannelKind::SerialPort => "serial",
         ChannelKind::CanMessage => "can",
+        ChannelKind::InterCoreChannel => "inter_core",
         ChannelKind::MqttTopic => "mqtt",
         ChannelKind::DbusInterface => "dbus",
         ChannelKind::ZeromqSocket => "zmq",
