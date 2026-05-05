@@ -501,6 +501,117 @@ basis = "api_call"
 notes = "Control SysV message queue. Arg0 is msqid, arg1 is cmd (IPC_RMID, IPC_STAT, etc.)."
 
 # ════════════════════════════════════════════════════════════════════════
+# SYSV SEMAPHORES (BI-LX-3)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: semget/semop/semtimedop/semctl API usage.
+# Scope: always inter_process (SysV semaphores are system-wide).
+# Direction: bidirectional (semop can increment or decrement).
+# Interaction: synchronization.
+#
+# See docs/slices/bi-lx-3-semaphores.md for design.
+
+[[binding]]
+language = "c"
+api_family = "sysv_sem"
+function = "semget"
+role = "bidirectional"
+channel_kind = "semaphore"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "synchronization"
+basis = "api_call"
+arg_index = 0
+notes = "Create/open SysV semaphore set. Arg0 is key, arg1 is nsems, arg2 is flags."
+
+[[binding]]
+language = "c"
+api_family = "sysv_sem"
+function = "semop"
+role = "bidirectional"
+channel_kind = "semaphore"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "synchronization"
+basis = "api_call"
+notes = "Perform semaphore operations. Direction depends on sembuf.sem_op sign."
+
+[[binding]]
+language = "c"
+api_family = "sysv_sem"
+function = "semtimedop"
+role = "bidirectional"
+channel_kind = "semaphore"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "synchronization"
+basis = "api_call"
+notes = "Perform semaphore operations with timeout."
+
+[[binding]]
+language = "c"
+api_family = "sysv_sem"
+function = "semctl"
+role = "bidirectional"
+channel_kind = "semaphore"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "synchronization"
+basis = "api_call"
+notes = "Control SysV semaphore set. Arg0 is semid, arg1 is semnum, arg2 is cmd."
+
+# ════════════════════════════════════════════════════════════════════════
+# NAMED POSIX SEMAPHORES (BI-LX-3)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: sem_open/sem_close/sem_unlink API usage.
+# Scope: always inter_process (named semaphores are system-wide).
+# Direction: bidirectional (lifecycle operations, role unclear).
+# Interaction: synchronization.
+#
+# NOTE: Unnamed POSIX semaphore operations (sem_wait, sem_post, etc.) are
+# DEFERRED until identity correlation or pshared=1 proof is available.
+# See docs/slices/bi-lx-3-semaphores.md for rationale.
+
+[[binding]]
+language = "c"
+api_family = "posix_sem"
+function = "sem_open"
+role = "bidirectional"
+channel_kind = "semaphore"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "synchronization"
+basis = "api_call"
+arg_index = 0
+notes = "Open/create named semaphore. Arg0 is name (starts with /)."
+
+[[binding]]
+language = "c"
+api_family = "posix_sem"
+function = "sem_close"
+role = "bidirectional"
+channel_kind = "semaphore"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "synchronization"
+basis = "api_call"
+notes = "Close named semaphore."
+
+[[binding]]
+language = "c"
+api_family = "posix_sem"
+function = "sem_unlink"
+role = "bidirectional"
+channel_kind = "semaphore"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "synchronization"
+basis = "api_call"
+arg_index = 0
+notes = "Remove named semaphore. Arg0 is name."
+
+# ════════════════════════════════════════════════════════════════════════
 # POSIX MESSAGE QUEUES
 # ════════════════════════════════════════════════════════════════════════
 #

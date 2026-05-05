@@ -640,6 +640,7 @@ fn parse_channel_kind(s: &str) -> Result<ChannelKind, BoundaryInteractionReadErr
         "anonymous_pipe" => Ok(ChannelKind::AnonymousPipe),
         "shared_memory" => Ok(ChannelKind::SharedMemory),
         "message_queue" => Ok(ChannelKind::MessageQueue),
+        "semaphore" => Ok(ChannelKind::Semaphore),
         "process_signal" => Ok(ChannelKind::ProcessSignal),
         "tcp_socket" => Ok(ChannelKind::TcpSocket),
         "udp_socket" => Ok(ChannelKind::UdpSocket),
@@ -700,6 +701,7 @@ fn parse_protocol_family(s: &str) -> Result<ProtocolFamily, BoundaryInteractionR
         "shared_memory" => Ok(ProtocolFamily::SharedMemory),
         "message_queue" => Ok(ProtocolFamily::MessageQueue),
         "signal" => Ok(ProtocolFamily::Signal),
+        "semaphore" => Ok(ProtocolFamily::Semaphore),
         "rpc" => Ok(ProtocolFamily::Rpc),
         "serial" => Ok(ProtocolFamily::Serial),
         "bus" => Ok(ProtocolFamily::Bus),
@@ -722,6 +724,7 @@ fn parse_interaction_pattern(s: &str) -> Result<InteractionPattern, BoundaryInte
         "datagram" => Ok(InteractionPattern::Datagram),
         "fire_and_forget" => Ok(InteractionPattern::FireAndForget),
         "shared_state" => Ok(InteractionPattern::SharedState),
+        "synchronization" => Ok(InteractionPattern::Synchronization),
         "unknown" => Ok(InteractionPattern::Unknown),
         other => Err(BoundaryInteractionReadError::Storage(format!(
             "unrecognized interaction_pattern: '{}'",

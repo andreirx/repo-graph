@@ -3183,3 +3183,406 @@ fn boundaries_list_filter_scope_inter_process_includes_sysv_msgq() {
         result["count"]
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// BI-LX-3: SEMAPHORES CLI ADAPTER TESTS
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Create a test repo with SysV semaphore usage.
+fn create_test_repo_with_sysv_sem(dir: &std::path::Path) {
+    let src = dir.join("sysv_sem.c");
+    let mut f = File::create(&src).unwrap();
+    writeln!(f, "#include <sys/ipc.h>").unwrap();
+    writeln!(f, "#include <sys/sem.h>").unwrap();
+    writeln!(f, "void use_sysv_semaphore() {{").unwrap();
+    writeln!(f, "    int semid = semget(0xABCD, 1, IPC_CREAT | 0644);").unwrap();
+    writeln!(f, "    struct sembuf op = {{ 0, -1, 0 }};").unwrap();
+    writeln!(f, "    semop(semid, &op, 1);").unwrap();
+    writeln!(f, "    semctl(semid, 0, IPC_RMID);").unwrap();
+    writeln!(f, "}}").unwrap();
+}
+
+/// Create a test repo with POSIX named semaphore usage.
+fn create_test_repo_with_posix_named_sem(dir: &std::path::Path) {
+    let src = dir.join("posix_named.c");
+    let mut f = File::create(&src).unwrap();
+    writeln!(f, "#include <fcntl.h>").unwrap();
+    writeln!(f, "#include <semaphore.h>").unwrap();
+    writeln!(f, "void use_posix_named_semaphore() {{").unwrap();
+    writeln!(f, "    sem_t *sem = sem_open(\"/my_sem\", O_CREAT, 0644, 1);").unwrap();
+    writeln!(f, "    sem_close(sem);").unwrap();
+    writeln!(f, "    sem_unlink(\"/my_sem\");").unwrap();
+    writeln!(f, "}}").unwrap();
+}
+
+/// Create a test repo with both SysV and POSIX named semaphores.
+fn create_test_repo_with_all_semaphores(dir: &std::path::Path) {
+    create_test_repo_with_sysv_sem(dir);
+    create_test_repo_with_posix_named_sem(dir);
+}
+
+/// Build a DB with SysV semaphore surfaces only.
+fn build_indexed_db_with_sysv_sem() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_test_repo_with_sysv_sem(&repo_path);
+
+    let db_path = dir.path().join("test.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "sysv-sem-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 1);
+
+    (dir, db_path, repo_path)
+}
+
+/// Build a DB with POSIX named semaphore surfaces only.
+fn build_indexed_db_with_posix_named_sem() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_test_repo_with_posix_named_sem(&repo_path);
+
+    let db_path = dir.path().join("test.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "posix-sem-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 1);
+
+    (dir, db_path, repo_path)
+}
+
+/// Build a DB with both SysV and POSIX named semaphore surfaces.
+fn build_indexed_db_with_all_semaphores() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_test_repo_with_all_semaphores(&repo_path);
+
+    let db_path = dir.path().join("test.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "all-sem-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 2);
+
+    (dir, db_path, repo_path)
+}
+
+#[test]
+fn boundaries_list_sysv_semaphores_included_in_semaphore_kind() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_sysv_sem();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "sysv-sem-repo",
+            "--kind",
+            "semaphore",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Should have 3 surfaces: semget, semop, semctl
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(
+        count, 3,
+        "expected 3 SysV sem surfaces; got {}",
+        count
+    );
+
+    // Verify all are semaphore
+    let surfaces = result["results"].as_array().unwrap();
+    for surface in surfaces {
+        assert_eq!(
+            surface["channelKind"], "semaphore",
+            "expected semaphore channel kind"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_posix_named_semaphores_included_in_semaphore_kind() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_posix_named_sem();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "posix-sem-repo",
+            "--kind",
+            "semaphore",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Should have 3 surfaces: sem_open, sem_close, sem_unlink
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(
+        count, 3,
+        "expected 3 POSIX named sem surfaces; got {}",
+        count
+    );
+
+    // Verify all are semaphore
+    let surfaces = result["results"].as_array().unwrap();
+    for surface in surfaces {
+        assert_eq!(
+            surface["channelKind"], "semaphore",
+            "expected semaphore channel kind"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_kind_sem_alias_works() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_sysv_sem();
+
+    // Test using "sem" alias instead of "semaphore"
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "sysv-sem-repo",
+            "--kind",
+            "sem",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0 with --kind sem alias; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(
+        result["count"], 3,
+        "expected 3 surfaces with --kind sem; got {}",
+        result["count"]
+    );
+}
+
+#[test]
+fn boundaries_list_semaphores_have_inter_process_scope() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_all_semaphores();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "all-sem-repo",
+            "--kind",
+            "semaphore",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    // All semaphore surfaces should have inter_process scope
+    let surfaces = result["results"].as_array().unwrap();
+    for surface in surfaces {
+        assert_eq!(
+            surface["boundaryScope"], "inter_process",
+            "semaphore surfaces should have inter_process scope"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_semaphores_have_synchronization_pattern() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_all_semaphores();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "all-sem-repo",
+            "--kind",
+            "semaphore",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    // All semaphore surfaces should have synchronization pattern
+    let surfaces = result["results"].as_array().unwrap();
+    for surface in surfaces {
+        assert_eq!(
+            surface["interactionPattern"], "synchronization",
+            "semaphore surfaces should have synchronization pattern (per BI-LX-3 design)"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_semaphores_are_bidirectional() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_all_semaphores();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "all-sem-repo",
+            "--kind",
+            "semaphore",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    // All semaphore surfaces should be bidirectional (sync primitives have no direction)
+    let surfaces = result["results"].as_array().unwrap();
+    for surface in surfaces {
+        assert_eq!(
+            surface["direction"], "bidirectional",
+            "semaphore surfaces should be bidirectional (per BI-LX-3 design)"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_filter_scope_inter_process_includes_semaphores() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_all_semaphores();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "all-sem-repo",
+            "--scope",
+            "inter_process",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    // All 6 semaphore surfaces should appear (3 SysV + 3 POSIX named)
+    assert_eq!(
+        result["count"], 6,
+        "expected 6 surfaces with inter_process scope; got {}",
+        result["count"]
+    );
+}
+
+#[test]
+fn boundaries_list_mixed_semaphores_both_families_detected() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_all_semaphores();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "all-sem-repo",
+            "--kind",
+            "semaphore",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    let surfaces = result["results"].as_array().unwrap();
+    assert_eq!(surfaces.len(), 6, "expected 6 total semaphore surfaces");
+
+    // Count by provenance to verify both SysV and POSIX are detected.
+    // Provenance format: "api:<family>:<function>"
+    let sysv_count = surfaces
+        .iter()
+        .filter(|s| {
+            s["provenance"]
+                .as_str()
+                .map(|p| p.contains(":sysv_sem:"))
+                .unwrap_or(false)
+        })
+        .count();
+    let posix_count = surfaces
+        .iter()
+        .filter(|s| {
+            s["provenance"]
+                .as_str()
+                .map(|p| p.contains(":posix_sem:"))
+                .unwrap_or(false)
+        })
+        .count();
+
+    assert_eq!(sysv_count, 3, "expected 3 SysV semaphore surfaces");
+    assert_eq!(posix_count, 3, "expected 3 POSIX named semaphore surfaces");
+}

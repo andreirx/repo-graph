@@ -178,6 +178,10 @@ pub enum InteractionPattern {
     /// doc section 4.4.
     SharedState,
 
+    /// Synchronization primitive (semaphore, mutex, condition variable).
+    /// Used for IPC synchronization mechanisms.
+    Synchronization,
+
     /// Unknown pattern (used for hint-grade surfaces where pattern cannot
     /// be determined, e.g., GR-1A implementation hints).
     Unknown,
@@ -193,6 +197,7 @@ impl InteractionPattern {
             InteractionPattern::Datagram => "datagram",
             InteractionPattern::FireAndForget => "fire_and_forget",
             InteractionPattern::SharedState => "shared_state",
+            InteractionPattern::Synchronization => "synchronization",
             InteractionPattern::Unknown => "unknown",
         }
     }
@@ -227,6 +232,12 @@ pub enum ChannelKind {
 
     /// POSIX message queue (mq_open).
     MessageQueue,
+
+    // ── BI-LX-3: Semaphores ───────────────────────────────────────────
+    /// IPC semaphore (SysV semget/semop, POSIX sem_open).
+    /// Scope: inter_process (both SysV and named POSIX are IPC-capable).
+    /// Transport class: raw_ipc.
+    Semaphore,
 
     // ── Slice 1D: Process signals ─────────────────────────────────────
     /// POSIX signal (kill, signal, sigaction).
@@ -323,6 +334,7 @@ impl ChannelKind {
             ChannelKind::AnonymousPipe => "anonymous_pipe",
             ChannelKind::SharedMemory => "shared_memory",
             ChannelKind::MessageQueue => "message_queue",
+            ChannelKind::Semaphore => "semaphore",
             ChannelKind::ProcessSignal => "process_signal",
             ChannelKind::TcpSocket => "tcp_socket",
             ChannelKind::UdpSocket => "udp_socket",
@@ -369,6 +381,11 @@ impl ChannelKind {
         matches!(self, ChannelKind::ProcessSignal)
     }
 
+    /// Whether this channel kind is in scope for BI-LX-3 (semaphores).
+    pub const fn is_bi_lx_3(self) -> bool {
+        matches!(self, ChannelKind::Semaphore)
+    }
+
     /// Whether this channel kind is in scope for Slice 1C (SharedArrayBuffer).
     pub const fn is_slice_1c(self) -> bool {
         matches!(self, ChannelKind::SharedArrayBuffer)
@@ -409,6 +426,7 @@ impl ChannelKind {
             | ChannelKind::AnonymousPipe
             | ChannelKind::SharedMemory
             | ChannelKind::MessageQueue
+            | ChannelKind::Semaphore
             | ChannelKind::ProcessSignal
             | ChannelKind::SharedArrayBuffer => TransportClass::RawIpc,
 
@@ -461,6 +479,9 @@ pub enum ProtocolFamily {
     /// Process signals (POSIX signals).
     Signal,
 
+    /// Semaphores (SysV, POSIX named).
+    Semaphore,
+
     /// Schema-backed RPC (gRPC, protobuf, eRPC).
     Rpc,
 
@@ -492,6 +513,7 @@ impl ProtocolFamily {
             ProtocolFamily::SharedMemory => "shared_memory",
             ProtocolFamily::MessageQueue => "message_queue",
             ProtocolFamily::Signal => "signal",
+            ProtocolFamily::Semaphore => "semaphore",
             ProtocolFamily::Rpc => "rpc",
             ProtocolFamily::Serial => "serial",
             ProtocolFamily::Bus => "bus",
@@ -514,6 +536,7 @@ impl From<ChannelKind> for ProtocolFamily {
                 ProtocolFamily::SharedMemory
             }
             ChannelKind::MessageQueue => ProtocolFamily::MessageQueue,
+            ChannelKind::Semaphore => ProtocolFamily::Semaphore,
             ChannelKind::ProcessSignal => ProtocolFamily::Signal,
             ChannelKind::GrpcChannel | ChannelKind::ProtobufStream | ChannelKind::ErpcChannel => {
                 ProtocolFamily::Rpc

@@ -431,8 +431,11 @@ impl BoundaryInteractionEmitter {
                 }
             }
 
-            // Anonymous pipes, message queues, process signals — no guards needed
-            ChannelKind::AnonymousPipe | ChannelKind::MessageQueue | ChannelKind::ProcessSignal => true,
+            // Anonymous pipes, message queues, semaphores, process signals — no guards needed
+            ChannelKind::AnonymousPipe
+            | ChannelKind::MessageQueue
+            | ChannelKind::Semaphore
+            | ChannelKind::ProcessSignal => true,
 
             // SharedArrayBuffer (BI-1C) — no guards needed, all detection is pattern-based
             ChannelKind::SharedArrayBuffer => true,
@@ -465,7 +468,8 @@ impl BoundaryInteractionEmitter {
                     ChannelKind::UnixSocket
                     | ChannelKind::NamedPipe
                     | ChannelKind::SharedMemory
-                    | ChannelKind::MessageQueue => EndpointLocality::SameHostNamed,
+                    | ChannelKind::MessageQueue
+                    | ChannelKind::Semaphore => EndpointLocality::SameHostNamed,
                     ChannelKind::AnonymousPipe => EndpointLocality::SameHostNamed,
                     _ => EndpointLocality::Unknown,
                 };
@@ -701,6 +705,7 @@ fn protocol_for_channel_kind(kind: ChannelKind) -> &'static str {
         ChannelKind::AnonymousPipe => "pipe",
         ChannelKind::SharedMemory => "shm",
         ChannelKind::MessageQueue => "mqueue",
+        ChannelKind::Semaphore => "sem",
         ChannelKind::ProcessSignal => "signal",
         ChannelKind::SharedArrayBuffer => "sab",
         ChannelKind::AmqpQueue => "amqp",

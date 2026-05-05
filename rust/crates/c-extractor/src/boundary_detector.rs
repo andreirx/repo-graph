@@ -102,6 +102,10 @@ const SIGNAL_FUNCTIONS: &[&str] = &[
 const SYSV_SHM_FUNCTIONS: &[&str] = &["shmget", "shmat", "shmdt", "shmctl"];
 /// SysV message queue functions for BI-LX-2.
 const SYSV_MSGQ_FUNCTIONS: &[&str] = &["msgget", "msgsnd", "msgrcv", "msgctl"];
+/// SysV semaphore functions for BI-LX-3.
+const SYSV_SEM_FUNCTIONS: &[&str] = &["semget", "semop", "semtimedop", "semctl"];
+/// Named POSIX semaphore functions for BI-LX-3.
+const POSIX_NAMED_SEM_FUNCTIONS: &[&str] = &["sem_open", "sem_close", "sem_unlink"];
 
 /// Check if a function name is a boundary interaction candidate.
 pub fn is_boundary_function(name: &str) -> bool {
@@ -113,6 +117,8 @@ pub fn is_boundary_function(name: &str) -> bool {
         || SIGNAL_FUNCTIONS.contains(&name)
         || SYSV_SHM_FUNCTIONS.contains(&name)
         || SYSV_MSGQ_FUNCTIONS.contains(&name)
+        || SYSV_SEM_FUNCTIONS.contains(&name)
+        || POSIX_NAMED_SEM_FUNCTIONS.contains(&name)
 }
 
 /// Extract boundary calls from a parsed C file.
@@ -373,6 +379,41 @@ fn try_extract_boundary_call(
             //
             // Only msgget has the key. For others, channel identity requires
             // callsite correlation (deferred). Just detect the call.
+        }
+
+        // ── BI-LX-3: Semaphore functions ──────────────────────────────────
+        "semget" | "semop" | "semtimedop" | "semctl" => {
+            // semget(key, nsems, semflg) — key is arg0
+            // semop(semid, sops, nsops) — semid is runtime
+            // semtimedop(semid, sops, nsops, timeout) — semid is runtime
+            // semctl(semid, semnum, cmd, ...) — semid is runtime
+            //
+            // Only semget has the key. For others, channel identity requires
+            // callsite correlation (deferred). Just detect the call.
+        }
+
+        "sem_open" => {
+            // sem_open(name, oflag, ...) — name is arg0
+            if let Some(arg0) = args.first() {
+                if let Some(name) = extract_string_literal(arg0) {
+                    call.extracted_argument = Some(name);
+                    call.argument_index = Some(0);
+                }
+            }
+        }
+
+        "sem_close" | "sem_unlink" => {
+            // sem_close(sem) — sem is descriptor, no name
+            // sem_unlink(name) — name is arg0
+            if function_name == "sem_unlink" {
+                if let Some(arg0) = args.first() {
+                    if let Some(name) = extract_string_literal(arg0) {
+                        call.extracted_argument = Some(name);
+                        call.argument_index = Some(0);
+                    }
+                }
+            }
+            // sem_close takes descriptor, cannot extract name without tracking
         }
 
         _ => {}
@@ -1055,5 +1096,129 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].function_name, "kill");
         assert_eq!(calls[0].extracted_argument, None); // Variable, can't extract
+    }
+
+    // ── BI-LX-3: Semaphore detection tests ────────────────────────────
+
+    #[test]
+    fn semget_is_detected() {
+        let source = r#"
+            void create_sem() {
+                int semid = semget(0x1234, 2, IPC_CREAT | 0644);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "semget");
+        assert_eq!(calls[0].enclosing_function, "create_sem");
+    }
+
+    #[test]
+    fn semop_is_detected() {
+        let source = r#"
+            void sem_wait() {
+                struct sembuf sop;
+                semop(semid, &sop, 1);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "semop");
+    }
+
+    #[test]
+    fn semtimedop_is_detected() {
+        let source = r#"
+            void sem_timed_wait() {
+                struct sembuf sop;
+                struct timespec ts;
+                semtimedop(semid, &sop, 1, &ts);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "semtimedop");
+    }
+
+    #[test]
+    fn semctl_is_detected() {
+        let source = r#"
+            void remove_sem() {
+                semctl(semid, 0, IPC_RMID);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "semctl");
+    }
+
+    #[test]
+    fn sem_open_extracts_name() {
+        let source = r#"
+            void open_sem() {
+                sem_t *sem = sem_open("/my_sem", O_CREAT, 0644, 1);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "sem_open");
+        assert_eq!(calls[0].extracted_argument, Some("/my_sem".to_string()));
+        assert_eq!(calls[0].argument_index, Some(0));
+    }
+
+    #[test]
+    fn sem_close_is_detected() {
+        let source = r#"
+            void close_sem(sem_t *sem) {
+                sem_close(sem);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "sem_close");
+        // sem_close takes descriptor, no name extraction
+        assert_eq!(calls[0].extracted_argument, None);
+    }
+
+    #[test]
+    fn sem_unlink_extracts_name() {
+        let source = r#"
+            void unlink_sem() {
+                sem_unlink("/my_sem");
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "sem_unlink");
+        assert_eq!(calls[0].extracted_argument, Some("/my_sem".to_string()));
+        assert_eq!(calls[0].argument_index, Some(0));
+    }
+
+    #[test]
+    fn multiple_sysv_sem_calls() {
+        let source = r#"
+            void use_semaphore() {
+                int semid = semget(0x1234, 1, IPC_CREAT);
+                struct sembuf sop = {0, -1, 0};
+                semop(semid, &sop, 1);
+                sop.sem_op = 1;
+                semop(semid, &sop, 1);
+                semctl(semid, 0, IPC_RMID);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 4);
+        assert_eq!(calls[0].function_name, "semget");
+        assert_eq!(calls[1].function_name, "semop");
+        assert_eq!(calls[2].function_name, "semop");
+        assert_eq!(calls[3].function_name, "semctl");
     }
 }
