@@ -796,58 +796,101 @@ surfacing, risk prioritization) is the primary product direction.
 
 ## Next
 
-### Near-term execution sequence
+### Precedence Rule (binding)
 
-This section reflects dependency-aware execution order, not strategic
-importance ranking. Strategic priorities (quality discovery, daemon, delta
-indexing) are listed below in their own sections, but this sequence is
-what actually gets built next.
+The roadmap exposes multiple "next" concepts. Without explicit precedence,
+sequencing drifts. This rule is binding:
 
-**Discovery work outranks enforcement refinement**, but within discovery
-we still prefer breadth-first expansion of core relationship families
-until real-repo use proves a depth gap. Agents need discovery surfaces
-before governance verdict refinement. That includes structural, boundary,
-broker, and quality discovery; sequencing within discovery remains
-breadth-first unless a real workflow gap forces depth.
+**Priority order:**
 
-**Sequencing rule:** Prefer breadth-first coverage of major relationship
-and mechanism families over deeper refinement of a single family or
-discovery axis. Return to depth only when real-repo navigation shows
-the shallow surface is insufficient.
+1. **New discovery mechanism families** — breadth over depth
+2. **Incomplete high-value mechanism-family support modules becoming user-visible**
+3. **Cross-cutting discovery surfaces** (quality diff, risk prioritization)
+4. **Mechanism-family depth refinements** (correlation, linking, role inference)
+5. **Policy-fact depth** (PF-3+)
+6. **Governance/enforcement refinement**
+
+**Concrete examples:**
+
+- Linux IPC family expansion outranks snapshot diff
+- Message broker breadth outranks policy-fact depth
+- Embedded/inter-core transport discovery outranks quality delta surfacing
+- SysV shared memory outranks fd-tracking completion for TCP/UDP
+
+**What this means:**
+
+Discovery-first. Breadth-first within discovery. Mechanism coverage before
+cross-cutting refinement. Depth only when real navigation proves a gap.
+
+---
+
+### Immediate: Linux IPC Family Expansion (BI-LX)
+
+Linux/Unix IPC mechanisms are high-value discovery targets for legacy C
+codebases, embedded systems, and kernel-adjacent code. These outrank
+quality diff, policy-fact depth, and TCP/UDP role refinement.
+
+**Slice queue:**
+
+| Slice | Family | Functions | Status |
+|-------|--------|-----------|--------|
+| BI-LX-1 | SysV shared memory | shmget, shmat, shmdt, shmctl | **SHIPPED** |
+| BI-LX-2 | SysV message queues | msgget, msgsnd, msgrcv, msgctl | **SHIPPED** |
+| BI-LX-3 | SysV + named POSIX semaphores | semget, semop, semctl, sem_open, sem_close, sem_unlink | **NEXT** |
+| BI-LX-4 | memfd_create | memfd_create | queued |
+
+Note: BI-LX-3 covers SysV semaphores plus named POSIX semaphores. Unnamed POSIX
+semaphore operations (sem_wait, sem_post, etc.) are deferred until pshared/identity
+correlation is available — otherwise thread synchronization would be misclassified as IPC.
+
+**Slice docs:**
+
+- `docs/slices/bi-lx-1-sysv-shared-memory.md` — SHIPPED
+- `docs/slices/bi-lx-2-sysv-message-queues.md` — SHIPPED
+- `docs/slices/bi-lx-3-semaphores.md` — PLANNED
+
+**After BI-LX:**
+
+| Slice | Family | Description | Status |
+|-------|--------|-------------|--------|
+| BI-EM-1 | Inter-core messaging | Mailbox + RPMsg messaging APIs (no remoteproc lifecycle) | PLANNED |
+| BI-EM-2 | ~~DMA / descriptor-ring~~ | ~~dma_alloc_*, descriptor setup~~ | **WITHDRAWN** |
+
+**BI-EM-2 withdrawal:** DMA API usage is hardware I/O plumbing, not software-to-software
+boundary interaction. Concept deferred to future hardware-resource hints track.
+See `docs/slices/bi-em-2-dma-descriptor-rings.md` for rationale.
+
+BI-EM-1 is embedded/accelerator-focused and depends on real-repo validation
+targets (Linux kernel drivers, NXP BSPs, OpenAMP repos).
+
+---
+
+### Deferred (explicitly not next)
+
+The following are valuable but explicitly lower priority than BI-LX:
+
+- **Snapshot-to-snapshot quality diff** — cross-cutting, not mechanism breadth
+- **Quality delta surfacing** — cross-cutting, not mechanism breadth
+- **PF-3 (RETURN_FATE)** — policy-fact depth, not discovery breadth
+- **BI-1B fd-tracking completion** — TCP/UDP depth, not new mechanism family
+- **MB-3B (NATS request/reply)** — broker depth, not new mechanism family
+
+Return to these after Linux IPC coverage is sufficient.
+
+---
+
+### Previously listed execution sequence
+
+Items 1-2 are done. Items 3-8 are deferred per precedence rule above.
 
 1. **Trust overlay on read surfaces** — DONE
-   Inline trust summary in callers, callees, path, dead, modules show,
-   orient, explain. Option A: only present when degraded.
-
 2. **Dead-confidence stratification** — DONE
-   Every dead-code candidate now carries explicit confidence tier (HIGH,
-   MEDIUM, LOW) with reasons. Two layers: top-level repo trust summary
-   and per-result dead_confidence. See `docs/cli/rmap-contracts.md` for
-   output contract.
-
-3. **Snapshot-to-snapshot quality diff**
-   Compare two snapshots and surface what changed: new violations, worsened
-   measurements, improved measurements. This is discovery, not enforcement.
-   The agent learns "3 functions got more complex" not "gate pass/fail."
-
-4. **Quality delta surfacing in `rmap check` and `rmap orient`**
-   `check` should include top complexity/risk deltas before agent hands off.
-   `orient` should include current quality-risk hotspots for focused scope.
-   Focus-aware discovery: relevant quality signals for the code being touched.
-
-5. **Comparability/identity caveats in diff output**
-   When snapshots are non-comparable (metric version mismatch, identity
-   drift), surface that explicitly. Honest comparison > forced verdict.
-
-6. **Document-backed authored relationship items**
-   Hand-discovered architectural knowledge should become readable documentation
-   with anchors/references, not keep expanding as opaque DB-only declarations.
-
-7. **Long-lived daemon** (see #3 below)
-   Only after discovery surfaces are stable.
-
-8. **Seam expansion** (event/pubsub, persistence/schema, DI, registry/plugin)
-   Architectural extraction, not feature work.
+3. ~~Snapshot-to-snapshot quality diff~~ — deferred (cross-cutting)
+4. ~~Quality delta surfacing~~ — deferred (cross-cutting)
+5. ~~Comparability/identity caveats~~ — deferred (cross-cutting)
+6. ~~Document-backed authored relationship items~~ — deferred
+7. ~~Long-lived daemon~~ — deferred (infrastructure)
+8. ~~Seam expansion~~ — deferred (architectural extraction)
 
 ---
 
@@ -1212,14 +1255,46 @@ source-anchor provenance, or queryability.
 See slice docs: `docs/slices/pf-1-status-mapping.md`, `docs/slices/pf-2-behavioral-marker.md`.
 Design doc: `docs/design/policy-facts-support-module.md`.
 
-### 15. Multi-track boundary detection (design phase)
+### 15. rgistr productization plan (planning phase)
+
+`tools/rgistr` is currently a useful prototype, not yet a productized
+documentation generator.
+
+**Required direction:**
+- automatic backend discovery before generation
+- OpenAI env detection
+- local OpenAI-compatible backend probing (LM Studio, MLX, llama.cpp)
+- Ollama probing
+- preferred-model ranking
+- explicit findings/selection report
+- no large-file skipping
+- deterministic chunking with per-chunk gists
+- chunk -> file -> folder synthesis pipeline
+- explicit context-budget policy rather than byte-threshold heuristics
+
+**Design doc:** `docs/design/rgistr-productization-plan.md`
+
+**Non-negotiable rule:** never skip source files due to size; chunk and roll up
+instead.
+
+### 16. Multi-track boundary detection (design phase)
 
 Two-track architecture for boundary detection over a unified model:
 
 **Track A: Raw Transport**
 - BI-1B: TCP/UDP sockets — PARTIAL (socket() presence only, role detection pending)
-- BI-1C: SharedArrayBuffer (JS/TS worker boundaries)
+- BI-1C: SharedArrayBuffer (JS/TS worker boundaries) — SHIPPED
 - BI-1D: Process signals (POSIX signal send/handle) — SHIPPED (C API, direction, signal names)
+
+**Track A-LX: Linux IPC (priority track)**
+- BI-LX-1: SysV shared memory (shmget, shmat, shmdt, shmctl) — SHIPPED
+- BI-LX-2: SysV message queues (msgget, msgsnd, msgrcv, msgctl) — SHIPPED
+- BI-LX-3: SysV + named POSIX semaphores (semget, semop, sem_open, etc.) — **NEXT**
+- BI-LX-4: memfd_create — queued
+
+**Track A-EM: Embedded/Inter-core (future)**
+- BI-EM-1: Inter-core messaging (mailbox + RPMsg, no remoteproc) — PLANNED
+- ~~BI-EM-2: DMA / descriptor-ring~~ — WITHDRAWN (not boundary interaction)
 
 **Track B: Schema-Backed RPC** — ORIENTATION-SUFFICIENT
 - CS-1: Protobuf schema extraction (.proto parser) — COMPLETE

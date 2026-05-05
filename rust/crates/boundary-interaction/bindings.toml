@@ -379,6 +379,128 @@ basis = "api_call"
 notes = "Unmap shared memory region."
 
 # ════════════════════════════════════════════════════════════════════════
+# SYSV SHARED MEMORY (BI-LX-1)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: shmget/shmat/shmdt/shmctl API usage.
+# Scope: always inter_process.
+# Direction: bidirectional (shared-state, no provider/consumer inference).
+# Interaction: shared_state.
+#
+# Reuses channel_kind = shared_memory with api_family = sysv_shm.
+# See docs/slices/bi-lx-1-sysv-shared-memory.md for design.
+
+[[binding]]
+language = "c"
+api_family = "sysv_shm"
+function = "shmget"
+role = "bidirectional"
+channel_kind = "shared_memory"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+arg_index = 0
+notes = "Create/open SysV shared memory segment. Arg0 is key, arg1 is size, arg2 is flags."
+
+[[binding]]
+language = "c"
+api_family = "sysv_shm"
+function = "shmat"
+role = "bidirectional"
+channel_kind = "shared_memory"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Attach to SysV shared memory segment. Arg0 is shmid (runtime value)."
+
+[[binding]]
+language = "c"
+api_family = "sysv_shm"
+function = "shmdt"
+role = "bidirectional"
+channel_kind = "shared_memory"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Detach from SysV shared memory segment. Arg0 is shmaddr."
+
+[[binding]]
+language = "c"
+api_family = "sysv_shm"
+function = "shmctl"
+role = "bidirectional"
+channel_kind = "shared_memory"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+notes = "Control SysV shared memory segment. Arg0 is shmid, arg1 is cmd (IPC_RMID, IPC_STAT, etc.)."
+
+# ════════════════════════════════════════════════════════════════════════
+# SYSV MESSAGE QUEUES (BI-LX-2)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: msgget/msgsnd/msgrcv/msgctl API usage.
+# Scope: always inter_process.
+# Direction: msgsnd=provider (sends), msgrcv=consumer (receives), others=bidirectional.
+# Interaction: fire_and_forget (async message passing, no direct reply).
+#
+# Reuses channel_kind = message_queue with api_family = sysv_msgq.
+# See docs/slices/bi-lx-2-sysv-message-queues.md for design.
+
+[[binding]]
+language = "c"
+api_family = "sysv_msgq"
+function = "msgget"
+role = "bidirectional"
+channel_kind = "message_queue"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+arg_index = 0
+notes = "Create/open SysV message queue. Arg0 is key, arg1 is flags."
+
+[[binding]]
+language = "c"
+api_family = "sysv_msgq"
+function = "msgsnd"
+role = "provider"
+channel_kind = "message_queue"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+notes = "Send message to SysV queue. Arg0 is msqid (runtime value)."
+
+[[binding]]
+language = "c"
+api_family = "sysv_msgq"
+function = "msgrcv"
+role = "consumer"
+channel_kind = "message_queue"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+notes = "Receive message from SysV queue. Arg0 is msqid, arg3 is msgtyp selector."
+
+[[binding]]
+language = "c"
+api_family = "sysv_msgq"
+function = "msgctl"
+role = "bidirectional"
+channel_kind = "message_queue"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "fire_and_forget"
+basis = "api_call"
+notes = "Control SysV message queue. Arg0 is msqid, arg1 is cmd (IPC_RMID, IPC_STAT, etc.)."
+
+# ════════════════════════════════════════════════════════════════════════
 # POSIX MESSAGE QUEUES
 # ════════════════════════════════════════════════════════════════════════
 #

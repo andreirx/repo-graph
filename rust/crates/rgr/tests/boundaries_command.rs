@@ -2816,3 +2816,370 @@ fn boundaries_list_nats_p1_unrelated_connect_method_not_detected() {
         result["count"]
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// BI-LX-1: SysV shared memory CLI adapter tests
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Create a C file with SysV shared memory calls.
+fn create_test_repo_with_sysv_shm(dir: &std::path::Path) {
+    let src = dir.join("shm_user.c");
+    let mut f = File::create(&src).unwrap();
+    writeln!(f, "#include <sys/ipc.h>").unwrap();
+    writeln!(f, "#include <sys/shm.h>").unwrap();
+    writeln!(f, "void use_shared_memory() {{").unwrap();
+    writeln!(f, "    int shmid = shmget(0x1234, 4096, IPC_CREAT | 0644);").unwrap();
+    writeln!(f, "    char *data = shmat(shmid, NULL, 0);").unwrap();
+    writeln!(f, "    shmdt(data);").unwrap();
+    writeln!(f, "    shmctl(shmid, IPC_RMID, NULL);").unwrap();
+    writeln!(f, "}}").unwrap();
+}
+
+/// Build a DB with SysV shared memory surfaces.
+fn build_indexed_db_with_sysv_shm() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_test_repo_with_sysv_shm(&repo_path);
+
+    let db_path = dir.path().join("test.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "sysv-shm-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 1);
+
+    (dir, db_path, repo_path)
+}
+
+#[test]
+fn boundaries_list_sysv_shm_included_in_shared_memory_kind() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_sysv_shm();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "sysv-shm-repo",
+            "--kind",
+            "shared_memory",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Should have 4 surfaces: shmget, shmat, shmdt, shmctl
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(
+        count, 4,
+        "expected 4 SysV shm surfaces; got {}",
+        count
+    );
+
+    // Verify all are shared_memory
+    let surfaces = result["results"].as_array().unwrap();
+    for surface in surfaces {
+        assert_eq!(
+            surface["channelKind"], "shared_memory",
+            "expected shared_memory channel kind"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_sysv_shm_has_inter_process_scope() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_sysv_shm();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "sysv-shm-repo",
+            "--kind",
+            "shared_memory",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    // All SysV shm surfaces should have inter_process scope
+    let surfaces = result["results"].as_array().unwrap();
+    for surface in surfaces {
+        assert_eq!(
+            surface["boundaryScope"], "inter_process",
+            "SysV shm surfaces should have inter_process scope"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_sysv_shm_are_bidirectional() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_sysv_shm();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "sysv-shm-repo",
+            "--kind",
+            "shared_memory",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    // All SysV shm surfaces should be bidirectional
+    let surfaces = result["results"].as_array().unwrap();
+    for surface in surfaces {
+        assert_eq!(
+            surface["direction"], "bidirectional",
+            "SysV shm surfaces should be bidirectional (per BI-LX-1 design)"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_filter_scope_inter_process_includes_sysv_shm() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_sysv_shm();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "sysv-shm-repo",
+            "--scope",
+            "inter_process",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    // All 4 SysV shm surfaces should appear (all are inter_process)
+    assert_eq!(
+        result["count"], 4,
+        "expected 4 surfaces with inter_process scope; got {}",
+        result["count"]
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// BI-LX-2: SysV MESSAGE QUEUES CLI ADAPTER TESTS
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Create a test repo with SysV message queue usage.
+fn create_test_repo_with_sysv_msgq(dir: &std::path::Path) {
+    let src = dir.join("msgq_user.c");
+    let mut f = File::create(&src).unwrap();
+    writeln!(f, "#include <sys/ipc.h>").unwrap();
+    writeln!(f, "#include <sys/msg.h>").unwrap();
+    writeln!(f, "struct message {{ long mtype; char mtext[256]; }};").unwrap();
+    writeln!(f, "void use_message_queue() {{").unwrap();
+    writeln!(f, "    int msqid = msgget(0x5678, IPC_CREAT | 0644);").unwrap();
+    writeln!(f, "    struct message msg;").unwrap();
+    writeln!(f, "    msg.mtype = 1;").unwrap();
+    writeln!(f, "    msgsnd(msqid, &msg, sizeof(msg.mtext), 0);").unwrap();
+    writeln!(f, "    msgrcv(msqid, &msg, sizeof(msg.mtext), 0, 0);").unwrap();
+    writeln!(f, "    msgctl(msqid, IPC_RMID, NULL);").unwrap();
+    writeln!(f, "}}").unwrap();
+}
+
+/// Build a DB with SysV message queue surfaces.
+fn build_indexed_db_with_sysv_msgq() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_test_repo_with_sysv_msgq(&repo_path);
+
+    let db_path = dir.path().join("test.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "sysv-msgq-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 1);
+
+    (dir, db_path, repo_path)
+}
+
+#[test]
+fn boundaries_list_sysv_msgq_included_in_message_queue_kind() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_sysv_msgq();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "sysv-msgq-repo",
+            "--kind",
+            "message_queue",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Should have 4 surfaces: msgget, msgsnd, msgrcv, msgctl
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(
+        count, 4,
+        "expected 4 SysV msgq surfaces; got {}",
+        count
+    );
+
+    // Verify all are message_queue
+    let surfaces = result["results"].as_array().unwrap();
+    for surface in surfaces {
+        assert_eq!(
+            surface["channelKind"], "message_queue",
+            "expected message_queue channel kind"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_sysv_msgq_has_inter_process_scope() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_sysv_msgq();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "sysv-msgq-repo",
+            "--kind",
+            "message_queue",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    // All SysV msgq surfaces should have inter_process scope
+    let surfaces = result["results"].as_array().unwrap();
+    for surface in surfaces {
+        assert_eq!(
+            surface["boundaryScope"], "inter_process",
+            "SysV msgq surfaces should have inter_process scope"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_sysv_msgq_has_correct_directions() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_sysv_msgq();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "sysv-msgq-repo",
+            "--kind",
+            "message_queue",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    let surfaces = result["results"].as_array().unwrap();
+
+    // Count directions: msgsnd=provider, msgrcv=consumer, msgget/msgctl=bidirectional
+    let provider_count = surfaces.iter().filter(|s| s["direction"] == "provider").count();
+    let consumer_count = surfaces.iter().filter(|s| s["direction"] == "consumer").count();
+    let bidirectional_count = surfaces.iter().filter(|s| s["direction"] == "bidirectional").count();
+
+    assert_eq!(provider_count, 1, "expected 1 provider (msgsnd)");
+    assert_eq!(consumer_count, 1, "expected 1 consumer (msgrcv)");
+    assert_eq!(bidirectional_count, 2, "expected 2 bidirectional (msgget, msgctl)");
+}
+
+#[test]
+fn boundaries_list_filter_scope_inter_process_includes_sysv_msgq() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_sysv_msgq();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "sysv-msgq-repo",
+            "--scope",
+            "inter_process",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    // All 4 SysV msgq surfaces should appear (all are inter_process)
+    assert_eq!(
+        result["count"], 4,
+        "expected 4 surfaces with inter_process scope; got {}",
+        result["count"]
+    );
+}

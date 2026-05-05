@@ -1902,6 +1902,31 @@ Policy Signals verified on swupdate/corelib regeneration:
 The hints surface the correct architectural seams. They do not provide the
 provenance or queryability that a support module would deliver.
 
+## rgistr Productization Gaps (2026-05-05)
+
+Current `tools/rgistr` gaps recorded from source inspection:
+
+- large files are skipped rather than chunked
+- whole-file vs digest choice is based on byte size, not token budget
+- no per-chunk artifact contract exists
+- no backend discovery layer exists
+- no MLX support exists
+- no llama.cpp support exists
+- OpenAI-compatible local backends are not unified
+- model capability metadata is not explicit
+- generation preflight does not print a discovery/selection report
+
+Planned closure path:
+- `docs/design/rgistr-productization-plan.md`
+
+Debt classification:
+- productization debt
+- support-module gap
+- contract gap
+
+Non-negotiable closure rule:
+- never skip source files due to size; chunk and synthesize instead
+
 ## Contract Schema Extraction (CS-1)
 
 ### Current state

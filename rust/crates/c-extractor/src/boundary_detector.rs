@@ -98,6 +98,10 @@ const SIGNAL_FUNCTIONS: &[&str] = &[
     "kill", "killpg", "raise", "sigqueue", "pthread_kill",
     "signal", "sigaction", "sigwait", "sigwaitinfo", "sigtimedwait", "signalfd",
 ];
+/// SysV shared memory functions for BI-LX-1.
+const SYSV_SHM_FUNCTIONS: &[&str] = &["shmget", "shmat", "shmdt", "shmctl"];
+/// SysV message queue functions for BI-LX-2.
+const SYSV_MSGQ_FUNCTIONS: &[&str] = &["msgget", "msgsnd", "msgrcv", "msgctl"];
 
 /// Check if a function name is a boundary interaction candidate.
 pub fn is_boundary_function(name: &str) -> bool {
@@ -107,6 +111,8 @@ pub fn is_boundary_function(name: &str) -> bool {
         || SHM_FUNCTIONS.contains(&name)
         || MQUEUE_FUNCTIONS.contains(&name)
         || SIGNAL_FUNCTIONS.contains(&name)
+        || SYSV_SHM_FUNCTIONS.contains(&name)
+        || SYSV_MSGQ_FUNCTIONS.contains(&name)
 }
 
 /// Extract boundary calls from a parsed C file.
@@ -356,6 +362,17 @@ fn try_extract_boundary_call(
         "signalfd" => {
             // signalfd(fd, mask, flags) — sigset is arg1
             // Same issue as sigwait — sigset is not a single signal
+        }
+
+        // ── BI-LX-2: SysV message queue functions ─────────────────────────
+        "msgget" | "msgsnd" | "msgrcv" | "msgctl" => {
+            // msgget(key, msgflg) — key is arg0
+            // msgsnd(msqid, msgp, msgsz, msgflg) — msqid is runtime
+            // msgrcv(msqid, msgp, msgsz, msgtyp, msgflg) — msqid is runtime
+            // msgctl(msqid, cmd, buf) — msqid is runtime
+            //
+            // Only msgget has the key. For others, channel identity requires
+            // callsite correlation (deferred). Just detect the call.
         }
 
         _ => {}

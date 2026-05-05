@@ -65,10 +65,14 @@ Retained DBs must:
 - Include date in filename
 - Be explicitly named in the verification report
 
-## Script Wrappers
+## Script Wrappers (MANDATORY)
 
-Use these scripts instead of raw cargo commands. They enforce correct
-manifest paths, package names, and DB locations.
+**All smoke validation and verification runs must use the provided smoke scripts
+unless the script is incapable of expressing the run.** Manual command execution
+is exception-only and must reproduce the same `smoke-runs/` artifacts.
+
+The scripts enforce correct manifest paths, package names, DB locations, and
+`smoke-runs/` logging. Bypassing them forfeits the audit trail.
 
 ### Unit/Integration Tests
 
@@ -117,9 +121,15 @@ manifest paths, package names, and DB locations.
 ./scripts/smoke-validation-repos.sh quality-gate trust check orient
 ```
 
-## Manual Command Templates
+## Manual Command Templates (FALLBACK ONLY)
 
-For cases where scripts are insufficient.
+**Manual commands are fallback only.** Use only when the smoke scripts cannot
+express the required run. Manual runs must still produce `smoke-runs/` artifacts
+— either by calling the logging helpers or by manually creating the required
+files (`00-meta.json`, command outputs, `92-tool-latency.json`).
+
+If you run manual commands without producing `smoke-runs/` artifacts, the run
+does not count as validation.
 
 ### Setup
 
@@ -194,6 +204,9 @@ Agents must never:
 - Leave DBs in repo root or `rust/`
 - Omit DB path from verification reports
 - Retain without explicit reason
+- **Report smoke validation as complete if the run did not produce `smoke-runs/` artifacts**
+- **Promote slice maturity (IMPLEMENTED → SHIPPED) without citing a `smoke-runs/<timestamp>/` path**
+- **Bypass smoke scripts for ad hoc shell execution when scripts can express the run**
 
 ## Validation Repos
 
@@ -284,6 +297,16 @@ smoke-runs/
 
 Unit tests (cargo test) do not require smoke-runs logging — they use
 ephemeral in-memory fixtures.
+
+### Maturity Promotion Requirement
+
+Slice promotion from IMPLEMENTED to SHIPPED requires citing a `smoke-runs/<timestamp>/`
+path in:
+- The slice doc's "Smoke Validation" section, OR
+- The ROADMAP status note
+
+Chat summaries or ad hoc command output alone cannot satisfy the maturity bar.
+The `smoke-runs/` artifact is the audit hook.
 
 ### Reference
 
