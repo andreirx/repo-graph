@@ -55,6 +55,13 @@ pub enum EmitError {
 ///
 /// If the required context is missing or doesn't match, the emitter
 /// declines to emit (returns `Ok(None)`), not emits with unknown scope.
+///
+/// ## API family filtering
+///
+/// When `api_family` is set, only bindings with that exact api_family
+/// are considered. This prevents cross-contamination between message
+/// broker patterns that share function names (e.g., "publish" exists
+/// in AMQP, Kafka, and NATS bindings).
 #[derive(Debug, Clone)]
 pub struct BoundaryCallsite {
     /// Language of the source file.
@@ -80,6 +87,11 @@ pub struct BoundaryCallsite {
 
     /// Raw argument text (for debugging/evidence).
     pub raw_argument_text: Option<String>,
+
+    /// API family from the detector (e.g., "nats", "kafkajs", "amqplib").
+    /// When set, filters binding candidates to only those with matching api_family.
+    /// This prevents NATS calls from matching AMQP bindings when both have "publish".
+    pub api_family: Option<String>,
 
     /// Socket address family if known (AF_UNIX, AF_INET, etc.).
     /// Required for socket/bind/connect/listen/accept.
@@ -207,11 +219,16 @@ impl BoundaryInteractionEmitter {
     /// Returns `Ok(None)` if:
     /// - No binding matched the function name
     /// - All candidate bindings were rejected by context guards
+    /// - No binding matched the api_family filter (when set)
     ///
     /// When multiple candidate bindings exist for the same function (e.g.,
     /// `socket` → unix_socket, tcp_socket, udp_socket), candidates are
     /// evaluated in TOML declaration order. The first candidate that passes
     /// `binding_matches_context` is used.
+    ///
+    /// When `callsite.api_family` is set, only bindings with that exact
+    /// api_family are considered. This prevents cross-contamination between
+    /// message broker patterns (e.g., NATS "publish" matching AMQP "publish").
     ///
     /// Returns `Err` only on actual emission failures.
     pub fn try_emit(&mut self, callsite: &BoundaryCallsite) -> Result<Option<EmittedFacts>, EmitError> {
@@ -222,6 +239,21 @@ impl BoundaryInteractionEmitter {
 
         if candidates.is_empty() {
             return Ok(None); // Not a boundary interaction
+        }
+
+        // Filter candidates by api_family when the callsite specifies one.
+        // This prevents NATS calls from matching AMQP or Kafka bindings.
+        let candidates: Vec<_> = if let Some(ref family) = callsite.api_family {
+            candidates
+                .into_iter()
+                .filter(|b| b.api_family == *family)
+                .collect()
+        } else {
+            candidates
+        };
+
+        if candidates.is_empty() {
+            return Ok(None); // No binding matched api_family filter
         }
 
         // Evaluate candidates in order, use the first one that passes context guards.
@@ -410,6 +442,9 @@ impl BoundaryInteractionEmitter {
 
             // Kafka topic (MB-2A) — no guards needed, all detection is pattern-based
             ChannelKind::KafkaTopic => true,
+
+            // NATS subject (MB-3A) — no guards needed, all detection is pattern-based
+            ChannelKind::NatsSubject => true,
 
             // Future slice channel kinds — not yet supported, decline
             _ => false,
@@ -670,6 +705,7 @@ fn protocol_for_channel_kind(kind: ChannelKind) -> &'static str {
         ChannelKind::SharedArrayBuffer => "sab",
         ChannelKind::AmqpQueue => "amqp",
         ChannelKind::KafkaTopic => "kafka",
+        ChannelKind::NatsSubject => "nats",
         ChannelKind::GrpcChannel => "grpc",
         ChannelKind::ProtobufStream => "protobuf",
         ChannelKind::ErpcChannel => "erpc",
@@ -715,6 +751,7 @@ mod tests {
             extracted_argument: Some("/var/run/daemon.sock".to_string()),
             argument_index: Some(1),
             raw_argument_text: Some("&addr".to_string()),
+            api_family: None,
             socket_family: Some(SocketFamily::Unix),
             socket_type: Some(SocketType::Stream),
             mmap_flags: None,
@@ -754,6 +791,7 @@ mod tests {
             extracted_argument: None,
             argument_index: None,
             raw_argument_text: None,
+            api_family: None,
             socket_family: None,
             socket_type: None,
             mmap_flags: None,
@@ -794,6 +832,7 @@ mod tests {
             extracted_argument: Some("/my_shared_mem".to_string()),
             argument_index: Some(0),
             raw_argument_text: Some("\"/my_shared_mem\"".to_string()),
+            api_family: None,
             socket_family: None,
             socket_type: None,
             mmap_flags: None, // shm_open doesn't need mmap_flags
@@ -835,6 +874,7 @@ mod tests {
             extracted_argument: Some("/test_shm".to_string()),
             argument_index: Some(0),
             raw_argument_text: None,
+            api_family: None,
             socket_family: None,
             socket_type: None,
             mmap_flags: None, // shm_open doesn't need mmap_flags
@@ -868,6 +908,7 @@ mod tests {
             extracted_argument: None,
             argument_index: None,
             raw_argument_text: None,
+            api_family: None,
             socket_family: Some(SocketFamily::Inet), // AF_INET
             socket_type: None, // No type evidence — can't classify as TCP or UDP
             mmap_flags: None,
@@ -898,6 +939,7 @@ mod tests {
             extracted_argument: None,
             argument_index: None,
             raw_argument_text: None,
+            api_family: None,
             socket_family: Some(SocketFamily::Unix), // AF_UNIX — Slice 1A
             socket_type: Some(SocketType::Stream),
             mmap_flags: None,
@@ -929,6 +971,7 @@ mod tests {
             extracted_argument: None,
             argument_index: None,
             raw_argument_text: None,
+            api_family: None,
             socket_family: None, // Unknown family
             socket_type: None,
             mmap_flags: None,
@@ -959,6 +1002,7 @@ mod tests {
             extracted_argument: None,
             argument_index: None,
             raw_argument_text: None,
+            api_family: None,
             socket_family: None,
             socket_type: None,
             mmap_flags: Some(MmapFlags::Private), // MAP_PRIVATE — not shared memory
@@ -989,6 +1033,7 @@ mod tests {
             extracted_argument: None,
             argument_index: None,
             raw_argument_text: None,
+            api_family: None,
             socket_family: None,
             socket_type: None,
             mmap_flags: Some(MmapFlags::Shared), // MAP_SHARED — is shared memory
@@ -1022,6 +1067,7 @@ mod tests {
             extracted_argument: None,
             argument_index: None,
             raw_argument_text: None,
+            api_family: None,
             socket_family: None,
             socket_type: None,
             mmap_flags: None, // No flag evidence
@@ -1052,6 +1098,7 @@ mod tests {
             extracted_argument: Some("/dev/mydev".to_string()),
             argument_index: Some(0),
             raw_argument_text: None,
+            api_family: None,
             socket_family: None,
             socket_type: None,
             mmap_flags: None,
@@ -1082,6 +1129,7 @@ mod tests {
             extracted_argument: Some("/tmp/myfifo".to_string()),
             argument_index: Some(0),
             raw_argument_text: None,
+            api_family: None,
             socket_family: None,
             socket_type: None,
             mmap_flags: None,
@@ -1113,6 +1161,7 @@ mod tests {
             extracted_argument: Some("/tmp/fifo".to_string()),
             argument_index: Some(0),
             raw_argument_text: None,
+            api_family: None,
             socket_family: None,
             socket_type: None,
             mmap_flags: None,
@@ -1146,6 +1195,7 @@ mod tests {
             extracted_argument: Some("/var/run/app.sock".to_string()), // Path suggests Unix socket
             argument_index: Some(1),
             raw_argument_text: None,
+            api_family: None,
             socket_family: None, // No explicit family, but we have a path
             socket_type: None,
             mmap_flags: None,
@@ -1176,6 +1226,7 @@ mod tests {
             extracted_argument: None, // No path extracted
             argument_index: None,
             raw_argument_text: None,
+            api_family: None,
             socket_family: None, // No family evidence
             socket_type: None,
             mmap_flags: None,
@@ -1208,6 +1259,7 @@ mod tests {
             extracted_argument: None,
             argument_index: None,
             raw_argument_text: None,
+            api_family: None,
             socket_family: Some(SocketFamily::Inet),
             socket_type: Some(SocketType::Stream), // SOCK_STREAM = TCP
             mmap_flags: None,
@@ -1239,6 +1291,7 @@ mod tests {
             extracted_argument: None,
             argument_index: None,
             raw_argument_text: None,
+            api_family: None,
             socket_family: Some(SocketFamily::Inet),
             socket_type: Some(SocketType::Datagram), // SOCK_DGRAM = UDP
             mmap_flags: None,
@@ -1270,6 +1323,7 @@ mod tests {
             extracted_argument: None,
             argument_index: None,
             raw_argument_text: None,
+            api_family: None,
             socket_family: Some(SocketFamily::Inet6),
             socket_type: Some(SocketType::Stream), // SOCK_STREAM = TCP
             mmap_flags: None,
@@ -1303,6 +1357,7 @@ mod tests {
             extracted_argument: None,
             argument_index: None,
             raw_argument_text: None,
+            api_family: None,
             socket_family: Some(SocketFamily::Unix),
             socket_type: Some(SocketType::Stream),
             mmap_flags: None,
@@ -1337,6 +1392,7 @@ mod tests {
             extracted_argument: Some("0.0.0.0:8080".to_string()), // IP endpoint
             argument_index: Some(1),
             raw_argument_text: None,
+            api_family: None,
             socket_family: Some(SocketFamily::Inet),
             socket_type: None, // Without type, can't disambiguate TCP vs UDP
             mmap_flags: None,
@@ -1368,6 +1424,7 @@ mod tests {
             extracted_argument: Some("0.0.0.0:8080".to_string()),
             argument_index: Some(1),
             raw_argument_text: None,
+            api_family: None,
             socket_family: Some(SocketFamily::Inet),
             socket_type: Some(SocketType::Stream), // SOCK_STREAM → TCP
             mmap_flags: None,
@@ -1397,6 +1454,7 @@ mod tests {
             extracted_argument: Some("0.0.0.0:5353".to_string()),
             argument_index: Some(1),
             raw_argument_text: None,
+            api_family: None,
             socket_family: Some(SocketFamily::Inet),
             socket_type: Some(SocketType::Datagram), // SOCK_DGRAM → UDP
             mmap_flags: None,
@@ -1427,6 +1485,7 @@ mod tests {
             extracted_argument: None,
             argument_index: None,
             raw_argument_text: None,
+            api_family: None,
             socket_family: Some(SocketFamily::Inet),
             socket_type: None, // listen is TCP-only, doesn't need type evidence
             mmap_flags: None,
@@ -1460,6 +1519,7 @@ mod tests {
             extracted_argument: Some("192.168.1.1:5353".to_string()),
             argument_index: Some(4),
             raw_argument_text: None,
+            api_family: None,
             socket_family: Some(SocketFamily::Inet),
             socket_type: None, // sendto is UDP-only in table, doesn't need type evidence
             mmap_flags: None,

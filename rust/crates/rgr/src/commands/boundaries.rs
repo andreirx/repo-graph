@@ -409,10 +409,11 @@ fn parse_channel_kind(s: &str) -> Result<ChannelKind, String> {
         "shared_array_buffer" | "sharedarraybuffer" | "sab" | "atomics" => Ok(ChannelKind::SharedArrayBuffer),
         "amqp_queue" | "amqpqueue" | "amqp" | "rabbitmq" => Ok(ChannelKind::AmqpQueue),
         "kafka_topic" | "kafkatopic" | "kafka" => Ok(ChannelKind::KafkaTopic),
+        "nats_subject" | "natssubject" | "nats" => Ok(ChannelKind::NatsSubject),
         "serial_port" | "serialport" | "serial" => Ok(ChannelKind::SerialPort),
         "can_message" | "canmessage" | "can" => Ok(ChannelKind::CanMessage),
         other => Err(format!(
-            "unknown channel kind: {} (try: unix_socket, named_pipe, shared_memory, shared_array_buffer, amqp_queue, kafka_topic, ...)",
+            "unknown channel kind: {} (try: unix_socket, named_pipe, shared_memory, shared_array_buffer, amqp_queue, kafka_topic, nats_subject, ...)",
             other
         )),
     }

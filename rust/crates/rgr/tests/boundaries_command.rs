@@ -2396,3 +2396,423 @@ fn boundaries_list_kafka_no_detection_without_import() {
         result["count"]
     );
 }
+
+// ══════════════════════════════════════════════════════════════════
+// 13. MB-3A: NATS FILTER TESTS
+// ══════════════════════════════════════════════════════════════════
+
+/// Create a minimal repo with TS files containing nats npm code.
+fn create_test_repo_with_nats(dir: &std::path::Path) {
+    // Publisher: publish
+    let publisher_ts = dir.join("publisher.ts");
+    let mut f = File::create(&publisher_ts).unwrap();
+    writeln!(f, "import {{ connect }} from 'nats';").unwrap();
+    writeln!(f, "async function publishOrder() {{").unwrap();
+    writeln!(f, "    const nc = await connect({{ servers: 'localhost:4222' }});").unwrap();
+    writeln!(f, "    nc.publish('orders.created', 'data');").unwrap();
+    writeln!(f, "}}").unwrap();
+
+    // Subscriber: subscribe
+    let subscriber_ts = dir.join("subscriber.ts");
+    let mut f = File::create(&subscriber_ts).unwrap();
+    writeln!(f, "import {{ connect }} from 'nats';").unwrap();
+    writeln!(f, "async function processOrders() {{").unwrap();
+    writeln!(f, "    const nc = await connect({{ servers: 'localhost:4222' }});").unwrap();
+    writeln!(f, "    nc.subscribe('orders.created');").unwrap();
+    writeln!(f, "}}").unwrap();
+}
+
+/// Build a temp DB by indexing a repo with NATS code.
+fn build_indexed_db_with_nats() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_test_repo_with_nats(&repo_path);
+
+    let db_path = dir.path().join("nats_test.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "nats-test-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 2, "expected 2 TS fixture files");
+
+    (dir, db_path, repo_path)
+}
+
+#[test]
+fn boundaries_list_filter_kind_nats_subject_works() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_nats();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "nats-test-repo",
+            "--kind",
+            "nats_subject",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0 for successful filter; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected in envelope
+    assert_eq!(result["filter_kind"], "nats_subject");
+
+    // Should find NATS surfaces:
+    // publisher.ts: publish = 1
+    // subscriber.ts: subscribe = 1
+    // Total: 2 surfaces
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(
+        count, 2,
+        "expected 2 nats_subject surfaces (publish + subscribe); got {}",
+        count
+    );
+
+    // All results should be nats_subject
+    for item in result["results"].as_array().unwrap() {
+        assert_eq!(
+            item["channelKind"], "nats_subject",
+            "all filtered results should be nats_subject"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_filter_kind_nats_alias_works() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_nats();
+
+    // "nats" is the alias for "nats_subject"
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "nats-test-repo",
+            "--kind",
+            "nats",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0 for successful filter; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected (alias maps to nats_subject)
+    assert_eq!(result["filter_kind"], "nats_subject");
+
+    // Same count as nats_subject
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(count, 2, "nats alias should yield same results as nats_subject");
+}
+
+#[test]
+fn boundaries_list_filter_family_message_broker_includes_nats() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_nats();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "nats-test-repo",
+            "--family",
+            "message_broker",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "expected exit 0; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Filter reflected in envelope
+    assert_eq!(result["filter_family"], "message_broker");
+
+    // Should find NATS surfaces (nats_subject maps to message_broker family)
+    let count = result["count"].as_u64().unwrap_or(0);
+    assert_eq!(count, 2, "expected 2 surfaces in message_broker family");
+
+    // All results should have protocolFamily=message_broker
+    for item in result["results"].as_array().unwrap() {
+        assert_eq!(
+            item["protocolFamily"], "message_broker",
+            "all results should be message_broker family"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_nats_provider_consumer_directions() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_nats();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "nats-test-repo",
+            "--kind",
+            "nats_subject",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    let results = result["results"].as_array().unwrap();
+
+    // Count by direction
+    let providers: Vec<_> = results.iter().filter(|r| r["direction"] == "provider").collect();
+    let consumers: Vec<_> = results.iter().filter(|r| r["direction"] == "consumer").collect();
+
+    // publish = provider, subscribe = consumer
+    assert_eq!(
+        providers.len(),
+        1,
+        "expected 1 provider (publish); got {}",
+        providers.len()
+    );
+    assert_eq!(
+        consumers.len(),
+        1,
+        "expected 1 consumer (subscribe); got {}",
+        consumers.len()
+    );
+}
+
+#[test]
+fn boundaries_list_nats_no_detection_without_import() {
+    // Create a repo with NATS-like method names but NO nats import
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+
+    // File with publish/subscribe but NO nats import
+    let fake_ts = repo_path.join("fake_nats.ts");
+    let mut f = File::create(&fake_ts).unwrap();
+    writeln!(f, "// No nats import - these should NOT be detected").unwrap();
+    writeln!(f, "const bus = {{").unwrap();
+    writeln!(f, "    publish: (x: string) => console.log(x),").unwrap();
+    writeln!(f, "    subscribe: (x: string) => console.log(x),").unwrap();
+    writeln!(f, "}};").unwrap();
+    writeln!(f, "const nc = bus;").unwrap();
+    writeln!(f, "nc.publish('orders.created');").unwrap();
+    writeln!(f, "nc.subscribe('orders.created');").unwrap();
+
+    let db_path = dir.path().join("fake_nats.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "fake-nats-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 1, "expected 1 TS fixture file");
+
+    // Query for NATS surfaces - should find NONE
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "fake-nats-repo",
+            "--kind",
+            "nats_subject",
+        ])
+        .output()
+        .unwrap();
+
+    // Exit code 1 for "no results found"
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "expected exit 1 (no results) for fake NATS without nats import, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Count should be 0 - the import guard prevents false positives
+    assert_eq!(
+        result["count"], 0,
+        "import guard regression: generic .publish/.subscribe without nats import \
+         should NOT emit NATS surfaces. Got count: {}",
+        result["count"]
+    );
+}
+
+#[test]
+fn boundaries_list_nats_p1_local_shadow_connect_not_detected() {
+    // P1 FIX REGRESSION TEST: local function named `connect` should NOT produce
+    // tracked receivers, even with nats import present
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+
+    // File with nats import but local connect() function shadows it
+    let shadow_ts = repo_path.join("shadow_connect.ts");
+    let mut f = File::create(&shadow_ts).unwrap();
+    writeln!(f, "import {{ connect }} from 'nats';").unwrap();
+    writeln!(f, "").unwrap();
+    writeln!(f, "// This local function shadows the imported connect").unwrap();
+    writeln!(f, "async function connect() {{").unwrap();
+    writeln!(f, "    return {{ publish: () => {{}}, subscribe: () => {{}} }};").unwrap();
+    writeln!(f, "}}").unwrap();
+    writeln!(f, "").unwrap();
+    writeln!(f, "async function main() {{").unwrap();
+    writeln!(f, "    const nc = await connect();  // Calls LOCAL function, not NATS").unwrap();
+    writeln!(f, "    nc.publish('orders.created', 'data');").unwrap();
+    writeln!(f, "}}").unwrap();
+
+    let db_path = dir.path().join("shadow_nats.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "shadow-nats-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 1, "expected 1 TS fixture file");
+
+    // Query for NATS surfaces - should find NONE because local connect shadows import
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "shadow-nats-repo",
+            "--kind",
+            "nats_subject",
+        ])
+        .output()
+        .unwrap();
+
+    // Exit code 1 for "no results found"
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "P1 regression: expected exit 1 (no results) for local shadow connect(), stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Count should be 0 - local shadow prevents provenance tracking
+    assert_eq!(
+        result["count"], 0,
+        "P1 regression: local function `connect()` shadows NATS import. \
+         Should NOT emit surfaces. Got count: {}",
+        result["count"]
+    );
+}
+
+#[test]
+fn boundaries_list_nats_p1_unrelated_connect_method_not_detected() {
+    // P1 FIX REGRESSION TEST: unrelated .connect() method should NOT produce
+    // tracked receivers, even with nats import present
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+
+    // File with nats import but unrelated redis.connect() call
+    let unrelated_ts = repo_path.join("unrelated_connect.ts");
+    let mut f = File::create(&unrelated_ts).unwrap();
+    writeln!(f, "import {{ connect }} from 'nats';").unwrap();
+    writeln!(f, "").unwrap();
+    writeln!(f, "// This is an unrelated Redis client, not NATS").unwrap();
+    writeln!(f, "const redis = {{ connect: async () => ({{ publish: () => {{}} }}) }};").unwrap();
+    writeln!(f, "").unwrap();
+    writeln!(f, "async function main() {{").unwrap();
+    writeln!(f, "    const nc = await redis.connect();  // Calls Redis, not NATS").unwrap();
+    writeln!(f, "    nc.publish('orders.created', 'data');").unwrap();
+    writeln!(f, "}}").unwrap();
+
+    let db_path = dir.path().join("unrelated_nats.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "unrelated-nats-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 1, "expected 1 TS fixture file");
+
+    // Query for NATS surfaces - should find NONE because redis.connect() is not NATS
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "unrelated-nats-repo",
+            "--kind",
+            "nats_subject",
+        ])
+        .output()
+        .unwrap();
+
+    // Exit code 1 for "no results found"
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "P1 regression: expected exit 1 (no results) for unrelated .connect(), stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout not valid JSON: {}\nstdout: {}", e, stdout));
+
+    // Count should be 0 - unrelated .connect() not tracked
+    assert_eq!(
+        result["count"], 0,
+        "P1 regression: unrelated `redis.connect()` should NOT emit NATS surfaces. \
+         Only namespace imports (like `nats.connect()`) should work. Got count: {}",
+        result["count"]
+    );
+}

@@ -513,4 +513,31 @@ basis = "api_call"
         assert_eq!(candidates[1].channel_kind, ChannelKind::TcpSocket);
         assert_eq!(candidates[2].channel_kind, ChannelKind::UdpSocket);
     }
+
+    #[test]
+    fn nats_bindings_exist() {
+        let table = BindingTable::load_embedded();
+
+        // Find NATS publish binding
+        let publish_bindings = table.find_by_function(Language::TypeScript, "publish");
+        let nats_publish = publish_bindings
+            .iter()
+            .find(|b| b.channel_kind == ChannelKind::NatsSubject);
+        assert!(
+            nats_publish.is_some(),
+            "expected NATS publish binding in table; got bindings for 'publish': {:?}",
+            publish_bindings.iter().map(|b| &b.api_family).collect::<Vec<_>>()
+        );
+
+        // Find NATS subscribe binding
+        let subscribe_bindings = table.find_by_function(Language::TypeScript, "subscribe");
+        let nats_subscribe = subscribe_bindings
+            .iter()
+            .find(|b| b.channel_kind == ChannelKind::NatsSubject);
+        assert!(
+            nats_subscribe.is_some(),
+            "expected NATS subscribe binding in table; got bindings for 'subscribe': {:?}",
+            subscribe_bindings.iter().map(|b| &b.api_family).collect::<Vec<_>>()
+        );
+    }
 }

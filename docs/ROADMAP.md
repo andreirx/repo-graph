@@ -75,6 +75,11 @@ for what is actually operational.
   `kafka_topic`, interaction pattern `publish_subscribe`. Receiver provenance
   tracks `*.producer()` and `*.consumer()` factory assignments in same file.
   Deferred: `sendBatch` (nested topic extraction), `run()` (no topic evidence).
+  NATS detection (MB-3A) shipped: nats npm package patterns (publish, subscribe)
+  with triple scope guard (import + connection provenance + subject evidence).
+  Channel kind `nats_subject`, interaction pattern `publish_subscribe`. Connection
+  provenance tracks `connect()` assignments in same file. Deferred: `request()`
+  (mixed semantics — outbound + reply handling).
 - **Spring framework detectors:** container-managed bean liveness via `@Component`, `@Service`,
   `@Repository`, `@Configuration`, `@RestController`, `@Controller`, `@Bean`. Suppresses 93
   false dead-code reports on glamCRM. Also fixes Lambda entrypoint suppression in `findDeadNodes`.
@@ -798,8 +803,17 @@ importance ranking. Strategic priorities (quality discovery, daemon, delta
 indexing) are listed below in their own sections, but this sequence is
 what actually gets built next.
 
-**Discovery surfaces precede enforcement refinement.**
-The agent needs to see what changed before it needs gate verdicts.
+**Discovery work outranks enforcement refinement**, but within discovery
+we still prefer breadth-first expansion of core relationship families
+until real-repo use proves a depth gap. Agents need discovery surfaces
+before governance verdict refinement. That includes structural, boundary,
+broker, and quality discovery; sequencing within discovery remains
+breadth-first unless a real workflow gap forces depth.
+
+**Sequencing rule:** Prefer breadth-first coverage of major relationship
+and mechanism families over deeper refinement of a single family or
+discovery axis. Return to depth only when real-repo navigation shows
+the shallow surface is insufficient.
 
 1. **Trust overlay on read surfaces** — DONE
    Inline trust summary in callers, callees, path, dead, modules show,
@@ -1221,9 +1235,9 @@ Two-track architecture for boundary detection over a unified model:
 - ER-1: eRPC IDL extraction (future)
 
 **Message Broker Track (after A+B):**
-- MB-1: RabbitMQ / AMQP basic detection
-- MB-2: Kafka topic detection
-- MB-3: NATS / Redis pub-sub detection
+- MB-1: RabbitMQ / AMQP basic detection — SHIPPED (MB-1A)
+- MB-2: Kafka topic detection — SHIPPED (MB-2A)
+- MB-3: NATS / Redis pub-sub detection — PARTIAL (MB-3A shipped, MB-3B pending)
 - MB-4: Cloud broker detection (future: SQS, SNS, Pub/Sub, EventBridge)
 
 **Confirmed implementation order:**
@@ -1361,7 +1375,30 @@ This is sufficient as an orientation substrate. An agent can:
     - Deferred: Java kafka-clients, Spring Kafka, Python kafka, topic linking,
       run() correlation with subscribe(), cross-file receiver tracking,
       sendBatch nested topicMessages extraction
-11. MB-3 (NATS/Redis pub-sub)
+11. MB-3A (NATS subject detection) — SHIPPED
+    - TS/JS nats npm package patterns: publish, subscribe
+    - Channel kind: `nats_subject` (protocol family: `message_broker`)
+    - Interaction pattern: `publish_subscribe`
+    - Scope: unknown (broker endpoint may be local or remote)
+    - Direction: provider (publish), consumer (subscribe)
+    - Scope guards (triple):
+      1. Import presence guard: file must have direct `nats` import/require
+      2. Connection provenance guard: receiver must be assigned from `connect(...)`
+         call in same file
+      3. Subject evidence guard: call must have extractable subject argument
+    - Provenance tracking scope (deliberately narrow):
+      - Same file only, direct assignment only, direct receiver identifier only
+      - No interprocedural flow, no wrapper inference, no alias tracking
+    - Intentionally NOT detected (deferred to MB-3B):
+      - `nc.request()` — mixed semantics (outbound request + reply handling),
+        direction is muddy
+      - Subject wildcards
+      - Queue groups
+      - JetStream patterns
+    - CLI: `rmap boundaries list --kind nats_subject` (aliases: nats)
+    - Tests: 19 unit tests (nats_detector)
+    - Deferred: request() (MB-3B), Java nats-client, Python nats, Go nats
+12. MB-3B (NATS request/reply) — future
 
 **Shared infrastructure:**
 - Contract/IDL substrate module (`repo-graph-contract-schema`)

@@ -43,8 +43,9 @@ use repo_graph_java_extractor::JavaExtractor;
 use repo_graph_python_extractor::PythonExtractor;
 use repo_graph_rust_extractor::RustExtractor;
 use repo_graph_ts_extractor::{
-    extract_amqp_boundary_calls, extract_kafka_boundary_calls, extract_ts_boundary_calls,
-    RawAmqpBoundaryCall, RawKafkaBoundaryCall, RawTsBoundaryCall, TsExtractor,
+    extract_amqp_boundary_calls, extract_kafka_boundary_calls, extract_nats_boundary_calls,
+    extract_ts_boundary_calls, RawAmqpBoundaryCall, RawKafkaBoundaryCall, RawNatsBoundaryCall,
+    RawTsBoundaryCall, TsExtractor,
 };
 
 use crate::config::RepoConfigContext;
@@ -663,6 +664,8 @@ fn convert_raw_to_callsite(raw: &RawBoundaryCall, file_path: &str, repo_uid: &st
 		extracted_argument: raw.extracted_argument.clone(),
 		argument_index: raw.argument_index,
 		raw_argument_text: None,
+		// No api_family filter — C IPC calls don't conflict with message broker patterns
+		api_family: None,
 		socket_family: raw.socket_family.map(convert_socket_family),
 		socket_type: raw.socket_type.map(convert_socket_type),
 		mmap_flags: raw.mmap_flags.map(convert_mmap_flags),
@@ -804,6 +807,23 @@ fn persist_ts_boundary_interactions(
 				)));
 			}
 		}
+
+		// Extract NATS boundary calls (MB-3A).
+		let nats_calls = extract_nats_boundary_calls(
+			&tree.root_node(),
+			file.content.as_bytes(),
+			&file.rel_path,
+		);
+
+		for raw in nats_calls {
+			let callsite = convert_nats_raw_to_callsite(&raw, &file.rel_path, repo_uid);
+			if let Err(e) = emitter.try_emit(&callsite) {
+				return Err(ComposeError::Index(format!(
+					"boundary-interaction emitter failed at {}:{}: {}",
+					file.rel_path, raw.location.line_start, e
+				)));
+			}
+		}
 	}
 
 	// Collect emitted facts.
@@ -847,6 +867,8 @@ fn convert_ts_raw_to_callsite(raw: &RawTsBoundaryCall, file_path: &str, repo_uid
 		extracted_argument: raw.extracted_argument.clone(),
 		argument_index: None,
 		raw_argument_text: None,
+		// No api_family filter — TS SAB/Worker detection uses unique function names
+		api_family: None,
 		// TS SAB/Worker detection doesn't use socket/mmap semantics
 		socket_family: None,
 		socket_type: None,
@@ -880,6 +902,8 @@ fn convert_amqp_raw_to_callsite(raw: &RawAmqpBoundaryCall, file_path: &str, repo
 		extracted_argument,
 		argument_index: Some(0), // First argument is typically queue/exchange
 		raw_argument_text: None,
+		// Filter to AMQP bindings only — prevents matching Kafka/NATS functions
+		api_family: Some("amqplib".to_string()),
 		// AMQP doesn't use socket/mmap semantics
 		socket_family: None,
 		socket_type: None,
@@ -915,7 +939,40 @@ fn convert_kafka_raw_to_callsite(raw: &RawKafkaBoundaryCall, file_path: &str, re
 		extracted_argument,
 		argument_index: Some(0), // First argument is typically the options object with topic
 		raw_argument_text: None,
+		// Filter to Kafka bindings only — prevents matching AMQP/NATS functions
+		api_family: Some("kafkajs".to_string()),
 		// Kafka doesn't use socket/mmap semantics
+		socket_family: None,
+		socket_type: None,
+		mmap_flags: None,
+		mknod_mode: None,
+	}
+}
+
+/// Convert a raw NATS boundary call to a BoundaryCallsite for the emitter.
+fn convert_nats_raw_to_callsite(raw: &RawNatsBoundaryCall, file_path: &str, repo_uid: &str) -> BoundaryCallsite {
+	// Build enclosing symbol stable key.
+	let enclosing_symbol_key = if raw.enclosing_function.is_empty() {
+		format!("{}:{}:FILE", repo_uid, file_path)
+	} else {
+		format!(
+			"{}:{}#{}:SYMBOL:FUNCTION",
+			repo_uid, file_path, raw.enclosing_function
+		)
+	};
+
+	BoundaryCallsite {
+		language: BiLanguage::TypeScript,
+		function_name: raw.function_name.clone(),
+		location: raw.location.clone(),
+		source_file: file_path.to_string(),
+		enclosing_symbol_key,
+		extracted_argument: raw.subject.clone(),
+		argument_index: Some(0), // First argument is subject
+		raw_argument_text: None,
+		// Filter to NATS bindings only — prevents matching AMQP/Kafka "publish"
+		api_family: Some("nats".to_string()),
+		// NATS doesn't use socket/mmap semantics
 		socket_family: None,
 		socket_type: None,
 		mmap_flags: None,

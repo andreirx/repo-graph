@@ -278,6 +278,12 @@ pub enum ChannelKind {
     /// Scope: unknown by default (broker endpoint may be local or remote).
     KafkaTopic,
 
+    // ── MB-3A: NATS ───────────────────────────────────────────────
+    /// NATS subject (direct nats npm package).
+    /// Transport class: message_broker.
+    /// Scope: unknown by default (broker endpoint may be local or remote).
+    NatsSubject,
+
     // ── Slice 3: Library wrappers (deferred) ──────────────────────
     /// MQTT topic.
     MqttTopic,
@@ -326,6 +332,7 @@ impl ChannelKind {
             ChannelKind::ErpcChannel => "erpc_channel",
             ChannelKind::AmqpQueue => "amqp_queue",
             ChannelKind::KafkaTopic => "kafka_topic",
+            ChannelKind::NatsSubject => "nats_subject",
             ChannelKind::SerialPort => "serial_port",
             ChannelKind::CanMessage => "can_message",
             ChannelKind::MqttTopic => "mqtt_topic",
@@ -413,6 +420,7 @@ impl ChannelKind {
             // Message brokers
             ChannelKind::AmqpQueue
             | ChannelKind::KafkaTopic
+            | ChannelKind::NatsSubject
             | ChannelKind::MqttTopic
             | ChannelKind::DbusInterface
             | ChannelKind::ZeromqSocket => TransportClass::MessageBroker,
@@ -516,6 +524,7 @@ impl From<ChannelKind> for ProtocolFamily {
             }
             ChannelKind::AmqpQueue
             | ChannelKind::KafkaTopic
+            | ChannelKind::NatsSubject
             | ChannelKind::MqttTopic
             | ChannelKind::DbusInterface
             | ChannelKind::ZeromqSocket => ProtocolFamily::MessageBroker,

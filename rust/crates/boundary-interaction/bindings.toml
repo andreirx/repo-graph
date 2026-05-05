@@ -951,3 +951,61 @@ notes = "consumer.subscribe({ topic }) or consumer.subscribe({ topics: [...] }) 
 # NOTE: consumer.run() is intentionally NOT bound here.
 # It provides no topic evidence and is excluded from detection.
 # Future work may correlate run() with subscribe() for callback enrichment.
+
+# ════════════════════════════════════════════════════════════════════════
+# NATS (MB-3A)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: nats official npm package usage in JavaScript/TypeScript.
+# Shipped patterns: nc.publish, nc.subscribe.
+#
+# Triple scope guard in detector (nats_detector.rs):
+#   1. File must have direct nats import/require
+#   2. Receiver must be assigned from connect() call (NATS connection)
+#   3. Call must have extractable subject argument
+#
+# NOT detected (deferred to MB-3B):
+#   - nc.request() — mixed semantics (outbound + reply handling)
+#   - Subject wildcards
+#   - Queue groups
+#   - JetStream patterns
+#
+# Scope: unknown by default (broker endpoint may be local or remote).
+# Transport: message_broker.
+# Interaction: publish_subscribe (NATS is strongly pub/sub shaped).
+#
+# Contract: docs/slices/mb-3a-nats-subject.md
+
+# ── Publisher patterns ─────────────────────────────────────────────
+
+[[binding]]
+language = "typescript"
+api_family = "nats"
+function = "publish"
+role = "provider"
+channel_kind = "nats_subject"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "publish_subscribe"
+basis = "api_call"
+arg_index = 0
+notes = "nc.publish(subject, data) - publish to subject. Arg0 is subject name."
+
+# ── Consumer patterns ──────────────────────────────────────────────
+
+[[binding]]
+language = "typescript"
+api_family = "nats"
+function = "subscribe"
+role = "consumer"
+channel_kind = "nats_subject"
+scope_heuristic = "fixed"
+fixed_scope = "unknown"
+interaction_pattern = "publish_subscribe"
+basis = "api_call"
+arg_index = 0
+notes = "nc.subscribe(subject, options?) - subscribe to subject. Arg0 is subject name."
+
+# NOTE: nc.request() is intentionally NOT bound here.
+# The request() API has mixed semantics: it publishes a message and
+# waits for a reply. Direction is muddy. Deferred to MB-3B.
