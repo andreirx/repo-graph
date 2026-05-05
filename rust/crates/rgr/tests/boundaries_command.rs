@@ -3868,3 +3868,219 @@ fn boundaries_list_inter_core_both_families_detected() {
     assert_eq!(mailbox_count, 3, "expected 3 mailbox surfaces");
     assert_eq!(rpmsg_count, 3, "expected 3 rpmsg surfaces");
 }
+
+// ══════════════════════════════════════════════════════════════════
+// BI-LX-4: MEMFD_CREATE CLI ADAPTER TESTS
+// ══════════════════════════════════════════════════════════════════
+
+fn create_test_repo_with_memfd(dir: &std::path::Path) {
+    let src = dir.join("memfd_user.c");
+    let mut f = File::create(&src).unwrap();
+    writeln!(f, "#define _GNU_SOURCE").unwrap();
+    writeln!(f, "#include <sys/mman.h>").unwrap();
+    writeln!(f, "int create_basic_memfd(void) {{").unwrap();
+    writeln!(f, "    return memfd_create(\"basic_buffer\", 0);").unwrap();
+    writeln!(f, "}}").unwrap();
+    writeln!(f, "int create_cloexec_memfd(void) {{").unwrap();
+    writeln!(f, "    return memfd_create(\"cloexec_buffer\", MFD_CLOEXEC);").unwrap();
+    writeln!(f, "}}").unwrap();
+    writeln!(f, "int create_sealable_memfd(void) {{").unwrap();
+    writeln!(f, "    return memfd_create(\"sealable_buffer\", MFD_ALLOW_SEALING);").unwrap();
+    writeln!(f, "}}").unwrap();
+}
+
+fn build_indexed_db_with_memfd() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_test_repo_with_memfd(&repo_path);
+
+    let db_path = dir.path().join("test.db");
+
+    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
+    let result = index_path(
+        &repo_path,
+        &db_path,
+        "memfd-repo",
+        &ComposeOptions::default(),
+    )
+    .unwrap();
+    assert!(result.files_total >= 1);
+
+    (dir, db_path, repo_path)
+}
+
+#[test]
+fn boundaries_list_memfd_included_in_shared_memory_kind() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_memfd();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "memfd-repo",
+            "--kind",
+            "shared_memory",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    let surfaces = result["results"].as_array().unwrap();
+
+    // Should have 3 surfaces: 3 memfd_create calls
+    assert_eq!(
+        surfaces.len(),
+        3,
+        "expected 3 memfd_create surfaces; got {}",
+        surfaces.len()
+    );
+
+    // Verify all are shared_memory
+    for surface in surfaces {
+        assert_eq!(
+            surface["channelKind"], "shared_memory",
+            "expected shared_memory channel kind"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_memfd_has_memfd_provenance() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_memfd();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "memfd-repo",
+            "--kind",
+            "shared_memory",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    let surfaces = result["results"].as_array().unwrap();
+
+    // All memfd surfaces should have api:memfd:memfd_create provenance
+    for surface in surfaces {
+        let provenance = surface["provenance"].as_str().unwrap();
+        assert!(
+            provenance.contains(":memfd:"),
+            "expected memfd in provenance, got: {}",
+            provenance
+        );
+        assert!(
+            provenance.contains("memfd_create"),
+            "expected memfd_create in provenance, got: {}",
+            provenance
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_memfd_has_inter_process_scope() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_memfd();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "memfd-repo",
+            "--kind",
+            "shared_memory",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    let surfaces = result["results"].as_array().unwrap();
+
+    // All memfd surfaces should have inter_process scope
+    for surface in surfaces {
+        assert_eq!(
+            surface["boundaryScope"], "inter_process",
+            "memfd surfaces should have inter_process scope"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_memfd_are_bidirectional() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_memfd();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "memfd-repo",
+            "--kind",
+            "shared_memory",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    let surfaces = result["results"].as_array().unwrap();
+
+    // All memfd surfaces should be bidirectional (per BI-LX-4 design)
+    for surface in surfaces {
+        assert_eq!(
+            surface["direction"], "bidirectional",
+            "memfd surfaces should be bidirectional (per BI-LX-4 design)"
+        );
+    }
+}
+
+#[test]
+fn boundaries_list_memfd_has_shared_state_pattern() {
+    let (_dir, db_path, _repo_path) = build_indexed_db_with_memfd();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "list",
+            db_path.to_str().unwrap(),
+            "memfd-repo",
+            "--kind",
+            "shared_memory",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    let surfaces = result["results"].as_array().unwrap();
+
+    // All memfd surfaces should have shared_state interaction pattern
+    for surface in surfaces {
+        assert_eq!(
+            surface["interactionPattern"], "shared_state",
+            "memfd surfaces should have shared_state pattern"
+        );
+    }
+}

@@ -440,6 +440,31 @@ basis = "api_call"
 notes = "Control SysV shared memory segment. Arg0 is shmid, arg1 is cmd (IPC_RMID, IPC_STAT, etc.)."
 
 # ════════════════════════════════════════════════════════════════════════
+# MEMFD (BI-LX-4)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Detection: memfd_create() API usage.
+# Creates anonymous file-backed shared memory (Linux 3.17+).
+# Scope: always inter_process (designed for IPC via fd passing).
+# Direction: bidirectional (creates shared state, role unclear).
+#
+# Reuses channel_kind = shared_memory with api_family = memfd.
+# See docs/slices/bi-lx-4-memfd-create.md for design.
+
+[[binding]]
+language = "c"
+api_family = "memfd"
+function = "memfd_create"
+role = "bidirectional"
+channel_kind = "shared_memory"
+scope_heuristic = "fixed"
+fixed_scope = "inter_process"
+interaction_pattern = "shared_state"
+basis = "api_call"
+arg_index = 0
+notes = "Create anonymous memory fd. Arg0 is name, arg1 is flags (MFD_CLOEXEC, MFD_ALLOW_SEALING, etc.)."
+
+# ════════════════════════════════════════════════════════════════════════
 # SYSV MESSAGE QUEUES (BI-LX-2)
 # ════════════════════════════════════════════════════════════════════════
 #

@@ -100,6 +100,8 @@ const SIGNAL_FUNCTIONS: &[&str] = &[
 ];
 /// SysV shared memory functions for BI-LX-1.
 const SYSV_SHM_FUNCTIONS: &[&str] = &["shmget", "shmat", "shmdt", "shmctl"];
+/// memfd_create for BI-LX-4.
+const MEMFD_FUNCTIONS: &[&str] = &["memfd_create"];
 /// SysV message queue functions for BI-LX-2.
 const SYSV_MSGQ_FUNCTIONS: &[&str] = &["msgget", "msgsnd", "msgrcv", "msgctl"];
 /// SysV semaphore functions for BI-LX-3.
@@ -138,6 +140,7 @@ pub fn is_boundary_function(name: &str) -> bool {
         || MQUEUE_FUNCTIONS.contains(&name)
         || SIGNAL_FUNCTIONS.contains(&name)
         || SYSV_SHM_FUNCTIONS.contains(&name)
+        || MEMFD_FUNCTIONS.contains(&name)
         || SYSV_MSGQ_FUNCTIONS.contains(&name)
         || SYSV_SEM_FUNCTIONS.contains(&name)
         || POSIX_NAMED_SEM_FUNCTIONS.contains(&name)
@@ -438,6 +441,17 @@ fn try_extract_boundary_call(
                 }
             }
             // sem_close takes descriptor, cannot extract name without tracking
+        }
+
+        // ── BI-LX-4: memfd_create ─────────────────────────────────────────
+        "memfd_create" => {
+            // memfd_create(name, flags) — name is arg0
+            if let Some(arg0) = args.first() {
+                if let Some(name) = extract_string_literal(arg0) {
+                    call.extracted_argument = Some(name);
+                    call.argument_index = Some(0);
+                }
+            }
         }
 
         // ── BI-EM-1: Mailbox framework functions ──────────────────────────
@@ -1364,5 +1378,50 @@ mod tests {
         assert_eq!(calls[3].function_name, "rpmsg_create_ept");
         assert_eq!(calls[4].function_name, "rpmsg_send");
         assert_eq!(calls[5].function_name, "rpmsg_destroy_ept");
+    }
+
+    // ── BI-LX-4: memfd_create tests ────────────────────────────────────
+
+    #[test]
+    fn memfd_create_is_detected() {
+        let source = r#"
+            void create_memfd() {
+                int fd = memfd_create("buffer", 0);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "memfd_create");
+        assert_eq!(calls[0].enclosing_function, "create_memfd");
+    }
+
+    #[test]
+    fn memfd_create_extracts_name() {
+        let source = r#"
+            void create_memfd() {
+                int fd = memfd_create("my_shared_buffer", MFD_CLOEXEC);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "memfd_create");
+        assert_eq!(calls[0].extracted_argument, Some("my_shared_buffer".to_string()));
+        assert_eq!(calls[0].argument_index, Some(0));
+    }
+
+    #[test]
+    fn memfd_create_with_variable_name_has_none() {
+        let source = r#"
+            void create_memfd(const char *name) {
+                int fd = memfd_create(name, 0);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "memfd_create");
+        assert_eq!(calls[0].extracted_argument, None); // Variable, can't extract
     }
 }

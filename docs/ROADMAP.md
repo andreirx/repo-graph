@@ -837,7 +837,7 @@ quality diff, policy-fact depth, and TCP/UDP role refinement.
 | BI-LX-1 | SysV shared memory | shmget, shmat, shmdt, shmctl | **SHIPPED** |
 | BI-LX-2 | SysV message queues | msgget, msgsnd, msgrcv, msgctl | **SHIPPED** |
 | BI-LX-3 | SysV + named POSIX semaphores | semget, semop, semctl, sem_open, sem_close, sem_unlink | **SHIPPED** |
-| BI-LX-4 | memfd_create | memfd_create | queued |
+| BI-LX-4 | memfd_create | memfd_create | **SHIPPED** |
 
 Note: BI-LX-3 covers SysV semaphores plus named POSIX semaphores. Unnamed POSIX
 semaphore operations (sem_wait, sem_post, etc.) are deferred until pshared/identity
@@ -848,6 +848,7 @@ correlation is available — otherwise thread synchronization would be misclassi
 - `docs/slices/bi-lx-1-sysv-shared-memory.md` — SHIPPED
 - `docs/slices/bi-lx-2-sysv-message-queues.md` — SHIPPED
 - `docs/slices/bi-lx-3-semaphores.md` — SHIPPED
+- `docs/slices/bi-lx-4-memfd-create.md` — SHIPPED
 - `docs/slices/bi-em-1-inter-core-mailbox.md` — SHIPPED
 
 **After BI-LX:**
@@ -1291,7 +1292,7 @@ Two-track architecture for boundary detection over a unified model:
 - BI-LX-1: SysV shared memory (shmget, shmat, shmdt, shmctl) — SHIPPED
 - BI-LX-2: SysV message queues (msgget, msgsnd, msgrcv, msgctl) — SHIPPED
 - BI-LX-3: SysV + named POSIX semaphores (semget, semop, sem_open, etc.) — **SHIPPED**
-- BI-LX-4: memfd_create — queued
+- BI-LX-4: memfd_create — **SHIPPED**
 
 **Track A-EM: Embedded/Inter-core**
 - BI-EM-1: Inter-core messaging (mailbox + RPMsg, no remoteproc) — **SHIPPED**
