@@ -1028,12 +1028,8 @@ Daemonization hardens the execution boundary. The discovery surfaces
 must stabilize first:
 - Trust overlay on read surfaces — DONE
 - Dead-confidence stratification — DONE
-- Snapshot-to-snapshot quality diff — must complete
-- Quality delta surfacing in check/orient — must complete
 
-Only then does daemon work begin. This is correctness-before-latency
-sequencing. The purpose is multi-agent correctness first, warm-runtime
-latency second.
+The purpose is multi-agent correctness first, warm-runtime latency second.
 
 ### 4. Delta indexing support module (infrastructure)
 **Architectural principle:** Git owns historical truth. Repo-graph owns

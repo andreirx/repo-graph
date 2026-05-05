@@ -697,11 +697,97 @@ Required:
 - daemon-backed `rmap orient/check/explain` on validation repos from the canonical test protocol
 - compare daemon DTOs against direct in-process DTOs for parity
 
-## 21. Open Design Decisions
+## 21. Resolved Design Decisions
 
-These decisions should remain explicit. They should not be settled accidentally inside implementation.
+These decisions have been confirmed and should guide implementation.
 
-### 21.1 Application service packaging
+### 22.1 Storage topology: one private DB per repo
+
+**Decision:** Option B — one SQLite database per repo under a daemon-owned private state root.
+
+**Rationale:**
+- Aligns with daemon's per-repo session model (10.2, 10.3)
+- Unrelated repos do not serialize each other at SQLite level
+- Per-repo writer/read handle ownership is straightforward
+- Cleanup/eviction is simple (delete directory)
+- Smoke/test mode isolation is much cleaner
+- Migration failure is isolated to one repo
+- Enables future per-repo storage replacement
+
+**What this means:**
+- Daemon maintains a separate registry for repo metadata and session control
+- Each repo gets its own SQLite file under the state root
+- Cross-repo queries require orchestration above storage (acceptable trade-off)
+
+### 22.2 DBs become private in daemon-backed mode
+
+**Decision:** Normal CLI stops taking raw DB paths once daemon-backed mode is active.
+
+**Rationale:**
+- Prevents two competing control planes
+- Daemon owns: where DBs live, when created, whether retained, repo load state
+- User-facing CLI moves toward repo identity, not DB path
+
+**CLI contract change:**
+- Before: `rmap <command> <db_path> <repo_uid> ...`
+- After (daemon mode): `rmap <command> <repo_uid> ...` or `rmap <command> --repo <path>`
+
+The daemon resolves repo identity to its private DB location.
+
+### 22.3 Test mode via state root injection
+
+**Decision:** Test mode uses environment variable to inject alternative state root.
+
+**Shape:**
+```
+RMAP_STATE_ROOT=/private/tmp/repo-graph-daemon-tests/<test-run>/
+```
+
+**Normal mode state root:**
+```
+~/.rmapd/
+├── repos/<repo_uid>/repo.db
+├── registry.db          # repo metadata, session state
+├── rmapd.sock
+├── rmapd.pid
+├── logs/
+└── cache/
+```
+
+**Test mode state root:**
+```
+/private/tmp/repo-graph-daemon-tests/<test-run>/
+├── repos/<repo_uid>/repo.db
+├── registry.db
+├── rmapd.sock
+└── ...
+```
+
+Implementation is dependency injection of the state-root resolver. No forked logic.
+
+### 22.4 Daemon v1 surface priority
+
+**Decision:** Thin surfaces first, complexity later.
+
+**v1 daemon-backed surfaces:**
+1. `orient`
+2. `check`
+3. `explain`
+4. `callers`
+5. `callees`
+6. `imports`
+
+**Deferred:**
+- Full module query family
+- Policy write surfaces
+- Cross-repo orchestration
+- In-memory graph replacement
+
+## 22. Open Design Decisions (Remaining)
+
+These decisions remain open and should not be settled accidentally inside implementation.
+
+### 22.1 Application service packaging
 
 Option A: one new crate for daemon-facing services
 - pros: one obvious seam, simple adapter dependency graph
@@ -715,7 +801,7 @@ Constraint:
 - whichever option is chosen, transport DTOs and error conventions must be uniform
 - command modules must not remain the de facto service layer
 
-### 21.2 Extent of in-memory projection in the first daemon slice
+### 22.2 Extent of in-memory projection in the first daemon slice
 
 Option A: warm SQLite + minimal session metadata only
 - pros: lower implementation risk
@@ -728,7 +814,7 @@ Option B: selective projections for module/trust/docs/orient-heavy paths
 Constraint:
 - start with caches whose invalidation boundaries are already understood
 
-### 21.3 How far to push document-first authored knowledge in the first daemon slice
+### 22.3 How far to push document-first authored knowledge in the first daemon slice
 
 Option A: keep current declaration tables for governance, add document anchoring gradually
 - pros: lower migration pressure, smaller initial slice
@@ -741,7 +827,7 @@ Option B: introduce document-backed authored relationship items as the primary h
 Constraint:
 - discovery-oriented human knowledge should not end up trapped only in SQLite rows
 
-### 21.4 Cross-platform transport
+### 22.4 Cross-platform transport
 
 Option A: Unix socket first, Windows deferred
 - pros: matches current roadmap and keeps first slice narrower
@@ -754,7 +840,7 @@ Option B: abstract IPC from day one
 Constraint:
 - application service contracts must not care which IPC transport is used
 
-## 22. Assumptions and Divergences
+## 23. Assumptions and Divergences
 
 Assumptions used in this document:
 - `rmap` remains the primary Rust product surface
@@ -771,7 +857,7 @@ Intentional divergences from a naive daemon plan:
 - not "make history retention the daemon's central job"
 - not "let many clients mutate the same DB file directly and trust SQLite alone to sort it out"
 
-## 23. Bottom Line
+## 24. Bottom Line
 
 The daemon should be built as a long-lived outer adapter over transport-neutral
 application services and deterministic support crates, with explicit repo session
