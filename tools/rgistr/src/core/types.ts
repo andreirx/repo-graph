@@ -148,6 +148,8 @@ export interface GenerationConfig {
   dryRun?: boolean;
   /** Force regeneration even if MAP.md exists and is fresh */
   force?: boolean;
+  /** Chunk size in KB for large files (default: 200, use 50-100 for local models) */
+  chunkSizeKb?: number;
 }
 
 /**

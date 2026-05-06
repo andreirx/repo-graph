@@ -34,6 +34,7 @@ program
   .option('--repo-root <path>', 'Repository root for path provenance (defaults to target path)')
   .option('--force', 'Force regeneration even if MAP.md exists', false)
   .option('--dry-run', 'Show what would be generated without writing', false)
+  .option('--chunk-size <kb>', 'Chunk size in KB for large files (default: 200, use 50-100 for local models)', '200')
   .action(async (targetPath, opts) => {
     try {
       const rootPath = path.resolve(targetPath);
@@ -100,7 +101,8 @@ program
           maxFileSize: Number.MAX_SAFE_INTEGER,
           outputFilename: opts.output,
           force: opts.force,
-          dryRun: opts.dryRun
+          dryRun: opts.dryRun,
+          chunkSizeKb: parseInt(opts.chunkSize, 10)
         },
         onProgress: (status) => {
           if (status.phase === 'scanning') {

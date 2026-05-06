@@ -157,7 +157,9 @@ export abstract class BaseLLMAdapter implements ILLMAdapter {
           if (trimmed.startsWith('data: ')) {
             try {
               const json = JSON.parse(trimmed.slice(6));
-              const content = json.choices?.[0]?.delta?.content || '';
+              const delta = json.choices?.[0]?.delta;
+              // Support both standard content and Qwen-style reasoning_content
+              const content = delta?.content || delta?.reasoning_content || '';
               if (content) {
                 fullText += content;
                 process.stdout.write('.');
@@ -175,7 +177,8 @@ export abstract class BaseLLMAdapter implements ILLMAdapter {
       if (trimmed.startsWith('data: ') && trimmed !== 'data: [DONE]') {
         try {
           const json = JSON.parse(trimmed.slice(6));
-          const content = json.choices?.[0]?.delta?.content || '';
+          const delta = json.choices?.[0]?.delta;
+          const content = delta?.content || delta?.reasoning_content || '';
           if (content) fullText += content;
         } catch (e) { /* ignore */ }
       }

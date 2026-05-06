@@ -164,7 +164,8 @@ export async function generate(options: GeneratorOptions): Promise<MapGeneration
             repoRoot: effectiveRepoRoot,
             basisCommit,
             synthesisBasis,
-            dryRun: config.dryRun
+            dryRun: config.dryRun,
+            chunkSizeKb: config.chunkSizeKb
           });
           results.push(result);
         } else {
@@ -269,6 +270,7 @@ interface FileMapOptions {
   basisCommit: string | null;
   synthesisBasis: 'code_only' | 'code_and_graph' | 'code_graph_and_docs';
   dryRun?: boolean;
+  chunkSizeKb?: number;
 }
 
 async function generateFileMap(
@@ -389,15 +391,22 @@ async function generateChunkedFileMap(
   const effectiveSynthesisBasis = 'code_only' as const;
   const graphContextDropped = synthesisBasis !== 'code_only';
 
-  // Plan chunks using the chunking support module
+  // Plan chunks using the chunking support module.
+  // forceChunking: true because the CLI already decided this file exceeds
+  // WHOLE_FILE_THRESHOLD (200KB). The byte-size threshold is the product decision;
+  // token budget is only for chunk sizing.
+  const chunkSizeBytes = (options.chunkSizeKb || 200) * 1024;
   const plan = planChunks(repoRelativePath, content, {
     modelId: llm.modelName,
     includeGraphContext: false, // No graph context in chunked path
+    forceChunking: true, // CLI decided to chunk based on byte size
+    targetChunkBytes: chunkSizeBytes,
   });
 
-  if (!plan.requiresChunking) {
-    // File fits in single pass after all - use normal path
-    // This shouldn't happen since we already checked size, but handle gracefully
+  // With forceChunking: true, plan.requiresChunking should always be true.
+  // This guard is defensive only.
+  if (!plan.requiresChunking || plan.chunks.length === 0) {
+    console.error(`[WARN] Chunked path for ${file.relativePath} produced no chunks. Falling back to whole-file.`);
     return generateFileMap(file, folderPath, options);
   }
 

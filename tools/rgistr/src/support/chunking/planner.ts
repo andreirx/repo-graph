@@ -14,28 +14,40 @@ export interface ChunkPlannerConfig {
   /** Model ID for budget calculation. */
   modelId: string;
 
+  /** Target chunk size in bytes (default: 200KB, aligns with WHOLE_FILE_THRESHOLD). */
+  targetChunkBytes?: number;
+
   /** Target chunk size as fraction of safe budget (default: 0.8). */
   targetChunkFraction?: number;
 
   /** Minimum chunk size in lines (default: 10). */
   minChunkLines?: number;
 
-  /** Maximum chunk size in lines (default: 500). */
+  /** Maximum chunk size in lines (default: 8000). */
   maxChunkLines?: number;
 
-  /** Overlap lines between chunks (default: 5). */
+  /** Overlap lines between chunks (default: 20). */
   overlapLines?: number;
 
   /** Whether to include graph context in budget. */
   includeGraphContext?: boolean;
+
+  /** Force chunking even if file fits in token budget.
+   * Used when CLI has already decided chunking based on byte size threshold. */
+  forceChunking?: boolean;
 }
 
+/** 200KB - aligns with WHOLE_FILE_THRESHOLD in generator.ts */
+const TARGET_CHUNK_BYTES = 200 * 1024;
+
 const DEFAULT_CONFIG: Required<Omit<ChunkPlannerConfig, 'modelId'>> = {
+  targetChunkBytes: TARGET_CHUNK_BYTES,
   targetChunkFraction: 0.8,
   minChunkLines: 10,
-  maxChunkLines: 500,
-  overlapLines: 5,
+  maxChunkLines: 10000, // Safety cap, but bytes should be primary constraint
+  overlapLines: 20,     // More overlap for larger chunks
   includeGraphContext: false,
+  forceChunking: false,
 };
 
 // ── Main planner ─────────────────────────────────────────────────────
@@ -61,8 +73,8 @@ export function planChunks(
 
   const targetTokens = Math.floor(budget.safeChunkTokens * cfg.targetChunkFraction);
 
-  // Check if whole-file processing is possible
-  if (tokenEstimate.tokens <= budget.sourceContentBudget) {
+  // Check if whole-file processing is possible (unless forced to chunk)
+  if (!cfg.forceChunking && tokenEstimate.tokens <= budget.sourceContentBudget) {
     return {
       filePath,
       fileHash,
@@ -74,12 +86,12 @@ export function planChunks(
     };
   }
 
-  // Need to chunk - use line-window chunking
+  // Need to chunk - use line-window chunking with byte-based sizing
   const lines = content.split('\n');
   const chunks = planLineWindowChunks(
     lines,
     fileHash,
-    targetTokens,
+    cfg.targetChunkBytes,  // Primary constraint: bytes (aligns with WHOLE_FILE_THRESHOLD)
     cfg.minChunkLines,
     cfg.maxChunkLines,
     cfg.overlapLines
@@ -101,12 +113,13 @@ export function planChunks(
 /**
  * Plan chunks using line-window approach.
  *
- * This is the fallback when structural chunking is not available.
+ * Uses byte size as primary constraint (aligns with WHOLE_FILE_THRESHOLD).
+ * Each chunk targets ~200KB, same threshold that triggers chunking.
  */
 function planLineWindowChunks(
   lines: string[],
   fileHash: string,
-  targetTokens: number,
+  targetBytes: number,
   minLines: number,
   maxLines: number,
   overlapLines: number
@@ -115,22 +128,22 @@ function planLineWindowChunks(
   let currentStart = 0;
 
   while (currentStart < lines.length) {
-    // Find the end of this chunk
+    // Find the end of this chunk based on byte size
     let currentEnd = currentStart;
-    let currentTokens = 0;
+    let currentBytes = 0;
 
     while (currentEnd < lines.length) {
-      const lineTokens = estimateTokens(lines[currentEnd]).tokens;
+      const lineBytes = Buffer.byteLength(lines[currentEnd], 'utf-8') + 1; // +1 for newline
 
-      // Check if adding this line would exceed target
-      if (currentTokens + lineTokens > targetTokens && currentEnd - currentStart >= minLines) {
+      // Check if adding this line would exceed target bytes
+      if (currentBytes + lineBytes > targetBytes && currentEnd - currentStart >= minLines) {
         break;
       }
 
-      currentTokens += lineTokens;
+      currentBytes += lineBytes;
       currentEnd++;
 
-      // Respect maximum chunk size
+      // Respect maximum chunk size (safety cap)
       if (currentEnd - currentStart >= maxLines) {
         break;
       }
@@ -139,8 +152,11 @@ function planLineWindowChunks(
     // Ensure we have at least minLines
     if (currentEnd - currentStart < minLines && currentEnd < lines.length) {
       currentEnd = Math.min(currentStart + minLines, lines.length);
-      currentTokens = estimateTokens(lines.slice(currentStart, currentEnd).join('\n')).tokens;
     }
+
+    // Estimate tokens for the chunk (for metadata)
+    const chunkContent = lines.slice(currentStart, currentEnd).join('\n');
+    const chunkTokens = estimateTokens(chunkContent).tokens;
 
     // Create the chunk
     const span: SourceSpan = {
@@ -157,7 +173,7 @@ function planLineWindowChunks(
 
     chunks.push({
       identity,
-      estimatedTokens: currentTokens,
+      estimatedTokens: chunkTokens,
       boundaryType: 'arbitrary',
       overlapLines: chunks.length > 0 ? overlapLines : 0,
     });

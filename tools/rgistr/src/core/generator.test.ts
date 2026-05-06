@@ -449,3 +449,205 @@ describe('generate() small file path', () => {
     expect(chunkFiles.length).toBe(0);
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Fixture-based chunk rollup tests
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('chunk rollup ordering and determinism', () => {
+  it('chunk_basis array preserves chunk index order', async () => {
+    // Create a file that will produce multiple chunks
+    const largeContent = generateLargeContent(3000);
+    await createTestFile('ordered.ts', largeContent);
+
+    await generate({
+      llm: mockLlm,
+      config: {
+        rootPath: tempDir,
+        maxDepth: 1,
+        maxFileSize: 1024 * 1024,
+        force: true,
+      },
+      repoRoot: tempDir,
+    });
+
+    // Read the file artifact
+    const fileMapPath = path.join(tempDir, 'ordered_ts_MAP.md');
+    const fileMapContent = await fs.readFile(fileMapPath, 'utf-8');
+    const artifact = parseFileArtifact(fileMapContent);
+
+    expect(artifact).not.toBeNull();
+    expect(artifact!.chunkBasis).toBeDefined();
+    expect(artifact!.chunkBasis!.length).toBeGreaterThan(1);
+
+    // Verify chunk IDs are in index order (chunk-0, chunk-1, chunk-2, ...)
+    for (let i = 0; i < artifact!.chunkBasis!.length; i++) {
+      const chunkId = artifact!.chunkBasis![i];
+      // chunkId format: fileHash:index:startLine-endLine
+      const match = chunkId.match(/:(\d+):/);
+      expect(match).not.toBeNull();
+      expect(parseInt(match![1], 10)).toBe(i);
+    }
+  });
+
+  it('chunk artifacts have sequential indices', async () => {
+    const largeContent = generateLargeContent(3000);
+    await createTestFile('sequential.ts', largeContent);
+
+    await generate({
+      llm: mockLlm,
+      config: {
+        rootPath: tempDir,
+        maxDepth: 1,
+        maxFileSize: 1024 * 1024,
+        force: true,
+      },
+      repoRoot: tempDir,
+    });
+
+    // Find all chunk artifacts
+    const files = await fs.readdir(tempDir);
+    const chunkFiles = files
+      .filter(f => f.includes('sequential.ts.chunk-'))
+      .sort((a, b) => {
+        const aMatch = a.match(/chunk-(\d+)/);
+        const bMatch = b.match(/chunk-(\d+)/);
+        return parseInt(aMatch![1], 10) - parseInt(bMatch![1], 10);
+      });
+
+    expect(chunkFiles.length).toBeGreaterThan(1);
+
+    // Verify sequential indices starting from 0
+    for (let i = 0; i < chunkFiles.length; i++) {
+      expect(chunkFiles[i]).toContain(`chunk-${i}`);
+    }
+  });
+
+  it('deterministic output: same input produces same artifact structure', async () => {
+    const largeContent = generateLargeContent(3000);
+    await createTestFile('deterministic.ts', largeContent);
+
+    // First generation
+    await generate({
+      llm: mockLlm,
+      config: {
+        rootPath: tempDir,
+        maxDepth: 1,
+        maxFileSize: 1024 * 1024,
+        force: true,
+      },
+      repoRoot: tempDir,
+    });
+
+    const fileMapPath = path.join(tempDir, 'deterministic_ts_MAP.md');
+    const firstContent = await fs.readFile(fileMapPath, 'utf-8');
+    const firstArtifact = parseFileArtifact(firstContent);
+
+    // Delete artifacts and regenerate
+    const files = await fs.readdir(tempDir);
+    for (const f of files) {
+      if (f.includes('deterministic')) {
+        await fs.unlink(path.join(tempDir, f));
+      }
+    }
+
+    // Re-create the file with same content
+    await createTestFile('deterministic.ts', largeContent);
+
+    // Second generation
+    mockLlm.resetCallCount();
+    await generate({
+      llm: mockLlm,
+      config: {
+        rootPath: tempDir,
+        maxDepth: 1,
+        maxFileSize: 1024 * 1024,
+        force: true,
+      },
+      repoRoot: tempDir,
+    });
+
+    const secondContent = await fs.readFile(fileMapPath, 'utf-8');
+    const secondArtifact = parseFileArtifact(secondContent);
+
+    // Structural determinism: same chunk count, same basis ordering
+    expect(secondArtifact!.chunkBasis!.length).toBe(firstArtifact!.chunkBasis!.length);
+    expect(secondArtifact!.synthesisMode).toBe(firstArtifact!.synthesisMode);
+    expect(secondArtifact!.fileHash).toBe(firstArtifact!.fileHash);
+
+    // Chunk IDs should match (same file hash, same indices, same spans)
+    for (let i = 0; i < firstArtifact!.chunkBasis!.length; i++) {
+      expect(secondArtifact!.chunkBasis![i]).toBe(firstArtifact!.chunkBasis![i]);
+    }
+  });
+
+  it('file artifact has correct frontmatter shape for chunk_rollup mode', async () => {
+    const largeContent = generateLargeContent(3000);
+    await createTestFile('shape.ts', largeContent);
+
+    await generate({
+      llm: mockLlm,
+      config: {
+        rootPath: tempDir,
+        maxDepth: 1,
+        maxFileSize: 1024 * 1024,
+        force: true,
+      },
+      repoRoot: tempDir,
+    });
+
+    const fileMapPath = path.join(tempDir, 'shape_ts_MAP.md');
+    const content = await fs.readFile(fileMapPath, 'utf-8');
+    const artifact = parseFileArtifact(content);
+
+    // Required fields for chunk_rollup mode
+    expect(artifact).not.toBeNull();
+    expect(artifact!.scope).toBe('file');
+    expect(artifact!.sourceFile).toBe('shape.ts');
+    expect(artifact!.fileHash).toMatch(/^[a-f0-9]{8}$/);
+    expect(artifact!.synthesisMode).toBe('chunk_rollup');
+    expect(artifact!.chunkBasis).toBeDefined();
+    expect(Array.isArray(artifact!.chunkBasis)).toBe(true);
+    expect(artifact!.generatedAt).toBeDefined();
+    expect(artifact!.model).toBe('mock-model');
+    expect(artifact!.provider).toBe('mock');
+    expect(artifact!.content).toBeTruthy();
+  });
+
+  it('whole_file mode has correct frontmatter shape (legacy MAP format)', async () => {
+    // Note: whole-file mode currently uses writeMap (legacy MAP.md format)
+    // not serializeFileArtifact (new FileArtifact format).
+    // This test verifies the legacy format. Format unification is future work.
+    const smallContent = 'const x = 1;\nexport { x };';
+    await createTestFile('whole.ts', smallContent);
+
+    await generate({
+      llm: mockLlm,
+      config: {
+        rootPath: tempDir,
+        maxDepth: 1,
+        force: true,
+      },
+      repoRoot: tempDir,
+    });
+
+    const fileMapPath = path.join(tempDir, 'whole_ts_MAP.md');
+    const content = await fs.readFile(fileMapPath, 'utf-8');
+
+    // Parse using gray-matter (legacy MAP format)
+    const matter = await import('gray-matter');
+    const { data: frontmatter, content: body } = matter.default(content);
+
+    // Verify legacy MAP frontmatter shape
+    expect(frontmatter.generated_by).toBe('rgistr');
+    expect(frontmatter.generator_version).toBeDefined();
+    expect(frontmatter.scope).toBe('file');
+    expect(frontmatter.source_filename).toBe('whole.ts');
+    expect(frontmatter.adapter).toBe('mock');
+    expect(frontmatter.model).toBe('mock-model');
+    expect(frontmatter.synthesis_basis).toBe('code_only');
+    expect(frontmatter.confidence).toBe('low');
+    expect(frontmatter.generated_at).toBeDefined();
+    expect(body.trim()).toBeTruthy();
+  });
+});
