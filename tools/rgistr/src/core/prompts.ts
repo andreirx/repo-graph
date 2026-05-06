@@ -208,6 +208,232 @@ export function filePromptDigest(
 export const filePrompt = filePromptDigest;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Chunk Prompt (Oversized Files - Chunked Processing)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Schema for chunk summary output.
+ */
+export interface ChunkSummarySchema {
+  purpose: string;
+  key_symbols: string[];
+  notable_dependencies: string[];
+  cross_chunk_references: string[];
+  policy_signals: string[];
+  uncertainty: string | null;
+}
+
+/**
+ * Prompt for generating a summary of a single chunk.
+ */
+export function chunkPrompt(
+  filePath: string,
+  chunkContent: string,
+  language: string,
+  chunkIndex: number,
+  chunkCount: number,
+  lineStart: number,
+  lineEnd: number,
+  synthesisBasis: 'code_only' | 'code_and_graph' | 'code_graph_and_docs' = 'code_only'
+): string {
+  const parts: string[] = [];
+
+  parts.push(`SYNTHESIS_BASIS: ${synthesisBasis}`);
+  parts.push(`INPUT_MODE: chunk (${chunkIndex + 1} of ${chunkCount})`);
+  parts.push('');
+  parts.push('Summarize this chunk of a larger source file for agent orientation.');
+  parts.push('This is NOT the complete file. Focus on what this chunk contains.');
+  parts.push('');
+  parts.push('Output format - use these exact section headers:');
+  parts.push('');
+  parts.push('```');
+  parts.push('# Purpose');
+  parts.push('What this chunk of code does (1-2 sentences).');
+  parts.push('');
+  parts.push('# Key Symbols');
+  parts.push('- symbol_name (defined/used in this chunk)');
+  parts.push('');
+  parts.push('# Notable Dependencies');
+  parts.push('- imports or dependencies visible in this chunk');
+  parts.push('');
+  parts.push('# Cross-Chunk References');
+  parts.push('- symbols referenced but likely defined in other chunks');
+  parts.push('- Write "None visible" if the chunk is self-contained');
+  parts.push('');
+  parts.push('# Policy Signals');
+  parts.push('- policy-bearing patterns visible in this chunk');
+  parts.push('- Write "None" if no policy patterns are evident');
+  parts.push('');
+  parts.push('# Uncertainty');
+  parts.push('What cannot be determined from this chunk alone.');
+  parts.push('```');
+  parts.push('');
+  parts.push('Rules:');
+  parts.push('- Use exact symbol names from the chunk.');
+  parts.push('- Do not speculate about code in other chunks.');
+  parts.push('- Note symbols that appear to be defined elsewhere.');
+  parts.push('- Keep the summary dense and specific to this chunk.');
+  parts.push('');
+
+  parts.push('─'.repeat(60));
+  parts.push(`FILE: ${filePath}`);
+  parts.push(`CHUNK: ${chunkIndex + 1} of ${chunkCount} (lines ${lineStart}-${lineEnd})`);
+  parts.push(`LANGUAGE: ${language}`);
+  parts.push('');
+
+  parts.push('SOURCE:');
+  parts.push('```' + language);
+  parts.push(chunkContent);
+  parts.push('```');
+
+  return parts.join('\n');
+}
+
+/**
+ * Parse chunk summary from markdown sections.
+ */
+export function parseChunkSummary(markdown: string): ChunkSummarySchema {
+  return {
+    purpose: extractSection(markdown, 'Purpose') || 'Purpose not extracted.',
+    key_symbols: extractBullets(markdown, 'Key Symbols'),
+    notable_dependencies: extractBullets(markdown, 'Notable Dependencies'),
+    cross_chunk_references: extractBullets(markdown, 'Cross-Chunk References'),
+    policy_signals: extractBullets(markdown, 'Policy Signals'),
+    uncertainty: extractSection(markdown, 'Uncertainty'),
+  };
+}
+
+/**
+ * Render chunk summary to markdown.
+ */
+export function renderChunkSummary(summary: ChunkSummarySchema): string {
+  const lines: string[] = [];
+
+  lines.push('# Purpose');
+  lines.push(summary.purpose);
+  lines.push('');
+
+  if (summary.key_symbols.length > 0) {
+    lines.push('# Key Symbols');
+    for (const s of summary.key_symbols) {
+      lines.push(`- ${s}`);
+    }
+    lines.push('');
+  }
+
+  if (summary.notable_dependencies.length > 0) {
+    lines.push('# Notable Dependencies');
+    for (const d of summary.notable_dependencies) {
+      lines.push(`- ${d}`);
+    }
+    lines.push('');
+  }
+
+  if (summary.cross_chunk_references.length > 0) {
+    lines.push('# Cross-Chunk References');
+    for (const r of summary.cross_chunk_references) {
+      lines.push(`- ${r}`);
+    }
+    lines.push('');
+  }
+
+  if (summary.policy_signals.length > 0) {
+    lines.push('# Policy Signals');
+    for (const p of summary.policy_signals) {
+      lines.push(`- ${p}`);
+    }
+    lines.push('');
+  }
+
+  if (summary.uncertainty) {
+    lines.push('# Uncertainty');
+    lines.push(summary.uncertainty);
+    lines.push('');
+  }
+
+  return lines.join('\n').trim();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chunk Rollup Prompt (Synthesize File Summary from Chunks)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ChunkSummaryInput {
+  chunkIndex: number;
+  lineStart: number;
+  lineEnd: number;
+  summary: string;
+}
+
+/**
+ * Prompt for synthesizing a file summary from chunk summaries.
+ */
+export function chunkRollupPrompt(
+  filePath: string,
+  chunkSummaries: ChunkSummaryInput[],
+  language: string,
+  totalLines: number,
+  synthesisBasis: 'code_only' | 'code_and_graph' | 'code_graph_and_docs' = 'code_only'
+): string {
+  const parts: string[] = [];
+
+  parts.push(`SYNTHESIS_BASIS: ${synthesisBasis}`);
+  parts.push(`INPUT_MODE: chunk_rollup (${chunkSummaries.length} chunks)`);
+  parts.push('');
+  parts.push('Synthesize a file-level summary from these chunk summaries.');
+  parts.push('The file was too large for single-pass analysis.');
+  parts.push('');
+  parts.push('Output format - use these exact section headers:');
+  parts.push('');
+  parts.push('```');
+  parts.push('# Purpose');
+  parts.push('1-2 sentences explaining what this file is for.');
+  parts.push('');
+  parts.push('# Key Symbols');
+  parts.push('- most important symbols across all chunks');
+  parts.push('');
+  parts.push('# Notable Dependencies');
+  parts.push('- aggregated dependencies from chunks');
+  parts.push('');
+  parts.push('# Likely Change Reasons');
+  parts.push('- reason someone would edit this');
+  parts.push('');
+  parts.push('# Reading Hint');
+  parts.push('Which chunks to read first and why.');
+  parts.push('');
+  parts.push('# Policy Signals');
+  parts.push('Aggregated policy patterns from chunks. Write "None" if none visible.');
+  parts.push('');
+  parts.push('# Chunking Notes');
+  parts.push('Important cross-chunk relationships or boundaries that may affect understanding.');
+  parts.push('');
+  parts.push('# Uncertainty');
+  parts.push('Limitations from chunked analysis. Always note if cross-chunk visibility was limited.');
+  parts.push('```');
+  parts.push('');
+  parts.push('Rules:');
+  parts.push('- Synthesize, do not just concatenate.');
+  parts.push('- Highlight the most structurally important symbols.');
+  parts.push('- Note if chunks revealed cross-references that suggest important internal structure.');
+  parts.push('- Be explicit about what the chunking process may have obscured.');
+  parts.push('');
+
+  parts.push('─'.repeat(60));
+  parts.push(`FILE: ${filePath}`);
+  parts.push(`LANGUAGE: ${language} | TOTAL_LINES: ${totalLines}`);
+  parts.push('');
+
+  parts.push('CHUNK_SUMMARIES:');
+  for (const chunk of chunkSummaries) {
+    parts.push('');
+    parts.push(`## Chunk ${chunk.chunkIndex + 1} (lines ${chunk.lineStart}-${chunk.lineEnd})`);
+    parts.push(chunk.summary);
+  }
+
+  return parts.join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Folder Synthesis Prompt
 // ─────────────────────────────────────────────────────────────────────────────
 

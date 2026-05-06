@@ -25,8 +25,8 @@ program
   .command('generate')
   .description('Generate MAP.md files for a codebase')
   .argument('<path>', 'Path to the codebase root (or subtree)')
-  .option('-a, --adapter <type>', 'LLM adapter: lmstudio, ollama, openai', 'lmstudio')
-  .option('-m, --model <name>', 'Model name (required for ollama/openai)')
+  .option('-a, --adapter <type>', 'LLM adapter: lmstudio, ollama, openai (required)')
+  .option('-m, --model <name>', 'Model name (required)')
   .option('-e, --endpoint <url>', 'Custom endpoint URL')
   .option('--api-key <key>', 'API key (for openai, or use OPENAI_API_KEY env)')
   .option('-d, --max-depth <n>', 'Maximum recursion depth (-1 = unlimited)', '-1')
@@ -46,7 +46,13 @@ program
         process.exit(1);
       }
 
-      // Create LLM adapter
+      // Discovery-assisted preflight: if no explicit adapter, run discovery
+      if (!opts.adapter) {
+        await runDiscoveryPreflight();
+        return; // runDiscoveryPreflight exits the process
+      }
+
+      // Create LLM adapter (explicit choice provided)
       const llm = createAdapter(opts);
       if (!llm) {
         process.exit(1);
@@ -82,12 +88,16 @@ program
       console.log(`Adapter: ${llm.adapterName}, Model: ${llm.modelName}`);
       console.log(`Output: ${opts.output}, Force: ${opts.force}, Dry-run: ${opts.dryRun}\n`);
 
+      // No scanner size limit for generate: all code files must be processed.
+      // Files above WHOLE_FILE_THRESHOLD (200KB) use chunked generation.
+      // The scanner default (100KB) is for other use cases; CLI overrides it.
       const results = await generate({
         llm,
         repoRoot,
         config: {
           rootPath,
           maxDepth: parseInt(opts.maxDepth, 10),
+          maxFileSize: Number.MAX_SAFE_INTEGER,
           outputFilename: opts.output,
           force: opts.force,
           dryRun: opts.dryRun
@@ -154,11 +164,16 @@ program
 program
   .command('test-connection')
   .description('Test connection to an LLM service')
-  .option('-a, --adapter <type>', 'LLM adapter: lmstudio, ollama, openai', 'lmstudio')
-  .option('-m, --model <name>', 'Model name')
+  .option('-a, --adapter <type>', 'LLM adapter: lmstudio, ollama, openai (required)')
+  .option('-m, --model <name>', 'Model name (required)')
   .option('-e, --endpoint <url>', 'Custom endpoint URL')
   .option('--api-key <key>', 'API key (for openai)')
   .action(async (opts) => {
+    if (!opts.adapter) {
+      console.error('Error: --adapter is required');
+      console.error('Available adapters: lmstudio, ollama, openai');
+      process.exit(1);
+    }
     const llm = createAdapter(opts);
     if (!llm) {
       process.exit(1);
@@ -232,9 +247,13 @@ function createAdapter(opts: {
 }): ILLMAdapter | null {
   switch (opts.adapter) {
     case 'lmstudio':
+      if (!opts.model) {
+        console.error('Error: --model is required for lmstudio adapter');
+        return null;
+      }
       return new LMStudioAdapter({
         endpoint: opts.endpoint,
-        model: opts.model || 'local-model'
+        model: opts.model
       });
 
     case 'ollama':
@@ -285,6 +304,67 @@ function printTree(folder: { relativePath: string; files: { relativePath: string
   for (const sub of folder.folders) {
     printTree(sub, indent + '  ');
   }
+}
+
+/**
+ * Discovery-assisted preflight.
+ *
+ * Runs provider discovery and prints results. Never auto-proceeds.
+ * User must explicitly specify --adapter after seeing available options.
+ *
+ * Exit codes:
+ * - 1: No providers available (nothing to choose from)
+ * - 2: Providers available but explicit choice required
+ */
+async function runDiscoveryPreflight(): Promise<never> {
+  const { discoverProviders, formatDiscoveryReport } =
+    await import('./support/discovery/index.js');
+
+  console.log('No --adapter specified. Running provider discovery...\n');
+
+  const report = await discoverProviders({
+    probeTimeoutMs: 5000,
+  });
+
+  // Print the discovery report
+  console.log(formatDiscoveryReport(report));
+  console.log('');
+
+  if (report.availableProviders.length === 0) {
+    // No providers: error exit with guidance (already in report)
+    process.exit(1);
+  }
+
+  // Providers available: require explicit selection
+  console.log('--- Explicit Selection Required ---');
+  console.log('');
+  console.log('rgistr does not auto-select. Specify adapter and model explicitly:');
+  console.log('');
+
+  // Build example commands from discovered providers
+  for (const provider of report.availableProviders) {
+    const candidate = provider.candidate;
+    let adapterFlag: string;
+
+    if (candidate.transport === 'openai_cloud') {
+      adapterFlag = 'openai';
+    } else if (candidate.transport === 'ollama') {
+      adapterFlag = 'ollama';
+    } else {
+      // openai_compatible: use flavor or lmstudio as default
+      adapterFlag = candidate.flavor === 'lmstudio' ? 'lmstudio' : 'lmstudio';
+    }
+
+    // Show first preferred model, or first model, or placeholder
+    const preferredModel = provider.models.find(m => m.isPreferred);
+    const firstModel = provider.models[0];
+    const modelName = preferredModel?.id ?? firstModel?.id ?? '<model>';
+
+    console.log(`  rgistr generate <path> --adapter ${adapterFlag} --model ${modelName}`);
+  }
+
+  console.log('');
+  process.exit(2);
 }
 
 program.parse();

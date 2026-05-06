@@ -15,6 +15,11 @@ Tighten `rgistr` from a useful script into a productized documentation generator
 that works out of the box across cloud and local inference backends, while
 remaining separate from repo-graph's deterministic extraction core.
 
+**rgistr is secondary to rmap.** The product center is pragmatic documentation
+generation with provenance, not a substrate for other tools. Architecture
+decisions optimize for stability and bounded scope, not maximum abstraction
+purity.
+
 This document records the intended product shape, support modules, sequencing,
 constraints, and non-negotiable rules.
 
@@ -36,20 +41,18 @@ The product contract is:
 
 ## Current State
 
-Current implementation in `tools/rgistr/src/` has these prototype constraints:
+**Shipped:**
+- Provider discovery support module (OpenAI cloud, OpenAI-compatible local, Ollama)
+- Model capability support module (registry, budget calculation)
+- Chunking support module (planning, identity, artifact serialization)
+- Two-mode file routing: whole-file (≤200KB) or chunked (>200KB)
+- No silent file skipping — all code files processed
+- `rgistr discover` CLI command
+- Discovery-assisted preflight in `generate` command (fail-closed, no auto-selection)
 
-- CLI requires direct adapter selection (`lmstudio`, `ollama`, `openai`).
-- No discovery layer exists.
-- No MLX adapter exists.
-- No llama.cpp adapter exists.
-- OpenAI-compatible local backends are not unified.
-- `src/core/generator.ts` skips files above a hard size threshold.
-- Whole-file vs digest behavior is based on byte size, not prompt budget.
-- No per-chunk artifact layer exists.
-- No model capability registry exists.
-- No backend/model selection workflow exists.
-
-These are prototype shortcuts, not acceptable product behavior.
+**Remaining prototype constraints:**
+- No MLX-specific adapter (uses OpenAI-compatible)
+- No llama.cpp-specific adapter (uses OpenAI-compatible)
 
 ## Non-Negotiable Product Rules
 
@@ -250,8 +253,8 @@ Before generation, print:
 - effective selected model
 - planning context budget
 
-If the user explicitly supplied adapter/model, discovery still runs as a
-validation/reporting step but should not silently override explicit user input.
+If the user explicitly supplies `--adapter` and `--model`, discovery is skipped
+and generation proceeds directly with the specified provider.
 
 ### Preferred models
 
@@ -298,45 +301,50 @@ false silence exactly where the product is most needed.
 
 ### Chunk synthesis stages
 
-For oversized files:
+For files > 200KB (chunked path):
 
 1. source file -> chunk plan
 2. each chunk -> chunk gist
-3. ordered chunk gists -> file gist
+3. ordered chunk gists -> file gist (rollup)
 4. file gist -> folder synthesis input
 
-For non-oversized files:
+For files ≤ 200KB (whole-file path):
 
 1. whole file -> file gist
 
-The orchestration contract must unify both paths so folder synthesis consumes a
-single file-summary shape.
+Both paths produce the same file-summary shape for folder synthesis.
 
-## Context Budget Policy
+## File Routing Policy
 
-Current byte-based thresholds are a prototype shortcut and must be removed from
-product logic.
+**Two-mode routing (implemented):**
 
-### Planning policy
+- Files ≤ 200KB: whole-file prompt
+- Files > 200KB: chunked generation
 
-The product should plan around these working assumptions:
+No intermediate digest band. No silent file skipping.
 
-- local generation should fit within a conservative 200k-token working budget
-  on 256k-class local backends
-- OpenAI `gpt-4.1-mini` may use much larger whole-file windows when useful
+The 200KB threshold (`WHOLE_FILE_THRESHOLD`) is a conservative cutoff that
+ensures whole-file prompts fit comfortably in model context with room for
+system prompt, output, and optional graph context.
 
-### Required replacement
+### Scanner policy
 
-Introduce token-budget-aware planning:
+The CLI passes `maxFileSize: Number.MAX_SAFE_INTEGER` to the scanner, ensuring
+all code files are included regardless of size. The generator then routes them
+to whole-file or chunked path based on the 200KB threshold.
 
+### Chunked path budget
+
+The capability module's budget calculation is used when:
+- A file exceeds the 200KB threshold
+- The chunking support module plans how to split it
+- Chunk sizing respects model context limits
+
+Token-budget-aware planning for the chunked path:
 - estimate prompt footprint
 - reserve output budget
 - reserve system-prompt and wrapper overhead
-- reserve graph-context overhead when enabled
-- decide:
-  - whole file
-  - chunked file
-  - recursive subchunking
+- plan chunk boundaries within safe budget
 
 This is a support module concern, not a CLI concern.
 
@@ -387,20 +395,45 @@ Build support modules first. Then wire behavior.
 4. Implement per-chunk gist generation
 5. Implement chunk -> file rollup
 
-### Phase 4: Generator refactor
+### Phase 4: Generator integration (SHIPPED)
 
-1. Remove hard file skipping
-2. Replace byte-threshold branching with budget policy
-3. Unify whole-file and chunked file outputs
-4. Extend freshness checks to chunk artifacts
-5. Preserve deterministic traversal order
+**Implemented:** Two-mode file routing with no silent exclusions.
 
-### Phase 5: CLI productization
+1. All code files are included (scanner has no size cap)
+2. Files ≤ 200KB: whole-file prompt
+3. Files > 200KB: chunked generation
+   - Chunk planner splits file
+   - Per-chunk gist generation
+   - Rollup into file artifact
+4. Freshness checks include chunk artifact integrity
+5. Deterministic traversal order preserved
 
-1. Run discovery automatically before generation
-2. Print findings and selected execution plan
-3. Respect explicit user override flags
-4. Fail clearly when no viable backend/model exists
+**What was removed:**
+- Digest fallback path (100KB-500KB band)
+- Hard file size limits that caused silent skipping
+- `MAX_FILE_SIZE_WHOLE` and `MAX_FILE_SIZE_FOR_SUMMARY` constants
+
+**Current constants:**
+- `WHOLE_FILE_THRESHOLD = 200KB` — routing decision point
+
+The capability module's budget calculation is used by the chunked path
+for chunk sizing.
+
+### Phase 5: CLI productization (SHIPPED)
+
+**Implemented:** Discovery-assisted preflight with fail-closed behavior.
+
+1. If no `--adapter` specified, run provider discovery
+2. Print discovery report showing all probed endpoints and available models
+3. If 0 providers available: exit 1 with guidance
+4. If 1+ providers available: print example commands, exit 2 (require explicit selection)
+5. Never auto-proceed — user must always specify `--adapter` and `--model`
+
+**Exit codes:**
+- 1: No providers available (nothing to choose from)
+- 2: Providers available but explicit choice required
+
+This enforces the "fail closed" product rule: rgistr does not silently pick a backend.
 
 ### Phase 6: Documentation and validation
 
@@ -498,6 +531,30 @@ This keeps one transport family without collapsing into spaghetti.
    256k-class backends unless runtime capability says otherwise.
 5. Chunk-first generation is preferable to omission, even if it increases
    artifact count.
+
+## Architecture Constraints
+
+**rgistr is not a substrate product.** It is a pragmatic documentation tool.
+
+Architecture decisions follow these priorities:
+1. Protect existing operator-facing behavior where it already works
+2. Isolate new features (chunking) from existing stable paths
+3. Keep support modules separate from generator feature layer
+4. Minimize blast radius across unrelated code
+
+**What this means concretely:**
+
+- Support modules own policy (capability, chunking, discovery)
+- Generator consumes support modules where needed
+- Two-mode routing: whole-file (≤200KB) or chunked (>200KB)
+- No silent file exclusions
+- The goal is bounded stability, not maximum abstraction purity
+
+**What is explicitly NOT a goal:**
+
+- Making capability/budget policy the single decision center for routing
+  (the 200KB threshold is a simple constant, not a dynamic budget check)
+- Treating rgistr as a first-class policy center like rmap
 
 ## Divergences From Current Prototype
 

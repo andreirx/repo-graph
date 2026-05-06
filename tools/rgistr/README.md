@@ -35,22 +35,26 @@ npm run build
 ### Generate MAP.md files
 
 ```bash
-# Using LM Studio (default, localhost:1234)
-rgistr generate ./path/to/repo
+# Step 1: Discover available providers
+rgistr discover
 
-# Using Ollama
-rgistr generate ./path/to/repo -a ollama -m llama3.2:3b
-
-# Using OpenAI
-rgistr generate ./path/to/repo -a openai -m gpt-4o-mini --api-key sk-...
+# Step 2: Generate using a discovered provider/model
+rgistr generate ./path/to/repo -a lmstudio -m <discovered-model>
+rgistr generate ./path/to/repo -a ollama -m <discovered-model>
+rgistr generate ./path/to/repo -a openai -m <cloud-model> --api-key sk-...
 
 # Options
-rgistr generate ./path/to/repo \
+rgistr generate ./path/to/repo -a <adapter> -m <model> \
   --max-depth 3 \           # Limit recursion depth
   --output SUMMARY.md \     # Custom output filename
   --force \                 # Regenerate existing MAPs
   --dry-run                 # Show what would be generated
 ```
+
+**Explicit selection required:** rgistr does not auto-select providers or models.
+Run `rgistr discover` first, then copy a discovered model ID exactly into the
+`--model` argument. If `--adapter` is omitted, rgistr runs discovery and exits
+without generating.
 
 ### Scan without generating
 
@@ -61,8 +65,8 @@ rgistr scan ./path/to/repo
 ### Test LLM connection
 
 ```bash
-rgistr test-connection -a lmstudio
-rgistr test-connection -a ollama -m llama3.2:3b
+rgistr test-connection -a lmstudio -m <discovered-model>
+rgistr test-connection -a ollama -m <discovered-model>
 ```
 
 ## LLM Adapters
@@ -82,9 +86,9 @@ Generated files include machine-readable frontmatter:
 ```yaml
 ---
 generated_by: rgistr
-generator_version: 0.1.0
+generator_version: 0.2.0
 adapter: lmstudio
-model: local-model
+model: <selected-model>
 basis_commit: abc123...
 scope: folder
 path: src/core

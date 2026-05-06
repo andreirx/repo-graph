@@ -19,22 +19,39 @@ import type { IGraphContextAdapter } from '../adapters/graph/index.js';
 import type { FolderInfo, FileInfo, MapGenerationResult, GenerationConfig } from './types.js';
 import { scanDirectory, getCodeFiles, getFoldersForGeneration } from './scanner.js';
 import { writeMap, readMap, getGitCommit, isMapFresh, fileMapFilename, isFileMapFilename } from './map-writer.js';
-import { digestFile, formatDigestForPrompt } from './predigest.js';
+import { digestFile } from './predigest.js';
 import {
   SYSTEM_PROMPT,
   filePromptWhole,
-  filePromptDigest,
   folderPrompt,
   fileGroupPrompt,
+  chunkPrompt,
+  chunkRollupPrompt,
   parseFileSummary,
   parseFolderSummary,
+  parseChunkSummary,
   renderFileSummary,
   renderFolderSummary,
+  renderChunkSummary,
   extractSection,
   type FileSummarySchema,
   type FolderSummarySchema,
+  type ChunkSummaryInput,
   type ChildSummary
 } from './prompts.js';
+import {
+  planChunks,
+  extractChunkContent,
+  countLines,
+  computeFileHash,
+  serializeChunkArtifact,
+  serializeFileArtifact,
+  parseFileArtifact,
+  chunkArtifactFilename,
+  type ChunkArtifact,
+  type FileArtifact,
+} from '../support/chunking/index.js';
+import { estimateTokens } from '../support/capability/index.js';
 
 export interface GeneratorOptions {
   /** LLM adapter to use */
@@ -57,11 +74,10 @@ export interface GenerationStatus {
   errors: number;
 }
 
-/** Maximum file size for whole-file summarization (bytes) - use digest above this */
-const MAX_FILE_SIZE_WHOLE = 100 * 1024; // 100KB
-
-/** Absolute maximum file size for any summarization (bytes) */
-const MAX_FILE_SIZE_FOR_SUMMARY = 500 * 1024; // 500KB
+/** Threshold for whole-file vs chunked summarization (bytes).
+ * Files at or below this size use whole-file prompt.
+ * Files above this size use chunked generation. */
+const WHOLE_FILE_THRESHOLD = 200 * 1024; // 200KB
 
 /**
  * Generate MAP.md files for a codebase.
@@ -107,16 +123,26 @@ export async function generate(options: GeneratorOptions): Promise<MapGeneration
 
     // Generate file MAPs for all eligible source files
     for (const file of codeFiles) {
-      // Skip files exceeding absolute size limit
-      if (file.size > MAX_FILE_SIZE_FOR_SUMMARY) continue;
-
       const fileMapName = fileMapFilename(path.basename(file.path));
       const fileMapPath = path.join(folder.path, fileMapName);
 
       // Check freshness
       if (!config.force) {
         const fresh = await isMapFresh(fileMapPath, [file.path]);
-        if (fresh) continue;
+        if (fresh) {
+          // For chunked files, also verify chunk artifacts are intact
+          if (file.size > WHOLE_FILE_THRESHOLD) {
+            const chunksIntact = await areChunkArtifactsIntact(fileMapPath, folder.path);
+            if (!chunksIntact) {
+              // Chunk artifacts missing or corrupted - regenerate
+              // Fall through to generation
+            } else {
+              continue;
+            }
+          } else {
+            continue;
+          }
+        }
       }
 
       onProgress?.({
@@ -128,16 +154,32 @@ export async function generate(options: GeneratorOptions): Promise<MapGeneration
       });
 
       try {
-        const result = await generateFileMap(file, folder.path, {
-          llm,
-          graphAdapter,
-          rootPath: config.rootPath,
-          repoRoot: effectiveRepoRoot,
-          basisCommit,
-          synthesisBasis,
-          dryRun: config.dryRun
-        });
-        results.push(result);
+        // Two-mode routing: whole-file or chunked
+        if (file.size > WHOLE_FILE_THRESHOLD) {
+          // Chunked path for files exceeding threshold
+          const result = await generateChunkedFileMap(file, folder.path, {
+            llm,
+            graphAdapter,
+            rootPath: config.rootPath,
+            repoRoot: effectiveRepoRoot,
+            basisCommit,
+            synthesisBasis,
+            dryRun: config.dryRun
+          });
+          results.push(result);
+        } else {
+          // Whole-file path
+          const result = await generateFileMap(file, folder.path, {
+            llm,
+            graphAdapter,
+            rootPath: config.rootPath,
+            repoRoot: effectiveRepoRoot,
+            basisCommit,
+            synthesisBasis,
+            dryRun: config.dryRun
+          });
+          results.push(result);
+        }
       } catch (error) {
         results.push({
           path: fileMapPath,
@@ -255,16 +297,8 @@ async function generateFileMap(
     }
   }
 
-  // Choose prompting strategy based on file size
-  let prompt: string;
-  if (file.size <= MAX_FILE_SIZE_WHOLE) {
-    // Default: feed whole file for 1M context models
-    prompt = filePromptWhole(repoRelativePath, content, language, synthesisBasis, graphContext);
-  } else {
-    // Fallback: use pre-digest for oversized files
-    const digest = await digestFile(file.path, repoRelativePath);
-    prompt = filePromptDigest(digest, synthesisBasis);
-  }
+  // Whole-file prompt (routing ensures only files within threshold reach here)
+  const prompt = filePromptWhole(repoRelativePath, content, language, synthesisBasis, graphContext);
 
   // Generate summary via LLM (markdown output, no JSON)
   const response = await llm.complete(prompt, {
@@ -317,6 +351,176 @@ function detectLanguage(ext: string): string {
     vue: 'vue', svelte: 'svelte'
   };
   return map[ext] || ext || 'text';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chunked File MAP Generation (Oversized Files)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Generate file MAP via chunked processing for oversized files.
+ *
+ * Flow:
+ * 1. Plan chunks using the chunking support module
+ * 2. Generate chunk artifacts for each chunk
+ * 3. Roll up chunk summaries into file summary
+ * 4. Write file artifact with chunk_rollup synthesis mode
+ */
+async function generateChunkedFileMap(
+  file: FileInfo,
+  folderPath: string,
+  options: FileMapOptions
+): Promise<MapGenerationResult> {
+  const { llm, rootPath, repoRoot, basisCommit, synthesisBasis, dryRun } = options;
+  const fileMapName = fileMapFilename(path.basename(file.path));
+  const outputPath = path.join(folderPath, fileMapName);
+
+  // Compute repo-relative path for frontmatter
+  const repoRelativePath = path.relative(repoRoot, file.path);
+
+  // Read file content
+  const content = await fs.readFile(file.path, 'utf-8');
+  const ext = path.extname(file.path).slice(1);
+  const language = detectLanguage(ext);
+  const totalLines = countLines(content);
+
+  // Chunked files always use code_only synthesis.
+  // Graph context per-chunk is not implemented - acknowledge the limitation honestly.
+  const effectiveSynthesisBasis = 'code_only' as const;
+  const graphContextDropped = synthesisBasis !== 'code_only';
+
+  // Plan chunks using the chunking support module
+  const plan = planChunks(repoRelativePath, content, {
+    modelId: llm.modelName,
+    includeGraphContext: false, // No graph context in chunked path
+  });
+
+  if (!plan.requiresChunking) {
+    // File fits in single pass after all - use normal path
+    // This shouldn't happen since we already checked size, but handle gracefully
+    return generateFileMap(file, folderPath, options);
+  }
+
+  const chunkArtifacts: ChunkArtifact[] = [];
+  const chunkSummaryInputs: ChunkSummaryInput[] = [];
+  const generatedAt = new Date().toISOString();
+
+  // Generate chunk artifacts
+  for (const plannedChunk of plan.chunks) {
+    const chunkContent = extractChunkContent(content, plannedChunk.identity.span);
+    const { startLine, endLine } = plannedChunk.identity.span;
+
+    // Generate chunk summary via LLM
+    const prompt = chunkPrompt(
+      repoRelativePath,
+      chunkContent,
+      language,
+      plannedChunk.identity.chunkIndex,
+      plannedChunk.identity.chunkCount,
+      startLine,
+      endLine,
+      effectiveSynthesisBasis
+    );
+
+    const response = await llm.complete(prompt, {
+      maxTokens: 2000,
+      temperature: 0.3,
+      systemPrompt: SYSTEM_PROMPT
+    });
+
+    // Parse and render chunk summary
+    const chunkSummary = parseChunkSummary(response);
+    const renderedChunkContent = renderChunkSummary(chunkSummary);
+
+    // Build chunk artifact
+    const chunkArtifact: ChunkArtifact = {
+      scope: 'chunk',
+      sourceFile: repoRelativePath,
+      sourceSpan: plannedChunk.identity.span,
+      chunkId: plannedChunk.identity.id,
+      chunkIndex: plannedChunk.identity.chunkIndex,
+      chunkCount: plannedChunk.identity.chunkCount,
+      content: renderedChunkContent,
+      generatedAt,
+      model: llm.modelName,
+      provider: llm.adapterName,
+      sourceTokens: estimateTokens(chunkContent).tokens,
+      outputTokens: estimateTokens(renderedChunkContent).tokens,
+    };
+
+    chunkArtifacts.push(chunkArtifact);
+
+    // Collect for rollup
+    chunkSummaryInputs.push({
+      chunkIndex: plannedChunk.identity.chunkIndex,
+      lineStart: startLine,
+      lineEnd: endLine,
+      summary: renderedChunkContent,
+    });
+
+    // Write chunk artifact (unless dry run)
+    if (!dryRun) {
+      const chunkFilename = chunkArtifactFilename(path.basename(file.path), plannedChunk.identity.chunkIndex);
+      const chunkPath = path.join(folderPath, chunkFilename);
+      const serialized = serializeChunkArtifact(chunkArtifact);
+      await fs.writeFile(chunkPath, serialized, 'utf-8');
+    }
+  }
+
+  // Generate file-level rollup from chunk summaries
+  const rollupPrompt = chunkRollupPrompt(
+    repoRelativePath,
+    chunkSummaryInputs,
+    language,
+    totalLines,
+    effectiveSynthesisBasis
+  );
+
+  const rollupResponse = await llm.complete(rollupPrompt, {
+    maxTokens: 4000,
+    temperature: 0.3,
+    systemPrompt: SYSTEM_PROMPT
+  });
+
+  // Parse file summary from rollup
+  const fileSummary = parseFileSummary(rollupResponse);
+  const renderedContent = renderFileSummary(fileSummary);
+
+  // Build uncertainty notes
+  const uncertaintyNotes: string[] = [
+    `File processed in ${plan.chunks.length} chunks due to size (${plan.fileSizeBytes} bytes).`,
+    'Cross-chunk relationships may be incomplete.',
+  ];
+  if (graphContextDropped) {
+    uncertaintyNotes.push(
+      `Graph context was requested (${synthesisBasis}) but not available for chunked files. Synthesis used code_only.`
+    );
+  }
+
+  // Build file artifact with chunk_rollup mode
+  const fileArtifact: FileArtifact = {
+    scope: 'file',
+    sourceFile: repoRelativePath,
+    fileHash: plan.fileHash,
+    synthesisMode: 'chunk_rollup',
+    chunkBasis: chunkArtifacts.map(c => c.chunkId),
+    content: renderedContent,
+    generatedAt,
+    model: llm.modelName,
+    provider: llm.adapterName,
+    uncertaintyNotes,
+  };
+
+  if (dryRun) {
+    console.log(`[dry-run] Would write: ${outputPath} (chunked: ${plan.chunks.length} chunks)`);
+    return { path: outputPath, scope: 'file', success: true };
+  }
+
+  // Write file artifact using the chunking module serialization
+  const serializedFile = serializeFileArtifact(fileArtifact);
+  await fs.writeFile(outputPath, serializedFile, 'utf-8');
+
+  return { path: outputPath, scope: 'file', success: true };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -470,6 +674,71 @@ async function getLocalFileMaps(folderPath: string): Promise<string[]> {
       .sort();
   } catch {
     return [];
+  }
+}
+
+/**
+ * Check if chunk artifacts referenced by a chunked file MAP are intact.
+ *
+ * Returns true if:
+ * - The file MAP was not generated via chunk_rollup (no chunks to check)
+ * - The file MAP was generated via chunk_rollup and all chunk artifacts exist
+ *
+ * Returns false if:
+ * - The file MAP references chunk artifacts that no longer exist
+ * - The file MAP cannot be read or parsed (triggers regeneration)
+ */
+async function areChunkArtifactsIntact(fileMapPath: string, folderPath: string): Promise<boolean> {
+  try {
+    const content = await fs.readFile(fileMapPath, 'utf-8');
+    const artifact = parseFileArtifact(content);
+
+    if (!artifact) {
+      // Could not parse as file artifact - malformed or legacy format, regenerate
+      return false;
+    }
+
+    if (artifact.synthesisMode !== 'chunk_rollup') {
+      // Not a chunked file, no chunks to check
+      return true;
+    }
+
+    if (!artifact.chunkBasis || artifact.chunkBasis.length === 0) {
+      // No chunk basis recorded - inconsistent state, regenerate
+      return false;
+    }
+
+    // Check that all referenced chunk artifacts exist
+    // Chunk IDs are in format: {file_hash}:{chunk_index}:{line_start}-{line_end}
+    // We need to derive the chunk filename from the source filename and chunk index
+    const sourceBasename = path.basename(artifact.sourceFile);
+
+    for (const chunkId of artifact.chunkBasis) {
+      // Extract chunk index from ID (format: hash:index:lines)
+      const parts = chunkId.split(':');
+      if (parts.length < 2) {
+        return false; // Invalid chunk ID format
+      }
+      const chunkIndex = parseInt(parts[1], 10);
+      if (Number.isNaN(chunkIndex)) {
+        return false;
+      }
+
+      const chunkFilename = chunkArtifactFilename(sourceBasename, chunkIndex);
+      const chunkPath = path.join(folderPath, chunkFilename);
+
+      try {
+        await fs.access(chunkPath);
+      } catch {
+        // Chunk artifact does not exist
+        return false;
+      }
+    }
+
+    return true;
+  } catch {
+    // Error reading file MAP - cannot verify integrity, regenerate
+    return false;
   }
 }
 

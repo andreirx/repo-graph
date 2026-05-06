@@ -2013,3 +2013,76 @@ See `docs/slices/cs-2a-java-generated-code-mapping.md` for full spec.
    `GrpcImplHintResult` is in library-level `IndexResult` but not surfaced in CLI output.
 
 See `docs/slices/gr-1a-java-grpc-server.md` for full spec.
+
+## rgistr Artifact Frontmatter Inconsistency
+
+### Current state
+
+Chunked file generation uses the chunking support module's `serializeFileArtifact()`
+with its own frontmatter schema, while non-chunked files use `writeMap()` with
+the existing schema.
+
+Chunked file artifact frontmatter:
+- `scope: file`
+- `source_file`
+- `file_hash`
+- `synthesis_mode: chunk_rollup`
+- `chunk_basis: [...]`
+- `uncertainty_notes: [...]`
+- `generated_at`, `generator`, `model`, `provider`
+
+Non-chunked file artifact frontmatter:
+- `scope: file`
+- `path` (vs `source_file`)
+- `basis_commit`
+- `adapter`, `model`
+- `synthesis_basis`
+- `confidence`
+- `source_filename`
+
+### Impact
+
+- Both produce valid markdown artifacts
+- Both are readable by existing MAP consumers
+- Schema divergence may complicate future tooling that parses frontmatter
+
+### Resolution path
+
+When rgistr reaches MATURE status, unify the frontmatter contracts:
+- Either migrate `writeMap()` to use chunking module's schema
+- Or extend chunking module to match existing schema
+- Update documentation and any downstream consumers
+
+Low priority - the additive approach was the correct business decision for now.
+
+## rgistr CLI-level generate command coverage gap
+
+### Current state
+
+`tools/rgistr/src/cli.test.ts` covers `discover`, `--help`, and `--version`.
+The `generate` command has no CLI-level tests.
+
+Generator business logic is tested through the adapter seam in
+`tools/rgistr/src/core/generator.test.ts` (7 tests covering routing,
+chunking, freshness, artifacts).
+
+### Gap
+
+No regression test proves:
+- CLI forwards `maxFileSize: Number.MAX_SAFE_INTEGER` to scanner
+- Oversized file reaches chunked path from actual CLI entrypoint
+
+### Why deferred
+
+`generate` requires an LLM adapter. CLI-level testing would require:
+- Mock adapter injection at commander level
+- Or test mode flag that uses mock adapter
+
+The generator tests cover the actual business logic. The CLI is thin wiring.
+
+### Resolution path
+
+When rgistr reaches MATURE status:
+- Add `--test-mode` flag that uses mock adapter
+- Or refactor CLI to accept adapter factory for testability
+- Add CLI-level integration test for oversized file path

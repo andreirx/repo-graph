@@ -1253,27 +1253,28 @@ source-anchor provenance, or queryability.
 See slice docs: `docs/slices/pf-1-status-mapping.md`, `docs/slices/pf-2-behavioral-marker.md`.
 Design doc: `docs/design/policy-facts-support-module.md`.
 
-### 15. rgistr productization plan (planning phase)
+### 15. rgistr productization plan (phases 1-5 shipped)
 
-`tools/rgistr` is currently a useful prototype, not yet a productized
-documentation generator.
+`tools/rgistr` productization complete through Phase 5.
 
-**Required direction:**
-- automatic backend discovery before generation
-- OpenAI env detection
-- local OpenAI-compatible backend probing (LM Studio, MLX, llama.cpp)
-- Ollama probing
-- preferred-model ranking
-- explicit findings/selection report
-- no large-file skipping
-- deterministic chunking with per-chunk gists
-- chunk -> file -> folder synthesis pipeline
-- explicit context-budget policy rather than byte-threshold heuristics
+**Shipped:**
+- Provider discovery support module (OpenAI cloud, OpenAI-compatible local, Ollama)
+- Model capability support module (registry, budget calculation)
+- Chunking support module (planning, identity, artifact serialization)
+- Two-mode file routing: whole-file (≤200KB) or chunked (>200KB)
+- No silent file skipping — all code files processed regardless of size
+- `rgistr discover` CLI command with machine-readable output
+- Discovery-assisted preflight in `generate` (fail-closed, no auto-selection)
+
+**Remaining:**
+- End-to-end validation on real repositories with oversized files
+- CLI-level integration tests (documented as deferred in TECH-DEBT.md)
 
 **Design doc:** `docs/design/rgistr-productization-plan.md`
 
-**Non-negotiable rule:** never skip source files due to size; chunk and roll up
-instead.
+**Product rule:** rgistr never auto-selects a backend. If no `--adapter` is
+specified, it runs discovery, prints available providers, and exits requiring
+explicit selection.
 
 ### 16. Multi-track boundary detection (design phase)
 
