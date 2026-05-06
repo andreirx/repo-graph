@@ -48,6 +48,7 @@ export interface FileSummarySchema {
   notable_dependencies: string[];
   likely_change_reasons: string[];
   policy_signals: string[];
+  legacy_analysis: string[];
   reading_hint: string;
   uncertainty: string | null;
 }
@@ -58,6 +59,7 @@ export interface FolderSummarySchema {
   key_components: string[];
   seams: string[];
   policy_seams: string[];
+  folder_role: string;
   reading_order: string;
   uncertainty: string | null;
 }
@@ -107,6 +109,17 @@ export function filePromptWhole(
   parts.push('- result-fate patterns (return values ignored, collapsed, or weakly used)');
   parts.push('Write "None" if no policy-bearing code is evident.');
   parts.push('');
+  parts.push('# Legacy Analysis');
+  parts.push('If this file contains legacy patterns, note when visible:');
+  parts.push('- Seams: substitution points, test doubles entry, interface boundaries');
+  parts.push('- State ownership: who creates, who destroys, lifecycle boundaries');
+  parts.push('- Registration/extension points: plugin hooks, callback registration');
+  parts.push('- Orchestration loci: loops that coordinate multiple subsystems');
+  parts.push('- Configuration defaults: hardcoded values that control behavior');
+  parts.push('- External touchpoints: IPC, syscalls, hardware access, network I/O');
+  parts.push('- Likely extraction or replacement candidates: tightly-coupled sections that would need isolation for refactoring');
+  parts.push('Write "None visible" if the file is straightforward with no legacy complexity.');
+  parts.push('');
   parts.push('# Uncertainty');
   parts.push('What cannot be determined from the provided evidence. Write "None" if confident.');
   parts.push('```');
@@ -118,6 +131,7 @@ export function filePromptWhole(
   parts.push('- Do not claim callers, ownership, or runtime role unless evidence supports it.');
   parts.push('- For Policy Signals: be conservative. Use "appears to" or "contains" rather than "controls all".');
   parts.push('  Only report what is visible in this file.');
+  parts.push('- Do not infer idealized layering. Describe only visible seams and control points.');
   parts.push('');
 
   parts.push('─'.repeat(60));
@@ -220,6 +234,7 @@ export interface ChunkSummarySchema {
   notable_dependencies: string[];
   cross_chunk_references: string[];
   policy_signals: string[];
+  legacy_analysis: string[];
   uncertainty: string | null;
 }
 
@@ -264,6 +279,15 @@ export function chunkPrompt(
   parts.push('- policy-bearing patterns visible in this chunk');
   parts.push('- Write "None" if no policy patterns are evident');
   parts.push('');
+  parts.push('# Legacy Analysis');
+  parts.push('If this chunk contains legacy patterns, note when visible:');
+  parts.push('- Seams or substitution points');
+  parts.push('- State ownership boundaries');
+  parts.push('- Registration/extension hooks');
+  parts.push('- Orchestration loops');
+  parts.push('- External touchpoints (IPC, syscalls, hardware, network)');
+  parts.push('Write "None visible" if not applicable to this chunk.');
+  parts.push('');
   parts.push('# Uncertainty');
   parts.push('What cannot be determined from this chunk alone.');
   parts.push('```');
@@ -273,6 +297,7 @@ export function chunkPrompt(
   parts.push('- Do not speculate about code in other chunks.');
   parts.push('- Note symbols that appear to be defined elsewhere.');
   parts.push('- Keep the summary dense and specific to this chunk.');
+  parts.push('- Do not infer idealized layering. Describe only visible seams and control points.');
   parts.push('');
 
   parts.push('─'.repeat(60));
@@ -299,6 +324,7 @@ export function parseChunkSummary(markdown: string): ChunkSummarySchema {
     notable_dependencies: extractBullets(markdown, 'Notable Dependencies'),
     cross_chunk_references: extractBullets(markdown, 'Cross-Chunk References'),
     policy_signals: extractBullets(markdown, 'Policy Signals'),
+    legacy_analysis: extractBullets(markdown, 'Legacy Analysis'),
     uncertainty: extractSection(markdown, 'Uncertainty'),
   };
 }
@@ -341,6 +367,14 @@ export function renderChunkSummary(summary: ChunkSummarySchema): string {
     lines.push('# Policy Signals');
     for (const p of summary.policy_signals) {
       lines.push(`- ${p}`);
+    }
+    lines.push('');
+  }
+
+  if (summary.legacy_analysis.length > 0) {
+    lines.push('# Legacy Analysis');
+    for (const l of summary.legacy_analysis) {
+      lines.push(`- ${l}`);
     }
     lines.push('');
   }
@@ -404,6 +438,15 @@ export function chunkRollupPrompt(
   parts.push('# Policy Signals');
   parts.push('Aggregated policy patterns from chunks. Write "None" if none visible.');
   parts.push('');
+  parts.push('# Legacy Analysis');
+  parts.push('Synthesize from chunk legacy analysis:');
+  parts.push('- Key seams and substitution points');
+  parts.push('- State ownership and lifecycle boundaries');
+  parts.push('- Orchestration centers');
+  parts.push('- External touchpoints');
+  parts.push('- Likely extraction or replacement candidates');
+  parts.push('Write "None visible" if chunks reported no legacy patterns.');
+  parts.push('');
   parts.push('# Chunking Notes');
   parts.push('Important cross-chunk relationships or boundaries that may affect understanding.');
   parts.push('');
@@ -416,6 +459,13 @@ export function chunkRollupPrompt(
   parts.push('- Highlight the most structurally important symbols.');
   parts.push('- Note if chunks revealed cross-references that suggest important internal structure.');
   parts.push('- Be explicit about what the chunking process may have obscured.');
+  parts.push('- Do not infer idealized layering. Describe only visible seams and control points.');
+  parts.push('');
+  parts.push('Prioritization (critical for large files):');
+  parts.push('- Key Symbols: top 5-10 operationally important items, not exhaustive catalog');
+  parts.push('- Reading Hint: where policy decisions are made, not mechanism bulk');
+  parts.push('- Identify where protocol/business logic ends and platform/driver code begins');
+  parts.push('- Dense orientation beats comprehensive summary');
   parts.push('');
 
   parts.push('─'.repeat(60));
@@ -477,6 +527,22 @@ export function folderPrompt(
   parts.push('- default policy definitions and override points');
   parts.push('- orchestration loops that consume or ignore child results');
   parts.push('Write "None" if no policy-bearing code reported by children.');
+  parts.push('');
+  parts.push('# Folder Role');
+  parts.push('Infer the most likely role of this folder from child file summaries.');
+  parts.push('Possible roles (use one or two):');
+  parts.push('- orchestration/control');
+  parts.push('- adapter/boundary');
+  parts.push('- handler pack');
+  parts.push('- protocol implementation');
+  parts.push('- driver/hardware-facing');
+  parts.push('- parser/translation');
+  parts.push('- utility/support');
+  parts.push('- public interface');
+  parts.push('- crypto backend');
+  parts.push('- test/support');
+  parts.push('- mixed/unclear');
+  parts.push('Provide short evidence from child summaries. Write "mixed/unclear" if children do not support a clean role.');
   parts.push('');
   parts.push('# Reading Order');
   parts.push('Recommended order for reading this folder.');
@@ -671,6 +737,7 @@ export function parseFileSummary(markdown: string): FileSummarySchema {
     notable_dependencies: extractBullets(markdown, 'Notable Dependencies'),
     likely_change_reasons: extractBullets(markdown, 'Likely Change Reasons'),
     policy_signals: extractBullets(markdown, 'Policy Signals'),
+    legacy_analysis: extractBullets(markdown, 'Legacy Analysis'),
     reading_hint: extractSection(markdown, 'Reading Hint') || '',
     uncertainty: extractSection(markdown, 'Uncertainty')
   };
@@ -686,6 +753,7 @@ export function parseFolderSummary(markdown: string): FolderSummarySchema {
     key_components: extractBullets(markdown, 'Key Components'),
     seams: extractBullets(markdown, 'Seams'),
     policy_seams: extractBullets(markdown, 'Policy Seams'),
+    folder_role: extractSection(markdown, 'Folder Role') || '',
     reading_order: extractSection(markdown, 'Reading Order') || '',
     uncertainty: extractSection(markdown, 'Uncertainty')
   };
@@ -736,6 +804,12 @@ export function renderFileSummary(summary: FileSummarySchema): string {
     parts.push('');
   }
 
+  if (summary.legacy_analysis.length > 0) {
+    parts.push('# Legacy Analysis');
+    summary.legacy_analysis.forEach(l => parts.push(`- ${l}`));
+    parts.push('');
+  }
+
   if (summary.uncertainty) {
     parts.push('# Uncertainty');
     parts.push(summary.uncertainty);
@@ -772,6 +846,12 @@ export function renderFolderSummary(summary: FolderSummarySchema): string {
   if (summary.policy_seams.length > 0) {
     parts.push('# Policy Seams');
     summary.policy_seams.forEach(s => parts.push(`- ${s}`));
+    parts.push('');
+  }
+
+  if (summary.folder_role) {
+    parts.push('# Folder Role');
+    parts.push(summary.folder_role);
     parts.push('');
   }
 
