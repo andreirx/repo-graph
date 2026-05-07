@@ -705,3 +705,205 @@ fn orient_with_focus_and_budget() {
     assert!(output.contains(r#""focus""#));
     assert!(!output.contains(r#""error":"#), "Should not return error: {}", output);
 }
+
+// ── Enrich command tests ────────────────────────────────────────────
+
+#[test]
+fn enrich_missing_db_path_returns_invalid_request() {
+    let output = run_daemon_request(
+        r#"{"id":"en-1","method":"enrich","params":{"repo_uid":"test"}}"#,
+    );
+    assert!(output.contains(r#""id":"en-1""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#));
+    assert!(output.contains("db_path"));
+}
+
+#[test]
+fn enrich_missing_repo_uid_returns_invalid_request() {
+    let output = run_daemon_request(
+        r#"{"id":"en-2","method":"enrich","params":{"db_path":"/tmp/test.db"}}"#,
+    );
+    assert!(output.contains(r#""id":"en-2""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#));
+    assert!(output.contains("repo_uid"));
+}
+
+#[test]
+fn enrich_without_loaded_repo_returns_error() {
+    let temp = tempdir().unwrap();
+    let db_path = temp.path().join("test.db");
+    std::fs::write(&db_path, "").unwrap();
+    let db_path_str = db_path.to_string_lossy();
+
+    let output = run_daemon_request(&format!(
+        r#"{{"id":"en-3","method":"enrich","params":{{"db_path":"{}","repo_uid":"test"}}}}"#,
+        db_path_str
+    ));
+    assert!(output.contains(r#""id":"en-3""#));
+    assert!(output.contains(r#""code":"RepoNotFound""#));
+}
+
+#[test]
+fn enrich_emits_progress_and_returns_cli_contract_shape() {
+    // Create temp directories for repo and db
+    let temp = tempdir().unwrap();
+    let repo_dir = temp.path().join("enrich-test-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+
+    // Create a minimal Rust source file (no unresolved calls, but validates the pipeline runs)
+    std::fs::write(
+        repo_dir.join("main.rs"),
+        r#"fn main() { println!("hello"); }"#,
+    )
+    .unwrap();
+
+    let db_path = temp.path().join("test.db");
+    let repo_path_str = repo_dir.to_string_lossy();
+    let db_path_str = db_path.to_string_lossy();
+
+    let state = Arc::new(DaemonState::new());
+
+    // Step 1: Index the repo
+    let index_request = format!(
+        r#"{{"id":"en-e2e-1","method":"index","params":{{"repo_path":"{}","db_path":"{}"}}}}"#,
+        repo_path_str, db_path_str
+    );
+    run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+
+    // Step 2: Load the repo
+    let load_request = format!(
+        r#"{{"id":"en-e2e-2","method":"load_repo","params":{{"db_path":"{}","repo_uid":"enrich-test-repo"}}}}"#,
+        db_path_str
+    );
+    run_daemon_requests_with_state(vec![&load_request], Arc::clone(&state));
+
+    // Step 3: Enrich with dry_run (avoids needing rust-analyzer)
+    let enrich_request = format!(
+        r#"{{"id":"en-e2e-3","method":"enrich","params":{{"db_path":"{}","repo_uid":"enrich-test-repo","dry_run":true}}}}"#,
+        db_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&enrich_request], state);
+    let output = &results[0];
+
+    // Parse all NDJSON lines
+    let lines: Vec<&str> = output.lines().collect();
+
+    // Should have progress events + final response
+    assert!(
+        lines.len() >= 1,
+        "Expected at least one response line, got: {}",
+        output
+    );
+
+    // Check for progress phases
+    let mut found_initializing = false;
+    let mut found_complete = false;
+    let mut result_json: Option<serde_json::Value> = None;
+
+    for line in &lines {
+        let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert_eq!(
+            parsed["id"], "en-e2e-3",
+            "All events should have correct request ID"
+        );
+
+        if let Some(progress) = parsed.get("progress") {
+            let phase = progress["phase"].as_str().unwrap_or("");
+            match phase {
+                "initializing" => found_initializing = true,
+                "complete" => found_complete = true,
+                _ => {}
+            }
+        }
+        if parsed.get("result").is_some() {
+            result_json = Some(parsed);
+        }
+    }
+
+    assert!(found_initializing, "Should have initializing progress event");
+    assert!(found_complete, "Should have complete progress event");
+
+    // Verify result contract shape matches CLI EnrichOutput
+    let result = result_json.expect("Should have final result");
+    let r = &result["result"];
+
+    // Required fields from CLI contract
+    assert!(r.get("command").is_some(), "Missing command field");
+    assert!(r.get("repo_uid").is_some(), "Missing repo_uid field");
+    assert!(r.get("snapshot_uid").is_some(), "Missing snapshot_uid field");
+    assert!(r.get("promote").is_some(), "Missing promote field");
+    assert!(r.get("eligible_count").is_some(), "Missing eligible_count field");
+    assert!(r.get("enriched_count").is_some(), "Missing enriched_count field");
+    assert!(r.get("failed_count").is_some(), "Missing failed_count field");
+    assert!(
+        r.get("attempted_persist_count").is_some(),
+        "Missing attempted_persist_count field"
+    );
+    assert!(r.get("persisted_count").is_some(), "Missing persisted_count field");
+    assert!(
+        r.get("has_storage_discrepancy").is_some(),
+        "Missing has_storage_discrepancy field"
+    );
+    assert!(r.get("enrichment_rate").is_some(), "Missing enrichment_rate field");
+    assert!(r.get("by_language").is_some(), "Missing by_language field");
+    assert!(
+        r.get("top_failure_reasons").is_some(),
+        "Missing top_failure_reasons field"
+    );
+    assert!(r.get("top_types").is_some(), "Missing top_types field");
+    assert!(
+        r.get("available_resolvers").is_some(),
+        "Missing available_resolvers field"
+    );
+
+    // Verify dry_run is NOT in the result (CLI contract doesn't include it)
+    assert!(
+        r.get("dry_run").is_none(),
+        "dry_run should NOT be in result (CLI contract parity)"
+    );
+
+    // Verify by_language is tuple format: [["lang", {...}], ...]
+    let by_language = r["by_language"].as_array().expect("by_language should be array");
+    // May be empty if no eligible edges, but if present, should be tuple format
+    for entry in by_language {
+        assert!(
+            entry.is_array(),
+            "by_language entries should be tuples [lang, stats], got: {}",
+            entry
+        );
+        let tuple = entry.as_array().unwrap();
+        assert_eq!(
+            tuple.len(),
+            2,
+            "by_language tuple should have 2 elements: [lang, stats]"
+        );
+        assert!(tuple[0].is_string(), "First tuple element should be language string");
+        assert!(tuple[1].is_object(), "Second tuple element should be stats object");
+    }
+
+    // Verify top_failure_reasons is tuple format: [["reason", count], ...]
+    let top_reasons = r["top_failure_reasons"]
+        .as_array()
+        .expect("top_failure_reasons should be array");
+    for entry in top_reasons {
+        assert!(
+            entry.is_array(),
+            "top_failure_reasons entries should be tuples [reason, count], got: {}",
+            entry
+        );
+        let tuple = entry.as_array().unwrap();
+        assert_eq!(
+            tuple.len(),
+            2,
+            "top_failure_reasons tuple should have 2 elements"
+        );
+        assert!(tuple[0].is_string(), "First tuple element should be reason string");
+        assert!(
+            tuple[1].is_number(),
+            "Second tuple element should be count number"
+        );
+    }
+
+    // Verify command value
+    assert_eq!(r["command"], "enrich", "command should be 'enrich'");
+}

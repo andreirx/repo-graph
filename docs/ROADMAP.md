@@ -1024,7 +1024,7 @@ Two-part item: support module (multi-agent coordination runtime) + feature (CLI 
 | D6 | DONE | Smoke validation on real repos (repo-graph self-index) |
 
 **D6 validation results (2026-05-07):**
-- Functional parity: index, refresh, orient, check, explain all match one-shot `rmap`
+- Functional parity: index, refresh, enrich, orient, check, explain all match one-shot `rmap`
 - Protocol: progress events before final response, request IDs correlate, no stray output
 - Coordination: concurrent reads, write serialization, multi-DB isolation all verified
 
@@ -1033,12 +1033,12 @@ Two-part item: support module (multi-agent coordination runtime) + feature (CLI 
 - Repo load/unload/list
 - Graph queries: callers, callees, imports
 - Agent services: orient, check, explain
-- Write operations: index, refresh
-- Progress streaming (per-file granularity during extraction)
+- Write operations: index, refresh, enrich
+- Progress streaming (per-file granularity during extraction, phase tracking during enrich)
 - Transport-failure abort checkpoints (stops before next mutation on channel loss)
 
 **Implemented methods:** `ping`, `echo`, `load_repo`, `unload_repo`, `list_repos`,
-`callers`, `callees`, `imports`, `index`, `refresh`, `orient`, `check`, `explain`
+`callers`, `callees`, `imports`, `index`, `refresh`, `enrich`, `orient`, `check`, `explain`
 
 **Key design decisions implemented:**
 - Transport: NDJSON over stdin/stdout (not Unix sockets)
