@@ -16,6 +16,15 @@ import { scanDirectory, countCodeFiles } from './core/scanner.js';
 
 const program = new Command();
 
+/**
+ * OpenAI model routing configuration.
+ * Based on quality comparison: GPT-5.4-mini is better for files, GPT-4.1-mini for folders.
+ */
+const OPENAI_MODELS = {
+  file: 'gpt-5.4-mini',    // Better symbol enumeration, prioritized reading hints
+  folder: 'gpt-4.1-mini',  // Better folder synthesis, complete Policy Seams
+} as const;
+
 program
   .name('rgistr')
   .description('Recursive Gist Runner - Generate hierarchical MAP.md documentation via LLM')
@@ -26,7 +35,7 @@ program
   .description('Generate MAP.md files for a codebase')
   .argument('<path>', 'Path to the codebase root (or subtree)')
   .option('-a, --adapter <type>', 'LLM adapter: lmstudio, ollama, openai (required)')
-  .option('-m, --model <name>', 'Model name (required)')
+  .option('-m, --model <name>', 'Model name (required for lmstudio/ollama; openai uses auto-routing if omitted)')
   .option('-e, --endpoint <url>', 'Custom endpoint URL')
   .option('--api-key <key>', 'API key (for openai, or use OPENAI_API_KEY env)')
   .option('-d, --max-depth <n>', 'Maximum recursion depth (-1 = unlimited)', '-1')
@@ -53,21 +62,59 @@ program
         return; // runDiscoveryPreflight exits the process
       }
 
-      // Create LLM adapter (explicit choice provided)
-      const llm = createAdapter(opts);
-      if (!llm) {
-        process.exit(1);
+      // Create LLM adapter(s)
+      let llm: ILLMAdapter;
+      let folderLLM: ILLMAdapter | undefined;
+
+      if (opts.adapter === 'openai' && !opts.model) {
+        // OpenAI auto-routing: use optimal models for each scope
+        const apiKey = opts.apiKey || process.env.OPENAI_API_KEY;
+        if (!apiKey) {
+          console.error('Error: --api-key or OPENAI_API_KEY env is required for openai adapter');
+          process.exit(1);
+        }
+
+        llm = new OpenAIAdapter({
+          apiKey,
+          endpoint: opts.endpoint,
+          model: OPENAI_MODELS.file
+        });
+        folderLLM = new OpenAIAdapter({
+          apiKey,
+          endpoint: opts.endpoint,
+          model: OPENAI_MODELS.folder
+        });
+
+        console.log(`OpenAI auto-routing: files=${OPENAI_MODELS.file}, folders=${OPENAI_MODELS.folder}`);
+      } else {
+        // Explicit model choice
+        const adapter = createAdapter(opts);
+        if (!adapter) {
+          process.exit(1);
+        }
+        llm = adapter;
       }
 
-      // Test connection
+      // Test connection(s)
       console.log(`Testing connection to ${opts.adapter}...`);
       const connected = await llm.testConnection();
       if (!connected) {
-        console.error(`Error: Could not connect to ${opts.adapter}`);
+        console.error(`Error: Could not connect to ${opts.adapter} (file model: ${llm.modelName})`);
         console.error('Make sure the service is running and accessible.');
         process.exit(1);
       }
       console.log(`Connected to ${llm.adapterName}/${llm.modelName}`);
+
+      // Test folder LLM if using mixed-model routing
+      if (folderLLM) {
+        const folderConnected = await folderLLM.testConnection();
+        if (!folderConnected) {
+          console.error(`Error: Could not connect to ${opts.adapter} (folder model: ${folderLLM.modelName})`);
+          console.error('Make sure the service is running and the model is available.');
+          process.exit(1);
+        }
+        console.log(`Connected to ${folderLLM.adapterName}/${folderLLM.modelName}`);
+      }
 
       // Resolve repo root for path provenance
       const repoRoot = opts.repoRoot ? path.resolve(opts.repoRoot) : rootPath;
@@ -94,6 +141,7 @@ program
       // The scanner default (100KB) is for other use cases; CLI overrides it.
       const results = await generate({
         llm,
+        folderLLM,
         repoRoot,
         config: {
           rootPath,
@@ -340,7 +388,7 @@ async function runDiscoveryPreflight(): Promise<never> {
   // Providers available: require explicit selection
   console.log('--- Explicit Selection Required ---');
   console.log('');
-  console.log('rgistr does not auto-select. Specify adapter and model explicitly:');
+  console.log('rgistr does not auto-select. Specify adapter explicitly:');
   console.log('');
 
   // Build example commands from discovered providers
@@ -362,7 +410,13 @@ async function runDiscoveryPreflight(): Promise<never> {
     const firstModel = provider.models[0];
     const modelName = preferredModel?.id ?? firstModel?.id ?? '<model>';
 
-    console.log(`  rgistr generate <path> --adapter ${adapterFlag} --model ${modelName}`);
+    if (adapterFlag === 'openai') {
+      // OpenAI supports auto-routing (no --model needed)
+      console.log(`  rgistr generate <path> --adapter openai   # auto-routes: files=gpt-5.4-mini, folders=gpt-4.1-mini`);
+      console.log(`  rgistr generate <path> --adapter openai --model ${modelName}   # explicit model`);
+    } else {
+      console.log(`  rgistr generate <path> --adapter ${adapterFlag} --model ${modelName}`);
+    }
   }
 
   console.log('');

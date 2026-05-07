@@ -10,6 +10,7 @@
  */
 
 import type { FileDigest } from './predigest.js';
+import type { RepoProfile, RepoContextHint } from '../support/repo-context/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // System Prompt
@@ -497,7 +498,9 @@ export function folderPrompt(
   folderPath: string,
   fileSummaries: ChildSummary[],
   folderSummaries: ChildSummary[],
-  synthesisBasis: 'code_only' | 'code_and_graph' | 'code_graph_and_docs' = 'code_only'
+  synthesisBasis: 'code_only' | 'code_and_graph' | 'code_graph_and_docs' = 'code_only',
+  repoProfile?: RepoProfile,
+  repoContextHint?: RepoContextHint
 ): string {
   const parts: string[] = [];
 
@@ -529,20 +532,19 @@ export function folderPrompt(
   parts.push('Write "None" if no policy-bearing code reported by children.');
   parts.push('');
   parts.push('# Folder Role');
-  parts.push('Infer the most likely role of this folder from child file summaries.');
-  parts.push('Possible roles (use one or two):');
-  parts.push('- orchestration/control');
-  parts.push('- adapter/boundary');
-  parts.push('- handler pack');
-  parts.push('- protocol implementation');
-  parts.push('- driver/hardware-facing');
-  parts.push('- parser/translation');
-  parts.push('- utility/support');
-  parts.push('- public interface');
-  parts.push('- crypto backend');
-  parts.push('- test/support');
-  parts.push('- mixed/unclear');
-  parts.push('Provide short evidence from child summaries. Write "mixed/unclear" if children do not support a clean role.');
+  parts.push('Use the FOLDER CONTEXT HINT provided below as the folder role.');
+  parts.push('Map from hint class to role label:');
+  parts.push('- product_code → describe the semantic role (orchestration/control, adapter/boundary, etc.)');
+  parts.push('- test_support → test/support');
+  parts.push('- artifact_storage → artifact storage');
+  parts.push('- fixture_storage → fixture storage');
+  parts.push('- external_code_fixtures → external code fixtures');
+  parts.push('- validation_corpus → validation corpus');
+  parts.push('- unknown → mixed/unclear');
+  parts.push('');
+  parts.push('If the hint is product_code, infer the semantic role from child summaries.');
+  parts.push('If the hint is NOT product_code, use the storage/fixture role from the hint.');
+  parts.push('Only contradict the hint if child summaries provide strong evidence against it.');
   parts.push('');
   parts.push('# Reading Order');
   parts.push('Recommended order for reading this folder.');
@@ -567,6 +569,27 @@ export function folderPrompt(
   parts.push('─'.repeat(60));
   parts.push(`FOLDER: ${folderPath || '(root)'}`);
   parts.push('');
+
+  // Inject repo context hint immediately after folder path
+  if (repoProfile && repoContextHint) {
+    parts.push('REPOSITORY CONTEXT:');
+    parts.push(`- repo type: ${repoProfile.repoType.replace(/_/g, ' ')}`);
+    if (repoProfile.packageName) {
+      parts.push(`- package: ${repoProfile.packageName}`);
+    }
+    parts.push('');
+    parts.push('FOLDER CONTEXT HINT:');
+    parts.push(`- repo-context class: ${repoContextHint.repoContextClass}`);
+    parts.push(`- confidence: ${repoContextHint.confidence}`);
+    parts.push('- reasons:');
+    for (const reason of repoContextHint.reasons) {
+      parts.push(`  - ${reason}`);
+    }
+    parts.push('');
+    parts.push('Treat this as the folder\'s role in this repository.');
+    parts.push('Do not classify by the domain of the contained code unless child summaries clearly contradict this hint.');
+    parts.push('');
+  }
 
   if (folderSummaries.length > 0) {
     parts.push('CHILD FOLDERS:');

@@ -52,10 +52,18 @@ import {
   type FileArtifact,
 } from '../support/chunking/index.js';
 import { estimateTokens } from '../support/capability/index.js';
+import {
+  deriveRepoProfile,
+  classifyFolderContext,
+  type RepoProfile,
+  type RepoContextHint,
+} from '../support/repo-context/index.js';
 
 export interface GeneratorOptions {
-  /** LLM adapter to use */
+  /** LLM adapter for file/chunk generation */
   llm: ILLMAdapter;
+  /** LLM adapter for folder synthesis (defaults to llm if not specified) */
+  folderLLM?: ILLMAdapter;
   /** Graph context adapter (null adapter for code_only) */
   graphAdapter?: IGraphContextAdapter;
   /** Generation configuration */
@@ -83,12 +91,17 @@ const WHOLE_FILE_THRESHOLD = 200 * 1024; // 200KB
  * Generate MAP.md files for a codebase.
  */
 export async function generate(options: GeneratorOptions): Promise<MapGenerationResult[]> {
-  const { llm, graphAdapter, config, repoRoot, onProgress } = options;
+  const { llm, folderLLM, graphAdapter, config, repoRoot, onProgress } = options;
+  // Use folderLLM for folder synthesis if provided, otherwise use same llm
+  const effectiveFolderLLM = folderLLM || llm;
   const results: MapGenerationResult[] = [];
   const synthesisBasis = graphAdapter ? 'code_and_graph' : 'code_only';
 
   // Repo root for correct path provenance (defaults to scan root if not specified)
   const effectiveRepoRoot = repoRoot || config.rootPath;
+
+  // Build repo profile for folder context classification
+  const repoProfile = deriveRepoProfile(effectiveRepoRoot);
 
   // Phase 1: Scan the directory tree
   onProgress?.({ phase: 'scanning', processed: 0, total: 0, errors: 0 });
@@ -227,10 +240,11 @@ export async function generate(options: GeneratorOptions): Promise<MapGeneration
 
     try {
       const result = await generateFolderMap(folder, {
-        llm,
+        llm: effectiveFolderLLM,
         graphAdapter,
         rootPath: config.rootPath,
         repoRoot: effectiveRepoRoot,
+        repoProfile,
         basisCommit,
         synthesisBasis,
         dryRun: config.dryRun
@@ -541,6 +555,7 @@ interface FolderMapOptions {
   graphAdapter?: IGraphContextAdapter;
   rootPath: string;
   repoRoot: string;
+  repoProfile: RepoProfile;
   basisCommit: string | null;
   synthesisBasis: 'code_only' | 'code_and_graph' | 'code_graph_and_docs';
   dryRun?: boolean;
@@ -618,12 +633,29 @@ async function generateFolderMap(
     });
   }
 
+  // Compute repo-relative path for prompt (critical for path-based role classification)
+  const repoRelativeFolderPath = path.relative(options.repoRoot, folder.path) || '.';
+
+  // Compute repo-context hint using deterministic classifier
+  // Collect child summary text for domain detection
+  const childSummaryTexts = [
+    ...fileSummaries.map(s => s.summary),
+    ...folderSummaries.map(s => s.summary),
+  ];
+  const repoContextHint = classifyFolderContext(
+    repoRelativeFolderPath,
+    options.repoProfile,
+    childSummaryTexts
+  );
+
   // Generate folder summary
   const prompt = folderPrompt(
-    folder.relativePath,
+    repoRelativeFolderPath,
     fileSummaries,
     folderSummaries,
-    synthesisBasis
+    synthesisBasis,
+    options.repoProfile,
+    repoContextHint
   );
   const response = await llm.complete(prompt, {
     maxTokens: 8000,
@@ -643,8 +675,7 @@ async function generateFolderMap(
     return { path: outputPath, scope: 'folder', success: true };
   }
 
-  // P1 fix: compute repo-relative paths for frontmatter
-  const repoRelativeFolderPath = path.relative(options.repoRoot, folder.path) || '.';
+  // Compute repo-relative paths for frontmatter (repoRelativeFolderPath already computed above)
   const repoRelativeSourceFiles = codeFiles.map(f => path.relative(options.repoRoot, f.path));
 
   // Write the folder MAP

@@ -62,3 +62,4 @@ npm-debug.log*
 *_*_MAP.md
 # Folder-scope MAPs in rgistr tool output areas
 tools/rgistr/**/MAP.md
+*MAP.md

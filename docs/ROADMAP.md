@@ -1265,6 +1265,9 @@ Design doc: `docs/design/policy-facts-support-module.md`.
 - No silent file skipping — all code files processed regardless of size
 - `rgistr discover` CLI command with machine-readable output
 - Discovery-assisted preflight in `generate` (fail-closed, no auto-selection)
+- Repo-context support module for deterministic folder-role classification
+- Folder role anti-hallucination: validation corpus vs product code distinction
+- Mixed-model routing support (folderLLM option for different folder synthesis model)
 
 **Remaining:**
 - End-to-end validation on real repositories with oversized files

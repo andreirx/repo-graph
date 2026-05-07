@@ -1927,6 +1927,49 @@ Debt classification:
 Non-negotiable closure rule:
 - never skip source files due to size; chunk and synthesize instead
 
+## rgistr Repo-Context Classification (2026-05-07)
+
+### Implemented
+
+New support module at `tools/rgistr/src/support/repo-context/`:
+
+- `types.ts`: RepoContextClass, RepoContextHint, RepoProfile types
+- `repoProfile.ts`: Derives coarse repo type from manifests and structure
+- `folderClassify.ts`: Deterministic folder-role classification using weighted evidence
+- `index.ts`: Exports
+- `repo-context.test.ts`: 22 unit tests
+
+Classification taxonomy:
+- `product_code`, `test_support`, `artifact_storage`, `fixture_storage`
+- `external_code_fixtures`, `validation_corpus`, `unknown`
+
+Evidence sources:
+1. Path taxonomy (smoke*, fixtures*, vendor*, etc.)
+2. Repo-type mismatch (Linux drivers in code-analysis repo)
+3. Copied source tree patterns
+4. Artifact-shape signals
+
+Integration:
+- RepoProfile built once at generation start
+- RepoContextHint computed per-folder before prompt generation
+- Hint injected into folder prompt immediately after FOLDER path
+- LLM uses hint as strong prior for Folder Role section
+
+### Validated behavior
+
+- `smoke-runs/linux-inter-core-subset`: Now `validation_corpus` (was `driver/hardware-facing`)
+- `tools/rgistr/src/support`: Still `Orchestration/control` (product code preserved)
+
+### Remaining limitations
+
+- Artifact-shape signals (hasSmokeProtocolFiles, hasReportFiles) are defined in
+  types but not yet used in classification. Classification relies on path taxonomy
+  and repo-type mismatch only.
+- No manifest inspection beyond root Cargo.toml / package.json. Deep workspace
+  members not queried.
+- Confidence calibration is heuristic. No corpus validation of thresholds.
+- RepoType derivation uses simple keyword matching. Could miss obscure domains.
+
 ## Contract Schema Extraction (CS-1)
 
 ### Current state
