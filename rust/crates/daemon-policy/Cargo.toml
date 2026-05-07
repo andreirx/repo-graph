@@ -1,0 +1,42 @@
+# ── repo-graph-daemon-policy ──────────────────────────────────────
+#
+# Concurrency policy for the rmap daemon. Defines readers-writer
+# semantics for per-repo coordination.
+#
+# Slice scope (D1):
+#   - RepoCoordinator type with readers-writer semantics
+#   - single writer lock per repo
+#   - concurrent reader permits
+#   - writer queue (FIFO fairness)
+#   - explicit state: Idle, Reading(count), Writing, Refreshing
+#   - typed errors: Timeout, Cancelled, InvalidTransition
+#
+# NOT in scope (D1):
+#   - actual DB access
+#   - transport (NDJSON, stdin/stdout)
+#   - application services
+#
+# Architecture:
+#   - Pure support module, no transport knowledge
+#   - State machine is testable without real concurrency
+#   - Locking primitives wrap the state machine
+#   - Tests use deterministic state assertions
+
+[package]
+name         = "repo-graph-daemon-policy"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.75.0"
+license      = "MIT"
+description  = "Concurrency policy for the rmap daemon"
+publish      = false
+
+[dependencies]
+# parking_lot for RwLock with better fairness than std
+parking_lot = "0.12"
+
+# thiserror for typed error derives
+thiserror = "1"
+
+[dev-dependencies]
+# For concurrent test scenarios

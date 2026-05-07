@@ -895,7 +895,7 @@ Items 1-2 are done. Items 3-8 are deferred per precedence rule above.
 4. ~~Quality delta surfacing~~ — deferred (cross-cutting)
 5. ~~Comparability/identity caveats~~ — deferred (cross-cutting)
 6. ~~Document-backed authored relationship items~~ — deferred
-7. ~~Long-lived daemon~~ — deferred (infrastructure)
+7. **Long-lived daemon** — IN PROGRESS (D4 complete, see §3)
 8. ~~Seam expansion~~ — deferred (architectural extraction)
 
 ---
@@ -1007,8 +1007,35 @@ themselves are the data — not a narrow ontology of extracted facts.
    not inventory classification. Do NOT add content-authoritative detection
    to the inventory surface.
 
-### 3. Long-lived analysis daemon + daemon-backed CLI
+### 3. Long-lived analysis daemon + daemon-backed CLI — IN PROGRESS
 Two-part item: support module (multi-agent coordination runtime) + feature (CLI client).
+
+**Implementation status (2026-05-07):**
+
+| Slice | Status | Description |
+|-------|--------|-------------|
+| D1 | DONE | Core policy module — RepoCoordinator with FIFO writer queue |
+| D2 | DONE | Stdio adapter — NDJSON transport over stdin/stdout |
+| D3 | DONE | Application service bridge — direct Rust invocation |
+| D4 | DONE | Write operations — index/refresh with DB + repo coordination |
+| D5 | TODO | Read operations — orient/check/explain, progress streaming |
+| D6 | TODO | Smoke validation on real repos |
+
+**Implemented methods:** `ping`, `echo`, `load_repo`, `unload_repo`, `list_repos`,
+`callers`, `callees`, `imports`, `index`, `refresh`
+
+**Key design decisions implemented:**
+- Transport: NDJSON over stdin/stdout (not Unix sockets)
+- Identity: composite key (db_path + repo_uid) at API boundary
+- Coordination: two levels — DB-scoped write lock + repo-scoped reader/writer
+
+See `docs/design/rmap-daemon-architecture.md` for full design and implementation details.
+
+**Remaining work:**
+- Progress streaming for long operations
+- Cancellation support
+- orient/check/explain services through daemon
+- End-to-end validation on real repos
 
 Support: daemon-owned runtime for shared repo databases. It must solve:
 - many concurrent AI-agent reads
@@ -1018,9 +1045,8 @@ Support: daemon-owned runtime for shared repo databases. It must solve:
 
 It also eliminates repeated CLI bootstrap cost (WASM grammar load,
 extractor initialization, SQLite open, migration checks). Runtime
-components: prepared SQLite statements, request routing (JSON-RPC over
-Unix socket), three concurrency lanes (query/index/maintenance),
-per-repo write locks, snapshot pinning, progress streaming,
+components: prepared SQLite statements, request routing (NDJSON over
+stdin/stdout), per-repo write locks, snapshot pinning, progress streaming,
 cancellation tokens.
 
 Feature: CLI becomes a thin client (connect, send request, render

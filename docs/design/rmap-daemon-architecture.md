@@ -1,8 +1,70 @@
 # rmap Daemon Architecture
 
-Status: DESIGN PHASE
+Status: IMPLEMENTATION IN PROGRESS (D4 complete)
 Created: 2026-04-30
+Updated: 2026-05-07
 Maturity target: PROTOTYPE -> MATURE
+
+## Implementation Status
+
+### Completed Slices
+
+**D1: Core Policy Module** — DONE
+- `rust/crates/daemon-policy/src/state.rs` — Pure state machine
+- `rust/crates/daemon-policy/src/coordinator.rs` — RepoCoordinator with FIFO writer queue
+- 45 unit tests passing
+
+**D2: Stdio Adapter** — DONE
+- `rust/crates/daemon-transport/` — NDJSON transport over stdin/stdout
+- Dispatcher trait for pluggable routing
+- 23 unit tests passing
+
+**D3: Application Service Bridge** — DONE
+- `rust/crates/rgr/src/daemon/` — ServiceDispatcher wiring real services
+- Methods: ping, echo, load_repo, unload_repo, list_repos, callers, callees, imports
+
+**D4: Write Operations** — DONE
+- `index` method with DB-level write coordination
+- `refresh` method with DB + repo coordination
+- Proper composite identity (db_path + repo_uid) at API boundary
+- 11 state unit tests + 19 integration tests passing
+
+### Key Implementation Details
+
+**Identity Model:**
+All repo-scoped methods require composite identity:
+- `db_path`: canonical path to the database file
+- `repo_uid`: repo identifier within that database
+
+This prevents the identity collision bug where two databases with the same repo_uid would alias.
+
+**Coordination Model:**
+Two coordination levels:
+1. **Database-scoped** (`DatabaseState`): Single-writer for any DB mutation
+2. **Repo-scoped** (`RepoCoordinator`): Reader/writer semantics for loaded repos
+
+**API Contract:**
+```json
+// Load a repo
+{"id":"1","method":"load_repo","params":{"db_path":"/path/to/db","repo_uid":"myrepo"}}
+
+// Query callers (requires db_path + repo_uid)
+{"id":"2","method":"callers","params":{"db_path":"/path/to/db","repo_uid":"myrepo","symbol":"foo"}}
+
+// Index (acquires DB write lock)
+{"id":"3","method":"index","params":{"repo_path":"/path/to/source","db_path":"/path/to/db"}}
+
+// Refresh (acquires DB lock then repo lock)
+{"id":"4","method":"refresh","params":{"db_path":"/path/to/db","repo_uid":"myrepo"}}
+```
+
+### Remaining Work (D5-D6)
+
+- Progress streaming for long operations
+- Cancellation support
+- orient/check/explain services
+- Concurrent write coordination tests
+- End-to-end validation on real repos
 
 ## 1. Problem Statement
 
@@ -207,8 +269,8 @@ Representative service families:
 ### 7.3 Transport adapters
 
 Initial outer adapters:
-- CLI adapter (`rmap`)
-- daemon socket adapter
+- CLI adapter (`rmap` one-shot commands)
+- daemon stdio adapter (`rmap daemon`)
 
 Possible later adapters:
 - background worker / batch adapter
@@ -252,25 +314,24 @@ DB row is not.
 
 ```mermaid
 flowchart TD
-    CLI["rmap CLI adapter"] --> RPC["JSON-RPC socket transport"]
-    Test["transport tests / harness"] --> RPC
-    RPC --> Router["daemon request router"]
-    Router --> Sessions["repo session manager"]
+    Agent["AI agent / test harness"] --> STDIO["stdin/stdout NDJSON transport"]
+    STDIO --> Router["daemon request router"]
+    Router --> Coordinators["per-repo coordinators"]
     Router --> Services["application services"]
-    Sessions --> Services
+    Coordinators --> Services
     Services --> Support["support crates / use cases"]
     Support --> Ports["storage and repo ports"]
-    Ports --> DBMux["daemon-owned DB access coordinator"]
-    DBMux --> SQLite["SQLite adapter (transitional)"]
-    Sessions --> Cache["in-memory current-state cache"]
+    Coordinators --> DB["repo DB handle (owned by coordinator)"]
+    DB --> SQLite["SQLite adapter (transitional)"]
 ```
 
 Interpretation:
-- the CLI does not know storage details
+- `rmap daemon` is a mode of `rmap`, not a separate binary
+- agents connect via stdin/stdout with NDJSON framing
 - the daemon router does not contain domain logic
+- each repo has its own coordinator thread with owned DB handle
 - application services call support modules
-- the daemon session manager provides warmed state and lifecycle control
-- the daemon-owned DB coordinator is the only write path in daemon-backed mode
+- the coordinator enforces single-writer / multiple-reader semantics
 - SQLite remains an adapter during the transition period
 
 ## 10. Daemon Runtime Components
@@ -278,11 +339,11 @@ Interpretation:
 ### 10.1 Request router
 
 Responsibilities:
-- decode JSON-RPC requests
-- validate envelope shape
-- route to the correct application service
+- decode NDJSON requests from stdin
+- validate envelope shape (id, method, params)
+- route to the correct application service via repo coordinator
 - attach transport-scoped values such as wall clock time, cancellation handle, and progress sink
-- serialize typed success/error DTOs
+- serialize typed success/error DTOs to stdout
 
 Must not:
 - execute business rules
@@ -444,23 +505,24 @@ Practical consequence:
 
 ### Initial transport
 
-The roadmap already sets the initial transport direction:
-- JSON-RPC over Unix socket
+The initial transport is **NDJSON over stdin/stdout**.
 
 This is appropriate for the first daemon slice because it gives:
-- explicit request/response envelopes
-- easy multiplexing of progress and cancellation
+- universal IPC for AI agent tooling (no socket path negotiation)
+- explicit request/response envelopes with message framing
+- easy multiplexing of progress and cancellation on the same channel
 - clear separation from CLI rendering
-- no HTTP semantics leaking into application services
+- easy to test, easy to pipe, easy to wrap
+- no platform-specific IPC concerns (works identically on Unix/Windows)
 
 ### Deferred transports
 
 Deferred, not rejected:
+- Unix socket (for multi-client scenarios)
 - Windows named pipe equivalent
-- stdio proxy mode
 - HTTP bridge for remote/fleet scenarios
 
-These should remain adapters over the same application services.
+These should remain adapters over the same application services. The application service layer is transport-neutral.
 
 ## 14. Service Contract Rules
 
@@ -478,7 +540,7 @@ Every daemon-facing application service should expose:
 - services return `null` fields only when the value is unknown or unavailable
 - services do not print
 - services do not exit the process
-- services do not depend on JSON-RPC types
+- services do not depend on transport-specific types (NDJSON envelope, etc.)
 
 ## 15. Error Taxonomy
 
@@ -612,10 +674,10 @@ Priority order:
 ### Phase 2 — daemon runtime skeleton
 
 Target:
-- socket server
+- stdin/stdout NDJSON transport
 - request router
-- repo session manager
-- DB access coordinator
+- per-repo coordinator threads
+- DB access coordination (single writer, multiple readers)
 - cancellation registry
 - progress streaming
 - per-repo locks
@@ -673,11 +735,12 @@ Required:
 ### Transport tests
 
 Required:
-- JSON-RPC envelope validation
+- NDJSON envelope parsing and validation
 - error serialization tests
 - cancellation tests
 - progress streaming tests
-- CLI client mapping tests
+- stdin/stdout round-trip tests
+- graceful shutdown on EOF
 
 ### Runtime/session tests
 
@@ -748,7 +811,6 @@ RMAP_STATE_ROOT=/private/tmp/repo-graph-daemon-tests/<test-run>/
 ~/.rmapd/
 ├── repos/<repo_uid>/repo.db
 ├── registry.db          # repo metadata, session state
-├── rmapd.sock
 ├── rmapd.pid
 ├── logs/
 └── cache/
@@ -759,9 +821,10 @@ RMAP_STATE_ROOT=/private/tmp/repo-graph-daemon-tests/<test-run>/
 /private/tmp/repo-graph-daemon-tests/<test-run>/
 ├── repos/<repo_uid>/repo.db
 ├── registry.db
-├── rmapd.sock
 └── ...
 ```
+
+Note: No socket file needed. The daemon communicates via stdin/stdout.
 
 Implementation is dependency injection of the state-root resolver. No forked logic.
 
@@ -829,13 +892,18 @@ Constraint:
 
 ### 22.4 Cross-platform transport
 
-Option A: Unix socket first, Windows deferred
-- pros: matches current roadmap and keeps first slice narrower
-- cons: incomplete cross-platform story
+**Decision:** NDJSON over stdin/stdout is the initial transport.
 
-Option B: abstract IPC from day one
-- pros: cleaner portability story
-- cons: more design surface before first useful daemon slice
+**Rationale:**
+- stdin/stdout works identically on Unix and Windows
+- no socket path negotiation, no platform-specific IPC code
+- universal for AI agent tooling
+- socket transport can be added later as an adapter over the same service layer
+
+**Deferred:**
+- Unix socket (for multi-client scenarios where stdin/stdout is insufficient)
+- Windows named pipes
+- HTTP bridge
 
 Constraint:
 - application service contracts must not care which IPC transport is used
@@ -867,3 +935,218 @@ transitional SQLite-backed persistence strategy, and a document-first authored
 knowledge model for human-discovered architectural facts.
 
 The recent `main.rs` refactor matters because it made this architecture feasible. It did not produce the daemon. It exposed the seams required to build one correctly.
+
+## 25. Implementation Slices (D1–D6)
+
+The daemon is not a separate binary. `rmap` gains a daemon mode: `rmap daemon`.
+
+### Transport: NDJSON over stdin/stdout
+
+The initial transport is NDJSON (newline-delimited JSON) over stdin/stdout, not Unix sockets.
+
+Rationale:
+- stdin/stdout is the most universal IPC for AI agent tooling
+- no socket path negotiation, no platform-specific IPC
+- easy to test, easy to pipe, easy to wrap
+- progress and cancellation use the same channel with message framing
+- socket transport can be added later as an adapter over the same service layer
+
+Request/response envelope:
+```json
+{"id":"req-1","method":"orient","params":{"repo":"myrepo","focus":"src/core"}}
+{"id":"req-1","result":{...}}
+```
+
+Progress streaming:
+```json
+{"id":"req-1","progress":{"phase":"extracting","current":42,"total":100}}
+```
+
+Error response:
+```json
+{"id":"req-1","error":{"code":"RepoNotFound","message":"repo 'foo' not registered"}}
+```
+
+### Daemon runtime shape
+
+One process managing multiple repos:
+- per-repo coordinator thread
+- single writer, multiple readers per repo
+- coordinator owns DB handle for its repo
+- coordinator serializes write operations
+- concurrent reads proceed without blocking each other
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                       rmap daemon                            │
+│                                                              │
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐        │
+│  │ repo-A      │   │ repo-B      │   │ repo-C      │        │
+│  │ coordinator │   │ coordinator │   │ coordinator │  ...   │
+│  │             │   │             │   │             │        │
+│  │ writer lock │   │ writer lock │   │ writer lock │        │
+│  │ readers: N  │   │ readers: N  │   │ readers: N  │        │
+│  │ DB handle   │   │ DB handle   │   │ DB handle   │        │
+│  └─────────────┘   └─────────────┘   └─────────────┘        │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │                    stdio adapter                        │ │
+│  │  stdin → request router → coordinator → response → stdout│ │
+│  └─────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Slice D1: Core Policy Module
+
+**Goal:** Define the concurrency policy as a testable support module with no transport knowledge.
+
+Scope:
+- `RepoCoordinator` type with readers-writer semantics
+- single writer lock per repo
+- concurrent reader permits
+- writer queue (FIFO fairness)
+- explicit state: `Idle`, `Reading(count)`, `Writing`, `Refreshing`
+- typed error: `WriteConflict`, `Timeout`, `Cancelled`
+
+**Not in D1:**
+- actual DB access
+- transport
+- application services
+
+**Test surface:**
+- unit tests with fake work simulating read/write contention
+- deterministic assertions about lock state transitions
+- verify writer queue ordering
+- verify readers do not block each other
+- verify writer blocks new readers until complete
+
+Crate: `rust/crates/daemon-policy/` (new support module)
+
+### Slice D2: Stdio Adapter
+
+**Goal:** NDJSON transport adapter that can drive the coordinator layer.
+
+Scope:
+- read NDJSON lines from stdin
+- parse request envelope (id, method, params)
+- route to mock dispatcher (D1 coordinator + stub services)
+- write NDJSON response to stdout
+- handle malformed input gracefully
+- support shutdown on stdin EOF
+
+**Not in D2:**
+- real application services
+- real DB access
+- progress streaming (deferred to D4/D5)
+
+**Test surface:**
+- integration tests with piped stdin/stdout
+- verify request/response round-trip
+- verify unknown method error
+- verify malformed JSON error
+- verify graceful shutdown on EOF
+
+Crate: `rust/crates/daemon-transport/` or inline in `rgr`
+
+### Slice D3: Application Service Bridge
+
+**Goal:** Wire transport layer to application services without shell-out.
+
+Scope:
+- direct Rust function invocation for each service
+- no `std::process::Command`, no subprocess spawning
+- request DTO → service call → response DTO
+- typed error mapping to transport error envelope
+- service registry / dispatch table
+
+**Not in D3:**
+- new services (use existing: orient, check, callers, callees, imports)
+- progress streaming
+
+**Test surface:**
+- verify orient service invocation through transport layer
+- verify error propagation preserves type
+- verify no subprocess calls in call path
+
+### Slice D4: Write Operations
+
+**Goal:** Index and refresh operations through the daemon with proper coordination.
+
+Scope:
+- `index` method → acquire writer lock → run index → release
+- `refresh` method → acquire writer lock → run refresh → release
+- progress streaming during long operations
+- cancellation support (client disconnect or explicit cancel)
+- atomic state publication (refresh does not poison prior READY state)
+
+**Test surface:**
+- verify writer lock acquired during index
+- verify concurrent index requests queue
+- verify progress messages stream correctly
+- verify cancellation aborts without publishing partial state
+- verify failed refresh preserves prior queryable state
+
+### Slice D5: Read Operations
+
+**Goal:** Query operations through the daemon with concurrent reader support.
+
+Scope:
+- `orient`, `check`, `explain`, `callers`, `callees`, `imports` methods
+- acquire reader permit (non-exclusive)
+- concurrent reads proceed in parallel
+- reads block if writer is active (or use snapshot isolation)
+- response DTO matches CLI JSON output
+
+**Test surface:**
+- verify multiple concurrent reads complete
+- verify read during refresh uses prior READY state
+- verify DTO parity with direct CLI invocation
+
+### Slice D6: Smoke Validation
+
+**Goal:** End-to-end validation on real repos using the test protocol.
+
+Scope:
+- spawn `rmap daemon` in test harness
+- run full discovery flow: index → orient → check → explain → callers
+- compare daemon JSON output against direct CLI JSON output
+- verify on validation repos: `repo-graph`, `amodx`, `spring-petclinic`
+- document any delta in `docs/testing/daemon-validation-report.md`
+
+**Test surface:**
+- byte-for-byte JSON parity (or documented acceptable deltas)
+- timing comparison (daemon warm vs CLI cold)
+- multi-agent simulation: 3 concurrent readers + 1 writer
+
+### Slice dependency graph
+
+```
+D1 (core policy) ← D2 (stdio adapter)
+                        ↓
+                   D3 (app bridge) ← D4 (write ops)
+                                   ← D5 (read ops)
+                                          ↓
+                                     D6 (smoke validation)
+```
+
+D1 is the foundation. D2 depends on D1. D3 depends on D2. D4 and D5 depend on D3. D6 validates the complete stack.
+
+### Definition of Done per Slice
+
+| Slice | DoD |
+|-------|-----|
+| D1 | Unit tests pass. Coordinator state machine is deterministic. No transport code. |
+| D2 | Integration tests with piped stdio. Request/response round-trip works. Unknown method returns error. |
+| D3 | At least one real service (orient) callable through transport. No subprocess. |
+| D4 | Index and refresh work through daemon. Progress streams. Cancellation works. |
+| D5 | All v1 read surfaces work through daemon. Concurrent reads verified. |
+| D6 | Validation report documents parity on at least 3 repos. Multi-agent test passes. |
+
+### What This Achieves
+
+After D6:
+- `rmap daemon` is a functional long-running process
+- AI agents can connect via stdin/stdout and issue queries
+- multiple agents reading the same repo do not block each other
+- one agent refreshing does not corrupt reads
+- the daemon is the coordination authority for shared repo databases

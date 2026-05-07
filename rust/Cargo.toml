@@ -27,6 +27,8 @@ members = [
     "crates/classification",
     "crates/cpp-extractor",
     "crates/coverage",
+    "crates/daemon-policy",
+    "crates/daemon-transport",
     "crates/detectors",
     "crates/doc-facts",
     "crates/enrichment",

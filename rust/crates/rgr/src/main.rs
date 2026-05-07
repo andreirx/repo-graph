@@ -71,6 +71,7 @@ use repo_graph_rgr::commands::{
     run_path, run_policy, run_refresh, run_resource, run_risk, run_stats, run_surfaces,
     run_trust, run_violations,
 };
+use repo_graph_rgr::daemon::run_daemon;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -112,6 +113,15 @@ fn main() -> ExitCode {
 		"boundaries" => run_boundaries(&args[2..]),
 		"contracts" => run_contracts(&args[2..]),
 		"policy" => run_policy(&args[2..]),
+		"daemon" => {
+			match run_daemon() {
+				Ok(()) => ExitCode::SUCCESS,
+				Err(e) => {
+					eprintln!("daemon error: {}", e);
+					ExitCode::from(2)
+				}
+			}
+		}
 		other => {
 			eprintln!("unknown command: {}", other);
 			print_usage();

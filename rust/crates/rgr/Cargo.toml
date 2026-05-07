@@ -162,6 +162,8 @@ repo-graph-agent = { path = "../agent" }
 repo-graph-boundary-interaction = { path = "../boundary-interaction" }
 repo-graph-classification = { path = "../classification" }
 repo-graph-coverage = { path = "../coverage" }
+repo-graph-daemon-policy = { path = "../daemon-policy" }
+repo-graph-daemon-transport = { path = "../daemon-transport" }
 repo-graph-doc-facts = { path = "../doc-facts" }
 repo-graph-gate = { path = "../gate" }
 repo-graph-git = { path = "../git" }
@@ -177,6 +179,7 @@ pathdiff = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+parking_lot = "0.12.5"
 
 [dev-dependencies]
 tempfile = "3"

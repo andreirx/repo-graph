@@ -1,0 +1,40 @@
+# ── repo-graph-daemon-transport ───────────────────────────────────
+#
+# NDJSON transport adapter for the rmap daemon.
+#
+# Slice scope (D2):
+#   - read NDJSON lines from stdin
+#   - parse request envelope (id, method, params)
+#   - route to dispatcher (mock in D2, real services in D3)
+#   - write NDJSON response to stdout
+#   - handle malformed input gracefully
+#   - shutdown on stdin EOF
+#
+# NOT in scope (D2):
+#   - real application services (D3)
+#   - real DB access (D3+)
+#   - progress streaming (D4/D5)
+#
+# Architecture:
+#   - envelope: Request, Response, Error types
+#   - router: method dispatch with pluggable dispatcher trait
+#   - stdio: stdin/stdout NDJSON I/O
+
+[package]
+name         = "repo-graph-daemon-transport"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.75.0"
+license      = "MIT"
+description  = "NDJSON transport adapter for the rmap daemon"
+publish      = false
+
+[dependencies]
+# JSON serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Typed errors
+thiserror = "1"
+
+[dev-dependencies]
