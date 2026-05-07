@@ -10,14 +10,15 @@
 //! Both share `prepare_repo_inputs` for scanning, config resolution,
 //! and FileInput assembly.
 
+use std::ops::ControlFlow;
 use std::path::Path;
 
 use repo_graph_indexer::extractor_port::ExtractorPort;
-use repo_graph_indexer::orchestrator::{self, FileInput};
+use repo_graph_indexer::orchestrator::{self, FileInput, IndexError};
 use repo_graph_indexer::proto_indexer::ProtoFileInput;
 use repo_graph_indexer::routing;
 use repo_graph_indexer::storage_port::SnapshotLifecyclePort;
-use repo_graph_indexer::types::{IndexOptions, IndexResult};
+use repo_graph_indexer::types::{IndexOptions, IndexPhase, IndexProgressEvent, IndexResult};
 use repo_graph_classification::spring_liveness::{classify_spring_liveness, SpringNodeInput};
 use repo_graph_classification::types::{PackageDependencySet, TsconfigAliases};
 use repo_graph_policy_facts::{
@@ -60,6 +61,12 @@ pub enum ComposeError {
 	Storage(repo_graph_storage::error::StorageError),
 	Index(String),
 	ExtractorInit(String),
+	/// Operation aborted at a progress checkpoint.
+	///
+	/// This occurs when the progress callback signals stop (e.g., due to
+	/// transport failure in daemon mode). The operation terminates early
+	/// to avoid completing with a broken control channel.
+	Aborted,
 }
 
 impl std::fmt::Display for ComposeError {
@@ -69,6 +76,7 @@ impl std::fmt::Display for ComposeError {
 			Self::Storage(e) => write!(f, "storage: {}", e),
 			Self::Index(e) => write!(f, "index: {}", e),
 			Self::ExtractorInit(e) => write!(f, "extractor init: {}", e),
+			Self::Aborted => write!(f, "operation aborted at progress checkpoint"),
 		}
 	}
 }
@@ -95,6 +103,59 @@ impl Default for ComposeOptions {
 			c_include_roots: Vec::new(),
 			storage_root_path: None,
 		}
+	}
+}
+
+// ── Progress reporting ───────────────────────────────────────────
+
+/// Progress event emitted during index/refresh operations.
+#[derive(Debug, Clone)]
+pub struct ProgressEvent {
+	/// Current phase name (e.g., "scanning", "extracting", "persisting").
+	pub phase: String,
+	/// Current progress count within the phase.
+	pub current: u64,
+	/// Total expected count (0 if unknown).
+	pub total: u64,
+}
+
+impl ProgressEvent {
+	/// Create a new progress event.
+	pub fn new(phase: impl Into<String>, current: u64, total: u64) -> Self {
+		Self {
+			phase: phase.into(),
+			current,
+			total,
+		}
+	}
+}
+
+/// Callback for progress reporting.
+///
+/// Returns `ControlFlow::Continue(())` to proceed, or `ControlFlow::Break(())`
+/// to abort the operation at the current checkpoint.
+///
+/// This is an **abort checkpoint seam**: the callback can signal stop due to
+/// transport failure, cancellation, or any other reason. The orchestration
+/// layer will terminate early rather than continue with a broken control channel.
+///
+/// Uses `FnMut` because callbacks often need to mutate state (e.g., write
+/// to an output stream, update a counter, or emit to an event sink).
+pub type ProgressCallback<'a> = &'a mut dyn FnMut(&ProgressEvent) -> ControlFlow<()>;
+
+/// Helper to emit progress if callback is provided.
+///
+/// Returns `Ok(())` if progress was emitted successfully or no callback exists.
+/// Returns `Err(ComposeError::Aborted)` if callback signaled stop.
+#[inline]
+fn emit_progress(progress: &mut Option<ProgressCallback<'_>>, phase: &str, current: u64, total: u64) -> Result<(), ComposeError> {
+	if let Some(cb) = progress {
+		match cb(&ProgressEvent::new(phase, current, total)) {
+			ControlFlow::Continue(()) => Ok(()),
+			ControlFlow::Break(()) => Err(ComposeError::Aborted),
+		}
+	} else {
+		Ok(())
 	}
 }
 
@@ -989,13 +1050,31 @@ fn convert_nats_raw_to_callsite(raw: &RawNatsBoundaryCall, file_path: &str, repo
 // ── Full index ───────────────────────────────────────────────────
 
 /// Index a repo from disk into an existing StorageConnection.
+///
+/// If `progress` is provided, it will be called with phase-level progress events:
+/// - "scanning" (1 step)
+/// - "extracting" (1 step)
+/// - "persisting" (4 steps)
 pub fn index_into_storage(
 	repo_path: &Path,
 	storage: &mut StorageConnection,
 	repo_uid: &str,
 	options: &ComposeOptions,
 ) -> Result<IndexResult, ComposeError> {
+	index_into_storage_with_progress(repo_path, storage, repo_uid, options, None)
+}
+
+/// Index a repo from disk into an existing StorageConnection with progress reporting.
+pub fn index_into_storage_with_progress(
+	repo_path: &Path,
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	options: &ComposeOptions,
+	mut progress: Option<ProgressCallback<'_>>,
+) -> Result<IndexResult, ComposeError> {
+	emit_progress(&mut progress, "scanning", 0, 1)?;
 	let prepared = prepare_repo_inputs(repo_path)?;
+	emit_progress(&mut progress, "scanning", 1, 1)?;
 
 	let mut ts_extractor = TsExtractor::new();
 	ts_extractor
@@ -1027,13 +1106,33 @@ pub fn index_into_storage(
 		.initialize()
 		.map_err(|e| ComposeError::ExtractorInit(format!("rust: {}", e)))?;
 
+	// Checkpoint BEFORE repo mutation — abort here if transport failed
+	emit_progress(&mut progress, "initializing", 0, 1)?;
 	ensure_repo(storage, repo_uid, repo_path, options)?;
 
 	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut cpp_extractor, &mut java_extractor, &mut python_extractor, &mut rust_extractor];
+
+	// Bridge the compose progress callback to the indexer callback.
+	// The indexer emits per-file extracting progress with abort checkpoints.
+	let mut indexer_progress_callback = |event: &IndexProgressEvent| -> ControlFlow<()> {
+		if let Some(ref mut cb) = progress {
+			let phase = match event.phase {
+				IndexPhase::Scanning => "scanning",
+				IndexPhase::Extracting => "extracting",
+				IndexPhase::Resolving => "resolving",
+				IndexPhase::Persisting => "persisting",
+			};
+			cb(&ProgressEvent::new(phase, event.current, event.total))
+		} else {
+			ControlFlow::Continue(())
+		}
+	};
+
 	let mut idx_options = IndexOptions {
 		basis_commit: options.basis_commit.clone(),
 		edge_batch_size: options.edge_batch_size,
 		c_include_roots: options.c_include_roots.clone(),
+		on_progress: Some(&mut indexer_progress_callback),
 		..IndexOptions::default()
 	};
 
@@ -1042,7 +1141,9 @@ pub fn index_into_storage(
 	// gracefully (diagnostic, no emission, no abort).
 	let mut sb_hook = crate::state_boundary_hook::StateBoundaryHook::new(repo_uid);
 
-	let mut result = orchestrator::index_repo(
+	// The indexer now emits per-file progress with abort checkpoints.
+	// IndexError::Aborted maps to ComposeError::Aborted for transport failure.
+	let mut result = match orchestrator::index_repo(
 		storage,
 		&mut extractors,
 		repo_uid,
@@ -1050,9 +1151,16 @@ pub fn index_into_storage(
 		&prepared.contract_file_inputs,
 		&mut idx_options,
 		Some(&mut sb_hook),
-	)
-	.map_err(|e| ComposeError::Index(format!("{}", e)))?;
+	) {
+		Ok(r) => r,
+		Err(IndexError::Aborted) => return Err(ComposeError::Aborted),
+		Err(e) => return Err(ComposeError::Index(format!("{}", e))),
+	};
 
+	// Persisting phase: checkpoint BEFORE each mutation (6 mutations total)
+	// Semantics: current=N means "about to do mutation N"
+
+	emit_progress(&mut progress, "persisting", 0, 6)?;  // about to persist read failures
 	persist_read_failures(
 		storage,
 		repo_uid,
@@ -1061,20 +1169,25 @@ pub fn index_into_storage(
 		&mut result,
 	)?;
 
+	emit_progress(&mut progress, "persisting", 1, 6)?;  // about to persist metrics
 	// RS-MS-3c-prereq: Persist metrics (complexity, params, nesting).
 	persist_metrics(storage, repo_uid, &result.snapshot_uid, &result.metrics)?;
 
+	emit_progress(&mut progress, "persisting", 2, 6)?;  // about to persist spring liveness
 	// Persist Spring framework-liveness inferences for dead-code suppression.
 	persist_spring_liveness_inferences(storage, repo_uid, &result.snapshot_uid)?;
 
+	emit_progress(&mut progress, "persisting", 3, 6)?;  // about to persist policy facts
 	// PF-1: Extract and persist STATUS_MAPPING policy facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
 	persist_policy_facts(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
+	emit_progress(&mut progress, "persisting", 4, 6)?;  // about to persist C boundary interactions
 	// BI-1A: Extract and persist boundary interaction facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
 	persist_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
+	emit_progress(&mut progress, "persisting", 5, 6)?;  // about to persist TS boundary interactions
 	// BI-1C: Extract and persist boundary interaction facts from TS/JS files.
 	// SharedArrayBuffer, Worker, postMessage, Atomics patterns.
 	persist_ts_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
@@ -1089,8 +1202,19 @@ pub fn index_path(
 	repo_uid: &str,
 	options: &ComposeOptions,
 ) -> Result<IndexResult, ComposeError> {
+	index_path_with_progress(repo_path, db_path, repo_uid, options, None)
+}
+
+/// Index a repo from disk with progress reporting.
+pub fn index_path_with_progress(
+	repo_path: &Path,
+	db_path: &Path,
+	repo_uid: &str,
+	options: &ComposeOptions,
+	progress: Option<ProgressCallback<'_>>,
+) -> Result<IndexResult, ComposeError> {
 	let mut storage = open_or_create_storage(db_path)?;
-	index_into_storage(repo_path, &mut storage, repo_uid, options)
+	index_into_storage_with_progress(repo_path, &mut storage, repo_uid, options, progress)
 }
 
 // ── Refresh ──────────────────────────────────────────────────────
@@ -1106,7 +1230,20 @@ pub fn refresh_into_storage(
 	repo_uid: &str,
 	options: &ComposeOptions,
 ) -> Result<IndexResult, ComposeError> {
+	refresh_into_storage_with_progress(repo_path, storage, repo_uid, options, None)
+}
+
+/// Refresh with progress reporting.
+pub fn refresh_into_storage_with_progress(
+	repo_path: &Path,
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	options: &ComposeOptions,
+	mut progress: Option<ProgressCallback<'_>>,
+) -> Result<IndexResult, ComposeError> {
+	emit_progress(&mut progress, "scanning", 0, 1)?;
 	let prepared = prepare_repo_inputs(repo_path)?;
+	emit_progress(&mut progress, "scanning", 1, 1)?;
 
 	let mut ts_extractor = TsExtractor::new();
 	ts_extractor
@@ -1138,20 +1275,42 @@ pub fn refresh_into_storage(
 		.initialize()
 		.map_err(|e| ComposeError::ExtractorInit(format!("rust: {}", e)))?;
 
+	// Checkpoint BEFORE repo mutation — abort here if transport failed
+	emit_progress(&mut progress, "initializing", 0, 1)?;
 	ensure_repo(storage, repo_uid, repo_path, options)?;
 
 	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut cpp_extractor, &mut java_extractor, &mut python_extractor, &mut rust_extractor];
+
+	// Bridge the compose progress callback to the indexer callback.
+	// The indexer emits per-file extracting progress with abort checkpoints.
+	let mut indexer_progress_callback = |event: &IndexProgressEvent| -> ControlFlow<()> {
+		if let Some(ref mut cb) = progress {
+			let phase = match event.phase {
+				IndexPhase::Scanning => "scanning",
+				IndexPhase::Extracting => "extracting",
+				IndexPhase::Resolving => "resolving",
+				IndexPhase::Persisting => "persisting",
+			};
+			cb(&ProgressEvent::new(phase, event.current, event.total))
+		} else {
+			ControlFlow::Continue(())
+		}
+	};
+
 	let mut idx_options = IndexOptions {
 		basis_commit: options.basis_commit.clone(),
 		edge_batch_size: options.edge_batch_size,
 		c_include_roots: options.c_include_roots.clone(),
+		on_progress: Some(&mut indexer_progress_callback),
 		..IndexOptions::default()
 	};
 
 	// State-boundary hook (symmetric with index path — SB-4-pre.8).
 	let mut sb_hook = crate::state_boundary_hook::StateBoundaryHook::new(repo_uid);
 
-	let mut result = orchestrator::refresh_repo(
+	// The indexer now emits per-file progress with abort checkpoints.
+	// IndexError::Aborted maps to ComposeError::Aborted for transport failure.
+	let mut result = match orchestrator::refresh_repo(
 		storage,
 		&mut extractors,
 		repo_uid,
@@ -1159,9 +1318,16 @@ pub fn refresh_into_storage(
 		&prepared.contract_file_inputs,
 		&mut idx_options,
 		Some(&mut sb_hook),
-	)
-	.map_err(|e| ComposeError::Index(format!("{}", e)))?;
+	) {
+		Ok(r) => r,
+		Err(IndexError::Aborted) => return Err(ComposeError::Aborted),
+		Err(e) => return Err(ComposeError::Index(format!("{}", e))),
+	};
 
+	// Persisting phase: checkpoint BEFORE each mutation (6 mutations total)
+	// Semantics: current=N means "about to do mutation N"
+
+	emit_progress(&mut progress, "persisting", 0, 6)?;  // about to persist read failures
 	persist_read_failures(
 		storage,
 		repo_uid,
@@ -1170,20 +1336,25 @@ pub fn refresh_into_storage(
 		&mut result,
 	)?;
 
+	emit_progress(&mut progress, "persisting", 1, 6)?;  // about to persist metrics
 	// RS-MS-3c-prereq: Persist metrics (complexity, params, nesting).
 	persist_metrics(storage, repo_uid, &result.snapshot_uid, &result.metrics)?;
 
+	emit_progress(&mut progress, "persisting", 2, 6)?;  // about to persist spring liveness
 	// Persist Spring framework-liveness inferences for dead-code suppression.
 	persist_spring_liveness_inferences(storage, repo_uid, &result.snapshot_uid)?;
 
+	emit_progress(&mut progress, "persisting", 3, 6)?;  // about to persist policy facts
 	// PF-1: Extract and persist STATUS_MAPPING policy facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
 	persist_policy_facts(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
+	emit_progress(&mut progress, "persisting", 4, 6)?;  // about to persist C boundary interactions
 	// BI-1A: Extract and persist boundary interaction facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
 	persist_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
+	emit_progress(&mut progress, "persisting", 5, 6)?;  // about to persist TS boundary interactions
 	// BI-1C: Extract and persist boundary interaction facts from TS/JS files.
 	// SharedArrayBuffer, Worker, postMessage, Atomics patterns.
 	persist_ts_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
@@ -1198,8 +1369,19 @@ pub fn refresh_path(
 	repo_uid: &str,
 	options: &ComposeOptions,
 ) -> Result<IndexResult, ComposeError> {
+	refresh_path_with_progress(repo_path, db_path, repo_uid, options, None)
+}
+
+/// Refresh a repo from disk with progress reporting.
+pub fn refresh_path_with_progress(
+	repo_path: &Path,
+	db_path: &Path,
+	repo_uid: &str,
+	options: &ComposeOptions,
+	progress: Option<ProgressCallback<'_>>,
+) -> Result<IndexResult, ComposeError> {
 	let mut storage = open_or_create_storage(db_path)?;
-	refresh_into_storage(repo_path, &mut storage, repo_uid, options)
+	refresh_into_storage_with_progress(repo_path, &mut storage, repo_uid, options, progress)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────

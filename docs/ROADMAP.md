@@ -895,7 +895,7 @@ Items 1-2 are done. Items 3-8 are deferred per precedence rule above.
 4. ~~Quality delta surfacing~~ — deferred (cross-cutting)
 5. ~~Comparability/identity caveats~~ — deferred (cross-cutting)
 6. ~~Document-backed authored relationship items~~ — deferred
-7. **Long-lived daemon** — IN PROGRESS (D4 complete, see §3)
+7. **Long-lived daemon** — D1–D5b SHIPPED, D6 validated (see §3)
 8. ~~Seam expansion~~ — deferred (architectural extraction)
 
 ---
@@ -1007,7 +1007,7 @@ themselves are the data — not a narrow ontology of extracted facts.
    not inventory classification. Do NOT add content-authoritative detection
    to the inventory surface.
 
-### 3. Long-lived analysis daemon + daemon-backed CLI — IN PROGRESS
+### 3. Long-lived analysis daemon + daemon-backed CLI — D1–D5b SHIPPED
 Two-part item: support module (multi-agent coordination runtime) + feature (CLI client).
 
 **Implementation status (2026-05-07):**
@@ -1018,24 +1018,44 @@ Two-part item: support module (multi-agent coordination runtime) + feature (CLI 
 | D2 | DONE | Stdio adapter — NDJSON transport over stdin/stdout |
 | D3 | DONE | Application service bridge — direct Rust invocation |
 | D4 | DONE | Write operations — index/refresh with DB + repo coordination |
-| D5 | TODO | Read operations — orient/check/explain, progress streaming |
-| D6 | TODO | Smoke validation on real repos |
+| D5a | DONE | Agent services — orient/check/explain through daemon |
+| D5b | DONE | Progress streaming + transport-failure abort checkpoints |
+| D5c | DEFERRED | Cancellation support — reuses abort seam, separate concern |
+| D6 | DONE | Smoke validation on real repos (repo-graph self-index) |
+
+**D6 validation results (2026-05-07):**
+- Functional parity: index, refresh, orient, check, explain all match one-shot `rmap`
+- Protocol: progress events before final response, request IDs correlate, no stray output
+- Coordination: concurrent reads, write serialization, multi-DB isolation all verified
+
+**Daemon mode currently supports:**
+- Multi-DB runtime (multiple databases loaded simultaneously)
+- Repo load/unload/list
+- Graph queries: callers, callees, imports
+- Agent services: orient, check, explain
+- Write operations: index, refresh
+- Progress streaming (per-file granularity during extraction)
+- Transport-failure abort checkpoints (stops before next mutation on channel loss)
 
 **Implemented methods:** `ping`, `echo`, `load_repo`, `unload_repo`, `list_repos`,
-`callers`, `callees`, `imports`, `index`, `refresh`
+`callers`, `callees`, `imports`, `index`, `refresh`, `orient`, `check`, `explain`
 
 **Key design decisions implemented:**
 - Transport: NDJSON over stdin/stdout (not Unix sockets)
 - Identity: composite key (db_path + repo_uid) at API boundary
 - Coordination: two levels — DB-scoped write lock + repo-scoped reader/writer
+- Progress streaming: request-scoped emitter, separate NDJSON lines
+- Abort checkpoints: `ControlFlow<()>` callback seam through compose and indexer
 
 See `docs/design/rmap-daemon-architecture.md` for full design and implementation details.
 
-**Remaining work:**
-- Progress streaming for long operations
-- Cancellation support
-- orient/check/explain services through daemon
-- End-to-end validation on real repos
+**Residual limitations:**
+- Abort is checkpoint-granular, not instruction-granular. Between two checkpoints,
+  batch writes may complete partially. Mitigated: snapshot transitions to FAILED.
+- Cancellation (D5c) not shipped. Client-initiated cancel requires token threading.
+
+**Deferred:**
+- D5c cancellation support — will reuse the existing abort checkpoint seam
 
 Support: daemon-owned runtime for shared repo databases. It must solve:
 - many concurrent AI-agent reads

@@ -23,6 +23,7 @@
 //! `ExtractorPort`.
 
 use std::collections::{BTreeMap, HashMap};
+use std::ops::ControlFlow;
 
 use repo_graph_classification::classify_unresolved_edge;
 use repo_graph_classification::types::{
@@ -71,6 +72,14 @@ pub enum IndexError<E> {
 		extractor_name: String,
 		source: ExtractorError,
 	},
+	/// Operation aborted at a progress checkpoint.
+	///
+	/// This occurs when the progress callback returns `ControlFlow::Break`.
+	/// Typically indicates transport failure (daemon client disconnected)
+	/// or explicit cancellation request. The operation stopped at the
+	/// checkpoint — some mutations may have completed, but no further
+	/// writes will occur.
+	Aborted,
 }
 
 impl<E: std::fmt::Display> std::fmt::Display for IndexError<E> {
@@ -80,7 +89,15 @@ impl<E: std::fmt::Display> std::fmt::Display for IndexError<E> {
 			Self::ExtractorInit { extractor_name, source } => {
 				write!(f, "extractor {} init failed: {}", extractor_name, source)
 			}
+			Self::Aborted => write!(f, "operation aborted at progress checkpoint"),
 		}
+	}
+}
+
+/// Allows `?` to automatically convert storage errors to IndexError::Storage.
+impl<E> From<E> for IndexError<E> {
+	fn from(e: E) -> Self {
+		IndexError::Storage(e)
 	}
 }
 
@@ -182,6 +199,18 @@ pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStoreP
 	};
 
 	// ── Create snapshot ──────────────────────────────────────
+	// Abort checkpoint BEFORE snapshot creation — the first DB mutation.
+	if let Some(ref mut cb) = options.on_progress {
+		if cb(&crate::types::IndexProgressEvent {
+			phase: crate::types::IndexPhase::Extracting,
+			current: 0,
+			total: 0,
+			file: None,
+		}).is_break() {
+			return Err(IndexError::Aborted);
+		}
+	}
+
 	let toolchain_json = build_toolchain_json(extractors);
 	let snapshot = storage.create_snapshot(&CreateSnapshotInput {
 		repo_uid: repo_uid.into(),
@@ -376,7 +405,7 @@ pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStoreP
 			}
 			Ok(result)
 		}
-		Err(storage_err) => {
+		Err(pipeline_err) => {
 			// Best-effort: transition to FAILED. If this also fails,
 			// we still return the original error.
 			let _ = storage.update_snapshot_status(&UpdateSnapshotStatusInput {
@@ -384,7 +413,7 @@ pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStoreP
 				status: SnapshotStatus::Failed,
 				completed_at: None,
 			});
-			Err(IndexError::Storage(storage_err))
+			Err(pipeline_err)
 		}
 	}
 }
@@ -396,6 +425,10 @@ pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStoreP
 /// `all_file_paths` — ALL file paths in the snapshot (copied +
 ///   extracted) for module-node creation and resolution context.
 ///   For full index, this is the same as the extracted file paths.
+///
+/// Returns `IndexError::Aborted` if the progress callback returns
+/// `ControlFlow::Break` — this signals transport failure or
+/// cancellation and stops the pipeline at that checkpoint.
 fn run_pipeline<S: IndexerStoragePort>(
 	storage: &mut S,
 	extractors: &mut [&mut dyn ExtractorPort],
@@ -412,18 +445,24 @@ fn run_pipeline<S: IndexerStoragePort>(
 	mut hook: Option<&mut dyn crate::hook::ExtractionResultHook>,
 	copied_resource_keys: &HashMap<String, crate::storage_port::CopiedResourceNodeKey>,
 	c_include_roots: &[String],
-) -> Result<IndexResult, S::StorageError> {
+) -> Result<IndexResult, IndexError<S::StorageError>> {
 	let now_iso = created_at.to_string();
 	let total_files = files.len() as u64;
 
 	// Helper: emit progress if callback is set.
-	let mut emit = |phase: crate::types::IndexPhase, current: u64, total: u64, file: Option<String>| {
+	// Returns Err(Aborted) if callback signals abort, Ok(()) otherwise.
+	let mut emit = |phase: crate::types::IndexPhase, current: u64, total: u64, file: Option<String>| -> Result<(), IndexError<S::StorageError>> {
 		if let Some(ref mut cb) = progress {
-			cb(&crate::types::IndexProgressEvent { phase, current, total, file });
+			match cb(&crate::types::IndexProgressEvent { phase, current, total, file }) {
+				ControlFlow::Continue(()) => Ok(()),
+				ControlFlow::Break(()) => Err(IndexError::Aborted),
+			}
+		} else {
+			Ok(())
 		}
 	};
 
-	emit(crate::types::IndexPhase::Extracting, 0, total_files, None);
+	emit(crate::types::IndexPhase::Extracting, 0, total_files, None)?;
 
 	// ── Phase 1: Extract files ───────────────────────────────
 	let mut tracked_files: Vec<TrackedFile> = Vec::new();
@@ -439,7 +478,8 @@ fn run_pipeline<S: IndexerStoragePort>(
 		std::collections::BTreeMap::new();
 
 	for (file_idx, file) in files.iter().enumerate() {
-		emit(crate::types::IndexPhase::Extracting, file_idx as u64 + 1, total_files, Some(file.rel_path.clone()));
+		// Abort checkpoint: check transport before processing this file
+		emit(crate::types::IndexPhase::Extracting, file_idx as u64 + 1, total_files, Some(file.rel_path.clone()))?;
 		let file_uid = format!("{}:{}", repo_uid, file.rel_path);
 		let language = detect_language(&file.rel_path);
 		let is_test = is_test_file(&file.rel_path);
@@ -713,7 +753,8 @@ fn run_pipeline<S: IndexerStoragePort>(
 	nodes_total += module_node_count;
 
 	// ── Phase 3: Edge resolution ─────────────────────────────
-	emit(crate::types::IndexPhase::Resolving, 0, 0, None);
+	// Abort checkpoint: check transport before resolution phase
+	emit(crate::types::IndexPhase::Resolving, 0, 0, None)?;
 	let resolver_nodes = storage.query_resolver_nodes(snap_uid)?;
 	// Use the FULL file set for resolution context.
 	let file_resolution_map = build_file_resolution_map(all_file_paths, repo_uid);
@@ -891,7 +932,8 @@ fn run_pipeline<S: IndexerStoragePort>(
 	}
 
 	// ── Phase 5: Finalization ────────────────────────────────
-	emit(crate::types::IndexPhase::Persisting, 0, 0, None);
+	// Abort checkpoint: check transport before finalization phase
+	emit(crate::types::IndexPhase::Persisting, 0, 0, None)?;
 	storage.update_snapshot_counts(snap_uid)?;
 
 	let diagnostics = build_extraction_diagnostics(
@@ -1331,6 +1373,18 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 		},
 	};
 
+	// Abort checkpoint BEFORE snapshot creation — the first DB mutation in refresh.
+	if let Some(ref mut cb) = options.on_progress {
+		if cb(&crate::types::IndexProgressEvent {
+			phase: crate::types::IndexPhase::Extracting,
+			current: 0,
+			total: 0,
+			file: None,
+		}).is_break() {
+			return Err(IndexError::Aborted);
+		}
+	}
+
 	let toolchain_json = build_toolchain_json(extractors);
 	let snapshot = storage
 		.create_snapshot(&CreateSnapshotInput {
@@ -1346,6 +1400,24 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 	let snap_uid = snapshot.snapshot_uid.clone();
 	let created_at = snapshot.created_at.clone();
 
+	// Abort checkpoint BEFORE copy-forward — significant DB mutation.
+	if let Some(ref mut cb) = options.on_progress {
+		if cb(&crate::types::IndexProgressEvent {
+			phase: crate::types::IndexPhase::Extracting,
+			current: 0,
+			total: 0,
+			file: None,
+		}).is_break() {
+			// Transition snapshot to FAILED before aborting.
+			let _ = storage.update_snapshot_status(&UpdateSnapshotStatusInput {
+				snapshot_uid: snap_uid.clone(),
+				status: SnapshotStatus::Failed,
+				completed_at: None,
+			});
+			return Err(IndexError::Aborted);
+		}
+	}
+
 	// Copy forward unchanged files.
 	let copy_file_uids: Vec<String> = plan
 		.files_to_copy
@@ -1360,6 +1432,23 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 			file_uids: copy_file_uids,
 		})
 		.map_err(IndexError::Storage)?;
+
+	// Abort checkpoint BEFORE upsert_files — another DB mutation.
+	if let Some(ref mut cb) = options.on_progress {
+		if cb(&crate::types::IndexProgressEvent {
+			phase: crate::types::IndexPhase::Extracting,
+			current: 0,
+			total: 0,
+			file: None,
+		}).is_break() {
+			let _ = storage.update_snapshot_status(&UpdateSnapshotStatusInput {
+				snapshot_uid: snap_uid.clone(),
+				status: SnapshotStatus::Failed,
+				completed_at: None,
+			});
+			return Err(IndexError::Aborted);
+		}
+	}
 
 	// Register copied files as tracked.
 	let copied_tracked: Vec<TrackedFile> = plan
@@ -1614,13 +1703,13 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 
 			Ok(result)
 		}
-		Err(storage_err) => {
+		Err(pipeline_err) => {
 			let _ = storage.update_snapshot_status(&UpdateSnapshotStatusInput {
 				snapshot_uid: snap_uid,
 				status: SnapshotStatus::Failed,
 				completed_at: None,
 			});
-			Err(IndexError::Storage(storage_err))
+			Err(pipeline_err)
 		}
 	}
 }
@@ -2365,10 +2454,14 @@ mod tests {
 			tsconfig_aliases: None,
 		}];
 
+		// Progress callback now returns ControlFlow to support abort checkpoints.
+		let mut progress_callback = move |evt: &crate::types::IndexProgressEvent| -> ControlFlow<()> {
+			events_clone.lock().unwrap().push(evt.phase);
+			ControlFlow::Continue(())
+		};
+
 		let mut opts = IndexOptions {
-			on_progress: Some(Box::new(move |evt| {
-				events_clone.lock().unwrap().push(evt.phase);
-			})),
+			on_progress: Some(&mut progress_callback),
 			..IndexOptions::default()
 		};
 
@@ -2400,6 +2493,138 @@ mod tests {
 			"expected Persisting phase, got {:?}",
 			*phases
 		);
+	}
+
+	#[test]
+	fn progress_callback_abort_stops_extraction() {
+		use std::sync::{Arc, Mutex};
+
+		let mut storage = MockStorage::default();
+		let mut ext = MockExtractor::new(vec!["typescript".into()]);
+		let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ext];
+
+		let events: Arc<Mutex<Vec<crate::types::IndexPhase>>> = Arc::new(Mutex::new(vec![]));
+		let events_clone = events.clone();
+
+		// Create multiple files to extract
+		let files = vec![
+			FileInput {
+				rel_path: "src/a.ts".into(),
+				content: "export const a = 1;".into(),
+				content_hash: "h1".into(),
+				size_bytes: 20,
+				line_count: 1,
+				package_dependencies: None,
+				tsconfig_aliases: None,
+			},
+			FileInput {
+				rel_path: "src/b.ts".into(),
+				content: "export const b = 2;".into(),
+				content_hash: "h2".into(),
+				size_bytes: 20,
+				line_count: 1,
+				package_dependencies: None,
+				tsconfig_aliases: None,
+			},
+			FileInput {
+				rel_path: "src/c.ts".into(),
+				content: "export const c = 3;".into(),
+				content_hash: "h3".into(),
+				size_bytes: 20,
+				line_count: 1,
+				package_dependencies: None,
+				tsconfig_aliases: None,
+			},
+		];
+
+		// Progress callback that aborts after seeing 2 extracting events
+		let mut extract_count = 0u32;
+		let mut progress_callback = move |evt: &crate::types::IndexProgressEvent| -> ControlFlow<()> {
+			events_clone.lock().unwrap().push(evt.phase);
+			if evt.phase == crate::types::IndexPhase::Extracting {
+				extract_count += 1;
+				if extract_count >= 2 {
+					return ControlFlow::Break(());
+				}
+			}
+			ControlFlow::Continue(())
+		};
+
+		let mut opts = IndexOptions {
+			on_progress: Some(&mut progress_callback),
+			..IndexOptions::default()
+		};
+
+		let result = index_repo(
+			&mut storage,
+			&mut extractors,
+			"r1",
+			&files,
+			&[],
+			&mut opts,
+			None,
+		);
+
+		// Operation should have been aborted
+		assert!(matches!(result, Err(IndexError::Aborted)), "expected Aborted error, got {:?}", result);
+
+		// Should have seen exactly 2 extracting events before abort
+		let phases = events.lock().unwrap();
+		let extract_count = phases.iter().filter(|p| **p == crate::types::IndexPhase::Extracting).count();
+		assert_eq!(extract_count, 2, "expected 2 extracting events before abort, got {}", extract_count);
+
+		// Should NOT have reached resolving or persisting phases
+		assert!(
+			!phases.contains(&crate::types::IndexPhase::Resolving),
+			"should not have reached Resolving phase after abort"
+		);
+		assert!(
+			!phases.contains(&crate::types::IndexPhase::Persisting),
+			"should not have reached Persisting phase after abort"
+		);
+	}
+
+	#[test]
+	fn abort_before_snapshot_creation_prevents_db_mutation() {
+		let mut storage = MockStorage::default();
+		let mut ext = MockExtractor::new(vec!["typescript".into()]);
+		let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ext];
+
+		let files = vec![FileInput {
+			rel_path: "src/a.ts".into(),
+			content: "export const a = 1;".into(),
+			content_hash: "h1".into(),
+			size_bytes: 20,
+			line_count: 1,
+			package_dependencies: None,
+			tsconfig_aliases: None,
+		}];
+
+		// Progress callback that aborts immediately on first call
+		let mut progress_callback = |_evt: &crate::types::IndexProgressEvent| -> ControlFlow<()> {
+			ControlFlow::Break(())
+		};
+
+		let mut opts = IndexOptions {
+			on_progress: Some(&mut progress_callback),
+			..IndexOptions::default()
+		};
+
+		let result = index_repo(
+			&mut storage,
+			&mut extractors,
+			"r1",
+			&files,
+			&[],
+			&mut opts,
+			None,
+		);
+
+		// Operation should have been aborted
+		assert!(matches!(result, Err(IndexError::Aborted)), "expected Aborted error");
+
+		// No snapshot should have been created — the abort happened before snapshot creation
+		assert!(storage.snapshots.is_empty(), "no snapshot should exist after pre-pipeline abort");
 	}
 
 	// ── refresh_repo tests ───────────────────────────────────

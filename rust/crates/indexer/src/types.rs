@@ -23,6 +23,7 @@
 //! serde renames as needed for parity.
 
 use std::collections::BTreeMap;
+use std::ops::ControlFlow;
 
 use repo_graph_classification::types::{ImportBinding, SourceLocation};
 use serde::{Deserialize, Serialize};
@@ -420,16 +421,28 @@ pub struct ExtractionResult {
 // ── Indexer input/output types ──────────────────────────────────
 
 /// Progress callback type. Receives an `IndexProgressEvent` for
-/// each phase transition during indexing. Mirror of the TS
-/// `onProgress` callback in `IndexOptions`.
-pub type ProgressCallback = Box<dyn FnMut(&IndexProgressEvent) + Send>;
+/// each phase transition during indexing.
+///
+/// Returns `ControlFlow::Continue(())` to proceed, or
+/// `ControlFlow::Break(())` to abort the operation at this checkpoint.
+/// This enables abort-on-transport-failure: if progress delivery fails,
+/// the callback returns `Break` and the indexer stops before the next
+/// mutation.
+///
+/// Diverges from TS `onProgress` which is fire-and-forget. The Rust
+/// callback is an abort checkpoint seam.
+///
+/// Note: No `Send` bound because the indexer runs synchronously in a
+/// single thread. The compose layer wires up a callback that captures
+/// a `&mut dyn FnMut` reference.
+pub type ProgressCallback<'a> = &'a mut dyn FnMut(&IndexProgressEvent) -> ControlFlow<()>;
 
 /// Options for an indexing operation. Mirror of `IndexOptions`
 /// from `src/core/ports/indexer.ts`.
 ///
-/// Not `Clone` or `Debug` because `on_progress` is a boxed
-/// closure. Use `IndexOptions::default()` for tests.
-pub struct IndexOptions {
+/// Not `Clone` or `Debug` because `on_progress` is a mutable
+/// reference to a closure. Use `IndexOptions::default()` for tests.
+pub struct IndexOptions<'a> {
 	/// Glob patterns to exclude from scanning.
 	pub exclude: Vec<String>,
 	/// Glob patterns to include (if non-empty, only matching files
@@ -440,14 +453,15 @@ pub struct IndexOptions {
 	/// Batch size for edge resolution (default 10,000).
 	pub edge_batch_size: Option<usize>,
 	/// Optional progress callback. Called for each phase transition.
-	pub on_progress: Option<ProgressCallback>,
+	/// The callback can return `ControlFlow::Break` to abort the operation.
+	pub on_progress: Option<ProgressCallback<'a>>,
 	/// C/C++ include roots (repo-relative paths). If non-empty,
 	/// these are checked BEFORE conventional roots (include/, inc/,
 	/// src/include/). Per c-include-resolution-v1.1.md.
 	pub c_include_roots: Vec<String>,
 }
 
-impl Default for IndexOptions {
+impl Default for IndexOptions<'_> {
 	fn default() -> Self {
 		Self {
 			exclude: Vec::new(),

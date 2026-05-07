@@ -14,17 +14,22 @@
 //! - `index`: DB write lock only (repo may not exist yet)
 //! - `refresh`: DB write lock, then repo refresh lock
 
+use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::Arc;
 
+use repo_graph_agent::Budget;
 use repo_graph_daemon_transport::{
-    DispatchResult, Dispatcher, ErrorCode, ErrorDetail, Request,
+    DispatchResult, Dispatcher, ErrorCode, ErrorDetail, ProgressDetail, ProgressEmitter, Request,
 };
-use repo_graph_repo_index::compose::{index_path, refresh_path, ComposeOptions};
+use repo_graph_repo_index::compose::{
+    index_path_with_progress, refresh_path_with_progress, ComposeOptions, ProgressEvent,
+};
 use repo_graph_storage::types::RepoRef;
 use serde_json::Value;
 
 use super::state::{DaemonState, RepoKey};
+use crate::cli::{compute_trust_overlay_for_snapshot, utc_now_iso8601};
 
 /// Dispatcher that routes requests to real services.
 pub struct ServiceDispatcher {
@@ -53,7 +58,7 @@ impl ServiceDispatcher {
 }
 
 impl Dispatcher for ServiceDispatcher {
-    fn dispatch(&self, request: &Request) -> DispatchResult {
+    fn dispatch(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
         match request.method.as_str() {
             // ── Test methods ────────────────────────────────────────
             "ping" => DispatchResult::success(&request.id, serde_json::json!({"pong": true})),
@@ -70,9 +75,14 @@ impl Dispatcher for ServiceDispatcher {
             "callees" => self.handle_callees(request),
             "imports" => self.handle_imports(request),
 
-            // ── Write operations ────────────────────────────────────
-            "index" => self.handle_index(request),
-            "refresh" => self.handle_refresh(request),
+            // ── Agent services ──────────────────────────────────────
+            "orient" => self.handle_orient(request),
+            "check" => self.handle_check(request),
+            "explain" => self.handle_explain(request),
+
+            // ── Write operations (with progress) ────────────────────
+            "index" => self.handle_index(request, emitter),
+            "refresh" => self.handle_refresh(request, emitter),
 
             // ── Unknown method ──────────────────────────────────────
             _ => DispatchResult::unknown_method(&request.id, &request.method),
@@ -469,7 +479,7 @@ impl ServiceDispatcher {
 
     // ── Write operations ────────────────────────────────────────────
 
-    fn handle_index(&self, request: &Request) -> DispatchResult {
+    fn handle_index(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
         let repo_path_str = match Self::get_string_param(&request.params, "repo_path") {
             Ok(p) => p,
             Err(e) => return DispatchResult::error(&request.id, e),
@@ -540,8 +550,22 @@ impl ServiceDispatcher {
             ..ComposeOptions::default()
         };
 
-        // Execute index under DB write lock
-        match index_path(repo_path, db_path, repo_uid, &options) {
+        // Create progress callback that maps repo-index events to daemon protocol.
+        // Returns Continue on successful emit, Break on transport failure.
+        // Break causes the orchestrator to abort at this checkpoint.
+        let mut progress_callback = |event: &ProgressEvent| -> ControlFlow<()> {
+            match emitter.emit(ProgressDetail {
+                phase: event.phase.clone(),
+                current: event.current,
+                total: event.total,
+            }) {
+                Ok(()) => ControlFlow::Continue(()),
+                Err(_) => ControlFlow::Break(()),
+            }
+        };
+
+        // Execute index under DB write lock (with progress)
+        match index_path_with_progress(repo_path, db_path, repo_uid, &options, Some(&mut progress_callback)) {
             Ok(result) => DispatchResult::success(
                 &request.id,
                 serde_json::json!({
@@ -553,6 +577,13 @@ impl ServiceDispatcher {
                     "edges_unresolved": result.edges_unresolved,
                 }),
             ),
+            Err(repo_graph_repo_index::compose::ComposeError::Aborted) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::ProgressDeliveryFailed,
+                    "operation aborted: progress delivery failed",
+                ),
+            ),
             Err(e) => DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
@@ -561,7 +592,7 @@ impl ServiceDispatcher {
         // _db_write_guard drops here, releasing the lock
     }
 
-    fn handle_refresh(&self, request: &Request) -> DispatchResult {
+    fn handle_refresh(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
         let db_path_str = match Self::get_string_param(&request.params, "db_path") {
             Ok(p) => p,
             Err(e) => return DispatchResult::error(&request.id, e),
@@ -676,8 +707,22 @@ impl ServiceDispatcher {
             ..ComposeOptions::default()
         };
 
-        // Execute refresh under both locks
-        match refresh_path(&repo_path, canonical_db_path, repo_uid, &options) {
+        // Create progress callback that maps repo-index events to daemon protocol.
+        // Returns Continue on successful emit, Break on transport failure.
+        // Break causes the orchestrator to abort at this checkpoint.
+        let mut progress_callback = |event: &ProgressEvent| -> ControlFlow<()> {
+            match emitter.emit(ProgressDetail {
+                phase: event.phase.clone(),
+                current: event.current,
+                total: event.total,
+            }) {
+                Ok(()) => ControlFlow::Continue(()),
+                Err(_) => ControlFlow::Break(()),
+            }
+        };
+
+        // Execute refresh under both locks (with progress)
+        match refresh_path_with_progress(&repo_path, canonical_db_path, repo_uid, &options, Some(&mut progress_callback)) {
             Ok(result) => DispatchResult::success(
                 &request.id,
                 serde_json::json!({
@@ -688,11 +733,280 @@ impl ServiceDispatcher {
                     "edges_unresolved": result.edges_unresolved,
                 }),
             ),
+            Err(repo_graph_repo_index::compose::ComposeError::Aborted) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::ProgressDeliveryFailed,
+                    "operation aborted: progress delivery failed",
+                ),
+            ),
             Err(e) => DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
             ),
         }
         // Guards drop here: _refresh_guard then _db_write_guard
+    }
+
+    // ── Agent services ──────────────────────────────────────────────
+
+    fn handle_orient(&self, request: &Request) -> DispatchResult {
+        let db_path = match Self::get_string_param(&request.params, "db_path") {
+            Ok(p) => p,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let repo_uid = match Self::get_string_param(&request.params, "repo_uid") {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
+        // Build composite key
+        let key = match RepoKey::new(Path::new(db_path), repo_uid) {
+            Ok(k) => k,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::invalid_request(e),
+                );
+            }
+        };
+
+        // Get repo state by composite key
+        let repo_state = match self.state.get_repo_by_key(&key) {
+            Some(s) => s,
+            None => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::RepoNotFound,
+                        format!("repo not loaded: {}:{}", db_path, repo_uid),
+                    ),
+                );
+            }
+        };
+
+        // Parse optional focus
+        let focus = Self::get_optional_string_param(&request.params, "focus");
+
+        // Parse optional budget (default: small)
+        let budget = match request.params.get("budget").and_then(|v| v.as_str()) {
+            None | Some("small") => Budget::Small,
+            Some("medium") => Budget::Medium,
+            Some("large") => Budget::Large,
+            Some(other) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::invalid_request(format!(
+                        "invalid budget value: {} (expected small|medium|large)",
+                        other
+                    )),
+                );
+            }
+        };
+
+        // Acquire read lock
+        let _read_guard = repo_state.coordinator.acquire_read();
+
+        // Get wall-clock timestamp for waiver expiry evaluation
+        let now = utc_now_iso8601();
+
+        // Call the agent orient use case
+        let result = match repo_graph_agent::orient(&repo_state.storage, repo_uid, focus, budget, &now) {
+            Ok(r) => r,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+
+        // Apply trust overlay (matches CLI contract)
+        let mut output = match serde_json::to_value(&result) {
+            Ok(v) => v,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+
+        // Add trust section if degraded (briefing surface pattern)
+        if let Ok(Some(snapshot)) = repo_state.storage.get_snapshot(&result.snapshot) {
+            if let Some(trust) = compute_trust_overlay_for_snapshot(
+                &repo_state.storage, repo_uid, &snapshot, "CALLS+IMPORTS"
+            ) {
+                if trust.has_degradation() || !trust.caveats.is_empty() {
+                    if let serde_json::Value::Object(ref mut map) = output {
+                        if let Ok(trust_value) = serde_json::to_value(&trust) {
+                            map.insert("trust".to_string(), trust_value);
+                        }
+                    }
+                }
+            }
+        }
+
+        DispatchResult::success(&request.id, output)
+    }
+
+    fn handle_check(&self, request: &Request) -> DispatchResult {
+        let db_path = match Self::get_string_param(&request.params, "db_path") {
+            Ok(p) => p,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let repo_uid = match Self::get_string_param(&request.params, "repo_uid") {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
+        // Build composite key
+        let key = match RepoKey::new(Path::new(db_path), repo_uid) {
+            Ok(k) => k,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::invalid_request(e),
+                );
+            }
+        };
+
+        // Get repo state by composite key
+        let repo_state = match self.state.get_repo_by_key(&key) {
+            Some(s) => s,
+            None => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::RepoNotFound,
+                        format!("repo not loaded: {}:{}", db_path, repo_uid),
+                    ),
+                );
+            }
+        };
+
+        // Acquire read lock
+        let _read_guard = repo_state.coordinator.acquire_read();
+
+        // Get wall-clock timestamp for waiver expiry evaluation
+        let now = utc_now_iso8601();
+
+        // Call the agent check use case
+        match repo_graph_agent::run_check(&repo_state.storage, repo_uid, &now) {
+            Ok(result) => {
+                match serde_json::to_value(&result) {
+                    Ok(v) => DispatchResult::success(&request.id, v),
+                    Err(e) => DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    ),
+                }
+            }
+            Err(e) => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+            ),
+        }
+    }
+
+    fn handle_explain(&self, request: &Request) -> DispatchResult {
+        let db_path = match Self::get_string_param(&request.params, "db_path") {
+            Ok(p) => p,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let repo_uid = match Self::get_string_param(&request.params, "repo_uid") {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let target = match Self::get_string_param(&request.params, "target") {
+            Ok(t) => t,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
+        // Build composite key
+        let key = match RepoKey::new(Path::new(db_path), repo_uid) {
+            Ok(k) => k,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::invalid_request(e),
+                );
+            }
+        };
+
+        // Get repo state by composite key
+        let repo_state = match self.state.get_repo_by_key(&key) {
+            Some(s) => s,
+            None => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::RepoNotFound,
+                        format!("repo not loaded: {}:{}", db_path, repo_uid),
+                    ),
+                );
+            }
+        };
+
+        // Parse optional budget (default: medium for explain)
+        // CLI contract: explain only accepts medium|large, not small
+        let budget = match request.params.get("budget").and_then(|v| v.as_str()) {
+            None | Some("medium") => Budget::Medium,
+            Some("large") => Budget::Large,
+            Some(other) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::invalid_request(format!(
+                        "invalid budget value: {} (expected medium|large)",
+                        other
+                    )),
+                );
+            }
+        };
+
+        // Acquire read lock
+        let _read_guard = repo_state.coordinator.acquire_read();
+
+        // Get wall-clock timestamp for waiver expiry evaluation
+        let now = utc_now_iso8601();
+
+        // Call the agent explain use case
+        let result = match repo_graph_agent::run_explain(&repo_state.storage, repo_uid, target, budget, &now) {
+            Ok(r) => r,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+
+        // Apply trust overlay (matches CLI contract)
+        let mut output = match serde_json::to_value(&result) {
+            Ok(v) => v,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+
+        // Add trust section if degraded (briefing surface pattern)
+        if let Ok(Some(snapshot)) = repo_state.storage.get_snapshot(&result.snapshot) {
+            if let Some(trust) = compute_trust_overlay_for_snapshot(
+                &repo_state.storage, repo_uid, &snapshot, "CALLS+IMPORTS"
+            ) {
+                if trust.has_degradation() || !trust.caveats.is_empty() {
+                    if let serde_json::Value::Object(ref mut map) = output {
+                        if let Ok(trust_value) = serde_json::to_value(&trust) {
+                            map.insert("trust".to_string(), trust_value);
+                        }
+                    }
+                }
+            }
+        }
+
+        DispatchResult::success(&request.id, output)
     }
 }

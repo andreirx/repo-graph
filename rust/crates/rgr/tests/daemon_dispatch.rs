@@ -284,3 +284,424 @@ fn index_then_load_then_refresh_end_to_end() {
     assert!(refresh_output.contains(r#""snapshot_uid""#), "Refresh should return snapshot_uid: {}", refresh_output);
     assert!(!refresh_output.contains(r#""code""#), "Refresh should not return error: {}", refresh_output);
 }
+
+// ── D5b: Progress streaming tests ───────────────────────────────
+
+#[test]
+fn index_emits_progress_events() {
+    // Create temp directories for repo and db
+    let temp = tempdir().unwrap();
+    let repo_dir = temp.path().join("progress-test-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+
+    // Create a minimal source file
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+
+    let db_path = temp.path().join("test.db");
+    let repo_path_str = repo_dir.to_string_lossy();
+    let db_path_str = db_path.to_string_lossy();
+
+    let state = Arc::new(DaemonState::new());
+
+    // Index the repo
+    let index_request = format!(
+        r#"{{"id":"progress-1","method":"index","params":{{"repo_path":"{}","db_path":"{}"}}}}"#,
+        repo_path_str, db_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], state);
+    let output = &results[0];
+
+    // Parse all NDJSON lines
+    let lines: Vec<&str> = output.lines().collect();
+
+    // Should have at least some progress events + final response
+    assert!(lines.len() > 1, "Expected progress events + response, got {} lines: {}", lines.len(), output);
+
+    // Verify progress events
+    let mut found_initializing = false;
+    let mut found_scanning = false;
+    let mut found_extracting = false;
+    let mut found_persisting = false;
+    let mut found_result = false;
+
+    for line in &lines {
+        let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert_eq!(parsed["id"], "progress-1", "All events should have correct request ID");
+
+        if let Some(progress) = parsed.get("progress") {
+            let phase = progress["phase"].as_str().unwrap_or("");
+            match phase {
+                "initializing" => found_initializing = true,
+                "scanning" => found_scanning = true,
+                "extracting" => found_extracting = true,
+                "persisting" => found_persisting = true,
+                _ => {}
+            }
+        }
+        if parsed.get("result").is_some() {
+            found_result = true;
+        }
+    }
+
+    assert!(found_initializing, "Should have initializing progress event (abort checkpoint before ensure_repo)");
+    assert!(found_scanning, "Should have scanning progress event");
+    assert!(found_extracting, "Should have extracting progress event");
+    assert!(found_persisting, "Should have persisting progress event");
+    assert!(found_result, "Should have final result");
+
+    // Verify final response is last
+    let last_line = lines.last().unwrap();
+    let last_parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
+    assert!(last_parsed.get("result").is_some(), "Last line should be the result, not progress");
+}
+
+#[test]
+fn refresh_emits_progress_events() {
+    // Create temp directories for repo and db
+    let temp = tempdir().unwrap();
+    let repo_dir = temp.path().join("refresh-progress-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+
+    let db_path = temp.path().join("test.db");
+    let repo_path_str = repo_dir.to_string_lossy();
+    let db_path_str = db_path.to_string_lossy();
+
+    let state = Arc::new(DaemonState::new());
+
+    // Step 1: Index first (need existing repo to refresh)
+    let index_request = format!(
+        r#"{{"id":"rp-1","method":"index","params":{{"repo_path":"{}","db_path":"{}"}}}}"#,
+        repo_path_str, db_path_str
+    );
+    run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+
+    // Step 2: Load the repo
+    let load_request = format!(
+        r#"{{"id":"rp-2","method":"load_repo","params":{{"db_path":"{}","repo_uid":"refresh-progress-repo"}}}}"#,
+        db_path_str
+    );
+    run_daemon_requests_with_state(vec![&load_request], Arc::clone(&state));
+
+    // Step 3: Refresh and check progress
+    let refresh_request = format!(
+        r#"{{"id":"rp-3","method":"refresh","params":{{"db_path":"{}","repo_uid":"refresh-progress-repo"}}}}"#,
+        db_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&refresh_request], state);
+    let output = &results[0];
+
+    let lines: Vec<&str> = output.lines().collect();
+
+    // Should have progress events + final response
+    assert!(lines.len() > 1, "Expected progress events + response, got {} lines", lines.len());
+
+    // Verify we have progress events and final result
+    let mut found_initializing = false;
+    let mut found_scanning = false;
+    let mut found_extracting = false;
+    let mut found_persisting = false;
+    let mut has_result = false;
+
+    for line in &lines {
+        let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert_eq!(parsed["id"], "rp-3", "All events should have correct request ID");
+
+        if let Some(progress) = parsed.get("progress") {
+            let phase = progress["phase"].as_str().unwrap_or("");
+            match phase {
+                "initializing" => found_initializing = true,
+                "scanning" => found_scanning = true,
+                "extracting" => found_extracting = true,
+                "persisting" => found_persisting = true,
+                _ => {}
+            }
+        }
+        if parsed.get("result").is_some() {
+            has_result = true;
+        }
+    }
+
+    assert!(found_initializing, "Refresh should emit initializing progress event");
+    assert!(found_scanning, "Refresh should emit scanning progress event");
+    assert!(found_extracting, "Refresh should emit extracting progress event");
+    assert!(found_persisting, "Refresh should emit persisting progress event");
+    assert!(has_result, "Refresh should emit final result");
+
+    // Verify final response is last
+    let last_line = lines.last().unwrap();
+    let last_parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
+    assert!(last_parsed.get("result").is_some(), "Last line should be the result");
+}
+
+// ── D5: Agent service tests ─────────────────────────────────────
+
+#[test]
+fn orient_without_loaded_repo_returns_error() {
+    let temp = tempdir().unwrap();
+    let db_path = temp.path().join("test.db");
+    std::fs::write(&db_path, "").unwrap();
+    let db_path_str = db_path.to_string_lossy();
+
+    let output = run_daemon_request(&format!(
+        r#"{{"id":"d5-1","method":"orient","params":{{"db_path":"{}","repo_uid":"test"}}}}"#,
+        db_path_str
+    ));
+    assert!(output.contains(r#""id":"d5-1""#));
+    assert!(output.contains(r#""code":"RepoNotFound""#));
+}
+
+#[test]
+fn orient_missing_db_path_returns_invalid_request() {
+    let output = run_daemon_request(
+        r#"{"id":"d5-2","method":"orient","params":{"repo_uid":"test"}}"#,
+    );
+    assert!(output.contains(r#""id":"d5-2""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#));
+    assert!(output.contains("db_path"));
+}
+
+#[test]
+fn orient_missing_repo_uid_returns_invalid_request() {
+    let output = run_daemon_request(
+        r#"{"id":"d5-3","method":"orient","params":{"db_path":"/tmp/test.db"}}"#,
+    );
+    assert!(output.contains(r#""id":"d5-3""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#));
+    assert!(output.contains("repo_uid"));
+}
+
+#[test]
+fn orient_invalid_budget_returns_invalid_request() {
+    let temp = tempdir().unwrap();
+    let db_path = temp.path().join("test.db");
+    std::fs::write(&db_path, "").unwrap();
+    let db_path_str = db_path.to_string_lossy();
+
+    let output = run_daemon_request(&format!(
+        r#"{{"id":"d5-4","method":"orient","params":{{"db_path":"{}","repo_uid":"test","budget":"huge"}}}}"#,
+        db_path_str
+    ));
+    assert!(output.contains(r#""id":"d5-4""#));
+    // This will return RepoNotFound first (repo must be loaded first)
+    // Budget validation happens after repo lookup succeeds
+    assert!(output.contains(r#""code""#));
+}
+
+#[test]
+fn check_without_loaded_repo_returns_error() {
+    let temp = tempdir().unwrap();
+    let db_path = temp.path().join("test.db");
+    std::fs::write(&db_path, "").unwrap();
+    let db_path_str = db_path.to_string_lossy();
+
+    let output = run_daemon_request(&format!(
+        r#"{{"id":"d5-5","method":"check","params":{{"db_path":"{}","repo_uid":"test"}}}}"#,
+        db_path_str
+    ));
+    assert!(output.contains(r#""id":"d5-5""#));
+    assert!(output.contains(r#""code":"RepoNotFound""#));
+}
+
+#[test]
+fn check_missing_db_path_returns_invalid_request() {
+    let output = run_daemon_request(
+        r#"{"id":"d5-6","method":"check","params":{"repo_uid":"test"}}"#,
+    );
+    assert!(output.contains(r#""id":"d5-6""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#));
+    assert!(output.contains("db_path"));
+}
+
+#[test]
+fn explain_without_loaded_repo_returns_error() {
+    let temp = tempdir().unwrap();
+    let db_path = temp.path().join("test.db");
+    std::fs::write(&db_path, "").unwrap();
+    let db_path_str = db_path.to_string_lossy();
+
+    let output = run_daemon_request(&format!(
+        r#"{{"id":"d5-7","method":"explain","params":{{"db_path":"{}","repo_uid":"test","target":"main.ts"}}}}"#,
+        db_path_str
+    ));
+    assert!(output.contains(r#""id":"d5-7""#));
+    assert!(output.contains(r#""code":"RepoNotFound""#));
+}
+
+#[test]
+fn explain_missing_target_returns_invalid_request() {
+    let temp = tempdir().unwrap();
+    let db_path = temp.path().join("test.db");
+    std::fs::write(&db_path, "").unwrap();
+    let db_path_str = db_path.to_string_lossy();
+
+    let output = run_daemon_request(&format!(
+        r#"{{"id":"d5-8","method":"explain","params":{{"db_path":"{}","repo_uid":"test"}}}}"#,
+        db_path_str
+    ));
+    assert!(output.contains(r#""id":"d5-8""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#));
+    assert!(output.contains("target"));
+}
+
+#[test]
+fn explain_rejects_small_budget() {
+    // CLI contract: explain only accepts medium|large, not small
+    // Must test with a loaded repo since budget validation happens after repo lookup
+    let temp = tempdir().unwrap();
+    let repo_dir = temp.path().join("budget-test-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+
+    let db_path = temp.path().join("budget-test.db");
+    let repo_path_str = repo_dir.to_string_lossy();
+    let db_path_str = db_path.to_string_lossy();
+
+    let state = Arc::new(DaemonState::new());
+
+    // Index the repo
+    let index_request = format!(
+        r#"{{"id":"b-1","method":"index","params":{{"repo_path":"{}","db_path":"{}"}}}}"#,
+        repo_path_str, db_path_str
+    );
+    run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+
+    // Load the repo
+    let load_request = format!(
+        r#"{{"id":"b-2","method":"load_repo","params":{{"db_path":"{}","repo_uid":"budget-test-repo"}}}}"#,
+        db_path_str
+    );
+    run_daemon_requests_with_state(vec![&load_request], Arc::clone(&state));
+
+    // Try explain with small budget - should be rejected
+    let explain_request = format!(
+        r#"{{"id":"b-3","method":"explain","params":{{"db_path":"{}","repo_uid":"budget-test-repo","target":"main.ts","budget":"small"}}}}"#,
+        db_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&explain_request], Arc::clone(&state));
+    let output = &results[0];
+
+    assert!(output.contains(r#""id":"b-3""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#), "Should reject small budget: {}", output);
+    assert!(output.contains("medium|large"), "Error should mention valid budgets: {}", output);
+}
+
+#[test]
+fn orient_check_explain_end_to_end() {
+    // Create temp directories for repo and db
+    let temp = tempdir().unwrap();
+    let repo_dir = temp.path().join("test-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+
+    // Create a minimal source file
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+
+    let db_path = temp.path().join("test.db");
+    let repo_path_str = repo_dir.to_string_lossy();
+    let db_path_str = db_path.to_string_lossy();
+
+    let state = Arc::new(DaemonState::new());
+
+    // Step 1: Index the repo
+    let index_request = format!(
+        r#"{{"id":"e2e-orient-1","method":"index","params":{{"repo_path":"{}","db_path":"{}"}}}}"#,
+        repo_path_str, db_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    assert!(!results[0].contains(r#""code""#), "Index failed: {}", results[0]);
+
+    // Step 2: Load the repo
+    let load_request = format!(
+        r#"{{"id":"e2e-orient-2","method":"load_repo","params":{{"db_path":"{}","repo_uid":"test-repo"}}}}"#,
+        db_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&load_request], Arc::clone(&state));
+    assert!(results[0].contains(r#""loaded":"test-repo""#), "Load failed: {}", results[0]);
+
+    // Step 3: Orient (repo-level, no focus)
+    let orient_request = format!(
+        r#"{{"id":"e2e-orient-3","method":"orient","params":{{"db_path":"{}","repo_uid":"test-repo"}}}}"#,
+        db_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&orient_request], Arc::clone(&state));
+    let orient_output = &results[0];
+
+    assert!(orient_output.contains(r#""id":"e2e-orient-3""#), "Orient response: {}", orient_output);
+    assert!(orient_output.contains(r#""schema":"rgr.agent.v1""#), "Orient should return agent schema: {}", orient_output);
+    assert!(orient_output.contains(r#""command":"orient""#), "Orient should return command: {}", orient_output);
+    assert!(orient_output.contains(r#""repo":"test-repo""#), "Orient should return repo: {}", orient_output);
+    assert!(!orient_output.contains(r#""error":"#), "Orient should not return error: {}", orient_output);
+
+    // Step 4: Check
+    let check_request = format!(
+        r#"{{"id":"e2e-orient-4","method":"check","params":{{"db_path":"{}","repo_uid":"test-repo"}}}}"#,
+        db_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&check_request], Arc::clone(&state));
+    let check_output = &results[0];
+
+    assert!(check_output.contains(r#""id":"e2e-orient-4""#), "Check response: {}", check_output);
+    assert!(check_output.contains(r#""schema":"rgr.agent.v1""#), "Check should return agent schema: {}", check_output);
+    assert!(check_output.contains(r#""command":"check""#), "Check should return command: {}", check_output);
+    assert!(!check_output.contains(r#""error":"#), "Check should not return error: {}", check_output);
+
+    // Step 5: Explain (file target)
+    let explain_request = format!(
+        r#"{{"id":"e2e-orient-5","method":"explain","params":{{"db_path":"{}","repo_uid":"test-repo","target":"main.ts"}}}}"#,
+        db_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&explain_request], Arc::clone(&state));
+    let explain_output = &results[0];
+
+    assert!(explain_output.contains(r#""id":"e2e-orient-5""#), "Explain response: {}", explain_output);
+    assert!(explain_output.contains(r#""schema":"rgr.agent.v1""#), "Explain should return agent schema: {}", explain_output);
+    assert!(explain_output.contains(r#""command":"explain""#), "Explain should return command: {}", explain_output);
+    assert!(!explain_output.contains(r#""error":"#), "Explain should not return error: {}", explain_output);
+}
+
+#[test]
+fn orient_with_focus_and_budget() {
+    // Create temp directories for repo and db
+    let temp = tempdir().unwrap();
+    let repo_dir = temp.path().join("focus-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+
+    // Create source files
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+    std::fs::write(repo_dir.join("utils.ts"), "export function util() {}").unwrap();
+
+    let db_path = temp.path().join("focus.db");
+    let repo_path_str = repo_dir.to_string_lossy();
+    let db_path_str = db_path.to_string_lossy();
+
+    let state = Arc::new(DaemonState::new());
+
+    // Index
+    let index_request = format!(
+        r#"{{"id":"fb-1","method":"index","params":{{"repo_path":"{}","db_path":"{}"}}}}"#,
+        repo_path_str, db_path_str
+    );
+    run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+
+    // Load
+    let load_request = format!(
+        r#"{{"id":"fb-2","method":"load_repo","params":{{"db_path":"{}","repo_uid":"focus-repo"}}}}"#,
+        db_path_str
+    );
+    run_daemon_requests_with_state(vec![&load_request], Arc::clone(&state));
+
+    // Orient with focus and budget
+    let orient_request = format!(
+        r#"{{"id":"fb-3","method":"orient","params":{{"db_path":"{}","repo_uid":"focus-repo","focus":"main.ts","budget":"large"}}}}"#,
+        db_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&orient_request], Arc::clone(&state));
+    let output = &results[0];
+
+    assert!(output.contains(r#""id":"fb-3""#));
+    assert!(output.contains(r#""schema":"rgr.agent.v1""#));
+    assert!(output.contains(r#""command":"orient""#));
+    // Focus should be resolved to file
+    assert!(output.contains(r#""focus""#));
+    assert!(!output.contains(r#""error":"#), "Should not return error: {}", output);
+}

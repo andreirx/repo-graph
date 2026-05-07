@@ -1,6 +1,6 @@
 # rmap Daemon Architecture
 
-Status: IMPLEMENTATION IN PROGRESS (D4 complete)
+Status: IMPLEMENTATION IN PROGRESS (D5b complete)
 Created: 2026-04-30
 Updated: 2026-05-07
 Maturity target: PROTOTYPE -> MATURE
@@ -29,6 +29,25 @@ Maturity target: PROTOTYPE -> MATURE
 - Proper composite identity (db_path + repo_uid) at API boundary
 - 11 state unit tests + 19 integration tests passing
 
+**D5a: Agent Services** — DONE
+- `orient` method with optional focus and budget params
+- `check` method for pre-action trust/safety check
+- `explain` method with target and optional budget
+- All return `OrientResult` DTO (rgr.agent.v1 schema)
+
+**D5b: Progress Streaming** — DONE
+- `ProgressEmitter` trait in daemon-transport for request-scoped progress emission
+- Transport creates emitter bound to request ID and output writer
+- `index` and `refresh` emit progress events (scanning, extracting, persisting phases)
+- Progress events are separate NDJSON lines before final response
+- Event ordering contract: progress events first, final response last
+- **Abort checkpoint seam:** emit is fallible, transport failure aborts operation
+  - `ProgressCallback` returns `ControlFlow<()>` — Break aborts at checkpoint
+  - `EmitError` signals transport channel failure
+  - `ComposeError::Aborted` returned when progress emission fails
+  - `ProgressDeliveryFailed` error code surfaced to client
+- 35 total tests (33 daemon-transport + 2 integration abort tests)
+
 ### Key Implementation Details
 
 **Identity Model:**
@@ -56,15 +75,39 @@ Two coordination levels:
 
 // Refresh (acquires DB lock then repo lock)
 {"id":"4","method":"refresh","params":{"db_path":"/path/to/db","repo_uid":"myrepo"}}
+
+// Orient (optional focus and budget)
+{"id":"5","method":"orient","params":{"db_path":"/path/to/db","repo_uid":"myrepo"}}
+{"id":"6","method":"orient","params":{"db_path":"/path/to/db","repo_uid":"myrepo","focus":"src/core","budget":"large"}}
+
+// Check (pre-action safety check)
+{"id":"7","method":"check","params":{"db_path":"/path/to/db","repo_uid":"myrepo"}}
+
+// Explain (deep dive on target)
+{"id":"8","method":"explain","params":{"db_path":"/path/to/db","repo_uid":"myrepo","target":"src/main.ts"}}
 ```
 
-### Remaining Work (D5-D6)
+### Remaining Work (D5c/D6)
 
-- Progress streaming for long operations
-- Cancellation support
-- orient/check/explain services
+- Cancellation support (D5c) — can reuse D5b abort checkpoint seam
 - Concurrent write coordination tests
-- End-to-end validation on real repos
+- End-to-end validation on real repos (D6)
+
+### Abort Checkpoint Placement (D5b)
+
+Current checkpoints in `repo-index::compose`:
+- `scanning` start (0/1)
+- `scanning` end (1/1)
+- `extracting` start (0/1)
+- `extracting` end (1/1)
+- `persisting` steps (0-5 of 5)
+
+Abort granularity: operation terminates at the next checkpoint after transport failure.
+Partial state risk: if abort occurs during `persisting` phase, some persist steps may
+have committed. The orchestrator uses a single transaction for the core index, but
+post-processing steps (metrics, liveness, policy facts) are separate commits.
+
+D5c cancellation will use the same checkpoint seam with an explicit cancel flag.
 
 ## 1. Problem Statement
 

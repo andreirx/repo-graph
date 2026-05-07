@@ -125,6 +125,13 @@ pub enum ErrorCode {
     /// Operation was cancelled.
     Cancelled,
 
+    /// Progress delivery failed — client transport is broken.
+    ///
+    /// The operation was aborted at a progress checkpoint because the
+    /// transport channel failed. This prevents completing operations
+    /// whose results cannot be delivered to the client.
+    ProgressDeliveryFailed,
+
     /// Internal error (bug or unexpected failure).
     InternalError,
 }
@@ -141,6 +148,7 @@ impl ErrorCode {
             Self::StateUnavailable => "StateUnavailable",
             Self::Timeout => "Timeout",
             Self::Cancelled => "Cancelled",
+            Self::ProgressDeliveryFailed => "ProgressDeliveryFailed",
             Self::InternalError => "InternalError",
         }
     }

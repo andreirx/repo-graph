@@ -2283,3 +2283,51 @@ When rgistr reaches MATURE status:
 - Add `--test-mode` flag that uses mock adapter
 - Or refactor CLI to accept adapter factory for testability
 - Add CLI-level integration test for oversized file path
+
+## Daemon — Progress abort checkpoint granularity
+
+### Current state (D5b)
+
+Progress callbacks are now abort checkpoints. Transport failure during
+long-running operations triggers `ControlFlow::Break`, propagating
+`IndexError::Aborted` / `ComposeError::Aborted` back to the daemon.
+
+Abort checkpoint placement:
+- Compose layer: before `ensure_repo`, before each persist step
+- Indexer `index_repo`: before `create_snapshot`, before each file extraction, before resolving, before persisting
+- Indexer `refresh_repo`: before `create_snapshot`, before `copy_forward_unchanged_files`, before `upsert_files`, then same as full index
+
+### Residual limitation
+
+Abort is **checkpoint-granular**, not instruction-granular.
+
+Between two checkpoints, multiple storage writes may occur. If transport
+fails after checkpoint N but before checkpoint N+1, any writes that
+completed between those checkpoints are persisted.
+
+Example: during the per-file extraction loop, each file has a checkpoint
+before extraction. Within file extraction, tracked_files and file_versions
+are accumulated in memory, then batch-written after the loop completes.
+If abort happens mid-loop, files extracted before the abort checkpoint
+are accumulated but not yet persisted (good). However, after the loop,
+if abort happens between `upsert_files` and `insert_nodes`, files are
+persisted but nodes are not (partial state).
+
+### Why acceptable
+
+1. Snapshot status transitions to FAILED on any pipeline error, including
+   abort. Partial state is tagged as failed, not used for queries.
+2. The dominant mutation block (extraction loop) is now interruptible at
+   per-file granularity, which is the most important checkpoint.
+3. Making every storage call an abort checkpoint would add significant
+   overhead for marginal benefit.
+
+### Future improvement path
+
+If finer granularity is required:
+1. Wrap entire `run_pipeline` in a database transaction with rollback on abort
+2. Add checkpoints between batch storage writes (more overhead, more protection)
+3. SQLite savepoints for partial rollback within a transaction
+
+Current checkpoint granularity is sufficient for the daemon's transport
+failure recovery use case.
