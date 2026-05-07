@@ -20,7 +20,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::{build_envelope, open_storage};
+use crate::cli::{build_envelope, open_storage, resolve_repo_root};
 
 // ── hotspots command ─────────────────────────────────────────────
 
@@ -178,9 +178,17 @@ pub fn run_hotspots(args: &[String]) -> ExitCode {
 	// Get churn from git
 	use repo_graph_git::{get_file_churn, ChurnWindow};
 	let window = ChurnWindow::new(&since);
-	let repo_path = Path::new(&repo.root_path);
 
-	let raw_churn = match get_file_churn(repo_path, &window) {
+	// Resolve repo root relative to DB location (cwd-independent)
+	let repo_path = match resolve_repo_root(db_path, &repo.root_path) {
+		Ok(p) => p,
+		Err(e) => {
+			eprintln!("error: {}", e);
+			return ExitCode::from(2);
+		}
+	};
+
+	let raw_churn = match get_file_churn(&repo_path, &window) {
 		Ok(c) => c,
 		Err(e) => {
 			eprintln!("error: git churn failed: {}", e);

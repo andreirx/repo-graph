@@ -1,0 +1,50 @@
+# ── tsserver-resolver ──────────────────────────────────────────────
+#
+# TypeScript/JavaScript type resolver using direct tsserver integration.
+#
+# This is an outer-layer adapter crate. It implements the
+# `ReceiverTypeResolver` trait from the enrichment crate using
+# tsserver as the mechanism.
+#
+# Architecture:
+#   - Direct tsserver subprocess (no typescript-language-server wrapper)
+#   - TSServer protocol over stdin/stdout (not LSP)
+#   - Reader thread with channel for timeout enforcement
+#   - One session per tsconfig/jsconfig/package.json context
+#
+# Project detection (layered):
+#   1. nearest tsconfig.json
+#   2. fallback nearest jsconfig.json
+#   3. fallback nearest package.json
+#   4. otherwise standalone context (repo root)
+#
+# This crate is volatile — it depends on tsserver behavior and
+# may need updates when TypeScript releases change the protocol.
+# The enrichment crate remains stable and does not import this.
+
+[package]
+name         = "tsserver-resolver"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "TypeScript type resolver using direct tsserver integration"
+publish      = false
+
+[dependencies]
+# Enrichment crate — for ReceiverTypeResolver trait and DTOs.
+# Dependency direction: adapter → policy (outer → inner).
+enrichment = { path = "../enrichment" }
+
+# Serde for TSServer protocol message serialization.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling.
+thiserror = "2"
+
+# Logging.
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

@@ -29,10 +29,13 @@ members = [
     "crates/coverage",
     "crates/detectors",
     "crates/doc-facts",
+    "crates/enrichment",
     "crates/gate",
     "crates/git",
     "crates/indexer",
     "crates/java-extractor",
+    "crates/jdtls-resolver",
+    "crates/lsp-subprocess",
     "crates/module-queries",
     "crates/policy-facts",
     "crates/proto-parser",
@@ -41,12 +44,14 @@ members = [
     "crates/quality-policy-runner",
     "crates/repo-index",
     "crates/rgr",
+    "crates/rust-analyzer-resolver",
     "crates/rust-extractor",
     "crates/state-bindings",
     "crates/state-extractor",
     "crates/storage",
     "crates/trust",
     "crates/ts-extractor",
+    "crates/tsserver-resolver",
 ]
 
 # Shared profile settings: optimize for correctness and clear errors

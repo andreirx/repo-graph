@@ -56,9 +56,19 @@ pub fn run_index(args: &[String]) -> ExitCode {
         .and_then(|n| n.to_str())
         .unwrap_or("repo");
 
+    // Compute storage path relative to DB location for cwd-independent resolution
+    let storage_root_path = match crate::cli::compute_storage_root_path(repo_path, db_path) {
+        Ok(p) => Some(p),
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::from(2);
+        }
+    };
+
     use repo_graph_repo_index::compose::{index_path, ComposeOptions};
     let options = ComposeOptions {
         c_include_roots: include_roots,
+        storage_root_path,
         ..ComposeOptions::default()
     };
     match index_path(repo_path, db_path, repo_uid, &options) {
@@ -422,9 +432,19 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
         .and_then(|n| n.to_str())
         .unwrap_or("repo");
 
+    // Compute storage path relative to DB location for cwd-independent resolution
+    let storage_root_path = match crate::cli::compute_storage_root_path(repo_path, db_path) {
+        Ok(p) => Some(p),
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::from(2);
+        }
+    };
+
     use repo_graph_repo_index::compose::{refresh_path, ComposeOptions};
     let options = ComposeOptions {
         c_include_roots: include_roots,
+        storage_root_path,
         ..ComposeOptions::default()
     };
     match refresh_path(repo_path, db_path, repo_uid, &options) {

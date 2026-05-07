@@ -17,7 +17,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::{build_envelope, chrono_now, open_storage};
+use crate::cli::{build_envelope, chrono_now, open_storage, resolve_repo_root};
 use crate::coverage;
 
 // ── coverage command ─────────────────────────────────────────────
@@ -82,15 +82,11 @@ pub fn run_coverage(args: &[String]) -> ExitCode {
 		}
 	};
 
-	// Resolve repo root to absolute path for coverage normalization
-	// The DB may store "." which won't match absolute paths in the coverage report
-	let repo_root_abs = match std::fs::canonicalize(&repo.root_path) {
+	// Resolve repo root relative to DB location (cwd-independent)
+	let repo_root_abs = match resolve_repo_root(db_path, &repo.root_path) {
 		Ok(p) => p,
 		Err(e) => {
-			eprintln!(
-				"error: cannot resolve repo root '{}': {}",
-				repo.root_path, e
-			);
+			eprintln!("error: {}", e);
 			return ExitCode::from(2);
 		}
 	};

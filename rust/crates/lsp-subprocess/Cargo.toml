@@ -1,0 +1,44 @@
+# ── lsp-subprocess ─────────────────────────────────────────────────
+#
+# Shared outer-layer support crate for LSP-speaking subprocess transport.
+#
+# This crate provides the common transport machinery for language servers
+# that speak LSP over stdin/stdout:
+#
+# - Content-Length framing (LSP specification)
+# - Blocking stdin/stdout subprocess session
+# - Reader thread with channel timeout enforcement
+# - Request/response ID correlation
+# - Notification skipping
+# - Process exit detection
+#
+# This crate does NOT own:
+# - Tool-specific requests (hover, completion, etc.)
+# - Response parsing/type extraction
+# - Project grouping
+# - Type validation heuristics
+#
+# Architecture:
+#   - Outer volatile support module
+#   - Used by: rust-analyzer-resolver, jdtls-resolver
+#   - Does not depend on: enrichment (no policy layer coupling)
+#
+# The separation allows resolver adapters to share timeout/transport
+# logic while keeping tool-specific business logic independent.
+
+[package]
+name         = "lsp-subprocess"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Shared LSP subprocess transport for language server adapters"
+publish      = false
+
+[dependencies]
+# Serde for JSON-RPC message serialization.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling.
+thiserror = "2"

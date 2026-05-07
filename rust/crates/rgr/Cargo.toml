@@ -154,6 +154,10 @@ name = "rmap"
 path = "src/main.rs"
 
 [dependencies]
+enrichment = { path = "../enrichment" }
+rust-analyzer-resolver = { path = "../rust-analyzer-resolver" }
+tsserver-resolver = { path = "../tsserver-resolver" }
+jdtls-resolver = { path = "../jdtls-resolver" }
 repo-graph-agent = { path = "../agent" }
 repo-graph-boundary-interaction = { path = "../boundary-interaction" }
 repo-graph-classification = { path = "../classification" }
@@ -169,6 +173,7 @@ repo-graph-quality-policy-runner = { path = "../quality-policy-runner" }
 repo-graph-repo-index = { path = "../repo-index" }
 repo-graph-storage = { path = "../storage" }
 repo-graph-trust = { path = "../trust" }
+pathdiff = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -176,3 +181,4 @@ sha2 = "0.10"
 [dev-dependencies]
 tempfile = "3"
 rusqlite = { version = "0.31", features = ["bundled"] }
+repo-graph-storage = { path = "../storage" }

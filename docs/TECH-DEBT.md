@@ -236,6 +236,160 @@
     Workaround: use `rmap index` instead of `rmap refresh` when contract queries needed.
 - **No clangd/libclang enrichment** for receiver-type resolution yet.
 
+## Enrichment Subsystem — Rust
+
+**Status:** Slice 1 + Slice 2 complete.
+
+Rust-native enrichment subsystem for compiler-assisted receiver type resolution.
+Replaces TS `rgr enrich` subprocess model with native Rust code in `rmap`.
+
+### Crate Architecture
+
+| Crate | Role | Volatility |
+|-------|------|------------|
+| `enrichment` | DTOs, pipeline, resolver trait, promotion, reporting | Stable core |
+| `lsp-subprocess` | Shared LSP transport (Content-Length, reader thread, timeout) | Outer support |
+| `rust-analyzer-resolver` | rust-analyzer LSP subprocess adapter | Volatile mechanism |
+| `tsserver-resolver` | tsserver subprocess adapter for TS/JS | Volatile mechanism |
+| `jdtls-resolver` | Eclipse JDT Language Server adapter for Java | Volatile mechanism |
+
+The separation enforces the dependency rule: stable enrichment core does not
+import volatile LSP/subprocess machinery. LSP-speaking resolvers share transport
+via `lsp-subprocess` to avoid duplicating timeout/framing logic.
+
+### `enrichment` Modules
+
+- `contracts.rs`: DTOs (EligibleEdge, ReceiverTypeResult, PromotionCandidate, PromotedEdge)
+- `status.rs`: EnrichmentState enum, EnrichmentReport, ReportBuilder
+- `eligibility.rs`: EnrichmentStoragePort trait (storage port pattern)
+- `promotion.rs`: 8-gate safety filter for promotion
+- `resolver.rs`: ReceiverTypeResolver trait for language resolvers
+- `pipeline.rs`: Orchestration of eligibility → resolution → persistence → promotion
+
+### `lsp-subprocess` Modules
+
+- `lib.rs`: Content-Length framing, reader thread, timeout enforcement, ID correlation
+
+### `rust-analyzer-resolver` Modules
+
+- `transport.rs`: Re-exports from lsp-subprocess
+- `cargo.rs`: Cargo.toml discovery, file grouping per Cargo context
+- `types.rs`: Type extraction from hover markdown, validation, external detection
+- `client.rs`: RustAnalyzerResolver implementing ReceiverTypeResolver
+
+### `tsserver-resolver` Modules
+
+- `transport.rs`: Newline-delimited JSON framing, seq number correlation, reader thread
+- `protocol.rs`: TSServer request/response DTOs, QuickInfo body parsing
+- `project.rs`: tsconfig.json/jsconfig.json/package.json discovery, file grouping
+- `client.rs`: TsServerResolver implementing ReceiverTypeResolver
+
+### `jdtls-resolver` Modules
+
+- `project.rs`: Maven/Gradle/Eclipse detection, module root + workspace launch root distinction
+- `client.rs`: JdtlsResolver implementing ReceiverTypeResolver (uses lsp-subprocess)
+
+### 8-Gate Promotion Filter
+
+| Gate | Rule |
+|------|------|
+| 1 | Category is CallsObjMethodNeedsTypeInfo or CallsThisWildcardMethodNeedsTypeInfo |
+| 2 | Config opt-in (placeholder) |
+| 3 | Enrichment succeeded (origin != Failed) |
+| 4 | Type is internal (is_external_type = false) |
+| 5 | Type maps to exactly one CLASS in graph |
+| 6 | Method maps to exactly one METHOD on class (rejects overloads) |
+| 7 | No union/intersection types |
+| 8 | Simple receiver.method or this.field.method shape (rejects optional chaining, element access) |
+
+### Remaining work
+
+Enrichment pipeline is complete for Rust, TypeScript, and Java.
+
+Future work:
+- Python resolver (pylsp or pyright)
+- C++ resolver (clangd)
+- Configuration file for jdtls_path and other resolver settings
+
+### Tests
+
+- `enrichment`: 32 unit tests (gates, DTOs, regression tests)
+- `lsp-subprocess`: 8 unit tests (transport, timeout, correlation)
+- `rust-analyzer-resolver`: 13 unit tests (cargo grouping, type extraction)
+- `tsserver-resolver`: 32 unit tests (transport, project grouping, protocol, type extraction)
+- `jdtls-resolver`: 16 unit tests (project grouping, type extraction, build system detection)
+
+### Provisional Heuristics
+
+The following are bootstrap heuristics, not guaranteed truth:
+
+**Rust (rust-analyzer):**
+- Type extraction from hover markdown (pattern-based, may miss edge cases)
+- PascalCase validation for type names (Rust convention, not enforced by compiler)
+- std-only external type detection (future: check against indexed crate deps)
+- **Array type syntax (`[T]`) not handled:** hover returns `[String]` or `[&str]` for slice
+  types; these fail is_valid_rust_type_name validation. Needs regex refinement.
+- **String literals in test fixtures:** hover over string literals like `"John Doe"` returns
+  the literal text, which fails type validation. Not a defect — these are not type positions.
+
+**TypeScript (tsserver):**
+- Type extraction from QuickInfo displayString (regex-based parsing of "(kind) name: Type")
+- Skips union/intersection types, anonymous object types, function types
+- Array types (T[]) normalized to "Array"
+- Generic types (Promise<T>) extract base type only
+- External type detection via static list (Node.js, RxJS, Express, React, Angular)
+- Project detection via tsconfig.json > jsconfig.json > package.json fallback
+
+**Java (jdtls):**
+- Type extraction from hover text (Java "Type varName" pattern parsing)
+- Strips generic parameters (List<String> -> List)
+- Strips package prefix (java.util.List -> List)
+- Skips Java primitives (int, long, void, etc.) and Object
+- External type detection via static list (Java stdlib, Spring, JPA, Servlet)
+- Project detection: Maven (pom.xml) > Gradle (build.gradle*) > Eclipse (.project)
+- Gradle workspace promotion: module root may differ from workspace launch root
+- Timeout defaults are provisional (120s init, 45 warmup retries at 3s)
+- Requires explicit jdtls_path configuration (no auto-discovery)
+
+### Known Limitations
+
+**TypeScript resolver:**
+- `calls_this_wildcard_method_needs_type_info` category is unsupported. These edges
+  (e.g., `this.field.method()`) require AST traversal to find the intermediate
+  receiver expression. tsserver quickinfo at cursor position returns the wrong
+  symbol. Edges in this category fail explicitly with distinct reason
+  `unsupported_category:calls_this_wildcard_method_needs_type_info`.
+- Primary category `calls_obj_method_needs_type_info` (e.g., `obj.method()`) works
+  correctly because cursor position is at the receiver variable itself.
+- **Multi-tsconfig repos:** tsserver may fail with "Cannot read properties of undefined
+  (reading 'getSourceFile')" when files are not covered by the tsconfig used for the
+  session. The current implementation opens tsserver per-project-root (nearest tsconfig),
+  but files may belong to different project contexts within a monorepo. This is a known
+  limitation with the project grouping heuristic.
+
+**Java resolver:**
+- Same `calls_this_wildcard_method_needs_type_info` limitation as TypeScript.
+- Build system maturity: Maven fully supported, Gradle operational, Eclipse minimal.
+- Requires explicit jdtls path via `--jdtls-path <path>` flag or `JDTLS_PATH` env var.
+  If `--language java` is specified without a jdtls path, CLI exits with error.
+  If Java is not explicitly requested and no jdtls path is configured, Java resolver
+  is silently skipped (Rust/TS still run).
+
+### Timeout Enforcement
+
+All LSP-based resolvers use a dedicated reader thread (from `lsp-subprocess`)
+with channel timeout (`recv_timeout`) for true timeout enforcement on blocking I/O.
+
+**rust-analyzer:** `init_timeout_secs` (120s), `hover_timeout_secs` (30s), `warmup_retries` (60),
+  `warmup_delay_ms` (3000). Warm-up strategy: require actual type extraction OR 3+ consecutive
+  null responses after 15s minimum delay. This distinguishes "still loading" from "loaded,
+  position genuinely has no hover".
+**tsserver:** `quickinfo_timeout_secs` (15s), `warmup_retries` (20), `warmup_delay_ms` (1500).
+**jdtls:** `init_timeout_secs` (120s), `hover_timeout_secs` (15s), `warmup_retries` (45), `warmup_delay_ms` (3000).
+
+Java defaults are more generous due to JVM startup + dependency resolution overhead.
+All values are configurable and documented as provisional.
+
 ## Policy Facts — PF-1 STATUS_MAPPING
 
 - **PF-1 temporary re-parse postpass (TECH DEBT):** STATUS_MAPPING extraction

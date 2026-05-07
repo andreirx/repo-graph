@@ -21,7 +21,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::open_storage;
+use crate::cli::{open_storage, resolve_repo_root};
 
 /// Dispatcher for `rmap docs <subcommand>`.
 pub fn run_docs(args: &[String]) -> ExitCode {
@@ -82,10 +82,17 @@ fn run_docs_list(args: &[String]) -> ExitCode {
         }
     };
 
-    let repo_path = Path::new(&repo.root_path);
+    // Resolve repo root relative to DB location (cwd-independent)
+    let repo_path = match resolve_repo_root(db_path, &repo.root_path) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::from(2);
+        }
+    };
 
     // Discover documentation inventory (live filesystem, not semantic_facts)
-    let inventory = match repo_graph_doc_facts::discover_doc_inventory(repo_path, true) {
+    let inventory = match repo_graph_doc_facts::discover_doc_inventory(&repo_path, true) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: discovery failed: {}", e);
@@ -143,10 +150,17 @@ fn run_docs_extract(args: &[String]) -> ExitCode {
         }
     };
 
-    let repo_path = Path::new(&repo.root_path);
+    // Resolve repo root relative to DB location (cwd-independent)
+    let repo_path = match resolve_repo_root(db_path, &repo.root_path) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::from(2);
+        }
+    };
 
     // Extract semantic facts from documentation
-    let extraction_result = match repo_graph_doc_facts::extract_semantic_facts(repo_path) {
+    let extraction_result = match repo_graph_doc_facts::extract_semantic_facts(&repo_path) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: extraction failed: {}", e);

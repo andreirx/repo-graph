@@ -85,6 +85,23 @@ impl StorageConnection {
 		Ok(rows)
 	}
 
+	/// Update the `root_path` column for an existing repo.
+	///
+	/// Used during refresh to migrate old caller-relative paths to
+	/// the new DB-relative contract. Returns `Ok(true)` if a row was
+	/// updated, `Ok(false)` if the repo doesn't exist.
+	pub fn update_repo_root_path(
+		&self,
+		repo_uid: &str,
+		new_root_path: &str,
+	) -> Result<bool, StorageError> {
+		let rows_affected = self.connection().execute(
+			"UPDATE repos SET root_path = ? WHERE repo_uid = ?",
+			rusqlite::params![new_root_path, repo_uid],
+		)?;
+		Ok(rows_affected > 0)
+	}
+
 	/// Delete a repo row by uid. Mirrors TS `removeRepo`
 	/// (sqlite-storage.ts:242).
 	///

@@ -176,6 +176,12 @@ repo-graph-policy-facts = { path = "../policy-facts" }
 # types for the boundary interaction persistence methods.
 repo-graph-boundary-interaction = { path = "../boundary-interaction" }
 
+# Enrichment crate — added for EN-3 enrichment storage adapter. The
+# storage adapter implements the EnrichmentStoragePort trait defined
+# by the enrichment crate (policy). Same dependency direction:
+# adapter -> policy (outer -> inner).
+enrichment = { path = "../enrichment" }
+
 [dev-dependencies]
 # tempfile for tests that need a real file-backed SQLite database
 # in a unique temporary path. Added in R2-D when the connection

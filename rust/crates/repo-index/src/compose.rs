@@ -80,6 +80,11 @@ pub struct ComposeOptions {
 	/// C/C++ include roots (configured via `--include-root`).
 	/// Searched in order before conventional roots.
 	pub c_include_roots: Vec<String>,
+	/// Path to store in `repos.root_path`. If None, uses `repo_path.to_string_lossy()`.
+	///
+	/// CLI should compute this as the repo path relative to the DB file location.
+	/// This ensures filesystem-backed surfaces resolve correctly regardless of cwd.
+	pub storage_root_path: Option<String>,
 }
 
 impl Default for ComposeOptions {
@@ -88,6 +93,7 @@ impl Default for ComposeOptions {
 			basis_commit: None,
 			edge_batch_size: None,
 			c_include_roots: Vec::new(),
+			storage_root_path: None,
 		}
 	}
 }
@@ -1021,7 +1027,7 @@ pub fn index_into_storage(
 		.initialize()
 		.map_err(|e| ComposeError::ExtractorInit(format!("rust: {}", e)))?;
 
-	ensure_repo(storage, repo_uid, repo_path)?;
+	ensure_repo(storage, repo_uid, repo_path, options)?;
 
 	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut cpp_extractor, &mut java_extractor, &mut python_extractor, &mut rust_extractor];
 	let mut idx_options = IndexOptions {
@@ -1132,7 +1138,7 @@ pub fn refresh_into_storage(
 		.initialize()
 		.map_err(|e| ComposeError::ExtractorInit(format!("rust: {}", e)))?;
 
-	ensure_repo(storage, repo_uid, repo_path)?;
+	ensure_repo(storage, repo_uid, repo_path, options)?;
 
 	let mut extractors: Vec<&mut dyn ExtractorPort> = vec![&mut ts_extractor, &mut c_extractor, &mut cpp_extractor, &mut java_extractor, &mut python_extractor, &mut rust_extractor];
 	let mut idx_options = IndexOptions {
@@ -1210,21 +1216,39 @@ fn ensure_repo(
 	storage: &StorageConnection,
 	repo_uid: &str,
 	repo_path: &Path,
+	options: &ComposeOptions,
 ) -> Result<(), ComposeError> {
 	use repo_graph_storage::types::{Repo, RepoRef};
+
+	// Use storage_root_path if provided (CLI computes DB-relative path),
+	// otherwise fall back to the literal repo_path string.
+	let root_path = options
+		.storage_root_path
+		.clone()
+		.unwrap_or_else(|| repo_path.to_string_lossy().into());
 
 	let existing = storage
 		.get_repo(&RepoRef::Uid(repo_uid.into()))
 		.map_err(ComposeError::Storage)?;
-	if existing.is_some() {
+
+	if let Some(repo) = existing {
+		// Repo exists. Check if root_path needs migration to DB-relative form.
+		// This handles backward compatibility: old DBs stored caller-relative
+		// paths; refresh updates them to the new DB-relative contract.
+		if repo.root_path != root_path {
+			storage
+				.update_repo_root_path(repo_uid, &root_path)
+				.map_err(ComposeError::Storage)?;
+		}
 		return Ok(());
 	}
 
+	// Create new repo with DB-relative root_path
 	storage
 		.add_repo(&Repo {
 			repo_uid: repo_uid.into(),
 			name: repo_uid.into(),
-			root_path: repo_path.to_string_lossy().into(),
+			root_path,
 			default_branch: None,
 			created_at: "2025-01-01T00:00:00.000Z".into(),
 			metadata_json: None,

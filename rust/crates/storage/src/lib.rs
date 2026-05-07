@@ -178,6 +178,7 @@ mod quality_policy_impl; // QualityPolicyStoragePort impl for StorageConnection
 pub mod queries; // Read-side graph queries (R10+)
 mod trust_impl; // TrustStorageRead impl for StorageConnection (R4-E/F)
 mod policy_facts_impl; // PolicyFactsStorageRead/Write impl for StorageConnection (PF-1)
+mod enrichment_impl; // EnrichmentStoragePort impl for StorageConnection (EN-3)
 pub mod types;
 
 // Convenience re-exports for the public connection lifecycle API.

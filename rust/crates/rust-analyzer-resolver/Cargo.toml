@@ -1,0 +1,25 @@
+[package]
+name = "rust-analyzer-resolver"
+version = "0.1.0"
+edition = "2021"
+description = "Rust receiver type resolver using rust-analyzer LSP"
+
+[dependencies]
+# Shared LSP subprocess transport
+lsp-subprocess = { path = "../lsp-subprocess" }
+
+# LSP protocol types (request/response structs)
+lsp-types = "0.95"
+
+# Serialization for LSP JSON-RPC
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Enrichment contracts (ReceiverTypeResolver trait, DTOs)
+enrichment = { path = "../enrichment" }
+
+# Logging (optional, for debugging)
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3.10"

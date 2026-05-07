@@ -50,7 +50,11 @@ for what is actually operational.
 - **1464 tests** across 78 test files.
 - **Shipped language support:** TS/JS, Rust, Java, Python, C, and C++ are fully operational
   in `rmap`. Mobile track languages (Objective-C, Swift, Kotlin, Dart) are not yet implemented.
-- **Enrichment:** TS (~81%), Rust (~85%), Java (operational but fragile). All three wired.
+- **Enrichment:** Rust operational (~77% on repo-graph, warm-up fixed), TS has multi-tsconfig
+  project-context issues, Java operational but requires explicit jdtls path. All three wired.
+- **Repo-root anchoring:** Fixed. CLI computes and stores `repos.root_path` relative to the DB
+  file location at index/refresh time. Filesystem-backed surfaces (docs, churn, coverage, risk,
+  hotspots) resolve using that DB-relative path. Portable DB + cwd-independent resolution.
 - **Classifier version:** 6.
   - v4: language-aware imports
   - v5: Rust crate-internal module heuristic
