@@ -574,6 +574,16 @@ impl AgentStorageRead for FakeAgentStorage {
 		// Default: no measurements (emits COMPLEXITY_UNAVAILABLE limit).
 		Ok(false)
 	}
+
+	fn count_high_complexity_symbols(
+		&self,
+		_snapshot_uid: &str,
+		_min_threshold: u64,
+	) -> Result<u64, AgentStorageError> {
+		self.fail_if_forced("count_high_complexity_symbols")?;
+		// Default: no measurements.
+		Ok(0)
+	}
 }
 
 // ── Gate port impl (Rust-43A) ────────────────────────────────────

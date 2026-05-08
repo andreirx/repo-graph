@@ -50,8 +50,9 @@ for what is actually operational.
 - **1464 tests** across 78 test files.
 - **Shipped language support:** TS/JS, Rust, Java, Python, C, and C++ are fully operational
   in `rmap`. Mobile track languages (Objective-C, Swift, Kotlin, Dart) are not yet implemented.
-- **Enrichment:** Rust operational (~77% on repo-graph, warm-up fixed), TS has multi-tsconfig
-  project-context issues, Java operational but requires explicit jdtls path. All three wired.
+- **Enrichment:** Rust operational (~77% on repo-graph, warm-up fixed), TS has ownership
+  resolver for multi-tsconfig repos (explicit failure on unowned/ambiguous files), Java
+  operational but requires explicit jdtls path. All three wired.
 - **Repo-root anchoring:** Fixed. CLI computes and stores `repos.root_path` relative to the DB
   file location at index/refresh time. Filesystem-backed surfaces (docs, churn, coverage, risk,
   hotspots) resolve using that DB-relative path. Portable DB + cwd-independent resolution.

@@ -354,18 +354,22 @@ The following are bootstrap heuristics, not guaranteed truth:
 ### Known Limitations
 
 **TypeScript resolver:**
-- `calls_this_wildcard_method_needs_type_info` category is unsupported. These edges
-  (e.g., `this.field.method()`) require AST traversal to find the intermediate
-  receiver expression. tsserver quickinfo at cursor position returns the wrong
-  symbol. Edges in this category fail explicitly with distinct reason
-  `unsupported_category:calls_this_wildcard_method_needs_type_info`.
+- `calls_this_wildcard_method_needs_type_info` category now supported via tree-sitter.
+  The `receiver_locator` module extracts the receiver expression (e.g., `this.field`
+  from `this.field.method()`) using tree-sitter syntax parsing, then queries tsserver
+  for the type at that position. Explicit failure reasons for unsupported patterns:
+  `receiver_locator_no_receiver`, `receiver_locator_unsupported:<reason>`,
+  `receiver_locator_parse_error:<reason>`.
 - Primary category `calls_obj_method_needs_type_info` (e.g., `obj.method()`) works
   correctly because cursor position is at the receiver variable itself.
-- **Multi-tsconfig repos:** tsserver may fail with "Cannot read properties of undefined
-  (reading 'getSourceFile')" when files are not covered by the tsconfig used for the
-  session. The current implementation opens tsserver per-project-root (nearest tsconfig),
-  but files may belong to different project contexts within a monorepo. This is a known
-  limitation with the project grouping heuristic.
+- **Multi-tsconfig repos:** The `ownership` module in `tsserver-resolver` now determines
+  file→tsconfig ownership by evaluating actual config semantics (`files`, `include`,
+  `exclude`, `extends`, `references`). This replaces the naive "nearest config by
+  directory" heuristic. Files with no owning config fail explicitly as
+  `ts_project_ownership_not_found`. Files claimed by multiple configs fail as
+  `ts_project_ownership_ambiguous`. Remaining limitation: glob matching is simplified
+  (uses Rust patterns, not full TypeScript semantics) and `extends` from `node_modules`
+  packages is not fully supported.
 
 **Java resolver:**
 - Same `calls_this_wildcard_method_needs_type_info` limitation as TypeScript.

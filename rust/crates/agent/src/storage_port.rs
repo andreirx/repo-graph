@@ -660,6 +660,17 @@ pub trait AgentStorageRead {
 		&self,
 		snapshot_uid: &str,
 	) -> Result<bool, AgentStorageError>;
+
+	/// Count symbols with complexity exceeding the threshold.
+	///
+	/// Used by HIGH_COMPLEXITY signal to report the true count of
+	/// violating symbols (separate from the top-N sample returned
+	/// by `query_high_complexity_symbols`).
+	fn count_high_complexity_symbols(
+		&self,
+		snapshot_uid: &str,
+		min_threshold: u64,
+	) -> Result<u64, AgentStorageError>;
 }
 
 // ── Explain DTOs ────────────────────────────────────────────────

@@ -10,15 +10,43 @@
 //! - **TSServer protocol**: Custom protocol over stdin/stdout, not LSP.
 //!   Uses seq numbers for request/response correlation.
 //! - **Reader thread**: Background thread with channel for timeout enforcement.
-//! - **Project contexts**: One tsserver session per tsconfig/jsconfig/package.json.
+//! - **Project contexts**: One tsserver session per owning tsconfig/jsconfig.
 //!
-//! # Project Detection
+//! # Project Ownership
 //!
-//! Files are grouped by nearest config file:
-//! 1. `tsconfig.json` (TypeScript project)
-//! 2. `jsconfig.json` (JavaScript project with TS tooling)
-//! 3. `package.json` (Node.js package boundary)
-//! 4. Repo root (standalone fallback)
+//! The `ownership` module determines which tsconfig.json owns each file
+//! by evaluating actual config semantics:
+//!
+//! - `files` (explicit file list)
+//! - `include` / `exclude` (glob patterns)
+//! - `extends` (config inheritance)
+//! - `references` (composite project structure)
+//!
+//! This replaces the naive "nearest config by directory" heuristic that
+//! fails in monorepos with project references.
+//!
+//! Ownership outcomes:
+//! - **Owned**: Exactly one config claims the file.
+//! - **Ambiguous**: Multiple configs claim the file (explicit failure).
+//! - **Unowned**: No config covers the file (explicit failure).
+//!
+//! # Receiver Localization
+//!
+//! The `receiver_locator` module uses tree-sitter to extract receiver
+//! expressions from call sites. This enables resolution of the
+//! `calls_this_wildcard_method_needs_type_info` category where the edge
+//! position points at the method name, but we need the type of the
+//! intermediate receiver (e.g., `this.field` in `this.field.method()`).
+//!
+//! Architecture split:
+//! - **tree-sitter**: Deterministic syntax extraction (receiver span)
+//! - **tsserver**: Semantic type authority (type at receiver span)
+//!
+//! # Legacy Grouping
+//!
+//! The `project` module contains the original directory-ancestry grouping.
+//! It remains available for fallback comparison but is not the primary
+//! ownership source.
 //!
 //! # Usage
 //!
@@ -30,9 +58,14 @@
 //! // Register with ResolverRegistry, then run through pipeline
 //! ```
 
+pub mod ownership;
+pub mod receiver_locator;
+
 mod project;
 mod protocol;
 mod transport;
 mod client;
 
 pub use client::TsServerResolver;
+pub use ownership::{ProjectOwnership, TsProjectOwnershipResolver, OwnershipError};
+pub use receiver_locator::{ReceiverLocation, ReceiverLocator};

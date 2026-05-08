@@ -33,17 +33,20 @@ pub fn aggregate_with_threshold<S: AgentStorageRead + ?Sized>(
 	snapshot_uid: &str,
 	threshold: u64,
 ) -> Result<AggregatorOutput, AgentStorageError> {
+	// Get the true count of symbols exceeding threshold (not limited)
+	let count = storage.count_high_complexity_symbols(snapshot_uid, threshold)?;
+
+	if count == 0 {
+		return Ok(AggregatorOutput::empty());
+	}
+
+	// Get top N for evidence (sample, not full list)
 	let high_complexity = storage.query_high_complexity_symbols(
 		snapshot_uid,
 		threshold,
 		COMPLEXITY_TOP_N,
 	)?;
 
-	if high_complexity.is_empty() {
-		return Ok(AggregatorOutput::empty());
-	}
-
-	let count = high_complexity.len() as u64;
 	let top: Vec<ComplexSymbolEvidence> = high_complexity
 		.into_iter()
 		.map(|m| ComplexSymbolEvidence {
@@ -107,6 +110,19 @@ mod tests {
 			_snapshot_uid: &str,
 		) -> Result<bool, AgentStorageError> {
 			Ok(!self.measurements.is_empty())
+		}
+
+		fn count_high_complexity_symbols(
+			&self,
+			_snapshot_uid: &str,
+			min_threshold: u64,
+		) -> Result<u64, AgentStorageError> {
+			let count = self
+				.measurements
+				.iter()
+				.filter(|m| m.complexity >= min_threshold)
+				.count();
+			Ok(count as u64)
 		}
 
 		// Stub implementations for other required methods

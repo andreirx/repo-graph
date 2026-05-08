@@ -1323,4 +1323,27 @@ impl AgentStorageRead for StorageConnection {
 
 		Ok(count > 0)
 	}
+
+	fn count_high_complexity_symbols(
+		&self,
+		snapshot_uid: &str,
+		min_threshold: u64,
+	) -> Result<u64, AgentStorageError> {
+		let conn = self.connection();
+
+		// Complexity is stored in value_json as {"value": N}.
+		// Use json_extract to compare against threshold.
+		let count: i64 = conn
+			.query_row(
+				"SELECT COUNT(*) FROM measurements \
+				 WHERE snapshot_uid = ? \
+				   AND kind = 'cyclomatic_complexity' \
+				   AND CAST(json_extract(value_json, '$.value') AS INTEGER) >= ?",
+				rusqlite::params![snapshot_uid, min_threshold as i64],
+				|row| row.get(0),
+			)
+			.map_err(map_err("count_high_complexity_symbols"))?;
+
+		Ok(count as u64)
+	}
 }

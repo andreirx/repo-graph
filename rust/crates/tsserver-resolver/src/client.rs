@@ -32,8 +32,8 @@
 //! - Events emitted asynchronously (must be filtered)
 //! - `quickinfo` command for type information at position
 
-use std::collections::HashSet;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::time::Duration;
 
@@ -156,12 +156,29 @@ impl ReceiverTypeResolver for TsServerResolver {
             return Vec::new();
         }
 
-        // Group edges by nearest project config (tsconfig.json, jsconfig.json, package.json)
-        let groups = group_by_project_root(repo_root, edges);
+        // Build ownership resolver to determine which tsconfig owns each file.
+        // This replaces the naive "nearest config by directory" grouping.
+        let ownership_resolver = match crate::ownership::TsProjectOwnershipResolver::build(repo_root) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                warn!(error = %e, "failed to build ownership resolver, falling back to directory grouping");
+                None
+            }
+        };
 
-        let mut all_results: Vec<ReceiverTypeResult> = Vec::new();
+        // Group edges by owning project config.
+        // Edges with Unowned or Ambiguous ownership fail explicitly.
+        let (groups, ownership_failures) = if let Some(ref resolver) = ownership_resolver {
+            group_by_ownership(resolver, repo_root, edges)
+        } else {
+            // Fallback: use legacy directory-based grouping
+            let legacy_groups = group_by_project_root(repo_root, edges);
+            (legacy_groups, Vec::new())
+        };
+
+        let mut all_results: Vec<ReceiverTypeResult> = ownership_failures;
         let total = edges.len();
-        let mut processed = 0;
+        let mut processed = all_results.len();
 
         for (project_root, group_edges) in groups {
             // Report progress: starting session
@@ -239,20 +256,25 @@ impl ReceiverTypeResolver for TsServerResolver {
                     });
                 }
 
-                // LIMITATION: calls_this_wildcard_method_needs_type_info requires AST
-                // traversal to find the intermediate receiver (e.g., `this.field` in
-                // `this.field.method()`). tsserver quickinfo at cursor position returns
-                // the wrong symbol. Fail explicitly rather than return corrupt data.
+                let abs_path = repo_root.join(&edge.source_file_path);
+
+                // For wildcard receiver category, use tree-sitter to locate
+                // the actual receiver expression before querying tsserver.
                 if edge.category == UnresolvedCategory::CallsThisWildcardMethodNeedsTypeInfo {
-                    all_results.push(ReceiverTypeResult::failed(
-                        edge.edge_uid.clone(),
-                        "unsupported_category:calls_this_wildcard_method_needs_type_info",
-                    ));
+                    let result = resolve_wildcard_receiver(
+                        &mut session,
+                        repo_root,
+                        &abs_path,
+                        edge.line_start,
+                        edge.col_start,
+                        &edge.edge_uid,
+                        &edge.source_file_path,
+                    );
+                    all_results.push(result);
                     processed += 1;
                     continue;
                 }
 
-                let abs_path = repo_root.join(&edge.source_file_path);
                 let result = session.resolve_type(&abs_path, edge.line_start, edge.col_start, &edge.edge_uid);
                 all_results.push(result);
                 processed += 1;
@@ -765,6 +787,159 @@ fn is_external_type(type_name: &str) -> bool {
     ];
 
     NODE_TYPES.contains(&type_name) || LIBRARY_TYPES.contains(&type_name)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wildcard Receiver Resolution
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Resolve type for wildcard receiver category using tree-sitter localization.
+///
+/// For `this.field.method()`, the edge position points at `method`, but we
+/// need the type of `this.field`. This function:
+/// 1. Reads the source file
+/// 2. Uses tree-sitter to locate the receiver expression
+/// 3. Queries tsserver for the type at the receiver position
+fn resolve_wildcard_receiver(
+    session: &mut TsServerSession,
+    _repo_root: &Path,
+    abs_path: &Path,
+    line: u32,
+    col: u32,
+    edge_uid: &str,
+    rel_path: &str,
+) -> ReceiverTypeResult {
+    // Read source file
+    let source = match std::fs::read_to_string(abs_path) {
+        Ok(s) => s,
+        Err(e) => {
+            return ReceiverTypeResult::failed(
+                edge_uid.to_string(),
+                format!("receiver_locator_read_error:{}", e),
+            );
+        }
+    };
+
+    // Create locator based on file extension
+    let is_tsx = rel_path.ends_with(".tsx") || rel_path.ends_with(".jsx");
+    let mut locator = if is_tsx {
+        match crate::receiver_locator::ReceiverLocator::new_tsx() {
+            Ok(l) => l,
+            Err(e) => {
+                return ReceiverTypeResult::failed(
+                    edge_uid.to_string(),
+                    format!("receiver_locator_init_error:{}", e),
+                );
+            }
+        }
+    } else {
+        match crate::receiver_locator::ReceiverLocator::new_typescript() {
+            Ok(l) => l,
+            Err(e) => {
+                return ReceiverTypeResult::failed(
+                    edge_uid.to_string(),
+                    format!("receiver_locator_init_error:{}", e),
+                );
+            }
+        }
+    };
+
+    // Locate receiver expression
+    let location = locator.locate_receiver(&source, line, col);
+
+    match location {
+        crate::receiver_locator::ReceiverLocation::Found {
+            line: recv_line,
+            column: recv_col,
+            text,
+        } => {
+            debug!(
+                edge_uid = edge_uid,
+                original_pos = format!("{}:{}", line, col),
+                receiver_pos = format!("{}:{}", recv_line, recv_col),
+                receiver_text = text.as_str(),
+                "located receiver expression"
+            );
+
+            // Query tsserver at the receiver position
+            session.resolve_type(abs_path, recv_line, recv_col, edge_uid)
+        }
+
+        crate::receiver_locator::ReceiverLocation::NoReceiver => {
+            ReceiverTypeResult::failed(
+                edge_uid.to_string(),
+                "receiver_locator_no_receiver",
+            )
+        }
+
+        crate::receiver_locator::ReceiverLocation::UnsupportedPattern { reason } => {
+            ReceiverTypeResult::failed(
+                edge_uid.to_string(),
+                format!("receiver_locator_unsupported:{}", reason),
+            )
+        }
+
+        crate::receiver_locator::ReceiverLocation::ParseError { reason } => {
+            ReceiverTypeResult::failed(
+                edge_uid.to_string(),
+                format!("receiver_locator_parse_error:{}", reason),
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ownership-Based Grouping
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Group edges by their owning tsconfig, using the ownership resolver.
+///
+/// Returns:
+/// - Map of project_root → edges owned by that project
+/// - Vec of failures for edges with Unowned or Ambiguous ownership
+fn group_by_ownership(
+    resolver: &crate::ownership::TsProjectOwnershipResolver,
+    _repo_root: &Path,
+    edges: &[EligibleEdge],
+) -> (HashMap<PathBuf, Vec<EligibleEdge>>, Vec<ReceiverTypeResult>) {
+    let mut groups: HashMap<PathBuf, Vec<EligibleEdge>> = HashMap::new();
+    let mut failures: Vec<ReceiverTypeResult> = Vec::new();
+
+    for edge in edges {
+        let file_path = Path::new(&edge.source_file_path);
+
+        match resolver.resolve(file_path) {
+            crate::ownership::ProjectOwnership::Owned { project_root, .. } => {
+                groups
+                    .entry(project_root)
+                    .or_default()
+                    .push(edge.clone());
+            }
+            crate::ownership::ProjectOwnership::Unowned => {
+                // File not covered by any tsconfig — explicit failure
+                failures.push(ReceiverTypeResult::failed(
+                    edge.edge_uid.clone(),
+                    "ts_project_ownership_not_found",
+                ));
+            }
+            crate::ownership::ProjectOwnership::Ambiguous { candidates } => {
+                // Multiple tsconfigs claim ownership — explicit failure
+                let candidate_list: Vec<String> = candidates
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect();
+                failures.push(ReceiverTypeResult::failed(
+                    edge.edge_uid.clone(),
+                    format!(
+                        "ts_project_ownership_ambiguous:{}",
+                        candidate_list.join(",")
+                    ),
+                ));
+            }
+        }
+    }
+
+    (groups, failures)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

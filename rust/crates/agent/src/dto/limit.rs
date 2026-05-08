@@ -50,9 +50,10 @@ pub enum LimitCode {
 	/// snapshot totals instead of discovered module counts.
 	ModuleDataUnavailable,
 
-	/// Cyclomatic complexity measurements are not produced by the
-	/// Rust indexer. `HIGH_COMPLEXITY` is therefore never emitted
-	/// from a Rust-indexed repo.
+	/// This snapshot has no cyclomatic complexity measurements.
+	/// `HIGH_COMPLEXITY` cannot be evaluated without measurement
+	/// data. The absence may be due to indexer limitations or
+	/// repository content.
 	ComplexityUnavailable,
 
 	/// Indexed languages may not cover the full repository. The
@@ -99,8 +100,8 @@ impl LimitCode {
 				 snapshot totals."
 			}
 			Self::ComplexityUnavailable => {
-				"Cyclomatic complexity measurements are not produced by \
-				 the Rust indexer. HIGH_COMPLEXITY cannot be emitted."
+				"No cyclomatic complexity measurements available for this \
+				 snapshot. HIGH_COMPLEXITY cannot be evaluated."
 			}
 			Self::LanguageCoveragePartial => {
 				"Indexed languages may not cover the full repository. \
