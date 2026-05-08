@@ -829,11 +829,63 @@ cross-cutting refinement. Depth only when real navigation proves a gap.
 
 ---
 
-### Immediate: Linux IPC Family Expansion (BI-LX)
+### Immediate: Artifact Contract Registry (ACR)
 
-Linux/Unix IPC mechanisms are high-value discovery targets for legacy C
-codebases, embedded systems, and kernel-adjacent code. These outrank
-quality diff, policy-fact depth, and TCP/UDP role refinement.
+The next execution priority is the **Artifact Contract Registry** — a foundational
+architectural change that codifies artifact semantics in code rather than prose.
+
+**Problem:** The refresh pipeline treats all artifact families similarly, but they
+have fundamentally different truth classes and refresh semantics:
+- Extracted facts (nodes, edges, surfaces) can be copied forward for unchanged files
+- Deterministic relationships (boundary_contracts, boundary_interaction_links) must
+  be recomputed from current snapshot facts
+- Hints/inferences may be marked impacted rather than eagerly recomputed
+
+Without explicit contracts, the pipeline handles each table ad-hoc, leading to
+semantic bugs like boundary_interaction_links pointing to parent snapshot UIDs.
+
+**Solution:** Explicit artifact contract registry that defines truth class, refresh
+policy, identity model, degradation policy, and provenance requirements for every
+artifact family. The refresh pipeline and query surfaces consume this registry.
+
+**Architecture docs:**
+- `docs/architecture/artifact-contract-model.md` — full specification
+- `docs/architecture/adr/adr-artifact-contract-registry.md` — decision record
+
+**Execution slices (in order):**
+
+| Slice | Scope | Status |
+|-------|-------|--------|
+| ACR-1 | Create `artifact-contracts` crate with registry | NOT STARTED |
+| ACR-2 | Make refresh pipeline consume registry | NOT STARTED |
+| ACR-3 | Add per-row freshness and provenance schema | NOT STARTED |
+| ACR-4 | Implement impact propagation from L0 changes | NOT STARTED |
+| ACR-5 | Boundary contract proof case (first fix) | NOT STARTED |
+| ACR-6 | Wire query surfaces to report freshness/degradation | NOT STARTED |
+
+**Key decisions (locked):**
+- Option A: full registry now (all families classified upfront)
+- Dedicated `rust/crates/artifact-contracts` crate (not in storage)
+- Per-row freshness tracking (not per-family)
+- Per-row provenance to Layer 0 anchors
+- Upper layers may be marked impacted rather than eagerly recomputed
+
+**First proof case:** BoundaryContracts and BoundaryInteractionLinks will be
+fixed under the new model by recomputing from current snapshot facts in Phase 2
+of the refresh pipeline (after Layer 0-1 copy-forward completes).
+
+**Supersedes:** `docs/slices/refresh-integrity-parity.md` (tactical fixes)
+
+**Follow-on:** After ACR is complete, module truth-model unification
+(`docs/slices/rust-module-parity.md`) unifies Rust and TS indexer module
+representations into the canonical `module_candidates` tables.
+
+---
+
+### Shipped: Linux IPC Family Expansion (BI-LX)
+
+Linux/Unix IPC mechanisms were high-value discovery targets for legacy C
+codebases, embedded systems, and kernel-adjacent code. All planned slices shipped.
 
 **Slice queue:**
 
@@ -874,7 +926,7 @@ See `smoke-runs/2026-05-05T14-30-08Z/` (protocol v3 compliant).
 
 ### Deferred (explicitly not next)
 
-The following are valuable but explicitly lower priority than BI-LX:
+The following are valuable but explicitly lower priority than refresh integrity:
 
 - **Snapshot-to-snapshot quality diff** — cross-cutting, not mechanism breadth
 - **Quality delta surfacing** — cross-cutting, not mechanism breadth
@@ -882,7 +934,7 @@ The following are valuable but explicitly lower priority than BI-LX:
 - **BI-1B fd-tracking completion** — TCP/UDP depth, not new mechanism family
 - **MB-3B (NATS request/reply)** — broker depth, not new mechanism family
 
-Return to these after Linux IPC coverage is sufficient.
+Return to these after refresh integrity and module parity are complete.
 
 ---
 

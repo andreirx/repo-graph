@@ -112,6 +112,11 @@ impl<E> From<E> for IndexError<E> {
 /// These feed into the unresolved-edge classifier. If not
 /// provided (`None`), classification proceeds with empty signals
 /// (which weakens alias-based and registry-based resolution).
+/// Input for a single file to index.
+///
+/// Clone is derived to support refresh copy-forward filtering,
+/// where changed files are cloned into a separate collection.
+#[derive(Clone)]
 pub struct FileInput {
 	/// Repo-relative path (forward slashes).
 	pub rel_path: String,
@@ -130,6 +135,19 @@ pub struct FileInput {
 	/// Pre-computed tsconfig path aliases for this file's nearest
 	/// owning tsconfig.json. Typed, not raw JSON.
 	pub tsconfig_aliases: Option<TsconfigAliases>,
+}
+
+/// Config file state for invalidation planning.
+///
+/// Config files (package.json, Cargo.toml, tsconfig.json, etc.) are NOT
+/// extracted, but their hash changes trigger scope-widening invalidation.
+/// This struct carries the minimal state needed for the invalidation planner.
+#[derive(Clone, Debug)]
+pub struct ConfigFileState {
+	/// Repo-relative path (forward slashes).
+	pub rel_path: String,
+	/// Pre-computed content hash.
+	pub content_hash: String,
 }
 
 // ── Main orchestration ───────────────────────────────────────────
@@ -972,6 +990,9 @@ fn run_pipeline<S: IndexerStoragePort>(
 		grpc_client_hints: None, // Filled by index_repo after GR-2A detection
 		grpc_links: None, // Filled by index_repo after GR-3A detection
 		metrics: all_metrics,
+		parent_snapshot_uid: None, // Set by refresh_repo if applicable
+		unchanged_files: None, // Set by refresh_repo if applicable
+		artifact_copy_forward: None, // Filled by compose layer after copy-forward
 	})
 }
 
@@ -1304,6 +1325,7 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 	repo_uid: &str,
 	current_files: &[FileInput],
 	contract_files: &[crate::proto_indexer::ProtoFileInput],
+	config_files: &[ConfigFileState],
 	options: &mut IndexOptions,
 	hook: Option<&mut dyn crate::hook::ExtractionResultHook>,
 ) -> Result<IndexResult, IndexError<S::StorageError>> {
@@ -1324,7 +1346,10 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 		.query_file_version_hashes(&parent.snapshot_uid)
 		.map_err(IndexError::Storage)?;
 
-	let current_states: Vec<crate::invalidation::CurrentFileState> = current_files
+	// Build current states from source files + config files.
+	// Config files are included so the planner can detect changed configs
+	// and trigger scope-widening. They're filtered out of files_to_extract below.
+	let mut current_states: Vec<crate::invalidation::CurrentFileState> = current_files
 		.iter()
 		.map(|f| crate::invalidation::CurrentFileState {
 			file_uid: format!("{}:{}", repo_uid, f.rel_path),
@@ -1333,12 +1358,30 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 		})
 		.collect();
 
-	let plan = crate::invalidation::build_invalidation_plan(
+	// Add config files to current states for change detection.
+	for cf in config_files {
+		current_states.push(crate::invalidation::CurrentFileState {
+			file_uid: format!("{}:{}", repo_uid, cf.rel_path),
+			path: cf.rel_path.clone(),
+			content_hash: cf.content_hash.clone(),
+		});
+	}
+
+	let mut plan = crate::invalidation::build_invalidation_plan(
 		&parent.snapshot_uid,
 		&parent_hashes,
 		&current_states,
 		repo_uid,
 	);
+
+	// Filter config files out of files_to_extract and files_to_copy.
+	// Config files trigger widening but are NOT extracted (no FILE nodes).
+	let config_paths: std::collections::BTreeSet<&str> = config_files
+		.iter()
+		.map(|cf| cf.rel_path.as_str())
+		.collect();
+	plan.files_to_extract.retain(|p| !config_paths.contains(p.as_str()));
+	plan.files_to_copy.retain(|p| !config_paths.contains(p.as_str()));
 
 	// If nothing to copy, fall back to full index.
 	if plan.files_to_copy.is_empty() {
@@ -1532,6 +1575,10 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 			// Adjust node count to include copied nodes (which
 			// run_pipeline didn't extract but are in the snapshot).
 			result.nodes_total += copy_result.nodes_copied;
+
+			// Set refresh context for artifact copy-forward in compose layer.
+			result.parent_snapshot_uid = Some(parent.snapshot_uid.clone());
+			result.unchanged_files = Some(plan.files_to_copy.clone());
 
 			// ── Contract schema extraction (CS-1+) ───────────────
 			// Contract files are always re-indexed on refresh (no
@@ -2651,7 +2698,8 @@ mod tests {
 			&mut extractors,
 			"r1",
 			&files,
-			&[],
+			&[], // contract files
+			&[], // config files
 			&mut IndexOptions::default(),
 			None,
 		)
@@ -2735,7 +2783,8 @@ mod tests {
 			&mut extractors,
 			"r1",
 			&files_v2,
-			&[],
+			&[], // contract files
+			&[], // config files
 			&mut IndexOptions::default(),
 			None,
 		)

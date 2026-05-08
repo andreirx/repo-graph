@@ -211,29 +211,35 @@
     only invalidated files → resolve all edges → postpasses → finalize.
   - Trust metadata persisted in extraction diagnostics (`delta` block with
     per-category file counts and per-artifact-kind copy counts).
-  - **Config-file tracking gap:** manifest/config files (package.json, tsconfig.json,
-    Cargo.toml, etc.) are not tracked by the file scanner. The invalidation planner
-    only compares hashes for scanner-returned source files. Config changes are
-    invisible to the invalidation plan. Config-widening logic exists in the planner
-    but never fires because config files are never in the current-file hash set.
-    Fix: include config files in the hash comparison or add a separate config-change
-    detection pass using parent snapshot's file_versions.
+  - ~~**Config-file tracking gap:**~~ **FIXED (2026-05-08):** Config files (package.json,
+    tsconfig.json, Cargo.toml, etc.) now participate in refresh invalidation planning.
+    Architecture: `routing::is_config_file()` identifies configs; scanner includes them;
+    `ConfigFileState` passed to `refresh_repo()` for invalidation planning; config file
+    changes trigger scope-widening of unchanged source files. Config files are NOT extracted
+    (no FILE nodes). **files_total caveat:** config files are NOT counted in `IndexResult.files_total`
+    but ARE counted in snapshot table `files_total` (computed from `COUNT(*) FROM file_versions`).
   - **Postpasses are conservative:** run on all files, not just invalidated scope.
     Erodes refresh win for detector-heavy repos.
-  - **File-local fact reuse not implemented:** inferences, boundary facts not
-    copied forward for unchanged files.
+  - ~~**File-local fact reuse not implemented:**~~ **FIXED (2026-05-08):** Measurements,
+    inferences, boundary_surfaces now copied forward for unchanged files.
+    See `refresh_copy_forward_impl.rs`. Remaining gap: `project_surfaces` family blocked
+    on module_candidates (TS-only table). Note: contract schemas are re-indexed, not
+    copied forward (see below).
   - **Large-repo delta refresh not validated:** verified on repo-graph (235 files),
     not on Linux or other large repos.
-  - **Contract schemas not copied forward:** `contract_schemas` and `contract_elements`
-    tables are keyed by snapshot_uid. On delta refresh, unchanged proto files are not
-    re-parsed, but their schema data is not copied forward to the new snapshot_uid.
-    Result: `rmap contracts list/elements/usages` queries against the current snapshot
-    return empty results even though the data exists keyed to the previous snapshot.
-    Discovered during hadoop validation (2026-05-01). Fix requires either:
-    1. Copy-forward logic for contract tables during refresh, or
-    2. Schema query to union current and parent snapshot data, or
-    3. Re-parse all proto files on refresh (defeats delta win)
-    Workaround: use `rmap index` instead of `rmap refresh` when contract queries needed.
+  - **Contract schemas are RE-INDEXED during refresh (not copied forward):** By design, contract
+    files (`.proto`) are always re-indexed during refresh. The orchestrator's `refresh_repo`
+    explicitly runs `proto_indexer::index_proto_files()` for all contract files. The
+    `copy_forward_contract_schemas()` function exists but is not used because proto files
+    are not included in the `unchanged_files` list (they're handled separately from source
+    files). This is intentional — ensures proto schema facts are always fresh.
+  - **Contract schema UID fix (2026-05-08):** `proto_indexer.rs` now uses fresh UUIDs per
+    snapshot instead of deterministic UIDs based on content hash. The old approach caused
+    `INSERT OR IGNORE` to silently drop inserts during refresh because a row with the same
+    `schema_uid` already existed from the parent snapshot. Fixed by switching to
+    `Uuid::new_v4().to_string()` per schema.
+- ~~**Timestamps in compose-layer file versions:**~~ **FIXED (2026-05-08):** `persist_read_failures()`
+    and `persist_config_file_versions()` now use `chrono::Utc::now()` for real timestamps.
 - **No clangd/libclang enrichment** for receiver-type resolution yet.
 
 ## Enrichment Subsystem — Rust
@@ -2342,3 +2348,67 @@ If finer granularity is required:
 
 Current checkpoint granularity is sufficient for the daemon's transport
 failure recovery use case.
+
+---
+
+## Refresh Integrity Parity — Partial Implementation
+
+**Added:** 2026-05-08
+**Slice:** `docs/slices/refresh-integrity-parity.md`
+**Status:** IN PROGRESS
+
+### What's Done
+
+- Refresh context wiring: `IndexResult` carries `parent_snapshot_uid`, `unchanged_files`
+- Copy-forward for: measurements, inferences, boundary surfaces/channels
+- Contract schemas: re-indexed (not copied forward) with fresh UIDs per snapshot
+- Changed-file filtering for boundary/policy postpass extraction
+- Bug fix: boundary insertion PK collision (fresh UUIDs per snapshot)
+- Bug fix: contract schema UID collision (fresh UUIDs per snapshot)
+- Copy-forward diagnostics surfaced: `ArtifactCopyForward` struct in `IndexResult`, CLI shows counts
+- Config-file invalidation widening: scanner now includes config files, widening triggers correctly
+- Boundary + contract parity integration tests (6 tests in refresh.rs)
+
+### What Remains
+
+1. **Project surfaces family copy-forward** — BLOCKED on Rust module parity.
+   The Rust indexer does not populate `project_surfaces`, `module_candidates`, or
+   related tables. These are TypeScript-only features. Copy-forward blocked until
+   `rust-module-parity.md` slice is complete.
+   - `project_surfaces`
+   - `project_surface_evidence`
+   - `surface_entrypoints`
+   - `surface_config_roots`
+   - `surface_env_dependencies`
+   - `surface_env_evidence`
+   - `surface_fs_mutations`
+   - `surface_fs_mutation_evidence`
+
+2. **Boundary interaction links regeneration** — BLOCKED on architectural issue.
+   GR-3A (`run_grpc_link_detection`) joins:
+   - `boundary_interaction_surfaces` (copied with new UIDs)
+   - `boundary_contracts` (NOT copied — links surface_uid to contract_element_uid)
+   - `contract_elements` (re-indexed every refresh with new UIDs)
+
+   **Problem:** `boundary_contracts` uses two per-snapshot UIDs as FKs. Neither is
+   stable across refresh. Even copying boundary_contracts wouldn't help because
+   contract_element_uid changes when contracts are re-indexed.
+
+   **Fix required:** Re-run GR-1A/GR-2A/GR-3A AFTER copy-forward, not before. Requires
+   moving gRPC detection chain from `orchestrator::refresh_repo` to `compose.rs`.
+
+3. **End-to-end agent parity validation** — Integration tests added for boundary and
+   contract parity (storage/query level). Full semantic parity not verified for CLI output
+   normalization: `rmap boundaries`, `rmap contracts`, `rmap surfaces`, `rmap orient`,
+   `rmap check`. Slice acceptance requires normalized command output comparison.
+
+### Impact
+
+- `rmap refresh` now preserves boundaries, contracts, measurements, inferences for unchanged files
+- `rmap refresh` does NOT preserve project surfaces or boundary links
+- Config changes (Cargo.toml, package.json, etc.) NOW trigger invalidation widening
+- Agent discovery commands may return incomplete results on refresh snapshots
+
+### Fix Path
+
+Complete remaining items per `docs/slices/refresh-integrity-parity.md` Task Sets A3, A4, Phase 3, and full test matrix validation.

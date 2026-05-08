@@ -61,6 +61,32 @@ pub fn is_contract_extension(ext: &str) -> bool {
 	matches!(ext, ".proto")
 }
 
+/// Check whether a filename is a recognized config file for invalidation tracking.
+///
+/// Config files trigger scope-widening during refresh: when a config file changes,
+/// unchanged source files in its scope are re-extracted. Config files themselves
+/// are not extracted — they're only tracked for hash comparison.
+///
+/// Mirror of `RECOGNIZED_CONFIGS` from `invalidation.rs`.
+pub fn is_config_file(path: &str) -> bool {
+	let filename = path.rsplit('/').next().unwrap_or(path);
+	matches!(
+		filename,
+		"package.json"
+			| "pnpm-workspace.yaml"
+			| "tsconfig.json"
+			| "jsconfig.json"
+			| "Cargo.toml"
+			| "build.gradle"
+			| "build.gradle.kts"
+			| "settings.gradle"
+			| "settings.gradle.kts"
+			| "pyproject.toml"
+			| "requirements.txt"
+			| "compile_commands.json"
+	)
+}
+
 /// Detect the contract kind for a file path based on its extension.
 /// Returns `None` for non-contract files.
 pub fn detect_contract_kind(file_path: &str) -> Option<ContractKind> {
@@ -634,5 +660,60 @@ mod tests {
 		assert_eq!(route_file("src/App.jsx", &table), Some(0));
 		assert_eq!(route_file("src/main.rs", &table), Some(1));
 		assert_eq!(route_file("src/README.md", &table), None);
+	}
+
+	// ── config file detection ────────────────────────────────
+
+	#[test]
+	fn config_file_package_json() {
+		assert!(is_config_file("package.json"));
+		assert!(is_config_file("packages/foo/package.json"));
+	}
+
+	#[test]
+	fn config_file_cargo_toml() {
+		assert!(is_config_file("Cargo.toml"));
+		assert!(is_config_file("crates/foo/Cargo.toml"));
+	}
+
+	#[test]
+	fn config_file_tsconfig() {
+		assert!(is_config_file("tsconfig.json"));
+		assert!(is_config_file("src/tsconfig.json"));
+		assert!(is_config_file("jsconfig.json"));
+	}
+
+	#[test]
+	fn config_file_gradle() {
+		assert!(is_config_file("build.gradle"));
+		assert!(is_config_file("build.gradle.kts"));
+		assert!(is_config_file("settings.gradle"));
+		assert!(is_config_file("settings.gradle.kts"));
+	}
+
+	#[test]
+	fn config_file_python() {
+		assert!(is_config_file("pyproject.toml"));
+		assert!(is_config_file("requirements.txt"));
+	}
+
+	#[test]
+	fn config_file_cpp() {
+		assert!(is_config_file("compile_commands.json"));
+	}
+
+	#[test]
+	fn config_file_not_source() {
+		// Config files are not source extensions
+		assert!(!is_source_extension(".json"));
+		assert!(!is_source_extension(".toml"));
+		assert!(!is_source_extension(".yaml"));
+	}
+
+	#[test]
+	fn config_file_rejects_non_config() {
+		assert!(!is_config_file("src/data.json"));
+		assert!(!is_config_file("config.yaml"));
+		assert!(!is_config_file("Makefile"));
 	}
 }

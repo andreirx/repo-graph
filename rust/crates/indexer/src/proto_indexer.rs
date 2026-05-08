@@ -108,13 +108,12 @@ pub fn index_proto_files<S: ProtoSchemaStorePort>(
             }
         };
 
-        // Build schema UID deterministically from repo + path + hash
-        let schema_uid = format!(
-            "{}:{}:{}",
-            repo_uid,
-            file.rel_path,
-            &file.content_hash[..8.min(file.content_hash.len())]
-        );
+        // Build schema UID as a fresh UUID per snapshot.
+        // This allows the same proto file to exist in multiple snapshots,
+        // which is required for refresh operations. The deterministic
+        // identity of a schema across snapshots is (repo_uid, file_path, content_hash),
+        // but each snapshot needs its own row with a unique schema_uid.
+        let schema_uid = Uuid::new_v4().to_string();
 
         // Serialize imports and options to JSON
         let imports_json = if !parsed.imports.is_empty() {

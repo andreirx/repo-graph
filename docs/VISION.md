@@ -91,6 +91,23 @@ guarantees and depends on the layers below it.
 may surface partial, source-anchored orientation hints with explicit degradation,
 unknowns, and confidence limits.
 
+**Artifact contract model:** Every persisted artifact family has an explicit
+contract defining its truth class, refresh policy, identity model, degradation
+policy, and provenance requirements. This is not advisory documentation — it is
+enforced in code via the artifact contract registry. See
+`docs/architecture/artifact-contract-model.md` for the full specification and
+`docs/architecture/adr/adr-artifact-contract-registry.md` for the decision record.
+
+Key distinctions:
+- **Extracted facts** (Layer 0-1): deterministic, file-owned, copy-forward allowed
+- **Deterministic relationships** (Layer 2): computed from L0-1, recompute on refresh
+- **Hints/inferences** (Layer 3): evidence-backed, may be marked impacted
+- **Governance overlays** (Layer 4): human-authored, snapshot-independent
+
+Upper-layer artifacts track per-row provenance to their Layer 0 anchors. When
+Layer 0 changes, dependent rows are marked `impacted` with precise provenance.
+Queries report freshness honestly: current, impacted, stale, or unknown.
+
 ### Layer 0 — Deterministic Extraction Substrate
 
 The non-negotiable foundation. Everything else depends on this being correct.

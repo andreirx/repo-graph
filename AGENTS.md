@@ -1,227 +1,105 @@
-# Repo-Graph
-
-Deterministic code graph tool for AI agent consumption. Multi-language.
-
-Two CLI binaries: `rmap` (Rust, primary) and `rgr` (TypeScript, legacy).
+# CLAUDE.md
 
 ## Mission
 
-**Discovery is the primary goal.** See `docs/VISION.md` §Absolute Priority.
+Deterministic code-intelligence substrate for AI agent orientation.
+Discovery is the goal. Trustworthy current-state facts. Honest degradation reporting.
 
-Current-state agentic discovery. Not history accumulation. Not vector search.
-The graph answers: "What exists now? What changed? What is risky? Where should I look?"
+If a rule can be enforced by script, hook, or CI, prefer enforcement over instruction.
 
-### Orientation, Not Oracle
+You are not constrained by human development timelines. No need to cut corners. Implement full solutions.
 
-Repo-graph helps an AI agent **look in the right places, open the right files, and ask
-the right questions**. It does not replace agent cognition or guarantee exhaustive answers.
+## Fact Certainty Model
 
-The product narrows the search space and highlights what matters. The agent reads the
-actual files and makes the final engineering decisions. If repo-graph can surface more
-precise information (exact callers, boundary consumers, call sites), it will — but the
-primary contract is orientation, not completeness.
+Not all stored data has the same factual status.
 
-Enforcement (policies, gate verdicts, waivers) exists as available substrate, not product center.
+- Layer 0–1: deterministic extracted facts
+- Layer 2: bounded inferences derived from facts
+- Layer 3: evidence-backed orientation hints
+- Layer 4: governance/policy overlays
 
-### Breadth First
+Never describe Layers 2–4 as if they were Layer 0 truth.
+Never collapse unknown, inferred, and extracted into the same certainty class.
+See `agent_docs/architecture.md` for the full layer model.
 
-AI agents figure things out themselves. Repo-graph provides orientation surfaces, not exhaustive answers.
+## Decision Hierarchy
 
-Product strategy: **breadth first, not depth first.**
+When instructions conflict, obey in this order:
 
-1. Surface minimal hints across all identified useful directions.
-2. Improve depth only when real-repo navigation proves hints insufficient.
-3. Do not polish one feature while others remain invisible.
+1. `docs/VISION.md`
+2. Current priority in `docs/ROADMAP.md`
+3. `CURRENT_SLICE.md`
+4. Relevant `agent_docs/*.md`
+5. Other docs in `docs/`
+6. Local style
 
-A shallow signal that exists beats a deep signal that doesn't. Agents can compensate for thin data; they cannot compensate for absent data.
+Higher wins. Do not trade priority for polish.
 
-Repo-graph does not own documentation authoring for downstream repos. It owns the
-deterministic discovery substrate that lets an AI agent:
-- orient quickly
-- detect missing/stale documentation
-- write or repair docs in the target repo
-- rely on docs plus `rmap` instead of repeated raw file archaeology
+## Mandatory Preflight
 
-## Core Business Logic Center
+Before code changes:
 
-The stable product center is **legacy-code relationship modeling**.
+1. Read `docs/VISION.md`
+2. Read current priority in `docs/ROADMAP.md`
+3. Read `CURRENT_SLICE.md`
+4. Read relevant slice doc and relevant `agent_docs/*.md`
+5. Use `rmap` to inspect current system state
+6. Produce a task packet before editing
 
-Primary relationship families:
-- seams and enabling points
-- sensing/separation barriers
-- module and boundary relationships
-- state/resource touchpoints
-- policy propagation relationships
-- testability constraints
-- migration/replacement relationships
+## Task Packet
 
-This is Feathers-driven product logic. Languages are evidence sources for the same
-relationship substrate, not separate products.
+State before editing:
 
-## Product Layer Stack
+- task type (feature / bug / refactor / validation)
+- active priority (quote from roadmap)
+- definition of done (from slice)
+- why this task is on priority path now
+- files in scope
+- files explicitly out of scope
+- storage / refresh / trust / CLI impact
+- validation commands
+- stop conditions
 
-| Layer | Name | Certainty | Examples |
-|-------|------|-----------|----------|
-| 0 | Extraction substrate | Extracted fact | Files, symbols, IMPORTS, CALLS, stable keys |
-| 1 | Architectural substrate | Extracted fact | Callers/callees, declared modules, docs inventory, trust |
-| 2 | Derived architecture | Bounded inference | Inferred modules, runtime surfaces, risk overlays |
-| 3 | Orientation hints | Evidence-backed hints | Framework detectors, IPC detection, gRPC links |
-| 4 | Governance | Policy overlay | Declarations, assessments, gate, waivers |
+## Tool Hierarchy
 
-Inner layers (0–1) = deterministic fact. Outer layers (2–3) = partial hints with explicit unknowns. Layer 4 overlays but never erases.
+1. Use `rmap` first for orientation and validation.
+2. Raw SQL only after CLI, only for storage diagnostics.
+3. Never validate user-facing behavior through SQL alone.
 
-### Layer Rules
+## Evidence Law
 
-1. Never build Layer N before Layer N-1 is queryable.
-2. Never describe Layer 3 heuristics as Layer 0 truth.
-3. Layer 3 surfaces must include explicit unknowns.
-4. Layer 4 overlays, never replaces underlying fact.
-5. Maturity claims must specify layer.
+Label every validation claim:
 
-## Language Direction
+- `EXECUTED` — command run, output observed
+- `OBSERVED` — artifact inspected
+- `INFERRED` — concluded from context
+- `NOT RUN` — skipped
 
-Two primary tracks:
+Never present inferred output as observed.
 
-**Server/systems track:**
-- TypeScript/JavaScript
-- Rust
-- Python
-- Java
-- C
-- C++
+## Structural Guardrails
 
-**Mobile/client track:**
-- Objective-C
-- Objective-C++
-- Swift
-- Kotlin
-- Dart
+- `main.rs` is wiring only.
+- Do not append new responsibilities to files over 500 lines.
+- Refactor before expanding mixed-responsibility files.
 
-Later, when the primary tracks are mature:
-- Go
-- Scala
+## Persistence Completeness
 
-Rust-primary maturity is not uniform across these tracks. Do not claim parity where it
-does not exist yet, especially for C++ and the mobile track.
+Persisted feature is incomplete without: write path, read path, refresh behavior, trust impact, CLI visibility, validation.
 
-See `docs/ROADMAP.md` §Mobile and native client track for priority order and tooling paths.
+## Stop Conditions
 
-## Mandatory Architecture Rules
+Stop and report if:
 
-1. **Dependency rule:** inward only. Core never imports adapters or CLI.
-2. **Support module first:** build support libraries, then implement features using them.
-3. **Storage is adapter:** domain logic never lives in storage or CLI layers.
-4. **Docs are primary:** documentation inventory is the primary surface; semantic facts are secondary derived hints.
-5. **Deterministic output:** same input → same output. No randomness, no order jitter.
-6. **Explicit degradation:** `null` = unknown, empty = known-zero. Never conflate.
-7. **Document-first authored knowledge:** discovery-oriented human/agent knowledge should live in documentation first; DB projections are secondary.
-8. **Daemon is coordination authority:** for shared multi-agent use, the daemon arbitrates read/write access to repo databases; clients must not bypass the daemon for direct storage access.
+- work conflicts with current priority
+- architecture would be violated
+- refresh implications unclear
+- validation cannot execute
+- task drift detected
 
-## Implementation Workflow
+## Read Next
 
-Before changing code:
-1. Read relevant design docs in `docs/architecture/` or `docs/design/`.
-2. Use `rmap` to understand callers, callees, imports of what you're touching.
-3. Confirm which support module owns the logic vs. which adapter/CLI wires it.
-
-Build order:
-1. Support module (pure domain logic, tested in isolation)
-2. Storage port + adapter implementation
-3. Feature wiring in CLI
-4. Tests (unit → integration → smoke on real repos)
-5. Documentation updates
-
-After changing code:
-1. Run relevant test suite (`cargo test -p <crate>`).
-2. Re-index with `rmap refresh ./repo-graph ./repo-graph.db`.
-3. Document any debt immediately in `docs/TECH-DEBT.md`.
-
-## Quality Bar
-
-- Correct first. Fast is a given with agentic coding.
-- No silent contract drift. If output shape changes, update contracts.
-- Discovery surfaces must be clear. An agent should see what changed, not just pass/fail.
-- No mixing extracted fact with inferred hint. Keep provenance clear.
-- Prefer cheap deterministic measurements when they sharpen discovery: LOC, coverage,
-  complexity, churn, hotspot, boundary pressure.
-
-## Testing Expectations
-
-- Unit tests for pure functions and support modules.
-- Integration tests against fixture repos in `test/fixtures/`.
-- Smoke validation on real repos before declaring slice complete.
-
-**Test protocol:** See `docs/testing/rmap-test-protocol.md` for canonical DB
-locations, command templates, and verification report requirements. All smoke
-and validation runs must follow this protocol.
-
-**Validation repos** (use for smoke runs, document results in slice notes):
-- Internal: `repo-graph`, `../amodx`, `../glamCRM`, `../hexmanos`
-- External: `../legacy-codebases/spring-petclinic`, `sqlite`, `nginx`, `swupdate`, `linux`
-
-## Documentation and Debt Recording
-
-- Record technical debt immediately in `docs/TECH-DEBT.md`.
-- Record Rust CLI temporary gaps in `docs/TECH-DEBT.md`.
-- Record Rust CLI intentional contracts in `docs/cli/rmap-contracts.md`.
-- Update `docs/ROADMAP.md` when shipping or deferring features.
-- Do not accumulate slice history in CLAUDE.md.
-
-## Forbidden Patterns
-
-- Do not put domain logic in CLI handlers or storage adapters.
-- Do not erase computed facts under policy overlays — overlay, don't replace.
-- Do not treat documentation as semantic facts only — docs are primary evidence.
-- Do not trap discovery-oriented authored knowledge only inside opaque DB rows.
-- Do not use history accumulation as product center — current-state discovery only.
-- Do not default to "mirror TS" without explicit justification.
-- Do not store summaries of obvious code — store surprises, constraints, hazards.
-
-## Canonical Doc Map
-
-| Topic | Location |
-|-------|----------|
-| Vision and priorities | `docs/VISION.md` |
-| What's shipped/next | `docs/ROADMAP.md` |
-| Known limitations | `docs/TECH-DEBT.md` |
-| CLI contract (Rust) | `docs/cli/rmap-contracts.md` |
-| TS prototype (legacy) | `docs/ts-prototype.md` |
-| Database schema | `docs/architecture/schema.txt` |
-| Folder layout | `docs/architecture/project-structure.txt` |
-| Measurement model | `docs/architecture/measurement-model.txt` |
-| Rust milestone | `docs/milestones/rmap-structural-v1.md` |
-| Test protocol | `docs/testing/rmap-test-protocol.md` |
-
-## Commands (Quick Reference)
-
-```bash
-# Build and test
-cd rust && cargo build
-cargo test -p <crate>       # Test specific crate
-cargo test --workspace      # All Rust crates
-
-# Discovery (rmap uses <db_path> <repo_uid>)
-rmap orient ./repo-graph.db repo-graph --focus "src/core"
-rmap explain ./repo-graph.db repo-graph "src/core/some-file.ts"
-rmap check ./repo-graph.db repo-graph
-rmap trust ./repo-graph.db repo-graph
-
-# Structural queries
-rmap callers ./repo-graph.db repo-graph <symbol>
-rmap callees ./repo-graph.db repo-graph <symbol>
-rmap imports ./repo-graph.db repo-graph <file>
-
-# After editing
-rmap refresh ./repo-graph ./repo-graph.db
-```
-
-For full command reference, see `docs/cli/rmap-contracts.md`.
-
-## Conventions
-
-- `rmap` outputs JSON only.
-- No emojis in code or output.
-- Relative paths in DB, never absolute.
-- TEXT UIDs everywhere, no auto-increment integers.
-
-For TypeScript prototype commands and conventions, see `docs/ts-prototype.md`.
+- `CURRENT_SLICE.md` — what matters now
+- `agent_docs/validation.md` — evidence protocol
+- `agent_docs/architecture.md` — full architecture rules
+- `agent_docs/rmap-orientation.md` — CLI patterns

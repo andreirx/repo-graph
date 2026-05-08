@@ -56,7 +56,8 @@ fn index_classifier_repo_from_disk() {
 
 	// ── File count ───────────────────────────────────────────
 	// Only src/index.ts is a source file (.ts).
-	// package.json and tsconfig.json are NOT source extensions.
+	// Config files (package.json, tsconfig.json) are tracked for refresh
+	// invalidation but NOT counted in files_total.
 	assert_eq!(result.files_total, 1, "only src/index.ts is a source file");
 
 	// ── Nodes ────────────────────────────────────────────────
@@ -206,6 +207,7 @@ fn index_excludes_gitignored_and_always_excluded() {
 	assert_eq!(snap_status(&storage, &result.snapshot_uid), "ready");
 
 	// Exact file count: src/index.ts + src/server.ts = 2.
+	// Config files (package.json, tsconfig.json) tracked but not counted.
 	// Excluded:
 	//   - src/generated.ts (gitignored)
 	//   - node_modules/pkg/index.ts (always-excluded dir)
@@ -297,7 +299,7 @@ fn mixed_lang_language_isolation() {
 	assert_eq!(snap_status(&storage, &result.snapshot_uid), "ready");
 
 	// 3 source files: engine.rs (Rust), server.ts (TS), App.java (Java).
-	// build.gradle, Cargo.toml, package.json are not source extensions.
+	// Config files (build.gradle, Cargo.toml, package.json) tracked but not counted.
 	assert_eq!(result.files_total, 3, "expected engine.rs + server.ts + App.java");
 
 	use repo_graph_indexer::storage_port::FileSignalPort;
@@ -436,7 +438,7 @@ fn index_rust_crate_extracts_symbols() {
 
 	// ── File count ───────────────────────────────────────────
 	// src/lib.rs and src/utils.rs are Rust source files.
-	// Cargo.toml is NOT a source extension.
+	// Cargo.toml is a config file (tracked for invalidation, not counted).
 	assert_eq!(result.files_total, 2, "expected lib.rs + utils.rs");
 
 	// ── Nodes ────────────────────────────────────────────────

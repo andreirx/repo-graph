@@ -164,6 +164,19 @@ fn emit_progress(progress: &mut Option<ProgressCallback<'_>>, phase: &str, curre
 /// Result of scanning + config resolution + FileInput assembly.
 /// Carries both readable files and read-failed paths so callers
 /// can handle the read-failure contract correctly.
+/// A config file (e.g., package.json, Cargo.toml) tracked for invalidation.
+/// Config files are NOT extracted — they're only tracked for hash comparison
+/// during refresh to trigger scope-widening when they change.
+#[derive(Debug, Clone)]
+pub struct ConfigFileInput {
+	/// Repo-relative path.
+	pub rel_path: String,
+	/// Content hash for change detection.
+	pub content_hash: String,
+	/// Line count.
+	pub line_count: usize,
+}
+
 pub struct PreparedRepoInputs {
 	/// Readable source files with config attached, ready for the orchestrator.
 	pub file_inputs: Vec<FileInput>,
@@ -171,6 +184,8 @@ pub struct PreparedRepoInputs {
 	pub read_failed_paths: Vec<String>,
 	/// Contract files (e.g., .proto) for the contract indexing subpipeline.
 	pub contract_file_inputs: Vec<ProtoFileInput>,
+	/// Config files tracked for invalidation widening (not extracted).
+	pub config_file_inputs: Vec<ConfigFileInput>,
 }
 
 /// Scan the repo, resolve config per file, assemble typed FileInput.
@@ -186,6 +201,7 @@ pub fn prepare_repo_inputs(
 
 	let mut file_inputs = Vec::new();
 	let mut contract_file_inputs = Vec::new();
+	let mut config_file_inputs = Vec::new();
 	let mut read_failed_paths = Vec::new();
 
 	for file in &scanned {
@@ -199,6 +215,18 @@ pub fn prepare_repo_inputs(
 						rel_path: ok.rel_path.clone(),
 						content: ok.content.clone(),
 						content_hash: ok.content_hash.clone(),
+					});
+					continue;
+				}
+
+				// Config files are tracked for invalidation widening but NOT extracted.
+				// They don't produce FILE nodes or symbols — only file_versions for
+				// hash comparison during refresh.
+				if routing::is_config_file(&ok.rel_path) {
+					config_file_inputs.push(ConfigFileInput {
+						rel_path: ok.rel_path.clone(),
+						content_hash: ok.content_hash.clone(),
+						line_count: ok.line_count,
 					});
 					continue;
 				}
@@ -259,6 +287,7 @@ pub fn prepare_repo_inputs(
 		file_inputs,
 		read_failed_paths,
 		contract_file_inputs,
+		config_file_inputs,
 	})
 }
 
@@ -295,6 +324,7 @@ fn persist_read_failures(
 		.map_err(ComposeError::Storage)?;
 
 	// File version records with parse_status = "failed".
+	let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 	let failed_versions: Vec<repo_graph_storage::types::FileVersion> = read_failed_paths
 		.iter()
 		.map(|path| repo_graph_storage::types::FileVersion {
@@ -306,7 +336,7 @@ fn persist_read_failures(
 			parse_status: "failed".into(),
 			size_bytes: None,
 			line_count: None,
-			indexed_at: "2025-01-01T00:00:00.000Z".into(),
+			indexed_at: now.clone(),
 		})
 		.collect();
 	storage
@@ -343,6 +373,61 @@ fn persist_read_failures(
 	}
 
 	result.files_total += read_failed_count;
+	Ok(())
+}
+
+// ── Config file version persistence ──────────────────────────────
+
+/// Persist config file versions for refresh tracking.
+///
+/// Config files are NOT extracted (no FILE nodes, no symbols), but their
+/// file_versions are tracked so refresh can detect changes and trigger
+/// scope-widening invalidation.
+fn persist_config_file_versions(
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	snapshot_uid: &str,
+	config_files: &[ConfigFileInput],
+) -> Result<(), ComposeError> {
+	if config_files.is_empty() {
+		return Ok(());
+	}
+
+	// TrackedFile records — config files are tracked but have no language.
+	let tracked: Vec<repo_graph_storage::types::TrackedFile> = config_files
+		.iter()
+		.map(|f| repo_graph_storage::types::TrackedFile {
+			file_uid: format!("{}:{}", repo_uid, f.rel_path),
+			repo_uid: repo_uid.into(),
+			path: f.rel_path.clone(),
+			language: None, // Config files have no language
+			is_test: false,
+			is_generated: false,
+			is_excluded: false,
+		})
+		.collect();
+	storage.upsert_files(&tracked).map_err(ComposeError::Storage)?;
+
+	// FileVersion records — parse_status = "config" indicates tracked-only.
+	let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+	let versions: Vec<repo_graph_storage::types::FileVersion> = config_files
+		.iter()
+		.map(|f| repo_graph_storage::types::FileVersion {
+			snapshot_uid: snapshot_uid.into(),
+			file_uid: format!("{}:{}", repo_uid, f.rel_path),
+			content_hash: f.content_hash.clone(),
+			ast_hash: None,
+			extractor: Some("config:invalidation_tracking".into()),
+			parse_status: "config".into(), // Not parsed, just tracked
+			size_bytes: None,
+			line_count: Some(f.line_count as i64),
+			indexed_at: now.clone(),
+		})
+		.collect();
+	storage
+		.upsert_file_versions(&versions)
+		.map_err(ComposeError::Storage)?;
+
 	Ok(())
 }
 
@@ -698,13 +783,11 @@ fn persist_boundary_interactions(
 		return Ok(0);
 	}
 
-	// Persist to storage.
-	let surface_count = storage
-		.insert_boundary_surfaces(&surfaces)
-		.map_err(|e| ComposeError::Index(format!("boundary-interaction storage: {}", e)))?;
-
-	storage
-		.insert_boundary_channels(&channels)
+	// Persist to storage using combined function that handles UID mapping.
+	// The emitter uses deterministic UIDs for deduplication, but storage
+	// needs fresh UUIDs to allow same logical surface in multiple snapshots.
+	let (surface_count, _channel_count) = storage
+		.insert_boundary_surfaces_and_channels(&surfaces, &channels)
 		.map_err(|e| ComposeError::Index(format!("boundary-interaction storage: {}", e)))?;
 
 	Ok(surface_count)
@@ -901,13 +984,9 @@ fn persist_ts_boundary_interactions(
 		return Ok(0);
 	}
 
-	// Persist to storage.
-	let surface_count = storage
-		.insert_boundary_surfaces(&surfaces)
-		.map_err(|e| ComposeError::Index(format!("boundary-interaction storage: {}", e)))?;
-
-	storage
-		.insert_boundary_channels(&channels)
+	// Persist to storage using combined function that handles UID mapping.
+	let (surface_count, _channel_count) = storage
+		.insert_boundary_surfaces_and_channels(&surfaces, &channels)
 		.map_err(|e| ComposeError::Index(format!("boundary-interaction storage: {}", e)))?;
 
 	Ok(surface_count)
@@ -1157,10 +1236,10 @@ pub fn index_into_storage_with_progress(
 		Err(e) => return Err(ComposeError::Index(format!("{}", e))),
 	};
 
-	// Persisting phase: checkpoint BEFORE each mutation (6 mutations total)
+	// Persisting phase: checkpoint BEFORE each mutation (7 mutations total)
 	// Semantics: current=N means "about to do mutation N"
 
-	emit_progress(&mut progress, "persisting", 0, 6)?;  // about to persist read failures
+	emit_progress(&mut progress, "persisting", 0, 7)?;  // about to persist read failures
 	persist_read_failures(
 		storage,
 		repo_uid,
@@ -1169,25 +1248,35 @@ pub fn index_into_storage_with_progress(
 		&mut result,
 	)?;
 
-	emit_progress(&mut progress, "persisting", 1, 6)?;  // about to persist metrics
+	emit_progress(&mut progress, "persisting", 1, 7)?;  // about to persist config file versions
+	// Persist config file versions for refresh invalidation tracking.
+	// Config files are NOT extracted — only tracked for hash comparison.
+	persist_config_file_versions(
+		storage,
+		repo_uid,
+		&result.snapshot_uid,
+		&prepared.config_file_inputs,
+	)?;
+
+	emit_progress(&mut progress, "persisting", 2, 7)?;  // about to persist metrics
 	// RS-MS-3c-prereq: Persist metrics (complexity, params, nesting).
 	persist_metrics(storage, repo_uid, &result.snapshot_uid, &result.metrics)?;
 
-	emit_progress(&mut progress, "persisting", 2, 6)?;  // about to persist spring liveness
+	emit_progress(&mut progress, "persisting", 3, 7)?;  // about to persist spring liveness
 	// Persist Spring framework-liveness inferences for dead-code suppression.
 	persist_spring_liveness_inferences(storage, repo_uid, &result.snapshot_uid)?;
 
-	emit_progress(&mut progress, "persisting", 3, 6)?;  // about to persist policy facts
+	emit_progress(&mut progress, "persisting", 4, 7)?;  // about to persist policy facts
 	// PF-1: Extract and persist STATUS_MAPPING policy facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
 	persist_policy_facts(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
-	emit_progress(&mut progress, "persisting", 4, 6)?;  // about to persist C boundary interactions
+	emit_progress(&mut progress, "persisting", 5, 7)?;  // about to persist C boundary interactions
 	// BI-1A: Extract and persist boundary interaction facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
 	persist_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
-	emit_progress(&mut progress, "persisting", 5, 6)?;  // about to persist TS boundary interactions
+	emit_progress(&mut progress, "persisting", 6, 7)?;  // about to persist TS boundary interactions
 	// BI-1C: Extract and persist boundary interaction facts from TS/JS files.
 	// SharedArrayBuffer, Worker, postMessage, Atomics patterns.
 	persist_ts_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
@@ -1308,6 +1397,16 @@ pub fn refresh_into_storage_with_progress(
 	// State-boundary hook (symmetric with index path — SB-4-pre.8).
 	let mut sb_hook = crate::state_boundary_hook::StateBoundaryHook::new(repo_uid);
 
+	// Convert config files to state for invalidation planning.
+	let config_states: Vec<orchestrator::ConfigFileState> = prepared
+		.config_file_inputs
+		.iter()
+		.map(|cf| orchestrator::ConfigFileState {
+			rel_path: cf.rel_path.clone(),
+			content_hash: cf.content_hash.clone(),
+		})
+		.collect();
+
 	// The indexer now emits per-file progress with abort checkpoints.
 	// IndexError::Aborted maps to ComposeError::Aborted for transport failure.
 	let mut result = match orchestrator::refresh_repo(
@@ -1316,6 +1415,7 @@ pub fn refresh_into_storage_with_progress(
 		repo_uid,
 		&prepared.file_inputs,
 		&prepared.contract_file_inputs,
+		&config_states,
 		&mut idx_options,
 		Some(&mut sb_hook),
 	) {
@@ -1324,10 +1424,59 @@ pub fn refresh_into_storage_with_progress(
 		Err(e) => return Err(ComposeError::Index(format!("{}", e))),
 	};
 
-	// Persisting phase: checkpoint BEFORE each mutation (6 mutations total)
+	// ── Refresh artifact copy-forward (refresh-integrity-parity slice) ──
+	//
+	// If this was a refresh operation with unchanged files, copy forward
+	// derived artifacts (measurements, inferences, boundaries, contracts)
+	// from the parent snapshot for those files.
+	let unchanged_file_set: std::collections::HashSet<&str> =
+		result.unchanged_files.as_ref()
+			.map(|files| files.iter().map(|s| s.as_str()).collect())
+			.unwrap_or_default();
+
+	if let (Some(parent_uid), Some(unchanged_files)) = (
+		&result.parent_snapshot_uid,
+		&result.unchanged_files,
+	) {
+		// Identify proto files among the unchanged files.
+		let unchanged_proto_paths: Vec<String> = unchanged_files
+			.iter()
+			.filter(|p| p.ends_with(".proto"))
+			.cloned()
+			.collect();
+
+		// Copy forward derived artifacts for unchanged files.
+		let copy_result = storage.copy_forward_derived_artifacts(
+			parent_uid,
+			&result.snapshot_uid,
+			repo_uid,
+			unchanged_files,
+			&unchanged_proto_paths,
+		).map_err(ComposeError::Storage)?;
+
+		// Surface copy-forward counts in IndexResult for diagnostics.
+		result.artifact_copy_forward = Some(repo_graph_indexer::types::ArtifactCopyForward {
+			measurements_copied: copy_result.measurements_copied,
+			inferences_copied: copy_result.inferences_copied,
+			boundary_surfaces_copied: copy_result.boundary_surfaces_copied,
+			boundary_channels_copied: copy_result.boundary_channels_copied,
+			contract_schemas_copied: copy_result.contract_schemas_copied,
+			contract_elements_copied: copy_result.contract_elements_copied,
+		});
+	}
+
+	// Filter file inputs to only changed files for postpass extraction.
+	// Unchanged files already have their artifacts from copy-forward.
+	let changed_files_owned: Vec<FileInput> = prepared.file_inputs
+		.iter()
+		.filter(|f| !unchanged_file_set.contains(f.rel_path.as_str()))
+		.cloned()
+		.collect();
+
+	// Persisting phase: checkpoint BEFORE each mutation (7 mutations total)
 	// Semantics: current=N means "about to do mutation N"
 
-	emit_progress(&mut progress, "persisting", 0, 6)?;  // about to persist read failures
+	emit_progress(&mut progress, "persisting", 0, 7)?;  // about to persist read failures
 	persist_read_failures(
 		storage,
 		repo_uid,
@@ -1336,28 +1485,42 @@ pub fn refresh_into_storage_with_progress(
 		&mut result,
 	)?;
 
-	emit_progress(&mut progress, "persisting", 1, 6)?;  // about to persist metrics
+	emit_progress(&mut progress, "persisting", 1, 7)?;  // about to persist config file versions
+	// Persist config file versions for refresh invalidation tracking.
+	// Config files are NOT extracted — only tracked for hash comparison.
+	persist_config_file_versions(
+		storage,
+		repo_uid,
+		&result.snapshot_uid,
+		&prepared.config_file_inputs,
+	)?;
+
+	emit_progress(&mut progress, "persisting", 2, 7)?;  // about to persist metrics
 	// RS-MS-3c-prereq: Persist metrics (complexity, params, nesting).
+	// Only for changed files; unchanged file metrics already copied forward.
 	persist_metrics(storage, repo_uid, &result.snapshot_uid, &result.metrics)?;
 
-	emit_progress(&mut progress, "persisting", 2, 6)?;  // about to persist spring liveness
+	emit_progress(&mut progress, "persisting", 3, 7)?;  // about to persist spring liveness
 	// Persist Spring framework-liveness inferences for dead-code suppression.
 	persist_spring_liveness_inferences(storage, repo_uid, &result.snapshot_uid)?;
 
-	emit_progress(&mut progress, "persisting", 3, 6)?;  // about to persist policy facts
+	emit_progress(&mut progress, "persisting", 4, 7)?;  // about to persist policy facts
 	// PF-1: Extract and persist STATUS_MAPPING policy facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
-	persist_policy_facts(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
+	// Only extract from changed files; unchanged files copied forward.
+	persist_policy_facts(storage, repo_uid, &result.snapshot_uid, &changed_files_owned)?;
 
-	emit_progress(&mut progress, "persisting", 4, 6)?;  // about to persist C boundary interactions
+	emit_progress(&mut progress, "persisting", 5, 7)?;  // about to persist C boundary interactions
 	// BI-1A: Extract and persist boundary interaction facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
-	persist_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
+	// Only extract from changed files; unchanged files copied forward.
+	persist_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &changed_files_owned)?;
 
-	emit_progress(&mut progress, "persisting", 5, 6)?;  // about to persist TS boundary interactions
+	emit_progress(&mut progress, "persisting", 6, 7)?;  // about to persist TS boundary interactions
 	// BI-1C: Extract and persist boundary interaction facts from TS/JS files.
 	// SharedArrayBuffer, Worker, postMessage, Atomics patterns.
-	persist_ts_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
+	// Only extract from changed files; unchanged files copied forward.
+	persist_ts_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &changed_files_owned)?;
 
 	Ok(result)
 }

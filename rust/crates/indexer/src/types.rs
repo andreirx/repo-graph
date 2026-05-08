@@ -578,6 +578,50 @@ pub struct IndexResult {
 	/// parameter_count, and max_nesting_depth. Persisted by the
 	/// compose layer after index_repo returns.
 	pub metrics: BTreeMap<String, ExtractedMetrics>,
+	/// Parent snapshot UID (only present on refresh operations).
+	///
+	/// When present, indicates this was an incremental refresh rather than
+	/// a full index. The compose layer uses this to copy forward derived
+	/// artifacts (measurements, inferences, boundaries, contracts) for
+	/// unchanged files.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub parent_snapshot_uid: Option<String>,
+	/// File paths that were unchanged from parent snapshot (only on refresh).
+	///
+	/// Contains relative paths of files that were copied forward without
+	/// re-extraction. The compose layer uses this to:
+	/// 1. Copy forward measurements/inferences for these files
+	/// 2. Copy forward boundary/contract artifacts for these files
+	/// 3. Skip postpass extraction for these files
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub unchanged_files: Option<Vec<String>>,
+	/// Copy-forward diagnostics for refresh operations.
+	///
+	/// Reports counts of derived artifacts copied from parent snapshot
+	/// for unchanged files. Only present on refresh operations.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub artifact_copy_forward: Option<ArtifactCopyForward>,
+}
+
+/// Diagnostics from copying forward derived artifacts during refresh.
+///
+/// Reports per-family counts of artifacts copied from parent snapshot.
+/// Used for visibility into refresh correctness and debugging.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactCopyForward {
+	/// Number of measurements copied forward.
+	pub measurements_copied: u64,
+	/// Number of inferences copied forward.
+	pub inferences_copied: u64,
+	/// Number of boundary surfaces copied forward.
+	pub boundary_surfaces_copied: u64,
+	/// Number of boundary channels copied forward.
+	pub boundary_channels_copied: u64,
+	/// Number of contract schemas copied forward.
+	pub contract_schemas_copied: u64,
+	/// Number of contract elements copied forward.
+	pub contract_elements_copied: u64,
 }
 
 /// Progress event during indexing.

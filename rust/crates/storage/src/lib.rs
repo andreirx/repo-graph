@@ -179,7 +179,11 @@ pub mod queries; // Read-side graph queries (R10+)
 mod trust_impl; // TrustStorageRead impl for StorageConnection (R4-E/F)
 mod policy_facts_impl; // PolicyFactsStorageRead/Write impl for StorageConnection (PF-1)
 mod enrichment_impl; // EnrichmentStoragePort impl for StorageConnection (EN-3)
+mod refresh_copy_forward_impl; // Refresh artifact copy-forward (refresh-integrity-parity slice)
 pub mod types;
+
+// Re-export refresh copy-forward types for compose layer.
+pub use refresh_copy_forward_impl::ArtifactCopyForwardResult;
 
 // Convenience re-exports for the public connection lifecycle API.
 pub use connection::StorageConnection;

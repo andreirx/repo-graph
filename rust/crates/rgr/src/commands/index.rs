@@ -198,10 +198,62 @@ fn format_mapping_summary(
     lines
 }
 
+/// Print artifact copy-forward summary to stderr (refresh only).
+fn print_copy_forward_summary(
+    copy_forward: &Option<repo_graph_indexer::types::ArtifactCopyForward>,
+) {
+    for line in format_copy_forward_summary(copy_forward) {
+        eprintln!("{}", line);
+    }
+}
+
+/// Format artifact copy-forward summary as lines (testable).
+fn format_copy_forward_summary(
+    copy_forward: &Option<repo_graph_indexer::types::ArtifactCopyForward>,
+) -> Vec<String> {
+    let Some(cf) = copy_forward else {
+        return Vec::new();
+    };
+
+    // Skip if nothing was copied
+    let total = cf.measurements_copied
+        + cf.inferences_copied
+        + cf.boundary_surfaces_copied
+        + cf.boundary_channels_copied
+        + cf.contract_schemas_copied
+        + cf.contract_elements_copied;
+
+    if total == 0 {
+        return Vec::new();
+    }
+
+    let mut parts = Vec::new();
+    if cf.measurements_copied > 0 {
+        parts.push(format!("{} measurements", cf.measurements_copied));
+    }
+    if cf.inferences_copied > 0 {
+        parts.push(format!("{} inferences", cf.inferences_copied));
+    }
+    if cf.boundary_surfaces_copied > 0 {
+        parts.push(format!("{} boundary surfaces", cf.boundary_surfaces_copied));
+    }
+    if cf.boundary_channels_copied > 0 {
+        parts.push(format!("{} channels", cf.boundary_channels_copied));
+    }
+    if cf.contract_schemas_copied > 0 {
+        parts.push(format!("{} schemas", cf.contract_schemas_copied));
+    }
+    if cf.contract_elements_copied > 0 {
+        parts.push(format!("{} elements", cf.contract_elements_copied));
+    }
+
+    vec![format!("  copy-forward: {}", parts.join(", "))]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use repo_graph_indexer::types::{ContractIndexResult, ContractParseFailure, GeneratedCodeMappingResult};
+    use repo_graph_indexer::types::{ArtifactCopyForward, ContractIndexResult, ContractParseFailure, GeneratedCodeMappingResult};
 
     #[test]
     fn format_none_returns_empty() {
@@ -379,6 +431,61 @@ mod tests {
         assert_eq!(lines[1], "    symbol query: timeout");
         assert_eq!(lines[2], "    storage: disk full");
     }
+
+    #[test]
+    fn format_copy_forward_none_returns_empty() {
+        let lines = format_copy_forward_summary(&None);
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn format_copy_forward_zero_activity_returns_empty() {
+        let result = ArtifactCopyForward {
+            measurements_copied: 0,
+            inferences_copied: 0,
+            boundary_surfaces_copied: 0,
+            boundary_channels_copied: 0,
+            contract_schemas_copied: 0,
+            contract_elements_copied: 0,
+        };
+        let lines = format_copy_forward_summary(&Some(result));
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn format_copy_forward_measurements_only() {
+        let result = ArtifactCopyForward {
+            measurements_copied: 42,
+            inferences_copied: 0,
+            boundary_surfaces_copied: 0,
+            boundary_channels_copied: 0,
+            contract_schemas_copied: 0,
+            contract_elements_copied: 0,
+        };
+        let lines = format_copy_forward_summary(&Some(result));
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0], "  copy-forward: 42 measurements");
+    }
+
+    #[test]
+    fn format_copy_forward_multiple_families() {
+        let result = ArtifactCopyForward {
+            measurements_copied: 10,
+            inferences_copied: 5,
+            boundary_surfaces_copied: 3,
+            boundary_channels_copied: 7,
+            contract_schemas_copied: 2,
+            contract_elements_copied: 12,
+        };
+        let lines = format_copy_forward_summary(&Some(result));
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("10 measurements"));
+        assert!(lines[0].contains("5 inferences"));
+        assert!(lines[0].contains("3 boundary surfaces"));
+        assert!(lines[0].contains("7 channels"));
+        assert!(lines[0].contains("2 schemas"));
+        assert!(lines[0].contains("12 elements"));
+    }
 }
 
 /// Run the `rmap refresh` command.
@@ -457,6 +564,7 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
                 result.edges_unresolved,
                 result.snapshot_uid,
             );
+            print_copy_forward_summary(&result.artifact_copy_forward);
             print_contract_summary(&result.contracts);
             print_mapping_summary(&result.generated_code_mappings);
             ExitCode::SUCCESS

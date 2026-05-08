@@ -23,6 +23,10 @@ impl StorageConnection {
     ///
     /// Uses INSERT OR IGNORE to handle re-indexing idempotently.
     /// Surfaces are keyed by `surface_uid` which is deterministic.
+    ///
+    /// **Note:** For production use during refresh, prefer `insert_boundary_surfaces_and_channels`
+    /// which generates fresh UUIDs to avoid conflicts with surfaces from previous snapshots.
+    /// This function is kept for backward compatibility and testing.
     pub fn insert_boundary_surfaces(
         &mut self,
         surfaces: &[BoundaryInteractionSurface],
@@ -129,6 +133,131 @@ impl StorageConnection {
         }
 
         Ok(inserted)
+    }
+
+    /// Insert boundary surfaces and channels together with proper UID mapping.
+    ///
+    /// This is the preferred method for inserting boundary data because:
+    /// 1. Generates fresh UUIDs for surfaces (allowing same logical surface across snapshots)
+    /// 2. Builds mapping from emitter's deterministic UIDs to storage UUIDs
+    /// 3. Rewrites channel surface_uid references using that mapping
+    ///
+    /// Returns (surfaces_inserted, channels_inserted).
+    pub fn insert_boundary_surfaces_and_channels(
+        &mut self,
+        surfaces: &[BoundaryInteractionSurface],
+        channels: &[ChannelDetail],
+    ) -> Result<(usize, usize), StorageError> {
+        if surfaces.is_empty() {
+            return Ok((0, 0));
+        }
+
+        let conn = self.connection_mut();
+
+        // Build mapping: emitter deterministic UID -> storage UUID
+        let mut uid_mapping: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+
+        // Insert surfaces with fresh UUIDs
+        let mut surf_stmt = conn.prepare(
+            "INSERT INTO boundary_interaction_surfaces (
+                surface_uid, snapshot_uid, repo_uid,
+                boundary_scope, channel_kind, direction,
+                transport_class, provenance, confidence_basis,
+                protocol, protocol_family, interaction_pattern,
+                endpoint_locality,
+                symbol_stable_key, source_file, line_start, line_end, col_start, col_end,
+                extractor, basis, confidence, evidence_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )?;
+
+        let mut surfaces_inserted = 0;
+        for surface in surfaces {
+            let storage_uid = uuid::Uuid::new_v4().to_string();
+            uid_mapping.insert(surface.surface_uid.clone(), storage_uid.clone());
+
+            let result = surf_stmt.execute(params![
+                storage_uid,
+                surface.snapshot_uid,
+                surface.repo_uid,
+                surface.boundary_scope.as_str(),
+                surface.channel_kind.as_str(),
+                surface.direction.as_str(),
+                surface.transport_class.map(|tc| tc.as_str()),
+                surface.provenance,
+                surface.confidence_basis,
+                surface.protocol,
+                surface.protocol_family.as_str(),
+                surface.interaction_pattern.as_str(),
+                surface.endpoint_locality.as_str(),
+                surface.symbol_stable_key,
+                surface.source_file,
+                surface.line_start,
+                surface.line_end,
+                surface.col_start,
+                surface.col_end,
+                surface.extractor,
+                surface.basis.as_str(),
+                surface.confidence,
+                surface.evidence_json,
+            ])?;
+            surfaces_inserted += result;
+        }
+        drop(surf_stmt);
+
+        // Insert channels with remapped surface_uids
+        if channels.is_empty() {
+            return Ok((surfaces_inserted, 0));
+        }
+
+        let mut chan_stmt = conn.prepare(
+            "INSERT INTO boundary_channel_details (
+                channel_uid, surface_uid, channel_kind, channel_identity,
+                socket_path, tcp_endpoint, udp_endpoint,
+                can_id, i2c_address, spi_device, serial_device,
+                shm_key, pipe_path, pipe_context, mqueue_name,
+                baud_rate, can_extended, frame_format, payload_contract,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )?;
+
+        let mut channels_inserted = 0;
+        for channel in channels {
+            // Remap surface_uid to storage UUID
+            let storage_surface_uid = uid_mapping
+                .get(&channel.surface_uid)
+                .cloned()
+                .unwrap_or_else(|| channel.surface_uid.clone());
+
+            // Generate fresh channel UID too
+            let storage_channel_uid = uuid::Uuid::new_v4().to_string();
+
+            let result = chan_stmt.execute(params![
+                storage_channel_uid,
+                storage_surface_uid,
+                channel.channel_kind.as_str(),
+                channel.channel_identity,
+                channel.socket_path,
+                channel.tcp_endpoint,
+                channel.udp_endpoint,
+                channel.can_id,
+                channel.i2c_address,
+                channel.spi_device,
+                channel.serial_device,
+                channel.shm_key,
+                channel.pipe_path,
+                channel.pipe_context,
+                channel.mqueue_name,
+                channel.baud_rate,
+                channel.can_extended,
+                channel.frame_format,
+                channel.payload_contract,
+                channel.metadata_json,
+            ])?;
+            channels_inserted += result;
+        }
+
+        Ok((surfaces_inserted, channels_inserted))
     }
 
     /// Count boundary interaction surfaces for a snapshot.
