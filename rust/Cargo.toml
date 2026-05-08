@@ -20,6 +20,7 @@
 resolver = "2"
 members = [
     "crates/agent",
+    "crates/artifact-contracts",
     "crates/boundary-interaction",
     "crates/contract-schema",
     "crates/boundary-interaction-extractor",

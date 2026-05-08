@@ -367,7 +367,9 @@ This keeps repo-graph useful even if major AI platforms provide built-in code in
 
   ### Layer 2: Output Contracts
 
-  The agent learns what matters from the JSON it sees. Output contracts must encode policy semantics explicitly.
+  The agent learns what matters from the structured output it sees. Output contracts must encode policy semantics explicitly.
+  
+  (Current CLI transport format is JSON. The principle is structured semantic output, not JSON specifically.)
 
   Bad output teaches nothing:
 
@@ -441,8 +443,9 @@ This keeps repo-graph useful even if major AI platforms provide built-in code in
   │ Command naming   │ Workflow role is obvious from name     │ Agent must guess whether command is              │
   │                  │                                        │ safe/destructive/policy-carrying                 │
   ├──────────────────┼────────────────────────────────────────┼──────────────────────────────────────────────────┤
-  │ Output contract  │ JSON encodes inherited vs new,         │ Agent sees raw counts without semantic           │
-  │                  │ comparable vs not, confidence, reasons │ categories                                       │
+  │ Output contract  │ Structured output encodes inherited vs │ Agent sees raw counts without semantic           │
+  │                  │ new, comparable vs not, confidence,    │ categories                                       │
+  │                  │ reasons                                │                                                  │
   ├──────────────────┼────────────────────────────────────────┼──────────────────────────────────────────────────┤
   │ External         │ Canonical doc exists for consumer      │ Consumer agent must reverse-engineer workflow    │
   │ instructions     │ agent integration                      │ from CLI help alone                              │
@@ -455,7 +458,7 @@ This keeps repo-graph useful even if major AI platforms provide built-in code in
   When working on repo-graph:
 
   1. New commands must have names that imply their workflow role
-  2. New JSON output must encode policy semantics, not just raw data
+  2. New CLI output must encode policy semantics in structured form, not just raw data
   3. Consumer-facing commands must have corresponding entries in the agent instruction surface (to be maintained
   separately)
   4. Changes to output shape require contract documentation updates

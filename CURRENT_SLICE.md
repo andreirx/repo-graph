@@ -6,7 +6,7 @@ Artifact Contract Registry (ACR) — foundational architecture for artifact sema
 
 ## Active Slice
 
-`docs/slices/acr-1-artifact-contracts-crate.md`
+`docs/slices/acr-3-provenance-and-freshness-schema.md`
 
 ## Branch Intent
 
@@ -14,23 +14,29 @@ Codify artifact truth classes, refresh policies, and provenance requirements in 
 before continuing refresh bug fixes. The registry becomes the authority for how each
 artifact family behaves during refresh and query.
 
-## Definition of Done (ACR-1)
+## Definition of Done (ACR-3)
 
-- [ ] `rust/crates/artifact-contracts` crate created
-- [ ] All enums defined: ArtifactFamily, TruthKind, RefreshPolicy, IdentityPolicy, DegradationPolicy, ProvenancePolicy, ImpactPolicy, FreshnessTracking
-- [ ] ArtifactContract struct defined
-- [ ] Registry accessor functions implemented
-- [ ] All artifact families registered with contracts
-- [ ] Completeness tests pass (every family has a contract)
-- [ ] Coherence tests pass (policy combinations are valid)
-- [ ] No refresh behavior changed yet (support module only)
+- [ ] Per-row freshness columns added to derived artifact tables
+- [ ] Per-row provenance columns/tables for Layer 2+ families
+- [ ] Freshness state enum (`current`, `impacted`, `stale`, `unknown`) in schema
+- [ ] Provenance anchor storage for derived rows
+- [ ] Migration path for existing data
+
+## Carry-over from ACR-2
+
+These items require ACR-3 scaffolding before they can be completed:
+
+- **Per-row freshness/provenance** required to honor `MarkImpactedDeferRecompute` policy
+- **Proto reindex drift** remains until better scaffolding exists (ContractSchemas re-indexes all)
+- **Inferences** use copy-forward instead of `MarkImpactedDeferRecompute` pending ACR-3/4
+- **Boundary proof case** belongs to ACR-5
 
 ## Program Overview
 
 | Slice | Scope | Status |
 |-------|-------|--------|
-| ACR-1 | Create artifact-contracts crate | ACTIVE |
-| ACR-2 | Refresh pipeline consumes registry | NOT STARTED |
+| ACR-1 | Create artifact-contracts crate | DONE |
+| ACR-2 | Refresh pipeline consumes registry | DONE (copy-forward + recompute dispatched; reindex drift documented) |
 | ACR-3 | Per-row freshness and provenance schema | NOT STARTED |
 | ACR-4 | Impact propagation from L0 changes | NOT STARTED |
 | ACR-5 | Boundary contract proof case | NOT STARTED |
@@ -59,8 +65,8 @@ Do not create databases elsewhere.
 
 ## Known Drift to Avoid
 
-- Starting refresh fixes before ACR-1 is complete
 - Treating tables as the unit of architecture (families are the unit)
 - Ad-hoc refresh behavior without consulting contracts
 - Provisional classifications without explicit maturity markers
 - Prose-only documentation without code-level registry
+- Treating JSON as product essence (JSON is CLI transport contract)

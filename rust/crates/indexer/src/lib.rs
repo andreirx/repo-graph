@@ -102,6 +102,7 @@ pub mod invalidation;
 pub mod java_code_mapper;
 pub mod orchestrator;
 pub mod proto_indexer;
+pub mod refresh_dispatch;
 pub mod resolver;
 pub mod routing;
 pub mod storage_port;
@@ -138,6 +139,10 @@ pub use grpc_registration_proof::{run_grpc_registration_proof, GrpcRegistrationP
 pub use grpc_link::{
 	find_grpc_links, run_grpc_link_detection,
 	GrpcLink, GrpcLinkResult,
+};
+pub use refresh_dispatch::{
+	dispatch_recompute_relationships, should_recompute, should_reextract,
+	RecomputeDispatchResult,
 };
 pub use storage_port::{
 	BoundaryInteractionLinkInput, GrpcLinkReadPort, GrpcLinkStorePort, SurfaceWithContract,

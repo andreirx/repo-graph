@@ -98,7 +98,7 @@ cargo test --workspace
 
 ## Conventions
 
-- `rmap` outputs JSON only
+- `rmap` CLI currently outputs JSON (transport contract)
 - Relative paths in DB, never absolute
 - TEXT UIDs everywhere, no auto-increment integers
 

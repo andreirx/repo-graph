@@ -25,6 +25,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::ops::ControlFlow;
 
+use artifact_contracts::{ArtifactFamily, RefreshPolicy, get_contract};
 use repo_graph_classification::classify_unresolved_edge;
 use repo_graph_classification::types::{
 	FileSignals, PackageDependencySet, RuntimeBuiltinsSet, SnapshotSignals,
@@ -253,7 +254,13 @@ pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStoreP
 	let empty_resource_keys: HashMap<String, crate::storage_port::CopiedResourceNodeKey> = HashMap::new();
 	match run_pipeline(storage, extractors, repo_uid, &snap_uid, files, &all_file_paths, &snapshot_signals, &routing_table, &created_at, options.edge_batch_size, progress, start, hook, &empty_resource_keys, &options.c_include_roots) {
 		Ok(mut result) => {
-			// ── Contract schema extraction (CS-1+) ───────────────
+			// ══════════════════════════════════════════════════════════════
+			// Contract Schema Extraction (CS-1+)
+			// ══════════════════════════════════════════════════════════════
+			//
+			// ContractSchemas and ContractElements families.
+			// Contract: ReextractChangedInputs (full index = all files extracted)
+			//
 			// Run after source extraction but still under the same
 			// snapshot lifecycle. Contract files produce schema facts,
 			// not nodes/edges.
@@ -360,66 +367,28 @@ pub fn index_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStoreP
 					}
 				}
 
-				// ── gRPC impl hint detection (GR-1A) ─────────────────
-				// Run after CS-2A mapping. Detects Java classes extending
-				// *ImplBase and links them to proto services via CS-2A.
-				// Skip if no generated code mappings were produced.
-				if let Some(ref mappings) = result.generated_code_mappings {
-					if mappings.mappings_persisted > 0 && !mappings.has_error() {
-						let hint_result = crate::grpc_impl_hint::run_grpc_impl_hint_detection(
-							storage,
-							&snap_uid,
-							repo_uid,
-						);
-						result.grpc_impl_hints = Some(hint_result);
+				// ══════════════════════════════════════════════════════════════
+				// Contract-Driven Recompute Dispatch (ACR-2)
+				// ══════════════════════════════════════════════════════════════
+				//
+				// BoundaryContracts and BoundaryInteractionLinks are deterministic
+				// relationships with RecomputeFromCurrentSnapshot policy.
+				//
+				// The registry CHOOSES whether to run, not just validates after.
+				// dispatch_recompute_relationships checks contracts and only
+				// executes if policy is RecomputeFromCurrentSnapshot.
+				let recompute_result = crate::refresh_dispatch::dispatch_recompute_relationships(
+					storage,
+					&snap_uid,
+					repo_uid,
+					result.generated_code_mappings.as_ref(),
+				);
 
-						// ── gRPC registration proof (GR-1B) ─────────────
-						// Run after GR-1A. Detects addService/bindService calls
-						// and boosts confidence of matching GR-1A surfaces.
-						// Skip if no GR-1A hints were produced.
-						if let Some(ref hints) = result.grpc_impl_hints {
-							if hints.hints_emitted > 0 {
-								let proof_result = crate::grpc_registration_proof::run_grpc_registration_proof(
-									storage,
-									&snap_uid,
-								);
-								result.grpc_registration_proof = Some(proof_result);
-							}
-						}
-
-						// ── gRPC client hint detection (GR-2A) ───────────
-						// Run after CS-2A mapping. Detects gRPC client stub
-						// creations (*Grpc.newBlockingStub, etc.) and links
-						// them to proto services via CS-2A.
-						let client_hint_result = crate::grpc_client_hint::run_grpc_client_hint_detection(
-							storage,
-							&snap_uid,
-							repo_uid,
-						);
-						result.grpc_client_hints = Some(client_hint_result);
-
-						// ── gRPC link detection (GR-3A) ───────────────────
-						// Run after GR-1A and GR-2A. Links provider and consumer
-						// surfaces when both reference the same proto service.
-						// Requires at least one provider and one consumer hint.
-						let has_providers = result.grpc_impl_hints
-							.as_ref()
-							.map(|h| h.hints_emitted > 0)
-							.unwrap_or(false);
-						let has_consumers = result.grpc_client_hints
-							.as_ref()
-							.map(|h| h.hints_emitted > 0)
-							.unwrap_or(false);
-
-						if has_providers && has_consumers {
-							let link_result = crate::grpc_link::run_grpc_link_detection(
-								storage,
-								&snap_uid,
-							);
-							result.grpc_links = Some(link_result);
-						}
-					}
-				}
+				// Map dispatch results to IndexResult fields
+				result.grpc_impl_hints = recompute_result.grpc_impl_hints;
+				result.grpc_registration_proof = recompute_result.grpc_registration_proof;
+				result.grpc_client_hints = recompute_result.grpc_client_hints;
+				result.grpc_links = recompute_result.grpc_links;
 			}
 			Ok(result)
 		}
@@ -1580,9 +1549,39 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 			result.parent_snapshot_uid = Some(parent.snapshot_uid.clone());
 			result.unchanged_files = Some(plan.files_to_copy.clone());
 
-			// ── Contract schema extraction (CS-1+) ───────────────
-			// Contract files are always re-indexed on refresh (no
-			// delta optimization for contract schemas yet).
+			// ══════════════════════════════════════════════════════════════
+			// Contract Schema Extraction (CS-1+) — ACR-2 Documented Drift
+			// ══════════════════════════════════════════════════════════════
+			//
+			// ContractSchemas and ContractElements have ReextractChangedInputs
+			// policy, which means unchanged files should copy-forward.
+			//
+			// CURRENT BEHAVIOR: All contract files are re-indexed on every
+			// refresh (no delta optimization). This is documented drift from
+			// the contract policy.
+			//
+			// TODO(ACR-3/5): Full proto reindex retained until ACR-3/5 scaffolding
+			// lands. Wire copy-forward for unchanged .proto files once per-row
+			// provenance/freshness infrastructure exists. Storage copy-forward
+			// methods exist but are not invoked in active path.
+			// See: docs/TECH-DEBT.md "ACR-2 Architecture-Carried Deferrals"
+			//
+			// Validate contract policy for documentation purposes (debug builds)
+			debug_assert!(
+				matches!(
+					get_contract(ArtifactFamily::ContractSchemas).refresh_policy,
+					RefreshPolicy::ReextractChangedInputs
+				),
+				"ContractSchemas contract: expected ReextractChangedInputs"
+			);
+			debug_assert!(
+				matches!(
+					get_contract(ArtifactFamily::ContractElements).refresh_policy,
+					RefreshPolicy::ReextractChangedInputs
+				),
+				"ContractElements contract: expected ReextractChangedInputs"
+			);
+
 			if !contract_files.is_empty() {
 				// Index proto schemas first so we know which files failed parsing.
 				let proto_result = crate::proto_indexer::index_proto_files(
@@ -1686,66 +1685,28 @@ pub fn refresh_repo<S: IndexerStoragePort + crate::storage_port::ProtoSchemaStor
 					}
 				}
 
-				// ── gRPC impl hint detection (GR-1A) ─────────────────
-				// Run after CS-2A mapping. Detects Java classes extending
-				// *ImplBase and links them to proto services via CS-2A.
-				// Skip if no generated code mappings were produced.
-				if let Some(ref mappings) = result.generated_code_mappings {
-					if mappings.mappings_persisted > 0 && !mappings.has_error() {
-						let hint_result = crate::grpc_impl_hint::run_grpc_impl_hint_detection(
-							storage,
-							&snap_uid,
-							repo_uid,
-						);
-						result.grpc_impl_hints = Some(hint_result);
+				// ══════════════════════════════════════════════════════════════
+				// Contract-Driven Recompute Dispatch (ACR-2)
+				// ══════════════════════════════════════════════════════════════
+				//
+				// BoundaryContracts and BoundaryInteractionLinks are deterministic
+				// relationships with RecomputeFromCurrentSnapshot policy.
+				//
+				// The registry CHOOSES whether to run, not just validates after.
+				// dispatch_recompute_relationships checks contracts and only
+				// executes if policy is RecomputeFromCurrentSnapshot.
+				let recompute_result = crate::refresh_dispatch::dispatch_recompute_relationships(
+					storage,
+					&snap_uid,
+					repo_uid,
+					result.generated_code_mappings.as_ref(),
+				);
 
-						// ── gRPC registration proof (GR-1B) ─────────────
-						// Run after GR-1A. Detects addService/bindService calls
-						// and boosts confidence of matching GR-1A surfaces.
-						// Skip if no GR-1A hints were produced.
-						if let Some(ref hints) = result.grpc_impl_hints {
-							if hints.hints_emitted > 0 {
-								let proof_result = crate::grpc_registration_proof::run_grpc_registration_proof(
-									storage,
-									&snap_uid,
-								);
-								result.grpc_registration_proof = Some(proof_result);
-							}
-						}
-
-						// ── gRPC client hint detection (GR-2A) ───────────
-						// Run after CS-2A mapping. Detects gRPC client stub
-						// creations (*Grpc.newBlockingStub, etc.) and links
-						// them to proto services via CS-2A.
-						let client_hint_result = crate::grpc_client_hint::run_grpc_client_hint_detection(
-							storage,
-							&snap_uid,
-							repo_uid,
-						);
-						result.grpc_client_hints = Some(client_hint_result);
-
-						// ── gRPC link detection (GR-3A) ───────────────────
-						// Run after GR-1A and GR-2A. Links provider and consumer
-						// surfaces when both reference the same proto service.
-						// Requires at least one provider and one consumer hint.
-						let has_providers = result.grpc_impl_hints
-							.as_ref()
-							.map(|h| h.hints_emitted > 0)
-							.unwrap_or(false);
-						let has_consumers = result.grpc_client_hints
-							.as_ref()
-							.map(|h| h.hints_emitted > 0)
-							.unwrap_or(false);
-
-						if has_providers && has_consumers {
-							let link_result = crate::grpc_link::run_grpc_link_detection(
-								storage,
-								&snap_uid,
-							);
-							result.grpc_links = Some(link_result);
-						}
-					}
-				}
+				// Map dispatch results to IndexResult fields
+				result.grpc_impl_hints = recompute_result.grpc_impl_hints;
+				result.grpc_registration_proof = recompute_result.grpc_registration_proof;
+				result.grpc_client_hints = recompute_result.grpc_client_hints;
+				result.grpc_links = recompute_result.grpc_links;
 			}
 
 			Ok(result)

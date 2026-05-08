@@ -2412,3 +2412,59 @@ failure recovery use case.
 ### Fix Path
 
 Complete remaining items per `docs/slices/refresh-integrity-parity.md` Task Sets A3, A4, Phase 3, and full test matrix validation.
+
+---
+
+## ACR-2 Architecture-Carried Deferrals
+
+**Added:** 2026-05-08
+**Slice:** `docs/slices/acr-2-refresh-policy-integration.md`
+**Status:** INTENTIONAL DEFERRALS (not accidental omissions)
+
+### Context
+
+ACR-2 established contract-driven dispatch for refresh operations. The following
+items are explicitly deferred to later slices because they require scaffolding
+that does not yet exist.
+
+### 1. ContractSchemas / ContractElements Full Reindex
+
+**Current behavior:** Refresh re-indexes all `.proto` files every time.
+
+**Contract says:** `ReextractChangedInputs` (copy-forward unchanged, re-extract changed).
+
+**Why deferred:** Proto refresh has no provenance/freshness scaffolding. Full reindex
+is the safest honest behavior until ACR-3/5 provides the infrastructure.
+
+**Deferred to:** ACR-3 (schema) / ACR-5 (proof case)
+
+**Location:** `indexer/src/orchestrator.rs` at proto indexer invocation
+
+### 2. Inferences Copy-Forward Instead of MarkImpactedDeferRecompute
+
+**Current behavior:** Unchanged inferences are copied forward from parent snapshot.
+
+**Contract says:** `MarkImpactedDeferRecompute` (mark as impacted when L0 changes).
+
+**Why deferred:** Requires per-row freshness state columns, provenance anchor storage,
+and impact propagation logic. Copy-forward is the best we can do without that scaffolding.
+
+**Deferred to:** ACR-3 (schema) / ACR-4 (impact propagation)
+
+**Location:** `repo-index/src/refresh_policy.rs` at Inferences handling
+
+### 3. Per-Row Freshness/Provenance Not Wired
+
+**Affects:** All Layer 2+ families (derived artifacts).
+
+**Why deferred:** ACR-2 scope is dispatch logic only. The schema/runtime state for
+`current` / `impacted` / `stale` freshness tracking is ACR-3 scope.
+
+**Deferred to:** ACR-3
+
+### Fix Path
+
+1. ACR-3: Add freshness/provenance schema, migration, storage methods
+2. ACR-4: Implement impact propagation from L0 changes
+3. ACR-5: Complete boundary contract proof case with full integrity story
+4. Return to these deferrals and wire honest policy enforcement

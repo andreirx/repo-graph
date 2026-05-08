@@ -45,6 +45,10 @@ description  = "Rust port of the repo-graph indexer orchestration layer"
 publish      = false
 
 [dependencies]
+# Artifact contract registry — for policy-driven refresh dispatch (ACR-2).
+# Policy → policy.
+artifact-contracts = { path = "../artifact-contracts" }
+
 # Classification crate — for ImportBinding, RuntimeBuiltinsSet,
 # UnresolvedEdgeCategory, classifier functions. Policy → policy.
 repo-graph-classification = { path = "../classification" }

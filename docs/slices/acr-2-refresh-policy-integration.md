@@ -1,9 +1,75 @@
 # ACR-2: Refresh Policy Integration
 
-Status: NOT STARTED
+Status: DONE
 Depends: `acr-1-artifact-contracts-crate.md`
 Follow-on: `acr-3-provenance-and-freshness-schema.md`
 Track: Core Infrastructure — Artifact Contract Registry
+
+## Implementation Summary
+
+**Crate dependencies added:**
+- `repo-index/Cargo.toml` depends on `artifact-contracts`
+- `indexer/Cargo.toml` depends on `artifact-contracts`
+
+**repo-index changes:**
+- New module: `repo-index/src/refresh_policy.rs`
+  - Defines `COPY_FORWARD_FAMILIES`, `RECOMPUTE_FAMILIES`, `REINDEX_FAMILIES` subsets
+  - `RefreshDiagnostics` for structured output (captured for future exposure)
+  - Validation functions ensure subset membership matches contract policy
+- `compose.rs` copy-forward branch uses explicit contract-driven dispatch
+- Each family in `COPY_FORWARD_FAMILIES` is handled by consulting `get_contract()`
+
+**indexer changes:**
+- New module: `indexer/src/refresh_dispatch.rs`
+  - `dispatch_recompute_relationships()` function that CHOOSES action based on contract
+  - Checks `RefreshPolicy::RecomputeFromCurrentSnapshot` before executing GR chain
+  - The registry decides whether to run, not just validates after
+- `orchestrator.rs` now calls `dispatch_recompute_relationships()` instead of hardcoded GR chain
+- Contract schema extraction has documented drift (re-indexes all vs copy-forward)
+
+**Contract-driven dispatch coverage:**
+| Family Category | Dispatch Mechanism | How Registry Chooses |
+|-----------------|-------------------|----------------------|
+| COPY_FORWARD_FAMILIES | compose.rs loop | `get_contract()` → match on policy → call storage method |
+| RECOMPUTE_FAMILIES | `dispatch_recompute_relationships()` | Checks contract → only runs if `RecomputeFromCurrentSnapshot` |
+| REINDEX_FAMILIES | orchestrator.rs proto path | Documented drift: re-indexes all (future work: wire copy-forward) |
+
+**Documented drift:**
+- `ContractSchemas`/`ContractElements`: contract says `ReextractChangedInputs`, but current implementation re-indexes all (not copy-forward). Documented with TODO in orchestrator.rs.
+
+## Deferred / Carry-over
+
+These items are explicitly deferred to later slices, not accidental omissions:
+
+### 1. ContractSchemas / ContractElements full proto reindex
+- **Current behavior:** Refresh re-indexes all `.proto` files
+- **Contract says:** `ReextractChangedInputs` (copy-forward for unchanged)
+- **Why deferred:** Proto refresh has no better provenance/freshness scaffolding yet; "reindex all" is the safest honest behavior
+- **Deferred to:** ACR-3/ACR-5
+
+### 2. Inferences copy-forward instead of MarkImpactedDeferRecompute
+- **Current behavior:** Unchanged inferences are copied forward
+- **Contract says:** `MarkImpactedDeferRecompute`
+- **Why deferred:** Requires per-row freshness state + provenance anchors + impact propagation
+- **Deferred to:** ACR-3 (schema) and ACR-4 (impact propagation)
+
+### 3. Per-row freshness/provenance not wired
+- **Affects:** Every upper-layer non-L0 family
+- **Why deferred:** ACR-2 establishes dispatch; schema/runtime state for `current`/`impacted`/`stale` is ACR-3 scope
+- **Deferred to:** ACR-3
+
+### 4. Boundary contract proof case
+- **Families:** BoundaryContracts, BoundaryInteractionLinks
+- **Current state:** Recompute is contract-driven, but proof-case semantics and post-refresh integrity story are not finished
+- **Deferred to:** ACR-5
+
+## Definition of Done (Narrowed)
+
+ACR-2 is complete when:
+- [x] Copy-forward families dispatched by contract
+- [x] Recompute families dispatched by contract
+- [x] Reindex drift explicitly documented (not solved)
+- [x] Deferred items documented for ACR-3/4/5
 
 ## Objective
 

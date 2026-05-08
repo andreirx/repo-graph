@@ -48,6 +48,8 @@ publish      = false
 # Policy + adapter crates.
 repo-graph-indexer = { path = "../indexer" }
 repo-graph-storage = { path = "../storage" }
+# Artifact contract registry (ACR-2): drives refresh policy dispatch.
+artifact-contracts = { path = "../artifact-contracts" }
 repo-graph-trust = { path = "../trust" }
 repo-graph-ts-extractor = { path = "../ts-extractor" }
 repo-graph-c-extractor = { path = "../c-extractor" }

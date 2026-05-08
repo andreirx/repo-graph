@@ -1,6 +1,6 @@
 # ACR-1: Artifact Contracts Crate
 
-Status: NOT STARTED
+Status: DONE
 Depends: None (foundational)
 Follow-on: `acr-2-refresh-policy-integration.md`
 Track: Core Infrastructure — Artifact Contract Registry

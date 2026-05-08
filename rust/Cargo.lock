@@ -39,6 +39,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "artifact-contracts"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -879,6 +887,7 @@ dependencies = [
 name = "repo-graph-indexer"
 version = "0.1.0"
 dependencies = [
+ "artifact-contracts",
  "contract-schema",
  "regex",
  "repo-graph-classification",
@@ -971,6 +980,7 @@ dependencies = [
 name = "repo-graph-repo-index"
 version = "0.1.0"
 dependencies = [
+ "artifact-contracts",
  "chrono",
  "ignore",
  "repo-graph-boundary-interaction",

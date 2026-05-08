@@ -95,7 +95,7 @@ rmap gate ./repo.db repo-uid
 
 ## Output Format
 
-`rmap` outputs JSON only. Parse with `jq` for human reading:
+`rmap` currently outputs JSON (the CLI transport contract). Parse with `jq` for human reading:
 
 ```bash
 rmap trust ./repo-graph.db repo-graph | jq .

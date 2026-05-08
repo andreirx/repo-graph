@@ -50,7 +50,11 @@ use repo_graph_ts_extractor::{
 };
 
 use crate::config::RepoConfigContext;
+use crate::refresh_policy::{
+    FamilyRefreshResult, RefreshAction, RefreshDiagnostics, COPY_FORWARD_FAMILIES,
+};
 use crate::scanner::{self, ScannedFile};
+use artifact_contracts::{get_contract, ArtifactFamily, RefreshPolicy};
 
 // ── Error type ───────────────────────────────────────────────────
 
@@ -1424,11 +1428,18 @@ pub fn refresh_into_storage_with_progress(
 		Err(e) => return Err(ComposeError::Index(format!("{}", e))),
 	};
 
-	// ── Refresh artifact copy-forward (refresh-integrity-parity slice) ──
+	// ══════════════════════════════════════════════════════════════════════════
+	// Contract-Driven Refresh Dispatch (ACR-2)
+	// ══════════════════════════════════════════════════════════════════════════
 	//
-	// If this was a refresh operation with unchanged files, copy forward
-	// derived artifacts (measurements, inferences, boundaries, contracts)
-	// from the parent snapshot for those files.
+	// Dispatch copy-forward for unchanged files based on artifact contracts.
+	// Each family in COPY_FORWARD_FAMILIES is handled according to its
+	// RefreshPolicy. Families with ReextractChangedInputs or MarkImpactedDeferRecompute
+	// copy forward rows for unchanged files.
+	//
+	// This replaces the ad-hoc copy_forward_derived_artifacts() call with
+	// explicit, contract-driven dispatch.
+
 	let unchanged_file_set: std::collections::HashSet<&str> =
 		result.unchanged_files.as_ref()
 			.map(|files| files.iter().map(|s| s.as_str()).collect())
@@ -1438,30 +1449,96 @@ pub fn refresh_into_storage_with_progress(
 		&result.parent_snapshot_uid,
 		&result.unchanged_files,
 	) {
-		// Identify proto files among the unchanged files.
-		let unchanged_proto_paths: Vec<String> = unchanged_files
-			.iter()
-			.filter(|p| p.ends_with(".proto"))
-			.cloned()
-			.collect();
+		let mut diagnostics = RefreshDiagnostics::new();
 
-		// Copy forward derived artifacts for unchanged files.
-		let copy_result = storage.copy_forward_derived_artifacts(
-			parent_uid,
-			&result.snapshot_uid,
-			repo_uid,
-			unchanged_files,
-			&unchanged_proto_paths,
-		).map_err(ComposeError::Storage)?;
+		// Per-family counters for backward-compatible ArtifactCopyForward
+		let mut measurements_copied: u64 = 0;
+		let mut inferences_copied: u64 = 0;
+		let mut boundary_surfaces_copied: u64 = 0;
+		let mut boundary_channels_copied: u64 = 0;
+		// ContractSchemas is re-indexed, not copy-forwarded in active path
+		let contract_schemas_copied: u64 = 0;
+		let contract_elements_copied: u64 = 0;
 
-		// Surface copy-forward counts in IndexResult for diagnostics.
+		// ── Contract-driven dispatch for COPY_FORWARD_FAMILIES ──
+		for family in COPY_FORWARD_FAMILIES {
+			let contract = get_contract(*family);
+
+			let (action, rows) = match contract.refresh_policy {
+				RefreshPolicy::ReextractChangedInputs | RefreshPolicy::MarkImpactedDeferRecompute => {
+					// Unchanged branch: copy forward from parent snapshot
+					match family {
+						ArtifactFamily::Measurements => {
+							let n = storage.copy_forward_measurements(
+								parent_uid,
+								&result.snapshot_uid,
+								repo_uid,
+								unchanged_files,
+							).map_err(ComposeError::Storage)?;
+							measurements_copied = n;
+							(RefreshAction::CopiedForward, Some(n as usize))
+						}
+						ArtifactFamily::Inferences => {
+							let n = storage.copy_forward_inferences(
+								parent_uid,
+								&result.snapshot_uid,
+								repo_uid,
+								unchanged_files,
+							).map_err(ComposeError::Storage)?;
+							inferences_copied = n;
+							(RefreshAction::CopiedForward, Some(n as usize))
+						}
+						ArtifactFamily::BoundaryInteractionSurfaces => {
+							let (surfaces, channels) = storage.copy_forward_boundary_surfaces(
+								parent_uid,
+								&result.snapshot_uid,
+								unchanged_files,
+							).map_err(ComposeError::Storage)?;
+							boundary_surfaces_copied = surfaces;
+							boundary_channels_copied = channels;
+							(RefreshAction::CopiedForward, Some((surfaces + channels) as usize))
+						}
+						_ => {
+							// Family in COPY_FORWARD_FAMILIES but no storage method yet
+							(RefreshAction::NotImplemented, None)
+						}
+					}
+				}
+				RefreshPolicy::RecomputeFromCurrentSnapshot => {
+					// Should not be in COPY_FORWARD_FAMILIES
+					(RefreshAction::Skipped, None)
+				}
+				RefreshPolicy::SnapshotIndependent => {
+					(RefreshAction::Skipped, None)
+				}
+				_ => {
+					(RefreshAction::NotImplemented, None)
+				}
+			};
+
+			diagnostics.record(FamilyRefreshResult {
+				family: *family,
+				policy: contract.refresh_policy,
+				action,
+				rows_affected: rows,
+			});
+		}
+
+		// Diagnostics are captured but not emitted here.
+		// The structured data is available in `diagnostics` for future
+		// exposure through result objects or explicit diagnostic APIs.
+		let _ = &diagnostics; // suppress unused warning until wired to result
+
+		// Surface copy-forward counts in IndexResult for backward compatibility.
+		// This struct is part of the public API; keep populating it until
+		// consumers migrate to contract-driven diagnostics.
 		result.artifact_copy_forward = Some(repo_graph_indexer::types::ArtifactCopyForward {
-			measurements_copied: copy_result.measurements_copied,
-			inferences_copied: copy_result.inferences_copied,
-			boundary_surfaces_copied: copy_result.boundary_surfaces_copied,
-			boundary_channels_copied: copy_result.boundary_channels_copied,
-			contract_schemas_copied: copy_result.contract_schemas_copied,
-			contract_elements_copied: copy_result.contract_elements_copied,
+			measurements_copied,
+			inferences_copied,
+			boundary_surfaces_copied,
+			boundary_channels_copied,
+			contract_schemas_copied,
+			contract_elements_copied,
 		});
 	}
 
