@@ -29,7 +29,7 @@ use repo_graph_agent::{
 	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow,
 	AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry,
 	AgentFileEntry, AgentFocusCandidate, AgentFocusKind, AgentImportEdge,
-	AgentImportEntry, AgentPathResolution, AgentReliabilityAxis,
+	AgentImportEntry, AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis,
 	AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
 	AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext,
 	AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
@@ -1345,5 +1345,88 @@ impl AgentStorageRead for StorageConnection {
 			.map_err(map_err("count_high_complexity_symbols"))?;
 
 		Ok(count as u64)
+	}
+
+	fn get_module_summary(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Option<AgentModuleSummary>, AgentStorageError> {
+		let conn = self.connection();
+
+		// Strategy:
+		// 1. Try module_candidates table (TS-indexed repos)
+		// 2. If empty, fall back to MODULE nodes (Rust-indexed repos)
+		// 3. If both empty, return None
+
+		// ── Step 1: Query module_candidates table ─────────────────────
+		let mut stmt = conn
+			.prepare(
+				"SELECT module_kind, COUNT(*) as cnt \
+				 FROM module_candidates \
+				 WHERE snapshot_uid = ? \
+				 GROUP BY module_kind",
+			)
+			.map_err(map_err("get_module_summary"))?;
+
+		let rows = stmt
+			.query_map([snapshot_uid], |row| {
+				Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+			})
+			.map_err(map_err("get_module_summary"))?;
+
+		let mut declared: u64 = 0;
+		let mut operational: u64 = 0;
+		let mut inferred: u64 = 0;
+		let mut total: u64 = 0;
+
+		for row in rows {
+			let (kind, count) = row.map_err(map_err("get_module_summary"))?;
+			let count = count as u64;
+			total += count;
+			match kind.as_str() {
+				"declared" => declared += count,
+				"operational" => operational += count,
+				"inferred" => inferred += count,
+				"directory" => inferred += count,
+				_ => {}
+			}
+		}
+
+		// If module_candidates has data, use it.
+		if total > 0 {
+			return Ok(Some(AgentModuleSummary {
+				discovered_module_count: total,
+				declared_count: declared,
+				operational_count: operational,
+				inferred_count: inferred,
+			}));
+		}
+
+		// ── Step 2: Fallback to MODULE nodes in nodes table ───────────
+		// The Rust indexer produces MODULE nodes but does not populate
+		// module_candidates. This fallback mirrors the storage-level
+		// get_module_nodes_as_candidates() used by `modules list`.
+		let module_count: i64 = conn
+			.query_row(
+				"SELECT COUNT(*) FROM nodes \
+				 WHERE snapshot_uid = ? AND kind = 'MODULE'",
+				[snapshot_uid],
+				|row| row.get(0),
+			)
+			.map_err(map_err("get_module_summary"))?;
+
+		if module_count > 0 {
+			// All MODULE nodes from the Rust indexer are directory-derived,
+			// so they count as inferred (structure-based, not manifest-backed).
+			return Ok(Some(AgentModuleSummary {
+				discovered_module_count: module_count as u64,
+				declared_count: 0,
+				operational_count: 0,
+				inferred_count: module_count as u64,
+			}));
+		}
+
+		// No module data from either source.
+		Ok(None)
 	}
 }

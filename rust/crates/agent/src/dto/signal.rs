@@ -423,11 +423,33 @@ pub struct BoundaryViolationEvidence {
 // Surface withdrawn; internal substrate preserved.
 // See docs/TECH-DEBT.md for reintroduction conditions.
 
+/// Breakdown of discovered modules by kind.
+///
+/// This is only present when module discovery data exists. When
+/// absent, the `MODULE_DATA_UNAVAILABLE` limit is emitted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ModuleKindBreakdown {
+	pub declared: u64,
+	pub operational: u64,
+	pub inferred: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ModuleSummaryEvidence {
+	// ── Snapshot totals (always present) ──────────────────────────
 	pub file_count: u64,
 	pub symbol_count: u64,
 	pub languages: Vec<String>,
+
+	// ── Module discovery data (present when module_candidates exist) ─
+	/// Count of discovered modules. `None` when module discovery data
+	/// is unavailable (triggers `MODULE_DATA_UNAVAILABLE` limit).
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub discovered_module_count: Option<u64>,
+	/// Breakdown by module kind (declared/operational/inferred).
+	/// `None` when module discovery data is unavailable.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub module_kinds: Option<ModuleKindBreakdown>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1091,13 +1113,23 @@ impl Signal {
 	// See docs/TECH-DEBT.md for reintroduction conditions.
 
 	pub fn module_summary(evidence: ModuleSummaryEvidence) -> Self {
-		let summary = format!(
-			"{} file{}, {} symbol{} indexed.",
+		// Build summary text. Include module count when available.
+		let base = format!(
+			"{} file{}, {} symbol{} indexed",
 			evidence.file_count,
 			if evidence.file_count == 1 { "" } else { "s" },
 			evidence.symbol_count,
 			if evidence.symbol_count == 1 { "" } else { "s" }
 		);
+		let summary = match evidence.discovered_module_count {
+			Some(count) => format!(
+				"{}; {} discovered module{}.",
+				base,
+				count,
+				if count == 1 { "" } else { "s" }
+			),
+			None => format!("{}.", base),
+		};
 		Self::build(
 			SignalCode::ModuleSummary,
 			summary,
@@ -1418,13 +1450,37 @@ mod tests {
 
 	#[test]
 	fn constructor_invariant_module_summary() {
+		// Fallback case: no module discovery data
 		let s = Signal::module_summary(ModuleSummaryEvidence {
 			file_count: 10,
 			symbol_count: 100,
 			languages: vec!["rust".into()],
+			discovered_module_count: None,
+			module_kinds: None,
 		});
 		assert_eq!(s.code, SignalCode::ModuleSummary);
 		assert_eq!(s.category, SignalCategory::Informational);
+		assert!(s.summary.contains("10 files"));
+		assert!(!s.summary.contains("discovered module"));
+	}
+
+	#[test]
+	fn constructor_invariant_module_summary_with_modules() {
+		// Module discovery data present
+		let s = Signal::module_summary(ModuleSummaryEvidence {
+			file_count: 50,
+			symbol_count: 200,
+			languages: vec!["typescript".into(), "rust".into()],
+			discovered_module_count: Some(5),
+			module_kinds: Some(ModuleKindBreakdown {
+				declared: 3,
+				operational: 1,
+				inferred: 1,
+			}),
+		});
+		assert_eq!(s.code, SignalCode::ModuleSummary);
+		assert!(s.summary.contains("50 files"));
+		assert!(s.summary.contains("5 discovered modules"));
 	}
 
 	#[test]

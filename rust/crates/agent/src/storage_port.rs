@@ -155,6 +155,31 @@ pub struct AgentRepoSummary {
 	pub languages: Vec<String>,
 }
 
+// ── Module discovery summary ─────────────────────────────────────
+
+/// Summary of discovered module candidates for a snapshot.
+///
+/// This is module-derived data from the `module_candidates` table,
+/// NOT raw snapshot totals. When this exists, the MODULE_SUMMARY
+/// signal should include module evidence and NOT emit
+/// `MODULE_DATA_UNAVAILABLE`.
+///
+/// `module_kind` breakdown uses the three-tier vocabulary:
+/// - `declared`: manifest-backed (package.json, Cargo.toml, etc.)
+/// - `operational`: surface-promoted (CLI, service, web app)
+/// - `inferred`: structure/build-system derived
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentModuleSummary {
+	/// Total count of discovered module candidates.
+	pub discovered_module_count: u64,
+	/// Count of declared modules (manifest-backed).
+	pub declared_count: u64,
+	/// Count of operational modules (surface-promoted).
+	pub operational_count: u64,
+	/// Count of inferred modules (structure-derived).
+	pub inferred_count: u64,
+}
+
 // ── Complexity measurement ──────────────────────────────────────
 
 /// A symbol with high cyclomatic complexity.
@@ -671,6 +696,22 @@ pub trait AgentStorageRead {
 		snapshot_uid: &str,
 		min_threshold: u64,
 	) -> Result<u64, AgentStorageError>;
+
+	// ── Module discovery ────────────────────────────────────────────
+
+	/// Query module discovery summary for a snapshot.
+	///
+	/// Returns `Ok(Some(summary))` when the snapshot has discovered
+	/// module candidates (from the `module_candidates` table).
+	/// Returns `Ok(None)` when no module candidates exist — this is
+	/// the trigger for fallback behavior and `MODULE_DATA_UNAVAILABLE`.
+	///
+	/// The summary includes total count and breakdown by module kind
+	/// (declared/operational/inferred).
+	fn get_module_summary(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Option<AgentModuleSummary>, AgentStorageError>;
 }
 
 // ── Explain DTOs ────────────────────────────────────────────────

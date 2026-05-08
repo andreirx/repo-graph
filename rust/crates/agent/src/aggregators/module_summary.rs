@@ -1,23 +1,26 @@
 //! Repo-level structural summary.
 //!
-//! Emits `MODULE_SUMMARY` unconditionally with snapshot-level
-//! totals: file count, symbol count, language list.
+//! Emits `MODULE_SUMMARY` with snapshot-level totals and, when
+//! available, module discovery data.
 //!
-//! Rust-42 deliberately uses raw snapshot counts here, NOT
-//! discovered module totals from the (still TS-only) module
-//! discovery layer. The aggregator pairs the signal with a
-//! `MODULE_DATA_UNAVAILABLE` limit so the agent can tell the
-//! difference between "no discovered modules" and "module
-//! discovery data is not queryable from Rust".
+//! Behavior:
 //!
-//! The signal itself is NEVER suppressed by the limit — they
-//! are orthogonal. The signal says "here is what the snapshot
-//! contains", the limit says "there is a richer module catalog
-//! you cannot see from this path".
+//!   - If `module_candidates` table has data: include module
+//!     evidence (`discovered_module_count`, `module_kinds`), do NOT
+//!     emit `MODULE_DATA_UNAVAILABLE`.
+//!
+//!   - If `module_candidates` is empty: fall back to raw snapshot
+//!     totals, emit `MODULE_DATA_UNAVAILABLE` limit so the agent
+//!     can distinguish "no discovered modules" from "module
+//!     discovery data is not queryable from Rust".
+//!
+//! The signal itself is NEVER suppressed by the limit — they are
+//! orthogonal. The signal says "here is what the snapshot contains",
+//! the limit says "module discovery layer is unavailable".
 
 use super::AggregatorOutput;
 use crate::dto::limit::{Limit, LimitCode};
-use crate::dto::signal::{ModuleSummaryEvidence, Signal};
+use crate::dto::signal::{ModuleKindBreakdown, ModuleSummaryEvidence, Signal};
 use crate::errors::AgentStorageError;
 use crate::storage_port::AgentStorageRead;
 
@@ -25,33 +28,53 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
 	storage: &S,
 	snapshot_uid: &str,
 ) -> Result<AggregatorOutput, AgentStorageError> {
+	// Always get raw snapshot totals.
 	let summary = storage.compute_repo_summary(snapshot_uid)?;
 
-	let evidence = ModuleSummaryEvidence {
-		file_count: summary.file_count,
-		symbol_count: summary.symbol_count,
-		languages: summary.languages,
+	// Check for module discovery data.
+	let module_summary = storage.get_module_summary(snapshot_uid)?;
+
+	let (evidence, limits) = match module_summary {
+		Some(ms) => {
+			// Module discovery data exists — include it, no limit.
+			let evidence = ModuleSummaryEvidence {
+				file_count: summary.file_count,
+				symbol_count: summary.symbol_count,
+				languages: summary.languages,
+				discovered_module_count: Some(ms.discovered_module_count),
+				module_kinds: Some(ModuleKindBreakdown {
+					declared: ms.declared_count,
+					operational: ms.operational_count,
+					inferred: ms.inferred_count,
+				}),
+			};
+			(evidence, Vec::new())
+		}
+		None => {
+			// Fallback: no module candidates, emit limit.
+			let evidence = ModuleSummaryEvidence {
+				file_count: summary.file_count,
+				symbol_count: summary.symbol_count,
+				languages: summary.languages,
+				discovered_module_count: None,
+				module_kinds: None,
+			};
+			let limits = vec![Limit::from_code(LimitCode::ModuleDataUnavailable)];
+			(evidence, limits)
+		}
 	};
 
-	// LANGUAGE_COVERAGE_PARTIAL is defined as a LimitCode but
-	// NOT emitted here. The Rust-43 F5 review identified that
-	// emitting it unconditionally overclaims: a pure TypeScript
-	// repo fully covered by the indexer would incorrectly
-	// report partial language coverage. The limit should only
-	// fire when there is actual evidence of unsupported-language
-	// presence (e.g. a filesystem scan or a storage-side signal
-	// that the agent crate does not currently have). Deferred
-	// until that evidence is available. See docs/TECH-DEBT.md.
 	Ok(AggregatorOutput {
 		signals: vec![Signal::module_summary(evidence)],
-		limits: vec![Limit::from_code(LimitCode::ModuleDataUnavailable)],
+		limits,
 	})
 }
 
 /// File-scoped module summary.
 ///
 /// Uses `compute_file_summary` to produce counts scoped to a
-/// single file. Same output shape as the repo-level variant.
+/// single file. Module discovery data is not file-scoped, so
+/// this always returns the fallback shape with the limit.
 pub fn aggregate_file<S: AgentStorageRead + ?Sized>(
 	storage: &S,
 	snapshot_uid: &str,
@@ -59,10 +82,15 @@ pub fn aggregate_file<S: AgentStorageRead + ?Sized>(
 ) -> Result<AggregatorOutput, AgentStorageError> {
 	let summary = storage.compute_file_summary(snapshot_uid, file_path)?;
 
+	// File-level summary does not include module discovery data.
+	// Module ownership is per-repo, not per-file. Emit the limit
+	// to indicate this is a fallback path.
 	let evidence = ModuleSummaryEvidence {
 		file_count: summary.file_count,
 		symbol_count: summary.symbol_count,
 		languages: summary.languages,
+		discovered_module_count: None,
+		module_kinds: None,
 	};
 
 	Ok(AggregatorOutput {
@@ -74,7 +102,9 @@ pub fn aggregate_file<S: AgentStorageRead + ?Sized>(
 /// Path-scoped module summary.
 ///
 /// Uses `compute_path_summary` to produce counts scoped to files
-/// under a path prefix. Same output shape as the repo-level variant.
+/// under a path prefix. Module discovery data is repo-scoped,
+/// not path-scoped, so this always returns the fallback shape
+/// with the limit.
 pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
 	storage: &S,
 	snapshot_uid: &str,
@@ -82,10 +112,14 @@ pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
 ) -> Result<AggregatorOutput, AgentStorageError> {
 	let summary = storage.compute_path_summary(snapshot_uid, path_prefix)?;
 
+	// Path-level summary does not include module discovery data.
+	// Module ownership is per-repo. Emit the limit.
 	let evidence = ModuleSummaryEvidence {
 		file_count: summary.file_count,
 		symbol_count: summary.symbol_count,
 		languages: summary.languages,
+		discovered_module_count: None,
+		module_kinds: None,
 	};
 
 	Ok(AggregatorOutput {

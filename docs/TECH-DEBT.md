@@ -1183,15 +1183,22 @@ When reintroducing, restore:
   `FocusNotImplementedYet` diagnostic. Rust-44 (module/path)
   and Rust-45 (symbol) will implement the runtime without
   changing the flag grammar.
-- **`COMPLEXITY_UNAVAILABLE`.** Cyclomatic complexity is not
-  produced by the Rust indexer; the agent pipeline emits the
-  limit code unconditionally. Signal `HIGH_COMPLEXITY` is
-  declared in the enumeration but never constructed.
-- **`MODULE_DATA_UNAVAILABLE`.** Module discovery (Layer-1
-  catalog) is TS-only. The Rust `MODULE_SUMMARY` signal falls
-  back to raw snapshot totals (files, symbols, distinct file
-  languages). The limit is emitted unconditionally so the
-  agent can distinguish this fallback from a richer catalog.
+- **`COMPLEXITY_UNAVAILABLE`.** Emitted only when no cyclomatic
+  complexity measurements exist for the snapshot. The Rust
+  indexer produces complexity measurements, so Rust-indexed
+  repos emit `HIGH_COMPLEXITY` instead of this limit. The limit
+  still fires for snapshots without measurement data (e.g., old
+  snapshots predating the measurement pipeline).
+- **`MODULE_DATA_UNAVAILABLE`.** Emitted only when both the
+  `module_candidates` table and the MODULE nodes in the `nodes`
+  table are empty. TS-indexed repos populate `module_candidates`;
+  Rust-indexed repos produce MODULE nodes. The agent storage
+  adapter falls back to MODULE nodes when `module_candidates` is
+  empty, so both indexing paths surface module evidence. The
+  limit fires only on truly module-less snapshots. When module
+  data exists, `MODULE_SUMMARY` includes `discovered_module_count`
+  and `module_kinds` breakdown (declared/operational/inferred).
+  MODULE nodes count as inferred (directory-derived).
 - **Next-action emission.** The repo-level `next` list is
   always empty. Structured `NextAction` records become
   meaningful under module/symbol focus.

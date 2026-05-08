@@ -342,6 +342,13 @@ mod tests {
 		) -> Result<Vec<crate::AgentDocEntry>, AgentStorageError> {
 			Ok(Vec::new())
 		}
+
+		fn get_module_summary(
+			&self,
+			_snapshot_uid: &str,
+		) -> Result<Option<crate::AgentModuleSummary>, AgentStorageError> {
+			Ok(None)
+		}
 	}
 
 	#[test]

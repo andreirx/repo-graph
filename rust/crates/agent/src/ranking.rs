@@ -111,6 +111,8 @@ mod tests {
 				file_count: 1,
 				symbol_count: 1,
 				languages: vec![],
+				discovered_module_count: None,
+				module_kinds: None,
 			}),
 			Signal::trust_low_resolution(TrustLowResolutionEvidence {
 				resolution_rate: 0.5,

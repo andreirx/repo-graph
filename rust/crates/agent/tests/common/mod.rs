@@ -584,6 +584,19 @@ impl AgentStorageRead for FakeAgentStorage {
 		// Default: no measurements.
 		Ok(0)
 	}
+
+	// ── Module discovery methods ──────────────────────────────────
+
+	fn get_module_summary(
+		&self,
+		_snapshot_uid: &str,
+	) -> Result<Option<repo_graph_agent::AgentModuleSummary>, AgentStorageError> {
+		self.fail_if_forced("get_module_summary")?;
+		// Default: no module candidates (emits MODULE_DATA_UNAVAILABLE).
+		// Tests that need module discovery data should seed this when
+		// the feature requires validation.
+		Ok(None)
+	}
 }
 
 // ── Gate port impl (Rust-43A) ────────────────────────────────────

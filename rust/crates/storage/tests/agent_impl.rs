@@ -460,9 +460,13 @@ fn orient_runs_over_real_storage_connection() {
 	// ── Expected limit set on an empty snapshot ──
 	//
 	// Limits on this fixture (3 total):
-	//   1. MODULE_DATA_UNAVAILABLE (always)
+	//   1. MODULE_DATA_UNAVAILABLE (no module_candidates AND no MODULE nodes)
 	//   2. GATE_NOT_CONFIGURED (no requirement declarations)
-	//   3. COMPLEXITY_UNAVAILABLE (always)
+	//   3. COMPLEXITY_UNAVAILABLE (no complexity measurements)
+	//
+	// When data exists:
+	//   - MODULE_DATA_UNAVAILABLE suppressed when module_candidates OR MODULE nodes exist
+	//   - COMPLEXITY_UNAVAILABLE suppressed when complexity measurements exist
 	//
 	// Dead-code surface is withdrawn — no DEAD_CODE signal or
 	// DEAD_CODE_UNRELIABLE limit. Internal substrate preserved
@@ -1162,4 +1166,220 @@ fn find_file_imports_returns_distinct_targets() {
 	// Two edges but they both target the same file → 1 distinct result.
 	assert_eq!(imports.len(), 1, "DISTINCT must deduplicate same target file");
 	assert_eq!(imports[0].target_file, "src/b.ts");
+}
+
+// ── get_module_summary ───────────────────────────────────────────
+
+#[test]
+fn get_module_summary_returns_none_when_no_candidates() {
+	// Empty module_candidates table → None, triggers fallback.
+	let (_tmp, mut storage) = open_temp_storage();
+	insert_repo(&storage, "r1", "my-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	let summary = <StorageConnection as AgentStorageRead>::get_module_summary(
+		&mut storage,
+		&snapshot_uid,
+	)
+	.unwrap();
+
+	assert!(
+		summary.is_none(),
+		"get_module_summary must return None when module_candidates is empty"
+	);
+}
+
+#[test]
+fn get_module_summary_returns_counts_grouped_by_kind() {
+	// Seed module_candidates with different kinds → returns grouped counts.
+	let dir = tempfile::tempdir().unwrap();
+	let db_path = dir.path().join("module_summary.db");
+	let mut storage = StorageConnection::open(&db_path).unwrap();
+	insert_repo(&storage, "r1", "my-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	// Insert module candidates with different kinds directly via SQL.
+	{
+		let raw = rusqlite::Connection::open(&db_path).unwrap();
+		raw.execute(
+			"INSERT INTO module_candidates \
+			 (module_candidate_uid, snapshot_uid, repo_uid, module_key, \
+			  module_kind, canonical_root_path, confidence, display_name) \
+			 VALUES (?, ?, 'r1', 'npm:@test/core', 'declared', 'packages/core', 1.0, '@test/core')",
+			rusqlite::params!["mc1", &snapshot_uid],
+		)
+		.unwrap();
+		raw.execute(
+			"INSERT INTO module_candidates \
+			 (module_candidate_uid, snapshot_uid, repo_uid, module_key, \
+			  module_kind, canonical_root_path, confidence, display_name) \
+			 VALUES (?, ?, 'r1', 'npm:@test/utils', 'declared', 'packages/utils', 1.0, '@test/utils')",
+			rusqlite::params!["mc2", &snapshot_uid],
+		)
+		.unwrap();
+		raw.execute(
+			"INSERT INTO module_candidates \
+			 (module_candidate_uid, snapshot_uid, repo_uid, module_key, \
+			  module_kind, canonical_root_path, confidence, display_name) \
+			 VALUES (?, ?, 'r1', 'op:cli', 'operational', 'apps/cli', 1.0, 'cli')",
+			rusqlite::params!["mc3", &snapshot_uid],
+		)
+		.unwrap();
+		raw.execute(
+			"INSERT INTO module_candidates \
+			 (module_candidate_uid, snapshot_uid, repo_uid, module_key, \
+			  module_kind, canonical_root_path, confidence, display_name) \
+			 VALUES (?, ?, 'r1', 'inf:vendor', 'inferred', 'vendor', 0.8, NULL)",
+			rusqlite::params!["mc4", &snapshot_uid],
+		)
+		.unwrap();
+	}
+
+	let summary = <StorageConnection as AgentStorageRead>::get_module_summary(
+		&mut storage,
+		&snapshot_uid,
+	)
+	.unwrap();
+
+	let summary = summary.expect("get_module_summary must return Some when candidates exist");
+	assert_eq!(summary.discovered_module_count, 4, "total module count");
+	assert_eq!(summary.declared_count, 2, "declared module count");
+	assert_eq!(summary.operational_count, 1, "operational module count");
+	assert_eq!(summary.inferred_count, 1, "inferred module count");
+}
+
+#[test]
+fn get_module_summary_treats_directory_kind_as_inferred() {
+	// The Rust indexer's fallback (get_module_nodes_as_candidates)
+	// returns modules with kind = "directory". These should be
+	// counted as inferred.
+	let dir = tempfile::tempdir().unwrap();
+	let db_path = dir.path().join("module_summary_dir.db");
+	let mut storage = StorageConnection::open(&db_path).unwrap();
+	insert_repo(&storage, "r1", "my-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	{
+		let raw = rusqlite::Connection::open(&db_path).unwrap();
+		raw.execute(
+			"INSERT INTO module_candidates \
+			 (module_candidate_uid, snapshot_uid, repo_uid, module_key, \
+			  module_kind, canonical_root_path, confidence, display_name) \
+			 VALUES (?, ?, 'r1', 'r1:src:MODULE', 'directory', 'src', 1.0, 'src')",
+			rusqlite::params!["mc1", &snapshot_uid],
+		)
+		.unwrap();
+	}
+
+	let summary = <StorageConnection as AgentStorageRead>::get_module_summary(
+		&mut storage,
+		&snapshot_uid,
+	)
+	.unwrap();
+
+	let summary = summary.expect("get_module_summary must return Some");
+	assert_eq!(summary.discovered_module_count, 1);
+	assert_eq!(summary.declared_count, 0);
+	assert_eq!(summary.operational_count, 0);
+	assert_eq!(summary.inferred_count, 1, "directory kind maps to inferred");
+}
+
+#[test]
+fn get_module_summary_falls_back_to_module_nodes() {
+	// When module_candidates is empty but MODULE nodes exist in the
+	// nodes table (Rust-indexed repos), the adapter must fall back
+	// to counting MODULE nodes. All MODULE nodes from the Rust
+	// indexer are directory-derived, so they count as inferred.
+	use repo_graph_storage::types::GraphNode;
+
+	let dir = tempfile::tempdir().unwrap();
+	let db_path = dir.path().join("module_fallback.db");
+	let mut storage = StorageConnection::open(&db_path).unwrap();
+	insert_repo(&storage, "r1", "my-repo");
+	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+
+	// Insert MODULE nodes directly (Rust indexer path).
+	storage
+		.insert_nodes(&[
+			GraphNode {
+				node_uid: "mod1".into(),
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: "r1".into(),
+				stable_key: "r1:src:MODULE".into(),
+				kind: "MODULE".into(),
+				subtype: None,
+				name: "src".into(),
+				qualified_name: Some("src".into()),
+				file_uid: None,
+				parent_node_uid: None,
+				location: None,
+				signature: None,
+				visibility: None,
+				doc_comment: None,
+				metadata_json: None,
+			},
+			GraphNode {
+				node_uid: "mod2".into(),
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: "r1".into(),
+				stable_key: "r1:src/core:MODULE".into(),
+				kind: "MODULE".into(),
+				subtype: None,
+				name: "core".into(),
+				qualified_name: Some("src/core".into()),
+				file_uid: None,
+				parent_node_uid: None,
+				location: None,
+				signature: None,
+				visibility: None,
+				doc_comment: None,
+				metadata_json: None,
+			},
+			GraphNode {
+				node_uid: "mod3".into(),
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: "r1".into(),
+				stable_key: "r1:src/adapters:MODULE".into(),
+				kind: "MODULE".into(),
+				subtype: None,
+				name: "adapters".into(),
+				qualified_name: Some("src/adapters".into()),
+				file_uid: None,
+				parent_node_uid: None,
+				location: None,
+				signature: None,
+				visibility: None,
+				doc_comment: None,
+				metadata_json: None,
+			},
+		])
+		.unwrap();
+
+	// module_candidates is empty, but MODULE nodes exist.
+	let summary = <StorageConnection as AgentStorageRead>::get_module_summary(
+		&mut storage,
+		&snapshot_uid,
+	)
+	.unwrap();
+
+	let summary = summary.expect(
+		"get_module_summary must return Some when MODULE nodes exist \
+		 (fallback from empty module_candidates)",
+	);
+	assert_eq!(
+		summary.discovered_module_count, 3,
+		"should count MODULE nodes when module_candidates is empty"
+	);
+	assert_eq!(
+		summary.declared_count, 0,
+		"MODULE nodes are not manifest-backed"
+	);
+	assert_eq!(
+		summary.operational_count, 0,
+		"MODULE nodes are not surface-promoted"
+	);
+	assert_eq!(
+		summary.inferred_count, 3,
+		"MODULE nodes are directory-derived, counted as inferred"
+	);
 }
