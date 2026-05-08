@@ -44,6 +44,8 @@ pub enum SourceRef {
 	StorageFindSymbolCallers,
 	/// Port method: `AgentStorageRead::find_symbol_callees`.
 	StorageFindSymbolCallees,
+	/// Port method: `AgentStorageRead::query_high_complexity_symbols`.
+	StorageQueryHighComplexitySymbols,
 	/// Check use case: two-phase reducer (`check::check`).
 	/// Emitted by `CHECK_PASS`, `CHECK_FAIL`, `CHECK_INCOMPLETE`
 	/// signals.
@@ -71,6 +73,9 @@ impl SourceRef {
 			Self::GateAssemble => "gate::assemble",
 			Self::StorageFindSymbolCallers => "storage::find_symbol_callers",
 			Self::StorageFindSymbolCallees => "storage::find_symbol_callees",
+			Self::StorageQueryHighComplexitySymbols => {
+				"storage::query_high_complexity_symbols"
+			}
 			Self::CheckReducer => "check::reducer",
 			Self::ExplainPipeline => "explain::pipeline",
 		}
@@ -107,6 +112,7 @@ mod tests {
 			SourceRef::StorageGetTrustSummary,
 			SourceRef::StorageFindSymbolCallers,
 			SourceRef::StorageFindSymbolCallees,
+			SourceRef::StorageQueryHighComplexitySymbols,
 			SourceRef::CheckReducer,
 			SourceRef::ExplainPipeline,
 		] {

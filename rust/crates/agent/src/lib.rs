@@ -109,11 +109,11 @@ pub use errors::{AgentStorageError, CheckError, ExplainError, OrientError};
 pub use explain::run_explain;
 pub use orient::orient;
 pub use storage_port::{
-	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentCycle,
-	AgentDeadNode, AgentDocEntry, AgentFileEntry, AgentFocusCandidate,
-	AgentFocusKind, AgentImportEdge, AgentImportEntry, AgentPathResolution,
-	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo,
-	AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageRead,
-	AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary,
-	EnrichmentState,
+	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow,
+	AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry,
+	AgentFileEntry, AgentFocusCandidate, AgentFocusKind, AgentImportEdge,
+	AgentImportEntry, AgentPathResolution, AgentReliabilityAxis,
+	AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
+	AgentStaleFile, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
+	AgentTrustSummary, EnrichmentState,
 };

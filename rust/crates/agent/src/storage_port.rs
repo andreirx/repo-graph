@@ -155,6 +155,24 @@ pub struct AgentRepoSummary {
 	pub languages: Vec<String>,
 }
 
+// ── Complexity measurement ──────────────────────────────────────
+
+/// A symbol with high cyclomatic complexity.
+///
+/// Used by the `HIGH_COMPLEXITY` signal to surface complex code
+/// that may benefit from refactoring or additional testing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentComplexityMeasurement {
+	/// The symbol's stable key.
+	pub stable_key: String,
+	/// Symbol name (function/method name).
+	pub symbol_name: String,
+	/// Owning file path (if resolvable).
+	pub file_path: Option<String>,
+	/// The cyclomatic complexity value.
+	pub complexity: u64,
+}
+
 // ── Reliability axis (projection of trust axis scores) ──────────
 
 /// Three-state reliability level, mirror of `trust::ReliabilityLevel`.
@@ -615,6 +633,33 @@ pub trait AgentStorageRead {
 		&self,
 		repo_uid: &str,
 	) -> Result<Vec<AgentDocEntry>, AgentStorageError>;
+
+	// ── Complexity measurements ─────────────────────────────────────
+
+	/// Query symbols with cyclomatic complexity above a threshold.
+	///
+	/// Returns the top N symbols (by complexity descending) where
+	/// complexity exceeds `min_threshold`. Used by the HIGH_COMPLEXITY
+	/// signal to surface code that may need refactoring attention.
+	///
+	/// Returns an empty vector when no measurements exist or none
+	/// exceed the threshold — this is valid, not an error.
+	fn query_high_complexity_symbols(
+		&self,
+		snapshot_uid: &str,
+		min_threshold: u64,
+		limit: usize,
+	) -> Result<Vec<AgentComplexityMeasurement>, AgentStorageError>;
+
+	/// Check whether any complexity measurements exist for a snapshot.
+	///
+	/// Used to determine whether to emit COMPLEXITY_UNAVAILABLE limit.
+	/// Returns true if at least one cyclomatic_complexity measurement
+	/// exists, false otherwise.
+	fn has_complexity_measurements(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<bool, AgentStorageError>;
 }
 
 // ── Explain DTOs ────────────────────────────────────────────────

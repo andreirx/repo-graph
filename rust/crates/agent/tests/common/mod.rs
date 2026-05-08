@@ -551,6 +551,29 @@ impl AgentStorageRead for FakeAgentStorage {
 			.cloned()
 			.unwrap_or_default())
 	}
+
+	// ── Complexity methods ────────────────────────────────────────
+
+	fn query_high_complexity_symbols(
+		&self,
+		_snapshot_uid: &str,
+		_min_threshold: u64,
+		_limit: usize,
+	) -> Result<Vec<repo_graph_agent::AgentComplexityMeasurement>, AgentStorageError> {
+		self.fail_if_forced("query_high_complexity_symbols")?;
+		// Default: no measurements. Tests that need complexity
+		// data should seed this map when the feature is added.
+		Ok(Vec::new())
+	}
+
+	fn has_complexity_measurements(
+		&self,
+		_snapshot_uid: &str,
+	) -> Result<bool, AgentStorageError> {
+		self.fail_if_forced("has_complexity_measurements")?;
+		// Default: no measurements (emits COMPLEXITY_UNAVAILABLE limit).
+		Ok(false)
+	}
 }
 
 // ── Gate port impl (Rust-43A) ────────────────────────────────────

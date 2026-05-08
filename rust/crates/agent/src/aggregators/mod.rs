@@ -22,6 +22,7 @@
 //! `OrientError::Storage`.
 
 pub mod boundary;
+pub mod complexity;
 pub mod cycles;
 pub mod dead_code;
 pub mod gate;

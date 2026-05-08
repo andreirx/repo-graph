@@ -26,13 +26,13 @@
 use std::path::Path;
 
 use repo_graph_agent::{
-	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow, AgentCycle,
-	AgentDeadNode, AgentDocEntry, AgentFileEntry, AgentFocusCandidate,
-	AgentFocusKind, AgentImportEdge, AgentImportEntry, AgentPathResolution,
-	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo,
-	AgentRepoSummary, AgentSnapshot, AgentStaleFile, AgentStorageError,
-	AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
-	AgentTrustSummary, EnrichmentState,
+	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow,
+	AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry,
+	AgentFileEntry, AgentFocusCandidate, AgentFocusKind, AgentImportEdge,
+	AgentImportEntry, AgentPathResolution, AgentReliabilityAxis,
+	AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
+	AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext,
+	AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_trust::service::assemble_trust_report;
 use repo_graph_trust::types::{
@@ -1241,5 +1241,86 @@ impl AgentStorageRead for StorageConnection {
 			.collect();
 
 		Ok(entries)
+	}
+
+	// ── Complexity measurements ─────────────────────────────────────
+
+	fn query_high_complexity_symbols(
+		&self,
+		snapshot_uid: &str,
+		min_threshold: u64,
+		limit: usize,
+	) -> Result<Vec<AgentComplexityMeasurement>, AgentStorageError> {
+		let conn = self.connection();
+
+		// Query cyclomatic_complexity measurements joined with nodes to get
+		// symbol name and file path. Filter by threshold, order by complexity
+		// descending, limit to top N.
+		let mut stmt = conn
+			.prepare(
+				"SELECT m.target_stable_key, n.name, f.path, m.value_json \
+				 FROM measurements m \
+				 LEFT JOIN nodes n ON m.target_stable_key = n.stable_key \
+				   AND n.snapshot_uid = m.snapshot_uid \
+				 LEFT JOIN files f ON n.file_uid = f.file_uid \
+				 WHERE m.snapshot_uid = ? AND m.kind = 'cyclomatic_complexity' \
+				 ORDER BY CAST(json_extract(m.value_json, '$.value') AS INTEGER) DESC \
+				 LIMIT ?",
+			)
+			.map_err(map_err("query_high_complexity_symbols"))?;
+
+		let rows = stmt
+			.query_map(rusqlite::params![snapshot_uid, limit], |row| {
+				let stable_key: String = row.get(0)?;
+				let symbol_name: Option<String> = row.get(1)?;
+				let file_path: Option<String> = row.get(2)?;
+				let value_json: String = row.get(3)?;
+
+				// Parse the complexity value from JSON {"value": N}
+				let complexity: u64 = serde_json::from_str::<serde_json::Value>(&value_json)
+					.ok()
+					.and_then(|v| v.get("value").and_then(|n| n.as_u64()))
+					.unwrap_or(0);
+
+				Ok((stable_key, symbol_name, file_path, complexity))
+			})
+			.map_err(map_err("query_high_complexity_symbols"))?;
+
+		// Collect and filter by threshold
+		let mut results = Vec::new();
+		for row in rows {
+			let (stable_key, symbol_name, file_path, complexity) =
+				row.map_err(map_err("query_high_complexity_symbols"))?;
+
+			if complexity >= min_threshold {
+				results.push(AgentComplexityMeasurement {
+					stable_key,
+					symbol_name: symbol_name.unwrap_or_else(|| "unknown".to_string()),
+					file_path,
+					complexity,
+				});
+			}
+		}
+
+		Ok(results)
+	}
+
+	fn has_complexity_measurements(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<bool, AgentStorageError> {
+		let conn = self.connection();
+
+		let count: i64 = conn
+			.query_row(
+				"SELECT COUNT(*) FROM measurements \
+				 WHERE snapshot_uid = ? AND kind = 'cyclomatic_complexity' \
+				 LIMIT 1",
+				rusqlite::params![snapshot_uid],
+				|row| row.get(0),
+			)
+			.map_err(map_err("has_complexity_measurements"))?;
+
+		Ok(count > 0)
 	}
 }

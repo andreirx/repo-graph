@@ -895,7 +895,7 @@ Items 1-2 are done. Items 3-8 are deferred per precedence rule above.
 4. ~~Quality delta surfacing~~ — deferred (cross-cutting)
 5. ~~Comparability/identity caveats~~ — deferred (cross-cutting)
 6. ~~Document-backed authored relationship items~~ — deferred
-7. **Long-lived daemon** — D1–D5b SHIPPED, D6 validated (see §3)
+7. **Long-lived daemon** — D1-D6 SHIPPED (see §3)
 8. ~~Seam expansion~~ — deferred (architectural extraction)
 
 ---
@@ -1007,10 +1007,10 @@ themselves are the data — not a narrow ontology of extracted facts.
    not inventory classification. Do NOT add content-authoritative detection
    to the inventory surface.
 
-### 3. Long-lived analysis daemon + daemon-backed CLI — D1–D5b SHIPPED
+### 3. Long-lived analysis daemon + daemon-backed CLI — D1-D6 SHIPPED
 Two-part item: support module (multi-agent coordination runtime) + feature (CLI client).
 
-**Implementation status (2026-05-07):**
+**Implementation status (2026-05-08):**
 
 | Slice | Status | Description |
 |-------|--------|-------------|
@@ -1023,10 +1023,11 @@ Two-part item: support module (multi-agent coordination runtime) + feature (CLI 
 | D5c | DEFERRED | Cancellation support — reuses abort seam, separate concern |
 | D6 | DONE | Smoke validation on real repos (repo-graph self-index) |
 
-**D6 validation results (2026-05-07):**
+**D6 validation results (2026-05-07, updated 2026-05-08):**
 - Functional parity: index, refresh, enrich, orient, check, explain all match one-shot `rmap`
 - Protocol: progress events before final response, request IDs correlate, no stray output
 - Coordination: concurrent reads, write serialization, multi-DB isolation all verified
+- Validation report: `docs/testing/daemon-validation-report.md`
 
 **Daemon mode currently supports:**
 - Multi-DB runtime (multiple databases loaded simultaneously)

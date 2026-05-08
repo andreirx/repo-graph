@@ -431,6 +431,26 @@ pub struct ModuleSummaryEvidence {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HighComplexityEvidence {
+	/// Count of symbols exceeding the complexity threshold.
+	pub high_complexity_count: u64,
+	/// Threshold used (e.g., 20).
+	pub threshold: u64,
+	/// Top N most complex symbols.
+	pub top_complex: Vec<ComplexSymbolEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ComplexSymbolEvidence {
+	/// Symbol name (function/method).
+	pub symbol: String,
+	/// Owning file path.
+	pub file: Option<String>,
+	/// Cyclomatic complexity value.
+	pub complexity: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SnapshotInfoEvidence {
 	pub snapshot_uid: String,
 	pub scope: String,
@@ -685,6 +705,7 @@ pub enum SignalEvidence {
 	GateFail(GateFailEvidence),
 	GateIncomplete(GateIncompleteEvidence),
 	ImportCycles(ImportCyclesEvidence),
+	HighComplexity(HighComplexityEvidence),
 	TrustLowResolution(TrustLowResolutionEvidence),
 	TrustStaleSnapshot(TrustStaleSnapshotEvidence),
 	TrustNoEnrichment(TrustNoEnrichmentEvidence),
@@ -717,6 +738,7 @@ impl Serialize for SignalEvidence {
 			Self::GateFail(e) => e.serialize(serializer),
 			Self::GateIncomplete(e) => e.serialize(serializer),
 			Self::ImportCycles(e) => e.serialize(serializer),
+			Self::HighComplexity(e) => e.serialize(serializer),
 			Self::TrustLowResolution(e) => e.serialize(serializer),
 			Self::TrustStaleSnapshot(e) => e.serialize(serializer),
 			Self::TrustNoEnrichment(e) => e.serialize(serializer),
@@ -754,6 +776,7 @@ impl SignalEvidence {
 			Self::GateFail(_) => "GateFail",
 			Self::GateIncomplete(_) => "GateIncomplete",
 			Self::ImportCycles(_) => "ImportCycles",
+			Self::HighComplexity(_) => "HighComplexity",
 			Self::TrustLowResolution(_) => "TrustLowResolution",
 			Self::TrustStaleSnapshot(_) => "TrustStaleSnapshot",
 			Self::TrustNoEnrichment(_) => "TrustNoEnrichment",
@@ -986,6 +1009,22 @@ impl Signal {
 			summary,
 			SignalEvidence::ImportCycles(evidence),
 			SourceRef::StorageFindModuleCycles,
+		)
+	}
+
+	pub fn high_complexity(evidence: HighComplexityEvidence) -> Self {
+		let summary = format!(
+			"{} symbol{} exceed{} complexity threshold of {}.",
+			evidence.high_complexity_count,
+			if evidence.high_complexity_count == 1 { "" } else { "s" },
+			if evidence.high_complexity_count == 1 { "s" } else { "" },
+			evidence.threshold
+		);
+		Self::build(
+			SignalCode::HighComplexity,
+			summary,
+			SignalEvidence::HighComplexity(evidence),
+			SourceRef::StorageQueryHighComplexitySymbols,
 		)
 	}
 

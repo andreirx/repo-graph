@@ -8,17 +8,18 @@
 //!   1. Resolve repo identity (`get_repo`).
 //!   2. Resolve latest READY snapshot (`get_latest_snapshot`).
 //!   3. Run aggregators in a fixed order:
-//!      snapshot → trust → cycles → boundary → dead_code → module_summary.
+//!      snapshot → trust → cycles → boundary → dead_code →
+//!      module_summary → gate → complexity.
 //!      The order of aggregator invocation has no effect on the
 //!      final signal order — the ranking pass re-sorts everything
 //!      — but fixing it keeps error-propagation deterministic
 //!      and makes test fixtures predictable.
 //!   4. Collect all signals and limits into single vectors.
-//!   5. Append the `GATE_UNAVAILABLE` limit (Rust-42 policy
-//!      stub — see Sub-Decision A1 and TECH-DEBT.md).
-//!   6. Append the `COMPLEXITY_UNAVAILABLE` limit
-//!      (HIGH_COMPLEXITY signal is not emitted in Rust-42 because
-//!      the Rust indexer does not produce cyclomatic measurements).
+//!   5. Gate aggregator emits GATE_PASS/FAIL/INCOMPLETE or
+//!      GATE_NOT_CONFIGURED limit.
+//!   6. Complexity aggregator emits HIGH_COMPLEXITY signal if
+//!      measurements exist, or COMPLEXITY_UNAVAILABLE limit
+//!      when no measurements are present.
 //!   7. Sort signals + assign ranks.
 //!   8. Truncate signals / limits to budget caps.
 //!   9. Derive confidence from raw trust data (not from signals).
@@ -133,12 +134,18 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
 	)?;
 	merge(&mut all_signals, &mut all_limits, gate_out);
 
-	// ── 4 & 5. Static limits from Rust-42 scope. ─────────────
-	// COMPLEXITY_UNAVAILABLE is added unconditionally because
-	// the Rust indexer does not emit cyclomatic measurements
-	// and the agent pipeline does not attempt to synthesize
-	// them. Orient reports "unknown", never "none".
-	all_limits.push(Limit::from_code(LimitCode::ComplexityUnavailable));
+	// complexity — conditional on measurement presence.
+	// If the indexer emitted cyclomatic measurements, run the
+	// aggregator (may emit HIGH_COMPLEXITY signal). Otherwise
+	// emit COMPLEXITY_UNAVAILABLE limit so the agent knows
+	// the surface is unknown rather than known-zero.
+	if storage.has_complexity_measurements(&snapshot_uid)? {
+		let complexity_out =
+			aggregators::complexity::aggregate(storage, &snapshot_uid)?;
+		merge(&mut all_signals, &mut all_limits, complexity_out);
+	} else {
+		all_limits.push(Limit::from_code(LimitCode::ComplexityUnavailable));
+	}
 
 	// ── 7. Sort + rank. ──────────────────────────────────────
 	ranking::sort_and_rank(&mut all_signals);
