@@ -861,7 +861,7 @@ artifact family. The refresh pipeline and query surfaces consume this registry.
 | ACR-3 | Add per-row freshness and provenance schema | DONE |
 | ACR-4 | Implement impact propagation from L0 changes | DONE |
 | ACR-5 | Boundary contract proof case (first fix) | DONE |
-| ACR-6 | Wire query surfaces to report freshness/degradation | NOT STARTED |
+| ACR-6 | Wire query surfaces to report freshness/degradation | DONE |
 
 **Key decisions (locked):**
 - Option A: full registry now (all families classified upfront)

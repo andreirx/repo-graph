@@ -22,6 +22,12 @@
 //! pipeline can actually emit are listed here. The contract
 //! reserves additional codes (e.g. `IMPORTS_ONE_HOP` for the
 //! `imports` surface) for future commands.
+//!
+//! ACR-6 addition: `DegradationInfo` provides structured context
+//! for limits that represent capability gaps or data staleness.
+//! Not all limits carry degradation info — only those where the
+//! limit represents a known architectural gap (unsupported on
+//! embodiment) or data quality issue (stale/missing).
 
 use serde::{Serialize, Serializer};
 
@@ -122,6 +128,120 @@ impl Serialize for LimitCode {
 	}
 }
 
+// ── Degradation (ACR-6) ──────────────────────────────────────────
+//
+// Degradation info provides structured context for limits that
+// represent capability gaps or data quality issues. The status
+// vocabulary maps from artifact-contracts::DegradationPolicy
+// semantics but is surfaced as agent-facing DTO.
+
+/// Degradation status for a limit.
+///
+/// Indicates why a capability is unavailable or degraded.
+/// Maps from `artifact_contracts::DegradationPolicy` but uses
+/// agent-facing vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DegradationStatus {
+	/// Feature is not supported on this indexer embodiment.
+	///
+	/// Not a bug — a capability gap. The Rust indexer may not
+	/// populate certain tables that the TS prototype did.
+	Unsupported,
+
+	/// Required data is missing when it should be present.
+	///
+	/// Source files exist but expected artifacts were not extracted.
+	Missing,
+
+	/// Data exists but is partially stale/impacted.
+	///
+	/// Some backing rows have freshness_state != 'current'.
+	PartiallyStale,
+}
+
+impl DegradationStatus {
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Unsupported => "unsupported",
+			Self::Missing => "missing",
+			Self::PartiallyStale => "partially_stale",
+		}
+	}
+}
+
+impl Serialize for DegradationStatus {
+	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		serializer.serialize_str(self.as_str())
+	}
+}
+
+/// Structured degradation context for a limit.
+///
+/// Attached to limits where the unavailability has a known
+/// architectural or data-quality cause. Not all limits carry
+/// degradation info — only those with explicit backing reasons.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DegradationInfo {
+	/// Why the capability is degraded.
+	pub status: DegradationStatus,
+
+	/// The artifact family affected (e.g., "ModuleCandidates", "ProjectSurfaces").
+	pub family: String,
+
+	/// Human-readable explanation.
+	pub reason: String,
+
+	/// Suggested action to resolve (if any).
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub recommendation: Option<String>,
+}
+
+impl DegradationInfo {
+	/// Create degradation info for an unsupported feature.
+	pub fn unsupported(family: impl Into<String>, reason: impl Into<String>) -> Self {
+		Self {
+			status: DegradationStatus::Unsupported,
+			family: family.into(),
+			reason: reason.into(),
+			recommendation: None,
+		}
+	}
+
+	/// Create degradation info for an unsupported feature with recommendation.
+	pub fn unsupported_with_recommendation(
+		family: impl Into<String>,
+		reason: impl Into<String>,
+		recommendation: impl Into<String>,
+	) -> Self {
+		Self {
+			status: DegradationStatus::Unsupported,
+			family: family.into(),
+			reason: reason.into(),
+			recommendation: Some(recommendation.into()),
+		}
+	}
+
+	/// Create degradation info for missing data.
+	pub fn missing(family: impl Into<String>, reason: impl Into<String>) -> Self {
+		Self {
+			status: DegradationStatus::Missing,
+			family: family.into(),
+			reason: reason.into(),
+			recommendation: None,
+		}
+	}
+
+	/// Create degradation info for partially stale data.
+	pub fn partially_stale(family: impl Into<String>, reason: impl Into<String>) -> Self {
+		Self {
+			status: DegradationStatus::PartiallyStale,
+			family: family.into(),
+			reason: reason.into(),
+			recommendation: Some("consider refreshing the repository".into()),
+		}
+	}
+}
+
 /// One limit record in the output envelope.
 ///
 /// Shape rules:
@@ -136,16 +256,20 @@ impl Serialize for LimitCode {
 ///     triggered by an upstream policy layer carry the reasons
 ///     through to the output envelope so an agent can display
 ///     or match on them.
+///   - `degradation` (ACR-6) is structured context for limits
+///     that represent capability gaps or data quality issues.
+///     Most limits do not carry degradation info.
 ///
-/// The `reasons` field is skipped during serialization when
-/// empty, preserving the pre-Rust-43-fix output shape for every
-/// limit that does not use it.
+/// The `reasons` and `degradation` fields are skipped during
+/// serialization when empty/None, preserving backward compat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Limit {
 	pub code: LimitCode,
 	pub summary: &'static str,
 	#[serde(skip_serializing_if = "Vec::is_empty")]
 	pub reasons: Vec<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub degradation: Option<DegradationInfo>,
 }
 
 impl Limit {
@@ -153,14 +277,13 @@ impl Limit {
 	/// looked up by the code — callers cannot supply their own
 	/// summary string, which is how the contract stays stable.
 	///
-	/// No reasons attached. Use
-	/// `from_code_with_reasons` when the limit needs to carry
-	/// upstream diagnostic strings.
+	/// No reasons or degradation attached.
 	pub fn from_code(code: LimitCode) -> Self {
 		Self {
 			code,
 			summary: code.summary(),
 			reasons: Vec::new(),
+			degradation: None,
 		}
 	}
 
@@ -175,6 +298,37 @@ impl Limit {
 			code,
 			summary: code.summary(),
 			reasons,
+			degradation: None,
+		}
+	}
+
+	/// Construct a limit record with degradation info (ACR-6).
+	///
+	/// Use for limits that represent capability gaps or data
+	/// quality issues where structured context is valuable.
+	pub fn from_code_with_degradation(
+		code: LimitCode,
+		degradation: DegradationInfo,
+	) -> Self {
+		Self {
+			code,
+			summary: code.summary(),
+			reasons: Vec::new(),
+			degradation: Some(degradation),
+		}
+	}
+
+	/// Construct a limit record with both reasons and degradation.
+	pub fn from_code_with_reasons_and_degradation(
+		code: LimitCode,
+		reasons: Vec<String>,
+		degradation: DegradationInfo,
+	) -> Self {
+		Self {
+			code,
+			summary: code.summary(),
+			reasons,
+			degradation: Some(degradation),
 		}
 	}
 }
@@ -202,5 +356,82 @@ mod tests {
 		let s = serde_json::to_string(&l).unwrap();
 		assert!(s.contains("\"code\":\"COMPLEXITY_UNAVAILABLE\""));
 		assert!(s.contains("\"summary\":"));
+	}
+
+	// ── Degradation tests (ACR-6) ────────────────────────────────
+
+	#[test]
+	fn degradation_status_serializes_as_snake_case() {
+		assert_eq!(
+			serde_json::to_string(&DegradationStatus::Unsupported).unwrap(),
+			"\"unsupported\""
+		);
+		assert_eq!(
+			serde_json::to_string(&DegradationStatus::Missing).unwrap(),
+			"\"missing\""
+		);
+		assert_eq!(
+			serde_json::to_string(&DegradationStatus::PartiallyStale).unwrap(),
+			"\"partially_stale\""
+		);
+	}
+
+	#[test]
+	fn degradation_info_unsupported_constructor() {
+		let info = DegradationInfo::unsupported(
+			"ModuleCandidates",
+			"not populated on Rust indexer path",
+		);
+		assert_eq!(info.status, DegradationStatus::Unsupported);
+		assert_eq!(info.family, "ModuleCandidates");
+		assert!(info.reason.contains("Rust indexer"));
+		assert!(info.recommendation.is_none());
+	}
+
+	#[test]
+	fn degradation_info_with_recommendation() {
+		let info = DegradationInfo::unsupported_with_recommendation(
+			"ProjectSurfaces",
+			"requires module_candidates",
+			"use TypeScript indexer",
+		);
+		assert_eq!(info.status, DegradationStatus::Unsupported);
+		assert_eq!(info.recommendation, Some("use TypeScript indexer".into()));
+	}
+
+	#[test]
+	fn limit_with_degradation_serializes_correctly() {
+		let degradation = DegradationInfo::unsupported(
+			"ModuleCandidates",
+			"not supported on this embodiment",
+		);
+		let l = Limit::from_code_with_degradation(
+			LimitCode::ModuleDataUnavailable,
+			degradation,
+		);
+		let s = serde_json::to_string(&l).unwrap();
+
+		assert!(s.contains("\"code\":\"MODULE_DATA_UNAVAILABLE\""));
+		assert!(s.contains("\"degradation\":{"));
+		assert!(s.contains("\"status\":\"unsupported\""));
+		assert!(s.contains("\"family\":\"ModuleCandidates\""));
+	}
+
+	#[test]
+	fn limit_without_degradation_omits_field() {
+		let l = Limit::from_code(LimitCode::GateNotConfigured);
+		let s = serde_json::to_string(&l).unwrap();
+
+		// Should NOT contain degradation field
+		assert!(!s.contains("\"degradation\""));
+	}
+
+	#[test]
+	fn degradation_info_serializes_without_null_recommendation() {
+		let info = DegradationInfo::unsupported("Test", "reason");
+		let s = serde_json::to_string(&info).unwrap();
+
+		// recommendation is None, so should be omitted
+		assert!(!s.contains("\"recommendation\""));
 	}
 }

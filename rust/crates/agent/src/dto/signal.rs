@@ -45,6 +45,92 @@ use serde::Serialize;
 
 use crate::dto::source::SourceRef;
 
+// ── Freshness (ACR-6) ────────────────────────────────────────────
+//
+// Per-signal freshness for signals backed by Layer 2+ artifacts.
+// Maps from artifact_contracts::FreshnessState but uses agent-facing DTO.
+// Only populated when the signal is backed by freshness-tracked tables.
+
+/// Freshness state for a signal's backing artifacts.
+///
+/// Maps from `artifact_contracts::FreshnessState`. Only three states
+/// are surfaced in agent DTOs — `Stale` is not yet exposed (deferred).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FreshnessStateDto {
+	/// All backing artifacts are current (freshness_state = 'current').
+	Current,
+	/// At least one backing artifact is impacted by L0 changes.
+	Impacted,
+	/// Freshness state is unknown (no provenance tracked).
+	Unknown,
+}
+
+impl FreshnessStateDto {
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Current => "current",
+			Self::Impacted => "impacted",
+			Self::Unknown => "unknown",
+		}
+	}
+}
+
+impl Serialize for FreshnessStateDto {
+	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		serializer.serialize_str(self.as_str())
+	}
+}
+
+/// Freshness info for a signal backed by Layer 2+ artifacts.
+///
+/// Attached to signals whose evidence is derived from freshness-tracked
+/// tables (boundary_contracts, inferences, module_candidates, etc.).
+/// Omitted from signals backed by L0/L1 facts or governance overlays.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FreshnessInfo {
+	/// Aggregate freshness state (worst-of-all backing rows).
+	pub state: FreshnessStateDto,
+
+	/// When the backing artifacts became impacted (ISO 8601).
+	/// Only present when state = Impacted.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub impacted_since: Option<String>,
+}
+
+impl FreshnessInfo {
+	/// Create freshness info for current state.
+	pub fn current() -> Self {
+		Self {
+			state: FreshnessStateDto::Current,
+			impacted_since: None,
+		}
+	}
+
+	/// Create freshness info for impacted state.
+	pub fn impacted(since: impl Into<String>) -> Self {
+		Self {
+			state: FreshnessStateDto::Impacted,
+			impacted_since: Some(since.into()),
+		}
+	}
+
+	/// Create freshness info for impacted state without timestamp.
+	pub fn impacted_unknown_time() -> Self {
+		Self {
+			state: FreshnessStateDto::Impacted,
+			impacted_since: None,
+		}
+	}
+
+	/// Create freshness info for unknown state.
+	pub fn unknown() -> Self {
+		Self {
+			state: FreshnessStateDto::Unknown,
+			impacted_since: None,
+		}
+	}
+}
+
 // ── SignalScope ──────────────────────────────────────────────────
 
 /// Whether a signal is directly computed for the focused entity or
@@ -177,6 +263,7 @@ pub enum SignalCode {
 	GateFail,
 	GateIncomplete,
 	BoundaryViolations,
+	BoundaryLinksSummary,
 	// Trust
 	TrustLowResolution,
 	TrustStaleSnapshot,
@@ -217,6 +304,7 @@ impl SignalCode {
 			Self::GateFail => "GATE_FAIL",
 			Self::GateIncomplete => "GATE_INCOMPLETE",
 			Self::BoundaryViolations => "BOUNDARY_VIOLATIONS",
+			Self::BoundaryLinksSummary => "BOUNDARY_LINKS_SUMMARY",
 			Self::TrustLowResolution => "TRUST_LOW_RESOLUTION",
 			Self::TrustStaleSnapshot => "TRUST_STALE_SNAPSHOT",
 			Self::TrustNoEnrichment => "TRUST_NO_ENRICHMENT",
@@ -260,8 +348,9 @@ impl SignalCode {
 			Self::GatePass => 0,
 			Self::GateFail => 0,
 			Self::GateIncomplete => 0,
-			// Boundary (High): sole occupant.
+			// Boundary: violations most urgent, then summary.
 			Self::BoundaryViolations => 0,
+			Self::BoundaryLinksSummary => 1,
 			// Trust (Medium): low-resolution most urgent.
 			Self::TrustLowResolution => 0,
 			Self::TrustStaleSnapshot => 1,
@@ -310,6 +399,7 @@ impl SignalCode {
 			Self::GateFail => (Gate, High),
 			Self::GateIncomplete => (Gate, Medium),
 			Self::BoundaryViolations => (Boundary, High),
+			Self::BoundaryLinksSummary => (Boundary, Low),
 			Self::TrustLowResolution => (Trust, Medium),
 			Self::TrustStaleSnapshot => (Trust, Medium),
 			Self::TrustNoEnrichment => (Trust, Low),
@@ -417,6 +507,18 @@ pub struct BoundaryViolationEvidence {
 	pub source_module: String,
 	pub target_module: String,
 	pub edge_count: u64,
+}
+
+/// Evidence for `BOUNDARY_LINKS_SUMMARY` signal.
+///
+/// Reports total boundary interaction links for the snapshot.
+/// This is the first signal backed by a freshness-tracked L2 table
+/// (`boundary_interaction_links`). The freshness state is attached
+/// via `Signal.freshness`, not in the evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BoundaryLinksSummaryEvidence {
+	/// Total number of boundary interaction links.
+	pub link_count: u64,
 }
 
 // DeadCodeEvidence, DeadSymbolEvidence — removed.
@@ -732,6 +834,7 @@ pub enum SignalEvidence {
 	TrustStaleSnapshot(TrustStaleSnapshotEvidence),
 	TrustNoEnrichment(TrustNoEnrichmentEvidence),
 	BoundaryViolations(BoundaryViolationsEvidence),
+	BoundaryLinksSummary(BoundaryLinksSummaryEvidence),
 	// DeadCode — variant removed. Surface withdrawn.
 	ModuleSummary(ModuleSummaryEvidence),
 	SnapshotInfo(SnapshotInfoEvidence),
@@ -765,6 +868,7 @@ impl Serialize for SignalEvidence {
 			Self::TrustStaleSnapshot(e) => e.serialize(serializer),
 			Self::TrustNoEnrichment(e) => e.serialize(serializer),
 			Self::BoundaryViolations(e) => e.serialize(serializer),
+			Self::BoundaryLinksSummary(e) => e.serialize(serializer),
 			Self::ModuleSummary(e) => e.serialize(serializer),
 			Self::SnapshotInfo(e) => e.serialize(serializer),
 			Self::CallersSummary(e) => e.serialize(serializer),
@@ -803,6 +907,7 @@ impl SignalEvidence {
 			Self::TrustStaleSnapshot(_) => "TrustStaleSnapshot",
 			Self::TrustNoEnrichment(_) => "TrustNoEnrichment",
 			Self::BoundaryViolations(_) => "BoundaryViolations",
+			Self::BoundaryLinksSummary(_) => "BoundaryLinksSummary",
 			Self::ModuleSummary(_) => "ModuleSummary",
 			Self::SnapshotInfo(_) => "SnapshotInfo",
 			Self::CallersSummary(_) => "CallersSummary",
@@ -848,12 +953,21 @@ pub struct Signal {
 	pub(crate) evidence: SignalEvidence,
 	pub(crate) source: SourceRef,
 	pub(crate) scope: SignalScope,
+	/// Freshness info for signals backed by Layer 2+ artifacts (ACR-6).
+	/// None for signals backed by L0/L1 facts or governance overlays.
+	pub(crate) freshness: Option<FreshnessInfo>,
 }
 
 impl Serialize for Signal {
 	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-		// Count fields: 7 base + 1 optional scope
-		let field_count = if self.scope.is_direct() { 7 } else { 8 };
+		// Count fields: 7 base + optional scope + optional freshness
+		let mut field_count = 7;
+		if !self.scope.is_direct() {
+			field_count += 1;
+		}
+		if self.freshness.is_some() {
+			field_count += 1;
+		}
 		let mut state = serializer.serialize_struct("Signal", field_count)?;
 		state.serialize_field("code", &self.code)?;
 		state.serialize_field("rank", &self.rank)?;
@@ -864,6 +978,9 @@ impl Serialize for Signal {
 		state.serialize_field("source", &self.source)?;
 		if !self.scope.is_direct() {
 			state.serialize_field("scope", &self.scope)?;
+		}
+		if let Some(ref freshness) = self.freshness {
+			state.serialize_field("freshness", freshness)?;
 		}
 		state.end()
 	}
@@ -880,6 +997,7 @@ impl Signal {
 	pub fn evidence(&self) -> &SignalEvidence { &self.evidence }
 	pub fn source(&self) -> SourceRef { self.source }
 	pub fn scope(&self) -> SignalScope { self.scope }
+	pub fn freshness(&self) -> Option<&FreshnessInfo> { self.freshness.as_ref() }
 
 	/// Rank is assigned by the ranking pass after all signals
 	/// are collected. Callers must never set rank directly; this
@@ -900,6 +1018,9 @@ impl Signal {
 	// assigns category/severity automatically. `rank` is set to
 	// 0 at construction time and overwritten by the ranking
 	// pass — no aggregator computes its own rank.
+	//
+	// `freshness` is None by default. Signals backed by L2+
+	// artifacts can attach freshness via `with_freshness()`.
 	fn build(
 		code: SignalCode,
 		summary: String,
@@ -916,7 +1037,17 @@ impl Signal {
 			evidence,
 			source,
 			scope: SignalScope::Direct,
+			freshness: None,
 		}
+	}
+
+	/// Attach freshness info to a signal (ACR-6).
+	///
+	/// Use for signals backed by Layer 2+ artifacts. Returns self
+	/// for chaining.
+	pub(crate) fn with_freshness(mut self, freshness: FreshnessInfo) -> Self {
+		self.freshness = Some(freshness);
+		self
 	}
 
 	// ── Named constructors (one per emitted code) ────────────
@@ -1106,6 +1237,25 @@ impl Signal {
 			summary,
 			SignalEvidence::BoundaryViolations(evidence),
 			SourceRef::StorageFindImportsBetweenPaths,
+		)
+	}
+
+	/// Boundary interaction links summary with freshness.
+	///
+	/// This is the first signal backed by a freshness-tracked L2 table.
+	/// Freshness should be attached via `.with_freshness()` by the
+	/// aggregator.
+	pub fn boundary_links_summary(evidence: BoundaryLinksSummaryEvidence) -> Self {
+		let summary = format!(
+			"{} boundary interaction link{}.",
+			evidence.link_count,
+			if evidence.link_count == 1 { "" } else { "s" }
+		);
+		Self::build(
+			SignalCode::BoundaryLinksSummary,
+			summary,
+			SignalEvidence::BoundaryLinksSummary(evidence),
+			SourceRef::StorageGetBoundaryLinksFreshness,
 		)
 	}
 
@@ -1556,5 +1706,90 @@ mod tests {
 		// No stray "type" or "variant" fields leaked in.
 		assert!(ev.get("type").is_none());
 		assert!(ev.get("variant").is_none());
+	}
+
+	// ── Freshness tests (ACR-6) ──────────────────────────────────
+
+	#[test]
+	fn freshness_state_dto_serializes_as_lowercase() {
+		assert_eq!(
+			serde_json::to_string(&FreshnessStateDto::Current).unwrap(),
+			"\"current\""
+		);
+		assert_eq!(
+			serde_json::to_string(&FreshnessStateDto::Impacted).unwrap(),
+			"\"impacted\""
+		);
+		assert_eq!(
+			serde_json::to_string(&FreshnessStateDto::Unknown).unwrap(),
+			"\"unknown\""
+		);
+	}
+
+	#[test]
+	fn freshness_info_current_constructor() {
+		let info = FreshnessInfo::current();
+		assert_eq!(info.state, FreshnessStateDto::Current);
+		assert!(info.impacted_since.is_none());
+	}
+
+	#[test]
+	fn freshness_info_impacted_constructor() {
+		let info = FreshnessInfo::impacted("2026-05-09T12:00:00Z");
+		assert_eq!(info.state, FreshnessStateDto::Impacted);
+		assert_eq!(info.impacted_since, Some("2026-05-09T12:00:00Z".into()));
+	}
+
+	#[test]
+	fn freshness_info_unknown_constructor() {
+		let info = FreshnessInfo::unknown();
+		assert_eq!(info.state, FreshnessStateDto::Unknown);
+		assert!(info.impacted_since.is_none());
+	}
+
+	#[test]
+	fn freshness_info_serializes_without_null_impacted_since() {
+		let info = FreshnessInfo::current();
+		let s = serde_json::to_string(&info).unwrap();
+		// impacted_since is None, so should be omitted
+		assert!(!s.contains("impacted_since"));
+		assert!(s.contains("\"state\":\"current\""));
+	}
+
+	#[test]
+	fn freshness_info_serializes_with_impacted_since() {
+		let info = FreshnessInfo::impacted("2026-05-09T12:00:00Z");
+		let s = serde_json::to_string(&info).unwrap();
+		assert!(s.contains("\"state\":\"impacted\""));
+		assert!(s.contains("\"impacted_since\":\"2026-05-09T12:00:00Z\""));
+	}
+
+	#[test]
+	fn signal_without_freshness_omits_field() {
+		let s = Signal::snapshot_info(SnapshotInfoEvidence {
+			snapshot_uid: "snap-1".into(),
+			scope: "full".into(),
+			basis_commit: None,
+			created_at: "2026-05-09T00:00:00Z".into(),
+		});
+		let json = serde_json::to_string(&s).unwrap();
+		// freshness is None, so should be omitted
+		assert!(!json.contains("\"freshness\""));
+	}
+
+	#[test]
+	fn signal_with_freshness_includes_field() {
+		let s = Signal::snapshot_info(SnapshotInfoEvidence {
+			snapshot_uid: "snap-1".into(),
+			scope: "full".into(),
+			basis_commit: None,
+			created_at: "2026-05-09T00:00:00Z".into(),
+		})
+		.with_freshness(FreshnessInfo::impacted("2026-05-08T00:00:00Z"));
+
+		let json = serde_json::to_string(&s).unwrap();
+		assert!(json.contains("\"freshness\":{"));
+		assert!(json.contains("\"state\":\"impacted\""));
+		assert!(json.contains("\"impacted_since\":\"2026-05-08T00:00:00Z\""));
 	}
 }

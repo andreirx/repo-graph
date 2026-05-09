@@ -136,6 +136,27 @@ pub struct AgentImportEdge {
 	pub target_file: String,
 }
 
+// ── Boundary links freshness (ACR-6) ─────────────────────────────
+
+/// Freshness summary for `boundary_interaction_links` table.
+///
+/// Used by `BOUNDARY_LINKS_SUMMARY` signal to report freshness state.
+/// This is the first signal backed by a freshness-tracked L2 table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentBoundaryLinksFreshness {
+	/// Total number of links in the snapshot.
+	pub total: u64,
+	/// Links with `freshness_state = 'current'`.
+	pub current: u64,
+	/// Links with `freshness_state = 'impacted'`.
+	pub impacted: u64,
+	/// Links with `freshness_state = 'unknown'`.
+	pub unknown: u64,
+	/// Earliest `freshness_updated_at` among impacted rows, if any.
+	/// ISO-8601 timestamp as string.
+	pub earliest_impacted_at: Option<String>,
+}
+
 // ── Repo-level structural summary ────────────────────────────────
 
 /// Repo-wide totals + language roll-up used by `MODULE_SUMMARY`.
@@ -712,6 +733,22 @@ pub trait AgentStorageRead {
 		&self,
 		snapshot_uid: &str,
 	) -> Result<Option<AgentModuleSummary>, AgentStorageError>;
+
+	// ── Boundary links freshness (ACR-6) ────────────────────────────
+
+	/// Query freshness summary for boundary_interaction_links.
+	///
+	/// Returns counts by freshness state for the snapshot. Used by
+	/// `BOUNDARY_LINKS_SUMMARY` signal — the first signal backed by
+	/// a freshness-tracked L2 table.
+	///
+	/// Returns zero counts when the table has no rows for this
+	/// snapshot (which is a valid "no links discovered" state, not
+	/// an error).
+	fn get_boundary_links_freshness(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<AgentBoundaryLinksFreshness, AgentStorageError>;
 }
 
 // ── Explain DTOs ────────────────────────────────────────────────

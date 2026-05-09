@@ -597,6 +597,21 @@ impl AgentStorageRead for FakeAgentStorage {
 		// the feature requires validation.
 		Ok(None)
 	}
+
+	fn get_boundary_links_freshness(
+		&self,
+		_snapshot_uid: &str,
+	) -> Result<repo_graph_agent::AgentBoundaryLinksFreshness, AgentStorageError> {
+		self.fail_if_forced("get_boundary_links_freshness")?;
+		// Default: no boundary links (signal not emitted).
+		Ok(repo_graph_agent::AgentBoundaryLinksFreshness {
+			total: 0,
+			current: 0,
+			impacted: 0,
+			unknown: 0,
+			earliest_impacted_at: None,
+		})
+	}
 }
 
 // ── Gate port impl (Rust-43A) ────────────────────────────────────

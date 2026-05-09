@@ -17,6 +17,8 @@
 use std::path::Path;
 use std::process::ExitCode;
 
+use repo_graph_agent::DegradationInfo;
+
 use crate::cli::{build_envelope, open_storage, resolve_repo_ref};
 
 // ── surfaces command ─────────────────────────────────────────────
@@ -229,6 +231,25 @@ fn run_surfaces_list(args: &[String]) -> ExitCode {
 	}
 	if let Some(ref m) = filter.module {
 		extra.insert("filter_module".to_string(), serde_json::Value::String(m.clone()));
+	}
+
+	// ACR-6: Add degradation info when project_surfaces is effectively unsupported.
+	// ProjectSurfaces depends on ModuleCandidates. If modules is empty and surfaces
+	// is empty, this is likely the Rust-only indexer path where these tables are
+	// not populated.
+	//
+	// Uses typed DegradationInfo from agent DTOs — single vocabulary across
+	// agent orient and CLI surfaces.
+	if results.is_empty() && modules.is_empty() {
+		let degradation = DegradationInfo::unsupported_with_recommendation(
+			"ProjectSurfaces",
+			"project_surfaces and module_candidates are not populated on Rust indexer path",
+			"use TypeScript prototype indexer for project surface discovery",
+		);
+		extra.insert(
+			"degradation".to_string(),
+			serde_json::to_value(&degradation).unwrap(),
+		);
 	}
 
 	let output = match build_envelope(

@@ -349,6 +349,19 @@ mod tests {
 		) -> Result<Option<crate::AgentModuleSummary>, AgentStorageError> {
 			Ok(None)
 		}
+
+		fn get_boundary_links_freshness(
+			&self,
+			_snapshot_uid: &str,
+		) -> Result<crate::AgentBoundaryLinksFreshness, AgentStorageError> {
+			Ok(crate::AgentBoundaryLinksFreshness {
+				total: 0,
+				current: 0,
+				impacted: 0,
+				unknown: 0,
+				earliest_impacted_at: None,
+			})
+		}
 	}
 
 	#[test]

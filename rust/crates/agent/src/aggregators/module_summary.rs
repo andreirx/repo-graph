@@ -19,10 +19,24 @@
 //! the limit says "module discovery layer is unavailable".
 
 use super::AggregatorOutput;
-use crate::dto::limit::{Limit, LimitCode};
+use crate::dto::limit::{DegradationInfo, Limit, LimitCode};
 use crate::dto::signal::{ModuleKindBreakdown, ModuleSummaryEvidence, Signal};
 use crate::errors::AgentStorageError;
 use crate::storage_port::AgentStorageRead;
+
+/// Create the standard MODULE_DATA_UNAVAILABLE limit with degradation info.
+///
+/// This is the canonical degradation for module discovery on the Rust indexer
+/// path, where module_candidates is not populated.
+fn module_data_unavailable_limit() -> Limit {
+	Limit::from_code_with_degradation(
+		LimitCode::ModuleDataUnavailable,
+		DegradationInfo::unsupported(
+			"ModuleCandidates",
+			"module_candidates table is not populated on Rust indexer path",
+		),
+	)
+}
 
 pub fn aggregate<S: AgentStorageRead + ?Sized>(
 	storage: &S,
@@ -59,7 +73,7 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
 				discovered_module_count: None,
 				module_kinds: None,
 			};
-			let limits = vec![Limit::from_code(LimitCode::ModuleDataUnavailable)];
+			let limits = vec![module_data_unavailable_limit()];
 			(evidence, limits)
 		}
 	};
@@ -95,7 +109,7 @@ pub fn aggregate_file<S: AgentStorageRead + ?Sized>(
 
 	Ok(AggregatorOutput {
 		signals: vec![Signal::module_summary(evidence)],
-		limits: vec![Limit::from_code(LimitCode::ModuleDataUnavailable)],
+		limits: vec![module_data_unavailable_limit()],
 	})
 }
 
@@ -124,6 +138,6 @@ pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
 
 	Ok(AggregatorOutput {
 		signals: vec![Signal::module_summary(evidence)],
-		limits: vec![Limit::from_code(LimitCode::ModuleDataUnavailable)],
+		limits: vec![module_data_unavailable_limit()],
 	})
 }

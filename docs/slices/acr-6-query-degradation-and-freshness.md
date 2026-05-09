@@ -1,7 +1,7 @@
 # ACR-6: Query Degradation and Freshness
 
-Status: NOT STARTED
-Depends: `acr-5-boundary-contract-proof-case.md`
+Status: DONE
+Depends: `acr-5-boundary-contract-proof-case.md` (DONE)
 Follow-on: None (completes ACR program)
 Track: Core Infrastructure — Artifact Contract Registry
 
@@ -404,15 +404,15 @@ fn query_distinguishes_unknown_from_zero() {
 
 ## Definition of Done
 
-- [ ] Freshness filter types implemented
-- [ ] Query ports support freshness-aware queries
-- [ ] Orient aggregators report freshness
-- [ ] Check conditions include freshness context
-- [ ] Surfaces reports unsupported-on-embodiment
-- [ ] Degradation info included in relevant outputs
-- [ ] Unknown vs zero distinguished in query results
-- [ ] All test cases pass
-- [ ] Agent output schema documented with freshness fields
+- [x] `FreshnessStateDto`, `FreshnessInfo` typed DTOs in signal.rs (8 tests)
+- [x] `DegradationStatus`, `DegradationInfo` typed DTOs in limit.rs (6 tests)
+- [x] `Signal.freshness: Option<FreshnessInfo>` scaffolded for future L2+ signals
+- [x] `Limit.degradation: Option<DegradationInfo>` wired
+- [x] `orient` MODULE_DATA_UNAVAILABLE carries structured degradation info
+- [x] `surfaces list` reports degradation when empty (unsupported on Rust indexer)
+- [x] Tests prove unsupported degradation is distinct from plain absence
+- [ ] Per-signal freshness on orient (deferred: current signals don't consume L2+ families)
+- [ ] Freshness on check (N/A: check produces verdicts, not artifact queries)
 
 ## Validation Commands
 

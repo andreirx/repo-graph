@@ -92,10 +92,15 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
 	let cycles_out = aggregators::cycles::aggregate(storage, &snapshot_uid)?;
 	merge(&mut all_signals, &mut all_limits, cycles_out);
 
-	// boundary
+	// boundary violations
 	let boundary_out =
 		aggregators::boundary::aggregate(storage, repo_uid, &snapshot_uid)?;
 	merge(&mut all_signals, &mut all_limits, boundary_out);
+
+	// boundary links summary (first freshness-tracked signal)
+	let boundary_links_out =
+		aggregators::boundary_links::aggregate(storage, &snapshot_uid)?;
+	merge(&mut all_signals, &mut all_limits, boundary_links_out);
 
 	// dead_code — reliability-gated. The aggregator reads the
 	// trust layer's composite `dead_code_reliability` verdict

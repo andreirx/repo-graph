@@ -26,13 +26,13 @@
 use std::path::Path;
 
 use repo_graph_agent::{
-	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow,
-	AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry,
-	AgentFileEntry, AgentFocusCandidate, AgentFocusKind, AgentImportEdge,
-	AgentImportEntry, AgentModuleSummary, AgentPathResolution, AgentReliabilityAxis,
-	AgentReliabilityLevel, AgentRepo, AgentRepoSummary, AgentSnapshot,
-	AgentStaleFile, AgentStorageError, AgentStorageRead, AgentSymbolContext,
-	AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
+	AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow,
+	AgentCallerRow, AgentComplexityMeasurement, AgentCycle, AgentDeadNode,
+	AgentDocEntry, AgentFileEntry, AgentFocusCandidate, AgentFocusKind,
+	AgentImportEdge, AgentImportEntry, AgentModuleSummary, AgentPathResolution,
+	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
+	AgentSnapshot, AgentStaleFile, AgentStorageError, AgentStorageRead,
+	AgentSymbolContext, AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
 };
 use repo_graph_trust::service::assemble_trust_report;
 use repo_graph_trust::types::{
@@ -1428,5 +1428,74 @@ impl AgentStorageRead for StorageConnection {
 
 		// No module data from either source.
 		Ok(None)
+	}
+
+	fn get_boundary_links_freshness(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<AgentBoundaryLinksFreshness, AgentStorageError> {
+		let conn = self.connection();
+
+		// Query freshness state counts from boundary_interaction_links.
+		// This is a freshness-tracked L2 table (ACR-3/4/5).
+		let mut stmt = conn
+			.prepare(
+				"SELECT freshness_state, COUNT(*) as cnt \
+				 FROM boundary_interaction_links \
+				 WHERE snapshot_uid = ? \
+				 GROUP BY freshness_state",
+			)
+			.map_err(map_err("get_boundary_links_freshness"))?;
+
+		let rows = stmt
+			.query_map([snapshot_uid], |row| {
+				Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+			})
+			.map_err(map_err("get_boundary_links_freshness"))?;
+
+		let mut current: u64 = 0;
+		let mut impacted: u64 = 0;
+		let mut unknown: u64 = 0;
+
+		for row in rows {
+			let (state, count) = row.map_err(map_err("get_boundary_links_freshness"))?;
+			let count = count as u64;
+			match state.as_str() {
+				"current" => current += count,
+				"impacted" => impacted += count,
+				"unknown" => unknown += count,
+				"stale" => {
+					// Treat stale as impacted for summary purposes.
+					// Stale is a stronger form of impacted.
+					impacted += count;
+				}
+				_ => {}
+			}
+		}
+
+		let total = current + impacted + unknown;
+
+		// Query earliest impacted_at timestamp if there are impacted rows.
+		let earliest_impacted_at = if impacted > 0 {
+			conn.query_row(
+				"SELECT MIN(freshness_updated_at) \
+				 FROM boundary_interaction_links \
+				 WHERE snapshot_uid = ? \
+				   AND freshness_state IN ('impacted', 'stale')",
+				[snapshot_uid],
+				|row| row.get::<_, Option<String>>(0),
+			)
+			.map_err(map_err("get_boundary_links_freshness"))?
+		} else {
+			None
+		};
+
+		Ok(AgentBoundaryLinksFreshness {
+			total,
+			current,
+			impacted,
+			unknown,
+			earliest_impacted_at,
+		})
 	}
 }

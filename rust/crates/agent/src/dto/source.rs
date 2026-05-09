@@ -46,6 +46,8 @@ pub enum SourceRef {
 	StorageFindSymbolCallees,
 	/// Port method: `AgentStorageRead::query_high_complexity_symbols`.
 	StorageQueryHighComplexitySymbols,
+	/// Port method: `AgentStorageRead::get_boundary_links_freshness`.
+	StorageGetBoundaryLinksFreshness,
 	/// Check use case: two-phase reducer (`check::check`).
 	/// Emitted by `CHECK_PASS`, `CHECK_FAIL`, `CHECK_INCOMPLETE`
 	/// signals.
@@ -75,6 +77,9 @@ impl SourceRef {
 			Self::StorageFindSymbolCallees => "storage::find_symbol_callees",
 			Self::StorageQueryHighComplexitySymbols => {
 				"storage::query_high_complexity_symbols"
+			}
+			Self::StorageGetBoundaryLinksFreshness => {
+				"storage::get_boundary_links_freshness"
 			}
 			Self::CheckReducer => "check::reducer",
 			Self::ExplainPipeline => "explain::pipeline",
@@ -113,6 +118,7 @@ mod tests {
 			SourceRef::StorageFindSymbolCallers,
 			SourceRef::StorageFindSymbolCallees,
 			SourceRef::StorageQueryHighComplexitySymbols,
+			SourceRef::StorageGetBoundaryLinksFreshness,
 			SourceRef::CheckReducer,
 			SourceRef::ExplainPipeline,
 		] {

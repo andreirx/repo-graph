@@ -77,10 +77,10 @@ pub use dto::{
 		OrientResult, RelevantDoc, ResolvedKind, CHECK_COMMAND,
 		EXPLAIN_COMMAND, ORIENT_COMMAND, ORIENT_SCHEMA,
 	},
-	limit::{Limit, LimitCode},
+	limit::{DegradationInfo, DegradationStatus, Limit, LimitCode},
 	signal::{
-		BoundaryViolationEvidence, BoundaryViolationsEvidence,
-		CallersSummaryEvidence, CalleesSummaryEvidence,
+		BoundaryLinksSummaryEvidence, BoundaryViolationEvidence,
+		BoundaryViolationsEvidence, CallersSummaryEvidence, CalleesSummaryEvidence,
 		CheckConditionEvidence, CheckFailEvidence,
 		CheckIncompleteEvidence, CheckPassEvidence, CycleEvidence,
 		// DeadCodeEvidence, DeadSymbolEvidence — removed. Surface withdrawn.
@@ -109,10 +109,10 @@ pub use errors::{AgentStorageError, CheckError, ExplainError, OrientError};
 pub use explain::run_explain;
 pub use orient::orient;
 pub use storage_port::{
-	AgentBoundaryDeclaration, AgentCalleeRow, AgentCallerRow,
-	AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry,
-	AgentFileEntry, AgentFocusCandidate, AgentFocusKind, AgentImportEdge,
-	AgentImportEntry, AgentModuleSummary, AgentPathResolution,
+	AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow,
+	AgentCallerRow, AgentComplexityMeasurement, AgentCycle, AgentDeadNode,
+	AgentDocEntry, AgentFileEntry, AgentFocusCandidate, AgentFocusKind,
+	AgentImportEdge, AgentImportEntry, AgentModuleSummary, AgentPathResolution,
 	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
 	AgentSnapshot, AgentStaleFile, AgentStorageRead, AgentSymbolContext,
 	AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
