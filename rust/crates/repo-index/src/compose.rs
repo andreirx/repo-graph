@@ -17,6 +17,9 @@ use repo_graph_indexer::cargo_manifest::{
     self, CargoModule, CargoModuleCandidateInput, CargoModuleEvidenceInput,
     CargoModuleStorePort, FileOwnershipInput,
 };
+use repo_graph_indexer::package_json::{self, NpmModule};
+use repo_graph_indexer::pyproject::{self, PyprojectModule};
+use repo_graph_indexer::settings_gradle::{self, GradleModule};
 use repo_graph_indexer::extractor_port::ExtractorPort;
 use repo_graph_indexer::orchestrator::{self, FileInput, IndexError};
 use repo_graph_indexer::proto_indexer::ProtoFileInput;
@@ -211,6 +214,61 @@ pub struct CargoExtractionResult {
 	pub has_root_manifest: bool,
 }
 
+/// Extracted npm module with provenance info (rust-module-parity Phase 2).
+#[derive(Debug, Clone)]
+pub struct ExtractedNpmModule {
+	/// The extracted module data
+	pub module: NpmModule,
+	/// Declared pattern that led to this module (for workspace members)
+	/// None for root packages, Some("packages/*") for pattern-matched members
+	pub declared_pattern: Option<String>,
+}
+
+/// Result of package.json extraction for a repo.
+#[derive(Debug, Clone, Default)]
+pub struct NpmExtractionResult {
+	/// Extracted modules (root package + resolved workspace members)
+	pub modules: Vec<ExtractedNpmModule>,
+	/// Workspace patterns that were declared but had no matches
+	pub unmatched_patterns: Vec<String>,
+	/// Whether the repo root has a package.json
+	pub has_root_manifest: bool,
+	/// Whether workspace patterns came from pnpm-workspace.yaml
+	pub is_pnpm_workspace: bool,
+}
+
+/// Extracted pyproject module with provenance info (rust-module-parity Phase 2c).
+#[derive(Debug, Clone)]
+pub struct ExtractedPyprojectModule {
+	/// The extracted module data
+	pub module: PyprojectModule,
+}
+
+/// Result of pyproject.toml extraction for a repo.
+#[derive(Debug, Clone, Default)]
+pub struct PyprojectExtractionResult {
+	/// Extracted modules (single-package for Phase 2c)
+	pub modules: Vec<ExtractedPyprojectModule>,
+	/// Whether the repo root has a pyproject.toml
+	pub has_root_manifest: bool,
+}
+
+/// Extracted Gradle module with provenance info (rust-module-parity Phase 2b).
+#[derive(Debug, Clone)]
+pub struct ExtractedGradleModule {
+	/// The extracted module data
+	pub module: GradleModule,
+}
+
+/// Result of settings.gradle extraction for a repo.
+#[derive(Debug, Clone, Default)]
+pub struct GradleExtractionResult {
+	/// Extracted modules (root + subprojects)
+	pub modules: Vec<ExtractedGradleModule>,
+	/// Whether the repo root has a settings.gradle
+	pub has_root_settings: bool,
+}
+
 pub struct PreparedRepoInputs {
 	/// Readable source files with config attached, ready for the orchestrator.
 	pub file_inputs: Vec<FileInput>,
@@ -223,6 +281,12 @@ pub struct PreparedRepoInputs {
 	/// Cargo.toml extraction results (rust-module-parity Phase 1).
 	/// Separate from config_file_inputs: this is module-domain output.
 	pub cargo_modules: CargoExtractionResult,
+	/// package.json extraction results (rust-module-parity Phase 2).
+	pub npm_modules: NpmExtractionResult,
+	/// pyproject.toml extraction results (rust-module-parity Phase 2c).
+	pub pyproject_modules: PyprojectExtractionResult,
+	/// settings.gradle extraction results (rust-module-parity Phase 2b).
+	pub gradle_modules: GradleExtractionResult,
 }
 
 /// Scan the repo, resolve config per file, assemble typed FileInput.
@@ -243,6 +307,14 @@ pub fn prepare_repo_inputs(
 	// Collect Cargo.toml files with content for module extraction.
 	// Keyed by rel_path for later workspace member resolution.
 	let mut cargo_toml_files: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+	// Collect package.json files with content for npm module extraction (Phase 2).
+	let mut package_json_files: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+	// Content of pnpm-workspace.yaml if present (Phase 2).
+	let mut pnpm_workspace_content: Option<String> = None;
+	// Collect pyproject.toml files with content for Python module extraction (Phase 2c).
+	let mut pyproject_toml_files: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+	// Collect settings.gradle files with content for Gradle module extraction (Phase 2b).
+	let mut settings_gradle_files: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
 	for file in &scanned {
 		match file {
@@ -266,6 +338,22 @@ pub fn prepare_repo_inputs(
 					// Collect Cargo.toml content for module extraction (separate from config tracking).
 					if ok.rel_path.ends_with("Cargo.toml") {
 						cargo_toml_files.insert(ok.rel_path.clone(), ok.content.clone());
+					}
+					// Collect package.json content for npm module extraction (Phase 2).
+					if ok.rel_path.ends_with("package.json") {
+						package_json_files.insert(ok.rel_path.clone(), ok.content.clone());
+					}
+					// Collect pnpm-workspace.yaml for workspace pattern extraction (Phase 2).
+					if ok.rel_path == "pnpm-workspace.yaml" {
+						pnpm_workspace_content = Some(ok.content.clone());
+					}
+					// Collect pyproject.toml content for Python module extraction (Phase 2c).
+					if ok.rel_path.ends_with("pyproject.toml") {
+						pyproject_toml_files.insert(ok.rel_path.clone(), ok.content.clone());
+					}
+					// Collect settings.gradle content for Gradle module extraction (Phase 2b).
+					if ok.rel_path == "settings.gradle" || ok.rel_path == "settings.gradle.kts" {
+						settings_gradle_files.insert(ok.rel_path.clone(), ok.content.clone());
 					}
 					config_file_inputs.push(ConfigFileInput {
 						rel_path: ok.rel_path.clone(),
@@ -330,12 +418,28 @@ pub fn prepare_repo_inputs(
 	// Extract Cargo modules from collected Cargo.toml files.
 	let cargo_modules = extract_cargo_modules(repo_path, &cargo_toml_files);
 
+	// Extract npm modules from collected package.json files (Phase 2).
+	let npm_modules = extract_npm_modules(
+		repo_path,
+		&package_json_files,
+		pnpm_workspace_content.as_deref(),
+	);
+
+	// Extract pyproject modules from collected pyproject.toml files (Phase 2c).
+	let pyproject_modules = extract_pyproject_modules(&pyproject_toml_files);
+
+	// Extract Gradle modules from collected settings.gradle files (Phase 2b).
+	let gradle_modules = extract_gradle_modules(&settings_gradle_files);
+
 	Ok(PreparedRepoInputs {
 		file_inputs,
 		read_failed_paths,
 		contract_file_inputs,
 		config_file_inputs,
 		cargo_modules,
+		npm_modules,
+		pyproject_modules,
+		gradle_modules,
 	})
 }
 
@@ -445,6 +549,222 @@ fn expand_workspace_pattern(
 	}
 
 	modules
+}
+
+// ── npm module extraction (rust-module-parity Phase 2) ───────────────
+
+/// Extract npm modules from package.json files.
+///
+/// Parses the root package.json (if present), consumes pnpm-workspace.yaml
+/// (if present), expands workspace member patterns using glob, and collects
+/// all resolved packages with their evidence.
+///
+/// Supports three configurations:
+/// 1. Root package.json with workspaces array (npm/yarn workspaces)
+/// 2. Root package.json + pnpm-workspace.yaml (pnpm with root package)
+/// 3. pnpm-workspace.yaml only (pnpm virtual workspace, no root package)
+fn extract_npm_modules(
+	repo_path: &Path,
+	package_json_files: &std::collections::HashMap<String, String>,
+	pnpm_workspace_content: Option<&str>,
+) -> NpmExtractionResult {
+	let mut result = NpmExtractionResult::default();
+
+	// Parse root package.json if it exists.
+	let root_manifest_path = "package.json";
+	let root_parsed = package_json_files
+		.get(root_manifest_path)
+		.and_then(|content| package_json::parse_package_json(content, root_manifest_path).ok());
+
+	if root_parsed.is_some() {
+		result.has_root_manifest = true;
+	}
+
+	// Parse pnpm-workspace.yaml if it exists.
+	let pnpm_patterns = pnpm_workspace_content
+		.and_then(|content| package_json::parse_pnpm_workspace(content).ok())
+		.map(|parsed| {
+			result.is_pnpm_workspace = true;
+			parsed.workspace_patterns
+		});
+
+	// Early return if neither root package.json nor pnpm-workspace.yaml exists.
+	if root_parsed.is_none() && pnpm_patterns.is_none() {
+		return result;
+	}
+
+	// Add root package if it has a "name" field.
+	if let Some(ref parsed) = root_parsed {
+		if let Some(module) = &parsed.module {
+			result.modules.push(ExtractedNpmModule {
+				module: module.clone(),
+				declared_pattern: None,
+			});
+		}
+	}
+
+	// Determine workspace patterns.
+	// Priority: pnpm-workspace.yaml > package.json workspaces
+	let workspace_patterns = pnpm_patterns
+		.or_else(|| root_parsed.as_ref().map(|p| p.workspace_patterns.clone()))
+		.unwrap_or_default();
+
+	// Expand workspace patterns
+	for pattern in &workspace_patterns {
+		let expanded = expand_npm_workspace_pattern(repo_path, pattern, package_json_files);
+		if expanded.is_empty() {
+			result.unmatched_patterns.push(pattern.clone());
+		} else {
+			for member_module in expanded {
+				result.modules.push(ExtractedNpmModule {
+					module: member_module,
+					declared_pattern: Some(pattern.clone()),
+				});
+			}
+		}
+	}
+
+	result
+}
+
+/// Expand an npm workspace member pattern and return resolved modules.
+///
+/// Pattern examples:
+/// - "packages/core" → direct path
+/// - "packages/*" → glob all directories under packages/
+/// - "apps/**" → recursive glob
+/// - "!**/test/**" → negative pattern (skip matching directories)
+///
+/// For each match, checks if a package.json exists and parses it.
+fn expand_npm_workspace_pattern(
+	repo_path: &Path,
+	pattern: &str,
+	package_json_files: &std::collections::HashMap<String, String>,
+) -> Vec<NpmModule> {
+	let mut modules = Vec::new();
+
+	// Skip negative patterns (pnpm/yarn feature)
+	if pattern.starts_with('!') {
+		return modules;
+	}
+
+	// Check if pattern contains glob characters
+	if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+		// Glob expansion
+		// Canonicalize repo_path to ensure consistent path comparisons.
+		let canonical_repo = repo_path.canonicalize().unwrap_or_else(|_| repo_path.to_path_buf());
+		let full_pattern = canonical_repo.join(pattern).join("package.json");
+		let pattern_str = full_pattern.to_string_lossy();
+
+		if let Ok(paths) = glob::glob(&pattern_str) {
+			for entry in paths.flatten() {
+				// Canonicalize the entry path for consistent strip_prefix.
+				let canonical_entry = entry.canonicalize().unwrap_or(entry);
+				// Convert back to repo-relative path
+				if let Ok(rel) = canonical_entry.strip_prefix(&canonical_repo) {
+					let rel_path = rel.to_string_lossy().replace('\\', "/");
+					if let Some(content) = package_json_files.get(&rel_path) {
+						if let Ok(parsed) = package_json::parse_package_json(content, &rel_path) {
+							if let Some(mut module) = parsed.module {
+								module.is_workspace_member = true;
+								modules.push(module);
+							}
+						}
+					}
+				}
+			}
+		}
+	} else {
+		// Direct path (no glob)
+		let manifest_path = format!("{}/package.json", pattern);
+		if let Some(content) = package_json_files.get(&manifest_path) {
+			if let Ok(parsed) = package_json::parse_package_json(content, &manifest_path) {
+				if let Some(mut module) = parsed.module {
+					module.is_workspace_member = true;
+					modules.push(module);
+				}
+			}
+		}
+	}
+
+	modules
+}
+
+// ── pyproject module extraction (rust-module-parity Phase 2c) ────────
+
+/// Extract Python modules from pyproject.toml files.
+///
+/// Phase 2c: single-package only. No workspace/monorepo support yet.
+fn extract_pyproject_modules(
+	pyproject_toml_files: &std::collections::HashMap<String, String>,
+) -> PyprojectExtractionResult {
+	let mut result = PyprojectExtractionResult::default();
+
+	// Check for root pyproject.toml
+	let root_manifest_path = "pyproject.toml";
+	let root_content = match pyproject_toml_files.get(root_manifest_path) {
+		Some(content) => content,
+		None => return result, // No pyproject.toml at root
+	};
+
+	result.has_root_manifest = true;
+
+	// Parse root manifest
+	let root_parsed = match pyproject::parse_pyproject_toml(root_content, root_manifest_path) {
+		Ok(parsed) => parsed,
+		Err(_) => return result, // Parse error, skip silently
+	};
+
+	// Add root package if it has a [project].name
+	if let Some(module) = root_parsed.module {
+		result.modules.push(ExtractedPyprojectModule { module });
+	}
+
+	result
+}
+
+// ── Gradle module extraction (rust-module-parity Phase 2b) ────────
+
+/// Extract Gradle modules from settings.gradle files.
+///
+/// Parses settings.gradle (Groovy DSL) or settings.gradle.kts (Kotlin DSL)
+/// for `include` statements and project renames. Extracts root project
+/// and all declared subprojects.
+fn extract_gradle_modules(
+	settings_gradle_files: &std::collections::HashMap<String, String>,
+) -> GradleExtractionResult {
+	let mut result = GradleExtractionResult::default();
+
+	// Check for root settings.gradle (prefer Groovy over Kotlin)
+	let settings_path = if settings_gradle_files.contains_key("settings.gradle") {
+		"settings.gradle"
+	} else if settings_gradle_files.contains_key("settings.gradle.kts") {
+		"settings.gradle.kts"
+	} else {
+		return result; // No settings.gradle at root
+	};
+
+	let settings_content = match settings_gradle_files.get(settings_path) {
+		Some(content) => content,
+		None => return result,
+	};
+
+	result.has_root_settings = true;
+
+	// Parse settings file
+	let parsed = settings_gradle::parse_settings_gradle(settings_content, settings_path);
+
+	// Add root project
+	if let Some(root_module) = parsed.root_project {
+		result.modules.push(ExtractedGradleModule { module: root_module });
+	}
+
+	// Add subprojects
+	for subproject in parsed.subprojects {
+		result.modules.push(ExtractedGradleModule { module: subproject });
+	}
+
+	result
 }
 
 // ── Post-index read-failure repair ───────────────────────────────
@@ -1471,6 +1791,209 @@ fn compute_cargo_file_ownership(
 	ownership
 }
 
+// ── npm module persistence (rust-module-parity Phase 2) ──────────
+
+/// Persist package.json-derived module candidates, evidence, and file ownership.
+///
+/// Phase 2: persists module rows and ownership assignments for npm packages.
+/// - Root package
+/// - Resolved workspace members with real package.json
+/// - File ownership via longest-prefix-match
+fn persist_npm_modules(
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	snapshot_uid: &str,
+	npm_extraction: &NpmExtractionResult,
+	file_inputs: &[FileInput],
+) -> Result<usize, ComposeError> {
+	if npm_extraction.modules.is_empty() {
+		return Ok(0);
+	}
+
+	// Convert extracted modules to storage input DTOs.
+	// Reuses the same input types as Cargo (they're generic).
+	let mut candidates: Vec<CargoModuleCandidateInput> = Vec::new();
+	let mut evidence: Vec<CargoModuleEvidenceInput> = Vec::new();
+
+	for extracted in &npm_extraction.modules {
+		let (candidate, ev) = package_json::to_storage_inputs(
+			&extracted.module,
+			repo_uid,
+			snapshot_uid,
+		);
+		candidates.push(candidate);
+		evidence.push(ev);
+	}
+
+	// Persist using the storage port (same methods as Cargo).
+	let candidate_count = storage
+		.insert_cargo_module_candidates(&candidates)
+		.map_err(ComposeError::Storage)?;
+	let _evidence_count = storage
+		.insert_cargo_module_evidence(&evidence)
+		.map_err(ComposeError::Storage)?;
+
+	// Compute and persist file ownership using same algorithm as Cargo.
+	// Only for JS/TS files — other languages should not be assigned to npm modules.
+	let js_ts_files: Vec<_> = file_inputs
+		.iter()
+		.filter(|f| {
+			let lang = routing::detect_language(&f.rel_path);
+			matches!(lang, Some("typescript" | "tsx" | "javascript" | "jsx"))
+		})
+		.cloned()
+		.collect();
+
+	let ownership = compute_cargo_file_ownership(
+		repo_uid,
+		snapshot_uid,
+		&candidates,
+		&js_ts_files,
+	);
+
+	if !ownership.is_empty() {
+		storage
+			.insert_file_ownership(&ownership)
+			.map_err(ComposeError::Storage)?;
+	}
+
+	Ok(candidate_count)
+}
+
+// ── pyproject module persistence (rust-module-parity Phase 2c) ───
+
+/// Persist pyproject.toml-derived module candidates, evidence, and file ownership.
+///
+/// Phase 2c: persists module rows and ownership assignments for Python packages.
+/// - Root package only (single-package, no workspace support yet)
+/// - File ownership via longest-prefix-match (.py files only)
+fn persist_pyproject_modules(
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	snapshot_uid: &str,
+	pyproject_extraction: &PyprojectExtractionResult,
+	file_inputs: &[FileInput],
+) -> Result<usize, ComposeError> {
+	if pyproject_extraction.modules.is_empty() {
+		return Ok(0);
+	}
+
+	// Convert extracted modules to storage input DTOs.
+	let mut candidates: Vec<CargoModuleCandidateInput> = Vec::new();
+	let mut evidence: Vec<CargoModuleEvidenceInput> = Vec::new();
+
+	for extracted in &pyproject_extraction.modules {
+		let (candidate, ev) = pyproject::to_storage_inputs(
+			&extracted.module,
+			repo_uid,
+			snapshot_uid,
+		);
+		candidates.push(candidate);
+		evidence.push(ev);
+	}
+
+	// Persist using the storage port (same methods as Cargo/npm).
+	let candidate_count = storage
+		.insert_cargo_module_candidates(&candidates)
+		.map_err(ComposeError::Storage)?;
+	let _evidence_count = storage
+		.insert_cargo_module_evidence(&evidence)
+		.map_err(ComposeError::Storage)?;
+
+	// Compute and persist file ownership.
+	// Only for Python files — other languages should not be assigned to pyproject modules.
+	let python_files: Vec<_> = file_inputs
+		.iter()
+		.filter(|f| {
+			let lang = routing::detect_language(&f.rel_path);
+			matches!(lang, Some("python"))
+		})
+		.cloned()
+		.collect();
+
+	let ownership = compute_cargo_file_ownership(
+		repo_uid,
+		snapshot_uid,
+		&candidates,
+		&python_files,
+	);
+
+	if !ownership.is_empty() {
+		storage
+			.insert_file_ownership(&ownership)
+			.map_err(ComposeError::Storage)?;
+	}
+
+	Ok(candidate_count)
+}
+
+// ── Gradle module persistence (rust-module-parity Phase 2b) ───
+
+/// Persist settings.gradle-derived module candidates, evidence, and file ownership.
+///
+/// Phase 2b: persists module rows and ownership assignments for Gradle projects.
+/// - Root project and subprojects from settings.gradle
+/// - File ownership via longest-prefix-match (.java, .kt, .scala files only)
+fn persist_gradle_modules(
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	snapshot_uid: &str,
+	gradle_extraction: &GradleExtractionResult,
+	file_inputs: &[FileInput],
+) -> Result<usize, ComposeError> {
+	if gradle_extraction.modules.is_empty() {
+		return Ok(0);
+	}
+
+	// Convert extracted modules to storage input DTOs.
+	let mut candidates: Vec<CargoModuleCandidateInput> = Vec::new();
+	let mut evidence: Vec<CargoModuleEvidenceInput> = Vec::new();
+
+	for extracted in &gradle_extraction.modules {
+		let (candidate, ev) = settings_gradle::to_storage_inputs(
+			&extracted.module,
+			repo_uid,
+			snapshot_uid,
+		);
+		candidates.push(candidate);
+		evidence.push(ev);
+	}
+
+	// Persist using the storage port (same methods as Cargo/npm/pyproject).
+	let candidate_count = storage
+		.insert_cargo_module_candidates(&candidates)
+		.map_err(ComposeError::Storage)?;
+	let _evidence_count = storage
+		.insert_cargo_module_evidence(&evidence)
+		.map_err(ComposeError::Storage)?;
+
+	// Compute and persist file ownership.
+	// Only for JVM files — .java, .kt, .scala
+	let jvm_files: Vec<_> = file_inputs
+		.iter()
+		.filter(|f| {
+			let lang = routing::detect_language(&f.rel_path);
+			matches!(lang, Some("java" | "kotlin" | "scala"))
+		})
+		.cloned()
+		.collect();
+
+	let ownership = compute_cargo_file_ownership(
+		repo_uid,
+		snapshot_uid,
+		&candidates,
+		&jvm_files,
+	);
+
+	if !ownership.is_empty() {
+		storage
+			.insert_file_ownership(&ownership)
+			.map_err(ComposeError::Storage)?;
+	}
+
+	Ok(candidate_count)
+}
+
 // ── Full index ───────────────────────────────────────────────────
 
 /// Index a repo from disk into an existing StorageConnection.
@@ -1627,9 +2150,21 @@ pub fn index_into_storage_with_progress(
 	// SharedArrayBuffer, Worker, postMessage, Atomics patterns.
 	persist_ts_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
-	emit_progress(&mut progress, "persisting", 7, 8)?;  // about to persist Cargo modules
+	emit_progress(&mut progress, "persisting", 7, 9)?;  // about to persist Cargo modules
 	// rust-module-parity Phase 1.5: Persist Cargo.toml-derived module candidates and file ownership.
 	persist_cargo_modules(storage, repo_uid, &result.snapshot_uid, &prepared.cargo_modules, &prepared.file_inputs)?;
+
+	emit_progress(&mut progress, "persisting", 8, 10)?;  // about to persist npm modules
+	// rust-module-parity Phase 2: Persist package.json-derived module candidates and file ownership.
+	persist_npm_modules(storage, repo_uid, &result.snapshot_uid, &prepared.npm_modules, &prepared.file_inputs)?;
+
+	emit_progress(&mut progress, "persisting", 9, 11)?;  // about to persist pyproject modules
+	// rust-module-parity Phase 2c: Persist pyproject.toml-derived module candidates and file ownership.
+	persist_pyproject_modules(storage, repo_uid, &result.snapshot_uid, &prepared.pyproject_modules, &prepared.file_inputs)?;
+
+	emit_progress(&mut progress, "persisting", 10, 11)?;  // about to persist Gradle modules
+	// rust-module-parity Phase 2b: Persist settings.gradle-derived module candidates and file ownership.
+	persist_gradle_modules(storage, repo_uid, &result.snapshot_uid, &prepared.gradle_modules, &prepared.file_inputs)?;
 
 	Ok(result)
 }
@@ -2017,6 +2552,18 @@ pub fn refresh_into_storage_with_progress(
 	// Cargo.toml changes trigger config-file invalidation, so recompute is correct.
 	// Ownership is recomputed for all files to maintain consistency.
 	persist_cargo_modules(storage, repo_uid, &result.snapshot_uid, &prepared.cargo_modules, &prepared.file_inputs)?;
+
+	// rust-module-parity Phase 2: Persist package.json-derived module candidates and file ownership.
+	// Same recompute semantics as Cargo.
+	persist_npm_modules(storage, repo_uid, &result.snapshot_uid, &prepared.npm_modules, &prepared.file_inputs)?;
+
+	// rust-module-parity Phase 2c: Persist pyproject.toml-derived module candidates and file ownership.
+	// Same recompute semantics as Cargo and npm.
+	persist_pyproject_modules(storage, repo_uid, &result.snapshot_uid, &prepared.pyproject_modules, &prepared.file_inputs)?;
+
+	// rust-module-parity Phase 2b: Persist settings.gradle-derived module candidates and file ownership.
+	// Same recompute semantics as Cargo, npm, and pyproject.
+	persist_gradle_modules(storage, repo_uid, &result.snapshot_uid, &prepared.gradle_modules, &prepared.file_inputs)?;
 
 	Ok(result)
 }

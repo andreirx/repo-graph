@@ -79,6 +79,9 @@ regex = "1"
 # TOML parsing for Cargo.toml module extraction (rust-module-parity Phase 1).
 toml = "0.8"
 
+# YAML parsing for pnpm-workspace.yaml (rust-module-parity Phase 2).
+serde_yaml = "0.9"
+
 [dev-dependencies]
 # walkdir for parity-fixture corpus discovery (R5-I).
 walkdir = "2"

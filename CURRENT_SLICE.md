@@ -2,80 +2,89 @@
 
 ## Current Priority
 
-ACR program COMPLETE. Next priority: Module truth-model unification.
+Module truth-model unification (`docs/slices/rust-module-parity.md`).
 
 ## Active Slice
 
-NONE — ACR-6 delivered, awaiting next slice assignment.
+**Rust Module Parity — Phase 3: Inferred modules**
 
 ## Branch Intent
 
-ACR-6 complete. Query/read surfaces now report degradation semantics.
-Next work per ROADMAP: `docs/slices/rust-module-parity.md`
+Provide module structure for repos without manifest files.
+Directory-based heuristics detect module boundaries from filesystem layout.
 
-## Definition of Done (ACR-6)
+## Definition of Done (Phase 3)
 
-- [x] `FreshnessStateDto`, `FreshnessInfo` typed DTOs in signal.rs (8 tests)
-- [x] `DegradationStatus`, `DegradationInfo` typed DTOs in limit.rs (6 tests)
-- [x] `Signal.freshness: Option<FreshnessInfo>` — live on `BOUNDARY_LINKS_SUMMARY`
-- [x] `Limit.degradation: Option<DegradationInfo>` — wired
-- [x] `orient` MODULE_DATA_UNAVAILABLE carries structured degradation info
-- [x] `surfaces list` reports degradation when empty (Rust indexer path)
-- [x] Tests prove unsupported degradation is distinct from plain absence
-- [x] First live freshness signal: `BOUNDARY_LINKS_SUMMARY` backed by L2 table
-- [ ] Freshness on check (N/A: check is verdicts, not artifact queries)
+- [ ] Detect module boundaries from directory structure heuristics
+- [ ] Create `module_candidates` with `module_kind` = 'inferred'
+- [ ] Create `module_candidate_evidence` with `source_type` = 'directory_heuristic'
+- [ ] Compute file ownership from inferred module root paths
+- [ ] `rmap modules list` shows inferred modules on manifest-less repos
+- [ ] `rmap modules files <module>` returns owned files for inferred modules
+- [ ] Validated on local C repos (manifest-less)
 
-## Status
+## Identity Contract (LOCKED)
 
-ACR-6 COMPLETE. ACR program finished.
+**Module key format:** `inferred:{repo_uid}:{directory_path}`
 
-**Delivered:**
-- `FreshnessStateDto`, `FreshnessInfo` in signal.rs (8 tests)
-- `DegradationStatus`, `DegradationInfo` in limit.rs (6 tests)
-- `Signal.freshness: Option<FreshnessInfo>` — live
-- `Limit.degradation: Option<DegradationInfo>` — wired
-- `orient`: MODULE_DATA_UNAVAILABLE now carries degradation info
-- `surfaces list`: reports degradation when empty (Rust-only indexer path)
-- `BOUNDARY_LINKS_SUMMARY`: first signal backed by freshness-tracked L2 table
+Examples:
+- `inferred:linux:drivers/net`
+- `inferred:sqlite:.`
 
-**Freshness lifecycle (implementation proof):**
-- Write path: `current` when provenance present (grpc_link.rs)
-- Impact propagation: `impacted` when dependency changes (tested)
-- Read path: freshness surfaced in orient signal
+Path-anchored identity. Same rule as declared modules.
 
-**Operational validation deferred:**
-- Real workflow proof (fresh index → current → modify → refresh → impacted)
-- Current repo-graph DB shows `unknown` (legacy rows without provenance)
+## Evidence Structure
 
-## Program Overview
+- `source_type` = "directory_heuristic"
+- `source_path` = directory path that triggered inference
+- `evidence_kind` = "directory_structure"
+- `payload_json` contains:
+  - `heuristic`: which heuristic matched (e.g., "src_directory", "top_level_source")
+  - `directory_path`: the inferred module root
+  - `file_count`: number of source files in scope
 
-| Slice | Scope | Status |
-|-------|-------|--------|
-| ACR-1 | Create artifact-contracts crate | DONE |
-| ACR-2 | Refresh pipeline consumes registry | DONE |
-| ACR-3 | Per-row freshness and provenance schema | DONE |
-| ACR-4 | Impact propagation from L0 changes | DONE |
-| ACR-5 | Boundary contract proof case | DONE |
-| ACR-6 | Query degradation and freshness | DONE |
+## Inference Heuristics (to define)
 
-## Not the Priority
+Candidate heuristics for module boundary detection:
+- `src/` or `lib/` directory presence
+- Top-level directories containing source files
+- Directories with high file count relative to siblings
+- Language-specific patterns (e.g., `include/` for C/C++)
 
-- New IPC families
-- New language extractors
-- CLI ergonomic polish
-- Layer 3 hint expansion
-- Module discovery expansion
-- Feature work before ACR foundation is complete
+Heuristic selection and priority TBD during implementation.
 
-## After ACR
+## Scope Constraints (LOCKED)
 
-- Module truth-model unification (`docs/slices/rust-module-parity.md`)
+**In scope:**
+- Directory-based module inference
+- File ownership for inferred modules
+- Lower confidence than declared modules
 
-## Key Architecture References
+**Not in scope (deferred):**
+- Import graph analysis for module detection
+- Historical/git-based module detection
+- Cross-repo module inference
 
-- `docs/architecture/artifact-contract-model.md` — full specification
-- `docs/architecture/adr/adr-artifact-contract-registry.md` — decision record
-- `docs/VISION.md` §Product Layer Model — doctrine
+## Phase Ordering (LOCKED)
+
+1. **Phase 2** — package.json / pnpm-workspace.yaml — DONE
+2. **Phase 2c** — pyproject.toml single-package — DONE
+3. **Phase 2b** — Gradle settings.gradle — DONE
+4. **Phase 3** — inferred modules — ACTIVE
+5. **Phase 4** — MODULE-node fallback deprecation
+
+## Implementation Approach
+
+Same pattern as declared modules:
+- Inference module in `indexer` crate (policy owns heuristics)
+- Reuse existing storage port (generic module/evidence input types)
+- Compose layer wiring in `repo-index` crate
+- Lower confidence score (e.g., 0.7) than declared modules (1.0)
+
+## Validation Repos
+
+- Local C repos without manifests (identify available repos)
+- Any manifest-less codebase in `../legacy-codebases/`
 
 ## Approved DB Path
 
@@ -83,11 +92,8 @@ ACR-6 COMPLETE. ACR program finished.
 
 Do not create databases elsewhere.
 
-## Known Drift to Avoid
+## Key References
 
-- Treating tables as the unit of architecture (families are the unit)
-- Ad-hoc refresh behavior without consulting contracts
-- Provisional classifications without explicit maturity markers
-- Prose-only documentation without code-level registry
-- Treating JSON as product essence (JSON is CLI transport contract)
-- Collapsing unsupported/unknown/impacted into single "missing" state
+- `rust/crates/indexer/src/cargo_manifest.rs` — declared module pattern
+- `rust/crates/indexer/src/settings_gradle.rs` — Phase 2b pattern
+- `rust/crates/repo-index/src/compose.rs` — wiring location

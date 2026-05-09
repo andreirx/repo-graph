@@ -93,6 +93,9 @@
 
 pub mod cargo_manifest;
 pub mod extractor_port;
+pub mod package_json;
+pub mod pyproject;
+pub mod settings_gradle;
 pub mod grpc_client_hint;
 pub mod grpc_impl_hint;
 pub mod grpc_link;
@@ -152,4 +155,28 @@ pub use cargo_manifest::{
 	parse_cargo_toml, to_storage_inputs, generate_module_key, generate_module_uid,
 	generate_evidence_uid, CargoModule, CargoModuleCandidateInput, CargoModuleEvidenceInput,
 	CargoModuleStorePort, CargoParseResult, CargoEvidencePayload, FileOwnershipInput,
+};
+pub use package_json::{
+	parse_package_json, parse_pnpm_workspace,
+	generate_module_key as generate_npm_module_key,
+	generate_module_uid as generate_npm_module_uid,
+	generate_evidence_uid as generate_npm_evidence_uid,
+	to_storage_inputs as npm_to_storage_inputs,
+	NpmModule, NpmEvidencePayload, PackageJsonParseResult, PnpmWorkspaceParseResult,
+};
+pub use pyproject::{
+	parse_pyproject_toml,
+	generate_module_key as generate_pyproject_module_key,
+	generate_module_uid as generate_pyproject_module_uid,
+	generate_evidence_uid as generate_pyproject_evidence_uid,
+	to_storage_inputs as pyproject_to_storage_inputs,
+	PyprojectModule, PyprojectEvidencePayload, PyprojectParseResult,
+};
+pub use settings_gradle::{
+	parse_settings_gradle,
+	generate_module_key as generate_gradle_module_key,
+	generate_module_uid as generate_gradle_module_uid,
+	generate_evidence_uid as generate_gradle_evidence_uid,
+	to_storage_inputs as gradle_to_storage_inputs,
+	GradleModule, GradleEvidencePayload, SettingsGradleParseResult,
 };
