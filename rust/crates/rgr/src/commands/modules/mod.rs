@@ -7,6 +7,7 @@
 //! - `deps` — module dependency edges
 //! - `violations` — boundary violation report
 //! - `boundary` — create boundary declarations
+//! - `unowned` — ownership gap analysis (Phase 3.1B)
 //!
 //! Also exports unified `violations` command that combines
 //! declared boundaries (legacy) with discovered-module boundaries.
@@ -30,6 +31,7 @@ mod files;
 mod list;
 mod shared;
 mod show;
+mod unowned;
 mod violations;
 
 use std::process::ExitCode;
@@ -39,6 +41,7 @@ use deps::run_modules_deps;
 use files::run_modules_files;
 use list::run_modules_list;
 use show::run_modules_show;
+use unowned::run_modules_unowned;
 use violations::run_modules_violations;
 
 // Re-export unified violations command
@@ -54,6 +57,7 @@ pub fn run_modules(args: &[String]) -> ExitCode {
 		eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
 		eprintln!("  rmap modules violations <db_path> <repo_uid>");
 		eprintln!("  rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]");
+		eprintln!("  rmap modules unowned <db_path> <repo_uid>");
 		return ExitCode::from(1);
 	}
 
@@ -64,6 +68,7 @@ pub fn run_modules(args: &[String]) -> ExitCode {
 		"deps" => run_modules_deps(&args[1..]),
 		"violations" => run_modules_violations(&args[1..]),
 		"boundary" => run_modules_boundary(&args[1..]),
+		"unowned" => run_modules_unowned(&args[1..]),
 		other => {
 			eprintln!("unknown modules subcommand: {}", other);
 			eprintln!("usage:");
@@ -73,6 +78,7 @@ pub fn run_modules(args: &[String]) -> ExitCode {
 			eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
 			eprintln!("  rmap modules violations <db_path> <repo_uid>");
 			eprintln!("  rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]");
+			eprintln!("  rmap modules unowned <db_path> <repo_uid>");
 			ExitCode::from(1)
 		}
 	}

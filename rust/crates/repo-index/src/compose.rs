@@ -20,6 +20,7 @@ use repo_graph_indexer::cargo_manifest::{
 use repo_graph_indexer::package_json::{self, NpmModule};
 use repo_graph_indexer::pyproject::{self, PyprojectModule};
 use repo_graph_indexer::settings_gradle::{self, GradleModule};
+use repo_graph_indexer::inferred_modules::{self, InferredModule};
 use repo_graph_indexer::extractor_port::ExtractorPort;
 use repo_graph_indexer::orchestrator::{self, FileInput, IndexError};
 use repo_graph_indexer::proto_indexer::ProtoFileInput;
@@ -269,6 +270,20 @@ pub struct GradleExtractionResult {
 	pub has_root_settings: bool,
 }
 
+/// Extracted inferred module with provenance info (rust-module-parity Phase 3).
+#[derive(Debug, Clone)]
+pub struct ExtractedInferredModule {
+	/// The inferred module data
+	pub module: InferredModule,
+}
+
+/// Result of inferred module detection for a repo.
+#[derive(Debug, Clone, Default)]
+pub struct InferredExtractionResult {
+	/// Inferred modules from directory heuristics
+	pub modules: Vec<ExtractedInferredModule>,
+}
+
 pub struct PreparedRepoInputs {
 	/// Readable source files with config attached, ready for the orchestrator.
 	pub file_inputs: Vec<FileInput>,
@@ -287,6 +302,9 @@ pub struct PreparedRepoInputs {
 	pub pyproject_modules: PyprojectExtractionResult,
 	/// settings.gradle extraction results (rust-module-parity Phase 2b).
 	pub gradle_modules: GradleExtractionResult,
+	/// Inferred module detection results (rust-module-parity Phase 3).
+	/// Only populated if no declared modules exist for the repo.
+	pub inferred_modules: InferredExtractionResult,
 }
 
 /// Scan the repo, resolve config per file, assemble typed FileInput.
@@ -431,6 +449,18 @@ pub fn prepare_repo_inputs(
 	// Extract Gradle modules from collected settings.gradle files (Phase 2b).
 	let gradle_modules = extract_gradle_modules(&settings_gradle_files);
 
+	// Detect inferred modules (Phase 3) — only if no declared modules exist.
+	let has_declared_modules = !cargo_modules.modules.is_empty()
+		|| !npm_modules.modules.is_empty()
+		|| !pyproject_modules.modules.is_empty()
+		|| !gradle_modules.modules.is_empty();
+
+	let inferred_modules = if has_declared_modules {
+		InferredExtractionResult::default()
+	} else {
+		detect_inferred_modules_from_inputs(&file_inputs, repo_path)
+	};
+
 	Ok(PreparedRepoInputs {
 		file_inputs,
 		read_failed_paths,
@@ -440,6 +470,7 @@ pub fn prepare_repo_inputs(
 		npm_modules,
 		pyproject_modules,
 		gradle_modules,
+		inferred_modules,
 	})
 }
 
@@ -765,6 +796,41 @@ fn extract_gradle_modules(
 	}
 
 	result
+}
+
+// ── Inferred module detection (rust-module-parity Phase 3) ────────
+
+/// Detect inferred modules from file inputs.
+///
+/// Uses top-level directory heuristics to infer module boundaries
+/// in repos without manifest files.
+fn detect_inferred_modules_from_inputs(
+	file_inputs: &[FileInput],
+	repo_path: &Path,
+) -> InferredExtractionResult {
+	// Extract file paths from inputs.
+	let file_paths: Vec<String> = file_inputs
+		.iter()
+		.map(|f| f.rel_path.clone())
+		.collect();
+
+	// Derive repo display name from path.
+	let repo_display_name = repo_path
+		.file_name()
+		.and_then(|n| n.to_str())
+		.unwrap_or("root");
+
+	// Detect inferred modules using the indexer heuristics.
+	let detected = inferred_modules::detect_inferred_modules(&file_paths, repo_display_name);
+
+	// Convert to extraction result.
+	let modules = detected
+		.modules
+		.into_iter()
+		.map(|module| ExtractedInferredModule { module })
+		.collect();
+
+	InferredExtractionResult { modules }
 }
 
 // ── Post-index read-failure repair ───────────────────────────────
@@ -1994,6 +2060,64 @@ fn persist_gradle_modules(
 	Ok(candidate_count)
 }
 
+// ── Inferred module persistence (rust-module-parity Phase 3) ───
+
+/// Persist inferred module candidates, evidence, and file ownership.
+///
+/// Phase 3: persists module rows and ownership assignments for inferred modules.
+/// - Top-level directories containing source files
+/// - File ownership via longest-prefix-match (all source files)
+fn persist_inferred_modules(
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	snapshot_uid: &str,
+	inferred_extraction: &InferredExtractionResult,
+	file_inputs: &[FileInput],
+) -> Result<usize, ComposeError> {
+	if inferred_extraction.modules.is_empty() {
+		return Ok(0);
+	}
+
+	// Convert extracted modules to storage input DTOs.
+	let mut candidates: Vec<CargoModuleCandidateInput> = Vec::new();
+	let mut evidence: Vec<CargoModuleEvidenceInput> = Vec::new();
+
+	for extracted in &inferred_extraction.modules {
+		let (candidate, ev) = inferred_modules::to_storage_inputs(
+			&extracted.module,
+			repo_uid,
+			snapshot_uid,
+		);
+		candidates.push(candidate);
+		evidence.push(ev);
+	}
+
+	// Persist using the storage port (same methods as declared modules).
+	let candidate_count = storage
+		.insert_cargo_module_candidates(&candidates)
+		.map_err(ComposeError::Storage)?;
+	let _evidence_count = storage
+		.insert_cargo_module_evidence(&evidence)
+		.map_err(ComposeError::Storage)?;
+
+	// Compute and persist file ownership.
+	// For inferred modules, all source files are eligible (no language filter).
+	let ownership = compute_cargo_file_ownership(
+		repo_uid,
+		snapshot_uid,
+		&candidates,
+		file_inputs,
+	);
+
+	if !ownership.is_empty() {
+		storage
+			.insert_file_ownership(&ownership)
+			.map_err(ComposeError::Storage)?;
+	}
+
+	Ok(candidate_count)
+}
+
 // ── Full index ───────────────────────────────────────────────────
 
 /// Index a repo from disk into an existing StorageConnection.
@@ -2162,9 +2286,13 @@ pub fn index_into_storage_with_progress(
 	// rust-module-parity Phase 2c: Persist pyproject.toml-derived module candidates and file ownership.
 	persist_pyproject_modules(storage, repo_uid, &result.snapshot_uid, &prepared.pyproject_modules, &prepared.file_inputs)?;
 
-	emit_progress(&mut progress, "persisting", 10, 11)?;  // about to persist Gradle modules
+	emit_progress(&mut progress, "persisting", 10, 12)?;  // about to persist Gradle modules
 	// rust-module-parity Phase 2b: Persist settings.gradle-derived module candidates and file ownership.
 	persist_gradle_modules(storage, repo_uid, &result.snapshot_uid, &prepared.gradle_modules, &prepared.file_inputs)?;
+
+	emit_progress(&mut progress, "persisting", 11, 12)?;  // about to persist inferred modules
+	// rust-module-parity Phase 3: Persist inferred module candidates and file ownership.
+	persist_inferred_modules(storage, repo_uid, &result.snapshot_uid, &prepared.inferred_modules, &prepared.file_inputs)?;
 
 	Ok(result)
 }
@@ -2564,6 +2692,10 @@ pub fn refresh_into_storage_with_progress(
 	// rust-module-parity Phase 2b: Persist settings.gradle-derived module candidates and file ownership.
 	// Same recompute semantics as Cargo, npm, and pyproject.
 	persist_gradle_modules(storage, repo_uid, &result.snapshot_uid, &prepared.gradle_modules, &prepared.file_inputs)?;
+
+	// rust-module-parity Phase 3: Persist inferred module candidates and file ownership.
+	// Same recompute semantics as declared modules.
+	persist_inferred_modules(storage, repo_uid, &result.snapshot_uid, &prepared.inferred_modules, &prepared.file_inputs)?;
 
 	Ok(result)
 }
@@ -3100,6 +3232,246 @@ public class AppConfig {
 			inferences1.len(),
 			inferences2.len(),
 			"inference counts must match across re-index"
+		);
+	}
+
+	// ── Inferred Module Refresh Parity Tests (Phase 3.1 gate) ─────────
+
+	/// Creates a manifest-less C repo with multiple top-level source directories.
+	/// This will trigger inferred module detection (no Cargo.toml, package.json, etc.)
+	fn make_inferred_c_fixture() -> tempfile::TempDir {
+		let dir = tempfile::tempdir().unwrap();
+		let root = dir.path();
+
+		// src/ directory
+		fs::create_dir_all(root.join("src")).unwrap();
+		fs::write(root.join("src/main.c"), "#include \"util.h\"\nint main() { return 0; }").unwrap();
+		fs::write(root.join("src/util.c"), "void helper() {}").unwrap();
+		fs::write(root.join("src/util.h"), "void helper();").unwrap();
+
+		// lib/ directory
+		fs::create_dir_all(root.join("lib")).unwrap();
+		fs::write(root.join("lib/core.c"), "int compute() { return 42; }").unwrap();
+		fs::write(root.join("lib/core.h"), "int compute();").unwrap();
+
+		// test/ directory (should be suppressed when real source dirs exist)
+		fs::create_dir_all(root.join("test")).unwrap();
+		fs::write(root.join("test/test_main.c"), "void test() {}").unwrap();
+
+		dir
+	}
+
+	#[test]
+	fn inferred_modules_detected_on_first_index() {
+		let fixture = make_inferred_c_fixture();
+		let mut storage = StorageConnection::open_in_memory().unwrap();
+
+		let result = index_into_storage(
+			fixture.path(),
+			&mut storage,
+			"inferred-test",
+			&ComposeOptions::default(),
+		)
+		.unwrap();
+
+		let modules = storage
+			.get_module_candidates_for_snapshot(&result.snapshot_uid)
+			.unwrap();
+
+		// Should detect src and lib as inferred modules (test suppressed)
+		assert_eq!(modules.len(), 2, "expected 2 inferred modules; got {}", modules.len());
+
+		let module_keys: Vec<&str> = modules.iter().map(|m| m.module_key.as_str()).collect();
+		assert!(
+			module_keys.iter().any(|k| k.contains(":src")),
+			"expected src module; got {:?}",
+			module_keys
+		);
+		assert!(
+			module_keys.iter().any(|k| k.contains(":lib")),
+			"expected lib module; got {:?}",
+			module_keys
+		);
+
+		// All should be inferred kind with confidence < 1.0
+		for module in &modules {
+			assert_eq!(module.module_kind, "inferred", "expected inferred kind");
+			assert!(module.confidence < 1.0, "inferred modules should have confidence < 1.0");
+		}
+	}
+
+	#[test]
+	fn inferred_modules_stable_across_refresh() {
+		let fixture = make_inferred_c_fixture();
+		let mut storage = StorageConnection::open_in_memory().unwrap();
+
+		// First index
+		let result1 = index_into_storage(
+			fixture.path(),
+			&mut storage,
+			"inferred-test",
+			&ComposeOptions::default(),
+		)
+		.unwrap();
+
+		let modules1 = storage
+			.get_module_candidates_for_snapshot(&result1.snapshot_uid)
+			.unwrap();
+		let ownership1 = storage
+			.get_file_ownership_for_snapshot(&result1.snapshot_uid)
+			.unwrap();
+
+		// Refresh
+		let result2 = refresh_into_storage(
+			fixture.path(),
+			&mut storage,
+			"inferred-test",
+			&ComposeOptions::default(),
+		)
+		.unwrap();
+
+		let modules2 = storage
+			.get_module_candidates_for_snapshot(&result2.snapshot_uid)
+			.unwrap();
+		let ownership2 = storage
+			.get_file_ownership_for_snapshot(&result2.snapshot_uid)
+			.unwrap();
+
+		// Module count must match
+		assert_eq!(
+			modules1.len(),
+			modules2.len(),
+			"module count must be stable across refresh"
+		);
+
+		// Module UIDs must match (deterministic identity)
+		let uids1: std::collections::HashSet<&str> = modules1.iter()
+			.map(|m| m.module_candidate_uid.as_str())
+			.collect();
+		let uids2: std::collections::HashSet<&str> = modules2.iter()
+			.map(|m| m.module_candidate_uid.as_str())
+			.collect();
+		assert_eq!(uids1, uids2, "module UIDs must be stable across refresh");
+
+		// Module keys must match
+		let keys1: std::collections::HashSet<&str> = modules1.iter()
+			.map(|m| m.module_key.as_str())
+			.collect();
+		let keys2: std::collections::HashSet<&str> = modules2.iter()
+			.map(|m| m.module_key.as_str())
+			.collect();
+		assert_eq!(keys1, keys2, "module keys must be stable across refresh");
+
+		// Ownership count must match
+		assert_eq!(
+			ownership1.len(),
+			ownership2.len(),
+			"ownership count must be stable across refresh"
+		);
+
+		// Ownership assignments must match (file_uid -> module_candidate_uid)
+		let owner_map1: std::collections::HashMap<&str, &str> = ownership1.iter()
+			.map(|o| (o.file_uid.as_str(), o.module_candidate_uid.as_str()))
+			.collect();
+		let owner_map2: std::collections::HashMap<&str, &str> = ownership2.iter()
+			.map(|o| (o.file_uid.as_str(), o.module_candidate_uid.as_str()))
+			.collect();
+		assert_eq!(owner_map1, owner_map2, "file ownership must be stable across refresh");
+	}
+
+	#[test]
+	fn inferred_modules_update_on_directory_addition() {
+		let fixture = make_inferred_c_fixture();
+		let mut storage = StorageConnection::open_in_memory().unwrap();
+
+		// First index
+		let result1 = index_into_storage(
+			fixture.path(),
+			&mut storage,
+			"inferred-test",
+			&ComposeOptions::default(),
+		)
+		.unwrap();
+
+		let modules1 = storage
+			.get_module_candidates_for_snapshot(&result1.snapshot_uid)
+			.unwrap();
+		assert_eq!(modules1.len(), 2, "initial: expected 2 modules");
+
+		// Add a new source directory
+		fs::create_dir_all(fixture.path().join("util")).unwrap();
+		fs::write(fixture.path().join("util/parse.c"), "int parse() { return 1; }").unwrap();
+
+		// Refresh
+		let result2 = refresh_into_storage(
+			fixture.path(),
+			&mut storage,
+			"inferred-test",
+			&ComposeOptions::default(),
+		)
+		.unwrap();
+
+		let modules2 = storage
+			.get_module_candidates_for_snapshot(&result2.snapshot_uid)
+			.unwrap();
+
+		// Should now have 3 modules
+		assert_eq!(modules2.len(), 3, "after adding util/: expected 3 modules");
+
+		let keys: Vec<&str> = modules2.iter().map(|m| m.module_key.as_str()).collect();
+		assert!(
+			keys.iter().any(|k| k.contains(":util")),
+			"expected new util module; got {:?}",
+			keys
+		);
+
+		// Original modules should still have same UIDs
+		let src_uid1 = modules1.iter().find(|m| m.module_key.contains(":src")).map(|m| &m.module_candidate_uid);
+		let src_uid2 = modules2.iter().find(|m| m.module_key.contains(":src")).map(|m| &m.module_candidate_uid);
+		assert_eq!(src_uid1, src_uid2, "src module UID must be stable");
+	}
+
+	#[test]
+	fn inferred_modules_disappear_when_directory_emptied() {
+		let fixture = make_inferred_c_fixture();
+		let mut storage = StorageConnection::open_in_memory().unwrap();
+
+		// First index
+		let result1 = index_into_storage(
+			fixture.path(),
+			&mut storage,
+			"inferred-test",
+			&ComposeOptions::default(),
+		)
+		.unwrap();
+
+		let modules1 = storage
+			.get_module_candidates_for_snapshot(&result1.snapshot_uid)
+			.unwrap();
+		assert_eq!(modules1.len(), 2, "initial: expected 2 modules (src, lib)");
+
+		// Remove all source files from lib/
+		fs::remove_file(fixture.path().join("lib/core.c")).unwrap();
+		fs::remove_file(fixture.path().join("lib/core.h")).unwrap();
+
+		// Refresh
+		let result2 = refresh_into_storage(
+			fixture.path(),
+			&mut storage,
+			"inferred-test",
+			&ComposeOptions::default(),
+		)
+		.unwrap();
+
+		let modules2 = storage
+			.get_module_candidates_for_snapshot(&result2.snapshot_uid)
+			.unwrap();
+
+		// Should now have only 1 module (lib disappears)
+		assert_eq!(modules2.len(), 1, "after removing lib/*: expected 1 module");
+		assert!(
+			modules2[0].module_key.contains(":src"),
+			"remaining module should be src"
 		);
 	}
 }

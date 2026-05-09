@@ -93,6 +93,7 @@
 
 pub mod cargo_manifest;
 pub mod extractor_port;
+pub mod inferred_modules;
 pub mod package_json;
 pub mod pyproject;
 pub mod settings_gradle;
@@ -179,4 +180,13 @@ pub use settings_gradle::{
 	generate_evidence_uid as generate_gradle_evidence_uid,
 	to_storage_inputs as gradle_to_storage_inputs,
 	GradleModule, GradleEvidencePayload, SettingsGradleParseResult,
+};
+pub use inferred_modules::{
+	detect_inferred_modules,
+	generate_module_key as generate_inferred_module_key,
+	generate_module_uid as generate_inferred_module_uid,
+	generate_evidence_uid as generate_inferred_evidence_uid,
+	to_storage_inputs as inferred_to_storage_inputs,
+	InferredModule, InferredEvidencePayload, InferredModuleResult,
+	INFERRED_MODULE_CONFIDENCE,
 };
