@@ -111,11 +111,16 @@ impl StorageConnection {
             let prefix = format!("{}:{}#%", repo_uid, file_path);
             let prefix_file_only = format!("{}:{}:FILE", repo_uid, file_path);
 
+            // Copy forward inferences including provenance_json and freshness_state (ACR-4).
+            // Preserving these columns enables impact propagation on copy-forwarded rows:
+            // - provenance_json: tracks L0 dependencies
+            // - freshness_state: preserved so 'current' stays 'current' until impacted
             let rows = conn.execute(
                 "INSERT INTO inferences (
                     inference_uid, snapshot_uid, repo_uid,
                     target_stable_key, kind, value_json, confidence,
-                    basis_json, extractor, created_at
+                    basis_json, extractor, created_at,
+                    provenance_json, freshness_state
                 )
                 SELECT
                     printf('%s-copy-%s', inference_uid, ?1),
@@ -127,7 +132,9 @@ impl StorageConnection {
                     confidence,
                     basis_json,
                     extractor,
-                    created_at
+                    created_at,
+                    provenance_json,
+                    freshness_state
                 FROM inferences
                 WHERE snapshot_uid = ?2
                   AND (target_stable_key LIKE ?3 OR target_stable_key = ?4)",

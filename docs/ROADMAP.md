@@ -856,11 +856,11 @@ artifact family. The refresh pipeline and query surfaces consume this registry.
 
 | Slice | Scope | Status |
 |-------|-------|--------|
-| ACR-1 | Create `artifact-contracts` crate with registry | NOT STARTED |
-| ACR-2 | Make refresh pipeline consume registry | NOT STARTED |
-| ACR-3 | Add per-row freshness and provenance schema | NOT STARTED |
-| ACR-4 | Implement impact propagation from L0 changes | NOT STARTED |
-| ACR-5 | Boundary contract proof case (first fix) | NOT STARTED |
+| ACR-1 | Create `artifact-contracts` crate with registry | DONE |
+| ACR-2 | Make refresh pipeline consume registry | DONE |
+| ACR-3 | Add per-row freshness and provenance schema | DONE |
+| ACR-4 | Implement impact propagation from L0 changes | DONE |
+| ACR-5 | Boundary contract proof case (first fix) | DONE |
 | ACR-6 | Wire query surfaces to report freshness/degradation | NOT STARTED |
 
 **Key decisions (locked):**

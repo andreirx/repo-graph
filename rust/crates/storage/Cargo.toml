@@ -104,6 +104,10 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # typed failure modes to upstream crates.
 thiserror = "2"
 
+# Chrono for ISO 8601 timestamps. Used by freshness tracking (ACR-3)
+# for freshness_updated_at column values.
+chrono = "0.4"
+
 # UUID generation for storage identity surfaces.
 #
 # v4 (random): migration 004's obligation_id backfill. The TS
@@ -170,6 +174,11 @@ repo-graph-doc-facts = { path = "../doc-facts" }
 # storage adapter implements the PolicyFactsStorageRead/Write traits
 # defined by the policy-facts crate.
 repo-graph-policy-facts = { path = "../policy-facts" }
+
+# Artifact-contracts crate — added for ACR-3 freshness/provenance schema.
+# The storage adapter uses FreshnessState, FreshnessFilter, Provenance,
+# and ProvenanceAnchor types for the freshness storage port.
+artifact-contracts = { path = "../artifact-contracts" }
 
 # Boundary-interaction crate — added for BI-1A Local IPC slice. The
 # storage adapter uses BoundaryInteractionSurface and ChannelDetail

@@ -50,6 +50,7 @@ use repo_graph_ts_extractor::{
 };
 
 use crate::config::RepoConfigContext;
+use crate::impact_propagation::{propagate_impact, ImpactReport};
 use crate::refresh_policy::{
     FamilyRefreshResult, RefreshAction, RefreshDiagnostics, COPY_FORWARD_FAMILIES,
 };
@@ -540,18 +541,48 @@ fn persist_metrics(
 /// This enables dead-code suppression for Spring container-managed
 /// symbols (@Service, @Component, @Repository, @Controller,
 /// @RestController, @Configuration classes; @Bean methods).
+///
+/// # Arguments
+/// * `changed_file_paths` - If Some, only process nodes from these files (refresh mode).
+///   If None, process all nodes and replace all Spring inferences (full index mode).
+///
+/// In refresh mode, inferences for unchanged files are preserved via copy-forward.
+/// This respects the ACR-4 impact propagation model: copy-forwarded inferences
+/// can be marked impacted if their provenance references changed L0 keys.
 fn persist_spring_liveness_inferences(
 	storage: &mut StorageConnection,
 	repo_uid: &str,
 	snapshot_uid: &str,
+	changed_file_paths: Option<&[&str]>,
 ) -> Result<(), ComposeError> {
 	// Query all nodes for the snapshot
 	let nodes = storage
 		.query_all_nodes(snapshot_uid)
 		.map_err(ComposeError::Storage)?;
 
+	// Filter nodes based on changed files (if in refresh mode)
+	let nodes_to_process: Vec<_> = match changed_file_paths {
+		Some(changed_paths) => {
+			// Refresh mode: only process nodes from changed files
+			nodes
+				.into_iter()
+				.filter(|n| {
+					changed_paths.iter().any(|path| {
+						// Match SYMBOL nodes by "repo:path#" prefix
+						let symbol_prefix = format!("{}:{}#", repo_uid, path);
+						n.stable_key.starts_with(&symbol_prefix)
+					})
+				})
+				.collect()
+		}
+		None => {
+			// Full index mode: process all nodes
+			nodes
+		}
+	};
+
 	// Project to SpringNodeInput — only SYMBOL nodes with metadata
-	let inputs: Vec<SpringNodeInput> = nodes
+	let inputs: Vec<SpringNodeInput> = nodes_to_process
 		.iter()
 		.filter(|n| n.kind == "SYMBOL" && n.metadata_json.is_some())
 		.map(|n| SpringNodeInput {
@@ -562,18 +593,16 @@ fn persist_spring_liveness_inferences(
 		})
 		.collect();
 
-	if inputs.is_empty() {
+	if inputs.is_empty() && changed_file_paths.is_some() {
+		// Refresh mode with no Spring symbols in changed files — nothing to do.
+		// Copy-forwarded inferences from unchanged files are preserved.
 		return Ok(());
 	}
 
 	// Run classifier
 	let classified = classify_spring_liveness(&inputs);
 
-	if classified.is_empty() {
-		return Ok(());
-	}
-
-	// Convert to InferenceInput
+	// Convert to InferenceInput with provenance (ACR-4)
 	// Use real ISO timestamp and version consistent with Rust indexer
 	let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 	let extractor = "indexer:1.0.0"; // Match INDEXER_VERSION in orchestrator.rs
@@ -581,25 +610,67 @@ fn persist_spring_liveness_inferences(
 	let inferences: Vec<InferenceInput> = classified
 		.iter()
 		.enumerate()
-		.map(|(i, inf)| InferenceInput {
-			inference_uid: format!("{}-spring-{}", snapshot_uid, i),
-			snapshot_uid: snapshot_uid.to_string(),
-			repo_uid: repo_uid.to_string(),
-			target_stable_key: inf.target_stable_key.clone(),
-			kind: inf.kind.clone(),
-			value_json: inf.value_json.clone(),
-			confidence: inf.confidence,
-			basis_json: inf.basis_json.clone(),
-			extractor: extractor.to_string(),
-			created_at: now.clone(),
+		.map(|(i, inf)| {
+			// Construct canonical provenance for impact propagation.
+			// The inference depends on the Node it classifies (the target).
+			// When that node changes, this inference should be marked impacted.
+			let provenance = artifact_contracts::Provenance::from_layer0_items(vec![
+				artifact_contracts::ProvenanceAnchor::new("Nodes", &inf.target_stable_key),
+			]).with_extractor(extractor);
+			let provenance_json = serde_json::to_string(&provenance).ok();
+
+			InferenceInput {
+				inference_uid: format!("{}-spring-{}", snapshot_uid, i),
+				snapshot_uid: snapshot_uid.to_string(),
+				repo_uid: repo_uid.to_string(),
+				target_stable_key: inf.target_stable_key.clone(),
+				kind: inf.kind.clone(),
+				value_json: inf.value_json.clone(),
+				confidence: inf.confidence,
+				basis_json: inf.basis_json.clone(),
+				extractor: extractor.to_string(),
+				created_at: now.clone(),
+				provenance_json,
+			}
 		})
 		.collect();
 
-	// Atomic replace: delete + insert in a single transaction.
-	// If insert fails, the old inference set survives (transaction rollback).
-	storage
-		.replace_inferences_by_kind(snapshot_uid, &["spring_container_managed"], &inferences)
-		.map_err(ComposeError::Storage)?;
+	match changed_file_paths {
+		Some(changed_paths) => {
+			// Refresh mode: delete only inferences for changed files, then insert new ones.
+			// This preserves copy-forwarded inferences for unchanged files.
+			if !changed_paths.is_empty() {
+				// Delete Spring inferences whose target_stable_key matches changed files
+				storage
+					.delete_inferences_by_kind_and_files(
+						snapshot_uid,
+						repo_uid,
+						"spring_container_managed",
+						changed_paths,
+					)
+					.map_err(ComposeError::Storage)?;
+			}
+			// Insert new inferences for changed files
+			if !inferences.is_empty() {
+				storage
+					.insert_inferences(&inferences)
+					.map_err(ComposeError::Storage)?;
+			}
+		}
+		None => {
+			// Full index mode: replace all Spring inferences
+			if inferences.is_empty() {
+				// No Spring symbols — delete any existing Spring inferences
+				storage
+					.delete_inferences_by_kind(snapshot_uid, &["spring_container_managed"])
+					.map_err(ComposeError::Storage)?;
+			} else {
+				storage
+					.replace_inferences_by_kind(snapshot_uid, &["spring_container_managed"], &inferences)
+					.map_err(ComposeError::Storage)?;
+			}
+		}
+	}
 
 	Ok(())
 }
@@ -1268,7 +1339,8 @@ pub fn index_into_storage_with_progress(
 
 	emit_progress(&mut progress, "persisting", 3, 7)?;  // about to persist spring liveness
 	// Persist Spring framework-liveness inferences for dead-code suppression.
-	persist_spring_liveness_inferences(storage, repo_uid, &result.snapshot_uid)?;
+	// Full index mode: process all nodes, replace all Spring inferences.
+	persist_spring_liveness_inferences(storage, repo_uid, &result.snapshot_uid, None)?;
 
 	emit_progress(&mut progress, "persisting", 4, 7)?;  // about to persist policy facts
 	// PF-1: Extract and persist STATUS_MAPPING policy facts from C files.
@@ -1540,6 +1612,62 @@ pub fn refresh_into_storage_with_progress(
 			contract_schemas_copied,
 			contract_elements_copied,
 		});
+
+		// ══════════════════════════════════════════════════════════════════════════
+		// Impact Propagation (ACR-4)
+		// ══════════════════════════════════════════════════════════════════════════
+		//
+		// Mark derived artifacts as impacted when their Layer 0 dependencies changed.
+		// This implements the MarkImpactedOnRelevantLayer0Change policy.
+		//
+		// Collect stable keys of nodes from changed files. A file is "changed" if
+		// it was re-extracted (not in unchanged_files). We use the stable_key format
+		// `{repo_uid}:{path}#{symbol}:SYMBOL:{type}` to match nodes to changed files.
+		let changed_file_paths: Vec<&str> = prepared.file_inputs
+			.iter()
+			.map(|f| f.rel_path.as_str())
+			.filter(|path| !unchanged_file_set.contains(*path))
+			.collect();
+
+		let changed_stable_keys: Vec<String> = if changed_file_paths.is_empty() {
+			Vec::new()
+		} else {
+			// Query all nodes for the snapshot and filter to those from changed files.
+			// Node stable_keys embed the file path with specific delimiters:
+			// - SYMBOL nodes: "repo:path#symbol:SYMBOL:type" (# after path)
+			// - FILE nodes: "repo:path:FILE" (exact match)
+			//
+			// We must check for the delimiter to avoid false-matching path prefixes
+			// (e.g., "src/A.java" should not match "src/A.javax/Foo.java").
+			let all_nodes = storage
+				.query_all_nodes(&result.snapshot_uid)
+				.map_err(ComposeError::Storage)?;
+
+			all_nodes
+				.into_iter()
+				.filter(|node| {
+					changed_file_paths.iter().any(|path| {
+						// SYMBOL nodes have # after path: "repo:path#symbol:SYMBOL:type"
+						let symbol_prefix = format!("{}:{}#", repo_uid, path);
+						// FILE nodes have exact format: "repo:path:FILE"
+						let file_key = format!("{}:{}:FILE", repo_uid, path);
+						node.stable_key.starts_with(&symbol_prefix) || node.stable_key == file_key
+					})
+				})
+				.map(|node| node.stable_key)
+				.collect()
+		};
+
+		// Propagate impact to derived artifacts whose provenance references changed stable keys
+		let _impact_report: ImpactReport = propagate_impact(
+			storage,
+			&result.snapshot_uid,
+			&changed_stable_keys,
+		).map_err(ComposeError::Storage)?;
+
+		// Impact report available for future diagnostics integration.
+		// Fields: total_impacted(), get(family) per artifact family.
+		// TODO: Include impact_report in result diagnostics (ACR-4 follow-on)
 	}
 
 	// Filter file inputs to only changed files for postpass extraction.
@@ -1579,7 +1707,17 @@ pub fn refresh_into_storage_with_progress(
 
 	emit_progress(&mut progress, "persisting", 3, 7)?;  // about to persist spring liveness
 	// Persist Spring framework-liveness inferences for dead-code suppression.
-	persist_spring_liveness_inferences(storage, repo_uid, &result.snapshot_uid)?;
+	// Refresh mode: only process nodes from changed files, preserve copy-forwarded inferences.
+	let changed_paths_for_spring: Vec<&str> = changed_files_owned
+		.iter()
+		.map(|f| f.rel_path.as_str())
+		.collect();
+	persist_spring_liveness_inferences(
+		storage,
+		repo_uid,
+		&result.snapshot_uid,
+		Some(&changed_paths_for_spring),
+	)?;
 
 	emit_progress(&mut progress, "persisting", 4, 7)?;  // about to persist policy facts
 	// PF-1: Extract and persist STATUS_MAPPING policy facts from C files.

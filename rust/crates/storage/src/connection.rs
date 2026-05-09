@@ -36,7 +36,7 @@
 //!
 //! 1. `open(path)` or `open_in_memory()` → opens the SQLite
 //!    connection, applies WAL + foreign_keys pragmas via the
-//!    migration runner, applies all 26 migrations. Returns
+//!    migration runner, applies all 27 migrations. Returns
 //!    `Ok(StorageConnection)` on success.
 //!
 //! 2. The migration runner is called via
@@ -79,7 +79,7 @@ use crate::migrations::run_migrations;
 /// Owned, fully-initialized connection to a storage database.
 ///
 /// Construction via `open(path)` or `open_in_memory()` opens the
-/// underlying SQLite connection AND runs all 26 migrations
+/// underlying SQLite connection AND runs all 27 migrations
 /// before returning. A successfully-constructed
 /// `StorageConnection` is guaranteed to be backed by a database
 /// at the latest schema version. There is no uninitialized
@@ -261,6 +261,26 @@ impl StorageConnection {
 	pub fn diagnostic_dump(&self) -> serde_json::Value {
 		crate::diagnostic::dump_state(&self.conn)
 	}
+
+	// ══════════════════════════════════════════════════════════════════
+	// Test helpers — public for cross-crate integration tests
+	// ══════════════════════════════════════════════════════════════════
+
+	/// Execute raw SQL (no results). For test fixtures only.
+	///
+	/// # Panics
+	///
+	/// Panics on SQL error. Intended for test setup only.
+	pub fn execute_raw(&self, sql: &str) -> Result<usize, crate::error::StorageError> {
+		Ok(self.conn.execute(sql, [])?)
+	}
+
+	/// Query a single scalar value. For test assertions only.
+	///
+	/// Returns `StorageError` if query fails or returns no rows.
+	pub fn query_scalar<T: rusqlite::types::FromSql>(&self, sql: &str) -> Result<T, crate::error::StorageError> {
+		Ok(self.conn.query_row(sql, [], |row| row.get(0))?)
+	}
 }
 
 #[cfg(test)]
@@ -274,7 +294,7 @@ mod tests {
 		let storage = StorageConnection::open_in_memory()
 			.expect("open_in_memory must succeed");
 
-		// Verify all 26 migrations have been applied by checking
+		// Verify all 27 migrations have been applied by checking
 		// the schema_migrations table count.
 		let count: i64 = storage
 			.connection()
@@ -283,8 +303,8 @@ mod tests {
 			})
 			.expect("query schema_migrations");
 		assert_eq!(
-			count, 26,
-			"open_in_memory must run all 26 migrations before returning"
+			count, 27,
+			"open_in_memory must run all 27 migrations before returning"
 		);
 	}
 
@@ -363,7 +383,7 @@ mod tests {
 				row.get(0)
 			})
 			.unwrap();
-		assert_eq!(count, 26);
+		assert_eq!(count, 27);
 	}
 
 	#[test]
@@ -415,7 +435,7 @@ mod tests {
 			})
 			.unwrap();
 		assert_eq!(
-			migration_count, 26,
+			migration_count, 27,
 			"re-open must not duplicate schema_migrations rows"
 		);
 	}
@@ -448,7 +468,7 @@ mod tests {
 				row.get(0)
 			})
 			.unwrap();
-		assert_eq!(count, 26);
+		assert_eq!(count, 27);
 	}
 
 	#[test]

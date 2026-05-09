@@ -28,6 +28,7 @@
 
 use std::collections::HashMap;
 
+use artifact_contracts::{Provenance, ProvenanceAnchor};
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
@@ -55,7 +56,7 @@ pub struct GrpcClientHint {
     pub stub_method: String,
     /// The stub type (blocking, future, async)
     pub stub_type: StubType,
-    /// Proto service element UID (from CS-2A mapping)
+    /// Proto service element UID (from CS-2A mapping) — for FK insert only
     pub proto_service_uid: String,
     /// Proto service name
     pub proto_service_name: String,
@@ -63,6 +64,12 @@ pub struct GrpcClientHint {
     pub mapping_uid: String,
     /// Confidence from CS-2A mapping
     pub mapping_confidence: f64,
+    /// Proto service full name (e.g., "example.Greeter") — for stable provenance
+    pub proto_service_full_name: String,
+    /// Proto service element kind (e.g., "service") — for stable provenance
+    pub proto_service_kind: String,
+    /// Proto schema file path (e.g., "greeter.proto") — for stable provenance
+    pub proto_schema_file: String,
 }
 
 /// Type of gRPC client stub.
@@ -214,6 +221,9 @@ pub fn find_grpc_client_hints(
             proto_service_name: service.service_name.clone(),
             mapping_uid: service.mapping_uid.clone(),
             mapping_confidence: service.confidence,
+            proto_service_full_name: service.service_full_name.clone(),
+            proto_service_kind: service.element_kind.clone(),
+            proto_schema_file: service.schema_file_path.clone(),
         });
     }
 
@@ -385,6 +395,21 @@ where
             evidence_json: evidence.to_string(),
         });
 
+        // Compute provenance from stable anchors (ACR-5)
+        // Pattern: {repo}:{proto_file}#{element_kind}:{full_name}
+        let contract_element_stable_key = format!(
+            "{}:{}#{}:{}",
+            repo_uid,
+            hint.proto_schema_file,
+            hint.proto_service_kind,
+            hint.proto_service_full_name,
+        );
+        let provenance = Provenance::from_layer0_items(vec![
+            ProvenanceAnchor::new("BoundaryInteractionSurfaces", &hint.creator_stable_key),
+            ProvenanceAnchor::new("ContractElements", &contract_element_stable_key),
+        ])
+        .with_extractor("grpc_client_hint_java:1.0");
+
         contracts.push(GrpcClientContractInput {
             association_uid,
             surface_uid,
@@ -393,6 +418,7 @@ where
                 "mapping_uid": hint.mapping_uid,
             })
             .to_string(),
+            provenance: Some(provenance),
         });
     }
 
@@ -487,6 +513,9 @@ mod tests {
             service_name: "Greeter".to_string(),
             mapping_uid: "m1".to_string(),
             confidence: 0.85,
+            service_full_name: "example.Greeter".to_string(),
+            element_kind: "service".to_string(),
+            schema_file_path: "greeter.proto".to_string(),
         }];
 
         let hints = find_grpc_client_hints(&creations, &services);
@@ -516,6 +545,9 @@ mod tests {
             service_name: "Greeter".to_string(),
             mapping_uid: "m1".to_string(),
             confidence: 0.85,
+            service_full_name: "example.Greeter".to_string(),
+            element_kind: "service".to_string(),
+            schema_file_path: "greeter.proto".to_string(),
         }];
 
         let hints = find_grpc_client_hints(&creations, &services);
@@ -542,12 +574,18 @@ mod tests {
                 service_name: "Greeter".to_string(), // api.v1.Greeter
                 mapping_uid: "m1".to_string(),
                 confidence: 0.85,
+                service_full_name: "api.v1.Greeter".to_string(),
+                element_kind: "service".to_string(),
+                schema_file_path: "api/v1/greeter.proto".to_string(),
             },
             GrpcServiceMappingInput {
                 service_element_uid: "service-legacy".to_string(),
                 service_name: "Greeter".to_string(), // legacy.Greeter
                 mapping_uid: "m2".to_string(),
                 confidence: 0.85,
+                service_full_name: "legacy.Greeter".to_string(),
+                element_kind: "service".to_string(),
+                schema_file_path: "legacy/greeter.proto".to_string(),
             },
         ];
 

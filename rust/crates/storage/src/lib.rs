@@ -179,11 +179,19 @@ pub mod queries; // Read-side graph queries (R10+)
 mod trust_impl; // TrustStorageRead impl for StorageConnection (R4-E/F)
 mod policy_facts_impl; // PolicyFactsStorageRead/Write impl for StorageConnection (PF-1)
 mod enrichment_impl; // EnrichmentStoragePort impl for StorageConnection (EN-3)
+pub mod freshness_port; // Freshness and provenance storage port (ACR-3)
+mod freshness_impl; // FreshnessStoragePort impl for StorageConnection (ACR-3)
 mod refresh_copy_forward_impl; // Refresh artifact copy-forward (refresh-integrity-parity slice)
 pub mod types;
 
 // Re-export refresh copy-forward types for compose layer.
 pub use refresh_copy_forward_impl::ArtifactCopyForwardResult;
+
+// Re-export freshness port types (ACR-3).
+pub use freshness_port::{
+    FreshnessStoragePort, FreshnessSummary, RowRef,
+    FRESHNESS_TRACKED_TABLES, is_freshness_tracked,
+};
 
 // Convenience re-exports for the public connection lifecycle API.
 pub use connection::StorageConnection;

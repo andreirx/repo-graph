@@ -33,12 +33,18 @@ pub struct ImplBaseExtension {
 pub struct ImplBaseMapping {
     /// The mapping UID
     pub mapping_uid: String,
-    /// The proto service element UID
+    /// The proto service element UID (snapshot-local, for FK only)
     pub schema_element_uid: String,
     /// The generated symbol key (contains the ImplBase class)
     pub generated_symbol_key: String,
     /// Confidence of the CS-2A mapping
     pub confidence: f64,
+    /// Fully qualified element name (e.g., "example.Greeter") — for stable provenance
+    pub element_full_name: String,
+    /// Element kind (e.g., "service") — for stable provenance
+    pub element_kind: String,
+    /// Proto schema file path (e.g., "greeter.proto") — for stable provenance
+    pub schema_file_path: String,
 }
 
 impl StorageConnection {
@@ -102,6 +108,7 @@ impl StorageConnection {
     ///
     /// Finds CS-2A mappings where the generated_symbol_key contains "ImplBase".
     /// These mappings link generated gRPC stub classes to proto service elements.
+    /// Joins contract_elements and contract_schemas to get stable provenance data.
     /// Used by `GrpcImplHintReadPort` impl which converts to indexer types.
     pub fn query_impl_base_mappings_raw(
         &self,
@@ -112,13 +119,18 @@ impl StorageConnection {
         let mut stmt = conn.prepare(
             r#"
             SELECT
-                mapping_uid,
-                schema_element_uid,
-                generated_symbol_key,
-                confidence
-            FROM generated_code_mappings
-            WHERE snapshot_uid = ?
-              AND generated_symbol_key LIKE '%ImplBase%'
+                gcm.mapping_uid,
+                gcm.schema_element_uid,
+                gcm.generated_symbol_key,
+                gcm.confidence,
+                ce.full_name,
+                ce.element_kind,
+                cs.file_path
+            FROM generated_code_mappings gcm
+            JOIN contract_elements ce ON ce.element_uid = gcm.schema_element_uid
+            JOIN contract_schemas cs ON cs.schema_uid = ce.schema_uid
+            WHERE gcm.snapshot_uid = ?
+              AND gcm.generated_symbol_key LIKE '%ImplBase%'
             "#,
         )?;
 
@@ -128,6 +140,9 @@ impl StorageConnection {
                 schema_element_uid: row.get(1)?,
                 generated_symbol_key: row.get(2)?,
                 confidence: row.get(3)?,
+                element_full_name: row.get(4)?,
+                element_kind: row.get(5)?,
+                schema_file_path: row.get(6)?,
             })
         })?;
 

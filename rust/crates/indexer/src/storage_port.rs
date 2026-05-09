@@ -25,6 +25,7 @@
 
 use std::collections::BTreeMap;
 
+use artifact_contracts::Provenance;
 use repo_graph_classification::types::{
 	UnresolvedEdgeBasisCode, UnresolvedEdgeCategory, UnresolvedEdgeClassification,
 };
@@ -745,6 +746,10 @@ pub struct GrpcImplContractInput {
 	pub surface_uid: String,
 	pub contract_element_uid: String,
 	pub evidence_json: String,
+	/// Typed provenance for ACR freshness tracking.
+	/// When present, storage derives freshness_state='current'.
+	/// When absent, storage derives freshness_state='unknown'.
+	pub provenance: Option<Provenance>,
 }
 
 // ── GR-1B: Registration proof port ────────────────────────────────────
@@ -895,7 +900,7 @@ pub struct StubCreationInput {
 /// like `GreeterImplBase`, `GreeterBlockingStub`, etc., not the outer `GreeterGrpc`).
 #[derive(Debug, Clone)]
 pub struct GrpcServiceMappingInput {
-	/// The proto service element UID
+	/// The proto service element UID (snapshot-local, for FK only)
 	pub service_element_uid: String,
 	/// The proto service name (e.g., "Greeter", "UserService")
 	pub service_name: String,
@@ -903,6 +908,12 @@ pub struct GrpcServiceMappingInput {
 	pub mapping_uid: String,
 	/// Best confidence among mappings to this service
 	pub confidence: f64,
+	/// Fully qualified service name (e.g., "example.Greeter") — for stable provenance
+	pub service_full_name: String,
+	/// Element kind (e.g., "service") — for stable provenance
+	pub element_kind: String,
+	/// Proto schema file path (e.g., "greeter.proto") — for stable provenance
+	pub schema_file_path: String,
 }
 
 /// Input for inserting a gRPC client hint surface.
@@ -927,6 +938,10 @@ pub struct GrpcClientContractInput {
 	pub surface_uid: String,
 	pub contract_element_uid: String,
 	pub evidence_json: String,
+	/// Typed provenance for ACR freshness tracking.
+	/// When present, storage derives freshness_state='current'.
+	/// When absent, storage derives freshness_state='unknown'.
+	pub provenance: Option<Provenance>,
 }
 
 // ── GR-3A: Contract-based provider/consumer linking port ─────────────────────
@@ -981,7 +996,7 @@ pub trait GrpcLinkStorePort {
 pub struct SurfaceWithContract {
 	/// Surface UID
 	pub surface_uid: String,
-	/// Contract element UID (proto service)
+	/// Contract element UID (proto service) — for FK only
 	pub contract_element_uid: String,
 	/// Contract element full name (e.g., "helloworld.Greeter")
 	pub contract_full_name: String,
@@ -991,6 +1006,12 @@ pub struct SurfaceWithContract {
 	pub source_file: String,
 	/// Interaction basis (e.g., "impl_extension", "stub_creation")
 	pub basis: String,
+	/// Surface symbol stable key — for stable provenance
+	pub symbol_stable_key: String,
+	/// Contract element kind (e.g., "service") — for stable provenance
+	pub contract_element_kind: String,
+	/// Contract schema file path (e.g., "greeter.proto") — for stable provenance
+	pub contract_schema_file: String,
 }
 
 /// Input for inserting a boundary interaction link.
@@ -1014,4 +1035,8 @@ pub struct BoundaryInteractionLinkInput {
 	pub confidence: f64,
 	/// Evidence JSON
 	pub evidence_json: String,
+	/// Typed provenance for ACR freshness tracking.
+	/// When present, storage derives freshness_state='current'.
+	/// When absent, storage derives freshness_state='unknown'.
+	pub provenance: Option<Provenance>,
 }

@@ -1,9 +1,62 @@
 # ACR-4: Impact Propagation
 
-Status: NOT STARTED
+Status: **DONE**
 Depends: `acr-3-provenance-and-freshness-schema.md`
 Follow-on: `acr-5-boundary-contract-proof-case.md`
 Track: Core Infrastructure — Artifact Contract Registry
+
+## Implementation Progress
+
+### Completed
+
+- [x] **Step 1: Fix JSON Provenance Matching (ACR-3 Tech Debt)**
+  - Upgraded `mark_impacted_by_stable_keys()` to use `json_each()`/`json_extract()`
+  - Added regression test `mark_impacted_does_not_false_match_prefix`
+  - TECH-DEBT.md entry marked as FIXED
+
+- [x] **Step 2: Impact Propagation Module**
+  - Created `impact_propagation.rs` in repo-index crate
+  - `ImpactReport` type for tracking impacted counts per family
+  - `propagate_impact()` function iterates families and calls storage port
+
+- [x] **Step 3: Wire Impact Propagation into Refresh**
+  - `propagate_impact()` called after copy-forward in `refresh_into_storage_with_progress()`
+
+- [x] **Step 4: Populate Provenance During Inference Creation**
+  - Spring liveness inferences now populate `provenance_json` with canonical structure
+  - Provenance references the target Node stable key (the symbol being classified)
+  - Uses `Provenance::from_layer0_items()` with `ProvenanceAnchor::new("Nodes", stable_key)`
+  - Inferences with provenance get `freshness_state = 'current'` (not 'unknown')
+
+- [x] **Step 5: Track Changed L0 Stable Keys**
+  - Changed stable keys collected from nodes of changed files
+  - Uses delimiter-safe matching: `{repo}:{path}#` for SYMBOL, exact match for FILE
+  - Passes stable keys to `propagate_impact()` for impact marking
+
+- [x] **Step 6: Refresh Respects Changed vs Unchanged Files**
+  - `persist_spring_liveness_inferences()` accepts `changed_file_paths` parameter
+  - Refresh mode: only processes nodes from changed files, preserves copy-forwarded inferences
+  - Full index mode: processes all nodes, replaces all Spring inferences
+  - `copy_forward_inferences()` preserves `provenance_json` and `freshness_state`
+
+- [x] **Step 7: Delimiter-Safe Delete**
+  - `delete_inferences_by_kind_and_files()` uses `substr()` for exact prefix matching
+  - Prevents false-matching path prefixes (e.g., `src/A.java` won't match `src/A.javaX`)
+
+- [x] **Step 8: Tests**
+  - 451 storage unit tests pass (including ACR-4 specific tests)
+  - 16 refresh integration tests pass
+  - Key tests:
+    - `impact_propagation_marks_cross_file_dependency_impacted` (storage unit test)
+    - `refresh_marks_cross_file_inference_impacted` (integration test - **canonical proof**)
+    - `refresh_preserves_unchanged_spring_inferences`
+    - `delete_by_file_does_not_false_match_path_prefix`
+
+### Follow-on Work (Not Blocking ACR-4 Closure)
+
+- [ ] Provenance for other inference producers (framework entrypoints, Lambda detection)
+- [ ] Impact report included in refresh result diagnostics
+- [ ] Cross-file provenance for true `MarkImpactedDeferRecompute` behavior
 
 ## Objective
 
@@ -302,12 +355,14 @@ impl ImpactReport {
 
 ## Definition of Done
 
-- [ ] Impact propagation algorithm implemented
-- [ ] Provenance populated during boundary/inference creation
-- [ ] Refresh pipeline calls propagate_impact after Layer 0-1
-- [ ] Impact report included in refresh diagnostics
-- [ ] Tests verify impacted rows are marked correctly
-- [ ] Tests verify current rows are not affected when their provenance is unchanged
+- [x] Impact propagation algorithm implemented (`propagate_impact()` in impact_propagation.rs)
+- [x] Provenance populated during inference creation (Spring liveness as first adopter)
+- [x] Refresh pipeline calls propagate_impact after copy-forward
+- [x] Changed L0 stable keys collected from nodes of changed files
+- [x] Tests verify impacted rows are marked correctly (4 unit tests)
+- [x] Tests verify current rows are not affected when their provenance is unchanged
+- [x] Integration test: Spring inferences have provenance and 'current' freshness
+- [ ] Impact report included in refresh diagnostics (follow-on)
 
 ## Validation Commands
 

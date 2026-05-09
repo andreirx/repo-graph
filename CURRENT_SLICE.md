@@ -6,7 +6,7 @@ Artifact Contract Registry (ACR) — foundational architecture for artifact sema
 
 ## Active Slice
 
-`docs/slices/acr-3-provenance-and-freshness-schema.md`
+`docs/slices/acr-4-impact-propagation.md`
 
 ## Branch Intent
 
@@ -14,13 +14,37 @@ Codify artifact truth classes, refresh policies, and provenance requirements in 
 before continuing refresh bug fixes. The registry becomes the authority for how each
 artifact family behaves during refresh and query.
 
-## Definition of Done (ACR-3)
+## Definition of Done (ACR-4)
 
-- [ ] Per-row freshness columns added to derived artifact tables
-- [ ] Per-row provenance columns/tables for Layer 2+ families
-- [ ] Freshness state enum (`current`, `impacted`, `stale`, `unknown`) in schema
-- [ ] Provenance anchor storage for derived rows
-- [ ] Migration path for existing data
+- [x] `mark_impacted_by_stable_keys()` uses `json_each()`/`json_extract()` (fix ACR-3 scaffolding)
+- [x] Unit tests for JSON-based provenance matching (449 storage tests pass)
+- [x] TECH-DEBT.md ACR-3 scaffolding entry marked FIXED
+- [x] Impact propagation module created (`impact_propagation.rs`)
+- [x] Impact propagation wired into refresh pipeline
+- [x] Populate provenance_json during inference creation (Spring liveness)
+- [x] Changed L0 stable keys tracked from extraction results
+- [x] Unit tests: provenance populated → freshness='current', mark_impacted works
+- [x] Integration test: Spring inferences have provenance and 'current' freshness
+
+## Status
+
+ACR-4 implementation complete. Impact propagation now works end-to-end:
+
+1. **Provenance populated**: Spring liveness inferences have `provenance_json` with canonical structure
+2. **Freshness tracked**: Inferences with provenance get `freshness_state='current'`
+3. **Copy-forward preserves state**: Unchanged file inferences keep their provenance and freshness
+4. **Changed file detection**: Stable key matching uses proper delimiters (no prefix false-matches)
+5. **Refresh respects changes**: Only changed file inferences are regenerated; unchanged are copied
+
+**Integration tests**:
+- `refresh_spring_inference_has_provenance_and_current_freshness` - proves provenance populated
+- `refresh_preserves_unchanged_spring_inferences` - proves copy-forward + regenerate semantics
+- `refresh_marks_cross_file_inference_impacted` - **canonical proof**: cross-file provenance causes `current → impacted` on surviving row
+
+**Follow-on work** (not blocking ACR-4 closure):
+- Provenance for other inference producers (framework entrypoints, etc.)
+- Impact report included in refresh diagnostics
+- Query-layer freshness filtering (ACR-6)
 
 ## Carry-over from ACR-2
 
@@ -37,8 +61,8 @@ These items require ACR-3 scaffolding before they can be completed:
 |-------|-------|--------|
 | ACR-1 | Create artifact-contracts crate | DONE |
 | ACR-2 | Refresh pipeline consumes registry | DONE (copy-forward + recompute dispatched; reindex drift documented) |
-| ACR-3 | Per-row freshness and provenance schema | NOT STARTED |
-| ACR-4 | Impact propagation from L0 changes | NOT STARTED |
+| ACR-3 | Per-row freshness and provenance schema | DONE (schema + storage port; parity blocked on TS) |
+| ACR-4 | Impact propagation from L0 changes | DONE (provenance populated, copy-forward preserves state, delimiter-safe matching) |
 | ACR-5 | Boundary contract proof case | NOT STARTED |
 | ACR-6 | Query degradation and freshness | NOT STARTED |
 

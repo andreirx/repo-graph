@@ -26,6 +26,7 @@
 
 use std::collections::HashMap;
 
+use artifact_contracts::{Provenance, ProvenanceAnchor};
 use sha2::{Digest, Sha256};
 
 use crate::storage_port::{
@@ -49,7 +50,7 @@ pub struct GrpcImplHint {
     pub line_start: i64,
     /// Column number
     pub col_start: i64,
-    /// Proto service element UID (from CS-2A mapping)
+    /// Proto service element UID (from CS-2A mapping) — for FK insert only
     pub proto_service_uid: String,
     /// Proto service name
     pub proto_service_name: String,
@@ -57,6 +58,12 @@ pub struct GrpcImplHint {
     pub mapping_uid: String,
     /// Confidence from CS-2A mapping
     pub mapping_confidence: f64,
+    /// Proto service full name (e.g., "example.Greeter") — for stable provenance
+    pub proto_service_full_name: String,
+    /// Proto service element kind (e.g., "service") — for stable provenance
+    pub proto_service_kind: String,
+    /// Proto schema file path (e.g., "greeter.proto") — for stable provenance
+    pub proto_schema_file: String,
 }
 
 /// Input: a class extending an ImplBase (from storage query).
@@ -78,6 +85,12 @@ pub struct ImplBaseMappingInput {
     pub schema_element_uid: String,
     pub generated_symbol_key: String,
     pub confidence: f64,
+    /// Fully qualified element name (e.g., "example.Greeter") — for stable provenance
+    pub element_full_name: String,
+    /// Element kind (e.g., "service") — for stable provenance
+    pub element_kind: String,
+    /// Proto schema file path (e.g., "greeter.proto") — for stable provenance
+    pub schema_file_path: String,
 }
 
 /// Find gRPC server implementation hints by joining extensions with CS-2A mappings.
@@ -122,6 +135,9 @@ pub fn find_grpc_impl_hints(
                 proto_service_name: service_name,
                 mapping_uid: mapping.mapping_uid.clone(),
                 mapping_confidence: mapping.confidence,
+                proto_service_full_name: mapping.element_full_name.clone(),
+                proto_service_kind: mapping.element_kind.clone(),
+                proto_schema_file: mapping.schema_file_path.clone(),
             });
         }
     }
@@ -301,6 +317,21 @@ where
             evidence_json: evidence.to_string(),
         });
 
+        // Compute provenance from stable anchors (ACR-5)
+        // Pattern: {repo}:{proto_file}#{element_kind}:{full_name}
+        let contract_element_stable_key = format!(
+            "{}:{}#{}:{}",
+            repo_uid,
+            hint.proto_schema_file,
+            hint.proto_service_kind,
+            hint.proto_service_full_name,
+        );
+        let provenance = Provenance::from_layer0_items(vec![
+            ProvenanceAnchor::new("BoundaryInteractionSurfaces", &hint.impl_class_key),
+            ProvenanceAnchor::new("ContractElements", &contract_element_stable_key),
+        ])
+        .with_extractor("grpc_impl_hint_java:1.0");
+
         contracts.push(GrpcImplContractInput {
             association_uid,
             surface_uid,
@@ -309,6 +340,7 @@ where
                 "mapping_uid": hint.mapping_uid,
             })
             .to_string(),
+            provenance: Some(provenance),
         });
     }
 
@@ -392,6 +424,9 @@ mod tests {
             generated_symbol_key: "r1:src/GreeterGrpc.java#GreeterGrpc.GreeterImplBase:SYMBOL:CLASS"
                 .to_string(),
             confidence: 0.85,
+            element_full_name: "example.Greeter".to_string(),
+            element_kind: "service".to_string(),
+            schema_file_path: "greeter.proto".to_string(),
         }];
 
         let hints = find_grpc_impl_hints(&extensions, &mappings);
@@ -420,6 +455,9 @@ mod tests {
             schema_element_uid: "service-1".to_string(),
             generated_symbol_key: "r1:src/BarGrpc.java#BarGrpc.BarImplBase:SYMBOL:CLASS".to_string(),
             confidence: 0.85,
+            element_full_name: "example.Bar".to_string(),
+            element_kind: "service".to_string(),
+            schema_file_path: "bar.proto".to_string(),
         }];
 
         let hints = find_grpc_impl_hints(&extensions, &mappings);

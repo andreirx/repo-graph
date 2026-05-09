@@ -51,6 +51,7 @@
 
 pub mod compose;
 pub mod config;
+pub mod impact_propagation;
 pub mod refresh_policy;
 pub mod scanner;
 pub mod state_boundary_hook;

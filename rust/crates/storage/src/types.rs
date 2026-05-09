@@ -840,7 +840,7 @@ pub struct MeasurementInput {
 /// (e.g., `spring_container_managed`, `framework_entrypoint`) computed
 /// during or after extraction.
 ///
-/// Maps directly to the `inferences` table schema (001-initial.sql).
+/// Maps directly to the `inferences` table schema (001-initial.sql + migration 027).
 #[derive(Debug, Clone, PartialEq)]
 pub struct InferenceInput {
 	pub inference_uid: String,
@@ -853,6 +853,13 @@ pub struct InferenceInput {
 	pub basis_json: String,
 	pub extractor: String,
 	pub created_at: String,
+	/// Canonical provenance tracking Layer 0 dependencies (ACR-3/4).
+	///
+	/// When populated, enables impact propagation: if any stable key in
+	/// `depends_on` changes, this inference is marked `impacted`.
+	///
+	/// Format: JSON-serialized `artifact_contracts::Provenance`.
+	pub provenance_json: Option<String>,
 }
 
 // ── Project Surfaces ───────────────────────────────────────────────

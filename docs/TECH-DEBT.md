@@ -2440,31 +2440,116 @@ is the safest honest behavior until ACR-3/5 provides the infrastructure.
 
 **Location:** `indexer/src/orchestrator.rs` at proto indexer invocation
 
-### 2. Inferences Copy-Forward Instead of MarkImpactedDeferRecompute
+### ~~2. Inferences Copy-Forward Instead of MarkImpactedDeferRecompute~~ PARTIALLY ADDRESSED (ACR-4)
 
-**Current behavior:** Unchanged inferences are copied forward from parent snapshot.
+**Previous behavior:** Unchanged inferences were copied forward without provenance or freshness tracking.
 
-**Contract says:** `MarkImpactedDeferRecompute` (mark as impacted when L0 changes).
+**Current behavior (ACR-4):**
+- Spring liveness inferences populate `provenance_json` with target node dependency
+- Copy-forward preserves `provenance_json` and `freshness_state` columns
+- Impact propagation marks inferences as `impacted` when their provenance references changed L0 keys
+- Changed file inferences are regenerated fresh (not copy-forwarded)
 
-**Why deferred:** Requires per-row freshness state columns, provenance anchor storage,
-and impact propagation logic. Copy-forward is the best we can do without that scaffolding.
+**Remaining limitation:** Spring liveness provenance is self-referential (depends on target node).
+True `MarkImpactedDeferRecompute` requires cross-file provenance (e.g., inference for ClassB
+depending on InterfaceA). When InterfaceA changes, ClassB's inference should be marked impacted.
+This requires inference producers that track cross-file dependencies.
 
-**Deferred to:** ACR-3 (schema) / ACR-4 (impact propagation)
+**Location:** `repo-index/src/compose.rs` at `persist_spring_liveness_inferences()`
 
-**Location:** `repo-index/src/refresh_policy.rs` at Inferences handling
+### ~~3. Per-Row Freshness/Provenance Not Wired~~ PARTIALLY ADDRESSED (ACR-3/4)
 
-### 3. Per-Row Freshness/Provenance Not Wired
+**Previous state:** No freshness or provenance tracking for derived artifacts.
 
-**Affects:** All Layer 2+ families (derived artifacts).
+**Current state (ACR-3/4):**
+- Schema: `freshness_state`, `freshness_updated_at`, `provenance_json` columns on 12 tables
+- Storage port: `FreshnessStoragePort` with full CRUD for freshness/provenance
+- First adopter: Spring liveness inferences populate provenance and track freshness
+- Copy-forward: Preserves freshness_state and provenance_json for unchanged files
 
-**Why deferred:** ACR-2 scope is dispatch logic only. The schema/runtime state for
-`current` / `impacted` / `stale` freshness tracking is ACR-3 scope.
-
-**Deferred to:** ACR-3
+**Remaining work:**
+- Other inference producers (framework entrypoints, Lambda detection) don't populate provenance yet
 
 ### Fix Path
 
-1. ACR-3: Add freshness/provenance schema, migration, storage methods
-2. ACR-4: Implement impact propagation from L0 changes
-3. ACR-5: Complete boundary contract proof case with full integrity story
-4. Return to these deferrals and wire honest policy enforcement
+1. ~~ACR-3: Add freshness/provenance schema, migration, storage methods~~ DONE
+2. ~~ACR-4: Implement impact propagation from L0 changes~~ DONE
+3. ~~ACR-5: Complete boundary contract proof case with full integrity story~~ DONE
+4. Extend provenance adoption to other inference producers
+
+## ACR-5 — Boundary Contract Proof Case
+
+**Slice:** `docs/slices/acr-5-boundary-contract-proof.md`
+**Status:** DONE
+
+### Summary
+
+Full end-to-end provenance and freshness tracking for the boundary contract family.
+
+### Completed Work
+
+1. **Typed provenance in port structs:**
+   - `GrpcImplContractInput`, `GrpcClientContractInput`, `BoundaryInteractionLinkInput` have `provenance: Option<Provenance>`
+   - Storage derives `freshness_state` from provenance presence (`current` when present, `unknown` when absent)
+
+2. **Provenance computation in GR chain code:**
+   - GR-1A, GR-2A, GR-3A compute provenance using stable key pattern
+   - Stable key: `{repo}:{proto_file}#{element_kind}:{full_name}`
+
+3. **End-to-end GR chain provenance tests:**
+   - `acr5_gr1a_populates_provenance_and_freshness` (grpc_impl_hint_port_impl.rs)
+   - `acr5_gr2a_populates_provenance_and_freshness` (grpc_impl_hint_port_impl.rs)
+   - `acr5_gr3a_populates_provenance_and_freshness` (grpc_impl_hint_port_impl.rs)
+
+4. **Storage semantics tests (raw SQL inserts):**
+   - `acr5_boundary_contract_with_provenance_is_current`
+   - `acr5_boundary_contract_without_provenance_is_unknown`
+   - `acr5_boundary_interaction_link_with_provenance_is_current`
+   - `acr5_no_fk_leakage_on_snapshot_deletion`
+   - `acr5_impact_propagation_on_surviving_boundary_links`
+
+5. **`boundary_contracts` FK-join impact propagation:**
+   - `build_mark_impacted_sql()` in `freshness_impl.rs` generates table-specific SQL
+   - `boundary_contracts` joins through `surface_uid` → `boundary_interaction_surfaces.snapshot_uid`
+   - Proof tests:
+     - `acr5_boundary_contracts_fk_join_impact_propagation` — verifies impact works via FK-join
+     - `acr5_boundary_contracts_fk_join_respects_snapshot_scope` — verifies snapshot isolation
+     - `acr5_boundary_contracts_no_provenance_not_impacted` — verifies unknown baseline
+
+## ACR-3 — Freshness and Provenance Schema
+
+**Slice:** `docs/slices/acr-3-provenance-and-freshness-schema.md`
+**Status:** DONE (schema + storage port complete; parity blocked on TS migration)
+
+### ~~Scaffolding Limitation: String-Based Provenance Matching~~ FIXED (ACR-4)
+
+**Location:** `rust/crates/storage/src/freshness_impl.rs`, `mark_impacted_by_stable_keys()`
+
+**Fixed in ACR-4:** Now uses SQLite's structured JSON functions (`json_each()`,
+`json_extract()`) for proper provenance matching. Regression test
+`mark_impacted_does_not_false_match_prefix` validates exact matching.
+
+**Previous behavior (ACR-3 scaffolding):** Used `LIKE '%"stable_key":"<key>"%'`
+pattern matching which could false-match substrings.
+
+**Current behavior:**
+```sql
+UPDATE {table} SET freshness_state = 'impacted', freshness_updated_at = ?
+WHERE snapshot_uid = ?
+  AND freshness_state != 'impacted'
+  AND provenance_json IS NOT NULL
+  AND EXISTS (
+    SELECT 1 FROM json_each(provenance_json, '$.depends_on')
+    WHERE json_extract(value, '$.stable_key') = ?
+  )
+```
+
+### Carry-over: TS Parity Blocked
+
+**Current state:** Rust has migration 027; TypeScript fixtures do not.
+
+**Consequence:** Parity test (`cargo test -p repo-graph-storage -- parity`)
+fails until TS implements the corresponding migration.
+
+**Not a defect:** Deliberate asymmetry during Rust-led schema evolution.
+TS parity catch-up is tracked but not blocking.

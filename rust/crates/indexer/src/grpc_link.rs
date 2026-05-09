@@ -42,6 +42,7 @@
 
 use std::collections::HashMap;
 
+use artifact_contracts::{Provenance, ProvenanceAnchor};
 use sha2::{Digest, Sha256};
 
 use crate::storage_port::{
@@ -55,7 +56,7 @@ pub struct GrpcLink {
     pub provider_surface_uid: String,
     /// Consumer surface UID
     pub consumer_surface_uid: String,
-    /// Contract element UID (proto service)
+    /// Contract element UID (proto service) — for FK only
     pub contract_element_uid: String,
     /// Contract full name (e.g., "helloworld.Greeter")
     pub contract_full_name: String,
@@ -67,6 +68,14 @@ pub struct GrpcLink {
     pub provider_basis: String,
     /// Consumer basis (e.g., "stub_creation")
     pub consumer_basis: String,
+    /// Provider surface stable key — for stable provenance
+    pub provider_stable_key: String,
+    /// Consumer surface stable key — for stable provenance
+    pub consumer_stable_key: String,
+    /// Contract element kind (e.g., "service") — for stable provenance
+    pub contract_element_kind: String,
+    /// Contract schema file path (e.g., "greeter.proto") — for stable provenance
+    pub contract_schema_file: String,
 }
 
 /// Find links between provider and consumer surfaces that share the same contract.
@@ -103,6 +112,10 @@ pub fn find_grpc_links(
                     consumer_source_file: consumer.source_file.clone(),
                     provider_basis: provider.basis.clone(),
                     consumer_basis: consumer.basis.clone(),
+                    provider_stable_key: provider.symbol_stable_key.clone(),
+                    consumer_stable_key: consumer.symbol_stable_key.clone(),
+                    contract_element_kind: consumer.contract_element_kind.clone(),
+                    contract_schema_file: consumer.contract_schema_file.clone(),
                 });
             }
         }
@@ -250,6 +263,29 @@ where
                 "consumer_basis": link.consumer_basis,
             });
 
+            // Compute provenance from stable anchors (ACR-5)
+            // Extract repo_uid from provider stable key (format: {repo}:{path}#{symbol}:SYMBOL:{type})
+            let repo_uid = link.provider_stable_key
+                .split(':')
+                .next()
+                .unwrap_or("unknown");
+
+            // Pattern: {repo}:{proto_file}#{element_kind}:{full_name}
+            let contract_element_stable_key = format!(
+                "{}:{}#{}:{}",
+                repo_uid,
+                link.contract_schema_file,
+                link.contract_element_kind,
+                link.contract_full_name,
+            );
+
+            let provenance = Provenance::from_layer0_items(vec![
+                ProvenanceAnchor::new("BoundaryInteractionSurfaces", &link.provider_stable_key),
+                ProvenanceAnchor::new("BoundaryInteractionSurfaces", &link.consumer_stable_key),
+                ProvenanceAnchor::new("ContractElements", &contract_element_stable_key),
+            ])
+            .with_extractor("grpc_link_java:1.0");
+
             BoundaryInteractionLinkInput {
                 link_uid,
                 snapshot_uid: snapshot_uid.to_string(),
@@ -260,6 +296,7 @@ where
                 match_basis: "contract".to_string(),
                 confidence: 0.80,
                 evidence_json: evidence.to_string(),
+                provenance: Some(provenance),
             }
         })
         .collect();
@@ -292,6 +329,9 @@ mod tests {
             direction: "provider".to_string(),
             source_file: file.to_string(),
             basis: "impl_extension".to_string(),
+            symbol_stable_key: format!("r1:{}#Impl:SYMBOL:CLASS", file),
+            contract_element_kind: "service".to_string(),
+            contract_schema_file: "greeter.proto".to_string(),
         }
     }
 
@@ -308,6 +348,9 @@ mod tests {
             direction: "consumer".to_string(),
             source_file: file.to_string(),
             basis: "stub_creation".to_string(),
+            symbol_stable_key: format!("r1:{}#Stub:SYMBOL:METHOD", file),
+            contract_element_kind: "service".to_string(),
+            contract_schema_file: "greeter.proto".to_string(),
         }
     }
 
