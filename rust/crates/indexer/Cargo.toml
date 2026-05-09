@@ -76,6 +76,9 @@ sha2 = "0.10"
 # Regex for GR-1B pattern extraction.
 regex = "1"
 
+# TOML parsing for Cargo.toml module extraction (rust-module-parity Phase 1).
+toml = "0.8"
+
 [dev-dependencies]
 # walkdir for parity-fixture corpus discovery (R5-I).
 walkdir = "2"

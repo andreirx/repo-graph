@@ -897,6 +897,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "toml",
  "uuid",
  "walkdir",
 ]
@@ -984,6 +985,7 @@ version = "0.1.0"
 dependencies = [
  "artifact-contracts",
  "chrono",
+ "glob",
  "ignore",
  "repo-graph-boundary-interaction",
  "repo-graph-boundary-interaction-extractor",

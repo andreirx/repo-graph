@@ -91,6 +91,7 @@
 //! The IndexerStoragePort facade grows to include each new
 //! sub-trait as it is defined.
 
+pub mod cargo_manifest;
 pub mod extractor_port;
 pub mod grpc_client_hint;
 pub mod grpc_impl_hint;
@@ -146,4 +147,9 @@ pub use refresh_dispatch::{
 };
 pub use storage_port::{
 	BoundaryInteractionLinkInput, GrpcLinkReadPort, GrpcLinkStorePort, SurfaceWithContract,
+};
+pub use cargo_manifest::{
+	parse_cargo_toml, to_storage_inputs, generate_module_key, generate_module_uid,
+	generate_evidence_uid, CargoModule, CargoModuleCandidateInput, CargoModuleEvidenceInput,
+	CargoModuleStorePort, CargoParseResult, CargoEvidencePayload, FileOwnershipInput,
 };

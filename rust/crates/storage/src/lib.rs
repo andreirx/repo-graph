@@ -164,6 +164,7 @@ pub(crate) mod diagnostic;
 pub mod error;
 pub mod migrations;
 mod agent_impl; // AgentStorageRead impl for StorageConnection (Rust-42)
+mod cargo_module_impl; // CargoModuleStorePort impl for StorageConnection (rust-module-parity Phase 1)
 mod boundary_interaction_impl; // Boundary interaction write storage (BI-1A)
 mod boundary_interaction_read_impl; // Boundary interaction read port (BI-1A)
 mod gate_impl; // GateStorageRead impl for StorageConnection (Rust-43A)

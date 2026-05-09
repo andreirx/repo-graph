@@ -17,12 +17,12 @@ Next work per ROADMAP: `docs/slices/rust-module-parity.md`
 
 - [x] `FreshnessStateDto`, `FreshnessInfo` typed DTOs in signal.rs (8 tests)
 - [x] `DegradationStatus`, `DegradationInfo` typed DTOs in limit.rs (6 tests)
-- [x] `Signal.freshness: Option<FreshnessInfo>` — scaffolded, ready for L2+ signals
+- [x] `Signal.freshness: Option<FreshnessInfo>` — live on `BOUNDARY_LINKS_SUMMARY`
 - [x] `Limit.degradation: Option<DegradationInfo>` — wired
 - [x] `orient` MODULE_DATA_UNAVAILABLE carries structured degradation info
 - [x] `surfaces list` reports degradation when empty (Rust indexer path)
 - [x] Tests prove unsupported degradation is distinct from plain absence
-- [ ] Per-signal freshness on orient (deferred: current signals don't consume L2+ families)
+- [x] First live freshness signal: `BOUNDARY_LINKS_SUMMARY` backed by L2 table
 - [ ] Freshness on check (N/A: check is verdicts, not artifact queries)
 
 ## Status
@@ -32,14 +32,20 @@ ACR-6 COMPLETE. ACR program finished.
 **Delivered:**
 - `FreshnessStateDto`, `FreshnessInfo` in signal.rs (8 tests)
 - `DegradationStatus`, `DegradationInfo` in limit.rs (6 tests)
-- `Signal.freshness: Option<FreshnessInfo>` — scaffolded for future L2+ signals
+- `Signal.freshness: Option<FreshnessInfo>` — live
 - `Limit.degradation: Option<DegradationInfo>` — wired
 - `orient`: MODULE_DATA_UNAVAILABLE now carries degradation info
 - `surfaces list`: reports degradation when empty (Rust-only indexer path)
+- `BOUNDARY_LINKS_SUMMARY`: first signal backed by freshness-tracked L2 table
 
-**Deferred (by design):**
-- Per-signal freshness on orient: current signals consume L0/L1 facts, not L2+ families
-- Freshness on check: check produces verdicts, not artifact queries
+**Freshness lifecycle (implementation proof):**
+- Write path: `current` when provenance present (grpc_link.rs)
+- Impact propagation: `impacted` when dependency changes (tested)
+- Read path: freshness surfaced in orient signal
+
+**Operational validation deferred:**
+- Real workflow proof (fresh index → current → modify → refresh → impacted)
+- Current repo-graph DB shows `unknown` (legacy rows without provenance)
 
 ## Program Overview
 

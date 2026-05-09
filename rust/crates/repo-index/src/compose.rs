@@ -13,6 +13,10 @@
 use std::ops::ControlFlow;
 use std::path::Path;
 
+use repo_graph_indexer::cargo_manifest::{
+    self, CargoModule, CargoModuleCandidateInput, CargoModuleEvidenceInput,
+    CargoModuleStorePort, FileOwnershipInput,
+};
 use repo_graph_indexer::extractor_port::ExtractorPort;
 use repo_graph_indexer::orchestrator::{self, FileInput, IndexError};
 use repo_graph_indexer::proto_indexer::ProtoFileInput;
@@ -182,6 +186,31 @@ pub struct ConfigFileInput {
 	pub line_count: usize,
 }
 
+/// Extracted Cargo module from a Cargo.toml manifest.
+///
+/// Separate from ConfigFileInput per rust-module-parity design:
+/// ConfigFileInput is refresh/config substrate, this is module-domain output.
+#[derive(Debug, Clone)]
+pub struct ExtractedCargoModule {
+	/// The extracted module data
+	pub module: CargoModule,
+	/// Declared pattern that led to this module (for workspace members)
+	/// None for root crates, Some("crates/*") for pattern-matched members
+	pub declared_pattern: Option<String>,
+}
+
+/// Result of Cargo.toml extraction for a repo.
+#[derive(Debug, Clone, Default)]
+pub struct CargoExtractionResult {
+	/// Extracted modules (root crate + resolved workspace members)
+	pub modules: Vec<ExtractedCargoModule>,
+	/// Workspace patterns that were declared but had no matches
+	/// (recorded for evidence, not an error)
+	pub unmatched_patterns: Vec<String>,
+	/// Whether the repo root has a Cargo.toml
+	pub has_root_manifest: bool,
+}
+
 pub struct PreparedRepoInputs {
 	/// Readable source files with config attached, ready for the orchestrator.
 	pub file_inputs: Vec<FileInput>,
@@ -191,6 +220,9 @@ pub struct PreparedRepoInputs {
 	pub contract_file_inputs: Vec<ProtoFileInput>,
 	/// Config files tracked for invalidation widening (not extracted).
 	pub config_file_inputs: Vec<ConfigFileInput>,
+	/// Cargo.toml extraction results (rust-module-parity Phase 1).
+	/// Separate from config_file_inputs: this is module-domain output.
+	pub cargo_modules: CargoExtractionResult,
 }
 
 /// Scan the repo, resolve config per file, assemble typed FileInput.
@@ -208,6 +240,9 @@ pub fn prepare_repo_inputs(
 	let mut contract_file_inputs = Vec::new();
 	let mut config_file_inputs = Vec::new();
 	let mut read_failed_paths = Vec::new();
+	// Collect Cargo.toml files with content for module extraction.
+	// Keyed by rel_path for later workspace member resolution.
+	let mut cargo_toml_files: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
 	for file in &scanned {
 		match file {
@@ -228,6 +263,10 @@ pub fn prepare_repo_inputs(
 				// They don't produce FILE nodes or symbols — only file_versions for
 				// hash comparison during refresh.
 				if routing::is_config_file(&ok.rel_path) {
+					// Collect Cargo.toml content for module extraction (separate from config tracking).
+					if ok.rel_path.ends_with("Cargo.toml") {
+						cargo_toml_files.insert(ok.rel_path.clone(), ok.content.clone());
+					}
 					config_file_inputs.push(ConfigFileInput {
 						rel_path: ok.rel_path.clone(),
 						content_hash: ok.content_hash.clone(),
@@ -288,12 +327,124 @@ pub fn prepare_repo_inputs(
 		}
 	}
 
+	// Extract Cargo modules from collected Cargo.toml files.
+	let cargo_modules = extract_cargo_modules(repo_path, &cargo_toml_files);
+
 	Ok(PreparedRepoInputs {
 		file_inputs,
 		read_failed_paths,
 		contract_file_inputs,
 		config_file_inputs,
+		cargo_modules,
 	})
+}
+
+// ── Cargo module extraction ──────────────────────────────────────────
+
+/// Extract Cargo modules from Cargo.toml files.
+///
+/// Parses the root Cargo.toml, expands workspace member patterns using
+/// glob, and collects all resolved crates with their evidence.
+fn extract_cargo_modules(
+	repo_path: &Path,
+	cargo_toml_files: &std::collections::HashMap<String, String>,
+) -> CargoExtractionResult {
+	let mut result = CargoExtractionResult::default();
+
+	// Check for root Cargo.toml
+	let root_manifest_path = "Cargo.toml";
+	let root_content = match cargo_toml_files.get(root_manifest_path) {
+		Some(content) => content,
+		None => return result, // No Cargo.toml at root, not a Rust project
+	};
+
+	result.has_root_manifest = true;
+
+	// Parse root manifest
+	let root_parsed = match cargo_manifest::parse_cargo_toml(root_content, root_manifest_path) {
+		Ok(parsed) => parsed,
+		Err(_) => return result, // Parse error, skip silently (matches Cargo behavior)
+	};
+
+	// Add root crate if it has a [package] section
+	for module in &root_parsed.modules {
+		result.modules.push(ExtractedCargoModule {
+			module: module.clone(),
+			declared_pattern: None,
+		});
+	}
+
+	// If workspace root, expand member patterns
+	if root_parsed.is_workspace_root {
+		for pattern in &root_parsed.workspace_members {
+			let expanded = expand_workspace_pattern(repo_path, pattern, cargo_toml_files);
+			if expanded.is_empty() {
+				result.unmatched_patterns.push(pattern.clone());
+			} else {
+				for member_module in expanded {
+					result.modules.push(ExtractedCargoModule {
+						module: member_module,
+						declared_pattern: Some(pattern.clone()),
+					});
+				}
+			}
+		}
+	}
+
+	result
+}
+
+/// Expand a workspace member pattern and return resolved modules.
+///
+/// Pattern examples:
+/// - "crates/foo" → direct path
+/// - "crates/*" → glob all directories under crates/
+/// - "packages/*" → glob all directories under packages/
+///
+/// For each match, checks if a Cargo.toml exists and parses it.
+fn expand_workspace_pattern(
+	repo_path: &Path,
+	pattern: &str,
+	cargo_toml_files: &std::collections::HashMap<String, String>,
+) -> Vec<CargoModule> {
+	let mut modules = Vec::new();
+
+	// Check if pattern contains glob characters
+	if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+		// Glob expansion
+		let full_pattern = repo_path.join(pattern).join("Cargo.toml");
+		let pattern_str = full_pattern.to_string_lossy();
+
+		if let Ok(paths) = glob::glob(&pattern_str) {
+			for entry in paths.flatten() {
+				// Convert back to repo-relative path
+				if let Ok(rel) = entry.strip_prefix(repo_path) {
+					let rel_path = rel.to_string_lossy().replace('\\', "/");
+					if let Some(content) = cargo_toml_files.get(&rel_path) {
+						if let Ok(parsed) = cargo_manifest::parse_cargo_toml(content, &rel_path) {
+							for mut module in parsed.modules {
+								module.is_workspace_member = true;
+								modules.push(module);
+							}
+						}
+					}
+				}
+			}
+		}
+	} else {
+		// Direct path (no glob)
+		let manifest_path = format!("{}/Cargo.toml", pattern);
+		if let Some(content) = cargo_toml_files.get(&manifest_path) {
+			if let Ok(parsed) = cargo_manifest::parse_cargo_toml(content, &manifest_path) {
+				for mut module in parsed.modules {
+					module.is_workspace_member = true;
+					modules.push(module);
+				}
+			}
+		}
+	}
+
+	modules
 }
 
 // ── Post-index read-failure repair ───────────────────────────────
@@ -1201,6 +1352,125 @@ fn convert_nats_raw_to_callsite(raw: &RawNatsBoundaryCall, file_path: &str, repo
 	}
 }
 
+// ── Cargo module persistence (rust-module-parity Phase 1) ────────
+
+/// Persist Cargo.toml-derived module candidates, evidence, and file ownership.
+///
+/// Phase 1.5: persists module rows and ownership assignments.
+/// - Root crate/package
+/// - Resolved workspace members with real Cargo.toml
+/// - File ownership via longest-prefix-match
+fn persist_cargo_modules(
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	snapshot_uid: &str,
+	cargo_extraction: &CargoExtractionResult,
+	file_inputs: &[FileInput],
+) -> Result<usize, ComposeError> {
+	if cargo_extraction.modules.is_empty() {
+		return Ok(0);
+	}
+
+	// Convert extracted modules to storage input DTOs.
+	let mut candidates: Vec<CargoModuleCandidateInput> = Vec::new();
+	let mut evidence: Vec<CargoModuleEvidenceInput> = Vec::new();
+
+	for extracted in &cargo_extraction.modules {
+		let (candidate, ev) = cargo_manifest::to_storage_inputs(
+			&extracted.module,
+			repo_uid,
+			snapshot_uid,
+		);
+		candidates.push(candidate);
+		evidence.push(ev);
+	}
+
+	// Persist using the storage port.
+	let candidate_count = storage
+		.insert_cargo_module_candidates(&candidates)
+		.map_err(ComposeError::Storage)?;
+	let _evidence_count = storage
+		.insert_cargo_module_evidence(&evidence)
+		.map_err(ComposeError::Storage)?;
+
+	// Phase 1.5: Compute and persist file ownership.
+	let ownership = compute_cargo_file_ownership(
+		repo_uid,
+		snapshot_uid,
+		&candidates,
+		file_inputs,
+	);
+
+	if !ownership.is_empty() {
+		storage
+			.insert_file_ownership(&ownership)
+			.map_err(ComposeError::Storage)?;
+	}
+
+	Ok(candidate_count)
+}
+
+/// Compute file ownership assignments using longest-prefix-match.
+///
+/// Each file is assigned to the module candidate whose `canonical_root_path`
+/// is the longest prefix of the file's relative path. Files that don't match
+/// any module prefix are not assigned (no ownership row).
+///
+/// Algorithm:
+/// 1. Sort modules by canonical_root_path length descending (longest first)
+/// 2. For each file, find the first module whose path is a prefix
+/// 3. Create ownership record with assignment_kind = "manifest_prefix"
+fn compute_cargo_file_ownership(
+	repo_uid: &str,
+	snapshot_uid: &str,
+	candidates: &[CargoModuleCandidateInput],
+	file_inputs: &[FileInput],
+) -> Vec<FileOwnershipInput> {
+	if candidates.is_empty() || file_inputs.is_empty() {
+		return Vec::new();
+	}
+
+	// Build sorted list of (canonical_root_path, module_candidate_uid) by path length descending.
+	// This ensures longest-prefix-match when iterating.
+	let mut sorted_modules: Vec<(&str, &str)> = candidates
+		.iter()
+		.map(|c| (c.canonical_root_path.as_str(), c.module_candidate_uid.as_str()))
+		.collect();
+	sorted_modules.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+
+	let mut ownership = Vec::new();
+
+	for file in file_inputs {
+		// Find longest matching module prefix.
+		let matched = sorted_modules.iter().find(|(root_path, _)| {
+			if *root_path == "." {
+				// Root crate matches all files
+				true
+			} else {
+				// Check if file path starts with module root path.
+				// Must match as a directory boundary: "crates/foo" matches "crates/foo/src/lib.rs"
+				// but not "crates/foobar/src/lib.rs".
+				file.rel_path == *root_path
+					|| file.rel_path.starts_with(&format!("{}/", root_path))
+			}
+		});
+
+		if let Some((_, module_uid)) = matched {
+			ownership.push(FileOwnershipInput {
+				snapshot_uid: snapshot_uid.to_string(),
+				repo_uid: repo_uid.to_string(),
+				file_uid: format!("{}:{}", repo_uid, file.rel_path),
+				module_candidate_uid: module_uid.to_string(),
+				assignment_kind: "manifest_prefix".to_string(),
+				confidence: 1.0,
+				basis_json: None,
+			});
+		}
+	}
+
+	ownership
+}
+
 // ── Full index ───────────────────────────────────────────────────
 
 /// Index a repo from disk into an existing StorageConnection.
@@ -1314,7 +1584,7 @@ pub fn index_into_storage_with_progress(
 	// Persisting phase: checkpoint BEFORE each mutation (7 mutations total)
 	// Semantics: current=N means "about to do mutation N"
 
-	emit_progress(&mut progress, "persisting", 0, 7)?;  // about to persist read failures
+	emit_progress(&mut progress, "persisting", 0, 8)?;  // about to persist read failures
 	persist_read_failures(
 		storage,
 		repo_uid,
@@ -1323,7 +1593,7 @@ pub fn index_into_storage_with_progress(
 		&mut result,
 	)?;
 
-	emit_progress(&mut progress, "persisting", 1, 7)?;  // about to persist config file versions
+	emit_progress(&mut progress, "persisting", 1, 8)?;  // about to persist config file versions
 	// Persist config file versions for refresh invalidation tracking.
 	// Config files are NOT extracted — only tracked for hash comparison.
 	persist_config_file_versions(
@@ -1333,29 +1603,33 @@ pub fn index_into_storage_with_progress(
 		&prepared.config_file_inputs,
 	)?;
 
-	emit_progress(&mut progress, "persisting", 2, 7)?;  // about to persist metrics
+	emit_progress(&mut progress, "persisting", 2, 8)?;  // about to persist metrics
 	// RS-MS-3c-prereq: Persist metrics (complexity, params, nesting).
 	persist_metrics(storage, repo_uid, &result.snapshot_uid, &result.metrics)?;
 
-	emit_progress(&mut progress, "persisting", 3, 7)?;  // about to persist spring liveness
+	emit_progress(&mut progress, "persisting", 3, 8)?;  // about to persist spring liveness
 	// Persist Spring framework-liveness inferences for dead-code suppression.
 	// Full index mode: process all nodes, replace all Spring inferences.
 	persist_spring_liveness_inferences(storage, repo_uid, &result.snapshot_uid, None)?;
 
-	emit_progress(&mut progress, "persisting", 4, 7)?;  // about to persist policy facts
+	emit_progress(&mut progress, "persisting", 4, 8)?;  // about to persist policy facts
 	// PF-1: Extract and persist STATUS_MAPPING policy facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
 	persist_policy_facts(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
-	emit_progress(&mut progress, "persisting", 5, 7)?;  // about to persist C boundary interactions
+	emit_progress(&mut progress, "persisting", 5, 8)?;  // about to persist C boundary interactions
 	// BI-1A: Extract and persist boundary interaction facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
 	persist_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
 
-	emit_progress(&mut progress, "persisting", 6, 7)?;  // about to persist TS boundary interactions
+	emit_progress(&mut progress, "persisting", 6, 8)?;  // about to persist TS boundary interactions
 	// BI-1C: Extract and persist boundary interaction facts from TS/JS files.
 	// SharedArrayBuffer, Worker, postMessage, Atomics patterns.
 	persist_ts_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
+
+	emit_progress(&mut progress, "persisting", 7, 8)?;  // about to persist Cargo modules
+	// rust-module-parity Phase 1.5: Persist Cargo.toml-derived module candidates and file ownership.
+	persist_cargo_modules(storage, repo_uid, &result.snapshot_uid, &prepared.cargo_modules, &prepared.file_inputs)?;
 
 	Ok(result)
 }
@@ -1681,7 +1955,7 @@ pub fn refresh_into_storage_with_progress(
 	// Persisting phase: checkpoint BEFORE each mutation (7 mutations total)
 	// Semantics: current=N means "about to do mutation N"
 
-	emit_progress(&mut progress, "persisting", 0, 7)?;  // about to persist read failures
+	emit_progress(&mut progress, "persisting", 0, 8)?;  // about to persist read failures
 	persist_read_failures(
 		storage,
 		repo_uid,
@@ -1690,7 +1964,7 @@ pub fn refresh_into_storage_with_progress(
 		&mut result,
 	)?;
 
-	emit_progress(&mut progress, "persisting", 1, 7)?;  // about to persist config file versions
+	emit_progress(&mut progress, "persisting", 1, 8)?;  // about to persist config file versions
 	// Persist config file versions for refresh invalidation tracking.
 	// Config files are NOT extracted — only tracked for hash comparison.
 	persist_config_file_versions(
@@ -1700,12 +1974,12 @@ pub fn refresh_into_storage_with_progress(
 		&prepared.config_file_inputs,
 	)?;
 
-	emit_progress(&mut progress, "persisting", 2, 7)?;  // about to persist metrics
+	emit_progress(&mut progress, "persisting", 2, 8)?;  // about to persist metrics
 	// RS-MS-3c-prereq: Persist metrics (complexity, params, nesting).
 	// Only for changed files; unchanged file metrics already copied forward.
 	persist_metrics(storage, repo_uid, &result.snapshot_uid, &result.metrics)?;
 
-	emit_progress(&mut progress, "persisting", 3, 7)?;  // about to persist spring liveness
+	emit_progress(&mut progress, "persisting", 3, 8)?;  // about to persist spring liveness
 	// Persist Spring framework-liveness inferences for dead-code suppression.
 	// Refresh mode: only process nodes from changed files, preserve copy-forwarded inferences.
 	let changed_paths_for_spring: Vec<&str> = changed_files_owned
@@ -1719,23 +1993,30 @@ pub fn refresh_into_storage_with_progress(
 		Some(&changed_paths_for_spring),
 	)?;
 
-	emit_progress(&mut progress, "persisting", 4, 7)?;  // about to persist policy facts
+	emit_progress(&mut progress, "persisting", 4, 8)?;  // about to persist policy facts
 	// PF-1: Extract and persist STATUS_MAPPING policy facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
 	// Only extract from changed files; unchanged files copied forward.
 	persist_policy_facts(storage, repo_uid, &result.snapshot_uid, &changed_files_owned)?;
 
-	emit_progress(&mut progress, "persisting", 5, 7)?;  // about to persist C boundary interactions
+	emit_progress(&mut progress, "persisting", 5, 8)?;  // about to persist C boundary interactions
 	// BI-1A: Extract and persist boundary interaction facts from C files.
 	// TEMPORARY re-parse postpass; see docs/TECH-DEBT.md.
 	// Only extract from changed files; unchanged files copied forward.
 	persist_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &changed_files_owned)?;
 
-	emit_progress(&mut progress, "persisting", 6, 7)?;  // about to persist TS boundary interactions
+	emit_progress(&mut progress, "persisting", 6, 8)?;  // about to persist TS boundary interactions
 	// BI-1C: Extract and persist boundary interaction facts from TS/JS files.
 	// SharedArrayBuffer, Worker, postMessage, Atomics patterns.
 	// Only extract from changed files; unchanged files copied forward.
 	persist_ts_boundary_interactions(storage, repo_uid, &result.snapshot_uid, &changed_files_owned)?;
+
+	emit_progress(&mut progress, "persisting", 7, 8)?;  // about to persist Cargo modules
+	// rust-module-parity Phase 1.5: Persist Cargo.toml-derived module candidates and file ownership.
+	// Always recompute from current prepared inputs (Cargo.toml content).
+	// Cargo.toml changes trigger config-file invalidation, so recompute is correct.
+	// Ownership is recomputed for all files to maintain consistency.
+	persist_cargo_modules(storage, repo_uid, &result.snapshot_uid, &prepared.cargo_modules, &prepared.file_inputs)?;
 
 	Ok(result)
 }
