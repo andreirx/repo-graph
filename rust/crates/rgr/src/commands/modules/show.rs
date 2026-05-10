@@ -79,6 +79,26 @@ struct EnrichedViolation {
 	reason: Option<String>,
 }
 
+/// Evidence DTO for `modules show` output (Phase 3.2).
+///
+/// Surfaces evidence supporting module inference: heuristic type,
+/// build file presence, dominant language, and evidence strength.
+#[derive(serde::Serialize)]
+struct ModuleEvidenceOutput {
+	source_type: String,
+	source_path: String,
+	evidence_kind: String,
+	/// Evidence strength: "basic" or "build_marker_backed"
+	#[serde(skip_serializing_if = "Option::is_none")]
+	evidence_strength: Option<String>,
+	/// Build files present in module root (e.g., ["CMakeLists.txt", "Makefile"])
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	build_files_present: Vec<String>,
+	/// Dominant language by file count (None if tie)
+	#[serde(skip_serializing_if = "Option::is_none")]
+	dominant_language: Option<String>,
+}
+
 // ── modules show command ─────────────────────────────────────────
 
 pub(super) fn run_modules_show(args: &[String]) -> ExitCode {
@@ -146,6 +166,53 @@ pub(super) fn run_modules_show(args: &[String]) -> ExitCode {
 					confidence: m.confidence,
 				},
 			)
+		})
+		.collect();
+
+	// ── Step 2b: Load module evidence (Phase 3.2) ─────────────────
+	// Extract Phase 3.2 fields from evidence payload for CLI output.
+	let evidence_output: Vec<ModuleEvidenceOutput> = storage
+		.get_module_candidate_evidence(&resolved_module.module_candidate_uid)
+		.unwrap_or_default()
+		.into_iter()
+		.map(|e| {
+			// Parse payload_json for Phase 3.2 fields
+			let (evidence_strength, build_files_present, dominant_language) =
+				if let Some(ref payload) = e.payload_json {
+					if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(payload) {
+						let strength = parsed
+							.get("evidence_strength")
+							.and_then(|v| v.as_str())
+							.map(String::from);
+						let build_files = parsed
+							.get("build_files_present")
+							.and_then(|v| v.as_array())
+							.map(|arr| {
+								arr.iter()
+									.filter_map(|v| v.as_str().map(String::from))
+									.collect()
+							})
+							.unwrap_or_default();
+						let lang = parsed
+							.get("dominant_language")
+							.and_then(|v| v.as_str())
+							.map(String::from);
+						(strength, build_files, lang)
+					} else {
+						(None, vec![], None)
+					}
+				} else {
+					(None, vec![], None)
+				};
+
+			ModuleEvidenceOutput {
+				source_type: e.source_type,
+				source_path: e.source_path,
+				evidence_kind: e.evidence_kind,
+				evidence_strength,
+				build_files_present,
+				dominant_language,
+			}
 		})
 		.collect();
 
@@ -360,6 +427,14 @@ pub(super) fn run_modules_show(args: &[String]) -> ExitCode {
 		"warnings".to_string(),
 		serde_json::to_value(&warnings).unwrap(),
 	);
+
+	// Add evidence (Phase 3.2) — only if non-empty
+	if !evidence_output.is_empty() {
+		extra_fields.insert(
+			"evidence".to_string(),
+			serde_json::to_value(&evidence_output).unwrap(),
+		);
+	}
 
 	// Trust overlay (Option A: only when repo has degradations).
 	// Module dependencies are import-based, so graph_basis = "IMPORTS".

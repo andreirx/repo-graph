@@ -1,6 +1,6 @@
 # ACR-5: Boundary Contract Proof Case
 
-Status: NOT STARTED
+Status: DONE
 Depends: `acr-4-impact-propagation.md`
 Follow-on: `acr-6-query-degradation-and-freshness.md`
 Track: Core Infrastructure — Artifact Contract Registry
@@ -263,14 +263,23 @@ fn refresh_boundary_links_have_provenance() {
 
 ## Definition of Done
 
-- [ ] GR chain relocated to compose.rs Phase 2
-- [ ] BoundaryContracts regenerated from current snapshot
-- [ ] BoundaryInteractionLinks regenerated from current snapshot
-- [ ] Provenance populated for both families
-- [ ] No FK leakage to parent snapshot UIDs
-- [ ] Refresh diagnostics show regeneration counts
-- [ ] All four test cases pass
-- [ ] Existing boundary refresh tests still pass
+- [x] GR chain relocated to compose.rs Phase 2
+- [x] BoundaryContracts regenerated from current snapshot
+- [x] BoundaryInteractionLinks regenerated from current snapshot
+- [x] Provenance populated for both families
+- [x] No FK leakage to parent snapshot UIDs
+- [x] Refresh diagnostics show regeneration counts
+- [x] All four test cases pass (5 implemented in `refresh.rs`)
+- [x] Existing boundary refresh tests still pass
+
+## Implementation Notes (added post-completion)
+
+Five proof-case tests exist in `rust/crates/repo-index/tests/refresh.rs`:
+1. `acr5_boundary_contract_with_provenance_is_current`
+2. `acr5_boundary_contract_without_provenance_is_unknown`
+3. `acr5_boundary_interaction_link_with_provenance_is_current`
+4. `acr5_no_fk_leakage_on_snapshot_deletion`
+5. `acr5_impact_propagation_on_surviving_boundary_links`
 
 ## Validation Commands
 

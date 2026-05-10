@@ -927,6 +927,39 @@ shared `evaluate_violations_from_facts()` operates on the same
 preloaded facts used by callers, eliminating duplicate queries and
 ensuring consistency.
 
+## Inferred Module Identity Evolution (Phase 3.2)
+
+Inferred module identities are stable for a given heuristic version but may
+change when the heuristic is intentionally upgraded.
+
+### Umbrella-directory splitting (Phase 3.2)
+
+The umbrella-directory splitting heuristic changes identity for qualifying
+directories:
+
+**Before Phase 3.2:**
+- `inferred:nginx:src` (single module for all of src/)
+
+**After Phase 3.2:**
+- `inferred:nginx:src/core`
+- `inferred:nginx:src/http`
+- `inferred:nginx:src/event`
+
+This applies when:
+- Directory is an umbrella prefix (`src`, `packages`, `services`, `apps`, `libs`, `modules`)
+- At least 2 children have 5+ source files each
+- Parent has 5 or fewer direct source files
+
+**Impact:**
+- Module UIDs change (hash includes full path)
+- Module keys change (`inferred:{repo}:{path}`)
+- File ownership reassigned to child modules
+- No backward-compatible dual identity
+
+This is intentional heuristic evolution, not a breaking change. Inferred modules
+are orientation-grade data (confidence 0.7), not declared truth. Agents should
+not assume inferred module identities are permanent across heuristic upgrades.
+
 ## Rust agent use-case crate (`repo-graph-agent`)
 
 Current state: Rust-43A. Repo-level `orient` use case with

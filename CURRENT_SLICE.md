@@ -14,7 +14,35 @@ Phase 4 complete. MODULE-node fallback deprecated. `module_candidates` is now th
 sole source of module topology. Empty `module_candidates` surfaces repos that need
 module detection rather than silently synthesizing from generic graph structure.
 
-## Phase 3 Status
+## Phase 3.2 Status (2026-05-10)
+
+**Umbrella splitting, build-file evidence, dominant language — IMPLEMENTED**
+
+What was added in Phase 3.2:
+- Umbrella-directory splitting for `src`, `packages`, `services`, `apps`, `libs`, `modules`
+- Build-file presence detection (CMakeLists.txt, Makefile, meson.build, BUILD, etc.)
+- Dominant language extraction (plurality wins, excludes test files)
+- Evidence strength: `basic` or `build_marker_backed`
+- 47 unit tests (up from 21)
+
+Umbrella splitting thresholds:
+- 2+ child directories with 5+ source files each
+- ≤5 direct source files in parent directory
+- Children below threshold remain unowned (heuristic_gap)
+
+What was validated (smoke-runs/2026-05-10T11-*):
+- nginx: 6 modules from src/ (core, event, http, mail, os, stream)
+- sqlite: 5 modules (no umbrella split — src/ doesn't meet child thresholds)
+- true_gap_pct: nginx 0.5%, sqlite 0.0% (both within 3% threshold)
+- Refresh parity: UIDs preserved across no-op refresh (CLI verified, not smoke-logged)
+
+Evidence fields surfaced in CLI (2026-05-10):
+- `modules show` now includes `evidence` array with Phase 3.2 fields:
+  - `evidence_strength`: "basic" or "build_marker_backed"
+  - `dominant_language`: plurality language by file count (null if tie)
+  - `build_files_present`: list of detected build files (if any)
+
+## Phase 3 Status (superseded by Phase 3.2)
 
 **First cut implemented.** Coarse top-level directory heuristic populates `module_candidates` for manifest-less repos. This is orientation-grade inferred topology, not full module-truth completion.
 
@@ -24,25 +52,14 @@ What exists:
 - Identity contract: `inferred:{repo_uid}:{directory_path}`
 - Evidence type: `directory_heuristic`
 - Confidence: 0.7 (vs 1.0 for declared)
-- 14 unit tests
 
 What the heuristic does:
 - Scan source file paths
-- Group by top-level directory
+- Group by top-level directory (Phase 3.2: with umbrella splitting)
 - Ignore non-source files
 - Suppress pure test-only dirs when real source dirs exist
 - Create inferred modules for top-level source-bearing dirs
 - Fallback to root `.` only if repo is flat
-
-What was validated:
-- sqlite: 5 top-level source directories detected (test/ suppressed)
-- nginx: 1 module (src with 396 files)
-- leveldb: 6 top-level source directories (benchmarks/ excluded)
-- linux: 23 top-level source partitions (not "subsystems")
-
-What is weak (addressed in Phase 3.1):
-- Very coarse granularity (known limitation, umbrella splitting is Phase 3.2)
-- No umbrella-directory splitting (nginx `src` should be `src/core`, `src/http`, etc.)
 
 What was addressed in Phase 3.1:
 - Sanity metrics added (6 metrics including unowned_breakdown)
@@ -173,7 +190,7 @@ This is acceptable for Phase 4 if agents can query `modules unowned` to understa
 4. **Phase 3** — inferred modules first cut — DONE
 5. **Phase 3.1 hardening** — quality improvements — DONE
 6. **Phase 3.1B** — ownership gap analysis — DONE
-7. **Phase 3.2** — umbrella splitting, build-file evidence — NOT STARTED (optional)
+7. **Phase 3.2** — umbrella splitting, build-file evidence, dominant language — DONE (2026-05-10)
 8. **Phase 4** — MODULE-node fallback deprecation — DONE (2026-05-10)
 
 **Phase 4 gate (minimum requirements):**

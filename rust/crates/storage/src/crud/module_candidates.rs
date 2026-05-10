@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use crate::connection::StorageConnection;
 use crate::error::StorageError;
-use crate::types::ModuleCandidate;
+use crate::types::{ModuleCandidate, ModuleCandidateEvidence};
 
 impl StorageConnection {
 	/// Read all module candidates for a snapshot.
@@ -151,6 +151,34 @@ impl StorageConnection {
 			Some(row) => Ok(Some(ModuleCandidate::from_row(row)?)),
 			None => Ok(None),
 		}
+	}
+
+	/// Read all evidence records for a module candidate.
+	///
+	/// Returns evidence supporting the module candidate (e.g., manifest
+	/// files, heuristic matches). Evidence includes `payload_json` with
+	/// type-specific details like build files, dominant language, etc.
+	///
+	/// Returns an empty vector if no evidence exists for this module.
+	pub fn get_module_candidate_evidence(
+		&self,
+		module_candidate_uid: &str,
+	) -> Result<Vec<ModuleCandidateEvidence>, StorageError> {
+		let conn = self.connection();
+		let mut stmt = conn.prepare(
+			"SELECT evidence_uid, module_candidate_uid, snapshot_uid, repo_uid,
+			        source_type, source_path, evidence_kind, confidence, payload_json
+			 FROM module_candidate_evidence
+			 WHERE module_candidate_uid = ?",
+		)?;
+
+		let rows = stmt.query_map([module_candidate_uid], ModuleCandidateEvidence::from_row)?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			results.push(row?);
+		}
+		Ok(results)
 	}
 
 	/// Fallback: get MODULE nodes from the nodes table when

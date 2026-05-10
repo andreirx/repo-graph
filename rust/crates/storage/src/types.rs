@@ -990,6 +990,56 @@ impl ProjectSurfaceEvidence {
 	}
 }
 
+/// Module candidate evidence record from `module_candidate_evidence` table.
+///
+/// Evidence supports module candidates with source references, confidence,
+/// and payload-specific details (e.g., heuristic parameters, build file lists).
+///
+/// Schema (migration 011):
+/// ```sql
+/// CREATE TABLE module_candidate_evidence (
+///   evidence_uid           TEXT PRIMARY KEY,
+///   module_candidate_uid   TEXT NOT NULL,
+///   snapshot_uid           TEXT NOT NULL,
+///   repo_uid               TEXT NOT NULL,
+///   source_type            TEXT NOT NULL,
+///   source_path            TEXT NOT NULL,
+///   evidence_kind          TEXT NOT NULL,
+///   confidence             REAL NOT NULL,
+///   payload_json           TEXT
+/// );
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleCandidateEvidence {
+	pub evidence_uid: String,
+	pub module_candidate_uid: String,
+	pub snapshot_uid: String,
+	pub repo_uid: String,
+	pub source_type: String,
+	pub source_path: String,
+	pub evidence_kind: String,
+	pub confidence: f64,
+	pub payload_json: Option<String>,
+}
+
+impl ModuleCandidateEvidence {
+	/// Construct a `ModuleCandidateEvidence` from a rusqlite row.
+	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+		Ok(Self {
+			evidence_uid: row.get("evidence_uid")?,
+			module_candidate_uid: row.get("module_candidate_uid")?,
+			snapshot_uid: row.get("snapshot_uid")?,
+			repo_uid: row.get("repo_uid")?,
+			source_type: row.get("source_type")?,
+			source_path: row.get("source_path")?,
+			evidence_kind: row.get("evidence_kind")?,
+			confidence: row.get("confidence")?,
+			payload_json: row.get("payload_json")?,
+		})
+	}
+}
+
 // ── Quality Policy Types ───────────────────────────────────────────
 //
 // Quality policy declarations and assessments per quality-policy-design.md.

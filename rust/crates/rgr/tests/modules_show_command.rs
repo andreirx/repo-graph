@@ -120,6 +120,40 @@ fn insert_raw_declaration(
 	.expect("insert declaration");
 }
 
+/// Insert module candidate evidence for testing Phase 3.2 fields.
+fn insert_module_candidate_evidence(
+	db_path: &std::path::Path,
+	evidence_uid: &str,
+	module_candidate_uid: &str,
+	snapshot_uid: &str,
+	repo_uid: &str,
+	source_type: &str,
+	source_path: &str,
+	evidence_kind: &str,
+	confidence: f64,
+	payload_json: &str,
+) {
+	let conn = rusqlite::Connection::open(db_path).unwrap();
+	conn.execute(
+		"INSERT INTO module_candidate_evidence
+		 (evidence_uid, module_candidate_uid, snapshot_uid, repo_uid,
+		  source_type, source_path, evidence_kind, confidence, payload_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		rusqlite::params![
+			evidence_uid,
+			module_candidate_uid,
+			snapshot_uid,
+			repo_uid,
+			source_type,
+			source_path,
+			evidence_kind,
+			confidence,
+			payload_json,
+		],
+	)
+	.expect("insert module candidate evidence");
+}
+
 // ── 1. Usage error ───────────────────────────────────────────────
 
 #[test]
@@ -527,4 +561,110 @@ fn modules_show_envelope_contract() {
 	assert!(result["violations"].is_array() || result["violations"].is_null());
 	assert!(result["rollups_degraded"].is_boolean());
 	assert!(result["warnings"].is_array());
+}
+
+// ── 10. Phase 3.2 evidence fields ────────────────────────────────
+
+#[test]
+fn modules_show_evidence_phase_3_2_fields() {
+	let (_dir, db_path) = build_indexed_db();
+	let snapshot_uid = get_snapshot_uid(&db_path, "test-repo");
+
+	// Insert inferred module
+	insert_module_candidate(
+		&db_path,
+		&snapshot_uid,
+		"test-repo",
+		"inferred-mod-abc123",
+		"inferred:test-repo:src/core",
+		"src/core",
+		"inferred",
+		Some("core"),
+		0.7,
+	);
+
+	// Insert Phase 3.2 evidence with all fields
+	let payload = serde_json::json!({
+		"heuristic": "top_level_source_directory",
+		"directory_path": "src/core",
+		"source_file_count": 42,
+		"test_file_count": 8,
+		"is_fallback_root": false,
+		"evidence_strength": "build_marker_backed",
+		"build_files_present": ["CMakeLists.txt", "Makefile"],
+		"dominant_language": "cpp"
+	});
+
+	insert_module_candidate_evidence(
+		&db_path,
+		"ev-abc123",
+		"inferred-mod-abc123",
+		&snapshot_uid,
+		"test-repo",
+		"directory_heuristic",
+		"src/core",
+		"directory_structure",
+		0.7,
+		&payload.to_string(),
+	);
+
+	let output = Command::new(binary_path())
+		.args([
+			"modules",
+			"show",
+			db_path.to_str().unwrap(),
+			"test-repo",
+			"src/core",
+		])
+		.output()
+		.unwrap();
+
+	assert_eq!(
+		output.status.code(),
+		Some(0),
+		"stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	let result: serde_json::Value = serde_json::from_str(&stdout)
+		.unwrap_or_else(|e| panic!("stdout is not valid JSON: {}\nstdout: {}", e, stdout));
+
+	// Evidence array present
+	assert!(
+		result["evidence"].is_array(),
+		"evidence must be array, got: {:?}",
+		result["evidence"]
+	);
+
+	let evidence = result["evidence"].as_array().unwrap();
+	assert_eq!(evidence.len(), 1, "expected one evidence record");
+
+	let ev = &evidence[0];
+
+	// Phase 3.2 fields
+	assert_eq!(
+		ev["evidence_strength"], "build_marker_backed",
+		"evidence_strength mismatch"
+	);
+	assert_eq!(
+		ev["dominant_language"], "cpp",
+		"dominant_language mismatch"
+	);
+
+	let build_files = ev["build_files_present"].as_array().unwrap();
+	assert_eq!(build_files.len(), 2, "expected 2 build files");
+	assert!(
+		build_files.contains(&serde_json::json!("CMakeLists.txt")),
+		"missing CMakeLists.txt"
+	);
+	assert!(
+		build_files.contains(&serde_json::json!("Makefile")),
+		"missing Makefile"
+	);
+
+	// Standard evidence fields
+	assert_eq!(ev["source_type"], "directory_heuristic");
+	assert_eq!(ev["source_path"], "src/core");
+	assert_eq!(ev["evidence_kind"], "directory_structure");
 }

@@ -876,9 +876,11 @@ of the refresh pipeline (after Layer 0-1 copy-forward completes).
 
 **Supersedes:** `docs/slices/refresh-integrity-parity.md` (tactical fixes)
 
-**Follow-on:** After ACR is complete, module truth-model unification
-(`docs/slices/rust-module-parity.md`) unifies Rust and TS indexer module
-representations into the canonical `module_candidates` tables.
+**Follow-on:** Module truth-model unification (`docs/slices/rust-module-parity.md`)
+is now complete. Rust indexer populates `module_candidates` tables through declared
+module detection (Cargo.toml, package.json, pyproject.toml, settings.gradle) and
+inferred module heuristics (top-level directory detection). MODULE-node fallback
+path deprecated as of 2026-05-10.
 
 ---
 
