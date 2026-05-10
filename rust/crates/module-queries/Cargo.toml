@@ -10,4 +10,5 @@ repo-graph-classification = { path = "../classification" }
 thiserror = "1.0"
 
 [dev-dependencies]
-# No dev-dependencies yet - tested via rgr integration tests
+# Storage-backed tests for ModuleQueryContext::load() are in
+# rust/crates/rgr/tests/modules_list_command.rs as integration tests.

@@ -38,10 +38,11 @@ fn fixture_path() -> PathBuf {
 }
 
 /// Build a temp DB by indexing the classifier-repo fixture.
-/// Note: The Rust indexer produces MODULE nodes (directory-based)
-/// but does not populate the module_candidates table (which is
-/// produced by the TS indexer). The `modules list` command falls
-/// back to querying MODULE nodes when module_candidates is empty.
+///
+/// The Rust indexer populates `module_candidates` via inferred module
+/// detection (top-level directory heuristic). After Phase 4 (2026-05-10),
+/// there is no fallback to MODULE nodes - `module_candidates` is the
+/// sole source of module topology.
 fn build_indexed_db() -> (tempfile::TempDir, PathBuf) {
 	let dir = tempfile::tempdir().unwrap();
 	let db_path = dir.path().join("test.db");
@@ -175,15 +176,14 @@ fn modules_list_repo_not_found() {
 	);
 }
 
-// ── 4. Fallback to directory-based MODULE nodes ─────────────────
+// ── 4. Declared module from package.json ─────────────────────────
 //
-// When no module_candidates exist (TS-indexed), the CLI falls back
-// to querying MODULE nodes from the nodes table. The Rust indexer
-// creates directory-based MODULE nodes for each directory containing
-// files, so a Rust-indexed repo will have at least one module.
+// The fixture has a package.json which creates a declared module at root.
+// After Phase 4 (2026-05-10), there is no fallback to MODULE nodes -
+// `module_candidates` is the sole source of module topology.
 
 #[test]
-fn modules_list_fallback_to_module_nodes() {
+fn modules_list_declared_from_package_json() {
 	let (_dir, db_path) = build_indexed_db();
 
 	let output = Command::new(binary_path())
@@ -199,7 +199,7 @@ fn modules_list_fallback_to_module_nodes() {
 	assert_eq!(
 		output.status.code(),
 		Some(0),
-		"fallback result is success, stderr: {}",
+		"declared modules result is success, stderr: {}",
 		String::from_utf8_lossy(&output.stderr)
 	);
 
@@ -215,13 +215,14 @@ fn modules_list_fallback_to_module_nodes() {
 
 	assert_eq!(result["command"], "modules list");
 	assert_eq!(result["repo"], "test-repo");
-	// Rust indexer creates MODULE nodes for directories with files.
-	// The classifier-repo fixture has src/ directory, so 1 module.
+	// package.json at root creates a declared module at "."
+	// The module comes from module_candidates, NOT from MODULE node fallback.
 	assert_eq!(result["count"], 1);
 	let modules = result["results"].as_array().expect("results is array");
 	assert_eq!(modules.len(), 1);
-	// The module should be the src directory
-	assert_eq!(modules[0]["canonical_root_path"], "src");
+	// The module is at root (declared from package.json)
+	assert_eq!(modules[0]["canonical_root_path"], ".");
+	assert_eq!(modules[0]["module_kind"], "declared");
 }
 
 // ── 5. Non-empty result with exact field assertions ──────────────
@@ -231,7 +232,7 @@ fn modules_list_exact_fields() {
 	let (_dir, db_path) = build_indexed_db();
 	let snapshot_uid = get_snapshot_uid(&db_path, "test-repo");
 
-	// Insert a module candidate
+	// Insert a module candidate (in addition to auto-detected root module)
 	insert_module_candidate(
 		&db_path,
 		&snapshot_uid,
@@ -266,12 +267,16 @@ fn modules_list_exact_fields() {
 		.unwrap_or_else(|e| panic!("stdout is not valid JSON: {}\nstdout: {}", e, stdout));
 
 	assert_eq!(result["command"], "modules list");
-	assert_eq!(result["count"], 1);
+	// 2 modules: auto-detected root module from package.json + inserted mc-core
+	assert_eq!(result["count"], 2);
 
 	let modules = result["results"].as_array().unwrap();
-	assert_eq!(modules.len(), 1);
+	assert_eq!(modules.len(), 2);
 
-	let m = &modules[0];
+	// Find the inserted module (sorted by canonical_root_path, "." comes before "packages/core")
+	let m = modules.iter()
+		.find(|m| m["canonical_root_path"] == "packages/core")
+		.expect("inserted module not found");
 	// Verify identity fields in snake_case
 	assert_eq!(m["module_uid"], "mc-core");
 	assert_eq!(m["module_key"], "npm:@test/core");
@@ -361,12 +366,15 @@ fn modules_list_sorted_by_canonical_path() {
 	let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
 
 	let modules = result["results"].as_array().unwrap();
-	assert_eq!(modules.len(), 3);
+	// 4 modules: auto-detected root "." + 3 inserted
+	assert_eq!(modules.len(), 4);
 
 	// Sorted by canonical_root_path ascending
-	assert_eq!(modules[0]["canonical_root_path"], "packages/alpha");
-	assert_eq!(modules[1]["canonical_root_path"], "packages/beta");
-	assert_eq!(modules[2]["canonical_root_path"], "packages/zebra");
+	// "." comes before "packages/*"
+	assert_eq!(modules[0]["canonical_root_path"], ".");
+	assert_eq!(modules[1]["canonical_root_path"], "packages/alpha");
+	assert_eq!(modules[2]["canonical_root_path"], "packages/beta");
+	assert_eq!(modules[3]["canonical_root_path"], "packages/zebra");
 }
 
 // ── 7. Envelope contract ─────────────────────────────────────────
@@ -492,10 +500,13 @@ fn modules_list_rollup_with_owned_files() {
 	let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
 
 	let modules = result["results"].as_array().unwrap();
-	assert_eq!(modules.len(), 1);
+	// 2 modules: auto-detected root "." + inserted mc-app
+	assert_eq!(modules.len(), 2);
 
-	let m = &modules[0];
-	assert_eq!(m["module_uid"], "mc-app");
+	// Find the inserted module
+	let m = modules.iter()
+		.find(|m| m["module_uid"] == "mc-app")
+		.expect("inserted module not found");
 	assert_eq!(m["owned_file_count"], 2, "2 non-test files");
 	assert_eq!(m["owned_test_file_count"], 1, "1 test file");
 }
@@ -583,17 +594,135 @@ fn modules_list_degrades_on_malformed_boundary() {
 
 	// Catalog still returned
 	let modules = result["results"].as_array().unwrap();
-	assert_eq!(modules.len(), 1);
-	assert_eq!(modules[0]["module_uid"], "mc-core");
+	// 2 modules: auto-detected root "." + inserted mc-core
+	assert_eq!(modules.len(), 2);
+	let mc_core = modules.iter()
+		.find(|m| m["module_uid"] == "mc-core")
+		.expect("inserted module not found");
+	assert_eq!(mc_core["canonical_root_path"], "packages/core");
 
 	// Non-policy rollups still populated
-	assert_eq!(modules[0]["owned_file_count"], 0);
-	assert_eq!(modules[0]["dead_symbol_count"], 0);
+	assert_eq!(mc_core["owned_file_count"], 0);
+	assert_eq!(mc_core["dead_symbol_count"], 0);
 
 	// Policy-derived rollup is null (unknown, not zero)
 	assert!(
 		modules[0]["violation_count"].is_null(),
 		"violation_count must be null when policy unavailable, got: {:?}",
 		modules[0]["violation_count"]
+	);
+}
+
+// ── 10. Phase 4: No fallback to legacy MODULE nodes ──────────────
+//
+// After Phase 4 (2026-05-10), empty module_candidates returns empty
+// results even when legacy MODULE nodes exist in the nodes table.
+// This is the critical no-fallback behavior test.
+
+/// Build a DB with only legacy MODULE nodes (no module_candidates).
+/// This simulates a pre-Phase-4 indexed snapshot or manual node insertion.
+fn build_db_with_legacy_module_nodes_only() -> (tempfile::TempDir, PathBuf, String) {
+	let dir = tempfile::tempdir().unwrap();
+	let db_path = dir.path().join("test.db");
+
+	// Create DB with all migrations via StorageConnection, then close it
+	{
+		let _storage = repo_graph_storage::StorageConnection::open(&db_path).unwrap();
+		// StorageConnection runs all migrations on open
+	}
+
+	// Reopen with raw rusqlite to insert test data manually
+	let conn = rusqlite::Connection::open(&db_path).unwrap();
+
+	// Insert repo
+	conn.execute(
+		"INSERT INTO repos (repo_uid, name, root_path, created_at) \
+		 VALUES ('legacy-repo', 'legacy-test', '/tmp/legacy', '2026-05-10T00:00:00Z')",
+		[],
+	).unwrap();
+
+	// Insert snapshot
+	let snapshot_uid = "legacy-repo/2026-05-10T00:00:00Z/test1234";
+	conn.execute(
+		"INSERT INTO snapshots \
+		 (snapshot_uid, repo_uid, kind, status, files_total, nodes_total, edges_total, created_at) \
+		 VALUES (?, 'legacy-repo', 'full', 'ready', 2, 3, 0, '2026-05-10T00:00:00Z')",
+		[snapshot_uid],
+	).unwrap();
+
+	// Insert legacy MODULE nodes (pre-Phase-4 Rust indexer style)
+	// Using minimal columns required by schema: node_uid, snapshot_uid, repo_uid, stable_key, kind, name
+	conn.execute(
+		"INSERT INTO nodes \
+		 (node_uid, snapshot_uid, repo_uid, stable_key, kind, name, qualified_name, visibility) \
+		 VALUES ('mod-src', ?, 'legacy-repo', 'legacy-repo:src:MODULE', 'MODULE', 'src', 'src', 'public')",
+		[snapshot_uid],
+	).unwrap();
+	conn.execute(
+		"INSERT INTO nodes \
+		 (node_uid, snapshot_uid, repo_uid, stable_key, kind, name, qualified_name, visibility) \
+		 VALUES ('mod-lib', ?, 'legacy-repo', 'legacy-repo:lib:MODULE', 'MODULE', 'lib', 'lib', 'public')",
+		[snapshot_uid],
+	).unwrap();
+
+	// Verify: module_candidates is empty, but MODULE nodes exist
+	let mc_count: i64 = conn.query_row(
+		"SELECT COUNT(*) FROM module_candidates WHERE snapshot_uid = ?",
+		[snapshot_uid],
+		|row| row.get(0),
+	).unwrap();
+	assert_eq!(mc_count, 0, "module_candidates must be empty for this test");
+
+	let module_node_count: i64 = conn.query_row(
+		"SELECT COUNT(*) FROM nodes WHERE snapshot_uid = ? AND kind = 'MODULE'",
+		[snapshot_uid],
+		|row| row.get(0),
+	).unwrap();
+	assert_eq!(module_node_count, 2, "should have 2 legacy MODULE nodes");
+
+	drop(conn);
+	(dir, db_path, snapshot_uid.to_string())
+}
+
+#[test]
+fn modules_list_no_fallback_to_legacy_module_nodes() {
+	let (_dir, db_path, _snapshot_uid) = build_db_with_legacy_module_nodes_only();
+
+	let output = Command::new(binary_path())
+		.args([
+			"modules",
+			"list",
+			db_path.to_str().unwrap(),
+			"legacy-repo",
+		])
+		.output()
+		.unwrap();
+
+	assert_eq!(
+		output.status.code(),
+		Some(0),
+		"command should succeed, stderr: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	let result: serde_json::Value = serde_json::from_str(&stdout)
+		.unwrap_or_else(|e| panic!("stdout is not valid JSON: {}\nstdout: {}", e, stdout));
+
+	// Phase 4 critical assertion: count must be 0, NOT 2
+	// Legacy MODULE nodes are NOT used as fallback
+	assert_eq!(
+		result["count"], 0,
+		"Phase 4: module_candidates is empty, so count must be 0. \
+		 Legacy MODULE nodes must NOT be used as fallback. Got: {}",
+		result["count"]
+	);
+
+	let modules = result["results"].as_array().expect("results is array");
+	assert!(
+		modules.is_empty(),
+		"Phase 4: results array must be empty when module_candidates is empty. \
+		 Legacy MODULE nodes (2 present) must NOT be returned. Got: {:?}",
+		modules
 	);
 }

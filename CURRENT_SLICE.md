@@ -6,11 +6,13 @@ Module truth-model unification (`docs/slices/rust-module-parity.md`).
 
 ## Active Slice
 
-**Rust Module Parity — Phase 4: MODULE-node fallback deprecation**
+**Rust Module Parity — Phase 4: MODULE-node fallback deprecation — DONE**
 
 ## Branch Intent
 
-Phase 3 hardening complete. Gate conditions met. Ready to deprecate MODULE-node fallback and make `module_candidates` the primary truth surface for module topology.
+Phase 4 complete. MODULE-node fallback deprecated. `module_candidates` is now the
+sole source of module topology. Empty `module_candidates` surfaces repos that need
+module detection rather than silently synthesizing from generic graph structure.
 
 ## Phase 3 Status
 
@@ -38,11 +40,13 @@ What was validated:
 - leveldb: 6 top-level source directories (benchmarks/ excluded)
 - linux: 23 top-level source partitions (not "subsystems")
 
-What is weak:
-- Very coarse granularity
+What is weak (addressed in Phase 3.1):
+- Very coarse granularity (known limitation, umbrella splitting is Phase 3.2)
 - No umbrella-directory splitting (nginx `src` should be `src/core`, `src/http`, etc.)
-- No sanity metrics
-- Refresh behavior not tested
+
+What was addressed in Phase 3.1:
+- Sanity metrics added (6 metrics including unowned_breakdown)
+- Refresh parity tests added (4 tests)
 
 ## Phase 3.1 Validation (2026-05-09)
 
@@ -71,15 +75,21 @@ What is weak:
 
 ### Sanity metrics validated
 
-Example output from sqlite:
+Example output from sqlite (final model with unowned_breakdown):
 ```json
 {
   "largest_module_ownership_pct": 54.9,
-  "unowned_eligible_source_pct": 8.4,
   "tiny_module_count": 2,
   "root_fallback_used": false,
   "mixed_language_module_count": 1,
-  "has_inferred_modules": true
+  "has_inferred_modules": true,
+  "unowned_breakdown": {
+    "excluded_count": 0,
+    "suppressed_test_count": 33,
+    "true_gap_count": 0,
+    "true_gap_pct": 0.0,
+    "classified_pct": 100.0
+  }
 }
 ```
 
@@ -137,11 +147,11 @@ This is acceptable for Phase 4 if agents can query `modules unowned` to understa
 
 **Sanity metrics surfaced:**
 1. `largest_module_ownership_pct` — % of files in largest module (coarse granularity signal)
-2. `unowned_eligible_source_pct` — % of source files with no module (detection gap signal)
-3. `tiny_module_count` — modules with < 3 files (over-splitting signal)
-4. `root_fallback_used` — flat-repo fallback triggered
-5. `mixed_language_module_count` — modules with multiple languages
-6. `has_inferred_modules` — whether any inferred modules exist
+2. `tiny_module_count` — modules with < 3 files (over-splitting signal)
+3. `root_fallback_used` — flat-repo fallback triggered
+4. `mixed_language_module_count` — modules with multiple languages
+5. `has_inferred_modules` — whether any inferred modules exist
+6. `unowned_breakdown` — ownership classification (see Phase 3.1B model below)
 
 **Optional (polish):**
 - [ ] Dominant language in evidence
@@ -164,7 +174,7 @@ This is acceptable for Phase 4 if agents can query `modules unowned` to understa
 5. **Phase 3.1 hardening** — quality improvements — DONE
 6. **Phase 3.1B** — ownership gap analysis — DONE
 7. **Phase 3.2** — umbrella splitting, build-file evidence — NOT STARTED (optional)
-8. **Phase 4** — MODULE-node fallback deprecation — GATE MET, READY TO PROCEED
+8. **Phase 4** — MODULE-node fallback deprecation — DONE (2026-05-10)
 
 **Phase 4 gate (minimum requirements):**
 - [x] refresh/parity tests passing (4 tests)
@@ -257,6 +267,44 @@ The 3 unowned files are:
 | linux | 100% | 0.0% | PASS |
 
 **Phase 4 gate: MET**
+
+## Phase 4 Implementation (2026-05-10)
+
+### Changes made
+
+1. **`rust/crates/module-queries/src/context.rs`**
+   - Removed fallback code path from `ModuleQueryContext::load`
+   - `module_candidates` table is now the sole source of module data
+   - `is_fallback` field retained but always set to `false` for backward compatibility
+   - Empty `module_candidates` results in empty context (surfaces repos needing detection)
+
+2. **Documentation updates**
+   - `docs/slices/rust-module-parity.md` — Status changed from PLANNED to DONE
+   - `docs/ROADMAP.md` — Follow-on section updated to reflect completion
+   - `CURRENT_SLICE.md` — Phase 4 marked DONE
+
+### Validation results
+
+All 4 validation repos pass Phase 4 gate after fallback removal:
+
+| Repo | classified_pct | true_gap_pct | Modules | Status |
+|------|----------------|--------------|---------|--------|
+| sqlite | 100% | 0.0% | 5 | PASS |
+| leveldb | 100% | 2.26% | 6 | PASS |
+| nginx | 100% | 0.0% | 1 | PASS |
+| linux | 100% | 0.0% | 21 | PASS |
+
+All 54 unit tests in `module-queries` and `repo-index` crates pass.
+
+### Behavior change
+
+Prior to Phase 4, repos without `module_candidates` would fall back to MODULE nodes
+from the generic `nodes` table. This created a bifurcated data model where consumers
+couldn't trust module data consistency.
+
+After Phase 4, empty `module_candidates` means the repo needs module detection
+configured. This is intentional: it surfaces repos that need attention rather than
+silently providing degraded data.
 
 ## Sanity Metrics (Final Model)
 

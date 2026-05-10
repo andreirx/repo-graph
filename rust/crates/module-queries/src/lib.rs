@@ -13,7 +13,7 @@
 //! - Is consumed by `rgr` CLI commands
 //!
 //! The module graph loading is the single source of truth for:
-//! - Module context with TS/Rust fallback handling
+//! - Module context from `module_candidates` table (no fallback after Phase 4)
 //! - Resolved import loading
 //! - Module edge derivation
 //! - Violation evaluation from preloaded facts

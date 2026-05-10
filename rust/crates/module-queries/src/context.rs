@@ -1,14 +1,22 @@
 //! Module query context with unified read model.
 //!
-//! Provides a unified read model for module data that abstracts
-//! over two different backing representations:
+//! Provides a unified read model for module data from the `module_candidates`
+//! and `module_file_ownership` tables.
 //!
-//! - **TS path**: `module_candidates` table + `module_file_ownership` table
-//! - **Rust path**: `nodes` table (kind='MODULE') + `edges` table (type='OWNS')
+//! ## Phase 4: MODULE-node fallback deprecated (2026-05-10)
 //!
-//! The fallback logic is application-level normalization policy, not raw
-//! storage truth. Keeping it here (not in storage CRUD) preserves honest
-//! method semantics in the storage layer.
+//! Prior to Phase 4, this module supported two backing representations:
+//! - Primary: `module_candidates` table + `module_file_ownership` table
+//! - Fallback: `nodes` table (kind='MODULE') + `edges` table (type='OWNS')
+//!
+//! The fallback has been removed. Module topology now comes exclusively from
+//! `module_candidates`, which is populated by:
+//! - Declared modules (Cargo.toml, package.json, pyproject.toml, settings.gradle)
+//! - Inferred modules (top-level directory heuristic for manifest-less repos)
+//!
+//! If `module_candidates` is empty for a snapshot, the context will be empty.
+//! This is intentional: it surfaces repos that need module detection rather
+//! than silently synthesizing modules from generic graph structure.
 
 use repo_graph_storage::crud::module_edges_support::{FileOwnership, OwnedFileForRollup};
 use repo_graph_storage::error::StorageError;
@@ -18,11 +26,11 @@ use repo_graph_storage::StorageConnection;
 /// Bundled module query context with normalized data.
 ///
 /// All module commands should consume this context instead of raw storage
-/// queries. The context handles fallback logic internally and presents a
-/// unified view regardless of backing representation.
+/// queries. The context loads data from `module_candidates` and
+/// `module_file_ownership` tables exclusively.
 #[derive(Debug, Clone)]
 pub struct ModuleQueryContext {
-    /// All modules in the snapshot (normalized from either backing model).
+    /// All modules in the snapshot from `module_candidates` table.
     pub modules: Vec<ModuleCandidate>,
 
     /// File ownership mapping (file_uid → module_candidate_uid).
@@ -31,51 +39,37 @@ pub struct ModuleQueryContext {
     /// Owned files with path and is_test flag for rollup computation.
     pub owned_files: Vec<OwnedFileForRollup>,
 
-    /// True if data came from fallback (MODULE nodes + OWNS edges).
-    /// Commands can use this to adjust messaging or suppress features
-    /// that don't work well with synthesized modules.
+    /// Deprecated: always false after Phase 4.
+    /// Kept for backward compatibility with any code checking this field.
+    /// The MODULE-node fallback has been removed.
     pub is_fallback: bool,
 }
 
 impl ModuleQueryContext {
-    /// Load module context for a snapshot, applying fallback if needed.
+    /// Load module context for a snapshot.
     ///
-    /// Strategy:
-    /// 1. Try TS tables (`module_candidates`, `module_file_ownership`)
-    /// 2. If empty, fall back to Rust tables (`nodes` kind=MODULE, `edges` type=OWNS)
-    /// 3. Normalize both paths into the same DTOs
+    /// Loads data exclusively from `module_candidates` and `module_file_ownership`
+    /// tables. If no modules exist, returns an empty context (no fallback).
     ///
-    /// Returns `Ok(context)` with `is_fallback=true` if fallback was used.
+    /// ## Phase 4 change
+    ///
+    /// Prior to Phase 4, this method fell back to MODULE nodes if `module_candidates`
+    /// was empty. That fallback has been removed. Empty `module_candidates` now
+    /// results in an empty context, surfacing repos that need module detection.
     pub fn load(
         storage: &StorageConnection,
         snapshot_uid: &str,
     ) -> Result<Self, StorageError> {
-        // Try TS path first: module_candidates table
+        // Load from module_candidates table (the only source after Phase 4)
         let modules = storage.get_module_candidates_for_snapshot(snapshot_uid)?;
-
-        if !modules.is_empty() {
-            // TS path: use module_candidates and module_file_ownership
-            let ownership = storage.get_file_ownership_for_snapshot(snapshot_uid)?;
-            let owned_files = storage.get_owned_files_for_rollup(snapshot_uid)?;
-
-            return Ok(Self {
-                modules,
-                ownership,
-                owned_files,
-                is_fallback: false,
-            });
-        }
-
-        // Fallback: Rust path using MODULE nodes and OWNS edges
-        let modules = storage.get_module_nodes_as_candidates(snapshot_uid)?;
-        let ownership = storage.get_file_ownership_from_owns_edges(snapshot_uid)?;
-        let owned_files = storage.get_owned_files_from_owns_edges(snapshot_uid)?;
+        let ownership = storage.get_file_ownership_for_snapshot(snapshot_uid)?;
+        let owned_files = storage.get_owned_files_for_rollup(snapshot_uid)?;
 
         Ok(Self {
             modules,
             ownership,
             owned_files,
-            is_fallback: true,
+            is_fallback: false, // Always false after Phase 4
         })
     }
 
@@ -228,4 +222,11 @@ mod tests {
         assert_eq!(files[0].file_path, "src/core/a.ts");
         assert_eq!(files[1].file_path, "src/core/c.ts");
     }
+
+    // Storage-backed tests for ModuleQueryContext::load() are in
+    // rust/crates/rgr/tests/modules_list_command.rs as integration tests.
+    // They test:
+    // - Empty module_candidates returns empty context (no fallback)
+    // - Populated module_candidates works correctly
+    // - Legacy MODULE nodes are NOT used as fallback after Phase 4
 }

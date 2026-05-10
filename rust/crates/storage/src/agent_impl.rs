@@ -1347,18 +1347,21 @@ impl AgentStorageRead for StorageConnection {
 		Ok(count as u64)
 	}
 
+	/// Get module summary from module_candidates table.
+	///
+	/// ## Phase 4 change (2026-05-10)
+	///
+	/// Prior to Phase 4, this method fell back to MODULE nodes in the `nodes`
+	/// table when `module_candidates` was empty. That fallback has been removed.
+	/// Empty `module_candidates` now returns `None`, surfacing repos that need
+	/// module detection configured rather than silently providing degraded data.
 	fn get_module_summary(
 		&self,
 		snapshot_uid: &str,
 	) -> Result<Option<AgentModuleSummary>, AgentStorageError> {
 		let conn = self.connection();
 
-		// Strategy:
-		// 1. Try module_candidates table (TS-indexed repos)
-		// 2. If empty, fall back to MODULE nodes (Rust-indexed repos)
-		// 3. If both empty, return None
-
-		// ── Step 1: Query module_candidates table ─────────────────────
+		// Query module_candidates table (the sole source after Phase 4)
 		let mut stmt = conn
 			.prepare(
 				"SELECT module_kind, COUNT(*) as cnt \
@@ -1392,42 +1395,18 @@ impl AgentStorageRead for StorageConnection {
 			}
 		}
 
-		// If module_candidates has data, use it.
 		if total > 0 {
-			return Ok(Some(AgentModuleSummary {
+			Ok(Some(AgentModuleSummary {
 				discovered_module_count: total,
 				declared_count: declared,
 				operational_count: operational,
 				inferred_count: inferred,
-			}));
+			}))
+		} else {
+			// No module data. After Phase 4, this surfaces repos that need
+			// module detection rather than silently falling back to MODULE nodes.
+			Ok(None)
 		}
-
-		// ── Step 2: Fallback to MODULE nodes in nodes table ───────────
-		// The Rust indexer produces MODULE nodes but does not populate
-		// module_candidates. This fallback mirrors the storage-level
-		// get_module_nodes_as_candidates() used by `modules list`.
-		let module_count: i64 = conn
-			.query_row(
-				"SELECT COUNT(*) FROM nodes \
-				 WHERE snapshot_uid = ? AND kind = 'MODULE'",
-				[snapshot_uid],
-				|row| row.get(0),
-			)
-			.map_err(map_err("get_module_summary"))?;
-
-		if module_count > 0 {
-			// All MODULE nodes from the Rust indexer are directory-derived,
-			// so they count as inferred (structure-based, not manifest-backed).
-			return Ok(Some(AgentModuleSummary {
-				discovered_module_count: module_count as u64,
-				declared_count: 0,
-				operational_count: 0,
-				inferred_count: module_count as u64,
-			}));
-		}
-
-		// No module data from either source.
-		Ok(None)
 	}
 
 	fn get_boundary_links_freshness(

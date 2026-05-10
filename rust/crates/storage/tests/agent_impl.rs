@@ -460,12 +460,13 @@ fn orient_runs_over_real_storage_connection() {
 	// ── Expected limit set on an empty snapshot ──
 	//
 	// Limits on this fixture (3 total):
-	//   1. MODULE_DATA_UNAVAILABLE (no module_candidates AND no MODULE nodes)
+	//   1. MODULE_DATA_UNAVAILABLE (no module_candidates)
 	//   2. GATE_NOT_CONFIGURED (no requirement declarations)
 	//   3. COMPLEXITY_UNAVAILABLE (no complexity measurements)
 	//
 	// When data exists:
-	//   - MODULE_DATA_UNAVAILABLE suppressed when module_candidates OR MODULE nodes exist
+	//   - MODULE_DATA_UNAVAILABLE suppressed when module_candidates has data
+	//     (Phase 4: MODULE nodes are NOT used as fallback)
 	//   - COMPLEXITY_UNAVAILABLE suppressed when complexity measurements exist
 	//
 	// Dead-code surface is withdrawn — no DEAD_CODE signal or
@@ -1172,7 +1173,7 @@ fn find_file_imports_returns_distinct_targets() {
 
 #[test]
 fn get_module_summary_returns_none_when_no_candidates() {
-	// Empty module_candidates table → None, triggers fallback.
+	// Empty module_candidates table → None (no fallback after Phase 4).
 	let (_tmp, mut storage) = open_temp_storage();
 	insert_repo(&storage, "r1", "my-repo");
 	let snapshot_uid = create_ready_snapshot(&storage, "r1");
@@ -1250,9 +1251,8 @@ fn get_module_summary_returns_counts_grouped_by_kind() {
 
 #[test]
 fn get_module_summary_treats_directory_kind_as_inferred() {
-	// The Rust indexer's fallback (get_module_nodes_as_candidates)
-	// returns modules with kind = "directory". These should be
-	// counted as inferred.
+	// Inferred modules have module_kind = "directory" or "inferred".
+	// Both should be counted in the inferred_count.
 	let dir = tempfile::tempdir().unwrap();
 	let db_path = dir.path().join("module_summary_dir.db");
 	let mut storage = StorageConnection::open(&db_path).unwrap();
@@ -1285,20 +1285,21 @@ fn get_module_summary_treats_directory_kind_as_inferred() {
 }
 
 #[test]
-fn get_module_summary_falls_back_to_module_nodes() {
-	// When module_candidates is empty but MODULE nodes exist in the
-	// nodes table (Rust-indexed repos), the adapter must fall back
-	// to counting MODULE nodes. All MODULE nodes from the Rust
-	// indexer are directory-derived, so they count as inferred.
+fn get_module_summary_no_fallback_after_phase_4() {
+	// Phase 4 (2026-05-10): MODULE-node fallback removed.
+	// When module_candidates is empty, get_module_summary returns None
+	// even if MODULE nodes exist. This surfaces repos that need module
+	// detection configured rather than silently providing degraded data.
 	use repo_graph_storage::types::GraphNode;
 
 	let dir = tempfile::tempdir().unwrap();
-	let db_path = dir.path().join("module_fallback.db");
+	let db_path = dir.path().join("module_no_fallback.db");
 	let mut storage = StorageConnection::open(&db_path).unwrap();
 	insert_repo(&storage, "r1", "my-repo");
 	let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	// Insert MODULE nodes directly (Rust indexer path).
+	// Insert MODULE nodes directly (legacy Rust indexer path).
+	// These are NOT in module_candidates, only in nodes table.
 	storage
 		.insert_nodes(&[
 			GraphNode {
@@ -1355,31 +1356,16 @@ fn get_module_summary_falls_back_to_module_nodes() {
 		])
 		.unwrap();
 
-	// module_candidates is empty, but MODULE nodes exist.
+	// module_candidates is empty, MODULE nodes exist but are NOT used.
 	let summary = <StorageConnection as AgentStorageRead>::get_module_summary(
 		&mut storage,
 		&snapshot_uid,
 	)
 	.unwrap();
 
-	let summary = summary.expect(
-		"get_module_summary must return Some when MODULE nodes exist \
-		 (fallback from empty module_candidates)",
-	);
-	assert_eq!(
-		summary.discovered_module_count, 3,
-		"should count MODULE nodes when module_candidates is empty"
-	);
-	assert_eq!(
-		summary.declared_count, 0,
-		"MODULE nodes are not manifest-backed"
-	);
-	assert_eq!(
-		summary.operational_count, 0,
-		"MODULE nodes are not surface-promoted"
-	);
-	assert_eq!(
-		summary.inferred_count, 3,
-		"MODULE nodes are directory-derived, counted as inferred"
+	assert!(
+		summary.is_none(),
+		"Phase 4: get_module_summary must return None when module_candidates \
+		 is empty, even if MODULE nodes exist. No fallback."
 	);
 }

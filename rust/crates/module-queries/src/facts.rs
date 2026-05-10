@@ -63,7 +63,11 @@ impl ModuleGraphFacts {
         &self.context.owned_files
     }
 
-    /// Check if context came from fallback (Rust MODULE nodes).
+    /// Check if context came from fallback.
+    ///
+    /// After Phase 4 (2026-05-10), this always returns `false`.
+    /// The MODULE-node fallback has been removed; `module_candidates`
+    /// is now the sole source of module topology.
     pub fn is_fallback(&self) -> bool {
         self.context.is_fallback
     }
@@ -83,7 +87,7 @@ impl ModuleGraphFacts {
 ///
 /// This is the single-load orchestration point for all module graph data.
 /// It performs:
-/// 1. Module context loading (with TS/Rust fallback)
+/// 1. Module context loading from `module_candidates` (no fallback after Phase 4)
 /// 2. Resolved import loading
 /// 3. Module edge derivation
 ///
@@ -97,7 +101,7 @@ pub fn load_module_graph_facts(
     storage: &StorageConnection,
     snapshot_uid: &str,
 ) -> Result<ModuleGraphFacts, ModuleQueryError> {
-    // 1. Load module context (with fallback)
+    // 1. Load module context (no fallback after Phase 4)
     let context = ModuleQueryContext::load(storage, snapshot_uid)?;
 
     // 2. Load resolved imports
