@@ -98,6 +98,13 @@ rmap index ./path/to/repo ./repo.db
 rmap refresh ./path/to/repo ./repo.db
 ```
 
+### Daemon Mode
+
+```bash
+# Start the long-lived NDJSON server for persistent AI agent sessions
+rmap daemon
+```
+
 ## Current shipped language support
 
 Operational in `rmap`:
@@ -153,7 +160,6 @@ Specialized evidence tracks with varying implementation state:
 
 ### Current Rust-primary visibility gaps
 
-- Module inference is TS-side only; Rust indexer does not emit `module_candidates`
 - Some boundary contract linking remains incomplete
 - Enrichment passes not yet ported to Rust
 
@@ -186,36 +192,18 @@ rmap gate ./repo.db my-repo
 
 See `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/cli/rmap-contracts.md` for the governance CLI contract.
 
-## Legacy CLI: `rgr`
-
-The TypeScript CLI (`rgr`) remains for TS-side parity checks and features not yet ported to Rust.
-
-```bash
-rgr repo add ./path/to/repo --name my-repo
-rgr repo index my-repo
-rgr enrich my-repo
-```
-
 ## Current non-goals and cautions
 
 - Public dead-code claims are withdrawn until coverage-backed evidence is integrated. Do not treat old dead-code expectations as current product behavior.
 - SQLite is the current persistence mechanism, not the conceptual end-state center.
-- The long-term runtime direction is a daemon that coordinates many-reader/few-writer shared access for multiple AI agents.
+- The runtime architecture now relies on a shipped, long-lived daemon that coordinates many-reader/few-writer shared access for multiple AI agents, removing CLI bootstrap latency.
 
 ## Installation
 
 Requirements:
-- Node.js 20+
 - Rust toolchain
-- `pnpm`
 
 ```bash
-# TypeScript side
-pnpm install
-pnpm rebuild better-sqlite3
-pnpm build
-
-# Rust side
 cd rust && cargo build --release
 ```
 
@@ -236,7 +224,7 @@ Core rules:
 - documentation inventory is primary orientation evidence
 - trust and degradation are explicit
 
-The long-term architecture direction is a long-lived daemon with an in-memory current-state graph. SQLite remains the transitional persistence/query adapter until that runtime is built.
+The architecture now includes a shipped, long-lived daemon providing an in-memory current-state coordination layer. SQLite remains the persistence and query adapter underlying this runtime.
 
 ## Documentation map
 
@@ -253,17 +241,29 @@ The long-term architecture direction is a long-lived daemon with an in-memory cu
 ## Development
 
 ```bash
+cd rust
+
 # Build
-pnpm build
-cd rust && cargo build
+cargo build
 
 # Test
-pnpm test
-pnpm run test:rust
-pnpm run test:all
+cargo test
 
 # Lint
-pnpm lint
+cargo clippy
+```
+
+## Legacy TypeScript CLI (Deprecated)
+
+The TypeScript codebase (`rgr` CLI) is deprecated and being phased out as features achieve parity in Rust. 
+
+If you still need to run the TS codebase for legacy features:
+Requirements: Node.js 20+, `pnpm`
+```bash
+pnpm install
+pnpm rebuild better-sqlite3
+pnpm build
+pnpm test
 ```
 
 ## License
