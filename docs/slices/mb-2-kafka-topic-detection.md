@@ -1,10 +1,40 @@
 # MB-2: Kafka Topic Detection
 
-Status: PLANNED
+Status: PARTIAL — Rust path shipped for TS/JS source patterns; Python/Java pending
 Depends: MB-1 (broker foundation)
 Track: Message Broker
 
-## Objective
+## Shipped (2025-Q1)
+
+**Rust runtime detects TS/JS kafkajs patterns:**
+- `producer.send({ topic, messages })` — provider, single topic publish
+- `consumer.subscribe({ topic })` — consumer, topic subscription
+
+NOT shipped (deferred):
+- `producer.sendBatch()` — nested topicMessages[].topic extraction not implemented
+- `consumer.run()` — no topic evidence in call args
+
+Implementation: `rust/crates/ts-extractor/src/kafka_detector.rs`
+Bindings: `rust/crates/boundary-interaction/bindings.toml` (kafkajs section)
+Tests: `rust/crates/repo-index/tests/mb_2a_kafka.rs`
+
+Triple scope guard in detector:
+1. File must have direct kafkajs import/require
+2. Receiver must be assigned from `*.producer()` or `*.consumer()` factory
+3. Call must have extractable topic argument
+
+Channel kind: `kafka_topic`
+Transport class: `message_broker`
+Validation: `rmap boundaries list --transport message_broker`
+
+## Remaining Work
+
+**Python (kafka-python, confluent-kafka):** NOT STARTED
+**Java (kafka-clients, Spring Kafka):** NOT STARTED
+
+Blocker: Language extractors need message-broker detection integration. Java extractor exists but lacks Kafka call pattern detection.
+
+## Original Objective
 
 Detect Kafka producer and consumer patterns across Python, Java, and Node.js.
 Map topic/partition/consumer-group topology as boundary interaction surfaces.

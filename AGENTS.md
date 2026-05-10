@@ -100,6 +100,7 @@ Stop and report if:
 ## Read Next
 
 - `CURRENT_SLICE.md` — what matters now
+- `docs/documentation.md` — doc structure and slice lifecycle
 - `agent_docs/validation.md` — evidence protocol
 - `agent_docs/architecture.md` — full architecture rules
 - `agent_docs/rmap-orientation.md` — CLI patterns

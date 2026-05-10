@@ -1,10 +1,36 @@
 # MB-1: RabbitMQ / AMQP Basic Detection
 
-Status: PLANNED
+Status: PARTIAL — Rust path shipped for TS/JS source patterns; Python/Java/C# pending
 Depends: Foundation (migration 025), BI-1B TCP/UDP (network context)
 Track: Message Broker
 
-## Objective
+## Shipped (2025-Q1)
+
+**Rust runtime detects TS/JS amqplib patterns:**
+- `channel.sendToQueue()` — provider, queue publish
+- `channel.publish()` — provider, exchange publish
+- `channel.consume()` — consumer, queue consumption
+- `channel.assertQueue()` — bidirectional, queue declaration
+- `channel.assertExchange()` — bidirectional, exchange declaration
+- `channel.bindQueue()` — bidirectional, binding
+
+Implementation: `rust/crates/ts-extractor/src/amqp_detector.rs`
+Bindings: `rust/crates/boundary-interaction/bindings.toml` (amqplib section)
+Tests: `rust/crates/repo-index/tests/mb_1a_amqp.rs`
+
+Channel kind: `amqp_queue`
+Transport class: `message_broker`
+Validation: `rmap boundaries list --transport message_broker`
+
+## Remaining Work
+
+**Python (pika, kombu):** NOT STARTED
+**Java (RabbitMQ client):** NOT STARTED
+**C# (RabbitMQ.Client):** NOT STARTED
+
+Blocker: Language extractors need message-broker detection integration. Python extractor exists but lacks AMQP call pattern detection.
+
+## Original Objective
 
 Detect RabbitMQ / AMQP producer and consumer patterns across Python, Java,
 Node.js, and C#. Map exchange/queue/binding topology as boundary interaction

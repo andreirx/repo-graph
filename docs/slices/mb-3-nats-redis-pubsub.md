@@ -1,10 +1,52 @@
 # MB-3: NATS / Redis Pub-Sub Detection
 
-Status: PLANNED
+Status: PARTIAL — Rust path shipped for NATS TS/JS source patterns; Redis pub-sub and multi-language pending
 Depends: MB-1 (broker foundation)
 Track: Message Broker
 
-## Objective
+## Shipped (2025-Q1)
+
+**Rust runtime detects TS/JS nats patterns:**
+- `nc.publish(subject, data)` — provider, subject publish
+- `nc.subscribe(subject)` — consumer, subject subscription
+
+NOT shipped (deferred to MB-3B):
+- `nc.request()` — mixed semantics (outbound + reply handling)
+- Subject wildcards
+- Queue groups
+- JetStream patterns
+
+Implementation: `rust/crates/ts-extractor/src/nats_detector.rs`
+Bindings: `rust/crates/boundary-interaction/bindings.toml` (nats section)
+Tests: `rust/crates/repo-index/tests/mb_3a_nats.rs`
+
+Triple scope guard in detector:
+1. File must have direct nats import/require
+2. Receiver must be assigned from `connect()` call (NATS connection)
+3. Call must have extractable subject argument
+
+Channel kind: `nats_subject`
+Transport class: `message_broker`
+Validation: `rmap boundaries list --transport message_broker`
+
+## Remaining Work
+
+**Redis pub-sub (all languages):** NOT STARTED
+- Channel kind `redis_pubsub` not implemented
+- Would need: redis-py, ioredis, go-redis, Jedis detection
+
+**NATS multi-language:**
+- **Python (nats-py):** NOT STARTED
+- **Go (nats.go):** NOT STARTED
+- **Java (jnats):** NOT STARTED
+
+**NATS request-reply (MB-3B):** PLANNED
+- nc.request() has bidirectional semantics
+- Needs special handling
+
+Blocker: Language extractors need message-broker detection integration.
+
+## Original Objective
 
 Detect NATS and Redis pub-sub patterns as lighter-weight message broker
 alternatives. These are simpler than RabbitMQ/Kafka but widely used for
