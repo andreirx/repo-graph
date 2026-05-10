@@ -801,86 +801,78 @@ surfacing, risk prioritization) is the primary product direction.
 
 ## Next
 
-### Precedence Rule (binding)
+### Immediate: Gap-Closing and Dependency Surface
 
-The roadmap exposes multiple "next" concepts. Without explicit precedence,
-sequencing drifts. This rule is binding:
+The next execution priority is **closing TS/Rust extraction gaps** and **surfacing
+dependency relationships**. This strengthens Layer 0–2 facts before expanding
+Layer 3 framework detection.
 
-**Priority order:**
+**Execution queue (in order):**
 
-1. **New discovery mechanism families** — breadth over depth
-2. **Incomplete high-value mechanism-family support modules becoming user-visible**
-3. **Cross-cutting discovery surfaces** (quality diff, risk prioritization)
-4. **Mechanism-family depth refinements** (correlation, linking, role inference)
-5. **Policy-fact depth** (PF-3+)
-6. **Governance/enforcement refinement**
+| Slice | Scope | Layer | Status |
+|-------|-------|-------|--------|
+| PY-EXT-2 | Python extractor depth | L0–1 | PLANNED |
+| SB-7A | State boundaries support substrate | L2 | PLANNED |
+| SB-7C | Python state boundaries | L2 | PLANNED |
+| SB-7B | Java state boundaries | L2 | PLANNED |
+| DEP-1 | Dependency reconciliation surface | L2 | PLANNED |
+| FD-1A | Rust Express detector parity | L3 | PLANNED |
+| FD-1B | Rust React detector parity | L3 | PLANNED |
 
-**Concrete examples:**
+**Why this order:**
 
-- Linux IPC family expansion outranks snapshot diff
-- Message broker breadth outranks policy-fact depth
-- Embedded/inter-core transport discovery outranks quality delta surfacing
-- SysV shared memory outranks fd-tracking completion for TCP/UDP
+1. **PY-EXT-2** strengthens Layer 0–1 facts (callsite resolution improves all downstream)
+2. **SB-7A** creates Layer 2 support substrate consumed by language-specific adapters
+3. **SB-7C/7B** use SB-7A substrate for Python and Java state boundaries
+4. **DEP-1** is cross-cutting query surface over existing facts (JS/TS + Rust only in Phase A)
+5. **FD-1A/1B** are Layer 3 hints — come after stronger fact/substrate work
 
-**What this means:**
+**Slice docs:**
 
-Discovery-first. Breadth-first within discovery. Mechanism coverage before
-cross-cutting refinement. Depth only when real navigation proves a gap.
+- `docs/slices/py-ext-2-python-extractor-depth.md`
+- `docs/slices/sb-7a-state-boundaries-support-substrate.md`
+- `docs/slices/sb-7c-python-state-boundaries.md`
+- `docs/slices/sb-7b-java-state-boundaries.md`
+- `docs/slices/dep-1-dependency-reconciliation-surface.md`
+- `docs/slices/fd-1a-rust-express-detector-parity.md`
+- `docs/slices/fd-1b-rust-react-detector-parity.md`
+
+**DEP-1 placement note:** DEP-1 can move earlier if immediate agent orientation
+value is prioritized over relationship substrate completion. Current placement
+optimizes for substrate-first.
 
 ---
 
-### Immediate: Artifact Contract Registry (ACR)
+### Shipped: Artifact Contract Registry (ACR)
 
-The next execution priority is the **Artifact Contract Registry** — a foundational
-architectural change that codifies artifact semantics in code rather than prose.
-
-**Problem:** The refresh pipeline treats all artifact families similarly, but they
-have fundamentally different truth classes and refresh semantics:
-- Extracted facts (nodes, edges, surfaces) can be copied forward for unchanged files
-- Deterministic relationships (boundary_contracts, boundary_interaction_links) must
-  be recomputed from current snapshot facts
-- Hints/inferences may be marked impacted rather than eagerly recomputed
-
-Without explicit contracts, the pipeline handles each table ad-hoc, leading to
-semantic bugs like boundary_interaction_links pointing to parent snapshot UIDs.
-
-**Solution:** Explicit artifact contract registry that defines truth class, refresh
-policy, identity model, degradation policy, and provenance requirements for every
-artifact family. The refresh pipeline and query surfaces consume this registry.
+The **Artifact Contract Registry** codifies artifact semantics in code rather than prose.
+All slices shipped.
 
 **Architecture docs:**
 - `docs/architecture/artifact-contract-model.md` — full specification
 - `docs/architecture/adr/adr-artifact-contract-registry.md` — decision record
 
-**Execution slices (in order):**
+**Execution slices:**
 
 | Slice | Scope | Status |
 |-------|-------|--------|
-| ACR-1 | Create `artifact-contracts` crate with registry | DONE |
-| ACR-2 | Make refresh pipeline consume registry | DONE |
-| ACR-3 | Add per-row freshness and provenance schema | DONE |
-| ACR-4 | Implement impact propagation from L0 changes | DONE |
-| ACR-5 | Boundary contract proof case (first fix) | DONE |
-| ACR-6 | Wire query surfaces to report freshness/degradation | DONE |
+| ACR-1 | Create `artifact-contracts` crate with registry | **SHIPPED** |
+| ACR-2 | Make refresh pipeline consume registry | **SHIPPED** |
+| ACR-3 | Add per-row freshness and provenance schema | **SHIPPED** |
+| ACR-4 | Implement impact propagation from L0 changes | **SHIPPED** |
+| ACR-5 | Boundary contract proof case (first fix) | **SHIPPED** |
+| ACR-6 | Wire query surfaces to report freshness/degradation | **SHIPPED** |
 
-**Key decisions (locked):**
-- Option A: full registry now (all families classified upfront)
-- Dedicated `rust/crates/artifact-contracts` crate (not in storage)
-- Per-row freshness tracking (not per-family)
-- Per-row provenance to Layer 0 anchors
-- Upper layers may be marked impacted rather than eagerly recomputed
+---
 
-**First proof case:** BoundaryContracts and BoundaryInteractionLinks will be
-fixed under the new model by recomputing from current snapshot facts in Phase 2
-of the refresh pipeline (after Layer 0-1 copy-forward completes).
+### Shipped: Module Truth-Model Unification
 
-**Supersedes:** `docs/slices/refresh-integrity-parity.md` (tactical fixes)
+Module truth-model unification (`docs/slices/rust-module-parity.md`) is complete.
+Rust indexer populates `module_candidates` tables through declared module detection
+(Cargo.toml, package.json, pyproject.toml, settings.gradle) and inferred module
+heuristics (top-level directory detection with umbrella splitting).
 
-**Follow-on:** Module truth-model unification (`docs/slices/rust-module-parity.md`)
-is now complete. Rust indexer populates `module_candidates` tables through declared
-module detection (Cargo.toml, package.json, pyproject.toml, settings.gradle) and
-inferred module heuristics (top-level directory detection). MODULE-node fallback
-path deprecated as of 2026-05-10.
+MODULE-node fallback path deprecated as of 2026-05-10.
 
 ---
 

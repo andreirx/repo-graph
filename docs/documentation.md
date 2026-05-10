@@ -80,6 +80,7 @@ Prefixes:
 - `mb-` — Message Broker
 - `sb-` — State Boundaries
 - `fd-` — Framework Detection
+- `dep-` — Dependencies
 - `py-ext-` — Python Extractor
 - `pf-` — Policy Facts
 
