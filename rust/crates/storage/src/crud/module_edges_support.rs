@@ -272,6 +272,271 @@ impl StorageConnection {
 		}
 		Ok(results)
 	}
+
+	// ── DEP-1: Dependency reconciliation queries ──────────────────
+
+	/// Read all external library import specifiers for a snapshot.
+	///
+	/// Returns unresolved edges classified as `external_library_candidate`
+	/// with their target_key (the import specifier) and source file UID.
+	/// The source file UID is resolved via the source_node's file_uid.
+	///
+	/// Order is deterministic: sorted by (source_file_uid, target_key).
+	pub fn get_external_imports_for_snapshot(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<ExternalImportFact>, StorageError> {
+		let conn = self.connection();
+		let mut stmt = conn.prepare(
+			"SELECT n.file_uid AS source_file_uid,
+			        ue.target_key AS specifier
+			 FROM unresolved_edges ue
+			 JOIN nodes n ON ue.source_node_uid = n.node_uid
+			 WHERE ue.snapshot_uid = ?
+			   AND ue.classification = 'external_library_candidate'
+			   AND n.file_uid IS NOT NULL
+			 ORDER BY source_file_uid ASC, specifier ASC",
+		)?;
+
+		let rows = stmt.query_map([snapshot_uid], |row| {
+			Ok(ExternalImportFact {
+				source_file_uid: row.get("source_file_uid")?,
+				specifier: row.get("specifier")?,
+			})
+		})?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			results.push(row?);
+		}
+		Ok(results)
+	}
+
+	/// Read import bindings for identifier → specifier resolution.
+	///
+	/// Returns all non-relative import bindings from file_signals. Used by
+	/// DEP-1 to resolve callee identifiers (e.g., "useState") to their
+	/// import specifiers (e.g., "react").
+	///
+	/// Relative imports (./foo, ../bar) are excluded since they represent
+	/// internal module imports, not external package dependencies.
+	///
+	/// Order is deterministic: sorted by (file_uid, identifier).
+	pub fn get_external_import_bindings_for_snapshot(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<ImportBindingFact>, StorageError> {
+		let conn = self.connection();
+		let mut stmt = conn.prepare(
+			"SELECT file_uid, import_bindings_json
+			 FROM file_signals
+			 WHERE snapshot_uid = ?
+			   AND import_bindings_json IS NOT NULL
+			 ORDER BY file_uid ASC",
+		)?;
+
+		let rows = stmt.query_map([snapshot_uid], |row| {
+			let file_uid: String = row.get("file_uid")?;
+			let json_str: String = row.get("import_bindings_json")?;
+			Ok((file_uid, json_str))
+		})?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			let (file_uid, json_str) = row?;
+			// Parse the JSON array of import bindings.
+			// Format: [{"identifier": "React", "specifier": "react", "is_relative": false}, ...]
+			match serde_json::from_str::<Vec<ImportBindingJson>>(&json_str) {
+				Ok(bindings) => {
+					for b in bindings {
+						// Skip relative imports — they're internal, not external packages.
+						if b.is_relative {
+							continue;
+						}
+						results.push(ImportBindingFact {
+							file_uid: file_uid.clone(),
+							identifier: b.identifier,
+							specifier: b.specifier,
+							is_relative: b.is_relative,
+						});
+					}
+				}
+				Err(_) => {
+					// Skip malformed JSON rather than failing the whole query.
+					continue;
+				}
+			}
+		}
+		Ok(results)
+	}
+
+	/// Read package dependency names from file_signals for a snapshot.
+	///
+	/// Returns files that have a package_dependencies_json value, along
+	/// with the parsed dependency names. Only files with non-null
+	/// package dependencies are returned.
+	///
+	/// Order is deterministic: sorted by file_path.
+	pub fn get_package_dependencies_for_snapshot(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<FilePackageDependencies>, StorageError> {
+		let conn = self.connection();
+		let mut stmt = conn.prepare(
+			"SELECT fs.file_uid, f.path AS file_path, fs.package_dependencies_json
+			 FROM file_signals fs
+			 JOIN files f ON fs.file_uid = f.file_uid
+			 WHERE fs.snapshot_uid = ?
+			   AND fs.package_dependencies_json IS NOT NULL
+			 ORDER BY f.path ASC",
+		)?;
+
+		let rows = stmt.query_map([snapshot_uid], |row| {
+			let file_uid: String = row.get("file_uid")?;
+			let file_path: String = row.get("file_path")?;
+			let json_str: String = row.get("package_dependencies_json")?;
+			Ok((file_uid, file_path, json_str))
+		})?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			let (file_uid, file_path, json_str) = row?;
+			// Parse the JSON to extract package names.
+			// Format: {"names": ["react", "lodash", ...]}
+			match serde_json::from_str::<PackageDependencySetJson>(&json_str) {
+				Ok(parsed) => {
+					results.push(FilePackageDependencies {
+						file_uid,
+						file_path,
+						package_names: parsed.names,
+					});
+				}
+				Err(_) => {
+					// Skip malformed JSON rather than failing the whole query.
+					// This is a degradation signal but not a fatal error.
+					continue;
+				}
+			}
+		}
+		Ok(results)
+	}
+
+	/// Read external imports with file paths and locations for `deps why`.
+	///
+	/// Returns unresolved edges classified as `external_library_candidate`
+	/// enriched with file path and line/column information. Used for
+	/// sample import evidence in the CLI.
+	///
+	/// Order is deterministic: sorted by (file_path, line_start, specifier).
+	pub fn get_external_imports_with_locations(
+		&self,
+		snapshot_uid: &str,
+	) -> Result<Vec<ExternalImportWithLocation>, StorageError> {
+		let conn = self.connection();
+		let mut stmt = conn.prepare(
+			"SELECT f.file_uid,
+			        f.path AS file_path,
+			        ue.target_key AS specifier,
+			        ue.line_start,
+			        ue.col_start
+			 FROM unresolved_edges ue
+			 JOIN nodes n ON ue.source_node_uid = n.node_uid
+			 JOIN files f ON n.file_uid = f.file_uid
+			 WHERE ue.snapshot_uid = ?
+			   AND ue.classification = 'external_library_candidate'
+			   AND n.file_uid IS NOT NULL
+			 ORDER BY file_path ASC, ue.line_start ASC, specifier ASC",
+		)?;
+
+		let rows = stmt.query_map([snapshot_uid], |row| {
+			Ok(ExternalImportWithLocation {
+				file_uid: row.get("file_uid")?,
+				file_path: row.get("file_path")?,
+				specifier: row.get("specifier")?,
+				line_start: row.get("line_start")?,
+				col_start: row.get("col_start")?,
+			})
+		})?;
+
+		let mut results = Vec::new();
+		for row in rows {
+			results.push(row?);
+		}
+		Ok(results)
+	}
+}
+
+/// An external import fact from unresolved_edges.
+///
+/// Used by DEP-1 dependency reconciliation to identify imports
+/// classified as external library candidates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalImportFact {
+	/// The file UID of the source file containing the import.
+	pub source_file_uid: String,
+	/// The import specifier (e.g., "react/jsx-runtime", "tokio::spawn").
+	pub specifier: String,
+}
+
+/// An external import with file path and location evidence.
+///
+/// Used by `deps why` to show sample import locations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalImportWithLocation {
+	/// The file UID.
+	pub file_uid: String,
+	/// The file path (relative to repo root).
+	pub file_path: String,
+	/// The import specifier.
+	pub specifier: String,
+	/// Line number where the import appears (1-indexed, may be None).
+	pub line_start: Option<i64>,
+	/// Column number where the import starts (0-indexed, may be None).
+	pub col_start: Option<i64>,
+}
+
+/// Package dependencies declared for a file (from its nearest manifest).
+///
+/// Used by DEP-1 dependency reconciliation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilePackageDependencies {
+	/// The file UID.
+	pub file_uid: String,
+	/// The file path (relative to repo root). This is the manifest path.
+	pub file_path: String,
+	/// Package names declared as dependencies in the nearest manifest.
+	pub package_names: Vec<String>,
+}
+
+/// JSON structure for package_dependencies_json column.
+#[derive(Debug, serde::Deserialize)]
+struct PackageDependencySetJson {
+	names: Vec<String>,
+}
+
+/// JSON structure for import_bindings_json column.
+#[derive(Debug, serde::Deserialize)]
+struct ImportBindingJson {
+	identifier: String,
+	specifier: String,
+	#[serde(default)]
+	is_relative: bool,
+}
+
+/// An import binding for identifier → specifier resolution.
+///
+/// Used by DEP-1 to resolve callee identifiers (e.g., "useState") to
+/// their import specifiers (e.g., "react").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportBindingFact {
+	/// The file UID containing this import.
+	pub file_uid: String,
+	/// The local identifier bound by the import (e.g., "useState", "React").
+	pub identifier: String,
+	/// The import specifier (e.g., "react", "./utils").
+	pub specifier: String,
+	/// Whether this is a relative import (./foo, ../bar).
+	pub is_relative: bool,
 }
 
 /// A file ownership fact for rollup computation.

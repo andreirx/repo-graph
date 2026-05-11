@@ -1,6 +1,27 @@
 # DEP-1: Dependency Reconciliation Surface
 
-Status: PLANNED
+Status: SHIPPED (2026-05-11)
+
+## Implementation Notes (Phase A)
+
+**Implemented:**
+- Storage queries: `get_external_imports_for_snapshot`, `get_external_imports_with_locations`, `get_package_dependencies_for_snapshot`, `get_external_import_bindings_for_snapshot`
+- Import binding resolution: callee identifiers (e.g., `useState`) resolved to import specifiers (e.g., `react`) via `resolve.rs`
+- Core reconciliation: specifier normalization (npm/Cargo), declared+observed+builtin join
+- Module identity: uses `canonical_root_path` (user-facing), not internal UIDs
+- Ecosystem filtering: `--ecosystem npm|cargo` filters modules by `module_key` prefix
+- CLI: `deps list`, `deps why` (with sample import locations), `deps drift`
+- All commands support `--format json` (JSON is default and only format)
+- CLI integration tests: 12 tests in `rust/crates/rgr/tests/deps_command.rs`
+- Unit tests: 28 in module-queries (normalize, reconcile, resolve)
+
+**Deferred to DEP-1B or later:**
+- `dependency_class` (prod/dev/peer/optional): needs extended manifest JSON parsing
+- Workspace hoisting: deps attributed only to manifest-owning module; root→child inheritance not implemented
+- Empty-module surfacing: modules with no imports AND no declared deps silently excluded
+- Python/Java: manifest context not attached in compose.rs (silently excluded, no diagnostic)
+- Degradation diagnostics: `unowned_file`, `module_scope_inferred`, `manifest_scope_unavailable` not emitted
+
 Depends:
   - Module truth surface exists (rust-module-parity or equivalent)
   - Unresolved import classification stable (ExternalLibraryCandidate basis codes)
@@ -108,17 +129,21 @@ Rust:
 
 How module/workspace scoping works for dependency attribution:
 
-**Module ownership:**
-- Only declared modules participate in first cut
-- Inferred modules: excluded or marked `module_scope_inferred` (degraded)
-- Files with no module owner: reported as `unowned_file` in diagnostics, not silently assigned
+**Module ownership (implemented):**
+- Only declared modules participate
+- Inferred modules: silently excluded from output
+- Files with no module owner: silently excluded (no diagnostic emitted)
 
-**Manifest scope attribution:**
-- Workspace root manifest declarations: attributed to root workspace module
+**Manifest scope attribution (implemented):**
 - Child package manifest declarations: attributed to that child module only
-- Hoisted dependencies (npm workspaces): visible to child if in root manifest, but primary declaration is root
+- Root workspace declarations: attributed to root module only
 
-**Scope disagreement:**
+**Not implemented (deferred to DEP-1B):**
+- Workspace hoisting: root deps are NOT visible to child modules
+- `unowned_file` diagnostics
+- `module_scope_inferred` flag
+
+**Scope disagreement (implemented):**
 - If file belongs to module A but imports package declared only in module B's manifest → `observed_but_undeclared` for module A
 - Cross-module dependency inference is NOT done (would require DEP-2 graph edges)
 
@@ -133,26 +158,18 @@ monorepo/
 ```
 Result for `frontend` module:
 - `declared_and_used`: `react`
-- `observed_but_undeclared`: `lodash` (unless hoisting rules apply)
+- `observed_but_undeclared`: `lodash` (hoisting NOT implemented)
 
 ## Degradation Policy
 
-When manifest dependency context unavailable for a language:
-- `rmap deps list` returns `manifest_scope_unavailable` for that module
-- Do not silently skip or return empty
+**Implemented:**
+- Specifier normalization ambiguity: classified as `unknown_external_like` with `confidence < 0.8`
+- Import classification failure: inherits `UnresolvedEdgeCategory` from indexer
 
-When specifier normalization is ambiguous:
-- Classify as `unknown_external_like`
-- Include raw specifier in output
-- Set `confidence < 1.0`
-
-When module is inferred (not declared):
-- Exclude from `deps list` in Phase A, OR
-- Include with `module_scope_inferred` flag
-
-When import classification failed upstream:
-- Inherit `UnresolvedEdgeCategory` from indexer
-- Do not re-classify; surface the gap
+**Not implemented (silent exclusion instead):**
+- Python/Java modules: silently excluded from output (no `manifest_scope_unavailable` diagnostic)
+- Inferred modules: silently excluded (no `module_scope_inferred` flag)
+- Unowned files: silently excluded (no `unowned_file` diagnostic)
 
 ## Crate Layout
 
@@ -323,7 +340,7 @@ rmap deps list ./test-artifacts/dep-1.db express-app --format json \
 # If corpus uses Node builtins, must show them
 
 # 9. Unsupported language degradation
-# Index a Python-only repo (if available), verify manifest_scope_unavailable
+# Python-only repos: silently excluded from output (no diagnostic)
 ```
 
 ## Acceptance Criteria
@@ -341,23 +358,27 @@ rmap deps list ./test-artifacts/dep-1.db express-app --format json \
 8. `observed_but_undeclared` includes imports not in manifest
 9. `runtime_builtins_used` includes Node.js stdlib usage
 
-**Scoping:**
-10. Child package deps attributed to child module, not root
-11. Unowned files flagged, not silently assigned
+**Import binding resolution:**
+10. `useState` resolves to `react` via import binding lookup
+11. `React.createElement` resolves to `react` via receiver resolution
 
-**Degradation:**
-12. Python/Java repos return `manifest_scope_unavailable`, not silent empty
-13. Ambiguous specifiers classified as `unknown_external_like`
+**Scoping:**
+12. Child package deps attributed to child module, not root
 
 **CLI:**
-14. `rmap deps list` works with `--module` filter
-15. `rmap deps why <package>` shows module relationship + file evidence
-16. `rmap deps drift` reports anomalies
-17. All commands support `--format json`
+13. `rmap deps list` works with `--module` filter
+14. `rmap deps why <package>` shows module relationship + file evidence
+15. `rmap deps drift` reports anomalies
+16. All commands support `--format json`
 
 **Negative:**
-18. No `FILE_DEPENDS_ON_PACKAGE` edges created
-19. No Python/Java reconciliation attempted (deferred)
+17. No `FILE_DEPENDS_ON_PACKAGE` edges created
+18. No Python/Java reconciliation attempted (deferred)
+
+**Not implemented (deferred):**
+- Unowned files: silently excluded (no `unowned_file` diagnostic)
+- Python/Java: silently excluded (no `manifest_scope_unavailable` diagnostic)
+- Ambiguous specifier `unknown_external_like` classification (returns raw specifier instead)
 
 ## Definition of Parity
 

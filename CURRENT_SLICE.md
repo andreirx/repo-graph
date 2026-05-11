@@ -6,9 +6,28 @@ Gap-closing: strengthen Layer 0–2 facts before expanding Layer 3 framework det
 
 ## Active Slice
 
-None. See Execution Queue for next priority.
+None currently. Next in queue: SB-7B (Java state boundaries) — needs slice doc rewrite first.
 
 ## Recently Shipped
+
+**DEP-1: Dependency Reconciliation Surface** — SHIPPED (2026-05-11)
+
+Slice doc: `docs/shipped/slices/dep-1-dependency-reconciliation-surface.md`
+
+### Summary
+
+Dependency reconciliation surface for joining declared dependencies (from manifests) with observed external references (from imports) to produce module-level dependency summaries.
+
+### Key Fix (2026-05-11)
+
+Resolved upstream signal pollution: callee identifiers (e.g., `useState`, `React.createElement`) are now resolved to their import specifiers (e.g., `react`) using `file_signals.import_bindings_json`.
+
+### Validation
+
+- `deps list` shows `react` as `declared_and_used` with `import_count: 2`
+- `deps why react` finds both `useState` and `React.createElement` usages
+- `deps drift` correctly identifies `react-dom` as unused
+- 42 tests pass (12 CLI + 28 module-queries + 2 doc)
 
 **SB-7C: Python State Boundaries** — SHIPPED (2026-05-11)
 
@@ -42,8 +61,8 @@ Scope: `open(path, mode)`, `sqlite3.connect()`, `psycopg2.connect()`.
 | **PY-EXT-2-PERF** | Python extractor performance validation | L0–1 | DEFERRED |
 | **SB-7A** | State boundaries support substrate | L2 | **SHIPPED** |
 | **SB-7C** | Python state boundaries | L2 | **SHIPPED** |
-| SB-7B | Java state boundaries | L2 | PLANNED |
-| DEP-1 | Dependency reconciliation surface | L2 | PLANNED |
+| **DEP-1** | Dependency reconciliation surface | L2 | **SHIPPED** |
+| SB-7B | Java state boundaries | L2 | PLANNED (needs rewrite) |
 | FD-1A | Rust Express detector parity | L3 | PLANNED |
 | FD-1B | Rust React detector parity | L3 | PLANNED |
 
@@ -51,9 +70,10 @@ Scope: `open(path, mode)`, `sqlite3.connect()`, `psycopg2.connect()`.
 
 1. **PY-EXT-2** strengthens Layer 0–1 facts (callsite resolution improves all downstream)
 2. **SB-7A** creates Layer 2 support substrate consumed by language-specific adapters
-3. **SB-7C/7B** use SB-7A substrate for Python and Java state boundaries
-4. **DEP-1** is cross-cutting query surface over existing facts
-5. **FD-1A/1B** are Layer 3 hints — come after stronger fact/substrate work
+3. **SB-7C** uses SB-7A substrate for Python state boundaries
+4. **DEP-1** promoted ahead of SB-7B: cross-cutting query surface over existing facts, no extractor surgery required, immediate value across JS/TS and Rust repos
+5. **SB-7B** demoted: current slice doc has internal contradictions (constructor scope, JDBC statement provenance, NIO Path provenance), needs rewrite before implementation
+6. **FD-1A/1B** are Layer 3 hints — come after stronger fact/substrate work
 
 ## Previously Completed
 

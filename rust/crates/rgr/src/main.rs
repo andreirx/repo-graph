@@ -48,6 +48,10 @@
 //!
 //!   rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER] [--file <path>]
 //!
+//!   rmap deps list <db_path> <repo_uid> [module] [--ecosystem npm|cargo]
+//!   rmap deps why <db_path> <repo_uid> <package> [--ecosystem npm|cargo]
+//!   rmap deps drift <db_path> <repo_uid> [--ecosystem npm|cargo]
+//!
 //!   rmap enrich <db_path> <repo_uid> [--snapshot <uid>] [--language <lang>] [--limit <n>] [--promote] [--force]
 //!
 //! Exit codes:
@@ -66,10 +70,10 @@
 use repo_graph_rgr::cli::print_usage;
 use repo_graph_rgr::commands::{
     run_assess, run_boundaries, run_callers, run_callees, run_check_cmd, run_churn, run_contracts,
-    run_coverage, run_cycles, run_dead, run_declare, run_docs, run_enrich, run_explain_cmd,
-    run_gate, run_hotspots, run_imports, run_index, run_metrics, run_modules, run_orient,
-    run_path, run_policy, run_refresh, run_resource, run_risk, run_stats, run_surfaces,
-    run_trust, run_violations,
+    run_coverage, run_cycles, run_dead, run_declare, run_deps, run_docs, run_enrich,
+    run_explain_cmd, run_gate, run_hotspots, run_imports, run_index, run_metrics, run_modules,
+    run_orient, run_path, run_policy, run_refresh, run_resource, run_risk, run_stats,
+    run_surfaces, run_trust, run_violations,
 };
 use repo_graph_rgr::daemon::run_daemon;
 use std::process::ExitCode;
@@ -102,6 +106,7 @@ fn main() -> ExitCode {
 		"assess" => run_assess(&args[2..]),
 		"explain" => run_explain_cmd(&args[2..]),
 		"dead" => run_dead(&args[2..]),
+		"deps" => run_deps(&args[2..]),
 		"cycles" => run_cycles(&args[2..]),
 		"stats" => run_stats(&args[2..]),
 		"declare" => run_declare(&args[2..]),

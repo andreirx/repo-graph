@@ -32,10 +32,18 @@
 //! - CLI rendering/output (belongs in `repo-graph-rgr`)
 
 mod context;
+pub mod deps;
 mod facts;
 mod violations;
 
 pub use context::ModuleQueryContext;
+pub use deps::{
+    build_identifier_resolution_map, cargo_runtime_builtins, compose_dependency_summaries,
+    normalize_cargo_specifier, normalize_npm_specifier, npm_runtime_builtins,
+    reconcile_module_dependencies, resolve_import_specifier, ComposeDependenciesInput,
+    ComposeDependenciesResult, DependencyCategory, DependencyEntry, DriftEntry, DriftKind,
+    ModuleDependencySummary, PackageUsage, ReconcileInput,
+};
 pub use facts::{load_module_graph_facts, ModuleGraphFacts, ModuleQueryError};
 pub use violations::{
     evaluate_violations_from_facts, DiscoveredModuleViolationsResult,

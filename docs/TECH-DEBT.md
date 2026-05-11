@@ -2593,3 +2593,45 @@ fails until TS implements the corresponding migration.
 
 **Not a defect:** Deliberate asymmetry during Rust-led schema evolution.
 TS parity catch-up is tracked but not blocking.
+
+## DEP-1 — Dependency Reconciliation Surface
+
+**Slice:** `docs/shipped/slices/dep-1-dependency-reconciliation-surface.md`
+**Status:** SHIPPED (2026-05-11)
+
+### Resolved Issue (2026-05-11)
+
+Upstream signal pollution resolved via Option B: callee identifiers are resolved to import
+specifiers using `file_signals.import_bindings_json`.
+
+**Implementation:**
+- `resolve.rs` in module-queries: `resolve_import_specifier()` resolves callee identifiers
+- Storage: `get_external_import_bindings_for_snapshot()` loads import bindings
+- compose.rs and deps.rs both use resolution before reconciliation/filtering
+
+**Validation:**
+- `deps list` → `react` is `declared_and_used` with `import_count: 2`
+- `deps why react` → shows both `useState` and `React.createElement` usages
+- `deps drift` → correctly identifies `react-dom` as unused
+
+### Known Limitations
+
+1. **Manifest path derived from convention, not storage:**
+   `package_dependencies_json` is stored on source files (per-file dependency
+   context), not manifest files. DEP-1 derives `manifest_path` from
+   `canonical_root_path` + ecosystem convention (npm → package.json,
+   cargo → Cargo.toml). If a manifest is not at the conventional path, the
+   derived path will be incorrect.
+
+2. **Workspace hoisting not implemented:**
+   Dependencies attributed only to manifest-owning module. Root workspace deps
+   are not visible to child packages. Documented in slice as deferred to DEP-1B.
+
+3. **Python/Java manifest context not attached:**
+   `compose.rs` language dispatch only handles Cargo.toml and package.json.
+   Python (pyproject.toml) and Java (build.gradle) files return
+   `manifest_scope_unavailable`. Documented in slice as deferred.
+
+4. **Empty modules excluded:**
+   Modules with no imports AND no declared deps are silently excluded from
+   `deps list` output (vanish mode). No diagnostic emitted.

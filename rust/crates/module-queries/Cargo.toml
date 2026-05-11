@@ -7,6 +7,7 @@ description = "Module graph query orchestration for repo-graph"
 [dependencies]
 repo-graph-storage = { path = "../storage" }
 repo-graph-classification = { path = "../classification" }
+serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
 
 [dev-dependencies]

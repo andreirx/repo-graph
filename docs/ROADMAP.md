@@ -816,10 +816,10 @@ Layer 3 framework detection.
 |-------|-------|-------|--------|
 | PY-EXT-2 | Python extractor depth | L0–1 | IMPLEMENTED (functional) |
 | PY-EXT-2-PERF | Python extractor performance validation | L0–1 | DEFERRED |
-| SB-7A | State boundaries support substrate | L2 | **NEXT** |
-| SB-7C | Python state boundaries | L2 | PLANNED |
-| SB-7B | Java state boundaries | L2 | PLANNED |
-| DEP-1 | Dependency reconciliation surface | L2 | PLANNED |
+| SB-7A | State boundaries support substrate | L2 | **SHIPPED** |
+| SB-7C | Python state boundaries | L2 | **SHIPPED** |
+| DEP-1 | Dependency reconciliation surface | L2 | **SHIPPED** |
+| SB-7B | Java state boundaries | L2 | PLANNED (needs rewrite) |
 | FD-1A | Rust Express detector parity | L3 | PLANNED |
 | FD-1B | Rust React detector parity | L3 | PLANNED |
 
@@ -831,25 +831,22 @@ and pre-change baseline are established. Functional Layer 0–1 work is complete
 **Why this order:**
 
 1. **PY-EXT-2** strengthens Layer 0–1 facts — COMPLETE (functional), performance deferred
-2. **SB-7A** creates Layer 2 support substrate consumed by language-specific adapters
-3. **SB-7C/7B** use SB-7A substrate for Python and Java state boundaries
-4. **DEP-1** is cross-cutting query surface over existing facts (JS/TS + Rust only in Phase A)
-5. **FD-1A/1B** are Layer 3 hints — come after stronger fact/substrate work
-6. **PY-EXT-2-PERF** is backlog — requires benchmark harness infrastructure before execution
+2. **SB-7A** creates Layer 2 support substrate — SHIPPED
+3. **SB-7C** uses SB-7A substrate for Python state boundaries — SHIPPED
+4. **DEP-1** promoted: cross-cutting query surface over existing facts, no extractor surgery, immediate value across JS/TS and Rust repos
+5. **SB-7B** demoted: slice doc has internal contradictions (constructor scope vs "no constructors", JDBC statement provenance same as Python cursor.execute mistake, NIO Files.* needs Path provenance). Needs rewrite before implementation.
+6. **FD-1A/1B** are Layer 3 hints — come after stronger fact/substrate work
+7. **PY-EXT-2-PERF** is backlog — requires benchmark harness infrastructure before execution
 
 **Slice docs:**
 
 - `docs/slices/py-ext-2-python-extractor-depth.md`
-- `docs/slices/sb-7a-state-boundaries-support-substrate.md`
-- `docs/slices/sb-7c-python-state-boundaries.md`
+- `docs/shipped/slices/sb-7a-state-boundaries-support-substrate.md`
+- `docs/shipped/slices/sb-7c-python-state-boundaries.md`
 - `docs/slices/sb-7b-java-state-boundaries.md`
 - `docs/slices/dep-1-dependency-reconciliation-surface.md`
 - `docs/slices/fd-1a-rust-express-detector-parity.md`
 - `docs/slices/fd-1b-rust-react-detector-parity.md`
-
-**DEP-1 placement note:** DEP-1 can move earlier if immediate agent orientation
-value is prioritized over relationship substrate completion. Current placement
-optimizes for substrate-first.
 
 ---
 
