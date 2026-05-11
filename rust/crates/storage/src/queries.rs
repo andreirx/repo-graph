@@ -25,6 +25,25 @@ use serde::{Deserialize, Serialize};
 use crate::connection::StorageConnection;
 use crate::error::StorageError;
 
+// ── Display helpers ──────────────────────────────────────────────
+
+/// Decode URL percent-encoding for display purposes.
+///
+/// SB-7B: JDBC URLs are stored with colons encoded (`%3A`) to satisfy
+/// stable-key segment grammar. This function decodes for user-facing
+/// display while keeping the stable_key untouched.
+///
+/// Only handles the common percent-encoded characters that appear in
+/// resource names. This is a display-layer decode, not a full URL parser.
+fn decode_url_percent_encoding(s: &str) -> String {
+	s.replace("%3A", ":")
+		.replace("%2F", "/")
+		.replace("%3F", "?")
+		.replace("%3D", "=")
+		.replace("%26", "&")
+		.replace("%25", "%") // Must be last to avoid double-decode
+}
+
 // ── Query DTOs ───────────────────────────────────────────────────
 
 /// A resolved symbol from a symbol lookup query.
@@ -332,6 +351,10 @@ pub struct ResourceAccessorResult {
 /// A resource node with its read/write edge counts.
 ///
 /// SB-7A: Used by `rmap resource list` command for parity validation.
+///
+/// SB-7B: For DB_RESOURCE nodes, the `name` field is URL-decoded for
+/// display (e.g., `jdbc%3Ah2%3Amem%3Atestdb` → `jdbc:h2:mem:testdb`).
+/// The `stable_key` remains encoded for identity purposes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResourceListItem {
 	pub stable_key: String,
@@ -750,11 +773,25 @@ impl StorageConnection {
 		let mut stmt = self.connection().prepare(&sql)?;
 
 		// Row mapper (shared across both query paths).
+		// SB-7B: Decodes URL-encoded names for DB_RESOURCE nodes.
 		fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ResourceListItem> {
+			let stable_key: String = row.get(0)?;
+			let raw_name: String = row.get(1)?;
+			let kind: String = row.get(2)?;
+
+			// SB-7B: Decode URL-encoded names for DB resources.
+			// JDBC URLs are stored encoded (e.g., `jdbc%3Ah2%3Amem%3Atestdb`)
+			// but displayed decoded for user readability.
+			let name = if kind == "DB_RESOURCE" {
+				decode_url_percent_encoding(&raw_name)
+			} else {
+				raw_name
+			};
+
 			Ok(ResourceListItem {
-				stable_key: row.get(0)?,
-				name: row.get(1)?,
-				kind: row.get(2)?,
+				stable_key,
+				name,
+				kind,
 				subtype: row.get(3)?,
 				readers: row.get(4)?,
 				writers: row.get(5)?,
@@ -2230,6 +2267,62 @@ mod tests {
 		(storage, snap_uid.to_string())
 	}
 
+	// ── SB-7B: URL percent-encoding decode tests ────────────────
+
+	#[test]
+	fn decode_url_percent_encoding_handles_jdbc_urls() {
+		// Standard JDBC URL with colons.
+		assert_eq!(
+			decode_url_percent_encoding("jdbc%3Ah2%3Amem%3Atestdb"),
+			"jdbc:h2:mem:testdb"
+		);
+
+		// PostgreSQL JDBC URL with port.
+		assert_eq!(
+			decode_url_percent_encoding("jdbc%3Apostgresql%3A//localhost%3A5432/mydb"),
+			"jdbc:postgresql://localhost:5432/mydb"
+		);
+	}
+
+	#[test]
+	fn decode_url_percent_encoding_handles_other_characters() {
+		// Query string with = and &.
+		assert_eq!(
+			decode_url_percent_encoding("key%3Dvalue%26other%3Dfoo"),
+			"key=value&other=foo"
+		);
+
+		// Path with slashes.
+		assert_eq!(
+			decode_url_percent_encoding("%2Fpath%2Fto%2Ffile"),
+			"/path/to/file"
+		);
+	}
+
+	#[test]
+	fn decode_url_percent_encoding_handles_literal_percent() {
+		// Encoded percent sign.
+		assert_eq!(
+			decode_url_percent_encoding("50%25complete"),
+			"50%complete"
+		);
+	}
+
+	#[test]
+	fn decode_url_percent_encoding_preserves_unencoded_strings() {
+		// Already decoded string.
+		assert_eq!(
+			decode_url_percent_encoding("jdbc:h2:mem:testdb"),
+			"jdbc:h2:mem:testdb"
+		);
+
+		// No encoded characters.
+		assert_eq!(
+			decode_url_percent_encoding("simple-name"),
+			"simple-name"
+		);
+	}
+
 	// ── P2 regression: FILE stable_key must NOT resolve ─────────
 
 	#[test]
@@ -3171,6 +3264,43 @@ mod tests {
 
 		let resources = storage.list_resources(&snap_uid, None).unwrap();
 		assert!(resources.is_empty());
+	}
+
+	#[test]
+	fn list_resources_decodes_db_resource_names() {
+		// SB-7B: DB_RESOURCE names with URL-encoded characters should be
+		// decoded for display, while stable_key remains encoded.
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		// Insert a DB_RESOURCE with URL-encoded name (as JDBC adapter produces).
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-jdbc",
+			"r1:db:jdbc:jdbc%3Ah2%3Amem%3Atestdb:DB_RESOURCE",
+			"jdbc%3Ah2%3Amem%3Atestdb", // Stored encoded
+			"DB_RESOURCE", Some("CONNECTION"),
+		);
+
+		// Insert an FS_PATH to verify it is NOT decoded.
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-fs",
+			"r1:fs:/path/to/file:FS_PATH",
+			"/path/to/file",
+			"FS_PATH", Some("FILE_PATH"),
+		);
+
+		let resources = storage.list_resources(&snap_uid, None).unwrap();
+		assert_eq!(resources.len(), 2);
+
+		// Find the DB_RESOURCE.
+		let db_res = resources.iter().find(|r| r.kind == "DB_RESOURCE").unwrap();
+		// Name should be decoded for display.
+		assert_eq!(db_res.name, "jdbc:h2:mem:testdb");
+		// Stable key should remain encoded.
+		assert!(db_res.stable_key.contains("jdbc%3Ah2%3Amem%3Atestdb"));
+
+		// Find the FS_PATH — name should be unchanged.
+		let fs_res = resources.iter().find(|r| r.kind == "FS_PATH").unwrap();
+		assert_eq!(fs_res.name, "/path/to/file");
 	}
 
 	// ── SB-5: Dead-node resource exclusion tests ─────────────────

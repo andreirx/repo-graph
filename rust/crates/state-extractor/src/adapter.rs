@@ -108,14 +108,14 @@ impl Default for AdapterRegistry {
 /// Currently registers:
 /// - `TypeScriptAdapter` for `Language::Typescript`
 /// - `PythonAdapter` for `Language::Python` (SB-7C)
-///
-/// Future slices will add Java, C++ adapters (SB-7B).
+/// - `JavaAdapter` for `Language::Java` (SB-7B)
 pub fn default_registry() -> AdapterRegistry {
-    use crate::languages::{PythonAdapter, TypeScriptAdapter};
+    use crate::languages::{JavaAdapter, PythonAdapter, TypeScriptAdapter};
 
     let mut registry = AdapterRegistry::new();
     registry.register(Box::new(TypeScriptAdapter::new()));
     registry.register(Box::new(PythonAdapter::new()));
+    registry.register(Box::new(JavaAdapter::new()));
     registry
 }
 

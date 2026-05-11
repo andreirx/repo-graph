@@ -296,3 +296,18 @@ resource_kind = "db"
 driver        = "psycopg2"
 direction     = "read_write"
 basis         = "sdk_call"
+
+# ── Java JDBC ──────────────────────────────────────────────────────
+#
+# SB-7B first cut: DriverManager.getConnection(String) only.
+# Connection pools (DataSource), statement APIs, and NIO deferred
+# pending substrate extensions.
+
+[[binding]]
+language      = "java"
+module        = "java.sql"
+symbol_path   = "DriverManager.getConnection"
+resource_kind = "db"
+driver        = "jdbc"
+direction     = "read_write"
+basis         = "stdlib_api"

@@ -11,8 +11,8 @@ use repo_graph_classification::types::{ImportBinding, RuntimeBuiltinsSet, Source
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::routing::is_test_file;
 use repo_graph_indexer::types::{
-    EdgeType, ExtractionResult, ExtractedEdge, ExtractedMetrics, ExtractedNode, NodeKind,
-    NodeSubtype, Resolution, Visibility,
+    CallArgPayload, EdgeType, ExtractionResult, ExtractedEdge, ExtractedMetrics, ExtractedNode,
+    NodeKind, NodeSubtype, ResolvedCallsite, Resolution, Visibility,
 };
 
 use crate::builtins::java_runtime_builtins;
@@ -23,6 +23,15 @@ const EXTRACTOR_NAME: &str = "java-core:0.1.0";
 
 /// Languages this extractor handles.
 const LANGUAGES: &[&str] = &["java"];
+
+/// State-boundary-relevant Java modules for callsite pre-filtering.
+///
+/// JE-1: Only emit ResolvedCallsite for calls to these modules.
+/// This is an optimization to reduce noise; the binding-table match
+/// layer remains the authoritative filter.
+const STATE_BOUNDARY_MODULES: &[&str] = &[
+    "java.sql", // JDBC (DriverManager, Connection, Statement)
+];
 
 /// Concrete `ExtractorPort` adapter for Java.
 pub struct JavaExtractor {
@@ -148,6 +157,7 @@ impl ExtractorPort for JavaExtractor {
             }],
             edges: Vec::new(),
             import_bindings: Vec::new(),
+            resolved_callsites: Vec::new(),
             metrics: BTreeMap::new(),
             stable_key_counts: HashMap::new(),
         };
@@ -189,7 +199,7 @@ impl ExtractorPort for JavaExtractor {
             edges: ctx.edges,
             metrics: ctx.metrics,
             import_bindings: ctx.import_bindings,
-            resolved_callsites: Vec::new(),
+            resolved_callsites: ctx.resolved_callsites,
         })
     }
 }
@@ -206,6 +216,7 @@ struct ExtractionCtx<'a> {
     nodes: Vec<ExtractedNode>,
     edges: Vec<ExtractedEdge>,
     import_bindings: Vec<ImportBinding>,
+    resolved_callsites: Vec<ResolvedCallsite>,
     metrics: BTreeMap<String, ExtractedMetrics>,
     stable_key_counts: HashMap<String, u32>,
 }
@@ -1174,6 +1185,14 @@ fn extract_method_call(
         location: Some(node_location(node)),
         metadata_json: None,
     });
+
+    // JE-1: Attempt to generate ResolvedCallsite for state-boundary analysis.
+    // Only for static method calls with imported receivers.
+    if let Some(resolved) =
+        try_resolve_static_callsite_java(node, src, enclosing_node_uid, &ctx.import_bindings)
+    {
+        ctx.resolved_callsites.push(resolved);
+    }
 }
 
 fn extract_constructor_call(
@@ -1201,6 +1220,108 @@ fn extract_constructor_call(
         location: Some(node_location(node)),
         metadata_json: None,
     });
+}
+
+// ── ResolvedCallsite extraction (JE-1) ───────────────────────────
+//
+// Emits ResolvedCallsite facts for static method invocations with
+// imported receivers. Only emits when:
+// 1. Receiver is a simple identifier (not chained access)
+// 2. Receiver matches an import binding
+// 3. Resolved module is in STATE_BOUNDARY_MODULES
+// 4. First argument is a string literal
+
+/// Attempt to resolve a Java method call to a ResolvedCallsite.
+///
+/// Returns `Some(callsite)` only when:
+/// - The receiver is a simple identifier that matches an import binding
+/// - The import's specifier is a state-boundary-relevant module
+/// - The first argument is a string literal
+///
+/// Returns `None` otherwise (silent skip, no diagnostic).
+fn try_resolve_static_callsite_java(
+    call_node: &tree_sitter::Node,
+    src: &[u8],
+    enclosing_symbol_node_uid: &str,
+    import_bindings: &[ImportBinding],
+) -> Option<ResolvedCallsite> {
+    // Get method name
+    let method_name_node = call_node.child_by_field_name("name")?;
+    let method_name = node_text(&method_name_node, src);
+
+    // Get receiver (object). Must exist for static calls.
+    let receiver_node = call_node.child_by_field_name("object")?;
+
+    // Only resolve simple identifiers (e.g., "DriverManager"), not chains.
+    if receiver_node.kind() != "identifier" {
+        return None;
+    }
+    let receiver_text = node_text(&receiver_node, src);
+
+    // Look up receiver in import bindings.
+    // Java imports: `import java.sql.DriverManager;` creates binding with
+    // identifier="DriverManager", specifier="java.sql".
+    let binding = import_bindings
+        .iter()
+        .find(|b| b.identifier == receiver_text)?;
+
+    let resolved_module = &binding.specifier;
+
+    // Only proceed if this is a state-boundary-relevant module.
+    let is_sb_module = STATE_BOUNDARY_MODULES
+        .iter()
+        .any(|m| resolved_module == *m || resolved_module.starts_with(&format!("{}.", m)));
+
+    if !is_sb_module {
+        return None;
+    }
+
+    // Extract arg0 payload. Must be a string literal to emit callsite.
+    let arg0_payload = classify_arg0_payload_java(call_node, src)?;
+
+    let resolved_symbol = format!("{}.{}", receiver_text, method_name);
+
+    Some(ResolvedCallsite {
+        enclosing_symbol_node_uid: enclosing_symbol_node_uid.to_string(),
+        resolved_module: resolved_module.clone(),
+        resolved_symbol,
+        arg0_payload,
+        arg1_payload: None, // Java JDBC doesn't use arg1 for state boundaries
+        source_location: node_location(call_node),
+    })
+}
+
+/// Classify the first argument of a Java method call.
+///
+/// Returns `Some(CallArgPayload::StringLiteral)` if arg0 is a string literal.
+/// Returns `None` otherwise (dynamic, absent, or non-literal).
+fn classify_arg0_payload_java(
+    call_node: &tree_sitter::Node,
+    src: &[u8],
+) -> Option<CallArgPayload> {
+    let args_node = call_node.child_by_field_name("arguments")?;
+
+    // Find the first argument (skip "(" and ")")
+    let mut cursor = args_node.walk();
+    for child in args_node.children(&mut cursor) {
+        match child.kind() {
+            "string_literal" => {
+                let text = node_text(&child, src);
+                // Strip surrounding quotes
+                let unquoted = text
+                    .trim_start_matches('"')
+                    .trim_end_matches('"');
+                return Some(CallArgPayload::StringLiteral {
+                    value: unquoted.to_string(),
+                });
+            }
+            // Skip punctuation
+            "(" | ")" | "," => continue,
+            // Any other node type means arg0 is not a string literal
+            _ => return None,
+        }
+    }
+    None
 }
 
 // ── Helper functions ─────────────────────────────────────────────
@@ -1871,5 +1992,183 @@ mod tests {
 
         // Metadata should indicate isAnnotationType
         assert!(marker.metadata_json.as_ref().unwrap().contains("isAnnotationType"));
+    }
+
+    // ── JE-1: ResolvedCallsite tests ─────────────────────────────────
+
+    #[test]
+    fn resolved_callsite_jdbc_string_literal() {
+        // JE-1: DriverManager.getConnection with string literal should emit ResolvedCallsite
+        let result = extract_java(
+            r#"
+            import java.sql.DriverManager;
+            import java.sql.Connection;
+            import java.sql.SQLException;
+
+            public class App {
+                public void connect() throws SQLException {
+                    Connection conn = DriverManager.getConnection("jdbc:h2:mem:testdb");
+                }
+            }
+        "#,
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let rc = &result.resolved_callsites[0];
+        assert_eq!(rc.resolved_module, "java.sql");
+        assert_eq!(rc.resolved_symbol, "DriverManager.getConnection");
+        match &rc.arg0_payload {
+            CallArgPayload::StringLiteral { value } => {
+                assert_eq!(value, "jdbc:h2:mem:testdb");
+            }
+            other => panic!("expected StringLiteral, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn resolved_callsite_jdbc_dynamic_arg_no_emit() {
+        // JE-1: DriverManager.getConnection with variable argument should NOT emit ResolvedCallsite
+        let result = extract_java(
+            r#"
+            import java.sql.DriverManager;
+            import java.sql.Connection;
+            import java.sql.SQLException;
+
+            public class App {
+                public void connect(String url) throws SQLException {
+                    Connection conn = DriverManager.getConnection(url);
+                }
+            }
+        "#,
+        );
+
+        assert!(
+            result.resolved_callsites.is_empty(),
+            "dynamic arg0 must not produce a ResolvedCallsite"
+        );
+    }
+
+    #[test]
+    fn resolved_callsite_no_import_no_emit() {
+        // JE-1: Unresolved receiver (no matching import) should NOT emit ResolvedCallsite
+        let result = extract_java(
+            r#"
+            public class App {
+                public void connect() throws Exception {
+                    // No import for DriverManager - should not emit callsite
+                    Object conn = DriverManager.getConnection("jdbc:h2:mem:testdb");
+                }
+            }
+        "#,
+        );
+
+        assert!(
+            result.resolved_callsites.is_empty(),
+            "unresolved receiver must not produce a ResolvedCallsite"
+        );
+    }
+
+    #[test]
+    fn resolved_callsite_non_sb_module_no_emit() {
+        // JE-1: Calls to non-state-boundary modules should NOT emit ResolvedCallsite
+        let result = extract_java(
+            r#"
+            import java.util.Arrays;
+
+            public class App {
+                public void sort() {
+                    Arrays.sort(new int[]{3, 1, 2});
+                }
+            }
+        "#,
+        );
+
+        assert!(
+            result.resolved_callsites.is_empty(),
+            "non-state-boundary module must not produce a ResolvedCallsite"
+        );
+    }
+
+    #[test]
+    fn resolved_callsite_chained_receiver_no_emit() {
+        // JE-1: Chained receiver (not simple identifier) should NOT emit ResolvedCallsite
+        let result = extract_java(
+            r#"
+            import java.sql.DriverManager;
+
+            public class App {
+                public void connect() throws Exception {
+                    // System.out.println is chained, not a simple identifier
+                    System.out.println("test");
+                }
+            }
+        "#,
+        );
+
+        // System.out is a field access chain, not resolvable
+        assert!(
+            result.resolved_callsites.is_empty(),
+            "chained receiver must not produce a ResolvedCallsite"
+        );
+    }
+
+    #[test]
+    fn resolved_callsite_calls_edge_still_emitted() {
+        // JE-1: CALLS edge should still be emitted even if ResolvedCallsite is not
+        let result = extract_java(
+            r#"
+            import java.sql.DriverManager;
+
+            public class App {
+                public void connect(String url) throws Exception {
+                    DriverManager.getConnection(url);
+                }
+            }
+        "#,
+        );
+
+        // ResolvedCallsite not emitted (dynamic arg)
+        assert!(result.resolved_callsites.is_empty());
+
+        // But CALLS edge should still exist
+        let calls: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|e| e.edge_type == EdgeType::Calls)
+            .collect();
+        assert!(!calls.is_empty(), "CALLS edge must still be emitted");
+        assert!(
+            calls.iter().any(|e| e.target_key == "DriverManager.getConnection"),
+            "CALLS edge target must be DriverManager.getConnection"
+        );
+    }
+
+    #[test]
+    fn resolved_callsite_enclosing_symbol_uid() {
+        // JE-1: ResolvedCallsite.enclosing_symbol_node_uid must match containing method
+        let result = extract_java(
+            r#"
+            import java.sql.DriverManager;
+
+            public class App {
+                public void connect() throws Exception {
+                    DriverManager.getConnection("jdbc:h2:mem:testdb");
+                }
+            }
+        "#,
+        );
+
+        let method = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "connect" && n.subtype == Some(NodeSubtype::Method))
+            .expect("connect method node");
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(
+            result.resolved_callsites[0].enclosing_symbol_node_uid,
+            method.node_uid,
+            "enclosing_symbol_node_uid must match containing method's node_uid"
+        );
     }
 }

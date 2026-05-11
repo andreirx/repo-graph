@@ -819,8 +819,9 @@ Layer 3 framework detection.
 | SB-7A | State boundaries support substrate | L2 | **SHIPPED** |
 | SB-7C | Python state boundaries | L2 | **SHIPPED** |
 | DEP-1 | Dependency reconciliation surface | L2 | **SHIPPED** |
-| SB-7B | Java state boundaries | L2 | PLANNED (needs rewrite) |
-| FD-1A | Rust Express detector parity | L3 | PLANNED |
+| JE-1 | Java resolved callsites | L0–1 | **IMPLEMENTED** |
+| SB-7B | Java state boundaries | L2 | **SHIPPED** |
+| FD-1A | Rust Express detector parity | L3 | PLANNED (next) |
 | FD-1B | Rust React detector parity | L3 | PLANNED |
 
 **PY-EXT-2-PERF note:** Performance acceptance (throughput ≥ 0.95x, memory ≤ 1.1x)
@@ -834,17 +835,19 @@ and pre-change baseline are established. Functional Layer 0–1 work is complete
 2. **SB-7A** creates Layer 2 support substrate — SHIPPED
 3. **SB-7C** uses SB-7A substrate for Python state boundaries — SHIPPED
 4. **DEP-1** promoted: cross-cutting query surface over existing facts, no extractor surgery, immediate value across JS/TS and Rust repos
-5. **SB-7B** demoted: slice doc has internal contradictions (constructor scope vs "no constructors", JDBC statement provenance same as Python cursor.execute mistake, NIO Files.* needs Path provenance). Needs rewrite before implementation.
-6. **FD-1A/1B** are Layer 3 hints — come after stronger fact/substrate work
-7. **PY-EXT-2-PERF** is backlog — requires benchmark harness infrastructure before execution
+5. **JE-1** implemented: Java extractor now emits `ResolvedCallsite` facts with arg0 payload and import resolution.
+6. **SB-7B** shipped: narrow first-cut (`DriverManager.getConnection(String)` only) complete.
+7. **FD-1A/1B** are Layer 3 hints — next priority after L2 state boundaries
+8. **PY-EXT-2-PERF** is backlog — requires benchmark harness infrastructure before execution
 
 **Slice docs:**
 
 - `docs/slices/py-ext-2-python-extractor-depth.md`
 - `docs/shipped/slices/sb-7a-state-boundaries-support-substrate.md`
 - `docs/shipped/slices/sb-7c-python-state-boundaries.md`
-- `docs/slices/sb-7b-java-state-boundaries.md`
-- `docs/slices/dep-1-dependency-reconciliation-surface.md`
+- `docs/shipped/slices/dep-1-dependency-reconciliation-surface.md`
+- `docs/slices/je-1-java-resolved-callsites.md`
+- `docs/shipped/slices/sb-7b-java-state-boundaries.md`
 - `docs/slices/fd-1a-rust-express-detector-parity.md`
 - `docs/slices/fd-1b-rust-react-detector-parity.md`
 
@@ -1295,11 +1298,12 @@ jdtls is operational but fragile. The remaining issues are not polish:
 ### 13. State-boundary expansion (post-slice-1)
 Slice 1 shipped (see Shipped section above). Remaining work:
 
-**Language coverage (blocked on extractors):**
-- Java state-boundary coverage — blocked on Java Rust-workspace extractor
-- Python state-boundary coverage — blocked on Python Rust-workspace extractor
-- Rust-language state-boundary coverage — blocked on Rust-language Rust-workspace extractor
-- C++ state-boundary coverage — blocked on C++ Rust-workspace extractor
+**Language coverage:**
+- TypeScript/JavaScript — **SHIPPED** (SB-7A)
+- Python — **SHIPPED** (SB-7C)
+- Java — **SHIPPED** (SB-7B: narrow first-cut `DriverManager.getConnection` only)
+- Rust-language — blocked on Rust extractor `ResolvedCallsite` emission
+- C++ — blocked on C++ extractor `ResolvedCallsite` emission
 
 **Feature expansion:**
 - Queue/event boundaries: EMITS, CONSUMES, QUEUE node kind (Kafka, SQS, SNS, RabbitMQ)

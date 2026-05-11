@@ -16,11 +16,13 @@
 //! Populated:
 //! - `typescript` (SB-3): TypeScript/JavaScript adapter
 //! - `python` (SB-7C): Python adapter
-//! - Java, C++ adapters arrive in follow-on slices (SB-7B)
+//! - `java` (SB-7B): Java adapter (DriverManager.getConnection only)
 
+pub mod java;
 pub mod python;
 pub mod typescript;
 
 // Re-export adapter structs for convenience.
+pub use java::JavaAdapter;
 pub use python::PythonAdapter;
 pub use typescript::TypeScriptAdapter;

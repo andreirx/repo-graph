@@ -6,9 +6,65 @@ Gap-closing: strengthen Layer 0–2 facts before expanding Layer 3 framework det
 
 ## Active Slice
 
-None currently. Next in queue: SB-7B (Java state boundaries) — needs slice doc rewrite first.
+None currently. Next in queue: FD-1A (Rust Express detector parity).
 
 ## Recently Shipped
+
+**SB-7B: Java State Boundaries** — SHIPPED (2026-05-11)
+
+Slice doc: `docs/shipped/slices/sb-7b-java-state-boundaries.md`
+
+### Summary
+
+Java adapter for state-boundary extraction using SB-7A substrate.
+Scope: `DriverManager.getConnection(String)` only.
+
+### Completed
+
+- `JavaAdapter` implementing `LanguageStateAdapter`
+- Java JDBC binding in `bindings.toml` (direction = read_write)
+- JDBC URL colon encoding (`jdbc:h2:...` -> `jdbc%3Ah2%3A...`) for stable-key
+- URL decoding at display layer (`name` shows decoded, `stable_key` stays encoded)
+- Hook promotion (Java classified as Supported)
+- End-to-end validation: 2 DB resources detected via `rmap resource list`
+- Automated E2E integration test (`sb_7b_java_integration.rs`)
+
+### Deferred (requires substrate extension)
+
+- JDBC statements (need connection->statement provenance)
+- NIO Path APIs (need path provenance from `Paths.get()`)
+- Java IO constructors (need constructor callsite support)
+
+---
+
+## Recently Implemented (Support Slices)
+
+**JE-1: Java Resolved Callsites** — IMPLEMENTED (2026-05-11)
+
+Slice doc: `docs/slices/je-1-java-resolved-callsites.md`
+
+### Summary
+
+Extended Java extractor to emit `ResolvedCallsite` facts for static method calls with imported receivers and string literal arg0.
+
+### Scope
+
+- Static method calls (e.g., `DriverManager.getConnection("...")`)
+- Import binding resolution (receiver → module specifier)
+- String literal arg0 extraction
+- Pre-filtering to `java.sql` module (state-boundary-relevant)
+
+### Validation
+
+- 7 new unit tests for ResolvedCallsite emission
+- 36 total Java extractor tests pass
+- Validation corpus: `test/fixtures/java/jdbc-callsites/`
+
+### Unblocks
+
+SB-7B narrow first-cut (`DriverManager.getConnection(String)` only) — can now consume these facts via adapter + bindings. Broader Java state boundaries require additional substrate work.
+
+---
 
 **DEP-1: Dependency Reconciliation Surface** — SHIPPED (2026-05-11)
 
@@ -62,8 +118,9 @@ Scope: `open(path, mode)`, `sqlite3.connect()`, `psycopg2.connect()`.
 | **SB-7A** | State boundaries support substrate | L2 | **SHIPPED** |
 | **SB-7C** | Python state boundaries | L2 | **SHIPPED** |
 | **DEP-1** | Dependency reconciliation surface | L2 | **SHIPPED** |
-| SB-7B | Java state boundaries | L2 | PLANNED (needs rewrite) |
-| FD-1A | Rust Express detector parity | L3 | PLANNED |
+| **JE-1** | Java resolved callsites | L0–1 | **IMPLEMENTED** |
+| **SB-7B** | Java state boundaries | L2 | **SHIPPED** |
+| FD-1A | Rust Express detector parity | L3 | PLANNED (next) |
 | FD-1B | Rust React detector parity | L3 | PLANNED |
 
 ## Why This Order
@@ -71,9 +128,10 @@ Scope: `open(path, mode)`, `sqlite3.connect()`, `psycopg2.connect()`.
 1. **PY-EXT-2** strengthens Layer 0–1 facts (callsite resolution improves all downstream)
 2. **SB-7A** creates Layer 2 support substrate consumed by language-specific adapters
 3. **SB-7C** uses SB-7A substrate for Python state boundaries
-4. **DEP-1** promoted ahead of SB-7B: cross-cutting query surface over existing facts, no extractor surgery required, immediate value across JS/TS and Rust repos
-5. **SB-7B** demoted: current slice doc has internal contradictions (constructor scope, JDBC statement provenance, NIO Path provenance), needs rewrite before implementation
-6. **FD-1A/1B** are Layer 3 hints — come after stronger fact/substrate work
+4. **DEP-1** promoted: cross-cutting query surface over existing facts, immediate value across JS/TS and Rust repos
+5. **JE-1** implemented: extends Java extractor to emit `ResolvedCallsite` facts
+6. **SB-7B** shipped: consumes JE-1 facts via adapter + bindings
+7. **FD-1A/1B** are Layer 3 hints — next priority after L2 state boundaries
 
 ## Previously Completed
 
