@@ -313,30 +313,33 @@ pub struct ExtractedMetrics {
 	pub cognitive_complexity: Option<u32>,
 }
 
-/// Classification of a call site's positional argument 0 payload.
+/// Classification of a call site's positional argument payload.
 ///
 /// Added by SB-3-pre for state-boundary integration. The variant
 /// carries the extracted value directly: the state-boundary layer
 /// uses the payload plus the binding table to build the target
 /// resource's stable key.
 ///
-/// Slice-scoped on purpose: this covers only the argument-0 forms
-/// SB-3 ships (string literal; `process.env.NAME` member read).
-/// It is NOT the final universal call-argument model; object-
-/// property extraction, constructor configs, and positional
-/// beyond index 0 are reserved for later slices with their own
-/// types.
+/// Generic by design: used for any positional argument the extractor
+/// needs to surface (arg0, arg1, etc.). The type captures argument
+/// shapes, not positions — position is determined by which field
+/// holds the payload in `ResolvedCallsite`.
+///
+/// Slice-scoped variants: currently covers string literals and
+/// `process.env.NAME` member reads. Object-property extraction,
+/// constructor configs, and other patterns are reserved for later
+/// slices.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Arg0Payload {
-	/// Argument 0 is a string literal. Carries the literal text
+pub enum CallArgPayload {
+	/// Argument is a string literal. Carries the literal text
 	/// (quotes stripped).
 	StringLiteral {
 		/// The literal string value.
 		value: String,
 	},
-	/// Argument 0 is a `process.env.NAME` member read. Carries
-	/// the env-key name (the `NAME` part of `process.env.NAME`).
+	/// Argument is a `process.env.NAME` member read (TS/JS) or
+	/// `os.environ["NAME"]` (Python). Carries the env-key name.
 	EnvKeyRead {
 		/// The env-key identifier (e.g. `"DATABASE_URL"`).
 		key_name: String,
@@ -344,19 +347,25 @@ pub enum Arg0Payload {
 }
 
 /// A call-site fact with the callee resolved to a (module,
-/// symbol) pair via the file's import bindings, plus a
-/// classification of argument 0's payload.
+/// symbol) pair via the file's import bindings, plus classification
+/// of argument payloads.
 ///
-/// Added by SB-3-pre. Produced by the ts-extractor for every call
-/// expression whose callee resolves via an import binding AND
-/// whose arg 0 matches one of the patterns captured by
-/// `Arg0Payload`. Consumed by `state-extractor` downstream; no
-/// state-boundary-specific filtering in the extractor itself
-/// (filtering happens at the binding-table match layer).
+/// Added by SB-3-pre. Produced by extractors for call expressions
+/// whose callee resolves to a (module, symbol) pair AND whose arg 0
+/// matches one of the patterns captured by `CallArgPayload`.
+/// Consumed by `state-extractor` downstream.
 ///
-/// Narrow by design: only the fields SB-3 actually needs. The
-/// generic `CALLS` edge on `ExtractedEdge` is unchanged and
-/// remains the cross-runtime parity surface for call-graph
+/// **Filtering policy (SB-7C):** Language extractors MAY filter to
+/// emit only callsites relevant to state-boundary analysis (e.g.,
+/// builtins like `open()` or APIs from known state-touching modules).
+/// This is a pragmatic choice to reduce downstream filtering noise.
+/// The binding-table match layer remains the authoritative filter;
+/// extractor-side pre-filtering is an optimization, not a contract
+/// guarantee.
+///
+/// Narrow by design: only the fields state-boundary integration
+/// needs. The generic `CALLS` edge on `ExtractedEdge` is unchanged
+/// and remains the cross-runtime parity surface for call-graph
 /// analysis; `ResolvedCallsite` is a Rust-only extractor-output
 /// channel under the Fork-1 posture (TS population is deferred).
 ///
@@ -384,7 +393,12 @@ pub struct ResolvedCallsite {
 	/// the local alias.
 	pub resolved_symbol: String,
 	/// Classification of argument 0's payload.
-	pub arg0_payload: Arg0Payload,
+	pub arg0_payload: CallArgPayload,
+	/// Classification of argument 1's payload, if present.
+	/// Used for APIs where arg1 carries semantics (e.g., Python
+	/// `open(path, mode)` where mode determines direction).
+	/// `None` when arg1 is absent, non-literal, or not needed.
+	pub arg1_payload: Option<CallArgPayload>,
 	/// Source location of the call expression.
 	pub source_location: SourceLocation,
 }

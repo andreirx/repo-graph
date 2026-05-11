@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, HashSet};
 use repo_graph_classification::types::{ImportBinding, RuntimeBuiltinsSet, SourceLocation};
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::types::{
-    EdgeType, ExtractionResult, ExtractedEdge, ExtractedMetrics, ExtractedNode, NodeKind,
-    NodeSubtype, Resolution, Visibility,
+    CallArgPayload, EdgeType, ExtractionResult, ExtractedEdge, ExtractedMetrics, ExtractedNode,
+    NodeKind, NodeSubtype, Resolution, ResolvedCallsite, Visibility,
 };
 use tree_sitter::{Node, Parser};
 
@@ -64,6 +64,28 @@ const BUILTIN_CALL_NOISE: &[&str] = &[
     "locals",
 ];
 
+/// Built-in functions relevant for state-boundary analysis.
+///
+/// These are builtins that touch external resources (filesystem, etc.)
+/// and should generate `ResolvedCallsite` facts even though they may
+/// be in `BUILTIN_CALL_NOISE` (which suppresses generic CALLS edges).
+///
+/// SB-7C: For these builtins, we synthesize `resolved_module = "builtins"`
+/// to satisfy the Form-A matcher contract. This is documented as a
+/// deliberate builtin normalization rule, not literal import evidence.
+const STATE_BOUNDARY_BUILTINS: &[&str] = &["open"];
+
+/// Module imports that indicate state-boundary-relevant APIs.
+///
+/// When a call resolves to one of these modules, we attempt to generate
+/// a `ResolvedCallsite` for state-boundary analysis.
+const STATE_BOUNDARY_MODULES: &[&str] = &[
+    "sqlite3",
+    "psycopg2",
+    "mysql.connector",
+    "pathlib",
+];
+
 /// Extraction context for a single file.
 struct ExtractionCtx<'a> {
     file_path: &'a str,
@@ -80,6 +102,8 @@ struct ExtractionCtx<'a> {
     emitted_stable_keys: HashSet<String>,
     /// Current class context for method qualified names.
     current_class: Option<String>,
+    /// Resolved callsite facts for state-boundary integration (SB-7C).
+    resolved_callsites: Vec<ResolvedCallsite>,
 }
 
 /// Concrete `ExtractorPort` adapter for Python source files.
@@ -204,6 +228,7 @@ impl ExtractorPort for PythonExtractor {
             metrics: BTreeMap::new(),
             emitted_stable_keys: HashSet::new(),
             current_class: None,
+            resolved_callsites: Vec::new(),
         };
 
         // -- Walk module body --
@@ -217,7 +242,7 @@ impl ExtractorPort for PythonExtractor {
             edges: ctx.edges,
             metrics: ctx.metrics,
             import_bindings: ctx.import_bindings,
-            resolved_callsites: Vec::new(),
+            resolved_callsites: ctx.resolved_callsites,
         })
     }
 }
@@ -993,6 +1018,25 @@ fn extract_class(node: &Node, ctx: &mut ExtractionCtx) {
 fn extract_calls_from_node(node: &Node, ctx: &mut ExtractionCtx, caller_uid: &str) {
     if node.kind() == "call" {
         emit_call_edge(node, ctx, caller_uid);
+
+        // SB-7C: Also attempt to generate ResolvedCallsite for state-boundary analysis.
+        // This runs even for builtins that are filtered from CALLS edges.
+        if let Some(fn_node) = node.child_by_field_name("function") {
+            // Only generate ResolvedCallsite for calls within functions/methods,
+            // not top-level module calls. This matches the TS extractor contract:
+            // enclosing_symbol_node_uid must be a SYMBOL node UID, not a FILE node UID.
+            if caller_uid != ctx.file_node_uid {
+                if let Some(resolved) = try_resolve_callsite_python(
+                    node,
+                    &fn_node,
+                    ctx.source,
+                    caller_uid,
+                    &ctx.import_bindings,
+                ) {
+                    ctx.resolved_callsites.push(resolved);
+                }
+            }
+        }
     }
 
     // Recurse into children
@@ -1050,6 +1094,238 @@ fn get_call_target_name(fn_node: &Node, source: &str) -> Option<String> {
         }
         _ => None,
     }
+}
+
+// -- State-boundary callsite resolution (SB-7C) -----------------------------
+
+/// Attempt to generate a `ResolvedCallsite` for state-boundary analysis.
+///
+/// This handles:
+/// 1. Builtin `open()` — synthesizes `resolved_module = "builtins"`
+/// 2. Module-qualified calls like `sqlite3.connect()` — resolves via imports
+/// 3. Named-imported calls like `connect()` from `from sqlite3 import connect`
+///
+/// Returns `None` if the call doesn't resolve to a state-boundary-relevant API
+/// or if argument classification fails.
+fn try_resolve_callsite_python(
+    call_node: &Node,
+    fn_node: &Node,
+    source: &str,
+    enclosing_symbol_node_uid: &str,
+    import_bindings: &[ImportBinding],
+) -> Option<ResolvedCallsite> {
+    let (resolved_module, resolved_symbol) =
+        resolve_callee_via_python(fn_node, source, import_bindings)?;
+
+    // Only proceed if this is a state-boundary-relevant API.
+    let is_sb_builtin = resolved_module == "builtins"
+        && STATE_BOUNDARY_BUILTINS.contains(&resolved_symbol.as_str());
+    let is_sb_module = STATE_BOUNDARY_MODULES
+        .iter()
+        .any(|m| resolved_module == *m || resolved_module.starts_with(&format!("{}.", m)));
+
+    if !is_sb_builtin && !is_sb_module {
+        return None;
+    }
+
+    let arg0_payload = classify_arg0_payload_python(call_node, source)?;
+    let arg1_payload = classify_arg1_payload_python(call_node, source);
+
+    Some(ResolvedCallsite {
+        enclosing_symbol_node_uid: enclosing_symbol_node_uid.to_string(),
+        resolved_module,
+        resolved_symbol,
+        arg0_payload,
+        arg1_payload,
+        source_location: location_from_node(call_node),
+    })
+}
+
+/// Resolve a Python callee to a `(module, symbol)` pair.
+///
+/// Handles:
+/// - Bare identifier (`open(...)`, `connect(...)`)
+///   - If it's a state-boundary builtin → `("builtins", "open")`
+///   - Otherwise, look up in import_bindings for `from X import Y` pattern
+/// - Attribute expression (`sqlite3.connect(...)`, `os.open(...)`)
+///   - Object must match an import binding's identifier
+///   - Returns `(binding.specifier, attribute)`
+fn resolve_callee_via_python(
+    fn_node: &Node,
+    source: &str,
+    import_bindings: &[ImportBinding],
+) -> Option<(String, String)> {
+    match fn_node.kind() {
+        "identifier" => {
+            let ident = node_text(fn_node, source);
+
+            // Check if it's a state-boundary builtin (synthesize module).
+            if STATE_BOUNDARY_BUILTINS.contains(&ident) {
+                return Some(("builtins".to_string(), ident.to_string()));
+            }
+
+            // Look up in import_bindings for `from X import Y` pattern.
+            // These have `imported_name = Some(Y)`.
+            let binding = import_bindings
+                .iter()
+                .find(|b| b.identifier == ident && b.imported_name.is_some())?;
+
+            let symbol = binding
+                .imported_name
+                .clone()
+                .expect("checked is_some() above");
+            Some((binding.specifier.clone(), symbol))
+        }
+        "attribute" => {
+            // Pattern: `module.func()` where `module` is an import binding.
+            let object = fn_node.child_by_field_name("object")?;
+            let attribute = fn_node.child_by_field_name("attribute")?;
+
+            // Object must be a plain identifier (not a chain like `a.b.c()`).
+            if object.kind() != "identifier" {
+                return None;
+            }
+
+            let obj_text = node_text(&object, source);
+            let attr_text = node_text(&attribute, source);
+
+            // Look up import binding where identifier matches object.
+            // Whole-module imports (`import sqlite3`) have `imported_name = None`.
+            let binding = import_bindings
+                .iter()
+                .find(|b| b.identifier == obj_text && b.imported_name.is_none())?;
+
+            Some((binding.specifier.clone(), attr_text.to_string()))
+        }
+        _ => None,
+    }
+}
+
+/// Classify argument 0 of a Python call expression.
+///
+/// Supported patterns:
+/// - String literal: `open("/etc/config")` → `StringLiteral { value: "/etc/config" }`
+/// - os.environ access: `open(os.environ["PATH"])` → `EnvKeyRead { key_name: "PATH" }`
+///
+/// Returns `None` for unsupported patterns (variables, f-strings, etc.).
+fn classify_arg0_payload_python(call_node: &Node, source: &str) -> Option<CallArgPayload> {
+    classify_arg_at_index_python(call_node, source, 0)
+}
+
+/// Classify argument 1 of a Python call expression (e.g., mode for `open()`).
+///
+/// Returns `None` if arg1 is absent or not a supported pattern.
+fn classify_arg1_payload_python(call_node: &Node, source: &str) -> Option<CallArgPayload> {
+    classify_arg_at_index_python(call_node, source, 1)
+}
+
+/// Classify an argument at a specific index.
+fn classify_arg_at_index_python(
+    call_node: &Node,
+    source: &str,
+    index: usize,
+) -> Option<CallArgPayload> {
+    let args_node = call_node.child_by_field_name("arguments")?;
+
+    // Iterate through named children to find the argument at the given index.
+    let mut cursor = args_node.walk();
+    let mut current_index = 0usize;
+    let mut target_arg: Option<Node> = None;
+
+    for child in args_node.children(&mut cursor) {
+        if child.is_named() && child.kind() != "comment" {
+            if current_index == index {
+                target_arg = Some(child);
+                break;
+            }
+            current_index += 1;
+        }
+    }
+
+    let arg = target_arg?;
+    classify_python_expression(&arg, source)
+}
+
+/// Classify a Python expression node as a `CallArgPayload`.
+fn classify_python_expression(node: &Node, source: &str) -> Option<CallArgPayload> {
+    match node.kind() {
+        "string" => {
+            // Python string literal. May have prefix (f, r, b, etc.).
+            // Extract the actual string content.
+            let literal_text = node_text(node, source);
+
+            // Skip f-strings (they contain interpolation).
+            if literal_text.starts_with('f') || literal_text.starts_with("rf") {
+                return None;
+            }
+
+            // Strip quotes and optional prefix.
+            let stripped = strip_python_string_quotes(literal_text);
+            if stripped.is_empty() {
+                return None;
+            }
+
+            Some(CallArgPayload::StringLiteral {
+                value: stripped.to_string(),
+            })
+        }
+        "subscript" => {
+            // Pattern: `os.environ["KEY"]`
+            let value = node.child_by_field_name("value")?;
+            let subscript = node.child_by_field_name("subscript")?;
+
+            // Check for `os.environ` pattern.
+            if value.kind() == "attribute" {
+                let obj = value.child_by_field_name("object")?;
+                let attr = value.child_by_field_name("attribute")?;
+                if node_text(&obj, source) == "os" && node_text(&attr, source) == "environ" {
+                    // Extract the key from the subscript.
+                    if subscript.kind() == "string" {
+                        let key_literal = node_text(&subscript, source);
+                        let key_name = strip_python_string_quotes(key_literal);
+                        if !key_name.is_empty() {
+                            return Some(CallArgPayload::EnvKeyRead {
+                                key_name: key_name.to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Strip quotes from a Python string literal.
+///
+/// Handles:
+/// - Single quotes: `'text'`
+/// - Double quotes: `"text"`
+/// - Triple quotes: `'''text'''` or `"""text"""`
+/// - Prefixed strings: `r"text"`, `b"text"`, etc.
+fn strip_python_string_quotes(s: &str) -> &str {
+    let s = s.trim();
+
+    // Strip optional prefix (r, b, u, f, rf, br, etc.).
+    let s = s.trim_start_matches(|c: char| c.is_ascii_alphabetic());
+
+    // Strip triple quotes first.
+    if s.starts_with("\"\"\"") && s.ends_with("\"\"\"") && s.len() >= 6 {
+        return &s[3..s.len() - 3];
+    }
+    if s.starts_with("'''") && s.ends_with("'''") && s.len() >= 6 {
+        return &s[3..s.len() - 3];
+    }
+
+    // Strip single quotes.
+    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
+        if s.len() >= 2 {
+            return &s[1..s.len() - 1];
+        }
+    }
+
+    s
 }
 
 // -- Metrics computation ----------------------------------------------------
@@ -1929,5 +2205,157 @@ class Data:
         let metadata: serde_json::Value =
             serde_json::from_str(cls.metadata_json.as_ref().unwrap()).unwrap();
         assert_eq!(metadata["superclass"], "Parent");
+    }
+
+    // -- ResolvedCallsite extraction (SB-7C) --
+
+    #[test]
+    fn resolved_callsite_builtin_open_synthesizes_builtins_module() {
+        let result = extract_test(
+            r#"def load_config():
+    f = open("/etc/config.json", "r")
+    return f.read()
+"#,
+        );
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let rc = &result.resolved_callsites[0];
+        assert_eq!(rc.resolved_module, "builtins");
+        assert_eq!(rc.resolved_symbol, "open");
+        match &rc.arg0_payload {
+            CallArgPayload::StringLiteral { value } => {
+                assert_eq!(value, "/etc/config.json");
+            }
+            other => panic!("expected StringLiteral, got {:?}", other),
+        }
+        // arg1 should capture the mode
+        match &rc.arg1_payload {
+            Some(CallArgPayload::StringLiteral { value }) => {
+                assert_eq!(value, "r");
+            }
+            other => panic!("expected Some(StringLiteral), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn resolved_callsite_sqlite3_connect_via_import() {
+        let result = extract_test(
+            r#"import sqlite3
+
+def get_db():
+    return sqlite3.connect("app.db")
+"#,
+        );
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let rc = &result.resolved_callsites[0];
+        assert_eq!(rc.resolved_module, "sqlite3");
+        assert_eq!(rc.resolved_symbol, "connect");
+        match &rc.arg0_payload {
+            CallArgPayload::StringLiteral { value } => {
+                assert_eq!(value, "app.db");
+            }
+            other => panic!("expected StringLiteral, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn resolved_callsite_from_import_pattern() {
+        let result = extract_test(
+            r#"from sqlite3 import connect
+
+def get_db():
+    return connect(":memory:")
+"#,
+        );
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let rc = &result.resolved_callsites[0];
+        assert_eq!(rc.resolved_module, "sqlite3");
+        assert_eq!(rc.resolved_symbol, "connect");
+        match &rc.arg0_payload {
+            CallArgPayload::StringLiteral { value } => {
+                assert_eq!(value, ":memory:");
+            }
+            other => panic!("expected StringLiteral, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn no_resolved_callsite_for_top_level_call() {
+        // Top-level calls should NOT produce ResolvedCallsite per contract.
+        let result = extract_test(
+            r#"import sqlite3
+db = sqlite3.connect("app.db")
+"#,
+        );
+        assert!(
+            result.resolved_callsites.is_empty(),
+            "top-level calls should not produce ResolvedCallsite"
+        );
+    }
+
+    #[test]
+    fn no_resolved_callsite_for_non_state_boundary_api() {
+        // json.dumps is not in STATE_BOUNDARY_MODULES.
+        let result = extract_test(
+            r#"import json
+
+def serialize(data):
+    return json.dumps(data)
+"#,
+        );
+        assert!(
+            result.resolved_callsites.is_empty(),
+            "non-state-boundary APIs should not produce ResolvedCallsite"
+        );
+    }
+
+    #[test]
+    fn resolved_callsite_with_env_key_read_arg0() {
+        let result = extract_test(
+            r#"import os
+
+def load_from_env():
+    f = open(os.environ["CONFIG_PATH"], "r")
+    return f.read()
+"#,
+        );
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let rc = &result.resolved_callsites[0];
+        match &rc.arg0_payload {
+            CallArgPayload::EnvKeyRead { key_name } => {
+                assert_eq!(key_name, "CONFIG_PATH");
+            }
+            other => panic!("expected EnvKeyRead, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn no_resolved_callsite_for_variable_arg0() {
+        // open() with a variable argument should not produce ResolvedCallsite.
+        let result = extract_test(
+            r#"def load_file(path):
+    f = open(path, "r")
+    return f.read()
+"#,
+        );
+        assert!(
+            result.resolved_callsites.is_empty(),
+            "variable arg0 should not produce ResolvedCallsite"
+        );
+    }
+
+    #[test]
+    fn strip_python_string_quotes_handles_variants() {
+        // Single quotes
+        assert_eq!(strip_python_string_quotes("'hello'"), "hello");
+        // Double quotes
+        assert_eq!(strip_python_string_quotes("\"world\""), "world");
+        // Triple double quotes
+        assert_eq!(strip_python_string_quotes("\"\"\"multi\nline\"\"\""), "multi\nline");
+        // Triple single quotes
+        assert_eq!(strip_python_string_quotes("'''text'''"), "text");
+        // Raw string prefix
+        assert_eq!(strip_python_string_quotes("r\"raw\\nstring\""), "raw\\nstring");
+        // Bytes prefix
+        assert_eq!(strip_python_string_quotes("b\"bytes\""), "bytes");
     }
 }

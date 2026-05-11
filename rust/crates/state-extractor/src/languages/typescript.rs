@@ -3,7 +3,7 @@
 //! The Rust `ts-extractor` crate produces `ResolvedCallsite` facts
 //! (indexer::types) as a side-channel of `ExtractionResult`. Each
 //! fact carries a resolved `(module, symbol)` callee pair, an
-//! `Arg0Payload` classification, and the enclosing symbol's node
+//! `CallArgPayload` classification, and the enclosing symbol's node
 //! UID. This adapter turns those facts into
 //! `StateBoundaryCallsite` inputs and drives the language-
 //! agnostic `StateBoundaryEmitter`.
@@ -22,9 +22,9 @@
 //!   matcher entry point. The matcher's imports-presence check
 //!   is redundant for pre-resolved callsites but preserved to
 //!   keep a single matching code path.
-//! - 3-impl.3: `Arg0Payload::StringLiteral` → `CallsiteLogicalName::Fs`
+//! - 3-impl.3: `CallArgPayload::StringLiteral` → `CallsiteLogicalName::Fs`
 //!   (preserves colon-bearing Windows / URI paths);
-//!   `Arg0Payload::EnvKeyRead` → `CallsiteLogicalName::Generic`.
+//!   `CallArgPayload::EnvKeyRead` → `CallsiteLogicalName::Generic`.
 //!   `LogicalNameSource` is discriminated per payload shape:
 //!     - string literal, URL-shaped (`<scheme>://...`, per
 //!       `is_url_shaped`) → `NormalizedUrl`
@@ -43,7 +43,7 @@
 //! call. Silent skip is safer; future enrichment may surface
 //! these as diagnostic facts.
 
-use repo_graph_indexer::types::{Arg0Payload, ResolvedCallsite};
+use repo_graph_indexer::types::{CallArgPayload, ResolvedCallsite};
 use repo_graph_state_bindings::{
 	CalleePath, FsPathOrLogical, ImportView, Language, LogicalName,
 };
@@ -161,7 +161,7 @@ pub fn emit_from_resolved_callsites(
 /// setup.
 pub fn adapt_resolved_callsite(rc: &ResolvedCallsite) -> Option<StateBoundaryCallsite> {
 	let (logical_name, logical_name_source) = match &rc.arg0_payload {
-		Arg0Payload::StringLiteral { value } => {
+		CallArgPayload::StringLiteral { value } => {
 			// Fs variant preserves colon-bearing Windows / URI
 			// paths. For non-FS bindings, the emitter downgrades
 			// to LogicalName and errors on unconvertible payloads;
@@ -181,7 +181,7 @@ pub fn adapt_resolved_callsite(rc: &ResolvedCallsite) -> Option<StateBoundaryCal
 			};
 			(CallsiteLogicalName::Fs(payload), source)
 		}
-		Arg0Payload::EnvKeyRead { key_name } => {
+		CallArgPayload::EnvKeyRead { key_name } => {
 			// Env-key names never contain `:`; Generic keeps them
 			// in the strictest newtype.
 			let ln = LogicalName::new(key_name.clone()).ok()?;
@@ -238,9 +238,10 @@ mod tests {
 			enclosing_symbol_node_uid: "sym-1".to_string(),
 			resolved_module: "fs".to_string(),
 			resolved_symbol: "readFile".to_string(),
-			arg0_payload: Arg0Payload::StringLiteral {
+			arg0_payload: CallArgPayload::StringLiteral {
 				value: "/etc/config".to_string(),
 			},
+			arg1_payload: None,
 			source_location: loc(),
 		};
 		let adapted = adapt_resolved_callsite(&rc).expect("valid payload");
@@ -256,9 +257,10 @@ mod tests {
 			enclosing_symbol_node_uid: "sym-1".to_string(),
 			resolved_module: "fs".to_string(),
 			resolved_symbol: "readFile".to_string(),
-			arg0_payload: Arg0Payload::StringLiteral {
+			arg0_payload: CallArgPayload::StringLiteral {
 				value: "C:\\Windows\\path".to_string(),
 			},
+			arg1_payload: None,
 			source_location: loc(),
 		};
 		let adapted = adapt_resolved_callsite(&rc).expect("colon-bearing payload valid");
@@ -274,9 +276,10 @@ mod tests {
 			enclosing_symbol_node_uid: "sym-1".to_string(),
 			resolved_module: "fs".to_string(),
 			resolved_symbol: "readFile".to_string(),
-			arg0_payload: Arg0Payload::EnvKeyRead {
+			arg0_payload: CallArgPayload::EnvKeyRead {
 				key_name: "CACHE_DIR".to_string(),
 			},
+			arg1_payload: None,
 			source_location: loc(),
 		};
 		let adapted = adapt_resolved_callsite(&rc).expect("valid env-key payload");
@@ -290,9 +293,10 @@ mod tests {
 			enclosing_symbol_node_uid: "sym-1".to_string(),
 			resolved_module: "fs".to_string(),
 			resolved_symbol: "readFile".to_string(),
-			arg0_payload: Arg0Payload::StringLiteral {
+			arg0_payload: CallArgPayload::StringLiteral {
 				value: "/x".to_string(),
 			},
+			arg1_payload: None,
 			source_location: loc(),
 		};
 		let adapted = adapt_resolved_callsite(&rc).unwrap();
@@ -308,9 +312,10 @@ mod tests {
 			enclosing_symbol_node_uid: "sym-1".to_string(),
 			resolved_module: "fs".to_string(),
 			resolved_symbol: "readFile".to_string(),
-			arg0_payload: Arg0Payload::StringLiteral {
+			arg0_payload: CallArgPayload::StringLiteral {
 				value: "file:///etc/config".to_string(),
 			},
+			arg1_payload: None,
 			source_location: loc(),
 		};
 		let adapted = adapt_resolved_callsite(&rc).expect("valid URL payload");
@@ -335,9 +340,10 @@ mod tests {
 			enclosing_symbol_node_uid: "sym-1".to_string(),
 			resolved_module: "fs".to_string(),
 			resolved_symbol: "readFile".to_string(),
-			arg0_payload: Arg0Payload::StringLiteral {
+			arg0_payload: CallArgPayload::StringLiteral {
 				value: "C:\\Windows\\path".to_string(),
 			},
+			arg1_payload: None,
 			source_location: loc(),
 		};
 		let adapted = adapt_resolved_callsite(&rc).unwrap();
@@ -376,9 +382,10 @@ mod tests {
 			enclosing_symbol_node_uid: "sym-1".to_string(),
 			resolved_module: "fs".to_string(),
 			resolved_symbol: "readFile".to_string(),
-			arg0_payload: Arg0Payload::StringLiteral {
+			arg0_payload: CallArgPayload::StringLiteral {
 				value: "".to_string(),
 			},
+			arg1_payload: None,
 			source_location: loc(),
 		};
 		assert!(adapt_resolved_callsite(&rc).is_none());

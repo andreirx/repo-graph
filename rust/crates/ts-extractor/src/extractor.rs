@@ -7,7 +7,7 @@ use repo_graph_classification::types::{
 };
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::types::{
-	Arg0Payload, EdgeType, ExtractionResult, ExtractedEdge, ExtractedNode,
+	CallArgPayload, EdgeType, ExtractionResult, ExtractedEdge, ExtractedNode,
 	NodeKind, NodeSubtype, Resolution, ResolvedCallsite, Visibility,
 };
 
@@ -1816,6 +1816,7 @@ fn try_resolve_callsite(
 		resolved_module,
 		resolved_symbol,
 		arg0_payload,
+		arg1_payload: None, // TS extractor does not currently need arg1
 		source_location: location_from_node(call_node),
 	})
 }
@@ -1897,7 +1898,7 @@ fn resolve_callee_via_imports(
 fn classify_arg0_payload(
 	call_node: &tree_sitter::Node,
 	source: &[u8],
-) -> Option<Arg0Payload> {
+) -> Option<CallArgPayload> {
 	let args_node = call_node.child_by_field_name("arguments")?;
 	// tree-sitter's `arguments` node contains `(` + args + `)`.
 	// Iterate its named children to find arg index 0.
@@ -1919,7 +1920,7 @@ fn classify_arg0_payload(
 			let stripped = literal_text
 				.trim_matches(|c| c == '\'' || c == '"' || c == '`')
 				.to_string();
-			Some(Arg0Payload::StringLiteral { value: stripped })
+			Some(CallArgPayload::StringLiteral { value: stripped })
 		}
 		"member_expression" => {
 			// Pattern: `process.env.NAME`.
@@ -1938,7 +1939,7 @@ fn classify_arg0_payload(
 				return None;
 			}
 			let key_name = property.utf8_text(source).ok()?.to_string();
-			Some(Arg0Payload::EnvKeyRead { key_name })
+			Some(CallArgPayload::EnvKeyRead { key_name })
 		}
 		_ => None,
 	}
@@ -3058,7 +3059,7 @@ export function load() {
 		assert_eq!(rc.resolved_module, "fs");
 		assert_eq!(rc.resolved_symbol, "readFile");
 		match &rc.arg0_payload {
-			Arg0Payload::StringLiteral { value } => {
+			CallArgPayload::StringLiteral { value } => {
 				assert_eq!(value, "/etc/config");
 			}
 			other => panic!("expected StringLiteral, got {:?}", other),
@@ -3148,7 +3149,7 @@ export function load() {
 		assert_eq!(result.resolved_callsites.len(), 1);
 		let rc = &result.resolved_callsites[0];
 		match &rc.arg0_payload {
-			Arg0Payload::EnvKeyRead { key_name } => {
+			CallArgPayload::EnvKeyRead { key_name } => {
 				assert_eq!(key_name, "CACHE_DIR");
 			}
 			other => panic!("expected EnvKeyRead, got {:?}", other),

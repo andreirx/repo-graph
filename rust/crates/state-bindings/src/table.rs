@@ -412,28 +412,55 @@ impl BindingTable {
 mod tests {
 	use super::*;
 
-	/// Inline smoke test: confirms the embedded FS matrix parses
-	/// and contains canonical fs/node:fs/fs/promises/node:fs/promises
-	/// entries. Comprehensive coverage (rejection paths,
-	/// duplicates, long notes, bad variants) lives in
-	/// `tests/table.rs`.
+	/// Inline smoke test: confirms the embedded binding table parses
+	/// and contains expected entries for TypeScript and Python.
+	/// Comprehensive coverage (rejection paths, duplicates, long notes,
+	/// bad variants) lives in `tests/table.rs`.
 	#[test]
-	fn embedded_fs_matrix_parses() {
+	fn embedded_binding_table_parses() {
 		let table = BindingTable::load_embedded();
-		// Every embedded entry is TS/FS/stdlib.
-		for e in table.entries() {
-			assert_eq!(e.language, Language::Typescript);
+
+		// TypeScript FS entries exist with expected properties.
+		let ts_entries: Vec<_> = table
+			.entries()
+			.iter()
+			.filter(|e| e.language == Language::Typescript)
+			.collect();
+		assert!(!ts_entries.is_empty(), "must have TypeScript entries");
+		for e in &ts_entries {
 			assert_eq!(e.resource_kind, ResourceKind::Fs);
-			assert_eq!(e.basis, Basis::StdlibApi);
 			assert_eq!(e.driver, "node-fs");
 		}
-		// All four canonical module specifiers must be present.
-		let modules: std::collections::HashSet<&str> =
-			table.entries().iter().map(|e| e.module.as_str()).collect();
-		assert!(modules.contains("fs"));
-		assert!(modules.contains("node:fs"));
-		assert!(modules.contains("fs/promises"));
-		assert!(modules.contains("node:fs/promises"));
+
+		// All four canonical TS module specifiers must be present.
+		let ts_modules: std::collections::HashSet<&str> =
+			ts_entries.iter().map(|e| e.module.as_str()).collect();
+		assert!(ts_modules.contains("fs"));
+		assert!(ts_modules.contains("node:fs"));
+		assert!(ts_modules.contains("fs/promises"));
+		assert!(ts_modules.contains("node:fs/promises"));
+
+		// Python entries exist (SB-7C).
+		let py_entries: Vec<_> = table
+			.entries()
+			.iter()
+			.filter(|e| e.language == Language::Python)
+			.collect();
+		assert!(!py_entries.is_empty(), "must have Python entries");
+
+		// Python builtins:open_* entries.
+		let py_builtins: Vec<_> = py_entries
+			.iter()
+			.filter(|e| e.module == "builtins")
+			.collect();
+		assert_eq!(py_builtins.len(), 3, "must have open_read, open_write, open_read_write");
+
+		// Python DB entries.
+		let py_db: Vec<_> = py_entries
+			.iter()
+			.filter(|e| e.resource_kind == ResourceKind::Db)
+			.collect();
+		assert!(py_db.len() >= 2, "must have sqlite3 and psycopg2");
 	}
 
 	#[test]

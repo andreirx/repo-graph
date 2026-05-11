@@ -15,9 +15,12 @@
 //!
 //! Populated:
 //! - `typescript` (SB-3): TypeScript/JavaScript adapter
-//! - Python, Java, C++ adapters arrive in follow-on slices (SB-7B, SB-7C)
+//! - `python` (SB-7C): Python adapter
+//! - Java, C++ adapters arrive in follow-on slices (SB-7B)
 
+pub mod python;
 pub mod typescript;
 
 // Re-export adapter structs for convenience.
+pub use python::PythonAdapter;
 pub use typescript::TypeScriptAdapter;

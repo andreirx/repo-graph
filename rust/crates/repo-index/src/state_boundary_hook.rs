@@ -102,10 +102,11 @@ enum LanguageClassification {
 /// Convert routing language string to classification.
 ///
 /// Supported languages (adapters expected):
-/// - TypeScript/JavaScript (SB-7A ships this)
+/// - TypeScript/JavaScript (SB-7A)
+/// - Python (SB-7C)
 ///
 /// Unsupported languages (adapters not yet implemented):
-/// - Python, Java, Rust, C++ (SB-7B/SB-7C pending)
+/// - Java, Rust, C++ (SB-7B pending)
 ///
 /// Unknown languages:
 /// - Everything else
@@ -115,8 +116,9 @@ fn classify_language(lang_str: Option<&str>) -> LanguageClassification {
 		Some("typescript" | "tsx" | "javascript" | "jsx") => {
 			LanguageClassification::Supported(Language::Typescript)
 		}
-		// SB-7B/SB-7C pending: adapters not yet implemented.
-		Some("python") => LanguageClassification::Unsupported(Language::Python),
+		// SB-7C: Python adapter is shipped. Missing = fault.
+		Some("python") => LanguageClassification::Supported(Language::Python),
+		// SB-7B pending: adapters not yet implemented.
 		Some("java") => LanguageClassification::Unsupported(Language::Java),
 		Some("rust") => LanguageClassification::Unsupported(Language::Rust),
 		Some("cpp" | "c") => LanguageClassification::Unsupported(Language::Cpp),

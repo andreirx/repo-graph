@@ -234,3 +234,65 @@ resource_kind = "fs"
 driver        = "node-fs"
 direction     = "write"
 basis         = "stdlib_api"
+
+# ── Python builtins ────────────────────────────────────────────────
+#
+# SB-7C: Python builtin `open()` is treated as synthetic module
+# `builtins` for Form-A matcher compatibility. This is NOT evidence
+# of an actual import; it is a deliberate builtin normalization rule.
+#
+# The Python adapter normalizes mode to direction-specific symbols:
+#   - 'r', 'rb' → open_read
+#   - 'w', 'wb', 'a', 'ab', 'x' → open_write
+#   - 'r+', 'w+' → open_read_write
+
+[[binding]]
+language      = "python"
+module        = "builtins"
+symbol_path   = "open_read"
+resource_kind = "fs"
+driver        = "python-fs"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "python"
+module        = "builtins"
+symbol_path   = "open_write"
+resource_kind = "fs"
+driver        = "python-fs"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "python"
+module        = "builtins"
+symbol_path   = "open_read_write"
+resource_kind = "fs"
+driver        = "python-fs"
+direction     = "read_write"
+basis         = "stdlib_api"
+
+# ── Python DB-API 2.0 ──────────────────────────────────────────────
+#
+# SB-7C first cut: positional connection constructors only.
+# Keyword-arg constructors (mysql.connector) deferred pending
+# keyword-argument payload support in ResolvedCallsite.
+
+[[binding]]
+language      = "python"
+module        = "sqlite3"
+symbol_path   = "connect"
+resource_kind = "db"
+driver        = "sqlite3"
+direction     = "read_write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "python"
+module        = "psycopg2"
+symbol_path   = "connect"
+resource_kind = "db"
+driver        = "psycopg2"
+direction     = "read_write"
+basis         = "sdk_call"
