@@ -144,6 +144,13 @@
   for shadowed definitions so downstream tools can flag dead redefinitions.
 - **No Python semantic enrichment** (pyright/mypy) yet.
 - **No Python framework detectors** (Django, Flask, FastAPI) yet.
+- **PY-EXT-2 module organization:** Variables, constructors, and metrics logic
+  are inline in `extractor.rs` rather than separate modules (`variables.rs`,
+  `constructors.rs`, `metrics.rs`) as proposed in slice doc. Refactor deferred.
+- **PY-EXT-2 performance validation:** Tracked as follow-on slice `PY-EXT-2-PERF`
+  in ROADMAP.md. No baseline exists from pre-PY-EXT-2 commit. Original benchmark
+  command was invalid (library crate, no binary). Requires benchmark harness
+  infrastructure before execution.
 
 ## Extraction — C/C++
 

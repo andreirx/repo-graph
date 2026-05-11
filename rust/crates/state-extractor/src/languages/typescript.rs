@@ -8,6 +8,10 @@
 //! `StateBoundaryCallsite` inputs and drives the language-
 //! agnostic `StateBoundaryEmitter`.
 //!
+//! SB-7A: This module now exports `TypeScriptAdapter` which implements
+//! the `LanguageStateAdapter` trait. The free functions are preserved
+//! for backward compatibility.
+//!
 //! SB-3 design locks (recorded in
 //! `docs/milestones/rmap-state-boundaries-v1.md` SB-3 section):
 //!
@@ -41,12 +45,54 @@
 
 use repo_graph_indexer::types::{Arg0Payload, ResolvedCallsite};
 use repo_graph_state_bindings::{
-	CalleePath, FsPathOrLogical, ImportView, LogicalName,
+	CalleePath, FsPathOrLogical, ImportView, Language, LogicalName,
 };
 
+use crate::adapter::{AdapterContext, LanguageStateAdapter};
 use crate::emit::{CallsiteLogicalName, StateBoundaryCallsite, StateBoundaryEmitter};
 use crate::emit::EmitError;
 use crate::evidence::LogicalNameSource;
+
+// ── TypeScriptAdapter (SB-7A) ─────────────────────────────────────
+
+/// TypeScript/JavaScript language adapter.
+///
+/// Implements `LanguageStateAdapter` to convert `ResolvedCallsite`
+/// facts from the ts-extractor into `StateBoundaryCallsite` DTOs.
+///
+/// This adapter handles both `.ts` and `.js` files (the TS extractor
+/// processes both).
+#[derive(Debug, Clone, Default)]
+pub struct TypeScriptAdapter;
+
+impl TypeScriptAdapter {
+	/// Create a new TypeScript adapter.
+	pub fn new() -> Self {
+		Self
+	}
+}
+
+impl LanguageStateAdapter for TypeScriptAdapter {
+	fn language(&self) -> Language {
+		Language::Typescript
+	}
+
+	fn adapt_callsites(
+		&self,
+		_ctx: &AdapterContext<'_>,
+		callsites: &[ResolvedCallsite],
+	) -> Vec<StateBoundaryCallsite> {
+		// Delegate to the existing conversion function.
+		// The context is currently unused; the TS adapter derives
+		// all needed information from ResolvedCallsite.
+		callsites
+			.iter()
+			.filter_map(adapt_resolved_callsite)
+			.collect()
+	}
+}
+
+// ── Free functions (backward compatibility) ───────────────────────
 
 /// Classify a string-literal payload as URL-shaped vs path-shaped.
 ///

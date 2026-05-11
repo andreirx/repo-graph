@@ -132,8 +132,11 @@ for what is actually operational.
   execution evidence (line or function coverage). See `docs/TECH-DEBT.md` for policy.
 - **Native Python extraction in `rmap`:** Rust-side tree-sitter-python extractor with
   Python import resolution through shared file-resolution model. Extracts functions,
-  classes, methods, imports, calls. TS-side broader scope (constructors, variables,
-  complexity metrics) not yet ported.
+  classes, methods, constructors (`__init__`), variables (local and module-level,
+  including annotated assignments), imports, calls. Complexity metrics (cyclomatic,
+  nesting depth, parameter count, function length) computed and persisted to
+  measurements table. PY-EXT-2 functional implementation complete; performance
+  validation deferred (see `PY-EXT-2-PERF` in execution queue).
 - **Documentation-first direction:** docs inventory is primary orientation evidence. Current
   discovery-oriented authored knowledge is still split between documents and declaration rows.
   Direction: hand-discovered architectural knowledge should move toward document-backed items,
@@ -811,21 +814,28 @@ Layer 3 framework detection.
 
 | Slice | Scope | Layer | Status |
 |-------|-------|-------|--------|
-| PY-EXT-2 | Python extractor depth | L0–1 | PLANNED |
-| SB-7A | State boundaries support substrate | L2 | PLANNED |
+| PY-EXT-2 | Python extractor depth | L0–1 | IMPLEMENTED (functional) |
+| PY-EXT-2-PERF | Python extractor performance validation | L0–1 | DEFERRED |
+| SB-7A | State boundaries support substrate | L2 | **NEXT** |
 | SB-7C | Python state boundaries | L2 | PLANNED |
 | SB-7B | Java state boundaries | L2 | PLANNED |
 | DEP-1 | Dependency reconciliation surface | L2 | PLANNED |
 | FD-1A | Rust Express detector parity | L3 | PLANNED |
 | FD-1B | Rust React detector parity | L3 | PLANNED |
 
+**PY-EXT-2-PERF note:** Performance acceptance (throughput ≥ 0.95x, memory ≤ 1.1x)
+was not validated because no baseline exists and the original benchmark command was
+invalid (library crate has no binary). Deferred until a proper benchmark harness
+and pre-change baseline are established. Functional Layer 0–1 work is complete.
+
 **Why this order:**
 
-1. **PY-EXT-2** strengthens Layer 0–1 facts (callsite resolution improves all downstream)
+1. **PY-EXT-2** strengthens Layer 0–1 facts — COMPLETE (functional), performance deferred
 2. **SB-7A** creates Layer 2 support substrate consumed by language-specific adapters
 3. **SB-7C/7B** use SB-7A substrate for Python and Java state boundaries
 4. **DEP-1** is cross-cutting query surface over existing facts (JS/TS + Rust only in Phase A)
 5. **FD-1A/1B** are Layer 3 hints — come after stronger fact/substrate work
+6. **PY-EXT-2-PERF** is backlog — requires benchmark harness infrastructure before execution
 
 **Slice docs:**
 

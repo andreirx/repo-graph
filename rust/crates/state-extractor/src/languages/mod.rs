@@ -9,8 +9,15 @@
 //! the emitter free of per-language concerns (SB-2.2 narrowing:
 //! inputs stay crate-owned; output DTOs are indexer types).
 //!
-//! Slice-1 populated: `typescript` (Rust-side ts-extractor
-//! integration). Other languages arrive when their respective
-//! Rust-workspace extractors ship.
+//! SB-7A: Each language module now exports an adapter struct that
+//! implements `LanguageStateAdapter`. The free functions are
+//! preserved for backward compatibility.
+//!
+//! Populated:
+//! - `typescript` (SB-3): TypeScript/JavaScript adapter
+//! - Python, Java, C++ adapters arrive in follow-on slices (SB-7B, SB-7C)
 
 pub mod typescript;
+
+// Re-export adapter structs for convenience.
+pub use typescript::TypeScriptAdapter;

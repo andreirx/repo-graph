@@ -329,6 +329,19 @@ pub struct ResourceAccessorResult {
 	pub resolution: String,
 }
 
+/// A resource node with its read/write edge counts.
+///
+/// SB-7A: Used by `rmap resource list` command for parity validation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceListItem {
+	pub stable_key: String,
+	pub name: String,
+	pub kind: String,
+	pub subtype: Option<String>,
+	pub readers: i64,
+	pub writers: i64,
+}
+
 /// Error when resolving a symbol query.
 #[derive(Debug)]
 pub enum SymbolResolveError {
@@ -693,6 +706,75 @@ impl StorageConnection {
 
 		rows.collect::<Result<Vec<_>, _>>()
 			.map_err(StorageError::from)
+	}
+
+	/// List all resource nodes with their read/write edge counts.
+	///
+	/// SB-7A: Used by `rmap resource list` for CLI-based parity validation.
+	/// Returns all resource nodes (FS_PATH, DB_RESOURCE, BLOB, STATE+CACHE)
+	/// with counts of READS and WRITES edges pointing to each.
+	///
+	/// Optional `kind_filter` restricts to a specific resource kind.
+	pub fn list_resources(
+		&self,
+		snapshot_uid: &str,
+		kind_filter: Option<&str>,
+	) -> Result<Vec<ResourceListItem>, StorageError> {
+		// Base query: select resource nodes with edge counts.
+		let mut sql = String::from(
+			"SELECT
+				n.stable_key,
+				n.name,
+				n.kind,
+				n.subtype,
+				COALESCE(SUM(CASE WHEN e.type = 'READS' THEN 1 ELSE 0 END), 0) AS readers,
+				COALESCE(SUM(CASE WHEN e.type = 'WRITES' THEN 1 ELSE 0 END), 0) AS writers
+			 FROM nodes n
+			 LEFT JOIN edges e ON e.target_node_uid = n.node_uid
+			                  AND e.snapshot_uid = n.snapshot_uid
+			                  AND e.type IN ('READS', 'WRITES')
+			 WHERE n.snapshot_uid = ?1
+			   AND (
+			       n.kind IN ('FS_PATH', 'DB_RESOURCE', 'BLOB')
+			       OR (n.kind = 'STATE' AND n.subtype = 'CACHE')
+			   )",
+		);
+
+		// Optional kind filter.
+		if kind_filter.is_some() {
+			sql.push_str(" AND n.kind = ?2");
+		}
+
+		sql.push_str(" GROUP BY n.node_uid ORDER BY n.kind ASC, n.name ASC");
+
+		let mut stmt = self.connection().prepare(&sql)?;
+
+		// Row mapper (shared across both query paths).
+		fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ResourceListItem> {
+			Ok(ResourceListItem {
+				stable_key: row.get(0)?,
+				name: row.get(1)?,
+				kind: row.get(2)?,
+				subtype: row.get(3)?,
+				readers: row.get(4)?,
+				writers: row.get(5)?,
+			})
+		}
+
+		let mut results = Vec::new();
+		if let Some(kind) = kind_filter {
+			let mut rows = stmt.query(rusqlite::params![snapshot_uid, kind])?;
+			while let Some(row) = rows.next()? {
+				results.push(map_row(row)?);
+			}
+		} else {
+			let mut rows = stmt.query(rusqlite::params![snapshot_uid])?;
+			while let Some(row) = rows.next()? {
+				results.push(map_row(row)?);
+			}
+		};
+
+		Ok(results)
 	}
 
 	/// Find dead nodes — nodes with no incoming reference edges.
@@ -2986,6 +3068,109 @@ mod tests {
 		let writers = storage.find_resource_writers(&snap_uid, "r1:fs:log:FS_PATH").unwrap();
 		assert_eq!(writers.len(), 1);
 		assert_eq!(writers[0].edge_type, "WRITES");
+	}
+
+	// ── SB-7A: list_resources tests ──────────────────────────────
+
+	#[test]
+	fn list_resources_returns_all_resource_kinds() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		// Create various resource nodes.
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-fs", "r1:fs:/etc/config:FS_PATH",
+			"/etc/config", "FS_PATH", Some("FILE_PATH"),
+		);
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-db", "r1:db:postgres://host/db:DB_RESOURCE",
+			"postgres://host/db", "DB_RESOURCE", Some("CONNECTION"),
+		);
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-blob", "r1:blob:s3://bucket:BLOB",
+			"s3://bucket", "BLOB", Some("BUCKET"),
+		);
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-cache", "r1:state:redis:STATE",
+			"redis", "STATE", Some("CACHE"),
+		);
+		// Non-CACHE STATE should NOT be included.
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-session", "r1:state:session:STATE",
+			"session", "STATE", Some("SESSION"),
+		);
+		// SYMBOL should NOT be included.
+		insert_raw_node(&storage, &snap_uid, "n-sym", "r1:a.ts#fn:SYMBOL:FUNCTION", "fn", "SYMBOL");
+
+		let resources = storage.list_resources(&snap_uid, None).unwrap();
+
+		assert_eq!(resources.len(), 4, "should include FS_PATH, DB_RESOURCE, BLOB, STATE+CACHE");
+
+		let kinds: Vec<&str> = resources.iter().map(|r| r.kind.as_str()).collect();
+		assert!(kinds.contains(&"FS_PATH"));
+		assert!(kinds.contains(&"DB_RESOURCE"));
+		assert!(kinds.contains(&"BLOB"));
+		assert!(kinds.contains(&"STATE"));
+
+		// Verify STATE is only CACHE subtype.
+		let state_resource = resources.iter().find(|r| r.kind == "STATE").unwrap();
+		assert_eq!(state_resource.subtype.as_deref(), Some("CACHE"));
+	}
+
+	#[test]
+	fn list_resources_counts_reads_and_writes() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		// Resource with 2 readers, 1 writer.
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-res", "r1:fs:/data/file:FS_PATH",
+			"/data/file", "FS_PATH", Some("FILE_PATH"),
+		);
+		insert_raw_node(&storage, &snap_uid, "n-r1", "r1:a.ts#read1:SYMBOL:FUNCTION", "read1", "SYMBOL");
+		insert_raw_node(&storage, &snap_uid, "n-r2", "r1:a.ts#read2:SYMBOL:FUNCTION", "read2", "SYMBOL");
+		insert_raw_node(&storage, &snap_uid, "n-w1", "r1:a.ts#write1:SYMBOL:FUNCTION", "write1", "SYMBOL");
+
+		insert_raw_edge(&storage, &snap_uid, "e1", "n-r1", "n-res", "READS");
+		insert_raw_edge(&storage, &snap_uid, "e2", "n-r2", "n-res", "READS");
+		insert_raw_edge(&storage, &snap_uid, "e3", "n-w1", "n-res", "WRITES");
+
+		let resources = storage.list_resources(&snap_uid, None).unwrap();
+
+		assert_eq!(resources.len(), 1);
+		assert_eq!(resources[0].readers, 2);
+		assert_eq!(resources[0].writers, 1);
+	}
+
+	#[test]
+	fn list_resources_filters_by_kind() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-fs", "r1:fs:/etc/config:FS_PATH",
+			"/etc/config", "FS_PATH", Some("FILE_PATH"),
+		);
+		insert_raw_node_with_subtype(
+			&storage, &snap_uid, "n-db", "r1:db:conn:DB_RESOURCE",
+			"conn", "DB_RESOURCE", Some("CONNECTION"),
+		);
+
+		let fs_only = storage.list_resources(&snap_uid, Some("FS_PATH")).unwrap();
+		assert_eq!(fs_only.len(), 1);
+		assert_eq!(fs_only[0].kind, "FS_PATH");
+
+		let db_only = storage.list_resources(&snap_uid, Some("DB_RESOURCE")).unwrap();
+		assert_eq!(db_only.len(), 1);
+		assert_eq!(db_only[0].kind, "DB_RESOURCE");
+	}
+
+	#[test]
+	fn list_resources_returns_empty_for_no_resources() {
+		let (storage, snap_uid) = setup_db_with_snapshot();
+
+		// Only SYMBOL nodes, no resources.
+		insert_raw_node(&storage, &snap_uid, "n-sym", "r1:a.ts#fn:SYMBOL:FUNCTION", "fn", "SYMBOL");
+
+		let resources = storage.list_resources(&snap_uid, None).unwrap();
+		assert!(resources.is_empty());
 	}
 
 	// ── SB-5: Dead-node resource exclusion tests ─────────────────

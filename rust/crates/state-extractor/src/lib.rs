@@ -44,11 +44,13 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod adapter;
 pub mod emit;
 pub mod evidence;
 pub mod languages;
 
 // Re-export the most commonly used surface at the crate root.
+pub use adapter::{default_registry, AdapterContext, AdapterRegistry, LanguageStateAdapter};
 pub use emit::{
 	CallsiteLogicalName, EmittedFacts, EmitError, EmitterContext, StateBoundaryCallsite,
 	StateBoundaryEmitter,
@@ -56,3 +58,4 @@ pub use emit::{
 pub use evidence::{
 	LogicalNameSource, StateBoundaryEvidence, STATE_BOUNDARY_EVIDENCE_VERSION,
 };
+pub use languages::TypeScriptAdapter;

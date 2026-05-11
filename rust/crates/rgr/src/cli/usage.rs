@@ -72,6 +72,7 @@ pub fn print_usage() {
     eprintln!("  rmap declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]");
     eprintln!("  rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]");
     eprintln!("  rmap declare quality-policy <db_path> <repo_uid> <policy_id> --measurement <kind> --policy-kind <kind> --threshold <n> [...]");
+    eprintln!("  rmap resource list    <db_path> <repo_uid> [--kind <kind>]");
     eprintln!("  rmap resource readers <db_path> <repo_uid> <resource_stable_key>");
     eprintln!("  rmap resource writers <db_path> <repo_uid> <resource_stable_key>");
     eprintln!("  rmap modules list <db_path> <repo_uid>");

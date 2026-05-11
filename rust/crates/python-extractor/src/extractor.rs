@@ -231,8 +231,245 @@ fn visit_top_level(node: &Node, ctx: &mut ExtractionCtx) {
         "function_definition" => extract_function(node, ctx),
         "class_definition" => extract_class(node, ctx),
         "decorated_definition" => extract_decorated_definition(node, ctx),
+        "expression_statement" => extract_module_level_assignment(node, ctx),
+        "annotated_assignment" => extract_annotated_assignment(node, ctx, None),
         _ => {}
     }
+}
+
+// -- Variable extraction ----------------------------------------------------
+
+/// Extract module-level variable assignment.
+///
+/// Handles:
+/// - `x = 1` (simple assignment)
+/// - `x: int = 1` (annotated assignment)
+///
+/// Does NOT handle:
+/// - `self.x = 1` (instance attribute)
+/// - Multiple targets like `x = y = 1`
+fn extract_module_level_assignment(node: &Node, ctx: &mut ExtractionCtx) {
+    // expression_statement contains the actual assignment
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "assignment" => {
+                extract_assignment_variable(&child, ctx, None);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Extract a variable from an annotated assignment (`x: int = 1`).
+///
+/// `scope_prefix` is used for local variables (e.g., "func_name.") or None for module-level.
+fn extract_annotated_assignment(node: &Node, ctx: &mut ExtractionCtx, scope_prefix: Option<&str>) {
+    // annotated_assignment has `name` field (the identifier)
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+
+    // Only handle simple identifiers
+    if name_node.kind() != "identifier" {
+        return;
+    }
+
+    let name = node_text(&name_node, ctx.source);
+
+    // Skip instance/class attributes
+    if name.starts_with("self.") || name.starts_with("cls.") {
+        return;
+    }
+
+    let qualified_name = match scope_prefix {
+        Some(prefix) => format!("{}.{}", prefix, name),
+        None => name.to_string(),
+    };
+
+    let variable_node = ExtractedNode {
+        node_uid: uuid::Uuid::new_v4().to_string(),
+        snapshot_uid: ctx.snapshot_uid.into(),
+        repo_uid: ctx.repo_uid.into(),
+        stable_key: format!(
+            "{}:{}#{}:SYMBOL:VARIABLE",
+            ctx.repo_uid, ctx.file_path, qualified_name
+        ),
+        kind: NodeKind::Symbol,
+        subtype: Some(NodeSubtype::Variable),
+        name: name.to_string(),
+        qualified_name: Some(qualified_name),
+        file_uid: Some(ctx.file_uid.into()),
+        parent_node_uid: None,
+        location: Some(location_from_node(node)),
+        signature: None,
+        visibility: Some(if name.starts_with('_') {
+            Visibility::Private
+        } else {
+            Visibility::Export
+        }),
+        doc_comment: None,
+        metadata_json: None,
+    };
+
+    emit_node(variable_node, ctx);
+}
+
+/// Extract a variable from an assignment node.
+///
+/// `scope_prefix` is used for local variables (e.g., "func_name.") or None for module-level.
+fn extract_assignment_variable(node: &Node, ctx: &mut ExtractionCtx, scope_prefix: Option<&str>) {
+    // Get the left-hand side
+    let Some(left) = node.child_by_field_name("left") else {
+        return;
+    };
+
+    // Only handle simple identifiers, not attribute access (self.x), subscripts, etc.
+    if left.kind() != "identifier" {
+        return;
+    }
+
+    let name = node_text(&left, ctx.source);
+
+    // Skip if it looks like an instance attribute being assigned outside method context
+    // (shouldn't happen at module level, but be safe)
+    if name.starts_with("self.") || name.starts_with("cls.") {
+        return;
+    }
+
+    let qualified_name = match scope_prefix {
+        Some(prefix) => format!("{}.{}", prefix, name),
+        None => name.to_string(),
+    };
+
+    let variable_node = ExtractedNode {
+        node_uid: uuid::Uuid::new_v4().to_string(),
+        snapshot_uid: ctx.snapshot_uid.into(),
+        repo_uid: ctx.repo_uid.into(),
+        stable_key: format!(
+            "{}:{}#{}:SYMBOL:VARIABLE",
+            ctx.repo_uid, ctx.file_path, qualified_name
+        ),
+        kind: NodeKind::Symbol,
+        subtype: Some(NodeSubtype::Variable),
+        name: name.to_string(),
+        qualified_name: Some(qualified_name),
+        file_uid: Some(ctx.file_uid.into()),
+        parent_node_uid: None,
+        location: Some(location_from_node(node)),
+        signature: None,
+        visibility: Some(if name.starts_with('_') {
+            Visibility::Private
+        } else {
+            Visibility::Export
+        }),
+        doc_comment: None,
+        metadata_json: None,
+    };
+
+    emit_node(variable_node, ctx);
+}
+
+/// Extract local variable assignments from a function body.
+///
+/// Walks the body looking for assignment statements, excluding:
+/// - Instance attribute assignments (`self.x = ...`)
+/// - Loop variables
+/// - Comprehension variables
+fn extract_local_variables(body: &Node, ctx: &mut ExtractionCtx, scope_prefix: &str) {
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        match child.kind() {
+            "expression_statement" => {
+                // Look for assignment inside
+                let mut inner_cursor = child.walk();
+                for inner in child.children(&mut inner_cursor) {
+                    if inner.kind() == "assignment" {
+                        extract_local_assignment(&inner, ctx, scope_prefix);
+                    }
+                }
+            }
+            // Handle annotated assignments: `x: int = 1`
+            "annotated_assignment" => {
+                extract_annotated_assignment(&child, ctx, Some(scope_prefix));
+            }
+            // Recurse into blocks but skip nested functions/classes
+            "if_statement" | "for_statement" | "while_statement" | "with_statement"
+            | "try_statement" | "match_statement" => {
+                extract_local_variables_recursive(&child, ctx, scope_prefix);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Recursively extract local variables from nested blocks.
+fn extract_local_variables_recursive(node: &Node, ctx: &mut ExtractionCtx, scope_prefix: &str) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            // Skip nested function/class definitions
+            "function_definition" | "class_definition" => continue,
+            "expression_statement" => {
+                let mut inner_cursor = child.walk();
+                for inner in child.children(&mut inner_cursor) {
+                    if inner.kind() == "assignment" {
+                        extract_local_assignment(&inner, ctx, scope_prefix);
+                    }
+                }
+            }
+            // Handle annotated assignments: `x: int = 1`
+            "annotated_assignment" => {
+                extract_annotated_assignment(&child, ctx, Some(scope_prefix));
+            }
+            "block" => {
+                extract_local_variables_recursive(&child, ctx, scope_prefix);
+            }
+            _ => {
+                // Recurse into other node types
+                extract_local_variables_recursive(&child, ctx, scope_prefix);
+            }
+        }
+    }
+}
+
+/// Extract a local variable from an assignment, excluding instance attributes.
+fn extract_local_assignment(node: &Node, ctx: &mut ExtractionCtx, scope_prefix: &str) {
+    let Some(left) = node.child_by_field_name("left") else {
+        return;
+    };
+
+    // Skip attribute access (self.x, obj.attr)
+    if left.kind() != "identifier" {
+        return;
+    }
+
+    let name = node_text(&left, ctx.source);
+
+    let qualified_name = format!("{}.{}", scope_prefix, name);
+
+    let variable_node = ExtractedNode {
+        node_uid: uuid::Uuid::new_v4().to_string(),
+        snapshot_uid: ctx.snapshot_uid.into(),
+        repo_uid: ctx.repo_uid.into(),
+        stable_key: format!(
+            "{}:{}#{}:SYMBOL:VARIABLE",
+            ctx.repo_uid, ctx.file_path, qualified_name
+        ),
+        kind: NodeKind::Symbol,
+        subtype: Some(NodeSubtype::Variable),
+        name: name.to_string(),
+        qualified_name: Some(qualified_name),
+        file_uid: Some(ctx.file_uid.into()),
+        parent_node_uid: None,
+        location: Some(location_from_node(node)),
+        signature: None,
+        visibility: Some(Visibility::Private), // Local variables are always private
+        doc_comment: None,
+        metadata_json: None,
+    };
+
+    emit_node(variable_node, ctx);
 }
 
 // -- Import statement extraction --------------------------------------------
@@ -585,7 +822,13 @@ fn extract_function(node: &Node, ctx: &mut ExtractionCtx) {
 
     // Check if this is a method (inside a class)
     let (subtype, qualified_name) = if let Some(class_name) = &ctx.current_class {
-        (NodeSubtype::Method, format!("{}.{}", class_name, name))
+        // __init__ is a constructor, other methods are regular methods
+        let subtype = if name == "__init__" {
+            NodeSubtype::Constructor
+        } else {
+            NodeSubtype::Method
+        };
+        (subtype, format!("{}.{}", class_name, name))
     } else {
         (NodeSubtype::Function, name.to_string())
     };
@@ -645,9 +888,30 @@ fn extract_function(node: &Node, ctx: &mut ExtractionCtx) {
         return;
     }
 
-    // Extract calls from function body
+    // Compute and store metrics
     if let Some(body) = node.child_by_field_name("body") {
+        let cyclomatic = compute_cyclomatic_complexity(&body);
+        let nesting = compute_max_nesting_depth(&body, 0);
+        let param_count = count_parameters(node, ctx.source);
+        let location = location_from_node(node);
+        let function_length = (location.line_end - location.line_start + 1) as u32;
+
+        ctx.metrics.insert(
+            graph_node.stable_key.clone(),
+            ExtractedMetrics {
+                cyclomatic_complexity: cyclomatic,
+                parameter_count: param_count,
+                max_nesting_depth: nesting,
+                function_length: Some(function_length),
+                cognitive_complexity: None, // Deferred
+            },
+        );
+
+        // Extract calls from function body
         extract_calls_from_node(&body, ctx, &graph_node.node_uid);
+
+        // Extract local variables from function body
+        extract_local_variables(&body, ctx, &qualified_name);
     }
 }
 
@@ -786,6 +1050,120 @@ fn get_call_target_name(fn_node: &Node, source: &str) -> Option<String> {
         }
         _ => None,
     }
+}
+
+// -- Metrics computation ----------------------------------------------------
+
+/// Compute cyclomatic complexity for a function body.
+///
+/// Counts decision points: if, elif, for, while, and, or, except, with, assert, match/case.
+/// Base complexity is 1.
+fn compute_cyclomatic_complexity(node: &Node) -> u32 {
+    let mut complexity = 1u32; // Base complexity
+
+    fn count_decisions(node: &Node, count: &mut u32) {
+        match node.kind() {
+            // Control flow
+            "if_statement" | "elif_clause" | "for_statement" | "while_statement" => {
+                *count += 1;
+            }
+            // Exception handling
+            "except_clause" => {
+                *count += 1;
+            }
+            // Context managers
+            "with_statement" => {
+                *count += 1;
+            }
+            // Assertions
+            "assert_statement" => {
+                *count += 1;
+            }
+            // Pattern matching (Python 3.10+)
+            "case_clause" => {
+                *count += 1;
+            }
+            // Boolean operators (short-circuit evaluation = decision point)
+            "boolean_operator" => {
+                *count += 1;
+            }
+            // Conditional expressions (ternary)
+            "conditional_expression" => {
+                *count += 1;
+            }
+            _ => {}
+        }
+
+        // Recurse into children, but skip nested function/class definitions
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() != "function_definition" && child.kind() != "class_definition" {
+                count_decisions(&child, count);
+            }
+        }
+    }
+
+    count_decisions(node, &mut complexity);
+    complexity
+}
+
+/// Compute maximum nesting depth in a function body.
+///
+/// Counts nesting levels for: if, for, while, with, try, match.
+fn compute_max_nesting_depth(node: &Node, current_depth: u32) -> u32 {
+    let mut max_depth = current_depth;
+
+    let new_depth = match node.kind() {
+        "if_statement" | "for_statement" | "while_statement" | "with_statement"
+        | "try_statement" | "match_statement" => current_depth + 1,
+        _ => current_depth,
+    };
+
+    if new_depth > max_depth {
+        max_depth = new_depth;
+    }
+
+    // Recurse into children, skip nested function/class definitions
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "function_definition" && child.kind() != "class_definition" {
+            let child_max = compute_max_nesting_depth(&child, new_depth);
+            if child_max > max_depth {
+                max_depth = child_max;
+            }
+        }
+    }
+
+    max_depth
+}
+
+/// Count parameters in a function definition.
+fn count_parameters(node: &Node, source: &str) -> u32 {
+    let Some(params) = node.child_by_field_name("parameters") else {
+        return 0;
+    };
+
+    let mut count = 0u32;
+    let mut cursor = params.walk();
+    for child in params.children(&mut cursor) {
+        match child.kind() {
+            "identifier" | "typed_parameter" | "default_parameter" | "typed_default_parameter"
+            | "list_splat_pattern" | "dictionary_splat_pattern" => {
+                // Get the parameter name (first identifier child or the node itself)
+                let text = child
+                    .child_by_field_name("name")
+                    .map(|n| node_text(&n, source))
+                    .unwrap_or_else(|| node_text(&child, source));
+                // Skip 'self' and 'cls' in methods
+                if text != "self" && text != "cls" {
+                    count += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    count
 }
 
 // -- Helpers ----------------------------------------------------------------
@@ -960,6 +1338,291 @@ mod tests {
             .unwrap();
         assert_eq!(method.name, "bar");
         assert!(method.qualified_name.as_ref().unwrap().contains("Foo.bar"));
+    }
+
+    #[test]
+    fn extracts_init_as_constructor() {
+        let result = extract_test(
+            r#"class MyClass:
+    def __init__(self, value):
+        self.value = value
+
+    def get_value(self):
+        return self.value
+"#,
+        );
+        // __init__ should be Constructor
+        let constructor = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Constructor))
+            .unwrap();
+        assert_eq!(constructor.name, "__init__");
+        assert!(constructor
+            .qualified_name
+            .as_ref()
+            .unwrap()
+            .contains("MyClass.__init__"));
+
+        // Other methods should still be Method
+        let method = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Method))
+            .unwrap();
+        assert_eq!(method.name, "get_value");
+    }
+
+    // -- Metrics extraction --
+
+    #[test]
+    fn extracts_cyclomatic_complexity_simple() {
+        let result = extract_test(
+            r#"def simple():
+    return 42
+"#,
+        );
+        let func = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Function))
+            .unwrap();
+        let metrics = result.metrics.get(&func.stable_key).unwrap();
+        // Base complexity = 1, no decision points
+        assert_eq!(metrics.cyclomatic_complexity, 1);
+    }
+
+    #[test]
+    fn extracts_cyclomatic_complexity_with_if() {
+        let result = extract_test(
+            r#"def with_if(x):
+    if x > 0:
+        return 1
+    else:
+        return 0
+"#,
+        );
+        let func = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Function))
+            .unwrap();
+        let metrics = result.metrics.get(&func.stable_key).unwrap();
+        // Base = 1, if = 1 → total = 2
+        assert_eq!(metrics.cyclomatic_complexity, 2);
+    }
+
+    #[test]
+    fn extracts_cyclomatic_complexity_complex() {
+        let result = extract_test(
+            r#"def complex_func(x, y):
+    if x > 0:
+        if y > 0:
+            return 1
+        elif y < 0:
+            return 2
+    for i in range(10):
+        if i % 2 == 0 and x > i:
+            continue
+    while x > 0:
+        x -= 1
+    return 0
+"#,
+        );
+        let func = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Function))
+            .unwrap();
+        let metrics = result.metrics.get(&func.stable_key).unwrap();
+        // Base=1, outer if=1, inner if=1, elif=1, for=1, if in for=1, and=1, while=1 → total=8
+        assert_eq!(metrics.cyclomatic_complexity, 8);
+    }
+
+    #[test]
+    fn extracts_nesting_depth() {
+        let result = extract_test(
+            r#"def nested():
+    if True:
+        for i in range(10):
+            while i > 0:
+                pass
+"#,
+        );
+        let func = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Function))
+            .unwrap();
+        let metrics = result.metrics.get(&func.stable_key).unwrap();
+        // if → for → while = depth 3
+        assert_eq!(metrics.max_nesting_depth, 3);
+    }
+
+    #[test]
+    fn extracts_parameter_count() {
+        let result = extract_test(
+            r#"def with_params(a, b, c=10, *args, **kwargs):
+    pass
+"#,
+        );
+        let func = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Function))
+            .unwrap();
+        let metrics = result.metrics.get(&func.stable_key).unwrap();
+        // a, b, c, args, kwargs = 5 params
+        assert_eq!(metrics.parameter_count, 5);
+    }
+
+    #[test]
+    fn extracts_method_parameter_count_excludes_self() {
+        let result = extract_test(
+            r#"class Foo:
+    def method(self, x, y):
+        pass
+"#,
+        );
+        let method = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Method))
+            .unwrap();
+        let metrics = result.metrics.get(&method.stable_key).unwrap();
+        // x, y = 2 params (self excluded)
+        assert_eq!(metrics.parameter_count, 2);
+    }
+
+    #[test]
+    fn extracts_function_length() {
+        let result = extract_test(
+            r#"def multiline():
+    x = 1
+    y = 2
+    z = 3
+    return x + y + z
+"#,
+        );
+        let func = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Function))
+            .unwrap();
+        let metrics = result.metrics.get(&func.stable_key).unwrap();
+        // Lines 1-5 = 5 lines
+        assert_eq!(metrics.function_length, Some(5));
+    }
+
+    // -- Variable extraction --
+
+    #[test]
+    fn extracts_module_level_variable() {
+        let result = extract_test("CONFIG = 'production'");
+        let var = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Variable))
+            .unwrap();
+        assert_eq!(var.name, "CONFIG");
+        assert_eq!(var.visibility, Some(Visibility::Export));
+    }
+
+    #[test]
+    fn extracts_private_module_variable() {
+        let result = extract_test("_internal_state = []");
+        let var = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Variable))
+            .unwrap();
+        assert_eq!(var.name, "_internal_state");
+        assert_eq!(var.visibility, Some(Visibility::Private));
+    }
+
+    #[test]
+    fn extracts_local_variable_in_function() {
+        let result = extract_test(
+            r#"def process():
+    count = 0
+    return count
+"#,
+        );
+        let var = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Variable))
+            .unwrap();
+        assert_eq!(var.name, "count");
+        // Qualified name includes function scope
+        assert!(var.qualified_name.as_ref().unwrap().contains("process.count"));
+        // Local variables are always private
+        assert_eq!(var.visibility, Some(Visibility::Private));
+    }
+
+    #[test]
+    fn does_not_extract_self_assignment_as_variable() {
+        let result = extract_test(
+            r#"class Foo:
+    def __init__(self, x):
+        self.x = x
+"#,
+        );
+        // self.x is an instance attribute, not a variable
+        let vars: Vec<_> = result
+            .nodes
+            .iter()
+            .filter(|n| n.subtype == Some(NodeSubtype::Variable))
+            .collect();
+        // Should have no VARIABLE nodes (self.x is attribute access, not identifier)
+        assert!(vars.is_empty());
+    }
+
+    #[test]
+    fn extracts_nested_local_variable() {
+        let result = extract_test(
+            r#"def outer():
+    if True:
+        inner_var = 42
+"#,
+        );
+        let var = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Variable))
+            .unwrap();
+        assert_eq!(var.name, "inner_var");
+        assert!(var.qualified_name.as_ref().unwrap().contains("outer.inner_var"));
+    }
+
+    #[test]
+    fn extracts_annotated_assignment_module_level() {
+        let result = extract_test("count: int = 0");
+        let var = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Variable))
+            .unwrap();
+        assert_eq!(var.name, "count");
+        assert_eq!(var.qualified_name.as_ref().unwrap(), "count");
+        assert_eq!(var.visibility, Some(Visibility::Export));
+    }
+
+    #[test]
+    fn extracts_annotated_assignment_in_function() {
+        let result = extract_test(
+            r#"def process():
+    total: int = 0
+    return total
+"#,
+        );
+        let var = result
+            .nodes
+            .iter()
+            .find(|n| n.subtype == Some(NodeSubtype::Variable))
+            .unwrap();
+        assert_eq!(var.name, "total");
+        assert!(var.qualified_name.as_ref().unwrap().contains("process.total"));
     }
 
     // -- Import extraction --
