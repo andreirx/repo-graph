@@ -311,3 +311,99 @@ resource_kind = "db"
 driver        = "jdbc"
 direction     = "read_write"
 basis         = "stdlib_api"
+
+# ── C libc:stdio (fopen family) ────────────────────────────────────
+#
+# C-SB-1: fopen with mode-normalized direction symbols. The C
+# extractor parses the mode argument and normalizes to direction-
+# specific symbols:
+#   - 'r', 'rb' → fopen_read
+#   - 'w', 'wb', 'a', 'ab', 'x' → fopen_write
+#   - 'r+', 'w+', etc. → fopen_read_write
+# This mirrors the Python adapter's mode normalization pattern.
+
+[[binding]]
+language      = "c"
+module        = "libc:stdio"
+symbol_path   = "fopen_read"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "c"
+module        = "libc:stdio"
+symbol_path   = "fopen_write"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "c"
+module        = "libc:stdio"
+symbol_path   = "fopen_read_write"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "read_write"
+basis         = "stdlib_api"
+
+# ── C libc:fcntl (POSIX open family) ───────────────────────────────
+#
+# C-SB-1: POSIX open() with flag-pattern-based direction. The C
+# extractor matches flag names in the source to determine direction:
+#   - O_RDONLY → open_read
+#   - O_WRONLY → open_write
+#   - O_RDWR → open_read_write
+# Unknown/dynamic flags default to read_write.
+
+[[binding]]
+language      = "c"
+module        = "libc:fcntl"
+symbol_path   = "open_read"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "c"
+module        = "libc:fcntl"
+symbol_path   = "open_write"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "c"
+module        = "libc:fcntl"
+symbol_path   = "open_read_write"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "read_write"
+basis         = "stdlib_api"
+
+# ── C SQLite C API ─────────────────────────────────────────────────
+#
+# C-SB-1: SQLite open is always read_write (direction determined by
+# subsequent execute calls, which are out of scope for first cut).
+
+[[binding]]
+language      = "c"
+module        = "sqlite3"
+symbol_path   = "sqlite3_open"
+resource_kind = "db"
+driver        = "sqlite3"
+direction     = "read_write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "c"
+module        = "sqlite3"
+symbol_path   = "sqlite3_open_v2"
+resource_kind = "db"
+driver        = "sqlite3"
+direction     = "read_write"
+basis         = "stdlib_api"

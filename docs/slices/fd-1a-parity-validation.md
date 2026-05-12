@@ -156,7 +156,7 @@ rmap surfaces list ./test-artifacts/fd-1a-parity.db express-routes --kind http_p
 ## Artifacts Produced
 
 - `docs/slices/fd-1a-parity-report.md` — comparison results and delta classification
-- Updated `docs/slices/fd-1a-rust-express-detector-parity.md` — parity status
+- Updated `docs/shipped/slices/fd-1a-rust-express-detector-parity.md` — parity status
 
 ## Estimated Effort
 

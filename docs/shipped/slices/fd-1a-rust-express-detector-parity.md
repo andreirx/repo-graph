@@ -1,14 +1,14 @@
 # FD-1A: Rust Express Detector Parity
 
-Status: IMPLEMENTED (2026-05-11)
+Status: **SHIPPED** (2026-05-12)
 Depends: FD-SUPPORT-1 (storage write path) — IMPLEMENTED
 Unblocks: FD-1B (React detector)
 
-## Implementation Summary
+## Shipped Summary
 
 AST-based Express route detection using tree-sitter-typescript. Integrated into compose.rs orchestration (after npm module persistence for FK constraint).
 
-**Parity Status:** Validated (2026-05-12). See `fd-1a-parity-report.md` for comparison results.
+**Parity validated (2026-05-12).** See `fd-1a-parity-report.md` for comparison results.
 
 Core route detection matches TS prototype (15 of 17 routes shared). Documented differences:
 - Rust includes USE middleware mounts (TS excludes)

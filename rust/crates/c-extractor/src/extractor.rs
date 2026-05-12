@@ -9,8 +9,8 @@ use repo_graph_classification::types::{ImportBinding, RuntimeBuiltinsSet, Source
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::routing::is_test_file;
 use repo_graph_indexer::types::{
-    EdgeType, ExtractionResult, ExtractedEdge, ExtractedNode, ExtractedMetrics,
-    NodeKind, NodeSubtype, Resolution, Visibility,
+    CallArgPayload, EdgeType, ExtractionResult, ExtractedEdge, ExtractedNode,
+    ExtractedMetrics, NodeKind, NodeSubtype, Resolution, ResolvedCallsite, Visibility,
 };
 
 use crate::metrics::compute_function_metrics;
@@ -20,6 +20,20 @@ const EXTRACTOR_NAME: &str = "c-core:0.1.0";
 
 /// Languages this extractor handles.
 const LANGUAGES: &[&str] = &["c"];
+
+// ── State-boundary constants (C-SB-1) ─────────────────────────────
+
+/// State-boundary-relevant libc:stdio functions.
+/// fopen uses synthetic module "libc:stdio".
+const SB_STDIO_FUNCTIONS: &[&str] = &["fopen"];
+
+/// State-boundary-relevant libc:fcntl functions.
+/// open uses synthetic module "libc:fcntl".
+const SB_FCNTL_FUNCTIONS: &[&str] = &["open"];
+
+/// State-boundary-relevant SQLite functions.
+/// sqlite3_open* uses synthetic module "sqlite3".
+const SB_SQLITE_FUNCTIONS: &[&str] = &["sqlite3_open", "sqlite3_open_v2"];
 
 /// C runtime builtins (libc functions, etc.)
 fn c_runtime_builtins() -> RuntimeBuiltinsSet {
@@ -169,6 +183,7 @@ impl ExtractorPort for CExtractor {
             import_bindings: Vec::new(),
             metrics: BTreeMap::new(),
             stable_key_counts: HashMap::new(),
+            resolved_callsites: Vec::new(),
         };
 
         // Walk top-level declarations
@@ -215,7 +230,7 @@ impl ExtractorPort for CExtractor {
             edges: ctx.edges,
             metrics: ctx.metrics,
             import_bindings: ctx.import_bindings,
-            resolved_callsites: Vec::new(),
+            resolved_callsites: ctx.resolved_callsites,
         })
     }
 }
@@ -234,6 +249,8 @@ struct ExtractionCtx<'a> {
     metrics: BTreeMap<String, ExtractedMetrics>,
     /// Tracks usage count for stable_key disambiguation
     stable_key_counts: HashMap<String, u32>,
+    /// C-SB-1: ResolvedCallsite facts for state-boundary integration.
+    resolved_callsites: Vec<ResolvedCallsite>,
 }
 
 impl<'a> ExtractionCtx<'a> {
@@ -520,6 +537,188 @@ fn extract_call(
             "calleeName": target_name
         }).to_string()),
     });
+
+    // C-SB-1: Attempt to generate ResolvedCallsite for state-boundary analysis.
+    if let Some(callsite) = try_resolve_callsite_c(node, src, source_node_uid, target_name) {
+        ctx.resolved_callsites.push(callsite);
+    }
+}
+
+// ── State-boundary callsite resolution (C-SB-1) ──────────────────
+
+/// Attempt to generate a `ResolvedCallsite` for state-boundary analysis.
+///
+/// This handles:
+/// 1. fopen(path, mode) → synthetic module "libc:stdio", direction-specific symbol
+/// 2. open(path, flags) → synthetic module "libc:fcntl", direction-specific symbol
+/// 3. sqlite3_open(path, &db) → synthetic module "sqlite3"
+///
+/// Returns `None` if:
+/// - The function is not state-boundary-relevant
+/// - arg0 is not a string literal (dynamic paths are out of scope)
+fn try_resolve_callsite_c(
+    call_node: &tree_sitter::Node,
+    src: &[u8],
+    enclosing_symbol_node_uid: &str,
+    fn_name: &str,
+) -> Option<ResolvedCallsite> {
+    // Determine synthetic module and base symbol.
+    let (resolved_module, base_symbol) = if SB_STDIO_FUNCTIONS.contains(&fn_name) {
+        ("libc:stdio", fn_name)
+    } else if SB_FCNTL_FUNCTIONS.contains(&fn_name) {
+        ("libc:fcntl", fn_name)
+    } else if SB_SQLITE_FUNCTIONS.contains(&fn_name) {
+        ("sqlite3", fn_name)
+    } else {
+        return None;
+    };
+
+    // Get arguments node.
+    let arguments = call_node.child_by_field_name("arguments")?;
+
+    // Extract arg0 (path) — must be a string literal.
+    let arg0_payload = extract_arg0_payload(&arguments, src)?;
+
+    // Extract arg1 if present and needed for mode/flags.
+    let arg1_payload = extract_arg1_payload(&arguments, src);
+
+    // Determine direction-specific resolved_symbol.
+    let resolved_symbol = match resolved_module {
+        "libc:stdio" => {
+            // fopen: use mode argument to determine direction.
+            let mode = match &arg1_payload {
+                Some(CallArgPayload::StringLiteral { value }) => value.as_str(),
+                _ => "", // Default to read if no mode
+            };
+            format!("{}_{}", base_symbol, normalize_fopen_mode(mode))
+        }
+        "libc:fcntl" => {
+            // open: use flags argument to determine direction.
+            let flags = match &arg1_payload {
+                Some(CallArgPayload::StringLiteral { value }) => value.as_str(),
+                _ => "", // Default to read_write if flags are dynamic
+            };
+            format!("{}_{}", base_symbol, normalize_open_flags(flags))
+        }
+        "sqlite3" => {
+            // sqlite3_open*: always read_write.
+            base_symbol.to_string()
+        }
+        _ => base_symbol.to_string(),
+    };
+
+    Some(ResolvedCallsite {
+        enclosing_symbol_node_uid: enclosing_symbol_node_uid.to_string(),
+        resolved_module: resolved_module.to_string(),
+        resolved_symbol,
+        arg0_payload,
+        arg1_payload,
+        source_location: location_from_node(call_node),
+    })
+}
+
+/// Extract arg0 as a CallArgPayload. Returns None if not a string literal.
+fn extract_arg0_payload(arguments: &tree_sitter::Node, src: &[u8]) -> Option<CallArgPayload> {
+    let mut cursor = arguments.walk();
+    let mut arg_index = 0;
+
+    for child in arguments.children(&mut cursor) {
+        // Skip punctuation: opening paren, commas, closing paren.
+        if child.kind() == "(" || child.kind() == ")" || child.kind() == "," || child.kind() == "comment" {
+            continue;
+        }
+
+        if arg_index == 0 {
+            // This is arg0.
+            if child.kind() == "string_literal" {
+                let text = child.utf8_text(src).ok()?;
+                // Strip quotes. C string literals are "..."
+                let value = text.trim_matches('"').to_string();
+                return Some(CallArgPayload::StringLiteral { value });
+            }
+            // Not a string literal → dynamic path.
+            return None;
+        }
+        arg_index += 1;
+    }
+    None
+}
+
+/// Extract arg1 as a CallArgPayload if present. For fopen this is the mode,
+/// for open this might be the flags identifier.
+fn extract_arg1_payload(arguments: &tree_sitter::Node, src: &[u8]) -> Option<CallArgPayload> {
+    let mut cursor = arguments.walk();
+    let mut arg_index = 0;
+    for child in arguments.children(&mut cursor) {
+        // Skip punctuation.
+        if child.kind() == "," || child.kind() == "(" || child.kind() == ")" || child.kind() == "comment" {
+            continue;
+        }
+
+        if arg_index == 1 {
+            // This is arg1.
+            if child.kind() == "string_literal" {
+                let text = child.utf8_text(src).ok()?;
+                let value = text.trim_matches('"').to_string();
+                return Some(CallArgPayload::StringLiteral { value });
+            } else if child.kind() == "identifier" {
+                // For open(), flags are often identifiers like O_RDONLY.
+                // We capture the identifier name as a string literal for
+                // pattern matching in normalize_open_flags.
+                let value = child.utf8_text(src).ok()?.to_string();
+                return Some(CallArgPayload::StringLiteral { value });
+            }
+            // Dynamic arg1 — return None.
+            return None;
+        }
+        arg_index += 1;
+    }
+    None
+}
+
+/// Normalize fopen mode string to direction suffix.
+///
+/// Mode interpretation (matches Python adapter):
+/// - `'r'`, `'rb'` → `read`
+/// - `'w'`, `'wb'`, `'a'`, `'ab'`, `'x'`, `'xb'` → `write`
+/// - Contains `'+'` → `read_write`
+/// - Missing or unknown → `read` (C default)
+fn normalize_fopen_mode(mode: &str) -> &'static str {
+    // Strip 'b' (binary mode indicator).
+    let mode_normalized: String = mode.chars().filter(|c| *c != 'b').collect();
+
+    if mode_normalized.contains('+') {
+        "read_write"
+    } else if mode_normalized.starts_with('r') || mode_normalized.is_empty() {
+        "read"
+    } else if mode_normalized.starts_with('w')
+        || mode_normalized.starts_with('a')
+        || mode_normalized.starts_with('x')
+    {
+        "write"
+    } else {
+        "read" // Unknown mode, default to read.
+    }
+}
+
+/// Normalize open() flags identifier to direction suffix.
+///
+/// Flag pattern matching:
+/// - `O_RDONLY` → `read`
+/// - `O_WRONLY` → `write`
+/// - `O_RDWR` → `read_write`
+/// - Unknown/dynamic → `read_write` (conservative default)
+fn normalize_open_flags(flags: &str) -> &'static str {
+    if flags.contains("O_RDONLY") {
+        "read"
+    } else if flags.contains("O_WRONLY") {
+        "write"
+    } else if flags.contains("O_RDWR") {
+        "read_write"
+    } else {
+        // Unknown flags, conservative default.
+        "read_write"
+    }
 }
 
 // ── Struct extraction ────────────────────────────────────────────
@@ -890,5 +1089,207 @@ static void helper() {}
         assert_eq!(metrics.cyclomatic_complexity, 3); // base + if + while
         assert_eq!(metrics.parameter_count, 2);
         assert_eq!(metrics.max_nesting_depth, 2);
+    }
+
+    // -- ResolvedCallsite extraction tests (C-SB-1) --
+
+    #[test]
+    fn fopen_read_emits_resolved_callsite() {
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo() { FILE* f = fopen("config.txt", "r"); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let cs = &result.resolved_callsites[0];
+        assert_eq!(cs.resolved_module, "libc:stdio");
+        assert_eq!(cs.resolved_symbol, "fopen_read");
+        assert!(matches!(&cs.arg0_payload, CallArgPayload::StringLiteral { value } if value == "config.txt"));
+    }
+
+    #[test]
+    fn fopen_write_emits_resolved_callsite() {
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo() { FILE* f = fopen("output.log", "w"); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let cs = &result.resolved_callsites[0];
+        assert_eq!(cs.resolved_module, "libc:stdio");
+        assert_eq!(cs.resolved_symbol, "fopen_write");
+    }
+
+    #[test]
+    fn fopen_append_emits_write() {
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo() { FILE* f = fopen("app.log", "a"); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(result.resolved_callsites[0].resolved_symbol, "fopen_write");
+    }
+
+    #[test]
+    fn fopen_read_write_emits_resolved_callsite() {
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo() { FILE* f = fopen("data.bin", "r+"); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(result.resolved_callsites[0].resolved_symbol, "fopen_read_write");
+    }
+
+    #[test]
+    fn fopen_binary_mode_normalized() {
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo() { FILE* f = fopen("data.bin", "rb"); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        // 'rb' normalizes to 'r' → fopen_read
+        assert_eq!(result.resolved_callsites[0].resolved_symbol, "fopen_read");
+    }
+
+    #[test]
+    fn fopen_dynamic_path_skipped() {
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo(char* path) { FILE* f = fopen(path, "r"); }"#,
+            "src/main.c",
+        );
+
+        // Dynamic path → no ResolvedCallsite
+        assert!(result.resolved_callsites.is_empty());
+        // But CALLS edge still emitted
+        assert!(result.edges.iter().any(|e| e.edge_type == EdgeType::Calls && e.target_key == "fopen"));
+    }
+
+    #[test]
+    fn open_rdonly_emits_resolved_callsite() {
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo() { int fd = open("data.bin", O_RDONLY); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let cs = &result.resolved_callsites[0];
+        assert_eq!(cs.resolved_module, "libc:fcntl");
+        assert_eq!(cs.resolved_symbol, "open_read");
+    }
+
+    #[test]
+    fn open_wronly_emits_resolved_callsite() {
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo() { int fd = open("out.bin", O_WRONLY); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(result.resolved_callsites[0].resolved_symbol, "open_write");
+    }
+
+    #[test]
+    fn open_rdwr_emits_resolved_callsite() {
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo() { int fd = open("file.dat", O_RDWR); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(result.resolved_callsites[0].resolved_symbol, "open_read_write");
+    }
+
+    #[test]
+    fn sqlite3_open_emits_resolved_callsite() {
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo() { sqlite3* db; sqlite3_open("app.db", &db); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let cs = &result.resolved_callsites[0];
+        assert_eq!(cs.resolved_module, "sqlite3");
+        assert_eq!(cs.resolved_symbol, "sqlite3_open");
+        assert!(matches!(&cs.arg0_payload, CallArgPayload::StringLiteral { value } if value == "app.db"));
+    }
+
+    #[test]
+    fn sqlite3_open_v2_emits_resolved_callsite() {
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo() { sqlite3* db; sqlite3_open_v2("app.db", &db, flags, 0); }"#,
+            "src/main.c",
+        );
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(result.resolved_callsites[0].resolved_module, "sqlite3");
+        assert_eq!(result.resolved_callsites[0].resolved_symbol, "sqlite3_open_v2");
+    }
+
+    #[test]
+    fn non_state_boundary_call_no_callsite() {
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        let result = extract_ok(
+            &ext,
+            r#"void foo() { printf("hello"); }"#,
+            "src/main.c",
+        );
+
+        // printf is not state-boundary-relevant
+        assert!(result.resolved_callsites.is_empty());
+    }
+
+    #[test]
+    fn top_level_fopen_no_callsite() {
+        let mut ext = CExtractor::new();
+        ext.initialize().unwrap();
+        // Top-level calls (outside function) can't have enclosing_symbol_node_uid
+        // because they're associated with FILE node. Currently these won't produce
+        // ResolvedCallsite because extract_calls_from_body is only called for functions.
+        let result = extract_ok(
+            &ext,
+            r#"FILE* g = fopen("global.txt", "r");"#,
+            "src/main.c",
+        );
+
+        // Top-level variable initializers are declarations, not call_expressions
+        // in tree-sitter-c parse, so no callsite is extracted.
+        assert!(result.resolved_callsites.is_empty());
     }
 }

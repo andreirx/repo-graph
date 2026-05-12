@@ -46,6 +46,9 @@ const EMBEDDED_TABLE_TOML: &str = include_str!("../bindings.toml");
 /// The `typescript` variant covers the full TS/JS family (`.ts`,
 /// `.tsx`, `.js`, `.jsx`) on the matcher side; the TOML value is
 /// `"typescript"` for any entry in that family.
+///
+/// C and C++ are separate variants (separate actors with different
+/// change reasons per C-SB-1/CPP-SB-1 design decision).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
@@ -57,11 +60,15 @@ pub enum Language {
 	/// TypeScript / TSX / JavaScript / JSX source files.
 	/// The only language actually consumed by slice 1.
 	Typescript,
-	/// Python source files (`.py`). Reserved for a future slice.
+	/// Python source files (`.py`).
 	Python,
-	/// Java source files (`.java`). Reserved for a future slice.
+	/// Java source files (`.java`).
 	Java,
-	/// C and C++ source files. Reserved for a future slice.
+	/// C source files (`.c`, `.h`). Separate from C++ per C-SB-1
+	/// design decision: different APIs, different idioms.
+	C,
+	/// C++ source files (`.cpp`, `.cc`, `.cxx`, `.hpp`).
+	/// Separate from C per CPP-SB-1 design decision.
 	Cpp,
 }
 
@@ -196,6 +203,7 @@ impl BindingEntry {
 				Language::Typescript => "typescript",
 				Language::Python => "python",
 				Language::Java => "java",
+				Language::C => "c",
 				Language::Cpp => "cpp",
 			},
 			self.module,

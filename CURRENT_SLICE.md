@@ -2,11 +2,60 @@
 
 ## Current Priority
 
-Gap-closing: strengthen Layer 0–2 facts before expanding Layer 3 framework detection.
+C/C++ systems maturation: extend state-boundary extraction to C codebases.
 
-## Active Slice
+## Recently Shipped
 
-None currently active. Framework detection follow-on slices completed.
+**C-SB-1: C State Boundaries** — SHIPPED (2026-05-12)
+
+Slice doc: `docs/shipped/slices/c-sb-1-c-state-boundaries.md`
+
+### Summary
+
+C state-boundary extraction via `ResolvedCallsite` facts for `fopen`, `open`,
+and `sqlite3_open*` calls with mode/flag parsing for direction classification.
+
+### Completed
+
+- C extractor ResolvedCallsite emission (85 unit tests pass)
+- Mode parsing: `fopen("x", "r")` → `fopen_read`, etc.
+- Flag parsing: `open("x", O_RDONLY)` → `open_read`
+- CAdapter in state-extractor (6 unit tests pass)
+- 8 C bindings in bindings.toml
+- Hook promotion (C classified as Supported)
+- E2E integration test (`c_sb_1_integration.rs` — 10 tests)
+- Refresh-path coverage (3 tests: unchanged preservation, mixed files, dedup)
+
+### Validation Evidence (EXECUTED)
+
+```
+# E2E integration tests (including refresh)
+cargo test -p repo-graph-repo-index --test c_sb_1_integration
+→ 10 tests pass
+  - indexing: fopen read/write/read_write, open O_RDONLY, sqlite3_open
+  - negative: dynamic path, printf
+  - refresh: unchanged preservation, mixed changed/unchanged, dedup
+
+# Test corpus validation
+rmap resource list ./test-artifacts/c-sb-1.db state-boundaries-corpus
+→ 9 resources (7 FS, 2 DB)
+→ Directions correctly classified (read/write/read_write)
+
+# Smoke validation on swupdate
+rmap resource list ./test-artifacts/swupdate.db swupdate
+→ 5 FS resources detected
+→ /dev/null, /dev/urandom, /proc/cmdline, etc.
+```
+
+### Deferred
+
+- C++ state boundaries (separate CPP-SB-1 slice)
+- fread/fwrite (need file handle provenance)
+- Macro-wrapped calls
+
+## Next Priority
+
+CPP-SB-1: C++ state boundaries (not started)
 
 ## Completed Follow-on Slices
 
@@ -86,45 +135,6 @@ rmap inferences list --kind react_hook_usage
 
 ---
 
-**FD-1A: Rust Express Detector Parity** — IMPLEMENTED (2026-05-11)
-
-Slice doc: `docs/slices/fd-1a-rust-express-detector-parity.md`
-
-### Summary
-
-AST-based Express route detection for TypeScript/JavaScript files.
-
-### Completed
-
-- `detect_express_routes()` — AST-based detection via tree-sitter
-- `route_to_surface_with_resolver()` — conversion with module resolution
-- Compose-phase integration (after npm module persistence for FK)
-- Path parameter normalization (`:id` → `{id}`)
-- Evidence persistence (`evidence_count: 1` for all surfaces)
-- Directory-boundary-safe module resolution (fixed)
-- E2E integration test (`fd_1a_express_integration.rs` — 5 tests)
-- Validation corpus at `test/fixtures/typescript/express-routes/`
-- 16 routes detected from corpus (exceeds 5-route acceptance criteria)
-- 10 unit tests pass
-
-### Validation Evidence (EXECUTED)
-
-```
-rmap surfaces list --kind http_provider
-→ 16 http_provider surfaces detected
-→ evidence_count: 1 for all surfaces
-→ All routes linked to npm module (FK resolved)
-→ Dynamic paths correctly skipped
-→ Non-Express files correctly ignored
-```
-
-### Deferred
-
-- Handler symbol attribution (FD-1A-4)
-- TS prototype parity validation (not executed)
-
----
-
 **FD-SUPPORT-1: Provider-Fact / Project-Surface Write Path** — IMPLEMENTED (2026-05-11)
 
 Slice doc: `docs/slices/fd-support-1-rust-provider-surface-write-path.md`
@@ -141,34 +151,19 @@ Storage write path for Rust-produced framework surfaces.
 - 7 new tests (20 total for project_surfaces CRUD)
 - Round-trip validation: insert → query → fields match
 
-## Recently Shipped
+## Other Recently Shipped
+
+**FD-1A: Rust Express Detector Parity** — SHIPPED (2026-05-12)
+Slice doc: `docs/shipped/slices/fd-1a-rust-express-detector-parity.md`
 
 **SB-7B: Java State Boundaries** — SHIPPED (2026-05-11)
-
 Slice doc: `docs/shipped/slices/sb-7b-java-state-boundaries.md`
 
-### Summary
+**DEP-1: Dependency Reconciliation Surface** — SHIPPED (2026-05-11)
+Slice doc: `docs/shipped/slices/dep-1-dependency-reconciliation-surface.md`
 
-Java adapter for state-boundary extraction using SB-7A substrate.
-Scope: `DriverManager.getConnection(String)` only.
-
-### Completed
-
-- `JavaAdapter` implementing `LanguageStateAdapter`
-- Java JDBC binding in `bindings.toml` (direction = read_write)
-- JDBC URL colon encoding (`jdbc:h2:...` -> `jdbc%3Ah2%3A...`) for stable-key
-- URL decoding at display layer (`name` shows decoded, `stable_key` stays encoded)
-- Hook promotion (Java classified as Supported)
-- End-to-end validation: 2 DB resources detected via `rmap resource list`
-- Automated E2E integration test (`sb_7b_java_integration.rs`)
-
-### Deferred (requires substrate extension)
-
-- JDBC statements (need connection->statement provenance)
-- NIO Path APIs (need path provenance from `Paths.get()`)
-- Java IO constructors (need constructor callsite support)
-
----
+**SB-7C: Python State Boundaries** — SHIPPED (2026-05-11)
+Slice doc: `docs/shipped/slices/sb-7c-python-state-boundaries.md`
 
 ## Recently Implemented (Support Slices)
 
@@ -197,55 +192,12 @@ Extended Java extractor to emit `ResolvedCallsite` facts for static method calls
 
 SB-7B narrow first-cut (`DriverManager.getConnection(String)` only) — can now consume these facts via adapter + bindings. Broader Java state boundaries require additional substrate work.
 
----
-
-**DEP-1: Dependency Reconciliation Surface** — SHIPPED (2026-05-11)
-
-Slice doc: `docs/shipped/slices/dep-1-dependency-reconciliation-surface.md`
-
-### Summary
-
-Dependency reconciliation surface for joining declared dependencies (from manifests) with observed external references (from imports) to produce module-level dependency summaries.
-
-### Key Fix (2026-05-11)
-
-Resolved upstream signal pollution: callee identifiers (e.g., `useState`, `React.createElement`) are now resolved to their import specifiers (e.g., `react`) using `file_signals.import_bindings_json`.
-
-### Validation
-
-- `deps list` shows `react` as `declared_and_used` with `import_count: 2`
-- `deps why react` finds both `useState` and `React.createElement` usages
-- `deps drift` correctly identifies `react-dom` as unused
-- 42 tests pass (12 CLI + 28 module-queries + 2 doc)
-
-**SB-7C: Python State Boundaries** — SHIPPED (2026-05-11)
-
-Slice doc: `docs/shipped/slices/sb-7c-python-state-boundaries.md`
-
-### Summary
-
-Python adapter for state-boundary extraction using SB-7A substrate.
-Scope: `open(path, mode)`, `sqlite3.connect()`, `psycopg2.connect()`.
-
-### Completed
-
-- Phase 1: `CallArgPayload` rename + `arg1_payload` addition to `ResolvedCallsite`
-- Phase 2: Python extractor `ResolvedCallsite` emission (builtin normalization, mode classification)
-- Phase 3: Python bindings in `bindings.toml` (open_read/write/read_write, sqlite3, psycopg2)
-- Phase 4: `PythonAdapter` implementation with mode-to-symbol normalization
-- Phase 5: Test corpus + hook fix (`classify_language` promoted Python to Supported)
-- End-to-end validation: 11 resources, 12 reads, 13 writes detected via `rmap resource list`
-
-### Deferred (requires substrate extension)
-
-- `pathlib.Path.*` methods (resource on receiver, needs `receiver_payload`)
-- `mysql.connector.connect(**kwargs)` (needs keyword arg payload)
-- `cursor.execute()` (needs cursor→connection provenance)
-
 ## Execution Queue
 
 | Slice | Scope | Layer | Status |
 |-------|-------|-------|--------|
+| **C-SB-1** | C state boundaries ([slice](docs/shipped/slices/c-sb-1-c-state-boundaries.md)) | L2 | **SHIPPED** |
+| CPP-SB-1 | C++ state boundaries ([slice](docs/slices/cpp-sb-1-cpp-state-boundaries.md)) | L2 | NOT STARTED |
 | **PY-EXT-2** | Python extractor depth | L0–1 | IMPLEMENTED (functional) |
 | **PY-EXT-2-PERF** | Python extractor performance validation | L0–1 | DEFERRED |
 | **SB-7A** | State boundaries support substrate | L2 | **SHIPPED** |
@@ -255,8 +207,29 @@ Scope: `open(path, mode)`, `sqlite3.connect()`, `psycopg2.connect()`.
 | **SB-7B** | Java state boundaries | L2 | **SHIPPED** |
 | FD-SUPPORT-1 | Provider-fact / project-surface write path | L2–3 | **IMPLEMENTED** |
 | FD-SUPPORT-2 | Inference query surface | L3 | **IMPLEMENTED** |
-| FD-1A | Rust Express detector parity | L3 | **IMPLEMENTED** |
+| FD-1A | Rust Express detector parity | L3 | **SHIPPED** |
 | FD-1B | Rust React detector parity | L3 | **IMPLEMENTED** |
+
+### Toolchain-Aware Evidence Import Track (NEW)
+
+| Slice | Scope | Layer | Status |
+|-------|-------|-------|--------|
+| NC-1 | LLVM coverage import ([slice](docs/slices/nc-1-llvm-cov-import.md)) | L2 | PLANNED |
+| BC-1 | Build context import ([slice](docs/slices/bc-1-compile-commands-import.md)) | L1 | PLANNED |
+| TC-1 | Snapshot/evidence provenance ([slice](docs/slices/tc-1-toolchain-inventory.md)) | L1 | PLANNED |
+| AF-1 | Analyzer findings import ([slice](docs/slices/af-1-analyzer-findings-import.md)) | L3 | PLANNED |
+| SE-1 | Clangd semantic enrichment ([slice](docs/slices/se-1-clangd-enrichment.md)) | L2 | PLANNED (LOW) |
+
+**Priority order:** NC-1 > BC-1 > TC-1 > AF-1 > SE-1
+
+**Rationale:** Coverage import (NC-1) provides immediate value for risk/liveness.
+Build context (BC-1) unlocks native semantic paths. TC-1 is narrowed to snapshot/evidence
+provenance only (not generic host inventory—AI agents do that live). Findings import
+(AF-1) adds risk signal as artifact import. Clangd enrichment (SE-1) is expensive/volatile.
+
+**Boundary:** Repo-graph persists evidence lineage, not host tool inventory. An AI agent
+can probe "what's installed?" ad hoc. Repo-graph answers "what produced this evidence?"
+and "are these snapshots comparable?"
 
 ## Why This Order
 
