@@ -66,12 +66,13 @@ for what is actually operational.
   Local IPC slice (BI-1A) shipped: Unix sockets, named/anonymous pipes, shared memory,
   message queues. C extractor + `rmap boundaries` CLI surface. Validated on swupdate
   (14 surfaces across 12 files).
-  TCP/UDP socket presence hints (BI-1B partial): multi-binding table, socket_type
+  TCP/UDP socket detection (BI-1B) shipped: multi-binding table, socket_type
   extraction (SOCK_STREAM, SOCK_DGRAM), guard predicates for AF_INET/AF_INET6.
-  Current limitation: only socket() calls emit surfaces (direction = bidirectional).
-  Later ops (bind, listen, connect, send, recv, sendto, recvfrom) lack family/type
-  context propagation, so provider/consumer roles are not yet surfaced. CLI supports
-  `--kind tcp` and `--kind udp` filters.
+  Phase 2: FD role tracking implemented — function-local fd registry tracks
+  socket lineages, accumulates bind/listen/connect evidence, refines direction:
+  TCP server (bind+listen) → Provider, TCP client (connect) → Consumer,
+  UDP → Bidirectional (no strong role semantics). D3: bind alone insufficient
+  for provider classification. CLI supports `--kind tcp` and `--kind udp` filters.
   AMQP/RabbitMQ detection (MB-1A) shipped: amqplib patterns (sendToQueue, publish,
   consume, assertQueue, assertExchange, bindQueue). Channel kind `amqp_queue`,
   protocol family `message_broker`. Validated on rabbitmq-tutorials (31 surfaces).
@@ -400,9 +401,10 @@ for what is actually operational.
 - Maturity: MATURE (22 CLI tests, read-side port trait, explicit-degradation on
   unknown enum values, deterministic ordering).
 - Design doc: `docs/design/boundary-interaction-ipc-device.md`.
-- BI-1B (TCP/UDP sockets): Partial. Detects socket() with AF_INET/AF_INET6 +
-  SOCK_STREAM (TCP) or SOCK_DGRAM (UDP). Direction is bidirectional (setup only).
-  Provider/consumer roles require fd→family/type tracking not yet implemented.
+- BI-1B (TCP/UDP sockets): Shipped. Detects socket() with AF_INET/AF_INET6 +
+  SOCK_STREAM (TCP) or SOCK_DGRAM (UDP). Phase 2 FD role tracking: function-local
+  fd registry accumulates bind/listen/connect evidence, refines direction to
+  Provider (bind+listen) or Consumer (connect). UDP stays Bidirectional.
 - Explicit exclusions (deferred to later slices):
   - Serial/CAN (Slice 2 — inter_device scope)
   - MQTT/ZeroMQ/D-Bus (Slice 3 — library wrappers)
@@ -969,8 +971,8 @@ The following are valuable but explicitly lower priority than refresh integrity:
 
 - **Snapshot-to-snapshot quality diff** — cross-cutting, not mechanism breadth
 - **Quality delta surfacing** — cross-cutting, not mechanism breadth
-- **PF-3 (RETURN_FATE)** — policy-fact depth, not discovery breadth
-- **BI-1B fd-tracking completion** — TCP/UDP depth, not new mechanism family
+- **PF-3 (RETURN_FATE)** — SHIPPED (policy-fact depth)
+- **BI-1B fd-tracking completion** — SHIPPED (TCP/UDP role detection)
 - **MB-3B (NATS request/reply)** — broker depth, not new mechanism family
 
 Return to these after refresh integrity and module parity are complete.
@@ -1392,10 +1394,18 @@ source-anchor provenance, or queryability.
   `rmap policy <db> <repo> --kind BEHAVIORAL_MARKER`. Detects RETRY_LOOP
   (loops with sleep/delay) and RESUME_OFFSET (curl CURLOPT_RESUME_FROM*).
   Validated on swupdate channel_get_file (2 retry loops + 1 resume offset).
+- **PF-3 (RETURN_FATE):** What happens to function return values at call sites.
+  `rmap policy <db> <repo> --kind RETURN_FATE`. Classifies IGNORED, CHECKED,
+  PROPAGATED, TRANSFORMED, STORED. Validated on swupdate (296 facts across
+  5 fate kinds). Same-file callee_key resolution; cross-file deferred to PF-3b.
 
-**Next:** PF-3 (RETURN_FATE), PF-4+ (BRANCH_OUTCOME, DEFAULT_PROVENANCE).
+**Deferred:** PF-4+ (BRANCH_OUTCOME, DEFAULT_PROVENANCE) — broader scope, needs
+explicit prioritization. See design doc for scope decisions.
 
-See slice docs: `docs/slices/pf-1-status-mapping.md`, `docs/slices/pf-2-behavioral-marker.md`.
+See slice docs:
+- `docs/shipped/policy-facts/pf-1-status-mapping.md`
+- `docs/shipped/policy-facts/pf-2-behavioral-marker.md`
+- `docs/shipped/policy-facts/pf-3-return-fate.md`
 Design doc: `docs/design/policy-facts-support-module.md`.
 
 ### 15. rgistr productization plan (phases 1-5 shipped)
@@ -1429,7 +1439,7 @@ explicit selection.
 Two-track architecture for boundary detection over a unified model:
 
 **Track A: Raw Transport**
-- BI-1B: TCP/UDP sockets — PARTIAL (socket() presence only, role detection pending)
+- BI-1B: TCP/UDP sockets — SHIPPED (socket detection + fd role tracking)
 - BI-1C: SharedArrayBuffer (JS/TS worker boundaries) — SHIPPED
 - BI-1D: Process signals (POSIX signal send/handle) — SHIPPED (C API, direction, signal names)
 
@@ -1522,22 +1532,23 @@ This is sufficient as an orientation substrate. An agent can:
 
 **── Breadth-First: Next Mechanism Families ──**
 
-6. BI-1B (TCP/UDP sockets) — PARTIAL
+6. BI-1B (TCP/UDP sockets) — SHIPPED
    - Multi-binding table architecture: `(language, function, channel_kind)` uniqueness
    - Binding candidates evaluated in TOML declaration order (Unix sockets first)
    - Socket type extraction: SOCK_STREAM, SOCK_DGRAM, SOCK_RAW, SOCK_SEQPACKET
    - Guard predicates: AF_INET/AF_INET6 + SOCK_STREAM → tcp_socket, SOCK_DGRAM → udp_socket
    - Disambiguation: bind/connect refuse when socket_type unavailable (no TCP-by-precedence)
+   - Phase 2: FD role tracking — function-local registry, evidence accumulation,
+     direction refinement (Provider/Consumer/Bidirectional)
    - `InteractionPattern::Datagram` added for UDP semantics
    - Files: `boundary-interaction/src/types.rs`, `boundary-interaction/bindings.toml`,
      `boundary-interaction/src/table.rs`, `boundary-interaction-extractor/src/emit.rs`,
      `c-extractor/src/boundary_detector.rs`, `repo-index/src/compose.rs`,
      `storage/src/boundary_interaction_read_impl.rs`
    - Tests: 7 socket_type extraction tests, 10 emitter guard tests (incl. disambiguation)
-   - **Current output:** socket() presence only (direction = bidirectional)
-   - **Limitation:** bind/listen/connect/send/recv/sendto/recvfrom lack family/type
-     context propagation — provider/consumer roles not surfaced
-   - **Pending:** fd→family/type tracking to propagate context to later socket ops
+   - Phase 2: FD role tracking — function-local registry, evidence accumulation,
+     direction refinement (Provider for bind+listen, Consumer for connect, Bidirectional for UDP)
+   - Implementation: compose-phase lineage suppression, `update_surface_direction()` for refinement
    - CLI: `rmap boundaries list --kind tcp`, `rmap boundaries list --kind udp`
 7. BI-1D (Process signals) — SHIPPED
    - C signal API detection: kill, killpg, raise, sigqueue, pthread_kill (senders)

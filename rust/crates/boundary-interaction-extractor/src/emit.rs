@@ -16,7 +16,7 @@ use thiserror::Error;
 use repo_graph_boundary_interaction::{
     table::{BindingEntry, BindingTable, Language, ScopeHeuristic},
     BoundaryInteractionSurface, BoundaryScope, ChannelDetail, ChannelKind,
-    EndpointLocality, ProtocolFamily,
+    Direction, EndpointLocality, ProtocolFamily,
 };
 use repo_graph_classification::types::SourceLocation;
 
@@ -37,6 +37,10 @@ pub enum EmitError {
     /// Invalid surface builder state.
     #[error("surface builder error: {0}")]
     BuilderError(String),
+
+    /// Invalid emitter state (BI-1B: direction update on missing surface).
+    #[error("invalid emitter state: {0}")]
+    InvalidState(String),
 }
 
 /// Input from an extractor describing a detected API call.
@@ -693,6 +697,87 @@ impl BoundaryInteractionEmitter {
         self.surfaces.clear();
         self.channels.clear();
         self.dual_projection_surfaces.clear();
+    }
+
+    // ── BI-1B Phase 2: FD role tracking support ────────────────────────────
+
+    /// Update the direction of a previously emitted surface.
+    ///
+    /// This is used by the socket lineage aggregator to refine TCP/UDP socket
+    /// surfaces based on accumulated bind/listen/connect evidence.
+    ///
+    /// Since the surface UID includes direction, updating direction requires:
+    /// 1. Removing the surface under its old UID
+    /// 2. Updating the direction field and computing new UID
+    /// 3. Inserting under new UID
+    /// 4. Updating associated channel details
+    ///
+    /// Returns `Ok(new_uid)` on success, `Err` if old_uid not found.
+    ///
+    /// ## Design note (D2)
+    ///
+    /// This implements D2 (refine existing surface, don't duplicate).
+    /// The aggregator tracks socket lineages and calls this method at function
+    /// boundary to update directions based on accumulated evidence.
+    pub fn update_surface_direction(
+        &mut self,
+        old_uid: &str,
+        new_direction: Direction,
+    ) -> Result<String, EmitError> {
+        // Remove surface under old UID
+        let mut surface = self
+            .surfaces
+            .remove(old_uid)
+            .ok_or_else(|| EmitError::InvalidState(format!(
+                "surface not found for direction update: {}",
+                old_uid
+            )))?;
+
+        // Skip if direction is already correct
+        if surface.direction == new_direction {
+            // Put it back and return existing UID
+            self.surfaces.insert(old_uid.to_string(), surface);
+            return Ok(old_uid.to_string());
+        }
+
+        // Update direction and compute new UID
+        surface.direction = new_direction;
+        let new_uid = BoundaryInteractionSurface::build_uid(
+            &surface.repo_uid,
+            &surface.source_file,
+            surface.line_start,
+            surface.col_start,
+            surface.channel_kind,
+            new_direction,
+        );
+        surface.surface_uid = new_uid.clone();
+
+        // Update associated channel details
+        let channels_to_update: Vec<_> = self
+            .channels
+            .iter()
+            .filter(|(_, ch)| ch.surface_uid == old_uid)
+            .map(|(uid, _)| uid.clone())
+            .collect();
+
+        for channel_uid in channels_to_update {
+            if let Some(channel) = self.channels.get_mut(&channel_uid) {
+                channel.surface_uid = new_uid.clone();
+                // Note: channel_uid also includes surface_uid, but we're not
+                // changing it to avoid cascading complexity. The surface_uid
+                // field in ChannelDetail is the reference that matters for joins.
+            }
+        }
+
+        // Update dual projection tracking if needed
+        if let Some(pos) = self.dual_projection_surfaces.iter().position(|s| s == old_uid) {
+            self.dual_projection_surfaces[pos] = new_uid.clone();
+        }
+
+        // Insert surface under new UID
+        self.surfaces.insert(new_uid.clone(), surface);
+
+        Ok(new_uid)
     }
 }
 
@@ -1539,5 +1624,106 @@ mod tests {
             "sendto() with AF_INET should emit as UDP (sendto is UDP-only in binding table)"
         );
         assert_eq!(result.unwrap().surface.channel_kind, ChannelKind::UdpSocket);
+    }
+
+    // ── BI-1B Phase 2: Direction update tests ──────────────────────────────
+
+    #[test]
+    fn update_surface_direction_changes_direction_and_uid() {
+        let mut emitter = BoundaryInteractionEmitter::new(test_context());
+
+        // Emit a TCP socket with bidirectional direction (role = setup)
+        let callsite = BoundaryCallsite {
+            language: Language::C,
+            function_name: "socket".to_string(),
+            location: SourceLocation {
+                line_start: 10,
+                line_end: 10,
+                col_start: 5,
+                col_end: 45,
+            },
+            source_file: "src/server.c".to_string(),
+            enclosing_symbol_key: "test-repo:src/server.c#main:SYMBOL:function".to_string(),
+            extracted_argument: None,
+            argument_index: None,
+            raw_argument_text: None,
+            api_family: None,
+            socket_family: Some(SocketFamily::Inet),
+            socket_type: Some(SocketType::Stream),
+            mmap_flags: None,
+            mknod_mode: None,
+        };
+
+        let result = emitter.try_emit(&callsite).unwrap().unwrap();
+        let old_uid = result.surface.surface_uid.clone();
+
+        // Verify initial direction is bidirectional (setup role)
+        assert!(old_uid.ends_with(":bidirectional"), "socket() should emit with bidirectional direction");
+
+        // Update to provider direction (after bind+listen evidence)
+        let new_uid = emitter
+            .update_surface_direction(&old_uid, Direction::Provider)
+            .unwrap();
+
+        // Verify UID changed
+        assert_ne!(old_uid, new_uid);
+        assert!(new_uid.ends_with(":provider"), "updated UID should end with :provider");
+
+        // Verify surface is now under new UID
+        let surfaces: Vec<_> = emitter.surfaces().collect();
+        assert_eq!(surfaces.len(), 1);
+        assert_eq!(surfaces[0].surface_uid, new_uid);
+        assert_eq!(surfaces[0].direction, Direction::Provider);
+
+        // Verify old UID is gone
+        let uids: Vec<_> = surfaces.iter().map(|s| &s.surface_uid).collect();
+        assert!(!uids.contains(&&old_uid));
+    }
+
+    #[test]
+    fn update_surface_direction_returns_error_for_missing_uid() {
+        let mut emitter = BoundaryInteractionEmitter::new(test_context());
+
+        let result = emitter.update_surface_direction("bi:nonexistent:file:1:1:tcp_socket:bidirectional", Direction::Consumer);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn update_surface_direction_noop_for_same_direction() {
+        let mut emitter = BoundaryInteractionEmitter::new(test_context());
+
+        // Emit a TCP socket
+        let callsite = BoundaryCallsite {
+            language: Language::C,
+            function_name: "socket".to_string(),
+            location: SourceLocation {
+                line_start: 10,
+                line_end: 10,
+                col_start: 5,
+                col_end: 45,
+            },
+            source_file: "src/client.c".to_string(),
+            enclosing_symbol_key: "test-repo:src/client.c#main:SYMBOL:function".to_string(),
+            extracted_argument: None,
+            argument_index: None,
+            raw_argument_text: None,
+            api_family: None,
+            socket_family: Some(SocketFamily::Inet),
+            socket_type: Some(SocketType::Stream),
+            mmap_flags: None,
+            mknod_mode: None,
+        };
+
+        let result = emitter.try_emit(&callsite).unwrap().unwrap();
+        let old_uid = result.surface.surface_uid.clone();
+
+        // Update to same direction (bidirectional → bidirectional)
+        let new_uid = emitter
+            .update_surface_direction(&old_uid, Direction::Bidirectional)
+            .unwrap();
+
+        // UID should be unchanged
+        assert_eq!(old_uid, new_uid);
     }
 }

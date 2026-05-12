@@ -85,6 +85,19 @@ pub struct RawBoundaryCall {
 
     /// Argument index where the value was extracted.
     pub argument_index: Option<usize>,
+
+    // ── BI-1B Phase 2: FD role tracking substrate ──────────────────────
+
+    /// For socket(): the LHS identifier if assigned directly.
+    /// Pattern: `int fd = socket(...)` → Some("fd")
+    /// Pattern: `fd = socket(...)` → Some("fd")
+    /// Only populated when LHS is a simple identifier.
+    pub assigned_identifier: Option<String>,
+
+    /// For bind/listen/connect/accept: the fd argument (arg0).
+    /// Pattern: `bind(fd, ...)` → Some("fd")
+    /// Only populated when arg0 is a simple identifier.
+    pub fd_argument: Option<String>,
 }
 
 /// Set of known boundary interaction functions for Slice 1A.
@@ -257,6 +270,8 @@ fn try_extract_boundary_call(
         mknod_mode: None,
         extracted_argument: None,
         argument_index: None,
+        assigned_identifier: None,
+        fd_argument: None,
     };
 
     // Extract context based on function type
@@ -269,13 +284,24 @@ fn try_extract_boundary_call(
             if args.len() > 1 {
                 call.socket_type = parse_socket_type(&args[1]);
             }
+
+            // BI-1B Phase 2: Extract assigned identifier for fd tracking.
+            // Pattern: `int fd = socket(...)` or `fd = socket(...)`
+            call.assigned_identifier = extract_assignment_lhs(node, src);
         }
 
         "bind" | "connect" | "listen" | "accept" | "send" | "recv" | "sendto" | "recvfrom" => {
-            // These don't have domain argument — we need socket_family from context
-            // For now, try to extract path from sockaddr argument if it's a literal
-            // This is rare in practice; most code uses variables
-            // Leave socket_family = None for now; emitter will require it
+            // These don't have domain argument — we need socket_family from context.
+            // Leave socket_family = None; emitter will require it.
+
+            // BI-1B Phase 2: Extract fd argument (arg0) for lineage tracking.
+            // Pattern: `bind(fd, ...)` → fd_argument = Some("fd")
+            // Only extract if arg0 is a simple identifier.
+            if let Some(arg0) = args.first() {
+                if is_simple_identifier(arg0) {
+                    call.fd_argument = Some(arg0.clone());
+                }
+            }
         }
 
         "mmap" => {
@@ -505,6 +531,81 @@ fn collect_arguments(args_node: &tree_sitter::Node, src: &[u8]) -> Vec<String> {
     }
 
     args
+}
+
+// ── BI-1B Phase 2: FD tracking helpers ─────────────────────────────────────
+
+/// Extract the LHS identifier from an assignment containing a call expression.
+///
+/// Handles two patterns:
+/// 1. `int fd = socket(...)` → init_declarator with declarator + value
+/// 2. `fd = socket(...)` → assignment_expression with left + right
+///
+/// Returns None if:
+/// - The call is not in an assignment context
+/// - The LHS is not a simple identifier (e.g., `*ptr = socket()`)
+fn extract_assignment_lhs(call_node: &tree_sitter::Node, src: &[u8]) -> Option<String> {
+    let parent = call_node.parent()?;
+
+    match parent.kind() {
+        // Pattern 1: `int fd = socket(...)`
+        // Tree: init_declarator { declarator: identifier, value: call_expression }
+        "init_declarator" => {
+            let declarator = parent.child_by_field_name("declarator")?;
+            // Handle simple identifier or pointer_declarator
+            extract_identifier_from_declarator(&declarator, src)
+        }
+
+        // Pattern 2: `fd = socket(...)`
+        // Tree: assignment_expression { left: identifier, operator, right: call_expression }
+        "assignment_expression" => {
+            let left = parent.child_by_field_name("left")?;
+            if left.kind() == "identifier" {
+                left.utf8_text(src).ok().map(|s| s.to_string())
+            } else {
+                None // LHS is not a simple identifier
+            }
+        }
+
+        _ => None, // Not in assignment context
+    }
+}
+
+/// Extract identifier from a declarator node.
+///
+/// Handles:
+/// - Simple identifier: `fd`
+/// - Pointer declarator: `*fd` → extracts `fd`
+fn extract_identifier_from_declarator(node: &tree_sitter::Node, src: &[u8]) -> Option<String> {
+    match node.kind() {
+        "identifier" => node.utf8_text(src).ok().map(|s| s.to_string()),
+        "pointer_declarator" => {
+            // pointer_declarator has a declarator child
+            let inner = node.child_by_field_name("declarator")?;
+            extract_identifier_from_declarator(&inner, src)
+        }
+        _ => None,
+    }
+}
+
+/// Check if a string is a simple C identifier.
+///
+/// A simple identifier contains only alphanumeric characters and underscores,
+/// starts with a letter or underscore, and is not a complex expression.
+fn is_simple_identifier(s: &str) -> bool {
+    let s = s.trim();
+    if s.is_empty() {
+        return false;
+    }
+
+    // First character must be letter or underscore
+    let first = s.chars().next().unwrap();
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return false;
+    }
+
+    // Remaining characters must be alphanumeric or underscore
+    s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Parse socket family from an argument string.
@@ -1423,5 +1524,202 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].function_name, "memfd_create");
         assert_eq!(calls[0].extracted_argument, None); // Variable, can't extract
+    }
+
+    // ── BI-1B Phase 2: FD role tracking substrate tests ────────────────
+
+    #[test]
+    fn socket_extracts_assigned_identifier_from_declaration() {
+        let source = r#"
+            void server() {
+                int fd = socket(AF_INET, SOCK_STREAM, 0);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "socket");
+        assert_eq!(calls[0].assigned_identifier, Some("fd".to_string()));
+    }
+
+    #[test]
+    fn socket_extracts_assigned_identifier_from_assignment() {
+        let source = r#"
+            void server() {
+                int fd;
+                fd = socket(AF_INET, SOCK_STREAM, 0);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "socket");
+        assert_eq!(calls[0].assigned_identifier, Some("fd".to_string()));
+    }
+
+    #[test]
+    fn socket_no_assignment_has_none_assigned_identifier() {
+        let source = r#"
+            void wrapper() {
+                socket(AF_INET, SOCK_STREAM, 0); // Unused result
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "socket");
+        assert_eq!(calls[0].assigned_identifier, None);
+    }
+
+    #[test]
+    fn socket_pointer_lhs_extracts_identifier() {
+        let source = r#"
+            void server() {
+                int *pfd = socket(AF_INET, SOCK_STREAM, 0); // Unusual but syntactically valid
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        // Note: This extracts the dereferenced name, which is what we want
+        // for tracking purposes even if the code is semantically odd
+        assert_eq!(calls[0].assigned_identifier, Some("pfd".to_string()));
+    }
+
+    #[test]
+    fn bind_extracts_fd_argument() {
+        let source = r#"
+            void server() {
+                int fd = socket(AF_INET, SOCK_STREAM, 0);
+                bind(fd, (struct sockaddr *)&addr, sizeof(addr));
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 2);
+
+        // First call: socket
+        assert_eq!(calls[0].function_name, "socket");
+        assert_eq!(calls[0].assigned_identifier, Some("fd".to_string()));
+
+        // Second call: bind
+        assert_eq!(calls[1].function_name, "bind");
+        assert_eq!(calls[1].fd_argument, Some("fd".to_string()));
+    }
+
+    #[test]
+    fn listen_extracts_fd_argument() {
+        let source = r#"
+            void server() {
+                int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+                listen(sock_fd, 5);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1].function_name, "listen");
+        assert_eq!(calls[1].fd_argument, Some("sock_fd".to_string()));
+    }
+
+    #[test]
+    fn connect_extracts_fd_argument() {
+        let source = r#"
+            void client() {
+                int client_fd = socket(AF_INET, SOCK_STREAM, 0);
+                connect(client_fd, (struct sockaddr *)&addr, sizeof(addr));
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1].function_name, "connect");
+        assert_eq!(calls[1].fd_argument, Some("client_fd".to_string()));
+    }
+
+    #[test]
+    fn accept_extracts_fd_argument() {
+        let source = r#"
+            void server() {
+                int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+                int client_fd = accept(listen_fd, NULL, NULL);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1].function_name, "accept");
+        assert_eq!(calls[1].fd_argument, Some("listen_fd".to_string()));
+        // Note: accept also has assigned_identifier for its return value
+        assert_eq!(calls[1].assigned_identifier, None); // accept is not socket, no extraction
+    }
+
+    #[test]
+    fn bind_with_expression_fd_has_none() {
+        let source = r#"
+            void server() {
+                bind(get_fd(), (struct sockaddr *)&addr, sizeof(addr));
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function_name, "bind");
+        // get_fd() is not a simple identifier
+        assert_eq!(calls[0].fd_argument, None);
+    }
+
+    #[test]
+    fn full_tcp_server_pattern() {
+        let source = r#"
+            void tcp_server() {
+                int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+                bind(server_fd, (struct sockaddr *)&addr, sizeof(addr));
+                listen(server_fd, BACKLOG);
+                int client_fd = accept(server_fd, NULL, NULL);
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 4);
+
+        // socket: origin + assigned identifier
+        assert_eq!(calls[0].function_name, "socket");
+        assert_eq!(calls[0].socket_family, Some(SocketFamily::Inet));
+        assert_eq!(calls[0].socket_type, Some(SocketType::Stream));
+        assert_eq!(calls[0].assigned_identifier, Some("server_fd".to_string()));
+
+        // bind: fd argument for lineage tracking
+        assert_eq!(calls[1].function_name, "bind");
+        assert_eq!(calls[1].fd_argument, Some("server_fd".to_string()));
+
+        // listen: fd argument for lineage tracking
+        assert_eq!(calls[2].function_name, "listen");
+        assert_eq!(calls[2].fd_argument, Some("server_fd".to_string()));
+
+        // accept: fd argument for lineage tracking
+        assert_eq!(calls[3].function_name, "accept");
+        assert_eq!(calls[3].fd_argument, Some("server_fd".to_string()));
+    }
+
+    #[test]
+    fn full_tcp_client_pattern() {
+        let source = r#"
+            void tcp_client() {
+                int client_fd = socket(AF_INET, SOCK_STREAM, 0);
+                connect(client_fd, (struct sockaddr *)&addr, sizeof(addr));
+            }
+        "#;
+
+        let calls = parse_and_extract(source);
+        assert_eq!(calls.len(), 2);
+
+        // socket: origin + assigned identifier
+        assert_eq!(calls[0].function_name, "socket");
+        assert_eq!(calls[0].assigned_identifier, Some("client_fd".to_string()));
+
+        // connect: fd argument for lineage tracking
+        assert_eq!(calls[1].function_name, "connect");
+        assert_eq!(calls[1].fd_argument, Some("client_fd".to_string()));
     }
 }

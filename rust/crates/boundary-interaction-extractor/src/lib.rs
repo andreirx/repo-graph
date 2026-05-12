@@ -41,7 +41,9 @@
 
 pub mod emit;
 pub mod evidence;
+pub mod socket_lineage;
 
 // Re-export the main surface at crate root
 pub use emit::{BoundaryCallsite, BoundaryInteractionEmitter, EmitError, EmittedFacts};
 pub use evidence::{BoundaryInteractionEvidence, BOUNDARY_INTERACTION_EVIDENCE_VERSION};
+pub use socket_lineage::{FdRegistry, RoleEvidence, SocketLineage, TrackedChannelKind};

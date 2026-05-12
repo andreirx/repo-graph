@@ -36,10 +36,12 @@ use repo_graph_policy_facts::{
     PolicyFactsStorageWrite,
 };
 use repo_graph_boundary_interaction::table::Language as BiLanguage;
+use repo_graph_boundary_interaction::ChannelKind;
 use repo_graph_boundary_interaction_extractor::emit::{
     BoundaryCallsite, BoundaryInteractionEmitter, EmitterContext, MmapFlags, SocketFamily,
     SocketType,
 };
+use repo_graph_boundary_interaction_extractor::socket_lineage::{FdRegistry, TrackedChannelKind};
 use repo_graph_c_extractor::{
     extract_boundary_calls, MmapFlags as RawMmapFlags, RawBoundaryCall,
     SocketFamily as RawSocketFamily, SocketType as RawSocketType,
@@ -1333,6 +1335,10 @@ fn persist_policy_facts(
 /// extraction-time integration. See `docs/TECH-DEBT.md` entry
 /// "Boundary Interaction Extraction — Slice 1A".
 ///
+/// BI-1B Phase 2: FD role tracking for TCP/UDP sockets.
+/// Groups calls by enclosing function, tracks socket lineages, and refines
+/// direction based on accumulated bind/listen/connect evidence.
+///
 /// Returns the number of surfaces persisted.
 fn persist_boundary_interactions(
 	storage: &mut StorageConnection,
@@ -1375,18 +1381,141 @@ fn persist_boundary_interactions(
 			&file.rel_path,
 		);
 
-		// Convert to BoundaryCallsite and emit.
+		// BI-1B Phase 2: Group calls by enclosing function for FD tracking.
+		// Within each function, we track socket lineages and accumulate
+		// bind/listen/connect evidence for role detection.
+		let mut calls_by_function: std::collections::HashMap<String, Vec<_>> =
+			std::collections::HashMap::new();
 		for raw in raw_calls {
-			let callsite = convert_raw_to_callsite(&raw, &file.rel_path, repo_uid);
-			// try_emit returns:
-			//   Ok(Some(_)) - surface emitted
-			//   Ok(None) - no binding matched OR guard predicate rejected
-			//   Err(_) - emission logic error (bug in code)
-			if let Err(e) = emitter.try_emit(&callsite) {
-				return Err(ComposeError::Index(format!(
-					"boundary-interaction emitter failed at {}:{}: {}",
-					file.rel_path, raw.location.line_start, e
-				)));
+			calls_by_function
+				.entry(raw.enclosing_function.clone())
+				.or_default()
+				.push(raw);
+		}
+
+		// Process each function's calls with FD registry for role tracking.
+		for (_function_name, calls) in calls_by_function {
+			let mut fd_registry = FdRegistry::new();
+
+			for raw in calls {
+				let callsite = convert_raw_to_callsite(&raw, &file.rel_path, repo_uid);
+
+				// Process based on function type for FD tracking.
+				match raw.function_name.as_str() {
+					"socket" => {
+						// Emit the socket surface.
+						match emitter.try_emit(&callsite) {
+							Ok(Some(facts)) => {
+								// BI-1B: If TCP/UDP with assigned identifier, register for tracking.
+								if let Some(id) = &raw.assigned_identifier {
+									let kind = match facts.surface.channel_kind {
+										ChannelKind::TcpSocket => Some(TrackedChannelKind::TcpSocket),
+										ChannelKind::UdpSocket => Some(TrackedChannelKind::UdpSocket),
+										_ => None,
+									};
+									if let Some(k) = kind {
+										fd_registry.register_socket(id, k, &facts.surface.surface_uid);
+									}
+								}
+							}
+							Ok(None) => {} // No binding matched, fine.
+							Err(e) => {
+								return Err(ComposeError::Index(format!(
+									"boundary-interaction emitter failed at {}:{}: {}",
+									file.rel_path, raw.location.line_start, e
+								)));
+							}
+						}
+					}
+
+					"bind" => {
+						// BI-1B: Record bind evidence if fd is tracked.
+						if let Some(fd_arg) = &raw.fd_argument {
+							if fd_registry.is_tracked(fd_arg) {
+								fd_registry.record_bind(fd_arg);
+								// Don't emit - evidence only. Guard would reject anyway
+								// (no socket_type on bind callsite).
+								continue;
+							}
+						}
+						// Not tracked or no fd_arg - emit normally (Unix socket case).
+						if let Err(e) = emitter.try_emit(&callsite) {
+							return Err(ComposeError::Index(format!(
+								"boundary-interaction emitter failed at {}:{}: {}",
+								file.rel_path, raw.location.line_start, e
+							)));
+						}
+					}
+
+					"listen" => {
+						// BI-1B: Record listen evidence if fd is tracked.
+						if let Some(fd_arg) = &raw.fd_argument {
+							if fd_registry.is_tracked(fd_arg) {
+								fd_registry.record_listen(fd_arg);
+								continue; // Evidence only.
+							}
+						}
+						// Not tracked - emit normally.
+						if let Err(e) = emitter.try_emit(&callsite) {
+							return Err(ComposeError::Index(format!(
+								"boundary-interaction emitter failed at {}:{}: {}",
+								file.rel_path, raw.location.line_start, e
+							)));
+						}
+					}
+
+					"connect" => {
+						// BI-1B: Record connect evidence if fd is tracked.
+						if let Some(fd_arg) = &raw.fd_argument {
+							if fd_registry.is_tracked(fd_arg) {
+								fd_registry.record_connect(fd_arg);
+								continue; // Evidence only.
+							}
+						}
+						// Not tracked - emit normally (Unix socket case).
+						if let Err(e) = emitter.try_emit(&callsite) {
+							return Err(ComposeError::Index(format!(
+								"boundary-interaction emitter failed at {}:{}: {}",
+								file.rel_path, raw.location.line_start, e
+							)));
+						}
+					}
+
+					"accept" => {
+						// BI-1B: Record accept evidence if fd is tracked.
+						if let Some(fd_arg) = &raw.fd_argument {
+							if fd_registry.is_tracked(fd_arg) {
+								fd_registry.record_accept(fd_arg);
+								continue; // Evidence only.
+							}
+						}
+						// Not tracked - emit normally.
+						if let Err(e) = emitter.try_emit(&callsite) {
+							return Err(ComposeError::Index(format!(
+								"boundary-interaction emitter failed at {}:{}: {}",
+								file.rel_path, raw.location.line_start, e
+							)));
+						}
+					}
+
+					_ => {
+						// All other boundary calls: emit normally.
+						if let Err(e) = emitter.try_emit(&callsite) {
+							return Err(ComposeError::Index(format!(
+								"boundary-interaction emitter failed at {}:{}: {}",
+								file.rel_path, raw.location.line_start, e
+							)));
+						}
+					}
+				}
+			}
+
+			// BI-1B: Function boundary - resolve directions and update surfaces.
+			for (surface_uid, direction) in fd_registry.drain_for_refinement() {
+				// Silently ignore update failures - the surface might have been
+				// deduplicated or the direction is already correct. This is a
+				// best-effort refinement, not a hard requirement.
+				let _ = emitter.update_surface_direction(&surface_uid, direction);
 			}
 		}
 	}

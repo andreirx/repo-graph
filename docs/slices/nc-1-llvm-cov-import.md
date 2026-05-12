@@ -1,10 +1,28 @@
 # NC-1: LLVM Coverage Import
 
-Status: PLANNED
-Depends: TC-1 (toolchain inventory), coverage infrastructure (EXISTS)
+Status: **DEFERRED** (blocked on native coverage evidence contract)
+Depends: TC-1 (toolchain inventory), coverage infrastructure (EXISTS), **coverage evidence contract (NOT DEFINED)**
 Unblocks: Native risk scoring, dead-surface confidence, test-targeted navigation
 Track: Toolchain-Aware Evidence Import
 Layer: 2 (derived architecture — imported evidence)
+
+> **DEFERRED NOTE (2026-05-12):**
+> This slice is intentionally deferred. Implementation is blocked on native
+> coverage evidence contract clarification.
+>
+> Coverage import is not a standalone "just parse JSON" feature. It depends on:
+> - Toolchain provenance model (what produced this evidence?)
+> - Build context assumptions (what was instrumented? what target?)
+> - Target/runtime semantics (what does "covered" mean for this codebase?)
+> - Evidence admissibility rules (is this coverage comparable across snapshots?)
+> - Performance/test suite goals (why do we care about coverage here?)
+>
+> Without these foundations, coverage data is just numbers without product
+> semantics. The slice remains as conceptual planning, not execution-ready.
+>
+> **Correct dependency:** TC-1 and BC-1 define environment/provenance/build-context
+> model first. Native coverage import can be considered later if that model
+> matures and product semantics are endorsed.
 
 ## Goal
 

@@ -2,13 +2,56 @@
 
 ## Current Priority
 
-C/C++ systems maturation: extend state-boundary extraction to C++ codebases.
-
-## Active Slice
-
-None. CPP-SB-1 shipped. Select next priority from execution queue.
+No active slice. See ROADMAP.md for next priorities.
 
 ## Recently Shipped
+
+**BI-1B Phase 2: FD Role Tracking** — SHIPPED (2026-05-12)
+
+Slice doc: `docs/shipped/slices/bi-1b-tcp-udp-sockets.md`
+
+### Summary
+
+Intra-function fd tracking to refine TCP/UDP socket surfaces with provider/consumer
+role. Phase 1 (presence hints) shipped; Phase 2 adds role detection via function-local
+fd registry and evidence state machine.
+
+### Shipped Design Decisions
+
+- **D1: C-only** — No C++ in this slice (different actor, different complexity)
+- **D2: Refine, not duplicate** — Same surface identity, refined direction metadata
+- **D3: bind alone insufficient** — TCP provider requires bind+listen, consumer requires connect
+
+### Mechanism (Shipped)
+
+Local fd registry + role evidence state machine:
+- Registry: identifier → socket family
+- Evidence: tracks bind/listen/connect/accept per fd
+- State machine: bidirectional → consumer (on connect) or provider (on bind+listen)
+
+### Implementation
+
+- C extractor: `assigned_identifier` (socket LHS), `fd_argument` (bind/listen/connect/accept arg0)
+- `socket_lineage.rs`: `FdRegistry`, `RoleEvidence`, `TrackedChannelKind`
+- Emitter: `update_surface_direction()` for direction refinement
+- Compose: function-grouped processing, FdRegistry per function, direction update at boundary
+
+### Validation
+
+- 96 C extractor unit tests (11 new BI-1B substrate tests)
+- 13 socket_lineage unit tests
+- 44 boundary-interaction-extractor unit tests (3 new update_surface_direction tests)
+- 3 TCP/UDP E2E integration tests (updated for Phase 2 expectations)
+
+### Deferred (Phase 3+)
+
+- C++ wrappers, cross-function propagation, aliases, parameters, globals
+- Endpoint extraction, scope classification
+- UDP role semantics (stay bidirectional)
+
+---
+
+## Other Recently Shipped
 
 **CPP-SB-1: C++ State Boundaries** — SHIPPED (2026-05-12)
 
@@ -261,26 +304,33 @@ SB-7B narrow first-cut (`DriverManager.getConnection(String)` only) — can now 
 | FD-1A | Rust Express detector parity | L3 | **SHIPPED** |
 | FD-1B | Rust React detector parity | L3 | **IMPLEMENTED** |
 
-### Toolchain-Aware Evidence Import Track (NEW)
+### Toolchain-Aware Evidence Import Track (FUTURE)
 
 | Slice | Scope | Layer | Status |
 |-------|-------|-------|--------|
-| NC-1 | LLVM coverage import ([slice](docs/slices/nc-1-llvm-cov-import.md)) | L2 | PLANNED |
 | BC-1 | Build context import ([slice](docs/slices/bc-1-compile-commands-import.md)) | L1 | PLANNED |
 | TC-1 | Snapshot/evidence provenance ([slice](docs/slices/tc-1-toolchain-inventory.md)) | L1 | PLANNED |
+| NC-1 | LLVM coverage import ([slice](docs/slices/nc-1-llvm-cov-import.md)) | L2 | **DEFERRED** |
 | AF-1 | Analyzer findings import ([slice](docs/slices/af-1-analyzer-findings-import.md)) | L3 | PLANNED |
 | SE-1 | Clangd semantic enrichment ([slice](docs/slices/se-1-clangd-enrichment.md)) | L2 | PLANNED (LOW) |
 
-**Priority order:** NC-1 > BC-1 > TC-1 > AF-1 > SE-1
+**Priority order:** BC-1 > TC-1 > (coverage contract) > NC-1 > AF-1 > SE-1
 
-**Rationale:** Coverage import (NC-1) provides immediate value for risk/liveness.
-Build context (BC-1) unlocks native semantic paths. TC-1 is narrowed to snapshot/evidence
-provenance only (not generic host inventory—AI agents do that live). Findings import
-(AF-1) adds risk signal as artifact import. Clangd enrichment (SE-1) is expensive/volatile.
+**NC-1 deferral rationale:** Coverage import depends on product semantics not yet defined:
+toolchain provenance model, build context assumptions, target/runtime semantics, evidence
+admissibility rules, and performance/test suite goals. Without these foundations, coverage
+data is just numbers. NC-1 is blocked on a coverage evidence contract slice.
+
+**Track rationale:** Build context (BC-1) unlocks native semantic paths. TC-1 is narrowed to
+snapshot/evidence provenance only (not generic host inventory—AI agents do that live).
+Findings import (AF-1) adds risk signal as artifact import. Clangd enrichment (SE-1) is
+expensive/volatile.
 
 **Boundary:** Repo-graph persists evidence lineage, not host tool inventory. An AI agent
 can probe "what's installed?" ad hoc. Repo-graph answers "what produced this evidence?"
 and "are these snapshots comparable?"
+
+**NOTE:** This track is not the current execution priority. It is captured for future work.
 
 ## Why This Order
 

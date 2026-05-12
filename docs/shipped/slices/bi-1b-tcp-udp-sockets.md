@@ -1,45 +1,173 @@
 # BI-1B: TCP/UDP Socket Detection
 
-Status: PARTIAL (PRESENCE HINTS SHIPPED)
+Status: **SHIPPED** (Phase 1: Presence Hints + Phase 2: FD Role Tracking)
 Depends: BI-1A (shipped), storage schema migration
 Track: A (Raw Transport)
 
 ## What Shipped
 
-Presence hints only. The system detects `socket(AF_INET, SOCK_STREAM)` and
+### Phase 1: Presence Hints (2026-05-11)
+
+Presence hints. The system detects `socket(AF_INET, SOCK_STREAM)` and
 `socket(AF_INET, SOCK_DGRAM)` calls and emits surfaces with correct channel_kind
 (`tcp_socket` / `udp_socket`) and protocol (`tcp` / `udp`).
 
-**Shipped capabilities:**
+### Phase 2: FD Role Tracking (2026-05-12)
+
+Function-local fd tracking to refine TCP/UDP socket surfaces with provider/consumer
+role detection. Implements D1-D3 locked design decisions.
+
+**Implementation:**
+- C extractor: `assigned_identifier` for socket LHS, `fd_argument` for bind/listen/connect/accept
+- `socket_lineage.rs`: FdRegistry, RoleEvidence, TrackedChannelKind
+- Emitter: `update_surface_direction()` for direction refinement
+- Compose: function-grouped processing with FdRegistry per function
+
+**Validation:**
+- 96 C extractor unit tests (11 new BI-1B substrate tests)
+- 14 socket_lineage unit tests (includes UDP connect() bidirectional test)
+- 45 boundary-interaction-extractor unit tests (3 new direction update tests)
+- 7 TCP/UDP E2E integration tests (3 original + 4 refresh tests)
+
+**Implementation Mechanism:**
+Phase 2 role detection is implemented via compose-phase lineage suppression, NOT
+binding table narrowing. The binding table still contains per-call entries for
+bind/listen/connect/accept, but the compose phase:
+1. Tracks socket() calls with assigned identifiers in FdRegistry
+2. Intercepts bind/listen/connect/accept on tracked fds (accumulates evidence, skips emission)
+3. At function boundary, drains FdRegistry and calls `update_surface_direction()`
+
+This is deliberate: the lower-layer binding semantics remain compatible with
+non-tracked paths (e.g., Unix sockets), while the compose layer implements the
+FD-lineage model for TCP/UDP.
+
+## Shipped Behavior
+
+**Shipped capabilities (Phase 1 + Phase 2):**
 - TCP socket detection: `socket(AF_INET/AF_INET6, SOCK_STREAM)` → `tcp_socket`
 - UDP socket detection: `socket(AF_INET/AF_INET6, SOCK_DGRAM)` → `udp_socket`
 - TCP-only function classification: `listen`, `accept`, `send`, `recv`
 - UDP-only function classification: `sendto`, `recvfrom`
 - Multi-binding table with guard predicates (prevents TCP-by-precedence)
 - InteractionPattern::Datagram for UDP surfaces
+- **Phase 2:** FD role tracking with direction refinement:
+  - TCP server (bind+listen) → direction = Provider
+  - TCP client (connect) → direction = Consumer
+  - UDP → direction = Bidirectional (no strong role semantics)
 
-**All emitted surfaces have direction=bidirectional** because:
-1. `socket()` creates a socket — neither provider nor consumer yet
-2. Role semantics depend on subsequent operations (`bind+listen` vs `connect`)
-3. Current extractor processes files independently — no fd tracking across calls
+## Phase 2: FD Role Tracking (SHIPPED)
 
-## Deferred
+### Locked Design Decisions
 
-Role detection (provider vs consumer) requires fd tracking: linking `bind()` and
-`listen()` calls back to the socket descriptor created by `socket()`. This is
-documented as depth work in `docs/TECH-DEBT.md` §fd tracking.
+**D1: C-only first cut**
 
-**Deferred capabilities:**
-- Direction classification: provider (bind+listen) vs consumer (connect)
+Do NOT include C++ in this slice. The actors diverge:
+- C socket API: POSIX calls, integer fd identity, direct identifier tracking
+- C++ socket usage: wrapper classes, RAII, object ownership, aliases
+
+If C++ later needs similar fd/role tracking, create a separate slice. This slice
+is strictly about POSIX socket calls in C code.
+
+**D2: Refine existing surface, do not duplicate**
+
+When role evidence is detected, refine the direction metadata on the existing
+surface. Do NOT emit separate "presence hint" and "role hint" surfaces.
+
+- `socket()` alone → `direction = bidirectional` (role unknown)
+- `socket()` + later `connect` → same surface, `direction = consumer`
+- `socket()` + `bind` + `listen` → same surface, `direction = provider`
+
+One surface per socket lineage. Role is a refinement, not a second boundary.
+
+**D3: bind alone is insufficient evidence**
+
+`bind()` alone does NOT classify as provider. Reasons:
+- UDP sockets often bind without "server" semantics
+- Clients can bind local addresses/ports
+- Raw/native patterns bind for control, privilege, or address selection
+
+Evidence requirements:
+| Pattern | Classification |
+|---------|----------------|
+| `connect(fd, ...)` | consumer |
+| `bind(fd, ...) + listen(fd, ...)` | provider (TCP stream) |
+| `listen(fd, ...)` on known fd | provider (TCP stream) |
+| `accept(fd, ...)` | reinforces provider |
+| `bind(fd, ...)` alone | NOT sufficient — stay bidirectional |
+| UDP with `bind` only | stay bidirectional (no listen concept) |
+
+### Mechanism: Local FD Registry + Role Evidence State Machine
+
+This is NOT just a lookup table like CPP-SB-1's D3 type map. It is:
+1. **Local fd registry**: maps identifier → socket family
+2. **Role evidence accumulation**: tracks which operations have been seen on each fd
+
+```
+Registry entry:
+  identifier: "fd"
+  family: tcp_socket | udp_socket
+  evidence: { has_bind: bool, has_listen: bool, has_connect: bool, has_accept: bool }
+```
+
+State machine per fd:
+```
+initial: bidirectional (no role evidence)
+
+on connect(fd):
+  → consumer
+
+on bind(fd):
+  → still bidirectional (insufficient)
+
+on bind(fd) + listen(fd):
+  → provider
+
+on listen(fd) [fd already in registry]:
+  → provider
+
+on accept(fd):
+  → provider (reinforcement)
+```
+
+### In Scope (Phase 2)
+
+- C only
+- Function-local fd map (cleared at function boundary)
+- Direct declarations: `int fd = socket(...)`
+- Direct identifier use in: `bind(fd, ...)`, `listen(fd, ...)`, `accept(fd, ...)`, `connect(fd, ...)`
+- Refine existing socket surfaces with detected role
+- TCP stream: consumer (connect) or provider (bind+listen)
+- UDP datagram: remains bidirectional (no strong role heuristics in first cut)
+
+### Out of Scope (Phase 2)
+
+- C++ wrappers/objects
+- Cross-function fd propagation
+- Aliases/reassignments (`int fd2 = fd`)
+- Parameters, globals, member fields
+- Endpoint extraction (host:port)
+- Loopback/scope classification
+- UDP role semantics beyond presence
+
+### Explicit Limits
+
+| Supported | Not Supported |
+|-----------|---------------|
+| Local variable declarations | Parameters |
+| Same function body | Cross-function propagation |
+| Direct identifier receiver (`bind(fd, ...)`) | Aliases (`bind(fd2, ...)` where `fd2 = fd`) |
+| Simple int declarations | Pointer indirection |
+| | Reassignment tracking |
+| | Global/static fd variables |
+
+## Deferred (Phase 3+)
+
 - Endpoint extraction: host:port from bind/connect arguments
 - Scope classification: inter_process (loopback) vs inter_device (remote)
 - Endpoint locality: SameHostNamed vs Remote
-
-These require either:
-- fd tracking within function scope (moderate complexity)
-- Cross-function dataflow analysis (high complexity)
-
-Per breadth-first strategy: presence hints are useful now; depth work deferred.
+- UDP role heuristics (if ever needed)
+- C++ socket wrapper support (separate slice)
+- Cross-function fd propagation (requires dataflow)
 
 ## Objective
 
