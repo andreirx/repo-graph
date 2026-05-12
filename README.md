@@ -151,10 +151,10 @@ Schema support exists but Rust indexer population is incomplete:
 ### Layer 3: Orientation hints (mixed maturity)
 
 Specialized evidence tracks with varying implementation state:
-- local IPC boundary surfaces — shipped (BI-1A), public CLI via `rmap boundaries list/show/summary`
+- local IPC boundary surfaces — shipped (BI-1A), public CLI via `rmap boundaries list/show/summary/links`
 - HTTP boundary model — documented as mature
 - policy facts (RETURN_FATE, STATUS_MAPPING) — implemented
-- contract/protobuf substrate — exists
+- gRPC contract-based linking — shipped (GR-3A), links provider/consumer surfaces by shared proto service
 - framework detectors — partial, some TS-only
 - broader IPC link inference — roadmap
 
