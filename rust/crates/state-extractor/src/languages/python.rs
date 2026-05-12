@@ -69,8 +69,17 @@ impl LanguageStateAdapter for PythonAdapter {
 
 /// Adapt a single Python `ResolvedCallsite` into a
 /// `StateBoundaryCallsite`. Returns `None` if the payload fails
-/// validation.
+/// validation or represents a non-persistent resource.
 fn adapt_python_callsite(rc: &ResolvedCallsite) -> Option<StateBoundaryCallsite> {
+    // Skip SQLite :memory: databases — these are in-memory only, not
+    // persistent state boundaries. The `:` character also conflicts
+    // with the Db-kind stable-key segment grammar.
+    if let CallArgPayload::StringLiteral { value } = &rc.arg0_payload {
+        if value == ":memory:" {
+            return None;
+        }
+    }
+
     let (logical_name, logical_name_source) = classify_python_payload(&rc.arg0_payload)?;
 
     // Determine the binding symbol path. For builtins:open, normalize
@@ -305,6 +314,24 @@ mod tests {
         let adapted = adapt_python_callsite(&rc).expect("valid");
         assert_eq!(adapted.callee.resolved_module.as_deref(), Some("sqlite3"));
         assert_eq!(adapted.callee.resolved_symbol, "connect");
+    }
+
+    #[test]
+    fn sqlite3_memory_db_skipped() {
+        // :memory: is an in-memory database, not a persistent state boundary.
+        // It should be filtered out to avoid stable-key grammar conflicts.
+        let rc = ResolvedCallsite {
+            enclosing_symbol_node_uid: "sym-1".to_string(),
+            resolved_module: "sqlite3".to_string(),
+            resolved_symbol: "connect".to_string(),
+            arg0_payload: CallArgPayload::StringLiteral {
+                value: ":memory:".to_string(),
+            },
+            arg1_payload: None,
+            source_location: loc(),
+        };
+        let adapted = adapt_python_callsite(&rc);
+        assert!(adapted.is_none(), ":memory: should be skipped");
     }
 
     #[test]

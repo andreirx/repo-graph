@@ -1805,6 +1805,7 @@ fn persist_express_surfaces(
 	// routes_to_surfaces uses filter_map, so we need to track indices.
 	let mut surfaces = Vec::new();
 	let mut converted_routes = Vec::new();
+	let mut seen_stable_keys = std::collections::HashSet::new();
 	for route in &routes {
 		if let Some(surface) = crate::express_detector::route_to_surface_with_resolver(
 			route,
@@ -1812,8 +1813,13 @@ fn persist_express_surfaces(
 			repo_uid,
 			&resolve_module,
 		) {
-			surfaces.push(surface);
-			converted_routes.push(route);
+			// Deduplicate by stable_surface_key to avoid unique constraint violation.
+			// This can happen when the same route is defined in multiple AST patterns
+			// that the detector recognizes.
+			if seen_stable_keys.insert(surface.stable_surface_key.clone()) {
+				surfaces.push(surface);
+				converted_routes.push(route);
+			}
 		}
 	}
 

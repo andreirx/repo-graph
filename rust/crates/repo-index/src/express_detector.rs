@@ -346,9 +346,12 @@ pub fn route_to_surface_with_resolver(
 	// Resolve module candidate for this file.
 	let module_candidate_uid = resolve_module(&route.file_path)?;
 
-	// Compute stable surface key.
+	// Compute stable surface key. Include module_candidate_uid to
+	// disambiguate routes with the same method+path across different
+	// modules (e.g., two fixtures both defining GET /api).
 	let stable_key = format!(
-		"surface:express_route:{}:{}",
+		"surface:express_route:{}:{}:{}",
+		module_candidate_uid,
 		route.http_method,
 		&route.path
 	);

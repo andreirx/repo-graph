@@ -305,6 +305,17 @@ impl ExtractionResultHook for StateBoundaryHook {
 			all_edges.extend(facts.edges);
 		}
 
+		// SB-7A multi-language: Deduplicate resource nodes across languages.
+		// The same resource (e.g., /var/log/app.log) may be accessed from
+		// multiple languages in a polyglot repo. Each language emitter
+		// deduplicates within its own scope, but cross-language dedup must
+		// happen here at the aggregation point.
+		//
+		// Dedup by stable_key, keeping the first occurrence (order is
+		// deterministic from language enum iteration order).
+		let mut seen_stable_keys = std::collections::HashSet::new();
+		all_nodes.retain(|node| seen_stable_keys.insert(node.stable_key.clone()));
+
 		ExtractionExtras {
 			nodes: all_nodes,
 			edges: all_edges,
