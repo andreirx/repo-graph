@@ -45,6 +45,64 @@ Later: Go, Scala.
 These are strategic priorities, not shipped capability claims. See "Current state"
 for what is actually operational.
 
+## Distribution / Install / Host Integration Track
+
+This track makes repo-graph installable developer infrastructure, not just a CLI.
+
+### Platform Priority (Locked)
+
+1. **macOS** — primary supported platform
+2. **Linux** — second priority
+3. **Windows** — explicitly deferred
+
+### Track Sequence
+
+| Slice | Scope | Status |
+|-------|-------|--------|
+| **DIST-1** | Distribution and install contract (binary-first, manifest model, safety rules) | PLANNED |
+| **HOST-1** | Host integration contract (Claude/Codex hooks, Cursor MCP, detection model) | PLANNED |
+| **REL-1** | Release pipeline (GitHub Actions, artifact matrix, checksums) | PLANNED |
+| **HOOK-1** | `rmap hook` CLI surface (session-start, prompt-submit, post-edit, pre-compact, stop) | PLANNED |
+| **MAC-1** | macOS installer + daemon service (launchd, paths, health checks) | PLANNED |
+| **CLAUDE-1** | Claude Code integration (`.claude/settings.json` hooks) | PLANNED |
+| **CODEX-1** | Codex CLI integration (`hooks.json`) | PLANNED |
+| **LINUX-1** | Linux installer + daemon service (systemd user unit) | PLANNED |
+| **CURSOR-1** | Cursor MCP/rules integration | PLANNED |
+| **WIN-1** | Windows distribution/install | DEFERRED |
+| **MAC-2** | macOS signing/notarization | DEFERRED |
+| **UPDATE-1** | Updater/repair channel | DEFERRED |
+
+### Execution Order
+
+1. DIST-1 — contract before implementation
+2. HOST-1 — host integration rules before host-specific work
+3. REL-1 — release artifacts before installer credibility
+4. HOOK-1 — `rmap hook` commands before host shims use them
+5. MAC-1 — macOS as first complete vertical slice
+6. CLAUDE-1 — Claude Code integration on macOS
+7. CODEX-1 — Codex integration on macOS
+8. LINUX-1 — Linux reuses core policy, different service adapter
+9. CURSOR-1 — different integration model, separate from hook lane
+
+### Artifact Matrix (REL-1)
+
+**Must-have:**
+- macOS ARM64 (Apple Silicon)
+- Linux x86_64
+
+**Later:**
+- macOS x86_64
+- Windows x86_64 (deferred with WIN-1)
+
+### Design Principles
+
+See `docs/VISION.md` § Distribution and Host Integration for:
+- Binary-first distribution rationale
+- Host integration safety rules
+- Hook integration model (thin shim + `rmap hook` policy)
+- Enforcement progression (informational first)
+- Trust boundary rules
+
 ## Current state (as of last commit)
 
 - **1464 tests** across 78 test files.

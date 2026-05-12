@@ -251,6 +251,100 @@ Implications:
 
 The current SQLite design is the transition mechanism. It is useful now for persistence and query infrastructure. It is not the conceptual center of the end-state architecture. The daemon's in-memory model will become the conceptual center.
 
+## Distribution and Host Integration
+
+Repo-graph is not only a CLI. It is installable developer infrastructure.
+
+### Core Product Claims
+
+1. **The daemon is a first-class runtime**, not an optional manual tool. Installation
+   includes daemon deployment and lifecycle management.
+
+2. **Binary-first distribution.** Users should not need a Rust toolchain to install
+   repo-graph. Toolchain detection is for diagnostics and optional source-build
+   fallback, not as a prerequisite.
+
+3. **Host integrations must be deterministic, reviewable, and reversible.**
+   - Detect host installations (Claude Code, Codex, Cursor)
+   - Show exactly what was found
+   - Create backups before patching
+   - Patch only explicitly selected integrations
+   - Provide uninstall/rollback path
+
+4. **Lifecycle automation belongs in thin host adapters, with policy in `rmap`.**
+   Host-specific hook files are minimal shims. Core logic lives in `rmap hook`
+   commands, keeping policy testable and portable across hosts.
+
+5. **Agent hosts differ and must not be forced into one integration model.**
+   - Claude Code / Codex: lifecycle hook integration (SessionStart, PostToolUse, etc.)
+   - Cursor: MCP server + Rules integration (not the same lifecycle model)
+   - Future hosts: evaluate per-host, do not assume hook parity
+
+6. **Imported host/tool state is configuration and provenance, not graph truth.**
+   Environment detection (installed tools, versions, paths) is metadata for
+   diagnostics and compatibility, not Layer 0–1 extracted fact.
+
+### Platform Priority
+
+1. **macOS** — primary supported platform
+2. **Linux** — second priority
+3. **Windows** — explicitly deferred
+
+### Installer Contract
+
+A complete installation must:
+1. Detect platform and architecture
+2. Install `rmap` CLI and daemon binaries to stable location
+3. Create daemon runtime and configuration directories
+4. Register and start platform-native daemon service (launchd on macOS, systemd user unit on Linux)
+5. Verify daemon health
+6. Detect supported agent hosts (Claude Code, Codex, Cursor)
+7. Offer integration patch for each detected host (with backup)
+8. Write install manifest for uninstall and repair
+9. Provide clean uninstall path
+
+### Hook Integration Model
+
+Hook commands provide the policy surface:
+- `rmap hook session-start` — orientation before agent acts
+- `rmap hook prompt-submit` — preflight context injection
+- `rmap hook post-edit --files <paths>` — refresh after source changes
+- `rmap hook pre-compact` — checkpoint before context compaction
+- `rmap hook stop` — validation summary before completion
+
+Host-specific hook files call these commands. They do not contain policy logic.
+
+### Enforcement Progression
+
+Start informational, add enforcement after field experience:
+
+**Phase 1 (informational):**
+- Session-start orientation injection
+- Prompt-submit context augmentation
+- Post-edit refresh
+- Stop-time validation summary
+
+**Phase 2 (selective enforcement):**
+- Block raw SQL before CLI
+- Block completion without validation transcript
+- Block stale DB use in critical flows
+
+### Trust Boundaries
+
+Host integration is a trust surface. Design rules:
+- Never silently rewrite developer automation configuration
+- Always show what will be changed before patching
+- Always create backup before modification
+- Always provide rollback mechanism
+- Treat hook execution as code — review before activation
+
+### What This Section Does Not Cover
+
+- Implementation details (slice docs)
+- Release signing and notarization (platform-specific slice)
+- Auto-update mechanism (future phase)
+- Windows-specific concerns (deferred)
+
 ## Value Frontier
 
 The highest-value, slowest-changing substrate is not the raw code graph. It is the **architectural understanding layer:**
