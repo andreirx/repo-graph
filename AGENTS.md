@@ -83,6 +83,10 @@ Never present inferred output as observed.
 - Do not append new responsibilities to files over 500 lines.
 - Refactor before expanding mixed-responsibility files.
 
+## Command Execution
+
+- Write bash commands ONE AT A TIME. Compound commands (`&&`, `;`, pipes) trigger permission checks that block execution. Single commands flow faster.
+
 ## Persistence Completeness
 
 Persisted feature is incomplete without: write path, read path, refresh behavior, trust impact, CLI visibility, validation.

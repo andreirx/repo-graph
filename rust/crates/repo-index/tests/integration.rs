@@ -795,12 +795,12 @@ fn index_python_extracts_symbols() {
         stable_keys
     );
 
-    // METHOD nodes (class methods).
+    // CONSTRUCTOR nodes (__init__ methods are constructors).
     assert!(
         stable_keys
             .iter()
-            .any(|k| k.contains("#App.__init__:SYMBOL:METHOD")),
-        "missing App.__init__ METHOD node, keys: {:?}",
+            .any(|k| k.contains("#App.__init__:SYMBOL:CONSTRUCTOR")),
+        "missing App.__init__ CONSTRUCTOR node, keys: {:?}",
         stable_keys
     );
     assert!(
