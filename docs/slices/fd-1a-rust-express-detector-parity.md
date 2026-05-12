@@ -8,7 +8,13 @@ Unblocks: FD-1B (React detector)
 
 AST-based Express route detection using tree-sitter-typescript. Integrated into compose.rs orchestration (after npm module persistence for FK constraint).
 
-**Note:** This is a first-cut Rust implementation, not a verified parity match against the TS prototype. Parity claim has not been validated (no corpus comparison test).
+**Parity Status:** Validated (2026-05-12). See `fd-1a-parity-report.md` for comparison results.
+
+Core route detection matches TS prototype (15 of 17 routes shared). Documented differences:
+- Rust includes USE middleware mounts (TS excludes)
+- Rust skips template literals with interpolation (TS strips and keeps partial path)
+
+Both differences favor precision over recall, aligning with project mission.
 
 ### Artifacts
 

@@ -854,6 +854,37 @@ and pre-change baseline are established. Functional Layer 0–1 work is complete
 
 ---
 
+### Backlog: Framework Detection Follow-on Slices
+
+FD-1A and FD-1B are IMPLEMENTED but not parity-validated. These follow-on slices
+complete the framework detection work:
+
+| Slice | Type | Scope | Status |
+|-------|------|-------|--------|
+| FD-1A-PARITY | Validation | Rust vs TS Express detector comparison | **COMPLETED** |
+| FD-SUPPORT-EXT-JSTS | Support | Unified JS/TS extension contract | **IMPLEMENTED** |
+| FD-1B-EXT | Feature | React detector extension widening | **IMPLEMENTED** |
+| FD-SUPPORT-3 | Support | CLI regression tests for `rmap inferences` | **IMPLEMENTED** |
+
+**Dependency chain:**
+
+1. **FD-1A-PARITY** — standalone validation, may trigger FD-1A-FIX if gaps found
+2. **FD-SUPPORT-EXT-JSTS** — support substrate for extension handling
+3. **FD-1B-EXT** — depends on FD-SUPPORT-EXT-JSTS
+4. **FD-SUPPORT-3** — standalone, can execute independently
+
+**Note:** Implementation priority is NOT determined by this ordering. These are
+backlog slices with captured scope, not prioritized execution queue items.
+
+**Slice docs:**
+
+- `docs/slices/fd-1a-parity-validation.md`
+- `docs/slices/fd-support-ext-jsts.md`
+- `docs/slices/fd-1b-ext-react-extension-widening.md`
+- `docs/slices/fd-support-3-inferences-cli-regression.md`
+
+---
+
 ### Shipped: Artifact Contract Registry (ACR)
 
 The **Artifact Contract Registry** codifies artifact semantics in code rather than prose.

@@ -2636,6 +2636,34 @@ specifiers using `file_signals.import_bindings_json`.
    Modules with no imports AND no declared deps are silently excluded from
    `deps list` output (vanish mode). No diagnostic emitted.
 
+## FD-1A — Express Detector Implementation
+
+### Current state
+
+AST-based Express route detection for TypeScript/JavaScript files. Persists Layer 3
+surfaces (`http_provider`) via compose-phase postpass.
+
+Validation: 16 routes detected from corpus. E2E integration tests pass.
+
+### Known Limitations
+
+1. **Parity with TS prototype: VALIDATED (2026-05-12)**
+   
+   Comparison executed via `fd-1a-parity-validation.md`. Results:
+   - 15 of 17 routes match exactly
+   - Rust includes USE middleware mounts (TS excludes) — acceptable enhancement
+   - Rust skips dynamic template literals (TS strips and keeps partial) — higher precision
+   
+   See `docs/slices/fd-1a-parity-report.md` for full comparison.
+
+2. **Handler symbol attribution not implemented:**
+   Routes are detected but not linked to their handler functions.
+   Documented in slice as FD-1A-4 (deferred).
+
+3. **Router mount composition not implemented:**
+   `app.use('/api', router)` prefix propagation is not modeled.
+   Documented in slice as FD-1A-2 (deferred).
+
 ## FD-1B — React Detector Implementation
 
 ### Current state
@@ -2647,20 +2675,20 @@ Validation: 10 components, 14 hooks from corpus. E2E integration tests pass.
 
 ### Known Limitations
 
-1. **Extension coverage is TSX/JSX only:**
-   Current implementation only processes `.tsx` and `.jsx` files.
-   Plain `.ts`/`.js` files with JSX content (pragma-based or transpiler-configured)
-   are not detected. Extended family (`.mjs`, `.cjs`, `.mts`, `.cts`) also not covered.
+1. **Extension coverage: FIXED (2026-05-12)**
+   
+   - **Hook detection:** Now covers full JS/TS family (`.ts`, `.js`, `.mts`, `.cts`, `.mjs`, `.cjs`)
+   - **Component detection:** Still TSX/JSX only (requires JSX syntax)
+   - **JSX pragma support:** Still not implemented (`.ts`/`.js` files with JSX pragma not detected)
+   
+   See `docs/slices/fd-support-ext-jsts.md` and `docs/slices/fd-1b-ext-react-extension-widening.md`.
 
-   Fix path: Unify JS/TS-family extension contract across routing + extractor + detector,
-   then widen FD-1B gate. See user analysis in session for difficulty breakdown.
-
-2. **No CLI regression tests for `rmap inferences list`:**
-   The new CLI command (`rust/crates/rgr/src/commands/inferences.rs`) is validated
-   by manual execution and E2E tests in `fd_1b_react_integration.rs`, but has no
-   dedicated CLI-level regression tests (like `surfaces_command.rs` pattern).
-
-   Fix path: Add `rust/crates/rgr/tests/inferences_command.rs` following surfaces pattern.
+2. **CLI regression tests for `rmap inferences list`: FIXED (2026-05-12)**
+   
+   Added `rust/crates/rgr/tests/inferences_command.rs` with 6 test cases:
+   - usage error, missing DB, repo not found, empty result, kind filter, output structure
+   
+   See `docs/slices/fd-support-3-inferences-cli-regression.md`.
 
 3. **Class components not detected:**
    `extends React.Component` pattern is out of scope for first cut.

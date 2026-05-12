@@ -6,9 +6,42 @@ Gap-closing: strengthen Layer 0–2 facts before expanding Layer 3 framework det
 
 ## Active Slice
 
-None currently active. FD-1B just completed.
+None currently active. Framework detection follow-on slices completed.
+
+## Completed Follow-on Slices
+
+Framework detection follow-on work completed (2026-05-12).
+
+| Slice | Type | Scope | Status |
+|-------|------|-------|--------|
+| FD-1A-PARITY | Validation | Rust vs TS Express detector comparison | **COMPLETED** |
+| FD-SUPPORT-EXT-JSTS | Support | Unified JS/TS extension contract | **IMPLEMENTED** |
+| FD-1B-EXT | Feature | React detector extension widening | **IMPLEMENTED** |
+| FD-SUPPORT-3 | Support | CLI regression tests for `rmap inferences` | **IMPLEMENTED** |
+
+Slice docs:
+- `docs/slices/fd-1a-parity-validation.md`
+- `docs/slices/fd-support-ext-jsts.md`
+- `docs/slices/fd-1b-ext-react-extension-widening.md`
+- `docs/slices/fd-support-3-inferences-cli-regression.md`
 
 ## Recently Implemented
+
+**FD-SUPPORT-3: CLI Regression Tests for rmap inferences** — IMPLEMENTED (2026-05-12)
+
+Slice doc: `docs/slices/fd-support-3-inferences-cli-regression.md`
+
+### Summary
+
+CLI-level regression tests for the `rmap inferences list` command.
+
+### Completed
+
+- `rust/crates/rgr/tests/inferences_command.rs` — 6 test cases
+- Test cases: usage error, missing DB, repo not found, empty result, kind filter, output structure
+- All tests pass
+
+---
 
 **FD-1B: Rust React Detector Parity** — IMPLEMENTED (2026-05-11)
 

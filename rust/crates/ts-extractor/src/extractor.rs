@@ -6,6 +6,7 @@ use repo_graph_classification::types::{
 	ImportBinding, RuntimeBuiltinsSet, SourceLocation,
 };
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
+use repo_graph_indexer::jsts_extensions::{is_jsts_jsx_extension, get_extension};
 use repo_graph_indexer::types::{
 	CallArgPayload, EdgeType, ExtractionResult, ExtractedEdge, ExtractedNode,
 	NodeKind, NodeSubtype, Resolution, ResolvedCallsite, Visibility,
@@ -24,9 +25,9 @@ const LANGUAGES: &[&str] = &["typescript", "tsx", "javascript", "jsx"];
 /// Concrete `ExtractorPort` adapter for TypeScript/TSX/JS/JSX.
 ///
 /// Uses native tree-sitter with compiled-in grammars from
-/// `tree-sitter-typescript`. The TS grammar handles `.ts`/`.js`
-/// files; the TSX grammar handles `.tsx`/`.jsx` files (includes
-/// JSX syntax support).
+/// `tree-sitter-typescript`. Grammar selection per FD-SUPPORT-EXT-JSTS:
+/// - TSX grammar for `.tsx`/`.jsx` (includes JSX syntax support)
+/// - TS grammar for `.ts`/`.js`/`.mts`/`.cts`/`.mjs`/`.cjs`
 pub struct TsExtractor {
 	languages: Vec<String>,
 	builtins: RuntimeBuiltinsSet,
@@ -51,8 +52,13 @@ impl TsExtractor {
 	}
 
 	/// Select the appropriate grammar for a file path.
+	///
+	/// Uses the unified JS/TS extension contract from `jsts_extensions`:
+	/// - TSX grammar for `.tsx`/`.jsx` (JSX syntax support)
+	/// - TS grammar for all other JS/TS family extensions
 	fn language_for_file(&self, file_path: &str) -> tree_sitter::Language {
-		if file_path.ends_with(".tsx") || file_path.ends_with(".jsx") {
+		let ext = get_extension(file_path);
+		if is_jsts_jsx_extension(ext) {
 			self.tsx_language.clone()
 		} else {
 			self.ts_language.clone()

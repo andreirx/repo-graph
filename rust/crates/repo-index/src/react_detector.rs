@@ -1,4 +1,4 @@
-//! FD-1B: React component and hook detection for TSX/JSX files.
+//! FD-1B + FD-1B-EXT: React component and hook detection.
 //!
 //! Detects React component definitions and hook usage, emitting
 //! Layer 3 inferences (`react_component`, `react_hook_usage`).
@@ -10,16 +10,22 @@
 //! - Built-in hooks (`useState`, `useEffect`, etc.) -> `react_hook_usage`
 //! - Custom hooks (`use*` with lowercase second letter) -> `react_hook_usage`
 //!
-//! Detection gate:
-//! - File must import from `react` or `@types/react`
-//! - File must be TSX/JSX (or TS/JS with JSX pragma)
+//! Detection gates:
+//! - **Components:** File must import `react` AND have `.tsx`/`.jsx` extension
+//! - **Hooks:** File must import `react` AND be any JS/TS family extension
+//!   (`.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`, `.mjs`, `.cjs`)
+//!
+//! The hook gate is wider than the component gate because hook detection
+//! does not require JSX syntax. This is per FD-1B-EXT.
 //!
 //! Limitations (first-cut scope):
 //! - Does not detect class components (`extends React.Component`)
 //! - Does not analyze component props
 //! - Does not detect HOCs (Higher-Order Components)
 //! - Does not build component hierarchy
+//! - Does not detect components in `.ts`/`.js` files with JSX pragma
 
+use repo_graph_indexer::jsts_extensions::{get_extension, is_jsts_extension, is_jsts_jsx_extension};
 use repo_graph_indexer::orchestrator::FileInput;
 use repo_graph_storage::types::InferenceInput;
 use tree_sitter::{Node, Parser};
@@ -96,9 +102,10 @@ pub fn detect_react_components(file_inputs: &[FileInput]) -> Vec<ReactComponentD
 	let tsx_language: tree_sitter::Language = tree_sitter_typescript::LANGUAGE_TSX.into();
 
 	for file in file_inputs {
-		// Filter to TSX/JSX files only.
-		let is_tsx_jsx = file.rel_path.ends_with(".tsx") || file.rel_path.ends_with(".jsx");
-		if !is_tsx_jsx {
+		// Filter to TSX/JSX files only (narrow gate, FD-1B-EXT will widen).
+		// Uses shared utility per FD-SUPPORT-EXT-JSTS.
+		let ext = get_extension(&file.rel_path);
+		if !is_jsts_jsx_extension(ext) {
 			continue;
 		}
 
@@ -129,20 +136,25 @@ pub fn detect_react_components(file_inputs: &[FileInput]) -> Vec<ReactComponentD
 	components
 }
 
-/// Detect React hook usage in TSX/JSX files.
+/// Detect React hook usage in JS/TS files.
 ///
-/// Filters to TSX/JSX files, checks for React import, parses AST,
-/// and extracts hook call sites.
+/// Filters to all JS/TS family files (FD-1B-EXT widened gate), checks for
+/// React import, parses AST, and extracts hook call sites.
+///
+/// Hook detection does not require JSX syntax, so it works for all JS/TS
+/// extensions including `.ts`, `.js`, `.mts`, `.cts`, `.mjs`, `.cjs`.
 pub fn detect_react_hooks(file_inputs: &[FileInput]) -> Vec<ReactHookDetection> {
 	let mut hooks = Vec::new();
 
 	let mut parser = Parser::new();
+	let ts_language: tree_sitter::Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
 	let tsx_language: tree_sitter::Language = tree_sitter_typescript::LANGUAGE_TSX.into();
 
 	for file in file_inputs {
-		// Filter to TSX/JSX files only.
-		let is_tsx_jsx = file.rel_path.ends_with(".tsx") || file.rel_path.ends_with(".jsx");
-		if !is_tsx_jsx {
+		// Filter to all JS/TS family files (widened gate per FD-1B-EXT).
+		// Hook detection does not require JSX, so we can include all JS/TS files.
+		let ext = get_extension(&file.rel_path);
+		if !is_jsts_extension(ext) {
 			continue;
 		}
 
@@ -151,7 +163,14 @@ pub fn detect_react_hooks(file_inputs: &[FileInput]) -> Vec<ReactHookDetection> 
 			continue;
 		}
 
-		if parser.set_language(&tsx_language).is_err() {
+		// Select grammar: TSX for .tsx/.jsx (JSX syntax), TS for others.
+		let language = if is_jsts_jsx_extension(ext) {
+			&tsx_language
+		} else {
+			&ts_language
+		};
+
+		if parser.set_language(language).is_err() {
 			continue;
 		}
 

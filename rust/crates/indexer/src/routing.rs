@@ -24,11 +24,16 @@ pub const MAX_FILE_SIZE_BYTES: usize = 1_000_000;
 /// Source files produce nodes/edges/signals via language extractors.
 /// Contract files (proto, IDL) are handled separately — see
 /// `is_contract_extension()`.
+///
+/// JS/TS family includes extended extensions (`.mts`, `.cts`, `.mjs`, `.cjs`)
+/// per FD-SUPPORT-EXT-JSTS unified contract.
 pub fn is_source_extension(ext: &str) -> bool {
 	matches!(
 		ext,
-		".ts" | ".tsx"
-			| ".js" | ".jsx"
+		// JS/TS family (core + extended)
+		".ts" | ".tsx" | ".js" | ".jsx"
+			| ".mts" | ".cts" | ".mjs" | ".cjs"
+			// Other languages
 			| ".rs"
 			| ".java"
 			| ".py"
@@ -142,12 +147,19 @@ pub fn get_extension(file_path: &str) -> &str {
 /// `TrackedFile` is `Some("typescript")`, `Some("rust")`, etc.
 /// for supported languages, and `None` for languages without
 /// extractors.
+///
+/// JS/TS extended family (`.mts`, `.cts`, `.mjs`, `.cjs`) maps to
+/// the same language identifiers as their base extensions, per
+/// FD-SUPPORT-EXT-JSTS unified contract.
 pub fn detect_language(file_path: &str) -> Option<&'static str> {
 	match get_extension(file_path) {
-		".ts" => Some("typescript"),
+		// TypeScript family
+		".ts" | ".mts" | ".cts" => Some("typescript"),
 		".tsx" => Some("tsx"),
-		".js" => Some("javascript"),
+		// JavaScript family
+		".js" | ".mjs" | ".cjs" => Some("javascript"),
 		".jsx" => Some("jsx"),
+		// Other languages
 		".java" => Some("java"),
 		".py" => Some("python"),
 		".rs" => Some("rust"),
@@ -162,11 +174,14 @@ pub fn detect_language(file_path: &str) -> Option<&'static str> {
 /// `languages()` list.
 ///
 /// Mirror of `languageToExtensions` from `repo-indexer.ts:186`.
+///
+/// JS/TS extended family (`.mts`, `.cts`, `.mjs`, `.cjs`) included
+/// per FD-SUPPORT-EXT-JSTS unified contract.
 pub fn language_to_extensions(lang: &str) -> &'static [&'static str] {
 	match lang {
-		"typescript" => &[".ts"],
+		"typescript" => &[".ts", ".mts", ".cts"],
 		"tsx" => &[".tsx", ".jsx"],
-		"javascript" => &[".js"],
+		"javascript" => &[".js", ".mjs", ".cjs"],
 		"rust" => &[".rs"],
 		"java" => &[".java"],
 		"python" => &[".py"],
@@ -388,16 +403,43 @@ mod tests {
 		assert_eq!(detect_language("src/app.py"), Some("python"));
 	}
 
+	// ── detect_language extended JS/TS family (FD-SUPPORT-EXT-JSTS) ──
+
+	#[test]
+	fn detect_language_mts() {
+		assert_eq!(detect_language("src/utils.mts"), Some("typescript"));
+	}
+
+	#[test]
+	fn detect_language_cts() {
+		assert_eq!(detect_language("src/config.cts"), Some("typescript"));
+	}
+
+	#[test]
+	fn detect_language_mjs() {
+		assert_eq!(detect_language("src/utils.mjs"), Some("javascript"));
+	}
+
+	#[test]
+	fn detect_language_cjs() {
+		assert_eq!(detect_language("src/config.cjs"), Some("javascript"));
+	}
+
 	// ── language_to_extensions ────────────────────────────────
 
 	#[test]
 	fn language_to_extensions_typescript() {
-		assert_eq!(language_to_extensions("typescript"), &[".ts"]);
+		assert_eq!(language_to_extensions("typescript"), &[".ts", ".mts", ".cts"]);
 	}
 
 	#[test]
 	fn language_to_extensions_tsx_includes_jsx() {
 		assert_eq!(language_to_extensions("tsx"), &[".tsx", ".jsx"]);
+	}
+
+	#[test]
+	fn language_to_extensions_javascript() {
+		assert_eq!(language_to_extensions("javascript"), &[".js", ".mjs", ".cjs"]);
 	}
 
 	#[test]
@@ -433,6 +475,28 @@ mod tests {
 	#[test]
 	fn source_extension_md_not_supported() {
 		assert!(!is_source_extension(".md"));
+	}
+
+	// ── is_source_extension extended JS/TS family (FD-SUPPORT-EXT-JSTS) ──
+
+	#[test]
+	fn source_extension_mts() {
+		assert!(is_source_extension(".mts"));
+	}
+
+	#[test]
+	fn source_extension_cts() {
+		assert!(is_source_extension(".cts"));
+	}
+
+	#[test]
+	fn source_extension_mjs() {
+		assert!(is_source_extension(".mjs"));
+	}
+
+	#[test]
+	fn source_extension_cjs() {
+		assert!(is_source_extension(".cjs"));
 	}
 
 	// ── is_always_excluded_dir ────────────────────────────────

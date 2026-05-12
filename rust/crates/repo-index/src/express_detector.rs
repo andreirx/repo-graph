@@ -17,6 +17,7 @@
 //! - Does not compose router mount prefixes
 //! - Does not perform deep middleware analysis
 
+use repo_graph_indexer::jsts_extensions::{get_extension, is_jsts_extension, is_jsts_jsx_extension};
 use repo_graph_indexer::orchestrator::FileInput;
 use repo_graph_storage::types::CreateProjectSurfaceInput;
 use tree_sitter::{Node, Parser};
@@ -71,12 +72,9 @@ pub fn detect_express_routes(file_inputs: &[FileInput]) -> Vec<ExpressRouteDetec
 	let tsx_language: tree_sitter::Language = tree_sitter_typescript::LANGUAGE_TSX.into();
 
 	for file in file_inputs {
-		// Filter to TS/JS files.
-		let is_ts_js = file.rel_path.ends_with(".ts")
-			|| file.rel_path.ends_with(".tsx")
-			|| file.rel_path.ends_with(".js")
-			|| file.rel_path.ends_with(".jsx");
-		if !is_ts_js {
+		// Filter to JS/TS family files (core + extended per FD-SUPPORT-EXT-JSTS).
+		let ext = get_extension(&file.rel_path);
+		if !is_jsts_extension(ext) {
 			continue;
 		}
 
@@ -85,8 +83,8 @@ pub fn detect_express_routes(file_inputs: &[FileInput]) -> Vec<ExpressRouteDetec
 			continue;
 		}
 
-		// Select grammar based on extension.
-		let language = if file.rel_path.ends_with(".tsx") || file.rel_path.ends_with(".jsx") {
+		// Select grammar based on extension (TSX for .tsx/.jsx, TS for others).
+		let language = if is_jsts_jsx_extension(ext) {
 			&tsx_language
 		} else {
 			&ts_language

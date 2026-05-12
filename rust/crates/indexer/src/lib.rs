@@ -94,6 +94,7 @@
 pub mod cargo_manifest;
 pub mod extractor_port;
 pub mod inferred_modules;
+pub mod jsts_extensions;
 pub mod package_json;
 pub mod pyproject;
 pub mod settings_gradle;
