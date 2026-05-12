@@ -5,8 +5,8 @@
 use std::io::{BufReader, Cursor};
 use std::sync::Arc;
 
+use repo_graph_daemon_runtime::{DaemonState, ServiceDispatcher};
 use repo_graph_daemon_transport::run_transport;
-use repo_graph_rgr::daemon::{DaemonState, ServiceDispatcher};
 use tempfile::tempdir;
 
 fn run_daemon_request(input: &str) -> String {

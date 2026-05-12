@@ -28,7 +28,7 @@ Per DIST-1 D3, use native macOS paths (not XDG).
 ```
 ~/.local/bin/
   rmap                              # CLI binary
-  rmap-daemon                       # Daemon binary
+  rmapd                             # Daemon binary
 
 ~/Library/Application Support/repo-graph/
   config.toml                       # User configuration
@@ -42,7 +42,7 @@ Per DIST-1 D3, use native macOS paths (not XDG).
   hooks.log                         # Hook execution log
 
 ~/Library/LaunchAgents/
-  com.repo-graph.rmap-daemon.plist  # launchd user agent
+  com.repo-graph.rmapd.plist  # launchd user agent
 ```
 
 ## Installation Script
@@ -95,11 +95,14 @@ install_binaries() {
     
     # Install binaries (user-local, no sudo)
     install -m 755 "${ARTIFACT_DIR}/rmap" "${install_dir}/rmap"
-    install -m 755 "${ARTIFACT_DIR}/rmap-daemon" "${install_dir}/rmap-daemon"
+    install -m 755 "${ARTIFACT_DIR}/rmapd" "${install_dir}/rmapd"
     
     # Verify installation
     if ! "${install_dir}/rmap" --version > /dev/null 2>&1; then
-        error "Binary verification failed"
+        error "CLI binary verification failed"
+    fi
+    if ! "${install_dir}/rmapd" --version > /dev/null 2>&1; then
+        error "Daemon binary verification failed"
     fi
 }
 ```
@@ -131,11 +134,11 @@ create_directories() {
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.repo-graph.rmap-daemon</string>
+    <string>com.repo-graph.rmapd</string>
     
     <key>ProgramArguments</key>
     <array>
-        <string>${HOME}/.local/bin/rmap-daemon</string>
+        <string>${HOME}/.local/bin/rmapd</string>
         <string>--config</string>
         <string>${HOME}/Library/Application Support/repo-graph/config.toml</string>
     </array>
@@ -177,12 +180,12 @@ create_directories() {
 
 ```bash
 install_launchd_service() {
-    local plist_path=~/Library/LaunchAgents/com.repo-graph.rmap-daemon.plist
+    local plist_path=~/Library/LaunchAgents/com.repo-graph.rmapd.plist
     
     echo "Installing launchd service..."
     
     # Expand HOME in template
-    sed "s|\${HOME}|${HOME}|g" "${SCRIPT_DIR}/templates/com.repo-graph.rmap-daemon.plist" > "${plist_path}"
+    sed "s|\${HOME}|${HOME}|g" "${SCRIPT_DIR}/templates/com.repo-graph.rmapd.plist" > "${plist_path}"
     
     # Set permissions
     chmod 644 "${plist_path}"
@@ -192,10 +195,10 @@ start_daemon() {
     echo "Starting daemon..."
     
     # Unload if already loaded (for upgrades)
-    launchctl bootout gui/$(id -u)/com.repo-graph.rmap-daemon 2>/dev/null || true
+    launchctl bootout gui/$(id -u)/com.repo-graph.rmapd 2>/dev/null || true
     
     # Load and start
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.repo-graph.rmap-daemon.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.repo-graph.rmapd.plist
     
     # Wait for startup
     sleep 2
@@ -208,7 +211,7 @@ verify_daemon_health() {
     local attempt=1
     
     while [[ $attempt -le $max_attempts ]]; do
-        if rmap daemon status > /dev/null 2>&1; then
+        if rmapd --status > /dev/null 2>&1; then
             echo "Daemon is healthy"
             return 0
         fi
@@ -342,17 +345,17 @@ uninstall_macos() {
     echo "Uninstalling repo-graph..."
     
     # Stop and unload service
-    launchctl bootout gui/$(id -u)/com.repo-graph.rmap-daemon 2>/dev/null || true
+    launchctl bootout gui/$(id -u)/com.repo-graph.rmapd 2>/dev/null || true
     
     # Remove service definition
-    rm -f ~/Library/LaunchAgents/com.repo-graph.rmap-daemon.plist
+    rm -f ~/Library/LaunchAgents/com.repo-graph.rmapd.plist
     
     # Restore host integration backups
     restore_backups
     
     # Remove binaries (user-local, no sudo needed)
     rm -f ~/.local/bin/rmap
-    rm -f ~/.local/bin/rmap-daemon
+    rm -f ~/.local/bin/rmapd
     
     # Prompt for data removal
     if confirm "Remove configuration and data?"; then
@@ -374,13 +377,13 @@ upgrade_macos() {
     echo "New version: ${VERSION}"
     
     # Stop daemon
-    launchctl bootout gui/$(id -u)/com.repo-graph.rmap-daemon 2>/dev/null || true
+    launchctl bootout gui/$(id -u)/com.repo-graph.rmapd 2>/dev/null || true
     
     # Install new binaries
     install_binaries
     
     # Reload service (picks up new binary)
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.repo-graph.rmap-daemon.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.repo-graph.rmapd.plist
     
     # Verify
     verify_daemon_health
@@ -398,21 +401,21 @@ Until MAC-2 (code signing), binaries are unsigned.
 
 ```bash
 handle_gatekeeper() {
-    # Try to run binary
+    # Try to run binaries
     if ! ~/.local/bin/rmap --version > /dev/null 2>&1; then
         echo ""
-        echo "macOS Gatekeeper blocked the binary."
+        echo "macOS Gatekeeper blocked the binaries."
         echo ""
         echo "To allow, run:"
         echo "  xattr -d com.apple.quarantine ~/.local/bin/rmap"
-        echo "  xattr -d com.apple.quarantine ~/.local/bin/rmap-daemon"
+        echo "  xattr -d com.apple.quarantine ~/.local/bin/rmapd"
         echo ""
         echo "Or: System Preferences → Security & Privacy → Allow"
         echo ""
         
         if confirm "Run xattr commands now?"; then
             xattr -d com.apple.quarantine ~/.local/bin/rmap 2>/dev/null || true
-            xattr -d com.apple.quarantine ~/.local/bin/rmap-daemon 2>/dev/null || true
+            xattr -d com.apple.quarantine ~/.local/bin/rmapd 2>/dev/null || true
         fi
     fi
 }
@@ -429,7 +432,7 @@ repo-graph health check (macOS)
 
 Binaries:
   ✓ rmap: ~/.local/bin/rmap (0.1.0)
-  ✓ rmap-daemon: ~/.local/bin/rmap-daemon (0.1.0)
+  ✓ rmapd: ~/.local/bin/rmapd (0.1.0)
 
 Directories:
   ✓ Config: ~/Library/Application Support/repo-graph
@@ -437,7 +440,7 @@ Directories:
   ✓ Logs: ~/Library/Logs/repo-graph
 
 Daemon:
-  ✓ Service: loaded (com.repo-graph.rmap-daemon)
+  ✓ Service: loaded (com.repo-graph.rmapd)
   ✓ Status: running (pid 12345)
   ✓ Health: ok
 
@@ -484,7 +487,7 @@ Recent logs:
 
 1. `scripts/install-macos.sh`
 2. `scripts/lib/macos.sh` (macOS-specific functions)
-3. `scripts/templates/com.repo-graph.rmap-daemon.plist`
+3. `scripts/templates/com.repo-graph.rmapd.plist`
 4. `rmap uninstall` command (macOS path)
 5. `rmap doctor` command (macOS path)
 6. Installation documentation

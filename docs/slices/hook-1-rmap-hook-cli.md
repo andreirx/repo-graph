@@ -418,7 +418,7 @@ Warning: Daemon not running
 Hook will use direct execution (slower)
 
 To start daemon:
-  rmap daemon start
+  rmapd
 ```
 
 ## Integration with Daemon

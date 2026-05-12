@@ -44,8 +44,10 @@ Users should not need a Rust toolchain to install repo-graph.
 - System-wide install is opt-in (`--system` flag) for multi-user machines
 
 **User-local binary locations:**
-- macOS: `~/.local/bin/rmap` (add to PATH in shell profile)
-- Linux: `~/.local/bin/rmap` (XDG standard)
+- `~/.local/bin/rmap` — CLI binary
+- `~/.local/bin/rmapd` — daemon binary
+
+Add `~/.local/bin` to PATH in shell profile.
 
 ### D3: Platform-Native Directory Layout (LOCKED)
 
@@ -54,8 +56,8 @@ Use platform-native paths, not XDG-on-macOS.
 **macOS (native paths):**
 ```
 ~/.local/bin/
-  rmap
-  rmap-daemon
+  rmap                    # CLI binary
+  rmapd                   # Daemon binary
 
 ~/Library/Application Support/repo-graph/
   config.toml
@@ -71,14 +73,14 @@ Use platform-native paths, not XDG-on-macOS.
   sessions/
 
 ~/Library/LaunchAgents/
-  com.repo-graph.rmap-daemon.plist
+  com.repo-graph.rmapd.plist
 ```
 
 **Linux (XDG paths):**
 ```
 ~/.local/bin/
-  rmap
-  rmap-daemon
+  rmap                    # CLI binary
+  rmapd                   # Daemon binary
 
 ~/.config/rmap/
   config.toml
@@ -91,7 +93,7 @@ Use platform-native paths, not XDG-on-macOS.
   sessions/
 
 ~/.config/systemd/user/
-  rmap-daemon.service
+  rmapd.service
 ```
 
 ### D4: Toolchain Detection Contract
@@ -147,7 +149,7 @@ Note: Node.js/npm not required for rmap (Rust binary).
 Source fallback is opt-in via `--source` flag. It is NOT automatic.
 
 ```
-$ curl -fsSL https://repo-graph.dev/install.sh | bash -s -- --source
+$ curl -fsSL https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/install.sh | bash -s -- --source
 ```
 
 When `--source` is specified:
@@ -173,9 +175,9 @@ Installation includes daemon deployment and lifecycle management, not just CLI b
 1. Detect platform and architecture
 2. Detect toolchains (D4)
 3. Install `rmap` CLI binary to user-local location
-4. Install daemon binary to user-local location
+4. Install `rmapd` daemon binary to user-local location
 5. Create platform-native directories (D3)
-6. Register user-level daemon service
+6. Register user-level daemon service (invokes `rmapd`)
 7. Start daemon service
 8. Verify daemon health
 9. Detect supported agent hosts
@@ -198,13 +200,13 @@ Every installation writes a manifest recording what was done.
   "arch": "aarch64",
   "install_mode": "user",
   "components": {
-    "cli": {
+    "rmap": {
       "path": "~/.local/bin/rmap",
       "version": "0.1.0",
       "checksum": "sha256:..."
     },
-    "daemon": {
-      "path": "~/.local/bin/rmap-daemon",
+    "rmapd": {
+      "path": "~/.local/bin/rmapd",
       "version": "0.1.0",
       "checksum": "sha256:..."
     }
@@ -216,7 +218,7 @@ Every installation writes a manifest recording what was done.
   },
   "service": {
     "type": "launchd",
-    "path": "~/Library/LaunchAgents/com.repo-graph.rmap-daemon.plist",
+    "path": "~/Library/LaunchAgents/com.repo-graph.rmapd.plist",
     "status": "running"
   },
   "toolchain_detection": {
@@ -274,7 +276,7 @@ Installer checks version compatibility before upgrade.
 ### Interactive Mode (Default)
 
 ```
-$ curl -fsSL https://repo-graph.dev/install.sh | bash
+$ curl -fsSL https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/install.sh | bash
 
 Detecting platform... macOS ARM64
 Detecting toolchains...
@@ -283,7 +285,7 @@ Detecting toolchains...
 
 Downloading rmap v0.1.0...
 Installing CLI to ~/.local/bin/rmap...
-Installing daemon to ~/.local/bin/rmap-daemon...
+Installing daemon to ~/.local/bin/rmapd...
 Creating directories...
   ~/Library/Application Support/repo-graph/
   ~/Library/Logs/repo-graph/
@@ -309,14 +311,14 @@ Adding to ~/.zshrc...
 
 Installation complete.
   CLI: rmap --version
-  Daemon: rmap daemon status
+  Daemon: rmapd --status
   Uninstall: rmap uninstall
 ```
 
 ### Non-Interactive Mode
 
 ```
-$ curl -fsSL https://repo-graph.dev/install.sh | bash -s -- \
+$ curl -fsSL https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/install.sh | bash -s -- \
     --non-interactive \
     --integrate claude-code,codex
 ```
@@ -324,7 +326,7 @@ $ curl -fsSL https://repo-graph.dev/install.sh | bash -s -- \
 ### Binary-Only Mode
 
 ```
-$ curl -fsSL https://repo-graph.dev/install.sh | bash -s -- \
+$ curl -fsSL https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/install.sh | bash -s -- \
     --binary-only
 ```
 
@@ -368,7 +370,7 @@ Error: Daemon health check failed after 3 attempts
 Troubleshooting:
   1. Check logs: ~/.local/share/rmap/logs/daemon.log
   2. Check service: launchctl list | grep rmap
-  3. Manual start: rmap-daemon --foreground
+  3. Manual start: rmapd --foreground
 ```
 
 ### Host Integration Backup Failed

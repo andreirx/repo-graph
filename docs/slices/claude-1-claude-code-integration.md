@@ -423,7 +423,7 @@ repo-graph integrates with Claude Code via lifecycle hooks.
 
 ```bash
 # Install repo-graph with Claude Code integration
-curl -fsSL https://repo-graph.dev/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/install.sh | bash
 
 # Or add integration to existing installation
 rmap integrate claude-code

@@ -48,10 +48,10 @@ codesign --sign "Developer ID Application: Name (TEAMID)" \
 codesign --sign "Developer ID Application: Name (TEAMID)" \
     --options runtime \
     --timestamp \
-    rmap-daemon
+    rmapd
 
 # 2. Create ZIP for notarization
-zip -r rmap-darwin-aarch64.zip rmap rmap-daemon
+zip -r rmap-darwin-aarch64.zip rmap rmapd
 
 # 3. Submit for notarization
 xcrun notarytool submit rmap-darwin-aarch64.zip \
@@ -62,7 +62,7 @@ xcrun notarytool submit rmap-darwin-aarch64.zip \
 
 # 4. Staple ticket
 xcrun stapler staple rmap
-xcrun stapler staple rmap-daemon
+xcrun stapler staple rmapd
 ```
 
 ### CI Integration
@@ -83,7 +83,7 @@ GitHub Actions workflow additions:
 - name: Sign binaries
   run: |
     codesign --sign "Developer ID Application: ..." --options runtime --timestamp rmap
-    codesign --sign "Developer ID Application: ..." --options runtime --timestamp rmap-daemon
+    codesign --sign "Developer ID Application: ..." --options runtime --timestamp rmapd
 
 - name: Notarize
   env:
@@ -91,10 +91,10 @@ GitHub Actions workflow additions:
     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
   run: |
-    zip -r artifact.zip rmap rmap-daemon
+    zip -r artifact.zip rmap rmapd
     xcrun notarytool submit artifact.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
     xcrun stapler staple rmap
-    xcrun stapler staple rmap-daemon
+    xcrun stapler staple rmapd
 ```
 
 ### Secrets Required

@@ -838,6 +838,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-daemon-runtime"
+version = "0.1.0"
+dependencies = [
+ "enrichment",
+ "jdtls-resolver",
+ "parking_lot",
+ "pathdiff",
+ "repo-graph-agent",
+ "repo-graph-daemon-policy",
+ "repo-graph-daemon-transport",
+ "repo-graph-repo-index",
+ "repo-graph-storage",
+ "repo-graph-trust",
+ "rust-analyzer-resolver",
+ "serde_json",
+ "tempfile",
+ "tsserver-resolver",
+]
+
+[[package]]
 name = "repo-graph-daemon-transport"
 version = "0.1.0"
 dependencies = [
@@ -1028,6 +1048,7 @@ dependencies = [
  "repo-graph-classification",
  "repo-graph-coverage",
  "repo-graph-daemon-policy",
+ "repo-graph-daemon-runtime",
  "repo-graph-daemon-transport",
  "repo-graph-doc-facts",
  "repo-graph-gate",
@@ -1130,6 +1151,13 @@ dependencies = [
  "tree-sitter-typescript",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "rmapd"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-daemon-runtime",
 ]
 
 [[package]]

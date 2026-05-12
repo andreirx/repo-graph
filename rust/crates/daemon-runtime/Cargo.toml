@@ -1,0 +1,51 @@
+# ── repo-graph-daemon-runtime ───────────────────────────────────────
+#
+# Daemon service runtime for repo-graph.
+#
+# Responsibility: service bootstrap, state management, request dispatch,
+# and the main daemon loop. This is the shared runtime that both rmap
+# (compatibility shim) and rmapd (dedicated binary) use.
+#
+# NOT policy. NOT transport. This is the orchestration layer that wires
+# together transport, policy, storage, and application services.
+#
+# Created for RMAPD-1 slice to establish correct dependency direction:
+#   - rmapd depends on daemon-runtime (primary host)
+#   - rmap depends on daemon-runtime (deprecated compatibility shim)
+#   - Neither binary owns the daemon logic
+
+[package]
+name         = "repo-graph-daemon-runtime"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "Daemon service runtime for repo-graph"
+publish      = false
+
+[dependencies]
+# Transport and policy layers
+repo-graph-daemon-transport = { path = "../daemon-transport" }
+repo-graph-daemon-policy = { path = "../daemon-policy" }
+
+# Storage layer
+repo-graph-storage = { path = "../storage" }
+
+# Application services (used by dispatcher)
+repo-graph-repo-index = { path = "../repo-index" }
+repo-graph-agent = { path = "../agent" }
+repo-graph-trust = { path = "../trust" }
+
+# Enrichment pipeline and resolvers
+enrichment = { path = "../enrichment" }
+rust-analyzer-resolver = { path = "../rust-analyzer-resolver" }
+tsserver-resolver = { path = "../tsserver-resolver" }
+jdtls-resolver = { path = "../jdtls-resolver" }
+
+# Utilities
+pathdiff = "0.2"
+serde_json = "1"
+parking_lot = "0.12.5"
+
+[dev-dependencies]
+tempfile = "3"

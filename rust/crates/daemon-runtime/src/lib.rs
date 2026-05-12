@@ -1,12 +1,12 @@
-//! Daemon mode for rmap.
+//! Daemon service runtime for repo-graph.
 //!
-//! Provides long-running daemon functionality with NDJSON transport
-//! over stdin/stdout.
+//! This crate provides the shared runtime for the repo-graph daemon,
+//! including state management, request dispatch, and the main daemon loop.
 //!
 //! # Architecture
 //!
 //! ```text
-//! stdin → [NDJSON] → [ServiceDispatcher] → [RepoCoordinator] → [Storage] → response → stdout
+//! stdin → [NDJSON] → [ServiceDispatcher] → [Application Services] → response → stdout
 //! ```
 //!
 //! The daemon holds per-repo state including:
@@ -19,12 +19,29 @@
 //! 3. Acquires appropriate lock (read for queries, write for mutations)
 //! 4. Calls the service
 //! 5. Returns the result
+//!
+//! # Usage
+//!
+//! Both `rmap` (CLI compatibility shim) and `rmapd` (dedicated daemon binary)
+//! use this crate as their daemon runtime:
+//!
+//! ```ignore
+//! use repo_graph_daemon_runtime::run_daemon;
+//!
+//! fn main() {
+//!     if let Err(e) = run_daemon() {
+//!         eprintln!("daemon error: {}", e);
+//!         std::process::exit(1);
+//!     }
+//! }
+//! ```
 
-mod dispatch;
-mod state;
+pub mod dispatch;
+pub mod state;
+pub mod util;
 
 pub use dispatch::ServiceDispatcher;
-pub use state::{DaemonState, RepoState};
+pub use state::{DaemonState, RepoKey, RepoState};
 
 use std::sync::Arc;
 

@@ -163,6 +163,7 @@ repo-graph-boundary-interaction = { path = "../boundary-interaction" }
 repo-graph-classification = { path = "../classification" }
 repo-graph-coverage = { path = "../coverage" }
 repo-graph-daemon-policy = { path = "../daemon-policy" }
+repo-graph-daemon-runtime = { path = "../daemon-runtime" }
 repo-graph-daemon-transport = { path = "../daemon-transport" }
 repo-graph-doc-facts = { path = "../doc-facts" }
 repo-graph-gate = { path = "../gate" }

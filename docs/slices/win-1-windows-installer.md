@@ -41,7 +41,7 @@ Consider implementing WIN-1 when:
 ```
 C:\Program Files\repo-graph\
   rmap.exe
-  rmap-daemon.exe
+  rmapd.exe
 
 %APPDATA%\repo-graph\
   config.toml

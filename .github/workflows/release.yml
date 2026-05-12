@@ -1,0 +1,187 @@
+# repo-graph Release Workflow
+#
+# Builds cross-platform binaries and creates GitHub releases.
+#
+# Triggers:
+#   - Tag push: v* (e.g., v0.1.0, v1.0.0-beta.1)
+#
+# Artifact matrix:
+#   - macOS ARM64 (aarch64-apple-darwin)
+#   - Linux x86_64 (x86_64-unknown-linux-gnu)
+#
+# Binaries:
+#   - rmap: CLI binary
+#   - rmapd: Daemon binary
+#
+# See: docs/slices/rel-1-release-pipeline.md
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Manual dispatch removed: releases must come from tags to ensure version integrity.
+  # To release: create and push a tag (e.g., git tag v0.1.0 && git push origin v0.1.0)
+
+env:
+  RUST_TOOLCHAIN: '1.93.0'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14              # ARM64 runner (Apple Silicon)
+            target: aarch64-apple-darwin
+            platform: darwin
+            arch: aarch64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux
+            arch: x86_64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          # Extract version from tag (remove 'v' prefix)
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building version: ${VERSION}"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache Cargo build
+        uses: actions/cache@v4
+        with:
+          path: rust/target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-build-
+
+      - name: Build release binaries
+        working-directory: rust
+        run: |
+          # Build CLI binary from repo-graph-rgr crate
+          cargo build --release --target ${{ matrix.target }} -p repo-graph-rgr
+          # Build daemon binary from rmapd crate (separate crate per RMAPD-1)
+          cargo build --release --target ${{ matrix.target }} -p rmapd
+
+      - name: Prepare artifact directory
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          ARTIFACT_NAME="rmap-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}"
+
+          mkdir -p "dist/${ARTIFACT_NAME}"
+
+          # Copy binaries
+          cp "rust/target/${{ matrix.target }}/release/rmap" "dist/${ARTIFACT_NAME}/"
+          cp "rust/target/${{ matrix.target }}/release/rmapd" "dist/${ARTIFACT_NAME}/"
+
+          # Copy documentation files if they exist
+          [ -f README.md ] && cp README.md "dist/${ARTIFACT_NAME}/" || true
+          [ -f LICENSE ] && cp LICENSE "dist/${ARTIFACT_NAME}/" || true
+          [ -f CHANGELOG.md ] && cp CHANGELOG.md "dist/${ARTIFACT_NAME}/" || true
+
+      - name: Create archive
+        working-directory: dist
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          ARTIFACT_NAME="rmap-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}"
+          ARCHIVE_NAME="${ARTIFACT_NAME}.tar.gz"
+
+          tar -czvf "${ARCHIVE_NAME}" "${ARTIFACT_NAME}"
+
+          # Create checksum
+          if command -v shasum &> /dev/null; then
+            shasum -a 256 "${ARCHIVE_NAME}" > "${ARCHIVE_NAME}.sha256"
+          else
+            sha256sum "${ARCHIVE_NAME}" > "${ARCHIVE_NAME}.sha256"
+          fi
+
+          echo "Created: ${ARCHIVE_NAME}"
+          cat "${ARCHIVE_NAME}.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rmap-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          # Version comes from tag
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${GITHUB_REF_NAME}"
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "TAG=${TAG}" >> $GITHUB_OUTPUT
+
+          # Determine if pre-release
+          if [[ "$VERSION" == *"-"* ]]; then
+            echo "PRERELEASE=true" >> $GITHUB_OUTPUT
+          else
+            echo "PRERELEASE=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find artifacts -type f -ls
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.TAG }}
+          name: repo-graph v${{ steps.version.outputs.VERSION }}
+          draft: true
+          prerelease: ${{ steps.version.outputs.PRERELEASE }}
+          generate_release_notes: true
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

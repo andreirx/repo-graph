@@ -1,6 +1,6 @@
 # REL-1: Release Pipeline
 
-Status: PLANNED
+Status: IMPLEMENTED DRAFT
 Depends: DIST-1
 Track: Distribution / Install / Host Integration
 
@@ -8,6 +8,25 @@ Track: Distribution / Install / Host Integration
 
 Establish GitHub Actions pipeline to build and publish cross-platform binary artifacts
 for repo-graph releases.
+
+## Scope
+
+**REL-1 covers:**
+- GitHub Actions workflow for building release artifacts
+- Artifact naming, packaging, and checksums
+- GitHub Releases publication
+- Bootstrap installer script (downloads and installs binaries)
+
+**REL-1 does NOT cover:**
+- Daemon service registration (MAC-1, LINUX-1)
+- Host integration patching (CLAUDE-1, CODEX-1)
+- Code signing and notarization (MAC-2)
+- Auto-update mechanism (UPDATE-1)
+
+The install script in REL-1 is a **bootstrap installer** — it installs binaries and
+creates directories, but daemon service setup and host integrations are stubs that
+print guidance. Full installer functionality is completed by MAC-1, LINUX-1, CLAUDE-1,
+and CODEX-1.
 
 ## Artifact Matrix
 
@@ -46,7 +65,7 @@ rmap-0.1.0-linux-x86_64.tar.gz.sha256
 ```
 rmap-0.1.0-darwin-aarch64/
   rmap                      # CLI binary
-  rmap-daemon               # Daemon binary
+  rmapd                     # Daemon binary
   LICENSE
   README.md
   CHANGELOG.md
@@ -106,14 +125,15 @@ steps:
   - name: Build release binaries
     run: |
       cd rust
+      # Build CLI binary (rmap) and daemon binary (rmapd)
+      # Note: rmapd binary target must exist in repo-graph-rgr crate
       cargo build --release --target ${{ matrix.target }} -p repo-graph-rgr
-      cargo build --release --target ${{ matrix.target }} -p repo-graph-daemon
   
   - name: Package artifacts
     run: |
       mkdir -p dist/rmap-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}
       cp rust/target/${{ matrix.target }}/release/rmap dist/rmap-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}/
-      cp rust/target/${{ matrix.target }}/release/rmap-daemon dist/rmap-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}/
+      cp rust/target/${{ matrix.target }}/release/rmapd dist/rmap-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}/
       cp LICENSE README.md CHANGELOG.md dist/rmap-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}/
       cd dist
       tar -czvf rmap-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz rmap-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}
@@ -180,9 +200,10 @@ v0.1.0          → Full release, promoted to latest
 ### Script Location
 
 ```
-https://repo-graph.dev/install.sh
 https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/install.sh
 ```
+
+Replace `{OWNER}` with the actual GitHub organization or username when the repo is public.
 
 ### Script Behavior
 
@@ -275,7 +296,6 @@ All release artifacts hosted on GitHub Releases.
 For faster downloads, consider CDN distribution:
 - Cloudflare R2
 - AWS S3 + CloudFront
-- Custom domain: `https://releases.repo-graph.dev/`
 
 ## Security Considerations
 

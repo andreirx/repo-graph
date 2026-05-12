@@ -2,7 +2,84 @@
 
 ## Current Priority
 
-No active slice. See ROADMAP.md for next priorities.
+**REL-1: Release Pipeline** — ACTIVE (unblocked by RMAPD-1)
+
+Slice doc: `docs/slices/rel-1-release-pipeline.md`
+
+### Context
+
+REL-1 established GitHub Actions workflows and installer script for cross-platform
+binary distribution. Was IMPLEMENTED DRAFT, blocked on rmapd. Now unblocked.
+
+### Remaining Verification
+
+- Tag a test release to validate full pipeline
+- Verify CI workflow passes with both binaries
+
+---
+
+## Recently Implemented
+
+**RMAPD-1: Daemon Binary Target** — IMPLEMENTED (2026-05-12)
+
+Slice doc: `docs/slices/rmapd-1-daemon-binary.md`
+
+### Summary
+
+Created `rmapd` binary as separate crate (Option B) with proper architectural
+boundaries via new `daemon-runtime` crate.
+
+### Architecture
+
+```
+                ┌──────────────────────────────────┐
+                │       daemon-runtime              │
+                │  (state, dispatch, run_daemon)    │
+                └──────────────────────────────────┘
+                         ▲              ▲
+                         │              │
+                   ┌─────┴─────┐  ┌─────┴─────┐
+                   │   rmap    │  │   rmapd   │
+                   │   (CLI)   │  │  (daemon) │
+                   └───────────┘  └───────────┘
+```
+
+### Implementation
+
+- `rust/crates/daemon-runtime/` — NEW shared daemon runtime crate
+- `rust/crates/rmapd/` — dedicated daemon binary (depends on daemon-runtime, NOT rgr)
+- `rmap daemon` — deprecated compatibility shim with warning
+- Daemon code moved from `rgr/src/daemon/` to `daemon-runtime/`
+
+### Verification (EXECUTED)
+
+```
+$ cargo build -p repo-graph-daemon-runtime -p rmapd -p repo-graph-rgr
+   Finished `dev` profile [unoptimized + debuginfo] target(s)
+
+$ ./target/debug/rmap --version
+rmap 0.1.0
+
+$ ./target/debug/rmapd --version
+rmapd 0.1.0
+
+$ echo "" | ./target/debug/rmap daemon
+warning: 'rmap daemon' is deprecated. Use 'rmapd' instead.
+
+$ cargo test -p repo-graph-daemon-runtime
+running 13 tests ... ok
+
+$ cargo test -p repo-graph-rgr --test daemon_dispatch
+running 36 tests ... ok
+```
+
+### Unblocks
+
+- REL-1 release pipeline
+- CI workflow binary verification
+- Install script binary extraction
+
+---
 
 ## Recently Shipped
 

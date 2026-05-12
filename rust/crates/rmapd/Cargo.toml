@@ -1,0 +1,30 @@
+# ── rmapd ───────────────────────────────────────────────────────────
+#
+# Dedicated daemon binary for repo-graph.
+#
+# Responsibility: long-lived service process accepting NDJSON over
+# stdin/stdout. Distinct from `rmap` CLI which handles user commands.
+#
+# Created for RMAPD-1 slice. Separate crate (Option B) chosen for:
+# - Clear responsibility boundary
+# - Independent compilation
+# - Cleaner dependency graph
+#
+# Wiring only: all daemon logic lives in repo-graph-daemon-runtime.
+# This binary does NOT depend on repo-graph-rgr (the CLI crate).
+
+[package]
+name         = "rmapd"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.93.0"
+license      = "MIT"
+description  = "repo-graph daemon binary — NDJSON service over stdin/stdout"
+publish      = false
+
+[[bin]]
+name = "rmapd"
+path = "src/main.rs"
+
+[dependencies]
+repo-graph-daemon-runtime = { path = "../daemon-runtime" }

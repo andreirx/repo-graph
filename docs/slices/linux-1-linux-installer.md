@@ -25,7 +25,7 @@ the daemon as a systemd user service, and provides host integration.
 ```
 ~/.local/bin/
   rmap                              # CLI binary
-  rmap-daemon                       # Daemon binary
+  rmapd                             # Daemon binary
 
 ~/.config/rmap/
   config.toml                       # User configuration
@@ -33,7 +33,7 @@ the daemon as a systemd user service, and provides host integration.
   install-manifest.json             # Installation record
 
 ~/.config/systemd/user/
-  rmap-daemon.service               # systemd user service
+  rmapd.service               # systemd user service
 
 ~/.local/share/rmap/
   logs/
@@ -88,7 +88,7 @@ check_systemd() {
     if ! command -v systemctl &> /dev/null; then
         echo "Warning: systemd not found"
         echo "Daemon service will not be installed"
-        echo "You can run the daemon manually: rmap-daemon"
+        echo "You can run the daemon manually: rmapd"
         NO_SYSTEMD=true
         return
     fi
@@ -115,11 +115,14 @@ install_binaries() {
     
     # Install binaries (user-local, no sudo)
     install -m 755 "${ARTIFACT_DIR}/rmap" "${install_dir}/rmap"
-    install -m 755 "${ARTIFACT_DIR}/rmap-daemon" "${install_dir}/rmap-daemon"
+    install -m 755 "${ARTIFACT_DIR}/rmapd" "${install_dir}/rmapd"
     
     # Verify
     if ! "${install_dir}/rmap" --version > /dev/null 2>&1; then
-        error "Binary verification failed"
+        error "CLI binary verification failed"
+    fi
+    if ! "${install_dir}/rmapd" --version > /dev/null 2>&1; then
+        error "Daemon binary verification failed"
     fi
 }
 ```
@@ -129,15 +132,15 @@ install_binaries() {
 ### Service Unit
 
 ```ini
-# ~/.config/systemd/user/rmap-daemon.service
+# ~/.config/systemd/user/rmapd.service
 [Unit]
 Description=repo-graph daemon
-Documentation=https://github.com/anthropics/repo-graph
+Documentation=https://github.com/{OWNER}/repo-graph
 After=default.target
 
 [Service]
 Type=simple
-ExecStart=~/.local/bin/rmap-daemon --config %h/.config/rmap/config.toml
+ExecStart=%h/.local/bin/rmapd --config %h/.config/rmap/config.toml
 Restart=on-failure
 RestartSec=10
 
@@ -166,14 +169,14 @@ install_systemd_service() {
     fi
     
     local service_dir=~/.config/systemd/user
-    local service_file="${service_dir}/rmap-daemon.service"
+    local service_file="${service_dir}/rmapd.service"
     
     echo "Installing systemd user service..."
     
     mkdir -p "${service_dir}"
     
     # Copy service file (template expansion done by systemd via %h)
-    cp "${SCRIPT_DIR}/templates/rmap-daemon.service" "${service_file}"
+    cp "${SCRIPT_DIR}/templates/rmapd.service" "${service_file}"
     
     # Reload systemd
     systemctl --user daemon-reload
@@ -182,7 +185,7 @@ install_systemd_service() {
 start_daemon() {
     if [[ "${NO_SYSTEMD:-false}" == "true" ]]; then
         echo "Starting daemon manually..."
-        nohup rmap-daemon --config ~/.config/rmap/config.toml \
+        nohup rmapd --config ~/.config/rmap/config.toml \
             >> ~/.local/share/rmap/logs/daemon.log 2>&1 &
         echo $! > ~/.local/share/rmap/daemon.pid
         return
@@ -191,8 +194,8 @@ start_daemon() {
     echo "Starting daemon service..."
     
     # Enable and start
-    systemctl --user enable rmap-daemon.service
-    systemctl --user start rmap-daemon.service
+    systemctl --user enable rmapd.service
+    systemctl --user start rmapd.service
     
     # Wait for startup
     sleep 2
@@ -205,7 +208,7 @@ verify_daemon_health() {
     local attempt=1
     
     while [[ $attempt -le $max_attempts ]]; do
-        if rmap daemon status > /dev/null 2>&1; then
+        if rmapd --status > /dev/null 2>&1; then
             echo "Daemon is healthy"
             return 0
         fi
@@ -219,7 +222,7 @@ verify_daemon_health() {
     echo "Check logs: ~/.local/share/rmap/logs/daemon.log"
     
     if [[ "${NO_SYSTEMD:-false}" != "true" ]]; then
-        echo "Check service: systemctl --user status rmap-daemon"
+        echo "Check service: systemctl --user status rmapd"
     fi
     
     return 1
@@ -278,9 +281,9 @@ uninstall_linux() {
     
     # Stop and disable service
     if [[ "${NO_SYSTEMD:-false}" != "true" ]]; then
-        systemctl --user stop rmap-daemon.service 2>/dev/null || true
-        systemctl --user disable rmap-daemon.service 2>/dev/null || true
-        rm -f ~/.config/systemd/user/rmap-daemon.service
+        systemctl --user stop rmapd.service 2>/dev/null || true
+        systemctl --user disable rmapd.service 2>/dev/null || true
+        rm -f ~/.config/systemd/user/rmapd.service
         systemctl --user daemon-reload
     else
         # Kill manual daemon
@@ -293,10 +296,9 @@ uninstall_linux() {
     # Restore host integrations
     restore_backups
     
-    # Remove binaries
     # Remove binaries (user-local, no sudo needed)
     rm -f ~/.local/bin/rmap
-    rm -f ~/.local/bin/rmap-daemon
+    rm -f ~/.local/bin/rmapd
     
     # Prompt for data removal
     if confirm "Remove configuration and data?"; then
@@ -374,7 +376,7 @@ System:
 
 Binaries:
   ✓ rmap: ~/.local/bin/rmap (0.1.0)
-  ✓ rmap-daemon: ~/.local/bin/rmap-daemon (0.1.0)
+  ✓ rmapd: ~/.local/bin/rmapd (0.1.0)
 
 Directories:
   ✓ Config: ~/.config/rmap
@@ -382,7 +384,7 @@ Directories:
   ✓ Logs: ~/.local/share/rmap/logs
 
 Daemon:
-  ✓ Service: enabled (rmap-daemon.service)
+  ✓ Service: enabled (rmapd.service)
   ✓ Status: active (running)
   ✓ Health: ok
 
@@ -427,7 +429,7 @@ Host Integrations:
 
 1. `scripts/install-linux.sh`
 2. `scripts/lib/linux.sh`
-3. `scripts/templates/rmap-daemon.service`
+3. `scripts/templates/rmapd.service`
 4. `rmap uninstall` command (Linux path)
 5. `rmap doctor` command (Linux path)
 6. Distribution testing documentation

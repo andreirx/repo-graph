@@ -61,7 +61,8 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 |-------|-------|--------|
 | **DIST-1** | Distribution and install contract (binary-first, manifest model, safety rules) | PLANNED |
 | **HOST-1** | Host integration contract (Claude/Codex hooks, Cursor MCP, detection model) | PLANNED |
-| **REL-1** | Release pipeline (GitHub Actions, artifact matrix, checksums) | PLANNED |
+| **REL-1** | Release pipeline (GitHub Actions, artifact matrix, checksums) | **ACTIVE** |
+| **RMAPD-1** | Daemon binary target (`rmapd`) + daemon-runtime crate | IMPLEMENTED |
 | **HOOK-1** | `rmap hook` CLI surface (session-start, prompt-submit, post-edit, pre-compact, stop) | PLANNED |
 | **MAC-1** | macOS installer + daemon service (launchd, paths, health checks) | PLANNED |
 | **CLAUDE-1** | Claude Code integration (`.claude/settings.json` hooks) | PLANNED |
@@ -72,17 +73,29 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **MAC-2** | macOS signing/notarization | DEFERRED |
 | **UPDATE-1** | Updater/repair channel | DEFERRED |
 
+### Current Priority
+
+**REL-1** is now active (unblocked by RMAPD-1).
+
+RMAPD-1 completed: created `daemon-runtime` crate and `rmapd` binary with proper
+architectural boundaries. CI and release workflows updated to build both binaries.
+
+Remaining REL-1 verification:
+- Tag a test release to validate full pipeline
+- Verify CI workflow passes with both binaries
+
 ### Execution Order
 
 1. DIST-1 — contract before implementation
 2. HOST-1 — host integration rules before host-specific work
-3. REL-1 — release artifacts before installer credibility
-4. HOOK-1 — `rmap hook` commands before host shims use them
-5. MAC-1 — macOS as first complete vertical slice
-6. CLAUDE-1 — Claude Code integration on macOS
-7. CODEX-1 — Codex integration on macOS
-8. LINUX-1 — Linux reuses core policy, different service adapter
-9. CURSOR-1 — different integration model, separate from hook lane
+3. **REL-1 — release artifacts and verification (ACTIVE)**
+4. RMAPD-1 — daemon binary target (IMPLEMENTED)
+5. HOOK-1 — `rmap hook` commands before host shims use them
+6. MAC-1 — macOS as first complete vertical slice
+7. CLAUDE-1 — Claude Code integration on macOS
+8. CODEX-1 — Codex integration on macOS
+9. LINUX-1 — Linux reuses core policy, different service adapter
+10. CURSOR-1 — different integration model, separate from hook lane
 
 ### Artifact Matrix (REL-1)
 

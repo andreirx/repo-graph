@@ -34,8 +34,8 @@ use rust_analyzer_resolver::RustAnalyzerResolver;
 use serde_json::Value;
 use tsserver_resolver::TsServerResolver;
 
-use super::state::{DaemonState, RepoKey};
-use crate::cli::{compute_trust_overlay_for_snapshot, utc_now_iso8601};
+use crate::state::{DaemonState, RepoKey};
+use crate::util::{compute_storage_root_path, compute_trust_overlay_for_snapshot, utc_now_iso8601};
 
 /// Dispatcher that routes requests to real services.
 pub struct ServiceDispatcher {
@@ -529,7 +529,7 @@ impl ServiceDispatcher {
         let _db_write_guard = db_runtime.acquire_write();
 
         // Compute storage_root_path relative to DB location
-        let storage_root_path = match crate::cli::compute_storage_root_path(repo_path, db_path) {
+        let storage_root_path = match compute_storage_root_path(repo_path, db_path) {
             Ok(p) => Some(p),
             Err(e) => {
                 return DispatchResult::error(
@@ -698,7 +698,7 @@ impl ServiceDispatcher {
             .unwrap_or_default();
 
         // Compute storage_root_path for consistency
-        let storage_root_path = match crate::cli::compute_storage_root_path(&repo_path, canonical_db_path) {
+        let storage_root_path = match compute_storage_root_path(&repo_path, canonical_db_path) {
             Ok(p) => Some(p),
             Err(e) => {
                 return DispatchResult::error(

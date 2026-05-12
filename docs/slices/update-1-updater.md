@@ -166,7 +166,7 @@ Until UPDATE-1, users update manually:
 
 ```bash
 # Re-run installer
-curl -fsSL https://repo-graph.dev/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/install.sh | bash
 ```
 
 Installer handles:

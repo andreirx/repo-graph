@@ -508,6 +508,14 @@ All values are configurable and documented as provisional.
   migrations. Fix: regenerate expected.json files with `RGR_STORAGE_PARITY_EMIT_ACTUAL=1`
   and commit the updated fixtures. This is a fixture-drift issue, not a storage parity
   regression. Unrelated to any specific slice work.
+- **modules_violations_command tests failing:** 6 of 11 tests in
+  `crates/rgr/tests/modules_violations_command.rs` fail with "duplicate ownership"
+  errors during edge derivation. Error: `file r1:packages/X/src/Y.ts has duplicate
+  ownership: ["mc-X", "npm-mod-Z"]`. The test fixtures create monorepo-style
+  package.json files which produce both manifest-based and path-based module
+  candidates, causing ownership conflicts. This is a test fixture issue or a
+  module-candidate disambiguation issue, not an RMAPD-1 regression. Discovered
+  2026-05-12 during RMAPD-1 validation.
 
 ### TypeScript-Specific
 - `package-name extends` in tsconfig: `extends: "@tsconfig/node18"` not
@@ -2733,3 +2741,48 @@ Validation: 10 components, 14 hooks from corpus. E2E integration tests pass.
 4. **Component props not analyzed:**
    Detection reports component existence but does not extract prop types or defaults.
    Documented in slice as deferred.
+
+## Distribution / Install / Host Integration
+
+### REL-1 Implementation (2026-05-12)
+
+**Binary architecture decision:** Separate `rmap` (CLI) and `rmapd` (daemon) binaries.
+
+**Active blocker:** The `rmapd` binary target does not exist. See RMAPD-1 slice.
+REL-1 is IMPLEMENTED DRAFT, blocked on RMAPD-1 completion.
+
+**CI parity test exclusion:**
+
+`.github/workflows/ci.yml` excludes the storage parity test (`-- --skip parity`) because
+fixtures need regeneration after migration 027. Remove this exclusion once fixtures are updated.
+
+**{OWNER} placeholder in release artifacts:**
+
+The following files contain `{OWNER}` placeholders that must be replaced with the actual
+GitHub organization or username when the repo goes public:
+
+- `scripts/install.sh` — `REPO_OWNER="${RMAP_REPO_OWNER:-{OWNER}}"` and GitHub API URLs
+- `docs/slices/rel-1-release-pipeline.md` — documentation URLs
+- `docs/slices/linux-1-linux-installer.md` — systemd unit Documentation field
+
+**Action required before release:** Replace `{OWNER}` with actual GitHub org/user.
+
+**Stub implementations in bootstrap installer:**
+
+REL-1 provides a **bootstrap installer** that installs binaries but defers:
+
+1. **Daemon service setup** (`scripts/install.sh`):
+   - Currently prints info message and defers to MAC-1/LINUX-1
+   - launchd (macOS) and systemd (Linux) service installation not implemented
+   - Manual daemon execution works: `rmapd`
+
+2. **Host integration detection** (`scripts/install.sh`):
+   - Detects Claude Code and Codex directories
+   - Actual integration patching deferred to CLAUDE-1/CODEX-1
+   - `rmap integrate <host>` commands not yet implemented
+
+3. **Missing standard files for release archives:**
+   - `LICENSE` — not created (choose license before release)
+   - `CHANGELOG.md` — not created (use conventional commits or manual changelog)
+   - Install script handles missing files gracefully (copies only what exists)
+

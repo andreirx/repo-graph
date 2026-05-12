@@ -77,18 +77,31 @@ use repo_graph_rgr::commands::{
     run_modules, run_orient, run_path, run_policy, run_refresh, run_resource, run_risk, run_stats,
     run_surfaces, run_trust, run_violations,
 };
-use repo_graph_rgr::daemon::run_daemon;
 use std::process::ExitCode;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn main() -> ExitCode {
-	let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = std::env::args().collect();
 
-	if args.len() < 2 {
-		print_usage();
-		return ExitCode::from(1);
-	}
+    if args.len() < 2 {
+        print_usage();
+        return ExitCode::from(1);
+    }
 
-	match args[1].as_str() {
+    match args[1].as_str() {
+        "--version" | "-V" => {
+            println!("rmap {}", VERSION);
+            return ExitCode::SUCCESS;
+        }
+        "--help" | "-h" => {
+            print_usage();
+            return ExitCode::SUCCESS;
+        }
+        _ => {}
+    }
+
+    match args[1].as_str() {
 		"index" => run_index(&args[2..]),
 		"refresh" => run_refresh(&args[2..]),
 		"trust" => run_trust(&args[2..]),
@@ -122,7 +135,12 @@ fn main() -> ExitCode {
 		"contracts" => run_contracts(&args[2..]),
 		"policy" => run_policy(&args[2..]),
 		"daemon" => {
-			match run_daemon() {
+			// DEPRECATED: Use `rmapd` binary instead of `rmap daemon`.
+			// This compatibility shim will be removed in a future release.
+			eprintln!("warning: 'rmap daemon' is deprecated. Use 'rmapd' instead.");
+			eprintln!("         The rmapd binary is the dedicated daemon executable.");
+			eprintln!();
+			match repo_graph_daemon_runtime::run_daemon() {
 				Ok(()) => ExitCode::SUCCESS,
 				Err(e) => {
 					eprintln!("daemon error: {}", e);
