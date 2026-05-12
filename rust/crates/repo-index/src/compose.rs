@@ -58,7 +58,11 @@ use repo_graph_ts_extractor::{
 };
 
 use crate::config::RepoConfigContext;
+use crate::express_detector::detect_express_routes;
 use crate::impact_propagation::{propagate_impact, ImpactReport};
+use crate::react_detector::{
+	components_to_inferences, detect_react_components, detect_react_hooks, hooks_to_inferences,
+};
 use crate::refresh_policy::{
     FamilyRefreshResult, RefreshAction, RefreshDiagnostics, COPY_FORWARD_FAMILIES,
 };
@@ -1738,6 +1742,178 @@ fn convert_nats_raw_to_callsite(raw: &RawNatsBoundaryCall, file_path: &str, repo
 	}
 }
 
+// ── Express route surface persistence (FD-1A) ─────────────────────
+
+/// FD-1A: Detect Express routes in TS/JS files and persist as http_provider surfaces.
+///
+/// Re-parses TS/JS files with tree-sitter to detect route registrations
+/// (app.get, router.post, etc.) and persists them to project_surfaces.
+///
+/// **Requires:** npm modules must be persisted first (FK constraint).
+///
+/// Returns the number of surfaces persisted.
+fn persist_express_surfaces(
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	snapshot_uid: &str,
+	file_inputs: &[FileInput],
+	npm_extraction: &NpmExtractionResult,
+) -> Result<usize, ComposeError> {
+	// Early exit if no npm modules to resolve against.
+	if npm_extraction.modules.is_empty() {
+		return Ok(0);
+	}
+
+	// Detect Express routes.
+	let routes = detect_express_routes(file_inputs);
+	if routes.is_empty() {
+		return Ok(0);
+	}
+
+	// Build module resolver: file_path → module_candidate_uid
+	// Sorted by path length descending for longest-prefix match.
+	// Using owned Strings to avoid lifetime issues with the closure.
+	let mut sorted_modules: Vec<(String, String)> = npm_extraction
+		.modules
+		.iter()
+		.map(|m| {
+			let uid = package_json::generate_module_uid(repo_uid, &m.module.package_root);
+			(m.module.package_root.clone(), uid)
+		})
+		.collect();
+	sorted_modules.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+
+	// Resolver closure: finds longest-prefix-matching module.
+	// Uses directory-boundary-safe matching (same logic as compute_cargo_file_ownership).
+	let resolve_module = move |file_path: &str| -> Option<String> {
+		for (root, uid) in &sorted_modules {
+			// Root package "." matches everything.
+			if root == "." {
+				return Some(uid.clone());
+			}
+			// Directory-boundary-safe prefix match:
+			// "packages/app" must NOT match "packages/app2/file.ts"
+			// Only matches "packages/app/file.ts" or "packages/app" exactly.
+			if file_path == root || file_path.starts_with(&format!("{}/", root)) {
+				return Some(uid.clone());
+			}
+		}
+		None
+	};
+
+	// Convert routes to surfaces, keeping track of which routes converted.
+	// routes_to_surfaces uses filter_map, so we need to track indices.
+	let mut surfaces = Vec::new();
+	let mut converted_routes = Vec::new();
+	for route in &routes {
+		if let Some(surface) = crate::express_detector::route_to_surface_with_resolver(
+			route,
+			snapshot_uid,
+			repo_uid,
+			&resolve_module,
+		) {
+			surfaces.push(surface);
+			converted_routes.push(route);
+		}
+	}
+
+	if surfaces.is_empty() {
+		return Ok(0);
+	}
+
+	let count = surfaces.len();
+
+	// Insert surfaces and get generated UIDs.
+	let surface_uids = storage
+		.insert_project_surfaces_batch(&surfaces)
+		.map_err(|e| ComposeError::Index(format!("express-surfaces storage: {}", e)))?;
+
+	// Build evidence records for each surface.
+	// converted_routes and surface_uids are aligned (same order).
+	let evidence: Vec<repo_graph_storage::types::CreateProjectSurfaceEvidenceInput> = surface_uids
+		.iter()
+		.zip(converted_routes.iter())
+		.map(|(uid, route)| {
+			repo_graph_storage::types::CreateProjectSurfaceEvidenceInput {
+				project_surface_uid: uid.clone(),
+				snapshot_uid: snapshot_uid.to_string(),
+				repo_uid: repo_uid.to_string(),
+				source_type: "code_detection".to_string(),
+				source_path: route.file_path.clone(),
+				evidence_kind: "route_registration".to_string(),
+				confidence: route.confidence,
+				payload_json: Some(
+					serde_json::json!({
+						"method": route.http_method,
+						"path": route.path,
+						"receiver": route.receiver,
+						"lineStart": route.line_start,
+					})
+					.to_string(),
+				),
+			}
+		})
+		.collect();
+
+	// Insert evidence records.
+	if !evidence.is_empty() {
+		storage
+			.insert_project_surface_evidence_batch(&evidence)
+			.map_err(|e| ComposeError::Index(format!("express-evidence storage: {}", e)))?;
+	}
+
+	Ok(count)
+}
+
+// ── React inference persistence (FD-1B) ───────────────────────────
+
+/// FD-1B: Detect React components and hooks in TSX/JSX files and persist as inferences.
+///
+/// Re-parses TSX/JSX files with tree-sitter to detect:
+/// - React component definitions (PascalCase functions returning JSX)
+/// - React hook usage (useState, useEffect, custom hooks)
+///
+/// Persists to `inferences` table with kinds:
+/// - `react_component` — component definition evidence
+/// - `react_hook_usage` — hook call evidence
+///
+/// Returns the total number of inferences persisted.
+fn persist_react_inferences(
+	storage: &mut StorageConnection,
+	repo_uid: &str,
+	snapshot_uid: &str,
+	file_inputs: &[FileInput],
+) -> Result<usize, ComposeError> {
+	// Detect components and hooks.
+	let components = detect_react_components(file_inputs);
+	let hooks = detect_react_hooks(file_inputs);
+
+	if components.is_empty() && hooks.is_empty() {
+		return Ok(0);
+	}
+
+	// Convert to inference inputs.
+	let component_inferences = components_to_inferences(&components, snapshot_uid, repo_uid);
+	let hook_inferences = hooks_to_inferences(&hooks, snapshot_uid, repo_uid);
+
+	let total_count = component_inferences.len() + hook_inferences.len();
+
+	// Combine all inferences.
+	let mut all_inferences = component_inferences;
+	all_inferences.extend(hook_inferences);
+
+	// Replace existing React inferences for this snapshot (idempotent re-index).
+	storage
+		.replace_inferences_by_kind(
+			snapshot_uid,
+			&["react_component", "react_hook_usage"],
+			&all_inferences,
+		)
+		.map_err(|e| ComposeError::Index(format!("react-inferences storage: {}", e)))?;
+
+	Ok(total_count)
+}
+
 // ── Cargo module persistence (rust-module-parity Phase 1) ────────
 
 /// Persist Cargo.toml-derived module candidates, evidence, and file ownership.
@@ -2282,6 +2458,13 @@ pub fn index_into_storage_with_progress(
 	// rust-module-parity Phase 2: Persist package.json-derived module candidates and file ownership.
 	persist_npm_modules(storage, repo_uid, &result.snapshot_uid, &prepared.npm_modules, &prepared.file_inputs)?;
 
+	// FD-1A: Extract and persist Express route surfaces from TS/JS files.
+	// Must come after npm modules are persisted (FK constraint on module_candidate_uid).
+	persist_express_surfaces(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs, &prepared.npm_modules)?;
+
+	// FD-1B: Extract and persist React component/hook inferences from TSX/JSX files.
+	persist_react_inferences(storage, repo_uid, &result.snapshot_uid, &prepared.file_inputs)?;
+
 	emit_progress(&mut progress, "persisting", 9, 11)?;  // about to persist pyproject modules
 	// rust-module-parity Phase 2c: Persist pyproject.toml-derived module candidates and file ownership.
 	persist_pyproject_modules(storage, repo_uid, &result.snapshot_uid, &prepared.pyproject_modules, &prepared.file_inputs)?;
@@ -2684,6 +2867,15 @@ pub fn refresh_into_storage_with_progress(
 	// rust-module-parity Phase 2: Persist package.json-derived module candidates and file ownership.
 	// Same recompute semantics as Cargo.
 	persist_npm_modules(storage, repo_uid, &result.snapshot_uid, &prepared.npm_modules, &prepared.file_inputs)?;
+
+	// FD-1A: Extract and persist Express route surfaces from TS/JS files.
+	// Only extract from changed files; unchanged files copied forward.
+	// Must come after npm modules are persisted (FK constraint on module_candidate_uid).
+	persist_express_surfaces(storage, repo_uid, &result.snapshot_uid, &changed_files_owned, &prepared.npm_modules)?;
+
+	// FD-1B: Extract and persist React component/hook inferences from TSX/JSX files.
+	// Only extract from changed files; unchanged files copied forward via inference copy-forward.
+	persist_react_inferences(storage, repo_uid, &result.snapshot_uid, &changed_files_owned)?;
 
 	// rust-module-parity Phase 2c: Persist pyproject.toml-derived module candidates and file ownership.
 	// Same recompute semantics as Cargo and npm.

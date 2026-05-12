@@ -2635,3 +2635,37 @@ specifiers using `file_signals.import_bindings_json`.
 4. **Empty modules excluded:**
    Modules with no imports AND no declared deps are silently excluded from
    `deps list` output (vanish mode). No diagnostic emitted.
+
+## FD-1B — React Detector Implementation
+
+### Current state
+
+AST-based React component and hook detection for TSX/JSX files. Persists Layer 3
+inferences (`react_component`, `react_hook_usage`) via compose-phase postpass.
+
+Validation: 10 components, 14 hooks from corpus. E2E integration tests pass.
+
+### Known Limitations
+
+1. **Extension coverage is TSX/JSX only:**
+   Current implementation only processes `.tsx` and `.jsx` files.
+   Plain `.ts`/`.js` files with JSX content (pragma-based or transpiler-configured)
+   are not detected. Extended family (`.mjs`, `.cjs`, `.mts`, `.cts`) also not covered.
+
+   Fix path: Unify JS/TS-family extension contract across routing + extractor + detector,
+   then widen FD-1B gate. See user analysis in session for difficulty breakdown.
+
+2. **No CLI regression tests for `rmap inferences list`:**
+   The new CLI command (`rust/crates/rgr/src/commands/inferences.rs`) is validated
+   by manual execution and E2E tests in `fd_1b_react_integration.rs`, but has no
+   dedicated CLI-level regression tests (like `surfaces_command.rs` pattern).
+
+   Fix path: Add `rust/crates/rgr/tests/inferences_command.rs` following surfaces pattern.
+
+3. **Class components not detected:**
+   `extends React.Component` pattern is out of scope for first cut.
+   Documented in slice as deferred.
+
+4. **Component props not analyzed:**
+   Detection reports component existence but does not extract prop types or defaults.
+   Documented in slice as deferred.

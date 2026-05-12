@@ -267,6 +267,21 @@ pub struct InferenceRow {
 	pub value_json: String,
 }
 
+/// Full inference row for CLI listing.
+///
+/// FD-SUPPORT-2: Richer row for `rmap inferences list` command.
+/// Includes all fields needed for display and filtering.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferenceListRow {
+	pub inference_uid: String,
+	pub target_stable_key: String,
+	pub kind: String,
+	pub value_json: String,
+	pub confidence: f64,
+	pub extractor: String,
+	pub created_at: String,
+}
+
 /// A node with no incoming reference edges (dead code candidate).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeadNodeResult {
@@ -2026,6 +2041,55 @@ impl StorageConnection {
 
 		rows.collect::<Result<Vec<_>, _>>()
 			.map_err(StorageError::from)
+	}
+
+	/// List inferences for a snapshot, optionally filtered by kind.
+	///
+	/// FD-SUPPORT-2: Richer query for `rmap inferences list` CLI command.
+	/// Returns full inference rows for display, ordered by kind then target.
+	pub fn list_inferences_for_snapshot(
+		&self,
+		snapshot_uid: &str,
+		kind_filter: Option<&str>,
+	) -> Result<Vec<InferenceListRow>, StorageError> {
+		let map_row = |row: &rusqlite::Row| {
+			Ok(InferenceListRow {
+				inference_uid: row.get(0)?,
+				target_stable_key: row.get(1)?,
+				kind: row.get(2)?,
+				value_json: row.get(3)?,
+				confidence: row.get(4)?,
+				extractor: row.get(5)?,
+				created_at: row.get(6)?,
+			})
+		};
+
+		match kind_filter {
+			Some(kind) => {
+				let mut stmt = self.connection().prepare(
+					"SELECT inference_uid, target_stable_key, kind, value_json,
+					        confidence, extractor, created_at
+					 FROM inferences
+					 WHERE snapshot_uid = ? AND kind = ?
+					 ORDER BY kind, target_stable_key",
+				)?;
+				let rows = stmt.query_map(rusqlite::params![snapshot_uid, kind], map_row)?;
+				rows.collect::<Result<Vec<_>, _>>()
+					.map_err(StorageError::from)
+			}
+			None => {
+				let mut stmt = self.connection().prepare(
+					"SELECT inference_uid, target_stable_key, kind, value_json,
+					        confidence, extractor, created_at
+					 FROM inferences
+					 WHERE snapshot_uid = ?
+					 ORDER BY kind, target_stable_key",
+				)?;
+				let rows = stmt.query_map(rusqlite::params![snapshot_uid], map_row)?;
+				rows.collect::<Result<Vec<_>, _>>()
+					.map_err(StorageError::from)
+			}
+		}
 	}
 
 	/// Sum cyclomatic_complexity measurements per file via proper join.

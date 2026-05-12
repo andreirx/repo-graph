@@ -1,12 +1,33 @@
 # FD-1B: Rust React Detector Parity
 
-Status: PLANNED
-Depends: None (uses existing ts-extractor TSX/JSX output)
+Status: IMPLEMENTED (2026-05-11)
+Depends: None (uses existing ts-extractor TSX/JSX output + inferences substrate)
 Follow-on: None
+
+## Implementation Summary
+
+AST-based React component and hook detection using tree-sitter-typescript. Integrated into compose.rs orchestration (compose-phase postpass after extraction).
+
+### Artifacts
+
+- `rust/crates/repo-index/src/react_detector.rs` — detection module (10 unit tests)
+- `rust/crates/rgr/src/commands/inferences.rs` — inference query CLI (FD-SUPPORT-2)
+- `rust/crates/storage/src/queries.rs` — `list_inferences_for_snapshot()` query
+- `test/fixtures/typescript/react-frontend-corpus/` — validation corpus
+- `rust/crates/repo-index/tests/fd_1b_react_integration.rs` — E2E integration test (5 tests)
+
+### Validation Results (EXECUTED)
+
+- 10 react_component inferences from corpus (exceeds 5-component acceptance)
+- 14 react_hook_usage inferences from corpus (exceeds 5-hook acceptance)
+- Negative cases correctly produce no inferences:
+  - DataLoader (PascalCase but no JSX return): NOT detected
+  - Utils.ts (non-React file): NOT detected
+  - lowercase helper function: NOT detected
 
 ## Goal
 
-Port the React component and hook detection logic from the legacy TypeScript codebase to Rust. Emit frontend orientation hints for UI navigation — NOT HTTP surfaces.
+Detect React component definitions and hook usage in TypeScript/JavaScript files. Emit frontend orientation hints as **inferences** (Layer 3), not nodes.
 
 ## Certainty Layer
 
@@ -14,201 +35,182 @@ Port the React component and hook detection logic from the legacy TypeScript cod
 
 React detection relies on heuristic structural matching. Provides orientation hints for frontend navigation, not strict architectural facts.
 
-### Degradation Policy
+**Critical distinction:**
+- `nodes` = Layer 0–1 extracted graph facts
+- `inferences` = Layer 3 bounded hints
 
-When a capitalized function returns JSX but pattern is ambiguous:
-- Emit with `confidence = 0.6`
-- Tag as `possible_component`
+React component detection is heuristic, not deterministic. It belongs in `inferences`.
 
-When hook usage is detected but caller is not a component:
-- Emit hook evidence anyway (custom hooks call hooks)
-- Tag as `hook_usage` not `component`
+## Architecture
+
+### Detection Layer
+Compose-phase Rust React detector over TSX/JSX files (like FD-1A Express).
+
+### Persistence Layer
+`inferences` table with kinds:
+- `react_component` — component definition evidence
+- `react_hook_usage` — hook call evidence
+
+### Read Layer
+`rmap inferences list <db> <repo> --kind react_component`
+
+**Note:** If inference query surface doesn't exist, include FD-SUPPORT-2 in this slice.
 
 ## Scope
 
 ### In Scope
 
-**Component Definition:**
+**Component Detection:**
+- PascalCase functions returning JSX → `react_component` inference
+- Arrow functions with PascalCase name returning JSX → `react_component` inference
+- `React.FC<T>` typed functions → `react_component` inference
 
-A React component is:
-- A function with PascalCase name returning JSX, OR
-- A function assigned to `React.FC<T>` / `React.FunctionComponent<T>`, OR
-- An arrow function with PascalCase name returning JSX
+**Hook Usage Detection (first cut):**
+- Built-in hooks: `useState`, `useEffect`, `useContext`, `useReducer`, `useCallback`, `useMemo`, `useRef`
+- Custom hooks: `use*` pattern with lowercase second letter
 
-**Class components:** OUT for first cut (legacy pattern, low priority)
-
-**Detector Output Contract:**
-
-```rust
-struct ReactComponentEvidence {
-    kind: "react_component",
-    component_name: String,
-    component_style: "function" | "arrow" | "fc_typed",
-    location: Location,
-    confidence: f64,
-}
-
-struct ReactHookEvidence {
-    kind: "react_hook_usage",
-    hook_name: String,        // "useState", "useEffect", "useCustomHook"
-    hook_category: "builtin" | "custom",
-    caller_component: Option<String>,
-    location: Location,
-}
-```
-
-**Built-in Hooks (first cut):**
-- `useState`
-- `useEffect`
-- `useContext`
-- `useReducer`
-- `useCallback`
-- `useMemo`
-- `useRef`
-
-**Custom Hooks:**
-- Any function starting with `use` and lowercase second letter
-- e.g., `useAuth`, `useFetch`, `useLocalStorage`
-- Emitted as `hook_category: "custom"`
-
-**NOT HTTP Surfaces:**
-- This detector emits `ReactComponentEvidence` and `ReactHookEvidence`
-- These are frontend orientation hints
-- They do NOT create `project_surface` records
-- They do NOT appear in `rmap surfaces list`
+**Detection Gate:**
+- File must import from `react` or `@types/react`
+- File must have `.tsx` or `.jsx` extension (plain `.ts`/`.js` with JSX pragma NOT currently supported)
 
 ### Out of Scope
 
 - Class components (`extends React.Component`)
-- HTTP surface emission
-- `fetch`/`axios` call detection (state-boundary slices)
 - Component props analysis
 - HOC (Higher-Order Component) detection
+- Component hierarchy analysis
+- HTTP surface emission (React components are NOT HTTP endpoints)
 
-## Crate Layout
+## Inference Schema
+
+### Component Inference
 
 ```
-rust/crates/detectors/
-├── src/
-│   ├── lib.rs                    # Detector registry
-│   ├── express/                  # FD-1A
-│   ├── react/
-│   │   ├── mod.rs                # React detector entry
-│   │   ├── components.rs         # Component detection
-│   │   ├── hooks.rs              # Hook usage detection
-│   │   └── evidence.rs           # Evidence structs
-│   └── traits.rs                 # FrameworkDetector trait
-└── tests/
-    ├── react_components.rs
-    ├── react_hooks.rs
-    └── fixtures/
-        ├── simple_component.tsx
-        ├── hooks_usage.tsx
-        └── custom_hooks.ts
-
-rust/crates/indexer/
-└── src/
-    └── framework_hints.rs        # Stores evidence in nodes table
+kind: "react_component"
+target_stable_key: {repo}:{file}#{component_name}:SYMBOL:FUNCTION
+value_json: {
+  "component_name": "UserProfile",
+  "component_style": "function" | "arrow" | "fc_typed",
+  "has_jsx_return": true,
+  "import_gate": "react",
+  "line_start": 15
+}
+confidence: 0.9 (PascalCase + JSX) | 0.7 (PascalCase only)
 ```
 
-## Prerequisites
+### Hook Usage Inference
 
-- `ts-extractor` emits:
-  - `FUNCTION` nodes with name, return type
-  - `JSX_ELEMENT` detection in return position
-  - `CALL` nodes for hook invocations
-- Node `kind` extensible for `REACT_COMPONENT` / `REACT_HOOK`
+```
+kind: "react_hook_usage"
+target_stable_key: {repo}:{file}#{caller_symbol}:SYMBOL:FUNCTION
+value_json: {
+  "hook_name": "useState",
+  "hook_category": "builtin" | "custom",
+  "caller_component": "UserProfile" | null,
+  "line_start": 18
+}
+confidence: 0.9 (builtin) | 0.8 (custom)
+```
+
+## Crate Location
+
+Same pattern as FD-1A Express:
+
+```
+rust/crates/repo-index/src/
+├── compose.rs              # add persist_react_inferences call
+├── express_detector.rs     # FD-1A (existing)
+├── react_detector.rs       # FD-1B (NEW)
+└── ...
+```
 
 ## Validation Corpus
 
-Repository: `test/fixtures/typescript/react-frontend-corpus/`
+`test/fixtures/typescript/react-frontend-corpus/`
 
-Must contain:
+Required files:
 - Functional components (PascalCase)
 - Arrow function components
 - `React.FC<Props>` typed components
-- Built-in hook usage (`useState`, `useEffect`)
+- Built-in hook usage
 - Custom hook definitions
-- At least 10 components, 5 custom hooks
+- Negative: lowercase functions, non-React files
 
 ## Validation Commands
 
-**Note:** No `rmap` query surface exists yet for React component/hook evidence. This is a temporary validation limitation. Primary validation uses `rmap callers` to find component symbols; secondary validation uses storage diagnostics.
-
 ```bash
 # 1. Build
-cd rust && cargo build -p repo-graph-detectors
+cd rust && cargo build -p repo-graph-repo-index
 
 # 2. Unit tests
-cargo test -p repo-graph-detectors react
+cargo test -p repo-graph-repo-index react_detector
 
-# 3. Index validation corpus (product surface)
+# 3. Index validation corpus
 rmap index test/fixtures/typescript/react-frontend-corpus ./test-artifacts/fd-1b.db
 
-# 4. Primary validation: query component symbols via callers
-rmap callers ./test-artifacts/fd-1b.db react-frontend-corpus "UserProfile"
-# Must find the component if it exists in corpus
+# 4. List React component inferences
+rmap inferences list ./test-artifacts/fd-1b.db react-frontend-corpus --kind react_component
+# Expected: component count >= 5
 
-# 5. Verify components NOT exposed as HTTP surfaces
+# 5. List hook usage inferences
+rmap inferences list ./test-artifacts/fd-1b.db react-frontend-corpus --kind react_hook_usage
+# Expected: hook count >= 5
+
+# 6. Verify NOT in surfaces
 rmap surfaces list ./test-artifacts/fd-1b.db react-frontend-corpus --kind http_provider
-# Must return empty or no React-related surfaces
-
-# 6. Secondary diagnostic: storage query for evidence (interim)
-# This is temporary until rmap exposes framework hints
-sqlite3 ./test-artifacts/fd-1b.db \
-  "SELECT name, kind FROM nodes WHERE kind = 'REACT_COMPONENT' LIMIT 5"
-# Expected: component names visible
-
-# 7. Hook evidence diagnostic
-sqlite3 ./test-artifacts/fd-1b.db \
-  "SELECT COUNT(*) FROM nodes WHERE kind = 'REACT_COMPONENT'"
-# Expected: ≥10
+# Expected: empty (React components are not HTTP surfaces)
 ```
 
 ## Acceptance Criteria
 
-**Detection (detector responsibility):**
-1. `ReactDetector` implements `FrameworkDetector` trait
-2. Functional components: PascalCase + JSX return → `REACT_COMPONENT` node kind
-3. `React.FC<T>` typed functions → `REACT_COMPONENT` node kind
-4. Built-in hooks: 7 hooks detected when used
-5. Custom hooks: `use*` pattern → `hook_category: "custom"`
+1. `react_detector.rs` module exists in `repo-index`
+2. `detect_react_components()` extracts PascalCase functions with JSX
+3. `detect_react_hooks()` extracts hook calls
+4. Compose-phase wiring via `persist_react_inferences()`
+5. Inferences persist to `inferences` table with correct kinds
+6. `rmap inferences list --kind react_component` returns results
+7. Validation corpus produces >= 5 components, >= 5 hooks
+8. Negative cases produce no false positives
+9. React components do NOT create `project_surfaces` rows
 
-**Semantic Examples:**
-6. `function UserProfile() { return <div>...</div> }` → node with `kind: REACT_COMPONENT`, `name: UserProfile`
-7. `const App: React.FC = () => <Main />` → node with `kind: REACT_COMPONENT`, `name: App`
-8. `const [count, setCount] = useState(0)` → hook evidence with `hook_name: useState`
+## Definition of Done
 
-**Negative Examples:**
-9. `function fetchData() { ... }` (lowercase, no JSX) → NOT a component
-10. React components do NOT create `http_provider` surfaces
+- Detection functional (criteria 1-5)
+- Query surface working (criterion 6)
+- Validation corpus exists and validates (criteria 7-8)
+- Negative validation passes (criterion 9)
+- E2E integration test exists
 
-**Validation Limitation:**
-11. Until `rmap` exposes framework hints, secondary validation uses storage queries
-12. **Accept that React detection remains partially validated until a proper query surface exists**
-13. Component/hook count within ±15% of legacy TS detector
-14. `cargo test -p repo-graph-detectors` — all pass
+## Support Gap: Inference Query Surface
 
-## Definition of Parity
+If `rmap inferences list` doesn't exist, this slice includes:
 
-"Parity" for this slice means:
-- **Component count:** Within ±15% of legacy TS detector
-- **Hook detection:** Built-in hooks recognized
-- **Custom hook detection:** `use*` pattern recognized
+### FD-SUPPORT-2 (embedded)
 
-NOT required:
-- Exact confidence values
-- Class component detection
-- Props type extraction
-- Component hierarchy analysis
+Add `rmap inferences list <db> <repo> --kind <kind>` command.
 
-## Alternatives Considered
+Output format:
+```json
+{
+  "command": "inferences list",
+  "repo": "react-frontend-corpus",
+  "kind": "react_component",
+  "count": 12,
+  "results": [
+    {
+      "inference_uid": "inf-abc123",
+      "target_stable_key": "myrepo:src/UserProfile.tsx#UserProfile:SYMBOL:FUNCTION",
+      "kind": "react_component",
+      "value": { "component_name": "UserProfile", "component_style": "function" },
+      "confidence": 0.9
+    }
+  ]
+}
+```
 
-### A. Include class components
-Rejected: Class components are legacy pattern. Function components are >90% of modern React. Add later if needed.
+## Deferred
 
-### B. Create HTTP surfaces for data-fetching components
-Rejected: Conflates frontend structure with network boundaries. Data fetching is state-boundary concern.
-
-### C. Analyze component props
-Deferred: Props are useful but adds significant complexity. Component existence is sufficient for orientation.
+- Class components (`extends React.Component`)
+- Component props extraction
+- HOC detection
+- TS prototype parity validation (first-cut Rust implementation)

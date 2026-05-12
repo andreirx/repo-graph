@@ -6,7 +6,107 @@ Gap-closing: strengthen Layer 0–2 facts before expanding Layer 3 framework det
 
 ## Active Slice
 
-None currently. Next in queue: FD-1A (Rust Express detector parity).
+None currently active. FD-1B just completed.
+
+## Recently Implemented
+
+**FD-1B: Rust React Detector Parity** — IMPLEMENTED (2026-05-11)
+
+Slice doc: `docs/slices/fd-1b-rust-react-detector-parity.md`
+
+### Summary
+
+AST-based React component and hook detection for TSX/JSX files, persisting Layer 3 inferences.
+
+### Completed
+
+- `react_detector.rs` — AST-based detection via tree-sitter-typescript
+- `detect_react_components()` — PascalCase functions returning JSX
+- `detect_react_hooks()` — builtin and custom hook usage detection
+- `persist_react_inferences()` — compose-phase wiring
+- Inferences persist to `inferences` table with kinds `react_component`, `react_hook_usage`
+- FD-SUPPORT-2: `rmap inferences list --kind <kind>` CLI command
+- E2E integration test (`fd_1b_react_integration.rs` — 5 tests)
+- Validation corpus at `test/fixtures/typescript/react-frontend-corpus/`
+- 10 components, 14 hooks detected from corpus (exceeds acceptance criteria)
+- 10 unit tests pass
+
+### Validation Evidence (EXECUTED)
+
+```
+rmap inferences list --kind react_component
+→ 10 react_component inferences detected
+→ All component styles detected (function, arrow, fc_typed)
+→ Negative cases correctly produce no inferences
+
+rmap inferences list --kind react_hook_usage
+→ 14 react_hook_usage inferences detected
+→ Both builtin and custom hooks detected
+```
+
+### Deferred
+
+- Class components (`extends React.Component`)
+- Component props extraction
+- HOC detection
+- TS prototype parity validation (not executed)
+
+---
+
+**FD-1A: Rust Express Detector Parity** — IMPLEMENTED (2026-05-11)
+
+Slice doc: `docs/slices/fd-1a-rust-express-detector-parity.md`
+
+### Summary
+
+AST-based Express route detection for TypeScript/JavaScript files.
+
+### Completed
+
+- `detect_express_routes()` — AST-based detection via tree-sitter
+- `route_to_surface_with_resolver()` — conversion with module resolution
+- Compose-phase integration (after npm module persistence for FK)
+- Path parameter normalization (`:id` → `{id}`)
+- Evidence persistence (`evidence_count: 1` for all surfaces)
+- Directory-boundary-safe module resolution (fixed)
+- E2E integration test (`fd_1a_express_integration.rs` — 5 tests)
+- Validation corpus at `test/fixtures/typescript/express-routes/`
+- 16 routes detected from corpus (exceeds 5-route acceptance criteria)
+- 10 unit tests pass
+
+### Validation Evidence (EXECUTED)
+
+```
+rmap surfaces list --kind http_provider
+→ 16 http_provider surfaces detected
+→ evidence_count: 1 for all surfaces
+→ All routes linked to npm module (FK resolved)
+→ Dynamic paths correctly skipped
+→ Non-Express files correctly ignored
+```
+
+### Deferred
+
+- Handler symbol attribution (FD-1A-4)
+- TS prototype parity validation (not executed)
+
+---
+
+**FD-SUPPORT-1: Provider-Fact / Project-Surface Write Path** — IMPLEMENTED (2026-05-11)
+
+Slice doc: `docs/slices/fd-support-1-rust-provider-surface-write-path.md`
+
+### Summary
+
+Storage write path for Rust-produced framework surfaces.
+
+### Completed
+
+- `CreateProjectSurfaceInput` and `CreateProjectSurfaceEvidenceInput` types
+- `insert_project_surface()` and `insert_project_surface_evidence()` methods
+- Batch insert methods with transaction wrapping
+- 7 new tests (20 total for project_surfaces CRUD)
+- Round-trip validation: insert → query → fields match
 
 ## Recently Shipped
 
@@ -120,8 +220,10 @@ Scope: `open(path, mode)`, `sqlite3.connect()`, `psycopg2.connect()`.
 | **DEP-1** | Dependency reconciliation surface | L2 | **SHIPPED** |
 | **JE-1** | Java resolved callsites | L0–1 | **IMPLEMENTED** |
 | **SB-7B** | Java state boundaries | L2 | **SHIPPED** |
-| FD-1A | Rust Express detector parity | L3 | PLANNED (next) |
-| FD-1B | Rust React detector parity | L3 | PLANNED |
+| FD-SUPPORT-1 | Provider-fact / project-surface write path | L2–3 | **IMPLEMENTED** |
+| FD-SUPPORT-2 | Inference query surface | L3 | **IMPLEMENTED** |
+| FD-1A | Rust Express detector parity | L3 | **IMPLEMENTED** |
+| FD-1B | Rust React detector parity | L3 | **IMPLEMENTED** |
 
 ## Why This Order
 
@@ -131,7 +233,10 @@ Scope: `open(path, mode)`, `sqlite3.connect()`, `psycopg2.connect()`.
 4. **DEP-1** promoted: cross-cutting query surface over existing facts, immediate value across JS/TS and Rust repos
 5. **JE-1** implemented: extends Java extractor to emit `ResolvedCallsite` facts
 6. **SB-7B** shipped: consumes JE-1 facts via adapter + bindings
-7. **FD-1A/1B** are Layer 3 hints — next priority after L2 state boundaries
+7. **FD-SUPPORT-1** implemented — Rust write path for `project_surfaces` now exists
+8. **FD-1A** implemented — AST-based Express detection with evidence persistence and E2E tests
+9. **FD-SUPPORT-2** implemented — `rmap inferences list` CLI command for inference query
+10. **FD-1B** implemented — AST-based React component/hook detection with inference persistence
 
 ## Previously Completed
 

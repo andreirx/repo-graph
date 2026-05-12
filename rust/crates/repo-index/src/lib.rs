@@ -51,7 +51,9 @@
 
 pub mod compose;
 pub mod config;
+pub mod express_detector;
 pub mod impact_propagation;
+pub mod react_detector;
 pub mod refresh_policy;
 pub mod scanner;
 pub mod state_boundary_hook;

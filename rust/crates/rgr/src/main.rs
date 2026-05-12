@@ -54,6 +54,8 @@
 //!
 //!   rmap enrich <db_path> <repo_uid> [--snapshot <uid>] [--language <lang>] [--limit <n>] [--promote] [--force]
 //!
+//!   rmap inferences list <db_path> <repo_uid> [--kind <kind>]
+//!
 //! Exit codes:
 //!   0 — success (gate: all pass; check: pass; modules violations: no violations)
 //!   1 — usage error (gate: any fail; check: fail; modules violations: violations found)
@@ -71,8 +73,8 @@ use repo_graph_rgr::cli::print_usage;
 use repo_graph_rgr::commands::{
     run_assess, run_boundaries, run_callers, run_callees, run_check_cmd, run_churn, run_contracts,
     run_coverage, run_cycles, run_dead, run_declare, run_deps, run_docs, run_enrich,
-    run_explain_cmd, run_gate, run_hotspots, run_imports, run_index, run_metrics, run_modules,
-    run_orient, run_path, run_policy, run_refresh, run_resource, run_risk, run_stats,
+    run_explain_cmd, run_gate, run_hotspots, run_imports, run_index, run_inferences, run_metrics,
+    run_modules, run_orient, run_path, run_policy, run_refresh, run_resource, run_risk, run_stats,
     run_surfaces, run_trust, run_violations,
 };
 use repo_graph_rgr::daemon::run_daemon;
@@ -112,6 +114,7 @@ fn main() -> ExitCode {
 		"declare" => run_declare(&args[2..]),
 		"docs" => run_docs(&args[2..]),
 		"enrich" => run_enrich(&args[2..]),
+		"inferences" => run_inferences(&args[2..]),
 		"resource" => run_resource(&args[2..]),
 		"modules" => run_modules(&args[2..]),
 		"surfaces" => run_surfaces(&args[2..]),

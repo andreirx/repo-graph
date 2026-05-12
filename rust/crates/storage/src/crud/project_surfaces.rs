@@ -1,18 +1,28 @@
 //! Project surface CRUD methods.
 //!
-//! Read operations for the `project_surfaces` and
-//! `project_surface_evidence` tables. The TS indexer is the producer
-//! of project surface facts; Rust `rmap surfaces` commands consume
-//! them for catalog queries and detail views.
+//! Read and write operations for the `project_surfaces` and
+//! `project_surface_evidence` tables.
+//!
+//! **Producers:**
+//! - TS indexer (legacy path, most surface types)
+//! - Rust framework detection (FD-SUPPORT-1, framework-detected surfaces)
+//!
+//! **Consumers:**
+//! - `rmap surfaces list/show` CLI commands
 //!
 //! Key operations:
 //! - `get_project_surfaces_for_snapshot` — read all surfaces with filtering
 //! - `get_project_surface_by_ref` — resolve single surface by multiple criteria
 //! - `get_project_surface_evidence` — evidence items for one surface
+//! - `insert_project_surface` — create a new surface (FD-SUPPORT-1)
+//! - `insert_project_surface_evidence` — create evidence for a surface
 
 use crate::connection::StorageConnection;
 use crate::error::StorageError;
-use crate::types::{ProjectSurface, ProjectSurfaceEvidence};
+use crate::types::{
+	CreateProjectSurfaceEvidenceInput, CreateProjectSurfaceInput, ProjectSurface,
+	ProjectSurfaceEvidence,
+};
 
 /// Filter options for `get_project_surfaces_for_snapshot`.
 #[derive(Debug, Default, Clone)]
@@ -307,6 +317,185 @@ impl StorageConnection {
 			map.insert(uid, count);
 		}
 		Ok(map)
+	}
+
+	// ── Write operations (FD-SUPPORT-1) ───────────────────────────────
+
+	/// Insert a project surface. Returns the generated UID.
+	///
+	/// FD-SUPPORT-1: Enables Rust-side framework detection to persist
+	/// surfaces. UID is generated as `ps-<uuid-prefix>`.
+	///
+	/// The `stable_surface_key` must be unique within the snapshot
+	/// (enforced by table constraint).
+	pub fn insert_project_surface(
+		&mut self,
+		input: &CreateProjectSurfaceInput,
+	) -> Result<String, StorageError> {
+		let uid = format!("ps-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+
+		let conn = self.connection();
+		conn.execute(
+			"INSERT INTO project_surfaces (
+				project_surface_uid, snapshot_uid, repo_uid, module_candidate_uid,
+				surface_kind, display_name, root_path, entrypoint_path,
+				build_system, runtime_kind, confidence, metadata_json,
+				source_type, source_specific_id, stable_surface_key
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			rusqlite::params![
+				uid,
+				input.snapshot_uid,
+				input.repo_uid,
+				input.module_candidate_uid,
+				input.surface_kind,
+				input.display_name,
+				input.root_path,
+				input.entrypoint_path,
+				input.build_system,
+				input.runtime_kind,
+				input.confidence,
+				input.metadata_json,
+				input.source_type,
+				input.source_specific_id,
+				input.stable_surface_key,
+			],
+		)?;
+
+		Ok(uid)
+	}
+
+	/// Insert project surface evidence. Returns the generated UID.
+	///
+	/// FD-SUPPORT-1: Links detection evidence to a surface.
+	/// UID is generated as `pse-<uuid-prefix>`.
+	pub fn insert_project_surface_evidence(
+		&mut self,
+		input: &CreateProjectSurfaceEvidenceInput,
+	) -> Result<String, StorageError> {
+		let uid = format!("pse-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+
+		let conn = self.connection();
+		conn.execute(
+			"INSERT INTO project_surface_evidence (
+				project_surface_evidence_uid, project_surface_uid,
+				snapshot_uid, repo_uid, source_type, source_path,
+				evidence_kind, confidence, payload_json
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			rusqlite::params![
+				uid,
+				input.project_surface_uid,
+				input.snapshot_uid,
+				input.repo_uid,
+				input.source_type,
+				input.source_path,
+				input.evidence_kind,
+				input.confidence,
+				input.payload_json,
+			],
+		)?;
+
+		Ok(uid)
+	}
+
+	/// Batch insert project surfaces (transaction-wrapped).
+	///
+	/// Returns a vector of generated UIDs in the same order as inputs.
+	/// All inserts succeed or all fail (atomic).
+	pub fn insert_project_surfaces_batch(
+		&mut self,
+		inputs: &[CreateProjectSurfaceInput],
+	) -> Result<Vec<String>, StorageError> {
+		if inputs.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		let conn = self.connection_mut();
+		let tx = conn.transaction()?;
+
+		let mut uids = Vec::with_capacity(inputs.len());
+
+		{
+			let mut stmt = tx.prepare(
+				"INSERT INTO project_surfaces (
+					project_surface_uid, snapshot_uid, repo_uid, module_candidate_uid,
+					surface_kind, display_name, root_path, entrypoint_path,
+					build_system, runtime_kind, confidence, metadata_json,
+					source_type, source_specific_id, stable_surface_key
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			)?;
+
+			for input in inputs {
+				let uid = format!("ps-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+				stmt.execute(rusqlite::params![
+					uid,
+					input.snapshot_uid,
+					input.repo_uid,
+					input.module_candidate_uid,
+					input.surface_kind,
+					input.display_name,
+					input.root_path,
+					input.entrypoint_path,
+					input.build_system,
+					input.runtime_kind,
+					input.confidence,
+					input.metadata_json,
+					input.source_type,
+					input.source_specific_id,
+					input.stable_surface_key,
+				])?;
+				uids.push(uid);
+			}
+		}
+
+		tx.commit()?;
+		Ok(uids)
+	}
+
+	/// Batch insert project surface evidence (transaction-wrapped).
+	///
+	/// Returns a vector of generated UIDs in the same order as inputs.
+	/// All inserts succeed or all fail (atomic).
+	pub fn insert_project_surface_evidence_batch(
+		&mut self,
+		inputs: &[CreateProjectSurfaceEvidenceInput],
+	) -> Result<Vec<String>, StorageError> {
+		if inputs.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		let conn = self.connection_mut();
+		let tx = conn.transaction()?;
+
+		let mut uids = Vec::with_capacity(inputs.len());
+
+		{
+			let mut stmt = tx.prepare(
+				"INSERT INTO project_surface_evidence (
+					project_surface_evidence_uid, project_surface_uid,
+					snapshot_uid, repo_uid, source_type, source_path,
+					evidence_kind, confidence, payload_json
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			)?;
+
+			for input in inputs {
+				let uid = format!("pse-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+				stmt.execute(rusqlite::params![
+					uid,
+					input.project_surface_uid,
+					input.snapshot_uid,
+					input.repo_uid,
+					input.source_type,
+					input.source_path,
+					input.evidence_kind,
+					input.confidence,
+					input.payload_json,
+				])?;
+				uids.push(uid);
+			}
+		}
+
+		tx.commit()?;
+		Ok(uids)
 	}
 }
 
@@ -736,5 +925,277 @@ mod tests {
 
 		assert_eq!(counts.get("ps-1"), Some(&2));
 		assert_eq!(counts.get("ps-2"), Some(&1));
+	}
+
+	// ── FD-SUPPORT-1: Insert method tests ─────────────────────────────
+
+	#[test]
+	fn insert_project_surface_returns_uid_and_persists() {
+		let mut conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		insert_module_candidate(&conn, "mc1", &snapshot_uid, &repo_uid, "packages/api");
+
+		let input = CreateProjectSurfaceInput {
+			snapshot_uid: snapshot_uid.clone(),
+			repo_uid: repo_uid.clone(),
+			module_candidate_uid: "mc1".to_string(),
+			surface_kind: "http_provider".to_string(),
+			display_name: Some("GET /api/users".to_string()),
+			root_path: "packages/api".to_string(),
+			entrypoint_path: Some("packages/api/src/routes.ts".to_string()),
+			build_system: "npm".to_string(),
+			runtime_kind: "node".to_string(),
+			confidence: 0.9,
+			metadata_json: Some(r#"{"framework":"express"}"#.to_string()),
+			source_type: "express_route".to_string(),
+			source_specific_id: None,
+			stable_surface_key: "surface:express_route:GET:/api/users".to_string(),
+		};
+
+		let uid = conn.insert_project_surface(&input).expect("insert");
+
+		// UID should have correct prefix
+		assert!(uid.starts_with("ps-"), "UID should start with ps-, got: {}", uid);
+
+		// Verify round-trip via query
+		let filter = SurfaceFilter::default();
+		let surfaces = conn
+			.get_project_surfaces_for_snapshot(&snapshot_uid, &filter)
+			.expect("query");
+
+		assert_eq!(surfaces.len(), 1);
+		assert_eq!(surfaces[0].project_surface_uid, uid);
+		assert_eq!(surfaces[0].surface_kind, "http_provider");
+		assert_eq!(surfaces[0].display_name, Some("GET /api/users".to_string()));
+		assert_eq!(surfaces[0].source_type, Some("express_route".to_string()));
+		assert_eq!(
+			surfaces[0].stable_surface_key,
+			Some("surface:express_route:GET:/api/users".to_string())
+		);
+	}
+
+	#[test]
+	fn insert_project_surface_evidence_returns_uid_and_persists() {
+		let mut conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		insert_module_candidate(&conn, "mc1", &snapshot_uid, &repo_uid, "packages/api");
+
+		// First insert a surface
+		let surface_input = CreateProjectSurfaceInput {
+			snapshot_uid: snapshot_uid.clone(),
+			repo_uid: repo_uid.clone(),
+			module_candidate_uid: "mc1".to_string(),
+			surface_kind: "http_provider".to_string(),
+			display_name: Some("GET /api/users".to_string()),
+			root_path: "packages/api".to_string(),
+			entrypoint_path: None,
+			build_system: "npm".to_string(),
+			runtime_kind: "node".to_string(),
+			confidence: 0.9,
+			metadata_json: None,
+			source_type: "express_route".to_string(),
+			source_specific_id: None,
+			stable_surface_key: "surface:express_route:GET:/api/users".to_string(),
+		};
+		let surface_uid = conn.insert_project_surface(&surface_input).expect("insert surface");
+
+		// Now insert evidence
+		let evidence_input = CreateProjectSurfaceEvidenceInput {
+			project_surface_uid: surface_uid.clone(),
+			snapshot_uid: snapshot_uid.clone(),
+			repo_uid: repo_uid.clone(),
+			source_type: "code_detection".to_string(),
+			source_path: "packages/api/src/routes.ts".to_string(),
+			evidence_kind: "route_registration".to_string(),
+			confidence: 0.9,
+			payload_json: Some(r#"{"method":"GET","path":"/api/users"}"#.to_string()),
+		};
+
+		let evidence_uid = conn
+			.insert_project_surface_evidence(&evidence_input)
+			.expect("insert evidence");
+
+		// UID should have correct prefix
+		assert!(
+			evidence_uid.starts_with("pse-"),
+			"UID should start with pse-, got: {}",
+			evidence_uid
+		);
+
+		// Verify round-trip via query
+		let evidence_list = conn.get_project_surface_evidence(&surface_uid).expect("query");
+
+		assert_eq!(evidence_list.len(), 1);
+		assert_eq!(evidence_list[0].project_surface_evidence_uid, evidence_uid);
+		assert_eq!(evidence_list[0].source_type, "code_detection");
+		assert_eq!(evidence_list[0].evidence_kind, "route_registration");
+		assert_eq!(
+			evidence_list[0].payload_json,
+			Some(r#"{"method":"GET","path":"/api/users"}"#.to_string())
+		);
+	}
+
+	#[test]
+	fn insert_project_surfaces_batch_is_atomic() {
+		let mut conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		insert_module_candidate(&conn, "mc1", &snapshot_uid, &repo_uid, "packages/api");
+
+		let inputs = vec![
+			CreateProjectSurfaceInput {
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: repo_uid.clone(),
+				module_candidate_uid: "mc1".to_string(),
+				surface_kind: "http_provider".to_string(),
+				display_name: Some("GET /api/users".to_string()),
+				root_path: ".".to_string(),
+				entrypoint_path: None,
+				build_system: "npm".to_string(),
+				runtime_kind: "node".to_string(),
+				confidence: 0.9,
+				metadata_json: None,
+				source_type: "express_route".to_string(),
+				source_specific_id: None,
+				stable_surface_key: "surface:express_route:GET:/api/users".to_string(),
+			},
+			CreateProjectSurfaceInput {
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: repo_uid.clone(),
+				module_candidate_uid: "mc1".to_string(),
+				surface_kind: "http_provider".to_string(),
+				display_name: Some("POST /api/users".to_string()),
+				root_path: ".".to_string(),
+				entrypoint_path: None,
+				build_system: "npm".to_string(),
+				runtime_kind: "node".to_string(),
+				confidence: 0.9,
+				metadata_json: None,
+				source_type: "express_route".to_string(),
+				source_specific_id: None,
+				stable_surface_key: "surface:express_route:POST:/api/users".to_string(),
+			},
+		];
+
+		let uids = conn.insert_project_surfaces_batch(&inputs).expect("batch insert");
+
+		assert_eq!(uids.len(), 2);
+		assert!(uids[0].starts_with("ps-"));
+		assert!(uids[1].starts_with("ps-"));
+		assert_ne!(uids[0], uids[1], "UIDs must be unique");
+
+		// Verify all inserted
+		let filter = SurfaceFilter::default();
+		let surfaces = conn
+			.get_project_surfaces_for_snapshot(&snapshot_uid, &filter)
+			.expect("query");
+		assert_eq!(surfaces.len(), 2);
+	}
+
+	#[test]
+	fn insert_project_surface_evidence_batch_is_atomic() {
+		let mut conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		insert_module_candidate(&conn, "mc1", &snapshot_uid, &repo_uid, "packages/api");
+
+		// Insert a surface first
+		let surface_input = CreateProjectSurfaceInput {
+			snapshot_uid: snapshot_uid.clone(),
+			repo_uid: repo_uid.clone(),
+			module_candidate_uid: "mc1".to_string(),
+			surface_kind: "http_provider".to_string(),
+			display_name: Some("GET /api/users".to_string()),
+			root_path: ".".to_string(),
+			entrypoint_path: None,
+			build_system: "npm".to_string(),
+			runtime_kind: "node".to_string(),
+			confidence: 0.9,
+			metadata_json: None,
+			source_type: "express_route".to_string(),
+			source_specific_id: None,
+			stable_surface_key: "surface:express_route:GET:/api/users".to_string(),
+		};
+		let surface_uid = conn.insert_project_surface(&surface_input).expect("insert surface");
+
+		// Batch insert evidence
+		let evidence_inputs = vec![
+			CreateProjectSurfaceEvidenceInput {
+				project_surface_uid: surface_uid.clone(),
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: repo_uid.clone(),
+				source_type: "code_detection".to_string(),
+				source_path: "src/routes.ts".to_string(),
+				evidence_kind: "route_registration".to_string(),
+				confidence: 0.9,
+				payload_json: None,
+			},
+			CreateProjectSurfaceEvidenceInput {
+				project_surface_uid: surface_uid.clone(),
+				snapshot_uid: snapshot_uid.clone(),
+				repo_uid: repo_uid.clone(),
+				source_type: "code_detection".to_string(),
+				source_path: "src/routes.ts".to_string(),
+				evidence_kind: "handler_attribution".to_string(),
+				confidence: 0.8,
+				payload_json: Some(r#"{"handler":"getUsers"}"#.to_string()),
+			},
+		];
+
+		let evidence_uids = conn
+			.insert_project_surface_evidence_batch(&evidence_inputs)
+			.expect("batch insert");
+
+		assert_eq!(evidence_uids.len(), 2);
+		assert!(evidence_uids[0].starts_with("pse-"));
+		assert!(evidence_uids[1].starts_with("pse-"));
+		assert_ne!(evidence_uids[0], evidence_uids[1]);
+
+		// Verify all inserted
+		let evidence_list = conn.get_project_surface_evidence(&surface_uid).expect("query");
+		assert_eq!(evidence_list.len(), 2);
+	}
+
+	#[test]
+	fn insert_project_surfaces_batch_empty_input_returns_empty() {
+		let mut conn = fresh_storage();
+		let inputs: Vec<CreateProjectSurfaceInput> = vec![];
+
+		let uids = conn.insert_project_surfaces_batch(&inputs).expect("batch insert");
+		assert!(uids.is_empty());
+	}
+
+	#[test]
+	fn insert_project_surface_duplicate_stable_key_fails() {
+		let mut conn = fresh_storage();
+		let (repo_uid, snapshot_uid) = setup_test_snapshot(&conn);
+
+		insert_module_candidate(&conn, "mc1", &snapshot_uid, &repo_uid, "packages/api");
+
+		let input = CreateProjectSurfaceInput {
+			snapshot_uid: snapshot_uid.clone(),
+			repo_uid: repo_uid.clone(),
+			module_candidate_uid: "mc1".to_string(),
+			surface_kind: "http_provider".to_string(),
+			display_name: Some("GET /api/users".to_string()),
+			root_path: ".".to_string(),
+			entrypoint_path: None,
+			build_system: "npm".to_string(),
+			runtime_kind: "node".to_string(),
+			confidence: 0.9,
+			metadata_json: None,
+			source_type: "express_route".to_string(),
+			source_specific_id: None,
+			stable_surface_key: "surface:express_route:GET:/api/users".to_string(),
+		};
+
+		// First insert should succeed
+		let _uid1 = conn.insert_project_surface(&input).expect("first insert");
+
+		// Second insert with same stable_surface_key should fail (UNIQUE constraint)
+		let result = conn.insert_project_surface(&input);
+		assert!(result.is_err(), "duplicate stable_surface_key should fail");
 	}
 }

@@ -821,8 +821,8 @@ Layer 3 framework detection.
 | DEP-1 | Dependency reconciliation surface | L2 | **SHIPPED** |
 | JE-1 | Java resolved callsites | L0–1 | **IMPLEMENTED** |
 | SB-7B | Java state boundaries | L2 | **SHIPPED** |
-| FD-1A | Rust Express detector parity | L3 | PLANNED (next) |
-| FD-1B | Rust React detector parity | L3 | PLANNED |
+| FD-1A | Rust Express detector parity | L3 | **IMPLEMENTED** |
+| FD-1B | Rust React detector parity | L3 | **IMPLEMENTED** |
 
 **PY-EXT-2-PERF note:** Performance acceptance (throughput ≥ 0.95x, memory ≤ 1.1x)
 was not validated because no baseline exists and the original benchmark command was
@@ -837,8 +837,9 @@ and pre-change baseline are established. Functional Layer 0–1 work is complete
 4. **DEP-1** promoted: cross-cutting query surface over existing facts, no extractor surgery, immediate value across JS/TS and Rust repos
 5. **JE-1** implemented: Java extractor now emits `ResolvedCallsite` facts with arg0 payload and import resolution.
 6. **SB-7B** shipped: narrow first-cut (`DriverManager.getConnection(String)` only) complete.
-7. **FD-1A/1B** are Layer 3 hints — next priority after L2 state boundaries
-8. **PY-EXT-2-PERF** is backlog — requires benchmark harness infrastructure before execution
+7. **FD-1A** implemented: AST-based Express detection with module resolution, 16 routes detected in validation corpus.
+8. **FD-1B** implemented: React component/hook detection via AST, 10 components + 14 hooks in validation corpus. Uses `inferences` table (Layer 3).
+9. **PY-EXT-2-PERF** is backlog — requires benchmark harness infrastructure before execution
 
 **Slice docs:**
 

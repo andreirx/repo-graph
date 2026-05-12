@@ -90,6 +90,9 @@ glob = "0.3"
 # Timestamps for inference provenance.
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 
+# UUID generation for inference UIDs.
+uuid = { version = "1", features = ["v4"] }
+
 # Tree-sitter for PF-1 policy-facts re-parse postpass (TEMPORARY).
 # See docs/TECH-DEBT.md: "PF-1 temporary re-parse postpass".
 tree-sitter = "0.24"

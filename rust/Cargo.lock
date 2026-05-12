@@ -1011,6 +1011,7 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-c",
  "tree-sitter-typescript",
+ "uuid",
  "walkdir",
 ]
 
