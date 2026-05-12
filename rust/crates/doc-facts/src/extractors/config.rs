@@ -147,11 +147,7 @@ fn infer_environment_from_path(path: &str) -> String {
 
 /// Infer environment from .env filename.
 fn infer_environment_from_env_filename(path: &str) -> String {
-    let file_name = path
-        .rsplit('/')
-        .next()
-        .unwrap_or(path)
-        .to_lowercase();
+    let file_name = path.rsplit('/').next().unwrap_or(path).to_lowercase();
 
     // .env.production, .env.staging, .env.development, etc.
     if let Some(suffix) = file_name.strip_prefix(".env.") {
@@ -307,7 +303,10 @@ services:
     #[test]
     fn infer_module_scope_nested() {
         assert_eq!(super::infer_module_scope("a/b/c/.env"), "a/b/c");
-        assert_eq!(super::infer_module_scope("serverless/.env.stage"), "serverless");
+        assert_eq!(
+            super::infer_module_scope("serverless/.env.stage"),
+            "serverless"
+        );
     }
 
     #[test]

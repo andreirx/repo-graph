@@ -33,6 +33,7 @@ pub struct LinkageMetadata {
     pub declared_in_extern_c_block: bool,
 }
 
+#[allow(dead_code)]
 impl LinkageMetadata {
     /// Create metadata for a symbol inside an `extern "C"` block.
     pub fn in_extern_c_block() -> Self {

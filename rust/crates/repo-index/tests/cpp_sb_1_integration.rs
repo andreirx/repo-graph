@@ -62,21 +62,13 @@ void read_config() {
     let db_dir = tempfile::tempdir().unwrap();
     let db_path = db_dir.path().join("test.db");
 
-    let result = index_path(
-        &repo,
-        &db_path,
-        "cpp-test",
-        &ComposeOptions::default(),
-    )
-    .expect("indexing must succeed");
+    let result = index_path(&repo, &db_path, "cpp-test", &ComposeOptions::default())
+        .expect("indexing must succeed");
 
     let storage = StorageConnection::open(&db_path).unwrap();
     let nodes = storage.query_all_nodes(&result.snapshot_uid).unwrap();
 
-    let fs_nodes: Vec<_> = nodes
-        .iter()
-        .filter(|n| n.kind == "FS_PATH")
-        .collect();
+    let fs_nodes: Vec<_> = nodes.iter().filter(|n| n.kind == "FS_PATH").collect();
 
     assert_eq!(fs_nodes.len(), 1, "expected one FS_PATH node");
     assert!(
@@ -89,13 +81,20 @@ void read_config() {
     let reads_callees = storage
         .find_direct_callees(&result.snapshot_uid, func_stable_key, &["READS"])
         .expect("callee query must succeed");
-    assert_eq!(reads_callees.len(), 1, "ifstream should produce exactly one READS edge");
+    assert_eq!(
+        reads_callees.len(),
+        1,
+        "ifstream should produce exactly one READS edge"
+    );
 
     // No WRITES edge for ifstream.
     let writes_callees = storage
         .find_direct_callees(&result.snapshot_uid, func_stable_key, &["WRITES"])
         .expect("callee query must succeed");
-    assert!(writes_callees.is_empty(), "ifstream should not produce WRITES edge");
+    assert!(
+        writes_callees.is_empty(),
+        "ifstream should not produce WRITES edge"
+    );
 }
 
 #[test]
@@ -122,13 +121,20 @@ void write_log() {
     let writes_callees = storage
         .find_direct_callees(&result.snapshot_uid, func_stable_key, &["WRITES"])
         .expect("callee query must succeed");
-    assert_eq!(writes_callees.len(), 1, "ofstream should produce exactly one WRITES edge");
+    assert_eq!(
+        writes_callees.len(),
+        1,
+        "ofstream should produce exactly one WRITES edge"
+    );
 
     // No READS edge for ofstream.
     let reads_callees = storage
         .find_direct_callees(&result.snapshot_uid, func_stable_key, &["READS"])
         .expect("callee query must succeed");
-    assert!(reads_callees.is_empty(), "ofstream should not produce READS edge");
+    assert!(
+        reads_callees.is_empty(),
+        "ofstream should not produce READS edge"
+    );
 }
 
 #[test]
@@ -155,12 +161,19 @@ void read_data() {
     let reads_callees = storage
         .find_direct_callees(&result.snapshot_uid, func_stable_key, &["READS"])
         .expect("callee query must succeed");
-    assert_eq!(reads_callees.len(), 1, "fstream std::ios::in should produce READS edge");
+    assert_eq!(
+        reads_callees.len(),
+        1,
+        "fstream std::ios::in should produce READS edge"
+    );
 
     let writes_callees = storage
         .find_direct_callees(&result.snapshot_uid, func_stable_key, &["WRITES"])
         .expect("callee query must succeed");
-    assert!(writes_callees.is_empty(), "fstream std::ios::in should not produce WRITES edge");
+    assert!(
+        writes_callees.is_empty(),
+        "fstream std::ios::in should not produce WRITES edge"
+    );
 }
 
 #[test]
@@ -187,12 +200,19 @@ void write_data() {
     let writes_callees = storage
         .find_direct_callees(&result.snapshot_uid, func_stable_key, &["WRITES"])
         .expect("callee query must succeed");
-    assert_eq!(writes_callees.len(), 1, "fstream std::ios::out should produce WRITES edge");
+    assert_eq!(
+        writes_callees.len(),
+        1,
+        "fstream std::ios::out should produce WRITES edge"
+    );
 
     let reads_callees = storage
         .find_direct_callees(&result.snapshot_uid, func_stable_key, &["READS"])
         .expect("callee query must succeed");
-    assert!(reads_callees.is_empty(), "fstream std::ios::out should not produce READS edge");
+    assert!(
+        reads_callees.is_empty(),
+        "fstream std::ios::out should not produce READS edge"
+    );
 }
 
 #[test]
@@ -223,8 +243,16 @@ void update_data() {
         .find_direct_callees(&result.snapshot_uid, func_stable_key, &["WRITES"])
         .expect("callee query must succeed");
 
-    assert_eq!(reads_callees.len(), 1, "fstream in|out should produce READS edge");
-    assert_eq!(writes_callees.len(), 1, "fstream in|out should produce WRITES edge");
+    assert_eq!(
+        reads_callees.len(),
+        1,
+        "fstream in|out should produce READS edge"
+    );
+    assert_eq!(
+        writes_callees.len(),
+        1,
+        "fstream in|out should produce WRITES edge"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -440,13 +468,17 @@ int db_init() {
     let storage = StorageConnection::open(&db_path).unwrap();
     let nodes = storage.query_all_nodes(&result.snapshot_uid).unwrap();
 
-    let db_nodes: Vec<_> = nodes
-        .iter()
-        .filter(|n| n.kind == "DB_RESOURCE")
-        .collect();
+    let db_nodes: Vec<_> = nodes.iter().filter(|n| n.kind == "DB_RESOURCE").collect();
 
-    assert_eq!(db_nodes.len(), 1, "sqlite3_open should produce DB_RESOURCE node");
-    assert!(db_nodes[0].stable_key.contains("app.db"), "stable_key should contain db path");
+    assert_eq!(
+        db_nodes.len(),
+        1,
+        "sqlite3_open should produce DB_RESOURCE node"
+    );
+    assert!(
+        db_nodes[0].stable_key.contains("app.db"),
+        "stable_key should contain db path"
+    );
 
     // read_write produces both edges.
     let func_stable_key = "cpp-test:src/db.cpp#db_init:SYMBOL:FUNCTION";
@@ -458,8 +490,16 @@ int db_init() {
         .find_direct_callees(&result.snapshot_uid, func_stable_key, &["WRITES"])
         .expect("callee query must succeed");
 
-    assert_eq!(reads_callees.len(), 1, "sqlite3_open should produce READS edge");
-    assert_eq!(writes_callees.len(), 1, "sqlite3_open should produce WRITES edge");
+    assert_eq!(
+        reads_callees.len(),
+        1,
+        "sqlite3_open should produce READS edge"
+    );
+    assert_eq!(
+        writes_callees.len(),
+        1,
+        "sqlite3_open should produce WRITES edge"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -487,10 +527,7 @@ void process(std::ifstream& stream) {
     let storage = StorageConnection::open(&db_path).unwrap();
     let nodes = storage.query_all_nodes(&result.snapshot_uid).unwrap();
 
-    let fs_nodes: Vec<_> = nodes
-        .iter()
-        .filter(|n| n.kind == "FS_PATH")
-        .collect();
+    let fs_nodes: Vec<_> = nodes.iter().filter(|n| n.kind == "FS_PATH").collect();
 
     assert!(
         fs_nodes.is_empty(),
@@ -521,10 +558,7 @@ void use_factory() {
     let storage = StorageConnection::open(&db_path).unwrap();
     let nodes = storage.query_all_nodes(&result.snapshot_uid).unwrap();
 
-    let fs_nodes: Vec<_> = nodes
-        .iter()
-        .filter(|n| n.kind == "FS_PATH")
-        .collect();
+    let fs_nodes: Vec<_> = nodes.iter().filter(|n| n.kind == "FS_PATH").collect();
 
     assert!(
         fs_nodes.is_empty(),
@@ -557,10 +591,7 @@ class FileHandler {
     let storage = StorageConnection::open(&db_path).unwrap();
     let nodes = storage.query_all_nodes(&result.snapshot_uid).unwrap();
 
-    let fs_nodes: Vec<_> = nodes
-        .iter()
-        .filter(|n| n.kind == "FS_PATH")
-        .collect();
+    let fs_nodes: Vec<_> = nodes.iter().filter(|n| n.kind == "FS_PATH").collect();
 
     assert!(
         fs_nodes.is_empty(),
@@ -590,10 +621,7 @@ void read_dynamic(const std::string& path) {
     let storage = StorageConnection::open(&db_path).unwrap();
     let nodes = storage.query_all_nodes(&result.snapshot_uid).unwrap();
 
-    let fs_nodes: Vec<_> = nodes
-        .iter()
-        .filter(|n| n.kind == "FS_PATH")
-        .collect();
+    let fs_nodes: Vec<_> = nodes.iter().filter(|n| n.kind == "FS_PATH").collect();
 
     assert!(
         fs_nodes.is_empty(),
@@ -624,10 +652,7 @@ int db_memory() {
     let storage = StorageConnection::open(&db_path).unwrap();
     let nodes = storage.query_all_nodes(&result.snapshot_uid).unwrap();
 
-    let db_nodes: Vec<_> = nodes
-        .iter()
-        .filter(|n| n.kind == "DB_RESOURCE")
-        .collect();
+    let db_nodes: Vec<_> = nodes.iter().filter(|n| n.kind == "DB_RESOURCE").collect();
 
     assert!(
         db_nodes.is_empty(),
@@ -654,8 +679,8 @@ void read_config() {
     let db_path = db_dir.path().join("test.db");
 
     // Full index.
-    let idx = index_path(&repo, &db_path, "cpp-test", &ComposeOptions::default())
-        .expect("full index");
+    let idx =
+        index_path(&repo, &db_path, "cpp-test", &ComposeOptions::default()).expect("full index");
 
     // Verify state-boundary facts exist after full index.
     let storage = StorageConnection::open(&db_path).unwrap();
@@ -665,8 +690,8 @@ void read_config() {
     drop(storage);
 
     // Refresh (no file changes -> all copied forward).
-    let ref_result = refresh_path(&repo, &db_path, "cpp-test", &ComposeOptions::default())
-        .expect("refresh");
+    let ref_result =
+        refresh_path(&repo, &db_path, "cpp-test", &ComposeOptions::default()).expect("refresh");
 
     let storage = StorageConnection::open(&db_path).unwrap();
     let ref_nodes = storage.query_all_nodes(&ref_result.snapshot_uid).unwrap();
@@ -707,16 +732,13 @@ void write_b() {
     std::ofstream file("/var/log/b.log");
 }
 "#;
-    let (_dir, repo) = temp_repo(&[
-        ("src/a.cpp", src_a),
-        ("src/b.cpp", src_b),
-    ]);
+    let (_dir, repo) = temp_repo(&[("src/a.cpp", src_a), ("src/b.cpp", src_b)]);
     let db_dir = tempfile::tempdir().unwrap();
     let db_path = db_dir.path().join("test.db");
 
     // Full index.
-    let _idx = index_path(&repo, &db_path, "cpp-test", &ComposeOptions::default())
-        .expect("full index");
+    let _idx =
+        index_path(&repo, &db_path, "cpp-test", &ComposeOptions::default()).expect("full index");
 
     // Modify file b (change the path).
     let src_b2 = r#"
@@ -729,8 +751,8 @@ void write_b() {
     fs::write(repo.join("src/b.cpp"), src_b2).unwrap();
 
     // Refresh: a.cpp is unchanged -> copy-forward; b.cpp changed.
-    let ref_result = refresh_path(&repo, &db_path, "cpp-test", &ComposeOptions::default())
-        .expect("refresh");
+    let ref_result =
+        refresh_path(&repo, &db_path, "cpp-test", &ComposeOptions::default()).expect("refresh");
 
     let storage = StorageConnection::open(&db_path).unwrap();
     let ref_nodes = storage.query_all_nodes(&ref_result.snapshot_uid).unwrap();
@@ -739,16 +761,19 @@ void write_b() {
     let names: Vec<&str> = ref_fs.iter().map(|n| n.name.as_str()).collect();
     assert!(
         names.contains(&"/etc/a.conf"),
-        "unchanged file's resource must survive refresh, got: {:?}", names
+        "unchanged file's resource must survive refresh, got: {:?}",
+        names
     );
     assert!(
         names.contains(&"/var/log/b2.log"),
-        "changed file's new resource must appear, got: {:?}", names
+        "changed file's new resource must appear, got: {:?}",
+        names
     );
     // Stale orphan: /var/log/b.log persists (documented residual debt).
     assert!(
         names.contains(&"/var/log/b.log"),
-        "stale orphan resource should persist until full reindex, got: {:?}", names
+        "stale orphan resource should persist until full reindex, got: {:?}",
+        names
     );
 }
 
@@ -771,15 +796,12 @@ void read_b() {
     std::ifstream file("/etc/shared.conf");
 }
 "#;
-    let (_dir, repo) = temp_repo(&[
-        ("src/a.cpp", src_a),
-        ("src/b.cpp", src_b),
-    ]);
+    let (_dir, repo) = temp_repo(&[("src/a.cpp", src_a), ("src/b.cpp", src_b)]);
     let db_dir = tempfile::tempdir().unwrap();
     let db_path = db_dir.path().join("test.db");
 
-    let _idx = index_path(&repo, &db_path, "cpp-test", &ComposeOptions::default())
-        .expect("full index");
+    let _idx =
+        index_path(&repo, &db_path, "cpp-test", &ComposeOptions::default()).expect("full index");
 
     // Modify b.cpp trivially (add a comment so the hash changes).
     let src_b2 = r#"
@@ -792,8 +814,8 @@ void read_b() {
 "#;
     fs::write(repo.join("src/b.cpp"), src_b2).unwrap();
 
-    let ref_result = refresh_path(&repo, &db_path, "cpp-test", &ComposeOptions::default())
-        .expect("refresh");
+    let ref_result =
+        refresh_path(&repo, &db_path, "cpp-test", &ComposeOptions::default()).expect("refresh");
 
     let storage = StorageConnection::open(&db_path).unwrap();
     let ref_nodes = storage.query_all_nodes(&ref_result.snapshot_uid).unwrap();
@@ -805,7 +827,10 @@ void read_b() {
         shared_nodes.len(),
         1,
         "shared resource must appear exactly once after refresh (dedup), got: {:?}",
-        shared_nodes.iter().map(|n| &n.stable_key).collect::<Vec<_>>()
+        shared_nodes
+            .iter()
+            .map(|n| &n.stable_key)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -825,26 +850,26 @@ void read_late() {
     let db_path = db_dir.path().join("test.db");
 
     // Full index.
-    let idx = index_path(&repo, &db_path, "cpp-test", &ComposeOptions::default())
-        .expect("full index");
+    let idx =
+        index_path(&repo, &db_path, "cpp-test", &ComposeOptions::default()).expect("full index");
 
     let storage = StorageConnection::open(&db_path).unwrap();
     let idx_nodes = storage.query_all_nodes(&idx.snapshot_uid).unwrap();
     let idx_fs: Vec<_> = idx_nodes.iter().filter(|n| n.kind == "FS_PATH").collect();
-    assert_eq!(idx_fs.len(), 1, "D3 .open() must produce FS_PATH in full index");
+    assert_eq!(
+        idx_fs.len(),
+        1,
+        "D3 .open() must produce FS_PATH in full index"
+    );
     drop(storage);
 
     // Refresh (no changes).
-    let ref_result = refresh_path(&repo, &db_path, "cpp-test", &ComposeOptions::default())
-        .expect("refresh");
+    let ref_result =
+        refresh_path(&repo, &db_path, "cpp-test", &ComposeOptions::default()).expect("refresh");
 
     let storage = StorageConnection::open(&db_path).unwrap();
     let ref_nodes = storage.query_all_nodes(&ref_result.snapshot_uid).unwrap();
     let ref_fs: Vec<_> = ref_nodes.iter().filter(|n| n.kind == "FS_PATH").collect();
-    assert_eq!(
-        ref_fs.len(),
-        1,
-        "D3 .open() facts must survive refresh"
-    );
+    assert_eq!(ref_fs.len(), 1, "D3 .open() facts must survive refresh");
     assert_eq!(ref_fs[0].name, "/etc/d3_refresh.conf");
 }

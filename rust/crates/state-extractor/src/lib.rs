@@ -52,10 +52,8 @@ pub mod languages;
 // Re-export the most commonly used surface at the crate root.
 pub use adapter::{default_registry, AdapterContext, AdapterRegistry, LanguageStateAdapter};
 pub use emit::{
-	CallsiteLogicalName, EmittedFacts, EmitError, EmitterContext, StateBoundaryCallsite,
-	StateBoundaryEmitter,
+    CallsiteLogicalName, EmitError, EmittedFacts, EmitterContext, StateBoundaryCallsite,
+    StateBoundaryEmitter,
 };
-pub use evidence::{
-	LogicalNameSource, StateBoundaryEvidence, STATE_BOUNDARY_EVIDENCE_VERSION,
-};
+pub use evidence::{LogicalNameSource, StateBoundaryEvidence, STATE_BOUNDARY_EVIDENCE_VERSION};
 pub use languages::TypeScriptAdapter;

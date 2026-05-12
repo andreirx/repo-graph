@@ -40,7 +40,7 @@
 //! let mut ids = IdGenerator::new();
 //!
 //! // Send request
-//! let id = ids.next();
+//! let id = ids.next_id();
 //! write_request(&mut stdin, id, "initialize", init_params)?;
 //!
 //! // Wait for response with timeout
@@ -102,7 +102,7 @@ impl IdGenerator {
         Self { next: 1 }
     }
 
-    pub fn next(&mut self) -> i32 {
+    pub fn next_id(&mut self) -> i32 {
         let id = self.next;
         self.next += 1;
         id
@@ -411,9 +411,9 @@ mod tests {
     #[test]
     fn test_id_generator() {
         let mut gen = IdGenerator::new();
-        assert_eq!(gen.next(), 1);
-        assert_eq!(gen.next(), 2);
-        assert_eq!(gen.next(), 3);
+        assert_eq!(gen.next_id(), 1);
+        assert_eq!(gen.next_id(), 2);
+        assert_eq!(gen.next_id(), 3);
     }
 
     #[test]

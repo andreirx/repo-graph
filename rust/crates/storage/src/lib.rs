@@ -156,33 +156,33 @@
 //! R22:  `get_active_boundary_declarations` + `find_imports_between_paths`.
 //! R24:  `get_active_requirement_declarations`.
 
-pub mod connection;
-pub mod contract_schema_port; // Contract schema storage port (CS-1)
-mod contract_schema_impl; // ContractSchemaStoragePort impl for StorageConnection
-pub mod crud;
-pub(crate) mod diagnostic;
-pub mod error;
-pub mod migrations;
 mod agent_impl; // AgentStorageRead impl for StorageConnection (Rust-42)
-mod cargo_module_impl; // CargoModuleStorePort impl for StorageConnection (rust-module-parity Phase 1)
 mod boundary_interaction_impl; // Boundary interaction write storage (BI-1A)
 mod boundary_interaction_read_impl; // Boundary interaction read port (BI-1A)
+mod cargo_module_impl; // CargoModuleStorePort impl for StorageConnection (rust-module-parity Phase 1)
+pub mod connection;
+mod contract_schema_impl; // ContractSchemaStoragePort impl for StorageConnection
+pub mod contract_schema_port; // Contract schema storage port (CS-1)
+pub mod crud;
+pub(crate) mod diagnostic;
+mod enrichment_impl; // EnrichmentStoragePort impl for StorageConnection (EN-3)
+pub mod error;
+mod freshness_impl; // FreshnessStoragePort impl for StorageConnection (ACR-3)
+pub mod freshness_port; // Freshness and provenance storage port (ACR-3)
 mod gate_impl; // GateStorageRead impl for StorageConnection (Rust-43A)
-mod indexer_impl; // SnapshotLifecyclePort + FileCatalogPort impl (R5-C)
-mod proto_schema_impl; // ProtoSchemaStorePort impl for StorageConnection (CS-1)
 mod generated_code_mapping_impl; // GeneratedCodeMappingStorePort impl (CS-2A)
 mod generated_code_mapping_read_impl; // GeneratedCodeMappingReadPort impl (CS-2A)
 pub mod grpc_impl_hint_impl; // gRPC implementation hint queries (GR-1A)
 mod grpc_impl_hint_port_impl; // GrpcImplHintReadPort/StorePort impl (GR-1A)
-pub mod quality_policy_port; // Quality policy storage port (QP-Step-5)
-mod quality_policy_impl; // QualityPolicyStoragePort impl for StorageConnection
-pub mod queries; // Read-side graph queries (R10+)
-mod trust_impl; // TrustStorageRead impl for StorageConnection (R4-E/F)
+mod indexer_impl; // SnapshotLifecyclePort + FileCatalogPort impl (R5-C)
+pub mod migrations;
 mod policy_facts_impl; // PolicyFactsStorageRead/Write impl for StorageConnection (PF-1)
-mod enrichment_impl; // EnrichmentStoragePort impl for StorageConnection (EN-3)
-pub mod freshness_port; // Freshness and provenance storage port (ACR-3)
-mod freshness_impl; // FreshnessStoragePort impl for StorageConnection (ACR-3)
+mod proto_schema_impl; // ProtoSchemaStorePort impl for StorageConnection (CS-1)
+mod quality_policy_impl; // QualityPolicyStoragePort impl for StorageConnection
+pub mod quality_policy_port; // Quality policy storage port (QP-Step-5)
+pub mod queries; // Read-side graph queries (R10+)
 mod refresh_copy_forward_impl; // Refresh artifact copy-forward (refresh-integrity-parity slice)
+mod trust_impl; // TrustStorageRead impl for StorageConnection (R4-E/F)
 pub mod types;
 
 // Re-export refresh copy-forward types for compose layer.
@@ -190,8 +190,7 @@ pub use refresh_copy_forward_impl::ArtifactCopyForwardResult;
 
 // Re-export freshness port types (ACR-3).
 pub use freshness_port::{
-    FreshnessStoragePort, FreshnessSummary, RowRef,
-    FRESHNESS_TRACKED_TABLES, is_freshness_tracked,
+    is_freshness_tracked, FreshnessStoragePort, FreshnessSummary, RowRef, FRESHNESS_TRACKED_TABLES,
 };
 
 // Convenience re-exports for the public connection lifecycle API.

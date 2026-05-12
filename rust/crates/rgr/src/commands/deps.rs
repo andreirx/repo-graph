@@ -24,9 +24,8 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use repo_graph_module_queries::{
-    compose_dependency_summaries, npm_runtime_builtins, cargo_runtime_builtins,
-    build_identifier_resolution_map, resolve_import_specifier,
-    ComposeDependenciesInput, DependencyCategory,
+    build_identifier_resolution_map, cargo_runtime_builtins, compose_dependency_summaries,
+    npm_runtime_builtins, resolve_import_specifier, ComposeDependenciesInput, DependencyCategory,
 };
 
 use crate::cli::{build_envelope, open_storage};
@@ -115,7 +114,8 @@ fn run_deps_list(args: &[String]) -> ExitCode {
 
     // Filter to specific module if requested
     let summaries: Vec<_> = if let Some(filter) = module_filter {
-        result.summaries
+        result
+            .summaries
             .into_iter()
             .filter(|s| {
                 s.module == filter
@@ -127,17 +127,20 @@ fn run_deps_list(args: &[String]) -> ExitCode {
         result.summaries
     };
 
-    if summaries.is_empty() && module_filter.is_some() {
-        eprintln!("error: no dependencies found for module '{}'", module_filter.unwrap());
-        eprintln!("hint: use canonical path (e.g., 'packages/app') or check rmap modules list");
-        return ExitCode::from(1);
+    if let Some(filter) = module_filter.as_ref() {
+        if summaries.is_empty() {
+            eprintln!("error: no dependencies found for module '{}'", filter);
+            eprintln!("hint: use canonical path (e.g., 'packages/app') or check rmap modules list");
+            return ExitCode::from(1);
+        }
     }
 
     // Build JSON output
     let results: Vec<serde_json::Value> = summaries
         .iter()
         .map(|s| {
-            let entries: Vec<serde_json::Value> = s.entries
+            let entries: Vec<serde_json::Value> = s
+                .entries
                 .iter()
                 .map(|e| {
                     serde_json::json!({
@@ -167,9 +170,15 @@ fn run_deps_list(args: &[String]) -> ExitCode {
     // Build extra fields for envelope
     let mut extra = serde_json::Map::new();
     if let Some(m) = module_filter {
-        extra.insert("module_filter".to_string(), serde_json::Value::String(m.to_string()));
+        extra.insert(
+            "module_filter".to_string(),
+            serde_json::Value::String(m.to_string()),
+        );
     }
-    extra.insert("ecosystem".to_string(), serde_json::Value::String(ecosystem));
+    extra.insert(
+        "ecosystem".to_string(),
+        serde_json::Value::String(ecosystem),
+    );
     extra.insert(
         "total_external_imports".to_string(),
         serde_json::Value::Number(result.total_external_imports.into()),
@@ -210,8 +219,8 @@ fn run_deps_list(args: &[String]) -> ExitCode {
 // ── deps why command ──────────────────────────────────────────────
 
 fn run_deps_why(args: &[String]) -> ExitCode {
+    use repo_graph_module_queries::{normalize_cargo_specifier, normalize_npm_specifier};
     use std::collections::HashMap;
-    use repo_graph_module_queries::{normalize_npm_specifier, normalize_cargo_specifier};
 
     // Parse args: <db_path> <repo_uid> <package> [--ecosystem npm|cargo]
     let (positional, ecosystem) = match parse_deps_why_args(args) {
@@ -262,7 +271,12 @@ fn run_deps_why(args: &[String]) -> ExitCode {
     };
     let uid_to_canonical: HashMap<&str, &str> = modules
         .iter()
-        .map(|m| (m.module_candidate_uid.as_str(), m.canonical_root_path.as_str()))
+        .map(|m| {
+            (
+                m.module_candidate_uid.as_str(),
+                m.canonical_root_path.as_str(),
+            )
+        })
         .collect();
 
     // 2. Load file ownership
@@ -283,22 +297,24 @@ fn run_deps_why(args: &[String]) -> ExitCode {
         .collect();
 
     // 3. Load external imports with file locations
-    let imports_with_locations = match storage.get_external_imports_with_locations(&snapshot.snapshot_uid) {
-        Ok(i) => i,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    let imports_with_locations =
+        match storage.get_external_imports_with_locations(&snapshot.snapshot_uid) {
+            Ok(i) => i,
+            Err(e) => {
+                eprintln!("error: {}", e);
+                return ExitCode::from(2);
+            }
+        };
 
     // 3.5. Load import bindings for identifier → specifier resolution
-    let import_bindings = match storage.get_external_import_bindings_for_snapshot(&snapshot.snapshot_uid) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    let import_bindings =
+        match storage.get_external_import_bindings_for_snapshot(&snapshot.snapshot_uid) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("error: {}", e);
+                return ExitCode::from(2);
+            }
+        };
     let identifier_to_specifier = build_identifier_resolution_map(&import_bindings);
 
     // 4. Also get reconciliation summaries to check if package is declared
@@ -324,9 +340,12 @@ fn run_deps_why(args: &[String]) -> ExitCode {
     for summary in &reconciled.summaries {
         for entry in &summary.entries {
             if entry.package == *package_query {
-                let declared = matches!(entry.category,
-                    DependencyCategory::DeclaredAndUsed | DependencyCategory::DeclaredButUnobserved);
-                module_decl_info.insert(&summary.module, (declared, format_category(entry.category)));
+                let declared = matches!(
+                    entry.category,
+                    DependencyCategory::DeclaredAndUsed | DependencyCategory::DeclaredButUnobserved
+                );
+                module_decl_info
+                    .insert(&summary.module, (declared, format_category(entry.category)));
             }
         }
     }
@@ -397,7 +416,8 @@ fn run_deps_why(args: &[String]) -> ExitCode {
 
     // Sort by module path
     usages.sort_by(|a, b| {
-        a.get("module").and_then(|v| v.as_str())
+        a.get("module")
+            .and_then(|v| v.as_str())
             .cmp(&b.get("module").and_then(|v| v.as_str()))
     });
 
@@ -405,8 +425,14 @@ fn run_deps_why(args: &[String]) -> ExitCode {
 
     // Build extra fields for envelope
     let mut extra = serde_json::Map::new();
-    extra.insert("package".to_string(), serde_json::Value::String(package_query.clone()));
-    extra.insert("ecosystem".to_string(), serde_json::Value::String(ecosystem));
+    extra.insert(
+        "package".to_string(),
+        serde_json::Value::String(package_query.clone()),
+    );
+    extra.insert(
+        "ecosystem".to_string(),
+        serde_json::Value::String(ecosystem),
+    );
 
     let output = match build_envelope(
         &storage,
@@ -450,7 +476,9 @@ fn run_deps_drift(args: &[String]) -> ExitCode {
     };
 
     if positional.len() != 2 {
-        eprintln!("usage: rmap deps drift <db_path> <repo_uid> [--ecosystem npm|cargo] [--format json]");
+        eprintln!(
+            "usage: rmap deps drift <db_path> <repo_uid> [--ecosystem npm|cargo] [--format json]"
+        );
         return ExitCode::from(1);
     }
 
@@ -538,7 +566,10 @@ fn run_deps_drift(args: &[String]) -> ExitCode {
 
     // Build extra fields for envelope
     let mut extra = serde_json::Map::new();
-    extra.insert("ecosystem".to_string(), serde_json::Value::String(ecosystem));
+    extra.insert(
+        "ecosystem".to_string(),
+        serde_json::Value::String(ecosystem),
+    );
     extra.insert(
         "modules_analyzed".to_string(),
         serde_json::Value::Number(result.summaries.len().into()),
@@ -596,7 +627,10 @@ fn parse_deps_list_args(args: &[String]) -> Result<(Vec<String>, String), String
                 }
                 ecosystem = args[i + 1].clone();
                 if ecosystem != "npm" && ecosystem != "cargo" {
-                    return Err(format!("invalid ecosystem: {} (expected npm or cargo)", ecosystem));
+                    return Err(format!(
+                        "invalid ecosystem: {} (expected npm or cargo)",
+                        ecosystem
+                    ));
                 }
                 i += 2;
             }
@@ -606,7 +640,10 @@ fn parse_deps_list_args(args: &[String]) -> Result<(Vec<String>, String), String
                 }
                 let format = &args[i + 1];
                 if format != "json" {
-                    return Err(format!("unsupported format: {} (only json is supported)", format));
+                    return Err(format!(
+                        "unsupported format: {} (only json is supported)",
+                        format
+                    ));
                 }
                 // JSON is the default and only format, so this is a no-op
                 i += 2;

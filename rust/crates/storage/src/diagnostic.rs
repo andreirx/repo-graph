@@ -70,10 +70,10 @@ use serde_json::{json, Map, Value};
 ///
 /// Called by `StorageConnection::diagnostic_dump()`.
 pub(crate) fn dump_state(conn: &Connection) -> Value {
-	json!({
-		"schema": dump_schema(conn),
-		"tables": dump_tables(conn),
-	})
+    json!({
+        "schema": dump_schema(conn),
+        "tables": dump_tables(conn),
+    })
 }
 
 /// Dump the logical schema as `{tables: {<name>: [columns]}, indexes: [<name>...]}`.
@@ -81,122 +81,120 @@ pub(crate) fn dump_state(conn: &Connection) -> Value {
 /// Columns per table are sorted by column name.
 /// Indexes are sorted by index name.
 pub(crate) fn dump_schema(conn: &Connection) -> Value {
-	let mut table_stmt = conn
-		.prepare(
-			"SELECT name FROM sqlite_master WHERE type = 'table' \
+    let mut table_stmt = conn
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' \
 			 AND name NOT LIKE 'sqlite_%' ORDER BY name",
-		)
-		.expect("prepare schema table list");
-	let table_names: Vec<String> = table_stmt
-		.query_map([], |row| row.get::<_, String>(0))
-		.expect("query table names")
-		.map(|r| r.expect("table name"))
-		.collect();
+        )
+        .expect("prepare schema table list");
+    let table_names: Vec<String> = table_stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("query table names")
+        .map(|r| r.expect("table name"))
+        .collect();
 
-	let mut tables_out = Map::new();
-	for table_name in table_names {
-		let sql = format!("PRAGMA table_info({})", table_name);
-		let mut stmt = conn
-			.prepare(&sql)
-			.unwrap_or_else(|e| panic!("prepare pragma for {}: {e}", table_name));
-		let mut cols: Vec<Value> = stmt
-			.query_map([], |row| {
-				Ok(json!({
-					"name": row.get::<_, String>("name")?,
-					"type": row.get::<_, String>("type")?,
-					"notnull": row.get::<_, i64>("notnull")? != 0,
-					"dflt_value": row.get::<_, Option<String>>("dflt_value")?,
-					"pk": row.get::<_, i64>("pk")?,
-				}))
-			})
-			.expect("query pragma")
-			.map(|r| r.expect("pragma row"))
-			.collect();
-		cols.sort_by(|a, b| {
-			let an = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
-			let bn = b.get("name").and_then(|v| v.as_str()).unwrap_or("");
-			an.cmp(bn)
-		});
-		tables_out.insert(table_name, Value::Array(cols));
-	}
+    let mut tables_out = Map::new();
+    for table_name in table_names {
+        let sql = format!("PRAGMA table_info({})", table_name);
+        let mut stmt = conn
+            .prepare(&sql)
+            .unwrap_or_else(|e| panic!("prepare pragma for {}: {e}", table_name));
+        let mut cols: Vec<Value> = stmt
+            .query_map([], |row| {
+                Ok(json!({
+                    "name": row.get::<_, String>("name")?,
+                    "type": row.get::<_, String>("type")?,
+                    "notnull": row.get::<_, i64>("notnull")? != 0,
+                    "dflt_value": row.get::<_, Option<String>>("dflt_value")?,
+                    "pk": row.get::<_, i64>("pk")?,
+                }))
+            })
+            .expect("query pragma")
+            .map(|r| r.expect("pragma row"))
+            .collect();
+        cols.sort_by(|a, b| {
+            let an = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let bn = b.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            an.cmp(bn)
+        });
+        tables_out.insert(table_name, Value::Array(cols));
+    }
 
-	let mut idx_stmt = conn
-		.prepare(
-			"SELECT name FROM sqlite_master WHERE type = 'index' \
+    let mut idx_stmt = conn
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' \
 			 AND name NOT LIKE 'sqlite_%' ORDER BY name",
-		)
-		.expect("prepare index list");
-	let index_names: Vec<Value> = idx_stmt
-		.query_map([], |row| row.get::<_, String>(0))
-		.expect("query indexes")
-		.map(|r| Value::String(r.expect("index name")))
-		.collect();
+        )
+        .expect("prepare index list");
+    let index_names: Vec<Value> = idx_stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("query indexes")
+        .map(|r| Value::String(r.expect("index name")))
+        .collect();
 
-	json!({
-		"tables": Value::Object(tables_out),
-		"indexes": Value::Array(index_names),
-	})
+    json!({
+        "tables": Value::Object(tables_out),
+        "indexes": Value::Array(index_names),
+    })
 }
 
 /// Dump per-table row data. Only tables with at least one row
 /// are included. Each table's rows are sorted by the known
 /// identity key.
 pub(crate) fn dump_tables(conn: &Connection) -> Value {
-	let mut stmt = conn
-		.prepare(
-			"SELECT name FROM sqlite_master WHERE type = 'table' \
+    let mut stmt = conn
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' \
 			 AND name NOT LIKE 'sqlite_%' ORDER BY name",
-		)
-		.expect("prepare table names");
-	let table_names: Vec<String> = stmt
-		.query_map([], |row| row.get::<_, String>(0))
-		.expect("query table names")
-		.map(|r| r.expect("table name"))
-		.collect();
+        )
+        .expect("prepare table names");
+    let table_names: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("query table names")
+        .map(|r| r.expect("table name"))
+        .collect();
 
-	let mut out = Map::new();
-	for table_name in table_names {
-		let sort_key = sort_key_for(&table_name);
-		let sql = format!("SELECT * FROM \"{}\" ORDER BY {}", table_name, sort_key);
-		let mut stmt = conn
-			.prepare(&sql)
-			.unwrap_or_else(|e| panic!("prepare dump for {}: {e}", table_name));
+    let mut out = Map::new();
+    for table_name in table_names {
+        let sort_key = sort_key_for(&table_name);
+        let sql = format!("SELECT * FROM \"{}\" ORDER BY {}", table_name, sort_key);
+        let mut stmt = conn
+            .prepare(&sql)
+            .unwrap_or_else(|e| panic!("prepare dump for {}: {e}", table_name));
 
-		let col_count = stmt.column_count();
-		let col_names: Vec<String> = (0..col_count)
-			.map(|i| stmt.column_name(i).expect("column name").to_string())
-			.collect();
+        let col_count = stmt.column_count();
+        let col_names: Vec<String> = (0..col_count)
+            .map(|i| stmt.column_name(i).expect("column name").to_string())
+            .collect();
 
-		let rows: Vec<Value> = stmt
-			.query_map([], |row| {
-				let mut obj = Map::new();
-				for (i, col_name) in col_names.iter().enumerate() {
-					let v = row_value_to_json(row, i);
-					obj.insert(col_name.clone(), v);
-				}
-				Ok(Value::Object(obj))
-			})
-			.expect("query dump")
-			.map(|r| r.expect("dump row"))
-			.collect();
+        let rows: Vec<Value> = stmt
+            .query_map([], |row| {
+                let mut obj = Map::new();
+                for (i, col_name) in col_names.iter().enumerate() {
+                    let v = row_value_to_json(row, i);
+                    obj.insert(col_name.clone(), v);
+                }
+                Ok(Value::Object(obj))
+            })
+            .expect("query dump")
+            .map(|r| r.expect("dump row"))
+            .collect();
 
-		if !rows.is_empty() {
-			out.insert(table_name, Value::Array(rows));
-		}
-	}
-	Value::Object(out)
+        if !rows.is_empty() {
+            out.insert(table_name, Value::Array(rows));
+        }
+    }
+    Value::Object(out)
 }
 
 fn row_value_to_json(row: &rusqlite::Row, col: usize) -> Value {
-	match row.get_ref(col).expect("column ref") {
-		ValueRef::Null => Value::Null,
-		ValueRef::Integer(i) => Value::from(i),
-		ValueRef::Real(f) => Value::from(f),
-		ValueRef::Text(bytes) => {
-			Value::String(String::from_utf8_lossy(bytes).to_string())
-		}
-		ValueRef::Blob(_) => Value::String("<BLOB>".to_string()),
-	}
+    match row.get_ref(col).expect("column ref") {
+        ValueRef::Null => Value::Null,
+        ValueRef::Integer(i) => Value::from(i),
+        ValueRef::Real(f) => Value::from(f),
+        ValueRef::Text(bytes) => Value::String(String::from_utf8_lossy(bytes).to_string()),
+        ValueRef::Blob(_) => Value::String("<BLOB>".to_string()),
+    }
 }
 
 /// Identity-column SQL fragment for ORDER BY clauses, per table.
@@ -207,14 +205,14 @@ fn row_value_to_json(row: &rusqlite::Row, col: usize) -> Value {
 /// writes to such tables, but the dump does not crash if a
 /// future fixture does.
 pub(crate) fn sort_key_for(table: &str) -> &'static str {
-	match table {
-		"repos" => "repo_uid",
-		"snapshots" => "snapshot_uid",
-		"files" => "file_uid",
-		"file_versions" => "snapshot_uid, file_uid",
-		"nodes" => "node_uid",
-		"edges" => "edge_uid",
-		"schema_migrations" => "version",
-		_ => "rowid",
-	}
+    match table {
+        "repos" => "repo_uid",
+        "snapshots" => "snapshot_uid",
+        "files" => "file_uid",
+        "file_versions" => "snapshot_uid, file_uid",
+        "nodes" => "node_uid",
+        "edges" => "edge_uid",
+        "schema_migrations" => "version",
+        _ => "rowid",
+    }
 }

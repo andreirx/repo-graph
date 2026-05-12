@@ -24,9 +24,7 @@
 //!    `psycopg2:connect` pass through with `resolved_symbol` unchanged.
 
 use repo_graph_indexer::types::{CallArgPayload, ResolvedCallsite};
-use repo_graph_state_bindings::{
-    CalleePath, FsPathOrLogical, ImportView, Language, LogicalName,
-};
+use repo_graph_state_bindings::{CalleePath, FsPathOrLogical, ImportView, Language, LogicalName};
 
 use crate::adapter::{AdapterContext, LanguageStateAdapter};
 use crate::emit::{CallsiteLogicalName, StateBoundaryCallsite};
@@ -58,10 +56,7 @@ impl LanguageStateAdapter for PythonAdapter {
         _ctx: &AdapterContext<'_>,
         callsites: &[ResolvedCallsite],
     ) -> Vec<StateBoundaryCallsite> {
-        callsites
-            .iter()
-            .filter_map(adapt_python_callsite)
-            .collect()
+        callsites.iter().filter_map(adapt_python_callsite).collect()
     }
 }
 

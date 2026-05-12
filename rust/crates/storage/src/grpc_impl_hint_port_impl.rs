@@ -95,16 +95,16 @@ impl GrpcImplHintStorePort for StorageConnection {
                 surface.surface_uid,
                 surface.snapshot_uid,
                 surface.repo_uid,
-                "unknown",             // boundary_scope - unknown until endpoint proven
-                "grpc_channel",        // channel_kind (matches ChannelKind::GrpcChannel)
-                "provider",            // direction - server implementation
-                "schema_rpc",          // transport_class
-                "inferred",            // provenance - hint-grade
-                "extends_impl_base",   // confidence_basis
-                "grpc",                // protocol
-                "rpc",                 // protocol_family
-                "unknown",             // interaction_pattern
-                "unknown",             // endpoint_locality
+                "unknown",           // boundary_scope - unknown until endpoint proven
+                "grpc_channel",      // channel_kind (matches ChannelKind::GrpcChannel)
+                "provider",          // direction - server implementation
+                "schema_rpc",        // transport_class
+                "inferred",          // provenance - hint-grade
+                "extends_impl_base", // confidence_basis
+                "grpc",              // protocol
+                "rpc",               // protocol_family
+                "unknown",           // interaction_pattern
+                "unknown",           // endpoint_locality
                 surface.symbol_stable_key,
                 surface.source_file,
                 surface.line_start,
@@ -145,23 +145,26 @@ impl GrpcImplHintStorePort for StorageConnection {
         let mut inserted = 0;
         for contract in contracts {
             // Derive freshness from provenance presence
-            let (provenance_json, freshness_state, freshness_updated_at): (Option<String>, &str, Option<&str>) =
-                match &contract.provenance {
-                    Some(prov) => (
-                        Some(serde_json::to_string(prov).unwrap_or_default()),
-                        "current",
-                        Some(now.as_str()),
-                    ),
-                    None => (None, "unknown", None),
-                };
+            let (provenance_json, freshness_state, freshness_updated_at): (
+                Option<String>,
+                &str,
+                Option<&str>,
+            ) = match &contract.provenance {
+                Some(prov) => (
+                    Some(serde_json::to_string(prov).unwrap_or_default()),
+                    "current",
+                    Some(now.as_str()),
+                ),
+                None => (None, "unknown", None),
+            };
 
             let result = stmt.execute(params![
                 contract.association_uid,
                 contract.surface_uid,
                 contract.contract_element_uid,
-                "grpc_service",            // contract_kind
-                "generated_code_mapping",  // association_basis - via CS-2A
-                0.85f64,                   // confidence - inherited from CS-2A
+                "grpc_service",           // contract_kind
+                "generated_code_mapping", // association_basis - via CS-2A
+                0.85f64,                  // confidence - inherited from CS-2A
                 contract.evidence_json,
                 provenance_json,
                 freshness_state,
@@ -187,13 +190,15 @@ impl repo_graph_indexer::storage_port::GrpcRegistrationProofPort for StorageConn
 
         Ok(storage_results
             .into_iter()
-            .map(|call| repo_graph_indexer::storage_port::AddServiceCallInput {
-                source_method_key: call.source_method_key,
-                source_method_name: call.source_method_name,
-                source_file: call.source_file,
-                line_start: call.line_start,
-                call_pattern: call.call_pattern,
-            })
+            .map(
+                |call| repo_graph_indexer::storage_port::AddServiceCallInput {
+                    source_method_key: call.source_method_key,
+                    source_method_name: call.source_method_name,
+                    source_file: call.source_file,
+                    line_start: call.line_start,
+                    call_pattern: call.call_pattern,
+                },
+            )
             .collect())
     }
 
@@ -209,12 +214,14 @@ impl repo_graph_indexer::storage_port::GrpcRegistrationProofPort for StorageConn
             registration_source_file,
         )?;
 
-        Ok(result.map(|s| repo_graph_indexer::storage_port::GrpcImplSurfaceMatch {
-            surface_uid: s.surface_uid,
-            symbol_stable_key: s.symbol_stable_key,
-            source_file: s.source_file,
-            confidence: s.confidence,
-        }))
+        Ok(
+            result.map(|s| repo_graph_indexer::storage_port::GrpcImplSurfaceMatch {
+                surface_uid: s.surface_uid,
+                symbol_stable_key: s.symbol_stable_key,
+                source_file: s.source_file,
+                confidence: s.confidence,
+            }),
+        )
     }
 
     fn boost_grpc_impl_confidence(
@@ -342,16 +349,16 @@ impl repo_graph_indexer::storage_port::GrpcClientHintStorePort for StorageConnec
                 surface.surface_uid,
                 surface.snapshot_uid,
                 surface.repo_uid,
-                "unknown",             // boundary_scope - unknown until endpoint proven
-                "grpc_channel",        // channel_kind (matches ChannelKind::GrpcChannel)
-                "consumer",            // direction - CLIENT stub creation
-                "schema_rpc",          // transport_class
-                "inferred",            // provenance - hint-grade
-                "stub_creation",       // confidence_basis
-                "grpc",                // protocol
-                "rpc",                 // protocol_family
-                "unknown",             // interaction_pattern
-                "unknown",             // endpoint_locality
+                "unknown",       // boundary_scope - unknown until endpoint proven
+                "grpc_channel",  // channel_kind (matches ChannelKind::GrpcChannel)
+                "consumer",      // direction - CLIENT stub creation
+                "schema_rpc",    // transport_class
+                "inferred",      // provenance - hint-grade
+                "stub_creation", // confidence_basis
+                "grpc",          // protocol
+                "rpc",           // protocol_family
+                "unknown",       // interaction_pattern
+                "unknown",       // endpoint_locality
                 surface.symbol_stable_key,
                 surface.source_file,
                 surface.line_start,
@@ -359,8 +366,8 @@ impl repo_graph_indexer::storage_port::GrpcClientHintStorePort for StorageConnec
                 surface.col_start,
                 surface.col_end,
                 "grpc_client_hint_java", // extractor
-                "stub_creation",       // basis
-                0.85f64,               // confidence - hint-grade
+                "stub_creation",         // basis
+                0.85f64,                 // confidence - hint-grade
                 surface.evidence_json,
             ])?;
             inserted += result;
@@ -392,23 +399,26 @@ impl repo_graph_indexer::storage_port::GrpcClientHintStorePort for StorageConnec
         let mut inserted = 0;
         for contract in contracts {
             // Derive freshness from provenance presence
-            let (provenance_json, freshness_state, freshness_updated_at): (Option<String>, &str, Option<&str>) =
-                match &contract.provenance {
-                    Some(prov) => (
-                        Some(serde_json::to_string(prov).unwrap_or_default()),
-                        "current",
-                        Some(now.as_str()),
-                    ),
-                    None => (None, "unknown", None),
-                };
+            let (provenance_json, freshness_state, freshness_updated_at): (
+                Option<String>,
+                &str,
+                Option<&str>,
+            ) = match &contract.provenance {
+                Some(prov) => (
+                    Some(serde_json::to_string(prov).unwrap_or_default()),
+                    "current",
+                    Some(now.as_str()),
+                ),
+                None => (None, "unknown", None),
+            };
 
             let result = stmt.execute(rusqlite::params![
                 contract.association_uid,
                 contract.surface_uid,
                 contract.contract_element_uid,
-                "grpc_service",            // contract_kind
-                "generated_code_mapping",  // association_basis - via CS-2A
-                0.85f64,                   // confidence - inherited from CS-2A
+                "grpc_service",           // contract_kind
+                "generated_code_mapping", // association_basis - via CS-2A
+                0.85f64,                  // confidence - inherited from CS-2A
                 contract.evidence_json,
                 provenance_json,
                 freshness_state,
@@ -558,15 +568,18 @@ impl repo_graph_indexer::storage_port::GrpcLinkStorePort for StorageConnection {
         let mut inserted = 0;
         for link in links {
             // Derive freshness from provenance presence
-            let (provenance_json, freshness_state, freshness_updated_at): (Option<String>, &str, Option<&str>) =
-                match &link.provenance {
-                    Some(prov) => (
-                        Some(serde_json::to_string(prov).unwrap_or_default()),
-                        "current",
-                        Some(now.as_str()),
-                    ),
-                    None => (None, "unknown", None),
-                };
+            let (provenance_json, freshness_state, freshness_updated_at): (
+                Option<String>,
+                &str,
+                Option<&str>,
+            ) = match &link.provenance {
+                Some(prov) => (
+                    Some(serde_json::to_string(prov).unwrap_or_default()),
+                    "current",
+                    Some(now.as_str()),
+                ),
+                None => (None, "unknown", None),
+            };
 
             let result = stmt.execute(rusqlite::params![
                 link.link_uid,
@@ -683,7 +696,10 @@ mod tests {
 
         assert_eq!(extensions.len(), 1);
         assert_eq!(extensions[0].impl_class_name, "GreeterImpl");
-        assert_eq!(extensions[0].impl_base_target, "GreeterGrpc.GreeterImplBase");
+        assert_eq!(
+            extensions[0].impl_base_target,
+            "GreeterGrpc.GreeterImplBase"
+        );
         assert_eq!(extensions[0].line_start, 10);
         assert_eq!(extensions[0].col_start, 1);
     }
@@ -732,7 +748,8 @@ mod tests {
             evidence_json: r#"{"impl_base":"GreeterGrpc.GreeterImplBase"}"#.to_string(),
         }];
 
-        let inserted = GrpcImplHintStorePort::insert_grpc_impl_surfaces(&mut conn, &surfaces).unwrap();
+        let inserted =
+            GrpcImplHintStorePort::insert_grpc_impl_surfaces(&mut conn, &surfaces).unwrap();
         assert_eq!(inserted, 1);
 
         // Verify persisted values
@@ -780,7 +797,8 @@ mod tests {
             provenance: None,
         }];
 
-        let inserted = GrpcImplHintStorePort::insert_grpc_impl_contracts(&mut conn, &contracts).unwrap();
+        let inserted =
+            GrpcImplHintStorePort::insert_grpc_impl_contracts(&mut conn, &contracts).unwrap();
         assert_eq!(inserted, 1);
 
         // Verify persisted values
@@ -802,10 +820,12 @@ mod tests {
     fn empty_inserts_return_zero() {
         let mut conn = setup_test_db();
 
-        let surfaces_count = GrpcImplHintStorePort::insert_grpc_impl_surfaces(&mut conn, &[]).unwrap();
+        let surfaces_count =
+            GrpcImplHintStorePort::insert_grpc_impl_surfaces(&mut conn, &[]).unwrap();
         assert_eq!(surfaces_count, 0);
 
-        let contracts_count = GrpcImplHintStorePort::insert_grpc_impl_contracts(&mut conn, &[]).unwrap();
+        let contracts_count =
+            GrpcImplHintStorePort::insert_grpc_impl_contracts(&mut conn, &[]).unwrap();
         assert_eq!(contracts_count, 0);
     }
 
@@ -939,7 +959,10 @@ mod tests {
 
         assert_eq!(contract_kind, "grpc_service");
         assert_eq!(association_basis, "generated_code_mapping");
-        assert_eq!(contract_element_uid, "ce1", "Links to proto service element");
+        assert_eq!(
+            contract_element_uid, "ce1",
+            "Links to proto service element"
+        );
     }
 
     #[test]
@@ -1010,7 +1033,10 @@ mod tests {
         let result = run_grpc_impl_hint_detection(&mut conn, "s1", "r1");
 
         assert!(!result.has_error());
-        assert_eq!(result.hints_emitted, 0, "No hints without matching CS-2A mapping");
+        assert_eq!(
+            result.hints_emitted, 0,
+            "No hints without matching CS-2A mapping"
+        );
         assert_eq!(result.contracts_emitted, 0);
     }
 
@@ -1279,7 +1305,10 @@ mod tests {
         let result = run_grpc_client_hint_detection(&mut conn, "s1", "r1");
 
         assert!(!result.has_error());
-        assert_eq!(result.hints_emitted, 0, "No hints without matching CS-2A mapping");
+        assert_eq!(
+            result.hints_emitted, 0,
+            "No hints without matching CS-2A mapping"
+        );
     }
 
     // ── GR-3A: Provider/consumer linking tests ────────────────────────
@@ -1424,15 +1453,15 @@ mod tests {
         assert_eq!(result.links_emitted, 1, "Expected 1 link");
 
         // Verify link was stored
-        let (link_kind, match_basis, confidence, contract_uid): (String, String, f64, String) = conn
-            .connection()
-            .query_row(
-                r#"SELECT link_kind, match_basis, confidence, contract_element_uid
+        let (link_kind, match_basis, confidence, contract_uid): (String, String, f64, String) =
+            conn.connection()
+                .query_row(
+                    r#"SELECT link_kind, match_basis, confidence, contract_element_uid
                    FROM boundary_interaction_links WHERE snapshot_uid = 's1'"#,
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .unwrap();
 
         assert_eq!(link_kind, "contract_match_only");
         assert_eq!(match_basis, "contract");
@@ -1597,7 +1626,11 @@ mod tests {
         // Parse and verify provenance structure
         let prov: Provenance = serde_json::from_str(provenance_json.as_ref().unwrap()).unwrap();
         assert_eq!(prov.version, 1);
-        assert_eq!(prov.depends_on.len(), 2, "GR-1A: 2 anchors (surface + contract element)");
+        assert_eq!(
+            prov.depends_on.len(),
+            2,
+            "GR-1A: 2 anchors (surface + contract element)"
+        );
 
         // Verify anchor families
         let families: Vec<&str> = prov.depends_on.iter().map(|a| a.family.as_str()).collect();
@@ -1611,9 +1644,15 @@ mod tests {
         );
 
         // Verify stable key pattern for ContractElements: {repo}:{proto_file}#{kind}:{full_name}
-        let contract_anchor = prov.depends_on.iter().find(|a| a.family == "ContractElements").unwrap();
+        let contract_anchor = prov
+            .depends_on
+            .iter()
+            .find(|a| a.family == "ContractElements")
+            .unwrap();
         assert!(
-            contract_anchor.stable_key.contains("greeter.proto#service:example.Greeter"),
+            contract_anchor
+                .stable_key
+                .contains("greeter.proto#service:example.Greeter"),
             "ContractElements anchor must use stable key pattern; got: {}",
             contract_anchor.stable_key
         );
@@ -1659,7 +1698,11 @@ mod tests {
         // Parse and verify provenance structure
         let prov: Provenance = serde_json::from_str(provenance_json.as_ref().unwrap()).unwrap();
         assert_eq!(prov.version, 1);
-        assert_eq!(prov.depends_on.len(), 2, "GR-2A: 2 anchors (surface + contract element)");
+        assert_eq!(
+            prov.depends_on.len(),
+            2,
+            "GR-2A: 2 anchors (surface + contract element)"
+        );
     }
 
     #[test]
@@ -1708,10 +1751,24 @@ mod tests {
         );
 
         // Verify anchor families
-        let surface_count = prov.depends_on.iter().filter(|a| a.family == "BoundaryInteractionSurfaces").count();
-        assert_eq!(surface_count, 2, "GR-3A must have 2 BoundaryInteractionSurfaces anchors");
+        let surface_count = prov
+            .depends_on
+            .iter()
+            .filter(|a| a.family == "BoundaryInteractionSurfaces")
+            .count();
+        assert_eq!(
+            surface_count, 2,
+            "GR-3A must have 2 BoundaryInteractionSurfaces anchors"
+        );
 
-        let contract_count = prov.depends_on.iter().filter(|a| a.family == "ContractElements").count();
-        assert_eq!(contract_count, 1, "GR-3A must have 1 ContractElements anchor");
+        let contract_count = prov
+            .depends_on
+            .iter()
+            .filter(|a| a.family == "ContractElements")
+            .count();
+        assert_eq!(
+            contract_count, 1,
+            "GR-3A must have 1 ContractElements anchor"
+        );
     }
 }

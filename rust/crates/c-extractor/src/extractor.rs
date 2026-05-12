@@ -9,8 +9,8 @@ use repo_graph_classification::types::{ImportBinding, RuntimeBuiltinsSet, Source
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::routing::is_test_file;
 use repo_graph_indexer::types::{
-    CallArgPayload, EdgeType, ExtractionResult, ExtractedEdge, ExtractedNode,
-    ExtractedMetrics, NodeKind, NodeSubtype, Resolution, ResolvedCallsite, Visibility,
+    CallArgPayload, EdgeType, ExtractedEdge, ExtractedMetrics, ExtractedNode, ExtractionResult,
+    NodeKind, NodeSubtype, Resolution, ResolvedCallsite, Visibility,
 };
 
 use crate::metrics::compute_function_metrics;
@@ -40,24 +40,15 @@ fn c_runtime_builtins() -> RuntimeBuiltinsSet {
     RuntimeBuiltinsSet {
         identifiers: vec![
             // Standard I/O
-            "printf", "fprintf", "sprintf", "snprintf",
-            "scanf", "fscanf", "sscanf",
-            "fopen", "fclose", "fread", "fwrite", "fflush",
-            "fgets", "fputs", "puts", "gets",
-            "fseek", "ftell", "rewind", "feof", "ferror",
-            // Memory
-            "malloc", "calloc", "realloc", "free",
-            "memcpy", "memmove", "memset", "memcmp",
+            "printf", "fprintf", "sprintf", "snprintf", "scanf", "fscanf", "sscanf", "fopen",
+            "fclose", "fread", "fwrite", "fflush", "fgets", "fputs", "puts", "gets", "fseek",
+            "ftell", "rewind", "feof", "ferror", // Memory
+            "malloc", "calloc", "realloc", "free", "memcpy", "memmove", "memset", "memcmp",
             // Strings
-            "strlen", "strcpy", "strncpy", "strcat", "strncat",
-            "strcmp", "strncmp", "strchr", "strrchr", "strstr",
-            // stdlib
-            "exit", "abort", "atexit",
-            "atoi", "atol", "atof", "strtol", "strtod",
-            "rand", "srand",
-            "qsort", "bsearch",
-            "abs", "labs",
-            // assert
+            "strlen", "strcpy", "strncpy", "strcat", "strncat", "strcmp", "strncmp", "strchr",
+            "strrchr", "strstr", // stdlib
+            "exit", "abort", "atexit", "atoi", "atol", "atof", "strtol", "strtod", "rand", "srand",
+            "qsort", "bsearch", "abs", "labs", // assert
             "assert",
         ]
         .iter()
@@ -109,9 +100,11 @@ impl ExtractorPort for CExtractor {
 
     fn initialize(&mut self) -> Result<(), ExtractorError> {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&self.c_language).map_err(|e| ExtractorError {
-            message: format!("failed to set C grammar: {}", e),
-        })?;
+        parser
+            .set_language(&self.c_language)
+            .map_err(|e| ExtractorError {
+                message: format!("failed to set C grammar: {}", e),
+            })?;
         self.parser = Some(parser);
         Ok(())
     }
@@ -131,13 +124,17 @@ impl ExtractorPort for CExtractor {
 
         // Clone parser for thread safety (tree-sitter parsers are not Send)
         let mut parser_clone = tree_sitter::Parser::new();
-        parser_clone.set_language(&self.c_language).map_err(|e| ExtractorError {
-            message: format!("failed to set C grammar: {}", e),
-        })?;
+        parser_clone
+            .set_language(&self.c_language)
+            .map_err(|e| ExtractorError {
+                message: format!("failed to set C grammar: {}", e),
+            })?;
 
-        let tree = parser_clone.parse(source, None).ok_or_else(|| ExtractorError {
-            message: format!("tree-sitter returned null tree for {}", file_path),
-        })?;
+        let tree = parser_clone
+            .parse(source, None)
+            .ok_or_else(|| ExtractorError {
+                message: format!("tree-sitter returned null tree for {}", file_path),
+            })?;
 
         let root = tree.root_node();
 
@@ -163,7 +160,11 @@ impl ExtractorPort for CExtractor {
                 repo_uid: repo_uid.into(),
                 stable_key: format!("{}:{}:FILE", repo_uid, file_path),
                 kind: NodeKind::File,
-                subtype: Some(if is_test { NodeSubtype::TestFile } else { NodeSubtype::Source }),
+                subtype: Some(if is_test {
+                    NodeSubtype::TestFile
+                } else {
+                    NodeSubtype::Source
+                }),
                 name: file_name.into(),
                 qualified_name: Some(file_path.into()),
                 file_uid: Some(file_uid.into()),
@@ -320,7 +321,10 @@ fn extract_include(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCtx
             "system_lib_string" => {
                 // <stdio.h> → strip angle brackets
                 let text = child.utf8_text(src).unwrap_or("");
-                specifier = text.trim_start_matches('<').trim_end_matches('>').to_string();
+                specifier = text
+                    .trim_start_matches('<')
+                    .trim_end_matches('>')
+                    .to_string();
                 is_system = true;
             }
             "string_literal" => {
@@ -360,7 +364,7 @@ fn extract_include(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCtx
     // Import binding
     let identifier = specifier
         .split('/')
-        .last()
+        .next_back()
         .unwrap_or(&specifier)
         .trim_end_matches(".h")
         .trim_end_matches(".c")
@@ -406,9 +410,7 @@ fn extract_function(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCt
 
     // Extract signature
     let params = declarator.child_by_field_name("parameters");
-    let signature = params.map(|p| {
-        format!("{}{}", name, p.utf8_text(src).unwrap_or("()"))
-    });
+    let signature = params.map(|p| format!("{}{}", name, p.utf8_text(src).unwrap_or("()")));
 
     ctx.nodes.push(ExtractedNode {
         node_uid: func_uid.clone(),
@@ -533,9 +535,12 @@ fn extract_call(
         resolution: Resolution::Static,
         extractor: EXTRACTOR_NAME.into(),
         location: Some(location_from_node(node)),
-        metadata_json: Some(serde_json::json!({
-            "calleeName": target_name
-        }).to_string()),
+        metadata_json: Some(
+            serde_json::json!({
+                "calleeName": target_name
+            })
+            .to_string(),
+        ),
     });
 
     // C-SB-1: Attempt to generate ResolvedCallsite for state-boundary analysis.
@@ -624,7 +629,11 @@ fn extract_arg0_payload(arguments: &tree_sitter::Node, src: &[u8]) -> Option<Cal
 
     for child in arguments.children(&mut cursor) {
         // Skip punctuation: opening paren, commas, closing paren.
-        if child.kind() == "(" || child.kind() == ")" || child.kind() == "," || child.kind() == "comment" {
+        if child.kind() == "("
+            || child.kind() == ")"
+            || child.kind() == ","
+            || child.kind() == "comment"
+        {
             continue;
         }
 
@@ -651,7 +660,11 @@ fn extract_arg1_payload(arguments: &tree_sitter::Node, src: &[u8]) -> Option<Cal
     let mut arg_index = 0;
     for child in arguments.children(&mut cursor) {
         // Skip punctuation.
-        if child.kind() == "," || child.kind() == "(" || child.kind() == ")" || child.kind() == "comment" {
+        if child.kind() == ","
+            || child.kind() == "("
+            || child.kind() == ")"
+            || child.kind() == "comment"
+        {
             continue;
         }
 
@@ -977,7 +990,9 @@ mod tests {
         ext.initialize().unwrap();
         let result = extract_ok(&ext, "void foo() { bar(); }\n", "src/main.c");
 
-        let calls: Vec<_> = result.edges.iter()
+        let calls: Vec<_> = result
+            .edges
+            .iter()
             .filter(|e| e.edge_type == EdgeType::Calls)
             .collect();
 
@@ -991,7 +1006,9 @@ mod tests {
         ext.initialize().unwrap();
         let result = extract_ok(&ext, "void foo() { (*ptr)(); }\n", "src/main.c");
 
-        let calls: Vec<_> = result.edges.iter()
+        let calls: Vec<_> = result
+            .edges
+            .iter()
             .filter(|e| e.edge_type == EdgeType::Calls)
             .collect();
 
@@ -1058,19 +1075,20 @@ static void helper() {}
             "src/main.c",
         );
 
-        let helpers: Vec<_> = result.nodes.iter()
-            .filter(|n| n.name == "helper")
-            .collect();
+        let helpers: Vec<_> = result.nodes.iter().filter(|n| n.name == "helper").collect();
 
         assert_eq!(helpers.len(), 2);
 
-        let keys: std::collections::HashSet<_> = helpers.iter()
-            .map(|n| n.stable_key.as_str())
-            .collect();
+        let keys: std::collections::HashSet<_> =
+            helpers.iter().map(|n| n.stable_key.as_str()).collect();
         assert_eq!(keys.len(), 2); // All unique
 
-        assert!(helpers.iter().any(|n| n.stable_key.ends_with("#helper:SYMBOL:FUNCTION")));
-        assert!(helpers.iter().any(|n| n.stable_key.ends_with("#helper:SYMBOL:FUNCTION:dup2")));
+        assert!(helpers
+            .iter()
+            .any(|n| n.stable_key.ends_with("#helper:SYMBOL:FUNCTION")));
+        assert!(helpers
+            .iter()
+            .any(|n| n.stable_key.ends_with("#helper:SYMBOL:FUNCTION:dup2")));
     }
 
     #[test]
@@ -1107,7 +1125,9 @@ static void helper() {}
         let cs = &result.resolved_callsites[0];
         assert_eq!(cs.resolved_module, "libc:stdio");
         assert_eq!(cs.resolved_symbol, "fopen_read");
-        assert!(matches!(&cs.arg0_payload, CallArgPayload::StringLiteral { value } if value == "config.txt"));
+        assert!(
+            matches!(&cs.arg0_payload, CallArgPayload::StringLiteral { value } if value == "config.txt")
+        );
     }
 
     #[test]
@@ -1151,7 +1171,10 @@ static void helper() {}
         );
 
         assert_eq!(result.resolved_callsites.len(), 1);
-        assert_eq!(result.resolved_callsites[0].resolved_symbol, "fopen_read_write");
+        assert_eq!(
+            result.resolved_callsites[0].resolved_symbol,
+            "fopen_read_write"
+        );
     }
 
     #[test]
@@ -1182,7 +1205,10 @@ static void helper() {}
         // Dynamic path → no ResolvedCallsite
         assert!(result.resolved_callsites.is_empty());
         // But CALLS edge still emitted
-        assert!(result.edges.iter().any(|e| e.edge_type == EdgeType::Calls && e.target_key == "fopen"));
+        assert!(result
+            .edges
+            .iter()
+            .any(|e| e.edge_type == EdgeType::Calls && e.target_key == "fopen"));
     }
 
     #[test]
@@ -1226,7 +1252,10 @@ static void helper() {}
         );
 
         assert_eq!(result.resolved_callsites.len(), 1);
-        assert_eq!(result.resolved_callsites[0].resolved_symbol, "open_read_write");
+        assert_eq!(
+            result.resolved_callsites[0].resolved_symbol,
+            "open_read_write"
+        );
     }
 
     #[test]
@@ -1243,7 +1272,9 @@ static void helper() {}
         let cs = &result.resolved_callsites[0];
         assert_eq!(cs.resolved_module, "sqlite3");
         assert_eq!(cs.resolved_symbol, "sqlite3_open");
-        assert!(matches!(&cs.arg0_payload, CallArgPayload::StringLiteral { value } if value == "app.db"));
+        assert!(
+            matches!(&cs.arg0_payload, CallArgPayload::StringLiteral { value } if value == "app.db")
+        );
     }
 
     #[test]
@@ -1258,18 +1289,17 @@ static void helper() {}
 
         assert_eq!(result.resolved_callsites.len(), 1);
         assert_eq!(result.resolved_callsites[0].resolved_module, "sqlite3");
-        assert_eq!(result.resolved_callsites[0].resolved_symbol, "sqlite3_open_v2");
+        assert_eq!(
+            result.resolved_callsites[0].resolved_symbol,
+            "sqlite3_open_v2"
+        );
     }
 
     #[test]
     fn non_state_boundary_call_no_callsite() {
         let mut ext = CExtractor::new();
         ext.initialize().unwrap();
-        let result = extract_ok(
-            &ext,
-            r#"void foo() { printf("hello"); }"#,
-            "src/main.c",
-        );
+        let result = extract_ok(&ext, r#"void foo() { printf("hello"); }"#, "src/main.c");
 
         // printf is not state-boundary-relevant
         assert!(result.resolved_callsites.is_empty());
@@ -1282,11 +1312,7 @@ static void helper() {}
         // Top-level calls (outside function) can't have enclosing_symbol_node_uid
         // because they're associated with FILE node. Currently these won't produce
         // ResolvedCallsite because extract_calls_from_body is only called for functions.
-        let result = extract_ok(
-            &ext,
-            r#"FILE* g = fopen("global.txt", "r");"#,
-            "src/main.c",
-        );
+        let result = extract_ok(&ext, r#"FILE* g = fopen("global.txt", "r");"#, "src/main.c");
 
         // Top-level variable initializers are declarations, not call_expressions
         // in tree-sitter-c parse, so no callsite is extracted.

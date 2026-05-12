@@ -6,9 +6,9 @@
 use std::collections::{BTreeMap, HashMap};
 
 use repo_graph_classification::types::{ImportBinding, RuntimeBuiltinsSet, SourceLocation};
-use repo_graph_indexer::types::{CallArgPayload, ResolvedCallsite};
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::routing::is_test_file;
+use repo_graph_indexer::types::{CallArgPayload, ResolvedCallsite};
 use repo_graph_indexer::types::{
     EdgeType, ExtractedEdge, ExtractedMetrics, ExtractedNode, ExtractionResult, NodeKind,
     NodeSubtype, Resolution, Visibility,
@@ -33,6 +33,7 @@ const SB_FCNTL_FUNCTIONS: &[&str] = &["open"];
 const SB_SQLITE_FUNCTIONS: &[&str] = &["sqlite3_open", "sqlite3_open_v2"];
 
 // C++ stream types that map to state-boundary symbols.
+#[allow(dead_code)]
 const STREAM_TYPES: &[&str] = &[
     "std::ifstream",
     "std::ofstream",
@@ -80,6 +81,7 @@ impl StreamType {
     }
 
     /// Get direction-specific symbol when mode indicates read.
+    #[allow(dead_code)]
     fn mode_read_symbol(&self) -> &'static str {
         match self {
             StreamType::Ifstream => "ifstream", // Already read
@@ -89,6 +91,7 @@ impl StreamType {
     }
 
     /// Get direction-specific symbol when mode indicates write.
+    #[allow(dead_code)]
     fn mode_write_symbol(&self) -> &'static str {
         match self {
             StreamType::Ifstream => "ifstream", // Can't write to ifstream
@@ -477,7 +480,10 @@ fn extract_include(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCtx
         match child.kind() {
             "system_lib_string" => {
                 let text = child.utf8_text(src).unwrap_or("");
-                specifier = text.trim_start_matches('<').trim_end_matches('>').to_string();
+                specifier = text
+                    .trim_start_matches('<')
+                    .trim_end_matches('>')
+                    .to_string();
                 is_system = true;
             }
             "string_literal" => {
@@ -514,7 +520,7 @@ fn extract_include(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCtx
 
     let identifier = specifier
         .split('/')
-        .last()
+        .next_back()
         .unwrap_or(&specifier)
         .trim_end_matches(".h")
         .trim_end_matches(".hpp")
@@ -923,8 +929,7 @@ fn extract_function(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCt
             ctx.qualified_name(&func_name)
         } else {
             // Out-of-line definition with Class:: prefix
-            let mut parts: Vec<&str> =
-                ctx.current_namespace.iter().map(|s| s.as_str()).collect();
+            let mut parts: Vec<&str> = ctx.current_namespace.iter().map(|s| s.as_str()).collect();
             parts.push(class);
             parts.push(&func_name);
             parts.join("::")
@@ -939,13 +944,8 @@ fn extract_function(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCt
 
     // Build signature
     let params = declarator.child_by_field_name("parameters");
-    let signature = params.map(|p| {
-        format!(
-            "{}{}",
-            qualified_name,
-            p.utf8_text(src).unwrap_or("()")
-        )
-    });
+    let signature =
+        params.map(|p| format!("{}{}", qualified_name, p.utf8_text(src).unwrap_or("()")));
 
     let visibility = if is_static {
         Visibility::Private
@@ -1018,13 +1018,8 @@ fn extract_method(
     let linkage_meta = ctx.linkage_metadata();
 
     let params = declarator.child_by_field_name("parameters");
-    let signature = params.map(|p| {
-        format!(
-            "{}{}",
-            qualified_name,
-            p.utf8_text(src).unwrap_or("()")
-        )
-    });
+    let signature =
+        params.map(|p| format!("{}{}", qualified_name, p.utf8_text(src).unwrap_or("()")));
 
     ctx.nodes.push(ExtractedNode {
         node_uid: func_uid.clone(),
@@ -1090,13 +1085,8 @@ fn extract_method_declaration(
     let linkage_meta = ctx.linkage_metadata();
 
     let params = declarator.child_by_field_name("parameters");
-    let signature = params.map(|p| {
-        format!(
-            "{}{}",
-            qualified_name,
-            p.utf8_text(src).unwrap_or("()")
-        )
-    });
+    let signature =
+        params.map(|p| format!("{}{}", qualified_name, p.utf8_text(src).unwrap_or("()")));
 
     ctx.nodes.push(ExtractedNode {
         node_uid: uuid::Uuid::new_v4().to_string(),
@@ -1396,12 +1386,8 @@ fn try_resolve_stream_open(
         StreamType::Ofstream => stream_type.open_symbol().to_string(),
         StreamType::Fstream => {
             // Parse mode flags if present.
-            if let Some(ref mode) = arg1_payload {
-                if let CallArgPayload::StringLiteral { value } = mode {
-                    normalize_ios_mode_to_fstream_symbol(value)
-                } else {
-                    stream_type.open_symbol().to_string()
-                }
+            if let Some(CallArgPayload::StringLiteral { value }) = arg1_payload.as_ref() {
+                normalize_ios_mode_to_fstream_symbol(value)
             } else {
                 stream_type.open_symbol().to_string() // Default read_write
             }
@@ -1437,29 +1423,22 @@ fn try_extract_stream_declaration(
     let mut cursor = decl_node.walk();
     for child in decl_node.children(&mut cursor) {
         if child.kind() == "init_declarator" {
-            if let Some((var_name, path_arg, mode_arg)) =
-                extract_init_declarator_info(&child, src)
+            if let Some((var_name, path_arg, mode_arg)) = extract_init_declarator_info(&child, src)
             {
                 // Record in local type map (D3).
-                ctx.local_stream_types
-                    .insert(var_name.clone(), stream_type);
+                ctx.local_stream_types.insert(var_name.clone(), stream_type);
 
                 // If there's a path argument, emit ResolvedCallsite.
                 if let Some(path) = path_arg {
-                    let resolved_symbol = if let Some(ref mode) = mode_arg {
-                        if let CallArgPayload::StringLiteral { value } = mode {
+                    let resolved_symbol =
+                        if let Some(CallArgPayload::StringLiteral { value }) = mode_arg.as_ref() {
                             match stream_type {
-                                StreamType::Fstream => {
-                                    normalize_ios_mode_to_fstream_symbol(value)
-                                }
+                                StreamType::Fstream => normalize_ios_mode_to_fstream_symbol(value),
                                 _ => stream_type.constructor_symbol().to_string(),
                             }
                         } else {
                             stream_type.constructor_symbol().to_string()
-                        }
-                    } else {
-                        stream_type.constructor_symbol().to_string()
-                    };
+                        };
 
                     ctx.resolved_callsites.push(ResolvedCallsite {
                         enclosing_symbol_node_uid: enclosing_symbol_node_uid.to_string(),
@@ -1639,10 +1618,9 @@ fn normalize_open_flags(flags: &str) -> &'static str {
         "read"
     } else if flags.contains("O_WRONLY") {
         "write"
-    } else if flags.contains("O_RDWR") {
-        "read_write"
     } else {
-        "read_write" // Unknown flags, conservative default.
+        // O_RDWR or unknown flags → conservative read_write default.
+        "read_write"
     }
 }
 
@@ -1737,11 +1715,7 @@ mod tests {
     fn namespace_qualified_name() {
         let mut ext = CppExtractor::new();
         ext.initialize().unwrap();
-        let result = extract_ok(
-            &ext,
-            "namespace ns { void foo() {} }\n",
-            "src/main.cpp",
-        );
+        let result = extract_ok(&ext, "namespace ns { void foo() {} }\n", "src/main.cpp");
 
         let func = result.nodes.iter().find(|n| n.name == "foo").unwrap();
         assert_eq!(func.qualified_name, Some("ns::foo".to_string()));
@@ -1766,11 +1740,7 @@ mod tests {
     fn method_in_class() {
         let mut ext = CppExtractor::new();
         ext.initialize().unwrap();
-        let result = extract_ok(
-            &ext,
-            "class C { void method() {} };\n",
-            "src/main.cpp",
-        );
+        let result = extract_ok(&ext, "class C { void method() {} };\n", "src/main.cpp");
 
         let method = result.nodes.iter().find(|n| n.name == "method").unwrap();
         assert_eq!(method.qualified_name, Some("C::method".to_string()));
@@ -1826,11 +1796,7 @@ mod tests {
     fn extern_c_block_detected() {
         let mut ext = CppExtractor::new();
         ext.initialize().unwrap();
-        let result = extract_ok(
-            &ext,
-            r#"extern "C" { void c_func() {} }"#,
-            "src/main.cpp",
-        );
+        let result = extract_ok(&ext, r#"extern "C" { void c_func() {} }"#, "src/main.cpp");
 
         let func = result.nodes.iter().find(|n| n.name == "c_func").unwrap();
         let meta = func.metadata_json.as_ref().unwrap();
@@ -1842,11 +1808,7 @@ mod tests {
     fn extern_c_single_declaration() {
         let mut ext = CppExtractor::new();
         ext.initialize().unwrap();
-        let result = extract_ok(
-            &ext,
-            r#"extern "C" void c_func() {}"#,
-            "src/main.cpp",
-        );
+        let result = extract_ok(&ext, r#"extern "C" void c_func() {}"#, "src/main.cpp");
 
         let func = result.nodes.iter().find(|n| n.name == "c_func").unwrap();
         let meta = func.metadata_json.as_ref().unwrap();
@@ -1962,11 +1924,7 @@ mod tests {
             "src/main.cpp",
         );
 
-        let methods: Vec<_> = result
-            .nodes
-            .iter()
-            .filter(|n| n.name == "method")
-            .collect();
+        let methods: Vec<_> = result.nodes.iter().filter(|n| n.name == "method").collect();
 
         // Should have both declaration and definition
         assert_eq!(methods.len(), 2);

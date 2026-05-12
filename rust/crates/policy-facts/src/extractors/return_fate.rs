@@ -102,11 +102,25 @@ pub fn extract_return_fates(
     for child in root.children(&mut cursor) {
         match child.kind() {
             "function_definition" => {
-                extract_fates_from_function(&child, source, file_path, repo_uid, &function_registry, &mut results);
+                extract_fates_from_function(
+                    &child,
+                    source,
+                    file_path,
+                    repo_uid,
+                    &function_registry,
+                    &mut results,
+                );
             }
             // Handle preprocessor blocks
             "preproc_ifdef" | "preproc_if" | "preproc_else" | "preproc_elif" => {
-                walk_preproc_for_functions(&child, source, file_path, repo_uid, &function_registry, &mut results);
+                walk_preproc_for_functions(
+                    &child,
+                    source,
+                    file_path,
+                    repo_uid,
+                    &function_registry,
+                    &mut results,
+                );
             }
             _ => {}
         }
@@ -181,10 +195,24 @@ fn walk_preproc_for_functions(
     for child in node.children(&mut cursor) {
         match child.kind() {
             "function_definition" => {
-                extract_fates_from_function(&child, source, file_path, repo_uid, function_registry, results);
+                extract_fates_from_function(
+                    &child,
+                    source,
+                    file_path,
+                    repo_uid,
+                    function_registry,
+                    results,
+                );
             }
             "preproc_ifdef" | "preproc_if" | "preproc_else" | "preproc_elif" => {
-                walk_preproc_for_functions(&child, source, file_path, repo_uid, function_registry, results);
+                walk_preproc_for_functions(
+                    &child,
+                    source,
+                    file_path,
+                    repo_uid,
+                    function_registry,
+                    results,
+                );
             }
             _ => {}
         }
@@ -236,16 +264,11 @@ fn extract_function_name(declarator: &tree_sitter::Node, source: &[u8]) -> Optio
     let mut current = *declarator;
 
     // Unwrap function_declarator and pointer_declarator wrappers
-    loop {
-        match current.kind() {
-            "function_declarator" | "pointer_declarator" => {
-                if let Some(inner) = current.child_by_field_name("declarator") {
-                    current = inner;
-                } else {
-                    break;
-                }
-            }
-            _ => break,
+    while let "function_declarator" | "pointer_declarator" = current.kind() {
+        if let Some(inner) = current.child_by_field_name("declarator") {
+            current = inner;
+        } else {
+            break;
         }
     }
 
@@ -277,12 +300,27 @@ fn find_calls_recursive(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "call_expression" {
-            if let Some(fate) = classify_call(&child, source, file_path, caller_name, caller_key, function_registry) {
+            if let Some(fate) = classify_call(
+                &child,
+                source,
+                file_path,
+                caller_name,
+                caller_key,
+                function_registry,
+            ) {
                 results.push(fate);
             }
         }
         // Recurse into all children
-        find_calls_recursive(&child, source, file_path, caller_name, caller_key, function_registry, results);
+        find_calls_recursive(
+            &child,
+            source,
+            file_path,
+            caller_name,
+            caller_key,
+            function_registry,
+            results,
+        );
     }
 }
 
@@ -344,7 +382,10 @@ fn extract_callee_name(call_node: &tree_sitter::Node, source: &[u8]) -> Option<S
 /// Returns (callee_name, is_direct_call):
 /// - `is_direct_call = true`: simple identifier call like `func()`
 /// - `is_direct_call = false`: vtable/pointer call like `ptr->method()` or `(*fp)()`
-fn extract_callee_name_and_kind(call_node: &tree_sitter::Node, source: &[u8]) -> Option<(String, bool)> {
+fn extract_callee_name_and_kind(
+    call_node: &tree_sitter::Node,
+    source: &[u8],
+) -> Option<(String, bool)> {
     let callee = call_node.child_by_field_name("function")?;
 
     match callee.kind() {
@@ -430,7 +471,8 @@ fn classify_by_context(call_node: &tree_sitter::Node, source: &[u8]) -> (FateKin
             "if_statement" | "while_statement" | "for_statement" | "switch_statement" => {
                 // Check if call is in the condition field
                 if let Some(cond) = parent.child_by_field_name("condition") {
-                    if is_ancestor_of(&cond, call_node) && !has_assignment_ancestor(call_node, &cond)
+                    if is_ancestor_of(&cond, call_node)
+                        && !has_assignment_ancestor(call_node, &cond)
                     {
                         return classify_as_checked(&parent, call_node, source);
                     }
@@ -440,7 +482,8 @@ fn classify_by_context(call_node: &tree_sitter::Node, source: &[u8]) -> (FateKin
             // CHECKED: Ternary condition
             "conditional_expression" => {
                 if let Some(cond) = parent.child_by_field_name("condition") {
-                    if is_ancestor_of(&cond, call_node) && !has_assignment_ancestor(call_node, &cond)
+                    if is_ancestor_of(&cond, call_node)
+                        && !has_assignment_ancestor(call_node, &cond)
                     {
                         return (
                             FateKind::Checked,
@@ -456,10 +499,10 @@ fn classify_by_context(call_node: &tree_sitter::Node, source: &[u8]) -> (FateKin
 
             // CHECKED: Binary comparison where call is direct operand
             "binary_expression" => {
-                if is_comparison_operator(&parent, source) {
-                    if !has_assignment_ancestor(call_node, &parent) {
-                        return classify_checked_from_binary(&parent, call_node, source);
-                    }
+                if is_comparison_operator(&parent, source)
+                    && !has_assignment_ancestor(call_node, &parent)
+                {
+                    return classify_checked_from_binary(&parent, call_node, source);
                 }
             }
 
@@ -498,10 +541,11 @@ fn is_cast_to_void(
 ) -> bool {
     let mut cursor = expr_stmt.walk();
     for child in expr_stmt.children(&mut cursor) {
-        if child.kind() == "cast_expression" {
-            if is_void_cast(&child, source) && is_ancestor_of(&child, call_node) {
-                return true;
-            }
+        if child.kind() == "cast_expression"
+            && is_void_cast(&child, source)
+            && is_ancestor_of(&child, call_node)
+        {
+            return true;
         }
     }
     false
@@ -795,10 +839,11 @@ fn find_comparison_in_subtree(
     call_node: &tree_sitter::Node,
     source: &[u8],
 ) -> Option<(String, String)> {
-    if node.kind() == "binary_expression" && is_comparison_operator(node, source) {
-        if is_ancestor_of(node, call_node) {
-            return extract_comparison_from_binary(node, call_node, source);
-        }
+    if node.kind() == "binary_expression"
+        && is_comparison_operator(node, source)
+        && is_ancestor_of(node, call_node)
+    {
+        return extract_comparison_from_binary(node, call_node, source);
     }
 
     let mut cursor = node.walk();
@@ -1147,7 +1192,10 @@ void test(void) {
         } = &fates[0].evidence
         {
             assert_eq!(variable_name, "result");
-            assert!(immediately_checked, "compound assignment in condition should have immediately_checked = true");
+            assert!(
+                immediately_checked,
+                "compound assignment in condition should have immediately_checked = true"
+            );
         } else {
             panic!("expected Stored evidence");
         }
@@ -1255,10 +1303,12 @@ void test(void) {
         let tree = parse_c(source);
         let fates = extract_return_fates(&tree, source.as_bytes(), "test.c", "myrepo");
 
-        let ext_call = fates.iter().find(|f| f.callee_name == "external_func").unwrap();
+        let ext_call = fates
+            .iter()
+            .find(|f| f.callee_name == "external_func")
+            .unwrap();
         assert_eq!(
-            ext_call.callee_key,
-            None,
+            ext_call.callee_key, None,
             "external function call should have callee_key = None"
         );
     }
@@ -1276,8 +1326,7 @@ void test(struct server *s) {
 
         let vtable_call = fates.iter().find(|f| f.callee_name == "do_action").unwrap();
         assert_eq!(
-            vtable_call.callee_key,
-            None,
+            vtable_call.callee_key, None,
             "vtable call should have callee_key = None"
         );
     }
@@ -1292,43 +1341,50 @@ mod duplicate_diagnosis {
     #[test]
     #[ignore] // Run with: cargo test -p repo-graph-policy-facts duplicate_diagnosis -- --ignored --nocapture
     fn diagnose_leveldb_duplicates() {
-        let leveldb_path = Path::new("/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb");
-        
+        let leveldb_path =
+            Path::new("/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/leveldb");
+
         if !leveldb_path.exists() {
             println!("leveldb not found at {:?}, skipping", leveldb_path);
             return;
         }
-        
+
         // Initialize parser
         let mut parser = tree_sitter::Parser::new();
         let c_language: tree_sitter::Language = tree_sitter_c::LANGUAGE.into();
         parser.set_language(&c_language).unwrap();
-        
+
         // Find all .c and .h files
         let mut files = Vec::new();
         for entry in std::fs::read_dir(leveldb_path).unwrap().flatten() {
             collect_c_files(&entry.path(), &mut files);
         }
-        
+
         println!("Found {} C/H files in leveldb", files.len());
-        
-        let mut all_keys: HashMap<(String, u32, u32), Vec<(String, String, String)>> = HashMap::new();
-        
+
+        #[allow(clippy::type_complexity)]
+        let mut all_keys: HashMap<(String, u32, u32), Vec<(String, String, String)>> =
+            HashMap::new();
+
         for path in &files {
-            let rel_path = path.strip_prefix(leveldb_path).unwrap().to_string_lossy().to_string();
-            
+            let rel_path = path
+                .strip_prefix(leveldb_path)
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+
             let content = match std::fs::read_to_string(path) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
-            
+
             let tree = match parser.parse(&content, None) {
                 Some(t) => t,
                 None => continue,
             };
-            
+
             let fates = extract_return_fates(&tree, content.as_bytes(), &rel_path, "leveldb");
-            
+
             for fate in fates {
                 let key = (fate.caller_key.clone(), fate.line, fate.column);
                 all_keys.entry(key).or_default().push((
@@ -1338,7 +1394,7 @@ mod duplicate_diagnosis {
                 ));
             }
         }
-        
+
         // Report duplicates
         let mut dup_count = 0;
         for ((caller_key, line, col), entries) in &all_keys {
@@ -1351,14 +1407,17 @@ mod duplicate_diagnosis {
                 }
             }
         }
-        
+
         println!("\n=== SUMMARY ===");
-        println!("Total unique (caller_key, line, col) keys: {}", all_keys.len());
+        println!(
+            "Total unique (caller_key, line, col) keys: {}",
+            all_keys.len()
+        );
         println!("Duplicate keys: {}", dup_count);
-        
+
         assert_eq!(dup_count, 0, "Found {} duplicate keys", dup_count);
     }
-    
+
     fn collect_c_files(path: &Path, files: &mut Vec<std::path::PathBuf>) {
         if path.is_dir() {
             if let Ok(entries) = std::fs::read_dir(path) {

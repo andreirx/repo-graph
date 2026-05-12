@@ -195,7 +195,8 @@ mod tests {
         assert_eq!(count, 2);
 
         // Delete
-        conn.delete_generated_code_mappings_for_snapshot("s1").unwrap();
+        conn.delete_generated_code_mappings_for_snapshot("s1")
+            .unwrap();
 
         // Verify 0 mappings
         let count: i64 = conn
@@ -226,7 +227,8 @@ mod tests {
         };
 
         // Insert twice
-        conn.insert_generated_code_mappings(&[mapping.clone()]).unwrap();
+        conn.insert_generated_code_mappings(std::slice::from_ref(&mapping))
+            .unwrap();
         conn.insert_generated_code_mappings(&[mapping]).unwrap();
 
         // Should have only one

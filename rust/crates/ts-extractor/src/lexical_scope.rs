@@ -121,8 +121,12 @@ impl ScopeTree {
         // Check if this node creates a new scope
         let new_scope = match node.kind() {
             // Function-like constructs create new scopes
-            "function_declaration" | "function" | "arrow_function" | "method_definition"
-            | "generator_function_declaration" | "generator_function" => {
+            "function_declaration"
+            | "function"
+            | "arrow_function"
+            | "method_definition"
+            | "generator_function_declaration"
+            | "generator_function" => {
                 let scope_idx = self.scopes.len();
                 self.scopes.push(LexicalScope {
                     declarations: HashSet::new(),
@@ -142,10 +146,7 @@ impl ScopeTree {
             "statement_block" => {
                 // Only create new scope if not directly under a function
                 // (function body blocks share scope with function)
-                let parent_kind = node
-                    .parent()
-                    .map(|p| p.kind())
-                    .unwrap_or("");
+                let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
 
                 if matches!(
                     parent_kind,
@@ -203,9 +204,7 @@ impl ScopeTree {
                                 .insert(name.to_string());
                         } else {
                             // Module scope function
-                            self.scopes[scope_idx]
-                                .declarations
-                                .insert(name.to_string());
+                            self.scopes[scope_idx].declarations.insert(name.to_string());
                         }
                     }
                 }
@@ -224,12 +223,7 @@ impl ScopeTree {
     ///
     /// Skips CommonJS require() patterns since they are import mechanisms,
     /// not local declarations that could shadow imports.
-    fn extract_variable_names(
-        &mut self,
-        node: &tree_sitter::Node,
-        src: &[u8],
-        scope_idx: usize,
-    ) {
+    fn extract_variable_names(&mut self, node: &tree_sitter::Node, src: &[u8], scope_idx: usize) {
         for i in 0..node.child_count() {
             if let Some(child) = node.child(i) {
                 if child.kind() == "variable_declarator" {
@@ -269,12 +263,7 @@ impl ScopeTree {
     }
 
     /// Extract names from a binding pattern (handles destructuring).
-    fn extract_binding_pattern(
-        &mut self,
-        node: tree_sitter::Node,
-        src: &[u8],
-        scope_idx: usize,
-    ) {
+    fn extract_binding_pattern(&mut self, node: tree_sitter::Node, src: &[u8], scope_idx: usize) {
         match node.kind() {
             "identifier" => {
                 if let Ok(name) = node.utf8_text(src) {
@@ -362,12 +351,7 @@ impl ScopeTree {
 
             eprintln!(
                 "Scope {}: parent={:?}, bytes={}..{}, decls={:?}, snippet=\"{}...\"",
-                idx,
-                scope.parent,
-                scope.start_byte,
-                scope.end_byte,
-                scope.declarations,
-                snippet
+                idx, scope.parent, scope.start_byte, scope.end_byte, scope.declarations, snippet
             );
         }
     }

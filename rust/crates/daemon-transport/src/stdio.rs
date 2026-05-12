@@ -48,16 +48,13 @@ impl<W: Write> ProgressEmitter for StdioEmitter<'_, W> {
         };
 
         // Serialize the progress event
-        let json = serde_json::to_string(&response)
-            .map_err(EmitError::from_serialize)?;
+        let json = serde_json::to_string(&response).map_err(EmitError::from_serialize)?;
 
         // Write to output stream
-        writeln!(self.output, "{}", json)
-            .map_err(EmitError::from_io)?;
+        writeln!(self.output, "{}", json).map_err(EmitError::from_io)?;
 
         // Flush to ensure immediate delivery
-        self.output.flush()
-            .map_err(EmitError::from_io)?;
+        self.output.flush().map_err(EmitError::from_io)?;
 
         Ok(())
     }
@@ -86,11 +83,7 @@ impl<W: Write> ProgressEmitter for StdioEmitter<'_, W> {
 /// The event ordering contract is:
 /// 1. Zero or more progress lines (same request ID)
 /// 2. One final response line (success or error)
-pub fn run_transport<R, W, D>(
-    input: R,
-    mut output: W,
-    dispatcher: &D,
-) -> Result<(), TransportError>
+pub fn run_transport<R, W, D>(input: R, mut output: W, dispatcher: &D) -> Result<(), TransportError>
 where
     R: BufRead,
     W: Write,
@@ -111,8 +104,7 @@ where
         };
 
         // Write final response
-        writeln!(output, "{}", response_json)
-            .map_err(TransportError::OutputWrite)?;
+        writeln!(output, "{}", response_json).map_err(TransportError::OutputWrite)?;
 
         // Flush to ensure immediate delivery
         output.flush().map_err(TransportError::OutputWrite)?;
@@ -138,9 +130,8 @@ fn parse_and_dispatch<D: Dispatcher, W: Write>(
         Err(e) => {
             // For malformed JSON, we cannot reliably extract the request ID.
             // The response uses "unknown" as the correlation ID.
-            let error_resp = ErrorResponse::for_unparseable(
-                ErrorDetail::parse_error(e.to_string()),
-            );
+            let error_resp =
+                ErrorResponse::for_unparseable(ErrorDetail::parse_error(e.to_string()));
             let json = serde_json::to_string(&error_resp)
                 .unwrap_or_else(|_| r#"{"id":"unknown","error":{"code":"InternalError","message":"failed to serialize error"}}"#.to_string());
             return Err(json);
@@ -149,9 +140,9 @@ fn parse_and_dispatch<D: Dispatcher, W: Write>(
 
     // Validate required fields
     if request.id.is_empty() {
-        let error_resp = ErrorResponse::for_unparseable(
-            ErrorDetail::invalid_request("missing or empty 'id' field"),
-        );
+        let error_resp = ErrorResponse::for_unparseable(ErrorDetail::invalid_request(
+            "missing or empty 'id' field",
+        ));
         let json = serde_json::to_string(&error_resp).unwrap();
         return Err(json);
     }
@@ -319,13 +310,26 @@ mod tests {
         let lines: Vec<&str> = output.lines().collect();
 
         // Should have 3 progress events + 1 final response = 4 lines
-        assert_eq!(lines.len(), 4, "expected 3 progress + 1 response, got: {:?}", lines);
+        assert_eq!(
+            lines.len(),
+            4,
+            "expected 3 progress + 1 response, got: {:?}",
+            lines
+        );
 
         // First 3 lines should be progress events
         for (i, line) in lines[0..3].iter().enumerate() {
             let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
-            assert_eq!(parsed["id"], "p1", "progress event {} should have correct id", i);
-            assert!(parsed.get("progress").is_some(), "line {} should be progress event", i);
+            assert_eq!(
+                parsed["id"], "p1",
+                "progress event {} should have correct id",
+                i
+            );
+            assert!(
+                parsed.get("progress").is_some(),
+                "line {} should be progress event",
+                i
+            );
             assert_eq!(parsed["progress"]["current"], i as u64 + 1);
             assert_eq!(parsed["progress"]["total"], 3);
             assert_eq!(parsed["progress"]["phase"], "testing");
@@ -334,13 +338,18 @@ mod tests {
         // Last line should be final response
         let final_resp: serde_json::Value = serde_json::from_str(lines[3]).unwrap();
         assert_eq!(final_resp["id"], "p1");
-        assert!(final_resp.get("result").is_some(), "final line should be result");
+        assert!(
+            final_resp.get("result").is_some(),
+            "final line should be result"
+        );
         assert_eq!(final_resp["result"]["emitted"], 3);
     }
 
     #[test]
     fn progress_events_have_correct_request_id() {
-        let output = run_with_input(r#"{"id":"unique-req-id","method":"progress_test","params":{"count":1}}"#);
+        let output = run_with_input(
+            r#"{"id":"unique-req-id","method":"progress_test","params":{"count":1}}"#,
+        );
         let lines: Vec<&str> = output.lines().collect();
 
         // Both progress and response should have the same request ID
@@ -370,7 +379,10 @@ mod tests {
         // Should have only 1 final response
         assert_eq!(lines.len(), 1);
         let parsed: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
-        assert!(parsed.get("progress").is_none(), "ping should not emit progress");
+        assert!(
+            parsed.get("progress").is_none(),
+            "ping should not emit progress"
+        );
         assert!(parsed.get("result").is_some(), "ping should emit result");
     }
 
@@ -451,7 +463,8 @@ mod tests {
     fn broken_writer_aborts_progress_emission() {
         // Writer that fails after 2 writes (first progress event write + flush = 2)
         let mut output = FailingWriter::new(2);
-        let input = Cursor::new(r#"{"id":"abort-1","method":"progress_test","params":{"count":5}}"#);
+        let input =
+            Cursor::new(r#"{"id":"abort-1","method":"progress_test","params":{"count":5}}"#);
         let dispatcher = MockDispatcher::new();
 
         // Transport will fail when trying to write the second progress event
@@ -460,14 +473,21 @@ mod tests {
         // The transport should encounter an error writing the final response
         // (since the emitter failure causes the dispatch to return an error,
         // and writing that error response will also fail)
-        assert!(result.is_err(), "transport should fail when writer is broken");
+        assert!(
+            result.is_err(),
+            "transport should fail when writer is broken"
+        );
 
         // Whatever was written before failure should be valid NDJSON
         let partial_output = output.output_so_far();
         if !partial_output.is_empty() {
             for line in partial_output.lines() {
                 let parsed: Result<serde_json::Value, _> = serde_json::from_str(line);
-                assert!(parsed.is_ok(), "partial output should be valid JSON: {}", line);
+                assert!(
+                    parsed.is_ok(),
+                    "partial output should be valid JSON: {}",
+                    line
+                );
             }
         }
     }
@@ -491,7 +511,8 @@ mod tests {
 
         // Writer that fails on 4th write (allows 1 progress + flush, then fails on 2nd progress)
         let mut output = FailingWriter::new(3);
-        let input = Cursor::new(r#"{"id":"e2e-abort","method":"progress_test","params":{"count":5}}"#);
+        let input =
+            Cursor::new(r#"{"id":"e2e-abort","method":"progress_test","params":{"count":5}}"#);
         let dispatcher = MockDispatcher::new();
 
         let _ = run_transport(BufReader::new(input), &mut output, &dispatcher);

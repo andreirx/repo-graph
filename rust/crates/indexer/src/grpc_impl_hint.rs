@@ -185,7 +185,10 @@ pub fn generate_surface_uid(snapshot_uid: &str, impl_class_key: &str) -> String 
     hasher.update(b":");
     hasher.update(impl_class_key.as_bytes());
     let hash = hasher.finalize();
-    format!("grpc-hint-{:x}", &hash[..8].iter().fold(0u64, |acc, &b| acc << 8 | b as u64))
+    format!(
+        "grpc-hint-{:x}",
+        &hash[..8].iter().fold(0u64, |acc, &b| acc << 8 | b as u64)
+    )
 }
 
 /// Generate a deterministic association UID for a boundary contract.
@@ -196,7 +199,10 @@ pub fn generate_association_uid(surface_uid: &str, contract_element_uid: &str) -
     hasher.update(b":");
     hasher.update(contract_element_uid.as_bytes());
     let hash = hasher.finalize();
-    format!("grpc-bc-{:x}", &hash[..8].iter().fold(0u64, |acc, &b| acc << 8 | b as u64))
+    format!(
+        "grpc-bc-{:x}",
+        &hash[..8].iter().fold(0u64, |acc, &b| acc << 8 | b as u64)
+    )
 }
 
 /// Result of running gRPC impl hint detection.
@@ -321,10 +327,7 @@ where
         // Pattern: {repo}:{proto_file}#{element_kind}:{full_name}
         let contract_element_stable_key = format!(
             "{}:{}#{}:{}",
-            repo_uid,
-            hint.proto_schema_file,
-            hint.proto_service_kind,
-            hint.proto_service_full_name,
+            repo_uid, hint.proto_schema_file, hint.proto_service_kind, hint.proto_service_full_name,
         );
         let provenance = Provenance::from_layer0_items(vec![
             ProvenanceAnchor::new("BoundaryInteractionSurfaces", &hint.impl_class_key),
@@ -421,8 +424,8 @@ mod tests {
         let mappings = vec![ImplBaseMappingInput {
             mapping_uid: "m1".to_string(),
             schema_element_uid: "service-1".to_string(),
-            generated_symbol_key: "r1:src/GreeterGrpc.java#GreeterGrpc.GreeterImplBase:SYMBOL:CLASS"
-                .to_string(),
+            generated_symbol_key:
+                "r1:src/GreeterGrpc.java#GreeterGrpc.GreeterImplBase:SYMBOL:CLASS".to_string(),
             confidence: 0.85,
             element_full_name: "example.Greeter".to_string(),
             element_kind: "service".to_string(),
@@ -453,7 +456,8 @@ mod tests {
         let mappings = vec![ImplBaseMappingInput {
             mapping_uid: "m1".to_string(),
             schema_element_uid: "service-1".to_string(),
-            generated_symbol_key: "r1:src/BarGrpc.java#BarGrpc.BarImplBase:SYMBOL:CLASS".to_string(),
+            generated_symbol_key: "r1:src/BarGrpc.java#BarGrpc.BarImplBase:SYMBOL:CLASS"
+                .to_string(),
             confidence: 0.85,
             element_full_name: "example.Bar".to_string(),
             element_kind: "service".to_string(),

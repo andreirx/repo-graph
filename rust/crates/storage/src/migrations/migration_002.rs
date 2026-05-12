@@ -36,18 +36,16 @@ use crate::migrations::{pragma_table_columns, record_migration};
 /// columns is a no-op (the existence checks return true and no
 /// ALTER TABLE statements run).
 pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
-	let snapshot_cols = pragma_table_columns(conn, "snapshots")?;
-	let decl_cols = pragma_table_columns(conn, "declarations")?;
+    let snapshot_cols = pragma_table_columns(conn, "snapshots")?;
+    let decl_cols = pragma_table_columns(conn, "declarations")?;
 
-	if !snapshot_cols.iter().any(|c| c == "toolchain_json") {
-		conn.execute_batch("ALTER TABLE snapshots ADD COLUMN toolchain_json TEXT")?;
-	}
-	if !decl_cols.iter().any(|c| c == "authored_basis_json") {
-		conn.execute_batch(
-			"ALTER TABLE declarations ADD COLUMN authored_basis_json TEXT",
-		)?;
-	}
+    if !snapshot_cols.iter().any(|c| c == "toolchain_json") {
+        conn.execute_batch("ALTER TABLE snapshots ADD COLUMN toolchain_json TEXT")?;
+    }
+    if !decl_cols.iter().any(|c| c == "authored_basis_json") {
+        conn.execute_batch("ALTER TABLE declarations ADD COLUMN authored_basis_json TEXT")?;
+    }
 
-	record_migration(conn, 2, "002-provenance-columns")?;
-	Ok(())
+    record_migration(conn, 2, "002-provenance-columns")?;
+    Ok(())
 }

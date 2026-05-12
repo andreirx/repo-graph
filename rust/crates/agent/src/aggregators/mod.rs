@@ -37,12 +37,12 @@ use crate::dto::signal::Signal;
 /// Collected output of one aggregator.
 #[derive(Debug, Default)]
 pub struct AggregatorOutput {
-	pub signals: Vec<Signal>,
-	pub limits: Vec<Limit>,
+    pub signals: Vec<Signal>,
+    pub limits: Vec<Limit>,
 }
 
 impl AggregatorOutput {
-	pub fn empty() -> Self {
-		Self::default()
-	}
+    pub fn empty() -> Self {
+        Self::default()
+    }
 }

@@ -166,7 +166,8 @@ pub fn run_policy(args: &[String]) -> ExitCode {
     match kind {
         "STATUS_MAPPING" => {
             // Query STATUS_MAPPING facts.
-            let mappings = match storage.query_status_mappings(&snapshot.snapshot_uid, file_filter) {
+            let mappings = match storage.query_status_mappings(&snapshot.snapshot_uid, file_filter)
+            {
                 Ok(m) => m,
                 Err(e) => {
                     eprintln!("error: failed to query policy facts: {}", e);

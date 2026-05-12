@@ -48,12 +48,12 @@ use crate::table::{BindingEntry, BindingTable, Language};
 /// aliases.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportView {
-	/// Module path as it appears in the source-file import.
-	pub module_path: String,
-	/// The exported symbol brought in by the import.
-	pub imported_symbol: String,
-	/// Local alias, if any.
-	pub import_alias: Option<String>,
+    /// Module path as it appears in the source-file import.
+    pub module_path: String,
+    /// The exported symbol brought in by the import.
+    pub imported_symbol: String,
+    /// Local alias, if any.
+    pub import_alias: Option<String>,
 }
 
 /// The matcher's view of a resolved callee at a call site.
@@ -70,11 +70,11 @@ pub struct ImportView {
 ///   `symbol_path`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CalleePath {
-	/// Resolved source module of the callee, or `None` if the
-	/// extractor could not trace it.
-	pub resolved_module: Option<String>,
-	/// Resolved symbol path within `resolved_module`.
-	pub resolved_symbol: String,
+    /// Resolved source module of the callee, or `None` if the
+    /// extractor could not trace it.
+    pub resolved_module: Option<String>,
+    /// Resolved symbol path within `resolved_module`.
+    pub resolved_symbol: String,
 }
 
 // ── Match result ──────────────────────────────────────────────────
@@ -86,11 +86,11 @@ pub struct CalleePath {
 /// driver, notes) without a secondary lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchResult<'t> {
-	/// The matched binding entry.
-	pub binding: &'t BindingEntry,
-	/// The canonical binding key for edge-evidence use, per
-	/// contract §8.
-	pub binding_key: String,
+    /// The matched binding entry.
+    pub binding: &'t BindingEntry,
+    /// The canonical binding key for edge-evidence use, per
+    /// contract §8.
+    pub binding_key: String,
 }
 
 // ── Matcher entry point ───────────────────────────────────────────
@@ -111,95 +111,95 @@ pub struct MatchResult<'t> {
 ///     other languages are ignored even if their module /
 ///     symbol_path happens to match.
 pub fn match_form_a<'t>(
-	imports_in_file: &[ImportView],
-	callee: &CalleePath,
-	table: &'t BindingTable,
-	language: Language,
+    imports_in_file: &[ImportView],
+    callee: &CalleePath,
+    table: &'t BindingTable,
+    language: Language,
 ) -> Option<MatchResult<'t>> {
-	// Form-A condition 2: callee must be resolvable to a module.
-	let resolved_module = callee.resolved_module.as_ref()?;
+    // Form-A condition 2: callee must be resolvable to a module.
+    let resolved_module = callee.resolved_module.as_ref()?;
 
-	// Form-A condition 1: the file must import that module.
-	let has_import = imports_in_file
-		.iter()
-		.any(|imp| imp.module_path == *resolved_module);
-	if !has_import {
-		return None;
-	}
+    // Form-A condition 1: the file must import that module.
+    let has_import = imports_in_file
+        .iter()
+        .any(|imp| imp.module_path == *resolved_module);
+    if !has_import {
+        return None;
+    }
 
-	// Form-A condition 2 (cont.): symbol_path match against
-	// a binding entry for the same language.
-	for binding in table.entries() {
-		if binding.language != language {
-			continue;
-		}
-		if binding.module != *resolved_module {
-			continue;
-		}
-		if binding.symbol_path != callee.resolved_symbol {
-			continue;
-		}
-		return Some(MatchResult {
-			binding_key: binding.binding_key(),
-			binding,
-		});
-	}
+    // Form-A condition 2 (cont.): symbol_path match against
+    // a binding entry for the same language.
+    for binding in table.entries() {
+        if binding.language != language {
+            continue;
+        }
+        if binding.module != *resolved_module {
+            continue;
+        }
+        if binding.symbol_path != callee.resolved_symbol {
+            continue;
+        }
+        return Some(MatchResult {
+            binding_key: binding.binding_key(),
+            binding,
+        });
+    }
 
-	None
+    None
 }
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+    use super::*;
 
-	/// Load the embedded FS matrix. Cross-cutting match / no-match
-	/// cases live in `tests/matcher.rs`; inline tests exercise
-	/// one canonical entry (`fs:readFile`) for smoke coverage.
-	fn embedded_table() -> BindingTable {
-		BindingTable::load_embedded().clone()
-	}
+    /// Load the embedded FS matrix. Cross-cutting match / no-match
+    /// cases live in `tests/matcher.rs`; inline tests exercise
+    /// one canonical entry (`fs:readFile`) for smoke coverage.
+    fn embedded_table() -> BindingTable {
+        BindingTable::load_embedded().clone()
+    }
 
-	#[test]
-	fn matches_fs_read_file_when_import_and_callee_align() {
-		let table = embedded_table();
-		let imports = vec![ImportView {
-			module_path: "fs".to_string(),
-			imported_symbol: "readFile".to_string(),
-			import_alias: None,
-		}];
-		let callee = CalleePath {
-			resolved_module: Some("fs".to_string()),
-			resolved_symbol: "readFile".to_string(),
-		};
-		let result = match_form_a(&imports, &callee, &table, Language::Typescript);
-		let m = result.expect("fs:readFile must match");
-		assert_eq!(m.binding.driver, "node-fs");
-		assert_eq!(m.binding_key, "typescript:fs:readFile:read");
-	}
+    #[test]
+    fn matches_fs_read_file_when_import_and_callee_align() {
+        let table = embedded_table();
+        let imports = vec![ImportView {
+            module_path: "fs".to_string(),
+            imported_symbol: "readFile".to_string(),
+            import_alias: None,
+        }];
+        let callee = CalleePath {
+            resolved_module: Some("fs".to_string()),
+            resolved_symbol: "readFile".to_string(),
+        };
+        let result = match_form_a(&imports, &callee, &table, Language::Typescript);
+        let m = result.expect("fs:readFile must match");
+        assert_eq!(m.binding.driver, "node-fs");
+        assert_eq!(m.binding_key, "typescript:fs:readFile:read");
+    }
 
-	#[test]
-	fn no_match_without_import() {
-		let table = embedded_table();
-		let imports: Vec<ImportView> = vec![];
-		let callee = CalleePath {
-			resolved_module: Some("fs".to_string()),
-			resolved_symbol: "readFile".to_string(),
-		};
-		assert!(match_form_a(&imports, &callee, &table, Language::Typescript).is_none());
-	}
+    #[test]
+    fn no_match_without_import() {
+        let table = embedded_table();
+        let imports: Vec<ImportView> = vec![];
+        let callee = CalleePath {
+            resolved_module: Some("fs".to_string()),
+            resolved_symbol: "readFile".to_string(),
+        };
+        assert!(match_form_a(&imports, &callee, &table, Language::Typescript).is_none());
+    }
 
-	#[test]
-	fn no_match_when_callee_not_resolved() {
-		let table = embedded_table();
-		let imports = vec![ImportView {
-			module_path: "fs".to_string(),
-			imported_symbol: "readFile".to_string(),
-			import_alias: None,
-		}];
-		let callee = CalleePath {
-			resolved_module: None,
-			resolved_symbol: "readFile".to_string(),
-		};
-		assert!(match_form_a(&imports, &callee, &table, Language::Typescript).is_none());
-	}
+    #[test]
+    fn no_match_when_callee_not_resolved() {
+        let table = embedded_table();
+        let imports = vec![ImportView {
+            module_path: "fs".to_string(),
+            imported_symbol: "readFile".to_string(),
+            import_alias: None,
+        }];
+        let callee = CalleePath {
+            resolved_module: None,
+            resolved_symbol: "readFile".to_string(),
+        };
+        assert!(match_form_a(&imports, &callee, &table, Language::Typescript).is_none());
+    }
 }

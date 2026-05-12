@@ -216,15 +216,29 @@ impl StorageConnection {
                         col_start, col_end, extractor, basis, confidence, evidence_json, repo_uid
                  FROM boundary_interaction_surfaces
                  WHERE snapshot_uid = ?
-                   AND source_file IN (SELECT path FROM _unchanged_files)"
+                   AND source_file IN (SELECT path FROM _unchanged_files)",
             )?;
             let rows = stmt.query_map([parent_snapshot_uid], |row| {
                 Ok((
-                    row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
-                    row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
-                    row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?,
-                    row.get(12)?, row.get(13)?, row.get(14)?, row.get(15)?,
-                    row.get(16)?, row.get(17)?, row.get(18)?,
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
+                    row.get(11)?,
+                    row.get(12)?,
+                    row.get(13)?,
+                    row.get(14)?,
+                    row.get(15)?,
+                    row.get(16)?,
+                    row.get(17)?,
+                    row.get(18)?,
                 ))
             })?;
             rows.collect::<Result<Vec<_>, _>>()?
@@ -241,15 +255,33 @@ impl StorageConnection {
                     endpoint_locality, symbol_stable_key, source_file,
                     line_start, line_end, col_start, col_end,
                     extractor, basis, confidence, evidence_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )?;
 
             for s in &surfaces {
                 let new_uid = uuid::Uuid::new_v4().to_string();
                 surface_uid_map.insert(s.0.clone(), new_uid.clone());
                 insert_stmt.execute(rusqlite::params![
-                    new_uid, current_snapshot_uid, s.18, s.1, s.2, s.3, s.4, s.5,
-                    s.6, s.7, s.8, s.9, s.10, s.11, s.12, s.13, s.14, s.15, s.16, s.17
+                    new_uid,
+                    current_snapshot_uid,
+                    s.18,
+                    s.1,
+                    s.2,
+                    s.3,
+                    s.4,
+                    s.5,
+                    s.6,
+                    s.7,
+                    s.8,
+                    s.9,
+                    s.10,
+                    s.11,
+                    s.12,
+                    s.13,
+                    s.14,
+                    s.15,
+                    s.16,
+                    s.17
                 ])?;
             }
         }
@@ -337,21 +369,37 @@ impl StorageConnection {
                     spi_device, serial_device, shm_key, pipe_path, pipe_context,
                     mqueue_name, baud_rate, can_extended, frame_format,
                     payload_contract, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )?;
 
             for ch in &channels {
-                let new_surface_uid = surface_uid_map.get(&ch.old_surface_uid)
+                let new_surface_uid = surface_uid_map
+                    .get(&ch.old_surface_uid)
                     .cloned()
                     .unwrap_or_else(|| ch.old_surface_uid.clone());
                 let new_channel_uid = uuid::Uuid::new_v4().to_string();
 
                 insert_stmt.execute(rusqlite::params![
-                    new_channel_uid, new_surface_uid, ch.channel_kind, ch.channel_identity,
-                    ch.socket_path, ch.tcp_endpoint, ch.udp_endpoint, ch.can_id, ch.i2c_address,
-                    ch.spi_device, ch.serial_device, ch.shm_key, ch.pipe_path, ch.pipe_context,
-                    ch.mqueue_name, ch.baud_rate, ch.can_extended, ch.frame_format,
-                    ch.payload_contract, ch.metadata_json
+                    new_channel_uid,
+                    new_surface_uid,
+                    ch.channel_kind,
+                    ch.channel_identity,
+                    ch.socket_path,
+                    ch.tcp_endpoint,
+                    ch.udp_endpoint,
+                    ch.can_id,
+                    ch.i2c_address,
+                    ch.spi_device,
+                    ch.serial_device,
+                    ch.shm_key,
+                    ch.pipe_path,
+                    ch.pipe_context,
+                    ch.mqueue_name,
+                    ch.baud_rate,
+                    ch.can_extended,
+                    ch.frame_format,
+                    ch.payload_contract,
+                    ch.metadata_json
                 ])?;
             }
 
@@ -405,17 +453,17 @@ impl StorageConnection {
         // Select schemas for unchanged proto files.
         #[allow(clippy::type_complexity)]
         let schemas: Vec<(
-            String, // old schema_uid
-            String, // repo_uid
-            String, // schema_kind
-            String, // file_path
+            String,         // old schema_uid
+            String,         // repo_uid
+            String,         // schema_kind
+            String,         // file_path
             Option<String>, // package_name
             Option<String>, // syntax_version
-            String, // content_hash
+            String,         // content_hash
             Option<String>, // imports_json
             Option<String>, // options_json
-            String, // extractor
-            String, // parsed_at
+            String,         // extractor
+            String,         // parsed_at
         )> = {
             let mut stmt = tx.prepare(
                 "SELECT schema_uid, repo_uid, schema_kind, file_path, package_name,
@@ -423,13 +471,21 @@ impl StorageConnection {
                         extractor, parsed_at
                  FROM contract_schemas
                  WHERE snapshot_uid = ?
-                   AND file_path IN (SELECT path FROM _unchanged_protos)"
+                   AND file_path IN (SELECT path FROM _unchanged_protos)",
             )?;
             let rows = stmt.query_map([parent_snapshot_uid], |row| {
                 Ok((
-                    row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
-                    row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
-                    row.get(8)?, row.get(9)?, row.get(10)?,
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
                 ))
             })?;
             rows.collect::<Result<Vec<_>, _>>()?
@@ -444,15 +500,25 @@ impl StorageConnection {
                     schema_uid, snapshot_uid, repo_uid, schema_kind, file_path,
                     package_name, syntax_version, content_hash, imports_json,
                     options_json, extractor, parsed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )?;
 
             for s in &schemas {
                 let new_uid = uuid::Uuid::new_v4().to_string();
                 schema_uid_map.insert(s.0.clone(), new_uid.clone());
                 insert_stmt.execute(rusqlite::params![
-                    new_uid, current_snapshot_uid, s.1, s.2, s.3, s.4, s.5,
-                    s.6, s.7, s.8, s.9, s.10
+                    new_uid,
+                    current_snapshot_uid,
+                    s.1,
+                    s.2,
+                    s.3,
+                    s.4,
+                    s.5,
+                    s.6,
+                    s.7,
+                    s.8,
+                    s.9,
+                    s.10
                 ])?;
             }
         }
@@ -532,11 +598,12 @@ impl StorageConnection {
                     parent_element_uid, type_ref, is_repeated, is_optional, is_map,
                     map_key_type, map_value_type, field_number, default_value,
                     options_json, doc_comment, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )?;
 
             for el in &elements {
-                let new_schema_uid = schema_uid_map.get(&el.old_schema_uid)
+                let new_schema_uid = schema_uid_map
+                    .get(&el.old_schema_uid)
                     .cloned()
                     .unwrap_or_else(|| el.old_schema_uid.clone());
                 let new_element_uid = uuid::Uuid::new_v4().to_string();
@@ -548,10 +615,23 @@ impl StorageConnection {
                 // If needed, a second pass could remap parent_element_uid.
 
                 insert_stmt.execute(rusqlite::params![
-                    new_element_uid, new_schema_uid, el.element_kind, el.name, el.qualified_name,
-                    el.parent_element_uid, el.type_ref, el.is_repeated, el.is_optional, el.is_map,
-                    el.map_key_type, el.map_value_type, el.field_number, el.default_value,
-                    el.options_json, el.doc_comment, el.metadata_json
+                    new_element_uid,
+                    new_schema_uid,
+                    el.element_kind,
+                    el.name,
+                    el.qualified_name,
+                    el.parent_element_uid,
+                    el.type_ref,
+                    el.is_repeated,
+                    el.is_optional,
+                    el.is_map,
+                    el.map_key_type,
+                    el.map_value_type,
+                    el.field_number,
+                    el.default_value,
+                    el.options_json,
+                    el.doc_comment,
+                    el.metadata_json
                 ])?;
             }
 
@@ -593,17 +673,19 @@ impl StorageConnection {
             unchanged_file_paths,
         )?;
 
-        let (boundary_surfaces_copied, boundary_channels_copied) = self.copy_forward_boundary_surfaces(
-            parent_snapshot_uid,
-            current_snapshot_uid,
-            unchanged_file_paths,
-        )?;
+        let (boundary_surfaces_copied, boundary_channels_copied) = self
+            .copy_forward_boundary_surfaces(
+                parent_snapshot_uid,
+                current_snapshot_uid,
+                unchanged_file_paths,
+            )?;
 
-        let (contract_schemas_copied, contract_elements_copied) = self.copy_forward_contract_schemas(
-            parent_snapshot_uid,
-            current_snapshot_uid,
-            unchanged_proto_paths,
-        )?;
+        let (contract_schemas_copied, contract_elements_copied) = self
+            .copy_forward_contract_schemas(
+                parent_snapshot_uid,
+                current_snapshot_uid,
+                unchanged_proto_paths,
+            )?;
 
         Ok(ArtifactCopyForwardResult {
             measurements_copied,

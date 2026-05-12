@@ -31,9 +31,9 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::types::{
-	Emitted, EnvAccessKind, EnvHookContext, EnvHookEmission, EnvHookEntry,
-	EnvHookResult, EnvSuppliedField, FsHookContext, FsHookEmission, FsHookEntry,
-	FsHookResult, FsSuppliedField, HookRegistry, MutationKind, MutationPattern,
+    Emitted, EnvAccessKind, EnvHookContext, EnvHookEmission, EnvHookEntry, EnvHookResult,
+    EnvSuppliedField, FsHookContext, FsHookEmission, FsHookEntry, FsHookResult, FsSuppliedField,
+    HookRegistry, MutationKind, MutationPattern,
 };
 
 // ── Lazy-compiled inner regexes ────────────────────────────────────
@@ -44,40 +44,36 @@ use crate::types::{
 
 /// Inner regex for `infer_js_env_access_with_default`: captures the
 /// default value from `process.env.X || "default"` style fallbacks.
-static JS_DEFAULT_VALUE: LazyLock<Regex> = LazyLock::new(|| {
-	Regex::new(r#"^\s*(?:\|\||&&|\?\?)\s*["']([^"']+)["']"#).unwrap()
-});
+static JS_DEFAULT_VALUE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^\s*(?:\|\||&&|\?\?)\s*["']([^"']+)["']"#).unwrap());
 
 /// Inner regex for `infer_js_env_access_with_default`: matches a
 /// fallback operator (`||`, `&&`, `??`) right after the var.
 static JS_HAS_FALLBACK_OP: LazyLock<Regex> =
-	LazyLock::new(|| Regex::new(r#"^\s*(\|\||&&|\?\?)"#).unwrap());
+    LazyLock::new(|| Regex::new(r#"^\s*(\|\||&&|\?\?)"#).unwrap());
 
 /// Inner regex for `infer_js_env_access_with_default`: matches a
 /// closing paren right after the var (indicates the access is
 /// inside a function call argument list — kind = unknown).
-static JS_NEXT_IS_CLOSE_PAREN: LazyLock<Regex> =
-	LazyLock::new(|| Regex::new(r#"^\s*\)"#).unwrap());
+static JS_NEXT_IS_CLOSE_PAREN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^\s*\)"#).unwrap());
 
 /// Inner regex for `unwrap_java_files_write_literal`.
 static JAVA_FILES_WRITE_LITERAL: LazyLock<Regex> = LazyLock::new(|| {
-	Regex::new(r#"Files\.write(?:String)?\s*\(\s*Paths\.get\s*\(\s*"([^"]+)""#).unwrap()
+    Regex::new(r#"Files\.write(?:String)?\s*\(\s*Paths\.get\s*\(\s*"([^"]+)""#).unwrap()
 });
 
 /// Inner regex for `unwrap_java_files_delete_literal`.
-static JAVA_FILES_DELETE_LITERAL: LazyLock<Regex> = LazyLock::new(|| {
-	Regex::new(r#"Files\.delete\s*\(\s*Paths\.get\s*\(\s*"([^"]+)""#).unwrap()
-});
+static JAVA_FILES_DELETE_LITERAL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"Files\.delete\s*\(\s*Paths\.get\s*\(\s*"([^"]+)""#).unwrap());
 
 /// Inner regex for `unwrap_java_files_create_directory_literal`.
 static JAVA_FILES_CREATE_DIRECTORY_LITERAL: LazyLock<Regex> = LazyLock::new(|| {
-	Regex::new(r#"createDirector(?:y|ies)\s*\(\s*Paths\.get\s*\(\s*"([^"]+)""#)
-		.unwrap()
+    Regex::new(r#"createDirector(?:y|ies)\s*\(\s*Paths\.get\s*\(\s*"([^"]+)""#).unwrap()
 });
 
 /// Inner regex for `unwrap_java_file_output_stream_literal`.
 static JAVA_FILE_OUTPUT_STREAM_LITERAL: LazyLock<Regex> =
-	LazyLock::new(|| Regex::new(r#"new\s+FileOutputStream\s*\(\s*"([^"]+)""#).unwrap());
+    LazyLock::new(|| Regex::new(r#"new\s+FileOutputStream\s*\(\s*"([^"]+)""#).unwrap());
 
 // ── Env hooks ──────────────────────────────────────────────────────
 
@@ -95,35 +91,35 @@ static JAVA_FILE_OUTPUT_STREAM_LITERAL: LazyLock<Regex> =
 /// rather than the regex match position, to preserve any
 /// pre-existing edge case behavior of the original.
 fn infer_js_env_access_with_default(ctx: EnvHookContext<'_>) -> EnvHookResult {
-	let var_name = match ctx.captures.get(1) {
-		Some(m) => m.as_str().to_string(),
-		None => return EnvHookResult::Skip,
-	};
+    let var_name = match ctx.captures.get(1) {
+        Some(m) => m.as_str().to_string(),
+        None => return EnvHookResult::Skip,
+    };
 
-	let var_pos = match ctx.line.find(&var_name) {
-		Some(p) => p,
-		None => return EnvHookResult::Skip,
-	};
-	let after_var = &ctx.line[var_pos + var_name.len()..];
+    let var_pos = match ctx.line.find(&var_name) {
+        Some(p) => p,
+        None => return EnvHookResult::Skip,
+    };
+    let after_var = &ctx.line[var_pos + var_name.len()..];
 
-	let access_kind = if JS_HAS_FALLBACK_OP.is_match(after_var) {
-		EnvAccessKind::Optional
-	} else if JS_NEXT_IS_CLOSE_PAREN.is_match(after_var) {
-		EnvAccessKind::Unknown
-	} else {
-		EnvAccessKind::Required
-	};
+    let access_kind = if JS_HAS_FALLBACK_OP.is_match(after_var) {
+        EnvAccessKind::Optional
+    } else if JS_NEXT_IS_CLOSE_PAREN.is_match(after_var) {
+        EnvAccessKind::Unknown
+    } else {
+        EnvAccessKind::Required
+    };
 
-	let default_value = JS_DEFAULT_VALUE
-		.captures(after_var)
-		.and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
+    let default_value = JS_DEFAULT_VALUE
+        .captures(after_var)
+        .and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
 
-	EnvHookResult::Records(vec![EnvHookEmission {
-		var_name: Some(var_name),
-		access_kind: Some(access_kind),
-		default_value: Emitted::Value(default_value),
-		..Default::default()
-	}])
+    EnvHookResult::Records(vec![EnvHookEmission {
+        var_name: Some(var_name),
+        access_kind: Some(access_kind),
+        default_value: Emitted::Value(default_value),
+        ..Default::default()
+    }])
 }
 
 /// Expand a JS destructure pattern into one record per declared
@@ -132,36 +128,36 @@ fn infer_js_env_access_with_default(ctx: EnvHookContext<'_>) -> EnvHookResult {
 /// Walker default for varName does NOT apply because regex group 1
 /// is the entire destructure body, not an individual var.
 fn expand_js_env_destructure(ctx: EnvHookContext<'_>) -> EnvHookResult {
-	let body = match ctx.captures.get(1) {
-		Some(m) => m.as_str(),
-		None => return EnvHookResult::Skip,
-	};
+    let body = match ctx.captures.get(1) {
+        Some(m) => m.as_str(),
+        None => return EnvHookResult::Skip,
+    };
 
-	let mut records: Vec<EnvHookEmission> = Vec::new();
-	let upper_snake = Regex::new(r#"^[A-Z_][A-Z0-9_]*$"#).unwrap();
+    let mut records: Vec<EnvHookEmission> = Vec::new();
+    let upper_snake = Regex::new(r#"^[A-Z_][A-Z0-9_]*$"#).unwrap();
 
-	for raw in body.split(',') {
-		let v = raw.trim();
-		// Handle renaming: `VAR_NAME: localName`
-		let var_name = if let Some(colon) = v.find(':') {
-			v[..colon].trim()
-		} else {
-			v
-		};
-		if upper_snake.is_match(var_name) {
-			records.push(EnvHookEmission {
-				var_name: Some(var_name.to_string()),
-				access_kind: Some(EnvAccessKind::Unknown),
-				default_value: Emitted::Value(None),
-				..Default::default()
-			});
-		}
-	}
+    for raw in body.split(',') {
+        let v = raw.trim();
+        // Handle renaming: `VAR_NAME: localName`
+        let var_name = if let Some(colon) = v.find(':') {
+            v[..colon].trim()
+        } else {
+            v
+        };
+        if upper_snake.is_match(var_name) {
+            records.push(EnvHookEmission {
+                var_name: Some(var_name.to_string()),
+                access_kind: Some(EnvAccessKind::Unknown),
+                default_value: Emitted::Value(None),
+                ..Default::default()
+            });
+        }
+    }
 
-	if records.is_empty() {
-		return EnvHookResult::Skip;
-	}
-	EnvHookResult::Records(records)
+    if records.is_empty() {
+        return EnvHookResult::Skip;
+    }
+    EnvHookResult::Records(records)
 }
 
 /// Read default value from regex capture group 2 for Python
@@ -171,22 +167,22 @@ fn expand_js_env_destructure(ctx: EnvHookContext<'_>) -> EnvHookResult {
 ///  - if group 2 is present, accessKind = "optional", default = group 2
 ///  - if group 2 is absent, accessKind = "unknown", default = null
 fn python_get_default_from_group2(ctx: EnvHookContext<'_>) -> EnvHookResult {
-	let var_name = match ctx.captures.get(1) {
-		Some(m) => m.as_str().to_string(),
-		None => return EnvHookResult::Skip,
-	};
-	let default_value = ctx.captures.get(2).map(|m| m.as_str().to_string());
-	let access_kind = if default_value.is_some() {
-		EnvAccessKind::Optional
-	} else {
-		EnvAccessKind::Unknown
-	};
-	EnvHookResult::Records(vec![EnvHookEmission {
-		var_name: Some(var_name),
-		access_kind: Some(access_kind),
-		default_value: Emitted::Value(default_value),
-		..Default::default()
-	}])
+    let var_name = match ctx.captures.get(1) {
+        Some(m) => m.as_str().to_string(),
+        None => return EnvHookResult::Skip,
+    };
+    let default_value = ctx.captures.get(2).map(|m| m.as_str().to_string());
+    let access_kind = if default_value.is_some() {
+        EnvAccessKind::Optional
+    } else {
+        EnvAccessKind::Unknown
+    };
+    EnvHookResult::Records(vec![EnvHookEmission {
+        var_name: Some(var_name),
+        access_kind: Some(access_kind),
+        default_value: Emitted::Value(default_value),
+        ..Default::default()
+    }])
 }
 
 // ── Fs hooks ───────────────────────────────────────────────────────
@@ -199,14 +195,14 @@ fn python_get_default_from_group2(ctx: EnvHookContext<'_>) -> EnvHookResult {
 /// (e.g., `\bfs.writeFile\s*\(`) and the path follows immediately.
 /// Returns null if the first arg is not a literal string (dynamic).
 fn extract_first_string_arg(ctx: FsHookContext<'_>) -> FsHookResult {
-	let after_offset = ctx.captures.get(0).map(|m| m.end()).unwrap_or(0);
-	let after = &ctx.line[after_offset..];
-	let literal = extract_first_string_arg_impl(after);
-	FsHookResult::Records(vec![FsHookEmission {
-		target_path: Emitted::Value(literal.clone()),
-		dynamic_path: Emitted::Value(literal.is_none()),
-		..Default::default()
-	}])
+    let after_offset = ctx.captures.get(0).map(|m| m.end()).unwrap_or(0);
+    let after = &ctx.line[after_offset..];
+    let literal = extract_first_string_arg_impl(after);
+    FsHookResult::Records(vec![FsHookEmission {
+        target_path: Emitted::Value(literal.clone()),
+        dynamic_path: Emitted::Value(literal.is_none()),
+        ..Default::default()
+    }])
 }
 
 /// Extract first AND second string args for two-ended ops (rename,
@@ -214,54 +210,54 @@ fn extract_first_string_arg(ctx: FsHookContext<'_>) -> FsHookResult {
 /// are null. If the first is literal but the second is dynamic,
 /// target = literal, destination = null.
 fn extract_two_ended_args(ctx: FsHookContext<'_>) -> FsHookResult {
-	let after_offset = ctx.captures.get(0).map(|m| m.end()).unwrap_or(0);
-	let after = &ctx.line[after_offset..];
-	let first = extract_first_string_arg_impl(after);
-	let second = if first.is_some() {
-		extract_second_string_arg_impl(after)
-	} else {
-		None
-	};
-	FsHookResult::Records(vec![FsHookEmission {
-		target_path: Emitted::Value(first.clone()),
-		destination_path: Emitted::Value(second),
-		dynamic_path: Emitted::Value(first.is_none()),
-		..Default::default()
-	}])
+    let after_offset = ctx.captures.get(0).map(|m| m.end()).unwrap_or(0);
+    let after = &ctx.line[after_offset..];
+    let first = extract_first_string_arg_impl(after);
+    let second = if first.is_some() {
+        extract_second_string_arg_impl(after)
+    } else {
+        None
+    };
+    FsHookResult::Records(vec![FsHookEmission {
+        target_path: Emitted::Value(first.clone()),
+        destination_path: Emitted::Value(second),
+        dynamic_path: Emitted::Value(first.is_none()),
+        ..Default::default()
+    }])
 }
 
 /// Java `Files.write(Paths.get("..."))` literal unwrap.
 fn unwrap_java_files_write_literal(ctx: FsHookContext<'_>) -> FsHookResult {
-	let literal = JAVA_FILES_WRITE_LITERAL
-		.captures(ctx.line)
-		.and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
-	FsHookResult::Records(vec![FsHookEmission {
-		target_path: Emitted::Value(literal.clone()),
-		dynamic_path: Emitted::Value(literal.is_none()),
-		..Default::default()
-	}])
+    let literal = JAVA_FILES_WRITE_LITERAL
+        .captures(ctx.line)
+        .and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
+    FsHookResult::Records(vec![FsHookEmission {
+        target_path: Emitted::Value(literal.clone()),
+        dynamic_path: Emitted::Value(literal.is_none()),
+        ..Default::default()
+    }])
 }
 
 fn unwrap_java_files_delete_literal(ctx: FsHookContext<'_>) -> FsHookResult {
-	let literal = JAVA_FILES_DELETE_LITERAL
-		.captures(ctx.line)
-		.and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
-	FsHookResult::Records(vec![FsHookEmission {
-		target_path: Emitted::Value(literal.clone()),
-		dynamic_path: Emitted::Value(literal.is_none()),
-		..Default::default()
-	}])
+    let literal = JAVA_FILES_DELETE_LITERAL
+        .captures(ctx.line)
+        .and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
+    FsHookResult::Records(vec![FsHookEmission {
+        target_path: Emitted::Value(literal.clone()),
+        dynamic_path: Emitted::Value(literal.is_none()),
+        ..Default::default()
+    }])
 }
 
 fn unwrap_java_files_create_directory_literal(ctx: FsHookContext<'_>) -> FsHookResult {
-	let literal = JAVA_FILES_CREATE_DIRECTORY_LITERAL
-		.captures(ctx.line)
-		.and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
-	FsHookResult::Records(vec![FsHookEmission {
-		target_path: Emitted::Value(literal.clone()),
-		dynamic_path: Emitted::Value(literal.is_none()),
-		..Default::default()
-	}])
+    let literal = JAVA_FILES_CREATE_DIRECTORY_LITERAL
+        .captures(ctx.line)
+        .and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
+    FsHookResult::Records(vec![FsHookEmission {
+        target_path: Emitted::Value(literal.clone()),
+        dynamic_path: Emitted::Value(literal.is_none()),
+        ..Default::default()
+    }])
 }
 
 /// Java `new FileOutputStream("...")` literal-or-dynamic dispatch
@@ -277,21 +273,21 @@ fn unwrap_java_files_create_directory_literal(ctx: FsHookContext<'_>) -> FsHookR
 /// covers the literal case (0.85). The hook overrides confidence
 /// to 0.80 in the dynamic case.
 fn unwrap_java_file_output_stream_literal(ctx: FsHookContext<'_>) -> FsHookResult {
-	if let Some(c) = JAVA_FILE_OUTPUT_STREAM_LITERAL.captures(ctx.line) {
-		let literal = c.get(1).unwrap().as_str().to_string();
-		FsHookResult::Records(vec![FsHookEmission {
-			target_path: Emitted::Value(Some(literal)),
-			dynamic_path: Emitted::Value(false),
-			..Default::default()
-		}])
-	} else {
-		FsHookResult::Records(vec![FsHookEmission {
-			target_path: Emitted::Value(None),
-			dynamic_path: Emitted::Value(true),
-			confidence: Some(0.80),
-			..Default::default()
-		}])
-	}
+    if let Some(c) = JAVA_FILE_OUTPUT_STREAM_LITERAL.captures(ctx.line) {
+        let literal = c.get(1).unwrap().as_str().to_string();
+        FsHookResult::Records(vec![FsHookEmission {
+            target_path: Emitted::Value(Some(literal)),
+            dynamic_path: Emitted::Value(false),
+            ..Default::default()
+        }])
+    } else {
+        FsHookResult::Records(vec![FsHookEmission {
+            target_path: Emitted::Value(None),
+            dynamic_path: Emitted::Value(true),
+            confidence: Some(0.80),
+            ..Default::default()
+        }])
+    }
 }
 
 /// C `fopen(path, "wa+")` mode-based dispatch.
@@ -301,52 +297,52 @@ fn unwrap_java_file_output_stream_literal(ctx: FsHookContext<'_>) -> FsHookResul
 /// append_file / c_fopen_append. Otherwise → write_file /
 /// c_fopen_write.
 fn dispatch_c_fopen_mode(ctx: FsHookContext<'_>) -> FsHookResult {
-	let path = ctx.captures.get(1).map(|m| m.as_str().to_string());
-	let mode = match ctx.captures.get(2) {
-		Some(m) => m.as_str(),
-		None => return FsHookResult::Skip,
-	};
-	let is_append = mode.starts_with('a');
-	FsHookResult::Records(vec![FsHookEmission {
-		target_path: Emitted::Value(path.clone()),
-		dynamic_path: Emitted::Value(path.is_none()),
-		mutation_kind: Some(if is_append {
-			MutationKind::AppendFile
-		} else {
-			MutationKind::WriteFile
-		}),
-		mutation_pattern: Some(if is_append {
-			MutationPattern::CFopenAppend
-		} else {
-			MutationPattern::CFopenWrite
-		}),
-		..Default::default()
-	}])
+    let path = ctx.captures.get(1).map(|m| m.as_str().to_string());
+    let mode = match ctx.captures.get(2) {
+        Some(m) => m.as_str(),
+        None => return FsHookResult::Skip,
+    };
+    let is_append = mode.starts_with('a');
+    FsHookResult::Records(vec![FsHookEmission {
+        target_path: Emitted::Value(path.clone()),
+        dynamic_path: Emitted::Value(path.is_none()),
+        mutation_kind: Some(if is_append {
+            MutationKind::AppendFile
+        } else {
+            MutationKind::WriteFile
+        }),
+        mutation_pattern: Some(if is_append {
+            MutationPattern::CFopenAppend
+        } else {
+            MutationPattern::CFopenWrite
+        }),
+        ..Default::default()
+    }])
 }
 
 /// Python `open(path, "w"|"a")` mode-based dispatch.
 fn dispatch_python_open_mode(ctx: FsHookContext<'_>) -> FsHookResult {
-	let path = ctx.captures.get(1).map(|m| m.as_str().to_string());
-	let mode = match ctx.captures.get(2) {
-		Some(m) => m.as_str(),
-		None => return FsHookResult::Skip,
-	};
-	let is_append = mode == "a";
-	FsHookResult::Records(vec![FsHookEmission {
-		target_path: Emitted::Value(path.clone()),
-		dynamic_path: Emitted::Value(path.is_none()),
-		mutation_kind: Some(if is_append {
-			MutationKind::AppendFile
-		} else {
-			MutationKind::WriteFile
-		}),
-		mutation_pattern: Some(if is_append {
-			MutationPattern::PyOpenAppend
-		} else {
-			MutationPattern::PyOpenWrite
-		}),
-		..Default::default()
-	}])
+    let path = ctx.captures.get(1).map(|m| m.as_str().to_string());
+    let mode = match ctx.captures.get(2) {
+        Some(m) => m.as_str(),
+        None => return FsHookResult::Skip,
+    };
+    let is_append = mode == "a";
+    FsHookResult::Records(vec![FsHookEmission {
+        target_path: Emitted::Value(path.clone()),
+        dynamic_path: Emitted::Value(path.is_none()),
+        mutation_kind: Some(if is_append {
+            MutationKind::AppendFile
+        } else {
+            MutationKind::WriteFile
+        }),
+        mutation_pattern: Some(if is_append {
+            MutationPattern::PyOpenAppend
+        } else {
+            MutationPattern::PyOpenWrite
+        }),
+        ..Default::default()
+    }])
 }
 
 /// Python `os.remove`/`os.unlink`/`shutil.rmtree` pattern dispatch.
@@ -355,44 +351,44 @@ fn dispatch_python_open_mode(ctx: FsHookContext<'_>) -> FsHookResult {
 /// `mutation_kind` is always `delete_path` (supplied statically by
 /// the record); only `mutation_pattern` is dispatched here.
 fn dispatch_python_remove_call(ctx: FsHookContext<'_>) -> FsHookResult {
-	let call_name = match ctx.captures.get(1) {
-		Some(m) => m.as_str(),
-		None => return FsHookResult::Skip,
-	};
-	let path = ctx.captures.get(2).map(|m| m.as_str().to_string());
-	let pattern = if call_name == "os.unlink" {
-		MutationPattern::PyOsUnlink
-	} else if call_name == "shutil.rmtree" {
-		MutationPattern::PyShutilRmtree
-	} else {
-		MutationPattern::PyOsRemove
-	};
-	FsHookResult::Records(vec![FsHookEmission {
-		target_path: Emitted::Value(path.clone()),
-		dynamic_path: Emitted::Value(path.is_none()),
-		mutation_pattern: Some(pattern),
-		..Default::default()
-	}])
+    let call_name = match ctx.captures.get(1) {
+        Some(m) => m.as_str(),
+        None => return FsHookResult::Skip,
+    };
+    let path = ctx.captures.get(2).map(|m| m.as_str().to_string());
+    let pattern = if call_name == "os.unlink" {
+        MutationPattern::PyOsUnlink
+    } else if call_name == "shutil.rmtree" {
+        MutationPattern::PyShutilRmtree
+    } else {
+        MutationPattern::PyOsRemove
+    };
+    FsHookResult::Records(vec![FsHookEmission {
+        target_path: Emitted::Value(path.clone()),
+        dynamic_path: Emitted::Value(path.is_none()),
+        mutation_pattern: Some(pattern),
+        ..Default::default()
+    }])
 }
 
 /// Python `os.mkdir`/`os.makedirs` pattern dispatch.
 fn dispatch_python_mkdir_call(ctx: FsHookContext<'_>) -> FsHookResult {
-	let call_name = match ctx.captures.get(1) {
-		Some(m) => m.as_str(),
-		None => return FsHookResult::Skip,
-	};
-	let path = ctx.captures.get(2).map(|m| m.as_str().to_string());
-	let pattern = if call_name == "makedirs" {
-		MutationPattern::PyOsMakedirs
-	} else {
-		MutationPattern::PyOsMkdir
-	};
-	FsHookResult::Records(vec![FsHookEmission {
-		target_path: Emitted::Value(path.clone()),
-		dynamic_path: Emitted::Value(path.is_none()),
-		mutation_pattern: Some(pattern),
-		..Default::default()
-	}])
+    let call_name = match ctx.captures.get(1) {
+        Some(m) => m.as_str(),
+        None => return FsHookResult::Skip,
+    };
+    let path = ctx.captures.get(2).map(|m| m.as_str().to_string());
+    let pattern = if call_name == "makedirs" {
+        MutationPattern::PyOsMakedirs
+    } else {
+        MutationPattern::PyOsMkdir
+    };
+    FsHookResult::Records(vec![FsHookEmission {
+        target_path: Emitted::Value(path.clone()),
+        dynamic_path: Emitted::Value(path.is_none()),
+        mutation_pattern: Some(pattern),
+        ..Default::default()
+    }])
 }
 
 // ── State-machine string-literal extractors ───────────────────────
@@ -415,108 +411,108 @@ fn dispatch_python_mkdir_call(ctx: FsHookContext<'_>) -> FsHookResult {
 /// `after` is the substring starting at the position right after
 /// the matched call's opening `(`.
 fn extract_first_string_arg_impl(after: &str) -> Option<String> {
-	let bytes = after.as_bytes();
-	let len = bytes.len();
-	let mut i = 0;
-	// Skip leading whitespace.
-	while i < len && bytes[i].is_ascii_whitespace() {
-		i += 1;
-	}
-	if i >= len {
-		return None;
-	}
-	let quote = bytes[i];
-	if quote != b'"' && quote != b'\'' && quote != b'`' {
-		return None;
-	}
-	let mut result: Vec<u8> = Vec::new();
-	i += 1;
-	while i < len && bytes[i] != quote {
-		// Reject template literal interpolations as dynamic.
-		if quote == b'`' && bytes[i] == b'$' && i + 1 < len && bytes[i + 1] == b'{' {
-			return None;
-		}
-		// Backslash escape: append the next byte verbatim.
-		if bytes[i] == b'\\' && i + 1 < len {
-			result.push(bytes[i + 1]);
-			i += 2;
-			continue;
-		}
-		result.push(bytes[i]);
-		i += 1;
-	}
-	if i >= len {
-		return None;
-	}
-	// String::from_utf8 is safe here: every pushed byte is either
-	// a verbatim copy from the valid-UTF-8 input or an escaped
-	// byte from the same input. The result respects character
-	// boundaries because the only state transitions are on ASCII
-	// bytes (quotes, backslash, dollar/brace) which cannot appear
-	// inside a multi-byte UTF-8 sequence.
-	String::from_utf8(result).ok()
+    let bytes = after.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    // Skip leading whitespace.
+    while i < len && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= len {
+        return None;
+    }
+    let quote = bytes[i];
+    if quote != b'"' && quote != b'\'' && quote != b'`' {
+        return None;
+    }
+    let mut result: Vec<u8> = Vec::new();
+    i += 1;
+    while i < len && bytes[i] != quote {
+        // Reject template literal interpolations as dynamic.
+        if quote == b'`' && bytes[i] == b'$' && i + 1 < len && bytes[i + 1] == b'{' {
+            return None;
+        }
+        // Backslash escape: append the next byte verbatim.
+        if bytes[i] == b'\\' && i + 1 < len {
+            result.push(bytes[i + 1]);
+            i += 2;
+            continue;
+        }
+        result.push(bytes[i]);
+        i += 1;
+    }
+    if i >= len {
+        return None;
+    }
+    // String::from_utf8 is safe here: every pushed byte is either
+    // a verbatim copy from the valid-UTF-8 input or an escaped
+    // byte from the same input. The result respects character
+    // boundaries because the only state transitions are on ASCII
+    // bytes (quotes, backslash, dollar/brace) which cannot appear
+    // inside a multi-byte UTF-8 sequence.
+    String::from_utf8(result).ok()
 }
 
 /// Extract the SECOND string literal from an argument list. Used
 /// by two-ended ops (rename, copy).
 fn extract_second_string_arg_impl(after: &str) -> Option<String> {
-	let bytes = after.as_bytes();
-	let len = bytes.len();
-	let mut i = 0;
-	// Skip leading whitespace.
-	while i < len && bytes[i].is_ascii_whitespace() {
-		i += 1;
-	}
-	if i >= len {
-		return None;
-	}
-	let first_quote = bytes[i];
-	if first_quote != b'"' && first_quote != b'\'' && first_quote != b'`' {
-		return None;
-	}
-	i += 1;
-	// Skip past the first arg's closing quote.
-	while i < len && bytes[i] != first_quote {
-		if bytes[i] == b'\\' {
-			i += 2;
-			continue;
-		}
-		i += 1;
-	}
-	if i >= len {
-		return None;
-	}
-	i += 1; // past closing quote
-	// Skip whitespace and comma.
-	while i < len && (bytes[i].is_ascii_whitespace() || bytes[i] == b',') {
-		i += 1;
-	}
-	if i >= len {
-		return None;
-	}
-	// Now extract the second string literal.
-	let second_quote = bytes[i];
-	if second_quote != b'"' && second_quote != b'\'' && second_quote != b'`' {
-		return None;
-	}
-	let mut result: Vec<u8> = Vec::new();
-	i += 1;
-	while i < len && bytes[i] != second_quote {
-		if second_quote == b'`' && bytes[i] == b'$' && i + 1 < len && bytes[i + 1] == b'{' {
-			return None;
-		}
-		if bytes[i] == b'\\' && i + 1 < len {
-			result.push(bytes[i + 1]);
-			i += 2;
-			continue;
-		}
-		result.push(bytes[i]);
-		i += 1;
-	}
-	if i >= len {
-		return None;
-	}
-	String::from_utf8(result).ok()
+    let bytes = after.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    // Skip leading whitespace.
+    while i < len && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= len {
+        return None;
+    }
+    let first_quote = bytes[i];
+    if first_quote != b'"' && first_quote != b'\'' && first_quote != b'`' {
+        return None;
+    }
+    i += 1;
+    // Skip past the first arg's closing quote.
+    while i < len && bytes[i] != first_quote {
+        if bytes[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        i += 1;
+    }
+    if i >= len {
+        return None;
+    }
+    i += 1; // past closing quote
+            // Skip whitespace and comma.
+    while i < len && (bytes[i].is_ascii_whitespace() || bytes[i] == b',') {
+        i += 1;
+    }
+    if i >= len {
+        return None;
+    }
+    // Now extract the second string literal.
+    let second_quote = bytes[i];
+    if second_quote != b'"' && second_quote != b'\'' && second_quote != b'`' {
+        return None;
+    }
+    let mut result: Vec<u8> = Vec::new();
+    i += 1;
+    while i < len && bytes[i] != second_quote {
+        if second_quote == b'`' && bytes[i] == b'$' && i + 1 < len && bytes[i + 1] == b'{' {
+            return None;
+        }
+        if bytes[i] == b'\\' && i + 1 < len {
+            result.push(bytes[i + 1]);
+            i += 2;
+            continue;
+        }
+        result.push(bytes[i]);
+        i += 1;
+    }
+    if i >= len {
+        return None;
+    }
+    String::from_utf8(result).ok()
 }
 
 // ── Registry construction ──────────────────────────────────────────
@@ -539,162 +535,147 @@ fn extract_second_string_arg_impl(after: &str) -> Option<String> {
 /// a member of `EnvSuppliedField` / `FsSuppliedField`, so typos in
 /// the supplies set become compile errors.
 pub fn create_default_hook_registry() -> HookRegistry {
-	let mut env: HashMap<&'static str, EnvHookEntry> = HashMap::new();
-	let mut fs: HashMap<&'static str, FsHookEntry> = HashMap::new();
+    let mut env: HashMap<&'static str, EnvHookEntry> = HashMap::new();
+    let mut fs: HashMap<&'static str, FsHookEntry> = HashMap::new();
 
-	// ── env ────────────────────────────────────────────────────────
-	env.insert(
-		"infer_js_env_access_with_default",
-		EnvHookEntry {
-			func: infer_js_env_access_with_default,
-			supplies: env_supplies(&[
-				EnvSuppliedField::VarName,
-				EnvSuppliedField::AccessKind,
-				EnvSuppliedField::DefaultValue,
-			]),
-		},
-	);
-	env.insert(
-		"expand_js_env_destructure",
-		EnvHookEntry {
-			func: expand_js_env_destructure,
-			supplies: env_supplies(&[
-				EnvSuppliedField::VarName,
-				EnvSuppliedField::AccessKind,
-				EnvSuppliedField::DefaultValue,
-			]),
-		},
-	);
-	env.insert(
-		"python_get_default_from_group2",
-		EnvHookEntry {
-			func: python_get_default_from_group2,
-			supplies: env_supplies(&[
-				EnvSuppliedField::VarName,
-				EnvSuppliedField::AccessKind,
-				EnvSuppliedField::DefaultValue,
-			]),
-		},
-	);
+    // ── env ────────────────────────────────────────────────────────
+    env.insert(
+        "infer_js_env_access_with_default",
+        EnvHookEntry {
+            func: infer_js_env_access_with_default,
+            supplies: env_supplies(&[
+                EnvSuppliedField::VarName,
+                EnvSuppliedField::AccessKind,
+                EnvSuppliedField::DefaultValue,
+            ]),
+        },
+    );
+    env.insert(
+        "expand_js_env_destructure",
+        EnvHookEntry {
+            func: expand_js_env_destructure,
+            supplies: env_supplies(&[
+                EnvSuppliedField::VarName,
+                EnvSuppliedField::AccessKind,
+                EnvSuppliedField::DefaultValue,
+            ]),
+        },
+    );
+    env.insert(
+        "python_get_default_from_group2",
+        EnvHookEntry {
+            func: python_get_default_from_group2,
+            supplies: env_supplies(&[
+                EnvSuppliedField::VarName,
+                EnvSuppliedField::AccessKind,
+                EnvSuppliedField::DefaultValue,
+            ]),
+        },
+    );
 
-	// ── fs ─────────────────────────────────────────────────────────
-	fs.insert(
-		"extract_first_string_arg",
-		FsHookEntry {
-			func: extract_first_string_arg,
-			supplies: fs_supplies(&[
-				FsSuppliedField::TargetPath,
-				FsSuppliedField::DynamicPath,
-			]),
-		},
-	);
-	fs.insert(
-		"extract_two_ended_args",
-		FsHookEntry {
-			func: extract_two_ended_args,
-			supplies: fs_supplies(&[
-				FsSuppliedField::TargetPath,
-				FsSuppliedField::DestinationPath,
-				FsSuppliedField::DynamicPath,
-			]),
-		},
-	);
-	fs.insert(
-		"unwrap_java_files_write_literal",
-		FsHookEntry {
-			func: unwrap_java_files_write_literal,
-			supplies: fs_supplies(&[
-				FsSuppliedField::TargetPath,
-				FsSuppliedField::DynamicPath,
-			]),
-		},
-	);
-	fs.insert(
-		"unwrap_java_files_delete_literal",
-		FsHookEntry {
-			func: unwrap_java_files_delete_literal,
-			supplies: fs_supplies(&[
-				FsSuppliedField::TargetPath,
-				FsSuppliedField::DynamicPath,
-			]),
-		},
-	);
-	fs.insert(
-		"unwrap_java_files_create_directory_literal",
-		FsHookEntry {
-			func: unwrap_java_files_create_directory_literal,
-			supplies: fs_supplies(&[
-				FsSuppliedField::TargetPath,
-				FsSuppliedField::DynamicPath,
-			]),
-		},
-	);
-	fs.insert(
-		"unwrap_java_file_output_stream_literal",
-		FsHookEntry {
-			func: unwrap_java_file_output_stream_literal,
-			supplies: fs_supplies(&[
-				FsSuppliedField::TargetPath,
-				FsSuppliedField::DynamicPath,
-			]),
-		},
-	);
-	fs.insert(
-		"dispatch_c_fopen_mode",
-		FsHookEntry {
-			func: dispatch_c_fopen_mode,
-			supplies: fs_supplies(&[
-				FsSuppliedField::TargetPath,
-				FsSuppliedField::DynamicPath,
-				FsSuppliedField::MutationKind,
-				FsSuppliedField::MutationPattern,
-			]),
-		},
-	);
-	fs.insert(
-		"dispatch_python_open_mode",
-		FsHookEntry {
-			func: dispatch_python_open_mode,
-			supplies: fs_supplies(&[
-				FsSuppliedField::TargetPath,
-				FsSuppliedField::DynamicPath,
-				FsSuppliedField::MutationKind,
-				FsSuppliedField::MutationPattern,
-			]),
-		},
-	);
-	fs.insert(
-		"dispatch_python_remove_call",
-		FsHookEntry {
-			func: dispatch_python_remove_call,
-			supplies: fs_supplies(&[
-				FsSuppliedField::TargetPath,
-				FsSuppliedField::DynamicPath,
-				FsSuppliedField::MutationPattern,
-			]),
-		},
-	);
-	fs.insert(
-		"dispatch_python_mkdir_call",
-		FsHookEntry {
-			func: dispatch_python_mkdir_call,
-			supplies: fs_supplies(&[
-				FsSuppliedField::TargetPath,
-				FsSuppliedField::DynamicPath,
-				FsSuppliedField::MutationPattern,
-			]),
-		},
-	);
+    // ── fs ─────────────────────────────────────────────────────────
+    fs.insert(
+        "extract_first_string_arg",
+        FsHookEntry {
+            func: extract_first_string_arg,
+            supplies: fs_supplies(&[FsSuppliedField::TargetPath, FsSuppliedField::DynamicPath]),
+        },
+    );
+    fs.insert(
+        "extract_two_ended_args",
+        FsHookEntry {
+            func: extract_two_ended_args,
+            supplies: fs_supplies(&[
+                FsSuppliedField::TargetPath,
+                FsSuppliedField::DestinationPath,
+                FsSuppliedField::DynamicPath,
+            ]),
+        },
+    );
+    fs.insert(
+        "unwrap_java_files_write_literal",
+        FsHookEntry {
+            func: unwrap_java_files_write_literal,
+            supplies: fs_supplies(&[FsSuppliedField::TargetPath, FsSuppliedField::DynamicPath]),
+        },
+    );
+    fs.insert(
+        "unwrap_java_files_delete_literal",
+        FsHookEntry {
+            func: unwrap_java_files_delete_literal,
+            supplies: fs_supplies(&[FsSuppliedField::TargetPath, FsSuppliedField::DynamicPath]),
+        },
+    );
+    fs.insert(
+        "unwrap_java_files_create_directory_literal",
+        FsHookEntry {
+            func: unwrap_java_files_create_directory_literal,
+            supplies: fs_supplies(&[FsSuppliedField::TargetPath, FsSuppliedField::DynamicPath]),
+        },
+    );
+    fs.insert(
+        "unwrap_java_file_output_stream_literal",
+        FsHookEntry {
+            func: unwrap_java_file_output_stream_literal,
+            supplies: fs_supplies(&[FsSuppliedField::TargetPath, FsSuppliedField::DynamicPath]),
+        },
+    );
+    fs.insert(
+        "dispatch_c_fopen_mode",
+        FsHookEntry {
+            func: dispatch_c_fopen_mode,
+            supplies: fs_supplies(&[
+                FsSuppliedField::TargetPath,
+                FsSuppliedField::DynamicPath,
+                FsSuppliedField::MutationKind,
+                FsSuppliedField::MutationPattern,
+            ]),
+        },
+    );
+    fs.insert(
+        "dispatch_python_open_mode",
+        FsHookEntry {
+            func: dispatch_python_open_mode,
+            supplies: fs_supplies(&[
+                FsSuppliedField::TargetPath,
+                FsSuppliedField::DynamicPath,
+                FsSuppliedField::MutationKind,
+                FsSuppliedField::MutationPattern,
+            ]),
+        },
+    );
+    fs.insert(
+        "dispatch_python_remove_call",
+        FsHookEntry {
+            func: dispatch_python_remove_call,
+            supplies: fs_supplies(&[
+                FsSuppliedField::TargetPath,
+                FsSuppliedField::DynamicPath,
+                FsSuppliedField::MutationPattern,
+            ]),
+        },
+    );
+    fs.insert(
+        "dispatch_python_mkdir_call",
+        FsHookEntry {
+            func: dispatch_python_mkdir_call,
+            supplies: fs_supplies(&[
+                FsSuppliedField::TargetPath,
+                FsSuppliedField::DynamicPath,
+                FsSuppliedField::MutationPattern,
+            ]),
+        },
+    );
 
-	HookRegistry { env, fs }
+    HookRegistry { env, fs }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
 
 fn env_supplies(fields: &[EnvSuppliedField]) -> std::collections::HashSet<EnvSuppliedField> {
-	fields.iter().copied().collect()
+    fields.iter().copied().collect()
 }
 
 fn fs_supplies(fields: &[FsSuppliedField]) -> std::collections::HashSet<FsSuppliedField> {
-	fields.iter().copied().collect()
+    fields.iter().copied().collect()
 }

@@ -279,8 +279,7 @@ impl BindingTable {
             }
 
             // Validate fixed scope
-            if raw_entry.scope_heuristic == ScopeHeuristic::Fixed
-                && raw_entry.fixed_scope.is_none()
+            if raw_entry.scope_heuristic == ScopeHeuristic::Fixed && raw_entry.fixed_scope.is_none()
             {
                 return Err(TableError::MissingFixedScope { index });
             }
@@ -298,7 +297,11 @@ impl BindingTable {
             // Check for duplicates: (language, function, channel_kind) must be unique.
             // This allows multiple bindings for the same function with different channel_kinds
             // (e.g., socket → unix_socket, socket → tcp_socket, socket → udp_socket).
-            let dedup_key = (raw_entry.language, raw_entry.function.clone(), raw_entry.channel_kind);
+            let dedup_key = (
+                raw_entry.language,
+                raw_entry.function.clone(),
+                raw_entry.channel_kind,
+            );
             if !seen.insert(dedup_key.clone()) {
                 let first = entries
                     .iter()
@@ -526,7 +529,10 @@ basis = "api_call"
         assert!(
             nats_publish.is_some(),
             "expected NATS publish binding in table; got bindings for 'publish': {:?}",
-            publish_bindings.iter().map(|b| &b.api_family).collect::<Vec<_>>()
+            publish_bindings
+                .iter()
+                .map(|b| &b.api_family)
+                .collect::<Vec<_>>()
         );
 
         // Find NATS subscribe binding
@@ -537,7 +543,10 @@ basis = "api_call"
         assert!(
             nats_subscribe.is_some(),
             "expected NATS subscribe binding in table; got bindings for 'subscribe': {:?}",
-            subscribe_bindings.iter().map(|b| &b.api_family).collect::<Vec<_>>()
+            subscribe_bindings
+                .iter()
+                .map(|b| &b.api_family)
+                .collect::<Vec<_>>()
         );
     }
 }

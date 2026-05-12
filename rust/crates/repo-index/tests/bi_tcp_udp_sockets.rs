@@ -84,10 +84,7 @@ fn index_tcp_udp_fixture_produces_socket_surfaces() {
         "expected 4 socket() surfaces (2 TCP, 2 UDP); got {:?}",
         surfaces
             .iter()
-            .map(|s| format!(
-                "{}:{} → {:?}",
-                s.source_file, s.line_start, s.channel_kind
-            ))
+            .map(|s| format!("{}:{} → {:?}", s.source_file, s.line_start, s.channel_kind))
             .collect::<Vec<_>>()
     );
 
@@ -118,7 +115,8 @@ fn index_tcp_udp_fixture_produces_socket_surfaces() {
         };
 
         assert_eq!(
-            surface.direction, expected_direction,
+            surface.direction,
+            expected_direction,
             "BI-1B Phase 2: expected {:?} direction for {}:{} ({:?}); got {:?}",
             expected_direction,
             surface.source_file,
@@ -233,16 +231,17 @@ fn create_temp_repo_with_files(files: &[(&str, &str)]) -> TempDir {
 #[test]
 fn bi1b_refresh_preserves_unchanged_file_role_detection() {
     // Test that role detection survives refresh when files are unchanged.
-    let temp_dir = create_temp_repo_with_files(&[
-        ("server.c", r#"
+    let temp_dir = create_temp_repo_with_files(&[(
+        "server.c",
+        r#"
             #include <sys/socket.h>
             void server() {
                 int fd = socket(AF_INET, SOCK_STREAM, 0);
                 bind(fd, (struct sockaddr*)&addr, sizeof(addr));
                 listen(fd, 5);
             }
-        "#),
-    ]);
+        "#,
+    )]);
 
     let mut storage = StorageConnection::open_in_memory().unwrap();
 
@@ -263,7 +262,11 @@ fn bi1b_refresh_preserves_unchanged_file_role_detection() {
         .list_boundary_interactions(&result1.snapshot_uid, &filter)
         .unwrap();
 
-    assert_eq!(surfaces1.len(), 1, "expected 1 tcp_socket surface after initial index");
+    assert_eq!(
+        surfaces1.len(),
+        1,
+        "expected 1 tcp_socket surface after initial index"
+    );
     assert_eq!(
         surfaces1[0].direction,
         Direction::Provider,
@@ -283,7 +286,11 @@ fn bi1b_refresh_preserves_unchanged_file_role_detection() {
         .list_boundary_interactions(&result2.snapshot_uid, &filter)
         .unwrap();
 
-    assert_eq!(surfaces2.len(), 1, "expected 1 tcp_socket surface after refresh");
+    assert_eq!(
+        surfaces2.len(),
+        1,
+        "expected 1 tcp_socket surface after refresh"
+    );
     assert_eq!(
         surfaces2[0].direction,
         Direction::Provider,
@@ -295,21 +302,27 @@ fn bi1b_refresh_preserves_unchanged_file_role_detection() {
 fn bi1b_refresh_mixed_changed_unchanged_files() {
     // Test refresh with one changed file and one unchanged file.
     let temp_dir = create_temp_repo_with_files(&[
-        ("server.c", r#"
+        (
+            "server.c",
+            r#"
             #include <sys/socket.h>
             void server() {
                 int fd = socket(AF_INET, SOCK_STREAM, 0);
                 bind(fd, (struct sockaddr*)&addr, sizeof(addr));
                 listen(fd, 5);
             }
-        "#),
-        ("client.c", r#"
+        "#,
+        ),
+        (
+            "client.c",
+            r#"
             #include <sys/socket.h>
             void client() {
                 int fd = socket(AF_INET, SOCK_STREAM, 0);
                 connect(fd, (struct sockaddr*)&addr, sizeof(addr));
             }
-        "#),
+        "#,
+        ),
     ]);
 
     let mut storage = StorageConnection::open_in_memory().unwrap();
@@ -331,7 +344,11 @@ fn bi1b_refresh_mixed_changed_unchanged_files() {
         .list_boundary_interactions(&result1.snapshot_uid, &filter)
         .unwrap();
 
-    assert_eq!(surfaces1.len(), 2, "expected 2 tcp_socket surfaces after initial index");
+    assert_eq!(
+        surfaces1.len(),
+        2,
+        "expected 2 tcp_socket surfaces after initial index"
+    );
 
     // Modify client.c only (add a comment)
     let client_path = temp_dir.path().join("client.c");
@@ -351,11 +368,21 @@ fn bi1b_refresh_mixed_changed_unchanged_files() {
         .list_boundary_interactions(&result2.snapshot_uid, &filter)
         .unwrap();
 
-    assert_eq!(surfaces2.len(), 2, "expected 2 tcp_socket surfaces after refresh");
+    assert_eq!(
+        surfaces2.len(),
+        2,
+        "expected 2 tcp_socket surfaces after refresh"
+    );
 
     // Verify both directions survived
-    let server_surface = surfaces2.iter().find(|s| s.source_file == "server.c").unwrap();
-    let client_surface = surfaces2.iter().find(|s| s.source_file == "client.c").unwrap();
+    let server_surface = surfaces2
+        .iter()
+        .find(|s| s.source_file == "server.c")
+        .unwrap();
+    let client_surface = surfaces2
+        .iter()
+        .find(|s| s.source_file == "client.c")
+        .unwrap();
 
     assert_eq!(
         server_surface.direction,
@@ -372,16 +399,17 @@ fn bi1b_refresh_mixed_changed_unchanged_files() {
 #[test]
 fn bi1b_refresh_no_duplicate_surfaces() {
     // Test that refresh doesn't create duplicate surfaces.
-    let temp_dir = create_temp_repo_with_files(&[
-        ("server.c", r#"
+    let temp_dir = create_temp_repo_with_files(&[(
+        "server.c",
+        r#"
             #include <sys/socket.h>
             void server() {
                 int fd = socket(AF_INET, SOCK_STREAM, 0);
                 bind(fd, (struct sockaddr*)&addr, sizeof(addr));
                 listen(fd, 5);
             }
-        "#),
-    ]);
+        "#,
+    )]);
 
     let mut storage = StorageConnection::open_in_memory().unwrap();
 
@@ -426,16 +454,17 @@ fn bi1b_refresh_no_duplicate_surfaces() {
 #[test]
 fn bi1b_udp_connect_stays_bidirectional() {
     // Critical test: UDP connect() must NOT become Consumer.
-    let temp_dir = create_temp_repo_with_files(&[
-        ("udp_client.c", r#"
+    let temp_dir = create_temp_repo_with_files(&[(
+        "udp_client.c",
+        r#"
             #include <sys/socket.h>
             void send_data() {
                 int fd = socket(AF_INET, SOCK_DGRAM, 0);
                 connect(fd, (struct sockaddr*)&addr, sizeof(addr));
                 send(fd, data, len, 0);
             }
-        "#),
-    ]);
+        "#,
+    )]);
 
     let mut storage = StorageConnection::open_in_memory().unwrap();
 

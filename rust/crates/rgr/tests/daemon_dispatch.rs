@@ -1,6 +1,7 @@
 //! Integration tests for daemon dispatch.
 //!
 //! Tests the service dispatcher through the transport layer.
+#![allow(clippy::arc_with_non_send_sync)]
 
 use std::io::{BufReader, Cursor};
 use std::sync::Arc;
@@ -152,9 +153,8 @@ fn multiple_requests_processed_in_order() {
 
 #[test]
 fn index_missing_repo_path_returns_invalid_request() {
-    let output = run_daemon_request(
-        r#"{"id":"d4-1","method":"index","params":{"db_path":"/tmp/test.db"}}"#,
-    );
+    let output =
+        run_daemon_request(r#"{"id":"d4-1","method":"index","params":{"db_path":"/tmp/test.db"}}"#);
     assert!(output.contains(r#""id":"d4-1""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
     assert!(output.contains("repo_path"));
@@ -162,9 +162,8 @@ fn index_missing_repo_path_returns_invalid_request() {
 
 #[test]
 fn index_missing_db_path_returns_invalid_request() {
-    let output = run_daemon_request(
-        r#"{"id":"d4-2","method":"index","params":{"repo_path":"/tmp/repo"}}"#,
-    );
+    let output =
+        run_daemon_request(r#"{"id":"d4-2","method":"index","params":{"repo_path":"/tmp/repo"}}"#);
     assert!(output.contains(r#""id":"d4-2""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
     assert!(output.contains("db_path"));
@@ -197,9 +196,8 @@ fn refresh_without_loaded_repo_returns_error() {
 
 #[test]
 fn refresh_missing_db_path_returns_invalid_request() {
-    let output = run_daemon_request(
-        r#"{"id":"d4-5","method":"refresh","params":{"repo_uid":"test"}}"#,
-    );
+    let output =
+        run_daemon_request(r#"{"id":"d4-5","method":"refresh","params":{"repo_uid":"test"}}"#);
     assert!(output.contains(r#""id":"d4-5""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
     assert!(output.contains("db_path"));
@@ -256,10 +254,26 @@ fn index_then_load_then_refresh_end_to_end() {
     let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
     let index_output = &results[0];
 
-    assert!(index_output.contains(r#""id":"e2e-1""#), "Index response: {}", index_output);
-    assert!(index_output.contains(r#""repo_uid":"test-repo""#), "Index should return repo_uid: {}", index_output);
-    assert!(index_output.contains(r#""snapshot_uid""#), "Index should return snapshot_uid: {}", index_output);
-    assert!(!index_output.contains(r#""code""#), "Index should not return error: {}", index_output);
+    assert!(
+        index_output.contains(r#""id":"e2e-1""#),
+        "Index response: {}",
+        index_output
+    );
+    assert!(
+        index_output.contains(r#""repo_uid":"test-repo""#),
+        "Index should return repo_uid: {}",
+        index_output
+    );
+    assert!(
+        index_output.contains(r#""snapshot_uid""#),
+        "Index should return snapshot_uid: {}",
+        index_output
+    );
+    assert!(
+        !index_output.contains(r#""code""#),
+        "Index should not return error: {}",
+        index_output
+    );
 
     // Step 2: Load the repo
     let load_request = format!(
@@ -269,8 +283,16 @@ fn index_then_load_then_refresh_end_to_end() {
     let results = run_daemon_requests_with_state(vec![&load_request], Arc::clone(&state));
     let load_output = &results[0];
 
-    assert!(load_output.contains(r#""id":"e2e-2""#), "Load response: {}", load_output);
-    assert!(load_output.contains(r#""loaded":"test-repo""#), "Load should succeed: {}", load_output);
+    assert!(
+        load_output.contains(r#""id":"e2e-2""#),
+        "Load response: {}",
+        load_output
+    );
+    assert!(
+        load_output.contains(r#""loaded":"test-repo""#),
+        "Load should succeed: {}",
+        load_output
+    );
 
     // Step 3: Refresh the repo (now requires db_path + repo_uid)
     let refresh_request = format!(
@@ -280,9 +302,21 @@ fn index_then_load_then_refresh_end_to_end() {
     let results = run_daemon_requests_with_state(vec![&refresh_request], Arc::clone(&state));
     let refresh_output = &results[0];
 
-    assert!(refresh_output.contains(r#""id":"e2e-3""#), "Refresh response: {}", refresh_output);
-    assert!(refresh_output.contains(r#""snapshot_uid""#), "Refresh should return snapshot_uid: {}", refresh_output);
-    assert!(!refresh_output.contains(r#""code""#), "Refresh should not return error: {}", refresh_output);
+    assert!(
+        refresh_output.contains(r#""id":"e2e-3""#),
+        "Refresh response: {}",
+        refresh_output
+    );
+    assert!(
+        refresh_output.contains(r#""snapshot_uid""#),
+        "Refresh should return snapshot_uid: {}",
+        refresh_output
+    );
+    assert!(
+        !refresh_output.contains(r#""code""#),
+        "Refresh should not return error: {}",
+        refresh_output
+    );
 }
 
 // ── D5b: Progress streaming tests ───────────────────────────────
@@ -315,7 +349,12 @@ fn index_emits_progress_events() {
     let lines: Vec<&str> = output.lines().collect();
 
     // Should have at least some progress events + final response
-    assert!(lines.len() > 1, "Expected progress events + response, got {} lines: {}", lines.len(), output);
+    assert!(
+        lines.len() > 1,
+        "Expected progress events + response, got {} lines: {}",
+        lines.len(),
+        output
+    );
 
     // Verify progress events
     let mut found_initializing = false;
@@ -326,7 +365,10 @@ fn index_emits_progress_events() {
 
     for line in &lines {
         let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
-        assert_eq!(parsed["id"], "progress-1", "All events should have correct request ID");
+        assert_eq!(
+            parsed["id"], "progress-1",
+            "All events should have correct request ID"
+        );
 
         if let Some(progress) = parsed.get("progress") {
             let phase = progress["phase"].as_str().unwrap_or("");
@@ -343,7 +385,10 @@ fn index_emits_progress_events() {
         }
     }
 
-    assert!(found_initializing, "Should have initializing progress event (abort checkpoint before ensure_repo)");
+    assert!(
+        found_initializing,
+        "Should have initializing progress event (abort checkpoint before ensure_repo)"
+    );
     assert!(found_scanning, "Should have scanning progress event");
     assert!(found_extracting, "Should have extracting progress event");
     assert!(found_persisting, "Should have persisting progress event");
@@ -352,7 +397,10 @@ fn index_emits_progress_events() {
     // Verify final response is last
     let last_line = lines.last().unwrap();
     let last_parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
-    assert!(last_parsed.get("result").is_some(), "Last line should be the result, not progress");
+    assert!(
+        last_parsed.get("result").is_some(),
+        "Last line should be the result, not progress"
+    );
 }
 
 #[test]
@@ -394,7 +442,11 @@ fn refresh_emits_progress_events() {
     let lines: Vec<&str> = output.lines().collect();
 
     // Should have progress events + final response
-    assert!(lines.len() > 1, "Expected progress events + response, got {} lines", lines.len());
+    assert!(
+        lines.len() > 1,
+        "Expected progress events + response, got {} lines",
+        lines.len()
+    );
 
     // Verify we have progress events and final result
     let mut found_initializing = false;
@@ -405,7 +457,10 @@ fn refresh_emits_progress_events() {
 
     for line in &lines {
         let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
-        assert_eq!(parsed["id"], "rp-3", "All events should have correct request ID");
+        assert_eq!(
+            parsed["id"], "rp-3",
+            "All events should have correct request ID"
+        );
 
         if let Some(progress) = parsed.get("progress") {
             let phase = progress["phase"].as_str().unwrap_or("");
@@ -422,16 +477,31 @@ fn refresh_emits_progress_events() {
         }
     }
 
-    assert!(found_initializing, "Refresh should emit initializing progress event");
-    assert!(found_scanning, "Refresh should emit scanning progress event");
-    assert!(found_extracting, "Refresh should emit extracting progress event");
-    assert!(found_persisting, "Refresh should emit persisting progress event");
+    assert!(
+        found_initializing,
+        "Refresh should emit initializing progress event"
+    );
+    assert!(
+        found_scanning,
+        "Refresh should emit scanning progress event"
+    );
+    assert!(
+        found_extracting,
+        "Refresh should emit extracting progress event"
+    );
+    assert!(
+        found_persisting,
+        "Refresh should emit persisting progress event"
+    );
     assert!(has_result, "Refresh should emit final result");
 
     // Verify final response is last
     let last_line = lines.last().unwrap();
     let last_parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
-    assert!(last_parsed.get("result").is_some(), "Last line should be the result");
+    assert!(
+        last_parsed.get("result").is_some(),
+        "Last line should be the result"
+    );
 }
 
 // ── D5: Agent service tests ─────────────────────────────────────
@@ -453,9 +523,8 @@ fn orient_without_loaded_repo_returns_error() {
 
 #[test]
 fn orient_missing_db_path_returns_invalid_request() {
-    let output = run_daemon_request(
-        r#"{"id":"d5-2","method":"orient","params":{"repo_uid":"test"}}"#,
-    );
+    let output =
+        run_daemon_request(r#"{"id":"d5-2","method":"orient","params":{"repo_uid":"test"}}"#);
     assert!(output.contains(r#""id":"d5-2""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
     assert!(output.contains("db_path"));
@@ -505,9 +574,8 @@ fn check_without_loaded_repo_returns_error() {
 
 #[test]
 fn check_missing_db_path_returns_invalid_request() {
-    let output = run_daemon_request(
-        r#"{"id":"d5-6","method":"check","params":{"repo_uid":"test"}}"#,
-    );
+    let output =
+        run_daemon_request(r#"{"id":"d5-6","method":"check","params":{"repo_uid":"test"}}"#);
     assert!(output.contains(r#""id":"d5-6""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
     assert!(output.contains("db_path"));
@@ -582,8 +650,16 @@ fn explain_rejects_small_budget() {
     let output = &results[0];
 
     assert!(output.contains(r#""id":"b-3""#));
-    assert!(output.contains(r#""code":"InvalidRequest""#), "Should reject small budget: {}", output);
-    assert!(output.contains("medium|large"), "Error should mention valid budgets: {}", output);
+    assert!(
+        output.contains(r#""code":"InvalidRequest""#),
+        "Should reject small budget: {}",
+        output
+    );
+    assert!(
+        output.contains("medium|large"),
+        "Error should mention valid budgets: {}",
+        output
+    );
 }
 
 #[test]
@@ -608,7 +684,11 @@ fn orient_check_explain_end_to_end() {
         repo_path_str, db_path_str
     );
     let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
-    assert!(!results[0].contains(r#""code""#), "Index failed: {}", results[0]);
+    assert!(
+        !results[0].contains(r#""code""#),
+        "Index failed: {}",
+        results[0]
+    );
 
     // Step 2: Load the repo
     let load_request = format!(
@@ -616,7 +696,11 @@ fn orient_check_explain_end_to_end() {
         db_path_str
     );
     let results = run_daemon_requests_with_state(vec![&load_request], Arc::clone(&state));
-    assert!(results[0].contains(r#""loaded":"test-repo""#), "Load failed: {}", results[0]);
+    assert!(
+        results[0].contains(r#""loaded":"test-repo""#),
+        "Load failed: {}",
+        results[0]
+    );
 
     // Step 3: Orient (repo-level, no focus)
     let orient_request = format!(
@@ -626,11 +710,31 @@ fn orient_check_explain_end_to_end() {
     let results = run_daemon_requests_with_state(vec![&orient_request], Arc::clone(&state));
     let orient_output = &results[0];
 
-    assert!(orient_output.contains(r#""id":"e2e-orient-3""#), "Orient response: {}", orient_output);
-    assert!(orient_output.contains(r#""schema":"rgr.agent.v1""#), "Orient should return agent schema: {}", orient_output);
-    assert!(orient_output.contains(r#""command":"orient""#), "Orient should return command: {}", orient_output);
-    assert!(orient_output.contains(r#""repo":"test-repo""#), "Orient should return repo: {}", orient_output);
-    assert!(!orient_output.contains(r#""error":"#), "Orient should not return error: {}", orient_output);
+    assert!(
+        orient_output.contains(r#""id":"e2e-orient-3""#),
+        "Orient response: {}",
+        orient_output
+    );
+    assert!(
+        orient_output.contains(r#""schema":"rgr.agent.v1""#),
+        "Orient should return agent schema: {}",
+        orient_output
+    );
+    assert!(
+        orient_output.contains(r#""command":"orient""#),
+        "Orient should return command: {}",
+        orient_output
+    );
+    assert!(
+        orient_output.contains(r#""repo":"test-repo""#),
+        "Orient should return repo: {}",
+        orient_output
+    );
+    assert!(
+        !orient_output.contains(r#""error":"#),
+        "Orient should not return error: {}",
+        orient_output
+    );
 
     // Step 4: Check
     let check_request = format!(
@@ -640,10 +744,26 @@ fn orient_check_explain_end_to_end() {
     let results = run_daemon_requests_with_state(vec![&check_request], Arc::clone(&state));
     let check_output = &results[0];
 
-    assert!(check_output.contains(r#""id":"e2e-orient-4""#), "Check response: {}", check_output);
-    assert!(check_output.contains(r#""schema":"rgr.agent.v1""#), "Check should return agent schema: {}", check_output);
-    assert!(check_output.contains(r#""command":"check""#), "Check should return command: {}", check_output);
-    assert!(!check_output.contains(r#""error":"#), "Check should not return error: {}", check_output);
+    assert!(
+        check_output.contains(r#""id":"e2e-orient-4""#),
+        "Check response: {}",
+        check_output
+    );
+    assert!(
+        check_output.contains(r#""schema":"rgr.agent.v1""#),
+        "Check should return agent schema: {}",
+        check_output
+    );
+    assert!(
+        check_output.contains(r#""command":"check""#),
+        "Check should return command: {}",
+        check_output
+    );
+    assert!(
+        !check_output.contains(r#""error":"#),
+        "Check should not return error: {}",
+        check_output
+    );
 
     // Step 5: Explain (file target)
     let explain_request = format!(
@@ -653,10 +773,26 @@ fn orient_check_explain_end_to_end() {
     let results = run_daemon_requests_with_state(vec![&explain_request], Arc::clone(&state));
     let explain_output = &results[0];
 
-    assert!(explain_output.contains(r#""id":"e2e-orient-5""#), "Explain response: {}", explain_output);
-    assert!(explain_output.contains(r#""schema":"rgr.agent.v1""#), "Explain should return agent schema: {}", explain_output);
-    assert!(explain_output.contains(r#""command":"explain""#), "Explain should return command: {}", explain_output);
-    assert!(!explain_output.contains(r#""error":"#), "Explain should not return error: {}", explain_output);
+    assert!(
+        explain_output.contains(r#""id":"e2e-orient-5""#),
+        "Explain response: {}",
+        explain_output
+    );
+    assert!(
+        explain_output.contains(r#""schema":"rgr.agent.v1""#),
+        "Explain should return agent schema: {}",
+        explain_output
+    );
+    assert!(
+        explain_output.contains(r#""command":"explain""#),
+        "Explain should return command: {}",
+        explain_output
+    );
+    assert!(
+        !explain_output.contains(r#""error":"#),
+        "Explain should not return error: {}",
+        explain_output
+    );
 }
 
 #[test]
@@ -703,16 +839,19 @@ fn orient_with_focus_and_budget() {
     assert!(output.contains(r#""command":"orient""#));
     // Focus should be resolved to file
     assert!(output.contains(r#""focus""#));
-    assert!(!output.contains(r#""error":"#), "Should not return error: {}", output);
+    assert!(
+        !output.contains(r#""error":"#),
+        "Should not return error: {}",
+        output
+    );
 }
 
 // ── Enrich command tests ────────────────────────────────────────────
 
 #[test]
 fn enrich_missing_db_path_returns_invalid_request() {
-    let output = run_daemon_request(
-        r#"{"id":"en-1","method":"enrich","params":{"repo_uid":"test"}}"#,
-    );
+    let output =
+        run_daemon_request(r#"{"id":"en-1","method":"enrich","params":{"repo_uid":"test"}}"#);
     assert!(output.contains(r#""id":"en-1""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
     assert!(output.contains("db_path"));
@@ -790,7 +929,7 @@ fn enrich_emits_progress_and_returns_cli_contract_shape() {
 
     // Should have progress events + final response
     assert!(
-        lines.len() >= 1,
+        !lines.is_empty(),
         "Expected at least one response line, got: {}",
         output
     );
@@ -820,7 +959,10 @@ fn enrich_emits_progress_and_returns_cli_contract_shape() {
         }
     }
 
-    assert!(found_initializing, "Should have initializing progress event");
+    assert!(
+        found_initializing,
+        "Should have initializing progress event"
+    );
     assert!(found_complete, "Should have complete progress event");
 
     // Verify result contract shape matches CLI EnrichOutput
@@ -830,21 +972,39 @@ fn enrich_emits_progress_and_returns_cli_contract_shape() {
     // Required fields from CLI contract
     assert!(r.get("command").is_some(), "Missing command field");
     assert!(r.get("repo_uid").is_some(), "Missing repo_uid field");
-    assert!(r.get("snapshot_uid").is_some(), "Missing snapshot_uid field");
+    assert!(
+        r.get("snapshot_uid").is_some(),
+        "Missing snapshot_uid field"
+    );
     assert!(r.get("promote").is_some(), "Missing promote field");
-    assert!(r.get("eligible_count").is_some(), "Missing eligible_count field");
-    assert!(r.get("enriched_count").is_some(), "Missing enriched_count field");
-    assert!(r.get("failed_count").is_some(), "Missing failed_count field");
+    assert!(
+        r.get("eligible_count").is_some(),
+        "Missing eligible_count field"
+    );
+    assert!(
+        r.get("enriched_count").is_some(),
+        "Missing enriched_count field"
+    );
+    assert!(
+        r.get("failed_count").is_some(),
+        "Missing failed_count field"
+    );
     assert!(
         r.get("attempted_persist_count").is_some(),
         "Missing attempted_persist_count field"
     );
-    assert!(r.get("persisted_count").is_some(), "Missing persisted_count field");
+    assert!(
+        r.get("persisted_count").is_some(),
+        "Missing persisted_count field"
+    );
     assert!(
         r.get("has_storage_discrepancy").is_some(),
         "Missing has_storage_discrepancy field"
     );
-    assert!(r.get("enrichment_rate").is_some(), "Missing enrichment_rate field");
+    assert!(
+        r.get("enrichment_rate").is_some(),
+        "Missing enrichment_rate field"
+    );
     assert!(r.get("by_language").is_some(), "Missing by_language field");
     assert!(
         r.get("top_failure_reasons").is_some(),
@@ -863,7 +1023,9 @@ fn enrich_emits_progress_and_returns_cli_contract_shape() {
     );
 
     // Verify by_language is tuple format: [["lang", {...}], ...]
-    let by_language = r["by_language"].as_array().expect("by_language should be array");
+    let by_language = r["by_language"]
+        .as_array()
+        .expect("by_language should be array");
     // May be empty if no eligible edges, but if present, should be tuple format
     for entry in by_language {
         assert!(
@@ -877,8 +1039,14 @@ fn enrich_emits_progress_and_returns_cli_contract_shape() {
             2,
             "by_language tuple should have 2 elements: [lang, stats]"
         );
-        assert!(tuple[0].is_string(), "First tuple element should be language string");
-        assert!(tuple[1].is_object(), "Second tuple element should be stats object");
+        assert!(
+            tuple[0].is_string(),
+            "First tuple element should be language string"
+        );
+        assert!(
+            tuple[1].is_object(),
+            "Second tuple element should be stats object"
+        );
     }
 
     // Verify top_failure_reasons is tuple format: [["reason", count], ...]
@@ -897,7 +1065,10 @@ fn enrich_emits_progress_and_returns_cli_contract_shape() {
             2,
             "top_failure_reasons tuple should have 2 elements"
         );
-        assert!(tuple[0].is_string(), "First tuple element should be reason string");
+        assert!(
+            tuple[0].is_string(),
+            "First tuple element should be reason string"
+        );
         assert!(
             tuple[1].is_number(),
             "Second tuple element should be count number"

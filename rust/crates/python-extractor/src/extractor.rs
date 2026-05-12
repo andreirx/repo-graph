@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashSet};
 use repo_graph_classification::types::{ImportBinding, RuntimeBuiltinsSet, SourceLocation};
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::types::{
-    CallArgPayload, EdgeType, ExtractionResult, ExtractedEdge, ExtractedMetrics, ExtractedNode,
+    CallArgPayload, EdgeType, ExtractedEdge, ExtractedMetrics, ExtractedNode, ExtractionResult,
     NodeKind, NodeSubtype, Resolution, ResolvedCallsite, Visibility,
 };
 use tree_sitter::{Node, Parser};
@@ -79,12 +79,7 @@ const STATE_BOUNDARY_BUILTINS: &[&str] = &["open"];
 ///
 /// When a call resolves to one of these modules, we attempt to generate
 /// a `ResolvedCallsite` for state-boundary analysis.
-const STATE_BOUNDARY_MODULES: &[&str] = &[
-    "sqlite3",
-    "psycopg2",
-    "mysql.connector",
-    "pathlib",
-];
+const STATE_BOUNDARY_MODULES: &[&str] = &["sqlite3", "psycopg2", "mysql.connector", "pathlib"];
 
 /// Extraction context for a single file.
 struct ExtractionCtx<'a> {
@@ -277,11 +272,8 @@ fn extract_module_level_assignment(node: &Node, ctx: &mut ExtractionCtx) {
     // expression_statement contains the actual assignment
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        match child.kind() {
-            "assignment" => {
-                extract_assignment_variable(&child, ctx, None);
-            }
-            _ => {}
+        if child.kind() == "assignment" {
+            extract_assignment_variable(&child, ctx, None);
         }
     }
 }
@@ -735,7 +727,14 @@ fn extract_import_from_statement(node: &Node, ctx: &mut ExtractionCtx) {
                 let imported_name = node_text(&child, ctx.source).to_string();
                 let identifier = imported_name.clone();
 
-                emit_from_import_binding(ctx, &full_specifier, &identifier, &imported_name, is_relative, location);
+                emit_from_import_binding(
+                    ctx,
+                    &full_specifier,
+                    &identifier,
+                    &imported_name,
+                    is_relative,
+                    location,
+                );
             }
             "aliased_import" => {
                 let name_node = child.child_by_field_name("name");
@@ -747,12 +746,20 @@ fn extract_import_from_statement(node: &Node, ctx: &mut ExtractionCtx) {
                         .map(|a| node_text(&a, ctx.source).to_string())
                         .unwrap_or_else(|| imported_name.clone());
 
-                    emit_from_import_binding(ctx, &full_specifier, &identifier, &imported_name, is_relative, location);
+                    emit_from_import_binding(
+                        ctx,
+                        &full_specifier,
+                        &identifier,
+                        &imported_name,
+                        is_relative,
+                        location,
+                    );
                 }
             }
             "wildcard_import" => {
                 // `from x import *` - record the module import without individual bindings
-                let target_key = python_specifier_to_target_key(&full_specifier, ctx.file_path, ctx.repo_uid);
+                let target_key =
+                    python_specifier_to_target_key(&full_specifier, ctx.file_path, ctx.repo_uid);
                 ctx.edges.push(ExtractedEdge {
                     edge_uid: uuid::Uuid::new_v4().to_string(),
                     snapshot_uid: ctx.snapshot_uid.into(),
@@ -969,10 +976,7 @@ fn extract_class(node: &Node, ctx: &mut ExtractionCtx) {
         node_uid: uuid::Uuid::new_v4().to_string(),
         snapshot_uid: ctx.snapshot_uid.into(),
         repo_uid: ctx.repo_uid.into(),
-        stable_key: format!(
-            "{}:{}#{}:SYMBOL:CLASS",
-            ctx.repo_uid, ctx.file_path, name
-        ),
+        stable_key: format!("{}:{}#{}:SYMBOL:CLASS", ctx.repo_uid, ctx.file_path, name),
         kind: NodeKind::Symbol,
         subtype: Some(NodeSubtype::Class),
         name: name.to_string(),
@@ -1319,10 +1323,10 @@ fn strip_python_string_quotes(s: &str) -> &str {
     }
 
     // Strip single quotes.
-    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
-        if s.len() >= 2 {
-            return &s[1..s.len() - 1];
-        }
+    if ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
+        && s.len() >= 2
+    {
+        return &s[1..s.len() - 1];
     }
 
     s
@@ -1423,8 +1427,12 @@ fn count_parameters(node: &Node, source: &str) -> u32 {
     let mut cursor = params.walk();
     for child in params.children(&mut cursor) {
         match child.kind() {
-            "identifier" | "typed_parameter" | "default_parameter" | "typed_default_parameter"
-            | "list_splat_pattern" | "dictionary_splat_pattern" => {
+            "identifier"
+            | "typed_parameter"
+            | "default_parameter"
+            | "typed_default_parameter"
+            | "list_splat_pattern"
+            | "dictionary_splat_pattern" => {
                 // Get the parameter name (first identifier child or the node itself)
                 let text = child
                     .child_by_field_name("name")
@@ -1529,7 +1537,11 @@ mod tests {
     fn extracts_file_node() {
         let result = extract_test("def main(): pass");
         assert!(result.nodes.iter().any(|n| n.kind == NodeKind::File));
-        let file_node = result.nodes.iter().find(|n| n.kind == NodeKind::File).unwrap();
+        let file_node = result
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::File)
+            .unwrap();
         assert_eq!(file_node.stable_key, "test:src/app.py:FILE");
         assert_eq!(file_node.name, "app.py");
     }
@@ -1831,7 +1843,11 @@ mod tests {
             .unwrap();
         assert_eq!(var.name, "count");
         // Qualified name includes function scope
-        assert!(var.qualified_name.as_ref().unwrap().contains("process.count"));
+        assert!(var
+            .qualified_name
+            .as_ref()
+            .unwrap()
+            .contains("process.count"));
         // Local variables are always private
         assert_eq!(var.visibility, Some(Visibility::Private));
     }
@@ -1868,7 +1884,11 @@ mod tests {
             .find(|n| n.subtype == Some(NodeSubtype::Variable))
             .unwrap();
         assert_eq!(var.name, "inner_var");
-        assert!(var.qualified_name.as_ref().unwrap().contains("outer.inner_var"));
+        assert!(var
+            .qualified_name
+            .as_ref()
+            .unwrap()
+            .contains("outer.inner_var"));
     }
 
     #[test]
@@ -1898,7 +1918,11 @@ mod tests {
             .find(|n| n.subtype == Some(NodeSubtype::Variable))
             .unwrap();
         assert_eq!(var.name, "total");
-        assert!(var.qualified_name.as_ref().unwrap().contains("process.total"));
+        assert!(var
+            .qualified_name
+            .as_ref()
+            .unwrap()
+            .contains("process.total"));
     }
 
     // -- Import extraction --
@@ -1989,15 +2013,27 @@ mod tests {
     #[test]
     fn target_key_non_relative_simple() {
         // Non-relative imports return slash paths (resolver Stage 4 handles them)
-        assert_eq!(python_specifier_to_target_key("os", "src/app.py", "r1"), "os");
-        assert_eq!(python_specifier_to_target_key("json", "src/app.py", "r1"), "json");
+        assert_eq!(
+            python_specifier_to_target_key("os", "src/app.py", "r1"),
+            "os"
+        );
+        assert_eq!(
+            python_specifier_to_target_key("json", "src/app.py", "r1"),
+            "json"
+        );
     }
 
     #[test]
     fn target_key_non_relative_dotted() {
         // Dotted absolute imports become slash paths
-        assert_eq!(python_specifier_to_target_key("foo.bar", "src/app.py", "r1"), "foo/bar");
-        assert_eq!(python_specifier_to_target_key("src.module.sub", "app.py", "r1"), "src/module/sub");
+        assert_eq!(
+            python_specifier_to_target_key("foo.bar", "src/app.py", "r1"),
+            "foo/bar"
+        );
+        assert_eq!(
+            python_specifier_to_target_key("src.module.sub", "app.py", "r1"),
+            "src/module/sub"
+        );
     }
 
     #[test]
@@ -2350,11 +2386,17 @@ def load_from_env():
         // Double quotes
         assert_eq!(strip_python_string_quotes("\"world\""), "world");
         // Triple double quotes
-        assert_eq!(strip_python_string_quotes("\"\"\"multi\nline\"\"\""), "multi\nline");
+        assert_eq!(
+            strip_python_string_quotes("\"\"\"multi\nline\"\"\""),
+            "multi\nline"
+        );
         // Triple single quotes
         assert_eq!(strip_python_string_quotes("'''text'''"), "text");
         // Raw string prefix
-        assert_eq!(strip_python_string_quotes("r\"raw\\nstring\""), "raw\\nstring");
+        assert_eq!(
+            strip_python_string_quotes("r\"raw\\nstring\""),
+            "raw\\nstring"
+        );
         // Bytes prefix
         assert_eq!(strip_python_string_quotes("b\"bytes\""), "bytes");
     }

@@ -77,7 +77,10 @@ impl EligibilityQuery {
 /// pipeline interacts with storage only through this interface.
 pub trait EnrichmentStoragePort {
     /// Query eligible edges for enrichment.
-    fn query_eligible_edges(&self, query: &EligibilityQuery) -> Result<Vec<EligibleEdge>, StorageError>;
+    fn query_eligible_edges(
+        &self,
+        query: &EligibilityQuery,
+    ) -> Result<Vec<EligibleEdge>, StorageError>;
 
     /// Persist enrichment metadata for edges.
     ///
@@ -178,17 +181,16 @@ impl InMemoryEnrichmentStorage {
 }
 
 impl EnrichmentStoragePort for InMemoryEnrichmentStorage {
-    fn query_eligible_edges(&self, query: &EligibilityQuery) -> Result<Vec<EligibleEdge>, StorageError> {
+    fn query_eligible_edges(
+        &self,
+        query: &EligibilityQuery,
+    ) -> Result<Vec<EligibleEdge>, StorageError> {
         let mut edges: Vec<_> = self
             .eligible_edges
             .iter()
             .filter(|e| e.snapshot_uid == query.snapshot_uid)
-            .filter(|e| {
-                query.categories.is_empty() || query.categories.contains(&e.category)
-            })
-            .filter(|e| {
-                query.languages.is_empty() || query.languages.contains(&e.language)
-            })
+            .filter(|e| query.categories.is_empty() || query.categories.contains(&e.category))
+            .filter(|e| query.languages.is_empty() || query.languages.contains(&e.language))
             .filter(|e| {
                 !query.exclude_already_enriched || !self.enrichments.contains_key(&e.edge_uid)
             })
@@ -335,8 +337,7 @@ mod tests {
             language: EnrichmentLanguage::Rust,
         });
 
-        let query = EligibilityQuery::new("snap-1")
-            .with_languages(vec![EnrichmentLanguage::Rust]);
+        let query = EligibilityQuery::new("snap-1").with_languages(vec![EnrichmentLanguage::Rust]);
         let edges = storage.query_eligible_edges(&query).unwrap();
 
         assert_eq!(edges.len(), 1);

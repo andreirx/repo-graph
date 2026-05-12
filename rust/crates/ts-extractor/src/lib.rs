@@ -50,17 +50,23 @@
 //!   This mirrors the TS extractor, which does not reject
 //!   syntactically invalid files.
 
-mod builtins;
 pub mod amqp_detector;
 pub mod boundary_detector;
+mod builtins;
 mod extractor;
 pub mod kafka_detector;
 pub mod lexical_scope;
 mod metrics;
 pub mod nats_detector;
 
-pub use amqp_detector::{extract_amqp_boundary_calls, is_amqp_boundary_pattern, RawAmqpBoundaryCall};
+pub use amqp_detector::{
+    extract_amqp_boundary_calls, is_amqp_boundary_pattern, RawAmqpBoundaryCall,
+};
 pub use boundary_detector::{extract_ts_boundary_calls, is_boundary_pattern, RawTsBoundaryCall};
 pub use extractor::TsExtractor;
-pub use kafka_detector::{extract_kafka_boundary_calls, is_kafka_boundary_pattern, RawKafkaBoundaryCall};
-pub use nats_detector::{extract_nats_boundary_calls, is_nats_boundary_pattern, RawNatsBoundaryCall};
+pub use kafka_detector::{
+    extract_kafka_boundary_calls, is_kafka_boundary_pattern, RawKafkaBoundaryCall,
+};
+pub use nats_detector::{
+    extract_nats_boundary_calls, is_nats_boundary_pattern, RawNatsBoundaryCall,
+};

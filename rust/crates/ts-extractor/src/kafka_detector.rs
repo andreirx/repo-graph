@@ -274,7 +274,13 @@ pub fn extract_kafka_boundary_calls(
     let mut results = Vec::new();
     let mut enclosing_function = String::new();
 
-    extract_from_node(root, src, &mut enclosing_function, &factory_vars, &mut results);
+    extract_from_node(
+        root,
+        src,
+        &mut enclosing_function,
+        &factory_vars,
+        &mut results,
+    );
 
     results
 }
@@ -312,7 +318,8 @@ fn extract_from_node(
 
         // Detect `producer.send(...)`, `consumer.subscribe(...)`, etc.
         "call_expression" => {
-            if let Some(call) = try_extract_kafka_call(node, src, enclosing_function, factory_vars) {
+            if let Some(call) = try_extract_kafka_call(node, src, enclosing_function, factory_vars)
+            {
                 results.push(call);
             }
         }
@@ -420,7 +427,12 @@ fn extract_kafka_arguments(
     method_name: &str,
     arguments: &tree_sitter::Node,
     src: &[u8],
-) -> (Option<String>, Option<Vec<String>>, Option<String>, Option<String>) {
+) -> (
+    Option<String>,
+    Option<Vec<String>>,
+    Option<String>,
+    Option<String>,
+) {
     // Find the first object argument (most Kafka methods take { ... } as first arg)
     let object_arg = find_first_object_arg(arguments);
 
@@ -463,7 +475,9 @@ fn extract_kafka_arguments(
 }
 
 /// Find the first object literal argument in an arguments node.
-fn find_first_object_arg<'a>(arguments: &'a tree_sitter::Node<'a>) -> Option<tree_sitter::Node<'a>> {
+fn find_first_object_arg<'a>(
+    arguments: &'a tree_sitter::Node<'a>,
+) -> Option<tree_sitter::Node<'a>> {
     for i in 0..arguments.child_count() {
         if let Some(arg) = arguments.child(i) {
             if arg.kind() == "object" {
@@ -897,7 +911,12 @@ mod tests {
             await producer.send({ topic: 'notifications', messages: [] });
         "#;
         let calls = parse_and_extract(source);
-        assert_eq!(calls.len(), 2, "only subscribe and send should emit; got {:?}", calls);
+        assert_eq!(
+            calls.len(),
+            2,
+            "only subscribe and send should emit; got {:?}",
+            calls
+        );
 
         let names: Vec<_> = calls.iter().map(|c| c.function_name.as_str()).collect();
         assert!(names.contains(&"subscribe"));

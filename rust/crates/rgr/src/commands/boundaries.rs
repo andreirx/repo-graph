@@ -195,9 +195,7 @@ fn run_boundaries_list(args: &[String]) -> ExitCode {
     }
 }
 
-fn parse_list_args(
-    args: &[String],
-) -> Result<(&Path, &str, BoundaryInteractionFilter), String> {
+fn parse_list_args(args: &[String]) -> Result<(&Path, &str, BoundaryInteractionFilter), String> {
     if args.len() < 2 {
         return Err(
             "usage: rmap boundaries list <db_path> <repo_uid> [--kind <kind>] ...".to_string(),

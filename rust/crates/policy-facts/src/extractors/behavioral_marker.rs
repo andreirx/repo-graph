@@ -101,7 +101,10 @@ fn extract_markers_from_function(
     };
 
     // Build symbol key
-    let symbol_key = format!("{}:{}#{}:SYMBOL:FUNCTION", repo_uid, file_path, function_name);
+    let symbol_key = format!(
+        "{}:{}#{}:SYMBOL:FUNCTION",
+        repo_uid, file_path, function_name
+    );
 
     // Get function body
     let body = match func_node.child_by_field_name("body") {
@@ -135,16 +138,11 @@ fn extract_function_name(declarator: &tree_sitter::Node, source: &[u8]) -> Optio
     let mut current = *declarator;
 
     // Unwrap function_declarator and pointer_declarator wrappers
-    loop {
-        match current.kind() {
-            "function_declarator" | "pointer_declarator" => {
-                if let Some(inner) = current.child_by_field_name("declarator") {
-                    current = inner;
-                } else {
-                    break;
-                }
-            }
-            _ => break,
+    while let "function_declarator" | "pointer_declarator" = current.kind() {
+        if let Some(inner) = current.child_by_field_name("declarator") {
+            current = inner;
+        } else {
+            break;
         }
     }
 
@@ -200,12 +198,26 @@ fn find_loops_recursive(
                     results.push(marker);
                 }
                 // Also check for nested loops inside this loop
-                find_loops_recursive(&child, source, file_path, function_name, symbol_key, results);
+                find_loops_recursive(
+                    &child,
+                    source,
+                    file_path,
+                    function_name,
+                    symbol_key,
+                    results,
+                );
             }
             // Recurse into other compound structures
             "compound_statement" | "if_statement" | "switch_statement" | "case_statement"
             | "preproc_if" | "preproc_ifdef" | "preproc_else" | "preproc_elif" => {
-                find_loops_recursive(&child, source, file_path, function_name, symbol_key, results);
+                find_loops_recursive(
+                    &child,
+                    source,
+                    file_path,
+                    function_name,
+                    symbol_key,
+                    results,
+                );
             }
             _ => {}
         }
@@ -309,8 +321,8 @@ fn has_result_dependent_condition(
 
     // Check for result/status-like identifiers in the condition
     const RESULT_PATTERNS: &[&str] = &[
-        "result", "status", "error", "err", "ret", "rc", "ok", "success",
-        "fail", "code", "state", "try", "attempt", "count",
+        "result", "status", "error", "err", "ret", "rc", "ok", "success", "fail", "code", "state",
+        "try", "attempt", "count",
     ];
 
     for pattern in RESULT_PATTERNS {
@@ -321,8 +333,7 @@ fn has_result_dependent_condition(
 
     // Also check for comparisons to common success/failure constants
     const VALUE_PATTERNS: &[&str] = &[
-        "== 0", "!= 0", "< 0", "> 0", "<= 0", ">= 0",
-        "_ok", "_err", "_fail", "_success",
+        "== 0", "!= 0", "< 0", "> 0", "<= 0", ">= 0", "_ok", "_err", "_fail", "_success",
     ];
 
     for pattern in VALUE_PATTERNS {
@@ -336,7 +347,10 @@ fn has_result_dependent_condition(
 
 /// Find a sleep/delay call in a loop body.
 /// Returns (function_name, delay_ms) if found.
-fn find_sleep_in_loop(loop_node: &tree_sitter::Node, source: &[u8]) -> Option<(String, Option<u64>)> {
+fn find_sleep_in_loop(
+    loop_node: &tree_sitter::Node,
+    source: &[u8],
+) -> Option<(String, Option<u64>)> {
     find_sleep_recursive(loop_node, source)
 }
 
@@ -358,7 +372,10 @@ fn find_sleep_recursive(node: &tree_sitter::Node, source: &[u8]) -> Option<(Stri
 }
 
 /// Check if a call expression is a sleep/delay call.
-fn check_call_for_sleep(call_node: &tree_sitter::Node, source: &[u8]) -> Option<(String, Option<u64>)> {
+fn check_call_for_sleep(
+    call_node: &tree_sitter::Node,
+    source: &[u8],
+) -> Option<(String, Option<u64>)> {
     let callee = call_node.child_by_field_name("function")?;
     let callee_name = callee.utf8_text(source).ok()?.trim().to_string();
 
@@ -395,10 +412,10 @@ fn extract_sleep_delay_ms(
 
     // Convert to milliseconds based on function
     match func_name {
-        "sleep" => Some(value * 1000),       // seconds -> ms
-        "Sleep" => Some(value),               // already ms (Windows)
-        "usleep" => Some(value / 1000),       // microseconds -> ms
-        "nanosleep" => None,                  // requires parsing timespec struct
+        "sleep" => Some(value * 1000),  // seconds -> ms
+        "Sleep" => Some(value),         // already ms (Windows)
+        "usleep" => Some(value / 1000), // microseconds -> ms
+        "nanosleep" => None,            // requires parsing timespec struct
         _ => None,
     }
 }
@@ -649,7 +666,14 @@ fn find_curl_resume_recursive(
             }
         }
         // Recurse
-        find_curl_resume_recursive(&child, source, file_path, function_name, symbol_key, results);
+        find_curl_resume_recursive(
+            &child,
+            source,
+            file_path,
+            function_name,
+            symbol_key,
+            results,
+        );
     }
 }
 
@@ -788,8 +812,10 @@ int download_with_retry(void) {
             assert_eq!(sleep_call.as_deref(), Some("sleep"));
             assert_eq!(*delay_ms, Some(30000)); // 30 seconds
             assert_eq!(*max_attempts, None); // not determinable
-            // do-while condition
-            assert!(break_condition.as_ref().map_or(false, |c| c.contains("result != OK")));
+                                             // do-while condition
+            assert!(break_condition
+                .as_ref()
+                .is_some_and(|c| c.contains("result != OK")));
         } else {
             panic!("expected RetryLoop evidence");
         }
@@ -919,10 +945,7 @@ int download_small(CURL *curl, long offset) {
         let markers = extract_behavioral_markers(&tree, source.as_bytes(), "test.c", "test");
 
         assert_eq!(markers.len(), 1);
-        if let MarkerEvidence::ResumeOffset {
-            option_name, ..
-        } = &markers[0].evidence
-        {
+        if let MarkerEvidence::ResumeOffset { option_name, .. } = &markers[0].evidence {
             assert_eq!(option_name.as_deref(), Some("CURLOPT_RESUME_FROM"));
         } else {
             panic!("expected ResumeOffset evidence");

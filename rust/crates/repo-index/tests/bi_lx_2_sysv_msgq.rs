@@ -25,8 +25,8 @@
 use std::path::PathBuf;
 
 use repo_graph_boundary_interaction::{
-    BoundaryInteractionFilter, BoundaryInteractionReadPort, ChannelKind, Direction,
-    InteractionPattern, BoundaryScope,
+    BoundaryInteractionFilter, BoundaryInteractionReadPort, BoundaryScope, ChannelKind, Direction,
+    InteractionPattern,
 };
 use repo_graph_repo_index::compose::{index_into_storage, ComposeOptions};
 use repo_graph_storage::StorageConnection;
@@ -86,7 +86,10 @@ fn index_sysv_msgq_fixture_produces_message_queue_surfaces() {
             .iter()
             .map(|s| format!(
                 "{}:{} {} {:?}",
-                s.source_file, s.line_start, s.channel_kind.as_str(), s.direction
+                s.source_file,
+                s.line_start,
+                s.channel_kind.as_str(),
+                s.direction
             ))
             .collect::<Vec<_>>()
     );
@@ -193,14 +196,21 @@ fn sysv_msgq_msgsnd_is_provider() {
         .collect();
 
     // sender.c has msgget (bidirectional) and msgsnd (provider)
-    assert_eq!(msgsnd_surfaces.len(), 2, "expected 2 surfaces from sender.c");
+    assert_eq!(
+        msgsnd_surfaces.len(),
+        2,
+        "expected 2 surfaces from sender.c"
+    );
 
     // At least one should be provider (msgsnd)
     let provider_count = msgsnd_surfaces
         .iter()
         .filter(|s| s.direction == Direction::Provider)
         .count();
-    assert_eq!(provider_count, 1, "expected 1 provider surface (msgsnd) in sender.c");
+    assert_eq!(
+        provider_count, 1,
+        "expected 1 provider surface (msgsnd) in sender.c"
+    );
 }
 
 #[test]
@@ -231,14 +241,21 @@ fn sysv_msgq_msgrcv_is_consumer() {
         .collect();
 
     // receiver.c has msgget (bidirectional) and msgrcv (consumer)
-    assert_eq!(msgrcv_surfaces.len(), 2, "expected 2 surfaces from receiver.c");
+    assert_eq!(
+        msgrcv_surfaces.len(),
+        2,
+        "expected 2 surfaces from receiver.c"
+    );
 
     // At least one should be consumer (msgrcv)
     let consumer_count = msgrcv_surfaces
         .iter()
         .filter(|s| s.direction == Direction::Consumer)
         .count();
-    assert_eq!(consumer_count, 1, "expected 1 consumer surface (msgrcv) in receiver.c");
+    assert_eq!(
+        consumer_count, 1,
+        "expected 1 consumer surface (msgrcv) in receiver.c"
+    );
 }
 
 #[test]

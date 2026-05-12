@@ -36,8 +36,8 @@
 //! **API shape:** Four entry points:
 //!   - `index_path` / `index_into_storage` — full index from disk
 //!   - `refresh_path` / `refresh_into_storage` — incremental refresh
-//!   Both share `prepare_repo_inputs` for scanning/config/assembly
-//!   and `persist_read_failures` for read-failure repair.
+//!     Both share `prepare_repo_inputs` for scanning/config/assembly
+//!     and `persist_read_failures` for read-failure repair.
 //!
 //! **Scope:** Full-index + refresh from disk. No CLI, no trust
 //! computation. Policy crates unchanged.

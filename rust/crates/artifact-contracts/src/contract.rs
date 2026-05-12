@@ -4,8 +4,8 @@
 //! policies and classifications.
 
 use crate::{
-    ArtifactFamily, ClassificationMaturity, DegradationPolicy, FreshnessTracking,
-    IdentityPolicy, ImpactPolicy, ProvenancePolicy, RefreshPolicy, TruthKind,
+    ArtifactFamily, ClassificationMaturity, DegradationPolicy, FreshnessTracking, IdentityPolicy,
+    ImpactPolicy, ProvenancePolicy, RefreshPolicy, TruthKind,
 };
 
 /// Complete contract for one artifact family.

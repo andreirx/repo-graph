@@ -131,47 +131,37 @@ where
     }
 
     // GR-1A: Recompute BoundaryContracts (provider surfaces)
-    let hint_result = grpc_impl_hint::run_grpc_impl_hint_detection(
-        storage,
-        snapshot_uid,
-        repo_uid,
-    );
+    let hint_result = grpc_impl_hint::run_grpc_impl_hint_detection(storage, snapshot_uid, repo_uid);
     result.grpc_impl_hints = Some(hint_result);
 
     // GR-1B: Boost confidence for surfaces with registration proof
     if let Some(ref hints) = result.grpc_impl_hints {
         if hints.hints_emitted > 0 {
-            let proof_result = grpc_registration_proof::run_grpc_registration_proof(
-                storage,
-                snapshot_uid,
-            );
+            let proof_result =
+                grpc_registration_proof::run_grpc_registration_proof(storage, snapshot_uid);
             result.grpc_registration_proof = Some(proof_result);
         }
     }
 
     // GR-2A: Recompute BoundaryContracts (consumer surfaces)
-    let client_hint_result = grpc_client_hint::run_grpc_client_hint_detection(
-        storage,
-        snapshot_uid,
-        repo_uid,
-    );
+    let client_hint_result =
+        grpc_client_hint::run_grpc_client_hint_detection(storage, snapshot_uid, repo_uid);
     result.grpc_client_hints = Some(client_hint_result);
 
     // GR-3A: Recompute BoundaryInteractionLinks
-    let has_providers = result.grpc_impl_hints
+    let has_providers = result
+        .grpc_impl_hints
         .as_ref()
         .map(|h| h.hints_emitted > 0)
         .unwrap_or(false);
-    let has_consumers = result.grpc_client_hints
+    let has_consumers = result
+        .grpc_client_hints
         .as_ref()
         .map(|h| h.hints_emitted > 0)
         .unwrap_or(false);
 
     if has_providers && has_consumers {
-        let link_result = grpc_link::run_grpc_link_detection(
-            storage,
-            snapshot_uid,
-        );
+        let link_result = grpc_link::run_grpc_link_detection(storage, snapshot_uid);
         result.grpc_links = Some(link_result);
     }
 

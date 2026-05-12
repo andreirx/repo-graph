@@ -133,7 +133,10 @@ impl ProtoOptions {
             serde_json::from_str(json).unwrap_or_default();
 
         Self {
-            java_package: map.get("java_package").and_then(|v| v.as_str()).map(String::from),
+            java_package: map
+                .get("java_package")
+                .and_then(|v| v.as_str())
+                .map(String::from),
             java_outer_classname: map
                 .get("java_outer_classname")
                 .and_then(|v| v.as_str())
@@ -251,12 +254,7 @@ pub fn is_java_generated_grpc_file(path: &str) -> bool {
 }
 
 /// gRPC stub suffixes in order of specificity.
-const GRPC_STUB_SUFFIXES: &[&str] = &[
-    "ImplBase",
-    "BlockingStub",
-    "FutureStub",
-    "Stub",
-];
+const GRPC_STUB_SUFFIXES: &[&str] = &["ImplBase", "BlockingStub", "FutureStub", "Stub"];
 
 /// Extract service name from a gRPC stub class name.
 ///
@@ -293,7 +291,7 @@ pub fn proto_filename_to_outer_class(proto_filename: &str) -> String {
 
 /// Convert snake_case to CamelCase.
 pub fn to_camel_case(s: &str) -> String {
-    s.split(|c| c == '_' || c == '-')
+    s.split(['_', '-'])
         .map(|part| {
             if part.is_empty() {
                 return String::new();
@@ -568,14 +566,18 @@ mod tests {
     fn test_is_java_generated_proto_file() {
         assert!(is_java_generated_proto_file("com/example/MyProtos.java"));
         assert!(is_java_generated_proto_file("proto-generated/Test.java"));
-        assert!(is_java_generated_proto_file("src/proto2-generated/Foo.java"));
+        assert!(is_java_generated_proto_file(
+            "src/proto2-generated/Foo.java"
+        ));
         assert!(!is_java_generated_proto_file("com/example/MyService.java"));
         assert!(!is_java_generated_proto_file("MyProtos.txt"));
     }
 
     #[test]
     fn test_is_java_generated_grpc_file() {
-        assert!(is_java_generated_grpc_file("com/example/MyServiceGrpc.java"));
+        assert!(is_java_generated_grpc_file(
+            "com/example/MyServiceGrpc.java"
+        ));
         assert!(!is_java_generated_grpc_file("com/example/MyService.java"));
     }
 
@@ -584,9 +586,13 @@ mod tests {
         let symbol = JavaSymbol {
             stable_key: "test:key".to_string(),
             name: "RequestHeaderProto".to_string(),
-            qualified_name: "org.apache.hadoop.ipc.protobuf.ProtobufRpcEngineProtos.RequestHeaderProto".to_string(),
+            qualified_name:
+                "org.apache.hadoop.ipc.protobuf.ProtobufRpcEngineProtos.RequestHeaderProto"
+                    .to_string(),
             subtype: "CLASS".to_string(),
-            file_path: "proto2-generated/org/apache/hadoop/ipc/protobuf/ProtobufRpcEngineProtos.java".to_string(),
+            file_path:
+                "proto2-generated/org/apache/hadoop/ipc/protobuf/ProtobufRpcEngineProtos.java"
+                    .to_string(),
         };
 
         assert_eq!(
@@ -638,9 +644,13 @@ mod tests {
         let symbols = vec![JavaSymbol {
             stable_key: "test:RequestHeaderProto".to_string(),
             name: "RequestHeaderProto".to_string(),
-            qualified_name: "org.apache.hadoop.ipc.protobuf.ProtobufRpcEngineProtos.RequestHeaderProto".to_string(),
+            qualified_name:
+                "org.apache.hadoop.ipc.protobuf.ProtobufRpcEngineProtos.RequestHeaderProto"
+                    .to_string(),
             subtype: "CLASS".to_string(),
-            file_path: "proto2-generated/org/apache/hadoop/ipc/protobuf/ProtobufRpcEngineProtos.java".to_string(),
+            file_path:
+                "proto2-generated/org/apache/hadoop/ipc/protobuf/ProtobufRpcEngineProtos.java"
+                    .to_string(),
         }];
 
         let mappings = find_java_mappings(&elements, &symbols);
@@ -707,7 +717,8 @@ mod tests {
             JavaSymbol {
                 stable_key: "test:UserServiceBlockingStub".to_string(),
                 name: "UserServiceBlockingStub".to_string(),
-                qualified_name: "com.example.api.UserServiceGrpc.UserServiceBlockingStub".to_string(),
+                qualified_name: "com.example.api.UserServiceGrpc.UserServiceBlockingStub"
+                    .to_string(),
                 subtype: "CLASS".to_string(),
                 file_path: "generated/com/example/api/UserServiceGrpc.java".to_string(),
             },

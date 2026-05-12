@@ -24,169 +24,175 @@ use repo_graph_classification::types::{PackageDependencySet, TsconfigAliasEntry,
 /// Pre-computed config context for a repo. Caches config lookups
 /// by directory so each directory is resolved at most once.
 pub struct RepoConfigContext {
-	/// Directory → PackageDependencySet cache (for JS/TS via package.json).
-	pkg_cache: HashMap<String, PackageDependencySet>,
-	/// Directory → TsconfigAliases cache.
-	tsconfig_cache: HashMap<String, TsconfigAliases>,
-	/// Directory → PackageDependencySet cache (for Rust via Cargo.toml).
-	cargo_cache: HashMap<String, PackageDependencySet>,
+    /// Directory → PackageDependencySet cache (for JS/TS via package.json).
+    pkg_cache: HashMap<String, PackageDependencySet>,
+    /// Directory → TsconfigAliases cache.
+    tsconfig_cache: HashMap<String, TsconfigAliases>,
+    /// Directory → PackageDependencySet cache (for Rust via Cargo.toml).
+    cargo_cache: HashMap<String, PackageDependencySet>,
+}
+
+impl Default for RepoConfigContext {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RepoConfigContext {
-	/// Build config context by pre-scanning the repo root.
-	/// The actual per-directory resolution is lazy (on first lookup).
-	pub fn new() -> Self {
-		Self {
-			pkg_cache: HashMap::new(),
-			tsconfig_cache: HashMap::new(),
-			cargo_cache: HashMap::new(),
-		}
-	}
+    /// Build config context by pre-scanning the repo root.
+    /// The actual per-directory resolution is lazy (on first lookup).
+    pub fn new() -> Self {
+        Self {
+            pkg_cache: HashMap::new(),
+            tsconfig_cache: HashMap::new(),
+            cargo_cache: HashMap::new(),
+        }
+    }
 
-	/// Resolve package dependencies for a file.
-	/// Walks from file's directory upward to repo root.
-	pub fn resolve_package_deps(
-		&mut self,
-		file_rel_path: &str,
-		repo_root: &Path,
-	) -> PackageDependencySet {
-		let empty = PackageDependencySet { names: vec![] };
-		let dir = parent_dir(file_rel_path);
+    /// Resolve package dependencies for a file.
+    /// Walks from file's directory upward to repo root.
+    pub fn resolve_package_deps(
+        &mut self,
+        file_rel_path: &str,
+        repo_root: &Path,
+    ) -> PackageDependencySet {
+        let empty = PackageDependencySet { names: vec![] };
+        let dir = parent_dir(file_rel_path);
 
-		// Check cache chain upward.
-		let mut probe = dir.clone();
-		loop {
-			if let Some(cached) = self.pkg_cache.get(&probe) {
-				// Backfill cache for unchecked dirs.
-				let result = cached.clone();
-				self.pkg_cache.insert(dir.clone(), result.clone());
-				return result;
-			}
+        // Check cache chain upward.
+        let mut probe = dir.clone();
+        loop {
+            if let Some(cached) = self.pkg_cache.get(&probe) {
+                // Backfill cache for unchecked dirs.
+                let result = cached.clone();
+                self.pkg_cache.insert(dir.clone(), result.clone());
+                return result;
+            }
 
-			// Try reading package.json at this directory.
-			// TS behavior: if the file EXISTS, stop here regardless of
-			// parse success. Extract deps if parseable, else empty.
-			// A broken leaf manifest should NOT inherit parent deps.
-			let abs_dir = if probe.is_empty() {
-				repo_root.to_path_buf()
-			} else {
-				repo_root.join(&probe)
-			};
-			let pkg_path = abs_dir.join("package.json");
-			if pkg_path.exists() {
-				let deps = std::fs::read_to_string(&pkg_path)
-					.ok()
-					.and_then(|content| extract_package_dependencies(&content))
-					.unwrap_or_else(|| empty.clone());
-				self.pkg_cache.insert(probe.clone(), deps.clone());
-				self.pkg_cache.insert(dir.clone(), deps.clone());
-				return deps;
-			}
+            // Try reading package.json at this directory.
+            // TS behavior: if the file EXISTS, stop here regardless of
+            // parse success. Extract deps if parseable, else empty.
+            // A broken leaf manifest should NOT inherit parent deps.
+            let abs_dir = if probe.is_empty() {
+                repo_root.to_path_buf()
+            } else {
+                repo_root.join(&probe)
+            };
+            let pkg_path = abs_dir.join("package.json");
+            if pkg_path.exists() {
+                let deps = std::fs::read_to_string(&pkg_path)
+                    .ok()
+                    .and_then(|content| extract_package_dependencies(&content))
+                    .unwrap_or_else(|| empty.clone());
+                self.pkg_cache.insert(probe.clone(), deps.clone());
+                self.pkg_cache.insert(dir.clone(), deps.clone());
+                return deps;
+            }
 
-			if probe.is_empty() {
-				break;
-			}
-			probe = parent_dir(&probe);
-		}
+            if probe.is_empty() {
+                break;
+            }
+            probe = parent_dir(&probe);
+        }
 
-		self.pkg_cache.insert(dir, empty.clone());
-		empty
-	}
+        self.pkg_cache.insert(dir, empty.clone());
+        empty
+    }
 
-	/// Resolve tsconfig aliases for a file.
-	/// Walks from file's directory upward to repo root.
-	pub fn resolve_tsconfig_aliases(
-		&mut self,
-		file_rel_path: &str,
-		repo_root: &Path,
-	) -> TsconfigAliases {
-		let empty = TsconfigAliases { entries: vec![] };
-		let dir = parent_dir(file_rel_path);
+    /// Resolve tsconfig aliases for a file.
+    /// Walks from file's directory upward to repo root.
+    pub fn resolve_tsconfig_aliases(
+        &mut self,
+        file_rel_path: &str,
+        repo_root: &Path,
+    ) -> TsconfigAliases {
+        let empty = TsconfigAliases { entries: vec![] };
+        let dir = parent_dir(file_rel_path);
 
-		let mut probe = dir.clone();
-		loop {
-			if let Some(cached) = self.tsconfig_cache.get(&probe) {
-				let result = cached.clone();
-				self.tsconfig_cache.insert(dir.clone(), result.clone());
-				return result;
-			}
+        let mut probe = dir.clone();
+        loop {
+            if let Some(cached) = self.tsconfig_cache.get(&probe) {
+                let result = cached.clone();
+                self.tsconfig_cache.insert(dir.clone(), result.clone());
+                return result;
+            }
 
-			let abs_dir = if probe.is_empty() {
-				repo_root.to_path_buf()
-			} else {
-				repo_root.join(&probe)
-			};
-			let tsconfig_path = abs_dir.join("tsconfig.json");
-			if tsconfig_path.exists() {
-				let aliases = read_tsconfig_aliases_from_path(&tsconfig_path)
-					.unwrap_or_else(|| empty.clone());
-				self.tsconfig_cache.insert(probe.clone(), aliases.clone());
-				self.tsconfig_cache.insert(dir.clone(), aliases.clone());
-				return aliases;
-			}
+            let abs_dir = if probe.is_empty() {
+                repo_root.to_path_buf()
+            } else {
+                repo_root.join(&probe)
+            };
+            let tsconfig_path = abs_dir.join("tsconfig.json");
+            if tsconfig_path.exists() {
+                let aliases = read_tsconfig_aliases_from_path(&tsconfig_path)
+                    .unwrap_or_else(|| empty.clone());
+                self.tsconfig_cache.insert(probe.clone(), aliases.clone());
+                self.tsconfig_cache.insert(dir.clone(), aliases.clone());
+                return aliases;
+            }
 
-			if probe.is_empty() {
-				break;
-			}
-			probe = parent_dir(&probe);
-		}
+            if probe.is_empty() {
+                break;
+            }
+            probe = parent_dir(&probe);
+        }
 
-		self.tsconfig_cache.insert(dir, empty.clone());
-		empty
-	}
+        self.tsconfig_cache.insert(dir, empty.clone());
+        empty
+    }
 
-	/// Resolve Cargo dependencies for a Rust file.
-	/// Walks from file's directory upward to repo root.
-	/// Returns normalized dependency names (hyphen → underscore).
-	pub fn resolve_cargo_deps(
-		&mut self,
-		file_rel_path: &str,
-		repo_root: &Path,
-	) -> PackageDependencySet {
-		let empty = PackageDependencySet { names: vec![] };
-		let dir = parent_dir(file_rel_path);
+    /// Resolve Cargo dependencies for a Rust file.
+    /// Walks from file's directory upward to repo root.
+    /// Returns normalized dependency names (hyphen → underscore).
+    pub fn resolve_cargo_deps(
+        &mut self,
+        file_rel_path: &str,
+        repo_root: &Path,
+    ) -> PackageDependencySet {
+        let empty = PackageDependencySet { names: vec![] };
+        let dir = parent_dir(file_rel_path);
 
-		let mut probe = dir.clone();
-		loop {
-			if let Some(cached) = self.cargo_cache.get(&probe) {
-				let result = cached.clone();
-				self.cargo_cache.insert(dir.clone(), result.clone());
-				return result;
-			}
+        let mut probe = dir.clone();
+        loop {
+            if let Some(cached) = self.cargo_cache.get(&probe) {
+                let result = cached.clone();
+                self.cargo_cache.insert(dir.clone(), result.clone());
+                return result;
+            }
 
-			let abs_dir = if probe.is_empty() {
-				repo_root.to_path_buf()
-			} else {
-				repo_root.join(&probe)
-			};
-			let cargo_path = abs_dir.join("Cargo.toml");
-			if cargo_path.exists() {
-				let deps = std::fs::read_to_string(&cargo_path)
-					.ok()
-					.and_then(|content| extract_cargo_dependencies(&content))
-					.unwrap_or_else(|| empty.clone());
-				self.cargo_cache.insert(probe.clone(), deps.clone());
-				self.cargo_cache.insert(dir.clone(), deps.clone());
-				return deps;
-			}
+            let abs_dir = if probe.is_empty() {
+                repo_root.to_path_buf()
+            } else {
+                repo_root.join(&probe)
+            };
+            let cargo_path = abs_dir.join("Cargo.toml");
+            if cargo_path.exists() {
+                let deps = std::fs::read_to_string(&cargo_path)
+                    .ok()
+                    .and_then(|content| extract_cargo_dependencies(&content))
+                    .unwrap_or_else(|| empty.clone());
+                self.cargo_cache.insert(probe.clone(), deps.clone());
+                self.cargo_cache.insert(dir.clone(), deps.clone());
+                return deps;
+            }
 
-			if probe.is_empty() {
-				break;
-			}
-			probe = parent_dir(&probe);
-		}
+            if probe.is_empty() {
+                break;
+            }
+            probe = parent_dir(&probe);
+        }
 
-		self.cargo_cache.insert(dir, empty.clone());
-		empty
-	}
+        self.cargo_cache.insert(dir, empty.clone());
+        empty
+    }
 }
 
 /// Get the parent directory of a repo-relative path.
 fn parent_dir(rel_path: &str) -> String {
-	match rel_path.rfind('/') {
-		Some(pos) => rel_path[..pos].to_string(),
-		None => String::new(), // Root directory.
-	}
+    match rel_path.rfind('/') {
+        Some(pos) => rel_path[..pos].to_string(),
+        None => String::new(), // Root directory.
+    }
 }
 
 // ── Package.json reader ──────────────────────────────────────────
@@ -197,21 +203,26 @@ fn parent_dir(rel_path: &str) -> String {
 ///
 /// Mirrors TS `extractPackageDependencies` from `package-json.ts:67`.
 pub fn extract_package_dependencies(content: &str) -> Option<PackageDependencySet> {
-	let parsed: serde_json::Value = serde_json::from_str(content).ok()?;
-	let obj = parsed.as_object()?;
+    let parsed: serde_json::Value = serde_json::from_str(content).ok()?;
+    let obj = parsed.as_object()?;
 
-	let mut names = BTreeSet::new();
-	for field in &["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] {
-		if let Some(serde_json::Value::Object(deps)) = obj.get(*field) {
-			for key in deps.keys() {
-				names.insert(key.clone());
-			}
-		}
-	}
+    let mut names = BTreeSet::new();
+    for field in &[
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+    ] {
+        if let Some(serde_json::Value::Object(deps)) = obj.get(*field) {
+            for key in deps.keys() {
+                names.insert(key.clone());
+            }
+        }
+    }
 
-	Some(PackageDependencySet {
-		names: names.into_iter().collect(),
-	})
+    Some(PackageDependencySet {
+        names: names.into_iter().collect(),
+    })
 }
 
 // ── Cargo.toml reader ────────────────────────────────────────────
@@ -230,70 +241,72 @@ pub fn extract_package_dependencies(content: &str) -> Option<PackageDependencySe
 ///   - `name = "version"` inline deps
 ///   - `name = { version = "X" }` table deps
 ///   - `[dependencies.name]` sub-tables
+///
 /// Does NOT handle:
 ///   - Renamed deps (`foo = { package = "actual-name" }`)
 ///   - Workspace deps (`foo.workspace = true`)
 ///   - Target-specific deps (`[target.'cfg(...)'.dependencies]`)
+///
 /// These are edge cases for classification; the primary use is
 /// identifying external crate names for import bucketing.
 pub fn extract_cargo_dependencies(content: &str) -> Option<PackageDependencySet> {
-	let mut names = BTreeSet::new();
-	let mut current_section = "";
+    let mut names = BTreeSet::new();
+    let mut current_section = "";
 
-	for line in content.lines() {
-		let line = line.trim();
+    for line in content.lines() {
+        let line = line.trim();
 
-		// Track section headers.
-		if line.starts_with('[') && line.ends_with(']') {
-			current_section = &line[1..line.len() - 1];
-			// Handle sub-table syntax: [dependencies.foo] → dep name "foo".
-			for prefix in &["dependencies.", "dev-dependencies.", "build-dependencies."] {
-				if let Some(dep_name) = current_section.strip_prefix(prefix) {
-					// Normalize hyphen to underscore.
-					names.insert(dep_name.replace('-', "_"));
-				}
-			}
-			continue;
-		}
+        // Track section headers.
+        if line.starts_with('[') && line.ends_with(']') {
+            current_section = &line[1..line.len() - 1];
+            // Handle sub-table syntax: [dependencies.foo] → dep name "foo".
+            for prefix in &["dependencies.", "dev-dependencies.", "build-dependencies."] {
+                if let Some(dep_name) = current_section.strip_prefix(prefix) {
+                    // Normalize hyphen to underscore.
+                    names.insert(dep_name.replace('-', "_"));
+                }
+            }
+            continue;
+        }
 
-		// Only process lines in dependency sections.
-		// Note: target-specific deps ([target.'cfg(...)'.dependencies]) are NOT
-		// supported by this simple line parser.
-		let is_dep_section = current_section == "dependencies"
-			|| current_section == "dev-dependencies"
-			|| current_section == "build-dependencies"
-			|| current_section.starts_with("dependencies.")
-			|| current_section.starts_with("dev-dependencies.")
-			|| current_section.starts_with("build-dependencies.");
+        // Only process lines in dependency sections.
+        // Note: target-specific deps ([target.'cfg(...)'.dependencies]) are NOT
+        // supported by this simple line parser.
+        let is_dep_section = current_section == "dependencies"
+            || current_section == "dev-dependencies"
+            || current_section == "build-dependencies"
+            || current_section.starts_with("dependencies.")
+            || current_section.starts_with("dev-dependencies.")
+            || current_section.starts_with("build-dependencies.");
 
-		if !is_dep_section {
-			continue;
-		}
+        if !is_dep_section {
+            continue;
+        }
 
-		// Skip sub-table lines like [dependencies.foo].
-		if current_section.contains('.') {
-			continue;
-		}
+        // Skip sub-table lines like [dependencies.foo].
+        if current_section.contains('.') {
+            continue;
+        }
 
-		// Parse `name = "version"` or `name = { ... }`.
-		if let Some(eq_pos) = line.find('=') {
-			let key = line[..eq_pos].trim();
-			// Skip empty keys or non-identifier keys.
-			if key.is_empty() || key.contains(' ') || key.contains('[') {
-				continue;
-			}
-			// Normalize hyphen to underscore.
-			names.insert(key.replace('-', "_"));
-		}
-	}
+        // Parse `name = "version"` or `name = { ... }`.
+        if let Some(eq_pos) = line.find('=') {
+            let key = line[..eq_pos].trim();
+            // Skip empty keys or non-identifier keys.
+            if key.is_empty() || key.contains(' ') || key.contains('[') {
+                continue;
+            }
+            // Normalize hyphen to underscore.
+            names.insert(key.replace('-', "_"));
+        }
+    }
 
-	if names.is_empty() {
-		return None;
-	}
+    if names.is_empty() {
+        return None;
+    }
 
-	Some(PackageDependencySet {
-		names: names.into_iter().collect(),
-	})
+    Some(PackageDependencySet {
+        names: names.into_iter().collect(),
+    })
 }
 
 // ── Tsconfig.json reader ─────────────────────────────────────────
@@ -311,322 +324,347 @@ const MAX_EXTENDS_DEPTH: usize = 10;
 /// improvement — it cannot produce fewer aliases than TS, only more
 /// (and only for pathological inputs with comment syntax in strings).
 fn strip_json_comments(source: &str) -> String {
-	let mut result = String::with_capacity(source.len());
-	let mut chars = source.chars().peekable();
-	let mut in_string = false;
-	let mut escape_next = false;
+    let mut result = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    let mut in_string = false;
+    let mut escape_next = false;
 
-	while let Some(ch) = chars.next() {
-		if escape_next {
-			result.push(ch);
-			escape_next = false;
-			continue;
-		}
-		if in_string {
-			if ch == '\\' {
-				escape_next = true;
-			} else if ch == '"' {
-				in_string = false;
-			}
-			result.push(ch);
-			continue;
-		}
-		if ch == '"' {
-			in_string = true;
-			result.push(ch);
-			continue;
-		}
-		if ch == '/' {
-			match chars.peek() {
-				Some('/') => {
-					// Line comment — skip to end of line.
-					for c in chars.by_ref() {
-						if c == '\n' {
-							result.push('\n');
-							break;
-						}
-					}
-					continue;
-				}
-				Some('*') => {
-					// Block comment — skip to */.
-					chars.next(); // consume *
-					let mut prev = ' ';
-					for c in chars.by_ref() {
-						if prev == '*' && c == '/' {
-							break;
-						}
-						prev = c;
-					}
-					continue;
-				}
-				_ => {}
-			}
-		}
-		result.push(ch);
-	}
-	result
+    while let Some(ch) = chars.next() {
+        if escape_next {
+            result.push(ch);
+            escape_next = false;
+            continue;
+        }
+        if in_string {
+            if ch == '\\' {
+                escape_next = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            result.push(ch);
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+            result.push(ch);
+            continue;
+        }
+        if ch == '/' {
+            match chars.peek() {
+                Some('/') => {
+                    // Line comment — skip to end of line.
+                    for c in chars.by_ref() {
+                        if c == '\n' {
+                            result.push('\n');
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                Some('*') => {
+                    // Block comment — skip to */.
+                    chars.next(); // consume *
+                    let mut prev = ' ';
+                    for c in chars.by_ref() {
+                        if prev == '*' && c == '/' {
+                            break;
+                        }
+                        prev = c;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        result.push(ch);
+    }
+    result
 }
 
 /// Read tsconfig.json at `path`, following extends chains.
 /// Returns the effective TsconfigAliases, or None if file missing/unparseable.
 pub fn read_tsconfig_aliases_from_path(path: &Path) -> Option<TsconfigAliases> {
-	let empty = TsconfigAliases { entries: vec![] };
-	let mut visited = std::collections::HashSet::new();
-	let mut current = path.to_path_buf();
+    let empty = TsconfigAliases { entries: vec![] };
+    let mut visited = std::collections::HashSet::new();
+    let mut current = path.to_path_buf();
 
-	for depth in 0..MAX_EXTENDS_DEPTH {
-		let canonical = current.canonicalize().unwrap_or_else(|_| current.clone());
-		if visited.contains(&canonical) {
-			break; // Circular.
-		}
-		visited.insert(canonical.clone());
+    for depth in 0..MAX_EXTENDS_DEPTH {
+        let canonical = current.canonicalize().unwrap_or_else(|_| current.clone());
+        if visited.contains(&canonical) {
+            break; // Circular.
+        }
+        visited.insert(canonical.clone());
 
-		let raw = match std::fs::read_to_string(&current) {
-			Ok(c) => c,
-			Err(_) => {
-				return if depth == 0 { None } else { Some(empty) };
-			}
-		};
+        let raw = match std::fs::read_to_string(&current) {
+            Ok(c) => c,
+            Err(_) => {
+                return if depth == 0 { None } else { Some(empty) };
+            }
+        };
 
-		let stripped = strip_json_comments(&raw);
-		let parsed: serde_json::Value = match serde_json::from_str(&stripped) {
-			Ok(v) => v,
-			Err(_) => {
-				return if depth == 0 { None } else { Some(empty) };
-			}
-		};
+        let stripped = strip_json_comments(&raw);
+        let parsed: serde_json::Value = match serde_json::from_str(&stripped) {
+            Ok(v) => v,
+            Err(_) => {
+                return if depth == 0 { None } else { Some(empty) };
+            }
+        };
 
-		// Check for compilerOptions.paths.
-		if let Some(paths) = parsed
-			.get("compilerOptions")
-			.and_then(|co| co.get("paths"))
-			.and_then(|p| p.as_object())
-		{
-			let entries: Vec<TsconfigAliasEntry> = paths
-				.iter()
-				.map(|(pattern, subs)| {
-					let substitutions = subs
-						.as_array()
-						.map(|arr| {
-							arr.iter()
-								.filter_map(|s| s.as_str().map(|s| s.to_string()))
-								.collect()
-						})
-						.unwrap_or_default();
-					TsconfigAliasEntry {
-						pattern: pattern.clone(),
-						substitutions,
-					}
-				})
-				.collect();
-			return Some(TsconfigAliases { entries });
-		}
+        // Check for compilerOptions.paths.
+        if let Some(paths) = parsed
+            .get("compilerOptions")
+            .and_then(|co| co.get("paths"))
+            .and_then(|p| p.as_object())
+        {
+            let entries: Vec<TsconfigAliasEntry> = paths
+                .iter()
+                .map(|(pattern, subs)| {
+                    let substitutions = subs
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|s| s.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    TsconfigAliasEntry {
+                        pattern: pattern.clone(),
+                        substitutions,
+                    }
+                })
+                .collect();
+            return Some(TsconfigAliases { entries });
+        }
 
-		// Follow extends.
-		let extends = match parsed.get("extends").and_then(|e| e.as_str()) {
-			Some(e) => e.to_string(),
-			None => return Some(empty),
-		};
+        // Follow extends.
+        let extends = match parsed.get("extends").and_then(|e| e.as_str()) {
+            Some(e) => e.to_string(),
+            None => return Some(empty),
+        };
 
-		// Only follow relative extends paths.
-		if !extends.starts_with('.') && !extends.starts_with('/') {
-			return Some(empty);
-		}
+        // Only follow relative extends paths.
+        if !extends.starts_with('.') && !extends.starts_with('/') {
+            return Some(empty);
+        }
 
-		let parent_dir_path = current.parent().unwrap_or(Path::new(""));
-		let mut next = parent_dir_path.join(&extends);
-		if !next.extension().map(|e| e == "json").unwrap_or(false) {
-			next.set_extension("json");
-		}
-		current = next;
-	}
+        let parent_dir_path = current.parent().unwrap_or(Path::new(""));
+        let mut next = parent_dir_path.join(&extends);
+        if !next.extension().map(|e| e == "json").unwrap_or(false) {
+            next.set_extension("json");
+        }
+        current = next;
+    }
 
-	Some(empty)
+    Some(empty)
 }
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use std::fs;
+    use super::*;
+    use std::fs;
 
-	// ── extract_package_dependencies ─────────────────────────
+    // ── extract_package_dependencies ─────────────────────────
 
-	#[test]
-	fn extracts_all_dep_fields() {
-		let content = r#"{
+    #[test]
+    fn extracts_all_dep_fields() {
+        let content = r#"{
 			"dependencies": {"express": "^4.18.0"},
 			"devDependencies": {"vitest": "^1.0.0"},
 			"peerDependencies": {"react": "^18.0.0"},
 			"optionalDependencies": {"fsevents": "^2.3.0"}
 		}"#;
-		let deps = extract_package_dependencies(content).unwrap();
-		assert_eq!(deps.names, vec!["express", "fsevents", "react", "vitest"]);
-	}
+        let deps = extract_package_dependencies(content).unwrap();
+        assert_eq!(deps.names, vec!["express", "fsevents", "react", "vitest"]);
+    }
 
-	#[test]
-	fn returns_sorted_unique_names() {
-		let content = r#"{
+    #[test]
+    fn returns_sorted_unique_names() {
+        let content = r#"{
 			"dependencies": {"b-pkg": "1", "a-pkg": "2"},
 			"devDependencies": {"a-pkg": "3"}
 		}"#;
-		let deps = extract_package_dependencies(content).unwrap();
-		assert_eq!(deps.names, vec!["a-pkg", "b-pkg"]);
-	}
+        let deps = extract_package_dependencies(content).unwrap();
+        assert_eq!(deps.names, vec!["a-pkg", "b-pkg"]);
+    }
 
-	#[test]
-	fn returns_none_on_invalid_json() {
-		assert!(extract_package_dependencies("{invalid").is_none());
-	}
+    #[test]
+    fn returns_none_on_invalid_json() {
+        assert!(extract_package_dependencies("{invalid").is_none());
+    }
 
-	// ── strip_json_comments ──────────────────────────────────
+    // ── strip_json_comments ──────────────────────────────────
 
-	#[test]
-	fn strips_line_comments() {
-		let input = "{\n  // comment\n  \"key\": 1\n}";
-		let stripped = strip_json_comments(input);
-		let parsed: serde_json::Value = serde_json::from_str(&stripped).unwrap();
-		assert_eq!(parsed["key"], 1);
-	}
+    #[test]
+    fn strips_line_comments() {
+        let input = "{\n  // comment\n  \"key\": 1\n}";
+        let stripped = strip_json_comments(input);
+        let parsed: serde_json::Value = serde_json::from_str(&stripped).unwrap();
+        assert_eq!(parsed["key"], 1);
+    }
 
-	#[test]
-	fn strips_block_comments() {
-		let input = "{ /* block */ \"key\": 1 }";
-		let stripped = strip_json_comments(input);
-		let parsed: serde_json::Value = serde_json::from_str(&stripped).unwrap();
-		assert_eq!(parsed["key"], 1);
-	}
+    #[test]
+    fn strips_block_comments() {
+        let input = "{ /* block */ \"key\": 1 }";
+        let stripped = strip_json_comments(input);
+        let parsed: serde_json::Value = serde_json::from_str(&stripped).unwrap();
+        assert_eq!(parsed["key"], 1);
+    }
 
-	// ── read_tsconfig_aliases_from_path ───────────────────────
+    // ── read_tsconfig_aliases_from_path ───────────────────────
 
-	#[test]
-	fn reads_paths_from_tsconfig() {
-		let dir = tempfile::tempdir().unwrap();
-		let tsconfig = dir.path().join("tsconfig.json");
-		fs::write(&tsconfig, r#"{
+    #[test]
+    fn reads_paths_from_tsconfig() {
+        let dir = tempfile::tempdir().unwrap();
+        let tsconfig = dir.path().join("tsconfig.json");
+        fs::write(
+            &tsconfig,
+            r#"{
 			"compilerOptions": {
 				"paths": {
 					"@/*": ["./src/*"],
 					"@lib/*": ["./lib/*"]
 				}
 			}
-		}"#).unwrap();
+		}"#,
+        )
+        .unwrap();
 
-		let aliases = read_tsconfig_aliases_from_path(&tsconfig).unwrap();
-		assert_eq!(aliases.entries.len(), 2);
-		let at = aliases.entries.iter().find(|e| e.pattern == "@/*").unwrap();
-		assert_eq!(at.substitutions, vec!["./src/*"]);
-	}
+        let aliases = read_tsconfig_aliases_from_path(&tsconfig).unwrap();
+        assert_eq!(aliases.entries.len(), 2);
+        let at = aliases.entries.iter().find(|e| e.pattern == "@/*").unwrap();
+        assert_eq!(at.substitutions, vec!["./src/*"]);
+    }
 
-	#[test]
-	fn follows_extends_chain() {
-		let dir = tempfile::tempdir().unwrap();
-		let base = dir.path().join("base.json");
-		fs::write(&base, r#"{
+    #[test]
+    fn follows_extends_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("base.json");
+        fs::write(
+            &base,
+            r#"{
 			"compilerOptions": {
 				"paths": { "@/*": ["./src/*"] }
 			}
-		}"#).unwrap();
+		}"#,
+        )
+        .unwrap();
 
-		let child = dir.path().join("tsconfig.json");
-		fs::write(&child, r#"{ "extends": "./base.json" }"#).unwrap();
+        let child = dir.path().join("tsconfig.json");
+        fs::write(&child, r#"{ "extends": "./base.json" }"#).unwrap();
 
-		let aliases = read_tsconfig_aliases_from_path(&child).unwrap();
-		assert_eq!(aliases.entries.len(), 1);
-		assert_eq!(aliases.entries[0].pattern, "@/*");
-	}
+        let aliases = read_tsconfig_aliases_from_path(&child).unwrap();
+        assert_eq!(aliases.entries.len(), 1);
+        assert_eq!(aliases.entries[0].pattern, "@/*");
+    }
 
-	#[test]
-	fn returns_none_for_missing_file() {
-		let result = read_tsconfig_aliases_from_path(Path::new("/nonexistent/tsconfig.json"));
-		assert!(result.is_none());
-	}
+    #[test]
+    fn returns_none_for_missing_file() {
+        let result = read_tsconfig_aliases_from_path(Path::new("/nonexistent/tsconfig.json"));
+        assert!(result.is_none());
+    }
 
-	#[test]
-	fn handles_jsonc_comments_in_tsconfig() {
-		let dir = tempfile::tempdir().unwrap();
-		let tsconfig = dir.path().join("tsconfig.json");
-		fs::write(&tsconfig, r#"{
+    #[test]
+    fn handles_jsonc_comments_in_tsconfig() {
+        let dir = tempfile::tempdir().unwrap();
+        let tsconfig = dir.path().join("tsconfig.json");
+        fs::write(
+            &tsconfig,
+            r#"{
 			// This is a comment
 			"compilerOptions": {
 				/* block comment */
 				"paths": { "@/*": ["./src/*"] }
 			}
-		}"#).unwrap();
+		}"#,
+        )
+        .unwrap();
 
-		let aliases = read_tsconfig_aliases_from_path(&tsconfig).unwrap();
-		assert_eq!(aliases.entries.len(), 1);
-	}
+        let aliases = read_tsconfig_aliases_from_path(&tsconfig).unwrap();
+        assert_eq!(aliases.entries.len(), 1);
+    }
 
-	// ── RepoConfigContext ────────────────────────────────────
+    // ── RepoConfigContext ────────────────────────────────────
 
-	#[test]
-	fn nearest_ancestor_package_json() {
-		let dir = tempfile::tempdir().unwrap();
-		let root = dir.path();
+    #[test]
+    fn nearest_ancestor_package_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
 
-		// Root package.json.
-		fs::write(root.join("package.json"), r#"{"dependencies":{"express":"1"}}"#).unwrap();
-		// Nested package.json.
-		fs::create_dir_all(root.join("packages/web")).unwrap();
-		fs::write(
-			root.join("packages/web/package.json"),
-			r#"{"dependencies":{"react":"18"}}"#,
-		).unwrap();
+        // Root package.json.
+        fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"express":"1"}}"#,
+        )
+        .unwrap();
+        // Nested package.json.
+        fs::create_dir_all(root.join("packages/web")).unwrap();
+        fs::write(
+            root.join("packages/web/package.json"),
+            r#"{"dependencies":{"react":"18"}}"#,
+        )
+        .unwrap();
 
-		let mut ctx = RepoConfigContext::new();
+        let mut ctx = RepoConfigContext::new();
 
-		// File in root → gets root deps.
-		let root_deps = ctx.resolve_package_deps("src/index.ts", root);
-		assert_eq!(root_deps.names, vec!["express"]);
+        // File in root → gets root deps.
+        let root_deps = ctx.resolve_package_deps("src/index.ts", root);
+        assert_eq!(root_deps.names, vec!["express"]);
 
-		// File in packages/web → gets nested deps.
-		let web_deps = ctx.resolve_package_deps("packages/web/src/App.tsx", root);
-		assert_eq!(web_deps.names, vec!["react"]);
-	}
+        // File in packages/web → gets nested deps.
+        let web_deps = ctx.resolve_package_deps("packages/web/src/App.tsx", root);
+        assert_eq!(web_deps.names, vec!["react"]);
+    }
 
-	#[test]
-	fn malformed_package_json_stops_walk_returns_empty() {
-		let dir = tempfile::tempdir().unwrap();
-		let root = dir.path();
+    #[test]
+    fn malformed_package_json_stops_walk_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
 
-		// Root has valid deps.
-		fs::write(root.join("package.json"), r#"{"dependencies":{"express":"1"}}"#).unwrap();
-		// Nested has malformed package.json.
-		fs::create_dir_all(root.join("packages/broken")).unwrap();
-		fs::write(root.join("packages/broken/package.json"), "{invalid json}").unwrap();
+        // Root has valid deps.
+        fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"express":"1"}}"#,
+        )
+        .unwrap();
+        // Nested has malformed package.json.
+        fs::create_dir_all(root.join("packages/broken")).unwrap();
+        fs::write(root.join("packages/broken/package.json"), "{invalid json}").unwrap();
 
-		let mut ctx = RepoConfigContext::new();
-		// File under broken → should get empty deps (malformed stops walk),
-		// NOT inherit root's "express".
-		let deps = ctx.resolve_package_deps("packages/broken/src/index.ts", root);
-		assert!(
-			deps.names.is_empty(),
-			"malformed package.json should stop walk with empty deps, got {:?}",
-			deps.names
-		);
-	}
+        let mut ctx = RepoConfigContext::new();
+        // File under broken → should get empty deps (malformed stops walk),
+        // NOT inherit root's "express".
+        let deps = ctx.resolve_package_deps("packages/broken/src/index.ts", root);
+        assert!(
+            deps.names.is_empty(),
+            "malformed package.json should stop walk with empty deps, got {:?}",
+            deps.names
+        );
+    }
 
-	#[test]
-	fn nearest_ancestor_tsconfig() {
-		let dir = tempfile::tempdir().unwrap();
-		let root = dir.path();
+    #[test]
+    fn nearest_ancestor_tsconfig() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
 
-		fs::write(root.join("tsconfig.json"), r#"{
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{
 			"compilerOptions": { "paths": { "@/*": ["./src/*"] } }
-		}"#).unwrap();
+		}"#,
+        )
+        .unwrap();
 
-		let mut ctx = RepoConfigContext::new();
-		let aliases = ctx.resolve_tsconfig_aliases("src/index.ts", root);
-		assert_eq!(aliases.entries.len(), 1);
-		assert_eq!(aliases.entries[0].pattern, "@/*");
-	}
+        let mut ctx = RepoConfigContext::new();
+        let aliases = ctx.resolve_tsconfig_aliases("src/index.ts", root);
+        assert_eq!(aliases.entries.len(), 1);
+        assert_eq!(aliases.entries[0].pattern, "@/*");
+    }
 
-	// ── extract_cargo_dependencies ───────────────────────────
+    // ── extract_cargo_dependencies ───────────────────────────
 
-	#[test]
-	fn extracts_cargo_all_dep_sections() {
-		let content = r#"
+    #[test]
+    fn extracts_cargo_all_dep_sections() {
+        let content = r#"
 [package]
 name = "my-crate"
 version = "0.1.0"
@@ -641,33 +679,33 @@ tempfile = "3"
 [build-dependencies]
 cc = "1.0"
 "#;
-		let deps = extract_cargo_dependencies(content).unwrap();
-		assert!(deps.names.contains(&"serde".to_string()));
-		assert!(deps.names.contains(&"tokio".to_string()));
-		assert!(deps.names.contains(&"tempfile".to_string()));
-		assert!(deps.names.contains(&"cc".to_string()));
-	}
+        let deps = extract_cargo_dependencies(content).unwrap();
+        assert!(deps.names.contains(&"serde".to_string()));
+        assert!(deps.names.contains(&"tokio".to_string()));
+        assert!(deps.names.contains(&"tempfile".to_string()));
+        assert!(deps.names.contains(&"cc".to_string()));
+    }
 
-	#[test]
-	fn cargo_normalizes_hyphen_to_underscore() {
-		let content = r#"
+    #[test]
+    fn cargo_normalizes_hyphen_to_underscore() {
+        let content = r#"
 [dependencies]
 my-crate = "1.0"
 some_other = "2.0"
 "#;
-		let deps = extract_cargo_dependencies(content).unwrap();
-		// Both should be normalized to underscore form.
-		assert!(
-			deps.names.contains(&"my_crate".to_string()),
-			"hyphenated dep should be normalized: {:?}",
-			deps.names
-		);
-		assert!(deps.names.contains(&"some_other".to_string()));
-	}
+        let deps = extract_cargo_dependencies(content).unwrap();
+        // Both should be normalized to underscore form.
+        assert!(
+            deps.names.contains(&"my_crate".to_string()),
+            "hyphenated dep should be normalized: {:?}",
+            deps.names
+        );
+        assert!(deps.names.contains(&"some_other".to_string()));
+    }
 
-	#[test]
-	fn cargo_handles_subtable_syntax() {
-		let content = r#"
+    #[test]
+    fn cargo_handles_subtable_syntax() {
+        let content = r#"
 [package]
 name = "foo"
 
@@ -678,42 +716,42 @@ features = ["derive"]
 [dependencies.tokio]
 version = "1.0"
 "#;
-		let deps = extract_cargo_dependencies(content).unwrap();
-		assert!(deps.names.contains(&"serde".to_string()));
-		assert!(deps.names.contains(&"tokio".to_string()));
-	}
+        let deps = extract_cargo_dependencies(content).unwrap();
+        assert!(deps.names.contains(&"serde".to_string()));
+        assert!(deps.names.contains(&"tokio".to_string()));
+    }
 
-	#[test]
-	fn cargo_target_specific_deps_not_extracted() {
-		// Target-specific dependencies like [target.'cfg(unix)'.dependencies]
-		// are NOT extracted by the simple line parser. This is a known
-		// limitation documented in the function. The primary use case is
-		// identifying external crate names for import classification, and
-		// target-specific deps are edge cases.
-		let content = r#"
+    #[test]
+    fn cargo_target_specific_deps_not_extracted() {
+        // Target-specific dependencies like [target.'cfg(unix)'.dependencies]
+        // are NOT extracted by the simple line parser. This is a known
+        // limitation documented in the function. The primary use case is
+        // identifying external crate names for import classification, and
+        // target-specific deps are edge cases.
+        let content = r#"
 [package]
 name = "foo"
 
 [target.'cfg(unix)'.dependencies]
 nix = "0.26"
 "#;
-		// Should return None since there are no standard dependency sections.
-		assert!(extract_cargo_dependencies(content).is_none());
-	}
+        // Should return None since there are no standard dependency sections.
+        assert!(extract_cargo_dependencies(content).is_none());
+    }
 
-	#[test]
-	fn cargo_returns_none_for_no_deps() {
-		let content = r#"
+    #[test]
+    fn cargo_returns_none_for_no_deps() {
+        let content = r#"
 [package]
 name = "lib"
 version = "0.1.0"
 "#;
-		assert!(extract_cargo_dependencies(content).is_none());
-	}
+        assert!(extract_cargo_dependencies(content).is_none());
+    }
 
-	#[test]
-	fn cargo_returns_sorted_unique() {
-		let content = r#"
+    #[test]
+    fn cargo_returns_sorted_unique() {
+        let content = r#"
 [dependencies]
 zebra = "1"
 alpha = "1"
@@ -721,44 +759,52 @@ alpha = "1"
 [dev-dependencies]
 alpha = "2"
 "#;
-		let deps = extract_cargo_dependencies(content).unwrap();
-		assert_eq!(deps.names, vec!["alpha", "zebra"]);
-	}
+        let deps = extract_cargo_dependencies(content).unwrap();
+        assert_eq!(deps.names, vec!["alpha", "zebra"]);
+    }
 
-	// ── RepoConfigContext for Cargo ──────────────────────────
+    // ── RepoConfigContext for Cargo ──────────────────────────
 
-	#[test]
-	fn nearest_ancestor_cargo_toml() {
-		let dir = tempfile::tempdir().unwrap();
-		let root = dir.path();
+    #[test]
+    fn nearest_ancestor_cargo_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
 
-		// Root Cargo.toml.
-		fs::write(root.join("Cargo.toml"), r#"
+        // Root Cargo.toml.
+        fs::write(
+            root.join("Cargo.toml"),
+            r#"
 [package]
 name = "workspace"
 
 [dependencies]
 serde = "1"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
-		// Nested crate Cargo.toml.
-		fs::create_dir_all(root.join("crates/api")).unwrap();
-		fs::write(root.join("crates/api/Cargo.toml"), r#"
+        // Nested crate Cargo.toml.
+        fs::create_dir_all(root.join("crates/api")).unwrap();
+        fs::write(
+            root.join("crates/api/Cargo.toml"),
+            r#"
 [package]
 name = "api"
 
 [dependencies]
 tokio = "1"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
-		let mut ctx = RepoConfigContext::new();
+        let mut ctx = RepoConfigContext::new();
 
-		// File in root → gets root deps.
-		let root_deps = ctx.resolve_cargo_deps("src/lib.rs", root);
-		assert_eq!(root_deps.names, vec!["serde"]);
+        // File in root → gets root deps.
+        let root_deps = ctx.resolve_cargo_deps("src/lib.rs", root);
+        assert_eq!(root_deps.names, vec!["serde"]);
 
-		// File in crates/api → gets nested deps.
-		let api_deps = ctx.resolve_cargo_deps("crates/api/src/lib.rs", root);
-		assert_eq!(api_deps.names, vec!["tokio"]);
-	}
+        // File in crates/api → gets nested deps.
+        let api_deps = ctx.resolve_cargo_deps("crates/api/src/lib.rs", root);
+        assert_eq!(api_deps.names, vec!["tokio"]);
+    }
 }

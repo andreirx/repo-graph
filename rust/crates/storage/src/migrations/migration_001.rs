@@ -114,9 +114,8 @@ use crate::error::StorageError;
 /// If the shared `.sql` file is moved or renamed, this
 /// `include_str!` fails at compile time, surfacing the contract
 /// drift immediately.
-const MIGRATION_001_SQL: &str = include_str!(
-	"../../../../../src/adapters/storage/sqlite/migrations/001-initial.sql"
-);
+const MIGRATION_001_SQL: &str =
+    include_str!("../../../../../src/adapters/storage/sqlite/migrations/001-initial.sql");
 
 /// Run migration 001 against the given connection.
 ///
@@ -131,7 +130,7 @@ const MIGRATION_001_SQL: &str = include_str!(
 /// row, so re-running on an already-initialized database
 /// produces no errors and no state changes.
 pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
-	run_with_sql(conn, MIGRATION_001_SQL)
+    run_with_sql(conn, MIGRATION_001_SQL)
 }
 
 /// Apply an initial-migration SQL string to the given connection
@@ -152,15 +151,12 @@ pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
 /// Mirrors the TypeScript transaction wrap at
 /// `connection-provider.ts:65-70`. See module-level docs for the
 /// full rationale.
-pub(super) fn run_with_sql(
-	conn: &mut Connection,
-	sql: &str,
-) -> Result<(), StorageError> {
-	let stripped = strip_pragmas(sql);
-	let tx = conn.transaction()?;
-	tx.execute_batch(&stripped)?;
-	tx.commit()?;
-	Ok(())
+pub(super) fn run_with_sql(conn: &mut Connection, sql: &str) -> Result<(), StorageError> {
+    let stripped = strip_pragmas(sql);
+    let tx = conn.transaction()?;
+    tx.execute_batch(&stripped)?;
+    tx.commit()?;
+    Ok(())
 }
 
 /// Strip top-level `PRAGMA` statements from a multi-statement SQL
@@ -183,161 +179,158 @@ pub(super) fn run_with_sql(
 /// `PRAGMA` is matched case-insensitively to be tolerant of
 /// future SQL formatting changes.
 fn strip_pragmas(sql: &str) -> String {
-	let mut out = String::with_capacity(sql.len());
-	for stmt in sql.split(';') {
-		let trimmed = stmt.trim();
-		if trimmed.is_empty() {
-			continue;
-		}
-		if trimmed.to_uppercase().starts_with("PRAGMA") {
-			continue;
-		}
-		out.push_str(trimmed);
-		out.push_str(";\n");
-	}
-	out
+    let mut out = String::with_capacity(sql.len());
+    for stmt in sql.split(';') {
+        let trimmed = stmt.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.to_uppercase().starts_with("PRAGMA") {
+            continue;
+        }
+        out.push_str(trimmed);
+        out.push_str(";\n");
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+    use super::*;
 
-	#[test]
-	fn strip_pragmas_removes_top_level_pragma_statements() {
-		let sql = "PRAGMA journal_mode = WAL;\nPRAGMA foreign_keys = ON;\n\nCREATE TABLE foo (id INTEGER);\nCREATE TABLE bar (id INTEGER);";
-		let stripped = strip_pragmas(sql);
-		assert!(!stripped.to_uppercase().contains("PRAGMA"));
-		assert!(stripped.contains("CREATE TABLE foo"));
-		assert!(stripped.contains("CREATE TABLE bar"));
-	}
+    #[test]
+    fn strip_pragmas_removes_top_level_pragma_statements() {
+        let sql = "PRAGMA journal_mode = WAL;\nPRAGMA foreign_keys = ON;\n\nCREATE TABLE foo (id INTEGER);\nCREATE TABLE bar (id INTEGER);";
+        let stripped = strip_pragmas(sql);
+        assert!(!stripped.to_uppercase().contains("PRAGMA"));
+        assert!(stripped.contains("CREATE TABLE foo"));
+        assert!(stripped.contains("CREATE TABLE bar"));
+    }
 
-	#[test]
-	fn strip_pragmas_preserves_non_pragma_statements_in_order() {
-		let sql = "CREATE TABLE a (x INTEGER); CREATE TABLE b (y INTEGER); CREATE TABLE c (z INTEGER);";
-		let stripped = strip_pragmas(sql);
-		let a_pos = stripped.find("CREATE TABLE a").unwrap();
-		let b_pos = stripped.find("CREATE TABLE b").unwrap();
-		let c_pos = stripped.find("CREATE TABLE c").unwrap();
-		assert!(a_pos < b_pos);
-		assert!(b_pos < c_pos);
-	}
+    #[test]
+    fn strip_pragmas_preserves_non_pragma_statements_in_order() {
+        let sql =
+            "CREATE TABLE a (x INTEGER); CREATE TABLE b (y INTEGER); CREATE TABLE c (z INTEGER);";
+        let stripped = strip_pragmas(sql);
+        let a_pos = stripped.find("CREATE TABLE a").unwrap();
+        let b_pos = stripped.find("CREATE TABLE b").unwrap();
+        let c_pos = stripped.find("CREATE TABLE c").unwrap();
+        assert!(a_pos < b_pos);
+        assert!(b_pos < c_pos);
+    }
 
-	#[test]
-	fn strip_pragmas_handles_empty_segments_between_statements() {
-		let sql = "CREATE TABLE a (x INTEGER);;;CREATE TABLE b (y INTEGER);";
-		let stripped = strip_pragmas(sql);
-		assert!(stripped.contains("CREATE TABLE a"));
-		assert!(stripped.contains("CREATE TABLE b"));
-	}
+    #[test]
+    fn strip_pragmas_handles_empty_segments_between_statements() {
+        let sql = "CREATE TABLE a (x INTEGER);;;CREATE TABLE b (y INTEGER);";
+        let stripped = strip_pragmas(sql);
+        assert!(stripped.contains("CREATE TABLE a"));
+        assert!(stripped.contains("CREATE TABLE b"));
+    }
 
-	#[test]
-	fn strip_pragmas_is_case_insensitive_on_pragma_keyword() {
-		let sql = "pragma journal_mode = WAL; PRAGMA foreign_keys = ON; Pragma cache_size = 1000;\nCREATE TABLE foo (id INTEGER);";
-		let stripped = strip_pragmas(sql);
-		assert!(!stripped.to_lowercase().contains("pragma"));
-		assert!(stripped.contains("CREATE TABLE foo"));
-	}
+    #[test]
+    fn strip_pragmas_is_case_insensitive_on_pragma_keyword() {
+        let sql = "pragma journal_mode = WAL; PRAGMA foreign_keys = ON; Pragma cache_size = 1000;\nCREATE TABLE foo (id INTEGER);";
+        let stripped = strip_pragmas(sql);
+        assert!(!stripped.to_lowercase().contains("pragma"));
+        assert!(stripped.contains("CREATE TABLE foo"));
+    }
 
-	// ── Transaction wrapping (rollback regression) ────────────
+    // ── Transaction wrapping (rollback regression) ────────────
 
-	#[test]
-	fn rollback_on_partial_failure_within_initial_migration() {
-		// Pins the TS-parity transaction wrap.
-		//
-		// The current `001-initial.sql` uses `CREATE TABLE IF NOT
-		// EXISTS` everywhere, so a partial failure within real
-		// migration 001 SQL is not reachable today. But the shared
-		// `.sql` file is contract input and can evolve. A future
-		// change that introduces a non-idempotent statement could
-		// fail partway through.
-		//
-		// This test calls `run_with_sql` with a synthetic SQL
-		// string containing two valid CREATE TABLE statements
-		// followed by an invalid statement. The transaction wrap
-		// must roll back the first two CREATE TABLEs when the
-		// third fails. Without the wrap, `execute_batch` would
-		// commit the first two before failing on the third,
-		// leaving partial schema state.
-		//
-		// If a future maintainer removes the transaction wrap from
-		// `run_with_sql`, this test fails immediately, surfacing
-		// the parity regression.
-		let sql = "CREATE TABLE rollback_t1 (id INTEGER); CREATE TABLE rollback_t2 (id INTEGER); GARBAGE_NOT_VALID_SQL;";
+    #[test]
+    fn rollback_on_partial_failure_within_initial_migration() {
+        // Pins the TS-parity transaction wrap.
+        //
+        // The current `001-initial.sql` uses `CREATE TABLE IF NOT
+        // EXISTS` everywhere, so a partial failure within real
+        // migration 001 SQL is not reachable today. But the shared
+        // `.sql` file is contract input and can evolve. A future
+        // change that introduces a non-idempotent statement could
+        // fail partway through.
+        //
+        // This test calls `run_with_sql` with a synthetic SQL
+        // string containing two valid CREATE TABLE statements
+        // followed by an invalid statement. The transaction wrap
+        // must roll back the first two CREATE TABLEs when the
+        // third fails. Without the wrap, `execute_batch` would
+        // commit the first two before failing on the third,
+        // leaving partial schema state.
+        //
+        // If a future maintainer removes the transaction wrap from
+        // `run_with_sql`, this test fails immediately, surfacing
+        // the parity regression.
+        let sql = "CREATE TABLE rollback_t1 (id INTEGER); CREATE TABLE rollback_t2 (id INTEGER); GARBAGE_NOT_VALID_SQL;";
 
-		let mut conn = rusqlite::Connection::open_in_memory()
-			.expect("open in-memory db for rollback test");
+        let mut conn =
+            rusqlite::Connection::open_in_memory().expect("open in-memory db for rollback test");
 
-		// Apply pragmas (the runner normally does this).
-		conn.execute_batch(
-			"PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;",
-		)
-		.unwrap();
+        // Apply pragmas (the runner normally does this).
+        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
+            .unwrap();
 
-		let result = run_with_sql(&mut conn, sql);
-		assert!(
-			result.is_err(),
-			"GARBAGE_NOT_VALID_SQL must produce an error"
-		);
+        let result = run_with_sql(&mut conn, sql);
+        assert!(
+            result.is_err(),
+            "GARBAGE_NOT_VALID_SQL must produce an error"
+        );
 
-		// Verify neither rollback_t1 nor rollback_t2 exist after
-		// the failure (they were rolled back).
-		let t1_exists = conn
-			.query_row(
-				"SELECT 1 FROM sqlite_master WHERE type='table' AND name='rollback_t1'",
-				[],
-				|_| Ok(()),
-			)
-			.is_ok();
-		let t2_exists = conn
-			.query_row(
-				"SELECT 1 FROM sqlite_master WHERE type='table' AND name='rollback_t2'",
-				[],
-				|_| Ok(()),
-			)
-			.is_ok();
+        // Verify neither rollback_t1 nor rollback_t2 exist after
+        // the failure (they were rolled back).
+        let t1_exists = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='rollback_t1'",
+                [],
+                |_| Ok(()),
+            )
+            .is_ok();
+        let t2_exists = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='rollback_t2'",
+                [],
+                |_| Ok(()),
+            )
+            .is_ok();
 
-		assert!(
-			!t1_exists,
-			"rollback_t1 must be rolled back when a later statement in the batch fails"
-		);
-		assert!(
-			!t2_exists,
-			"rollback_t2 must be rolled back when a later statement in the batch fails"
-		);
-	}
+        assert!(
+            !t1_exists,
+            "rollback_t1 must be rolled back when a later statement in the batch fails"
+        );
+        assert!(
+            !t2_exists,
+            "rollback_t2 must be rolled back when a later statement in the batch fails"
+        );
+    }
 
-	#[test]
-	fn run_with_sql_commits_on_success() {
-		// Counter-test to the rollback test: when all statements
-		// succeed, the transaction commits and the resulting
-		// tables persist after the function returns.
-		let sql = "CREATE TABLE commit_t1 (id INTEGER); CREATE TABLE commit_t2 (id INTEGER);";
+    #[test]
+    fn run_with_sql_commits_on_success() {
+        // Counter-test to the rollback test: when all statements
+        // succeed, the transaction commits and the resulting
+        // tables persist after the function returns.
+        let sql = "CREATE TABLE commit_t1 (id INTEGER); CREATE TABLE commit_t2 (id INTEGER);";
 
-		let mut conn = rusqlite::Connection::open_in_memory().unwrap();
-		conn.execute_batch(
-			"PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;",
-		)
-		.unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
+            .unwrap();
 
-		run_with_sql(&mut conn, sql).expect("clean SQL must succeed");
+        run_with_sql(&mut conn, sql).expect("clean SQL must succeed");
 
-		// Verify both tables exist after the function returns.
-		let t1_exists = conn
-			.query_row(
-				"SELECT 1 FROM sqlite_master WHERE type='table' AND name='commit_t1'",
-				[],
-				|_| Ok(()),
-			)
-			.is_ok();
-		let t2_exists = conn
-			.query_row(
-				"SELECT 1 FROM sqlite_master WHERE type='table' AND name='commit_t2'",
-				[],
-				|_| Ok(()),
-			)
-			.is_ok();
+        // Verify both tables exist after the function returns.
+        let t1_exists = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='commit_t1'",
+                [],
+                |_| Ok(()),
+            )
+            .is_ok();
+        let t2_exists = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='commit_t2'",
+                [],
+                |_| Ok(()),
+            )
+            .is_ok();
 
-		assert!(t1_exists, "commit_t1 must be committed on success");
-		assert!(t2_exists, "commit_t2 must be committed on success");
-	}
+        assert!(t1_exists, "commit_t1 must be committed on success");
+        assert!(t2_exists, "commit_t2 must be committed on success");
+    }
 }

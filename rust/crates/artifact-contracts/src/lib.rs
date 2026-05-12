@@ -83,6 +83,5 @@ pub use truth_kind::TruthKind;
 
 pub use registry::{
     all_families, families_by_layer, families_by_truth_kind, families_for_refresh,
-    families_with_freshness_tracking, families_with_provenance, get_contract,
-    unsupported_families,
+    families_with_freshness_tracking, families_with_provenance, get_contract, unsupported_families,
 };

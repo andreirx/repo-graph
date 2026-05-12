@@ -25,9 +25,7 @@
 //!   need fallback logic (Decision D1: no implicit cross-language coupling).
 
 use repo_graph_indexer::types::{CallArgPayload, ResolvedCallsite};
-use repo_graph_state_bindings::{
-    CalleePath, FsPathOrLogical, ImportView, Language, LogicalName,
-};
+use repo_graph_state_bindings::{CalleePath, FsPathOrLogical, ImportView, Language, LogicalName};
 
 use crate::adapter::{AdapterContext, LanguageStateAdapter};
 use crate::emit::{CallsiteLogicalName, StateBoundaryCallsite};
@@ -59,10 +57,7 @@ impl LanguageStateAdapter for CppAdapter {
         _ctx: &AdapterContext<'_>,
         callsites: &[ResolvedCallsite],
     ) -> Vec<StateBoundaryCallsite> {
-        callsites
-            .iter()
-            .filter_map(adapt_cpp_callsite)
-            .collect()
+        callsites.iter().filter_map(adapt_cpp_callsite).collect()
     }
 }
 
@@ -181,7 +176,10 @@ mod tests {
             source_location: loc(),
         };
         let adapted = adapt_cpp_callsite(&rc).expect("valid");
-        assert_eq!(adapted.callee.resolved_module.as_deref(), Some("libc:stdio"));
+        assert_eq!(
+            adapted.callee.resolved_module.as_deref(),
+            Some("libc:stdio")
+        );
         assert_eq!(adapted.callee.resolved_symbol, "fopen_read");
     }
 

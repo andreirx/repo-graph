@@ -102,10 +102,7 @@ impl StorageConnection {
     /// No collision detection — inferences are keyed by generated
     /// UUID, not by target_stable_key. Multiple inferences for the
     /// same target are valid (though uncommon in practice).
-    pub fn insert_inferences(
-        &mut self,
-        inferences: &[InferenceInput],
-    ) -> Result<(), StorageError> {
+    pub fn insert_inferences(&mut self, inferences: &[InferenceInput]) -> Result<(), StorageError> {
         if inferences.is_empty() {
             return Ok(());
         }
@@ -246,12 +243,7 @@ mod tests {
         (storage, snap.snapshot_uid)
     }
 
-    fn make_inference(
-        uid: &str,
-        snapshot_uid: &str,
-        target: &str,
-        kind: &str,
-    ) -> InferenceInput {
+    fn make_inference(uid: &str, snapshot_uid: &str, target: &str, kind: &str) -> InferenceInput {
         InferenceInput {
             inference_uid: uid.to_string(),
             snapshot_uid: snapshot_uid.to_string(),
@@ -628,7 +620,9 @@ mod tests {
         storage.insert_inferences(&[inference]).unwrap();
 
         // freshness_state should be 'current' because provenance_json is populated
-        let state = storage.get_freshness_state("inferences", "i-prov-1").unwrap();
+        let state = storage
+            .get_freshness_state("inferences", "i-prov-1")
+            .unwrap();
         assert_eq!(state, Some(FreshnessState::Current));
     }
 
@@ -653,7 +647,9 @@ mod tests {
         storage.insert_inferences(&[inference]).unwrap();
 
         // freshness_state should be 'unknown' because provenance_json is NULL
-        let state = storage.get_freshness_state("inferences", "i-no-prov-1").unwrap();
+        let state = storage
+            .get_freshness_state("inferences", "i-no-prov-1")
+            .unwrap();
         assert_eq!(state, Some(FreshnessState::Unknown));
     }
 
@@ -681,8 +677,14 @@ mod tests {
         storage.insert_inferences(&[inference]).unwrap();
 
         // Pre-condition: freshness_state is 'current'
-        let state = storage.get_freshness_state("inferences", "i-impact-1").unwrap();
-        assert_eq!(state, Some(FreshnessState::Current), "pre-condition: should be current");
+        let state = storage
+            .get_freshness_state("inferences", "i-impact-1")
+            .unwrap();
+        assert_eq!(
+            state,
+            Some(FreshnessState::Current),
+            "pre-condition: should be current"
+        );
 
         // Simulate L0 change: the node changed during extraction
         let affected = storage
@@ -691,8 +693,14 @@ mod tests {
         assert_eq!(affected, 1, "one inference should be marked impacted");
 
         // Post-condition: freshness_state is now 'impacted'
-        let state = storage.get_freshness_state("inferences", "i-impact-1").unwrap();
-        assert_eq!(state, Some(FreshnessState::Impacted), "post-condition: should be impacted");
+        let state = storage
+            .get_freshness_state("inferences", "i-impact-1")
+            .unwrap();
+        assert_eq!(
+            state,
+            Some(FreshnessState::Impacted),
+            "post-condition: should be impacted"
+        );
     }
 
     /// ACR-4 end-to-end proof: copy-forwarded inference with cross-file provenance
@@ -806,7 +814,9 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             provenance_json: None,
         };
-        storage.insert_inferences(&[inference_a, inference_b]).unwrap();
+        storage
+            .insert_inferences(&[inference_a, inference_b])
+            .unwrap();
 
         // Verify both exist
         let before = storage
@@ -859,31 +869,45 @@ mod tests {
             "spring_container_managed",
             "r1:src/B.java#B:SYMBOL:CLASS", // depends on node B
         );
-        storage.insert_inferences(&[inference1, inference2]).unwrap();
+        storage
+            .insert_inferences(&[inference1, inference2])
+            .unwrap();
 
         // Both start as 'current'
         assert_eq!(
-            storage.get_freshness_state("inferences", "i-related").unwrap(),
+            storage
+                .get_freshness_state("inferences", "i-related")
+                .unwrap(),
             Some(FreshnessState::Current)
         );
         assert_eq!(
-            storage.get_freshness_state("inferences", "i-unrelated").unwrap(),
+            storage
+                .get_freshness_state("inferences", "i-unrelated")
+                .unwrap(),
             Some(FreshnessState::Current)
         );
 
         // Only node A changed
         let affected = storage
-            .mark_impacted_by_stable_keys(&snap_uid, "inferences", &["r1:src/A.java#A:SYMBOL:CLASS"])
+            .mark_impacted_by_stable_keys(
+                &snap_uid,
+                "inferences",
+                &["r1:src/A.java#A:SYMBOL:CLASS"],
+            )
             .unwrap();
         assert_eq!(affected, 1);
 
         // i-related is impacted, i-unrelated remains current
         assert_eq!(
-            storage.get_freshness_state("inferences", "i-related").unwrap(),
+            storage
+                .get_freshness_state("inferences", "i-related")
+                .unwrap(),
             Some(FreshnessState::Impacted)
         );
         assert_eq!(
-            storage.get_freshness_state("inferences", "i-unrelated").unwrap(),
+            storage
+                .get_freshness_state("inferences", "i-unrelated")
+                .unwrap(),
             Some(FreshnessState::Current)
         );
     }

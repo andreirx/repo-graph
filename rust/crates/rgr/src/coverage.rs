@@ -144,7 +144,10 @@ fn fact_to_measurement(
     // Collision-safe for any file path (no character substitution).
     let identity = format!("{}:{}:{}", snapshot_uid, target_stable_key, kind);
     let hash = Sha256::digest(identity.as_bytes());
-    let measurement_uid = format!("msr:{:x}", hash).chars().take(36).collect::<String>();
+    let measurement_uid = format!("msr:{:x}", hash)
+        .chars()
+        .take(36)
+        .collect::<String>();
 
     // Value JSON with ratio and underlying counts
     let value_json = format!(
@@ -268,9 +271,14 @@ mod tests {
         let parse_result = make_parse_result(vec![("src/lib/utils.ts", 0.75, 3, 4)], vec![]);
         let indexed = make_indexed_files(&["src/lib/utils.ts"]);
 
-        let result =
-            match_coverage_to_indexed_files(&parse_result, &indexed, "myrepo", "snap1", "2026-01-01")
-                .unwrap();
+        let result = match_coverage_to_indexed_files(
+            &parse_result,
+            &indexed,
+            "myrepo",
+            "snap1",
+            "2026-01-01",
+        )
+        .unwrap();
 
         let m = &result.measurements[0];
         assert_eq!(m.target_stable_key, "myrepo:src/lib/utils.ts:FILE");
@@ -343,7 +351,11 @@ mod tests {
 
         let m = &result.measurements[0];
         // SHA-256 based UIDs start with "msr:" prefix
-        assert!(m.measurement_uid.starts_with("msr:"), "uid={}", m.measurement_uid);
+        assert!(
+            m.measurement_uid.starts_with("msr:"),
+            "uid={}",
+            m.measurement_uid
+        );
         // Should be 36 chars: "msr:" (4) + 32 hex chars
         assert_eq!(m.measurement_uid.len(), 36, "uid={}", m.measurement_uid);
     }
@@ -353,10 +365,7 @@ mod tests {
         // These paths would collide under the old `/` and `.` replacement scheme:
         // "src/a.b.ts" and "src/a/b.ts" both became "src_a_b_ts"
         let parse_result = make_parse_result(
-            vec![
-                ("src/a.b.ts", 0.8, 8, 10),
-                ("src/a/b.ts", 0.6, 6, 10),
-            ],
+            vec![("src/a.b.ts", 0.8, 8, 10), ("src/a/b.ts", 0.6, 6, 10)],
             vec![],
         );
         let indexed = make_indexed_files(&["src/a.b.ts", "src/a/b.ts"]);

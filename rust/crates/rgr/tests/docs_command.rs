@@ -70,13 +70,13 @@ fn build_indexed_db_with_docs() -> (tempfile::TempDir, PathBuf, PathBuf) {
 
 #[test]
 fn docs_usage_error_exit_1() {
-    let output = Command::new(binary_path())
-        .args(["docs"])
-        .output()
-        .unwrap();
+    let output = Command::new(binary_path()).args(["docs"]).output().unwrap();
 
     assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty(), "stdout must be empty on usage error");
+    assert!(
+        output.stdout.is_empty(),
+        "stdout must be empty on usage error"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("usage:"), "stderr: {}", stderr);
 }
@@ -115,11 +115,7 @@ fn docs_repo_not_found_exit_2() {
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty(), "stdout must be empty on error");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("not found"),
-        "stderr: {}",
-        stderr
-    );
+    assert!(stderr.contains("not found"), "stderr: {}", stderr);
 }
 
 // ── 4. Success with basic extraction ─────────────────────────────
@@ -129,12 +125,7 @@ fn docs_success_extracts_markers() {
     let (_dir, db_path, _repo_path) = build_indexed_db_with_docs();
 
     let output = Command::new(binary_path())
-        .args([
-            "docs",
-            "extract",
-            db_path.to_str().unwrap(),
-            "test-repo",
-        ])
+        .args(["docs", "extract", db_path.to_str().unwrap(), "test-repo"])
         .output()
         .unwrap();
 
@@ -191,12 +182,7 @@ fn docs_facts_persist_in_storage() {
 
     // Run docs extract command
     let output = Command::new(binary_path())
-        .args([
-            "docs",
-            "extract",
-            db_path.to_str().unwrap(),
-            "test-repo",
-        ])
+        .args(["docs", "extract", db_path.to_str().unwrap(), "test-repo"])
         .output()
         .unwrap();
 
@@ -206,10 +192,7 @@ fn docs_facts_persist_in_storage() {
     let storage = repo_graph_storage::StorageConnection::open(&db_path).unwrap();
     let facts = storage.get_semantic_facts_for_repo("test-repo").unwrap();
 
-    assert!(
-        !facts.is_empty(),
-        "facts should be persisted in storage"
-    );
+    assert!(!facts.is_empty(), "facts should be persisted in storage");
 
     // Verify the replacement_for fact exists
     let replacement_facts: Vec<_> = facts

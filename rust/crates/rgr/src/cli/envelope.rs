@@ -27,7 +27,11 @@ pub fn build_envelope(
         .map(|r| r.name)
         .unwrap_or_else(|| repo_uid.to_string());
 
-    let snapshot_scope = if snapshot.kind == "full" { "full" } else { "incremental" };
+    let snapshot_scope = if snapshot.kind == "full" {
+        "full"
+    } else {
+        "incremental"
+    };
 
     let stale = storage
         .get_stale_files(&snapshot.snapshot_uid)

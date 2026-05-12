@@ -61,11 +61,11 @@
 pub mod ownership;
 pub mod receiver_locator;
 
+mod client;
 mod project;
 mod protocol;
 mod transport;
-mod client;
 
 pub use client::TsServerResolver;
-pub use ownership::{ProjectOwnership, TsProjectOwnershipResolver, OwnershipError};
+pub use ownership::{OwnershipError, ProjectOwnership, TsProjectOwnershipResolver};
 pub use receiver_locator::{ReceiverLocation, ReceiverLocator};

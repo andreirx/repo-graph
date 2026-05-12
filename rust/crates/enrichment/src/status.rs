@@ -24,10 +24,11 @@ use crate::contracts::EnrichmentLanguage;
 /// - NotRun: enrichment has never been executed
 /// - Ran: enrichment has been executed (success rate may vary)
 /// - NotApplicable: no enrichable edges exist
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum EnrichmentState {
     /// Enrichment has not been executed for this snapshot.
+    #[default]
     NotRun,
 
     /// Enrichment has been executed.
@@ -46,19 +47,13 @@ impl EnrichmentState {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "not_run" => Some(Self::NotRun),
             "ran" => Some(Self::Ran),
             "not_applicable" => Some(Self::NotApplicable),
             _ => None,
         }
-    }
-}
-
-impl Default for EnrichmentState {
-    fn default() -> Self {
-        Self::NotRun
     }
 }
 
@@ -246,12 +241,7 @@ impl ReportBuilder {
     }
 
     /// Record a successful enrichment.
-    pub fn record_success(
-        &mut self,
-        lang: EnrichmentLanguage,
-        type_name: &str,
-        is_external: bool,
-    ) {
+    pub fn record_success(&mut self, lang: EnrichmentLanguage, type_name: &str, is_external: bool) {
         let entry = self.by_language.entry(lang).or_default();
         entry.enriched += 1;
 
@@ -266,10 +256,7 @@ impl ReportBuilder {
         let entry = self.by_language.entry(lang).or_default();
         entry.failed += 1;
 
-        *self
-            .failure_reasons
-            .entry(reason.to_string())
-            .or_insert(0) += 1;
+        *self.failure_reasons.entry(reason.to_string()).or_insert(0) += 1;
     }
 
     /// Set promotion statistics.
@@ -345,7 +332,7 @@ mod tests {
             EnrichmentState::Ran,
             EnrichmentState::NotApplicable,
         ] {
-            assert_eq!(EnrichmentState::from_str(state.as_str()), Some(state));
+            assert_eq!(EnrichmentState::parse(state.as_str()), Some(state));
         }
     }
 

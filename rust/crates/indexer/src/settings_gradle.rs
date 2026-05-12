@@ -173,7 +173,8 @@ fn extract_project_renames(content: &str) -> HashMap<String, String> {
 
     // Match: project(":path").name = "name" or project(':path').name = 'name'
     // The path may use : separator (e.g., ":storage:api")
-    let re = Regex::new(r#"project\s*\(\s*['"]([^'"]+)['"]\s*\)\s*\.\s*name\s*=\s*['"]([^'"]+)['"]"#);
+    let re =
+        Regex::new(r#"project\s*\(\s*['"]([^'"]+)['"]\s*\)\s*\.\s*name\s*=\s*['"]([^'"]+)['"]"#);
 
     if let Ok(re) = re {
         for cap in re.captures_iter(content) {
@@ -401,19 +402,28 @@ rootProject.name = 'kafka'
         assert_eq!(result.subprojects.len(), 9);
 
         // Check specific subprojects
-        let clients = result.subprojects.iter().find(|p| p.project_root == "clients");
+        let clients = result
+            .subprojects
+            .iter()
+            .find(|p| p.project_root == "clients");
         assert!(clients.is_some());
         assert_eq!(clients.unwrap().display_name, "clients");
         assert_eq!(clients.unwrap().gradle_path, ":clients");
 
         // Check nested subproject
-        let connect_api = result.subprojects.iter().find(|p| p.project_root == "connect/api");
+        let connect_api = result
+            .subprojects
+            .iter()
+            .find(|p| p.project_root == "connect/api");
         assert!(connect_api.is_some());
         assert_eq!(connect_api.unwrap().display_name, "api");
         assert_eq!(connect_api.unwrap().gradle_path, ":connect:api");
 
         // Check renamed project
-        let storage_api = result.subprojects.iter().find(|p| p.project_root == "storage/api");
+        let storage_api = result
+            .subprojects
+            .iter()
+            .find(|p| p.project_root == "storage/api");
         assert!(storage_api.is_some());
         assert_eq!(storage_api.unwrap().display_name, "storage-api"); // Renamed!
     }
@@ -464,7 +474,10 @@ include 'app', 'lib'
         assert_eq!(gradle_path_to_filesystem(":clients"), "clients");
         assert_eq!(gradle_path_to_filesystem("connect:api"), "connect/api");
         assert_eq!(gradle_path_to_filesystem(":connect:api"), "connect/api");
-        assert_eq!(gradle_path_to_filesystem("streams:test-utils"), "streams/test-utils");
+        assert_eq!(
+            gradle_path_to_filesystem("streams:test-utils"),
+            "streams/test-utils"
+        );
     }
 
     #[test]
@@ -535,8 +548,7 @@ include 'app', 'lib'
         assert_eq!(evidence.evidence_kind, "manifest_declaration");
 
         // Verify payload JSON
-        let payload: GradleEvidencePayload =
-            serde_json::from_str(&evidence.payload_json).unwrap();
+        let payload: GradleEvidencePayload = serde_json::from_str(&evidence.payload_json).unwrap();
         assert_eq!(payload.gradle_path, ":connect:api");
         assert_eq!(payload.project_root, "connect/api");
         assert!(!payload.is_root);

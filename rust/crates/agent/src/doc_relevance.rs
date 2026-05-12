@@ -105,10 +105,7 @@ pub struct DocEntry {
 ///
 /// Ordered list of relevant docs with reasons. Empty if no docs
 /// match the focus context.
-pub fn select_relevant_docs(
-    inventory: &[DocEntry],
-    focus: &DocFocusContext,
-) -> Vec<RelevantDoc> {
+pub fn select_relevant_docs(inventory: &[DocEntry], focus: &DocFocusContext) -> Vec<RelevantDoc> {
     let mut results: Vec<(RelevantDoc, i32)> = Vec::new();
 
     for entry in inventory {
@@ -118,9 +115,7 @@ pub fn select_relevant_docs(
     }
 
     // Sort by priority descending, then by path for determinism
-    results.sort_by(|a, b| {
-        b.1.cmp(&a.1).then_with(|| a.0.path.cmp(&b.0.path))
-    });
+    results.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.path.cmp(&b.0.path)));
 
     results.into_iter().map(|(doc, _)| doc).collect()
 }
@@ -142,10 +137,7 @@ enum DocMatchType {
 ///
 /// Returns `Some((RelevantDoc, priority))` if relevant, `None` if not.
 /// Higher priority = more relevant.
-fn evaluate_doc_relevance(
-    entry: &DocEntry,
-    focus: &DocFocusContext,
-) -> Option<(RelevantDoc, i32)> {
+fn evaluate_doc_relevance(entry: &DocEntry, focus: &DocFocusContext) -> Option<(RelevantDoc, i32)> {
     let path = &entry.path;
     let kind = &entry.kind;
     let generated = entry.generated;
@@ -170,7 +162,10 @@ fn evaluate_doc_relevance(
             // Config docs at root are relevant for environment context
             if kind == "config" && !path.contains('/') {
                 let priority = 50 + generated_penalty;
-                return Some((make_doc(entry, DocRelevanceReason::ConfigRelevance), priority));
+                return Some((
+                    make_doc(entry, DocRelevanceReason::ConfigRelevance),
+                    priority,
+                ));
             }
             // Skip non-root docs at repo level (too many)
             None
@@ -235,7 +230,10 @@ fn evaluate_doc_relevance(
             // Architecture docs in ancestor paths are still relevant (tier 4)
             if kind == "architecture" && is_ancestor_doc(path, focus_path) {
                 let priority = 150 + generated_penalty;
-                return Some((make_doc(entry, DocRelevanceReason::ArchitectureDoc), priority));
+                return Some((
+                    make_doc(entry, DocRelevanceReason::ArchitectureDoc),
+                    priority,
+                ));
             }
 
             // Repo-root docs are always somewhat relevant (tier 5)
@@ -252,7 +250,10 @@ fn evaluate_doc_relevance(
             // Config docs may be relevant for environment context (tier 6)
             if kind == "config" && config_relevant_to_path(path, focus_path) {
                 let priority = 80 + generated_penalty;
-                return Some((make_doc(entry, DocRelevanceReason::ConfigRelevance), priority));
+                return Some((
+                    make_doc(entry, DocRelevanceReason::ConfigRelevance),
+                    priority,
+                ));
             }
 
             None
@@ -270,12 +271,11 @@ fn make_doc(entry: &DocEntry, reason: DocRelevanceReason) -> RelevantDoc {
 }
 
 fn is_repo_root_doc(path: &str) -> bool {
-    !path.contains('/') && (
-        path == "README.md" ||
-        path == "README" ||
-        path == "ARCHITECTURE.md" ||
-        path == "CONTRIBUTING.md"
-    )
+    !path.contains('/')
+        && (path == "README.md"
+            || path == "README"
+            || path == "ARCHITECTURE.md"
+            || path == "CONTRIBUTING.md")
 }
 
 fn base_priority_for_kind(kind: &str) -> i32 {
@@ -306,8 +306,7 @@ fn classify_doc_match(doc_path: &str, focus_path: &str) -> DocMatchType {
 
     // Descendant: doc is inside the focus subtree
     // e.g., focus="ext/wasm", doc_dir="ext/wasm/api"
-    if doc_dir.starts_with(focus_path) {
-        let remainder = &doc_dir[focus_path.len()..];
+    if let Some(remainder) = doc_dir.strip_prefix(focus_path) {
         if remainder.starts_with('/') || remainder.is_empty() {
             return DocMatchType::Descendant;
         }
@@ -315,10 +314,11 @@ fn classify_doc_match(doc_path: &str, focus_path: &str) -> DocMatchType {
 
     // Ancestor: doc is in a parent directory of focus
     // e.g., focus="ext/wasm", doc_dir="ext"
-    if !doc_dir.is_empty() && focus_path.starts_with(doc_dir) {
-        let remainder = &focus_path[doc_dir.len()..];
-        if remainder.starts_with('/') || remainder.is_empty() {
-            return DocMatchType::Ancestor;
+    if !doc_dir.is_empty() {
+        if let Some(remainder) = focus_path.strip_prefix(doc_dir) {
+            if remainder.starts_with('/') || remainder.is_empty() {
+                return DocMatchType::Ancestor;
+            }
         }
     }
 
@@ -470,8 +470,8 @@ mod tests {
         // This test verifies the fix for the sqlite ext/wasm ranking bug:
         // ext/wasm/README.md (exact) must rank above ext/README.md (ancestor)
         let inventory = vec![
-            doc("ext/README.md", "readme", false),       // ancestor
-            doc("ext/wasm/README.md", "readme", false),  // exact match
+            doc("ext/README.md", "readme", false),          // ancestor
+            doc("ext/wasm/README.md", "readme", false),     // exact match
             doc("ext/wasm/api/README.md", "readme", false), // descendant
         ];
 
@@ -490,8 +490,8 @@ mod tests {
     #[test]
     fn descendant_docs_outrank_ancestor_docs() {
         let inventory = vec![
-            doc("src/README.md", "readme", false),           // ancestor
-            doc("src/core/README.md", "readme", false),      // exact
+            doc("src/README.md", "readme", false),            // ancestor
+            doc("src/core/README.md", "readme", false),       // exact
             doc("src/core/model/README.md", "readme", false), // descendant
         ];
 
@@ -499,8 +499,8 @@ mod tests {
         let result = select_relevant_docs(&inventory, &focus);
 
         assert_eq!(result.len(), 3);
-        assert_eq!(result[0].path, "src/core/README.md");      // exact (320)
+        assert_eq!(result[0].path, "src/core/README.md"); // exact (320)
         assert_eq!(result[1].path, "src/core/model/README.md"); // descendant (270)
-        assert_eq!(result[2].path, "src/README.md");           // ancestor (220)
+        assert_eq!(result[2].path, "src/README.md"); // ancestor (220)
     }
 }

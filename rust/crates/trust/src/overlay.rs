@@ -15,7 +15,7 @@
 
 use serde::Serialize;
 
-use crate::types::{ReliabilityLevel, TrustReport, TrustReliability};
+use crate::types::{ReliabilityLevel, TrustReliability, TrustReport};
 
 // ── Top-level trust overlay for query surfaces ───────────────────
 
@@ -50,16 +50,36 @@ impl TrustOverlaySummary {
     pub fn from_report(report: &TrustReport, graph_basis: &str) -> Self {
         let mut degradation_flags = Vec::new();
 
-        if report.summary.triggered_downgrades.framework_heavy_suspicion.triggered {
+        if report
+            .summary
+            .triggered_downgrades
+            .framework_heavy_suspicion
+            .triggered
+        {
             degradation_flags.push("framework_heavy_suspicion".to_string());
         }
-        if report.summary.triggered_downgrades.registry_pattern_suspicion.triggered {
+        if report
+            .summary
+            .triggered_downgrades
+            .registry_pattern_suspicion
+            .triggered
+        {
             degradation_flags.push("registry_pattern_suspicion".to_string());
         }
-        if report.summary.triggered_downgrades.missing_entrypoint_declarations.triggered {
+        if report
+            .summary
+            .triggered_downgrades
+            .missing_entrypoint_declarations
+            .triggered
+        {
             degradation_flags.push("missing_entrypoint_declarations".to_string());
         }
-        if report.summary.triggered_downgrades.alias_resolution_suspicion.triggered {
+        if report
+            .summary
+            .triggered_downgrades
+            .alias_resolution_suspicion
+            .triggered
+        {
             degradation_flags.push("alias_resolution_suspicion".to_string());
         }
 
@@ -260,8 +280,8 @@ pub fn assess_dead_confidence(
 mod tests {
     use super::*;
     use crate::types::{
-        DowngradeTrigger, ReliabilityAxisScore, TrustDowngrades, TrustReliability,
-        TrustReport, TrustSummary,
+        DowngradeTrigger, ReliabilityAxisScore, TrustDowngrades, TrustReliability, TrustReport,
+        TrustSummary,
     };
 
     fn minimal_report() -> TrustReport {
@@ -342,12 +362,18 @@ mod tests {
     #[test]
     fn overlay_from_report_with_framework_heavy() {
         let mut report = minimal_report();
-        report.summary.triggered_downgrades.framework_heavy_suspicion.triggered = true;
+        report
+            .summary
+            .triggered_downgrades
+            .framework_heavy_suspicion
+            .triggered = true;
         report.summary.reliability.dead_code.level = ReliabilityLevel::LOW;
 
         let overlay = TrustOverlaySummary::from_report(&report, "CALLS");
 
-        assert!(overlay.degradation_flags.contains(&"framework_heavy_suspicion".to_string()));
+        assert!(overlay
+            .degradation_flags
+            .contains(&"framework_heavy_suspicion".to_string()));
         assert!(overlay.has_degradation());
     }
 
@@ -363,7 +389,11 @@ mod tests {
     #[test]
     fn dead_confidence_returns_low_with_framework_suspicion() {
         let mut report = minimal_report();
-        report.summary.triggered_downgrades.framework_heavy_suspicion.triggered = true;
+        report
+            .summary
+            .triggered_downgrades
+            .framework_heavy_suspicion
+            .triggered = true;
         report.summary.reliability.dead_code.level = ReliabilityLevel::LOW;
 
         let result = assess_dead_confidence(&report, "some::symbol");
@@ -375,25 +405,37 @@ mod tests {
     #[test]
     fn dead_confidence_returns_low_with_registry_suspicion() {
         let mut report = minimal_report();
-        report.summary.triggered_downgrades.registry_pattern_suspicion.triggered = true;
+        report
+            .summary
+            .triggered_downgrades
+            .registry_pattern_suspicion
+            .triggered = true;
         report.summary.reliability.dead_code.level = ReliabilityLevel::LOW;
 
         let result = assess_dead_confidence(&report, "some::symbol");
 
         assert_eq!(result.dead_confidence, ResultConfidence::Low);
-        assert!(result.reasons.contains(&"registry_pattern_suspicion".to_string()));
+        assert!(result
+            .reasons
+            .contains(&"registry_pattern_suspicion".to_string()));
     }
 
     #[test]
     fn dead_confidence_returns_low_with_missing_entrypoints() {
         let mut report = minimal_report();
-        report.summary.triggered_downgrades.missing_entrypoint_declarations.triggered = true;
+        report
+            .summary
+            .triggered_downgrades
+            .missing_entrypoint_declarations
+            .triggered = true;
         report.summary.reliability.dead_code.level = ReliabilityLevel::LOW;
 
         let result = assess_dead_confidence(&report, "some::symbol");
 
         assert_eq!(result.dead_confidence, ResultConfidence::Low);
-        assert!(result.reasons.contains(&"missing_entrypoint_declarations".to_string()));
+        assert!(result
+            .reasons
+            .contains(&"missing_entrypoint_declarations".to_string()));
     }
 
     #[test]
@@ -405,7 +447,9 @@ mod tests {
         let result = assess_dead_confidence(&report, "some::symbol");
 
         assert_eq!(result.dead_confidence, ResultConfidence::Medium);
-        assert!(result.reasons.contains(&"unresolved_call_pressure".to_string()));
+        assert!(result
+            .reasons
+            .contains(&"unresolved_call_pressure".to_string()));
     }
 
     #[test]
@@ -415,14 +459,20 @@ mod tests {
 
         let result = assess_dead_confidence(&report, "some::symbol");
 
-        assert!(result.reasons.contains(&"unresolved_import_pressure".to_string()));
+        assert!(result
+            .reasons
+            .contains(&"unresolved_import_pressure".to_string()));
     }
 
     #[test]
     fn dead_confidence_framework_suspicion_forces_low_even_with_high_dead_code_axis() {
         let mut report = minimal_report();
         // dead_code axis is HIGH but framework suspicion is triggered
-        report.summary.triggered_downgrades.framework_heavy_suspicion.triggered = true;
+        report
+            .summary
+            .triggered_downgrades
+            .framework_heavy_suspicion
+            .triggered = true;
 
         let result = assess_dead_confidence(&report, "some::symbol");
 

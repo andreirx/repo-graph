@@ -15,9 +15,7 @@
 //!    classified as URL-shaped (contains `://`) and becomes the resource key.
 
 use repo_graph_indexer::types::{CallArgPayload, ResolvedCallsite};
-use repo_graph_state_bindings::{
-    CalleePath, FsPathOrLogical, ImportView, Language, LogicalName,
-};
+use repo_graph_state_bindings::{CalleePath, FsPathOrLogical, ImportView, Language, LogicalName};
 
 use crate::adapter::{AdapterContext, LanguageStateAdapter};
 use crate::emit::{CallsiteLogicalName, StateBoundaryCallsite};
@@ -49,10 +47,7 @@ impl LanguageStateAdapter for JavaAdapter {
         _ctx: &AdapterContext<'_>,
         callsites: &[ResolvedCallsite],
     ) -> Vec<StateBoundaryCallsite> {
-        callsites
-            .iter()
-            .filter_map(adapt_java_callsite)
-            .collect()
+        callsites.iter().filter_map(adapt_java_callsite).collect()
     }
 }
 
@@ -108,15 +103,24 @@ fn classify_java_payload(
                 // This preserves all info while satisfying the stable-key segment grammar.
                 let encoded = encode_colons(value);
                 let ln = LogicalName::new(encoded).ok()?;
-                Some((CallsiteLogicalName::Generic(ln), LogicalNameSource::NormalizedUrl))
+                Some((
+                    CallsiteLogicalName::Generic(ln),
+                    LogicalNameSource::NormalizedUrl,
+                ))
             } else if is_url_shaped(value) {
                 // Other URL-shaped strings (non-JDBC)
                 let fs_path = FsPathOrLogical::new(value.clone()).ok()?;
-                Some((CallsiteLogicalName::Fs(fs_path), LogicalNameSource::NormalizedUrl))
+                Some((
+                    CallsiteLogicalName::Fs(fs_path),
+                    LogicalNameSource::NormalizedUrl,
+                ))
             } else {
                 // Path-shaped strings (unlikely for JDBC, but handle gracefully)
                 let fs_path = FsPathOrLogical::new(value.clone()).ok()?;
-                Some((CallsiteLogicalName::Fs(fs_path), LogicalNameSource::NormalizedPath))
+                Some((
+                    CallsiteLogicalName::Fs(fs_path),
+                    LogicalNameSource::NormalizedPath,
+                ))
             }
         }
         CallArgPayload::EnvKeyRead { key_name } => {
@@ -181,14 +185,20 @@ mod tests {
         };
         let adapted = adapt_java_callsite(&rc).expect("valid");
         assert_eq!(adapted.callee.resolved_module.as_deref(), Some("java.sql"));
-        assert_eq!(adapted.callee.resolved_symbol, "DriverManager.getConnection");
+        assert_eq!(
+            adapted.callee.resolved_symbol,
+            "DriverManager.getConnection"
+        );
         assert!(matches!(
             adapted.logical_name,
             CallsiteLogicalName::Generic(_)
         ));
         // Colons are URL-encoded to satisfy LogicalName invariant.
         assert_eq!(adapted.logical_name.as_str(), "jdbc%3Ah2%3Amem%3Atestdb");
-        assert_eq!(adapted.logical_name_source, LogicalNameSource::NormalizedUrl);
+        assert_eq!(
+            adapted.logical_name_source,
+            LogicalNameSource::NormalizedUrl
+        );
     }
 
     #[test]

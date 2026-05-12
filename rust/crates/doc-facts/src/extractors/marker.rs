@@ -15,9 +15,8 @@ use crate::types::{
 };
 
 /// Marker pattern: `<!-- rg:<directive> <args> -->`
-static MARKER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"<!--\s*rg:(\S+)\s+(.+?)\s*-->").unwrap()
-});
+static MARKER_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<!--\s*rg:(\S+)\s+(.+?)\s*-->").unwrap());
 
 /// Extract semantic facts from explicit rg: markers.
 pub fn extract(doc: &DocFile, content: &str, content_hash: &str) -> Vec<ExtractedFact> {
@@ -31,7 +30,9 @@ pub fn extract(doc: &DocFile, content: &str, content_hash: &str) -> Vec<Extracte
             let args = cap.get(2).map(|m| m.as_str()).unwrap_or("");
             let excerpt = cap.get(0).map(|m| m.as_str().to_string());
 
-            if let Some(fact) = parse_marker(doc, directive, args, line_number, excerpt, content_hash) {
+            if let Some(fact) =
+                parse_marker(doc, directive, args, line_number, excerpt, content_hash)
+            {
                 facts.push(fact);
             }
         }

@@ -46,7 +46,9 @@ where
     let calls = match storage.query_add_service_calls(snapshot_uid) {
         Ok(c) => c,
         Err(e) => {
-            result.errors.push(format!("Failed to query add_service calls: {}", e));
+            result
+                .errors
+                .push(format!("Failed to query add_service calls: {}", e));
             return result;
         }
     };
@@ -82,11 +84,9 @@ where
                 continue;
             }
             Err(e) => {
-                result.errors.push(format!(
-                    "Failed to find surface for {}: {}",
-                    class_name,
-                    e
-                ));
+                result
+                    .errors
+                    .push(format!("Failed to find surface for {}: {}", class_name, e));
                 continue;
             }
         };
@@ -112,8 +112,7 @@ where
             Err(e) => {
                 result.errors.push(format!(
                     "Failed to boost surface {}: {}",
-                    surface.surface_uid,
-                    e
+                    surface.surface_uid, e
                 ));
             }
         }

@@ -303,7 +303,12 @@ impl StorageConnection {
                 "#,
             )?;
 
-            let mut rows = stmt.query(params![snapshot_uid, src_file, pattern_toplevel, pattern_inner])?;
+            let mut rows = stmt.query(params![
+                snapshot_uid,
+                src_file,
+                pattern_toplevel,
+                pattern_inner
+            ])?;
 
             if let Some(row) = rows.next()? {
                 return Ok(Some(GrpcImplSurface {
@@ -381,7 +386,8 @@ impl StorageConnection {
         )?;
 
         // Parse and update evidence
-        let new_evidence = merge_registration_evidence(current_evidence.as_deref(), registration_site);
+        let new_evidence =
+            merge_registration_evidence(current_evidence.as_deref(), registration_site);
 
         // Update confidence and evidence
         let updated = conn.execute(
@@ -605,7 +611,10 @@ mod tests {
 
         assert_eq!(extensions.len(), 1);
         assert_eq!(extensions[0].impl_class_name, "GreeterImpl");
-        assert_eq!(extensions[0].impl_base_target, "GreeterGrpc.GreeterImplBase");
+        assert_eq!(
+            extensions[0].impl_base_target,
+            "GreeterGrpc.GreeterImplBase"
+        );
         assert_eq!(extensions[0].source_file, "src/GreeterImpl.java");
     }
 

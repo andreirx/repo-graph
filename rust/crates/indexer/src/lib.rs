@@ -84,8 +84,7 @@
 //!
 //! Sub-traits are added progressively per substep:
 //!   - R5-B: SnapshotLifecyclePort, FileCatalogPort
-//!   - R5-F: NodeStorePort, EdgeStorePort, UnresolvedEdgePort,
-//!           FileSignalPort
+//!   - R5-F: NodeStorePort, EdgeStorePort, UnresolvedEdgePort, FileSignalPort
 //!   - R5-H: DeltaCopyPort
 //!
 //! The IndexerStoragePort facade grows to include each new
@@ -93,101 +92,90 @@
 
 pub mod cargo_manifest;
 pub mod extractor_port;
-pub mod inferred_modules;
-pub mod jsts_extensions;
-pub mod package_json;
-pub mod pyproject;
-pub mod settings_gradle;
 pub mod grpc_client_hint;
 pub mod grpc_impl_hint;
 pub mod grpc_link;
 pub mod grpc_registration_proof;
 pub mod hook;
 pub mod include_resolver;
+pub mod inferred_modules;
 pub mod invalidation;
 pub mod java_code_mapper;
+pub mod jsts_extensions;
 pub mod orchestrator;
+pub mod package_json;
 pub mod proto_indexer;
+pub mod pyproject;
 pub mod refresh_dispatch;
 pub mod resolver;
 pub mod routing;
+pub mod settings_gradle;
 pub mod storage_port;
 pub mod types;
 
 // ── Public re-exports ────────────────────────────────────────
 
+pub use cargo_manifest::{
+    generate_evidence_uid, generate_module_key, generate_module_uid, parse_cargo_toml,
+    to_storage_inputs, CargoEvidencePayload, CargoModule, CargoModuleCandidateInput,
+    CargoModuleEvidenceInput, CargoModuleStorePort, CargoParseResult, FileOwnershipInput,
+};
 pub use extractor_port::{ExtractorError, ExtractorPort};
-pub use proto_indexer::{index_proto_files, ProtoFileInput, ProtoIndexResult, ProtoParseFailure};
-pub use java_code_mapper::{
-	find_java_mappings, ContractElementContext, GeneratedCodeMapping, JavaSymbol,
-	MappingBasis, MappingEvidence, ProtoOptions,
-};
-pub use storage_port::{
-	AddServiceCallInput, DeltaCopyPort, EdgeStorePort, FileCatalogPort, FileSignalPort,
-	GeneratedCodeMappingInput, GeneratedCodeMappingReadPort, GeneratedCodeMappingStorePort,
-	GrpcClientContractInput, GrpcClientHintReadPort,
-	GrpcClientHintStorePort, GrpcClientSurfaceInput, GrpcServiceMappingInput,
-	GrpcImplContractInput, GrpcImplHintReadPort, GrpcImplHintStorePort, GrpcImplSurfaceInput,
-	GrpcImplSurfaceMatch, GrpcRegistrationProofPort, IndexerStoragePort, NodeStorePort,
-	ProtoElementInput, ProtoSchemaInput, ProtoSchemaStorePort, RegistrationSiteInput,
-	SnapshotLifecyclePort, StubCreationInput, UnresolvedEdgePort,
-};
 pub use grpc_client_hint::{
-	find_grpc_client_hints, run_grpc_client_hint_detection,
-	GrpcClientHint, GrpcClientHintResult, StubType,
+    find_grpc_client_hints, run_grpc_client_hint_detection, GrpcClientHint, GrpcClientHintResult,
+    StubType,
 };
 pub use grpc_impl_hint::{
-	find_grpc_impl_hints, generate_association_uid, generate_surface_uid,
-	run_grpc_impl_hint_detection, GrpcImplHint, GrpcImplHintResult,
-	ImplBaseExtensionInput, ImplBaseMappingInput,
+    find_grpc_impl_hints, generate_association_uid, generate_surface_uid,
+    run_grpc_impl_hint_detection, GrpcImplHint, GrpcImplHintResult, ImplBaseExtensionInput,
+    ImplBaseMappingInput,
 };
+pub use grpc_link::{find_grpc_links, run_grpc_link_detection, GrpcLink, GrpcLinkResult};
 pub use grpc_registration_proof::{run_grpc_registration_proof, GrpcRegistrationProofResult};
-pub use grpc_link::{
-	find_grpc_links, run_grpc_link_detection,
-	GrpcLink, GrpcLinkResult,
+pub use inferred_modules::{
+    detect_inferred_modules, generate_evidence_uid as generate_inferred_evidence_uid,
+    generate_module_key as generate_inferred_module_key,
+    generate_module_uid as generate_inferred_module_uid,
+    to_storage_inputs as inferred_to_storage_inputs, InferredEvidencePayload, InferredModule,
+    InferredModuleResult, INFERRED_MODULE_CONFIDENCE,
 };
-pub use refresh_dispatch::{
-	dispatch_recompute_relationships, should_recompute, should_reextract,
-	RecomputeDispatchResult,
-};
-pub use storage_port::{
-	BoundaryInteractionLinkInput, GrpcLinkReadPort, GrpcLinkStorePort, SurfaceWithContract,
-};
-pub use cargo_manifest::{
-	parse_cargo_toml, to_storage_inputs, generate_module_key, generate_module_uid,
-	generate_evidence_uid, CargoModule, CargoModuleCandidateInput, CargoModuleEvidenceInput,
-	CargoModuleStorePort, CargoParseResult, CargoEvidencePayload, FileOwnershipInput,
+pub use java_code_mapper::{
+    find_java_mappings, ContractElementContext, GeneratedCodeMapping, JavaSymbol, MappingBasis,
+    MappingEvidence, ProtoOptions,
 };
 pub use package_json::{
-	parse_package_json, parse_pnpm_workspace,
-	generate_module_key as generate_npm_module_key,
-	generate_module_uid as generate_npm_module_uid,
-	generate_evidence_uid as generate_npm_evidence_uid,
-	to_storage_inputs as npm_to_storage_inputs,
-	NpmModule, NpmEvidencePayload, PackageJsonParseResult, PnpmWorkspaceParseResult,
+    generate_evidence_uid as generate_npm_evidence_uid,
+    generate_module_key as generate_npm_module_key, generate_module_uid as generate_npm_module_uid,
+    parse_package_json, parse_pnpm_workspace, to_storage_inputs as npm_to_storage_inputs,
+    NpmEvidencePayload, NpmModule, PackageJsonParseResult, PnpmWorkspaceParseResult,
 };
+pub use proto_indexer::{index_proto_files, ProtoFileInput, ProtoIndexResult, ProtoParseFailure};
 pub use pyproject::{
-	parse_pyproject_toml,
-	generate_module_key as generate_pyproject_module_key,
-	generate_module_uid as generate_pyproject_module_uid,
-	generate_evidence_uid as generate_pyproject_evidence_uid,
-	to_storage_inputs as pyproject_to_storage_inputs,
-	PyprojectModule, PyprojectEvidencePayload, PyprojectParseResult,
+    generate_evidence_uid as generate_pyproject_evidence_uid,
+    generate_module_key as generate_pyproject_module_key,
+    generate_module_uid as generate_pyproject_module_uid, parse_pyproject_toml,
+    to_storage_inputs as pyproject_to_storage_inputs, PyprojectEvidencePayload, PyprojectModule,
+    PyprojectParseResult,
+};
+pub use refresh_dispatch::{
+    dispatch_recompute_relationships, should_recompute, should_reextract, RecomputeDispatchResult,
 };
 pub use settings_gradle::{
-	parse_settings_gradle,
-	generate_module_key as generate_gradle_module_key,
-	generate_module_uid as generate_gradle_module_uid,
-	generate_evidence_uid as generate_gradle_evidence_uid,
-	to_storage_inputs as gradle_to_storage_inputs,
-	GradleModule, GradleEvidencePayload, SettingsGradleParseResult,
+    generate_evidence_uid as generate_gradle_evidence_uid,
+    generate_module_key as generate_gradle_module_key,
+    generate_module_uid as generate_gradle_module_uid, parse_settings_gradle,
+    to_storage_inputs as gradle_to_storage_inputs, GradleEvidencePayload, GradleModule,
+    SettingsGradleParseResult,
 };
-pub use inferred_modules::{
-	detect_inferred_modules,
-	generate_module_key as generate_inferred_module_key,
-	generate_module_uid as generate_inferred_module_uid,
-	generate_evidence_uid as generate_inferred_evidence_uid,
-	to_storage_inputs as inferred_to_storage_inputs,
-	InferredModule, InferredEvidencePayload, InferredModuleResult,
-	INFERRED_MODULE_CONFIDENCE,
+pub use storage_port::{
+    AddServiceCallInput, DeltaCopyPort, EdgeStorePort, FileCatalogPort, FileSignalPort,
+    GeneratedCodeMappingInput, GeneratedCodeMappingReadPort, GeneratedCodeMappingStorePort,
+    GrpcClientContractInput, GrpcClientHintReadPort, GrpcClientHintStorePort,
+    GrpcClientSurfaceInput, GrpcImplContractInput, GrpcImplHintReadPort, GrpcImplHintStorePort,
+    GrpcImplSurfaceInput, GrpcImplSurfaceMatch, GrpcRegistrationProofPort, GrpcServiceMappingInput,
+    IndexerStoragePort, NodeStorePort, ProtoElementInput, ProtoSchemaInput, ProtoSchemaStorePort,
+    RegistrationSiteInput, SnapshotLifecyclePort, StubCreationInput, UnresolvedEdgePort,
+};
+pub use storage_port::{
+    BoundaryInteractionLinkInput, GrpcLinkReadPort, GrpcLinkStorePort, SurfaceWithContract,
 };

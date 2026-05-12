@@ -62,8 +62,15 @@ impl GeneratedCodeMappingReadPort for StorageConnection {
 
         let mut elements = Vec::new();
         for row_result in rows {
-            let (element_uid, element_kind, name, full_name, schema_file, proto_package, options_json) =
-                row_result?;
+            let (
+                element_uid,
+                element_kind,
+                name,
+                full_name,
+                schema_file,
+                proto_package,
+                options_json,
+            ) = row_result?;
 
             let options = options_json
                 .as_deref()

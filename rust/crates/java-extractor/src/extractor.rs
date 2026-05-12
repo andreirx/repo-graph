@@ -11,8 +11,8 @@ use repo_graph_classification::types::{ImportBinding, RuntimeBuiltinsSet, Source
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::routing::is_test_file;
 use repo_graph_indexer::types::{
-    CallArgPayload, EdgeType, ExtractionResult, ExtractedEdge, ExtractedMetrics, ExtractedNode,
-    NodeKind, NodeSubtype, ResolvedCallsite, Resolution, Visibility,
+    CallArgPayload, EdgeType, ExtractedEdge, ExtractedMetrics, ExtractedNode, ExtractionResult,
+    NodeKind, NodeSubtype, Resolution, ResolvedCallsite, Visibility,
 };
 
 use crate::builtins::java_runtime_builtins;
@@ -731,7 +731,13 @@ fn extract_class_body(
             }
             "annotation_type_declaration" => {
                 // Nested @interface
-                extract_annotation_type(&child, src, ctx, Some(enclosing_type_chain), class_node_uid);
+                extract_annotation_type(
+                    &child,
+                    src,
+                    ctx,
+                    Some(enclosing_type_chain),
+                    class_node_uid,
+                );
             }
             _ => {}
         }
@@ -759,19 +765,49 @@ fn extract_interface_body(
             }
             // Interfaces can have nested types
             "class_declaration" => {
-                extract_class(&child, src, ctx, Some(enclosing_type_chain), interface_node_uid);
+                extract_class(
+                    &child,
+                    src,
+                    ctx,
+                    Some(enclosing_type_chain),
+                    interface_node_uid,
+                );
             }
             "interface_declaration" => {
-                extract_interface(&child, src, ctx, Some(enclosing_type_chain), interface_node_uid);
+                extract_interface(
+                    &child,
+                    src,
+                    ctx,
+                    Some(enclosing_type_chain),
+                    interface_node_uid,
+                );
             }
             "enum_declaration" => {
-                extract_enum(&child, src, ctx, Some(enclosing_type_chain), interface_node_uid);
+                extract_enum(
+                    &child,
+                    src,
+                    ctx,
+                    Some(enclosing_type_chain),
+                    interface_node_uid,
+                );
             }
             "record_declaration" => {
-                extract_record(&child, src, ctx, Some(enclosing_type_chain), interface_node_uid);
+                extract_record(
+                    &child,
+                    src,
+                    ctx,
+                    Some(enclosing_type_chain),
+                    interface_node_uid,
+                );
             }
             "annotation_type_declaration" => {
-                extract_annotation_type(&child, src, ctx, Some(enclosing_type_chain), interface_node_uid);
+                extract_annotation_type(
+                    &child,
+                    src,
+                    ctx,
+                    Some(enclosing_type_chain),
+                    interface_node_uid,
+                );
             }
             _ => {}
         }
@@ -816,7 +852,13 @@ fn extract_enum_body(
                 extract_record(&child, src, ctx, Some(enclosing_type_chain), enum_node_uid);
             }
             "annotation_type_declaration" => {
-                extract_annotation_type(&child, src, ctx, Some(enclosing_type_chain), enum_node_uid);
+                extract_annotation_type(
+                    &child,
+                    src,
+                    ctx,
+                    Some(enclosing_type_chain),
+                    enum_node_uid,
+                );
             }
             _ => {}
         }
@@ -962,7 +1004,8 @@ fn extract_field(
             if let Some(name_node) = child.child_by_field_name("name") {
                 let name = node_text(&name_node, src);
 
-                let stable_key = ctx.make_stable_key(&name, &NodeSubtype::Property, Some(enclosing_type_chain));
+                let stable_key =
+                    ctx.make_stable_key(&name, &NodeSubtype::Property, Some(enclosing_type_chain));
                 let node_uid = uuid::Uuid::new_v4().to_string();
 
                 // Qualified name: package.EnclosingType.fieldName
@@ -984,7 +1027,7 @@ fn extract_field(
                     parent_node_uid: Some(parent_uid.into()),
                     location: Some(node_location(&child)),
                     signature: None,
-                    visibility: visibility.clone(),
+                    visibility,
                     doc_comment: None,
                     metadata_json: annotations.clone(),
                 });
@@ -1007,7 +1050,8 @@ fn extract_enum_constant(
         None => return,
     };
 
-    let stable_key = ctx.make_stable_key(&name, &NodeSubtype::EnumMember, Some(enclosing_type_chain));
+    let stable_key =
+        ctx.make_stable_key(&name, &NodeSubtype::EnumMember, Some(enclosing_type_chain));
 
     // Qualified name: package.EnumType.CONSTANT_NAME
     let qualified_name = match &ctx.package_name {
@@ -1295,10 +1339,7 @@ fn try_resolve_static_callsite_java(
 ///
 /// Returns `Some(CallArgPayload::StringLiteral)` if arg0 is a string literal.
 /// Returns `None` otherwise (dynamic, absent, or non-literal).
-fn classify_arg0_payload_java(
-    call_node: &tree_sitter::Node,
-    src: &[u8],
-) -> Option<CallArgPayload> {
+fn classify_arg0_payload_java(call_node: &tree_sitter::Node, src: &[u8]) -> Option<CallArgPayload> {
     let args_node = call_node.child_by_field_name("arguments")?;
 
     // Find the first argument (skip "(" and ")")
@@ -1308,9 +1349,7 @@ fn classify_arg0_payload_java(
             "string_literal" => {
                 let text = node_text(&child, src);
                 // Strip surrounding quotes
-                let unquoted = text
-                    .trim_start_matches('"')
-                    .trim_end_matches('"');
+                let unquoted = text.trim_start_matches('"').trim_end_matches('"');
                 return Some(CallArgPayload::StringLiteral {
                     value: unquoted.to_string(),
                 });
@@ -1991,7 +2030,11 @@ mod tests {
         assert!(marker.stable_key.contains("#Outer.Marker"));
 
         // Metadata should indicate isAnnotationType
-        assert!(marker.metadata_json.as_ref().unwrap().contains("isAnnotationType"));
+        assert!(marker
+            .metadata_json
+            .as_ref()
+            .unwrap()
+            .contains("isAnnotationType"));
     }
 
     // ── JE-1: ResolvedCallsite tests ─────────────────────────────────
@@ -2138,7 +2181,9 @@ mod tests {
             .collect();
         assert!(!calls.is_empty(), "CALLS edge must still be emitted");
         assert!(
-            calls.iter().any(|e| e.target_key == "DriverManager.getConnection"),
+            calls
+                .iter()
+                .any(|e| e.target_key == "DriverManager.getConnection"),
             "CALLS edge target must be DriverManager.getConnection"
         );
     }
@@ -2166,8 +2211,7 @@ mod tests {
 
         assert_eq!(result.resolved_callsites.len(), 1);
         assert_eq!(
-            result.resolved_callsites[0].enclosing_symbol_node_uid,
-            method.node_uid,
+            result.resolved_callsites[0].enclosing_symbol_node_uid, method.node_uid,
             "enclosing_symbol_node_uid must match containing method's node_uid"
         );
     }

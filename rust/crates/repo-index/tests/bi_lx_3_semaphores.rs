@@ -101,7 +101,10 @@ fn index_semaphores_fixture_produces_semaphore_surfaces() {
             .iter()
             .map(|s| format!(
                 "{}:{} {} {:?}",
-                s.source_file, s.line_start, s.channel_kind.as_str(), s.direction
+                s.source_file,
+                s.line_start,
+                s.channel_kind.as_str(),
+                s.direction
             ))
             .collect::<Vec<_>>()
     );

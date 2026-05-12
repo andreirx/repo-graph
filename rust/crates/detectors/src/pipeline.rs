@@ -36,8 +36,7 @@ use crate::comment_masker::mask_comments_for_file;
 use crate::hooks::create_default_hook_registry;
 use crate::loader::load_detector_graph;
 use crate::types::{
-	DetectedEnvDependency, DetectedFsMutation, DetectorLanguage, HookRegistry,
-	LoadedDetectorGraph,
+    DetectedEnvDependency, DetectedFsMutation, DetectorLanguage, HookRegistry, LoadedDetectorGraph,
 };
 use crate::walker::{walk_env_detectors, walk_fs_detectors};
 
@@ -50,9 +49,7 @@ use crate::walker::{walk_env_detectors, walk_fs_detectors};
 /// file. If the TS side moves or renames `detectors.toml`, the
 /// Rust crate fails to build — which is the intended fail-fast
 /// signal for cross-runtime contract drift.
-const DETECTORS_TOML: &str = include_str!(
-	"../../../../src/core/seams/detectors/detectors.toml"
-);
+const DETECTORS_TOML: &str = include_str!("../../../../src/core/seams/detectors/detectors.toml");
 
 // ── Eager-loaded singleton ────────────────────────────────────────
 
@@ -60,8 +57,8 @@ const DETECTORS_TOML: &str = include_str!(
 /// registry, both populated from the embedded `detectors.toml` and
 /// the default hook registry respectively.
 pub struct ProductionPipeline {
-	pub graph: LoadedDetectorGraph,
-	pub registry: HookRegistry,
+    pub graph: LoadedDetectorGraph,
+    pub registry: HookRegistry,
 }
 
 /// Lazy-initialized singleton holding the production pipeline.
@@ -79,10 +76,11 @@ pub struct ProductionPipeline {
 /// to express "run this initialization exactly once, thread-safe,
 /// on first access".
 static PRODUCTION_PIPELINE: LazyLock<ProductionPipeline> = LazyLock::new(|| {
-	let registry = create_default_hook_registry();
-	let graph = load_detector_graph(DETECTORS_TOML, &registry)
-		.expect("production detectors.toml should parse and validate against the default hook registry");
-	ProductionPipeline { graph, registry }
+    let registry = create_default_hook_registry();
+    let graph = load_detector_graph(DETECTORS_TOML, &registry).expect(
+        "production detectors.toml should parse and validate against the default hook registry",
+    );
+    ProductionPipeline { graph, registry }
 });
 
 /// Access the production pipeline singleton.
@@ -91,7 +89,7 @@ static PRODUCTION_PIPELINE: LazyLock<ProductionPipeline> = LazyLock::new(|| {
 /// registry directly. Normal callers should use
 /// `detect_env_accesses` / `detect_fs_mutations` instead.
 pub fn production_pipeline() -> &'static ProductionPipeline {
-	&PRODUCTION_PIPELINE
+    &PRODUCTION_PIPELINE
 }
 
 // ── Public detector API ───────────────────────────────────────────
@@ -110,23 +108,20 @@ pub fn production_pipeline() -> &'static ProductionPipeline {
 ///
 /// Byte-identical to the TS public function against every fixture
 /// in `parity-fixtures/`.
-pub fn detect_env_accesses(
-	content: &str,
-	file_path: &str,
-) -> Vec<DetectedEnvDependency> {
-	let language = match language_from_extension(file_path) {
-		Some(l) => l,
-		None => return Vec::new(),
-	};
-	let masked = mask_comments_for_file(file_path, content);
-	let pipeline = production_pipeline();
-	walk_env_detectors(
-		&pipeline.graph,
-		&pipeline.registry,
-		language,
-		&masked,
-		file_path,
-	)
+pub fn detect_env_accesses(content: &str, file_path: &str) -> Vec<DetectedEnvDependency> {
+    let language = match language_from_extension(file_path) {
+        Some(l) => l,
+        None => return Vec::new(),
+    };
+    let masked = mask_comments_for_file(file_path, content);
+    let pipeline = production_pipeline();
+    walk_env_detectors(
+        &pipeline.graph,
+        &pipeline.registry,
+        language,
+        &masked,
+        file_path,
+    )
 }
 
 /// Detect filesystem mutation occurrences in a source file.
@@ -135,23 +130,20 @@ pub fn detect_env_accesses(
 /// public function. Composition is identical to
 /// `detect_env_accesses`: extension → language, comment mask,
 /// walker dispatch.
-pub fn detect_fs_mutations(
-	content: &str,
-	file_path: &str,
-) -> Vec<DetectedFsMutation> {
-	let language = match language_from_extension(file_path) {
-		Some(l) => l,
-		None => return Vec::new(),
-	};
-	let masked = mask_comments_for_file(file_path, content);
-	let pipeline = production_pipeline();
-	walk_fs_detectors(
-		&pipeline.graph,
-		&pipeline.registry,
-		language,
-		&masked,
-		file_path,
-	)
+pub fn detect_fs_mutations(content: &str, file_path: &str) -> Vec<DetectedFsMutation> {
+    let language = match language_from_extension(file_path) {
+        Some(l) => l,
+        None => return Vec::new(),
+    };
+    let masked = mask_comments_for_file(file_path, content);
+    let pipeline = production_pipeline();
+    walk_fs_detectors(
+        &pipeline.graph,
+        &pipeline.registry,
+        language,
+        &masked,
+        file_path,
+    )
 }
 
 // ── Language dispatch ─────────────────────────────────────────────
@@ -172,82 +164,106 @@ pub fn detect_fs_mutations(
 /// behavior exactly. Files with no extension or unknown extensions
 /// return `None` and the walker is never called.
 fn language_from_extension(file_path: &str) -> Option<DetectorLanguage> {
-	let dot = file_path.rfind('.')?;
-	let ext = &file_path[dot..];
-	match ext {
-		".ts" | ".tsx" | ".js" | ".jsx" => Some(DetectorLanguage::Ts),
-		".py" => Some(DetectorLanguage::Py),
-		".rs" => Some(DetectorLanguage::Rs),
-		".java" => Some(DetectorLanguage::Java),
-		".c" | ".h" | ".cpp" | ".hpp" | ".cc" | ".cxx" => Some(DetectorLanguage::C),
-		_ => None,
-	}
+    let dot = file_path.rfind('.')?;
+    let ext = &file_path[dot..];
+    match ext {
+        ".ts" | ".tsx" | ".js" | ".jsx" => Some(DetectorLanguage::Ts),
+        ".py" => Some(DetectorLanguage::Py),
+        ".rs" => Some(DetectorLanguage::Rs),
+        ".java" => Some(DetectorLanguage::Java),
+        ".c" | ".h" | ".cpp" | ".hpp" | ".cc" | ".cxx" => Some(DetectorLanguage::C),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod extension_tests {
-	use super::*;
+    use super::*;
 
-	#[test]
-	fn ts_family_extensions_map_to_ts() {
-		assert_eq!(language_from_extension("src/a.ts"), Some(DetectorLanguage::Ts));
-		assert_eq!(language_from_extension("src/a.tsx"), Some(DetectorLanguage::Ts));
-		assert_eq!(language_from_extension("src/a.js"), Some(DetectorLanguage::Ts));
-		assert_eq!(language_from_extension("src/a.jsx"), Some(DetectorLanguage::Ts));
-	}
+    #[test]
+    fn ts_family_extensions_map_to_ts() {
+        assert_eq!(
+            language_from_extension("src/a.ts"),
+            Some(DetectorLanguage::Ts)
+        );
+        assert_eq!(
+            language_from_extension("src/a.tsx"),
+            Some(DetectorLanguage::Ts)
+        );
+        assert_eq!(
+            language_from_extension("src/a.js"),
+            Some(DetectorLanguage::Ts)
+        );
+        assert_eq!(
+            language_from_extension("src/a.jsx"),
+            Some(DetectorLanguage::Ts)
+        );
+    }
 
-	#[test]
-	fn python_extension_maps_to_py() {
-		assert_eq!(language_from_extension("src/a.py"), Some(DetectorLanguage::Py));
-	}
+    #[test]
+    fn python_extension_maps_to_py() {
+        assert_eq!(
+            language_from_extension("src/a.py"),
+            Some(DetectorLanguage::Py)
+        );
+    }
 
-	#[test]
-	fn rust_extension_maps_to_rs() {
-		assert_eq!(language_from_extension("src/a.rs"), Some(DetectorLanguage::Rs));
-	}
+    #[test]
+    fn rust_extension_maps_to_rs() {
+        assert_eq!(
+            language_from_extension("src/a.rs"),
+            Some(DetectorLanguage::Rs)
+        );
+    }
 
-	#[test]
-	fn java_extension_maps_to_java() {
-		assert_eq!(
-			language_from_extension("src/A.java"),
-			Some(DetectorLanguage::Java)
-		);
-	}
+    #[test]
+    fn java_extension_maps_to_java() {
+        assert_eq!(
+            language_from_extension("src/A.java"),
+            Some(DetectorLanguage::Java)
+        );
+    }
 
-	#[test]
-	fn c_cpp_extensions_map_to_c() {
-		for ext in [".c", ".h", ".cpp", ".hpp", ".cc", ".cxx"] {
-			assert_eq!(
-				language_from_extension(&format!("src/a{ext}")),
-				Some(DetectorLanguage::C),
-				"failed for extension {ext}"
-			);
-		}
-	}
+    #[test]
+    fn c_cpp_extensions_map_to_c() {
+        for ext in [".c", ".h", ".cpp", ".hpp", ".cc", ".cxx"] {
+            assert_eq!(
+                language_from_extension(&format!("src/a{ext}")),
+                Some(DetectorLanguage::C),
+                "failed for extension {ext}"
+            );
+        }
+    }
 
-	#[test]
-	fn unknown_extension_returns_none() {
-		assert_eq!(language_from_extension("src/a.rb"), None);
-		assert_eq!(language_from_extension("src/a.go"), None);
-		assert_eq!(language_from_extension("src/a.txt"), None);
-	}
+    #[test]
+    fn unknown_extension_returns_none() {
+        assert_eq!(language_from_extension("src/a.rb"), None);
+        assert_eq!(language_from_extension("src/a.go"), None);
+        assert_eq!(language_from_extension("src/a.txt"), None);
+    }
 
-	#[test]
-	fn no_extension_returns_none() {
-		assert_eq!(language_from_extension("Makefile"), None);
-		assert_eq!(language_from_extension("src/README"), None);
-	}
+    #[test]
+    fn no_extension_returns_none() {
+        assert_eq!(language_from_extension("Makefile"), None);
+        assert_eq!(language_from_extension("src/README"), None);
+    }
 
-	#[test]
-	fn uppercase_extensions_are_not_recognized() {
-		// Case-sensitive by design, matching TS.
-		assert_eq!(language_from_extension("src/a.TS"), None);
-		assert_eq!(language_from_extension("src/a.PY"), None);
-	}
+    #[test]
+    fn uppercase_extensions_are_not_recognized() {
+        // Case-sensitive by design, matching TS.
+        assert_eq!(language_from_extension("src/a.TS"), None);
+        assert_eq!(language_from_extension("src/a.PY"), None);
+    }
 
-	#[test]
-	fn extension_is_last_dot_segment() {
-		assert_eq!(language_from_extension("a.b.c.ts"), Some(DetectorLanguage::Ts));
-		assert_eq!(language_from_extension("src/foo.bar.rs"), Some(DetectorLanguage::Rs));
-	}
+    #[test]
+    fn extension_is_last_dot_segment() {
+        assert_eq!(
+            language_from_extension("a.b.c.ts"),
+            Some(DetectorLanguage::Ts)
+        );
+        assert_eq!(
+            language_from_extension("src/foo.bar.rs"),
+            Some(DetectorLanguage::Rs)
+        );
+    }
 }

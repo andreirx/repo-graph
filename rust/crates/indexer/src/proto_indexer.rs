@@ -171,34 +171,17 @@ pub fn index_proto_files<S: ProtoSchemaStorePort>(
 
         // Process messages (recursively for nested)
         for msg in &parsed.messages {
-            extract_message_elements(
-                &mut elements,
-                msg,
-                &schema_uid,
-                package_prefix,
-                None,
-            );
+            extract_message_elements(&mut elements, msg, &schema_uid, package_prefix, None);
         }
 
         // Process enums
         for enum_def in &parsed.enums {
-            extract_enum_elements(
-                &mut elements,
-                enum_def,
-                &schema_uid,
-                package_prefix,
-                None,
-            );
+            extract_enum_elements(&mut elements, enum_def, &schema_uid, package_prefix, None);
         }
 
         // Process services
         for service in &parsed.services {
-            extract_service_elements(
-                &mut elements,
-                service,
-                &schema_uid,
-                package_prefix,
-            );
+            extract_service_elements(&mut elements, service, &schema_uid, package_prefix);
         }
 
         // Insert elements
@@ -275,24 +258,12 @@ fn extract_message_elements(
 
     // Process nested messages
     for nested in &msg.nested_messages {
-        extract_message_elements(
-            elements,
-            nested,
-            schema_uid,
-            &full_name,
-            Some(&element_uid),
-        );
+        extract_message_elements(elements, nested, schema_uid, &full_name, Some(&element_uid));
     }
 
     // Process nested enums
     for nested in &msg.nested_enums {
-        extract_enum_elements(
-            elements,
-            nested,
-            schema_uid,
-            &full_name,
-            Some(&element_uid),
-        );
+        extract_enum_elements(elements, nested, schema_uid, &full_name, Some(&element_uid));
     }
 }
 
@@ -435,7 +406,10 @@ mod tests {
             Ok(())
         }
 
-        fn insert_proto_elements(&mut self, elements: &[ProtoElementInput]) -> Result<usize, String> {
+        fn insert_proto_elements(
+            &mut self,
+            elements: &[ProtoElementInput],
+        ) -> Result<usize, String> {
             let count = elements.len();
             self.elements.extend(elements.iter().cloned());
             Ok(count)
@@ -457,7 +431,8 @@ mod tests {
                     string name = 1;
                     int32 age = 2;
                 }
-            "#.to_string(),
+            "#
+            .to_string(),
             content_hash: "abc123".to_string(),
         }];
 
@@ -472,10 +447,15 @@ mod tests {
         // Check schema
         assert_eq!(storage.schemas.len(), 1);
         assert_eq!(storage.schemas[0].package_name, Some("api".to_string()));
-        assert_eq!(storage.schemas[0].syntax_version, Some("proto3".to_string()));
+        assert_eq!(
+            storage.schemas[0].syntax_version,
+            Some("proto3".to_string())
+        );
 
         // Check elements
-        let messages: Vec<_> = storage.elements.iter()
+        let messages: Vec<_> = storage
+            .elements
+            .iter()
             .filter(|e| e.element_kind == "message")
             .collect();
         assert_eq!(messages.len(), 1);
@@ -500,7 +480,8 @@ mod tests {
                     rpc GetUser(Request) returns (Response);
                     rpc StreamUsers(Request) returns (stream Response);
                 }
-            "#.to_string(),
+            "#
+            .to_string(),
             content_hash: "def456".to_string(),
         }];
 
@@ -509,25 +490,26 @@ mod tests {
         assert_eq!(result.schemas_indexed, 1);
 
         // Check service
-        let services: Vec<_> = storage.elements.iter()
+        let services: Vec<_> = storage
+            .elements
+            .iter()
             .filter(|e| e.element_kind == "service")
             .collect();
         assert_eq!(services.len(), 1);
         assert_eq!(services[0].full_name, "api.UserService");
 
         // Check methods
-        let methods: Vec<_> = storage.elements.iter()
+        let methods: Vec<_> = storage
+            .elements
+            .iter()
             .filter(|e| e.element_kind == "method")
             .collect();
         assert_eq!(methods.len(), 2);
 
         // Verify streaming method has correct metadata
-        let stream_method = methods.iter()
-            .find(|m| m.name == "StreamUsers")
-            .unwrap();
-        let meta: serde_json::Value = serde_json::from_str(
-            stream_method.metadata_json.as_ref().unwrap()
-        ).unwrap();
+        let stream_method = methods.iter().find(|m| m.name == "StreamUsers").unwrap();
+        let meta: serde_json::Value =
+            serde_json::from_str(stream_method.metadata_json.as_ref().unwrap()).unwrap();
         assert_eq!(meta["server_streaming"], true);
     }
 
@@ -545,7 +527,8 @@ mod tests {
                     }
                     Inner nested = 1;
                 }
-            "#.to_string(),
+            "#
+            .to_string(),
             content_hash: "nested123".to_string(),
         }];
 
@@ -554,9 +537,7 @@ mod tests {
         assert_eq!(result.schemas_indexed, 1);
 
         // Check nested message full name
-        let inner = storage.elements.iter()
-            .find(|e| e.name == "Inner")
-            .unwrap();
+        let inner = storage.elements.iter().find(|e| e.name == "Inner").unwrap();
         assert_eq!(inner.full_name, "Outer.Inner");
         assert!(inner.parent_element_uid.is_some());
     }
@@ -574,7 +555,8 @@ mod tests {
                 content: r#"
                     syntax = "proto3";
                     message Good { string x = 1; }
-                "#.to_string(),
+                "#
+                .to_string(),
                 content_hash: "good".to_string(),
             },
             ProtoFileInput {
@@ -582,7 +564,8 @@ mod tests {
                 content: r#"
                     syntax = "proto3";
                     message AlsoGood { int32 y = 1; }
-                "#.to_string(),
+                "#
+                .to_string(),
                 content_hash: "also_good".to_string(),
             },
         ];
@@ -595,7 +578,11 @@ mod tests {
 
         // Verify we have both schemas
         assert_eq!(storage.schemas.len(), 2);
-        let paths: Vec<_> = storage.schemas.iter().map(|s| s.file_path.as_str()).collect();
+        let paths: Vec<_> = storage
+            .schemas
+            .iter()
+            .map(|s| s.file_path.as_str())
+            .collect();
         assert!(paths.contains(&"good.proto"));
         assert!(paths.contains(&"also_good.proto"));
     }
@@ -614,7 +601,8 @@ mod tests {
                     ACTIVE = 1;
                     INACTIVE = 2;
                 }
-            "#.to_string(),
+            "#
+            .to_string(),
             content_hash: "enum123".to_string(),
         }];
 
@@ -623,14 +611,18 @@ mod tests {
         assert_eq!(result.schemas_indexed, 1);
 
         // Check enum
-        let enums: Vec<_> = storage.elements.iter()
+        let enums: Vec<_> = storage
+            .elements
+            .iter()
             .filter(|e| e.element_kind == "enum")
             .collect();
         assert_eq!(enums.len(), 1);
         assert_eq!(enums[0].full_name, "api.Status");
 
         // Check enum values
-        let values: Vec<_> = storage.elements.iter()
+        let values: Vec<_> = storage
+            .elements
+            .iter()
             .filter(|e| e.element_kind == "enum_value")
             .collect();
         assert_eq!(values.len(), 3);

@@ -144,7 +144,10 @@ impl Provenance {
 
     /// Get all stable keys this provenance depends on.
     pub fn all_stable_keys(&self) -> Vec<&str> {
-        self.depends_on.iter().map(|a| a.stable_key.as_str()).collect()
+        self.depends_on
+            .iter()
+            .map(|a| a.stable_key.as_str())
+            .collect()
     }
 }
 

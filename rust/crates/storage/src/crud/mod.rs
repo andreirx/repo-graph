@@ -8,20 +8,20 @@
 //!
 //! Module layout (one file per D4-Core entity):
 //!
-//! - `repos`         — `add_repo`, `get_repo` (with `RepoRef`),
-//!                     `list_repos`, `remove_repo`
-//! - `snapshots`     — `create_snapshot`, `get_snapshot`,
-//!                     `get_latest_snapshot`,
-//!                     `update_snapshot_status`,
-//!                     `update_snapshot_counts`
-//! - `files`         — `upsert_files`, `get_files_by_repo`,
-//!                     `get_stale_files`
+//! - `repos` — `add_repo`, `get_repo` (with `RepoRef`),
+//!   `list_repos`, `remove_repo`
+//! - `snapshots` — `create_snapshot`, `get_snapshot`,
+//!   `get_latest_snapshot`,
+//!   `update_snapshot_status`,
+//!   `update_snapshot_counts`
+//! - `files` — `upsert_files`, `get_files_by_repo`,
+//!   `get_stale_files`
 //! - `file_versions` — `upsert_file_versions`,
-//!                     `query_file_version_hashes`
-//! - `nodes`         — `insert_nodes` (with preflight stable-key
-//!                     collision detection), `query_all_nodes`,
-//!                     `delete_nodes_by_file`
-//! - `edges`         — `insert_edges`, `delete_edges_by_uids`
+//!   `query_file_version_hashes`
+//! - `nodes` — `insert_nodes` (with preflight stable-key
+//!   collision detection), `query_all_nodes`,
+//!   `delete_nodes_by_file`
+//! - `edges` — `insert_edges`, `delete_edges_by_uids`
 //!
 //! Total: **19 methods** across 6 entity files. This matches the
 //! exact set the user locked at R2-E decision D-E1, using the
@@ -102,110 +102,108 @@ pub mod snapshots;
 
 #[cfg(test)]
 pub(crate) mod test_helpers {
-	//! Shared test helpers for CRUD tests across the per-entity
-	//! modules. Each test in `repos`, `snapshots`, `files`,
-	//! `file_versions`, `nodes`, `edges` can `use
-	//! crate::crud::test_helpers::...` to construct fixtures
-	//! without duplicating boilerplate.
+    //! Shared test helpers for CRUD tests across the per-entity
+    //! modules. Each test in `repos`, `snapshots`, `files`,
+    //! `file_versions`, `nodes`, `edges` can `use
+    //! crate::crud::test_helpers::...` to construct fixtures
+    //! without duplicating boilerplate.
 
-	use crate::connection::StorageConnection;
-	use crate::types::{
-		FileVersion, GraphEdge, GraphNode, Repo, SourceLocation, TrackedFile,
-	};
+    use crate::connection::StorageConnection;
+    use crate::types::{FileVersion, GraphEdge, GraphNode, Repo, SourceLocation, TrackedFile};
 
-	/// Open a fresh in-memory `StorageConnection` with all 19
-	/// migrations applied.
-	pub fn fresh_storage() -> StorageConnection {
-		StorageConnection::open_in_memory().expect("open_in_memory")
-	}
+    /// Open a fresh in-memory `StorageConnection` with all 19
+    /// migrations applied.
+    pub fn fresh_storage() -> StorageConnection {
+        StorageConnection::open_in_memory().expect("open_in_memory")
+    }
 
-	pub fn make_repo(uid: &str) -> Repo {
-		Repo {
-			repo_uid: uid.to_string(),
-			name: format!("name-{}", uid),
-			root_path: format!("/tmp/{}", uid),
-			default_branch: Some("main".to_string()),
-			created_at: "2025-01-01T00:00:00Z".to_string(),
-			metadata_json: None,
-		}
-	}
+    pub fn make_repo(uid: &str) -> Repo {
+        Repo {
+            repo_uid: uid.to_string(),
+            name: format!("name-{}", uid),
+            root_path: format!("/tmp/{}", uid),
+            default_branch: Some("main".to_string()),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            metadata_json: None,
+        }
+    }
 
-	pub fn make_file(repo_uid: &str, path: &str) -> TrackedFile {
-		TrackedFile {
-			file_uid: format!("{}:{}", repo_uid, path),
-			repo_uid: repo_uid.to_string(),
-			path: path.to_string(),
-			language: Some("typescript".to_string()),
-			is_test: false,
-			is_generated: false,
-			is_excluded: false,
-		}
-	}
+    pub fn make_file(repo_uid: &str, path: &str) -> TrackedFile {
+        TrackedFile {
+            file_uid: format!("{}:{}", repo_uid, path),
+            repo_uid: repo_uid.to_string(),
+            path: path.to_string(),
+            language: Some("typescript".to_string()),
+            is_test: false,
+            is_generated: false,
+            is_excluded: false,
+        }
+    }
 
-	pub fn make_file_version(snapshot_uid: &str, file_uid: &str) -> FileVersion {
-		FileVersion {
-			snapshot_uid: snapshot_uid.to_string(),
-			file_uid: file_uid.to_string(),
-			content_hash: "deadbeef".to_string(),
-			ast_hash: None,
-			extractor: Some("ts-core:0.1.0".to_string()),
-			parse_status: "parsed".to_string(),
-			size_bytes: Some(1024),
-			line_count: Some(42),
-			indexed_at: "2025-01-01T00:00:00Z".to_string(),
-		}
-	}
+    pub fn make_file_version(snapshot_uid: &str, file_uid: &str) -> FileVersion {
+        FileVersion {
+            snapshot_uid: snapshot_uid.to_string(),
+            file_uid: file_uid.to_string(),
+            content_hash: "deadbeef".to_string(),
+            ast_hash: None,
+            extractor: Some("ts-core:0.1.0".to_string()),
+            parse_status: "parsed".to_string(),
+            size_bytes: Some(1024),
+            line_count: Some(42),
+            indexed_at: "2025-01-01T00:00:00Z".to_string(),
+        }
+    }
 
-	pub fn make_node(
-		node_uid: &str,
-		snapshot_uid: &str,
-		repo_uid: &str,
-		stable_key: &str,
-		file_uid: &str,
-		name: &str,
-	) -> GraphNode {
-		GraphNode {
-			node_uid: node_uid.to_string(),
-			snapshot_uid: snapshot_uid.to_string(),
-			repo_uid: repo_uid.to_string(),
-			stable_key: stable_key.to_string(),
-			kind: "SYMBOL".to_string(),
-			subtype: Some("FUNCTION".to_string()),
-			name: name.to_string(),
-			qualified_name: Some(name.to_string()),
-			file_uid: Some(file_uid.to_string()),
-			parent_node_uid: None,
-			location: Some(SourceLocation {
-				line_start: 1,
-				col_start: 0,
-				line_end: 10,
-				col_end: 0,
-			}),
-			signature: None,
-			visibility: Some("export".to_string()),
-			doc_comment: None,
-			metadata_json: None,
-		}
-	}
+    pub fn make_node(
+        node_uid: &str,
+        snapshot_uid: &str,
+        repo_uid: &str,
+        stable_key: &str,
+        file_uid: &str,
+        name: &str,
+    ) -> GraphNode {
+        GraphNode {
+            node_uid: node_uid.to_string(),
+            snapshot_uid: snapshot_uid.to_string(),
+            repo_uid: repo_uid.to_string(),
+            stable_key: stable_key.to_string(),
+            kind: "SYMBOL".to_string(),
+            subtype: Some("FUNCTION".to_string()),
+            name: name.to_string(),
+            qualified_name: Some(name.to_string()),
+            file_uid: Some(file_uid.to_string()),
+            parent_node_uid: None,
+            location: Some(SourceLocation {
+                line_start: 1,
+                col_start: 0,
+                line_end: 10,
+                col_end: 0,
+            }),
+            signature: None,
+            visibility: Some("export".to_string()),
+            doc_comment: None,
+            metadata_json: None,
+        }
+    }
 
-	pub fn make_edge(
-		edge_uid: &str,
-		snapshot_uid: &str,
-		repo_uid: &str,
-		source: &str,
-		target: &str,
-	) -> GraphEdge {
-		GraphEdge {
-			edge_uid: edge_uid.to_string(),
-			snapshot_uid: snapshot_uid.to_string(),
-			repo_uid: repo_uid.to_string(),
-			source_node_uid: source.to_string(),
-			target_node_uid: target.to_string(),
-			edge_type: "CALLS".to_string(),
-			resolution: "static".to_string(),
-			extractor: "test:0.0.1".to_string(),
-			location: None,
-			metadata_json: None,
-		}
-	}
+    pub fn make_edge(
+        edge_uid: &str,
+        snapshot_uid: &str,
+        repo_uid: &str,
+        source: &str,
+        target: &str,
+    ) -> GraphEdge {
+        GraphEdge {
+            edge_uid: edge_uid.to_string(),
+            snapshot_uid: snapshot_uid.to_string(),
+            repo_uid: repo_uid.to_string(),
+            source_node_uid: source.to_string(),
+            target_node_uid: target.to_string(),
+            edge_type: "CALLS".to_string(),
+            resolution: "static".to_string(),
+            extractor: "test:0.0.1".to_string(),
+            location: None,
+            metadata_json: None,
+        }
+    }
 }

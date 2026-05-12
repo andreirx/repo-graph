@@ -20,9 +20,9 @@ use std::path::{Path, PathBuf};
 /// Returns error if paths cannot be canonicalized or if relative path computation fails.
 pub fn compute_storage_root_path(repo_path: &Path, db_path: &Path) -> Result<String, String> {
     // Canonicalize both paths to absolute
-    let repo_abs = repo_path.canonicalize().map_err(|e| {
-        format!("cannot resolve repo path '{}': {}", repo_path.display(), e)
-    })?;
+    let repo_abs = repo_path
+        .canonicalize()
+        .map_err(|e| format!("cannot resolve repo path '{}': {}", repo_path.display(), e))?;
 
     // Get DB directory (parent of db file, or current dir if db_path has no parent)
     let db_dir = if let Some(parent) = db_path.parent() {
@@ -30,9 +30,9 @@ pub fn compute_storage_root_path(repo_path: &Path, db_path: &Path) -> Result<Str
             // db_path is just a filename like "repo.db", use current directory
             std::env::current_dir().map_err(|e| format!("cannot get current directory: {}", e))?
         } else {
-            parent.canonicalize().map_err(|e| {
-                format!("cannot resolve DB directory '{}': {}", parent.display(), e)
-            })?
+            parent
+                .canonicalize()
+                .map_err(|e| format!("cannot resolve DB directory '{}': {}", parent.display(), e))?
         }
     } else {
         std::env::current_dir().map_err(|e| format!("cannot get current directory: {}", e))?
@@ -94,9 +94,7 @@ pub fn resolve_repo_root(db_path: &Path, root_path: &str) -> Result<PathBuf, Str
 /// Open a storage connection from a database file path.
 ///
 /// Returns an error if the file does not exist or cannot be opened.
-pub fn open_storage(
-    db_path: &Path,
-) -> Result<repo_graph_storage::StorageConnection, String> {
+pub fn open_storage(db_path: &Path) -> Result<repo_graph_storage::StorageConnection, String> {
     if !db_path.exists() {
         return Err(format!(
             "database file does not exist: {}",

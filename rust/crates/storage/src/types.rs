@@ -135,67 +135,67 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceLocation {
-	pub line_start: i64,
-	pub col_start: i64,
-	pub line_end: i64,
-	pub col_end: i64,
+    pub line_start: i64,
+    pub col_start: i64,
+    pub line_end: i64,
+    pub col_end: i64,
 }
 
 impl SourceLocation {
-	/// Construct a `SourceLocation` from the four nullable SQL
-	/// position columns, applying the asymmetric null-handling
-	/// rule from the TypeScript `mapNode` row mapper at
-	/// `src/adapters/storage/sqlite/sqlite-storage.ts:3302-3310`:
-	///
-	/// ```ts
-	/// location:
-	///   row.line_start != null
-	///     ? {
-	///         lineStart: row.line_start as number,
-	///         colStart: (row.col_start as number) ?? 0,
-	///         lineEnd: (row.line_end as number) ?? (row.line_start as number),
-	///         colEnd: (row.col_end as number) ?? 0,
-	///       }
-	///     : null,
-	/// ```
-	///
-	/// Rules captured here:
-	///   - `line_start` is the **discriminator**: if it is `None`,
-	///     the entire location collapses to `None` regardless of
-	///     the other three columns.
-	///   - When `line_start` is `Some(ls)`:
-	///       * `line_start = ls`
-	///       * `col_start = col_start.unwrap_or(0)`
-	///       * `line_end = line_end.unwrap_or(ls)` (defaults to
-	///         `line_start`, NOT to 0)
-	///       * `col_end = col_end.unwrap_or(0)`
-	///
-	/// The defaults are asymmetric and surprising. They cannot be
-	/// reduced to "fall back to 0 for everything" or "all four
-	/// must be present". The exact rule is what the TS adapter
-	/// emits, and the parity boundary requires byte-equivalence
-	/// at the JSON layer.
-	///
-	/// This helper is reused by both `GraphNode::from_row` and
-	/// `GraphEdge::from_row`. The reuse is deliberate: there is
-	/// no `mapEdge` in the TS adapter (edges are write-only), so
-	/// the Rust `GraphEdge::from_row` borrows the rule from
-	/// `mapNode` by analogy. Both Rust mappers therefore apply
-	/// the same rule, which is the only documented rule in the
-	/// codebase.
-	pub fn from_partial_columns(
-		line_start: Option<i64>,
-		col_start: Option<i64>,
-		line_end: Option<i64>,
-		col_end: Option<i64>,
-	) -> Option<SourceLocation> {
-		line_start.map(|ls| SourceLocation {
-			line_start: ls,
-			col_start: col_start.unwrap_or(0),
-			line_end: line_end.unwrap_or(ls),
-			col_end: col_end.unwrap_or(0),
-		})
-	}
+    /// Construct a `SourceLocation` from the four nullable SQL
+    /// position columns, applying the asymmetric null-handling
+    /// rule from the TypeScript `mapNode` row mapper at
+    /// `src/adapters/storage/sqlite/sqlite-storage.ts:3302-3310`:
+    ///
+    /// ```ts
+    /// location:
+    ///   row.line_start != null
+    ///     ? {
+    ///         lineStart: row.line_start as number,
+    ///         colStart: (row.col_start as number) ?? 0,
+    ///         lineEnd: (row.line_end as number) ?? (row.line_start as number),
+    ///         colEnd: (row.col_end as number) ?? 0,
+    ///       }
+    ///     : null,
+    /// ```
+    ///
+    /// Rules captured here:
+    ///   - `line_start` is the **discriminator**: if it is `None`,
+    ///     the entire location collapses to `None` regardless of
+    ///     the other three columns.
+    ///   - When `line_start` is `Some(ls)`:
+    ///       * `line_start = ls`
+    ///       * `col_start = col_start.unwrap_or(0)`
+    ///       * `line_end = line_end.unwrap_or(ls)` (defaults to
+    ///         `line_start`, NOT to 0)
+    ///       * `col_end = col_end.unwrap_or(0)`
+    ///
+    /// The defaults are asymmetric and surprising. They cannot be
+    /// reduced to "fall back to 0 for everything" or "all four
+    /// must be present". The exact rule is what the TS adapter
+    /// emits, and the parity boundary requires byte-equivalence
+    /// at the JSON layer.
+    ///
+    /// This helper is reused by both `GraphNode::from_row` and
+    /// `GraphEdge::from_row`. The reuse is deliberate: there is
+    /// no `mapEdge` in the TS adapter (edges are write-only), so
+    /// the Rust `GraphEdge::from_row` borrows the rule from
+    /// `mapNode` by analogy. Both Rust mappers therefore apply
+    /// the same rule, which is the only documented rule in the
+    /// codebase.
+    pub fn from_partial_columns(
+        line_start: Option<i64>,
+        col_start: Option<i64>,
+        line_end: Option<i64>,
+        col_end: Option<i64>,
+    ) -> Option<SourceLocation> {
+        line_start.map(|ls| SourceLocation {
+            line_start: ls,
+            col_start: col_start.unwrap_or(0),
+            line_end: line_end.unwrap_or(ls),
+            col_end: col_end.unwrap_or(0),
+        })
+    }
 }
 
 // ── Repos ──────────────────────────────────────────────────────────
@@ -219,30 +219,30 @@ impl SourceLocation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Repo {
-	pub repo_uid: String,
-	pub name: String,
-	pub root_path: String,
-	pub default_branch: Option<String>,
-	pub created_at: String,
-	pub metadata_json: Option<String>,
+    pub repo_uid: String,
+    pub name: String,
+    pub root_path: String,
+    pub default_branch: Option<String>,
+    pub created_at: String,
+    pub metadata_json: Option<String>,
 }
 
 impl Repo {
-	/// Construct a `Repo` from a rusqlite row.
-	///
-	/// Mirrors the TS `mapRepo` row mapper at
-	/// `sqlite-storage.ts:3247`. Looks up columns by SQL column
-	/// name (snake_case) regardless of Rust field name.
-	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
-		Ok(Self {
-			repo_uid: row.get("repo_uid")?,
-			name: row.get("name")?,
-			root_path: row.get("root_path")?,
-			default_branch: row.get("default_branch")?,
-			created_at: row.get("created_at")?,
-			metadata_json: row.get("metadata_json")?,
-		})
-	}
+    /// Construct a `Repo` from a rusqlite row.
+    ///
+    /// Mirrors the TS `mapRepo` row mapper at
+    /// `sqlite-storage.ts:3247`. Looks up columns by SQL column
+    /// name (snake_case) regardless of Rust field name.
+    pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+        Ok(Self {
+            repo_uid: row.get("repo_uid")?,
+            name: row.get("name")?,
+            root_path: row.get("root_path")?,
+            default_branch: row.get("default_branch")?,
+            created_at: row.get("created_at")?,
+            metadata_json: row.get("metadata_json")?,
+        })
+    }
 }
 
 // ── Snapshots ──────────────────────────────────────────────────────
@@ -282,52 +282,52 @@ impl Repo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
-	pub snapshot_uid: String,
-	pub repo_uid: String,
-	pub parent_snapshot_uid: Option<String>,
-	pub kind: String,
-	pub basis_ref: Option<String>,
-	pub basis_commit: Option<String>,
-	pub dirty_hash: Option<String>,
-	pub status: String,
-	pub files_total: i64,
-	pub nodes_total: i64,
-	pub edges_total: i64,
-	pub created_at: String,
-	pub completed_at: Option<String>,
-	pub label: Option<String>,
-	pub toolchain_json: Option<String>,
+    pub snapshot_uid: String,
+    pub repo_uid: String,
+    pub parent_snapshot_uid: Option<String>,
+    pub kind: String,
+    pub basis_ref: Option<String>,
+    pub basis_commit: Option<String>,
+    pub dirty_hash: Option<String>,
+    pub status: String,
+    pub files_total: i64,
+    pub nodes_total: i64,
+    pub edges_total: i64,
+    pub created_at: String,
+    pub completed_at: Option<String>,
+    pub label: Option<String>,
+    pub toolchain_json: Option<String>,
 }
 
 impl Snapshot {
-	/// Construct a `Snapshot` from a rusqlite row.
-	///
-	/// Mirrors the TS `mapSnapshot` row mapper at
-	/// `sqlite-storage.ts:3258`. Note the defensive `unwrap_or(0)`
-	/// on the three counter columns: even though the SQL schema
-	/// declares them `INTEGER NOT NULL DEFAULT 0`, the TS mapper
-	/// applies a defensive nullish-coalesce default. Rust mirrors
-	/// exactly to preserve parity in any edge case where a NULL
-	/// counter value reaches the mapper.
-	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
-		Ok(Self {
-			snapshot_uid: row.get("snapshot_uid")?,
-			repo_uid: row.get("repo_uid")?,
-			parent_snapshot_uid: row.get("parent_snapshot_uid")?,
-			kind: row.get("kind")?,
-			basis_ref: row.get("basis_ref")?,
-			basis_commit: row.get("basis_commit")?,
-			dirty_hash: row.get("dirty_hash")?,
-			status: row.get("status")?,
-			files_total: row.get::<_, Option<i64>>("files_total")?.unwrap_or(0),
-			nodes_total: row.get::<_, Option<i64>>("nodes_total")?.unwrap_or(0),
-			edges_total: row.get::<_, Option<i64>>("edges_total")?.unwrap_or(0),
-			created_at: row.get("created_at")?,
-			completed_at: row.get("completed_at")?,
-			label: row.get("label")?,
-			toolchain_json: row.get("toolchain_json")?,
-		})
-	}
+    /// Construct a `Snapshot` from a rusqlite row.
+    ///
+    /// Mirrors the TS `mapSnapshot` row mapper at
+    /// `sqlite-storage.ts:3258`. Note the defensive `unwrap_or(0)`
+    /// on the three counter columns: even though the SQL schema
+    /// declares them `INTEGER NOT NULL DEFAULT 0`, the TS mapper
+    /// applies a defensive nullish-coalesce default. Rust mirrors
+    /// exactly to preserve parity in any edge case where a NULL
+    /// counter value reaches the mapper.
+    pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+        Ok(Self {
+            snapshot_uid: row.get("snapshot_uid")?,
+            repo_uid: row.get("repo_uid")?,
+            parent_snapshot_uid: row.get("parent_snapshot_uid")?,
+            kind: row.get("kind")?,
+            basis_ref: row.get("basis_ref")?,
+            basis_commit: row.get("basis_commit")?,
+            dirty_hash: row.get("dirty_hash")?,
+            status: row.get("status")?,
+            files_total: row.get::<_, Option<i64>>("files_total")?.unwrap_or(0),
+            nodes_total: row.get::<_, Option<i64>>("nodes_total")?.unwrap_or(0),
+            edges_total: row.get::<_, Option<i64>>("edges_total")?.unwrap_or(0),
+            created_at: row.get("created_at")?,
+            completed_at: row.get("completed_at")?,
+            label: row.get("label")?,
+            toolchain_json: row.get("toolchain_json")?,
+        })
+    }
 }
 
 // ── Tracked files ──────────────────────────────────────────────────
@@ -362,56 +362,56 @@ impl Snapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackedFile {
-	pub file_uid: String,
-	pub repo_uid: String,
-	pub path: String,
-	pub language: Option<String>,
-	pub is_test: bool,
-	pub is_generated: bool,
-	pub is_excluded: bool,
+    pub file_uid: String,
+    pub repo_uid: String,
+    pub path: String,
+    pub language: Option<String>,
+    pub is_test: bool,
+    pub is_generated: bool,
+    pub is_excluded: bool,
 }
 
 impl TrackedFile {
-	/// Construct a `TrackedFile` from a rusqlite row.
-	///
-	/// Mirrors the TS `mapFile` row mapper at
-	/// `sqlite-storage.ts:3278`. The boolean conversion uses
-	/// **strict `i64 == 1`** to exactly match the TS adapter's
-	/// `=== 1` semantics.
-	///
-	/// **Why strict, not `!= 0`:** the schema declares these
-	/// columns as `INTEGER NOT NULL DEFAULT 0` but does NOT
-	/// enforce a `CHECK (col IN (0, 1))` constraint, so
-	/// out-of-range integer values (e.g., 2, -1) are structurally
-	/// possible if a contributor inserts data via raw SQL or via
-	/// a migration that doesn't validate. With strict `== 1`:
-	///
-	///   - `0` → `false` (the schema default)
-	///   - `1` → `true`  (the schema "set" value)
-	///   - any other value (`2`, `-1`, `999`, ...) → `false`,
-	///     matching the TS `=== 1` strict equality
-	///
-	/// An earlier version of this mapper used `!= 0` (the SQL
-	/// truthiness convention). That form is more permissive than
-	/// the TS adapter and introduces a real parity drift on
-	/// out-of-range values: TS would emit `false` for 2/-1, the
-	/// `!= 0` Rust form would emit `true`. The corrected `== 1`
-	/// form is byte-equivalent to TS for every possible integer
-	/// column value, including the out-of-range ones the schema
-	/// does not prevent. The test
-	/// `tracked_file_boolean_uses_strict_eq_one_parity_with_ts`
-	/// pins this correction against future regression.
-	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
-		Ok(Self {
-			file_uid: row.get("file_uid")?,
-			repo_uid: row.get("repo_uid")?,
-			path: row.get("path")?,
-			language: row.get("language")?,
-			is_test: row.get::<_, i64>("is_test")? == 1,
-			is_generated: row.get::<_, i64>("is_generated")? == 1,
-			is_excluded: row.get::<_, i64>("is_excluded")? == 1,
-		})
-	}
+    /// Construct a `TrackedFile` from a rusqlite row.
+    ///
+    /// Mirrors the TS `mapFile` row mapper at
+    /// `sqlite-storage.ts:3278`. The boolean conversion uses
+    /// **strict `i64 == 1`** to exactly match the TS adapter's
+    /// `=== 1` semantics.
+    ///
+    /// **Why strict, not `!= 0`:** the schema declares these
+    /// columns as `INTEGER NOT NULL DEFAULT 0` but does NOT
+    /// enforce a `CHECK (col IN (0, 1))` constraint, so
+    /// out-of-range integer values (e.g., 2, -1) are structurally
+    /// possible if a contributor inserts data via raw SQL or via
+    /// a migration that doesn't validate. With strict `== 1`:
+    ///
+    ///   - `0` → `false` (the schema default)
+    ///   - `1` → `true`  (the schema "set" value)
+    ///   - any other value (`2`, `-1`, `999`, ...) → `false`,
+    ///     matching the TS `=== 1` strict equality
+    ///
+    /// An earlier version of this mapper used `!= 0` (the SQL
+    /// truthiness convention). That form is more permissive than
+    /// the TS adapter and introduces a real parity drift on
+    /// out-of-range values: TS would emit `false` for 2/-1, the
+    /// `!= 0` Rust form would emit `true`. The corrected `== 1`
+    /// form is byte-equivalent to TS for every possible integer
+    /// column value, including the out-of-range ones the schema
+    /// does not prevent. The test
+    /// `tracked_file_boolean_uses_strict_eq_one_parity_with_ts`
+    /// pins this correction against future regression.
+    pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+        Ok(Self {
+            file_uid: row.get("file_uid")?,
+            repo_uid: row.get("repo_uid")?,
+            path: row.get("path")?,
+            language: row.get("language")?,
+            is_test: row.get::<_, i64>("is_test")? == 1,
+            is_generated: row.get::<_, i64>("is_generated")? == 1,
+            is_excluded: row.get::<_, i64>("is_excluded")? == 1,
+        })
+    }
 }
 
 // ── File versions ──────────────────────────────────────────────────
@@ -461,36 +461,36 @@ impl TrackedFile {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileVersion {
-	pub snapshot_uid: String,
-	pub file_uid: String,
-	pub content_hash: String,
-	pub ast_hash: Option<String>,
-	pub extractor: Option<String>,
-	pub parse_status: String,
-	pub size_bytes: Option<i64>,
-	pub line_count: Option<i64>,
-	pub indexed_at: String,
+    pub snapshot_uid: String,
+    pub file_uid: String,
+    pub content_hash: String,
+    pub ast_hash: Option<String>,
+    pub extractor: Option<String>,
+    pub parse_status: String,
+    pub size_bytes: Option<i64>,
+    pub line_count: Option<i64>,
+    pub indexed_at: String,
 }
 
 impl FileVersion {
-	/// Construct a `FileVersion` from a rusqlite row.
-	///
-	/// No TS reference implementation. Field-by-field mapping
-	/// using SQL column names. `parse_status` is `String` per
-	/// D-B7a (string-literal enum passthrough).
-	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
-		Ok(Self {
-			snapshot_uid: row.get("snapshot_uid")?,
-			file_uid: row.get("file_uid")?,
-			content_hash: row.get("content_hash")?,
-			ast_hash: row.get("ast_hash")?,
-			extractor: row.get("extractor")?,
-			parse_status: row.get("parse_status")?,
-			size_bytes: row.get("size_bytes")?,
-			line_count: row.get("line_count")?,
-			indexed_at: row.get("indexed_at")?,
-		})
-	}
+    /// Construct a `FileVersion` from a rusqlite row.
+    ///
+    /// No TS reference implementation. Field-by-field mapping
+    /// using SQL column names. `parse_status` is `String` per
+    /// D-B7a (string-literal enum passthrough).
+    pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+        Ok(Self {
+            snapshot_uid: row.get("snapshot_uid")?,
+            file_uid: row.get("file_uid")?,
+            content_hash: row.get("content_hash")?,
+            ast_hash: row.get("ast_hash")?,
+            extractor: row.get("extractor")?,
+            parse_status: row.get("parse_status")?,
+            size_bytes: row.get("size_bytes")?,
+            line_count: row.get("line_count")?,
+            indexed_at: row.get("indexed_at")?,
+        })
+    }
 }
 
 // ── Graph nodes ────────────────────────────────────────────────────
@@ -535,55 +535,55 @@ impl FileVersion {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphNode {
-	pub node_uid: String,
-	pub snapshot_uid: String,
-	pub repo_uid: String,
-	pub stable_key: String,
-	pub kind: String,
-	pub subtype: Option<String>,
-	pub name: String,
-	pub qualified_name: Option<String>,
-	pub file_uid: Option<String>,
-	pub parent_node_uid: Option<String>,
-	pub location: Option<SourceLocation>,
-	pub signature: Option<String>,
-	pub visibility: Option<String>,
-	pub doc_comment: Option<String>,
-	pub metadata_json: Option<String>,
+    pub node_uid: String,
+    pub snapshot_uid: String,
+    pub repo_uid: String,
+    pub stable_key: String,
+    pub kind: String,
+    pub subtype: Option<String>,
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub file_uid: Option<String>,
+    pub parent_node_uid: Option<String>,
+    pub location: Option<SourceLocation>,
+    pub signature: Option<String>,
+    pub visibility: Option<String>,
+    pub doc_comment: Option<String>,
+    pub metadata_json: Option<String>,
 }
 
 impl GraphNode {
-	/// Construct a `GraphNode` from a rusqlite row.
-	///
-	/// Mirrors the TS `mapNode` row mapper at
-	/// `sqlite-storage.ts:3290`. The location field is built via
-	/// `SourceLocation::from_partial_columns` which captures the
-	/// asymmetric null-handling rule. See that function's
-	/// docstring for the exact rule.
-	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
-		Ok(Self {
-			node_uid: row.get("node_uid")?,
-			snapshot_uid: row.get("snapshot_uid")?,
-			repo_uid: row.get("repo_uid")?,
-			stable_key: row.get("stable_key")?,
-			kind: row.get("kind")?,
-			subtype: row.get("subtype")?,
-			name: row.get("name")?,
-			qualified_name: row.get("qualified_name")?,
-			file_uid: row.get("file_uid")?,
-			parent_node_uid: row.get("parent_node_uid")?,
-			location: SourceLocation::from_partial_columns(
-				row.get("line_start")?,
-				row.get("col_start")?,
-				row.get("line_end")?,
-				row.get("col_end")?,
-			),
-			signature: row.get("signature")?,
-			visibility: row.get("visibility")?,
-			doc_comment: row.get("doc_comment")?,
-			metadata_json: row.get("metadata_json")?,
-		})
-	}
+    /// Construct a `GraphNode` from a rusqlite row.
+    ///
+    /// Mirrors the TS `mapNode` row mapper at
+    /// `sqlite-storage.ts:3290`. The location field is built via
+    /// `SourceLocation::from_partial_columns` which captures the
+    /// asymmetric null-handling rule. See that function's
+    /// docstring for the exact rule.
+    pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+        Ok(Self {
+            node_uid: row.get("node_uid")?,
+            snapshot_uid: row.get("snapshot_uid")?,
+            repo_uid: row.get("repo_uid")?,
+            stable_key: row.get("stable_key")?,
+            kind: row.get("kind")?,
+            subtype: row.get("subtype")?,
+            name: row.get("name")?,
+            qualified_name: row.get("qualified_name")?,
+            file_uid: row.get("file_uid")?,
+            parent_node_uid: row.get("parent_node_uid")?,
+            location: SourceLocation::from_partial_columns(
+                row.get("line_start")?,
+                row.get("col_start")?,
+                row.get("line_end")?,
+                row.get("col_end")?,
+            ),
+            signature: row.get("signature")?,
+            visibility: row.get("visibility")?,
+            doc_comment: row.get("doc_comment")?,
+            metadata_json: row.get("metadata_json")?,
+        })
+    }
 }
 
 // ── Graph edges ────────────────────────────────────────────────────
@@ -628,50 +628,50 @@ impl GraphNode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphEdge {
-	pub edge_uid: String,
-	pub snapshot_uid: String,
-	pub repo_uid: String,
-	pub source_node_uid: String,
-	pub target_node_uid: String,
-	#[serde(rename = "type")]
-	pub edge_type: String,
-	pub resolution: String,
-	pub extractor: String,
-	pub location: Option<SourceLocation>,
-	pub metadata_json: Option<String>,
+    pub edge_uid: String,
+    pub snapshot_uid: String,
+    pub repo_uid: String,
+    pub source_node_uid: String,
+    pub target_node_uid: String,
+    #[serde(rename = "type")]
+    pub edge_type: String,
+    pub resolution: String,
+    pub extractor: String,
+    pub location: Option<SourceLocation>,
+    pub metadata_json: Option<String>,
 }
 
 impl GraphEdge {
-	/// Construct a `GraphEdge` from a rusqlite row.
-	///
-	/// **No TS reference implementation.** The TS adapter never
-	/// reads `GraphEdge` back as a full DTO. This mapper exists
-	/// for symmetry per the R2-B substep contract. The location
-	/// null-handling rule is borrowed from `mapNode` by analogy
-	/// (principle of least surprise: same rule applied
-	/// consistently across both entities).
-	///
-	/// The row lookup for the renamed `edge_type` field uses the
-	/// SQL column name `"type"`, not the Rust field name.
-	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
-		Ok(Self {
-			edge_uid: row.get("edge_uid")?,
-			snapshot_uid: row.get("snapshot_uid")?,
-			repo_uid: row.get("repo_uid")?,
-			source_node_uid: row.get("source_node_uid")?,
-			target_node_uid: row.get("target_node_uid")?,
-			edge_type: row.get("type")?,
-			resolution: row.get("resolution")?,
-			extractor: row.get("extractor")?,
-			location: SourceLocation::from_partial_columns(
-				row.get("line_start")?,
-				row.get("col_start")?,
-				row.get("line_end")?,
-				row.get("col_end")?,
-			),
-			metadata_json: row.get("metadata_json")?,
-		})
-	}
+    /// Construct a `GraphEdge` from a rusqlite row.
+    ///
+    /// **No TS reference implementation.** The TS adapter never
+    /// reads `GraphEdge` back as a full DTO. This mapper exists
+    /// for symmetry per the R2-B substep contract. The location
+    /// null-handling rule is borrowed from `mapNode` by analogy
+    /// (principle of least surprise: same rule applied
+    /// consistently across both entities).
+    ///
+    /// The row lookup for the renamed `edge_type` field uses the
+    /// SQL column name `"type"`, not the Rust field name.
+    pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+        Ok(Self {
+            edge_uid: row.get("edge_uid")?,
+            snapshot_uid: row.get("snapshot_uid")?,
+            repo_uid: row.get("repo_uid")?,
+            source_node_uid: row.get("source_node_uid")?,
+            target_node_uid: row.get("target_node_uid")?,
+            edge_type: row.get("type")?,
+            resolution: row.get("resolution")?,
+            extractor: row.get("extractor")?,
+            location: SourceLocation::from_partial_columns(
+                row.get("line_start")?,
+                row.get("col_start")?,
+                row.get("line_end")?,
+                row.get("col_end")?,
+            ),
+            metadata_json: row.get("metadata_json")?,
+        })
+    }
 }
 
 // ── Input shapes (R2-E) ────────────────────────────────────────────
@@ -704,12 +704,12 @@ impl GraphEdge {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RepoRef {
-	/// Look up by `repos.repo_uid`.
-	Uid(String),
-	/// Look up by `repos.name`.
-	Name(String),
-	/// Look up by `repos.root_path`.
-	RootPath(String),
+    /// Look up by `repos.repo_uid`.
+    Uid(String),
+    /// Look up by `repos.name`.
+    Name(String),
+    /// Look up by `repos.root_path`.
+    RootPath(String),
 }
 
 /// Input for `create_snapshot`. Mirrors `CreateSnapshotInput`
@@ -727,14 +727,14 @@ pub enum RepoRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSnapshotInput {
-	pub repo_uid: String,
-	pub kind: String,
-	pub basis_ref: Option<String>,
-	pub basis_commit: Option<String>,
-	pub parent_snapshot_uid: Option<String>,
-	pub label: Option<String>,
-	/// Snapshot-level toolchain provenance JSON.
-	pub toolchain_json: Option<String>,
+    pub repo_uid: String,
+    pub kind: String,
+    pub basis_ref: Option<String>,
+    pub basis_commit: Option<String>,
+    pub parent_snapshot_uid: Option<String>,
+    pub label: Option<String>,
+    /// Snapshot-level toolchain provenance JSON.
+    pub toolchain_json: Option<String>,
 }
 
 /// Input for `update_snapshot_status`. Mirrors
@@ -747,9 +747,9 @@ pub struct CreateSnapshotInput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSnapshotStatusInput {
-	pub snapshot_uid: String,
-	pub status: String,
-	pub completed_at: Option<String>,
+    pub snapshot_uid: String,
+    pub status: String,
+    pub completed_at: Option<String>,
 }
 
 // ── Module Candidates (RS-MG-1) ────────────────────────────────────
@@ -780,34 +780,34 @@ pub struct UpdateSnapshotStatusInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModuleCandidate {
-	pub module_candidate_uid: String,
-	pub snapshot_uid: String,
-	pub repo_uid: String,
-	pub module_key: String,
-	pub module_kind: String,
-	pub canonical_root_path: String,
-	pub confidence: f64,
-	pub display_name: Option<String>,
-	pub metadata_json: Option<String>,
+    pub module_candidate_uid: String,
+    pub snapshot_uid: String,
+    pub repo_uid: String,
+    pub module_key: String,
+    pub module_kind: String,
+    pub canonical_root_path: String,
+    pub confidence: f64,
+    pub display_name: Option<String>,
+    pub metadata_json: Option<String>,
 }
 
 impl ModuleCandidate {
-	/// Construct a `ModuleCandidate` from a rusqlite row.
-	///
-	/// Looks up columns by SQL column name (snake_case).
-	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
-		Ok(Self {
-			module_candidate_uid: row.get("module_candidate_uid")?,
-			snapshot_uid: row.get("snapshot_uid")?,
-			repo_uid: row.get("repo_uid")?,
-			module_key: row.get("module_key")?,
-			module_kind: row.get("module_kind")?,
-			canonical_root_path: row.get("canonical_root_path")?,
-			confidence: row.get("confidence")?,
-			display_name: row.get("display_name")?,
-			metadata_json: row.get("metadata_json")?,
-		})
-	}
+    /// Construct a `ModuleCandidate` from a rusqlite row.
+    ///
+    /// Looks up columns by SQL column name (snake_case).
+    pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+        Ok(Self {
+            module_candidate_uid: row.get("module_candidate_uid")?,
+            snapshot_uid: row.get("snapshot_uid")?,
+            repo_uid: row.get("repo_uid")?,
+            module_key: row.get("module_key")?,
+            module_kind: row.get("module_kind")?,
+            canonical_root_path: row.get("canonical_root_path")?,
+            confidence: row.get("confidence")?,
+            display_name: row.get("display_name")?,
+            metadata_json: row.get("metadata_json")?,
+        })
+    }
 }
 
 // ── Measurement input ───────────────────────────────────────────────
@@ -822,14 +822,14 @@ impl ModuleCandidate {
 /// `MeasurementInput` includes all columns needed for INSERT.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeasurementInput {
-	pub measurement_uid: String,
-	pub snapshot_uid: String,
-	pub repo_uid: String,
-	pub target_stable_key: String,
-	pub kind: String,
-	pub value_json: String,
-	pub source: String,
-	pub created_at: String,
+    pub measurement_uid: String,
+    pub snapshot_uid: String,
+    pub repo_uid: String,
+    pub target_stable_key: String,
+    pub kind: String,
+    pub value_json: String,
+    pub source: String,
+    pub created_at: String,
 }
 
 // ── Inference input ────────────────────────────────────────────────
@@ -843,23 +843,23 @@ pub struct MeasurementInput {
 /// Maps directly to the `inferences` table schema (001-initial.sql + migration 027).
 #[derive(Debug, Clone, PartialEq)]
 pub struct InferenceInput {
-	pub inference_uid: String,
-	pub snapshot_uid: String,
-	pub repo_uid: String,
-	pub target_stable_key: String,
-	pub kind: String,
-	pub value_json: String,
-	pub confidence: f64,
-	pub basis_json: String,
-	pub extractor: String,
-	pub created_at: String,
-	/// Canonical provenance tracking Layer 0 dependencies (ACR-3/4).
-	///
-	/// When populated, enables impact propagation: if any stable key in
-	/// `depends_on` changes, this inference is marked `impacted`.
-	///
-	/// Format: JSON-serialized `artifact_contracts::Provenance`.
-	pub provenance_json: Option<String>,
+    pub inference_uid: String,
+    pub snapshot_uid: String,
+    pub repo_uid: String,
+    pub target_stable_key: String,
+    pub kind: String,
+    pub value_json: String,
+    pub confidence: f64,
+    pub basis_json: String,
+    pub extractor: String,
+    pub created_at: String,
+    /// Canonical provenance tracking Layer 0 dependencies (ACR-3/4).
+    ///
+    /// When populated, enables impact propagation: if any stable key in
+    /// `depends_on` changes, this inference is marked `impacted`.
+    ///
+    /// Format: JSON-serialized `artifact_contracts::Provenance`.
+    pub provenance_json: Option<String>,
 }
 
 // ── Project Surfaces ───────────────────────────────────────────────
@@ -902,47 +902,47 @@ pub struct InferenceInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSurface {
-	pub project_surface_uid: String,
-	pub snapshot_uid: String,
-	pub repo_uid: String,
-	pub module_candidate_uid: String,
-	pub surface_kind: String,
-	pub display_name: Option<String>,
-	pub root_path: String,
-	pub entrypoint_path: Option<String>,
-	pub build_system: String,
-	pub runtime_kind: String,
-	pub confidence: f64,
-	pub metadata_json: Option<String>,
-	// Identity columns (migration 018) — nullable for legacy rows
-	pub source_type: Option<String>,
-	pub source_specific_id: Option<String>,
-	pub stable_surface_key: Option<String>,
+    pub project_surface_uid: String,
+    pub snapshot_uid: String,
+    pub repo_uid: String,
+    pub module_candidate_uid: String,
+    pub surface_kind: String,
+    pub display_name: Option<String>,
+    pub root_path: String,
+    pub entrypoint_path: Option<String>,
+    pub build_system: String,
+    pub runtime_kind: String,
+    pub confidence: f64,
+    pub metadata_json: Option<String>,
+    // Identity columns (migration 018) — nullable for legacy rows
+    pub source_type: Option<String>,
+    pub source_specific_id: Option<String>,
+    pub stable_surface_key: Option<String>,
 }
 
 impl ProjectSurface {
-	/// Construct a `ProjectSurface` from a rusqlite row.
-	///
-	/// Looks up columns by SQL column name (snake_case).
-	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
-		Ok(Self {
-			project_surface_uid: row.get("project_surface_uid")?,
-			snapshot_uid: row.get("snapshot_uid")?,
-			repo_uid: row.get("repo_uid")?,
-			module_candidate_uid: row.get("module_candidate_uid")?,
-			surface_kind: row.get("surface_kind")?,
-			display_name: row.get("display_name")?,
-			root_path: row.get("root_path")?,
-			entrypoint_path: row.get("entrypoint_path")?,
-			build_system: row.get("build_system")?,
-			runtime_kind: row.get("runtime_kind")?,
-			confidence: row.get("confidence")?,
-			metadata_json: row.get("metadata_json")?,
-			source_type: row.get("source_type")?,
-			source_specific_id: row.get("source_specific_id")?,
-			stable_surface_key: row.get("stable_surface_key")?,
-		})
-	}
+    /// Construct a `ProjectSurface` from a rusqlite row.
+    ///
+    /// Looks up columns by SQL column name (snake_case).
+    pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+        Ok(Self {
+            project_surface_uid: row.get("project_surface_uid")?,
+            snapshot_uid: row.get("snapshot_uid")?,
+            repo_uid: row.get("repo_uid")?,
+            module_candidate_uid: row.get("module_candidate_uid")?,
+            surface_kind: row.get("surface_kind")?,
+            display_name: row.get("display_name")?,
+            root_path: row.get("root_path")?,
+            entrypoint_path: row.get("entrypoint_path")?,
+            build_system: row.get("build_system")?,
+            runtime_kind: row.get("runtime_kind")?,
+            confidence: row.get("confidence")?,
+            metadata_json: row.get("metadata_json")?,
+            source_type: row.get("source_type")?,
+            source_specific_id: row.get("source_specific_id")?,
+            stable_surface_key: row.get("stable_surface_key")?,
+        })
+    }
 }
 
 /// Evidence item for a project surface. Mirrors the
@@ -965,32 +965,32 @@ impl ProjectSurface {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSurfaceEvidence {
-	pub project_surface_evidence_uid: String,
-	pub project_surface_uid: String,
-	pub snapshot_uid: String,
-	pub repo_uid: String,
-	pub source_type: String,
-	pub source_path: String,
-	pub evidence_kind: String,
-	pub confidence: f64,
-	pub payload_json: Option<String>,
+    pub project_surface_evidence_uid: String,
+    pub project_surface_uid: String,
+    pub snapshot_uid: String,
+    pub repo_uid: String,
+    pub source_type: String,
+    pub source_path: String,
+    pub evidence_kind: String,
+    pub confidence: f64,
+    pub payload_json: Option<String>,
 }
 
 impl ProjectSurfaceEvidence {
-	/// Construct a `ProjectSurfaceEvidence` from a rusqlite row.
-	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
-		Ok(Self {
-			project_surface_evidence_uid: row.get("project_surface_evidence_uid")?,
-			project_surface_uid: row.get("project_surface_uid")?,
-			snapshot_uid: row.get("snapshot_uid")?,
-			repo_uid: row.get("repo_uid")?,
-			source_type: row.get("source_type")?,
-			source_path: row.get("source_path")?,
-			evidence_kind: row.get("evidence_kind")?,
-			confidence: row.get("confidence")?,
-			payload_json: row.get("payload_json")?,
-		})
-	}
+    /// Construct a `ProjectSurfaceEvidence` from a rusqlite row.
+    pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+        Ok(Self {
+            project_surface_evidence_uid: row.get("project_surface_evidence_uid")?,
+            project_surface_uid: row.get("project_surface_uid")?,
+            snapshot_uid: row.get("snapshot_uid")?,
+            repo_uid: row.get("repo_uid")?,
+            source_type: row.get("source_type")?,
+            source_path: row.get("source_path")?,
+            evidence_kind: row.get("evidence_kind")?,
+            confidence: row.get("confidence")?,
+            payload_json: row.get("payload_json")?,
+        })
+    }
 }
 
 // ── Project surface write path (FD-SUPPORT-1) ─────────────────────────
@@ -1006,32 +1006,32 @@ impl ProjectSurfaceEvidence {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateProjectSurfaceInput {
-	pub snapshot_uid: String,
-	pub repo_uid: String,
-	pub module_candidate_uid: String,
-	/// Surface kind: "http_provider", "grpc_provider", "cli_provider", etc.
-	pub surface_kind: String,
-	/// Human-readable display name (e.g., "GET /api/users").
-	pub display_name: Option<String>,
-	/// Root path of the surface (e.g., module root or service root).
-	pub root_path: String,
-	/// Entrypoint file path where the surface is defined.
-	pub entrypoint_path: Option<String>,
-	/// Build system: "npm", "cargo", "gradle", etc.
-	pub build_system: String,
-	/// Runtime kind: "node", "rust_native", "jvm", etc.
-	pub runtime_kind: String,
-	/// Detection confidence (0.0 to 1.0).
-	pub confidence: f64,
-	/// Optional metadata JSON (framework-specific details).
-	pub metadata_json: Option<String>,
-	/// Source type: "express_route", "spring_controller", "dockerfile", etc.
-	pub source_type: String,
-	/// Source-specific identifier (optional, for deduplication).
-	pub source_specific_id: Option<String>,
-	/// Stable identity key (mandatory for Rust-produced surfaces).
-	/// Format: `surface:<source_type>:<identity>` (e.g., `surface:express_route:GET:/api/users`)
-	pub stable_surface_key: String,
+    pub snapshot_uid: String,
+    pub repo_uid: String,
+    pub module_candidate_uid: String,
+    /// Surface kind: "http_provider", "grpc_provider", "cli_provider", etc.
+    pub surface_kind: String,
+    /// Human-readable display name (e.g., "GET /api/users").
+    pub display_name: Option<String>,
+    /// Root path of the surface (e.g., module root or service root).
+    pub root_path: String,
+    /// Entrypoint file path where the surface is defined.
+    pub entrypoint_path: Option<String>,
+    /// Build system: "npm", "cargo", "gradle", etc.
+    pub build_system: String,
+    /// Runtime kind: "node", "rust_native", "jvm", etc.
+    pub runtime_kind: String,
+    /// Detection confidence (0.0 to 1.0).
+    pub confidence: f64,
+    /// Optional metadata JSON (framework-specific details).
+    pub metadata_json: Option<String>,
+    /// Source type: "express_route", "spring_controller", "dockerfile", etc.
+    pub source_type: String,
+    /// Source-specific identifier (optional, for deduplication).
+    pub source_specific_id: Option<String>,
+    /// Stable identity key (mandatory for Rust-produced surfaces).
+    /// Format: `surface:<source_type>:<identity>` (e.g., `surface:express_route:GET:/api/users`)
+    pub stable_surface_key: String,
 }
 
 /// Input for creating project surface evidence.
@@ -1041,21 +1041,21 @@ pub struct CreateProjectSurfaceInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateProjectSurfaceEvidenceInput {
-	/// UID of the surface this evidence supports.
-	pub project_surface_uid: String,
-	pub snapshot_uid: String,
-	pub repo_uid: String,
-	/// Evidence source type: "code_detection", "manifest", "dockerfile", etc.
-	pub source_type: String,
-	/// File path where the evidence was found.
-	pub source_path: String,
-	/// Evidence kind: "route_registration", "middleware_mount", "annotation", etc.
-	pub evidence_kind: String,
-	/// Detection confidence (0.0 to 1.0).
-	pub confidence: f64,
-	/// Optional payload JSON with evidence details.
-	/// For Express routes: `{"method": "GET", "path": "/api/users", "handler": "..."}`
-	pub payload_json: Option<String>,
+    /// UID of the surface this evidence supports.
+    pub project_surface_uid: String,
+    pub snapshot_uid: String,
+    pub repo_uid: String,
+    /// Evidence source type: "code_detection", "manifest", "dockerfile", etc.
+    pub source_type: String,
+    /// File path where the evidence was found.
+    pub source_path: String,
+    /// Evidence kind: "route_registration", "middleware_mount", "annotation", etc.
+    pub evidence_kind: String,
+    /// Detection confidence (0.0 to 1.0).
+    pub confidence: f64,
+    /// Optional payload JSON with evidence details.
+    /// For Express routes: `{"method": "GET", "path": "/api/users", "handler": "..."}`
+    pub payload_json: Option<String>,
 }
 
 /// Module candidate evidence record from `module_candidate_evidence` table.
@@ -1080,32 +1080,32 @@ pub struct CreateProjectSurfaceEvidenceInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModuleCandidateEvidence {
-	pub evidence_uid: String,
-	pub module_candidate_uid: String,
-	pub snapshot_uid: String,
-	pub repo_uid: String,
-	pub source_type: String,
-	pub source_path: String,
-	pub evidence_kind: String,
-	pub confidence: f64,
-	pub payload_json: Option<String>,
+    pub evidence_uid: String,
+    pub module_candidate_uid: String,
+    pub snapshot_uid: String,
+    pub repo_uid: String,
+    pub source_type: String,
+    pub source_path: String,
+    pub evidence_kind: String,
+    pub confidence: f64,
+    pub payload_json: Option<String>,
 }
 
 impl ModuleCandidateEvidence {
-	/// Construct a `ModuleCandidateEvidence` from a rusqlite row.
-	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
-		Ok(Self {
-			evidence_uid: row.get("evidence_uid")?,
-			module_candidate_uid: row.get("module_candidate_uid")?,
-			snapshot_uid: row.get("snapshot_uid")?,
-			repo_uid: row.get("repo_uid")?,
-			source_type: row.get("source_type")?,
-			source_path: row.get("source_path")?,
-			evidence_kind: row.get("evidence_kind")?,
-			confidence: row.get("confidence")?,
-			payload_json: row.get("payload_json")?,
-		})
-	}
+    /// Construct a `ModuleCandidateEvidence` from a rusqlite row.
+    pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+        Ok(Self {
+            evidence_uid: row.get("evidence_uid")?,
+            module_candidate_uid: row.get("module_candidate_uid")?,
+            snapshot_uid: row.get("snapshot_uid")?,
+            repo_uid: row.get("repo_uid")?,
+            source_type: row.get("source_type")?,
+            source_path: row.get("source_path")?,
+            evidence_kind: row.get("evidence_kind")?,
+            confidence: row.get("confidence")?,
+            payload_json: row.get("payload_json")?,
+        })
+    }
 }
 
 // ── Quality Policy Types ───────────────────────────────────────────
@@ -1125,56 +1125,59 @@ impl ModuleCandidateEvidence {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QualityPolicyKind {
-	/// Every measurement must satisfy `value <= threshold`.
-	AbsoluteMax,
-	/// Every measurement must satisfy `value >= threshold`.
-	AbsoluteMin,
-	/// Only newly introduced targets are evaluated. New targets must
-	/// satisfy `value <= threshold`. Existing targets are ignored.
-	NoNew,
-	/// Only existing violators are evaluated. Existing violators
-	/// (`value > threshold` in baseline) may not increase. New targets
-	/// and non-violating existing targets are ignored.
-	NoWorsened,
+    /// Every measurement must satisfy `value <= threshold`.
+    AbsoluteMax,
+    /// Every measurement must satisfy `value >= threshold`.
+    AbsoluteMin,
+    /// Only newly introduced targets are evaluated. New targets must
+    /// satisfy `value <= threshold`. Existing targets are ignored.
+    NoNew,
+    /// Only existing violators are evaluated. Existing violators
+    /// (`value > threshold` in baseline) may not increase. New targets
+    /// and non-violating existing targets are ignored.
+    NoWorsened,
 }
 
 impl QualityPolicyKind {
-	/// Return the comparison operator implied by this policy kind.
-	/// Used for verdict computation: pass if `value <op> threshold`.
-	pub fn operator(&self) -> ComparisonOperator {
-		match self {
-			QualityPolicyKind::AbsoluteMax => ComparisonOperator::LessOrEqual,
-			QualityPolicyKind::AbsoluteMin => ComparisonOperator::GreaterOrEqual,
-			QualityPolicyKind::NoNew => ComparisonOperator::LessOrEqual,
-			QualityPolicyKind::NoWorsened => ComparisonOperator::LessOrEqual,
-		}
-	}
+    /// Return the comparison operator implied by this policy kind.
+    /// Used for verdict computation: pass if `value <op> threshold`.
+    pub fn operator(&self) -> ComparisonOperator {
+        match self {
+            QualityPolicyKind::AbsoluteMax => ComparisonOperator::LessOrEqual,
+            QualityPolicyKind::AbsoluteMin => ComparisonOperator::GreaterOrEqual,
+            QualityPolicyKind::NoNew => ComparisonOperator::LessOrEqual,
+            QualityPolicyKind::NoWorsened => ComparisonOperator::LessOrEqual,
+        }
+    }
 
-	/// Whether this policy kind requires a baseline snapshot for evaluation.
-	pub fn requires_baseline(&self) -> bool {
-		matches!(self, QualityPolicyKind::NoNew | QualityPolicyKind::NoWorsened)
-	}
+    /// Whether this policy kind requires a baseline snapshot for evaluation.
+    pub fn requires_baseline(&self) -> bool {
+        matches!(
+            self,
+            QualityPolicyKind::NoNew | QualityPolicyKind::NoWorsened
+        )
+    }
 
-	/// Parse from string (matches serde snake_case convention).
-	pub fn from_str(s: &str) -> Option<Self> {
-		match s {
-			"absolute_max" => Some(QualityPolicyKind::AbsoluteMax),
-			"absolute_min" => Some(QualityPolicyKind::AbsoluteMin),
-			"no_new" => Some(QualityPolicyKind::NoNew),
-			"no_worsened" => Some(QualityPolicyKind::NoWorsened),
-			_ => None,
-		}
-	}
+    /// Parse from string (matches serde snake_case convention).
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "absolute_max" => Some(QualityPolicyKind::AbsoluteMax),
+            "absolute_min" => Some(QualityPolicyKind::AbsoluteMin),
+            "no_new" => Some(QualityPolicyKind::NoNew),
+            "no_worsened" => Some(QualityPolicyKind::NoWorsened),
+            _ => None,
+        }
+    }
 
-	/// Serialize to string (matches serde snake_case convention).
-	pub fn as_str(&self) -> &'static str {
-		match self {
-			QualityPolicyKind::AbsoluteMax => "absolute_max",
-			QualityPolicyKind::AbsoluteMin => "absolute_min",
-			QualityPolicyKind::NoNew => "no_new",
-			QualityPolicyKind::NoWorsened => "no_worsened",
-		}
-	}
+    /// Serialize to string (matches serde snake_case convention).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            QualityPolicyKind::AbsoluteMax => "absolute_max",
+            QualityPolicyKind::AbsoluteMin => "absolute_min",
+            QualityPolicyKind::NoNew => "no_new",
+            QualityPolicyKind::NoWorsened => "no_worsened",
+        }
+    }
 }
 
 /// Comparison operator for threshold evaluation.
@@ -1182,57 +1185,57 @@ impl QualityPolicyKind {
 /// Derived from `QualityPolicyKind`, never stored separately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComparisonOperator {
-	LessOrEqual,
-	GreaterOrEqual,
+    LessOrEqual,
+    GreaterOrEqual,
 }
 
 impl ComparisonOperator {
-	/// Evaluate the comparison: `value <op> threshold`.
-	pub fn evaluate(&self, value: f64, threshold: f64) -> bool {
-		match self {
-			ComparisonOperator::LessOrEqual => value <= threshold,
-			ComparisonOperator::GreaterOrEqual => value >= threshold,
-		}
-	}
+    /// Evaluate the comparison: `value <op> threshold`.
+    pub fn evaluate(&self, value: f64, threshold: f64) -> bool {
+        match self {
+            ComparisonOperator::LessOrEqual => value <= threshold,
+            ComparisonOperator::GreaterOrEqual => value >= threshold,
+        }
+    }
 
-	/// Returns true if `current` is worse than `baseline` according to
-	/// this operator's direction. Used for `no_worsened` evaluation.
-	///
-	/// For `<=` (max-direction): worse means current > baseline.
-	/// For `>=` (min-direction): worse means current < baseline.
-	pub fn is_worse(&self, current: f64, baseline: f64) -> bool {
-		match self {
-			ComparisonOperator::LessOrEqual => current > baseline,
-			ComparisonOperator::GreaterOrEqual => current < baseline,
-		}
-	}
+    /// Returns true if `current` is worse than `baseline` according to
+    /// this operator's direction. Used for `no_worsened` evaluation.
+    ///
+    /// For `<=` (max-direction): worse means current > baseline.
+    /// For `>=` (min-direction): worse means current < baseline.
+    pub fn is_worse(&self, current: f64, baseline: f64) -> bool {
+        match self {
+            ComparisonOperator::LessOrEqual => current > baseline,
+            ComparisonOperator::GreaterOrEqual => current < baseline,
+        }
+    }
 }
 
 /// Policy severity determines gate impact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QualityPolicySeverity {
-	/// Gate-blocking: FAIL contributes to non-zero exit code.
-	Fail,
-	/// Informational: FAIL reported but does not block gate.
-	Advisory,
+    /// Gate-blocking: FAIL contributes to non-zero exit code.
+    Fail,
+    /// Informational: FAIL reported but does not block gate.
+    Advisory,
 }
 
 impl QualityPolicySeverity {
-	pub fn from_str(s: &str) -> Option<Self> {
-		match s {
-			"fail" => Some(QualityPolicySeverity::Fail),
-			"advisory" => Some(QualityPolicySeverity::Advisory),
-			_ => None,
-		}
-	}
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "fail" => Some(QualityPolicySeverity::Fail),
+            "advisory" => Some(QualityPolicySeverity::Advisory),
+            _ => None,
+        }
+    }
 
-	pub fn as_str(&self) -> &'static str {
-		match self {
-			QualityPolicySeverity::Fail => "fail",
-			QualityPolicySeverity::Advisory => "advisory",
-		}
-	}
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            QualityPolicySeverity::Fail => "fail",
+            QualityPolicySeverity::Advisory => "advisory",
+        }
+    }
 }
 
 /// Scope clause kind — closed set per design lock.
@@ -1242,31 +1245,31 @@ impl QualityPolicySeverity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScopeClauseKind {
-	/// Filter to measurements in files under this module path.
-	Module,
-	/// Filter to measurements in matching files (exact or glob).
-	File,
-	/// Filter to measurements on symbols of this kind (node subtype).
-	SymbolKind,
+    /// Filter to measurements in files under this module path.
+    Module,
+    /// Filter to measurements in matching files (exact or glob).
+    File,
+    /// Filter to measurements on symbols of this kind (node subtype).
+    SymbolKind,
 }
 
 impl ScopeClauseKind {
-	pub fn from_str(s: &str) -> Option<Self> {
-		match s {
-			"module" => Some(ScopeClauseKind::Module),
-			"file" => Some(ScopeClauseKind::File),
-			"symbol_kind" => Some(ScopeClauseKind::SymbolKind),
-			_ => None,
-		}
-	}
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "module" => Some(ScopeClauseKind::Module),
+            "file" => Some(ScopeClauseKind::File),
+            "symbol_kind" => Some(ScopeClauseKind::SymbolKind),
+            _ => None,
+        }
+    }
 
-	pub fn as_str(&self) -> &'static str {
-		match self {
-			ScopeClauseKind::Module => "module",
-			ScopeClauseKind::File => "file",
-			ScopeClauseKind::SymbolKind => "symbol_kind",
-		}
-	}
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ScopeClauseKind::Module => "module",
+            ScopeClauseKind::File => "file",
+            ScopeClauseKind::SymbolKind => "symbol_kind",
+        }
+    }
 }
 
 /// A single scope filter clause. All clauses are ANDed.
@@ -1275,31 +1278,31 @@ impl ScopeClauseKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ScopeClause {
-	/// Clause kind — enforced as closed enum.
-	#[serde(rename = "type")]
-	pub clause_kind: ScopeClauseKind,
-	/// Selector value: path prefix for module, path/glob for file,
-	/// node subtype for symbol_kind.
-	pub selector: String,
+    /// Clause kind — enforced as closed enum.
+    #[serde(rename = "type")]
+    pub clause_kind: ScopeClauseKind,
+    /// Selector value: path prefix for module, path/glob for file,
+    /// node subtype for symbol_kind.
+    pub selector: String,
 }
 
 impl ScopeClause {
-	pub fn new(clause_kind: ScopeClauseKind, selector: impl Into<String>) -> Self {
-		Self {
-			clause_kind,
-			selector: selector.into(),
-		}
-	}
+    pub fn new(clause_kind: ScopeClauseKind, selector: impl Into<String>) -> Self {
+        Self {
+            clause_kind,
+            selector: selector.into(),
+        }
+    }
 
-	/// Parse from CLI format: "type:selector".
-	pub fn parse(s: &str) -> Option<Self> {
-		let (kind_str, selector) = s.split_once(':')?;
-		if kind_str.is_empty() || selector.is_empty() {
-			return None;
-		}
-		let clause_kind = ScopeClauseKind::from_str(kind_str)?;
-		Some(Self::new(clause_kind, selector))
-	}
+    /// Parse from CLI format: "type:selector".
+    pub fn parse(s: &str) -> Option<Self> {
+        let (kind_str, selector) = s.split_once(':')?;
+        if kind_str.is_empty() || selector.is_empty() {
+            return None;
+        }
+        let clause_kind = ScopeClauseKind::parse(kind_str)?;
+        Some(Self::new(clause_kind, selector))
+    }
 }
 
 /// Quality policy declaration payload (stored in value_json).
@@ -1308,71 +1311,71 @@ impl ScopeClause {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct QualityPolicyPayload {
-	/// Human-readable policy ID (e.g., "QP-001").
-	pub policy_id: String,
-	/// Monotonic version for supersede.
-	pub version: i64,
-	/// Target scope (AND of all clauses; empty = repo-wide).
-	pub scope_clauses: Vec<ScopeClause>,
-	/// Bound measurement kind (e.g., "cognitive_complexity").
-	pub measurement_kind: String,
-	/// Policy kind determines operator and evaluation scope.
-	pub policy_kind: QualityPolicyKind,
-	/// Threshold value (always required).
-	pub threshold: f64,
-	/// Gate impact: fail (blocking) or advisory (informational).
-	pub severity: QualityPolicySeverity,
-	/// Optional description.
-	pub description: Option<String>,
+    /// Human-readable policy ID (e.g., "QP-001").
+    pub policy_id: String,
+    /// Monotonic version for supersede.
+    pub version: i64,
+    /// Target scope (AND of all clauses; empty = repo-wide).
+    pub scope_clauses: Vec<ScopeClause>,
+    /// Bound measurement kind (e.g., "cognitive_complexity").
+    pub measurement_kind: String,
+    /// Policy kind determines operator and evaluation scope.
+    pub policy_kind: QualityPolicyKind,
+    /// Threshold value (always required).
+    pub threshold: f64,
+    /// Gate impact: fail (blocking) or advisory (informational).
+    pub severity: QualityPolicySeverity,
+    /// Optional description.
+    pub description: Option<String>,
 }
 
 /// Assessment verdict states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AssessmentVerdict {
-	/// All evaluated measurements satisfy threshold.
-	Pass,
-	/// One or more measurements violate threshold.
-	Fail,
-	/// No measurements match policy scope.
-	NotApplicable,
-	/// Baseline required but unavailable or incompatible.
-	NotComparable,
+    /// All evaluated measurements satisfy threshold.
+    Pass,
+    /// One or more measurements violate threshold.
+    Fail,
+    /// No measurements match policy scope.
+    NotApplicable,
+    /// Baseline required but unavailable or incompatible.
+    NotComparable,
 }
 
 impl AssessmentVerdict {
-	pub fn from_str(s: &str) -> Option<Self> {
-		match s {
-			"PASS" => Some(AssessmentVerdict::Pass),
-			"FAIL" => Some(AssessmentVerdict::Fail),
-			"NOT_APPLICABLE" => Some(AssessmentVerdict::NotApplicable),
-			"NOT_COMPARABLE" => Some(AssessmentVerdict::NotComparable),
-			_ => None,
-		}
-	}
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "PASS" => Some(AssessmentVerdict::Pass),
+            "FAIL" => Some(AssessmentVerdict::Fail),
+            "NOT_APPLICABLE" => Some(AssessmentVerdict::NotApplicable),
+            "NOT_COMPARABLE" => Some(AssessmentVerdict::NotComparable),
+            _ => None,
+        }
+    }
 
-	pub fn as_str(&self) -> &'static str {
-		match self {
-			AssessmentVerdict::Pass => "PASS",
-			AssessmentVerdict::Fail => "FAIL",
-			AssessmentVerdict::NotApplicable => "NOT_APPLICABLE",
-			AssessmentVerdict::NotComparable => "NOT_COMPARABLE",
-		}
-	}
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AssessmentVerdict::Pass => "PASS",
+            AssessmentVerdict::Fail => "FAIL",
+            AssessmentVerdict::NotApplicable => "NOT_APPLICABLE",
+            AssessmentVerdict::NotComparable => "NOT_COMPARABLE",
+        }
+    }
 }
 
 /// A single violation in an assessment.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct AssessmentViolation {
-	/// The symbol that violates the policy.
-	pub target_stable_key: String,
-	/// The measured value that caused the violation.
-	pub measurement_value: f64,
-	/// The threshold the value failed to meet.
-	pub threshold: f64,
-	/// For `no_worsened`: the baseline value (None for absolute policies).
-	pub baseline_value: Option<f64>,
+    /// The symbol that violates the policy.
+    pub target_stable_key: String,
+    /// The measured value that caused the violation.
+    pub measurement_value: f64,
+    /// The threshold the value failed to meet.
+    pub threshold: f64,
+    /// For `no_worsened`: the baseline value (None for absolute policies).
+    pub baseline_value: Option<f64>,
 }
 
 /// A quality assessment row from the database.
@@ -1381,123 +1384,124 @@ pub struct AssessmentViolation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QualityAssessmentRow {
-	pub assessment_uid: String,
-	pub snapshot_uid: String,
-	pub policy_uid: String,
-	pub baseline_snapshot_uid: Option<String>,
-	pub computed_verdict: String,
-	pub measurements_evaluated: i64,
-	pub violations_json: String,
-	pub new_violations: Option<i64>,
-	pub worsened_violations: Option<i64>,
-	pub created_at: String,
+    pub assessment_uid: String,
+    pub snapshot_uid: String,
+    pub policy_uid: String,
+    pub baseline_snapshot_uid: Option<String>,
+    pub computed_verdict: String,
+    pub measurements_evaluated: i64,
+    pub violations_json: String,
+    pub new_violations: Option<i64>,
+    pub worsened_violations: Option<i64>,
+    pub created_at: String,
 }
 
 impl QualityAssessmentRow {
-	/// Construct from a rusqlite row.
-	pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
-		Ok(Self {
-			assessment_uid: row.get("assessment_uid")?,
-			snapshot_uid: row.get("snapshot_uid")?,
-			policy_uid: row.get("policy_uid")?,
-			baseline_snapshot_uid: row.get("baseline_snapshot_uid")?,
-			computed_verdict: row.get("computed_verdict")?,
-			measurements_evaluated: row.get("measurements_evaluated")?,
-			violations_json: row.get("violations_json")?,
-			new_violations: row.get("new_violations")?,
-			worsened_violations: row.get("worsened_violations")?,
-			created_at: row.get("created_at")?,
-		})
-	}
+    /// Construct from a rusqlite row.
+    pub fn from_row(row: &Row<'_>) -> SqlResult<Self> {
+        Ok(Self {
+            assessment_uid: row.get("assessment_uid")?,
+            snapshot_uid: row.get("snapshot_uid")?,
+            policy_uid: row.get("policy_uid")?,
+            baseline_snapshot_uid: row.get("baseline_snapshot_uid")?,
+            computed_verdict: row.get("computed_verdict")?,
+            measurements_evaluated: row.get("measurements_evaluated")?,
+            violations_json: row.get("violations_json")?,
+            new_violations: row.get("new_violations")?,
+            worsened_violations: row.get("worsened_violations")?,
+            created_at: row.get("created_at")?,
+        })
+    }
 
-	/// Parse violations from JSON.
-	pub fn violations(&self) -> Result<Vec<AssessmentViolation>, serde_json::Error> {
-		serde_json::from_str(&self.violations_json)
-	}
+    /// Parse violations from JSON.
+    pub fn violations(&self) -> Result<Vec<AssessmentViolation>, serde_json::Error> {
+        serde_json::from_str(&self.violations_json)
+    }
 
-	/// Parse verdict from string.
-	pub fn verdict(&self) -> Option<AssessmentVerdict> {
-		AssessmentVerdict::from_str(&self.computed_verdict)
-	}
+    /// Parse verdict from string.
+    pub fn verdict(&self) -> Option<AssessmentVerdict> {
+        AssessmentVerdict::parse(&self.computed_verdict)
+    }
 }
 
 /// Input for inserting a quality assessment.
 #[derive(Debug, Clone)]
 pub struct QualityAssessmentInput {
-	pub assessment_uid: String,
-	pub snapshot_uid: String,
-	pub policy_uid: String,
-	pub baseline_snapshot_uid: Option<String>,
-	pub computed_verdict: AssessmentVerdict,
-	pub measurements_evaluated: i64,
-	pub violations: Vec<AssessmentViolation>,
-	pub new_violations: Option<i64>,
-	pub worsened_violations: Option<i64>,
-	pub created_at: String,
+    pub assessment_uid: String,
+    pub snapshot_uid: String,
+    pub policy_uid: String,
+    pub baseline_snapshot_uid: Option<String>,
+    pub computed_verdict: AssessmentVerdict,
+    pub measurements_evaluated: i64,
+    pub violations: Vec<AssessmentViolation>,
+    pub new_violations: Option<i64>,
+    pub worsened_violations: Option<i64>,
+    pub created_at: String,
 }
 
 /// Error when building an assessment UID with mismatched policy kind and baseline.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssessmentUidError {
-	/// Comparative policy requires a baseline but none was provided.
-	BaselineRequired { policy_kind: QualityPolicyKind },
-	/// Absolute policy must not have a baseline.
-	BaselineNotAllowed { policy_kind: QualityPolicyKind },
+    /// Comparative policy requires a baseline but none was provided.
+    BaselineRequired { policy_kind: QualityPolicyKind },
+    /// Absolute policy must not have a baseline.
+    BaselineNotAllowed { policy_kind: QualityPolicyKind },
 }
 
 impl std::fmt::Display for AssessmentUidError {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			AssessmentUidError::BaselineRequired { policy_kind } => {
-				write!(
-					f,
-					"policy kind '{}' requires a baseline snapshot",
-					policy_kind.as_str()
-				)
-			}
-			AssessmentUidError::BaselineNotAllowed { policy_kind } => {
-				write!(
-					f,
-					"policy kind '{}' must not have a baseline snapshot",
-					policy_kind.as_str()
-				)
-			}
-		}
-	}
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AssessmentUidError::BaselineRequired { policy_kind } => {
+                write!(
+                    f,
+                    "policy kind '{}' requires a baseline snapshot",
+                    policy_kind.as_str()
+                )
+            }
+            AssessmentUidError::BaselineNotAllowed { policy_kind } => {
+                write!(
+                    f,
+                    "policy kind '{}' must not have a baseline snapshot",
+                    policy_kind.as_str()
+                )
+            }
+        }
+    }
 }
 
 impl std::error::Error for AssessmentUidError {}
 
 impl QualityAssessmentInput {
-	/// Build a deterministic assessment UID.
-	///
-	/// For absolute policies (`absolute_max`, `absolute_min`):
-	///   `{snapshot_uid}-qpa-{policy_uid}`
-	///   Baseline must be None.
-	///
-	/// For comparative policies (`no_new`, `no_worsened`):
-	///   `{snapshot_uid}-qpa-{policy_uid}-vs-{baseline_snapshot_uid}`
-	///   Baseline must be Some.
-	///
-	/// Returns `Err` if the policy kind and baseline presence are inconsistent.
-	/// This enforces the design invariant that baseline is part of identity
-	/// for comparative policies and must not appear for absolute policies.
-	pub fn build_uid(
-		snapshot_uid: &str,
-		policy_uid: &str,
-		policy_kind: QualityPolicyKind,
-		baseline_snapshot_uid: Option<&str>,
-	) -> Result<String, AssessmentUidError> {
-		let requires_baseline = policy_kind.requires_baseline();
-		match (requires_baseline, baseline_snapshot_uid) {
-			(true, Some(baseline)) => {
-				Ok(format!("{}-qpa-{}-vs-{}", snapshot_uid, policy_uid, baseline))
-			}
-			(true, None) => Err(AssessmentUidError::BaselineRequired { policy_kind }),
-			(false, None) => Ok(format!("{}-qpa-{}", snapshot_uid, policy_uid)),
-			(false, Some(_)) => Err(AssessmentUidError::BaselineNotAllowed { policy_kind }),
-		}
-	}
+    /// Build a deterministic assessment UID.
+    ///
+    /// For absolute policies (`absolute_max`, `absolute_min`):
+    ///   `{snapshot_uid}-qpa-{policy_uid}`
+    ///   Baseline must be None.
+    ///
+    /// For comparative policies (`no_new`, `no_worsened`):
+    ///   `{snapshot_uid}-qpa-{policy_uid}-vs-{baseline_snapshot_uid}`
+    ///   Baseline must be Some.
+    ///
+    /// Returns `Err` if the policy kind and baseline presence are inconsistent.
+    /// This enforces the design invariant that baseline is part of identity
+    /// for comparative policies and must not appear for absolute policies.
+    pub fn build_uid(
+        snapshot_uid: &str,
+        policy_uid: &str,
+        policy_kind: QualityPolicyKind,
+        baseline_snapshot_uid: Option<&str>,
+    ) -> Result<String, AssessmentUidError> {
+        let requires_baseline = policy_kind.requires_baseline();
+        match (requires_baseline, baseline_snapshot_uid) {
+            (true, Some(baseline)) => Ok(format!(
+                "{}-qpa-{}-vs-{}",
+                snapshot_uid, policy_uid, baseline
+            )),
+            (true, None) => Err(AssessmentUidError::BaselineRequired { policy_kind }),
+            (false, None) => Ok(format!("{}-qpa-{}", snapshot_uid, policy_uid)),
+            (false, Some(_)) => Err(AssessmentUidError::BaselineNotAllowed { policy_kind }),
+        }
+    }
 }
 
 /// Quality policy waiver payload (stored in value_json).
@@ -1506,22 +1510,22 @@ impl QualityAssessmentInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct QualityPolicyWaiverPayload {
-	/// The policy this waiver applies to.
-	pub policy_id: String,
-	/// The policy version this waiver was created against.
-	pub policy_version: i64,
-	/// The specific symbol being waived.
-	pub target_stable_key: String,
-	/// Reason for the waiver.
-	pub reason: String,
-	/// Optional expiration date (ISO 8601).
-	pub expires_at: Option<String>,
-	/// Optional author.
-	pub created_by: Option<String>,
-	/// Optional rationale category (e.g., "legacy", "third_party").
-	pub rationale_category: Option<String>,
-	/// Optional policy basis (e.g., "TL-approved").
-	pub policy_basis: Option<String>,
+    /// The policy this waiver applies to.
+    pub policy_id: String,
+    /// The policy version this waiver was created against.
+    pub policy_version: i64,
+    /// The specific symbol being waived.
+    pub target_stable_key: String,
+    /// Reason for the waiver.
+    pub reason: String,
+    /// Optional expiration date (ISO 8601).
+    pub expires_at: Option<String>,
+    /// Optional author.
+    pub created_by: Option<String>,
+    /// Optional rationale category (e.g., "legacy", "third_party").
+    pub rationale_category: Option<String>,
+    /// Optional policy basis (e.g., "TL-approved").
+    pub policy_basis: Option<String>,
 }
 
 // ── Tests ──────────────────────────────────────────────────────────
@@ -1544,233 +1548,231 @@ pub struct QualityPolicyWaiverPayload {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+    use super::*;
 
-	// ── SourceLocation::from_partial_columns ──────────────────
+    // ── SourceLocation::from_partial_columns ──────────────────
 
-	#[test]
-	fn location_is_none_when_line_start_is_none() {
-		assert_eq!(
-			SourceLocation::from_partial_columns(None, None, None, None),
-			None
-		);
-	}
+    #[test]
+    fn location_is_none_when_line_start_is_none() {
+        assert_eq!(
+            SourceLocation::from_partial_columns(None, None, None, None),
+            None
+        );
+    }
 
-	#[test]
-	fn location_is_none_when_line_start_is_none_even_if_others_are_set() {
-		// The asymmetric rule: line_start is the discriminator.
-		// Other columns being non-null does not produce a location.
-		assert_eq!(
-			SourceLocation::from_partial_columns(None, Some(5), Some(10), Some(15)),
-			None
-		);
-	}
+    #[test]
+    fn location_is_none_when_line_start_is_none_even_if_others_are_set() {
+        // The asymmetric rule: line_start is the discriminator.
+        // Other columns being non-null does not produce a location.
+        assert_eq!(
+            SourceLocation::from_partial_columns(None, Some(5), Some(10), Some(15)),
+            None
+        );
+    }
 
-	#[test]
-	fn location_is_some_when_line_start_is_set_with_all_others_null() {
-		// All defaults fire: col_start=0, line_end=line_start, col_end=0.
-		let loc = SourceLocation::from_partial_columns(Some(7), None, None, None);
-		assert_eq!(
-			loc,
-			Some(SourceLocation {
-				line_start: 7,
-				col_start: 0,
-				line_end: 7, // defaults to line_start, NOT to 0
-				col_end: 0,
-			})
-		);
-	}
+    #[test]
+    fn location_is_some_when_line_start_is_set_with_all_others_null() {
+        // All defaults fire: col_start=0, line_end=line_start, col_end=0.
+        let loc = SourceLocation::from_partial_columns(Some(7), None, None, None);
+        assert_eq!(
+            loc,
+            Some(SourceLocation {
+                line_start: 7,
+                col_start: 0,
+                line_end: 7, // defaults to line_start, NOT to 0
+                col_end: 0,
+            })
+        );
+    }
 
-	#[test]
-	fn location_uses_explicit_col_start_when_set() {
-		let loc = SourceLocation::from_partial_columns(Some(7), Some(3), None, None);
-		assert_eq!(
-			loc,
-			Some(SourceLocation {
-				line_start: 7,
-				col_start: 3,
-				line_end: 7,
-				col_end: 0,
-			})
-		);
-	}
+    #[test]
+    fn location_uses_explicit_col_start_when_set() {
+        let loc = SourceLocation::from_partial_columns(Some(7), Some(3), None, None);
+        assert_eq!(
+            loc,
+            Some(SourceLocation {
+                line_start: 7,
+                col_start: 3,
+                line_end: 7,
+                col_end: 0,
+            })
+        );
+    }
 
-	#[test]
-	fn location_uses_explicit_line_end_when_set() {
-		let loc = SourceLocation::from_partial_columns(Some(7), None, Some(12), None);
-		assert_eq!(
-			loc,
-			Some(SourceLocation {
-				line_start: 7,
-				col_start: 0,
-				line_end: 12, // explicit value, not the default
-				col_end: 0,
-			})
-		);
-	}
+    #[test]
+    fn location_uses_explicit_line_end_when_set() {
+        let loc = SourceLocation::from_partial_columns(Some(7), None, Some(12), None);
+        assert_eq!(
+            loc,
+            Some(SourceLocation {
+                line_start: 7,
+                col_start: 0,
+                line_end: 12, // explicit value, not the default
+                col_end: 0,
+            })
+        );
+    }
 
-	#[test]
-	fn location_uses_explicit_col_end_when_set() {
-		let loc = SourceLocation::from_partial_columns(Some(7), None, None, Some(20));
-		assert_eq!(
-			loc,
-			Some(SourceLocation {
-				line_start: 7,
-				col_start: 0,
-				line_end: 7,
-				col_end: 20,
-			})
-		);
-	}
+    #[test]
+    fn location_uses_explicit_col_end_when_set() {
+        let loc = SourceLocation::from_partial_columns(Some(7), None, None, Some(20));
+        assert_eq!(
+            loc,
+            Some(SourceLocation {
+                line_start: 7,
+                col_start: 0,
+                line_end: 7,
+                col_end: 20,
+            })
+        );
+    }
 
-	#[test]
-	fn location_uses_all_explicit_values_when_all_set() {
-		let loc =
-			SourceLocation::from_partial_columns(Some(7), Some(3), Some(12), Some(20));
-		assert_eq!(
-			loc,
-			Some(SourceLocation {
-				line_start: 7,
-				col_start: 3,
-				line_end: 12,
-				col_end: 20,
-			})
-		);
-	}
+    #[test]
+    fn location_uses_all_explicit_values_when_all_set() {
+        let loc = SourceLocation::from_partial_columns(Some(7), Some(3), Some(12), Some(20));
+        assert_eq!(
+            loc,
+            Some(SourceLocation {
+                line_start: 7,
+                col_start: 3,
+                line_end: 12,
+                col_end: 20,
+            })
+        );
+    }
 
-	#[test]
-	fn location_default_line_end_to_line_start_is_critical() {
-		// This test pins the most surprising default: line_end
-		// falls back to line_start, NOT to 0. If a future change
-		// inverts this, parity with the TS mapNode rule breaks.
-		let loc = SourceLocation::from_partial_columns(Some(42), None, None, None);
-		assert_eq!(loc.unwrap().line_end, 42);
-	}
+    #[test]
+    fn location_default_line_end_to_line_start_is_critical() {
+        // This test pins the most surprising default: line_end
+        // falls back to line_start, NOT to 0. If a future change
+        // inverts this, parity with the TS mapNode rule breaks.
+        let loc = SourceLocation::from_partial_columns(Some(42), None, None, None);
+        assert_eq!(loc.unwrap().line_end, 42);
+    }
 
-	#[test]
-	fn location_zero_line_start_is_still_some() {
-		// line_start = 0 is a valid non-null value (Some(0)).
-		// The discriminator is presence, not truthiness.
-		let loc = SourceLocation::from_partial_columns(Some(0), None, None, None);
-		assert_eq!(
-			loc,
-			Some(SourceLocation {
-				line_start: 0,
-				col_start: 0,
-				line_end: 0, // defaults to line_start which is 0
-				col_end: 0,
-			})
-		);
-	}
+    #[test]
+    fn location_zero_line_start_is_still_some() {
+        // line_start = 0 is a valid non-null value (Some(0)).
+        // The discriminator is presence, not truthiness.
+        let loc = SourceLocation::from_partial_columns(Some(0), None, None, None);
+        assert_eq!(
+            loc,
+            Some(SourceLocation {
+                line_start: 0,
+                col_start: 0,
+                line_end: 0, // defaults to line_start which is 0
+                col_end: 0,
+            })
+        );
+    }
 
-	// ── Serde rename_all and field rename ─────────────────────
+    // ── Serde rename_all and field rename ─────────────────────
 
-	#[test]
-	fn repo_serializes_field_names_as_camel_case() {
-		let repo = Repo {
-			repo_uid: "r1".into(),
-			name: "test".into(),
-			root_path: "/abs".into(),
-			default_branch: Some("main".into()),
-			created_at: "2025-01-01T00:00:00Z".into(),
-			metadata_json: None,
-		};
-		let json = serde_json::to_string(&repo).unwrap();
-		// camelCase field names per D-B7a
-		assert!(json.contains("\"repoUid\":\"r1\""));
-		assert!(json.contains("\"rootPath\":\"/abs\""));
-		assert!(json.contains("\"defaultBranch\":\"main\""));
-		assert!(json.contains("\"createdAt\":"));
-		assert!(json.contains("\"metadataJson\":null"));
-		// snake_case must NOT appear in the serialized JSON
-		assert!(!json.contains("\"repo_uid\""));
-		assert!(!json.contains("\"root_path\""));
-		assert!(!json.contains("\"default_branch\""));
-		assert!(!json.contains("\"metadata_json\""));
-	}
+    #[test]
+    fn repo_serializes_field_names_as_camel_case() {
+        let repo = Repo {
+            repo_uid: "r1".into(),
+            name: "test".into(),
+            root_path: "/abs".into(),
+            default_branch: Some("main".into()),
+            created_at: "2025-01-01T00:00:00Z".into(),
+            metadata_json: None,
+        };
+        let json = serde_json::to_string(&repo).unwrap();
+        // camelCase field names per D-B7a
+        assert!(json.contains("\"repoUid\":\"r1\""));
+        assert!(json.contains("\"rootPath\":\"/abs\""));
+        assert!(json.contains("\"defaultBranch\":\"main\""));
+        assert!(json.contains("\"createdAt\":"));
+        assert!(json.contains("\"metadataJson\":null"));
+        // snake_case must NOT appear in the serialized JSON
+        assert!(!json.contains("\"repo_uid\""));
+        assert!(!json.contains("\"root_path\""));
+        assert!(!json.contains("\"default_branch\""));
+        assert!(!json.contains("\"metadata_json\""));
+    }
 
-	#[test]
-	fn graph_edge_type_field_serializes_as_type() {
-		// D-B4: the Rust field is `edge_type`, JSON field is `type`
-		// to match the TS `GraphEdge.type`.
-		let edge = GraphEdge {
-			edge_uid: "e1".into(),
-			snapshot_uid: "s1".into(),
-			repo_uid: "r1".into(),
-			source_node_uid: "n1".into(),
-			target_node_uid: "n2".into(),
-			edge_type: "CALLS".into(),
-			resolution: "static".into(),
-			extractor: "ts-core:0.1.0".into(),
-			location: None,
-			metadata_json: None,
-		};
-		let json = serde_json::to_string(&edge).unwrap();
-		assert!(json.contains("\"type\":\"CALLS\""));
-		// Rust field name must NOT leak to JSON
-		assert!(!json.contains("\"edgeType\""));
-		assert!(!json.contains("\"edge_type\""));
-	}
+    #[test]
+    fn graph_edge_type_field_serializes_as_type() {
+        // D-B4: the Rust field is `edge_type`, JSON field is `type`
+        // to match the TS `GraphEdge.type`.
+        let edge = GraphEdge {
+            edge_uid: "e1".into(),
+            snapshot_uid: "s1".into(),
+            repo_uid: "r1".into(),
+            source_node_uid: "n1".into(),
+            target_node_uid: "n2".into(),
+            edge_type: "CALLS".into(),
+            resolution: "static".into(),
+            extractor: "ts-core:0.1.0".into(),
+            location: None,
+            metadata_json: None,
+        };
+        let json = serde_json::to_string(&edge).unwrap();
+        assert!(json.contains("\"type\":\"CALLS\""));
+        // Rust field name must NOT leak to JSON
+        assert!(!json.contains("\"edgeType\""));
+        assert!(!json.contains("\"edge_type\""));
+    }
 
-	#[test]
-	fn graph_node_location_serializes_as_nested_object_when_some() {
-		let node = GraphNode {
-			node_uid: "n1".into(),
-			snapshot_uid: "s1".into(),
-			repo_uid: "r1".into(),
-			stable_key: "r1:src/foo.ts#bar:SYMBOL".into(),
-			kind: "SYMBOL".into(),
-			subtype: Some("FUNCTION".into()),
-			name: "bar".into(),
-			qualified_name: None,
-			file_uid: None,
-			parent_node_uid: None,
-			location: Some(SourceLocation {
-				line_start: 1,
-				col_start: 2,
-				line_end: 3,
-				col_end: 4,
-			}),
-			signature: None,
-			visibility: None,
-			doc_comment: None,
-			metadata_json: None,
-		};
-		let json = serde_json::to_string(&node).unwrap();
-		// location is a nested camelCase object
-		assert!(
-			json.contains("\"location\":{\"lineStart\":1,\"colStart\":2,\"lineEnd\":3,\"colEnd\":4}")
-		);
-	}
+    #[test]
+    fn graph_node_location_serializes_as_nested_object_when_some() {
+        let node = GraphNode {
+            node_uid: "n1".into(),
+            snapshot_uid: "s1".into(),
+            repo_uid: "r1".into(),
+            stable_key: "r1:src/foo.ts#bar:SYMBOL".into(),
+            kind: "SYMBOL".into(),
+            subtype: Some("FUNCTION".into()),
+            name: "bar".into(),
+            qualified_name: None,
+            file_uid: None,
+            parent_node_uid: None,
+            location: Some(SourceLocation {
+                line_start: 1,
+                col_start: 2,
+                line_end: 3,
+                col_end: 4,
+            }),
+            signature: None,
+            visibility: None,
+            doc_comment: None,
+            metadata_json: None,
+        };
+        let json = serde_json::to_string(&node).unwrap();
+        // location is a nested camelCase object
+        assert!(json
+            .contains("\"location\":{\"lineStart\":1,\"colStart\":2,\"lineEnd\":3,\"colEnd\":4}"));
+    }
 
-	// ── TrackedFile boolean parity (regression pin) ───────────
+    // ── TrackedFile boolean parity (regression pin) ───────────
 
-	#[test]
-	fn tracked_file_boolean_uses_strict_eq_one_parity_with_ts() {
-		// Pins the D-B2 strict-parity correction.
-		//
-		// The TS `mapFile` row mapper at sqlite-storage.ts:3284
-		// uses `(row.is_test as number) === 1`. The Rust mapper
-		// must use exactly the same semantics — strict `== 1`,
-		// not the more permissive `!= 0` SQL-truthiness form.
-		//
-		// The schema declares these columns as INTEGER NOT NULL
-		// DEFAULT 0 but does NOT enforce CHECK (col IN (0, 1)).
-		// Out-of-range values (2, -1, etc.) are structurally
-		// possible. Both runtimes must emit `false` for any
-		// value other than literal 1, otherwise parity drifts.
-		//
-		// This test uses an inline rusqlite::Connection plus a
-		// minimal CREATE TABLE matching the `files` table schema
-		// from 001-initial.sql. It does NOT depend on R2-C
-		// (migration runner) or R2-D (connection lifecycle) —
-		// the test is self-contained and exercises only the
-		// `TrackedFile::from_row` mapper directly.
-		use rusqlite::Connection;
+    #[test]
+    fn tracked_file_boolean_uses_strict_eq_one_parity_with_ts() {
+        // Pins the D-B2 strict-parity correction.
+        //
+        // The TS `mapFile` row mapper at sqlite-storage.ts:3284
+        // uses `(row.is_test as number) === 1`. The Rust mapper
+        // must use exactly the same semantics — strict `== 1`,
+        // not the more permissive `!= 0` SQL-truthiness form.
+        //
+        // The schema declares these columns as INTEGER NOT NULL
+        // DEFAULT 0 but does NOT enforce CHECK (col IN (0, 1)).
+        // Out-of-range values (2, -1, etc.) are structurally
+        // possible. Both runtimes must emit `false` for any
+        // value other than literal 1, otherwise parity drifts.
+        //
+        // This test uses an inline rusqlite::Connection plus a
+        // minimal CREATE TABLE matching the `files` table schema
+        // from 001-initial.sql. It does NOT depend on R2-C
+        // (migration runner) or R2-D (connection lifecycle) —
+        // the test is self-contained and exercises only the
+        // `TrackedFile::from_row` mapper directly.
+        use rusqlite::Connection;
 
-		let conn = Connection::open_in_memory().expect("open in-memory db");
-		conn.execute_batch(
-			"CREATE TABLE files (
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch(
+            "CREATE TABLE files (
 				file_uid     TEXT PRIMARY KEY,
 				repo_uid     TEXT NOT NULL,
 				path         TEXT NOT NULL,
@@ -1779,15 +1781,15 @@ mod tests {
 				is_generated INTEGER NOT NULL DEFAULT 0,
 				is_excluded  INTEGER NOT NULL DEFAULT 0
 			)",
-		)
-		.expect("create files table");
+        )
+        .expect("create files table");
 
-		// Four rows covering the boolean integer cases:
-		//   - "f_zero": all 0  → all false
-		//   - "f_one":  all 1  → all true
-		//   - "f_two":  all 2  → all FALSE (matches TS === 1)
-		//   - "f_neg":  all -1 → all FALSE (matches TS === 1)
-		conn.execute(
+        // Four rows covering the boolean integer cases:
+        //   - "f_zero": all 0  → all false
+        //   - "f_one":  all 1  → all true
+        //   - "f_two":  all 2  → all FALSE (matches TS === 1)
+        //   - "f_neg":  all -1 → all FALSE (matches TS === 1)
+        conn.execute(
 			"INSERT INTO files (file_uid, repo_uid, path, language, is_test, is_generated, is_excluded) VALUES
 				('f_zero', 'r1', 'a.ts', 'typescript', 0, 0, 0),
 				('f_one',  'r1', 'b.ts', 'typescript', 1, 1, 1),
@@ -1797,276 +1799,286 @@ mod tests {
 		)
 		.expect("insert test rows");
 
-		let mut stmt = conn
-			.prepare("SELECT * FROM files")
-			.expect("prepare select");
-		let rows: Vec<TrackedFile> = stmt
-			.query_map([], |row| TrackedFile::from_row(row))
-			.expect("query_map")
-			.collect::<Result<Vec<_>, _>>()
-			.expect("collect rows");
+        let mut stmt = conn.prepare("SELECT * FROM files").expect("prepare select");
+        let rows: Vec<TrackedFile> = stmt
+            .query_map([], TrackedFile::from_row)
+            .expect("query_map")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect rows");
 
-		// Look up by file_uid (order-independent).
-		let by_uid = |uid: &str| -> &TrackedFile {
-			rows.iter()
-				.find(|f| f.file_uid == uid)
-				.unwrap_or_else(|| panic!("no row with file_uid={uid}"))
-		};
+        // Look up by file_uid (order-independent).
+        let by_uid = |uid: &str| -> &TrackedFile {
+            rows.iter()
+                .find(|f| f.file_uid == uid)
+                .unwrap_or_else(|| panic!("no row with file_uid={uid}"))
+        };
 
-		// f_zero: 0 → false. Schema default case.
-		let f_zero = by_uid("f_zero");
-		assert!(!f_zero.is_test, "is_test=0 must be false");
-		assert!(!f_zero.is_generated, "is_generated=0 must be false");
-		assert!(!f_zero.is_excluded, "is_excluded=0 must be false");
+        // f_zero: 0 → false. Schema default case.
+        let f_zero = by_uid("f_zero");
+        assert!(!f_zero.is_test, "is_test=0 must be false");
+        assert!(!f_zero.is_generated, "is_generated=0 must be false");
+        assert!(!f_zero.is_excluded, "is_excluded=0 must be false");
 
-		// f_one: 1 → true. Schema "set" case.
-		let f_one = by_uid("f_one");
-		assert!(f_one.is_test, "is_test=1 must be true");
-		assert!(f_one.is_generated, "is_generated=1 must be true");
-		assert!(f_one.is_excluded, "is_excluded=1 must be true");
+        // f_one: 1 → true. Schema "set" case.
+        let f_one = by_uid("f_one");
+        assert!(f_one.is_test, "is_test=1 must be true");
+        assert!(f_one.is_generated, "is_generated=1 must be true");
+        assert!(f_one.is_excluded, "is_excluded=1 must be true");
 
-		// f_two: 2 → FALSE (the parity-critical case).
-		// Permissive `!= 0` would have produced true here, drifting
-		// from TS `=== 1`. Strict `== 1` produces false.
-		let f_two = by_uid("f_two");
-		assert!(
-			!f_two.is_test,
-			"is_test=2 must be false (TS === 1 parity); permissive != 0 would drift"
-		);
-		assert!(!f_two.is_generated, "is_generated=2 must be false (TS === 1 parity)");
-		assert!(!f_two.is_excluded, "is_excluded=2 must be false (TS === 1 parity)");
+        // f_two: 2 → FALSE (the parity-critical case).
+        // Permissive `!= 0` would have produced true here, drifting
+        // from TS `=== 1`. Strict `== 1` produces false.
+        let f_two = by_uid("f_two");
+        assert!(
+            !f_two.is_test,
+            "is_test=2 must be false (TS === 1 parity); permissive != 0 would drift"
+        );
+        assert!(
+            !f_two.is_generated,
+            "is_generated=2 must be false (TS === 1 parity)"
+        );
+        assert!(
+            !f_two.is_excluded,
+            "is_excluded=2 must be false (TS === 1 parity)"
+        );
 
-		// f_neg: -1 → FALSE (the other parity-critical case).
-		let f_neg = by_uid("f_neg");
-		assert!(
-			!f_neg.is_test,
-			"is_test=-1 must be false (TS === 1 parity); permissive != 0 would drift"
-		);
-		assert!(!f_neg.is_generated, "is_generated=-1 must be false (TS === 1 parity)");
-		assert!(!f_neg.is_excluded, "is_excluded=-1 must be false (TS === 1 parity)");
-	}
+        // f_neg: -1 → FALSE (the other parity-critical case).
+        let f_neg = by_uid("f_neg");
+        assert!(
+            !f_neg.is_test,
+            "is_test=-1 must be false (TS === 1 parity); permissive != 0 would drift"
+        );
+        assert!(
+            !f_neg.is_generated,
+            "is_generated=-1 must be false (TS === 1 parity)"
+        );
+        assert!(
+            !f_neg.is_excluded,
+            "is_excluded=-1 must be false (TS === 1 parity)"
+        );
+    }
 
-	#[test]
-	fn graph_node_location_serializes_as_null_when_none() {
-		let node = GraphNode {
-			node_uid: "n1".into(),
-			snapshot_uid: "s1".into(),
-			repo_uid: "r1".into(),
-			stable_key: "k".into(),
-			kind: "SYMBOL".into(),
-			subtype: None,
-			name: "n".into(),
-			qualified_name: None,
-			file_uid: None,
-			parent_node_uid: None,
-			location: None,
-			signature: None,
-			visibility: None,
-			doc_comment: None,
-			metadata_json: None,
-		};
-		let json = serde_json::to_string(&node).unwrap();
-		assert!(json.contains("\"location\":null"));
-	}
+    #[test]
+    fn graph_node_location_serializes_as_null_when_none() {
+        let node = GraphNode {
+            node_uid: "n1".into(),
+            snapshot_uid: "s1".into(),
+            repo_uid: "r1".into(),
+            stable_key: "k".into(),
+            kind: "SYMBOL".into(),
+            subtype: None,
+            name: "n".into(),
+            qualified_name: None,
+            file_uid: None,
+            parent_node_uid: None,
+            location: None,
+            signature: None,
+            visibility: None,
+            doc_comment: None,
+            metadata_json: None,
+        };
+        let json = serde_json::to_string(&node).unwrap();
+        assert!(json.contains("\"location\":null"));
+    }
 
-	// ── Quality Policy Types ──────────────────────────────────────
+    // ── Quality Policy Types ──────────────────────────────────────
 
-	#[test]
-	fn quality_policy_kind_operator_derivation() {
-		assert_eq!(
-			QualityPolicyKind::AbsoluteMax.operator(),
-			ComparisonOperator::LessOrEqual
-		);
-		assert_eq!(
-			QualityPolicyKind::AbsoluteMin.operator(),
-			ComparisonOperator::GreaterOrEqual
-		);
-		assert_eq!(
-			QualityPolicyKind::NoNew.operator(),
-			ComparisonOperator::LessOrEqual
-		);
-		assert_eq!(
-			QualityPolicyKind::NoWorsened.operator(),
-			ComparisonOperator::LessOrEqual
-		);
-	}
+    #[test]
+    fn quality_policy_kind_operator_derivation() {
+        assert_eq!(
+            QualityPolicyKind::AbsoluteMax.operator(),
+            ComparisonOperator::LessOrEqual
+        );
+        assert_eq!(
+            QualityPolicyKind::AbsoluteMin.operator(),
+            ComparisonOperator::GreaterOrEqual
+        );
+        assert_eq!(
+            QualityPolicyKind::NoNew.operator(),
+            ComparisonOperator::LessOrEqual
+        );
+        assert_eq!(
+            QualityPolicyKind::NoWorsened.operator(),
+            ComparisonOperator::LessOrEqual
+        );
+    }
 
-	#[test]
-	fn quality_policy_kind_requires_baseline() {
-		assert!(!QualityPolicyKind::AbsoluteMax.requires_baseline());
-		assert!(!QualityPolicyKind::AbsoluteMin.requires_baseline());
-		assert!(QualityPolicyKind::NoNew.requires_baseline());
-		assert!(QualityPolicyKind::NoWorsened.requires_baseline());
-	}
+    #[test]
+    fn quality_policy_kind_requires_baseline() {
+        assert!(!QualityPolicyKind::AbsoluteMax.requires_baseline());
+        assert!(!QualityPolicyKind::AbsoluteMin.requires_baseline());
+        assert!(QualityPolicyKind::NoNew.requires_baseline());
+        assert!(QualityPolicyKind::NoWorsened.requires_baseline());
+    }
 
-	#[test]
-	fn quality_policy_kind_roundtrip() {
-		for kind in [
-			QualityPolicyKind::AbsoluteMax,
-			QualityPolicyKind::AbsoluteMin,
-			QualityPolicyKind::NoNew,
-			QualityPolicyKind::NoWorsened,
-		] {
-			let s = kind.as_str();
-			let parsed = QualityPolicyKind::from_str(s);
-			assert_eq!(parsed, Some(kind), "roundtrip failed for {:?}", kind);
-		}
-	}
+    #[test]
+    fn quality_policy_kind_roundtrip() {
+        for kind in [
+            QualityPolicyKind::AbsoluteMax,
+            QualityPolicyKind::AbsoluteMin,
+            QualityPolicyKind::NoNew,
+            QualityPolicyKind::NoWorsened,
+        ] {
+            let s = kind.as_str();
+            let parsed = QualityPolicyKind::parse(s);
+            assert_eq!(parsed, Some(kind), "roundtrip failed for {:?}", kind);
+        }
+    }
 
-	#[test]
-	fn comparison_operator_evaluate() {
-		assert!(ComparisonOperator::LessOrEqual.evaluate(10.0, 20.0));
-		assert!(ComparisonOperator::LessOrEqual.evaluate(20.0, 20.0));
-		assert!(!ComparisonOperator::LessOrEqual.evaluate(21.0, 20.0));
+    #[test]
+    fn comparison_operator_evaluate() {
+        assert!(ComparisonOperator::LessOrEqual.evaluate(10.0, 20.0));
+        assert!(ComparisonOperator::LessOrEqual.evaluate(20.0, 20.0));
+        assert!(!ComparisonOperator::LessOrEqual.evaluate(21.0, 20.0));
 
-		assert!(ComparisonOperator::GreaterOrEqual.evaluate(20.0, 10.0));
-		assert!(ComparisonOperator::GreaterOrEqual.evaluate(10.0, 10.0));
-		assert!(!ComparisonOperator::GreaterOrEqual.evaluate(9.0, 10.0));
-	}
+        assert!(ComparisonOperator::GreaterOrEqual.evaluate(20.0, 10.0));
+        assert!(ComparisonOperator::GreaterOrEqual.evaluate(10.0, 10.0));
+        assert!(!ComparisonOperator::GreaterOrEqual.evaluate(9.0, 10.0));
+    }
 
-	#[test]
-	fn comparison_operator_is_worse() {
-		// LessOrEqual: worse means current > baseline (value went up)
-		assert!(ComparisonOperator::LessOrEqual.is_worse(25.0, 20.0));
-		assert!(!ComparisonOperator::LessOrEqual.is_worse(20.0, 20.0));
-		assert!(!ComparisonOperator::LessOrEqual.is_worse(15.0, 20.0));
+    #[test]
+    fn comparison_operator_is_worse() {
+        // LessOrEqual: worse means current > baseline (value went up)
+        assert!(ComparisonOperator::LessOrEqual.is_worse(25.0, 20.0));
+        assert!(!ComparisonOperator::LessOrEqual.is_worse(20.0, 20.0));
+        assert!(!ComparisonOperator::LessOrEqual.is_worse(15.0, 20.0));
 
-		// GreaterOrEqual: worse means current < baseline (value went down)
-		assert!(ComparisonOperator::GreaterOrEqual.is_worse(75.0, 80.0));
-		assert!(!ComparisonOperator::GreaterOrEqual.is_worse(80.0, 80.0));
-		assert!(!ComparisonOperator::GreaterOrEqual.is_worse(85.0, 80.0));
-	}
+        // GreaterOrEqual: worse means current < baseline (value went down)
+        assert!(ComparisonOperator::GreaterOrEqual.is_worse(75.0, 80.0));
+        assert!(!ComparisonOperator::GreaterOrEqual.is_worse(80.0, 80.0));
+        assert!(!ComparisonOperator::GreaterOrEqual.is_worse(85.0, 80.0));
+    }
 
-	#[test]
-	fn scope_clause_parse_valid() {
-		let clause = ScopeClause::parse("module:src/core").unwrap();
-		assert_eq!(clause.clause_kind, ScopeClauseKind::Module);
-		assert_eq!(clause.selector, "src/core");
+    #[test]
+    fn scope_clause_parse_valid() {
+        let clause = ScopeClause::parse("module:src/core").unwrap();
+        assert_eq!(clause.clause_kind, ScopeClauseKind::Module);
+        assert_eq!(clause.selector, "src/core");
 
-		let clause = ScopeClause::parse("symbol_kind:METHOD").unwrap();
-		assert_eq!(clause.clause_kind, ScopeClauseKind::SymbolKind);
-		assert_eq!(clause.selector, "METHOD");
-	}
+        let clause = ScopeClause::parse("symbol_kind:METHOD").unwrap();
+        assert_eq!(clause.clause_kind, ScopeClauseKind::SymbolKind);
+        assert_eq!(clause.selector, "METHOD");
+    }
 
-	#[test]
-	fn scope_clause_kind_roundtrip() {
-		for kind in [
-			ScopeClauseKind::Module,
-			ScopeClauseKind::File,
-			ScopeClauseKind::SymbolKind,
-		] {
-			let s = kind.as_str();
-			let parsed = ScopeClauseKind::from_str(s);
-			assert_eq!(parsed, Some(kind), "roundtrip failed for {:?}", kind);
-		}
-	}
+    #[test]
+    fn scope_clause_kind_roundtrip() {
+        for kind in [
+            ScopeClauseKind::Module,
+            ScopeClauseKind::File,
+            ScopeClauseKind::SymbolKind,
+        ] {
+            let s = kind.as_str();
+            let parsed = ScopeClauseKind::parse(s);
+            assert_eq!(parsed, Some(kind), "roundtrip failed for {:?}", kind);
+        }
+    }
 
-	#[test]
-	fn scope_clause_parse_invalid() {
-		assert!(ScopeClause::parse("").is_none());
-		assert!(ScopeClause::parse("no-colon").is_none());
-		assert!(ScopeClause::parse(":empty_type").is_none());
-		assert!(ScopeClause::parse("module:").is_none());
-		assert!(ScopeClause::parse("invalid_type:value").is_none());
-	}
+    #[test]
+    fn scope_clause_parse_invalid() {
+        assert!(ScopeClause::parse("").is_none());
+        assert!(ScopeClause::parse("no-colon").is_none());
+        assert!(ScopeClause::parse(":empty_type").is_none());
+        assert!(ScopeClause::parse("module:").is_none());
+        assert!(ScopeClause::parse("invalid_type:value").is_none());
+    }
 
-	#[test]
-	fn assessment_verdict_roundtrip() {
-		for verdict in [
-			AssessmentVerdict::Pass,
-			AssessmentVerdict::Fail,
-			AssessmentVerdict::NotApplicable,
-			AssessmentVerdict::NotComparable,
-		] {
-			let s = verdict.as_str();
-			let parsed = AssessmentVerdict::from_str(s);
-			assert_eq!(parsed, Some(verdict), "roundtrip failed for {:?}", verdict);
-		}
-	}
+    #[test]
+    fn assessment_verdict_roundtrip() {
+        for verdict in [
+            AssessmentVerdict::Pass,
+            AssessmentVerdict::Fail,
+            AssessmentVerdict::NotApplicable,
+            AssessmentVerdict::NotComparable,
+        ] {
+            let s = verdict.as_str();
+            let parsed = AssessmentVerdict::parse(s);
+            assert_eq!(parsed, Some(verdict), "roundtrip failed for {:?}", verdict);
+        }
+    }
 
-	#[test]
-	fn assessment_uid_absolute_policy() {
-		let uid = QualityAssessmentInput::build_uid(
-			"snap-1",
-			"policy-1",
-			QualityPolicyKind::AbsoluteMax,
-			None,
-		)
-		.unwrap();
-		assert_eq!(uid, "snap-1-qpa-policy-1");
-	}
+    #[test]
+    fn assessment_uid_absolute_policy() {
+        let uid = QualityAssessmentInput::build_uid(
+            "snap-1",
+            "policy-1",
+            QualityPolicyKind::AbsoluteMax,
+            None,
+        )
+        .unwrap();
+        assert_eq!(uid, "snap-1-qpa-policy-1");
+    }
 
-	#[test]
-	fn assessment_uid_comparative_policy() {
-		let uid = QualityAssessmentInput::build_uid(
-			"snap-2",
-			"policy-1",
-			QualityPolicyKind::NoNew,
-			Some("snap-1"),
-		)
-		.unwrap();
-		assert_eq!(uid, "snap-2-qpa-policy-1-vs-snap-1");
-	}
+    #[test]
+    fn assessment_uid_comparative_policy() {
+        let uid = QualityAssessmentInput::build_uid(
+            "snap-2",
+            "policy-1",
+            QualityPolicyKind::NoNew,
+            Some("snap-1"),
+        )
+        .unwrap();
+        assert_eq!(uid, "snap-2-qpa-policy-1-vs-snap-1");
+    }
 
-	#[test]
-	fn assessment_uid_absolute_policy_with_baseline_is_error() {
-		let result = QualityAssessmentInput::build_uid(
-			"snap-1",
-			"policy-1",
-			QualityPolicyKind::AbsoluteMax,
-			Some("baseline"),
-		);
-		assert!(matches!(
-			result,
-			Err(AssessmentUidError::BaselineNotAllowed { .. })
-		));
-	}
+    #[test]
+    fn assessment_uid_absolute_policy_with_baseline_is_error() {
+        let result = QualityAssessmentInput::build_uid(
+            "snap-1",
+            "policy-1",
+            QualityPolicyKind::AbsoluteMax,
+            Some("baseline"),
+        );
+        assert!(matches!(
+            result,
+            Err(AssessmentUidError::BaselineNotAllowed { .. })
+        ));
+    }
 
-	#[test]
-	fn assessment_uid_comparative_policy_without_baseline_is_error() {
-		let result = QualityAssessmentInput::build_uid(
-			"snap-1",
-			"policy-1",
-			QualityPolicyKind::NoWorsened,
-			None,
-		);
-		assert!(matches!(
-			result,
-			Err(AssessmentUidError::BaselineRequired { .. })
-		));
-	}
+    #[test]
+    fn assessment_uid_comparative_policy_without_baseline_is_error() {
+        let result = QualityAssessmentInput::build_uid(
+            "snap-1",
+            "policy-1",
+            QualityPolicyKind::NoWorsened,
+            None,
+        );
+        assert!(matches!(
+            result,
+            Err(AssessmentUidError::BaselineRequired { .. })
+        ));
+    }
 
-	#[test]
-	fn quality_policy_payload_serializes_correctly() {
-		let policy = QualityPolicyPayload {
-			policy_id: "QP-001".into(),
-			version: 1,
-			scope_clauses: vec![ScopeClause::new(ScopeClauseKind::Module, "src/core")],
-			measurement_kind: "cognitive_complexity".into(),
-			policy_kind: QualityPolicyKind::AbsoluteMax,
-			threshold: 25.0,
-			severity: QualityPolicySeverity::Fail,
-			description: Some("Limit complexity".into()),
-		};
-		let json = serde_json::to_string(&policy).unwrap();
-		assert!(json.contains("\"policy_id\":\"QP-001\""));
-		assert!(json.contains("\"policy_kind\":\"absolute_max\""));
-		assert!(json.contains("\"severity\":\"fail\""));
-		assert!(json.contains("\"threshold\":25"));
-		assert!(json.contains("\"type\":\"module\""));
-	}
+    #[test]
+    fn quality_policy_payload_serializes_correctly() {
+        let policy = QualityPolicyPayload {
+            policy_id: "QP-001".into(),
+            version: 1,
+            scope_clauses: vec![ScopeClause::new(ScopeClauseKind::Module, "src/core")],
+            measurement_kind: "cognitive_complexity".into(),
+            policy_kind: QualityPolicyKind::AbsoluteMax,
+            threshold: 25.0,
+            severity: QualityPolicySeverity::Fail,
+            description: Some("Limit complexity".into()),
+        };
+        let json = serde_json::to_string(&policy).unwrap();
+        assert!(json.contains("\"policy_id\":\"QP-001\""));
+        assert!(json.contains("\"policy_kind\":\"absolute_max\""));
+        assert!(json.contains("\"severity\":\"fail\""));
+        assert!(json.contains("\"threshold\":25"));
+        assert!(json.contains("\"type\":\"module\""));
+    }
 
-	#[test]
-	fn assessment_violation_serializes_correctly() {
-		let violation = AssessmentViolation {
-			target_stable_key: "r1:src/foo.ts#bar:SYMBOL:FUNCTION".into(),
-			measurement_value: 30.0,
-			threshold: 25.0,
-			baseline_value: Some(28.0),
-		};
-		let json = serde_json::to_string(&violation).unwrap();
-		assert!(json.contains("\"target_stable_key\":"));
-		assert!(json.contains("\"measurement_value\":30"));
-		assert!(json.contains("\"baseline_value\":28"));
-	}
+    #[test]
+    fn assessment_violation_serializes_correctly() {
+        let violation = AssessmentViolation {
+            target_stable_key: "r1:src/foo.ts#bar:SYMBOL:FUNCTION".into(),
+            measurement_value: 30.0,
+            threshold: 25.0,
+            baseline_value: Some(28.0),
+        };
+        let json = serde_json::to_string(&violation).unwrap();
+        assert!(json.contains("\"target_stable_key\":"));
+        assert!(json.contains("\"measurement_value\":30"));
+        assert!(json.contains("\"baseline_value\":28"));
+    }
 }

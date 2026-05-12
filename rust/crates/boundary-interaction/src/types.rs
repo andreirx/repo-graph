@@ -436,9 +436,9 @@ impl ChannelKind {
     pub const fn default_transport_class(self) -> TransportClass {
         match self {
             // Raw sockets
-            ChannelKind::UnixSocket
-            | ChannelKind::TcpSocket
-            | ChannelKind::UdpSocket => TransportClass::RawSocket,
+            ChannelKind::UnixSocket | ChannelKind::TcpSocket | ChannelKind::UdpSocket => {
+                TransportClass::RawSocket
+            }
 
             // Raw IPC
             ChannelKind::NamedPipe
@@ -451,9 +451,9 @@ impl ChannelKind {
             | ChannelKind::InterCoreChannel => TransportClass::RawIpc,
 
             // Schema-backed RPC
-            ChannelKind::GrpcChannel
-            | ChannelKind::ProtobufStream
-            | ChannelKind::ErpcChannel => TransportClass::SchemaRpc,
+            ChannelKind::GrpcChannel | ChannelKind::ProtobufStream | ChannelKind::ErpcChannel => {
+                TransportClass::SchemaRpc
+            }
 
             // Message brokers
             ChannelKind::AmqpQueue
@@ -808,7 +808,13 @@ mod tests {
     #[test]
     fn interaction_basis_confidence_ordering() {
         // Declaration is highest, inferred is lowest
-        assert!(InteractionBasis::Declaration.default_confidence() > InteractionBasis::ApiCall.default_confidence());
-        assert!(InteractionBasis::ApiCall.default_confidence() > InteractionBasis::Inferred.default_confidence());
+        assert!(
+            InteractionBasis::Declaration.default_confidence()
+                > InteractionBasis::ApiCall.default_confidence()
+        );
+        assert!(
+            InteractionBasis::ApiCall.default_confidence()
+                > InteractionBasis::Inferred.default_confidence()
+        );
     }
 }

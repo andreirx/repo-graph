@@ -35,31 +35,31 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EdgeType {
-	// Structural
-	Imports,
-	Calls,
-	Implements,
-	Instantiates,
-	// Data flow
-	Reads,
-	Writes,
-	// Async / event
-	Emits,
-	Consumes,
-	// Framework
-	RoutesTo,
-	RegisteredBy,
-	GatedBy,
-	// Relational
-	DependsOn,
-	Owns,
-	TestedBy,
-	Covers,
-	// Exception flow
-	Throws,
-	Catches,
-	// State machine
-	TransitionsTo,
+    // Structural
+    Imports,
+    Calls,
+    Implements,
+    Instantiates,
+    // Data flow
+    Reads,
+    Writes,
+    // Async / event
+    Emits,
+    Consumes,
+    // Framework
+    RoutesTo,
+    RegisteredBy,
+    GatedBy,
+    // Relational
+    DependsOn,
+    Owns,
+    TestedBy,
+    Covers,
+    // Exception flow
+    Throws,
+    Catches,
+    // State machine
+    TransitionsTo,
 }
 
 /// Edge resolution provenance. Mirror of `Resolution` from
@@ -67,12 +67,12 @@ pub enum EdgeType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Resolution {
-	/// Deterministically resolved from source code.
-	Static,
-	/// Known to exist but resolved at runtime.
-	Dynamic,
-	/// Guessed from naming, proximity, or heuristics.
-	Inferred,
+    /// Deterministically resolved from source code.
+    Static,
+    /// Known to exist but resolved at runtime.
+    Dynamic,
+    /// Guessed from naming, proximity, or heuristics.
+    Inferred,
 }
 
 // ── Node types ──────────────────────────────────────────────────
@@ -90,27 +90,27 @@ pub enum Resolution {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum NodeKind {
-	Module,
-	File,
-	Symbol,
-	Endpoint,
-	EventTopic,
-	Table,
-	ConfigKey,
-	Test,
-	State,
-	Queue,
-	Job,
-	/// Logical database endpoint (driver-level identity). Added
-	/// by SB-2-pre. Serialized as `"DB_RESOURCE"`.
-	DbResource,
-	/// Filesystem path or logical filesystem resource. Added by
-	/// SB-2-pre. Serialized as `"FS_PATH"`.
-	FsPath,
-	/// Object-storage endpoint (S3 bucket, Azure Blob container,
-	/// GCP Storage namespace). Added by SB-2-pre. Serialized as
-	/// `"BLOB"`.
-	Blob,
+    Module,
+    File,
+    Symbol,
+    Endpoint,
+    EventTopic,
+    Table,
+    ConfigKey,
+    Test,
+    State,
+    Queue,
+    Job,
+    /// Logical database endpoint (driver-level identity). Added
+    /// by SB-2-pre. Serialized as `"DB_RESOURCE"`.
+    DbResource,
+    /// Filesystem path or logical filesystem resource. Added by
+    /// SB-2-pre. Serialized as `"FS_PATH"`.
+    FsPath,
+    /// Object-storage endpoint (S3 bucket, Azure Blob container,
+    /// GCP Storage namespace). Added by SB-2-pre. Serialized as
+    /// `"BLOB"`.
+    Blob,
 }
 
 /// Node subtype. Mirror of `NodeSubtype` from
@@ -132,68 +132,68 @@ pub enum NodeKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum NodeSubtype {
-	// SYMBOL subtypes
-	Function,
-	Class,
-	Method,
-	Interface,
-	Struct,
-	TypeAlias,
-	Variable,
-	Constant,
-	Enum,
-	EnumMember,
-	Property,
-	Constructor,
-	Destructor,
-	Getter,
-	Setter,
-	// FILE subtypes
-	Source,
-	TestFile,
-	Config,
-	Migration,
-	Schema,
-	// MODULE subtypes
-	Package,
-	Namespace,
-	Directory,
-	// ENDPOINT subtypes
-	Route,
-	RpcMethod,
-	GraphqlResolver,
-	WebsocketHandler,
-	// TEST subtypes
-	TestSuite,
-	TestCase,
-	// ── State-boundary slice 1 (SB-2-pre-2) ─────────────────
-	// Resource-kind subtypes. Not emitted by any extractor
-	// under slice 1 directly — emission ships in SB-2 via the
-	// `state-extractor` crate. Canonical vocabulary is pinned
-	// here so state-extractor can select from a stable set.
-	/// DB_RESOURCE subtype — logical database connection /
-	/// data source. Serialized as `"CONNECTION"`.
-	Connection,
-	/// FS_PATH subtype — literal filesystem file path.
-	/// Serialized as `"FILE_PATH"`.
-	FilePath,
-	/// FS_PATH subtype — literal filesystem directory path.
-	/// Serialized as `"DIRECTORY_PATH"`.
-	DirectoryPath,
-	/// FS_PATH subtype — logical (config/env-derived) FS
-	/// resource name rather than a concrete path.
-	/// Serialized as `"LOGICAL"`.
-	Logical,
-	/// STATE subtype — cache endpoint (Redis, Memcached, etc.).
-	/// Serialized as `"CACHE"`. The pre-existing STATE
-	/// subtypes (`STATE_VALUE`, `STATE_FIELD`) remain reserved.
-	Cache,
-	/// BLOB subtype — object-storage bucket (S3 bucket, GCP
-	/// Storage bucket). Serialized as `"BUCKET"`.
-	Bucket,
-	/// BLOB subtype — Azure Blob Storage container (and
-	/// similarly-named providers). Serialized as `"CONTAINER"`.
-	Container,
+    // SYMBOL subtypes
+    Function,
+    Class,
+    Method,
+    Interface,
+    Struct,
+    TypeAlias,
+    Variable,
+    Constant,
+    Enum,
+    EnumMember,
+    Property,
+    Constructor,
+    Destructor,
+    Getter,
+    Setter,
+    // FILE subtypes
+    Source,
+    TestFile,
+    Config,
+    Migration,
+    Schema,
+    // MODULE subtypes
+    Package,
+    Namespace,
+    Directory,
+    // ENDPOINT subtypes
+    Route,
+    RpcMethod,
+    GraphqlResolver,
+    WebsocketHandler,
+    // TEST subtypes
+    TestSuite,
+    TestCase,
+    // ── State-boundary slice 1 (SB-2-pre-2) ─────────────────
+    // Resource-kind subtypes. Not emitted by any extractor
+    // under slice 1 directly — emission ships in SB-2 via the
+    // `state-extractor` crate. Canonical vocabulary is pinned
+    // here so state-extractor can select from a stable set.
+    /// DB_RESOURCE subtype — logical database connection /
+    /// data source. Serialized as `"CONNECTION"`.
+    Connection,
+    /// FS_PATH subtype — literal filesystem file path.
+    /// Serialized as `"FILE_PATH"`.
+    FilePath,
+    /// FS_PATH subtype — literal filesystem directory path.
+    /// Serialized as `"DIRECTORY_PATH"`.
+    DirectoryPath,
+    /// FS_PATH subtype — logical (config/env-derived) FS
+    /// resource name rather than a concrete path.
+    /// Serialized as `"LOGICAL"`.
+    Logical,
+    /// STATE subtype — cache endpoint (Redis, Memcached, etc.).
+    /// Serialized as `"CACHE"`. The pre-existing STATE
+    /// subtypes (`STATE_VALUE`, `STATE_FIELD`) remain reserved.
+    Cache,
+    /// BLOB subtype — object-storage bucket (S3 bucket, GCP
+    /// Storage bucket). Serialized as `"BUCKET"`.
+    Bucket,
+    /// BLOB subtype — Azure Blob Storage container (and
+    /// similarly-named providers). Serialized as `"CONTAINER"`.
+    Container,
 }
 
 /// Visibility of a symbol. Mirror of `Visibility` from
@@ -201,11 +201,11 @@ pub enum NodeSubtype {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Visibility {
-	Public,
-	Private,
-	Protected,
-	Internal,
-	Export,
+    Public,
+    Private,
+    Protected,
+    Internal,
+    Export,
 }
 
 // ── Snapshot types ───────────────────────────────────────────────
@@ -215,10 +215,10 @@ pub enum Visibility {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SnapshotKind {
-	Full,
-	Refresh,
-	Working,
-	Sealed,
+    Full,
+    Refresh,
+    Working,
+    Sealed,
 }
 
 /// Snapshot status. Mirror of `SnapshotStatus` from
@@ -226,10 +226,10 @@ pub enum SnapshotKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SnapshotStatus {
-	Building,
-	Ready,
-	Stale,
-	Failed,
+    Building,
+    Ready,
+    Stale,
+    Failed,
 }
 
 /// File parse status. Mirror of `ParseStatus` from
@@ -237,10 +237,10 @@ pub enum SnapshotStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ParseStatus {
-	Parsed,
-	Skipped,
-	Failed,
-	Stale,
+    Parsed,
+    Skipped,
+    Failed,
+    Stale,
 }
 
 // ── Extraction output types ─────────────────────────────────────
@@ -253,21 +253,21 @@ pub enum ParseStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtractedNode {
-	pub node_uid: String,
-	pub snapshot_uid: String,
-	pub repo_uid: String,
-	pub stable_key: String,
-	pub kind: NodeKind,
-	pub subtype: Option<NodeSubtype>,
-	pub name: String,
-	pub qualified_name: Option<String>,
-	pub file_uid: Option<String>,
-	pub parent_node_uid: Option<String>,
-	pub location: Option<SourceLocation>,
-	pub signature: Option<String>,
-	pub visibility: Option<Visibility>,
-	pub doc_comment: Option<String>,
-	pub metadata_json: Option<String>,
+    pub node_uid: String,
+    pub snapshot_uid: String,
+    pub repo_uid: String,
+    pub stable_key: String,
+    pub kind: NodeKind,
+    pub subtype: Option<NodeSubtype>,
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub file_uid: Option<String>,
+    pub parent_node_uid: Option<String>,
+    pub location: Option<SourceLocation>,
+    pub signature: Option<String>,
+    pub visibility: Option<Visibility>,
+    pub doc_comment: Option<String>,
+    pub metadata_json: Option<String>,
 }
 
 /// An unresolved edge produced by an extractor. The `target_key`
@@ -276,18 +276,18 @@ pub struct ExtractedNode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtractedEdge {
-	pub edge_uid: String,
-	pub snapshot_uid: String,
-	pub repo_uid: String,
-	pub source_node_uid: String,
-	/// Symbolic target reference. NOT a node UID.
-	pub target_key: String,
-	#[serde(rename = "type")]
-	pub edge_type: EdgeType,
-	pub resolution: Resolution,
-	pub extractor: String,
-	pub location: Option<SourceLocation>,
-	pub metadata_json: Option<String>,
+    pub edge_uid: String,
+    pub snapshot_uid: String,
+    pub repo_uid: String,
+    pub source_node_uid: String,
+    /// Symbolic target reference. NOT a node UID.
+    pub target_key: String,
+    #[serde(rename = "type")]
+    pub edge_type: EdgeType,
+    pub resolution: Resolution,
+    pub extractor: String,
+    pub location: Option<SourceLocation>,
+    pub metadata_json: Option<String>,
 }
 
 /// Per-function metrics produced by an extractor.
@@ -300,17 +300,17 @@ pub struct ExtractedEdge {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtractedMetrics {
-	pub cyclomatic_complexity: u32,
-	pub parameter_count: u32,
-	pub max_nesting_depth: u32,
-	/// Line count of full function node span (signature + body).
-	/// Computed as `line_end - line_start + 1`.
-	/// `None` when the extractor does not compute this metric.
-	pub function_length: Option<u32>,
-	/// Sonar-style cognitive complexity (nesting-penalized).
-	/// Deferred items: recursion penalty, early-return penalty.
-	/// `None` when the extractor does not compute this metric.
-	pub cognitive_complexity: Option<u32>,
+    pub cyclomatic_complexity: u32,
+    pub parameter_count: u32,
+    pub max_nesting_depth: u32,
+    /// Line count of full function node span (signature + body).
+    /// Computed as `line_end - line_start + 1`.
+    /// `None` when the extractor does not compute this metric.
+    pub function_length: Option<u32>,
+    /// Sonar-style cognitive complexity (nesting-penalized).
+    /// Deferred items: recursion penalty, early-return penalty.
+    /// `None` when the extractor does not compute this metric.
+    pub cognitive_complexity: Option<u32>,
 }
 
 /// Classification of a call site's positional argument payload.
@@ -332,18 +332,18 @@ pub struct ExtractedMetrics {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CallArgPayload {
-	/// Argument is a string literal. Carries the literal text
-	/// (quotes stripped).
-	StringLiteral {
-		/// The literal string value.
-		value: String,
-	},
-	/// Argument is a `process.env.NAME` member read (TS/JS) or
-	/// `os.environ["NAME"]` (Python). Carries the env-key name.
-	EnvKeyRead {
-		/// The env-key identifier (e.g. `"DATABASE_URL"`).
-		key_name: String,
-	},
+    /// Argument is a string literal. Carries the literal text
+    /// (quotes stripped).
+    StringLiteral {
+        /// The literal string value.
+        value: String,
+    },
+    /// Argument is a `process.env.NAME` member read (TS/JS) or
+    /// `os.environ["NAME"]` (Python). Carries the env-key name.
+    EnvKeyRead {
+        /// The env-key identifier (e.g. `"DATABASE_URL"`).
+        key_name: String,
+    },
 }
 
 /// A call-site fact with the callee resolved to a (module,
@@ -381,26 +381,26 @@ pub enum CallArgPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedCallsite {
-	/// `node_uid` of the symbol containing the call site.
-	pub enclosing_symbol_node_uid: String,
-	/// Resolved source module of the callee, via import
-	/// bindings. Matches the `specifier` of one of the file's
-	/// `import_bindings`.
-	pub resolved_module: String,
-	/// Resolved exported-symbol path within `resolved_module`.
-	/// For named imports with an alias, this is the ORIGINAL
-	/// exported name (via `ImportBinding.imported_name`), not
-	/// the local alias.
-	pub resolved_symbol: String,
-	/// Classification of argument 0's payload.
-	pub arg0_payload: CallArgPayload,
-	/// Classification of argument 1's payload, if present.
-	/// Used for APIs where arg1 carries semantics (e.g., Python
-	/// `open(path, mode)` where mode determines direction).
-	/// `None` when arg1 is absent, non-literal, or not needed.
-	pub arg1_payload: Option<CallArgPayload>,
-	/// Source location of the call expression.
-	pub source_location: SourceLocation,
+    /// `node_uid` of the symbol containing the call site.
+    pub enclosing_symbol_node_uid: String,
+    /// Resolved source module of the callee, via import
+    /// bindings. Matches the `specifier` of one of the file's
+    /// `import_bindings`.
+    pub resolved_module: String,
+    /// Resolved exported-symbol path within `resolved_module`.
+    /// For named imports with an alias, this is the ORIGINAL
+    /// exported name (via `ImportBinding.imported_name`), not
+    /// the local alias.
+    pub resolved_symbol: String,
+    /// Classification of argument 0's payload.
+    pub arg0_payload: CallArgPayload,
+    /// Classification of argument 1's payload, if present.
+    /// Used for APIs where arg1 carries semantics (e.g., Python
+    /// `open(path, mode)` where mode determines direction).
+    /// `None` when arg1 is absent, non-literal, or not needed.
+    pub arg1_payload: Option<CallArgPayload>,
+    /// Source location of the call expression.
+    pub source_location: SourceLocation,
 }
 
 /// The result of extracting a single file. Mirrors
@@ -415,21 +415,21 @@ pub struct ResolvedCallsite {
 /// under the Fork-1 posture). See
 /// `docs/TECH-DEBT.md` for the TS-side deferred population note.
 pub struct ExtractionResult {
-	/// FILE node + all symbol nodes found in this file.
-	pub nodes: Vec<ExtractedNode>,
-	/// Unresolved edges (symbolic targets) found in this file.
-	pub edges: Vec<ExtractedEdge>,
-	/// Per-function metrics keyed by stable_key. BTreeMap for
-	/// deterministic iteration (no-HashMap API rule).
-	pub metrics: BTreeMap<String, ExtractedMetrics>,
-	/// Import statement bindings found in this file.
-	pub import_bindings: Vec<ImportBinding>,
-	/// Resolved callsite facts for state-boundary integration
-	/// (SB-3-pre). Present on both runtimes' `ExtractionResult`
-	/// contract; populated by the Rust `ts-extractor` under
-	/// Fork 1, empty for all other extractors. See
-	/// `ResolvedCallsite` docs.
-	pub resolved_callsites: Vec<ResolvedCallsite>,
+    /// FILE node + all symbol nodes found in this file.
+    pub nodes: Vec<ExtractedNode>,
+    /// Unresolved edges (symbolic targets) found in this file.
+    pub edges: Vec<ExtractedEdge>,
+    /// Per-function metrics keyed by stable_key. BTreeMap for
+    /// deterministic iteration (no-HashMap API rule).
+    pub metrics: BTreeMap<String, ExtractedMetrics>,
+    /// Import statement bindings found in this file.
+    pub import_bindings: Vec<ImportBinding>,
+    /// Resolved callsite facts for state-boundary integration
+    /// (SB-3-pre). Present on both runtimes' `ExtractionResult`
+    /// contract; populated by the Rust `ts-extractor` under
+    /// Fork 1, empty for all other extractors. See
+    /// `ResolvedCallsite` docs.
+    pub resolved_callsites: Vec<ResolvedCallsite>,
 }
 
 // ── Indexer input/output types ──────────────────────────────────
@@ -456,36 +456,24 @@ pub type ProgressCallback<'a> = &'a mut dyn FnMut(&IndexProgressEvent) -> Contro
 ///
 /// Not `Clone` or `Debug` because `on_progress` is a mutable
 /// reference to a closure. Use `IndexOptions::default()` for tests.
+#[derive(Default)]
 pub struct IndexOptions<'a> {
-	/// Glob patterns to exclude from scanning.
-	pub exclude: Vec<String>,
-	/// Glob patterns to include (if non-empty, only matching files
-	/// are indexed).
-	pub include: Vec<String>,
-	/// Git commit SHA to record as the snapshot basis.
-	pub basis_commit: Option<String>,
-	/// Batch size for edge resolution (default 10,000).
-	pub edge_batch_size: Option<usize>,
-	/// Optional progress callback. Called for each phase transition.
-	/// The callback can return `ControlFlow::Break` to abort the operation.
-	pub on_progress: Option<ProgressCallback<'a>>,
-	/// C/C++ include roots (repo-relative paths). If non-empty,
-	/// these are checked BEFORE conventional roots (include/, inc/,
-	/// src/include/). Per c-include-resolution-v1.1.md.
-	pub c_include_roots: Vec<String>,
-}
-
-impl Default for IndexOptions<'_> {
-	fn default() -> Self {
-		Self {
-			exclude: Vec::new(),
-			include: Vec::new(),
-			basis_commit: None,
-			edge_batch_size: None,
-			on_progress: None,
-			c_include_roots: Vec::new(),
-		}
-	}
+    /// Glob patterns to exclude from scanning.
+    pub exclude: Vec<String>,
+    /// Glob patterns to include (if non-empty, only matching files
+    /// are indexed).
+    pub include: Vec<String>,
+    /// Git commit SHA to record as the snapshot basis.
+    pub basis_commit: Option<String>,
+    /// Batch size for edge resolution (default 10,000).
+    pub edge_batch_size: Option<usize>,
+    /// Optional progress callback. Called for each phase transition.
+    /// The callback can return `ControlFlow::Break` to abort the operation.
+    pub on_progress: Option<ProgressCallback<'a>>,
+    /// C/C++ include roots (repo-relative paths). If non-empty,
+    /// these are checked BEFORE conventional roots (include/, inc/,
+    /// src/include/). Per c-include-resolution-v1.1.md.
+    pub c_include_roots: Vec<String>,
 }
 
 /// Result of contract schema extraction (CS-1+).
@@ -495,27 +483,27 @@ impl Default for IndexOptions<'_> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContractIndexResult {
-	/// Number of schema files (e.g., .proto) successfully parsed.
-	pub schemas_indexed: usize,
-	/// Number of elements (messages, enums, services, etc.) stored.
-	pub elements_indexed: usize,
-	/// Files that failed to parse.
-	pub parse_failures: Vec<ContractParseFailure>,
-	/// Storage-level error during contract indexing.
-	/// When `Some(...)`, the contract pipeline failed after parsing.
-	/// `schemas_indexed` and `elements_indexed` may be partial or zero.
-	/// This is explicit degradation, not silent failure.
-	pub storage_error: Option<String>,
+    /// Number of schema files (e.g., .proto) successfully parsed.
+    pub schemas_indexed: usize,
+    /// Number of elements (messages, enums, services, etc.) stored.
+    pub elements_indexed: usize,
+    /// Files that failed to parse.
+    pub parse_failures: Vec<ContractParseFailure>,
+    /// Storage-level error during contract indexing.
+    /// When `Some(...)`, the contract pipeline failed after parsing.
+    /// `schemas_indexed` and `elements_indexed` may be partial or zero.
+    /// This is explicit degradation, not silent failure.
+    pub storage_error: Option<String>,
 }
 
 /// A contract file that failed to parse.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContractParseFailure {
-	/// The file path.
-	pub file_path: String,
-	/// The error message.
-	pub error: String,
+    /// The file path.
+    pub file_path: String,
+    /// The error message.
+    pub error: String,
 }
 
 /// Result of generated code mapping (CS-2A: Java).
@@ -525,96 +513,97 @@ pub struct ContractParseFailure {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeneratedCodeMappingResult {
-	/// Number of mappings persisted.
-	pub mappings_persisted: usize,
-	/// Number of high-confidence mappings (>= 0.75).
-	pub high_confidence_count: usize,
-	/// Query error when reading contract elements.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub element_query_error: Option<String>,
-	/// Query error when reading Java symbols.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub symbol_query_error: Option<String>,
-	/// Storage error when persisting mappings.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub storage_error: Option<String>,
+    /// Number of mappings persisted.
+    pub mappings_persisted: usize,
+    /// Number of high-confidence mappings (>= 0.75).
+    pub high_confidence_count: usize,
+    /// Query error when reading contract elements.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub element_query_error: Option<String>,
+    /// Query error when reading Java symbols.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol_query_error: Option<String>,
+    /// Storage error when persisting mappings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_error: Option<String>,
 }
 
 impl GeneratedCodeMappingResult {
-	/// Returns true if any error occurred during mapping.
-	pub fn has_error(&self) -> bool {
-		self.element_query_error.is_some()
-			|| self.symbol_query_error.is_some()
-			|| self.storage_error.is_some()
-	}
+    /// Returns true if any error occurred during mapping.
+    pub fn has_error(&self) -> bool {
+        self.element_query_error.is_some()
+            || self.symbol_query_error.is_some()
+            || self.storage_error.is_some()
+    }
 }
 
 /// Result of an indexing operation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexResult {
-	pub snapshot_uid: String,
-	pub files_total: u64,
-	pub nodes_total: u64,
-	pub edges_total: u64,
-	pub edges_unresolved: u64,
-	pub unresolved_breakdown: BTreeMap<String, u64>,
-	pub duration_ms: u64,
-	pub orphaned_declarations: u64,
-	/// Contract schema extraction results (CS-1+). Present when
-	/// contract files were indexed as part of this operation.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub contracts: Option<ContractIndexResult>,
-	/// Generated code mapping results (CS-2A). Present when Java
-	/// generated code mapping ran during this operation.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub generated_code_mappings: Option<GeneratedCodeMappingResult>,
-	/// gRPC implementation hint results (GR-1A). Present when gRPC
-	/// hint detection ran during this operation.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub grpc_impl_hints: Option<crate::grpc_impl_hint::GrpcImplHintResult>,
-	/// gRPC registration proof results (GR-1B). Present when GR-1B
-	/// ran to boost confidence of GR-1A surfaces.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub grpc_registration_proof: Option<crate::grpc_registration_proof::GrpcRegistrationProofResult>,
-	/// gRPC client hint results (GR-2A). Present when gRPC client
-	/// stub detection ran during this operation.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub grpc_client_hints: Option<crate::grpc_client_hint::GrpcClientHintResult>,
-	/// gRPC link results (GR-3A). Present when provider/consumer
-	/// contract-based linking ran during this operation.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub grpc_links: Option<crate::grpc_link::GrpcLinkResult>,
-	/// Per-symbol metrics from extraction.
-	///
-	/// RS-MS-3c-prereq: Accumulated from all extraction results.
-	/// Keyed by symbol stable_key, containing cyclomatic_complexity,
-	/// parameter_count, and max_nesting_depth. Persisted by the
-	/// compose layer after index_repo returns.
-	pub metrics: BTreeMap<String, ExtractedMetrics>,
-	/// Parent snapshot UID (only present on refresh operations).
-	///
-	/// When present, indicates this was an incremental refresh rather than
-	/// a full index. The compose layer uses this to copy forward derived
-	/// artifacts (measurements, inferences, boundaries, contracts) for
-	/// unchanged files.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub parent_snapshot_uid: Option<String>,
-	/// File paths that were unchanged from parent snapshot (only on refresh).
-	///
-	/// Contains relative paths of files that were copied forward without
-	/// re-extraction. The compose layer uses this to:
-	/// 1. Copy forward measurements/inferences for these files
-	/// 2. Copy forward boundary/contract artifacts for these files
-	/// 3. Skip postpass extraction for these files
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub unchanged_files: Option<Vec<String>>,
-	/// Copy-forward diagnostics for refresh operations.
-	///
-	/// Reports counts of derived artifacts copied from parent snapshot
-	/// for unchanged files. Only present on refresh operations.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub artifact_copy_forward: Option<ArtifactCopyForward>,
+    pub snapshot_uid: String,
+    pub files_total: u64,
+    pub nodes_total: u64,
+    pub edges_total: u64,
+    pub edges_unresolved: u64,
+    pub unresolved_breakdown: BTreeMap<String, u64>,
+    pub duration_ms: u64,
+    pub orphaned_declarations: u64,
+    /// Contract schema extraction results (CS-1+). Present when
+    /// contract files were indexed as part of this operation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contracts: Option<ContractIndexResult>,
+    /// Generated code mapping results (CS-2A). Present when Java
+    /// generated code mapping ran during this operation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated_code_mappings: Option<GeneratedCodeMappingResult>,
+    /// gRPC implementation hint results (GR-1A). Present when gRPC
+    /// hint detection ran during this operation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grpc_impl_hints: Option<crate::grpc_impl_hint::GrpcImplHintResult>,
+    /// gRPC registration proof results (GR-1B). Present when GR-1B
+    /// ran to boost confidence of GR-1A surfaces.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grpc_registration_proof:
+        Option<crate::grpc_registration_proof::GrpcRegistrationProofResult>,
+    /// gRPC client hint results (GR-2A). Present when gRPC client
+    /// stub detection ran during this operation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grpc_client_hints: Option<crate::grpc_client_hint::GrpcClientHintResult>,
+    /// gRPC link results (GR-3A). Present when provider/consumer
+    /// contract-based linking ran during this operation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grpc_links: Option<crate::grpc_link::GrpcLinkResult>,
+    /// Per-symbol metrics from extraction.
+    ///
+    /// RS-MS-3c-prereq: Accumulated from all extraction results.
+    /// Keyed by symbol stable_key, containing cyclomatic_complexity,
+    /// parameter_count, and max_nesting_depth. Persisted by the
+    /// compose layer after index_repo returns.
+    pub metrics: BTreeMap<String, ExtractedMetrics>,
+    /// Parent snapshot UID (only present on refresh operations).
+    ///
+    /// When present, indicates this was an incremental refresh rather than
+    /// a full index. The compose layer uses this to copy forward derived
+    /// artifacts (measurements, inferences, boundaries, contracts) for
+    /// unchanged files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_snapshot_uid: Option<String>,
+    /// File paths that were unchanged from parent snapshot (only on refresh).
+    ///
+    /// Contains relative paths of files that were copied forward without
+    /// re-extraction. The compose layer uses this to:
+    /// 1. Copy forward measurements/inferences for these files
+    /// 2. Copy forward boundary/contract artifacts for these files
+    /// 3. Skip postpass extraction for these files
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unchanged_files: Option<Vec<String>>,
+    /// Copy-forward diagnostics for refresh operations.
+    ///
+    /// Reports counts of derived artifacts copied from parent snapshot
+    /// for unchanged files. Only present on refresh operations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_copy_forward: Option<ArtifactCopyForward>,
 }
 
 /// Diagnostics from copying forward derived artifacts during refresh.
@@ -624,35 +613,35 @@ pub struct IndexResult {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArtifactCopyForward {
-	/// Number of measurements copied forward.
-	pub measurements_copied: u64,
-	/// Number of inferences copied forward.
-	pub inferences_copied: u64,
-	/// Number of boundary surfaces copied forward.
-	pub boundary_surfaces_copied: u64,
-	/// Number of boundary channels copied forward.
-	pub boundary_channels_copied: u64,
-	/// Number of contract schemas copied forward.
-	pub contract_schemas_copied: u64,
-	/// Number of contract elements copied forward.
-	pub contract_elements_copied: u64,
+    /// Number of measurements copied forward.
+    pub measurements_copied: u64,
+    /// Number of inferences copied forward.
+    pub inferences_copied: u64,
+    /// Number of boundary surfaces copied forward.
+    pub boundary_surfaces_copied: u64,
+    /// Number of boundary channels copied forward.
+    pub boundary_channels_copied: u64,
+    /// Number of contract schemas copied forward.
+    pub contract_schemas_copied: u64,
+    /// Number of contract elements copied forward.
+    pub contract_elements_copied: u64,
 }
 
 /// Progress event during indexing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexProgressEvent {
-	pub phase: IndexPhase,
-	pub current: u64,
-	pub total: u64,
-	pub file: Option<String>,
+    pub phase: IndexPhase,
+    pub current: u64,
+    pub total: u64,
+    pub file: Option<String>,
 }
 
 /// Indexing phase for progress reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum IndexPhase {
-	Scanning,
-	Extracting,
-	Resolving,
-	Persisting,
+    Scanning,
+    Extracting,
+    Resolving,
+    Persisting,
 }

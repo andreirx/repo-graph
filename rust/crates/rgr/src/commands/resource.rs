@@ -269,7 +269,7 @@ fn run_resource_writers(args: &[String]) -> ExitCode {
                  Expected FS_PATH, DB_RESOURCE, BLOB, or STATE+CACHE.",
                 resource_key, kind
             );
-            return ExitCode::from(2)
+            return ExitCode::from(2);
         }
         Err(ResourceResolveError::Storage(e)) => {
             eprintln!("error: {}", e);

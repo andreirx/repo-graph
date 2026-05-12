@@ -46,8 +46,8 @@ use crate::errors::AgentStorageError;
 /// follow-up commands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentRepo {
-	pub repo_uid: String,
-	pub name: String,
+    pub repo_uid: String,
+    pub name: String,
 }
 
 // ── Snapshot identity ────────────────────────────────────────────
@@ -63,14 +63,14 @@ pub struct AgentRepo {
 /// envelope for the caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentSnapshot {
-	pub snapshot_uid: String,
-	pub repo_uid: String,
-	pub scope: String,
-	pub basis_commit: Option<String>,
-	pub created_at: String,
-	pub files_total: u64,
-	pub nodes_total: u64,
-	pub edges_total: u64,
+    pub snapshot_uid: String,
+    pub repo_uid: String,
+    pub scope: String,
+    pub basis_commit: Option<String>,
+    pub created_at: String,
+    pub files_total: u64,
+    pub nodes_total: u64,
+    pub edges_total: u64,
 }
 
 // ── Stale file ───────────────────────────────────────────────────
@@ -83,7 +83,7 @@ pub struct AgentSnapshot {
 /// does not perform.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentStaleFile {
-	pub path: String,
+    pub path: String,
 }
 
 // ── Module cycle ─────────────────────────────────────────────────
@@ -95,8 +95,8 @@ pub struct AgentStaleFile {
 /// storage).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentCycle {
-	pub length: usize,
-	pub modules: Vec<String>,
+    pub length: usize,
+    pub modules: Vec<String>,
 }
 
 // ── Dead node ────────────────────────────────────────────────────
@@ -106,12 +106,12 @@ pub struct AgentCycle {
 /// evidence; raw lists never cross the output envelope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentDeadNode {
-	pub stable_key: String,
-	pub symbol: String,
-	pub kind: String,
-	pub file: Option<String>,
-	pub line_count: Option<u64>,
-	pub is_test: bool,
+    pub stable_key: String,
+    pub symbol: String,
+    pub kind: String,
+    pub file: Option<String>,
+    pub line_count: Option<u64>,
+    pub is_test: bool,
 }
 
 // ── Boundary declaration ─────────────────────────────────────────
@@ -120,9 +120,9 @@ pub struct AgentDeadNode {
 /// module Y". Path prefixes are repo-relative.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentBoundaryDeclaration {
-	pub source_module: String,
-	pub forbidden_target: String,
-	pub reason: Option<String>,
+    pub source_module: String,
+    pub forbidden_target: String,
+    pub reason: Option<String>,
 }
 
 // ── Import edge (violation evidence) ─────────────────────────────
@@ -132,8 +132,8 @@ pub struct AgentBoundaryDeclaration {
 /// these into `BOUNDARY_VIOLATIONS` evidence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentImportEdge {
-	pub source_file: String,
-	pub target_file: String,
+    pub source_file: String,
+    pub target_file: String,
 }
 
 // ── Boundary links freshness (ACR-6) ─────────────────────────────
@@ -144,17 +144,17 @@ pub struct AgentImportEdge {
 /// This is the first signal backed by a freshness-tracked L2 table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentBoundaryLinksFreshness {
-	/// Total number of links in the snapshot.
-	pub total: u64,
-	/// Links with `freshness_state = 'current'`.
-	pub current: u64,
-	/// Links with `freshness_state = 'impacted'`.
-	pub impacted: u64,
-	/// Links with `freshness_state = 'unknown'`.
-	pub unknown: u64,
-	/// Earliest `freshness_updated_at` among impacted rows, if any.
-	/// ISO-8601 timestamp as string.
-	pub earliest_impacted_at: Option<String>,
+    /// Total number of links in the snapshot.
+    pub total: u64,
+    /// Links with `freshness_state = 'current'`.
+    pub current: u64,
+    /// Links with `freshness_state = 'impacted'`.
+    pub impacted: u64,
+    /// Links with `freshness_state = 'unknown'`.
+    pub unknown: u64,
+    /// Earliest `freshness_updated_at` among impacted rows, if any.
+    /// ISO-8601 timestamp as string.
+    pub earliest_impacted_at: Option<String>,
 }
 
 // ── Repo-level structural summary ────────────────────────────────
@@ -171,9 +171,9 @@ pub struct AgentBoundaryLinksFreshness {
 /// similar limits for module discovery data, a different surface).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentRepoSummary {
-	pub file_count: u64,
-	pub symbol_count: u64,
-	pub languages: Vec<String>,
+    pub file_count: u64,
+    pub symbol_count: u64,
+    pub languages: Vec<String>,
 }
 
 // ── Module discovery summary ─────────────────────────────────────
@@ -191,14 +191,14 @@ pub struct AgentRepoSummary {
 /// - `inferred`: structure/build-system derived
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentModuleSummary {
-	/// Total count of discovered module candidates.
-	pub discovered_module_count: u64,
-	/// Count of declared modules (manifest-backed).
-	pub declared_count: u64,
-	/// Count of operational modules (surface-promoted).
-	pub operational_count: u64,
-	/// Count of inferred modules (structure-derived).
-	pub inferred_count: u64,
+    /// Total count of discovered module candidates.
+    pub discovered_module_count: u64,
+    /// Count of declared modules (manifest-backed).
+    pub declared_count: u64,
+    /// Count of operational modules (surface-promoted).
+    pub operational_count: u64,
+    /// Count of inferred modules (structure-derived).
+    pub inferred_count: u64,
 }
 
 // ── Complexity measurement ──────────────────────────────────────
@@ -209,14 +209,14 @@ pub struct AgentModuleSummary {
 /// that may benefit from refactoring or additional testing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentComplexityMeasurement {
-	/// The symbol's stable key.
-	pub stable_key: String,
-	/// Symbol name (function/method name).
-	pub symbol_name: String,
-	/// Owning file path (if resolvable).
-	pub file_path: Option<String>,
-	/// The cyclomatic complexity value.
-	pub complexity: u64,
+    /// The symbol's stable key.
+    pub stable_key: String,
+    /// Symbol name (function/method name).
+    pub symbol_name: String,
+    /// Owning file path (if resolvable).
+    pub file_path: Option<String>,
+    /// The cyclomatic complexity value.
+    pub complexity: u64,
 }
 
 // ── Reliability axis (projection of trust axis scores) ──────────
@@ -229,9 +229,9 @@ pub struct AgentComplexityMeasurement {
 /// enum into this one at the port boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentReliabilityLevel {
-	Low,
-	Medium,
-	High,
+    Low,
+    Medium,
+    High,
 }
 
 /// One reliability axis score: a level plus human-readable
@@ -245,8 +245,8 @@ pub enum AgentReliabilityLevel {
 /// is controlled by the trust crate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentReliabilityAxis {
-	pub level: AgentReliabilityLevel,
-	pub reasons: Vec<String>,
+    pub level: AgentReliabilityLevel,
+    pub reasons: Vec<String>,
 }
 
 // ── Enrichment state ─────────────────────────────────────────────
@@ -280,9 +280,9 @@ pub struct AgentReliabilityAxis {
 ///     has no evidence that the call graph was ever enriched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnrichmentState {
-	Ran,
-	NotApplicable,
-	NotRun,
+    Ran,
+    NotApplicable,
+    NotRun,
 }
 
 // ── Trust summary (projection) ───────────────────────────────────
@@ -315,14 +315,14 @@ pub enum EnrichmentState {
 /// authoritative state — the enum is).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentTrustSummary {
-	pub call_resolution_rate: f64,
-	pub resolved_calls: u64,
-	pub unresolved_calls: u64,
-	pub call_graph_reliability: AgentReliabilityAxis,
-	pub dead_code_reliability: AgentReliabilityAxis,
-	pub enrichment_state: EnrichmentState,
-	pub enrichment_eligible: u64,
-	pub enrichment_enriched: u64,
+    pub call_resolution_rate: f64,
+    pub resolved_calls: u64,
+    pub unresolved_calls: u64,
+    pub call_graph_reliability: AgentReliabilityAxis,
+    pub dead_code_reliability: AgentReliabilityAxis,
+    pub enrichment_state: EnrichmentState,
+    pub enrichment_eligible: u64,
+    pub enrichment_enriched: u64,
 }
 
 // ── Focus resolution DTOs ────────────────────────────────────────
@@ -334,9 +334,9 @@ pub struct AgentTrustSummary {
 /// (file vs path-area) based on this kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentFocusKind {
-	File,
-	Module,
-	Symbol,
+    File,
+    Module,
+    Symbol,
 }
 
 /// A candidate entity returned by stable-key focus resolution.
@@ -347,9 +347,9 @@ pub enum AgentFocusKind {
 /// association.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentFocusCandidate {
-	pub stable_key: String,
-	pub kind: AgentFocusKind,
-	pub file: Option<String>,
+    pub stable_key: String,
+    pub kind: AgentFocusKind,
+    pub file: Option<String>,
 }
 
 /// Result of resolving a path-based focus string against the
@@ -366,13 +366,13 @@ pub struct AgentFocusCandidate {
 /// node (e.g. a subdirectory that is not a module root).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentPathResolution {
-	pub has_exact_file: bool,
-	/// When `has_exact_file` is true, the stable key of the FILE
-	/// node. `None` if the file exists but the resolver could not
-	/// produce a key (defensive — should not happen in practice).
-	pub file_stable_key: Option<String>,
-	pub has_content_under_prefix: bool,
-	pub module_stable_key: Option<String>,
+    pub has_exact_file: bool,
+    /// When `has_exact_file` is true, the stable key of the FILE
+    /// node. `None` if the file exists but the resolver could not
+    /// produce a key (defensive — should not happen in practice).
+    pub file_stable_key: Option<String>,
+    pub has_content_under_prefix: bool,
+    pub module_stable_key: Option<String>,
 }
 
 // ── Symbol context (Rust-45) ────────────────────────────────────
@@ -385,13 +385,13 @@ pub struct AgentPathResolution {
 /// rediscover module ownership.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentSymbolContext {
-	pub file_path: Option<String>,
-	pub module_path: Option<String>,
-	pub module_stable_key: Option<String>,
-	pub name: String,
-	pub qualified_name: Option<String>,
-	pub subtype: Option<String>,
-	pub line_start: Option<u64>,
+    pub file_path: Option<String>,
+    pub module_path: Option<String>,
+    pub module_stable_key: Option<String>,
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub subtype: Option<String>,
+    pub line_start: Option<u64>,
 }
 
 // ── Caller/callee rows (Rust-45) ────────────────────────────────
@@ -401,22 +401,22 @@ pub struct AgentSymbolContext {
 /// by module.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentCallerRow {
-	pub stable_key: String,
-	pub name: String,
-	pub file: Option<String>,
-	pub module_path: Option<String>,
-	pub module_stable_key: Option<String>,
+    pub stable_key: String,
+    pub name: String,
+    pub file: Option<String>,
+    pub module_path: Option<String>,
+    pub module_stable_key: Option<String>,
 }
 
 /// One callee row enriched with module ownership. Symmetric with
 /// `AgentCallerRow`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentCalleeRow {
-	pub stable_key: String,
-	pub name: String,
-	pub file: Option<String>,
-	pub module_path: Option<String>,
-	pub module_stable_key: Option<String>,
+    pub stable_key: String,
+    pub name: String,
+    pub file: Option<String>,
+    pub module_path: Option<String>,
+    pub module_stable_key: Option<String>,
 }
 
 // ── Trait ────────────────────────────────────────────────────────
@@ -433,322 +433,308 @@ pub struct AgentCalleeRow {
 /// into `AgentStorageError` at the adapter boundary so the agent
 /// crate never sees rusqlite, SQL diagnostics, or table names.
 pub trait AgentStorageRead {
-	/// Look up a repo by its stable `repo_uid`. Returns
-	/// `Ok(None)` when the repo is not registered.
-	fn get_repo(
-		&self,
-		repo_uid: &str,
-	) -> Result<Option<AgentRepo>, AgentStorageError>;
+    /// Look up a repo by its stable `repo_uid`. Returns
+    /// `Ok(None)` when the repo is not registered.
+    fn get_repo(&self, repo_uid: &str) -> Result<Option<AgentRepo>, AgentStorageError>;
 
-	/// Look up the latest READY snapshot for a repo. Returns
-	/// `Ok(None)` when the repo exists but has never had a
-	/// successfully completed index. BUILDING, STALE, and FAILED
-	/// snapshots are excluded.
-	fn get_latest_snapshot(
-		&self,
-		repo_uid: &str,
-	) -> Result<Option<AgentSnapshot>, AgentStorageError>;
+    /// Look up the latest READY snapshot for a repo. Returns
+    /// `Ok(None)` when the repo exists but has never had a
+    /// successfully completed index. BUILDING, STALE, and FAILED
+    /// snapshots are excluded.
+    fn get_latest_snapshot(
+        &self,
+        repo_uid: &str,
+    ) -> Result<Option<AgentSnapshot>, AgentStorageError>;
 
-	/// List files whose recorded parse state is stale for a
-	/// snapshot. Used as the `TRUST_STALE_SNAPSHOT` trigger.
-	fn get_stale_files(
-		&self,
-		snapshot_uid: &str,
-	) -> Result<Vec<AgentStaleFile>, AgentStorageError>;
+    /// List files whose recorded parse state is stale for a
+    /// snapshot. Used as the `TRUST_STALE_SNAPSHOT` trigger.
+    fn get_stale_files(&self, snapshot_uid: &str)
+        -> Result<Vec<AgentStaleFile>, AgentStorageError>;
 
-	/// Return module-level dependency cycles for a snapshot.
-	/// Canonicalized (each cycle appears once, rotated to its
-	/// lexicographically smallest UID).
-	fn find_module_cycles(
-		&self,
-		snapshot_uid: &str,
-	) -> Result<Vec<AgentCycle>, AgentStorageError>;
+    /// Return module-level dependency cycles for a snapshot.
+    /// Canonicalized (each cycle appears once, rotated to its
+    /// lexicographically smallest UID).
+    fn find_module_cycles(&self, snapshot_uid: &str) -> Result<Vec<AgentCycle>, AgentStorageError>;
 
-	/// Return nodes unreferenced by any reference edge, minus
-	/// declared entrypoints and framework-liveness inferences.
-	/// `kind_filter`, when `Some`, restricts to nodes of that
-	/// kind (e.g. `"SYMBOL"`).
-	fn find_dead_nodes(
-		&self,
-		snapshot_uid: &str,
-		repo_uid: &str,
-		kind_filter: Option<&str>,
-	) -> Result<Vec<AgentDeadNode>, AgentStorageError>;
+    /// Return nodes unreferenced by any reference edge, minus
+    /// declared entrypoints and framework-liveness inferences.
+    /// `kind_filter`, when `Some`, restricts to nodes of that
+    /// kind (e.g. `"SYMBOL"`).
+    fn find_dead_nodes(
+        &self,
+        snapshot_uid: &str,
+        repo_uid: &str,
+        kind_filter: Option<&str>,
+    ) -> Result<Vec<AgentDeadNode>, AgentStorageError>;
 
-	/// Return all active boundary declarations for a repo.
-	/// Each declaration names a source module and a forbidden
-	/// target module.
-	fn get_active_boundary_declarations(
-		&self,
-		repo_uid: &str,
-	) -> Result<Vec<AgentBoundaryDeclaration>, AgentStorageError>;
+    /// Return all active boundary declarations for a repo.
+    /// Each declaration names a source module and a forbidden
+    /// target module.
+    fn get_active_boundary_declarations(
+        &self,
+        repo_uid: &str,
+    ) -> Result<Vec<AgentBoundaryDeclaration>, AgentStorageError>;
 
-	/// Return IMPORTS edges where the source file path is under
-	/// `source_prefix` AND the target file path is under
-	/// `target_prefix`. Used to detect boundary violations given
-	/// a declaration.
-	fn find_imports_between_paths(
-		&self,
-		snapshot_uid: &str,
-		source_prefix: &str,
-		target_prefix: &str,
-	) -> Result<Vec<AgentImportEdge>, AgentStorageError>;
+    /// Return IMPORTS edges where the source file path is under
+    /// `source_prefix` AND the target file path is under
+    /// `target_prefix`. Used to detect boundary violations given
+    /// a declaration.
+    fn find_imports_between_paths(
+        &self,
+        snapshot_uid: &str,
+        source_prefix: &str,
+        target_prefix: &str,
+    ) -> Result<Vec<AgentImportEdge>, AgentStorageError>;
 
-	/// Repo-level structural totals used by `MODULE_SUMMARY`.
-	fn compute_repo_summary(
-		&self,
-		snapshot_uid: &str,
-	) -> Result<AgentRepoSummary, AgentStorageError>;
+    /// Repo-level structural totals used by `MODULE_SUMMARY`.
+    fn compute_repo_summary(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<AgentRepoSummary, AgentStorageError>;
 
-	/// Assemble a narrow trust projection for the snapshot.
-	///
-	/// Implementation note: the storage adapter is expected to
-	/// call `repo_graph_trust::assemble_trust_report` (or an
-	/// equivalent) internally and project the result into
-	/// `AgentTrustSummary`. The agent crate does not depend on
-	/// `repo-graph-trust`; all trust policy lives on the adapter
-	/// side of this method.
-	fn get_trust_summary(
-		&self,
-		repo_uid: &str,
-		snapshot_uid: &str,
-	) -> Result<AgentTrustSummary, AgentStorageError>;
+    /// Assemble a narrow trust projection for the snapshot.
+    ///
+    /// Implementation note: the storage adapter is expected to
+    /// call `repo_graph_trust::assemble_trust_report` (or an
+    /// equivalent) internally and project the result into
+    /// `AgentTrustSummary`. The agent crate does not depend on
+    /// `repo-graph-trust`; all trust policy lives on the adapter
+    /// side of this method.
+    fn get_trust_summary(
+        &self,
+        repo_uid: &str,
+        snapshot_uid: &str,
+    ) -> Result<AgentTrustSummary, AgentStorageError>;
 
-	// ── Focus resolution (Rust-44) ──────────────────────────────
+    // ── Focus resolution (Rust-44) ──────────────────────────────
 
-	/// Resolve a path-based focus string against the snapshot.
-	///
-	/// Checks (1) whether the path names an exact FILE node,
-	/// (2) whether any file content exists under the prefix,
-	/// (3) whether a MODULE node exists at that path.
-	fn resolve_path_focus(
-		&self,
-		snapshot_uid: &str,
-		path: &str,
-	) -> Result<AgentPathResolution, AgentStorageError>;
+    /// Resolve a path-based focus string against the snapshot.
+    ///
+    /// Checks (1) whether the path names an exact FILE node,
+    /// (2) whether any file content exists under the prefix,
+    /// (3) whether a MODULE node exists at that path.
+    fn resolve_path_focus(
+        &self,
+        snapshot_uid: &str,
+        path: &str,
+    ) -> Result<AgentPathResolution, AgentStorageError>;
 
-	/// Resolve a stable-key focus string against the snapshot.
-	///
-	/// Returns the matching node (with its kind and file) when
-	/// exactly one node has the given `stable_key`. Returns
-	/// `Ok(None)` when no match.
-	fn resolve_stable_key_focus(
-		&self,
-		snapshot_uid: &str,
-		stable_key: &str,
-	) -> Result<Option<AgentFocusCandidate>, AgentStorageError>;
+    /// Resolve a stable-key focus string against the snapshot.
+    ///
+    /// Returns the matching node (with its kind and file) when
+    /// exactly one node has the given `stable_key`. Returns
+    /// `Ok(None)` when no match.
+    fn resolve_stable_key_focus(
+        &self,
+        snapshot_uid: &str,
+        stable_key: &str,
+    ) -> Result<Option<AgentFocusCandidate>, AgentStorageError>;
 
-	/// Return dead nodes scoped to files under a path prefix.
-	///
-	/// Same exclusion layers as `find_dead_nodes` (incoming edges,
-	/// entrypoint declarations, framework-liveness inferences).
-	/// Path matching uses `{prefix}/` with trailing slash to avoid
-	/// prefix collisions.
-	fn find_dead_nodes_in_path(
-		&self,
-		snapshot_uid: &str,
-		repo_uid: &str,
-		path_prefix: &str,
-	) -> Result<Vec<AgentDeadNode>, AgentStorageError>;
+    /// Return dead nodes scoped to files under a path prefix.
+    ///
+    /// Same exclusion layers as `find_dead_nodes` (incoming edges,
+    /// entrypoint declarations, framework-liveness inferences).
+    /// Path matching uses `{prefix}/` with trailing slash to avoid
+    /// prefix collisions.
+    fn find_dead_nodes_in_path(
+        &self,
+        snapshot_uid: &str,
+        repo_uid: &str,
+        path_prefix: &str,
+    ) -> Result<Vec<AgentDeadNode>, AgentStorageError>;
 
-	/// Return dead nodes scoped to a single exact file.
-	///
-	/// Same exclusion layers as `find_dead_nodes`.
-	fn find_dead_nodes_in_file(
-		&self,
-		snapshot_uid: &str,
-		repo_uid: &str,
-		file_path: &str,
-	) -> Result<Vec<AgentDeadNode>, AgentStorageError>;
+    /// Return dead nodes scoped to a single exact file.
+    ///
+    /// Same exclusion layers as `find_dead_nodes`.
+    fn find_dead_nodes_in_file(
+        &self,
+        snapshot_uid: &str,
+        repo_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<AgentDeadNode>, AgentStorageError>;
 
-	/// Structural summary scoped to files under a path prefix.
-	fn compute_path_summary(
-		&self,
-		snapshot_uid: &str,
-		path_prefix: &str,
-	) -> Result<AgentRepoSummary, AgentStorageError>;
+    /// Structural summary scoped to files under a path prefix.
+    fn compute_path_summary(
+        &self,
+        snapshot_uid: &str,
+        path_prefix: &str,
+    ) -> Result<AgentRepoSummary, AgentStorageError>;
 
-	/// Structural summary scoped to a single file.
-	fn compute_file_summary(
-		&self,
-		snapshot_uid: &str,
-		file_path: &str,
-	) -> Result<AgentRepoSummary, AgentStorageError>;
+    /// Structural summary scoped to a single file.
+    fn compute_file_summary(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<AgentRepoSummary, AgentStorageError>;
 
-	/// Return active boundary declarations where the source module
-	/// is under the given path prefix.
-	fn find_boundary_declarations_in_path(
-		&self,
-		repo_uid: &str,
-		path_prefix: &str,
-	) -> Result<Vec<AgentBoundaryDeclaration>, AgentStorageError>;
+    /// Return active boundary declarations where the source module
+    /// is under the given path prefix.
+    fn find_boundary_declarations_in_path(
+        &self,
+        repo_uid: &str,
+        path_prefix: &str,
+    ) -> Result<Vec<AgentBoundaryDeclaration>, AgentStorageError>;
 
-	/// Return module-level dependency cycles that involve at least
-	/// one module under the given path prefix.
-	fn find_cycles_involving_path(
-		&self,
-		snapshot_uid: &str,
-		path_prefix: &str,
-	) -> Result<Vec<AgentCycle>, AgentStorageError>;
+    /// Return module-level dependency cycles that involve at least
+    /// one module under the given path prefix.
+    fn find_cycles_involving_path(
+        &self,
+        snapshot_uid: &str,
+        path_prefix: &str,
+    ) -> Result<Vec<AgentCycle>, AgentStorageError>;
 
-	// ── Symbol-focus methods (Rust-45) ──────────────────────────
+    // ── Symbol-focus methods (Rust-45) ──────────────────────────
 
-	/// Resolve a symbol name to candidate nodes. Returns up to 5
-	/// candidates matching `name` with `kind = 'SYMBOL'`, sorted
-	/// by `stable_key` ascending.
-	fn resolve_symbol_name(
-		&self,
-		snapshot_uid: &str,
-		name: &str,
-	) -> Result<Vec<AgentFocusCandidate>, AgentStorageError>;
+    /// Resolve a symbol name to candidate nodes. Returns up to 5
+    /// candidates matching `name` with `kind = 'SYMBOL'`, sorted
+    /// by `stable_key` ascending.
+    fn resolve_symbol_name(
+        &self,
+        snapshot_uid: &str,
+        name: &str,
+    ) -> Result<Vec<AgentFocusCandidate>, AgentStorageError>;
 
-	/// Get context for a resolved SYMBOL node: file, module
-	/// ownership (via OWNS edges), name, subtype, line_start.
-	fn get_symbol_context(
-		&self,
-		snapshot_uid: &str,
-		symbol_stable_key: &str,
-	) -> Result<Option<AgentSymbolContext>, AgentStorageError>;
+    /// Get context for a resolved SYMBOL node: file, module
+    /// ownership (via OWNS edges), name, subtype, line_start.
+    fn get_symbol_context(
+        &self,
+        snapshot_uid: &str,
+        symbol_stable_key: &str,
+    ) -> Result<Option<AgentSymbolContext>, AgentStorageError>;
 
-	/// Return direct callers of a symbol (CALLS edges only),
-	/// enriched with module ownership.
-	fn find_symbol_callers(
-		&self,
-		snapshot_uid: &str,
-		symbol_stable_key: &str,
-	) -> Result<Vec<AgentCallerRow>, AgentStorageError>;
+    /// Return direct callers of a symbol (CALLS edges only),
+    /// enriched with module ownership.
+    fn find_symbol_callers(
+        &self,
+        snapshot_uid: &str,
+        symbol_stable_key: &str,
+    ) -> Result<Vec<AgentCallerRow>, AgentStorageError>;
 
-	/// Return direct callees of a symbol (CALLS edges only),
-	/// enriched with module ownership.
-	fn find_symbol_callees(
-		&self,
-		snapshot_uid: &str,
-		symbol_stable_key: &str,
-	) -> Result<Vec<AgentCalleeRow>, AgentStorageError>;
+    /// Return direct callees of a symbol (CALLS edges only),
+    /// enriched with module ownership.
+    fn find_symbol_callees(
+        &self,
+        snapshot_uid: &str,
+        symbol_stable_key: &str,
+    ) -> Result<Vec<AgentCalleeRow>, AgentStorageError>;
 
-	/// Return module-level dependency cycles that involve the
-	/// given module (exact qualified_name match, NOT prefix).
-	fn find_cycles_involving_module(
-		&self,
-		snapshot_uid: &str,
-		module_qualified_name: &str,
-	) -> Result<Vec<AgentCycle>, AgentStorageError>;
+    /// Return module-level dependency cycles that involve the
+    /// given module (exact qualified_name match, NOT prefix).
+    fn find_cycles_involving_module(
+        &self,
+        snapshot_uid: &str,
+        module_qualified_name: &str,
+    ) -> Result<Vec<AgentCycle>, AgentStorageError>;
 
-	// ── Explain-focus methods ───────────────────────────────────
+    // ── Explain-focus methods ───────────────────────────────────
 
-	/// List SYMBOL nodes in a specific file, ordered by line_start
-	/// ascending then name ascending.
-	fn list_symbols_in_file(
-		&self,
-		snapshot_uid: &str,
-		file_path: &str,
-	) -> Result<Vec<AgentSymbolEntry>, AgentStorageError>;
+    /// List SYMBOL nodes in a specific file, ordered by line_start
+    /// ascending then name ascending.
+    fn list_symbols_in_file(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<AgentSymbolEntry>, AgentStorageError>;
 
-	/// List files under a path prefix (or at exact path), ordered
-	/// by path ascending. Each entry includes a symbol count and
-	/// is_test flag.
-	fn list_files_in_path(
-		&self,
-		snapshot_uid: &str,
-		path_prefix: &str,
-	) -> Result<Vec<AgentFileEntry>, AgentStorageError>;
+    /// List files under a path prefix (or at exact path), ordered
+    /// by path ascending. Each entry includes a symbol count and
+    /// is_test flag.
+    fn list_files_in_path(
+        &self,
+        snapshot_uid: &str,
+        path_prefix: &str,
+    ) -> Result<Vec<AgentFileEntry>, AgentStorageError>;
 
-	/// Return distinct target file paths imported by a source file
-	/// via IMPORTS edges.
-	fn find_file_imports(
-		&self,
-		snapshot_uid: &str,
-		file_path: &str,
-	) -> Result<Vec<AgentImportEntry>, AgentStorageError>;
+    /// Return distinct target file paths imported by a source file
+    /// via IMPORTS edges.
+    fn find_file_imports(
+        &self,
+        snapshot_uid: &str,
+        file_path: &str,
+    ) -> Result<Vec<AgentImportEntry>, AgentStorageError>;
 
-	// ── Documentation inventory (docs-primary pivot) ────────────────
+    // ── Documentation inventory (docs-primary pivot) ────────────────
 
-	/// Discover documentation files from the repo's filesystem.
-	///
-	/// Implementation: the storage adapter reads `repo_path` from
-	/// the repos table, then calls
-	/// `repo_graph_doc_facts::discover_doc_inventory(repo_path, false)`
-	/// and projects entries into `AgentDocEntry`.
-	///
-	/// Returns an empty vector when the repo path is inaccessible
-	/// or the repo has no documentation files. Does NOT return an
-	/// error for missing files — docs are optional and their absence
-	/// is valid (the orient contract says "works on repos with zero
-	/// semantic hints").
-	fn get_doc_inventory(
-		&self,
-		repo_uid: &str,
-	) -> Result<Vec<AgentDocEntry>, AgentStorageError>;
+    /// Discover documentation files from the repo's filesystem.
+    ///
+    /// Implementation: the storage adapter reads `repo_path` from
+    /// the repos table, then calls
+    /// `repo_graph_doc_facts::discover_doc_inventory(repo_path, false)`
+    /// and projects entries into `AgentDocEntry`.
+    ///
+    /// Returns an empty vector when the repo path is inaccessible
+    /// or the repo has no documentation files. Does NOT return an
+    /// error for missing files — docs are optional and their absence
+    /// is valid (the orient contract says "works on repos with zero
+    /// semantic hints").
+    fn get_doc_inventory(&self, repo_uid: &str) -> Result<Vec<AgentDocEntry>, AgentStorageError>;
 
-	// ── Complexity measurements ─────────────────────────────────────
+    // ── Complexity measurements ─────────────────────────────────────
 
-	/// Query symbols with cyclomatic complexity above a threshold.
-	///
-	/// Returns the top N symbols (by complexity descending) where
-	/// complexity exceeds `min_threshold`. Used by the HIGH_COMPLEXITY
-	/// signal to surface code that may need refactoring attention.
-	///
-	/// Returns an empty vector when no measurements exist or none
-	/// exceed the threshold — this is valid, not an error.
-	fn query_high_complexity_symbols(
-		&self,
-		snapshot_uid: &str,
-		min_threshold: u64,
-		limit: usize,
-	) -> Result<Vec<AgentComplexityMeasurement>, AgentStorageError>;
+    /// Query symbols with cyclomatic complexity above a threshold.
+    ///
+    /// Returns the top N symbols (by complexity descending) where
+    /// complexity exceeds `min_threshold`. Used by the HIGH_COMPLEXITY
+    /// signal to surface code that may need refactoring attention.
+    ///
+    /// Returns an empty vector when no measurements exist or none
+    /// exceed the threshold — this is valid, not an error.
+    fn query_high_complexity_symbols(
+        &self,
+        snapshot_uid: &str,
+        min_threshold: u64,
+        limit: usize,
+    ) -> Result<Vec<AgentComplexityMeasurement>, AgentStorageError>;
 
-	/// Check whether any complexity measurements exist for a snapshot.
-	///
-	/// Used to determine whether to emit COMPLEXITY_UNAVAILABLE limit.
-	/// Returns true if at least one cyclomatic_complexity measurement
-	/// exists, false otherwise.
-	fn has_complexity_measurements(
-		&self,
-		snapshot_uid: &str,
-	) -> Result<bool, AgentStorageError>;
+    /// Check whether any complexity measurements exist for a snapshot.
+    ///
+    /// Used to determine whether to emit COMPLEXITY_UNAVAILABLE limit.
+    /// Returns true if at least one cyclomatic_complexity measurement
+    /// exists, false otherwise.
+    fn has_complexity_measurements(&self, snapshot_uid: &str) -> Result<bool, AgentStorageError>;
 
-	/// Count symbols with complexity exceeding the threshold.
-	///
-	/// Used by HIGH_COMPLEXITY signal to report the true count of
-	/// violating symbols (separate from the top-N sample returned
-	/// by `query_high_complexity_symbols`).
-	fn count_high_complexity_symbols(
-		&self,
-		snapshot_uid: &str,
-		min_threshold: u64,
-	) -> Result<u64, AgentStorageError>;
+    /// Count symbols with complexity exceeding the threshold.
+    ///
+    /// Used by HIGH_COMPLEXITY signal to report the true count of
+    /// violating symbols (separate from the top-N sample returned
+    /// by `query_high_complexity_symbols`).
+    fn count_high_complexity_symbols(
+        &self,
+        snapshot_uid: &str,
+        min_threshold: u64,
+    ) -> Result<u64, AgentStorageError>;
 
-	// ── Module discovery ────────────────────────────────────────────
+    // ── Module discovery ────────────────────────────────────────────
 
-	/// Query module discovery summary for a snapshot.
-	///
-	/// Returns `Ok(Some(summary))` when the snapshot has discovered
-	/// module candidates (from the `module_candidates` table).
-	/// Returns `Ok(None)` when no module candidates exist — this is
-	/// the trigger for fallback behavior and `MODULE_DATA_UNAVAILABLE`.
-	///
-	/// The summary includes total count and breakdown by module kind
-	/// (declared/operational/inferred).
-	fn get_module_summary(
-		&self,
-		snapshot_uid: &str,
-	) -> Result<Option<AgentModuleSummary>, AgentStorageError>;
+    /// Query module discovery summary for a snapshot.
+    ///
+    /// Returns `Ok(Some(summary))` when the snapshot has discovered
+    /// module candidates (from the `module_candidates` table).
+    /// Returns `Ok(None)` when no module candidates exist — this is
+    /// the trigger for fallback behavior and `MODULE_DATA_UNAVAILABLE`.
+    ///
+    /// The summary includes total count and breakdown by module kind
+    /// (declared/operational/inferred).
+    fn get_module_summary(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Option<AgentModuleSummary>, AgentStorageError>;
 
-	// ── Boundary links freshness (ACR-6) ────────────────────────────
+    // ── Boundary links freshness (ACR-6) ────────────────────────────
 
-	/// Query freshness summary for boundary_interaction_links.
-	///
-	/// Returns counts by freshness state for the snapshot. Used by
-	/// `BOUNDARY_LINKS_SUMMARY` signal — the first signal backed by
-	/// a freshness-tracked L2 table.
-	///
-	/// Returns zero counts when the table has no rows for this
-	/// snapshot (which is a valid "no links discovered" state, not
-	/// an error).
-	fn get_boundary_links_freshness(
-		&self,
-		snapshot_uid: &str,
-	) -> Result<AgentBoundaryLinksFreshness, AgentStorageError>;
+    /// Query freshness summary for boundary_interaction_links.
+    ///
+    /// Returns counts by freshness state for the snapshot. Used by
+    /// `BOUNDARY_LINKS_SUMMARY` signal — the first signal backed by
+    /// a freshness-tracked L2 table.
+    ///
+    /// Returns zero counts when the table has no rows for this
+    /// snapshot (which is a valid "no links discovered" state, not
+    /// an error).
+    fn get_boundary_links_freshness(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<AgentBoundaryLinksFreshness, AgentStorageError>;
 }
 
 // ── Explain DTOs ────────────────────────────────────────────────
@@ -756,25 +742,25 @@ pub trait AgentStorageRead {
 /// One SYMBOL node entry in a file listing (explain surface).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentSymbolEntry {
-	pub stable_key: String,
-	pub name: String,
-	pub qualified_name: Option<String>,
-	pub subtype: Option<String>,
-	pub line_start: Option<u64>,
+    pub stable_key: String,
+    pub name: String,
+    pub qualified_name: Option<String>,
+    pub subtype: Option<String>,
+    pub line_start: Option<u64>,
 }
 
 /// One file entry under a path prefix (explain surface).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentFileEntry {
-	pub path: String,
-	pub symbol_count: u64,
-	pub is_test: bool,
+    pub path: String,
+    pub symbol_count: u64,
+    pub is_test: bool,
 }
 
 /// One import target file (explain surface).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentImportEntry {
-	pub target_file: String,
+    pub target_file: String,
 }
 
 // ── Documentation inventory ─────────────────────────────────────────
@@ -787,10 +773,10 @@ pub struct AgentImportEntry {
 /// the filesystem directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentDocEntry {
-	/// Path relative to repo root.
-	pub path: String,
-	/// Document kind: "readme", "architecture", "config", "map".
-	pub kind: String,
-	/// Whether this is a generated document (e.g., MAP.md from rgistr).
-	pub generated: bool,
+    /// Path relative to repo root.
+    pub path: String,
+    /// Document kind: "readme", "architecture", "config", "map".
+    pub kind: String,
+    /// Whether this is a generated document (e.g., MAP.md from rgistr).
+    pub generated: bool,
 }

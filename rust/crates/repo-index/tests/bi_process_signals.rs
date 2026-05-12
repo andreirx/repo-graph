@@ -79,10 +79,7 @@ fn index_signal_fixture_produces_signal_surfaces() {
         "expected 5 process_signal surfaces (2 provider, 3 consumer); got {:?}",
         surfaces
             .iter()
-            .map(|s| format!(
-                "{}:{} {:?}",
-                s.source_file, s.line_start, s.direction
-            ))
+            .map(|s| format!("{}:{} {:?}", s.source_file, s.line_start, s.direction))
             .collect::<Vec<_>>()
     );
 

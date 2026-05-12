@@ -17,7 +17,6 @@ pub enum ArtifactFamily {
     // Layer 0-1: Extracted Facts
     // Directly source-owned, deterministic, file/parse-unit anchored.
     // ═══════════════════════════════════════════════════════════════════
-
     /// File path + content hash tracking.
     /// Table: `file_versions`
     FileVersions,
@@ -58,7 +57,6 @@ pub enum ArtifactFamily {
     // Layer 2: Deterministic Relationships
     // Computed from current lower-layer facts. Not source-owned by one file.
     // ═══════════════════════════════════════════════════════════════════
-
     /// Surface-to-contract-element mapping.
     /// Table: `boundary_contracts`
     BoundaryContracts,
@@ -71,7 +69,6 @@ pub enum ArtifactFamily {
     // Layer 3: Hints / Inferences
     // Evidence-backed but partial, heuristic, degradable.
     // ═══════════════════════════════════════════════════════════════════
-
     /// Derived facts with confidence (dead-code candidates, trust signals).
     /// Table: `inferences`
     Inferences,
@@ -116,7 +113,6 @@ pub enum ArtifactFamily {
     // Layer 4: Governance Overlays
     // Human-authored policy and declarations.
     // ═══════════════════════════════════════════════════════════════════
-
     /// Quality gate rules and boundary declarations.
     /// Table: `requirement_declarations` (filtered by kind)
     RequirementDeclarations,

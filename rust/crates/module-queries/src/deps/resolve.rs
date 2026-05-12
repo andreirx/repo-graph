@@ -10,9 +10,9 @@ use repo_graph_storage::crud::module_edges_support::ImportBindingFact;
 /// Build an identifier→specifier resolution map from import bindings.
 ///
 /// Returns a map keyed by (file_uid, identifier) with the import specifier as value.
-pub fn build_identifier_resolution_map<'a>(
-    bindings: &'a [ImportBindingFact],
-) -> HashMap<(&'a str, &'a str), &'a str> {
+pub fn build_identifier_resolution_map(
+    bindings: &[ImportBindingFact],
+) -> HashMap<(&str, &str), &str> {
     let mut map = HashMap::new();
     for binding in bindings {
         map.insert(
@@ -107,7 +107,10 @@ mod tests {
         let map = build_identifier_resolution_map(&bindings);
 
         assert_eq!(resolve_import_specifier("useState", "file1", &map), "react");
-        assert_eq!(resolve_import_specifier("useState", "file2", &map), "preact");
+        assert_eq!(
+            resolve_import_specifier("useState", "file2", &map),
+            "preact"
+        );
     }
 
     #[test]

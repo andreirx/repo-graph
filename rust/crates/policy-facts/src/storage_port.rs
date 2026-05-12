@@ -135,10 +135,7 @@ pub trait PolicyFactsStorageRead {
     /// Count STATUS_MAPPING facts for a snapshot.
     ///
     /// More efficient than query + len when only count is needed.
-    fn count_status_mappings(
-        &self,
-        snapshot_uid: &str,
-    ) -> Result<usize, PolicyFactsStorageError>;
+    fn count_status_mappings(&self, snapshot_uid: &str) -> Result<usize, PolicyFactsStorageError>;
 
     /// Query BEHAVIORAL_MARKER facts for a snapshot.
     ///
@@ -191,10 +188,7 @@ pub trait PolicyFactsStorageRead {
     /// Count RETURN_FATE facts for a snapshot.
     ///
     /// More efficient than query + len when only count is needed.
-    fn count_return_fates(
-        &self,
-        snapshot_uid: &str,
-    ) -> Result<usize, PolicyFactsStorageError>;
+    fn count_return_fates(&self, snapshot_uid: &str) -> Result<usize, PolicyFactsStorageError>;
 }
 
 #[cfg(test)]

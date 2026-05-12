@@ -65,14 +65,19 @@ pub fn reconcile_module_dependencies(input: ReconcileInput) -> ModuleDependencyS
         };
 
         // Skip crate-relative paths for Rust.
-        if package.starts_with("crate::") || package.starts_with("self::") || package.starts_with("super::") {
+        if package.starts_with("crate::")
+            || package.starts_with("self::")
+            || package.starts_with("super::")
+        {
             continue;
         }
 
-        let entry = observed_packages.entry(package).or_insert_with(|| ObservedPackage {
-            import_count: 0,
-            raw_specifiers: Vec::new(),
-        });
+        let entry = observed_packages
+            .entry(package)
+            .or_insert_with(|| ObservedPackage {
+                import_count: 0,
+                raw_specifiers: Vec::new(),
+            });
         entry.import_count += 1;
         if !entry.raw_specifiers.contains(specifier) {
             entry.raw_specifiers.push(specifier.clone());
@@ -178,7 +183,9 @@ fn is_runtime_builtin(package: &str, builtins: &HashSet<String>, ecosystem: &str
     if ecosystem == "npm" {
         let with_prefix = format!("node:{}", package);
         let without_prefix = package.strip_prefix("node:").unwrap_or("");
-        if builtins.contains(&with_prefix) || (!without_prefix.is_empty() && builtins.contains(without_prefix)) {
+        if builtins.contains(&with_prefix)
+            || (!without_prefix.is_empty() && builtins.contains(without_prefix))
+        {
             return true;
         }
     }
@@ -207,10 +214,19 @@ mod tests {
     use super::*;
 
     fn npm_builtins() -> HashSet<String> {
-        ["fs", "path", "node:fs", "node:path", "http", "https", "url", "util"]
-            .into_iter()
-            .map(String::from)
-            .collect()
+        [
+            "fs",
+            "path",
+            "node:fs",
+            "node:path",
+            "http",
+            "https",
+            "url",
+            "util",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect()
     }
 
     #[test]
@@ -234,11 +250,19 @@ mod tests {
         assert!(summary.manifest_scope_available);
         assert_eq!(summary.declared_and_used_count(), 2);
 
-        let react = summary.entries.iter().find(|e| e.package == "react").unwrap();
+        let react = summary
+            .entries
+            .iter()
+            .find(|e| e.package == "react")
+            .unwrap();
         assert_eq!(react.category, DependencyCategory::DeclaredAndUsed);
         assert_eq!(react.import_count, 2); // react + react/jsx-runtime
 
-        let lodash = summary.entries.iter().find(|e| e.package == "lodash").unwrap();
+        let lodash = summary
+            .entries
+            .iter()
+            .find(|e| e.package == "lodash")
+            .unwrap();
         assert_eq!(lodash.category, DependencyCategory::DeclaredAndUsed);
         assert_eq!(lodash.import_count, 1);
     }
@@ -259,7 +283,11 @@ mod tests {
 
         assert_eq!(summary.declared_but_unobserved_count(), 1);
 
-        let moment = summary.entries.iter().find(|e| e.package == "moment").unwrap();
+        let moment = summary
+            .entries
+            .iter()
+            .find(|e| e.package == "moment")
+            .unwrap();
         assert_eq!(moment.category, DependencyCategory::DeclaredButUnobserved);
         assert_eq!(moment.import_count, 0);
     }
@@ -283,7 +311,11 @@ mod tests {
 
         assert_eq!(summary.observed_but_undeclared_count(), 1);
 
-        let debug = summary.entries.iter().find(|e| e.package == "debug").unwrap();
+        let debug = summary
+            .entries
+            .iter()
+            .find(|e| e.package == "debug")
+            .unwrap();
         assert_eq!(debug.category, DependencyCategory::ObservedButUndeclared);
         assert_eq!(debug.import_count, 1);
     }
@@ -295,10 +327,7 @@ mod tests {
             manifest_path: Some("package.json".to_string()),
             declared_dependencies: vec![],
             manifest_scope_available: true,
-            observed_external_imports: vec![
-                "fs".to_string(),
-                "node:path".to_string(),
-            ],
+            observed_external_imports: vec!["fs".to_string(), "node:path".to_string()],
             runtime_builtins: npm_builtins(),
             ecosystem: "npm".to_string(),
         };
@@ -310,7 +339,11 @@ mod tests {
         let fs = summary.entries.iter().find(|e| e.package == "fs").unwrap();
         assert_eq!(fs.category, DependencyCategory::RuntimeBuiltin);
 
-        let path = summary.entries.iter().find(|e| e.package == "node:path").unwrap();
+        let path = summary
+            .entries
+            .iter()
+            .find(|e| e.package == "node:path")
+            .unwrap();
         assert_eq!(path.category, DependencyCategory::RuntimeBuiltin);
     }
 
@@ -358,7 +391,11 @@ mod tests {
         // tokio and serde are declared and used
         assert_eq!(summary.declared_and_used_count(), 2);
 
-        let tokio = summary.entries.iter().find(|e| e.package == "tokio").unwrap();
+        let tokio = summary
+            .entries
+            .iter()
+            .find(|e| e.package == "tokio")
+            .unwrap();
         assert_eq!(tokio.category, DependencyCategory::DeclaredAndUsed);
         assert_eq!(tokio.import_count, 2); // spawn + sync::Mutex
 
@@ -376,8 +413,8 @@ mod tests {
             manifest_scope_available: true,
             observed_external_imports: vec![
                 "react".to_string(),
-                "./utils".to_string(),       // local
-                "../shared".to_string(),     // local
+                "./utils".to_string(),        // local
+                "../shared".to_string(),      // local
                 "/absolute/path".to_string(), // local
             ],
             runtime_builtins: npm_builtins(),

@@ -35,12 +35,12 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::time::Duration;
 
 use lsp_subprocess::{
-    IdGenerator, LspResponse, ReaderHandle, TransportError, write_notification, write_request,
+    write_notification, write_request, IdGenerator, LspResponse, ReaderHandle, TransportError,
 };
 use lsp_types::{
     ClientCapabilities, Hover, HoverContents, HoverParams, InitializeParams, InitializedParams,
-    MarkedString, MarkupContent, Position, TextDocumentIdentifier, TextDocumentPositionParams,
-    Url, WorkspaceFolder,
+    MarkedString, MarkupContent, Position, TextDocumentIdentifier, TextDocumentPositionParams, Url,
+    WorkspaceFolder,
 };
 use tracing::{debug, warn};
 
@@ -212,12 +212,8 @@ impl ReceiverTypeResolver for JdtlsResolver {
             }
 
             // Start jdtls session for this workspace context
-            let session_result = JdtlsSession::start(
-                &workspace_root,
-                &context,
-                &jdtls_path,
-                &self.config,
-            );
+            let session_result =
+                JdtlsSession::start(&workspace_root, &context, &jdtls_path, &self.config);
 
             let mut session = match session_result {
                 Ok(s) => s,
@@ -250,11 +246,8 @@ impl ReceiverTypeResolver for JdtlsResolver {
 
             let first_edge = &group_edges[0];
             let first_path = repo_root.join(&first_edge.source_file_path);
-            let warmed_up = session.warm_up(
-                &first_path,
-                first_edge.line_start,
-                first_edge.col_start,
-            );
+            let warmed_up =
+                session.warm_up(&first_path, first_edge.line_start, first_edge.col_start);
 
             if !warmed_up {
                 warn!(
@@ -294,7 +287,12 @@ impl ReceiverTypeResolver for JdtlsResolver {
                 }
 
                 let abs_path = repo_root.join(&edge.source_file_path);
-                let result = session.resolve_type(&abs_path, edge.line_start, edge.col_start, &edge.edge_uid);
+                let result = session.resolve_type(
+                    &abs_path,
+                    edge.line_start,
+                    edge.col_start,
+                    &edge.edge_uid,
+                );
                 all_results.push(result);
                 processed += 1;
             }
@@ -376,9 +374,11 @@ impl JdtlsSession {
             command.stderr(Stdio::null());
         }
 
-        let mut process = command.spawn().map_err(|e| ResolverError::ToolNotAvailable {
-            tool: format!("jdtls ({}): {}", jdtls_path, e),
-        })?;
+        let mut process = command
+            .spawn()
+            .map_err(|e| ResolverError::ToolNotAvailable {
+                tool: format!("jdtls ({}): {}", jdtls_path, e),
+            })?;
 
         let stdin = process
             .stdin
@@ -450,16 +450,19 @@ impl JdtlsSession {
             ..Default::default()
         };
 
-        let init_id = self.ids.next();
-        write_request(&mut self.stdin, init_id, "initialize", init_params)
-            .map_err(|e| ResolverError::StartupFailed {
+        let init_id = self.ids.next_id();
+        write_request(&mut self.stdin, init_id, "initialize", init_params).map_err(|e| {
+            ResolverError::StartupFailed {
                 reason: format!("failed to send initialize: {}", e),
-            })?;
+            }
+        })?;
 
         // Wait for initialize response with real timeout enforcement
         let timeout = Duration::from_secs(self.config.init_timeout_secs);
-        let response: LspResponse<serde_json::Value> =
-            self.reader.recv_response(init_id, timeout).map_err(|e| match e {
+        let response: LspResponse<serde_json::Value> = self
+            .reader
+            .recv_response(init_id, timeout)
+            .map_err(|e| match e {
                 TransportError::Timeout(d) => ResolverError::Timeout {
                     operation: format!("initialize ({}s)", d.as_secs()),
                 },
@@ -557,15 +560,21 @@ impl JdtlsSession {
             work_done_progress_params: Default::default(),
         };
 
-        let hover_id = self.ids.next();
-        if write_request(&mut self.stdin, hover_id, "textDocument/hover", hover_params).is_err() {
+        let hover_id = self.ids.next_id();
+        if write_request(
+            &mut self.stdin,
+            hover_id,
+            "textDocument/hover",
+            hover_params,
+        )
+        .is_err()
+        {
             return HoverOutcome::NoResponse;
         }
 
         // Read response with real timeout enforcement
         let timeout = Duration::from_secs(self.config.hover_timeout_secs);
-        let response: Result<LspResponse<Hover>, _> =
-            self.reader.recv_response(hover_id, timeout);
+        let response: Result<LspResponse<Hover>, _> = self.reader.recv_response(hover_id, timeout);
 
         match response {
             Ok(resp) => {
@@ -591,7 +600,9 @@ impl JdtlsSession {
         edge_uid: &str,
     ) -> ReceiverTypeResult {
         match self.hover_raw(file_path, line, col) {
-            HoverOutcome::ServerResponded { type_name: Some(name) } => {
+            HoverOutcome::ServerResponded {
+                type_name: Some(name),
+            } => {
                 if is_valid_java_type_name(&name) {
                     ReceiverTypeResult {
                         edge_uid: edge_uid.to_string(),
@@ -623,8 +634,13 @@ impl JdtlsSession {
     /// Stop the jdtls process gracefully.
     fn stop(&mut self) {
         // Send shutdown request
-        let shutdown_id = self.ids.next();
-        let _ = write_request(&mut self.stdin, shutdown_id, "shutdown", serde_json::Value::Null);
+        let shutdown_id = self.ids.next_id();
+        let _ = write_request(
+            &mut self.stdin,
+            shutdown_id,
+            "shutdown",
+            serde_json::Value::Null,
+        );
 
         // Wait briefly for shutdown response
         let _ = self
@@ -658,13 +674,17 @@ fn extract_hover_text(contents: &HoverContents) -> Option<String> {
         HoverContents::Array(arr) => {
             let text: String = arr
                 .iter()
-                .filter_map(|ms| match ms {
-                    MarkedString::String(s) => Some(s.as_str()),
-                    MarkedString::LanguageString(ls) => Some(ls.value.as_str()),
+                .map(|ms| match ms {
+                    MarkedString::String(s) => s.as_str(),
+                    MarkedString::LanguageString(ls) => ls.value.as_str(),
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            if text.is_empty() { None } else { Some(text) }
+            if text.is_empty() {
+                None
+            } else {
+                Some(text)
+            }
         }
     }
 }
@@ -694,9 +714,20 @@ fn extract_type_from_hover(text: &str) -> Option<String> {
 
     for (i, word) in words.iter().enumerate() {
         // Skip Java keywords/modifiers
-        if matches!(*word, "public" | "private" | "protected" | "static" |
-                         "final" | "abstract" | "synchronized" | "volatile" |
-                         "transient" | "native" | "strictfp") {
+        if matches!(
+            *word,
+            "public"
+                | "private"
+                | "protected"
+                | "static"
+                | "final"
+                | "abstract"
+                | "synchronized"
+                | "volatile"
+                | "transient"
+                | "native"
+                | "strictfp"
+        ) {
             continue;
         }
 
@@ -714,8 +745,10 @@ fn extract_type_from_hover(text: &str) -> Option<String> {
         let simple_name = type_name.rsplit('.').next().unwrap_or(type_name);
 
         // Skip primitives
-        if matches!(simple_name, "void" | "int" | "long" | "short" | "byte" |
-                                 "float" | "double" | "char" | "boolean") {
+        if matches!(
+            simple_name,
+            "void" | "int" | "long" | "short" | "byte" | "float" | "double" | "char" | "boolean"
+        ) {
             // If there's a next word, this might be return type, keep looking
             if i + 1 < words.len() {
                 continue;
@@ -724,7 +757,12 @@ fn extract_type_from_hover(text: &str) -> Option<String> {
         }
 
         // Check if it looks like a class name (starts with uppercase)
-        if simple_name.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false) {
+        if simple_name
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_uppercase())
+            .unwrap_or(false)
+        {
             return Some(simple_name.to_string());
         }
     }
@@ -741,9 +779,16 @@ fn is_valid_java_type_name(name: &str) -> bool {
     // Skip Java primitives and wrapper ambiguities
     if matches!(
         name,
-        "void" | "int" | "long" | "short" | "byte" |
-        "float" | "double" | "char" | "boolean" |
-        "Object" // Too generic
+        "void"
+            | "int"
+            | "long"
+            | "short"
+            | "byte"
+            | "float"
+            | "double"
+            | "char"
+            | "boolean"
+            | "Object" // Too generic
     ) {
         return false;
     }
@@ -762,27 +807,85 @@ fn is_valid_java_type_name(name: &str) -> bool {
 fn is_external_type(type_name: &str) -> bool {
     // Common Java standard library types
     const JAVA_STD_TYPES: &[&str] = &[
-        "String", "Integer", "Long", "Double", "Float", "Boolean", "Byte", "Short", "Character",
-        "List", "ArrayList", "LinkedList", "Set", "HashSet", "TreeSet", "Map", "HashMap", "TreeMap",
-        "Optional", "Stream", "Collector", "Predicate", "Function", "Consumer", "Supplier",
-        "Date", "Calendar", "LocalDate", "LocalTime", "LocalDateTime", "Instant", "Duration",
-        "File", "Path", "Files", "InputStream", "OutputStream", "Reader", "Writer",
-        "Thread", "Runnable", "Callable", "Future", "CompletableFuture", "Executor",
-        "Exception", "RuntimeException", "Error", "Throwable",
-        "Class", "Method", "Field", "Constructor", "Annotation",
+        "String",
+        "Integer",
+        "Long",
+        "Double",
+        "Float",
+        "Boolean",
+        "Byte",
+        "Short",
+        "Character",
+        "List",
+        "ArrayList",
+        "LinkedList",
+        "Set",
+        "HashSet",
+        "TreeSet",
+        "Map",
+        "HashMap",
+        "TreeMap",
+        "Optional",
+        "Stream",
+        "Collector",
+        "Predicate",
+        "Function",
+        "Consumer",
+        "Supplier",
+        "Date",
+        "Calendar",
+        "LocalDate",
+        "LocalTime",
+        "LocalDateTime",
+        "Instant",
+        "Duration",
+        "File",
+        "Path",
+        "Files",
+        "InputStream",
+        "OutputStream",
+        "Reader",
+        "Writer",
+        "Thread",
+        "Runnable",
+        "Callable",
+        "Future",
+        "CompletableFuture",
+        "Executor",
+        "Exception",
+        "RuntimeException",
+        "Error",
+        "Throwable",
+        "Class",
+        "Method",
+        "Field",
+        "Constructor",
+        "Annotation",
     ];
 
     // Common framework types
     const FRAMEWORK_TYPES: &[&str] = &[
         // Spring
-        "ApplicationContext", "BeanFactory", "RestTemplate", "WebClient",
-        "JdbcTemplate", "TransactionTemplate", "MockMvc",
+        "ApplicationContext",
+        "BeanFactory",
+        "RestTemplate",
+        "WebClient",
+        "JdbcTemplate",
+        "TransactionTemplate",
+        "MockMvc",
         // Servlet
-        "HttpServletRequest", "HttpServletResponse", "ServletContext",
+        "HttpServletRequest",
+        "HttpServletResponse",
+        "ServletContext",
         // JPA/Hibernate
-        "EntityManager", "Session", "SessionFactory", "Query", "Criteria",
+        "EntityManager",
+        "Session",
+        "SessionFactory",
+        "Query",
+        "Criteria",
         // Testing
-        "MockitoAnnotations", "ArgumentCaptor",
+        "MockitoAnnotations",
+        "ArgumentCaptor",
     ];
 
     JAVA_STD_TYPES.contains(&type_name) || FRAMEWORK_TYPES.contains(&type_name)

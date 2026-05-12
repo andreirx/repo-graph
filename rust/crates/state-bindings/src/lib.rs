@@ -59,8 +59,8 @@ pub mod table;
 pub use basis::Basis;
 pub use matcher::{match_form_a, CalleePath, ImportView, MatchResult};
 pub use stable_key::{
-	build_blob, build_cache_state, build_db_resource, build_fs_path, Driver,
-	FsPathOrLogical, LogicalName, Provider, RepoUid, StableKey, ValidationError,
-	NODE_KIND_BLOB, NODE_KIND_DB_RESOURCE, NODE_KIND_FS_PATH, NODE_KIND_STATE,
+    build_blob, build_cache_state, build_db_resource, build_fs_path, Driver, FsPathOrLogical,
+    LogicalName, Provider, RepoUid, StableKey, ValidationError, NODE_KIND_BLOB,
+    NODE_KIND_DB_RESOURCE, NODE_KIND_FS_PATH, NODE_KIND_STATE,
 };
 pub use table::{BindingEntry, BindingTable, Direction, Language, ResourceKind, TableError};

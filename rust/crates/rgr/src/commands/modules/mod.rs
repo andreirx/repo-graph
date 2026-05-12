@@ -49,37 +49,37 @@ pub use violations::run_violations;
 
 /// Dispatcher for `rmap modules <subcommand>`.
 pub fn run_modules(args: &[String]) -> ExitCode {
-	if args.is_empty() {
-		eprintln!("usage:");
-		eprintln!("  rmap modules list <db_path> <repo_uid>");
-		eprintln!("  rmap modules show <db_path> <repo_uid> <module>");
-		eprintln!("  rmap modules files <db_path> <repo_uid> <module>");
-		eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
-		eprintln!("  rmap modules violations <db_path> <repo_uid>");
-		eprintln!("  rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]");
-		eprintln!("  rmap modules unowned <db_path> <repo_uid>");
-		return ExitCode::from(1);
-	}
+    if args.is_empty() {
+        eprintln!("usage:");
+        eprintln!("  rmap modules list <db_path> <repo_uid>");
+        eprintln!("  rmap modules show <db_path> <repo_uid> <module>");
+        eprintln!("  rmap modules files <db_path> <repo_uid> <module>");
+        eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
+        eprintln!("  rmap modules violations <db_path> <repo_uid>");
+        eprintln!("  rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]");
+        eprintln!("  rmap modules unowned <db_path> <repo_uid>");
+        return ExitCode::from(1);
+    }
 
-	match args[0].as_str() {
-		"list" => run_modules_list(&args[1..]),
-		"show" => run_modules_show(&args[1..]),
-		"files" => run_modules_files(&args[1..]),
-		"deps" => run_modules_deps(&args[1..]),
-		"violations" => run_modules_violations(&args[1..]),
-		"boundary" => run_modules_boundary(&args[1..]),
-		"unowned" => run_modules_unowned(&args[1..]),
-		other => {
-			eprintln!("unknown modules subcommand: {}", other);
-			eprintln!("usage:");
-			eprintln!("  rmap modules list <db_path> <repo_uid>");
-			eprintln!("  rmap modules show <db_path> <repo_uid> <module>");
-			eprintln!("  rmap modules files <db_path> <repo_uid> <module>");
-			eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
-			eprintln!("  rmap modules violations <db_path> <repo_uid>");
-			eprintln!("  rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]");
-			eprintln!("  rmap modules unowned <db_path> <repo_uid>");
-			ExitCode::from(1)
-		}
-	}
+    match args[0].as_str() {
+        "list" => run_modules_list(&args[1..]),
+        "show" => run_modules_show(&args[1..]),
+        "files" => run_modules_files(&args[1..]),
+        "deps" => run_modules_deps(&args[1..]),
+        "violations" => run_modules_violations(&args[1..]),
+        "boundary" => run_modules_boundary(&args[1..]),
+        "unowned" => run_modules_unowned(&args[1..]),
+        other => {
+            eprintln!("unknown modules subcommand: {}", other);
+            eprintln!("usage:");
+            eprintln!("  rmap modules list <db_path> <repo_uid>");
+            eprintln!("  rmap modules show <db_path> <repo_uid> <module>");
+            eprintln!("  rmap modules files <db_path> <repo_uid> <module>");
+            eprintln!("  rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
+            eprintln!("  rmap modules violations <db_path> <repo_uid>");
+            eprintln!("  rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]");
+            eprintln!("  rmap modules unowned <db_path> <repo_uid>");
+            ExitCode::from(1)
+        }
+    }
 }

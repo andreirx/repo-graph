@@ -136,9 +136,7 @@ fn verify_git_repo(repo_path: &Path) -> Result<(), GitError> {
         .output()?;
 
     if !output.status.success() {
-        return Err(GitError::NotARepository(
-            repo_path.display().to_string(),
-        ));
+        return Err(GitError::NotARepository(repo_path.display().to_string()));
     }
 
     Ok(())
@@ -201,11 +199,13 @@ fn parse_churn_output(output: &str) -> Result<Vec<FileChurnEntry>, GitError> {
     // Convert to vec and sort
     let mut results: Vec<FileChurnEntry> = file_stats
         .into_iter()
-        .map(|(file_path, (commit_count, lines_changed))| FileChurnEntry {
-            file_path,
-            commit_count,
-            lines_changed,
-        })
+        .map(
+            |(file_path, (commit_count, lines_changed))| FileChurnEntry {
+                file_path,
+                commit_count,
+                lines_changed,
+            },
+        )
         .collect();
 
     // Deterministic total order:

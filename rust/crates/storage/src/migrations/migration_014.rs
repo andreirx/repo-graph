@@ -10,7 +10,7 @@ use crate::error::StorageError;
 use crate::migrations::record_migration;
 
 pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
-	conn.execute_batch(
+    conn.execute_batch(
 		r#"
 		CREATE TABLE IF NOT EXISTS surface_config_roots (
 			surface_config_root_uid  TEXT PRIMARY KEY,
@@ -43,6 +43,6 @@ pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
 		"#,
 	)?;
 
-	record_migration(conn, 14, "014-topology-links")?;
-	Ok(())
+    record_migration(conn, 14, "014-topology-links")?;
+    Ok(())
 }

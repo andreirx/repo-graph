@@ -363,10 +363,7 @@ mod tests {
             target_type: "server_op_res_t".to_string(),
             mappings: vec![
                 CaseMapping {
-                    inputs: vec![
-                        "CHANNEL_ENONET".to_string(),
-                        "CHANNEL_EAGAIN".to_string(),
-                    ],
+                    inputs: vec!["CHANNEL_ENONET".to_string(), "CHANNEL_EAGAIN".to_string()],
                     output: "SERVER_EAGAIN".to_string(),
                 },
                 CaseMapping {
@@ -497,7 +494,7 @@ mod tests {
             evidence: MarkerEvidence::RetryLoop {
                 loop_kind: "do_while".to_string(),
                 sleep_call: Some("sleep".to_string()),
-                delay_ms: None, // dynamic
+                delay_ms: None,     // dynamic
                 max_attempts: None, // unbounded
                 break_condition: None,
             },
@@ -545,7 +542,8 @@ mod tests {
         let fate = ReturnFate {
             callee_key: None, // unresolved
             callee_name: "install_update".to_string(),
-            caller_key: "swupdate:suricatta/suricatta.c#start_suricatta:SYMBOL:FUNCTION".to_string(),
+            caller_key: "swupdate:suricatta/suricatta.c#start_suricatta:SYMBOL:FUNCTION"
+                .to_string(),
             caller_name: "start_suricatta".to_string(),
             file_path: "suricatta/suricatta.c".to_string(),
             line: 351,

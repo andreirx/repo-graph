@@ -370,8 +370,7 @@ impl PolicyFactsStorageRead for StorageConnection {
              FROM behavioral_markers
              WHERE snapshot_uid = ?",
         );
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> =
-            vec![Box::new(snapshot_uid.to_string())];
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(snapshot_uid.to_string())];
 
         if let Some(prefix) = file_filter {
             sql.push_str(" AND file_path LIKE ?");
@@ -415,8 +414,15 @@ impl PolicyFactsStorageRead for StorageConnection {
 
         let mut results = Vec::new();
         for row_result in rows {
-            let (symbol_key, function_name, file_path, line_start, line_end, kind_str, evidence_json) =
-                row_result.map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
+            let (
+                symbol_key,
+                function_name,
+                file_path,
+                line_start,
+                line_end,
+                kind_str,
+                evidence_json,
+            ) = row_result.map_err(|e| PolicyFactsStorageError::DatabaseError(e.to_string()))?;
 
             let kind: MarkerKind = kind_str
                 .parse()
@@ -439,7 +445,10 @@ impl PolicyFactsStorageRead for StorageConnection {
         Ok(results)
     }
 
-    fn count_behavioral_markers(&self, snapshot_uid: &str) -> Result<usize, PolicyFactsStorageError> {
+    fn count_behavioral_markers(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<usize, PolicyFactsStorageError> {
         let conn = self.connection();
 
         let count: i64 = conn
@@ -469,8 +478,7 @@ impl PolicyFactsStorageRead for StorageConnection {
              FROM return_fates
              WHERE snapshot_uid = ?",
         );
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> =
-            vec![Box::new(snapshot_uid.to_string())];
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(snapshot_uid.to_string())];
 
         if let Some(prefix) = file_filter {
             sql.push_str(" AND file_path LIKE ?");
@@ -623,7 +631,10 @@ mod tests {
         assert_eq!(results[0].source_type, "input_code_t");
         assert_eq!(results[0].mappings.len(), 1);
         assert_eq!(results[0].mappings[0].inputs.len(), 2);
-        assert_eq!(results[0].default_output, Some("OUTPUT_DEFAULT".to_string()));
+        assert_eq!(
+            results[0].default_output,
+            Some("OUTPUT_DEFAULT".to_string())
+        );
     }
 
     #[test]
@@ -792,9 +803,7 @@ mod tests {
         let count = conn.insert_behavioral_markers("snap-1", &markers).unwrap();
         assert_eq!(count, 2);
 
-        let results = conn
-            .query_behavioral_markers("snap-1", None, None)
-            .unwrap();
+        let results = conn.query_behavioral_markers("snap-1", None, None).unwrap();
         assert_eq!(results.len(), 2);
 
         // Results should be sorted by file_path, line_start
@@ -967,9 +976,7 @@ mod tests {
         conn.insert_behavioral_markers("snap-1", &markers2).unwrap();
         assert_eq!(conn.count_behavioral_markers("snap-1").unwrap(), 2);
 
-        let results = conn
-            .query_behavioral_markers("snap-1", None, None)
-            .unwrap();
+        let results = conn.query_behavioral_markers("snap-1", None, None).unwrap();
         assert!(results.iter().all(|m| m.function_name != "old"));
     }
 
@@ -1053,9 +1060,7 @@ mod tests {
         let count = conn.insert_return_fates("snap-1", &fates).unwrap();
         assert_eq!(count, 2);
 
-        let results = conn
-            .query_return_fates("snap-1", None, None, None)
-            .unwrap();
+        let results = conn.query_return_fates("snap-1", None, None, None).unwrap();
         assert_eq!(results.len(), 2);
 
         // Results should be sorted by file_path, line, col
@@ -1221,9 +1226,7 @@ mod tests {
         conn.insert_return_fates("snap-1", &fates2).unwrap();
         assert_eq!(conn.count_return_fates("snap-1").unwrap(), 2);
 
-        let results = conn
-            .query_return_fates("snap-1", None, None, None)
-            .unwrap();
+        let results = conn.query_return_fates("snap-1", None, None, None).unwrap();
         assert!(results.iter().all(|f| f.callee_name != "old_func"));
     }
 

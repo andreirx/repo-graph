@@ -3,9 +3,7 @@
 //! These tests ensure that every artifact family has a contract
 //! and that all required fields are populated.
 
-use artifact_contracts::{
-    all_families, get_contract, ArtifactFamily, ClassificationMaturity,
-};
+use artifact_contracts::{all_families, get_contract, ArtifactFamily, ClassificationMaturity};
 
 #[test]
 fn every_family_has_a_contract() {
@@ -96,7 +94,9 @@ fn provisional_families_documented() {
     // Provisional families should be documented as such
     let provisional: Vec<_> = all_families()
         .iter()
-        .filter(|f| get_contract(**f).classification_maturity == ClassificationMaturity::Provisional)
+        .filter(|f| {
+            get_contract(**f).classification_maturity == ClassificationMaturity::Provisional
+        })
         .collect();
 
     // These are known provisional families (update as classifications stabilize)

@@ -131,10 +131,7 @@ fn add_freshness_columns(conn: &Connection, table: &str) -> Result<(), StorageEr
     // freshness_updated_at: NULL for existing rows
     if !cols.contains(&"freshness_updated_at".to_string()) {
         conn.execute(
-            &format!(
-                "ALTER TABLE {} ADD COLUMN freshness_updated_at TEXT",
-                table
-            ),
+            &format!("ALTER TABLE {} ADD COLUMN freshness_updated_at TEXT", table),
             [],
         )?;
     }
@@ -142,10 +139,7 @@ fn add_freshness_columns(conn: &Connection, table: &str) -> Result<(), StorageEr
     // provenance_json: NULL for existing rows (we don't know their provenance)
     if !cols.contains(&"provenance_json".to_string()) {
         conn.execute(
-            &format!(
-                "ALTER TABLE {} ADD COLUMN provenance_json TEXT",
-                table
-            ),
+            &format!("ALTER TABLE {} ADD COLUMN provenance_json TEXT", table),
             [],
         )?;
     }
@@ -319,7 +313,10 @@ mod tests {
         // Columns should still exist exactly once
         let cols = pragma_table_columns(&conn, "inferences").unwrap();
         let freshness_count = cols.iter().filter(|c| *c == "freshness_state").count();
-        assert_eq!(freshness_count, 1, "freshness_state should appear exactly once");
+        assert_eq!(
+            freshness_count, 1,
+            "freshness_state should appear exactly once"
+        );
     }
 
     #[test]
@@ -358,7 +355,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(freshness, "unknown", "existing rows should have freshness_state = 'unknown'");
+        assert_eq!(
+            freshness, "unknown",
+            "existing rows should have freshness_state = 'unknown'"
+        );
 
         // Verify freshness_updated_at is NULL
         let updated_at: Option<String> = conn
@@ -368,7 +368,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(updated_at.is_none(), "existing rows should have freshness_updated_at = NULL");
+        assert!(
+            updated_at.is_none(),
+            "existing rows should have freshness_updated_at = NULL"
+        );
 
         // Verify provenance_json is NULL
         let provenance: Option<String> = conn
@@ -378,7 +381,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(provenance.is_none(), "existing rows should have provenance_json = NULL");
+        assert!(
+            provenance.is_none(),
+            "existing rows should have provenance_json = NULL"
+        );
     }
 
     #[test]

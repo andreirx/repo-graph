@@ -40,10 +40,7 @@ pub fn group_by_project_root(
         let file_path = Path::new(&edge.source_file_path);
         let project_root = find_project_root(repo_root, file_path, &mut cache);
 
-        groups
-            .entry(project_root)
-            .or_default()
-            .push(edge.clone());
+        groups.entry(project_root).or_default().push(edge.clone());
     }
 
     groups
@@ -112,12 +109,10 @@ fn find_project_root(
 /// Returns the config file name if found, None otherwise.
 #[allow(dead_code)] // Kept for API completeness and future use
 pub fn detect_config_type(project_root: &Path) -> Option<&'static str> {
-    for config_file in CONFIG_FILES {
-        if project_root.join(config_file).exists() {
-            return Some(config_file);
-        }
-    }
-    None
+    CONFIG_FILES
+        .iter()
+        .find(|&config_file| project_root.join(config_file).exists())
+        .copied()
 }
 
 #[cfg(test)]

@@ -12,16 +12,25 @@ pub mod source;
 
 pub use budget::Budget;
 pub use envelope::{
-	Confidence, Focus, FocusCandidate, FocusFailureReason, NextAction, NextKind,
-	OrientResult, ResolvedKind, ORIENT_COMMAND, ORIENT_SCHEMA,
+    Confidence, Focus, FocusCandidate, FocusFailureReason, NextAction, NextKind, OrientResult,
+    ResolvedKind, ORIENT_COMMAND, ORIENT_SCHEMA,
 };
 pub use limit::{Limit, LimitCode};
 pub use signal::{
-	BoundaryViolationEvidence, BoundaryViolationsEvidence, CycleEvidence,
-	// DeadCodeEvidence, DeadSymbolEvidence — removed. Surface withdrawn.
-	ImportCyclesEvidence, ModuleSummaryEvidence, Severity, Signal,
-	SignalCategory, SignalCode, SignalEvidence, SnapshotInfoEvidence,
-	TrustLowResolutionEvidence, TrustNoEnrichmentEvidence,
-	TrustStaleSnapshotEvidence,
+    BoundaryViolationEvidence,
+    BoundaryViolationsEvidence,
+    CycleEvidence,
+    // DeadCodeEvidence, DeadSymbolEvidence — removed. Surface withdrawn.
+    ImportCyclesEvidence,
+    ModuleSummaryEvidence,
+    Severity,
+    Signal,
+    SignalCategory,
+    SignalCode,
+    SignalEvidence,
+    SnapshotInfoEvidence,
+    TrustLowResolutionEvidence,
+    TrustNoEnrichmentEvidence,
+    TrustStaleSnapshotEvidence,
 };
 pub use source::SourceRef;

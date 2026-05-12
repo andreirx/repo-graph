@@ -131,7 +131,10 @@ fn format_contract_summary(
     // Show parse failure details (first 5)
     if fail_count > 0 {
         for failure in c.parse_failures.iter().take(5) {
-            lines.push(format!("    FAILED: {}: {}", failure.file_path, failure.error));
+            lines.push(format!(
+                "    FAILED: {}: {}",
+                failure.file_path, failure.error
+            ));
         }
         if fail_count > 5 {
             lines.push(format!("    ... and {} more failures", fail_count - 5));
@@ -165,7 +168,9 @@ fn format_mapping_summary(
 
     // Build error suffix
     let errors: Vec<&str> = [
-        m.element_query_error.as_ref().map(|_| "element query failed"),
+        m.element_query_error
+            .as_ref()
+            .map(|_| "element query failed"),
         m.symbol_query_error.as_ref().map(|_| "symbol query failed"),
         m.storage_error.as_ref().map(|_| "storage failed"),
     ]
@@ -251,9 +256,12 @@ fn format_copy_forward_summary(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
-    use repo_graph_indexer::types::{ArtifactCopyForward, ContractIndexResult, ContractParseFailure, GeneratedCodeMappingResult};
+    use repo_graph_indexer::types::{
+        ArtifactCopyForward, ContractIndexResult, ContractParseFailure, GeneratedCodeMappingResult,
+    };
 
     #[test]
     fn format_none_returns_empty() {

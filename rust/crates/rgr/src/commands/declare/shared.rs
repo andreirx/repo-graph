@@ -21,10 +21,10 @@ pub const VALID_OPERATORS: &[&str] = &[">=", ">", "<=", "<", "=="];
 /// - the value is missing
 /// - the value looks like another flag (starts with `-`)
 /// - the value is empty after trimming
-pub fn parse_flag_value<'a>(
+pub fn parse_flag_value(
     flag_name: &str,
     current: &Option<String>,
-    args: &'a [String],
+    args: &[String],
     i: &mut usize,
 ) -> Option<String> {
     if current.is_some() {
@@ -48,9 +48,9 @@ pub fn parse_flag_value<'a>(
 ///
 /// Unlike `parse_flag_value`, this does not check for repetition.
 /// Returns `None` if the value is missing, looks like a flag, or is empty.
-pub fn parse_repeatable_flag_value<'a>(
+pub fn parse_repeatable_flag_value(
     flag_name: &str,
-    args: &'a [String],
+    args: &[String],
     i: &mut usize,
 ) -> Option<String> {
     *i += 1;

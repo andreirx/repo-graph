@@ -95,7 +95,13 @@ impl QualityPolicyStoragePort for StorageConnection {
             let file_path: Option<String> = row.get(3)?;
             let symbol_kind: Option<String> = row.get(4)?;
 
-            Ok((target_stable_key, measurement_kind, value_json, file_path, symbol_kind))
+            Ok((
+                target_stable_key,
+                measurement_kind,
+                value_json,
+                file_path,
+                symbol_kind,
+            ))
         })?;
 
         let mut results = Vec::new();

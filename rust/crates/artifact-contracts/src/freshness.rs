@@ -103,7 +103,7 @@ impl FreshnessState {
     }
 
     /// Parse from database string value.
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "current" => Some(Self::Current),
             "impacted" => Some(Self::Impacted),
@@ -135,7 +135,7 @@ impl std::fmt::Display for FreshnessState {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Filter for freshness-aware queries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FreshnessFilter {
     /// Only rows with `freshness_state = 'current'`.
@@ -145,6 +145,7 @@ pub enum FreshnessFilter {
     ///
     /// This is the default for agent surfaces: impacted data
     /// is still useful for orientation.
+    #[default]
     CurrentAndImpacted,
 
     /// All rows regardless of freshness.
@@ -173,13 +174,6 @@ impl FreshnessFilter {
                 FreshnessState::Unknown,
             ],
         }
-    }
-}
-
-impl Default for FreshnessFilter {
-    fn default() -> Self {
-        // Agent surfaces default to including impacted data
-        Self::CurrentAndImpacted
     }
 }
 

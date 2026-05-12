@@ -369,7 +369,10 @@ const PYTHON_STDLIB_MODULES: &[&str] = &[
 pub fn python_runtime_builtins() -> RuntimeBuiltinsSet {
     RuntimeBuiltinsSet {
         identifiers: PYTHON_BUILTINS.iter().map(|s| s.to_string()).collect(),
-        module_specifiers: PYTHON_STDLIB_MODULES.iter().map(|s| s.to_string()).collect(),
+        module_specifiers: PYTHON_STDLIB_MODULES
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
     }
 }
 

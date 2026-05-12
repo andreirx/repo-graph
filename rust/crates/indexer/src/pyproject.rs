@@ -121,7 +121,13 @@ pub fn parse_pyproject_toml(
     let package_root = manifest_path
         .strip_suffix("/pyproject.toml")
         .or_else(|| manifest_path.strip_suffix("pyproject.toml"))
-        .map(|s| if s.is_empty() { "." } else { s.trim_end_matches('/') })
+        .map(|s| {
+            if s.is_empty() {
+                "."
+            } else {
+                s.trim_end_matches('/')
+            }
+        })
         .unwrap_or(".");
 
     // Extract module if [project].name exists.

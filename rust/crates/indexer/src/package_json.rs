@@ -165,7 +165,13 @@ pub fn parse_package_json(
     let package_root = manifest_path
         .strip_suffix("/package.json")
         .or_else(|| manifest_path.strip_suffix("package.json"))
-        .map(|s| if s.is_empty() { "." } else { s.trim_end_matches('/') })
+        .map(|s| {
+            if s.is_empty() {
+                "."
+            } else {
+                s.trim_end_matches('/')
+            }
+        })
         .unwrap_or(".");
 
     let workspace_patterns = parsed
@@ -199,9 +205,7 @@ pub fn parse_package_json(
 /// # Returns
 /// - `Ok(PnpmWorkspaceParseResult)` with workspace patterns
 /// - `Err` if YAML parsing fails
-pub fn parse_pnpm_workspace(
-    content: &str,
-) -> Result<PnpmWorkspaceParseResult, serde_yaml::Error> {
+pub fn parse_pnpm_workspace(content: &str) -> Result<PnpmWorkspaceParseResult, serde_yaml::Error> {
     let parsed: PnpmWorkspace = serde_yaml::from_str(content)?;
 
     Ok(PnpmWorkspaceParseResult {

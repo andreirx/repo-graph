@@ -79,7 +79,10 @@ impl RefreshPolicy {
 
     /// Returns true if this policy requires recomputation after Layer 0-1.
     pub fn requires_recomputation(&self) -> bool {
-        matches!(self, Self::RecomputeFromCurrentSnapshot | Self::NeverCopyForward)
+        matches!(
+            self,
+            Self::RecomputeFromCurrentSnapshot | Self::NeverCopyForward
+        )
     }
 
     /// Returns true if this policy may mark rows as impacted.

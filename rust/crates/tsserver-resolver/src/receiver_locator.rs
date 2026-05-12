@@ -67,9 +67,7 @@ pub enum ReceiverLocation {
         reason: String,
     },
     /// Parse error or position not found.
-    ParseError {
-        reason: String,
-    },
+    ParseError { reason: String },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,12 +106,7 @@ impl ReceiverLocator {
     /// The position should be at or near the method name in a call expression.
     ///
     /// Returns receiver location with **0-based** coordinates.
-    pub fn locate_receiver(
-        &mut self,
-        source: &str,
-        line: u32,
-        column: u32,
-    ) -> ReceiverLocation {
+    pub fn locate_receiver(&mut self, source: &str, line: u32, column: u32) -> ReceiverLocation {
         // Parse the source
         let tree = match self.parser.parse(source, None) {
             Some(t) => t,
@@ -184,10 +177,7 @@ fn locate_receiver_at_point(tree: &Tree, source: &str, point: Point) -> Receiver
     extract_receiver_from_callee(callee, source)
 }
 
-fn extract_receiver_from_callee(
-    callee: tree_sitter::Node,
-    source: &str,
-) -> ReceiverLocation {
+fn extract_receiver_from_callee(callee: tree_sitter::Node, source: &str) -> ReceiverLocation {
     match callee.kind() {
         // `obj.method` or `this.field.method`
         "member_expression" => extract_receiver_from_member_expression(callee, source),

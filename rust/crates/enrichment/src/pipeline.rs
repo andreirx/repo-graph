@@ -201,11 +201,7 @@ impl<S: EnrichmentStoragePort> EnrichmentPipeline<S> {
                             .unwrap_or("unknown");
                         builder.record_success(*lang, type_name, result.is_external_type);
                     } else {
-                        let reason = result
-                            .failure_reason
-                            .as_ref()
-                            .map(|s| s.as_str())
-                            .unwrap_or("unknown");
+                        let reason = result.failure_reason.as_deref().unwrap_or("unknown");
                         builder.record_failure(*lang, reason);
                     }
                 }
@@ -275,13 +271,17 @@ impl<S: EnrichmentStoragePort> EnrichmentPipeline<S> {
         let mut ctx = PromotionContext::new();
 
         // Load symbols
-        let symbols = self.storage.load_symbols_by_names(snapshot_uid, &type_names)?;
+        let symbols = self
+            .storage
+            .load_symbols_by_names(snapshot_uid, &type_names)?;
         for symbol in symbols {
             ctx.add_symbol(symbol.clone());
 
             // If it's a class, load its methods
             if symbol.subtype == crate::contracts::SymbolSubtype::Class {
-                let methods = self.storage.load_class_methods(snapshot_uid, &symbol.stable_key)?;
+                let methods = self
+                    .storage
+                    .load_class_methods(snapshot_uid, &symbol.stable_key)?;
                 for (method_name, method_info) in methods {
                     ctx.add_class_method(&symbol.stable_key, &method_name, method_info);
                 }
@@ -314,8 +314,8 @@ fn group_by_language(edges: &[EligibleEdge]) -> HashMap<EnrichmentLanguage, Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eligibility::InMemoryEnrichmentStorage;
     use crate::contracts::UnresolvedCategory;
+    use crate::eligibility::InMemoryEnrichmentStorage;
     use crate::resolver::NullResolver;
 
     #[test]
@@ -328,7 +328,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(report.eligible_count, 0);
-        assert_eq!(report.state(), crate::status::EnrichmentState::NotApplicable);
+        assert_eq!(
+            report.state(),
+            crate::status::EnrichmentState::NotApplicable
+        );
     }
 
     #[test]

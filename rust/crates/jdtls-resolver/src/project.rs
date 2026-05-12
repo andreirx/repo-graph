@@ -36,18 +36,10 @@ use std::path::{Path, PathBuf};
 use enrichment::EligibleEdge;
 
 /// Build file types in priority order for module grouping.
-const MODULE_BUILD_FILES: &[&str] = &[
-    "pom.xml",
-    "build.gradle.kts",
-    "build.gradle",
-    ".project",
-];
+const MODULE_BUILD_FILES: &[&str] = &["pom.xml", "build.gradle.kts", "build.gradle", ".project"];
 
 /// Gradle settings files (for workspace promotion).
-const GRADLE_SETTINGS_FILES: &[&str] = &[
-    "settings.gradle.kts",
-    "settings.gradle",
-];
+const GRADLE_SETTINGS_FILES: &[&str] = &["settings.gradle.kts", "settings.gradle"];
 
 /// Detected build system type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,8 +55,9 @@ impl BuildSystem {
     pub fn from_file(filename: &str) -> Self {
         match filename {
             "pom.xml" => Self::Maven,
-            "build.gradle.kts" | "build.gradle" |
-            "settings.gradle.kts" | "settings.gradle" => Self::Gradle,
+            "build.gradle.kts" | "build.gradle" | "settings.gradle.kts" | "settings.gradle" => {
+                Self::Gradle
+            }
             ".project" => Self::Eclipse,
             _ => Self::None,
         }
@@ -132,13 +125,11 @@ fn detect_project_context(
     }
 
     // Find nearest module root (build file)
-    let (module_root, build_file, build_system) =
-        find_module_root(repo_root, file_dir);
+    let (module_root, build_file, build_system) = find_module_root(repo_root, file_dir);
 
     // For Gradle, check for workspace promotion
     let workspace_root = if build_system == BuildSystem::Gradle {
-        find_gradle_workspace_root(repo_root, &module_root)
-            .unwrap_or_else(|| module_root.clone())
+        find_gradle_workspace_root(repo_root, &module_root).unwrap_or_else(|| module_root.clone())
     } else {
         module_root.clone()
     };
@@ -159,10 +150,7 @@ fn detect_project_context(
 /// Find the nearest module root (build file) for a file directory.
 ///
 /// Returns (absolute module root path, build file name, build system).
-fn find_module_root(
-    repo_root: &Path,
-    file_dir: &Path,
-) -> (PathBuf, Option<String>, BuildSystem) {
+fn find_module_root(repo_root: &Path, file_dir: &Path) -> (PathBuf, Option<String>, BuildSystem) {
     let mut current = file_dir.to_path_buf();
 
     loop {
@@ -184,7 +172,11 @@ fn find_module_root(
         // Also check for settings files (they indicate a Gradle workspace)
         for settings_file in GRADLE_SETTINGS_FILES {
             if abs_dir.join(settings_file).exists() {
-                return (abs_dir, Some(settings_file.to_string()), BuildSystem::Gradle);
+                return (
+                    abs_dir,
+                    Some(settings_file.to_string()),
+                    BuildSystem::Gradle,
+                );
             }
         }
 
@@ -204,10 +196,7 @@ fn find_module_root(
 ///
 /// If the module root has a build.gradle* but there's a settings.gradle* higher up,
 /// promote to the settings file location as the workspace root.
-fn find_gradle_workspace_root(
-    repo_root: &Path,
-    module_root: &Path,
-) -> Option<PathBuf> {
+fn find_gradle_workspace_root(repo_root: &Path, module_root: &Path) -> Option<PathBuf> {
     // Only promote if module_root is below repo_root
     let rel_path = module_root.strip_prefix(repo_root).ok()?;
     if rel_path.as_os_str().is_empty() {

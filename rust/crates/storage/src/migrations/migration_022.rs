@@ -141,7 +141,9 @@ mod tests {
 
         // Both should exist
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM behavioral_markers", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM behavioral_markers", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(count, 2);
     }

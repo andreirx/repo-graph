@@ -71,7 +71,10 @@ pub struct ModuleDependencySummary {
 impl ModuleDependencySummary {
     /// Get entries by category.
     pub fn by_category(&self, category: DependencyCategory) -> Vec<&DependencyEntry> {
-        self.entries.iter().filter(|e| e.category == category).collect()
+        self.entries
+            .iter()
+            .filter(|e| e.category == category)
+            .collect()
     }
 
     /// Count of declared and used dependencies.
@@ -81,12 +84,14 @@ impl ModuleDependencySummary {
 
     /// Count of declared but unobserved dependencies.
     pub fn declared_but_unobserved_count(&self) -> usize {
-        self.by_category(DependencyCategory::DeclaredButUnobserved).len()
+        self.by_category(DependencyCategory::DeclaredButUnobserved)
+            .len()
     }
 
     /// Count of observed but undeclared dependencies.
     pub fn observed_but_undeclared_count(&self) -> usize {
-        self.by_category(DependencyCategory::ObservedButUndeclared).len()
+        self.by_category(DependencyCategory::ObservedButUndeclared)
+            .len()
     }
 
     /// Count of runtime builtin usages.

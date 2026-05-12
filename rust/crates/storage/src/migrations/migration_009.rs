@@ -9,8 +9,8 @@ use crate::error::StorageError;
 use crate::migrations::record_migration;
 
 pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
-	conn.execute_batch(
-		r#"
+    conn.execute_batch(
+        r#"
 		CREATE TABLE IF NOT EXISTS staged_edges (
 			edge_uid        TEXT PRIMARY KEY,
 			snapshot_uid    TEXT NOT NULL REFERENCES snapshots(snapshot_uid) ON DELETE CASCADE,
@@ -38,8 +38,8 @@ pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
 		);
 		CREATE INDEX IF NOT EXISTS idx_file_signals_snapshot ON file_signals(snapshot_uid);
 		"#,
-	)?;
+    )?;
 
-	record_migration(conn, 9, "009-staging-tables")?;
-	Ok(())
+    record_migration(conn, 9, "009-staging-tables")?;
+    Ok(())
 }

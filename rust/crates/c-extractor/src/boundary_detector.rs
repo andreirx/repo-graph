@@ -87,7 +87,6 @@ pub struct RawBoundaryCall {
     pub argument_index: Option<usize>,
 
     // ── BI-1B Phase 2: FD role tracking substrate ──────────────────────
-
     /// For socket(): the LHS identifier if assigned directly.
     /// Pattern: `int fd = socket(...)` → Some("fd")
     /// Pattern: `fd = socket(...)` → Some("fd")
@@ -102,14 +101,25 @@ pub struct RawBoundaryCall {
 
 /// Set of known boundary interaction functions for Slice 1A.
 const SOCKET_FUNCTIONS: &[&str] = &["socket"];
-const SOCKET_OP_FUNCTIONS: &[&str] = &["bind", "connect", "listen", "accept", "send", "recv", "sendto", "recvfrom"];
+const SOCKET_OP_FUNCTIONS: &[&str] = &[
+    "bind", "connect", "listen", "accept", "send", "recv", "sendto", "recvfrom",
+];
 const PIPE_FUNCTIONS: &[&str] = &["pipe", "pipe2", "mkfifo", "mknod"];
 const SHM_FUNCTIONS: &[&str] = &["shm_open", "shm_unlink", "mmap", "munmap"];
 const MQUEUE_FUNCTIONS: &[&str] = &["mq_open", "mq_close", "mq_unlink", "mq_send", "mq_receive"];
 /// Signal-related functions for BI-1D.
 const SIGNAL_FUNCTIONS: &[&str] = &[
-    "kill", "killpg", "raise", "sigqueue", "pthread_kill",
-    "signal", "sigaction", "sigwait", "sigwaitinfo", "sigtimedwait", "signalfd",
+    "kill",
+    "killpg",
+    "raise",
+    "sigqueue",
+    "pthread_kill",
+    "signal",
+    "sigaction",
+    "sigwait",
+    "sigwaitinfo",
+    "sigtimedwait",
+    "signalfd",
 ];
 /// SysV shared memory functions for BI-LX-1.
 const SYSV_SHM_FUNCTIONS: &[&str] = &["shmget", "shmat", "shmdt", "shmctl"];
@@ -481,8 +491,11 @@ fn try_extract_boundary_call(
         }
 
         // ── BI-EM-1: Mailbox framework functions ──────────────────────────
-        "mbox_request_channel" | "mbox_free_channel" | "mbox_send_message"
-        | "mbox_client_txdone" | "mbox_client_peek_data" => {
+        "mbox_request_channel"
+        | "mbox_free_channel"
+        | "mbox_send_message"
+        | "mbox_client_txdone"
+        | "mbox_client_peek_data" => {
             // mbox_request_channel(client, name, ...) — no name extraction needed
             // These are kernel APIs; channel identity is typically from device tree
             // Just detect the call for boundary surface emission.
@@ -500,8 +513,13 @@ fn try_extract_boundary_call(
 
         // ── BI-EM-1: RPMsg functions ──────────────────────────────────────
         // Note: rpmsg_recv does not exist in Linux kernel API. Receive is callback-based.
-        "rpmsg_create_ept" | "rpmsg_destroy_ept" | "rpmsg_send" | "rpmsg_sendto"
-        | "rpmsg_send_offchannel" | "rpmsg_trysend" | "rpmsg_trysendto"
+        "rpmsg_create_ept"
+        | "rpmsg_destroy_ept"
+        | "rpmsg_send"
+        | "rpmsg_sendto"
+        | "rpmsg_send_offchannel"
+        | "rpmsg_trysend"
+        | "rpmsg_trysendto"
         | "rpmsg_register_device" => {
             // RPMsg endpoint/device lifecycle and messaging functions.
             // Endpoint names may be embedded in struct fields (not easily extractable).
@@ -718,16 +736,41 @@ fn parse_signal_name(arg: &str) -> Option<String> {
 
     // Known POSIX signal names
     const SIGNAL_NAMES: &[&str] = &[
-        "SIGABRT", "SIGALRM", "SIGBUS", "SIGCHLD", "SIGCONT",
-        "SIGFPE", "SIGHUP", "SIGILL", "SIGINT", "SIGKILL",
-        "SIGPIPE", "SIGQUIT", "SIGSEGV", "SIGSTOP", "SIGTERM",
-        "SIGTSTP", "SIGTTIN", "SIGTTOU", "SIGUSR1", "SIGUSR2",
-        "SIGPOLL", "SIGPROF", "SIGSYS", "SIGTRAP", "SIGURG",
-        "SIGVTALRM", "SIGXCPU", "SIGXFSZ",
+        "SIGABRT",
+        "SIGALRM",
+        "SIGBUS",
+        "SIGCHLD",
+        "SIGCONT",
+        "SIGFPE",
+        "SIGHUP",
+        "SIGILL",
+        "SIGINT",
+        "SIGKILL",
+        "SIGPIPE",
+        "SIGQUIT",
+        "SIGSEGV",
+        "SIGSTOP",
+        "SIGTERM",
+        "SIGTSTP",
+        "SIGTTIN",
+        "SIGTTOU",
+        "SIGUSR1",
+        "SIGUSR2",
+        "SIGPOLL",
+        "SIGPROF",
+        "SIGSYS",
+        "SIGTRAP",
+        "SIGURG",
+        "SIGVTALRM",
+        "SIGXCPU",
+        "SIGXFSZ",
         // Linux-specific
-        "SIGPWR", "SIGSTKFLT", "SIGWINCH",
+        "SIGPWR",
+        "SIGSTKFLT",
+        "SIGWINCH",
         // Aliases
-        "SIGCLD", "SIGIO",
+        "SIGCLD",
+        "SIGIO",
     ];
 
     // Check for direct signal name match
@@ -1508,7 +1551,10 @@ mod tests {
         let calls = parse_and_extract(source);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].function_name, "memfd_create");
-        assert_eq!(calls[0].extracted_argument, Some("my_shared_buffer".to_string()));
+        assert_eq!(
+            calls[0].extracted_argument,
+            Some("my_shared_buffer".to_string())
+        );
         assert_eq!(calls[0].argument_index, Some(0));
     }
 

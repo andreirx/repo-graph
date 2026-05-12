@@ -10,7 +10,7 @@ use crate::error::StorageError;
 use crate::migrations::record_migration;
 
 pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
-	conn.execute_batch(
+    conn.execute_batch(
 		r#"
 		CREATE TABLE IF NOT EXISTS surface_env_dependencies (
 			surface_env_dependency_uid  TEXT PRIMARY KEY,
@@ -43,6 +43,6 @@ pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
 		"#,
 	)?;
 
-	record_migration(conn, 15, "015-env-dependencies")?;
-	Ok(())
+    record_migration(conn, 15, "015-env-dependencies")?;
+    Ok(())
 }

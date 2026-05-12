@@ -9,8 +9,8 @@ use crate::error::StorageError;
 use crate::migrations::record_migration;
 
 pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
-	conn.execute_batch(
-		r#"
+    conn.execute_batch(
+        r#"
 		CREATE TABLE IF NOT EXISTS annotations (
 			annotation_uid      TEXT PRIMARY KEY,
 			snapshot_uid        TEXT NOT NULL REFERENCES snapshots(snapshot_uid) ON DELETE CASCADE,
@@ -30,8 +30,8 @@ pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
 		CREATE INDEX IF NOT EXISTS idx_annotations_target ON annotations(snapshot_uid, target_stable_key);
 		CREATE INDEX IF NOT EXISTS idx_annotations_kind ON annotations(snapshot_uid, annotation_kind);
 		"#,
-	)?;
+    )?;
 
-	record_migration(conn, 6, "006-annotations")?;
-	Ok(())
+    record_migration(conn, 6, "006-annotations")?;
+    Ok(())
 }

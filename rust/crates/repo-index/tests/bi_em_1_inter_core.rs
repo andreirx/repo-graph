@@ -5,8 +5,8 @@
 use std::path::PathBuf;
 
 use repo_graph_boundary_interaction::{
-    BoundaryInteractionFilter, BoundaryInteractionReadPort, BoundaryScope, ChannelKind,
-    Direction, InteractionPattern,
+    BoundaryInteractionFilter, BoundaryInteractionReadPort, BoundaryScope, ChannelKind, Direction,
+    InteractionPattern,
 };
 use repo_graph_repo_index::compose::{index_into_storage, ComposeOptions};
 use repo_graph_storage::StorageConnection;
@@ -44,7 +44,10 @@ fn index_inter_core_fixture_produces_inter_core_channel_surfaces() {
     assert_eq!(result.files_total, 2, "expected 2 C fixture files");
 
     let filter = BoundaryInteractionFilter::new().with_channel_kind(ChannelKind::InterCoreChannel);
-    let snapshot = storage.get_latest_snapshot("inter-core-fixture").unwrap().unwrap();
+    let snapshot = storage
+        .get_latest_snapshot("inter-core-fixture")
+        .unwrap()
+        .unwrap();
     let surfaces = storage
         .list_boundary_interactions(&snapshot.snapshot_uid, &filter)
         .unwrap();
@@ -82,7 +85,10 @@ fn mailbox_surfaces_detected_in_fixture() {
     )
     .unwrap();
 
-    let snapshot = storage.get_latest_snapshot("inter-core-fixture").unwrap().unwrap();
+    let snapshot = storage
+        .get_latest_snapshot("inter-core-fixture")
+        .unwrap()
+        .unwrap();
     let filter = BoundaryInteractionFilter::new()
         .with_channel_kind(ChannelKind::InterCoreChannel)
         .with_file("mailbox_user.c".to_string());
@@ -100,7 +106,10 @@ fn mailbox_surfaces_detected_in_fixture() {
 
     // Check provenance contains mailbox api_family
     for surface in &surfaces {
-        let provenance = surface.provenance.as_ref().expect("provenance should be set");
+        let provenance = surface
+            .provenance
+            .as_ref()
+            .expect("provenance should be set");
         assert!(
             provenance.contains(":mailbox:"),
             "mailbox surfaces should have mailbox api_family in provenance: {}",
@@ -121,7 +130,10 @@ fn rpmsg_surfaces_detected_in_fixture() {
     )
     .unwrap();
 
-    let snapshot = storage.get_latest_snapshot("inter-core-fixture").unwrap().unwrap();
+    let snapshot = storage
+        .get_latest_snapshot("inter-core-fixture")
+        .unwrap()
+        .unwrap();
     let filter = BoundaryInteractionFilter::new()
         .with_channel_kind(ChannelKind::InterCoreChannel)
         .with_file("rpmsg_user.c".to_string());
@@ -139,7 +151,10 @@ fn rpmsg_surfaces_detected_in_fixture() {
 
     // Check provenance contains rpmsg api_family
     for surface in &surfaces {
-        let provenance = surface.provenance.as_ref().expect("provenance should be set");
+        let provenance = surface
+            .provenance
+            .as_ref()
+            .expect("provenance should be set");
         assert!(
             provenance.contains(":rpmsg:"),
             "rpmsg surfaces should have rpmsg api_family in provenance: {}",
@@ -160,7 +175,10 @@ fn inter_core_surfaces_have_unknown_scope() {
     )
     .unwrap();
 
-    let snapshot = storage.get_latest_snapshot("inter-core-fixture").unwrap().unwrap();
+    let snapshot = storage
+        .get_latest_snapshot("inter-core-fixture")
+        .unwrap()
+        .unwrap();
     let filter = BoundaryInteractionFilter::new().with_channel_kind(ChannelKind::InterCoreChannel);
     let surfaces = storage
         .list_boundary_interactions(&snapshot.snapshot_uid, &filter)
@@ -189,7 +207,10 @@ fn inter_core_surfaces_have_correct_directions() {
     )
     .unwrap();
 
-    let snapshot = storage.get_latest_snapshot("inter-core-fixture").unwrap().unwrap();
+    let snapshot = storage
+        .get_latest_snapshot("inter-core-fixture")
+        .unwrap()
+        .unwrap();
     let filter = BoundaryInteractionFilter::new().with_channel_kind(ChannelKind::InterCoreChannel);
     let surfaces = storage
         .list_boundary_interactions(&snapshot.snapshot_uid, &filter)
@@ -217,7 +238,10 @@ fn inter_core_surfaces_have_correct_directions() {
     //        rpmsg_create_ept, rpmsg_destroy_ept, rpmsg_register_device = bidirectional (3)
     // Total: provider=7, consumer=1, bidirectional=6
     assert_eq!(provider_count, 7, "expected 7 provider surfaces");
-    assert_eq!(consumer_count, 1, "expected 1 consumer surface (mbox_client_peek_data only)");
+    assert_eq!(
+        consumer_count, 1,
+        "expected 1 consumer surface (mbox_client_peek_data only)"
+    );
     assert_eq!(bidirectional_count, 6, "expected 6 bidirectional surfaces");
 }
 
@@ -233,7 +257,10 @@ fn inter_core_surfaces_have_message_passing_or_fire_and_forget_pattern() {
     )
     .unwrap();
 
-    let snapshot = storage.get_latest_snapshot("inter-core-fixture").unwrap().unwrap();
+    let snapshot = storage
+        .get_latest_snapshot("inter-core-fixture")
+        .unwrap()
+        .unwrap();
     let filter = BoundaryInteractionFilter::new().with_channel_kind(ChannelKind::InterCoreChannel);
     let surfaces = storage
         .list_boundary_interactions(&snapshot.snapshot_uid, &filter)

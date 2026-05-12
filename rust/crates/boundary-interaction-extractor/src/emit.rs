@@ -15,8 +15,8 @@ use thiserror::Error;
 
 use repo_graph_boundary_interaction::{
     table::{BindingEntry, BindingTable, Language, ScopeHeuristic},
-    BoundaryInteractionSurface, BoundaryScope, ChannelDetail, ChannelKind,
-    Direction, EndpointLocality, ProtocolFamily,
+    BoundaryInteractionSurface, BoundaryScope, ChannelDetail, ChannelKind, Direction,
+    EndpointLocality, ProtocolFamily,
 };
 use repo_graph_classification::types::SourceLocation;
 
@@ -235,7 +235,10 @@ impl BoundaryInteractionEmitter {
     /// message broker patterns (e.g., NATS "publish" matching AMQP "publish").
     ///
     /// Returns `Err` only on actual emission failures.
-    pub fn try_emit(&mut self, callsite: &BoundaryCallsite) -> Result<Option<EmittedFacts>, EmitError> {
+    pub fn try_emit(
+        &mut self,
+        callsite: &BoundaryCallsite,
+    ) -> Result<Option<EmittedFacts>, EmitError> {
         // Look up all candidate bindings by function name
         let candidates = self
             .binding_table
@@ -287,7 +290,8 @@ impl BoundaryInteractionEmitter {
         // Track dual projection
         let requires_dual_projection = binding.channel_kind.requires_dual_projection();
         if requires_dual_projection {
-            self.dual_projection_surfaces.push(surface.surface_uid.clone());
+            self.dual_projection_surfaces
+                .push(surface.surface_uid.clone());
         }
 
         // Dedup and store
@@ -333,9 +337,10 @@ impl BoundaryInteractionEmitter {
                             // For bind/connect, require extracted_argument (the path)
                             // as weak evidence this is a Unix socket operation.
                             // Path-like arguments (starting with / or relative) suggest Unix socket.
-                            callsite.extracted_argument.as_ref().map_or(false, |arg| {
-                                arg.starts_with('/') || arg.starts_with('.')
-                            })
+                            callsite
+                                .extracted_argument
+                                .as_ref()
+                                .is_some_and(|arg| arg.starts_with('/') || arg.starts_with('.'))
                         }
                     }
                 }
@@ -414,7 +419,7 @@ impl BoundaryInteractionEmitter {
                         Some(MmapFlags::Shared) => true,
                         Some(MmapFlags::Private) => false, // Not shared memory
                         Some(MmapFlags::Unknown) => false, // Can't prove MAP_SHARED
-                        None => false, // No evidence — decline
+                        None => false,                     // No evidence — decline
                     }
                 } else {
                     // shm_open, shm_unlink, munmap — no additional guard needed
@@ -458,7 +463,6 @@ impl BoundaryInteractionEmitter {
             _ => false,
         }
     }
-
 
     /// Determine boundary scope and endpoint locality from binding and callsite.
     fn determine_scope_and_locality(
@@ -619,10 +623,9 @@ impl BoundaryInteractionEmitter {
         callsite: &BoundaryCallsite,
         surface_uid: &str,
     ) -> Result<ChannelDetail, EmitError> {
-        let channel_identity = callsite
-            .extracted_argument
-            .clone()
-            .unwrap_or_else(|| format!("{}:{}", callsite.source_file, callsite.location.line_start));
+        let channel_identity = callsite.extracted_argument.clone().unwrap_or_else(|| {
+            format!("{}:{}", callsite.source_file, callsite.location.line_start)
+        });
 
         let channel_uid = ChannelDetail::build_uid(surface_uid, &channel_identity);
 
@@ -725,13 +728,12 @@ impl BoundaryInteractionEmitter {
         new_direction: Direction,
     ) -> Result<String, EmitError> {
         // Remove surface under old UID
-        let mut surface = self
-            .surfaces
-            .remove(old_uid)
-            .ok_or_else(|| EmitError::InvalidState(format!(
+        let mut surface = self.surfaces.remove(old_uid).ok_or_else(|| {
+            EmitError::InvalidState(format!(
                 "surface not found for direction update: {}",
                 old_uid
-            )))?;
+            ))
+        })?;
 
         // Skip if direction is already correct
         if surface.direction == new_direction {
@@ -770,7 +772,11 @@ impl BoundaryInteractionEmitter {
         }
 
         // Update dual projection tracking if needed
-        if let Some(pos) = self.dual_projection_surfaces.iter().position(|s| s == old_uid) {
+        if let Some(pos) = self
+            .dual_projection_surfaces
+            .iter()
+            .position(|s| s == old_uid)
+        {
             self.dual_projection_surfaces[pos] = new_uid.clone();
         }
 
@@ -1043,7 +1049,10 @@ mod tests {
             result.is_some(),
             "socket(AF_UNIX) should emit as unix_socket"
         );
-        assert_eq!(result.unwrap().surface.channel_kind, ChannelKind::UnixSocket);
+        assert_eq!(
+            result.unwrap().surface.channel_kind,
+            ChannelKind::UnixSocket
+        );
     }
 
     #[test]
@@ -1229,10 +1238,7 @@ mod tests {
         };
 
         let result = emitter.try_emit(&callsite).unwrap();
-        assert!(
-            result.is_some(),
-            "mknod(S_IFIFO) should emit as named_pipe"
-        );
+        assert!(result.is_some(), "mknod(S_IFIFO) should emit as named_pipe");
         assert_eq!(result.unwrap().surface.channel_kind, ChannelKind::NamedPipe);
     }
 
@@ -1524,7 +1530,10 @@ mod tests {
         };
 
         let result = emitter.try_emit(&callsite).unwrap();
-        assert!(result.is_some(), "bind() with SOCK_STREAM should emit as TCP");
+        assert!(
+            result.is_some(),
+            "bind() with SOCK_STREAM should emit as TCP"
+        );
         assert_eq!(result.unwrap().surface.channel_kind, ChannelKind::TcpSocket);
     }
 
@@ -1554,7 +1563,10 @@ mod tests {
         };
 
         let result = emitter.try_emit(&callsite).unwrap();
-        assert!(result.is_some(), "bind() with SOCK_DGRAM should emit as UDP");
+        assert!(
+            result.is_some(),
+            "bind() with SOCK_DGRAM should emit as UDP"
+        );
         assert_eq!(result.unwrap().surface.channel_kind, ChannelKind::UdpSocket);
     }
 
@@ -1658,7 +1670,10 @@ mod tests {
         let old_uid = result.surface.surface_uid.clone();
 
         // Verify initial direction is bidirectional (setup role)
-        assert!(old_uid.ends_with(":bidirectional"), "socket() should emit with bidirectional direction");
+        assert!(
+            old_uid.ends_with(":bidirectional"),
+            "socket() should emit with bidirectional direction"
+        );
 
         // Update to provider direction (after bind+listen evidence)
         let new_uid = emitter
@@ -1667,7 +1682,10 @@ mod tests {
 
         // Verify UID changed
         assert_ne!(old_uid, new_uid);
-        assert!(new_uid.ends_with(":provider"), "updated UID should end with :provider");
+        assert!(
+            new_uid.ends_with(":provider"),
+            "updated UID should end with :provider"
+        );
 
         // Verify surface is now under new UID
         let surfaces: Vec<_> = emitter.surfaces().collect();
@@ -1684,7 +1702,10 @@ mod tests {
     fn update_surface_direction_returns_error_for_missing_uid() {
         let mut emitter = BoundaryInteractionEmitter::new(test_context());
 
-        let result = emitter.update_surface_direction("bi:nonexistent:file:1:1:tcp_socket:bidirectional", Direction::Consumer);
+        let result = emitter.update_surface_direction(
+            "bi:nonexistent:file:1:1:tcp_socket:bidirectional",
+            Direction::Consumer,
+        );
 
         assert!(result.is_err());
     }

@@ -9,133 +9,135 @@ mod common;
 
 use common::FakeAgentStorage;
 use repo_graph_agent::{
-	orient, AgentBoundaryDeclaration, AgentCycle, AgentImportEdge,
-	AgentReliabilityAxis, AgentReliabilityLevel, AgentTrustSummary,
-	Budget, EnrichmentState, Severity, SignalCategory,
+    orient, AgentBoundaryDeclaration, AgentCycle, AgentImportEdge, AgentReliabilityAxis,
+    AgentReliabilityLevel, AgentTrustSummary, Budget, EnrichmentState, Severity, SignalCategory,
 };
 
 fn seed_with_all_signals() -> FakeAgentStorage {
-	let mut fake = FakeAgentStorage::new();
-	fake.seed_minimal_repo("r1", "my-repo", "snap-1");
+    let mut fake = FakeAgentStorage::new();
+    fake.seed_minimal_repo("r1", "my-repo", "snap-1");
 
-	// BOUNDARY_VIOLATIONS (High severity)
-	fake.boundary_declarations.insert(
-		"r1".into(),
-		vec![AgentBoundaryDeclaration {
-			source_module: "src/core".into(),
-			forbidden_target: "src/adapters".into(),
-			reason: None,
-		}],
-	);
-	fake.imports_between_paths.insert(
-		("snap-1".into(), "src/core".into(), "src/adapters".into()),
-		vec![AgentImportEdge {
-			source_file: "src/core/a.rs".into(),
-			target_file: "src/adapters/b.rs".into(),
-		}],
-	);
+    // BOUNDARY_VIOLATIONS (High severity)
+    fake.boundary_declarations.insert(
+        "r1".into(),
+        vec![AgentBoundaryDeclaration {
+            source_module: "src/core".into(),
+            forbidden_target: "src/adapters".into(),
+            reason: None,
+        }],
+    );
+    fake.imports_between_paths.insert(
+        ("snap-1".into(), "src/core".into(), "src/adapters".into()),
+        vec![AgentImportEdge {
+            source_file: "src/core/a.rs".into(),
+            target_file: "src/adapters/b.rs".into(),
+        }],
+    );
 
-	// TRUST_LOW_RESOLUTION (Medium, Trust category).
-	fake.trust_summaries.insert(
-		"snap-1".into(),
-		AgentTrustSummary {
-			call_resolution_rate: 0.10,
-			resolved_calls: 1,
-			unresolved_calls: 9,
-			call_graph_reliability: AgentReliabilityAxis {
-				level: AgentReliabilityLevel::High,
-				reasons: Vec::new(),
-			},
-			dead_code_reliability: AgentReliabilityAxis {
-				level: AgentReliabilityLevel::High,
-				reasons: Vec::new(),
-			},
-			enrichment_state: EnrichmentState::Ran,
-			enrichment_eligible: 10,
-			enrichment_enriched: 9,
-		},
-	);
+    // TRUST_LOW_RESOLUTION (Medium, Trust category).
+    fake.trust_summaries.insert(
+        "snap-1".into(),
+        AgentTrustSummary {
+            call_resolution_rate: 0.10,
+            resolved_calls: 1,
+            unresolved_calls: 9,
+            call_graph_reliability: AgentReliabilityAxis {
+                level: AgentReliabilityLevel::High,
+                reasons: Vec::new(),
+            },
+            dead_code_reliability: AgentReliabilityAxis {
+                level: AgentReliabilityLevel::High,
+                reasons: Vec::new(),
+            },
+            enrichment_state: EnrichmentState::Ran,
+            enrichment_eligible: 10,
+            enrichment_enriched: 9,
+        },
+    );
 
-	// IMPORT_CYCLES (Medium, Structure)
-	fake.cycles.insert(
-		"snap-1".into(),
-		vec![AgentCycle { length: 2, modules: vec!["m1".into(), "m2".into()] }],
-	);
+    // IMPORT_CYCLES (Medium, Structure)
+    fake.cycles.insert(
+        "snap-1".into(),
+        vec![AgentCycle {
+            length: 2,
+            modules: vec!["m1".into(), "m2".into()],
+        }],
+    );
 
-	// DEAD_CODE surface withdrawn — no dead_nodes seeding.
+    // DEAD_CODE surface withdrawn — no dead_nodes seeding.
 
-	fake
+    fake
 }
 
 #[test]
 fn ranks_are_dense_and_one_based() {
-	let fake = seed_with_all_signals();
-	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
-	for (i, sig) in result.signals.iter().enumerate() {
-		assert_eq!(sig.rank(), (i + 1) as u32, "rank must be i+1");
-	}
+    let fake = seed_with_all_signals();
+    let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
+    for (i, sig) in result.signals.iter().enumerate() {
+        assert_eq!(sig.rank(), (i + 1) as u32, "rank must be i+1");
+    }
 }
 
 #[test]
 fn severity_order_is_high_medium_low() {
-	let fake = seed_with_all_signals();
-	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
+    let fake = seed_with_all_signals();
+    let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 
-	let mut prev: Option<Severity> = None;
-	for sig in &result.signals {
-		if let Some(p) = prev {
-			// Severity must be non-increasing when iterating.
-			assert!(
-				sig.severity() <= p,
-				"severity must not increase: saw {:?} after {:?}",
-				sig.severity(),
-				p
-			);
-		}
-		prev = Some(sig.severity());
-	}
+    let mut prev: Option<Severity> = None;
+    for sig in &result.signals {
+        if let Some(p) = prev {
+            // Severity must be non-increasing when iterating.
+            assert!(
+                sig.severity() <= p,
+                "severity must not increase: saw {:?} after {:?}",
+                sig.severity(),
+                p
+            );
+        }
+        prev = Some(sig.severity());
+    }
 }
 
 #[test]
 fn first_signal_is_boundary_violations_high() {
-	let fake = seed_with_all_signals();
-	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
+    let fake = seed_with_all_signals();
+    let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 
-	let first = result.signals.first().expect("at least one signal");
-	assert_eq!(first.severity(), Severity::High);
-	assert_eq!(first.category(), SignalCategory::Boundary);
-	assert_eq!(first.code().as_str(), "BOUNDARY_VIOLATIONS");
+    let first = result.signals.first().expect("at least one signal");
+    assert_eq!(first.severity(), Severity::High);
+    assert_eq!(first.category(), SignalCategory::Boundary);
+    assert_eq!(first.code().as_str(), "BOUNDARY_VIOLATIONS");
 }
 
 #[test]
 fn within_medium_tier_trust_precedes_structure() {
-	let fake = seed_with_all_signals();
-	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
+    let fake = seed_with_all_signals();
+    let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 
-	let medium_signals: Vec<_> = result
-		.signals
-		.iter()
-		.filter(|s| s.severity() == Severity::Medium)
-		.collect();
-	assert!(
-		!medium_signals.is_empty(),
-		"fixture should produce medium-tier signals"
-	);
+    let medium_signals: Vec<_> = result
+        .signals
+        .iter()
+        .filter(|s| s.severity() == Severity::Medium)
+        .collect();
+    assert!(
+        !medium_signals.is_empty(),
+        "fixture should produce medium-tier signals"
+    );
 
-	// Within the Medium tier, Trust (ordinal 2) must precede
-	// Structure (ordinal 3).
-	let mut seen_structure = false;
-	for sig in &medium_signals {
-		if sig.category() == SignalCategory::Structure {
-			seen_structure = true;
-		}
-		if sig.category() == SignalCategory::Trust {
-			assert!(
-				!seen_structure,
-				"Trust must precede Structure within the same severity tier"
-			);
-		}
-	}
+    // Within the Medium tier, Trust (ordinal 2) must precede
+    // Structure (ordinal 3).
+    let mut seen_structure = false;
+    for sig in &medium_signals {
+        if sig.category() == SignalCategory::Structure {
+            seen_structure = true;
+        }
+        if sig.category() == SignalCategory::Trust {
+            assert!(
+                !seen_structure,
+                "Trust must precede Structure within the same severity tier"
+            );
+        }
+    }
 }
 
 // import_cycles_ranks_before_dead_code_within_same_tier — test removed.
@@ -144,21 +146,21 @@ fn within_medium_tier_trust_precedes_structure() {
 
 #[test]
 fn informational_signals_land_at_the_tail() {
-	let fake = seed_with_all_signals();
-	let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
+    let fake = seed_with_all_signals();
+    let result = orient(&fake, "r1", None, Budget::Large, common::TEST_NOW).unwrap();
 
-	let tail_two: Vec<_> = result
-		.signals
-		.iter()
-		.rev()
-		.take(2)
-		.map(|s| s.category())
-		.collect();
-	for cat in tail_two {
-		assert_eq!(
-			cat,
-			SignalCategory::Informational,
-			"MODULE_SUMMARY and SNAPSHOT_INFO must be at the tail"
-		);
-	}
+    let tail_two: Vec<_> = result
+        .signals
+        .iter()
+        .rev()
+        .take(2)
+        .map(|s| s.category())
+        .collect();
+    for cat in tail_two {
+        assert_eq!(
+            cat,
+            SignalCategory::Informational,
+            "MODULE_SUMMARY and SNAPSHOT_INFO must be at the tail"
+        );
+    }
 }

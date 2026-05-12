@@ -26,7 +26,9 @@ fn memfd_fixture_path() -> PathBuf {
 }
 
 /// Filter surfaces to only those with memfd in provenance.
-fn filter_memfd_surfaces(surfaces: Vec<BoundaryInteractionListItem>) -> Vec<BoundaryInteractionListItem> {
+fn filter_memfd_surfaces(
+    surfaces: Vec<BoundaryInteractionListItem>,
+) -> Vec<BoundaryInteractionListItem> {
     surfaces
         .into_iter()
         .filter(|s| {
@@ -61,7 +63,10 @@ fn index_memfd_fixture_produces_shared_memory_surfaces() {
 
     // Query for shared_memory surfaces (memfd uses shared_memory channel kind)
     let filter = BoundaryInteractionFilter::new().with_channel_kind(ChannelKind::SharedMemory);
-    let snapshot = storage.get_latest_snapshot("memfd-fixture").unwrap().unwrap();
+    let snapshot = storage
+        .get_latest_snapshot("memfd-fixture")
+        .unwrap()
+        .unwrap();
     let all_surfaces = storage
         .list_boundary_interactions(&snapshot.snapshot_uid, &filter)
         .unwrap();
@@ -99,7 +104,10 @@ fn memfd_surfaces_have_inter_process_scope() {
     )
     .unwrap();
 
-    let snapshot = storage.get_latest_snapshot("memfd-fixture").unwrap().unwrap();
+    let snapshot = storage
+        .get_latest_snapshot("memfd-fixture")
+        .unwrap()
+        .unwrap();
     let filter = BoundaryInteractionFilter::new().with_channel_kind(ChannelKind::SharedMemory);
     let all_surfaces = storage
         .list_boundary_interactions(&snapshot.snapshot_uid, &filter)
@@ -128,7 +136,10 @@ fn memfd_surfaces_are_bidirectional() {
     )
     .unwrap();
 
-    let snapshot = storage.get_latest_snapshot("memfd-fixture").unwrap().unwrap();
+    let snapshot = storage
+        .get_latest_snapshot("memfd-fixture")
+        .unwrap()
+        .unwrap();
     let filter = BoundaryInteractionFilter::new().with_channel_kind(ChannelKind::SharedMemory);
     let all_surfaces = storage
         .list_boundary_interactions(&snapshot.snapshot_uid, &filter)
@@ -157,7 +168,10 @@ fn memfd_surfaces_have_shared_state_pattern() {
     )
     .unwrap();
 
-    let snapshot = storage.get_latest_snapshot("memfd-fixture").unwrap().unwrap();
+    let snapshot = storage
+        .get_latest_snapshot("memfd-fixture")
+        .unwrap()
+        .unwrap();
     let filter = BoundaryInteractionFilter::new().with_channel_kind(ChannelKind::SharedMemory);
     let all_surfaces = storage
         .list_boundary_interactions(&snapshot.snapshot_uid, &filter)
@@ -186,7 +200,10 @@ fn memfd_surfaces_have_memfd_provenance() {
     )
     .unwrap();
 
-    let snapshot = storage.get_latest_snapshot("memfd-fixture").unwrap().unwrap();
+    let snapshot = storage
+        .get_latest_snapshot("memfd-fixture")
+        .unwrap()
+        .unwrap();
     let filter = BoundaryInteractionFilter::new().with_channel_kind(ChannelKind::SharedMemory);
     let all_surfaces = storage
         .list_boundary_interactions(&snapshot.snapshot_uid, &filter)
@@ -198,7 +215,10 @@ fn memfd_surfaces_have_memfd_provenance() {
 
     // Check provenance contains memfd api_family
     for surface in &surfaces {
-        let provenance = surface.provenance.as_ref().expect("provenance should be set");
+        let provenance = surface
+            .provenance
+            .as_ref()
+            .expect("provenance should be set");
         assert!(
             provenance.contains(":memfd:"),
             "memfd surfaces should have memfd api_family in provenance: {}",

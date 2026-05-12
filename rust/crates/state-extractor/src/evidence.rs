@@ -40,19 +40,19 @@ use serde::{Deserialize, Serialize};
 ///   (precedence rule 3, URL form).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LogicalNameSource {
-	/// Logical name sourced from a config / environment key.
-	#[serde(rename = "env_key")]
-	EnvKey,
-	/// Logical name sourced from a stable literal identifier.
-	#[serde(rename = "literal_identifier")]
-	LiteralIdentifier,
-	/// Logical name sourced from a normalized literal filesystem
-	/// path.
-	#[serde(rename = "normalized_path")]
-	NormalizedPath,
-	/// Logical name sourced from a normalized literal URL.
-	#[serde(rename = "normalized_url")]
-	NormalizedUrl,
+    /// Logical name sourced from a config / environment key.
+    #[serde(rename = "env_key")]
+    EnvKey,
+    /// Logical name sourced from a stable literal identifier.
+    #[serde(rename = "literal_identifier")]
+    LiteralIdentifier,
+    /// Logical name sourced from a normalized literal filesystem
+    /// path.
+    #[serde(rename = "normalized_path")]
+    NormalizedPath,
+    /// Logical name sourced from a normalized literal URL.
+    #[serde(rename = "normalized_url")]
+    NormalizedUrl,
 }
 
 /// Evidence blob serialized into `edges.metadata_json` per
@@ -63,37 +63,37 @@ pub enum LogicalNameSource {
 /// key order on the wire is stable and predictable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateBoundaryEvidence {
-	/// Contract version of the evidence shape. Always `1` for
-	/// slice 1; bumps per contract §13 versioning rules.
-	pub state_boundary_version: u32,
-	/// Basis tag copied from the matched binding entry.
-	pub basis: Basis,
-	/// Canonical binding-key string.
-	/// Format: `<language>:<module>:<symbol_path>:<direction>`
-	/// per contract §8. Produced by
-	/// `BindingEntry::binding_key()`.
-	pub binding_key: String,
-	/// Direction of the emitted edge.
-	///
-	/// For a `Read` or `Write` binding this equals the binding's
-	/// direction. For a `ReadWrite` binding the emitter produces
-	/// TWO edges at the same call site; each edge's evidence
-	/// blob carries `direction = read` or `direction = write`
-	/// respectively (never `direction = read_write`). The binding
-	/// entry's read-or-write ambiguity is visible in the
-	/// `binding_key` suffix (`...:read_write`); the per-edge
-	/// direction is resolved. This lets downstream readers
-	/// interpret a single edge without branching on binding
-	/// semantics.
-	pub direction: Direction,
-	/// Source of the logical-name segment on the target
-	/// resource's stable key.
-	pub logical_name_source: LogicalNameSource,
-	/// Optional free-text notes copied from the binding entry.
-	/// Omitted from JSON when `None` (contract §8 lists notes as
-	/// optional).
-	#[serde(skip_serializing_if = "Option::is_none", default)]
-	pub binding_notes: Option<String>,
+    /// Contract version of the evidence shape. Always `1` for
+    /// slice 1; bumps per contract §13 versioning rules.
+    pub state_boundary_version: u32,
+    /// Basis tag copied from the matched binding entry.
+    pub basis: Basis,
+    /// Canonical binding-key string.
+    /// Format: `<language>:<module>:<symbol_path>:<direction>`
+    /// per contract §8. Produced by
+    /// `BindingEntry::binding_key()`.
+    pub binding_key: String,
+    /// Direction of the emitted edge.
+    ///
+    /// For a `Read` or `Write` binding this equals the binding's
+    /// direction. For a `ReadWrite` binding the emitter produces
+    /// TWO edges at the same call site; each edge's evidence
+    /// blob carries `direction = read` or `direction = write`
+    /// respectively (never `direction = read_write`). The binding
+    /// entry's read-or-write ambiguity is visible in the
+    /// `binding_key` suffix (`...:read_write`); the per-edge
+    /// direction is resolved. This lets downstream readers
+    /// interpret a single edge without branching on binding
+    /// semantics.
+    pub direction: Direction,
+    /// Source of the logical-name segment on the target
+    /// resource's stable key.
+    pub logical_name_source: LogicalNameSource,
+    /// Optional free-text notes copied from the binding entry.
+    /// Omitted from JSON when `None` (contract §8 lists notes as
+    /// optional).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub binding_notes: Option<String>,
 }
 
 /// Current contract-defined evidence version. Bumps per contract
@@ -103,75 +103,77 @@ pub const STATE_BOUNDARY_EVIDENCE_VERSION: u32 = 1;
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+    use super::*;
 
-	#[test]
-	fn evidence_serializes_with_contract_field_names() {
-		let ev = StateBoundaryEvidence {
-			state_boundary_version: STATE_BOUNDARY_EVIDENCE_VERSION,
-			basis: Basis::SdkCall,
-			binding_key: "typescript:@aws-sdk/client-s3:PutObjectCommand:write".to_string(),
-			direction: Direction::Write,
-			logical_name_source: LogicalNameSource::LiteralIdentifier,
-			binding_notes: None,
-		};
-		let json = serde_json::to_string(&ev).unwrap();
+    #[test]
+    fn evidence_serializes_with_contract_field_names() {
+        let ev = StateBoundaryEvidence {
+            state_boundary_version: STATE_BOUNDARY_EVIDENCE_VERSION,
+            basis: Basis::SdkCall,
+            binding_key: "typescript:@aws-sdk/client-s3:PutObjectCommand:write".to_string(),
+            direction: Direction::Write,
+            logical_name_source: LogicalNameSource::LiteralIdentifier,
+            binding_notes: None,
+        };
+        let json = serde_json::to_string(&ev).unwrap();
 
-		// Pin the serialized shape. Field order matches struct
-		// declaration order (serde default).
-		assert!(
-			json.contains("\"state_boundary_version\":1"),
-			"got {}",
-			json
-		);
-		assert!(json.contains("\"basis\":\"sdk_call\""), "got {}", json);
-		assert!(
-			json.contains("\"binding_key\":\"typescript:@aws-sdk/client-s3:PutObjectCommand:write\""),
-			"got {}",
-			json
-		);
-		assert!(json.contains("\"direction\":\"write\""), "got {}", json);
-		assert!(
-			json.contains("\"logical_name_source\":\"literal_identifier\""),
-			"got {}",
-			json
-		);
-		assert!(
-			!json.contains("binding_notes"),
-			"notes should not appear when None, got {}",
-			json
-		);
-	}
+        // Pin the serialized shape. Field order matches struct
+        // declaration order (serde default).
+        assert!(
+            json.contains("\"state_boundary_version\":1"),
+            "got {}",
+            json
+        );
+        assert!(json.contains("\"basis\":\"sdk_call\""), "got {}", json);
+        assert!(
+            json.contains(
+                "\"binding_key\":\"typescript:@aws-sdk/client-s3:PutObjectCommand:write\""
+            ),
+            "got {}",
+            json
+        );
+        assert!(json.contains("\"direction\":\"write\""), "got {}", json);
+        assert!(
+            json.contains("\"logical_name_source\":\"literal_identifier\""),
+            "got {}",
+            json
+        );
+        assert!(
+            !json.contains("binding_notes"),
+            "notes should not appear when None, got {}",
+            json
+        );
+    }
 
-	#[test]
-	fn evidence_includes_notes_when_present() {
-		let ev = StateBoundaryEvidence {
-			state_boundary_version: STATE_BOUNDARY_EVIDENCE_VERSION,
-			basis: Basis::StdlibApi,
-			binding_key: "typescript:fs:readFile:read".to_string(),
-			direction: Direction::Read,
-			logical_name_source: LogicalNameSource::NormalizedPath,
-			binding_notes: Some("probe entry".to_string()),
-		};
-		let json = serde_json::to_string(&ev).unwrap();
-		assert!(
-			json.contains("\"binding_notes\":\"probe entry\""),
-			"got {}",
-			json
-		);
-	}
+    #[test]
+    fn evidence_includes_notes_when_present() {
+        let ev = StateBoundaryEvidence {
+            state_boundary_version: STATE_BOUNDARY_EVIDENCE_VERSION,
+            basis: Basis::StdlibApi,
+            binding_key: "typescript:fs:readFile:read".to_string(),
+            direction: Direction::Read,
+            logical_name_source: LogicalNameSource::NormalizedPath,
+            binding_notes: Some("probe entry".to_string()),
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        assert!(
+            json.contains("\"binding_notes\":\"probe entry\""),
+            "got {}",
+            json
+        );
+    }
 
-	#[test]
-	fn logical_name_source_renames_match_contract() {
-		let cases = [
-			(LogicalNameSource::EnvKey, "env_key"),
-			(LogicalNameSource::LiteralIdentifier, "literal_identifier"),
-			(LogicalNameSource::NormalizedPath, "normalized_path"),
-			(LogicalNameSource::NormalizedUrl, "normalized_url"),
-		];
-		for (variant, expected) in cases {
-			let json = serde_json::to_string(&variant).unwrap();
-			assert_eq!(json, format!("\"{}\"", expected));
-		}
-	}
+    #[test]
+    fn logical_name_source_renames_match_contract() {
+        let cases = [
+            (LogicalNameSource::EnvKey, "env_key"),
+            (LogicalNameSource::LiteralIdentifier, "literal_identifier"),
+            (LogicalNameSource::NormalizedPath, "normalized_path"),
+            (LogicalNameSource::NormalizedUrl, "normalized_url"),
+        ];
+        for (variant, expected) in cases {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert_eq!(json, format!("\"{}\"", expected));
+        }
+    }
 }

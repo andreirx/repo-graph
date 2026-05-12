@@ -59,11 +59,9 @@ pub use compute::{compute, GateInput, MethodEvidence, ObligationKey, PolicyMeasu
 pub use errors::{GateError, GateStorageError};
 pub use storage_port::GateStorageRead;
 pub use types::{
-	EffectiveVerdict, GateAssessmentState, GateAssessmentVerdict,
-	GateBoundaryDeclaration, GateCounts, GateImportEdge, GateInference,
-	GateMeasurement, GateMode, GateModuleViolationEvidence, GateObligation,
-	GateOutcome, GateQualityAssessmentEvaluation, GateQualityAssessmentFact,
-	GateQualityCounts, GateQualityPolicyKind, GateQualityPolicySeverity,
-	GateReport, GateRequirement, GateWaiver, ObligationEvaluation, Verdict,
-	WaiverBasis,
+    EffectiveVerdict, GateAssessmentState, GateAssessmentVerdict, GateBoundaryDeclaration,
+    GateCounts, GateImportEdge, GateInference, GateMeasurement, GateMode,
+    GateModuleViolationEvidence, GateObligation, GateOutcome, GateQualityAssessmentEvaluation,
+    GateQualityAssessmentFact, GateQualityCounts, GateQualityPolicyKind, GateQualityPolicySeverity,
+    GateReport, GateRequirement, GateWaiver, ObligationEvaluation, Verdict, WaiverBasis,
 };

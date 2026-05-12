@@ -130,14 +130,14 @@ pub fn run_callers(args: &[String]) -> ExitCode {
 
     // Find direct callers.
     let et_refs: Vec<&str> = edge_types.iter().map(|s| s.as_str()).collect();
-    let callers = match storage.find_direct_callers(&snapshot.snapshot_uid, &target.stable_key, &et_refs)
-    {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    let callers =
+        match storage.find_direct_callers(&snapshot.snapshot_uid, &target.stable_key, &et_refs) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("error: {}", e);
+                return ExitCode::from(2);
+            }
+        };
 
     // JSON to stdout (TS-compatible QueryResult envelope).
     let count = callers.len();
@@ -145,7 +145,8 @@ pub fn run_callers(args: &[String]) -> ExitCode {
     extra.insert("target".to_string(), serde_json::to_value(&target).unwrap());
 
     // Trust overlay (Option A: only when repo has degradations).
-    if let Some(trust) = compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS") {
+    if let Some(trust) = compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS")
+    {
         if trust.has_degradation() || !trust.caveats.is_empty() {
             extra.insert("trust".to_string(), serde_json::to_value(&trust).unwrap());
         }
@@ -243,14 +244,14 @@ pub fn run_callees(args: &[String]) -> ExitCode {
 
     // Find direct callees.
     let et_refs: Vec<&str> = edge_types.iter().map(|s| s.as_str()).collect();
-    let callees = match storage.find_direct_callees(&snapshot.snapshot_uid, &target.stable_key, &et_refs)
-    {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    let callees =
+        match storage.find_direct_callees(&snapshot.snapshot_uid, &target.stable_key, &et_refs) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("error: {}", e);
+                return ExitCode::from(2);
+            }
+        };
 
     // JSON to stdout (TS-compatible QueryResult envelope).
     let count = callees.len();
@@ -258,7 +259,8 @@ pub fn run_callees(args: &[String]) -> ExitCode {
     extra.insert("target".to_string(), serde_json::to_value(&target).unwrap());
 
     // Trust overlay (Option A: only when repo has degradations).
-    if let Some(trust) = compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS") {
+    if let Some(trust) = compute_trust_overlay_for_snapshot(&storage, repo_uid, &snapshot, "CALLS")
+    {
         if trust.has_degradation() || !trust.caveats.is_empty() {
             extra.insert("trust".to_string(), serde_json::to_value(&trust).unwrap());
         }

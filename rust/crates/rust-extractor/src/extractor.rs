@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashSet};
 use repo_graph_classification::types::{ImportBinding, RuntimeBuiltinsSet, SourceLocation};
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::types::{
-    EdgeType, ExtractionResult, ExtractedEdge, ExtractedMetrics, ExtractedNode, NodeKind,
+    EdgeType, ExtractedEdge, ExtractedMetrics, ExtractedNode, ExtractionResult, NodeKind,
     NodeSubtype, Resolution, Visibility,
 };
 use tree_sitter::{Node, Parser};
@@ -287,12 +287,7 @@ fn collect_use_bindings(node: &Node, source: &str) -> Vec<UseBinding> {
 }
 
 /// Recursively walk the use tree collecting bindings.
-fn walk_use_tree(
-    node: &Node,
-    source: &str,
-    path_prefix: &[&str],
-    results: &mut Vec<UseBinding>,
-) {
+fn walk_use_tree(node: &Node, source: &str, path_prefix: &[&str], results: &mut Vec<UseBinding>) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
@@ -368,7 +363,8 @@ fn walk_use_tree(
                 }
                 if let Some(list) = list_node {
                     // Need to leak the strings to satisfy lifetime requirements
-                    let prefix_owned: Vec<String> = new_prefix.iter().map(|s| s.to_string()).collect();
+                    let prefix_owned: Vec<String> =
+                        new_prefix.iter().map(|s| s.to_string()).collect();
                     let prefix_refs: Vec<&str> = prefix_owned.iter().map(|s| s.as_str()).collect();
                     walk_use_tree(&list, source, &prefix_refs, results);
                 }
@@ -416,14 +412,19 @@ fn extract_function(node: &Node, source: &str, ctx: &mut ExtractionCtx) {
 
     let sig = match (params, return_type) {
         (Some(p), Some(r)) => {
-            format!("fn {}{} -> {}", name, node_text(&p, source), node_text(&r, source))
+            format!(
+                "fn {}{} -> {}",
+                name,
+                node_text(&p, source),
+                node_text(&r, source)
+            )
         }
         (Some(p), None) => format!("fn {}{}", name, node_text(&p, source)),
         _ => format!("fn {}()", name),
     };
 
     let graph_node = make_symbol_node(
-        &name,
+        name,
         NodeSubtype::Function,
         if exported {
             Visibility::Export
@@ -456,7 +457,7 @@ fn extract_struct(node: &Node, source: &str, ctx: &mut ExtractionCtx) {
 
     let exported = has_pub_visibility(node);
     let graph_node = make_symbol_node(
-        &name,
+        name,
         NodeSubtype::Class, // Closest mapping for structs
         if exported {
             Visibility::Export
@@ -482,7 +483,7 @@ fn extract_enum(node: &Node, source: &str, ctx: &mut ExtractionCtx) {
 
     let exported = has_pub_visibility(node);
     let graph_node = make_symbol_node(
-        &name,
+        name,
         NodeSubtype::Enum,
         if exported {
             Visibility::Export
@@ -508,7 +509,7 @@ fn extract_trait(node: &Node, source: &str, ctx: &mut ExtractionCtx) {
 
     let exported = has_pub_visibility(node);
     let trait_node = make_symbol_node(
-        &name,
+        name,
         NodeSubtype::Interface, // Closest mapping for traits
         if exported {
             Visibility::Export
@@ -562,10 +563,7 @@ fn extract_trait_method(
         repo_uid: ctx.repo_uid.into(),
         stable_key: format!(
             "{}:{}#{}:SYMBOL:{}",
-            ctx.repo_uid,
-            ctx.file_path,
-            qualified_name,
-            "METHOD"
+            ctx.repo_uid, ctx.file_path, qualified_name, "METHOD"
         ),
         kind: NodeKind::Symbol,
         subtype: Some(NodeSubtype::Method),
@@ -602,7 +600,7 @@ fn extract_impl(node: &Node, source: &str, ctx: &mut ExtractionCtx) {
     let mut cursor = body.walk();
     for member in body.children(&mut cursor) {
         if member.kind() == "function_item" {
-            extract_impl_method(&member, source, &type_name, trait_name.as_deref(), ctx);
+            extract_impl_method(&member, source, type_name, trait_name.as_deref(), ctx);
         }
     }
 }
@@ -626,7 +624,12 @@ fn extract_impl_method(
 
     let sig = match (params, return_type) {
         (Some(p), Some(r)) => {
-            format!("fn {}{} -> {}", name, node_text(&p, source), node_text(&r, source))
+            format!(
+                "fn {}{} -> {}",
+                name,
+                node_text(&p, source),
+                node_text(&r, source)
+            )
         }
         (Some(p), None) => format!("fn {}{}", name, node_text(&p, source)),
         _ => format!("fn {}()", name),
@@ -716,7 +719,7 @@ fn extract_const(node: &Node, source: &str, ctx: &mut ExtractionCtx) {
 
     let exported = has_pub_visibility(node);
     let graph_node = make_symbol_node(
-        &name,
+        name,
         NodeSubtype::Constant,
         if exported {
             Visibility::Export
@@ -740,7 +743,7 @@ fn extract_static(node: &Node, source: &str, ctx: &mut ExtractionCtx) {
 
     let exported = has_pub_visibility(node);
     let graph_node = make_symbol_node(
-        &name,
+        name,
         NodeSubtype::Variable,
         if exported {
             Visibility::Export
@@ -764,7 +767,7 @@ fn extract_type_alias(node: &Node, source: &str, ctx: &mut ExtractionCtx) {
 
     let exported = has_pub_visibility(node);
     let graph_node = make_symbol_node(
-        &name,
+        name,
         NodeSubtype::TypeAlias,
         if exported {
             Visibility::Export
@@ -993,7 +996,11 @@ mod tests {
     fn extracts_file_node() {
         let result = extract_test("fn main() {}");
         assert!(result.nodes.iter().any(|n| n.kind == NodeKind::File));
-        let file_node = result.nodes.iter().find(|n| n.kind == NodeKind::File).unwrap();
+        let file_node = result
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::File)
+            .unwrap();
         assert_eq!(file_node.stable_key, "test:src/lib.rs:FILE");
         assert_eq!(file_node.name, "lib.rs");
     }
@@ -1090,7 +1097,11 @@ impl Foo {
     fn extracts_use_imports_edge() {
         let result = extract_test("use std::collections::HashMap;");
         assert!(!result.edges.is_empty());
-        let edge = result.edges.iter().find(|e| e.edge_type == EdgeType::Imports).unwrap();
+        let edge = result
+            .edges
+            .iter()
+            .find(|e| e.edge_type == EdgeType::Imports)
+            .unwrap();
         assert_eq!(edge.target_key, "std::collections");
     }
 
@@ -1322,7 +1333,11 @@ impl Foo {
     fn extracts_grouped_use() {
         let result = extract_test("use std::collections::{HashMap, HashSet};");
         assert_eq!(result.import_bindings.len(), 2);
-        let names: Vec<_> = result.import_bindings.iter().map(|b| &b.identifier).collect();
+        let names: Vec<_> = result
+            .import_bindings
+            .iter()
+            .map(|b| &b.identifier)
+            .collect();
         assert!(names.contains(&&"HashMap".to_string()));
         assert!(names.contains(&&"HashSet".to_string()));
     }

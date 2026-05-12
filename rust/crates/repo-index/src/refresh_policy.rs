@@ -26,7 +26,7 @@
 //!
 //! The contract's `RefreshPolicy` determines which branch applies.
 
-use artifact_contracts::{ArtifactFamily, RefreshPolicy, get_contract};
+use artifact_contracts::{get_contract, ArtifactFamily, RefreshPolicy};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Refresh-Executable Subset
@@ -263,7 +263,8 @@ mod tests {
             assert!(
                 matches!(
                     contract.refresh_policy,
-                    RefreshPolicy::ReextractChangedInputs | RefreshPolicy::MarkImpactedDeferRecompute
+                    RefreshPolicy::ReextractChangedInputs
+                        | RefreshPolicy::MarkImpactedDeferRecompute
                 ),
                 "{:?} should have copy-forward compatible policy, got {:?}",
                 family,

@@ -31,53 +31,48 @@
 
 use super::AggregatorOutput;
 use crate::dto::limit::{Limit, LimitCode};
-use crate::dto::signal::{
-	GateFailEvidence, GateIncompleteEvidence, GatePassEvidence, Signal,
-};
+use crate::dto::signal::{GateFailEvidence, GateIncompleteEvidence, GatePassEvidence, Signal};
 use crate::errors::{AgentStorageError, OrientError};
 use repo_graph_gate::{
-	assemble_from_requirements, GateError, GateMode, GateReport,
-	GateRequirement, GateStorageRead,
+    assemble_from_requirements, GateError, GateMode, GateReport, GateRequirement, GateStorageRead,
 };
 
 pub fn aggregate<S: GateStorageRead + ?Sized>(
-	storage: &S,
-	repo_uid: &str,
-	snapshot_uid: &str,
-	now: &str,
+    storage: &S,
+    repo_uid: &str,
+    snapshot_uid: &str,
+    now: &str,
 ) -> Result<AggregatorOutput, OrientError> {
-	// Fetch requirements once so we can short-circuit on empty.
-	let requirements = storage
-		.get_active_requirements(repo_uid)
-		.map_err(|e| {
-			OrientError::Storage(AgentStorageError::new(
-				"get_active_requirements",
-				e.message,
-			))
-		})?;
+    // Fetch requirements once so we can short-circuit on empty.
+    let requirements = storage.get_active_requirements(repo_uid).map_err(|e| {
+        OrientError::Storage(AgentStorageError::new("get_active_requirements", e.message))
+    })?;
 
-	if requirements.is_empty() {
-		return Ok(AggregatorOutput {
-			signals: Vec::new(),
-			limits: vec![Limit::from_code(LimitCode::GateNotConfigured)],
-		});
-	}
+    if requirements.is_empty() {
+        return Ok(AggregatorOutput {
+            signals: Vec::new(),
+            limits: vec![Limit::from_code(LimitCode::GateNotConfigured)],
+        });
+    }
 
-	let report = match assemble_from_requirements(
-		storage,
-		repo_uid,
-		snapshot_uid,
-		GateMode::Default,
-		now,
-		requirements,
-	) {
-		Ok(r) => r,
-		Err(e) => return Err(map_gate_error(e)),
-	};
+    let report = match assemble_from_requirements(
+        storage,
+        repo_uid,
+        snapshot_uid,
+        GateMode::Default,
+        now,
+        requirements,
+    ) {
+        Ok(r) => r,
+        Err(e) => return Err(map_gate_error(e)),
+    };
 
-	let signals = project_report(&report);
+    let signals = project_report(&report);
 
-	Ok(AggregatorOutput { signals, limits: Vec::new() })
+    Ok(AggregatorOutput {
+        signals,
+        limits: Vec::new(),
+    })
 }
 
 /// Path-scoped gate aggregator.
@@ -95,140 +90,128 @@ pub fn aggregate<S: GateStorageRead + ?Sized>(
 ///   5. Otherwise → call `assemble_from_requirements` with the
 ///      filtered list.
 pub fn aggregate_path<S: GateStorageRead + ?Sized>(
-	storage: &S,
-	repo_uid: &str,
-	snapshot_uid: &str,
-	now: &str,
-	path_prefix: &str,
+    storage: &S,
+    repo_uid: &str,
+    snapshot_uid: &str,
+    now: &str,
+    path_prefix: &str,
 ) -> Result<AggregatorOutput, OrientError> {
-	let requirements = storage
-		.get_active_requirements(repo_uid)
-		.map_err(|e| {
-			OrientError::Storage(AgentStorageError::new(
-				"get_active_requirements",
-				e.message,
-			))
-		})?;
+    let requirements = storage.get_active_requirements(repo_uid).map_err(|e| {
+        OrientError::Storage(AgentStorageError::new("get_active_requirements", e.message))
+    })?;
 
-	if requirements.is_empty() {
-		return Ok(AggregatorOutput {
-			signals: Vec::new(),
-			limits: vec![Limit::from_code(LimitCode::GateNotConfigured)],
-		});
-	}
+    if requirements.is_empty() {
+        return Ok(AggregatorOutput {
+            signals: Vec::new(),
+            limits: vec![Limit::from_code(LimitCode::GateNotConfigured)],
+        });
+    }
 
-	// Filter obligations by target prefix.
-	let filtered: Vec<GateRequirement> = requirements
-		.into_iter()
-		.filter_map(|req| {
-			let matching: Vec<_> = req
-				.obligations
-				.into_iter()
-				.filter(|o| {
-					match &o.target {
-						Some(t) => {
-							t == path_prefix
-								|| t.starts_with(&format!("{}/", path_prefix))
-						}
-						None => false,
-					}
-				})
-				.collect();
-			if matching.is_empty() {
-				None
-			} else {
-				Some(GateRequirement {
-					req_id: req.req_id,
-					version: req.version,
-					obligations: matching,
-				})
-			}
-		})
-		.collect();
+    // Filter obligations by target prefix.
+    let filtered: Vec<GateRequirement> = requirements
+        .into_iter()
+        .filter_map(|req| {
+            let matching: Vec<_> = req
+                .obligations
+                .into_iter()
+                .filter(|o| match &o.target {
+                    Some(t) => t == path_prefix || t.starts_with(&format!("{}/", path_prefix)),
+                    None => false,
+                })
+                .collect();
+            if matching.is_empty() {
+                None
+            } else {
+                Some(GateRequirement {
+                    req_id: req.req_id,
+                    version: req.version,
+                    obligations: matching,
+                })
+            }
+        })
+        .collect();
 
-	if filtered.is_empty() {
-		return Ok(AggregatorOutput {
-			signals: Vec::new(),
-			limits: vec![Limit::from_code(LimitCode::GateNotApplicableToFocus)],
-		});
-	}
+    if filtered.is_empty() {
+        return Ok(AggregatorOutput {
+            signals: Vec::new(),
+            limits: vec![Limit::from_code(LimitCode::GateNotApplicableToFocus)],
+        });
+    }
 
-	let report = match assemble_from_requirements(
-		storage,
-		repo_uid,
-		snapshot_uid,
-		GateMode::Default,
-		now,
-		filtered,
-	) {
-		Ok(r) => r,
-		Err(e) => return Err(map_gate_error(e)),
-	};
+    let report = match assemble_from_requirements(
+        storage,
+        repo_uid,
+        snapshot_uid,
+        GateMode::Default,
+        now,
+        filtered,
+    ) {
+        Ok(r) => r,
+        Err(e) => return Err(map_gate_error(e)),
+    };
 
-	let signals = project_report(&report);
+    let signals = project_report(&report);
 
-	Ok(AggregatorOutput { signals, limits: Vec::new() })
+    Ok(AggregatorOutput {
+        signals,
+        limits: Vec::new(),
+    })
 }
 
 fn project_report(report: &GateReport) -> Vec<Signal> {
-	// A gate with zero obligations reduces to outcome="pass"
-	// with total_count=0 in every mode. The caller should
-	// already have short-circuited on empty requirements, but
-	// if a requirement existed with zero obligations (which
-	// the storage layer skips), the assemble path returns an
-	// empty report. Treat that exactly the same as "not
-	// configured" — emit no signal. The `GATE_NOT_CONFIGURED`
-	// limit is added by the caller, not here.
-	if report.outcome.counts.total == 0 {
-		return Vec::new();
-	}
+    // A gate with zero obligations reduces to outcome="pass"
+    // with total_count=0 in every mode. The caller should
+    // already have short-circuited on empty requirements, but
+    // if a requirement existed with zero obligations (which
+    // the storage layer skips), the assemble path returns an
+    // empty report. Treat that exactly the same as "not
+    // configured" — emit no signal. The `GATE_NOT_CONFIGURED`
+    // limit is added by the caller, not here.
+    if report.outcome.counts.total == 0 {
+        return Vec::new();
+    }
 
-	let counts = &report.outcome.counts;
+    let counts = &report.outcome.counts;
 
-	match report.outcome.outcome.as_str() {
-		"fail" => {
-			let failing_obligations: Vec<String> = report
-				.obligations
-				.iter()
-				.filter(|o| {
-					matches!(
-						o.effective_verdict,
-						repo_graph_gate::EffectiveVerdict::FAIL
-					)
-				})
-				.map(|o| format!("{}/{}", o.req_id, o.obligation_id))
-				.collect();
+    match report.outcome.outcome.as_str() {
+        "fail" => {
+            let failing_obligations: Vec<String> = report
+                .obligations
+                .iter()
+                .filter(|o| matches!(o.effective_verdict, repo_graph_gate::EffectiveVerdict::FAIL))
+                .map(|o| format!("{}/{}", o.req_id, o.obligation_id))
+                .collect();
 
-			vec![Signal::gate_fail(GateFailEvidence {
-				fail_count: counts.fail as u64,
-				total_count: counts.total as u64,
-				failing_obligations,
-			})]
-		}
-		"incomplete" => vec![Signal::gate_incomplete(GateIncompleteEvidence {
-			missing_count: counts.missing_evidence as u64,
-			unsupported_count: counts.unsupported as u64,
-			total_count: counts.total as u64,
-		})],
-		"pass" => vec![Signal::gate_pass(GatePassEvidence {
-			pass_count: counts.pass as u64,
-			waived_count: counts.waived as u64,
-			total_count: counts.total as u64,
-		})],
-		// Unknown outcome string — defensive. Do not panic, do
-		// not guess. Emit no signal and let the caller notice
-		// through the limit/signal count mismatch.
-		_ => Vec::new(),
-	}
+            vec![Signal::gate_fail(GateFailEvidence {
+                fail_count: counts.fail as u64,
+                total_count: counts.total as u64,
+                failing_obligations,
+            })]
+        }
+        "incomplete" => vec![Signal::gate_incomplete(GateIncompleteEvidence {
+            missing_count: counts.missing_evidence as u64,
+            unsupported_count: counts.unsupported as u64,
+            total_count: counts.total as u64,
+        })],
+        "pass" => vec![Signal::gate_pass(GatePassEvidence {
+            pass_count: counts.pass as u64,
+            waived_count: counts.waived as u64,
+            total_count: counts.total as u64,
+        })],
+        // Unknown outcome string — defensive. Do not panic, do
+        // not guess. Emit no signal and let the caller notice
+        // through the limit/signal count mismatch.
+        _ => Vec::new(),
+    }
 }
 
 fn map_gate_error(e: GateError) -> OrientError {
-	match e {
-		GateError::Storage(inner) => OrientError::Storage(
-			AgentStorageError::new(inner.operation, inner.message),
-		),
-		GateError::MalformedEvidence { operation, reason } => {
-			OrientError::Storage(AgentStorageError::new(operation, reason))
-		}
-	}
+    match e {
+        GateError::Storage(inner) => {
+            OrientError::Storage(AgentStorageError::new(inner.operation, inner.message))
+        }
+        GateError::MalformedEvidence { operation, reason } => {
+            OrientError::Storage(AgentStorageError::new(operation, reason))
+        }
+    }
 }

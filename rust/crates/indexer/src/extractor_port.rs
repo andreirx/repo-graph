@@ -52,13 +52,13 @@ use crate::types::ExtractionResult;
 /// aborting the entire indexing run.
 #[derive(Debug)]
 pub struct ExtractorError {
-	pub message: String,
+    pub message: String,
 }
 
 impl std::fmt::Display for ExtractorError {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "extraction failed: {}", self.message)
-	}
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "extraction failed: {}", self.message)
+    }
 }
 
 impl std::error::Error for ExtractorError {}
@@ -73,58 +73,58 @@ impl std::error::Error for ExtractorError {}
 /// The trait is object-safe (`&dyn ExtractorPort`) so the indexer
 /// can hold a heterogeneous collection of extractors.
 pub trait ExtractorPort {
-	/// Human-readable name and version. e.g., `"ts-base:1.0.0"`.
-	fn name(&self) -> &str;
+    /// Human-readable name and version. e.g., `"ts-base:1.0.0"`.
+    fn name(&self) -> &str;
 
-	/// Language identifiers this extractor handles.
-	/// e.g., `["typescript", "tsx"]`.
-	///
-	/// The indexer uses `language_to_extensions()` to map these
-	/// to file extensions for routing.
-	fn languages(&self) -> &[String];
+    /// Language identifiers this extractor handles.
+    /// e.g., `["typescript", "tsx"]`.
+    ///
+    /// The indexer uses `language_to_extensions()` to map these
+    /// to file extensions for routing.
+    fn languages(&self) -> &[String];
 
-	/// Runtime builtins known to this extractor's language ecosystem.
-	/// Used by the classifier to distinguish runtime globals from
-	/// project symbols.
-	fn runtime_builtins(&self) -> &RuntimeBuiltinsSet;
+    /// Runtime builtins known to this extractor's language ecosystem.
+    /// Used by the classifier to distinguish runtime globals from
+    /// project symbols.
+    fn runtime_builtins(&self) -> &RuntimeBuiltinsSet;
 
-	/// One-time initialization before first use. Mirrors the TS
-	/// contract's `initialize(): Promise<void>`.
-	///
-	/// Concrete adapters use this for grammar loading, WASM
-	/// compilation, or other one-time setup that must complete
-	/// before `extract()` can be called. The indexer orchestrator
-	/// calls `initialize()` on each registered extractor before
-	/// starting the extraction phase.
-	///
-	/// # Errors
-	/// Returns `Err(ExtractorError)` if initialization fails
-	/// (e.g., grammar file not found, WASM compilation error).
-	fn initialize(&mut self) -> Result<(), ExtractorError>;
+    /// One-time initialization before first use. Mirrors the TS
+    /// contract's `initialize(): Promise<void>`.
+    ///
+    /// Concrete adapters use this for grammar loading, WASM
+    /// compilation, or other one-time setup that must complete
+    /// before `extract()` can be called. The indexer orchestrator
+    /// calls `initialize()` on each registered extractor before
+    /// starting the extraction phase.
+    ///
+    /// # Errors
+    /// Returns `Err(ExtractorError)` if initialization fails
+    /// (e.g., grammar file not found, WASM compilation error).
+    fn initialize(&mut self) -> Result<(), ExtractorError>;
 
-	/// Extract nodes and edges from a single file's source text.
-	///
-	/// # Arguments
-	/// - `source`: UTF-8 source text (not a file path)
-	/// - `file_path`: repo-relative path (forward slashes)
-	/// - `file_uid`: e.g., `"my-repo:src/core/Foo.ts"`
-	/// - `repo_uid`: repository identifier
-	/// - `snapshot_uid`: snapshot being built
-	///
-	/// # Errors
-	/// Returns `Err(ExtractorError)` only for true adapter/setup
-	/// failures (null parser, wrong grammar, uninitialized state).
-	/// Syntactically broken source still produces `Ok` with a
-	/// partial extraction result — tree-sitter returns partial
-	/// trees with ERROR nodes, and the extractor visits whatever
-	/// it can find. The indexer records `ParseStatus::Failed` only
-	/// when this method returns `Err`.
-	fn extract(
-		&self,
-		source: &str,
-		file_path: &str,
-		file_uid: &str,
-		repo_uid: &str,
-		snapshot_uid: &str,
-	) -> Result<ExtractionResult, ExtractorError>;
+    /// Extract nodes and edges from a single file's source text.
+    ///
+    /// # Arguments
+    /// - `source`: UTF-8 source text (not a file path)
+    /// - `file_path`: repo-relative path (forward slashes)
+    /// - `file_uid`: e.g., `"my-repo:src/core/Foo.ts"`
+    /// - `repo_uid`: repository identifier
+    /// - `snapshot_uid`: snapshot being built
+    ///
+    /// # Errors
+    /// Returns `Err(ExtractorError)` only for true adapter/setup
+    /// failures (null parser, wrong grammar, uninitialized state).
+    /// Syntactically broken source still produces `Ok` with a
+    /// partial extraction result — tree-sitter returns partial
+    /// trees with ERROR nodes, and the extractor visits whatever
+    /// it can find. The indexer records `ParseStatus::Failed` only
+    /// when this method returns `Err`.
+    fn extract(
+        &self,
+        source: &str,
+        file_path: &str,
+        file_uid: &str,
+        repo_uid: &str,
+        snapshot_uid: &str,
+    ) -> Result<ExtractionResult, ExtractorError>;
 }

@@ -101,12 +101,11 @@ pub(super) fn run_modules_unowned(args: &[String]) -> ExitCode {
     };
 
     // Build set of owned file UIDs
-    let owned_uids: HashSet<&str> = ownership.iter()
-        .map(|o| o.file_uid.as_str())
-        .collect();
+    let owned_uids: HashSet<&str> = ownership.iter().map(|o| o.file_uid.as_str()).collect();
 
     // Build set of module root paths for classification
-    let module_roots: HashSet<&str> = modules.iter()
+    let module_roots: HashSet<&str> = modules
+        .iter()
         .map(|m| m.canonical_root_path.as_str())
         .collect();
 
@@ -138,7 +137,9 @@ pub(super) fn run_modules_unowned(args: &[String]) -> ExitCode {
 
     // Sort by reason then path
     unowned_files.sort_by(|a, b| {
-        a.reason.cmp(&b.reason).then_with(|| a.file_path.cmp(&b.file_path))
+        a.reason
+            .cmp(&b.reason)
+            .then_with(|| a.file_path.cmp(&b.file_path))
     });
 
     // Compute summary
@@ -231,31 +232,55 @@ fn is_excluded_directory(dir_name: &str) -> bool {
     let dir_lower = dir_name.to_lowercase();
     matches!(
         dir_lower.as_str(),
-        "vendor" | "vendors"
-            | "third_party" | "third-party" | "thirdparty"
+        "vendor"
+            | "vendors"
+            | "third_party"
+            | "third-party"
+            | "thirdparty"
             | "node_modules"
             | "bower_components"
             | "jspm_packages"
-            | "external" | "externals"
-            | "deps" | "dependencies"
-            | "dist" | "build" | "builds"
-            | "out" | "output"
+            | "external"
+            | "externals"
+            | "deps"
+            | "dependencies"
+            | "dist"
+            | "build"
+            | "builds"
+            | "out"
+            | "output"
             | "target"
             | "bin"
             | "obj"
             | "_build"
-            | "generated" | "gen" | "codegen"
-            | "auto" | "autogen"
+            | "generated"
+            | "gen"
+            | "codegen"
+            | "auto"
+            | "autogen"
             | "__generated__"
-            | "docs" | "doc" | "documentation"
-            | "man" | "manpages"
-            | "javadoc" | "apidoc" | "apidocs"
-            | "examples" | "example"
-            | "samples" | "sample"
-            | "demo" | "demos"
-            | "tutorials" | "tutorial"
-            | "benchmark" | "benchmarks" | "bench" | "benches"
-            | "perf" | "performance"
+            | "docs"
+            | "doc"
+            | "documentation"
+            | "man"
+            | "manpages"
+            | "javadoc"
+            | "apidoc"
+            | "apidocs"
+            | "examples"
+            | "example"
+            | "samples"
+            | "sample"
+            | "demo"
+            | "demos"
+            | "tutorials"
+            | "tutorial"
+            | "benchmark"
+            | "benchmarks"
+            | "bench"
+            | "benches"
+            | "perf"
+            | "performance"
     )
 }
 
@@ -273,15 +298,29 @@ fn is_source_file(path: &str) -> bool {
     let ext = path.rsplit('.').next().unwrap_or("");
     matches!(
         ext.to_lowercase().as_str(),
-        "c" | "h" | "cpp" | "hpp" | "cc" | "hh" | "cxx" | "hxx"
-            | "java" | "kt" | "scala"
+        "c" | "h"
+            | "cpp"
+            | "hpp"
+            | "cc"
+            | "hh"
+            | "cxx"
+            | "hxx"
+            | "java"
+            | "kt"
+            | "scala"
             | "py"
             | "rs"
             | "go"
-            | "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs"
+            | "js"
+            | "jsx"
+            | "ts"
+            | "tsx"
+            | "mjs"
+            | "cjs"
             | "rb"
             | "swift"
-            | "m" | "mm"
+            | "m"
+            | "mm"
     )
 }
 

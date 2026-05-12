@@ -107,7 +107,12 @@ fn extract_definition_header(text: &str) -> Option<String> {
                     .take_while(|c| c.is_alphanumeric() || *c == '_')
                     .collect();
 
-                if !name.is_empty() && name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                if !name.is_empty()
+                    && name
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false)
                 {
                     return Some(name);
                 }
@@ -133,7 +138,13 @@ fn extract_reference_type(text: &str) -> Option<String> {
         .take_while(|c| c.is_alphanumeric() || *c == '_')
         .collect();
 
-    if !name.is_empty() && name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+    if !name.is_empty()
+        && name
+            .chars()
+            .next()
+            .map(|c| c.is_uppercase())
+            .unwrap_or(false)
+    {
         Some(name)
     } else {
         None
@@ -145,7 +156,12 @@ fn extract_plain_type(text: &str) -> Option<String> {
     let text = text.trim();
 
     // Must start with uppercase
-    if !text.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+    if !text
+        .chars()
+        .next()
+        .map(|c| c.is_uppercase())
+        .unwrap_or(false)
+    {
         return None;
     }
 
@@ -253,7 +269,10 @@ pub fn is_valid_rust_type_name(name: &str) -> bool {
     }
 
     // Must start with uppercase (Rust type convention)
-    name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+    name.chars()
+        .next()
+        .map(|c| c.is_uppercase())
+        .unwrap_or(false)
 }
 
 /// Check if a Rust type is external (from std or well-known crates).
@@ -270,10 +289,48 @@ pub fn is_external_type(type_name: &str) -> bool {
 
 static REJECT_TOKENS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     [
-        "self", "Self", "let", "mut", "fn", "pub", "mod", "use", "impl", "trait", "struct", "enum",
-        "type", "const", "static", "return", "if", "else", "match", "for", "while", "loop",
-        "break", "continue", "async", "await", "move", "ref", "where", "as", "in", "true",
-        "false", "crate", "super", "any", "unknown", "{unknown}", "test", "def", "dyn", "unsafe",
+        "self",
+        "Self",
+        "let",
+        "mut",
+        "fn",
+        "pub",
+        "mod",
+        "use",
+        "impl",
+        "trait",
+        "struct",
+        "enum",
+        "type",
+        "const",
+        "static",
+        "return",
+        "if",
+        "else",
+        "match",
+        "for",
+        "while",
+        "loop",
+        "break",
+        "continue",
+        "async",
+        "await",
+        "move",
+        "ref",
+        "where",
+        "as",
+        "in",
+        "true",
+        "false",
+        "crate",
+        "super",
+        "any",
+        "unknown",
+        "{unknown}",
+        "test",
+        "def",
+        "dyn",
+        "unsafe",
         "extern",
     ]
     .into_iter()

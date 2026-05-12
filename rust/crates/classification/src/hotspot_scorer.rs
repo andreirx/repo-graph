@@ -48,10 +48,7 @@ pub struct HotspotEntry {
 ///   1. `hotspot_score` descending
 ///   2. `lines_changed` descending
 ///   3. `file_path` ascending
-pub fn compute_hotspots(
-    churn: &[ChurnInput],
-    complexity: &[ComplexityInput],
-) -> Vec<HotspotEntry> {
+pub fn compute_hotspots(churn: &[ChurnInput], complexity: &[ComplexityInput]) -> Vec<HotspotEntry> {
     // Build complexity lookup by file path
     let complexity_map: HashMap<&str, u64> = complexity
         .iter()
@@ -62,16 +59,18 @@ pub fn compute_hotspots(
     let mut results: Vec<HotspotEntry> = churn
         .iter()
         .filter_map(|c| {
-            complexity_map.get(c.file_path.as_str()).map(|&sum_complexity| {
-                let hotspot_score = c.lines_changed * sum_complexity;
-                HotspotEntry {
-                    file_path: c.file_path.clone(),
-                    commit_count: c.commit_count,
-                    lines_changed: c.lines_changed,
-                    sum_complexity,
-                    hotspot_score,
-                }
-            })
+            complexity_map
+                .get(c.file_path.as_str())
+                .map(|&sum_complexity| {
+                    let hotspot_score = c.lines_changed * sum_complexity;
+                    HotspotEntry {
+                        file_path: c.file_path.clone(),
+                        commit_count: c.commit_count,
+                        lines_changed: c.lines_changed,
+                        sum_complexity,
+                        hotspot_score,
+                    }
+                })
         })
         .collect();
 

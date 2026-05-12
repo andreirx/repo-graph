@@ -249,10 +249,7 @@ mod tests {
 
     #[test]
     fn error_response_serializes_correctly() {
-        let resp = ErrorResponse::new(
-            "req-1",
-            ErrorDetail::unknown_method("bogus"),
-        );
+        let resp = ErrorResponse::new("req-1", ErrorDetail::unknown_method("bogus"));
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains(r#""id":"req-1""#));
         assert!(json.contains(r#""code":"UnknownMethod""#));

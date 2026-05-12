@@ -61,32 +61,32 @@ use serde::{Deserialize, Serialize};
 /// the fields they want to override.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum Emitted<T> {
-	#[default]
-	Unset,
-	Value(T),
+    #[default]
+    Unset,
+    Value(T),
 }
 
 impl<T> Emitted<T> {
-	/// Resolve this emission against a fallback closure. If the
-	/// emission is `Unset`, the fallback is invoked. Otherwise the
-	/// inner value is returned.
-	///
-	/// Used by the walker merge path:
-	///
-	/// ```ignore
-	/// let target_path = emission.target_path.or_else_with(|| walker_target_path);
-	/// ```
-	pub fn or_else_with<F: FnOnce() -> T>(self, f: F) -> T {
-		match self {
-			Emitted::Unset => f(),
-			Emitted::Value(v) => v,
-		}
-	}
+    /// Resolve this emission against a fallback closure. If the
+    /// emission is `Unset`, the fallback is invoked. Otherwise the
+    /// inner value is returned.
+    ///
+    /// Used by the walker merge path:
+    ///
+    /// ```ignore
+    /// let target_path = emission.target_path.or_else_with(|| walker_target_path);
+    /// ```
+    pub fn or_else_with<F: FnOnce() -> T>(self, f: F) -> T {
+        match self {
+            Emitted::Unset => f(),
+            Emitted::Value(v) => v,
+        }
+    }
 
-	/// True iff the hook supplied a value for this field.
-	pub fn is_set(&self) -> bool {
-		matches!(self, Emitted::Value(_))
-	}
+    /// True iff the hook supplied a value for this field.
+    pub fn is_set(&self) -> bool {
+        matches!(self, Emitted::Value(_))
+    }
 }
 
 // ── Family / language enums ────────────────────────────────────────
@@ -99,11 +99,11 @@ impl<T> Emitted<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DetectorLanguage {
-	Ts,
-	Py,
-	Rs,
-	Java,
-	C,
+    Ts,
+    Py,
+    Rs,
+    Java,
+    C,
 }
 
 /// Detector family — what kind of seam this detector reports.
@@ -112,8 +112,8 @@ pub enum DetectorLanguage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DetectorFamily {
-	Env,
-	Fs,
+    Env,
+    Fs,
 }
 
 // ── Env access enums ───────────────────────────────────────────────
@@ -126,9 +126,9 @@ pub enum DetectorFamily {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EnvAccessKind {
-	Required,
-	Optional,
-	Unknown,
+    Required,
+    Optional,
+    Unknown,
 }
 
 /// Which language pattern matched an env access.
@@ -139,15 +139,15 @@ pub enum EnvAccessKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EnvAccessPattern {
-	ProcessEnvDot,
-	ProcessEnvBracket,
-	ProcessEnvDestructure,
-	OsEnviron,
-	OsGetenv,
-	StdEnvVar,
-	SystemGetenv,
-	CGetenv,
-	DotenvReference,
+    ProcessEnvDot,
+    ProcessEnvBracket,
+    ProcessEnvDestructure,
+    OsEnviron,
+    OsGetenv,
+    StdEnvVar,
+    SystemGetenv,
+    CGetenv,
+    DotenvReference,
 }
 
 // ── Fs mutation enums ──────────────────────────────────────────────
@@ -159,14 +159,14 @@ pub enum EnvAccessPattern {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MutationKind {
-	WriteFile,
-	AppendFile,
-	DeletePath,
-	CreateDir,
-	RenamePath,
-	CopyPath,
-	ChmodPath,
-	CreateTemp,
+    WriteFile,
+    AppendFile,
+    DeletePath,
+    CreateDir,
+    RenamePath,
+    CopyPath,
+    ChmodPath,
+    CreateTemp,
 }
 
 /// Per-language fs mutation pattern identifier.
@@ -177,46 +177,46 @@ pub enum MutationKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MutationPattern {
-	// JS/TS (node:fs)
-	FsWriteFile,
-	FsAppendFile,
-	FsUnlink,
-	FsRm,
-	FsMkdir,
-	FsCreateWriteStream,
-	FsRename,
-	FsCopyFile,
-	FsChmod,
-	// Python
-	PyOpenWrite,
-	PyOpenAppend,
-	PyOsRemove,
-	PyOsUnlink,
-	PyShutilRmtree,
-	PyOsMkdir,
-	PyOsMakedirs,
-	PyPathlibWrite,
-	PyPathlibMkdir,
-	PyTempfile,
-	// Rust
-	RustFsWrite,
-	RustFsRemoveFile,
-	RustFsRemoveDirAll,
-	RustFsCreateDir,
-	RustFsRename,
-	RustFsCopy,
-	// Java
-	JavaFilesWrite,
-	JavaFilesDelete,
-	JavaFilesCreateDirectory,
-	JavaFileOutputStream,
-	// C/C++
-	CFopenWrite,
-	CFopenAppend,
-	CUnlink,
-	CRemove,
-	CRmdir,
-	CMkdir,
+    // JS/TS (node:fs)
+    FsWriteFile,
+    FsAppendFile,
+    FsUnlink,
+    FsRm,
+    FsMkdir,
+    FsCreateWriteStream,
+    FsRename,
+    FsCopyFile,
+    FsChmod,
+    // Python
+    PyOpenWrite,
+    PyOpenAppend,
+    PyOsRemove,
+    PyOsUnlink,
+    PyShutilRmtree,
+    PyOsMkdir,
+    PyOsMakedirs,
+    PyPathlibWrite,
+    PyPathlibMkdir,
+    PyTempfile,
+    // Rust
+    RustFsWrite,
+    RustFsRemoveFile,
+    RustFsRemoveDirAll,
+    RustFsCreateDir,
+    RustFsRename,
+    RustFsCopy,
+    // Java
+    JavaFilesWrite,
+    JavaFilesDelete,
+    JavaFilesCreateDirectory,
+    JavaFileOutputStream,
+    // C/C++
+    CFopenWrite,
+    CFopenAppend,
+    CUnlink,
+    CRemove,
+    CRmdir,
+    CMkdir,
 }
 
 // ── Public output facts (parity boundary) ──────────────────────────
@@ -237,13 +237,13 @@ pub enum MutationPattern {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectedEnvDependency {
-	pub var_name: String,
-	pub access_kind: EnvAccessKind,
-	pub access_pattern: EnvAccessPattern,
-	pub file_path: String,
-	pub line_number: usize,
-	pub default_value: Option<String>,
-	pub confidence: f64,
+    pub var_name: String,
+    pub access_kind: EnvAccessKind,
+    pub access_pattern: EnvAccessPattern,
+    pub file_path: String,
+    pub line_number: usize,
+    pub default_value: Option<String>,
+    pub confidence: f64,
 }
 
 /// Detected fs mutation. Mirrors `DetectedFsMutation` in
@@ -264,14 +264,14 @@ pub struct DetectedEnvDependency {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectedFsMutation {
-	pub file_path: String,
-	pub line_number: usize,
-	pub mutation_kind: MutationKind,
-	pub mutation_pattern: MutationPattern,
-	pub target_path: Option<String>,
-	pub destination_path: Option<String>,
-	pub dynamic_path: bool,
-	pub confidence: f64,
+    pub file_path: String,
+    pub line_number: usize,
+    pub mutation_kind: MutationKind,
+    pub mutation_pattern: MutationPattern,
+    pub target_path: Option<String>,
+    pub destination_path: Option<String>,
+    pub dynamic_path: bool,
+    pub confidence: f64,
 }
 
 // ── Detector record runtime types ──────────────────────────────────
@@ -290,17 +290,17 @@ pub struct DetectedFsMutation {
 /// hook's supplies set.
 #[derive(Debug, Clone)]
 pub struct EnvDetectorRecord {
-	pub language: DetectorLanguage,
-	pub family: DetectorFamily,
-	pub pattern_id: String,
-	pub regex: String,
-	pub flags: String,
-	pub compiled_regex: Regex,
-	pub confidence: f64,
-	pub hook: Option<String>,
-	pub single_match_per_line: bool,
-	pub access_kind: Option<EnvAccessKind>,
-	pub access_pattern: Option<EnvAccessPattern>,
+    pub language: DetectorLanguage,
+    pub family: DetectorFamily,
+    pub pattern_id: String,
+    pub regex: String,
+    pub flags: String,
+    pub compiled_regex: Regex,
+    pub confidence: f64,
+    pub hook: Option<String>,
+    pub single_match_per_line: bool,
+    pub access_kind: Option<EnvAccessKind>,
+    pub access_pattern: Option<EnvAccessPattern>,
 }
 
 /// Fs-family detector record after loading.
@@ -313,19 +313,19 @@ pub struct EnvDetectorRecord {
 /// single walker call.
 #[derive(Debug, Clone)]
 pub struct FsDetectorRecord {
-	pub language: DetectorLanguage,
-	pub family: DetectorFamily,
-	pub pattern_id: String,
-	pub regex: String,
-	pub flags: String,
-	pub compiled_regex: Regex,
-	pub confidence: f64,
-	pub hook: Option<String>,
-	pub single_match_per_line: bool,
-	pub base_kind: Option<MutationKind>,
-	pub base_pattern: Option<MutationPattern>,
-	pub two_ended: bool,
-	pub position_dedup_group: Option<String>,
+    pub language: DetectorLanguage,
+    pub family: DetectorFamily,
+    pub pattern_id: String,
+    pub regex: String,
+    pub flags: String,
+    pub compiled_regex: Regex,
+    pub confidence: f64,
+    pub hook: Option<String>,
+    pub single_match_per_line: bool,
+    pub base_kind: Option<MutationKind>,
+    pub base_pattern: Option<MutationPattern>,
+    pub two_ended: bool,
+    pub position_dedup_group: Option<String>,
 }
 
 /// Discriminated union of env and fs detector records.
@@ -334,18 +334,18 @@ pub struct FsDetectorRecord {
 /// on the variant to dispatch to the appropriate emission path.
 #[derive(Debug, Clone)]
 pub enum DetectorRecord {
-	Env(EnvDetectorRecord),
-	Fs(FsDetectorRecord),
+    Env(EnvDetectorRecord),
+    Fs(FsDetectorRecord),
 }
 
 impl DetectorRecord {
-	/// The (family, language) bucket key for the loaded graph index.
-	pub fn family_language(&self) -> (DetectorFamily, DetectorLanguage) {
-		match self {
-			DetectorRecord::Env(r) => (DetectorFamily::Env, r.language),
-			DetectorRecord::Fs(r) => (DetectorFamily::Fs, r.language),
-		}
-	}
+    /// The (family, language) bucket key for the loaded graph index.
+    pub fn family_language(&self) -> (DetectorFamily, DetectorLanguage) {
+        match self {
+            DetectorRecord::Env(r) => (DetectorFamily::Env, r.language),
+            DetectorRecord::Fs(r) => (DetectorFamily::Fs, r.language),
+        }
+    }
 }
 
 /// The full loaded detector graph.
@@ -358,9 +358,8 @@ impl DetectorRecord {
 /// preserve table order).
 #[derive(Debug, Clone)]
 pub struct LoadedDetectorGraph {
-	pub all_records: Vec<DetectorRecord>,
-	pub by_family_language:
-		HashMap<(DetectorFamily, DetectorLanguage), Vec<DetectorRecord>>,
+    pub all_records: Vec<DetectorRecord>,
+    pub by_family_language: HashMap<(DetectorFamily, DetectorLanguage), Vec<DetectorRecord>>,
 }
 
 // ── Raw TOML deserialization shapes ────────────────────────────────
@@ -387,8 +386,8 @@ pub struct LoadedDetectorGraph {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawDetectorDocument {
-	#[serde(default)]
-	pub detector: Vec<RawDetectorRecord>,
+    #[serde(default)]
+    pub detector: Vec<RawDetectorRecord>,
 }
 
 /// One raw `[[detector]]` table from the TOML source.
@@ -408,22 +407,22 @@ pub(crate) struct RawDetectorDocument {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawDetectorRecord {
-	pub language: Option<String>,
-	pub family: Option<String>,
-	pub pattern_id: Option<String>,
-	pub regex: Option<String>,
-	pub flags: Option<String>,
-	pub confidence: Option<f64>,
-	pub hook: Option<String>,
-	pub single_match_per_line: Option<bool>,
-	// Env-only fields
-	pub access_kind: Option<String>,
-	pub access_pattern: Option<String>,
-	// Fs-only fields
-	pub base_kind: Option<String>,
-	pub base_pattern: Option<String>,
-	pub two_ended: Option<bool>,
-	pub position_dedup_group: Option<String>,
+    pub language: Option<String>,
+    pub family: Option<String>,
+    pub pattern_id: Option<String>,
+    pub regex: Option<String>,
+    pub flags: Option<String>,
+    pub confidence: Option<f64>,
+    pub hook: Option<String>,
+    pub single_match_per_line: Option<bool>,
+    // Env-only fields
+    pub access_kind: Option<String>,
+    pub access_pattern: Option<String>,
+    // Fs-only fields
+    pub base_kind: Option<String>,
+    pub base_pattern: Option<String>,
+    pub two_ended: Option<bool>,
+    pub position_dedup_group: Option<String>,
 }
 
 // ── Hook context, result, emission ────────────────────────────────
@@ -440,11 +439,11 @@ pub(crate) struct RawDetectorRecord {
 /// the input text alive for the duration of the hook call.
 #[derive(Debug)]
 pub struct EnvHookContext<'a> {
-	pub captures: regex::Captures<'a>,
-	pub line: &'a str,
-	pub line_number: usize,
-	pub file_path: &'a str,
-	pub base_record: &'a EnvDetectorRecord,
+    pub captures: regex::Captures<'a>,
+    pub line: &'a str,
+    pub line_number: usize,
+    pub file_path: &'a str,
+    pub base_record: &'a EnvDetectorRecord,
 }
 
 /// One env record an env hook wants to emit before walker merge.
@@ -472,11 +471,11 @@ pub struct EnvHookContext<'a> {
 ///   - `confidence`: `Option<f64>`. `??` semantics.
 #[derive(Debug, Clone, Default)]
 pub struct EnvHookEmission {
-	pub var_name: Option<String>,
-	pub access_kind: Option<EnvAccessKind>,
-	pub access_pattern: Option<EnvAccessPattern>,
-	pub default_value: Emitted<Option<String>>,
-	pub confidence: Option<f64>,
+    pub var_name: Option<String>,
+    pub access_kind: Option<EnvAccessKind>,
+    pub access_pattern: Option<EnvAccessPattern>,
+    pub default_value: Emitted<Option<String>>,
+    pub confidence: Option<f64>,
 }
 
 /// Result returned by an env hook.
@@ -485,18 +484,18 @@ pub struct EnvHookEmission {
 /// or more partials that the walker merges with defaults.
 #[derive(Debug, Clone)]
 pub enum EnvHookResult {
-	Skip,
-	Records(Vec<EnvHookEmission>),
+    Skip,
+    Records(Vec<EnvHookEmission>),
 }
 
 /// Context passed to an fs hook on each regex match.
 #[derive(Debug)]
 pub struct FsHookContext<'a> {
-	pub captures: regex::Captures<'a>,
-	pub line: &'a str,
-	pub line_number: usize,
-	pub file_path: &'a str,
-	pub base_record: &'a FsDetectorRecord,
+    pub captures: regex::Captures<'a>,
+    pub line: &'a str,
+    pub line_number: usize,
+    pub file_path: &'a str,
+    pub base_record: &'a FsDetectorRecord,
 }
 
 /// One fs record an fs hook wants to emit before walker merge.
@@ -532,19 +531,19 @@ pub struct FsHookContext<'a> {
 /// setting only the fields they want to override.
 #[derive(Debug, Clone, Default)]
 pub struct FsHookEmission {
-	pub target_path: Emitted<Option<String>>,
-	pub destination_path: Emitted<Option<String>>,
-	pub mutation_kind: Option<MutationKind>,
-	pub mutation_pattern: Option<MutationPattern>,
-	pub dynamic_path: Emitted<bool>,
-	pub confidence: Option<f64>,
+    pub target_path: Emitted<Option<String>>,
+    pub destination_path: Emitted<Option<String>>,
+    pub mutation_kind: Option<MutationKind>,
+    pub mutation_pattern: Option<MutationPattern>,
+    pub dynamic_path: Emitted<bool>,
+    pub confidence: Option<f64>,
 }
 
 /// Result returned by an fs hook.
 #[derive(Debug, Clone)]
 pub enum FsHookResult {
-	Skip,
-	Records(Vec<FsHookEmission>),
+    Skip,
+    Records(Vec<FsHookEmission>),
 }
 
 // ── Hook function pointer types ────────────────────────────────────
@@ -574,20 +573,20 @@ pub type FsHook = for<'a> fn(ctx: FsHookContext<'a>) -> FsHookResult;
 /// Env output fields a hook may supply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EnvSuppliedField {
-	VarName,
-	AccessKind,
-	AccessPattern,
-	DefaultValue,
+    VarName,
+    AccessKind,
+    AccessPattern,
+    DefaultValue,
 }
 
 /// Fs output fields a hook may supply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FsSuppliedField {
-	TargetPath,
-	DestinationPath,
-	MutationKind,
-	MutationPattern,
-	DynamicPath,
+    TargetPath,
+    DestinationPath,
+    MutationKind,
+    MutationPattern,
+    DynamicPath,
 }
 
 /// Required env output fields the loader must verify are reachable
@@ -600,10 +599,10 @@ pub enum FsSuppliedField {
 /// the must-be-supplied set because the walker default makes it
 /// reachable for any record with at least one capture group.
 pub fn env_must_be_supplied() -> HashSet<EnvSuppliedField> {
-	let mut s = HashSet::new();
-	s.insert(EnvSuppliedField::AccessKind);
-	s.insert(EnvSuppliedField::AccessPattern);
-	s
+    let mut s = HashSet::new();
+    s.insert(EnvSuppliedField::AccessKind);
+    s.insert(EnvSuppliedField::AccessPattern);
+    s
 }
 
 /// Required fs output fields the loader must verify are reachable.
@@ -613,10 +612,10 @@ pub fn env_must_be_supplied() -> HashSet<EnvSuppliedField> {
 /// `dynamic_path` from `target_path == None`. None of those are in
 /// the must-be-supplied set.
 pub fn fs_must_be_supplied() -> HashSet<FsSuppliedField> {
-	let mut s = HashSet::new();
-	s.insert(FsSuppliedField::MutationKind);
-	s.insert(FsSuppliedField::MutationPattern);
-	s
+    let mut s = HashSet::new();
+    s.insert(FsSuppliedField::MutationKind);
+    s.insert(FsSuppliedField::MutationPattern);
+    s
 }
 
 // ── Hook registry ──────────────────────────────────────────────────
@@ -629,15 +628,15 @@ pub fn fs_must_be_supplied() -> HashSet<FsSuppliedField> {
 /// record references the hook.
 #[derive(Debug, Clone)]
 pub struct EnvHookEntry {
-	pub func: EnvHook,
-	pub supplies: HashSet<EnvSuppliedField>,
+    pub func: EnvHook,
+    pub supplies: HashSet<EnvSuppliedField>,
 }
 
 /// One fs hook entry: function pointer plus declared supplies set.
 #[derive(Debug, Clone)]
 pub struct FsHookEntry {
-	pub func: FsHook,
-	pub supplies: HashSet<FsSuppliedField>,
+    pub func: FsHook,
+    pub supplies: HashSet<FsSuppliedField>,
 }
 
 /// Named registry of env and fs hook entries.
@@ -653,6 +652,6 @@ pub struct FsHookEntry {
 /// + a function pointer + a supplies set to the registry builder.
 #[derive(Debug, Clone, Default)]
 pub struct HookRegistry {
-	pub env: HashMap<&'static str, EnvHookEntry>,
-	pub fs: HashMap<&'static str, FsHookEntry>,
+    pub env: HashMap<&'static str, EnvHookEntry>,
+    pub fs: HashMap<&'static str, FsHookEntry>,
 }

@@ -239,7 +239,8 @@ mod tests {
                 'c-ipc:0.1.0', 'api_call', 0.95, '{}'
             )",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Insert a channel detail
         conn.execute(
@@ -249,30 +250,44 @@ mod tests {
                 'ch1', 'surf1', 'unix_socket', '/var/run/daemon.sock', '/var/run/daemon.sock'
             )",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Verify both exist
         let surface_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM boundary_interaction_surfaces", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM boundary_interaction_surfaces",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(surface_count, 1);
 
         let channel_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM boundary_channel_details", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM boundary_channel_details", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(channel_count, 1);
 
         // Delete the snapshot (should cascade to surface and channel)
-        conn.execute("DELETE FROM snapshots WHERE snapshot_uid = 's1'", []).unwrap();
+        conn.execute("DELETE FROM snapshots WHERE snapshot_uid = 's1'", [])
+            .unwrap();
 
         // Both should be gone
         let surface_count_after: i64 = conn
-            .query_row("SELECT COUNT(*) FROM boundary_interaction_surfaces", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM boundary_interaction_surfaces",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(surface_count_after, 0);
 
         let channel_count_after: i64 = conn
-            .query_row("SELECT COUNT(*) FROM boundary_channel_details", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM boundary_channel_details", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(channel_count_after, 0);
     }
@@ -330,12 +345,17 @@ mod tests {
                     ch_uid, surf_uid, kind, identity
                 ),
                 [],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         // All 5 should exist
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM boundary_interaction_surfaces", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM boundary_interaction_surfaces",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(count, 5);
     }

@@ -18,39 +18,85 @@ use repo_graph_classification::types::RuntimeBuiltinsSet;
 
 const JAVA_LANG_CLASSES: &[&str] = &[
     // Core object types
-    "Object", "Class", "ClassLoader",
+    "Object",
+    "Class",
+    "ClassLoader",
     // Primitive wrappers
-    "Boolean", "Byte", "Character", "Short", "Integer", "Long", "Float", "Double",
-    "Number", "Void",
+    "Boolean",
+    "Byte",
+    "Character",
+    "Short",
+    "Integer",
+    "Long",
+    "Float",
+    "Double",
+    "Number",
+    "Void",
     // String types
-    "String", "StringBuffer", "StringBuilder", "CharSequence",
+    "String",
+    "StringBuffer",
+    "StringBuilder",
+    "CharSequence",
     // Exceptions and errors
-    "Throwable", "Exception", "Error",
-    "RuntimeException", "NullPointerException", "IllegalArgumentException",
-    "IllegalStateException", "IndexOutOfBoundsException", "ArrayIndexOutOfBoundsException",
-    "StringIndexOutOfBoundsException", "UnsupportedOperationException",
-    "ArithmeticException", "ClassCastException", "ClassNotFoundException",
-    "CloneNotSupportedException", "InterruptedException", "NoSuchMethodException",
-    "NoSuchFieldException", "SecurityException",
-    "OutOfMemoryError", "StackOverflowError", "AssertionError",
-    "LinkageError", "NoClassDefFoundError", "ExceptionInInitializerError",
+    "Throwable",
+    "Exception",
+    "Error",
+    "RuntimeException",
+    "NullPointerException",
+    "IllegalArgumentException",
+    "IllegalStateException",
+    "IndexOutOfBoundsException",
+    "ArrayIndexOutOfBoundsException",
+    "StringIndexOutOfBoundsException",
+    "UnsupportedOperationException",
+    "ArithmeticException",
+    "ClassCastException",
+    "ClassNotFoundException",
+    "CloneNotSupportedException",
+    "InterruptedException",
+    "NoSuchMethodException",
+    "NoSuchFieldException",
+    "SecurityException",
+    "OutOfMemoryError",
+    "StackOverflowError",
+    "AssertionError",
+    "LinkageError",
+    "NoClassDefFoundError",
+    "ExceptionInInitializerError",
     // System
-    "System", "Runtime", "Process", "ProcessBuilder",
-    "Thread", "ThreadGroup", "ThreadLocal", "InheritableThreadLocal",
+    "System",
+    "Runtime",
+    "Process",
+    "ProcessBuilder",
+    "Thread",
+    "ThreadGroup",
+    "ThreadLocal",
+    "InheritableThreadLocal",
     "Runnable",
     // Math
-    "Math", "StrictMath",
+    "Math",
+    "StrictMath",
     // Reflection
-    "Package", "Module",
+    "Package",
+    "Module",
     // Annotations
-    "Override", "Deprecated", "SuppressWarnings", "SafeVarargs", "FunctionalInterface",
+    "Override",
+    "Deprecated",
+    "SuppressWarnings",
+    "SafeVarargs",
+    "FunctionalInterface",
     // Records (Java 14+)
     "Record",
     // Enums
     "Enum",
     // Misc
-    "Comparable", "Cloneable", "Iterable", "AutoCloseable",
-    "Appendable", "Readable", "StackTraceElement",
+    "Comparable",
+    "Cloneable",
+    "Iterable",
+    "AutoCloseable",
+    "Appendable",
+    "Readable",
+    "StackTraceElement",
 ];
 
 // ── JDK package prefixes ─────────────────────────────────────────
@@ -101,15 +147,10 @@ const JDK_PACKAGE_PREFIXES: &[&str] = &[
 
 /// Build the full runtime builtins set for the Java ecosystem.
 pub fn java_runtime_builtins() -> RuntimeBuiltinsSet {
-    let identifiers: Vec<String> = JAVA_LANG_CLASSES
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let identifiers: Vec<String> = JAVA_LANG_CLASSES.iter().map(|s| s.to_string()).collect();
 
-    let module_specifiers: Vec<String> = JDK_PACKAGE_PREFIXES
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let module_specifiers: Vec<String> =
+        JDK_PACKAGE_PREFIXES.iter().map(|s| s.to_string()).collect();
 
     RuntimeBuiltinsSet {
         identifiers,

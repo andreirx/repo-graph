@@ -88,9 +88,13 @@ impl std::fmt::Display for DegradationPolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MustBePresent => write!(f, "must_be_present"),
-            Self::MayBeOmittedWithExplicitUnknown => write!(f, "may_be_omitted_with_explicit_unknown"),
+            Self::MayBeOmittedWithExplicitUnknown => {
+                write!(f, "may_be_omitted_with_explicit_unknown")
+            }
             Self::MustTriggerWarning => write!(f, "must_trigger_warning"),
-            Self::MustTriggerRebuildRecommendation => write!(f, "must_trigger_rebuild_recommendation"),
+            Self::MustTriggerRebuildRecommendation => {
+                write!(f, "must_trigger_rebuild_recommendation")
+            }
             Self::UnsupportedOnEmbodiment => write!(f, "unsupported_on_embodiment"),
         }
     }

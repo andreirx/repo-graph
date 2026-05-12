@@ -26,9 +26,10 @@ use std::fmt;
 /// Refreshing ──acquire_read──> BLOCKED
 /// Refreshing ──acquire_write──> Conflict (coordinator waits)
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum CoordinatorState {
     /// No active readers or writers.
+    #[default]
     Idle,
 
     /// Active readers. Count must be > 0.
@@ -40,12 +41,6 @@ pub enum CoordinatorState {
     /// A refresh operation is in progress. Semantically similar to
     /// Writing, but tracked separately for observability.
     Refreshing,
-}
-
-impl Default for CoordinatorState {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 impl fmt::Display for CoordinatorState {
@@ -98,13 +93,12 @@ impl CoordinatorState {
         match self {
             Self::Reading(1) => TransitionResult::Ok(Self::Idle),
             Self::Reading(n) if *n > 1 => TransitionResult::Ok(Self::Reading(n - 1)),
-            Self::Reading(0) => TransitionResult::InvariantViolation(
-                "Reading(0) is invalid state".to_string(),
-            ),
-            _ => TransitionResult::InvariantViolation(format!(
-                "cannot release read while {}",
-                self
-            )),
+            Self::Reading(0) => {
+                TransitionResult::InvariantViolation("Reading(0) is invalid state".to_string())
+            }
+            _ => {
+                TransitionResult::InvariantViolation(format!("cannot release read while {}", self))
+            }
         }
     }
 
@@ -130,10 +124,9 @@ impl CoordinatorState {
     pub fn release_write(&self) -> TransitionResult {
         match self {
             Self::Writing => TransitionResult::Ok(Self::Idle),
-            _ => TransitionResult::InvariantViolation(format!(
-                "cannot release write while {}",
-                self
-            )),
+            _ => {
+                TransitionResult::InvariantViolation(format!("cannot release write while {}", self))
+            }
         }
     }
 

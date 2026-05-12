@@ -254,15 +254,19 @@ mod tests {
     fn connect_makes_consumer_tcp_only() {
         // TCP connect() → Consumer
         // UDP connect() → Bidirectional (tested separately)
-        let mut evidence = RoleEvidence::default();
-        evidence.has_connect = true;
+        let evidence = RoleEvidence {
+            has_connect: true,
+            ..Default::default()
+        };
         assert_eq!(evidence.resolve_direction(true), Direction::Consumer);
     }
 
     #[test]
     fn bind_alone_stays_bidirectional_per_d3() {
-        let mut evidence = RoleEvidence::default();
-        evidence.has_bind = true;
+        let evidence = RoleEvidence {
+            has_bind: true,
+            ..Default::default()
+        };
         // D3: bind alone is insufficient for provider
         assert_eq!(evidence.resolve_direction(true), Direction::Bidirectional);
         assert_eq!(evidence.resolve_direction(false), Direction::Bidirectional);
@@ -270,17 +274,21 @@ mod tests {
 
     #[test]
     fn bind_plus_listen_makes_provider_tcp() {
-        let mut evidence = RoleEvidence::default();
-        evidence.has_bind = true;
-        evidence.has_listen = true;
+        let evidence = RoleEvidence {
+            has_bind: true,
+            has_listen: true,
+            ..Default::default()
+        };
         assert_eq!(evidence.resolve_direction(true), Direction::Provider);
     }
 
     #[test]
     fn listen_alone_makes_provider_tcp() {
         // If we're tracking and see listen, it's on a known socket
-        let mut evidence = RoleEvidence::default();
-        evidence.has_listen = true;
+        let evidence = RoleEvidence {
+            has_listen: true,
+            ..Default::default()
+        };
         assert_eq!(evidence.resolve_direction(true), Direction::Provider);
     }
 
@@ -288,9 +296,11 @@ mod tests {
     fn udp_stays_bidirectional_with_bind_listen() {
         // UDP doesn't have listen semantics, so even if we somehow
         // accumulated these flags, it should stay bidirectional
-        let mut evidence = RoleEvidence::default();
-        evidence.has_bind = true;
-        evidence.has_listen = true; // Shouldn't happen for UDP, but test the logic
+        let evidence = RoleEvidence {
+            has_bind: true,
+            has_listen: true, // Shouldn't happen for UDP, but test the logic
+            ..Default::default()
+        };
         assert_eq!(evidence.resolve_direction(false), Direction::Bidirectional);
     }
 
@@ -298,8 +308,10 @@ mod tests {
     fn udp_connect_stays_bidirectional() {
         // UDP connect() just sets default destination, not a "client" role
         // This is a critical test for D3 compliance
-        let mut evidence = RoleEvidence::default();
-        evidence.has_connect = true;
+        let evidence = RoleEvidence {
+            has_connect: true,
+            ..Default::default()
+        };
         assert_eq!(
             evidence.resolve_direction(false),
             Direction::Bidirectional,
@@ -309,8 +321,10 @@ mod tests {
 
     #[test]
     fn accept_makes_provider_tcp() {
-        let mut evidence = RoleEvidence::default();
-        evidence.has_accept = true;
+        let evidence = RoleEvidence {
+            has_accept: true,
+            ..Default::default()
+        };
         assert_eq!(evidence.resolve_direction(true), Direction::Provider);
     }
 
@@ -378,7 +392,11 @@ mod tests {
         let mut registry = FdRegistry::new();
 
         // Simulate: int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-        registry.register_socket("server_fd", TrackedChannelKind::TcpSocket, "bi:test:server.c:10:5:tcp_socket:bidirectional");
+        registry.register_socket(
+            "server_fd",
+            TrackedChannelKind::TcpSocket,
+            "bi:test:server.c:10:5:tcp_socket:bidirectional",
+        );
 
         // Simulate: bind(server_fd, &addr, sizeof(addr));
         registry.record_bind("server_fd");
@@ -399,7 +417,11 @@ mod tests {
         let mut registry = FdRegistry::new();
 
         // Simulate: int client_fd = socket(AF_INET, SOCK_STREAM, 0);
-        registry.register_socket("client_fd", TrackedChannelKind::TcpSocket, "bi:test:client.c:10:5:tcp_socket:bidirectional");
+        registry.register_socket(
+            "client_fd",
+            TrackedChannelKind::TcpSocket,
+            "bi:test:client.c:10:5:tcp_socket:bidirectional",
+        );
 
         // Simulate: connect(client_fd, &addr, sizeof(addr));
         registry.record_connect("client_fd");

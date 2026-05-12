@@ -66,7 +66,10 @@ impl Default for SeqGenerator {
 /// Write a request to tsserver stdin.
 ///
 /// TSServer uses newline-delimited JSON (no Content-Length headers).
-pub fn write_request<T: Serialize>(stdin: &mut ChildStdin, request: &T) -> Result<(), TransportError> {
+pub fn write_request<T: Serialize>(
+    stdin: &mut ChildStdin,
+    request: &T,
+) -> Result<(), TransportError> {
     let json = serde_json::to_string(request)?;
     writeln!(stdin, "{}", json)?;
     stdin.flush()?;
@@ -260,7 +263,8 @@ mod tests {
             "success": true,
             "body": {}
         }"#;
-        tx.send(ReaderMessage::Message(response_json.to_string())).unwrap();
+        tx.send(ReaderMessage::Message(response_json.to_string()))
+            .unwrap();
 
         let result = reader.recv_response(42, Duration::from_secs(1));
         assert!(result.is_ok());
@@ -282,7 +286,8 @@ mod tests {
             "command": "configure",
             "success": true
         }"#;
-        tx.send(ReaderMessage::Message(wrong_json.to_string())).unwrap();
+        tx.send(ReaderMessage::Message(wrong_json.to_string()))
+            .unwrap();
 
         // Then send correct one
         let correct_json = r#"{
@@ -293,7 +298,8 @@ mod tests {
             "success": true,
             "body": {"kind": "method"}
         }"#;
-        tx.send(ReaderMessage::Message(correct_json.to_string())).unwrap();
+        tx.send(ReaderMessage::Message(correct_json.to_string()))
+            .unwrap();
 
         // Should skip wrong seq and return correct one
         let result = reader.recv_response(42, Duration::from_secs(1));
@@ -313,7 +319,8 @@ mod tests {
             "event": "projectLoadingFinish",
             "body": {}
         }"#;
-        tx.send(ReaderMessage::Message(event_json.to_string())).unwrap();
+        tx.send(ReaderMessage::Message(event_json.to_string()))
+            .unwrap();
 
         // Then send the actual response
         let response_json = r#"{
@@ -323,7 +330,8 @@ mod tests {
             "command": "open",
             "success": true
         }"#;
-        tx.send(ReaderMessage::Message(response_json.to_string())).unwrap();
+        tx.send(ReaderMessage::Message(response_json.to_string()))
+            .unwrap();
 
         // Should skip event and return response
         let result = reader.recv_response(1, Duration::from_secs(1));
@@ -358,7 +366,8 @@ mod tests {
         let (tx, rx) = channel::<ReaderMessage>();
         let reader = ReaderHandle::from_receiver(rx);
 
-        tx.send(ReaderMessage::Error("some error".to_string())).unwrap();
+        tx.send(ReaderMessage::Error("some error".to_string()))
+            .unwrap();
 
         let result = reader.recv_response(1, Duration::from_secs(1));
         assert!(matches!(result, Err(TransportError::TsServerError(_))));

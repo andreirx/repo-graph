@@ -25,26 +25,26 @@
 //! In-scope TS files ported to Rust across R3-B through R3-F:
 //!
 //!   - src/core/classification/api-boundary.ts
-//!     → `types` module (BoundaryMechanism, BoundaryProviderFact,
-//!       BoundaryConsumerFact, BoundaryLinkCandidate)
+//!     -> `types` module (BoundaryMechanism, BoundaryProviderFact,
+//!     BoundaryConsumerFact, BoundaryLinkCandidate)
 //!   - src/core/classification/signals.ts
-//!     → `signals` module (SnapshotSignals, FileSignals DTOs +
-//!       pub(crate) pure predicates)
+//!     -> `signals` module (SnapshotSignals, FileSignals DTOs +
+//!     pub(crate) pure predicates)
 //!   - src/core/classification/blast-radius.ts
-//!     → `blast_radius` module (deriveBlastRadius function +
-//!       ReceiverOrigin / EnclosingScope / BlastRadius enums)
+//!     -> `blast_radius` module (deriveBlastRadius function +
+//!     ReceiverOrigin / EnclosingScope / BlastRadius enums)
 //!   - src/core/classification/boundary-matcher.ts
-//!     → `boundary_matcher` module (HttpBoundaryMatchStrategy +
-//!       matchBoundaryFacts orchestrator + computeMatcherKey)
+//!     -> `boundary_matcher` module (HttpBoundaryMatchStrategy +
+//!     matchBoundaryFacts orchestrator + computeMatcherKey)
 //!   - src/core/classification/framework-boundary.ts
-//!     → `framework_boundary` module (Express route /
-//!       middleware detection)
+//!     -> `framework_boundary` module (Express route /
+//!     middleware detection)
 //!   - src/core/classification/framework-entrypoints.ts
-//!     → `framework_entrypoints` module (Lambda handler
-//!       detection)
+//!     -> `framework_entrypoints` module (Lambda handler
+//!     detection)
 //!   - src/core/classification/unresolved-classifier.ts
-//!     → `unresolved_classifier` module (the main 6-rule
-//!       precedence classifier)
+//!     -> `unresolved_classifier` module (the main 6-rule
+//!     precedence classifier)
 //!
 //! Transitive type deps also ported (into the `types` module):
 //!
@@ -275,13 +275,13 @@ pub(crate) mod framework_boundary;
 pub(crate) mod framework_entrypoints;
 pub mod hotspot_scorer;
 pub mod module_edges;
-pub mod risk_scorer;
 pub mod module_rollup;
+pub mod risk_scorer;
 pub(crate) mod signals;
 pub mod spring_liveness;
-pub mod weighted_neighbors;
 pub mod types;
 pub(crate) mod unresolved_classifier;
+pub mod weighted_neighbors;
 
 // ── Public re-exports (locked R3 API surface) ─────────────────
 //

@@ -51,8 +51,7 @@ pub fn evaluate_violations_from_facts(
     facts: &ModuleGraphFacts,
 ) -> Result<DiscoveredModuleViolationsResult, ModuleQueryError> {
     // 1. Load boundary declarations (the only storage query needed)
-    let declarations = storage
-        .get_active_boundary_declarations_for_repo(repo_uid)?;
+    let declarations = storage.get_active_boundary_declarations_for_repo(repo_uid)?;
 
     // 2. Parse discovered-module boundaries
     let raw_boundaries: Vec<RawBoundaryDeclaration> = declarations
@@ -80,11 +79,7 @@ pub fn evaluate_violations_from_facts(
         .collect();
 
     // 4. Evaluate boundaries against preloaded edges
-    let evaluation = evaluate_module_boundaries(
-        &parsed_boundaries,
-        &facts.edges,
-        &module_index,
-    );
+    let evaluation = evaluate_module_boundaries(&parsed_boundaries, &facts.edges, &module_index);
 
     Ok(DiscoveredModuleViolationsResult {
         evaluation,
@@ -141,11 +136,7 @@ pub fn evaluate_violations_from_preloaded(
         .collect();
 
     // 3. Evaluate boundaries against preloaded edges
-    let evaluation = evaluate_module_boundaries(
-        &parsed_boundaries,
-        &facts.edges,
-        &module_index,
-    );
+    let evaluation = evaluate_module_boundaries(&parsed_boundaries, &facts.edges, &module_index);
 
     Ok(DiscoveredModuleViolationsResult {
         evaluation,

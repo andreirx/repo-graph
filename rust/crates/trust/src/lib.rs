@@ -154,14 +154,13 @@ pub mod types;
 // trait + its supporting DTOs live in the `storage_port` module.
 
 pub use rules::{
-	compute_call_graph_reliability, compute_change_impact_reliability,
-	compute_dead_code_reliability, compute_import_graph_reliability,
-	detect_alias_resolution_suspicion, detect_framework_heavy_suspicion,
-	detect_missing_entrypoint_declarations, detect_registry_pattern_suspicion,
+    compute_call_graph_reliability, compute_change_impact_reliability,
+    compute_dead_code_reliability, compute_import_graph_reliability,
+    detect_alias_resolution_suspicion, detect_framework_heavy_suspicion,
+    detect_missing_entrypoint_declarations, detect_registry_pattern_suspicion,
 };
 pub use service::{
-	assemble_trust_report, compute_trust_report, TrustAssemblyError,
-	TrustComputationInput,
+    assemble_trust_report, compute_trust_report, TrustAssemblyError, TrustComputationInput,
 };
 pub use storage_port::TrustStorageRead;
 
@@ -172,6 +171,4 @@ pub use storage_port::TrustStorageRead;
 // 2. DeadResultTrust — per-candidate dead-code confidence
 //
 // EdgeResultTrust remains pub(crate) until callers/callees contracts emit it.
-pub use overlay::{
-    assess_dead_confidence, DeadResultTrust, ResultConfidence, TrustOverlaySummary,
-};
+pub use overlay::{assess_dead_confidence, DeadResultTrust, ResultConfidence, TrustOverlaySummary};

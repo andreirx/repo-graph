@@ -33,99 +33,98 @@ use serde::{Serialize, Serializer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LimitCode {
-	/// The repo has no active requirement declarations, so the
-	/// gate pipeline has nothing to evaluate. This is an
-	/// absence-of-configured-policy state, NOT a gate result.
-	/// It does not become a `GATE_PASS` (which would imply
-	/// obligations existed and all passed). It is a limit so
-	/// the agent can distinguish "gate not configured" from
-	/// "gate configured and passing".
-	///
-	/// Replaces the `GATE_UNAVAILABLE` code used during Rust-42,
-	/// which existed only because gate policy was trapped in the
-	/// `rgr` binary crate and could not be called from the agent
-	/// layer. After Rust-43A relocated gate into
-	/// `repo-graph-gate`, gate evaluation IS available — the
-	/// relevant "unavailable" state shifted from tooling to
-	/// policy configuration.
-	GateNotConfigured,
+    /// The repo has no active requirement declarations, so the
+    /// gate pipeline has nothing to evaluate. This is an
+    /// absence-of-configured-policy state, NOT a gate result.
+    /// It does not become a `GATE_PASS` (which would imply
+    /// obligations existed and all passed). It is a limit so
+    /// the agent can distinguish "gate not configured" from
+    /// "gate configured and passing".
+    ///
+    /// Replaces the `GATE_UNAVAILABLE` code used during Rust-42,
+    /// which existed only because gate policy was trapped in the
+    /// `rgr` binary crate and could not be called from the agent
+    /// layer. After Rust-43A relocated gate into
+    /// `repo-graph-gate`, gate evaluation IS available — the
+    /// relevant "unavailable" state shifted from tooling to
+    /// policy configuration.
+    GateNotConfigured,
 
-	/// Module discovery data (Layer-1 discovered modules catalog)
-	/// is not yet queryable through the Rust storage path. The
-	/// repo-level `MODULE_SUMMARY` signal falls back to raw
-	/// snapshot totals instead of discovered module counts.
-	ModuleDataUnavailable,
+    /// Module discovery data (Layer-1 discovered modules catalog)
+    /// is not yet queryable through the Rust storage path. The
+    /// repo-level `MODULE_SUMMARY` signal falls back to raw
+    /// snapshot totals instead of discovered module counts.
+    ModuleDataUnavailable,
 
-	/// This snapshot has no cyclomatic complexity measurements.
-	/// `HIGH_COMPLEXITY` cannot be evaluated without measurement
-	/// data. The absence may be due to indexer limitations or
-	/// repository content.
-	ComplexityUnavailable,
+    /// This snapshot has no cyclomatic complexity measurements.
+    /// `HIGH_COMPLEXITY` cannot be evaluated without measurement
+    /// data. The absence may be due to indexer limitations or
+    /// repository content.
+    ComplexityUnavailable,
 
-	/// Indexed languages may not cover the full repository. The
-	/// Rust indexer supports a narrower set of languages than the
-	/// file tree may contain. Files in unsupported languages are
-	/// not reflected in `MODULE_SUMMARY` counts.
-	LanguageCoveragePartial,
+    /// Indexed languages may not cover the full repository. The
+    /// Rust indexer supports a narrower set of languages than the
+    /// file tree may contain. Files in unsupported languages are
+    /// not reflected in `MODULE_SUMMARY` counts.
+    LanguageCoveragePartial,
 
-	// DeadCodeUnreliable — removed. Surface withdrawn.
-	// See docs/TECH-DEBT.md for reintroduction conditions.
-
-	/// Gate requirements exist but none of their obligations
-	/// target the focused path area. The gate pipeline has
-	/// nothing to evaluate within this scope. Distinct from
-	/// `GateNotConfigured` (which means no requirements exist
-	/// at all) and from gate signals (which evaluate specific
-	/// obligations).
-	GateNotApplicableToFocus,
+    // DeadCodeUnreliable — removed. Surface withdrawn.
+    // See docs/TECH-DEBT.md for reintroduction conditions.
+    /// Gate requirements exist but none of their obligations
+    /// target the focused path area. The gate pipeline has
+    /// nothing to evaluate within this scope. Distinct from
+    /// `GateNotConfigured` (which means no requirements exist
+    /// at all) and from gate signals (which evaluate specific
+    /// obligations).
+    GateNotApplicableToFocus,
 }
 
 impl LimitCode {
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::GateNotConfigured => "GATE_NOT_CONFIGURED",
-			Self::ModuleDataUnavailable => "MODULE_DATA_UNAVAILABLE",
-			Self::ComplexityUnavailable => "COMPLEXITY_UNAVAILABLE",
-			Self::LanguageCoveragePartial => "LANGUAGE_COVERAGE_PARTIAL",
-			Self::GateNotApplicableToFocus => "GATE_NOT_APPLICABLE_TO_FOCUS",
-		}
-	}
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::GateNotConfigured => "GATE_NOT_CONFIGURED",
+            Self::ModuleDataUnavailable => "MODULE_DATA_UNAVAILABLE",
+            Self::ComplexityUnavailable => "COMPLEXITY_UNAVAILABLE",
+            Self::LanguageCoveragePartial => "LANGUAGE_COVERAGE_PARTIAL",
+            Self::GateNotApplicableToFocus => "GATE_NOT_APPLICABLE_TO_FOCUS",
+        }
+    }
 
-	/// Canonical summary string that accompanies this code in
-	/// the output envelope. Stable wording — changing this is a
-	/// contract change.
-	pub fn summary(self) -> &'static str {
-		match self {
-			Self::GateNotConfigured => {
-				"No active requirement declarations. Gate has no \
+    /// Canonical summary string that accompanies this code in
+    /// the output envelope. Stable wording — changing this is a
+    /// contract change.
+    pub fn summary(self) -> &'static str {
+        match self {
+            Self::GateNotConfigured => {
+                "No active requirement declarations. Gate has no \
 				 obligations to evaluate."
-			}
-			Self::ModuleDataUnavailable => {
-				"Module discovery data is not queryable through the Rust \
+            }
+            Self::ModuleDataUnavailable => {
+                "Module discovery data is not queryable through the Rust \
 				 storage path. Repo-level counts fall back to raw \
 				 snapshot totals."
-			}
-			Self::ComplexityUnavailable => {
-				"No cyclomatic complexity measurements available for this \
+            }
+            Self::ComplexityUnavailable => {
+                "No cyclomatic complexity measurements available for this \
 				 snapshot. HIGH_COMPLEXITY cannot be evaluated."
-			}
-			Self::LanguageCoveragePartial => {
-				"Indexed languages may not cover the full repository. \
+            }
+            Self::LanguageCoveragePartial => {
+                "Indexed languages may not cover the full repository. \
 				 Files in languages the indexer does not support are \
 				 not reflected in MODULE_SUMMARY."
-			}
-			Self::GateNotApplicableToFocus => {
-				"Gate is configured but no obligations target the \
+            }
+            Self::GateNotApplicableToFocus => {
+                "Gate is configured but no obligations target the \
 				 focused area."
-			}
-		}
-	}
+            }
+        }
+    }
 }
 
 impl Serialize for LimitCode {
-	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-		serializer.serialize_str(self.as_str())
-	}
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
 }
 
 // ── Degradation (ACR-6) ──────────────────────────────────────────
@@ -142,37 +141,37 @@ impl Serialize for LimitCode {
 /// agent-facing vocabulary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DegradationStatus {
-	/// Feature is not supported on this indexer embodiment.
-	///
-	/// Not a bug — a capability gap. The Rust indexer may not
-	/// populate certain tables that the TS prototype did.
-	Unsupported,
+    /// Feature is not supported on this indexer embodiment.
+    ///
+    /// Not a bug — a capability gap. The Rust indexer may not
+    /// populate certain tables that the TS prototype did.
+    Unsupported,
 
-	/// Required data is missing when it should be present.
-	///
-	/// Source files exist but expected artifacts were not extracted.
-	Missing,
+    /// Required data is missing when it should be present.
+    ///
+    /// Source files exist but expected artifacts were not extracted.
+    Missing,
 
-	/// Data exists but is partially stale/impacted.
-	///
-	/// Some backing rows have freshness_state != 'current'.
-	PartiallyStale,
+    /// Data exists but is partially stale/impacted.
+    ///
+    /// Some backing rows have freshness_state != 'current'.
+    PartiallyStale,
 }
 
 impl DegradationStatus {
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Unsupported => "unsupported",
-			Self::Missing => "missing",
-			Self::PartiallyStale => "partially_stale",
-		}
-	}
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unsupported => "unsupported",
+            Self::Missing => "missing",
+            Self::PartiallyStale => "partially_stale",
+        }
+    }
 }
 
 impl Serialize for DegradationStatus {
-	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-		serializer.serialize_str(self.as_str())
-	}
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
 }
 
 /// Structured degradation context for a limit.
@@ -182,64 +181,64 @@ impl Serialize for DegradationStatus {
 /// degradation info — only those with explicit backing reasons.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DegradationInfo {
-	/// Why the capability is degraded.
-	pub status: DegradationStatus,
+    /// Why the capability is degraded.
+    pub status: DegradationStatus,
 
-	/// The artifact family affected (e.g., "ModuleCandidates", "ProjectSurfaces").
-	pub family: String,
+    /// The artifact family affected (e.g., "ModuleCandidates", "ProjectSurfaces").
+    pub family: String,
 
-	/// Human-readable explanation.
-	pub reason: String,
+    /// Human-readable explanation.
+    pub reason: String,
 
-	/// Suggested action to resolve (if any).
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub recommendation: Option<String>,
+    /// Suggested action to resolve (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recommendation: Option<String>,
 }
 
 impl DegradationInfo {
-	/// Create degradation info for an unsupported feature.
-	pub fn unsupported(family: impl Into<String>, reason: impl Into<String>) -> Self {
-		Self {
-			status: DegradationStatus::Unsupported,
-			family: family.into(),
-			reason: reason.into(),
-			recommendation: None,
-		}
-	}
+    /// Create degradation info for an unsupported feature.
+    pub fn unsupported(family: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            status: DegradationStatus::Unsupported,
+            family: family.into(),
+            reason: reason.into(),
+            recommendation: None,
+        }
+    }
 
-	/// Create degradation info for an unsupported feature with recommendation.
-	pub fn unsupported_with_recommendation(
-		family: impl Into<String>,
-		reason: impl Into<String>,
-		recommendation: impl Into<String>,
-	) -> Self {
-		Self {
-			status: DegradationStatus::Unsupported,
-			family: family.into(),
-			reason: reason.into(),
-			recommendation: Some(recommendation.into()),
-		}
-	}
+    /// Create degradation info for an unsupported feature with recommendation.
+    pub fn unsupported_with_recommendation(
+        family: impl Into<String>,
+        reason: impl Into<String>,
+        recommendation: impl Into<String>,
+    ) -> Self {
+        Self {
+            status: DegradationStatus::Unsupported,
+            family: family.into(),
+            reason: reason.into(),
+            recommendation: Some(recommendation.into()),
+        }
+    }
 
-	/// Create degradation info for missing data.
-	pub fn missing(family: impl Into<String>, reason: impl Into<String>) -> Self {
-		Self {
-			status: DegradationStatus::Missing,
-			family: family.into(),
-			reason: reason.into(),
-			recommendation: None,
-		}
-	}
+    /// Create degradation info for missing data.
+    pub fn missing(family: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            status: DegradationStatus::Missing,
+            family: family.into(),
+            reason: reason.into(),
+            recommendation: None,
+        }
+    }
 
-	/// Create degradation info for partially stale data.
-	pub fn partially_stale(family: impl Into<String>, reason: impl Into<String>) -> Self {
-		Self {
-			status: DegradationStatus::PartiallyStale,
-			family: family.into(),
-			reason: reason.into(),
-			recommendation: Some("consider refreshing the repository".into()),
-		}
-	}
+    /// Create degradation info for partially stale data.
+    pub fn partially_stale(family: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            status: DegradationStatus::PartiallyStale,
+            family: family.into(),
+            reason: reason.into(),
+            recommendation: Some("consider refreshing the repository".into()),
+        }
+    }
 }
 
 /// One limit record in the output envelope.
@@ -264,174 +263,161 @@ impl DegradationInfo {
 /// serialization when empty/None, preserving backward compat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Limit {
-	pub code: LimitCode,
-	pub summary: &'static str,
-	#[serde(skip_serializing_if = "Vec::is_empty")]
-	pub reasons: Vec<String>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub degradation: Option<DegradationInfo>,
+    pub code: LimitCode,
+    pub summary: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reasons: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degradation: Option<DegradationInfo>,
 }
 
 impl Limit {
-	/// Construct a limit record from a code. The summary is
-	/// looked up by the code — callers cannot supply their own
-	/// summary string, which is how the contract stays stable.
-	///
-	/// No reasons or degradation attached.
-	pub fn from_code(code: LimitCode) -> Self {
-		Self {
-			code,
-			summary: code.summary(),
-			reasons: Vec::new(),
-			degradation: None,
-		}
-	}
+    /// Construct a limit record from a code. The summary is
+    /// looked up by the code — callers cannot supply their own
+    /// summary string, which is how the contract stays stable.
+    ///
+    /// No reasons or degradation attached.
+    pub fn from_code(code: LimitCode) -> Self {
+        Self {
+            code,
+            summary: code.summary(),
+            reasons: Vec::new(),
+            degradation: None,
+        }
+    }
 
-	/// Construct a limit record from a code with an attached
-	/// reasons list. Reasons are passed through verbatim — the
-	/// caller is responsible for the vocabulary.
-	pub fn from_code_with_reasons(
-		code: LimitCode,
-		reasons: Vec<String>,
-	) -> Self {
-		Self {
-			code,
-			summary: code.summary(),
-			reasons,
-			degradation: None,
-		}
-	}
+    /// Construct a limit record from a code with an attached
+    /// reasons list. Reasons are passed through verbatim — the
+    /// caller is responsible for the vocabulary.
+    pub fn from_code_with_reasons(code: LimitCode, reasons: Vec<String>) -> Self {
+        Self {
+            code,
+            summary: code.summary(),
+            reasons,
+            degradation: None,
+        }
+    }
 
-	/// Construct a limit record with degradation info (ACR-6).
-	///
-	/// Use for limits that represent capability gaps or data
-	/// quality issues where structured context is valuable.
-	pub fn from_code_with_degradation(
-		code: LimitCode,
-		degradation: DegradationInfo,
-	) -> Self {
-		Self {
-			code,
-			summary: code.summary(),
-			reasons: Vec::new(),
-			degradation: Some(degradation),
-		}
-	}
+    /// Construct a limit record with degradation info (ACR-6).
+    ///
+    /// Use for limits that represent capability gaps or data
+    /// quality issues where structured context is valuable.
+    pub fn from_code_with_degradation(code: LimitCode, degradation: DegradationInfo) -> Self {
+        Self {
+            code,
+            summary: code.summary(),
+            reasons: Vec::new(),
+            degradation: Some(degradation),
+        }
+    }
 
-	/// Construct a limit record with both reasons and degradation.
-	pub fn from_code_with_reasons_and_degradation(
-		code: LimitCode,
-		reasons: Vec<String>,
-		degradation: DegradationInfo,
-	) -> Self {
-		Self {
-			code,
-			summary: code.summary(),
-			reasons,
-			degradation: Some(degradation),
-		}
-	}
+    /// Construct a limit record with both reasons and degradation.
+    pub fn from_code_with_reasons_and_degradation(
+        code: LimitCode,
+        reasons: Vec<String>,
+        degradation: DegradationInfo,
+    ) -> Self {
+        Self {
+            code,
+            summary: code.summary(),
+            reasons,
+            degradation: Some(degradation),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+    use super::*;
 
-	#[test]
-	fn limit_code_serializes_as_screaming_snake() {
-		let s = serde_json::to_string(&LimitCode::GateNotConfigured).unwrap();
-		assert_eq!(s, "\"GATE_NOT_CONFIGURED\"");
-	}
+    #[test]
+    fn limit_code_serializes_as_screaming_snake() {
+        let s = serde_json::to_string(&LimitCode::GateNotConfigured).unwrap();
+        assert_eq!(s, "\"GATE_NOT_CONFIGURED\"");
+    }
 
-	#[test]
-	fn limit_carries_canonical_summary() {
-		let l = Limit::from_code(LimitCode::GateNotConfigured);
-		assert_eq!(l.code, LimitCode::GateNotConfigured);
-		assert!(l.summary.contains("requirement declarations"));
-	}
+    #[test]
+    fn limit_carries_canonical_summary() {
+        let l = Limit::from_code(LimitCode::GateNotConfigured);
+        assert_eq!(l.code, LimitCode::GateNotConfigured);
+        assert!(l.summary.contains("requirement declarations"));
+    }
 
-	#[test]
-	fn limit_serializes_with_code_and_summary() {
-		let l = Limit::from_code(LimitCode::ComplexityUnavailable);
-		let s = serde_json::to_string(&l).unwrap();
-		assert!(s.contains("\"code\":\"COMPLEXITY_UNAVAILABLE\""));
-		assert!(s.contains("\"summary\":"));
-	}
+    #[test]
+    fn limit_serializes_with_code_and_summary() {
+        let l = Limit::from_code(LimitCode::ComplexityUnavailable);
+        let s = serde_json::to_string(&l).unwrap();
+        assert!(s.contains("\"code\":\"COMPLEXITY_UNAVAILABLE\""));
+        assert!(s.contains("\"summary\":"));
+    }
 
-	// ── Degradation tests (ACR-6) ────────────────────────────────
+    // ── Degradation tests (ACR-6) ────────────────────────────────
 
-	#[test]
-	fn degradation_status_serializes_as_snake_case() {
-		assert_eq!(
-			serde_json::to_string(&DegradationStatus::Unsupported).unwrap(),
-			"\"unsupported\""
-		);
-		assert_eq!(
-			serde_json::to_string(&DegradationStatus::Missing).unwrap(),
-			"\"missing\""
-		);
-		assert_eq!(
-			serde_json::to_string(&DegradationStatus::PartiallyStale).unwrap(),
-			"\"partially_stale\""
-		);
-	}
+    #[test]
+    fn degradation_status_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&DegradationStatus::Unsupported).unwrap(),
+            "\"unsupported\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DegradationStatus::Missing).unwrap(),
+            "\"missing\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DegradationStatus::PartiallyStale).unwrap(),
+            "\"partially_stale\""
+        );
+    }
 
-	#[test]
-	fn degradation_info_unsupported_constructor() {
-		let info = DegradationInfo::unsupported(
-			"ModuleCandidates",
-			"not populated on Rust indexer path",
-		);
-		assert_eq!(info.status, DegradationStatus::Unsupported);
-		assert_eq!(info.family, "ModuleCandidates");
-		assert!(info.reason.contains("Rust indexer"));
-		assert!(info.recommendation.is_none());
-	}
+    #[test]
+    fn degradation_info_unsupported_constructor() {
+        let info =
+            DegradationInfo::unsupported("ModuleCandidates", "not populated on Rust indexer path");
+        assert_eq!(info.status, DegradationStatus::Unsupported);
+        assert_eq!(info.family, "ModuleCandidates");
+        assert!(info.reason.contains("Rust indexer"));
+        assert!(info.recommendation.is_none());
+    }
 
-	#[test]
-	fn degradation_info_with_recommendation() {
-		let info = DegradationInfo::unsupported_with_recommendation(
-			"ProjectSurfaces",
-			"requires module_candidates",
-			"use TypeScript indexer",
-		);
-		assert_eq!(info.status, DegradationStatus::Unsupported);
-		assert_eq!(info.recommendation, Some("use TypeScript indexer".into()));
-	}
+    #[test]
+    fn degradation_info_with_recommendation() {
+        let info = DegradationInfo::unsupported_with_recommendation(
+            "ProjectSurfaces",
+            "requires module_candidates",
+            "use TypeScript indexer",
+        );
+        assert_eq!(info.status, DegradationStatus::Unsupported);
+        assert_eq!(info.recommendation, Some("use TypeScript indexer".into()));
+    }
 
-	#[test]
-	fn limit_with_degradation_serializes_correctly() {
-		let degradation = DegradationInfo::unsupported(
-			"ModuleCandidates",
-			"not supported on this embodiment",
-		);
-		let l = Limit::from_code_with_degradation(
-			LimitCode::ModuleDataUnavailable,
-			degradation,
-		);
-		let s = serde_json::to_string(&l).unwrap();
+    #[test]
+    fn limit_with_degradation_serializes_correctly() {
+        let degradation =
+            DegradationInfo::unsupported("ModuleCandidates", "not supported on this embodiment");
+        let l = Limit::from_code_with_degradation(LimitCode::ModuleDataUnavailable, degradation);
+        let s = serde_json::to_string(&l).unwrap();
 
-		assert!(s.contains("\"code\":\"MODULE_DATA_UNAVAILABLE\""));
-		assert!(s.contains("\"degradation\":{"));
-		assert!(s.contains("\"status\":\"unsupported\""));
-		assert!(s.contains("\"family\":\"ModuleCandidates\""));
-	}
+        assert!(s.contains("\"code\":\"MODULE_DATA_UNAVAILABLE\""));
+        assert!(s.contains("\"degradation\":{"));
+        assert!(s.contains("\"status\":\"unsupported\""));
+        assert!(s.contains("\"family\":\"ModuleCandidates\""));
+    }
 
-	#[test]
-	fn limit_without_degradation_omits_field() {
-		let l = Limit::from_code(LimitCode::GateNotConfigured);
-		let s = serde_json::to_string(&l).unwrap();
+    #[test]
+    fn limit_without_degradation_omits_field() {
+        let l = Limit::from_code(LimitCode::GateNotConfigured);
+        let s = serde_json::to_string(&l).unwrap();
 
-		// Should NOT contain degradation field
-		assert!(!s.contains("\"degradation\""));
-	}
+        // Should NOT contain degradation field
+        assert!(!s.contains("\"degradation\""));
+    }
 
-	#[test]
-	fn degradation_info_serializes_without_null_recommendation() {
-		let info = DegradationInfo::unsupported("Test", "reason");
-		let s = serde_json::to_string(&info).unwrap();
+    #[test]
+    fn degradation_info_serializes_without_null_recommendation() {
+        let info = DegradationInfo::unsupported("Test", "reason");
+        let s = serde_json::to_string(&info).unwrap();
 
-		// recommendation is None, so should be omitted
-		assert!(!s.contains("\"recommendation\""));
-	}
+        // recommendation is None, so should be omitted
+        assert!(!s.contains("\"recommendation\""));
+    }
 }

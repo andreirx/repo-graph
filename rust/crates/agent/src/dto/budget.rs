@@ -12,75 +12,70 @@
 
 use serde::Serialize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Budget {
-	Small,
-	Medium,
-	Large,
+    #[default]
+    Small,
+    Medium,
+    Large,
 }
 
 impl Budget {
-	/// Maximum number of signals emitted at this budget tier.
-	pub fn max_signals(self) -> usize {
-		match self {
-			Self::Small => 5,
-			Self::Medium => 15,
-			Self::Large => 50,
-		}
-	}
+    /// Maximum number of signals emitted at this budget tier.
+    pub fn max_signals(self) -> usize {
+        match self {
+            Self::Small => 5,
+            Self::Medium => 15,
+            Self::Large => 50,
+        }
+    }
 
-	/// Maximum number of limit records emitted at this budget tier.
-	pub fn max_limits(self) -> usize {
-		match self {
-			Self::Small => 3,
-			Self::Medium => 5,
-			Self::Large => 20,
-		}
-	}
+    /// Maximum number of limit records emitted at this budget tier.
+    pub fn max_limits(self) -> usize {
+        match self {
+            Self::Small => 3,
+            Self::Medium => 5,
+            Self::Large => 20,
+        }
+    }
 
-	/// Maximum number of next-action records emitted at this
-	/// budget tier.
-	pub fn max_next(self) -> usize {
-		match self {
-			Self::Small => 3,
-			Self::Medium => 5,
-			Self::Large => 10,
-		}
-	}
-}
-
-impl Default for Budget {
-	fn default() -> Self {
-		Self::Small
-	}
+    /// Maximum number of next-action records emitted at this
+    /// budget tier.
+    pub fn max_next(self) -> usize {
+        match self {
+            Self::Small => 3,
+            Self::Medium => 5,
+            Self::Large => 10,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+    use super::*;
 
-	#[test]
-	fn caps_are_stable_per_tier() {
-		assert_eq!(Budget::Small.max_signals(), 5);
-		assert_eq!(Budget::Small.max_limits(), 3);
-		assert_eq!(Budget::Small.max_next(), 3);
-		assert_eq!(Budget::Medium.max_signals(), 15);
-		assert_eq!(Budget::Medium.max_limits(), 5);
-		assert_eq!(Budget::Medium.max_next(), 5);
-		assert_eq!(Budget::Large.max_signals(), 50);
-		assert_eq!(Budget::Large.max_limits(), 20);
-		assert_eq!(Budget::Large.max_next(), 10);
-	}
+    #[test]
+    fn caps_are_stable_per_tier() {
+        assert_eq!(Budget::Small.max_signals(), 5);
+        assert_eq!(Budget::Small.max_limits(), 3);
+        assert_eq!(Budget::Small.max_next(), 3);
+        assert_eq!(Budget::Medium.max_signals(), 15);
+        assert_eq!(Budget::Medium.max_limits(), 5);
+        assert_eq!(Budget::Medium.max_next(), 5);
+        assert_eq!(Budget::Large.max_signals(), 50);
+        assert_eq!(Budget::Large.max_limits(), 20);
+        assert_eq!(Budget::Large.max_next(), 10);
+    }
 
-	#[test]
-	fn default_is_small() {
-		assert_eq!(Budget::default(), Budget::Small);
-	}
+    #[test]
+    fn default_is_small() {
+        assert_eq!(Budget::default(), Budget::Small);
+    }
 
-	#[test]
-	fn serializes_lowercase() {
-		let s = serde_json::to_string(&Budget::Small).unwrap();
-		assert_eq!(s, "\"small\"");
-	}
+    #[test]
+    fn serializes_lowercase() {
+        let s = serde_json::to_string(&Budget::Small).unwrap();
+        assert_eq!(s, "\"small\"");
+    }
 }

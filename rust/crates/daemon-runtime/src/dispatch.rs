@@ -50,10 +50,9 @@ impl ServiceDispatcher {
 
     /// Get a required string parameter.
     fn get_string_param<'a>(params: &'a Value, key: &str) -> Result<&'a str, ErrorDetail> {
-        params
-            .get(key)
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ErrorDetail::invalid_request(format!("missing or invalid '{}' parameter", key)))
+        params.get(key).and_then(|v| v.as_str()).ok_or_else(|| {
+            ErrorDetail::invalid_request(format!("missing or invalid '{}' parameter", key))
+        })
     }
 
     /// Get an optional string parameter.
@@ -110,15 +109,14 @@ impl ServiceDispatcher {
             Err(e) => return DispatchResult::error(&request.id, e),
         };
 
-        match self.state.load_repo(std::path::Path::new(db_path), repo_uid) {
-            Ok(_) => DispatchResult::success(
-                &request.id,
-                serde_json::json!({"loaded": repo_uid}),
-            ),
-            Err(e) => DispatchResult::error(
-                &request.id,
-                ErrorDetail::new(ErrorCode::InternalError, e),
-            ),
+        match self
+            .state
+            .load_repo(std::path::Path::new(db_path), repo_uid)
+        {
+            Ok(_) => DispatchResult::success(&request.id, serde_json::json!({"loaded": repo_uid})),
+            Err(e) => {
+                DispatchResult::error(&request.id, ErrorDetail::new(ErrorCode::InternalError, e))
+            }
         }
     }
 
@@ -136,26 +134,17 @@ impl ServiceDispatcher {
         let key = match RepoKey::new(Path::new(db_path), repo_uid) {
             Ok(k) => k,
             Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::invalid_request(e),
-                );
+                return DispatchResult::error(&request.id, ErrorDetail::invalid_request(e));
             }
         };
 
         let unloaded = self.state.unload_repo_by_key(&key);
-        DispatchResult::success(
-            &request.id,
-            serde_json::json!({"unloaded": unloaded}),
-        )
+        DispatchResult::success(&request.id, serde_json::json!({"unloaded": unloaded}))
     }
 
     fn handle_list_repos(&self, request: &Request) -> DispatchResult {
         let repos = self.state.list_repos();
-        DispatchResult::success(
-            &request.id,
-            serde_json::json!({"repos": repos}),
-        )
+        DispatchResult::success(&request.id, serde_json::json!({"repos": repos}))
     }
 
     fn handle_callers(&self, request: &Request) -> DispatchResult {
@@ -176,10 +165,7 @@ impl ServiceDispatcher {
         let key = match RepoKey::new(Path::new(db_path), repo_uid) {
             Ok(k) => k,
             Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::invalid_request(e),
-                );
+                return DispatchResult::error(&request.id, ErrorDetail::invalid_request(e));
             }
         };
 
@@ -219,7 +205,10 @@ impl ServiceDispatcher {
 
         // Resolve symbol
         use repo_graph_storage::queries::SymbolResolveError;
-        let target = match repo_state.storage.resolve_symbol(&snapshot.snapshot_uid, symbol) {
+        let target = match repo_state
+            .storage
+            .resolve_symbol(&snapshot.snapshot_uid, symbol)
+        {
             Ok(sym) => sym,
             Err(SymbolResolveError::NotFound) => {
                 return DispatchResult::error(
@@ -289,10 +278,7 @@ impl ServiceDispatcher {
         let key = match RepoKey::new(Path::new(db_path), repo_uid) {
             Ok(k) => k,
             Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::invalid_request(e),
-                );
+                return DispatchResult::error(&request.id, ErrorDetail::invalid_request(e));
             }
         };
 
@@ -332,7 +318,10 @@ impl ServiceDispatcher {
 
         // Resolve symbol
         use repo_graph_storage::queries::SymbolResolveError;
-        let target = match repo_state.storage.resolve_symbol(&snapshot.snapshot_uid, symbol) {
+        let target = match repo_state
+            .storage
+            .resolve_symbol(&snapshot.snapshot_uid, symbol)
+        {
             Ok(sym) => sym,
             Err(SymbolResolveError::NotFound) => {
                 return DispatchResult::error(
@@ -402,10 +391,7 @@ impl ServiceDispatcher {
         let key = match RepoKey::new(Path::new(db_path), repo_uid) {
             Ok(k) => k,
             Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::invalid_request(e),
-                );
+                return DispatchResult::error(&request.id, ErrorDetail::invalid_request(e));
             }
         };
 
@@ -447,7 +433,10 @@ impl ServiceDispatcher {
         let file_stable_key = format!("{}:{}:FILE", repo_uid, file_path);
 
         // Verify file exists
-        match repo_state.storage.node_exists(&snapshot.snapshot_uid, &file_stable_key) {
+        match repo_state
+            .storage
+            .node_exists(&snapshot.snapshot_uid, &file_stable_key)
+        {
             Ok(true) => {}
             Ok(false) => {
                 return DispatchResult::error(
@@ -464,7 +453,10 @@ impl ServiceDispatcher {
         }
 
         // Find imports
-        let imports = match repo_state.storage.find_imports(&snapshot.snapshot_uid, &file_stable_key) {
+        let imports = match repo_state
+            .storage
+            .find_imports(&snapshot.snapshot_uid, &file_stable_key)
+        {
             Ok(i) => i,
             Err(e) => {
                 return DispatchResult::error(
@@ -572,7 +564,13 @@ impl ServiceDispatcher {
         };
 
         // Execute index under DB write lock (with progress)
-        match index_path_with_progress(repo_path, db_path, repo_uid, &options, Some(&mut progress_callback)) {
+        match index_path_with_progress(
+            repo_path,
+            db_path,
+            repo_uid,
+            &options,
+            Some(&mut progress_callback),
+        ) {
             Ok(result) => DispatchResult::success(
                 &request.id,
                 serde_json::json!({
@@ -599,7 +597,11 @@ impl ServiceDispatcher {
         // _db_write_guard drops here, releasing the lock
     }
 
-    fn handle_refresh(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
+    fn handle_refresh(
+        &self,
+        request: &Request,
+        emitter: &mut dyn ProgressEmitter,
+    ) -> DispatchResult {
         let db_path_str = match Self::get_string_param(&request.params, "db_path") {
             Ok(p) => p,
             Err(e) => return DispatchResult::error(&request.id, e),
@@ -615,10 +617,7 @@ impl ServiceDispatcher {
         let key = match RepoKey::new(db_path, repo_uid) {
             Ok(k) => k,
             Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::invalid_request(e),
-                );
+                return DispatchResult::error(&request.id, ErrorDetail::invalid_request(e));
             }
         };
 
@@ -653,7 +652,10 @@ impl ServiceDispatcher {
 
         // Resolve repo_path from stored root_path
         let canonical_db_path = repo_state.db_path();
-        let repo_info = match repo_state.storage.get_repo(&RepoRef::Uid(repo_uid.to_string())) {
+        let repo_info = match repo_state
+            .storage
+            .get_repo(&RepoRef::Uid(repo_uid.to_string()))
+        {
             Ok(Some(r)) => r,
             Ok(None) => {
                 return DispatchResult::error(
@@ -729,7 +731,13 @@ impl ServiceDispatcher {
         };
 
         // Execute refresh under both locks (with progress)
-        match refresh_path_with_progress(&repo_path, canonical_db_path, repo_uid, &options, Some(&mut progress_callback)) {
+        match refresh_path_with_progress(
+            &repo_path,
+            canonical_db_path,
+            repo_uid,
+            &options,
+            Some(&mut progress_callback),
+        ) {
             Ok(result) => DispatchResult::success(
                 &request.id,
                 serde_json::json!({
@@ -755,7 +763,11 @@ impl ServiceDispatcher {
         // Guards drop here: _refresh_guard then _db_write_guard
     }
 
-    fn handle_enrich(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
+    fn handle_enrich(
+        &self,
+        request: &Request,
+        emitter: &mut dyn ProgressEmitter,
+    ) -> DispatchResult {
         let db_path_str = match Self::get_string_param(&request.params, "db_path") {
             Ok(p) => p,
             Err(e) => return DispatchResult::error(&request.id, e),
@@ -771,10 +783,7 @@ impl ServiceDispatcher {
         let key = match RepoKey::new(db_path, repo_uid) {
             Ok(k) => k,
             Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::invalid_request(e),
-                );
+                return DispatchResult::error(&request.id, ErrorDetail::invalid_request(e));
             }
         };
 
@@ -809,10 +818,26 @@ impl ServiceDispatcher {
 
         // Parse optional parameters
         let snapshot_uid_param = Self::get_optional_string_param(&request.params, "snapshot_uid");
-        let dry_run = request.params.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false);
-        let promote = request.params.get("promote").and_then(|v| v.as_bool()).unwrap_or(false);
-        let force = request.params.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
-        let limit = request.params.get("limit").and_then(|v| v.as_u64()).map(|n| n as usize);
+        let dry_run = request
+            .params
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let promote = request
+            .params
+            .get("promote")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let force = request
+            .params
+            .get("force")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let limit = request
+            .params
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
         let jdtls_path = Self::get_optional_string_param(&request.params, "jdtls_path")
             .map(String::from)
             .or_else(|| std::env::var("JDTLS_PATH").ok());
@@ -827,7 +852,9 @@ impl ServiceDispatcher {
                     .filter_map(|v| v.as_str())
                     .filter_map(|s| match s.to_lowercase().as_str() {
                         "rust" | "rs" => Some(EnrichmentLanguage::Rust),
-                        "typescript" | "ts" | "javascript" | "js" => Some(EnrichmentLanguage::TypeScript),
+                        "typescript" | "ts" | "javascript" | "js" => {
+                            Some(EnrichmentLanguage::TypeScript)
+                        }
                         "java" => Some(EnrichmentLanguage::Java),
                         _ => None,
                     })
@@ -910,14 +937,20 @@ impl ServiceDispatcher {
         };
 
         // Emit initial progress
-        if emitter.emit(ProgressDetail {
-            phase: "initializing".to_string(),
-            current: 0,
-            total: 1,
-        }).is_err() {
+        if emitter
+            .emit(ProgressDetail {
+                phase: "initializing".to_string(),
+                current: 0,
+                total: 1,
+            })
+            .is_err()
+        {
             return DispatchResult::error(
                 &request.id,
-                ErrorDetail::new(ErrorCode::ProgressDeliveryFailed, "progress delivery failed"),
+                ErrorDetail::new(
+                    ErrorCode::ProgressDeliveryFailed,
+                    "progress delivery failed",
+                ),
             );
         }
 
@@ -926,24 +959,24 @@ impl ServiceDispatcher {
         let mut available_languages = Vec::new();
 
         // Register Rust resolver if not filtered out
-        let should_register_rust = languages.is_empty()
-            || languages.contains(&EnrichmentLanguage::Rust);
+        let should_register_rust =
+            languages.is_empty() || languages.contains(&EnrichmentLanguage::Rust);
         if should_register_rust {
             registry.register(Box::new(RustAnalyzerResolver::new()));
             available_languages.push("rust".to_string());
         }
 
         // Register TypeScript resolver if not filtered out
-        let should_register_typescript = languages.is_empty()
-            || languages.contains(&EnrichmentLanguage::TypeScript);
+        let should_register_typescript =
+            languages.is_empty() || languages.contains(&EnrichmentLanguage::TypeScript);
         if should_register_typescript {
             registry.register(Box::new(TsServerResolver::new()));
             available_languages.push("typescript".to_string());
         }
 
         // Register Java resolver if not filtered out and jdtls available
-        let should_register_java = languages.is_empty()
-            || languages.contains(&EnrichmentLanguage::Java);
+        let should_register_java =
+            languages.is_empty() || languages.contains(&EnrichmentLanguage::Java);
         if should_register_java {
             if let Some(path) = &jdtls_path {
                 let config = JdtlsConfig {
@@ -957,7 +990,7 @@ impl ServiceDispatcher {
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::invalid_request(
-                        "language 'java' requires jdtls_path parameter or JDTLS_PATH env var"
+                        "language 'java' requires jdtls_path parameter or JDTLS_PATH env var",
                     ),
                 );
             }
@@ -971,14 +1004,20 @@ impl ServiceDispatcher {
         }
 
         // Emit resolving progress
-        if emitter.emit(ProgressDetail {
-            phase: "resolving".to_string(),
-            current: 0,
-            total: 0,
-        }).is_err() {
+        if emitter
+            .emit(ProgressDetail {
+                phase: "resolving".to_string(),
+                current: 0,
+                total: 0,
+            })
+            .is_err()
+        {
             return DispatchResult::error(
                 &request.id,
-                ErrorDetail::new(ErrorCode::ProgressDeliveryFailed, "progress delivery failed"),
+                ErrorDetail::new(
+                    ErrorCode::ProgressDeliveryFailed,
+                    "progress delivery failed",
+                ),
             );
         }
 
@@ -1008,7 +1047,10 @@ impl ServiceDispatcher {
             Err(e) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, format!("failed to open storage for enrichment: {}", e)),
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to open storage for enrichment: {}", e),
+                    ),
                 );
             }
         };
@@ -1020,7 +1062,10 @@ impl ServiceDispatcher {
             Err(e) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, format!("enrichment failed: {}", e)),
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("enrichment failed: {}", e),
+                    ),
                 );
             }
         };
@@ -1063,18 +1108,22 @@ impl ServiceDispatcher {
             .top_types
             .iter()
             .take(10)
-            .map(|tc| serde_json::json!({
-                "type_name": tc.type_name,
-                "is_external": tc.is_external,
-                "count": tc.count,
-            }))
+            .map(|tc| {
+                serde_json::json!({
+                    "type_name": tc.type_name,
+                    "is_external": tc.is_external,
+                    "count": tc.count,
+                })
+            })
             .collect();
 
-        let promotion = report.promotion.as_ref().map(|p| serde_json::json!({
-            "candidates": p.candidates,
-            "promoted": p.promoted,
-            "persisted_count": p.persisted_count,
-        }));
+        let promotion = report.promotion.as_ref().map(|p| {
+            serde_json::json!({
+                "candidates": p.candidates,
+                "promoted": p.promoted,
+                "persisted_count": p.persisted_count,
+            })
+        });
 
         DispatchResult::success(
             &request.id,
@@ -1116,10 +1165,7 @@ impl ServiceDispatcher {
         let key = match RepoKey::new(Path::new(db_path), repo_uid) {
             Ok(k) => k,
             Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::invalid_request(e),
-                );
+                return DispatchResult::error(&request.id, ErrorDetail::invalid_request(e));
             }
         };
 
@@ -1163,15 +1209,16 @@ impl ServiceDispatcher {
         let now = utc_now_iso8601();
 
         // Call the agent orient use case
-        let result = match repo_graph_agent::orient(&repo_state.storage, repo_uid, focus, budget, &now) {
-            Ok(r) => r,
-            Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                );
-            }
-        };
+        let result =
+            match repo_graph_agent::orient(&repo_state.storage, repo_uid, focus, budget, &now) {
+                Ok(r) => r,
+                Err(e) => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    );
+                }
+            };
 
         // Apply trust overlay (matches CLI contract)
         let mut output = match serde_json::to_value(&result) {
@@ -1187,7 +1234,10 @@ impl ServiceDispatcher {
         // Add trust section if degraded (briefing surface pattern)
         if let Ok(Some(snapshot)) = repo_state.storage.get_snapshot(&result.snapshot) {
             if let Some(trust) = compute_trust_overlay_for_snapshot(
-                &repo_state.storage, repo_uid, &snapshot, "CALLS+IMPORTS"
+                &repo_state.storage,
+                repo_uid,
+                &snapshot,
+                "CALLS+IMPORTS",
             ) {
                 if trust.has_degradation() || !trust.caveats.is_empty() {
                     if let serde_json::Value::Object(ref mut map) = output {
@@ -1216,10 +1266,7 @@ impl ServiceDispatcher {
         let key = match RepoKey::new(Path::new(db_path), repo_uid) {
             Ok(k) => k,
             Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::invalid_request(e),
-                );
+                return DispatchResult::error(&request.id, ErrorDetail::invalid_request(e));
             }
         };
 
@@ -1245,15 +1292,13 @@ impl ServiceDispatcher {
 
         // Call the agent check use case
         match repo_graph_agent::run_check(&repo_state.storage, repo_uid, &now) {
-            Ok(result) => {
-                match serde_json::to_value(&result) {
-                    Ok(v) => DispatchResult::success(&request.id, v),
-                    Err(e) => DispatchResult::error(
-                        &request.id,
-                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                    ),
-                }
-            }
+            Ok(result) => match serde_json::to_value(&result) {
+                Ok(v) => DispatchResult::success(&request.id, v),
+                Err(e) => DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                ),
+            },
             Err(e) => DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
@@ -1279,10 +1324,7 @@ impl ServiceDispatcher {
         let key = match RepoKey::new(Path::new(db_path), repo_uid) {
             Ok(k) => k,
             Err(e) => {
-                return DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::invalid_request(e),
-                );
+                return DispatchResult::error(&request.id, ErrorDetail::invalid_request(e));
             }
         };
 
@@ -1323,7 +1365,13 @@ impl ServiceDispatcher {
         let now = utc_now_iso8601();
 
         // Call the agent explain use case
-        let result = match repo_graph_agent::run_explain(&repo_state.storage, repo_uid, target, budget, &now) {
+        let result = match repo_graph_agent::run_explain(
+            &repo_state.storage,
+            repo_uid,
+            target,
+            budget,
+            &now,
+        ) {
             Ok(r) => r,
             Err(e) => {
                 return DispatchResult::error(
@@ -1347,7 +1395,10 @@ impl ServiceDispatcher {
         // Add trust section if degraded (briefing surface pattern)
         if let Ok(Some(snapshot)) = repo_state.storage.get_snapshot(&result.snapshot) {
             if let Some(trust) = compute_trust_overlay_for_snapshot(
-                &repo_state.storage, repo_uid, &snapshot, "CALLS+IMPORTS"
+                &repo_state.storage,
+                repo_uid,
+                &snapshot,
+                "CALLS+IMPORTS",
             ) {
                 if trust.has_degradation() || !trust.caveats.is_empty() {
                     if let serde_json::Value::Object(ref mut map) = output {

@@ -24,8 +24,8 @@
 use std::collections::HashMap;
 
 use crate::contracts::{
-    EdgeLocation, PromotedEdge, PromotionCandidate, ReceiverTypeOrigin,
-    SymbolInfo, SymbolSubtype, UnresolvedCategory,
+    EdgeLocation, PromotedEdge, PromotionCandidate, ReceiverTypeOrigin, SymbolInfo, SymbolSubtype,
+    UnresolvedCategory,
 };
 use crate::status::PromotionReport;
 
@@ -57,7 +57,11 @@ impl PromotionResult {
     ///
     /// `persisted_count` is the actual number of edges persisted to storage,
     /// which may differ from promoted count if storage fails.
-    pub fn to_report(&self, candidate_count: usize, persisted_count: Option<usize>) -> PromotionReport {
+    pub fn to_report(
+        &self,
+        candidate_count: usize,
+        persisted_count: Option<usize>,
+    ) -> PromotionReport {
         PromotionReport {
             candidates: candidate_count,
             promoted: self.promoted.len(),
@@ -109,7 +113,12 @@ impl PromotionContext {
     ///
     /// Multiple methods with the same name (overloads) are tracked separately
     /// to detect ambiguity in Gate 6.
-    pub fn add_class_method(&mut self, class_stable_key: &str, method_name: &str, method: SymbolInfo) {
+    pub fn add_class_method(
+        &mut self,
+        class_stable_key: &str,
+        method_name: &str,
+        method: SymbolInfo,
+    ) {
         self.class_methods
             .entry(class_stable_key.to_string())
             .or_default()
@@ -126,7 +135,11 @@ impl PromotionContext {
     /// Look up methods by name on a class.
     ///
     /// Returns all methods with the given name (may be multiple for overloads).
-    pub fn get_methods(&self, class_stable_key: &str, method_name: &str) -> Option<&Vec<SymbolInfo>> {
+    pub fn get_methods(
+        &self,
+        class_stable_key: &str,
+        method_name: &str,
+    ) -> Option<&Vec<SymbolInfo>> {
         self.class_methods
             .get(class_stable_key)
             .and_then(|methods| methods.get(method_name))
@@ -428,7 +441,10 @@ mod tests {
         let result = promote_edges(&[candidate], &ctx);
 
         assert!(result.promoted.is_empty());
-        assert_eq!(result.skipped_reasons.get("no_compiler_enrichment"), Some(&1));
+        assert_eq!(
+            result.skipped_reasons.get("no_compiler_enrichment"),
+            Some(&1)
+        );
     }
 
     #[test]
@@ -482,7 +498,10 @@ mod tests {
         let result = promote_edges(&[candidate], &ctx);
 
         assert!(result.promoted.is_empty());
-        assert_eq!(result.skipped_reasons.get("method_not_found_on_class"), Some(&1));
+        assert_eq!(
+            result.skipped_reasons.get("method_not_found_on_class"),
+            Some(&1)
+        );
     }
 
     #[test]
@@ -500,7 +519,10 @@ mod tests {
         let result = promote_edges(&[candidate], &ctx);
 
         assert!(result.promoted.is_empty());
-        assert_eq!(result.skipped_reasons.get("union_or_intersection"), Some(&1));
+        assert_eq!(
+            result.skipped_reasons.get("union_or_intersection"),
+            Some(&1)
+        );
     }
 
     #[test]
@@ -518,7 +540,10 @@ mod tests {
         let result = promote_edges(&[candidate], &ctx);
 
         assert!(result.promoted.is_empty());
-        assert_eq!(result.skipped_reasons.get("not_simple_receiver_method"), Some(&1));
+        assert_eq!(
+            result.skipped_reasons.get("not_simple_receiver_method"),
+            Some(&1)
+        );
     }
 
     #[test]
@@ -584,7 +609,10 @@ mod tests {
 
         assert_eq!(result.promoted.len(), 1);
         assert_eq!(result.skipped_reasons.get("external_type"), Some(&1));
-        assert_eq!(result.skipped_reasons.get("method_not_found_on_class"), Some(&1));
+        assert_eq!(
+            result.skipped_reasons.get("method_not_found_on_class"),
+            Some(&1)
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -640,7 +668,10 @@ mod tests {
 
         // Should REJECT due to ambiguous method (overloaded)
         assert!(result.promoted.is_empty());
-        assert_eq!(result.skipped_reasons.get("ambiguous_method_overloaded"), Some(&1));
+        assert_eq!(
+            result.skipped_reasons.get("ambiguous_method_overloaded"),
+            Some(&1)
+        );
     }
 
     #[test]
@@ -662,7 +693,10 @@ mod tests {
 
         // Should REJECT due to optional chaining
         assert!(result.promoted.is_empty());
-        assert_eq!(result.skipped_reasons.get("optional_or_element_access"), Some(&1));
+        assert_eq!(
+            result.skipped_reasons.get("optional_or_element_access"),
+            Some(&1)
+        );
     }
 
     #[test]
@@ -683,6 +717,9 @@ mod tests {
 
         // Should REJECT due to element access
         assert!(result.promoted.is_empty());
-        assert_eq!(result.skipped_reasons.get("optional_or_element_access"), Some(&1));
+        assert_eq!(
+            result.skipped_reasons.get("optional_or_element_access"),
+            Some(&1)
+        );
     }
 }

@@ -19,7 +19,9 @@
 
 use serde_json::Value;
 
-use crate::envelope::{ErrorCode, ErrorDetail, ErrorResponse, ProgressDetail, Request, SuccessResponse};
+use crate::envelope::{
+    ErrorCode, ErrorDetail, ErrorResponse, ProgressDetail, Request, SuccessResponse,
+};
 
 /// Result of dispatching a request.
 #[derive(Debug)]
@@ -60,17 +62,23 @@ pub struct EmitError {
 impl EmitError {
     /// Create a new emit error.
     pub fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into() }
+        Self {
+            message: message.into(),
+        }
     }
 
     /// Create an emit error from an I/O error.
     pub fn from_io(e: std::io::Error) -> Self {
-        Self { message: format!("transport write failed: {}", e) }
+        Self {
+            message: format!("transport write failed: {}", e),
+        }
     }
 
     /// Create an emit error from a serialization error.
     pub fn from_serialize(e: serde_json::Error) -> Self {
-        Self { message: format!("progress serialization failed: {}", e) }
+        Self {
+            message: format!("progress serialization failed: {}", e),
+        }
     }
 }
 
@@ -168,10 +176,14 @@ impl Dispatcher for MockDispatcher {
 
             "error" => {
                 // For testing error responses
-                let code = request.params.get("code")
+                let code = request
+                    .params
+                    .get("code")
                     .and_then(|v| v.as_str())
                     .unwrap_or("TestError");
-                let message = request.params.get("message")
+                let message = request
+                    .params
+                    .get("message")
                     .and_then(|v| v.as_str())
                     .unwrap_or("test error");
                 DispatchResult::error(
@@ -185,15 +197,20 @@ impl Dispatcher for MockDispatcher {
 
             "progress_test" => {
                 // For testing progress emission
-                let count = request.params.get("count")
+                let count = request
+                    .params
+                    .get("count")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(3);
                 for i in 1..=count {
-                    if emitter.emit(ProgressDetail {
-                        phase: "testing".to_string(),
-                        current: i,
-                        total: count,
-                    }).is_err() {
+                    if emitter
+                        .emit(ProgressDetail {
+                            phase: "testing".to_string(),
+                            current: i,
+                            total: count,
+                        })
+                        .is_err()
+                    {
                         // Abort on transport failure
                         return DispatchResult::error(
                             &request.id,
@@ -352,7 +369,10 @@ mod tests {
 
     impl FailingEmitter {
         fn new(fail_after: u64) -> Self {
-            Self { fail_after, count: 0 }
+            Self {
+                fail_after,
+                count: 0,
+            }
         }
     }
 

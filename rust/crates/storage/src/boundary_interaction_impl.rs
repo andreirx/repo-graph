@@ -300,11 +300,11 @@ impl StorageConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use repo_graph_boundary_interaction::surface::SurfaceBuilder;
     use repo_graph_boundary_interaction::{
         BoundaryScope, ChannelKind, Direction, EndpointLocality, InteractionBasis,
         InteractionPattern,
     };
-    use repo_graph_boundary_interaction::surface::SurfaceBuilder;
 
     fn create_test_db() -> StorageConnection {
         let mut conn = StorageConnection::open_in_memory().unwrap();
@@ -359,7 +359,8 @@ mod tests {
         let surface = test_surface();
 
         // Insert twice
-        conn.insert_boundary_surfaces(&[surface.clone()]).unwrap();
+        conn.insert_boundary_surfaces(std::slice::from_ref(&surface))
+            .unwrap();
         conn.insert_boundary_surfaces(&[surface]).unwrap();
 
         // Should only have one
@@ -372,7 +373,8 @@ mod tests {
         let mut conn = create_test_db();
 
         let surface = test_surface();
-        conn.insert_boundary_surfaces(&[surface.clone()]).unwrap();
+        conn.insert_boundary_surfaces(std::slice::from_ref(&surface))
+            .unwrap();
 
         let channel = ChannelDetail {
             channel_uid: ChannelDetail::build_uid(&surface.surface_uid, "/var/run/app.sock"),
@@ -409,7 +411,8 @@ mod tests {
         let mut conn = create_test_db();
 
         let surface = test_surface();
-        conn.insert_boundary_surfaces(&[surface.clone()]).unwrap();
+        conn.insert_boundary_surfaces(std::slice::from_ref(&surface))
+            .unwrap();
 
         let channel = ChannelDetail {
             channel_uid: ChannelDetail::build_uid(&surface.surface_uid, "/tmp/pipe"),

@@ -18,8 +18,18 @@ use crate::types::{CaseMapping, StatusMapping};
 /// Note: _t is a general C typedef convention, not specific to status types.
 /// We use more specific suffixes to reduce false positives.
 const STATUS_SUFFIXES: &[&str] = &[
-    "_res_t", "_result_t", "_status_t", "_code_t", "_error_t", "_ret_t",
-    "_res", "_result", "_status", "_code", "_error", "_ret",
+    "_res_t",
+    "_result_t",
+    "_status_t",
+    "_code_t",
+    "_error_t",
+    "_ret_t",
+    "_res",
+    "_result",
+    "_status",
+    "_code",
+    "_error",
+    "_ret",
     "_e", // enum suffix in some codebases
 ];
 
@@ -54,7 +64,8 @@ pub fn extract_status_mappings(
     for child in root.children(&mut cursor) {
         match child.kind() {
             "function_definition" => {
-                if let Some(mapping) = try_extract_status_mapping(&child, source, file_path, repo_uid)
+                if let Some(mapping) =
+                    try_extract_status_mapping(&child, source, file_path, repo_uid)
                 {
                     results.push(mapping);
                 }
@@ -82,7 +93,8 @@ fn walk_preproc_for_functions(
     for child in node.children(&mut cursor) {
         match child.kind() {
             "function_definition" => {
-                if let Some(mapping) = try_extract_status_mapping(&child, source, file_path, repo_uid)
+                if let Some(mapping) =
+                    try_extract_status_mapping(&child, source, file_path, repo_uid)
                 {
                     results.push(mapping);
                 }
@@ -148,7 +160,10 @@ fn try_extract_status_mapping(
     let line_end = (func_node.end_position().row + 1) as u32;
 
     // Use canonical stable key format with uppercase subtype
-    let symbol_key = format!("{}:{}#{}:SYMBOL:FUNCTION", repo_uid, file_path, function_name);
+    let symbol_key = format!(
+        "{}:{}#{}:SYMBOL:FUNCTION",
+        repo_uid, file_path, function_name
+    );
 
     Some(StatusMapping {
         symbol_key,
@@ -219,16 +234,11 @@ fn extract_function_name(declarator: &tree_sitter::Node, source: &[u8]) -> Optio
     let mut current = *declarator;
 
     // Unwrap function_declarator and pointer_declarator wrappers
-    loop {
-        match current.kind() {
-            "function_declarator" | "pointer_declarator" => {
-                if let Some(inner) = current.child_by_field_name("declarator") {
-                    current = inner;
-                } else {
-                    break;
-                }
-            }
-            _ => break,
+    while let "function_declarator" | "pointer_declarator" = current.kind() {
+        if let Some(inner) = current.child_by_field_name("declarator") {
+            current = inner;
+        } else {
+            break;
         }
     }
 
@@ -263,11 +273,7 @@ fn extract_all_parameters(declarator: &tree_sitter::Node, source: &[u8]) -> Vec<
 }
 
 /// Recursively extract parameters from a declarator node.
-fn extract_params_from_node(
-    node: &tree_sitter::Node,
-    source: &[u8],
-    params: &mut Vec<ParamInfo>,
-) {
+fn extract_params_from_node(node: &tree_sitter::Node, source: &[u8], params: &mut Vec<ParamInfo>) {
     // Direct function_declarator
     if node.kind() == "function_declarator" {
         if let Some(param_list) = node.child_by_field_name("parameters") {
@@ -380,7 +386,9 @@ fn find_switch_on_any_param<'a>(
         if child.kind() == "switch_statement" {
             // Check if condition matches any parameter
             if let Some(condition) = child.child_by_field_name("condition") {
-                if let Some(matched_type) = switch_condition_matches_any_param(&condition, params, source) {
+                if let Some(matched_type) =
+                    switch_condition_matches_any_param(&condition, params, source)
+                {
                     return Some((child, matched_type));
                 }
             }
@@ -474,12 +482,15 @@ fn extract_discriminant_info(expr: &tree_sitter::Node, source: &[u8]) -> Option<
             }
             None
         }
-        _ => None
+        _ => None,
     }
 }
 
 /// Extract case mappings and default from a switch statement.
-fn extract_case_mappings(switch_node: &tree_sitter::Node, source: &[u8]) -> (Vec<CaseMapping>, Option<String>) {
+fn extract_case_mappings(
+    switch_node: &tree_sitter::Node,
+    source: &[u8],
+) -> (Vec<CaseMapping>, Option<String>) {
     let mut mappings = Vec::new();
     let mut default_output = None;
     let mut current_inputs: Vec<String> = Vec::new();
@@ -612,10 +623,8 @@ fn find_fallback_return_after_switch(
     let mut cursor = body.walk();
     for child in body.children(&mut cursor) {
         // Only look at statements after the switch
-        if child.start_position().row > switch_end_row {
-            if child.kind() == "return_statement" {
-                return extract_return_expression(&child, source);
-            }
+        if child.start_position().row > switch_end_row && child.kind() == "return_statement" {
+            return extract_return_expression(&child, source);
         }
     }
     None
@@ -910,7 +919,8 @@ status_t func(code_t c) {
 }
 "#;
         let tree = parse_c(source);
-        let mappings = extract_status_mappings(&tree, source.as_bytes(), "path/to/file.c", "myrepo");
+        let mappings =
+            extract_status_mappings(&tree, source.as_bytes(), "path/to/file.c", "myrepo");
 
         assert_eq!(mappings.len(), 1);
         assert_eq!(
@@ -946,7 +956,11 @@ channel_op_res_t channel_post_method(channel_method_t method, void *data) {
         let mappings = extract_status_mappings(&tree, source.as_bytes(), "test.c", "test");
 
         // Must be rejected: no explicit case-to-output mappings
-        assert_eq!(mappings.len(), 0, "command dispatcher should not be classified as STATUS_MAPPING");
+        assert_eq!(
+            mappings.len(),
+            0,
+            "command dispatcher should not be classified as STATUS_MAPPING"
+        );
     }
 
     /// Reject ioctl-style dispatcher with trailing return.
@@ -973,7 +987,11 @@ disk_result_t disk_ioctl(disk_cmd_t cmd, void *buf) {
         let tree = parse_c(source);
         let mappings = extract_status_mappings(&tree, source.as_bytes(), "test.c", "test");
 
-        assert_eq!(mappings.len(), 0, "ioctl dispatcher should not be classified as STATUS_MAPPING");
+        assert_eq!(
+            mappings.len(),
+            0,
+            "ioctl dispatcher should not be classified as STATUS_MAPPING"
+        );
     }
 
     /// Reject handler dispatch with fallback return but no direct mappings.
@@ -1002,7 +1020,11 @@ server_op_res_t handle_feedback(feedback_t fb_type, json_t *json_data) {
 
         // Even though result is modified in some cases, there are no direct
         // case-to-return mappings, so this is not a STATUS_MAPPING.
-        assert_eq!(mappings.len(), 0, "feedback handler should not be classified as STATUS_MAPPING");
+        assert_eq!(
+            mappings.len(),
+            0,
+            "feedback handler should not be classified as STATUS_MAPPING"
+        );
     }
 
     /// Accept true status mapping even when some cases have side effects.
@@ -1080,20 +1102,29 @@ channel_op_res_t channel_map_curl_error(CURLcode res) {
         let m = &mappings[0];
 
         // Should have 3 distinct case groups, NOT merged together
-        assert_eq!(m.mappings.len(), 3, "expected 3 case groups, got {:?}", m.mappings);
+        assert_eq!(
+            m.mappings.len(),
+            3,
+            "expected 3 case groups, got {:?}",
+            m.mappings
+        );
 
         // First group: SSL init errors -> CHANNEL_EINIT
         // Note: preprocessor-guarded CURLE_SSL_INVALIDCERTSTATUS may or may not appear
         // depending on how tree-sitter parses #if blocks
         assert!(
-            m.mappings[0].inputs.contains(&"CURLE_SSL_ENGINE_NOTFOUND".to_string()),
+            m.mappings[0]
+                .inputs
+                .contains(&"CURLE_SSL_ENGINE_NOTFOUND".to_string()),
             "first group should contain CURLE_SSL_ENGINE_NOTFOUND"
         );
         assert_eq!(m.mappings[0].output, "CHANNEL_EINIT");
 
         // Second group: network errors -> CHANNEL_ENONET
         assert!(
-            m.mappings[1].inputs.contains(&"CURLE_COULDNT_RESOLVE_HOST".to_string()),
+            m.mappings[1]
+                .inputs
+                .contains(&"CURLE_COULDNT_RESOLVE_HOST".to_string()),
             "second group should contain CURLE_COULDNT_RESOLVE_HOST"
         );
         assert_eq!(m.mappings[1].output, "CHANNEL_ENONET");
@@ -1134,7 +1165,12 @@ error_code_t map_error(int code) {
         // 1. Cases 1, 2, [3] -> ERR_EXTENDED (from inside #ifdef)
         // 2. Case 4 -> ERR_BASIC
         // The #ifdef'd return terminates the first group
-        assert_eq!(m.mappings.len(), 2, "expected 2 groups, got {:?}", m.mappings);
+        assert_eq!(
+            m.mappings.len(),
+            2,
+            "expected 2 groups, got {:?}",
+            m.mappings
+        );
         assert_eq!(m.mappings[0].output, "ERR_EXTENDED");
         assert_eq!(m.mappings[1].output, "ERR_BASIC");
     }

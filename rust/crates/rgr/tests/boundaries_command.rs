@@ -103,7 +103,10 @@ fn boundaries_usage_error_no_subcommand() {
         .unwrap();
 
     assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty(), "stdout must be empty on usage error");
+    assert!(
+        output.stdout.is_empty(),
+        "stdout must be empty on usage error"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("usage:"), "stderr: {}", stderr);
 }
@@ -141,12 +144,7 @@ fn boundaries_show_usage_error_missing_surface_uid() {
     let (_dir, db_path, _repo_path) = build_indexed_db_no_boundaries();
 
     let output = Command::new(binary_path())
-        .args([
-            "boundaries",
-            "show",
-            db_path.to_str().unwrap(),
-            "test-repo",
-        ])
+        .args(["boundaries", "show", db_path.to_str().unwrap(), "test-repo"])
         .output()
         .unwrap();
 
@@ -285,12 +283,7 @@ fn boundaries_list_empty_exit_1() {
     let (_dir, db_path, _repo_path) = build_indexed_db_no_boundaries();
 
     let output = Command::new(binary_path())
-        .args([
-            "boundaries",
-            "list",
-            db_path.to_str().unwrap(),
-            "test-repo",
-        ])
+        .args(["boundaries", "list", db_path.to_str().unwrap(), "test-repo"])
         .output()
         .unwrap();
 
@@ -316,12 +309,7 @@ fn boundaries_list_envelope_contract() {
     let (_dir, db_path, _repo_path) = build_indexed_db();
 
     let output = Command::new(binary_path())
-        .args([
-            "boundaries",
-            "list",
-            db_path.to_str().unwrap(),
-            "test-repo",
-        ])
+        .args(["boundaries", "list", db_path.to_str().unwrap(), "test-repo"])
         .output()
         .unwrap();
 
@@ -602,7 +590,7 @@ fn build_indexed_db_with_contract() -> (tempfile::TempDir, PathBuf, String) {
     // Reopen with rusqlite to insert test data directly
     let conn = rusqlite::Connection::open(&db_path).unwrap();
     conn.execute_batch(
-            r#"
+        r#"
             INSERT INTO repos (repo_uid, name, root_path, created_at)
             VALUES ('test-repo', 'Test', '/tmp/test', datetime('now'));
 
@@ -655,8 +643,8 @@ fn build_indexed_db_with_contract() -> (tempfile::TempDir, PathBuf, String) {
                 '{"mapping_uid":"m-greeter"}'
             );
             "#,
-        )
-        .unwrap();
+    )
+    .unwrap();
 
     let surface_uid = "surf-greeter-impl".to_string();
     (dir, db_path, surface_uid)
@@ -667,12 +655,7 @@ fn boundaries_list_shows_contract_name_for_grpc_hint() {
     let (_dir, db_path, _surface_uid) = build_indexed_db_with_contract();
 
     let output = Command::new(binary_path())
-        .args([
-            "boundaries",
-            "list",
-            db_path.to_str().unwrap(),
-            "test-repo",
-        ])
+        .args(["boundaries", "list", db_path.to_str().unwrap(), "test-repo"])
         .output()
         .unwrap();
 
@@ -739,7 +722,8 @@ fn boundaries_show_includes_contracts_for_grpc_hint() {
     assert_eq!(result["transportClass"], "schema_rpc");
 
     // Verify contracts array present
-    let contracts = result["contracts"].as_array()
+    let contracts = result["contracts"]
+        .as_array()
         .expect("contracts should be an array");
     assert_eq!(contracts.len(), 1, "should have 1 contract association");
 
@@ -835,12 +819,7 @@ fn boundaries_list_shows_gr1b_boosted_confidence() {
     let (_dir, db_path, _surface_uid) = build_indexed_db_with_gr1b_boost();
 
     let output = Command::new(binary_path())
-        .args([
-            "boundaries",
-            "list",
-            db_path.to_str().unwrap(),
-            "test-repo",
-        ])
+        .args(["boundaries", "list", db_path.to_str().unwrap(), "test-repo"])
         .output()
         .unwrap();
 
@@ -907,14 +886,20 @@ fn boundaries_show_includes_registration_sites_for_gr1b() {
     );
 
     // evidenceJson should contain registration_sites
-    let evidence_json_str = result["evidenceJson"].as_str()
+    let evidence_json_str = result["evidenceJson"]
+        .as_str()
         .expect("evidenceJson should be a string");
-    let evidence: serde_json::Value = serde_json::from_str(evidence_json_str)
-        .expect("evidenceJson should be valid JSON");
+    let evidence: serde_json::Value =
+        serde_json::from_str(evidence_json_str).expect("evidenceJson should be valid JSON");
 
-    let registration_sites = evidence["registration_sites"].as_array()
+    let registration_sites = evidence["registration_sites"]
+        .as_array()
         .expect("registration_sites should be an array");
-    assert_eq!(registration_sites.len(), 1, "should have 1 registration site");
+    assert_eq!(
+        registration_sites.len(),
+        1,
+        "should have 1 registration site"
+    );
 
     let site = &registration_sites[0];
     assert_eq!(site["file"], "src/HelloWorldServer.java");
@@ -1006,12 +991,7 @@ fn boundaries_list_shows_gr2a_consumer_direction() {
     let (_dir, db_path, _surface_uid) = build_indexed_db_with_gr2a_client();
 
     let output = Command::new(binary_path())
-        .args([
-            "boundaries",
-            "list",
-            db_path.to_str().unwrap(),
-            "test-repo",
-        ])
+        .args(["boundaries", "list", db_path.to_str().unwrap(), "test-repo"])
         .output()
         .unwrap();
 
@@ -1088,10 +1068,11 @@ fn boundaries_show_includes_stub_info_for_gr2a() {
     assert_eq!(result["direction"], "consumer");
 
     // evidenceJson should contain stub info
-    let evidence_json_str = result["evidenceJson"].as_str()
+    let evidence_json_str = result["evidenceJson"]
+        .as_str()
         .expect("evidenceJson should be a string");
-    let evidence: serde_json::Value = serde_json::from_str(evidence_json_str)
-        .expect("evidenceJson should be valid JSON");
+    let evidence: serde_json::Value =
+        serde_json::from_str(evidence_json_str).expect("evidenceJson should be valid JSON");
 
     // Verify stub-specific fields
     assert_eq!(evidence["grpc_class"], "GreeterGrpc");
@@ -1128,7 +1109,8 @@ fn boundaries_show_includes_gr2a_contract_association() {
         .unwrap_or_else(|e| panic!("stdout is not valid JSON: {}\nstdout: {}", e, stdout));
 
     // Verify contract association is present in show output
-    let contracts = result["contracts"].as_array()
+    let contracts = result["contracts"]
+        .as_array()
         .expect("contracts should be an array in show output");
 
     assert_eq!(contracts.len(), 1, "should have 1 contract association");
@@ -1271,7 +1253,10 @@ fn boundaries_list_filter_kind_signal_alias_works() {
 
     // Same count as process_signal
     let count = result["count"].as_u64().unwrap_or(0);
-    assert_eq!(count, 4, "signal alias should yield same results as process_signal");
+    assert_eq!(
+        count, 4,
+        "signal alias should yield same results as process_signal"
+    );
 }
 
 #[test]
@@ -1446,7 +1431,9 @@ fn gr2a_fixture_validated_full_indexed_run() {
         .join("grpc-java-minimal");
 
     assert!(
-        fixture_path.join("src/main/java/io/grpc/examples/helloworld/HelloWorldClient.java").exists(),
+        fixture_path
+            .join("src/main/java/io/grpc/examples/helloworld/HelloWorldClient.java")
+            .exists(),
         "HelloWorldClient.java fixture not found at {:?}",
         fixture_path
     );
@@ -1495,13 +1482,13 @@ fn gr2a_fixture_validated_full_indexed_run() {
         .unwrap_or_else(|e| panic!("stdout is not valid JSON: {}\nstdout: {}", e, stdout));
 
     // boundaries list returns "results" array
-    let surfaces = result["results"].as_array()
+    let surfaces = result["results"]
+        .as_array()
         .expect("results should be an array");
 
     // Find the GR-2A consumer surface (from HelloWorldClient)
     let client_surface = surfaces.iter().find(|s| {
-        s["direction"].as_str() == Some("consumer")
-            && s["basis"].as_str() == Some("stub_creation")
+        s["direction"].as_str() == Some("consumer") && s["basis"].as_str() == Some("stub_creation")
     });
 
     assert!(
@@ -1514,10 +1501,22 @@ fn gr2a_fixture_validated_full_indexed_run() {
     let client = client_surface.unwrap();
 
     // Verify GR-2A surface semantics
-    assert_eq!(client["direction"], "consumer", "GR-2A should emit direction=consumer");
-    assert_eq!(client["channelKind"], "grpc_channel", "should be grpc_channel");
-    assert_eq!(client["transportClass"], "schema_rpc", "should be schema_rpc");
-    assert_eq!(client["basis"], "stub_creation", "basis should be stub_creation");
+    assert_eq!(
+        client["direction"], "consumer",
+        "GR-2A should emit direction=consumer"
+    );
+    assert_eq!(
+        client["channelKind"], "grpc_channel",
+        "should be grpc_channel"
+    );
+    assert_eq!(
+        client["transportClass"], "schema_rpc",
+        "should be schema_rpc"
+    );
+    assert_eq!(
+        client["basis"], "stub_creation",
+        "basis should be stub_creation"
+    );
     assert_eq!(client["protocol"], "grpc", "protocol should be grpc");
 
     // Verify confidence is hint-grade
@@ -1538,7 +1537,8 @@ fn gr2a_fixture_validated_full_indexed_run() {
 
     // ── GR-2A: Contract association proof ────────────────────────────
     // Get surface_uid and verify contract link via show command
-    let surface_uid = client["surfaceUid"].as_str()
+    let surface_uid = client["surfaceUid"]
+        .as_str()
         .expect("surface should have surfaceUid");
 
     let show_output = Command::new(binary_path())
@@ -1563,13 +1563,20 @@ fn gr2a_fixture_validated_full_indexed_run() {
         .unwrap_or_else(|e| panic!("show output not valid JSON: {}\nstdout: {}", e, show_stdout));
 
     // Verify evidence contains stub info
-    let evidence_json_str = show_result["evidenceJson"].as_str()
+    let evidence_json_str = show_result["evidenceJson"]
+        .as_str()
         .expect("show should include evidenceJson");
-    let evidence: serde_json::Value = serde_json::from_str(evidence_json_str)
-        .expect("evidenceJson should be valid JSON");
+    let evidence: serde_json::Value =
+        serde_json::from_str(evidence_json_str).expect("evidenceJson should be valid JSON");
 
-    assert_eq!(evidence["grpc_class"], "GreeterGrpc", "grpc_class in evidence");
-    assert_eq!(evidence["stub_method"], "newBlockingStub", "stub_method in evidence");
+    assert_eq!(
+        evidence["grpc_class"], "GreeterGrpc",
+        "grpc_class in evidence"
+    );
+    assert_eq!(
+        evidence["stub_method"], "newBlockingStub",
+        "stub_method in evidence"
+    );
     assert_eq!(evidence["stub_type"], "blocking", "stub_type in evidence");
 
     // Verify contract association to proto service
@@ -1582,7 +1589,10 @@ fn gr2a_fixture_validated_full_indexed_run() {
     );
 
     let contract = &contracts.unwrap()[0];
-    assert_eq!(contract["contractKind"], "grpc_service", "contract kind should be grpc_service");
+    assert_eq!(
+        contract["contractKind"], "grpc_service",
+        "contract kind should be grpc_service"
+    );
 
     // Contract name should reference Greeter service
     let contract_name = contract["contractName"].as_str().unwrap_or("");
@@ -1596,7 +1606,10 @@ fn gr2a_fixture_validated_full_indexed_run() {
     println!("  - HelloWorldClient.java indexed");
     println!("  - CALLS edge to GreeterGrpc.newBlockingStub detected");
     println!("  - CS-2A mapping to proto service present");
-    println!("  - GR-2A consumer surface emitted (confidence={:.2})", confidence);
+    println!(
+        "  - GR-2A consumer surface emitted (confidence={:.2})",
+        confidence
+    );
     println!("  - Contract association to Greeter service verified");
 }
 
@@ -1726,7 +1739,10 @@ fn boundaries_list_filter_kind_sab_alias_works() {
 
     // Same count as shared_array_buffer
     let count = result["count"].as_u64().unwrap_or(0);
-    assert!(count >= 6, "sab alias should yield SharedArrayBuffer results");
+    assert!(
+        count >= 6,
+        "sab alias should yield SharedArrayBuffer results"
+    );
 }
 
 #[test]
@@ -1761,7 +1777,10 @@ fn boundaries_list_filter_family_shared_memory_includes_sab() {
 
     // Should find surfaces (SAB maps to shared_memory family)
     let count = result["count"].as_u64().unwrap_or(0);
-    assert!(count >= 6, "expected SharedArrayBuffer surfaces in shared_memory family");
+    assert!(
+        count >= 6,
+        "expected SharedArrayBuffer surfaces in shared_memory family"
+    );
 
     // All results should have protocolFamily=shared_memory
     for item in result["results"].as_array().unwrap() {
@@ -1816,9 +1835,17 @@ fn create_test_repo_with_amqp(dir: &std::path::Path) {
     let mut f = File::create(&producer_ts).unwrap();
     writeln!(f, "import amqp from 'amqplib';").unwrap();
     writeln!(f, "async function main() {{").unwrap();
-    writeln!(f, "    const conn = await amqp.connect('amqp://localhost');").unwrap();
+    writeln!(
+        f,
+        "    const conn = await amqp.connect('amqp://localhost');"
+    )
+    .unwrap();
     writeln!(f, "    const channel = await conn.createChannel();").unwrap();
-    writeln!(f, "    await channel.assertQueue('hello', {{ durable: true }});").unwrap();
+    writeln!(
+        f,
+        "    await channel.assertQueue('hello', {{ durable: true }});"
+    )
+    .unwrap();
     writeln!(f, "    channel.sendToQueue('hello', Buffer.from('msg'));").unwrap();
     writeln!(f, "}}").unwrap();
 
@@ -1827,10 +1854,22 @@ fn create_test_repo_with_amqp(dir: &std::path::Path) {
     let mut f = File::create(&consumer_ts).unwrap();
     writeln!(f, "import amqp from 'amqplib';").unwrap();
     writeln!(f, "async function main() {{").unwrap();
-    writeln!(f, "    const conn = await amqp.connect('amqp://localhost');").unwrap();
+    writeln!(
+        f,
+        "    const conn = await amqp.connect('amqp://localhost');"
+    )
+    .unwrap();
     writeln!(f, "    const channel = await conn.createChannel();").unwrap();
-    writeln!(f, "    await channel.assertQueue('hello', {{ durable: true }});").unwrap();
-    writeln!(f, "    channel.consume('hello', (msg) => console.log(msg));").unwrap();
+    writeln!(
+        f,
+        "    await channel.assertQueue('hello', {{ durable: true }});"
+    )
+    .unwrap();
+    writeln!(
+        f,
+        "    channel.consume('hello', (msg) => console.log(msg));"
+    )
+    .unwrap();
     writeln!(f, "}}").unwrap();
 }
 
@@ -1939,7 +1978,10 @@ fn boundaries_list_filter_kind_amqp_alias_works() {
 
     // Same count as amqp_queue
     let count = result["count"].as_u64().unwrap_or(0);
-    assert_eq!(count, 4, "amqp alias should yield same results as amqp_queue");
+    assert_eq!(
+        count, 4,
+        "amqp alias should yield same results as amqp_queue"
+    );
 }
 
 #[test]
@@ -1975,7 +2017,10 @@ fn boundaries_list_filter_kind_rabbitmq_alias_works() {
 
     // Same count as amqp_queue
     let count = result["count"].as_u64().unwrap_or(0);
-    assert_eq!(count, 4, "rabbitmq alias should yield same results as amqp_queue");
+    assert_eq!(
+        count, 4,
+        "rabbitmq alias should yield same results as amqp_queue"
+    );
 }
 
 #[test]
@@ -2066,11 +2111,7 @@ fn boundaries_list_amqp_provider_consumer_directions() {
         1,
         "expected 1 provider surface (sendToQueue)"
     );
-    assert_eq!(
-        consumers.len(),
-        1,
-        "expected 1 consumer surface (consume)"
-    );
+    assert_eq!(consumers.len(), 1, "expected 1 consumer surface (consume)");
     assert_eq!(
         bidirectional.len(),
         2,
@@ -2155,9 +2196,17 @@ fn create_test_repo_with_kafka(dir: &std::path::Path) {
     let mut f = File::create(&producer_ts).unwrap();
     writeln!(f, "import {{ Kafka }} from 'kafkajs';").unwrap();
     writeln!(f, "async function main() {{").unwrap();
-    writeln!(f, "    const kafka = new Kafka({{ brokers: ['localhost:9092'] }});").unwrap();
+    writeln!(
+        f,
+        "    const kafka = new Kafka({{ brokers: ['localhost:9092'] }});"
+    )
+    .unwrap();
     writeln!(f, "    const producer = kafka.producer();").unwrap();
-    writeln!(f, "    await producer.send({{ topic: 'orders', messages: [] }});").unwrap();
+    writeln!(
+        f,
+        "    await producer.send({{ topic: 'orders', messages: [] }});"
+    )
+    .unwrap();
     writeln!(f, "}}").unwrap();
 
     // Consumer: subscribe only (run is NOT detected — no topic evidence)
@@ -2165,10 +2214,22 @@ fn create_test_repo_with_kafka(dir: &std::path::Path) {
     let mut f = File::create(&consumer_ts).unwrap();
     writeln!(f, "import {{ Kafka }} from 'kafkajs';").unwrap();
     writeln!(f, "async function main() {{").unwrap();
-    writeln!(f, "    const kafka = new Kafka({{ brokers: ['localhost:9092'] }});").unwrap();
-    writeln!(f, "    const consumer = kafka.consumer({{ groupId: 'billing' }});").unwrap();
+    writeln!(
+        f,
+        "    const kafka = new Kafka({{ brokers: ['localhost:9092'] }});"
+    )
+    .unwrap();
+    writeln!(
+        f,
+        "    const consumer = kafka.consumer({{ groupId: 'billing' }});"
+    )
+    .unwrap();
     writeln!(f, "    await consumer.subscribe({{ topic: 'orders' }});").unwrap();
-    writeln!(f, "    await consumer.run({{ eachMessage: async () => {{}} }});").unwrap();
+    writeln!(
+        f,
+        "    await consumer.run({{ eachMessage: async () => {{}} }});"
+    )
+    .unwrap();
     writeln!(f, "}}").unwrap();
 }
 
@@ -2278,7 +2339,10 @@ fn boundaries_list_filter_kind_kafka_alias_works() {
 
     // Same count as kafka_topic
     let count = result["count"].as_u64().unwrap_or(0);
-    assert_eq!(count, 2, "kafka alias should yield same results as kafka_topic");
+    assert_eq!(
+        count, 2,
+        "kafka alias should yield same results as kafka_topic"
+    );
 }
 
 #[test]
@@ -2317,11 +2381,7 @@ fn boundaries_list_kafka_provider_consumer_directions() {
     // - 1 provider: send (producer.ts)
     // - 1 consumer: subscribe (consumer.ts)
     // Note: run() is NOT detected — no topic evidence
-    assert_eq!(
-        providers.len(),
-        1,
-        "expected 1 provider surface (send)"
-    );
+    assert_eq!(providers.len(), 1, "expected 1 provider surface (send)");
     assert_eq!(
         consumers.len(),
         1,
@@ -2408,7 +2468,11 @@ fn create_test_repo_with_nats(dir: &std::path::Path) {
     let mut f = File::create(&publisher_ts).unwrap();
     writeln!(f, "import {{ connect }} from 'nats';").unwrap();
     writeln!(f, "async function publishOrder() {{").unwrap();
-    writeln!(f, "    const nc = await connect({{ servers: 'localhost:4222' }});").unwrap();
+    writeln!(
+        f,
+        "    const nc = await connect({{ servers: 'localhost:4222' }});"
+    )
+    .unwrap();
     writeln!(f, "    nc.publish('orders.created', 'data');").unwrap();
     writeln!(f, "}}").unwrap();
 
@@ -2417,7 +2481,11 @@ fn create_test_repo_with_nats(dir: &std::path::Path) {
     let mut f = File::create(&subscriber_ts).unwrap();
     writeln!(f, "import {{ connect }} from 'nats';").unwrap();
     writeln!(f, "async function processOrders() {{").unwrap();
-    writeln!(f, "    const nc = await connect({{ servers: 'localhost:4222' }});").unwrap();
+    writeln!(
+        f,
+        "    const nc = await connect({{ servers: 'localhost:4222' }});"
+    )
+    .unwrap();
     writeln!(f, "    nc.subscribe('orders.created');").unwrap();
     writeln!(f, "}}").unwrap();
 }
@@ -2527,7 +2595,10 @@ fn boundaries_list_filter_kind_nats_alias_works() {
 
     // Same count as nats_subject
     let count = result["count"].as_u64().unwrap_or(0);
-    assert_eq!(count, 2, "nats alias should yield same results as nats_subject");
+    assert_eq!(
+        count, 2,
+        "nats alias should yield same results as nats_subject"
+    );
 }
 
 #[test]
@@ -2598,8 +2669,14 @@ fn boundaries_list_nats_provider_consumer_directions() {
     let results = result["results"].as_array().unwrap();
 
     // Count by direction
-    let providers: Vec<_> = results.iter().filter(|r| r["direction"] == "provider").collect();
-    let consumers: Vec<_> = results.iter().filter(|r| r["direction"] == "consumer").collect();
+    let providers: Vec<_> = results
+        .iter()
+        .filter(|r| r["direction"] == "provider")
+        .collect();
+    let consumers: Vec<_> = results
+        .iter()
+        .filter(|r| r["direction"] == "consumer")
+        .collect();
 
     // publish = provider, subscribe = consumer
     assert_eq!(
@@ -2693,14 +2770,22 @@ fn boundaries_list_nats_p1_local_shadow_connect_not_detected() {
     let shadow_ts = repo_path.join("shadow_connect.ts");
     let mut f = File::create(&shadow_ts).unwrap();
     writeln!(f, "import {{ connect }} from 'nats';").unwrap();
-    writeln!(f, "").unwrap();
+    writeln!(f).unwrap();
     writeln!(f, "// This local function shadows the imported connect").unwrap();
     writeln!(f, "async function connect() {{").unwrap();
-    writeln!(f, "    return {{ publish: () => {{}}, subscribe: () => {{}} }};").unwrap();
+    writeln!(
+        f,
+        "    return {{ publish: () => {{}}, subscribe: () => {{}} }};"
+    )
+    .unwrap();
     writeln!(f, "}}").unwrap();
-    writeln!(f, "").unwrap();
+    writeln!(f).unwrap();
     writeln!(f, "async function main() {{").unwrap();
-    writeln!(f, "    const nc = await connect();  // Calls LOCAL function, not NATS").unwrap();
+    writeln!(
+        f,
+        "    const nc = await connect();  // Calls LOCAL function, not NATS"
+    )
+    .unwrap();
     writeln!(f, "    nc.publish('orders.created', 'data');").unwrap();
     writeln!(f, "}}").unwrap();
 
@@ -2762,12 +2847,20 @@ fn boundaries_list_nats_p1_unrelated_connect_method_not_detected() {
     let unrelated_ts = repo_path.join("unrelated_connect.ts");
     let mut f = File::create(&unrelated_ts).unwrap();
     writeln!(f, "import {{ connect }} from 'nats';").unwrap();
-    writeln!(f, "").unwrap();
+    writeln!(f).unwrap();
     writeln!(f, "// This is an unrelated Redis client, not NATS").unwrap();
-    writeln!(f, "const redis = {{ connect: async () => ({{ publish: () => {{}} }}) }};").unwrap();
-    writeln!(f, "").unwrap();
+    writeln!(
+        f,
+        "const redis = {{ connect: async () => ({{ publish: () => {{}} }}) }};"
+    )
+    .unwrap();
+    writeln!(f).unwrap();
     writeln!(f, "async function main() {{").unwrap();
-    writeln!(f, "    const nc = await redis.connect();  // Calls Redis, not NATS").unwrap();
+    writeln!(
+        f,
+        "    const nc = await redis.connect();  // Calls Redis, not NATS"
+    )
+    .unwrap();
     writeln!(f, "    nc.publish('orders.created', 'data');").unwrap();
     writeln!(f, "}}").unwrap();
 
@@ -2886,11 +2979,7 @@ fn boundaries_list_sysv_shm_included_in_shared_memory_kind() {
 
     // Should have 4 surfaces: shmget, shmat, shmdt, shmctl
     let count = result["count"].as_u64().unwrap_or(0);
-    assert_eq!(
-        count, 4,
-        "expected 4 SysV shm surfaces; got {}",
-        count
-    );
+    assert_eq!(count, 4, "expected 4 SysV shm surfaces; got {}", count);
 
     // Verify all are shared_memory
     let surfaces = result["results"].as_array().unwrap();
@@ -3070,11 +3159,7 @@ fn boundaries_list_sysv_msgq_included_in_message_queue_kind() {
 
     // Should have 4 surfaces: msgget, msgsnd, msgrcv, msgctl
     let count = result["count"].as_u64().unwrap_or(0);
-    assert_eq!(
-        count, 4,
-        "expected 4 SysV msgq surfaces; got {}",
-        count
-    );
+    assert_eq!(count, 4, "expected 4 SysV msgq surfaces; got {}", count);
 
     // Verify all are message_queue
     let surfaces = result["results"].as_array().unwrap();
@@ -3141,13 +3226,25 @@ fn boundaries_list_sysv_msgq_has_correct_directions() {
     let surfaces = result["results"].as_array().unwrap();
 
     // Count directions: msgsnd=provider, msgrcv=consumer, msgget/msgctl=bidirectional
-    let provider_count = surfaces.iter().filter(|s| s["direction"] == "provider").count();
-    let consumer_count = surfaces.iter().filter(|s| s["direction"] == "consumer").count();
-    let bidirectional_count = surfaces.iter().filter(|s| s["direction"] == "bidirectional").count();
+    let provider_count = surfaces
+        .iter()
+        .filter(|s| s["direction"] == "provider")
+        .count();
+    let consumer_count = surfaces
+        .iter()
+        .filter(|s| s["direction"] == "consumer")
+        .count();
+    let bidirectional_count = surfaces
+        .iter()
+        .filter(|s| s["direction"] == "bidirectional")
+        .count();
 
     assert_eq!(provider_count, 1, "expected 1 provider (msgsnd)");
     assert_eq!(consumer_count, 1, "expected 1 consumer (msgrcv)");
-    assert_eq!(bidirectional_count, 2, "expected 2 bidirectional (msgget, msgctl)");
+    assert_eq!(
+        bidirectional_count, 2,
+        "expected 2 bidirectional (msgget, msgctl)"
+    );
 }
 
 #[test]
@@ -3209,7 +3306,11 @@ fn create_test_repo_with_posix_named_sem(dir: &std::path::Path) {
     writeln!(f, "#include <fcntl.h>").unwrap();
     writeln!(f, "#include <semaphore.h>").unwrap();
     writeln!(f, "void use_posix_named_semaphore() {{").unwrap();
-    writeln!(f, "    sem_t *sem = sem_open(\"/my_sem\", O_CREAT, 0644, 1);").unwrap();
+    writeln!(
+        f,
+        "    sem_t *sem = sem_open(\"/my_sem\", O_CREAT, 0644, 1);"
+    )
+    .unwrap();
     writeln!(f, "    sem_close(sem);").unwrap();
     writeln!(f, "    sem_unlink(\"/my_sem\");").unwrap();
     writeln!(f, "}}").unwrap();
@@ -3316,11 +3417,7 @@ fn boundaries_list_sysv_semaphores_included_in_semaphore_kind() {
 
     // Should have 3 surfaces: semget, semop, semctl
     let count = result["count"].as_u64().unwrap_or(0);
-    assert_eq!(
-        count, 3,
-        "expected 3 SysV sem surfaces; got {}",
-        count
-    );
+    assert_eq!(count, 3, "expected 3 SysV sem surfaces; got {}", count);
 
     // Verify all are semaphore
     let surfaces = result["results"].as_array().unwrap();
@@ -3811,8 +3908,14 @@ fn boundaries_list_inter_core_mixed_directions() {
     let surfaces = result["results"].as_array().unwrap();
 
     // Count directions
-    let provider_count = surfaces.iter().filter(|s| s["direction"] == "provider").count();
-    let bidirectional_count = surfaces.iter().filter(|s| s["direction"] == "bidirectional").count();
+    let provider_count = surfaces
+        .iter()
+        .filter(|s| s["direction"] == "provider")
+        .count();
+    let bidirectional_count = surfaces
+        .iter()
+        .filter(|s| s["direction"] == "bidirectional")
+        .count();
 
     // Mailbox: mbox_send_message = provider (1), mbox_request_channel + mbox_free_channel = bidirectional (2)
     // RPMsg: rpmsg_send = provider (1), rpmsg_create_ept + rpmsg_destroy_ept = bidirectional (2)
@@ -3843,7 +3946,11 @@ fn boundaries_list_inter_core_both_families_detected() {
     let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
 
     let surfaces = result["results"].as_array().unwrap();
-    assert_eq!(surfaces.len(), 6, "expected 6 total inter_core_channel surfaces");
+    assert_eq!(
+        surfaces.len(),
+        6,
+        "expected 6 total inter_core_channel surfaces"
+    );
 
     // Count by provenance to verify both mailbox and rpmsg are detected
     let mailbox_count = surfaces
@@ -3882,10 +3989,18 @@ fn create_test_repo_with_memfd(dir: &std::path::Path) {
     writeln!(f, "    return memfd_create(\"basic_buffer\", 0);").unwrap();
     writeln!(f, "}}").unwrap();
     writeln!(f, "int create_cloexec_memfd(void) {{").unwrap();
-    writeln!(f, "    return memfd_create(\"cloexec_buffer\", MFD_CLOEXEC);").unwrap();
+    writeln!(
+        f,
+        "    return memfd_create(\"cloexec_buffer\", MFD_CLOEXEC);"
+    )
+    .unwrap();
     writeln!(f, "}}").unwrap();
     writeln!(f, "int create_sealable_memfd(void) {{").unwrap();
-    writeln!(f, "    return memfd_create(\"sealable_buffer\", MFD_ALLOW_SEALING);").unwrap();
+    writeln!(
+        f,
+        "    return memfd_create(\"sealable_buffer\", MFD_ALLOW_SEALING);"
+    )
+    .unwrap();
     writeln!(f, "}}").unwrap();
 }
 

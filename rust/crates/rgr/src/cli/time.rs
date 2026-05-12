@@ -14,12 +14,12 @@ pub fn chrono_now() -> String {
     // Simple ISO 8601 format without external dependency
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        1970 + now / 31556952,           // Rough year
-        (now % 31556952) / 2629746 + 1,  // Rough month
-        (now % 2629746) / 86400 + 1,     // Rough day
-        (now % 86400) / 3600,            // Hour
-        (now % 3600) / 60,               // Minute
-        now % 60                         // Second
+        1970 + now / 31556952,          // Rough year
+        (now % 31556952) / 2629746 + 1, // Rough month
+        (now % 2629746) / 86400 + 1,    // Rough day
+        (now % 86400) / 3600,           // Hour
+        (now % 3600) / 60,              // Minute
+        now % 60                        // Second
     )
 }
 

@@ -121,7 +121,11 @@ fn create_test_repo_with_proto_and_java(dir: &std::path::Path) {
     let mut f = File::create(&java_protos).unwrap();
     writeln!(f, "package com.example.api;").unwrap();
     writeln!(f, "public final class ApiProtos {{").unwrap();
-    writeln!(f, "  public static final class User extends com.google.protobuf.GeneratedMessageV3 {{}}").unwrap();
+    writeln!(
+        f,
+        "  public static final class User extends com.google.protobuf.GeneratedMessageV3 {{}}"
+    )
+    .unwrap();
     writeln!(f, "}}").unwrap();
 
     // Simulate gRPC generated file
@@ -130,7 +134,11 @@ fn create_test_repo_with_proto_and_java(dir: &std::path::Path) {
     writeln!(f, "package com.example.api;").unwrap();
     writeln!(f, "public final class UserServiceGrpc {{").unwrap();
     writeln!(f, "  public static abstract class UserServiceImplBase {{}}").unwrap();
-    writeln!(f, "  public static final class UserServiceBlockingStub {{}}").unwrap();
+    writeln!(
+        f,
+        "  public static final class UserServiceBlockingStub {{}}"
+    )
+    .unwrap();
     writeln!(f, "}}").unwrap();
 }
 
@@ -168,7 +176,10 @@ fn contracts_usage_error_no_subcommand() {
         .unwrap();
 
     assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty(), "stdout must be empty on usage error");
+    assert!(
+        output.stdout.is_empty(),
+        "stdout must be empty on usage error"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("usage:"), "stderr: {}", stderr);
 }
@@ -206,12 +217,7 @@ fn contracts_show_usage_error_missing_file_path() {
     let (_dir, db_path, _repo_path) = build_indexed_db_no_contracts();
 
     let output = Command::new(binary_path())
-        .args([
-            "contracts",
-            "show",
-            db_path.to_str().unwrap(),
-            "test-repo",
-        ])
+        .args(["contracts", "show", db_path.to_str().unwrap(), "test-repo"])
         .output()
         .unwrap();
 
@@ -393,12 +399,7 @@ fn contracts_list_empty_results() {
     let (_dir, db_path, _repo_path) = build_indexed_db_no_contracts();
 
     let output = Command::new(binary_path())
-        .args([
-            "contracts",
-            "list",
-            db_path.to_str().unwrap(),
-            "test-repo",
-        ])
+        .args(["contracts", "list", db_path.to_str().unwrap(), "test-repo"])
         .output()
         .unwrap();
 
@@ -424,12 +425,7 @@ fn contracts_list_envelope_contract() {
     let (_dir, db_path, _repo_path) = build_indexed_db_with_proto();
 
     let output = Command::new(binary_path())
-        .args([
-            "contracts",
-            "list",
-            db_path.to_str().unwrap(),
-            "test-repo",
-        ])
+        .args(["contracts", "list", db_path.to_str().unwrap(), "test-repo"])
         .output()
         .unwrap();
 
@@ -845,14 +841,32 @@ fn contracts_usages_envelope_contract() {
 
     // Verify mapping entry shape for all results
     for mapping in results {
-        assert!(mapping["mapping_uid"].is_string(), "mapping_uid must be string");
-        assert!(mapping["schema_element_uid"].is_string(), "schema_element_uid must be string");
-        assert!(mapping["generated_symbol_key"].is_string(), "generated_symbol_key must be string");
+        assert!(
+            mapping["mapping_uid"].is_string(),
+            "mapping_uid must be string"
+        );
+        assert!(
+            mapping["schema_element_uid"].is_string(),
+            "schema_element_uid must be string"
+        );
+        assert!(
+            mapping["generated_symbol_key"].is_string(),
+            "generated_symbol_key must be string"
+        );
         assert!(mapping["language"].is_string(), "language must be string");
         assert_eq!(mapping["language"], "java", "language must be 'java'");
-        assert!(mapping["generated_file"].is_string(), "generated_file must be string");
-        assert!(mapping["mapping_basis"].is_string(), "mapping_basis must be string");
-        assert!(mapping["confidence"].is_number(), "confidence must be number");
+        assert!(
+            mapping["generated_file"].is_string(),
+            "generated_file must be string"
+        );
+        assert!(
+            mapping["mapping_basis"].is_string(),
+            "mapping_basis must be string"
+        );
+        assert!(
+            mapping["confidence"].is_number(),
+            "confidence must be number"
+        );
 
         // Confidence should be above minimum floor (0.50)
         let confidence = mapping["confidence"].as_f64().unwrap();
@@ -873,7 +887,8 @@ fn contracts_usages_envelope_contract() {
         has_grpc_mapping,
         "expected at least one gRPC service mapping (UserServiceGrpc.java), but none found. \
          Mappings: {:?}",
-        results.iter()
+        results
+            .iter()
             .map(|m| m["generated_file"].as_str().unwrap_or("?"))
             .collect::<Vec<_>>()
     );
@@ -975,11 +990,7 @@ fn contracts_usages_element_requires_value() {
 
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("requires a value"),
-        "stderr: {}",
-        stderr
-    );
+    assert!(stderr.contains("requires a value"), "stderr: {}", stderr);
 }
 
 #[test]
@@ -999,11 +1010,7 @@ fn contracts_usages_min_confidence_requires_value() {
 
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("requires a value"),
-        "stderr: {}",
-        stderr
-    );
+    assert!(stderr.contains("requires a value"), "stderr: {}", stderr);
 }
 
 #[test]
@@ -1024,9 +1031,5 @@ fn contracts_usages_min_confidence_invalid_value() {
 
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("between 0.0 and 1.0"),
-        "stderr: {}",
-        stderr
-    );
+    assert!(stderr.contains("between 0.0 and 1.0"), "stderr: {}", stderr);
 }

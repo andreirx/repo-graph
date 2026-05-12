@@ -50,14 +50,7 @@ pub const INFERRED_MODULE_CONFIDENCE: f64 = 0.7;
 /// Directory prefixes that are candidates for umbrella splitting.
 /// If a top-level directory matches one of these and has multiple
 /// qualifying children, it will be split into child modules.
-const UMBRELLA_PREFIXES: &[&str] = &[
-    "src",
-    "packages",
-    "services",
-    "apps",
-    "libs",
-    "modules",
-];
+const UMBRELLA_PREFIXES: &[&str] = &["src", "packages", "services", "apps", "libs", "modules"];
 
 /// Minimum number of qualifying children to trigger umbrella split.
 const UMBRELLA_MIN_CHILDREN: usize = 2;
@@ -292,7 +285,10 @@ pub fn detect_inferred_modules(
                             child_stats.source_file_count += 1;
                             // Track language counts for non-test files only.
                             if let Some(lang) = language {
-                                *child_stats.language_counts.entry(lang.to_string()).or_insert(0) += 1;
+                                *child_stats
+                                    .language_counts
+                                    .entry(lang.to_string())
+                                    .or_insert(0) += 1;
                             }
                         }
                     }
@@ -306,7 +302,10 @@ pub fn detect_inferred_modules(
                     root_stats.source_file_count += 1;
                     // Track language counts for non-test files only (Phase 3.2).
                     if let Some(lang) = language {
-                        *root_stats.language_counts.entry(lang.to_string()).or_insert(0) += 1;
+                        *root_stats
+                            .language_counts
+                            .entry(lang.to_string())
+                            .or_insert(0) += 1;
                     }
                 }
             }
@@ -353,7 +352,7 @@ pub fn detect_inferred_modules(
                     .iter()
                     .filter(|(path, stats)| {
                         path.starts_with(&prefix)
-                        && stats.source_file_count >= UMBRELLA_MIN_FILES_PER_CHILD
+                            && stats.source_file_count >= UMBRELLA_MIN_FILES_PER_CHILD
                     })
                     .map(|(path, stats)| (path.clone(), stats))
                     .collect();
@@ -370,12 +369,17 @@ pub fn detect_inferred_modules(
                 if should_split {
                     // Create child modules instead of parent.
                     for (child_path, child_stats) in qualifying_children {
-                        let dominant_language = compute_dominant_language(&child_stats.language_counts);
+                        let dominant_language =
+                            compute_dominant_language(&child_stats.language_counts);
                         let mut build_files = child_stats.build_files.clone();
                         build_files.sort();
 
                         // Display name is the child directory name (e.g., "core" from "src/core").
-                        let display_name = child_path.rsplit('/').next().unwrap_or(&child_path).to_string();
+                        let display_name = child_path
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&child_path)
+                            .to_string();
 
                         result.modules.push(InferredModule {
                             directory_path: child_path,
@@ -552,15 +556,29 @@ fn is_source_file(path: &str) -> bool {
     let ext = path.rsplit('.').next().unwrap_or("");
     matches!(
         ext,
-        "c" | "h" | "cpp" | "hpp" | "cc" | "hh" | "cxx" | "hxx"
-            | "java" | "kt" | "scala"
+        "c" | "h"
+            | "cpp"
+            | "hpp"
+            | "cc"
+            | "hh"
+            | "cxx"
+            | "hxx"
+            | "java"
+            | "kt"
+            | "scala"
             | "py"
             | "rs"
             | "go"
-            | "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs"
+            | "js"
+            | "jsx"
+            | "ts"
+            | "tsx"
+            | "mjs"
+            | "cjs"
             | "rb"
             | "swift"
-            | "m" | "mm"  // Objective-C
+            | "m"
+            | "mm" // Objective-C
     )
 }
 
@@ -609,13 +627,18 @@ fn should_exclude_directory(dir_name: &str) -> Option<ExclusionReason> {
     // Vendor/dependency directories
     if matches!(
         dir_lower.as_str(),
-        "vendor" | "vendors"
-            | "third_party" | "third-party" | "thirdparty"
+        "vendor"
+            | "vendors"
+            | "third_party"
+            | "third-party"
+            | "thirdparty"
             | "node_modules"
             | "bower_components"
             | "jspm_packages"
-            | "external" | "externals"
-            | "deps" | "dependencies"
+            | "external"
+            | "externals"
+            | "deps"
+            | "dependencies"
     ) {
         return Some(ExclusionReason::VendorDependency);
     }
@@ -637,9 +660,7 @@ fn should_exclude_directory(dir_name: &str) -> Option<ExclusionReason> {
     // Generated code directories
     if matches!(
         dir_lower.as_str(),
-        "generated" | "gen" | "codegen"
-            | "auto" | "autogen"
-            | "__generated__"
+        "generated" | "gen" | "codegen" | "auto" | "autogen" | "__generated__"
     ) {
         return Some(ExclusionReason::GeneratedCode);
     }
@@ -647,9 +668,7 @@ fn should_exclude_directory(dir_name: &str) -> Option<ExclusionReason> {
     // Documentation directories
     if matches!(
         dir_lower.as_str(),
-        "docs" | "doc" | "documentation"
-            | "man" | "manpages"
-            | "javadoc" | "apidoc" | "apidocs"
+        "docs" | "doc" | "documentation" | "man" | "manpages" | "javadoc" | "apidoc" | "apidocs"
     ) {
         return Some(ExclusionReason::Documentation);
     }
@@ -657,10 +676,7 @@ fn should_exclude_directory(dir_name: &str) -> Option<ExclusionReason> {
     // Examples/samples directories
     if matches!(
         dir_lower.as_str(),
-        "examples" | "example"
-            | "samples" | "sample"
-            | "demo" | "demos"
-            | "tutorials" | "tutorial"
+        "examples" | "example" | "samples" | "sample" | "demo" | "demos" | "tutorials" | "tutorial"
     ) {
         return Some(ExclusionReason::ExamplesOrSamples);
     }
@@ -668,8 +684,7 @@ fn should_exclude_directory(dir_name: &str) -> Option<ExclusionReason> {
     // Benchmark-only directories
     if matches!(
         dir_lower.as_str(),
-        "benchmark" | "benchmarks" | "bench" | "benches"
-            | "perf" | "performance"
+        "benchmark" | "benchmarks" | "bench" | "benches" | "perf" | "performance"
     ) {
         return Some(ExclusionReason::BenchmarkOnly);
     }
@@ -805,7 +820,11 @@ mod tests {
         // Should detect src, ext, tool (not test because it's test-only)
         assert_eq!(result.modules.len(), 3);
 
-        let dirs: HashSet<_> = result.modules.iter().map(|m| m.directory_path.as_str()).collect();
+        let dirs: HashSet<_> = result
+            .modules
+            .iter()
+            .map(|m| m.directory_path.as_str())
+            .collect();
         assert!(dirs.contains("src"));
         assert!(dirs.contains("ext"));
         assert!(dirs.contains("tool"));
@@ -849,10 +868,7 @@ mod tests {
 
     #[test]
     fn detect_test_only_fallback() {
-        let files = vec![
-            "test/test1.c".to_string(),
-            "test/test2.c".to_string(),
-        ];
+        let files = vec!["test/test1.c".to_string(), "test/test2.c".to_string()];
 
         let result = detect_inferred_modules(&files, "testonly");
 
@@ -875,8 +891,8 @@ mod tests {
     fn detect_mixed_source_and_test() {
         let files = vec![
             "src/main.c".to_string(),
-            "src/test/unit_test.c".to_string(),  // Test within src
-            "tests/integration.c".to_string(),   // Top-level test dir
+            "src/test/unit_test.c".to_string(), // Test within src
+            "tests/integration.c".to_string(),  // Top-level test dir
         ];
 
         let result = detect_inferred_modules(&files, "mixed");
@@ -888,7 +904,10 @@ mod tests {
 
     #[test]
     fn top_level_directory_extraction() {
-        assert_eq!(get_top_level_directory("src/foo/bar.c"), Some("src".to_string()));
+        assert_eq!(
+            get_top_level_directory("src/foo/bar.c"),
+            Some("src".to_string())
+        );
         assert_eq!(get_top_level_directory("foo.c"), None);
         assert_eq!(get_top_level_directory("a/b.c"), Some("a".to_string()));
     }
@@ -994,7 +1013,7 @@ mod tests {
 
     #[test]
     fn confidence_is_lower_than_declared() {
-        assert!(INFERRED_MODULE_CONFIDENCE < 1.0);
+        const { assert!(INFERRED_MODULE_CONFIDENCE < 1.0) };
         assert!((INFERRED_MODULE_CONFIDENCE - 0.7).abs() < f64::EPSILON);
     }
 
@@ -1017,7 +1036,9 @@ mod tests {
 
         // Check exclusions
         assert_eq!(result.excluded_directories.len(), 3);
-        let excluded_paths: HashSet<_> = result.excluded_directories.iter()
+        let excluded_paths: HashSet<_> = result
+            .excluded_directories
+            .iter()
             .map(|e| e.directory_path.as_str())
             .collect();
         assert!(excluded_paths.contains("vendor"));
@@ -1104,30 +1125,72 @@ mod tests {
     #[test]
     fn exclusion_check_function() {
         // Vendor
-        assert_eq!(should_exclude_directory("vendor"), Some(ExclusionReason::VendorDependency));
-        assert_eq!(should_exclude_directory("third_party"), Some(ExclusionReason::VendorDependency));
-        assert_eq!(should_exclude_directory("node_modules"), Some(ExclusionReason::VendorDependency));
+        assert_eq!(
+            should_exclude_directory("vendor"),
+            Some(ExclusionReason::VendorDependency)
+        );
+        assert_eq!(
+            should_exclude_directory("third_party"),
+            Some(ExclusionReason::VendorDependency)
+        );
+        assert_eq!(
+            should_exclude_directory("node_modules"),
+            Some(ExclusionReason::VendorDependency)
+        );
 
         // Build
-        assert_eq!(should_exclude_directory("build"), Some(ExclusionReason::BuildOutput));
-        assert_eq!(should_exclude_directory("dist"), Some(ExclusionReason::BuildOutput));
-        assert_eq!(should_exclude_directory("target"), Some(ExclusionReason::BuildOutput));
+        assert_eq!(
+            should_exclude_directory("build"),
+            Some(ExclusionReason::BuildOutput)
+        );
+        assert_eq!(
+            should_exclude_directory("dist"),
+            Some(ExclusionReason::BuildOutput)
+        );
+        assert_eq!(
+            should_exclude_directory("target"),
+            Some(ExclusionReason::BuildOutput)
+        );
 
         // Generated
-        assert_eq!(should_exclude_directory("generated"), Some(ExclusionReason::GeneratedCode));
-        assert_eq!(should_exclude_directory("gen"), Some(ExclusionReason::GeneratedCode));
+        assert_eq!(
+            should_exclude_directory("generated"),
+            Some(ExclusionReason::GeneratedCode)
+        );
+        assert_eq!(
+            should_exclude_directory("gen"),
+            Some(ExclusionReason::GeneratedCode)
+        );
 
         // Docs
-        assert_eq!(should_exclude_directory("docs"), Some(ExclusionReason::Documentation));
-        assert_eq!(should_exclude_directory("Documentation"), Some(ExclusionReason::Documentation));
+        assert_eq!(
+            should_exclude_directory("docs"),
+            Some(ExclusionReason::Documentation)
+        );
+        assert_eq!(
+            should_exclude_directory("Documentation"),
+            Some(ExclusionReason::Documentation)
+        );
 
         // Examples
-        assert_eq!(should_exclude_directory("examples"), Some(ExclusionReason::ExamplesOrSamples));
-        assert_eq!(should_exclude_directory("samples"), Some(ExclusionReason::ExamplesOrSamples));
+        assert_eq!(
+            should_exclude_directory("examples"),
+            Some(ExclusionReason::ExamplesOrSamples)
+        );
+        assert_eq!(
+            should_exclude_directory("samples"),
+            Some(ExclusionReason::ExamplesOrSamples)
+        );
 
         // Benchmarks
-        assert_eq!(should_exclude_directory("benchmark"), Some(ExclusionReason::BenchmarkOnly));
-        assert_eq!(should_exclude_directory("benches"), Some(ExclusionReason::BenchmarkOnly));
+        assert_eq!(
+            should_exclude_directory("benchmark"),
+            Some(ExclusionReason::BenchmarkOnly)
+        );
+        assert_eq!(
+            should_exclude_directory("benches"),
+            Some(ExclusionReason::BenchmarkOnly)
+        );
 
         // Not excluded
         assert_eq!(should_exclude_directory("src"), None);
@@ -1149,8 +1212,8 @@ mod tests {
 
         assert_eq!(result.modules.len(), 1);
         let module = &result.modules[0];
-        assert_eq!(module.source_file_count, 2);  // main.c, util.c
-        assert_eq!(module.test_file_count, 2);    // unit_test.c, integration_test.c
+        assert_eq!(module.source_file_count, 2); // main.c, util.c
+        assert_eq!(module.test_file_count, 2); // unit_test.c, integration_test.c
     }
 
     // ── Build file detection tests (Phase 3.2) ───────────────────────────
@@ -1169,10 +1232,18 @@ mod tests {
 
         assert_eq!(result.modules.len(), 2);
 
-        let src_module = result.modules.iter().find(|m| m.directory_path == "src").unwrap();
+        let src_module = result
+            .modules
+            .iter()
+            .find(|m| m.directory_path == "src")
+            .unwrap();
         assert_eq!(src_module.build_files_present, vec!["Makefile"]);
 
-        let lib_module = result.modules.iter().find(|m| m.directory_path == "lib").unwrap();
+        let lib_module = result
+            .modules
+            .iter()
+            .find(|m| m.directory_path == "lib")
+            .unwrap();
         assert_eq!(lib_module.build_files_present, vec!["CMakeLists.txt"]);
     }
 
@@ -1181,7 +1252,7 @@ mod tests {
         // Build files nested in subdirectories should NOT be counted
         let files = vec![
             "src/main.c".to_string(),
-            "src/sub/Makefile".to_string(),  // nested, should NOT count
+            "src/sub/Makefile".to_string(), // nested, should NOT count
         ];
 
         let result = detect_inferred_modules(&files, "test");
@@ -1204,7 +1275,10 @@ mod tests {
         assert_eq!(result.modules.len(), 1);
         let module = &result.modules[0];
         assert!(module.is_fallback_root);
-        assert_eq!(module.build_files_present, vec!["CMakeLists.txt", "Makefile"]);
+        assert_eq!(
+            module.build_files_present,
+            vec!["CMakeLists.txt", "Makefile"]
+        );
     }
 
     #[test]
@@ -1220,7 +1294,8 @@ mod tests {
         };
 
         let (_, evidence) = to_storage_inputs(&module, "test", "snap-1");
-        let payload: InferredEvidencePayload = serde_json::from_str(&evidence.payload_json).unwrap();
+        let payload: InferredEvidencePayload =
+            serde_json::from_str(&evidence.payload_json).unwrap();
 
         assert_eq!(payload.evidence_strength, "basic");
     }
@@ -1238,7 +1313,8 @@ mod tests {
         };
 
         let (_, evidence) = to_storage_inputs(&module, "test", "snap-1");
-        let payload: InferredEvidencePayload = serde_json::from_str(&evidence.payload_json).unwrap();
+        let payload: InferredEvidencePayload =
+            serde_json::from_str(&evidence.payload_json).unwrap();
 
         assert_eq!(payload.evidence_strength, "build_marker_backed");
     }
@@ -1257,9 +1333,9 @@ mod tests {
 
         // Should NOT detect
         assert!(!is_build_file("main.c"));
-        assert!(!is_build_file("Makefile.am"));  // autotools config, not direct makefile
-        assert!(!is_build_file("configure.ac"));  // excluded from initial set
-        assert!(!is_build_file("SConstruct"));    // excluded from initial set
+        assert!(!is_build_file("Makefile.am")); // autotools config, not direct makefile
+        assert!(!is_build_file("configure.ac")); // excluded from initial set
+        assert!(!is_build_file("SConstruct")); // excluded from initial set
     }
 
     // ── Dominant language tests (Phase 3.2) ──────────────────────────────
@@ -1433,10 +1509,22 @@ mod tests {
         let result = detect_inferred_modules(&files, "nginx");
 
         // Should be split into 3 child modules (core, http, event).
-        assert_eq!(result.modules.len(), 3, "Expected 3 child modules, got {:?}",
-            result.modules.iter().map(|m| &m.directory_path).collect::<Vec<_>>());
+        assert_eq!(
+            result.modules.len(),
+            3,
+            "Expected 3 child modules, got {:?}",
+            result
+                .modules
+                .iter()
+                .map(|m| &m.directory_path)
+                .collect::<Vec<_>>()
+        );
 
-        let paths: HashSet<_> = result.modules.iter().map(|m| m.directory_path.as_str()).collect();
+        let paths: HashSet<_> = result
+            .modules
+            .iter()
+            .map(|m| m.directory_path.as_str())
+            .collect();
         assert!(paths.contains("src/core"));
         assert!(paths.contains("src/http"));
         assert!(paths.contains("src/event"));
@@ -1526,7 +1614,11 @@ mod tests {
         // Should split (parent has 5 direct files, ceiling is 5, so <= ceiling).
         assert_eq!(result.modules.len(), 2, "Expected 2 child modules");
 
-        let paths: HashSet<_> = result.modules.iter().map(|m| m.directory_path.as_str()).collect();
+        let paths: HashSet<_> = result
+            .modules
+            .iter()
+            .map(|m| m.directory_path.as_str())
+            .collect();
         assert!(paths.contains("src/core"));
         assert!(paths.contains("src/http"));
     }
@@ -1586,10 +1678,18 @@ mod tests {
         let result = detect_inferred_modules(&files, "nginx");
 
         // Display names should be the child directory names, not full paths.
-        let core = result.modules.iter().find(|m| m.directory_path == "src/core").unwrap();
+        let core = result
+            .modules
+            .iter()
+            .find(|m| m.directory_path == "src/core")
+            .unwrap();
         assert_eq!(core.display_name, "core");
 
-        let http = result.modules.iter().find(|m| m.directory_path == "src/http").unwrap();
+        let http = result
+            .modules
+            .iter()
+            .find(|m| m.directory_path == "src/http")
+            .unwrap();
         assert_eq!(http.display_name, "http");
     }
 
@@ -1610,11 +1710,19 @@ mod tests {
 
         let result = detect_inferred_modules(&files, "test");
 
-        let core = result.modules.iter().find(|m| m.directory_path == "src/core").unwrap();
+        let core = result
+            .modules
+            .iter()
+            .find(|m| m.directory_path == "src/core")
+            .unwrap();
         assert_eq!(core.source_file_count, 6);
         assert_eq!(core.test_file_count, 2);
 
-        let http = result.modules.iter().find(|m| m.directory_path == "src/http").unwrap();
+        let http = result
+            .modules
+            .iter()
+            .find(|m| m.directory_path == "src/http")
+            .unwrap();
         assert_eq!(http.source_file_count, 5);
         assert_eq!(http.test_file_count, 0);
     }
@@ -1632,8 +1740,8 @@ mod tests {
         assert!(is_umbrella_candidate("modules"));
 
         // Should NOT match.
-        assert!(!is_umbrella_candidate("lib"));  // excluded from initial list
-        assert!(!is_umbrella_candidate("components"));  // excluded from initial list
+        assert!(!is_umbrella_candidate("lib")); // excluded from initial list
+        assert!(!is_umbrella_candidate("components")); // excluded from initial list
         assert!(!is_umbrella_candidate("core"));
         assert!(!is_umbrella_candidate("utils"));
     }

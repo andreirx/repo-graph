@@ -75,7 +75,10 @@ pub fn normalize_npm_specifier(specifier: &str) -> String {
 /// ```
 pub fn normalize_cargo_specifier(specifier: &str) -> String {
     // Special cases for relative paths
-    if specifier.starts_with("crate::") || specifier.starts_with("self::") || specifier.starts_with("super::") {
+    if specifier.starts_with("crate::")
+        || specifier.starts_with("self::")
+        || specifier.starts_with("super::")
+    {
         return specifier.to_string();
     }
 
@@ -121,7 +124,10 @@ mod tests {
 
     #[test]
     fn npm_scoped_package() {
-        assert_eq!(normalize_npm_specifier("@tanstack/react-query"), "@tanstack/react-query");
+        assert_eq!(
+            normalize_npm_specifier("@tanstack/react-query"),
+            "@tanstack/react-query"
+        );
         assert_eq!(normalize_npm_specifier("@types/node"), "@types/node");
         assert_eq!(normalize_npm_specifier("@babel/core"), "@babel/core");
     }
@@ -155,10 +161,7 @@ mod tests {
 
     #[test]
     fn cargo_nested_path() {
-        assert_eq!(
-            normalize_cargo_specifier("tokio::sync::Mutex"),
-            "tokio"
-        );
+        assert_eq!(normalize_cargo_specifier("tokio::sync::Mutex"), "tokio");
         assert_eq!(
             normalize_cargo_specifier("std::collections::HashMap"),
             "std"

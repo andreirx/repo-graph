@@ -19,41 +19,41 @@ use crate::errors::AgentStorageError;
 use crate::storage_port::AgentStorageRead;
 
 pub fn aggregate<S: AgentStorageRead + ?Sized>(
-	storage: &S,
-	snapshot_uid: &str,
+    storage: &S,
+    snapshot_uid: &str,
 ) -> Result<AggregatorOutput, AgentStorageError> {
-	let freshness = storage.get_boundary_links_freshness(snapshot_uid)?;
+    let freshness = storage.get_boundary_links_freshness(snapshot_uid)?;
 
-	// No links → no signal (legitimate zero state, not an error).
-	if freshness.total == 0 {
-		return Ok(AggregatorOutput::empty());
-	}
+    // No links → no signal (legitimate zero state, not an error).
+    if freshness.total == 0 {
+        return Ok(AggregatorOutput::empty());
+    }
 
-	let evidence = BoundaryLinksSummaryEvidence {
-		link_count: freshness.total,
-	};
+    let evidence = BoundaryLinksSummaryEvidence {
+        link_count: freshness.total,
+    };
 
-	// Derive FreshnessInfo from counts.
-	// Rule: any impacted → Impacted, else any unknown → Unknown, else Current.
-	let state = if freshness.impacted > 0 {
-		FreshnessStateDto::Impacted
-	} else if freshness.unknown > 0 {
-		FreshnessStateDto::Unknown
-	} else {
-		FreshnessStateDto::Current
-	};
+    // Derive FreshnessInfo from counts.
+    // Rule: any impacted → Impacted, else any unknown → Unknown, else Current.
+    let state = if freshness.impacted > 0 {
+        FreshnessStateDto::Impacted
+    } else if freshness.unknown > 0 {
+        FreshnessStateDto::Unknown
+    } else {
+        FreshnessStateDto::Current
+    };
 
-	let freshness_info = FreshnessInfo {
-		state,
-		impacted_since: freshness.earliest_impacted_at,
-	};
+    let freshness_info = FreshnessInfo {
+        state,
+        impacted_since: freshness.earliest_impacted_at,
+    };
 
-	let signal = Signal::boundary_links_summary(evidence).with_freshness(freshness_info);
+    let signal = Signal::boundary_links_summary(evidence).with_freshness(freshness_info);
 
-	Ok(AggregatorOutput {
-		signals: vec![signal],
-		limits: Vec::new(),
-	})
+    Ok(AggregatorOutput {
+        signals: vec![signal],
+        limits: Vec::new(),
+    })
 }
 
 // Unit tests removed — the mock is too large to maintain here.

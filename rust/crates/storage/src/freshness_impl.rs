@@ -7,7 +7,7 @@ use chrono::Utc;
 
 use crate::connection::StorageConnection;
 use crate::error::StorageError;
-use crate::freshness_port::{FreshnessStoragePort, FreshnessSummary, is_freshness_tracked};
+use crate::freshness_port::{is_freshness_tracked, FreshnessStoragePort, FreshnessSummary};
 
 impl FreshnessStoragePort for StorageConnection {
     fn update_freshness_state(
@@ -109,10 +109,9 @@ impl FreshnessStoragePort for StorageConnection {
             // or requires FK-join scoping.
             let sql = build_mark_impacted_sql(table, snapshot_uid);
 
-            let affected = self.connection_mut().execute(
-                &sql,
-                rusqlite::params![now, snapshot_uid, stable_key],
-            )?;
+            let affected = self
+                .connection_mut()
+                .execute(&sql, rusqlite::params![now, snapshot_uid, stable_key])?;
             total_affected += affected;
         }
 
@@ -133,8 +132,9 @@ impl FreshnessStoragePort for StorageConnection {
         }
 
         let pk_column = get_primary_key_column(table);
-        let provenance_json = serde_json::to_string(provenance)
-            .map_err(|e| StorageError::InvalidArgument(format!("Failed to serialize provenance: {}", e)))?;
+        let provenance_json = serde_json::to_string(provenance).map_err(|e| {
+            StorageError::InvalidArgument(format!("Failed to serialize provenance: {}", e))
+        })?;
 
         let sql = format!(
             "UPDATE {} SET provenance_json = ? WHERE {} = ?",
@@ -148,11 +148,7 @@ impl FreshnessStoragePort for StorageConnection {
         Ok(rows_affected > 0)
     }
 
-    fn mark_all_current(
-        &mut self,
-        snapshot_uid: &str,
-        table: &str,
-    ) -> Result<usize, StorageError> {
+    fn mark_all_current(&mut self, snapshot_uid: &str, table: &str) -> Result<usize, StorageError> {
         if !is_freshness_tracked(table) {
             return Err(StorageError::InvalidArgument(format!(
                 "Table '{}' does not support freshness tracking",
@@ -199,14 +195,14 @@ impl FreshnessStoragePort for StorageConnection {
             .optional()?;
 
         match result {
-            Some(state_str) => {
-                FreshnessState::from_str(&state_str)
-                    .ok_or_else(|| StorageError::InvalidArgument(format!(
+            Some(state_str) => FreshnessState::parse(&state_str)
+                .ok_or_else(|| {
+                    StorageError::InvalidArgument(format!(
                         "Invalid freshness_state value: {}",
                         state_str
-                    )))
-                    .map(Some)
-            }
+                    ))
+                })
+                .map(Some),
             None => Ok(None),
         }
     }
@@ -236,11 +232,9 @@ impl FreshnessStoragePort for StorageConnection {
 
         match result {
             Some(Some(json_str)) => {
-                let provenance: Provenance = serde_json::from_str(&json_str)
-                    .map_err(|e| StorageError::InvalidArgument(format!(
-                        "Failed to parse provenance_json: {}",
-                        e
-                    )))?;
+                let provenance: Provenance = serde_json::from_str(&json_str).map_err(|e| {
+                    StorageError::InvalidArgument(format!("Failed to parse provenance_json: {}", e))
+                })?;
                 Ok(Some(provenance))
             }
             Some(None) | None => Ok(None),
@@ -265,11 +259,11 @@ impl FreshnessStoragePort for StorageConnection {
             table
         );
 
-        let count: i64 = self
-            .connection()
-            .query_row(&sql, rusqlite::params![snapshot_uid, state.as_str()], |row| {
-                row.get(0)
-            })?;
+        let count: i64 = self.connection().query_row(
+            &sql,
+            rusqlite::params![snapshot_uid, state.as_str()],
+            |row| row.get(0),
+        )?;
 
         Ok(count as usize)
     }
@@ -396,24 +390,21 @@ fn get_primary_key_column(table: &str) -> &'static str {
 fn build_mark_impacted_sql(table: &str, _snapshot_uid: &str) -> String {
     match table {
         // boundary_contracts has no snapshot_uid — join through surface_uid
-        "boundary_contracts" => {
-            format!(
-                r#"UPDATE boundary_contracts
-                   SET freshness_state = 'impacted', freshness_updated_at = ?
-                   WHERE association_uid IN (
-                       SELECT bc.association_uid
-                       FROM boundary_contracts bc
-                       JOIN boundary_interaction_surfaces bis ON bc.surface_uid = bis.surface_uid
-                       WHERE bis.snapshot_uid = ?
-                         AND bc.freshness_state != 'impacted'
-                         AND bc.provenance_json IS NOT NULL
-                         AND EXISTS (
-                             SELECT 1 FROM json_each(bc.provenance_json, '$.depends_on')
-                             WHERE json_extract(value, '$.stable_key') = ?
-                         )
-                   )"#
-            )
-        }
+        "boundary_contracts" => r#"UPDATE boundary_contracts
+               SET freshness_state = 'impacted', freshness_updated_at = ?
+               WHERE association_uid IN (
+                   SELECT bc.association_uid
+                   FROM boundary_contracts bc
+                   JOIN boundary_interaction_surfaces bis ON bc.surface_uid = bis.surface_uid
+                   WHERE bis.snapshot_uid = ?
+                     AND bc.freshness_state != 'impacted'
+                     AND bc.provenance_json IS NOT NULL
+                     AND EXISTS (
+                         SELECT 1 FROM json_each(bc.provenance_json, '$.depends_on')
+                         WHERE json_extract(value, '$.stable_key') = ?
+                     )
+               )"#
+        .to_string(),
         // All other tables have direct snapshot_uid
         _ => {
             format!(
@@ -489,7 +480,9 @@ mod tests {
         assert_eq!(state, Some(FreshnessState::Unknown));
 
         // Update to 'current'
-        let updated = storage.update_freshness_state("inferences", &uid, FreshnessState::Current).unwrap();
+        let updated = storage
+            .update_freshness_state("inferences", &uid, FreshnessState::Current)
+            .unwrap();
         assert!(updated);
 
         let state = storage.get_freshness_state("inferences", &uid).unwrap();
@@ -501,7 +494,9 @@ mod tests {
         let mut storage = fresh_storage();
         setup_test_inference(&mut storage);
 
-        let updated = storage.update_freshness_state("inferences", "nonexistent", FreshnessState::Current).unwrap();
+        let updated = storage
+            .update_freshness_state("inferences", "nonexistent", FreshnessState::Current)
+            .unwrap();
         assert!(!updated);
     }
 
@@ -525,11 +520,17 @@ mod tests {
         ).unwrap();
 
         // Mark both as current first
-        storage.update_freshness_state("inferences", &uid1, FreshnessState::Current).unwrap();
-        storage.update_freshness_state("inferences", "inf-002", FreshnessState::Current).unwrap();
+        storage
+            .update_freshness_state("inferences", &uid1, FreshnessState::Current)
+            .unwrap();
+        storage
+            .update_freshness_state("inferences", "inf-002", FreshnessState::Current)
+            .unwrap();
 
         // Now mark both as impacted
-        let affected = storage.mark_rows_impacted("inferences", &[&uid1, "inf-002"]).unwrap();
+        let affected = storage
+            .mark_rows_impacted("inferences", &[&uid1, "inf-002"])
+            .unwrap();
         assert_eq!(affected, 2);
 
         assert_eq!(
@@ -537,7 +538,9 @@ mod tests {
             Some(FreshnessState::Impacted)
         );
         assert_eq!(
-            storage.get_freshness_state("inferences", "inf-002").unwrap(),
+            storage
+                .get_freshness_state("inferences", "inf-002")
+                .unwrap(),
             Some(FreshnessState::Impacted)
         );
     }
@@ -550,9 +553,12 @@ mod tests {
         let provenance = Provenance::from_layer0_items(vec![
             ProvenanceAnchor::new("Nodes", "repo:file.ts#func:SYMBOL:FUNCTION"),
             ProvenanceAnchor::new("Edges", "repo:file.ts#func->dep:CALLS"),
-        ]).with_extractor("test_extractor:1.0");
+        ])
+        .with_extractor("test_extractor:1.0");
 
-        let updated = storage.set_provenance("inferences", &uid, &provenance).unwrap();
+        let updated = storage
+            .set_provenance("inferences", &uid, &provenance)
+            .unwrap();
         assert!(updated);
 
         let retrieved = storage.get_provenance("inferences", &uid).unwrap();
@@ -569,13 +575,20 @@ mod tests {
         let mut storage = fresh_storage();
         let uid = setup_test_inference(&mut storage);
 
-        let provenance = Provenance::from_layer0_items(vec![
-            ProvenanceAnchor::new("Nodes", "repo:file.ts#func:SYMBOL:FUNCTION"),
-        ]);
-        storage.set_provenance("inferences", &uid, &provenance).unwrap();
+        let provenance = Provenance::from_layer0_items(vec![ProvenanceAnchor::new(
+            "Nodes",
+            "repo:file.ts#func:SYMBOL:FUNCTION",
+        )]);
+        storage
+            .set_provenance("inferences", &uid, &provenance)
+            .unwrap();
 
-        assert!(storage.provenance_depends_on("inferences", &uid, "repo:file.ts#func:SYMBOL:FUNCTION").unwrap());
-        assert!(!storage.provenance_depends_on("inferences", &uid, "repo:other.ts#other:SYMBOL:FUNCTION").unwrap());
+        assert!(storage
+            .provenance_depends_on("inferences", &uid, "repo:file.ts#func:SYMBOL:FUNCTION")
+            .unwrap());
+        assert!(!storage
+            .provenance_depends_on("inferences", &uid, "repo:other.ts#other:SYMBOL:FUNCTION")
+            .unwrap());
     }
 
     #[test]
@@ -596,15 +609,39 @@ mod tests {
         ).unwrap();
 
         // All start as 'unknown'
-        assert_eq!(storage.count_by_freshness("s1", "inferences", FreshnessState::Unknown).unwrap(), 3);
+        assert_eq!(
+            storage
+                .count_by_freshness("s1", "inferences", FreshnessState::Unknown)
+                .unwrap(),
+            3
+        );
 
         // Update some states
-        storage.update_freshness_state("inferences", &uid1, FreshnessState::Current).unwrap();
-        storage.update_freshness_state("inferences", "inf-002", FreshnessState::Impacted).unwrap();
+        storage
+            .update_freshness_state("inferences", &uid1, FreshnessState::Current)
+            .unwrap();
+        storage
+            .update_freshness_state("inferences", "inf-002", FreshnessState::Impacted)
+            .unwrap();
 
-        assert_eq!(storage.count_by_freshness("s1", "inferences", FreshnessState::Current).unwrap(), 1);
-        assert_eq!(storage.count_by_freshness("s1", "inferences", FreshnessState::Impacted).unwrap(), 1);
-        assert_eq!(storage.count_by_freshness("s1", "inferences", FreshnessState::Unknown).unwrap(), 1);
+        assert_eq!(
+            storage
+                .count_by_freshness("s1", "inferences", FreshnessState::Current)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            storage
+                .count_by_freshness("s1", "inferences", FreshnessState::Impacted)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            storage
+                .count_by_freshness("s1", "inferences", FreshnessState::Unknown)
+                .unwrap(),
+            1
+        );
     }
 
     #[test]
@@ -618,7 +655,9 @@ mod tests {
             [],
         ).unwrap();
 
-        storage.update_freshness_state("inferences", &uid1, FreshnessState::Current).unwrap();
+        storage
+            .update_freshness_state("inferences", &uid1, FreshnessState::Current)
+            .unwrap();
 
         let summary = storage.freshness_summary("s1", "inferences").unwrap();
         assert_eq!(summary.current, 1);
@@ -637,13 +676,19 @@ mod tests {
             [],
         ).unwrap();
 
-        storage.update_freshness_state("inferences", &uid1, FreshnessState::Current).unwrap();
+        storage
+            .update_freshness_state("inferences", &uid1, FreshnessState::Current)
+            .unwrap();
 
-        let current_rows = storage.list_rows_by_freshness("s1", "inferences", FreshnessState::Current, 10).unwrap();
+        let current_rows = storage
+            .list_rows_by_freshness("s1", "inferences", FreshnessState::Current, 10)
+            .unwrap();
         assert_eq!(current_rows.len(), 1);
         assert_eq!(current_rows[0], uid1);
 
-        let unknown_rows = storage.list_rows_by_freshness("s1", "inferences", FreshnessState::Unknown, 10).unwrap();
+        let unknown_rows = storage
+            .list_rows_by_freshness("s1", "inferences", FreshnessState::Unknown, 10)
+            .unwrap();
         assert_eq!(unknown_rows.len(), 1);
         assert_eq!(unknown_rows[0], "inf-002");
     }
@@ -663,7 +708,12 @@ mod tests {
         let affected = storage.mark_all_current("s1", "inferences").unwrap();
         assert_eq!(affected, 2);
 
-        assert_eq!(storage.count_by_freshness("s1", "inferences", FreshnessState::Current).unwrap(), 2);
+        assert_eq!(
+            storage
+                .count_by_freshness("s1", "inferences", FreshnessState::Current)
+                .unwrap(),
+            2
+        );
     }
 
     #[test]
@@ -672,18 +722,25 @@ mod tests {
         let uid = setup_test_inference(&mut storage);
 
         // Set provenance with a specific stable key
-        let provenance = Provenance::from_layer0_items(vec![
-            ProvenanceAnchor::new("Nodes", "repo:file.ts#func:SYMBOL:FUNCTION"),
-        ]);
-        storage.set_provenance("inferences", &uid, &provenance).unwrap();
-        storage.update_freshness_state("inferences", &uid, FreshnessState::Current).unwrap();
+        let provenance = Provenance::from_layer0_items(vec![ProvenanceAnchor::new(
+            "Nodes",
+            "repo:file.ts#func:SYMBOL:FUNCTION",
+        )]);
+        storage
+            .set_provenance("inferences", &uid, &provenance)
+            .unwrap();
+        storage
+            .update_freshness_state("inferences", &uid, FreshnessState::Current)
+            .unwrap();
 
         // Mark impacted by the stable key
-        let affected = storage.mark_impacted_by_stable_keys(
-            "s1",
-            "inferences",
-            &["repo:file.ts#func:SYMBOL:FUNCTION"],
-        ).unwrap();
+        let affected = storage
+            .mark_impacted_by_stable_keys(
+                "s1",
+                "inferences",
+                &["repo:file.ts#func:SYMBOL:FUNCTION"],
+            )
+            .unwrap();
         assert_eq!(affected, 1);
 
         assert_eq!(
@@ -697,18 +754,25 @@ mod tests {
         let mut storage = fresh_storage();
         let uid = setup_test_inference(&mut storage);
 
-        let provenance = Provenance::from_layer0_items(vec![
-            ProvenanceAnchor::new("Nodes", "repo:file.ts#func:SYMBOL:FUNCTION"),
-        ]);
-        storage.set_provenance("inferences", &uid, &provenance).unwrap();
-        storage.update_freshness_state("inferences", &uid, FreshnessState::Current).unwrap();
+        let provenance = Provenance::from_layer0_items(vec![ProvenanceAnchor::new(
+            "Nodes",
+            "repo:file.ts#func:SYMBOL:FUNCTION",
+        )]);
+        storage
+            .set_provenance("inferences", &uid, &provenance)
+            .unwrap();
+        storage
+            .update_freshness_state("inferences", &uid, FreshnessState::Current)
+            .unwrap();
 
         // Mark impacted by a different stable key
-        let affected = storage.mark_impacted_by_stable_keys(
-            "s1",
-            "inferences",
-            &["repo:other.ts#other:SYMBOL:FUNCTION"],
-        ).unwrap();
+        let affected = storage
+            .mark_impacted_by_stable_keys(
+                "s1",
+                "inferences",
+                &["repo:other.ts#other:SYMBOL:FUNCTION"],
+            )
+            .unwrap();
         assert_eq!(affected, 0);
 
         // Still current
@@ -730,20 +794,30 @@ mod tests {
         let uid = setup_test_inference(&mut storage);
 
         // Provenance depends on "repo:file.ts#func_helper:SYMBOL:FUNCTION"
-        let provenance = Provenance::from_layer0_items(vec![
-            ProvenanceAnchor::new("Nodes", "repo:file.ts#func_helper:SYMBOL:FUNCTION"),
-        ]);
-        storage.set_provenance("inferences", &uid, &provenance).unwrap();
-        storage.update_freshness_state("inferences", &uid, FreshnessState::Current).unwrap();
+        let provenance = Provenance::from_layer0_items(vec![ProvenanceAnchor::new(
+            "Nodes",
+            "repo:file.ts#func_helper:SYMBOL:FUNCTION",
+        )]);
+        storage
+            .set_provenance("inferences", &uid, &provenance)
+            .unwrap();
+        storage
+            .update_freshness_state("inferences", &uid, FreshnessState::Current)
+            .unwrap();
 
         // Try to mark impacted by the prefix key "repo:file.ts#func:SYMBOL:FUNCTION"
         // This should NOT match because we depend on "func_helper", not "func"
-        let affected = storage.mark_impacted_by_stable_keys(
-            "s1",
-            "inferences",
-            &["repo:file.ts#func:SYMBOL:FUNCTION"],
-        ).unwrap();
-        assert_eq!(affected, 0, "Prefix should not false-match with JSON-based approach");
+        let affected = storage
+            .mark_impacted_by_stable_keys(
+                "s1",
+                "inferences",
+                &["repo:file.ts#func:SYMBOL:FUNCTION"],
+            )
+            .unwrap();
+        assert_eq!(
+            affected, 0,
+            "Prefix should not false-match with JSON-based approach"
+        );
 
         // Row should still be current
         assert_eq!(
@@ -752,11 +826,13 @@ mod tests {
         );
 
         // Now mark impacted by the correct full key
-        let affected = storage.mark_impacted_by_stable_keys(
-            "s1",
-            "inferences",
-            &["repo:file.ts#func_helper:SYMBOL:FUNCTION"],
-        ).unwrap();
+        let affected = storage
+            .mark_impacted_by_stable_keys(
+                "s1",
+                "inferences",
+                &["repo:file.ts#func_helper:SYMBOL:FUNCTION"],
+            )
+            .unwrap();
         assert_eq!(affected, 1, "Exact match should work");
 
         assert_eq!(
@@ -792,9 +868,9 @@ mod tests {
                 .expect("prepare pragma")
                 .query_map([], |row| {
                     Ok((
-                        row.get::<_, String>(1)?,  // column name
-                        row.get::<_, String>(2)?,  // column type
-                        row.get::<_, i32>(3)?,     // notnull
+                        row.get::<_, String>(1)?, // column name
+                        row.get::<_, String>(2)?, // column type
+                        row.get::<_, i32>(3)?,    // notnull
                     ))
                 })
                 .expect("query pragma")
@@ -880,22 +956,33 @@ mod tests {
         }
 
         // New row should have 'unknown' freshness from migration default
-        let state = storage.get_freshness_state("inferences", "inf-file-001").unwrap();
+        let state = storage
+            .get_freshness_state("inferences", "inf-file-001")
+            .unwrap();
         assert_eq!(state, Some(FreshnessState::Unknown));
 
         // Update freshness state
-        storage.update_freshness_state("inferences", "inf-file-001", FreshnessState::Current).unwrap();
-        let state = storage.get_freshness_state("inferences", "inf-file-001").unwrap();
+        storage
+            .update_freshness_state("inferences", "inf-file-001", FreshnessState::Current)
+            .unwrap();
+        let state = storage
+            .get_freshness_state("inferences", "inf-file-001")
+            .unwrap();
         assert_eq!(state, Some(FreshnessState::Current));
 
         // Set provenance
-        let provenance = Provenance::from_layer0_items(vec![
-            ProvenanceAnchor::new("Nodes", "repo:file.ts#handler:SYMBOL:FUNCTION"),
-        ]);
-        storage.set_provenance("inferences", "inf-file-001", &provenance).unwrap();
+        let provenance = Provenance::from_layer0_items(vec![ProvenanceAnchor::new(
+            "Nodes",
+            "repo:file.ts#handler:SYMBOL:FUNCTION",
+        )]);
+        storage
+            .set_provenance("inferences", "inf-file-001", &provenance)
+            .unwrap();
 
         // Verify provenance persisted
-        let retrieved = storage.get_provenance("inferences", "inf-file-001").unwrap();
+        let retrieved = storage
+            .get_provenance("inferences", "inf-file-001")
+            .unwrap();
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().depends_on.len(), 1);
 
@@ -904,10 +991,14 @@ mod tests {
         let storage = StorageConnection::open(&db_path).expect("re-open file-backed db");
 
         // Data should still be there
-        let state = storage.get_freshness_state("inferences", "inf-file-001").unwrap();
+        let state = storage
+            .get_freshness_state("inferences", "inf-file-001")
+            .unwrap();
         assert_eq!(state, Some(FreshnessState::Current));
 
-        let retrieved = storage.get_provenance("inferences", "inf-file-001").unwrap();
+        let retrieved = storage
+            .get_provenance("inferences", "inf-file-001")
+            .unwrap();
         assert!(retrieved.is_some());
     }
 
@@ -947,7 +1038,8 @@ mod tests {
                 'test:1.0', 'api_call', 0.95, '{}'
             )"#,
             rusqlite::params![surface_uid],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Insert boundary_contracts row (no snapshot_uid — links via surface_uid)
         let association_uid = "bc-001";
@@ -956,7 +1048,8 @@ mod tests {
                 association_uid, surface_uid, contract_kind, association_basis, confidence
             ) VALUES (?, ?, 'grpc_method', 'schema_type', 0.95)"#,
             rusqlite::params![association_uid, surface_uid],
-        ).unwrap();
+        )
+        .unwrap();
 
         (surface_uid.to_string(), association_uid.to_string())
     }
@@ -986,31 +1079,50 @@ mod tests {
         let (_surface_uid, association_uid) = setup_boundary_contracts_fixture(&mut storage);
 
         // Set provenance on the boundary_contracts row
-        let provenance = Provenance::from_layer0_items(vec![
-            ProvenanceAnchor::new("ContractElements", "r1:api.proto#service:MyService#method:DoThing"),
-        ]).with_extractor("grpc_contract_linker:1.0");
+        let provenance = Provenance::from_layer0_items(vec![ProvenanceAnchor::new(
+            "ContractElements",
+            "r1:api.proto#service:MyService#method:DoThing",
+        )])
+        .with_extractor("grpc_contract_linker:1.0");
 
-        storage.set_provenance("boundary_contracts", &association_uid, &provenance).unwrap();
-        storage.update_freshness_state("boundary_contracts", &association_uid, FreshnessState::Current).unwrap();
+        storage
+            .set_provenance("boundary_contracts", &association_uid, &provenance)
+            .unwrap();
+        storage
+            .update_freshness_state(
+                "boundary_contracts",
+                &association_uid,
+                FreshnessState::Current,
+            )
+            .unwrap();
 
         // Verify initial state
         assert_eq!(
-            storage.get_freshness_state("boundary_contracts", &association_uid).unwrap(),
+            storage
+                .get_freshness_state("boundary_contracts", &association_uid)
+                .unwrap(),
             Some(FreshnessState::Current)
         );
 
         // Mark impacted by a stable key that MATCHES the provenance
         // Should affect 1 row via FK-join scoping
-        let affected = storage.mark_impacted_by_stable_keys(
-            "s1",  // snapshot_uid — this must join through boundary_interaction_surfaces
-            "boundary_contracts",
-            &["r1:api.proto#service:MyService#method:DoThing"],
-        ).unwrap();
-
-        assert_eq!(affected, 1, "FK-join should find and impact the row via surface_uid -> snapshot_uid");
+        let affected = storage
+            .mark_impacted_by_stable_keys(
+                "s1", // snapshot_uid — this must join through boundary_interaction_surfaces
+                "boundary_contracts",
+                &["r1:api.proto#service:MyService#method:DoThing"],
+            )
+            .unwrap();
 
         assert_eq!(
-            storage.get_freshness_state("boundary_contracts", &association_uid).unwrap(),
+            affected, 1,
+            "FK-join should find and impact the row via surface_uid -> snapshot_uid"
+        );
+
+        assert_eq!(
+            storage
+                .get_freshness_state("boundary_contracts", &association_uid)
+                .unwrap(),
             Some(FreshnessState::Impacted),
             "Row should be impacted after stable_key match"
         );
@@ -1032,8 +1144,10 @@ mod tests {
         ).unwrap();
 
         // Create a second surface in snapshot s2
-        storage.connection_mut().execute(
-            r#"INSERT INTO boundary_interaction_surfaces (
+        storage
+            .connection_mut()
+            .execute(
+                r#"INSERT INTO boundary_interaction_surfaces (
                 surface_uid, snapshot_uid, repo_uid,
                 boundary_scope, channel_kind, direction,
                 protocol, protocol_family, interaction_pattern,
@@ -1048,47 +1162,70 @@ mod tests {
                 100, 110, 1, 60,
                 'test:1.0', 'api_call', 0.9, '{}'
             )"#,
-            [],
-        ).unwrap();
+                [],
+            )
+            .unwrap();
 
         // Create boundary_contracts for s2's surface
-        storage.connection_mut().execute(
-            r#"INSERT INTO boundary_contracts (
+        storage
+            .connection_mut()
+            .execute(
+                r#"INSERT INTO boundary_contracts (
                 association_uid, surface_uid, contract_kind, association_basis, confidence
             ) VALUES ('bc-002', 'surface-002', 'grpc_method', 'schema_type', 0.9)"#,
-            [],
-        ).unwrap();
+                [],
+            )
+            .unwrap();
 
         // Set provenance on BOTH boundary_contracts rows with the SAME stable_key
-        let provenance = Provenance::from_layer0_items(vec![
-            ProvenanceAnchor::new("ContractElements", "r1:api.proto#service:MyService#method:DoThing"),
-        ]);
+        let provenance = Provenance::from_layer0_items(vec![ProvenanceAnchor::new(
+            "ContractElements",
+            "r1:api.proto#service:MyService#method:DoThing",
+        )]);
 
-        storage.set_provenance("boundary_contracts", &association_uid, &provenance).unwrap();
-        storage.update_freshness_state("boundary_contracts", &association_uid, FreshnessState::Current).unwrap();
+        storage
+            .set_provenance("boundary_contracts", &association_uid, &provenance)
+            .unwrap();
+        storage
+            .update_freshness_state(
+                "boundary_contracts",
+                &association_uid,
+                FreshnessState::Current,
+            )
+            .unwrap();
 
-        storage.set_provenance("boundary_contracts", "bc-002", &provenance).unwrap();
-        storage.update_freshness_state("boundary_contracts", "bc-002", FreshnessState::Current).unwrap();
+        storage
+            .set_provenance("boundary_contracts", "bc-002", &provenance)
+            .unwrap();
+        storage
+            .update_freshness_state("boundary_contracts", "bc-002", FreshnessState::Current)
+            .unwrap();
 
         // Mark impacted ONLY for snapshot s1
-        let affected = storage.mark_impacted_by_stable_keys(
-            "s1",  // Only s1, not s2
-            "boundary_contracts",
-            &["r1:api.proto#service:MyService#method:DoThing"],
-        ).unwrap();
+        let affected = storage
+            .mark_impacted_by_stable_keys(
+                "s1", // Only s1, not s2
+                "boundary_contracts",
+                &["r1:api.proto#service:MyService#method:DoThing"],
+            )
+            .unwrap();
 
         assert_eq!(affected, 1, "Should only impact rows in snapshot s1");
 
         // Verify: bc-001 (in s1 via surface-001) is impacted
         assert_eq!(
-            storage.get_freshness_state("boundary_contracts", &association_uid).unwrap(),
+            storage
+                .get_freshness_state("boundary_contracts", &association_uid)
+                .unwrap(),
             Some(FreshnessState::Impacted),
             "Row in s1 should be impacted"
         );
 
         // Verify: bc-002 (in s2 via surface-002) is still current
         assert_eq!(
-            storage.get_freshness_state("boundary_contracts", "bc-002").unwrap(),
+            storage
+                .get_freshness_state("boundary_contracts", "bc-002")
+                .unwrap(),
             Some(FreshnessState::Current),
             "Row in s2 should NOT be impacted when targeting s1"
         );
@@ -1105,20 +1242,30 @@ mod tests {
 
         // Do NOT set provenance — row has NULL provenance_json
         // But do set it to current state
-        storage.update_freshness_state("boundary_contracts", &association_uid, FreshnessState::Current).unwrap();
+        storage
+            .update_freshness_state(
+                "boundary_contracts",
+                &association_uid,
+                FreshnessState::Current,
+            )
+            .unwrap();
 
         // Try to mark impacted
-        let affected = storage.mark_impacted_by_stable_keys(
-            "s1",
-            "boundary_contracts",
-            &["r1:api.proto#service:MyService#method:DoThing"],
-        ).unwrap();
+        let affected = storage
+            .mark_impacted_by_stable_keys(
+                "s1",
+                "boundary_contracts",
+                &["r1:api.proto#service:MyService#method:DoThing"],
+            )
+            .unwrap();
 
         assert_eq!(affected, 0, "Row without provenance should not be impacted");
 
         // Row should still be current
         assert_eq!(
-            storage.get_freshness_state("boundary_contracts", &association_uid).unwrap(),
+            storage
+                .get_freshness_state("boundary_contracts", &association_uid)
+                .unwrap(),
             Some(FreshnessState::Current),
             "Row without provenance should remain current"
         );

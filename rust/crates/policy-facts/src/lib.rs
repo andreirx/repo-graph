@@ -41,12 +41,12 @@
 //! let mappings = extract_status_mappings(&tree, source.as_bytes(), file_path, repo_uid);
 //! ```
 
-mod types;
 pub mod extractors;
 pub mod storage_port;
+mod types;
 
 pub use storage_port::{PolicyFactsStorageError, PolicyFactsStorageRead, PolicyFactsStorageWrite};
 pub use types::{
-    BehavioralMarker, CaseMapping, FateEvidence, FateKind, MarkerEvidence, MarkerKind,
-    ReturnFate, StatusMapping,
+    BehavioralMarker, CaseMapping, FateEvidence, FateKind, MarkerEvidence, MarkerKind, ReturnFate,
+    StatusMapping,
 };

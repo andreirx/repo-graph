@@ -10,13 +10,11 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use enrichment::{
-    EnrichmentConfig, EnrichmentLanguage, EnrichmentPipeline, ResolverRegistry,
-};
+use enrichment::{EnrichmentConfig, EnrichmentLanguage, EnrichmentPipeline, ResolverRegistry};
 use jdtls_resolver::{JdtlsConfig, JdtlsResolver};
 use rust_analyzer_resolver::RustAnalyzerResolver;
-use tsserver_resolver::TsServerResolver;
 use serde::Serialize;
+use tsserver_resolver::TsServerResolver;
 
 use crate::cli::open_storage;
 
@@ -121,8 +119,8 @@ pub fn run_enrich(args: &[String]) -> ExitCode {
     let mut available_languages = Vec::new();
 
     // Register Rust resolver if not filtered out
-    let should_register_rust = parsed.languages.is_empty()
-        || parsed.languages.contains(&EnrichmentLanguage::Rust);
+    let should_register_rust =
+        parsed.languages.is_empty() || parsed.languages.contains(&EnrichmentLanguage::Rust);
 
     if should_register_rust {
         // RustAnalyzerResolver::new() doesn't fail - it defers session creation to resolve_batch
@@ -132,8 +130,8 @@ pub fn run_enrich(args: &[String]) -> ExitCode {
     }
 
     // Register TypeScript resolver if not filtered out
-    let should_register_typescript = parsed.languages.is_empty()
-        || parsed.languages.contains(&EnrichmentLanguage::TypeScript);
+    let should_register_typescript =
+        parsed.languages.is_empty() || parsed.languages.contains(&EnrichmentLanguage::TypeScript);
 
     if should_register_typescript {
         // TsServerResolver::new() doesn't fail - it defers session creation to resolve_batch
@@ -144,12 +142,14 @@ pub fn run_enrich(args: &[String]) -> ExitCode {
 
     // Register Java resolver if not filtered out
     // jdtls requires explicit path: --jdtls-path flag or JDTLS_PATH env var
-    let should_register_java = parsed.languages.is_empty()
-        || parsed.languages.contains(&EnrichmentLanguage::Java);
+    let should_register_java =
+        parsed.languages.is_empty() || parsed.languages.contains(&EnrichmentLanguage::Java);
 
     if should_register_java {
         // Resolve jdtls path: CLI flag takes precedence over env var
-        let jdtls_path = parsed.jdtls_path.clone()
+        let jdtls_path = parsed
+            .jdtls_path
+            .clone()
             .or_else(|| std::env::var("JDTLS_PATH").ok());
 
         if let Some(path) = jdtls_path {

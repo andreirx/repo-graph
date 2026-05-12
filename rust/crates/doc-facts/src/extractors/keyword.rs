@@ -36,7 +36,8 @@ static PATTERNS: LazyLock<Vec<PatternDef>> = LazyLock::new(|| {
     vec![
         // "X replaces Y" / "X is a replacement for Y"
         PatternDef {
-            regex: Regex::new(r"(?i)\b(\S+)\s+(?:replaces|is\s+a\s+replacement\s+for)\s+(\S+)").unwrap(),
+            regex: Regex::new(r"(?i)\b(\S+)\s+(?:replaces|is\s+a\s+replacement\s+for)\s+(\S+)")
+                .unwrap(),
             fact_kind: FactKind::ReplacementFor,
             subject_group: 1,
             object_group: 2,
@@ -151,7 +152,8 @@ pub fn extract(doc: &DocFile, content: &str, content_hash: &str) -> Vec<Extracte
                 let object = if pattern.object_group == 0 {
                     None
                 } else {
-                    cap.get(pattern.object_group).map(|m| clean_reference(m.as_str()))
+                    cap.get(pattern.object_group)
+                        .map(|m| clean_reference(m.as_str()))
                 };
 
                 // Skip if subject and object are the same
@@ -201,8 +203,10 @@ pub fn extract(doc: &DocFile, content: &str, content_hash: &str) -> Vec<Extracte
 /// - `@` for scoped packages (e.g., `@scope/pkg`)
 /// - `:` for namespaces (e.g., `crate::module`)
 fn clean_reference(s: &str) -> String {
-    s.trim_matches(|c: char| c.is_ascii_punctuation() && c != '-' && c != '_' && c != '/' && c != '@' && c != ':')
-        .to_string()
+    s.trim_matches(|c: char| {
+        c.is_ascii_punctuation() && c != '-' && c != '_' && c != '/' && c != '@' && c != ':'
+    })
+    .to_string()
 }
 
 /// Check for common false positive patterns.
@@ -212,25 +216,113 @@ fn is_false_positive(subject: &str, object: Option<&str>) -> bool {
     // Skip common words that aren't module/symbol names
     let skip_words = [
         // Pronouns and articles
-        "this", "that", "it", "the", "a", "an",
+        "this",
+        "that",
+        "it",
+        "the",
+        "a",
+        "an",
         // Auxiliary verbs
-        "is", "are", "was", "were", "be", "been", "being",
-        "have", "has", "had", "do", "does", "did",
-        "will", "would", "could", "should", "may", "might", "must", "can",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "must",
+        "can",
         // Common verbs
-        "need", "want", "like", "use", "make", "get", "set",
+        "need",
+        "want",
+        "like",
+        "use",
+        "make",
+        "get",
+        "set",
         // Generic nouns (high false positive rate in real repos)
-        "field", "fields", "value", "values", "data", "content", "entire",
-        "name", "names", "id", "ids", "key", "keys", "type", "types",
-        "json", "string", "number", "boolean", "array", "object",
-        "file", "files", "path", "paths", "url", "urls",
-        "option", "options", "config", "configuration", "setting", "settings",
-        "method", "methods", "function", "functions", "property", "properties",
-        "parameter", "parameters", "argument", "arguments", "variable", "variables",
-        "input", "inputs", "output", "outputs", "result", "results",
-        "item", "items", "element", "elements", "entry", "entries",
-        "old", "new", "previous", "current", "default", "custom",
-        "all", "any", "some", "none", "other", "each", "every",
+        "field",
+        "fields",
+        "value",
+        "values",
+        "data",
+        "content",
+        "entire",
+        "name",
+        "names",
+        "id",
+        "ids",
+        "key",
+        "keys",
+        "type",
+        "types",
+        "json",
+        "string",
+        "number",
+        "boolean",
+        "array",
+        "object",
+        "file",
+        "files",
+        "path",
+        "paths",
+        "url",
+        "urls",
+        "option",
+        "options",
+        "config",
+        "configuration",
+        "setting",
+        "settings",
+        "method",
+        "methods",
+        "function",
+        "functions",
+        "property",
+        "properties",
+        "parameter",
+        "parameters",
+        "argument",
+        "arguments",
+        "variable",
+        "variables",
+        "input",
+        "inputs",
+        "output",
+        "outputs",
+        "result",
+        "results",
+        "item",
+        "items",
+        "element",
+        "elements",
+        "entry",
+        "entries",
+        "old",
+        "new",
+        "previous",
+        "current",
+        "default",
+        "custom",
+        "all",
+        "any",
+        "some",
+        "none",
+        "other",
+        "each",
+        "every",
     ];
 
     if skip_words.contains(&lower_subject.as_str()) {
@@ -521,7 +613,10 @@ After the code block.
 
         // Namespaces should preserve ::
         assert_eq!(clean_reference("crate::module"), "crate::module");
-        assert_eq!(clean_reference("std::collections::HashMap"), "std::collections::HashMap");
+        assert_eq!(
+            clean_reference("std::collections::HashMap"),
+            "std::collections::HashMap"
+        );
 
         // Still strips other punctuation
         assert_eq!(clean_reference("\"module\""), "module");

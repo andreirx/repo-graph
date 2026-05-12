@@ -4,5 +4,5 @@
 //! The implementation lives in the `lsp-subprocess` crate.
 
 pub use lsp_subprocess::{
-    IdGenerator, LspResponse, ReaderHandle, TransportError, write_notification, write_request,
+    write_notification, write_request, IdGenerator, LspResponse, ReaderHandle, TransportError,
 };

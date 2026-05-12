@@ -46,7 +46,9 @@ use waiver::run_declare_waiver;
 pub fn run_declare(args: &[String]) -> ExitCode {
     if args.is_empty() {
         eprintln!("usage: rmap declare <subcommand> ...");
-        eprintln!("subcommands: boundary, requirement, waiver, quality-policy, deactivate, supersede");
+        eprintln!(
+            "subcommands: boundary, requirement, waiver, quality-policy, deactivate, supersede"
+        );
         return ExitCode::from(1);
     }
 
@@ -59,7 +61,9 @@ pub fn run_declare(args: &[String]) -> ExitCode {
         "supersede" => run_declare_supersede(&args[1..]),
         other => {
             eprintln!("unknown declare subcommand: {}", other);
-            eprintln!("subcommands: boundary, requirement, waiver, quality-policy, deactivate, supersede");
+            eprintln!(
+                "subcommands: boundary, requirement, waiver, quality-policy, deactivate, supersede"
+            );
             ExitCode::from(1)
         }
     }

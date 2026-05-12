@@ -25,257 +25,233 @@
 
 use repo_graph_agent::AgentStorageRead;
 use repo_graph_storage::types::{
-	CreateSnapshotInput, FileVersion, GraphEdge, GraphNode, Repo,
-	SourceLocation, TrackedFile, UpdateSnapshotStatusInput,
+    CreateSnapshotInput, FileVersion, GraphEdge, GraphNode, Repo, SourceLocation, TrackedFile,
+    UpdateSnapshotStatusInput,
 };
 use repo_graph_storage::StorageConnection;
 
 // ── Helpers ──────────────────────────────────────────────────────
 
 fn open_temp_storage() -> (tempfile::TempDir, StorageConnection) {
-	let dir = tempfile::tempdir().unwrap();
-	let db_path = dir.path().join("agent_impl_test.db");
-	let storage = StorageConnection::open(&db_path).unwrap();
-	(dir, storage)
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("agent_impl_test.db");
+    let storage = StorageConnection::open(&db_path).unwrap();
+    (dir, storage)
 }
 
 fn insert_repo(storage: &StorageConnection, uid: &str, name: &str) {
-	storage
-		.add_repo(&Repo {
-			repo_uid: uid.to_string(),
-			name: name.to_string(),
-			root_path: format!("/tmp/{}", uid),
-			default_branch: None,
-			created_at: "2026-04-15T00:00:00Z".to_string(),
-			metadata_json: None,
-		})
-		.unwrap();
+    storage
+        .add_repo(&Repo {
+            repo_uid: uid.to_string(),
+            name: name.to_string(),
+            root_path: format!("/tmp/{}", uid),
+            default_branch: None,
+            created_at: "2026-04-15T00:00:00Z".to_string(),
+            metadata_json: None,
+        })
+        .unwrap();
 }
 
-fn create_ready_snapshot(
-	storage: &StorageConnection,
-	repo_uid: &str,
-) -> String {
-	let snap = storage
-		.create_snapshot(&CreateSnapshotInput {
-			repo_uid: repo_uid.to_string(),
-			parent_snapshot_uid: None,
-			kind: "full".to_string(),
-			basis_ref: None,
-			basis_commit: None,
-			label: None,
-			toolchain_json: None,
-		})
-		.unwrap();
-	storage
-		.update_snapshot_status(&UpdateSnapshotStatusInput {
-			snapshot_uid: snap.snapshot_uid.clone(),
-			status: "ready".to_string(),
-			completed_at: Some("2026-04-15T00:01:00Z".to_string()),
-		})
-		.unwrap();
-	snap.snapshot_uid
+fn create_ready_snapshot(storage: &StorageConnection, repo_uid: &str) -> String {
+    let snap = storage
+        .create_snapshot(&CreateSnapshotInput {
+            repo_uid: repo_uid.to_string(),
+            parent_snapshot_uid: None,
+            kind: "full".to_string(),
+            basis_ref: None,
+            basis_commit: None,
+            label: None,
+            toolchain_json: None,
+        })
+        .unwrap();
+    storage
+        .update_snapshot_status(&UpdateSnapshotStatusInput {
+            snapshot_uid: snap.snapshot_uid.clone(),
+            status: "ready".to_string(),
+            completed_at: Some("2026-04-15T00:01:00Z".to_string()),
+        })
+        .unwrap();
+    snap.snapshot_uid
 }
 
 // ── get_repo ─────────────────────────────────────────────────────
 
 #[test]
 fn get_repo_returns_mapped_agent_repo() {
-	let (_tmp, mut storage) = open_temp_storage();
-	insert_repo(&storage, "r1", "my-repo");
+    let (_tmp, storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
 
-	let result = <StorageConnection as AgentStorageRead>::get_repo(
-		&mut storage,
-		"r1",
-	)
-	.unwrap();
-	let repo = result.expect("repo exists");
-	assert_eq!(repo.repo_uid, "r1");
-	assert_eq!(repo.name, "my-repo");
+    let result = <StorageConnection as AgentStorageRead>::get_repo(&storage, "r1").unwrap();
+    let repo = result.expect("repo exists");
+    assert_eq!(repo.repo_uid, "r1");
+    assert_eq!(repo.name, "my-repo");
 }
 
 #[test]
 fn get_repo_returns_none_when_missing() {
-	let (_tmp, mut storage) = open_temp_storage();
+    let (_tmp, storage) = open_temp_storage();
 
-	let result = <StorageConnection as AgentStorageRead>::get_repo(
-		&mut storage,
-		"absent",
-	)
-	.unwrap();
-	assert!(result.is_none());
+    let result = <StorageConnection as AgentStorageRead>::get_repo(&storage, "absent").unwrap();
+    assert!(result.is_none());
 }
 
 // ── get_latest_snapshot ──────────────────────────────────────────
 
 #[test]
 fn get_latest_snapshot_maps_kind_to_scope() {
-	let (_tmp, mut storage) = open_temp_storage();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    let (_tmp, storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	let result =
-		<StorageConnection as AgentStorageRead>::get_latest_snapshot(
-			&mut storage,
-			"r1",
-		)
-		.unwrap();
-	let snap = result.expect("READY snapshot exists");
-	assert_eq!(snap.snapshot_uid, snapshot_uid);
-	assert_eq!(snap.repo_uid, "r1");
-	// Storage column `kind` surfaces as agent DTO `scope`.
-	assert_eq!(snap.scope, "full");
+    let result =
+        <StorageConnection as AgentStorageRead>::get_latest_snapshot(&storage, "r1").unwrap();
+    let snap = result.expect("READY snapshot exists");
+    assert_eq!(snap.snapshot_uid, snapshot_uid);
+    assert_eq!(snap.repo_uid, "r1");
+    // Storage column `kind` surfaces as agent DTO `scope`.
+    assert_eq!(snap.scope, "full");
 }
 
 #[test]
 fn get_latest_snapshot_returns_none_when_no_ready_snapshot() {
-	let (_tmp, mut storage) = open_temp_storage();
-	insert_repo(&storage, "r1", "my-repo");
-	// Repo exists but no snapshot → Ok(None).
+    let (_tmp, storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    // Repo exists but no snapshot → Ok(None).
 
-	let result =
-		<StorageConnection as AgentStorageRead>::get_latest_snapshot(
-			&mut storage,
-			"r1",
-		)
-		.unwrap();
-	assert!(result.is_none());
+    let result =
+        <StorageConnection as AgentStorageRead>::get_latest_snapshot(&storage, "r1").unwrap();
+    assert!(result.is_none());
 }
 
 // ── compute_repo_summary ─────────────────────────────────────────
 
 #[test]
 fn compute_repo_summary_rolls_up_languages_deterministically() {
-	let (_tmp, mut storage) = open_temp_storage();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    let (_tmp, mut storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	// Seed three files with two distinct languages.
-	storage
-		.upsert_files(&[
-			TrackedFile {
-				file_uid: "f1".into(),
-				repo_uid: "r1".into(),
-				path: "src/a.rs".into(),
-				language: Some("rust".into()),
-				is_test: false,
-				is_generated: false,
-				is_excluded: false,
-			},
-			TrackedFile {
-				file_uid: "f2".into(),
-				repo_uid: "r1".into(),
-				path: "src/b.ts".into(),
-				language: Some("typescript".into()),
-				is_test: false,
-				is_generated: false,
-				is_excluded: false,
-			},
-			TrackedFile {
-				file_uid: "f3".into(),
-				repo_uid: "r1".into(),
-				path: "src/c.rs".into(),
-				language: Some("rust".into()),
-				is_test: false,
-				is_generated: false,
-				is_excluded: false,
-			},
-		])
-		.unwrap();
-	storage
-		.upsert_file_versions(&[
-			FileVersion {
-				snapshot_uid: snapshot_uid.clone(),
-				file_uid: "f1".into(),
-				content_hash: "h1".into(),
-				ast_hash: None,
-				extractor: None,
-				parse_status: "ok".into(),
-				size_bytes: Some(10),
-				line_count: Some(2),
-				indexed_at: "2026-04-15T00:00:00Z".into(),
-			},
-			FileVersion {
-				snapshot_uid: snapshot_uid.clone(),
-				file_uid: "f2".into(),
-				content_hash: "h2".into(),
-				ast_hash: None,
-				extractor: None,
-				parse_status: "ok".into(),
-				size_bytes: Some(10),
-				line_count: Some(2),
-				indexed_at: "2026-04-15T00:00:00Z".into(),
-			},
-			FileVersion {
-				snapshot_uid: snapshot_uid.clone(),
-				file_uid: "f3".into(),
-				content_hash: "h3".into(),
-				ast_hash: None,
-				extractor: None,
-				parse_status: "ok".into(),
-				size_bytes: Some(10),
-				line_count: Some(2),
-				indexed_at: "2026-04-15T00:00:00Z".into(),
-			},
-		])
-		.unwrap();
+    // Seed three files with two distinct languages.
+    storage
+        .upsert_files(&[
+            TrackedFile {
+                file_uid: "f1".into(),
+                repo_uid: "r1".into(),
+                path: "src/a.rs".into(),
+                language: Some("rust".into()),
+                is_test: false,
+                is_generated: false,
+                is_excluded: false,
+            },
+            TrackedFile {
+                file_uid: "f2".into(),
+                repo_uid: "r1".into(),
+                path: "src/b.ts".into(),
+                language: Some("typescript".into()),
+                is_test: false,
+                is_generated: false,
+                is_excluded: false,
+            },
+            TrackedFile {
+                file_uid: "f3".into(),
+                repo_uid: "r1".into(),
+                path: "src/c.rs".into(),
+                language: Some("rust".into()),
+                is_test: false,
+                is_generated: false,
+                is_excluded: false,
+            },
+        ])
+        .unwrap();
+    storage
+        .upsert_file_versions(&[
+            FileVersion {
+                snapshot_uid: snapshot_uid.clone(),
+                file_uid: "f1".into(),
+                content_hash: "h1".into(),
+                ast_hash: None,
+                extractor: None,
+                parse_status: "ok".into(),
+                size_bytes: Some(10),
+                line_count: Some(2),
+                indexed_at: "2026-04-15T00:00:00Z".into(),
+            },
+            FileVersion {
+                snapshot_uid: snapshot_uid.clone(),
+                file_uid: "f2".into(),
+                content_hash: "h2".into(),
+                ast_hash: None,
+                extractor: None,
+                parse_status: "ok".into(),
+                size_bytes: Some(10),
+                line_count: Some(2),
+                indexed_at: "2026-04-15T00:00:00Z".into(),
+            },
+            FileVersion {
+                snapshot_uid: snapshot_uid.clone(),
+                file_uid: "f3".into(),
+                content_hash: "h3".into(),
+                ast_hash: None,
+                extractor: None,
+                parse_status: "ok".into(),
+                size_bytes: Some(10),
+                line_count: Some(2),
+                indexed_at: "2026-04-15T00:00:00Z".into(),
+            },
+        ])
+        .unwrap();
 
-	let summary = <StorageConnection as AgentStorageRead>::compute_repo_summary(
-		&mut storage,
-		&snapshot_uid,
-	)
-	.unwrap();
-	assert_eq!(summary.file_count, 3);
-	// symbol_count is zero until we seed nodes, and we deliberately
-	// do NOT seed nodes here — this test's focus is language rollup.
-	assert_eq!(summary.symbol_count, 0);
-	// Languages are sorted ascending and deduplicated.
-	assert_eq!(
-		summary.languages,
-		vec!["rust".to_string(), "typescript".to_string()]
-	);
+    let summary =
+        <StorageConnection as AgentStorageRead>::compute_repo_summary(&storage, &snapshot_uid)
+            .unwrap();
+    assert_eq!(summary.file_count, 3);
+    // symbol_count is zero until we seed nodes, and we deliberately
+    // do NOT seed nodes here — this test's focus is language rollup.
+    assert_eq!(summary.symbol_count, 0);
+    // Languages are sorted ascending and deduplicated.
+    assert_eq!(
+        summary.languages,
+        vec!["rust".to_string(), "typescript".to_string()]
+    );
 }
 
 // ── get_stale_files ──────────────────────────────────────────────
 
 #[test]
 fn get_stale_files_maps_to_agent_paths() {
-	let (_tmp, mut storage) = open_temp_storage();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    let (_tmp, mut storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	storage
-		.upsert_files(&[TrackedFile {
-			file_uid: "f1".into(),
-			repo_uid: "r1".into(),
-			path: "src/stale.rs".into(),
-			language: Some("rust".into()),
-			is_test: false,
-			is_generated: false,
-			is_excluded: false,
-		}])
-		.unwrap();
-	storage
-		.upsert_file_versions(&[FileVersion {
-			snapshot_uid: snapshot_uid.clone(),
-			file_uid: "f1".into(),
-			content_hash: "h1".into(),
-			ast_hash: None,
-			extractor: None,
-			parse_status: "stale".into(),
-			size_bytes: Some(10),
-			line_count: Some(2),
-			indexed_at: "2026-04-15T00:00:00Z".into(),
-		}])
-		.unwrap();
+    storage
+        .upsert_files(&[TrackedFile {
+            file_uid: "f1".into(),
+            repo_uid: "r1".into(),
+            path: "src/stale.rs".into(),
+            language: Some("rust".into()),
+            is_test: false,
+            is_generated: false,
+            is_excluded: false,
+        }])
+        .unwrap();
+    storage
+        .upsert_file_versions(&[FileVersion {
+            snapshot_uid: snapshot_uid.clone(),
+            file_uid: "f1".into(),
+            content_hash: "h1".into(),
+            ast_hash: None,
+            extractor: None,
+            parse_status: "stale".into(),
+            size_bytes: Some(10),
+            line_count: Some(2),
+            indexed_at: "2026-04-15T00:00:00Z".into(),
+        }])
+        .unwrap();
 
-	let stale = <StorageConnection as AgentStorageRead>::get_stale_files(
-		&mut storage,
-		&snapshot_uid,
-	)
-	.unwrap();
-	assert_eq!(stale.len(), 1);
-	assert_eq!(stale[0].path, "src/stale.rs");
+    let stale =
+        <StorageConnection as AgentStorageRead>::get_stale_files(&storage, &snapshot_uid).unwrap();
+    assert_eq!(stale.len(), 1);
+    assert_eq!(stale[0].path, "src/stale.rs");
 }
 
 // ── Trust summary: enrichment state disambiguation (P2) ─────────
@@ -300,112 +276,108 @@ fn get_stale_files_maps_to_agent_paths() {
 
 #[test]
 fn empty_snapshot_maps_to_enrichment_state_not_applicable() {
-	use repo_graph_agent::EnrichmentState;
+    use repo_graph_agent::EnrichmentState;
 
-	let (_tmp, mut storage) = open_temp_storage();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    let (_tmp, storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	let trust =
-		<StorageConnection as AgentStorageRead>::get_trust_summary(
-			&mut storage,
-			"r1",
-			&snapshot_uid,
-		)
-		.unwrap();
+    let trust =
+        <StorageConnection as AgentStorageRead>::get_trust_summary(&storage, "r1", &snapshot_uid)
+            .unwrap();
 
-	// Empty snapshot has zero CallsObjMethodNeedsTypeInfo
-	// samples. The adapter must NOT report NotRun (the
-	// pre-P2-fix bug) — it must report NotApplicable so the
-	// agent pipeline does not fire a spurious
-	// TRUST_NO_ENRICHMENT signal and does not penalize
-	// confidence on the enrichment axis.
-	assert_eq!(
-		trust.enrichment_state,
-		EnrichmentState::NotApplicable,
-		"empty snapshot must map to NotApplicable; pre-P2 the adapter \
+    // Empty snapshot has zero CallsObjMethodNeedsTypeInfo
+    // samples. The adapter must NOT report NotRun (the
+    // pre-P2-fix bug) — it must report NotApplicable so the
+    // agent pipeline does not fire a spurious
+    // TRUST_NO_ENRICHMENT signal and does not penalize
+    // confidence on the enrichment axis.
+    assert_eq!(
+        trust.enrichment_state,
+        EnrichmentState::NotApplicable,
+        "empty snapshot must map to NotApplicable; pre-P2 the adapter \
 		 conflated this with NotRun and the spike re-run would have \
 		 reported a false positive"
-	);
-	assert_eq!(trust.enrichment_eligible, 0);
-	assert_eq!(trust.enrichment_enriched, 0);
+    );
+    assert_eq!(trust.enrichment_eligible, 0);
+    assert_eq!(trust.enrichment_enriched, 0);
 }
 
 #[test]
 fn snapshot_with_unresolved_obj_method_call_maps_to_enrichment_state_not_run() {
-	// The other branch of the P2 disambiguator. Seeds a
-	// `CallsObjMethodNeedsTypeInfo` unresolved edge with NO
-	// enrichment metadata. The trust layer's compute path will:
-	//
-	//   1. Count the row in `all_classification_counts`
-	//      (non-empty), so the blast/enrichment computation runs.
-	//   2. Sample it via `query_unresolved_edges(classification =
-	//      Unknown)` — the row's `classification` is `"unknown"`,
-	//      so it appears.
-	//   3. Find no `enrichment` key in `metadata_json` (NULL),
-	//      so `enrichment_was_run` stays false.
-	//   4. Return `enrichment_status = None`,
-	//      `enrichment_eligible_count = 1`.
-	//
-	// The adapter must then map this to `EnrichmentState::NotRun`
-	// — NOT `NotApplicable`. This is the actual code path that
-	// drives `TRUST_NO_ENRICHMENT` emission and the confidence
-	// penalty in production. Pre-P2 the adapter conflated this
-	// with `NotApplicable`; the regression at the manual spike
-	// caught it. This test pins the behavior in CI.
-	use repo_graph_agent::EnrichmentState;
-	use repo_graph_storage::types::GraphNode;
+    // The other branch of the P2 disambiguator. Seeds a
+    // `CallsObjMethodNeedsTypeInfo` unresolved edge with NO
+    // enrichment metadata. The trust layer's compute path will:
+    //
+    //   1. Count the row in `all_classification_counts`
+    //      (non-empty), so the blast/enrichment computation runs.
+    //   2. Sample it via `query_unresolved_edges(classification =
+    //      Unknown)` — the row's `classification` is `"unknown"`,
+    //      so it appears.
+    //   3. Find no `enrichment` key in `metadata_json` (NULL),
+    //      so `enrichment_was_run` stays false.
+    //   4. Return `enrichment_status = None`,
+    //      `enrichment_eligible_count = 1`.
+    //
+    // The adapter must then map this to `EnrichmentState::NotRun`
+    // — NOT `NotApplicable`. This is the actual code path that
+    // drives `TRUST_NO_ENRICHMENT` emission and the confidence
+    // penalty in production. Pre-P2 the adapter conflated this
+    // with `NotApplicable`; the regression at the manual spike
+    // caught it. This test pins the behavior in CI.
+    use repo_graph_agent::EnrichmentState;
+    use repo_graph_storage::types::GraphNode;
 
-	let dir = tempfile::tempdir().unwrap();
-	let db_path = dir.path().join("notrun.db");
-	let mut storage = StorageConnection::open(&db_path).unwrap();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("notrun.db");
+    let mut storage = StorageConnection::open(&db_path).unwrap();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	// Insert a SYMBOL node so the unresolved_edges
-	// `source_node_uid` foreign key resolves. The visibility
-	// is `"export"` so the trust sample carries a sensible
-	// blast-radius input — not strictly required for this
-	// test but matches realistic data.
-	storage
-		.insert_nodes(&[GraphNode {
-			node_uid: "n1".into(),
-			snapshot_uid: snapshot_uid.clone(),
-			repo_uid: "r1".into(),
-			stable_key: "r1:src/a.ts:caller:SYMBOL".into(),
-			kind: "SYMBOL".into(),
-			subtype: Some("FUNCTION".into()),
-			name: "caller".into(),
-			qualified_name: Some("src/a.ts:caller".into()),
-			file_uid: None,
-			parent_node_uid: None,
-			location: None,
-			signature: None,
-			visibility: Some("export".into()),
-			doc_comment: None,
-			metadata_json: None,
-		}])
-		.unwrap();
+    // Insert a SYMBOL node so the unresolved_edges
+    // `source_node_uid` foreign key resolves. The visibility
+    // is `"export"` so the trust sample carries a sensible
+    // blast-radius input — not strictly required for this
+    // test but matches realistic data.
+    storage
+        .insert_nodes(&[GraphNode {
+            node_uid: "n1".into(),
+            snapshot_uid: snapshot_uid.clone(),
+            repo_uid: "r1".into(),
+            stable_key: "r1:src/a.ts:caller:SYMBOL".into(),
+            kind: "SYMBOL".into(),
+            subtype: Some("FUNCTION".into()),
+            name: "caller".into(),
+            qualified_name: Some("src/a.ts:caller".into()),
+            file_uid: None,
+            parent_node_uid: None,
+            location: None,
+            signature: None,
+            visibility: Some("export".into()),
+            doc_comment: None,
+            metadata_json: None,
+        }])
+        .unwrap();
 
-	// Insert one unresolved edge directly via a parallel
-	// rusqlite connection. The storage crate has a private
-	// helper for this in trust_impl tests; integration tests
-	// do not have access to it, so the SQL is inlined here.
-	// Schema reference: migration_007.rs.
-	//
-	// Critical fields:
-	//   - category = "calls_obj_method_needs_type_info" so
-	//     trust counts it as enrichment-eligible.
-	//   - classification = "unknown" so trust's
-	//     `query_unresolved_edges(classification=Unknown)`
-	//     surfaces it as a sample.
-	//   - metadata_json = NULL so `enrichment_was_run` stays
-	//     false on the compute side, producing
-	//     `enrichment_status = None` with eligible_count = 1.
-	{
-		let raw = rusqlite::Connection::open(&db_path).unwrap();
-		raw.execute(
-			"INSERT INTO unresolved_edges \
+    // Insert one unresolved edge directly via a parallel
+    // rusqlite connection. The storage crate has a private
+    // helper for this in trust_impl tests; integration tests
+    // do not have access to it, so the SQL is inlined here.
+    // Schema reference: migration_007.rs.
+    //
+    // Critical fields:
+    //   - category = "calls_obj_method_needs_type_info" so
+    //     trust counts it as enrichment-eligible.
+    //   - classification = "unknown" so trust's
+    //     `query_unresolved_edges(classification=Unknown)`
+    //     surfaces it as a sample.
+    //   - metadata_json = NULL so `enrichment_was_run` stays
+    //     false on the compute side, producing
+    //     `enrichment_status = None` with eligible_count = 1.
+    {
+        let raw = rusqlite::Connection::open(&db_path).unwrap();
+        raw.execute(
+            "INSERT INTO unresolved_edges \
 			 (edge_uid, snapshot_uid, repo_uid, source_node_uid, \
 			  target_key, type, resolution, extractor, \
 			  category, classification, classifier_version, \
@@ -414,108 +386,97 @@ fn snapshot_with_unresolved_obj_method_call_maps_to_enrichment_state_not_run() {
 			  'target::key', 'CALLS', 'unresolved', 'ts-base:1', \
 			  'calls_obj_method_needs_type_info', 'unknown', 1, \
 			  'no_supporting_signal', '2025-01-01T00:00:00.000Z')",
-			rusqlite::params!["ue1", &snapshot_uid],
-		)
-		.unwrap();
-	}
+            rusqlite::params!["ue1", &snapshot_uid],
+        )
+        .unwrap();
+    }
 
-	// Adapter call.
-	let trust =
-		<StorageConnection as AgentStorageRead>::get_trust_summary(
-			&mut storage,
-			"r1",
-			&snapshot_uid,
-		)
-		.unwrap();
+    // Adapter call.
+    let trust =
+        <StorageConnection as AgentStorageRead>::get_trust_summary(&storage, "r1", &snapshot_uid)
+            .unwrap();
 
-	assert_eq!(
-		trust.enrichment_state,
-		EnrichmentState::NotRun,
-		"snapshot with eligible CallsObjMethodNeedsTypeInfo sample but no \
+    assert_eq!(
+        trust.enrichment_state,
+        EnrichmentState::NotRun,
+        "snapshot with eligible CallsObjMethodNeedsTypeInfo sample but no \
 		 enrichment metadata must map to NotRun. Pre-P2 the adapter could \
 		 not see this case (Option<EnrichmentStatus> alone collapsed it \
 		 with NotApplicable). The fix added `enrichment_eligible_count` to \
 		 the TrustReport so the adapter can disambiguate."
-	);
-	assert_eq!(
-		trust.enrichment_eligible, 1,
-		"the eligible count must be preserved through the adapter so \
+    );
+    assert_eq!(
+        trust.enrichment_eligible, 1,
+        "the eligible count must be preserved through the adapter so \
 		 downstream consumers see the same value the trust layer computed"
-	);
-	assert_eq!(trust.enrichment_enriched, 0);
+    );
+    assert_eq!(trust.enrichment_enriched, 0);
 }
 
 // ── end-to-end orient over real storage ──────────────────────────
 
 #[test]
 fn orient_runs_over_real_storage_connection() {
-	// Prove the full orient pipeline works when driven through
-	// a real StorageConnection, not a fake. This is the single
-	// smoke test that exercises the whole policy ↔ adapter
-	// boundary end-to-end. It intentionally uses an almost-empty
-	// repo to keep the fixture trivial; signal correctness is
-	// covered by the agent crate's own test suite against the
-	// fake.
-	//
-	// ── Expected limit set on an empty snapshot ──
-	//
-	// Limits on this fixture (3 total):
-	//   1. MODULE_DATA_UNAVAILABLE (no module_candidates)
-	//   2. GATE_NOT_CONFIGURED (no requirement declarations)
-	//   3. COMPLEXITY_UNAVAILABLE (no complexity measurements)
-	//
-	// When data exists:
-	//   - MODULE_DATA_UNAVAILABLE suppressed when module_candidates has data
-	//     (Phase 4: MODULE nodes are NOT used as fallback)
-	//   - COMPLEXITY_UNAVAILABLE suppressed when complexity measurements exist
-	//
-	// Dead-code surface is withdrawn — no DEAD_CODE signal or
-	// DEAD_CODE_UNRELIABLE limit. Internal substrate preserved
-	// but not surfaced to orient output.
-	use repo_graph_agent::{orient, Budget, ORIENT_SCHEMA};
+    // Prove the full orient pipeline works when driven through
+    // a real StorageConnection, not a fake. This is the single
+    // smoke test that exercises the whole policy ↔ adapter
+    // boundary end-to-end. It intentionally uses an almost-empty
+    // repo to keep the fixture trivial; signal correctness is
+    // covered by the agent crate's own test suite against the
+    // fake.
+    //
+    // ── Expected limit set on an empty snapshot ──
+    //
+    // Limits on this fixture (3 total):
+    //   1. MODULE_DATA_UNAVAILABLE (no module_candidates)
+    //   2. GATE_NOT_CONFIGURED (no requirement declarations)
+    //   3. COMPLEXITY_UNAVAILABLE (no complexity measurements)
+    //
+    // When data exists:
+    //   - MODULE_DATA_UNAVAILABLE suppressed when module_candidates has data
+    //     (Phase 4: MODULE nodes are NOT used as fallback)
+    //   - COMPLEXITY_UNAVAILABLE suppressed when complexity measurements exist
+    //
+    // Dead-code surface is withdrawn — no DEAD_CODE signal or
+    // DEAD_CODE_UNRELIABLE limit. Internal substrate preserved
+    // but not surfaced to orient output.
+    use repo_graph_agent::{orient, Budget, ORIENT_SCHEMA};
 
-	let (_tmp, mut storage) = open_temp_storage();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    let (_tmp, storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	let result = orient(
-		&mut storage,
-		"r1",
-		None,
-		Budget::Large,
-		"2026-04-15T00:00:00Z",
-	)
-	.unwrap();
-	assert_eq!(result.schema, ORIENT_SCHEMA);
-	assert_eq!(result.repo, "my-repo");
-	assert_eq!(result.snapshot, snapshot_uid);
+    let result = orient(&storage, "r1", None, Budget::Large, "2026-04-15T00:00:00Z").unwrap();
+    assert_eq!(result.schema, ORIENT_SCHEMA);
+    assert_eq!(result.repo, "my-repo");
+    assert_eq!(result.snapshot, snapshot_uid);
 
-	assert_eq!(
-		result.limits.len(),
-		3,
-		"empty snapshot must emit MODULE_DATA_UNAVAILABLE + \
+    assert_eq!(
+        result.limits.len(),
+        3,
+        "empty snapshot must emit MODULE_DATA_UNAVAILABLE + \
 		 GATE_NOT_CONFIGURED + COMPLEXITY_UNAVAILABLE; actual: {:?}",
-		result.limits.iter().map(|l| l.code).collect::<Vec<_>>()
-	);
+        result.limits.iter().map(|l| l.code).collect::<Vec<_>>()
+    );
 
-	// No dead-code vocabulary should appear in limits or signals.
-	for limit in &result.limits {
-		assert!(
-			!limit.code.as_str().contains("DEAD"),
-			"no dead-code limit should appear: {}",
-			limit.code.as_str()
-		);
-	}
-	for signal in &result.signals {
-		assert!(
-			!signal.code().as_str().contains("DEAD"),
-			"no dead-code signal should appear: {}",
-			signal.code().as_str()
-		);
-	}
+    // No dead-code vocabulary should appear in limits or signals.
+    for limit in &result.limits {
+        assert!(
+            !limit.code.as_str().contains("DEAD"),
+            "no dead-code limit should appear: {}",
+            limit.code.as_str()
+        );
+    }
+    for signal in &result.signals {
+        assert!(
+            !signal.code().as_str().contains("DEAD"),
+            "no dead-code signal should appear: {}",
+            signal.code().as_str()
+        );
+    }
 
-	// At minimum MODULE_SUMMARY + SNAPSHOT_INFO fire.
-	assert!(result.signals.len() >= 2);
+    // At minimum MODULE_SUMMARY + SNAPSHOT_INFO fire.
+    assert!(result.signals.len() >= 2);
 }
 
 // ── Characterization: trust reliability axes on empty snapshot ──
@@ -526,846 +487,823 @@ fn orient_runs_over_real_storage_connection() {
 
 #[test]
 fn trust_reliability_axes_on_empty_snapshot() {
-	// Characterization: get_trust_summary on a READY snapshot with
-	// zero files/nodes/edges. Pins the trust crate's behavior for
-	// the empty-data case so check can rely on these values.
-	use repo_graph_agent::{
-		AgentReliabilityLevel, EnrichmentState,
-	};
+    // Characterization: get_trust_summary on a READY snapshot with
+    // zero files/nodes/edges. Pins the trust crate's behavior for
+    // the empty-data case so check can rely on these values.
+    use repo_graph_agent::{AgentReliabilityLevel, EnrichmentState};
 
-	let (_tmp, mut storage) = open_temp_storage();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    let (_tmp, storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	let trust =
-		<StorageConnection as AgentStorageRead>::get_trust_summary(
-			&mut storage,
-			"r1",
-			&snapshot_uid,
-		)
-		.unwrap();
+    let trust =
+        <StorageConnection as AgentStorageRead>::get_trust_summary(&storage, "r1", &snapshot_uid)
+            .unwrap();
 
-	// call_graph_reliability: trust rule returns HIGH when total
-	// calls = 0 (no data to be unreliable about).
-	assert_eq!(
-		trust.call_graph_reliability.level,
-		AgentReliabilityLevel::High,
-		"empty snapshot call_graph_reliability must be High \
+    // call_graph_reliability: trust rule returns HIGH when total
+    // calls = 0 (no data to be unreliable about).
+    assert_eq!(
+        trust.call_graph_reliability.level,
+        AgentReliabilityLevel::High,
+        "empty snapshot call_graph_reliability must be High \
 		 (trust returns HIGH when total=0)"
-	);
+    );
 
-	// dead_code_reliability: trust rule fires
-	// missing_entrypoint_declarations when active_entrypoint_count
-	// = 0, which downgrades dead_code to LOW.
-	assert_eq!(
-		trust.dead_code_reliability.level,
-		AgentReliabilityLevel::Low,
-		"empty snapshot dead_code_reliability must be Low \
+    // dead_code_reliability: trust rule fires
+    // missing_entrypoint_declarations when active_entrypoint_count
+    // = 0, which downgrades dead_code to LOW.
+    assert_eq!(
+        trust.dead_code_reliability.level,
+        AgentReliabilityLevel::Low,
+        "empty snapshot dead_code_reliability must be Low \
 		 (missing_entrypoint_declarations fires when active_entrypoint_count=0)"
-	);
+    );
 
-	// call_resolution_rate: trust defaults to 1.0 when total
-	// calls = 0 (no unresolved data → nothing to penalize).
-	assert!(
-		(trust.call_resolution_rate - 1.0).abs() < f64::EPSILON,
-		"empty snapshot call_resolution_rate must be 1.0 (no-data default); \
+    // call_resolution_rate: trust defaults to 1.0 when total
+    // calls = 0 (no unresolved data → nothing to penalize).
+    assert!(
+        (trust.call_resolution_rate - 1.0).abs() < f64::EPSILON,
+        "empty snapshot call_resolution_rate must be 1.0 (no-data default); \
 		 actual: {}",
-		trust.call_resolution_rate
-	);
+        trust.call_resolution_rate
+    );
 
-	// enrichment_state: already tested separately, but pin it
-	// alongside the reliability axes for completeness.
-	assert_eq!(
-		trust.enrichment_state,
-		EnrichmentState::NotApplicable,
-		"empty snapshot enrichment_state must be NotApplicable"
-	);
+    // enrichment_state: already tested separately, but pin it
+    // alongside the reliability axes for completeness.
+    assert_eq!(
+        trust.enrichment_state,
+        EnrichmentState::NotApplicable,
+        "empty snapshot enrichment_state must be NotApplicable"
+    );
 }
 
 // ── Characterization: trust reliability axes with call data ─────
 
 #[test]
 fn trust_reliability_axes_with_call_data() {
-	// Characterization: get_trust_summary on a snapshot with
-	// resolved CALLS edges AND extraction diagnostics recording
-	// unresolved calls. Pins the non-trivial reliability
-	// computation path.
-	//
-	// The trust crate reads `resolved_calls` from
-	// `count_edges_by_type(snapshot_uid, "CALLS")` (the edges
-	// table) and `unresolved_calls` from
-	// `ExtractionDiagnostics.unresolved_breakdown` (the
-	// `extraction_diagnostics_json` column on snapshots). Both
-	// must be seeded for a non-trivial call_resolution_rate.
-	use repo_graph_agent::AgentReliabilityLevel;
+    // Characterization: get_trust_summary on a snapshot with
+    // resolved CALLS edges AND extraction diagnostics recording
+    // unresolved calls. Pins the non-trivial reliability
+    // computation path.
+    //
+    // The trust crate reads `resolved_calls` from
+    // `count_edges_by_type(snapshot_uid, "CALLS")` (the edges
+    // table) and `unresolved_calls` from
+    // `ExtractionDiagnostics.unresolved_breakdown` (the
+    // `extraction_diagnostics_json` column on snapshots). Both
+    // must be seeded for a non-trivial call_resolution_rate.
+    use repo_graph_agent::AgentReliabilityLevel;
 
-	let dir = tempfile::tempdir().unwrap();
-	let db_path = dir.path().join("trust_calls.db");
-	let mut storage = StorageConnection::open(&db_path).unwrap();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("trust_calls.db");
+    let mut storage = StorageConnection::open(&db_path).unwrap();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	// Insert two SYMBOL nodes so the CALLS edge has valid
-	// source/target references.
-	storage
-		.insert_nodes(&[
-			GraphNode {
-				node_uid: "n1".into(),
-				snapshot_uid: snapshot_uid.clone(),
-				repo_uid: "r1".into(),
-				stable_key: "r1:src/a.ts:caller:SYMBOL".into(),
-				kind: "SYMBOL".into(),
-				subtype: Some("FUNCTION".into()),
-				name: "caller".into(),
-				qualified_name: Some("src/a.ts:caller".into()),
-				file_uid: None,
-				parent_node_uid: None,
-				location: None,
-				signature: None,
-				visibility: Some("export".into()),
-				doc_comment: None,
-				metadata_json: None,
-			},
-			GraphNode {
-				node_uid: "n2".into(),
-				snapshot_uid: snapshot_uid.clone(),
-				repo_uid: "r1".into(),
-				stable_key: "r1:src/b.ts:callee:SYMBOL".into(),
-				kind: "SYMBOL".into(),
-				subtype: Some("FUNCTION".into()),
-				name: "callee".into(),
-				qualified_name: Some("src/b.ts:callee".into()),
-				file_uid: None,
-				parent_node_uid: None,
-				location: None,
-				signature: None,
-				visibility: Some("export".into()),
-				doc_comment: None,
-				metadata_json: None,
-			},
-		])
-		.unwrap();
+    // Insert two SYMBOL nodes so the CALLS edge has valid
+    // source/target references.
+    storage
+        .insert_nodes(&[
+            GraphNode {
+                node_uid: "n1".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:src/a.ts:caller:SYMBOL".into(),
+                kind: "SYMBOL".into(),
+                subtype: Some("FUNCTION".into()),
+                name: "caller".into(),
+                qualified_name: Some("src/a.ts:caller".into()),
+                file_uid: None,
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: Some("export".into()),
+                doc_comment: None,
+                metadata_json: None,
+            },
+            GraphNode {
+                node_uid: "n2".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:src/b.ts:callee:SYMBOL".into(),
+                kind: "SYMBOL".into(),
+                subtype: Some("FUNCTION".into()),
+                name: "callee".into(),
+                qualified_name: Some("src/b.ts:callee".into()),
+                file_uid: None,
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: Some("export".into()),
+                doc_comment: None,
+                metadata_json: None,
+            },
+        ])
+        .unwrap();
 
-	// Insert one resolved CALLS edge. This drives
-	// `resolved_calls = 1` through `count_edges_by_type`.
-	storage
-		.insert_edges(&[GraphEdge {
-			edge_uid: "e1".into(),
-			snapshot_uid: snapshot_uid.clone(),
-			repo_uid: "r1".into(),
-			source_node_uid: "n1".into(),
-			target_node_uid: "n2".into(),
-			edge_type: "CALLS".into(),
-			resolution: "static".into(),
-			extractor: "ts-base:1".into(),
-			location: None,
-			metadata_json: None,
-		}])
-		.unwrap();
+    // Insert one resolved CALLS edge. This drives
+    // `resolved_calls = 1` through `count_edges_by_type`.
+    storage
+        .insert_edges(&[GraphEdge {
+            edge_uid: "e1".into(),
+            snapshot_uid: snapshot_uid.clone(),
+            repo_uid: "r1".into(),
+            source_node_uid: "n1".into(),
+            target_node_uid: "n2".into(),
+            edge_type: "CALLS".into(),
+            resolution: "static".into(),
+            extractor: "ts-base:1".into(),
+            location: None,
+            metadata_json: None,
+        }])
+        .unwrap();
 
-	// Seed extraction diagnostics with 1 unresolved call in a
-	// CALLS-family category. The trust crate reads unresolved
-	// calls from this JSON, not from the unresolved_edges table.
-	{
-		let raw = rusqlite::Connection::open(&db_path).unwrap();
-		let diagnostics_json = serde_json::json!({
-			"diagnostics_version": 1,
-			"edges_total": 2,
-			"unresolved_total": 1,
-			"unresolved_breakdown": {
-				"calls_function_ambiguous_or_missing": 1
-			}
-		});
-		raw.execute(
-			"UPDATE snapshots SET extraction_diagnostics_json = ? \
+    // Seed extraction diagnostics with 1 unresolved call in a
+    // CALLS-family category. The trust crate reads unresolved
+    // calls from this JSON, not from the unresolved_edges table.
+    {
+        let raw = rusqlite::Connection::open(&db_path).unwrap();
+        let diagnostics_json = serde_json::json!({
+            "diagnostics_version": 1,
+            "edges_total": 2,
+            "unresolved_total": 1,
+            "unresolved_breakdown": {
+                "calls_function_ambiguous_or_missing": 1
+            }
+        });
+        raw.execute(
+            "UPDATE snapshots SET extraction_diagnostics_json = ? \
 			 WHERE snapshot_uid = ?",
-			rusqlite::params![diagnostics_json.to_string(), &snapshot_uid],
-		)
-		.unwrap();
-	}
+            rusqlite::params![diagnostics_json.to_string(), &snapshot_uid],
+        )
+        .unwrap();
+    }
 
-	let trust =
-		<StorageConnection as AgentStorageRead>::get_trust_summary(
-			&mut storage,
-			"r1",
-			&snapshot_uid,
-		)
-		.unwrap();
+    let trust =
+        <StorageConnection as AgentStorageRead>::get_trust_summary(&storage, "r1", &snapshot_uid)
+            .unwrap();
 
-	// call_resolution_rate: 1 resolved / (1 resolved + 1
-	// unresolved) = 0.5. Must be between 0 and 1 (not the
-	// empty-default 1.0).
-	assert!(
-		trust.call_resolution_rate > 0.0 && trust.call_resolution_rate < 1.0,
-		"call_resolution_rate with mixed resolved/unresolved must be \
+    // call_resolution_rate: 1 resolved / (1 resolved + 1
+    // unresolved) = 0.5. Must be between 0 and 1 (not the
+    // empty-default 1.0).
+    assert!(
+        trust.call_resolution_rate > 0.0 && trust.call_resolution_rate < 1.0,
+        "call_resolution_rate with mixed resolved/unresolved must be \
 		 between 0 and 1; actual: {}",
-		trust.call_resolution_rate
-	);
-	assert!(
-		(trust.call_resolution_rate - 0.5).abs() < f64::EPSILON,
-		"expected call_resolution_rate = 0.5 (1 resolved, 1 unresolved \
+        trust.call_resolution_rate
+    );
+    assert!(
+        (trust.call_resolution_rate - 0.5).abs() < f64::EPSILON,
+        "expected call_resolution_rate = 0.5 (1 resolved, 1 unresolved \
 		 internal-like); actual: {}",
-		trust.call_resolution_rate
-	);
+        trust.call_resolution_rate
+    );
 
-	// call_graph_reliability: the trust rule uses rate < 0.5 →
-	// LOW, rate <= 0.85 → MEDIUM, rate > 0.85 → HIGH. At exactly
-	// 0.5, the rate is not < 0.5, so it falls into MEDIUM.
-	assert_eq!(
-		trust.call_graph_reliability.level,
-		AgentReliabilityLevel::Medium,
-		"call_graph_reliability at 50% resolution rate must be Medium"
-	);
+    // call_graph_reliability: the trust rule uses rate < 0.5 →
+    // LOW, rate <= 0.85 → MEDIUM, rate > 0.85 → HIGH. At exactly
+    // 0.5, the rate is not < 0.5, so it falls into MEDIUM.
+    assert_eq!(
+        trust.call_graph_reliability.level,
+        AgentReliabilityLevel::Medium,
+        "call_graph_reliability at 50% resolution rate must be Medium"
+    );
 
-	// dead_code_reliability: still no entrypoints → LOW.
-	assert_eq!(
-		trust.dead_code_reliability.level,
-		AgentReliabilityLevel::Low,
-		"dead_code_reliability must still be Low (no entrypoints seeded)"
-	);
+    // dead_code_reliability: still no entrypoints → LOW.
+    assert_eq!(
+        trust.dead_code_reliability.level,
+        AgentReliabilityLevel::Low,
+        "dead_code_reliability must still be Low (no entrypoints seeded)"
+    );
 }
 
 // ── Characterization: stale-files filtering ─────────────────────
 
 #[test]
 fn get_stale_files_returns_only_stale_not_ok() {
-	// Characterization: pin that get_stale_files returns only rows
-	// whose parse_status = 'stale', and that adding an 'ok' file
-	// does not inflate the stale count.
-	let (_tmp, mut storage) = open_temp_storage();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    // Characterization: pin that get_stale_files returns only rows
+    // whose parse_status = 'stale', and that adding an 'ok' file
+    // does not inflate the stale count.
+    let (_tmp, mut storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	// Seed one file with parse_status = 'stale'.
-	storage
-		.upsert_files(&[TrackedFile {
-			file_uid: "f1".into(),
-			repo_uid: "r1".into(),
-			path: "src/stale_file.rs".into(),
-			language: Some("rust".into()),
-			is_test: false,
-			is_generated: false,
-			is_excluded: false,
-		}])
-		.unwrap();
-	storage
-		.upsert_file_versions(&[FileVersion {
-			snapshot_uid: snapshot_uid.clone(),
-			file_uid: "f1".into(),
-			content_hash: "h1".into(),
-			ast_hash: None,
-			extractor: None,
-			parse_status: "stale".into(),
-			size_bytes: Some(10),
-			line_count: Some(2),
-			indexed_at: "2026-04-15T00:00:00Z".into(),
-		}])
-		.unwrap();
+    // Seed one file with parse_status = 'stale'.
+    storage
+        .upsert_files(&[TrackedFile {
+            file_uid: "f1".into(),
+            repo_uid: "r1".into(),
+            path: "src/stale_file.rs".into(),
+            language: Some("rust".into()),
+            is_test: false,
+            is_generated: false,
+            is_excluded: false,
+        }])
+        .unwrap();
+    storage
+        .upsert_file_versions(&[FileVersion {
+            snapshot_uid: snapshot_uid.clone(),
+            file_uid: "f1".into(),
+            content_hash: "h1".into(),
+            ast_hash: None,
+            extractor: None,
+            parse_status: "stale".into(),
+            size_bytes: Some(10),
+            line_count: Some(2),
+            indexed_at: "2026-04-15T00:00:00Z".into(),
+        }])
+        .unwrap();
 
-	// First call: exactly 1 stale file.
-	let stale = <StorageConnection as AgentStorageRead>::get_stale_files(
-		&mut storage,
-		&snapshot_uid,
-	)
-	.unwrap();
-	assert_eq!(
-		stale.len(),
-		1,
-		"must return exactly 1 stale file before adding ok file"
-	);
-	assert_eq!(stale[0].path, "src/stale_file.rs");
+    // First call: exactly 1 stale file.
+    let stale =
+        <StorageConnection as AgentStorageRead>::get_stale_files(&storage, &snapshot_uid).unwrap();
+    assert_eq!(
+        stale.len(),
+        1,
+        "must return exactly 1 stale file before adding ok file"
+    );
+    assert_eq!(stale[0].path, "src/stale_file.rs");
 
-	// Seed a second file with parse_status = 'ok'.
-	storage
-		.upsert_files(&[TrackedFile {
-			file_uid: "f2".into(),
-			repo_uid: "r1".into(),
-			path: "src/ok_file.rs".into(),
-			language: Some("rust".into()),
-			is_test: false,
-			is_generated: false,
-			is_excluded: false,
-		}])
-		.unwrap();
-	storage
-		.upsert_file_versions(&[FileVersion {
-			snapshot_uid: snapshot_uid.clone(),
-			file_uid: "f2".into(),
-			content_hash: "h2".into(),
-			ast_hash: None,
-			extractor: None,
-			parse_status: "ok".into(),
-			size_bytes: Some(20),
-			line_count: Some(5),
-			indexed_at: "2026-04-15T00:00:00Z".into(),
-		}])
-		.unwrap();
+    // Seed a second file with parse_status = 'ok'.
+    storage
+        .upsert_files(&[TrackedFile {
+            file_uid: "f2".into(),
+            repo_uid: "r1".into(),
+            path: "src/ok_file.rs".into(),
+            language: Some("rust".into()),
+            is_test: false,
+            is_generated: false,
+            is_excluded: false,
+        }])
+        .unwrap();
+    storage
+        .upsert_file_versions(&[FileVersion {
+            snapshot_uid: snapshot_uid.clone(),
+            file_uid: "f2".into(),
+            content_hash: "h2".into(),
+            ast_hash: None,
+            extractor: None,
+            parse_status: "ok".into(),
+            size_bytes: Some(20),
+            line_count: Some(5),
+            indexed_at: "2026-04-15T00:00:00Z".into(),
+        }])
+        .unwrap();
 
-	// Second call: still exactly 1 stale file.
-	let stale_after = <StorageConnection as AgentStorageRead>::get_stale_files(
-		&mut storage,
-		&snapshot_uid,
-	)
-	.unwrap();
-	assert_eq!(
-		stale_after.len(),
-		1,
-		"stale count must not increase when an 'ok' file is added; \
+    // Second call: still exactly 1 stale file.
+    let stale_after =
+        <StorageConnection as AgentStorageRead>::get_stale_files(&storage, &snapshot_uid).unwrap();
+    assert_eq!(
+        stale_after.len(),
+        1,
+        "stale count must not increase when an 'ok' file is added; \
 		 actual stale files: {:?}",
-		stale_after.iter().map(|s| &s.path).collect::<Vec<_>>()
-	);
-	assert_eq!(stale_after[0].path, "src/stale_file.rs");
+        stale_after.iter().map(|s| &s.path).collect::<Vec<_>>()
+    );
+    assert_eq!(stale_after[0].path, "src/stale_file.rs");
 }
 
 // ── Explain port methods ────────────────────────────────────────────
 
 #[test]
 fn list_symbols_in_file_returns_ordered_entries() {
-	let (_tmp, mut storage) = open_temp_storage();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    let (_tmp, mut storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	// Seed a file.
-	storage
-		.upsert_files(&[TrackedFile {
-			file_uid: "f1".into(),
-			repo_uid: "r1".into(),
-			path: "src/service.ts".into(),
-			language: Some("typescript".into()),
-			is_test: false,
-			is_generated: false,
-			is_excluded: false,
-		}])
-		.unwrap();
-	storage
-		.upsert_file_versions(&[FileVersion {
-			snapshot_uid: snapshot_uid.clone(),
-			file_uid: "f1".into(),
-			content_hash: "h1".into(),
-			ast_hash: None,
-			extractor: None,
-			parse_status: "ok".into(),
-			size_bytes: Some(100),
-			line_count: Some(20),
-			indexed_at: "2026-04-15T00:00:00Z".into(),
-		}])
-		.unwrap();
+    // Seed a file.
+    storage
+        .upsert_files(&[TrackedFile {
+            file_uid: "f1".into(),
+            repo_uid: "r1".into(),
+            path: "src/service.ts".into(),
+            language: Some("typescript".into()),
+            is_test: false,
+            is_generated: false,
+            is_excluded: false,
+        }])
+        .unwrap();
+    storage
+        .upsert_file_versions(&[FileVersion {
+            snapshot_uid: snapshot_uid.clone(),
+            file_uid: "f1".into(),
+            content_hash: "h1".into(),
+            ast_hash: None,
+            extractor: None,
+            parse_status: "ok".into(),
+            size_bytes: Some(100),
+            line_count: Some(20),
+            indexed_at: "2026-04-15T00:00:00Z".into(),
+        }])
+        .unwrap();
 
-	// Seed two SYMBOL nodes in the file (line 10 and line 5).
-	storage
-		.insert_nodes(&[
-			GraphNode {
-				node_uid: "n1".into(),
-				snapshot_uid: snapshot_uid.clone(),
-				repo_uid: "r1".into(),
-				stable_key: "r1:src/service.ts:beta:SYMBOL".into(),
-				kind: "SYMBOL".into(),
-				subtype: Some("FUNCTION".into()),
-				name: "beta".into(),
-				qualified_name: Some("src/service.ts:beta".into()),
-				file_uid: Some("f1".into()),
-				parent_node_uid: None,
-				location: Some(SourceLocation {
-					line_start: 10,
-					col_start: 0,
-					line_end: 15,
-					col_end: 0,
-				}),
-				signature: None,
-				visibility: Some("export".into()),
-				doc_comment: None,
-				metadata_json: None,
-			},
-			GraphNode {
-				node_uid: "n2".into(),
-				snapshot_uid: snapshot_uid.clone(),
-				repo_uid: "r1".into(),
-				stable_key: "r1:src/service.ts:alpha:SYMBOL".into(),
-				kind: "SYMBOL".into(),
-				subtype: Some("CLASS".into()),
-				name: "alpha".into(),
-				qualified_name: Some("src/service.ts:alpha".into()),
-				file_uid: Some("f1".into()),
-				parent_node_uid: None,
-				location: Some(SourceLocation {
-					line_start: 5,
-					col_start: 0,
-					line_end: 8,
-					col_end: 0,
-				}),
-				signature: None,
-				visibility: Some("export".into()),
-				doc_comment: None,
-				metadata_json: None,
-			},
-		])
-		.unwrap();
+    // Seed two SYMBOL nodes in the file (line 10 and line 5).
+    storage
+        .insert_nodes(&[
+            GraphNode {
+                node_uid: "n1".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:src/service.ts:beta:SYMBOL".into(),
+                kind: "SYMBOL".into(),
+                subtype: Some("FUNCTION".into()),
+                name: "beta".into(),
+                qualified_name: Some("src/service.ts:beta".into()),
+                file_uid: Some("f1".into()),
+                parent_node_uid: None,
+                location: Some(SourceLocation {
+                    line_start: 10,
+                    col_start: 0,
+                    line_end: 15,
+                    col_end: 0,
+                }),
+                signature: None,
+                visibility: Some("export".into()),
+                doc_comment: None,
+                metadata_json: None,
+            },
+            GraphNode {
+                node_uid: "n2".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:src/service.ts:alpha:SYMBOL".into(),
+                kind: "SYMBOL".into(),
+                subtype: Some("CLASS".into()),
+                name: "alpha".into(),
+                qualified_name: Some("src/service.ts:alpha".into()),
+                file_uid: Some("f1".into()),
+                parent_node_uid: None,
+                location: Some(SourceLocation {
+                    line_start: 5,
+                    col_start: 0,
+                    line_end: 8,
+                    col_end: 0,
+                }),
+                signature: None,
+                visibility: Some("export".into()),
+                doc_comment: None,
+                metadata_json: None,
+            },
+        ])
+        .unwrap();
 
-	let symbols =
-		<StorageConnection as AgentStorageRead>::list_symbols_in_file(
-			&mut storage,
-			&snapshot_uid,
-			"src/service.ts",
-		)
-		.unwrap();
+    let symbols = <StorageConnection as AgentStorageRead>::list_symbols_in_file(
+        &storage,
+        &snapshot_uid,
+        "src/service.ts",
+    )
+    .unwrap();
 
-	assert_eq!(symbols.len(), 2);
-	// Ordered by line_start ASC: alpha (5) before beta (10).
-	assert_eq!(symbols[0].name, "alpha");
-	assert_eq!(symbols[0].subtype.as_deref(), Some("CLASS"));
-	assert_eq!(symbols[0].line_start, Some(5));
-	assert_eq!(symbols[1].name, "beta");
-	assert_eq!(symbols[1].subtype.as_deref(), Some("FUNCTION"));
-	assert_eq!(symbols[1].line_start, Some(10));
+    assert_eq!(symbols.len(), 2);
+    // Ordered by line_start ASC: alpha (5) before beta (10).
+    assert_eq!(symbols[0].name, "alpha");
+    assert_eq!(symbols[0].subtype.as_deref(), Some("CLASS"));
+    assert_eq!(symbols[0].line_start, Some(5));
+    assert_eq!(symbols[1].name, "beta");
+    assert_eq!(symbols[1].subtype.as_deref(), Some("FUNCTION"));
+    assert_eq!(symbols[1].line_start, Some(10));
 }
 
 #[test]
 fn list_files_in_path_returns_files_under_prefix() {
-	let (_tmp, mut storage) = open_temp_storage();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    let (_tmp, mut storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	// Seed two files under src/core and one under src/adapters.
-	storage
-		.upsert_files(&[
-			TrackedFile {
-				file_uid: "f1".into(),
-				repo_uid: "r1".into(),
-				path: "src/core/model.ts".into(),
-				language: Some("typescript".into()),
-				is_test: false,
-				is_generated: false,
-				is_excluded: false,
-			},
-			TrackedFile {
-				file_uid: "f2".into(),
-				repo_uid: "r1".into(),
-				path: "src/core/service.ts".into(),
-				language: Some("typescript".into()),
-				is_test: false,
-				is_generated: false,
-				is_excluded: false,
-			},
-			TrackedFile {
-				file_uid: "f3".into(),
-				repo_uid: "r1".into(),
-				path: "src/adapters/storage.ts".into(),
-				language: Some("typescript".into()),
-				is_test: false,
-				is_generated: false,
-				is_excluded: false,
-			},
-		])
-		.unwrap();
-	storage
-		.upsert_file_versions(&[
-			FileVersion {
-				snapshot_uid: snapshot_uid.clone(),
-				file_uid: "f1".into(),
-				content_hash: "h1".into(),
-				ast_hash: None,
-				extractor: None,
-				parse_status: "ok".into(),
-				size_bytes: Some(100),
-				line_count: Some(10),
-				indexed_at: "2026-04-15T00:00:00Z".into(),
-			},
-			FileVersion {
-				snapshot_uid: snapshot_uid.clone(),
-				file_uid: "f2".into(),
-				content_hash: "h2".into(),
-				ast_hash: None,
-				extractor: None,
-				parse_status: "ok".into(),
-				size_bytes: Some(200),
-				line_count: Some(20),
-				indexed_at: "2026-04-15T00:00:00Z".into(),
-			},
-			FileVersion {
-				snapshot_uid: snapshot_uid.clone(),
-				file_uid: "f3".into(),
-				content_hash: "h3".into(),
-				ast_hash: None,
-				extractor: None,
-				parse_status: "ok".into(),
-				size_bytes: Some(50),
-				line_count: Some(5),
-				indexed_at: "2026-04-15T00:00:00Z".into(),
-			},
-		])
-		.unwrap();
+    // Seed two files under src/core and one under src/adapters.
+    storage
+        .upsert_files(&[
+            TrackedFile {
+                file_uid: "f1".into(),
+                repo_uid: "r1".into(),
+                path: "src/core/model.ts".into(),
+                language: Some("typescript".into()),
+                is_test: false,
+                is_generated: false,
+                is_excluded: false,
+            },
+            TrackedFile {
+                file_uid: "f2".into(),
+                repo_uid: "r1".into(),
+                path: "src/core/service.ts".into(),
+                language: Some("typescript".into()),
+                is_test: false,
+                is_generated: false,
+                is_excluded: false,
+            },
+            TrackedFile {
+                file_uid: "f3".into(),
+                repo_uid: "r1".into(),
+                path: "src/adapters/storage.ts".into(),
+                language: Some("typescript".into()),
+                is_test: false,
+                is_generated: false,
+                is_excluded: false,
+            },
+        ])
+        .unwrap();
+    storage
+        .upsert_file_versions(&[
+            FileVersion {
+                snapshot_uid: snapshot_uid.clone(),
+                file_uid: "f1".into(),
+                content_hash: "h1".into(),
+                ast_hash: None,
+                extractor: None,
+                parse_status: "ok".into(),
+                size_bytes: Some(100),
+                line_count: Some(10),
+                indexed_at: "2026-04-15T00:00:00Z".into(),
+            },
+            FileVersion {
+                snapshot_uid: snapshot_uid.clone(),
+                file_uid: "f2".into(),
+                content_hash: "h2".into(),
+                ast_hash: None,
+                extractor: None,
+                parse_status: "ok".into(),
+                size_bytes: Some(200),
+                line_count: Some(20),
+                indexed_at: "2026-04-15T00:00:00Z".into(),
+            },
+            FileVersion {
+                snapshot_uid: snapshot_uid.clone(),
+                file_uid: "f3".into(),
+                content_hash: "h3".into(),
+                ast_hash: None,
+                extractor: None,
+                parse_status: "ok".into(),
+                size_bytes: Some(50),
+                line_count: Some(5),
+                indexed_at: "2026-04-15T00:00:00Z".into(),
+            },
+        ])
+        .unwrap();
 
-	let files =
-		<StorageConnection as AgentStorageRead>::list_files_in_path(
-			&mut storage,
-			&snapshot_uid,
-			"src/core",
-		)
-		.unwrap();
+    let files = <StorageConnection as AgentStorageRead>::list_files_in_path(
+        &storage,
+        &snapshot_uid,
+        "src/core",
+    )
+    .unwrap();
 
-	assert_eq!(files.len(), 2, "only files under src/core");
-	// Ordered by path ASC.
-	assert_eq!(files[0].path, "src/core/model.ts");
-	assert_eq!(files[1].path, "src/core/service.ts");
-	// symbol_count is 0 since we did not seed nodes.
-	assert_eq!(files[0].symbol_count, 0);
-	assert!(!files[0].is_test);
+    assert_eq!(files.len(), 2, "only files under src/core");
+    // Ordered by path ASC.
+    assert_eq!(files[0].path, "src/core/model.ts");
+    assert_eq!(files[1].path, "src/core/service.ts");
+    // symbol_count is 0 since we did not seed nodes.
+    assert_eq!(files[0].symbol_count, 0);
+    assert!(!files[0].is_test);
 }
 
 #[test]
 fn find_file_imports_returns_distinct_targets() {
-	let (_tmp, mut storage) = open_temp_storage();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    let (_tmp, mut storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	// Seed two files.
-	storage
-		.upsert_files(&[
-			TrackedFile {
-				file_uid: "f1".into(),
-				repo_uid: "r1".into(),
-				path: "src/a.ts".into(),
-				language: Some("typescript".into()),
-				is_test: false,
-				is_generated: false,
-				is_excluded: false,
-			},
-			TrackedFile {
-				file_uid: "f2".into(),
-				repo_uid: "r1".into(),
-				path: "src/b.ts".into(),
-				language: Some("typescript".into()),
-				is_test: false,
-				is_generated: false,
-				is_excluded: false,
-			},
-		])
-		.unwrap();
-	storage
-		.upsert_file_versions(&[
-			FileVersion {
-				snapshot_uid: snapshot_uid.clone(),
-				file_uid: "f1".into(),
-				content_hash: "h1".into(),
-				ast_hash: None,
-				extractor: None,
-				parse_status: "ok".into(),
-				size_bytes: Some(10),
-				line_count: Some(2),
-				indexed_at: "2026-04-15T00:00:00Z".into(),
-			},
-			FileVersion {
-				snapshot_uid: snapshot_uid.clone(),
-				file_uid: "f2".into(),
-				content_hash: "h2".into(),
-				ast_hash: None,
-				extractor: None,
-				parse_status: "ok".into(),
-				size_bytes: Some(10),
-				line_count: Some(2),
-				indexed_at: "2026-04-15T00:00:00Z".into(),
-			},
-		])
-		.unwrap();
+    // Seed two files.
+    storage
+        .upsert_files(&[
+            TrackedFile {
+                file_uid: "f1".into(),
+                repo_uid: "r1".into(),
+                path: "src/a.ts".into(),
+                language: Some("typescript".into()),
+                is_test: false,
+                is_generated: false,
+                is_excluded: false,
+            },
+            TrackedFile {
+                file_uid: "f2".into(),
+                repo_uid: "r1".into(),
+                path: "src/b.ts".into(),
+                language: Some("typescript".into()),
+                is_test: false,
+                is_generated: false,
+                is_excluded: false,
+            },
+        ])
+        .unwrap();
+    storage
+        .upsert_file_versions(&[
+            FileVersion {
+                snapshot_uid: snapshot_uid.clone(),
+                file_uid: "f1".into(),
+                content_hash: "h1".into(),
+                ast_hash: None,
+                extractor: None,
+                parse_status: "ok".into(),
+                size_bytes: Some(10),
+                line_count: Some(2),
+                indexed_at: "2026-04-15T00:00:00Z".into(),
+            },
+            FileVersion {
+                snapshot_uid: snapshot_uid.clone(),
+                file_uid: "f2".into(),
+                content_hash: "h2".into(),
+                ast_hash: None,
+                extractor: None,
+                parse_status: "ok".into(),
+                size_bytes: Some(10),
+                line_count: Some(2),
+                indexed_at: "2026-04-15T00:00:00Z".into(),
+            },
+        ])
+        .unwrap();
 
-	// Seed nodes in both files.
-	storage
-		.insert_nodes(&[
-			GraphNode {
-				node_uid: "n1".into(),
-				snapshot_uid: snapshot_uid.clone(),
-				repo_uid: "r1".into(),
-				stable_key: "r1:src/a.ts:foo:SYMBOL".into(),
-				kind: "SYMBOL".into(),
-				subtype: Some("FUNCTION".into()),
-				name: "foo".into(),
-				qualified_name: None,
-				file_uid: Some("f1".into()),
-				parent_node_uid: None,
-				location: None,
-				signature: None,
-				visibility: None,
-				doc_comment: None,
-				metadata_json: None,
-			},
-			GraphNode {
-				node_uid: "n2".into(),
-				snapshot_uid: snapshot_uid.clone(),
-				repo_uid: "r1".into(),
-				stable_key: "r1:src/b.ts:bar:SYMBOL".into(),
-				kind: "SYMBOL".into(),
-				subtype: Some("FUNCTION".into()),
-				name: "bar".into(),
-				qualified_name: None,
-				file_uid: Some("f2".into()),
-				parent_node_uid: None,
-				location: None,
-				signature: None,
-				visibility: None,
-				doc_comment: None,
-				metadata_json: None,
-			},
-			// Second node in f1 to create a duplicate import target.
-			GraphNode {
-				node_uid: "n3".into(),
-				snapshot_uid: snapshot_uid.clone(),
-				repo_uid: "r1".into(),
-				stable_key: "r1:src/a.ts:baz:SYMBOL".into(),
-				kind: "SYMBOL".into(),
-				subtype: Some("FUNCTION".into()),
-				name: "baz".into(),
-				qualified_name: None,
-				file_uid: Some("f1".into()),
-				parent_node_uid: None,
-				location: None,
-				signature: None,
-				visibility: None,
-				doc_comment: None,
-				metadata_json: None,
-			},
-		])
-		.unwrap();
+    // Seed nodes in both files.
+    storage
+        .insert_nodes(&[
+            GraphNode {
+                node_uid: "n1".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:src/a.ts:foo:SYMBOL".into(),
+                kind: "SYMBOL".into(),
+                subtype: Some("FUNCTION".into()),
+                name: "foo".into(),
+                qualified_name: None,
+                file_uid: Some("f1".into()),
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            },
+            GraphNode {
+                node_uid: "n2".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:src/b.ts:bar:SYMBOL".into(),
+                kind: "SYMBOL".into(),
+                subtype: Some("FUNCTION".into()),
+                name: "bar".into(),
+                qualified_name: None,
+                file_uid: Some("f2".into()),
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            },
+            // Second node in f1 to create a duplicate import target.
+            GraphNode {
+                node_uid: "n3".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:src/a.ts:baz:SYMBOL".into(),
+                kind: "SYMBOL".into(),
+                subtype: Some("FUNCTION".into()),
+                name: "baz".into(),
+                qualified_name: None,
+                file_uid: Some("f1".into()),
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            },
+        ])
+        .unwrap();
 
-	// Two IMPORTS edges from a.ts nodes -> b.ts node.
-	storage
-		.insert_edges(&[
-			GraphEdge {
-				edge_uid: "e1".into(),
-				snapshot_uid: snapshot_uid.clone(),
-				repo_uid: "r1".into(),
-				source_node_uid: "n1".into(),
-				target_node_uid: "n2".into(),
-				edge_type: "IMPORTS".into(),
-				resolution: "static".into(),
-				extractor: "ts-base:1".into(),
-				location: None,
-				metadata_json: None,
-			},
-			GraphEdge {
-				edge_uid: "e2".into(),
-				snapshot_uid: snapshot_uid.clone(),
-				repo_uid: "r1".into(),
-				source_node_uid: "n3".into(),
-				target_node_uid: "n2".into(),
-				edge_type: "IMPORTS".into(),
-				resolution: "static".into(),
-				extractor: "ts-base:1".into(),
-				location: None,
-				metadata_json: None,
-			},
-		])
-		.unwrap();
+    // Two IMPORTS edges from a.ts nodes -> b.ts node.
+    storage
+        .insert_edges(&[
+            GraphEdge {
+                edge_uid: "e1".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                source_node_uid: "n1".into(),
+                target_node_uid: "n2".into(),
+                edge_type: "IMPORTS".into(),
+                resolution: "static".into(),
+                extractor: "ts-base:1".into(),
+                location: None,
+                metadata_json: None,
+            },
+            GraphEdge {
+                edge_uid: "e2".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                source_node_uid: "n3".into(),
+                target_node_uid: "n2".into(),
+                edge_type: "IMPORTS".into(),
+                resolution: "static".into(),
+                extractor: "ts-base:1".into(),
+                location: None,
+                metadata_json: None,
+            },
+        ])
+        .unwrap();
 
-	let imports =
-		<StorageConnection as AgentStorageRead>::find_file_imports(
-			&mut storage,
-			&snapshot_uid,
-			"src/a.ts",
-		)
-		.unwrap();
+    let imports = <StorageConnection as AgentStorageRead>::find_file_imports(
+        &storage,
+        &snapshot_uid,
+        "src/a.ts",
+    )
+    .unwrap();
 
-	// Two edges but they both target the same file → 1 distinct result.
-	assert_eq!(imports.len(), 1, "DISTINCT must deduplicate same target file");
-	assert_eq!(imports[0].target_file, "src/b.ts");
+    // Two edges but they both target the same file → 1 distinct result.
+    assert_eq!(
+        imports.len(),
+        1,
+        "DISTINCT must deduplicate same target file"
+    );
+    assert_eq!(imports[0].target_file, "src/b.ts");
 }
 
 // ── get_module_summary ───────────────────────────────────────────
 
 #[test]
 fn get_module_summary_returns_none_when_no_candidates() {
-	// Empty module_candidates table → None (no fallback after Phase 4).
-	let (_tmp, mut storage) = open_temp_storage();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    // Empty module_candidates table → None (no fallback after Phase 4).
+    let (_tmp, storage) = open_temp_storage();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	let summary = <StorageConnection as AgentStorageRead>::get_module_summary(
-		&mut storage,
-		&snapshot_uid,
-	)
-	.unwrap();
+    let summary =
+        <StorageConnection as AgentStorageRead>::get_module_summary(&storage, &snapshot_uid)
+            .unwrap();
 
-	assert!(
-		summary.is_none(),
-		"get_module_summary must return None when module_candidates is empty"
-	);
+    assert!(
+        summary.is_none(),
+        "get_module_summary must return None when module_candidates is empty"
+    );
 }
 
 #[test]
 fn get_module_summary_returns_counts_grouped_by_kind() {
-	// Seed module_candidates with different kinds → returns grouped counts.
-	let dir = tempfile::tempdir().unwrap();
-	let db_path = dir.path().join("module_summary.db");
-	let mut storage = StorageConnection::open(&db_path).unwrap();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    // Seed module_candidates with different kinds → returns grouped counts.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("module_summary.db");
+    let storage = StorageConnection::open(&db_path).unwrap();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	// Insert module candidates with different kinds directly via SQL.
-	{
-		let raw = rusqlite::Connection::open(&db_path).unwrap();
-		raw.execute(
-			"INSERT INTO module_candidates \
+    // Insert module candidates with different kinds directly via SQL.
+    {
+        let raw = rusqlite::Connection::open(&db_path).unwrap();
+        raw.execute(
+            "INSERT INTO module_candidates \
 			 (module_candidate_uid, snapshot_uid, repo_uid, module_key, \
 			  module_kind, canonical_root_path, confidence, display_name) \
 			 VALUES (?, ?, 'r1', 'npm:@test/core', 'declared', 'packages/core', 1.0, '@test/core')",
-			rusqlite::params!["mc1", &snapshot_uid],
-		)
-		.unwrap();
-		raw.execute(
-			"INSERT INTO module_candidates \
+            rusqlite::params!["mc1", &snapshot_uid],
+        )
+        .unwrap();
+        raw.execute(
+            "INSERT INTO module_candidates \
 			 (module_candidate_uid, snapshot_uid, repo_uid, module_key, \
 			  module_kind, canonical_root_path, confidence, display_name) \
 			 VALUES (?, ?, 'r1', 'npm:@test/utils', 'declared', 'packages/utils', 1.0, '@test/utils')",
-			rusqlite::params!["mc2", &snapshot_uid],
-		)
-		.unwrap();
-		raw.execute(
-			"INSERT INTO module_candidates \
+            rusqlite::params!["mc2", &snapshot_uid],
+        )
+        .unwrap();
+        raw.execute(
+            "INSERT INTO module_candidates \
 			 (module_candidate_uid, snapshot_uid, repo_uid, module_key, \
 			  module_kind, canonical_root_path, confidence, display_name) \
 			 VALUES (?, ?, 'r1', 'op:cli', 'operational', 'apps/cli', 1.0, 'cli')",
-			rusqlite::params!["mc3", &snapshot_uid],
-		)
-		.unwrap();
-		raw.execute(
-			"INSERT INTO module_candidates \
+            rusqlite::params!["mc3", &snapshot_uid],
+        )
+        .unwrap();
+        raw.execute(
+            "INSERT INTO module_candidates \
 			 (module_candidate_uid, snapshot_uid, repo_uid, module_key, \
 			  module_kind, canonical_root_path, confidence, display_name) \
 			 VALUES (?, ?, 'r1', 'inf:vendor', 'inferred', 'vendor', 0.8, NULL)",
-			rusqlite::params!["mc4", &snapshot_uid],
-		)
-		.unwrap();
-	}
+            rusqlite::params!["mc4", &snapshot_uid],
+        )
+        .unwrap();
+    }
 
-	let summary = <StorageConnection as AgentStorageRead>::get_module_summary(
-		&mut storage,
-		&snapshot_uid,
-	)
-	.unwrap();
+    let summary =
+        <StorageConnection as AgentStorageRead>::get_module_summary(&storage, &snapshot_uid)
+            .unwrap();
 
-	let summary = summary.expect("get_module_summary must return Some when candidates exist");
-	assert_eq!(summary.discovered_module_count, 4, "total module count");
-	assert_eq!(summary.declared_count, 2, "declared module count");
-	assert_eq!(summary.operational_count, 1, "operational module count");
-	assert_eq!(summary.inferred_count, 1, "inferred module count");
+    let summary = summary.expect("get_module_summary must return Some when candidates exist");
+    assert_eq!(summary.discovered_module_count, 4, "total module count");
+    assert_eq!(summary.declared_count, 2, "declared module count");
+    assert_eq!(summary.operational_count, 1, "operational module count");
+    assert_eq!(summary.inferred_count, 1, "inferred module count");
 }
 
 #[test]
 fn get_module_summary_treats_directory_kind_as_inferred() {
-	// Inferred modules have module_kind = "directory" or "inferred".
-	// Both should be counted in the inferred_count.
-	let dir = tempfile::tempdir().unwrap();
-	let db_path = dir.path().join("module_summary_dir.db");
-	let mut storage = StorageConnection::open(&db_path).unwrap();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    // Inferred modules have module_kind = "directory" or "inferred".
+    // Both should be counted in the inferred_count.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("module_summary_dir.db");
+    let storage = StorageConnection::open(&db_path).unwrap();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	{
-		let raw = rusqlite::Connection::open(&db_path).unwrap();
-		raw.execute(
-			"INSERT INTO module_candidates \
+    {
+        let raw = rusqlite::Connection::open(&db_path).unwrap();
+        raw.execute(
+            "INSERT INTO module_candidates \
 			 (module_candidate_uid, snapshot_uid, repo_uid, module_key, \
 			  module_kind, canonical_root_path, confidence, display_name) \
 			 VALUES (?, ?, 'r1', 'r1:src:MODULE', 'directory', 'src', 1.0, 'src')",
-			rusqlite::params!["mc1", &snapshot_uid],
-		)
-		.unwrap();
-	}
+            rusqlite::params!["mc1", &snapshot_uid],
+        )
+        .unwrap();
+    }
 
-	let summary = <StorageConnection as AgentStorageRead>::get_module_summary(
-		&mut storage,
-		&snapshot_uid,
-	)
-	.unwrap();
+    let summary =
+        <StorageConnection as AgentStorageRead>::get_module_summary(&storage, &snapshot_uid)
+            .unwrap();
 
-	let summary = summary.expect("get_module_summary must return Some");
-	assert_eq!(summary.discovered_module_count, 1);
-	assert_eq!(summary.declared_count, 0);
-	assert_eq!(summary.operational_count, 0);
-	assert_eq!(summary.inferred_count, 1, "directory kind maps to inferred");
+    let summary = summary.expect("get_module_summary must return Some");
+    assert_eq!(summary.discovered_module_count, 1);
+    assert_eq!(summary.declared_count, 0);
+    assert_eq!(summary.operational_count, 0);
+    assert_eq!(summary.inferred_count, 1, "directory kind maps to inferred");
 }
 
 #[test]
 fn get_module_summary_no_fallback_after_phase_4() {
-	// Phase 4 (2026-05-10): MODULE-node fallback removed.
-	// When module_candidates is empty, get_module_summary returns None
-	// even if MODULE nodes exist. This surfaces repos that need module
-	// detection configured rather than silently providing degraded data.
-	use repo_graph_storage::types::GraphNode;
+    // Phase 4 (2026-05-10): MODULE-node fallback removed.
+    // When module_candidates is empty, get_module_summary returns None
+    // even if MODULE nodes exist. This surfaces repos that need module
+    // detection configured rather than silently providing degraded data.
+    use repo_graph_storage::types::GraphNode;
 
-	let dir = tempfile::tempdir().unwrap();
-	let db_path = dir.path().join("module_no_fallback.db");
-	let mut storage = StorageConnection::open(&db_path).unwrap();
-	insert_repo(&storage, "r1", "my-repo");
-	let snapshot_uid = create_ready_snapshot(&storage, "r1");
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("module_no_fallback.db");
+    let mut storage = StorageConnection::open(&db_path).unwrap();
+    insert_repo(&storage, "r1", "my-repo");
+    let snapshot_uid = create_ready_snapshot(&storage, "r1");
 
-	// Insert MODULE nodes directly (legacy Rust indexer path).
-	// These are NOT in module_candidates, only in nodes table.
-	storage
-		.insert_nodes(&[
-			GraphNode {
-				node_uid: "mod1".into(),
-				snapshot_uid: snapshot_uid.clone(),
-				repo_uid: "r1".into(),
-				stable_key: "r1:src:MODULE".into(),
-				kind: "MODULE".into(),
-				subtype: None,
-				name: "src".into(),
-				qualified_name: Some("src".into()),
-				file_uid: None,
-				parent_node_uid: None,
-				location: None,
-				signature: None,
-				visibility: None,
-				doc_comment: None,
-				metadata_json: None,
-			},
-			GraphNode {
-				node_uid: "mod2".into(),
-				snapshot_uid: snapshot_uid.clone(),
-				repo_uid: "r1".into(),
-				stable_key: "r1:src/core:MODULE".into(),
-				kind: "MODULE".into(),
-				subtype: None,
-				name: "core".into(),
-				qualified_name: Some("src/core".into()),
-				file_uid: None,
-				parent_node_uid: None,
-				location: None,
-				signature: None,
-				visibility: None,
-				doc_comment: None,
-				metadata_json: None,
-			},
-			GraphNode {
-				node_uid: "mod3".into(),
-				snapshot_uid: snapshot_uid.clone(),
-				repo_uid: "r1".into(),
-				stable_key: "r1:src/adapters:MODULE".into(),
-				kind: "MODULE".into(),
-				subtype: None,
-				name: "adapters".into(),
-				qualified_name: Some("src/adapters".into()),
-				file_uid: None,
-				parent_node_uid: None,
-				location: None,
-				signature: None,
-				visibility: None,
-				doc_comment: None,
-				metadata_json: None,
-			},
-		])
-		.unwrap();
+    // Insert MODULE nodes directly (legacy Rust indexer path).
+    // These are NOT in module_candidates, only in nodes table.
+    storage
+        .insert_nodes(&[
+            GraphNode {
+                node_uid: "mod1".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:src:MODULE".into(),
+                kind: "MODULE".into(),
+                subtype: None,
+                name: "src".into(),
+                qualified_name: Some("src".into()),
+                file_uid: None,
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            },
+            GraphNode {
+                node_uid: "mod2".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:src/core:MODULE".into(),
+                kind: "MODULE".into(),
+                subtype: None,
+                name: "core".into(),
+                qualified_name: Some("src/core".into()),
+                file_uid: None,
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            },
+            GraphNode {
+                node_uid: "mod3".into(),
+                snapshot_uid: snapshot_uid.clone(),
+                repo_uid: "r1".into(),
+                stable_key: "r1:src/adapters:MODULE".into(),
+                kind: "MODULE".into(),
+                subtype: None,
+                name: "adapters".into(),
+                qualified_name: Some("src/adapters".into()),
+                file_uid: None,
+                parent_node_uid: None,
+                location: None,
+                signature: None,
+                visibility: None,
+                doc_comment: None,
+                metadata_json: None,
+            },
+        ])
+        .unwrap();
 
-	// module_candidates is empty, MODULE nodes exist but are NOT used.
-	let summary = <StorageConnection as AgentStorageRead>::get_module_summary(
-		&mut storage,
-		&snapshot_uid,
-	)
-	.unwrap();
+    // module_candidates is empty, MODULE nodes exist but are NOT used.
+    let summary =
+        <StorageConnection as AgentStorageRead>::get_module_summary(&storage, &snapshot_uid)
+            .unwrap();
 
-	assert!(
-		summary.is_none(),
-		"Phase 4: get_module_summary must return None when module_candidates \
+    assert!(
+        summary.is_none(),
+        "Phase 4: get_module_summary must return None when module_candidates \
 		 is empty, even if MODULE nodes exist. No fallback."
-	);
+    );
 }

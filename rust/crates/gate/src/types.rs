@@ -33,9 +33,9 @@ use serde::Serialize;
 /// use `PartialEq` and accept the NaN semantics.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GateRequirement {
-	pub req_id: String,
-	pub version: i64,
-	pub obligations: Vec<GateObligation>,
+    pub req_id: String,
+    pub version: i64,
+    pub obligations: Vec<GateObligation>,
 }
 
 /// One verification obligation attached to a requirement.
@@ -47,12 +47,12 @@ pub struct GateRequirement {
 /// numeric-comparison parameters.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GateObligation {
-	pub obligation_id: String,
-	pub obligation: String,
-	pub method: String,
-	pub target: Option<String>,
-	pub threshold: Option<f64>,
-	pub operator: Option<String>,
+    pub obligation_id: String,
+    pub obligation: String,
+    pub method: String,
+    pub target: Option<String>,
+    pub threshold: Option<f64>,
+    pub operator: Option<String>,
 }
 
 /// One boundary declaration attached to a source module. The
@@ -60,17 +60,17 @@ pub struct GateObligation {
 /// `forbids`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateBoundaryDeclaration {
-	pub boundary_module: String,
-	pub forbids: String,
-	pub reason: Option<String>,
+    pub boundary_module: String,
+    pub forbids: String,
+    pub reason: Option<String>,
 }
 
 /// One IMPORTS edge between file-path prefixes. Used as
 /// evidence for the arch_violations gate method.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateImportEdge {
-	pub source_file: String,
-	pub target_file: String,
+    pub source_file: String,
+    pub target_file: String,
 }
 
 /// One measurement row from the measurements table. Gate reads
@@ -85,8 +85,8 @@ pub struct GateImportEdge {
 /// error out over a single bad row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateMeasurement {
-	pub target_stable_key: String,
-	pub value_json: String,
+    pub target_stable_key: String,
+    pub value_json: String,
 }
 
 /// One inference row. Gate reads `hotspot_score` inferences
@@ -94,8 +94,8 @@ pub struct GateMeasurement {
 /// `normalized_score` field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateInference {
-	pub target_stable_key: String,
-	pub value_json: String,
+    pub target_stable_key: String,
+    pub value_json: String,
 }
 
 /// Evaluated module boundary violations evidence (RS-MG-8).
@@ -110,11 +110,11 @@ pub struct GateInference {
 /// referencing modules that no longer exist in the snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GateModuleViolationEvidence {
-	/// Total count of discovered-module boundary violations.
-	/// PASS if 0, FAIL if > 0.
-	pub violations_count: usize,
-	/// Count of stale boundary declarations (informational).
-	pub stale_declarations_count: usize,
+    /// Total count of discovered-module boundary violations.
+    /// PASS if 0, FAIL if > 0.
+    pub violations_count: usize,
+    /// Count of stale boundary declarations (informational).
+    pub stale_declarations_count: usize,
 }
 
 /// One active waiver matching a specific
@@ -122,13 +122,13 @@ pub struct GateModuleViolationEvidence {
 /// waiver wins at the overlay step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateWaiver {
-	pub waiver_uid: String,
-	pub reason: String,
-	pub created_at: String,
-	pub created_by: Option<String>,
-	pub expires_at: Option<String>,
-	pub rationale_category: Option<String>,
-	pub policy_basis: Option<String>,
+    pub waiver_uid: String,
+    pub reason: String,
+    pub created_at: String,
+    pub created_by: Option<String>,
+    pub expires_at: Option<String>,
+    pub rationale_category: Option<String>,
+    pub policy_basis: Option<String>,
 }
 
 // ── Output types ─────────────────────────────────────────────────
@@ -142,21 +142,21 @@ pub struct GateWaiver {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[allow(non_camel_case_types)]
 pub enum Verdict {
-	PASS,
-	FAIL,
-	MISSING_EVIDENCE,
-	UNSUPPORTED,
+    PASS,
+    FAIL,
+    MISSING_EVIDENCE,
+    UNSUPPORTED,
 }
 
 impl std::fmt::Display for Verdict {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			Self::PASS => write!(f, "PASS"),
-			Self::FAIL => write!(f, "FAIL"),
-			Self::MISSING_EVIDENCE => write!(f, "MISSING_EVIDENCE"),
-			Self::UNSUPPORTED => write!(f, "UNSUPPORTED"),
-		}
-	}
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PASS => write!(f, "PASS"),
+            Self::FAIL => write!(f, "FAIL"),
+            Self::MISSING_EVIDENCE => write!(f, "MISSING_EVIDENCE"),
+            Self::UNSUPPORTED => write!(f, "UNSUPPORTED"),
+        }
+    }
 }
 
 /// Five-state effective verdict used at the gate boundary.
@@ -167,35 +167,35 @@ impl std::fmt::Display for Verdict {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[allow(non_camel_case_types)]
 pub enum EffectiveVerdict {
-	PASS,
-	FAIL,
-	MISSING_EVIDENCE,
-	UNSUPPORTED,
-	WAIVED,
+    PASS,
+    FAIL,
+    MISSING_EVIDENCE,
+    UNSUPPORTED,
+    WAIVED,
 }
 
 impl From<Verdict> for EffectiveVerdict {
-	fn from(v: Verdict) -> Self {
-		match v {
-			Verdict::PASS => Self::PASS,
-			Verdict::FAIL => Self::FAIL,
-			Verdict::MISSING_EVIDENCE => Self::MISSING_EVIDENCE,
-			Verdict::UNSUPPORTED => Self::UNSUPPORTED,
-		}
-	}
+    fn from(v: Verdict) -> Self {
+        match v {
+            Verdict::PASS => Self::PASS,
+            Verdict::FAIL => Self::FAIL,
+            Verdict::MISSING_EVIDENCE => Self::MISSING_EVIDENCE,
+            Verdict::UNSUPPORTED => Self::UNSUPPORTED,
+        }
+    }
 }
 
 /// Audit trail of the waiver that suppressed a computed
 /// verdict. Non-null iff `effective_verdict == WAIVED`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WaiverBasis {
-	pub waiver_uid: String,
-	pub reason: String,
-	pub created_at: String,
-	pub created_by: Option<String>,
-	pub expires_at: Option<String>,
-	pub rationale_category: Option<String>,
-	pub policy_basis: Option<String>,
+    pub waiver_uid: String,
+    pub reason: String,
+    pub created_at: String,
+    pub created_by: Option<String>,
+    pub expires_at: Option<String>,
+    pub rationale_category: Option<String>,
+    pub policy_basis: Option<String>,
 }
 
 /// One evaluated obligation result.
@@ -205,29 +205,29 @@ pub struct WaiverBasis {
 /// output consumers of `rmap gate` see no shape change.
 #[derive(Debug, Clone, Serialize)]
 pub struct ObligationEvaluation {
-	pub req_id: String,
-	pub req_version: i64,
-	pub obligation_id: String,
-	pub obligation: String,
-	pub method: String,
-	pub target: Option<String>,
-	pub threshold: Option<f64>,
-	pub operator: Option<String>,
-	pub computed_verdict: Verdict,
-	pub effective_verdict: EffectiveVerdict,
-	pub evidence: serde_json::Value,
-	pub waiver_basis: Option<WaiverBasis>,
+    pub req_id: String,
+    pub req_version: i64,
+    pub obligation_id: String,
+    pub obligation: String,
+    pub method: String,
+    pub target: Option<String>,
+    pub threshold: Option<f64>,
+    pub operator: Option<String>,
+    pub computed_verdict: Verdict,
+    pub effective_verdict: EffectiveVerdict,
+    pub evidence: serde_json::Value,
+    pub waiver_basis: Option<WaiverBasis>,
 }
 
 /// Per-verdict counts in the final reduction (obligations).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GateCounts {
-	pub total: usize,
-	pub pass: usize,
-	pub fail: usize,
-	pub waived: usize,
-	pub missing_evidence: usize,
-	pub unsupported: usize,
+    pub total: usize,
+    pub pass: usize,
+    pub fail: usize,
+    pub waived: usize,
+    pub missing_evidence: usize,
+    pub unsupported: usize,
 }
 
 /// Per-verdict counts for quality-policy assessments.
@@ -237,20 +237,20 @@ pub struct GateCounts {
 /// and severity-based blocking behavior.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct GateQualityCounts {
-	/// Total quality policies evaluated.
-	pub total: usize,
-	/// PASS verdicts.
-	pub pass: usize,
-	/// FAIL verdicts with severity=Fail (gate-blocking).
-	pub fail: usize,
-	/// FAIL verdicts with severity=Advisory (non-blocking).
-	pub advisory_fail: usize,
-	/// Missing assessments (no assessment row for active policy).
-	pub missing: usize,
-	/// NOT_COMPARABLE verdicts (comparative policy without baseline).
-	pub not_comparable: usize,
-	/// NOT_APPLICABLE verdicts (treated as non-blocking pass).
-	pub not_applicable: usize,
+    /// Total quality policies evaluated.
+    pub total: usize,
+    /// PASS verdicts.
+    pub pass: usize,
+    /// FAIL verdicts with severity=Fail (gate-blocking).
+    pub fail: usize,
+    /// FAIL verdicts with severity=Advisory (non-blocking).
+    pub advisory_fail: usize,
+    /// Missing assessments (no assessment row for active policy).
+    pub missing: usize,
+    /// NOT_COMPARABLE verdicts (comparative policy without baseline).
+    pub not_comparable: usize,
+    /// NOT_APPLICABLE verdicts (treated as non-blocking pass).
+    pub not_applicable: usize,
 }
 
 /// Reduced gate outcome. `outcome` is a short string
@@ -259,12 +259,12 @@ pub struct GateQualityCounts {
 /// policy; `mode` echoes the mode the caller requested.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GateOutcome {
-	pub outcome: String,
-	pub exit_code: i32,
-	pub mode: String,
-	pub counts: GateCounts,
-	/// Quality-policy assessment counts (separate domain).
-	pub quality_counts: GateQualityCounts,
+    pub outcome: String,
+    pub exit_code: i32,
+    pub mode: String,
+    pub counts: GateCounts,
+    /// Quality-policy assessment counts (separate domain).
+    pub quality_counts: GateQualityCounts,
 }
 
 /// Full gate report. Produced by `compute` and returned by
@@ -281,10 +281,10 @@ pub struct GateOutcome {
 /// reduced `outcome`.
 #[derive(Debug, Clone, Serialize)]
 pub struct GateReport {
-	pub obligations: Vec<ObligationEvaluation>,
-	/// Quality-policy assessment evaluations (separate domain).
-	pub quality_assessments: Vec<GateQualityAssessmentEvaluation>,
-	pub outcome: GateOutcome,
+    pub obligations: Vec<ObligationEvaluation>,
+    /// Quality-policy assessment evaluations (separate domain).
+    pub quality_assessments: Vec<GateQualityAssessmentEvaluation>,
+    pub outcome: GateOutcome,
 }
 
 // ── Gate mode ────────────────────────────────────────────────────
@@ -296,26 +296,26 @@ pub struct GateReport {
 /// pre-relocation behavior in `rgr/src/gate.rs`. Do not change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GateMode {
-	/// exit 0: all PASS/WAIVED (or empty).
-	/// exit 1: any FAIL.
-	/// exit 2: no FAIL but MISSING_EVIDENCE or UNSUPPORTED.
-	Default,
-	/// exit 0: all PASS/WAIVED.
-	/// exit 1: any FAIL, MISSING_EVIDENCE, or UNSUPPORTED.
-	Strict,
-	/// exit 0: no FAIL (MISSING/UNSUPPORTED informational).
-	/// exit 1: any FAIL.
-	Advisory,
+    /// exit 0: all PASS/WAIVED (or empty).
+    /// exit 1: any FAIL.
+    /// exit 2: no FAIL but MISSING_EVIDENCE or UNSUPPORTED.
+    Default,
+    /// exit 0: all PASS/WAIVED.
+    /// exit 1: any FAIL, MISSING_EVIDENCE, or UNSUPPORTED.
+    Strict,
+    /// exit 0: no FAIL (MISSING/UNSUPPORTED informational).
+    /// exit 1: any FAIL.
+    Advisory,
 }
 
 impl GateMode {
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Default => "default",
-			Self::Strict => "strict",
-			Self::Advisory => "advisory",
-		}
-	}
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Strict => "strict",
+            Self::Advisory => "advisory",
+        }
+    }
 }
 
 // ── Quality-Policy Assessment Types (Gate-Owned) ─────────────────────
@@ -327,19 +327,19 @@ impl GateMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GateAssessmentState {
-	/// Assessment row exists for this policy + snapshot.
-	Present,
-	/// No assessment row found (assessment not run or stale).
-	Missing,
+    /// Assessment row exists for this policy + snapshot.
+    Present,
+    /// No assessment row found (assessment not run or stale).
+    Missing,
 }
 
 impl GateAssessmentState {
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Present => "present",
-			Self::Missing => "missing",
-		}
-	}
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Present => "present",
+            Self::Missing => "missing",
+        }
+    }
 }
 
 /// Quality-policy kind (gate-owned mirror of storage enum).
@@ -349,66 +349,66 @@ impl GateAssessmentState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GateQualityPolicyKind {
-	AbsoluteMax,
-	AbsoluteMin,
-	NoNew,
-	NoWorsened,
+    AbsoluteMax,
+    AbsoluteMin,
+    NoNew,
+    NoWorsened,
 }
 
 impl GateQualityPolicyKind {
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::AbsoluteMax => "absolute_max",
-			Self::AbsoluteMin => "absolute_min",
-			Self::NoNew => "no_new",
-			Self::NoWorsened => "no_worsened",
-		}
-	}
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AbsoluteMax => "absolute_max",
+            Self::AbsoluteMin => "absolute_min",
+            Self::NoNew => "no_new",
+            Self::NoWorsened => "no_worsened",
+        }
+    }
 
-	/// Whether this policy kind requires a baseline snapshot.
-	pub fn is_comparative(self) -> bool {
-		matches!(self, Self::NoNew | Self::NoWorsened)
-	}
+    /// Whether this policy kind requires a baseline snapshot.
+    pub fn is_comparative(self) -> bool {
+        matches!(self, Self::NoNew | Self::NoWorsened)
+    }
 }
 
 /// Quality-policy severity (gate-owned mirror of storage enum).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GateQualityPolicySeverity {
-	/// Gate-blocking: FAIL contributes to non-zero exit code.
-	Fail,
-	/// Informational: FAIL reported but does not block gate.
-	Advisory,
+    /// Gate-blocking: FAIL contributes to non-zero exit code.
+    Fail,
+    /// Informational: FAIL reported but does not block gate.
+    Advisory,
 }
 
 impl GateQualityPolicySeverity {
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Fail => "fail",
-			Self::Advisory => "advisory",
-		}
-	}
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fail => "fail",
+            Self::Advisory => "advisory",
+        }
+    }
 }
 
 /// Quality-assessment computed verdict (gate-owned mirror).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum GateAssessmentVerdict {
-	Pass,
-	Fail,
-	NotApplicable,
-	NotComparable,
+    Pass,
+    Fail,
+    NotApplicable,
+    NotComparable,
 }
 
 impl GateAssessmentVerdict {
-	pub fn as_str(self) -> &'static str {
-		match self {
-			Self::Pass => "PASS",
-			Self::Fail => "FAIL",
-			Self::NotApplicable => "NOT_APPLICABLE",
-			Self::NotComparable => "NOT_COMPARABLE",
-		}
-	}
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pass => "PASS",
+            Self::Fail => "FAIL",
+            Self::NotApplicable => "NOT_APPLICABLE",
+            Self::NotComparable => "NOT_COMPARABLE",
+        }
+    }
 }
 
 /// Enriched quality-assessment fact for gate consumption.
@@ -420,31 +420,31 @@ impl GateAssessmentVerdict {
 /// and the verdict/count fields are `None`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GateQualityAssessmentFact {
-	// ── Policy identity (from declaration) ──
-	/// Storage-assigned declaration UID.
-	pub policy_uid: String,
-	/// Human-readable policy ID (e.g., "QP-001").
-	pub policy_id: String,
-	/// Policy version.
-	pub policy_version: i64,
-	/// Policy kind (determines comparative vs absolute).
-	pub policy_kind: GateQualityPolicyKind,
-	/// Severity (determines gate-blocking vs advisory).
-	pub severity: GateQualityPolicySeverity,
+    // ── Policy identity (from declaration) ──
+    /// Storage-assigned declaration UID.
+    pub policy_uid: String,
+    /// Human-readable policy ID (e.g., "QP-001").
+    pub policy_id: String,
+    /// Policy version.
+    pub policy_version: i64,
+    /// Policy kind (determines comparative vs absolute).
+    pub policy_kind: GateQualityPolicyKind,
+    /// Severity (determines gate-blocking vs advisory).
+    pub severity: GateQualityPolicySeverity,
 
-	// ── Assessment state ──
-	/// Whether an assessment row exists.
-	pub assessment_state: GateAssessmentState,
+    // ── Assessment state ──
+    /// Whether an assessment row exists.
+    pub assessment_state: GateAssessmentState,
 
-	// ── Assessment data (present only when state = Present) ──
-	/// Computed verdict from the assessment.
-	pub computed_verdict: Option<GateAssessmentVerdict>,
-	/// Baseline snapshot UID (for comparative assessments).
-	pub baseline_snapshot_uid: Option<String>,
-	/// Count of measurements evaluated.
-	pub measurements_evaluated: Option<i64>,
-	/// Count of violations found.
-	pub violations_count: Option<usize>,
+    // ── Assessment data (present only when state = Present) ──
+    /// Computed verdict from the assessment.
+    pub computed_verdict: Option<GateAssessmentVerdict>,
+    /// Baseline snapshot UID (for comparative assessments).
+    pub baseline_snapshot_uid: Option<String>,
+    /// Count of measurements evaluated.
+    pub measurements_evaluated: Option<i64>,
+    /// Count of violations found.
+    pub violations_count: Option<usize>,
 }
 
 /// Evaluated quality-assessment result in the gate report.
@@ -454,27 +454,27 @@ pub struct GateQualityAssessmentFact {
 /// but report separately.
 #[derive(Debug, Clone, Serialize)]
 pub struct GateQualityAssessmentEvaluation {
-	pub policy_id: String,
-	pub policy_version: i64,
-	pub policy_kind: String,
-	pub severity: String,
-	pub assessment_state: String,
-	pub computed_verdict: Option<String>,
-	pub is_comparative: bool,
-	pub violations_count: Option<usize>,
+    pub policy_id: String,
+    pub policy_version: i64,
+    pub policy_kind: String,
+    pub severity: String,
+    pub assessment_state: String,
+    pub computed_verdict: Option<String>,
+    pub is_comparative: bool,
+    pub violations_count: Option<usize>,
 }
 
 impl From<&GateQualityAssessmentFact> for GateQualityAssessmentEvaluation {
-	fn from(fact: &GateQualityAssessmentFact) -> Self {
-		Self {
-			policy_id: fact.policy_id.clone(),
-			policy_version: fact.policy_version,
-			policy_kind: fact.policy_kind.as_str().to_string(),
-			severity: fact.severity.as_str().to_string(),
-			assessment_state: fact.assessment_state.as_str().to_string(),
-			computed_verdict: fact.computed_verdict.map(|v| v.as_str().to_string()),
-			is_comparative: fact.policy_kind.is_comparative(),
-			violations_count: fact.violations_count,
-		}
-	}
+    fn from(fact: &GateQualityAssessmentFact) -> Self {
+        Self {
+            policy_id: fact.policy_id.clone(),
+            policy_version: fact.policy_version,
+            policy_kind: fact.policy_kind.as_str().to_string(),
+            severity: fact.severity.as_str().to_string(),
+            assessment_state: fact.assessment_state.as_str().to_string(),
+            computed_verdict: fact.computed_verdict.map(|v| v.as_str().to_string()),
+            is_comparative: fact.policy_kind.is_comparative(),
+            violations_count: fact.violations_count,
+        }
+    }
 }

@@ -158,7 +158,10 @@ impl RepoCoordinator {
     /// Acquire a read permit with timeout.
     ///
     /// Returns `Err(Timeout)` if the timeout expires before access is granted.
-    pub fn acquire_read_timeout(&self, timeout: Duration) -> Result<ReadGuard<'_>, CoordinatorError> {
+    pub fn acquire_read_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<ReadGuard<'_>, CoordinatorError> {
         let deadline = Instant::now() + timeout;
         let mut inner = self.inner.lock();
 
@@ -169,7 +172,11 @@ impl RepoCoordinator {
                 if remaining.is_zero() {
                     return Err(CoordinatorError::timeout("read access"));
                 }
-                if self.state_changed.wait_for(&mut inner, remaining).timed_out() {
+                if self
+                    .state_changed
+                    .wait_for(&mut inner, remaining)
+                    .timed_out()
+                {
                     return Err(CoordinatorError::timeout("read access"));
                 }
                 continue;
@@ -185,7 +192,11 @@ impl RepoCoordinator {
                     if remaining.is_zero() {
                         return Err(CoordinatorError::timeout("read access"));
                     }
-                    if self.state_changed.wait_for(&mut inner, remaining).timed_out() {
+                    if self
+                        .state_changed
+                        .wait_for(&mut inner, remaining)
+                        .timed_out()
+                    {
                         return Err(CoordinatorError::timeout("read access"));
                     }
                 }
@@ -332,7 +343,11 @@ impl RepoCoordinator {
                     self.state_changed.notify_all();
                     return Err(CoordinatorError::timeout("write access"));
                 }
-                if self.state_changed.wait_for(&mut inner, remaining).timed_out() {
+                if self
+                    .state_changed
+                    .wait_for(&mut inner, remaining)
+                    .timed_out()
+                {
                     inner.write_queue.retain(|(t, _)| *t != ticket);
                     self.state_changed.notify_all();
                     return Err(CoordinatorError::timeout("write access"));
@@ -364,7 +379,11 @@ impl RepoCoordinator {
                         self.state_changed.notify_all();
                         return Err(CoordinatorError::timeout("write access"));
                     }
-                    if self.state_changed.wait_for(&mut inner, remaining).timed_out() {
+                    if self
+                        .state_changed
+                        .wait_for(&mut inner, remaining)
+                        .timed_out()
+                    {
                         inner.write_queue.retain(|(t, _)| *t != ticket);
                         self.state_changed.notify_all();
                         return Err(CoordinatorError::timeout("write access"));
@@ -524,7 +543,10 @@ mod tests {
         // Try to acquire another write with long timeout (we'll check queue before it expires)
         let handle = thread::spawn(move || {
             let result = coord2.acquire_write_timeout(Duration::from_secs(2));
-            timed_out2.store(matches!(result, Err(CoordinatorError::Timeout { .. })), Ordering::SeqCst);
+            timed_out2.store(
+                matches!(result, Err(CoordinatorError::Timeout { .. })),
+                Ordering::SeqCst,
+            );
         });
 
         // Poll until we see the writer in the queue (timeout after 500ms)
@@ -563,7 +585,10 @@ mod tests {
         // Try to acquire another write with short timeout
         let handle = thread::spawn(move || {
             let result = coord2.acquire_write_timeout(Duration::from_millis(50));
-            timed_out2.store(matches!(result, Err(CoordinatorError::Timeout { .. })), Ordering::SeqCst);
+            timed_out2.store(
+                matches!(result, Err(CoordinatorError::Timeout { .. })),
+                Ordering::SeqCst,
+            );
         });
 
         // Wait for thread to complete (should timeout)

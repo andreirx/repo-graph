@@ -33,8 +33,8 @@ use regex::Regex;
 use sha2::{Digest, Sha256};
 
 use crate::storage_port::{
-    GrpcClientContractInput, GrpcClientHintReadPort,
-    GrpcClientHintStorePort, GrpcClientSurfaceInput, GrpcServiceMappingInput, StubCreationInput,
+    GrpcClientContractInput, GrpcClientHintReadPort, GrpcClientHintStorePort,
+    GrpcClientSurfaceInput, GrpcServiceMappingInput, StubCreationInput,
 };
 
 /// A detected gRPC client stub hint.
@@ -255,7 +255,10 @@ pub fn generate_surface_uid(
     hasher.update(b":");
     hasher.update(line_start.to_string().as_bytes());
     let hash = hasher.finalize();
-    format!("grpc-client-{:x}", &hash[..8].iter().fold(0u64, |acc, &b| acc << 8 | b as u64))
+    format!(
+        "grpc-client-{:x}",
+        &hash[..8].iter().fold(0u64, |acc, &b| acc << 8 | b as u64)
+    )
 }
 
 /// Generate a deterministic association UID for a boundary contract.
@@ -266,7 +269,10 @@ pub fn generate_association_uid(surface_uid: &str, contract_element_uid: &str) -
     hasher.update(b":");
     hasher.update(contract_element_uid.as_bytes());
     let hash = hasher.finalize();
-    format!("grpc-client-bc-{:x}", &hash[..8].iter().fold(0u64, |acc, &b| acc << 8 | b as u64))
+    format!(
+        "grpc-client-bc-{:x}",
+        &hash[..8].iter().fold(0u64, |acc, &b| acc << 8 | b as u64)
+    )
 }
 
 /// Result of running gRPC client hint detection.
@@ -399,10 +405,7 @@ where
         // Pattern: {repo}:{proto_file}#{element_kind}:{full_name}
         let contract_element_stable_key = format!(
             "{}:{}#{}:{}",
-            repo_uid,
-            hint.proto_schema_file,
-            hint.proto_service_kind,
-            hint.proto_service_full_name,
+            repo_uid, hint.proto_schema_file, hint.proto_service_kind, hint.proto_service_full_name,
         );
         let provenance = Provenance::from_layer0_items(vec![
             ProvenanceAnchor::new("BoundaryInteractionSurfaces", &hint.creator_stable_key),
@@ -592,25 +595,58 @@ mod tests {
         let hints = find_grpc_client_hints(&creations, &services);
 
         // Should refuse to link rather than risk binding to wrong service
-        assert!(hints.is_empty(), "Ambiguous services should produce no hints");
+        assert!(
+            hints.is_empty(),
+            "Ambiguous services should produce no hints"
+        );
     }
 
     #[test]
     fn surface_uid_is_deterministic() {
-        let uid1 = generate_surface_uid("snap-1", "r1:Client:METHOD:init", "GreeterGrpc", "newBlockingStub", 10);
-        let uid2 = generate_surface_uid("snap-1", "r1:Client:METHOD:init", "GreeterGrpc", "newBlockingStub", 10);
+        let uid1 = generate_surface_uid(
+            "snap-1",
+            "r1:Client:METHOD:init",
+            "GreeterGrpc",
+            "newBlockingStub",
+            10,
+        );
+        let uid2 = generate_surface_uid(
+            "snap-1",
+            "r1:Client:METHOD:init",
+            "GreeterGrpc",
+            "newBlockingStub",
+            10,
+        );
         assert_eq!(uid1, uid2);
 
         // Different stub method -> different UID
-        let uid3 = generate_surface_uid("snap-1", "r1:Client:METHOD:init", "GreeterGrpc", "newFutureStub", 10);
+        let uid3 = generate_surface_uid(
+            "snap-1",
+            "r1:Client:METHOD:init",
+            "GreeterGrpc",
+            "newFutureStub",
+            10,
+        );
         assert_ne!(uid1, uid3);
 
         // Different line -> different UID (same method creating multiple stubs)
-        let uid4 = generate_surface_uid("snap-1", "r1:Client:METHOD:init", "GreeterGrpc", "newBlockingStub", 11);
+        let uid4 = generate_surface_uid(
+            "snap-1",
+            "r1:Client:METHOD:init",
+            "GreeterGrpc",
+            "newBlockingStub",
+            11,
+        );
         assert_ne!(uid1, uid4);
 
         // Different grpc_class -> different UID (same method calling different services)
-        let uid5 = generate_surface_uid("snap-1", "r1:Client:METHOD:init", "UserGrpc", "newBlockingStub", 10);
+        let uid5 = generate_surface_uid(
+            "snap-1",
+            "r1:Client:METHOD:init",
+            "UserGrpc",
+            "newBlockingStub",
+            10,
+        );
         assert_ne!(uid1, uid5);
     }
 

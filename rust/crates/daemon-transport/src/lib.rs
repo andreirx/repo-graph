@@ -50,7 +50,9 @@ mod envelope;
 mod error;
 mod stdio;
 
-pub use dispatch::{DispatchResult, Dispatcher, EmitError, MockDispatcher, NoOpEmitter, ProgressEmitter};
+pub use dispatch::{
+    DispatchResult, Dispatcher, EmitError, MockDispatcher, NoOpEmitter, ProgressEmitter,
+};
 pub use envelope::{
     ErrorCode, ErrorDetail, ErrorResponse, ProgressDetail, ProgressResponse, Request,
     SuccessResponse,

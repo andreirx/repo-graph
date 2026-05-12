@@ -36,80 +36,78 @@
 use std::collections::HashSet;
 
 use super::AggregatorOutput;
-use crate::dto::signal::{
-	BoundaryViolationEvidence, BoundaryViolationsEvidence, Signal,
-};
+use crate::dto::signal::{BoundaryViolationEvidence, BoundaryViolationsEvidence, Signal};
 use crate::errors::AgentStorageError;
 use crate::storage_port::{AgentBoundaryDeclaration, AgentStorageRead};
 
 const VIOLATIONS_TOP_N: usize = 3;
 
 pub fn aggregate<S: AgentStorageRead + ?Sized>(
-	storage: &S,
-	repo_uid: &str,
-	snapshot_uid: &str,
+    storage: &S,
+    repo_uid: &str,
+    snapshot_uid: &str,
 ) -> Result<AggregatorOutput, AgentStorageError> {
-	let declarations = storage.get_active_boundary_declarations(repo_uid)?;
+    let declarations = storage.get_active_boundary_declarations(repo_uid)?;
 
-	if declarations.is_empty() {
-		return Ok(AggregatorOutput::empty());
-	}
+    if declarations.is_empty() {
+        return Ok(AggregatorOutput::empty());
+    }
 
-	// Deduplicate by (source_module, forbidden_target). The
-	// first declaration for a given key wins — subsequent
-	// duplicates are dropped. This prevents double-counting
-	// violating edges when legacy authoring produced redundant
-	// rows.
-	let unique = dedupe_declarations(declarations);
+    // Deduplicate by (source_module, forbidden_target). The
+    // first declaration for a given key wins — subsequent
+    // duplicates are dropped. This prevents double-counting
+    // violating edges when legacy authoring produced redundant
+    // rows.
+    let unique = dedupe_declarations(declarations);
 
-	// For each unique rule, collect the violating edges and
-	// aggregate into one per-rule entry. Total violation_count
-	// is the sum of all edges across all unique rules.
-	let mut per_rule: Vec<BoundaryViolationEvidence> = Vec::new();
-	let mut total_edges: u64 = 0;
+    // For each unique rule, collect the violating edges and
+    // aggregate into one per-rule entry. Total violation_count
+    // is the sum of all edges across all unique rules.
+    let mut per_rule: Vec<BoundaryViolationEvidence> = Vec::new();
+    let mut total_edges: u64 = 0;
 
-	for decl in unique {
-		let edges = storage.find_imports_between_paths(
-			snapshot_uid,
-			&decl.source_module,
-			&decl.forbidden_target,
-		)?;
-		if edges.is_empty() {
-			continue;
-		}
-		let edge_count = edges.len() as u64;
-		total_edges += edge_count;
-		per_rule.push(BoundaryViolationEvidence {
-			source_module: decl.source_module,
-			target_module: decl.forbidden_target,
-			edge_count,
-		});
-	}
+    for decl in unique {
+        let edges = storage.find_imports_between_paths(
+            snapshot_uid,
+            &decl.source_module,
+            &decl.forbidden_target,
+        )?;
+        if edges.is_empty() {
+            continue;
+        }
+        let edge_count = edges.len() as u64;
+        total_edges += edge_count;
+        per_rule.push(BoundaryViolationEvidence {
+            source_module: decl.source_module,
+            target_module: decl.forbidden_target,
+            edge_count,
+        });
+    }
 
-	if total_edges == 0 {
-		return Ok(AggregatorOutput::empty());
-	}
+    if total_edges == 0 {
+        return Ok(AggregatorOutput::empty());
+    }
 
-	// Deterministic top-N ordering: sort descending by
-	// edge_count, tiebreak by source_module then target_module
-	// (lexicographic ascending). Then truncate to TOP_N.
-	per_rule.sort_by(|a, b| {
-		b.edge_count
-			.cmp(&a.edge_count)
-			.then_with(|| a.source_module.cmp(&b.source_module))
-			.then_with(|| a.target_module.cmp(&b.target_module))
-	});
-	per_rule.truncate(VIOLATIONS_TOP_N);
+    // Deterministic top-N ordering: sort descending by
+    // edge_count, tiebreak by source_module then target_module
+    // (lexicographic ascending). Then truncate to TOP_N.
+    per_rule.sort_by(|a, b| {
+        b.edge_count
+            .cmp(&a.edge_count)
+            .then_with(|| a.source_module.cmp(&b.source_module))
+            .then_with(|| a.target_module.cmp(&b.target_module))
+    });
+    per_rule.truncate(VIOLATIONS_TOP_N);
 
-	let evidence = BoundaryViolationsEvidence {
-		violation_count: total_edges,
-		top_violations: per_rule,
-	};
+    let evidence = BoundaryViolationsEvidence {
+        violation_count: total_edges,
+        top_violations: per_rule,
+    };
 
-	Ok(AggregatorOutput {
-		signals: vec![Signal::boundary_violations(evidence)],
-		limits: Vec::new(),
-	})
+    Ok(AggregatorOutput {
+        signals: vec![Signal::boundary_violations(evidence)],
+        limits: Vec::new(),
+    })
 }
 
 /// Path-scoped boundary aggregator.
@@ -119,61 +117,61 @@ pub fn aggregate<S: AgentStorageRead + ?Sized>(
 /// `find_boundary_declarations_in_path`), then checks for
 /// violations the same way as the repo-level aggregator.
 pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
-	storage: &S,
-	repo_uid: &str,
-	snapshot_uid: &str,
-	path_prefix: &str,
+    storage: &S,
+    repo_uid: &str,
+    snapshot_uid: &str,
+    path_prefix: &str,
 ) -> Result<AggregatorOutput, AgentStorageError> {
-	let declarations = storage.find_boundary_declarations_in_path(repo_uid, path_prefix)?;
+    let declarations = storage.find_boundary_declarations_in_path(repo_uid, path_prefix)?;
 
-	if declarations.is_empty() {
-		return Ok(AggregatorOutput::empty());
-	}
+    if declarations.is_empty() {
+        return Ok(AggregatorOutput::empty());
+    }
 
-	let unique = dedupe_declarations(declarations);
+    let unique = dedupe_declarations(declarations);
 
-	let mut per_rule: Vec<BoundaryViolationEvidence> = Vec::new();
-	let mut total_edges: u64 = 0;
+    let mut per_rule: Vec<BoundaryViolationEvidence> = Vec::new();
+    let mut total_edges: u64 = 0;
 
-	for decl in unique {
-		let edges = storage.find_imports_between_paths(
-			snapshot_uid,
-			&decl.source_module,
-			&decl.forbidden_target,
-		)?;
-		if edges.is_empty() {
-			continue;
-		}
-		let edge_count = edges.len() as u64;
-		total_edges += edge_count;
-		per_rule.push(BoundaryViolationEvidence {
-			source_module: decl.source_module,
-			target_module: decl.forbidden_target,
-			edge_count,
-		});
-	}
+    for decl in unique {
+        let edges = storage.find_imports_between_paths(
+            snapshot_uid,
+            &decl.source_module,
+            &decl.forbidden_target,
+        )?;
+        if edges.is_empty() {
+            continue;
+        }
+        let edge_count = edges.len() as u64;
+        total_edges += edge_count;
+        per_rule.push(BoundaryViolationEvidence {
+            source_module: decl.source_module,
+            target_module: decl.forbidden_target,
+            edge_count,
+        });
+    }
 
-	if total_edges == 0 {
-		return Ok(AggregatorOutput::empty());
-	}
+    if total_edges == 0 {
+        return Ok(AggregatorOutput::empty());
+    }
 
-	per_rule.sort_by(|a, b| {
-		b.edge_count
-			.cmp(&a.edge_count)
-			.then_with(|| a.source_module.cmp(&b.source_module))
-			.then_with(|| a.target_module.cmp(&b.target_module))
-	});
-	per_rule.truncate(VIOLATIONS_TOP_N);
+    per_rule.sort_by(|a, b| {
+        b.edge_count
+            .cmp(&a.edge_count)
+            .then_with(|| a.source_module.cmp(&b.source_module))
+            .then_with(|| a.target_module.cmp(&b.target_module))
+    });
+    per_rule.truncate(VIOLATIONS_TOP_N);
 
-	let evidence = BoundaryViolationsEvidence {
-		violation_count: total_edges,
-		top_violations: per_rule,
-	};
+    let evidence = BoundaryViolationsEvidence {
+        violation_count: total_edges,
+        top_violations: per_rule,
+    };
 
-	Ok(AggregatorOutput {
-		signals: vec![Signal::boundary_violations(evidence)],
-		limits: Vec::new(),
-	})
+    Ok(AggregatorOutput {
+        signals: vec![Signal::boundary_violations(evidence)],
+        limits: Vec::new(),
+    })
 }
 
 /// Deduplicate a list of active boundary declarations by
@@ -187,75 +185,74 @@ pub fn aggregate_path<S: AgentStorageRead + ?Sized>(
 /// caller sorts per-rule by `edge_count` after the violation
 /// counts are known, which is where ordering actually matters.
 fn dedupe_declarations(
-	declarations: Vec<AgentBoundaryDeclaration>,
+    declarations: Vec<AgentBoundaryDeclaration>,
 ) -> Vec<AgentBoundaryDeclaration> {
-	let mut seen: HashSet<(String, String)> = HashSet::new();
-	let mut out: Vec<AgentBoundaryDeclaration> =
-		Vec::with_capacity(declarations.len());
-	for decl in declarations {
-		let key = (decl.source_module.clone(), decl.forbidden_target.clone());
-		if seen.insert(key) {
-			out.push(decl);
-		}
-	}
-	out
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut out: Vec<AgentBoundaryDeclaration> = Vec::with_capacity(declarations.len());
+    for decl in declarations {
+        let key = (decl.source_module.clone(), decl.forbidden_target.clone());
+        if seen.insert(key) {
+            out.push(decl);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+    use super::*;
 
-	#[test]
-	fn dedupe_keeps_first_seen_reason_and_drops_duplicates() {
-		let input = vec![
-			AgentBoundaryDeclaration {
-				source_module: "src/core".into(),
-				forbidden_target: "src/adapters".into(),
-				reason: Some("first-wins".into()),
-			},
-			AgentBoundaryDeclaration {
-				source_module: "src/core".into(),
-				forbidden_target: "src/adapters".into(),
-				reason: Some("duplicate ignored".into()),
-			},
-			AgentBoundaryDeclaration {
-				source_module: "src/core".into(),
-				forbidden_target: "src/cli".into(),
-				reason: None,
-			},
-		];
-		let out = dedupe_declarations(input);
-		assert_eq!(out.len(), 2);
-		assert_eq!(out[0].source_module, "src/core");
-		assert_eq!(out[0].forbidden_target, "src/adapters");
-		assert_eq!(out[0].reason.as_deref(), Some("first-wins"));
-		assert_eq!(out[1].source_module, "src/core");
-		assert_eq!(out[1].forbidden_target, "src/cli");
-	}
+    #[test]
+    fn dedupe_keeps_first_seen_reason_and_drops_duplicates() {
+        let input = vec![
+            AgentBoundaryDeclaration {
+                source_module: "src/core".into(),
+                forbidden_target: "src/adapters".into(),
+                reason: Some("first-wins".into()),
+            },
+            AgentBoundaryDeclaration {
+                source_module: "src/core".into(),
+                forbidden_target: "src/adapters".into(),
+                reason: Some("duplicate ignored".into()),
+            },
+            AgentBoundaryDeclaration {
+                source_module: "src/core".into(),
+                forbidden_target: "src/cli".into(),
+                reason: None,
+            },
+        ];
+        let out = dedupe_declarations(input);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].source_module, "src/core");
+        assert_eq!(out[0].forbidden_target, "src/adapters");
+        assert_eq!(out[0].reason.as_deref(), Some("first-wins"));
+        assert_eq!(out[1].source_module, "src/core");
+        assert_eq!(out[1].forbidden_target, "src/cli");
+    }
 
-	#[test]
-	fn dedupe_preserves_insertion_order_of_unique_entries() {
-		let input = vec![
-			AgentBoundaryDeclaration {
-				source_module: "b".into(),
-				forbidden_target: "b2".into(),
-				reason: None,
-			},
-			AgentBoundaryDeclaration {
-				source_module: "a".into(),
-				forbidden_target: "a2".into(),
-				reason: None,
-			},
-			AgentBoundaryDeclaration {
-				source_module: "b".into(),
-				forbidden_target: "b2".into(),
-				reason: None,
-			},
-		];
-		let out = dedupe_declarations(input);
-		assert_eq!(out.len(), 2);
-		// First-seen order: "b" before "a".
-		assert_eq!(out[0].source_module, "b");
-		assert_eq!(out[1].source_module, "a");
-	}
+    #[test]
+    fn dedupe_preserves_insertion_order_of_unique_entries() {
+        let input = vec![
+            AgentBoundaryDeclaration {
+                source_module: "b".into(),
+                forbidden_target: "b2".into(),
+                reason: None,
+            },
+            AgentBoundaryDeclaration {
+                source_module: "a".into(),
+                forbidden_target: "a2".into(),
+                reason: None,
+            },
+            AgentBoundaryDeclaration {
+                source_module: "b".into(),
+                forbidden_target: "b2".into(),
+                reason: None,
+            },
+        ];
+        let out = dedupe_declarations(input);
+        assert_eq!(out.len(), 2);
+        // First-seen order: "b" before "a".
+        assert_eq!(out[0].source_module, "b");
+        assert_eq!(out[1].source_module, "a");
+    }
 }

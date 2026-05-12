@@ -27,9 +27,9 @@
 //! (snake_case) and the DB schema (camelCase, nested under "enrichment").
 
 use enrichment::{
-    EligibilityQuery, EligibleEdge, EnrichmentLanguage, EnrichmentMetadata,
-    EnrichmentStoragePort, PromotedEdge, PromotionCandidate, ReceiverTypeOrigin,
-    StorageError as EnrichmentStorageError, SymbolInfo, SymbolSubtype, UnresolvedCategory,
+    EligibilityQuery, EligibleEdge, EnrichmentLanguage, EnrichmentMetadata, EnrichmentStoragePort,
+    PromotedEdge, PromotionCandidate, ReceiverTypeOrigin, StorageError as EnrichmentStorageError,
+    SymbolInfo, SymbolSubtype, UnresolvedCategory,
 };
 
 use crate::connection::StorageConnection;
@@ -192,7 +192,7 @@ impl EnrichmentStoragePort for StorageConnection {
         let mut edges = Vec::new();
         for raw in raw_rows {
             // Parse category
-            let category = match UnresolvedCategory::from_str(&raw.category) {
+            let category = match UnresolvedCategory::parse(&raw.category) {
                 Some(c) => c,
                 None => continue, // Skip unrecognized categories
             };
@@ -200,7 +200,10 @@ impl EnrichmentStoragePort for StorageConnection {
             // Derive language from source file path
             let file_path = self.get_file_path_for_node(&raw.source_node_uid)?;
 
-            let language = match file_path.as_ref().and_then(|p| EnrichmentLanguage::from_path(p)) {
+            let language = match file_path
+                .as_ref()
+                .and_then(|p| EnrichmentLanguage::from_path(p))
+            {
                 Some(lang) => lang,
                 None => continue, // Skip files with unsupported language
             };
@@ -262,7 +265,10 @@ impl EnrichmentStoragePort for StorageConnection {
                 Ok(n) => count += n,
                 Err(e) => {
                     // Log but continue - partial success is acceptable
-                    eprintln!("warning: failed to persist enrichment for {}: {}", edge_uid, e);
+                    eprintln!(
+                        "warning: failed to persist enrichment for {}: {}",
+                        edge_uid, e
+                    );
                 }
             }
         }
@@ -275,9 +281,7 @@ impl EnrichmentStoragePort for StorageConnection {
         snapshot_uid: &str,
         limit: Option<usize>,
     ) -> Result<Vec<PromotionCandidate>, EnrichmentStorageError> {
-        let limit_clause = limit
-            .map(|n| format!(" LIMIT {}", n))
-            .unwrap_or_default();
+        let limit_clause = limit.map(|n| format!(" LIMIT {}", n)).unwrap_or_default();
 
         // Query using nested camelCase schema (trust service compatible)
         let sql = format!(
@@ -330,7 +334,7 @@ impl EnrichmentStoragePort for StorageConnection {
         for row_result in rows {
             let raw = row_result.map_err(StorageError::from)?;
 
-            let category = match UnresolvedCategory::from_str(&raw.category) {
+            let category = match UnresolvedCategory::parse(&raw.category) {
                 Some(c) => c,
                 None => continue,
             };
@@ -418,7 +422,7 @@ impl EnrichmentStoragePort for StorageConnection {
                 qualified_name: raw.qualified_name,
                 subtype: raw
                     .subtype
-                    .map(|s| SymbolSubtype::from_str(&s))
+                    .map(|s| SymbolSubtype::parse(&s))
                     .unwrap_or(SymbolSubtype::Other),
             });
         }
@@ -487,7 +491,7 @@ impl EnrichmentStoragePort for StorageConnection {
                 qualified_name: raw.qualified_name,
                 subtype: raw
                     .subtype
-                    .map(|s| SymbolSubtype::from_str(&s))
+                    .map(|s| SymbolSubtype::parse(&s))
                     .unwrap_or(SymbolSubtype::Method),
             };
 

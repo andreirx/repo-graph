@@ -11,20 +11,16 @@ use crate::error::StorageError;
 use crate::migrations::{pragma_table_columns, record_migration};
 
 pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
-	let cols = pragma_table_columns(conn, "file_signals")?;
+    let cols = pragma_table_columns(conn, "file_signals")?;
 
-	if !cols.iter().any(|c| c == "package_dependencies_json") {
-		conn.execute_batch(
-			"ALTER TABLE file_signals ADD COLUMN package_dependencies_json TEXT",
-		)?;
-	}
+    if !cols.iter().any(|c| c == "package_dependencies_json") {
+        conn.execute_batch("ALTER TABLE file_signals ADD COLUMN package_dependencies_json TEXT")?;
+    }
 
-	if !cols.iter().any(|c| c == "tsconfig_aliases_json") {
-		conn.execute_batch(
-			"ALTER TABLE file_signals ADD COLUMN tsconfig_aliases_json TEXT",
-		)?;
-	}
+    if !cols.iter().any(|c| c == "tsconfig_aliases_json") {
+        conn.execute_batch("ALTER TABLE file_signals ADD COLUMN tsconfig_aliases_json TEXT")?;
+    }
 
-	record_migration(conn, 10, "010-file-signals-expansion")?;
-	Ok(())
+    record_migration(conn, 10, "010-file-signals-expansion")?;
+    Ok(())
 }

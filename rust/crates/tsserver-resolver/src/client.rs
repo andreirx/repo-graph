@@ -158,7 +158,9 @@ impl ReceiverTypeResolver for TsServerResolver {
 
         // Build ownership resolver to determine which tsconfig owns each file.
         // This replaces the naive "nearest config by directory" grouping.
-        let ownership_resolver = match crate::ownership::TsProjectOwnershipResolver::build(repo_root) {
+        let ownership_resolver = match crate::ownership::TsProjectOwnershipResolver::build(
+            repo_root,
+        ) {
             Ok(r) => Some(r),
             Err(e) => {
                 warn!(error = %e, "failed to build ownership resolver, falling back to directory grouping");
@@ -224,11 +226,8 @@ impl ReceiverTypeResolver for TsServerResolver {
 
             let first_edge = &group_edges[0];
             let first_path = repo_root.join(&first_edge.source_file_path);
-            let warmed_up = session.warm_up(
-                &first_path,
-                first_edge.line_start,
-                first_edge.col_start,
-            );
+            let warmed_up =
+                session.warm_up(&first_path, first_edge.line_start, first_edge.col_start);
 
             if !warmed_up {
                 warn!(
@@ -275,7 +274,12 @@ impl ReceiverTypeResolver for TsServerResolver {
                     continue;
                 }
 
-                let result = session.resolve_type(&abs_path, edge.line_start, edge.col_start, &edge.edge_uid);
+                let result = session.resolve_type(
+                    &abs_path,
+                    edge.line_start,
+                    edge.col_start,
+                    &edge.edge_uid,
+                );
                 all_results.push(result);
                 processed += 1;
             }
@@ -340,9 +344,11 @@ impl TsServerSession {
             command.stderr(Stdio::null());
         }
 
-        let mut process = command.spawn().map_err(|e| ResolverError::ToolNotAvailable {
-            tool: format!("tsserver ({}): {}", tsserver_cmd, e),
-        })?;
+        let mut process = command
+            .spawn()
+            .map_err(|e| ResolverError::ToolNotAvailable {
+                tool: format!("tsserver ({}): {}", tsserver_cmd, e),
+            })?;
 
         let stdin = process
             .stdin
@@ -549,7 +555,9 @@ impl TsServerSession {
         edge_uid: &str,
     ) -> ReceiverTypeResult {
         match self.quickinfo_raw(file_path, line, col) {
-            QuickInfoOutcome::ServerResponded { type_name: Some(name) } => {
+            QuickInfoOutcome::ServerResponded {
+                type_name: Some(name),
+            } => {
                 if is_valid_ts_type_name(&name) {
                     ReceiverTypeResult {
                         edge_uid: edge_uid.to_string(),
@@ -740,9 +748,24 @@ fn is_valid_ts_type_name(name: &str) -> bool {
     // Skip TypeScript primitives and special types
     if matches!(
         name,
-        "string" | "number" | "boolean" | "null" | "undefined" | "void" |
-        "any" | "unknown" | "never" | "object" | "symbol" | "bigint" |
-        "String" | "Number" | "Boolean" | "Object" | "Symbol" | "BigInt"
+        "string"
+            | "number"
+            | "boolean"
+            | "null"
+            | "undefined"
+            | "void"
+            | "any"
+            | "unknown"
+            | "never"
+            | "object"
+            | "symbol"
+            | "bigint"
+            | "String"
+            | "Number"
+            | "Boolean"
+            | "Object"
+            | "Symbol"
+            | "BigInt"
     ) {
         return false;
     }
@@ -765,25 +788,49 @@ fn is_valid_ts_type_name(name: &str) -> bool {
 fn is_external_type(type_name: &str) -> bool {
     // Node.js built-in types
     const NODE_TYPES: &[&str] = &[
-        "Buffer", "Stream", "Readable", "Writable", "Transform",
-        "EventEmitter", "ChildProcess", "Server", "Socket",
-        "IncomingMessage", "ServerResponse", "Agent",
+        "Buffer",
+        "Stream",
+        "Readable",
+        "Writable",
+        "Transform",
+        "EventEmitter",
+        "ChildProcess",
+        "Server",
+        "Socket",
+        "IncomingMessage",
+        "ServerResponse",
+        "Agent",
     ];
 
     // Common library types
     const LIBRARY_TYPES: &[&str] = &[
         // RxJS
-        "Observable", "Subject", "BehaviorSubject", "ReplaySubject",
-        "Subscription", "Subscriber", "Observer",
+        "Observable",
+        "Subject",
+        "BehaviorSubject",
+        "ReplaySubject",
+        "Subscription",
+        "Subscriber",
+        "Observer",
         // Express
-        "Express", "Router", "NextFunction",
+        "Express",
+        "Router",
+        "NextFunction",
         // React
-        "Component", "PureComponent", "ReactNode", "ReactElement",
-        "RefObject", "MutableRefObject",
+        "Component",
+        "PureComponent",
+        "ReactNode",
+        "ReactElement",
+        "RefObject",
+        "MutableRefObject",
         // Angular
-        "NgModule", "Injector", "ComponentRef",
+        "NgModule",
+        "Injector",
+        "ComponentRef",
         // Database
-        "Connection", "Repository", "QueryBuilder",
+        "Connection",
+        "Repository",
+        "QueryBuilder",
     ];
 
     NODE_TYPES.contains(&type_name) || LIBRARY_TYPES.contains(&type_name)
@@ -866,10 +913,7 @@ fn resolve_wildcard_receiver(
         }
 
         crate::receiver_locator::ReceiverLocation::NoReceiver => {
-            ReceiverTypeResult::failed(
-                edge_uid.to_string(),
-                "receiver_locator_no_receiver",
-            )
+            ReceiverTypeResult::failed(edge_uid.to_string(), "receiver_locator_no_receiver")
         }
 
         crate::receiver_locator::ReceiverLocation::UnsupportedPattern { reason } => {
@@ -910,10 +954,7 @@ fn group_by_ownership(
 
         match resolver.resolve(file_path) {
             crate::ownership::ProjectOwnership::Owned { project_root, .. } => {
-                groups
-                    .entry(project_root)
-                    .or_default()
-                    .push(edge.clone());
+                groups.entry(project_root).or_default().push(edge.clone());
             }
             crate::ownership::ProjectOwnership::Unowned => {
                 // File not covered by any tsconfig — explicit failure
@@ -924,10 +965,8 @@ fn group_by_ownership(
             }
             crate::ownership::ProjectOwnership::Ambiguous { candidates } => {
                 // Multiple tsconfigs claim ownership — explicit failure
-                let candidate_list: Vec<String> = candidates
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect();
+                let candidate_list: Vec<String> =
+                    candidates.iter().map(|p| p.display().to_string()).collect();
                 failures.push(ReceiverTypeResult::failed(
                     edge.edge_uid.clone(),
                     format!(
@@ -1046,10 +1085,7 @@ mod tests {
 
     #[test]
     fn test_extract_type_from_display_string_skips_any() {
-        assert_eq!(
-            extract_type_from_display_string("(local var) x: any"),
-            None
-        );
+        assert_eq!(extract_type_from_display_string("(local var) x: any"), None);
     }
 
     #[test]

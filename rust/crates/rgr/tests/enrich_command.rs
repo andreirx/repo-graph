@@ -331,7 +331,14 @@ fn dry_run_does_not_persist() {
     let snap_uid = create_ready_snapshot(&storage, "r1");
 
     // Create a file and node so the edge can derive language
-    insert_file_and_version(&mut storage, "f1", "r1", &snap_uid, "src/test.ts", "typescript");
+    insert_file_and_version(
+        &mut storage,
+        "f1",
+        "r1",
+        &snap_uid,
+        "src/test.ts",
+        "typescript",
+    );
     insert_node(&mut storage, "n1", &snap_uid, "r1", "f1", "testFunc");
 
     // Insert an unresolved edge with NULL metadata

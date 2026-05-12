@@ -58,7 +58,9 @@ pub fn print_usage() {
     eprintln!("  rmap imports <db_path> <repo_uid> <file_path>");
     eprintln!("  rmap violations <db_path> <repo_uid>");
     eprintln!("  rmap gate       <db_path> <repo_uid>");
-    eprintln!("  rmap orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]");
+    eprintln!(
+        "  rmap orient     <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]"
+    );
     eprintln!("  rmap check      <db_path> <repo_uid>");
     eprintln!("  rmap churn      <db_path> <repo_uid> [--since <expr>]");
     eprintln!("  rmap hotspots   <db_path> <repo_uid> [--since <expr>] [--exclude-tests] [--exclude-vendored]");

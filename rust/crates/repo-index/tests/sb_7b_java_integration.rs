@@ -27,23 +27,23 @@ use repo_graph_repo_index::compose::{index_path, ComposeOptions};
 use repo_graph_storage::StorageConnection;
 
 fn temp_repo(files: &[(&str, &str)]) -> (tempfile::TempDir, PathBuf) {
-	let dir = tempfile::tempdir().unwrap();
-	let repo = dir.path().to_path_buf();
-	for (path, content) in files {
-		let full = repo.join(path);
-		if let Some(parent) = full.parent() {
-			fs::create_dir_all(parent).unwrap();
-		}
-		fs::write(&full, content).unwrap();
-	}
-	(dir, repo)
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_path_buf();
+    for (path, content) in files {
+        let full = repo.join(path);
+        if let Some(parent) = full.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&full, content).unwrap();
+    }
+    (dir, repo)
 }
 
 // ── Happy path: literal JDBC URL produces DB_RESOURCE ──────────────
 
 #[test]
 fn index_java_jdbc_literal_produces_db_resource_node() {
-	let source = r#"
+    let source = r#"
 package com.example;
 
 import java.sql.DriverManager;
@@ -56,50 +56,50 @@ public class App {
     }
 }
 "#;
-	let (_dir, repo) = temp_repo(&[("src/main/java/com/example/App.java", source)]);
-	let db_dir = tempfile::tempdir().unwrap();
-	let db_path = db_dir.path().join("test.db");
+    let (_dir, repo) = temp_repo(&[("src/main/java/com/example/App.java", source)]);
+    let db_dir = tempfile::tempdir().unwrap();
+    let db_path = db_dir.path().join("test.db");
 
-	let result = index_path(
-		&repo,
-		&db_path,
-		"myservice",
-		&ComposeOptions::default(),
-	)
-	.expect("indexing must succeed");
+    let result = index_path(&repo, &db_path, "myservice", &ComposeOptions::default())
+        .expect("indexing must succeed");
 
-	assert!(result.nodes_total > 0, "should have at least file + symbol nodes");
+    assert!(
+        result.nodes_total > 0,
+        "should have at least file + symbol nodes"
+    );
 
-	// Open the DB and verify state-boundary facts are present.
-	let storage = StorageConnection::open(&db_path).unwrap();
-	let nodes = storage.query_all_nodes(&result.snapshot_uid).unwrap();
+    // Open the DB and verify state-boundary facts are present.
+    let storage = StorageConnection::open(&db_path).unwrap();
+    let nodes = storage.query_all_nodes(&result.snapshot_uid).unwrap();
 
-	let db_resource_nodes: Vec<_> = nodes
-		.iter()
-		.filter(|n| n.kind == "DB_RESOURCE")
-		.collect();
+    let db_resource_nodes: Vec<_> = nodes.iter().filter(|n| n.kind == "DB_RESOURCE").collect();
 
-	assert_eq!(
-		db_resource_nodes.len(),
-		1,
-		"expected exactly one DB_RESOURCE node for jdbc:h2:mem:testdb, got: {:?}",
-		db_resource_nodes.iter().map(|n| &n.stable_key).collect::<Vec<_>>()
-	);
+    assert_eq!(
+        db_resource_nodes.len(),
+        1,
+        "expected exactly one DB_RESOURCE node for jdbc:h2:mem:testdb, got: {:?}",
+        db_resource_nodes
+            .iter()
+            .map(|n| &n.stable_key)
+            .collect::<Vec<_>>()
+    );
 
-	// Stable key should be URL-encoded.
-	assert!(
-		db_resource_nodes[0].stable_key.contains("jdbc%3Ah2%3Amem%3Atestdb"),
-		"stable_key should contain URL-encoded JDBC URL, got: {}",
-		db_resource_nodes[0].stable_key
-	);
-	assert_eq!(db_resource_nodes[0].subtype.as_deref(), Some("CONNECTION"));
+    // Stable key should be URL-encoded.
+    assert!(
+        db_resource_nodes[0]
+            .stable_key
+            .contains("jdbc%3Ah2%3Amem%3Atestdb"),
+        "stable_key should contain URL-encoded JDBC URL, got: {}",
+        db_resource_nodes[0].stable_key
+    );
+    assert_eq!(db_resource_nodes[0].subtype.as_deref(), Some("CONNECTION"));
 }
 
 // ── Display name is decoded ────────────────────────────────────────
 
 #[test]
 fn index_java_jdbc_resource_name_is_decoded() {
-	let source = r#"
+    let source = r#"
 package com.example;
 
 import java.sql.DriverManager;
@@ -112,45 +112,40 @@ public class App {
     }
 }
 "#;
-	let (_dir, repo) = temp_repo(&[("src/main/java/com/example/App.java", source)]);
-	let db_dir = tempfile::tempdir().unwrap();
-	let db_path = db_dir.path().join("test.db");
+    let (_dir, repo) = temp_repo(&[("src/main/java/com/example/App.java", source)]);
+    let db_dir = tempfile::tempdir().unwrap();
+    let db_path = db_dir.path().join("test.db");
 
-	let result = index_path(
-		&repo,
-		&db_path,
-		"myservice",
-		&ComposeOptions::default(),
-	)
-	.unwrap();
+    let result = index_path(&repo, &db_path, "myservice", &ComposeOptions::default()).unwrap();
 
-	let storage = StorageConnection::open(&db_path).unwrap();
+    let storage = StorageConnection::open(&db_path).unwrap();
 
-	// Use list_resources which decodes the name for display.
-	let resources = storage.list_resources(&result.snapshot_uid, Some("DB_RESOURCE")).unwrap();
+    // Use list_resources which decodes the name for display.
+    let resources = storage
+        .list_resources(&result.snapshot_uid, Some("DB_RESOURCE"))
+        .unwrap();
 
-	assert_eq!(resources.len(), 1, "expected one DB_RESOURCE");
+    assert_eq!(resources.len(), 1, "expected one DB_RESOURCE");
 
-	// Name should be decoded for display (SB-7B display contract).
-	assert_eq!(
-		resources[0].name,
-		"jdbc:postgresql://localhost:5432/mydb",
-		"name should be decoded for display"
-	);
+    // Name should be decoded for display (SB-7B display contract).
+    assert_eq!(
+        resources[0].name, "jdbc:postgresql://localhost:5432/mydb",
+        "name should be decoded for display"
+    );
 
-	// Stable key should remain encoded.
-	assert!(
-		resources[0].stable_key.contains("jdbc%3Apostgresql%3A"),
-		"stable_key should remain URL-encoded, got: {}",
-		resources[0].stable_key
-	);
+    // Stable key should remain encoded.
+    assert!(
+        resources[0].stable_key.contains("jdbc%3Apostgresql%3A"),
+        "stable_key should remain URL-encoded, got: {}",
+        resources[0].stable_key
+    );
 }
 
 // ── read_write binding produces both READS and WRITES edges ────────
 
 #[test]
 fn index_java_jdbc_produces_reads_and_writes_edges() {
-	let source = r#"
+    let source = r#"
 package com.example;
 
 import java.sql.DriverManager;
@@ -163,42 +158,36 @@ public class App {
     }
 }
 "#;
-	let (_dir, repo) = temp_repo(&[("src/main/java/com/example/App.java", source)]);
-	let db_dir = tempfile::tempdir().unwrap();
-	let db_path = db_dir.path().join("test.db");
+    let (_dir, repo) = temp_repo(&[("src/main/java/com/example/App.java", source)]);
+    let db_dir = tempfile::tempdir().unwrap();
+    let db_path = db_dir.path().join("test.db");
 
-	let result = index_path(
-		&repo,
-		&db_path,
-		"myservice",
-		&ComposeOptions::default(),
-	)
-	.unwrap();
+    let result = index_path(&repo, &db_path, "myservice", &ComposeOptions::default()).unwrap();
 
-	let storage = StorageConnection::open(&db_path).unwrap();
+    let storage = StorageConnection::open(&db_path).unwrap();
 
-	// Check edge counts via list_resources.
-	let resources = storage.list_resources(&result.snapshot_uid, Some("DB_RESOURCE")).unwrap();
-	assert_eq!(resources.len(), 1);
+    // Check edge counts via list_resources.
+    let resources = storage
+        .list_resources(&result.snapshot_uid, Some("DB_RESOURCE"))
+        .unwrap();
+    assert_eq!(resources.len(), 1);
 
-	// read_write binding should produce one reader and one writer.
-	assert_eq!(
-		resources[0].readers,
-		1,
-		"read_write binding should produce READS edge"
-	);
-	assert_eq!(
-		resources[0].writers,
-		1,
-		"read_write binding should produce WRITES edge"
-	);
+    // read_write binding should produce one reader and one writer.
+    assert_eq!(
+        resources[0].readers, 1,
+        "read_write binding should produce READS edge"
+    );
+    assert_eq!(
+        resources[0].writers, 1,
+        "read_write binding should produce WRITES edge"
+    );
 }
 
 // ── Negative: dynamic URL produces no state-boundary facts ─────────
 
 #[test]
 fn index_java_jdbc_dynamic_url_produces_no_resource() {
-	let source = r#"
+    let source = r#"
 package com.example;
 
 import java.sql.DriverManager;
@@ -211,38 +200,32 @@ public class App {
     }
 }
 "#;
-	let (_dir, repo) = temp_repo(&[("src/main/java/com/example/App.java", source)]);
-	let db_dir = tempfile::tempdir().unwrap();
-	let db_path = db_dir.path().join("test.db");
+    let (_dir, repo) = temp_repo(&[("src/main/java/com/example/App.java", source)]);
+    let db_dir = tempfile::tempdir().unwrap();
+    let db_path = db_dir.path().join("test.db");
 
-	let result = index_path(
-		&repo,
-		&db_path,
-		"myservice",
-		&ComposeOptions::default(),
-	)
-	.unwrap();
+    let result = index_path(&repo, &db_path, "myservice", &ComposeOptions::default()).unwrap();
 
-	let storage = StorageConnection::open(&db_path).unwrap();
-	let nodes = storage.query_all_nodes(&result.snapshot_uid).unwrap();
+    let storage = StorageConnection::open(&db_path).unwrap();
+    let nodes = storage.query_all_nodes(&result.snapshot_uid).unwrap();
 
-	let db_resource_nodes: Vec<_> = nodes
-		.iter()
-		.filter(|n| n.kind == "DB_RESOURCE")
-		.collect();
+    let db_resource_nodes: Vec<_> = nodes.iter().filter(|n| n.kind == "DB_RESOURCE").collect();
 
-	assert!(
-		db_resource_nodes.is_empty(),
-		"dynamic URL must produce no DB_RESOURCE nodes, got: {:?}",
-		db_resource_nodes.iter().map(|n| &n.stable_key).collect::<Vec<_>>()
-	);
+    assert!(
+        db_resource_nodes.is_empty(),
+        "dynamic URL must produce no DB_RESOURCE nodes, got: {:?}",
+        db_resource_nodes
+            .iter()
+            .map(|n| &n.stable_key)
+            .collect::<Vec<_>>()
+    );
 }
 
 // ── Multiple literal URLs produce multiple DB_RESOURCE nodes ───────
 
 #[test]
 fn index_java_jdbc_multiple_urls_produce_multiple_resources() {
-	let source = r#"
+    let source = r#"
 package com.example;
 
 import java.sql.DriverManager;
@@ -259,28 +242,32 @@ public class App {
     }
 }
 "#;
-	let (_dir, repo) = temp_repo(&[("src/main/java/com/example/App.java", source)]);
-	let db_dir = tempfile::tempdir().unwrap();
-	let db_path = db_dir.path().join("test.db");
+    let (_dir, repo) = temp_repo(&[("src/main/java/com/example/App.java", source)]);
+    let db_dir = tempfile::tempdir().unwrap();
+    let db_path = db_dir.path().join("test.db");
 
-	let result = index_path(
-		&repo,
-		&db_path,
-		"myservice",
-		&ComposeOptions::default(),
-	)
-	.unwrap();
+    let result = index_path(&repo, &db_path, "myservice", &ComposeOptions::default()).unwrap();
 
-	let storage = StorageConnection::open(&db_path).unwrap();
-	let resources = storage.list_resources(&result.snapshot_uid, Some("DB_RESOURCE")).unwrap();
+    let storage = StorageConnection::open(&db_path).unwrap();
+    let resources = storage
+        .list_resources(&result.snapshot_uid, Some("DB_RESOURCE"))
+        .unwrap();
 
-	assert_eq!(
-		resources.len(),
-		2,
-		"two different JDBC URLs should produce two DB_RESOURCE nodes"
-	);
+    assert_eq!(
+        resources.len(),
+        2,
+        "two different JDBC URLs should produce two DB_RESOURCE nodes"
+    );
 
-	let names: Vec<&str> = resources.iter().map(|r| r.name.as_str()).collect();
-	assert!(names.contains(&"jdbc:h2:mem:testdb"), "H2 URL missing: {:?}", names);
-	assert!(names.contains(&"jdbc:postgresql://localhost/mydb"), "PostgreSQL URL missing: {:?}", names);
+    let names: Vec<&str> = resources.iter().map(|r| r.name.as_str()).collect();
+    assert!(
+        names.contains(&"jdbc:h2:mem:testdb"),
+        "H2 URL missing: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"jdbc:postgresql://localhost/mydb"),
+        "PostgreSQL URL missing: {:?}",
+        names
+    );
 }

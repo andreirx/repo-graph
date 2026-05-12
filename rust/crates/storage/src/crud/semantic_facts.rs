@@ -25,9 +25,9 @@ use crate::error::StorageError;
 /// the same fact_uid across extraction runs.
 ///
 /// Generated via: `uuid::Uuid::new_v4()` → frozen as constant.
-const SEMANTIC_FACT_NAMESPACE: Uuid =
-    Uuid::from_bytes([0x9a, 0x3b, 0x7c, 0x4d, 0x5e, 0x6f, 0x01, 0x23,
-                      0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x12, 0x34]);
+const SEMANTIC_FACT_NAMESPACE: Uuid = Uuid::from_bytes([
+    0x9a, 0x3b, 0x7c, 0x4d, 0x5e, 0x6f, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x12, 0x34,
+]);
 
 /// Derive a deterministic fact_uid from the semantic identity fields.
 ///
@@ -53,8 +53,12 @@ fn derive_fact_uid(fact: &NewSemanticFact) -> String {
         fact.object_ref_kind.as_deref().unwrap_or(""),
         fact.object_ref.as_deref().unwrap_or(""),
         fact.source_file,
-        fact.source_line_start.map(|n| n.to_string()).unwrap_or_default(),
-        fact.source_line_end.map(|n| n.to_string()).unwrap_or_default(),
+        fact.source_line_start
+            .map(|n| n.to_string())
+            .unwrap_or_default(),
+        fact.source_line_end
+            .map(|n| n.to_string())
+            .unwrap_or_default(),
         fact.doc_kind,
     );
 
@@ -154,15 +158,17 @@ impl StorageConnection {
         }
 
         let tx = self.connection_mut().transaction()?;
-        let now = tx.query_row(
-            "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-            [],
-            |row| row.get::<_, String>(0),
-        )?;
+        let now = tx.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
+            row.get::<_, String>(0)
+        })?;
 
         // Sort by confidence descending so highest-quality evidence is inserted first
         let mut sorted_facts: Vec<_> = facts.iter().collect();
-        sorted_facts.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        sorted_facts.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         let mut inserted = 0;
         for fact in sorted_facts {
@@ -243,16 +249,18 @@ impl StorageConnection {
         // This ensures that when INSERT OR IGNORE deduplicates, the
         // highest-confidence extraction method wins rather than
         // depending on arbitrary extractor iteration order.
-        let now = tx.query_row(
-            "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-            [],
-            |row| row.get::<_, String>(0),
-        )?;
+        let now = tx.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
+            row.get::<_, String>(0)
+        })?;
         let mut inserted = 0;
 
         // Sort by confidence descending so highest-quality evidence is inserted first
         let mut sorted_facts: Vec<_> = facts.iter().collect();
-        sorted_facts.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        sorted_facts.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         for fact in sorted_facts {
             let fact_uid = derive_fact_uid(fact);
@@ -581,7 +589,8 @@ mod tests {
         let mut conn = setup_conn();
 
         let fact = make_fact("r1", "replacement_for", "module-x");
-        conn.insert_semantic_facts(&[fact.clone()]).unwrap();
+        conn.insert_semantic_facts(std::slice::from_ref(&fact))
+            .unwrap();
 
         let first_run = conn.get_semantic_facts_for_repo("r1").unwrap();
         assert_eq!(first_run.len(), 1);
@@ -638,8 +647,8 @@ mod tests {
             source_text_excerpt: Some("improved excerpt".to_string()),
             content_hash: "hash-v2".to_string(),
             extraction_method: "explicit_marker".to_string(), // improved
-            confidence: 0.95, // higher confidence
-            generated: true,  // different
+            confidence: 0.95,                                 // higher confidence
+            generated: true,                                  // different
             doc_kind: "readme".to_string(),
         };
 
@@ -660,7 +669,10 @@ mod tests {
         let uid_a = derive_fact_uid(&fact_a);
         let uid_b = derive_fact_uid(&fact_b);
 
-        assert_ne!(uid_a, uid_b, "different identity must produce different uid");
+        assert_ne!(
+            uid_a, uid_b,
+            "different identity must produce different uid"
+        );
     }
 
     #[test]
@@ -685,7 +697,9 @@ mod tests {
 
         // Insert one fact
         let fact1 = make_fact("r1", "replacement_for", "module-a");
-        let inserted1 = conn.insert_semantic_facts(&[fact1.clone()]).unwrap();
+        let inserted1 = conn
+            .insert_semantic_facts(std::slice::from_ref(&fact1))
+            .unwrap();
         assert_eq!(inserted1, 1);
         assert_eq!(conn.get_semantic_facts_for_repo("r1").unwrap().len(), 1);
 
@@ -693,7 +707,7 @@ mod tests {
         // INSERT OR IGNORE: duplicate is silently ignored, new one inserted.
         let batch = vec![
             make_fact("r1", "replacement_for", "module-b"), // new
-            fact1.clone(), // duplicate - will be ignored
+            fact1.clone(),                                  // duplicate - will be ignored
         ];
 
         let inserted2 = conn.insert_semantic_facts(&batch).unwrap();

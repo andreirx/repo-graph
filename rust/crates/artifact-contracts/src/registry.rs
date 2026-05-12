@@ -4,9 +4,8 @@
 //! This is the authoritative source for artifact semantics.
 
 use crate::{
-    ArtifactContract, ArtifactFamily, ClassificationMaturity, DegradationPolicy,
-    FreshnessTracking, IdentityPolicy, ImpactPolicy, ProvenancePolicy, RefreshPolicy,
-    TruthKind,
+    ArtifactContract, ArtifactFamily, ClassificationMaturity, DegradationPolicy, FreshnessTracking,
+    IdentityPolicy, ImpactPolicy, ProvenancePolicy, RefreshPolicy, TruthKind,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -475,7 +474,10 @@ pub fn validate_policy_coherence() -> Vec<String> {
 
         // Rule: ExtractedFact should have DirectFromSourceFile provenance
         if contract.truth_kind == TruthKind::ExtractedFact
-            && !matches!(contract.provenance_policy, ProvenancePolicy::DirectFromSourceFile)
+            && !matches!(
+                contract.provenance_policy,
+                ProvenancePolicy::DirectFromSourceFile
+            )
         {
             errors.push(format!(
                 "{:?}: ExtractedFact should have DirectFromSourceFile provenance",
@@ -485,7 +487,10 @@ pub fn validate_policy_coherence() -> Vec<String> {
 
         // Rule: DeterministicRelationship should have DerivedFromLayer0Items provenance
         if contract.truth_kind == TruthKind::DeterministicRelationship
-            && !matches!(contract.provenance_policy, ProvenancePolicy::DerivedFromLayer0Items)
+            && !matches!(
+                contract.provenance_policy,
+                ProvenancePolicy::DerivedFromLayer0Items
+            )
         {
             errors.push(format!(
                 "{:?}: DeterministicRelationship should have DerivedFromLayer0Items provenance",
@@ -494,8 +499,10 @@ pub fn validate_policy_coherence() -> Vec<String> {
         }
 
         // Rule: DerivedFromLayer0Items should have non-empty layer_dependencies
-        if matches!(contract.provenance_policy, ProvenancePolicy::DerivedFromLayer0Items)
-            && contract.layer_dependencies.is_empty()
+        if matches!(
+            contract.provenance_policy,
+            ProvenancePolicy::DerivedFromLayer0Items
+        ) && contract.layer_dependencies.is_empty()
         {
             errors.push(format!(
                 "{:?}: DerivedFromLayer0Items provenance requires non-empty layer_dependencies",
@@ -505,7 +512,10 @@ pub fn validate_policy_coherence() -> Vec<String> {
 
         // Rule: SnapshotIndependent refresh implies SnapshotIndependent identity
         if matches!(contract.refresh_policy, RefreshPolicy::SnapshotIndependent)
-            && !matches!(contract.identity_policy, IdentityPolicy::SnapshotIndependent)
+            && !matches!(
+                contract.identity_policy,
+                IdentityPolicy::SnapshotIndependent
+            )
         {
             errors.push(format!(
                 "{:?}: SnapshotIndependent refresh should have SnapshotIndependent identity",

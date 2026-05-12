@@ -178,7 +178,10 @@ impl TsProjectOwnershipResolver {
             0 => ProjectOwnership::Unowned,
             1 => {
                 let config_path = owners[0].clone();
-                let project_root = config_path.parent().unwrap_or(&self.repo_root).to_path_buf();
+                let project_root = config_path
+                    .parent()
+                    .unwrap_or(&self.repo_root)
+                    .to_path_buf();
                 ProjectOwnership::Owned {
                     config_path,
                     project_root,
@@ -194,8 +197,7 @@ impl TsProjectOwnershipResolver {
                     }
                 } else {
                     // Genuine ambiguity
-                    let mut candidates: Vec<PathBuf> =
-                        owners.into_iter().cloned().collect();
+                    let mut candidates: Vec<PathBuf> = owners.into_iter().cloned().collect();
                     candidates.sort(); // Deterministic order
                     ProjectOwnership::Ambiguous { candidates }
                 }
@@ -220,7 +222,7 @@ fn discover_configs(repo_root: &Path) -> Result<Vec<PathBuf>, OwnershipError> {
     let mut configs = Vec::new();
 
     // Walk directory tree
-    discover_configs_recursive(repo_root, repo_root, &mut configs)?;
+    discover_configs_recursive(repo_root, &mut configs)?;
 
     // Sort for deterministic order
     configs.sort();
@@ -230,7 +232,6 @@ fn discover_configs(repo_root: &Path) -> Result<Vec<PathBuf>, OwnershipError> {
 
 fn discover_configs_recursive(
     dir: &Path,
-    repo_root: &Path,
     configs: &mut Vec<PathBuf>,
 ) -> Result<(), OwnershipError> {
     // Skip excluded directories
@@ -247,7 +248,7 @@ fn discover_configs_recursive(
         let path = entry.path();
 
         if path.is_dir() {
-            discover_configs_recursive(&path, repo_root, configs)?;
+            discover_configs_recursive(&path, configs)?;
         } else if path.is_file() {
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                 if is_ts_config_file(name) {
@@ -368,10 +369,9 @@ impl ParsedConfig {
 
         // File must match at least one include pattern
         let matches_include = self.include.is_empty()
-            || self
-                .include
-                .iter()
-                .any(|pattern| matches_glob_pattern(pattern, relative_path, &self.config_dir, repo_root));
+            || self.include.iter().any(|pattern| {
+                matches_glob_pattern(pattern, relative_path, &self.config_dir, repo_root)
+            });
 
         if !matches_include {
             return false;
@@ -387,9 +387,7 @@ impl ParsedConfig {
 
     /// Check if this is a solution-style config (has references, no own code).
     fn is_solution_style(&self) -> bool {
-        !self.references.is_empty()
-            && self.files.is_none()
-            && self.include.is_empty()
+        !self.references.is_empty() && self.files.is_none() && self.include.is_empty()
     }
 }
 
@@ -413,10 +411,12 @@ fn parse_config_recursive(
         repo_root.join(config_path)
     };
 
-    let abs_path = abs_path.canonicalize().map_err(|e| OwnershipError::ConfigParseError {
-        path: config_path.to_path_buf(),
-        reason: format!("failed to canonicalize: {}", e),
-    })?;
+    let abs_path = abs_path
+        .canonicalize()
+        .map_err(|e| OwnershipError::ConfigParseError {
+            path: config_path.to_path_buf(),
+            reason: format!("failed to canonicalize: {}", e),
+        })?;
 
     // Cycle detection
     if visited.contains(&abs_path) {
@@ -641,9 +641,7 @@ fn matches_glob_pattern(
     repo_root: &Path,
 ) -> bool {
     // Get config dir relative to repo root
-    let config_rel = config_dir
-        .strip_prefix(repo_root)
-        .unwrap_or(Path::new(""));
+    let config_rel = config_dir.strip_prefix(repo_root).unwrap_or(Path::new(""));
 
     // Pattern is relative to config dir
     let full_pattern = if config_rel.as_os_str().is_empty() {
@@ -729,10 +727,11 @@ fn glob_match_recursive(pattern: &str, path: &str) -> bool {
                 return true;
             }
             // Only advance to next '/' boundary or end
-            if i < remaining.len() && !remaining[i..].starts_with('/') {
-                if remaining[i..].find('/').is_some() {
-                    continue;
-                }
+            if i < remaining.len()
+                && !remaining[i..].starts_with('/')
+                && remaining[i..].find('/').is_some()
+            {
+                continue;
             }
         }
 
@@ -931,7 +930,9 @@ mod tests {
         assert_eq!(configs.len(), 2);
         assert!(configs.iter().any(|p| p.ends_with("tsconfig.json")));
         assert!(configs.iter().any(|p| p.ends_with("src/sub/tsconfig.json")));
-        assert!(!configs.iter().any(|p| p.to_string_lossy().contains("node_modules")));
+        assert!(!configs
+            .iter()
+            .any(|p| p.to_string_lossy().contains("node_modules")));
     }
 
     #[test]

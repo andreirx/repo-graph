@@ -74,12 +74,7 @@ fn deps_list_returns_json_envelope() {
     let (_dir, db_path) = build_indexed_db();
 
     let output = Command::new(binary_path())
-        .args([
-            "deps",
-            "list",
-            db_path.to_str().unwrap(),
-            "test-repo",
-        ])
+        .args(["deps", "list", db_path.to_str().unwrap(), "test-repo"])
         .output()
         .unwrap();
 
@@ -88,8 +83,8 @@ fn deps_list_returns_json_envelope() {
 
     // Should be valid JSON if any output
     if !stdout.is_empty() {
-        let parsed: serde_json::Value = serde_json::from_str(&stdout)
-            .expect("output should be valid JSON");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
 
         // Check envelope structure
         assert!(parsed.get("command").is_some(), "missing command field");
@@ -115,7 +110,10 @@ fn deps_list_format_json_flag_accepted() {
 
     // Should not fail with "unknown flag" error
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stderr.contains("unknown flag"), "format flag should be recognized");
+    assert!(
+        !stderr.contains("unknown flag"),
+        "format flag should be recognized"
+    );
 }
 
 #[test]
@@ -192,12 +190,7 @@ fn deps_drift_returns_json_envelope() {
     let (_dir, db_path) = build_indexed_db();
 
     let output = Command::new(binary_path())
-        .args([
-            "deps",
-            "drift",
-            db_path.to_str().unwrap(),
-            "test-repo",
-        ])
+        .args(["deps", "drift", db_path.to_str().unwrap(), "test-repo"])
         .output()
         .unwrap();
 
@@ -205,8 +198,8 @@ fn deps_drift_returns_json_envelope() {
 
     // Should be valid JSON
     if !stdout.is_empty() {
-        let parsed: serde_json::Value = serde_json::from_str(&stdout)
-            .expect("output should be valid JSON");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&stdout).expect("output should be valid JSON");
 
         // Check envelope structure
         assert!(parsed.get("command").is_some(), "missing command field");
@@ -225,7 +218,7 @@ fn deps_list_returns_modules_with_manifest_path() {
             "deps",
             "list",
             db_path.to_str().unwrap(),
-            "test-repo",  // Matches build_indexed_db repo name
+            "test-repo", // Matches build_indexed_db repo name
         ])
         .output()
         .unwrap();
@@ -237,18 +230,24 @@ fn deps_list_returns_modules_with_manifest_path() {
         stderr
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value = serde_json::from_str(&stdout)
-        .expect("output should be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("output should be valid JSON");
 
     // Verify results array is non-empty.
     let results = parsed.get("results").and_then(|r| r.as_array()).unwrap();
-    assert!(!results.is_empty(), "expected at least one module in results");
+    assert!(
+        !results.is_empty(),
+        "expected at least one module in results"
+    );
 
     // Find packages/api module and verify manifest_path.
-    let api_module = results.iter().find(|m| {
-        m.get("module").and_then(|v| v.as_str()) == Some("packages/api")
-    });
-    assert!(api_module.is_some(), "expected packages/api module in results");
+    let api_module = results
+        .iter()
+        .find(|m| m.get("module").and_then(|v| v.as_str()) == Some("packages/api"));
+    assert!(
+        api_module.is_some(),
+        "expected packages/api module in results"
+    );
     let api = api_module.unwrap();
 
     // Verify manifest_path is the package.json, not a source file.
@@ -259,7 +258,10 @@ fn deps_list_returns_modules_with_manifest_path() {
     );
 
     // Verify manifest_scope_available is true.
-    let scope_available = api.get("manifest_scope_available").and_then(|v| v.as_bool()).unwrap();
+    let scope_available = api
+        .get("manifest_scope_available")
+        .and_then(|v| v.as_bool())
+        .unwrap();
     assert!(scope_available, "manifest_scope_available should be true");
 }
 
@@ -272,7 +274,7 @@ fn deps_list_returns_declared_packages() {
             "deps",
             "list",
             db_path.to_str().unwrap(),
-            "test-repo",  // Matches build_indexed_db repo name
+            "test-repo", // Matches build_indexed_db repo name
         ])
         .output()
         .unwrap();
@@ -284,17 +286,22 @@ fn deps_list_returns_declared_packages() {
         stderr
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value = serde_json::from_str(&stdout)
-        .expect("output should be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("output should be valid JSON");
 
     let results = parsed.get("results").and_then(|r| r.as_array()).unwrap();
-    let api_module = results.iter().find(|m| {
-        m.get("module").and_then(|v| v.as_str()) == Some("packages/api")
-    }).expect("packages/api module not found");
+    let api_module = results
+        .iter()
+        .find(|m| m.get("module").and_then(|v| v.as_str()) == Some("packages/api"))
+        .expect("packages/api module not found");
 
     // Check entries contain declared packages (express, cors).
-    let entries = api_module.get("entries").and_then(|e| e.as_array()).unwrap();
-    let package_names: Vec<&str> = entries.iter()
+    let entries = api_module
+        .get("entries")
+        .and_then(|e| e.as_array())
+        .unwrap();
+    let package_names: Vec<&str> = entries
+        .iter()
         .filter_map(|e| e.get("package").and_then(|p| p.as_str()))
         .collect();
 

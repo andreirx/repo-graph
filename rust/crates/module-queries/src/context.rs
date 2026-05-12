@@ -56,10 +56,7 @@ impl ModuleQueryContext {
     /// Prior to Phase 4, this method fell back to MODULE nodes if `module_candidates`
     /// was empty. That fallback has been removed. Empty `module_candidates` now
     /// results in an empty context, surfacing repos that need module detection.
-    pub fn load(
-        storage: &StorageConnection,
-        snapshot_uid: &str,
-    ) -> Result<Self, StorageError> {
+    pub fn load(storage: &StorageConnection, snapshot_uid: &str) -> Result<Self, StorageError> {
         // Load from module_candidates table (the only source after Phase 4)
         let modules = storage.get_module_candidates_for_snapshot(snapshot_uid)?;
         let ownership = storage.get_file_ownership_for_snapshot(snapshot_uid)?;
@@ -93,9 +90,7 @@ impl ModuleQueryContext {
         }
 
         // Try module_candidate_uid
-        self.modules
-            .iter()
-            .find(|m| m.module_candidate_uid == arg)
+        self.modules.iter().find(|m| m.module_candidate_uid == arg)
     }
 
     /// Get files owned by a specific module.

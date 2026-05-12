@@ -84,7 +84,10 @@ fn index_amqp_fixture_produces_amqp_surfaces() {
             .iter()
             .map(|s| format!(
                 "{}:{} {} {:?}",
-                s.source_file, s.line_start, s.channel_kind.as_str(), s.direction
+                s.source_file,
+                s.line_start,
+                s.channel_kind.as_str(),
+                s.direction
             ))
             .collect::<Vec<_>>()
     );
@@ -144,7 +147,7 @@ fn amqp_provider_consumer_roles_detected() {
         providers.len()
     );
     assert!(
-        consumers.len() >= 1,
+        !consumers.is_empty(),
         "expected at least 1 consumer surface (consume); got {}",
         consumers.len()
     );

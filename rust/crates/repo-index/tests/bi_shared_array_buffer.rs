@@ -87,7 +87,10 @@ fn index_sab_fixture_produces_sab_surfaces() {
             .iter()
             .map(|s| format!(
                 "{}:{} {} {:?}",
-                s.source_file, s.line_start, s.channel_kind.as_str(), s.direction
+                s.source_file,
+                s.line_start,
+                s.channel_kind.as_str(),
+                s.direction
             ))
             .collect::<Vec<_>>()
     );
@@ -179,7 +182,7 @@ fn sab_provider_consumer_roles_detected() {
         providers.len()
     );
     assert!(
-        consumers.len() >= 1,
+        !consumers.is_empty(),
         "expected at least 1 consumer surface (wait); got {}",
         consumers.len()
     );

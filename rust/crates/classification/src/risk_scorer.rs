@@ -51,10 +51,7 @@ pub struct RiskEntry {
 ///   1. `risk_score` descending
 ///   2. `hotspot_score` descending
 ///   3. `file_path` ascending
-pub fn compute_risk(
-    hotspots: &[HotspotEntry],
-    coverage: &[CoverageInput],
-) -> Vec<RiskEntry> {
+pub fn compute_risk(hotspots: &[HotspotEntry], coverage: &[CoverageInput]) -> Vec<RiskEntry> {
     // Build coverage lookup by file path
     let coverage_map: HashMap<&str, f64> = coverage
         .iter()
@@ -65,18 +62,20 @@ pub fn compute_risk(
     let mut results: Vec<RiskEntry> = hotspots
         .iter()
         .filter_map(|h| {
-            coverage_map.get(h.file_path.as_str()).map(|&line_coverage| {
-                let coverage_gap = 1.0 - line_coverage;
-                let risk_score = (h.hotspot_score as f64) * coverage_gap;
-                RiskEntry {
-                    file_path: h.file_path.clone(),
-                    risk_score,
-                    hotspot_score: h.hotspot_score,
-                    line_coverage,
-                    lines_changed: h.lines_changed,
-                    sum_complexity: h.sum_complexity,
-                }
-            })
+            coverage_map
+                .get(h.file_path.as_str())
+                .map(|&line_coverage| {
+                    let coverage_gap = 1.0 - line_coverage;
+                    let risk_score = (h.hotspot_score as f64) * coverage_gap;
+                    RiskEntry {
+                        file_path: h.file_path.clone(),
+                        risk_score,
+                        hotspot_score: h.hotspot_score,
+                        line_coverage,
+                        lines_changed: h.lines_changed,
+                        sum_complexity: h.sum_complexity,
+                    }
+                })
         })
         .collect();
 
@@ -235,15 +234,9 @@ mod tests {
 
     #[test]
     fn compute_risk_tiebreaker_file_path() {
-        let hotspots = vec![
-            make_hotspot("z.ts", 100, 10),
-            make_hotspot("a.ts", 100, 10),
-        ];
+        let hotspots = vec![make_hotspot("z.ts", 100, 10), make_hotspot("a.ts", 100, 10)];
 
-        let coverage = vec![
-            make_coverage("z.ts", 0.5),
-            make_coverage("a.ts", 0.5),
-        ];
+        let coverage = vec![make_coverage("z.ts", 0.5), make_coverage("a.ts", 0.5)];
 
         let results = compute_risk(&hotspots, &coverage);
 
@@ -286,7 +279,7 @@ mod tests {
         ];
 
         let coverage = vec![
-            make_coverage("well_tested.ts", 0.95),  // risk = 1000 * 0.05 = 50
+            make_coverage("well_tested.ts", 0.95), // risk = 1000 * 0.05 = 50
             make_coverage("poorly_tested.ts", 0.1), // risk = 250 * 0.9 = 225
         ];
 

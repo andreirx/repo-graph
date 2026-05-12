@@ -303,21 +303,15 @@ mod tests {
     #[test]
     fn same_directory_resolves() {
         let resolver = IncludeResolver::with_defaults();
-        let indexed = make_indexed_files(&[
-            "src/core/main.c",
-            "src/core/util.h",
-        ]);
+        let indexed = make_indexed_files(&["src/core/main.c", "src/core/util.h"]);
 
-        let result = resolver.resolve(
-            "src/core/main.c",
-            "util.h",
-            false,
-            &indexed,
-            "r1",
-        );
+        let result = resolver.resolve("src/core/main.c", "util.h", false, &indexed, "r1");
 
         assert_eq!(result.status, ResolutionStatus::Resolved);
-        assert_eq!(result.target_stable_key, Some("r1:src/core/util.h:FILE".to_string()));
+        assert_eq!(
+            result.target_stable_key,
+            Some("r1:src/core/util.h:FILE".to_string())
+        );
     }
 
     #[test]
@@ -326,21 +320,18 @@ mod tests {
         let resolver = IncludeResolver::with_defaults();
         let indexed = make_indexed_files(&[
             "src/core/main.c",
-            "src/core/config.h",  // same-dir
-            "include/config.h",   // include root
+            "src/core/config.h", // same-dir
+            "include/config.h",  // include root
         ]);
 
-        let result = resolver.resolve(
-            "src/core/main.c",
-            "config.h",
-            false,
-            &indexed,
-            "r1",
-        );
+        let result = resolver.resolve("src/core/main.c", "config.h", false, &indexed, "r1");
 
         // Same-directory is authoritative.
         assert_eq!(result.status, ResolutionStatus::Resolved);
-        assert_eq!(result.target_stable_key, Some("r1:src/core/config.h:FILE".to_string()));
+        assert_eq!(
+            result.target_stable_key,
+            Some("r1:src/core/config.h:FILE".to_string())
+        );
     }
 
     // ── Include root resolution ──────────────────────────────────
@@ -348,61 +339,43 @@ mod tests {
     #[test]
     fn include_root_resolves() {
         let resolver = IncludeResolver::with_defaults();
-        let indexed = make_indexed_files(&[
-            "core/main.c",
-            "include/util.h",
-        ]);
+        let indexed = make_indexed_files(&["core/main.c", "include/util.h"]);
 
-        let result = resolver.resolve(
-            "core/main.c",
-            "util.h",
-            false,
-            &indexed,
-            "r1",
-        );
+        let result = resolver.resolve("core/main.c", "util.h", false, &indexed, "r1");
 
         assert_eq!(result.status, ResolutionStatus::Resolved);
-        assert_eq!(result.target_stable_key, Some("r1:include/util.h:FILE".to_string()));
+        assert_eq!(
+            result.target_stable_key,
+            Some("r1:include/util.h:FILE".to_string())
+        );
     }
 
     #[test]
     fn inc_root_resolves() {
         let resolver = IncludeResolver::with_defaults();
-        let indexed = make_indexed_files(&[
-            "src/main.c",
-            "inc/types.h",
-        ]);
+        let indexed = make_indexed_files(&["src/main.c", "inc/types.h"]);
 
-        let result = resolver.resolve(
-            "src/main.c",
-            "types.h",
-            false,
-            &indexed,
-            "r1",
-        );
+        let result = resolver.resolve("src/main.c", "types.h", false, &indexed, "r1");
 
         assert_eq!(result.status, ResolutionStatus::Resolved);
-        assert_eq!(result.target_stable_key, Some("r1:inc/types.h:FILE".to_string()));
+        assert_eq!(
+            result.target_stable_key,
+            Some("r1:inc/types.h:FILE".to_string())
+        );
     }
 
     #[test]
     fn src_include_root_resolves() {
         let resolver = IncludeResolver::with_defaults();
-        let indexed = make_indexed_files(&[
-            "src/main.c",
-            "src/include/api.h",
-        ]);
+        let indexed = make_indexed_files(&["src/main.c", "src/include/api.h"]);
 
-        let result = resolver.resolve(
-            "src/main.c",
-            "api.h",
-            false,
-            &indexed,
-            "r1",
-        );
+        let result = resolver.resolve("src/main.c", "api.h", false, &indexed, "r1");
 
         assert_eq!(result.status, ResolutionStatus::Resolved);
-        assert_eq!(result.target_stable_key, Some("r1:src/include/api.h:FILE".to_string()));
+        assert_eq!(
+            result.target_stable_key,
+            Some("r1:src/include/api.h:FILE".to_string())
+        );
     }
 
     // ── Header-to-header resolution ──────────────────────────────
@@ -410,42 +383,30 @@ mod tests {
     #[test]
     fn header_to_header_same_dir() {
         let resolver = IncludeResolver::with_defaults();
-        let indexed = make_indexed_files(&[
-            "include/a.h",
-            "include/b.h",
-        ]);
+        let indexed = make_indexed_files(&["include/a.h", "include/b.h"]);
 
-        let result = resolver.resolve(
-            "include/a.h",
-            "b.h",
-            false,
-            &indexed,
-            "r1",
-        );
+        let result = resolver.resolve("include/a.h", "b.h", false, &indexed, "r1");
 
         assert_eq!(result.status, ResolutionStatus::Resolved);
-        assert_eq!(result.target_stable_key, Some("r1:include/b.h:FILE".to_string()));
+        assert_eq!(
+            result.target_stable_key,
+            Some("r1:include/b.h:FILE".to_string())
+        );
     }
 
     #[test]
     fn header_to_header_via_include_root() {
         let resolver = IncludeResolver::with_defaults();
-        let indexed = make_indexed_files(&[
-            "include/sub/a.h",
-            "include/util.h",
-        ]);
+        let indexed = make_indexed_files(&["include/sub/a.h", "include/util.h"]);
 
         // a.h in include/sub/ includes "util.h" which is in include/
-        let result = resolver.resolve(
-            "include/sub/a.h",
-            "util.h",
-            false,
-            &indexed,
-            "r1",
-        );
+        let result = resolver.resolve("include/sub/a.h", "util.h", false, &indexed, "r1");
 
         assert_eq!(result.status, ResolutionStatus::Resolved);
-        assert_eq!(result.target_stable_key, Some("r1:include/util.h:FILE".to_string()));
+        assert_eq!(
+            result.target_stable_key,
+            Some("r1:include/util.h:FILE".to_string())
+        );
     }
 
     // ── Subpath includes ─────────────────────────────────────────
@@ -453,21 +414,15 @@ mod tests {
     #[test]
     fn subpath_include_resolves() {
         let resolver = IncludeResolver::with_defaults();
-        let indexed = make_indexed_files(&[
-            "src/main.c",
-            "include/sub/foo.h",
-        ]);
+        let indexed = make_indexed_files(&["src/main.c", "include/sub/foo.h"]);
 
-        let result = resolver.resolve(
-            "src/main.c",
-            "sub/foo.h",
-            false,
-            &indexed,
-            "r1",
-        );
+        let result = resolver.resolve("src/main.c", "sub/foo.h", false, &indexed, "r1");
 
         assert_eq!(result.status, ResolutionStatus::Resolved);
-        assert_eq!(result.target_stable_key, Some("r1:include/sub/foo.h:FILE".to_string()));
+        assert_eq!(
+            result.target_stable_key,
+            Some("r1:include/sub/foo.h:FILE".to_string())
+        );
     }
 
     #[test]
@@ -476,16 +431,10 @@ mod tests {
         let resolver = IncludeResolver::with_defaults();
         let indexed = make_indexed_files(&[
             "src/main.c",
-            "include/foo.h",  // NOT include/sub/foo.h
+            "include/foo.h", // NOT include/sub/foo.h
         ]);
 
-        let result = resolver.resolve(
-            "src/main.c",
-            "sub/foo.h",
-            false,
-            &indexed,
-            "r1",
-        );
+        let result = resolver.resolve("src/main.c", "sub/foo.h", false, &indexed, "r1");
 
         assert_eq!(result.status, ResolutionStatus::Unresolved);
     }
@@ -494,24 +443,16 @@ mod tests {
 
     #[test]
     fn configured_root_resolves() {
-        let resolver = IncludeResolver::with_configured_roots(vec![
-            "custom/headers".to_string(),
-        ]);
-        let indexed = make_indexed_files(&[
-            "src/main.c",
-            "custom/headers/api.h",
-        ]);
+        let resolver = IncludeResolver::with_configured_roots(vec!["custom/headers".to_string()]);
+        let indexed = make_indexed_files(&["src/main.c", "custom/headers/api.h"]);
 
-        let result = resolver.resolve(
-            "src/main.c",
-            "api.h",
-            false,
-            &indexed,
-            "r1",
-        );
+        let result = resolver.resolve("src/main.c", "api.h", false, &indexed, "r1");
 
         assert_eq!(result.status, ResolutionStatus::Resolved);
-        assert_eq!(result.target_stable_key, Some("r1:custom/headers/api.h:FILE".to_string()));
+        assert_eq!(
+            result.target_stable_key,
+            Some("r1:custom/headers/api.h:FILE".to_string())
+        );
     }
 
     #[test]
@@ -524,19 +465,9 @@ mod tests {
             configured_roots: vec!["custom".to_string()],
             conventional_roots: vec!["include"],
         });
-        let indexed = make_indexed_files(&[
-            "src/main.c",
-            "custom/util.h",
-            "include/util.h",
-        ]);
+        let indexed = make_indexed_files(&["src/main.c", "custom/util.h", "include/util.h"]);
 
-        let result = resolver.resolve(
-            "src/main.c",
-            "util.h",
-            false,
-            &indexed,
-            "r1",
-        );
+        let result = resolver.resolve("src/main.c", "util.h", false, &indexed, "r1");
 
         // Both match — ambiguous.
         assert_eq!(result.status, ResolutionStatus::Ambiguous);
@@ -548,23 +479,17 @@ mod tests {
     #[test]
     fn ambiguous_when_multiple_roots_have_same_header() {
         let resolver = IncludeResolver::with_defaults();
-        let indexed = make_indexed_files(&[
-            "src/main.c",
-            "include/config.h",
-            "inc/config.h",
-        ]);
+        let indexed = make_indexed_files(&["src/main.c", "include/config.h", "inc/config.h"]);
 
-        let result = resolver.resolve(
-            "src/main.c",
-            "config.h",
-            false,
-            &indexed,
-            "r1",
-        );
+        let result = resolver.resolve("src/main.c", "config.h", false, &indexed, "r1");
 
         assert_eq!(result.status, ResolutionStatus::Ambiguous);
-        assert!(result.candidates.contains(&"r1:include/config.h:FILE".to_string()));
-        assert!(result.candidates.contains(&"r1:inc/config.h:FILE".to_string()));
+        assert!(result
+            .candidates
+            .contains(&"r1:include/config.h:FILE".to_string()));
+        assert!(result
+            .candidates
+            .contains(&"r1:inc/config.h:FILE".to_string()));
     }
 
     // ── Angle-bracket includes (v1.2) ─────────────────────────────
@@ -573,21 +498,21 @@ mod tests {
     fn angle_bracket_resolves_via_conventional_root() {
         // v1.2: <ngx_core.h> should resolve if it exists in conventional root.
         let resolver = IncludeResolver::with_defaults();
-        let indexed = make_indexed_files(&[
-            "src/http/request.c",
-            "include/ngx_core.h",
-        ]);
+        let indexed = make_indexed_files(&["src/http/request.c", "include/ngx_core.h"]);
 
         let result = resolver.resolve(
             "src/http/request.c",
             "ngx_core.h",
-            true,  // angle-bracket include
+            true, // angle-bracket include
             &indexed,
             "nginx",
         );
 
         assert_eq!(result.status, ResolutionStatus::Resolved);
-        assert_eq!(result.target_stable_key, Some("nginx:include/ngx_core.h:FILE".to_string()));
+        assert_eq!(
+            result.target_stable_key,
+            Some("nginx:include/ngx_core.h:FILE".to_string())
+        );
     }
 
     #[test]
@@ -597,14 +522,14 @@ mod tests {
         let resolver = IncludeResolver::with_defaults();
         let indexed = make_indexed_files(&[
             "src/main.c",
-            "src/foo.h",  // same dir as source
-            // no include/foo.h
+            "src/foo.h", // same dir as source
+                         // no include/foo.h
         ]);
 
         let result = resolver.resolve(
             "src/main.c",
             "foo.h",
-            true,  // angle-bracket skips same-dir
+            true, // angle-bracket skips same-dir
             &indexed,
             "r1",
         );
@@ -625,7 +550,7 @@ mod tests {
         let result = resolver.resolve(
             "src/main.c",
             "stdio.h",
-            true,  // angle-bracket
+            true, // angle-bracket
             &indexed,
             "r1",
         );
@@ -639,43 +564,46 @@ mod tests {
         let resolver = IncludeResolver::with_defaults();
         let indexed = make_indexed_files(&[
             "src/main.c",
-            "include/stdio.h",  // vendored locally
+            "include/stdio.h", // vendored locally
         ]);
 
         let result = resolver.resolve(
             "src/main.c",
             "stdio.h",
-            true,  // angle-bracket
+            true, // angle-bracket
             &indexed,
             "r1",
         );
 
         // Resolves because local header exists in conventional root.
         assert_eq!(result.status, ResolutionStatus::Resolved);
-        assert_eq!(result.target_stable_key, Some("r1:include/stdio.h:FILE".to_string()));
+        assert_eq!(
+            result.target_stable_key,
+            Some("r1:include/stdio.h:FILE".to_string())
+        );
     }
 
     #[test]
     fn angle_bracket_ambiguous_when_multiple_matches() {
         // v1.2: ambiguity detection applies to angle-bracket too.
         let resolver = IncludeResolver::with_defaults();
-        let indexed = make_indexed_files(&[
-            "src/main.c",
-            "include/config.h",
-            "inc/config.h",
-        ]);
+        let indexed = make_indexed_files(&["src/main.c", "include/config.h", "inc/config.h"]);
 
         let result = resolver.resolve(
             "src/main.c",
             "config.h",
-            true,  // angle-bracket
+            true, // angle-bracket
             &indexed,
             "r1",
         );
 
         assert_eq!(result.status, ResolutionStatus::Ambiguous);
-        assert!(result.candidates.contains(&"r1:include/config.h:FILE".to_string()));
-        assert!(result.candidates.contains(&"r1:inc/config.h:FILE".to_string()));
+        assert!(result
+            .candidates
+            .contains(&"r1:include/config.h:FILE".to_string()));
+        assert!(result
+            .candidates
+            .contains(&"r1:inc/config.h:FILE".to_string()));
     }
 
     #[test]
@@ -684,21 +612,24 @@ mod tests {
         let resolver = IncludeResolver::with_defaults();
         let indexed = make_indexed_files(&[
             "src/main.c",
-            "src/foo.h",       // same dir
-            "include/foo.h",   // also in conventional root
+            "src/foo.h",     // same dir
+            "include/foo.h", // also in conventional root
         ]);
 
         let result = resolver.resolve(
             "src/main.c",
             "foo.h",
-            false,  // quoted — checks same-dir
+            false, // quoted — checks same-dir
             &indexed,
             "r1",
         );
 
         // Same-dir wins (authoritative, returns immediately).
         assert_eq!(result.status, ResolutionStatus::Resolved);
-        assert_eq!(result.target_stable_key, Some("r1:src/foo.h:FILE".to_string()));
+        assert_eq!(
+            result.target_stable_key,
+            Some("r1:src/foo.h:FILE".to_string())
+        );
     }
 
     // ── No sibling magic ─────────────────────────────────────────
@@ -708,18 +639,9 @@ mod tests {
         // handlers/x.c includes "core/y.h" — should NOT resolve
         // because we don't search sibling directories.
         let resolver = IncludeResolver::with_defaults();
-        let indexed = make_indexed_files(&[
-            "handlers/x.c",
-            "core/y.h",
-        ]);
+        let indexed = make_indexed_files(&["handlers/x.c", "core/y.h"]);
 
-        let result = resolver.resolve(
-            "handlers/x.c",
-            "core/y.h",
-            false,
-            &indexed,
-            "r1",
-        );
+        let result = resolver.resolve("handlers/x.c", "core/y.h", false, &indexed, "r1");
 
         // This would only resolve if "core/y.h" existed under same-dir
         // or an include root. It doesn't.
@@ -731,19 +653,10 @@ mod tests {
     #[test]
     fn no_suffix_guessing() {
         let resolver = IncludeResolver::with_defaults();
-        let indexed = make_indexed_files(&[
-            "src/main.c",
-            "include/foo.h",
-        ]);
+        let indexed = make_indexed_files(&["src/main.c", "include/foo.h"]);
 
         // #include "foo" should NOT match "foo.h"
-        let result = resolver.resolve(
-            "src/main.c",
-            "foo",
-            false,
-            &indexed,
-            "r1",
-        );
+        let result = resolver.resolve("src/main.c", "foo", false, &indexed, "r1");
 
         assert_eq!(result.status, ResolutionStatus::Unresolved);
     }
@@ -772,10 +685,7 @@ mod tests {
     #[test]
     fn resolution_map_get_resolved_key() {
         let config = IncludeResolverConfig::default();
-        let paths = vec![
-            "src/main.c".to_string(),
-            "include/util.h".to_string(),
-        ];
+        let paths = vec!["src/main.c".to_string(), "include/util.h".to_string()];
         let map = build_include_resolution_map(&paths, "r1", &config);
 
         let key = map.get_resolved_key("src/main.c", "util.h", false);

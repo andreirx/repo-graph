@@ -42,12 +42,36 @@ use serde::{Deserialize, Serialize};
 ///
 /// Convention identifiers match the TS implementation in `spring-bean-detector.ts`.
 const SPRING_CLASS_STEREOTYPES: &[(&str, &str, &str)] = &[
-    ("Component", "spring_component", "class annotated @Component - container-managed bean"),
-    ("Service", "spring_service", "class annotated @Service - business logic bean"),
-    ("Repository", "spring_repository", "class annotated @Repository - data access bean"),
-    ("Controller", "spring_controller", "class annotated @Controller - MVC controller bean"),
-    ("RestController", "spring_rest_controller", "class annotated @RestController - HTTP handler bean"),
-    ("Configuration", "spring_configuration", "class annotated @Configuration - bean factory class"),
+    (
+        "Component",
+        "spring_component",
+        "class annotated @Component - container-managed bean",
+    ),
+    (
+        "Service",
+        "spring_service",
+        "class annotated @Service - business logic bean",
+    ),
+    (
+        "Repository",
+        "spring_repository",
+        "class annotated @Repository - data access bean",
+    ),
+    (
+        "Controller",
+        "spring_controller",
+        "class annotated @Controller - MVC controller bean",
+    ),
+    (
+        "RestController",
+        "spring_rest_controller",
+        "class annotated @RestController - HTTP handler bean",
+    ),
+    (
+        "Configuration",
+        "spring_configuration",
+        "class annotated @Configuration - bean factory class",
+    ),
 ];
 
 /// Method-level Spring annotation for factory methods.
@@ -271,9 +295,13 @@ mod tests {
 
         // Verify payload contract matches TS spring-bean-detector.ts
         assert!(results[0].value_json.contains(r#""annotation":"@Service""#));
-        assert!(results[0].value_json.contains(r#""convention":"spring_service""#));
+        assert!(results[0]
+            .value_json
+            .contains(r#""convention":"spring_service""#));
         assert!(results[0].value_json.contains(r#""reason":"#));
-        assert!(results[0].basis_json.contains(r#""convention":"spring_service""#));
+        assert!(results[0]
+            .basis_json
+            .contains(r#""convention":"spring_service""#));
         assert!(results[0].basis_json.contains(r#""classifier_version":1"#));
     }
 
@@ -471,7 +499,10 @@ mod tests {
         }];
 
         let results = classify_spring_liveness(&nodes);
-        assert!(results.is_empty(), "INTERFACE should not match stereotype annotations");
+        assert!(
+            results.is_empty(),
+            "INTERFACE should not match stereotype annotations"
+        );
     }
 
     #[test]
@@ -503,7 +534,9 @@ mod tests {
         assert_eq!(results.len(), 1);
         // Should emit simple name with @ prefix
         assert!(results[0].value_json.contains(r#""annotation":"@Service""#));
-        assert!(results[0].value_json.contains(r#""convention":"spring_service""#));
+        assert!(results[0]
+            .value_json
+            .contains(r#""convention":"spring_service""#));
     }
 
     #[test]
@@ -517,7 +550,9 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert!(results[0].value_json.contains(r#""annotation":"@Bean""#));
-        assert!(results[0].value_json.contains(r#""convention":"spring_bean_factory""#));
+        assert!(results[0]
+            .value_json
+            .contains(r#""convention":"spring_bean_factory""#));
     }
 
     #[test]

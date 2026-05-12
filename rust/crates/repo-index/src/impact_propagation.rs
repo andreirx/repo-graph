@@ -23,7 +23,7 @@
 
 use std::collections::HashMap;
 
-use artifact_contracts::{get_contract, families_with_provenance, ArtifactFamily, ImpactPolicy};
+use artifact_contracts::{families_with_provenance, get_contract, ArtifactFamily, ImpactPolicy};
 use repo_graph_storage::FreshnessStoragePort;
 
 /// Report of impact propagation results.
@@ -116,11 +116,7 @@ pub fn propagate_impact<S: FreshnessStoragePort>(
                 // Mark rows whose provenance depends on changed keys
                 let table = family_to_table(family);
                 if let Some(table) = table {
-                    let count = storage.mark_impacted_by_stable_keys(
-                        snapshot_uid,
-                        table,
-                        &keys,
-                    )?;
+                    let count = storage.mark_impacted_by_stable_keys(snapshot_uid, table, &keys)?;
                     report.add(family, count);
                 } else {
                     report.skip(family);
@@ -213,9 +209,18 @@ mod tests {
 
     #[test]
     fn family_to_table_maps_freshness_tracked() {
-        assert_eq!(family_to_table(ArtifactFamily::Inferences), Some("inferences"));
-        assert_eq!(family_to_table(ArtifactFamily::BoundaryContracts), Some("boundary_contracts"));
-        assert_eq!(family_to_table(ArtifactFamily::ModuleCandidates), Some("module_candidates"));
+        assert_eq!(
+            family_to_table(ArtifactFamily::Inferences),
+            Some("inferences")
+        );
+        assert_eq!(
+            family_to_table(ArtifactFamily::BoundaryContracts),
+            Some("boundary_contracts")
+        );
+        assert_eq!(
+            family_to_table(ArtifactFamily::ModuleCandidates),
+            Some("module_candidates")
+        );
     }
 
     #[test]

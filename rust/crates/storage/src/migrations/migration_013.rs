@@ -10,7 +10,7 @@ use crate::error::StorageError;
 use crate::migrations::record_migration;
 
 pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
-	conn.execute_batch(
+    conn.execute_batch(
 		r#"
 		CREATE TABLE IF NOT EXISTS project_surfaces (
 			project_surface_uid    TEXT PRIMARY KEY,
@@ -46,6 +46,6 @@ pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
 		"#,
 	)?;
 
-	record_migration(conn, 13, "013-project-surfaces")?;
-	Ok(())
+    record_migration(conn, 13, "013-project-surfaces")?;
+    Ok(())
 }

@@ -147,7 +147,7 @@ mod tests {
         parser.parse(source, None).unwrap()
     }
 
-    fn get_function_body(tree: &tree_sitter::Tree) -> tree_sitter::Node {
+    fn get_function_body(tree: &tree_sitter::Tree) -> tree_sitter::Node<'_> {
         let root = tree.root_node();
         let func = root.child(0).unwrap();
         assert_eq!(func.kind(), "function_definition");
@@ -196,9 +196,8 @@ mod tests {
 
     #[test]
     fn multiple_catch_clauses() {
-        let tree = parse_cpp(
-            "void foo() { try { x(); } catch (int) {} catch (char*) {} catch (...) {} }",
-        );
+        let tree =
+            parse_cpp("void foo() { try { x(); } catch (int) {} catch (char*) {} catch (...) {} }");
         let body = get_function_body(&tree);
 
         let metrics = compute_function_metrics(&body, None);

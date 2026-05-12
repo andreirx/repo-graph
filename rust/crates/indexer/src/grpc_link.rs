@@ -7,7 +7,7 @@
 //! # What GR-3A surfaces
 //!
 //! - "provider surface X and consumer surface Y appear to belong to the
-//!    same proto service contract"
+//!   same proto service contract"
 //! - candidate link for agent inspection
 //!
 //! # What GR-3A does NOT claim
@@ -101,7 +101,9 @@ pub fn find_grpc_links(
 
     for consumer in consumers {
         // Find providers with matching contract
-        if let Some(matching_providers) = providers_by_contract.get(consumer.contract_element_uid.as_str()) {
+        if let Some(matching_providers) =
+            providers_by_contract.get(consumer.contract_element_uid.as_str())
+        {
             for provider in matching_providers {
                 links.push(GrpcLink {
                     provider_surface_uid: provider.surface_uid.clone(),
@@ -265,7 +267,8 @@ where
 
             // Compute provenance from stable anchors (ACR-5)
             // Extract repo_uid from provider stable key (format: {repo}:{path}#{symbol}:SYMBOL:{type})
-            let repo_uid = link.provider_stable_key
+            let repo_uid = link
+                .provider_stable_key
                 .split(':')
                 .next()
                 .unwrap_or("unknown");
@@ -464,7 +467,10 @@ mod tests {
         // Different contract — critical: same provider/consumer pair with
         // different services must produce different link UIDs
         let uid6 = generate_link_uid("snap-1", "p1", "c1", "ce2");
-        assert_ne!(uid1, uid6, "Different contracts must produce different UIDs");
+        assert_ne!(
+            uid1, uid6,
+            "Different contracts must produce different UIDs"
+        );
     }
 
     #[test]
@@ -491,7 +497,11 @@ mod tests {
         let links = find_grpc_links(&providers, &consumers);
 
         // Should produce 2 links: (p1, c1, Greeter) and (p1, c1, Health)
-        assert_eq!(links.len(), 2, "Multi-service pair should produce 2 distinct links");
+        assert_eq!(
+            links.len(),
+            2,
+            "Multi-service pair should produce 2 distinct links"
+        );
 
         // Verify different contracts
         let contracts: std::collections::HashSet<_> = links
@@ -513,6 +523,10 @@ mod tests {
                 )
             })
             .collect();
-        assert_eq!(link_uids.len(), 2, "Link UIDs must be distinct per contract");
+        assert_eq!(
+            link_uids.len(),
+            2,
+            "Link UIDs must be distinct per contract"
+        );
     }
 }

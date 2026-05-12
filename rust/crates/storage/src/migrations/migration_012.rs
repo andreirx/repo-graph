@@ -31,8 +31,8 @@ use crate::error::StorageError;
 use crate::migrations::record_migration;
 
 pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
-	// Create the extraction_edges table and indexes.
-	conn.execute_batch(
+    // Create the extraction_edges table and indexes.
+    conn.execute_batch(
 		r#"
 		CREATE TABLE IF NOT EXISTS extraction_edges (
 			edge_uid        TEXT PRIMARY KEY,
@@ -56,16 +56,14 @@ pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
 		"#,
 	)?;
 
-	// Conditional copy of any surviving staged_edges rows.
-	let staged_count: i64 =
-		conn.query_row("SELECT COUNT(*) FROM staged_edges", [], |row| row.get(0))?;
+    // Conditional copy of any surviving staged_edges rows.
+    let staged_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM staged_edges", [], |row| row.get(0))?;
 
-	if staged_count > 0 {
-		conn.execute_batch(
-			"INSERT OR IGNORE INTO extraction_edges SELECT * FROM staged_edges",
-		)?;
-	}
+    if staged_count > 0 {
+        conn.execute_batch("INSERT OR IGNORE INTO extraction_edges SELECT * FROM staged_edges")?;
+    }
 
-	record_migration(conn, 12, "012-extraction-edges")?;
-	Ok(())
+    record_migration(conn, 12, "012-extraction-edges")?;
+    Ok(())
 }

@@ -231,10 +231,10 @@ fn extract_bindings_recursive(
             // Check if this is a require('nats') assignment
             for i in 0..node.child_count() {
                 if let Some(declarator) = node.child(i) {
-                    if declarator.kind() == "variable_declarator" {
-                        if is_nats_require_declarator(&declarator, src) {
-                            extract_commonjs_bindings(&declarator, src, bindings);
-                        }
+                    if declarator.kind() == "variable_declarator"
+                        && is_nats_require_declarator(&declarator, src)
+                    {
+                        extract_commonjs_bindings(&declarator, src, bindings);
                     }
                 }
             }
@@ -556,7 +556,9 @@ fn extract_connection_vars_recursive(
                                         // CRITICAL: Verify receiver is a NATS namespace import
                                         // AND it is not shadowed at this scope
                                         if method_name == "connect"
-                                            && bindings.namespace_identifiers.contains(receiver_name)
+                                            && bindings
+                                                .namespace_identifiers
+                                                .contains(receiver_name)
                                             && !scope_tree.is_shadowed_at(receiver_name, call_scope)
                                         {
                                             if let Ok(var_name) = name_node.utf8_text(src) {
@@ -714,9 +716,7 @@ fn try_extract_nats_call(
     let subject = extract_subject_arg(&arguments, src);
 
     // Require extractable subject to emit
-    if subject.is_none() {
-        return None;
-    }
+    subject.as_ref()?;
 
     let start = node.start_position();
     let end = node.end_position();

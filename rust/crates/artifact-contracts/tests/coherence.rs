@@ -6,8 +6,7 @@
 use artifact_contracts::{
     all_families, families_by_truth_kind, families_with_freshness_tracking,
     families_with_provenance, get_contract, unsupported_families, ArtifactFamily,
-    DegradationPolicy, IdentityPolicy, ImpactPolicy, ProvenancePolicy, RefreshPolicy,
-    TruthKind,
+    DegradationPolicy, IdentityPolicy, ImpactPolicy, ProvenancePolicy, RefreshPolicy, TruthKind,
 };
 
 #[test]
@@ -48,7 +47,8 @@ fn derived_provenance_has_dependencies() {
         let contract = get_contract(*family);
         if matches!(
             contract.provenance_policy,
-            ProvenancePolicy::DerivedFromLayer0Items | ProvenancePolicy::DerivedFromArtifactFamilies
+            ProvenancePolicy::DerivedFromLayer0Items
+                | ProvenancePolicy::DerivedFromArtifactFamilies
         ) {
             assert!(
                 !contract.layer_dependencies.is_empty(),
@@ -98,7 +98,10 @@ fn governance_overlays_are_snapshot_independent() {
             contract.refresh_policy
         );
         assert!(
-            matches!(contract.impact_policy, ImpactPolicy::UnaffectedByLayer0Refresh),
+            matches!(
+                contract.impact_policy,
+                ImpactPolicy::UnaffectedByLayer0Refresh
+            ),
             "{:?}: GovernanceOverlay should be UnaffectedByLayer0Refresh, got {:?}",
             family,
             contract.impact_policy
@@ -115,12 +118,10 @@ fn freshness_tracking_families_have_appropriate_provenance() {
         // 2. Be deterministic relationships (recomputed anyway)
         let has_derived_provenance = matches!(
             contract.provenance_policy,
-            ProvenancePolicy::DerivedFromLayer0Items | ProvenancePolicy::DerivedFromArtifactFamilies
+            ProvenancePolicy::DerivedFromLayer0Items
+                | ProvenancePolicy::DerivedFromArtifactFamilies
         );
-        let is_deterministic = matches!(
-            contract.truth_kind,
-            TruthKind::DeterministicRelationship
-        );
+        let is_deterministic = matches!(contract.truth_kind, TruthKind::DeterministicRelationship);
         assert!(
             has_derived_provenance || is_deterministic,
             "{:?}: Per-row freshness tracking requires derived provenance or deterministic relationship",
@@ -228,7 +229,8 @@ fn recompute_policy_matches_truth_kind() {
                 assert!(
                     matches!(
                         contract.refresh_policy,
-                        RefreshPolicy::ReextractChangedInputs | RefreshPolicy::CopyForwardWithFkRemap
+                        RefreshPolicy::ReextractChangedInputs
+                            | RefreshPolicy::CopyForwardWithFkRemap
                     ),
                     "{:?}: ExtractedFact should have Reextract or CopyForwardWithFkRemap refresh",
                     family

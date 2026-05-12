@@ -277,22 +277,26 @@ fn extract_amqp_arguments(
 
     match method_name {
         // sendToQueue(queue, msg, options?)
-        "sendToQueue" => (args.get(0).cloned(), None, None),
+        "sendToQueue" => (args.first().cloned(), None, None),
 
         // publish(exchange, routingKey, msg, options?)
-        "publish" => (None, args.get(0).cloned(), args.get(1).cloned()),
+        "publish" => (None, args.first().cloned(), args.get(1).cloned()),
 
         // consume(queue, handler, options?)
-        "consume" => (args.get(0).cloned(), None, None),
+        "consume" => (args.first().cloned(), None, None),
 
         // assertQueue(queue, options?)
-        "assertQueue" => (args.get(0).cloned(), None, None),
+        "assertQueue" => (args.first().cloned(), None, None),
 
         // assertExchange(exchange, type, options?)
-        "assertExchange" => (None, args.get(0).cloned(), None),
+        "assertExchange" => (None, args.first().cloned(), None),
 
         // bindQueue(queue, exchange, routingKey)
-        "bindQueue" => (args.get(0).cloned(), args.get(1).cloned(), args.get(2).cloned()),
+        "bindQueue" => (
+            args.first().cloned(),
+            args.get(1).cloned(),
+            args.get(2).cloned(),
+        ),
 
         _ => (None, None, None),
     }

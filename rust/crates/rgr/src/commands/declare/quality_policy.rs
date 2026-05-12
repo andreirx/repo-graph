@@ -20,7 +20,8 @@ use std::process::ExitCode;
 use super::shared::{parse_flag_value, parse_repeatable_flag_value};
 use crate::cli::{open_storage, utc_now_iso8601};
 
-const DECLARE_QUALITY_POLICY_USAGE: &str = "usage: rmap declare quality-policy <db_path> <repo_uid> <policy_id> \\
+const DECLARE_QUALITY_POLICY_USAGE: &str =
+    "usage: rmap declare quality-policy <db_path> <repo_uid> <policy_id> \\
   --measurement <kind> --policy-kind <kind> --threshold <n> [--version <n>] \\
   [--severity <fail|advisory>] [--scope-clause <type>:<selector>]... [--description <text>]";
 
@@ -70,12 +71,10 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
                 Some(v) => severity = Some(v),
                 None => return ExitCode::from(1),
             },
-            "--scope-clause" => {
-                match parse_repeatable_flag_value("--scope-clause", args, &mut i) {
-                    Some(v) => scope_clauses_raw.push(v),
-                    None => return ExitCode::from(1),
-                }
-            }
+            "--scope-clause" => match parse_repeatable_flag_value("--scope-clause", args, &mut i) {
+                Some(v) => scope_clauses_raw.push(v),
+                None => return ExitCode::from(1),
+            },
             "--description" => {
                 match parse_flag_value("--description", &description, args, &mut i) {
                     Some(v) => description = Some(v),
@@ -148,7 +147,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let policy_kind_enum = match QualityPolicyKind::from_str(&policy_kind_str) {
+    let policy_kind_enum = match QualityPolicyKind::parse(&policy_kind_str) {
         Some(k) => k,
         None => {
             eprintln!(
@@ -211,7 +210,7 @@ pub(super) fn run_declare_quality_policy(args: &[String]) -> ExitCode {
             );
             return ExitCode::from(1);
         }
-        let clause_kind = match ScopeClauseKind::from_str(clause_type) {
+        let clause_kind = match ScopeClauseKind::parse(clause_type) {
             Some(k) => k,
             None => {
                 eprintln!(

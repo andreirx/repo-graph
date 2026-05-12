@@ -6,8 +6,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use repo_graph_storage::StorageConnection;
 use repo_graph_storage::types::ModuleCandidate;
+use repo_graph_storage::StorageConnection;
 
 use super::reconcile::{reconcile_module_dependencies, ReconcileInput};
 use super::resolve::{build_identifier_resolution_map, resolve_import_specifier};
@@ -172,7 +172,10 @@ pub fn compose_dependency_summaries(
             .get(canonical_path)
             .map(|s| s.iter().cloned().collect())
             .unwrap_or_default();
-        let has_manifest = module_has_manifest.get(canonical_path).copied().unwrap_or(false);
+        let has_manifest = module_has_manifest
+            .get(canonical_path)
+            .copied()
+            .unwrap_or(false);
         // Derive manifest path from canonical_root_path + ecosystem convention.
         // npm: package.json, cargo: Cargo.toml
         let manifest_path = if has_manifest {
@@ -225,15 +228,29 @@ pub fn compose_dependency_summaries(
 pub fn npm_runtime_builtins() -> HashSet<String> {
     [
         // File system
-        "fs", "path", "os",
+        "fs",
+        "path",
+        "os",
         // Network
-        "http", "https", "http2", "net", "dns", "tls",
+        "http",
+        "https",
+        "http2",
+        "net",
+        "dns",
+        "tls",
         // Streams
-        "stream", "zlib",
+        "stream",
+        "zlib",
         // Process
-        "process", "child_process", "cluster", "worker_threads",
+        "process",
+        "child_process",
+        "cluster",
+        "worker_threads",
         // Utilities
-        "util", "url", "querystring", "string_decoder",
+        "util",
+        "url",
+        "querystring",
+        "string_decoder",
         // Crypto
         "crypto",
         // Events
@@ -247,11 +264,25 @@ pub fn npm_runtime_builtins() -> HashSet<String> {
         // Assert
         "assert",
         // Node prefixed variants
-        "node:fs", "node:path", "node:os",
-        "node:http", "node:https", "node:http2", "node:net", "node:dns", "node:tls",
-        "node:stream", "node:zlib",
-        "node:process", "node:child_process", "node:cluster", "node:worker_threads",
-        "node:util", "node:url", "node:querystring", "node:string_decoder",
+        "node:fs",
+        "node:path",
+        "node:os",
+        "node:http",
+        "node:https",
+        "node:http2",
+        "node:net",
+        "node:dns",
+        "node:tls",
+        "node:stream",
+        "node:zlib",
+        "node:process",
+        "node:child_process",
+        "node:cluster",
+        "node:worker_threads",
+        "node:util",
+        "node:url",
+        "node:querystring",
+        "node:string_decoder",
         "node:crypto",
         "node:events",
         "node:buffer",

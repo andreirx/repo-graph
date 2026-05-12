@@ -24,10 +24,7 @@ pub fn group_by_cargo_root(
         let file_path = Path::new(&edge.source_file_path);
         let cargo_root = find_cargo_root(repo_root, file_path, &mut cache);
 
-        groups
-            .entry(cargo_root)
-            .or_default()
-            .push(edge.clone());
+        groups.entry(cargo_root).or_default().push(edge.clone());
     }
 
     groups

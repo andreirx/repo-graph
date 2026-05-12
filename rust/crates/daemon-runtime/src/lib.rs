@@ -52,6 +52,9 @@ use repo_graph_daemon_transport::run_stdio;
 /// Reads NDJSON requests from stdin, dispatches them, and writes
 /// responses to stdout. Returns when stdin reaches EOF.
 pub fn run_daemon() -> Result<(), String> {
+    // DaemonState is !Send/!Sync due to interior mutability. Arc is used for
+    // shared ownership, not cross-thread access. The daemon is single-threaded.
+    #[allow(clippy::arc_with_non_send_sync)]
     let state = Arc::new(DaemonState::new());
     let dispatcher = ServiceDispatcher::new(state);
 

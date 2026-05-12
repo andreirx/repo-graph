@@ -10,7 +10,7 @@ use crate::error::StorageError;
 use crate::migrations::record_migration;
 
 pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
-	conn.execute_batch(
+    conn.execute_batch(
 		r#"
 		CREATE TABLE IF NOT EXISTS module_candidates (
 			module_candidate_uid  TEXT PRIMARY KEY,
@@ -56,6 +56,6 @@ pub fn run(conn: &mut Connection) -> Result<(), StorageError> {
 		"#,
 	)?;
 
-	record_migration(conn, 11, "011-module-candidates")?;
-	Ok(())
+    record_migration(conn, 11, "011-module-candidates")?;
+    Ok(())
 }

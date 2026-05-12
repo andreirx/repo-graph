@@ -46,7 +46,7 @@ pub use deps::run_deps;
 pub use docs::run_docs;
 pub use enrich::run_enrich;
 pub use gate::run_gate;
-pub use graph::{run_callers, run_callees, run_cycles, run_imports, run_path, run_stats};
+pub use graph::{run_callees, run_callers, run_cycles, run_imports, run_path, run_stats};
 pub use index::{run_index, run_refresh};
 pub use inferences::run_inferences;
 pub use modules::{run_modules, run_violations};

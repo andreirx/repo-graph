@@ -343,7 +343,10 @@ mod tests {
         let result = extract_semantic_facts(&file_path);
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), DocFactsError::NotADirectory(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            DocFactsError::NotADirectory(_)
+        ));
     }
 
     #[test]
@@ -418,7 +421,11 @@ mod tests {
     fn nested_env_file_has_module_scope() {
         // P1 fix: nested .env files use parent directory as subject, not repo root
         let dir = tempdir().unwrap();
-        create_file(dir.path(), "frontend/web/.env.prod", "API_URL=https://prod.api.example.com");
+        create_file(
+            dir.path(),
+            "frontend/web/.env.prod",
+            "API_URL=https://prod.api.example.com",
+        );
 
         let result = extract_semantic_facts(dir.path()).unwrap();
 

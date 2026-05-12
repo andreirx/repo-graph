@@ -81,7 +81,9 @@ impl DatabaseState {
 
     /// Try to acquire write access without blocking.
     pub fn try_acquire_write(&self) -> Option<DbWriteGuard<'_>> {
-        self.write_lock.try_lock().map(|g| DbWriteGuard { _guard: g })
+        self.write_lock
+            .try_lock()
+            .map(|g| DbWriteGuard { _guard: g })
     }
 }
 
@@ -107,9 +109,9 @@ impl RepoKey {
     ///
     /// Canonicalizes the db_path to ensure consistent identity.
     pub fn new(db_path: &Path, repo_uid: &str) -> Result<Self, String> {
-        let canonical = db_path.canonicalize().map_err(|e| {
-            format!("cannot canonicalize db path '{}': {}", db_path.display(), e)
-        })?;
+        let canonical = db_path
+            .canonicalize()
+            .map_err(|e| format!("cannot canonicalize db path '{}': {}", db_path.display(), e))?;
         Ok(Self {
             db_path: canonical,
             repo_uid: repo_uid.to_string(),
@@ -217,9 +219,9 @@ impl DaemonState {
     /// The path is canonicalized to ensure consistent identity.
     /// Returns the database state for write coordination.
     pub fn get_or_create_db_runtime(&self, db_path: &Path) -> Result<Arc<DatabaseState>, String> {
-        let canonical = db_path.canonicalize().map_err(|e| {
-            format!("cannot canonicalize db path '{}': {}", db_path.display(), e)
-        })?;
+        let canonical = db_path
+            .canonicalize()
+            .map_err(|e| format!("cannot canonicalize db path '{}': {}", db_path.display(), e))?;
 
         // Check if already exists
         {
@@ -250,26 +252,27 @@ impl DaemonState {
     ///
     /// Handles relative paths like "repo.db" where parent() returns an empty path
     /// by using the current working directory.
-    pub fn get_or_create_db_runtime_for_new_db(&self, db_path: &Path) -> Result<Arc<DatabaseState>, String> {
+    pub fn get_or_create_db_runtime_for_new_db(
+        &self,
+        db_path: &Path,
+    ) -> Result<Arc<DatabaseState>, String> {
         // For new DBs, canonicalize the parent and append the filename
-        let filename = db_path.file_name().ok_or_else(|| {
-            format!("invalid db path (no filename): {}", db_path.display())
-        })?;
+        let filename = db_path
+            .file_name()
+            .ok_or_else(|| format!("invalid db path (no filename): {}", db_path.display()))?;
 
         // Handle relative paths like "repo.db" where parent() is empty
         let parent = db_path.parent();
         let canonical_parent = match parent {
             Some(p) if !p.as_os_str().is_empty() => {
                 // Normal case: parent directory exists
-                p.canonicalize().map_err(|e| {
-                    format!("cannot canonicalize parent '{}': {}", p.display(), e)
-                })?
+                p.canonicalize()
+                    .map_err(|e| format!("cannot canonicalize parent '{}': {}", p.display(), e))?
             }
             _ => {
                 // Empty or no parent (e.g., "repo.db") — use current working directory
-                std::env::current_dir().map_err(|e| {
-                    format!("cannot get current directory: {}", e)
-                })?
+                std::env::current_dir()
+                    .map_err(|e| format!("cannot get current directory: {}", e))?
             }
         };
         let canonical = canonical_parent.join(filename);
@@ -314,6 +317,10 @@ impl DaemonState {
         }
 
         // Open and insert
+        // Note: RepoState is !Sync due to interior RefCell. Arc is used for shared
+        // ownership across the RwLock, not for cross-thread access. The daemon is
+        // single-threaded, so this is safe.
+        #[allow(clippy::arc_with_non_send_sync)]
         let state = Arc::new(RepoState::open(db_path, repo_uid)?);
         {
             let mut repos = self.repos.write().unwrap();
@@ -402,7 +409,11 @@ mod tests {
         let result = daemon.load_repo(&db_path, "nonexistent-repo");
 
         match result {
-            Err(msg) => assert!(msg.contains("not found in database"), "unexpected error: {}", msg),
+            Err(msg) => assert!(
+                msg.contains("not found in database"),
+                "unexpected error: {}",
+                msg
+            ),
             Ok(_) => panic!("expected error for nonexistent repo"),
         }
     }
@@ -552,7 +563,9 @@ mod tests {
         let daemon = DaemonState::new();
 
         // Can still create a runtime (parent exists and can be canonicalized)
-        let runtime = daemon.get_or_create_db_runtime_for_new_db(&db_path).unwrap();
+        let runtime = daemon
+            .get_or_create_db_runtime_for_new_db(&db_path)
+            .unwrap();
         assert_eq!(runtime.db_path().file_name().unwrap(), "new.db");
     }
 
@@ -579,7 +592,7 @@ mod tests {
 
         // "repo.db" has no parent directory component
         let db_path = Path::new("relative-test.db");
-        assert!(db_path.parent().map_or(true, |p| p.as_os_str().is_empty()));
+        assert!(db_path.parent().is_none_or(|p| p.as_os_str().is_empty()));
 
         // Should succeed by using current working directory
         let runtime = daemon.get_or_create_db_runtime_for_new_db(db_path).unwrap();
@@ -599,7 +612,11 @@ mod tests {
         let db_path_a = dir.path().join("a.db");
         let db_path_m = dir.path().join("m.db");
 
-        for (path, uid) in [(&db_path_z, "z-repo"), (&db_path_a, "a-repo"), (&db_path_m, "m-repo")] {
+        for (path, uid) in [
+            (&db_path_z, "z-repo"),
+            (&db_path_a, "a-repo"),
+            (&db_path_m, "m-repo"),
+        ] {
             let storage = StorageConnection::open(path).unwrap();
             storage
                 .add_repo(&Repo {
@@ -623,7 +640,11 @@ mod tests {
 
         // Verify sorted order (by full display string)
         for i in 0..repos.len() - 1 {
-            assert!(repos[i] < repos[i + 1], "list_repos not sorted: {:?}", repos);
+            assert!(
+                repos[i] < repos[i + 1],
+                "list_repos not sorted: {:?}",
+                repos
+            );
         }
     }
 }

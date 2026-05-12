@@ -583,9 +583,7 @@ mod tests {
         .unwrap();
 
         // Filter by kind
-        let protobuf = conn
-            .list_contract_schemas("s1", Some("protobuf"))
-            .unwrap();
+        let protobuf = conn.list_contract_schemas("s1", Some("protobuf")).unwrap();
         assert_eq!(protobuf.len(), 1);
         assert_eq!(protobuf[0].file_path, "a.proto");
 

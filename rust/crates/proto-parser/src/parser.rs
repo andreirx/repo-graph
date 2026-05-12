@@ -441,16 +441,16 @@ fn parse_field_text(text: &str) -> Option<(ProtoFieldLabel, String, String, i32)
     }
 
     let mut idx = 0;
-    let label = match parts.get(idx)? {
-        &"optional" => {
+    let label = match *parts.get(idx)? {
+        "optional" => {
             idx += 1;
             ProtoFieldLabel::Optional
         }
-        &"required" => {
+        "required" => {
             idx += 1;
             ProtoFieldLabel::Required
         }
-        &"repeated" => {
+        "repeated" => {
             idx += 1;
             ProtoFieldLabel::Repeated
         }
@@ -948,7 +948,10 @@ fn parse_rpc_text(text: &str) -> Option<(String, String, String, bool, bool)> {
     let input_end = text.find(')')?;
     let input_text = text[input_start..input_end].trim();
     let (client_streaming, input_type) = if input_text.starts_with("stream") {
-        (true, input_text.trim_start_matches("stream").trim().to_string())
+        (
+            true,
+            input_text.trim_start_matches("stream").trim().to_string(),
+        )
     } else {
         (false, input_text.to_string())
     };
@@ -959,12 +962,21 @@ fn parse_rpc_text(text: &str) -> Option<(String, String, String, bool, bool)> {
     let output_end = text[output_start..].find(')')? + output_start;
     let output_text = text[output_start..output_end].trim();
     let (server_streaming, output_type) = if output_text.starts_with("stream") {
-        (true, output_text.trim_start_matches("stream").trim().to_string())
+        (
+            true,
+            output_text.trim_start_matches("stream").trim().to_string(),
+        )
     } else {
         (false, output_text.to_string())
     };
 
-    Some((name, input_type, output_type, client_streaming, server_streaming))
+    Some((
+        name,
+        input_type,
+        output_type,
+        client_streaming,
+        server_streaming,
+    ))
 }
 
 /// Get the text content of a node.
@@ -1149,7 +1161,9 @@ message Event {
 "#;
         let result = parse_proto("event.proto", source).unwrap();
         assert_eq!(result.imports.len(), 2);
-        assert!(result.imports.contains(&"google/protobuf/timestamp.proto".to_string()));
+        assert!(result
+            .imports
+            .contains(&"google/protobuf/timestamp.proto".to_string()));
         assert!(result.imports.contains(&"common/types.proto".to_string()));
     }
 

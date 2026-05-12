@@ -113,12 +113,17 @@ impl<P: QualityPolicyStoragePort> QualityPolicyRunner<P> {
 
         // Step 6: Load current snapshot measurements.
         let kind_refs: Vec<&str> = required_kinds.iter().map(|s| s.as_str()).collect();
-        let current_measurements = self.port.load_enriched_measurements(snapshot_uid, &kind_refs)?;
+        let current_measurements = self
+            .port
+            .load_enriched_measurements(snapshot_uid, &kind_refs)?;
 
         // Step 7: Load baseline measurements if needed.
         let baseline_measurements = if baseline_required_count > 0 {
             let baseline_uid = baseline_snapshot_uid.expect("checked above");
-            Some(self.port.load_enriched_measurements(baseline_uid, &kind_refs)?)
+            Some(
+                self.port
+                    .load_enriched_measurements(baseline_uid, &kind_refs)?,
+            )
         } else {
             None
         };
@@ -401,11 +406,15 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
     const DAYS_IN_MONTH: [u64; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
     fn is_leap_year(year: u64) -> bool {
-        (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+        (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
     }
 
     fn days_in_year(year: u64) -> u64 {
-        if is_leap_year(year) { 366 } else { 365 }
+        if is_leap_year(year) {
+            366
+        } else {
+            365
+        }
     }
 
     let mut remaining = days;
@@ -491,7 +500,8 @@ mod tests {
         }
 
         fn with_snapshot(mut self, snapshot: Snapshot) -> Self {
-            self.snapshots.insert(snapshot.snapshot_uid.clone(), snapshot);
+            self.snapshots
+                .insert(snapshot.snapshot_uid.clone(), snapshot);
             self
         }
     }

@@ -74,8 +74,12 @@ impl ImpactPolicy {
 impl std::fmt::Display for ImpactPolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::RecomputeOnRelevantLayer0Change => write!(f, "recompute_on_relevant_layer0_change"),
-            Self::MarkImpactedOnRelevantLayer0Change => write!(f, "mark_impacted_on_relevant_layer0_change"),
+            Self::RecomputeOnRelevantLayer0Change => {
+                write!(f, "recompute_on_relevant_layer0_change")
+            }
+            Self::MarkImpactedOnRelevantLayer0Change => {
+                write!(f, "mark_impacted_on_relevant_layer0_change")
+            }
             Self::MarkImpactedOnAnyLayer0Change => write!(f, "mark_impacted_on_any_layer0_change"),
             Self::UnaffectedByLayer0Refresh => write!(f, "unaffected_by_layer0_refresh"),
         }

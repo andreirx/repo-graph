@@ -322,7 +322,9 @@ impl ChannelDetailBuilder {
     /// Build the channel detail, validating all required fields.
     pub fn build(self) -> Result<ChannelDetail, String> {
         let surface_uid = self.surface_uid.ok_or("surface_uid is required")?;
-        let channel_identity = self.channel_identity.ok_or("channel_identity is required")?;
+        let channel_identity = self
+            .channel_identity
+            .ok_or("channel_identity is required")?;
 
         let channel_uid = ChannelDetail::build_uid(&surface_uid, &channel_identity);
 

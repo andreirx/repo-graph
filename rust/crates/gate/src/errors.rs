@@ -32,20 +32,27 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateStorageError {
-	pub operation: &'static str,
-	pub message: String,
+    pub operation: &'static str,
+    pub message: String,
 }
 
 impl GateStorageError {
-	pub fn new(operation: &'static str, message: impl Into<String>) -> Self {
-		Self { operation, message: message.into() }
-	}
+    pub fn new(operation: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            operation,
+            message: message.into(),
+        }
+    }
 }
 
 impl fmt::Display for GateStorageError {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "gate storage error in {}: {}", self.operation, self.message)
-	}
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "gate storage error in {}: {}",
+            self.operation, self.message
+        )
+    }
 }
 
 impl std::error::Error for GateStorageError {}
@@ -54,36 +61,36 @@ impl std::error::Error for GateStorageError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateError {
-	/// The storage port failed.
-	Storage(GateStorageError),
-	/// An evidence row (measurement, inference, waiver) was
-	/// malformed at the adapter boundary in a way that makes it
-	/// impossible to continue the gate run. Adapters should
-	/// prefer returning `Storage(...)` with a clear message;
-	/// this variant is reserved for cases where the gate crate
-	/// itself detects a structural problem after the port has
-	/// already returned data.
-	MalformedEvidence {
-		operation: &'static str,
-		reason: String,
-	},
+    /// The storage port failed.
+    Storage(GateStorageError),
+    /// An evidence row (measurement, inference, waiver) was
+    /// malformed at the adapter boundary in a way that makes it
+    /// impossible to continue the gate run. Adapters should
+    /// prefer returning `Storage(...)` with a clear message;
+    /// this variant is reserved for cases where the gate crate
+    /// itself detects a structural problem after the port has
+    /// already returned data.
+    MalformedEvidence {
+        operation: &'static str,
+        reason: String,
+    },
 }
 
 impl fmt::Display for GateError {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Self::Storage(e) => write!(f, "{}", e),
-			Self::MalformedEvidence { operation, reason } => {
-				write!(f, "malformed evidence in {}: {}", operation, reason)
-			}
-		}
-	}
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Storage(e) => write!(f, "{}", e),
+            Self::MalformedEvidence { operation, reason } => {
+                write!(f, "malformed evidence in {}: {}", operation, reason)
+            }
+        }
+    }
 }
 
 impl std::error::Error for GateError {}
 
 impl From<GateStorageError> for GateError {
-	fn from(e: GateStorageError) -> Self {
-		Self::Storage(e)
-	}
+    fn from(e: GateStorageError) -> Self {
+        Self::Storage(e)
+    }
 }

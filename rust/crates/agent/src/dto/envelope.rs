@@ -33,10 +33,10 @@ use crate::dto::signal::Signal;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ResolvedKind {
-	Repo,
-	Module,
-	File,
-	Symbol,
+    Repo,
+    Module,
+    File,
+    Symbol,
 }
 
 /// Reason a focus failed to resolve. Used only for real domain
@@ -46,16 +46,16 @@ pub enum ResolvedKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FocusFailureReason {
-	NoMatch,
-	Ambiguous,
+    NoMatch,
+    Ambiguous,
 }
 
 /// One candidate when focus resolution is ambiguous.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FocusCandidate {
-	pub stable_key: String,
-	pub file: Option<String>,
-	pub kind: ResolvedKind,
+    pub stable_key: String,
+    pub file: Option<String>,
+    pub kind: ResolvedKind,
 }
 
 /// Focus resolution outcome.
@@ -91,139 +91,124 @@ pub struct FocusCandidate {
 /// keep `resolved_key` strictly nullable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Focus {
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub input: Option<String>,
-	pub resolved: bool,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub resolved_kind: Option<ResolvedKind>,
-	/// Graph-node stable key, if the focus resolved to an exact
-	/// node. `None` for repo-level focus and for path-area
-	/// focus that has no backing MODULE node.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub resolved_key: Option<String>,
-	/// Normalized repo-relative path for the resolved focus.
-	/// Present for FILE and MODULE/path-area resolution. Absent
-	/// for repo-level and unresolved focus.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub resolved_path: Option<String>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub reason: Option<FocusFailureReason>,
-	#[serde(skip_serializing_if = "Vec::is_empty")]
-	pub candidates: Vec<FocusCandidate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+    pub resolved: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_kind: Option<ResolvedKind>,
+    /// Graph-node stable key, if the focus resolved to an exact
+    /// node. `None` for repo-level focus and for path-area
+    /// focus that has no backing MODULE node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_key: Option<String>,
+    /// Normalized repo-relative path for the resolved focus.
+    /// Present for FILE and MODULE/path-area resolution. Absent
+    /// for repo-level and unresolved focus.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<FocusFailureReason>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<FocusCandidate>,
 }
 
 impl Focus {
-	/// Build a repo-level focus record for a successfully
-	/// loaded repo.
-	///
-	/// `resolved_key` is `None` because repo-level focus does
-	/// not resolve to a graph node. The repo identity is
-	/// carried on the envelope's top-level `repo` field; it
-	/// must not be duplicated into `resolved_key`, which is
-	/// reserved for graph-node stable keys.
-	pub fn repo() -> Self {
-		Self {
-			input: None,
-			resolved: true,
-			resolved_kind: Some(ResolvedKind::Repo),
-			resolved_key: None,
-			resolved_path: None,
-			reason: None,
-			candidates: Vec::new(),
-		}
-	}
+    /// Build a repo-level focus record for a successfully
+    /// loaded repo.
+    ///
+    /// `resolved_key` is `None` because repo-level focus does
+    /// not resolve to a graph node. The repo identity is
+    /// carried on the envelope's top-level `repo` field; it
+    /// must not be duplicated into `resolved_key`, which is
+    /// reserved for graph-node stable keys.
+    pub fn repo() -> Self {
+        Self {
+            input: None,
+            resolved: true,
+            resolved_kind: Some(ResolvedKind::Repo),
+            resolved_key: None,
+            resolved_path: None,
+            reason: None,
+            candidates: Vec::new(),
+        }
+    }
 
-	/// Build a file-focus record. The file resolved to an
-	/// exact FILE node. `stable_key` is optional because the
-	/// path-based resolution can confirm a file exists without
-	/// producing the node's stable key in all code paths. When
-	/// `None`, `resolved_key` is omitted from the JSON output
-	/// (same nullable contract as `path_area`).
-	pub fn file(
-		input: &str,
-		stable_key: Option<&str>,
-		path: &str,
-	) -> Self {
-		Self {
-			input: Some(input.to_string()),
-			resolved: true,
-			resolved_kind: Some(ResolvedKind::File),
-			resolved_key: stable_key.map(|k| k.to_string()),
-			resolved_path: Some(path.to_string()),
-			reason: None,
-			candidates: Vec::new(),
-		}
-	}
+    /// Build a file-focus record. The file resolved to an
+    /// exact FILE node. `stable_key` is optional because the
+    /// path-based resolution can confirm a file exists without
+    /// producing the node's stable key in all code paths. When
+    /// `None`, `resolved_key` is omitted from the JSON output
+    /// (same nullable contract as `path_area`).
+    pub fn file(input: &str, stable_key: Option<&str>, path: &str) -> Self {
+        Self {
+            input: Some(input.to_string()),
+            resolved: true,
+            resolved_kind: Some(ResolvedKind::File),
+            resolved_key: stable_key.map(|k| k.to_string()),
+            resolved_path: Some(path.to_string()),
+            reason: None,
+            candidates: Vec::new(),
+        }
+    }
 
-	/// Build a module/path-area focus record. If the path
-	/// corresponds to an exact MODULE node, `module_stable_key`
-	/// carries its stable key. Otherwise `resolved_key` is None
-	/// and `resolved_path` alone identifies the area.
-	pub fn path_area(
-		input: &str,
-		module_stable_key: Option<&str>,
-		path: &str,
-	) -> Self {
-		Self {
-			input: Some(input.to_string()),
-			resolved: true,
-			resolved_kind: Some(ResolvedKind::Module),
-			resolved_key: module_stable_key.map(|k| k.to_string()),
-			resolved_path: Some(path.to_string()),
-			reason: None,
-			candidates: Vec::new(),
-		}
-	}
+    /// Build a module/path-area focus record. If the path
+    /// corresponds to an exact MODULE node, `module_stable_key`
+    /// carries its stable key. Otherwise `resolved_key` is None
+    /// and `resolved_path` alone identifies the area.
+    pub fn path_area(input: &str, module_stable_key: Option<&str>, path: &str) -> Self {
+        Self {
+            input: Some(input.to_string()),
+            resolved: true,
+            resolved_kind: Some(ResolvedKind::Module),
+            resolved_key: module_stable_key.map(|k| k.to_string()),
+            resolved_path: Some(path.to_string()),
+            reason: None,
+            candidates: Vec::new(),
+        }
+    }
 
-	/// Build a symbol-focus record. The focus resolved to an
-	/// exact SYMBOL node. `stable_key` is the node's stable key.
-	/// `file_path` is the repo-relative path if the symbol has a
-	/// file association (via `AgentSymbolContext`).
-	pub fn symbol(
-		input: &str,
-		stable_key: &str,
-		file_path: Option<&str>,
-	) -> Self {
-		Self {
-			input: Some(input.to_string()),
-			resolved: true,
-			resolved_kind: Some(ResolvedKind::Symbol),
-			resolved_key: Some(stable_key.to_string()),
-			resolved_path: file_path.map(|p| p.to_string()),
-			reason: None,
-			candidates: Vec::new(),
-		}
-	}
+    /// Build a symbol-focus record. The focus resolved to an
+    /// exact SYMBOL node. `stable_key` is the node's stable key.
+    /// `file_path` is the repo-relative path if the symbol has a
+    /// file association (via `AgentSymbolContext`).
+    pub fn symbol(input: &str, stable_key: &str, file_path: Option<&str>) -> Self {
+        Self {
+            input: Some(input.to_string()),
+            resolved: true,
+            resolved_kind: Some(ResolvedKind::Symbol),
+            resolved_key: Some(stable_key.to_string()),
+            resolved_path: file_path.map(|p| p.to_string()),
+            reason: None,
+            candidates: Vec::new(),
+        }
+    }
 
-	/// Build an ambiguous focus record. The focus matched
-	/// multiple candidates and cannot be resolved uniquely.
-	pub fn ambiguous(
-		input: &str,
-		candidates: Vec<FocusCandidate>,
-	) -> Self {
-		Self {
-			input: Some(input.to_string()),
-			resolved: false,
-			resolved_kind: None,
-			resolved_key: None,
-			resolved_path: None,
-			reason: Some(FocusFailureReason::Ambiguous),
-			candidates,
-		}
-	}
+    /// Build an ambiguous focus record. The focus matched
+    /// multiple candidates and cannot be resolved uniquely.
+    pub fn ambiguous(input: &str, candidates: Vec<FocusCandidate>) -> Self {
+        Self {
+            input: Some(input.to_string()),
+            resolved: false,
+            resolved_kind: None,
+            resolved_key: None,
+            resolved_path: None,
+            reason: Some(FocusFailureReason::Ambiguous),
+            candidates,
+        }
+    }
 
-	/// Build an unresolved focus record.
-	pub fn no_match(input: &str) -> Self {
-		Self {
-			input: Some(input.to_string()),
-			resolved: false,
-			resolved_kind: None,
-			resolved_key: None,
-			resolved_path: None,
-			reason: Some(FocusFailureReason::NoMatch),
-			candidates: Vec::new(),
-		}
-	}
+    /// Build an unresolved focus record.
+    pub fn no_match(input: &str) -> Self {
+        Self {
+            input: Some(input.to_string()),
+            resolved: false,
+            resolved_kind: None,
+            resolved_key: None,
+            resolved_path: None,
+            reason: Some(FocusFailureReason::NoMatch),
+            candidates: Vec::new(),
+        }
+    }
 }
 
 // ── Confidence ────────────────────────────────────────────────────
@@ -231,9 +216,9 @@ impl Focus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Confidence {
-	High,
-	Medium,
-	Low,
+    High,
+    Medium,
+    Low,
 }
 
 // ── Next action ───────────────────────────────────────────────────
@@ -245,18 +230,18 @@ pub enum Confidence {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NextKind {
-	Orient,
-	Check,
-	Explain,
+    Orient,
+    Check,
+    Explain,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NextAction {
-	pub kind: NextKind,
-	pub repo: String,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub target: Option<String>,
-	pub reason: String,
+    pub kind: NextKind,
+    pub repo: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    pub reason: String,
 }
 
 // ── Documentation ─────────────────────────────────────────────────
@@ -265,16 +250,16 @@ pub struct NextAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DocRelevanceReason {
-	/// Repo-level doc (root README, ARCHITECTURE)
-	RepoRootDoc,
-	/// Doc under a matching module/path prefix
-	ModulePathMatch,
-	/// Architecture doc relevant to focus
-	ArchitectureDoc,
-	/// Config doc relevant for environment context
-	ConfigRelevance,
-	/// Generated MAP for the target module/path
-	GeneratedMapForTarget,
+    /// Repo-level doc (root README, ARCHITECTURE)
+    RepoRootDoc,
+    /// Doc under a matching module/path prefix
+    ModulePathMatch,
+    /// Architecture doc relevant to focus
+    ArchitectureDoc,
+    /// Config doc relevant for environment context
+    ConfigRelevance,
+    /// Generated MAP for the target module/path
+    GeneratedMapForTarget,
 }
 
 /// A relevant documentation file surfaced by orient.
@@ -283,14 +268,14 @@ pub enum DocRelevanceReason {
 /// This struct represents the primary documentation surface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RelevantDoc {
-	/// Path relative to repo root.
-	pub path: String,
-	/// Document kind (readme, architecture, config, map).
-	pub kind: String,
-	/// Whether this is a generated document (e.g., MAP.md from rgistr).
-	pub generated: bool,
-	/// Why this doc was selected as relevant.
-	pub reason: DocRelevanceReason,
+    /// Path relative to repo root.
+    pub path: String,
+    /// Document kind (readme, architecture, config, map).
+    pub kind: String,
+    /// Whether this is a generated document (e.g., MAP.md from rgistr).
+    pub generated: bool,
+    /// Why this doc was selected as relevant.
+    pub reason: DocRelevanceReason,
 }
 
 /// Documentation section in orient output.
@@ -299,11 +284,11 @@ pub struct RelevantDoc {
 /// to read. Semantic facts (hints) are optional and secondary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DocumentationSection {
-	/// Relevant documentation files, ranked by relevance.
-	/// Authored docs rank above generated docs.
-	pub relevant_files: Vec<RelevantDoc>,
-	/// Count of relevant docs (convenience).
-	pub count: usize,
+    /// Relevant documentation files, ranked by relevance.
+    /// Authored docs rank above generated docs.
+    pub relevant_files: Vec<RelevantDoc>,
+    /// Count of relevant docs (convenience).
+    pub count: usize,
 }
 
 // ── Envelope ──────────────────────────────────────────────────────
@@ -314,37 +299,37 @@ pub struct DocumentationSection {
 /// no risk of a typo drifting out of sync with the contract.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct OrientResult {
-	pub schema: &'static str,
-	pub command: &'static str,
-	pub repo: String,
-	pub snapshot: String,
-	pub focus: Focus,
-	pub confidence: Confidence,
+    pub schema: &'static str,
+    pub command: &'static str,
+    pub repo: String,
+    pub snapshot: String,
+    pub focus: Focus,
+    pub confidence: Confidence,
 
-	/// Primary documentation surface: relevant files for the agent to read.
-	/// Docs are first-class orientation evidence.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub documentation: Option<DocumentationSection>,
+    /// Primary documentation surface: relevant files for the agent to read.
+    /// Docs are first-class orientation evidence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub documentation: Option<DocumentationSection>,
 
-	pub signals: Vec<Signal>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub signals_truncated: Option<bool>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub signals_omitted_count: Option<usize>,
+    pub signals: Vec<Signal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signals_truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signals_omitted_count: Option<usize>,
 
-	pub limits: Vec<Limit>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub limits_truncated: Option<bool>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub limits_omitted_count: Option<usize>,
+    pub limits: Vec<Limit>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits_truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits_omitted_count: Option<usize>,
 
-	pub next: Vec<NextAction>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub next_truncated: Option<bool>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub next_omitted_count: Option<usize>,
+    pub next: Vec<NextAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_omitted_count: Option<usize>,
 
-	pub truncated: bool,
+    pub truncated: bool,
 }
 
 /// Stable schema identifier. Incrementing this is a contract
@@ -362,73 +347,102 @@ pub const EXPLAIN_COMMAND: &str = "explain";
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+    use super::*;
 
-	#[test]
-	fn repo_focus_serializes_without_input_key_or_path() {
-		let f = Focus::repo();
-		let s = serde_json::to_string(&f).unwrap();
-		assert!(!s.contains("\"input\""), "input must be omitted at repo-level: {}", s);
-		assert!(s.contains("\"resolved\":true"));
-		assert!(s.contains("\"resolved_kind\":\"repo\""));
-		assert!(!s.contains("\"resolved_key\""), "repo focus must not emit resolved_key: {}", s);
-		assert!(!s.contains("\"resolved_path\""), "repo focus must not emit resolved_path: {}", s);
-		assert!(!s.contains("\"candidates\""), "empty candidates must be omitted: {}", s);
-	}
+    #[test]
+    fn repo_focus_serializes_without_input_key_or_path() {
+        let f = Focus::repo();
+        let s = serde_json::to_string(&f).unwrap();
+        assert!(
+            !s.contains("\"input\""),
+            "input must be omitted at repo-level: {}",
+            s
+        );
+        assert!(s.contains("\"resolved\":true"));
+        assert!(s.contains("\"resolved_kind\":\"repo\""));
+        assert!(
+            !s.contains("\"resolved_key\""),
+            "repo focus must not emit resolved_key: {}",
+            s
+        );
+        assert!(
+            !s.contains("\"resolved_path\""),
+            "repo focus must not emit resolved_path: {}",
+            s
+        );
+        assert!(
+            !s.contains("\"candidates\""),
+            "empty candidates must be omitted: {}",
+            s
+        );
+    }
 
-	#[test]
-	fn file_focus_serializes_with_key_and_path() {
-		let f = Focus::file("src/core/service.ts", Some("r1:src/core/service.ts:FILE"), "src/core/service.ts");
-		let json = serde_json::to_value(&f).unwrap();
-		assert_eq!(json["resolved"], true);
-		assert_eq!(json["resolved_kind"], "file");
-		assert_eq!(json["resolved_key"], "r1:src/core/service.ts:FILE");
-		assert_eq!(json["resolved_path"], "src/core/service.ts");
-		assert_eq!(json["input"], "src/core/service.ts");
-	}
+    #[test]
+    fn file_focus_serializes_with_key_and_path() {
+        let f = Focus::file(
+            "src/core/service.ts",
+            Some("r1:src/core/service.ts:FILE"),
+            "src/core/service.ts",
+        );
+        let json = serde_json::to_value(&f).unwrap();
+        assert_eq!(json["resolved"], true);
+        assert_eq!(json["resolved_kind"], "file");
+        assert_eq!(json["resolved_key"], "r1:src/core/service.ts:FILE");
+        assert_eq!(json["resolved_path"], "src/core/service.ts");
+        assert_eq!(json["input"], "src/core/service.ts");
+    }
 
-	#[test]
-	fn path_area_focus_with_module_node_serializes_key_and_path() {
-		let f = Focus::path_area("src/core", Some("r1:src/core:MODULE"), "src/core");
-		let json = serde_json::to_value(&f).unwrap();
-		assert_eq!(json["resolved"], true);
-		assert_eq!(json["resolved_kind"], "module");
-		assert_eq!(json["resolved_key"], "r1:src/core:MODULE");
-		assert_eq!(json["resolved_path"], "src/core");
-	}
+    #[test]
+    fn path_area_focus_with_module_node_serializes_key_and_path() {
+        let f = Focus::path_area("src/core", Some("r1:src/core:MODULE"), "src/core");
+        let json = serde_json::to_value(&f).unwrap();
+        assert_eq!(json["resolved"], true);
+        assert_eq!(json["resolved_kind"], "module");
+        assert_eq!(json["resolved_key"], "r1:src/core:MODULE");
+        assert_eq!(json["resolved_path"], "src/core");
+    }
 
-	#[test]
-	fn path_area_focus_without_module_node_omits_key() {
-		let f = Focus::path_area("src/core", None, "src/core");
-		let json = serde_json::to_value(&f).unwrap();
-		assert_eq!(json["resolved"], true);
-		assert_eq!(json["resolved_kind"], "module");
-		assert!(json.get("resolved_key").is_none(), "path-area without MODULE node must not emit resolved_key");
-		assert_eq!(json["resolved_path"], "src/core");
-	}
+    #[test]
+    fn path_area_focus_without_module_node_omits_key() {
+        let f = Focus::path_area("src/core", None, "src/core");
+        let json = serde_json::to_value(&f).unwrap();
+        assert_eq!(json["resolved"], true);
+        assert_eq!(json["resolved_kind"], "module");
+        assert!(
+            json.get("resolved_key").is_none(),
+            "path-area without MODULE node must not emit resolved_key"
+        );
+        assert_eq!(json["resolved_path"], "src/core");
+    }
 
-	#[test]
-	fn no_match_focus_omits_key_and_path() {
-		let f = Focus::no_match("nonexistent/path");
-		let json = serde_json::to_value(&f).unwrap();
-		assert_eq!(json["resolved"], false);
-		assert!(json.get("resolved_kind").is_none());
-		assert!(json.get("resolved_key").is_none());
-		assert!(json.get("resolved_path").is_none());
-		assert_eq!(json["reason"], "no_match");
-		assert_eq!(json["input"], "nonexistent/path");
-	}
+    #[test]
+    fn no_match_focus_omits_key_and_path() {
+        let f = Focus::no_match("nonexistent/path");
+        let json = serde_json::to_value(&f).unwrap();
+        assert_eq!(json["resolved"], false);
+        assert!(json.get("resolved_kind").is_none());
+        assert!(json.get("resolved_key").is_none());
+        assert!(json.get("resolved_path").is_none());
+        assert_eq!(json["reason"], "no_match");
+        assert_eq!(json["input"], "nonexistent/path");
+    }
 
-	#[test]
-	fn confidence_serializes_lowercase() {
-		assert_eq!(serde_json::to_string(&Confidence::High).unwrap(), "\"high\"");
-		assert_eq!(serde_json::to_string(&Confidence::Medium).unwrap(), "\"medium\"");
-		assert_eq!(serde_json::to_string(&Confidence::Low).unwrap(), "\"low\"");
-	}
+    #[test]
+    fn confidence_serializes_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&Confidence::High).unwrap(),
+            "\"high\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Confidence::Medium).unwrap(),
+            "\"medium\""
+        );
+        assert_eq!(serde_json::to_string(&Confidence::Low).unwrap(), "\"low\"");
+    }
 
-	#[test]
-	fn schema_constants_are_locked() {
-		assert_eq!(ORIENT_SCHEMA, "rgr.agent.v1");
-		assert_eq!(ORIENT_COMMAND, "orient");
-	}
+    #[test]
+    fn schema_constants_are_locked() {
+        assert_eq!(ORIENT_SCHEMA, "rgr.agent.v1");
+        assert_eq!(ORIENT_COMMAND, "orient");
+    }
 }

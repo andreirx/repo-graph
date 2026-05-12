@@ -167,11 +167,7 @@ fn index_with_protos_shows_contract_summary() {
         stderr
     );
     // Should show schema and element counts
-    assert!(
-        stderr.contains("schemas"),
-        "missing schemas in: {}",
-        stderr
-    );
+    assert!(stderr.contains("schemas"), "missing schemas in: {}", stderr);
     assert!(
         stderr.contains("elements"),
         "missing elements in: {}",
@@ -228,11 +224,7 @@ fn refresh_with_protos_shows_contract_summary() {
         "missing contracts line in: {}",
         stderr
     );
-    assert!(
-        stderr.contains("schemas"),
-        "missing schemas in: {}",
-        stderr
-    );
+    assert!(stderr.contains("schemas"), "missing schemas in: {}", stderr);
 }
 
 // ======================================================================
@@ -263,7 +255,11 @@ fn index_contract_summary_format() {
     let lines: Vec<&str> = stderr.lines().collect();
 
     // Should have at least 2 lines (main line + contracts line)
-    assert!(lines.len() >= 2, "expected at least 2 lines, got: {}", stderr);
+    assert!(
+        lines.len() >= 2,
+        "expected at least 2 lines, got: {}",
+        stderr
+    );
 
     // First line should be the main index line
     assert!(
@@ -315,7 +311,11 @@ fn index_multiple_protos_aggregates_counts() {
     let mut f = File::create(&proto3).unwrap();
     writeln!(f, r#"syntax = "proto3";"#).unwrap();
     writeln!(f, r#"package api;"#).unwrap();
-    writeln!(f, r#"service MyService {{ rpc Get(User) returns (Order); }}"#).unwrap();
+    writeln!(
+        f,
+        r#"service MyService {{ rpc Get(User) returns (Order); }}"#
+    )
+    .unwrap();
 
     // Need at least one source file
     let src = repo_path.join("index.ts");
@@ -375,7 +375,11 @@ fn create_repo_with_proto_and_java(dir: &std::path::Path) {
     let mut f = File::create(&java_protos).unwrap();
     writeln!(f, "package com.example.api;").unwrap();
     writeln!(f, "public final class ApiProtos {{").unwrap();
-    writeln!(f, "  public static final class User extends com.google.protobuf.GeneratedMessageV3 {{}}").unwrap();
+    writeln!(
+        f,
+        "  public static final class User extends com.google.protobuf.GeneratedMessageV3 {{}}"
+    )
+    .unwrap();
     writeln!(f, "}}").unwrap();
 
     // Simulate gRPC generated file
@@ -384,7 +388,11 @@ fn create_repo_with_proto_and_java(dir: &std::path::Path) {
     writeln!(f, "package com.example.api;").unwrap();
     writeln!(f, "public final class UserServiceGrpc {{").unwrap();
     writeln!(f, "  public static abstract class UserServiceImplBase {{}}").unwrap();
-    writeln!(f, "  public static final class UserServiceBlockingStub {{}}").unwrap();
+    writeln!(
+        f,
+        "  public static final class UserServiceBlockingStub {{}}"
+    )
+    .unwrap();
     writeln!(f, "}}").unwrap();
 }
 

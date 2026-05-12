@@ -45,6 +45,4 @@ pub use deps::{
     ModuleDependencySummary, PackageUsage, ReconcileInput,
 };
 pub use facts::{load_module_graph_facts, ModuleGraphFacts, ModuleQueryError};
-pub use violations::{
-    evaluate_violations_from_facts, DiscoveredModuleViolationsResult,
-};
+pub use violations::{evaluate_violations_from_facts, DiscoveredModuleViolationsResult};

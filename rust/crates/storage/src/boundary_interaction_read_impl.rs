@@ -130,7 +130,8 @@ impl BoundaryInteractionReadPort for StorageConnection {
         let mut stmt = conn.prepare(&sql).map_err(map_storage_error)?;
 
         // Bind parameters dynamically
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(snapshot_uid.to_string())];
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> =
+            vec![Box::new(snapshot_uid.to_string())];
 
         if let Some(ref kind) = filter.channel_kind {
             params_vec.push(Box::new(kind.as_str().to_string()));
@@ -157,7 +158,8 @@ impl BoundaryInteractionReadPort for StorageConnection {
             params_vec.push(Box::new(min_conf));
         }
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
 
         // Query into raw rows first, then parse enum values outside the closure
         // to properly propagate parse errors.
@@ -1175,7 +1177,10 @@ mod tests {
 
         // All are unix_socket
         assert_eq!(summary.by_channel_kind.len(), 1);
-        assert_eq!(summary.by_channel_kind[0].channel_kind, ChannelKind::UnixSocket);
+        assert_eq!(
+            summary.by_channel_kind[0].channel_kind,
+            ChannelKind::UnixSocket
+        );
         assert_eq!(summary.by_channel_kind[0].count, 3);
     }
 
@@ -1379,7 +1384,10 @@ mod tests {
             detail.contracts[0].contract_name.as_deref(),
             Some("api.v1.Greeter")
         );
-        assert_eq!(detail.contracts[0].association_basis, "generated_code_mapping");
+        assert_eq!(
+            detail.contracts[0].association_basis,
+            "generated_code_mapping"
+        );
         assert!((detail.contracts[0].confidence - 0.95).abs() < 0.001);
         assert!(detail.contracts[0].evidence_json.is_some());
     }
@@ -1424,7 +1432,9 @@ mod tests {
         let conn = create_test_db();
 
         let filter = BoundaryInteractionLinkFilter::new();
-        let results = conn.list_boundary_interaction_links("snap-1", &filter).unwrap();
+        let results = conn
+            .list_boundary_interaction_links("snap-1", &filter)
+            .unwrap();
 
         assert!(results.is_empty());
     }
@@ -1472,7 +1482,8 @@ mod tests {
 
         let provider_uid = provider_surface.surface_uid.clone();
         let consumer_uid = consumer_surface.surface_uid.clone();
-        conn.insert_boundary_surfaces(&[provider_surface, consumer_surface]).unwrap();
+        conn.insert_boundary_surfaces(&[provider_surface, consumer_surface])
+            .unwrap();
 
         // Create contract schema and element
         conn.connection_mut()
@@ -1494,7 +1505,9 @@ mod tests {
             .unwrap();
 
         let filter = BoundaryInteractionLinkFilter::new();
-        let results = conn.list_boundary_interaction_links("snap-1", &filter).unwrap();
+        let results = conn
+            .list_boundary_interaction_links("snap-1", &filter)
+            .unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].link_uid, "link-1");
@@ -1551,7 +1564,8 @@ mod tests {
 
         let provider_uid = provider_surface.surface_uid.clone();
         let consumer_uid = consumer_surface.surface_uid.clone();
-        conn.insert_boundary_surfaces(&[provider_surface, consumer_surface]).unwrap();
+        conn.insert_boundary_surfaces(&[provider_surface, consumer_surface])
+            .unwrap();
 
         // Create two contract elements
         conn.connection_mut()
@@ -1583,7 +1597,9 @@ mod tests {
 
         // Filter by "Greeter" - should match only the greeter link
         let filter = BoundaryInteractionLinkFilter::new().with_contract_name("Greeter");
-        let results = conn.list_boundary_interaction_links("snap-1", &filter).unwrap();
+        let results = conn
+            .list_boundary_interaction_links("snap-1", &filter)
+            .unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].link_uid, "link-greeter");
@@ -1591,14 +1607,18 @@ mod tests {
 
         // Filter by "Hello" - should match only the hello link
         let filter = BoundaryInteractionLinkFilter::new().with_contract_name("Hello");
-        let results = conn.list_boundary_interaction_links("snap-1", &filter).unwrap();
+        let results = conn
+            .list_boundary_interaction_links("snap-1", &filter)
+            .unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].link_uid, "link-hello");
 
         // No filter - should return both
         let filter = BoundaryInteractionLinkFilter::new();
-        let results = conn.list_boundary_interaction_links("snap-1", &filter).unwrap();
+        let results = conn
+            .list_boundary_interaction_links("snap-1", &filter)
+            .unwrap();
 
         assert_eq!(results.len(), 2);
     }

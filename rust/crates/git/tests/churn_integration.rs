@@ -144,8 +144,14 @@ fn churn_multiple_files() {
     assert_eq!(results.len(), 2);
 
     // Find each file
-    let main = results.iter().find(|e| e.file_path == "src/main.rs").unwrap();
-    let lib = results.iter().find(|e| e.file_path == "src/lib.rs").unwrap();
+    let main = results
+        .iter()
+        .find(|e| e.file_path == "src/main.rs")
+        .unwrap();
+    let lib = results
+        .iter()
+        .find(|e| e.file_path == "src/lib.rs")
+        .unwrap();
 
     assert_eq!(main.commit_count, 2);
     assert_eq!(lib.commit_count, 1);
@@ -276,7 +282,10 @@ fn churn_high_commits_low_lines() {
 
     // bulk.rs has more lines (10), tweaked.rs has more commits (3)
     let bulk = results.iter().find(|e| e.file_path == "bulk.rs").unwrap();
-    let tweaked = results.iter().find(|e| e.file_path == "tweaked.rs").unwrap();
+    let tweaked = results
+        .iter()
+        .find(|e| e.file_path == "tweaked.rs")
+        .unwrap();
 
     assert!(bulk.lines_changed > tweaked.lines_changed);
     assert!(tweaked.commit_count > bulk.commit_count);

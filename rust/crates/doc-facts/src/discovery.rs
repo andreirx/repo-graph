@@ -86,11 +86,9 @@ fn discover_recursive(
                 // For other dirs, only look for MAP.md and .env files
                 discover_recursive(repo_root, &path, depth + 1, results, seen);
             }
-        } else if path.is_file() {
-            if is_doc_candidate(&path, file_name) {
-                if let Some(doc_file) = make_doc_file(repo_root, &path) {
-                    results.push(doc_file);
-                }
+        } else if path.is_file() && is_doc_candidate(&path, file_name) {
+            if let Some(doc_file) = make_doc_file(repo_root, &path) {
+                results.push(doc_file);
             }
         }
     }
@@ -124,9 +122,7 @@ fn is_doc_candidate(path: &Path, file_name: &str) -> bool {
     // Markdown files in docs/ directories
     if let Some(parent) = path.parent() {
         if let Some(parent_name) = parent.file_name().and_then(|n| n.to_str()) {
-            if (parent_name == "docs" || parent_name == "design")
-                && file_name.ends_with(".md")
-            {
+            if (parent_name == "docs" || parent_name == "design") && file_name.ends_with(".md") {
                 return true;
             }
         }
@@ -137,11 +133,7 @@ fn is_doc_candidate(path: &Path, file_name: &str) -> bool {
 
 /// Create a DocFile from a discovered path.
 fn make_doc_file(repo_root: &Path, path: &Path) -> Option<DocFile> {
-    let relative_path = path
-        .strip_prefix(repo_root)
-        .ok()?
-        .to_str()?
-        .to_string();
+    let relative_path = path.strip_prefix(repo_root).ok()?.to_str()?.to_string();
 
     let kind = classify_doc_kind(&relative_path);
     let generated = is_generated_by_path(&relative_path);

@@ -20,9 +20,7 @@
 //!    grammar).
 
 use repo_graph_indexer::types::{CallArgPayload, ResolvedCallsite};
-use repo_graph_state_bindings::{
-    CalleePath, FsPathOrLogical, ImportView, Language, LogicalName,
-};
+use repo_graph_state_bindings::{CalleePath, FsPathOrLogical, ImportView, Language, LogicalName};
 
 use crate::adapter::{AdapterContext, LanguageStateAdapter};
 use crate::emit::{CallsiteLogicalName, StateBoundaryCallsite};
@@ -54,10 +52,7 @@ impl LanguageStateAdapter for CAdapter {
         _ctx: &AdapterContext<'_>,
         callsites: &[ResolvedCallsite],
     ) -> Vec<StateBoundaryCallsite> {
-        callsites
-            .iter()
-            .filter_map(adapt_c_callsite)
-            .collect()
+        callsites.iter().filter_map(adapt_c_callsite).collect()
     }
 }
 
@@ -175,7 +170,10 @@ mod tests {
             source_location: loc(),
         };
         let adapted = adapt_c_callsite(&rc).expect("valid");
-        assert_eq!(adapted.callee.resolved_module.as_deref(), Some("libc:stdio"));
+        assert_eq!(
+            adapted.callee.resolved_module.as_deref(),
+            Some("libc:stdio")
+        );
         assert_eq!(adapted.callee.resolved_symbol, "fopen_read");
     }
 
@@ -212,7 +210,10 @@ mod tests {
             source_location: loc(),
         };
         let adapted = adapt_c_callsite(&rc).expect("valid");
-        assert_eq!(adapted.callee.resolved_module.as_deref(), Some("libc:fcntl"));
+        assert_eq!(
+            adapted.callee.resolved_module.as_deref(),
+            Some("libc:fcntl")
+        );
         assert_eq!(adapted.callee.resolved_symbol, "open_read");
     }
 

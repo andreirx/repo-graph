@@ -68,52 +68,74 @@ pub mod storage_port;
 
 // ── Public surface (locked at Rust-42) ────────────────────────
 
-pub use doc_relevance::{DocEntry, DocFocusContext, select_relevant_docs};
-pub use dto::{
-	budget::Budget,
-	envelope::{
-		Confidence, DocRelevanceReason, DocumentationSection, Focus,
-		FocusCandidate, FocusFailureReason, NextAction, NextKind,
-		OrientResult, RelevantDoc, ResolvedKind, CHECK_COMMAND,
-		EXPLAIN_COMMAND, ORIENT_COMMAND, ORIENT_SCHEMA,
-	},
-	limit::{DegradationInfo, DegradationStatus, Limit, LimitCode},
-	signal::{
-		BoundaryLinksSummaryEvidence, BoundaryViolationEvidence,
-		BoundaryViolationsEvidence, CallersSummaryEvidence, CalleesSummaryEvidence,
-		CheckConditionEvidence, CheckFailEvidence,
-		CheckIncompleteEvidence, CheckPassEvidence, CycleEvidence,
-		// DeadCodeEvidence, DeadSymbolEvidence — removed. Surface withdrawn.
-		ExplainBoundaryEvidence, ExplainCalleeItem,
-		ExplainCalleesEvidence, ExplainCallerItem,
-		ExplainCallersEvidence, ExplainCyclesEvidence,
-		ExplainFileItem, ExplainFilesEvidence,
-		ExplainGateEvidence, ExplainGateItem,
-		ExplainIdentityEvidence, ExplainImportItem,
-		ExplainImportsEvidence, ExplainMeasurementItem,
-		ExplainMeasurementsEvidence, ExplainSymbolItem,
-		ExplainSymbolsEvidence, ExplainTrustEvidence,
-		ImportCyclesEvidence, ModuleCountEvidence,
-		ModuleKindBreakdown, ModuleSummaryEvidence, Severity, Signal, SignalCategory,
-		SignalCode, SignalEvidence, SignalScope,
-		SnapshotInfoEvidence, TrustLowResolutionEvidence,
-		TrustNoEnrichmentEvidence, TrustStaleSnapshotEvidence,
-	},
-	source::SourceRef,
-};
 pub use check::{
-	run_check, CheckInput, CheckResult, CheckVerdict, ConditionCode,
-	ConditionResult, ConditionStatus, GateOutcomeForCheck,
+    run_check, CheckInput, CheckResult, CheckVerdict, ConditionCode, ConditionResult,
+    ConditionStatus, GateOutcomeForCheck,
+};
+pub use doc_relevance::{select_relevant_docs, DocEntry, DocFocusContext};
+pub use dto::{
+    budget::Budget,
+    envelope::{
+        Confidence, DocRelevanceReason, DocumentationSection, Focus, FocusCandidate,
+        FocusFailureReason, NextAction, NextKind, OrientResult, RelevantDoc, ResolvedKind,
+        CHECK_COMMAND, EXPLAIN_COMMAND, ORIENT_COMMAND, ORIENT_SCHEMA,
+    },
+    limit::{DegradationInfo, DegradationStatus, Limit, LimitCode},
+    signal::{
+        BoundaryLinksSummaryEvidence,
+        BoundaryViolationEvidence,
+        BoundaryViolationsEvidence,
+        CalleesSummaryEvidence,
+        CallersSummaryEvidence,
+        CheckConditionEvidence,
+        CheckFailEvidence,
+        CheckIncompleteEvidence,
+        CheckPassEvidence,
+        CycleEvidence,
+        // DeadCodeEvidence, DeadSymbolEvidence — removed. Surface withdrawn.
+        ExplainBoundaryEvidence,
+        ExplainCalleeItem,
+        ExplainCalleesEvidence,
+        ExplainCallerItem,
+        ExplainCallersEvidence,
+        ExplainCyclesEvidence,
+        ExplainFileItem,
+        ExplainFilesEvidence,
+        ExplainGateEvidence,
+        ExplainGateItem,
+        ExplainIdentityEvidence,
+        ExplainImportItem,
+        ExplainImportsEvidence,
+        ExplainMeasurementItem,
+        ExplainMeasurementsEvidence,
+        ExplainSymbolItem,
+        ExplainSymbolsEvidence,
+        ExplainTrustEvidence,
+        ImportCyclesEvidence,
+        ModuleCountEvidence,
+        ModuleKindBreakdown,
+        ModuleSummaryEvidence,
+        Severity,
+        Signal,
+        SignalCategory,
+        SignalCode,
+        SignalEvidence,
+        SignalScope,
+        SnapshotInfoEvidence,
+        TrustLowResolutionEvidence,
+        TrustNoEnrichmentEvidence,
+        TrustStaleSnapshotEvidence,
+    },
+    source::SourceRef,
 };
 pub use errors::{AgentStorageError, CheckError, ExplainError, OrientError};
 pub use explain::run_explain;
 pub use orient::orient;
 pub use storage_port::{
-	AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow,
-	AgentCallerRow, AgentComplexityMeasurement, AgentCycle, AgentDeadNode,
-	AgentDocEntry, AgentFileEntry, AgentFocusCandidate, AgentFocusKind,
-	AgentImportEdge, AgentImportEntry, AgentModuleSummary, AgentPathResolution,
-	AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
-	AgentSnapshot, AgentStaleFile, AgentStorageRead, AgentSymbolContext,
-	AgentSymbolEntry, AgentTrustSummary, EnrichmentState,
+    AgentBoundaryDeclaration, AgentBoundaryLinksFreshness, AgentCalleeRow, AgentCallerRow,
+    AgentComplexityMeasurement, AgentCycle, AgentDeadNode, AgentDocEntry, AgentFileEntry,
+    AgentFocusCandidate, AgentFocusKind, AgentImportEdge, AgentImportEntry, AgentModuleSummary,
+    AgentPathResolution, AgentReliabilityAxis, AgentReliabilityLevel, AgentRepo, AgentRepoSummary,
+    AgentSnapshot, AgentStaleFile, AgentStorageRead, AgentSymbolContext, AgentSymbolEntry,
+    AgentTrustSummary, EnrichmentState,
 };

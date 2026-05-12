@@ -25,8 +25,8 @@
 
 use crate::errors::GateStorageError;
 use crate::types::{
-	GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
-	GateModuleViolationEvidence, GateQualityAssessmentFact, GateRequirement, GateWaiver,
+    GateBoundaryDeclaration, GateImportEdge, GateInference, GateMeasurement,
+    GateModuleViolationEvidence, GateQualityAssessmentFact, GateRequirement, GateWaiver,
 };
 
 /// Narrow read port for the gate policy layer.
@@ -34,112 +34,112 @@ use crate::types::{
 /// **Defined by the policy layer (gate crate). Implemented by
 /// the adapter layer (storage crate).**
 pub trait GateStorageRead {
-	/// Return all active requirement declarations for a repo,
-	/// parsed into gate-owned DTOs. Declarations with empty
-	/// verification lists are skipped (mirrors the existing
-	/// storage behavior at `get_active_requirement_declarations`).
-	fn get_active_requirements(
-		&self,
-		repo_uid: &str,
-	) -> Result<Vec<GateRequirement>, GateStorageError>;
+    /// Return all active requirement declarations for a repo,
+    /// parsed into gate-owned DTOs. Declarations with empty
+    /// verification lists are skipped (mirrors the existing
+    /// storage behavior at `get_active_requirement_declarations`).
+    fn get_active_requirements(
+        &self,
+        repo_uid: &str,
+    ) -> Result<Vec<GateRequirement>, GateStorageError>;
 
-	/// Return all active boundary declarations for a repo.
-	fn get_boundary_declarations(
-		&self,
-		repo_uid: &str,
-	) -> Result<Vec<GateBoundaryDeclaration>, GateStorageError>;
+    /// Return all active boundary declarations for a repo.
+    fn get_boundary_declarations(
+        &self,
+        repo_uid: &str,
+    ) -> Result<Vec<GateBoundaryDeclaration>, GateStorageError>;
 
-	/// Return IMPORTS edges between two file-path prefixes.
-	/// Mirrors the storage query used by the existing
-	/// `arch_violations` method.
-	fn find_boundary_imports(
-		&self,
-		snapshot_uid: &str,
-		source_prefix: &str,
-		target_prefix: &str,
-	) -> Result<Vec<GateImportEdge>, GateStorageError>;
+    /// Return IMPORTS edges between two file-path prefixes.
+    /// Mirrors the storage query used by the existing
+    /// `arch_violations` method.
+    fn find_boundary_imports(
+        &self,
+        snapshot_uid: &str,
+        source_prefix: &str,
+        target_prefix: &str,
+    ) -> Result<Vec<GateImportEdge>, GateStorageError>;
 
-	/// Return all `line_coverage` measurements for a snapshot.
-	/// The assembler filters by target prefix after reading.
-	fn get_coverage_measurements(
-		&self,
-		snapshot_uid: &str,
-	) -> Result<Vec<GateMeasurement>, GateStorageError>;
+    /// Return all `line_coverage` measurements for a snapshot.
+    /// The assembler filters by target prefix after reading.
+    fn get_coverage_measurements(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<GateMeasurement>, GateStorageError>;
 
-	/// Return all `cyclomatic_complexity` measurements for a
-	/// snapshot. The assembler filters by target prefix after
-	/// reading.
-	fn get_complexity_measurements(
-		&self,
-		snapshot_uid: &str,
-	) -> Result<Vec<GateMeasurement>, GateStorageError>;
+    /// Return all `cyclomatic_complexity` measurements for a
+    /// snapshot. The assembler filters by target prefix after
+    /// reading.
+    fn get_complexity_measurements(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<GateMeasurement>, GateStorageError>;
 
-	/// Return all `hotspot_score` inferences for a snapshot.
-	/// The assembler filters by target prefix (or not, when the
-	/// obligation has no target) after reading.
-	fn get_hotspot_inferences(
-		&self,
-		snapshot_uid: &str,
-	) -> Result<Vec<GateInference>, GateStorageError>;
+    /// Return all `hotspot_score` inferences for a snapshot.
+    /// The assembler filters by target prefix (or not, when the
+    /// obligation has no target) after reading.
+    fn get_hotspot_inferences(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<Vec<GateInference>, GateStorageError>;
 
-	/// Return active, non-expired waivers matching a given
-	/// `(req_id, req_version, obligation_id)` tuple. `now` is
-	/// an ISO 8601 timestamp used for expiry comparison.
-	/// First-matching is caller's choice — the assembler keeps
-	/// the full list so compute can make the decision.
-	fn find_waivers(
-		&self,
-		repo_uid: &str,
-		req_id: &str,
-		req_version: i64,
-		obligation_id: &str,
-		now: &str,
-	) -> Result<Vec<GateWaiver>, GateStorageError>;
+    /// Return active, non-expired waivers matching a given
+    /// `(req_id, req_version, obligation_id)` tuple. `now` is
+    /// an ISO 8601 timestamp used for expiry comparison.
+    /// First-matching is caller's choice — the assembler keeps
+    /// the full list so compute can make the decision.
+    fn find_waivers(
+        &self,
+        repo_uid: &str,
+        req_id: &str,
+        req_version: i64,
+        obligation_id: &str,
+        now: &str,
+    ) -> Result<Vec<GateWaiver>, GateStorageError>;
 
-	/// Evaluate discovered-module boundary violations (RS-MG-8).
-	///
-	/// The storage adapter implements this using RS-MG-1 through
-	/// RS-MG-4 support modules from the classification crate:
-	///
-	///   1. Load module candidates and build identity index (RS-MG-1)
-	///   2. Load imports + ownership and derive edges (RS-MG-2)
-	///   3. Load and parse boundary declarations (RS-MG-3)
-	///   4. Evaluate violations (RS-MG-4)
-	///
-	/// Always repo-wide. Evaluates ALL discovered-module boundaries
-	/// for the repo. If scoped evaluation is needed, it requires a
-	/// separate method with explicit design.
-	///
-	/// Returns summary counts only — the gate compute layer does
-	/// not need individual violation details for verdict
-	/// determination.
-	fn evaluate_module_violations(
-		&self,
-		repo_uid: &str,
-		snapshot_uid: &str,
-	) -> Result<GateModuleViolationEvidence, GateStorageError>;
+    /// Evaluate discovered-module boundary violations (RS-MG-8).
+    ///
+    /// The storage adapter implements this using RS-MG-1 through
+    /// RS-MG-4 support modules from the classification crate:
+    ///
+    ///   1. Load module candidates and build identity index (RS-MG-1)
+    ///   2. Load imports + ownership and derive edges (RS-MG-2)
+    ///   3. Load and parse boundary declarations (RS-MG-3)
+    ///   4. Evaluate violations (RS-MG-4)
+    ///
+    /// Always repo-wide. Evaluates ALL discovered-module boundaries
+    /// for the repo. If scoped evaluation is needed, it requires a
+    /// separate method with explicit design.
+    ///
+    /// Returns summary counts only — the gate compute layer does
+    /// not need individual violation details for verdict
+    /// determination.
+    fn evaluate_module_violations(
+        &self,
+        repo_uid: &str,
+        snapshot_uid: &str,
+    ) -> Result<GateModuleViolationEvidence, GateStorageError>;
 
-	/// Return enriched quality-assessment facts for gate consumption.
-	///
-	/// Joins active quality-policy declarations for the repo with
-	/// assessment rows for the snapshot. Returns one entry per active
-	/// policy.
-	///
-	/// If no assessment exists for a policy, the entry has
-	/// `assessment_state = Missing` — this enables gate to detect
-	/// missing required assessments rather than silently passing.
-	///
-	/// The storage adapter:
-	///   1. Loads active quality-policy declarations (typed)
-	///   2. Loads assessment rows for the snapshot
-	///   3. Joins by policy_uid
-	///   4. Maps to gate-owned DTOs
-	///
-	/// Gate does NOT parse declaration JSON — storage provides all
-	/// required fields in the DTO.
-	fn get_quality_assessment_facts_for_gate(
-		&self,
-		repo_uid: &str,
-		snapshot_uid: &str,
-	) -> Result<Vec<GateQualityAssessmentFact>, GateStorageError>;
+    /// Return enriched quality-assessment facts for gate consumption.
+    ///
+    /// Joins active quality-policy declarations for the repo with
+    /// assessment rows for the snapshot. Returns one entry per active
+    /// policy.
+    ///
+    /// If no assessment exists for a policy, the entry has
+    /// `assessment_state = Missing` — this enables gate to detect
+    /// missing required assessments rather than silently passing.
+    ///
+    /// The storage adapter:
+    ///   1. Loads active quality-policy declarations (typed)
+    ///   2. Loads assessment rows for the snapshot
+    ///   3. Joins by policy_uid
+    ///   4. Maps to gate-owned DTOs
+    ///
+    /// Gate does NOT parse declaration JSON — storage provides all
+    /// required fields in the DTO.
+    fn get_quality_assessment_facts_for_gate(
+        &self,
+        repo_uid: &str,
+        snapshot_uid: &str,
+    ) -> Result<Vec<GateQualityAssessmentFact>, GateStorageError>;
 }

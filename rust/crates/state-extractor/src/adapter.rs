@@ -148,7 +148,9 @@ mod tests {
     #[test]
     fn registry_register_and_get() {
         let mut registry = AdapterRegistry::new();
-        registry.register(Box::new(MockAdapter { lang: Language::Typescript }));
+        registry.register(Box::new(MockAdapter {
+            lang: Language::Typescript,
+        }));
 
         assert!(registry.has(Language::Typescript));
         assert!(!registry.has(Language::Python));

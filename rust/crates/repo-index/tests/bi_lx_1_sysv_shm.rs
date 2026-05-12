@@ -25,8 +25,8 @@
 use std::path::PathBuf;
 
 use repo_graph_boundary_interaction::{
-    BoundaryInteractionFilter, BoundaryInteractionReadPort, ChannelKind, Direction,
-    InteractionPattern, BoundaryScope,
+    BoundaryInteractionFilter, BoundaryInteractionReadPort, BoundaryScope, ChannelKind, Direction,
+    InteractionPattern,
 };
 use repo_graph_repo_index::compose::{index_into_storage, ComposeOptions};
 use repo_graph_storage::StorageConnection;
@@ -86,7 +86,10 @@ fn index_sysv_shm_fixture_produces_shared_memory_surfaces() {
             .iter()
             .map(|s| format!(
                 "{}:{} {} {:?}",
-                s.source_file, s.line_start, s.channel_kind.as_str(), s.direction
+                s.source_file,
+                s.line_start,
+                s.channel_kind.as_str(),
+                s.direction
             ))
             .collect::<Vec<_>>()
     );

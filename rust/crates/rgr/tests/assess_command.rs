@@ -51,9 +51,8 @@ fn run_cmd(args: &[&str]) -> std::process::Output {
 
 fn parse_json(output: &std::process::Output) -> serde_json::Value {
     let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(&stdout).unwrap_or_else(|e| {
-        panic!("invalid JSON: {}\nstdout: {}", e, stdout)
-    })
+    serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("invalid JSON: {}\nstdout: {}", e, stdout))
 }
 
 // -- 1. Missing args => usage error ------------------------------------------
@@ -63,7 +62,10 @@ fn assess_missing_args() {
     let output = run_cmd(&["assess"]);
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("usage:"), "expected usage message in stderr");
+    assert!(
+        stderr.contains("usage:"),
+        "expected usage message in stderr"
+    );
 }
 
 #[test]
@@ -92,7 +94,12 @@ fn assess_no_policies() {
     let db_str = db.to_str().unwrap();
 
     let output = run_cmd(&["assess", db_str, "r1"]);
-    assert_eq!(output.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let json = parse_json(&output);
     assert_eq!(json["command"], "assess");
@@ -109,17 +116,33 @@ fn assess_absolute_policy_pass() {
 
     // Declare a policy that the code will pass (threshold high enough).
     let declare_output = run_cmd(&[
-        "declare", "quality-policy", db_str, "r1", "QP-001",
-        "--measurement", "cognitive_complexity",
-        "--policy-kind", "absolute_max",
-        "--threshold", "100",  // Very high, should pass
+        "declare",
+        "quality-policy",
+        db_str,
+        "r1",
+        "QP-001",
+        "--measurement",
+        "cognitive_complexity",
+        "--policy-kind",
+        "absolute_max",
+        "--threshold",
+        "100", // Very high, should pass
     ]);
-    assert_eq!(declare_output.status.code(), Some(0), "declare failed: {}",
-        String::from_utf8_lossy(&declare_output.stderr));
+    assert_eq!(
+        declare_output.status.code(),
+        Some(0),
+        "declare failed: {}",
+        String::from_utf8_lossy(&declare_output.stderr)
+    );
 
     // Run assessment.
     let output = run_cmd(&["assess", db_str, "r1"]);
-    assert_eq!(output.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let json = parse_json(&output);
     assert_eq!(json["command"], "assess");
@@ -131,7 +154,9 @@ fn assess_absolute_policy_pass() {
     // Verify persistence: read back from quality_assessments table.
     let conn = repo_graph_storage::StorageConnection::open(&db).unwrap();
     let snap = conn.get_latest_snapshot("r1").unwrap().unwrap();
-    let assessments = conn.get_quality_assessments_for_snapshot(&snap.snapshot_uid).unwrap();
+    let assessments = conn
+        .get_quality_assessments_for_snapshot(&snap.snapshot_uid)
+        .unwrap();
     assert_eq!(assessments.len(), 1, "expected 1 persisted assessment");
     assert_eq!(assessments[0].computed_verdict, "PASS");
 }
@@ -143,10 +168,17 @@ fn assess_absolute_policy_fail() {
 
     // Declare a policy with very low threshold that will fail.
     let declare_output = run_cmd(&[
-        "declare", "quality-policy", db_str, "r1", "QP-002",
-        "--measurement", "cognitive_complexity",
-        "--policy-kind", "absolute_max",
-        "--threshold", "0",  // Threshold 0 means any complexity fails
+        "declare",
+        "quality-policy",
+        db_str,
+        "r1",
+        "QP-002",
+        "--measurement",
+        "cognitive_complexity",
+        "--policy-kind",
+        "absolute_max",
+        "--threshold",
+        "0", // Threshold 0 means any complexity fails
     ]);
     assert_eq!(declare_output.status.code(), Some(0));
 
@@ -154,7 +186,12 @@ fn assess_absolute_policy_fail() {
     let output = run_cmd(&["assess", db_str, "r1"]);
     // Assessment should still succeed (exit 0) even if policies fail.
     // The assessment persisted successfully; verdicts are informational.
-    assert_eq!(output.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let json = parse_json(&output);
     assert_eq!(json["assessments"]["total"], 1);
@@ -165,7 +202,9 @@ fn assess_absolute_policy_fail() {
     // Verify persistence: read back from quality_assessments table.
     let conn = repo_graph_storage::StorageConnection::open(&db).unwrap();
     let snap = conn.get_latest_snapshot("r1").unwrap().unwrap();
-    let assessments = conn.get_quality_assessments_for_snapshot(&snap.snapshot_uid).unwrap();
+    let assessments = conn
+        .get_quality_assessments_for_snapshot(&snap.snapshot_uid)
+        .unwrap();
     assert_eq!(assessments.len(), 1, "expected 1 persisted assessment");
     assert_eq!(assessments[0].computed_verdict, "FAIL");
 }
@@ -179,19 +218,34 @@ fn assess_comparative_policy_missing_baseline() {
 
     // Declare a comparative policy.
     let declare_output = run_cmd(&[
-        "declare", "quality-policy", db_str, "r1", "QP-003",
-        "--measurement", "cognitive_complexity",
-        "--policy-kind", "no_new",
-        "--threshold", "10",
+        "declare",
+        "quality-policy",
+        db_str,
+        "r1",
+        "QP-003",
+        "--measurement",
+        "cognitive_complexity",
+        "--policy-kind",
+        "no_new",
+        "--threshold",
+        "10",
     ]);
     assert_eq!(declare_output.status.code(), Some(0));
 
     // Run assessment without --baseline.
     let output = run_cmd(&["assess", db_str, "r1"]);
     // Should fail because comparative policy requires baseline.
-    assert_eq!(output.status.code(), Some(2), "expected exit 2 for missing baseline");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "expected exit 2 for missing baseline"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("baseline"), "stderr should mention baseline: {}", stderr);
+    assert!(
+        stderr.contains("baseline"),
+        "stderr should mention baseline: {}",
+        stderr
+    );
 }
 
 #[test]
@@ -201,20 +255,34 @@ fn assess_comparative_policy_invalid_baseline() {
 
     // Declare a comparative policy.
     let declare_output = run_cmd(&[
-        "declare", "quality-policy", db_str, "r1", "QP-INV",
-        "--measurement", "cognitive_complexity",
-        "--policy-kind", "no_new",
-        "--threshold", "10",
+        "declare",
+        "quality-policy",
+        db_str,
+        "r1",
+        "QP-INV",
+        "--measurement",
+        "cognitive_complexity",
+        "--policy-kind",
+        "no_new",
+        "--threshold",
+        "10",
     ]);
     assert_eq!(declare_output.status.code(), Some(0));
 
     // Run assessment with a nonexistent baseline.
     let output = run_cmd(&["assess", db_str, "r1", "--baseline", "nonexistent-snap"]);
     // Should fail because baseline doesn't exist.
-    assert_eq!(output.status.code(), Some(2), "expected exit 2 for invalid baseline");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "expected exit 2 for invalid baseline"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("does not exist") || stderr.contains("invalid"),
-        "stderr should mention invalid baseline: {}", stderr);
+    assert!(
+        stderr.contains("does not exist") || stderr.contains("invalid"),
+        "stderr should mention invalid baseline: {}",
+        stderr
+    );
 }
 
 // -- 6. Comparative policy with --baseline -----------------------------------
@@ -233,16 +301,28 @@ fn assess_comparative_policy_with_baseline() {
 
     // Declare a comparative policy.
     let declare_output = run_cmd(&[
-        "declare", "quality-policy", db_str, "r1", "QP-004",
-        "--measurement", "cognitive_complexity",
-        "--policy-kind", "no_worsened",
-        "--threshold", "10",
+        "declare",
+        "quality-policy",
+        db_str,
+        "r1",
+        "QP-004",
+        "--measurement",
+        "cognitive_complexity",
+        "--policy-kind",
+        "no_worsened",
+        "--threshold",
+        "10",
     ]);
     assert_eq!(declare_output.status.code(), Some(0));
 
     // Run assessment with --baseline.
     let output = run_cmd(&["assess", db_str, "r1", "--baseline", &snapshot_uid]);
-    assert_eq!(output.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let json = parse_json(&output);
     assert_eq!(json["command"], "assess");
@@ -266,15 +346,39 @@ fn assess_json_shape() {
     assert!(json.get("command").is_some(), "missing 'command' field");
     assert!(json.get("repo").is_some(), "missing 'repo' field");
     assert!(json.get("snapshot").is_some(), "missing 'snapshot' field");
-    assert!(json.get("baseline_snapshot").is_some(), "missing 'baseline_snapshot' field");
-    assert!(json.get("assessments").is_some(), "missing 'assessments' field");
-    assert!(json.get("baseline_required_count").is_some(), "missing 'baseline_required_count' field");
+    assert!(
+        json.get("baseline_snapshot").is_some(),
+        "missing 'baseline_snapshot' field"
+    );
+    assert!(
+        json.get("assessments").is_some(),
+        "missing 'assessments' field"
+    );
+    assert!(
+        json.get("baseline_required_count").is_some(),
+        "missing 'baseline_required_count' field"
+    );
 
     // Assessments sub-object.
     let assessments = &json["assessments"];
-    assert!(assessments.get("total").is_some(), "missing 'total' in assessments");
-    assert!(assessments.get("pass").is_some(), "missing 'pass' in assessments");
-    assert!(assessments.get("fail").is_some(), "missing 'fail' in assessments");
-    assert!(assessments.get("not_applicable").is_some(), "missing 'not_applicable' in assessments");
-    assert!(assessments.get("not_comparable").is_some(), "missing 'not_comparable' in assessments");
+    assert!(
+        assessments.get("total").is_some(),
+        "missing 'total' in assessments"
+    );
+    assert!(
+        assessments.get("pass").is_some(),
+        "missing 'pass' in assessments"
+    );
+    assert!(
+        assessments.get("fail").is_some(),
+        "missing 'fail' in assessments"
+    );
+    assert!(
+        assessments.get("not_applicable").is_some(),
+        "missing 'not_applicable' in assessments"
+    );
+    assert!(
+        assessments.get("not_comparable").is_some(),
+        "missing 'not_comparable' in assessments"
+    );
 }

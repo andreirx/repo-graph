@@ -337,7 +337,13 @@ impl SurfaceBuilder {
     }
 
     /// Set full location (lines and columns).
-    pub fn location(mut self, line_start: u32, line_end: u32, col_start: u32, col_end: u32) -> Self {
+    pub fn location(
+        mut self,
+        line_start: u32,
+        line_end: u32,
+        col_start: u32,
+        col_end: u32,
+    ) -> Self {
         self.line_start = Some(line_start);
         self.line_end = Some(line_end);
         self.col_start = Some(col_start);
@@ -379,11 +385,19 @@ impl SurfaceBuilder {
         let direction = self.direction.ok_or("direction is required")?;
         let basis = self.basis.ok_or("basis is required")?;
 
-        let surface_uid =
-            BoundaryInteractionSurface::build_uid(&repo_uid, &source_file, line_start, col_start, channel_kind, direction);
+        let surface_uid = BoundaryInteractionSurface::build_uid(
+            &repo_uid,
+            &source_file,
+            line_start,
+            col_start,
+            channel_kind,
+            direction,
+        );
 
         let protocol_family = ProtocolFamily::from(channel_kind);
-        let confidence = self.confidence.unwrap_or_else(|| basis.default_confidence());
+        let confidence = self
+            .confidence
+            .unwrap_or_else(|| basis.default_confidence());
 
         let surface = BoundaryInteractionSurface {
             surface_uid,
@@ -403,7 +417,9 @@ impl SurfaceBuilder {
             endpoint_locality: self
                 .endpoint_locality
                 .ok_or("endpoint_locality is required")?,
-            symbol_stable_key: self.symbol_stable_key.ok_or("symbol_stable_key is required")?,
+            symbol_stable_key: self
+                .symbol_stable_key
+                .ok_or("symbol_stable_key is required")?,
             source_file,
             line_start,
             line_end: self.line_end.ok_or("line_end is required")?,
@@ -479,7 +495,7 @@ mod tests {
             "repo",
             "src/main.c",
             100,
-            5,  // col 5
+            5, // col 5
             ChannelKind::UnixSocket,
             Direction::Provider,
         );

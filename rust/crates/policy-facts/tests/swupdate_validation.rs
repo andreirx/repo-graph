@@ -38,7 +38,6 @@ fn read_swupdate_file(relative_path: &str) -> Option<String> {
     None
 }
 
-
 #[test]
 fn test_map_channel_retcode() {
     let source = match read_swupdate_file("corelib/server_utils.c") {
@@ -50,10 +49,17 @@ fn test_map_channel_retcode() {
     };
 
     let tree = parse_c_file(&source);
-    let mappings = extract_status_mappings(&tree, source.as_bytes(), "corelib/server_utils.c", "swupdate");
+    let mappings = extract_status_mappings(
+        &tree,
+        source.as_bytes(),
+        "corelib/server_utils.c",
+        "swupdate",
+    );
 
     // Should find map_channel_retcode
-    let map_channel = mappings.iter().find(|m| m.function_name == "map_channel_retcode");
+    let map_channel = mappings
+        .iter()
+        .find(|m| m.function_name == "map_channel_retcode");
     assert!(map_channel.is_some(), "map_channel_retcode not found");
 
     let m = map_channel.unwrap();
@@ -78,11 +84,18 @@ fn test_map_channel_retcode() {
     );
 
     // Validate default
-    assert_eq!(m.default_output, Some("SERVER_EERR".to_string()), "default mismatch");
+    assert_eq!(
+        m.default_output,
+        Some("SERVER_EERR".to_string()),
+        "default mismatch"
+    );
 
     // Print summary for debugging
-    eprintln!("map_channel_retcode: {} mappings, default={:?}",
-        m.mappings.len(), m.default_output);
+    eprintln!(
+        "map_channel_retcode: {} mappings, default={:?}",
+        m.mappings.len(),
+        m.default_output
+    );
     for cm in &m.mappings {
         eprintln!("  {:?} -> {}", cm.inputs, cm.output);
     }
@@ -99,10 +112,17 @@ fn test_channel_map_curl_error() {
     };
 
     let tree = parse_c_file(&source);
-    let mappings = extract_status_mappings(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+    let mappings = extract_status_mappings(
+        &tree,
+        source.as_bytes(),
+        "corelib/channel_curl.c",
+        "swupdate",
+    );
 
     // Should find channel_map_curl_error
-    let curl_error = mappings.iter().find(|m| m.function_name == "channel_map_curl_error");
+    let curl_error = mappings
+        .iter()
+        .find(|m| m.function_name == "channel_map_curl_error");
     assert!(curl_error.is_some(), "channel_map_curl_error not found");
 
     let m = curl_error.unwrap();
@@ -122,7 +142,9 @@ fn test_channel_map_curl_error() {
     assert!(enonet_mapping.is_some(), "CHANNEL_ENONET mapping not found");
     let enonet = enonet_mapping.unwrap();
     assert!(
-        enonet.inputs.contains(&"CURLE_COULDNT_RESOLVE_HOST".to_string()),
+        enonet
+            .inputs
+            .contains(&"CURLE_COULDNT_RESOLVE_HOST".to_string()),
         "CURLE_COULDNT_RESOLVE_HOST should map to CHANNEL_ENONET, got: {:?}",
         find_output_for_input(m, "CURLE_COULDNT_RESOLVE_HOST")
     );
@@ -133,7 +155,9 @@ fn test_channel_map_curl_error() {
     assert!(einit_mapping.is_some(), "CHANNEL_EINIT mapping not found");
     let einit = einit_mapping.unwrap();
     assert!(
-        einit.inputs.contains(&"CURLE_SSL_ENGINE_INITFAILED".to_string()),
+        einit
+            .inputs
+            .contains(&"CURLE_SSL_ENGINE_INITFAILED".to_string()),
         "CURLE_SSL_ENGINE_INITFAILED should map to CHANNEL_EINIT, got: {:?}",
         find_output_for_input(m, "CURLE_SSL_ENGINE_INITFAILED")
     );
@@ -141,21 +165,30 @@ fn test_channel_map_curl_error() {
     // 3. CURLE_PEER_FAILED_VERIFICATION must map to CHANNEL_ESSLCERT
     //    NOT merged with CHANNEL_ESSLCONNECT
     let esslcert_mapping = m.mappings.iter().find(|cm| cm.output == "CHANNEL_ESSLCERT");
-    assert!(esslcert_mapping.is_some(), "CHANNEL_ESSLCERT mapping not found");
+    assert!(
+        esslcert_mapping.is_some(),
+        "CHANNEL_ESSLCERT mapping not found"
+    );
     let esslcert = esslcert_mapping.unwrap();
     assert!(
-        esslcert.inputs.contains(&"CURLE_PEER_FAILED_VERIFICATION".to_string()),
+        esslcert
+            .inputs
+            .contains(&"CURLE_PEER_FAILED_VERIFICATION".to_string()),
         "CURLE_PEER_FAILED_VERIFICATION should map to CHANNEL_ESSLCERT, got: {:?}",
         find_output_for_input(m, "CURLE_PEER_FAILED_VERIFICATION")
     );
 
     // 4. Verify CHANNEL_ENONET does NOT contain SSL init errors
     assert!(
-        !enonet.inputs.contains(&"CURLE_SSL_ENGINE_INITFAILED".to_string()),
+        !enonet
+            .inputs
+            .contains(&"CURLE_SSL_ENGINE_INITFAILED".to_string()),
         "CHANNEL_ENONET wrongly contains SSL init error CURLE_SSL_ENGINE_INITFAILED"
     );
     assert!(
-        !enonet.inputs.contains(&"CURLE_SSL_ENGINE_NOTFOUND".to_string()),
+        !enonet
+            .inputs
+            .contains(&"CURLE_SSL_ENGINE_NOTFOUND".to_string()),
         "CHANNEL_ENONET wrongly contains SSL init error CURLE_SSL_ENGINE_NOTFOUND"
     );
 
@@ -167,15 +200,21 @@ fn test_channel_map_curl_error() {
     );
 
     // Print summary
-    eprintln!("channel_map_curl_error: {} mappings, default={:?}",
-        m.mappings.len(), m.default_output);
+    eprintln!(
+        "channel_map_curl_error: {} mappings, default={:?}",
+        m.mappings.len(),
+        m.default_output
+    );
     for cm in &m.mappings {
         eprintln!("  {:?} -> {}", cm.inputs, cm.output);
     }
 }
 
 /// Helper to find which output a specific input maps to.
-fn find_output_for_input(m: &repo_graph_policy_facts::StatusMapping, input: &str) -> Option<String> {
+fn find_output_for_input(
+    m: &repo_graph_policy_facts::StatusMapping,
+    input: &str,
+) -> Option<String> {
     for cm in &m.mappings {
         if cm.inputs.contains(&input.to_string()) {
             return Some(cm.output.clone());
@@ -195,10 +234,17 @@ fn test_channel_map_http_code() {
     };
 
     let tree = parse_c_file(&source);
-    let mappings = extract_status_mappings(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+    let mappings = extract_status_mappings(
+        &tree,
+        source.as_bytes(),
+        "corelib/channel_curl.c",
+        "swupdate",
+    );
 
     // Should find channel_map_http_code
-    let http_code = mappings.iter().find(|m| m.function_name == "channel_map_http_code");
+    let http_code = mappings
+        .iter()
+        .find(|m| m.function_name == "channel_map_http_code");
     assert!(http_code.is_some(), "channel_map_http_code not found");
 
     let m = http_code.unwrap();
@@ -211,15 +257,30 @@ fn test_channel_map_http_code() {
     assert!(!m.mappings.is_empty(), "no case mappings found");
 
     // Check for some expected HTTP code mappings
-    let has_200 = m.mappings.iter().any(|cm| cm.inputs.contains(&"200".to_string()));
-    let has_401 = m.mappings.iter().any(|cm| cm.inputs.contains(&"401".to_string()));
-    let has_404 = m.mappings.iter().any(|cm| cm.inputs.contains(&"404".to_string()));
+    let has_200 = m
+        .mappings
+        .iter()
+        .any(|cm| cm.inputs.contains(&"200".to_string()));
+    let has_401 = m
+        .mappings
+        .iter()
+        .any(|cm| cm.inputs.contains(&"401".to_string()));
+    let has_404 = m
+        .mappings
+        .iter()
+        .any(|cm| cm.inputs.contains(&"404".to_string()));
 
-    assert!(has_200 || has_401 || has_404, "expected HTTP code mappings not found");
+    assert!(
+        has_200 || has_401 || has_404,
+        "expected HTTP code mappings not found"
+    );
 
     // Print summary
-    eprintln!("channel_map_http_code: {} mappings, default={:?}",
-        m.mappings.len(), m.default_output);
+    eprintln!(
+        "channel_map_http_code: {} mappings, default={:?}",
+        m.mappings.len(),
+        m.default_output
+    );
     for cm in &m.mappings {
         eprintln!("  {:?} -> {}", cm.inputs, cm.output);
     }
@@ -228,10 +289,7 @@ fn test_channel_map_http_code() {
 #[test]
 fn test_no_false_positives_in_corelib() {
     // Verify we don't have excessive false positives
-    let files = &[
-        "corelib/server_utils.c",
-        "corelib/channel_curl.c",
-    ];
+    let files = &["corelib/server_utils.c", "corelib/channel_curl.c"];
 
     let mut total_mappings = 0;
 
@@ -249,7 +307,10 @@ fn test_no_false_positives_in_corelib() {
 
         eprintln!("{}: {} STATUS_MAPPING functions", file, mappings.len());
         for m in &mappings {
-            eprintln!("  - {} ({} -> {})", m.function_name, m.source_type, m.target_type);
+            eprintln!(
+                "  - {} ({} -> {})",
+                m.function_name, m.source_type, m.target_type
+            );
         }
 
         total_mappings += mappings.len();
@@ -288,8 +349,12 @@ fn test_channel_get_file_retry_loops() {
     };
 
     let tree = parse_c_file(&source);
-    let markers =
-        extract_behavioral_markers(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+    let markers = extract_behavioral_markers(
+        &tree,
+        source.as_bytes(),
+        "corelib/channel_curl.c",
+        "swupdate",
+    );
 
     // Filter to channel_get_file function markers
     let channel_get_file_markers: Vec<_> = markers
@@ -386,8 +451,12 @@ fn test_channel_get_file_resume_offset() {
     };
 
     let tree = parse_c_file(&source);
-    let markers =
-        extract_behavioral_markers(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+    let markers = extract_behavioral_markers(
+        &tree,
+        source.as_bytes(),
+        "corelib/channel_curl.c",
+        "swupdate",
+    );
 
     // Filter to channel_get_file function markers
     let channel_get_file_markers: Vec<_> = markers
@@ -451,8 +520,12 @@ fn test_no_false_positive_behavioral_markers() {
     };
 
     let tree = parse_c_file(&source);
-    let markers =
-        extract_behavioral_markers(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+    let markers = extract_behavioral_markers(
+        &tree,
+        source.as_bytes(),
+        "corelib/channel_curl.c",
+        "swupdate",
+    );
 
     // channel_curl_init should NOT have markers (setup function, no retry/resume)
     let init_markers: Vec<_> = markers
@@ -491,8 +564,12 @@ fn test_behavioral_marker_count_channel_get_file() {
     };
 
     let tree = parse_c_file(&source);
-    let markers =
-        extract_behavioral_markers(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+    let markers = extract_behavioral_markers(
+        &tree,
+        source.as_bytes(),
+        "corelib/channel_curl.c",
+        "swupdate",
+    );
 
     let channel_get_file_markers: Vec<_> = markers
         .iter()
@@ -549,8 +626,12 @@ fn test_return_fate_channel_curl() {
     };
 
     let tree = parse_c_file(&source);
-    let fates =
-        extract_return_fates(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+    let fates = extract_return_fates(
+        &tree,
+        source.as_bytes(),
+        "corelib/channel_curl.c",
+        "swupdate",
+    );
 
     // Should have many fates (this is a large file with many calls)
     assert!(
@@ -592,8 +673,12 @@ fn test_return_fate_channel_get_file_curl_perform() {
     };
 
     let tree = parse_c_file(&source);
-    let fates =
-        extract_return_fates(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+    let fates = extract_return_fates(
+        &tree,
+        source.as_bytes(),
+        "corelib/channel_curl.c",
+        "swupdate",
+    );
 
     // Find curl_easy_perform calls in channel_get_file
     let curl_perform_fates: Vec<_> = fates
@@ -637,8 +722,12 @@ fn test_return_fate_channel_map_curl_error() {
     };
 
     let tree = parse_c_file(&source);
-    let fates =
-        extract_return_fates(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+    let fates = extract_return_fates(
+        &tree,
+        source.as_bytes(),
+        "corelib/channel_curl.c",
+        "swupdate",
+    );
 
     // Find channel_map_curl_error calls in channel_get_file
     let map_error_fates: Vec<_> = fates
@@ -679,8 +768,12 @@ fn test_return_fate_no_void_functions() {
     };
 
     let tree = parse_c_file(&source);
-    let fates =
-        extract_return_fates(&tree, source.as_bytes(), "corelib/channel_curl.c", "swupdate");
+    let fates = extract_return_fates(
+        &tree,
+        source.as_bytes(),
+        "corelib/channel_curl.c",
+        "swupdate",
+    );
 
     // None of these should appear as callees
     let void_functions = ["printf", "fprintf", "free", "memcpy", "memset", "strcpy"];
@@ -713,7 +806,12 @@ fn test_return_fate_suricatta_vtable_ignored() {
     };
 
     let tree = parse_c_file(&source);
-    let fates = extract_return_fates(&tree, source.as_bytes(), "suricatta/suricatta.c", "swupdate");
+    let fates = extract_return_fates(
+        &tree,
+        source.as_bytes(),
+        "suricatta/suricatta.c",
+        "swupdate",
+    );
 
     // Find server->install_update() call in start_suricatta
     let install_update_fates: Vec<_> = fates

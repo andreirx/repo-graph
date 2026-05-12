@@ -48,8 +48,8 @@ Thumbs.db
 .env
 .env.local
 
-# Test coverage
-coverage/
+# Test coverage (root-level only, not rust/crates/coverage/)
+/coverage/
 
 # npm
 *.tgz

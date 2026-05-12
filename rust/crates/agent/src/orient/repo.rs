@@ -28,12 +28,12 @@
 use crate::aggregators;
 use crate::aggregators::AggregatorOutput;
 use crate::confidence::derive_repo_confidence;
-use crate::doc_relevance::{DocEntry, DocFocusContext, select_relevant_docs};
+use crate::doc_relevance::{select_relevant_docs, DocEntry, DocFocusContext};
 use repo_graph_gate::GateStorageRead;
 
 use crate::dto::budget::Budget;
 use crate::dto::envelope::{
-	DocumentationSection, Focus, OrientResult, ORIENT_COMMAND, ORIENT_SCHEMA,
+    DocumentationSection, Focus, OrientResult, ORIENT_COMMAND, ORIENT_SCHEMA,
 };
 use crate::dto::limit::{Limit, LimitCode};
 use crate::dto::signal::Signal;
@@ -56,153 +56,142 @@ use crate::storage_port::AgentStorageRead;
 /// removed in the P2 fix because a far-future or far-past
 /// sentinel silently mis-evaluates finite-expiry waivers.
 pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
-	storage: &S,
-	repo_uid: &str,
-	budget: Budget,
-	now: &str,
+    storage: &S,
+    repo_uid: &str,
+    budget: Budget,
+    now: &str,
 ) -> Result<OrientResult, OrientError> {
-	// ── 1. Resolve repo identity. ────────────────────────────
-	let repo = storage
-		.get_repo(repo_uid)?
-		.ok_or_else(|| OrientError::NoRepo { repo_uid: repo_uid.to_string() })?;
+    // ── 1. Resolve repo identity. ────────────────────────────
+    let repo = storage
+        .get_repo(repo_uid)?
+        .ok_or_else(|| OrientError::NoRepo {
+            repo_uid: repo_uid.to_string(),
+        })?;
 
-	// ── 2. Resolve snapshot. ─────────────────────────────────
-	let snapshot = storage
-		.get_latest_snapshot(repo_uid)?
-		.ok_or_else(|| OrientError::NoSnapshot {
-			repo_uid: repo_uid.to_string(),
-		})?;
+    // ── 2. Resolve snapshot. ─────────────────────────────────
+    let snapshot =
+        storage
+            .get_latest_snapshot(repo_uid)?
+            .ok_or_else(|| OrientError::NoSnapshot {
+                repo_uid: repo_uid.to_string(),
+            })?;
 
-	let snapshot_uid = snapshot.snapshot_uid.clone();
+    let snapshot_uid = snapshot.snapshot_uid.clone();
 
-	// ── 3. Run aggregators. ──────────────────────────────────
-	let mut all_signals: Vec<Signal> = Vec::new();
-	let mut all_limits: Vec<Limit> = Vec::new();
+    // ── 3. Run aggregators. ──────────────────────────────────
+    let mut all_signals: Vec<Signal> = Vec::new();
+    let mut all_limits: Vec<Limit> = Vec::new();
 
-	// snapshot_info
-	let snap_out = aggregators::snapshot::aggregate(&snapshot);
-	merge(&mut all_signals, &mut all_limits, snap_out);
+    // snapshot_info
+    let snap_out = aggregators::snapshot::aggregate(&snapshot);
+    merge(&mut all_signals, &mut all_limits, snap_out);
 
-	// trust (returns summary + stale flag for confidence)
-	let trust_result =
-		aggregators::trust::aggregate(storage, repo_uid, &snapshot_uid)?;
-	merge(&mut all_signals, &mut all_limits, trust_result.output);
+    // trust (returns summary + stale flag for confidence)
+    let trust_result = aggregators::trust::aggregate(storage, repo_uid, &snapshot_uid)?;
+    merge(&mut all_signals, &mut all_limits, trust_result.output);
 
-	// cycles
-	let cycles_out = aggregators::cycles::aggregate(storage, &snapshot_uid)?;
-	merge(&mut all_signals, &mut all_limits, cycles_out);
+    // cycles
+    let cycles_out = aggregators::cycles::aggregate(storage, &snapshot_uid)?;
+    merge(&mut all_signals, &mut all_limits, cycles_out);
 
-	// boundary violations
-	let boundary_out =
-		aggregators::boundary::aggregate(storage, repo_uid, &snapshot_uid)?;
-	merge(&mut all_signals, &mut all_limits, boundary_out);
+    // boundary violations
+    let boundary_out = aggregators::boundary::aggregate(storage, repo_uid, &snapshot_uid)?;
+    merge(&mut all_signals, &mut all_limits, boundary_out);
 
-	// boundary links summary (first freshness-tracked signal)
-	let boundary_links_out =
-		aggregators::boundary_links::aggregate(storage, &snapshot_uid)?;
-	merge(&mut all_signals, &mut all_limits, boundary_links_out);
+    // boundary links summary (first freshness-tracked signal)
+    let boundary_links_out = aggregators::boundary_links::aggregate(storage, &snapshot_uid)?;
+    merge(&mut all_signals, &mut all_limits, boundary_links_out);
 
-	// dead_code — reliability-gated. The aggregator reads the
-	// trust layer's composite `dead_code_reliability` verdict
-	// and suppresses the signal (emitting a
-	// DEAD_CODE_UNRELIABLE limit instead) when the level is
-	// not High. The agent crate does NOT re-derive the
-	// threshold logic; the trust crate is the authority. See
-	// the dead_code module doc for the rationale, and
-	// `docs/spikes/2026-04-15-orient-on-repo-graph.md` for the
-	// spike that motivated this gate.
-	let dead_out = aggregators::dead_code::aggregate(
-		storage,
-		&snapshot_uid,
-		repo_uid,
-		&trust_result.summary,
-	)?;
-	merge(&mut all_signals, &mut all_limits, dead_out);
+    // dead_code — reliability-gated. The aggregator reads the
+    // trust layer's composite `dead_code_reliability` verdict
+    // and suppresses the signal (emitting a
+    // DEAD_CODE_UNRELIABLE limit instead) when the level is
+    // not High. The agent crate does NOT re-derive the
+    // threshold logic; the trust crate is the authority. See
+    // the dead_code module doc for the rationale, and
+    // `docs/spikes/2026-04-15-orient-on-repo-graph.md` for the
+    // spike that motivated this gate.
+    let dead_out =
+        aggregators::dead_code::aggregate(storage, &snapshot_uid, repo_uid, &trust_result.summary)?;
+    merge(&mut all_signals, &mut all_limits, dead_out);
 
-	// module_summary
-	let mod_out = aggregators::module_summary::aggregate(storage, &snapshot_uid)?;
-	merge(&mut all_signals, &mut all_limits, mod_out);
+    // module_summary
+    let mod_out = aggregators::module_summary::aggregate(storage, &snapshot_uid)?;
+    merge(&mut all_signals, &mut all_limits, mod_out);
 
-	// gate — emits at most one of GATE_PASS / GATE_FAIL /
-	// GATE_INCOMPLETE, or the GATE_NOT_CONFIGURED limit when
-	// the repo has no active requirement declarations.
-	// Relocated from rgr/src/gate.rs in Rust-43A and called
-	// here through the GateStorageRead supertrait bound on S.
-	// `now` is forwarded directly to gate's waiver-expiry
-	// filter. See the function doc for the clock-explicit
-	// contract.
-	let gate_out = aggregators::gate::aggregate(
-		storage,
-		repo_uid,
-		&snapshot_uid,
-		now,
-	)?;
-	merge(&mut all_signals, &mut all_limits, gate_out);
+    // gate — emits at most one of GATE_PASS / GATE_FAIL /
+    // GATE_INCOMPLETE, or the GATE_NOT_CONFIGURED limit when
+    // the repo has no active requirement declarations.
+    // Relocated from rgr/src/gate.rs in Rust-43A and called
+    // here through the GateStorageRead supertrait bound on S.
+    // `now` is forwarded directly to gate's waiver-expiry
+    // filter. See the function doc for the clock-explicit
+    // contract.
+    let gate_out = aggregators::gate::aggregate(storage, repo_uid, &snapshot_uid, now)?;
+    merge(&mut all_signals, &mut all_limits, gate_out);
 
-	// complexity — conditional on measurement presence.
-	// If the indexer emitted cyclomatic measurements, run the
-	// aggregator (may emit HIGH_COMPLEXITY signal). Otherwise
-	// emit COMPLEXITY_UNAVAILABLE limit so the agent knows
-	// the surface is unknown rather than known-zero.
-	if storage.has_complexity_measurements(&snapshot_uid)? {
-		let complexity_out =
-			aggregators::complexity::aggregate(storage, &snapshot_uid)?;
-		merge(&mut all_signals, &mut all_limits, complexity_out);
-	} else {
-		all_limits.push(Limit::from_code(LimitCode::ComplexityUnavailable));
-	}
+    // complexity — conditional on measurement presence.
+    // If the indexer emitted cyclomatic measurements, run the
+    // aggregator (may emit HIGH_COMPLEXITY signal). Otherwise
+    // emit COMPLEXITY_UNAVAILABLE limit so the agent knows
+    // the surface is unknown rather than known-zero.
+    if storage.has_complexity_measurements(&snapshot_uid)? {
+        let complexity_out = aggregators::complexity::aggregate(storage, &snapshot_uid)?;
+        merge(&mut all_signals, &mut all_limits, complexity_out);
+    } else {
+        all_limits.push(Limit::from_code(LimitCode::ComplexityUnavailable));
+    }
 
-	// ── 7. Sort + rank. ──────────────────────────────────────
-	ranking::sort_and_rank(&mut all_signals);
+    // ── 7. Sort + rank. ──────────────────────────────────────
+    ranking::sort_and_rank(&mut all_signals);
 
-	// ── 8. Truncate. ─────────────────────────────────────────
-	let sig_tx = ranking::truncate_signals(&mut all_signals, budget);
-	let lim_tx = ranking::truncate_limits(&mut all_limits, budget);
+    // ── 8. Truncate. ─────────────────────────────────────────
+    let sig_tx = ranking::truncate_signals(&mut all_signals, budget);
+    let lim_tx = ranking::truncate_limits(&mut all_limits, budget);
 
-	// ── 9. Confidence. ───────────────────────────────────────
-	let confidence =
-		derive_repo_confidence(&trust_result.summary, trust_result.stale);
+    // ── 9. Confidence. ───────────────────────────────────────
+    let confidence = derive_repo_confidence(&trust_result.summary, trust_result.stale);
 
-	// ── 10. Documentation (docs-primary pivot). ──────────────
-	//
-	// Docs are primary orientation data. Retrieve inventory from
-	// storage (live filesystem discovery via doc-facts crate),
-	// select relevant docs for repo-level focus, build section.
-	// Empty inventory is valid — works on repos with zero docs.
-	let documentation = build_documentation_section(storage, repo_uid);
+    // ── 10. Documentation (docs-primary pivot). ──────────────
+    //
+    // Docs are primary orientation data. Retrieve inventory from
+    // storage (live filesystem discovery via doc-facts crate),
+    // select relevant docs for repo-level focus, build section.
+    // Empty inventory is valid — works on repos with zero docs.
+    let documentation = build_documentation_section(storage, repo_uid);
 
-	// ── 11. Build envelope. ──────────────────────────────────
-	let truncated_any = sig_tx.truncated || lim_tx.truncated;
+    // ── 11. Build envelope. ──────────────────────────────────
+    let truncated_any = sig_tx.truncated || lim_tx.truncated;
 
-	Ok(OrientResult {
-		schema: ORIENT_SCHEMA,
-		command: ORIENT_COMMAND,
-		repo: repo.name,
-		snapshot: snapshot_uid,
-		focus: Focus::repo(),
-		confidence,
+    Ok(OrientResult {
+        schema: ORIENT_SCHEMA,
+        command: ORIENT_COMMAND,
+        repo: repo.name,
+        snapshot: snapshot_uid,
+        focus: Focus::repo(),
+        confidence,
 
-		documentation,
+        documentation,
 
-		signals: all_signals,
-		signals_truncated: sig_tx.truncated.then_some(true),
-		signals_omitted_count: sig_tx.truncated.then_some(sig_tx.omitted),
+        signals: all_signals,
+        signals_truncated: sig_tx.truncated.then_some(true),
+        signals_omitted_count: sig_tx.truncated.then_some(sig_tx.omitted),
 
-		limits: all_limits,
-		limits_truncated: lim_tx.truncated.then_some(true),
-		limits_omitted_count: lim_tx.truncated.then_some(lim_tx.omitted),
+        limits: all_limits,
+        limits_truncated: lim_tx.truncated.then_some(true),
+        limits_omitted_count: lim_tx.truncated.then_some(lim_tx.omitted),
 
-		next: Vec::new(),
-		next_truncated: None,
-		next_omitted_count: None,
+        next: Vec::new(),
+        next_truncated: None,
+        next_omitted_count: None,
 
-		truncated: truncated_any,
-	})
+        truncated: truncated_any,
+    })
 }
 
 fn merge(signals: &mut Vec<Signal>, limits: &mut Vec<Limit>, out: AggregatorOutput) {
-	signals.extend(out.signals);
-	limits.extend(out.limits);
+    signals.extend(out.signals);
+    limits.extend(out.limits);
 }
 
 /// Build the documentation section for repo-level orient.
@@ -211,40 +200,40 @@ fn merge(signals: &mut Vec<Signal>, limits: &mut Vec<Limit>, out: AggregatorOutp
 /// repo-level focus, and builds `DocumentationSection`. Returns
 /// `None` if no relevant docs (valid state — docs are optional).
 fn build_documentation_section<S: AgentStorageRead + ?Sized>(
-	storage: &S,
-	repo_uid: &str,
+    storage: &S,
+    repo_uid: &str,
 ) -> Option<DocumentationSection> {
-	// Get doc inventory from storage (may fail or be empty).
-	let agent_entries = match storage.get_doc_inventory(repo_uid) {
-		Ok(entries) => entries,
-		Err(_) => return None, // Graceful degradation: no docs section.
-	};
+    // Get doc inventory from storage (may fail or be empty).
+    let agent_entries = match storage.get_doc_inventory(repo_uid) {
+        Ok(entries) => entries,
+        Err(_) => return None, // Graceful degradation: no docs section.
+    };
 
-	if agent_entries.is_empty() {
-		return None;
-	}
+    if agent_entries.is_empty() {
+        return None;
+    }
 
-	// Convert to doc_relevance::DocEntry.
-	let inventory: Vec<DocEntry> = agent_entries
-		.into_iter()
-		.map(|e| DocEntry {
-			path: e.path,
-			kind: e.kind,
-			generated: e.generated,
-		})
-		.collect();
+    // Convert to doc_relevance::DocEntry.
+    let inventory: Vec<DocEntry> = agent_entries
+        .into_iter()
+        .map(|e| DocEntry {
+            path: e.path,
+            kind: e.kind,
+            generated: e.generated,
+        })
+        .collect();
 
-	// Select relevant docs for repo-level focus.
-	let focus = DocFocusContext::repo();
-	let relevant = select_relevant_docs(&inventory, &focus);
+    // Select relevant docs for repo-level focus.
+    let focus = DocFocusContext::repo();
+    let relevant = select_relevant_docs(&inventory, &focus);
 
-	if relevant.is_empty() {
-		return None;
-	}
+    if relevant.is_empty() {
+        return None;
+    }
 
-	let count = relevant.len();
-	Some(DocumentationSection {
-		relevant_files: relevant,
-		count,
-	})
+    let count = relevant.len();
+    Some(DocumentationSection {
+        relevant_files: relevant,
+        count,
+    })
 }

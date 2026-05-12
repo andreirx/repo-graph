@@ -123,11 +123,8 @@ pub trait FreshnessStoragePort {
     ///
     /// Sets `freshness_state = 'impacted'` and updates timestamp.
     /// Returns count of rows actually updated.
-    fn mark_rows_impacted(
-        &mut self,
-        table: &str,
-        row_uids: &[&str],
-    ) -> Result<usize, StorageError>;
+    fn mark_rows_impacted(&mut self, table: &str, row_uids: &[&str])
+        -> Result<usize, StorageError>;
 
     /// Mark rows impacted by provenance dependency.
     ///
@@ -156,11 +153,7 @@ pub trait FreshnessStoragePort {
     /// Mark all rows in a table for a snapshot as current.
     ///
     /// Used after successful refresh to reset freshness state.
-    fn mark_all_current(
-        &mut self,
-        snapshot_uid: &str,
-        table: &str,
-    ) -> Result<usize, StorageError>;
+    fn mark_all_current(&mut self, snapshot_uid: &str, table: &str) -> Result<usize, StorageError>;
 
     // ── Read operations ─────────────────────────────────────────────────
 
@@ -317,27 +310,63 @@ mod tests {
     #[test]
     fn state_passes_filter_current_only() {
         use FreshnessFilter::CurrentOnly;
-        assert!(FreshnessSummary::state_passes_filter(FreshnessState::Current, CurrentOnly));
-        assert!(!FreshnessSummary::state_passes_filter(FreshnessState::Impacted, CurrentOnly));
-        assert!(!FreshnessSummary::state_passes_filter(FreshnessState::Stale, CurrentOnly));
-        assert!(!FreshnessSummary::state_passes_filter(FreshnessState::Unknown, CurrentOnly));
+        assert!(FreshnessSummary::state_passes_filter(
+            FreshnessState::Current,
+            CurrentOnly
+        ));
+        assert!(!FreshnessSummary::state_passes_filter(
+            FreshnessState::Impacted,
+            CurrentOnly
+        ));
+        assert!(!FreshnessSummary::state_passes_filter(
+            FreshnessState::Stale,
+            CurrentOnly
+        ));
+        assert!(!FreshnessSummary::state_passes_filter(
+            FreshnessState::Unknown,
+            CurrentOnly
+        ));
     }
 
     #[test]
     fn state_passes_filter_current_and_impacted() {
         use FreshnessFilter::CurrentAndImpacted;
-        assert!(FreshnessSummary::state_passes_filter(FreshnessState::Current, CurrentAndImpacted));
-        assert!(FreshnessSummary::state_passes_filter(FreshnessState::Impacted, CurrentAndImpacted));
-        assert!(!FreshnessSummary::state_passes_filter(FreshnessState::Stale, CurrentAndImpacted));
-        assert!(!FreshnessSummary::state_passes_filter(FreshnessState::Unknown, CurrentAndImpacted));
+        assert!(FreshnessSummary::state_passes_filter(
+            FreshnessState::Current,
+            CurrentAndImpacted
+        ));
+        assert!(FreshnessSummary::state_passes_filter(
+            FreshnessState::Impacted,
+            CurrentAndImpacted
+        ));
+        assert!(!FreshnessSummary::state_passes_filter(
+            FreshnessState::Stale,
+            CurrentAndImpacted
+        ));
+        assert!(!FreshnessSummary::state_passes_filter(
+            FreshnessState::Unknown,
+            CurrentAndImpacted
+        ));
     }
 
     #[test]
     fn state_passes_filter_all() {
         use FreshnessFilter::All;
-        assert!(FreshnessSummary::state_passes_filter(FreshnessState::Current, All));
-        assert!(FreshnessSummary::state_passes_filter(FreshnessState::Impacted, All));
-        assert!(FreshnessSummary::state_passes_filter(FreshnessState::Stale, All));
-        assert!(FreshnessSummary::state_passes_filter(FreshnessState::Unknown, All));
+        assert!(FreshnessSummary::state_passes_filter(
+            FreshnessState::Current,
+            All
+        ));
+        assert!(FreshnessSummary::state_passes_filter(
+            FreshnessState::Impacted,
+            All
+        ));
+        assert!(FreshnessSummary::state_passes_filter(
+            FreshnessState::Stale,
+            All
+        ));
+        assert!(FreshnessSummary::state_passes_filter(
+            FreshnessState::Unknown,
+            All
+        ));
     }
 }

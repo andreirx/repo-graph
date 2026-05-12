@@ -103,6 +103,6 @@ pub use resolver::{
 };
 
 pub use status::{
-    EnrichmentReport, EnrichmentState, FailureCount, LanguageReport, PromotionReport, ReportBuilder,
-    TypeCount,
+    EnrichmentReport, EnrichmentState, FailureCount, LanguageReport, PromotionReport,
+    ReportBuilder, TypeCount,
 };

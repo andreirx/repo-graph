@@ -1,0 +1,30 @@
+# RS-MS-4-prereq-a: Coverage report parsing and normalization.
+#
+# Pure support crate for importing coverage reports into the measurement model.
+# Parses Istanbul/c8 JSON format, normalizes paths to repo-relative form.
+#
+# What belongs here:
+# - Istanbul/c8 JSON parsing
+# - FileCoverageFact DTO
+# - Repo-root-relative path normalization
+# - ParseResult with matched/unmatched reporting
+#
+# What does NOT belong here:
+# - Storage writes (that's the compose/CLI layer)
+# - CLI argument parsing
+# - Risk scoring or gate logic
+# - Database access
+#
+# Normalization is pure and parameterized by repo_root.
+
+[package]
+name = "repo-graph-coverage"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+
+[dev-dependencies]

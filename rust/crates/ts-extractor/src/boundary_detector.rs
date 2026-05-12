@@ -252,7 +252,10 @@ mod tests {
         // to prove SAB is actually passed. See Option A decision.
         let source = r#"const worker = new Worker("./worker.ts");"#;
         let calls = parse_and_extract(source);
-        assert!(calls.is_empty(), "Worker without SAB correlation should not emit SAB surface");
+        assert!(
+            calls.is_empty(),
+            "Worker without SAB correlation should not emit SAB surface"
+        );
     }
 
     #[test]
@@ -261,7 +264,10 @@ mod tests {
         // to prove SAB is in the arguments. See Option A decision.
         let source = r#"worker.postMessage({ type: "ping" });"#;
         let calls = parse_and_extract(source);
-        assert!(calls.is_empty(), "postMessage without SAB correlation should not emit SAB surface");
+        assert!(
+            calls.is_empty(),
+            "postMessage without SAB correlation should not emit SAB surface"
+        );
     }
 
     #[test]

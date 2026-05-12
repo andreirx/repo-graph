@@ -75,7 +75,7 @@ impl UnresolvedCategory {
     }
 
     /// Parse from database string.
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "calls_obj_method_needs_type_info" => Some(Self::CallsObjMethodNeedsTypeInfo),
             "calls_this_wildcard_method_needs_type_info" => {
@@ -99,9 +99,7 @@ impl EnrichmentLanguage {
     /// Infer language from file extension.
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext {
-            "ts" | "tsx" | "js" | "jsx" | "mts" | "cts" | "mjs" | "cjs" => {
-                Some(Self::TypeScript)
-            }
+            "ts" | "tsx" | "js" | "jsx" | "mts" | "cts" | "mjs" | "cjs" => Some(Self::TypeScript),
             "rs" => Some(Self::Rust),
             "java" => Some(Self::Java),
             _ => None,
@@ -347,7 +345,7 @@ pub enum SymbolSubtype {
 }
 
 impl SymbolSubtype {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_uppercase().as_str() {
             "CLASS" => Self::Class,
             "METHOD" => Self::Method,
@@ -407,10 +405,10 @@ mod tests {
     #[test]
     fn test_unresolved_category_roundtrip() {
         let cat = UnresolvedCategory::CallsObjMethodNeedsTypeInfo;
-        assert_eq!(UnresolvedCategory::from_str(cat.as_str()), Some(cat));
+        assert_eq!(UnresolvedCategory::parse(cat.as_str()), Some(cat));
 
         let cat2 = UnresolvedCategory::CallsThisWildcardMethodNeedsTypeInfo;
-        assert_eq!(UnresolvedCategory::from_str(cat2.as_str()), Some(cat2));
+        assert_eq!(UnresolvedCategory::parse(cat2.as_str()), Some(cat2));
     }
 
     #[test]

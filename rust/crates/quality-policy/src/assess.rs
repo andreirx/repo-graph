@@ -337,8 +337,7 @@ pub fn evaluate_policy(
     let policy_kind = payload.policy_kind;
 
     // Parse measurement kind from policy
-    let policy_measurement_kind = match SupportedMeasurementKind::from_str(&payload.measurement_kind)
-    {
+    let policy_measurement_kind = match SupportedMeasurementKind::parse(&payload.measurement_kind) {
         Some(k) => k,
         None => {
             // Invalid measurement kind in policy — NOT_APPLICABLE
@@ -580,9 +579,7 @@ fn evaluate_no_new(
     // Find new targets (in current but not in baseline)
     let new_facts: Vec<&&MeasurementFact> = facts
         .iter()
-        .filter(|f| {
-            !baseline_lookup.contains_key(&(&f.target_stable_key, f.measurement_kind))
-        })
+        .filter(|f| !baseline_lookup.contains_key(&(&f.target_stable_key, f.measurement_kind)))
         .collect();
 
     let measurements_evaluated = new_facts.len();
@@ -837,13 +834,22 @@ mod tests {
 
     #[test]
     fn file_scope_glob_star() {
-        assert!(file_scope_matches("src/core/foo.test.ts", "src/core/*.test.ts"));
-        assert!(!file_scope_matches("src/other/foo.test.ts", "src/core/*.test.ts"));
+        assert!(file_scope_matches(
+            "src/core/foo.test.ts",
+            "src/core/*.test.ts"
+        ));
+        assert!(!file_scope_matches(
+            "src/other/foo.test.ts",
+            "src/core/*.test.ts"
+        ));
     }
 
     #[test]
     fn file_scope_glob_double_star() {
-        assert!(file_scope_matches("src/core/nested/foo.test.ts", "src/**/*.test.ts"));
+        assert!(file_scope_matches(
+            "src/core/nested/foo.test.ts",
+            "src/**/*.test.ts"
+        ));
         assert!(file_scope_matches("src/foo.test.ts", "src/**/*.test.ts"));
     }
 
@@ -1033,7 +1039,7 @@ mod tests {
             SupportedMeasurementKind::CognitiveComplexity,
             20.0,
         )];
-        let baseline = vec![make_fact(
+        let baseline = [make_fact(
             "sym1",
             SupportedMeasurementKind::CognitiveComplexity,
             18.0,
@@ -1070,7 +1076,7 @@ mod tests {
             make_fact("sym1", SupportedMeasurementKind::CognitiveComplexity, 10.0),
             make_fact("sym2", SupportedMeasurementKind::CognitiveComplexity, 20.0), // new, above threshold
         ];
-        let baseline = vec![make_fact(
+        let baseline = [make_fact(
             "sym1",
             SupportedMeasurementKind::CognitiveComplexity,
             10.0,
@@ -1169,7 +1175,7 @@ mod tests {
             SupportedMeasurementKind::CognitiveComplexity,
             20.0,
         )];
-        let baseline = vec![make_fact(
+        let baseline = [make_fact(
             "sym1",
             SupportedMeasurementKind::CognitiveComplexity,
             20.0, // baseline violator: 20 > 15
@@ -1207,7 +1213,7 @@ mod tests {
             SupportedMeasurementKind::CognitiveComplexity,
             18.0, // improved from 20
         )];
-        let baseline = vec![make_fact(
+        let baseline = [make_fact(
             "sym1",
             SupportedMeasurementKind::CognitiveComplexity,
             20.0, // baseline violator: 20 > 15
@@ -1244,7 +1250,7 @@ mod tests {
             SupportedMeasurementKind::CognitiveComplexity,
             25.0, // worsened from 20
         )];
-        let baseline = vec![make_fact(
+        let baseline = [make_fact(
             "sym1",
             SupportedMeasurementKind::CognitiveComplexity,
             20.0, // baseline violator: 20 > 15
@@ -1285,7 +1291,7 @@ mod tests {
             SupportedMeasurementKind::CognitiveComplexity,
             12.0, // increased from 10
         )];
-        let baseline = vec![make_fact(
+        let baseline = [make_fact(
             "sym1",
             SupportedMeasurementKind::CognitiveComplexity,
             10.0, // NOT a baseline violator: 10 <= 15
@@ -1323,7 +1329,7 @@ mod tests {
             make_fact("sym1", SupportedMeasurementKind::CognitiveComplexity, 20.0), // existing violator
             make_fact("sym2", SupportedMeasurementKind::CognitiveComplexity, 50.0), // new, high
         ];
-        let baseline = vec![make_fact(
+        let baseline = [make_fact(
             "sym1",
             SupportedMeasurementKind::CognitiveComplexity,
             20.0, // baseline violator: 20 > 15

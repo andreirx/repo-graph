@@ -59,12 +59,12 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CStyleState {
-	Code,
-	LineComment,
-	BlockComment,
-	StringDq,
-	StringSq,
-	Template,
+    Code,
+    LineComment,
+    BlockComment,
+    StringDq,
+    StringSq,
+    Template,
 }
 
 /// Mask comments in C-style source files.
@@ -85,213 +85,213 @@ enum CStyleState {
 ///    case is non-nested.
 ///  - C++ raw string literals R"delim(...)delim" are not handled.
 pub fn mask_comments_c_style(source: &str) -> String {
-	let bytes = source.as_bytes();
-	let len = bytes.len();
-	let mut out: Vec<u8> = vec![0u8; len];
+    let bytes = source.as_bytes();
+    let len = bytes.len();
+    let mut out: Vec<u8> = vec![0u8; len];
 
-	let mut state = CStyleState::Code;
+    let mut state = CStyleState::Code;
 
-	// Stack of template-interpolation frames. Each frame tracks the
-	// brace depth inside a `${...}` so that inner `{}` braces don't
-	// pop the frame too early.
-	let mut template_stack: Vec<u32> = Vec::new();
+    // Stack of template-interpolation frames. Each frame tracks the
+    // brace depth inside a `${...}` so that inner `{}` braces don't
+    // pop the frame too early.
+    let mut template_stack: Vec<u32> = Vec::new();
 
-	let mut i = 0;
-	while i < len {
-		let b = bytes[i];
-		let next = if i + 1 < len { bytes[i + 1] } else { 0 };
+    let mut i = 0;
+    while i < len {
+        let b = bytes[i];
+        let next = if i + 1 < len { bytes[i + 1] } else { 0 };
 
-		match state {
-			CStyleState::Code => {
-				// Detect interpolation close: `}` while inside a
-				// template-interpolation frame.
-				if b == b'}' && !template_stack.is_empty() {
-					let top = template_stack.last_mut().unwrap();
-					if *top == 0 {
-						template_stack.pop();
-						state = CStyleState::Template;
-						out[i] = b;
-						i += 1;
-						continue;
-					}
-					*top -= 1;
-					out[i] = b;
-					i += 1;
-					continue;
-				}
-				if b == b'{' && !template_stack.is_empty() {
-					*template_stack.last_mut().unwrap() += 1;
-					out[i] = b;
-					i += 1;
-					continue;
-				}
+        match state {
+            CStyleState::Code => {
+                // Detect interpolation close: `}` while inside a
+                // template-interpolation frame.
+                if b == b'}' && !template_stack.is_empty() {
+                    let top = template_stack.last_mut().unwrap();
+                    if *top == 0 {
+                        template_stack.pop();
+                        state = CStyleState::Template;
+                        out[i] = b;
+                        i += 1;
+                        continue;
+                    }
+                    *top -= 1;
+                    out[i] = b;
+                    i += 1;
+                    continue;
+                }
+                if b == b'{' && !template_stack.is_empty() {
+                    *template_stack.last_mut().unwrap() += 1;
+                    out[i] = b;
+                    i += 1;
+                    continue;
+                }
 
-				if b == b'/' && next == b'/' {
-					// Line comment start. Mask both slashes.
-					out[i] = b' ';
-					out[i + 1] = b' ';
-					i += 2;
-					state = CStyleState::LineComment;
-					continue;
-				}
-				if b == b'/' && next == b'*' {
-					// Block comment start. Mask both bytes.
-					out[i] = b' ';
-					out[i + 1] = b' ';
-					i += 2;
-					state = CStyleState::BlockComment;
-					continue;
-				}
-				if b == b'"' {
-					state = CStyleState::StringDq;
-					out[i] = b;
-					i += 1;
-					continue;
-				}
-				if b == b'\'' {
-					state = CStyleState::StringSq;
-					out[i] = b;
-					i += 1;
-					continue;
-				}
-				if b == b'`' {
-					state = CStyleState::Template;
-					out[i] = b;
-					i += 1;
-					continue;
-				}
-				out[i] = b;
-				i += 1;
-			}
+                if b == b'/' && next == b'/' {
+                    // Line comment start. Mask both slashes.
+                    out[i] = b' ';
+                    out[i + 1] = b' ';
+                    i += 2;
+                    state = CStyleState::LineComment;
+                    continue;
+                }
+                if b == b'/' && next == b'*' {
+                    // Block comment start. Mask both bytes.
+                    out[i] = b' ';
+                    out[i + 1] = b' ';
+                    i += 2;
+                    state = CStyleState::BlockComment;
+                    continue;
+                }
+                if b == b'"' {
+                    state = CStyleState::StringDq;
+                    out[i] = b;
+                    i += 1;
+                    continue;
+                }
+                if b == b'\'' {
+                    state = CStyleState::StringSq;
+                    out[i] = b;
+                    i += 1;
+                    continue;
+                }
+                if b == b'`' {
+                    state = CStyleState::Template;
+                    out[i] = b;
+                    i += 1;
+                    continue;
+                }
+                out[i] = b;
+                i += 1;
+            }
 
-			CStyleState::LineComment => {
-				if b == b'\n' {
-					// Preserve the newline; line comment ends here.
-					out[i] = b;
-					state = CStyleState::Code;
-					i += 1;
-					continue;
-				}
-				// Replace any other byte with an ASCII space.
-				// This works for multi-byte UTF-8 sequences too:
-				// each byte (including continuation bytes) becomes
-				// a space. Byte length is preserved and the output
-				// remains valid UTF-8 because ASCII spaces are
-				// single-byte sequences.
-				out[i] = b' ';
-				i += 1;
-			}
+            CStyleState::LineComment => {
+                if b == b'\n' {
+                    // Preserve the newline; line comment ends here.
+                    out[i] = b;
+                    state = CStyleState::Code;
+                    i += 1;
+                    continue;
+                }
+                // Replace any other byte with an ASCII space.
+                // This works for multi-byte UTF-8 sequences too:
+                // each byte (including continuation bytes) becomes
+                // a space. Byte length is preserved and the output
+                // remains valid UTF-8 because ASCII spaces are
+                // single-byte sequences.
+                out[i] = b' ';
+                i += 1;
+            }
 
-			CStyleState::BlockComment => {
-				if b == b'*' && next == b'/' {
-					// Block comment end. Mask both bytes.
-					out[i] = b' ';
-					out[i + 1] = b' ';
-					i += 2;
-					state = CStyleState::Code;
-					continue;
-				}
-				// Newlines inside block comments MUST be preserved.
-				if b == b'\n' {
-					out[i] = b;
-					i += 1;
-					continue;
-				}
-				out[i] = b' ';
-				i += 1;
-			}
+            CStyleState::BlockComment => {
+                if b == b'*' && next == b'/' {
+                    // Block comment end. Mask both bytes.
+                    out[i] = b' ';
+                    out[i + 1] = b' ';
+                    i += 2;
+                    state = CStyleState::Code;
+                    continue;
+                }
+                // Newlines inside block comments MUST be preserved.
+                if b == b'\n' {
+                    out[i] = b;
+                    i += 1;
+                    continue;
+                }
+                out[i] = b' ';
+                i += 1;
+            }
 
-			CStyleState::StringDq => {
-				if b == b'\\' && i + 1 < len {
-					// Consume the escaped byte verbatim. For
-					// multi-byte UTF-8 chars after a backslash,
-					// only the first byte is consumed by the
-					// escape; the remaining continuation bytes
-					// are copied as ordinary string content,
-					// which is correct because continuation bytes
-					// are not state-transition triggers.
-					out[i] = b;
-					out[i + 1] = bytes[i + 1];
-					i += 2;
-					continue;
-				}
-				if b == b'"' {
-					state = CStyleState::Code;
-					out[i] = b;
-					i += 1;
-					continue;
-				}
-				// JS string literals do not allow raw newlines, but
-				// real-world code occasionally has them in malformed
-				// inputs; treat newline as terminator to recover.
-				if b == b'\n' {
-					out[i] = b;
-					state = CStyleState::Code;
-					i += 1;
-					continue;
-				}
-				out[i] = b;
-				i += 1;
-			}
+            CStyleState::StringDq => {
+                if b == b'\\' && i + 1 < len {
+                    // Consume the escaped byte verbatim. For
+                    // multi-byte UTF-8 chars after a backslash,
+                    // only the first byte is consumed by the
+                    // escape; the remaining continuation bytes
+                    // are copied as ordinary string content,
+                    // which is correct because continuation bytes
+                    // are not state-transition triggers.
+                    out[i] = b;
+                    out[i + 1] = bytes[i + 1];
+                    i += 2;
+                    continue;
+                }
+                if b == b'"' {
+                    state = CStyleState::Code;
+                    out[i] = b;
+                    i += 1;
+                    continue;
+                }
+                // JS string literals do not allow raw newlines, but
+                // real-world code occasionally has them in malformed
+                // inputs; treat newline as terminator to recover.
+                if b == b'\n' {
+                    out[i] = b;
+                    state = CStyleState::Code;
+                    i += 1;
+                    continue;
+                }
+                out[i] = b;
+                i += 1;
+            }
 
-			CStyleState::StringSq => {
-				if b == b'\\' && i + 1 < len {
-					out[i] = b;
-					out[i + 1] = bytes[i + 1];
-					i += 2;
-					continue;
-				}
-				if b == b'\'' {
-					state = CStyleState::Code;
-					out[i] = b;
-					i += 1;
-					continue;
-				}
-				if b == b'\n' {
-					out[i] = b;
-					state = CStyleState::Code;
-					i += 1;
-					continue;
-				}
-				out[i] = b;
-				i += 1;
-			}
+            CStyleState::StringSq => {
+                if b == b'\\' && i + 1 < len {
+                    out[i] = b;
+                    out[i + 1] = bytes[i + 1];
+                    i += 2;
+                    continue;
+                }
+                if b == b'\'' {
+                    state = CStyleState::Code;
+                    out[i] = b;
+                    i += 1;
+                    continue;
+                }
+                if b == b'\n' {
+                    out[i] = b;
+                    state = CStyleState::Code;
+                    i += 1;
+                    continue;
+                }
+                out[i] = b;
+                i += 1;
+            }
 
-			CStyleState::Template => {
-				if b == b'\\' && i + 1 < len {
-					out[i] = b;
-					out[i + 1] = bytes[i + 1];
-					i += 2;
-					continue;
-				}
-				if b == b'`' {
-					state = CStyleState::Code;
-					out[i] = b;
-					i += 1;
-					continue;
-				}
-				if b == b'$' && next == b'{' {
-					// Interpolation start. Switch to code state and
-					// push a frame.
-					out[i] = b;
-					out[i + 1] = next;
-					i += 2;
-					template_stack.push(0);
-					state = CStyleState::Code;
-					continue;
-				}
-				out[i] = b;
-				i += 1;
-			}
-		}
-	}
+            CStyleState::Template => {
+                if b == b'\\' && i + 1 < len {
+                    out[i] = b;
+                    out[i + 1] = bytes[i + 1];
+                    i += 2;
+                    continue;
+                }
+                if b == b'`' {
+                    state = CStyleState::Code;
+                    out[i] = b;
+                    i += 1;
+                    continue;
+                }
+                if b == b'$' && next == b'{' {
+                    // Interpolation start. Switch to code state and
+                    // push a frame.
+                    out[i] = b;
+                    out[i + 1] = next;
+                    i += 2;
+                    template_stack.push(0);
+                    state = CStyleState::Code;
+                    continue;
+                }
+                out[i] = b;
+                i += 1;
+            }
+        }
+    }
 
-	// Safety: every byte we emit is either a verbatim copy from a
-	// valid UTF-8 input or an ASCII space (b' ', 0x20) or an ASCII
-	// newline (b'\n', 0x0A). Both ASCII bytes are valid single-byte
-	// UTF-8 sequences. Verbatim copies preserve UTF-8 validity.
-	// Therefore the output is always valid UTF-8.
-	String::from_utf8(out).expect(
+    // Safety: every byte we emit is either a verbatim copy from a
+    // valid UTF-8 input or an ASCII space (b' ', 0x20) or an ASCII
+    // newline (b'\n', 0x0A). Both ASCII bytes are valid single-byte
+    // UTF-8 sequences. Verbatim copies preserve UTF-8 validity.
+    // Therefore the output is always valid UTF-8.
+    String::from_utf8(out).expect(
 		"comment masker output should be valid UTF-8 (every emitted byte is either an ASCII space/newline or a verbatim copy from valid UTF-8 input)",
 	)
 }
@@ -300,12 +300,12 @@ pub fn mask_comments_c_style(source: &str) -> String {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PythonState {
-	Code,
-	LineComment,
-	StringDq,
-	StringSq,
-	StringTripleDq,
-	StringTripleSq,
+    Code,
+    LineComment,
+    StringDq,
+    StringSq,
+    StringTripleDq,
+    StringTripleSq,
 }
 
 /// Mask comments in Python source files.
@@ -325,159 +325,143 @@ enum PythonState {
 ///  - Raw `r"..."` and bytes `b"..."` prefixes work fine because
 ///    the state machine only switches on the quote byte.
 pub fn mask_comments_python(source: &str) -> String {
-	let bytes = source.as_bytes();
-	let len = bytes.len();
-	let mut out: Vec<u8> = vec![0u8; len];
+    let bytes = source.as_bytes();
+    let len = bytes.len();
+    let mut out: Vec<u8> = vec![0u8; len];
 
-	let mut state = PythonState::Code;
+    let mut state = PythonState::Code;
 
-	let mut i = 0;
-	while i < len {
-		let b = bytes[i];
+    let mut i = 0;
+    while i < len {
+        let b = bytes[i];
 
-		match state {
-			PythonState::Code => {
-				if b == b'#' {
-					out[i] = b' ';
-					state = PythonState::LineComment;
-					i += 1;
-					continue;
-				}
-				// Triple-quoted string detection takes precedence.
-				if b == b'"'
-					&& i + 2 < len
-					&& bytes[i + 1] == b'"'
-					&& bytes[i + 2] == b'"'
-				{
-					out[i] = b;
-					out[i + 1] = b'"';
-					out[i + 2] = b'"';
-					i += 3;
-					state = PythonState::StringTripleDq;
-					continue;
-				}
-				if b == b'\''
-					&& i + 2 < len
-					&& bytes[i + 1] == b'\''
-					&& bytes[i + 2] == b'\''
-				{
-					out[i] = b;
-					out[i + 1] = b'\'';
-					out[i + 2] = b'\'';
-					i += 3;
-					state = PythonState::StringTripleSq;
-					continue;
-				}
-				if b == b'"' {
-					state = PythonState::StringDq;
-					out[i] = b;
-					i += 1;
-					continue;
-				}
-				if b == b'\'' {
-					state = PythonState::StringSq;
-					out[i] = b;
-					i += 1;
-					continue;
-				}
-				out[i] = b;
-				i += 1;
-			}
+        match state {
+            PythonState::Code => {
+                if b == b'#' {
+                    out[i] = b' ';
+                    state = PythonState::LineComment;
+                    i += 1;
+                    continue;
+                }
+                // Triple-quoted string detection takes precedence.
+                if b == b'"' && i + 2 < len && bytes[i + 1] == b'"' && bytes[i + 2] == b'"' {
+                    out[i] = b;
+                    out[i + 1] = b'"';
+                    out[i + 2] = b'"';
+                    i += 3;
+                    state = PythonState::StringTripleDq;
+                    continue;
+                }
+                if b == b'\'' && i + 2 < len && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\'' {
+                    out[i] = b;
+                    out[i + 1] = b'\'';
+                    out[i + 2] = b'\'';
+                    i += 3;
+                    state = PythonState::StringTripleSq;
+                    continue;
+                }
+                if b == b'"' {
+                    state = PythonState::StringDq;
+                    out[i] = b;
+                    i += 1;
+                    continue;
+                }
+                if b == b'\'' {
+                    state = PythonState::StringSq;
+                    out[i] = b;
+                    i += 1;
+                    continue;
+                }
+                out[i] = b;
+                i += 1;
+            }
 
-			PythonState::LineComment => {
-				if b == b'\n' {
-					out[i] = b;
-					state = PythonState::Code;
-					i += 1;
-					continue;
-				}
-				out[i] = b' ';
-				i += 1;
-			}
+            PythonState::LineComment => {
+                if b == b'\n' {
+                    out[i] = b;
+                    state = PythonState::Code;
+                    i += 1;
+                    continue;
+                }
+                out[i] = b' ';
+                i += 1;
+            }
 
-			PythonState::StringDq => {
-				if b == b'\\' && i + 1 < len {
-					out[i] = b;
-					out[i + 1] = bytes[i + 1];
-					i += 2;
-					continue;
-				}
-				if b == b'"' {
-					state = PythonState::Code;
-					out[i] = b;
-					i += 1;
-					continue;
-				}
-				if b == b'\n' {
-					out[i] = b;
-					state = PythonState::Code;
-					i += 1;
-					continue;
-				}
-				out[i] = b;
-				i += 1;
-			}
+            PythonState::StringDq => {
+                if b == b'\\' && i + 1 < len {
+                    out[i] = b;
+                    out[i + 1] = bytes[i + 1];
+                    i += 2;
+                    continue;
+                }
+                if b == b'"' {
+                    state = PythonState::Code;
+                    out[i] = b;
+                    i += 1;
+                    continue;
+                }
+                if b == b'\n' {
+                    out[i] = b;
+                    state = PythonState::Code;
+                    i += 1;
+                    continue;
+                }
+                out[i] = b;
+                i += 1;
+            }
 
-			PythonState::StringSq => {
-				if b == b'\\' && i + 1 < len {
-					out[i] = b;
-					out[i + 1] = bytes[i + 1];
-					i += 2;
-					continue;
-				}
-				if b == b'\'' {
-					state = PythonState::Code;
-					out[i] = b;
-					i += 1;
-					continue;
-				}
-				if b == b'\n' {
-					out[i] = b;
-					state = PythonState::Code;
-					i += 1;
-					continue;
-				}
-				out[i] = b;
-				i += 1;
-			}
+            PythonState::StringSq => {
+                if b == b'\\' && i + 1 < len {
+                    out[i] = b;
+                    out[i + 1] = bytes[i + 1];
+                    i += 2;
+                    continue;
+                }
+                if b == b'\'' {
+                    state = PythonState::Code;
+                    out[i] = b;
+                    i += 1;
+                    continue;
+                }
+                if b == b'\n' {
+                    out[i] = b;
+                    state = PythonState::Code;
+                    i += 1;
+                    continue;
+                }
+                out[i] = b;
+                i += 1;
+            }
 
-			PythonState::StringTripleDq => {
-				if b == b'"'
-					&& i + 2 < len
-					&& bytes[i + 1] == b'"'
-					&& bytes[i + 2] == b'"'
-				{
-					out[i] = b;
-					out[i + 1] = b'"';
-					out[i + 2] = b'"';
-					i += 3;
-					state = PythonState::Code;
-					continue;
-				}
-				out[i] = b;
-				i += 1;
-			}
+            PythonState::StringTripleDq => {
+                if b == b'"' && i + 2 < len && bytes[i + 1] == b'"' && bytes[i + 2] == b'"' {
+                    out[i] = b;
+                    out[i + 1] = b'"';
+                    out[i + 2] = b'"';
+                    i += 3;
+                    state = PythonState::Code;
+                    continue;
+                }
+                out[i] = b;
+                i += 1;
+            }
 
-			PythonState::StringTripleSq => {
-				if b == b'\''
-					&& i + 2 < len
-					&& bytes[i + 1] == b'\''
-					&& bytes[i + 2] == b'\''
-				{
-					out[i] = b;
-					out[i + 1] = b'\'';
-					out[i + 2] = b'\'';
-					i += 3;
-					state = PythonState::Code;
-					continue;
-				}
-				out[i] = b;
-				i += 1;
-			}
-		}
-	}
+            PythonState::StringTripleSq => {
+                if b == b'\'' && i + 2 < len && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\'' {
+                    out[i] = b;
+                    out[i + 1] = b'\'';
+                    out[i + 2] = b'\'';
+                    i += 3;
+                    state = PythonState::Code;
+                    continue;
+                }
+                out[i] = b;
+                i += 1;
+            }
+        }
+    }
 
-	String::from_utf8(out).expect(
+    String::from_utf8(out).expect(
 		"comment masker output should be valid UTF-8 (every emitted byte is either an ASCII space/newline or a verbatim copy from valid UTF-8 input)",
 	)
 }
@@ -487,10 +471,10 @@ pub fn mask_comments_python(source: &str) -> String {
 /// Mask comments in source for the language inferred from
 /// `file_path`. Falls back to C-style for unknown extensions.
 pub fn mask_comments_for_file(file_path: &str, source: &str) -> String {
-	let lower = file_path.to_lowercase();
-	if lower.ends_with(".py") {
-		mask_comments_python(source)
-	} else {
-		mask_comments_c_style(source)
-	}
+    let lower = file_path.to_lowercase();
+    if lower.ends_with(".py") {
+        mask_comments_python(source)
+    } else {
+        mask_comments_c_style(source)
+    }
 }
