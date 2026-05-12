@@ -501,6 +501,13 @@ All values are configurable and documented as provisional.
   recurring `better-sqlite3` NODE_MODULE_VERSION drift. The issue is
   environmental (Node.js version changes between invocations), not code-related.
   Fix: `pnpm rebuild better-sqlite3`.
+- **Storage parity test failure:** `cargo test -p repo-graph-storage --test parity`
+  fails because expected.json fixtures were last updated in commit c0fb0dc, before
+  migrations 027 (freshness/provenance) was added in commit 50b4882. The test dumps
+  the full DB schema including migrations table; the expected fixtures expect fewer
+  migrations. Fix: regenerate expected.json files with `RGR_STORAGE_PARITY_EMIT_ACTUAL=1`
+  and commit the updated fixtures. This is a fixture-drift issue, not a storage parity
+  regression. Unrelated to any specific slice work.
 
 ### TypeScript-Specific
 - `package-name extends` in tsconfig: `extends: "@tsconfig/node18"` not
@@ -1937,40 +1944,37 @@ predicates to select the appropriate binding based on callsite evidence.
 
 ## Boundary Interaction Extraction — BI-1B (TCP/UDP Sockets)
 
-### fd→family/type context propagation not implemented
+### fd→family/type context propagation — IMPLEMENTED (Phase 2)
 
-**Status:** Known limitation, blocking provider/consumer role detection for TCP/UDP.
+**Status:** RESOLVED (2026-05-12). Intra-function fd tracking shipped.
 
-**Problem:** The C extractor extracts `socket_family` and `socket_type` from
-`socket(AF_INET, SOCK_STREAM, 0)` calls because the evidence is in the arguments.
-But later operations (`bind`, `listen`, `connect`, `send`, `recv`, `sendto`,
-`recvfrom`) operate on file descriptors, not family/type constants.
+**What shipped (BI-1B Phase 2):**
+- C extractor emits `assigned_identifier` for socket() LHS, `fd_argument` for
+  bind/listen/connect/accept arg0
+- `socket_lineage.rs`: FdRegistry (identifier → socket family), RoleEvidence
+  (bind/listen/connect/accept flags), TrackedChannelKind enum
+- Compose phase: function-grouped processing with FdRegistry per function
+- Role detection state machine: TCP server (bind+listen) → Provider, TCP client
+  (connect) → Consumer, UDP → Bidirectional (no strong role semantics)
+- D3: bind alone insufficient for provider classification
+- `update_surface_direction()` for direction refinement at function boundary
 
-**Current behavior:**
-- `socket()` calls emit as `tcp_socket` or `udp_socket` with `direction = bidirectional`
-- Later operations decline to emit because guards require family/type evidence
-- Result: socket presence hints only, no provider/consumer roles
+**Explicit limits (Phase 2):**
+- C only (no C++ in this slice)
+- Function-local fd tracking only (cleared at function boundary)
+- Direct declarations: `int fd = socket(...)`
+- Direct identifier use in bind/listen/connect/accept
+- Does NOT track: cross-function propagation, aliases, parameters, globals
 
-**What would be needed:**
-1. **Intra-function fd tracking:** Track `int fd = socket(AF_INET, SOCK_STREAM, 0)`
-   and propagate family/type to later uses of `fd` in the same function.
-2. **Cross-function fd tracking:** If `fd` is passed to another function, propagate
-   context through call graph (much harder).
-3. **Compiler-assisted:** Use clangd or similar to resolve types and track fd flow.
+**Remaining deferred items (Phase 3+):**
+- C++ socket wrapper support (separate slice)
+- Cross-function fd propagation (requires dataflow)
+- Endpoint extraction (host:port from bind/connect arguments)
+- Scope classification (inter_process vs inter_device)
+- UDP role semantics (if ever needed)
 
-**Why this is hard:**
-- C has no socket type system — `int fd` carries no semantic info
-- fd can be stored in struct fields, arrays, global variables
-- fd can be returned from helper functions
-- fd can be duplicated, closed, and reused
-
-**Acceptable current state:**
-- Socket presence hints are still useful for orientation
-- Agent sees "this function uses TCP sockets" even without provider/consumer role
-- Full role detection is a depth slice, not required for breadth-first orientation
-
-**Unblocks:** Nothing — this is a known limitation, not a P1 correctness bug.
-**Deferred to:** BI-1B-depth (fd tracking) or compiler-assisted extraction.
+**Validation:** 96 C extractor tests, 14 socket_lineage tests, 45 boundary-interaction-extractor
+tests, 7 TCP/UDP E2E integration tests. See `docs/shipped/slices/bi-1b-tcp-udp-sockets.md`.
 
 ### Extractor contract: conservative field population
 

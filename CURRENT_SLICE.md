@@ -6,6 +6,32 @@ No active slice. See ROADMAP.md for next priorities.
 
 ## Recently Shipped
 
+**GR-3A: gRPC Contract-Based Linking (CLI Wiring)** — SHIPPED (2026-05-12)
+
+Slice doc: `docs/shipped/slices/gr-3-grpc-linking.md`
+
+### Summary
+
+CLI wiring for `rmap boundaries links` command, completing the GR-3A contract-based
+linking implementation. Links gRPC provider and consumer surfaces that reference
+the same proto service contract.
+
+### Implementation
+
+- `BoundaryInteractionLinkFilter` and `BoundaryInteractionLinkListItem` DTOs in boundary-interaction crate
+- `list_boundary_interaction_links()` method added to `BoundaryInteractionReadPort` trait
+- Storage implementation with contract name filtering (`--service` flag)
+- CLI subcommand: `rmap boundaries links <db> <repo> [--service <name>]`
+
+### Validation
+
+- 3 storage unit tests (empty, basic link query, service name filter)
+- 5 CLI integration tests (usage errors, missing DB, repo not found, empty results, unknown option)
+
+---
+
+## Other Recently Shipped
+
 **BI-1B Phase 2: FD Role Tracking** — SHIPPED (2026-05-12)
 
 Slice doc: `docs/shipped/slices/bi-1b-tcp-udp-sockets.md`

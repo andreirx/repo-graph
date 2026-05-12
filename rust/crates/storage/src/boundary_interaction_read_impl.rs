@@ -14,10 +14,11 @@ use crate::connection::StorageConnection;
 
 use repo_graph_boundary_interaction::{
     BasisCount, BoundaryContractView, BoundaryInteractionChannelView, BoundaryInteractionDetail,
-    BoundaryInteractionFilter, BoundaryInteractionListItem, BoundaryInteractionReadError,
-    BoundaryInteractionReadPort, BoundaryInteractionSummary, BoundaryScope, ChannelKind,
-    Direction, DirectionCount, EndpointLocality, FamilyCount, InteractionBasis,
-    InteractionPattern, KindCount, ProtocolFamily, ScopeCount, TransportClass,
+    BoundaryInteractionFilter, BoundaryInteractionLinkFilter, BoundaryInteractionLinkListItem,
+    BoundaryInteractionListItem, BoundaryInteractionReadError, BoundaryInteractionReadPort,
+    BoundaryInteractionSummary, BoundaryScope, ChannelKind, Direction, DirectionCount,
+    EndpointLocality, FamilyCount, InteractionBasis, InteractionPattern, KindCount, ProtocolFamily,
+    ScopeCount, TransportClass,
 };
 
 impl BoundaryInteractionReadPort for StorageConnection {
@@ -536,6 +537,126 @@ impl BoundaryInteractionReadPort for StorageConnection {
             files_with_boundaries,
         })
     }
+
+    fn list_boundary_interaction_links(
+        &self,
+        snapshot_uid: &str,
+        filter: &BoundaryInteractionLinkFilter,
+    ) -> Result<Vec<BoundaryInteractionLinkListItem>, BoundaryInteractionReadError> {
+        // Build dynamic WHERE clause based on filter
+        let mut conditions = vec!["bil.snapshot_uid = ?1".to_string()];
+        let mut param_index = 2;
+
+        // Contract name filter (contains match via LIKE)
+        if filter.contract_name.is_some() {
+            conditions.push(format!("ce.full_name LIKE ?{}", param_index));
+            param_index += 1;
+        }
+
+        // Link kind filter (exact match)
+        if filter.link_kind.is_some() {
+            conditions.push(format!("bil.link_kind = ?{}", param_index));
+            param_index += 1;
+        }
+
+        // Min confidence filter
+        if filter.min_confidence.is_some() {
+            conditions.push(format!("bil.confidence >= ?{}", param_index));
+            // param_index += 1; // Not needed, last parameter
+        }
+
+        let where_clause = conditions.join(" AND ");
+
+        // Query links with provider/consumer surface details and contract info
+        let sql = format!(
+            "SELECT
+                bil.link_uid,
+                bil.link_kind,
+                bil.match_basis,
+                bil.confidence,
+                bil.contract_element_uid,
+                ce.full_name as contract_name,
+                bil.provider_surface_uid,
+                p_surf.source_file as provider_file,
+                p_surf.line_start as provider_line,
+                p_surf.symbol_stable_key as provider_symbol,
+                bil.consumer_surface_uid,
+                c_surf.source_file as consumer_file,
+                c_surf.line_start as consumer_line,
+                c_surf.symbol_stable_key as consumer_symbol
+            FROM boundary_interaction_links bil
+            LEFT JOIN contract_elements ce ON bil.contract_element_uid = ce.element_uid
+            LEFT JOIN boundary_interaction_surfaces p_surf ON bil.provider_surface_uid = p_surf.surface_uid
+            LEFT JOIN boundary_interaction_surfaces c_surf ON bil.consumer_surface_uid = c_surf.surface_uid
+            WHERE {}
+            ORDER BY ce.full_name ASC NULLS LAST, p_surf.source_file ASC, c_surf.source_file ASC",
+            where_clause
+        );
+
+        let conn = self.connection();
+        let mut stmt = conn.prepare(&sql).map_err(map_storage_error)?;
+
+        // Bind parameters dynamically
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> =
+            vec![Box::new(snapshot_uid.to_string())];
+
+        if let Some(ref name) = filter.contract_name {
+            params_vec.push(Box::new(format!("%{}%", name)));
+        }
+        if let Some(ref kind) = filter.link_kind {
+            params_vec.push(Box::new(kind.clone()));
+        }
+        if let Some(min_conf) = filter.min_confidence {
+            params_vec.push(Box::new(min_conf));
+        }
+
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                Ok(RawLinkRow {
+                    link_uid: row.get(0)?,
+                    link_kind: row.get(1)?,
+                    match_basis: row.get(2)?,
+                    confidence: row.get(3)?,
+                    contract_element_uid: row.get(4)?,
+                    contract_name: row.get(5)?,
+                    provider_surface_uid: row.get(6)?,
+                    provider_file: row.get(7)?,
+                    provider_line: row.get(8)?,
+                    provider_symbol: row.get(9)?,
+                    consumer_surface_uid: row.get(10)?,
+                    consumer_file: row.get(11)?,
+                    consumer_line: row.get(12)?,
+                    consumer_symbol: row.get(13)?,
+                })
+            })
+            .map_err(map_storage_error)?;
+
+        let mut results = Vec::new();
+        for row_result in rows {
+            let raw = row_result.map_err(map_storage_error)?;
+            results.push(BoundaryInteractionLinkListItem {
+                link_uid: raw.link_uid,
+                link_kind: raw.link_kind,
+                match_basis: raw.match_basis,
+                confidence: raw.confidence,
+                contract_element_uid: raw.contract_element_uid,
+                contract_name: raw.contract_name,
+                provider_surface_uid: raw.provider_surface_uid,
+                provider_file: raw.provider_file.unwrap_or_default(),
+                provider_line: raw.provider_line.unwrap_or(0),
+                provider_symbol: raw.provider_symbol,
+                consumer_surface_uid: raw.consumer_surface_uid,
+                consumer_file: raw.consumer_file.unwrap_or_default(),
+                consumer_line: raw.consumer_line.unwrap_or(0),
+                consumer_symbol: raw.consumer_symbol,
+            });
+        }
+
+        Ok(results)
+    }
 }
 
 // ── Helper types ─────────────────────────────────────────────────────
@@ -624,6 +745,24 @@ struct RawContractRow {
     association_basis: String,
     confidence: f64,
     evidence_json: Option<String>,
+}
+
+/// Internal raw row type for link queries (GR-3A).
+struct RawLinkRow {
+    link_uid: String,
+    link_kind: String,
+    match_basis: String,
+    confidence: f64,
+    contract_element_uid: Option<String>,
+    contract_name: Option<String>,
+    provider_surface_uid: String,
+    provider_file: Option<String>,
+    provider_line: Option<u32>,
+    provider_symbol: Option<String>,
+    consumer_surface_uid: String,
+    consumer_file: Option<String>,
+    consumer_line: Option<u32>,
+    consumer_symbol: Option<String>,
 }
 
 // ── Parse helpers ────────────────────────────────────────────────────
@@ -1276,5 +1415,191 @@ mod tests {
             .unwrap();
 
         assert!(detail.contracts.is_empty());
+    }
+
+    // ── GR-3A: Boundary interaction link tests ───────────────────────────
+
+    #[test]
+    fn list_links_returns_empty_when_no_links() {
+        let conn = create_test_db();
+
+        let filter = BoundaryInteractionLinkFilter::new();
+        let results = conn.list_boundary_interaction_links("snap-1", &filter).unwrap();
+
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn list_links_returns_links_with_contract_and_surface_info() {
+        let mut conn = create_test_db();
+
+        // Create provider and consumer surfaces
+        let provider_surface = SurfaceBuilder::new()
+            .snapshot_uid("snap-1")
+            .repo_uid("test-repo")
+            .boundary_scope(BoundaryScope::Unknown)
+            .channel_kind(ChannelKind::GrpcChannel)
+            .direction(Direction::Provider)
+            .protocol("grpc")
+            .transport_class(TransportClass::SchemaRpc)
+            .interaction_pattern(InteractionPattern::RequestResponse)
+            .endpoint_locality(EndpointLocality::Unknown)
+            .symbol_stable_key("test-repo:src/GreeterImpl.java#GreeterImpl:SYMBOL:class")
+            .source_file("src/GreeterImpl.java")
+            .location(10, 50, 1, 1)
+            .extractor("grpc_impl_hint_java")
+            .basis(Basis::Inferred)
+            .build()
+            .unwrap();
+
+        let consumer_surface = SurfaceBuilder::new()
+            .snapshot_uid("snap-1")
+            .repo_uid("test-repo")
+            .boundary_scope(BoundaryScope::Unknown)
+            .channel_kind(ChannelKind::GrpcChannel)
+            .direction(Direction::Consumer)
+            .protocol("grpc")
+            .transport_class(TransportClass::SchemaRpc)
+            .interaction_pattern(InteractionPattern::RequestResponse)
+            .endpoint_locality(EndpointLocality::Unknown)
+            .symbol_stable_key("test-repo:src/Client.java#main:SYMBOL:function")
+            .source_file("src/Client.java")
+            .location(20, 25, 5, 50)
+            .extractor("grpc_stub_hint_java")
+            .basis(Basis::Inferred)
+            .build()
+            .unwrap();
+
+        let provider_uid = provider_surface.surface_uid.clone();
+        let consumer_uid = consumer_surface.surface_uid.clone();
+        conn.insert_boundary_surfaces(&[provider_surface, consumer_surface]).unwrap();
+
+        // Create contract schema and element
+        conn.connection_mut()
+            .execute_batch(
+                "INSERT INTO contract_schemas (schema_uid, snapshot_uid, repo_uid, schema_kind, file_path, package_name, content_hash, extractor, parsed_at)
+                 VALUES ('cs-1', 'snap-1', 'test-repo', 'protobuf', 'api/v1/greeter.proto', 'api.v1', 'abc123', 'proto-parser:0.1.0', datetime('now'));
+                 INSERT INTO contract_elements (element_uid, schema_uid, element_kind, name, full_name)
+                 VALUES ('ce-greeter', 'cs-1', 'service', 'Greeter', 'api.v1.Greeter');",
+            )
+            .unwrap();
+
+        // Create a link
+        conn.connection_mut()
+            .execute(
+                "INSERT INTO boundary_interaction_links (link_uid, snapshot_uid, provider_surface_uid, consumer_surface_uid, link_kind, contract_element_uid, match_basis, confidence, materialized_at)
+                 VALUES (?1, 'snap-1', ?2, ?3, 'contract_match_only', 'ce-greeter', 'contract', 0.80, datetime('now'))",
+                rusqlite::params!["link-1", &provider_uid, &consumer_uid],
+            )
+            .unwrap();
+
+        let filter = BoundaryInteractionLinkFilter::new();
+        let results = conn.list_boundary_interaction_links("snap-1", &filter).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].link_uid, "link-1");
+        assert_eq!(results[0].link_kind, "contract_match_only");
+        assert_eq!(results[0].match_basis, "contract");
+        assert!((results[0].confidence - 0.80).abs() < 0.001);
+        assert_eq!(results[0].contract_name.as_deref(), Some("api.v1.Greeter"));
+        assert_eq!(results[0].provider_file, "src/GreeterImpl.java");
+        assert_eq!(results[0].provider_line, 10);
+        assert_eq!(results[0].consumer_file, "src/Client.java");
+        assert_eq!(results[0].consumer_line, 20);
+    }
+
+    #[test]
+    fn list_links_filters_by_service_name() {
+        let mut conn = create_test_db();
+
+        // Create surfaces
+        let provider_surface = SurfaceBuilder::new()
+            .snapshot_uid("snap-1")
+            .repo_uid("test-repo")
+            .boundary_scope(BoundaryScope::Unknown)
+            .channel_kind(ChannelKind::GrpcChannel)
+            .direction(Direction::Provider)
+            .protocol("grpc")
+            .transport_class(TransportClass::SchemaRpc)
+            .interaction_pattern(InteractionPattern::RequestResponse)
+            .endpoint_locality(EndpointLocality::Unknown)
+            .symbol_stable_key("test-repo:src/Server.java#Server:SYMBOL:class")
+            .source_file("src/Server.java")
+            .location(10, 50, 1, 1)
+            .extractor("grpc_impl_hint_java")
+            .basis(Basis::Inferred)
+            .build()
+            .unwrap();
+
+        let consumer_surface = SurfaceBuilder::new()
+            .snapshot_uid("snap-1")
+            .repo_uid("test-repo")
+            .boundary_scope(BoundaryScope::Unknown)
+            .channel_kind(ChannelKind::GrpcChannel)
+            .direction(Direction::Consumer)
+            .protocol("grpc")
+            .transport_class(TransportClass::SchemaRpc)
+            .interaction_pattern(InteractionPattern::RequestResponse)
+            .endpoint_locality(EndpointLocality::Unknown)
+            .symbol_stable_key("test-repo:src/Client.java#Client:SYMBOL:class")
+            .source_file("src/Client.java")
+            .location(20, 25, 5, 50)
+            .extractor("grpc_stub_hint_java")
+            .basis(Basis::Inferred)
+            .build()
+            .unwrap();
+
+        let provider_uid = provider_surface.surface_uid.clone();
+        let consumer_uid = consumer_surface.surface_uid.clone();
+        conn.insert_boundary_surfaces(&[provider_surface, consumer_surface]).unwrap();
+
+        // Create two contract elements
+        conn.connection_mut()
+            .execute_batch(
+                "INSERT INTO contract_schemas (schema_uid, snapshot_uid, repo_uid, schema_kind, file_path, package_name, content_hash, extractor, parsed_at)
+                 VALUES ('cs-1', 'snap-1', 'test-repo', 'protobuf', 'api/v1/api.proto', 'api.v1', 'abc123', 'proto-parser:0.1.0', datetime('now'));
+                 INSERT INTO contract_elements (element_uid, schema_uid, element_kind, name, full_name)
+                 VALUES ('ce-greeter', 'cs-1', 'service', 'Greeter', 'api.v1.Greeter');
+                 INSERT INTO contract_elements (element_uid, schema_uid, element_kind, name, full_name)
+                 VALUES ('ce-hello', 'cs-1', 'service', 'Hello', 'api.v1.Hello');",
+            )
+            .unwrap();
+
+        // Create two links with different contracts
+        conn.connection_mut()
+            .execute(
+                "INSERT INTO boundary_interaction_links (link_uid, snapshot_uid, provider_surface_uid, consumer_surface_uid, link_kind, contract_element_uid, match_basis, confidence, materialized_at)
+                 VALUES ('link-greeter', 'snap-1', ?1, ?2, 'contract_match_only', 'ce-greeter', 'contract', 0.80, datetime('now'))",
+                rusqlite::params![&provider_uid, &consumer_uid],
+            )
+            .unwrap();
+        conn.connection_mut()
+            .execute(
+                "INSERT INTO boundary_interaction_links (link_uid, snapshot_uid, provider_surface_uid, consumer_surface_uid, link_kind, contract_element_uid, match_basis, confidence, materialized_at)
+                 VALUES ('link-hello', 'snap-1', ?1, ?2, 'contract_match_only', 'ce-hello', 'contract', 0.80, datetime('now'))",
+                rusqlite::params![&provider_uid, &consumer_uid],
+            )
+            .unwrap();
+
+        // Filter by "Greeter" - should match only the greeter link
+        let filter = BoundaryInteractionLinkFilter::new().with_contract_name("Greeter");
+        let results = conn.list_boundary_interaction_links("snap-1", &filter).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].link_uid, "link-greeter");
+        assert_eq!(results[0].contract_name.as_deref(), Some("api.v1.Greeter"));
+
+        // Filter by "Hello" - should match only the hello link
+        let filter = BoundaryInteractionLinkFilter::new().with_contract_name("Hello");
+        let results = conn.list_boundary_interaction_links("snap-1", &filter).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].link_uid, "link-hello");
+
+        // No filter - should return both
+        let filter = BoundaryInteractionLinkFilter::new();
+        let results = conn.list_boundary_interaction_links("snap-1", &filter).unwrap();
+
+        assert_eq!(results.len(), 2);
     }
 }

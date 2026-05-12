@@ -1,12 +1,14 @@
 //! Boundaries command family.
 //!
 //! BI-1A: Boundary interaction discovery for local IPC mechanisms.
+//! GR-3A: gRPC provider/consumer link listing.
 //!
 //! ## Commands
 //!
 //!   rmap boundaries list <db_path> <repo_uid> [filters...]
 //!   rmap boundaries show <db_path> <repo_uid> <surface_uid>
 //!   rmap boundaries summary <db_path> <repo_uid>
+//!   rmap boundaries links <db_path> <repo_uid> [filters...]
 //!
 //! ## Exit codes
 //!
@@ -23,6 +25,10 @@
 //!   --file <path>                           Filter by exact file path
 //!   --file-prefix <prefix>                  Filter by file path prefix
 //!   --symbol <key>                          Filter by enclosing symbol stable key
+//!
+//! ## Filters (links command)
+//!
+//!   --service <name>                        Filter by contract service name (contains match)
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -30,8 +36,8 @@ use std::process::ExitCode;
 use crate::cli::{build_envelope, open_storage, resolve_repo_ref};
 
 use repo_graph_boundary_interaction::{
-    BoundaryInteractionFilter, BoundaryInteractionReadPort, BoundaryScope, ChannelKind, Direction,
-    ProtocolFamily,
+    BoundaryInteractionFilter, BoundaryInteractionLinkFilter, BoundaryInteractionReadPort,
+    BoundaryScope, ChannelKind, Direction, ProtocolFamily,
 };
 
 // ── boundaries command ───────────────────────────────────────────────
@@ -46,6 +52,7 @@ pub fn run_boundaries(args: &[String]) -> ExitCode {
         "list" => run_boundaries_list(&args[1..]),
         "show" => run_boundaries_show(&args[1..]),
         "summary" => run_boundaries_summary(&args[1..]),
+        "links" => run_boundaries_links(&args[1..]),
         other => {
             eprintln!("unknown boundaries subcommand: {}", other);
             print_usage();
@@ -59,6 +66,7 @@ fn print_usage() {
     eprintln!("  rmap boundaries list <db_path> <repo_uid> [--kind <kind>] [--scope <scope>] [--direction <dir>] [--family <fam>] [--file <path>] [--file-prefix <prefix>] [--symbol <key>]");
     eprintln!("  rmap boundaries show <db_path> <repo_uid> <surface_uid>");
     eprintln!("  rmap boundaries summary <db_path> <repo_uid>");
+    eprintln!("  rmap boundaries links <db_path> <repo_uid> [--service <name>]");
 }
 
 // ── boundaries list ──────────────────────────────────────────────────
@@ -392,6 +400,128 @@ fn run_boundaries_summary(args: &[String]) -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+// ── boundaries links (GR-3A) ─────────────────────────────────────────
+
+fn run_boundaries_links(args: &[String]) -> ExitCode {
+    let (db_path, repo_ref, filter) = match parse_links_args(args) {
+        Ok(v) => v,
+        Err(msg) => {
+            eprintln!("{}", msg);
+            return ExitCode::from(1);
+        }
+    };
+
+    let storage = match open_storage(db_path) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("error: {}", msg);
+            return ExitCode::from(2);
+        }
+    };
+
+    let repo_uid = match resolve_repo_ref(&storage, repo_ref) {
+        Ok(uid) => uid,
+        Err(msg) => {
+            eprintln!("error: {}", msg);
+            return ExitCode::from(2);
+        }
+    };
+
+    let snapshot = match storage.get_latest_snapshot(&repo_uid) {
+        Ok(Some(snap)) => snap,
+        Ok(None) => {
+            eprintln!("error: no snapshot for repo '{}'", repo_ref);
+            return ExitCode::from(2);
+        }
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::from(2);
+        }
+    };
+
+    let items = match storage.list_boundary_interaction_links(&snapshot.snapshot_uid, &filter) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::from(2);
+        }
+    };
+
+    let count = items.len();
+
+    // Build envelope with filter info
+    let mut extra = serde_json::Map::new();
+    if let Some(ref s) = filter.contract_name {
+        extra.insert(
+            "filter_service".to_string(),
+            serde_json::Value::String(s.clone()),
+        );
+    }
+
+    let output = match build_envelope(
+        &storage,
+        "boundaries links",
+        &repo_uid,
+        &snapshot,
+        serde_json::to_value(&items).unwrap(),
+        count,
+        extra,
+    ) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::from(2);
+        }
+    };
+
+    match serde_json::to_string_pretty(&output) {
+        Ok(json) => {
+            println!("{}", json);
+            if count == 0 {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
+        Err(e) => {
+            eprintln!("error: {}", e);
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn parse_links_args(
+    args: &[String],
+) -> Result<(&Path, &str, BoundaryInteractionLinkFilter), String> {
+    if args.len() < 2 {
+        return Err(
+            "usage: rmap boundaries links <db_path> <repo_uid> [--service <name>]".to_string(),
+        );
+    }
+
+    let db_path = Path::new(&args[0]);
+    let repo_ref = args[1].as_str();
+    let mut filter = BoundaryInteractionLinkFilter::new();
+
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--service" => {
+                if i + 1 >= args.len() {
+                    return Err("--service requires a value".to_string());
+                }
+                filter.contract_name = Some(args[i + 1].clone());
+                i += 2;
+            }
+            other => {
+                return Err(format!("unknown option: {}", other));
+            }
+        }
+    }
+
+    Ok((db_path, repo_ref, filter))
 }
 
 // ── Parse helpers ────────────────────────────────────────────────────

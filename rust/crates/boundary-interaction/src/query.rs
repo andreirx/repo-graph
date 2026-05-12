@@ -505,6 +505,103 @@ pub struct BasisCount {
     pub count: usize,
 }
 
+// ── Link list item DTO (GR-3A CLI) ───────────────────────────────────
+
+/// Lightweight DTO for boundary interaction link listings.
+///
+/// Surfaces provider/consumer links for CLI display without full evidence.
+/// GR-3A scope: contract-based linking only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoundaryInteractionLinkListItem {
+    /// Link primary key.
+    pub link_uid: String,
+
+    /// Link kind (e.g., "contract_match_only" for GR-3A).
+    pub link_kind: String,
+
+    /// Match basis (e.g., "contract" for GR-3A).
+    pub match_basis: String,
+
+    /// Confidence score.
+    pub confidence: f64,
+
+    // ── Contract info ─────────────────────────────────────────────
+    /// Contract element UID (proto service).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_element_uid: Option<String>,
+
+    /// Contract full name (e.g., "helloworld.Greeter").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_name: Option<String>,
+
+    // ── Provider info ─────────────────────────────────────────────
+    /// Provider surface UID.
+    pub provider_surface_uid: String,
+
+    /// Provider source file.
+    pub provider_file: String,
+
+    /// Provider line number.
+    pub provider_line: u32,
+
+    /// Provider symbol stable key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_symbol: Option<String>,
+
+    // ── Consumer info ─────────────────────────────────────────────
+    /// Consumer surface UID.
+    pub consumer_surface_uid: String,
+
+    /// Consumer source file.
+    pub consumer_file: String,
+
+    /// Consumer line number.
+    pub consumer_line: u32,
+
+    /// Consumer symbol stable key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consumer_symbol: Option<String>,
+}
+
+/// Filter for boundary interaction link queries.
+#[derive(Debug, Clone, Default)]
+pub struct BoundaryInteractionLinkFilter {
+    /// Filter by contract name (contains match).
+    pub contract_name: Option<String>,
+
+    /// Filter by link kind (exact match).
+    pub link_kind: Option<String>,
+
+    /// Filter by minimum confidence.
+    pub min_confidence: Option<f64>,
+}
+
+impl BoundaryInteractionLinkFilter {
+    /// Create an empty filter that matches all links.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set contract name filter.
+    pub fn with_contract_name(mut self, name: impl Into<String>) -> Self {
+        self.contract_name = Some(name.into());
+        self
+    }
+
+    /// Set link kind filter.
+    pub fn with_link_kind(mut self, kind: impl Into<String>) -> Self {
+        self.link_kind = Some(kind.into());
+        self
+    }
+
+    /// Set minimum confidence filter.
+    pub fn with_min_confidence(mut self, min: f64) -> Self {
+        self.min_confidence = Some(min);
+        self
+    }
+}
+
 // ── Read port trait ──────────────────────────────────────────────────
 
 /// Read port for boundary interaction facts.
@@ -541,6 +638,16 @@ pub trait BoundaryInteractionReadPort {
         &self,
         snapshot_uid: &str,
     ) -> Result<BoundaryInteractionSummary, BoundaryInteractionReadError>;
+
+    /// List boundary interaction links with optional filtering.
+    ///
+    /// GR-3A scope: contract-based provider/consumer links.
+    /// Returns links sorted by (contract_name, provider_file, consumer_file).
+    fn list_boundary_interaction_links(
+        &self,
+        snapshot_uid: &str,
+        filter: &BoundaryInteractionLinkFilter,
+    ) -> Result<Vec<BoundaryInteractionLinkListItem>, BoundaryInteractionReadError>;
 }
 
 // ── Error type ───────────────────────────────────────────────────────

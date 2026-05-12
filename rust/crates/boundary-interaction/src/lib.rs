@@ -61,9 +61,9 @@ pub mod types;
 pub use channel::ChannelDetail;
 pub use query::{
     BasisCount, BoundaryContractView, BoundaryInteractionChannelView, BoundaryInteractionDetail,
-    BoundaryInteractionFilter, BoundaryInteractionListItem, BoundaryInteractionReadError,
-    BoundaryInteractionReadPort, BoundaryInteractionSummary, DirectionCount, FamilyCount,
-    KindCount, ScopeCount,
+    BoundaryInteractionFilter, BoundaryInteractionLinkFilter, BoundaryInteractionLinkListItem,
+    BoundaryInteractionListItem, BoundaryInteractionReadError, BoundaryInteractionReadPort,
+    BoundaryInteractionSummary, DirectionCount, FamilyCount, KindCount, ScopeCount,
 };
 pub use surface::BoundaryInteractionSurface;
 pub use types::{

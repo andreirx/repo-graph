@@ -4084,3 +4084,103 @@ fn boundaries_list_memfd_has_shared_state_pattern() {
         );
     }
 }
+
+// ══════════════════════════════════════════════════════════════════
+// GR-3A: LINKS SUBCOMMAND TESTS
+// ══════════════════════════════════════════════════════════════════
+
+#[test]
+fn boundaries_links_usage_error_missing_args() {
+    let output = Command::new(binary_path())
+        .args(["boundaries", "links"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("usage:"),
+        "should show usage on missing args"
+    );
+}
+
+#[test]
+fn boundaries_links_missing_db_exit_2() {
+    let output = Command::new(binary_path())
+        .args(["boundaries", "links", "/nonexistent/db.db", "test-repo"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+}
+
+#[test]
+fn boundaries_links_repo_not_found_exit_2() {
+    let (_dir, db_path, _repo_path) = build_indexed_db();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "links",
+            db_path.to_str().unwrap(),
+            "nonexistent-repo",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not found") || stderr.contains("error"),
+        "should show error for missing repo"
+    );
+}
+
+#[test]
+fn boundaries_links_empty_when_no_links() {
+    let (_dir, db_path, _repo_path) = build_indexed_db();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "links",
+            db_path.to_str().unwrap(),
+            "test-repo",
+        ])
+        .output()
+        .unwrap();
+
+    // Exit code 1 means no results found (success but empty)
+    assert_eq!(output.status.code(), Some(1));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(result["command"], "boundaries links");
+    assert_eq!(result["count"], 0);
+    let results = result["results"].as_array().unwrap();
+    assert!(results.is_empty());
+}
+
+#[test]
+fn boundaries_links_unknown_option_exit_1() {
+    let (_dir, db_path, _repo_path) = build_indexed_db();
+
+    let output = Command::new(binary_path())
+        .args([
+            "boundaries",
+            "links",
+            db_path.to_str().unwrap(),
+            "test-repo",
+            "--unknown-flag",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown option"),
+        "should show error for unknown flag"
+    );
+}

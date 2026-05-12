@@ -1,6 +1,6 @@
 # GR-3: gRPC Provider/Consumer Linking
 
-Status: GR-3A IMPLEMENTED (CLI pending), GR-3B/GR-3C DEFERRED
+Status: GR-3A **SHIPPED**, GR-3B/GR-3C DEFERRED
 Depends: GR-1A (Server Hints), GR-2A (Client Hints), CS-2A (Generated Code Mapping)
 Track: B (Schema-Backed RPC)
 
@@ -298,10 +298,15 @@ Key implementation details:
 - `gr3a_no_links_without_matching_contracts` — negative test
 - `gr3a_link_is_idempotent` — INSERT OR IGNORE behavior
 
-**Pending:**
-- CLI command `rmap boundaries links` (GR-3A has no CLI exposure yet)
-- Fixture validation test with real indexed grpc-java-minimal run
-- Cross-language fixture test (Java server + Python/TS client)
+**Completed (2026-05-12):**
+- CLI command `rmap boundaries links <db> <repo> [--service <name>]`
+- `BoundaryInteractionLinkFilter` and `BoundaryInteractionLinkListItem` DTOs
+- Storage implementation: `list_boundary_interaction_links()`
+- 3 storage unit tests + 5 CLI integration tests
+
+**Validation (2026-05-12):**
+- Manual fixture validation: indexed `test/fixtures/grpc-java-minimal/` to temp DB, ran `rmap boundaries links`, confirmed contract-based links returned for matching provider/consumer surfaces
+- Cross-language fixture test deferred to GR-3B/3C (requires endpoint matching)
 
 ### What GR-3A Does NOT Do
 

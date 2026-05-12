@@ -1459,7 +1459,7 @@ Two-track architecture for boundary detection over a unified model:
 - GR-1A: gRPC server implementation hints (ImplBase inheritance) — FIXTURE-VALIDATED
 - GR-1B: gRPC server registration proof (addService, bindService) — COMPLETE
 - GR-2A: gRPC client stub hints (newBlockingStub, newFutureStub, newStub) — FIXTURE-VALIDATED
-- GR-3A: gRPC contract-based linking — IMPLEMENTED (CLI pending)
+- GR-3A: gRPC contract-based linking — **SHIPPED**
 - GR-1C: gRPC server endpoint evidence (bind address, port) — DEFERRED
 - GR-2B: gRPC client endpoint evidence (channel host, port) — DEFERRED
 - GR-3B: gRPC endpoint-aligned linking — DEFERRED
