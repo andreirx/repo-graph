@@ -1675,6 +1675,38 @@ The type is slice-scoped:
   must follow the same rule. CONFIG_KEY is outside this slice
   and is handled by the config/env seam slice when it ships.
 
+### CPP-SB-1: C++ State Boundaries — Known Limits
+
+**Local type map limits (D3):** The intra-function local type map
+for `.open()` receiver resolution tracks only local variable
+declarations in the same function body. Explicit limits:
+
+| Supported | Not Supported |
+|-----------|---------------|
+| Local variable declarations | Parameters (`void f(ifstream& s)`) |
+| Same function body | Cross-function propagation |
+| Direct identifier receiver (`file.open()`) | Factory returns (`getStream().open()`) |
+| Simple declarations | Aliases (`auto& ref = file`) |
+| | References/pointers |
+| | Reassignment |
+| | Member fields (`this->file_.open()`) |
+
+These are deliberate design limits. Generalized receiver-type
+resolution is future substrate work (not part of CPP-SB-1).
+
+**Mode parsing:** Limited to literal `std::ios::*` patterns.
+Variable modes or complex expressions default to `read_write`.
+
+**Binding duplication:** 16 bindings total (8 C-style APIs
+duplicated for `language = "cpp"` + 8 stream family entries).
+If this becomes a maintenance burden, future slice can introduce
+binding-table substrate extension (language families, shared
+bindings, alias groups).
+
+Validated by E2E tests: `rust/crates/repo-index/tests/cpp_sb_1_integration.rs`
+(20 tests covering constructor path, D3 .open(), C-style APIs, negative
+limits, and refresh path).
+
 ## Measurement Commands (`rmap churn`, `rmap hotspots`)
 
 ### Hotspots — validated for v1 (RS-MS-3d)

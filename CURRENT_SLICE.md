@@ -2,9 +2,64 @@
 
 ## Current Priority
 
-C/C++ systems maturation: extend state-boundary extraction to C codebases.
+C/C++ systems maturation: extend state-boundary extraction to C++ codebases.
+
+## Active Slice
+
+None. CPP-SB-1 shipped. Select next priority from execution queue.
 
 ## Recently Shipped
+
+**CPP-SB-1: C++ State Boundaries** — SHIPPED (2026-05-12)
+
+Slice doc: `docs/shipped/slices/cpp-sb-1-cpp-state-boundaries.md`
+
+### Summary
+
+C++ state-boundary extraction via `ResolvedCallsite` facts for `std::fstream`
+family (constructors + `.open()`) and C-style APIs in C++ files.
+
+### Design Decisions (Locked)
+
+- **D1 Bindings:** Option A — duplicate C bindings for `language = "cpp"` (explicit, no fallback)
+- **D2 Scope:** Scope 2 — constructors + `.open()` member calls (practical coverage)
+- **D3 .open() resolution:** Intra-function local type map (bounded, function-scoped)
+
+### Completed
+
+- 16 C++ bindings in bindings.toml (8 duplicated C + 8 stream family)
+- C++ extractor ResolvedCallsite emission with D3 local type map (47 unit tests)
+- CppAdapter in state-extractor (7 unit tests in languages/cpp.rs)
+- Hook promotion (cpp classified as Supported)
+- E2E integration test (`cpp_sb_1_integration.rs` — 20 tests)
+- Refresh-path coverage (4 tests: unchanged preservation, mixed files, dedup, D3 survival)
+
+### Validation Evidence (EXECUTED)
+
+```
+# E2E integration tests (repo-index temp-repo tests)
+cargo test -p repo-graph-repo-index --test cpp_sb_1_integration
+→ 20 tests pass
+  - constructor path: ifstream, ofstream, fstream + ios modes (5 tests)
+  - .open() via D3: ifstream.open, ofstream.open, fstream.open (3 tests)
+  - C-style APIs: fopen, open, sqlite3_open in .cpp files (3 tests)
+  - negative limits: parameter, factory, member, dynamic, :memory: (5 tests)
+  - refresh: unchanged, mixed, dedup, D3 survival (4 tests)
+
+# Unit tests
+cargo test -p repo-graph-cpp-extractor → 47 tests pass
+cargo test -p repo-graph-state-extractor → 41 + 19 + 14 tests pass
+cargo test -p repo-graph-state-bindings → 13 + 9 + 17 + 20 tests pass
+```
+
+### Deferred
+
+- Fixture corpus CLI validation (E2E tests use temp repos instead)
+- std::filesystem (C++17)
+- Boost.Asio, Qt file APIs
+- fread/fwrite (need file handle provenance)
+
+---
 
 **C-SB-1: C State Boundaries** — SHIPPED (2026-05-12)
 
@@ -52,10 +107,6 @@ rmap resource list ./test-artifacts/swupdate.db swupdate
 - C++ state boundaries (separate CPP-SB-1 slice)
 - fread/fwrite (need file handle provenance)
 - Macro-wrapped calls
-
-## Next Priority
-
-CPP-SB-1: C++ state boundaries (not started)
 
 ## Completed Follow-on Slices
 
@@ -197,7 +248,7 @@ SB-7B narrow first-cut (`DriverManager.getConnection(String)` only) — can now 
 | Slice | Scope | Layer | Status |
 |-------|-------|-------|--------|
 | **C-SB-1** | C state boundaries ([slice](docs/shipped/slices/c-sb-1-c-state-boundaries.md)) | L2 | **SHIPPED** |
-| CPP-SB-1 | C++ state boundaries ([slice](docs/slices/cpp-sb-1-cpp-state-boundaries.md)) | L2 | NOT STARTED |
+| **CPP-SB-1** | C++ state boundaries ([slice](docs/shipped/slices/cpp-sb-1-cpp-state-boundaries.md)) | L2 | **SHIPPED** |
 | **PY-EXT-2** | Python extractor depth | L0–1 | IMPLEMENTED (functional) |
 | **PY-EXT-2-PERF** | Python extractor performance validation | L0–1 | DEFERRED |
 | **SB-7A** | State boundaries support substrate | L2 | **SHIPPED** |
@@ -240,7 +291,7 @@ and "are these snapshots comparable?"
 5. **JE-1** implemented: extends Java extractor to emit `ResolvedCallsite` facts
 6. **SB-7B** shipped: consumes JE-1 facts via adapter + bindings
 7. **FD-SUPPORT-1** implemented — Rust write path for `project_surfaces` now exists
-8. **FD-1A** implemented — AST-based Express detection with evidence persistence and E2E tests
+8. **FD-1A** shipped — AST-based Express detection, parity-validated against TS prototype
 9. **FD-SUPPORT-2** implemented — `rmap inferences list` CLI command for inference query
 10. **FD-1B** implemented — AST-based React component/hook detection with inference persistence
 

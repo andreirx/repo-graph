@@ -821,7 +821,8 @@ Layer 3 framework detection.
 | DEP-1 | Dependency reconciliation surface | L2 | **SHIPPED** |
 | JE-1 | Java resolved callsites | L0–1 | **IMPLEMENTED** |
 | SB-7B | Java state boundaries | L2 | **SHIPPED** |
-| FD-1A | Rust Express detector parity | L3 | **IMPLEMENTED** |
+| CPP-SB-1 | C++ state boundaries | L2 | **SHIPPED** |
+| FD-1A | Rust Express detector parity | L3 | **SHIPPED** |
 | FD-1B | Rust React detector parity | L3 | **IMPLEMENTED** |
 
 **PY-EXT-2-PERF note:** Performance acceptance (throughput ≥ 0.95x, memory ≤ 1.1x)
@@ -837,9 +838,10 @@ and pre-change baseline are established. Functional Layer 0–1 work is complete
 4. **DEP-1** promoted: cross-cutting query surface over existing facts, no extractor surgery, immediate value across JS/TS and Rust repos
 5. **JE-1** implemented: Java extractor now emits `ResolvedCallsite` facts with arg0 payload and import resolution.
 6. **SB-7B** shipped: narrow first-cut (`DriverManager.getConnection(String)` only) complete.
-7. **FD-1A** implemented: AST-based Express detection with module resolution, 16 routes detected in validation corpus.
-8. **FD-1B** implemented: React component/hook detection via AST, 10 components + 14 hooks in validation corpus. Uses `inferences` table (Layer 3).
-9. **PY-EXT-2-PERF** is backlog — requires benchmark harness infrastructure before execution
+7. **CPP-SB-1** shipped: C++ stream family (ifstream, ofstream, fstream constructors + .open()) with D3 intra-function local type map. Duplicated C bindings for language="cpp". 20 E2E tests.
+8. **FD-1A** shipped: AST-based Express detection with module resolution, parity-validated against TS prototype.
+9. **FD-1B** implemented: React component/hook detection via AST, 10 components + 14 hooks in validation corpus. Uses `inferences` table (Layer 3).
+10. **PY-EXT-2-PERF** is backlog — requires benchmark harness infrastructure before execution
 
 **Slice docs:**
 
@@ -849,14 +851,15 @@ and pre-change baseline are established. Functional Layer 0–1 work is complete
 - `docs/shipped/slices/dep-1-dependency-reconciliation-surface.md`
 - `docs/slices/je-1-java-resolved-callsites.md`
 - `docs/shipped/slices/sb-7b-java-state-boundaries.md`
-- `docs/slices/fd-1a-rust-express-detector-parity.md`
+- `docs/shipped/slices/cpp-sb-1-cpp-state-boundaries.md`
+- `docs/shipped/slices/fd-1a-rust-express-detector-parity.md`
 - `docs/slices/fd-1b-rust-react-detector-parity.md`
 
 ---
 
 ### Backlog: Framework Detection Follow-on Slices
 
-FD-1A and FD-1B are IMPLEMENTED but not parity-validated. These follow-on slices
+FD-1A is SHIPPED (parity-validated). FD-1B is IMPLEMENTED. These follow-on slices
 complete the framework detection work:
 
 | Slice | Type | Scope | Status |
@@ -1334,8 +1337,9 @@ Slice 1 shipped (see Shipped section above). Remaining work:
 - TypeScript/JavaScript — **SHIPPED** (SB-7A)
 - Python — **SHIPPED** (SB-7C)
 - Java — **SHIPPED** (SB-7B: narrow first-cut `DriverManager.getConnection` only)
+- C — **SHIPPED** (C-SB-1: fopen, open, sqlite3_open)
+- C++ — **SHIPPED** (CPP-SB-1: stream family + C-style APIs, D3 local type map)
 - Rust-language — blocked on Rust extractor `ResolvedCallsite` emission
-- C++ — blocked on C++ extractor `ResolvedCallsite` emission
 
 **Feature expansion:**
 - Queue/event boundaries: EMITS, CONSUMES, QUEUE node kind (Kafka, SQS, SNS, RabbitMQ)

@@ -124,9 +124,10 @@ fn classify_language(lang_str: Option<&str>) -> LanguageClassification {
 		Some("java") => LanguageClassification::Supported(Language::Java),
 		// C-SB-1: C adapter is shipped. Missing = fault.
 		Some("c") => LanguageClassification::Supported(Language::C),
+		// CPP-SB-1: C++ adapter is shipped. Missing = fault.
+		Some("cpp") => LanguageClassification::Supported(Language::Cpp),
 		// Adapters not yet implemented.
 		Some("rust") => LanguageClassification::Unsupported(Language::Rust),
-		Some("cpp") => LanguageClassification::Unsupported(Language::Cpp),
 		// Unknown language.
 		_ => LanguageClassification::Unknown,
 	}

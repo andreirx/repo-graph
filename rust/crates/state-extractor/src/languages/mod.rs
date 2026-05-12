@@ -18,14 +18,17 @@
 //! - `python` (SB-7C): Python adapter
 //! - `java` (SB-7B): Java adapter (DriverManager.getConnection only)
 //! - `c` (C-SB-1): C adapter (fopen, open, sqlite3_open)
+//! - `cpp` (CPP-SB-1): C++ adapter (fstream family, C-style APIs)
 
 pub mod c;
+pub mod cpp;
 pub mod java;
 pub mod python;
 pub mod typescript;
 
 // Re-export adapter structs for convenience.
 pub use c::CAdapter;
+pub use cpp::CppAdapter;
 pub use java::JavaAdapter;
 pub use python::PythonAdapter;
 pub use typescript::TypeScriptAdapter;

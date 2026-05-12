@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use repo_graph_classification::types::{ImportBinding, RuntimeBuiltinsSet, SourceLocation};
+use repo_graph_indexer::types::{CallArgPayload, ResolvedCallsite};
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::routing::is_test_file;
 use repo_graph_indexer::types::{
@@ -23,6 +24,79 @@ const EXTRACTOR_NAME: &str = "cpp-core:0.1.0";
 
 /// Languages this extractor handles.
 const LANGUAGES: &[&str] = &["cpp"];
+
+// ── CPP-SB-1: State-boundary function detection ───────────────────
+//
+// C-style APIs (duplicated from C bindings for cpp language).
+const SB_STDIO_FUNCTIONS: &[&str] = &["fopen"];
+const SB_FCNTL_FUNCTIONS: &[&str] = &["open"];
+const SB_SQLITE_FUNCTIONS: &[&str] = &["sqlite3_open", "sqlite3_open_v2"];
+
+// C++ stream types that map to state-boundary symbols.
+const STREAM_TYPES: &[&str] = &[
+    "std::ifstream",
+    "std::ofstream",
+    "std::fstream",
+    "ifstream",
+    "ofstream",
+    "fstream",
+];
+
+/// Stream type for local type map (D3 substrate).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamType {
+    Ifstream,
+    Ofstream,
+    Fstream,
+}
+
+impl StreamType {
+    /// Parse from type specifier text.
+    fn from_type_text(text: &str) -> Option<Self> {
+        match text {
+            "std::ifstream" | "ifstream" => Some(StreamType::Ifstream),
+            "std::ofstream" | "ofstream" => Some(StreamType::Ofstream),
+            "std::fstream" | "fstream" => Some(StreamType::Fstream),
+            _ => None,
+        }
+    }
+
+    /// Get constructor symbol for this stream type.
+    fn constructor_symbol(&self) -> &'static str {
+        match self {
+            StreamType::Ifstream => "ifstream",
+            StreamType::Ofstream => "ofstream",
+            StreamType::Fstream => "fstream",
+        }
+    }
+
+    /// Get .open() symbol for this stream type.
+    fn open_symbol(&self) -> &'static str {
+        match self {
+            StreamType::Ifstream => "ifstream_open",
+            StreamType::Ofstream => "ofstream_open",
+            StreamType::Fstream => "fstream_open",
+        }
+    }
+
+    /// Get direction-specific symbol when mode indicates read.
+    fn mode_read_symbol(&self) -> &'static str {
+        match self {
+            StreamType::Ifstream => "ifstream", // Already read
+            StreamType::Ofstream => "ofstream", // Can't read from ofstream
+            StreamType::Fstream => "fstream_read",
+        }
+    }
+
+    /// Get direction-specific symbol when mode indicates write.
+    fn mode_write_symbol(&self) -> &'static str {
+        match self {
+            StreamType::Ifstream => "ifstream", // Can't write to ifstream
+            StreamType::Ofstream => "ofstream", // Already write
+            StreamType::Fstream => "fstream_write",
+        }
+    }
+}
 
 /// C++ runtime builtins (STL, etc.)
 fn cpp_runtime_builtins() -> RuntimeBuiltinsSet {
@@ -252,6 +326,8 @@ impl ExtractorPort for CppExtractor {
             current_namespace: Vec::new(),
             current_class: None,
             current_linkage: None,
+            resolved_callsites: Vec::new(),
+            local_stream_types: HashMap::new(),
         };
 
         // Walk top-level declarations
@@ -272,7 +348,7 @@ impl ExtractorPort for CppExtractor {
             edges: ctx.edges,
             metrics: ctx.metrics,
             import_bindings: ctx.import_bindings,
-            resolved_callsites: Vec::new(),
+            resolved_callsites: ctx.resolved_callsites,
         })
     }
 }
@@ -297,6 +373,11 @@ struct ExtractionCtx<'a> {
     current_class: Option<String>,
     /// Current linkage specification if inside extern "C" block
     current_linkage: Option<LanguageLinkage>,
+    /// CPP-SB-1: ResolvedCallsite facts for state-boundary APIs.
+    resolved_callsites: Vec<ResolvedCallsite>,
+    /// CPP-SB-1 D3: Intra-function local type map for .open() resolution.
+    /// Maps local variable identifier -> stream type. Cleared on function boundary.
+    local_stream_types: HashMap<String, StreamType>,
 }
 
 impl<'a> ExtractionCtx<'a> {
@@ -1046,14 +1127,23 @@ fn extract_calls_from_body(
     source_node_uid: &str,
     ctx: &mut ExtractionCtx,
 ) {
-    fn walk(node: &tree_sitter::Node, src: &[u8], source_node_uid: &str, ctx: &mut ExtractionCtx) {
-        if node.kind() == "call_expression" {
-            extract_call(node, src, source_node_uid, ctx);
-        }
+    // CPP-SB-1 D3: Clear local type map at function boundary.
+    ctx.local_stream_types.clear();
 
-        // Don't recurse into nested functions or lambdas
-        if node.kind() == "function_definition" || node.kind() == "lambda_expression" {
-            return;
+    fn walk(node: &tree_sitter::Node, src: &[u8], source_node_uid: &str, ctx: &mut ExtractionCtx) {
+        match node.kind() {
+            "call_expression" => {
+                extract_call(node, src, source_node_uid, ctx);
+            }
+            "declaration" => {
+                // CPP-SB-1: Check for stream constructor with path.
+                try_extract_stream_declaration(node, src, source_node_uid, ctx);
+            }
+            // Don't recurse into nested functions or lambdas
+            "function_definition" | "lambda_expression" => {
+                return;
+            }
+            _ => {}
         }
 
         let mut cursor = node.walk();
@@ -1078,12 +1168,26 @@ fn extract_call(
 
     // Extract callee based on type
     let target_name = match function.kind() {
-        "identifier" => function.utf8_text(src).unwrap_or("").to_string(),
+        "identifier" => {
+            let fn_name = function.utf8_text(src).unwrap_or("").to_string();
+            // CPP-SB-1: Check for C-style API state-boundary call.
+            if let Some(callsite) = try_resolve_c_style_api(node, src, source_node_uid, &fn_name) {
+                ctx.resolved_callsites.push(callsite);
+            }
+            fn_name
+        }
         "qualified_identifier" | "scoped_identifier" => {
             function.utf8_text(src).unwrap_or("").to_string()
         }
         "field_expression" => {
             // obj.method() or ptr->method()
+            // CPP-SB-1 D3: Check for stream .open() call.
+            if let Some(callsite) =
+                try_resolve_stream_open(node, &function, src, source_node_uid, ctx)
+            {
+                ctx.resolved_callsites.push(callsite);
+            }
+
             if let Some(field) = function.child_by_field_name("field") {
                 field.utf8_text(src).unwrap_or("").to_string()
             } else {
@@ -1186,6 +1290,385 @@ fn extract_declarator_name(declarator: &tree_sitter::Node, src: &[u8]) -> String
     }
 
     String::new()
+}
+
+// ── CPP-SB-1: State-boundary extraction ──────────────────────────
+
+/// Try to resolve a C-style API call (fopen, open, sqlite3_open*) to a ResolvedCallsite.
+fn try_resolve_c_style_api(
+    call_node: &tree_sitter::Node,
+    src: &[u8],
+    enclosing_symbol_node_uid: &str,
+    fn_name: &str,
+) -> Option<ResolvedCallsite> {
+    // Determine synthetic module and base symbol.
+    let (resolved_module, base_symbol) = if SB_STDIO_FUNCTIONS.contains(&fn_name) {
+        ("libc:stdio", fn_name)
+    } else if SB_FCNTL_FUNCTIONS.contains(&fn_name) {
+        ("libc:fcntl", fn_name)
+    } else if SB_SQLITE_FUNCTIONS.contains(&fn_name) {
+        ("sqlite3", fn_name)
+    } else {
+        return None;
+    };
+
+    // Get arguments node.
+    let arguments = call_node.child_by_field_name("arguments")?;
+
+    // Extract arg0 (path) — must be a string literal.
+    let arg0_payload = extract_arg0_string_literal(&arguments, src)?;
+
+    // Extract arg1 if present and needed for mode/flags.
+    let arg1_payload = extract_arg1_payload(&arguments, src);
+
+    // Determine direction-specific resolved_symbol.
+    let resolved_symbol = match resolved_module {
+        "libc:stdio" => {
+            // fopen: use mode argument to determine direction.
+            let mode = match &arg1_payload {
+                Some(CallArgPayload::StringLiteral { value }) => value.as_str(),
+                _ => "", // Default to read if no mode
+            };
+            format!("{}_{}", base_symbol, normalize_fopen_mode(mode))
+        }
+        "libc:fcntl" => {
+            // open: use flags argument to determine direction.
+            let flags = match &arg1_payload {
+                Some(CallArgPayload::StringLiteral { value }) => value.as_str(),
+                _ => "", // Default to read_write if flags are dynamic
+            };
+            format!("{}_{}", base_symbol, normalize_open_flags(flags))
+        }
+        "sqlite3" => {
+            // sqlite3_open*: always read_write.
+            base_symbol.to_string()
+        }
+        _ => base_symbol.to_string(),
+    };
+
+    Some(ResolvedCallsite {
+        enclosing_symbol_node_uid: enclosing_symbol_node_uid.to_string(),
+        resolved_module: resolved_module.to_string(),
+        resolved_symbol,
+        arg0_payload,
+        arg1_payload,
+        source_location: location_from_node(call_node),
+    })
+}
+
+/// CPP-SB-1 D3: Try to resolve a stream .open() call using the local type map.
+fn try_resolve_stream_open(
+    call_node: &tree_sitter::Node,
+    function_node: &tree_sitter::Node,
+    src: &[u8],
+    enclosing_symbol_node_uid: &str,
+    ctx: &ExtractionCtx,
+) -> Option<ResolvedCallsite> {
+    // Check if the field is "open".
+    let field = function_node.child_by_field_name("field")?;
+    let field_name = field.utf8_text(src).ok()?;
+    if field_name != "open" {
+        return None;
+    }
+
+    // Get the receiver (must be a simple identifier per D3 limits).
+    let argument = function_node.child_by_field_name("argument")?;
+    if argument.kind() != "identifier" {
+        return None; // Not a simple identifier receiver (e.g., getStream().open())
+    }
+    let receiver_name = argument.utf8_text(src).ok()?;
+
+    // Look up receiver in local type map.
+    let stream_type = ctx.local_stream_types.get(receiver_name)?;
+
+    // Get arguments node.
+    let arguments = call_node.child_by_field_name("arguments")?;
+
+    // Extract path argument (arg0).
+    let arg0_payload = extract_arg0_string_literal(&arguments, src)?;
+
+    // Extract mode argument (arg1) if present — for fstream mode parsing.
+    let arg1_payload = extract_arg1_ios_mode(&arguments, src);
+
+    // Determine resolved symbol based on stream type and mode.
+    let resolved_symbol = match stream_type {
+        StreamType::Ifstream => stream_type.open_symbol().to_string(),
+        StreamType::Ofstream => stream_type.open_symbol().to_string(),
+        StreamType::Fstream => {
+            // Parse mode flags if present.
+            if let Some(ref mode) = arg1_payload {
+                if let CallArgPayload::StringLiteral { value } = mode {
+                    normalize_ios_mode_to_fstream_symbol(value)
+                } else {
+                    stream_type.open_symbol().to_string()
+                }
+            } else {
+                stream_type.open_symbol().to_string() // Default read_write
+            }
+        }
+    };
+
+    Some(ResolvedCallsite {
+        enclosing_symbol_node_uid: enclosing_symbol_node_uid.to_string(),
+        resolved_module: "std:fstream".to_string(),
+        resolved_symbol,
+        arg0_payload,
+        arg1_payload,
+        source_location: location_from_node(call_node),
+    })
+}
+
+/// CPP-SB-1: Try to extract stream declaration and track in local type map.
+/// If the declaration has a path argument, emit a ResolvedCallsite.
+fn try_extract_stream_declaration(
+    decl_node: &tree_sitter::Node,
+    src: &[u8],
+    enclosing_symbol_node_uid: &str,
+    ctx: &mut ExtractionCtx,
+) {
+    // Look for type specifier that matches stream types.
+    let type_text = extract_declaration_type(decl_node, src);
+    let stream_type = match StreamType::from_type_text(&type_text) {
+        Some(st) => st,
+        None => return, // Not a stream type.
+    };
+
+    // Find init_declarator(s) to get variable name and potential path argument.
+    let mut cursor = decl_node.walk();
+    for child in decl_node.children(&mut cursor) {
+        if child.kind() == "init_declarator" {
+            if let Some((var_name, path_arg, mode_arg)) =
+                extract_init_declarator_info(&child, src)
+            {
+                // Record in local type map (D3).
+                ctx.local_stream_types
+                    .insert(var_name.clone(), stream_type);
+
+                // If there's a path argument, emit ResolvedCallsite.
+                if let Some(path) = path_arg {
+                    let resolved_symbol = if let Some(ref mode) = mode_arg {
+                        if let CallArgPayload::StringLiteral { value } = mode {
+                            match stream_type {
+                                StreamType::Fstream => {
+                                    normalize_ios_mode_to_fstream_symbol(value)
+                                }
+                                _ => stream_type.constructor_symbol().to_string(),
+                            }
+                        } else {
+                            stream_type.constructor_symbol().to_string()
+                        }
+                    } else {
+                        stream_type.constructor_symbol().to_string()
+                    };
+
+                    ctx.resolved_callsites.push(ResolvedCallsite {
+                        enclosing_symbol_node_uid: enclosing_symbol_node_uid.to_string(),
+                        resolved_module: "std:fstream".to_string(),
+                        resolved_symbol,
+                        arg0_payload: path,
+                        arg1_payload: mode_arg,
+                        source_location: location_from_node(&child),
+                    });
+                }
+            }
+        }
+        // Also handle simple declarator without initializer (for type map tracking).
+        else if child.kind() == "identifier" {
+            let var_name = child.utf8_text(src).unwrap_or("").to_string();
+            if !var_name.is_empty() {
+                ctx.local_stream_types.insert(var_name, stream_type);
+            }
+        }
+    }
+}
+
+/// Extract the type specifier text from a declaration.
+fn extract_declaration_type(decl_node: &tree_sitter::Node, src: &[u8]) -> String {
+    let mut cursor = decl_node.walk();
+    for child in decl_node.children(&mut cursor) {
+        match child.kind() {
+            "qualified_identifier" | "scoped_identifier" | "type_identifier" => {
+                return child.utf8_text(src).unwrap_or("").to_string();
+            }
+            "template_type" => {
+                // e.g., std::basic_ifstream<char> — extract base type
+                if let Some(name) = child.child_by_field_name("name") {
+                    return name.utf8_text(src).unwrap_or("").to_string();
+                }
+            }
+            _ => {}
+        }
+    }
+    String::new()
+}
+
+/// Extract variable name and optional path/mode arguments from init_declarator.
+/// Returns (var_name, path_payload, mode_payload).
+fn extract_init_declarator_info(
+    init_decl: &tree_sitter::Node,
+    src: &[u8],
+) -> Option<(String, Option<CallArgPayload>, Option<CallArgPayload>)> {
+    let mut var_name = String::new();
+    let mut path_payload = None;
+    let mut mode_payload = None;
+
+    let mut cursor = init_decl.walk();
+    for child in init_decl.children(&mut cursor) {
+        match child.kind() {
+            "identifier" => {
+                var_name = child.utf8_text(src).unwrap_or("").to_string();
+            }
+            "argument_list" => {
+                // Constructor arguments: (path) or (path, mode)
+                path_payload = extract_arg0_string_literal(&child, src);
+                mode_payload = extract_arg1_ios_mode(&child, src);
+            }
+            "initializer_list" => {
+                // Brace initialization: {path} or {path, mode}
+                path_payload = extract_arg0_string_literal(&child, src);
+                mode_payload = extract_arg1_ios_mode(&child, src);
+            }
+            _ => {}
+        }
+    }
+
+    if var_name.is_empty() {
+        return None;
+    }
+
+    Some((var_name, path_payload, mode_payload))
+}
+
+/// Extract arg0 as a string literal CallArgPayload.
+fn extract_arg0_string_literal(
+    arguments: &tree_sitter::Node,
+    src: &[u8],
+) -> Option<CallArgPayload> {
+    let mut cursor = arguments.walk();
+    let mut arg_index = 0;
+
+    for child in arguments.children(&mut cursor) {
+        // Skip punctuation.
+        if matches!(child.kind(), "(" | ")" | "{" | "}" | "," | "comment") {
+            continue;
+        }
+
+        if arg_index == 0 {
+            if child.kind() == "string_literal" {
+                let text = child.utf8_text(src).ok()?;
+                let value = text.trim_matches('"').to_string();
+                return Some(CallArgPayload::StringLiteral { value });
+            }
+            // Not a string literal → dynamic path, skip.
+            return None;
+        }
+        arg_index += 1;
+    }
+    None
+}
+
+/// Extract arg1 for fopen/open — either string literal or identifier.
+fn extract_arg1_payload(arguments: &tree_sitter::Node, src: &[u8]) -> Option<CallArgPayload> {
+    let mut cursor = arguments.walk();
+    let mut arg_index = 0;
+
+    for child in arguments.children(&mut cursor) {
+        if matches!(child.kind(), "(" | ")" | "," | "comment") {
+            continue;
+        }
+
+        if arg_index == 1 {
+            if child.kind() == "string_literal" {
+                let text = child.utf8_text(src).ok()?;
+                let value = text.trim_matches('"').to_string();
+                return Some(CallArgPayload::StringLiteral { value });
+            } else if child.kind() == "identifier" {
+                // For open(), flags are identifiers like O_RDONLY.
+                let value = child.utf8_text(src).ok()?.to_string();
+                return Some(CallArgPayload::StringLiteral { value });
+            }
+            return None;
+        }
+        arg_index += 1;
+    }
+    None
+}
+
+/// Extract arg1 for std::ios mode flags.
+/// Captures the text of the mode expression for pattern matching.
+fn extract_arg1_ios_mode(arguments: &tree_sitter::Node, src: &[u8]) -> Option<CallArgPayload> {
+    let mut cursor = arguments.walk();
+    let mut arg_index = 0;
+
+    for child in arguments.children(&mut cursor) {
+        if matches!(child.kind(), "(" | ")" | "{" | "}" | "," | "comment") {
+            continue;
+        }
+
+        if arg_index == 1 {
+            // Capture the entire expression text for mode parsing.
+            let text = child.utf8_text(src).ok()?.to_string();
+            return Some(CallArgPayload::StringLiteral { value: text });
+        }
+        arg_index += 1;
+    }
+    None
+}
+
+/// Normalize fopen mode string to direction suffix.
+fn normalize_fopen_mode(mode: &str) -> &'static str {
+    let mode_normalized: String = mode.chars().filter(|c| *c != 'b').collect();
+
+    if mode_normalized.contains('+') {
+        "read_write"
+    } else if mode_normalized.starts_with('r') || mode_normalized.is_empty() {
+        "read"
+    } else if mode_normalized.starts_with('w')
+        || mode_normalized.starts_with('a')
+        || mode_normalized.starts_with('x')
+    {
+        "write"
+    } else {
+        "read"
+    }
+}
+
+/// Normalize open() flags identifier to direction suffix.
+fn normalize_open_flags(flags: &str) -> &'static str {
+    if flags.contains("O_RDONLY") {
+        "read"
+    } else if flags.contains("O_WRONLY") {
+        "write"
+    } else if flags.contains("O_RDWR") {
+        "read_write"
+    } else {
+        "read_write" // Unknown flags, conservative default.
+    }
+}
+
+/// Normalize std::ios mode flags to fstream symbol.
+fn normalize_ios_mode_to_fstream_symbol(mode_text: &str) -> String {
+    // Pattern matching on mode expression text.
+    // std::ios::in → read
+    // std::ios::out → write
+    // std::ios::in | std::ios::out → read_write
+    // std::ios::app, std::ios::trunc → write
+
+    let has_in = mode_text.contains("::in") || mode_text.contains("ios_base::in");
+    let has_out = mode_text.contains("::out")
+        || mode_text.contains("ios_base::out")
+        || mode_text.contains("::app")
+        || mode_text.contains("::trunc");
+
+    if has_in && has_out {
+        "fstream".to_string() // read_write
+    } else if has_in {
+        "fstream_read".to_string()
+    } else if has_out {
+        "fstream_write".to_string()
+    } else {
+        "fstream".to_string() // Default read_write
+    }
 }
 
 // ── Doc comment extraction ───────────────────────────────────────
@@ -1491,5 +1974,236 @@ mod tests {
         for m in methods {
             assert_eq!(m.qualified_name, Some("C::method".to_string()));
         }
+    }
+
+    // ── CPP-SB-1: ResolvedCallsite tests ──────────────────────────
+
+    #[test]
+    fn fopen_emits_resolved_callsite() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <cstdio>
+
+void read_config() {
+    FILE* f = fopen("/etc/config.txt", "r");
+    if (f) fclose(f);
+}
+"#;
+        let result = extract_ok(&ext, source, "src/reader.cpp");
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let cs = &result.resolved_callsites[0];
+        assert_eq!(cs.resolved_module, "libc:stdio");
+        assert_eq!(cs.resolved_symbol, "fopen_read");
+        assert_eq!(
+            cs.arg0_payload,
+            CallArgPayload::StringLiteral {
+                value: "/etc/config.txt".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn fopen_write_mode_emits_correct_symbol() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+void write_log() {
+    FILE* f = fopen("/var/log/app.log", "w");
+    if (f) fclose(f);
+}
+"#;
+        let result = extract_ok(&ext, source, "src/writer.cpp");
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        assert_eq!(result.resolved_callsites[0].resolved_symbol, "fopen_write");
+    }
+
+    #[test]
+    fn open_rdonly_emits_resolved_callsite() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <fcntl.h>
+
+void read_device() {
+    int fd = open("/dev/input0", O_RDONLY);
+    if (fd >= 0) close(fd);
+}
+"#;
+        let result = extract_ok(&ext, source, "src/device.cpp");
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let cs = &result.resolved_callsites[0];
+        assert_eq!(cs.resolved_module, "libc:fcntl");
+        assert_eq!(cs.resolved_symbol, "open_read");
+    }
+
+    #[test]
+    fn ifstream_constructor_emits_resolved_callsite() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <fstream>
+
+void load_config() {
+    std::ifstream config("/etc/app.ini");
+}
+"#;
+        let result = extract_ok(&ext, source, "src/config.cpp");
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let cs = &result.resolved_callsites[0];
+        assert_eq!(cs.resolved_module, "std:fstream");
+        assert_eq!(cs.resolved_symbol, "ifstream");
+        assert_eq!(
+            cs.arg0_payload,
+            CallArgPayload::StringLiteral {
+                value: "/etc/app.ini".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn ofstream_constructor_emits_resolved_callsite() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <fstream>
+
+void save_data() {
+    std::ofstream output("/var/data/output.txt");
+}
+"#;
+        let result = extract_ok(&ext, source, "src/output.cpp");
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let cs = &result.resolved_callsites[0];
+        assert_eq!(cs.resolved_module, "std:fstream");
+        assert_eq!(cs.resolved_symbol, "ofstream");
+    }
+
+    #[test]
+    fn fstream_with_mode_emits_resolved_callsite() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <fstream>
+
+void read_binary() {
+    std::fstream data("/data/file.bin", std::ios::in);
+}
+"#;
+        let result = extract_ok(&ext, source, "src/binary.cpp");
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let cs = &result.resolved_callsites[0];
+        assert_eq!(cs.resolved_module, "std:fstream");
+        assert_eq!(cs.resolved_symbol, "fstream_read");
+    }
+
+    #[test]
+    fn ifstream_open_with_local_type_map() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <fstream>
+
+void load() {
+    std::ifstream file;
+    file.open("/etc/settings.conf");
+}
+"#;
+        let result = extract_ok(&ext, source, "src/settings.cpp");
+
+        // Should have one callsite from .open() (declaration without path doesn't emit)
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let cs = &result.resolved_callsites[0];
+        assert_eq!(cs.resolved_module, "std:fstream");
+        assert_eq!(cs.resolved_symbol, "ifstream_open");
+        assert_eq!(
+            cs.arg0_payload,
+            CallArgPayload::StringLiteral {
+                value: "/etc/settings.conf".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn ofstream_open_with_local_type_map() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <fstream>
+
+void save() {
+    std::ofstream out;
+    out.open("/var/log/output.log");
+}
+"#;
+        let result = extract_ok(&ext, source, "src/log.cpp");
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let cs = &result.resolved_callsites[0];
+        assert_eq!(cs.resolved_symbol, "ofstream_open");
+    }
+
+    #[test]
+    fn dynamic_path_produces_no_callsite() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+void read_file(const char* path) {
+    FILE* f = fopen(path, "r");
+    if (f) fclose(f);
+}
+"#;
+        let result = extract_ok(&ext, source, "src/dynamic.cpp");
+
+        assert!(
+            result.resolved_callsites.is_empty(),
+            "dynamic path should not produce ResolvedCallsite"
+        );
+    }
+
+    #[test]
+    fn cout_produces_no_state_boundary() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <iostream>
+
+void log_message() {
+    std::cout << "Hello, world!" << std::endl;
+}
+"#;
+        let result = extract_ok(&ext, source, "src/logger.cpp");
+
+        assert!(
+            result.resolved_callsites.is_empty(),
+            "cout should not produce state-boundary callsite"
+        );
+    }
+
+    #[test]
+    fn sqlite3_open_emits_resolved_callsite() {
+        let mut ext = CppExtractor::new();
+        ext.initialize().unwrap();
+        let source = r#"
+#include <sqlite3.h>
+
+int db_open() {
+    sqlite3* db;
+    int rc = sqlite3_open("app.db", &db);
+    return rc;
+}
+"#;
+        let result = extract_ok(&ext, source, "src/database.cpp");
+
+        assert_eq!(result.resolved_callsites.len(), 1);
+        let cs = &result.resolved_callsites[0];
+        assert_eq!(cs.resolved_module, "sqlite3");
+        assert_eq!(cs.resolved_symbol, "sqlite3_open");
     }
 }

@@ -407,3 +407,170 @@ resource_kind = "db"
 driver        = "sqlite3"
 direction     = "read_write"
 basis         = "stdlib_api"
+
+# ── C++ duplicates of C APIs ───────────────────────────────────────
+#
+# CPP-SB-1: Same APIs as C-SB-1, but language = "cpp" for C++ files.
+# Decision D1: explicit duplication, no implicit fallback. This keeps
+# Language::C and Language::Cpp truthful and auditable.
+
+[[binding]]
+language      = "cpp"
+module        = "libc:stdio"
+symbol_path   = "fopen_read"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "libc:stdio"
+symbol_path   = "fopen_write"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "libc:stdio"
+symbol_path   = "fopen_read_write"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "read_write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "libc:fcntl"
+symbol_path   = "open_read"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "libc:fcntl"
+symbol_path   = "open_write"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "libc:fcntl"
+symbol_path   = "open_read_write"
+resource_kind = "fs"
+driver        = "libc"
+direction     = "read_write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "sqlite3"
+symbol_path   = "sqlite3_open"
+resource_kind = "db"
+driver        = "sqlite3"
+direction     = "read_write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "sqlite3"
+symbol_path   = "sqlite3_open_v2"
+resource_kind = "db"
+driver        = "sqlite3"
+direction     = "read_write"
+basis         = "stdlib_api"
+
+# ── C++ standard library streams ───────────────────────────────────
+#
+# CPP-SB-1: std::fstream family. Stream type determines direction
+# unless explicit mode flags are present.
+#
+# Constructor symbols:
+#   - ifstream → read (std::ifstream f("path"))
+#   - ofstream → write (std::ofstream f("path"))
+#   - fstream → read_write default, or mode-specific
+#
+# Open method symbols (via D3 intra-function local type map):
+#   - ifstream_open → read (file.open("path") where file is ifstream)
+#   - ofstream_open → write
+#   - fstream_open → read_write default
+#   - fstream_read → read (explicit std::ios::in)
+#   - fstream_write → write (explicit std::ios::out/app/trunc)
+
+[[binding]]
+language      = "cpp"
+module        = "std:fstream"
+symbol_path   = "ifstream"
+resource_kind = "fs"
+driver        = "libstdc++"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "std:fstream"
+symbol_path   = "ifstream_open"
+resource_kind = "fs"
+driver        = "libstdc++"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "std:fstream"
+symbol_path   = "ofstream"
+resource_kind = "fs"
+driver        = "libstdc++"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "std:fstream"
+symbol_path   = "ofstream_open"
+resource_kind = "fs"
+driver        = "libstdc++"
+direction     = "write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "std:fstream"
+symbol_path   = "fstream"
+resource_kind = "fs"
+driver        = "libstdc++"
+direction     = "read_write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "std:fstream"
+symbol_path   = "fstream_open"
+resource_kind = "fs"
+driver        = "libstdc++"
+direction     = "read_write"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "std:fstream"
+symbol_path   = "fstream_read"
+resource_kind = "fs"
+driver        = "libstdc++"
+direction     = "read"
+basis         = "stdlib_api"
+
+[[binding]]
+language      = "cpp"
+module        = "std:fstream"
+symbol_path   = "fstream_write"
+resource_kind = "fs"
+driver        = "libstdc++"
+direction     = "write"
+basis         = "stdlib_api"
