@@ -57,6 +57,29 @@ jobs:
           echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
           echo "Building version: ${VERSION}"
 
+      - name: Validate version consistency
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+
+          # Extract workspace version from [workspace.package] section
+          MANIFEST_VERSION=$(grep -A10 '^\[workspace\.package\]' rust/Cargo.toml | grep '^version = "' | sed 's/version = "\(.*\)"/\1/')
+
+          echo "Tag version: ${TAG_VERSION}"
+          echo "Manifest version: ${MANIFEST_VERSION}"
+
+          if [ "$TAG_VERSION" != "$MANIFEST_VERSION" ]; then
+            echo ""
+            echo "ERROR: Tag version does not match manifest version"
+            echo "  Tag:      v${TAG_VERSION}"
+            echo "  Manifest: ${MANIFEST_VERSION}"
+            echo ""
+            echo "To fix: run ./scripts/cut_release_{patch,minor,major}.sh"
+            echo "This ensures the workspace version matches the tag."
+            exit 1
+          fi
+
+          echo "Version consistency validated: ${TAG_VERSION}"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
@@ -88,6 +111,39 @@ jobs:
           cargo build --release --target ${{ matrix.target }} -p repo-graph-rgr
           # Build daemon binary from rmapd crate (separate crate per RMAPD-1)
           cargo build --release --target ${{ matrix.target }} -p rmapd
+
+      - name: Validate binary versions
+        run: |
+          TAG_VERSION="${{ steps.version.outputs.VERSION }}"
+
+          # Extract version from binary --version output (format: "rmap X.Y.Z")
+          RMAP_VERSION=$(./rust/target/${{ matrix.target }}/release/rmap --version | awk '{print $2}')
+          RMAPD_VERSION=$(./rust/target/${{ matrix.target }}/release/rmapd --version | awk '{print $2}')
+
+          echo "Tag version:   ${TAG_VERSION}"
+          echo "rmap version:  ${RMAP_VERSION}"
+          echo "rmapd version: ${RMAPD_VERSION}"
+
+          FAILED=0
+
+          if [ "$RMAP_VERSION" != "$TAG_VERSION" ]; then
+            echo "ERROR: rmap --version ($RMAP_VERSION) does not match tag ($TAG_VERSION)"
+            FAILED=1
+          fi
+
+          if [ "$RMAPD_VERSION" != "$TAG_VERSION" ]; then
+            echo "ERROR: rmapd --version ($RMAPD_VERSION) does not match tag ($TAG_VERSION)"
+            FAILED=1
+          fi
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "Binary version mismatch detected."
+            echo "This indicates workspace version inheritance is not working correctly."
+            exit 1
+          fi
+
+          echo "Binary versions validated: ${TAG_VERSION}"
 
       - name: Prepare artifact directory
         run: |

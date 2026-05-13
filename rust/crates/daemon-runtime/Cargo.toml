@@ -15,13 +15,13 @@
 #   - Neither binary owns the daemon logic
 
 [package]
-name         = "repo-graph-daemon-runtime"
-version      = "0.1.0"
-edition      = "2021"
-rust-version = "1.93.0"
-license      = "MIT"
-description  = "Daemon service runtime for repo-graph"
-publish      = false
+name                = "repo-graph-daemon-runtime"
+version.workspace   = true
+edition.workspace   = true
+rust-version.workspace = true
+license.workspace   = true
+description         = "Daemon service runtime for repo-graph"
+publish             = false
 
 [dependencies]
 # Transport and policy layers

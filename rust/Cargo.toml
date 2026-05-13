@@ -59,6 +59,23 @@ members = [
     "crates/tsserver-resolver",
 ]
 
+# ── Workspace Package Metadata ─────────────────────────────────────
+#
+# Canonical version for all release-bearing crates. Version changes
+# happen only through release-cut scripts, never during builds.
+#
+# Release crates (rgr, rmapd, daemon-runtime) use version.workspace = true.
+# Internal crates may also inherit for consistency.
+#
+# See: docs/slices/rel-support-1-version-authority.md
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.93.0"
+license = "MIT"
+repository = "https://github.com/andreirx/repo-graph"
+
 # Shared profile settings: optimize for correctness and clear errors
 # during the prototype-then-port phase, not raw speed.
 [profile.dev]

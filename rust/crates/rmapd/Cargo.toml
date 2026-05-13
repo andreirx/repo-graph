@@ -14,13 +14,13 @@
 # This binary does NOT depend on repo-graph-rgr (the CLI crate).
 
 [package]
-name         = "rmapd"
-version      = "0.1.0"
-edition      = "2021"
-rust-version = "1.93.0"
-license      = "MIT"
-description  = "repo-graph daemon binary — NDJSON service over stdin/stdout"
-publish      = false
+name                = "rmapd"
+version.workspace   = true
+edition.workspace   = true
+rust-version.workspace = true
+license.workspace   = true
+description         = "repo-graph daemon binary — NDJSON service over stdin/stdout"
+publish             = false
 
 [[bin]]
 name = "rmapd"

@@ -2,23 +2,46 @@
 
 ## Current Priority
 
-**REL-1: Release Pipeline** — ACTIVE (unblocked by RMAPD-1)
+**REL-SUPPORT-1: Version Authority** — ACTIVE
 
-Slice doc: `docs/slices/rel-1-release-pipeline.md`
+Slice doc: `docs/slices/rel-support-1-version-authority.md`
 
 ### Context
 
-REL-1 established GitHub Actions workflows and installer script for cross-platform
-binary distribution. Was IMPLEMENTED DRAFT, blocked on rmapd. Now unblocked.
+REL-1 completed with v0.1.0 release. The pipeline works, but version authority
+was not enforced. REL-SUPPORT-1 hardens the release process with:
+
+- Workspace-level canonical version (`[workspace.package] version`)
+- Crate version inheritance (`version.workspace = true`)
+- Bump scripts (`scripts/bump_version_{patch,minor,major}.sh`)
+- Cut-release scripts (`scripts/cut_release_{patch,minor,major}.sh`)
+- CI validation (tag == manifest == binary)
+
+### Implementation Status
+
+- [x] Workspace version setup in `rust/Cargo.toml`
+- [x] Release crates inherit version (rgr, rmapd, daemon-runtime)
+- [x] Bump scripts created and tested
+- [x] Cut-release scripts created
+- [x] Release workflow validation steps added
 
 ### Remaining Verification
 
-- Tag a test release to validate full pipeline
-- Verify CI workflow passes with both binaries
+- First use of cut-release scripts for next release (v0.1.1 or v0.2.0)
+- CI workflow validation step passes on tag push
 
 ---
 
 ## Recently Implemented
+
+**REL-1: Release Pipeline** — IMPLEMENTED (2026-05-13)
+
+Slice doc: `docs/slices/rel-1-release-pipeline.md`
+
+v0.1.0 released. Pipeline operational. Version authority enforcement now in
+REL-SUPPORT-1.
+
+---
 
 **RMAPD-1: Daemon Binary Target** — IMPLEMENTED (2026-05-12)
 

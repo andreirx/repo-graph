@@ -141,13 +141,13 @@
 # No formatting-heavy UX.
 
 [package]
-name         = "repo-graph-rgr"
-version      = "0.1.0"
-edition      = "2021"
-rust-version = "1.93.0"
-license      = "MIT"
-description  = "Minimal CLI (rmap) for repo-graph indexing, trust, and graph queries"
-publish      = false
+name                = "repo-graph-rgr"
+version.workspace   = true
+edition.workspace   = true
+rust-version.workspace = true
+license.workspace   = true
+description         = "Minimal CLI (rmap) for repo-graph indexing, trust, and graph queries"
+publish             = false
 
 [[bin]]
 name = "rmap"

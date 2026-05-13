@@ -1,0 +1,66 @@
+#!/bin/bash
+# ── cut_release_minor.sh ───────────────────────────────────────────
+#
+# Full minor release workflow:
+# 1. Bump minor version (0.1.5 → 0.2.0)
+# 2. Validate workspace (cargo check, clippy)
+# 3. Commit version bump
+# 4. Create annotated tag
+# 5. Print push instructions
+#
+# Usage: ./scripts/cut_release_minor.sh
+#
+# Does NOT push automatically. Review the commit and tag before pushing.
+#
+# See: docs/slices/rel-support-1-version-authority.md
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CARGO_TOML="$REPO_ROOT/rust/Cargo.toml"
+
+# Check for uncommitted changes
+if ! git -C "$REPO_ROOT" diff --quiet || ! git -C "$REPO_ROOT" diff --cached --quiet; then
+    echo "ERROR: Working directory has uncommitted changes."
+    echo "Commit or stash changes before cutting a release."
+    exit 1
+fi
+
+# Bump version
+echo "=== Bumping minor version ==="
+"$SCRIPT_DIR/bump_version_minor.sh"
+
+# Get new version
+VERSION=$(grep -A10 '^\[workspace\.package\]' "$CARGO_TOML" | grep '^version = "' | sed 's/version = "\(.*\)"/\1/')
+TAG="v${VERSION}"
+
+echo ""
+echo "=== Validating workspace ==="
+cd "$REPO_ROOT/rust"
+cargo check --workspace
+cargo clippy --all-targets -- -D warnings
+cd "$REPO_ROOT"
+
+echo ""
+echo "=== Creating release commit ==="
+git add "$CARGO_TOML"
+git commit -m "release: ${TAG}"
+
+echo ""
+echo "=== Creating annotated tag ==="
+git tag -a "${TAG}" -m "Release ${TAG}"
+
+echo ""
+echo "============================================================"
+echo "Release prepared: ${TAG}"
+echo "============================================================"
+echo ""
+echo "To publish:"
+echo "  git push origin main"
+echo "  git push origin ${TAG}"
+echo ""
+echo "To abort (before pushing):"
+echo "  git tag -d ${TAG}"
+echo "  git reset --hard HEAD~1"
+echo ""
