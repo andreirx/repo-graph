@@ -38,8 +38,19 @@ TAG="v${VERSION}"
 echo ""
 echo "=== Validating workspace ==="
 cd "$REPO_ROOT/rust"
+
+echo "--- cargo fmt --check ---"
+cargo fmt --all -- --check
+
+echo "--- cargo check --workspace ---"
 cargo check --workspace
+
+echo "--- cargo clippy ---"
 cargo clippy --all-targets -- -D warnings
+
+echo "--- cargo test (skip parity) ---"
+cargo test --workspace -- --skip parity
+
 cd "$REPO_ROOT"
 
 echo ""
