@@ -1,8 +1,9 @@
 # REL-1: Release Pipeline
 
-Status: IMPLEMENTED DRAFT
+Status: IMPLEMENTED (pipeline operational; version authority enforcement in REL-SUPPORT-1)
 Depends: DIST-1
 Track: Distribution / Install / Host Integration
+Follow-on: REL-SUPPORT-1 (version authority enforcement)
 
 ## Objective
 
@@ -86,11 +87,8 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release (without v prefix)'
-        required: true
+  # Manual dispatch removed: releases must come from tags to ensure version integrity.
+  # To release: create and push a tag (e.g., git tag v0.1.0 && git push origin v0.1.0)
 ```
 
 ### Build Matrix
@@ -125,9 +123,10 @@ steps:
   - name: Build release binaries
     run: |
       cd rust
-      # Build CLI binary (rmap) and daemon binary (rmapd)
-      # Note: rmapd binary target must exist in repo-graph-rgr crate
+      # Build CLI binary from repo-graph-rgr crate
       cargo build --release --target ${{ matrix.target }} -p repo-graph-rgr
+      # Build daemon binary from rmapd crate (separate crate per RMAPD-1)
+      cargo build --release --target ${{ matrix.target }} -p rmapd
   
   - name: Package artifacts
     run: |
@@ -169,14 +168,73 @@ steps:
 
 ## Version Management
 
-### Version Source
+### Version Authority
 
-Version is derived from `rust/Cargo.toml` workspace version.
+> **Note:** This section defines the target contract. Enforcement is implemented
+> by REL-SUPPORT-1. Until that slice is complete, crate versions may not inherit
+> from workspace and CI validation is not enforced.
+
+The **workspace manifest** is the canonical source of version truth.
 
 ```toml
+# rust/Cargo.toml
 [workspace.package]
 version = "0.1.0"
 ```
+
+All release-bearing crates inherit this version:
+
+```toml
+# rust/crates/rgr/Cargo.toml
+# rust/crates/rmapd/Cargo.toml
+# rust/crates/daemon-runtime/Cargo.toml
+[package]
+version.workspace = true
+```
+
+**Git tag must equal manifest version.** The release workflow validates this.
+
+### Version Bump Policy
+
+| Bump Type | When | Initiator |
+|-----------|------|-----------|
+| Major | Breaking changes, major features | Human decision |
+| Minor | New features, non-breaking | Human decision |
+| Patch | Bug fixes, security patches | Human decision |
+
+**Builds do not mutate version.** A build must be:
+- Reproducible
+- Side-effect free
+- Non-mutating
+
+Version changes happen only through intentional release-cut scripts.
+
+### Release-Cut Workflow
+
+1. Human runs `cut_release_{patch,minor,major}`
+2. Script bumps workspace version
+3. Script verifies crate inheritance
+4. Script runs validation gates
+5. Script commits version bump
+6. Script creates tag `vX.Y.Z`
+7. Human pushes commit + tag
+8. Release workflow validates and publishes
+
+See REL-SUPPORT-1 for implementation of bump and cut scripts.
+
+### Release Consistency Checks
+
+The release workflow **must fail** if any of these do not match:
+
+| Source | Must Equal |
+|--------|------------|
+| Git tag | `v{workspace.package.version}` |
+| `rmap --version` | `{workspace.package.version}` |
+| `rmapd --version` | `{workspace.package.version}` |
+| Archive filename | `rmap-{workspace.package.version}-...` |
+| Release title | `repo-graph v{workspace.package.version}` |
+
+This ensures the release is internally consistent and traceable.
 
 ### Tag Format
 
@@ -200,10 +258,14 @@ v0.1.0          → Full release, promoted to latest
 ### Script Location
 
 ```
-https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/install.sh
+https://raw.githubusercontent.com/andreirx/repo-graph/main/scripts/install.sh
 ```
 
-Replace `{OWNER}` with the actual GitHub organization or username when the repo is public.
+### Usage
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/andreirx/repo-graph/main/scripts/install.sh | bash
+```
 
 ### Script Behavior
 
@@ -232,12 +294,12 @@ esac
 # Get latest version or use specified
 VERSION="${RMAP_VERSION:-latest}"
 if [ "$VERSION" = "latest" ]; then
-  VERSION=$(curl -fsSL https://api.github.com/repos/{OWNER}/repo-graph/releases/latest | grep tag_name | cut -d'"' -f4 | sed 's/^v//')
+  VERSION=$(curl -fsSL https://api.github.com/repos/andreirx/repo-graph/releases/latest | grep tag_name | cut -d'"' -f4 | sed 's/^v//')
 fi
 
 # Download and verify
 ARTIFACT="rmap-${VERSION}-${PLATFORM}-${ARCH}.tar.gz"
-DOWNLOAD_URL="https://github.com/{OWNER}/repo-graph/releases/download/v${VERSION}/${ARTIFACT}"
+DOWNLOAD_URL="https://github.com/andreirx/repo-graph/releases/download/v${VERSION}/${ARTIFACT}"
 
 echo "Downloading ${ARTIFACT}..."
 curl -fsSL -o "${ARTIFACT}" "${DOWNLOAD_URL}"

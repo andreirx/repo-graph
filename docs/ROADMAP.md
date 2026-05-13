@@ -61,7 +61,9 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 |-------|-------|--------|
 | **DIST-1** | Distribution and install contract (binary-first, manifest model, safety rules) | PLANNED |
 | **HOST-1** | Host integration contract (Claude/Codex hooks, Cursor MCP, detection model) | PLANNED |
-| **REL-1** | Release pipeline (GitHub Actions, artifact matrix, checksums) | **ACTIVE** |
+| **REL-1** | Release pipeline (GitHub Actions, artifact matrix, checksums) | IMPLEMENTED |
+| **REL-SUPPORT-1** | Version authority (workspace version, bump/cut scripts, CI validation) | **ACTIVE** |
+| **RGISTR-1** | rgistr binary packaging (Node SEA, same archive as rmap/rmapd) | PLANNED |
 | **RMAPD-1** | Daemon binary target (`rmapd`) + daemon-runtime crate | IMPLEMENTED |
 | **HOOK-1** | `rmap hook` CLI surface (session-start, prompt-submit, post-edit, pre-compact, stop) | PLANNED |
 | **MAC-1** | macOS installer + daemon service (launchd, paths, health checks) | PLANNED |
@@ -75,27 +77,29 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 
 ### Current Priority
 
-**REL-1** is now active (unblocked by RMAPD-1).
+**REL-SUPPORT-1** is now active.
 
-RMAPD-1 completed: created `daemon-runtime` crate and `rmapd` binary with proper
-architectural boundaries. CI and release workflows updated to build both binaries.
-
-Remaining REL-1 verification:
-- Tag a test release to validate full pipeline
-- Verify CI workflow passes with both binaries
+REL-1 completed with v0.1.0 release. The release pipeline works, but version
+authority is not yet enforced. REL-SUPPORT-1 hardens the release process:
+- Workspace-level canonical version
+- Crate version inheritance
+- Bump and cut-release scripts
+- CI validation (tag == manifest == binary)
 
 ### Execution Order
 
 1. DIST-1 — contract before implementation
 2. HOST-1 — host integration rules before host-specific work
-3. **REL-1 — release artifacts and verification (ACTIVE)**
-4. RMAPD-1 — daemon binary target (IMPLEMENTED)
-5. HOOK-1 — `rmap hook` commands before host shims use them
-6. MAC-1 — macOS as first complete vertical slice
-7. CLAUDE-1 — Claude Code integration on macOS
-8. CODEX-1 — Codex integration on macOS
-9. LINUX-1 — Linux reuses core policy, different service adapter
-10. CURSOR-1 — different integration model, separate from hook lane
+3. REL-1 — release artifacts and verification (IMPLEMENTED)
+4. **REL-SUPPORT-1 — version authority enforcement (ACTIVE)**
+5. RGISTR-1 — rgistr binary packaging (PLANNED, after REL-SUPPORT-1)
+6. RMAPD-1 — daemon binary target (IMPLEMENTED)
+7. HOOK-1 — `rmap hook` commands before host shims use them
+8. MAC-1 — macOS as first complete vertical slice
+9. CLAUDE-1 — Claude Code integration on macOS
+10. CODEX-1 — Codex integration on macOS
+11. LINUX-1 — Linux reuses core policy, different service adapter
+12. CURSOR-1 — different integration model, separate from hook lane
 
 ### Artifact Matrix (REL-1)
 
