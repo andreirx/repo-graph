@@ -96,8 +96,8 @@ impl SessionState {
             return Ok(None);
         }
 
-        let content = fs::read_to_string(&path)
-            .map_err(|e| format!("failed to read session file: {}", e))?;
+        let content =
+            fs::read_to_string(&path).map_err(|e| format!("failed to read session file: {}", e))?;
 
         let state: Self = serde_json::from_str(&content)
             .map_err(|e| format!("failed to parse session file: {}", e))?;
@@ -117,8 +117,7 @@ impl SessionState {
         let content = serde_json::to_string_pretty(self)
             .map_err(|e| format!("failed to serialize session state: {}", e))?;
 
-        fs::write(&path, content)
-            .map_err(|e| format!("failed to write session file: {}", e))?;
+        fs::write(&path, content).map_err(|e| format!("failed to write session file: {}", e))?;
 
         Ok(path)
     }

@@ -1,12 +1,30 @@
 # MAC-1: macOS Installer and Daemon Service
 
 Status: PLANNED
-Depends: DIST-1, REL-1
+Depends: DIST-1, REL-1, HOOK-1 (runtime)
 Track: Distribution / Install / Host Integration
 
 **Execution order note:** Runs after HOOK-1 in rollout sequence, but HOOK-1 is not
 a build dependency. MAC-1 implements DIST-1 contract; HOOK-1 provides commands that
 host integrations call.
+
+## Path Authority
+
+**Contract:** DIST-1 D3 defines the platform-native directory layout.
+
+**Runtime reference:** `rust/crates/rgr/src/cli/paths.rs` is the authoritative
+implementation for CLI/runtime path resolution.
+
+**Installer/service conformance:** The installer (`scripts/install.sh`) and
+launchd service template must conform to the same path contract as `cli/paths.rs`.
+Path drift between installer, runtime, and service is a product bug.
+
+| Path | Source |
+|------|--------|
+| Config/data | `paths::config_dir()` / `paths::data_dir()` |
+| Logs | `paths::logs_dir()` |
+| Sessions | `paths::sessions_dir()` |
+| Databases | `paths::databases_dir()` |
 
 ## Objective
 
@@ -23,63 +41,79 @@ the daemon as a launchd user service, and provides host integration.
 
 ## Directory Layout (Native macOS Paths)
 
-Per DIST-1 D3, use native macOS paths (not XDG).
+Per DIST-1 D3, use native macOS paths (not XDG). Must match `cli/paths.rs`.
 
 ```
 ~/.local/bin/
   rmap                              # CLI binary
   rmapd                             # Daemon binary
+  rgistr                            # Policy hints binary
 
 ~/Library/Application Support/repo-graph/
-  config.toml                       # User configuration
-  hooks.toml                        # Hook configuration
-  install-manifest.json             # Installation record
+  hooks.toml                        # Hook configuration (IMPLEMENTED - HOOK-1)
+  install-manifest.json             # Installation record (IMPLEMENTED - REL-1)
   databases/                        # Default DB storage
-  sessions/                         # Session state files
+  sessions/                         # Session state files (IMPLEMENTED - HOOK-1)
 
 ~/Library/Logs/repo-graph/
   daemon.log                        # Daemon stdout/stderr
   hooks.log                         # Hook execution log
 
 ~/Library/LaunchAgents/
-  com.repo-graph.rmapd.plist  # launchd user agent
+  com.repo-graph.rmapd.plist        # launchd user agent
 ```
+
+**Configuration surface status:**
+
+| File | Status | Implemented By |
+|------|--------|----------------|
+| `hooks.toml` | IMPLEMENTED | HOOK-1 |
+| `install-manifest.json` | IMPLEMENTED | REL-1 |
+| `config.toml` (daemon config) | NOT IMPLEMENTED | Future slice |
+
+Note: Daemon configuration (`config.toml`) is deferred. The daemon currently has
+no configurable parameters beyond environment variables.
 
 ## Installation Script
 
-### Entry Point
+### Architecture
+
+**Single entry point:** `scripts/install.sh` (unified cross-platform installer)
+
+**Platform-specific logic:** `scripts/lib/macos.sh` (sourced after platform detection)
+
+The unified installer already exists (REL-1) and handles:
+- Platform/arch detection
+- Version resolution
+- Binary download and verification
+- PATH setup
+- Manifest writing
+
+MAC-1 adds macOS-specific service logic to `scripts/lib/macos.sh`:
+- launchd service installation
+- Daemon health verification
+- Host integration patching
+
+### Integration Point
+
+After platform detection in `install.sh`:
 
 ```bash
-#!/bin/bash
-# install-macos.sh
-set -euo pipefail
+# Source platform-specific module
+if [[ "${PLATFORM}" == "darwin" ]]; then
+    source "${SCRIPT_DIR}/lib/macos.sh"
+fi
+```
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/lib/common.sh"
-source "${SCRIPT_DIR}/lib/macos.sh"
+The unified installer calls platform functions when `BINARY_ONLY != true`:
 
-main() {
-    check_macos
-    check_arch
-    parse_args "$@"
-    
-    if [[ "${BINARY_ONLY:-false}" == "true" ]]; then
-        install_binaries
-    else
-        install_binaries
-        create_directories
-        install_launchd_service
-        start_daemon
-        verify_daemon_health
-        detect_hosts
-        offer_integrations
-    fi
-    
-    write_manifest
-    print_success
-}
-
-main "$@"
+```bash
+if [[ "${BINARY_ONLY}" != "true" ]]; then
+    create_directories
+    setup_daemon_service      # calls macos.sh functions on Darwin
+    detect_hosts
+    offer_integrations
+fi
 ```
 
 ### Binary Installation
@@ -128,6 +162,10 @@ create_directories() {
 
 ### Plist Template
 
+Note: `--config` argument is omitted. Daemon config (`config.toml`) is not yet
+implemented. The daemon currently accepts no configuration file; `rmapd --config`
+is reserved but ignored.
+
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -139,8 +177,6 @@ create_directories() {
     <key>ProgramArguments</key>
     <array>
         <string>${HOME}/.local/bin/rmapd</string>
-        <string>--config</string>
-        <string>${HOME}/Library/Application Support/repo-graph/config.toml</string>
     </array>
     
     <key>RunAtLoad</key>
@@ -485,12 +521,17 @@ Recent logs:
 
 ## Deliverables
 
-1. `scripts/install-macos.sh`
-2. `scripts/lib/macos.sh` (macOS-specific functions)
-3. `scripts/templates/com.repo-graph.rmapd.plist`
-4. `rmap uninstall` command (macOS path)
-5. `rmap doctor` command (macOS path)
-6. Installation documentation
+1. `scripts/lib/macos.sh` (macOS-specific functions, sourced by unified installer)
+2. `scripts/templates/com.repo-graph.rmapd.plist` (launchd service template)
+3. Updates to `scripts/install.sh` (source macos.sh, call service functions)
+4. `rmap uninstall` command — CLI entrypoint + macOS platform adapter
+5. `rmap doctor` command — CLI entrypoint + macOS platform adapter
+6. `rust/crates/rgr/src/platform/macos.rs` — platform adapter module
+7. Installation documentation updates
+
+**Architecture note:** `rmap uninstall` and `rmap doctor` are CLI entrypoints backed
+by platform adapter modules. The adapter isolates launchd operations from generic
+command logic. Implementation follows manifest-driven behavior per DIST-1 D6.
 
 ## Success Criteria
 

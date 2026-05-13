@@ -37,7 +37,13 @@ pub struct CheckpointInfo {
 impl HumanReadable for HookResult<PreCompactOutput> {
     fn print_human(&self) {
         println!("pre-compact checkpoint");
-        println!("  Timestamp: {}", self.data.checkpoint.timestamp.format("%Y-%m-%d %H:%M:%S UTC"));
+        println!(
+            "  Timestamp: {}",
+            self.data
+                .checkpoint
+                .timestamp
+                .format("%Y-%m-%d %H:%M:%S UTC")
+        );
 
         if let Some(ref db) = self.data.checkpoint.db_path {
             println!("  Database: {}", db);

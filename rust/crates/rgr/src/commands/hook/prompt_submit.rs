@@ -187,7 +187,12 @@ fn gather_context(
         trust_snapshot = "no database specified".to_string();
     }
 
-    (trust_snapshot, relevant_modules, relevant_boundaries, active_slice)
+    (
+        trust_snapshot,
+        relevant_modules,
+        relevant_boundaries,
+        active_slice,
+    )
 }
 
 /// Extract active slice name from CURRENT_SLICE.md content.

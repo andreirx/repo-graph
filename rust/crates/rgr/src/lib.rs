@@ -19,3 +19,4 @@
 pub mod cli;
 pub mod commands;
 pub mod coverage;
+pub mod platform;

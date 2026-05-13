@@ -115,7 +115,9 @@ mod tests {
 
         let path = result.unwrap();
         #[cfg(target_os = "macos")]
-        assert!(path.to_string_lossy().contains("Application Support/repo-graph"));
+        assert!(path
+            .to_string_lossy()
+            .contains("Application Support/repo-graph"));
 
         #[cfg(not(target_os = "macos"))]
         assert!(path.to_string_lossy().contains(".config/rmap"));

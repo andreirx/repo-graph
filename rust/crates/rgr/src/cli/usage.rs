@@ -96,4 +96,8 @@ pub fn print_usage() {
     eprintln!("  rmap hook pre-compact [--from-env | --db <path> --repo <path>]");
     eprintln!("  rmap hook stop [--from-env | --db <path> --repo <path>]");
     eprintln!("  rmap hook status");
+    eprintln!();
+    eprintln!("Installation management (MAC-1):");
+    eprintln!("  rmap doctor    [--json]");
+    eprintln!("  rmap uninstall [--dry-run] [--force] [--remove-data]");
 }

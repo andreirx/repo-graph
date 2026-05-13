@@ -261,8 +261,7 @@ fn write_transcript(
     let content = serde_json::to_string_pretty(&transcript)
         .map_err(|e| format!("failed to serialize transcript: {}", e))?;
 
-    std::fs::write(path, content)
-        .map_err(|e| format!("failed to write transcript file: {}", e))?;
+    std::fs::write(path, content).map_err(|e| format!("failed to write transcript file: {}", e))?;
 
     Ok(())
 }

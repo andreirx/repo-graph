@@ -132,6 +132,34 @@ detect_platform() {
     info "Detected platform: ${PLATFORM}-${ARCH}"
 }
 
+# Source platform-specific module after platform detection.
+# Called from main() after detect_platform().
+source_platform_module() {
+    local lib_dir="${SCRIPT_DIR}/lib"
+
+    case "${PLATFORM}" in
+        darwin)
+            if [[ -f "${lib_dir}/macos.sh" ]]; then
+                source "${lib_dir}/macos.sh"
+                PLATFORM_MODULE_LOADED=true
+            else
+                PLATFORM_MODULE_LOADED=false
+            fi
+            ;;
+        linux)
+            if [[ -f "${lib_dir}/linux.sh" ]]; then
+                source "${lib_dir}/linux.sh"
+                PLATFORM_MODULE_LOADED=true
+            else
+                PLATFORM_MODULE_LOADED=false
+            fi
+            ;;
+        *)
+            PLATFORM_MODULE_LOADED=false
+            ;;
+    esac
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Toolchain Detection (informational only, not required for binary install)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -442,7 +470,7 @@ setup_path() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Daemon Service (stub - implementation in MAC-1/LINUX-1)
+# Daemon Service
 # ─────────────────────────────────────────────────────────────────────────────
 
 setup_daemon_service() {
@@ -452,16 +480,31 @@ setup_daemon_service() {
     fi
 
     info ""
-    info "Daemon service setup is available but not yet implemented."
-    info "The daemon can be run manually: rmap daemon"
-    info ""
-    info "Service setup will be available in a future release."
-    info "See: docs/slices/mac-1-macos-installer.md (macOS)"
-    info "     docs/slices/linux-1-linux-installer.md (Linux)"
 
-    # TODO: Implement in MAC-1 and LINUX-1
-    # - macOS: launchd user agent
-    # - Linux: systemd --user unit
+    # Dispatch to platform-specific module
+    case "${PLATFORM}" in
+        darwin)
+            if [[ "${PLATFORM_MODULE_LOADED}" == "true" ]] && declare -f setup_macos_daemon_service > /dev/null; then
+                setup_macos_daemon_service
+            else
+                info "macOS daemon service: platform module not loaded"
+                info "The daemon can be run manually: rmapd"
+            fi
+            ;;
+        linux)
+            if [[ "${PLATFORM_MODULE_LOADED}" == "true" ]] && declare -f setup_linux_daemon_service > /dev/null; then
+                setup_linux_daemon_service
+            else
+                info "Linux daemon service setup not yet implemented."
+                info "The daemon can be run manually: rmapd"
+                info "See: docs/slices/linux-1-linux-installer.md"
+            fi
+            ;;
+        *)
+            info "Daemon service not available for platform: ${PLATFORM}"
+            info "The daemon can be run manually: rmapd"
+            ;;
+    esac
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -518,6 +561,38 @@ write_manifest() {
     local installed_at
     installed_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
+    # Build service section based on platform (only if not binary-only)
+    local service_section=""
+    if [[ "${BINARY_ONLY}" != "true" ]]; then
+        case "${PLATFORM}" in
+            darwin)
+                # macOS: launchd service
+                # Path uses variables from lib/macos.sh
+                local plist_path="${MACOS_LAUNCHAGENTS_DIR}/${MACOS_PLIST_NAME}"
+                service_section=$(cat << SVCEOF
+  "service": {
+    "type": "launchd",
+    "path": "${plist_path}",
+    "status": "installed"
+  },
+SVCEOF
+)
+                ;;
+            linux)
+                # Linux: systemd service (LINUX-1 placeholder)
+                local unit_path="${HOME}/.config/systemd/user/rmapd.service"
+                service_section=$(cat << SVCEOF
+  "service": {
+    "type": "systemd",
+    "path": "${unit_path}",
+    "status": "installed"
+  },
+SVCEOF
+)
+                ;;
+        esac
+    fi
+
     cat > "${manifest_path}" << EOF
 {
   "schema_version": "1",
@@ -526,6 +601,7 @@ write_manifest() {
   "platform": "${PLATFORM}",
   "arch": "${ARCH}",
   "install_mode": "user",
+${service_section}
   "components": {
     "rmap": {
       "path": "${INSTALL_DIR}/rmap",
@@ -628,6 +704,7 @@ main() {
     parse_args "$@"
 
     detect_platform
+    source_platform_module
     detect_toolchains
     resolve_version
 

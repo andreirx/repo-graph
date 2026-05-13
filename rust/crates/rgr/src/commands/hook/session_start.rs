@@ -162,48 +162,49 @@ fn execute_session_start(ctx: &HookContext) -> (HookResult<SessionStartOutput>, 
     session.repo_path = ctx.repo_path.clone();
 
     // Try to find and open database
-    let (db_path_str, repo_name, trust_summary, orientation) =
-        if let Some(ref db_path) = ctx.db_path {
-            match try_open_db_and_gather_info(db_path, ctx.repo_path.as_deref()) {
-                Ok(info) => {
-                    // Record trust check
-                    session.record_trust_check(ValidationResult::Passed);
-                    info
-                }
-                Err(e) => {
-                    warnings.push(e);
-                    suggestions.push("Run `rmap index <repo> <db>` to create a database".to_string());
-                    (
-                        Some(db_path.display().to_string()),
-                        None,
-                        TrustSummary {
-                            level: "unknown".to_string(),
-                            caveats: vec!["database not accessible".to_string()],
-                        },
-                        OrientationSummary {
-                            modules: 0,
-                            boundaries: 0,
-                            recent_changes: 0,
-                        },
-                    )
-                }
+    let (db_path_str, repo_name, trust_summary, orientation) = if let Some(ref db_path) =
+        ctx.db_path
+    {
+        match try_open_db_and_gather_info(db_path, ctx.repo_path.as_deref()) {
+            Ok(info) => {
+                // Record trust check
+                session.record_trust_check(ValidationResult::Passed);
+                info
             }
-        } else {
-            suggestions.push("Provide --db <path> to specify database location".to_string());
-            (
-                None,
-                None,
-                TrustSummary {
-                    level: "unknown".to_string(),
-                    caveats: vec!["no database specified".to_string()],
-                },
-                OrientationSummary {
-                    modules: 0,
-                    boundaries: 0,
-                    recent_changes: 0,
-                },
-            )
-        };
+            Err(e) => {
+                warnings.push(e);
+                suggestions.push("Run `rmap index <repo> <db>` to create a database".to_string());
+                (
+                    Some(db_path.display().to_string()),
+                    None,
+                    TrustSummary {
+                        level: "unknown".to_string(),
+                        caveats: vec!["database not accessible".to_string()],
+                    },
+                    OrientationSummary {
+                        modules: 0,
+                        boundaries: 0,
+                        recent_changes: 0,
+                    },
+                )
+            }
+        }
+    } else {
+        suggestions.push("Provide --db <path> to specify database location".to_string());
+        (
+            None,
+            None,
+            TrustSummary {
+                level: "unknown".to_string(),
+                caveats: vec!["no database specified".to_string()],
+            },
+            OrientationSummary {
+                modules: 0,
+                boundaries: 0,
+                recent_changes: 0,
+            },
+        )
+    };
 
     // Check for CURRENT_SLICE.md
     let current_slice = if let Some(ref repo_path) = ctx.repo_path {
@@ -245,7 +246,15 @@ fn execute_session_start(ctx: &HookContext) -> (HookResult<SessionStartOutput>, 
 fn try_open_db_and_gather_info(
     db_path: &Path,
     _repo_path: Option<&Path>,
-) -> Result<(Option<String>, Option<String>, TrustSummary, OrientationSummary), String> {
+) -> Result<
+    (
+        Option<String>,
+        Option<String>,
+        TrustSummary,
+        OrientationSummary,
+    ),
+    String,
+> {
     let storage = open_storage(db_path)?;
 
     // Get first repo (simplified - in practice would use repo_path to resolve)

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  repo-graph daemon launchd user agent.
+
+  Installed to: ~/Library/LaunchAgents/com.repo-graph.rmapd.plist
+
+  Path contract: Must match rust/crates/rgr/src/cli/paths.rs
+  See: docs/slices/mac-1-macos-installer.md
+
+  Note: ${HOME} is expanded by the installer before installation.
+  The daemon binary path and log paths use the expanded value.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.repo-graph.rmapd</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>${HOME}/.local/bin/rmapd</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <!-- Restart on non-zero exit (crash recovery) -->
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>${HOME}/Library/Logs/repo-graph/daemon.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>${HOME}/Library/Logs/repo-graph/daemon.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>RMAP_LOG_LEVEL</key>
+        <string>info</string>
+    </dict>
+
+    <!-- Background process, not user-interactive -->
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <!-- Reduce I/O priority to avoid impacting user work -->
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <!-- Minimum seconds between restart attempts after crash -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>
