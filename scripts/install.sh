@@ -1,8 +1,8 @@
 #!/bin/bash
 # repo-graph installer
 #
-# Usage (when repo is public, replace {OWNER} with actual GitHub org/user):
-#   curl -fsSL https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/install.sh | bash
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/andreirx/repo-graph/main/scripts/install.sh | bash
 #
 # Options (via environment variables):
 #   RMAP_VERSION=0.1.0      # Install specific version (default: latest)
@@ -26,8 +26,8 @@ set -euo pipefail
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
-# GitHub repository (update {OWNER} when repo is public)
-REPO_OWNER="${RMAP_REPO_OWNER:-{OWNER}}"
+# GitHub repository
+REPO_OWNER="${RMAP_REPO_OWNER:-andreirx}"
 REPO_NAME="repo-graph"
 RELEASES_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases"
 DOWNLOAD_BASE="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download"
