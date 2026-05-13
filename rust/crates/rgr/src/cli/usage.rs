@@ -88,4 +88,12 @@ pub fn print_usage() {
     eprintln!("  rmap boundaries show <db_path> <repo_uid> <surface_uid>");
     eprintln!("  rmap boundaries summary <db_path> <repo_uid>");
     eprintln!("  rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER] [--file <path>]");
+    eprintln!();
+    eprintln!("Agent host integration (HOOK-1):");
+    eprintln!("  rmap hook session-start [--from-env | --db <path> --repo <path>]");
+    eprintln!("  rmap hook prompt-submit [--from-env | --db <path> --repo <path>]");
+    eprintln!("  rmap hook post-edit [--from-env | --db <path> --repo <path> --files <paths>]");
+    eprintln!("  rmap hook pre-compact [--from-env | --db <path> --repo <path>]");
+    eprintln!("  rmap hook stop [--from-env | --db <path> --repo <path>]");
+    eprintln!("  rmap hook status");
 }

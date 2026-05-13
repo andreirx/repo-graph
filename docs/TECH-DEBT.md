@@ -2780,3 +2780,31 @@ REL-1 provides a **bootstrap installer** that installs binaries but defers:
    - `CHANGELOG.md` — not created (use conventional commits or manual changelog)
    - Install script handles missing files gracefully (copies only what exists)
 
+### HOOK-1 Implementation (2026-05-13)
+
+**Implemented:** All six `rmap hook` commands functional with full flag support.
+
+**Deferred items:**
+
+1. **`post-edit` actual refresh execution:**
+   - Currently marks files as dirty in session state only
+   - Does not execute actual `rmap refresh` or incremental index update
+   - Rationale: Refresh semantics complex (batch window, dirty tracking, partial refresh)
+   - Future: Integrate with hooks.toml `post_edit.batch_window_seconds` for debounced refresh
+
+2. **Full orientation summary in `session-start`:**
+   - Returns simplified orientation (db exists, repo detected, stale flag)
+   - Does not query snapshot-level counts (module_candidates, boundary_count, etc.)
+   - Rationale: Orientation queries require snapshot_uid, not just repo existence
+   - Future: Requires snapshot discovery or "most recent snapshot" resolution
+
+3. **Integration detection accuracy:**
+   - `rmap hook status` checks for hook strings in config files
+   - Does not validate hook configuration structure or version compatibility
+   - Future: Structured JSON parsing of host config files
+
+4. **Session cleanup:**
+   - Session state files persist in sessions_dir indefinitely
+   - No automatic pruning of old sessions
+   - Future: Add session expiry or `rmap hook sessions prune` command
+

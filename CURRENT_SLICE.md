@@ -2,36 +2,135 @@
 
 ## Current Priority
 
-**RGISTR-1: rgistr Binary Packaging** — ACTIVE
-
-Slice doc: `docs/slices/rgistr-1-binary-packaging.md`
-
-### Context
-
-Package `rgistr` (LLM-powered code registration tool) as standalone binary
-via Node SEA. Include in same release archive as `rmap`/`rmapd`.
-
-### Implementation Plan
-
-1. **Bundle rgistr to single file** (esbuild)
-2. **Node SEA binary generation** for macOS arm64 and Linux x86_64
-3. **Version injection** from workspace manifest
-4. **GitHub Actions integration** (extend release.yml)
-5. **Installer update** (install rgistr alongside rmap/rmapd)
-
-### Progress
-
-- [x] Add esbuild to package.json, create bundle script
-- [x] Create SEA build script (`scripts/build-sea.sh`)
-- [x] Replace hardcoded version with injected constant
-- [x] Update release workflow for rgistr
-- [x] Update installer for rgistr
-- [x] Local validation (macOS arm64): `rgistr --version` → `0.1.1`
-- [ ] CI validation (both platforms) — pending next release
+No active slice. Ready for next priority assignment.
 
 ---
 
 ## Recently Implemented
+
+**HOOK-1: rmap hook CLI Surface** — IMPLEMENTED (2026-05-13)
+
+Slice doc: `docs/slices/hook-1-rmap-hook-cli.md`
+
+### Summary
+
+`rmap hook` command family for agent host integration. All six subcommands
+implemented with full flag support, resolution chain, and configuration.
+
+### Commands
+
+```
+rmap hook session-start [--from-env | --db <path> --repo <path>]
+rmap hook prompt-submit [--from-env | --classify | --prompt <text>]
+rmap hook post-edit [--from-env | --files <paths>]
+rmap hook pre-compact [--from-env]
+rmap hook stop [--from-env | --require-validation | --transcript <path>]
+rmap hook status [--json]
+```
+
+### Implementation
+
+- `env.rs` — Host detection (ClaudeCode, Codex), HookContext with full resolution chain
+- `config.rs` — hooks.toml TOML configuration (session, post_edit, stop sections)
+- `session.rs` — Session state persistence to JSON files
+- `output.rs` — HookResult envelope, JSON/human output modes, exit codes
+- `session_start.rs` — Orientation bundle with stale DB detection
+- `prompt_submit.rs` — CURRENT_SLICE.md parsing, prompt classification
+- `post_edit.rs` — File dirty tracking (actual refresh deferred)
+- `pre_compact.rs` — Session state checkpoint
+- `stop.rs` — Validation summary, --require-validation, --transcript writing
+- `status.rs` — Configuration display, integration detection
+
+### Resolution Chain (per HOOK-1 slice)
+
+1. Explicit --db/--repo arguments
+2. RMAP_DB_PATH, RMAP_REPO_PATH environment variables
+3. Host environment (CLAUDE_PROJECT_PATH, CODEX_PROJECT_PATH)
+4. Discovery (search for .rmap.db, repo.db; find .git for repo)
+
+### Platform Directories (per DIST-1 D3)
+
+- macOS: ~/Library/Application Support/repo-graph/
+- Linux: ~/.config/rmap/
+
+### Validation Evidence (EXECUTED)
+
+```
+$ rmap hook prompt-submit --classify --prompt "add a feature" --json
+{"status":"ok","classification":"feature","context":{"trust_snapshot":"no database specified","relevant_boundaries":0,"active_slice":"HOOK-1"},"inject":"Trust: no database specified. Active slice: HOOK-1. Task type: feature."}
+
+$ rmap hook stop --require-validation --json; echo "Exit: $?"
+{"status":"error","validation":{...},"error":"Required validations not run"}
+Exit: 2
+
+$ rmap hook stop --transcript /tmp/t.json --json
+{"status":"warning",...,"transcript_path":"/tmp/t.json",...}
+# Transcript file written with session data
+
+$ rmap hook status
+rmap hook status
+Directories: Config: .../repo-graph, Sessions: .../sessions, Logs: .../logs
+Configuration: File: .../hooks.toml, Status: not found (using defaults)
+  Defaults: session.stale_threshold_minutes: 30, post_edit.batch_window_seconds: 5
+```
+
+### Unit Tests
+
+11 hook-related tests pass:
+- config (2): defaults, toml roundtrip
+- env (4): explicit args, json flag, comma-separated files, json array files
+- session (4): file path sanitization, traversal rejection, state new, record edit
+
+### Deferred
+
+- `post-edit` actual refresh execution (currently marks dirty only)
+- Full orientation summary (requires snapshot lookup, not just repo existence)
+
+---
+
+**RGISTR-1: rgistr Binary Packaging** — IMPLEMENTED (2026-05-13)
+
+Slice doc: `docs/slices/rgistr-1-binary-packaging.md`
+
+- esbuild bundling with version injection from workspace manifest
+- Node SEA binary generation (macOS arm64, Linux x86_64)
+- Release workflow integration
+- Installer updated for three-binary install
+- postject pinned in package.json (no network fetch)
+- Source install fails hard if Node.js missing
+
+---
+
+**DIST-1: Distribution and Install Contract** — IMPLEMENTED (2026-05-13)
+
+Slice doc: `docs/slices/dist-1-distribution-install-contract.md`
+
+Contract locked:
+- D1: Binary-first distribution
+- D2: User-local install by default
+- D3: Platform-native directory layout
+- D4: Toolchain detection contract
+- D5: Full installer scope
+- D6: Install manifest model
+- D7: Uninstall contract
+- D8: Version compatibility
+
+---
+
+**HOST-1: Host Integration Contract** — IMPLEMENTED (2026-05-13)
+
+Slice doc: `docs/slices/host-1-host-integration-contract.md`
+
+Contract locked:
+- D1: Thin shim model (host shims call `rmap hook` commands)
+- D2: Detect + explicit activation (never silent config rewrite)
+- D3: Backup before patch
+- D4: Rollback support
+- D5: Project vs global scope
+- Environment variable contract clarified (host-provided vs rmap-internal)
+- Hook event mapping for Claude Code, Codex, Cursor
+
+---
 
 **REL-SUPPORT-1: Version Authority** — IMPLEMENTED (2026-05-13)
 
@@ -41,18 +140,14 @@ Validated with v0.1.1 release:
 - Workspace version inheritance working
 - Cut-release scripts produce clean commits
 - CI validates tag == manifest == binary versions
-- Draft release assets created for both platforms
 
 ---
-
-## Recently Implemented
 
 **REL-1: Release Pipeline** — IMPLEMENTED (2026-05-13)
 
 Slice doc: `docs/slices/rel-1-release-pipeline.md`
 
-v0.1.0 released. Pipeline operational. Version authority enforcement now in
-REL-SUPPORT-1.
+v0.1.0 released. Pipeline operational.
 
 ---
 

@@ -1,6 +1,6 @@
 # HOOK-1: rmap hook CLI Surface
 
-Status: PLANNED
+Status: ACTIVE
 Depends: HOST-1
 Track: Distribution / Install / Host Integration
 

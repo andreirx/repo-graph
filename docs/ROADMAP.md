@@ -59,13 +59,13 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 
 | Slice | Scope | Status |
 |-------|-------|--------|
-| **DIST-1** | Distribution and install contract (binary-first, manifest model, safety rules) | PLANNED |
-| **HOST-1** | Host integration contract (Claude/Codex hooks, Cursor MCP, detection model) | PLANNED |
+| **DIST-1** | Distribution and install contract (binary-first, manifest model, safety rules) | IMPLEMENTED |
+| **HOST-1** | Host integration contract (Claude/Codex hooks, Cursor MCP, detection model) | IMPLEMENTED |
 | **REL-1** | Release pipeline (GitHub Actions, artifact matrix, checksums) | IMPLEMENTED |
 | **REL-SUPPORT-1** | Version authority (workspace version, bump/cut scripts, CI validation) | IMPLEMENTED |
-| **RGISTR-1** | rgistr binary packaging (Node SEA, same archive as rmap/rmapd) | **ACTIVE** |
+| **RGISTR-1** | rgistr binary packaging (Node SEA, same archive as rmap/rmapd) | IMPLEMENTED |
 | **RMAPD-1** | Daemon binary target (`rmapd`) + daemon-runtime crate | IMPLEMENTED |
-| **HOOK-1** | `rmap hook` CLI surface (session-start, prompt-submit, post-edit, pre-compact, stop) | PLANNED |
+| **HOOK-1** | `rmap hook` CLI surface (session-start, prompt-submit, post-edit, pre-compact, stop) | IMPLEMENTED |
 | **MAC-1** | macOS installer + daemon service (launchd, paths, health checks) | PLANNED |
 | **CLAUDE-1** | Claude Code integration (`.claude/settings.json` hooks) | PLANNED |
 | **CODEX-1** | Codex CLI integration (`hooks.json`) | PLANNED |
@@ -77,28 +77,33 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 
 ### Current Priority
 
-**RGISTR-1** is active.
+**MAC-1** is next.
 
-REL-SUPPORT-1 completed with v0.1.1 release (CI validated).
+Completed:
+- REL-SUPPORT-1: v0.1.1 release (CI validated)
+- RGISTR-1: rgistr packaged as Node SEA binary in release archive
+- DIST-1: Distribution contract locked (binary-first, manifest, security rules)
+- HOST-1: Host integration contract locked (thin shim model, environment variable translation, backup/rollback)
+- HOOK-1: `rmap hook` CLI surface implemented (2026-05-13)
 
-RGISTR-1 packages rgistr as Node SEA binary in same release archive:
-- esbuild bundling with version injection from workspace manifest
-- Node SEA binary generation (macOS arm64, Linux x86_64)
-- Release workflow integration
-- Installer updated for three-binary install
-
-Pending: CI validation on next release.
+HOOK-1 delivered:
+- All six hook commands: session-start, prompt-submit, post-edit, pre-compact, stop, status
+- Full resolution chain: explicit args → RMAP_* env → host env → discovery
+- hooks.toml configuration infrastructure
+- Session state persistence
+- --classify, --prompt, --require-validation, --transcript flags
+- Platform-native directories per DIST-1 D3
 
 ### Execution Order
 
-1. DIST-1 — contract before implementation
-2. HOST-1 — host integration rules before host-specific work
-3. REL-1 — release artifacts and verification (IMPLEMENTED)
-4. REL-SUPPORT-1 — version authority enforcement (IMPLEMENTED, v0.1.1)
-5. **RGISTR-1 — rgistr binary packaging (ACTIVE)**
-6. RMAPD-1 — daemon binary target (IMPLEMENTED)
-7. HOOK-1 — `rmap hook` commands before host shims use them
-8. MAC-1 — macOS as first complete vertical slice
+1. ~~DIST-1 — contract before implementation~~ (IMPLEMENTED)
+2. ~~HOST-1 — host integration rules before host-specific work~~ (IMPLEMENTED)
+3. ~~REL-1 — release artifacts and verification~~ (IMPLEMENTED)
+4. ~~REL-SUPPORT-1 — version authority enforcement (v0.1.1)~~ (IMPLEMENTED)
+5. ~~RGISTR-1 — rgistr binary packaging~~ (IMPLEMENTED)
+6. ~~RMAPD-1 — daemon binary target~~ (IMPLEMENTED)
+7. ~~HOOK-1 — `rmap hook` commands before host shims use them~~ (IMPLEMENTED)
+8. **MAC-1 — macOS as first complete vertical slice (NEXT)**
 9. CLAUDE-1 — Claude Code integration on macOS
 10. CODEX-1 — Codex integration on macOS
 11. LINUX-1 — Linux reuses core policy, different service adapter

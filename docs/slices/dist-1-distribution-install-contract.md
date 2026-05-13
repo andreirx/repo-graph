@@ -1,6 +1,6 @@
 # DIST-1: Distribution and Install Contract
 
-Status: PLANNED
+Status: IMPLEMENTED
 Depends: None
 Track: Distribution / Install / Host Integration
 

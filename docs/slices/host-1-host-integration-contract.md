@@ -1,6 +1,6 @@
 # HOST-1: Host Integration Contract
 
-Status: PLANNED
+Status: IMPLEMENTED
 Depends: DIST-1
 Track: Distribution / Install / Host Integration
 
@@ -357,17 +357,45 @@ Choice: 1
 
 ## Environment Variables
 
-Hooks receive context via environment variables.
+Hooks receive context via environment variables. There are two categories:
 
-**Standard variables:**
-- `RMAP_DB_PATH` — path to repo database
-- `RMAP_REPO_PATH` — path to repository root
-- `RMAP_SESSION_ID` — unique session identifier
+### Host-Provided Variables
 
-**Event-specific variables:**
-- `TOOL_NAME` — name of tool that was used (PostToolUse)
-- `TOOL_OUTPUT_FILES` — files modified (PostToolUse)
+Each host provides its own set of environment variables. These are host-specific and
+documented in the respective implementation slices (CLAUDE-1, CODEX-1).
+
+**Example — Claude Code:**
+- `CLAUDE_PROJECT_PATH` — project root path
+- `CLAUDE_SESSION_ID` — unique session identifier
+- `TOOL_NAME` — name of tool used (PostToolUse)
+- `TOOL_OUTPUT` — tool output (PostToolUse)
 - `PROMPT_TEXT` — user prompt content (UserPromptSubmit)
+
+**Example — Codex (to be verified):**
+- Variable names may differ from Claude Code
+- Documented in CODEX-1 after verification
+
+### rmap Internal Variables
+
+rmap hook commands normalize host-provided variables into a common internal model.
+This translation happens inside the hook command, not in the shim.
+
+| Internal Variable | Meaning | Derived From |
+|-------------------|---------|--------------|
+| `RMAP_REPO_PATH` | Repository root path | Host-provided project path |
+| `RMAP_SESSION_ID` | Session identifier | Host-provided session ID |
+| `RMAP_DB_PATH` | Path to repo database | Computed from repo path |
+
+**Contract:**
+- Shims pass host environment variables unchanged
+- `rmap hook` commands read host variables via `--from-env` flag
+- `rmap hook` commands perform the translation internally
+- Core hook policy code uses only rmap internal variables
+
+This separation allows:
+- Host-specific adapters in `rmap hook` implementation
+- Core policy code that is host-agnostic
+- New host support without changing core policy
 
 ## Error Handling in Hooks
 

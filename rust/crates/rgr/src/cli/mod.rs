@@ -8,6 +8,7 @@
 //! - Trust overlay computation
 //! - Usage and error formatting
 //! - Time utilities
+//! - Platform-aware directory resolution
 //! - Future: shared argument parsing helpers (only if reused across families)
 //!
 //! This module does **not** own:
@@ -20,10 +21,12 @@
 
 mod context;
 mod envelope;
+pub mod paths;
 mod time;
 mod usage;
 
 pub use context::{compute_storage_root_path, open_storage, resolve_repo_ref, resolve_repo_root};
 pub use envelope::{build_envelope, compute_trust_overlay_for_snapshot};
+pub use paths::{config_dir, data_dir, ensure_dir, logs_dir, sessions_dir};
 pub use time::{chrono_now, utc_now_iso8601};
 pub use usage::{format_gate_error, print_usage};

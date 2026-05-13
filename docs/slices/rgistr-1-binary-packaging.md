@@ -1,6 +1,6 @@
 # RGISTR-1: rgistr Binary Packaging
 
-Status: PLANNED
+Status: IMPLEMENTED
 Depends: REL-SUPPORT-1
 Track: Distribution / Install / Host Integration
 
