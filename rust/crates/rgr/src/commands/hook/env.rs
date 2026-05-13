@@ -350,8 +350,11 @@ impl HookContext {
             .or(host_ctx.prompt_text);
 
         // Transcript path: explicit arg > stdin payload
-        let resolved_transcript = transcript_path
-            .or_else(|| stdin_payload.as_ref().and_then(|p| p.transcript_path.clone()));
+        let resolved_transcript = transcript_path.or_else(|| {
+            stdin_payload
+                .as_ref()
+                .and_then(|p| p.transcript_path.clone())
+        });
 
         Ok(Self {
             db_path: resolved_db,
@@ -513,9 +516,7 @@ mod tests {
         let args = vec!["--from-stdin".to_string(), "--from-env".to_string()];
         let result = HookContext::from_args(&args);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("mutually exclusive"));
+        assert!(result.unwrap_err().contains("mutually exclusive"));
     }
 
     #[test]

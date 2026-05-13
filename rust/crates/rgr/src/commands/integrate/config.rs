@@ -396,9 +396,17 @@ pub fn plan_install(
 
     let profile_name = if full_profile { "full" } else { "minimal" };
     let summary = if existing_hooks_found {
-        format!("Update to {} profile ({} events)", profile_name, changes.len())
+        format!(
+            "Update to {} profile ({} events)",
+            profile_name,
+            changes.len()
+        )
     } else {
-        format!("Install {} profile ({} events)", profile_name, changes.len())
+        format!(
+            "Install {} profile ({} events)",
+            profile_name,
+            changes.len()
+        )
     };
 
     Ok(MergePlan {
@@ -442,19 +450,14 @@ pub fn plan_remove(existing_content: Option<&str>) -> Result<MergePlan, String> 
 }
 
 /// Apply the install plan to produce new configuration.
-pub fn apply_install(
-    existing_content: Option<&str>,
-    full_profile: bool,
-) -> Result<String, String> {
+pub fn apply_install(existing_content: Option<&str>, full_profile: bool) -> Result<String, String> {
     let mut root: Value = if let Some(content) = existing_content {
         parse_settings(content)?
     } else {
         Value::Object(Map::new())
     };
 
-    let root_obj = root
-        .as_object_mut()
-        .ok_or("root must be an object")?;
+    let root_obj = root.as_object_mut().ok_or("root must be an object")?;
 
     // Ensure hooks object exists
     if !root_obj.contains_key("hooks") {
@@ -496,9 +499,7 @@ pub fn apply_install(
 pub fn apply_remove(existing_content: &str) -> Result<String, String> {
     let mut root: Value = parse_settings(existing_content)?;
 
-    let root_obj = root
-        .as_object_mut()
-        .ok_or("root must be an object")?;
+    let root_obj = root.as_object_mut().ok_or("root must be an object")?;
 
     let Some(hooks) = root_obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
         // No hooks section, nothing to remove
@@ -622,7 +623,9 @@ mod tests {
             }
         }"#;
         let analysis = analyze_config(Some(config));
-        assert!(analysis.repo_graph_events.contains(&"SessionStart".to_string()));
+        assert!(analysis
+            .repo_graph_events
+            .contains(&"SessionStart".to_string()));
         assert!(analysis.other_events.contains(&"SessionStart".to_string()));
     }
 
@@ -696,11 +699,7 @@ mod tests {
         // Should have both repo-graph hook and custom hook
         assert_eq!(session_start.len(), 2);
         // repo-graph hook should be first
-        let first_cmd = session_start[0]
-            .get("hooks")
-            .unwrap()
-            .as_array()
-            .unwrap()[0]
+        let first_cmd = session_start[0].get("hooks").unwrap().as_array().unwrap()[0]
             .get("command")
             .unwrap()
             .as_str()
@@ -761,8 +760,12 @@ mod tests {
 
     #[test]
     fn test_is_repo_graph_hook() {
-        assert!(RepoGraphHooks::is_repo_graph_hook("rmap hook session-start --from-stdin"));
-        assert!(RepoGraphHooks::is_repo_graph_hook("/usr/local/bin/rmap hook stop"));
+        assert!(RepoGraphHooks::is_repo_graph_hook(
+            "rmap hook session-start --from-stdin"
+        ));
+        assert!(RepoGraphHooks::is_repo_graph_hook(
+            "/usr/local/bin/rmap hook stop"
+        ));
         assert!(!RepoGraphHooks::is_repo_graph_hook("my-custom-hook.sh"));
         assert!(!RepoGraphHooks::is_repo_graph_hook("echo hello"));
     }

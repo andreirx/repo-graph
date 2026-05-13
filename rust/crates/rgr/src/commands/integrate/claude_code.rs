@@ -54,7 +54,7 @@ impl Default for InstallOptions {
         Self {
             global: true, // default to global
             project: false,
-            full: false,  // default to minimal
+            full: false, // default to minimal
             dry_run: false,
             force: false,
         }
@@ -262,7 +262,10 @@ fn execute_install_dry_run(config_path: &Path, scope: &str, opts: &InstallOption
 
     if existing_content.is_some() {
         println!();
-        println!("  Would create backup: {}", backup_path(config_path).display());
+        println!(
+            "  Would create backup: {}",
+            backup_path(config_path).display()
+        );
     }
 
     println!();
@@ -472,12 +475,18 @@ fn print_status_human(
         if let Some(ref backup) = record.backup_path {
             println!("  Backup: {}", backup);
         }
-        println!("  Installed: {}", record.installed_at.format("%Y-%m-%d %H:%M:%S UTC"));
+        println!(
+            "  Installed: {}",
+            record.installed_at.format("%Y-%m-%d %H:%M:%S UTC")
+        );
     }
 
     if !analysis.other_events.is_empty() {
         println!();
-        println!("  Other hooks present: {}", analysis.other_events.join(", "));
+        println!(
+            "  Other hooks present: {}",
+            analysis.other_events.join(", ")
+        );
     }
 }
 

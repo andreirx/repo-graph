@@ -153,7 +153,10 @@ mod tests {
         }"#;
 
         let payload: StdinPayload = serde_json::from_str(json).unwrap();
-        assert_eq!(payload.prompt, Some("Implement the login feature".to_string()));
+        assert_eq!(
+            payload.prompt,
+            Some("Implement the login feature".to_string())
+        );
     }
 
     #[test]
@@ -174,7 +177,10 @@ mod tests {
         let payload: StdinPayload = serde_json::from_str(json).unwrap();
         assert_eq!(payload.tool_name, Some("Edit".to_string()));
         assert!(payload.tool_input.is_some());
-        assert_eq!(payload.tool_output, Some("File edited successfully".to_string()));
+        assert_eq!(
+            payload.tool_output,
+            Some("File edited successfully".to_string())
+        );
 
         let files = payload.extract_file_paths();
         assert_eq!(files.len(), 1);

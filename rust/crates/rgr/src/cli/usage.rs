@@ -102,7 +102,9 @@ pub fn print_usage() {
     eprintln!("  rmap uninstall [--dry-run] [--force] [--remove-data]");
     eprintln!();
     eprintln!("Host integrations (CLAUDE-1):");
-    eprintln!("  rmap integrate claude-code install [--global|--project] [--full] [--dry-run] [--force]");
+    eprintln!(
+        "  rmap integrate claude-code install [--global|--project] [--full] [--dry-run] [--force]"
+    );
     eprintln!("  rmap integrate claude-code remove [--global|--project]");
     eprintln!("  rmap integrate claude-code status [--global|--project] [--json]");
 }

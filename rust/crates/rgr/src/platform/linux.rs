@@ -3,8 +3,6 @@
 //! To be implemented in LINUX-1 slice.
 //! Will implement systemd --user service management.
 
-use std::path::PathBuf;
-
 use crate::cli::paths;
 
 use super::{InstallManifest, PlatformAdapter, ProbeResult, ServiceStatus};

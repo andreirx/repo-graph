@@ -157,7 +157,10 @@ pub fn record_integration(
 }
 
 /// Remove a host integration from the manifest.
-pub fn remove_integration_record(host: &str, scope: &str) -> Result<Option<HostIntegration>, String> {
+pub fn remove_integration_record(
+    host: &str,
+    scope: &str,
+) -> Result<Option<HostIntegration>, String> {
     let mut manifest = load_manifest()?;
     let removed = manifest.remove_integration(host, scope);
     save_manifest(&manifest)?;
@@ -224,7 +227,9 @@ mod tests {
         manifest.upsert_integration(integration);
 
         assert!(manifest.find_integration("claude-code", "global").is_some());
-        assert!(manifest.find_integration("claude-code", "project").is_none());
+        assert!(manifest
+            .find_integration("claude-code", "project")
+            .is_none());
         assert!(manifest.find_integration("codex", "global").is_none());
     }
 
