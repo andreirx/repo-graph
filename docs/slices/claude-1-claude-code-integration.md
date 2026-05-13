@@ -1,244 +1,478 @@
 # CLAUDE-1: Claude Code Integration
 
-Status: PLANNED
-Depends: HOST-1, HOOK-1
+Status: IMPLEMENTED (2026-05-13)
+Depends: HOST-1, HOOK-1, HOOK-1A
 Track: Distribution / Install / Host Integration
 
-**Execution order note:** Follows MAC-1 in rollout sequence (macOS-first), but MAC-1
-is not a build dependency. This slice implements HOST-1 contract for Claude Code
-specifically. Platform installers (MAC-1, LINUX-1) call `rmap integrate claude-code`.
+**Execution order note:** Follows MAC-1 in rollout sequence (macOS-first). This slice
+implements HOST-1 contract for Claude Code specifically. Platform installers (MAC-1,
+LINUX-1) call `rmap integrate claude-code install`.
+
+**Amendment (2026-05-13):** Command structure changed from mode flags to subcommands
+for cleaner CLI grammar and better scalability to future hosts (Codex, Cursor).
+Original: `rmap integrate [--remove|--status] claude-code`
+New: `rmap integrate claude-code [install|remove|status]`
+
+**Schema source:** This slice is aligned with the official Claude Code hooks reference
+at https://code.claude.com/docs/en/hooks (verified 2026-05-13).
 
 ## Objective
 
 Implement repo-graph integration with Claude Code via lifecycle hooks. This slice
-produces the Claude Code-specific hook configuration and integration tooling.
+produces:
+1. Claude Code-specific hook configuration
+2. Stdin-JSON transport adapter for HOOK-1 commands
+3. Integration CLI tooling
 
-## Assumptions to Verify
+## Transport Architecture
 
-**The following are based on Anthropic documentation as of 2024. Verify against
-actual Claude Code behavior before implementation.**
+### The Problem
 
-- Hook event names and schema
-- Environment variable names and contents
-- Timeout behavior and defaults
-- Matcher schema for PostToolUse
-- Config file merge behavior
+HOOK-1 was designed with `--from-env` assuming hosts provide context via environment
+variables. Claude Code does not use this model — it passes a **JSON payload on stdin**.
 
-Sources:
-- https://docs.anthropic.com/en/docs/claude-code/hooks-guide
-- https://docs.anthropic.com/en/docs/claude-code/hooks
+### The Solution
+
+Introduce explicit transport separation in hook commands:
+
+| Flag | Transport | Host |
+|------|-----------|------|
+| `--from-env` | Environment variables | Codex, future hosts |
+| `--from-stdin` | JSON on stdin | Claude Code |
+
+Both transports normalize to the same internal `HookContext` structure. Policy handlers
+remain unchanged.
+
+```
+┌─────────────────┐     ┌─────────────────┐
+│  Claude Code    │     │     Codex       │
+│  (stdin JSON)   │     │  (env vars)     │
+└────────┬────────┘     └────────┬────────┘
+         │                       │
+         ▼                       ▼
+┌─────────────────┐     ┌─────────────────┐
+│ --from-stdin    │     │ --from-env      │
+│ transport       │     │ transport       │
+└────────┬────────┘     └────────┬────────┘
+         │                       │
+         └───────────┬───────────┘
+                     ▼
+            ┌─────────────────┐
+            │   HookContext   │
+            │  (normalized)   │
+            └────────┬────────┘
+                     ▼
+            ┌─────────────────┐
+            │  Policy Handler │
+            │  (unchanged)    │
+            └─────────────────┘
+```
 
 ## Claude Code Hook Model
 
-Claude Code exposes lifecycle hooks via `.claude/settings.json`:
+Claude Code exposes lifecycle hooks via `.claude/settings.json`. Hooks are organized
+in **matcher groups** with nested hook arrays.
+
+### Hook Configuration Structure
 
 ```json
 {
   "hooks": {
-    "SessionStart": [...],
-    "UserPromptSubmit": [...],
-    "PreToolUse": [...],
-    "PostToolUse": [...],
-    "PreCompact": [...],
-    "Stop": [...],
-    "SubagentStop": [...]
+    "<EventName>": [
+      {
+        "matcher": "<pattern>",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/handler",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
   }
 }
 ```
 
-Each hook is an array of hook entries. Entries execute in order.
+- **EventName**: Hook event (e.g., `SessionStart`, `PostToolUse`)
+- **matcher**: String pattern for filtering (tool events only)
+- **hooks**: Array of hook handlers to execute
+- **type**: Handler type (`"command"` for shell commands)
+- **timeout**: Seconds before timeout (not milliseconds)
 
-## Hook Entry Schema
+### Events Without Matchers
 
-```json
-{
-  "command": "shell command to execute",
-  "timeout": 30000,
-  "matcher": {
-    "tool_name": ["Edit", "Write"]
-  }
-}
-```
-
-- `command`: Shell command (string)
-- `timeout`: Milliseconds before timeout (optional, default varies)
-- `matcher`: Filter for when hook runs (optional, event-specific)
-
-## Environment Variables
-
-Claude Code provides context via environment variables:
-
-| Variable | Event | Description |
-|----------|-------|-------------|
-| `CLAUDE_SESSION_ID` | All | Unique session identifier |
-| `CLAUDE_PROJECT_PATH` | All | Project root path |
-| `TOOL_NAME` | PostToolUse | Name of tool that was used |
-| `TOOL_INPUT` | PostToolUse | Tool input (JSON) |
-| `TOOL_OUTPUT` | PostToolUse | Tool output (may include file paths) |
-| `PROMPT_TEXT` | UserPromptSubmit | User prompt content |
-
-## Payload Transport Contract
-
-**Problem:** Passing large or multiline payloads (prompt text, tool output) as shell
-command arguments is fragile due to quoting, escaping, and length limits.
-
-**Solution:** Hook commands read payloads from environment variables directly, not
-from command-line arguments.
-
-| Payload | Transport | Consumed by |
-|---------|-----------|-------------|
-| Project path | Env var `CLAUDE_PROJECT_PATH` | All hooks |
-| Session ID | Env var `CLAUDE_SESSION_ID` | All hooks |
-| Prompt text | Env var `PROMPT_TEXT` | `prompt-submit` |
-| Tool output | Env var `TOOL_OUTPUT` | `post-edit` |
-| Tool name | Env var `TOOL_NAME` | `post-edit` |
-
-Hook commands use `--from-env` flag to indicate environment variable consumption:
-
-```bash
-rmap hook session-start --from-env
-# Reads: CLAUDE_PROJECT_PATH, CLAUDE_SESSION_ID
-
-rmap hook prompt-submit --from-env
-# Reads: CLAUDE_PROJECT_PATH, PROMPT_TEXT
-
-rmap hook post-edit --from-env
-# Reads: CLAUDE_PROJECT_PATH, TOOL_OUTPUT, TOOL_NAME
-```
-
-## repo-graph Hook Configuration
-
-### Full Configuration
+Some events do not support matchers and always fire:
 
 ```json
 {
   "hooks": {
     "SessionStart": [
       {
-        "command": "rmap hook session-start --from-env",
-        "timeout": 30000
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook session-start --from-stdin",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+## Hook Entry Schema
+
+### Command Hook Handler
+
+```json
+{
+  "type": "command",
+  "command": "rmap hook session-start --from-stdin",
+  "timeout": 30
+}
+```
+
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `type` | Yes | string | Must be `"command"` for shell commands |
+| `command` | Yes | string | Shell command to execute |
+| `timeout` | No | number | Seconds before timeout (default: 600) |
+
+### Matcher Patterns (Tool Events)
+
+Matchers filter which tool invocations trigger the hook.
+
+| Pattern | Meaning | Example |
+|---------|---------|---------|
+| Omitted or `""` | Match all | Fires on every tool |
+| `"Edit"` | Exact match | Only Edit tool |
+| `"Edit\|Write"` | Pipe-separated | Edit or Write |
+| `"^mcp__.*"` | Regex | Any MCP tool |
+
+## Stdin JSON Payload
+
+Claude Code passes hook input as **JSON on stdin**, not environment variables.
+
+### Common Fields (All Events)
+
+```json
+{
+  "session_id": "abc123-def456",
+  "cwd": "/path/to/project",
+  "hook_event_name": "SessionStart"
+}
+```
+
+### SessionStart Payload
+
+```json
+{
+  "session_id": "abc123",
+  "cwd": "/path/to/project",
+  "hook_event_name": "SessionStart"
+}
+```
+
+### UserPromptSubmit Payload
+
+```json
+{
+  "session_id": "abc123",
+  "cwd": "/path/to/project",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Implement the login feature"
+}
+```
+
+### PostToolUse Payload
+
+```json
+{
+  "session_id": "abc123",
+  "cwd": "/path/to/project",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/path/to/file.rs",
+    "old_string": "...",
+    "new_string": "..."
+  },
+  "tool_output": "File edited successfully"
+}
+```
+
+### PreCompact Payload
+
+```json
+{
+  "session_id": "abc123",
+  "cwd": "/path/to/project",
+  "hook_event_name": "PreCompact",
+  "compaction_type": "auto"
+}
+```
+
+### Stop Payload
+
+```json
+{
+  "session_id": "abc123",
+  "cwd": "/path/to/project",
+  "hook_event_name": "Stop"
+}
+```
+
+## Environment Variables
+
+Claude Code provides limited environment variables (not payload data):
+
+| Variable | Description |
+|----------|-------------|
+| `CLAUDE_PROJECT_DIR` | Project root directory |
+| `CLAUDE_ENV_FILE` | Path to file for persisting env vars (SessionStart only) |
+| `CLAUDE_EFFORT` | Effort level: `low`, `medium`, `high`, `xhigh`, `max` |
+
+**Note:** Session ID, prompt text, tool inputs are in the stdin JSON, not env vars.
+
+## repo-graph Hook Configuration
+
+### Minimal Configuration (Default)
+
+Installed by `rmap integrate claude-code install` (no flags).
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook session-start --from-stdin",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook stop --from-stdin",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Full Configuration
+
+Installed by `rmap integrate claude-code install --full`.
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook session-start --from-stdin",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
       {
-        "command": "rmap hook prompt-submit --from-env",
-        "timeout": 10000
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook prompt-submit --from-stdin",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": {
-          "tool_name": ["Edit", "Write", "MultiEdit"]
-        },
-        "command": "rmap hook post-edit --from-env",
-        "timeout": 60000
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook post-edit --from-stdin",
+            "timeout": 60
+          }
+        ]
       }
     ],
     "PreCompact": [
       {
-        "command": "rmap hook pre-compact --from-env",
-        "timeout": 10000
+        "matcher": "auto|manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook pre-compact --from-stdin",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "Stop": [
       {
-        "command": "rmap hook stop --from-env",
-        "timeout": 30000
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook stop --from-stdin",
+            "timeout": 30
+          }
+        ]
       }
     ]
   }
 }
 ```
 
-### Minimal Configuration
+## Hook Output Protocol
 
-For users who want less integration:
+### stdout
+
+Hook stdout is processed by Claude Code. repo-graph hooks output:
+
+**Plain text (default):** Human-readable summary, added to context.
+
+**JSON with decision control:**
 
 ```json
 {
-  "hooks": {
-    "SessionStart": [
-      {
-        "command": "rmap hook session-start --from-env",
-        "timeout": 30000
-      }
-    ],
-    "Stop": [
-      {
-        "command": "rmap hook stop --from-env",
-        "timeout": 30000
-      }
-    ]
+  "decision": "continue",
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "repo-graph: 12 modules, 8 boundaries, trust: high"
   }
 }
 ```
 
+| Field | Description |
+|-------|-------------|
+| `decision` | `"continue"` or `"block"` |
+| `additionalContext` | String added to Claude's context |
+| `reason` | Shown to user if blocked |
+
+### Exit Codes
+
+| Code | Meaning | Claude Code Behavior |
+|------|---------|---------------------|
+| 0 | Success | Continue, process stdout |
+| 1 | Warning | Continue, log warning |
+| 2 | Block | Stop processing, show stderr to user |
+
 ## Configuration Locations
 
-### Global Configuration
+| Location | Scope | Shareable |
+|----------|-------|-----------|
+| `~/.claude/settings.json` | All projects | No (local) |
+| `.claude/settings.json` | Single project | Yes (commit) |
+| `.claude/settings.local.json` | Single project | No (gitignored) |
 
-`~/.claude/settings.json`
+### Precedence
 
-Applies to all projects without project-level config.
-
-### Project Configuration
-
-`.claude/settings.json` in project root.
-
-Overrides global config for that project.
+Project-level config overrides global for that project.
 
 ## Integration Commands
 
-### rmap integrate claude-code
+### rmap integrate claude-code install
 
 ```
-$ rmap integrate claude-code [--global|--project] [--minimal]
+$ rmap integrate claude-code install [--global|--project] [--full] [--dry-run] [--force]
 
 Options:
   --global    Install to ~/.claude/settings.json (default)
   --project   Install to ./.claude/settings.json
-  --minimal   Only session-start and stop hooks
+  --full      Install all hooks (default: minimal - SessionStart + Stop only)
   --dry-run   Show changes without applying
   --force     Overwrite existing repo-graph hooks
 ```
 
-**Behavior:**
+**Default behavior (minimal profile):**
+
+Installs only:
+- `SessionStart` — orientation at session start
+- `Stop` — validation summary at session end
+
+**Full profile (`--full`):**
+
+Installs all hooks:
+- `SessionStart` — orientation at session start
+- `UserPromptSubmit` — prompt classification
+- `PostToolUse` — file dirty tracking after Edit/Write
+- `PreCompact` — checkpoint before compaction
+- `Stop` — validation summary at session end
+
+**Rationale for minimal default:** CLAUDE-1 is the first external host config mutation.
+Minimal reduces config blast radius, merge complexity, and rollback risk while still
+providing startup orientation and end-of-session reporting.
+
+**Install sequence:**
 
 1. Check for existing config file
-2. If exists, check for existing hooks
-3. Show planned changes
-4. Create backup
-5. Merge hooks into config
-6. Verify config is valid JSON
-7. Record in install manifest
+2. Parse existing hooks (validate JSON)
+3. Detect existing repo-graph hooks
+4. Plan merge strategy
+5. Create backup (`{file}.rmap-backup`)
+6. Merge hooks into config
+7. Validate resulting JSON
+8. Record in install manifest
 
-### rmap integrate --remove claude-code
+### rmap integrate claude-code remove
 
 ```
-$ rmap integrate --remove claude-code [--global|--project]
+$ rmap integrate claude-code remove [--global|--project]
+
+Options:
+  --global    Remove from ~/.claude/settings.json (default)
+  --project   Remove from ./.claude/settings.json
 ```
 
-**Behavior:**
+**Behavior (surgical removal):**
 
 1. Find config file
-2. Remove repo-graph hooks only
-3. Restore from backup if available
-4. Update install manifest
+2. Remove repo-graph hooks only (preserve non-repo-graph hooks)
+3. If event becomes empty, remove event key
+4. If hooks section becomes empty, remove hooks key
+5. Update install manifest
 
-### rmap integrate --status claude-code
+**Note:** Surgical removal preserves any custom hooks the user added after repo-graph
+installation. This is safer than backup restore, which would destroy post-install user
+changes. Backup remains available for manual emergency recovery.
+
+### rmap integrate claude-code status
 
 ```
-$ rmap integrate --status claude-code
+$ rmap integrate claude-code status [--global|--project] [--json]
 
+Options:
+  --global    Check ~/.claude/settings.json (default)
+  --project   Check ./.claude/settings.json
+  --json      Output JSON instead of human-readable text
+```
+
+**Example output:**
+
+```
 Claude Code Integration Status
 
 Global (~/.claude/settings.json):
-  Status: installed
+  Status: installed (minimal)
   Hooks:
-    ✓ SessionStart: rmap hook session-start
-    ✓ PostToolUse: rmap hook post-edit (Edit, Write, MultiEdit)
-    ✓ PreCompact: rmap hook pre-compact
-    ✓ Stop: rmap hook stop
+    SessionStart: rmap hook session-start --from-stdin
+    Stop: rmap hook stop --from-stdin
   Backup: ~/.claude/settings.json.rmap-backup
   Installed: 2024-01-15T10:30:00Z
 
@@ -248,115 +482,131 @@ Project (./.claude/settings.json):
 
 ## Merging with Existing Hooks
 
-### Existing Hooks Present
+### Strategy
 
-If Claude Code config already has hooks, merge rather than replace.
+1. Parse existing hook configuration
+2. For each event, check if repo-graph hooks exist
+3. If no repo-graph hooks: prepend to existing hooks array
+4. If repo-graph hooks exist: update in place or skip
+5. Preserve all non-repo-graph hooks
 
-**Strategy:**
-1. Prepend repo-graph hooks (run first)
-2. Preserve all existing hooks
-3. Avoid duplicates
+### Duplicate Detection
 
-**Example:**
+repo-graph hooks are identified by command containing `rmap hook`.
 
-Before:
+### Example Merge (Minimal Install)
+
+**Before:**
 ```json
 {
   "hooks": {
     "SessionStart": [
-      {"command": "my-custom-setup.sh", "timeout": 5000}
+      {
+        "hooks": [
+          {"type": "command", "command": "my-setup.sh", "timeout": 5}
+        ]
+      }
     ]
   }
 }
 ```
 
-After:
+**After (`rmap integrate claude-code install`):**
 ```json
 {
   "hooks": {
     "SessionStart": [
-      {"command": "rmap hook session-start --repo \"$CLAUDE_PROJECT_PATH\"", "timeout": 30000},
-      {"command": "my-custom-setup.sh", "timeout": 5000}
+      {
+        "hooks": [
+          {"type": "command", "command": "rmap hook session-start --from-stdin", "timeout": 30}
+        ]
+      },
+      {
+        "hooks": [
+          {"type": "command", "command": "my-setup.sh", "timeout": 5}
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {"type": "command", "command": "rmap hook stop --from-stdin", "timeout": 30}
+        ]
+      }
     ]
   }
 }
 ```
 
-### repo-graph Hooks Already Present
-
-If repo-graph hooks are already installed:
+## Module Structure
 
 ```
-repo-graph hooks already installed in ~/.claude/settings.json
-  Installed version: 0.1.0
-  Current version: 0.2.0
-
-Options:
-  [1] Update to current version
-  [2] Keep existing
-  [3] Remove repo-graph hooks
-
-Choice:
+commands/integrate/
+├── mod.rs           # Dispatcher: parse host + action subcommands
+├── claude_code.rs   # Claude Code policy: install/remove/status logic
+├── config.rs        # JSON merge/patch planning (shared across hosts)
+└── manifest.rs      # Install manifest recording (shared across hosts)
 ```
 
-## Hook Output Handling
+**Boundary rules:**
+- `mod.rs` owns dispatch only, no host-specific logic
+- `claude_code.rs` owns Claude-specific paths, schema, detection
+- `config.rs` owns JSON parsing, merge planning, validation
+- `manifest.rs` owns `host_integrations` array in install manifest
 
-### stdout
+Backup/restore logic lives in `config.rs` unless it grows large enough to warrant
+a dedicated `backup.rs`.
 
-Hook stdout is captured and may be injected into context (depends on Claude Code version).
+## HOOK-1A Transport (Implemented)
 
-repo-graph hooks output:
-- Human-readable by default
-- JSON with `--json` flag
-- Compact summaries suitable for context injection
+**Status:** Implemented in HOOK-1A slice.
 
-### stderr
+All hook commands support `--from-stdin` for Claude Code JSON payloads:
 
-Hook stderr goes to Claude Code's log.
+```
+rmap hook session-start --from-stdin
+rmap hook prompt-submit --from-stdin
+rmap hook post-edit --from-stdin
+rmap hook pre-compact --from-stdin
+rmap hook stop --from-stdin
+```
 
-repo-graph hooks log errors to:
-- stderr (captured by Claude Code)
-- `~/.local/share/rmap/logs/hooks.log`
+Implementation details in `docs/slices/hook-1a-stdin-transport.md`.
 
-### Exit Codes
+### Resolution Chain
 
-| Code | Meaning | Claude Code Behavior |
-|------|---------|---------------------|
-| 0 | Success | Continue |
-| 1 | Warning | Continue (log warning) |
-| 2 | Error | Continue (log error) |
+```
+1. Explicit --db/--repo arguments (highest priority)
+2. RMAP_DB_PATH, RMAP_REPO_PATH environment variables
+3. --from-stdin: read JSON payload, use cwd as repo path
+4. --from-env: read host environment variables
+5. Discovery: find .rmap.db in current directory or parents
+```
 
-Note: In informational mode, hooks never block Claude Code operation.
-Enforcement mode (future) may change this.
+## Backup Contract
 
-## Testing
+Per HOST-1 D3:
 
-### Unit Tests
+- **Backup naming:** `{original}.rmap-backup`
+- **Multiple backups:** `{original}.rmap-backup.{timestamp}`
+- **Recorded in manifest:** `host_integrations` array
 
-- Config file parsing
-- Hook merging logic
-- Backup/restore logic
-- Environment variable handling
+### Manifest Recording
 
-### Integration Tests
-
-- Fresh integration on clean config
-- Integration with existing hooks
-- Integration update
-- Integration removal
-- Project vs global scope
-
-### End-to-End Tests
-
-Requires Claude Code installation:
-
-1. Install integration
-2. Start Claude Code session
-3. Verify session-start hook runs
-4. Make edits
-5. Verify post-edit hook runs
-6. End session
-7. Verify stop hook runs
+```json
+{
+  "host_integrations": [
+    {
+      "host": "claude-code",
+      "scope": "global",
+      "config_path": "~/.claude/settings.json",
+      "backup_path": "~/.claude/settings.json.rmap-backup",
+      "installed_at": "2024-01-15T10:30:00Z",
+      "hooks_installed": ["SessionStart", "PostToolUse", "PreCompact", "Stop"]
+    }
+  ]
+}
+```
 
 ## Error Handling
 
@@ -375,101 +625,86 @@ Cannot proceed. Fix the JSON syntax or use --force to overwrite.
 Error: Cannot write to ~/.claude/settings.json
   Permission denied
 
-Try:
-  chmod u+w ~/.claude/settings.json
+Try: chmod u+w ~/.claude/settings.json
 ```
 
 ### Claude Code Not Detected
 
 ```
-Warning: Claude Code installation not detected
-  No ~/.claude directory
-  No Claude.app in /Applications
+Note: ~/.claude directory does not exist
+Creating ~/.claude/settings.json
 
-Integration will create ~/.claude/settings.json
-Proceed anyway? [y/N]
+Proceed? [y/N]
 ```
 
-## Version Compatibility
+## Available Hook Events (Reference)
 
-### Claude Code Hook API Changes
+Claude Code supports these events (repo-graph uses subset):
 
-If Claude Code changes its hook API:
+**Session Lifecycle:**
+- `SessionStart` - Session begins/resumes (used)
+- `Setup` - During init
+- `SessionEnd` - Session terminates
 
-1. Detect Claude Code version (if possible)
-2. Use appropriate hook schema
-3. Warn if version unknown
+**Per-Turn:**
+- `UserPromptSubmit` - User submits prompt (used)
+- `Stop` - Claude finishes responding (used)
+- `StopFailure` - Turn ends due to error
 
-### repo-graph Hook Command Changes
+**Tool Events:**
+- `PreToolUse` - Before tool executes (future: enforcement)
+- `PostToolUse` - After tool succeeds (used)
+- `PostToolUseFailure` - After tool fails
 
-Hook commands should be stable. If commands change:
+**Compaction:**
+- `PreCompact` - Before compaction (used)
+- `PostCompact` - After compaction
 
-1. New version uses new commands
-2. `rmap integrate --update` updates hook commands
-3. Old commands continue working (deprecated)
-
-## Documentation
-
-### User-Facing
-
-Add to repo-graph docs:
-
-```markdown
-## Claude Code Integration
-
-repo-graph integrates with Claude Code via lifecycle hooks.
-
-### Quick Start
-
-```bash
-# Install repo-graph with Claude Code integration
-curl -fsSL https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/install.sh | bash
-
-# Or add integration to existing installation
-rmap integrate claude-code
-```
-
-### What It Does
-
-- **Session Start:** Orients the agent on repo structure before any action
-- **Post Edit:** Refreshes index after file changes
-- **Pre Compact:** Checkpoints state before context compaction
-- **Stop:** Validates and summarizes at task completion
-
-### Configuration
-
-Global: `~/.claude/settings.json`
-Project: `./.claude/settings.json`
-
-### Removing Integration
-
-```bash
-rmap integrate --remove claude-code
-```
-```
+**Other (not used by repo-graph):**
+- `SubagentStart`, `SubagentStop`
+- `TaskCreated`, `TaskCompleted`
+- `FileChanged`, `CwdChanged`
+- `WorktreeCreate`, `WorktreeRemove`
 
 ## Out of Scope (CLAUDE-1)
 
-- Claude Code API changes tracking
+- PreToolUse enforcement (future slice)
 - SubagentStop hook (same as Stop for now)
-- PreToolUse hook (future enforcement)
 - Custom hook timeout configuration
+- PostCompact hook
+- FileChanged incremental refresh
 
 ## Deliverables
 
-1. `rmap integrate claude-code` command
-2. `rmap integrate --remove claude-code` command
-3. `rmap integrate --status claude-code` command
-4. Hook configuration templates
-5. Merge logic for existing configs
-6. Backup/restore logic
-7. Integration tests
-8. User documentation
+1. `--from-stdin` transport mode in HOOK-1 commands — **DONE (HOOK-1A)**
+2. `rmap integrate claude-code install` command (minimal default, --full opt-in)
+3. `rmap integrate claude-code remove` command
+4. `rmap integrate claude-code status` command
+5. Correct hook configuration schema — **DONE (scripts/lib/macos.sh)**
+6. Merge logic for existing configs
+7. Backup/restore logic
+8. Manifest recording for host integrations
+9. Integration tests
+10. Module structure: dispatcher, claude_code, config, manifest
 
 ## Success Criteria
 
+- Minimal install (`install`) installs SessionStart + Stop only
+- Full install (`install --full`) installs all 5 hooks
 - Integration installs cleanly on fresh Claude Code setup
 - Integration merges correctly with existing hooks
+- `--from-stdin` correctly parses Claude Code JSON payloads — **DONE (HOOK-1A)**
 - All hooks execute and produce expected output
 - Removal cleanly restores previous state
 - Project and global scopes work correctly
+- Backup/restore is reliable
+- Status correctly reports installed profile (minimal/full)
+
+## Dependencies on HOOK-1/HOOK-1A
+
+**Completed (HOOK-1A):**
+- `--from-stdin` flag on all hook commands
+- `StdinPayload` parsing
+- Normalization to existing `HookContext`
+
+Policy handlers remain unchanged. HOOK-1A is implemented and validated.

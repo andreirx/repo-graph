@@ -272,13 +272,16 @@ fn print_prompt_submit_usage() {
     eprintln!("usage: rmap hook prompt-submit [OPTIONS]");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  --from-env          Read context from host environment variables");
+    eprintln!("  --from-stdin        Read JSON payload from stdin (Claude Code)");
+    eprintln!("  --from-env          Read from host environment variables (Codex, testing)");
     eprintln!("  --db <path>         Path to database file");
     eprintln!("  --repo <path>       Path to repository root");
     eprintln!("  --classify          Enable prompt classification");
+    eprintln!("  --prompt <text>     Provide prompt text explicitly");
     eprintln!("  --json              Output JSON instead of human-readable text");
     eprintln!("  --help              Show this help message");
     eprintln!();
-    eprintln!("With --from-env, prompt text is read from PROMPT_TEXT (Claude Code)");
-    eprintln!("or PROMPT (Codex).");
+    eprintln!("Transport modes:");
+    eprintln!("  --from-stdin: Claude Code passes JSON with prompt field");
+    eprintln!("  --from-env: Codex uses PROMPT env var");
 }

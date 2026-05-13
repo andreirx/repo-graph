@@ -104,12 +104,31 @@ Always create backup before modifying host configuration.
 
 Every integration must be reversible.
 
-```
-$ rmap integrate --remove claude-code
-This will restore: ~/.claude/settings.json from backup
-Backup location: ~/.claude/settings.json.rmap-backup
+**Default removal behavior: Surgical removal**
 
-Proceed? [y/N]: y
+Removal surgically removes repo-graph hooks while preserving any non-repo-graph hooks
+the user may have added after installation. This is safer than backup restore because
+it doesn't destroy user changes made after repo-graph was installed.
+
+```
+$ rmap integrate claude-code remove
+Claude Code integration removed
+  Config: ~/.claude/settings.json
+  Removed: 2 events
+  Note: Non-repo-graph hooks preserved
+```
+
+**Backup purpose:**
+
+The backup (created at install time) serves as:
+1. Emergency recovery if removal corrupts the file
+2. Reference for what the config looked like before repo-graph
+3. Manual restore option if user explicitly wants pre-install state
+
+**Manual backup restore (if needed):**
+
+```
+$ cp ~/.claude/settings.json.rmap-backup ~/.claude/settings.json
 ```
 
 ### D5: Project vs Global Scope
@@ -195,39 +214,68 @@ Support both project-level and user-global integrations.
 
 ## Claude Code Hook Schema
 
+**Schema source:** https://code.claude.com/docs/en/hooks (verified 2026-05-13)
+
+**Transport:** Claude Code passes hook input as **JSON on stdin**, not environment
+variables. Hook commands must use `--from-stdin` flag.
+
+**Structure:** Hooks use matcher groups with nested `hooks` arrays. The `type` field
+is required. Timeout is in **seconds**, not milliseconds.
+
 ```json
 {
   "hooks": {
     "SessionStart": [
       {
-        "command": "rmap hook session-start",
-        "timeout": 30000
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook session-start --from-stdin",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": {
-          "tool_name": ["Edit", "Write", "MultiEdit"]
-        },
-        "command": "rmap hook post-edit --files \"$TOOL_OUTPUT_FILES\"",
-        "timeout": 60000
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook post-edit --from-stdin",
+            "timeout": 60
+          }
+        ]
       }
     ],
     "PreCompact": [
       {
-        "command": "rmap hook pre-compact",
-        "timeout": 10000
+        "matcher": "auto|manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook pre-compact --from-stdin",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "Stop": [
       {
-        "command": "rmap hook stop",
-        "timeout": 30000
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook stop --from-stdin",
+            "timeout": 30
+          }
+        ]
       }
     ]
   }
 }
 ```
+
+**Matcher patterns:** String-based, not object. Use `|` for alternatives, regex for patterns.
 
 ## Codex Hook Schema
 
@@ -355,47 +403,75 @@ Options:
 Choice: 1
 ```
 
-## Environment Variables
+## Hook Input Transport
 
-Hooks receive context via environment variables. There are two categories:
+Hosts differ in how they provide context to hooks. This contract supports multiple
+transport mechanisms, normalized internally.
 
-### Host-Provided Variables
+### Transport Modes
 
-Each host provides its own set of environment variables. These are host-specific and
-documented in the respective implementation slices (CLAUDE-1, CODEX-1).
+| Host | Transport | Flag | Input Source |
+|------|-----------|------|--------------|
+| Claude Code | stdin JSON | `--from-stdin` | JSON payload on stdin |
+| Codex | Environment vars | `--from-env` | Environment variables |
+| Manual/Testing | Explicit args | `--db`, `--repo` | Command-line arguments |
 
-**Example — Claude Code:**
-- `CLAUDE_PROJECT_PATH` — project root path
-- `CLAUDE_SESSION_ID` — unique session identifier
-- `TOOL_NAME` — name of tool used (PostToolUse)
-- `TOOL_OUTPUT` — tool output (PostToolUse)
-- `PROMPT_TEXT` — user prompt content (UserPromptSubmit)
+### Claude Code Transport (stdin JSON)
 
-**Example — Codex (to be verified):**
-- Variable names may differ from Claude Code
-- Documented in CODEX-1 after verification
+Claude Code passes a JSON object on stdin containing session context:
 
-### rmap Internal Variables
+```json
+{
+  "session_id": "abc123",
+  "cwd": "/path/to/project",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Edit",
+  "tool_input": {...},
+  "tool_output": "..."
+}
+```
 
-rmap hook commands normalize host-provided variables into a common internal model.
-This translation happens inside the hook command, not in the shim.
+**Environment variables available (limited):**
+- `CLAUDE_PROJECT_DIR` — project root directory
+- `CLAUDE_ENV_FILE` — path to persist env vars (SessionStart only)
 
-| Internal Variable | Meaning | Derived From |
-|-------------------|---------|--------------|
-| `RMAP_REPO_PATH` | Repository root path | Host-provided project path |
-| `RMAP_SESSION_ID` | Session identifier | Host-provided session ID |
-| `RMAP_DB_PATH` | Path to repo database | Computed from repo path |
+### Codex Transport (Environment Variables)
+
+Codex provides context via environment variables (to be verified in CODEX-1):
+
+- `CODEX_PROJECT_PATH` — project root path
+- `CODEX_SESSION_ID` — session identifier
+- `CHANGED_FILES` — edited file paths (PostToolUse)
+- `PROMPT` — user prompt content (UserPromptSubmit)
+
+### Internal Normalization
+
+All transport modes normalize to a common `HookContext` structure inside `rmap hook`
+commands. The policy handlers are transport-agnostic.
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  --from-stdin   │     │   --from-env    │     │  --db/--repo    │
+│  (stdin JSON)   │     │  (env vars)     │     │  (explicit)     │
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 ▼
+                        ┌─────────────────┐
+                        │   HookContext   │
+                        │  (normalized)   │
+                        └────────┬────────┘
+                                 ▼
+                        ┌─────────────────┐
+                        │  Policy Handler │
+                        └─────────────────┘
+```
 
 **Contract:**
-- Shims pass host environment variables unchanged
-- `rmap hook` commands read host variables via `--from-env` flag
-- `rmap hook` commands perform the translation internally
-- Core hook policy code uses only rmap internal variables
-
-This separation allows:
-- Host-specific adapters in `rmap hook` implementation
-- Core policy code that is host-agnostic
-- New host support without changing core policy
+- Shims use the appropriate transport flag (`--from-stdin` or `--from-env`)
+- `rmap hook` commands parse input according to the flag
+- Core policy code uses only the normalized `HookContext`
+- New host support requires only a new transport adapter, not policy changes
 
 ## Error Handling in Hooks
 

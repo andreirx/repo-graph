@@ -31,6 +31,7 @@ mod graph;
 mod hook;
 mod index;
 mod inferences;
+mod integrate;
 mod modules;
 mod orient;
 mod policy;
@@ -54,6 +55,7 @@ pub use graph::{run_callees, run_callers, run_cycles, run_imports, run_path, run
 pub use hook::run_hook;
 pub use index::{run_index, run_refresh};
 pub use inferences::run_inferences;
+pub use integrate::run_integrate;
 pub use modules::{run_modules, run_violations};
 pub use orient::{run_check_cmd, run_explain_cmd, run_orient};
 pub use policy::run_policy;

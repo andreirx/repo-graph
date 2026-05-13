@@ -4,10 +4,16 @@
 //! - Host-provided variables are host-specific (CLAUDE_*, CODEX_*)
 //! - rmap internal variables (RMAP_*) are derived by hook commands
 //!
+//! Extended by HOOK-1A for stdin JSON transport:
+//! - Hosts like Claude Code pass context as JSON on stdin
+//! - StdinPayload is normalized to the same HookContext
+//!
 //! The translation layer belongs here, not in host shims.
 
 use std::env;
 use std::path::PathBuf;
+
+use super::transport::StdinPayload;
 
 /// Detected agent host type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,16 +166,19 @@ pub struct HookContext {
 impl HookContext {
     /// Parse hook context from command-line arguments.
     ///
-    /// Supports two modes:
-    /// - `--from-env`: Read from host environment variables
+    /// Supports three transport modes:
+    /// - `--from-stdin`: Read JSON payload from stdin (Claude Code)
+    /// - `--from-env`: Read from host environment variables (Codex)
     /// - Explicit: `--db <path> --repo <path>`
     ///
-    /// DB/repo resolution order (per HOOK-1 slice):
-    /// 1. Explicit --db/--repo arguments
+    /// Resolution order (per HOOK-1/HOOK-1A slices):
+    /// 1. Explicit --db/--repo arguments (highest priority)
     /// 2. RMAP_DB_PATH, RMAP_REPO_PATH environment variables
-    /// 3. Host environment variables (CLAUDE_PROJECT_PATH, etc.)
-    /// 4. Discovery: find .rmap.db or repo.db in current directory or parents
+    /// 3. --from-stdin: JSON payload provides cwd/session_id/event data
+    /// 4. --from-env: Host environment variables (CLAUDE_PROJECT_PATH, etc.)
+    /// 5. Discovery: find .rmap.db or repo.db in current directory or parents
     pub fn from_args(args: &[String]) -> Result<Self, String> {
+        let mut from_stdin = false;
         let mut from_env = false;
         let mut db_path: Option<PathBuf> = None;
         let mut repo_path: Option<PathBuf> = None;
@@ -183,6 +192,10 @@ impl HookContext {
         let mut i = 0;
         while i < args.len() {
             match args[i].as_str() {
+                "--from-stdin" => {
+                    from_stdin = true;
+                    i += 1;
+                }
                 "--from-env" => {
                     from_env = true;
                     i += 1;
@@ -246,6 +259,18 @@ impl HookContext {
             }
         }
 
+        // Validate transport mode exclusivity
+        if from_stdin && from_env {
+            return Err("--from-stdin and --from-env are mutually exclusive".to_string());
+        }
+
+        // Parse stdin payload if requested
+        let stdin_payload = if from_stdin {
+            Some(StdinPayload::from_stdin()?)
+        } else {
+            None
+        };
+
         // Resolution chain for DB path:
         // 1. Explicit --db argument
         // 2. RMAP_DB_PATH environment variable
@@ -257,8 +282,9 @@ impl HookContext {
         // Resolution chain for repo path:
         // 1. Explicit --repo argument
         // 2. RMAP_REPO_PATH environment variable
-        // 3. Host environment variables (CLAUDE_PROJECT_PATH, CODEX_PROJECT_PATH)
-        // 4. Discovery from DB location or current directory
+        // 3. --from-stdin: cwd from JSON payload
+        // 4. --from-env: Host environment variables (CLAUDE_PROJECT_PATH, CODEX_PROJECT_PATH)
+        // 5. Discovery from DB location or current directory
         let host_ctx = if from_env {
             HostContext::from_env()
         } else {
@@ -267,22 +293,65 @@ impl HookContext {
 
         let resolved_repo = repo_path
             .or_else(|| env::var("RMAP_REPO_PATH").ok().map(PathBuf::from))
+            .or_else(|| stdin_payload.as_ref().map(|p| p.cwd.clone()))
             .or(host_ctx.repo_path.clone())
             .or_else(|| discover_repo_path(resolved_db.as_ref()));
 
-        // Extract what we need from host_ctx
-        let session_id = if from_env {
+        // Session ID resolution:
+        // 1. --from-stdin: from JSON payload
+        // 2. --from-env: from host environment
+        // 3. Generate UUID
+        let session_id = if let Some(ref payload) = stdin_payload {
+            payload
+                .session_id
+                .clone()
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+        } else if from_env {
             host_ctx.session_id_or_generate()
         } else {
             uuid::Uuid::new_v4().to_string()
         };
 
-        let host_type = host_ctx.host_type;
-        let tool_name = host_ctx.tool_name.clone();
-        let tool_output = host_ctx.tool_output;
+        // Host type detection
+        let host_type = if stdin_payload.is_some() {
+            // Stdin transport is currently Claude Code specific
+            HostType::ClaudeCode
+        } else {
+            host_ctx.host_type
+        };
 
-        // Prompt text: explicit arg > host env
-        let resolved_prompt = prompt_text_arg.or(host_ctx.prompt_text);
+        // Tool name: stdin payload > env transport
+        let tool_name = stdin_payload
+            .as_ref()
+            .and_then(|p| p.tool_name.clone())
+            .or(host_ctx.tool_name.clone());
+
+        // Tool output: stdin payload > env transport
+        let tool_output = stdin_payload
+            .as_ref()
+            .and_then(|p| p.tool_output.clone())
+            .or(host_ctx.tool_output);
+
+        // Files: explicit arg > stdin payload > env transport
+        let resolved_files = if !files.is_empty() {
+            files
+        } else if let Some(ref payload) = stdin_payload {
+            payload.extract_file_paths()
+        } else {
+            tool_output
+                .as_ref()
+                .map(|s| parse_files_arg(s).unwrap_or_default())
+                .unwrap_or_default()
+        };
+
+        // Prompt text: explicit arg > stdin payload > env transport
+        let resolved_prompt = prompt_text_arg
+            .or_else(|| stdin_payload.as_ref().and_then(|p| p.prompt.clone()))
+            .or(host_ctx.prompt_text);
+
+        // Transcript path: explicit arg > stdin payload
+        let resolved_transcript = transcript_path
+            .or_else(|| stdin_payload.as_ref().and_then(|p| p.transcript_path.clone()));
 
         Ok(Self {
             db_path: resolved_db,
@@ -290,19 +359,11 @@ impl HookContext {
             session_id,
             host_type,
             json_output,
-            files: if files.is_empty() {
-                // Try to parse files from tool output
-                tool_output
-                    .as_ref()
-                    .map(|s| parse_files_arg(s).unwrap_or_default())
-                    .unwrap_or_default()
-            } else {
-                files
-            },
+            files: resolved_files,
             tool_name,
             prompt_text: resolved_prompt,
             require_validation,
-            transcript_path,
+            transcript_path: resolved_transcript,
             classify,
         })
     }
@@ -445,5 +506,32 @@ mod tests {
         let args = vec!["--json".to_string()];
         let ctx = HookContext::from_args(&args).unwrap();
         assert!(ctx.json_output);
+    }
+
+    #[test]
+    fn from_stdin_and_from_env_mutually_exclusive() {
+        let args = vec!["--from-stdin".to_string(), "--from-env".to_string()];
+        let result = HookContext::from_args(&args);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn explicit_args_override_transport() {
+        // Even with transport flags, explicit args take priority
+        // (can't test --from-stdin without mocking stdin, but can test the precedence principle)
+        let args = vec![
+            "--db".to_string(),
+            "explicit.db".to_string(),
+            "--repo".to_string(),
+            "/explicit/repo".to_string(),
+            "--from-env".to_string(),
+        ];
+        let ctx = HookContext::from_args(&args).unwrap();
+        // Explicit args should take precedence
+        assert_eq!(ctx.db_path, Some(PathBuf::from("explicit.db")));
+        assert_eq!(ctx.repo_path, Some(PathBuf::from("/explicit/repo")));
     }
 }

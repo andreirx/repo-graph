@@ -374,13 +374,14 @@ fn print_session_start_usage() {
     eprintln!("usage: rmap hook session-start [OPTIONS]");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  --from-env          Read context from host environment variables");
+    eprintln!("  --from-stdin        Read JSON payload from stdin (Claude Code)");
+    eprintln!("  --from-env          Read from host environment variables (Codex, testing)");
     eprintln!("  --db <path>         Path to database file");
     eprintln!("  --repo <path>       Path to repository root");
     eprintln!("  --json              Output JSON instead of human-readable text");
     eprintln!("  --help              Show this help message");
     eprintln!();
-    eprintln!("Environment variables (with --from-env):");
-    eprintln!("  Claude Code: CLAUDE_PROJECT_PATH, CLAUDE_SESSION_ID");
-    eprintln!("  Codex: CODEX_PROJECT_PATH, CODEX_SESSION_ID");
+    eprintln!("Transport modes:");
+    eprintln!("  --from-stdin: Claude Code passes JSON on stdin with session_id, cwd fields");
+    eprintln!("  --from-env: Codex uses CODEX_PROJECT_PATH, CODEX_SESSION_ID env vars");
 }

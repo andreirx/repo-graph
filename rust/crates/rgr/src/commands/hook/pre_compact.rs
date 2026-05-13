@@ -163,7 +163,8 @@ fn print_pre_compact_usage() {
     eprintln!("usage: rmap hook pre-compact [OPTIONS]");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  --from-env          Read context from host environment variables");
+    eprintln!("  --from-stdin        Read JSON payload from stdin (Claude Code)");
+    eprintln!("  --from-env          Read from host environment variables (Codex, testing)");
     eprintln!("  --db <path>         Path to database file");
     eprintln!("  --repo <path>       Path to repository root");
     eprintln!("  --json              Output JSON instead of human-readable text");

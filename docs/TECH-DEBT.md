@@ -2808,3 +2808,11 @@ REL-1 provides a **bootstrap installer** that installs binaries but defers:
    - No automatic pruning of old sessions
    - Future: Add session expiry or `rmap hook sessions prune` command
 
+5. **`--from-stdin` transport not implemented:**
+   - HOOK-1 only supports `--from-env` (environment variable transport)
+   - Claude Code uses stdin JSON transport, not environment variables
+   - `scripts/lib/macos.sh` has correct Claude Code schema using `--from-stdin`
+   - This flag does not exist yet — hooks will fail until CLAUDE-1 implements it
+   - Blocker for: CLAUDE-1 implementation
+   - See: CLAUDE-1 slice "Transport Architecture" section
+

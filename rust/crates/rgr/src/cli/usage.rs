@@ -89,15 +89,20 @@ pub fn print_usage() {
     eprintln!("  rmap boundaries summary <db_path> <repo_uid>");
     eprintln!("  rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER] [--file <path>]");
     eprintln!();
-    eprintln!("Agent host integration (HOOK-1):");
-    eprintln!("  rmap hook session-start [--from-env | --db <path> --repo <path>]");
-    eprintln!("  rmap hook prompt-submit [--from-env | --db <path> --repo <path>]");
-    eprintln!("  rmap hook post-edit [--from-env | --db <path> --repo <path> --files <paths>]");
-    eprintln!("  rmap hook pre-compact [--from-env | --db <path> --repo <path>]");
-    eprintln!("  rmap hook stop [--from-env | --db <path> --repo <path>]");
+    eprintln!("Agent host integration (HOOK-1/HOOK-1A):");
+    eprintln!("  rmap hook session-start [--from-stdin | --from-env | --db <path> --repo <path>]");
+    eprintln!("  rmap hook prompt-submit [--from-stdin | --from-env | --db <path> --repo <path>]");
+    eprintln!("  rmap hook post-edit [--from-stdin | --from-env | --db <path> --repo <path> --files <paths>]");
+    eprintln!("  rmap hook pre-compact [--from-stdin | --from-env | --db <path> --repo <path>]");
+    eprintln!("  rmap hook stop [--from-stdin | --from-env | --db <path> --repo <path>]");
     eprintln!("  rmap hook status");
     eprintln!();
     eprintln!("Installation management (MAC-1):");
     eprintln!("  rmap doctor    [--json]");
     eprintln!("  rmap uninstall [--dry-run] [--force] [--remove-data]");
+    eprintln!();
+    eprintln!("Host integrations (CLAUDE-1):");
+    eprintln!("  rmap integrate claude-code install [--global|--project] [--full] [--dry-run] [--force]");
+    eprintln!("  rmap integrate claude-code remove [--global|--project]");
+    eprintln!("  rmap integrate claude-code status [--global|--project] [--json]");
 }

@@ -243,25 +243,44 @@ patch_claude_code() {
     record_backup "claude-code" "${config_path}" "${backup_path}"
 
     # The hooks JSON to merge
+    # Schema per https://code.claude.com/docs/en/hooks (verified 2026-05-13)
+    # - Uses matcher groups with nested "hooks" arrays
+    # - Requires "type": "command" field
+    # - Timeout is in seconds, not milliseconds
+    # - Uses --from-stdin (stdin JSON), not --from-env
     local hooks_json
     hooks_json=$(cat <<'HOOKS_EOF'
 {
   "hooks": {
     "SessionStart": [
-      {"command": "rmap hook session-start --from-env", "timeout": 30000}
+      {
+        "hooks": [
+          {"type": "command", "command": "rmap hook session-start --from-stdin", "timeout": 30}
+        ]
+      }
     ],
     "PostToolUse": [
       {
-        "matcher": {"tool_name": ["Edit", "Write", "MultiEdit"]},
-        "command": "rmap hook post-edit --from-env",
-        "timeout": 60000
+        "matcher": "Edit|Write",
+        "hooks": [
+          {"type": "command", "command": "rmap hook post-edit --from-stdin", "timeout": 60}
+        ]
       }
     ],
     "PreCompact": [
-      {"command": "rmap hook pre-compact --from-env", "timeout": 10000}
+      {
+        "matcher": "auto|manual",
+        "hooks": [
+          {"type": "command", "command": "rmap hook pre-compact --from-stdin", "timeout": 10}
+        ]
+      }
     ],
     "Stop": [
-      {"command": "rmap hook stop --from-env", "timeout": 30000}
+      {
+        "hooks": [
+          {"type": "command", "command": "rmap hook stop --from-stdin", "timeout": 30}
+        ]
+      }
     ]
   }
 }

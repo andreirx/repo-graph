@@ -66,8 +66,9 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **RGISTR-1** | rgistr binary packaging (Node SEA, same archive as rmap/rmapd) | IMPLEMENTED |
 | **RMAPD-1** | Daemon binary target (`rmapd`) + daemon-runtime crate | IMPLEMENTED |
 | **HOOK-1** | `rmap hook` CLI surface (session-start, prompt-submit, post-edit, pre-compact, stop) | IMPLEMENTED |
-| **MAC-1** | macOS installer + daemon service (launchd, paths, health checks) | PLANNED |
-| **CLAUDE-1** | Claude Code integration (`.claude/settings.json` hooks) | PLANNED |
+| **MAC-1** | macOS installer + daemon service (launchd, paths, health checks) | IMPLEMENTED |
+| **HOOK-1A** | Stdin JSON transport for Claude Code hooks (`--from-stdin` flag) | IMPLEMENTED |
+| **CLAUDE-1** | Claude Code integration (`.claude/settings.json` hooks) | IMPLEMENTED |
 | **CODEX-1** | Codex CLI integration (`hooks.json`) | PLANNED |
 | **LINUX-1** | Linux installer + daemon service (systemd user unit) | PLANNED |
 | **CURSOR-1** | Cursor MCP/rules integration | PLANNED |
@@ -77,14 +78,35 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 
 ### Current Priority
 
-**MAC-1** is next.
+**CODEX-1** is next.
+
+CLAUDE-1 completed: Claude Code integration via `.claude/settings.json` hooks.
+CODEX-1 implements Codex CLI integration (`hooks.json`).
 
 Completed:
 - REL-SUPPORT-1: v0.1.1 release (CI validated)
 - RGISTR-1: rgistr packaged as Node SEA binary in release archive
 - DIST-1: Distribution contract locked (binary-first, manifest, security rules)
-- HOST-1: Host integration contract locked (thin shim model, environment variable translation, backup/rollback)
+- HOST-1: Host integration contract locked (thin shim model, transport model clarified)
 - HOOK-1: `rmap hook` CLI surface implemented (2026-05-13)
+- HOOK-1A: Stdin JSON transport for Claude Code hooks (2026-05-13)
+- MAC-1: macOS installer + daemon service implemented (2026-05-13)
+- CLAUDE-1: Claude Code integration implemented (2026-05-13)
+
+MAC-1 delivered:
+- `rmap doctor` health check command with JSON/human output
+- `rmap uninstall` with manifest-driven paths, --dry-run, --force, --remove-data
+- Platform adapter pattern (PlatformAdapter trait, macos.rs implementation)
+- launchd service management (plist template, bootstrap/bootout)
+- Install manifest with service metadata
+- Claude Code hook schema in installer (correct schema)
+
+HOOK-1A delivered (2026-05-13):
+- `--from-stdin` flag on all hook commands
+- `StdinPayload` parsing from stdin JSON
+- Normalization to existing `HookContext` (policy handlers unchanged)
+- Precedence: explicit args > stdin payload > env transport > discovery
+- Claude Code uses stdin JSON; Codex uses env vars
 
 HOOK-1 delivered:
 - All six hook commands: session-start, prompt-submit, post-edit, pre-compact, stop, status
@@ -103,11 +125,12 @@ HOOK-1 delivered:
 5. ~~RGISTR-1 — rgistr binary packaging~~ (IMPLEMENTED)
 6. ~~RMAPD-1 — daemon binary target~~ (IMPLEMENTED)
 7. ~~HOOK-1 — `rmap hook` commands before host shims use them~~ (IMPLEMENTED)
-8. **MAC-1 — macOS as first complete vertical slice (NEXT)**
-9. CLAUDE-1 — Claude Code integration on macOS
-10. CODEX-1 — Codex integration on macOS
-11. LINUX-1 — Linux reuses core policy, different service adapter
-12. CURSOR-1 — different integration model, separate from hook lane
+8. ~~MAC-1 — macOS installer + daemon service~~ (IMPLEMENTED)
+9. ~~HOOK-1A — stdin JSON transport for Claude Code~~ (IMPLEMENTED)
+10. ~~CLAUDE-1 — Claude Code integration on macOS~~ (IMPLEMENTED)
+11. **CODEX-1 — Codex integration on macOS (NEXT)**
+12. LINUX-1 — Linux reuses core policy, different service adapter
+13. CURSOR-1 — different integration model, separate from hook lane
 
 ### Artifact Matrix (REL-1)
 

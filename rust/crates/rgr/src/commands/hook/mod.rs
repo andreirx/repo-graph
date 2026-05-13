@@ -1,6 +1,7 @@
 //! Hook command family for agent host integration.
 //!
 //! Implements HOOK-1: `rmap hook` CLI surface.
+//! Extended by HOOK-1A: stdin JSON transport.
 //!
 //! These commands are called by thin host shims (Claude Code hooks, Codex hooks)
 //! and contain all orientation, refresh, and validation logic. The shims are
@@ -17,9 +18,13 @@
 //!
 //! # Payload Transport
 //!
-//! The `--from-env` flag is the recommended invocation mode. Hook commands
-//! read context from environment variables set by the host (Claude Code, Codex).
-//! This avoids shell quoting issues with large payloads.
+//! Two transport modes are supported:
+//!
+//! - `--from-env`: Read from host environment variables (Codex, legacy)
+//! - `--from-stdin`: Read JSON payload from stdin (Claude Code)
+//!
+//! Claude Code passes context as JSON on stdin. Codex uses environment variables.
+//! Both modes normalize to the same `HookContext` for policy handlers.
 //!
 //! # Exit Codes
 //!
@@ -37,6 +42,7 @@ mod session;
 mod session_start;
 mod status;
 mod stop;
+mod transport;
 
 use std::process::ExitCode;
 
@@ -75,15 +81,16 @@ pub fn run_hook(args: &[String]) -> ExitCode {
 
 fn print_hook_usage() {
     eprintln!("usage:");
-    eprintln!("  rmap hook session-start [--from-env | --db <path> --repo <path>]");
-    eprintln!("  rmap hook prompt-submit [--from-env | --db <path> --repo <path>]");
-    eprintln!("  rmap hook post-edit [--from-env | --db <path> --repo <path> --files <paths>]");
-    eprintln!("  rmap hook pre-compact [--from-env | --db <path> --repo <path>]");
-    eprintln!("  rmap hook stop [--from-env | --db <path> --repo <path>]");
+    eprintln!("  rmap hook session-start [--from-stdin | --from-env | --db <path> --repo <path>]");
+    eprintln!("  rmap hook prompt-submit [--from-stdin | --from-env | --db <path> --repo <path>]");
+    eprintln!("  rmap hook post-edit [--from-stdin | --from-env | --db <path> --repo <path> --files <paths>]");
+    eprintln!("  rmap hook pre-compact [--from-stdin | --from-env | --db <path> --repo <path>]");
+    eprintln!("  rmap hook stop [--from-stdin | --from-env | --db <path> --repo <path>]");
     eprintln!("  rmap hook status");
     eprintln!();
-    eprintln!("Environment variable mode (--from-env) reads context from host-provided");
-    eprintln!("environment variables. This is the recommended mode for host integration.");
+    eprintln!("Transport modes:");
+    eprintln!("  --from-stdin  Read JSON payload from stdin (Claude Code)");
+    eprintln!("  --from-env    Read from host environment variables (Codex)");
     eprintln!();
     eprintln!("Exit codes:");
     eprintln!("  0 — success");

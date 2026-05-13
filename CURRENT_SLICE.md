@@ -2,11 +2,151 @@
 
 ## Current Priority
 
-No active slice. Ready for next priority assignment.
+**CODEX-1: Codex CLI Integration**
+
+Slice doc: `docs/slices/codex-1-codex-cli-integration.md` (to be created)
+
+### Why This Slice
+
+Codex CLI integration via `hooks.json`. Second host-specific integration slice,
+implementing the HOST-1 contract for Codex.
+
+### Prerequisites Completed
+
+- HOOK-1: `rmap hook` command surface
+- HOOK-1A: `--from-stdin` transport (Claude Code)
+- HOOK-1: `--from-env` transport (Codex uses env vars)
+- MAC-1: macOS installer
+- CLAUDE-1: Claude Code integration (reference implementation)
 
 ---
 
 ## Recently Implemented
+
+**CLAUDE-1: Claude Code Integration** — IMPLEMENTED (2026-05-13)
+
+Slice doc: `docs/slices/claude-1-claude-code-integration.md`
+
+### Summary
+
+Claude Code integration via `.claude/settings.json` hooks using subcommand structure.
+
+### Delivered
+
+- `rmap integrate claude-code install [--global|--project] [--full] [--dry-run] [--force]`
+- `rmap integrate claude-code remove [--global|--project]`
+- `rmap integrate claude-code status [--global|--project] [--json]`
+- Minimal-by-default profile (SessionStart + Stop)
+- Full profile opt-in (--full adds UserPromptSubmit, PostToolUse, PreCompact)
+- JSON merge logic preserving non-repo-graph hooks
+- Backup before config mutation
+- Manifest recording for host integrations
+
+### Module Structure
+
+```
+commands/integrate/
+├── mod.rs           # Dispatcher only
+├── claude_code.rs   # Claude-specific policy
+├── config.rs        # Pure JSON transformation (32 tests)
+└── manifest.rs      # Integration state recording
+```
+
+### Validation Evidence (EXECUTED)
+
+```
+$ cargo clippy -p repo-graph-rgr -- -D warnings
+    Finished (no warnings)
+
+$ cargo test -p repo-graph-rgr integrate
+running 32 tests ... ok
+
+$ rmap integrate claude-code install --project --dry-run
+Dry run: Claude Code integration (minimal profile)
+  Plan: Install minimal profile (2 events)
+
+$ rmap integrate claude-code status --project --json
+{"scope":"project","status":"installed","profile":"minimal",...}
+```
+
+---
+
+**HOOK-1A: Stdin JSON Transport Adapter** — IMPLEMENTED (2026-05-13)
+
+Slice doc: `docs/slices/hook-1a-stdin-transport.md`
+
+### Summary
+
+Added `--from-stdin` transport mode to all hook commands. Claude Code passes
+hook context as JSON on stdin, not environment variables.
+
+### Delivered
+
+- `--from-stdin` flag on all 5 hook commands
+- `StdinPayload` struct with serde deserialization
+- Normalization to existing `HookContext` (policy handlers unchanged)
+- Precedence: explicit args > stdin payload > env transport > discovery
+- 9 transport unit tests, 7 env unit tests
+
+### Architecture
+
+```
+--from-stdin  →  StdinPayload  →  HookContext  →  Policy Handler (unchanged)
+--from-env    →  HostContext   →  HookContext  →  Policy Handler (unchanged)
+```
+
+---
+
+**MAC-1: macOS Installer + Daemon Service** — IMPLEMENTED (2026-05-13)
+
+Slice doc: `docs/slices/mac-1-macos-installer.md`
+
+### Summary
+
+macOS installer and daemon service management. Platform adapter pattern
+with clean architecture boundary: policy in CLI commands, mechanism in
+platform adapters.
+
+### Delivered
+
+- `rmap doctor` — health check command with JSON/human output
+- `rmap uninstall` — manifest-driven uninstall with --dry-run, --force, --remove-data
+- PlatformAdapter trait with MacOSAdapter implementation
+- launchd service management (plist template, bootstrap/bootout)
+- Install manifest with service metadata (`service` block)
+- Claude Code hook schema in installer (correct schema per official docs)
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│               CLI Commands (Policy)             │
+│  doctor.rs: what constitutes health             │
+│  uninstall.rs: what to remove, in what order    │
+└─────────────────────────────────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────┐
+│            PlatformAdapter Trait                │
+│  service_status(), stop_service(), remove_service() │
+│  read_manifest(), doctor_probes()               │
+└─────────────────────────────────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────┐
+│          MacOSAdapter (Mechanism)               │
+│  launchctl bootstrap/bootout                    │
+│  plist parsing, service target resolution       │
+└─────────────────────────────────────────────────┘
+```
+
+### Note
+
+`scripts/lib/macos.sh` has correct Claude Code hook schema (matcher groups,
+type field, timeout in seconds, --from-stdin). With HOOK-1A complete, the
+installer can now produce functional Claude Code integrations.
+
+---
 
 **HOOK-1: rmap hook CLI Surface** — IMPLEMENTED (2026-05-13)
 
@@ -20,13 +160,17 @@ implemented with full flag support, resolution chain, and configuration.
 ### Commands
 
 ```
-rmap hook session-start [--from-env | --db <path> --repo <path>]
-rmap hook prompt-submit [--from-env | --classify | --prompt <text>]
-rmap hook post-edit [--from-env | --files <paths>]
-rmap hook pre-compact [--from-env]
-rmap hook stop [--from-env | --require-validation | --transcript <path>]
+rmap hook session-start [--from-stdin | --from-env | --db <path> --repo <path>]
+rmap hook prompt-submit [--from-stdin | --from-env | --classify | --prompt <text>]
+rmap hook post-edit [--from-stdin | --from-env | --files <paths>]
+rmap hook pre-compact [--from-stdin | --from-env]
+rmap hook stop [--from-stdin | --from-env | --require-validation | --transcript <path>]
 rmap hook status [--json]
 ```
+
+**Transport modes:**
+- `--from-stdin`: Claude Code passes JSON on stdin (session_id, cwd, event data)
+- `--from-env`: Codex uses environment variables (CODEX_PROJECT_PATH, etc.)
 
 ### Implementation
 
@@ -41,12 +185,13 @@ rmap hook status [--json]
 - `stop.rs` — Validation summary, --require-validation, --transcript writing
 - `status.rs` — Configuration display, integration detection
 
-### Resolution Chain (per HOOK-1 slice)
+### Resolution Chain (per HOOK-1/HOOK-1A slices)
 
 1. Explicit --db/--repo arguments
 2. RMAP_DB_PATH, RMAP_REPO_PATH environment variables
-3. Host environment (CLAUDE_PROJECT_PATH, CODEX_PROJECT_PATH)
-4. Discovery (search for .rmap.db, repo.db; find .git for repo)
+3. --from-stdin: cwd from JSON payload (Claude Code)
+4. --from-env: Host environment variables (CODEX_PROJECT_PATH, etc.)
+5. Discovery (search for .rmap.db, repo.db; find .git for repo)
 
 ### Platform Directories (per DIST-1 D3)
 

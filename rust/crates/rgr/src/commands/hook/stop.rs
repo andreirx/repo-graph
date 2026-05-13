@@ -270,7 +270,8 @@ fn print_stop_usage() {
     eprintln!("usage: rmap hook stop [OPTIONS]");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  --from-env              Read context from host environment variables");
+    eprintln!("  --from-stdin            Read JSON payload from stdin (Claude Code)");
+    eprintln!("  --from-env              Read from host environment variables (Codex, testing)");
     eprintln!("  --db <path>             Path to database file");
     eprintln!("  --repo <path>           Path to repository root");
     eprintln!("  --require-validation    Fail if required validation not run");

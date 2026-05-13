@@ -192,13 +192,15 @@ fn print_post_edit_usage() {
     eprintln!("usage: rmap hook post-edit [OPTIONS]");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  --from-env          Read context from host environment variables");
+    eprintln!("  --from-stdin        Read JSON payload from stdin (Claude Code)");
+    eprintln!("  --from-env          Read from host environment variables (Codex, testing)");
     eprintln!("  --db <path>         Path to database file");
     eprintln!("  --repo <path>       Path to repository root");
     eprintln!("  --files <paths>     Comma-separated or JSON array of edited file paths");
     eprintln!("  --json              Output JSON instead of human-readable text");
     eprintln!("  --help              Show this help message");
     eprintln!();
-    eprintln!("With --from-env, file paths are read from TOOL_OUTPUT (Claude Code)");
-    eprintln!("or CHANGED_FILES (Codex).");
+    eprintln!("Transport modes:");
+    eprintln!("  --from-stdin: Claude Code passes JSON with tool_input.file_path");
+    eprintln!("  --from-env: Codex uses CHANGED_FILES env var");
 }
