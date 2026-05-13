@@ -839,7 +839,7 @@ dependencies = [
 
 [[package]]
 name = "repo-graph-daemon-runtime"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "enrichment",
  "jdtls-resolver",
@@ -1037,7 +1037,7 @@ dependencies = [
 
 [[package]]
 name = "repo-graph-rgr"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "enrichment",
  "jdtls-resolver",
@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "rmapd"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "repo-graph-daemon-runtime",
 ]
