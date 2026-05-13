@@ -178,6 +178,22 @@ fn insert_file_ownership_for_module(
     }
 }
 
+/// Clear all auto-generated module candidates and ownership.
+/// Call this before manually inserting test module data.
+fn clear_auto_generated_modules(db_path: &std::path::Path, repo_uid: &str) {
+    let conn = rusqlite::Connection::open(db_path).unwrap();
+    conn.execute(
+        "DELETE FROM module_file_ownership WHERE repo_uid = ?",
+        [repo_uid],
+    )
+    .expect("clear file ownership");
+    conn.execute(
+        "DELETE FROM module_candidates WHERE repo_uid = ?",
+        [repo_uid],
+    )
+    .expect("clear module candidates");
+}
+
 fn run_cmd(args: &[&str]) -> std::process::Output {
     Command::new(binary_path()).args(args).output().unwrap()
 }
@@ -236,6 +252,9 @@ fn modules_violations_empty_when_no_declarations() {
     let (_r, _d, db) = build_workspace_db();
     let snapshot_uid = get_snapshot_uid(&db, "r1");
 
+    // Clear auto-generated modules before inserting test data
+    clear_auto_generated_modules(&db, "r1");
+
     // Insert module candidates (but no boundary declarations)
     insert_module_candidate(
         &db,
@@ -285,6 +304,9 @@ fn modules_violations_empty_when_no_declarations() {
 fn modules_violations_empty_when_no_violating_imports() {
     let (_r, _d, db) = build_workspace_db();
     let snapshot_uid = get_snapshot_uid(&db, "r1");
+
+    // Clear auto-generated modules before inserting test data
+    clear_auto_generated_modules(&db, "r1");
 
     // Insert module candidates
     insert_module_candidate(
@@ -351,6 +373,9 @@ fn modules_violations_empty_when_no_violating_imports() {
 fn modules_violations_exact_results() {
     let (_r, _d, db) = build_workspace_db();
     let snapshot_uid = get_snapshot_uid(&db, "r1");
+
+    // Clear auto-generated modules before inserting test data
+    clear_auto_generated_modules(&db, "r1");
 
     // Insert module candidates
     insert_module_candidate(
@@ -476,6 +501,9 @@ fn insert_boundary_declaration(
 fn modules_violations_stale_declaration() {
     let (_r, _d, db) = build_workspace_db();
     let snapshot_uid = get_snapshot_uid(&db, "r1");
+
+    // Clear auto-generated modules before inserting test data
+    clear_auto_generated_modules(&db, "r1");
 
     // Insert module candidates (only app, NOT core)
     insert_module_candidate(
@@ -617,6 +645,9 @@ fn modules_violations_diagnostics_healthy() {
     let (_r, _d, db) = build_workspace_db();
     let snapshot_uid = get_snapshot_uid(&db, "r1");
 
+    // Clear auto-generated modules before inserting test data
+    clear_auto_generated_modules(&db, "r1");
+
     // Insert both module candidates
     insert_module_candidate(
         &db,
@@ -684,6 +715,9 @@ fn modules_violations_diagnostics_healthy() {
 fn modules_violations_diagnostics_degraded() {
     let (_r, _d, db) = build_workspace_db();
     let snapshot_uid = get_snapshot_uid(&db, "r1");
+
+    // Clear auto-generated modules before inserting test data
+    clear_auto_generated_modules(&db, "r1");
 
     // Insert only the app module candidate (NOT core)
     insert_module_candidate(
