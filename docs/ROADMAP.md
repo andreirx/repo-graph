@@ -63,7 +63,7 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **HOST-1** | Host integration contract (Claude/Codex hooks, Cursor MCP, detection model) | PLANNED |
 | **REL-1** | Release pipeline (GitHub Actions, artifact matrix, checksums) | IMPLEMENTED |
 | **REL-SUPPORT-1** | Version authority (workspace version, bump/cut scripts, CI validation) | IMPLEMENTED |
-| **RGISTR-1** | rgistr binary packaging (Node SEA, same archive as rmap/rmapd) | PLANNED |
+| **RGISTR-1** | rgistr binary packaging (Node SEA, same archive as rmap/rmapd) | **ACTIVE** |
 | **RMAPD-1** | Daemon binary target (`rmapd`) + daemon-runtime crate | IMPLEMENTED |
 | **HOOK-1** | `rmap hook` CLI surface (session-start, prompt-submit, post-edit, pre-compact, stop) | PLANNED |
 | **MAC-1** | macOS installer + daemon service (launchd, paths, health checks) | PLANNED |
@@ -77,15 +77,17 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 
 ### Current Priority
 
-**RGISTR-1** is next (after REL-SUPPORT-1 CI validation completes).
+**RGISTR-1** is active.
 
-REL-SUPPORT-1 implemented with v0.1.1 release:
-- Workspace-level canonical version
-- Crate version inheritance
-- Bump and cut-release scripts (including Cargo.lock)
-- CI validation (tag == manifest == binary)
+REL-SUPPORT-1 completed with v0.1.1 release (CI validated).
 
-Pending: push v0.1.1 tag, verify CI passes.
+RGISTR-1 packages rgistr as Node SEA binary in same release archive:
+- esbuild bundling with version injection from workspace manifest
+- Node SEA binary generation (macOS arm64, Linux x86_64)
+- Release workflow integration
+- Installer updated for three-binary install
+
+Pending: CI validation on next release.
 
 ### Execution Order
 
@@ -93,7 +95,7 @@ Pending: push v0.1.1 tag, verify CI passes.
 2. HOST-1 — host integration rules before host-specific work
 3. REL-1 — release artifacts and verification (IMPLEMENTED)
 4. REL-SUPPORT-1 — version authority enforcement (IMPLEMENTED, v0.1.1)
-5. **RGISTR-1 — rgistr binary packaging (NEXT, after CI validation)**
+5. **RGISTR-1 — rgistr binary packaging (ACTIVE)**
 6. RMAPD-1 — daemon binary target (IMPLEMENTED)
 7. HOOK-1 — `rmap hook` commands before host shims use them
 8. MAC-1 — macOS as first complete vertical slice

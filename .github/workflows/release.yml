@@ -112,7 +112,7 @@ jobs:
           # Build daemon binary from rmapd crate (separate crate per RMAPD-1)
           cargo build --release --target ${{ matrix.target }} -p rmapd
 
-      - name: Validate binary versions
+      - name: Validate Rust binary versions
         run: |
           TAG_VERSION="${{ steps.version.outputs.VERSION }}"
 
@@ -143,7 +143,39 @@ jobs:
             exit 1
           fi
 
-          echo "Binary versions validated: ${TAG_VERSION}"
+          echo "Rust binary versions validated: ${TAG_VERSION}"
+
+      # ── rgistr Node SEA build ────────────────────────────────────────
+      - name: Setup Node.js for rgistr
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build rgistr bundle
+        working-directory: tools/rgistr
+        run: |
+          npm ci
+          npm run bundle
+
+      - name: Build rgistr SEA binary
+        working-directory: tools/rgistr
+        run: |
+          ./scripts/build-sea.sh ${{ matrix.platform }} ${{ matrix.arch }}
+
+      - name: Validate rgistr version
+        run: |
+          TAG_VERSION="${{ steps.version.outputs.VERSION }}"
+          RGISTR_VERSION=$(./tools/rgistr/build/rgistr-${{ matrix.platform }}-${{ matrix.arch }} --version)
+
+          echo "Tag version:    ${TAG_VERSION}"
+          echo "rgistr version: ${RGISTR_VERSION}"
+
+          if [ "$RGISTR_VERSION" != "$TAG_VERSION" ]; then
+            echo "ERROR: rgistr --version ($RGISTR_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+
+          echo "rgistr version validated: ${TAG_VERSION}"
 
       - name: Prepare artifact directory
         run: |
@@ -152,9 +184,12 @@ jobs:
 
           mkdir -p "dist/${ARTIFACT_NAME}"
 
-          # Copy binaries
+          # Copy Rust binaries
           cp "rust/target/${{ matrix.target }}/release/rmap" "dist/${ARTIFACT_NAME}/"
           cp "rust/target/${{ matrix.target }}/release/rmapd" "dist/${ARTIFACT_NAME}/"
+
+          # Copy rgistr SEA binary
+          cp "tools/rgistr/build/rgistr-${{ matrix.platform }}-${{ matrix.arch }}" "dist/${ARTIFACT_NAME}/rgistr"
 
           # Copy documentation files if they exist
           [ -f README.md ] && cp README.md "dist/${ARTIFACT_NAME}/" || true

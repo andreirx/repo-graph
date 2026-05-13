@@ -258,6 +258,9 @@ download_binary() {
     if [[ ! -f "${EXTRACTED_DIR}/rmapd" ]]; then
         error "Daemon binary (rmapd) not found in archive"
     fi
+    if [[ ! -f "${EXTRACTED_DIR}/rgistr" ]]; then
+        error "rgistr binary not found in archive"
+    fi
 
     # Create install directory if needed
     mkdir -p "${INSTALL_DIR}"
@@ -268,6 +271,9 @@ download_binary() {
     info "Installing daemon to ${INSTALL_DIR}/rmapd..."
     install -m 755 "${EXTRACTED_DIR}/rmapd" "${INSTALL_DIR}/rmapd"
 
+    info "Installing rgistr to ${INSTALL_DIR}/rgistr..."
+    install -m 755 "${EXTRACTED_DIR}/rgistr" "${INSTALL_DIR}/rgistr"
+
     # Verify installation
     if ! "${INSTALL_DIR}/rmap" --version > /dev/null 2>&1; then
         # On macOS, Gatekeeper may block unsigned binaries
@@ -277,6 +283,7 @@ download_binary() {
             warn "To allow, run:"
             warn "  xattr -d com.apple.quarantine ${INSTALL_DIR}/rmap"
             warn "  xattr -d com.apple.quarantine ${INSTALL_DIR}/rmapd"
+            warn "  xattr -d com.apple.quarantine ${INSTALL_DIR}/rgistr"
             warn ""
             warn "Or: System Preferences -> Security & Privacy -> Allow"
             warn ""
@@ -284,6 +291,7 @@ download_binary() {
             if confirm "Run xattr commands now?"; then
                 xattr -d com.apple.quarantine "${INSTALL_DIR}/rmap" 2>/dev/null || true
                 xattr -d com.apple.quarantine "${INSTALL_DIR}/rmapd" 2>/dev/null || true
+                xattr -d com.apple.quarantine "${INSTALL_DIR}/rgistr" 2>/dev/null || true
 
                 if "${INSTALL_DIR}/rmap" --version > /dev/null 2>&1; then
                     info "Binaries unblocked successfully"
@@ -328,12 +336,24 @@ build_from_source() {
     cd "${tmp_dir}/repo-graph/rust"
 
     info "Building release binaries..."
-    cargo build --release -p repo-graph-rgr
+    cargo build --release -p repo-graph-rgr -p rmapd
 
-    # Install both binaries
+    # Install Rust binaries
     mkdir -p "${INSTALL_DIR}"
     install -m 755 "target/release/rmap" "${INSTALL_DIR}/rmap"
     install -m 755 "target/release/rmapd" "${INSTALL_DIR}/rmapd"
+
+    # Build rgistr (required - rgistr is a first-class release component)
+    if ! command_exists node || ! command_exists npm; then
+        error "Node.js and npm required for source build (rgistr is a first-class component)"
+    fi
+
+    info "Building rgistr..."
+    cd "${tmp_dir}/repo-graph/tools/rgistr"
+    npm ci
+    npm run bundle
+    ./scripts/build-sea.sh "${PLATFORM}" "${ARCH}"
+    install -m 755 "build/rgistr-${PLATFORM}-${ARCH}" "${INSTALL_DIR}/rgistr"
 
     local installed_version
     installed_version="$("${INSTALL_DIR}/rmap" --version 2>/dev/null | head -1)"
@@ -514,6 +534,10 @@ write_manifest() {
     "rmapd": {
       "path": "${INSTALL_DIR}/rmapd",
       "version": "${VERSION}"
+    },
+    "rgistr": {
+      "path": "${INSTALL_DIR}/rgistr",
+      "version": "${VERSION}"
     }
   },
   "directories": {
@@ -644,7 +668,7 @@ main() {
     fi
 
     echo "Uninstall:"
-    echo "  rm ${INSTALL_DIR}/rmap ${INSTALL_DIR}/rmapd"
+    echo "  rm ${INSTALL_DIR}/rmap ${INSTALL_DIR}/rmapd ${INSTALL_DIR}/rgistr"
     if [[ "${BINARY_ONLY}" != "true" ]]; then
         echo "  rm -rf ${CONFIG_DIR}"
         echo "  rm -rf ${DATA_DIR}"

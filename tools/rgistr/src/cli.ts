@@ -14,6 +14,13 @@ import { OpenAIAdapter } from './adapters/llm/OpenAIAdapter.js';
 import { generate, GenerationStatus } from './core/generator.js';
 import { scanDirectory, countCodeFiles } from './core/scanner.js';
 
+/**
+ * Version injected at bundle time from workspace manifest.
+ * Falls back to dev version for unbundled development.
+ */
+declare const __VERSION__: string | undefined;
+const VERSION = typeof __VERSION__ !== 'undefined' ? __VERSION__ : '0.0.0-dev';
+
 const program = new Command();
 
 /**
@@ -28,7 +35,7 @@ const OPENAI_MODELS = {
 program
   .name('rgistr')
   .description('Recursive Gist Runner - Generate hierarchical MAP.md documentation via LLM')
-  .version('0.2.0');
+  .version(VERSION);
 
 program
   .command('generate')

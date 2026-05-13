@@ -12,10 +12,12 @@ on:
       - main
     paths:
       - 'rust/**'
+      - 'tools/rgistr/**'
       - '.github/workflows/ci.yml'
   pull_request:
     paths:
       - 'rust/**'
+      - 'tools/rgistr/**'
       - '.github/workflows/ci.yml'
 
 env:
@@ -128,7 +130,7 @@ jobs:
 
   # Cross-platform build check (matches release matrix)
   build:
-    name: Build ${{ matrix.platform }}
+    name: Build ${{ matrix.platform_name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -136,10 +138,14 @@ jobs:
         include:
           - os: macos-14
             target: aarch64-apple-darwin
-            platform: macOS ARM64
+            platform: darwin
+            arch: aarch64
+            platform_name: macOS ARM64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            platform: Linux x86_64
+            platform: linux
+            arch: x86_64
+            platform_name: Linux x86_64
 
     steps:
       - name: Checkout repository
@@ -168,7 +174,28 @@ jobs:
           cargo build --release --target ${{ matrix.target }} -p repo-graph-rgr
           cargo build --release --target ${{ matrix.target }} -p rmapd
 
-      - name: Verify binaries
+      - name: Verify Rust binaries
         run: |
           ./rust/target/${{ matrix.target }}/release/rmap --version
           ./rust/target/${{ matrix.target }}/release/rmapd --version
+
+      # ── rgistr Node SEA build ────────────────────────────────────────
+      - name: Setup Node.js for rgistr
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build rgistr bundle
+        working-directory: tools/rgistr
+        run: |
+          npm ci
+          npm run bundle
+
+      - name: Build rgistr SEA binary
+        working-directory: tools/rgistr
+        run: |
+          ./scripts/build-sea.sh ${{ matrix.platform }} ${{ matrix.arch }}
+
+      - name: Verify rgistr binary
+        run: |
+          ./tools/rgistr/build/rgistr-${{ matrix.platform }}-${{ matrix.arch }} --version

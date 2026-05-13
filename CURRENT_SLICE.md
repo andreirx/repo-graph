@@ -2,37 +2,46 @@
 
 ## Current Priority
 
+**RGISTR-1: rgistr Binary Packaging** — ACTIVE
+
+Slice doc: `docs/slices/rgistr-1-binary-packaging.md`
+
+### Context
+
+Package `rgistr` (LLM-powered code registration tool) as standalone binary
+via Node SEA. Include in same release archive as `rmap`/`rmapd`.
+
+### Implementation Plan
+
+1. **Bundle rgistr to single file** (esbuild)
+2. **Node SEA binary generation** for macOS arm64 and Linux x86_64
+3. **Version injection** from workspace manifest
+4. **GitHub Actions integration** (extend release.yml)
+5. **Installer update** (install rgistr alongside rmap/rmapd)
+
+### Progress
+
+- [x] Add esbuild to package.json, create bundle script
+- [x] Create SEA build script (`scripts/build-sea.sh`)
+- [x] Replace hardcoded version with injected constant
+- [x] Update release workflow for rgistr
+- [x] Update installer for rgistr
+- [x] Local validation (macOS arm64): `rgistr --version` → `0.1.1`
+- [ ] CI validation (both platforms) — pending next release
+
+---
+
+## Recently Implemented
+
 **REL-SUPPORT-1: Version Authority** — IMPLEMENTED (2026-05-13)
 
 Slice doc: `docs/slices/rel-support-1-version-authority.md`
 
-### Context
-
-REL-1 completed with v0.1.0 release. REL-SUPPORT-1 hardened the release process with:
-
-- Workspace-level canonical version (`[workspace.package] version`)
-- Crate version inheritance (`version.workspace = true`)
-- Bump scripts (`scripts/bump_version_{patch,minor,major}.sh`)
-- Cut-release scripts (`scripts/cut_release_{patch,minor,major}.sh`)
-- CI validation (tag == manifest == binary)
-
-### Validation (v0.1.1)
-
-- [x] Workspace version setup in `rust/Cargo.toml`
-- [x] Release crates inherit version (rgr, rmapd, daemon-runtime)
-- [x] Bump scripts created and tested
-- [x] Cut-release scripts created (including Cargo.lock staging)
-- [x] Release workflow validation steps added
-- [x] `cut_release_patch.sh` executed successfully
-- [x] Commit `release: v0.1.1` created
-- [x] Tag `v0.1.1` created
-- [x] `rmap --version` reports `0.1.1`
-- [x] `rmapd --version` reports `0.1.1`
-- [ ] CI release workflow passes on tag push (pending)
-
-### Next
-
-Push `v0.1.1` tag to trigger CI. After CI passes, move to RGISTR-1.
+Validated with v0.1.1 release:
+- Workspace version inheritance working
+- Cut-release scripts produce clean commits
+- CI validates tag == manifest == binary versions
+- Draft release assets created for both platforms
 
 ---
 

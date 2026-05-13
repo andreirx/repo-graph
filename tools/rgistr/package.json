@@ -1,6 +1,6 @@
 {
   "name": "rgistr",
-  "version": "0.2.0",
+  "version": "0.0.0-workspace",
   "description": "Recursive Gist Runner - Hierarchical documentation synthesis via LLM",
   "type": "module",
   "main": "dist/cli.js",
@@ -12,7 +12,8 @@
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "bundle": "node scripts/bundle.mjs"
   },
   "dependencies": {
     "commander": "^12.0.0",
@@ -21,6 +22,8 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "esbuild": "^0.21.0",
+    "postject": "^1.0.0-alpha.6",
     "typescript": "^5.3.3",
     "vitest": "^1.2.0"
   },
