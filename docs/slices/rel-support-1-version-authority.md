@@ -1,6 +1,6 @@
 # REL-SUPPORT-1: Version Authority and Release-Cut Scripts
 
-Status: PLANNED
+Status: IMPLEMENTED (v0.1.1 released using this workflow)
 Depends: REL-1
 Track: Distribution / Install / Host Integration
 
@@ -157,8 +157,8 @@ cargo check --workspace
 cargo clippy --all-targets -- -D warnings
 cd ..
 
-# Commit
-git add rust/Cargo.toml
+# Commit (manifest + lockfile — lockfile updates with workspace versions)
+git add rust/Cargo.toml rust/Cargo.lock
 git commit -m "release: ${TAG}"
 
 # Tag
@@ -231,9 +231,12 @@ Add validation step to `.github/workflows/release.yml`:
 1. `[workspace.package] version` is the single source of version truth
 2. All release crates report matching versions via `--version`
 3. Bump scripts correctly increment version components
-4. Cut-release scripts produce valid, committable release state
+4. Cut-release scripts produce valid, committable release state (including Cargo.lock)
 5. Release workflow fails if tag != manifest != binary version
-6. v0.2.0 release uses the new workflow successfully
+6. First release after implementation uses the new workflow successfully
+
+**Validation (v0.1.1):** All criteria met. Cut-release script produced commit + tag,
+CI workflow validated tag == manifest == binary versions, draft release created.
 
 ## Migration
 

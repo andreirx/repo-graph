@@ -56,7 +56,8 @@ cd "$REPO_ROOT"
 
 echo ""
 echo "=== Creating release commit ==="
-git add "$CARGO_TOML"
+# Stage workspace manifest and lockfile (lockfile updates with workspace versions)
+git add "$CARGO_TOML" "$REPO_ROOT/rust/Cargo.lock"
 git commit -m "release: ${TAG}"
 
 echo ""

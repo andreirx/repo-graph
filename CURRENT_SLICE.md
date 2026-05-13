@@ -2,14 +2,13 @@
 
 ## Current Priority
 
-**REL-SUPPORT-1: Version Authority** — ACTIVE
+**REL-SUPPORT-1: Version Authority** — IMPLEMENTED (2026-05-13)
 
 Slice doc: `docs/slices/rel-support-1-version-authority.md`
 
 ### Context
 
-REL-1 completed with v0.1.0 release. The pipeline works, but version authority
-was not enforced. REL-SUPPORT-1 hardens the release process with:
+REL-1 completed with v0.1.0 release. REL-SUPPORT-1 hardened the release process with:
 
 - Workspace-level canonical version (`[workspace.package] version`)
 - Crate version inheritance (`version.workspace = true`)
@@ -17,18 +16,23 @@ was not enforced. REL-SUPPORT-1 hardens the release process with:
 - Cut-release scripts (`scripts/cut_release_{patch,minor,major}.sh`)
 - CI validation (tag == manifest == binary)
 
-### Implementation Status
+### Validation (v0.1.1)
 
 - [x] Workspace version setup in `rust/Cargo.toml`
 - [x] Release crates inherit version (rgr, rmapd, daemon-runtime)
 - [x] Bump scripts created and tested
-- [x] Cut-release scripts created
+- [x] Cut-release scripts created (including Cargo.lock staging)
 - [x] Release workflow validation steps added
+- [x] `cut_release_patch.sh` executed successfully
+- [x] Commit `release: v0.1.1` created
+- [x] Tag `v0.1.1` created
+- [x] `rmap --version` reports `0.1.1`
+- [x] `rmapd --version` reports `0.1.1`
+- [ ] CI release workflow passes on tag push (pending)
 
-### Remaining Verification
+### Next
 
-- First use of cut-release scripts for next release (v0.1.1 or v0.2.0)
-- CI workflow validation step passes on tag push
+Push `v0.1.1` tag to trigger CI. After CI passes, move to RGISTR-1.
 
 ---
 
