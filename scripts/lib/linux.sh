@@ -50,22 +50,52 @@ detect_systemd() {
 # systemd Service Management
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Emit systemd unit content to stdout.
+# Used by install_systemd_unit. Can be overridden in bundled mode.
+emit_linux_service() {
+    # Try template file first (modular mode)
+    if [[ -n "${SCRIPT_DIR:-}" ]] && [[ -f "${SCRIPT_DIR}/templates/${LINUX_SERVICE_NAME}" ]]; then
+        cat "${SCRIPT_DIR}/templates/${LINUX_SERVICE_NAME}"
+        return
+    fi
+
+    # Fallback: embedded template (bundled mode)
+    cat << 'SERVICE_TEMPLATE'
+[Unit]
+Description=repo-graph daemon
+Documentation=https://github.com/andreirx/repo-graph
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/rmapd
+Restart=on-failure
+RestartSec=10
+
+StandardOutput=append:%h/.local/share/rmap/logs/daemon.log
+StandardError=append:%h/.local/share/rmap/logs/daemon.log
+
+Environment=RMAP_LOG_LEVEL=info
+
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target
+SERVICE_TEMPLATE
+}
+
 # Install the systemd unit file from template.
 install_systemd_unit() {
-    local template_path="${SCRIPT_DIR}/templates/${LINUX_SERVICE_NAME}"
     local unit_path="${LINUX_SYSTEMD_USER_DIR}/${LINUX_SERVICE_NAME}"
-
-    if [[ ! -f "${template_path}" ]]; then
-        error "systemd unit template not found: ${template_path}"
-    fi
 
     info "Installing systemd user service..."
 
     # Ensure systemd user directory exists
     mkdir -p "${LINUX_SYSTEMD_USER_DIR}"
 
-    # Copy unit file (systemd expands %h, no substitution needed)
-    cp "${template_path}" "${unit_path}"
+    # Write unit file (systemd expands %h, no substitution needed)
+    emit_linux_service > "${unit_path}"
 
     # Set correct permissions (644 for unit files)
     chmod 644 "${unit_path}"

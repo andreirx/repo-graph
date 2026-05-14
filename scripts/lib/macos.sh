@@ -21,23 +21,75 @@ MACOS_PLIST_NAME="${MACOS_SERVICE_LABEL}.plist"
 # launchd Service Management
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Emit launchd plist content to stdout.
+# Used by install_launchd_plist. Can be overridden in bundled mode.
+emit_macos_plist() {
+    # Try template file first (modular mode)
+    if [[ -n "${SCRIPT_DIR:-}" ]] && [[ -f "${SCRIPT_DIR}/templates/${MACOS_PLIST_NAME}" ]]; then
+        cat "${SCRIPT_DIR}/templates/${MACOS_PLIST_NAME}"
+        return
+    fi
+
+    # Fallback: embedded template (bundled mode)
+    cat << 'PLIST_TEMPLATE'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.repo-graph.rmapd</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>${HOME}/.local/bin/rmapd</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>${HOME}/Library/Logs/repo-graph/daemon.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>${HOME}/Library/Logs/repo-graph/daemon.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>RMAP_LOG_LEVEL</key>
+        <string>info</string>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>
+PLIST_TEMPLATE
+}
+
 # Install the launchd plist from template.
 # Expands ${HOME} in the template and installs to LaunchAgents.
 install_launchd_plist() {
-    local template_path="${SCRIPT_DIR}/templates/${MACOS_PLIST_NAME}"
     local plist_path="${MACOS_LAUNCHAGENTS_DIR}/${MACOS_PLIST_NAME}"
-
-    if [[ ! -f "${template_path}" ]]; then
-        error "launchd template not found: ${template_path}"
-    fi
 
     info "Installing launchd service..."
 
     # Ensure LaunchAgents directory exists
     mkdir -p "${MACOS_LAUNCHAGENTS_DIR}"
 
-    # Expand ${HOME} in template
-    sed "s|\${HOME}|${HOME}|g" "${template_path}" > "${plist_path}"
+    # Expand ${HOME} in template and write to plist
+    emit_macos_plist | sed "s|\${HOME}|${HOME}|g" > "${plist_path}"
 
     # Set correct permissions (644 for plist files)
     chmod 644 "${plist_path}"

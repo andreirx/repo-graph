@@ -262,6 +262,30 @@ jobs:
           echo "Downloaded artifacts:"
           find artifacts -type f -ls
 
+      - name: Generate bundled installer
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          echo "Generating bundled installer for v${VERSION}..."
+
+          # Generate bundled installer
+          ./scripts/bundle-installer.sh > artifacts/install.sh
+          chmod +x artifacts/install.sh
+
+          # Validate syntax
+          bash -n artifacts/install.sh
+
+          # Create checksum
+          cd artifacts
+          if command -v shasum &> /dev/null; then
+            shasum -a 256 install.sh > install.sh.sha256
+          else
+            sha256sum install.sh > install.sh.sha256
+          fi
+
+          echo "Bundled installer created:"
+          ls -la install.sh install.sh.sha256
+          cat install.sh.sha256
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -273,6 +297,7 @@ jobs:
           files: |
             artifacts/*.tar.gz
             artifacts/*.sha256
+            artifacts/install.sh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

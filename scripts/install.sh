@@ -23,6 +23,17 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Script Location Detection
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Detect script directory. Empty if running via curl|bash (bundled mode).
+if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ -f "${BASH_SOURCE[0]}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    SCRIPT_DIR=""
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -134,7 +145,22 @@ detect_platform() {
 
 # Source platform-specific module after platform detection.
 # Called from main() after detect_platform().
+#
+# In modular mode (run from checkout): sources lib/macos.sh or lib/linux.sh
+# In bundled mode (curl|bash): libs are already inlined, this is a no-op
 source_platform_module() {
+    # Bundled mode: SCRIPT_DIR is empty, libs are already inlined
+    if [[ -z "${SCRIPT_DIR}" ]]; then
+        # Check if platform functions are already defined (bundled)
+        if declare -f setup_macos_daemon_service > /dev/null 2>&1 || \
+           declare -f setup_linux_daemon_service > /dev/null 2>&1; then
+            PLATFORM_MODULE_LOADED=true
+            return
+        fi
+        PLATFORM_MODULE_LOADED=false
+        return
+    fi
+
     local lib_dir="${SCRIPT_DIR}/lib"
 
     case "${PLATFORM}" in
