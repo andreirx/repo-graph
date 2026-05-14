@@ -97,12 +97,37 @@ pub struct MergePlan {
     pub summary: String,
 }
 
-/// Hook definitions for repo-graph.
-pub struct RepoGraphHooks;
+/// Check if a command string is a repo-graph hook.
+pub fn is_repo_graph_hook(command: &str) -> bool {
+    command.contains("rmap hook")
+}
 
-impl RepoGraphHooks {
-    /// Minimal profile: SessionStart + Stop
-    pub fn minimal() -> Vec<(&'static str, MatcherGroup)> {
+/// Hook definitions for a specific host.
+///
+/// Each host (Claude Code, Codex) provides its own hook definitions.
+/// This trait allows config.rs to remain generic.
+pub trait HookDefinitions {
+    /// Get minimal profile hooks.
+    fn minimal() -> Vec<(&'static str, MatcherGroup)>;
+
+    /// Get full profile hooks.
+    fn full() -> Vec<(&'static str, MatcherGroup)>;
+
+    /// Get minimal profile event names.
+    fn minimal_events() -> Vec<&'static str>;
+
+    /// Get full profile event names.
+    fn full_events() -> Vec<&'static str>;
+}
+
+/// Claude Code hook definitions.
+///
+/// - Minimal: SessionStart + Stop
+/// - Full: SessionStart + UserPromptSubmit + PostToolUse + PreCompact + Stop
+pub struct ClaudeCodeHooks;
+
+impl HookDefinitions for ClaudeCodeHooks {
+    fn minimal() -> Vec<(&'static str, MatcherGroup)> {
         vec![
             (
                 "SessionStart",
@@ -129,8 +154,7 @@ impl RepoGraphHooks {
         ]
     }
 
-    /// Full profile: all 5 hooks
-    pub fn full() -> Vec<(&'static str, MatcherGroup)> {
+    fn full() -> Vec<(&'static str, MatcherGroup)> {
         vec![
             (
                 "SessionStart",
@@ -190,18 +214,11 @@ impl RepoGraphHooks {
         ]
     }
 
-    /// Check if a command string is a repo-graph hook.
-    pub fn is_repo_graph_hook(command: &str) -> bool {
-        command.contains("rmap hook")
-    }
-
-    /// Events in minimal profile.
-    pub fn minimal_events() -> Vec<&'static str> {
+    fn minimal_events() -> Vec<&'static str> {
         vec!["SessionStart", "Stop"]
     }
 
-    /// Events in full profile.
-    pub fn full_events() -> Vec<&'static str> {
+    fn full_events() -> Vec<&'static str> {
         vec![
             "SessionStart",
             "UserPromptSubmit",
@@ -211,6 +228,107 @@ impl RepoGraphHooks {
         ]
     }
 }
+
+/// Codex CLI hook definitions.
+///
+/// Verified May 2026 from https://developers.openai.com/codex/hooks
+///
+/// - Minimal: SessionStart (startup|resume) + Stop
+/// - Full: SessionStart + UserPromptSubmit + PostToolUse + Stop
+/// - No PreCompact (Codex doesn't support this event)
+/// - PostToolUse includes apply_patch tool name
+pub struct CodexHooks;
+
+impl HookDefinitions for CodexHooks {
+    fn minimal() -> Vec<(&'static str, MatcherGroup)> {
+        vec![
+            (
+                "SessionStart",
+                MatcherGroup {
+                    // Skip "clear" events - only orient on startup/resume
+                    matcher: Some("startup|resume".to_string()),
+                    hooks: vec![HookHandler {
+                        handler_type: "command".to_string(),
+                        command: "rmap hook session-start --from-stdin".to_string(),
+                        timeout: Some(30),
+                    }],
+                },
+            ),
+            (
+                "Stop",
+                MatcherGroup {
+                    matcher: None,
+                    hooks: vec![HookHandler {
+                        handler_type: "command".to_string(),
+                        command: "rmap hook stop --from-stdin".to_string(),
+                        timeout: Some(30),
+                    }],
+                },
+            ),
+        ]
+    }
+
+    fn full() -> Vec<(&'static str, MatcherGroup)> {
+        vec![
+            (
+                "SessionStart",
+                MatcherGroup {
+                    matcher: Some("startup|resume".to_string()),
+                    hooks: vec![HookHandler {
+                        handler_type: "command".to_string(),
+                        command: "rmap hook session-start --from-stdin".to_string(),
+                        timeout: Some(30),
+                    }],
+                },
+            ),
+            (
+                "UserPromptSubmit",
+                MatcherGroup {
+                    matcher: None,
+                    hooks: vec![HookHandler {
+                        handler_type: "command".to_string(),
+                        command: "rmap hook prompt-submit --from-stdin".to_string(),
+                        timeout: Some(10),
+                    }],
+                },
+            ),
+            (
+                "PostToolUse",
+                MatcherGroup {
+                    // Codex uses apply_patch in addition to Edit|Write
+                    matcher: Some("Edit|Write|apply_patch".to_string()),
+                    hooks: vec![HookHandler {
+                        handler_type: "command".to_string(),
+                        command: "rmap hook post-edit --from-stdin".to_string(),
+                        timeout: Some(60),
+                    }],
+                },
+            ),
+            (
+                "Stop",
+                MatcherGroup {
+                    matcher: None,
+                    hooks: vec![HookHandler {
+                        handler_type: "command".to_string(),
+                        command: "rmap hook stop --from-stdin".to_string(),
+                        timeout: Some(30),
+                    }],
+                },
+            ),
+        ]
+    }
+
+    fn minimal_events() -> Vec<&'static str> {
+        vec!["SessionStart", "Stop"]
+    }
+
+    fn full_events() -> Vec<&'static str> {
+        vec!["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"]
+    }
+}
+
+/// Legacy alias for backward compatibility.
+pub type RepoGraphHooks = ClaudeCodeHooks;
 
 /// Parse a Claude Code settings.json file content.
 pub fn parse_settings(content: &str) -> Result<Value, String> {
@@ -294,7 +412,7 @@ fn event_has_repo_graph_hooks(event_value: &Value) -> bool {
         if let Some(hooks) = group.get("hooks").and_then(|h| h.as_array()) {
             for hook in hooks {
                 if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
-                    if RepoGraphHooks::is_repo_graph_hook(cmd) {
+                    if is_repo_graph_hook(cmd) {
                         return true;
                     }
                 }
@@ -314,7 +432,7 @@ fn event_has_non_repo_graph_hooks(event_value: &Value) -> bool {
         if let Some(hooks) = group.get("hooks").and_then(|h| h.as_array()) {
             for hook in hooks {
                 if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
-                    if !RepoGraphHooks::is_repo_graph_hook(cmd) {
+                    if !is_repo_graph_hook(cmd) {
                         return true;
                     }
                 }
@@ -351,8 +469,8 @@ fn determine_profile(repo_graph_events: &[String]) -> InstalledProfile {
     }
 }
 
-/// Plan the merge operation for installing hooks.
-pub fn plan_install(
+/// Plan the merge operation for installing hooks (generic version).
+pub fn plan_install_with<H: HookDefinitions>(
     existing_content: Option<&str>,
     full_profile: bool,
     force: bool,
@@ -366,9 +484,9 @@ pub fn plan_install(
     }
 
     let target_hooks = if full_profile {
-        RepoGraphHooks::full()
+        H::full()
     } else {
-        RepoGraphHooks::minimal()
+        H::minimal()
     };
 
     let existing_hooks_found = !analysis.repo_graph_events.is_empty();
@@ -416,6 +534,15 @@ pub fn plan_install(
     })
 }
 
+/// Plan the merge operation for installing hooks (Claude Code default).
+pub fn plan_install(
+    existing_content: Option<&str>,
+    full_profile: bool,
+    force: bool,
+) -> Result<MergePlan, String> {
+    plan_install_with::<ClaudeCodeHooks>(existing_content, full_profile, force)
+}
+
 /// Plan the remove operation.
 pub fn plan_remove(existing_content: Option<&str>) -> Result<MergePlan, String> {
     let analysis = analyze_config(existing_content);
@@ -449,8 +576,11 @@ pub fn plan_remove(existing_content: Option<&str>) -> Result<MergePlan, String> 
     })
 }
 
-/// Apply the install plan to produce new configuration.
-pub fn apply_install(existing_content: Option<&str>, full_profile: bool) -> Result<String, String> {
+/// Apply the install plan to produce new configuration (generic version).
+pub fn apply_install_with<H: HookDefinitions>(
+    existing_content: Option<&str>,
+    full_profile: bool,
+) -> Result<String, String> {
     let mut root: Value = if let Some(content) = existing_content {
         parse_settings(content)?
     } else {
@@ -470,9 +600,9 @@ pub fn apply_install(existing_content: Option<&str>, full_profile: bool) -> Resu
         .ok_or("hooks must be an object")?;
 
     let target_hooks = if full_profile {
-        RepoGraphHooks::full()
+        H::full()
     } else {
-        RepoGraphHooks::minimal()
+        H::minimal()
     };
 
     for (event_name, matcher_group) in target_hooks {
@@ -493,6 +623,11 @@ pub fn apply_install(existing_content: Option<&str>, full_profile: bool) -> Resu
     }
 
     serde_json::to_string_pretty(&root).map_err(|e| format!("failed to serialize: {}", e))
+}
+
+/// Apply the install plan to produce new configuration (Claude Code default).
+pub fn apply_install(existing_content: Option<&str>, full_profile: bool) -> Result<String, String> {
+    apply_install_with::<ClaudeCodeHooks>(existing_content, full_profile)
 }
 
 /// Apply the remove plan to produce new configuration.
@@ -536,7 +671,7 @@ fn group_has_repo_graph_hooks(group: &Value) -> bool {
     if let Some(hooks) = group.get("hooks").and_then(|h| h.as_array()) {
         for hook in hooks {
             if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
-                if RepoGraphHooks::is_repo_graph_hook(cmd) {
+                if is_repo_graph_hook(cmd) {
                     return true;
                 }
             }
@@ -760,13 +895,9 @@ mod tests {
 
     #[test]
     fn test_is_repo_graph_hook() {
-        assert!(RepoGraphHooks::is_repo_graph_hook(
-            "rmap hook session-start --from-stdin"
-        ));
-        assert!(RepoGraphHooks::is_repo_graph_hook(
-            "/usr/local/bin/rmap hook stop"
-        ));
-        assert!(!RepoGraphHooks::is_repo_graph_hook("my-custom-hook.sh"));
-        assert!(!RepoGraphHooks::is_repo_graph_hook("echo hello"));
+        assert!(is_repo_graph_hook("rmap hook session-start --from-stdin"));
+        assert!(is_repo_graph_hook("/usr/local/bin/rmap hook stop"));
+        assert!(!is_repo_graph_hook("my-custom-hook.sh"));
+        assert!(!is_repo_graph_hook("echo hello"));
     }
 }

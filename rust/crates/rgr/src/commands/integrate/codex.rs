@@ -1,4 +1,4 @@
-//! Claude Code integration policy.
+//! Codex CLI integration policy.
 //!
 //! This module decides:
 //! - Target config path (global vs project)
@@ -6,6 +6,9 @@
 //! - Minimal vs full hook set
 //! - Dry-run reporting
 //! - Force semantics
+//!
+//! Schema verified May 2026 from https://developers.openai.com/codex/hooks
+//! Codex hooks are experimental and may change.
 //!
 //! It delegates JSON manipulation to config.rs.
 
@@ -15,13 +18,13 @@ use std::process::ExitCode;
 use serde::Serialize;
 
 use super::config::{
-    self, analyze_config, apply_install, apply_remove, backup_path, plan_install, plan_remove,
-    ConfigAnalysis, HookDefinitions, RepoGraphHooks,
+    self, analyze_config, apply_install_with, apply_remove, backup_path, plan_install_with,
+    plan_remove, CodexHooks, ConfigAnalysis, HookDefinitions,
 };
 use super::manifest::{self, get_integration, record_integration, remove_integration_record};
 
 /// Host identifier for manifest recording.
-pub const HOST_ID: &str = "claude-code";
+pub const HOST_ID: &str = "codex";
 
 /// Scope for global installation.
 pub const SCOPE_GLOBAL: &str = "global";
@@ -29,14 +32,14 @@ pub const SCOPE_GLOBAL: &str = "global";
 /// Scope for project installation.
 pub const SCOPE_PROJECT: &str = "project";
 
-/// Get the global Claude Code settings path.
+/// Get the global Codex hooks path.
 pub fn global_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".claude/settings.json"))
+    dirs::home_dir().map(|h| h.join(".codex/hooks.json"))
 }
 
-/// Get the project Claude Code settings path.
+/// Get the project Codex hooks path.
 pub fn project_config_path() -> PathBuf {
-    PathBuf::from(".claude/settings.json")
+    PathBuf::from(".codex/hooks.json")
 }
 
 /// Options for the install command.
@@ -116,7 +119,7 @@ pub fn execute_install(opts: &InstallOptions) -> ExitCode {
     let (config_path, scope) = resolve_config_path(opts.global, opts.project);
 
     let Some(config_path) = config_path else {
-        eprintln!("error: could not determine Claude Code config path");
+        eprintln!("error: could not determine Codex config path");
         return ExitCode::from(2);
     };
 
@@ -138,13 +141,14 @@ pub fn execute_install(opts: &InstallOptions) -> ExitCode {
     };
 
     // Plan the install
-    let plan = match plan_install(existing_content.as_deref(), opts.full, opts.force) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(1);
-        }
-    };
+    let plan =
+        match plan_install_with::<CodexHooks>(existing_content.as_deref(), opts.full, opts.force) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("error: {}", e);
+                return ExitCode::from(1);
+            }
+        };
 
     // Create backup if file exists
     let backup = if existing_content.is_some() {
@@ -178,7 +182,8 @@ pub fn execute_install(opts: &InstallOptions) -> ExitCode {
     }
 
     // Apply the install
-    let new_content = match apply_install(existing_content.as_deref(), opts.full) {
+    let new_content = match apply_install_with::<CodexHooks>(existing_content.as_deref(), opts.full)
+    {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: failed to generate config: {}", e);
@@ -195,12 +200,12 @@ pub fn execute_install(opts: &InstallOptions) -> ExitCode {
     // Record in manifest
     let profile = if opts.full { "full" } else { "minimal" };
     let hooks_installed: Vec<String> = if opts.full {
-        RepoGraphHooks::full_events()
+        CodexHooks::full_events()
             .into_iter()
             .map(String::from)
             .collect()
     } else {
-        RepoGraphHooks::minimal_events()
+        CodexHooks::minimal_events()
             .into_iter()
             .map(String::from)
             .collect()
@@ -218,12 +223,14 @@ pub fn execute_install(opts: &InstallOptions) -> ExitCode {
     }
 
     // Report success
-    println!("Claude Code integration installed ({} profile)", profile);
+    println!("Codex integration installed ({} profile)", profile);
     println!("  Config: {}", config_path.display());
     println!("  Hooks: {}", hooks_installed.join(", "));
     if plan.existing_hooks_found {
         println!("  Note: existing repo-graph hooks were updated");
     }
+    println!();
+    println!("  Note: Codex hooks are experimental and may change in future releases.");
 
     ExitCode::SUCCESS
 }
@@ -236,16 +243,17 @@ fn execute_install_dry_run(config_path: &Path, scope: &str, opts: &InstallOption
         None
     };
 
-    let plan = match plan_install(existing_content.as_deref(), opts.full, opts.force) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(1);
-        }
-    };
+    let plan =
+        match plan_install_with::<CodexHooks>(existing_content.as_deref(), opts.full, opts.force) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("error: {}", e);
+                return ExitCode::from(1);
+            }
+        };
 
     let profile = if opts.full { "full" } else { "minimal" };
-    println!("Dry run: Claude Code integration ({} profile)", profile);
+    println!("Dry run: Codex integration ({} profile)", profile);
     println!("  Scope: {}", scope);
     println!("  Config: {}", config_path.display());
     println!();
@@ -279,12 +287,12 @@ pub fn execute_remove(opts: &RemoveOptions) -> ExitCode {
     let (config_path, scope) = resolve_config_path(opts.global, opts.project);
 
     let Some(config_path) = config_path else {
-        eprintln!("error: could not determine Claude Code config path");
+        eprintln!("error: could not determine Codex config path");
         return ExitCode::from(2);
     };
 
     if !config_path.exists() {
-        println!("Claude Code config not found: {}", config_path.display());
+        println!("Codex config not found: {}", config_path.display());
         println!("No repo-graph hooks to remove.");
         return ExitCode::SUCCESS;
     }
@@ -333,7 +341,7 @@ pub fn execute_remove(opts: &RemoveOptions) -> ExitCode {
     }
 
     // Report success
-    println!("Claude Code integration removed");
+    println!("Codex integration removed");
     println!("  Config: {}", config_path.display());
     println!(
         "  Removed: {} events",
@@ -364,7 +372,7 @@ pub fn execute_status(opts: &StatusOptions) -> ExitCode {
             };
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
         } else {
-            eprintln!("error: could not determine Claude Code config path");
+            eprintln!("error: could not determine Codex config path");
         }
         return ExitCode::from(2);
     };
@@ -435,7 +443,7 @@ fn print_status_human(
     analysis: &ConfigAnalysis,
     manifest_record: Option<&manifest::HostIntegration>,
 ) {
-    println!("Claude Code Integration Status");
+    println!("Codex Integration Status");
     println!();
     println!(
         "{} ({}):",
@@ -488,6 +496,9 @@ fn print_status_human(
             analysis.other_events.join(", ")
         );
     }
+
+    println!();
+    println!("  Note: Codex hooks are experimental and may change in future releases.");
 }
 
 /// Resolve config path based on global/project flags.
@@ -579,34 +590,36 @@ pub fn parse_status_args(args: &[String]) -> Result<StatusOptions, String> {
 
 /// Print install usage.
 pub fn print_install_usage() {
-    eprintln!("usage: rmap integrate claude-code install [OPTIONS]");
+    eprintln!("usage: rmap integrate codex install [OPTIONS]");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  --global    Install to ~/.claude/settings.json (default)");
-    eprintln!("  --project   Install to ./.claude/settings.json");
+    eprintln!("  --global    Install to ~/.codex/hooks.json (default)");
+    eprintln!("  --project   Install to ./.codex/hooks.json");
     eprintln!("  --full      Install all hooks (default: minimal - SessionStart + Stop)");
     eprintln!("  --dry-run   Show changes without applying");
     eprintln!("  --force     Overwrite existing repo-graph hooks");
     eprintln!("  --help      Show this help message");
+    eprintln!();
+    eprintln!("Note: Codex hooks are experimental and may change in future releases.");
 }
 
 /// Print remove usage.
 pub fn print_remove_usage() {
-    eprintln!("usage: rmap integrate claude-code remove [OPTIONS]");
+    eprintln!("usage: rmap integrate codex remove [OPTIONS]");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  --global    Remove from ~/.claude/settings.json (default)");
-    eprintln!("  --project   Remove from ./.claude/settings.json");
+    eprintln!("  --global    Remove from ~/.codex/hooks.json (default)");
+    eprintln!("  --project   Remove from ./.codex/hooks.json");
     eprintln!("  --help      Show this help message");
 }
 
 /// Print status usage.
 pub fn print_status_usage() {
-    eprintln!("usage: rmap integrate claude-code status [OPTIONS]");
+    eprintln!("usage: rmap integrate codex status [OPTIONS]");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  --global    Check ~/.claude/settings.json (default)");
-    eprintln!("  --project   Check ./.claude/settings.json");
+    eprintln!("  --global    Check ~/.codex/hooks.json (default)");
+    eprintln!("  --project   Check ./.codex/hooks.json");
     eprintln!("  --json      Output JSON instead of human-readable text");
     eprintln!("  --help      Show this help message");
 }
@@ -687,6 +700,43 @@ mod tests {
         let (path, scope) = resolve_config_path(false, true);
         assert!(path.is_some());
         assert_eq!(scope, SCOPE_PROJECT);
-        assert_eq!(path.unwrap().to_string_lossy(), ".claude/settings.json");
+        assert_eq!(path.unwrap().to_string_lossy(), ".codex/hooks.json");
+    }
+
+    #[test]
+    fn test_codex_hooks_minimal() {
+        let hooks = CodexHooks::minimal();
+        assert_eq!(hooks.len(), 2);
+        // SessionStart should have matcher
+        let (name, group) = &hooks[0];
+        assert_eq!(*name, "SessionStart");
+        assert!(group.matcher.is_some());
+        assert_eq!(group.matcher.as_ref().unwrap(), "startup|resume");
+    }
+
+    #[test]
+    fn test_codex_hooks_full() {
+        let hooks = CodexHooks::full();
+        assert_eq!(hooks.len(), 4); // No PreCompact in Codex
+        let event_names: Vec<&str> = hooks.iter().map(|(n, _)| *n).collect();
+        assert!(event_names.contains(&"SessionStart"));
+        assert!(event_names.contains(&"UserPromptSubmit"));
+        assert!(event_names.contains(&"PostToolUse"));
+        assert!(event_names.contains(&"Stop"));
+        assert!(!event_names.contains(&"PreCompact")); // Codex doesn't have PreCompact
+    }
+
+    #[test]
+    fn test_codex_post_tool_use_matcher() {
+        let hooks = CodexHooks::full();
+        let post_tool = hooks.iter().find(|(n, _)| *n == "PostToolUse").unwrap();
+        assert!(post_tool.1.matcher.is_some());
+        // Should include apply_patch
+        assert!(post_tool
+            .1
+            .matcher
+            .as_ref()
+            .unwrap()
+            .contains("apply_patch"));
     }
 }

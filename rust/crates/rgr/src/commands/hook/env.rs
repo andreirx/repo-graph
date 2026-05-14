@@ -1,12 +1,16 @@
-//! Host environment variable detection and translation.
+//! Host context detection and translation.
 //!
-//! Implements HOST-1 environment variable contract:
-//! - Host-provided variables are host-specific (CLAUDE_*, CODEX_*)
-//! - rmap internal variables (RMAP_*) are derived by hook commands
+//! Supports multiple transport modes for hook context:
 //!
-//! Extended by HOOK-1A for stdin JSON transport:
-//! - Hosts like Claude Code pass context as JSON on stdin
-//! - StdinPayload is normalized to the same HookContext
+//! - `--from-stdin`: JSON payload on stdin (Claude Code, Codex — verified May 2026)
+//! - `--from-env`: Environment variables (legacy/fallback, not used by current hosts)
+//! - Explicit args: `--db`, `--repo` (testing, scripting)
+//!
+//! **Important:** The CODEX_* environment variable names below are legacy assumptions
+//! that predate schema verification. Verified Codex documentation (May 2026) shows
+//! Codex uses stdin JSON transport, same as Claude Code. The `--from-env` transport
+//! is retained for testing and potential future hosts, but is not part of any
+//! verified host contract.
 //!
 //! The translation layer belongs here, not in host shims.
 
@@ -81,8 +85,9 @@ impl HostContext {
 
     /// Extract context from Codex environment variables.
     ///
-    /// Note: Codex variable names are assumed based on HOST-1 contract.
-    /// Actual names should be verified against Codex CLI documentation.
+    /// **LEGACY:** These variable names are unverified assumptions. Verified Codex
+    /// documentation (May 2026) shows Codex uses stdin JSON transport, not env vars.
+    /// This code path is retained for fallback/testing only.
     fn from_codex_env() -> Self {
         Self {
             host_type: HostType::Codex,

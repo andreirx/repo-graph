@@ -1,12 +1,41 @@
 # LINUX-1: Linux Installer and Daemon Service
 
-Status: PLANNED
+Status: CODE COMPLETE — PENDING LINUX VALIDATION
 Depends: DIST-1, REL-1
 Track: Distribution / Install / Host Integration
 
 **Execution order note:** Follows MAC-1 in rollout sequence (macOS-first platform priority),
 but MAC-1 is not a build dependency. Both implement the same DIST-1 contract independently.
 HOOK-1 provides commands that host integrations call, but is not a build dependency.
+
+## Implementation Notes (2026-05-14)
+
+**Actual implementation differs from design-time code snippets below.**
+
+Key differences from original design:
+
+| Aspect | Design (below) | Actual Implementation |
+|--------|----------------|----------------------|
+| Entry point | Separate `install-linux.sh` | Unified `scripts/install.sh` (per MAC-1 pattern) |
+| Service mode variable | `NO_SYSTEMD=true` | `LINUX_SERVICE_MODE=systemd\|manual` |
+| systemd unit | `ExecStart=%h/.local/bin/rmapd --config ...` | `ExecStart=%h/.local/bin/rmapd` (no config flag) |
+| Manual fallback | Basic PID file | Full PID file lifecycle in `linux.sh` |
+| Manifest mode | Always `systemd` | Records actual mode (`systemd` or `manual`) |
+
+**Actual files:**
+- `scripts/install.sh` — unified installer with Linux dispatch
+- `scripts/lib/linux.sh` — Linux-specific functions (systemd + manual mode)
+- `scripts/templates/rmapd.service` — systemd user unit template
+- `rust/crates/rgr/src/platform/linux.rs` — Rust adapter with dual-mode support
+- `rust/crates/rgr/src/platform/manifest.rs` — shared manifest parser
+
+**Pending validation (requires Linux):**
+- Fresh install on Ubuntu/Fedora/Arch
+- systemd service lifecycle
+- Non-systemd fallback (Alpine/WSL1)
+- `rmap doctor` / `rmap uninstall`
+
+---
 
 ## Objective
 

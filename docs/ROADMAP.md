@@ -69,8 +69,8 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **MAC-1** | macOS installer + daemon service (launchd, paths, health checks) | IMPLEMENTED |
 | **HOOK-1A** | Stdin JSON transport for Claude Code hooks (`--from-stdin` flag) | IMPLEMENTED |
 | **CLAUDE-1** | Claude Code integration (`.claude/settings.json` hooks) | IMPLEMENTED |
-| **CODEX-1** | Codex CLI integration (`hooks.json`) | PLANNED |
-| **LINUX-1** | Linux installer + daemon service (systemd user unit) | PLANNED |
+| **CODEX-1** | Codex CLI integration (`hooks.json`) | IMPLEMENTED |
+| **LINUX-1** | Linux installer + daemon service (systemd user unit) | CODE COMPLETE |
 | **CURSOR-1** | Cursor MCP/rules integration | PLANNED |
 | **WIN-1** | Windows distribution/install | DEFERRED |
 | **MAC-2** | macOS signing/notarization | DEFERRED |
@@ -78,10 +78,15 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 
 ### Current Priority
 
-**CODEX-1** is next.
+**LINUX-1** code complete, pending Linux validation.
 
-CLAUDE-1 completed: Claude Code integration via `.claude/settings.json` hooks.
-CODEX-1 implements Codex CLI integration (`hooks.json`).
+Distribution track complete for macOS:
+- MAC-1: macOS installer + launchd service
+- CLAUDE-1: Claude Code integration
+- CODEX-1: Codex CLI integration
+
+LINUX-1 code is written but requires validation on actual Linux systems before
+marking IMPLEMENTED. After Linux validation, CURSOR-1 is next.
 
 Completed:
 - REL-SUPPORT-1: v0.1.1 release (CI validated)
@@ -92,6 +97,7 @@ Completed:
 - HOOK-1A: Stdin JSON transport for Claude Code hooks (2026-05-13)
 - MAC-1: macOS installer + daemon service implemented (2026-05-13)
 - CLAUDE-1: Claude Code integration implemented (2026-05-13)
+- CODEX-1: Codex CLI integration implemented (2026-05-14)
 
 MAC-1 delivered:
 - `rmap doctor` health check command with JSON/human output
@@ -106,7 +112,7 @@ HOOK-1A delivered (2026-05-13):
 - `StdinPayload` parsing from stdin JSON
 - Normalization to existing `HookContext` (policy handlers unchanged)
 - Precedence: explicit args > stdin payload > env transport > discovery
-- Claude Code uses stdin JSON; Codex uses env vars
+- Both Claude Code and Codex use stdin JSON (verified May 2026)
 
 HOOK-1 delivered:
 - All six hook commands: session-start, prompt-submit, post-edit, pre-compact, stop, status
@@ -128,8 +134,8 @@ HOOK-1 delivered:
 8. ~~MAC-1 — macOS installer + daemon service~~ (IMPLEMENTED)
 9. ~~HOOK-1A — stdin JSON transport for Claude Code~~ (IMPLEMENTED)
 10. ~~CLAUDE-1 — Claude Code integration on macOS~~ (IMPLEMENTED)
-11. **CODEX-1 — Codex integration on macOS (NEXT)**
-12. LINUX-1 — Linux reuses core policy, different service adapter
+11. ~~CODEX-1 — Codex integration on macOS~~ (IMPLEMENTED)
+12. **LINUX-1 — Linux installer + daemon service (CODE COMPLETE — PENDING VALIDATION)**
 13. CURSOR-1 — different integration model, separate from hook lane
 
 ### Artifact Matrix (REL-1)

@@ -13,49 +13,65 @@ Codex hooks, etc.) and contain all orientation, refresh, and validation logic.
 ## Command Surface
 
 ```
-rmap hook session-start [--from-env | --db <path> --repo <path>]
+rmap hook session-start [--from-stdin | --from-env | --db <path> --repo <path>]
   Orient agent at session start. Outputs context summary to stdout.
 
-rmap hook prompt-submit [--from-env | --db <path> --repo <path>]
+rmap hook prompt-submit [--from-stdin | --from-env | --db <path> --repo <path>]
   Inject task-relevant context before prompt processing.
 
-rmap hook post-edit [--from-env | --db <path> --repo <path> --files <paths>]
+rmap hook post-edit [--from-stdin | --from-env | --db <path> --repo <path> --files <paths>]
   Refresh index and report impact after file edits.
 
-rmap hook pre-compact [--from-env | --db <path> --repo <path>]
+rmap hook pre-compact [--from-stdin | --from-env | --db <path> --repo <path>]
   Checkpoint session state before context compaction.
 
-rmap hook stop [--from-env | --db <path> --repo <path>]
+rmap hook stop [--from-stdin | --from-env | --db <path> --repo <path>]
   Validate and summarize at task completion.
 
 rmap hook status
   Show current hook state and configuration.
 ```
 
-## Payload Transport: --from-env
+**Transport:** Both Claude Code and Codex use `--from-stdin` (JSON on stdin). The
+`--from-env` flag is legacy/fallback only.
 
-The `--from-env` flag is the **recommended invocation mode** for host integrations.
+## Payload Transport
 
-**Problem:** Passing large or multiline payloads (prompt text, tool output, file lists)
-as shell command arguments is fragile due to quoting, escaping, and length limits.
+Hook commands support multiple transport modes for receiving context from hosts.
 
-**Solution:** With `--from-env`, hook commands read all context from environment variables
-set by the host (Claude Code, Codex, etc.).
+### --from-stdin (Recommended)
 
-| Variable (Claude Code) | Variable (Codex) | Consumed by |
-|------------------------|------------------|-------------|
-| `CLAUDE_PROJECT_PATH` | `CODEX_PROJECT_PATH` | All hooks |
-| `CLAUDE_SESSION_ID` | `CODEX_SESSION_ID` | All hooks |
-| `PROMPT_TEXT` | `PROMPT` | `prompt-submit` |
-| `TOOL_OUTPUT` | `CHANGED_FILES` | `post-edit` |
-| `TOOL_NAME` | `TOOL_NAME` | `post-edit` |
+**Both Claude Code and Codex pass context as JSON on stdin.** This is the recommended
+transport for all current host integrations.
 
-The hook commands auto-detect which host is invoking them based on which environment
-variables are present, and read from the appropriate ones.
+```
+rmap hook session-start --from-stdin
+```
 
-**Explicit arguments still supported:** For testing, scripting, or non-host invocation,
-explicit `--db`, `--repo`, `--files` arguments are still accepted and take precedence
-over environment variables.
+The host passes a JSON object on stdin containing:
+- `session_id` — session identifier
+- `cwd` — working directory (used as repo path)
+- `hook_event_name` — current event name
+- Event-specific fields (`prompt`, `tool_name`, `tool_input`, etc.)
+
+### --from-env (Legacy/Fallback)
+
+The `--from-env` flag reads context from environment variables. **Neither Claude Code
+nor Codex uses this transport.** It exists for testing and potential future hosts.
+
+The CODEX_* environment variable names in the codebase are legacy assumptions that
+predate schema verification. They are retained as fallback but are not part of any
+verified host contract.
+
+### Explicit Arguments
+
+For testing, scripting, or direct invocation, explicit arguments are supported:
+
+```
+rmap hook session-start --db ./repo.db --repo /path/to/repo
+```
+
+**Explicit arguments take precedence** over all transport modes.
 
 ## Command Specifications
 

@@ -9,10 +9,7 @@ use std::process::Command;
 
 use crate::cli::paths;
 
-use super::{
-    InstallManifest, ManifestComponent, ManifestComponents, ManifestDirectories, ManifestService,
-    PlatformAdapter, ProbeResult, ServiceStatus,
-};
+use super::{manifest, InstallManifest, PlatformAdapter, ProbeResult, ServiceStatus};
 
 /// Service label for launchd.
 const SERVICE_LABEL: &str = "com.repo-graph.rmapd";
@@ -179,65 +176,7 @@ impl PlatformAdapter for MacOSAdapter {
             .ok_or_else(|| "could not determine config directory".to_string())?;
         let manifest_path = config_dir.join("install-manifest.json");
 
-        if !manifest_path.exists() {
-            return Err(format!("manifest not found: {}", manifest_path.display()));
-        }
-
-        let content = std::fs::read_to_string(&manifest_path)
-            .map_err(|e| format!("failed to read manifest: {}", e))?;
-
-        let json: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| format!("failed to parse manifest: {}", e))?;
-
-        // Parse manifest fields
-        let manifest = InstallManifest {
-            schema_version: json["schema_version"].as_str().unwrap_or("1").to_string(),
-            installed_at: json["installed_at"].as_str().map(|s| s.to_string()),
-            platform: json["platform"].as_str().unwrap_or("").to_string(),
-            arch: json["arch"].as_str().unwrap_or("").to_string(),
-            install_mode: json["install_mode"].as_str().unwrap_or("user").to_string(),
-            components: ManifestComponents {
-                rmap: json["components"]["rmap"]["path"]
-                    .as_str()
-                    .map(|p| ManifestComponent {
-                        path: PathBuf::from(p),
-                        version: json["components"]["rmap"]["version"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_string(),
-                    }),
-                rmapd: json["components"]["rmapd"]["path"]
-                    .as_str()
-                    .map(|p| ManifestComponent {
-                        path: PathBuf::from(p),
-                        version: json["components"]["rmapd"]["version"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_string(),
-                    }),
-                rgistr: json["components"]["rgistr"]["path"]
-                    .as_str()
-                    .map(|p| ManifestComponent {
-                        path: PathBuf::from(p),
-                        version: json["components"]["rgistr"]["version"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_string(),
-                    }),
-            },
-            directories: ManifestDirectories {
-                config: PathBuf::from(json["directories"]["config"].as_str().unwrap_or("")),
-                data: PathBuf::from(json["directories"]["data"].as_str().unwrap_or("")),
-                logs: PathBuf::from(json["directories"]["logs"].as_str().unwrap_or("")),
-            },
-            service: json["service"]["type"].as_str().map(|t| ManifestService {
-                service_type: t.to_string(),
-                path: PathBuf::from(json["service"]["path"].as_str().unwrap_or("")),
-                status: json["service"]["status"].as_str().unwrap_or("").to_string(),
-            }),
-        };
-
-        Ok(manifest)
+        manifest::parse_manifest_from_path(&manifest_path)
     }
 
     fn doctor_probes(&self) -> Vec<ProbeResult> {

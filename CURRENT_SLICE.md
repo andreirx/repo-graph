@@ -2,26 +2,128 @@
 
 ## Current Priority
 
-**CODEX-1: Codex CLI Integration**
+**LINUX-1: Linux Installer + Daemon Service** — CODE COMPLETE, PENDING VALIDATION
 
-Slice doc: `docs/slices/codex-1-codex-cli-integration.md` (to be created)
+Slice doc: `docs/slices/linux-1-linux-installer.md`
 
-### Why This Slice
+macOS host integration lane complete (CLAUDE-1, CODEX-1). LINUX-1 extends distribution to Linux.
 
-Codex CLI integration via `hooks.json`. Second host-specific integration slice,
-implementing the HOST-1 contract for Codex.
+### Code Complete
 
-### Prerequisites Completed
+1. **Shared manifest parser** (`platform/manifest.rs`)
+   - Extracted from macos.rs, 6 unit tests
+   - Parses all service types: `launchd`, `systemd`, `manual`
 
-- HOOK-1: `rmap hook` command surface
-- HOOK-1A: `--from-stdin` transport (Claude Code)
-- HOOK-1: `--from-env` transport (Codex uses env vars)
-- MAC-1: macOS installer
-- CLAUDE-1: Claude Code integration (reference implementation)
+2. **Linux platform adapter** (`platform/linux.rs`)
+   - Dual-mode service support (systemd + manual PID file)
+   - `service_status()` reads manifest to determine mode
+   - `stop_service()` / `remove_service()` handle both modes
+   - `doctor_probes()` reports mode-aware status
+   - 5 unit tests for systemctl output parsing (gated, not run on macOS)
+
+3. **systemd user service template** (`scripts/templates/rmapd.service`)
+   - Uses `%h` specifier (systemd expands to home dir)
+   - Restart=on-failure, Nice=10, IOSchedulingClass=idle
+
+4. **Linux shell support** (`scripts/lib/linux.sh`)
+   - `detect_systemd()` — checks for user session availability
+   - `setup_linux_daemon_service()` — installs correct mode
+   - `uninstall_linux_daemon_service()` — handles both modes
+   - Manual mode: PID file + nohup fallback for Alpine/WSL1
+
+5. **Installer updates** (`scripts/install.sh`)
+   - Correct manifest service mode recording (systemd or manual)
+   - Daemon setup runs before manifest write (determines mode)
+
+### Validation Evidence (EXECUTED on macOS)
+
+```
+$ cargo test -p repo-graph-rgr --lib platform::manifest
+running 6 tests ... ok
+
+$ cargo test -p repo-graph-rgr --lib platform::macos
+running 2 tests ... ok
+
+$ cargo clippy -p repo-graph-rgr -- -D warnings
+    Finished (no warnings)
+
+$ cargo test -p repo-graph-rgr --lib
+running 105 tests ... ok
+```
+
+**Note:** Linux adapter tests (`platform::linux::*`) are gated behind `#[cfg(target_os = "linux")]`
+and were not executed in this macOS environment.
+
+### Pending Validation (requires Linux)
+
+Before LINUX-1 can be marked IMPLEMENTED:
+
+- [ ] Fresh install on Ubuntu
+- [ ] Fresh install on Fedora
+- [ ] Fresh install on Arch
+- [ ] systemd service lifecycle (enable/start/stop/disable)
+- [ ] Non-systemd fallback on Alpine or WSL1
+- [ ] `rmap doctor` output on Linux
+- [ ] `rmap uninstall` on Linux (systemd mode)
+- [ ] `rmap uninstall` on Linux (manual mode)
 
 ---
 
 ## Recently Implemented
+
+**CODEX-1: Codex CLI Integration** — IMPLEMENTED (2026-05-14)
+
+Slice doc: `docs/slices/codex-1-codex-cli-integration.md`
+
+### Summary
+
+Codex CLI integration via `.codex/hooks.json` using the same subcommand structure as CLAUDE-1.
+Schema verified against official OpenAI documentation (May 2026). Codex hooks are experimental.
+
+### Delivered
+
+- `rmap integrate codex install [--global|--project] [--full] [--dry-run] [--force]`
+- `rmap integrate codex remove [--global|--project]`
+- `rmap integrate codex status [--global|--project] [--json]`
+- Minimal-by-default profile (SessionStart + Stop)
+- Full profile opt-in (--full adds UserPromptSubmit, PostToolUse)
+- Codex-specific matchers (SessionStart: `startup|resume`, PostToolUse: `Edit|Write|apply_patch`)
+- No PreCompact (Codex doesn't support this event)
+- 20 behavioral integration tests
+
+### Module Structure
+
+```
+commands/integrate/
+├── mod.rs           # Dispatcher (shared)
+├── claude_code.rs   # Claude-specific policy
+├── codex.rs         # Codex-specific policy (NEW)
+├── config.rs        # Generic JSON transformation with HookDefinitions trait
+└── manifest.rs      # Integration state recording (shared)
+```
+
+### Architecture
+
+Refactored config.rs to use `HookDefinitions` trait:
+- `ClaudeCodeHooks` — Claude Code hook definitions
+- `CodexHooks` — Codex hook definitions (no PreCompact, different matchers)
+- Generic `plan_install_with<H>` and `apply_install_with<H>` functions
+
+### Validation Evidence (EXECUTED)
+
+```
+$ cargo test -p repo-graph-rgr --test integrate_codex_command
+running 20 tests ... ok
+
+$ rmap integrate codex install --project --dry-run
+Dry run: Codex integration (minimal profile)
+  Plan: Install minimal profile (2 events)
+
+$ rmap integrate codex status --project --json
+{"scope":"project","status":"installed","profile":"minimal",...}
+```
+
+---
 
 **CLAUDE-1: Claude Code Integration** — IMPLEMENTED (2026-05-13)
 
@@ -168,9 +270,9 @@ rmap hook stop [--from-stdin | --from-env | --require-validation | --transcript 
 rmap hook status [--json]
 ```
 
-**Transport modes:**
-- `--from-stdin`: Claude Code passes JSON on stdin (session_id, cwd, event data)
-- `--from-env`: Codex uses environment variables (CODEX_PROJECT_PATH, etc.)
+**Transport modes (per HOOK-1A):**
+- `--from-stdin`: Claude Code/Codex pass JSON on stdin (session_id, cwd, event data)
+- `--from-env`: Legacy/fallback transport (neither Claude Code nor Codex uses this)
 
 ### Implementation
 
@@ -190,7 +292,7 @@ rmap hook status [--json]
 1. Explicit --db/--repo arguments
 2. RMAP_DB_PATH, RMAP_REPO_PATH environment variables
 3. --from-stdin: cwd from JSON payload (Claude Code)
-4. --from-env: Host environment variables (CODEX_PROJECT_PATH, etc.)
+4. --from-env: Legacy/fallback transport (not used by current hosts)
 5. Discovery (search for .rmap.db, repo.db; find .git for repo)
 
 ### Platform Directories (per DIST-1 D3)

@@ -10,6 +10,8 @@
 //!
 //! **Path contract:** Platform paths must match `cli/paths.rs` and DIST-1 D3.
 
+pub mod manifest;
+
 #[cfg(target_os = "macos")]
 pub mod macos;
 

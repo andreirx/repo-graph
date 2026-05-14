@@ -1,0 +1,34 @@
+# repo-graph daemon systemd user service.
+#
+# Installed to: ~/.config/systemd/user/rmapd.service
+#
+# Path contract: Must match rust/crates/rgr/src/cli/paths.rs
+# See: docs/slices/linux-1-linux-installer.md
+#
+# Note: %h is expanded by systemd to the user's home directory.
+# No installer-side substitution needed (unlike macOS plist ${HOME}).
+
+[Unit]
+Description=repo-graph daemon
+Documentation=https://github.com/andreirx/repo-graph
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/rmapd
+Restart=on-failure
+RestartSec=10
+
+# Logging to user's data directory
+StandardOutput=append:%h/.local/share/rmap/logs/daemon.log
+StandardError=append:%h/.local/share/rmap/logs/daemon.log
+
+# Environment
+Environment=RMAP_LOG_LEVEL=info
+
+# Resource limits - background process, reduce impact on user work
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target

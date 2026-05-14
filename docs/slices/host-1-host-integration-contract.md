@@ -22,12 +22,14 @@ points in the agent workflow.
 **Claude Code:**
 - Hook events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PreCompact`, `Stop`, `SubagentStop`
 - Config: `.claude/settings.json` in project or `~/.claude/settings.json` global
-- Hook format: shell command strings with environment variables
+- Hook format: shell command strings with JSON on stdin
 
 **Codex CLI:**
-- Hook events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`
-- Config: `hooks.json` in project or `~/.codex/hooks.json` global
-- Hook format: shell command strings
+- Hook events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Stop`
+- Config: `hooks.json` in project (`.codex/`) or global (`~/.codex/`)
+- Hook format: shell command strings with JSON on stdin (same as Claude Code)
+- **Status:** Hooks are experimental and may change in future releases (per OpenAI docs, May 2026)
+- **Note:** Codex also supports inline `[hooks]` in `config.toml`, but repo-graph targets `hooks.json` only (CODEX-1 scope)
 
 ### Protocol/Rules Hosts
 
@@ -279,25 +281,54 @@ is required. Timeout is in **seconds**, not milliseconds.
 
 ## Codex Hook Schema
 
+**Verified May 2026.** Codex uses the same nested matcher-group structure as Claude Code.
+Timeout is in **seconds** (default 600). Hooks are **experimental** per OpenAI documentation.
+
 ```json
 {
   "hooks": {
-    "SessionStart": {
-      "command": "rmap hook session-start",
-      "timeout": 30000
-    },
-    "PostToolUse": {
-      "matcher": ["Edit", "Write"],
-      "command": "rmap hook post-edit --files \"$CHANGED_FILES\"",
-      "timeout": 60000
-    },
-    "Stop": {
-      "command": "rmap hook stop",
-      "timeout": 30000
-    }
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook session-start --from-stdin",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook post-edit --from-stdin",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rmap hook stop --from-stdin",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
   }
 }
 ```
+
+**Matcher patterns:** Regex strings. Use `|` for alternatives. Omit or use `""` to match all.
+
+**SessionStart sources:** `startup` (new session), `resume` (continued), `clear` (context cleared).
 
 ## Cursor Integration Model
 
@@ -413,8 +444,9 @@ transport mechanisms, normalized internally.
 | Host | Transport | Flag | Input Source |
 |------|-----------|------|--------------|
 | Claude Code | stdin JSON | `--from-stdin` | JSON payload on stdin |
-| Codex | Environment vars | `--from-env` | Environment variables |
+| Codex | stdin JSON | `--from-stdin` | JSON payload on stdin (same as Claude Code) |
 | Manual/Testing | Explicit args | `--db`, `--repo` | Command-line arguments |
+| Legacy/Fallback | Environment vars | `--from-env` | Environment variables (not used by current hosts) |
 
 ### Claude Code Transport (stdin JSON)
 
@@ -435,14 +467,28 @@ Claude Code passes a JSON object on stdin containing session context:
 - `CLAUDE_PROJECT_DIR` — project root directory
 - `CLAUDE_ENV_FILE` — path to persist env vars (SessionStart only)
 
-### Codex Transport (Environment Variables)
+### Codex Transport (stdin JSON)
 
-Codex provides context via environment variables (to be verified in CODEX-1):
+**Verified May 2026.** Codex passes hook context as JSON on stdin, same as Claude Code.
 
-- `CODEX_PROJECT_PATH` — project root path
-- `CODEX_SESSION_ID` — session identifier
-- `CHANGED_FILES` — edited file paths (PostToolUse)
-- `PROMPT` — user prompt content (UserPromptSubmit)
+Common fields (all events):
+- `session_id` — session identifier
+- `cwd` — working directory
+- `hook_event_name` — current event name
+- `model` — active model slug
+- `turn_id` — for turn-scoped hooks
+- `transcript_path` — optional path to session transcript
+
+Event-specific fields:
+- `tool_name`, `tool_input`, `tool_response` — tool events
+- `prompt` — UserPromptSubmit
+- `source` — SessionStart (startup/resume/clear)
+
+### Legacy/Fallback Transport (Environment Variables)
+
+The `--from-env` flag exists for testing and potential future hosts that use environment
+variables. **Neither Claude Code nor Codex uses this transport.** The CODEX_* environment
+variables in the codebase are legacy assumptions that predate schema verification.
 
 ### Internal Normalization
 

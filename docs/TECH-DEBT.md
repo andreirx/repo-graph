@@ -2808,11 +2808,24 @@ REL-1 provides a **bootstrap installer** that installs binaries but defers:
    - No automatic pruning of old sessions
    - Future: Add session expiry or `rmap hook sessions prune` command
 
-5. **`--from-stdin` transport not implemented:**
-   - HOOK-1 only supports `--from-env` (environment variable transport)
-   - Claude Code uses stdin JSON transport, not environment variables
-   - `scripts/lib/macos.sh` has correct Claude Code schema using `--from-stdin`
-   - This flag does not exist yet — hooks will fail until CLAUDE-1 implements it
-   - Blocker for: CLAUDE-1 implementation
-   - See: CLAUDE-1 slice "Transport Architecture" section
+5. ~~**`--from-stdin` transport not implemented:**~~ **RESOLVED (2026-05-13).**
+   HOOK-1A implemented `--from-stdin` transport. Both Claude Code and Codex use stdin JSON.
+
+### CODEX-1 Volatility (2026-05-14)
+
+**Codex hooks are experimental.** Per OpenAI documentation (verified May 2026):
+
+> "Hooks are experimental and may change in future releases."
+
+**Implications:**
+- Codex hook schema may change without notice
+- Implementation is isolated in `commands/integrate/codex.rs` for easy updates
+- Shared config transformation layer (`config.rs`) reduces schema change impact
+- Monitor https://developers.openai.com/codex/hooks for changes
+
+**Contract verification (May 2026):**
+- Codex uses **stdin JSON transport** (not environment variables as previously assumed)
+- HOST-1 v1 assumptions about CODEX_* env vars were incorrect and have been amended
+- Schema structure matches Claude Code (nested matcher groups)
+- Timeout unit is seconds (not milliseconds)
 

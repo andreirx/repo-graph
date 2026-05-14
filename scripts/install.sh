@@ -579,12 +579,18 @@ SVCEOF
 )
                 ;;
             linux)
-                # Linux: systemd service (LINUX-1 placeholder)
-                local unit_path="${HOME}/.config/systemd/user/rmapd.service"
+                # Linux: systemd or manual mode (set by setup_linux_daemon_service)
+                local service_type="${LINUX_SERVICE_MODE:-manual}"
+                local service_path
+                if [[ "${service_type}" == "systemd" ]]; then
+                    service_path="${HOME}/.config/systemd/user/rmapd.service"
+                else
+                    service_path="${HOME}/.local/share/rmap/daemon.pid"
+                fi
                 service_section=$(cat << SVCEOF
   "service": {
-    "type": "systemd",
-    "path": "${unit_path}",
+    "type": "${service_type}",
+    "path": "${service_path}",
     "status": "installed"
   },
 SVCEOF
@@ -718,8 +724,8 @@ main() {
 
     if [[ "${BINARY_ONLY}" != "true" ]]; then
         create_directories
+        setup_daemon_service  # Must run before write_manifest (sets LINUX_SERVICE_MODE)
         write_manifest
-        setup_daemon_service
         detect_hosts
     fi
 
