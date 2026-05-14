@@ -34,10 +34,7 @@ pub fn parse_manifest_from_str(content: &str) -> Result<InstallManifest, String>
         serde_json::from_str(content).map_err(|e| format!("failed to parse manifest: {}", e))?;
 
     let manifest = InstallManifest {
-        schema_version: json["schema_version"]
-            .as_str()
-            .unwrap_or("1")
-            .to_string(),
+        schema_version: json["schema_version"].as_str().unwrap_or("1").to_string(),
         installed_at: json["installed_at"].as_str().map(|s| s.to_string()),
         platform: json["platform"].as_str().unwrap_or("").to_string(),
         arch: json["arch"].as_str().unwrap_or("").to_string(),
@@ -132,7 +129,10 @@ mod tests {
 
         let manifest = parse_manifest_from_str(json).unwrap();
         assert_eq!(manifest.platform, "linux");
-        assert_eq!(manifest.installed_at, Some("2026-05-14T12:00:00Z".to_string()));
+        assert_eq!(
+            manifest.installed_at,
+            Some("2026-05-14T12:00:00Z".to_string())
+        );
 
         // Components
         let rmap = manifest.components.rmap.as_ref().unwrap();

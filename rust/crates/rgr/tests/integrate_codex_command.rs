@@ -43,7 +43,11 @@ fn install_fresh_minimal_creates_hooks_json() {
         .output()
         .unwrap();
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     // hooks.json should exist
     let hooks_path = codex_dir.join("hooks.json");
@@ -144,7 +148,14 @@ fn install_with_force_updates_existing() {
     // Second install full with --force should succeed
     let output = rmap_binary()
         .current_dir(temp.path())
-        .args(["integrate", "codex", "install", "--project", "--full", "--force"])
+        .args([
+            "integrate",
+            "codex",
+            "install",
+            "--project",
+            "--full",
+            "--force",
+        ])
         .output()
         .unwrap();
 

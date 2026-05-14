@@ -56,7 +56,12 @@ impl LinuxAdapter {
     /// Check systemd service status.
     fn systemd_status(&self) -> ServiceStatus {
         let output = Command::new("systemctl")
-            .args(["--user", "show", SERVICE_NAME, "--property=ActiveState,MainPID"])
+            .args([
+                "--user",
+                "show",
+                SERVICE_NAME,
+                "--property=ActiveState,MainPID",
+            ])
             .output();
 
         match output {
@@ -168,8 +173,8 @@ impl LinuxAdapter {
 
     /// Stop manual mode daemon by PID.
     fn stop_manual(&self) -> Result<(), String> {
-        let pid_path = Self::pid_file_path()
-            .ok_or_else(|| "could not determine PID file path".to_string())?;
+        let pid_path =
+            Self::pid_file_path().ok_or_else(|| "could not determine PID file path".to_string())?;
 
         if !pid_path.exists() {
             return Ok(()); // No daemon to stop
@@ -192,9 +197,7 @@ impl LinuxAdapter {
 
             // Force kill if still running
             if Self::process_exists(pid) {
-                let _ = Command::new("kill")
-                    .args(["-9", &pid.to_string()])
-                    .output();
+                let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
             }
         }
 
@@ -289,7 +292,10 @@ impl PlatformAdapter for LinuxAdapter {
             _ => {
                 // No manifest or unknown mode: try systemd first, then manual
                 let systemd = self.systemd_status();
-                if matches!(systemd, ServiceStatus::Running { .. } | ServiceStatus::Stopped) {
+                if matches!(
+                    systemd,
+                    ServiceStatus::Running { .. } | ServiceStatus::Stopped
+                ) {
                     return systemd;
                 }
                 self.manual_status()
@@ -373,9 +379,7 @@ impl PlatformAdapter for LinuxAdapter {
             ServiceStatus::Stopped => {
                 ProbeResult::fail("daemon_service", format!("stopped (mode: {})", mode_label))
             }
-            ServiceStatus::NotInstalled => {
-                ProbeResult::fail("daemon_service", "not installed")
-            }
+            ServiceStatus::NotInstalled => ProbeResult::fail("daemon_service", "not installed"),
             ServiceStatus::Unknown { reason } => {
                 ProbeResult::fail("daemon_service", format!("unknown: {}", reason))
             }
@@ -399,10 +403,16 @@ impl PlatformAdapter for LinuxAdapter {
             Some("manual") => {
                 if let Some(pid_file) = Self::pid_file_path() {
                     if pid_file.exists() {
-                        probes.push(ProbeResult::pass("pid_file", pid_file.display().to_string()));
+                        probes.push(ProbeResult::pass(
+                            "pid_file",
+                            pid_file.display().to_string(),
+                        ));
                     } else {
                         // PID file not existing is fine if daemon is not running
-                        probes.push(ProbeResult::pass("pid_file", "not present (daemon not running)"));
+                        probes.push(ProbeResult::pass(
+                            "pid_file",
+                            "not present (daemon not running)",
+                        ));
                     }
                 }
             }
