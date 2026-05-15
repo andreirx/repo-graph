@@ -7,12 +7,19 @@
 //!   4. Exact metrics on a known module graph
 //!   5. Empty-module behavior (no exported symbols)
 //!   6. Results sorted by module path
+//!
+//! Uses RMAP_SOCKET_PATH to isolate from real daemon.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn binary_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_rmap"))
+}
+
+/// Returns a non-existent socket path for test isolation.
+fn isolated_socket_path(dir: &Path) -> PathBuf {
+    dir.join("nonexistent-daemon.sock")
 }
 
 /// Build a temp DB with a known module graph for metrics verification.
@@ -125,9 +132,10 @@ fn stats_missing_db() {
 
 #[test]
 fn stats_repo_not_found() {
-    let (_repo_dir, _db_dir, db_path) = build_stats_db();
+    let (_repo_dir, db_dir, db_path) = build_stats_db();
 
     let output = Command::new(binary_path())
+        .env("RMAP_SOCKET_PATH", isolated_socket_path(db_dir.path()))
         .args(["stats", db_path.to_str().unwrap(), "nonexistent-repo"])
         .output()
         .unwrap();
@@ -142,9 +150,10 @@ fn stats_repo_not_found() {
 
 #[test]
 fn stats_exact_metrics() {
-    let (_repo_dir, _db_dir, db_path) = build_stats_db();
+    let (_repo_dir, db_dir, db_path) = build_stats_db();
 
     let output = Command::new(binary_path())
+        .env("RMAP_SOCKET_PATH", isolated_socket_path(db_dir.path()))
         .args(["stats", db_path.to_str().unwrap(), "r1"])
         .output()
         .unwrap();
@@ -208,9 +217,10 @@ fn stats_exact_metrics() {
 
 #[test]
 fn stats_empty_module_has_zero_symbols() {
-    let (_repo_dir, _db_dir, db_path) = build_stats_db();
+    let (_repo_dir, db_dir, db_path) = build_stats_db();
 
     let output = Command::new(binary_path())
+        .env("RMAP_SOCKET_PATH", isolated_socket_path(db_dir.path()))
         .args(["stats", db_path.to_str().unwrap(), "r1"])
         .output()
         .unwrap();
@@ -254,9 +264,10 @@ fn stats_empty_module_has_zero_symbols() {
 
 #[test]
 fn stats_results_sorted_by_module_path() {
-    let (_repo_dir, _db_dir, db_path) = build_stats_db();
+    let (_repo_dir, db_dir, db_path) = build_stats_db();
 
     let output = Command::new(binary_path())
+        .env("RMAP_SOCKET_PATH", isolated_socket_path(db_dir.path()))
         .args(["stats", db_path.to_str().unwrap(), "r1"])
         .output()
         .unwrap();

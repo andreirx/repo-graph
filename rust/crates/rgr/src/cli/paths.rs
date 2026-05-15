@@ -100,8 +100,15 @@ pub fn databases_dir() -> Option<PathBuf> {
 /// This is the Unix domain socket used for CLI-to-daemon communication.
 /// The daemon binds this socket on startup; the CLI connects to it.
 ///
-/// Returns `None` if the home directory cannot be determined.
+/// Environment override: `RMAP_SOCKET_PATH` - If set, returns this path instead.
+/// Used for testing to point CLI at a non-existent socket (simulate daemon unavailable).
+///
+/// Returns `None` if the home directory cannot be determined (and no override is set).
 pub fn daemon_socket_path() -> Option<PathBuf> {
+    // Allow override for testing daemon-unavailable scenarios
+    if let Ok(override_path) = std::env::var("RMAP_SOCKET_PATH") {
+        return Some(PathBuf::from(override_path));
+    }
     data_dir().map(|d| d.join("daemon.sock"))
 }
 

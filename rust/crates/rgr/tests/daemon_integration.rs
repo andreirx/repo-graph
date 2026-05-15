@@ -5,6 +5,8 @@
 //! - Read-only commands fall back to direct access when daemon unavailable
 //!
 //! These tests run WITHOUT a daemon to verify fallback behavior.
+//! Uses RMAP_SOCKET_PATH env var to point CLI at a non-existent socket,
+//! ensuring isolation from any real daemon running on the system.
 
 use std::fs::{self, File};
 use std::io::Write;
@@ -22,6 +24,12 @@ fn binary_path() -> PathBuf {
             .join("rmap");
     }
     path
+}
+
+/// Returns a non-existent socket path for test isolation.
+/// Using this ensures tests don't accidentally connect to a real daemon.
+fn isolated_socket_path(dir: &std::path::Path) -> PathBuf {
+    dir.join("nonexistent-daemon.sock")
 }
 
 /// Create a minimal TypeScript repo for testing.
@@ -45,6 +53,7 @@ fn index_fails_when_daemon_unavailable() {
     let db_path = dir.path().join("test.db");
 
     let output = Command::new(binary_path())
+        .env("RMAP_SOCKET_PATH", isolated_socket_path(dir.path()))
         .args([
             "index",
             repo_path.to_str().unwrap(),
@@ -84,6 +93,7 @@ fn refresh_fails_when_daemon_unavailable() {
     File::create(&db_path).unwrap();
 
     let output = Command::new(binary_path())
+        .env("RMAP_SOCKET_PATH", isolated_socket_path(dir.path()))
         .args(["refresh", db_path.to_str().unwrap(), "test-repo"])
         .output()
         .unwrap();
@@ -127,6 +137,7 @@ fn stats_succeeds_via_fallback_when_daemon_unavailable() {
 
     // Now test CLI stats command (read-only, should fallback)
     let output = Command::new(binary_path())
+        .env("RMAP_SOCKET_PATH", isolated_socket_path(dir.path()))
         .args(["stats", db_path.to_str().unwrap(), "repo"])
         .output()
         .unwrap();

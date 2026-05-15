@@ -11,12 +11,20 @@
 //!   - exit code 0 on success
 //!
 //! Added in Rust-16 (consolidation slice).
+//!
+//! Uses RMAP_SOCKET_PATH to isolate from real daemon (tests use direct
+//! library indexing, daemon fallback should handle reads).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn binary_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_rmap"))
+}
+
+/// Returns a non-existent socket path for test isolation.
+fn isolated_socket_path(dir: &Path) -> PathBuf {
+    dir.join("nonexistent-daemon.sock")
 }
 
 /// Build a fixture with enough structure for all five commands.
@@ -97,9 +105,13 @@ fn assert_envelope(result: &serde_json::Value, expected_command: &str) {
     );
 }
 
-/// Run a command, assert exit 0, empty stderr, parse JSON stdout.
-fn run_success(args: &[&str]) -> serde_json::Value {
-    let output = Command::new(binary_path()).args(args).output().unwrap();
+/// Run a command with daemon isolation, assert exit 0, empty stderr, parse JSON stdout.
+fn run_success(args: &[&str], isolation_dir: &Path) -> serde_json::Value {
+    let output = Command::new(binary_path())
+        .env("RMAP_SOCKET_PATH", isolated_socket_path(isolation_dir))
+        .args(args)
+        .output()
+        .unwrap();
 
     assert_eq!(
         output.status.code(),
@@ -123,10 +135,10 @@ fn run_success(args: &[&str]) -> serde_json::Value {
 
 #[test]
 fn callers_envelope_contract() {
-    let (_r, _d, db) = build_fixture_db();
+    let (_r, db_dir, db) = build_fixture_db();
     let db_str = db.to_str().unwrap();
 
-    let result = run_success(&["callers", db_str, "r1", "foo"]);
+    let result = run_success(&["callers", db_str, "r1", "foo"], db_dir.path());
     assert_envelope(&result, "graph callers");
 
     // Command-specific field: target must be present.
@@ -138,10 +150,10 @@ fn callers_envelope_contract() {
 
 #[test]
 fn callees_envelope_contract() {
-    let (_r, _d, db) = build_fixture_db();
+    let (_r, db_dir, db) = build_fixture_db();
     let db_str = db.to_str().unwrap();
 
-    let result = run_success(&["callees", db_str, "r1", "caller"]);
+    let result = run_success(&["callees", db_str, "r1", "caller"], db_dir.path());
     assert_envelope(&result, "graph callees");
 
     // Command-specific field: target must be present.
@@ -162,10 +174,11 @@ fn callees_envelope_contract() {
 /// to verify the QueryResult envelope shape.
 #[test]
 fn dead_envelope_contract() {
-    let (_r, _d, db) = build_fixture_db();
+    let (_r, db_dir, db) = build_fixture_db();
     let db_str = db.to_str().unwrap();
 
     let output = Command::new(binary_path())
+        .env("RMAP_SOCKET_PATH", isolated_socket_path(db_dir.path()))
         .args(["dead", db_str, "r1", "SYMBOL"])
         .output()
         .unwrap();
@@ -188,10 +201,10 @@ fn dead_envelope_contract() {
 
 #[test]
 fn cycles_envelope_contract() {
-    let (_r, _d, db) = build_fixture_db();
+    let (_r, db_dir, db) = build_fixture_db();
     let db_str = db.to_str().unwrap();
 
-    let result = run_success(&["cycles", db_str, "r1"]);
+    let result = run_success(&["cycles", db_str, "r1"], db_dir.path());
     assert_envelope(&result, "graph cycles");
 
     // Should have at least one cycle (src/a <-> src/b).
@@ -205,10 +218,10 @@ fn cycles_envelope_contract() {
 
 #[test]
 fn stats_envelope_contract() {
-    let (_r, _d, db) = build_fixture_db();
+    let (_r, db_dir, db) = build_fixture_db();
     let db_str = db.to_str().unwrap();
 
-    let result = run_success(&["stats", db_str, "r1"]);
+    let result = run_success(&["stats", db_str, "r1"], db_dir.path());
     assert_envelope(&result, "graph stats");
 
     // Each result must have the module metrics fields.
