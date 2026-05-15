@@ -16,7 +16,9 @@ use std::process::Command;
 
 use crate::cli::paths;
 
-use super::{manifest, InstallManifest, PlatformAdapter, ProbeResult, ServiceStatus};
+use super::{
+    check_daemon_socket, manifest, InstallManifest, PlatformAdapter, ProbeResult, ServiceStatus,
+};
 
 /// systemd service name.
 const SERVICE_NAME: &str = "rmapd.service";
@@ -363,7 +365,7 @@ impl PlatformAdapter for LinuxAdapter {
             probes.push(self.check_directory(&logs_dir, "logs_dir"));
         }
 
-        // Service check with mode awareness
+        // Service check with mode awareness (systemd/manual status)
         let mode = self.service_mode_from_manifest();
         let mode_label = mode.as_deref().unwrap_or("unknown");
         let status = self.service_status();
@@ -385,6 +387,9 @@ impl PlatformAdapter for LinuxAdapter {
             }
         };
         probes.push(service_probe);
+
+        // Socket connectivity check (actual daemon responsiveness)
+        probes.push(check_daemon_socket());
 
         // Service artifact check (unit file or PID file)
         match mode.as_deref() {

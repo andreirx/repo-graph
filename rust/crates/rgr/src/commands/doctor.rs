@@ -138,7 +138,12 @@ fn print_human_output(output: &DoctorOutput) {
     let service_probes: Vec<_> = output
         .probes
         .iter()
-        .filter(|p| matches!(p.name.as_str(), "daemon_service" | "plist"))
+        .filter(|p| {
+            matches!(
+                p.name.as_str(),
+                "daemon_service" | "daemon_socket" | "plist" | "unit_file" | "pid_file"
+            )
+        })
         .collect();
 
     // Binaries

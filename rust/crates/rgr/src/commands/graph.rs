@@ -1,11 +1,18 @@
 //! Graph query command family.
 //!
 //! Symbol-level and file-level graph traversal commands.
+//!
+//! ## Daemon Integration
+//!
+//! Read-only graph commands can operate in two modes:
+//! - **Daemon available**: Query via daemon for coordinated access
+//! - **Daemon unavailable**: Fall back to direct storage access (RMAPD-2 D4)
 
 use std::path::Path;
 use std::process::ExitCode;
 
 use crate::cli::{build_envelope, compute_trust_overlay_for_snapshot, open_storage};
+use crate::daemon_client::DaemonClient;
 
 // ── Edge type parsing (graph-family-local) ───────────────────────
 
@@ -585,46 +592,122 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
 
 // ── stats command ────────────────────────────────────────────────
 
+/// Run the `rmap stats` command.
+///
+/// This is a read-only operation that supports daemon fallback (RMAPD-2 D4):
+/// - If daemon is available and repo is loaded, queries via daemon
+/// - If daemon is unavailable, falls back to direct storage access
 pub fn run_stats(args: &[String]) -> ExitCode {
     if args.len() != 2 {
         eprintln!("usage: rmap stats <db_path> <repo_uid>");
         return ExitCode::from(1);
     }
 
-    let db_path = Path::new(&args[0]);
-    let repo_uid = &args[1];
+    let db_path_str = args[0].clone();
+    let repo_uid = args[1].clone();
 
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
-            return ExitCode::from(2);
+    let db_path = Path::new(&db_path_str);
+
+    // Create daemon client for execute_or_fallback
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
+        Err(_) => {
+            // Can't even determine socket path, go direct
+            return run_stats_direct(db_path, &repo_uid);
         }
     };
 
-    let snapshot = match storage.get_latest_snapshot(repo_uid) {
-        Ok(Some(snap)) => snap,
-        Ok(None) => {
-            eprintln!("error: no snapshot found for repo '{}'", repo_uid);
-            return ExitCode::from(2);
-        }
+    // Try to canonicalize for daemon (only needed if daemon is available)
+    // If canonicalize fails (file doesn't exist), fallback will handle it
+    let db_path_canon = db_path.canonicalize().ok();
+
+    // Use execute_or_fallback for read-only operation
+    let result = client.execute_or_fallback(
+        &["stats"],
+        // Daemon path
+        |client| {
+            // Need canonical path for daemon
+            let canon = db_path_canon
+                .as_ref()
+                .ok_or_else(|| format!("database does not exist: {}", db_path.display()))?;
+
+            let params = serde_json::json!({
+                "db_path": canon.to_string_lossy(),
+                "repo_uid": repo_uid,
+            });
+
+            match client.request("stats", Some(params)) {
+                Ok(result) => {
+                    // Format daemon response to match CLI output
+                    let output = serde_json::json!({
+                        "command": "graph stats",
+                        "repo_uid": result["repo_uid"],
+                        "snapshot_uid": result["snapshot_uid"],
+                        "result": result["stats"],
+                        "count": result["count"],
+                    });
+                    Ok(output)
+                }
+                Err(e) => Err(e.to_string()),
+            }
+        },
+        // Fallback path (direct storage access)
+        || run_stats_direct_inner(db_path, &repo_uid),
+    );
+
+    match result {
+        Ok(output) => match serde_json::to_string_pretty(&output) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            ExitCode::from(2)
         }
-    };
+    }
+}
 
-    let stats = match storage.compute_module_stats(&snapshot.snapshot_uid) {
-        Ok(s) => s,
+/// Direct storage implementation for stats (fallback path).
+fn run_stats_direct(db_path: &Path, repo_uid: &str) -> ExitCode {
+    match run_stats_direct_inner(db_path, repo_uid) {
+        Ok(output) => match serde_json::to_string_pretty(&output) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            ExitCode::from(2)
         }
-    };
+    }
+}
 
-    // JSON to stdout (TS-compatible QueryResult envelope).
+/// Inner implementation for direct stats query.
+fn run_stats_direct_inner(db_path: &Path, repo_uid: &str) -> Result<serde_json::Value, String> {
+    let storage = open_storage(db_path)?;
+
+    let snapshot = storage
+        .get_latest_snapshot(repo_uid)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("no snapshot found for repo '{}'", repo_uid))?;
+
+    let stats = storage
+        .compute_module_stats(&snapshot.snapshot_uid)
+        .map_err(|e| e.to_string())?;
+
     let count = stats.len();
-    let output = match build_envelope(
+    build_envelope(
         &storage,
         "graph stats",
         repo_uid,
@@ -632,22 +715,5 @@ pub fn run_stats(args: &[String]) -> ExitCode {
         serde_json::to_value(&stats).unwrap(),
         count,
         serde_json::Map::new(),
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("error: {}", e);
-            ExitCode::from(2)
-        }
-    }
+    )
 }

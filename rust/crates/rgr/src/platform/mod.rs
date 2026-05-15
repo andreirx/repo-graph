@@ -20,6 +20,9 @@ pub mod linux;
 
 use std::path::PathBuf;
 
+use crate::cli::paths;
+use crate::daemon_client::is_daemon_reachable;
+
 /// Service status as reported by the platform service manager.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServiceStatus {
@@ -74,6 +77,49 @@ impl ProbeResult {
     pub fn with_details(mut self, details: impl Into<String>) -> Self {
         self.details = Some(details.into());
         self
+    }
+}
+
+/// Check daemon socket connectivity.
+///
+/// This is a cross-platform probe used by both macOS and Linux adapters.
+/// It checks:
+/// 1. Socket path can be determined
+/// 2. Socket file exists
+/// 3. Daemon accepts connections on the socket
+///
+/// The socket connectivity check uses the same code path as production
+/// CLI-to-daemon communication (no special health endpoint).
+pub fn check_daemon_socket() -> ProbeResult {
+    let socket_path = match paths::daemon_socket_path() {
+        Some(p) => p,
+        None => {
+            return ProbeResult::fail("daemon_socket", "could not determine socket path");
+        }
+    };
+
+    if !socket_path.exists() {
+        return ProbeResult::fail(
+            "daemon_socket",
+            format!("socket not found: {}", socket_path.display()),
+        );
+    }
+
+    // Check if daemon is accepting connections
+    if is_daemon_reachable(&socket_path) {
+        ProbeResult::pass(
+            "daemon_socket",
+            format!("connected: {}", socket_path.display()),
+        )
+    } else {
+        ProbeResult::fail(
+            "daemon_socket",
+            format!(
+                "socket exists but not responding: {}",
+                socket_path.display()
+            ),
+        )
+        .with_details("daemon process may have crashed without cleanup")
     }
 }
 

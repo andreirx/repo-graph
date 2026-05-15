@@ -2,13 +2,66 @@
 
 ## Current Priority
 
-**LINUX-1: Linux Installer + Daemon Service** — CODE COMPLETE, PENDING VALIDATION
+**RMAPD-2: Unix Socket Transport** — PLANNING
+
+Slice doc: `docs/slices/rmapd-2-socket-transport.md`
+
+### Blocking Issue
+
+Linux validation (v0.1.2) exposed a transport/model mismatch:
+
+- `rmapd` is implemented as a **stdio NDJSON server** that exits on stdin EOF
+- The installer/service model treats it as a **resident background daemon**
+- These are incompatible runtime contracts
+
+Evidence:
+- systemd starts `rmapd`
+- stdin is empty/EOF
+- `rmapd` exits immediately with status 0 (553 microseconds)
+- health check fails
+- log is empty (0 bytes)
+
+This is not an installer bug. It is an architectural defect.
+
+### Architectural Decisions (Locked)
+
+| ID | Decision | Choice |
+|----|----------|--------|
+| D1 | Transport | Unix domain socket + NDJSON |
+| D2 | Lifetime | Always-on resident service |
+| D3 | Stdio mode | Keep as `--stdio` flag, test/debug only |
+| D4 | Fallback | Read-only degraded mode only |
+
+### D4 Elaboration
+
+If daemon is unavailable, CLI may perform **read-only** operations directly.
+
+**Allowed:** version, doctor, repo list, graph queries, config inspection  
+**Not allowed:** repo add/remove, refresh, index, any mutation
+
+Daemon remains authoritative for all writes and coordination.
+
+### Blocked Slices
+
+| Slice | Status | Blocked By |
+|-------|--------|------------|
+| LINUX-1 | CODE COMPLETE | RMAPD-2 (transport model) |
+| MAC-1 | IMPLEMENTED | RMAPD-2 (same defect, not yet exposed) |
+
+Both platform slices assume a resident daemon. Neither can be validated correctly
+until the daemon actually stays alive as a resident process.
+
+---
+
+## Blocked: LINUX-1
+
+**LINUX-1: Linux Installer + Daemon Service** — CODE COMPLETE, BLOCKED BY RMAPD-2
 
 Slice doc: `docs/slices/linux-1-linux-installer.md`
 
-macOS host integration lane complete (CLAUDE-1, CODEX-1). LINUX-1 extends distribution to Linux.
+The installer code is complete. The daemon transport is wrong.
 
-### Code Complete
+### Code Complete (Installer)
 
 1. **Shared manifest parser** (`platform/manifest.rs`)
    - Extracted from macos.rs, 6 unit tests
@@ -35,37 +88,17 @@ macOS host integration lane complete (CLAUDE-1, CODEX-1). LINUX-1 extends distri
    - Correct manifest service mode recording (systemd or manual)
    - Daemon setup runs before manifest write (determines mode)
 
-### Validation Evidence (EXECUTED on macOS)
+6. **Bundled installer** (`scripts/bundle-installer.sh`)
+   - Self-contained installer for curl|bash distribution
+   - Published as release artifact (v0.1.2+)
 
-```
-$ cargo test -p repo-graph-rgr --lib platform::manifest
-running 6 tests ... ok
+### Validation Blocked
 
-$ cargo test -p repo-graph-rgr --lib platform::macos
-running 2 tests ... ok
+Cannot validate service lifecycle until RMAPD-2 is implemented:
 
-$ cargo clippy -p repo-graph-rgr -- -D warnings
-    Finished (no warnings)
-
-$ cargo test -p repo-graph-rgr --lib
-running 105 tests ... ok
-```
-
-**Note:** Linux adapter tests (`platform::linux::*`) are gated behind `#[cfg(target_os = "linux")]`
-and were not executed in this macOS environment.
-
-### Pending Validation (requires Linux)
-
-Before LINUX-1 can be marked IMPLEMENTED:
-
-- [ ] Fresh install on Ubuntu
-- [ ] Fresh install on Fedora
-- [ ] Fresh install on Arch
-- [ ] systemd service lifecycle (enable/start/stop/disable)
-- [ ] Non-systemd fallback on Alpine or WSL1
-- [ ] `rmap doctor` output on Linux
-- [ ] `rmap uninstall` on Linux (systemd mode)
-- [ ] `rmap uninstall` on Linux (manual mode)
+- [ ] systemd service stays alive with no client
+- [ ] Health check validates socket connectivity
+- [ ] `rmap doctor` reports socket status
 
 ---
 

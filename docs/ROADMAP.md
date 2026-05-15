@@ -66,11 +66,12 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **RGISTR-1** | rgistr binary packaging (Node SEA, same archive as rmap/rmapd) | IMPLEMENTED |
 | **RMAPD-1** | Daemon binary target (`rmapd`) + daemon-runtime crate | IMPLEMENTED |
 | **HOOK-1** | `rmap hook` CLI surface (session-start, prompt-submit, post-edit, pre-compact, stop) | IMPLEMENTED |
-| **MAC-1** | macOS installer + daemon service (launchd, paths, health checks) | IMPLEMENTED |
+| **MAC-1** | macOS installer + daemon service (launchd, paths, health checks) | IMPLEMENTED (blocked) |
 | **HOOK-1A** | Stdin JSON transport for Claude Code hooks (`--from-stdin` flag) | IMPLEMENTED |
 | **CLAUDE-1** | Claude Code integration (`.claude/settings.json` hooks) | IMPLEMENTED |
 | **CODEX-1** | Codex CLI integration (`hooks.json`) | IMPLEMENTED |
-| **LINUX-1** | Linux installer + daemon service (systemd user unit) | CODE COMPLETE |
+| **LINUX-1** | Linux installer + daemon service (systemd user unit) | CODE COMPLETE (blocked) |
+| **RMAPD-2** | Unix socket transport (resident daemon model) | **CURRENT** |
 | **CURSOR-1** | Cursor MCP/rules integration | PLANNED |
 | **WIN-1** | Windows distribution/install | DEFERRED |
 | **MAC-2** | macOS signing/notarization | DEFERRED |
@@ -78,15 +79,22 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 
 ### Current Priority
 
-**LINUX-1** code complete, pending Linux validation.
+**RMAPD-2: Unix Socket Transport** — BLOCKING
 
-Distribution track complete for macOS:
-- MAC-1: macOS installer + launchd service
-- CLAUDE-1: Claude Code integration
-- CODEX-1: Codex CLI integration
+Linux validation (v0.1.2) exposed a transport/model mismatch:
 
-LINUX-1 code is written but requires validation on actual Linux systems before
-marking IMPLEMENTED. After Linux validation, CURSOR-1 is next.
+- `rmapd` is implemented as a **stdio NDJSON server** that exits on stdin EOF
+- The installer/service model treats it as a **resident background daemon**
+- These are incompatible runtime contracts
+
+RMAPD-2 fixes this by making `rmapd` a true resident daemon with Unix socket transport.
+See `docs/slices/rmapd-2-socket-transport.md` for full specification.
+
+**Blocked slices:**
+- LINUX-1: code complete, blocked by RMAPD-2
+- MAC-1: implemented but has same latent defect (not yet exposed)
+
+After RMAPD-2, both MAC-1 and LINUX-1 can be properly validated.
 
 Completed:
 - REL-SUPPORT-1: v0.1.1 release (CI validated)

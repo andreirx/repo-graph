@@ -20,4 +20,12 @@ pub enum TransportError {
     /// Input stream closed (EOF).
     #[error("input stream closed")]
     InputClosed,
+
+    /// Failed to bind Unix socket.
+    #[error("socket bind error: {0}")]
+    SocketBind(String),
+
+    /// Failed to accept connection on socket.
+    #[error("socket accept error: {0}")]
+    SocketAccept(String),
 }

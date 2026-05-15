@@ -37,4 +37,9 @@ serde_json = "1"
 # Typed errors
 thiserror = "1"
 
+# Signal handling for daemon shutdown
+ctrlc = "3"
+
 [dev-dependencies]
+# Temp directories for socket tests
+tempfile = "3"

@@ -1,15 +1,15 @@
 //! rmapd — repo-graph daemon binary
 //!
 //! Long-lived service process for repo-graph. Accepts NDJSON requests
-//! on stdin, writes NDJSON responses to stdout.
+//! via Unix domain socket (default) or stdin/stdout (debug mode).
 //!
 //! Usage:
-//!   rmapd              Start daemon (reads NDJSON from stdin)
+//!   rmapd              Start daemon (Unix socket, resident process)
+//!   rmapd --stdio      Start in debug mode (stdin/stdout, exits on EOF)
 //!   rmapd --version    Print version and exit
 //!   rmapd --help       Print usage and exit
-//!   rmapd --config P   Start daemon with config file (reserved, not yet used)
 //!
-//! Protocol: NDJSON (newline-delimited JSON) over stdin/stdout.
+//! Protocol: NDJSON (newline-delimited JSON).
 //! See daemon-transport crate for protocol details.
 //!
 //! This binary is wiring only. All daemon logic lives in
@@ -25,16 +25,27 @@ fn print_help() {
         "rmapd {} — repo-graph daemon
 
 USAGE:
-    rmapd              Start daemon (NDJSON on stdin/stdout)
+    rmapd              Start daemon (Unix socket, stays alive)
+    rmapd --stdio      Start in debug mode (stdin/stdout, exits on EOF)
     rmapd --version    Print version and exit
     rmapd --help       Print this help and exit
-    rmapd --config P   Start daemon with config file P (reserved)
 
-The daemon reads NDJSON requests from stdin and writes responses to stdout.
-It maintains per-repo state and coordinates concurrent access.
+SOCKET MODE (default):
+    The daemon binds a Unix domain socket and accepts client connections.
+    It stays alive as a resident process until SIGTERM/SIGINT.
+
+    Socket location:
+      macOS: ~/Library/Application Support/repo-graph/daemon.sock
+      Linux: ~/.local/share/rmap/daemon.sock
+
+STDIO MODE (--stdio):
+    Debug/test mode. Reads NDJSON from stdin, writes to stdout.
+    Exits when stdin reaches EOF. NOT for production use.
+
+The daemon maintains per-repo state and coordinates concurrent access.
 
 Exit codes:
-    0    Clean shutdown (stdin EOF)
+    0    Clean shutdown
     1    Runtime error
 ",
         VERSION
@@ -59,36 +70,35 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    // Handle --config (reserved for future use)
-    let mut config_path: Option<String> = None;
-    let mut i = 0;
-    while i < args.len() {
-        if args[i] == "--config" {
-            if i + 1 < args.len() {
-                config_path = Some(args[i + 1].clone());
-                i += 2;
-            } else {
-                eprintln!("error: --config requires a path argument");
-                return ExitCode::FAILURE;
-            }
-        } else {
-            eprintln!("error: unknown argument '{}'", args[i]);
+    // Check for --stdio flag (debug/test mode)
+    let stdio_mode = args.iter().any(|a| a == "--stdio");
+
+    // Validate arguments
+    for arg in &args {
+        if arg != "--stdio" {
+            eprintln!("error: unknown argument '{}'", arg);
             eprintln!("Run 'rmapd --help' for usage.");
             return ExitCode::FAILURE;
         }
     }
 
-    // Config path is reserved but not yet used
-    if config_path.is_some() {
-        eprintln!("note: --config is reserved for future use, currently ignored");
-    }
-
-    // Run daemon
-    match repo_graph_daemon_runtime::run_daemon() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("daemon error: {}", e);
-            ExitCode::FAILURE
+    // Run daemon in appropriate mode
+    if stdio_mode {
+        eprintln!("warning: --stdio mode is for debug/test only, not production");
+        match repo_graph_daemon_runtime::run_daemon_stdio() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("daemon error: {}", e);
+                ExitCode::FAILURE
+            }
+        }
+    } else {
+        match repo_graph_daemon_runtime::run_daemon() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("daemon error: {}", e);
+                ExitCode::FAILURE
+            }
         }
     }
 }

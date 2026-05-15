@@ -10,13 +10,20 @@
 //! a subprocess. This enables testing exit codes, argument parsing,
 //! and database interactions at the function level.
 //!
-//! # Daemon
+//! # Daemon Client
 //!
-//! Daemon functionality has been moved to the `repo-graph-daemon-runtime`
-//! crate. The `rmap daemon` command is a deprecated compatibility shim
-//! that calls into daemon-runtime. Use `rmapd` binary instead.
+//! The `daemon_client` module provides the CLI-to-daemon transport adapter.
+//! It handles socket communication, fallback policy enforcement, and
+//! daemon availability checking.
+//!
+//! # Daemon Runtime
+//!
+//! Daemon functionality lives in the `repo-graph-daemon-runtime` crate.
+//! The `rmap daemon` command is a deprecated compatibility shim.
+//! Use `rmapd` binary instead.
 
 pub mod cli;
 pub mod commands;
 pub mod coverage;
+pub mod daemon_client;
 pub mod platform;

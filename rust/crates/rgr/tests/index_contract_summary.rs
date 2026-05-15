@@ -9,6 +9,13 @@
 //!   3. Parse failures - summary with failure count and details
 //!   4. Combined scenarios
 //!   5. Generated code mappings - summary with counts (CS-2A)
+//!
+//! **RMAPD-2 Note:** These tests require a running daemon since `rmap index`
+//! and `rmap refresh` are now daemon-required operations. Run with daemon:
+//!   `cargo test --test index_contract_summary -- --ignored`
+//!
+//! Or use the library directly for testing contract summary formatting
+//! via the format_* functions in commands/index.rs.
 
 use std::fs::{self, File};
 use std::io::Write;
@@ -63,6 +70,7 @@ fn create_repo_with_protos(dir: &std::path::Path) {
 // ======================================================================
 
 #[test]
+#[ignore = "requires daemon (RMAPD-2)"]
 fn index_no_contracts_no_summary_line() {
     let dir = tempfile::tempdir().unwrap();
     let repo_path = dir.path().join("repo");
@@ -94,6 +102,7 @@ fn index_no_contracts_no_summary_line() {
 }
 
 #[test]
+#[ignore = "requires daemon (RMAPD-2)"]
 fn refresh_no_contracts_no_summary_line() {
     let dir = tempfile::tempdir().unwrap();
     let repo_path = dir.path().join("repo");
@@ -112,13 +121,9 @@ fn refresh_no_contracts_no_summary_line() {
         .output()
         .unwrap();
 
-    // Then refresh
+    // Then refresh (new signature: <db_path> <repo_uid>)
     let output = Command::new(binary_path())
-        .args([
-            "refresh",
-            repo_path.to_str().unwrap(),
-            db_path.to_str().unwrap(),
-        ])
+        .args(["refresh", db_path.to_str().unwrap(), "repo"])
         .output()
         .unwrap();
 
@@ -138,6 +143,7 @@ fn refresh_no_contracts_no_summary_line() {
 // ======================================================================
 
 #[test]
+#[ignore = "requires daemon (RMAPD-2)"]
 fn index_with_protos_shows_contract_summary() {
     let dir = tempfile::tempdir().unwrap();
     let repo_path = dir.path().join("repo");
@@ -187,6 +193,7 @@ fn index_with_protos_shows_contract_summary() {
 }
 
 #[test]
+#[ignore = "requires daemon (RMAPD-2)"]
 fn refresh_with_protos_shows_contract_summary() {
     let dir = tempfile::tempdir().unwrap();
     let repo_path = dir.path().join("repo");
@@ -205,13 +212,9 @@ fn refresh_with_protos_shows_contract_summary() {
         .output()
         .unwrap();
 
-    // Then refresh
+    // Then refresh (new signature: <db_path> <repo_uid>)
     let output = Command::new(binary_path())
-        .args([
-            "refresh",
-            repo_path.to_str().unwrap(),
-            db_path.to_str().unwrap(),
-        ])
+        .args(["refresh", db_path.to_str().unwrap(), "repo"])
         .output()
         .unwrap();
 
@@ -232,6 +235,7 @@ fn refresh_with_protos_shows_contract_summary() {
 // ======================================================================
 
 #[test]
+#[ignore = "requires daemon (RMAPD-2)"]
 fn index_contract_summary_format() {
     let dir = tempfile::tempdir().unwrap();
     let repo_path = dir.path().join("repo");
@@ -289,6 +293,7 @@ fn index_contract_summary_format() {
 // ======================================================================
 
 #[test]
+#[ignore = "requires daemon (RMAPD-2)"]
 fn index_multiple_protos_aggregates_counts() {
     let dir = tempfile::tempdir().unwrap();
     let repo_path = dir.path().join("repo");
@@ -397,6 +402,7 @@ fn create_repo_with_proto_and_java(dir: &std::path::Path) {
 }
 
 #[test]
+#[ignore = "requires daemon (RMAPD-2)"]
 fn index_no_java_no_mapping_summary() {
     let dir = tempfile::tempdir().unwrap();
     let repo_path = dir.path().join("repo");
@@ -432,6 +438,7 @@ fn index_no_java_no_mapping_summary() {
 }
 
 #[test]
+#[ignore = "requires daemon (RMAPD-2)"]
 fn index_with_proto_and_java_shows_mapping_summary() {
     let dir = tempfile::tempdir().unwrap();
     let repo_path = dir.path().join("repo");
@@ -485,6 +492,7 @@ fn index_with_proto_and_java_shows_mapping_summary() {
 }
 
 #[test]
+#[ignore = "requires daemon (RMAPD-2)"]
 fn index_mapping_summary_format() {
     let dir = tempfile::tempdir().unwrap();
     let repo_path = dir.path().join("repo");

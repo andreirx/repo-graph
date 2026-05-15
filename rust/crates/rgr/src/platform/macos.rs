@@ -9,7 +9,9 @@ use std::process::Command;
 
 use crate::cli::paths;
 
-use super::{manifest, InstallManifest, PlatformAdapter, ProbeResult, ServiceStatus};
+use super::{
+    check_daemon_socket, manifest, InstallManifest, PlatformAdapter, ProbeResult, ServiceStatus,
+};
 
 /// Service label for launchd.
 const SERVICE_LABEL: &str = "com.repo-graph.rmapd";
@@ -199,7 +201,7 @@ impl PlatformAdapter for MacOSAdapter {
             probes.push(self.check_directory(&logs_dir, "logs_dir"));
         }
 
-        // Service check
+        // Service check (launchd status)
         let status = self.service_status();
         let service_probe = match &status {
             ServiceStatus::Running { pid } => {
@@ -216,6 +218,9 @@ impl PlatformAdapter for MacOSAdapter {
             }
         };
         probes.push(service_probe);
+
+        // Socket connectivity check (actual daemon responsiveness)
+        probes.push(check_daemon_socket());
 
         // Plist check
         if let Some(plist) = Self::plist_path() {

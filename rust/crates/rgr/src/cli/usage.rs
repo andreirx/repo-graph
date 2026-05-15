@@ -49,8 +49,8 @@ pub fn format_gate_error(err: &repo_graph_gate::GateError) -> String {
 /// Print the main usage help to stderr.
 pub fn print_usage() {
     eprintln!("usage:");
-    eprintln!("  rmap index   <repo_path> <db_path> [--include-root <path>]...");
-    eprintln!("  rmap refresh <repo_path> <db_path> [--include-root <path>]...");
+    eprintln!("  rmap index   <repo_path> <db_path> [--include-root <path>]...  (daemon required)");
+    eprintln!("  rmap refresh <db_path> <repo_uid> [--include-root <path>]...  (daemon required)");
     eprintln!("  rmap trust   <db_path> <repo_uid>");
     eprintln!("  rmap callers <db_path> <repo_uid> <symbol> [--edge-types <types>]");
     eprintln!("  rmap callees <db_path> <repo_uid> <symbol> [--edge-types <types>]");

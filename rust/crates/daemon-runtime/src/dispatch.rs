@@ -79,6 +79,7 @@ impl Dispatcher for ServiceDispatcher {
             "callers" => self.handle_callers(request),
             "callees" => self.handle_callees(request),
             "imports" => self.handle_imports(request),
+            "stats" => self.handle_stats(request),
 
             // ── Agent services ──────────────────────────────────────
             "orient" => self.handle_orient(request),
@@ -476,6 +477,83 @@ impl ServiceDispatcher {
         )
     }
 
+    fn handle_stats(&self, request: &Request) -> DispatchResult {
+        let db_path = match Self::get_string_param(&request.params, "db_path") {
+            Ok(p) => p,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let repo_uid = match Self::get_string_param(&request.params, "repo_uid") {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
+        // Build composite key
+        let key = match RepoKey::new(Path::new(db_path), repo_uid) {
+            Ok(k) => k,
+            Err(e) => {
+                return DispatchResult::error(&request.id, ErrorDetail::invalid_request(e));
+            }
+        };
+
+        // Get repo state by composite key
+        let repo_state = match self.state.get_repo_by_key(&key) {
+            Some(s) => s,
+            None => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::RepoNotFound,
+                        format!("repo not loaded: {}:{}", db_path, repo_uid),
+                    ),
+                );
+            }
+        };
+
+        // Acquire read lock
+        let _read_guard = repo_state.coordinator.acquire_read();
+
+        // Get latest snapshot
+        let snapshot = match repo_state.storage.get_latest_snapshot(repo_uid) {
+            Ok(Some(snap)) => snap,
+            Ok(None) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                );
+            }
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+
+        // Compute module stats
+        let stats = match repo_state
+            .storage
+            .compute_module_stats(&snapshot.snapshot_uid)
+        {
+            Ok(s) => s,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+
+        DispatchResult::success(
+            &request.id,
+            serde_json::json!({
+                "repo_uid": repo_uid,
+                "snapshot_uid": snapshot.snapshot_uid,
+                "stats": stats,
+                "count": stats.len(),
+            }),
+        )
+    }
+
     // ── Write operations ────────────────────────────────────────────
 
     fn handle_index(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
@@ -571,17 +649,50 @@ impl ServiceDispatcher {
             &options,
             Some(&mut progress_callback),
         ) {
-            Ok(result) => DispatchResult::success(
-                &request.id,
-                serde_json::json!({
+            Ok(result) => {
+                // Build response with all summary data for CLI parity
+                let mut response = serde_json::json!({
                     "repo_uid": repo_uid,
                     "snapshot_uid": result.snapshot_uid,
                     "files_total": result.files_total,
                     "nodes_total": result.nodes_total,
                     "edges_total": result.edges_total,
                     "edges_unresolved": result.edges_unresolved,
-                }),
-            ),
+                });
+
+                // Include contract indexing results if present
+                if let Some(ref contracts) = result.contracts {
+                    response["contracts"] = serde_json::json!({
+                        "schemas_indexed": contracts.schemas_indexed,
+                        "elements_indexed": contracts.elements_indexed,
+                        "parse_failures": contracts.parse_failures,
+                        "storage_error": contracts.storage_error,
+                    });
+                }
+
+                // Include generated code mapping results if present
+                if let Some(ref mappings) = result.generated_code_mappings {
+                    response["generated_code_mappings"] = serde_json::json!({
+                        "mappings_persisted": mappings.mappings_persisted,
+                        "high_confidence_count": mappings.high_confidence_count,
+                        "element_query_error": mappings.element_query_error,
+                        "symbol_query_error": mappings.symbol_query_error,
+                        "storage_error": mappings.storage_error,
+                    });
+                }
+
+                // Auto-load repo into daemon registry so subsequent refresh calls work.
+                // Best-effort: don't fail index if load fails (repo is still indexed).
+                if let Err(e) = self.state.load_repo(db_path, repo_uid) {
+                    // Log but don't fail - the index succeeded, repo just isn't hot-loaded
+                    eprintln!(
+                        "warning: index succeeded but auto-load failed: {} (refresh will require explicit load_repo)",
+                        e
+                    );
+                }
+
+                DispatchResult::success(&request.id, response)
+            }
             Err(repo_graph_repo_index::compose::ComposeError::Aborted) => DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(
@@ -738,16 +849,51 @@ impl ServiceDispatcher {
             &options,
             Some(&mut progress_callback),
         ) {
-            Ok(result) => DispatchResult::success(
-                &request.id,
-                serde_json::json!({
+            Ok(result) => {
+                // Build response with all summary data for CLI parity
+                let mut response = serde_json::json!({
                     "snapshot_uid": result.snapshot_uid,
                     "files_total": result.files_total,
                     "nodes_total": result.nodes_total,
                     "edges_total": result.edges_total,
                     "edges_unresolved": result.edges_unresolved,
-                }),
-            ),
+                });
+
+                // Include artifact copy-forward results (refresh-specific)
+                if let Some(ref cf) = result.artifact_copy_forward {
+                    response["artifact_copy_forward"] = serde_json::json!({
+                        "measurements_copied": cf.measurements_copied,
+                        "inferences_copied": cf.inferences_copied,
+                        "boundary_surfaces_copied": cf.boundary_surfaces_copied,
+                        "boundary_channels_copied": cf.boundary_channels_copied,
+                        "contract_schemas_copied": cf.contract_schemas_copied,
+                        "contract_elements_copied": cf.contract_elements_copied,
+                    });
+                }
+
+                // Include contract indexing results if present
+                if let Some(ref contracts) = result.contracts {
+                    response["contracts"] = serde_json::json!({
+                        "schemas_indexed": contracts.schemas_indexed,
+                        "elements_indexed": contracts.elements_indexed,
+                        "parse_failures": contracts.parse_failures,
+                        "storage_error": contracts.storage_error,
+                    });
+                }
+
+                // Include generated code mapping results if present
+                if let Some(ref mappings) = result.generated_code_mappings {
+                    response["generated_code_mappings"] = serde_json::json!({
+                        "mappings_persisted": mappings.mappings_persisted,
+                        "high_confidence_count": mappings.high_confidence_count,
+                        "element_query_error": mappings.element_query_error,
+                        "symbol_query_error": mappings.symbol_query_error,
+                        "storage_error": mappings.storage_error,
+                    });
+                }
+
+                DispatchResult::success(&request.id, response)
+            }
             Err(repo_graph_repo_index::compose::ComposeError::Aborted) => DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(

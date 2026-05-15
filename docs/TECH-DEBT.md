@@ -2765,20 +2765,47 @@ Updated to use `andreirx`:
 
 REL-1 provides a **bootstrap installer** that installs binaries but defers:
 
-1. **Daemon service setup** (`scripts/install.sh`):
-   - Currently prints info message and defers to MAC-1/LINUX-1
-   - launchd (macOS) and systemd (Linux) service installation not implemented
-   - Manual daemon execution works: `rmapd`
+1. ~~**Daemon service setup** (`scripts/install.sh`):~~ **UNBLOCKED (2026-05-15).**
+   - MAC-1: launchd service installation implemented
+   - LINUX-1: systemd user service installation implemented
+   - ~~BLOCKED by RMAPD-2~~ **RESOLVED:** daemon now uses Unix socket transport
+   - Ready for validation against new socket daemon contract
 
-2. **Host integration detection** (`scripts/install.sh`):
-   - Detects Claude Code and Codex directories
-   - Actual integration patching deferred to CLAUDE-1/CODEX-1
-   - `rmap integrate <host>` commands not yet implemented
+2. ~~**Host integration detection** (`scripts/install.sh`):~~ **RESOLVED (2026-05-14).**
+   - CLAUDE-1: Claude Code integration implemented
+   - CODEX-1: Codex CLI integration implemented
+   - `rmap integrate claude-code` and `rmap integrate codex` commands operational
 
 3. **Missing standard files for release archives:**
    - `LICENSE` — not created (choose license before release)
    - `CHANGELOG.md` — not created (use conventional commits or manual changelog)
    - Install script handles missing files gracefully (copies only what exists)
+
+### RMAPD-2: Daemon Transport/Model Mismatch (2026-05-14)
+
+**STATUS: IMPLEMENTED (2026-05-15)**
+
+**Original issue:** Linux validation (v0.1.2) exposed stdio vs socket mismatch.
+
+**Resolution:**
+- Unix socket transport implemented as default mode
+- `--stdio` retained for debug/test mode only
+- Daemon is now a true resident process
+- Auto-load repo into daemon registry after successful `index` (enables immediate `refresh`)
+
+**Verified (real-machine, daemon running):**
+- `cargo test -p repo-graph-daemon-transport`: 39 passed
+- `cargo test -p repo-graph-rgr --lib`: 123 passed
+- `cargo test -p repo-graph-rgr --test index_contract_summary -- --ignored`: 9 passed
+- `cargo test -p repo-graph-rgr --test daemon_integration`: 6 passed
+
+**Command-path adoption complete:**
+- `index` and `refresh` are daemon-required operations
+- `stats` and other read-only commands use `execute_or_fallback` pattern
+- Daemon responses include summary data (contracts, generated_code_mappings, artifact_copy_forward)
+- CLI formats daemon response summaries for output parity with pre-daemon behavior
+
+See `docs/slices/rmapd-2-socket-transport.md` for full specification.
 
 ### HOOK-1 Implementation (2026-05-13)
 

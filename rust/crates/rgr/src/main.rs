@@ -1,8 +1,8 @@
 //! Minimal Rust CLI for repo-graph.
 //!
 //! Commands:
-//!   rmap index   <repo_path> <db_path>
-//!   rmap refresh <repo_path> <db_path>
+//!   rmap index   <repo_path> <db_path>   [requires daemon]
+//!   rmap refresh <db_path> <repo_uid>   [requires daemon]
 //!   rmap trust   <db_path> <repo_uid>
 //!   rmap callers <db_path> <repo_uid> <symbol> [--edge-types <types>]
 //!   rmap callees <db_path> <repo_uid> <symbol> [--edge-types <types>]

@@ -92,6 +92,19 @@ pub fn databases_dir() -> Option<PathBuf> {
     data_dir().map(|d| d.join("databases"))
 }
 
+/// Returns the platform-native daemon socket path.
+///
+/// - macOS: `~/Library/Application Support/repo-graph/daemon.sock`
+/// - Linux: `~/.local/share/rmap/daemon.sock`
+///
+/// This is the Unix domain socket used for CLI-to-daemon communication.
+/// The daemon binds this socket on startup; the CLI connects to it.
+///
+/// Returns `None` if the home directory cannot be determined.
+pub fn daemon_socket_path() -> Option<PathBuf> {
+    data_dir().map(|d| d.join("daemon.sock"))
+}
+
 /// Ensure a directory exists, creating it and parents if necessary.
 ///
 /// Returns the path if successful, or an error message if creation fails.
@@ -143,5 +156,22 @@ mod tests {
 
         let path = result.unwrap();
         assert!(path.to_string_lossy().contains("sessions"));
+    }
+
+    #[test]
+    fn daemon_socket_path_returns_some() {
+        let result = daemon_socket_path();
+        assert!(result.is_some());
+
+        let path = result.unwrap();
+        assert!(path.to_string_lossy().ends_with("daemon.sock"));
+
+        #[cfg(target_os = "macos")]
+        assert!(path
+            .to_string_lossy()
+            .contains("Application Support/repo-graph"));
+
+        #[cfg(not(target_os = "macos"))]
+        assert!(path.to_string_lossy().contains(".local/share/rmap"));
     }
 }
