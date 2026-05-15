@@ -46,15 +46,23 @@ DOWNLOAD_BASE="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download"
 # Default install directory (user-local, no sudo required)
 DEFAULT_INSTALL_DIR="${HOME}/.local/bin"
 
-# Platform-specific paths
+# Platform-specific paths and constants
+# These are fallbacks for bundled mode (curl|bash). In modular mode,
+# lib/macos.sh or lib/linux.sh may override these.
 if [[ "$(uname -s)" == "Darwin" ]]; then
     CONFIG_DIR="${HOME}/Library/Application Support/repo-graph"
     DATA_DIR="${HOME}/Library/Application Support/repo-graph"
     LOG_DIR="${HOME}/Library/Logs/repo-graph"
+    # launchd constants (must match lib/macos.sh)
+    MACOS_LAUNCHAGENTS_DIR="${HOME}/Library/LaunchAgents"
+    MACOS_SERVICE_LABEL="com.repo-graph.rmapd"
+    MACOS_PLIST_NAME="${MACOS_SERVICE_LABEL}.plist"
 else
     CONFIG_DIR="${HOME}/.config/rmap"
     DATA_DIR="${HOME}/.local/share/rmap"
     LOG_DIR="${HOME}/.local/share/rmap/logs"
+    # systemd constants
+    LINUX_SERVICE_MODE="${LINUX_SERVICE_MODE:-manual}"
 fi
 
 # State
