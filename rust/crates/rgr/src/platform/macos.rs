@@ -55,7 +55,7 @@ impl MacOSAdapter {
 
     /// Parse launchctl print output for service status.
     fn parse_launchctl_print(&self, output: &str) -> ServiceStatus {
-        // Look for "state = running" or "state = waiting"
+        // Look for "state = <status>" in the output
         if output.contains("state = running") {
             // Try to extract PID
             let pid = output
@@ -67,7 +67,11 @@ impl MacOSAdapter {
                         .and_then(|s| s.trim().parse::<u32>().ok())
                 });
             ServiceStatus::Running { pid }
-        } else if output.contains("state = waiting") || output.contains("state = idle") {
+        } else if output.contains("state = waiting")
+            || output.contains("state = idle")
+            || output.contains("state = not running")
+        {
+            // Service is loaded but not currently running
             ServiceStatus::Stopped
         } else {
             ServiceStatus::Unknown {
@@ -266,6 +270,22 @@ com.repo-graph.rmapd = {
 com.repo-graph.rmapd = {
     active count = 0
     state = waiting
+}
+"#;
+        let status = adapter.parse_launchctl_print(output);
+        assert!(matches!(status, ServiceStatus::Stopped));
+    }
+
+    #[test]
+    fn parse_not_running_state() {
+        let adapter = MacOSAdapter::new();
+        let output = r#"
+gui/501/com.repo-graph.rmapd = {
+    active count = 0
+    path = /Users/apple/Library/LaunchAgents/com.repo-graph.rmapd.plist
+    type = LaunchAgent
+    state = not running
+    program = /Users/apple/.local/bin/rmapd
 }
 "#;
         let status = adapter.parse_launchctl_print(output);
