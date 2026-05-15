@@ -200,6 +200,16 @@ See `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/cli/rmap-contrac
 
 ## Installation
 
+### Binary install (recommended)
+
+```bash
+curl -fsSL https://github.com/andreirx/repo-graph/releases/latest/download/install.sh | bash
+```
+
+This installs `rmap`, `rmapd`, and `rgistr` to `~/.local/bin` and configures the daemon service.
+
+### Build from source
+
 Requirements:
 - Rust toolchain
 

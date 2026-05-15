@@ -262,17 +262,16 @@ jobs:
           echo "Downloaded artifacts:"
           find artifacts -type f -ls
 
-      - name: Generate bundled installer
+      - name: Build bundled installer
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
-          echo "Generating bundled installer for v${VERSION}..."
+          echo "Building bundled installer for v${VERSION}..."
 
-          # Generate bundled installer
-          ./scripts/bundle-installer.sh > artifacts/install.sh
-          chmod +x artifacts/install.sh
+          # Build bundled installer (validates syntax and required functions)
+          ./scripts/build-installer.sh
 
-          # Validate syntax
-          bash -n artifacts/install.sh
+          # Copy to artifacts directory
+          cp scripts/dist/install.sh artifacts/install.sh
 
           # Create checksum
           cd artifacts

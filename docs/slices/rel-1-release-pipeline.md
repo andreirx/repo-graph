@@ -258,13 +258,13 @@ v0.1.0          → Full release, promoted to latest
 ### Script Location
 
 ```
-https://raw.githubusercontent.com/andreirx/repo-graph/main/scripts/install.sh
+https://github.com/andreirx/repo-graph/releases/latest/download/install.sh
 ```
 
 ### Usage
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/andreirx/repo-graph/main/scripts/install.sh | bash
+curl -fsSL https://github.com/andreirx/repo-graph/releases/latest/download/install.sh | bash
 ```
 
 ### Script Behavior

@@ -149,7 +149,7 @@ Note: Node.js/npm not required for rmap (Rust binary).
 Source fallback is opt-in via `--source` flag. It is NOT automatic.
 
 ```
-$ curl -fsSL https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/install.sh | bash -s -- --source
+$ curl -fsSL https://github.com/{OWNER}/repo-graph/releases/latest/download/install.sh | bash -s -- --source
 ```
 
 When `--source` is specified:
@@ -276,7 +276,7 @@ Installer checks version compatibility before upgrade.
 ### Interactive Mode (Default)
 
 ```
-$ curl -fsSL https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/install.sh | bash
+$ curl -fsSL https://github.com/{OWNER}/repo-graph/releases/latest/download/install.sh | bash
 
 Detecting platform... macOS ARM64
 Detecting toolchains...
@@ -318,7 +318,7 @@ Installation complete.
 ### Non-Interactive Mode
 
 ```
-$ curl -fsSL https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/install.sh | bash -s -- \
+$ curl -fsSL https://github.com/{OWNER}/repo-graph/releases/latest/download/install.sh | bash -s -- \
     --non-interactive \
     --integrate claude-code,codex
 ```
@@ -326,7 +326,7 @@ $ curl -fsSL https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/i
 ### Binary-Only Mode
 
 ```
-$ curl -fsSL https://raw.githubusercontent.com/{OWNER}/repo-graph/main/scripts/install.sh | bash -s -- \
+$ curl -fsSL https://github.com/{OWNER}/repo-graph/releases/latest/download/install.sh | bash -s -- \
     --binary-only
 ```
 
