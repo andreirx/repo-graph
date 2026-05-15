@@ -411,10 +411,18 @@ fn print_mapping_summary_from_daemon(mappings: &serde_json::Value) {
 fn print_copy_forward_summary_from_daemon(copy_forward: &serde_json::Value) {
     let measurements_copied = copy_forward["measurements_copied"].as_u64().unwrap_or(0);
     let inferences_copied = copy_forward["inferences_copied"].as_u64().unwrap_or(0);
-    let boundary_surfaces_copied = copy_forward["boundary_surfaces_copied"].as_u64().unwrap_or(0);
-    let boundary_channels_copied = copy_forward["boundary_channels_copied"].as_u64().unwrap_or(0);
-    let contract_schemas_copied = copy_forward["contract_schemas_copied"].as_u64().unwrap_or(0);
-    let contract_elements_copied = copy_forward["contract_elements_copied"].as_u64().unwrap_or(0);
+    let boundary_surfaces_copied = copy_forward["boundary_surfaces_copied"]
+        .as_u64()
+        .unwrap_or(0);
+    let boundary_channels_copied = copy_forward["boundary_channels_copied"]
+        .as_u64()
+        .unwrap_or(0);
+    let contract_schemas_copied = copy_forward["contract_schemas_copied"]
+        .as_u64()
+        .unwrap_or(0);
+    let contract_elements_copied = copy_forward["contract_elements_copied"]
+        .as_u64()
+        .unwrap_or(0);
 
     // Skip if nothing was copied
     let total = measurements_copied
