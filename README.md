@@ -49,10 +49,16 @@ Repo-graph is not a documentation authoring system. It is the deterministic disc
 
 ## Primary CLI: `rmap`
 
-The Rust CLI (`rmap`) is the primary binary. Commands use explicit positional arguments:
+The Rust CLI (`rmap`) is the primary binary. Query commands use explicit positional arguments:
 
 ```bash
 rmap <command> <db_path> <repo_uid> [options]
+```
+
+Index/refresh commands differ (daemon required):
+```bash
+rmap index   <repo_path> <db_path>
+rmap refresh <db_path> <repo_uid>
 ```
 
 ### Discovery workflow
@@ -91,18 +97,20 @@ rmap risk ./repo.db my-repo
 ### Indexing
 
 ```bash
-# Full index
+# Full index (daemon required)
 rmap index ./path/to/repo ./repo.db
 
-# Incremental refresh
-rmap refresh ./path/to/repo ./repo.db
+# Incremental refresh (daemon required)
+rmap refresh ./repo.db my-repo
 ```
 
 ### Daemon Mode
 
+The daemon (`rmapd`) is installed as a system service by the installer. To run manually:
+
 ```bash
-# Start the long-lived NDJSON server for persistent AI agent sessions
-rmap daemon
+# Start the daemon (normally auto-started by launchd/systemd)
+rmapd
 ```
 
 ## Current shipped language support
