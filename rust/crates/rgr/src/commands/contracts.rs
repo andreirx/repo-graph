@@ -2,23 +2,31 @@
 //!
 //! Contract schema discovery and inspection (CS-1+).
 //!
+//! # REG-1 Contract
+//!
+//! All subcommands resolve the repo from cwd via daemon registry.
+//! No explicit db_path or repo_uid arguments.
+//!
 //! # Boundary rules
 //!
 //! This module owns contracts command-family behavior:
-//! - `run_contracts`, `run_contracts_list`, `run_contracts_show`,
-//!   `run_contracts_elements` handlers
-//! - contracts-family DTOs
-//! - contracts-family argument parsing
-//! - contracts-family output shaping
+//! - command handlers
+//! - daemon request dispatch
 //!
 //! This module does **not** own:
 //! - shared infrastructure (lives in `crate::cli`)
-//! - storage queries (belongs in storage crate)
+//! - storage queries (belongs in storage crate via daemon)
 
-use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::{build_envelope, open_storage, resolve_repo_ref};
+use crate::daemon_client::DaemonClient;
+
+fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
+    format!(
+        "Daemon unavailable (socket: {}). Start with: rmapd",
+        socket_path.display()
+    )
+}
 
 // ── contracts command ────────────────────────────────────────────
 
@@ -43,38 +51,20 @@ pub fn run_contracts(args: &[String]) -> ExitCode {
 
 fn print_contracts_usage() {
     eprintln!("usage:");
-    eprintln!("  rmap contracts list <db_path> <repo_uid> [--kind protobuf]");
-    eprintln!("  rmap contracts show <db_path> <repo_uid> <file_path>");
-    eprintln!("  rmap contracts elements <db_path> <repo_uid> [--kind message|enum|service|method|field] [--file <path>]");
-    eprintln!("  rmap contracts usages <db_path> <repo_uid> [--element <element_uid>] [--min-confidence <0.0-1.0>]");
+    eprintln!("  rmap contracts list [--kind protobuf]");
+    eprintln!("  rmap contracts show <file_path>");
+    eprintln!("  rmap contracts elements [--kind message|enum|service|method|field] [--file <path>]");
+    eprintln!("  rmap contracts usages [--element <element_uid>] [--min-confidence <0.0-1.0>]");
+    eprintln!();
+    eprintln!("Run from within a repo directory.");
 }
 
 // ── contracts list command ───────────────────────────────────────
 
-/// Output DTO for `contracts list` command.
-#[derive(serde::Serialize)]
-struct ContractSchemaEntry {
-    schema_uid: String,
-    file_path: String,
-    schema_kind: String,
-    package_name: Option<String>,
-    syntax_version: Option<String>,
-    parsed_at: String,
-}
-
 fn run_contracts_list(args: &[String]) -> ExitCode {
-    // Parse args: <db_path> <repo_uid> [--kind <kind>]
-    if args.len() < 2 {
-        eprintln!("usage: rmap contracts list <db_path> <repo_uid> [--kind protobuf]");
-        return ExitCode::from(1);
-    }
-
-    let db_path = Path::new(&args[0]);
-    let repo_ref = &args[1];
-
     // Parse optional --kind filter
     let mut kind_filter: Option<String> = None;
-    let mut i = 2;
+    let mut i = 0;
     while i < args.len() {
         if args[i] == "--kind" {
             if i + 1 >= args.len() {
@@ -89,90 +79,55 @@ fn run_contracts_list(args: &[String]) -> ExitCode {
         }
     }
 
-    // Open storage
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
+    // Get cwd for repo resolution
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
         Err(e) => {
-            eprintln!("storage error: {}", e);
+            eprintln!("error: cannot determine current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Resolve repo
-    let repo_uid = match resolve_repo_ref(&storage, repo_ref) {
-        Ok(r) => r,
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("error: cannot canonicalize current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Get latest snapshot
-    let snapshot = match storage.get_latest_snapshot(&repo_uid) {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            eprintln!("no snapshot found for repo '{}'", repo_ref);
-            return ExitCode::from(2);
-        }
-        Err(e) => {
-            eprintln!("storage error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Query schemas
-    use repo_graph_storage::contract_schema_port::ContractSchemaStoragePort;
-    let schemas =
-        match storage.list_contract_schemas(&snapshot.snapshot_uid, kind_filter.as_deref()) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("query error: {}", e);
-                return ExitCode::from(2);
-            }
-        };
-
-    // Build output
-    let results: Vec<ContractSchemaEntry> = schemas
-        .into_iter()
-        .map(|s| ContractSchemaEntry {
-            schema_uid: s.schema_uid,
-            file_path: s.file_path,
-            schema_kind: s.schema_kind,
-            package_name: s.package_name,
-            syntax_version: s.syntax_version,
-            parsed_at: s.parsed_at,
-        })
-        .collect();
-
-    let count = results.len();
-    let mut extra = serde_json::Map::new();
-    if let Some(ref k) = kind_filter {
-        extra.insert(
-            "filter_kind".to_string(),
-            serde_json::Value::String(k.clone()),
-        );
-    }
-
-    let output = match build_envelope(
-        &storage,
-        "contracts list",
-        &repo_uid,
-        &snapshot,
-        serde_json::to_value(&results).unwrap(),
-        count,
-        extra,
-    ) {
-        Ok(v) => v,
+    // Connect to daemon
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::SUCCESS
+    if !client.is_available() {
+        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        return ExitCode::from(2);
+    }
+
+    // Build request params
+    let mut params = serde_json::json!({ "repo": repo_path });
+    if let Some(kind) = kind_filter {
+        params["kind"] = serde_json::json!(kind);
+    }
+
+    match client.request("contracts_list", Some(params)) {
+        Ok(result) => {
+            match serde_json::to_string_pretty(&result) {
+                Ok(json) => {
+                    println!("{}", json);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: failed to serialize result: {}", e);
+                    ExitCode::from(2)
+                }
+            }
         }
         Err(e) => {
             eprintln!("error: {}", e);
@@ -183,145 +138,63 @@ fn run_contracts_list(args: &[String]) -> ExitCode {
 
 // ── contracts show command ───────────────────────────────────────
 
-/// Output DTO for `contracts show` command.
-#[derive(serde::Serialize)]
-struct ContractSchemaDetail {
-    schema_uid: String,
-    file_path: String,
-    schema_kind: String,
-    package_name: Option<String>,
-    syntax_version: Option<String>,
-    content_hash: String,
-    extractor: String,
-    parsed_at: String,
-    elements: Vec<ContractElementEntry>,
-}
-
-/// Element entry for show command.
-#[derive(serde::Serialize)]
-struct ContractElementEntry {
-    element_uid: String,
-    element_kind: String,
-    name: String,
-    full_name: String,
-    parent_element_uid: Option<String>,
-    line_start: Option<u32>,
-    line_end: Option<u32>,
-    metadata: Option<serde_json::Value>,
-}
-
 fn run_contracts_show(args: &[String]) -> ExitCode {
-    // Parse args: <db_path> <repo_uid> <file_path>
-    if args.len() < 3 {
-        eprintln!("usage: rmap contracts show <db_path> <repo_uid> <file_path>");
+    if args.is_empty() {
+        eprintln!("usage: rmap contracts show <file_path>");
         return ExitCode::from(1);
     }
 
-    let db_path = Path::new(&args[0]);
-    let repo_ref = &args[1];
-    let file_path = &args[2];
+    let file_path = &args[0];
 
-    // Open storage
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
+    // Get cwd for repo resolution
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
         Err(e) => {
-            eprintln!("storage error: {}", e);
+            eprintln!("error: cannot determine current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Resolve repo
-    let repo_uid = match resolve_repo_ref(&storage, repo_ref) {
-        Ok(r) => r,
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("error: cannot canonicalize current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Get latest snapshot
-    let snapshot = match storage.get_latest_snapshot(&repo_uid) {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            eprintln!("no snapshot found for repo '{}'", repo_ref);
-            return ExitCode::from(2);
-        }
-        Err(e) => {
-            eprintln!("storage error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Query schema by file path
-    use repo_graph_storage::contract_schema_port::ContractSchemaStoragePort;
-    let schema = match storage.get_schema_by_file(&snapshot.snapshot_uid, file_path) {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            eprintln!("schema not found: {}", file_path);
-            return ExitCode::from(2);
-        }
-        Err(e) => {
-            eprintln!("query error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Query elements for this schema
-    let elements = match storage.list_elements_for_schema(&schema.schema_uid, None) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("query error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Build output
-    let element_entries: Vec<ContractElementEntry> = elements
-        .into_iter()
-        .map(|e| ContractElementEntry {
-            element_uid: e.element_uid,
-            element_kind: e.element_kind,
-            name: e.name,
-            full_name: e.full_name,
-            parent_element_uid: e.parent_element_uid,
-            line_start: e.line_start,
-            line_end: e.line_end,
-            metadata: e.metadata_json.and_then(|s| serde_json::from_str(&s).ok()),
-        })
-        .collect();
-
-    let detail = ContractSchemaDetail {
-        schema_uid: schema.schema_uid,
-        file_path: schema.file_path,
-        schema_kind: schema.schema_kind,
-        package_name: schema.package_name,
-        syntax_version: schema.syntax_version,
-        content_hash: schema.content_hash,
-        extractor: schema.extractor,
-        parsed_at: schema.parsed_at,
-        elements: element_entries,
-    };
-
-    let output = match build_envelope(
-        &storage,
-        "contracts show",
-        &repo_uid,
-        &snapshot,
-        serde_json::to_value(&detail).unwrap(),
-        1,
-        serde_json::Map::new(),
-    ) {
-        Ok(v) => v,
+    // Connect to daemon
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::SUCCESS
+    if !client.is_available() {
+        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        return ExitCode::from(2);
+    }
+
+    // Send request
+    let params = serde_json::json!({
+        "repo": repo_path,
+        "file": file_path,
+    });
+
+    match client.request("contracts_show", Some(params)) {
+        Ok(result) => {
+            match serde_json::to_string_pretty(&result) {
+                Ok(json) => {
+                    println!("{}", json);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: failed to serialize result: {}", e);
+                    ExitCode::from(2)
+                }
+            }
         }
         Err(e) => {
             eprintln!("error: {}", e);
@@ -332,32 +205,11 @@ fn run_contracts_show(args: &[String]) -> ExitCode {
 
 // ── contracts elements command ───────────────────────────────────
 
-/// Output DTO for `contracts elements` command.
-#[derive(serde::Serialize)]
-struct ContractElementListEntry {
-    element_uid: String,
-    schema_uid: String,
-    file_path: String,
-    element_kind: String,
-    name: String,
-    full_name: String,
-    line_start: Option<u32>,
-}
-
 fn run_contracts_elements(args: &[String]) -> ExitCode {
-    // Parse args: <db_path> <repo_uid> [--kind <kind>] [--file <path>]
-    if args.len() < 2 {
-        eprintln!("usage: rmap contracts elements <db_path> <repo_uid> [--kind message|enum|service|method|field] [--file <path>]");
-        return ExitCode::from(1);
-    }
-
-    let db_path = Path::new(&args[0]);
-    let repo_ref = &args[1];
-
     // Parse optional filters
     let mut kind_filter: Option<String> = None;
     let mut file_filter: Option<String> = None;
-    let mut i = 2;
+    let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--kind" => {
@@ -383,121 +235,58 @@ fn run_contracts_elements(args: &[String]) -> ExitCode {
         }
     }
 
-    // Open storage
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
+    // Get cwd for repo resolution
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
         Err(e) => {
-            eprintln!("storage error: {}", e);
+            eprintln!("error: cannot determine current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Resolve repo
-    let repo_uid = match resolve_repo_ref(&storage, repo_ref) {
-        Ok(r) => r,
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("error: cannot canonicalize current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Get latest snapshot
-    let snapshot = match storage.get_latest_snapshot(&repo_uid) {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            eprintln!("no snapshot found for repo '{}'", repo_ref);
-            return ExitCode::from(2);
-        }
-        Err(e) => {
-            eprintln!("storage error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    use repo_graph_storage::contract_schema_port::ContractSchemaStoragePort;
-
-    // Get schemas (optionally filtered by file)
-    let schemas = match &file_filter {
-        Some(path) => match storage.get_schema_by_file(&snapshot.snapshot_uid, path) {
-            Ok(Some(s)) => vec![s],
-            Ok(None) => {
-                eprintln!("schema not found: {}", path);
-                return ExitCode::from(2);
-            }
-            Err(e) => {
-                eprintln!("query error: {}", e);
-                return ExitCode::from(2);
-            }
-        },
-        None => match storage.list_contract_schemas(&snapshot.snapshot_uid, None) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("query error: {}", e);
-                return ExitCode::from(2);
-            }
-        },
-    };
-
-    // Collect elements from all schemas
-    let mut results: Vec<ContractElementListEntry> = Vec::new();
-    for schema in schemas {
-        let elements =
-            match storage.list_elements_for_schema(&schema.schema_uid, kind_filter.as_deref()) {
-                Ok(e) => e,
-                Err(e) => {
-                    eprintln!("query error: {}", e);
-                    return ExitCode::from(2);
-                }
-            };
-
-        for elem in elements {
-            results.push(ContractElementListEntry {
-                element_uid: elem.element_uid,
-                schema_uid: schema.schema_uid.clone(),
-                file_path: schema.file_path.clone(),
-                element_kind: elem.element_kind,
-                name: elem.name,
-                full_name: elem.full_name,
-                line_start: elem.line_start,
-            });
-        }
-    }
-
-    let count = results.len();
-    let mut extra = serde_json::Map::new();
-    if let Some(ref k) = kind_filter {
-        extra.insert(
-            "filter_kind".to_string(),
-            serde_json::Value::String(k.clone()),
-        );
-    }
-    if let Some(ref f) = file_filter {
-        extra.insert(
-            "filter_file".to_string(),
-            serde_json::Value::String(f.clone()),
-        );
-    }
-
-    let output = match build_envelope(
-        &storage,
-        "contracts elements",
-        &repo_uid,
-        &snapshot,
-        serde_json::to_value(&results).unwrap(),
-        count,
-        extra,
-    ) {
-        Ok(v) => v,
+    // Connect to daemon
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::SUCCESS
+    if !client.is_available() {
+        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        return ExitCode::from(2);
+    }
+
+    // Build request params
+    let mut params = serde_json::json!({ "repo": repo_path });
+    if let Some(kind) = kind_filter {
+        params["kind"] = serde_json::json!(kind);
+    }
+    if let Some(file) = file_filter {
+        params["file"] = serde_json::json!(file);
+    }
+
+    match client.request("contracts_elements", Some(params)) {
+        Ok(result) => {
+            match serde_json::to_string_pretty(&result) {
+                Ok(json) => {
+                    println!("{}", json);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: failed to serialize result: {}", e);
+                    ExitCode::from(2)
+                }
+            }
         }
         Err(e) => {
             eprintln!("error: {}", e);
@@ -508,35 +297,11 @@ fn run_contracts_elements(args: &[String]) -> ExitCode {
 
 // ── contracts usages command ─────────────────────────────────────
 
-/// Output DTO for `contracts usages` command.
-#[derive(serde::Serialize)]
-struct GeneratedCodeMappingEntry {
-    mapping_uid: String,
-    schema_element_uid: String,
-    element_name: Option<String>,
-    element_full_name: Option<String>,
-    generated_symbol_key: String,
-    language: String,
-    generated_file: String,
-    mapping_basis: String,
-    confidence: f64,
-    evidence: Option<serde_json::Value>,
-}
-
 fn run_contracts_usages(args: &[String]) -> ExitCode {
-    // Parse args: <db_path> <repo_uid> [--element <element_uid>] [--min-confidence <value>]
-    if args.len() < 2 {
-        eprintln!("usage: rmap contracts usages <db_path> <repo_uid> [--element <element_uid>] [--min-confidence <0.0-1.0>]");
-        return ExitCode::from(1);
-    }
-
-    let db_path = Path::new(&args[0]);
-    let repo_ref = &args[1];
-
     // Parse optional filters
     let mut element_filter: Option<String> = None;
-    let mut min_confidence: f64 = 0.0;
-    let mut i = 2;
+    let mut min_confidence: Option<f64> = None;
+    let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--element" => {
@@ -553,7 +318,7 @@ fn run_contracts_usages(args: &[String]) -> ExitCode {
                     return ExitCode::from(1);
                 }
                 match args[i + 1].parse::<f64>() {
-                    Ok(v) if (0.0..=1.0).contains(&v) => min_confidence = v,
+                    Ok(v) if (0.0..=1.0).contains(&v) => min_confidence = Some(v),
                     _ => {
                         eprintln!("--min-confidence must be a number between 0.0 and 1.0");
                         return ExitCode::from(1);
@@ -568,108 +333,58 @@ fn run_contracts_usages(args: &[String]) -> ExitCode {
         }
     }
 
-    // Open storage
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
+    // Get cwd for repo resolution
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
         Err(e) => {
-            eprintln!("storage error: {}", e);
+            eprintln!("error: cannot determine current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Resolve repo
-    let repo_uid = match resolve_repo_ref(&storage, repo_ref) {
-        Ok(r) => r,
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("error: cannot canonicalize current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Get latest snapshot
-    let snapshot = match storage.get_latest_snapshot(&repo_uid) {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            eprintln!("no snapshot found for repo '{}'", repo_ref);
-            return ExitCode::from(2);
-        }
-        Err(e) => {
-            eprintln!("storage error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    use repo_graph_storage::contract_schema_port::ContractSchemaStoragePort;
-
-    // Query mappings
-    let mappings = match storage
-        .list_generated_code_mappings(&snapshot.snapshot_uid, element_filter.as_deref())
-    {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("query error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Filter by min confidence and build results
-    let mut results: Vec<GeneratedCodeMappingEntry> = Vec::new();
-    for mapping in mappings {
-        if mapping.confidence < min_confidence {
-            continue;
-        }
-
-        results.push(GeneratedCodeMappingEntry {
-            mapping_uid: mapping.mapping_uid,
-            schema_element_uid: mapping.schema_element_uid,
-            element_name: None, // Element lookup by UID deferred
-            element_full_name: None,
-            generated_symbol_key: mapping.generated_symbol_key,
-            language: mapping.language,
-            generated_file: mapping.generated_file,
-            mapping_basis: mapping.mapping_basis,
-            confidence: mapping.confidence,
-            evidence: mapping
-                .metadata_json
-                .and_then(|s| serde_json::from_str(&s).ok()),
-        });
-    }
-
-    let count = results.len();
-    let mut extra = serde_json::Map::new();
-    if let Some(ref e) = element_filter {
-        extra.insert(
-            "filter_element".to_string(),
-            serde_json::Value::String(e.clone()),
-        );
-    }
-    if min_confidence > 0.0 {
-        extra.insert(
-            "filter_min_confidence".to_string(),
-            serde_json::json!(min_confidence),
-        );
-    }
-
-    let output = match build_envelope(
-        &storage,
-        "contracts usages",
-        &repo_uid,
-        &snapshot,
-        serde_json::to_value(&results).unwrap(),
-        count,
-        extra,
-    ) {
-        Ok(v) => v,
+    // Connect to daemon
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::SUCCESS
+    if !client.is_available() {
+        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        return ExitCode::from(2);
+    }
+
+    // Build request params
+    let mut params = serde_json::json!({ "repo": repo_path });
+    if let Some(element) = element_filter {
+        params["element"] = serde_json::json!(element);
+    }
+    if let Some(conf) = min_confidence {
+        params["min_confidence"] = serde_json::json!(conf);
+    }
+
+    match client.request("contracts_usages", Some(params)) {
+        Ok(result) => {
+            match serde_json::to_string_pretty(&result) {
+                Ok(json) => {
+                    println!("{}", json);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: failed to serialize result: {}", e);
+                    ExitCode::from(2)
+                }
+            }
         }
         Err(e) => {
             eprintln!("error: {}", e);

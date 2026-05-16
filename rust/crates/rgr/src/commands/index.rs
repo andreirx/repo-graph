@@ -14,12 +14,22 @@ use std::process::ExitCode;
 
 use crate::daemon_client::{DaemonClient, DaemonClientError};
 
-/// Run the `rmap index` command.
+/// Run the `rmap index` command (REG-1 contract).
 ///
-/// Usage: `rmap index <repo_path> <db_path> [--include-root <path>]...`
+/// Usage: `rmap index [repo_path] [--alias <name>] [--include-root <path>]...`
 ///
-/// This command requires the daemon to be running. If the daemon is
-/// unavailable, it fails with an actionable error message.
+/// - `repo_path`: Optional. Path to repository root. Defaults to current directory.
+/// - `--alias`: Optional. Human-friendly name for the repo.
+/// - `--include-root`: Optional. C/C++ include paths.
+///
+/// The daemon:
+/// 1. Registers repo in registry (or retrieves existing entry)
+/// 2. Allocates db_path if new
+/// 3. Generates stable repo_uid if new
+/// 4. Indexes the repo
+/// 5. Updates registry with last_indexed_at and last_snapshot_uid
+///
+/// This command requires the daemon to be running.
 ///
 /// Exit codes:
 /// - 0: success
@@ -28,8 +38,10 @@ use crate::daemon_client::{DaemonClient, DaemonClientError};
 pub fn run_index(args: &[String]) -> ExitCode {
     // Parse options and positional args.
     let mut include_roots: Vec<String> = Vec::new();
-    let mut positional: Vec<&String> = Vec::new();
+    let mut alias: Option<String> = None;
+    let mut repo_path_arg: Option<String> = None;
     let mut i = 0;
+
     while i < args.len() {
         if args[i] == "--include-root" {
             if i + 1 >= args.len() {
@@ -38,22 +50,29 @@ pub fn run_index(args: &[String]) -> ExitCode {
             }
             include_roots.push(args[i + 1].clone());
             i += 2;
+        } else if args[i] == "--alias" {
+            if i + 1 >= args.len() {
+                eprintln!("error: --alias requires a name argument");
+                return ExitCode::from(1);
+            }
+            alias = Some(args[i + 1].clone());
+            i += 2;
         } else if args[i].starts_with("--") {
             eprintln!("error: unknown option: {}", args[i]);
             return ExitCode::from(1);
-        } else {
-            positional.push(&args[i]);
+        } else if repo_path_arg.is_none() {
+            repo_path_arg = Some(args[i].clone());
             i += 1;
+        } else {
+            eprintln!("error: unexpected argument: {}", args[i]);
+            eprintln!("usage: rmap index [repo_path] [--alias <name>] [--include-root <path>]...");
+            return ExitCode::from(1);
         }
     }
 
-    if positional.len() != 2 {
-        eprintln!("usage: rmap index <repo_path> <db_path> [--include-root <path>]...");
-        return ExitCode::from(1);
-    }
-
-    let repo_path = Path::new(positional[0]);
-    let db_path = Path::new(positional[1]);
+    // Default to current directory if no repo_path provided
+    let repo_path_str = repo_path_arg.unwrap_or_else(|| ".".to_string());
+    let repo_path = Path::new(&repo_path_str);
 
     if !repo_path.is_dir() {
         eprintln!(
@@ -63,7 +82,7 @@ pub fn run_index(args: &[String]) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    // Canonicalize paths for daemon
+    // Canonicalize repo path for daemon
     let repo_path_canon = match repo_path.canonicalize() {
         Ok(p) => p,
         Err(e) => {
@@ -72,20 +91,14 @@ pub fn run_index(args: &[String]) -> ExitCode {
         }
     };
 
-    // db_path may not exist yet (new index), so we canonicalize parent + filename
-    let db_path_canon = match canonicalize_db_path(db_path) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Build daemon request params
+    // Build daemon request params (REG-1: no db_path, daemon allocates)
     let mut params = serde_json::json!({
         "repo_path": repo_path_canon.to_string_lossy(),
-        "db_path": db_path_canon.to_string_lossy(),
     });
+
+    if let Some(alias_str) = &alias {
+        params["alias"] = serde_json::json!(alias_str);
+    }
 
     if !include_roots.is_empty() {
         params["include_roots"] = serde_json::json!(include_roots);
@@ -116,11 +129,14 @@ pub fn run_index(args: &[String]) -> ExitCode {
             let edges_total = result["edges_total"].as_u64().unwrap_or(0);
             let edges_unresolved = result["edges_unresolved"].as_u64().unwrap_or(0);
             let snapshot_uid = result["snapshot_uid"].as_str().unwrap_or("unknown");
+            let repo_uid = result["repo_uid"].as_str().unwrap_or("unknown");
 
             eprintln!(
-                "indexed {} files, {} nodes, {} edges ({} unresolved) → {}",
-                files_total, nodes_total, edges_total, edges_unresolved, snapshot_uid,
+                "indexed {} files, {} nodes, {} edges ({} unresolved)",
+                files_total, nodes_total, edges_total, edges_unresolved,
             );
+            eprintln!("  repo: {}", repo_uid);
+            eprintln!("  snapshot: {}", snapshot_uid);
 
             // Print contract summary if present
             if let Some(contracts) = result.get("contracts") {
@@ -148,6 +164,10 @@ pub fn run_index(args: &[String]) -> ExitCode {
 /// Canonicalize a database path, handling the case where the file doesn't exist yet.
 ///
 /// For new databases, we canonicalize the parent directory and append the filename.
+///
+/// Note: This function is retained for the refresh command which still uses
+/// explicit db_path until REG-1 CLI migration is complete.
+#[allow(dead_code)]
 fn canonicalize_db_path(db_path: &Path) -> Result<std::path::PathBuf, String> {
     if db_path.exists() {
         db_path
@@ -756,9 +776,8 @@ mod tests {
 /// - 1: usage error
 /// - 2: runtime error (includes daemon unavailable)
 pub fn run_refresh(args: &[String]) -> ExitCode {
-    // Parse options and positional args.
+    // Parse options (REG-1: no positional args, repo from cwd)
     let mut include_roots: Vec<String> = Vec::new();
-    let mut positional: Vec<&String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--include-root" {
@@ -772,37 +791,32 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
             eprintln!("error: unknown option: {}", args[i]);
             return ExitCode::from(1);
         } else {
-            positional.push(&args[i]);
-            i += 1;
+            eprintln!("error: unexpected argument: {}", args[i]);
+            eprintln!("usage: rmap refresh [--include-root <path>]...");
+            return ExitCode::from(1);
         }
     }
 
-    if positional.len() != 2 {
-        eprintln!("usage: rmap refresh <db_path> <repo_uid> [--include-root <path>]...");
-        return ExitCode::from(1);
-    }
-
-    let db_path = Path::new(positional[0]);
-    let repo_uid = positional[1];
-
-    if !db_path.exists() {
-        eprintln!("error: database does not exist: {}", db_path.display());
-        return ExitCode::from(1);
-    }
-
-    // Canonicalize db_path for daemon
-    let db_path_canon = match db_path.canonicalize() {
+    // REG-1: resolve repo from cwd
+    let cwd = match std::env::current_dir() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("error: failed to canonicalize db path: {}", e);
+            eprintln!("error: cannot get current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Build daemon request params
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(e) => {
+            eprintln!("error: cannot canonicalize current directory: {}", e);
+            return ExitCode::from(2);
+        }
+    };
+
+    // Build daemon request params (REG-1: sends repo path, not db_path/repo_uid)
     let mut params = serde_json::json!({
-        "db_path": db_path_canon.to_string_lossy(),
-        "repo_uid": repo_uid,
+        "repo": repo_path,
     });
 
     if !include_roots.is_empty() {
@@ -858,7 +872,12 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(DaemonClientError::DaemonError { code, message }) => {
-            eprintln!("error: daemon returned {}: {}", code, message);
+            if code == "RepoNotFound" {
+                eprintln!("error: repo not indexed");
+                eprintln!("hint: run 'rmap index .' to index this repo first");
+            } else {
+                eprintln!("error: daemon returned {}: {}", code, message);
+            }
             ExitCode::from(2)
         }
         Err(e) => {

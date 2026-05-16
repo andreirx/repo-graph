@@ -2,19 +2,28 @@
 //!
 //! Queries resource readers and writers from the graph.
 //!
-//! SB-7A adds `resource list` for CLI-based parity validation.
+//! # REG-1 Contract
+//!
+//! All subcommands resolve the repo from cwd via daemon registry.
+//! No explicit db_path or repo_uid arguments.
 
-use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::{build_envelope, open_storage};
+use crate::daemon_client::DaemonClient;
+
+fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
+    format!(
+        "Daemon unavailable (socket: {}). Start with: rmapd",
+        socket_path.display()
+    )
+}
 
 /// Run the `rmap resource` command dispatcher.
 ///
 /// Usage:
-/// - `rmap resource list    <db_path> <repo_uid> [--kind <kind>]`
-/// - `rmap resource readers <db_path> <repo_uid> <resource_stable_key>`
-/// - `rmap resource writers <db_path> <repo_uid> <resource_stable_key>`
+/// - `rmap resource list    [--kind <kind>]`
+/// - `rmap resource readers <resource_stable_key>`
+/// - `rmap resource writers <resource_stable_key>`
 pub fn run_resource(args: &[String]) -> ExitCode {
     if args.is_empty() {
         print_usage();
@@ -35,93 +44,76 @@ pub fn run_resource(args: &[String]) -> ExitCode {
 
 fn print_usage() {
     eprintln!("usage:");
-    eprintln!("  rmap resource list    <db_path> <repo_uid> [--kind <kind>]");
-    eprintln!("  rmap resource readers <db_path> <repo_uid> <resource_stable_key>");
-    eprintln!("  rmap resource writers <db_path> <repo_uid> <resource_stable_key>");
+    eprintln!("  rmap resource list    [--kind <kind>]");
+    eprintln!("  rmap resource readers <resource_stable_key>");
+    eprintln!("  rmap resource writers <resource_stable_key>");
     eprintln!();
     eprintln!("kinds: FS_PATH, DB_RESOURCE, BLOB, STATE");
+    eprintln!();
+    eprintln!("Run from within a repo directory.");
 }
 
 /// Run `rmap resource list`.
-///
-/// SB-7A: Lists all resource nodes with read/write edge counts.
-/// Used for CLI-based parity validation.
 fn run_resource_list(args: &[String]) -> ExitCode {
-    if args.len() < 2 {
-        eprintln!("usage: rmap resource list <db_path> <repo_uid> [--kind <kind>]");
+    // Parse optional --kind filter
+    let kind_filter = if args.len() >= 2 && args[0] == "--kind" {
+        Some(args[1].as_str())
+    } else if !args.is_empty() {
+        eprintln!("usage: rmap resource list [--kind <kind>]");
         return ExitCode::from(1);
-    }
-
-    let db_path = Path::new(&args[0]);
-    let repo_uid = &args[1];
-
-    // Parse optional --kind filter.
-    let kind_filter = if args.len() >= 4 && args[2] == "--kind" {
-        Some(args[3].as_str())
     } else {
         None
     };
 
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
+    // Get cwd for repo resolution
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: cannot determine current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let snapshot = match storage.get_latest_snapshot(repo_uid) {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(e) => {
+            eprintln!("error: cannot canonicalize current directory: {}", e);
             return ExitCode::from(2);
         }
+    };
+
+    // Connect to daemon
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let resources = match storage.list_resources(&snapshot.snapshot_uid, kind_filter) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Compute summary counts.
-    let total_reads: i64 = resources.iter().map(|r| r.readers).sum();
-    let total_writes: i64 = resources.iter().map(|r| r.writers).sum();
-
-    let count = resources.len();
-    let mut extra = serde_json::Map::new();
-    extra.insert("total_reads".to_string(), serde_json::json!(total_reads));
-    extra.insert("total_writes".to_string(), serde_json::json!(total_writes));
-    if let Some(k) = kind_filter {
-        extra.insert("filter_kind".to_string(), serde_json::json!(k));
+    if !client.is_available() {
+        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        return ExitCode::from(2);
     }
 
-    let output = match build_envelope(
-        &storage,
-        "resource list",
-        repo_uid,
-        &snapshot,
-        serde_json::to_value(&resources).unwrap(),
-        count,
-        extra,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    // Build request params
+    let mut params = serde_json::json!({ "repo": repo_path });
+    if let Some(kind) = kind_filter {
+        params["kind"] = serde_json::json!(kind);
+    }
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::SUCCESS
+    match client.request("resource_list", Some(params)) {
+        Ok(result) => {
+            match serde_json::to_string_pretty(&result) {
+                Ok(json) => {
+                    println!("{}", json);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: failed to serialize result: {}", e);
+                    ExitCode::from(2)
+                }
+            }
         }
         Err(e) => {
             eprintln!("error: {}", e);
@@ -132,90 +124,62 @@ fn run_resource_list(args: &[String]) -> ExitCode {
 
 /// Run `rmap resource readers`.
 fn run_resource_readers(args: &[String]) -> ExitCode {
-    if args.len() != 3 {
-        eprintln!("usage: rmap resource readers <db_path> <repo_uid> <resource_stable_key>");
+    if args.len() != 1 {
+        eprintln!("usage: rmap resource readers <resource_stable_key>");
         return ExitCode::from(1);
     }
 
-    let db_path = Path::new(&args[0]);
-    let repo_uid = &args[1];
-    let resource_key = &args[2];
+    let resource_key = &args[0];
 
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
+    // Get cwd for repo resolution
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: cannot determine current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let snapshot = match storage.get_latest_snapshot(repo_uid) {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(e) => {
+            eprintln!("error: cannot canonicalize current directory: {}", e);
             return ExitCode::from(2);
         }
+    };
+
+    // Connect to daemon
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Resolve resource (exact stable_key, must be resource kind).
-    use repo_graph_storage::queries::ResourceResolveError;
-    let target = match storage.resolve_resource(&snapshot.snapshot_uid, resource_key) {
-        Ok(r) => r,
-        Err(ResourceResolveError::NotFound) => {
-            eprintln!("error: resource not found: {}", resource_key);
-            return ExitCode::from(2);
-        }
-        Err(ResourceResolveError::NotAResource(kind)) => {
-            eprintln!(
-                "error: '{}' is not a resource node (kind: {}). \
-                 Expected FS_PATH, DB_RESOURCE, BLOB, or STATE+CACHE.",
-                resource_key, kind
-            );
-            return ExitCode::from(2);
-        }
-        Err(ResourceResolveError::Storage(e)) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    if !client.is_available() {
+        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        return ExitCode::from(2);
+    }
 
-    // Find readers.
-    let readers = match storage.find_resource_readers(&snapshot.snapshot_uid, &target.stable_key) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    // Send request
+    let params = serde_json::json!({
+        "repo": repo_path,
+        "resource": resource_key,
+    });
 
-    // JSON output (QueryResult envelope).
-    let count = readers.len();
-    let mut extra = serde_json::Map::new();
-    extra.insert("target".to_string(), serde_json::json!(target.stable_key));
-    let output = match build_envelope(
-        &storage,
-        "resource readers",
-        repo_uid,
-        &snapshot,
-        serde_json::to_value(&readers).unwrap(),
-        count,
-        extra,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::SUCCESS
+    match client.request("resource_readers", Some(params)) {
+        Ok(result) => {
+            match serde_json::to_string_pretty(&result) {
+                Ok(json) => {
+                    println!("{}", json);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: failed to serialize result: {}", e);
+                    ExitCode::from(2)
+                }
+            }
         }
         Err(e) => {
             eprintln!("error: {}", e);
@@ -226,90 +190,62 @@ fn run_resource_readers(args: &[String]) -> ExitCode {
 
 /// Run `rmap resource writers`.
 fn run_resource_writers(args: &[String]) -> ExitCode {
-    if args.len() != 3 {
-        eprintln!("usage: rmap resource writers <db_path> <repo_uid> <resource_stable_key>");
+    if args.len() != 1 {
+        eprintln!("usage: rmap resource writers <resource_stable_key>");
         return ExitCode::from(1);
     }
 
-    let db_path = Path::new(&args[0]);
-    let repo_uid = &args[1];
-    let resource_key = &args[2];
+    let resource_key = &args[0];
 
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
+    // Get cwd for repo resolution
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: cannot determine current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let snapshot = match storage.get_latest_snapshot(repo_uid) {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(e) => {
+            eprintln!("error: cannot canonicalize current directory: {}", e);
             return ExitCode::from(2);
         }
+    };
+
+    // Connect to daemon
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Resolve resource (exact stable_key, must be resource kind).
-    use repo_graph_storage::queries::ResourceResolveError;
-    let target = match storage.resolve_resource(&snapshot.snapshot_uid, resource_key) {
-        Ok(r) => r,
-        Err(ResourceResolveError::NotFound) => {
-            eprintln!("error: resource not found: {}", resource_key);
-            return ExitCode::from(2);
-        }
-        Err(ResourceResolveError::NotAResource(kind)) => {
-            eprintln!(
-                "error: '{}' is not a resource node (kind: {}). \
-                 Expected FS_PATH, DB_RESOURCE, BLOB, or STATE+CACHE.",
-                resource_key, kind
-            );
-            return ExitCode::from(2);
-        }
-        Err(ResourceResolveError::Storage(e)) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    if !client.is_available() {
+        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        return ExitCode::from(2);
+    }
 
-    // Find writers.
-    let writers = match storage.find_resource_writers(&snapshot.snapshot_uid, &target.stable_key) {
-        Ok(w) => w,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    // Send request
+    let params = serde_json::json!({
+        "repo": repo_path,
+        "resource": resource_key,
+    });
 
-    // JSON output (QueryResult envelope).
-    let count = writers.len();
-    let mut extra = serde_json::Map::new();
-    extra.insert("target".to_string(), serde_json::json!(target.stable_key));
-    let output = match build_envelope(
-        &storage,
-        "resource writers",
-        repo_uid,
-        &snapshot,
-        serde_json::to_value(&writers).unwrap(),
-        count,
-        extra,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::SUCCESS
+    match client.request("resource_writers", Some(params)) {
+        Ok(result) => {
+            match serde_json::to_string_pretty(&result) {
+                Ok(json) => {
+                    println!("{}", json);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: failed to serialize result: {}", e);
+                    ExitCode::from(2)
+                }
+            }
         }
         Err(e) => {
             eprintln!("error: {}", e);

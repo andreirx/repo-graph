@@ -1,44 +1,40 @@
 //! Boundaries command family.
 //!
-//! BI-1A: Boundary interaction discovery for local IPC mechanisms.
-//! GR-3A: gRPC provider/consumer link listing.
+//! Boundary interaction discovery and inspection.
 //!
-//! ## Commands
+//! # REG-1 Contract
 //!
-//!   rmap boundaries list <db_path> <repo_uid> [filters...]
-//!   rmap boundaries show <db_path> <repo_uid> <surface_uid>
-//!   rmap boundaries summary <db_path> <repo_uid>
-//!   rmap boundaries links <db_path> <repo_uid> [filters...]
+//! All subcommands resolve the repo from cwd via daemon registry.
+//! No explicit db_path or repo_uid arguments.
 //!
-//! ## Exit codes
+//! # Commands
 //!
-//!   0 — success (results found)
-//!   1 — success (no results found / not found)
-//!   2 — runtime error
+//! - `rmap boundaries list [--kind <kind>] [--scope <scope>] [--direction <dir>] [--family <fam>] [--file <path>] [--file-prefix <prefix>] [--symbol <key>]`
+//! - `rmap boundaries show <surface_uid>`
+//! - `rmap boundaries summary`
+//! - `rmap boundaries links [--service <name>]`
 //!
-//! ## Filters (list command)
+//! # Boundary rules
 //!
-//!   --kind <unix_socket|named_pipe|...>     Filter by channel kind
-//!   --scope <inter_process|inter_device>    Filter by boundary scope
-//!   --direction <provider|consumer>         Filter by direction
-//!   --family <socket|pipe|shared_memory|...> Filter by protocol family
-//!   --file <path>                           Filter by exact file path
-//!   --file-prefix <prefix>                  Filter by file path prefix
-//!   --symbol <key>                          Filter by enclosing symbol stable key
+//! This module owns boundaries command-family behavior:
+//! - `run_boundaries`, `run_boundaries_list`, `run_boundaries_show`, etc.
+//! - boundaries-family argument parsing
+//! - boundaries-family output rendering
 //!
-//! ## Filters (links command)
-//!
-//!   --service <name>                        Filter by contract service name (contains match)
+//! This module does **not** own:
+//! - shared infrastructure (lives in `crate::cli`)
+//! - storage queries (belongs in daemon)
 
-use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::{build_envelope, open_storage, resolve_repo_ref};
+use crate::daemon_client::DaemonClient;
 
-use repo_graph_boundary_interaction::{
-    BoundaryInteractionFilter, BoundaryInteractionLinkFilter, BoundaryInteractionReadPort,
-    BoundaryScope, ChannelKind, Direction, ProtocolFamily,
-};
+fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
+    format!(
+        "Daemon unavailable (socket: {}). Start with: rmapd",
+        socket_path.display()
+    )
+}
 
 // ── boundaries command ───────────────────────────────────────────────
 
@@ -63,129 +59,93 @@ pub fn run_boundaries(args: &[String]) -> ExitCode {
 
 fn print_usage() {
     eprintln!("usage:");
-    eprintln!("  rmap boundaries list <db_path> <repo_uid> [--kind <kind>] [--scope <scope>] [--direction <dir>] [--family <fam>] [--file <path>] [--file-prefix <prefix>] [--symbol <key>]");
-    eprintln!("  rmap boundaries show <db_path> <repo_uid> <surface_uid>");
-    eprintln!("  rmap boundaries summary <db_path> <repo_uid>");
-    eprintln!("  rmap boundaries links <db_path> <repo_uid> [--service <name>]");
+    eprintln!("  rmap boundaries list [--kind <kind>] [--scope <scope>] [--direction <dir>] [--family <fam>] [--file <path>] [--file-prefix <prefix>] [--symbol <key>]");
+    eprintln!("  rmap boundaries show <surface_uid>");
+    eprintln!("  rmap boundaries summary");
+    eprintln!("  rmap boundaries links [--service <name>]");
+    eprintln!();
+    eprintln!("Run from within a repo directory.");
 }
 
 // ── boundaries list ──────────────────────────────────────────────────
 
 fn run_boundaries_list(args: &[String]) -> ExitCode {
-    let (db_path, repo_ref, filter) = match parse_list_args(args) {
-        Ok(v) => v,
+    // Parse filters
+    let filters = match parse_list_filters(args) {
+        Ok(f) => f,
         Err(msg) => {
-            eprintln!("{}", msg);
+            eprintln!("error: {}", msg);
+            eprintln!("usage: rmap boundaries list [--kind <kind>] [--scope <scope>] [--direction <dir>] [--family <fam>] [--file <path>] [--file-prefix <prefix>] [--symbol <key>]");
             return ExitCode::from(1);
         }
     };
 
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
+    // Get cwd for repo resolution
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: cannot determine current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let repo_uid = match resolve_repo_ref(&storage, repo_ref) {
-        Ok(uid) => uid,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(e) => {
+            eprintln!("error: cannot canonicalize current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let snapshot = match storage.get_latest_snapshot(&repo_uid) {
-        Ok(Some(snap)) => snap,
-        Ok(None) => {
-            eprintln!("error: no snapshot for repo '{}'", repo_ref);
-            return ExitCode::from(2);
-        }
+    // Connect to daemon
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let items = match storage.list_boundary_interactions(&snapshot.snapshot_uid, &filter) {
-        Ok(i) => i,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    let count = items.len();
-
-    // Build envelope with filter info.
-    let mut extra = serde_json::Map::new();
-    if let Some(ref k) = filter.channel_kind {
-        extra.insert(
-            "filter_kind".to_string(),
-            serde_json::Value::String(k.as_str().to_string()),
-        );
-    }
-    if let Some(ref s) = filter.boundary_scope {
-        extra.insert(
-            "filter_scope".to_string(),
-            serde_json::Value::String(s.as_str().to_string()),
-        );
-    }
-    if let Some(ref d) = filter.direction {
-        extra.insert(
-            "filter_direction".to_string(),
-            serde_json::Value::String(d.as_str().to_string()),
-        );
-    }
-    if let Some(ref f) = filter.protocol_family {
-        extra.insert(
-            "filter_family".to_string(),
-            serde_json::Value::String(f.as_str().to_string()),
-        );
-    }
-    if let Some(ref f) = filter.file {
-        extra.insert(
-            "filter_file".to_string(),
-            serde_json::Value::String(f.clone()),
-        );
-    }
-    if let Some(ref p) = filter.file_prefix {
-        extra.insert(
-            "filter_file_prefix".to_string(),
-            serde_json::Value::String(p.clone()),
-        );
-    }
-    if let Some(ref s) = filter.symbol {
-        extra.insert(
-            "filter_symbol".to_string(),
-            serde_json::Value::String(s.clone()),
-        );
+    if !client.is_available() {
+        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        return ExitCode::from(2);
     }
 
-    let output = match build_envelope(
-        &storage,
-        "boundaries list",
-        &repo_uid,
-        &snapshot,
-        serde_json::to_value(&items).unwrap(),
-        count,
-        extra,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    // Build request params
+    let mut params = serde_json::json!({ "repo": repo_path });
+    if let Some(k) = filters.kind {
+        params["kind"] = serde_json::json!(k);
+    }
+    if let Some(s) = filters.scope {
+        params["scope"] = serde_json::json!(s);
+    }
+    if let Some(d) = filters.direction {
+        params["direction"] = serde_json::json!(d);
+    }
+    if let Some(f) = filters.family {
+        params["family"] = serde_json::json!(f);
+    }
+    if let Some(f) = filters.file {
+        params["file"] = serde_json::json!(f);
+    }
+    if let Some(p) = filters.file_prefix {
+        params["file_prefix"] = serde_json::json!(p);
+    }
+    if let Some(s) = filters.symbol {
+        params["symbol"] = serde_json::json!(s);
+    }
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            if count == 0 {
-                ExitCode::from(1)
-            } else {
-                ExitCode::SUCCESS
+    match client.request("boundaries_list", Some(params)) {
+        Ok(result) => {
+            match serde_json::to_string_pretty(&result) {
+                Ok(json) => {
+                    println!("{}", json);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: failed to serialize result: {}", e);
+                    ExitCode::from(2)
+                }
             }
         }
         Err(e) => {
@@ -195,134 +155,165 @@ fn run_boundaries_list(args: &[String]) -> ExitCode {
     }
 }
 
-fn parse_list_args(args: &[String]) -> Result<(&Path, &str, BoundaryInteractionFilter), String> {
-    if args.len() < 2 {
-        return Err(
-            "usage: rmap boundaries list <db_path> <repo_uid> [--kind <kind>] ...".to_string(),
-        );
-    }
+struct ListFilters {
+    kind: Option<String>,
+    scope: Option<String>,
+    direction: Option<String>,
+    family: Option<String>,
+    file: Option<String>,
+    file_prefix: Option<String>,
+    symbol: Option<String>,
+}
 
-    let db_path = Path::new(&args[0]);
-    let repo_ref = args[1].as_str();
-    let mut filter = BoundaryInteractionFilter::new();
+fn parse_list_filters(args: &[String]) -> Result<ListFilters, String> {
+    let mut filters = ListFilters {
+        kind: None,
+        scope: None,
+        direction: None,
+        family: None,
+        file: None,
+        file_prefix: None,
+        symbol: None,
+    };
 
-    let mut i = 2;
+    let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--kind" => {
                 if i + 1 >= args.len() {
                     return Err("--kind requires a value".to_string());
                 }
-                filter.channel_kind = Some(parse_channel_kind(&args[i + 1])?);
+                filters.kind = Some(args[i + 1].clone());
                 i += 2;
             }
             "--scope" => {
                 if i + 1 >= args.len() {
                     return Err("--scope requires a value".to_string());
                 }
-                filter.boundary_scope = Some(parse_boundary_scope(&args[i + 1])?);
+                filters.scope = Some(args[i + 1].clone());
                 i += 2;
             }
             "--direction" => {
                 if i + 1 >= args.len() {
                     return Err("--direction requires a value".to_string());
                 }
-                filter.direction = Some(parse_direction(&args[i + 1])?);
+                filters.direction = Some(args[i + 1].clone());
                 i += 2;
             }
             "--family" => {
                 if i + 1 >= args.len() {
                     return Err("--family requires a value".to_string());
                 }
-                filter.protocol_family = Some(parse_protocol_family(&args[i + 1])?);
+                filters.family = Some(args[i + 1].clone());
                 i += 2;
             }
             "--file" => {
                 if i + 1 >= args.len() {
                     return Err("--file requires a value".to_string());
                 }
-                filter.file = Some(args[i + 1].clone());
+                filters.file = Some(args[i + 1].clone());
                 i += 2;
             }
             "--file-prefix" => {
                 if i + 1 >= args.len() {
                     return Err("--file-prefix requires a value".to_string());
                 }
-                filter.file_prefix = Some(args[i + 1].clone());
+                filters.file_prefix = Some(args[i + 1].clone());
                 i += 2;
             }
             "--symbol" => {
                 if i + 1 >= args.len() {
                     return Err("--symbol requires a value".to_string());
                 }
-                filter.symbol = Some(args[i + 1].clone());
+                filters.symbol = Some(args[i + 1].clone());
                 i += 2;
             }
-            other => {
+            other if other.starts_with("--") => {
                 return Err(format!("unknown option: {}", other));
+            }
+            other => {
+                return Err(format!("unexpected argument: {}", other));
             }
         }
     }
 
-    Ok((db_path, repo_ref, filter))
+    Ok(filters)
 }
 
 // ── boundaries show ──────────────────────────────────────────────────
 
 fn run_boundaries_show(args: &[String]) -> ExitCode {
-    if args.len() != 3 {
-        eprintln!("usage: rmap boundaries show <db_path> <repo_uid> <surface_uid>");
+    if args.is_empty() {
+        eprintln!("usage: rmap boundaries show <surface_uid>");
         return ExitCode::from(1);
     }
 
-    let db_path = Path::new(&args[0]);
-    let repo_ref = &args[1];
-    let surface_uid = &args[2];
+    let surface_uid = &args[0];
 
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
+    // Check for unexpected args
+    if args.len() > 1 {
+        eprintln!("error: unexpected argument: {}", args[1]);
+        eprintln!("usage: rmap boundaries show <surface_uid>");
+        return ExitCode::from(1);
+    }
+
+    // Get cwd for repo resolution
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: cannot determine current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Resolve repo to validate it exists.
-    let repo_uid = match resolve_repo_ref(&storage, repo_ref) {
-        Ok(uid) => uid,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(e) => {
+            eprintln!("error: cannot canonicalize current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let detail = match storage.get_boundary_interaction_detail(surface_uid) {
-        Ok(Some(d)) => d,
-        Ok(None) => {
-            eprintln!("error: surface not found: {}", surface_uid);
-            return ExitCode::from(1);
-        }
+    // Connect to daemon
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Verify surface belongs to requested repo.
-    if detail.repo_uid != repo_uid {
-        eprintln!(
-            "error: surface {} belongs to repo '{}', not '{}'",
-            surface_uid, detail.repo_uid, repo_ref
-        );
-        return ExitCode::from(1);
+    if !client.is_available() {
+        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        return ExitCode::from(2);
     }
 
-    match serde_json::to_string_pretty(&detail) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::SUCCESS
+    // Build request params
+    let params = serde_json::json!({
+        "repo": repo_path,
+        "surface": surface_uid,
+    });
+
+    match client.request("boundaries_show", Some(params)) {
+        Ok(result) => {
+            match serde_json::to_string_pretty(&result) {
+                Ok(json) => {
+                    println!("{}", json);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: failed to serialize result: {}", e);
+                    ExitCode::from(2)
+                }
+            }
         }
         Err(e) => {
+            // Check for "surface not found" error
+            let err_str = e.to_string();
+            if err_str.contains("not found") {
+                eprintln!("error: {}", err_str);
+                return ExitCode::from(1);
+            }
             eprintln!("error: {}", e);
             ExitCode::from(2)
         }
@@ -332,65 +323,58 @@ fn run_boundaries_show(args: &[String]) -> ExitCode {
 // ── boundaries summary ───────────────────────────────────────────────
 
 fn run_boundaries_summary(args: &[String]) -> ExitCode {
-    if args.len() != 2 {
-        eprintln!("usage: rmap boundaries summary <db_path> <repo_uid>");
+    // Check for unexpected args
+    if !args.is_empty() {
+        eprintln!("error: unexpected argument: {}", args[0]);
+        eprintln!("usage: rmap boundaries summary");
         return ExitCode::from(1);
     }
 
-    let db_path = Path::new(&args[0]);
-    let repo_ref = &args[1];
-
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
+    // Get cwd for repo resolution
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: cannot determine current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let repo_uid = match resolve_repo_ref(&storage, repo_ref) {
-        Ok(uid) => uid,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(e) => {
+            eprintln!("error: cannot canonicalize current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let snapshot = match storage.get_latest_snapshot(&repo_uid) {
-        Ok(Some(snap)) => snap,
-        Ok(None) => {
-            eprintln!("error: no snapshot for repo '{}'", repo_ref);
-            return ExitCode::from(2);
-        }
+    // Connect to daemon
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let summary = match storage.get_boundary_interaction_summary(&snapshot.snapshot_uid) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    if !client.is_available() {
+        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        return ExitCode::from(2);
+    }
 
-    // Wrap in envelope with repo/snapshot context.
-    let output = serde_json::json!({
-        "command": "boundaries summary",
-        "repo": repo_uid,
-        "snapshot": snapshot.snapshot_uid,
-        "summary": summary,
-    });
+    // Build request params
+    let params = serde_json::json!({ "repo": repo_path });
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            if summary.total_surfaces == 0 {
-                ExitCode::from(1)
-            } else {
-                ExitCode::SUCCESS
+    match client.request("boundaries_summary", Some(params)) {
+        Ok(result) => {
+            match serde_json::to_string_pretty(&result) {
+                Ok(json) => {
+                    println!("{}", json);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: failed to serialize result: {}", e);
+                    ExitCode::from(2)
+                }
             }
         }
         Err(e) => {
@@ -400,87 +384,67 @@ fn run_boundaries_summary(args: &[String]) -> ExitCode {
     }
 }
 
-// ── boundaries links (GR-3A) ─────────────────────────────────────────
+// ── boundaries links ─────────────────────────────────────────────────
 
 fn run_boundaries_links(args: &[String]) -> ExitCode {
-    let (db_path, repo_ref, filter) = match parse_links_args(args) {
-        Ok(v) => v,
+    // Parse filters
+    let service = match parse_links_filters(args) {
+        Ok(s) => s,
         Err(msg) => {
-            eprintln!("{}", msg);
+            eprintln!("error: {}", msg);
+            eprintln!("usage: rmap boundaries links [--service <name>]");
             return ExitCode::from(1);
         }
     };
 
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
+    // Get cwd for repo resolution
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: cannot determine current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let repo_uid = match resolve_repo_ref(&storage, repo_ref) {
-        Ok(uid) => uid,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
-            return ExitCode::from(2);
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(e) => {
+            eprintln!("error: cannot canonicalize current directory: {}", e);
+            return ExitCode::from(2)
         }
     };
 
-    let snapshot = match storage.get_latest_snapshot(&repo_uid) {
-        Ok(Some(snap)) => snap,
-        Ok(None) => {
-            eprintln!("error: no snapshot for repo '{}'", repo_ref);
-            return ExitCode::from(2);
-        }
+    // Connect to daemon
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let items = match storage.list_boundary_interaction_links(&snapshot.snapshot_uid, &filter) {
-        Ok(i) => i,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    let count = items.len();
-
-    // Build envelope with filter info
-    let mut extra = serde_json::Map::new();
-    if let Some(ref s) = filter.contract_name {
-        extra.insert(
-            "filter_service".to_string(),
-            serde_json::Value::String(s.clone()),
-        );
+    if !client.is_available() {
+        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        return ExitCode::from(2);
     }
 
-    let output = match build_envelope(
-        &storage,
-        "boundaries links",
-        &repo_uid,
-        &snapshot,
-        serde_json::to_value(&items).unwrap(),
-        count,
-        extra,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    // Build request params
+    let mut params = serde_json::json!({ "repo": repo_path });
+    if let Some(s) = service {
+        params["service"] = serde_json::json!(s);
+    }
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            if count == 0 {
-                ExitCode::from(1)
-            } else {
-                ExitCode::SUCCESS
+    match client.request("boundaries_links", Some(params)) {
+        Ok(result) => {
+            match serde_json::to_string_pretty(&result) {
+                Ok(json) => {
+                    println!("{}", json);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: failed to serialize result: {}", e);
+                    ExitCode::from(2)
+                }
             }
         }
         Err(e) => {
@@ -490,108 +454,27 @@ fn run_boundaries_links(args: &[String]) -> ExitCode {
     }
 }
 
-fn parse_links_args(
-    args: &[String],
-) -> Result<(&Path, &str, BoundaryInteractionLinkFilter), String> {
-    if args.len() < 2 {
-        return Err(
-            "usage: rmap boundaries links <db_path> <repo_uid> [--service <name>]".to_string(),
-        );
-    }
+fn parse_links_filters(args: &[String]) -> Result<Option<String>, String> {
+    let mut service = None;
+    let mut i = 0;
 
-    let db_path = Path::new(&args[0]);
-    let repo_ref = args[1].as_str();
-    let mut filter = BoundaryInteractionLinkFilter::new();
-
-    let mut i = 2;
     while i < args.len() {
         match args[i].as_str() {
             "--service" => {
                 if i + 1 >= args.len() {
                     return Err("--service requires a value".to_string());
                 }
-                filter.contract_name = Some(args[i + 1].clone());
+                service = Some(args[i + 1].clone());
                 i += 2;
             }
-            other => {
+            other if other.starts_with("--") => {
                 return Err(format!("unknown option: {}", other));
+            }
+            other => {
+                return Err(format!("unexpected argument: {}", other));
             }
         }
     }
 
-    Ok((db_path, repo_ref, filter))
-}
-
-// ── Parse helpers ────────────────────────────────────────────────────
-
-fn parse_channel_kind(s: &str) -> Result<ChannelKind, String> {
-    match s.to_lowercase().as_str() {
-        "unix_socket" | "unixsocket" | "unix" => Ok(ChannelKind::UnixSocket),
-        "named_pipe" | "namedpipe" | "fifo" => Ok(ChannelKind::NamedPipe),
-        "anonymous_pipe" | "anonymouspipe" | "pipe" => Ok(ChannelKind::AnonymousPipe),
-        "shared_memory" | "sharedmemory" | "shm" => Ok(ChannelKind::SharedMemory),
-        "message_queue" | "messagequeue" | "mq" | "mqueue" => Ok(ChannelKind::MessageQueue),
-        "semaphore" | "sem" => Ok(ChannelKind::Semaphore),
-        "process_signal" | "processsignal" | "signal" => Ok(ChannelKind::ProcessSignal),
-        "tcp_socket" | "tcpsocket" | "tcp" => Ok(ChannelKind::TcpSocket),
-        "udp_socket" | "udpsocket" | "udp" => Ok(ChannelKind::UdpSocket),
-        "shared_array_buffer" | "sharedarraybuffer" | "sab" | "atomics" => Ok(ChannelKind::SharedArrayBuffer),
-        "amqp_queue" | "amqpqueue" | "amqp" | "rabbitmq" => Ok(ChannelKind::AmqpQueue),
-        "kafka_topic" | "kafkatopic" | "kafka" => Ok(ChannelKind::KafkaTopic),
-        "nats_subject" | "natssubject" | "nats" => Ok(ChannelKind::NatsSubject),
-        "serial_port" | "serialport" | "serial" => Ok(ChannelKind::SerialPort),
-        "can_message" | "canmessage" | "can" => Ok(ChannelKind::CanMessage),
-        "inter_core_channel" | "intercorechannel" | "inter_core" => Ok(ChannelKind::InterCoreChannel),
-        other => Err(format!(
-            "unknown channel kind: {} (try: unix_socket, named_pipe, shared_memory, inter_core_channel, ...)",
-            other
-        )),
-    }
-}
-
-fn parse_boundary_scope(s: &str) -> Result<BoundaryScope, String> {
-    match s.to_lowercase().as_str() {
-        "intra_process" | "intraprocess" | "thread" => Ok(BoundaryScope::IntraProcess),
-        "inter_process" | "interprocess" | "ipc" => Ok(BoundaryScope::InterProcess),
-        "inter_device" | "interdevice" | "device" => Ok(BoundaryScope::InterDevice),
-        "unknown" => Ok(BoundaryScope::Unknown),
-        other => Err(format!(
-            "unknown boundary scope: {} (try: intra_process, inter_process, inter_device, unknown)",
-            other
-        )),
-    }
-}
-
-fn parse_direction(s: &str) -> Result<Direction, String> {
-    match s.to_lowercase().as_str() {
-        "provider" | "server" | "listen" => Ok(Direction::Provider),
-        "consumer" | "client" | "connect" => Ok(Direction::Consumer),
-        "bidirectional" | "both" => Ok(Direction::Bidirectional),
-        other => Err(format!(
-            "unknown direction: {} (try: provider, consumer, bidirectional)",
-            other
-        )),
-    }
-}
-
-fn parse_protocol_family(s: &str) -> Result<ProtocolFamily, String> {
-    match s.to_lowercase().as_str() {
-        "socket" => Ok(ProtocolFamily::Socket),
-        "pipe" => Ok(ProtocolFamily::Pipe),
-        "shared_memory" | "sharedmemory" | "shm" => Ok(ProtocolFamily::SharedMemory),
-        "message_queue" | "messagequeue" | "mq" => Ok(ProtocolFamily::MessageQueue),
-        "signal" | "signals" | "process_signal" => Ok(ProtocolFamily::Signal),
-        "semaphore" | "sem" => Ok(ProtocolFamily::Semaphore),
-        "inter_core" | "intercore" => Ok(ProtocolFamily::InterCore),
-        "serial" => Ok(ProtocolFamily::Serial),
-        "bus" => Ok(ProtocolFamily::Bus),
-        "message_broker" | "messagebroker" | "broker" => Ok(ProtocolFamily::MessageBroker),
-        "usb" => Ok(ProtocolFamily::Usb),
-        "bluetooth" | "bt" | "ble" => Ok(ProtocolFamily::Bluetooth),
-        "custom" => Ok(ProtocolFamily::Custom),
-        other => Err(format!(
-            "unknown protocol family: {} (try: socket, pipe, shared_memory, ...)",
-            other
-        )),
-    }
+    Ok(service)
 }

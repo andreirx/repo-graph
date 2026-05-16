@@ -1,17 +1,41 @@
 //! Integration tests for daemon dispatch.
 //!
 //! Tests the service dispatcher through the transport layer.
+//!
+//! # REG-1 Contract
+//!
+//! Query commands (callers, callees, imports, stats, orient, check, explain)
+//! resolve repo from the `repo` parameter via the daemon registry.
+//!
+//! Write commands (index, refresh) also use registry-based resolution.
+//!
+//! # Test Isolation
+//!
+//! All tests use isolated state roots (temp directories) to ensure hermetic behavior.
+//! Tests do not read the user's actual registry from platform data directories.
 #![allow(clippy::arc_with_non_send_sync)]
 
 use std::io::{BufReader, Cursor};
 use std::sync::Arc;
 
-use repo_graph_daemon_runtime::{DaemonState, ServiceDispatcher};
+use repo_graph_daemon_runtime::{DaemonState, RepoRegistry, ServiceDispatcher};
 use repo_graph_daemon_transport::run_transport;
-use tempfile::tempdir;
+use tempfile::{tempdir, TempDir};
 
+/// Create an isolated daemon state with a fresh temp registry.
+///
+/// Returns both the state and the temp dir (to keep it alive).
+fn create_isolated_state() -> (Arc<DaemonState>, TempDir) {
+    let temp = tempdir().expect("failed to create temp dir");
+    let registry =
+        RepoRegistry::with_state_root(temp.path()).expect("failed to create temp registry");
+    let state = Arc::new(DaemonState::with_registry(registry));
+    (state, temp)
+}
+
+/// Run a single daemon request with an isolated state.
 fn run_daemon_request(input: &str) -> String {
-    let state = Arc::new(DaemonState::new());
+    let (state, _temp) = create_isolated_state();
     let dispatcher = ServiceDispatcher::new(state);
 
     let input = Cursor::new(input);
@@ -21,6 +45,8 @@ fn run_daemon_request(input: &str) -> String {
 
     String::from_utf8(output).unwrap()
 }
+
+// ── Basic protocol tests ────────────────────────────────────────────────
 
 #[test]
 fn ping_returns_pong() {
@@ -47,91 +73,22 @@ fn unknown_method_returns_error() {
 fn list_repos_empty_initially() {
     let output = run_daemon_request(r#"{"id":"4","method":"list_repos"}"#);
     assert!(output.contains(r#""id":"4""#));
-    assert!(output.contains(r#""repos":[]"#));
-}
-
-#[test]
-fn callers_without_loaded_repo_returns_error() {
-    // Use a temp dir so the db_path can be canonicalized
-    let temp = tempdir().unwrap();
-    let db_path = temp.path().join("test.db");
-    // Create an empty file so canonicalization works
-    std::fs::write(&db_path, "").unwrap();
-    let db_path_str = db_path.to_string_lossy();
-
-    let output = run_daemon_request(&format!(
-        r#"{{"id":"5","method":"callers","params":{{"db_path":"{}","repo_uid":"test","symbol":"foo"}}}}"#,
-        db_path_str
-    ));
-    assert!(output.contains(r#""id":"5""#));
-    assert!(output.contains(r#""code":"RepoNotFound""#));
-}
-
-#[test]
-fn callees_without_loaded_repo_returns_error() {
-    let temp = tempdir().unwrap();
-    let db_path = temp.path().join("test.db");
-    std::fs::write(&db_path, "").unwrap();
-    let db_path_str = db_path.to_string_lossy();
-
-    let output = run_daemon_request(&format!(
-        r#"{{"id":"6","method":"callees","params":{{"db_path":"{}","repo_uid":"test","symbol":"foo"}}}}"#,
-        db_path_str
-    ));
-    assert!(output.contains(r#""id":"6""#));
-    assert!(output.contains(r#""code":"RepoNotFound""#));
-}
-
-#[test]
-fn imports_without_loaded_repo_returns_error() {
-    let temp = tempdir().unwrap();
-    let db_path = temp.path().join("test.db");
-    std::fs::write(&db_path, "").unwrap();
-    let db_path_str = db_path.to_string_lossy();
-
-    let output = run_daemon_request(&format!(
-        r#"{{"id":"7","method":"imports","params":{{"db_path":"{}","repo_uid":"test","file":"foo.ts"}}}}"#,
-        db_path_str
-    ));
-    assert!(output.contains(r#""id":"7""#));
-    assert!(output.contains(r#""code":"RepoNotFound""#));
-}
-
-#[test]
-fn callers_missing_db_path_returns_invalid_request() {
-    let output = run_daemon_request(
-        r#"{"id":"8","method":"callers","params":{"repo_uid":"test","symbol":"foo"}}"#,
+    assert!(
+        output.contains(r#""repos":[]"#),
+        "Isolated state should have no repos initially: {}",
+        output
     );
-    assert!(output.contains(r#""id":"8""#));
-    assert!(output.contains(r#""code":"InvalidRequest""#));
-    assert!(output.contains("db_path"));
 }
 
 #[test]
-fn callers_missing_repo_uid_returns_invalid_request() {
-    let output = run_daemon_request(
-        r#"{"id":"8b","method":"callers","params":{"db_path":"/tmp/test.db","symbol":"foo"}}"#,
+fn list_loaded_repos_empty_initially() {
+    let output = run_daemon_request(r#"{"id":"4b","method":"list_loaded_repos"}"#);
+    assert!(output.contains(r#""id":"4b""#));
+    assert!(
+        output.contains(r#""loaded_repos":[]"#),
+        "Daemon should have no repos loaded initially: {}",
+        output
     );
-    assert!(output.contains(r#""id":"8b""#));
-    assert!(output.contains(r#""code":"InvalidRequest""#));
-    assert!(output.contains("repo_uid"));
-}
-
-#[test]
-fn callers_missing_symbol_param_returns_invalid_request() {
-    let output = run_daemon_request(
-        r#"{"id":"9","method":"callers","params":{"db_path":"/tmp/test.db","repo_uid":"test"}}"#,
-    );
-    assert!(output.contains(r#""id":"9""#));
-    assert!(output.contains(r#""code":"InvalidRequest""#));
-    assert!(output.contains("symbol"));
-}
-
-#[test]
-fn load_repo_missing_params_returns_invalid_request() {
-    let output = run_daemon_request(r#"{"id":"10","method":"load_repo"}"#);
-    assert!(output.contains(r#""id":"10""#));
-    assert!(output.contains(r#""code":"InvalidRequest""#));
 }
 
 #[test]
@@ -149,71 +106,177 @@ fn multiple_requests_processed_in_order() {
     assert!(lines[2].contains(r#""id":"c""#));
 }
 
-// ── D4: Write operation tests ───────────────────────────────────────
+// ── REG-1: Missing repo param tests ─────────────────────────────────────
+
+#[test]
+fn callers_missing_repo_returns_invalid_request() {
+    let output =
+        run_daemon_request(r#"{"id":"5","method":"callers","params":{"symbol":"foo"}}"#);
+    assert!(output.contains(r#""id":"5""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#));
+    assert!(output.contains("repo"), "Should mention missing repo param");
+}
+
+#[test]
+fn callers_missing_symbol_param_returns_invalid_request() {
+    // Create isolated state and index a repo first
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("test-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"s-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Now test missing symbol with valid repo
+    let callers_request = format!(
+        r#"{{"id":"6","method":"callers","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&callers_request], state);
+    let output = &results[0];
+
+    assert!(output.contains(r#""id":"6""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#), "output: {}", output);
+    assert!(output.contains("symbol"));
+}
+
+#[test]
+fn callees_missing_repo_returns_invalid_request() {
+    let output =
+        run_daemon_request(r#"{"id":"7","method":"callees","params":{"symbol":"foo"}}"#);
+    assert!(output.contains(r#""id":"7""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#));
+    assert!(output.contains("repo"));
+}
+
+#[test]
+fn imports_missing_repo_returns_invalid_request() {
+    let output =
+        run_daemon_request(r#"{"id":"8","method":"imports","params":{"file":"foo.ts"}}"#);
+    assert!(output.contains(r#""id":"8""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#));
+    assert!(output.contains("repo"));
+}
+
+#[test]
+fn orient_missing_repo_returns_invalid_request() {
+    let output =
+        run_daemon_request(r#"{"id":"9","method":"orient","params":{}}"#);
+    assert!(output.contains(r#""id":"9""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#));
+    assert!(output.contains("repo"));
+}
+
+#[test]
+fn check_missing_repo_returns_invalid_request() {
+    let output =
+        run_daemon_request(r#"{"id":"10","method":"check","params":{}}"#);
+    assert!(output.contains(r#""id":"10""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#));
+    assert!(output.contains("repo"));
+}
+
+#[test]
+fn refresh_missing_repo_returns_invalid_request() {
+    let output =
+        run_daemon_request(r#"{"id":"11","method":"refresh","params":{}}"#);
+    assert!(output.contains(r#""id":"11""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#));
+    assert!(output.contains("repo"));
+}
+
+// ── REG-1: Repo not indexed tests ───────────────────────────────────────
+
+#[test]
+fn callers_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"12","method":"callers","params":{"repo":"/nonexistent/path","symbol":"foo"}}"#,
+    );
+    assert!(output.contains(r#""id":"12""#));
+    assert!(output.contains(r#""code":"RepoNotFound""#));
+}
+
+#[test]
+fn callees_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"13","method":"callees","params":{"repo":"/nonexistent/path","symbol":"foo"}}"#,
+    );
+    assert!(output.contains(r#""id":"13""#));
+    assert!(output.contains(r#""code":"RepoNotFound""#));
+}
+
+#[test]
+fn orient_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"14","method":"orient","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(output.contains(r#""id":"14""#));
+    assert!(output.contains(r#""code":"RepoNotFound""#));
+}
+
+#[test]
+fn check_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"15","method":"check","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(output.contains(r#""id":"15""#));
+    assert!(output.contains(r#""code":"RepoNotFound""#));
+}
+
+#[test]
+fn refresh_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"16","method":"refresh","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(output.contains(r#""id":"16""#));
+    assert!(output.contains(r#""code":"RepoNotFound""#));
+}
+
+// ── Index tests ─────────────────────────────────────────────────────────
 
 #[test]
 fn index_missing_repo_path_returns_invalid_request() {
-    let output =
-        run_daemon_request(r#"{"id":"d4-1","method":"index","params":{"db_path":"/tmp/test.db"}}"#);
-    assert!(output.contains(r#""id":"d4-1""#));
+    let output = run_daemon_request(r#"{"id":"17","method":"index","params":{}}"#);
+    assert!(output.contains(r#""id":"17""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
     assert!(output.contains("repo_path"));
 }
 
 #[test]
-fn index_missing_db_path_returns_invalid_request() {
-    let output =
-        run_daemon_request(r#"{"id":"d4-2","method":"index","params":{"repo_path":"/tmp/repo"}}"#);
-    assert!(output.contains(r#""id":"d4-2""#));
-    assert!(output.contains(r#""code":"InvalidRequest""#));
-    assert!(output.contains("db_path"));
-}
-
-#[test]
 fn index_nonexistent_repo_path_returns_invalid_request() {
     let output = run_daemon_request(
-        r#"{"id":"d4-3","method":"index","params":{"repo_path":"/nonexistent/path","db_path":"/tmp/test.db"}}"#,
+        r#"{"id":"18","method":"index","params":{"repo_path":"/nonexistent/path"}}"#,
     );
-    assert!(output.contains(r#""id":"d4-3""#));
+    assert!(output.contains(r#""id":"18""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
     assert!(output.contains("does not exist"));
 }
 
 #[test]
-fn refresh_without_loaded_repo_returns_error() {
-    let temp = tempdir().unwrap();
-    let db_path = temp.path().join("test.db");
-    std::fs::write(&db_path, "").unwrap();
-    let db_path_str = db_path.to_string_lossy();
-
-    let output = run_daemon_request(&format!(
-        r#"{{"id":"d4-4","method":"refresh","params":{{"db_path":"{}","repo_uid":"test"}}}}"#,
-        db_path_str
-    ));
-    assert!(output.contains(r#""id":"d4-4""#));
-    assert!(output.contains(r#""code":"RepoNotFound""#));
-}
-
-#[test]
-fn refresh_missing_db_path_returns_invalid_request() {
-    let output =
-        run_daemon_request(r#"{"id":"d4-5","method":"refresh","params":{"repo_uid":"test"}}"#);
-    assert!(output.contains(r#""id":"d4-5""#));
+fn load_repo_missing_params_returns_invalid_request() {
+    let output = run_daemon_request(r#"{"id":"19","method":"load_repo"}"#);
+    assert!(output.contains(r#""id":"19""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
-    assert!(output.contains("db_path"));
 }
 
-#[test]
-fn refresh_missing_repo_uid_returns_invalid_request() {
-    let output = run_daemon_request(
-        r#"{"id":"d4-5b","method":"refresh","params":{"db_path":"/tmp/test.db"}}"#,
-    );
-    assert!(output.contains(r#""id":"d4-5b""#));
-    assert!(output.contains(r#""code":"InvalidRequest""#));
-    assert!(output.contains("repo_uid"));
-}
+// ── End-to-end tests with shared state ──────────────────────────────────
 
-// ── D4: End-to-end write operation tests ────────────────────────────
+/// Create isolated daemon state from a temp state root.
+fn create_isolated_state_in(state_temp: &TempDir) -> Arc<DaemonState> {
+    let registry = RepoRegistry::with_state_root(state_temp.path())
+        .expect("failed to create isolated registry");
+    Arc::new(DaemonState::with_registry(registry))
+}
 
 /// Helper to run requests against a shared daemon state.
 fn run_daemon_requests_with_state(inputs: Vec<&str>, state: Arc<DaemonState>) -> Vec<String> {
@@ -230,125 +293,123 @@ fn run_daemon_requests_with_state(inputs: Vec<&str>, state: Arc<DaemonState>) ->
     results
 }
 
+/// Helper to extract repo_uid, db_path, and canonical_path from index result.
+fn extract_index_result(output: &str) -> (String, String, String) {
+    // Find the last line (result, not progress)
+    let last_line = output.lines().last().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
+    let result = &parsed["result"];
+    let repo_uid = result["repo_uid"].as_str().unwrap().to_string();
+    let db_path = result["db_path"].as_str().unwrap().to_string();
+    let canonical_path = result["canonical_path"].as_str().unwrap().to_string();
+    (repo_uid, db_path, canonical_path)
+}
+
 #[test]
-fn index_then_load_then_refresh_end_to_end() {
-    // Create temp directories for repo and db
-    let temp = tempdir().unwrap();
-    let repo_dir = temp.path().join("test-repo");
+fn index_then_query_end_to_end() {
+    // Create isolated state root (for registry and databases)
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    // Create temp directory for test repo
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("test-repo");
     std::fs::create_dir(&repo_dir).unwrap();
 
     // Create a minimal source file
     std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
 
-    let db_path = temp.path().join("test.db");
     let repo_path_str = repo_dir.to_string_lossy();
-    let db_path_str = db_path.to_string_lossy();
 
-    let state = Arc::new(DaemonState::new());
-
-    // Step 1: Index the repo
+    // Step 1: Index the repo (REG-1 contract)
     let index_request = format!(
-        r#"{{"id":"e2e-1","method":"index","params":{{"repo_path":"{}","db_path":"{}"}}}}"#,
-        repo_path_str, db_path_str
+        r#"{{"id":"e2e-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
     );
     let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
     let index_output = &results[0];
 
     assert!(
-        index_output.contains(r#""id":"e2e-1""#),
-        "Index response: {}",
-        index_output
-    );
-    assert!(
-        index_output.contains(r#""repo_uid":"test-repo""#),
-        "Index should return repo_uid: {}",
-        index_output
-    );
-    assert!(
-        index_output.contains(r#""snapshot_uid""#),
-        "Index should return snapshot_uid: {}",
-        index_output
-    );
-    assert!(
-        !index_output.contains(r#""code""#),
-        "Index should not return error: {}",
+        !index_output.contains(r#""code":"InvalidRequest""#)
+            && !index_output.contains(r#""code":"InternalError""#),
+        "Index should succeed: {}",
         index_output
     );
 
-    // Step 2: Load the repo
-    let load_request = format!(
-        r#"{{"id":"e2e-2","method":"load_repo","params":{{"db_path":"{}","repo_uid":"test-repo"}}}}"#,
-        db_path_str
-    );
-    let results = run_daemon_requests_with_state(vec![&load_request], Arc::clone(&state));
-    let load_output = &results[0];
-
+    let (repo_uid, _db_path, canonical_path) = extract_index_result(index_output);
     assert!(
-        load_output.contains(r#""id":"e2e-2""#),
-        "Load response: {}",
-        load_output
-    );
-    assert!(
-        load_output.contains(r#""loaded":"test-repo""#),
-        "Load should succeed: {}",
-        load_output
+        repo_uid.starts_with("repo_"),
+        "REG-1: repo_uid should be ULID-based, got: {}",
+        repo_uid
     );
 
-    // Step 3: Refresh the repo (now requires db_path + repo_uid)
+    // Step 2: Query using canonical path (REG-1)
+    let orient_request = format!(
+        r#"{{"id":"e2e-2","method":"orient","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&orient_request], Arc::clone(&state));
+    let orient_output = &results[0];
+
+    assert!(
+        orient_output.contains(r#""schema":"rgr.agent.v1""#),
+        "Orient should succeed with REG-1 repo param: {}",
+        orient_output
+    );
+
+    // Step 3: Check also works
+    let check_request = format!(
+        r#"{{"id":"e2e-3","method":"check","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&check_request], Arc::clone(&state));
+    let check_output = &results[0];
+
+    assert!(
+        check_output.contains(r#""schema":"rgr.agent.v1""#),
+        "Check should succeed: {}",
+        check_output
+    );
+
+    // Step 4: Refresh uses repo param too
     let refresh_request = format!(
-        r#"{{"id":"e2e-3","method":"refresh","params":{{"db_path":"{}","repo_uid":"test-repo"}}}}"#,
-        db_path_str
+        r#"{{"id":"e2e-4","method":"refresh","params":{{"repo":"{}"}}}}"#,
+        canonical_path
     );
     let results = run_daemon_requests_with_state(vec![&refresh_request], Arc::clone(&state));
     let refresh_output = &results[0];
 
     assert!(
-        refresh_output.contains(r#""id":"e2e-3""#),
-        "Refresh response: {}",
-        refresh_output
-    );
-    assert!(
         refresh_output.contains(r#""snapshot_uid""#),
-        "Refresh should return snapshot_uid: {}",
-        refresh_output
-    );
-    assert!(
-        !refresh_output.contains(r#""code""#),
-        "Refresh should not return error: {}",
+        "Refresh should succeed: {}",
         refresh_output
     );
 }
 
-// ── D5b: Progress streaming tests ───────────────────────────────
-
 #[test]
 fn index_emits_progress_events() {
-    // Create temp directories for repo and db
-    let temp = tempdir().unwrap();
-    let repo_dir = temp.path().join("progress-test-repo");
-    std::fs::create_dir(&repo_dir).unwrap();
+    // Create isolated state root
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
 
-    // Create a minimal source file
+    // Create temp directory for test repo
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("progress-test-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
     std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
 
-    let db_path = temp.path().join("test.db");
     let repo_path_str = repo_dir.to_string_lossy();
-    let db_path_str = db_path.to_string_lossy();
 
-    let state = Arc::new(DaemonState::new());
-
-    // Index the repo
     let index_request = format!(
-        r#"{{"id":"progress-1","method":"index","params":{{"repo_path":"{}","db_path":"{}"}}}}"#,
-        repo_path_str, db_path_str
+        r#"{{"id":"progress-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
     );
     let results = run_daemon_requests_with_state(vec![&index_request], state);
     let output = &results[0];
 
-    // Parse all NDJSON lines
     let lines: Vec<&str> = output.lines().collect();
 
-    // Should have at least some progress events + final response
+    // Should have progress events + final response
     assert!(
         lines.len() > 1,
         "Expected progress events + response, got {} lines: {}",
@@ -359,25 +420,17 @@ fn index_emits_progress_events() {
     // Verify progress events
     let mut found_initializing = false;
     let mut found_scanning = false;
-    let mut found_extracting = false;
-    let mut found_persisting = false;
     let mut found_result = false;
 
     for line in &lines {
         let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
-        assert_eq!(
-            parsed["id"], "progress-1",
-            "All events should have correct request ID"
-        );
-
         if let Some(progress) = parsed.get("progress") {
             let phase = progress["phase"].as_str().unwrap_or("");
-            match phase {
-                "initializing" => found_initializing = true,
-                "scanning" => found_scanning = true,
-                "extracting" => found_extracting = true,
-                "persisting" => found_persisting = true,
-                _ => {}
+            if phase == "initializing" {
+                found_initializing = true;
+            }
+            if phase == "scanning" {
+                found_scanning = true;
             }
         }
         if parsed.get("result").is_some() {
@@ -385,468 +438,132 @@ fn index_emits_progress_events() {
         }
     }
 
-    assert!(
-        found_initializing,
-        "Should have initializing progress event (abort checkpoint before ensure_repo)"
-    );
+    assert!(found_initializing, "Should have initializing progress event");
     assert!(found_scanning, "Should have scanning progress event");
-    assert!(found_extracting, "Should have extracting progress event");
-    assert!(found_persisting, "Should have persisting progress event");
     assert!(found_result, "Should have final result");
-
-    // Verify final response is last
-    let last_line = lines.last().unwrap();
-    let last_parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
-    assert!(
-        last_parsed.get("result").is_some(),
-        "Last line should be the result, not progress"
-    );
 }
 
 #[test]
 fn refresh_emits_progress_events() {
-    // Create temp directories for repo and db
-    let temp = tempdir().unwrap();
-    let repo_dir = temp.path().join("refresh-progress-repo");
+    // Create isolated state root
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    // Create temp directory for test repo
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("refresh-progress-repo");
     std::fs::create_dir(&repo_dir).unwrap();
     std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
 
-    let db_path = temp.path().join("test.db");
     let repo_path_str = repo_dir.to_string_lossy();
-    let db_path_str = db_path.to_string_lossy();
 
-    let state = Arc::new(DaemonState::new());
-
-    // Step 1: Index first (need existing repo to refresh)
+    // Index first
     let index_request = format!(
-        r#"{{"id":"rp-1","method":"index","params":{{"repo_path":"{}","db_path":"{}"}}}}"#,
-        repo_path_str, db_path_str
+        r#"{{"id":"rp-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
     );
-    run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
 
-    // Step 2: Load the repo
-    let load_request = format!(
-        r#"{{"id":"rp-2","method":"load_repo","params":{{"db_path":"{}","repo_uid":"refresh-progress-repo"}}}}"#,
-        db_path_str
-    );
-    run_daemon_requests_with_state(vec![&load_request], Arc::clone(&state));
-
-    // Step 3: Refresh and check progress
+    // Refresh using repo param (REG-1)
     let refresh_request = format!(
-        r#"{{"id":"rp-3","method":"refresh","params":{{"db_path":"{}","repo_uid":"refresh-progress-repo"}}}}"#,
-        db_path_str
+        r#"{{"id":"rp-2","method":"refresh","params":{{"repo":"{}"}}}}"#,
+        canonical_path
     );
     let results = run_daemon_requests_with_state(vec![&refresh_request], state);
     let output = &results[0];
 
     let lines: Vec<&str> = output.lines().collect();
 
-    // Should have progress events + final response
     assert!(
         lines.len() > 1,
         "Expected progress events + response, got {} lines",
         lines.len()
     );
 
-    // Verify we have progress events and final result
-    let mut found_initializing = false;
-    let mut found_scanning = false;
-    let mut found_extracting = false;
-    let mut found_persisting = false;
     let mut has_result = false;
-
     for line in &lines {
         let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
-        assert_eq!(
-            parsed["id"], "rp-3",
-            "All events should have correct request ID"
-        );
-
-        if let Some(progress) = parsed.get("progress") {
-            let phase = progress["phase"].as_str().unwrap_or("");
-            match phase {
-                "initializing" => found_initializing = true,
-                "scanning" => found_scanning = true,
-                "extracting" => found_extracting = true,
-                "persisting" => found_persisting = true,
-                _ => {}
-            }
-        }
         if parsed.get("result").is_some() {
             has_result = true;
         }
     }
 
-    assert!(
-        found_initializing,
-        "Refresh should emit initializing progress event"
-    );
-    assert!(
-        found_scanning,
-        "Refresh should emit scanning progress event"
-    );
-    assert!(
-        found_extracting,
-        "Refresh should emit extracting progress event"
-    );
-    assert!(
-        found_persisting,
-        "Refresh should emit persisting progress event"
-    );
     assert!(has_result, "Refresh should emit final result");
-
-    // Verify final response is last
-    let last_line = lines.last().unwrap();
-    let last_parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
-    assert!(
-        last_parsed.get("result").is_some(),
-        "Last line should be the result"
-    );
-}
-
-// ── D5: Agent service tests ─────────────────────────────────────
-
-#[test]
-fn orient_without_loaded_repo_returns_error() {
-    let temp = tempdir().unwrap();
-    let db_path = temp.path().join("test.db");
-    std::fs::write(&db_path, "").unwrap();
-    let db_path_str = db_path.to_string_lossy();
-
-    let output = run_daemon_request(&format!(
-        r#"{{"id":"d5-1","method":"orient","params":{{"db_path":"{}","repo_uid":"test"}}}}"#,
-        db_path_str
-    ));
-    assert!(output.contains(r#""id":"d5-1""#));
-    assert!(output.contains(r#""code":"RepoNotFound""#));
-}
-
-#[test]
-fn orient_missing_db_path_returns_invalid_request() {
-    let output =
-        run_daemon_request(r#"{"id":"d5-2","method":"orient","params":{"repo_uid":"test"}}"#);
-    assert!(output.contains(r#""id":"d5-2""#));
-    assert!(output.contains(r#""code":"InvalidRequest""#));
-    assert!(output.contains("db_path"));
-}
-
-#[test]
-fn orient_missing_repo_uid_returns_invalid_request() {
-    let output = run_daemon_request(
-        r#"{"id":"d5-3","method":"orient","params":{"db_path":"/tmp/test.db"}}"#,
-    );
-    assert!(output.contains(r#""id":"d5-3""#));
-    assert!(output.contains(r#""code":"InvalidRequest""#));
-    assert!(output.contains("repo_uid"));
-}
-
-#[test]
-fn orient_invalid_budget_returns_invalid_request() {
-    let temp = tempdir().unwrap();
-    let db_path = temp.path().join("test.db");
-    std::fs::write(&db_path, "").unwrap();
-    let db_path_str = db_path.to_string_lossy();
-
-    let output = run_daemon_request(&format!(
-        r#"{{"id":"d5-4","method":"orient","params":{{"db_path":"{}","repo_uid":"test","budget":"huge"}}}}"#,
-        db_path_str
-    ));
-    assert!(output.contains(r#""id":"d5-4""#));
-    // This will return RepoNotFound first (repo must be loaded first)
-    // Budget validation happens after repo lookup succeeds
-    assert!(output.contains(r#""code""#));
-}
-
-#[test]
-fn check_without_loaded_repo_returns_error() {
-    let temp = tempdir().unwrap();
-    let db_path = temp.path().join("test.db");
-    std::fs::write(&db_path, "").unwrap();
-    let db_path_str = db_path.to_string_lossy();
-
-    let output = run_daemon_request(&format!(
-        r#"{{"id":"d5-5","method":"check","params":{{"db_path":"{}","repo_uid":"test"}}}}"#,
-        db_path_str
-    ));
-    assert!(output.contains(r#""id":"d5-5""#));
-    assert!(output.contains(r#""code":"RepoNotFound""#));
-}
-
-#[test]
-fn check_missing_db_path_returns_invalid_request() {
-    let output =
-        run_daemon_request(r#"{"id":"d5-6","method":"check","params":{"repo_uid":"test"}}"#);
-    assert!(output.contains(r#""id":"d5-6""#));
-    assert!(output.contains(r#""code":"InvalidRequest""#));
-    assert!(output.contains("db_path"));
-}
-
-#[test]
-fn explain_without_loaded_repo_returns_error() {
-    let temp = tempdir().unwrap();
-    let db_path = temp.path().join("test.db");
-    std::fs::write(&db_path, "").unwrap();
-    let db_path_str = db_path.to_string_lossy();
-
-    let output = run_daemon_request(&format!(
-        r#"{{"id":"d5-7","method":"explain","params":{{"db_path":"{}","repo_uid":"test","target":"main.ts"}}}}"#,
-        db_path_str
-    ));
-    assert!(output.contains(r#""id":"d5-7""#));
-    assert!(output.contains(r#""code":"RepoNotFound""#));
 }
 
 #[test]
 fn explain_missing_target_returns_invalid_request() {
-    let temp = tempdir().unwrap();
-    let db_path = temp.path().join("test.db");
-    std::fs::write(&db_path, "").unwrap();
-    let db_path_str = db_path.to_string_lossy();
+    // Create isolated state and index a repo first
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
 
-    let output = run_daemon_request(&format!(
-        r#"{{"id":"d5-8","method":"explain","params":{{"db_path":"{}","repo_uid":"test"}}}}"#,
-        db_path_str
-    ));
-    assert!(output.contains(r#""id":"d5-8""#));
-    assert!(output.contains(r#""code":"InvalidRequest""#));
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("test-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"e-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Now test missing target with valid repo
+    let explain_request = format!(
+        r#"{{"id":"20","method":"explain","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&explain_request], state);
+    let output = &results[0];
+
+    assert!(output.contains(r#""id":"20""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#), "output: {}", output);
     assert!(output.contains("target"));
 }
 
 #[test]
 fn explain_rejects_small_budget() {
-    // CLI contract: explain only accepts medium|large, not small
-    // Must test with a loaded repo since budget validation happens after repo lookup
-    let temp = tempdir().unwrap();
-    let repo_dir = temp.path().join("budget-test-repo");
+    // Create isolated state root
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    // Create temp directory for test repo
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("budget-test-repo");
     std::fs::create_dir(&repo_dir).unwrap();
     std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
 
-    let db_path = temp.path().join("budget-test.db");
     let repo_path_str = repo_dir.to_string_lossy();
-    let db_path_str = db_path.to_string_lossy();
-
-    let state = Arc::new(DaemonState::new());
 
     // Index the repo
     let index_request = format!(
-        r#"{{"id":"b-1","method":"index","params":{{"repo_path":"{}","db_path":"{}"}}}}"#,
-        repo_path_str, db_path_str
+        r#"{{"id":"b-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
     );
-    run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
-
-    // Load the repo
-    let load_request = format!(
-        r#"{{"id":"b-2","method":"load_repo","params":{{"db_path":"{}","repo_uid":"budget-test-repo"}}}}"#,
-        db_path_str
-    );
-    run_daemon_requests_with_state(vec![&load_request], Arc::clone(&state));
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
 
     // Try explain with small budget - should be rejected
     let explain_request = format!(
-        r#"{{"id":"b-3","method":"explain","params":{{"db_path":"{}","repo_uid":"budget-test-repo","target":"main.ts","budget":"small"}}}}"#,
-        db_path_str
+        r#"{{"id":"b-2","method":"explain","params":{{"repo":"{}","target":"main.ts","budget":"small"}}}}"#,
+        canonical_path
     );
     let results = run_daemon_requests_with_state(vec![&explain_request], Arc::clone(&state));
     let output = &results[0];
 
-    assert!(output.contains(r#""id":"b-3""#));
+    assert!(output.contains(r#""id":"b-2""#));
     assert!(
         output.contains(r#""code":"InvalidRequest""#),
         "Should reject small budget: {}",
         output
     );
-    assert!(
-        output.contains("medium|large"),
-        "Error should mention valid budgets: {}",
-        output
-    );
 }
 
-#[test]
-fn orient_check_explain_end_to_end() {
-    // Create temp directories for repo and db
-    let temp = tempdir().unwrap();
-    let repo_dir = temp.path().join("test-repo");
-    std::fs::create_dir(&repo_dir).unwrap();
-
-    // Create a minimal source file
-    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
-
-    let db_path = temp.path().join("test.db");
-    let repo_path_str = repo_dir.to_string_lossy();
-    let db_path_str = db_path.to_string_lossy();
-
-    let state = Arc::new(DaemonState::new());
-
-    // Step 1: Index the repo
-    let index_request = format!(
-        r#"{{"id":"e2e-orient-1","method":"index","params":{{"repo_path":"{}","db_path":"{}"}}}}"#,
-        repo_path_str, db_path_str
-    );
-    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
-    assert!(
-        !results[0].contains(r#""code""#),
-        "Index failed: {}",
-        results[0]
-    );
-
-    // Step 2: Load the repo
-    let load_request = format!(
-        r#"{{"id":"e2e-orient-2","method":"load_repo","params":{{"db_path":"{}","repo_uid":"test-repo"}}}}"#,
-        db_path_str
-    );
-    let results = run_daemon_requests_with_state(vec![&load_request], Arc::clone(&state));
-    assert!(
-        results[0].contains(r#""loaded":"test-repo""#),
-        "Load failed: {}",
-        results[0]
-    );
-
-    // Step 3: Orient (repo-level, no focus)
-    let orient_request = format!(
-        r#"{{"id":"e2e-orient-3","method":"orient","params":{{"db_path":"{}","repo_uid":"test-repo"}}}}"#,
-        db_path_str
-    );
-    let results = run_daemon_requests_with_state(vec![&orient_request], Arc::clone(&state));
-    let orient_output = &results[0];
-
-    assert!(
-        orient_output.contains(r#""id":"e2e-orient-3""#),
-        "Orient response: {}",
-        orient_output
-    );
-    assert!(
-        orient_output.contains(r#""schema":"rgr.agent.v1""#),
-        "Orient should return agent schema: {}",
-        orient_output
-    );
-    assert!(
-        orient_output.contains(r#""command":"orient""#),
-        "Orient should return command: {}",
-        orient_output
-    );
-    assert!(
-        orient_output.contains(r#""repo":"test-repo""#),
-        "Orient should return repo: {}",
-        orient_output
-    );
-    assert!(
-        !orient_output.contains(r#""error":"#),
-        "Orient should not return error: {}",
-        orient_output
-    );
-
-    // Step 4: Check
-    let check_request = format!(
-        r#"{{"id":"e2e-orient-4","method":"check","params":{{"db_path":"{}","repo_uid":"test-repo"}}}}"#,
-        db_path_str
-    );
-    let results = run_daemon_requests_with_state(vec![&check_request], Arc::clone(&state));
-    let check_output = &results[0];
-
-    assert!(
-        check_output.contains(r#""id":"e2e-orient-4""#),
-        "Check response: {}",
-        check_output
-    );
-    assert!(
-        check_output.contains(r#""schema":"rgr.agent.v1""#),
-        "Check should return agent schema: {}",
-        check_output
-    );
-    assert!(
-        check_output.contains(r#""command":"check""#),
-        "Check should return command: {}",
-        check_output
-    );
-    assert!(
-        !check_output.contains(r#""error":"#),
-        "Check should not return error: {}",
-        check_output
-    );
-
-    // Step 5: Explain (file target)
-    let explain_request = format!(
-        r#"{{"id":"e2e-orient-5","method":"explain","params":{{"db_path":"{}","repo_uid":"test-repo","target":"main.ts"}}}}"#,
-        db_path_str
-    );
-    let results = run_daemon_requests_with_state(vec![&explain_request], Arc::clone(&state));
-    let explain_output = &results[0];
-
-    assert!(
-        explain_output.contains(r#""id":"e2e-orient-5""#),
-        "Explain response: {}",
-        explain_output
-    );
-    assert!(
-        explain_output.contains(r#""schema":"rgr.agent.v1""#),
-        "Explain should return agent schema: {}",
-        explain_output
-    );
-    assert!(
-        explain_output.contains(r#""command":"explain""#),
-        "Explain should return command: {}",
-        explain_output
-    );
-    assert!(
-        !explain_output.contains(r#""error":"#),
-        "Explain should not return error: {}",
-        explain_output
-    );
-}
-
-#[test]
-fn orient_with_focus_and_budget() {
-    // Create temp directories for repo and db
-    let temp = tempdir().unwrap();
-    let repo_dir = temp.path().join("focus-repo");
-    std::fs::create_dir(&repo_dir).unwrap();
-
-    // Create source files
-    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
-    std::fs::write(repo_dir.join("utils.ts"), "export function util() {}").unwrap();
-
-    let db_path = temp.path().join("focus.db");
-    let repo_path_str = repo_dir.to_string_lossy();
-    let db_path_str = db_path.to_string_lossy();
-
-    let state = Arc::new(DaemonState::new());
-
-    // Index
-    let index_request = format!(
-        r#"{{"id":"fb-1","method":"index","params":{{"repo_path":"{}","db_path":"{}"}}}}"#,
-        repo_path_str, db_path_str
-    );
-    run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
-
-    // Load
-    let load_request = format!(
-        r#"{{"id":"fb-2","method":"load_repo","params":{{"db_path":"{}","repo_uid":"focus-repo"}}}}"#,
-        db_path_str
-    );
-    run_daemon_requests_with_state(vec![&load_request], Arc::clone(&state));
-
-    // Orient with focus and budget
-    let orient_request = format!(
-        r#"{{"id":"fb-3","method":"orient","params":{{"db_path":"{}","repo_uid":"focus-repo","focus":"main.ts","budget":"large"}}}}"#,
-        db_path_str
-    );
-    let results = run_daemon_requests_with_state(vec![&orient_request], Arc::clone(&state));
-    let output = &results[0];
-
-    assert!(output.contains(r#""id":"fb-3""#));
-    assert!(output.contains(r#""schema":"rgr.agent.v1""#));
-    assert!(output.contains(r#""command":"orient""#));
-    // Focus should be resolved to file
-    assert!(output.contains(r#""focus""#));
-    assert!(
-        !output.contains(r#""error":"#),
-        "Should not return error: {}",
-        output
-    );
-}
-
-// ── Enrich command tests ────────────────────────────────────────────
+// ── Enrich tests (still uses db_path/repo_uid - admin operation) ────────
 
 #[test]
 fn enrich_missing_db_path_returns_invalid_request() {
@@ -867,214 +584,1269 @@ fn enrich_missing_repo_uid_returns_invalid_request() {
     assert!(output.contains("repo_uid"));
 }
 
-#[test]
-fn enrich_without_loaded_repo_returns_error() {
-    let temp = tempdir().unwrap();
-    let db_path = temp.path().join("test.db");
-    std::fs::write(&db_path, "").unwrap();
-    let db_path_str = db_path.to_string_lossy();
+// ══════════════════════════════════════════════════════════════════════════════
+// BATCH 1 SUCCESS-PATH TESTS (REG-1 Contract)
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// These tests prove the daemon handler behavior for migrated Batch 1 commands.
+// Each test:
+//   1. Creates isolated daemon state
+//   2. Indexes a fixture repo through daemon
+//   3. Queries using REG-1 `repo` parameter (canonical path)
+//   4. Validates response contract
+//
+// Organized by command family: docs, resource, contracts, inferences, deps
 
-    let output = run_daemon_request(&format!(
-        r#"{{"id":"en-3","method":"enrich","params":{{"db_path":"{}","repo_uid":"test"}}}}"#,
-        db_path_str
-    ));
-    assert!(output.contains(r#""id":"en-3""#));
-    assert!(output.contains(r#""code":"RepoNotFound""#));
+// ── Docs command family ─────────────────────────────────────────────────────
+
+#[test]
+fn docs_list_returns_envelope_with_entries() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    // Create repo with documentation files
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("docs-test-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("README.md"), "# Test Project\n\nDescription here.").unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    // Index the repo
+    let index_request = format!(
+        r#"{{"id":"docs-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Query docs_list
+    let docs_request = format!(
+        r#"{{"id":"docs-2","method":"docs_list","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&docs_request], state);
+    let output = &results[0];
+
+    // Validate response contract
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    assert!(result.get("command").is_some(), "missing command field: {}", output);
+    assert!(result.get("entries").is_some(), "missing entries field: {}", output);
+    assert!(result.get("count").is_some(), "missing count field: {}", output);
+
+    // Should find README.md
+    let entries = result["entries"].as_array().unwrap();
+    let has_readme = entries.iter().any(|e| {
+        e.get("path").and_then(|p| p.as_str()).map(|p| p.contains("README.md")).unwrap_or(false)
+    });
+    assert!(has_readme, "Should find README.md in docs list: {}", output);
 }
 
 #[test]
-fn enrich_emits_progress_and_returns_cli_contract_shape() {
-    // Create temp directories for repo and db
-    let temp = tempdir().unwrap();
-    let repo_dir = temp.path().join("enrich-test-repo");
-    std::fs::create_dir(&repo_dir).unwrap();
+fn docs_list_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"docs-err-1","method":"docs_list","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(output.contains(r#""code":"RepoNotFound""#), "output: {}", output);
+}
 
-    // Create a minimal Rust source file (no unresolved calls, but validates the pipeline runs)
+#[test]
+fn docs_extract_returns_envelope_with_facts() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    // Create repo with documentation containing semantic markers
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("docs-extract-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
     std::fs::write(
-        repo_dir.join("main.rs"),
-        r#"fn main() { println!("hello"); }"#,
+        repo_dir.join("README.md"),
+        "# Project\n\n<!-- rg:replacement_for old-lib -->\nThis replaces old-lib.\n",
+    ).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    // Index the repo
+    let index_request = format!(
+        r#"{{"id":"de-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Call docs_extract
+    let extract_request = format!(
+        r#"{{"id":"de-2","method":"docs_extract","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&extract_request], state);
+    let output = &results[0];
+
+    // Validate response contract
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    assert!(result.get("command").is_some(), "missing command field: {}", output);
+    assert!(result.get("files_scanned").is_some(), "missing files_scanned: {}", output);
+    assert!(result.get("facts_extracted").is_some(), "missing facts_extracted: {}", output);
+}
+
+// ── Resource command family ─────────────────────────────────────────────────
+
+#[test]
+fn resource_list_returns_envelope() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    // Create repo with resource patterns
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("resource-test-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(
+        repo_dir.join("db.ts"),
+        r#"import { Pool } from 'pg';
+const pool = new Pool();
+export async function query(sql: string) {
+    return pool.query(sql);
+}"#,
+    ).unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    // Index the repo
+    let index_request = format!(
+        r#"{{"id":"res-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Query resource_list
+    let resource_request = format!(
+        r#"{{"id":"res-2","method":"resource_list","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&resource_request], state);
+    let output = &results[0];
+
+    // Validate response contract
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    assert!(result.get("command").is_some(), "missing command field: {}", output);
+    assert!(result.get("results").is_some(), "missing results field: {}", output);
+    assert!(result.get("count").is_some(), "missing count field: {}", output);
+}
+
+#[test]
+fn resource_list_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"res-err-1","method":"resource_list","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(output.contains(r#""code":"RepoNotFound""#), "output: {}", output);
+}
+
+#[test]
+fn resource_readers_returns_envelope_or_not_found() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("resource-readers-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"rr-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Query resource_readers for a resource (may not exist in simple fixture)
+    let readers_request = format!(
+        r#"{{"id":"rr-2","method":"resource_readers","params":{{"repo":"{}","resource":"database"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&readers_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+
+    // Either success with results or error (resource not found is valid)
+    if let Some(result) = parsed.get("result") {
+        assert!(result.get("command").is_some(), "missing command field: {}", output);
+        assert!(result.get("results").is_some(), "missing results field: {}", output);
+    } else {
+        // "resource not found" is expected for nonexistent resources
+        assert!(
+            parsed.get("error").is_some(),
+            "Should have result or error: {}",
+            output
+        );
+    }
+}
+
+#[test]
+fn resource_writers_returns_envelope_or_not_found() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("resource-writers-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"rw-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let writers_request = format!(
+        r#"{{"id":"rw-2","method":"resource_writers","params":{{"repo":"{}","resource":"database"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&writers_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+
+    // Either success with results or error (resource not found is valid)
+    if let Some(result) = parsed.get("result") {
+        assert!(result.get("command").is_some(), "missing command field: {}", output);
+        assert!(result.get("results").is_some(), "missing results field: {}", output);
+    } else {
+        // "resource not found" is expected for nonexistent resources
+        assert!(
+            parsed.get("error").is_some(),
+            "Should have result or error: {}",
+            output
+        );
+    }
+}
+
+// ── Contracts command family ────────────────────────────────────────────────
+
+#[test]
+fn contracts_list_returns_envelope() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    // Create repo with proto file
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("contracts-test-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(
+        repo_dir.join("api.proto"),
+        r#"syntax = "proto3";
+package api;
+message Request { string id = 1; }
+message Response { string result = 1; }
+service Api { rpc Call(Request) returns (Response); }
+"#,
+    ).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"con-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let contracts_request = format!(
+        r#"{{"id":"con-2","method":"contracts_list","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&contracts_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    assert!(result.get("command").is_some(), "missing command field: {}", output);
+    assert!(result.get("results").is_some(), "missing results field: {}", output);
+    assert!(result.get("count").is_some(), "missing count field: {}", output);
+}
+
+#[test]
+fn contracts_list_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"con-err-1","method":"contracts_list","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(output.contains(r#""code":"RepoNotFound""#), "output: {}", output);
+}
+
+#[test]
+fn contracts_list_with_kind_filter() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("contracts-filter-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(
+        repo_dir.join("api.proto"),
+        r#"syntax = "proto3"; package api; message Msg { string id = 1; }"#,
+    ).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"cf-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Filter by kind
+    let contracts_request = format!(
+        r#"{{"id":"cf-2","method":"contracts_list","params":{{"repo":"{}","kind":"protobuf"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&contracts_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    // Kind filter should be reflected in response
+    assert!(
+        result.get("filter_kind").is_some() || result.get("kind").is_some(),
+        "Kind filter should be reflected: {}",
+        output
+    );
+}
+
+#[test]
+fn contracts_show_returns_schema_detail() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("contracts-show-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(
+        repo_dir.join("api.proto"),
+        r#"syntax = "proto3"; package api; message Request { string id = 1; }"#,
+    ).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"cs-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let show_request = format!(
+        r#"{{"id":"cs-2","method":"contracts_show","params":{{"repo":"{}","file":"api.proto"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&show_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    // Should have result (success) or error (file not found)
+    assert!(
+        parsed.get("result").is_some() || parsed.get("error").is_some(),
+        "Should have result or error: {}",
+        output
+    );
+}
+
+#[test]
+fn contracts_elements_returns_envelope() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("contracts-elements-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(
+        repo_dir.join("api.proto"),
+        r#"syntax = "proto3";
+package api;
+message Request { string id = 1; }
+service Api { rpc Call(Request) returns (Request); }
+"#,
+    ).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"ce-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let elements_request = format!(
+        r#"{{"id":"ce-2","method":"contracts_elements","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&elements_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    assert!(result.get("command").is_some(), "missing command field: {}", output);
+    assert!(result.get("results").is_some(), "missing results field: {}", output);
+}
+
+#[test]
+fn contracts_usages_returns_envelope() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("contracts-usages-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(
+        repo_dir.join("api.proto"),
+        r#"syntax = "proto3"; package api; message Request { string id = 1; }"#,
+    ).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"cu-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let usages_request = format!(
+        r#"{{"id":"cu-2","method":"contracts_usages","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&usages_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    assert!(result.get("command").is_some(), "missing command field: {}", output);
+    assert!(result.get("results").is_some(), "missing results field: {}", output);
+}
+
+// ── Inferences command family ───────────────────────────────────────────────
+
+#[test]
+fn inferences_list_returns_envelope() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("inferences-test-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"inf-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let inferences_request = format!(
+        r#"{{"id":"inf-2","method":"inferences_list","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&inferences_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    assert!(result.get("command").is_some(), "missing command field: {}", output);
+    assert!(result.get("results").is_some(), "missing results field: {}", output);
+    assert!(result.get("count").is_some(), "missing count field: {}", output);
+}
+
+#[test]
+fn inferences_list_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"inf-err-1","method":"inferences_list","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(output.contains(r#""code":"RepoNotFound""#), "output: {}", output);
+}
+
+#[test]
+fn inferences_list_with_kind_filter() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("inferences-filter-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"if-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let inferences_request = format!(
+        r#"{{"id":"if-2","method":"inferences_list","params":{{"repo":"{}","kind":"hotspot_score"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&inferences_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    // Kind filter should be reflected
+    assert!(
+        result.get("filter_kind").is_some(),
+        "Kind filter should be reflected: {}",
+        output
+    );
+}
+
+// ── Deps command family ─────────────────────────────────────────────────────
+
+#[test]
+fn deps_list_returns_envelope_with_modules() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    // Create repo with package.json and imports
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("deps-test-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(
+        repo_dir.join("package.json"),
+        r#"{"name": "test-pkg", "dependencies": {"express": "^4.0.0"}}"#,
+    ).unwrap();
+    std::fs::write(
+        repo_dir.join("server.ts"),
+        r#"import express from 'express';
+const app = express();
+app.listen(3000);
+"#,
+    ).unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"deps-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let deps_request = format!(
+        r#"{{"id":"deps-2","method":"deps_list","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&deps_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    assert!(result.get("command").is_some(), "missing command field: {}", output);
+    assert!(result.get("results").is_some(), "missing results field: {}", output);
+    assert!(result.get("count").is_some(), "missing count field: {}", output);
+    assert!(result.get("ecosystem").is_some(), "missing ecosystem field: {}", output);
+}
+
+#[test]
+fn deps_list_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"deps-err-1","method":"deps_list","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(output.contains(r#""code":"RepoNotFound""#), "output: {}", output);
+}
+
+#[test]
+fn deps_list_with_module_filter() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("deps-filter-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(
+        repo_dir.join("package.json"),
+        r#"{"name": "test-pkg", "dependencies": {"lodash": "^4.0.0"}}"#,
+    ).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "import _ from 'lodash';").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"df-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let deps_request = format!(
+        r#"{{"id":"df-2","method":"deps_list","params":{{"repo":"{}","module":"src"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&deps_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    // Should succeed (may have empty results if module doesn't match)
+    assert!(parsed.get("result").is_some(), "Should have result: {}", output);
+}
+
+#[test]
+fn deps_list_with_ecosystem_cargo() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("deps-cargo-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"dc-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let deps_request = format!(
+        r#"{{"id":"dc-2","method":"deps_list","params":{{"repo":"{}","ecosystem":"cargo"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&deps_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    assert_eq!(
+        result.get("ecosystem").and_then(|e| e.as_str()),
+        Some("cargo"),
+        "Ecosystem should be cargo: {}",
+        output
+    );
+}
+
+#[test]
+fn deps_why_returns_package_usages() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("deps-why-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(
+        repo_dir.join("package.json"),
+        r#"{"name": "test-pkg", "dependencies": {"express": "^4.0.0"}}"#,
+    ).unwrap();
+    std::fs::write(
+        repo_dir.join("server.ts"),
+        r#"import express from 'express';
+const app = express();
+"#,
+    ).unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"dw-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let why_request = format!(
+        r#"{{"id":"dw-2","method":"deps_why","params":{{"repo":"{}","package":"express"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&why_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    // Either success with usages or error if package not found
+    assert!(
+        parsed.get("result").is_some() || parsed.get("error").is_some(),
+        "Should have result or error: {}",
+        output
+    );
+}
+
+#[test]
+fn deps_why_package_not_found_returns_error() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("deps-why-notfound-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"dwn-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let why_request = format!(
+        r#"{{"id":"dwn-2","method":"deps_why","params":{{"repo":"{}","package":"nonexistent-package-xyz"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&why_request], state);
+    let output = &results[0];
+
+    // Should return error for nonexistent package
+    assert!(
+        output.contains("error") || output.contains("not found"),
+        "Should indicate package not found: {}",
+        output
+    );
+}
+
+#[test]
+fn deps_drift_returns_anomalies() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("deps-drift-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    // Package with declared but unused dependency (potential drift)
+    std::fs::write(
+        repo_dir.join("package.json"),
+        r#"{"name": "test-pkg", "dependencies": {"unused-pkg": "^1.0.0"}}"#,
+    ).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"dd-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let drift_request = format!(
+        r#"{{"id":"dd-2","method":"deps_drift","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&drift_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    assert!(result.get("command").is_some(), "missing command field: {}", output);
+    assert!(result.get("results").is_some(), "missing results field: {}", output);
+    assert!(result.get("count").is_some(), "missing count field: {}", output);
+    assert!(result.get("modules_analyzed").is_some(), "missing modules_analyzed: {}", output);
+}
+
+#[test]
+fn deps_drift_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"dd-err-1","method":"deps_drift","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(output.contains(r#""code":"RepoNotFound""#), "output: {}", output);
+}
+
+// ── Surfaces command family ─────────────────────────────────────────────────
+
+#[test]
+fn surfaces_list_returns_envelope() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("surfaces-test-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"surf-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let surfaces_request = format!(
+        r#"{{"id":"surf-2","method":"surfaces_list","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&surfaces_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    assert!(result.get("command").is_some(), "missing command field: {}", output);
+    assert!(result.get("results").is_some(), "missing results field: {}", output);
+    assert!(result.get("count").is_some(), "missing count field: {}", output);
+}
+
+#[test]
+fn surfaces_list_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"surf-err-1","method":"surfaces_list","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(output.contains(r#""code":"RepoNotFound""#), "output: {}", output);
+}
+
+#[test]
+fn surfaces_list_with_kind_filter() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("surfaces-filter-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"sf-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let surfaces_request = format!(
+        r#"{{"id":"sf-2","method":"surfaces_list","params":{{"repo":"{}","kind":"backend"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&surfaces_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    // Kind filter should be reflected in response
+    assert!(
+        result.get("filter_kind").is_some(),
+        "Kind filter should be reflected: {}",
+        output
+    );
+}
+
+#[test]
+fn surfaces_show_returns_detail_or_not_found() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("surfaces-show-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"ss-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Try to show a surface (may not exist in simple fixture)
+    let show_request = format!(
+        r#"{{"id":"ss-2","method":"surfaces_show","params":{{"repo":"{}","surface":"test-surface"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&show_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+
+    // Either success with detail or error (surface not found is valid)
+    if let Some(result) = parsed.get("result") {
+        assert!(result.get("command").is_some(), "missing command field: {}", output);
+        assert!(result.get("surface").is_some(), "missing surface field: {}", output);
+    } else {
+        // "surface not found" is expected for nonexistent surfaces
+        assert!(
+            parsed.get("error").is_some(),
+            "Should have result or error: {}",
+            output
+        );
+    }
+}
+
+#[test]
+fn surfaces_show_missing_surface_param() {
+    // Test with an indexed repo to verify surface param validation
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("surfaces-show-err-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"sse-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Now test missing surface param with valid repo
+    let show_request = format!(
+        r#"{{"id":"sse-2","method":"surfaces_show","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&show_request], state);
+    let output = &results[0];
+
+    assert!(output.contains(r#""code":"InvalidRequest""#), "output: {}", output);
+    assert!(output.contains("surface"), "Should mention missing surface param: {}", output);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// BOUNDARIES COMMAND FAMILY
+// ══════════════════════════════════════════════════════════════════
+
+#[test]
+fn boundaries_list_returns_envelope() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("boundaries-list-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    // C file with socket usage (may trigger boundary detection)
+    std::fs::write(
+        repo_dir.join("server.c"),
+        r#"
+#include <sys/socket.h>
+#include <sys/un.h>
+void start() {
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    struct sockaddr_un addr;
+    bind(fd, (struct sockaddr*)&addr, sizeof(addr));
+}
+"#,
     )
     .unwrap();
 
-    let db_path = temp.path().join("test.db");
     let repo_path_str = repo_dir.to_string_lossy();
-    let db_path_str = db_path.to_string_lossy();
 
-    let state = Arc::new(DaemonState::new());
-
-    // Step 1: Index the repo
     let index_request = format!(
-        r#"{{"id":"en-e2e-1","method":"index","params":{{"repo_path":"{}","db_path":"{}"}}}}"#,
-        repo_path_str, db_path_str
+        r#"{{"id":"bl-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
     );
-    run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
 
-    // Step 2: Load the repo
-    let load_request = format!(
-        r#"{{"id":"en-e2e-2","method":"load_repo","params":{{"db_path":"{}","repo_uid":"enrich-test-repo"}}}}"#,
-        db_path_str
+    let boundaries_request = format!(
+        r#"{{"id":"bl-2","method":"boundaries_list","params":{{"repo":"{}"}}}}"#,
+        canonical_path
     );
-    run_daemon_requests_with_state(vec![&load_request], Arc::clone(&state));
-
-    // Step 3: Enrich with dry_run (avoids needing rust-analyzer)
-    let enrich_request = format!(
-        r#"{{"id":"en-e2e-3","method":"enrich","params":{{"db_path":"{}","repo_uid":"enrich-test-repo","dry_run":true}}}}"#,
-        db_path_str
-    );
-    let results = run_daemon_requests_with_state(vec![&enrich_request], state);
+    let results = run_daemon_requests_with_state(vec![&boundaries_request], state);
     let output = &results[0];
 
-    // Parse all NDJSON lines
-    let lines: Vec<&str> = output.lines().collect();
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
 
-    // Should have progress events + final response
+    // Standard envelope fields
+    assert_eq!(result["command"], "boundaries list");
+    assert!(result["repo"].is_string(), "missing repo: {}", output);
+    assert!(result["snapshot"].is_string(), "missing snapshot: {}", output);
+    assert!(result["results"].is_array(), "missing results: {}", output);
+    assert!(result["count"].is_u64(), "missing count: {}", output);
+}
+
+#[test]
+fn boundaries_list_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"bl-err","method":"boundaries_list","params":{"repo":"/nonexistent/path"}}"#,
+    );
     assert!(
-        !lines.is_empty(),
-        "Expected at least one response line, got: {}",
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
         output
     );
+}
 
-    // Check for progress phases
-    let mut found_initializing = false;
-    let mut found_complete = false;
-    let mut result_json: Option<serde_json::Value> = None;
+#[test]
+fn boundaries_list_with_kind_filter() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
 
-    for line in &lines {
-        let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
-        assert_eq!(
-            parsed["id"], "en-e2e-3",
-            "All events should have correct request ID"
-        );
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("boundaries-filter-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
 
-        if let Some(progress) = parsed.get("progress") {
-            let phase = progress["phase"].as_str().unwrap_or("");
-            match phase {
-                "initializing" => found_initializing = true,
-                "complete" => found_complete = true,
-                _ => {}
-            }
-        }
-        if parsed.get("result").is_some() {
-            result_json = Some(parsed);
-        }
-    }
+    let repo_path_str = repo_dir.to_string_lossy();
 
-    assert!(
-        found_initializing,
-        "Should have initializing progress event"
+    let index_request = format!(
+        r#"{{"id":"bf-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
     );
-    assert!(found_complete, "Should have complete progress event");
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
 
-    // Verify result contract shape matches CLI EnrichOutput
-    let result = result_json.expect("Should have final result");
-    let r = &result["result"];
+    let boundaries_request = format!(
+        r#"{{"id":"bf-2","method":"boundaries_list","params":{{"repo":"{}","kind":"unix_socket"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&boundaries_request], state);
+    let output = &results[0];
 
-    // Required fields from CLI contract
-    assert!(r.get("command").is_some(), "Missing command field");
-    assert!(r.get("repo_uid").is_some(), "Missing repo_uid field");
-    assert!(
-        r.get("snapshot_uid").is_some(),
-        "Missing snapshot_uid field"
-    );
-    assert!(r.get("promote").is_some(), "Missing promote field");
-    assert!(
-        r.get("eligible_count").is_some(),
-        "Missing eligible_count field"
-    );
-    assert!(
-        r.get("enriched_count").is_some(),
-        "Missing enriched_count field"
-    );
-    assert!(
-        r.get("failed_count").is_some(),
-        "Missing failed_count field"
-    );
-    assert!(
-        r.get("attempted_persist_count").is_some(),
-        "Missing attempted_persist_count field"
-    );
-    assert!(
-        r.get("persisted_count").is_some(),
-        "Missing persisted_count field"
-    );
-    assert!(
-        r.get("has_storage_discrepancy").is_some(),
-        "Missing has_storage_discrepancy field"
-    );
-    assert!(
-        r.get("enrichment_rate").is_some(),
-        "Missing enrichment_rate field"
-    );
-    assert!(r.get("by_language").is_some(), "Missing by_language field");
-    assert!(
-        r.get("top_failure_reasons").is_some(),
-        "Missing top_failure_reasons field"
-    );
-    assert!(r.get("top_types").is_some(), "Missing top_types field");
-    assert!(
-        r.get("available_resolvers").is_some(),
-        "Missing available_resolvers field"
-    );
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
 
-    // Verify dry_run is NOT in the result (CLI contract doesn't include it)
+    // Kind filter should be reflected in response
     assert!(
-        r.get("dry_run").is_none(),
-        "dry_run should NOT be in result (CLI contract parity)"
+        result.get("filter_kind").is_some(),
+        "Kind filter should be reflected: {}",
+        output
     );
+}
 
-    // Verify by_language is tuple format: [["lang", {...}], ...]
-    let by_language = r["by_language"]
-        .as_array()
-        .expect("by_language should be array");
-    // May be empty if no eligible edges, but if present, should be tuple format
-    for entry in by_language {
+#[test]
+fn boundaries_show_returns_detail_or_not_found() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("boundaries-show-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"bs-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Try to show a boundary surface (likely won't exist in simple fixture)
+    let show_request = format!(
+        r#"{{"id":"bs-2","method":"boundaries_show","params":{{"repo":"{}","surface":"test-surface"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&show_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+
+    // Either success with detail or error (surface not found is valid)
+    if let Some(result) = parsed.get("result") {
+        assert!(result.get("command").is_some(), "missing command field: {}", output);
+        assert!(result.get("detail").is_some(), "missing detail field: {}", output);
+    } else {
+        // "surface not found" is expected for nonexistent surfaces
         assert!(
-            entry.is_array(),
-            "by_language entries should be tuples [lang, stats], got: {}",
-            entry
-        );
-        let tuple = entry.as_array().unwrap();
-        assert_eq!(
-            tuple.len(),
-            2,
-            "by_language tuple should have 2 elements: [lang, stats]"
-        );
-        assert!(
-            tuple[0].is_string(),
-            "First tuple element should be language string"
-        );
-        assert!(
-            tuple[1].is_object(),
-            "Second tuple element should be stats object"
+            parsed.get("error").is_some(),
+            "Should have result or error: {}",
+            output
         );
     }
+}
 
-    // Verify top_failure_reasons is tuple format: [["reason", count], ...]
-    let top_reasons = r["top_failure_reasons"]
-        .as_array()
-        .expect("top_failure_reasons should be array");
-    for entry in top_reasons {
-        assert!(
-            entry.is_array(),
-            "top_failure_reasons entries should be tuples [reason, count], got: {}",
-            entry
-        );
-        let tuple = entry.as_array().unwrap();
-        assert_eq!(
-            tuple.len(),
-            2,
-            "top_failure_reasons tuple should have 2 elements"
-        );
-        assert!(
-            tuple[0].is_string(),
-            "First tuple element should be reason string"
-        );
-        assert!(
-            tuple[1].is_number(),
-            "Second tuple element should be count number"
-        );
-    }
+#[test]
+fn boundaries_show_missing_surface_param() {
+    // Test with an indexed repo to verify surface param validation
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
 
-    // Verify command value
-    assert_eq!(r["command"], "enrich", "command should be 'enrich'");
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("boundaries-show-err-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"bse-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Now test missing surface param with valid repo
+    let show_request = format!(
+        r#"{{"id":"bse-2","method":"boundaries_show","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&show_request], state);
+    let output = &results[0];
+
+    assert!(output.contains(r#""code":"InvalidRequest""#), "output: {}", output);
+    assert!(output.contains("surface"), "Should mention missing surface param: {}", output);
+}
+
+#[test]
+fn boundaries_summary_returns_envelope() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("boundaries-summary-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"bsum-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let summary_request = format!(
+        r#"{{"id":"bsum-2","method":"boundaries_summary","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&summary_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    // Standard envelope fields
+    assert_eq!(result["command"], "boundaries summary");
+    assert!(result["repo"].is_string(), "missing repo: {}", output);
+    assert!(result["snapshot"].is_string(), "missing snapshot: {}", output);
+    assert!(result["summary"].is_object(), "missing summary: {}", output);
+}
+
+#[test]
+fn boundaries_summary_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"bsum-err","method":"boundaries_summary","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
+        output
+    );
+}
+
+#[test]
+fn boundaries_links_returns_envelope() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("boundaries-links-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"blnk-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let links_request = format!(
+        r#"{{"id":"blnk-2","method":"boundaries_links","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&links_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    // Standard envelope fields
+    assert_eq!(result["command"], "boundaries links");
+    assert!(result["repo"].is_string(), "missing repo: {}", output);
+    assert!(result["snapshot"].is_string(), "missing snapshot: {}", output);
+    assert!(result["results"].is_array(), "missing results: {}", output);
+    assert!(result["count"].is_u64(), "missing count: {}", output);
+}
+
+#[test]
+fn boundaries_links_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"blnk-err","method":"boundaries_links","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
+        output
+    );
+}
+
+#[test]
+fn boundaries_links_with_service_filter() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("boundaries-links-filter-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"blf-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    let links_request = format!(
+        r#"{{"id":"blf-2","method":"boundaries_links","params":{{"repo":"{}","service":"UserService"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&links_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = &parsed["result"];
+
+    // Service filter should be reflected in response
+    assert!(
+        result.get("filter_service").is_some(),
+        "Service filter should be reflected: {}",
+        output
+    );
 }

@@ -2,26 +2,44 @@
 //!
 //! Requirement/obligation gate evaluation for CI integration.
 //!
-//! # Boundary rules
+//! # REG-1 Contract
 //!
-//! This module owns gate command-family behavior:
-//! - `run_gate` handler
-//! - gate-local argument parsing (--strict, --advisory)
-//!
-//! This module does **not** own:
-//! - shared infrastructure (lives in `crate::cli`)
-//! - gate domain logic (belongs in `repo-graph-gate` crate)
+//! With REG-1, gate resolves repo from cwd via daemon.
+//! New contract: `rmap gate [--strict | --advisory]`
 
-use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::{format_gate_error, open_storage, utc_now_iso8601};
+use crate::daemon_client::DaemonClient;
 
-// ── gate command ─────────────────────────────────────────────────
+fn print_usage() {
+    eprintln!("usage: rmap gate [--strict | --advisory]");
+    eprintln!();
+    eprintln!("Evaluates the gate for the repository.");
+    eprintln!("Repository is resolved from current working directory.");
+    eprintln!();
+    eprintln!("Options:");
+    eprintln!("  --strict    Strict mode (fail on any unmet requirement)");
+    eprintln!("  --advisory  Advisory mode (warn but don't fail)");
+}
 
+fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
+    format!(
+        "Daemon unavailable (socket: {}). Start with: rmapd",
+        socket_path.display()
+    )
+}
+
+/// Run the `rmap gate` command.
+///
+/// Usage: `rmap gate [--strict | --advisory]`
+///
+/// Exit codes:
+/// - 0: gate pass
+/// - 1: usage error
+/// - 2: runtime error (daemon unavailable, repo not indexed)
+/// - 3: gate fail (strict mode or violations present)
 pub fn run_gate(args: &[String]) -> ExitCode {
-    // Parse positional args and optional mode flags.
-    let mut positional = Vec::new();
+    // Parse optional mode flags
     let mut strict = false;
     let mut advisory = false;
 
@@ -29,18 +47,17 @@ pub fn run_gate(args: &[String]) -> ExitCode {
         match arg.as_str() {
             "--strict" => strict = true,
             "--advisory" => advisory = true,
-            _ if arg.starts_with('-') => {
-                eprintln!("error: unknown flag: {}", arg);
-                eprintln!("usage: rmap gate <db_path> <repo_uid> [--strict | --advisory]");
+            flag if flag.starts_with('-') => {
+                eprintln!("error: unknown flag: {}", flag);
+                print_usage();
                 return ExitCode::from(1);
             }
-            _ => positional.push(arg),
+            _ => {
+                eprintln!("error: unexpected argument: {}", arg);
+                print_usage();
+                return ExitCode::from(1);
+            }
         }
-    }
-
-    if positional.len() != 2 {
-        eprintln!("usage: rmap gate <db_path> <repo_uid> [--strict | --advisory]");
-        return ExitCode::from(1);
     }
 
     if strict && advisory {
@@ -48,92 +65,73 @@ pub fn run_gate(args: &[String]) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    let mode = if strict {
-        repo_graph_gate::GateMode::Strict
-    } else if advisory {
-        repo_graph_gate::GateMode::Advisory
-    } else {
-        repo_graph_gate::GateMode::Default
-    };
-
-    let db_path = Path::new(positional[0]);
-    let repo_uid = positional[1];
-
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
+    // Resolve repo from cwd
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: cannot get current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let snapshot = match storage.get_latest_snapshot(repo_uid) {
-        Ok(Some(snap)) => snap,
-        Ok(None) => {
-            eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(e) => {
+            eprintln!("error: cannot canonicalize current directory: {}", e);
             return ExitCode::from(2);
         }
+    };
+
+    // Connect to daemon
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Current UTC time for waiver expiry comparison (ISO 8601).
-    let now = utc_now_iso8601();
+    if !client.is_available() {
+        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        return ExitCode::from(2);
+    }
 
-    // Delegate the entire gate pipeline (requirement load +
-    // obligation evaluation + waiver overlay + mode reduction)
-    // to the relocated `repo-graph-gate` crate. The
-    // `GateStorageRead` trait is implemented on
-    // `StorageConnection` in `repo-graph-storage::gate_impl`.
-    //
-    // Error formatting preserves the pre-relocation stderr
-    // wording used by `rmap gate` so the test suite's
-    // regression assertions stay valid. New callers of the
-    // gate crate should use `GateError::Display` directly.
-    let report =
-        match repo_graph_gate::assemble(&storage, repo_uid, &snapshot.snapshot_uid, mode, &now) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("error: {}", format_gate_error(&e));
-                return ExitCode::from(2);
-            }
-        };
-    let exit_code = report.outcome.exit_code;
+    // Determine mode for daemon request
+    let mode = if strict {
+        "strict"
+    } else if advisory {
+        "advisory"
+    } else {
+        "strict" // Default to strict for CI use cases
+    };
 
-    // Repo name for the report.
-    use repo_graph_storage::types::RepoRef;
-    let repo_name = storage
-        .get_repo(&RepoRef::Uid(repo_uid.to_string()))
-        .ok()
-        .flatten()
-        .map(|r| r.name)
-        .unwrap_or_else(|| repo_uid.to_string());
-
-    // Toolchain metadata from snapshot (may be null).
-    let toolchain: serde_json::Value = snapshot
-        .toolchain_json
-        .as_deref()
-        .and_then(|s| serde_json::from_str(s).ok())
-        .unwrap_or(serde_json::Value::Null);
-
-    // Gate report JSON (TS-compatible shape, NOT QueryResult envelope).
-    // Field names and nesting preserved from the pre-relocation
-    // gate.rs output so `rmap gate` consumers see no shape change.
-    let output = serde_json::json!({
-        "command": "gate",
-        "repo": repo_name,
-        "snapshot": snapshot.snapshot_uid,
-        "toolchain": toolchain,
-        "obligations": report.obligations,
-        "gate": report.outcome,
+    // Send gate request
+    let params = serde_json::json!({
+        "repo": repo_path,
+        "mode": mode,
     });
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::from(exit_code as u8)
+    match client.request("gate", Some(params)) {
+        Ok(result) => {
+            // Pretty-print JSON to stdout
+            match serde_json::to_string_pretty(&result) {
+                Ok(json) => {
+                    println!("{}", json);
+
+                    // Determine exit code from gate outcome
+                    let exit_code = result
+                        .get("gate")
+                        .and_then(|g| g.get("exit_code"))
+                        .and_then(|c| c.as_u64())
+                        .unwrap_or(0) as u8;
+
+                    ExitCode::from(exit_code)
+                }
+                Err(e) => {
+                    eprintln!("error: failed to serialize result: {}", e);
+                    ExitCode::from(2)
+                }
+            }
         }
         Err(e) => {
             eprintln!("error: {}", e);

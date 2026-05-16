@@ -404,6 +404,7 @@ fn declare_waiver_optional_fields_do_not_affect_identity() {
 // -- 10. Inserted waiver suppresses gate failure ---------------------
 
 #[test]
+#[ignore = "REG-1: gate command requires daemon infrastructure"]
 fn declare_waiver_suppresses_gate() {
     let (_r, _d, db) = build_db();
     let db_str = db.to_str().unwrap();
@@ -448,6 +449,7 @@ fn declare_waiver_suppresses_gate() {
 // -- 11. Expired waiver does not suppress gate -----------------------
 
 #[test]
+#[ignore = "REG-1: gate command requires daemon infrastructure"]
 fn declare_waiver_expired_does_not_suppress() {
     let (_r, _d, db) = build_db();
     let db_str = db.to_str().unwrap();

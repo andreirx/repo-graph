@@ -1,67 +1,46 @@
 //! Minimal Rust CLI for repo-graph.
 //!
-//! Commands:
-//!   rmap index   <repo_path> <db_path>   [requires daemon]
-//!   rmap refresh <db_path> <repo_uid>   [requires daemon]
-//!   rmap trust   <db_path> <repo_uid>
-//!   rmap callers <db_path> <repo_uid> <symbol> [--edge-types <types>]
-//!   rmap callees <db_path> <repo_uid> <symbol> [--edge-types <types>]
-//!   rmap path    <db_path> <repo_uid> <from> <to>
-//!   rmap imports <db_path> <repo_uid> <file_path>
-//!   rmap violations <db_path> <repo_uid>
-//!   rmap cycles  <db_path> <repo_uid>
-//!   rmap stats   <db_path> <repo_uid>
+//! ## REG-1 Contract (Primary)
 //!
-//!   rmap gate    <db_path> <repo_uid> [--strict | --advisory]
-//!   rmap orient  <db_path> <repo_uid> [--budget small|medium|large] [--focus <string>]
-//!   rmap check   <db_path> <repo_uid>
-//!   rmap docs list    <db_path> <repo_uid>
-//!   rmap docs extract <db_path> <repo_uid>
-//!   rmap churn    <db_path> <repo_uid> [--since <expr>]
-//!   rmap hotspots <db_path> <repo_uid> [--since <expr>]
-//!   rmap assess   <db_path> <repo_uid> [--baseline <snapshot_uid>]
+//! Most commands resolve repo from current working directory via daemon registry.
+//! Explicit `--repo` or `--repo-path` overrides are available for multi-repo scenarios.
 //!
-//!   rmap declare boundary <db_path> <repo_uid> <module_path> --forbids <target> [--reason <text>]
-//!   rmap declare requirement <db_path> <repo_uid> <req_id> --version <n> --obligation-id <id> --method <method> --obligation <text> [--target <t>] [--threshold <n>] [--operator <op>]
-//!   rmap declare quality-policy <db_path> <repo_uid> <policy_id> --measurement <kind> --policy-kind <kind> --threshold <n> [--version <n>] [--severity <fail|advisory>] [--scope-clause <type>:<selector>]... [--description <text>]
-//!   rmap declare deactivate <db_path> <declaration_uid>
+//! ```text
+//! # Indexing
+//! rmap index [repo_path] [--alias <name>]   # index repo, daemon allocates db
 //!
-//!   rmap resource readers <db_path> <repo_uid> <resource_stable_key>
-//!   rmap resource writers <db_path> <repo_uid> <resource_stable_key>
+//! # Repo management
+//! rmap repo list                            # list all registered repos
+//! rmap repo info [repo]                     # show repo details (default: cwd)
+//! rmap repo alias <repo> <alias>            # set or change alias
+//! rmap repo remove <repo> [--delete-db]     # remove from registry
 //!
-//!   rmap modules list <db_path> <repo_uid>
-//!   rmap modules files <db_path> <repo_uid> <module>
-//!   rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]
-//!   rmap modules violations <db_path> <repo_uid>
-//!   rmap modules boundary <db_path> <repo_uid> <source> --forbids <target> [--reason <text>]
+//! # Query commands (resolve repo from cwd)
+//! rmap orient [--focus <path>] [--budget small|medium|large]
+//! rmap check
+//! rmap explain <target>
+//! rmap callers <symbol>
+//! rmap callees <symbol>
+//! rmap trust
+//! ```
 //!
-//!   rmap surfaces list <db_path> <repo_uid> [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>]
-//!   rmap surfaces show <db_path> <repo_uid> <surface_ref>
+//! ## Legacy/Transitional Commands
 //!
-//!   rmap boundaries list <db_path> <repo_uid> [--kind <kind>] [--scope <scope>] [--direction <dir>] [--family <fam>] [--file <path>]
-//!   rmap boundaries show <db_path> <repo_uid> <surface_uid>
-//!   rmap boundaries summary <db_path> <repo_uid>
+//! Some commands still use explicit `<db_path> <repo_uid>` until full REG-1 migration.
+//! These will be updated in subsequent slices:
 //!
-//!   rmap contracts list <db_path> <repo_uid> [--kind protobuf]
-//!   rmap contracts show <db_path> <repo_uid> <file_path>
-//!   rmap contracts elements <db_path> <repo_uid> [--kind message|enum|service|method|field] [--file <path>]
+//! ```text
+//! rmap refresh <db_path> <repo_uid>
+//! rmap gate    <db_path> <repo_uid>
+//! rmap assess  <db_path> <repo_uid>
+//! ... (see --help for full list)
+//! ```
 //!
-//!   rmap policy <db_path> <repo_uid> [--kind STATUS_MAPPING|BEHAVIORAL_MARKER] [--file <path>]
+//! ## Exit codes
 //!
-//!   rmap deps list <db_path> <repo_uid> [module] [--ecosystem npm|cargo]
-//!   rmap deps why <db_path> <repo_uid> <package> [--ecosystem npm|cargo]
-//!   rmap deps drift <db_path> <repo_uid> [--ecosystem npm|cargo]
-//!
-//!   rmap enrich <db_path> <repo_uid> [--snapshot <uid>] [--language <lang>] [--limit <n>] [--promote] [--force]
-//!
-//!   rmap inferences list <db_path> <repo_uid> [--kind <kind>]
-//!
-//! Exit codes:
-//!   0 — success (gate: all pass; check: pass; modules violations: no violations)
-//!   1 — usage error (gate: any fail; check: fail; modules violations: violations found)
-//!   2 — runtime error (gate: incomplete; check: incomplete;
-//!       orient: focus-not-implemented, storage failure,
-//!       missing repo, missing snapshot, boundary parse failure)
+//! - 0: success
+//! - 1: usage error / check fail / violations found
+//! - 2: runtime error (daemon unavailable, storage failure, etc.)
 
 // Gate policy was relocated out of this binary crate into
 // `repo-graph-gate` during Rust-43A. The `run_gate` function
@@ -75,7 +54,8 @@ use repo_graph_rgr::commands::{
     run_coverage, run_cycles, run_dead, run_declare, run_deps, run_docs, run_doctor, run_enrich,
     run_explain_cmd, run_gate, run_hook, run_hotspots, run_imports, run_index, run_inferences,
     run_integrate, run_metrics, run_modules, run_orient, run_path, run_policy, run_refresh,
-    run_resource, run_risk, run_stats, run_surfaces, run_trust, run_uninstall, run_violations,
+    run_repo, run_resource, run_risk, run_stats, run_surfaces, run_trust, run_uninstall,
+    run_violations,
 };
 use std::process::ExitCode;
 
@@ -135,6 +115,7 @@ fn main() -> ExitCode {
         "boundaries" => run_boundaries(&args[2..]),
         "contracts" => run_contracts(&args[2..]),
         "policy" => run_policy(&args[2..]),
+        "repo" => run_repo(&args[2..]),
         "doctor" => run_doctor(&args[2..]),
         "uninstall" => run_uninstall(&args[2..]),
         "integrate" => run_integrate(&args[2..]),

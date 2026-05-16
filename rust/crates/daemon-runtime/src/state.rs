@@ -24,6 +24,7 @@
 //!    - Keyed by `RepoKey`
 //!    - Acquired for repo-level operations after DB coordination
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -32,6 +33,8 @@ use parking_lot::{Mutex, MutexGuard};
 use repo_graph_daemon_policy::RepoCoordinator;
 use repo_graph_storage::types::RepoRef;
 use repo_graph_storage::StorageConnection;
+
+use crate::registry::{RegistryError, RepoRegistry};
 
 // ── Database-scoped coordination ────────────────────────────────────
 
@@ -184,7 +187,7 @@ impl RepoState {
     }
 }
 
-/// Daemon state holding all loaded repos and database runtimes.
+/// Daemon state holding all loaded repos, database runtimes, and the registry.
 ///
 /// # Coordination Hierarchy
 ///
@@ -192,6 +195,12 @@ impl RepoState {
 /// 2. Repo-level: `repos` provides reader/writer coordination per loaded repo
 ///
 /// Write operations must acquire DB write lock first, then repo lock if applicable.
+///
+/// # Registry
+///
+/// The registry is the authoritative list of known repos. It maps canonical paths
+/// to repo metadata (db_path, repo_uid, alias). The registry is persisted to disk
+/// and loaded on daemon startup.
 pub struct DaemonState {
     /// Repos indexed by RepoKey (db_path + repo_uid).
     repos: RwLock<HashMap<RepoKey, Arc<RepoState>>>,
@@ -201,14 +210,49 @@ pub struct DaemonState {
     /// Provides write coordination for database-level operations (index, refresh, enrich).
     /// Created lazily on first access to a database path.
     db_runtimes: RwLock<HashMap<PathBuf, Arc<DatabaseState>>>,
+
+    /// Repo registry for path-based resolution.
+    ///
+    /// The registry is daemon-owned and persisted to `registry.json`.
+    /// Uses RefCell for interior mutability (daemon is single-threaded).
+    registry: RefCell<RepoRegistry>,
 }
 
 impl DaemonState {
-    /// Create empty daemon state.
+    /// Create daemon state with registry loaded from disk.
+    ///
+    /// Registry resolution uses `RMAP_STATE_ROOT` if set, otherwise platform data dir.
+    /// If initialization fails, logs a warning and uses a non-persistent empty registry.
     pub fn new() -> Self {
+        let registry = match RepoRegistry::new() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!(
+                    "warning: failed to load registry: {} (starting with empty non-persistent registry)",
+                    e
+                );
+                // Use explicit non-persistent fallback instead of retrying the same constructor
+                RepoRegistry::empty_non_persistent()
+            }
+        };
+
         Self {
             repos: RwLock::new(HashMap::new()),
             db_runtimes: RwLock::new(HashMap::new()),
+            registry: RefCell::new(registry),
+        }
+    }
+
+    /// Create daemon state with a specific registry.
+    ///
+    /// Use this for:
+    /// - Isolated test environments
+    /// - Custom state root configurations
+    pub fn with_registry(registry: RepoRegistry) -> Self {
+        Self {
+            repos: RwLock::new(HashMap::new()),
+            db_runtimes: RwLock::new(HashMap::new()),
+            registry: RefCell::new(registry),
         }
     }
 
@@ -355,6 +399,41 @@ impl DaemonState {
     pub fn unload_repo_by_key(&self, key: &RepoKey) -> bool {
         let mut repos = self.repos.write().unwrap();
         repos.remove(key).is_some()
+    }
+
+    // ── Registry operations ─────────────────────────────────────────────
+
+    /// Access the registry immutably.
+    ///
+    /// Returns a RefCell borrow - caller must not hold across await points.
+    pub fn registry(&self) -> std::cell::Ref<'_, RepoRegistry> {
+        self.registry.borrow()
+    }
+
+    /// Access the registry mutably.
+    ///
+    /// Returns a RefCell borrow - caller must not hold across await points.
+    pub fn registry_mut(&self) -> std::cell::RefMut<'_, RepoRegistry> {
+        self.registry.borrow_mut()
+    }
+
+    /// Resolve a path to a registered repo.
+    ///
+    /// Uses registry resolution: exact match or longest ancestor prefix.
+    pub fn resolve_repo_path(&self, path: &Path) -> Option<crate::registry::RegistryEntry> {
+        self.registry.borrow().resolve(path).cloned()
+    }
+
+    /// Resolve by alias or path.
+    pub fn resolve_alias_or_path(&self, alias_or_path: &str) -> Option<crate::registry::RegistryEntry> {
+        self.registry.borrow().resolve_alias_or_path(alias_or_path).cloned()
+    }
+
+    /// Save the registry to disk.
+    ///
+    /// Should be called after mutations to persist changes.
+    pub fn save_registry(&self) -> Result<(), RegistryError> {
+        self.registry.borrow_mut().save()
     }
 }
 

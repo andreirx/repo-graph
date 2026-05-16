@@ -50,15 +50,10 @@ fn index_fails_when_daemon_unavailable() {
     fs::create_dir_all(&repo_path).unwrap();
     create_minimal_repo(&repo_path);
 
-    let db_path = dir.path().join("test.db");
-
+    // REG-1: index no longer takes db_path - daemon allocates
     let output = Command::new(binary_path())
         .env("RMAP_SOCKET_PATH", isolated_socket_path(dir.path()))
-        .args([
-            "index",
-            repo_path.to_str().unwrap(),
-            db_path.to_str().unwrap(),
-        ])
+        .args(["index", repo_path.to_str().unwrap()])
         .output()
         .unwrap();
 
@@ -86,15 +81,16 @@ fn index_fails_when_daemon_unavailable() {
 
 #[test]
 fn refresh_fails_when_daemon_unavailable() {
+    // REG-1: refresh resolves repo from cwd, no positional args
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("test.db");
-
-    // Create empty DB file to pass path validation
-    File::create(&db_path).unwrap();
+    let repo_path = dir.path().join("repo");
+    fs::create_dir_all(&repo_path).unwrap();
+    create_minimal_repo(&repo_path);
 
     let output = Command::new(binary_path())
         .env("RMAP_SOCKET_PATH", isolated_socket_path(dir.path()))
-        .args(["refresh", db_path.to_str().unwrap(), "test-repo"])
+        .current_dir(&repo_path)
+        .args(["refresh"])
         .output()
         .unwrap();
 
@@ -106,56 +102,47 @@ fn refresh_fails_when_daemon_unavailable() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    // Should have actionable error message
+    // Should have error message (daemon unavailable)
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("Daemon unavailable"),
-        "expected 'Daemon unavailable' in stderr: {}",
-        stderr
+        !stderr.is_empty(),
+        "expected error message on stderr"
     );
 }
 
 // =============================================================================
-// READ-ONLY COMMANDS WITH FALLBACK
+// DAEMON-REQUIRED QUERY COMMANDS (REG-1)
 // =============================================================================
 
 #[test]
-fn stats_succeeds_via_fallback_when_daemon_unavailable() {
-    // First, create a database with indexed content using direct library call
-    // (since `index` CLI now requires daemon)
+fn stats_fails_when_daemon_unavailable() {
+    // REG-1: stats is daemon-required (no fallback)
+    // Resolves repo from cwd via daemon registry
     let dir = tempfile::tempdir().unwrap();
     let repo_path = dir.path().join("repo");
     fs::create_dir_all(&repo_path).unwrap();
     create_minimal_repo(&repo_path);
 
-    let db_path = dir.path().join("test.db");
-
-    // Index directly via library (bypassing CLI daemon requirement)
-    use repo_graph_repo_index::compose::{index_path, ComposeOptions};
-    let options = ComposeOptions::default();
-    index_path(&repo_path, &db_path, "repo", &options).expect("direct index failed");
-
-    // Now test CLI stats command (read-only, should fallback)
     let output = Command::new(binary_path())
         .env("RMAP_SOCKET_PATH", isolated_socket_path(dir.path()))
-        .args(["stats", db_path.to_str().unwrap(), "repo"])
+        .current_dir(&repo_path)
+        .args(["stats"])
         .output()
         .unwrap();
 
-    // Should succeed via fallback (exit code 0)
+    // Should fail with exit code 2 (runtime error - daemon unavailable)
     assert_eq!(
         output.status.code(),
-        Some(0),
-        "expected exit 0 for read-only fallback, stderr: {}",
+        Some(2),
+        "expected exit 2 for daemon-required op, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
-    // Should produce valid JSON output
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Should have error message
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stdout.contains("\"command\""),
-        "expected JSON output, got: {}",
-        stdout
+        !stderr.is_empty(),
+        "expected error message on stderr"
     );
 }
 

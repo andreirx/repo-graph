@@ -47,10 +47,12 @@
 //! ```
 
 pub mod dispatch;
+pub mod registry;
 pub mod state;
 pub mod util;
 
 pub use dispatch::ServiceDispatcher;
+pub use registry::{RegistryEntry, RegistryError, RepoRegistry};
 pub use state::{DaemonState, RepoKey, RepoState};
 
 use std::path::PathBuf;

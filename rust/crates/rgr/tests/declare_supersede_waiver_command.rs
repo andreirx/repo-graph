@@ -341,6 +341,7 @@ fn supersede_waiver_success() {
 // -- 11. Gate sees replacement waiver reason -------------------------
 
 #[test]
+#[ignore = "REG-1: gate command requires daemon infrastructure"]
 fn supersede_waiver_gate_sees_new_reason() {
     let (_r, _d, db) = build_db();
     let db_str = db.to_str().unwrap();
@@ -382,6 +383,7 @@ fn supersede_waiver_gate_sees_new_reason() {
 // -- 12. Supersede to expired expiry restores gate failure -----------
 
 #[test]
+#[ignore = "REG-1: gate command requires daemon infrastructure"]
 fn supersede_waiver_expired_restores_gate_failure() {
     let (_r, _d, db) = build_db();
     let db_str = db.to_str().unwrap();

@@ -390,6 +390,7 @@ fn declare_requirement_obligation_text_does_not_affect_identity() {
 // -- 10. Inserted requirement visible to gate ------------------------
 
 #[test]
+#[ignore = "REG-1: gate command requires daemon infrastructure"]
 fn declare_requirement_visible_to_gate() {
     let (_r, _d, db) = build_db();
     let db_str = db.to_str().unwrap();

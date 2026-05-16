@@ -49,59 +49,71 @@ Repo-graph is not a documentation authoring system. It is the deterministic disc
 
 ## Primary CLI: `rmap`
 
-The Rust CLI (`rmap`) is the primary binary. Query commands use explicit positional arguments:
+The Rust CLI (`rmap`) is the primary binary.
+
+### CLI contract
+
+The daemon owns repo state. Normal usage requires no paths or identifiers:
 
 ```bash
-rmap <command> <db_path> <repo_uid> [options]
+rmap index .              # index current directory (daemon allocates storage)
+rmap index . --alias pmc  # index with friendly alias
+rmap orient               # orient on current repo (daemon resolves from cwd)
+rmap check                # check current repo
+rmap explain src/foo.ts   # explain file in current repo
 ```
 
-Index/refresh commands differ (daemon required):
+### Repo management
+
 ```bash
-rmap index   <repo_path> <db_path>
-rmap refresh <db_path> <repo_uid>
+rmap repo list            # list all registered repos
+rmap repo info            # show details for current repo
+rmap repo info pmc        # show details by alias
+rmap repo alias . pmc     # set alias for current repo
+rmap repo remove pmc      # remove from registry
 ```
 
 ### Discovery workflow
 
 ```bash
 # Orient before changing code
-rmap orient ./repo.db my-repo --focus "src/core/auth"
+rmap orient --focus "src/core/auth"
 
 # Deep-dive on an unfamiliar file
-rmap explain ./repo.db my-repo "src/core/auth/session.ts"
+rmap explain "src/core/auth/session.ts"
 
 # Check structural and quality impact after changes
-rmap check ./repo.db my-repo
+rmap check
 
 # Surface documentation inventory
-rmap docs list ./repo.db my-repo
+rmap docs list
 ```
 
 ### Structural queries
 
 ```bash
-rmap callers ./repo.db my-repo "AuthService.validate"
-rmap callees ./repo.db my-repo "AuthService.validate"
-rmap imports ./repo.db my-repo "src/core/auth/session.ts"
-rmap trust ./repo.db my-repo
+rmap callers "AuthService.validate"
+rmap callees "AuthService.validate"
+rmap imports "src/core/auth/session.ts"
+rmap trust
 ```
 
 ### Quality discovery
 
 ```bash
-rmap churn ./repo.db my-repo --since "2 weeks ago"
-rmap hotspots ./repo.db my-repo
-rmap risk ./repo.db my-repo
+rmap churn --since "2 weeks ago"
+rmap hotspots
+rmap risk
 ```
 
 ### Indexing
 
 ```bash
 # Full index (daemon required)
-rmap index ./path/to/repo ./repo.db
+rmap index .
 
 # Incremental refresh (daemon required)
-rmap refresh ./repo.db my-repo
+rmap refresh
 ```
 
 ### Daemon Mode

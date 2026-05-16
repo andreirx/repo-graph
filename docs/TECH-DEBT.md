@@ -2807,6 +2807,43 @@ REL-1 provides a **bootstrap installer** that installs binaries but defers:
 
 See `docs/slices/rmapd-2-socket-transport.md` for full specification.
 
+### REG-1: CLI Contract Leakage (2026-05-15)
+
+**STATUS: ACTIVE DEBT — BLOCKING**
+
+The current CLI exposes internal storage concepts that should be daemon-internal:
+
+**Leaked concepts:**
+- `db_path`: User must specify database file path for every command
+- `repo_uid`: Internal storage identity (e.g., `pmc/2026-05-15T13:20:55.279Z/bf171385`)
+
+**Current (leaky) contract:**
+```bash
+rmap index ./path/to/repo ./repo.db
+rmap orient ./repo.db pmc/2026-05-15T13:20:55.279Z/bf171385
+```
+
+**Target (daemon-native) contract:**
+```bash
+rmap index .
+rmap orient
+```
+
+**Why this is blocking:**
+- Contradicts daemon-native product story (daemon owns repo state)
+- Forces users to understand and manage SQLite plumbing
+- Every tutorial, support thread, and screenshot gets polluted with internal identifiers
+- Turns temporary contract debt into adoption debt
+
+**Required resolution (REG-1):**
+1. Daemon maintains repo registry (path → db_path + repo_uid)
+2. CLI auto-discovers repo from cwd
+3. Database files live in standard location (`~/.local/share/rmap/databases/`)
+4. `repo_uid` becomes internal-only (visible in debug/doctor output only)
+5. Explicit `--db`/`--repo-uid` retained as diagnostic escape hatches
+
+See `docs/ROADMAP.md` for REG-1 priority status.
+
 ### HOOK-1 Implementation (2026-05-13)
 
 **Implemented:** All six `rmap hook` commands functional with full flag support.
@@ -2856,3 +2893,33 @@ See `docs/slices/rmapd-2-socket-transport.md` for full specification.
 - Schema structure matches Claude Code (nested matcher groups)
 - Timeout unit is seconds (not milliseconds)
 
+
+### REG-1 CLI Tests (2026-05-16)
+
+**Context:** REG-1 changed CLI contract from `rmap <cmd> <db_path> <repo_uid> [args]` to
+`rmap <cmd> [args]` with daemon-based repo resolution from cwd.
+
+**Deferred test migration:**
+
+Many CLI tests that verify success behavior now require daemon infrastructure:
+- `edge_type_filter.rs`: 6 ignored (edge-type filtering behavior)
+- `envelope_contract.rs`: 4 ignored (JSON envelope shape)
+- `explain_command.rs`: 5 ignored (explain success paths)
+- `imports_command.rs`: 6 ignored (imports query behavior)
+- `orient_command.rs`: 10 ignored (orient success paths)
+- `path_command.rs`: 7 ignored (path finding behavior)
+- `stats_command.rs`: 5 ignored (stats metrics)
+
+**Total: ~43 ignored tests**
+
+**Rationale:** Tests require:
+1. A running daemon
+2. An indexed repo registered in daemon registry
+3. REG-1 cwd-based resolution working
+
+**Resolution path:**
+- Move tests to `daemon_dispatch.rs` which has proper daemon test infrastructure
+- Or create dedicated daemon harness for each test file
+
+**Note:** Usage error tests and daemon-unavailable tests were updated to work without
+daemon - only success path tests are ignored.

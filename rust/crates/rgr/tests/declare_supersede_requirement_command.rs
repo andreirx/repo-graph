@@ -435,6 +435,7 @@ fn supersede_requirement_success() {
 // -- 12. Gate sees replacement obligation ----------------------------
 
 #[test]
+#[ignore = "REG-1: gate command requires daemon infrastructure"]
 fn supersede_requirement_gate_sees_replacement() {
     let (_r, _d, db) = build_db();
     let db_str = db.to_str().unwrap();

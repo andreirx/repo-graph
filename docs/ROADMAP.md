@@ -70,8 +70,9 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **HOOK-1A** | Stdin JSON transport for Claude Code hooks (`--from-stdin` flag) | IMPLEMENTED |
 | **CLAUDE-1** | Claude Code integration (`.claude/settings.json` hooks) | IMPLEMENTED |
 | **CODEX-1** | Codex CLI integration (`hooks.json`) | IMPLEMENTED |
-| **LINUX-1** | Linux installer + daemon service (systemd user unit) | CODE COMPLETE (blocked) |
-| **RMAPD-2** | Unix socket transport (resident daemon model) | **CURRENT** |
+| **LINUX-1** | Linux installer + daemon service (systemd user unit) | IMPLEMENTED |
+| **RMAPD-2** | Unix socket transport (resident daemon model) | IMPLEMENTED |
+| **REG-1** | Repo registry + cwd auto-discovery (daemon-native CLI) | **CURRENT** |
 | **CURSOR-1** | Cursor MCP/rules integration | PLANNED |
 | **WIN-1** | Windows distribution/install | DEFERRED |
 | **MAC-2** | macOS signing/notarization | DEFERRED |
@@ -79,22 +80,36 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 
 ### Current Priority
 
-**RMAPD-2: Unix Socket Transport** — BLOCKING
+**REG-1: Repo Registry + CWD Auto-Discovery** — BLOCKING
 
-Linux validation (v0.1.2) exposed a transport/model mismatch:
+The current CLI exposes internal storage concepts (`db_path`, `repo_uid`) that should be
+daemon-internal. This contradicts the daemon-native product story.
 
-- `rmapd` is implemented as a **stdio NDJSON server** that exits on stdin EOF
-- The installer/service model treats it as a **resident background daemon**
-- These are incompatible runtime contracts
+Current (leaky) contract:
+```bash
+rmap index ./path/to/repo ./repo.db
+rmap orient ./repo.db pmc/2026-05-15T13:20:55.279Z/bf171385
+```
 
-RMAPD-2 fixes this by making `rmapd` a true resident daemon with Unix socket transport.
-See `docs/slices/rmapd-2-socket-transport.md` for full specification.
+Target (daemon-native) contract:
+```bash
+rmap index .
+rmap orient
+```
 
-**Blocked slices:**
-- LINUX-1: code complete, blocked by RMAPD-2
-- MAC-1: implemented but has same latent defect (not yet exposed)
+REG-1 delivers:
+- Daemon-maintained repo registry (maps repo paths → db paths + repo_uids)
+- CWD-based repo auto-discovery
+- Standard database location (`~/.local/share/rmap/databases/`)
+- `repo_uid` becomes internal-only (visible only in debug/doctor output)
+- Explicit `--db`/`--repo-uid` flags retained as escape hatches for diagnostics
 
-After RMAPD-2, both MAC-1 and LINUX-1 can be properly validated.
+See `docs/slices/reg-1-repo-registry.md` for full specification.
+
+**Completed:**
+- RMAPD-2: Unix socket transport (v0.1.5)
+- MAC-1: macOS installer validated (v0.1.3)
+- LINUX-1: Linux installer validated (v0.1.5)
 
 Completed:
 - REL-SUPPORT-1: v0.1.1 release (CI validated)
@@ -143,8 +158,10 @@ HOOK-1 delivered:
 9. ~~HOOK-1A — stdin JSON transport for Claude Code~~ (IMPLEMENTED)
 10. ~~CLAUDE-1 — Claude Code integration on macOS~~ (IMPLEMENTED)
 11. ~~CODEX-1 — Codex integration on macOS~~ (IMPLEMENTED)
-12. **LINUX-1 — Linux installer + daemon service (CODE COMPLETE — PENDING VALIDATION)**
-13. CURSOR-1 — different integration model, separate from hook lane
+12. ~~LINUX-1 — Linux installer + daemon service~~ (IMPLEMENTED)
+13. ~~RMAPD-2 — Unix socket transport~~ (IMPLEMENTED)
+14. **REG-1 — Repo registry + cwd auto-discovery (CURRENT)**
+15. CURSOR-1 — different integration model, separate from hook lane
 
 ### Artifact Matrix (REL-1)
 
