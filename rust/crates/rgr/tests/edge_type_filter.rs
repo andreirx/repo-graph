@@ -110,69 +110,15 @@ fn callers_empty_edge_types_value() {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// IGNORED TESTS - Require daemon infrastructure
+// SUCCESS-PATH TESTS
 //
-// These tests verify edge-type filtering behavior which requires:
-// 1. A running daemon
-// 2. An indexed repo registered in daemon
-// 3. REG-1 resolution working
+// Edge-type filtering success tests (5-10) belong in daemon_dispatch.rs
+// where daemon infrastructure is available. The tests would verify:
+// - Default (no flag) = CALLS only
+// - Explicit --edge-types CALLS = same as default
+// - --edge-types INSTANTIATES only
+// - --edge-types CALLS,INSTANTIATES = union
+// - Callees symmetry
 //
-// TODO: Move these to daemon_dispatch.rs where proper daemon setup exists
+// Stub tests deleted as part of REG-1 cleanup.
 // ══════════════════════════════════════════════════════════════════════
-
-// ── 5. Default (no flag) = CALLS only ───────────────────────────
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn callers_default_is_calls_only() {
-    // Server has an INSTANTIATES caller (main) but no CALLS caller.
-    // Default (CALLS-only) should return 0.
-    unimplemented!("requires daemon");
-}
-
-// ── 6. Explicit --edge-types CALLS = same as default ────────────
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn callers_explicit_calls_same_as_default() {
-    // helper has one CALLS caller (main).
-    unimplemented!("requires daemon");
-}
-
-// ── 7. --edge-types INSTANTIATES only ───────────────────────────
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn callers_instantiates_only() {
-    // Server has one INSTANTIATES caller (main).
-    unimplemented!("requires daemon");
-}
-
-// ── 8. --edge-types CALLS,INSTANTIATES = union ──────────────────
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn callers_union_calls_and_instantiates() {
-    // Server has 0 CALLS callers but 1 INSTANTIATES caller (main).
-    // The union must return 1, proving INSTANTIATES is included.
-    unimplemented!("requires daemon");
-}
-
-// ── 9. Callees: --edge-types INSTANTIATES ───────────────────────
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn callees_instantiates_only() {
-    // main calls helper (CALLS) and instantiates Server (INSTANTIATES).
-    // With INSTANTIATES filter, only Server should appear.
-    unimplemented!("requires daemon");
-}
-
-// ── 10. Callees: --edge-types CALLS,INSTANTIATES = union ────────
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn callees_union_calls_and_instantiates() {
-    // main has both CALLS (helper) and INSTANTIATES (Server) callees.
-    unimplemented!("requires daemon");
-}

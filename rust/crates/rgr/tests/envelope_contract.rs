@@ -75,31 +75,15 @@ fn assert_envelope(result: &serde_json::Value, expected_command: &str) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// IGNORED TESTS - Require daemon infrastructure
+// ENVELOPE TESTS
 //
-// These tests verify JSON envelope contract which requires:
-// 1. A running daemon
-// 2. An indexed repo registered in daemon
-// 3. REG-1 resolution working
+// Envelope contract tests for callers, callees, cycles, stats belong in
+// daemon_dispatch.rs where daemon infrastructure is available.
+// Stub tests deleted as part of REG-1 cleanup.
 //
-// TODO: Move these to daemon_dispatch.rs where proper daemon setup exists
+// The dead_envelope_contract test below tests the DISABLED state of the
+// dead command, which doesn't require daemon.
 // ══════════════════════════════════════════════════════════════════════
-
-// ── callers envelope ────────────────────────────────────────────
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn callers_envelope_contract() {
-    unimplemented!("requires daemon");
-}
-
-// ── callees envelope ────────────────────────────────────────────
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn callees_envelope_contract() {
-    unimplemented!("requires daemon");
-}
 
 // ── dead envelope ───────────────────────────────────────────────
 
@@ -146,20 +130,4 @@ fn dead_envelope_contract() {
         stderr.contains("rmap dead` is disabled"),
         "stderr should explain disabled state"
     );
-}
-
-// ── cycles envelope ─────────────────────────────────────────────
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn cycles_envelope_contract() {
-    unimplemented!("requires daemon");
-}
-
-// ── stats envelope ──────────────────────────────────────────────
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn stats_envelope_contract() {
-    unimplemented!("requires daemon");
 }

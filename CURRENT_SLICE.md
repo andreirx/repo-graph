@@ -2,159 +2,125 @@
 
 ## Current Priority
 
-**RMAPD-2: Unix Socket Transport** — PLANNING
+**REG-1: Repo Registry + CWD Auto-Discovery** — IN PROGRESS
 
-Slice doc: `docs/slices/rmapd-2-socket-transport.md`
+Slice doc: `docs/slices/reg-1-repo-registry.md`
 
-### Blocking Issue
+### Goal
 
-Linux validation (v0.1.2) exposed a transport/model mismatch:
+Eliminate `<db_path> <repo_uid>` from normal CLI workflows. Daemon resolves repos from cwd via registry.
 
-- `rmapd` is implemented as a **stdio NDJSON server** that exits on stdin EOF
-- The installer/service model treats it as a **resident background daemon**
-- These are incompatible runtime contracts
+### Target Contract
 
-Evidence:
-- systemd starts `rmapd`
-- stdin is empty/EOF
-- `rmapd` exits immediately with status 0 (553 microseconds)
-- health check fails
-- log is empty (0 bytes)
+```bash
+# Normal path (daemon resolves from cwd)
+rmap index .
+rmap orient
+rmap modules list
+rmap explain src/foo.ts
 
-This is not an installer bug. It is an architectural defect.
+# Not required in normal use
+rmap orient ./some.db some-repo-uid   # REMOVED
+```
 
-### Architectural Decisions (Locked)
+### Progress (2026-05-17)
 
-| ID | Decision | Choice |
-|----|----------|--------|
-| D1 | Transport | Unix domain socket + NDJSON |
-| D2 | Lifetime | Always-on resident service |
-| D3 | Stdio mode | Keep as `--stdio` flag, test/debug only |
-| D4 | Fallback | Read-only degraded mode only |
+**Infrastructure (IMPLEMENTED):**
+- RepoRegistry in daemon-runtime
+- Registry persistence (registry.json)
+- `resolve_repo`, `list_repos`, `repo_info`, `repo_alias`, `repo_remove` handlers
+- REG-1 repo resolution helper: `resolve_and_load_repo()`
+- DaemonClient in CLI for daemon communication
 
-### D4 Elaboration
+**Command Families Migrated:**
+| Family | Status |
+|--------|--------|
+| `surfaces` | list, show — REG-1 |
+| `boundaries` | list, show, summary, links — REG-1 |
+| `modules` | list, show, files, deps, violations, unowned — REG-1 |
 
-If daemon is unavailable, CLI may perform **read-only** operations directly.
+**Also REG-1 (verified from code):**
+| Family | Commands |
+|--------|----------|
+| orient family | orient, check, explain |
+| graph family | callers, callees, path, imports, cycles, stats |
+| other | trust, gate, deps, docs, contracts, inferences, resource |
+| dead | Disabled (not legacy, just disabled) |
 
-**Allowed:** version, doctor, repo list, graph queries, config inspection  
-**Not allowed:** repo add/remove, refresh, index, any mutation
+**Still Legacy (db_path + repo_uid required):**
+| Command | Notes |
+|---------|-------|
+| `assess` | Write operation |
+| `enrich` | Write operation |
+| `policy` | Legacy |
+| `modules boundary` | Write operation |
+| `violations` (top-level) | Mixed-responsibility in violations.rs |
+| `quality/churn` | Legacy |
+| `quality/risk` | Legacy |
+| `quality/hotspots` | Legacy |
+| `quality/metrics` | Legacy |
+| `quality/coverage` | Legacy |
+| `declare/*` | All declaration commands — Legacy write |
 
-Daemon remains authoritative for all writes and coordination.
+**Test Migration:**
+- daemon_dispatch.rs: 87 success-path tests using daemon infrastructure
+- Ignored tests: 71 remaining (46 stubs deleted)
+  - 43 in gate_command.rs — real implementations using old CLI contract, needs migration
+  - 11 in dead_command.rs — command disabled (not REG-1 related)
+  - 9 in index_contract_summary.rs — real implementations using old CLI contract
+  - 8 in declare_* — legacy write operations
+
+### Definition of Done
+
+1. No normal documented workflow requires `<db_path> <repo_uid>`
+2. Remaining legacy commands are either migrated or explicitly deferred in docs
+3. Ignored REG-1 tests are reduced or accounted for
+4. slice/roadmap/current-slice documents agree
+5. Old positional syntax removed for migrated commands
 
 ### Blocked Slices
 
-| Slice | Status | Blocked By |
-|-------|--------|------------|
-| LINUX-1 | CODE COMPLETE | RMAPD-2 (transport model) |
-| MAC-1 | IMPLEMENTED | RMAPD-2 (same defect, not yet exposed) |
-
-Both platform slices assume a resident daemon. Neither can be validated correctly
-until the daemon actually stays alive as a resident process.
-
----
-
-## Blocked: LINUX-1
-
-**LINUX-1: Linux Installer + Daemon Service** — CODE COMPLETE, BLOCKED BY RMAPD-2
-
-Slice doc: `docs/slices/linux-1-linux-installer.md`
-
-The installer code is complete. The daemon transport is wrong.
-
-### Code Complete (Installer)
-
-1. **Shared manifest parser** (`platform/manifest.rs`)
-   - Extracted from macos.rs, 6 unit tests
-   - Parses all service types: `launchd`, `systemd`, `manual`
-
-2. **Linux platform adapter** (`platform/linux.rs`)
-   - Dual-mode service support (systemd + manual PID file)
-   - `service_status()` reads manifest to determine mode
-   - `stop_service()` / `remove_service()` handle both modes
-   - `doctor_probes()` reports mode-aware status
-   - 5 unit tests for systemctl output parsing (gated, not run on macOS)
-
-3. **systemd user service template** (`scripts/templates/rmapd.service`)
-   - Uses `%h` specifier (systemd expands to home dir)
-   - Restart=on-failure, Nice=10, IOSchedulingClass=idle
-
-4. **Linux shell support** (`scripts/lib/linux.sh`)
-   - `detect_systemd()` — checks for user session availability
-   - `setup_linux_daemon_service()` — installs correct mode
-   - `uninstall_linux_daemon_service()` — handles both modes
-   - Manual mode: PID file + nohup fallback for Alpine/WSL1
-
-5. **Installer updates** (`scripts/install.sh`)
-   - Correct manifest service mode recording (systemd or manual)
-   - Daemon setup runs before manifest write (determines mode)
-
-6. **Bundled installer** (`scripts/bundle-installer.sh`)
-   - Self-contained installer for curl|bash distribution
-   - Published as release artifact (v0.1.2+)
-
-### Validation Blocked
-
-Cannot validate service lifecycle until RMAPD-2 is implemented:
-
-- [ ] systemd service stays alive with no client
-- [ ] Health check validates socket connectivity
-- [ ] `rmap doctor` reports socket status
+None. REG-1 is the current priority.
 
 ---
 
 ## Recently Implemented
 
-**CODEX-1: Codex CLI Integration** — IMPLEMENTED (2026-05-14)
+**RMAPD-2: Unix Socket Transport** — IMPLEMENTED (2026-05-15)
 
-Slice doc: `docs/slices/codex-1-codex-cli-integration.md`
+Slice doc: `docs/slices/rmapd-2-socket-transport.md`
 
-### Summary
-
-Codex CLI integration via `.codex/hooks.json` using the same subcommand structure as CLAUDE-1.
-Schema verified against official OpenAI documentation (May 2026). Codex hooks are experimental.
+Daemon now runs as resident service with Unix socket transport.
 
 ### Delivered
 
-- `rmap integrate codex install [--global|--project] [--full] [--dry-run] [--force]`
-- `rmap integrate codex remove [--global|--project]`
-- `rmap integrate codex status [--global|--project] [--json]`
-- Minimal-by-default profile (SessionStart + Stop)
-- Full profile opt-in (--full adds UserPromptSubmit, PostToolUse)
-- Codex-specific matchers (SessionStart: `startup|resume`, PostToolUse: `Edit|Write|apply_patch`)
-- No PreCompact (Codex doesn't support this event)
-- 20 behavioral integration tests
+- Unix domain socket transport (`/tmp/rmap-<uid>.sock`)
+- Resident daemon lifecycle (stays alive without clients)
+- NDJSON-over-socket protocol
+- DaemonClient in CLI for socket communication
+- Socket-based health checks in `rmap doctor`
 
-### Module Structure
+### Validation Evidence
 
 ```
-commands/integrate/
-├── mod.rs           # Dispatcher (shared)
-├── claude_code.rs   # Claude-specific policy
-├── codex.rs         # Codex-specific policy (NEW)
-├── config.rs        # Generic JSON transformation with HookDefinitions trait
-└── manifest.rs      # Integration state recording (shared)
+$ rmapd &
+$ rmap doctor
+Daemon: running (socket: /tmp/rmap-501.sock)
 ```
 
-### Architecture
+---
 
-Refactored config.rs to use `HookDefinitions` trait:
-- `ClaudeCodeHooks` — Claude Code hook definitions
-- `CodexHooks` — Codex hook definitions (no PreCompact, different matchers)
-- Generic `plan_install_with<H>` and `apply_install_with<H>` functions
+**LINUX-1: Linux Installer + Daemon Service** — IMPLEMENTED (2026-05-15)
 
-### Validation Evidence (EXECUTED)
+Slice doc: `docs/slices/linux-1-linux-installer.md`
 
-```
-$ cargo test -p repo-graph-rgr --test integrate_codex_command
-running 20 tests ... ok
+Validated with RMAPD-2 socket transport.
 
-$ rmap integrate codex install --project --dry-run
-Dry run: Codex integration (minimal profile)
-  Plan: Install minimal profile (2 events)
+---
 
-$ rmap integrate codex status --project --json
-{"scope":"project","status":"installed","profile":"minimal",...}
-```
+**CODEX-1: Codex CLI Integration** — IMPLEMENTED (2026-05-14)
+
+Slice doc: `docs/slices/codex-1-codex-cli-integration.md`
 
 ---
 
@@ -162,73 +128,11 @@ $ rmap integrate codex status --project --json
 
 Slice doc: `docs/slices/claude-1-claude-code-integration.md`
 
-### Summary
-
-Claude Code integration via `.claude/settings.json` hooks using subcommand structure.
-
-### Delivered
-
-- `rmap integrate claude-code install [--global|--project] [--full] [--dry-run] [--force]`
-- `rmap integrate claude-code remove [--global|--project]`
-- `rmap integrate claude-code status [--global|--project] [--json]`
-- Minimal-by-default profile (SessionStart + Stop)
-- Full profile opt-in (--full adds UserPromptSubmit, PostToolUse, PreCompact)
-- JSON merge logic preserving non-repo-graph hooks
-- Backup before config mutation
-- Manifest recording for host integrations
-
-### Module Structure
-
-```
-commands/integrate/
-├── mod.rs           # Dispatcher only
-├── claude_code.rs   # Claude-specific policy
-├── config.rs        # Pure JSON transformation (32 tests)
-└── manifest.rs      # Integration state recording
-```
-
-### Validation Evidence (EXECUTED)
-
-```
-$ cargo clippy -p repo-graph-rgr -- -D warnings
-    Finished (no warnings)
-
-$ cargo test -p repo-graph-rgr integrate
-running 32 tests ... ok
-
-$ rmap integrate claude-code install --project --dry-run
-Dry run: Claude Code integration (minimal profile)
-  Plan: Install minimal profile (2 events)
-
-$ rmap integrate claude-code status --project --json
-{"scope":"project","status":"installed","profile":"minimal",...}
-```
-
 ---
 
 **HOOK-1A: Stdin JSON Transport Adapter** — IMPLEMENTED (2026-05-13)
 
 Slice doc: `docs/slices/hook-1a-stdin-transport.md`
-
-### Summary
-
-Added `--from-stdin` transport mode to all hook commands. Claude Code passes
-hook context as JSON on stdin, not environment variables.
-
-### Delivered
-
-- `--from-stdin` flag on all 5 hook commands
-- `StdinPayload` struct with serde deserialization
-- Normalization to existing `HookContext` (policy handlers unchanged)
-- Precedence: explicit args > stdin payload > env transport > discovery
-- 9 transport unit tests, 7 env unit tests
-
-### Architecture
-
-```
---from-stdin  →  StdinPayload  →  HookContext  →  Policy Handler (unchanged)
---from-env    →  HostContext   →  HookContext  →  Policy Handler (unchanged)
-```
 
 ---
 
@@ -236,650 +140,28 @@ hook context as JSON on stdin, not environment variables.
 
 Slice doc: `docs/slices/mac-1-macos-installer.md`
 
-### Summary
-
-macOS installer and daemon service management. Platform adapter pattern
-with clean architecture boundary: policy in CLI commands, mechanism in
-platform adapters.
-
-### Delivered
-
-- `rmap doctor` — health check command with JSON/human output
-- `rmap uninstall` — manifest-driven uninstall with --dry-run, --force, --remove-data
-- PlatformAdapter trait with MacOSAdapter implementation
-- launchd service management (plist template, bootstrap/bootout)
-- Install manifest with service metadata (`service` block)
-- Claude Code hook schema in installer (correct schema per official docs)
-
-### Architecture
-
-```
-┌─────────────────────────────────────────────────┐
-│               CLI Commands (Policy)             │
-│  doctor.rs: what constitutes health             │
-│  uninstall.rs: what to remove, in what order    │
-└─────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────┐
-│            PlatformAdapter Trait                │
-│  service_status(), stop_service(), remove_service() │
-│  read_manifest(), doctor_probes()               │
-└─────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────┐
-│          MacOSAdapter (Mechanism)               │
-│  launchctl bootstrap/bootout                    │
-│  plist parsing, service target resolution       │
-└─────────────────────────────────────────────────┘
-```
-
-### Note
-
-`scripts/lib/macos.sh` has correct Claude Code hook schema (matcher groups,
-type field, timeout in seconds, --from-stdin). With HOOK-1A complete, the
-installer can now produce functional Claude Code integrations.
-
 ---
 
 **HOOK-1: rmap hook CLI Surface** — IMPLEMENTED (2026-05-13)
 
 Slice doc: `docs/slices/hook-1-rmap-hook-cli.md`
 
-### Summary
-
-`rmap hook` command family for agent host integration. All six subcommands
-implemented with full flag support, resolution chain, and configuration.
-
-### Commands
-
-```
-rmap hook session-start [--from-stdin | --from-env | --db <path> --repo <path>]
-rmap hook prompt-submit [--from-stdin | --from-env | --classify | --prompt <text>]
-rmap hook post-edit [--from-stdin | --from-env | --files <paths>]
-rmap hook pre-compact [--from-stdin | --from-env]
-rmap hook stop [--from-stdin | --from-env | --require-validation | --transcript <path>]
-rmap hook status [--json]
-```
-
-**Transport modes (per HOOK-1A):**
-- `--from-stdin`: Claude Code/Codex pass JSON on stdin (session_id, cwd, event data)
-- `--from-env`: Legacy/fallback transport (neither Claude Code nor Codex uses this)
-
-### Implementation
-
-- `env.rs` — Host detection (ClaudeCode, Codex), HookContext with full resolution chain
-- `config.rs` — hooks.toml TOML configuration (session, post_edit, stop sections)
-- `session.rs` — Session state persistence to JSON files
-- `output.rs` — HookResult envelope, JSON/human output modes, exit codes
-- `session_start.rs` — Orientation bundle with stale DB detection
-- `prompt_submit.rs` — CURRENT_SLICE.md parsing, prompt classification
-- `post_edit.rs` — File dirty tracking (actual refresh deferred)
-- `pre_compact.rs` — Session state checkpoint
-- `stop.rs` — Validation summary, --require-validation, --transcript writing
-- `status.rs` — Configuration display, integration detection
-
-### Resolution Chain (per HOOK-1/HOOK-1A slices)
-
-1. Explicit --db/--repo arguments
-2. RMAP_DB_PATH, RMAP_REPO_PATH environment variables
-3. --from-stdin: cwd from JSON payload (Claude Code)
-4. --from-env: Legacy/fallback transport (not used by current hosts)
-5. Discovery (search for .rmap.db, repo.db; find .git for repo)
-
-### Platform Directories (per DIST-1 D3)
-
-- macOS: ~/Library/Application Support/repo-graph/
-- Linux: ~/.config/rmap/
-
-### Validation Evidence (EXECUTED)
-
-```
-$ rmap hook prompt-submit --classify --prompt "add a feature" --json
-{"status":"ok","classification":"feature","context":{"trust_snapshot":"no database specified","relevant_boundaries":0,"active_slice":"HOOK-1"},"inject":"Trust: no database specified. Active slice: HOOK-1. Task type: feature."}
-
-$ rmap hook stop --require-validation --json; echo "Exit: $?"
-{"status":"error","validation":{...},"error":"Required validations not run"}
-Exit: 2
-
-$ rmap hook stop --transcript /tmp/t.json --json
-{"status":"warning",...,"transcript_path":"/tmp/t.json",...}
-# Transcript file written with session data
-
-$ rmap hook status
-rmap hook status
-Directories: Config: .../repo-graph, Sessions: .../sessions, Logs: .../logs
-Configuration: File: .../hooks.toml, Status: not found (using defaults)
-  Defaults: session.stale_threshold_minutes: 30, post_edit.batch_window_seconds: 5
-```
-
-### Unit Tests
-
-11 hook-related tests pass:
-- config (2): defaults, toml roundtrip
-- env (4): explicit args, json flag, comma-separated files, json array files
-- session (4): file path sanitization, traversal rejection, state new, record edit
-
-### Deferred
-
-- `post-edit` actual refresh execution (currently marks dirty only)
-- Full orientation summary (requires snapshot lookup, not just repo existence)
-
 ---
 
-**RGISTR-1: rgistr Binary Packaging** — IMPLEMENTED (2026-05-13)
-
-Slice doc: `docs/slices/rgistr-1-binary-packaging.md`
-
-- esbuild bundling with version injection from workspace manifest
-- Node SEA binary generation (macOS arm64, Linux x86_64)
-- Release workflow integration
-- Installer updated for three-binary install
-- postject pinned in package.json (no network fetch)
-- Source install fails hard if Node.js missing
-
----
-
-**DIST-1: Distribution and Install Contract** — IMPLEMENTED (2026-05-13)
-
-Slice doc: `docs/slices/dist-1-distribution-install-contract.md`
-
-Contract locked:
-- D1: Binary-first distribution
-- D2: User-local install by default
-- D3: Platform-native directory layout
-- D4: Toolchain detection contract
-- D5: Full installer scope
-- D6: Install manifest model
-- D7: Uninstall contract
-- D8: Version compatibility
-
----
-
-**HOST-1: Host Integration Contract** — IMPLEMENTED (2026-05-13)
-
-Slice doc: `docs/slices/host-1-host-integration-contract.md`
-
-Contract locked:
-- D1: Thin shim model (host shims call `rmap hook` commands)
-- D2: Detect + explicit activation (never silent config rewrite)
-- D3: Backup before patch
-- D4: Rollback support
-- D5: Project vs global scope
-- Environment variable contract clarified (host-provided vs rmap-internal)
-- Hook event mapping for Claude Code, Codex, Cursor
-
----
-
-**REL-SUPPORT-1: Version Authority** — IMPLEMENTED (2026-05-13)
-
-Slice doc: `docs/slices/rel-support-1-version-authority.md`
-
-Validated with v0.1.1 release:
-- Workspace version inheritance working
-- Cut-release scripts produce clean commits
-- CI validates tag == manifest == binary versions
-
----
-
-**REL-1: Release Pipeline** — IMPLEMENTED (2026-05-13)
-
-Slice doc: `docs/slices/rel-1-release-pipeline.md`
-
-v0.1.0 released. Pipeline operational.
-
----
-
-**RMAPD-1: Daemon Binary Target** — IMPLEMENTED (2026-05-12)
-
-Slice doc: `docs/slices/rmapd-1-daemon-binary.md`
-
-### Summary
-
-Created `rmapd` binary as separate crate (Option B) with proper architectural
-boundaries via new `daemon-runtime` crate.
-
-### Architecture
-
-```
-                ┌──────────────────────────────────┐
-                │       daemon-runtime              │
-                │  (state, dispatch, run_daemon)    │
-                └──────────────────────────────────┘
-                         ▲              ▲
-                         │              │
-                   ┌─────┴─────┐  ┌─────┴─────┐
-                   │   rmap    │  │   rmapd   │
-                   │   (CLI)   │  │  (daemon) │
-                   └───────────┘  └───────────┘
-```
-
-### Implementation
-
-- `rust/crates/daemon-runtime/` — NEW shared daemon runtime crate
-- `rust/crates/rmapd/` — dedicated daemon binary (depends on daemon-runtime, NOT rgr)
-- `rmap daemon` — deprecated compatibility shim with warning
-- Daemon code moved from `rgr/src/daemon/` to `daemon-runtime/`
-
-### Verification (EXECUTED)
-
-```
-$ cargo build -p repo-graph-daemon-runtime -p rmapd -p repo-graph-rgr
-   Finished `dev` profile [unoptimized + debuginfo] target(s)
-
-$ ./target/debug/rmap --version
-rmap 0.1.0
-
-$ ./target/debug/rmapd --version
-rmapd 0.1.0
-
-$ echo "" | ./target/debug/rmap daemon
-warning: 'rmap daemon' is deprecated. Use 'rmapd' instead.
-
-$ cargo test -p repo-graph-daemon-runtime
-running 13 tests ... ok
-
-$ cargo test -p repo-graph-rgr --test daemon_dispatch
-running 36 tests ... ok
-```
-
-### Unblocks
-
-- REL-1 release pipeline
-- CI workflow binary verification
-- Install script binary extraction
-
----
-
-## Recently Shipped
-
-**GR-3A: gRPC Contract-Based Linking (CLI Wiring)** — SHIPPED (2026-05-12)
-
-Slice doc: `docs/shipped/slices/gr-3-grpc-linking.md`
-
-### Summary
-
-CLI wiring for `rmap boundaries links` command, completing the GR-3A contract-based
-linking implementation. Links gRPC provider and consumer surfaces that reference
-the same proto service contract.
-
-### Implementation
-
-- `BoundaryInteractionLinkFilter` and `BoundaryInteractionLinkListItem` DTOs in boundary-interaction crate
-- `list_boundary_interaction_links()` method added to `BoundaryInteractionReadPort` trait
-- Storage implementation with contract name filtering (`--service` flag)
-- CLI subcommand: `rmap boundaries links <db> <repo> [--service <name>]`
-
-### Validation
-
-- 3 storage unit tests (empty, basic link query, service name filter)
-- 5 CLI integration tests (usage errors, missing DB, repo not found, empty results, unknown option)
-
----
-
-## Other Recently Shipped
-
-**BI-1B Phase 2: FD Role Tracking** — SHIPPED (2026-05-12)
-
-Slice doc: `docs/shipped/slices/bi-1b-tcp-udp-sockets.md`
-
-### Summary
-
-Intra-function fd tracking to refine TCP/UDP socket surfaces with provider/consumer
-role. Phase 1 (presence hints) shipped; Phase 2 adds role detection via function-local
-fd registry and evidence state machine.
-
-### Shipped Design Decisions
-
-- **D1: C-only** — No C++ in this slice (different actor, different complexity)
-- **D2: Refine, not duplicate** — Same surface identity, refined direction metadata
-- **D3: bind alone insufficient** — TCP provider requires bind+listen, consumer requires connect
-
-### Mechanism (Shipped)
-
-Local fd registry + role evidence state machine:
-- Registry: identifier → socket family
-- Evidence: tracks bind/listen/connect/accept per fd
-- State machine: bidirectional → consumer (on connect) or provider (on bind+listen)
-
-### Implementation
-
-- C extractor: `assigned_identifier` (socket LHS), `fd_argument` (bind/listen/connect/accept arg0)
-- `socket_lineage.rs`: `FdRegistry`, `RoleEvidence`, `TrackedChannelKind`
-- Emitter: `update_surface_direction()` for direction refinement
-- Compose: function-grouped processing, FdRegistry per function, direction update at boundary
-
-### Validation
-
-- 96 C extractor unit tests (11 new BI-1B substrate tests)
-- 13 socket_lineage unit tests
-- 44 boundary-interaction-extractor unit tests (3 new update_surface_direction tests)
-- 3 TCP/UDP E2E integration tests (updated for Phase 2 expectations)
-
-### Deferred (Phase 3+)
-
-- C++ wrappers, cross-function propagation, aliases, parameters, globals
-- Endpoint extraction, scope classification
-- UDP role semantics (stay bidirectional)
-
----
-
-## Other Recently Shipped
-
-**CPP-SB-1: C++ State Boundaries** — SHIPPED (2026-05-12)
-
-Slice doc: `docs/shipped/slices/cpp-sb-1-cpp-state-boundaries.md`
-
-### Summary
-
-C++ state-boundary extraction via `ResolvedCallsite` facts for `std::fstream`
-family (constructors + `.open()`) and C-style APIs in C++ files.
-
-### Design Decisions (Locked)
-
-- **D1 Bindings:** Option A — duplicate C bindings for `language = "cpp"` (explicit, no fallback)
-- **D2 Scope:** Scope 2 — constructors + `.open()` member calls (practical coverage)
-- **D3 .open() resolution:** Intra-function local type map (bounded, function-scoped)
-
-### Completed
-
-- 16 C++ bindings in bindings.toml (8 duplicated C + 8 stream family)
-- C++ extractor ResolvedCallsite emission with D3 local type map (47 unit tests)
-- CppAdapter in state-extractor (7 unit tests in languages/cpp.rs)
-- Hook promotion (cpp classified as Supported)
-- E2E integration test (`cpp_sb_1_integration.rs` — 20 tests)
-- Refresh-path coverage (4 tests: unchanged preservation, mixed files, dedup, D3 survival)
-
-### Validation Evidence (EXECUTED)
-
-```
-# E2E integration tests (repo-index temp-repo tests)
-cargo test -p repo-graph-repo-index --test cpp_sb_1_integration
-→ 20 tests pass
-  - constructor path: ifstream, ofstream, fstream + ios modes (5 tests)
-  - .open() via D3: ifstream.open, ofstream.open, fstream.open (3 tests)
-  - C-style APIs: fopen, open, sqlite3_open in .cpp files (3 tests)
-  - negative limits: parameter, factory, member, dynamic, :memory: (5 tests)
-  - refresh: unchanged, mixed, dedup, D3 survival (4 tests)
-
-# Unit tests
-cargo test -p repo-graph-cpp-extractor → 47 tests pass
-cargo test -p repo-graph-state-extractor → 41 + 19 + 14 tests pass
-cargo test -p repo-graph-state-bindings → 13 + 9 + 17 + 20 tests pass
-```
-
-### Deferred
-
-- Fixture corpus CLI validation (E2E tests use temp repos instead)
-- std::filesystem (C++17)
-- Boost.Asio, Qt file APIs
-- fread/fwrite (need file handle provenance)
-
----
-
-**C-SB-1: C State Boundaries** — SHIPPED (2026-05-12)
-
-Slice doc: `docs/shipped/slices/c-sb-1-c-state-boundaries.md`
-
-### Summary
-
-C state-boundary extraction via `ResolvedCallsite` facts for `fopen`, `open`,
-and `sqlite3_open*` calls with mode/flag parsing for direction classification.
-
-### Completed
-
-- C extractor ResolvedCallsite emission (85 unit tests pass)
-- Mode parsing: `fopen("x", "r")` → `fopen_read`, etc.
-- Flag parsing: `open("x", O_RDONLY)` → `open_read`
-- CAdapter in state-extractor (6 unit tests pass)
-- 8 C bindings in bindings.toml
-- Hook promotion (C classified as Supported)
-- E2E integration test (`c_sb_1_integration.rs` — 10 tests)
-- Refresh-path coverage (3 tests: unchanged preservation, mixed files, dedup)
-
-### Validation Evidence (EXECUTED)
-
-```
-# E2E integration tests (including refresh)
-cargo test -p repo-graph-repo-index --test c_sb_1_integration
-→ 10 tests pass
-  - indexing: fopen read/write/read_write, open O_RDONLY, sqlite3_open
-  - negative: dynamic path, printf
-  - refresh: unchanged preservation, mixed changed/unchanged, dedup
-
-# Test corpus validation
-rmap resource list ./test-artifacts/c-sb-1.db state-boundaries-corpus
-→ 9 resources (7 FS, 2 DB)
-→ Directions correctly classified (read/write/read_write)
-
-# Smoke validation on swupdate
-rmap resource list ./test-artifacts/swupdate.db swupdate
-→ 5 FS resources detected
-→ /dev/null, /dev/urandom, /proc/cmdline, etc.
-```
-
-### Deferred
-
-- C++ state boundaries (separate CPP-SB-1 slice)
-- fread/fwrite (need file handle provenance)
-- Macro-wrapped calls
-
-## Completed Follow-on Slices
-
-Framework detection follow-on work completed (2026-05-12).
-
-| Slice | Type | Scope | Status |
-|-------|------|-------|--------|
-| FD-1A-PARITY | Validation | Rust vs TS Express detector comparison | **COMPLETED** |
-| FD-SUPPORT-EXT-JSTS | Support | Unified JS/TS extension contract | **IMPLEMENTED** |
-| FD-1B-EXT | Feature | React detector extension widening | **IMPLEMENTED** |
-| FD-SUPPORT-3 | Support | CLI regression tests for `rmap inferences` | **IMPLEMENTED** |
-
-Slice docs:
-- `docs/slices/fd-1a-parity-validation.md`
-- `docs/slices/fd-support-ext-jsts.md`
-- `docs/slices/fd-1b-ext-react-extension-widening.md`
-- `docs/slices/fd-support-3-inferences-cli-regression.md`
-
-## Recently Implemented
-
-**FD-SUPPORT-3: CLI Regression Tests for rmap inferences** — IMPLEMENTED (2026-05-12)
-
-Slice doc: `docs/slices/fd-support-3-inferences-cli-regression.md`
-
-### Summary
-
-CLI-level regression tests for the `rmap inferences list` command.
-
-### Completed
-
-- `rust/crates/rgr/tests/inferences_command.rs` — 6 test cases
-- Test cases: usage error, missing DB, repo not found, empty result, kind filter, output structure
-- All tests pass
-
----
-
-**FD-1B: Rust React Detector Parity** — IMPLEMENTED (2026-05-11)
-
-Slice doc: `docs/slices/fd-1b-rust-react-detector-parity.md`
-
-### Summary
-
-AST-based React component and hook detection for TSX/JSX files, persisting Layer 3 inferences.
-
-### Completed
-
-- `react_detector.rs` — AST-based detection via tree-sitter-typescript
-- `detect_react_components()` — PascalCase functions returning JSX
-- `detect_react_hooks()` — builtin and custom hook usage detection
-- `persist_react_inferences()` — compose-phase wiring
-- Inferences persist to `inferences` table with kinds `react_component`, `react_hook_usage`
-- FD-SUPPORT-2: `rmap inferences list --kind <kind>` CLI command
-- E2E integration test (`fd_1b_react_integration.rs` — 5 tests)
-- Validation corpus at `test/fixtures/typescript/react-frontend-corpus/`
-- 10 components, 14 hooks detected from corpus (exceeds acceptance criteria)
-- 10 unit tests pass
-
-### Validation Evidence (EXECUTED)
-
-```
-rmap inferences list --kind react_component
-→ 10 react_component inferences detected
-→ All component styles detected (function, arrow, fc_typed)
-→ Negative cases correctly produce no inferences
-
-rmap inferences list --kind react_hook_usage
-→ 14 react_hook_usage inferences detected
-→ Both builtin and custom hooks detected
-```
-
-### Deferred
-
-- Class components (`extends React.Component`)
-- Component props extraction
-- HOC detection
-- TS prototype parity validation (not executed)
-
----
-
-**FD-SUPPORT-1: Provider-Fact / Project-Surface Write Path** — IMPLEMENTED (2026-05-11)
-
-Slice doc: `docs/slices/fd-support-1-rust-provider-surface-write-path.md`
-
-### Summary
-
-Storage write path for Rust-produced framework surfaces.
-
-### Completed
-
-- `CreateProjectSurfaceInput` and `CreateProjectSurfaceEvidenceInput` types
-- `insert_project_surface()` and `insert_project_surface_evidence()` methods
-- Batch insert methods with transaction wrapping
-- 7 new tests (20 total for project_surfaces CRUD)
-- Round-trip validation: insert → query → fields match
-
-## Other Recently Shipped
-
-**FD-1A: Rust Express Detector Parity** — SHIPPED (2026-05-12)
-Slice doc: `docs/shipped/slices/fd-1a-rust-express-detector-parity.md`
-
-**SB-7B: Java State Boundaries** — SHIPPED (2026-05-11)
-Slice doc: `docs/shipped/slices/sb-7b-java-state-boundaries.md`
-
-**DEP-1: Dependency Reconciliation Surface** — SHIPPED (2026-05-11)
-Slice doc: `docs/shipped/slices/dep-1-dependency-reconciliation-surface.md`
-
-**SB-7C: Python State Boundaries** — SHIPPED (2026-05-11)
-Slice doc: `docs/shipped/slices/sb-7c-python-state-boundaries.md`
-
-## Recently Implemented (Support Slices)
-
-**JE-1: Java Resolved Callsites** — IMPLEMENTED (2026-05-11)
-
-Slice doc: `docs/slices/je-1-java-resolved-callsites.md`
-
-### Summary
-
-Extended Java extractor to emit `ResolvedCallsite` facts for static method calls with imported receivers and string literal arg0.
-
-### Scope
-
-- Static method calls (e.g., `DriverManager.getConnection("...")`)
-- Import binding resolution (receiver → module specifier)
-- String literal arg0 extraction
-- Pre-filtering to `java.sql` module (state-boundary-relevant)
-
-### Validation
-
-- 7 new unit tests for ResolvedCallsite emission
-- 36 total Java extractor tests pass
-- Validation corpus: `test/fixtures/java/jdbc-callsites/`
-
-### Unblocks
-
-SB-7B narrow first-cut (`DriverManager.getConnection(String)` only) — can now consume these facts via adapter + bindings. Broader Java state boundaries require additional substrate work.
-
-## Execution Queue
-
-| Slice | Scope | Layer | Status |
-|-------|-------|-------|--------|
-| **C-SB-1** | C state boundaries ([slice](docs/shipped/slices/c-sb-1-c-state-boundaries.md)) | L2 | **SHIPPED** |
-| **CPP-SB-1** | C++ state boundaries ([slice](docs/shipped/slices/cpp-sb-1-cpp-state-boundaries.md)) | L2 | **SHIPPED** |
-| **PY-EXT-2** | Python extractor depth | L0–1 | IMPLEMENTED (functional) |
-| **PY-EXT-2-PERF** | Python extractor performance validation | L0–1 | DEFERRED |
-| **SB-7A** | State boundaries support substrate | L2 | **SHIPPED** |
-| **SB-7C** | Python state boundaries | L2 | **SHIPPED** |
-| **DEP-1** | Dependency reconciliation surface | L2 | **SHIPPED** |
-| **JE-1** | Java resolved callsites | L0–1 | **IMPLEMENTED** |
-| **SB-7B** | Java state boundaries | L2 | **SHIPPED** |
-| FD-SUPPORT-1 | Provider-fact / project-surface write path | L2–3 | **IMPLEMENTED** |
-| FD-SUPPORT-2 | Inference query surface | L3 | **IMPLEMENTED** |
-| FD-1A | Rust Express detector parity | L3 | **SHIPPED** |
-| FD-1B | Rust React detector parity | L3 | **IMPLEMENTED** |
-
-### Toolchain-Aware Evidence Import Track (FUTURE)
-
-| Slice | Scope | Layer | Status |
-|-------|-------|-------|--------|
-| BC-1 | Build context import ([slice](docs/slices/bc-1-compile-commands-import.md)) | L1 | PLANNED |
-| TC-1 | Snapshot/evidence provenance ([slice](docs/slices/tc-1-toolchain-inventory.md)) | L1 | PLANNED |
-| NC-1 | LLVM coverage import ([slice](docs/slices/nc-1-llvm-cov-import.md)) | L2 | **DEFERRED** |
-| AF-1 | Analyzer findings import ([slice](docs/slices/af-1-analyzer-findings-import.md)) | L3 | PLANNED |
-| SE-1 | Clangd semantic enrichment ([slice](docs/slices/se-1-clangd-enrichment.md)) | L2 | PLANNED (LOW) |
-
-**Priority order:** BC-1 > TC-1 > (coverage contract) > NC-1 > AF-1 > SE-1
-
-**NC-1 deferral rationale:** Coverage import depends on product semantics not yet defined:
-toolchain provenance model, build context assumptions, target/runtime semantics, evidence
-admissibility rules, and performance/test suite goals. Without these foundations, coverage
-data is just numbers. NC-1 is blocked on a coverage evidence contract slice.
-
-**Track rationale:** Build context (BC-1) unlocks native semantic paths. TC-1 is narrowed to
-snapshot/evidence provenance only (not generic host inventory—AI agents do that live).
-Findings import (AF-1) adds risk signal as artifact import. Clangd enrichment (SE-1) is
-expensive/volatile.
-
-**Boundary:** Repo-graph persists evidence lineage, not host tool inventory. An AI agent
-can probe "what's installed?" ad hoc. Repo-graph answers "what produced this evidence?"
-and "are these snapshots comparable?"
-
-**NOTE:** This track is not the current execution priority. It is captured for future work.
-
-## Why This Order
-
-1. **PY-EXT-2** strengthens Layer 0–1 facts (callsite resolution improves all downstream)
-2. **SB-7A** creates Layer 2 support substrate consumed by language-specific adapters
-3. **SB-7C** uses SB-7A substrate for Python state boundaries
-4. **DEP-1** promoted: cross-cutting query surface over existing facts, immediate value across JS/TS and Rust repos
-5. **JE-1** implemented: extends Java extractor to emit `ResolvedCallsite` facts
-6. **SB-7B** shipped: consumes JE-1 facts via adapter + bindings
-7. **FD-SUPPORT-1** implemented — Rust write path for `project_surfaces` now exists
-8. **FD-1A** shipped — AST-based Express detection, parity-validated against TS prototype
-9. **FD-SUPPORT-2** implemented — `rmap inferences list` CLI command for inference query
-10. **FD-1B** implemented — AST-based React component/hook detection with inference persistence
-
-## Previously Completed
-
-**SB-7A: State Boundaries Support Substrate** — SHIPPED 2026-05-11
-
-- `LanguageStateAdapter` trait and `AdapterRegistry` for multi-language dispatch
-- TypeScript adapter as reference implementation
-- Multi-language emitter architecture (one emitter per language per snapshot)
-- Hybrid diagnostic policy (supported + missing = diagnostic; unsupported = silent)
-- `rmap resource list` CLI for parity validation
-- Canonical forward parity baseline established
-- See `docs/shipped/slices/sb-7a-state-boundaries-support-substrate.md`
-
-**Module Truth-Model Unification (rust-module-parity)** — SHIPPED 2026-05-10
-
-- Phase 4 complete: MODULE-node fallback deprecated
-- `module_candidates` is now the sole source of module topology
-- Umbrella splitting, build-file evidence, dominant language shipped
-- See `docs/shipped/slices/rust-module-parity.md` for full history
-
-**Artifact Contract Registry (ACR)** — SHIPPED
-
-- ACR-1 through ACR-6 all complete
-- Per-row freshness and provenance tracking
-- Refresh pipeline consumes registry
+## Execution Order (Distribution Track)
+
+1. ~~DIST-1~~ — IMPLEMENTED
+2. ~~HOST-1~~ — IMPLEMENTED
+3. ~~REL-1~~ — IMPLEMENTED
+4. ~~REL-SUPPORT-1~~ — IMPLEMENTED
+5. ~~RGISTR-1~~ — IMPLEMENTED
+6. ~~RMAPD-1~~ — IMPLEMENTED
+7. ~~HOOK-1~~ — IMPLEMENTED
+8. ~~MAC-1~~ — IMPLEMENTED
+9. ~~HOOK-1A~~ — IMPLEMENTED
+10. ~~CLAUDE-1~~ — IMPLEMENTED
+11. ~~CODEX-1~~ — IMPLEMENTED
+12. ~~LINUX-1~~ — IMPLEMENTED
+13. ~~RMAPD-2~~ — IMPLEMENTED
+14. **REG-1** — IN PROGRESS (current)
+15. CURSOR-1 — PLANNED

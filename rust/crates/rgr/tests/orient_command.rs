@@ -180,76 +180,11 @@ fn orient_budget_flag_as_value_usage_error() {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// IGNORED TESTS - Require daemon infrastructure
+// SUCCESS-PATH TESTS
 //
-// These tests verify orient command success behavior which requires:
-// 1. A running daemon
-// 2. An indexed repo registered in daemon
-// 3. REG-1 resolution working
-//
-// TODO: Move these to daemon_dispatch.rs where proper daemon setup exists
+// Orient success behavior tests are in daemon_dispatch.rs where daemon
+// infrastructure is available. See:
+// - orient_missing_repo_returns_invalid_request
+// - orient_repo_not_indexed_returns_error
+// - e2e_index_then_orient_works
 // ══════════════════════════════════════════════════════════════════════
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn orient_missing_args_usage_error() {
-    // Old test - with REG-1, no positional args needed
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn orient_one_positional_arg_usage_error() {
-    // Old test - with REG-1, no positional args needed
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn orient_missing_db_runtime_error() {
-    // With REG-1, no db_path argument
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn orient_missing_repo_runtime_error() {
-    // With REG-1, no repo_uid argument - repo not indexed case
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn orient_missing_snapshot_runtime_error() {
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn orient_focus_flag_returns_no_match_for_unknown_path() {
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn orient_default_budget_small_succeeds() {
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn orient_medium_budget_succeeds() {
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn orient_large_budget_succeeds() {
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn orient_smoke_emits_informational_signals_and_gate_limit() {
-    unimplemented!("requires daemon");
-}

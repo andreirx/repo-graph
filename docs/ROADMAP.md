@@ -128,9 +128,24 @@ See `docs/slices/reg-1-repo-registry.md` for full specification.
 
 **Modules read-side complete.** All `modules` read subcommands migrated to REG-1.
 
-**Remaining work:**
-- Batch 4: Write operations (`assess`, `modules boundary`)
-- Other read commands: `orient`, `stats`, `path`, `imports`, etc.
+**Other REG-1 read commands (verified from code):**
+- `orient`, `check`, `explain` (orient.rs)
+- `callers`, `callees`, `path`, `imports`, `cycles`, `stats` (graph.rs)
+- `trust`, `gate`, `deps`, `docs`, `contracts`, `inferences`, `resource`
+- `dead` — disabled (not legacy, just disabled due to false positive rates)
+
+**Remaining legacy commands (still require `<db_path> <repo_uid>`):**
+- `assess`, `enrich`, `policy` — write operations
+- `modules boundary` — write operation
+- `violations` (top-level) — mixed-responsibility in violations.rs
+- `quality/*` (churn, coverage, hotspots, metrics, risk)
+- `declare/*` (all declaration commands)
+
+**REG-1 Definition of Done (close but not met):**
+1. Most normal read workflows no longer require `<db_path> <repo_uid>` — ACHIEVED
+2. Remaining legacy = write operations + quality + declare families — DOCUMENTED
+3. Ignored REG-1 tests reduced or accounted for — IN PROGRESS
+4. slice/roadmap/current-slice documents agree — ACHIEVED (reconciled 2026-05-17)
 
 Completed:
 - REL-SUPPORT-1: v0.1.1 release (CI validated)

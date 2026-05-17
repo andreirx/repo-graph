@@ -1,6 +1,6 @@
 # REG-1: Repo Registry and CWD Auto-Discovery
 
-**Status:** PLANNING  
+**Status:** IN PROGRESS  
 **Priority:** BLOCKING (CLI contract debt)  
 **Type:** Support Module + CLI Contract  
 
@@ -25,19 +25,25 @@ the CLI should not expose SQLite plumbing.
 ## Target Contract
 
 ```bash
-# Normal path (daemon resolves everything from cwd)
+# Implemented: CWD resolution (daemon resolves repo from cwd)
 rmap index .
 rmap orient
 rmap check
 rmap explain src/foo.ts
+```
 
-# Explicit repo selection (multi-repo scenarios)
+**Deferred (not implemented in current REG-1):**
+```bash
+# Explicit repo selection (multi-repo scenarios) — DEFERRED
 rmap orient --repo my-alias
 rmap orient --repo-path /abs/path/to/repo
 
-# Diagnostic escape hatch (debug/recovery only, not documented as primary)
+# Diagnostic escape hatch — DEFERRED
 rmap orient --db /path/to/db --repo-uid <uid>
 ```
+
+CWD resolution covers the primary use case. Override flags can be added later
+if multi-repo scenarios require them.
 
 ## Architectural Decisions (Locked)
 
@@ -49,7 +55,7 @@ rmap orient --db /path/to/db --repo-uid <uid>
 | D4 | CWD resolution | CLI sends canonicalized cwd to daemon; daemon resolves by registered ancestry |
 | D5 | Alias support | Optional human-friendly names, unique per registry |
 | D6 | repo_uid visibility | Internal only; visible in `--json` output and `doctor`, never required as input |
-| D7 | Explicit override path | Advanced `--db`/`--repo-uid` flags for diagnostic targeting; old positional `<db_path> <repo_uid>` syntax removed |
+| D7 | Explicit override path | Old positional `<db_path> <repo_uid>` syntax removed; advanced `--db`/`--repo-uid` flags DEFERRED |
 | D8 | Database location | `<platform_data_dir>/databases/<hash>.db` (daemon-managed) |
 
 ## Registry Data Model (D1)
@@ -155,18 +161,26 @@ all paths against registered canonical paths.
 
 Optional human-friendly names for repos.
 
+**Implemented:**
 ```bash
 # Set alias during index
 rmap index . --alias my-app
 
-# Use alias instead of path
+# Manage aliases
+rmap repo alias <path> <new-alias>
+rmap repo list  # shows aliases
+```
+
+**Deferred:**
+```bash
+# Use alias for query commands — DEFERRED (requires --repo flag)
 rmap orient --repo my-app
 ```
 
 Constraints:
 - Aliases must be unique within registry
 - Alias is optional (canonical_path is always the primary key)
-- Alias can be changed: `rmap repo alias <path> <new-alias>`
+- Query commands currently resolve from CWD only; `--repo` flag is deferred
 
 ## repo_uid Visibility (D6)
 
@@ -186,41 +200,54 @@ lifetime of the registry entry.
 - Normal orient/check/explain commands
 - Any documented primary workflow
 
-**Retained as escape hatch:**
-- `--repo-uid <uid>` flag for diagnostic/recovery scenarios
-- Not documented in README or primary help text
-- Documented in `rmap <cmd> --help` under "Advanced Options"
+**Escape hatch (DEFERRED):**
+- `--repo-uid <uid>` flag for diagnostic/recovery scenarios — not yet implemented
+- When implemented: not documented in README, only in `rmap <cmd> --help` under "Advanced Options"
 
 ## CLI Contract Changes (D7)
 
 ### Commands Affected
 
-| Command | Old Signature | New Signature |
-|---------|--------------|---------------|
-| `index` | `<repo_path> <db_path>` | `[repo_path]` (default: `.`) |
-| `refresh` | `<db_path> <repo_uid>` | `[--repo <alias_or_path>]` |
-| `orient` | `<db_path> <repo_uid>` | `[--repo <alias_or_path>]` |
-| `check` | `<db_path> <repo_uid>` | `[--repo <alias_or_path>]` |
-| `explain` | `<db_path> <repo_uid> <target>` | `<target> [--repo <alias_or_path>]` |
-| `callers` | `<db_path> <repo_uid> <symbol>` | `<symbol> [--repo <alias_or_path>]` |
-| `callees` | `<db_path> <repo_uid> <symbol>` | `<symbol> [--repo <alias_or_path>]` |
-| ... | ... | ... |
+| Command | Old Signature | Implemented Now | Deferred |
+|---------|--------------|-----------------|----------|
+| `index` | `<repo_path> <db_path>` | `[repo_path]` (default: `.`) | `--alias` works |
+| `refresh` | `<db_path> <repo_uid>` | (no args, cwd-based) | `[--repo <alias_or_path>]` |
+| `orient` | `<db_path> <repo_uid>` | (no args, cwd-based) | `[--repo <alias_or_path>]` |
+| `check` | `<db_path> <repo_uid>` | (no args, cwd-based) | `[--repo <alias_or_path>]` |
+| `explain` | `<db_path> <repo_uid> <target>` | `<target>` (cwd-based) | `[--repo <alias_or_path>]` |
+| `callers` | `<db_path> <repo_uid> <symbol>` | `<symbol>` (cwd-based) | `[--repo <alias_or_path>]` |
+| `callees` | `<db_path> <repo_uid> <symbol>` | `<symbol>` (cwd-based) | `[--repo <alias_or_path>]` |
+| `path` | `<db_path> <repo_uid> <from> <to>` | `<from> <to>` (cwd-based) | `[--repo <alias_or_path>]` |
+| `imports` | `<db_path> <repo_uid> <file>` | `<file>` (cwd-based) | `[--repo <alias_or_path>]` |
+| `cycles` | `<db_path> <repo_uid>` | (no args, cwd-based) | `[--repo <alias_or_path>]` |
+| `stats` | `<db_path> <repo_uid>` | (no args, cwd-based) | `[--repo <alias_or_path>]` |
+| `trust` | `<db_path> <repo_uid>` | (no args, cwd-based) | `[--repo <alias_or_path>]` |
+| `gate` | `<db_path> <repo_uid>` | (no args, cwd-based) | `[--repo <alias_or_path>]` |
 
 ### New Flags (All Query Commands)
 
+**DEFERRED (2026-05-17):** The explicit override flags below were originally planned
+but are deferred. CWD resolution covers the primary use case. Override flags are
+escape hatches for multi-repo scenarios; they can be added later if needed.
+
 ```
---repo <alias_or_path>    Use specific repo (alias or path)
---repo-path <path>        Use repo at explicit path
---db <path>               [Advanced] Use explicit database file
---repo-uid <uid>          [Advanced] Use explicit repo_uid
+--repo <alias_or_path>    Use specific repo (alias or path)     [DEFERRED]
+--repo-path <path>        Use repo at explicit path             [DEFERRED]
+--db <path>               [Advanced] Use explicit database file [DEFERRED]
+--repo-uid <uid>          [Advanced] Use explicit repo_uid      [DEFERRED]
 ```
 
-### Flag Precedence
+### Current Resolution (Implemented)
+
+All query commands resolve repo from CWD via daemon registry.
+No explicit repo selection flags are implemented.
+
+### Flag Precedence (When Implemented)
 
 1. `--db` + `--repo-uid` (explicit escape hatch, bypasses registry)
 2. `--repo-path` (resolve path, query registry)
 3. `--repo` (resolve alias or path, query registry)
-4. CWD resolution (default)
+4. CWD resolution (default) — **currently the only implemented path**
 
 ## Daemon Protocol Additions
 
@@ -375,26 +402,70 @@ Do not architect around cache nostalgia.
 
 ### Daemon Changes
 
-- [ ] Add `RepoRegistry` struct to daemon-runtime
-- [ ] Implement registry persistence (load/save JSON, atomic write)
-- [ ] Add `resolve_repo` request handler
-- [ ] Add `list_repos` request handler
-- [ ] Modify `index` to use registry (generate repo_uid, allocate db_path, create entry)
-- [ ] Modify `refresh` to resolve via registry
-- [ ] Add repo management requests (alias, remove, info)
+- [x] Add `RepoRegistry` struct to daemon-runtime
+- [x] Implement registry persistence (load/save JSON, atomic write)
+- [x] Add `resolve_repo` request handler
+- [x] Add `list_repos` request handler
+- [x] Modify `index` to use registry (generate repo_uid, allocate db_path, create entry)
+- [x] Modify `refresh` to resolve via registry
+- [x] Add repo management requests (alias, remove, info)
+- [x] Add `resolve_and_load_repo()` helper for REG-1 pattern
 
-### CLI Changes
+### CLI Changes — Command Migration
 
-- [ ] Add `--repo`, `--repo-path` flags to all query commands
+**Migrated to REG-1 (cwd-based, no db_path/repo_uid):**
+- [x] `surfaces list`
+- [x] `surfaces show`
+- [x] `boundaries list`
+- [x] `boundaries show`
+- [x] `boundaries summary`
+- [x] `boundaries links`
+- [x] `modules list`
+- [x] `modules show`
+- [x] `modules files`
+- [x] `modules deps`
+- [x] `modules violations`
+- [x] `modules unowned`
+- [x] `orient`
+- [x] `check`
+- [x] `explain`
+- [x] `callers`
+- [x] `callees`
+- [x] `path`
+- [x] `imports`
+- [x] `cycles`
+- [x] `stats`
+- [x] `trust`
+- [x] `gate`
+- [x] `deps` (family: list, why, drift)
+- [x] `docs`
+- [x] `contracts`
+- [x] `inferences`
+- [x] `resource`
+- [x] `dead` (disabled, not legacy — false positive rates)
+
+**Still legacy (db_path + repo_uid required):**
+- [ ] `violations` (top-level, separate from `modules violations`)
+
+**Legacy write operations (not planned for REG-1):**
+- [ ] `modules boundary`
+- [ ] `assess`
+- [ ] `policy`
+- [ ] `enrich`
+- [ ] `quality/*` (churn, coverage, hotspots, metrics, risk)
+- [ ] `declare/*` (all declaration commands)
+
+### CLI Changes — Infrastructure
+
+- [x] Implement DaemonClient for socket communication
+- [x] Implement CWD canonicalization (send to daemon for resolution)
+- [x] Add `rmap repo` subcommand group
+- [x] Implement `rmap repo list`
+- [x] Implement `rmap repo alias`
+- [x] Implement `rmap repo remove`
+- [x] Implement `rmap repo info`
+- [ ] Add `--repo`, `--repo-path` flags to remaining commands
 - [ ] Add `--db`, `--repo-uid` escape hatch flags (advanced/diagnostic only)
-- [ ] Implement CWD canonicalization (send to daemon for resolution)
-- [ ] Add `rmap repo` subcommand group
-- [ ] Implement `rmap repo list`
-- [ ] Implement `rmap repo alias`
-- [ ] Implement `rmap repo remove`
-- [ ] Implement `rmap repo info`
-- [ ] Update `index` to register repo (no db_path arg)
-- [ ] Update all query commands to use resolution chain
 
 ### Documentation Changes
 
@@ -404,11 +475,28 @@ Do not architect around cache nostalgia.
 
 ### Testing
 
-- [ ] Registry persistence tests (load, save, atomic write)
-- [ ] CWD resolution tests (exact match, ancestor match, not found)
-- [ ] Alias uniqueness tests
-- [ ] `rmap repo` subcommand tests
-- [ ] `rmap index` creates registry entry test
+- [x] Registry persistence tests (load, save, atomic write)
+- [x] CWD resolution tests (exact match, ancestor match, not found)
+- [x] Alias uniqueness tests
+- [x] `rmap repo` subcommand tests
+- [x] `rmap index` creates registry entry test
+- [x] daemon_dispatch.rs tests for migrated commands (87 tests)
+
+**Ignored Tests Audit (71 remaining after cleanup):**
+
+| Category | Count | Status |
+|----------|-------|--------|
+| gate_command.rs | 43 | Real implementations using old CLI contract - needs migration |
+| dead_command.rs | 11 | Command disabled (not REG-1 related) - keep ignored |
+| index_contract_summary.rs | 9 | Real implementations using old CLI contract |
+| declare_* tests | 8 | Legacy write operations - keep ignored |
+
+**Completed:**
+- [x] Delete 46 stub tests (orient, path, imports, stats, explain, trust, edge_type_filter, envelope_contract)
+
+**Remaining:**
+- [ ] Migrate gate_command.rs tests to daemon_dispatch.rs (43 tests)
+- [ ] Migrate index_contract_summary.rs tests to REG-1 contract (9 tests)
 
 ## Definition of Done
 

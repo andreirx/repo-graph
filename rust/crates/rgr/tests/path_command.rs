@@ -94,56 +94,8 @@ fn path_daemon_required() {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// IGNORED TESTS - Require daemon infrastructure
+// SUCCESS-PATH TESTS
 //
-// These tests verify path command behavior which requires:
-// 1. A running daemon
-// 2. An indexed repo registered in daemon
-// 3. REG-1 resolution working
-//
-// TODO: Move these to daemon_dispatch.rs where proper daemon setup exists
+// Path success behavior tests belong in daemon_dispatch.rs where daemon
+// infrastructure is available. Stub tests deleted as part of REG-1 cleanup.
 // ══════════════════════════════════════════════════════════════════════
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn path_missing_db() {
-    // With REG-1, no db_path argument
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn path_repo_not_found() {
-    // With REG-1, no repo_uid argument - repo not indexed case
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn path_from_symbol_not_found() {
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn path_to_symbol_not_found() {
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn path_no_route() {
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn path_exact_result() {
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn path_envelope_contract() {
-    unimplemented!("requires daemon");
-}

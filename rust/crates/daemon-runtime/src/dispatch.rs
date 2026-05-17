@@ -5139,7 +5139,8 @@ impl ServiceDispatcher {
                 .iter()
                 .filter(|v| v.source_canonical_path == resolved_module.canonical_root_path)
                 .filter_map(|v| {
-                    let target_identity = module_identity_map.get(v.target_canonical_path.as_str())?;
+                    let target_identity =
+                        module_identity_map.get(v.target_canonical_path.as_str())?;
                     Some(serde_json::json!({
                         "declaration_uid": v.declaration_uid,
                         "target": {
@@ -5192,12 +5193,9 @@ impl ServiceDispatcher {
         }
 
         // Add trust overlay if degraded
-        if let Some(trust) = compute_trust_overlay_for_snapshot(
-            &repo_state.storage,
-            &repo_uid,
-            &snapshot,
-            "IMPORTS",
-        ) {
+        if let Some(trust) =
+            compute_trust_overlay_for_snapshot(&repo_state.storage, &repo_uid, &snapshot, "IMPORTS")
+        {
             if trust.has_degradation() || !trust.caveats.is_empty() {
                 response["trust"] = serde_json::to_value(&trust).unwrap_or(serde_json::Value::Null);
             }
@@ -5323,7 +5321,8 @@ impl ServiceDispatcher {
         };
 
         // Build rollup lookup by module_uid
-        let rollup_map: HashMap<&str, _> = rollups.iter().map(|r| (r.module_uid.as_str(), r)).collect();
+        let rollup_map: HashMap<&str, _> =
+            rollups.iter().map(|r| (r.module_uid.as_str(), r)).collect();
 
         // Build results with module identity + rollup stats
         let results: Vec<serde_json::Value> = facts
@@ -5460,12 +5459,9 @@ fn compute_sanity_metrics_for_list(
     });
 
     // has_inferred_modules
-    let has_inferred_modules = results.iter().any(|r| {
-        r.get("module_kind")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            == "inferred"
-    });
+    let has_inferred_modules = results
+        .iter()
+        .any(|r| r.get("module_kind").and_then(|v| v.as_str()).unwrap_or("") == "inferred");
 
     // mixed_language_module_count
     let mut languages_per_module: HashMap<&str, HashSet<&str>> = HashMap::new();

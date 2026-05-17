@@ -98,45 +98,11 @@ fn explain_daemon_required() {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// IGNORED TESTS - Require daemon infrastructure
+// SUCCESS-PATH TESTS
 //
-// These tests verify explain command success behavior which requires:
-// 1. A running daemon
-// 2. An indexed repo registered in daemon
-// 3. REG-1 resolution working
-//
-// TODO: Move these to daemon_dispatch.rs where proper daemon setup exists
+// Explain success behavior tests are in daemon_dispatch.rs where daemon
+// infrastructure is available. See:
+// - explain_missing_target_returns_invalid_request
+// - explain_rejects_small_budget
+// Stub tests deleted as part of REG-1 cleanup.
 // ══════════════════════════════════════════════════════════════════════
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn explain_missing_db_runtime_error() {
-    // With REG-1, no db_path argument - this test concept doesn't apply
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn explain_missing_repo_runtime_error() {
-    // With REG-1, no repo_uid argument - this test concept doesn't apply
-    // Repo resolution failure would be "repo not indexed"
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn explain_valid_file_target() {
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn explain_valid_path_target() {
-    unimplemented!("requires daemon");
-}
-
-#[test]
-#[ignore = "REG-1: requires daemon infrastructure - move to daemon_dispatch.rs"]
-fn explain_envelope_command_is_explain() {
-    unimplemented!("requires daemon");
-}
