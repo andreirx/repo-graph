@@ -184,6 +184,8 @@ impl Dispatcher for ServiceDispatcher {
             "modules_deps" => self.handle_modules_deps(request),
             "modules_violations" => self.handle_modules_violations(request),
             "modules_unowned" => self.handle_modules_unowned(request),
+            "modules_show" => self.handle_modules_show(request),
+            "modules_list" => self.handle_modules_list(request),
 
             // ── Write operations (with progress) ────────────────────
             "index" => self.handle_index(request, emitter),
@@ -4843,6 +4845,743 @@ impl ServiceDispatcher {
 
         DispatchResult::success(&request.id, response)
     }
+
+    /// Show single module detail view (REG-1 pattern).
+    ///
+    /// Request: `{"method": "modules_show", "params": {"repo": "<path_or_alias>", "module": "<module_ref>"}}`
+    fn handle_modules_show(&self, request: &Request) -> DispatchResult {
+        use repo_graph_classification::module_rollup::{
+            compute_module_rollups, DeadNodeFact, ModuleRollupInput, OwnedFileFact,
+        };
+        use repo_graph_classification::weighted_neighbors::compute_weighted_neighbors;
+        use repo_graph_module_queries::{evaluate_violations_from_facts, load_module_graph_facts};
+        use std::collections::HashMap;
+
+        // REG-1: resolve repo from path/alias and auto-load
+        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
+        let module_ref = match Self::get_string_param(&request.params, "module") {
+            Ok(m) => m,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
+        // Acquire read lock
+        let _read_guard = repo_state.coordinator.acquire_read();
+
+        // Get latest snapshot
+        let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
+            Ok(Some(snap)) => snap,
+            Ok(None) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                );
+            }
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+
+        // Load module graph facts
+        let facts = match load_module_graph_facts(&repo_state.storage, &snapshot.snapshot_uid) {
+            Ok(f) => f,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to load module graph facts: {}", e),
+                    ),
+                );
+            }
+        };
+
+        // Resolve module argument
+        let resolved_module = match facts.resolve_module(module_ref) {
+            Some(m) => m.clone(),
+            None => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InvalidRequest,
+                        format!(
+                            "module not found: {} (use canonical path or module key)",
+                            module_ref
+                        ),
+                    ),
+                );
+            }
+        };
+
+        // Build module identity lookup for enrichment
+        let module_identity_map: HashMap<&str, serde_json::Value> = facts
+            .context
+            .modules
+            .iter()
+            .map(|m| {
+                (
+                    m.canonical_root_path.as_str(),
+                    serde_json::json!({
+                        "module_uid": m.module_candidate_uid,
+                        "module_key": m.module_key,
+                        "canonical_root_path": m.canonical_root_path,
+                        "module_kind": m.module_kind,
+                        "display_name": m.display_name,
+                        "confidence": m.confidence,
+                    }),
+                )
+            })
+            .collect();
+
+        // Load module evidence (Phase 3.2)
+        let evidence_output: Vec<serde_json::Value> = repo_state
+            .storage
+            .get_module_candidate_evidence(&resolved_module.module_candidate_uid)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| {
+                let (evidence_strength, build_files_present, dominant_language) =
+                    if let Some(ref payload) = e.payload_json {
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(payload) {
+                            let strength = parsed
+                                .get("evidence_strength")
+                                .and_then(|v| v.as_str())
+                                .map(String::from);
+                            let build_files = parsed
+                                .get("build_files_present")
+                                .and_then(|v| v.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|v| v.as_str().map(String::from))
+                                        .collect::<Vec<_>>()
+                                })
+                                .unwrap_or_default();
+                            let lang = parsed
+                                .get("dominant_language")
+                                .and_then(|v| v.as_str())
+                                .map(String::from);
+                            (strength, build_files, lang)
+                        } else {
+                            (None, vec![], None)
+                        }
+                    } else {
+                        (None, vec![], None)
+                    };
+
+                let mut ev = serde_json::json!({
+                    "source_type": e.source_type,
+                    "source_path": e.source_path,
+                    "evidence_kind": e.evidence_kind,
+                });
+                if let Some(strength) = evidence_strength {
+                    ev["evidence_strength"] = serde_json::json!(strength);
+                }
+                if !build_files_present.is_empty() {
+                    ev["build_files_present"] = serde_json::json!(build_files_present);
+                }
+                if let Some(lang) = dominant_language {
+                    ev["dominant_language"] = serde_json::json!(lang);
+                }
+                ev
+            })
+            .collect();
+
+        // Load dead nodes (SYMBOL kind only)
+        let dead_nodes = repo_state
+            .storage
+            .find_dead_nodes(&snapshot.snapshot_uid, &repo_uid, Some("SYMBOL"))
+            .unwrap_or_default();
+
+        // Evaluate violations (advisory)
+        let (violations_eval, violations_warning) =
+            match evaluate_violations_from_facts(&repo_state.storage, &repo_uid, &facts) {
+                Ok(r) => (Some(r.evaluation), None::<String>),
+                Err(msg) => (
+                    None,
+                    Some(format!(
+                        "discovered-module violation rollups unavailable: {}",
+                        msg
+                    )),
+                ),
+            };
+
+        let violations_available = violations_eval.is_some();
+
+        // Compute rollup for this module
+        let violations_for_rollup = violations_eval
+            .as_ref()
+            .map(|e| e.violations.clone())
+            .unwrap_or_default();
+
+        let owned_file_facts: Vec<OwnedFileFact> = facts
+            .context
+            .owned_files
+            .iter()
+            .map(|f| OwnedFileFact {
+                file_path: f.file_path.clone(),
+                module_uid: f.module_candidate_uid.clone(),
+                is_test: f.is_test,
+            })
+            .collect();
+
+        let dead_node_facts: Vec<DeadNodeFact> = dead_nodes
+            .into_iter()
+            .filter_map(|d| {
+                d.file.map(|file_path| DeadNodeFact {
+                    file_path,
+                    is_test: d.is_test,
+                })
+            })
+            .collect();
+
+        let rollup_input = ModuleRollupInput {
+            modules: facts.module_refs.clone(),
+            owned_files: owned_file_facts,
+            edges: facts.edges.clone(),
+            violations: violations_for_rollup,
+            dead_nodes: dead_node_facts,
+        };
+
+        let rollups = match compute_module_rollups(&rollup_input) {
+            Ok(r) => r,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to compute rollups: {}", e),
+                    ),
+                );
+            }
+        };
+
+        // Find this module's rollup
+        let module_rollup = rollups
+            .iter()
+            .find(|r| r.module_uid == resolved_module.module_candidate_uid);
+
+        let rollups_output = serde_json::json!({
+            "owned_file_count": module_rollup.map_or(0, |r| r.owned_file_count),
+            "owned_test_file_count": module_rollup.map_or(0, |r| r.owned_test_file_count),
+            "outbound_dependency_count": module_rollup.map_or(0, |r| r.outbound_dependency_count),
+            "outbound_import_count": module_rollup.map_or(0, |r| r.outbound_import_count),
+            "inbound_dependency_count": module_rollup.map_or(0, |r| r.inbound_dependency_count),
+            "inbound_import_count": module_rollup.map_or(0, |r| r.inbound_import_count),
+            "violation_count": if violations_available {
+                serde_json::json!(module_rollup.map_or(0, |r| r.violation_count))
+            } else {
+                serde_json::Value::Null
+            },
+            "dead_symbol_count": module_rollup.map_or(0, |r| r.dead_symbol_count),
+            "dead_test_symbol_count": module_rollup.map_or(0, |r| r.dead_test_symbol_count),
+        });
+
+        // Compute weighted neighbors
+        let weighted =
+            compute_weighted_neighbors(&resolved_module.module_candidate_uid, &facts.edges);
+
+        // Enrich outbound neighbors
+        let outbound_dependencies: Vec<serde_json::Value> = weighted
+            .outbound
+            .iter()
+            .filter_map(|n| {
+                let module_path = facts
+                    .edges
+                    .iter()
+                    .find(|e| e.target_module_uid == n.module_uid)
+                    .map(|e| e.target_canonical_path.as_str())?;
+                let identity = module_identity_map.get(module_path)?;
+                Some(serde_json::json!({
+                    "module_uid": identity["module_uid"],
+                    "module_key": identity["module_key"],
+                    "canonical_root_path": identity["canonical_root_path"],
+                    "module_kind": identity["module_kind"],
+                    "import_count": n.import_count,
+                    "source_file_count": n.source_file_count,
+                }))
+            })
+            .collect();
+
+        // Enrich inbound neighbors
+        let inbound_dependencies: Vec<serde_json::Value> = weighted
+            .inbound
+            .iter()
+            .filter_map(|n| {
+                let module_path = facts
+                    .edges
+                    .iter()
+                    .find(|e| e.source_module_uid == n.module_uid)
+                    .map(|e| e.source_canonical_path.as_str())?;
+                let identity = module_identity_map.get(module_path)?;
+                Some(serde_json::json!({
+                    "module_uid": identity["module_uid"],
+                    "module_key": identity["module_key"],
+                    "canonical_root_path": identity["canonical_root_path"],
+                    "module_kind": identity["module_kind"],
+                    "import_count": n.import_count,
+                    "source_file_count": n.source_file_count,
+                }))
+            })
+            .collect();
+
+        // Filter violations for this module (source-side only)
+        let violations_output: serde_json::Value = if violations_available {
+            let source_violations: Vec<serde_json::Value> = violations_eval
+                .as_ref()
+                .unwrap()
+                .violations
+                .iter()
+                .filter(|v| v.source_canonical_path == resolved_module.canonical_root_path)
+                .filter_map(|v| {
+                    let target_identity = module_identity_map.get(v.target_canonical_path.as_str())?;
+                    Some(serde_json::json!({
+                        "declaration_uid": v.declaration_uid,
+                        "target": {
+                            "module_uid": target_identity["module_uid"],
+                            "module_key": target_identity["module_key"],
+                            "canonical_root_path": target_identity["canonical_root_path"],
+                            "module_kind": target_identity["module_kind"],
+                        },
+                        "import_count": v.import_count,
+                        "source_file_count": v.source_file_count,
+                        "reason": v.reason,
+                    }))
+                })
+                .collect();
+            serde_json::json!(source_violations)
+        } else {
+            serde_json::Value::Null
+        };
+
+        // Build warnings
+        let warnings: Vec<String> = violations_warning.into_iter().collect();
+
+        // Build module identity
+        let module_identity = serde_json::json!({
+            "module_uid": resolved_module.module_candidate_uid,
+            "module_key": resolved_module.module_key,
+            "canonical_root_path": resolved_module.canonical_root_path,
+            "module_kind": resolved_module.module_kind,
+            "display_name": resolved_module.display_name,
+            "confidence": resolved_module.confidence,
+        });
+
+        // Build response (no results array for show)
+        let mut response = serde_json::json!({
+            "command": "modules show",
+            "repo": repo_uid,
+            "snapshot": snapshot.snapshot_uid,
+            "module": module_identity,
+            "rollups": rollups_output,
+            "outbound_dependencies": outbound_dependencies,
+            "inbound_dependencies": inbound_dependencies,
+            "violations": violations_output,
+            "rollups_degraded": !violations_available,
+            "warnings": warnings,
+        });
+
+        // Add evidence if non-empty
+        if !evidence_output.is_empty() {
+            response["evidence"] = serde_json::json!(evidence_output);
+        }
+
+        // Add trust overlay if degraded
+        if let Some(trust) = compute_trust_overlay_for_snapshot(
+            &repo_state.storage,
+            &repo_uid,
+            &snapshot,
+            "IMPORTS",
+        ) {
+            if trust.has_degradation() || !trust.caveats.is_empty() {
+                response["trust"] = serde_json::to_value(&trust).unwrap_or(serde_json::Value::Null);
+            }
+        }
+
+        DispatchResult::success(&request.id, response)
+    }
+
+    fn handle_modules_list(&self, request: &Request) -> DispatchResult {
+        use repo_graph_classification::module_rollup::{
+            compute_module_rollups, DeadNodeFact, ModuleRollupInput, OwnedFileFact,
+        };
+        use repo_graph_module_queries::{evaluate_violations_from_facts, load_module_graph_facts};
+        use std::collections::HashMap;
+
+        // REG-1: resolve repo from path/alias and auto-load
+        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
+        // Acquire read lock
+        let _read_guard = repo_state.coordinator.acquire_read();
+
+        // Get latest snapshot
+        let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
+            Ok(Some(snap)) => snap,
+            Ok(None) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                );
+            }
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+
+        // Load module graph facts
+        let facts = match load_module_graph_facts(&repo_state.storage, &snapshot.snapshot_uid) {
+            Ok(f) => f,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to load module graph facts: {}", e),
+                    ),
+                );
+            }
+        };
+
+        // Load dead nodes (SYMBOL kind only)
+        let dead_nodes = repo_state
+            .storage
+            .find_dead_nodes(&snapshot.snapshot_uid, &repo_uid, Some("SYMBOL"))
+            .unwrap_or_default();
+
+        // Evaluate violations (advisory)
+        let (violations_eval, violations_warning) =
+            match evaluate_violations_from_facts(&repo_state.storage, &repo_uid, &facts) {
+                Ok(r) => (Some(r.evaluation), None::<String>),
+                Err(msg) => (
+                    None,
+                    Some(format!(
+                        "discovered-module violation rollups unavailable: {}",
+                        msg
+                    )),
+                ),
+            };
+
+        let violations_available = violations_eval.is_some();
+
+        // Compute rollups
+        let owned_file_facts: Vec<OwnedFileFact> = facts
+            .context
+            .owned_files
+            .iter()
+            .map(|f| OwnedFileFact {
+                file_path: f.file_path.clone(),
+                module_uid: f.module_candidate_uid.clone(),
+                is_test: f.is_test,
+            })
+            .collect();
+
+        let dead_node_facts: Vec<DeadNodeFact> = dead_nodes
+            .into_iter()
+            .filter_map(|d| {
+                d.file.map(|file_path| DeadNodeFact {
+                    file_path,
+                    is_test: d.is_test,
+                })
+            })
+            .collect();
+
+        let violations_for_rollup = violations_eval
+            .as_ref()
+            .map(|e| e.violations.clone())
+            .unwrap_or_default();
+
+        let rollup_input = ModuleRollupInput {
+            modules: facts.module_refs.clone(),
+            owned_files: owned_file_facts.clone(),
+            edges: facts.edges.clone(),
+            violations: violations_for_rollup,
+            dead_nodes: dead_node_facts,
+        };
+
+        let rollups = match compute_module_rollups(&rollup_input) {
+            Ok(r) => r,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to compute rollups: {}", e),
+                    ),
+                );
+            }
+        };
+
+        // Build rollup lookup by module_uid
+        let rollup_map: HashMap<&str, _> = rollups.iter().map(|r| (r.module_uid.as_str(), r)).collect();
+
+        // Build results with module identity + rollup stats
+        let results: Vec<serde_json::Value> = facts
+            .context
+            .modules
+            .iter()
+            .map(|m| {
+                let rollup = rollup_map.get(m.module_candidate_uid.as_str());
+                serde_json::json!({
+                    "module_uid": m.module_candidate_uid,
+                    "module_key": m.module_key,
+                    "canonical_root_path": m.canonical_root_path,
+                    "module_kind": m.module_kind,
+                    "display_name": m.display_name,
+                    "confidence": m.confidence,
+                    "owned_file_count": rollup.map_or(0, |r| r.owned_file_count),
+                    "owned_test_file_count": rollup.map_or(0, |r| r.owned_test_file_count),
+                    "outbound_dependency_count": rollup.map_or(0, |r| r.outbound_dependency_count),
+                    "outbound_import_count": rollup.map_or(0, |r| r.outbound_import_count),
+                    "inbound_dependency_count": rollup.map_or(0, |r| r.inbound_dependency_count),
+                    "inbound_import_count": rollup.map_or(0, |r| r.inbound_import_count),
+                    "violation_count": if violations_available {
+                        serde_json::json!(rollup.map_or(0, |r| r.violation_count))
+                    } else {
+                        serde_json::Value::Null
+                    },
+                    "dead_symbol_count": rollup.map_or(0, |r| r.dead_symbol_count),
+                    "dead_test_symbol_count": rollup.map_or(0, |r| r.dead_test_symbol_count),
+                })
+            })
+            .collect();
+
+        let count = results.len();
+
+        // Compute sanity metrics (Phase 3.1)
+        let sanity_metrics = compute_sanity_metrics_for_list(
+            &results,
+            &owned_file_facts,
+            &facts,
+            snapshot.files_total as u64,
+            &repo_state.storage,
+            &snapshot.snapshot_uid,
+            &repo_uid,
+        );
+
+        // Build warnings
+        let mut warnings: Vec<String> = violations_warning.into_iter().collect();
+
+        if sanity_metrics
+            .get("has_inferred_modules")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            warnings.push(
+                "Module topology includes inferred modules (heuristic detection, not manifest-declared). \
+                Some directories are intentionally excluded from module ownership. \
+                Use `rmap modules unowned` to see classification of files without module assignment.".to_string()
+            );
+        }
+
+        if let Some(breakdown) = sanity_metrics.get("unowned_breakdown") {
+            if let Some(true_gap) = breakdown.get("true_gap_count").and_then(|v| v.as_u64()) {
+                if true_gap > 0 {
+                    warnings.push(format!(
+                        "True heuristic gap: {} files could be owned but aren't. Run `rmap modules unowned` for details.",
+                        true_gap
+                    ));
+                }
+            }
+        }
+
+        // Build response
+        let response = serde_json::json!({
+            "command": "modules list",
+            "repo": repo_uid,
+            "snapshot": snapshot.snapshot_uid,
+            "results": results,
+            "count": count,
+            "rollups_degraded": !violations_available,
+            "sanity_metrics": sanity_metrics,
+            "warnings": warnings,
+        });
+
+        DispatchResult::success(&request.id, response)
+    }
+}
+
+/// Compute sanity metrics for modules list (Phase 3.1).
+fn compute_sanity_metrics_for_list(
+    results: &[serde_json::Value],
+    owned_file_facts: &[repo_graph_classification::module_rollup::OwnedFileFact],
+    facts: &repo_graph_module_queries::ModuleGraphFacts,
+    total_files: u64,
+    storage: &repo_graph_storage::StorageConnection,
+    snapshot_uid: &str,
+    repo_uid: &str,
+) -> serde_json::Value {
+    use std::collections::{HashMap, HashSet};
+
+    // largest_module_ownership_pct
+    let total_owned: u64 = results
+        .iter()
+        .filter_map(|r| r.get("owned_file_count").and_then(|v| v.as_u64()))
+        .sum();
+    let max_owned: u64 = results
+        .iter()
+        .filter_map(|r| r.get("owned_file_count").and_then(|v| v.as_u64()))
+        .max()
+        .unwrap_or(0);
+    let largest_module_ownership_pct = if total_owned > 0 {
+        (max_owned as f64 / total_owned as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    // tiny_module_count (< 3 files)
+    const TINY_THRESHOLD: u64 = 3;
+    let tiny_module_count = results
+        .iter()
+        .filter(|r| {
+            r.get("owned_file_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0)
+                < TINY_THRESHOLD
+        })
+        .count() as u64;
+
+    // root_fallback_used
+    let root_fallback_used = results.iter().any(|r| {
+        r.get("canonical_root_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            == "."
+    });
+
+    // has_inferred_modules
+    let has_inferred_modules = results.iter().any(|r| {
+        r.get("module_kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            == "inferred"
+    });
+
+    // mixed_language_module_count
+    let mut languages_per_module: HashMap<&str, HashSet<&str>> = HashMap::new();
+    for file in owned_file_facts {
+        let lang = infer_language_for_unowned(&file.file_path);
+        languages_per_module
+            .entry(file.module_uid.as_str())
+            .or_default()
+            .insert(lang);
+    }
+    let mixed_language_module_count = languages_per_module
+        .values()
+        .filter(|langs| langs.len() > 1)
+        .count() as u64;
+
+    // Compute unowned breakdown
+    let unowned_breakdown = compute_unowned_breakdown_for_list(
+        storage,
+        snapshot_uid,
+        repo_uid,
+        facts,
+        results,
+        total_files,
+    );
+
+    serde_json::json!({
+        "largest_module_ownership_pct": largest_module_ownership_pct,
+        "tiny_module_count": tiny_module_count,
+        "root_fallback_used": root_fallback_used,
+        "mixed_language_module_count": mixed_language_module_count,
+        "has_inferred_modules": has_inferred_modules,
+        "unowned_breakdown": unowned_breakdown,
+    })
+}
+
+/// Compute breakdown of unowned files for modules list.
+fn compute_unowned_breakdown_for_list(
+    storage: &repo_graph_storage::StorageConnection,
+    snapshot_uid: &str,
+    repo_uid: &str,
+    facts: &repo_graph_module_queries::ModuleGraphFacts,
+    results: &[serde_json::Value],
+    total_files: u64,
+) -> serde_json::Value {
+    use std::collections::HashSet;
+
+    // Get all file UIDs in snapshot
+    let file_hashes = storage
+        .query_file_version_hashes(snapshot_uid)
+        .unwrap_or_default();
+
+    // Build set of owned file UIDs
+    let owned_uids: HashSet<&str> = facts
+        .context
+        .owned_files
+        .iter()
+        .map(|f| f.file_uid.as_str())
+        .collect();
+
+    // Build set of module root paths
+    let module_roots: HashSet<&str> = results
+        .iter()
+        .filter_map(|r| r.get("canonical_root_path").and_then(|v| v.as_str()))
+        .collect();
+
+    let mut excluded_count: u64 = 0;
+    let mut suppressed_test_count: u64 = 0;
+    let mut true_gap_count: u64 = 0;
+
+    for file_uid in file_hashes.keys() {
+        if owned_uids.contains(file_uid.as_str()) {
+            continue;
+        }
+
+        // Extract path from file_uid (format: repo_uid:path)
+        let path = file_uid
+            .strip_prefix(&format!("{}:", repo_uid))
+            .unwrap_or(file_uid);
+
+        // Only count source files
+        if !is_source_file_for_unowned(path) {
+            continue;
+        }
+
+        // Classify the unowned file
+        let top_level = path.split('/').next().unwrap_or("");
+
+        if is_excluded_directory(top_level) {
+            excluded_count += 1;
+        } else if is_test_directory(top_level) {
+            suppressed_test_count += 1;
+        } else if !path.contains('/') {
+            // Root-level source file with no module
+            true_gap_count += 1;
+        } else if module_roots.contains(top_level) {
+            // Under a module root but not owned - ownership bug
+            true_gap_count += 1;
+        } else {
+            // Directory not recognized as module
+            true_gap_count += 1;
+        }
+    }
+
+    let true_gap_pct = if total_files > 0 {
+        (true_gap_count as f64 / total_files as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    serde_json::json!({
+        "excluded_count": excluded_count,
+        "suppressed_test_count": suppressed_test_count,
+        "true_gap_count": true_gap_count,
+        "true_gap_pct": true_gap_pct,
+        "classified_pct": 100.0,
+    })
 }
 
 // ── Unowned classification helpers (TECH DEBT: should be in shared module) ──

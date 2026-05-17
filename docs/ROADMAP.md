@@ -111,22 +111,24 @@ See `docs/slices/reg-1-repo-registry.md` for full specification.
 - MAC-1: macOS installer validated (v0.1.3)
 - LINUX-1: Linux installer validated (v0.1.5)
 
-**REG-1 CLI Migration Progress (2026-05-16):**
+**REG-1 CLI Migration Progress (2026-05-17):**
 
 | Command Family | Subcommand | Status |
 |---------------|------------|--------|
 | `surfaces` | list, show | REG-1 migrated |
 | `boundaries` | list, show, summary, links | REG-1 migrated |
+| `modules` | list | REG-1 migrated |
+| `modules` | show | REG-1 migrated |
 | `modules` | files | REG-1 migrated |
 | `modules` | deps | REG-1 migrated |
 | `modules` | violations | REG-1 migrated |
 | `modules` | unowned | REG-1 migrated |
-| `modules` | list, show | Legacy (pending) |
 | `modules` | boundary | Legacy write (Batch 4) |
 | `assess` | | Legacy write (Batch 4) |
 
+**Modules read-side complete.** All `modules` read subcommands migrated to REG-1.
+
 **Remaining work:**
-- Batch 3: `modules list`, `modules show` (most complex - 598 lines)
 - Batch 4: Write operations (`assess`, `modules boundary`)
 - Other read commands: `orient`, `stats`, `path`, `imports`, etc.
 

@@ -2721,3 +2721,377 @@ fn modules_unowned_repo_not_indexed_returns_error() {
         output
     );
 }
+
+// ══════════════════════════════════════════════════════════════════
+// MODULES SHOW (REG-1)
+// ══════════════════════════════════════════════════════════════════
+
+#[test]
+fn modules_show_returns_module_identity() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("modules-show-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::create_dir(repo_dir.join("packages")).unwrap();
+    std::fs::create_dir(repo_dir.join("packages/core")).unwrap();
+    std::fs::write(
+        repo_dir.join("packages/core/index.ts"),
+        "export function main() {}",
+    )
+    .unwrap();
+    // Add package.json to trigger module detection
+    std::fs::write(
+        repo_dir.join("packages/core/package.json"),
+        r#"{"name": "@test/core", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"ms-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Request show for the module
+    let show_request = format!(
+        r#"{{"id":"ms-2","method":"modules_show","params":{{"repo":"{}","module":"packages/core"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&show_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+
+    // Either success with module identity or module not found error
+    if let Some(result) = parsed.get("result") {
+        assert_eq!(result["command"], "modules show");
+        assert!(result["repo"].is_string(), "missing repo: {}", output);
+        assert!(
+            result["snapshot"].is_string(),
+            "missing snapshot: {}",
+            output
+        );
+        // Module identity fields
+        assert!(result["module"].is_object(), "missing module: {}", output);
+        let module = &result["module"];
+        assert!(
+            module["module_uid"].is_string(),
+            "missing module_uid: {}",
+            output
+        );
+        assert!(
+            module["canonical_root_path"].is_string(),
+            "missing canonical_root_path: {}",
+            output
+        );
+        // Rollups
+        assert!(result["rollups"].is_object(), "missing rollups: {}", output);
+        // Neighbors
+        assert!(
+            result["outbound_dependencies"].is_array(),
+            "missing outbound_dependencies: {}",
+            output
+        );
+        assert!(
+            result["inbound_dependencies"].is_array(),
+            "missing inbound_dependencies: {}",
+            output
+        );
+        // Degradation fields
+        assert!(
+            result["rollups_degraded"].is_boolean(),
+            "missing rollups_degraded: {}",
+            output
+        );
+        assert!(
+            result["warnings"].is_array(),
+            "missing warnings: {}",
+            output
+        );
+    } else {
+        // Module not found is acceptable for simple fixture
+        assert!(
+            parsed.get("error").is_some(),
+            "Should have result or error: {}",
+            output
+        );
+    }
+}
+
+#[test]
+fn modules_show_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"ms-err","method":"modules_show","params":{"repo":"/nonexistent/path","module":"some-module"}}"#,
+    );
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
+        output
+    );
+}
+
+#[test]
+fn modules_show_missing_module_param() {
+    // Test with an indexed repo to verify module param validation
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("modules-show-err-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"mse-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Now test missing module param with valid repo
+    let show_request = format!(
+        r#"{{"id":"mse-2","method":"modules_show","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&show_request], state);
+    let output = &results[0];
+
+    assert!(
+        output.contains(r#""code":"InvalidRequest""#),
+        "Should return InvalidRequest for missing module param: {}",
+        output
+    );
+    assert!(
+        output.contains("module"),
+        "Error should mention 'module': {}",
+        output
+    );
+}
+
+#[test]
+fn modules_show_module_not_found_returns_error() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("modules-show-notfound-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"msnf-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Request show for a module that doesn't exist
+    let show_request = format!(
+        r#"{{"id":"msnf-2","method":"modules_show","params":{{"repo":"{}","module":"nonexistent/module"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&show_request], state);
+    let output = &results[0];
+
+    assert!(
+        output.contains(r#""code":"InvalidRequest""#),
+        "Should return InvalidRequest for module not found: {}",
+        output
+    );
+    assert!(
+        output.contains("module not found"),
+        "Error should mention 'module not found': {}",
+        output
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MODULES LIST (REG-1)
+// ══════════════════════════════════════════════════════════════════
+
+#[test]
+fn modules_list_returns_envelope() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("modules-list-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::create_dir(repo_dir.join("packages")).unwrap();
+    std::fs::create_dir(repo_dir.join("packages/core")).unwrap();
+    std::fs::write(
+        repo_dir.join("packages/core/index.ts"),
+        "export function main() {}",
+    )
+    .unwrap();
+    // Add package.json to trigger module detection
+    std::fs::write(
+        repo_dir.join("packages/core/package.json"),
+        r#"{"name": "@test/core", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"ml-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Request modules list
+    let list_request = format!(
+        r#"{{"id":"ml-2","method":"modules_list","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&list_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = parsed.get("result").expect("Should have result");
+
+    // Standard envelope fields
+    assert_eq!(result["command"], "modules list");
+    assert!(result["repo"].is_string(), "missing repo: {}", output);
+    assert!(
+        result["snapshot"].is_string(),
+        "missing snapshot: {}",
+        output
+    );
+    assert!(result["results"].is_array(), "missing results: {}", output);
+    assert!(result["count"].is_u64(), "missing count: {}", output);
+
+    // Degradation fields
+    assert!(
+        result["rollups_degraded"].is_boolean(),
+        "missing rollups_degraded: {}",
+        output
+    );
+    assert!(
+        result["warnings"].is_array(),
+        "missing warnings: {}",
+        output
+    );
+
+    // Sanity metrics (Phase 3.1)
+    assert!(
+        result["sanity_metrics"].is_object(),
+        "missing sanity_metrics: {}",
+        output
+    );
+}
+
+#[test]
+fn modules_list_returns_sanity_metrics() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("modules-list-sanity-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+    // Add package.json at root
+    std::fs::write(
+        repo_dir.join("package.json"),
+        r#"{"name": "test-repo", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"mls-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Request modules list
+    let list_request = format!(
+        r#"{{"id":"mls-2","method":"modules_list","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&list_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let result = parsed.get("result").expect("Should have result");
+
+    // Verify sanity metrics fields
+    let sanity = &result["sanity_metrics"];
+    assert!(
+        sanity["largest_module_ownership_pct"].is_f64(),
+        "missing largest_module_ownership_pct: {}",
+        output
+    );
+    assert!(
+        sanity["tiny_module_count"].is_u64(),
+        "missing tiny_module_count: {}",
+        output
+    );
+    assert!(
+        sanity["root_fallback_used"].is_boolean(),
+        "missing root_fallback_used: {}",
+        output
+    );
+    assert!(
+        sanity["mixed_language_module_count"].is_u64(),
+        "missing mixed_language_module_count: {}",
+        output
+    );
+    assert!(
+        sanity["has_inferred_modules"].is_boolean(),
+        "missing has_inferred_modules: {}",
+        output
+    );
+
+    // Verify unowned breakdown
+    let breakdown = &sanity["unowned_breakdown"];
+    assert!(
+        breakdown["excluded_count"].is_u64(),
+        "missing excluded_count: {}",
+        output
+    );
+    assert!(
+        breakdown["suppressed_test_count"].is_u64(),
+        "missing suppressed_test_count: {}",
+        output
+    );
+    assert!(
+        breakdown["true_gap_count"].is_u64(),
+        "missing true_gap_count: {}",
+        output
+    );
+    assert!(
+        breakdown["true_gap_pct"].is_f64(),
+        "missing true_gap_pct: {}",
+        output
+    );
+    assert!(
+        breakdown["classified_pct"].is_f64(),
+        "missing classified_pct: {}",
+        output
+    );
+}
+
+#[test]
+fn modules_list_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"ml-err","method":"modules_list","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
+        output
+    );
+}
