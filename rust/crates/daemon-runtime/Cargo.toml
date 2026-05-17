@@ -39,6 +39,7 @@ repo-graph-gate = { path = "../gate" }
 repo-graph-doc-facts = { path = "../doc-facts" }
 repo-graph-module-queries = { path = "../module-queries" }
 repo-graph-boundary-interaction = { path = "../boundary-interaction" }
+repo-graph-classification = { path = "../classification" }
 
 # Enrichment pipeline and resolvers
 enrichment = { path = "../enrichment" }

@@ -100,18 +100,16 @@ fn run_docs_list(args: &[String]) -> ExitCode {
     // Send docs_list request with repo path
     let params = serde_json::json!({ "repo": repo_path });
     match client.request("docs_list", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: failed to serialize result: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)
@@ -163,18 +161,16 @@ fn run_docs_extract(args: &[String]) -> ExitCode {
     // Send docs_extract request with repo path
     let params = serde_json::json!({ "repo": repo_path });
     match client.request("docs_extract", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: failed to serialize result: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)

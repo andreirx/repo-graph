@@ -1,16 +1,17 @@
-//! Deterministic tests for the `modules files` command.
+//! Deterministic tests for the `modules deps` command.
 //!
 //! REG-1 Contract:
-//!   - `rmap modules files <module>` — list files owned by module (from cwd)
+//!   - `rmap modules deps [module] [--outbound|--inbound]` — from cwd
 //!
 //! Test matrix:
-//!   1-3. Usage errors (no args, unexpected args)
-//!   4. Daemon required
+//!   1-4. Usage errors (conflicting flags, unknown flags, direction without module, extra args)
+//!   5. Daemon required
 //!
 //! Success-path tests are in daemon_dispatch.rs:
-//!   - modules_files_returns_envelope
-//!   - modules_files_repo_not_indexed_returns_error
-//!   - modules_files_module_not_found_returns_error
+//!   - modules_deps_returns_envelope
+//!   - modules_deps_with_module_filter
+//!   - modules_deps_direction_without_module_error
+//!   - modules_deps_module_not_found_returns_error
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -33,25 +34,54 @@ fn binary_path() -> PathBuf {
 // ══════════════════════════════════════════════════════════════════
 
 #[test]
-fn modules_files_usage_error_no_args() {
+fn modules_deps_usage_error_conflicting_flags() {
     let output = Command::new(binary_path())
-        .args(["modules", "files"])
+        .args(["modules", "deps", "some-module", "--outbound", "--inbound"])
         .output()
         .unwrap();
 
     assert_eq!(output.status.code(), Some(1));
-    assert!(
-        output.stdout.is_empty(),
-        "stdout must be empty on usage error"
-    );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("usage:"), "stderr: {}", stderr);
+    assert!(stderr.contains("cannot specify both"), "stderr: {}", stderr);
 }
 
 #[test]
-fn modules_files_usage_error_unexpected_arg() {
+fn modules_deps_usage_error_unknown_flag() {
     let output = Command::new(binary_path())
-        .args(["modules", "files", "some-module", "extra-arg"])
+        .args(["modules", "deps", "--unknown-flag"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unknown flag"), "stderr: {}", stderr);
+}
+
+#[test]
+fn modules_deps_usage_error_direction_without_module() {
+    // This test runs in a temp dir without daemon, so it will fail at daemon
+    // connection before validating direction. The real validation test is in
+    // daemon_dispatch.rs where we have a running daemon.
+    let temp = tempfile::tempdir().unwrap();
+    let output = Command::new(binary_path())
+        .args(["modules", "deps", "--outbound"])
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--outbound") || stderr.contains("require a module"),
+        "stderr: {}",
+        stderr
+    );
+}
+
+#[test]
+fn modules_deps_usage_error_extra_positional_args() {
+    let output = Command::new(binary_path())
+        .args(["modules", "deps", "module1", "module2"])
         .output()
         .unwrap();
 
@@ -65,10 +95,10 @@ fn modules_files_usage_error_unexpected_arg() {
 // ══════════════════════════════════════════════════════════════════
 
 #[test]
-fn modules_files_daemon_required() {
+fn modules_deps_daemon_required() {
     let temp = tempfile::tempdir().unwrap();
     let output = Command::new(binary_path())
-        .args(["modules", "files", "some-module"])
+        .args(["modules", "deps"])
         .current_dir(temp.path())
         .output()
         .unwrap();

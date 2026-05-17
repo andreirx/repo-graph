@@ -146,11 +146,7 @@ fn gate_strict_advisory_mutually_exclusive() {
 
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("mutually exclusive"),
-        "stderr: {}",
-        stderr
-    );
+    assert!(stderr.contains("mutually exclusive"), "stderr: {}", stderr);
 }
 
 // ══════════════════════════════════════════════════════════════════════

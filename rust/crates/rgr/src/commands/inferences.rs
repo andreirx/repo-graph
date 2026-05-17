@@ -101,18 +101,16 @@ fn run_inferences_list(args: &[String]) -> ExitCode {
     }
 
     match client.request("inferences_list", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: failed to serialize result: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)

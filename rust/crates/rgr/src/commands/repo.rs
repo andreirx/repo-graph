@@ -62,7 +62,10 @@ fn run_repo_list(args: &[String]) -> ExitCode {
     match client.request("list_repos", None) {
         Ok(result) => {
             if json_output {
-                println!("{}", serde_json::to_string_pretty(&result["repos"]).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&result["repos"]).unwrap_or_default()
+                );
                 return ExitCode::SUCCESS;
             }
 
@@ -80,7 +83,7 @@ fn run_repo_list(args: &[String]) -> ExitCode {
             }
 
             // Print header
-            println!("{:<20} {:<50} {}", "ALIAS", "PATH", "LAST INDEXED");
+            println!("{:<20} {:<50} LAST INDEXED", "ALIAS", "PATH");
             println!("{}", "-".repeat(90));
 
             for repo in repos {
@@ -150,7 +153,10 @@ fn run_repo_info(args: &[String]) -> ExitCode {
         Ok(result) => {
             if json_output {
                 // JSON mode: output full result for machine consumption
-                println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&result).unwrap_or_default()
+                );
                 return ExitCode::SUCCESS;
             }
 

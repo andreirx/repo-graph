@@ -38,10 +38,7 @@ fn check_no_args_is_valid() {
 
     // Verify we got some error output
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.is_empty(),
-        "Should have error message on stderr"
-    );
+    assert!(!stderr.is_empty(), "Should have error message on stderr");
 }
 
 #[test]

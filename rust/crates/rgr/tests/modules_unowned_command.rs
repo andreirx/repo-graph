@@ -1,17 +1,15 @@
-//! Deterministic tests for the `modules violations` command.
+//! Deterministic tests for the `modules unowned` command.
 //!
 //! REG-1 Contract:
-//!   - `rmap modules violations` — from cwd
+//!   - `rmap modules unowned` — from cwd
 //!
 //! Test matrix:
 //!   1. Usage error (unexpected args)
 //!   2. Daemon required
 //!
 //! Success-path tests are in daemon_dispatch.rs:
-//!   - modules_violations_returns_envelope
-//!   - modules_violations_repo_not_indexed_returns_error
-//!   - modules_violations_with_no_declarations
-//!   - modules_violations_with_violation
+//!   - modules_unowned_returns_envelope
+//!   - modules_unowned_repo_not_indexed_returns_error
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -34,9 +32,9 @@ fn binary_path() -> PathBuf {
 // ══════════════════════════════════════════════════════════════════
 
 #[test]
-fn modules_violations_usage_error_unexpected_args() {
+fn modules_unowned_usage_error_unexpected_args() {
     let output = Command::new(binary_path())
-        .args(["modules", "violations", "extra-arg"])
+        .args(["modules", "unowned", "extra-arg"])
         .output()
         .unwrap();
 
@@ -54,10 +52,10 @@ fn modules_violations_usage_error_unexpected_args() {
 // ══════════════════════════════════════════════════════════════════
 
 #[test]
-fn modules_violations_daemon_required() {
+fn modules_unowned_daemon_required() {
     let temp = tempfile::tempdir().unwrap();
     let output = Command::new(binary_path())
-        .args(["modules", "violations"])
+        .args(["modules", "unowned"])
         .current_dir(temp.path())
         .output()
         .unwrap();

@@ -425,8 +425,14 @@ impl DaemonState {
     }
 
     /// Resolve by alias or path.
-    pub fn resolve_alias_or_path(&self, alias_or_path: &str) -> Option<crate::registry::RegistryEntry> {
-        self.registry.borrow().resolve_alias_or_path(alias_or_path).cloned()
+    pub fn resolve_alias_or_path(
+        &self,
+        alias_or_path: &str,
+    ) -> Option<crate::registry::RegistryEntry> {
+        self.registry
+            .borrow()
+            .resolve_alias_or_path(alias_or_path)
+            .cloned()
     }
 
     /// Save the registry to disk.

@@ -2,197 +2,127 @@
 //!
 //! Shows module dependency edges (import-based).
 //!
+//! # REG-1 Contract
+//!
+//! Resolves repo from cwd via daemon registry.
+//! No explicit db_path or repo_uid arguments.
+//!
 //! # Boundary rules
 //!
 //! This module owns:
 //! - `run_modules_deps` handler
-//! - `parse_deps_args` helper
-//! - `DepsDirection` enum
+//! - modules deps argument parsing
+//! - modules deps output rendering
 //!
 //! This module does **not** own:
 //! - shared infrastructure (lives in `crate::cli`)
-//! - module graph loading (lives in `repo-graph-module-queries`)
+//! - module graph loading (belongs in daemon via module-queries)
+//! - edge derivation (belongs in daemon via classification)
 
-use std::path::Path;
 use std::process::ExitCode;
 
-use super::shared::load_module_graph_facts;
-use crate::cli::{build_envelope, open_storage};
+use crate::daemon_client::DaemonClient;
+
+fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
+    format!(
+        "Daemon unavailable (socket: {}). Start with: rmapd",
+        socket_path.display()
+    )
+}
 
 // ── modules deps command ─────────────────────────────────────────
 
-/// Direction filter for module deps command.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DepsDirection {
-    /// Show all cross-module edges (default).
-    All,
-    /// Show only edges where the specified module is the source.
-    Outbound,
-    /// Show only edges where the specified module is the target.
-    Inbound,
-}
-
 pub(super) fn run_modules_deps(args: &[String]) -> ExitCode {
-    // Parse args: <db_path> <repo_uid> [module] [--outbound|--inbound]
-    let (positional, direction) = match parse_deps_args(args) {
+    // Parse args: [module] [--outbound|--inbound]
+    let (module_filter, direction) = match parse_deps_args(args) {
         Ok(v) => v,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            eprintln!(
-                "usage: rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]"
-            );
+            eprintln!("usage: rmap modules deps [module] [--outbound|--inbound]");
+            eprintln!();
+            eprintln!("Run from within a repo directory.");
             return ExitCode::from(1);
         }
     };
 
-    if positional.len() < 2 || positional.len() > 3 {
-        eprintln!("usage: rmap modules deps <db_path> <repo_uid> [module] [--outbound|--inbound]");
-        return ExitCode::from(1);
-    }
-
-    let db_path = Path::new(&positional[0]);
-    let repo_uid = &positional[1];
-    let module_filter: Option<&str> = positional.get(2).map(|s| s.as_str());
-
     // Direction flag requires module filter
-    if direction != DepsDirection::All && module_filter.is_none() {
+    if direction != "all" && module_filter.is_none() {
         eprintln!("error: --outbound and --inbound require a module argument");
-        eprintln!("usage: rmap modules deps <db_path> <repo_uid> <module> --outbound");
+        eprintln!("usage: rmap modules deps <module> --outbound");
         return ExitCode::from(1);
     }
 
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
+    // Get cwd for repo resolution
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: cannot determine current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let snapshot = match storage.get_latest_snapshot(repo_uid) {
-        Ok(Some(snap)) => snap,
-        Ok(None) => {
-            eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(e) => {
+            eprintln!("error: cannot canonicalize current directory: {}", e);
             return ExitCode::from(2);
         }
+    };
+
+    // Connect to daemon
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // ── Step 1: Load module graph facts (single load with precomputed edges) ─
-    let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    if !client.is_available() {
+        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        return ExitCode::from(2);
+    }
 
-    // ── Step 2: Resolve module filter argument against discovered modules ─
-    // Resolution precedence: canonical_root_path exact → module_key exact → module_uid exact.
-    // Unknown module → error (not empty results).
-    let resolved_module_path: Option<String> = match module_filter {
-        Some(filter) => match facts.resolve_module(filter) {
-            Some(m) => Some(m.canonical_root_path.clone()),
-            None => {
-                eprintln!("error: module not found: {}", filter);
-                eprintln!("hint: use canonical path (e.g., 'packages/app') or module key");
-                return ExitCode::from(1);
+    // Build request params
+    let mut params = serde_json::json!({
+        "repo": repo_path,
+        "direction": direction,
+    });
+
+    if let Some(ref module) = module_filter {
+        params["module"] = serde_json::json!(module);
+    }
+
+    match client.request("modules_deps", Some(params)) {
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to serialize result: {}", e);
+                ExitCode::from(2)
             }
         },
-        None => None,
-    };
-
-    // ── Step 3: Filter precomputed edges ──────────────────────────
-    let filtered_edges: Vec<_> = match &resolved_module_path {
-        Some(module_path) => facts
-            .edges
-            .iter()
-            .filter(|e| match direction {
-                DepsDirection::All => {
-                    e.source_canonical_path == *module_path
-                        || e.target_canonical_path == *module_path
-                }
-                DepsDirection::Outbound => e.source_canonical_path == *module_path,
-                DepsDirection::Inbound => e.target_canonical_path == *module_path,
-            })
-            .collect(),
-        None => facts.edges.iter().collect(),
-    };
-
-    // Build JSON output
-    let results: Vec<serde_json::Value> = filtered_edges
-        .iter()
-        .map(|e| {
-            serde_json::json!({
-                "source": e.source_canonical_path,
-                "target": e.target_canonical_path,
-                "import_count": e.import_count,
-                "source_file_count": e.source_file_count,
-            })
-        })
-        .collect();
-
-    let count = results.len();
-
-    // Build extra fields for envelope
-    let mut extra = serde_json::Map::new();
-    if let Some(ref m) = resolved_module_path {
-        extra.insert("module".to_string(), serde_json::Value::String(m.clone()));
-    }
-    extra.insert(
-        "direction".to_string(),
-        serde_json::Value::String(match direction {
-            DepsDirection::All => "all".to_string(),
-            DepsDirection::Outbound => "outbound".to_string(),
-            DepsDirection::Inbound => "inbound".to_string(),
-        }),
-    );
-    extra.insert(
-        "diagnostics".to_string(),
-        serde_json::json!({
-            "imports_total": facts.diagnostics.imports_total,
-            "imports_cross_module": facts.diagnostics.imports_cross_module,
-            "imports_intra_module": facts.diagnostics.imports_intra_module,
-            "imports_source_unowned": facts.diagnostics.imports_source_unowned,
-            "imports_target_unowned": facts.diagnostics.imports_target_unowned,
-        }),
-    );
-
-    let output = match build_envelope(
-        &storage,
-        "modules deps",
-        repo_uid,
-        &snapshot,
-        serde_json::to_value(&results).unwrap(),
-        count,
-        extra,
-    ) {
-        Ok(v) => v,
         Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
+            // Check for "module not found" error
+            let err_str = e.to_string();
+            if err_str.contains("module not found") {
+                eprintln!("error: {}", err_str);
+                return ExitCode::from(1);
+            }
             eprintln!("error: {}", e);
             ExitCode::from(2)
         }
     }
 }
 
-/// Parse --outbound / --inbound flags from args.
-fn parse_deps_args(args: &[String]) -> Result<(Vec<String>, DepsDirection), String> {
-    let mut positional = Vec::new();
-    let mut direction = DepsDirection::All;
+/// Parse [module] [--outbound|--inbound] args.
+///
+/// Returns (module_filter, direction_string).
+fn parse_deps_args(args: &[String]) -> Result<(Option<String>, &'static str), String> {
+    let mut module_filter = None;
+    let mut direction: &'static str = "all";
     let mut direction_set = false;
 
     for arg in args {
@@ -201,24 +131,27 @@ fn parse_deps_args(args: &[String]) -> Result<(Vec<String>, DepsDirection), Stri
                 if direction_set {
                     return Err("cannot specify both --outbound and --inbound".to_string());
                 }
-                direction = DepsDirection::Outbound;
+                direction = "outbound";
                 direction_set = true;
             }
             "--inbound" => {
                 if direction_set {
                     return Err("cannot specify both --outbound and --inbound".to_string());
                 }
-                direction = DepsDirection::Inbound;
+                direction = "inbound";
                 direction_set = true;
             }
             other if other.starts_with("--") => {
                 return Err(format!("unknown flag: {}", other));
             }
             _ => {
-                positional.push(arg.clone());
+                if module_filter.is_some() {
+                    return Err(format!("unexpected argument: {}", arg));
+                }
+                module_filter = Some(arg.clone());
             }
         }
     }
 
-    Ok((positional, direction))
+    Ok((module_filter, direction))
 }

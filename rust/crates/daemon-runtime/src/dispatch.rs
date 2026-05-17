@@ -86,18 +86,15 @@ impl ServiceDispatcher {
         let repo_ref = Self::get_string_param(params, "repo")?;
 
         // Resolve via registry (alias or path)
-        let entry = self
-            .state
-            .resolve_alias_or_path(repo_ref)
-            .ok_or_else(|| {
-                ErrorDetail::new(
-                    ErrorCode::RepoNotFound,
-                    format!(
-                        "repo not indexed: {} (run: rmap index {})",
-                        repo_ref, repo_ref
-                    ),
-                )
-            })?;
+        let entry = self.state.resolve_alias_or_path(repo_ref).ok_or_else(|| {
+            ErrorDetail::new(
+                ErrorCode::RepoNotFound,
+                format!(
+                    "repo not indexed: {} (run: rmap index {})",
+                    repo_ref, repo_ref
+                ),
+            )
+        })?;
 
         let db_path = std::path::Path::new(&entry.db_path);
         let repo_uid = &entry.repo_uid;
@@ -181,6 +178,12 @@ impl Dispatcher for ServiceDispatcher {
             "boundaries_show" => self.handle_boundaries_show(request),
             "boundaries_summary" => self.handle_boundaries_summary(request),
             "boundaries_links" => self.handle_boundaries_links(request),
+
+            // ── Modules queries ─────────────────────────────────────
+            "modules_files" => self.handle_modules_files(request),
+            "modules_deps" => self.handle_modules_deps(request),
+            "modules_violations" => self.handle_modules_violations(request),
+            "modules_unowned" => self.handle_modules_unowned(request),
 
             // ── Write operations (with progress) ────────────────────
             "index" => self.handle_index(request, emitter),
@@ -267,28 +270,27 @@ impl ServiceDispatcher {
         let path = Path::new(path_str);
 
         match self.state.resolve_repo_path(path) {
-            Some(entry) => {
-                DispatchResult::success(
-                    &request.id,
-                    serde_json::json!({
-                        "canonical_path": entry.canonical_path,
-                        "alias": entry.alias,
-                        "db_path": entry.db_path,
-                        "repo_uid": entry.repo_uid,
-                        "last_indexed_at": entry.last_indexed_at,
-                        "last_snapshot_uid": entry.last_snapshot_uid,
-                    }),
-                )
-            }
-            None => {
-                DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(
-                        ErrorCode::RepoNotFound,
-                        format!("repo not indexed: {} (run: rmap index {})", path_str, path_str),
+            Some(entry) => DispatchResult::success(
+                &request.id,
+                serde_json::json!({
+                    "canonical_path": entry.canonical_path,
+                    "alias": entry.alias,
+                    "db_path": entry.db_path,
+                    "repo_uid": entry.repo_uid,
+                    "last_indexed_at": entry.last_indexed_at,
+                    "last_snapshot_uid": entry.last_snapshot_uid,
+                }),
+            ),
+            None => DispatchResult::error(
+                &request.id,
+                ErrorDetail::new(
+                    ErrorCode::RepoNotFound,
+                    format!(
+                        "repo not indexed: {} (run: rmap index {})",
+                        path_str, path_str
                     ),
-                )
-            }
+                ),
+            ),
         }
     }
 
@@ -411,7 +413,10 @@ impl ServiceDispatcher {
         if let Err(e) = registry.save() {
             return DispatchResult::error(
                 &request.id,
-                ErrorDetail::new(ErrorCode::InternalError, format!("failed to save registry: {}", e)),
+                ErrorDetail::new(
+                    ErrorCode::InternalError,
+                    format!("failed to save registry: {}", e),
+                ),
             );
         }
 
@@ -468,7 +473,10 @@ impl ServiceDispatcher {
         if let Err(e) = registry.save() {
             return DispatchResult::error(
                 &request.id,
-                ErrorDetail::new(ErrorCode::InternalError, format!("failed to save registry: {}", e)),
+                ErrorDetail::new(
+                    ErrorCode::InternalError,
+                    format!("failed to save registry: {}", e),
+                ),
             );
         }
 
@@ -1161,10 +1169,7 @@ impl ServiceDispatcher {
 
                 // Auto-load repo so subsequent queries work immediately
                 if let Err(e) = self.state.load_repo(&db_path, &repo_uid) {
-                    eprintln!(
-                        "warning: index succeeded but auto-load failed: {}",
-                        e
-                    );
+                    eprintln!("warning: index succeeded but auto-load failed: {}", e);
                 }
 
                 DispatchResult::success(&request.id, response)
@@ -1215,10 +1220,7 @@ impl ServiceDispatcher {
 
         // Resolve repo_path from stored root_path
         let canonical_db_path = repo_state.db_path();
-        let repo_info = match repo_state
-            .storage
-            .get_repo(&RepoRef::Uid(repo_uid.clone()))
-        {
+        let repo_info = match repo_state.storage.get_repo(&RepoRef::Uid(repo_uid.clone())) {
             Ok(Some(r)) => r,
             Ok(None) => {
                 return DispatchResult::error(
@@ -1971,10 +1973,7 @@ impl ServiceDispatcher {
                 &request.id,
                 ErrorDetail::new(
                     ErrorCode::SnapshotNotFound,
-                    format!(
-                        "latest snapshot is not ready (status: {})",
-                        snapshot.status
-                    ),
+                    format!("latest snapshot is not ready (status: {})", snapshot.status),
                 ),
             );
         }
@@ -2053,10 +2052,7 @@ impl ServiceDispatcher {
                 &request.id,
                 ErrorDetail::new(
                     ErrorCode::SnapshotNotFound,
-                    format!(
-                        "latest snapshot is not ready (status: {})",
-                        snapshot.status
-                    ),
+                    format!("latest snapshot is not ready (status: {})", snapshot.status),
                 ),
             );
         }
@@ -2134,15 +2130,15 @@ impl ServiceDispatcher {
         let _read_guard = repo_state.coordinator.acquire_read();
 
         // Get repo to find root_path
-        let repo = match repo_state
-            .storage
-            .get_repo(&RepoRef::Uid(repo_uid.clone()))
-        {
+        let repo = match repo_state.storage.get_repo(&RepoRef::Uid(repo_uid.clone())) {
             Ok(Some(r)) => r,
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::RepoNotFound, format!("repo '{}' not found", repo_uid)),
+                    ErrorDetail::new(
+                        ErrorCode::RepoNotFound,
+                        format!("repo '{}' not found", repo_uid),
+                    ),
                 );
             }
             Err(e) => {
@@ -2224,15 +2220,15 @@ impl ServiceDispatcher {
         let _refresh_guard = repo_state.coordinator.acquire_refresh();
 
         // Get repo to find root_path
-        let repo = match repo_state
-            .storage
-            .get_repo(&RepoRef::Uid(repo_uid.clone()))
-        {
+        let repo = match repo_state.storage.get_repo(&RepoRef::Uid(repo_uid.clone())) {
             Ok(Some(r)) => r,
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::RepoNotFound, format!("repo '{}' not found", repo_uid)),
+                    ErrorDetail::new(
+                        ErrorCode::RepoNotFound,
+                        format!("repo '{}' not found", repo_uid),
+                    ),
                 );
             }
             Err(e) => {
@@ -2265,7 +2261,10 @@ impl ServiceDispatcher {
             Err(e) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, format!("extraction failed: {}", e)),
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("extraction failed: {}", e),
+                    ),
                 );
             }
         };
@@ -2276,7 +2275,10 @@ impl ServiceDispatcher {
             Err(e) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, format!("storage open failed: {}", e)),
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("storage open failed: {}", e),
+                    ),
                 );
             }
         };
@@ -2375,7 +2377,10 @@ impl ServiceDispatcher {
         };
 
         // List resources
-        let resources = match repo_state.storage.list_resources(&snapshot.snapshot_uid, kind_filter) {
+        let resources = match repo_state
+            .storage
+            .list_resources(&snapshot.snapshot_uid, kind_filter)
+        {
             Ok(r) => r,
             Err(e) => {
                 return DispatchResult::error(
@@ -2446,7 +2451,10 @@ impl ServiceDispatcher {
 
         // Resolve resource
         use repo_graph_storage::queries::ResourceResolveError;
-        let target = match repo_state.storage.resolve_resource(&snapshot.snapshot_uid, resource_key) {
+        let target = match repo_state
+            .storage
+            .resolve_resource(&snapshot.snapshot_uid, resource_key)
+        {
             Ok(r) => r,
             Err(ResourceResolveError::NotFound) => {
                 return DispatchResult::error(
@@ -2472,7 +2480,10 @@ impl ServiceDispatcher {
         };
 
         // Find readers
-        let readers = match repo_state.storage.find_resource_readers(&snapshot.snapshot_uid, &target.stable_key) {
+        let readers = match repo_state
+            .storage
+            .find_resource_readers(&snapshot.snapshot_uid, &target.stable_key)
+        {
             Ok(r) => r,
             Err(e) => {
                 return DispatchResult::error(
@@ -2532,7 +2543,10 @@ impl ServiceDispatcher {
 
         // Resolve resource
         use repo_graph_storage::queries::ResourceResolveError;
-        let target = match repo_state.storage.resolve_resource(&snapshot.snapshot_uid, resource_key) {
+        let target = match repo_state
+            .storage
+            .resolve_resource(&snapshot.snapshot_uid, resource_key)
+        {
             Ok(r) => r,
             Err(ResourceResolveError::NotFound) => {
                 return DispatchResult::error(
@@ -2558,7 +2572,10 @@ impl ServiceDispatcher {
         };
 
         // Find writers
-        let writers = match repo_state.storage.find_resource_writers(&snapshot.snapshot_uid, &target.stable_key) {
+        let writers = match repo_state
+            .storage
+            .find_resource_writers(&snapshot.snapshot_uid, &target.stable_key)
+        {
             Ok(w) => w,
             Err(e) => {
                 return DispatchResult::error(
@@ -2618,7 +2635,10 @@ impl ServiceDispatcher {
 
         // Query schemas
         use repo_graph_storage::contract_schema_port::ContractSchemaStoragePort;
-        let schemas = match repo_state.storage.list_contract_schemas(&snapshot.snapshot_uid, kind_filter) {
+        let schemas = match repo_state
+            .storage
+            .list_contract_schemas(&snapshot.snapshot_uid, kind_filter)
+        {
             Ok(s) => s,
             Err(e) => {
                 return DispatchResult::error(
@@ -2698,7 +2718,10 @@ impl ServiceDispatcher {
 
         // Query schema by file path
         use repo_graph_storage::contract_schema_port::ContractSchemaStoragePort;
-        let schema = match repo_state.storage.get_schema_by_file(&snapshot.snapshot_uid, file_path) {
+        let schema = match repo_state
+            .storage
+            .get_schema_by_file(&snapshot.snapshot_uid, file_path)
+        {
             Ok(Some(s)) => s,
             Ok(None) => {
                 return DispatchResult::error(
@@ -2715,7 +2738,10 @@ impl ServiceDispatcher {
         };
 
         // Query elements for this schema
-        let elements = match repo_state.storage.list_elements_for_schema(&schema.schema_uid, None) {
+        let elements = match repo_state
+            .storage
+            .list_elements_for_schema(&schema.schema_uid, None)
+        {
             Ok(e) => e,
             Err(e) => {
                 return DispatchResult::error(
@@ -2805,7 +2831,10 @@ impl ServiceDispatcher {
 
         // Get schemas (optionally filtered by file)
         let schemas = match file_filter {
-            Some(path) => match repo_state.storage.get_schema_by_file(&snapshot.snapshot_uid, path) {
+            Some(path) => match repo_state
+                .storage
+                .get_schema_by_file(&snapshot.snapshot_uid, path)
+            {
                 Ok(Some(s)) => vec![s],
                 Ok(None) => {
                     return DispatchResult::error(
@@ -2820,7 +2849,10 @@ impl ServiceDispatcher {
                     );
                 }
             },
-            None => match repo_state.storage.list_contract_schemas(&snapshot.snapshot_uid, None) {
+            None => match repo_state
+                .storage
+                .list_contract_schemas(&snapshot.snapshot_uid, None)
+            {
                 Ok(s) => s,
                 Err(e) => {
                     return DispatchResult::error(
@@ -2834,7 +2866,10 @@ impl ServiceDispatcher {
         // Collect elements from all schemas
         let mut results: Vec<serde_json::Value> = Vec::new();
         for schema in &schemas {
-            let elements = match repo_state.storage.list_elements_for_schema(&schema.schema_uid, kind_filter) {
+            let elements = match repo_state
+                .storage
+                .list_elements_for_schema(&schema.schema_uid, kind_filter)
+            {
                 Ok(e) => e,
                 Err(e) => {
                     return DispatchResult::error(
@@ -2921,7 +2956,10 @@ impl ServiceDispatcher {
         use repo_graph_storage::contract_schema_port::ContractSchemaStoragePort;
 
         // Query mappings
-        let mappings = match repo_state.storage.list_generated_code_mappings(&snapshot.snapshot_uid, element_filter) {
+        let mappings = match repo_state
+            .storage
+            .list_generated_code_mappings(&snapshot.snapshot_uid, element_filter)
+        {
             Ok(m) => m,
             Err(e) => {
                 return DispatchResult::error(
@@ -2965,7 +3003,10 @@ impl ServiceDispatcher {
         }
         if min_confidence > 0.0 {
             if let serde_json::Value::Object(ref mut map) = response {
-                map.insert("filter_min_confidence".to_string(), serde_json::json!(min_confidence));
+                map.insert(
+                    "filter_min_confidence".to_string(),
+                    serde_json::json!(min_confidence),
+                );
             }
         }
 
@@ -3008,7 +3049,10 @@ impl ServiceDispatcher {
         };
 
         // Load inferences
-        let inferences = match repo_state.storage.list_inferences_for_snapshot(&snapshot.snapshot_uid, kind_filter) {
+        let inferences = match repo_state
+            .storage
+            .list_inferences_for_snapshot(&snapshot.snapshot_uid, kind_filter)
+        {
             Ok(i) => i,
             Err(e) => {
                 return DispatchResult::error(
@@ -3254,7 +3298,10 @@ impl ServiceDispatcher {
         }
 
         // Load module_candidates for file → module mapping
-        let modules = match repo_state.storage.get_module_candidates_for_snapshot(&snapshot.snapshot_uid) {
+        let modules = match repo_state
+            .storage
+            .get_module_candidates_for_snapshot(&snapshot.snapshot_uid)
+        {
             Ok(m) => m,
             Err(e) => {
                 return DispatchResult::error(
@@ -3265,11 +3312,19 @@ impl ServiceDispatcher {
         };
         let uid_to_canonical: HashMap<&str, &str> = modules
             .iter()
-            .map(|m| (m.module_candidate_uid.as_str(), m.canonical_root_path.as_str()))
+            .map(|m| {
+                (
+                    m.module_candidate_uid.as_str(),
+                    m.canonical_root_path.as_str(),
+                )
+            })
             .collect();
 
         // Load file ownership
-        let ownership = match repo_state.storage.get_file_ownership_for_snapshot(&snapshot.snapshot_uid) {
+        let ownership = match repo_state
+            .storage
+            .get_file_ownership_for_snapshot(&snapshot.snapshot_uid)
+        {
             Ok(o) => o,
             Err(e) => {
                 return DispatchResult::error(
@@ -3288,7 +3343,10 @@ impl ServiceDispatcher {
             .collect();
 
         // Load external imports with file locations
-        let imports_with_locations = match repo_state.storage.get_external_imports_with_locations(&snapshot.snapshot_uid) {
+        let imports_with_locations = match repo_state
+            .storage
+            .get_external_imports_with_locations(&snapshot.snapshot_uid)
+        {
             Ok(i) => i,
             Err(e) => {
                 return DispatchResult::error(
@@ -3299,7 +3357,10 @@ impl ServiceDispatcher {
         };
 
         // Load import bindings for identifier → specifier resolution
-        let import_bindings = match repo_state.storage.get_external_import_bindings_for_snapshot(&snapshot.snapshot_uid) {
+        let import_bindings = match repo_state
+            .storage
+            .get_external_import_bindings_for_snapshot(&snapshot.snapshot_uid)
+        {
             Ok(b) => b,
             Err(e) => {
                 return DispatchResult::error(
@@ -3337,9 +3398,11 @@ impl ServiceDispatcher {
                 if entry.package == package_query {
                     let declared = matches!(
                         entry.category,
-                        DependencyCategory::DeclaredAndUsed | DependencyCategory::DeclaredButUnobserved
+                        DependencyCategory::DeclaredAndUsed
+                            | DependencyCategory::DeclaredButUnobserved
                     );
-                    module_decl_info.insert(&summary.module, (declared, format_category(entry.category)));
+                    module_decl_info
+                        .insert(&summary.module, (declared, format_category(entry.category)));
                 }
             }
         }
@@ -3595,7 +3658,10 @@ impl ServiceDispatcher {
         };
 
         // Load surfaces with filtering
-        let surfaces = match repo_state.storage.get_project_surfaces_for_snapshot(&snapshot.snapshot_uid, &filter) {
+        let surfaces = match repo_state
+            .storage
+            .get_project_surfaces_for_snapshot(&snapshot.snapshot_uid, &filter)
+        {
             Ok(s) => s,
             Err(e) => {
                 return DispatchResult::error(
@@ -3606,7 +3672,10 @@ impl ServiceDispatcher {
         };
 
         // Load module candidates for enrichment
-        let modules = match repo_state.storage.get_module_candidates_for_snapshot(&snapshot.snapshot_uid) {
+        let modules = match repo_state
+            .storage
+            .get_module_candidates_for_snapshot(&snapshot.snapshot_uid)
+        {
             Ok(m) => m,
             Err(e) => {
                 return DispatchResult::error(
@@ -3621,7 +3690,10 @@ impl ServiceDispatcher {
             .collect();
 
         // Load evidence counts
-        let evidence_counts = match repo_state.storage.count_evidence_by_surface(&snapshot.snapshot_uid) {
+        let evidence_counts = match repo_state
+            .storage
+            .count_evidence_by_surface(&snapshot.snapshot_uid)
+        {
             Ok(c) => c,
             Err(e) => {
                 return DispatchResult::error(
@@ -3672,13 +3744,22 @@ impl ServiceDispatcher {
                 map.insert("filter_kind".to_string(), serde_json::json!(filter.kind));
             }
             if filter.runtime.is_some() {
-                map.insert("filter_runtime".to_string(), serde_json::json!(filter.runtime));
+                map.insert(
+                    "filter_runtime".to_string(),
+                    serde_json::json!(filter.runtime),
+                );
             }
             if filter.source.is_some() {
-                map.insert("filter_source".to_string(), serde_json::json!(filter.source));
+                map.insert(
+                    "filter_source".to_string(),
+                    serde_json::json!(filter.source),
+                );
             }
             if filter.module.is_some() {
-                map.insert("filter_module".to_string(), serde_json::json!(filter.module));
+                map.insert(
+                    "filter_module".to_string(),
+                    serde_json::json!(filter.module),
+                );
             }
 
             // Add degradation info when surfaces not populated
@@ -3732,12 +3813,18 @@ impl ServiceDispatcher {
         };
 
         // Resolve surface by ref
-        let surface = match repo_state.storage.get_project_surface_by_ref(&snapshot.snapshot_uid, &surface_ref) {
+        let surface = match repo_state
+            .storage
+            .get_project_surface_by_ref(&snapshot.snapshot_uid, &surface_ref)
+        {
             Ok(Some(s)) => s,
             Ok(None) => {
                 return DispatchResult::error(
                     &request.id,
-                    ErrorDetail::new(ErrorCode::InvalidRequest, format!("surface not found: {}", surface_ref)),
+                    ErrorDetail::new(
+                        ErrorCode::InvalidRequest,
+                        format!("surface not found: {}", surface_ref),
+                    ),
                 );
             }
             Err(e) => {
@@ -3749,7 +3836,10 @@ impl ServiceDispatcher {
         };
 
         // Load owning module by UID
-        let module = match repo_state.storage.get_module_by_uid(&surface.module_candidate_uid) {
+        let module = match repo_state
+            .storage
+            .get_module_by_uid(&surface.module_candidate_uid)
+        {
             Ok(m) => m,
             Err(e) => {
                 return DispatchResult::error(
@@ -3760,7 +3850,10 @@ impl ServiceDispatcher {
         };
 
         // Load evidence
-        let evidence_rows = match repo_state.storage.get_project_surface_evidence(&surface.project_surface_uid) {
+        let evidence_rows = match repo_state
+            .storage
+            .get_project_surface_evidence(&surface.project_surface_uid)
+        {
             Ok(e) => e,
             Err(e) => {
                 return DispatchResult::error(
@@ -3774,8 +3867,12 @@ impl ServiceDispatcher {
         let metadata = match &surface.metadata_json {
             None => serde_json::json!({ "parsed": null, "raw": null, "parse_error": null }),
             Some(raw) => match serde_json::from_str::<serde_json::Value>(raw) {
-                Ok(parsed) => serde_json::json!({ "parsed": parsed, "raw": null, "parse_error": null }),
-                Err(e) => serde_json::json!({ "parsed": null, "raw": raw, "parse_error": e.to_string() }),
+                Ok(parsed) => {
+                    serde_json::json!({ "parsed": parsed, "raw": null, "parse_error": null })
+                }
+                Err(e) => {
+                    serde_json::json!({ "parsed": null, "raw": raw, "parse_error": e.to_string() })
+                }
             },
         };
 
@@ -3985,7 +4082,10 @@ impl ServiceDispatcher {
         };
 
         // Query boundary interaction detail
-        let detail = match repo_state.storage.get_boundary_interaction_detail(surface_uid) {
+        let detail = match repo_state
+            .storage
+            .get_boundary_interaction_detail(surface_uid)
+        {
             Ok(Some(d)) => d,
             Ok(None) => {
                 return DispatchResult::error(
@@ -4156,6 +4256,740 @@ impl ServiceDispatcher {
         }
 
         DispatchResult::success(&request.id, response)
+    }
+
+    // ── Modules handlers ────────────────────────────────────────────────
+
+    /// List files owned by a module (REG-1 pattern).
+    ///
+    /// Request: `{"method": "modules_files", "params": {"repo": "<path_or_alias>", "module": "<module_ref>"}}`
+    fn handle_modules_files(&self, request: &Request) -> DispatchResult {
+        use repo_graph_module_queries::ModuleQueryContext;
+
+        // REG-1: resolve repo from path/alias and auto-load
+        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
+        let module_ref = match Self::get_string_param(&request.params, "module") {
+            Ok(m) => m,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
+        // Acquire read lock
+        let _read_guard = repo_state.coordinator.acquire_read();
+
+        // Get latest snapshot
+        let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
+            Ok(Some(snap)) => snap,
+            Ok(None) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                );
+            }
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+
+        // Load module context (service layer)
+        let ctx = match ModuleQueryContext::load(&repo_state.storage, &snapshot.snapshot_uid) {
+            Ok(c) => c,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to load module context: {}", e),
+                    ),
+                );
+            }
+        };
+
+        // Resolve module argument
+        let resolved_module = match ctx.resolve_module(module_ref) {
+            Some(m) => m.clone(),
+            None => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InvalidRequest,
+                        format!(
+                            "module not found: {} (use canonical path or module key)",
+                            module_ref
+                        ),
+                    ),
+                );
+            }
+        };
+
+        // Load files for the resolved module
+        let files = match repo_state.storage.get_files_for_module(
+            &snapshot.snapshot_uid,
+            &resolved_module.module_candidate_uid,
+        ) {
+            Ok(f) if !f.is_empty() => f,
+            Ok(_) => {
+                // Fallback: use context's files_for_module (degraded metadata)
+                ctx.files_for_module(&resolved_module.module_candidate_uid)
+                    .into_iter()
+                    .map(
+                        |of| repo_graph_storage::crud::module_edges_support::ModuleFileEntry {
+                            file_uid: of.file_uid.clone(),
+                            path: of.file_path.clone(),
+                            language: None,
+                            assignment_kind: "inferred".to_string(),
+                            confidence: 1.0,
+                        },
+                    )
+                    .collect()
+            }
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to load module files: {}", e),
+                    ),
+                );
+            }
+        };
+
+        // Build results
+        let results: Vec<serde_json::Value> = files
+            .into_iter()
+            .map(|f| {
+                serde_json::json!({
+                    "file_uid": f.file_uid,
+                    "path": f.path,
+                    "language": f.language,
+                    "assignment_kind": f.assignment_kind,
+                    "confidence": f.confidence,
+                })
+            })
+            .collect();
+
+        let count = results.len();
+
+        let response = serde_json::json!({
+            "command": "modules files",
+            "repo": repo_uid,
+            "snapshot": snapshot.snapshot_uid,
+            "module": {
+                "module_uid": resolved_module.module_candidate_uid,
+                "module_key": resolved_module.module_key,
+                "canonical_root_path": resolved_module.canonical_root_path,
+            },
+            "results": results,
+            "count": count,
+        });
+
+        DispatchResult::success(&request.id, response)
+    }
+
+    /// Get module dependency edges (REG-1 pattern).
+    ///
+    /// Request: `{"method": "modules_deps", "params": {"repo": "<path_or_alias>", "module": "<module_ref>", "direction": "all|outbound|inbound"}}`
+    ///
+    /// - `module` is optional; if omitted, returns all cross-module edges
+    /// - `direction` is optional; defaults to "all"; only valid when module is specified
+    fn handle_modules_deps(&self, request: &Request) -> DispatchResult {
+        use repo_graph_module_queries::load_module_graph_facts;
+
+        // REG-1: resolve repo from path/alias and auto-load
+        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
+        // Optional module filter
+        let module_ref = Self::get_optional_string_param(&request.params, "module");
+
+        // Optional direction filter (only meaningful with module)
+        let direction_str =
+            Self::get_optional_string_param(&request.params, "direction").unwrap_or("all");
+
+        // Validate direction
+        let direction = match direction_str.to_lowercase().as_str() {
+            "all" => "all",
+            "outbound" => "outbound",
+            "inbound" => "inbound",
+            other => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::invalid_request(format!(
+                        "invalid direction: {} (expected: all, outbound, inbound)",
+                        other
+                    )),
+                );
+            }
+        };
+
+        // Direction without module is invalid
+        if direction != "all" && module_ref.is_none() {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::invalid_request(
+                    "direction filter requires module parameter".to_string(),
+                ),
+            );
+        }
+
+        // Acquire read lock
+        let _read_guard = repo_state.coordinator.acquire_read();
+
+        // Get latest snapshot
+        let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
+            Ok(Some(snap)) => snap,
+            Ok(None) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                );
+            }
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+
+        // Load module graph facts (service layer - single load with precomputed edges)
+        let facts = match load_module_graph_facts(&repo_state.storage, &snapshot.snapshot_uid) {
+            Ok(f) => f,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to load module graph facts: {}", e),
+                    ),
+                );
+            }
+        };
+
+        // Resolve module if specified
+        let resolved_module_path: Option<String> = match module_ref {
+            Some(filter) => match facts.resolve_module(filter) {
+                Some(m) => Some(m.canonical_root_path.clone()),
+                None => {
+                    return DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(
+                            ErrorCode::InvalidRequest,
+                            format!(
+                                "module not found: {} (use canonical path or module key)",
+                                filter
+                            ),
+                        ),
+                    );
+                }
+            },
+            None => None,
+        };
+
+        // Filter precomputed edges
+        let filtered_edges: Vec<_> = match &resolved_module_path {
+            Some(module_path) => facts
+                .edges
+                .iter()
+                .filter(|e| match direction {
+                    "all" => {
+                        e.source_canonical_path == *module_path
+                            || e.target_canonical_path == *module_path
+                    }
+                    "outbound" => e.source_canonical_path == *module_path,
+                    "inbound" => e.target_canonical_path == *module_path,
+                    _ => false, // unreachable due to validation above
+                })
+                .collect(),
+            None => facts.edges.iter().collect(),
+        };
+
+        // Build results
+        let results: Vec<serde_json::Value> = filtered_edges
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "source": e.source_canonical_path,
+                    "target": e.target_canonical_path,
+                    "import_count": e.import_count,
+                    "source_file_count": e.source_file_count,
+                })
+            })
+            .collect();
+
+        let count = results.len();
+
+        // Build response
+        let mut response = serde_json::json!({
+            "command": "modules deps",
+            "repo": repo_uid,
+            "snapshot": snapshot.snapshot_uid,
+            "direction": direction,
+            "diagnostics": {
+                "imports_total": facts.diagnostics.imports_total,
+                "imports_cross_module": facts.diagnostics.imports_cross_module,
+                "imports_intra_module": facts.diagnostics.imports_intra_module,
+                "imports_source_unowned": facts.diagnostics.imports_source_unowned,
+                "imports_target_unowned": facts.diagnostics.imports_target_unowned,
+            },
+            "results": results,
+            "count": count,
+        });
+
+        // Add module info if filtered
+        if let Some(ref module_path) = resolved_module_path {
+            response["module"] = serde_json::json!(module_path);
+        }
+
+        DispatchResult::success(&request.id, response)
+    }
+
+    /// Evaluate discovered-module boundary violations (REG-1 pattern).
+    ///
+    /// Request: `{"method": "modules_violations", "params": {"repo": "<path_or_alias>"}}`
+    fn handle_modules_violations(&self, request: &Request) -> DispatchResult {
+        use repo_graph_classification::boundary_evaluator::StaleSide;
+        use repo_graph_module_queries::{evaluate_violations_from_facts, load_module_graph_facts};
+
+        // REG-1: resolve repo from path/alias and auto-load
+        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
+        // Acquire read lock
+        let _read_guard = repo_state.coordinator.acquire_read();
+
+        // Get latest snapshot
+        let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
+            Ok(Some(snap)) => snap,
+            Ok(None) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                );
+            }
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+
+        // Load module graph facts (service layer)
+        let facts = match load_module_graph_facts(&repo_state.storage, &snapshot.snapshot_uid) {
+            Ok(f) => f,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to load module graph facts: {}", e),
+                    ),
+                );
+            }
+        };
+
+        // Evaluate violations using preloaded facts (service layer)
+        let result = match evaluate_violations_from_facts(&repo_state.storage, &repo_uid, &facts) {
+            Ok(r) => r,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to evaluate violations: {}", e),
+                    ),
+                );
+            }
+        };
+
+        // Build violations JSON
+        let violations_json: Vec<serde_json::Value> = result
+            .evaluation
+            .violations
+            .iter()
+            .map(|v| {
+                serde_json::json!({
+                    "declaration_uid": v.declaration_uid,
+                    "source": v.source_canonical_path,
+                    "target": v.target_canonical_path,
+                    "import_count": v.import_count,
+                    "source_file_count": v.source_file_count,
+                    "reason": v.reason,
+                })
+            })
+            .collect();
+
+        // Build stale declarations JSON
+        let stale_json: Vec<serde_json::Value> = result
+            .evaluation
+            .stale_declarations
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "declaration_uid": s.declaration_uid,
+                    "stale_side": match s.stale_side {
+                        StaleSide::Source => "source",
+                        StaleSide::Target => "target",
+                        StaleSide::Both => "both",
+                    },
+                    "missing_paths": s.missing_paths,
+                })
+            })
+            .collect();
+
+        let violation_count = result.evaluation.violations.len();
+        let stale_count = result.evaluation.stale_declarations.len();
+
+        // Build response
+        let response = serde_json::json!({
+            "command": "modules violations",
+            "repo": repo_uid,
+            "snapshot": snapshot.snapshot_uid,
+            "results": {
+                "violations": violations_json,
+                "stale_declarations": stale_json,
+            },
+            "count": violation_count,
+            "stale_count": stale_count,
+            "diagnostics": {
+                "imports_edges_total": result.diagnostics.imports_total,
+                "imports_source_no_file": 0,
+                "imports_target_no_file": 0,
+                "imports_source_no_module": result.diagnostics.imports_source_unowned,
+                "imports_target_no_module": result.diagnostics.imports_target_unowned,
+                "imports_intra_module": result.diagnostics.imports_intra_module,
+                "imports_cross_module": result.diagnostics.imports_cross_module,
+            },
+        });
+
+        DispatchResult::success(&request.id, response)
+    }
+
+    /// List unowned source files (REG-1 pattern).
+    ///
+    /// Request: `{"method": "modules_unowned", "params": {"repo": "<path_or_alias>"}}`
+    fn handle_modules_unowned(&self, request: &Request) -> DispatchResult {
+        use std::collections::{HashMap, HashSet};
+
+        // REG-1: resolve repo from path/alias and auto-load
+        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+
+        // Acquire read lock
+        let _read_guard = repo_state.coordinator.acquire_read();
+
+        // Get latest snapshot
+        let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
+            Ok(Some(snap)) => snap,
+            Ok(None) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                );
+            }
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+
+        // Get all indexed files via file_version_hashes
+        let file_version_hashes = match repo_state
+            .storage
+            .query_file_version_hashes(&snapshot.snapshot_uid)
+        {
+            Ok(f) => f,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to load files: {}", e),
+                    ),
+                );
+            }
+        };
+
+        // Extract file paths from file_uids (format: repo_uid:path)
+        let all_file_paths: Vec<(String, String)> = file_version_hashes
+            .keys()
+            .map(|file_uid| {
+                let path = file_uid
+                    .strip_prefix(&format!("{}:", repo_uid))
+                    .unwrap_or(file_uid)
+                    .to_string();
+                (file_uid.clone(), path)
+            })
+            .collect();
+
+        // Get owned files
+        let ownership = match repo_state
+            .storage
+            .get_file_ownership_for_snapshot(&snapshot.snapshot_uid)
+        {
+            Ok(o) => o,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to load ownership: {}", e),
+                    ),
+                );
+            }
+        };
+
+        // Get module candidates for context
+        let modules = match repo_state
+            .storage
+            .get_module_candidates_for_snapshot(&snapshot.snapshot_uid)
+        {
+            Ok(m) => m,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InternalError,
+                        format!("failed to load modules: {}", e),
+                    ),
+                );
+            }
+        };
+
+        // Build set of owned file UIDs
+        let owned_uids: HashSet<&str> = ownership.iter().map(|o| o.file_uid.as_str()).collect();
+
+        // Build set of module root paths for classification
+        let module_roots: HashSet<&str> = modules
+            .iter()
+            .map(|m| m.canonical_root_path.as_str())
+            .collect();
+
+        // Find unowned files and classify reasons
+        let mut unowned_files: Vec<serde_json::Value> = Vec::new();
+        let mut by_reason: HashMap<String, u64> = HashMap::new();
+
+        for (file_uid, path) in &all_file_paths {
+            if owned_uids.contains(file_uid.as_str()) {
+                continue;
+            }
+
+            // Only count source files as "eligible" unowned
+            if !is_source_file_for_unowned(path) {
+                continue;
+            }
+
+            let reason = classify_unowned_reason(path, &module_roots);
+            let language = infer_language_for_unowned(path);
+
+            *by_reason.entry(reason.clone()).or_insert(0) += 1;
+
+            unowned_files.push(serde_json::json!({
+                "file_path": path,
+                "language": language,
+                "reason": reason,
+            }));
+        }
+
+        // Sort by reason then path
+        unowned_files.sort_by(|a, b| {
+            let reason_a = a["reason"].as_str().unwrap_or("");
+            let reason_b = b["reason"].as_str().unwrap_or("");
+            let path_a = a["file_path"].as_str().unwrap_or("");
+            let path_b = b["file_path"].as_str().unwrap_or("");
+            reason_a.cmp(reason_b).then_with(|| path_a.cmp(path_b))
+        });
+
+        // Compute summary
+        let total_indexed = all_file_paths.len() as u64;
+        let total_owned = ownership.len() as u64;
+        let total_unowned = unowned_files.len() as u64;
+        let unowned_pct = if total_indexed > 0 {
+            (total_unowned as f64 / total_indexed as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        // Build response
+        let response = serde_json::json!({
+            "command": "modules unowned",
+            "repo": repo_uid,
+            "snapshot": snapshot.snapshot_uid,
+            "results": unowned_files,
+            "count": total_unowned,
+            "summary": {
+                "total_indexed_files": total_indexed,
+                "total_owned_files": total_owned,
+                "total_unowned_files": total_unowned,
+                "unowned_pct": unowned_pct,
+                "by_reason": by_reason,
+            },
+        });
+
+        DispatchResult::success(&request.id, response)
+    }
+}
+
+// ── Unowned classification helpers (TECH DEBT: should be in shared module) ──
+
+/// Classify why a file is unowned.
+fn classify_unowned_reason(path: &str, module_roots: &std::collections::HashSet<&str>) -> String {
+    // Check if file is at repo root (no directory)
+    if !path.contains('/') {
+        return "root_source_no_module".to_string();
+    }
+
+    // Get top-level directory
+    let top_level = path.split('/').next().unwrap_or("");
+
+    // Check if in an excluded directory
+    if is_excluded_directory(top_level) {
+        return format!("excluded_directory:{}", top_level);
+    }
+
+    // Check if parent would be a module root
+    if module_roots.contains(top_level) {
+        return "ownership_computation_gap".to_string();
+    }
+
+    // Check if it's a test directory that was suppressed
+    if is_test_directory(top_level) {
+        return "suppressed_test_directory".to_string();
+    }
+
+    format!("heuristic_gap:{}", top_level)
+}
+
+/// Check if a directory name is in the exclusion list.
+fn is_excluded_directory(dir_name: &str) -> bool {
+    let dir_lower = dir_name.to_lowercase();
+    matches!(
+        dir_lower.as_str(),
+        "vendor"
+            | "vendors"
+            | "third_party"
+            | "third-party"
+            | "thirdparty"
+            | "node_modules"
+            | "bower_components"
+            | "jspm_packages"
+            | "external"
+            | "externals"
+            | "deps"
+            | "dependencies"
+            | "dist"
+            | "build"
+            | "builds"
+            | "out"
+            | "output"
+            | "target"
+            | "bin"
+            | "obj"
+            | "_build"
+            | "generated"
+            | "gen"
+            | "codegen"
+            | "auto"
+            | "autogen"
+            | "__generated__"
+            | "docs"
+            | "doc"
+            | "documentation"
+            | "man"
+            | "manpages"
+            | "javadoc"
+            | "apidoc"
+            | "apidocs"
+            | "examples"
+            | "example"
+            | "samples"
+            | "sample"
+            | "demo"
+            | "demos"
+            | "tutorials"
+            | "tutorial"
+            | "benchmark"
+            | "benchmarks"
+            | "bench"
+            | "benches"
+            | "perf"
+            | "performance"
+    )
+}
+
+/// Check if a directory is a test directory.
+fn is_test_directory(dir_name: &str) -> bool {
+    let dir_lower = dir_name.to_lowercase();
+    matches!(
+        dir_lower.as_str(),
+        "test" | "tests" | "testing" | "__tests__" | "spec" | "specs"
+    )
+}
+
+/// Check if a file is a source file.
+fn is_source_file_for_unowned(path: &str) -> bool {
+    let ext = path.rsplit('.').next().unwrap_or("");
+    matches!(
+        ext.to_lowercase().as_str(),
+        "c" | "h"
+            | "cpp"
+            | "hpp"
+            | "cc"
+            | "hh"
+            | "cxx"
+            | "hxx"
+            | "java"
+            | "kt"
+            | "scala"
+            | "py"
+            | "rs"
+            | "go"
+            | "js"
+            | "jsx"
+            | "ts"
+            | "tsx"
+            | "mjs"
+            | "cjs"
+            | "rb"
+            | "swift"
+            | "m"
+            | "mm"
+    )
+}
+
+/// Infer language from file extension.
+fn infer_language_for_unowned(path: &str) -> &'static str {
+    let ext = path.rsplit('.').next().unwrap_or("");
+    match ext.to_lowercase().as_str() {
+        "c" | "h" => "c",
+        "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => "cpp",
+        "java" => "java",
+        "kt" | "kts" => "kotlin",
+        "scala" => "scala",
+        "py" | "pyi" => "python",
+        "rs" => "rust",
+        "go" => "go",
+        "js" | "jsx" | "mjs" | "cjs" => "javascript",
+        "ts" | "tsx" | "mts" | "cts" => "typescript",
+        "rb" => "ruby",
+        "swift" => "swift",
+        "m" | "mm" => "objc",
+        _ => "other",
     }
 }
 

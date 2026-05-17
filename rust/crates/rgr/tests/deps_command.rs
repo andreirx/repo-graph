@@ -41,10 +41,7 @@ fn binary_path() -> PathBuf {
 
 #[test]
 fn deps_usage_error_no_subcommand() {
-    let output = Command::new(binary_path())
-        .args(["deps"])
-        .output()
-        .unwrap();
+    let output = Command::new(binary_path()).args(["deps"]).output().unwrap();
 
     assert_eq!(output.status.code(), Some(1));
     assert!(

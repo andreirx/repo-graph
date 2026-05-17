@@ -53,7 +53,9 @@ fn print_contracts_usage() {
     eprintln!("usage:");
     eprintln!("  rmap contracts list [--kind protobuf]");
     eprintln!("  rmap contracts show <file_path>");
-    eprintln!("  rmap contracts elements [--kind message|enum|service|method|field] [--file <path>]");
+    eprintln!(
+        "  rmap contracts elements [--kind message|enum|service|method|field] [--file <path>]"
+    );
     eprintln!("  rmap contracts usages [--element <element_uid>] [--min-confidence <0.0-1.0>]");
     eprintln!();
     eprintln!("Run from within a repo directory.");
@@ -117,18 +119,16 @@ fn run_contracts_list(args: &[String]) -> ExitCode {
     }
 
     match client.request("contracts_list", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: failed to serialize result: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)
@@ -184,18 +184,16 @@ fn run_contracts_show(args: &[String]) -> ExitCode {
     });
 
     match client.request("contracts_show", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: failed to serialize result: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)
@@ -276,18 +274,16 @@ fn run_contracts_elements(args: &[String]) -> ExitCode {
     }
 
     match client.request("contracts_elements", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: failed to serialize result: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)
@@ -374,18 +370,16 @@ fn run_contracts_usages(args: &[String]) -> ExitCode {
     }
 
     match client.request("contracts_usages", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: failed to serialize result: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)

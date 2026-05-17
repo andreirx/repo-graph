@@ -139,7 +139,10 @@ pub fn run_orient(args: &[String]) -> ExitCode {
     };
 
     if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path(), "orient"));
+        eprintln!(
+            "{}",
+            daemon_unavailable_message(client.socket_path(), "orient")
+        );
         return ExitCode::from(2);
     }
 
@@ -155,18 +158,16 @@ pub fn run_orient(args: &[String]) -> ExitCode {
 
     // ── Execute request ──────────────────────────────────────
     match client.request("orient", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(DaemonClientError::DaemonError { code, message }) => {
             if code == "RepoNotFound" {
                 eprintln!("error: repo not indexed");
@@ -228,7 +229,10 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
     };
 
     if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path(), "check"));
+        eprintln!(
+            "{}",
+            daemon_unavailable_message(client.socket_path(), "check")
+        );
         return ExitCode::from(2);
     }
 
@@ -386,7 +390,10 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
     };
 
     if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path(), "explain"));
+        eprintln!(
+            "{}",
+            daemon_unavailable_message(client.socket_path(), "explain")
+        );
         return ExitCode::from(2);
     }
 
@@ -398,18 +405,16 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
     });
 
     match client.request("explain", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(DaemonClientError::DaemonError { code, message }) => {
             if code == "RepoNotFound" {
                 eprintln!("error: repo not indexed");

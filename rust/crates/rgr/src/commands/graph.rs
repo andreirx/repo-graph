@@ -74,8 +74,8 @@ fn parse_edge_types_flag(args: &[String]) -> Result<(Vec<String>, Vec<String>), 
 
 /// Resolve repo from cwd and return canonical path.
 fn resolve_repo_from_cwd() -> Result<String, String> {
-    let cwd = std::env::current_dir()
-        .map_err(|e| format!("cannot get current directory: {}", e))?;
+    let cwd =
+        std::env::current_dir().map_err(|e| format!("cannot get current directory: {}", e))?;
     let canonical = cwd
         .canonicalize()
         .map_err(|e| format!("cannot canonicalize current directory: {}", e))?;
@@ -93,7 +93,10 @@ fn create_daemon_client(command: &str) -> Result<DaemonClient, ExitCode> {
     };
 
     if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path(), command));
+        eprintln!(
+            "{}",
+            daemon_unavailable_message(client.socket_path(), command)
+        );
         return Err(ExitCode::from(2));
     }
 
@@ -159,18 +162,16 @@ pub fn run_callers(args: &[String]) -> ExitCode {
     });
 
     match client.request("callers", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => handle_daemon_error(e),
     }
 }
@@ -215,18 +216,16 @@ pub fn run_callees(args: &[String]) -> ExitCode {
     });
 
     match client.request("callees", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => handle_daemon_error(e),
     }
 }
@@ -263,18 +262,16 @@ pub fn run_path(args: &[String]) -> ExitCode {
     });
 
     match client.request("path", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => handle_daemon_error(e),
     }
 }
@@ -309,18 +306,16 @@ pub fn run_imports(args: &[String]) -> ExitCode {
     });
 
     match client.request("imports", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => handle_daemon_error(e),
     }
 }
@@ -353,18 +348,16 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
     });
 
     match client.request("cycles", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => handle_daemon_error(e),
     }
 }
@@ -397,18 +390,16 @@ pub fn run_stats(args: &[String]) -> ExitCode {
     });
 
     match client.request("stats", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => handle_daemon_error(e),
     }
 }

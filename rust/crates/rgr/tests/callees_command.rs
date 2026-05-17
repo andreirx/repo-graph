@@ -54,8 +54,5 @@ fn callees_daemon_required() {
 
     // Verify we got some error output (daemon-related or repo-related)
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.is_empty(),
-        "Should have error message on stderr"
-    );
+    assert!(!stderr.is_empty(), "Should have error message on stderr");
 }

@@ -2,7 +2,12 @@
 //!
 //! Contains:
 //! - `run_violations` — unified violations command (legacy + discovered-module)
-//! - `run_modules_violations` — discovered-module violations only
+//! - `run_modules_violations` — discovered-module violations only (REG-1)
+//!
+//! # REG-1 Contract
+//!
+//! `run_modules_violations` resolves repo from cwd via daemon registry.
+//! No explicit db_path or repo_uid arguments.
 //!
 //! # Boundary rules
 //!
@@ -12,16 +17,27 @@
 //!
 //! This module does **not** own:
 //! - shared infrastructure (lives in `crate::cli`)
-//! - module graph loading (lives in `repo-graph-module-queries`)
-//! - boundary evaluation logic (belongs in `repo-graph-classification`)
+//! - module graph loading (lives in daemon via module-queries)
+//! - boundary evaluation logic (lives in daemon via classification)
 
 use std::path::Path;
 use std::process::ExitCode;
 
 use super::shared::{evaluate_violations_from_facts, load_module_graph_facts};
 use crate::cli::{build_envelope, open_storage};
+use crate::daemon_client::DaemonClient;
+
+fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
+    format!(
+        "Daemon unavailable (socket: {}). Start with: rmapd",
+        socket_path.display()
+    )
+}
 
 // ── unified violations command ───────────────────────────────────
+//
+// NOTE: This command remains legacy (db_path + repo_uid) for now.
+// It will be migrated separately as a top-level command.
 
 pub fn run_violations(args: &[String]) -> ExitCode {
     if args.len() != 2 {
@@ -227,146 +243,74 @@ pub fn run_violations(args: &[String]) -> ExitCode {
     }
 }
 
-// ── modules violations command ───────────────────────────────────
+// ── modules violations command (REG-1) ───────────────────────────
 
 pub(super) fn run_modules_violations(args: &[String]) -> ExitCode {
-    if args.len() != 2 {
-        eprintln!("usage: rmap modules violations <db_path> <repo_uid>");
+    // Check for unexpected args
+    if !args.is_empty() {
+        eprintln!("error: unexpected argument: {}", args[0]);
+        eprintln!("usage: rmap modules violations");
+        eprintln!();
+        eprintln!("Run from within a repo directory.");
         return ExitCode::from(1);
     }
 
-    let db_path = Path::new(&args[0]);
-    let repo_uid = &args[1];
-
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
+    // Get cwd for repo resolution
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: cannot determine current directory: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    let snapshot = match storage.get_latest_snapshot(repo_uid) {
-        Ok(Some(snap)) => snap,
-        Ok(None) => {
-            eprintln!("error: no snapshot found for repo '{}'", repo_uid);
+    let repo_path = match cwd.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(e) => {
+            eprintln!("error: cannot canonicalize current directory: {}", e);
             return ExitCode::from(2);
         }
+    };
+
+    // Connect to daemon
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::from(2);
         }
     };
 
-    // Load module graph facts once
-    let facts = match load_module_graph_facts(&storage, &snapshot.snapshot_uid) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    if !client.is_available() {
+        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        return ExitCode::from(2);
+    }
 
-    // Evaluate using preloaded facts
-    let result = match evaluate_violations_from_facts(&storage, repo_uid, &facts) {
-        Ok(r) => r,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
-            return ExitCode::from(2);
-        }
-    };
-
-    use repo_graph_classification::boundary_evaluator::StaleSide;
-
-    // Build JSON output — preserve evaluator order exactly
-    let violations_json: Vec<serde_json::Value> = result
-        .evaluation
-        .violations
-        .iter()
-        .map(|v| {
-            serde_json::json!({
-                "declaration_uid": v.declaration_uid,
-                "source": v.source_canonical_path,
-                "target": v.target_canonical_path,
-                "import_count": v.import_count,
-                "source_file_count": v.source_file_count,
-                "reason": v.reason,
-            })
-        })
-        .collect();
-
-    let stale_json: Vec<serde_json::Value> = result
-        .evaluation
-        .stale_declarations
-        .iter()
-        .map(|s| {
-            serde_json::json!({
-                "declaration_uid": s.declaration_uid,
-                "stale_side": match s.stale_side {
-                    StaleSide::Source => "source",
-                    StaleSide::Target => "target",
-                    StaleSide::Both => "both",
-                },
-                "missing_paths": s.missing_paths,
-            })
-        })
-        .collect();
-
-    let violation_count = result.evaluation.violations.len();
-    let stale_count = result.evaluation.stale_declarations.len();
-
-    // Build diagnostics JSON from precomputed facts
-    // Note: imports_source_no_file and imports_target_no_file are always 0 in Rust
-    // because the storage query (get_resolved_imports_for_snapshot) pre-filters
-    // edges where nodes lack file_uid. The TS implementation tracks these separately.
-    let diagnostics_json = serde_json::json!({
-        "imports_edges_total": result.diagnostics.imports_total,
-        "imports_source_no_file": 0,
-        "imports_target_no_file": 0,
-        "imports_source_no_module": result.diagnostics.imports_source_unowned,
-        "imports_target_no_module": result.diagnostics.imports_target_unowned,
-        "imports_intra_module": result.diagnostics.imports_intra_module,
-        "imports_cross_module": result.diagnostics.imports_cross_module,
+    // Build request params
+    let params = serde_json::json!({
+        "repo": repo_path,
     });
 
-    let results = serde_json::json!({
-        "violations": violations_json,
-        "stale_declarations": stale_json,
-    });
+    match client.request("modules_violations", Some(params)) {
+        Ok(result) => {
+            // Extract violation count for exit code
+            let violation_count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
 
-    // Build envelope with count, stale_count, and diagnostics
-    let mut extra = serde_json::Map::new();
-    extra.insert(
-        "stale_count".to_string(),
-        serde_json::Value::Number(stale_count.into()),
-    );
-    extra.insert("diagnostics".to_string(), diagnostics_json);
-
-    let output = match build_envelope(
-        &storage,
-        "modules violations",
-        repo_uid,
-        &snapshot,
-        results,
-        violation_count,
-        extra,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            // Exit code: 0 if no violations, 1 if violations
-            // stale_declarations alone do not force exit 1
-            if violation_count > 0 {
-                ExitCode::from(1)
-            } else {
-                ExitCode::SUCCESS
+            match serde_json::to_string_pretty(&result) {
+                Ok(json) => {
+                    println!("{}", json);
+                    // Exit code: 0 if no violations, 1 if violations
+                    // stale_declarations alone do not force exit 1
+                    if violation_count > 0 {
+                        ExitCode::from(1)
+                    } else {
+                        ExitCode::SUCCESS
+                    }
+                }
+                Err(e) => {
+                    eprintln!("error: failed to serialize result: {}", e);
+                    ExitCode::from(2)
+                }
             }
         }
         Err(e) => {

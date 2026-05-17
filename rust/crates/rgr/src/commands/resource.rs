@@ -103,18 +103,16 @@ fn run_resource_list(args: &[String]) -> ExitCode {
     }
 
     match client.request("resource_list", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: failed to serialize result: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)
@@ -169,18 +167,16 @@ fn run_resource_readers(args: &[String]) -> ExitCode {
     });
 
     match client.request("resource_readers", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: failed to serialize result: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)
@@ -235,18 +231,16 @@ fn run_resource_writers(args: &[String]) -> ExitCode {
     });
 
     match client.request("resource_writers", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: failed to serialize result: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)

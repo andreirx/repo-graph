@@ -39,7 +39,9 @@ fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
 pub fn run_surfaces(args: &[String]) -> ExitCode {
     if args.is_empty() {
         eprintln!("usage:");
-        eprintln!("  rmap surfaces list [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>]");
+        eprintln!(
+            "  rmap surfaces list [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>]"
+        );
         eprintln!("  rmap surfaces show <surface_ref>");
         eprintln!();
         eprintln!("Run from within a repo directory.");
@@ -119,18 +121,16 @@ fn run_surfaces_list(args: &[String]) -> ExitCode {
     }
 
     match client.request("surfaces_list", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: failed to serialize result: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)
@@ -193,18 +193,16 @@ fn run_surfaces_show(args: &[String]) -> ExitCode {
     });
 
     match client.request("surfaces_show", Some(params)) {
-        Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
-                }
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
             }
-        }
+            Err(e) => {
+                eprintln!("error: failed to serialize result: {}", e);
+                ExitCode::from(2)
+            }
+        },
         Err(e) => {
             // Check for "surface not found" error
             let err_str = e.to_string();
@@ -220,9 +218,15 @@ fn run_surfaces_show(args: &[String]) -> ExitCode {
 
 // ── Argument parsing helpers ──────────────────────────────────────
 
-fn parse_surfaces_list_args(
-    args: &[String],
-) -> Result<(Option<String>, Option<String>, Option<String>, Option<String>), String> {
+/// Parsed filters for surfaces list: (kind, runtime, source, module)
+type SurfacesListFilters = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+fn parse_surfaces_list_args(args: &[String]) -> Result<SurfacesListFilters, String> {
     let mut kind = None;
     let mut runtime = None;
     let mut source = None;

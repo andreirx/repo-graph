@@ -104,10 +104,7 @@ fn refresh_fails_when_daemon_unavailable() {
 
     // Should have error message (daemon unavailable)
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.is_empty(),
-        "expected error message on stderr"
-    );
+    assert!(!stderr.is_empty(), "expected error message on stderr");
 }
 
 // =============================================================================
@@ -140,10 +137,7 @@ fn stats_fails_when_daemon_unavailable() {
 
     // Should have error message
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.is_empty(),
-        "expected error message on stderr"
-    );
+    assert!(!stderr.is_empty(), "expected error message on stderr");
 }
 
 // =============================================================================

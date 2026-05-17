@@ -1067,6 +1067,7 @@ dependencies = [
  "pathdiff",
  "repo-graph-agent",
  "repo-graph-boundary-interaction",
+ "repo-graph-classification",
  "repo-graph-daemon-policy",
  "repo-graph-daemon-transport",
  "repo-graph-doc-facts",

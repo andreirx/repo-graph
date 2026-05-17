@@ -138,9 +138,8 @@ impl RepoRegistry {
         let db_dir = data_dir.join("databases");
 
         // Ensure directories exist
-        fs::create_dir_all(&db_dir).map_err(|e| {
-            RegistryError::Io(format!("failed to create db directory: {}", e))
-        })?;
+        fs::create_dir_all(&db_dir)
+            .map_err(|e| RegistryError::Io(format!("failed to create db directory: {}", e)))?;
 
         let mut registry = Self {
             registry_path,
@@ -166,9 +165,8 @@ impl RepoRegistry {
         let registry_path = state_root.join("registry.json");
         let db_dir = state_root.join("databases");
 
-        fs::create_dir_all(&db_dir).map_err(|e| {
-            RegistryError::Io(format!("failed to create db directory: {}", e))
-        })?;
+        fs::create_dir_all(&db_dir)
+            .map_err(|e| RegistryError::Io(format!("failed to create db directory: {}", e)))?;
 
         let mut registry = Self {
             registry_path,
@@ -346,11 +344,7 @@ impl RepoRegistry {
     }
 
     /// Set or change alias for a registered repo.
-    pub fn set_alias(
-        &mut self,
-        canonical_path: &Path,
-        alias: String,
-    ) -> Result<(), RegistryError> {
+    pub fn set_alias(&mut self, canonical_path: &Path, alias: String) -> Result<(), RegistryError> {
         // Check alias uniqueness (unless it's the same repo)
         if let Some(existing_path) = self.by_alias.get(&alias) {
             if existing_path != canonical_path {
@@ -421,14 +415,12 @@ impl RepoRegistry {
             return Ok(()); // Empty registry
         }
 
-        let file = File::open(&self.registry_path).map_err(|e| {
-            RegistryError::Io(format!("failed to open registry: {}", e))
-        })?;
+        let file = File::open(&self.registry_path)
+            .map_err(|e| RegistryError::Io(format!("failed to open registry: {}", e)))?;
         let reader = BufReader::new(file);
 
-        let registry_file: RegistryFile = serde_json::from_reader(reader).map_err(|e| {
-            RegistryError::Parse(format!("failed to parse registry: {}", e))
-        })?;
+        let registry_file: RegistryFile = serde_json::from_reader(reader)
+            .map_err(|e| RegistryError::Parse(format!("failed to parse registry: {}", e)))?;
 
         // Populate in-memory structures
         for entry in registry_file.repos {
@@ -456,18 +448,15 @@ impl RepoRegistry {
         // Atomic write: write to temp file, then rename
         let temp_path = self.registry_path.with_extension("json.tmp");
 
-        let file = File::create(&temp_path).map_err(|e| {
-            RegistryError::Io(format!("failed to create temp file: {}", e))
-        })?;
+        let file = File::create(&temp_path)
+            .map_err(|e| RegistryError::Io(format!("failed to create temp file: {}", e)))?;
         let writer = BufWriter::new(file);
 
-        serde_json::to_writer_pretty(writer, &registry_file).map_err(|e| {
-            RegistryError::Io(format!("failed to write registry: {}", e))
-        })?;
+        serde_json::to_writer_pretty(writer, &registry_file)
+            .map_err(|e| RegistryError::Io(format!("failed to write registry: {}", e)))?;
 
-        fs::rename(&temp_path, &self.registry_path).map_err(|e| {
-            RegistryError::Io(format!("failed to rename temp file: {}", e))
-        })?;
+        fs::rename(&temp_path, &self.registry_path)
+            .map_err(|e| RegistryError::Io(format!("failed to rename temp file: {}", e)))?;
 
         self.dirty = false;
         Ok(())
@@ -542,11 +531,7 @@ fn platform_data_dir() -> Result<PathBuf, RegistryError> {
 /// Canonicalize a path, returning a descriptive error on failure.
 pub fn canonicalize_path(path: &Path) -> Result<PathBuf, RegistryError> {
     path.canonicalize().map_err(|e| {
-        RegistryError::InvalidPath(format!(
-            "cannot canonicalize '{}': {}",
-            path.display(),
-            e
-        ))
+        RegistryError::InvalidPath(format!("cannot canonicalize '{}': {}", path.display(), e))
     })
 }
 

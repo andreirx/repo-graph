@@ -54,8 +54,5 @@ fn callers_daemon_required() {
 
     // Verify we got some error output
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.is_empty(),
-        "Should have error message on stderr"
-    );
+    assert!(!stderr.is_empty(), "Should have error message on stderr");
 }

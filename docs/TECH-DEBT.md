@@ -2923,3 +2923,30 @@ Many CLI tests that verify success behavior now require daemon infrastructure:
 
 **Note:** Usage error tests and daemon-unavailable tests were updated to work without
 daemon - only success path tests are ignored.
+
+### REG-1 Duplicated Classification Helpers (2026-05-16)
+
+**Context:** During REG-1 migration of `modules unowned` command, classification helper
+functions were duplicated from CLI to daemon-runtime.
+
+**Duplicated functions in `daemon-runtime/src/dispatch.rs`:**
+- `classify_unowned_reason(path, module_roots)` — classifies why a file is unowned
+- `is_excluded_directory(dir_name)` — checks if directory is in exclusion list
+- `is_test_directory(dir_name)` — checks if directory is a test directory
+- `is_source_file_for_unowned(path)` — checks if file is a source file
+- `infer_language_for_unowned(path)` — infers language from file extension
+
+**Root cause:** These pure functions existed only in CLI layer (`rgr/src/commands/modules/unowned.rs`).
+For REG-1 migration, the handler needed these functions in the daemon, but there was no shared
+classification crate where they belong.
+
+**Impact:**
+- Code duplication between CLI and daemon layers
+- Maintenance burden if classification rules change
+
+**Resolution path:**
+1. Create a shared classification module in `repo-graph-classification` crate
+2. Move helpers to shared module (DIP: both layers depend on abstraction)
+3. Remove duplicates from CLI and daemon
+
+**Severity:** Low. Pure functions, no state, minimal change frequency.

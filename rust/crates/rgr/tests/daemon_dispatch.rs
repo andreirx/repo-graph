@@ -110,8 +110,7 @@ fn multiple_requests_processed_in_order() {
 
 #[test]
 fn callers_missing_repo_returns_invalid_request() {
-    let output =
-        run_daemon_request(r#"{"id":"5","method":"callers","params":{"symbol":"foo"}}"#);
+    let output = run_daemon_request(r#"{"id":"5","method":"callers","params":{"symbol":"foo"}}"#);
     assert!(output.contains(r#""id":"5""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
     assert!(output.contains("repo"), "Should mention missing repo param");
@@ -146,14 +145,17 @@ fn callers_missing_symbol_param_returns_invalid_request() {
     let output = &results[0];
 
     assert!(output.contains(r#""id":"6""#));
-    assert!(output.contains(r#""code":"InvalidRequest""#), "output: {}", output);
+    assert!(
+        output.contains(r#""code":"InvalidRequest""#),
+        "output: {}",
+        output
+    );
     assert!(output.contains("symbol"));
 }
 
 #[test]
 fn callees_missing_repo_returns_invalid_request() {
-    let output =
-        run_daemon_request(r#"{"id":"7","method":"callees","params":{"symbol":"foo"}}"#);
+    let output = run_daemon_request(r#"{"id":"7","method":"callees","params":{"symbol":"foo"}}"#);
     assert!(output.contains(r#""id":"7""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
     assert!(output.contains("repo"));
@@ -161,8 +163,7 @@ fn callees_missing_repo_returns_invalid_request() {
 
 #[test]
 fn imports_missing_repo_returns_invalid_request() {
-    let output =
-        run_daemon_request(r#"{"id":"8","method":"imports","params":{"file":"foo.ts"}}"#);
+    let output = run_daemon_request(r#"{"id":"8","method":"imports","params":{"file":"foo.ts"}}"#);
     assert!(output.contains(r#""id":"8""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
     assert!(output.contains("repo"));
@@ -170,8 +171,7 @@ fn imports_missing_repo_returns_invalid_request() {
 
 #[test]
 fn orient_missing_repo_returns_invalid_request() {
-    let output =
-        run_daemon_request(r#"{"id":"9","method":"orient","params":{}}"#);
+    let output = run_daemon_request(r#"{"id":"9","method":"orient","params":{}}"#);
     assert!(output.contains(r#""id":"9""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
     assert!(output.contains("repo"));
@@ -179,8 +179,7 @@ fn orient_missing_repo_returns_invalid_request() {
 
 #[test]
 fn check_missing_repo_returns_invalid_request() {
-    let output =
-        run_daemon_request(r#"{"id":"10","method":"check","params":{}}"#);
+    let output = run_daemon_request(r#"{"id":"10","method":"check","params":{}}"#);
     assert!(output.contains(r#""id":"10""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
     assert!(output.contains("repo"));
@@ -188,8 +187,7 @@ fn check_missing_repo_returns_invalid_request() {
 
 #[test]
 fn refresh_missing_repo_returns_invalid_request() {
-    let output =
-        run_daemon_request(r#"{"id":"11","method":"refresh","params":{}}"#);
+    let output = run_daemon_request(r#"{"id":"11","method":"refresh","params":{}}"#);
     assert!(output.contains(r#""id":"11""#));
     assert!(output.contains(r#""code":"InvalidRequest""#));
     assert!(output.contains("repo"));
@@ -226,9 +224,8 @@ fn orient_repo_not_indexed_returns_error() {
 
 #[test]
 fn check_repo_not_indexed_returns_error() {
-    let output = run_daemon_request(
-        r#"{"id":"15","method":"check","params":{"repo":"/nonexistent/path"}}"#,
-    );
+    let output =
+        run_daemon_request(r#"{"id":"15","method":"check","params":{"repo":"/nonexistent/path"}}"#);
     assert!(output.contains(r#""id":"15""#));
     assert!(output.contains(r#""code":"RepoNotFound""#));
 }
@@ -438,7 +435,10 @@ fn index_emits_progress_events() {
         }
     }
 
-    assert!(found_initializing, "Should have initializing progress event");
+    assert!(
+        found_initializing,
+        "Should have initializing progress event"
+    );
     assert!(found_scanning, "Should have scanning progress event");
     assert!(found_result, "Should have final result");
 }
@@ -521,7 +521,11 @@ fn explain_missing_target_returns_invalid_request() {
     let output = &results[0];
 
     assert!(output.contains(r#""id":"20""#));
-    assert!(output.contains(r#""code":"InvalidRequest""#), "output: {}", output);
+    assert!(
+        output.contains(r#""code":"InvalidRequest""#),
+        "output: {}",
+        output
+    );
     assert!(output.contains("target"));
 }
 
@@ -608,7 +612,11 @@ fn docs_list_returns_envelope_with_entries() {
     let repo_temp = tempdir().unwrap();
     let repo_dir = repo_temp.path().join("docs-test-repo");
     std::fs::create_dir(&repo_dir).unwrap();
-    std::fs::write(repo_dir.join("README.md"), "# Test Project\n\nDescription here.").unwrap();
+    std::fs::write(
+        repo_dir.join("README.md"),
+        "# Test Project\n\nDescription here.",
+    )
+    .unwrap();
     std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
 
     let repo_path_str = repo_dir.to_string_lossy();
@@ -633,14 +641,29 @@ fn docs_list_returns_envelope_with_entries() {
     let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
     let result = &parsed["result"];
 
-    assert!(result.get("command").is_some(), "missing command field: {}", output);
-    assert!(result.get("entries").is_some(), "missing entries field: {}", output);
-    assert!(result.get("count").is_some(), "missing count field: {}", output);
+    assert!(
+        result.get("command").is_some(),
+        "missing command field: {}",
+        output
+    );
+    assert!(
+        result.get("entries").is_some(),
+        "missing entries field: {}",
+        output
+    );
+    assert!(
+        result.get("count").is_some(),
+        "missing count field: {}",
+        output
+    );
 
     // Should find README.md
     let entries = result["entries"].as_array().unwrap();
     let has_readme = entries.iter().any(|e| {
-        e.get("path").and_then(|p| p.as_str()).map(|p| p.contains("README.md")).unwrap_or(false)
+        e.get("path")
+            .and_then(|p| p.as_str())
+            .map(|p| p.contains("README.md"))
+            .unwrap_or(false)
     });
     assert!(has_readme, "Should find README.md in docs list: {}", output);
 }
@@ -650,7 +673,11 @@ fn docs_list_repo_not_indexed_returns_error() {
     let output = run_daemon_request(
         r#"{"id":"docs-err-1","method":"docs_list","params":{"repo":"/nonexistent/path"}}"#,
     );
-    assert!(output.contains(r#""code":"RepoNotFound""#), "output: {}", output);
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
+        output
+    );
 }
 
 #[test]
@@ -665,7 +692,8 @@ fn docs_extract_returns_envelope_with_facts() {
     std::fs::write(
         repo_dir.join("README.md"),
         "# Project\n\n<!-- rg:replacement_for old-lib -->\nThis replaces old-lib.\n",
-    ).unwrap();
+    )
+    .unwrap();
     std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
 
     let repo_path_str = repo_dir.to_string_lossy();
@@ -690,9 +718,21 @@ fn docs_extract_returns_envelope_with_facts() {
     let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
     let result = &parsed["result"];
 
-    assert!(result.get("command").is_some(), "missing command field: {}", output);
-    assert!(result.get("files_scanned").is_some(), "missing files_scanned: {}", output);
-    assert!(result.get("facts_extracted").is_some(), "missing facts_extracted: {}", output);
+    assert!(
+        result.get("command").is_some(),
+        "missing command field: {}",
+        output
+    );
+    assert!(
+        result.get("files_scanned").is_some(),
+        "missing files_scanned: {}",
+        output
+    );
+    assert!(
+        result.get("facts_extracted").is_some(),
+        "missing facts_extracted: {}",
+        output
+    );
 }
 
 // ── Resource command family ─────────────────────────────────────────────────
@@ -713,7 +753,8 @@ const pool = new Pool();
 export async function query(sql: string) {
     return pool.query(sql);
 }"#,
-    ).unwrap();
+    )
+    .unwrap();
 
     let repo_path_str = repo_dir.to_string_lossy();
 
@@ -737,9 +778,21 @@ export async function query(sql: string) {
     let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
     let result = &parsed["result"];
 
-    assert!(result.get("command").is_some(), "missing command field: {}", output);
-    assert!(result.get("results").is_some(), "missing results field: {}", output);
-    assert!(result.get("count").is_some(), "missing count field: {}", output);
+    assert!(
+        result.get("command").is_some(),
+        "missing command field: {}",
+        output
+    );
+    assert!(
+        result.get("results").is_some(),
+        "missing results field: {}",
+        output
+    );
+    assert!(
+        result.get("count").is_some(),
+        "missing count field: {}",
+        output
+    );
 }
 
 #[test]
@@ -747,7 +800,11 @@ fn resource_list_repo_not_indexed_returns_error() {
     let output = run_daemon_request(
         r#"{"id":"res-err-1","method":"resource_list","params":{"repo":"/nonexistent/path"}}"#,
     );
-    assert!(output.contains(r#""code":"RepoNotFound""#), "output: {}", output);
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
+        output
+    );
 }
 
 #[test]
@@ -781,8 +838,16 @@ fn resource_readers_returns_envelope_or_not_found() {
 
     // Either success with results or error (resource not found is valid)
     if let Some(result) = parsed.get("result") {
-        assert!(result.get("command").is_some(), "missing command field: {}", output);
-        assert!(result.get("results").is_some(), "missing results field: {}", output);
+        assert!(
+            result.get("command").is_some(),
+            "missing command field: {}",
+            output
+        );
+        assert!(
+            result.get("results").is_some(),
+            "missing results field: {}",
+            output
+        );
     } else {
         // "resource not found" is expected for nonexistent resources
         assert!(
@@ -823,8 +888,16 @@ fn resource_writers_returns_envelope_or_not_found() {
 
     // Either success with results or error (resource not found is valid)
     if let Some(result) = parsed.get("result") {
-        assert!(result.get("command").is_some(), "missing command field: {}", output);
-        assert!(result.get("results").is_some(), "missing results field: {}", output);
+        assert!(
+            result.get("command").is_some(),
+            "missing command field: {}",
+            output
+        );
+        assert!(
+            result.get("results").is_some(),
+            "missing results field: {}",
+            output
+        );
     } else {
         // "resource not found" is expected for nonexistent resources
         assert!(
@@ -854,7 +927,8 @@ message Request { string id = 1; }
 message Response { string result = 1; }
 service Api { rpc Call(Request) returns (Response); }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
     std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
 
     let repo_path_str = repo_dir.to_string_lossy();
@@ -876,9 +950,21 @@ service Api { rpc Call(Request) returns (Response); }
     let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
     let result = &parsed["result"];
 
-    assert!(result.get("command").is_some(), "missing command field: {}", output);
-    assert!(result.get("results").is_some(), "missing results field: {}", output);
-    assert!(result.get("count").is_some(), "missing count field: {}", output);
+    assert!(
+        result.get("command").is_some(),
+        "missing command field: {}",
+        output
+    );
+    assert!(
+        result.get("results").is_some(),
+        "missing results field: {}",
+        output
+    );
+    assert!(
+        result.get("count").is_some(),
+        "missing count field: {}",
+        output
+    );
 }
 
 #[test]
@@ -886,7 +972,11 @@ fn contracts_list_repo_not_indexed_returns_error() {
     let output = run_daemon_request(
         r#"{"id":"con-err-1","method":"contracts_list","params":{"repo":"/nonexistent/path"}}"#,
     );
-    assert!(output.contains(r#""code":"RepoNotFound""#), "output: {}", output);
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
+        output
+    );
 }
 
 #[test]
@@ -900,7 +990,8 @@ fn contracts_list_with_kind_filter() {
     std::fs::write(
         repo_dir.join("api.proto"),
         r#"syntax = "proto3"; package api; message Msg { string id = 1; }"#,
-    ).unwrap();
+    )
+    .unwrap();
     std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
 
     let repo_path_str = repo_dir.to_string_lossy();
@@ -942,7 +1033,8 @@ fn contracts_show_returns_schema_detail() {
     std::fs::write(
         repo_dir.join("api.proto"),
         r#"syntax = "proto3"; package api; message Request { string id = 1; }"#,
-    ).unwrap();
+    )
+    .unwrap();
     std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
 
     let repo_path_str = repo_dir.to_string_lossy();
@@ -985,7 +1077,8 @@ package api;
 message Request { string id = 1; }
 service Api { rpc Call(Request) returns (Request); }
 "#,
-    ).unwrap();
+    )
+    .unwrap();
     std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
 
     let repo_path_str = repo_dir.to_string_lossy();
@@ -1007,8 +1100,16 @@ service Api { rpc Call(Request) returns (Request); }
     let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
     let result = &parsed["result"];
 
-    assert!(result.get("command").is_some(), "missing command field: {}", output);
-    assert!(result.get("results").is_some(), "missing results field: {}", output);
+    assert!(
+        result.get("command").is_some(),
+        "missing command field: {}",
+        output
+    );
+    assert!(
+        result.get("results").is_some(),
+        "missing results field: {}",
+        output
+    );
 }
 
 #[test]
@@ -1022,7 +1123,8 @@ fn contracts_usages_returns_envelope() {
     std::fs::write(
         repo_dir.join("api.proto"),
         r#"syntax = "proto3"; package api; message Request { string id = 1; }"#,
-    ).unwrap();
+    )
+    .unwrap();
     std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
 
     let repo_path_str = repo_dir.to_string_lossy();
@@ -1044,8 +1146,16 @@ fn contracts_usages_returns_envelope() {
     let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
     let result = &parsed["result"];
 
-    assert!(result.get("command").is_some(), "missing command field: {}", output);
-    assert!(result.get("results").is_some(), "missing results field: {}", output);
+    assert!(
+        result.get("command").is_some(),
+        "missing command field: {}",
+        output
+    );
+    assert!(
+        result.get("results").is_some(),
+        "missing results field: {}",
+        output
+    );
 }
 
 // ── Inferences command family ───────────────────────────────────────────────
@@ -1079,9 +1189,21 @@ fn inferences_list_returns_envelope() {
     let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
     let result = &parsed["result"];
 
-    assert!(result.get("command").is_some(), "missing command field: {}", output);
-    assert!(result.get("results").is_some(), "missing results field: {}", output);
-    assert!(result.get("count").is_some(), "missing count field: {}", output);
+    assert!(
+        result.get("command").is_some(),
+        "missing command field: {}",
+        output
+    );
+    assert!(
+        result.get("results").is_some(),
+        "missing results field: {}",
+        output
+    );
+    assert!(
+        result.get("count").is_some(),
+        "missing count field: {}",
+        output
+    );
 }
 
 #[test]
@@ -1089,7 +1211,11 @@ fn inferences_list_repo_not_indexed_returns_error() {
     let output = run_daemon_request(
         r#"{"id":"inf-err-1","method":"inferences_list","params":{"repo":"/nonexistent/path"}}"#,
     );
-    assert!(output.contains(r#""code":"RepoNotFound""#), "output: {}", output);
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
+        output
+    );
 }
 
 #[test]
@@ -1143,14 +1269,16 @@ fn deps_list_returns_envelope_with_modules() {
     std::fs::write(
         repo_dir.join("package.json"),
         r#"{"name": "test-pkg", "dependencies": {"express": "^4.0.0"}}"#,
-    ).unwrap();
+    )
+    .unwrap();
     std::fs::write(
         repo_dir.join("server.ts"),
         r#"import express from 'express';
 const app = express();
 app.listen(3000);
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     let repo_path_str = repo_dir.to_string_lossy();
 
@@ -1171,10 +1299,26 @@ app.listen(3000);
     let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
     let result = &parsed["result"];
 
-    assert!(result.get("command").is_some(), "missing command field: {}", output);
-    assert!(result.get("results").is_some(), "missing results field: {}", output);
-    assert!(result.get("count").is_some(), "missing count field: {}", output);
-    assert!(result.get("ecosystem").is_some(), "missing ecosystem field: {}", output);
+    assert!(
+        result.get("command").is_some(),
+        "missing command field: {}",
+        output
+    );
+    assert!(
+        result.get("results").is_some(),
+        "missing results field: {}",
+        output
+    );
+    assert!(
+        result.get("count").is_some(),
+        "missing count field: {}",
+        output
+    );
+    assert!(
+        result.get("ecosystem").is_some(),
+        "missing ecosystem field: {}",
+        output
+    );
 }
 
 #[test]
@@ -1182,7 +1326,11 @@ fn deps_list_repo_not_indexed_returns_error() {
     let output = run_daemon_request(
         r#"{"id":"deps-err-1","method":"deps_list","params":{"repo":"/nonexistent/path"}}"#,
     );
-    assert!(output.contains(r#""code":"RepoNotFound""#), "output: {}", output);
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
+        output
+    );
 }
 
 #[test]
@@ -1196,7 +1344,8 @@ fn deps_list_with_module_filter() {
     std::fs::write(
         repo_dir.join("package.json"),
         r#"{"name": "test-pkg", "dependencies": {"lodash": "^4.0.0"}}"#,
-    ).unwrap();
+    )
+    .unwrap();
     std::fs::write(repo_dir.join("main.ts"), "import _ from 'lodash';").unwrap();
 
     let repo_path_str = repo_dir.to_string_lossy();
@@ -1217,7 +1366,11 @@ fn deps_list_with_module_filter() {
 
     let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
     // Should succeed (may have empty results if module doesn't match)
-    assert!(parsed.get("result").is_some(), "Should have result: {}", output);
+    assert!(
+        parsed.get("result").is_some(),
+        "Should have result: {}",
+        output
+    );
 }
 
 #[test]
@@ -1268,13 +1421,15 @@ fn deps_why_returns_package_usages() {
     std::fs::write(
         repo_dir.join("package.json"),
         r#"{"name": "test-pkg", "dependencies": {"express": "^4.0.0"}}"#,
-    ).unwrap();
+    )
+    .unwrap();
     std::fs::write(
         repo_dir.join("server.ts"),
         r#"import express from 'express';
 const app = express();
 "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     let repo_path_str = repo_dir.to_string_lossy();
 
@@ -1347,7 +1502,8 @@ fn deps_drift_returns_anomalies() {
     std::fs::write(
         repo_dir.join("package.json"),
         r#"{"name": "test-pkg", "dependencies": {"unused-pkg": "^1.0.0"}}"#,
-    ).unwrap();
+    )
+    .unwrap();
     std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
 
     let repo_path_str = repo_dir.to_string_lossy();
@@ -1369,10 +1525,26 @@ fn deps_drift_returns_anomalies() {
     let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
     let result = &parsed["result"];
 
-    assert!(result.get("command").is_some(), "missing command field: {}", output);
-    assert!(result.get("results").is_some(), "missing results field: {}", output);
-    assert!(result.get("count").is_some(), "missing count field: {}", output);
-    assert!(result.get("modules_analyzed").is_some(), "missing modules_analyzed: {}", output);
+    assert!(
+        result.get("command").is_some(),
+        "missing command field: {}",
+        output
+    );
+    assert!(
+        result.get("results").is_some(),
+        "missing results field: {}",
+        output
+    );
+    assert!(
+        result.get("count").is_some(),
+        "missing count field: {}",
+        output
+    );
+    assert!(
+        result.get("modules_analyzed").is_some(),
+        "missing modules_analyzed: {}",
+        output
+    );
 }
 
 #[test]
@@ -1380,7 +1552,11 @@ fn deps_drift_repo_not_indexed_returns_error() {
     let output = run_daemon_request(
         r#"{"id":"dd-err-1","method":"deps_drift","params":{"repo":"/nonexistent/path"}}"#,
     );
-    assert!(output.contains(r#""code":"RepoNotFound""#), "output: {}", output);
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
+        output
+    );
 }
 
 // ── Surfaces command family ─────────────────────────────────────────────────
@@ -1414,9 +1590,21 @@ fn surfaces_list_returns_envelope() {
     let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
     let result = &parsed["result"];
 
-    assert!(result.get("command").is_some(), "missing command field: {}", output);
-    assert!(result.get("results").is_some(), "missing results field: {}", output);
-    assert!(result.get("count").is_some(), "missing count field: {}", output);
+    assert!(
+        result.get("command").is_some(),
+        "missing command field: {}",
+        output
+    );
+    assert!(
+        result.get("results").is_some(),
+        "missing results field: {}",
+        output
+    );
+    assert!(
+        result.get("count").is_some(),
+        "missing count field: {}",
+        output
+    );
 }
 
 #[test]
@@ -1424,7 +1612,11 @@ fn surfaces_list_repo_not_indexed_returns_error() {
     let output = run_daemon_request(
         r#"{"id":"surf-err-1","method":"surfaces_list","params":{"repo":"/nonexistent/path"}}"#,
     );
-    assert!(output.contains(r#""code":"RepoNotFound""#), "output: {}", output);
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
+        output
+    );
 }
 
 #[test]
@@ -1495,8 +1687,16 @@ fn surfaces_show_returns_detail_or_not_found() {
 
     // Either success with detail or error (surface not found is valid)
     if let Some(result) = parsed.get("result") {
-        assert!(result.get("command").is_some(), "missing command field: {}", output);
-        assert!(result.get("surface").is_some(), "missing surface field: {}", output);
+        assert!(
+            result.get("command").is_some(),
+            "missing command field: {}",
+            output
+        );
+        assert!(
+            result.get("surface").is_some(),
+            "missing surface field: {}",
+            output
+        );
     } else {
         // "surface not found" is expected for nonexistent surfaces
         assert!(
@@ -1535,8 +1735,16 @@ fn surfaces_show_missing_surface_param() {
     let results = run_daemon_requests_with_state(vec![&show_request], state);
     let output = &results[0];
 
-    assert!(output.contains(r#""code":"InvalidRequest""#), "output: {}", output);
-    assert!(output.contains("surface"), "Should mention missing surface param: {}", output);
+    assert!(
+        output.contains(r#""code":"InvalidRequest""#),
+        "output: {}",
+        output
+    );
+    assert!(
+        output.contains("surface"),
+        "Should mention missing surface param: {}",
+        output
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1588,7 +1796,11 @@ void start() {
     // Standard envelope fields
     assert_eq!(result["command"], "boundaries list");
     assert!(result["repo"].is_string(), "missing repo: {}", output);
-    assert!(result["snapshot"].is_string(), "missing snapshot: {}", output);
+    assert!(
+        result["snapshot"].is_string(),
+        "missing snapshot: {}",
+        output
+    );
     assert!(result["results"].is_array(), "missing results: {}", output);
     assert!(result["count"].is_u64(), "missing count: {}", output);
 }
@@ -1673,8 +1885,16 @@ fn boundaries_show_returns_detail_or_not_found() {
 
     // Either success with detail or error (surface not found is valid)
     if let Some(result) = parsed.get("result") {
-        assert!(result.get("command").is_some(), "missing command field: {}", output);
-        assert!(result.get("detail").is_some(), "missing detail field: {}", output);
+        assert!(
+            result.get("command").is_some(),
+            "missing command field: {}",
+            output
+        );
+        assert!(
+            result.get("detail").is_some(),
+            "missing detail field: {}",
+            output
+        );
     } else {
         // "surface not found" is expected for nonexistent surfaces
         assert!(
@@ -1713,8 +1933,16 @@ fn boundaries_show_missing_surface_param() {
     let results = run_daemon_requests_with_state(vec![&show_request], state);
     let output = &results[0];
 
-    assert!(output.contains(r#""code":"InvalidRequest""#), "output: {}", output);
-    assert!(output.contains("surface"), "Should mention missing surface param: {}", output);
+    assert!(
+        output.contains(r#""code":"InvalidRequest""#),
+        "output: {}",
+        output
+    );
+    assert!(
+        output.contains("surface"),
+        "Should mention missing surface param: {}",
+        output
+    );
 }
 
 #[test]
@@ -1749,7 +1977,11 @@ fn boundaries_summary_returns_envelope() {
     // Standard envelope fields
     assert_eq!(result["command"], "boundaries summary");
     assert!(result["repo"].is_string(), "missing repo: {}", output);
-    assert!(result["snapshot"].is_string(), "missing snapshot: {}", output);
+    assert!(
+        result["snapshot"].is_string(),
+        "missing snapshot: {}",
+        output
+    );
     assert!(result["summary"].is_object(), "missing summary: {}", output);
 }
 
@@ -1797,7 +2029,11 @@ fn boundaries_links_returns_envelope() {
     // Standard envelope fields
     assert_eq!(result["command"], "boundaries links");
     assert!(result["repo"].is_string(), "missing repo: {}", output);
-    assert!(result["snapshot"].is_string(), "missing snapshot: {}", output);
+    assert!(
+        result["snapshot"].is_string(),
+        "missing snapshot: {}",
+        output
+    );
     assert!(result["results"].is_array(), "missing results: {}", output);
     assert!(result["count"].is_u64(), "missing count: {}", output);
 }
@@ -1847,6 +2083,641 @@ fn boundaries_links_with_service_filter() {
     assert!(
         result.get("filter_service").is_some(),
         "Service filter should be reflected: {}",
+        output
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MODULES COMMAND FAMILY
+// ══════════════════════════════════════════════════════════════════
+
+#[test]
+fn modules_files_returns_envelope() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("modules-files-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::create_dir(repo_dir.join("packages")).unwrap();
+    std::fs::create_dir(repo_dir.join("packages/core")).unwrap();
+    std::fs::write(
+        repo_dir.join("packages/core/index.ts"),
+        "export function main() {}",
+    )
+    .unwrap();
+    // Add package.json to trigger module detection
+    std::fs::write(
+        repo_dir.join("packages/core/package.json"),
+        r#"{"name": "@test/core", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"mf-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Request files for the module (may or may not have detected module)
+    let files_request = format!(
+        r#"{{"id":"mf-2","method":"modules_files","params":{{"repo":"{}","module":"packages/core"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&files_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+
+    // Either success with envelope or module not found error
+    if let Some(result) = parsed.get("result") {
+        assert_eq!(result["command"], "modules files");
+        assert!(result["repo"].is_string(), "missing repo: {}", output);
+        assert!(
+            result["snapshot"].is_string(),
+            "missing snapshot: {}",
+            output
+        );
+        assert!(result["module"].is_object(), "missing module: {}", output);
+        assert!(result["results"].is_array(), "missing results: {}", output);
+        assert!(result["count"].is_u64(), "missing count: {}", output);
+    } else {
+        // Module not found is acceptable for simple fixture
+        assert!(
+            parsed.get("error").is_some(),
+            "Should have result or error: {}",
+            output
+        );
+    }
+}
+
+#[test]
+fn modules_files_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"mf-err","method":"modules_files","params":{"repo":"/nonexistent/path","module":"some-module"}}"#,
+    );
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
+        output
+    );
+}
+
+#[test]
+fn modules_files_missing_module_param() {
+    // Test with an indexed repo to verify module param validation
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("modules-files-err-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"mfe-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Now test missing module param with valid repo
+    let files_request = format!(
+        r#"{{"id":"mfe-2","method":"modules_files","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&files_request], state);
+    let output = &results[0];
+
+    assert!(
+        output.contains(r#""code":"InvalidRequest""#),
+        "output: {}",
+        output
+    );
+    assert!(
+        output.contains("module"),
+        "Should mention missing module param: {}",
+        output
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// modules_deps
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn modules_deps_returns_envelope() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("modules-deps-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::create_dir_all(repo_dir.join("packages/core")).unwrap();
+    std::fs::create_dir_all(repo_dir.join("packages/cli")).unwrap();
+
+    // Create two modules with an import relationship
+    std::fs::write(
+        repo_dir.join("packages/core/index.ts"),
+        "export function coreUtil() {}",
+    )
+    .unwrap();
+    std::fs::write(
+        repo_dir.join("packages/core/package.json"),
+        r#"{"name": "@test/core", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+
+    std::fs::write(
+        repo_dir.join("packages/cli/index.ts"),
+        r#"import { coreUtil } from "../core/index";"#,
+    )
+    .unwrap();
+    std::fs::write(
+        repo_dir.join("packages/cli/package.json"),
+        r#"{"name": "@test/cli", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"md-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Request all module deps
+    let deps_request = format!(
+        r#"{{"id":"md-2","method":"modules_deps","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&deps_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+
+    // Check envelope fields
+    assert!(
+        parsed.get("result").is_some(),
+        "Should have result field: {}",
+        output
+    );
+    let result = &parsed["result"];
+    assert_eq!(
+        result["command"], "modules deps",
+        "command mismatch: {}",
+        output
+    );
+    assert!(result.get("repo").is_some(), "Should have repo: {}", output);
+    assert!(
+        result.get("snapshot").is_some(),
+        "Should have snapshot: {}",
+        output
+    );
+    assert!(
+        result.get("results").is_some(),
+        "Should have results: {}",
+        output
+    );
+    assert!(
+        result.get("count").is_some(),
+        "Should have count: {}",
+        output
+    );
+    assert!(
+        result.get("diagnostics").is_some(),
+        "Should have diagnostics: {}",
+        output
+    );
+    assert_eq!(
+        result["direction"], "all",
+        "direction should default to all: {}",
+        output
+    );
+}
+
+#[test]
+fn modules_deps_with_module_filter() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("modules-deps-filter-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::create_dir_all(repo_dir.join("packages/core")).unwrap();
+    std::fs::write(
+        repo_dir.join("packages/core/index.ts"),
+        "export function coreUtil() {}",
+    )
+    .unwrap();
+    std::fs::write(
+        repo_dir.join("packages/core/package.json"),
+        r#"{"name": "@test/core", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"mdf-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Request deps for specific module with direction
+    let deps_request = format!(
+        r#"{{"id":"mdf-2","method":"modules_deps","params":{{"repo":"{}","module":"packages/core","direction":"outbound"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&deps_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+
+    // Should succeed (module exists) or error if module not detected
+    if parsed.get("result").is_some() {
+        let result = &parsed["result"];
+        assert_eq!(
+            result["direction"], "outbound",
+            "direction mismatch: {}",
+            output
+        );
+        assert!(
+            result.get("module").is_some(),
+            "Should have module field: {}",
+            output
+        );
+    } else {
+        // Module detection may fail - that's okay for this test
+        assert!(
+            parsed.get("error").is_some(),
+            "Should have result or error: {}",
+            output
+        );
+    }
+}
+
+#[test]
+fn modules_deps_direction_without_module_error() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("modules-deps-dir-err-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"mdde-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Request with direction but no module - should error
+    let deps_request = format!(
+        r#"{{"id":"mdde-2","method":"modules_deps","params":{{"repo":"{}","direction":"outbound"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&deps_request], state);
+    let output = &results[0];
+
+    assert!(
+        output.contains(r#""code":"InvalidRequest""#),
+        "Should be InvalidRequest error: {}",
+        output
+    );
+    assert!(
+        output.contains("direction") || output.contains("module"),
+        "Should mention direction requires module: {}",
+        output
+    );
+}
+
+#[test]
+fn modules_deps_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"md-err","method":"modules_deps","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
+        output
+    );
+}
+
+#[test]
+fn modules_deps_module_not_found_returns_error() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("modules-deps-notfound-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"mdnf-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Request deps for non-existent module
+    let deps_request = format!(
+        r#"{{"id":"mdnf-2","method":"modules_deps","params":{{"repo":"{}","module":"nonexistent-module"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&deps_request], state);
+    let output = &results[0];
+
+    assert!(
+        output.contains(r#""code":"InvalidRequest""#),
+        "Should be InvalidRequest error: {}",
+        output
+    );
+    assert!(
+        output.contains("module not found"),
+        "Should mention module not found: {}",
+        output
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// modules_violations
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn modules_violations_returns_envelope() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("modules-violations-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::create_dir_all(repo_dir.join("packages/core")).unwrap();
+    std::fs::write(
+        repo_dir.join("packages/core/index.ts"),
+        "export function coreUtil() {}",
+    )
+    .unwrap();
+    std::fs::write(
+        repo_dir.join("packages/core/package.json"),
+        r#"{"name": "@test/core", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"mv-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Request violations
+    let violations_request = format!(
+        r#"{{"id":"mv-2","method":"modules_violations","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&violations_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+
+    // Check envelope fields
+    assert!(
+        parsed.get("result").is_some(),
+        "Should have result field: {}",
+        output
+    );
+    let result = &parsed["result"];
+    assert_eq!(
+        result["command"], "modules violations",
+        "command mismatch: {}",
+        output
+    );
+    assert!(result.get("repo").is_some(), "Should have repo: {}", output);
+    assert!(
+        result.get("snapshot").is_some(),
+        "Should have snapshot: {}",
+        output
+    );
+    assert!(
+        result.get("results").is_some(),
+        "Should have results: {}",
+        output
+    );
+    assert!(
+        result["results"].get("violations").is_some(),
+        "Should have violations: {}",
+        output
+    );
+    assert!(
+        result["results"].get("stale_declarations").is_some(),
+        "Should have stale_declarations: {}",
+        output
+    );
+    assert!(
+        result.get("count").is_some(),
+        "Should have count: {}",
+        output
+    );
+    assert!(
+        result.get("stale_count").is_some(),
+        "Should have stale_count: {}",
+        output
+    );
+    assert!(
+        result.get("diagnostics").is_some(),
+        "Should have diagnostics: {}",
+        output
+    );
+}
+
+#[test]
+fn modules_violations_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"mv-err","method":"modules_violations","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
+        output
+    );
+}
+
+#[test]
+fn modules_violations_no_declarations_returns_empty() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("mv-no-decl-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function main() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"mvnd-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Request violations (no declarations exist)
+    let violations_request = format!(
+        r#"{{"id":"mvnd-2","method":"modules_violations","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&violations_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+
+    let result = &parsed["result"];
+    assert_eq!(
+        result["count"], 0,
+        "No violations expected without declarations: {}",
+        output
+    );
+    let violations = result["results"]["violations"].as_array().unwrap();
+    assert!(
+        violations.is_empty(),
+        "Violations should be empty: {}",
+        output
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// modules_unowned
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn modules_unowned_returns_envelope() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("modules-unowned-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::create_dir_all(repo_dir.join("packages/core")).unwrap();
+    std::fs::write(
+        repo_dir.join("packages/core/index.ts"),
+        "export function coreUtil() {}",
+    )
+    .unwrap();
+    std::fs::write(
+        repo_dir.join("packages/core/package.json"),
+        r#"{"name": "@test/core", "version": "1.0.0"}"#,
+    )
+    .unwrap();
+    // Add an unowned file at root
+    std::fs::write(repo_dir.join("orphan.ts"), "export function orphan() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    let index_request = format!(
+        r#"{{"id":"mu-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Request unowned files
+    let unowned_request = format!(
+        r#"{{"id":"mu-2","method":"modules_unowned","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&unowned_request], state);
+    let output = &results[0];
+
+    let parsed: serde_json::Value = serde_json::from_str(output).unwrap();
+
+    // Check envelope fields
+    assert!(
+        parsed.get("result").is_some(),
+        "Should have result field: {}",
+        output
+    );
+    let result = &parsed["result"];
+    assert_eq!(
+        result["command"], "modules unowned",
+        "command mismatch: {}",
+        output
+    );
+    assert!(result.get("repo").is_some(), "Should have repo: {}", output);
+    assert!(
+        result.get("snapshot").is_some(),
+        "Should have snapshot: {}",
+        output
+    );
+    assert!(
+        result.get("results").is_some(),
+        "Should have results: {}",
+        output
+    );
+    assert!(
+        result.get("count").is_some(),
+        "Should have count: {}",
+        output
+    );
+    assert!(
+        result.get("summary").is_some(),
+        "Should have summary: {}",
+        output
+    );
+    // Check summary fields
+    let summary = &result["summary"];
+    assert!(
+        summary.get("total_indexed_files").is_some(),
+        "Should have total_indexed_files: {}",
+        output
+    );
+    assert!(
+        summary.get("total_owned_files").is_some(),
+        "Should have total_owned_files: {}",
+        output
+    );
+    assert!(
+        summary.get("total_unowned_files").is_some(),
+        "Should have total_unowned_files: {}",
+        output
+    );
+    assert!(
+        summary.get("unowned_pct").is_some(),
+        "Should have unowned_pct: {}",
+        output
+    );
+    assert!(
+        summary.get("by_reason").is_some(),
+        "Should have by_reason: {}",
+        output
+    );
+}
+
+#[test]
+fn modules_unowned_repo_not_indexed_returns_error() {
+    let output = run_daemon_request(
+        r#"{"id":"mu-err","method":"modules_unowned","params":{"repo":"/nonexistent/path"}}"#,
+    );
+    assert!(
+        output.contains(r#""code":"RepoNotFound""#),
+        "output: {}",
         output
     );
 }
