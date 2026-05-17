@@ -78,9 +78,16 @@ rmap orient ./some.db some-repo-uid   # REMOVED
 4. slice/roadmap/current-slice documents agree
 5. Old positional syntax removed for migrated commands
 
-### Blocked Slices
+### Next Slice
 
-None. REG-1 is the current priority.
+**CLI-OUT-1: Presentation Layer** — PLANNING
+
+Slice doc: `docs/slices/cli-out-1-presentation-layer.md`
+
+Problem: Current CLI dumps daemon DTOs directly to stdout. No human-first presentation.
+
+Scope: Human-default plain text output for `orient`, `check`, `explain`. 
+`--json` flag for machine mode. Dedicated `presentation/` module with typed response structs.
 
 ---
 

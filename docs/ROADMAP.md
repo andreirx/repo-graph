@@ -73,6 +73,7 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **LINUX-1** | Linux installer + daemon service (systemd user unit) | IMPLEMENTED |
 | **RMAPD-2** | Unix socket transport (resident daemon model) | IMPLEMENTED |
 | **REG-1** | Repo registry + cwd auto-discovery (daemon-native CLI) | **CURRENT** |
+| **CLI-OUT-1** | Presentation layer (human-default output, --json opt-in) | PLANNED |
 | **CURSOR-1** | Cursor MCP/rules integration | PLANNED |
 | **WIN-1** | Windows distribution/install | DEFERRED |
 | **MAC-2** | macOS signing/notarization | DEFERRED |
@@ -147,6 +148,21 @@ See `docs/slices/reg-1-repo-registry.md` for full specification.
 3. Ignored REG-1 tests reduced or accounted for — IN PROGRESS
 4. slice/roadmap/current-slice documents agree — ACHIEVED (reconciled 2026-05-17)
 
+### Next Priority
+
+**CLI-OUT-1: Presentation Layer** — PLANNING
+
+Problem: Current CLI dumps daemon DTOs directly to stdout. No human-first presentation.
+The daemon transport envelope is being used as the product UI.
+
+Scope:
+- Human-default plain text output for `orient`, `check`, `explain`
+- `--json` flag for machine mode (full daemon envelope)
+- Dedicated `presentation/` module with typed response structs
+- No terminal styling/color in phase 1
+
+See `docs/slices/cli-out-1-presentation-layer.md` for full specification.
+
 Completed:
 - REL-SUPPORT-1: v0.1.1 release (CI validated)
 - RGISTR-1: rgistr packaged as Node SEA binary in release archive
@@ -197,7 +213,8 @@ HOOK-1 delivered:
 12. ~~LINUX-1 — Linux installer + daemon service~~ (IMPLEMENTED)
 13. ~~RMAPD-2 — Unix socket transport~~ (IMPLEMENTED)
 14. **REG-1 — Repo registry + cwd auto-discovery (CURRENT)**
-15. CURSOR-1 — different integration model, separate from hook lane
+15. CLI-OUT-1 — Presentation layer (human-default output)
+16. CURSOR-1 — different integration model, separate from hook lane
 
 ### Artifact Matrix (REL-1)
 
