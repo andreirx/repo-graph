@@ -984,7 +984,7 @@ dependencies = [
 
 [[package]]
 name = "repo-graph-algorithms"
-version = "0.1.8"
+version = "0.1.9"
 
 [[package]]
 name = "repo-graph-boundary-interaction"
@@ -1061,7 +1061,7 @@ dependencies = [
 
 [[package]]
 name = "repo-graph-daemon-runtime"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "dirs 6.0.0",
  "enrichment",
@@ -1271,7 +1271,7 @@ dependencies = [
 
 [[package]]
 name = "repo-graph-rgr"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -1395,7 +1395,7 @@ dependencies = [
 
 [[package]]
 name = "rmapd"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "repo-graph-daemon-runtime",
 ]
