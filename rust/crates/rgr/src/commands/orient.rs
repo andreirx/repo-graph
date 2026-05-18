@@ -8,23 +8,35 @@
 //! via the daemon registry. No positional `<db_path> <repo_uid>` arguments.
 //!
 //! ```text
-//! rmap orient [--focus <path>] [--budget small|medium|large]
-//! rmap check
-//! rmap explain <target> [--budget medium|large]
+//! rmap orient [--focus <path>] [--budget small|medium|large] [--json]
+//! rmap check [--json]
+//! rmap explain <target> [--budget medium|large] [--json]
 //! ```
+//!
+//! # CLI-OUT-1 Output Modes
+//!
+//! - **Human mode (default)**: Plain text output optimized for reading.
+//!   Internal envelope fields are hidden. Signals grouped by severity.
+//!
+//! - **Machine mode (--json)**: Full daemon envelope as pretty-printed JSON.
+//!   Backward compatible with pre-CLI-OUT-1 behavior.
 
 use std::process::ExitCode;
 
 use crate::daemon_client::{daemon_unavailable_message, DaemonClient, DaemonClientError};
+use crate::presentation::check::CheckResponse;
+use crate::presentation::explain::ExplainResponse;
+use crate::presentation::orient::OrientResponse;
 
-// ── orient command (REG-1) ───────────────────────────────────────────
+// ── orient command (REG-1 + CLI-OUT-1) ───────────────────────────────
 //
-// `rmap orient [--budget small|medium|large] [--focus <string>]`
+// `rmap orient [--budget small|medium|large] [--focus <string>] [--json]`
 //
-// Resolves repo from cwd via daemon registry. Output is JSON on stdout.
+// Resolves repo from cwd via daemon registry.
+// Default: human-readable plain text. --json: full envelope.
 //
 // Exit codes:
-//   0 — success, JSON on stdout
+//   0 — success
 //   1 — usage error (unknown flag, invalid budget, etc.)
 //   2 — runtime error (daemon unavailable, repo not indexed, etc.)
 
@@ -32,11 +44,15 @@ pub fn run_orient(args: &[String]) -> ExitCode {
     // ── Parse args ───────────────────────────────────────────
     let mut budget_raw: Option<String> = None;
     let mut focus_raw: Option<String> = None;
+    let mut json_mode = false;
 
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
         match arg.as_str() {
+            "--json" => {
+                json_mode = true;
+            }
             "--budget" => {
                 if budget_raw.is_some() {
                     eprintln!("error: --budget specified more than once");
@@ -158,16 +174,33 @@ pub fn run_orient(args: &[String]) -> ExitCode {
 
     // ── Execute request ──────────────────────────────────────
     match client.request("orient", Some(params)) {
-        Ok(result) => match serde_json::to_string_pretty(&result) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
+        Ok(result) => {
+            if json_mode {
+                // Machine mode: print full envelope
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
+            } else {
+                // Human mode: parse and render
+                match serde_json::from_value::<OrientResponse>(result) {
+                    Ok(response) => {
+                        println!("{}", response.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse orient response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                ExitCode::from(2)
-            }
-        },
+        }
         Err(DaemonClientError::DaemonError { code, message }) => {
             if code == "RepoNotFound" {
                 eprintln!("error: repo not indexed");
@@ -185,21 +218,35 @@ pub fn run_orient(args: &[String]) -> ExitCode {
 }
 
 fn print_orient_usage() {
-    eprintln!("usage: rmap orient [--focus <path>] [--budget small|medium|large]");
+    eprintln!("usage: rmap orient [--focus <path>] [--budget small|medium|large] [--json]");
 }
 
 // ── check command (REG-1) ────────────────────────────────────────────
 //
-// `rmap check`
+// `rmap check [--json]`
 //
 // Resolves repo from cwd via daemon registry.
 
 pub fn run_check_cmd(args: &[String]) -> ExitCode {
-    // No args expected in REG-1 contract
-    if !args.is_empty() {
-        eprintln!("error: unexpected arguments");
-        eprintln!("usage: rmap check");
-        return ExitCode::from(1);
+    // ── Parse args ───────────────────────────────────────────
+    let mut json_mode = false;
+
+    for arg in args {
+        match arg.as_str() {
+            "--json" => {
+                json_mode = true;
+            }
+            flag if flag.starts_with("--") => {
+                eprintln!("error: unknown flag: {}", flag);
+                eprintln!("usage: rmap check [--json]");
+                return ExitCode::from(1);
+            }
+            other => {
+                eprintln!("error: unexpected argument: {}", other);
+                eprintln!("usage: rmap check [--json]");
+                return ExitCode::from(1);
+            }
+        }
     }
 
     // ── Resolve repo from cwd ────────────────────────────────
@@ -258,14 +305,29 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
                 })
                 .unwrap_or(2);
 
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    ExitCode::from(exit_code)
+            if json_mode {
+                // Machine mode: print full envelope
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::from(exit_code)
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        ExitCode::from(2)
+                    }
                 }
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    ExitCode::from(2)
+            } else {
+                // Human mode: parse and render
+                match serde_json::from_value::<CheckResponse>(result) {
+                    Ok(response) => {
+                        println!("{}", response.render_human());
+                        ExitCode::from(exit_code)
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse check response: {}", e);
+                        ExitCode::from(2)
+                    }
                 }
             }
         }
@@ -287,19 +349,23 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
 
 // ── explain command (REG-1) ──────────────────────────────────────────
 //
-// `rmap explain <target> [--budget medium|large]`
+// `rmap explain <target> [--budget medium|large] [--json]`
 //
 // Resolves repo from cwd via daemon registry.
 
 pub fn run_explain_cmd(args: &[String]) -> ExitCode {
-    // Parse args: one positional (target), optional --budget
+    // Parse args: one positional (target), optional --budget, optional --json
     let mut target: Option<String> = None;
     let mut budget_raw: Option<String> = None;
+    let mut json_mode = false;
 
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
         match arg.as_str() {
+            "--json" => {
+                json_mode = true;
+            }
             "--budget" => {
                 if budget_raw.is_some() {
                     eprintln!("error: --budget specified more than once");
@@ -405,16 +471,33 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
     });
 
     match client.request("explain", Some(params)) {
-        Ok(result) => match serde_json::to_string_pretty(&result) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
+        Ok(result) => {
+            if json_mode {
+                // Machine mode: print full envelope
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
+            } else {
+                // Human mode: parse and render
+                match serde_json::from_value::<ExplainResponse>(result) {
+                    Ok(response) => {
+                        println!("{}", response.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse explain response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                ExitCode::from(2)
-            }
-        },
+        }
         Err(DaemonClientError::DaemonError { code, message }) => {
             if code == "RepoNotFound" {
                 eprintln!("error: repo not indexed");
@@ -432,5 +515,5 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
 }
 
 fn print_explain_usage() {
-    eprintln!("usage: rmap explain <target> [--budget medium|large]");
+    eprintln!("usage: rmap explain <target> [--budget medium|large] [--json]");
 }

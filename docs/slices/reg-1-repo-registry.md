@@ -1,7 +1,7 @@
 # REG-1: Repo Registry and CWD Auto-Discovery
 
-**Status:** IN PROGRESS  
-**Priority:** BLOCKING (CLI contract debt)  
+**Status:** IMPLEMENTED (2026-05-17)  
+**Closure:** Read-side contract migration complete. Write/governance families deferred. Presentation handed to CLI-OUT-1.  
 **Type:** Support Module + CLI Contract  
 
 ## Problem Statement

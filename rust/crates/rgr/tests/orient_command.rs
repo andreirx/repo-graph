@@ -1,15 +1,18 @@
-//! Deterministic tests for the `orient` command (Rust-43B).
+//! Deterministic tests for the `orient` command.
 //!
-//! # REG-1 Contract
+//! # REG-1 + CLI-OUT-1 Contract
 //!
 //! With REG-1, the `orient` command requires daemon and resolves repo from cwd.
-//! New contract: `rmap orient [--focus <path>] [--budget small|medium|large]`
+//! With CLI-OUT-1, output defaults to human-readable; `--json` returns full envelope.
+//!
+//! New contract: `rmap orient [--focus <path>] [--budget small|medium|large] [--json]`
 //!
 //! ## Test Categories
 //!
 //! 1. **Usage error tests**: Test CLI parsing without daemon
 //! 2. **Daemon required test**: Verify daemon is needed
-//! 3. **Success tests**: IGNORED - require daemon infrastructure
+//! 3. **--json flag tests**: Verify flag parsing
+//! 4. **Success tests**: In daemon_dispatch.rs (require daemon infrastructure)
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -179,6 +182,45 @@ fn orient_budget_flag_as_value_usage_error() {
     );
 }
 
+// ── 3. CLI-OUT-1: --json flag parsing ────────────────────────────────
+
+#[test]
+fn orient_json_flag_accepted() {
+    // --json is a valid flag; should not cause usage error (exit 1)
+    // Will still exit 2 (daemon unavailable) but flag is parsed
+    let output = run_cmd_isolated(&["orient", "--json"]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "Should be daemon error (2), not usage error (1). stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn orient_json_with_other_flags_accepted() {
+    // --json combined with other flags
+    let output = run_cmd_isolated(&["orient", "--focus", "src/core", "--json"]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "Should be daemon error (2), not usage error (1). stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn orient_json_flag_order_independent() {
+    // --json first, then other flags
+    let output = run_cmd_isolated(&["orient", "--json", "--budget", "large"]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "Flag order should not matter. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // SUCCESS-PATH TESTS
 //
@@ -187,4 +229,9 @@ fn orient_budget_flag_as_value_usage_error() {
 // - orient_missing_repo_returns_invalid_request
 // - orient_repo_not_indexed_returns_error
 // - e2e_index_then_orient_works
+//
+// CLI-OUT-1 output mode tests (human vs JSON) require daemon success
+// to produce actual output. Those tests are in daemon_dispatch.rs:
+// - e2e_orient_json_mode_returns_envelope
+// - e2e_orient_human_mode_hides_internal_fields
 // ══════════════════════════════════════════════════════════════════════

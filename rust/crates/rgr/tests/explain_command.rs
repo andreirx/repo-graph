@@ -1,15 +1,17 @@
 //! Deterministic tests for the `explain` command.
 //!
-//! # REG-1 Contract
+//! # REG-1 + CLI-OUT-1 Contract
 //!
 //! With REG-1, the `explain` command requires daemon and resolves repo from cwd.
-//! New contract: `rmap explain <target> [--budget medium|large]`
+//! With CLI-OUT-1, output defaults to human-readable; `--json` returns full envelope.
+//!
+//! New contract: `rmap explain <target> [--budget medium|large] [--json]`
 //!
 //! ## Test Categories
 //!
 //! 1. **Usage error tests**: Test CLI parsing without daemon
-//! 2. **Success tests**: IGNORED - require daemon infrastructure
-//!    These should be moved to daemon_dispatch.rs for proper testing
+//! 2. **--json flag tests**: Verify flag parsing
+//! 3. **Success tests**: In daemon_dispatch.rs (require daemon infrastructure)
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -97,6 +99,45 @@ fn explain_daemon_required() {
     assert!(!stderr.is_empty(), "Should have error message on stderr");
 }
 
+// ── 3. CLI-OUT-1: --json flag parsing ────────────────────────────────
+
+#[test]
+fn explain_json_flag_accepted() {
+    // --json is a valid flag; should not cause usage error (exit 1)
+    // Will still exit 2 (daemon unavailable) but flag is parsed
+    let output = run_cmd_isolated(&["explain", "src/a.ts", "--json"]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "Should be daemon error (2), not usage error (1). stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn explain_json_with_budget_accepted() {
+    // --json combined with --budget
+    let output = run_cmd_isolated(&["explain", "src/a.ts", "--budget", "large", "--json"]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "Should be daemon error (2), not usage error (1). stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn explain_json_flag_order_independent() {
+    // --json first, then target
+    let output = run_cmd_isolated(&["explain", "--json", "src/a.ts"]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "Flag order should not matter. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // SUCCESS-PATH TESTS
 //
@@ -104,5 +145,7 @@ fn explain_daemon_required() {
 // infrastructure is available. See:
 // - explain_missing_target_returns_invalid_request
 // - explain_rejects_small_budget
-// Stub tests deleted as part of REG-1 cleanup.
+//
+// CLI-OUT-1 output mode tests (human vs JSON) require daemon success
+// to produce actual output. Those tests are in daemon_dispatch.rs.
 // ══════════════════════════════════════════════════════════════════════

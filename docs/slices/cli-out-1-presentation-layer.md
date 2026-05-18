@@ -1,9 +1,9 @@
 # CLI-OUT-1: Presentation Layer for Human-Default Output
 
-**Status:** PLANNING  
+**Status:** IMPLEMENTED (2026-05-18)  
 **Priority:** HIGH (product surface quality)  
 **Type:** CLI Architecture + UX  
-**Depends on:** REG-1 (in progress)
+**Depends on:** REG-1 (implemented)
 
 ## Problem Statement
 

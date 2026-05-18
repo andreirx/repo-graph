@@ -60,14 +60,24 @@ use std::sync::Arc;
 
 use repo_graph_daemon_transport::{run_socket_transport, run_stdio, SocketConfig};
 
-/// Returns the platform-native daemon socket path.
+/// Returns the daemon socket path.
+///
+/// Resolution order:
+/// 1. `RMAP_SOCKET_PATH` environment variable (if set)
+/// 2. Platform-native default path
 ///
 /// This duplicates the logic from `rgr/src/cli/paths.rs` to avoid
 /// a dependency from daemon-runtime to rgr. The paths must stay in sync.
 ///
+/// Default paths:
 /// - macOS: `~/Library/Application Support/repo-graph/daemon.sock`
 /// - Linux: `~/.local/share/rmap/daemon.sock`
 fn daemon_socket_path() -> Result<PathBuf, String> {
+    // Check for environment override (used by tests)
+    if let Ok(override_path) = std::env::var("RMAP_SOCKET_PATH") {
+        return Ok(PathBuf::from(override_path));
+    }
+
     #[cfg(target_os = "macos")]
     {
         dirs::data_dir()

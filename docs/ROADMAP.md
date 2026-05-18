@@ -72,96 +72,53 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **CODEX-1** | Codex CLI integration (`hooks.json`) | IMPLEMENTED |
 | **LINUX-1** | Linux installer + daemon service (systemd user unit) | IMPLEMENTED |
 | **RMAPD-2** | Unix socket transport (resident daemon model) | IMPLEMENTED |
-| **REG-1** | Repo registry + cwd auto-discovery (daemon-native CLI) | **CURRENT** |
-| **CLI-OUT-1** | Presentation layer (human-default output, --json opt-in) | PLANNED |
-| **CURSOR-1** | Cursor MCP/rules integration | PLANNED |
+| **REG-1** | Repo registry + cwd auto-discovery (read-side contract) | IMPLEMENTED |
+| **CLI-OUT-1** | Presentation layer (human-default output, --json opt-in) | IMPLEMENTED |
+| **CURSOR-1** | Cursor MCP/rules integration | **CURRENT** |
 | **WIN-1** | Windows distribution/install | DEFERRED |
 | **MAC-2** | macOS signing/notarization | DEFERRED |
 | **UPDATE-1** | Updater/repair channel | DEFERRED |
 
 ### Current Priority
 
-**REG-1: Repo Registry + CWD Auto-Discovery** — BLOCKING
+**CURSOR-1: Cursor Integration** — PLANNED
 
-The current CLI exposes internal storage concepts (`db_path`, `repo_uid`) that should be
-daemon-internal. This contradicts the daemon-native product story.
+Different integration model from Claude Code / Codex. Needs investigation.
 
-Current (leaky) contract:
-```bash
-rmap index ./path/to/repo ./repo.db
-rmap orient ./repo.db pmc/2026-05-15T13:20:55.279Z/bf171385
-```
+### Recently Completed
 
-Target (daemon-native) contract:
-```bash
-rmap index .
-rmap orient
-```
+**CLI-OUT-1: Presentation Layer** — IMPLEMENTED (2026-05-18)
 
-REG-1 delivers:
-- Daemon-maintained repo registry (maps repo paths → db paths + repo_uids)
-- CWD-based repo auto-discovery
-- Standard database location (`~/.local/share/rmap/databases/`)
-- `repo_uid` becomes internal-only (visible only in debug/doctor output)
-- Explicit `--db`/`--repo-uid` flags retained as escape hatches for diagnostics
-
-See `docs/slices/reg-1-repo-registry.md` for full specification.
-
-**Completed:**
-- RMAPD-2: Unix socket transport (v0.1.5)
-- MAC-1: macOS installer validated (v0.1.3)
-- LINUX-1: Linux installer validated (v0.1.5)
-
-**REG-1 CLI Migration Progress (2026-05-17):**
-
-| Command Family | Subcommand | Status |
-|---------------|------------|--------|
-| `surfaces` | list, show | REG-1 migrated |
-| `boundaries` | list, show, summary, links | REG-1 migrated |
-| `modules` | list | REG-1 migrated |
-| `modules` | show | REG-1 migrated |
-| `modules` | files | REG-1 migrated |
-| `modules` | deps | REG-1 migrated |
-| `modules` | violations | REG-1 migrated |
-| `modules` | unowned | REG-1 migrated |
-| `modules` | boundary | Legacy write (Batch 4) |
-| `assess` | | Legacy write (Batch 4) |
-
-**Modules read-side complete.** All `modules` read subcommands migrated to REG-1.
-
-**Other REG-1 read commands (verified from code):**
-- `orient`, `check`, `explain` (orient.rs)
-- `callers`, `callees`, `path`, `imports`, `cycles`, `stats` (graph.rs)
-- `trust`, `gate`, `deps`, `docs`, `contracts`, `inferences`, `resource`
-- `dead` — disabled (not legacy, just disabled due to false positive rates)
-
-**Remaining legacy commands (still require `<db_path> <repo_uid>`):**
-- `assess`, `enrich`, `policy` — write operations
-- `modules boundary` — write operation
-- `violations` (top-level) — mixed-responsibility in violations.rs
-- `quality/*` (churn, coverage, hotspots, metrics, risk)
-- `declare/*` (all declaration commands)
-
-**REG-1 Definition of Done (close but not met):**
-1. Most normal read workflows no longer require `<db_path> <repo_uid>` — ACHIEVED
-2. Remaining legacy = write operations + quality + declare families — DOCUMENTED
-3. Ignored REG-1 tests reduced or accounted for — IN PROGRESS
-4. slice/roadmap/current-slice documents agree — ACHIEVED (reconciled 2026-05-17)
-
-### Next Priority
-
-**CLI-OUT-1: Presentation Layer** — PLANNING
-
-Problem: Current CLI dumps daemon DTOs directly to stdout. No human-first presentation.
-The daemon transport envelope is being used as the product UI.
-
-Scope:
+Delivered:
 - Human-default plain text output for `orient`, `check`, `explain`
 - `--json` flag for machine mode (full daemon envelope)
-- Dedicated `presentation/` module with typed response structs
-- No terminal styling/color in phase 1
+- `presentation/` module with typed response structs
+- 50 tests (37 renderer unit + 7 flag parsing + 6 CLI success-path)
 
-See `docs/slices/cli-out-1-presentation-layer.md` for full specification.
+See `docs/slices/cli-out-1-presentation-layer.md` for specification.
+
+---
+
+**REG-1: Repo Registry + CWD Auto-Discovery** — IMPLEMENTED (2026-05-17)
+
+**Closure scope: Read-side contract migration complete.**
+- Write/governance families intentionally deferred
+- Presentation quality handed off to CLI-OUT-1
+
+Delivered:
+- Daemon-owned repo registry with persistence
+- CWD-based resolution for normal read/query surface
+- `db_path`/`repo_uid` removed from normal read workflows
+- All read commands migrated (orient, check, explain, callers, callees, path, imports, cycles, stats, trust, gate, modules/*, boundaries/*, surfaces/*, contracts, docs, deps, inferences, resource)
+
+Explicitly deferred:
+- Write operations: `assess`, `enrich`, `modules boundary`
+- Governance: `declare/*`, `policy`
+- Quality commands: `quality/*` (churn, risk, hotspots, metrics, coverage)
+- Other legacy: top-level `violations`
+- Override flags: `--repo`, `--repo-path`, `--db`, `--repo-uid`
+
+See `docs/slices/reg-1-repo-registry.md` for full specification.
 
 Completed:
 - REL-SUPPORT-1: v0.1.1 release (CI validated)
@@ -212,9 +169,9 @@ HOOK-1 delivered:
 11. ~~CODEX-1 — Codex integration on macOS~~ (IMPLEMENTED)
 12. ~~LINUX-1 — Linux installer + daemon service~~ (IMPLEMENTED)
 13. ~~RMAPD-2 — Unix socket transport~~ (IMPLEMENTED)
-14. **REG-1 — Repo registry + cwd auto-discovery (CURRENT)**
-15. CLI-OUT-1 — Presentation layer (human-default output)
-16. CURSOR-1 — different integration model, separate from hook lane
+14. ~~REG-1 — Repo registry + cwd auto-discovery (read-side)~~ (IMPLEMENTED)
+15. ~~CLI-OUT-1 — Presentation layer (human-default output)~~ (IMPLEMENTED)
+16. **CURSOR-1 — Cursor integration (CURRENT)**
 
 ### Artifact Matrix (REL-1)
 

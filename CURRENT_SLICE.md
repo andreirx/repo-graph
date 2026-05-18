@@ -2,96 +2,71 @@
 
 ## Current Priority
 
-**REG-1: Repo Registry + CWD Auto-Discovery** — IN PROGRESS
+**CURSOR-1: Cursor Integration** — PLANNED
 
-Slice doc: `docs/slices/reg-1-repo-registry.md`
+Slice doc: `docs/slices/cursor-1-cursor-integration.md` (to be created)
 
-### Goal
-
-Eliminate `<db_path> <repo_uid>` from normal CLI workflows. Daemon resolves repos from cwd via registry.
-
-### Target Contract
-
-```bash
-# Normal path (daemon resolves from cwd)
-rmap index .
-rmap orient
-rmap modules list
-rmap explain src/foo.ts
-
-# Not required in normal use
-rmap orient ./some.db some-repo-uid   # REMOVED
-```
-
-### Progress (2026-05-17)
-
-**Infrastructure (IMPLEMENTED):**
-- RepoRegistry in daemon-runtime
-- Registry persistence (registry.json)
-- `resolve_repo`, `list_repos`, `repo_info`, `repo_alias`, `repo_remove` handlers
-- REG-1 repo resolution helper: `resolve_and_load_repo()`
-- DaemonClient in CLI for daemon communication
-
-**Command Families Migrated:**
-| Family | Status |
-|--------|--------|
-| `surfaces` | list, show — REG-1 |
-| `boundaries` | list, show, summary, links — REG-1 |
-| `modules` | list, show, files, deps, violations, unowned — REG-1 |
-
-**Also REG-1 (verified from code):**
-| Family | Commands |
-|--------|----------|
-| orient family | orient, check, explain |
-| graph family | callers, callees, path, imports, cycles, stats |
-| other | trust, gate, deps, docs, contracts, inferences, resource |
-| dead | Disabled (not legacy, just disabled) |
-
-**Still Legacy (db_path + repo_uid required):**
-| Command | Notes |
-|---------|-------|
-| `assess` | Write operation |
-| `enrich` | Write operation |
-| `policy` | Legacy |
-| `modules boundary` | Write operation |
-| `violations` (top-level) | Mixed-responsibility in violations.rs |
-| `quality/churn` | Legacy |
-| `quality/risk` | Legacy |
-| `quality/hotspots` | Legacy |
-| `quality/metrics` | Legacy |
-| `quality/coverage` | Legacy |
-| `declare/*` | All declaration commands — Legacy write |
-
-**Test Migration:**
-- daemon_dispatch.rs: 87 success-path tests using daemon infrastructure
-- Ignored tests: 71 remaining (46 stubs deleted)
-  - 43 in gate_command.rs — real implementations using old CLI contract, needs migration
-  - 11 in dead_command.rs — command disabled (not REG-1 related)
-  - 9 in index_contract_summary.rs — real implementations using old CLI contract
-  - 8 in declare_* — legacy write operations
-
-### Definition of Done
-
-1. No normal documented workflow requires `<db_path> <repo_uid>`
-2. Remaining legacy commands are either migrated or explicitly deferred in docs
-3. Ignored REG-1 tests are reduced or accounted for
-4. slice/roadmap/current-slice documents agree
-5. Old positional syntax removed for migrated commands
-
-### Next Slice
-
-**CLI-OUT-1: Presentation Layer** — PLANNING
-
-Slice doc: `docs/slices/cli-out-1-presentation-layer.md`
-
-Problem: Current CLI dumps daemon DTOs directly to stdout. No human-first presentation.
-
-Scope: Human-default plain text output for `orient`, `check`, `explain`. 
-`--json` flag for machine mode. Dedicated `presentation/` module with typed response structs.
+Different integration model from Claude Code / Codex. Needs investigation.
 
 ---
 
 ## Recently Implemented
+
+**CLI-OUT-1: Presentation Layer** — IMPLEMENTED (2026-05-18)
+
+Slice doc: `docs/slices/cli-out-1-presentation-layer.md`
+
+Delivered:
+- Human-default plain text output for `orient`, `check`, `explain`
+- `--json` flag for machine mode (full daemon envelope)
+- `presentation/` module with typed response structs and renderers
+- 37 renderer unit tests + 7 flag parsing tests + 6 CLI success-path tests
+
+**Validation evidence (2026-05-18):**
+```
+cargo test -p repo-graph-rgr --test cli_output_mode
+test result: ok. 6 passed; 0 failed
+```
+
+**Known debt:** Test harness requires `cargo build -p rmapd` pre-step.
+See `docs/TECH-DEBT.md` → "CLI-OUT-1 Test Harness Pre-Build Dependency".
+
+---
+
+**REG-1: Repo Registry + CWD Auto-Discovery** — IMPLEMENTED (2026-05-17)
+
+Slice doc: `docs/slices/reg-1-repo-registry.md`
+
+**Closure scope: Read-side contract migration complete.**
+- Write/governance families intentionally deferred
+- Presentation quality handed off to CLI-OUT-1
+
+### Delivered
+
+- Daemon-owned repo registry with persistence
+- CWD-based resolution for normal read/query surface
+- `db_path`/`repo_uid` removed from normal read workflows
+- Modules read-side fully migrated
+- Documentation updated to reflect reality
+
+### Explicitly Deferred
+
+| Category | Items |
+|----------|-------|
+| Write operations | `assess`, `enrich`, `modules boundary` |
+| Governance | `declare/*`, `policy` |
+| Quality commands | `quality/*` (churn, risk, hotspots, metrics, coverage) |
+| Other legacy | top-level `violations` |
+| Override flags | `--repo`, `--repo-path`, `--db`, `--repo-uid` |
+
+### Ignored Test Debt (tracked)
+
+- 43 in gate_command.rs — real implementations using old CLI contract
+- 11 in dead_command.rs — command disabled (not REG-1 related)
+- 9 in index_contract_summary.rs — real implementations using old CLI contract
+- 8 in declare_* — legacy write operations
+
+---
 
 **RMAPD-2: Unix Socket Transport** — IMPLEMENTED (2026-05-15)
 
@@ -170,5 +145,6 @@ Slice doc: `docs/slices/hook-1-rmap-hook-cli.md`
 11. ~~CODEX-1~~ — IMPLEMENTED
 12. ~~LINUX-1~~ — IMPLEMENTED
 13. ~~RMAPD-2~~ — IMPLEMENTED
-14. **REG-1** — IN PROGRESS (current)
-15. CURSOR-1 — PLANNED
+14. ~~REG-1~~ — IMPLEMENTED
+15. ~~CLI-OUT-1~~ — IMPLEMENTED
+16. **CURSOR-1** — CURRENT

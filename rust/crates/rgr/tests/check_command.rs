@@ -1,11 +1,11 @@
 //! CLI tests for the `check` command.
 //!
-//! # REG-1 Contract
+//! # REG-1 + CLI-OUT-1 Contract
 //!
 //! With REG-1, the `check` command requires daemon and resolves repo from cwd.
-//! The old positional `<db_path> <repo_uid>` contract is obsolete.
+//! With CLI-OUT-1, output defaults to human-readable; `--json` returns full envelope.
 //!
-//! New contract: `rmap check`
+//! New contract: `rmap check [--json]`
 //!
 //! Full integration tests for the new contract are in daemon_dispatch.rs
 //! since they require daemon coordination.
@@ -62,5 +62,39 @@ fn check_unexpected_args_is_usage_error() {
         stderr.contains("unexpected") || stderr.contains("usage"),
         "stderr should mention unexpected args or usage: {}",
         stderr
+    );
+}
+
+// -- CLI-OUT-1: --json flag tests ---------------------------------------------
+
+#[test]
+fn check_json_flag_accepted() {
+    // --json is a valid flag; should not cause usage error (exit 1)
+    // Will still exit 2 (daemon unavailable) but flag is parsed
+    let output = Command::new(binary_path())
+        .args(["check", "--json"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "Should be daemon error (2), not usage error (1). stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn check_unknown_flag_usage_error() {
+    let output = Command::new(binary_path())
+        .args(["check", "--bogus"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "Unknown flag should be usage error. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }

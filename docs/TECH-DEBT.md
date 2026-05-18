@@ -2950,3 +2950,34 @@ classification crate where they belong.
 3. Remove duplicates from CLI and daemon
 
 **Severity:** Low. Pure functions, no state, minimal change frequency.
+
+### CLI-OUT-1 Test Harness Pre-Build Dependency (2026-05-18)
+
+**Context:** The `cli_output_mode.rs` test file contains 6 CLI success-path tests that
+spawn an actual `rmapd` daemon process to test human/JSON output modes.
+
+**Problem:** Tests require manual `cargo build -p rmapd` before running. Cargo does not
+automatically build binaries from other packages when running `cargo test`.
+
+**Location:** `rust/crates/rgr/tests/cli_output_mode.rs`
+
+**Harness assumption:** The test locates `rmapd` by assuming it's a sibling of `rmap`
+in the target directory (derived from `CARGO_BIN_EXE_rmap` → `parent.join("rmapd")`).
+
+**Impact:**
+- Test proof surface is not self-contained
+- If package layout changes, harness becomes fragile
+- Contributors may run `cargo test` and see confusing failures
+
+**Resolution paths:**
+1. Workspace-level test runner script that builds required binaries first
+2. Convert to in-process testing (avoid subprocess spawning entirely)
+3. Use `cargo test --workspace` with proper dependency ordering
+4. Accept as documented limitation for integration tests
+
+**Additional constraint:** Tests require Unix socket bind permission. They will fail
+in sandboxed environments (e.g., Claude Code sandbox). This is environmental, not a
+code defect, but further limits where the proof can be validated.
+
+**Severity:** Medium. Divergence from ideal test automation, but tests are still
+structurally valid when run correctly.

@@ -27,3 +27,4 @@ pub mod commands;
 pub mod coverage;
 pub mod daemon_client;
 pub mod platform;
+pub mod presentation;

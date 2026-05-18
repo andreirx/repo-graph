@@ -98,12 +98,15 @@ rmap imports "src/core/auth/session.ts"
 rmap trust
 ```
 
-### Quality discovery
+### Quality discovery (legacy)
+
+**Note:** These quality commands still require explicit `<db_path> <repo_uid>` arguments and have not yet migrated to the daemon-native contract.
 
 ```bash
-rmap churn --since "2 weeks ago"
-rmap hotspots
-rmap risk
+# Legacy contract
+rmap churn <db_path> <repo_uid> --since "2 weeks ago"
+rmap hotspots <db_path> <repo_uid>
+rmap risk <db_path> <repo_uid>
 ```
 
 ### Indexing
@@ -199,6 +202,14 @@ Unknowns are surfaced, not erased.
 
 Quality-policy declarations, assessments, and gate evaluation exist for teams that need hard enforcement, but they are not the product center.
 
+Gate evaluation (daemon-native):
+```bash
+rmap gate                 # evaluate all requirements
+rmap gate --strict        # strict mode
+rmap gate --advisory      # advisory mode
+```
+
+Declaration and assessment (legacy — still require `<db_path> <repo_uid>`):
 ```bash
 rmap declare quality-policy ./repo.db my-repo QP-001 \
   --policy-kind absolute_max \
@@ -207,10 +218,9 @@ rmap declare quality-policy ./repo.db my-repo QP-001 \
   --severity fail
 
 rmap assess ./repo.db my-repo
-rmap gate ./repo.db my-repo
 ```
 
-See `/Users/apple/Documents/APLICATII BIJUTERIE/repo-graph/docs/cli/rmap-contracts.md` for the governance CLI contract.
+See `docs/cli/rmap-contracts.md` for the full governance CLI contract.
 
 ## Current non-goals and cautions
 

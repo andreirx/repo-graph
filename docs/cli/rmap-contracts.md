@@ -7,15 +7,55 @@ These are **design decisions**, not gaps or debt.
 
 ## Invocation Pattern
 
-All `rmap` commands use `<db_path> <repo_uid>` positional arguments:
+### REG-1 Commands (daemon-native)
 
-```
-rmap <command> <db_path> <repo_uid> [options]
+Most query commands now use CWD-based resolution. The daemon resolves the repo
+from the current working directory:
+
+```bash
+rmap orient                    # resolves repo from cwd
+rmap check                     # resolves repo from cwd
+rmap explain <target>          # resolves repo from cwd
+rmap callers <symbol>          # resolves repo from cwd
+rmap callees <symbol>          # resolves repo from cwd
+rmap path <from> <to>          # resolves repo from cwd
+rmap imports <file>            # resolves repo from cwd
+rmap cycles                    # resolves repo from cwd
+rmap stats                     # resolves repo from cwd
+rmap trust                     # resolves repo from cwd
+rmap gate                      # resolves repo from cwd
+rmap modules list              # resolves repo from cwd
+rmap modules show <module>     # resolves repo from cwd
+rmap boundaries list           # resolves repo from cwd
+rmap surfaces list             # resolves repo from cwd
+rmap contracts list            # resolves repo from cwd
+rmap docs list                 # resolves repo from cwd
+rmap deps list                 # resolves repo from cwd
+rmap inferences list           # resolves repo from cwd
 ```
 
-This differs from `rgr` which uses a repo registry (`rgr <command> <repo_name>`).
-The `<db_path> <repo_uid>` pattern keeps `rmap` consistent and self-contained
-until a registry slice ships.
+Indexing commands:
+```bash
+rmap index [repo_path]         # daemon allocates db_path, defaults to cwd
+rmap refresh                   # resolves repo from cwd
+```
+
+### Legacy Commands (still require positional args)
+
+These commands have not yet migrated to REG-1 and still require explicit paths:
+
+```bash
+rmap assess <db_path> <repo_uid>
+rmap enrich <db_path> <repo_uid>
+rmap policy <db_path> <repo_uid> [options]
+rmap modules boundary <db_path> <repo_uid> [options]
+rmap violations <db_path> <repo_uid>
+rmap quality/* <db_path> <repo_uid> [options]
+rmap declare/* <db_path> <repo_uid> [options]
+```
+
+These are primarily write operations or governance commands that will be
+migrated in future slices.
 
 ## Command-Specific Contracts
 
