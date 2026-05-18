@@ -2981,3 +2981,78 @@ code defect, but further limits where the proof can be validated.
 
 **Severity:** Medium. Divergence from ideal test automation, but tests are still
 structurally valid when run correctly.
+
+### Smoke Script Validation Model Defects (2026-05-18)
+
+**Context:** The smoke scripts (`smoke-rmap.sh`, `smoke-validation-repos.sh`) were updated
+for REG-1 daemon-based CLI but have structural weaknesses that prevent them from being
+trusted as a product-grade validation surface.
+
+**Defects identified:**
+
+#### A. Weak multi-command model
+The script treats remaining positional args as separate commands:
+```bash
+COMMANDS=("$@")
+for COMMAND in "${COMMANDS[@]}"
+```
+
+This works for simple commands (`trust check orient`) but cannot safely model:
+- `orient --budget small`
+- `explain src/foo.cpp --json`
+
+No structured command-list encoding (e.g., repeated `--cmd`, JSON manifest, or
+newline-delimited spec file).
+
+#### B. Output file typing lies about content type
+Scripts write `.json` extensions regardless of actual content:
+- `trust.json`, `orient.json`, `check.json`
+
+But after CLI-OUT-1, default output for several commands is plain text, not JSON.
+Artifact naming does not reflect content type.
+
+**Resolution:** Use `.txt` for human output, `.json` only when `--json` flag is used.
+
+#### C. Conflates execution failure with domain verdict failure
+Any non-zero exit code is marked as failure. But `check` can legitimately exit
+non-zero because the repo fails quality/trust checks.
+
+Cannot distinguish:
+- Product worked and reported FAIL (domain verdict)
+- Product failed to execute (transport error)
+
+**Resolution:** Metadata should separate:
+- `transport_status`: ok / daemon_error / timeout / invalid_output
+- `command_exit_code`: raw exit code
+- `semantic_verdict`: pass / fail / unknown / not_applicable
+
+#### D. Incorrect metadata field names
+Scripts write:
+```json
+"repo_uid": "$REPO_NAME"
+```
+
+This is structurally wrong. `repo_uid` is the daemon-generated stable identifier,
+not the directory name.
+
+**Resolution:** Use correct field names:
+- `repo_name`: directory basename
+- `repo_path`: full path
+- `repo_uid`: only if retrieved from daemon response
+
+#### E. Build-environment coupling
+Scripts use `cargo run --release` for every command invocation. This couples the
+smoke protocol to:
+- Local cargo installation
+- Workspace shape
+- Repeated compilation behavior
+
+**Resolution for release-smoke:** Build once, run explicit binaries. Or point at
+installed binaries. Current model is acceptable for dev validation only.
+
+**Severity:** Medium. Does not invalidate the Tarjan SCC fix validation, but blocks
+trusting the smoke harness as a stable protocol tool.
+
+**Immediate fix applied:** Changed `.json` → `.txt` for non-JSON output modes.
+
+**Full resolution:** Requires a dedicated cleanup slice addressing A-E above.

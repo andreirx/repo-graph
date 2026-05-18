@@ -34,7 +34,7 @@
 # Run logging (per protocol):
 #   smoke-runs/<timestamp>/00-meta.json           — batch summary
 #   smoke-runs/<timestamp>/<repo>-meta.json       — per-repo traceability
-#   smoke-runs/<timestamp>/<repo>-<command>.json  — per-command output
+#   smoke-runs/<timestamp>/<repo>-<command>.txt   — per-command output (human mode)
 #   smoke-runs/<timestamp>/92-tool-latency.json   — all timings
 #
 # Protocol requirement:
@@ -402,7 +402,7 @@ EOF
         # Log output
         if [[ "$ADHOC" == "false" ]]; then
             CMD_FILENAME=$(echo "$CMD" | tr ' /' '-')
-            cp "$CMD_OUTPUT" "$RUN_DIR/${REPO_NAME}-${CMD_FILENAME}.json"
+            cp "$CMD_OUTPUT" "$RUN_DIR/${REPO_NAME}-${CMD_FILENAME}.txt"
         fi
 
         rm -f "$CMD_OUTPUT"
@@ -482,7 +482,7 @@ if [[ "$ADHOC" == "false" ]]; then
   "passed": $PASSED_JSON,
   "failed": $FAILED_JSON,
   "skipped": $SKIPPED_JSON,
-  "per_repo_meta": "See <repo>-meta.json files for per-repo category, exit codes, and timing"
+  "per_repo_meta": "See <repo>-meta.json for per-repo category, exit codes, timing; <repo>-<cmd>.txt for output"
 }
 EOF
 

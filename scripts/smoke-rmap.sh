@@ -22,7 +22,7 @@
 #
 # Run logging (per protocol):
 #   smoke-runs/<timestamp>/00-meta.json      — run metadata with generator provenance
-#   smoke-runs/<timestamp>/<command>.json    — command output
+#   smoke-runs/<timestamp>/<command>.txt     — command output (human mode default)
 #   smoke-runs/<timestamp>/92-tool-latency.json — timing information
 #
 # Protocol requirements:
@@ -282,7 +282,7 @@ for COMMAND in "${COMMANDS[@]}"; do
     # Save command output
     if [[ "$ADHOC" == "false" ]]; then
         CMD_FILENAME=$(echo "$COMMAND" | tr ' /' '-')
-        cp "$CMD_OUTPUT_FILE" "$RUN_DIR/$CMD_FILENAME.json"
+        cp "$CMD_OUTPUT_FILE" "$RUN_DIR/$CMD_FILENAME.txt"
     fi
 
     rm -f "$CMD_OUTPUT_FILE"

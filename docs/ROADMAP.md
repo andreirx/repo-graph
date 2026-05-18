@@ -75,6 +75,7 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **REG-1** | Repo registry + cwd auto-discovery (read-side contract) | IMPLEMENTED |
 | **CLI-OUT-1** | Presentation layer (human-default output, --json opt-in) | IMPLEMENTED |
 | **CURSOR-1** | Cursor MCP/rules integration | **CURRENT** |
+| **SMOKE-1** | Validation harness cleanup (command model, verdict semantics) | QUEUED |
 | **WIN-1** | Windows distribution/install | DEFERRED |
 | **MAC-2** | macOS signing/notarization | DEFERRED |
 | **UPDATE-1** | Updater/repair channel | DEFERRED |
@@ -84,6 +85,19 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 **CURSOR-1: Cursor Integration** — PLANNED
 
 Different integration model from Claude Code / Codex. Needs investigation.
+
+### Queued After Current
+
+**SMOKE-1: Validation Harness Cleanup** — QUEUED
+
+Support infrastructure slice. Addresses structural defects in smoke scripts exposed
+during Tarjan SCC fix validation (2026-05-18):
+- Weak multi-command model (no per-command arguments)
+- Execution/verdict conflation (exit code vs. domain semantics)
+- Incorrect metadata field names
+- No `eval` (explicit argv parsing required)
+
+See `docs/slices/smoke-1-validation-harness-cleanup.md` for specification.
 
 ### Recently Completed
 
