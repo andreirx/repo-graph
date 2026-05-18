@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# smoke-validation-repos.sh — smoke test rmap on all validation repos with run logging
+# smoke-validation-repos.sh — smoke test rmap on all validation repos with daemon-based execution
+#
+# Version: 2 (REG-1 daemon-based CLI)
 #
 # Usage:
 #   ./scripts/smoke-validation-repos.sh <task> [commands...]
@@ -10,7 +12,7 @@
 #   ./scripts/smoke-validation-repos.sh quality trust check orient  # multiple commands
 #
 # Flags:
-#   --retain    Keep DBs after run (default: delete on success)
+#   --retain    Keep state after run (default: delete on success)
 #   --adhoc     Skip smoke-runs/ logging (for quick exploration only,
 #               NOT for slice verification or production-fix validation)
 #
@@ -25,8 +27,9 @@
 #   - hidden entries skipped
 #   - sorted lexicographically
 #
-# DB paths follow protocol:
-#   /private/tmp/repo-graph-tests/<task>/<repo-name>.db
+# State isolation (REG-1 daemon model):
+#   RMAP_STATE_ROOT=/private/tmp/repo-graph-tests/<task>
+#   RMAP_SOCKET_PATH=/private/tmp/repo-graph-tests/<task>/daemon.sock
 #
 # Run logging (per protocol):
 #   smoke-runs/<timestamp>/00-meta.json           — batch summary
@@ -41,15 +44,20 @@
 
 set -euo pipefail
 
+SCRIPT_VERSION="2"
+GENERATOR="smoke-validation-repos.sh"
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST_PATH="$REPO_ROOT/rust/Cargo.toml"
-PACKAGE="repo-graph-rgr"
+PACKAGE_RGR="repo-graph-rgr"
+PACKAGE_RMAPD="rmapd"
 TEST_ROOT="/private/tmp/repo-graph-tests"
 PARENT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
 LEGACY_BUCKET="$PARENT_DIR/legacy-codebases"
 
 RETAIN=false
 ADHOC=false
+DAEMON_PID=""
 
 # Internal repos — explicitly listed
 INTERNAL_NAMES=(
@@ -70,7 +78,7 @@ INTERNAL_PATHS=(
 usage() {
     echo "usage: $0 [--retain] [--adhoc] <task> [commands...]" >&2
     echo "" >&2
-    echo "  --retain   — keep DBs after run (default: delete on success)" >&2
+    echo "  --retain   — keep state after run (default: delete on success)" >&2
     echo "  --adhoc    — skip logging (exploration only, NOT for verification)" >&2
     echo "  task       — task identifier (e.g., slice-12, validation-run)" >&2
     echo "  commands   — rmap commands to run (default: trust, modules, check)" >&2
@@ -120,6 +128,55 @@ display_truncated() {
         echo "... ($((total - lines)) more lines)"
     fi
 }
+
+# Start daemon in background with isolated state
+start_daemon() {
+    local state_root="$1"
+    local socket_path="$2"
+
+    echo "Starting daemon..."
+    echo "  State root: $state_root"
+    echo "  Socket: $socket_path"
+
+    RMAP_STATE_ROOT="$state_root" RMAP_SOCKET_PATH="$socket_path" \
+        cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RMAPD" --release &
+    DAEMON_PID=$!
+
+    # Wait for socket to appear (up to 120 seconds for initial compilation)
+    local waited=0
+    while [[ ! -S "$socket_path" && $waited -lt 1200 ]]; do
+        sleep 0.1
+        waited=$((waited + 1))
+        if (( waited % 100 == 0 )); then
+            echo "  Waiting for daemon... (${waited}0ms)"
+        fi
+    done
+
+    if [[ ! -S "$socket_path" ]]; then
+        echo "ERROR: Daemon failed to start (socket not created after 120s)" >&2
+        kill $DAEMON_PID 2>/dev/null || true
+        exit 2
+    fi
+
+    echo "  Daemon started (PID: $DAEMON_PID)"
+}
+
+# Stop daemon gracefully
+stop_daemon() {
+    if [[ -n "${DAEMON_PID:-}" ]]; then
+        echo "Stopping daemon (PID: $DAEMON_PID)..."
+        kill "$DAEMON_PID" 2>/dev/null || true
+        wait "$DAEMON_PID" 2>/dev/null || true
+        DAEMON_PID=""
+    fi
+}
+
+# Cleanup handler
+cleanup() {
+    stop_daemon
+}
+
+trap cleanup EXIT
 
 # Parse flags
 while [[ $# -gt 0 ]]; do
@@ -172,8 +229,10 @@ for _ in "${LEGACY_NAMES[@]}"; do
     ALL_CATEGORIES+=("legacy")
 done
 
-DB_DIR="$TEST_ROOT/$TASK"
-mkdir -p "$DB_DIR"
+# State isolation paths (REG-1 daemon model)
+STATE_ROOT="$TEST_ROOT/$TASK"
+SOCKET_PATH="$STATE_ROOT/daemon.sock"
+mkdir -p "$STATE_ROOT"
 
 # Run logging setup
 TIMESTAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
@@ -187,7 +246,7 @@ fi
 echo "=============================================="
 echo "Validation smoke run: $TASK"
 echo "Commands: ${COMMANDS[*]}"
-echo "DB directory: $DB_DIR"
+echo "State root: $STATE_ROOT"
 if [[ "$ADHOC" == "false" ]]; then
     echo "Run log: $RUN_DIR"
 fi
@@ -196,6 +255,13 @@ echo "Internal repos: ${INTERNAL_NAMES[*]}"
 echo "Legacy repos: ${LEGACY_NAMES[*]:-none discovered}"
 echo "=============================================="
 echo ""
+
+# Start isolated daemon
+start_daemon "$STATE_ROOT" "$SOCKET_PATH"
+
+# Export daemon environment for rmap commands
+export RMAP_STATE_ROOT="$STATE_ROOT"
+export RMAP_SOCKET_PATH="$SOCKET_PATH"
 
 FAILED_REPOS=()
 PASSED_REPOS=()
@@ -210,12 +276,10 @@ for i in "${!ALL_NAMES[@]}"; do
     REPO_NAME="${ALL_NAMES[$i]}"
     REPO_PATH="${ALL_PATHS[$i]}"
     REPO_CATEGORY="${ALL_CATEGORIES[$i]}"
-    DB_PATH="$DB_DIR/$REPO_NAME.db"
 
     echo "----------------------------------------------"
     echo "Repo: $REPO_NAME ($REPO_CATEGORY)"
     echo "Path: $REPO_PATH"
-    echo "DB: $DB_PATH"
     echo "----------------------------------------------"
 
     if [[ ! -d "$REPO_PATH" ]]; then
@@ -228,55 +292,53 @@ for i in "${!ALL_NAMES[@]}"; do
     # Per-repo meta accumulator
     REPO_META_COMMANDS=""
 
-    # Index if DB does not exist
+    # Index the repo (daemon allocates db internally)
     INDEX_EXIT=0
     INDEX_TIME=0
-    if [[ ! -f "$DB_PATH" ]]; then
-        echo "Indexing..."
-        INDEX_OUTPUT=$(mktemp)
-        START_TIME=$(date +%s)
-        if ! run_and_capture "$INDEX_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE" --release -- \
-            index "$REPO_PATH" "$DB_PATH"; then
-            INDEX_EXIT=1
-            echo "FAIL: indexing failed"
-            display_truncated "$INDEX_OUTPUT" 20
-            FAILED_REPOS+=("$REPO_NAME:index")
-            rm -f "$INDEX_OUTPUT"
+    echo "Indexing..."
+    INDEX_OUTPUT=$(mktemp)
+    START_TIME=$(date +%s)
+    if ! run_and_capture "$INDEX_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
+        index "$REPO_PATH"; then
+        INDEX_EXIT=1
+        echo "FAIL: indexing failed"
+        display_truncated "$INDEX_OUTPUT" 20
+        FAILED_REPOS+=("$REPO_NAME:index")
+        rm -f "$INDEX_OUTPUT"
 
-            # Write per-repo meta even on index failure
-            if [[ "$ADHOC" == "false" ]]; then
-                cat > "$RUN_DIR/${REPO_NAME}-meta.json" << EOF
+        # Write per-repo meta even on index failure
+        if [[ "$ADHOC" == "false" ]]; then
+            cat > "$RUN_DIR/${REPO_NAME}-meta.json" << EOF
 {
   "repo_uid": "$REPO_NAME",
   "repo_path": "$REPO_PATH",
-  "db_path": "$DB_PATH",
   "category": "$REPO_CATEGORY",
-  "baseline_shape_version": 3,
+  "baseline_shape_version": 4,
+  "cli_model": "REG-1",
   "timestamp": "$TIMESTAMP",
   "index_failed": true,
   "commands": {}
 }
 EOF
-            fi
-            echo ""
-            continue
         fi
-        END_TIME=$(date +%s)
-        INDEX_TIME=$((END_TIME - START_TIME))
-
-        # Add to timing log
-        if [[ "$FIRST_TIMING" == "true" ]]; then
-            FIRST_TIMING=false
-        else
-            echo "," >> "$TIMING_FILE"
-        fi
-        echo "  \"${REPO_NAME}_index_seconds\": $INDEX_TIME" >> "$TIMING_FILE"
-
-        display_truncated "$INDEX_OUTPUT" 5
-        rm -f "$INDEX_OUTPUT"
+        echo ""
+        continue
     fi
+    END_TIME=$(date +%s)
+    INDEX_TIME=$((END_TIME - START_TIME))
 
-    # Run each command
+    # Add to timing log
+    if [[ "$FIRST_TIMING" == "true" ]]; then
+        FIRST_TIMING=false
+    else
+        echo "," >> "$TIMING_FILE"
+    fi
+    echo "  \"${REPO_NAME}_index_seconds\": $INDEX_TIME" >> "$TIMING_FILE"
+
+    display_truncated "$INDEX_OUTPUT" 5
+    rm -f "$INDEX_OUTPUT"
+
+    # Run each command from the repo directory (CWD-based resolution)
     REPO_FAILED=false
     for CMD in "${COMMANDS[@]}"; do
         echo ""
@@ -286,28 +348,31 @@ EOF
         CMD_EXIT=0
         START_TIME=$(date +%s)
 
+        # Run command from repo directory
+        pushd "$REPO_PATH" > /dev/null
         case "$CMD" in
             trust)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE" --release -- \
-                    trust "$DB_PATH" "$REPO_NAME" || CMD_EXIT=$?
+                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
+                    trust || CMD_EXIT=$?
                 ;;
             modules)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE" --release -- \
-                    modules list "$DB_PATH" "$REPO_NAME" || CMD_EXIT=$?
+                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
+                    modules list || CMD_EXIT=$?
                 ;;
             check)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE" --release -- \
-                    check "$DB_PATH" "$REPO_NAME" || CMD_EXIT=$?
+                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
+                    check || CMD_EXIT=$?
                 ;;
             orient)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE" --release -- \
-                    orient "$DB_PATH" "$REPO_NAME" --budget small || CMD_EXIT=$?
+                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
+                    orient --budget small || CMD_EXIT=$?
                 ;;
             *)
-                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE" --release -- \
-                    "$CMD" "$DB_PATH" "$REPO_NAME" || CMD_EXIT=$?
+                run_and_capture "$CMD_OUTPUT" cargo run --manifest-path "$MANIFEST_PATH" -p "$PACKAGE_RGR" --release -- \
+                    "$CMD" || CMD_EXIT=$?
                 ;;
         esac
+        popd > /dev/null
 
         END_TIME=$(date +%s)
         CMD_TIME=$((END_TIME - START_TIME))
@@ -349,9 +414,9 @@ EOF
 {
   "repo_uid": "$REPO_NAME",
   "repo_path": "$REPO_PATH",
-  "db_path": "$DB_PATH",
   "category": "$REPO_CATEGORY",
-  "baseline_shape_version": 3,
+  "baseline_shape_version": 4,
+  "cli_model": "REG-1",
   "timestamp": "$TIMESTAMP",
   "commands": {$REPO_META_COMMANDS}
 }
@@ -401,10 +466,13 @@ if [[ "$ADHOC" == "false" ]]; then
     # 00-meta.json — batch summary
     cat > "$RUN_DIR/00-meta.json" << EOF
 {
+  "generator": "$GENERATOR",
+  "generator_version": "$SCRIPT_VERSION",
   "type": "batch_validation",
   "task": "$TASK",
-  "db_dir": "$DB_DIR",
-  "baseline_shape_version": 3,
+  "state_root": "$STATE_ROOT",
+  "baseline_shape_version": 4,
+  "cli_model": "REG-1",
   "timestamp": "$TIMESTAMP",
   "inventory_model": "hybrid",
   "internal_repos": $INTERNAL_JSON,
@@ -414,7 +482,7 @@ if [[ "$ADHOC" == "false" ]]; then
   "passed": $PASSED_JSON,
   "failed": $FAILED_JSON,
   "skipped": $SKIPPED_JSON,
-  "per_repo_meta": "See <repo>-meta.json files for per-repo db_path, category, exit codes, and timing"
+  "per_repo_meta": "See <repo>-meta.json files for per-repo category, exit codes, and timing"
 }
 EOF
 
@@ -424,6 +492,9 @@ fi
 
 rm -f "$TIMING_FILE"
 
+# Stop daemon before summary
+stop_daemon
+
 echo "=============================================="
 echo "Summary"
 echo "=============================================="
@@ -431,7 +502,7 @@ echo "Passed: ${#PASSED_REPOS[@]} (${PASSED_REPOS[*]:-none})"
 echo "Failed: ${#FAILED_REPOS[@]} (${FAILED_REPOS[*]:-none})"
 echo "Skipped: ${#SKIPPED_REPOS[@]} (${SKIPPED_REPOS[*]:-none})"
 echo ""
-echo "DB directory: $DB_DIR"
+echo "State root: $STATE_ROOT"
 
 if [[ "$ADHOC" == "false" ]]; then
     echo "Run log: $RUN_DIR"
@@ -439,7 +510,7 @@ fi
 
 # Cleanup or retain
 if [[ ${#FAILED_REPOS[@]} -eq 0 && "$RETAIN" == "false" ]]; then
-    rm -rf "$DB_DIR"
+    rm -rf "$STATE_ROOT"
     echo "Disposal: deleted (all passed, default lifecycle)"
 elif [[ "$RETAIN" == "true" ]]; then
     echo "Disposal: RETAINED (--retain flag)"

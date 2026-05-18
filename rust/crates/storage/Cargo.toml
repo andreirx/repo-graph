@@ -162,6 +162,10 @@ repo-graph-agent = { path = "../agent" }
 # through the StorageConnection implementation added here.
 repo-graph-gate = { path = "../gate" }
 
+# Graph algorithms crate — provides O(V+E) Tarjan SCC for cycle
+# detection, replacing the pathological recursive SQL CTE.
+repo-graph-algorithms = { path = "../graph-algorithms" }
+
 # Doc-facts crate — added for the docs-primary pivot. The storage
 # adapter's `get_doc_inventory` method calls
 # `discover_doc_inventory(repo_path, false)` to perform live

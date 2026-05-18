@@ -36,6 +36,7 @@ members = [
     "crates/enrichment",
     "crates/gate",
     "crates/git",
+    "crates/graph-algorithms",
     "crates/indexer",
     "crates/java-extractor",
     "crates/jdtls-resolver",
@@ -70,7 +71,7 @@ members = [
 # See: docs/slices/rel-support-1-version-authority.md
 
 [workspace.package]
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 rust-version = "1.93.0"
 license = "MIT"

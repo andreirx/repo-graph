@@ -1,0 +1,28 @@
+# ── graph-algorithms ────────────────────────────────────────────────
+#
+# Pure graph algorithms for code analysis. No persistence, no presentation.
+#
+# Algorithms:
+#   - Tarjan SCC: O(V+E) strongly connected component detection
+#
+# Design principles:
+#   - Input: abstract node IDs and edges
+#   - Output: structural results (component membership, counts)
+#   - No storage dependency
+#   - No human-readable formatting
+#   - Deterministic ordering where possible
+
+[package]
+name                = "repo-graph-algorithms"
+version.workspace   = true
+edition.workspace   = true
+rust-version.workspace = true
+license.workspace   = true
+description         = "Graph algorithms for repo-graph analysis (SCC, reachability)"
+publish             = false
+
+[dependencies]
+# None required for pure algorithms
+
+[dev-dependencies]
+# None required

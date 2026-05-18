@@ -949,69 +949,64 @@ impl StorageConnection {
     ///
     /// The `level` parameter selects the node kind: "module" → MODULE,
     /// "file" → FILE. Default is "module" (matching TS default).
+    ///
+    /// # Algorithm
+    ///
+    /// Uses Tarjan's SCC algorithm (O(V+E)) instead of the previous
+    /// recursive SQL CTE which had exponential complexity on dense graphs.
+    /// The new implementation:
+    /// 1. Loads all IMPORTS edges between nodes of the specified kind
+    /// 2. Runs `find_sccs` from graph-algorithms crate
+    /// 3. Filters to SCCs with size > 1 (actual cycles)
+    /// 4. Maps to CycleResult format with node names
     pub fn find_cycles(
         &self,
         snapshot_uid: &str,
         level: &str,
     ) -> Result<Vec<CycleResult>, StorageError> {
+        use repo_graph_algorithms::{find_sccs, DirectedEdge};
+
         let node_kind = match level {
             "file" => "FILE",
             _ => "MODULE",
         };
 
-        let mut stmt = self.connection().prepare(
-            "WITH RECURSIVE cycle_search(start_uid, current_uid, path, is_cycle) AS (
-				SELECT n.node_uid, n.node_uid, n.node_uid, 0
-				FROM nodes n
-				WHERE n.snapshot_uid = ? AND n.kind = ?
-
-				UNION ALL
-
-				SELECT cs.start_uid, e.target_node_uid,
-				       cs.path || ' -> ' || e.target_node_uid,
-				       CASE WHEN e.target_node_uid = cs.start_uid THEN 1 ELSE 0 END
-				FROM edges e
-				JOIN cycle_search cs ON e.source_node_uid = cs.current_uid
-				WHERE e.snapshot_uid = ?
-				  AND e.type = 'IMPORTS'
-				  AND cs.is_cycle = 0
-				  AND (cs.path NOT LIKE '%' || e.target_node_uid || '%'
-				       OR e.target_node_uid = cs.start_uid)
-			)
-			SELECT DISTINCT path FROM cycle_search
-			WHERE is_cycle = 1
-			ORDER BY path",
+        // Step 1: Load all IMPORTS edges between nodes of the specified kind.
+        // This single query replaces the exponential recursive CTE.
+        let mut edge_stmt = self.connection().prepare(
+            "SELECT DISTINCT e.source_node_uid, e.target_node_uid
+             FROM edges e
+             JOIN nodes src ON e.source_node_uid = src.node_uid
+             JOIN nodes tgt ON e.target_node_uid = tgt.node_uid
+             WHERE e.snapshot_uid = ?
+               AND e.type = 'IMPORTS'
+               AND src.kind = ?
+               AND tgt.kind = ?",
         )?;
 
-        let raw_paths: Vec<String> = stmt
+        let edges: Vec<DirectedEdge> = edge_stmt
             .query_map(
-                rusqlite::params![snapshot_uid, node_kind, snapshot_uid],
-                |row| row.get(0),
+                rusqlite::params![snapshot_uid, node_kind, node_kind],
+                |row| {
+                    Ok(DirectedEdge {
+                        source: row.get(0)?,
+                        target: row.get(1)?,
+                    })
+                },
             )?
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Canonicalize and deduplicate (same algorithm as TS).
-        let mut seen = std::collections::HashSet::new();
+        // Step 2: Run Tarjan's SCC algorithm (O(V+E)).
+        let scc_result = find_sccs(&edges);
+
+        // Step 3: Convert cycles to CycleResult format.
+        // The SCC result already filters to size > 1 in its `cycles` field.
         let mut results = Vec::new();
 
-        for path in &raw_paths {
-            let uids: Vec<&str> = path.split(" -> ").collect();
-            // The path includes the start node repeated at the end;
-            // remove it to get the unique ring members.
-            let ring = &uids[..uids.len().saturating_sub(1)];
-            if ring.is_empty() {
-                continue;
-            }
-
-            let canonical = canonicalize_cycle(ring);
-            if !seen.insert(canonical.clone()) {
-                continue;
-            }
-
-            let canonical_uids: Vec<&str> = canonical.split(',').collect();
-
+        for (idx, scc) in scc_result.cycles.iter().enumerate() {
             // Look up names for each node in the cycle.
-            let nodes: Vec<CycleNode> = canonical_uids
+            let nodes: Vec<CycleNode> = scc
+                .members
                 .iter()
                 .map(|uid| {
                     let name: String = self
@@ -1031,11 +1026,14 @@ impl StorageConnection {
                 .collect();
 
             results.push(CycleResult {
-                cycle_id: format!("cycle-{}", results.len() + 1),
-                length: canonical_uids.len(),
+                cycle_id: format!("cycle-{}", idx + 1),
+                length: scc.size(),
                 nodes,
             });
         }
+
+        // Sort by cycle_id for deterministic output (matches previous behavior).
+        results.sort_by(|a, b| a.cycle_id.cmp(&b.cycle_id));
 
         Ok(results)
     }
@@ -2258,6 +2256,11 @@ fn extract_module_path(stable_key: &str) -> Option<String> {
 /// Canonicalize a cycle by rotating so the lexicographically
 /// smallest UID comes first. Matches TS `canonicalizeCycle`
 /// (sqlite-storage.ts:3356-3365).
+///
+/// Note: This function is no longer used after the Tarjan SCC rewrite
+/// but is kept for reference. Tarjan's algorithm produces deterministic
+/// output without explicit canonicalization.
+#[allow(dead_code)]
 fn canonicalize_cycle(uids: &[&str]) -> String {
     let min_idx = uids
         .iter()
