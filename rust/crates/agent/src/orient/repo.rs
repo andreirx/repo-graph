@@ -167,6 +167,7 @@ pub fn orient_repo<S: AgentStorageRead + GateStorageRead + ?Sized>(
         schema: ORIENT_SCHEMA,
         command: ORIENT_COMMAND,
         repo: repo.name,
+        display_name: None, // Populated by daemon handler
         snapshot: snapshot_uid,
         focus: Focus::repo(),
         confidence,

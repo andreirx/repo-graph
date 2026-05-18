@@ -320,14 +320,33 @@ pub fn run_imports(args: &[String]) -> ExitCode {
     }
 }
 
-// ── cycles command (REG-1) ───────────────────────────────────────────
+// ── cycles command (REG-1 + CLI-OUT-2B) ──────────────────────────────
+//
+// `rmap cycles [--json]`
+//
+// Human mode (default): plain text with cycle topology.
+// Machine mode (--json): full envelope.
 
 pub fn run_cycles(args: &[String]) -> ExitCode {
-    // REG-1: no positional args, repo from cwd
-    if !args.is_empty() {
-        eprintln!("error: unexpected arguments");
-        eprintln!("usage: rmap cycles");
-        return ExitCode::from(1);
+    // ── Parse args ───────────────────────────────────────────
+    let mut json_mode = false;
+
+    for arg in args {
+        match arg.as_str() {
+            "--json" => {
+                json_mode = true;
+            }
+            flag if flag.starts_with("--") => {
+                eprintln!("error: unknown flag: {}", flag);
+                eprintln!("usage: rmap cycles [--json]");
+                return ExitCode::from(1);
+            }
+            other => {
+                eprintln!("error: unexpected argument: {}", other);
+                eprintln!("usage: rmap cycles [--json]");
+                return ExitCode::from(1);
+            }
+        }
     }
 
     let repo_path = match resolve_repo_from_cwd() {
@@ -348,16 +367,34 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
     });
 
     match client.request("cycles", Some(params)) {
-        Ok(result) => match serde_json::to_string_pretty(&result) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
+        Ok(result) => {
+            if json_mode {
+                // Machine mode: print full envelope
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
+            } else {
+                // Human mode: parse and render
+                use crate::presentation::cycles::CyclesResponse;
+                match serde_json::from_value::<CyclesResponse>(result) {
+                    Ok(response) => {
+                        println!("{}", response.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse cycles response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                ExitCode::from(2)
-            }
-        },
+        }
         Err(e) => handle_daemon_error(e),
     }
 }

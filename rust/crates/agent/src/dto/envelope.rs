@@ -302,6 +302,12 @@ pub struct OrientResult {
     pub schema: &'static str,
     pub command: &'static str,
     pub repo: String,
+    /// Human-readable repo name for CLI presentation.
+    /// Populated by daemon from registry alias (if present) or
+    /// basename of the canonical repo path. `None` only when
+    /// identity resolution failed (defensive).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     pub snapshot: String,
     pub focus: Focus,
     pub confidence: Confidence,

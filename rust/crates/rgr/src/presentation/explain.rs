@@ -64,6 +64,12 @@ use crate::presentation::{bullet, heading, kv_line};
 #[derive(Debug, Deserialize)]
 pub struct ExplainResponse {
     pub repo: String,
+    /// Human-readable repo name for CLI display.
+    /// Populated by daemon from registry alias or path basename.
+    /// When present, prefer this over `repo` (which is internal UID).
+    /// (Rendering deferred to CLI-OUT-3.)
+    #[serde(default)]
+    pub display_name: Option<String>,
     #[allow(dead_code)]
     pub snapshot: String,
     pub focus: ExplainFocus,
@@ -519,6 +525,7 @@ mod tests {
     fn minimal_response() -> ExplainResponse {
         ExplainResponse {
             repo: "test-repo".to_string(),
+            display_name: None,
             snapshot: "snap-123".to_string(),
             focus: ExplainFocus {
                 input: Some("src/core/auth.ts".to_string()),

@@ -59,6 +59,11 @@ use crate::presentation::{bullet, bullet_list, heading, kv_line, DisplaySeverity
 #[derive(Debug, Deserialize)]
 pub struct OrientResponse {
     pub repo: String,
+    /// Human-readable repo name for CLI display.
+    /// Populated by daemon from registry alias or path basename.
+    /// When present, prefer this over `repo` (which is internal UID).
+    #[serde(default)]
+    pub display_name: Option<String>,
     #[allow(dead_code)]
     pub snapshot: String,
     pub focus: Focus,
@@ -116,6 +121,9 @@ pub struct Signal {
     pub summary: String,
     #[serde(default)]
     pub scope: Option<String>,
+    /// Evidence payload - structure varies by signal code.
+    #[serde(default)]
+    pub evidence: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -136,11 +144,31 @@ pub struct NextAction {
 #[derive(Debug, Deserialize)]
 pub struct TrustOverlay {
     #[serde(default)]
+    pub reliability: Option<ReliabilitySection>,
+    #[serde(default)]
+    pub caveats: Vec<String>,
+    // Legacy fields for backward compatibility
+    #[serde(default)]
     pub call_graph_reliability: Option<String>,
     #[serde(default)]
     pub call_resolution_rate: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReliabilitySection {
     #[serde(default)]
-    pub caveats: Vec<String>,
+    pub call_graph: Option<ReliabilityAxis>,
+    #[serde(default)]
+    pub import_graph: Option<ReliabilityAxis>,
+    #[serde(default)]
+    pub change_impact: Option<ReliabilityAxis>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReliabilityAxis {
+    pub level: String,
+    #[serde(default)]
+    pub reasons: Vec<String>,
 }
 
 // ── Human Rendering ──────────────────────────────────────────────────────────
@@ -151,7 +179,9 @@ impl OrientResponse {
         let mut out = String::new();
 
         // ── Header ─────────────────────────────────────────────────
-        out.push_str(&kv_line("Repo", &self.repo));
+        // CLI-OUT-2B: prefer display_name (human-readable) over internal repo UID
+        let repo_display = self.display_name.as_deref().unwrap_or(&self.repo);
+        out.push_str(&kv_line("Repo", repo_display));
         out.push_str(&self.render_focus());
         out.push_str(&kv_line("Confidence", &self.confidence));
         out.push('\n');
@@ -190,9 +220,10 @@ impl OrientResponse {
             out.push_str(&self.render_next_steps());
         }
 
-        // ── Truncation warning ─────────────────────────────────────
+        // ── Truncation notice ──────────────────────────────────────
+        // Budget-based truncation is transparent: user can adjust via --budget or get full data via --json
         if self.truncated {
-            out.push_str("\n[Output truncated. Use --json for full results.]\n");
+            out.push_str("\n[Some signals omitted due to budget. Use --budget large or --json for complete output.]\n");
         }
 
         out.trim_end().to_string()
@@ -209,9 +240,9 @@ impl OrientResponse {
         match &self.focus.resolved_path {
             Some(path) => kv_line("Focus", &format!("{} ({})", path, kind)),
             None => {
-                // Repo-level focus — no path
+                // Repo-level focus — no path. Omit the line entirely as it adds nothing.
                 if kind == "repo" {
-                    kv_line("Focus", "(repo)")
+                    String::new()
                 } else {
                     kv_line("Focus", &format!("({})", kind))
                 }
@@ -248,45 +279,122 @@ impl OrientResponse {
         if !high.is_empty() {
             out.push_str("  High\n");
             for s in high {
-                out.push_str(&format!("    - {}\n", s.summary));
+                out.push_str(&self.render_signal_line(s));
             }
         }
         if !medium.is_empty() {
             out.push_str("  Medium\n");
             for s in medium {
-                out.push_str(&format!("    - {}\n", s.summary));
+                out.push_str(&self.render_signal_line(s));
             }
         }
         if !low.is_empty() {
             out.push_str("  Low\n");
             for s in low {
-                out.push_str(&format!("    - {}\n", s.summary));
+                out.push_str(&self.render_signal_line(s));
             }
         }
 
         out
     }
 
+    /// Render a single signal line, with cycle anchor for IMPORT_CYCLES.
+    fn render_signal_line(&self, signal: &Signal) -> String {
+        if signal.code == "IMPORT_CYCLES" {
+            // Extract cycle anchor from evidence
+            if let Some(evidence) = &signal.evidence {
+                if let Some(cycles) = evidence.get("cycles").and_then(|c| c.as_array()) {
+                    if let Some(first_cycle) = cycles.first() {
+                        let length = first_cycle
+                            .get("length")
+                            .and_then(|l| l.as_u64())
+                            .unwrap_or(0);
+                        let modules = first_cycle.get("modules").and_then(|m| m.as_array());
+
+                        if let Some(mods) = modules {
+                            let cycle_count = cycles.len();
+                            let anchor = self.format_cycle_anchor(mods, length as usize);
+
+                            if cycle_count == 1 {
+                                return format!(
+                                    "    - 1 import cycle ({} modules): {}\n",
+                                    length, anchor
+                                );
+                            } else {
+                                // Multiple cycles - show largest
+                                return format!(
+                                    "    - {} import cycles (largest: {} modules): {}\n",
+                                    cycle_count, length, anchor
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Default: just the summary
+        format!("    - {}\n", signal.summary)
+    }
+
+    /// Format cycle anchor as "A -> B -> C -> ... -> A"
+    fn format_cycle_anchor(&self, modules: &[serde_json::Value], _length: usize) -> String {
+        let names: Vec<&str> = modules.iter().filter_map(|m| m.as_str()).collect();
+
+        if names.is_empty() {
+            return "(empty cycle)".to_string();
+        }
+
+        if names.len() <= 4 {
+            // Show full chain
+            let mut chain = names.join(" -> ");
+            chain.push_str(&format!(" -> {}", names[0]));
+            chain
+        } else {
+            // Truncate: first 3 -> ... -> last -> first
+            let mut chain = names[..3].join(" -> ");
+            chain.push_str(" -> ...");
+            chain.push_str(&format!(" -> {} -> {}", names[names.len() - 1], names[0]));
+            chain
+        }
+    }
+
     fn render_degradation(&self, trust: &TrustOverlay) -> String {
         let mut items: Vec<String> = Vec::new();
 
-        // Call resolution rate
-        if let Some(rate) = trust.call_resolution_rate {
-            if rate < 0.95 {
-                items.push(format!("Call resolution rate: {:.0}%", rate * 100.0));
+        // Render from new reliability structure if present
+        if let Some(reliability) = &trust.reliability {
+            if let Some(cg) = &reliability.call_graph {
+                if cg.level != "HIGH" {
+                    items.push(self.format_reliability_axis("Call-graph", cg));
+                }
             }
-        }
-
-        // Call graph reliability
-        if let Some(reliability) = &trust.call_graph_reliability {
-            if reliability != "high" {
-                items.push(format!("Call graph reliability: {}", reliability));
+            if let Some(ig) = &reliability.import_graph {
+                if ig.level != "HIGH" {
+                    items.push(self.format_reliability_axis("Import-graph", ig));
+                }
             }
-        }
-
-        // Caveats
-        for caveat in &trust.caveats {
-            items.push(caveat.clone());
+            if let Some(ci) = &reliability.change_impact {
+                if ci.level != "HIGH" {
+                    items.push(self.format_reliability_axis("Change-impact", ci));
+                }
+            }
+        } else {
+            // Legacy fallback: use old fields
+            if let Some(rate) = trust.call_resolution_rate {
+                if rate < 0.95 {
+                    items.push(format!("Call resolution rate: {:.0}%", rate * 100.0));
+                }
+            }
+            if let Some(reliability) = &trust.call_graph_reliability {
+                if reliability != "high" {
+                    items.push(format!("Call graph reliability: {}", reliability));
+                }
+            }
+            // Caveats from legacy path
+            for caveat in &trust.caveats {
+                items.push(caveat.clone());
+            }
         }
 
         if items.is_empty() {
@@ -296,6 +404,78 @@ impl OrientResponse {
         let mut out = heading("Degradation");
         out.push_str(&bullet_list(&items));
         out
+    }
+
+    /// Format a reliability axis as human-readable prose.
+    ///
+    /// Converts machine tokens like "call_resolution_rate=33.5%_below_50%"
+    /// into "33% call resolution (below 50% threshold)".
+    fn format_reliability_axis(&self, name: &str, axis: &ReliabilityAxis) -> String {
+        let level = &axis.level;
+
+        if axis.reasons.is_empty() {
+            return format!("{} reliability is {} on this repo. Do not use for safety-critical decisions without verification.", name, level);
+        }
+
+        // Convert machine reasons to human prose
+        let human_reasons: Vec<String> = axis
+            .reasons
+            .iter()
+            .map(|r| self.humanize_reason(r))
+            .collect();
+
+        format!(
+            "{} reliability is {} ({})",
+            name,
+            level,
+            human_reasons.join("; ")
+        )
+    }
+
+    /// Convert a machine-format reason to human-readable prose.
+    fn humanize_reason(&self, reason: &str) -> String {
+        // Pattern: "call_resolution_rate=33.5%_below_50%"
+        if reason.starts_with("call_resolution_rate=") {
+            if let Some(rest) = reason.strip_prefix("call_resolution_rate=") {
+                // Extract rate and threshold
+                // Format: "33.5%_below_50%"
+                let parts: Vec<&str> = rest.split("_below_").collect();
+                if parts.len() == 2 {
+                    let rate = parts[0].trim_end_matches('%');
+                    let threshold = parts[1].trim_end_matches('%');
+                    if let (Ok(r), Ok(t)) = (rate.parse::<f64>(), threshold.parse::<f64>()) {
+                        return format!("{:.0}% call resolution, below {}% threshold", r, t);
+                    }
+                }
+            }
+        }
+
+        // Pattern: "unresolved_imports=944"
+        if reason.starts_with("unresolved_imports=") {
+            if let Some(count) = reason.strip_prefix("unresolved_imports=") {
+                if let Ok(n) = count.parse::<u64>() {
+                    return format!("{} unresolved imports", n);
+                }
+            }
+        }
+
+        // Pattern: "alias_resolution_suspicion"
+        if reason == "alias_resolution_suspicion" {
+            return "alias resolution suspected".to_string();
+        }
+
+        // Pattern: "missing_entrypoint_declarations"
+        if reason == "missing_entrypoint_declarations" {
+            return "no entrypoints declared".to_string();
+        }
+
+        // Pattern: "registry_pattern_suspicion"
+        if reason == "registry_pattern_suspicion" {
+            return "registry/factory patterns detected".to_string();
+        }
+
+        // Unknown pattern - return as-is but cleaned up
+        reason.replace('_', " ")
     }
 
     fn render_limits(&self) -> String {
@@ -326,6 +506,7 @@ mod tests {
     fn minimal_response() -> OrientResponse {
         OrientResponse {
             repo: "test-repo".to_string(),
+            display_name: None,
             snapshot: "snap-123".to_string(),
             focus: Focus {
                 input: None,
@@ -368,10 +549,11 @@ mod tests {
     }
 
     #[test]
-    fn render_shows_focus_repo_level() {
+    fn render_omits_focus_at_repo_level() {
+        // Repo-level focus adds no information - omit the line entirely
         let r = minimal_response();
         let out = r.render_human();
-        assert!(out.contains("Focus: (repo)"));
+        assert!(!out.contains("Focus:"));
     }
 
     #[test]
@@ -438,6 +620,7 @@ mod tests {
                 category: "gate".to_string(),
                 summary: "Gate fails: 2 of 5 obligations failing.".to_string(),
                 scope: None,
+                evidence: None,
             },
             Signal {
                 code: "IMPORT_CYCLES".to_string(),
@@ -445,6 +628,7 @@ mod tests {
                 category: "structure".to_string(),
                 summary: "3 import cycles detected.".to_string(),
                 scope: None,
+                evidence: None,
             },
             Signal {
                 code: "MODULE_SUMMARY".to_string(),
@@ -452,6 +636,7 @@ mod tests {
                 category: "informational".to_string(),
                 summary: "150 files, 1200 symbols indexed.".to_string(),
                 scope: None,
+                evidence: None,
             },
         ];
         let out = r.render_human();
@@ -465,9 +650,11 @@ mod tests {
     }
 
     #[test]
-    fn render_shows_degradation_from_trust() {
+    fn render_shows_degradation_from_trust_legacy() {
+        // Test legacy TrustOverlay structure (backward compatibility)
         let mut r = minimal_response();
         r.trust = Some(TrustOverlay {
+            reliability: None,
             call_graph_reliability: Some("medium".to_string()),
             call_resolution_rate: Some(0.78),
             caveats: vec!["Enrichment phase did not run.".to_string()],
@@ -480,15 +667,114 @@ mod tests {
     }
 
     #[test]
+    fn render_shows_degradation_from_trust_new_structure() {
+        // Test new TrustOverlay structure with reliability section
+        let mut r = minimal_response();
+        r.trust = Some(TrustOverlay {
+            reliability: Some(ReliabilitySection {
+                call_graph: Some(ReliabilityAxis {
+                    level: "LOW".to_string(),
+                    reasons: vec!["call_resolution_rate=33.5%_below_50%".to_string()],
+                }),
+                import_graph: Some(ReliabilityAxis {
+                    level: "LOW".to_string(),
+                    reasons: vec!["unresolved_imports=944".to_string()],
+                }),
+                change_impact: Some(ReliabilityAxis {
+                    level: "LOW".to_string(),
+                    reasons: vec!["alias_resolution_suspicion".to_string()],
+                }),
+            }),
+            call_graph_reliability: None,
+            call_resolution_rate: None,
+            caveats: vec![],
+        });
+        let out = r.render_human();
+        assert!(out.contains("Degradation"));
+        // Check humanized reasons
+        assert!(out.contains("Call-graph reliability is LOW"));
+        assert!(out.contains("34% call resolution")); // 33.5 rounds to 34
+        assert!(out.contains("Import-graph reliability is LOW"));
+        assert!(out.contains("944 unresolved imports"));
+        assert!(out.contains("Change-impact reliability is LOW"));
+        assert!(out.contains("alias resolution suspected"));
+    }
+
+    #[test]
     fn render_hides_degradation_when_trust_is_high() {
         let mut r = minimal_response();
         r.trust = Some(TrustOverlay {
-            call_graph_reliability: Some("high".to_string()),
-            call_resolution_rate: Some(0.98),
+            reliability: Some(ReliabilitySection {
+                call_graph: Some(ReliabilityAxis {
+                    level: "HIGH".to_string(),
+                    reasons: vec![],
+                }),
+                import_graph: Some(ReliabilityAxis {
+                    level: "HIGH".to_string(),
+                    reasons: vec![],
+                }),
+                change_impact: Some(ReliabilityAxis {
+                    level: "HIGH".to_string(),
+                    reasons: vec![],
+                }),
+            }),
+            call_graph_reliability: None,
+            call_resolution_rate: None,
             caveats: vec![],
         });
         let out = r.render_human();
         assert!(!out.contains("Degradation"));
+    }
+
+    #[test]
+    fn render_shows_cycle_anchor_in_signal() {
+        let mut r = minimal_response();
+        // Create cycle evidence JSON with 4 modules (shows full chain)
+        let evidence = serde_json::json!({
+            "cycle_count": 1,
+            "cycles": [{
+                "length": 4,
+                "modules": ["Auth", "User", "Session", "Config"]
+            }]
+        });
+        r.signals = vec![Signal {
+            code: "IMPORT_CYCLES".to_string(),
+            severity: "medium".to_string(),
+            category: "structure".to_string(),
+            summary: "1 import cycle detected.".to_string(),
+            scope: None,
+            evidence: Some(evidence),
+        }];
+        let out = r.render_human();
+        assert!(out.contains("Medium"));
+        // Should show cycle anchor with modules (full chain for <= 4)
+        assert!(out.contains("1 import cycle (4 modules)"));
+        assert!(out.contains("Auth -> User -> Session -> Config -> Auth"));
+    }
+
+    #[test]
+    fn render_shows_large_cycle_truncated() {
+        let mut r = minimal_response();
+        // Create cycle evidence with >4 modules
+        let evidence = serde_json::json!({
+            "cycle_count": 1,
+            "cycles": [{
+                "length": 10,
+                "modules": ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
+            }]
+        });
+        r.signals = vec![Signal {
+            code: "IMPORT_CYCLES".to_string(),
+            severity: "medium".to_string(),
+            category: "structure".to_string(),
+            summary: "1 import cycle detected.".to_string(),
+            scope: None,
+            evidence: Some(evidence),
+        }];
+        let out = r.render_human();
+        // Should truncate: first 3 -> ... -> last -> first
+        assert!(out.contains("A -> B -> C -> ..."));
+        assert!(out.contains("-> J -> A"));
     }
 
     #[test]
@@ -527,11 +813,12 @@ mod tests {
     }
 
     #[test]
-    fn render_shows_truncation_warning() {
+    fn render_shows_truncation_notice() {
         let mut r = minimal_response();
         r.truncated = true;
         let out = r.render_human();
-        assert!(out.contains("[Output truncated. Use --json for full results.]"));
+        assert!(out.contains("Some signals omitted due to budget"));
+        assert!(out.contains("--budget large"));
     }
 
     #[test]

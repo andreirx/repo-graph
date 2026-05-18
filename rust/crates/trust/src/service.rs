@@ -407,6 +407,7 @@ pub fn compute_trust_report(input: &TrustComputationInput) -> TrustReport {
     // ── Assemble report ──────────────────────────────────────
     TrustReport {
         snapshot_uid: input.snapshot_uid.clone(),
+        display_name: None, // Populated by daemon handler
         basis_commit: input.basis_commit.clone(),
         toolchain: input.toolchain.clone(),
         diagnostics_version: input.diagnostics.as_ref().map(|d| d.diagnostics_version),

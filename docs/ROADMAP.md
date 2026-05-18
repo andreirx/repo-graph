@@ -75,10 +75,10 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **REG-1** | Repo registry + cwd auto-discovery (read-side contract) | IMPLEMENTED |
 | **CLI-OUT-1** | Presentation layer (human-default output, --json opt-in) | IMPLEMENTED |
 | **CLI-OUT-2A** | Cross-repo output audit (findings + contracts) | HANDOFF COMPLETE |
-| **CLI-OUT-2B** | First-contact discovery output (orient, trust, cycles) | **CURRENT** |
+| **CLI-OUT-2B** | First-contact discovery output (orient, trust, cycles) | IMPLEMENTED |
+| **RMAPD-PERF-1** | Large repo timeout investigation | IMPLEMENTED |
 | **ORIENT-BUG-1** | Module count mismatch (data bug) | QUEUED |
-| **RMAPD-PERF-1** | Large repo timeout investigation | QUEUED |
-| **CLI-OUT-2C** | stats renderer (after RMAPD-PERF-1) | QUEUED |
+| **CLI-OUT-2C** | stats renderer | **CURRENT** |
 | **CLI-OUT-3** | Graph drilldown output (callers, callees, path, imports, explain) | QUEUED |
 | **CLI-OUT-4** | Module/architecture output (modules, surfaces, boundaries) | QUEUED |
 | **CLI-OUT-5** | Inventory output (docs, resource, policy) | QUEUED |
@@ -92,23 +92,34 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 
 ### Current Priority
 
-**CLI-OUT-2B: First-Contact Discovery Output** — CURRENT
+**CLI-OUT-2C: Stats Renderer** — CURRENT
 
-Renderer-only implementation. Uses data already in daemon responses.
+Human renderer for `stats` command. RMAPD-PERF-1 resolved, so stats now works
+on large repos. See Wave 1b in Output Program.
 
-In scope:
-- `orient` — repo identity, cycle topology, evidence-bearing degradation
-- `trust` — new human renderer
-- `cycles` — new human renderer
-- `check` — optional evidence refinement
+See `docs/slices/cli-out-2c-stats.md` for specification (to be created).
 
-Out of scope (separate slices):
-- Module count fix (ORIENT-BUG-1)
-- Daemon timeouts (RMAPD-PERF-1)
-- stats (CLI-OUT-2C, after RMAPD-PERF-1)
-- explain (CLI-OUT-3)
+### Recently Completed
 
-See `docs/slices/cli-out-2b-output-redesign.md` for specification.
+**CLI-OUT-2B: First-Contact Discovery Output** — IMPLEMENTED (2026-05-18)
+
+Delivered:
+- Human renderer for `orient` with repo name, cycle topology, evidence-bearing degradation
+- Human renderer for `trust` with resolution rates, reliability breakdown
+- Human renderer for `cycles` with topology
+- All commands default to human output, `--json` for machine mode
+- Validated on 5-repo corpus (OpenXcom, buildroot, django, duckdb, grpc-java)
+
+See `docs/audits/cli-out-2b/review-packet.md` for validation evidence.
+
+**RMAPD-PERF-1: Large Repo Timeout** — IMPLEMENTED (2026-05-18)
+
+Delivered:
+- Increased client read timeout from 30s to 300s
+- Added heartbeat emission to read handlers (orient, check, trust, stats, cycles)
+- django, duckdb, grpc-java now index and query successfully
+
+See `docs/slices/rmapd-perf-1-timeout.md` for analysis.
 
 ### Handoff Complete
 
@@ -137,22 +148,14 @@ Not a renderer issue. Requires storage/query investigation.
 
 See `docs/slices/orient-bug-1-module-count.md`.
 
-**RMAPD-PERF-1: Large Repo Timeout** — QUEUED
-
-Daemon runtime issue. Indexing times out on gstreamer/hadoop.
-Stats/check times out on duckdb/django.
-Not a renderer issue. Requires daemon investigation.
-
-See `docs/slices/rmapd-perf-1-timeout.md`.
-
 ---
 
 ### Output Program Wave Model
 
 | Wave | Slice | Commands | Status |
 |------|-------|----------|--------|
-| 1 | CLI-OUT-2B | orient, trust, cycles, check | CURRENT |
-| 1b | CLI-OUT-2C | stats | After RMAPD-PERF-1 |
+| 1 | CLI-OUT-2B | orient, trust, cycles, check | IMPLEMENTED |
+| 1b | CLI-OUT-2C | stats | CURRENT |
 | 2 | CLI-OUT-3 | callers, callees, path, imports, explain | QUEUED |
 | 3 | CLI-OUT-4 | modules *, surfaces *, boundaries * | QUEUED |
 | 4 | CLI-OUT-5 | docs *, resource *, policy | QUEUED |
@@ -160,7 +163,6 @@ See `docs/slices/rmapd-perf-1-timeout.md`.
 | 6 | CLI-OUT-7 | violations, gate, assess | QUEUED |
 
 Each wave: audit, define contracts, implement renderers, validate.
-Do not expand CLI-OUT-2B to cover later waves.
 
 ---
 

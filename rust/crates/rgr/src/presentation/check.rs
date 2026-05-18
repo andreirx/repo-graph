@@ -32,6 +32,11 @@ use crate::presentation::{bullet, heading, kv_line};
 #[derive(Debug, Deserialize)]
 pub struct CheckResponse {
     pub repo: String,
+    /// Human-readable repo name for CLI display.
+    /// Populated by daemon from registry alias or path basename.
+    /// When present, prefer this over `repo` (which is internal UID).
+    #[serde(default)]
+    pub display_name: Option<String>,
     #[allow(dead_code)]
     pub snapshot: String,
     pub confidence: String,
@@ -75,7 +80,9 @@ impl CheckResponse {
         let mut out = String::new();
 
         // ── Header ─────────────────────────────────────────────────
-        out.push_str(&kv_line("Repo", &self.repo));
+        // CLI-OUT-2B: prefer display_name (human-readable) over internal repo UID
+        let repo_display = self.display_name.as_deref().unwrap_or(&self.repo);
+        out.push_str(&kv_line("Repo", repo_display));
 
         // Determine verdict from signals
         let verdict = self.determine_verdict();
@@ -163,6 +170,7 @@ mod tests {
     fn minimal_response() -> CheckResponse {
         CheckResponse {
             repo: "test-repo".to_string(),
+            display_name: None,
             snapshot: "snap-123".to_string(),
             confidence: "high".to_string(),
             signals: vec![],

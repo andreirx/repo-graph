@@ -95,6 +95,7 @@ pub fn orient_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
         schema: ORIENT_SCHEMA,
         command: ORIENT_COMMAND,
         repo: repo_name.to_string(),
+        display_name: None, // Populated by daemon handler
         snapshot: snapshot_uid.clone(),
         focus,
         confidence,

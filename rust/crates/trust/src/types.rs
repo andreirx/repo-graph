@@ -240,6 +240,13 @@ pub struct ModuleTrustRow {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrustReport {
     pub snapshot_uid: String,
+    /// Human-readable repo name for CLI presentation.
+    /// Populated by daemon from registry alias (if present) or
+    /// basename of the canonical repo path. `None` only when
+    /// identity resolution failed (defensive) or when
+    /// deserializing legacy JSON that lacks the field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub display_name: Option<String>,
     pub basis_commit: Option<String>,
     pub toolchain: Option<Map<String, serde_json::Value>>,
     pub diagnostics_version: Option<u32>,

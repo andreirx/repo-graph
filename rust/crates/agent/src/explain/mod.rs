@@ -181,6 +181,7 @@ pub fn run_explain<S: AgentStorageRead + GateStorageRead + ?Sized>(
                         schema: ORIENT_SCHEMA,
                         command: EXPLAIN_COMMAND,
                         repo: repo.name,
+                        display_name: None, // Populated by daemon handler
                         snapshot: snapshot.snapshot_uid.clone(),
                         focus: Focus::ambiguous(target, focus_candidates),
                         confidence: Confidence::High,
@@ -228,6 +229,7 @@ fn build_no_match(
         schema: ORIENT_SCHEMA,
         command: EXPLAIN_COMMAND,
         repo: repo_name.to_string(),
+        display_name: None, // Populated by daemon handler
         snapshot: snapshot.snapshot_uid.clone(),
         focus: Focus::no_match(target),
         confidence: Confidence::High,
@@ -435,6 +437,7 @@ fn explain_symbol<S: AgentStorageRead + GateStorageRead + ?Sized>(
         schema: ORIENT_SCHEMA,
         command: EXPLAIN_COMMAND,
         repo: repo_name.to_string(),
+        display_name: None, // Populated by daemon handler
         snapshot: snapshot_uid.clone(),
         focus,
         confidence,
@@ -556,6 +559,7 @@ fn explain_file<S: AgentStorageRead + GateStorageRead + ?Sized>(
         schema: ORIENT_SCHEMA,
         command: EXPLAIN_COMMAND,
         repo: repo_name.to_string(),
+        display_name: None, // Populated by daemon handler
         snapshot: snapshot_uid.clone(),
         focus,
         confidence,
@@ -721,6 +725,7 @@ fn explain_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
         schema: ORIENT_SCHEMA,
         command: EXPLAIN_COMMAND,
         repo: repo_name.to_string(),
+        display_name: None, // Populated by daemon handler
         snapshot: snapshot_uid.clone(),
         focus,
         confidence,

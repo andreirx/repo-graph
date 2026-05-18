@@ -107,6 +107,53 @@ impl ServiceDispatcher {
 
         Ok((repo_state, repo_uid.clone()))
     }
+
+    /// Variant of `resolve_and_load_repo` that also returns a human-readable
+    /// display name for CLI presentation.
+    ///
+    /// The display name is derived from:
+    /// 1. Registry alias (if present)
+    /// 2. Otherwise, basename of the canonical repo path
+    ///
+    /// Used by CLI-OUT-2B handlers (orient, check, trust, cycles) to populate
+    /// the `display_name` field in user-facing response DTOs.
+    fn resolve_and_load_repo_with_display_name(
+        &self,
+        params: &Value,
+    ) -> Result<(Arc<crate::state::RepoState>, String, String), ErrorDetail> {
+        let repo_ref = Self::get_string_param(params, "repo")?;
+
+        // Resolve via registry (alias or path)
+        let entry = self.state.resolve_alias_or_path(repo_ref).ok_or_else(|| {
+            ErrorDetail::new(
+                ErrorCode::RepoNotFound,
+                format!(
+                    "repo not indexed: {} (run: rmap index {})",
+                    repo_ref, repo_ref
+                ),
+            )
+        })?;
+
+        let db_path = Path::new(&entry.db_path);
+        let repo_uid = &entry.repo_uid;
+
+        // Compute display_name: alias if present, else path basename
+        let display_name = entry.alias.clone().unwrap_or_else(|| {
+            Path::new(&entry.canonical_path)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(repo_uid)
+                .to_string()
+        });
+
+        // Auto-load if not already loaded
+        let repo_state = self
+            .state
+            .load_repo(db_path, repo_uid)
+            .map_err(|e| ErrorDetail::new(ErrorCode::InternalError, e))?;
+
+        Ok((repo_state, repo_uid.clone(), display_name))
+    }
 }
 
 impl Dispatcher for ServiceDispatcher {
@@ -133,17 +180,20 @@ impl Dispatcher for ServiceDispatcher {
             "callers" => self.handle_callers(request),
             "callees" => self.handle_callees(request),
             "imports" => self.handle_imports(request),
-            "stats" => self.handle_stats(request),
-            "cycles" => self.handle_cycles(request),
+            // RMAPD-PERF-1: These operations emit heartbeat for long queries
+            "stats" => self.handle_stats(request, emitter),
+            "cycles" => self.handle_cycles(request, emitter),
             "path" => self.handle_path(request),
 
             // ── Agent services ──────────────────────────────────────
-            "orient" => self.handle_orient(request),
-            "check" => self.handle_check(request),
+            // RMAPD-PERF-1: These operations emit heartbeat for long queries
+            "orient" => self.handle_orient(request, emitter),
+            "check" => self.handle_check(request, emitter),
             "explain" => self.handle_explain(request),
 
             // ── Trust and governance ────────────────────────────────
-            "trust" => self.handle_trust(request),
+            // RMAPD-PERF-1: trust emits heartbeat for long queries
+            "trust" => self.handle_trust(request, emitter),
             "gate" => self.handle_gate(request),
 
             // ── Documentation ───────────────────────────────────────
@@ -763,7 +813,8 @@ impl ServiceDispatcher {
         )
     }
 
-    fn handle_stats(&self, request: &Request) -> DispatchResult {
+    /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
+    fn handle_stats(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
         // REG-1: resolve repo from path/alias and auto-load
         let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
             Ok(r) => r,
@@ -789,6 +840,13 @@ impl ServiceDispatcher {
                 );
             }
         };
+
+        // RMAPD-PERF-1: Emit heartbeat before potentially long query
+        let _ = emitter.emit(ProgressDetail {
+            phase: "computing_module_stats".to_string(),
+            current: 0,
+            total: 1,
+        });
 
         // Compute module stats
         let stats = match repo_state
@@ -815,12 +873,18 @@ impl ServiceDispatcher {
         )
     }
 
-    fn handle_cycles(&self, request: &Request) -> DispatchResult {
-        // REG-1: resolve repo from path/alias and auto-load
-        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
-            Ok(r) => r,
-            Err(e) => return DispatchResult::error(&request.id, e),
-        };
+    /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
+    fn handle_cycles(
+        &self,
+        request: &Request,
+        emitter: &mut dyn ProgressEmitter,
+    ) -> DispatchResult {
+        // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-2B)
+        let (repo_state, repo_uid, display_name) =
+            match self.resolve_and_load_repo_with_display_name(&request.params) {
+                Ok(r) => r,
+                Err(e) => return DispatchResult::error(&request.id, e),
+            };
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
@@ -842,6 +906,13 @@ impl ServiceDispatcher {
             }
         };
 
+        // RMAPD-PERF-1: Emit heartbeat before potentially long Tarjan SCC
+        let _ = emitter.emit(ProgressDetail {
+            phase: "finding_cycles".to_string(),
+            current: 0,
+            total: 1,
+        });
+
         // Module-level cycles (default)
         let cycles = match repo_state
             .storage
@@ -856,10 +927,12 @@ impl ServiceDispatcher {
             }
         };
 
+        // CLI-OUT-2B: Include display_name for human renderers
         DispatchResult::success(
             &request.id,
             serde_json::json!({
                 "repo_uid": repo_uid,
+                "display_name": display_name,
                 "snapshot_uid": snapshot.snapshot_uid,
                 "cycles": cycles,
                 "count": cycles.len(),
@@ -1753,12 +1826,18 @@ impl ServiceDispatcher {
 
     // ── Agent services ──────────────────────────────────────────────
 
-    fn handle_orient(&self, request: &Request) -> DispatchResult {
-        // REG-1: resolve repo from path/alias and auto-load
-        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
-            Ok(r) => r,
-            Err(e) => return DispatchResult::error(&request.id, e),
-        };
+    /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
+    fn handle_orient(
+        &self,
+        request: &Request,
+        emitter: &mut dyn ProgressEmitter,
+    ) -> DispatchResult {
+        // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-2B)
+        let (repo_state, repo_uid, display_name) =
+            match self.resolve_and_load_repo_with_display_name(&request.params) {
+                Ok(r) => r,
+                Err(e) => return DispatchResult::error(&request.id, e),
+            };
 
         // Parse optional focus
         let focus = Self::get_optional_string_param(&request.params, "focus");
@@ -1785,8 +1864,15 @@ impl ServiceDispatcher {
         // Get wall-clock timestamp for waiver expiry evaluation
         let now = utc_now_iso8601();
 
+        // RMAPD-PERF-1: Emit heartbeat before potentially long orient computation
+        let _ = emitter.emit(ProgressDetail {
+            phase: "computing_orient".to_string(),
+            current: 0,
+            total: 1,
+        });
+
         // Call the agent orient use case
-        let result =
+        let mut result =
             match repo_graph_agent::orient(&repo_state.storage, &repo_uid, focus, budget, &now) {
                 Ok(r) => r,
                 Err(e) => {
@@ -1796,6 +1882,9 @@ impl ServiceDispatcher {
                     );
                 }
             };
+
+        // CLI-OUT-2B: Inject display_name for human renderers
+        result.display_name = Some(display_name);
 
         // Apply trust overlay (matches CLI contract)
         let mut output = match serde_json::to_value(&result) {
@@ -1807,6 +1896,13 @@ impl ServiceDispatcher {
                 );
             }
         };
+
+        // RMAPD-PERF-1: Emit heartbeat before trust overlay computation
+        let _ = emitter.emit(ProgressDetail {
+            phase: "computing_trust_overlay".to_string(),
+            current: 0,
+            total: 1,
+        });
 
         // Add trust section if degraded (briefing surface pattern)
         if let Ok(Some(snapshot)) = repo_state.storage.get_snapshot(&result.snapshot) {
@@ -1829,12 +1925,14 @@ impl ServiceDispatcher {
         DispatchResult::success(&request.id, output)
     }
 
-    fn handle_check(&self, request: &Request) -> DispatchResult {
-        // REG-1: resolve repo from path/alias and auto-load
-        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
-            Ok(r) => r,
-            Err(e) => return DispatchResult::error(&request.id, e),
-        };
+    /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
+    fn handle_check(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
+        // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-2B)
+        let (repo_state, repo_uid, display_name) =
+            match self.resolve_and_load_repo_with_display_name(&request.params) {
+                Ok(r) => r,
+                Err(e) => return DispatchResult::error(&request.id, e),
+            };
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
@@ -1842,15 +1940,26 @@ impl ServiceDispatcher {
         // Get wall-clock timestamp for waiver expiry evaluation
         let now = utc_now_iso8601();
 
+        // RMAPD-PERF-1: Emit heartbeat before potentially long check computation
+        let _ = emitter.emit(ProgressDetail {
+            phase: "running_check".to_string(),
+            current: 0,
+            total: 1,
+        });
+
         // Call the agent check use case
         match repo_graph_agent::run_check(&repo_state.storage, &repo_uid, &now) {
-            Ok(result) => match serde_json::to_value(&result) {
-                Ok(v) => DispatchResult::success(&request.id, v),
-                Err(e) => DispatchResult::error(
-                    &request.id,
-                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-                ),
-            },
+            Ok(mut result) => {
+                // CLI-OUT-2B: Inject display_name for human renderers
+                result.display_name = Some(display_name);
+                match serde_json::to_value(&result) {
+                    Ok(v) => DispatchResult::success(&request.id, v),
+                    Err(e) => DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                    ),
+                }
+            }
             Err(e) => DispatchResult::error(
                 &request.id,
                 ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
@@ -1859,11 +1968,12 @@ impl ServiceDispatcher {
     }
 
     fn handle_explain(&self, request: &Request) -> DispatchResult {
-        // REG-1: resolve repo from path/alias and auto-load
-        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
-            Ok(r) => r,
-            Err(e) => return DispatchResult::error(&request.id, e),
-        };
+        // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-3)
+        let (repo_state, repo_uid, display_name) =
+            match self.resolve_and_load_repo_with_display_name(&request.params) {
+                Ok(r) => r,
+                Err(e) => return DispatchResult::error(&request.id, e),
+            };
 
         let target = match Self::get_string_param(&request.params, "target") {
             Ok(t) => t,
@@ -1893,7 +2003,7 @@ impl ServiceDispatcher {
         let now = utc_now_iso8601();
 
         // Call the agent explain use case
-        let result = match repo_graph_agent::run_explain(
+        let mut result = match repo_graph_agent::run_explain(
             &repo_state.storage,
             &repo_uid,
             target,
@@ -1908,6 +2018,9 @@ impl ServiceDispatcher {
                 );
             }
         };
+
+        // CLI-OUT-3: Inject display_name for human renderers (explain deferred to CLI-OUT-3)
+        result.display_name = Some(display_name);
 
         // Apply trust overlay (matches CLI contract)
         let mut output = match serde_json::to_value(&result) {
@@ -1943,12 +2056,14 @@ impl ServiceDispatcher {
 
     // ── Trust and governance handlers ───────────────────────────────
 
-    fn handle_trust(&self, request: &Request) -> DispatchResult {
-        // REG-1: resolve repo from path/alias and auto-load
-        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
-            Ok(r) => r,
-            Err(e) => return DispatchResult::error(&request.id, e),
-        };
+    /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
+    fn handle_trust(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
+        // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-2B)
+        let (repo_state, repo_uid, display_name) =
+            match self.resolve_and_load_repo_with_display_name(&request.params) {
+                Ok(r) => r,
+                Err(e) => return DispatchResult::error(&request.id, e),
+            };
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
@@ -1980,9 +2095,16 @@ impl ServiceDispatcher {
             );
         }
 
+        // RMAPD-PERF-1: Emit heartbeat before potentially long trust computation
+        let _ = emitter.emit(ProgressDetail {
+            phase: "assembling_trust_report".to_string(),
+            current: 0,
+            total: 1,
+        });
+
         // Compute trust report
         use repo_graph_trust::service::assemble_trust_report;
-        let report = match assemble_trust_report(
+        let mut report = match assemble_trust_report(
             &repo_state.storage,
             &repo_uid,
             &snapshot.snapshot_uid,
@@ -1997,6 +2119,9 @@ impl ServiceDispatcher {
                 );
             }
         };
+
+        // CLI-OUT-2B: Inject display_name for human renderers
+        report.display_name = Some(display_name);
 
         match serde_json::to_value(&report) {
             Ok(v) => DispatchResult::success(&request.id, v),

@@ -287,6 +287,7 @@ mod tests {
     fn minimal_report() -> TrustReport {
         TrustReport {
             snapshot_uid: "snap1".into(),
+            display_name: None,
             basis_commit: None,
             toolchain: None,
             diagnostics_version: None,

@@ -279,6 +279,7 @@ fn build_ambiguous_result(
         schema: ORIENT_SCHEMA,
         command: ORIENT_COMMAND,
         repo: repo_name.to_string(),
+        display_name: None, // Populated by daemon handler
         snapshot: snapshot.snapshot_uid.clone(),
         focus: Focus::ambiguous(focus_str, focus_candidates),
         confidence: Confidence::High,
@@ -316,6 +317,7 @@ fn build_no_match_result(
         schema: ORIENT_SCHEMA,
         command: ORIENT_COMMAND,
         repo: repo_name.to_string(),
+        display_name: None, // Populated by daemon handler
         snapshot: snapshot.snapshot_uid.clone(),
         focus: Focus::no_match(focus_str),
         confidence: Confidence::High,

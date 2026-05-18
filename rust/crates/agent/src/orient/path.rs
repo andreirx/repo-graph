@@ -108,6 +108,7 @@ pub fn orient_path<S: AgentStorageRead + GateStorageRead + ?Sized>(
         schema: ORIENT_SCHEMA,
         command: ORIENT_COMMAND,
         repo: repo_name.to_string(),
+        display_name: None, // Populated by daemon handler
         snapshot: snapshot_uid.clone(),
         focus: Focus::path_area(path_prefix, module_stable_key, path_prefix),
         confidence,

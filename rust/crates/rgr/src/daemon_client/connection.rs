@@ -21,7 +21,21 @@ use serde::{Deserialize, Serialize};
 const CONNECTION_TIMEOUT_SECS: u64 = 2;
 
 /// Default read timeout in seconds.
-const READ_TIMEOUT_SECS: u64 = 30;
+///
+/// RMAPD-PERF-1: Increased from 30s to 300s as mitigation for long-running
+/// read operations (orient, check, trust, stats, cycles). Even with heartbeat
+/// emission before queries, the queries themselves can exceed minutes on large
+/// repos (django ~3000 files, duckdb ~5000 files).
+///
+/// The proper fix requires either:
+/// - SQLite progress_handler callback for mid-query heartbeats
+/// - Background thread execution with periodic heartbeat emission
+///
+/// Until then, 300s provides sufficient headroom for current corpus while
+/// keeping failure detection under 5 minutes for true hangs.
+///
+/// See docs/slices/rmapd-perf-1-timeout.md.
+const READ_TIMEOUT_SECS: u64 = 300;
 
 /// Error returned when daemon communication fails.
 #[derive(Debug)]

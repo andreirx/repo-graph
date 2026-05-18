@@ -3056,3 +3056,46 @@ trusting the smoke harness as a stable protocol tool.
 **Immediate fix applied:** Changed `.json` → `.txt` for non-JSON output modes.
 
 **Full resolution:** Requires a dedicated cleanup slice addressing A-E above.
+
+## CLI Presentation
+
+### display_name in shared response DTOs
+
+**Added:** CLI-OUT-2B (2026-05-18)
+
+`display_name: Option<String>` is a daemon-populated presentation field embedded
+in shared response DTOs (`OrientResult`, `TrustReport`, cycles JSON).
+
+**Why this is an architectural compromise:**
+
+The field exists to avoid renderer-side identity guessing. Before this change,
+the CLI would have to derive human-readable repo names from:
+- cwd-based heuristics
+- registry lookups duplicating daemon logic
+
+Instead, the daemon computes display identity once (registry alias if present,
+else path basename) and embeds it in the response.
+
+**Why it is acceptable:**
+
+- Daemon populates it; agent code clearly marks it as daemon-populated
+- Field is `Option<String>` with `#[serde(default)]`
+- No business logic depends on it
+- Renderers fall back to internal `repo` UID when absent
+
+**What this is NOT:**
+
+- Not a domain field — it has no meaning to core business rules
+- Not required for correctness — only for human presentation
+
+**Affected DTOs:**
+
+- `OrientResult` (agent/src/dto/envelope.rs) — used by orient, check, explain
+- `TrustReport` (trust/src/types.rs) — used by trust
+- cycles inline JSON (daemon-runtime/src/dispatch.rs) — used by cycles
+
+**Resolution if this becomes problematic:**
+
+Move display identity to a separate presentation envelope that wraps the core
+DTO at the CLI boundary. This would require presentation-layer types distinct
+from daemon response types. Current approach avoids that complexity.
