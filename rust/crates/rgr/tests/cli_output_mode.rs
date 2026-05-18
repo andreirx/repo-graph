@@ -239,11 +239,15 @@ impl Drop for DaemonHarness {
     }
 }
 
-// ═══════════════════════════���══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 // ORIENT OUTPUT MODE TESTS
-// ═══════════════════════════��══════════════════════════════════════════════════
+//
+// These tests require `rmapd` to be built first: `cargo build -p rmapd`
+// Run with: `cargo test -p repo-graph-rgr --test cli_output_mode -- --ignored`
+// ═══════════════════════════════════════════════════════════════════════════════
 
 #[test]
+#[ignore = "requires rmapd binary and Unix socket permission - run with --ignored"]
 fn orient_human_mode_contains_structured_markers() {
     let harness = DaemonHarness::new();
     let output = harness.run_cli(&["orient"]);
@@ -288,6 +292,7 @@ fn orient_human_mode_contains_structured_markers() {
 }
 
 #[test]
+#[ignore = "requires rmapd binary and Unix socket permission - run with --ignored"]
 fn orient_json_mode_returns_valid_envelope() {
     let harness = DaemonHarness::new();
     let output = harness.run_cli(&["orient", "--json"]);
@@ -329,11 +334,12 @@ fn orient_json_mode_returns_valid_envelope() {
     );
 }
 
-// ════════════════��═════════════════════��═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 // CHECK OUTPUT MODE TESTS
-// ════════════════════════════��═════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 
 #[test]
+#[ignore = "requires rmapd binary and Unix socket permission - run with --ignored"]
 fn check_human_mode_contains_verdict() {
     let harness = DaemonHarness::new();
     let output = harness.run_cli(&["check"]);
@@ -365,6 +371,7 @@ fn check_human_mode_contains_verdict() {
 }
 
 #[test]
+#[ignore = "requires rmapd binary and Unix socket permission - run with --ignored"]
 fn check_json_mode_returns_valid_envelope() {
     let harness = DaemonHarness::new();
     let output = harness.run_cli(&["check", "--json"]);
@@ -399,6 +406,7 @@ fn check_json_mode_returns_valid_envelope() {
 // ═══════════════════════════���═════════════════════════���════════════════════════
 
 #[test]
+#[ignore = "requires rmapd binary and Unix socket permission - run with --ignored"]
 fn explain_human_mode_contains_target() {
     let harness = DaemonHarness::new();
     let output = harness.run_cli(&["explain", "main.ts"]);
@@ -433,6 +441,7 @@ fn explain_human_mode_contains_target() {
 }
 
 #[test]
+#[ignore = "requires rmapd binary and Unix socket permission - run with --ignored"]
 fn explain_json_mode_returns_valid_envelope() {
     let harness = DaemonHarness::new();
     let output = harness.run_cli(&["explain", "main.ts", "--json"]);
