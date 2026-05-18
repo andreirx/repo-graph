@@ -74,30 +74,112 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **RMAPD-2** | Unix socket transport (resident daemon model) | IMPLEMENTED |
 | **REG-1** | Repo registry + cwd auto-discovery (read-side contract) | IMPLEMENTED |
 | **CLI-OUT-1** | Presentation layer (human-default output, --json opt-in) | IMPLEMENTED |
-| **CURSOR-1** | Cursor MCP/rules integration | **CURRENT** |
+| **CLI-OUT-2A** | Cross-repo output audit (findings + contracts) | HANDOFF COMPLETE |
+| **CLI-OUT-2B** | First-contact discovery output (orient, trust, cycles) | **CURRENT** |
+| **ORIENT-BUG-1** | Module count mismatch (data bug) | QUEUED |
+| **RMAPD-PERF-1** | Large repo timeout investigation | QUEUED |
+| **CLI-OUT-2C** | stats renderer (after RMAPD-PERF-1) | QUEUED |
+| **CLI-OUT-3** | Graph drilldown output (callers, callees, path, imports, explain) | QUEUED |
+| **CLI-OUT-4** | Module/architecture output (modules, surfaces, boundaries) | QUEUED |
+| **CLI-OUT-5** | Inventory output (docs, resource, policy) | QUEUED |
+| **CLI-OUT-6** | Quality/risk output (churn, hotspots, risk, coverage) | QUEUED |
+| **CLI-OUT-7** | Governance output (violations, gate, assess) | QUEUED |
 | **SMOKE-1** | Validation harness cleanup (command model, verdict semantics) | QUEUED |
+| **CURSOR-1** | Cursor MCP/rules integration | QUEUED |
 | **WIN-1** | Windows distribution/install | DEFERRED |
 | **MAC-2** | macOS signing/notarization | DEFERRED |
 | **UPDATE-1** | Updater/repair channel | DEFERRED |
 
 ### Current Priority
 
-**CURSOR-1: Cursor Integration** — PLANNED
+**CLI-OUT-2B: First-Contact Discovery Output** — CURRENT
 
-Different integration model from Claude Code / Codex. Needs investigation.
+Renderer-only implementation. Uses data already in daemon responses.
 
-### Queued After Current
+In scope:
+- `orient` — repo identity, cycle topology, evidence-bearing degradation
+- `trust` — new human renderer
+- `cycles` — new human renderer
+- `check` — optional evidence refinement
+
+Out of scope (separate slices):
+- Module count fix (ORIENT-BUG-1)
+- Daemon timeouts (RMAPD-PERF-1)
+- stats (CLI-OUT-2C, after RMAPD-PERF-1)
+- explain (CLI-OUT-3)
+
+See `docs/slices/cli-out-2b-output-redesign.md` for specification.
+
+### Handoff Complete
+
+**CLI-OUT-2A: Cross-Repo Output Audit** — HANDOFF COMPLETE
+
+Audit sufficient to drive first implementation wave.
+
+Completed:
+- 5 of 7 repos audited (gstreamer/hadoop blocked by RMAPD-PERF-1)
+- Contracts proposed for first-contact discovery commands
+
+Gaps handed off:
+- ORIENT-BUG-1: Module count mismatch
+- RMAPD-PERF-1: Large repo timeouts
+
+See `docs/audits/cli-out-2a/synthesis.md` for findings.
+
+---
+
+### Queued Bug/Support Slices
+
+**ORIENT-BUG-1: Module Count Mismatch** — QUEUED
+
+Data/query bug. Orient shows 2-17 modules when trust shows 19-240+.
+Not a renderer issue. Requires storage/query investigation.
+
+See `docs/slices/orient-bug-1-module-count.md`.
+
+**RMAPD-PERF-1: Large Repo Timeout** — QUEUED
+
+Daemon runtime issue. Indexing times out on gstreamer/hadoop.
+Stats/check times out on duckdb/django.
+Not a renderer issue. Requires daemon investigation.
+
+See `docs/slices/rmapd-perf-1-timeout.md`.
+
+---
+
+### Output Program Wave Model
+
+| Wave | Slice | Commands | Status |
+|------|-------|----------|--------|
+| 1 | CLI-OUT-2B | orient, trust, cycles, check | CURRENT |
+| 1b | CLI-OUT-2C | stats | After RMAPD-PERF-1 |
+| 2 | CLI-OUT-3 | callers, callees, path, imports, explain | QUEUED |
+| 3 | CLI-OUT-4 | modules *, surfaces *, boundaries * | QUEUED |
+| 4 | CLI-OUT-5 | docs *, resource *, policy | QUEUED |
+| 5 | CLI-OUT-6 | churn, hotspots, risk, coverage | QUEUED |
+| 6 | CLI-OUT-7 | violations, gate, assess | QUEUED |
+
+Each wave: audit, define contracts, implement renderers, validate.
+Do not expand CLI-OUT-2B to cover later waves.
+
+---
 
 **SMOKE-1: Validation Harness Cleanup** — QUEUED
 
-Support infrastructure slice. Addresses structural defects in smoke scripts exposed
-during Tarjan SCC fix validation (2026-05-18):
-- Weak multi-command model (no per-command arguments)
-- Execution/verdict conflation (exit code vs. domain semantics)
-- Incorrect metadata field names
-- No `eval` (explicit argv parsing required)
+Support infrastructure slice. Addresses structural defects in smoke scripts.
+Current harness is imperfect but sufficient for audit-phase manual review.
+More important before broad implementation automation (CLI-OUT-2B) than before
+human review of existing outputs (CLI-OUT-2A).
 
 See `docs/slices/smoke-1-validation-harness-cleanup.md` for specification.
+
+---
+
+**CURSOR-1: Cursor Integration** — QUEUED
+
+Different integration model from Claude Code / Codex. Moved back from current
+to prioritize product-surface quality (CLI-OUT-2A/2B) based on real-repo
+validation evidence from Tarjan SCC fix smoke runs.
 
 ### Recently Completed
 
@@ -185,7 +267,12 @@ HOOK-1 delivered:
 13. ~~RMAPD-2 — Unix socket transport~~ (IMPLEMENTED)
 14. ~~REG-1 — Repo registry + cwd auto-discovery (read-side)~~ (IMPLEMENTED)
 15. ~~CLI-OUT-1 — Presentation layer (human-default output)~~ (IMPLEMENTED)
-16. **CURSOR-1 — Cursor integration (CURRENT)**
+16. ~~CLI-OUT-2A — Cross-repo output audit~~ (HANDOFF COMPLETE)
+17. **CLI-OUT-2B — First-contact discovery output (CURRENT)**
+18. CLI-OUT-2C — stats renderer (after RMAPD-PERF-1)
+19. CLI-OUT-3 — Graph drilldown output (QUEUED)
+20. SMOKE-1 — Validation harness cleanup (QUEUED)
+21. CURSOR-1 — Cursor integration (QUEUED)
 
 ### Artifact Matrix (REL-1)
 

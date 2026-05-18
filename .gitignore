@@ -29,6 +29,9 @@ artifacts/
 smoke-runs/*
 !smoke-runs/README.md
 
+# Audit working documents (local analysis, not committed)
+docs/audits/
+
 # Python virtual environments (for optional analysis pipelines)
 tools/python/venv/
 __pycache__/
