@@ -70,7 +70,7 @@ members = [
 # See: docs/slices/rel-support-1-version-authority.md
 
 [workspace.package]
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 rust-version = "1.93.0"
 license = "MIT"
