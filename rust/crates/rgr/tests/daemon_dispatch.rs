@@ -249,8 +249,9 @@ fn refresh_repo_not_indexed_returns_error() {
 
 #[test]
 fn stats_repo_not_indexed_returns_error() {
-    let output =
-        run_daemon_request(r#"{"id":"16b","method":"stats","params":{"repo":"/nonexistent/path"}}"#);
+    let output = run_daemon_request(
+        r#"{"id":"16b","method":"stats","params":{"repo":"/nonexistent/path"}}"#,
+    );
     assert!(output.contains(r#""id":"16b""#));
     assert!(output.contains(r#""code":"RepoNotFound""#));
 }
@@ -451,7 +452,9 @@ fn stats_success_returns_module_metrics() {
     );
 
     // Verify stats is an array
-    let stats = result["stats"].as_array().expect("stats should be an array");
+    let stats = result["stats"]
+        .as_array()
+        .expect("stats should be an array");
 
     // For each module, verify required fields exist
     for module_stats in stats {
