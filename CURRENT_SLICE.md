@@ -2,25 +2,45 @@
 
 ## Current Priority
 
-**CLI-OUT-2B: First-Contact Discovery Output** — CURRENT
+**CLI-OUT-2C: Stats Renderer** — CURRENT
+
+Slice doc: `docs/slices/cli-out-2c-stats-renderer.md` (to be created)
+
+Stats query pathology fixed. Stats now completes in under 6 seconds on all
+tested repos. Renderer can proceed.
+
+---
+
+## Recently Fixed
+
+**RMAPD-PERF-1: Stats Query Pathology** — STATS FIXED (2026-05-19)
+
+Slice doc: `docs/slices/rmapd-perf-1-timeout.md`
+
+Stats root cause (OBSERVED): `compute_module_stats` had correlated subqueries
+with O(modules × edges × symbols) complexity.
+
+Fix: Rewrote query with CTEs. Django stats improved from 760s to 3s (255x speedup).
+
+Evidence: Instrumentation (`--features perf-trace`) confirmed before/after.
+
+Not proven: Trust, cycles, other query performance. Timeout class mitigated,
+not universally solved.
+
+---
+
+## Recently Validated
+
+**CLI-OUT-2B: First-Contact Discovery Output** — VALIDATED (2026-05-18)
 
 Slice doc: `docs/slices/cli-out-2b-output-redesign.md`
+Review packet: `docs/audits/cli-out-2b/review-packet.md`
 
-Renderer-only implementation. Data already exists in daemon responses.
-
-### In Scope
-
-- `orient` — repo identity, cycle topology, evidence-bearing degradation
-- `trust` — new human renderer
-- `cycles` — new human renderer
-- `check` — optional evidence refinement
-
-### Out of Scope
-
-- Module count fix (ORIENT-BUG-1 — data bug)
-- Daemon timeouts (RMAPD-PERF-1 — runtime issue)
-- stats renderer (deferred to CLI-OUT-2C pending timeout investigation)
-- explain renderer (deferred to CLI-OUT-3)
+Delivered:
+- Human renderer for `orient` with repo name, cycle topology, evidence-bearing degradation
+- Human renderer for `trust` with resolution rates, reliability breakdown
+- Human renderer for `cycles` with topology
+- Validated on 5-repo corpus (OpenXcom, buildroot, django, duckdb, grpc-java)
 
 ---
 
@@ -28,60 +48,30 @@ Renderer-only implementation. Data already exists in daemon responses.
 
 **CLI-OUT-2A: Cross-Repo Output Audit** — HANDOFF COMPLETE
 
-Slice doc: `docs/slices/cli-out-2a-output-audit.md`
-
 Audit sufficient to drive first implementation wave. Findings in `docs/audits/cli-out-2a/`.
-
-### Completed
-
-- 5 of 7 repos audited (gstreamer/hadoop blocked by RMAPD-PERF-1)
-- orient, trust, cycles, stats, check audited (explain deferred)
-- Contracts proposed for first-contact discovery commands
-
-### Gaps Handed Off
-
-| Gap | Tracked As |
-|-----|------------|
-| gstreamer/hadoop not audited | RMAPD-PERF-1 |
-| explain not audited | CLI-OUT-3 |
-| Module count mismatch | ORIENT-BUG-1 |
-| stats/check timeout | RMAPD-PERF-1 |
-
-### Key Defects Found
-
-1. Repo identity shows internal UID, not name
-2. Module count wrong in orient vs trust (ORIENT-BUG-1)
-3. Cycle severity hidden (69 modules = "4 cycles")
-4. Resolution rates hidden behind "LOW"
-5. trust/cycles/stats are JSON dumps
 
 ---
 
-## Bug Slices Created
+## Bug Slices
 
 **ORIENT-BUG-1: Module Count Mismatch** — QUEUED
 
 Orient shows 2-17 modules, trust shows 19-240+. Data/query bug.
 See `docs/slices/orient-bug-1-module-count.md`.
 
-**RMAPD-PERF-1: Large Repo Timeout** — QUEUED
-
-Indexing/stats/check timeout on large repos. Daemon runtime issue.
-See `docs/slices/rmapd-perf-1-timeout.md`.
-
 ---
 
 ## Output Program Wave Model
 
-| Wave | Slice | Commands | Notes |
-|------|-------|----------|-------|
-| 1 | CLI-OUT-2B | orient, trust, cycles, check | CURRENT |
-| 1b | CLI-OUT-2C | stats | After RMAPD-PERF-1 timeout fix |
-| 2 | CLI-OUT-3 | callers, callees, path, imports, explain | Graph drilldown |
-| 3 | CLI-OUT-4 | modules *, surfaces *, boundaries * | Module/architecture |
-| 4 | CLI-OUT-5 | docs *, resource *, policy | Inventory |
-| 5 | CLI-OUT-6 | churn, hotspots, risk, coverage | Quality/risk |
-| 6 | CLI-OUT-7 | violations, gate, assess | Governance |
+| Wave | Slice | Commands | Status |
+|------|-------|----------|--------|
+| 1 | CLI-OUT-2B | orient, trust, cycles, check | VALIDATED |
+| 1b | CLI-OUT-2C | stats | CURRENT |
+| 2 | CLI-OUT-3 | callers, callees, path, imports, explain | QUEUED |
+| 3 | CLI-OUT-4 | modules *, surfaces *, boundaries * | QUEUED |
+| 4 | CLI-OUT-5 | docs *, resource *, policy | QUEUED |
+| 5 | CLI-OUT-6 | churn, hotspots, risk, coverage | QUEUED |
+| 6 | CLI-OUT-7 | violations, gate, assess | QUEUED |
 
 ---
 

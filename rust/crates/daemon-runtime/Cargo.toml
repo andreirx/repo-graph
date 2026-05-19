@@ -23,6 +23,13 @@ license.workspace   = true
 description         = "Daemon service runtime for repo-graph"
 publish             = false
 
+[features]
+default = []
+# RMAPD-PERF-1: Enable performance tracing to stderr.
+# Build with: cargo build --features perf-trace
+# Or: cargo build --release --features perf-trace
+perf-trace = []
+
 [dependencies]
 # Transport and policy layers
 repo-graph-daemon-transport = { path = "../daemon-transport" }

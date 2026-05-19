@@ -87,6 +87,16 @@ Never present inferred output as observed.
 
 - Write bash commands ONE AT A TIME. Compound commands (`&&`, `;`, pipes) trigger permission checks that block execution. Single commands flow faster.
 
+## Local Development Build
+
+After code changes that need testing against the installed daemon:
+
+```bash
+./scripts/dev-install-local.sh
+```
+
+This builds release binaries, restarts the daemon, and validates the installation. macOS only.
+
 ## Persistence Completeness
 
 Persisted feature is incomplete without: write path, read path, refresh behavior, trust impact, CLI visibility, validation.

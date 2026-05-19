@@ -3099,3 +3099,39 @@ else path basename) and embeds it in the response.
 Move display identity to a separate presentation envelope that wraps the core
 DTO at the CLI boundary. This would require presentation-layer types distinct
 from daemon response types. Current approach avoids that complexity.
+
+## Performance — Daemon/Transport
+
+### RMAPD-PERF-1: Stats Query Performance — STATS FIXED
+
+**Added:** 2026-05-18  
+**Stats query fixed:** 2026-05-19
+
+**Stats root cause (OBSERVED):** `compute_module_stats` query had three
+correlated subqueries in the SELECT clause, running once per module with
+O(modules × edges × symbols) complexity.
+
+**Fix:** Rewrote query to use CTEs, computing module→file mapping and
+per-file symbol stats in single passes, then aggregating.
+
+**Results (OBSERVED):**
+- Django stats: 760,594ms → 2,981ms (255x improvement)
+- DuckDB stats: 5,537ms (acceptable)
+- All repos complete stats in under 6 seconds
+
+**Remaining mitigations (retained as defensive measures):**
+- 300s client read timeout (was 30s)
+- Pre-computation heartbeat emission
+
+**Remaining debt (NOT measured/fixed):**
+- Trust query timings not instrumented
+- Cycles/Tarjan SCC timings not instrumented
+- Indexing phase timing not instrumented
+- No mid-query keepalive for genuinely long operations
+- Index utilization not audited for non-stats queries
+
+The timeout class is mitigated but not universally solved. One real
+pathological query was found and fixed. Future heavy operations could
+still encounter issues.
+
+See `docs/slices/rmapd-perf-1-timeout.md` for honest assessment.

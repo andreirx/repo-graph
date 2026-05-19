@@ -18,6 +18,7 @@
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
 use enrichment::{EnrichmentConfig, EnrichmentLanguage, EnrichmentPipeline, ResolverRegistry};
 use jdtls_resolver::{JdtlsConfig, JdtlsResolver};
@@ -36,6 +37,23 @@ use tsserver_resolver::TsServerResolver;
 
 use crate::state::{DaemonState, RepoKey};
 use crate::util::{compute_storage_root_path, compute_trust_overlay_for_snapshot, utc_now_iso8601};
+
+/// RMAPD-PERF-1: Performance tracing macro.
+/// Enabled with `--features perf-trace`. No-op otherwise.
+///
+/// Build with: `cargo build --features perf-trace`
+/// Or for release: `cargo build --release --features perf-trace`
+#[cfg(feature = "perf-trace")]
+macro_rules! perf_trace {
+    ($($arg:tt)*) => {
+        eprintln!($($arg)*);
+    };
+}
+
+#[cfg(not(feature = "perf-trace"))]
+macro_rules! perf_trace {
+    ($($arg:tt)*) => {};
+}
 
 /// Dispatcher that routes requests to real services.
 pub struct ServiceDispatcher {
@@ -814,17 +832,25 @@ impl ServiceDispatcher {
     }
 
     /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
+    #[allow(unused_variables)] // Timing variables used only with perf-trace feature
     fn handle_stats(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
+        let handler_start = Instant::now();
+
         // REG-1: resolve repo from path/alias and auto-load
+        let resolve_start = Instant::now();
         let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
             Ok(r) => r,
             Err(e) => return DispatchResult::error(&request.id, e),
         };
+        let resolve_ms = resolve_start.elapsed().as_millis();
 
         // Acquire read lock
+        let lock_start = Instant::now();
         let _read_guard = repo_state.coordinator.acquire_read();
+        let lock_ms = lock_start.elapsed().as_millis();
 
         // Get latest snapshot
+        let snapshot_start = Instant::now();
         let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
             Ok(Some(snap)) => snap,
             Ok(None) => {
@@ -840,6 +866,7 @@ impl ServiceDispatcher {
                 );
             }
         };
+        let snapshot_ms = snapshot_start.elapsed().as_millis();
 
         // RMAPD-PERF-1: Emit heartbeat before potentially long query
         let _ = emitter.emit(ProgressDetail {
@@ -849,6 +876,7 @@ impl ServiceDispatcher {
         });
 
         // Compute module stats
+        let query_start = Instant::now();
         let stats = match repo_state
             .storage
             .compute_module_stats(&snapshot.snapshot_uid)
@@ -861,6 +889,15 @@ impl ServiceDispatcher {
                 );
             }
         };
+        let query_ms = query_start.elapsed().as_millis();
+
+        let total_ms = handler_start.elapsed().as_millis();
+
+        // RMAPD-PERF-1: Timing instrumentation (enable with --features perf-trace)
+        perf_trace!(
+            "[PERF] stats: total={}ms resolve={}ms lock={}ms snapshot={}ms query={}ms",
+            total_ms, resolve_ms, lock_ms, snapshot_ms, query_ms
+        );
 
         DispatchResult::success(
             &request.id,
@@ -874,22 +911,30 @@ impl ServiceDispatcher {
     }
 
     /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
+    #[allow(unused_variables)] // Timing variables used only with perf-trace feature
     fn handle_cycles(
         &self,
         request: &Request,
         emitter: &mut dyn ProgressEmitter,
     ) -> DispatchResult {
+        let handler_start = Instant::now();
+
         // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-2B)
+        let resolve_start = Instant::now();
         let (repo_state, repo_uid, display_name) =
             match self.resolve_and_load_repo_with_display_name(&request.params) {
                 Ok(r) => r,
                 Err(e) => return DispatchResult::error(&request.id, e),
             };
+        let resolve_ms = resolve_start.elapsed().as_millis();
 
         // Acquire read lock
+        let lock_start = Instant::now();
         let _read_guard = repo_state.coordinator.acquire_read();
+        let lock_ms = lock_start.elapsed().as_millis();
 
         // Get latest snapshot
+        let snapshot_start = Instant::now();
         let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
             Ok(Some(snap)) => snap,
             Ok(None) => {
@@ -905,6 +950,7 @@ impl ServiceDispatcher {
                 );
             }
         };
+        let snapshot_ms = snapshot_start.elapsed().as_millis();
 
         // RMAPD-PERF-1: Emit heartbeat before potentially long Tarjan SCC
         let _ = emitter.emit(ProgressDetail {
@@ -914,6 +960,7 @@ impl ServiceDispatcher {
         });
 
         // Module-level cycles (default)
+        let query_start = Instant::now();
         let cycles = match repo_state
             .storage
             .find_cycles(&snapshot.snapshot_uid, "module")
@@ -926,6 +973,15 @@ impl ServiceDispatcher {
                 );
             }
         };
+        let query_ms = query_start.elapsed().as_millis();
+
+        let total_ms = handler_start.elapsed().as_millis();
+
+        // RMAPD-PERF-1: Timing instrumentation (enable with --features perf-trace)
+        perf_trace!(
+            "[PERF] cycles: total={}ms resolve={}ms lock={}ms snapshot={}ms query={}ms",
+            total_ms, resolve_ms, lock_ms, snapshot_ms, query_ms
+        );
 
         // CLI-OUT-2B: Include display_name for human renderers
         DispatchResult::success(
@@ -1827,17 +1883,22 @@ impl ServiceDispatcher {
     // ── Agent services ──────────────────────────────────────────────
 
     /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
+    #[allow(unused_variables)] // Timing variables used only with perf-trace feature
     fn handle_orient(
         &self,
         request: &Request,
         emitter: &mut dyn ProgressEmitter,
     ) -> DispatchResult {
+        let handler_start = Instant::now();
+
         // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-2B)
+        let resolve_start = Instant::now();
         let (repo_state, repo_uid, display_name) =
             match self.resolve_and_load_repo_with_display_name(&request.params) {
                 Ok(r) => r,
                 Err(e) => return DispatchResult::error(&request.id, e),
             };
+        let resolve_ms = resolve_start.elapsed().as_millis();
 
         // Parse optional focus
         let focus = Self::get_optional_string_param(&request.params, "focus");
@@ -1859,7 +1920,9 @@ impl ServiceDispatcher {
         };
 
         // Acquire read lock
+        let lock_start = Instant::now();
         let _read_guard = repo_state.coordinator.acquire_read();
+        let lock_ms = lock_start.elapsed().as_millis();
 
         // Get wall-clock timestamp for waiver expiry evaluation
         let now = utc_now_iso8601();
@@ -1872,6 +1935,7 @@ impl ServiceDispatcher {
         });
 
         // Call the agent orient use case
+        let orient_start = Instant::now();
         let mut result =
             match repo_graph_agent::orient(&repo_state.storage, &repo_uid, focus, budget, &now) {
                 Ok(r) => r,
@@ -1882,6 +1946,7 @@ impl ServiceDispatcher {
                     );
                 }
             };
+        let orient_ms = orient_start.elapsed().as_millis();
 
         // CLI-OUT-2B: Inject display_name for human renderers
         result.display_name = Some(display_name);
@@ -1905,6 +1970,7 @@ impl ServiceDispatcher {
         });
 
         // Add trust section if degraded (briefing surface pattern)
+        let overlay_start = Instant::now();
         if let Ok(Some(snapshot)) = repo_state.storage.get_snapshot(&result.snapshot) {
             if let Some(trust) = compute_trust_overlay_for_snapshot(
                 &repo_state.storage,
@@ -1921,21 +1987,37 @@ impl ServiceDispatcher {
                 }
             }
         }
+        let overlay_ms = overlay_start.elapsed().as_millis();
+
+        let total_ms = handler_start.elapsed().as_millis();
+
+        // RMAPD-PERF-1: Timing instrumentation (enable with --features perf-trace)
+        perf_trace!(
+            "[PERF] orient: total={}ms resolve={}ms lock={}ms orient={}ms overlay={}ms",
+            total_ms, resolve_ms, lock_ms, orient_ms, overlay_ms
+        );
 
         DispatchResult::success(&request.id, output)
     }
 
     /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
+    #[allow(unused_variables)] // Timing variables used only with perf-trace feature
     fn handle_check(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
+        let handler_start = Instant::now();
+
         // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-2B)
+        let resolve_start = Instant::now();
         let (repo_state, repo_uid, display_name) =
             match self.resolve_and_load_repo_with_display_name(&request.params) {
                 Ok(r) => r,
                 Err(e) => return DispatchResult::error(&request.id, e),
             };
+        let resolve_ms = resolve_start.elapsed().as_millis();
 
         // Acquire read lock
+        let lock_start = Instant::now();
         let _read_guard = repo_state.coordinator.acquire_read();
+        let lock_ms = lock_start.elapsed().as_millis();
 
         // Get wall-clock timestamp for waiver expiry evaluation
         let now = utc_now_iso8601();
@@ -1948,7 +2030,19 @@ impl ServiceDispatcher {
         });
 
         // Call the agent check use case
-        match repo_graph_agent::run_check(&repo_state.storage, &repo_uid, &now) {
+        let check_start = Instant::now();
+        let check_result = repo_graph_agent::run_check(&repo_state.storage, &repo_uid, &now);
+        let check_ms = check_start.elapsed().as_millis();
+
+        let total_ms = handler_start.elapsed().as_millis();
+
+        // RMAPD-PERF-1: Timing instrumentation (enable with --features perf-trace)
+        perf_trace!(
+            "[PERF] check: total={}ms resolve={}ms lock={}ms check={}ms",
+            total_ms, resolve_ms, lock_ms, check_ms
+        );
+
+        match check_result {
             Ok(mut result) => {
                 // CLI-OUT-2B: Inject display_name for human renderers
                 result.display_name = Some(display_name);
@@ -2057,18 +2151,26 @@ impl ServiceDispatcher {
     // ── Trust and governance handlers ───────────────────────────────
 
     /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
+    #[allow(unused_variables)] // Timing variables used only with perf-trace feature
     fn handle_trust(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
+        let handler_start = Instant::now();
+
         // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-2B)
+        let resolve_start = Instant::now();
         let (repo_state, repo_uid, display_name) =
             match self.resolve_and_load_repo_with_display_name(&request.params) {
                 Ok(r) => r,
                 Err(e) => return DispatchResult::error(&request.id, e),
             };
+        let resolve_ms = resolve_start.elapsed().as_millis();
 
         // Acquire read lock
+        let lock_start = Instant::now();
         let _read_guard = repo_state.coordinator.acquire_read();
+        let lock_ms = lock_start.elapsed().as_millis();
 
         // Get latest snapshot
+        let snapshot_start = Instant::now();
         let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
             Ok(Some(snap)) => snap,
             Ok(None) => {
@@ -2084,6 +2186,7 @@ impl ServiceDispatcher {
                 );
             }
         };
+        let snapshot_ms = snapshot_start.elapsed().as_millis();
 
         if snapshot.status != "ready" {
             return DispatchResult::error(
@@ -2103,6 +2206,7 @@ impl ServiceDispatcher {
         });
 
         // Compute trust report
+        let trust_start = Instant::now();
         use repo_graph_trust::service::assemble_trust_report;
         let mut report = match assemble_trust_report(
             &repo_state.storage,
@@ -2119,9 +2223,18 @@ impl ServiceDispatcher {
                 );
             }
         };
+        let trust_ms = trust_start.elapsed().as_millis();
 
         // CLI-OUT-2B: Inject display_name for human renderers
         report.display_name = Some(display_name);
+
+        let total_ms = handler_start.elapsed().as_millis();
+
+        // RMAPD-PERF-1: Timing instrumentation (enable with --features perf-trace)
+        perf_trace!(
+            "[PERF] trust: total={}ms resolve={}ms lock={}ms snapshot={}ms trust={}ms",
+            total_ms, resolve_ms, lock_ms, snapshot_ms, trust_ms
+        );
 
         match serde_json::to_value(&report) {
             Ok(v) => DispatchResult::success(&request.id, v),

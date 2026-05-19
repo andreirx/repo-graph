@@ -1046,75 +1046,111 @@ impl StorageConnection {
     ///
     /// Only modules with `file_count > 0` are included (matches TS).
     /// Ordered by module path (qualified_name) ascending.
+    /// RMAPD-PERF-1: Query rewritten to eliminate correlated subqueries.
+    ///
+    /// Original query had three correlated subqueries in SELECT that ran
+    /// once per module, each doing edges→nodes join then symbol counting.
+    /// Complexity was O(modules × edges × symbols).
+    ///
+    /// Rewritten to use CTEs:
+    /// 1. module_files: compute module→file mapping once
+    /// 2. file_stats: aggregate symbol stats per file once
+    /// 3. module_symbol_stats: roll up to module level
+    /// 4. Main query joins pre-computed aggregates
+    ///
+    /// New complexity: O(edges + symbols + modules)
     pub fn compute_module_stats(
         &self,
         snapshot_uid: &str,
     ) -> Result<Vec<ModuleStatsResult>, StorageError> {
         let mut stmt = self.connection().prepare(
-			"SELECT
-			   m.qualified_name AS path,
-			   COALESCE(fan_in.cnt, 0) AS fan_in,
-			   COALESCE(fan_out.cnt, 0) AS fan_out,
-			   COALESCE(files.cnt, 0) AS file_count,
-			   (SELECT COUNT(*) FROM nodes n
-			    WHERE n.snapshot_uid = ?1
-			      AND n.kind = 'SYMBOL' AND n.visibility = 'export'
-			      AND n.file_uid IN (
-			        SELECT tgt.file_uid FROM edges oe
-			        JOIN nodes tgt ON oe.target_node_uid = tgt.node_uid
-			        WHERE oe.snapshot_uid = ?1 AND oe.type = 'OWNS'
-			          AND oe.source_node_uid = m.node_uid
-			      )
-			   ) AS symbol_count,
-			   (SELECT COUNT(*) FROM nodes n
-			    WHERE n.snapshot_uid = ?1
-			      AND n.kind = 'SYMBOL'
-			      AND n.subtype IN ('INTERFACE', 'TYPE_ALIAS')
-			      AND n.parent_node_uid IS NULL
-			      AND n.file_uid IN (
-			        SELECT tgt.file_uid FROM edges oe
-			        JOIN nodes tgt ON oe.target_node_uid = tgt.node_uid
-			        WHERE oe.snapshot_uid = ?1 AND oe.type = 'OWNS'
-			          AND oe.source_node_uid = m.node_uid
-			      )
-			   ) AS abstract_count,
-			   (SELECT COUNT(*) FROM nodes n
-			    WHERE n.snapshot_uid = ?1
-			      AND n.kind = 'SYMBOL'
-			      AND n.subtype IN ('INTERFACE', 'TYPE_ALIAS', 'CLASS', 'ENUM')
-			      AND n.parent_node_uid IS NULL
-			      AND n.file_uid IN (
-			        SELECT tgt.file_uid FROM edges oe
-			        JOIN nodes tgt ON oe.target_node_uid = tgt.node_uid
-			        WHERE oe.snapshot_uid = ?1 AND oe.type = 'OWNS'
-			          AND oe.source_node_uid = m.node_uid
-			      )
-			   ) AS type_count
-			 FROM nodes m
-			 LEFT JOIN (
-			   SELECT target_node_uid AS nid, COUNT(DISTINCT source_node_uid) AS cnt
-			   FROM edges
-			   WHERE snapshot_uid = ?1 AND type = 'IMPORTS'
-			     AND source_node_uid IN (SELECT node_uid FROM nodes WHERE snapshot_uid = ?1 AND kind = 'MODULE')
-			   GROUP BY target_node_uid
-			 ) fan_in ON fan_in.nid = m.node_uid
-			 LEFT JOIN (
-			   SELECT source_node_uid AS nid, COUNT(DISTINCT target_node_uid) AS cnt
-			   FROM edges
-			   WHERE snapshot_uid = ?1 AND type = 'IMPORTS'
-			     AND target_node_uid IN (SELECT node_uid FROM nodes WHERE snapshot_uid = ?1 AND kind = 'MODULE')
-			   GROUP BY source_node_uid
-			 ) fan_out ON fan_out.nid = m.node_uid
-			 LEFT JOIN (
-			   SELECT source_node_uid AS nid, COUNT(*) AS cnt
-			   FROM edges
-			   WHERE snapshot_uid = ?1 AND type = 'OWNS'
-			   GROUP BY source_node_uid
-			 ) files ON files.nid = m.node_uid
-			 WHERE m.snapshot_uid = ?1 AND m.kind = 'MODULE'
-			   AND COALESCE(files.cnt, 0) > 0
-			 ORDER BY m.qualified_name",
-		)?;
+            "WITH
+            -- CTE 1: Map each module to its owned files (single pass over OWNS edges)
+            module_files AS (
+                SELECT DISTINCT
+                    e.source_node_uid AS module_uid,
+                    tgt.file_uid
+                FROM edges e
+                JOIN nodes tgt ON e.target_node_uid = tgt.node_uid
+                WHERE e.snapshot_uid = ?1
+                  AND e.type = 'OWNS'
+                  AND tgt.file_uid IS NOT NULL
+            ),
+
+            -- CTE 2: Pre-aggregate symbol stats per file (single pass over symbols)
+            file_stats AS (
+                SELECT
+                    n.file_uid,
+                    SUM(CASE WHEN n.visibility = 'export' THEN 1 ELSE 0 END) AS export_count,
+                    SUM(CASE WHEN n.subtype IN ('INTERFACE', 'TYPE_ALIAS')
+                             AND n.parent_node_uid IS NULL THEN 1 ELSE 0 END) AS abstract_count,
+                    SUM(CASE WHEN n.subtype IN ('INTERFACE', 'TYPE_ALIAS', 'CLASS', 'ENUM')
+                             AND n.parent_node_uid IS NULL THEN 1 ELSE 0 END) AS type_count
+                FROM nodes n
+                WHERE n.snapshot_uid = ?1
+                  AND n.kind = 'SYMBOL'
+                GROUP BY n.file_uid
+            ),
+
+            -- CTE 3: Aggregate file stats to module level
+            module_symbol_stats AS (
+                SELECT
+                    mf.module_uid,
+                    SUM(COALESCE(fs.export_count, 0)) AS symbol_count,
+                    SUM(COALESCE(fs.abstract_count, 0)) AS abstract_count,
+                    SUM(COALESCE(fs.type_count, 0)) AS type_count
+                FROM module_files mf
+                LEFT JOIN file_stats fs ON fs.file_uid = mf.file_uid
+                GROUP BY mf.module_uid
+            ),
+
+            -- CTE 4: fan_in (count of distinct modules that import this module)
+            fan_in AS (
+                SELECT target_node_uid AS nid, COUNT(DISTINCT source_node_uid) AS cnt
+                FROM edges
+                WHERE snapshot_uid = ?1 AND type = 'IMPORTS'
+                  AND source_node_uid IN (
+                      SELECT node_uid FROM nodes WHERE snapshot_uid = ?1 AND kind = 'MODULE'
+                  )
+                GROUP BY target_node_uid
+            ),
+
+            -- CTE 5: fan_out (count of distinct modules this module imports)
+            fan_out AS (
+                SELECT source_node_uid AS nid, COUNT(DISTINCT target_node_uid) AS cnt
+                FROM edges
+                WHERE snapshot_uid = ?1 AND type = 'IMPORTS'
+                  AND target_node_uid IN (
+                      SELECT node_uid FROM nodes WHERE snapshot_uid = ?1 AND kind = 'MODULE'
+                  )
+                GROUP BY source_node_uid
+            ),
+
+            -- CTE 6: file count per module (OWNS edge count)
+            files AS (
+                SELECT source_node_uid AS nid, COUNT(*) AS cnt
+                FROM edges
+                WHERE snapshot_uid = ?1 AND type = 'OWNS'
+                GROUP BY source_node_uid
+            )
+
+            SELECT
+                m.qualified_name AS path,
+                COALESCE(fan_in.cnt, 0) AS fan_in,
+                COALESCE(fan_out.cnt, 0) AS fan_out,
+                COALESCE(files.cnt, 0) AS file_count,
+                COALESCE(mss.symbol_count, 0) AS symbol_count,
+                COALESCE(mss.abstract_count, 0) AS abstract_count,
+                COALESCE(mss.type_count, 0) AS type_count
+            FROM nodes m
+            LEFT JOIN fan_in ON fan_in.nid = m.node_uid
+            LEFT JOIN fan_out ON fan_out.nid = m.node_uid
+            LEFT JOIN files ON files.nid = m.node_uid
+            LEFT JOIN module_symbol_stats mss ON mss.module_uid = m.node_uid
+            WHERE m.snapshot_uid = ?1 AND m.kind = 'MODULE'
+              AND COALESCE(files.cnt, 0) > 0
+            ORDER BY m.qualified_name",
+        )?;
 
         let rows = stmt.query_map(rusqlite::params![snapshot_uid], |row| {
             let path: String = row.get(0)?;

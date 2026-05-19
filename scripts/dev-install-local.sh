@@ -11,6 +11,9 @@
 # USAGE:
 #   ./scripts/dev-install-local.sh
 #
+# With optional cargo features (e.g., performance tracing):
+#   CARGO_FEATURES="repo-graph-daemon-runtime/perf-trace" ./scripts/dev-install-local.sh
+#
 # PREREQUISITES:
 #   - Rust toolchain (cargo)
 #   - Running from repo-graph source tree root
@@ -77,7 +80,17 @@ Run the full installer first: ./scripts/install.sh"
 build_release() {
     info "Building release binaries..."
     cd "${REPO_ROOT}/rust"
-    cargo build --release --bin rmap --bin rmapd
+
+    local cargo_cmd=(cargo build --release --bin rmap --bin rmapd)
+
+    # Optional feature flags via environment variable
+    # Usage: CARGO_FEATURES="repo-graph-daemon-runtime/perf-trace" ./scripts/dev-install-local.sh
+    if [[ -n "${CARGO_FEATURES:-}" ]]; then
+        cargo_cmd+=(--features "${CARGO_FEATURES}")
+        info "  Features: ${CARGO_FEATURES}"
+    fi
+
+    "${cargo_cmd[@]}"
 
     if [[ ! -x "${REPO_ROOT}/rust/target/release/rmap" ]]; then
         error "rmap binary not found after build"

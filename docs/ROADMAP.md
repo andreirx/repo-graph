@@ -76,7 +76,7 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **CLI-OUT-1** | Presentation layer (human-default output, --json opt-in) | IMPLEMENTED |
 | **CLI-OUT-2A** | Cross-repo output audit (findings + contracts) | HANDOFF COMPLETE |
 | **CLI-OUT-2B** | First-contact discovery output (orient, trust, cycles) | IMPLEMENTED |
-| **RMAPD-PERF-1** | Large repo timeout investigation | IMPLEMENTED |
+| **RMAPD-PERF-1** | Large repo timeout investigation | STATS FIXED |
 | **ORIENT-BUG-1** | Module count mismatch (data bug) | QUEUED |
 | **CLI-OUT-2C** | stats renderer | **CURRENT** |
 | **CLI-OUT-3** | Graph drilldown output (callers, callees, path, imports, explain) | QUEUED |
@@ -112,14 +112,23 @@ Delivered:
 
 See `docs/audits/cli-out-2b/review-packet.md` for validation evidence.
 
-**RMAPD-PERF-1: Large Repo Timeout** — IMPLEMENTED (2026-05-18)
+**RMAPD-PERF-1: Large Repo Timeout** — STATS FIXED (2026-05-19)
 
-Delivered:
-- Increased client read timeout from 30s to 300s
-- Added heartbeat emission to read handlers (orient, check, trust, stats, cycles)
-- django, duckdb, grpc-java now index and query successfully
+Stats query pathology identified and fixed. Timeout class mitigated.
 
-See `docs/slices/rmapd-perf-1-timeout.md` for analysis.
+**Stats root cause:** `compute_module_stats` query had correlated subqueries
+with O(modules × edges × symbols) complexity. Django stats took 760 seconds.
+
+**Fix:** Rewrote query to use CTEs, computing aggregates in single passes.
+Django stats now takes 3 seconds (255x improvement).
+
+**Evidence:** Timing instrumentation (`--features perf-trace`) confirmed
+before/after performance on stats.
+
+**Not proven:** Trust, cycles, and other query performance not instrumented.
+The broader timeout class is mitigated but not universally solved.
+
+See `docs/slices/rmapd-perf-1-timeout.md` for honest assessment.
 
 ### Handoff Complete
 
@@ -128,12 +137,11 @@ See `docs/slices/rmapd-perf-1-timeout.md` for analysis.
 Audit sufficient to drive first implementation wave.
 
 Completed:
-- 5 of 7 repos audited (gstreamer/hadoop blocked by RMAPD-PERF-1)
+- 5 of 7 repos audited (gstreamer/hadoop blocked at time, now unblocked)
 - Contracts proposed for first-contact discovery commands
 
 Gaps handed off:
-- ORIENT-BUG-1: Module count mismatch
-- RMAPD-PERF-1: Large repo timeouts
+- ORIENT-BUG-1: Module count mismatch (still queued)
 
 See `docs/audits/cli-out-2a/synthesis.md` for findings.
 
@@ -271,7 +279,7 @@ HOOK-1 delivered:
 15. ~~CLI-OUT-1 — Presentation layer (human-default output)~~ (IMPLEMENTED)
 16. ~~CLI-OUT-2A — Cross-repo output audit~~ (HANDOFF COMPLETE)
 17. **CLI-OUT-2B — First-contact discovery output (CURRENT)**
-18. CLI-OUT-2C — stats renderer (after RMAPD-PERF-1)
+18. CLI-OUT-2C — stats renderer (stats query fixed, now CURRENT)
 19. CLI-OUT-3 — Graph drilldown output (QUEUED)
 20. SMOKE-1 — Validation harness cleanup (QUEUED)
 21. CURSOR-1 — Cursor integration (QUEUED)

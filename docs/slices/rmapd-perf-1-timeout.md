@@ -1,136 +1,133 @@
 # RMAPD-PERF-1: Large Repo Timeout Investigation
 
-**Status:** IMPLEMENTED  
+**Status:** STATS QUERY FIXED, TIMEOUT CLASS MITIGATED  
 **Type:** Bug / Performance  
-**Priority:** After CLI-OUT-2B (does not block renderer work)  
+**Priority:** After CLI-OUT-2B  
 **Discovered:** CLI-OUT-2A audit (2026-05-18)  
-**Resolved:** 2026-05-18
+**Mitigated:** 2026-05-18  
+**Resolved:** 2026-05-19
 
 ## Problem Statement
 
-Large repositories failed with daemon timeouts during indexing or query operations.
+Large repositories failed with daemon timeouts during `stats` queries.
 
-### Indexing Timeout (RESOLVED)
+## Root Cause (OBSERVED)
 
-| Repo | Files | Result |
-|------|-------|--------|
-| gstreamer | ~6328 C | Previously timeout, now works |
-| hadoop | ~12478 Java | Untested |
-| django | 3019 Python | **Indexed in 117s** |
-| duckdb | 5109 C++ | **Indexed in 203s** |
-| grpc-java | 1821 Java | **Indexed in 112s** |
+The `compute_module_stats` query in `storage/src/queries.rs` had **three correlated subqueries** in the SELECT clause that ran once per module.
 
-### Query Timeout (RESOLVED)
+Each subquery:
+1. Scanned OWNS edges to find files owned by module
+2. Joined to nodes to get file_uid
+3. Scanned symbols to count those in matching files
 
-| Repo | Files | Command | Result |
-|------|-------|---------|--------|
-| DuckDB | 5109 | orient | **9s** |
-| DuckDB | 5109 | trust | **3s** |
-| Django | 3019 | orient | **6s** |
-| Django | 3019 | trust | **2s** |
+**Complexity:** O(modules × edges × symbols)
 
-## Root Cause Analysis
+For django (3019 files, ~78K symbols), this resulted in a **760-second query** (12.7 minutes).
 
-### Primary Cause
-Client-side read timeout was 30 seconds (`connection.rs:24`). Operations that took longer than 30 seconds without emitting a line to the socket caused the client to time out with `Resource temporarily unavailable (os error 35)`.
+### Evidence
 
-### Why Operations Exceeded 30s
+Instrumentation added (`--features perf-trace`):
 
-1. **Read operations had no progress emission**: `orient`, `check`, `trust`, `stats`, `cycles` were synchronous handlers that didn't emit heartbeats.
+**Before fix:**
+| Repo | Files | Query Time |
+|------|-------|------------|
+| OpenXcom | 733 | 10,343ms |
+| django | 3,019 | 760,594ms (12.7 min) — **client timeout** |
 
-2. **First-query-after-index overhead**: SQLite query plan compilation and statistics warmup caused the first query to be significantly slower. Subsequent queries complete in seconds.
+**After fix:**
+| Repo | Files | Query Time (1st run) | Query Time (2nd run) |
+|------|-------|---------------------|----------------------|
+| OpenXcom | 733 | 334ms | 101ms |
+| buildroot | 645 | 131ms | 114ms |
+| django | 3,019 | 2,981ms | 2,846ms |
+| duckdb | 5,109 | 5,537ms | 4,612ms |
+| grpc-java | 1,821 | 893ms | 574ms |
 
-3. **Indexing large repos**: 3000-5000 file repos take 2-4 minutes to index.
-
-### Query Performance
-
-The `compute_module_stats` query has adequate indexes:
-- `idx_edges_snapshot_type` on `(snapshot_uid, type)`
-- `idx_edges_snapshot_type_src` on `(snapshot_uid, type, source_node_uid)`
-- `idx_edges_snapshot_type_dst` on `(snapshot_uid, type, target_node_uid)`
-- `idx_nodes_snapshot_kind` on `(snapshot_uid, kind)`
-
-The slow first-query behavior is SQLite query planner warmup, not missing indexes.
+**Django improvement: 760,594ms → 2,981ms (255x speedup)**
 
 ## Fix Applied
 
+Rewrote `compute_module_stats` to eliminate correlated subqueries using CTEs:
+
+1. `module_files` CTE: compute module→file mapping once
+2. `file_stats` CTE: aggregate symbol stats per file once (single pass)
+3. `module_symbol_stats` CTE: roll up file stats to module level
+4. Main query joins pre-computed aggregates
+
+**New complexity:** O(edges + symbols + modules)
+
+See `storage/src/queries.rs` line 1049 for the rewritten query with documentation.
+
+## Mitigation Still in Place
+
+The following mitigations from initial investigation remain:
+
 ### A. Increased Read Timeout (connection.rs)
 
-Changed `READ_TIMEOUT_SECS` from 30s to 300s (5 minutes).
+`READ_TIMEOUT_SECS` increased from 30s to 300s. This provides headroom for genuinely long operations and is harmless to keep.
 
-```rust
-const READ_TIMEOUT_SECS: u64 = 300;
-```
+### B. Pre-Computation Heartbeat (dispatch.rs)
 
-This provides headroom for:
-- Multi-minute indexing operations
-- First-query-after-index overhead
-- Genuinely large repos
+Progress emission before heavy computation in read handlers. Provides visibility during long operations.
 
-### C. Added Heartbeat Emission (dispatch.rs)
+## Orient Query Performance (OBSERVED)
 
-Added `emitter` parameter and heartbeat emission to read handlers:
-- `handle_stats`
-- `handle_cycles`
-- `handle_orient`
-- `handle_check`
-- `handle_trust`
+Orient timings measured during investigation:
 
-Each handler emits a progress event before starting heavy computation:
+| Repo | Files | orient |
+|------|-------|--------|
+| OpenXcom | 733 | 1,779ms |
+| buildroot | 645 | 369ms |
+| django | 3,019 | 9,038ms |
+| duckdb | 5,109 | 15,007ms |
+| grpc-java | 1,821 | 10,248ms |
 
-```rust
-let _ = emitter.emit(ProgressDetail {
-    phase: "computing_orient".to_string(),
-    current: 0,
-    total: 1,
-});
-```
+All complete under the original 30-second timeout.
 
-This keeps the connection alive during legitimate long work.
+**Trust query timings were NOT measured in this investigation.** Trust is assumed
+acceptable based on prior operational testing, not instrumented proof.
 
-## Remaining Limitations
+## Definition of Done (Stats Query)
 
-### Mid-Query Heartbeats
+- [x] Instrumentation added (`--features perf-trace`)
+- [x] Stats query root cause identified with evidence (OBSERVED)
+- [x] Query rewritten to eliminate correlated subqueries
+- [x] Stats performance validated on full corpus
+- [x] Unit tests pass (3 `module_stats` tests)
 
-If a single SQLite query exceeds 300 seconds, the client will still timeout. The current heartbeat is emitted BEFORE the query, not during.
+## Not Done (Broader Timeout Class)
 
-For true mid-query heartbeats, would need either:
-- SQLite `progress_handler` callback
-- Background thread execution with periodic emission
-
-Not needed for current corpus - all queries complete well under 300s after warmup.
-
-### First-Query Overhead
-
-The first query after indexing a repo may take 10-60 seconds while SQLite compiles query plans and warms caches. Subsequent queries are fast (single-digit seconds).
-
-This is expected behavior, not a bug. Could be improved by:
-- Running a warmup query after indexing
-- Using `ANALYZE` to update SQLite statistics
-
-## Definition of Done
-
-- [x] Root cause identified (client timeout, not daemon)
-- [x] Timeout increased to 300s
-- [x] Heartbeat emission added to read handlers
-- [x] django indexed and queryable
-- [x] duckdb indexed and queryable
-- [x] grpc-java indexed and queryable
+- [ ] Trust query timings measured
+- [ ] Other heavy queries (cycles, Tarjan SCC) profiled
+- [ ] Mid-query keepalive for future long operations
+- [ ] Indexing phase instrumentation
 
 ## Files Changed
 
-- `rust/crates/rgr/src/daemon_client/connection.rs` — timeout constant
-- `rust/crates/daemon-runtime/src/dispatch.rs` — heartbeat emission
+- `rust/crates/storage/src/queries.rs` — rewritten `compute_module_stats` query
+- `rust/crates/daemon-runtime/src/dispatch.rs` — timing instrumentation
+- `rust/crates/daemon-runtime/Cargo.toml` — `perf-trace` feature flag
+- `scripts/dev-install-local.sh` — `CARGO_FEATURES` env var support
 
 ## Verification
 
 ```bash
-# All commands complete successfully
-rmap index /path/to/django
-rmap orient  # from django directory
-rmap trust   # from django directory
-
-rmap index /path/to/duckdb
-rmap orient  # from duckdb directory
-rmap trust   # from duckdb directory
+# All repos complete stats in under 6 seconds
+CARGO_FEATURES="repo-graph-daemon-runtime/perf-trace" ./scripts/dev-install-local.sh
+cd /path/to/django && rmap stats  # ~3s
+cd /path/to/duckdb && rmap stats  # ~5.5s
+grep "^\[PERF\] stats:" ~/Library/Logs/repo-graph/daemon.log
 ```
+
+## Status Classification
+
+**STATS QUERY FIXED** — stats pathology identified and eliminated with proof.
+
+**TIMEOUT CLASS MITIGATED** — current corpus operationally unblocked. The
+300-second timeout and heartbeat emission remain as defensive measures.
+Future heavy operations could still encounter timeout issues if they
+exceed 300 seconds without emitting a line.
+
+This is not a universal/permanent performance resolution. One real
+pathological query was found and fixed. The whole class of future
+long-running read operations is not mathematically "solved."
