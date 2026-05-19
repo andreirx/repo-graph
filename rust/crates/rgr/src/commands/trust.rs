@@ -121,7 +121,7 @@ pub fn run_trust(args: &[String]) -> ExitCode {
                 }
             }
         }
-        Err(DaemonClientError::DaemonError { code, message }) => {
+        Err(DaemonClientError::DaemonError { code, message, .. }) => {
             if code == "RepoNotFound" {
                 eprintln!("error: repo not indexed");
                 eprintln!("hint: run 'rmap index .' to index this repo");

@@ -37,7 +37,10 @@
 pub mod check;
 pub mod cycles;
 pub mod explain;
+pub mod graph_edges;
+pub mod imports;
 pub mod orient;
+pub mod path;
 pub mod stats;
 pub mod trust;
 

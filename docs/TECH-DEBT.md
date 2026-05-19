@@ -2982,6 +2982,28 @@ code defect, but further limits where the proof can be validated.
 **Severity:** Medium. Divergence from ideal test automation, but tests are still
 structurally valid when run correctly.
 
+### CLI-OUT-3 Test Harness Pre-Build Dependency (2026-05-19)
+
+**Context:** The `cli_out_3_drilldown.rs` test file contains 10 CLI success-path tests
+that spawn an actual `rmapd` daemon process to test human/JSON output modes for
+callers, callees, path, imports, and ambiguous symbol error formatting.
+
+**Problem:** Same as CLI-OUT-1 (TD-CLI-OUT-1-A). Tests require manual
+`cargo build -p rmapd` before running. They are marked `#[ignore]` and run opt-in.
+
+**Location:** `rust/crates/rgr/tests/cli_out_3_drilldown.rs`
+
+**Run command:**
+```
+cargo build -p rmapd
+cargo test -p repo-graph-rgr --test cli_out_3_drilldown -- --ignored
+```
+
+**Rationale:** Consistent with existing CLI integration test pattern. The tests
+exist as proof surface but are not part of the default `cargo test` path.
+
+**Severity:** Medium. Same class as CLI-OUT-1 debt.
+
 ### Smoke Script Validation Model Defects (2026-05-18)
 
 **Context:** The smoke scripts (`smoke-rmap.sh`, `smoke-validation-repos.sh`) were updated

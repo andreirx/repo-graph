@@ -150,7 +150,7 @@ pub fn run_index(args: &[String]) -> ExitCode {
 
             ExitCode::SUCCESS
         }
-        Err(DaemonClientError::DaemonError { code, message }) => {
+        Err(DaemonClientError::DaemonError { code, message, .. }) => {
             eprintln!("error: daemon returned {}: {}", code, message);
             ExitCode::from(2)
         }
@@ -871,7 +871,7 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
 
             ExitCode::SUCCESS
         }
-        Err(DaemonClientError::DaemonError { code, message }) => {
+        Err(DaemonClientError::DaemonError { code, message, .. }) => {
             if code == "RepoNotFound" {
                 eprintln!("error: repo not indexed");
                 eprintln!("hint: run 'rmap index .' to index this repo first");

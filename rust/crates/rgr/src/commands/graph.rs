@@ -106,10 +106,34 @@ fn create_daemon_client(command: &str) -> Result<DaemonClient, ExitCode> {
 /// Handle daemon error response with REG-1 hint for repo not found.
 fn handle_daemon_error(err: DaemonClientError) -> ExitCode {
     match err {
-        DaemonClientError::DaemonError { code, message } => {
+        DaemonClientError::DaemonError {
+            code,
+            message,
+            data,
+        } => {
             if code == "RepoNotFound" {
                 eprintln!("error: repo not indexed");
                 eprintln!("hint: run 'rmap index .' to index this repo");
+            } else if code == "AmbiguousSymbol" {
+                // Render structured ambiguity data
+                eprintln!("error: {}", message);
+                if let Some(data) = data {
+                    if let Some(matches) = data.get("matches").and_then(|m| m.as_array()) {
+                        eprintln!();
+                        eprintln!("Matches:");
+                        for (i, m) in matches.iter().enumerate() {
+                            let qualified = m
+                                .get("qualified_name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("?");
+                            let kind = m.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
+                            let file = m.get("file").and_then(|v| v.as_str()).unwrap_or("?");
+                            eprintln!("  {}. {}  {}  {}", i + 1, qualified, kind, file);
+                        }
+                        eprintln!();
+                        eprintln!("hint: use qualified name for exact match");
+                    }
+                }
             } else {
                 eprintln!("error: {}: {}", code, message);
             }
@@ -122,21 +146,41 @@ fn handle_daemon_error(err: DaemonClientError) -> ExitCode {
     }
 }
 
-// ── callers command (REG-1) ──────────────────────────────────────────
+// ── callers command (REG-1 + CLI-OUT-3) ──────────────────────────────
+//
+// `rmap callers <symbol> [--edge-types <types>] [--json]`
+//
+// Human mode (default): plain text with caller list.
+// Machine mode (--json): full envelope.
 
 pub fn run_callers(args: &[String]) -> ExitCode {
-    let (positional, edge_types) = match parse_edge_types_flag(args) {
+    // ── Parse args (filter out --json before edge_types parsing) ────
+    let mut json_mode = false;
+    let filtered_args: Vec<String> = args
+        .iter()
+        .filter(|a| {
+            if *a == "--json" {
+                json_mode = true;
+                false
+            } else {
+                true
+            }
+        })
+        .cloned()
+        .collect();
+
+    let (positional, edge_types) = match parse_edge_types_flag(&filtered_args) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
-            eprintln!("usage: rmap callers <symbol> [--edge-types <types>]");
+            eprintln!("usage: rmap callers <symbol> [--edge-types <types>] [--json]");
             return ExitCode::from(1);
         }
     };
 
     // REG-1: one positional arg (symbol), repo from cwd
     if positional.len() != 1 {
-        eprintln!("usage: rmap callers <symbol> [--edge-types <types>]");
+        eprintln!("usage: rmap callers <symbol> [--edge-types <types>] [--json]");
         return ExitCode::from(1);
     }
 
@@ -162,35 +206,73 @@ pub fn run_callers(args: &[String]) -> ExitCode {
     });
 
     match client.request("callers", Some(params)) {
-        Ok(result) => match serde_json::to_string_pretty(&result) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
+        Ok(result) => {
+            if json_mode {
+                // Machine mode: print full envelope
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
+            } else {
+                // Human mode: parse and render (CLI-OUT-3)
+                use crate::presentation::graph_edges::CallersResponse;
+                match serde_json::from_value::<CallersResponse>(result) {
+                    Ok(response) => {
+                        print!("{}", response.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse callers response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                ExitCode::from(2)
-            }
-        },
+        }
         Err(e) => handle_daemon_error(e),
     }
 }
 
-// ── callees command (REG-1) ──────────────────────────────────────────
+// ── callees command (REG-1 + CLI-OUT-3) ──────────────────────────────
+//
+// `rmap callees <symbol> [--edge-types <types>] [--json]`
+//
+// Human mode (default): plain text with callee list.
+// Machine mode (--json): full envelope.
 
 pub fn run_callees(args: &[String]) -> ExitCode {
-    let (positional, edge_types) = match parse_edge_types_flag(args) {
+    // ── Parse args (filter out --json before edge_types parsing) ────
+    let mut json_mode = false;
+    let filtered_args: Vec<String> = args
+        .iter()
+        .filter(|a| {
+            if *a == "--json" {
+                json_mode = true;
+                false
+            } else {
+                true
+            }
+        })
+        .cloned()
+        .collect();
+
+    let (positional, edge_types) = match parse_edge_types_flag(&filtered_args) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
-            eprintln!("usage: rmap callees <symbol> [--edge-types <types>]");
+            eprintln!("usage: rmap callees <symbol> [--edge-types <types>] [--json]");
             return ExitCode::from(1);
         }
     };
 
     // REG-1: one positional arg (symbol), repo from cwd
     if positional.len() != 1 {
-        eprintln!("usage: rmap callees <symbol> [--edge-types <types>]");
+        eprintln!("usage: rmap callees <symbol> [--edge-types <types>] [--json]");
         return ExitCode::from(1);
     }
 
@@ -216,31 +298,68 @@ pub fn run_callees(args: &[String]) -> ExitCode {
     });
 
     match client.request("callees", Some(params)) {
-        Ok(result) => match serde_json::to_string_pretty(&result) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
+        Ok(result) => {
+            if json_mode {
+                // Machine mode: print full envelope
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
+            } else {
+                // Human mode: parse and render (CLI-OUT-3)
+                use crate::presentation::graph_edges::CalleesResponse;
+                match serde_json::from_value::<CalleesResponse>(result) {
+                    Ok(response) => {
+                        print!("{}", response.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse callees response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                ExitCode::from(2)
-            }
-        },
+        }
         Err(e) => handle_daemon_error(e),
     }
 }
 
-// ── path command (REG-1) ─────────────────────────────────────────────
+// ── path command (REG-1 + CLI-OUT-3) ─────────────────────────────────
+//
+// `rmap path <from> <to> [--json]`
+//
+// Human mode (default): plain text showing route between symbols.
+// Machine mode (--json): full envelope.
 
 pub fn run_path(args: &[String]) -> ExitCode {
+    // ── Parse args (filter out --json) ──────────────────────────
+    let mut json_mode = false;
+    let positional: Vec<&String> = args
+        .iter()
+        .filter(|a| {
+            if *a == "--json" {
+                json_mode = true;
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+
     // REG-1: two positional args (from, to), repo from cwd
-    if args.len() != 2 {
-        eprintln!("usage: rmap path <from> <to>");
+    if positional.len() != 2 {
+        eprintln!("usage: rmap path <from> <to> [--json]");
         return ExitCode::from(1);
     }
 
-    let from_query = &args[0];
-    let to_query = &args[1];
+    let from_query = positional[0];
+    let to_query = positional[1];
 
     let repo_path = match resolve_repo_from_cwd() {
         Ok(p) => p,
@@ -262,30 +381,68 @@ pub fn run_path(args: &[String]) -> ExitCode {
     });
 
     match client.request("path", Some(params)) {
-        Ok(result) => match serde_json::to_string_pretty(&result) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
+        Ok(result) => {
+            if json_mode {
+                // Machine mode: print full envelope
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
+            } else {
+                // Human mode: parse and render (CLI-OUT-3)
+                use crate::presentation::path::PathResponse;
+                match serde_json::from_value::<PathResponse>(result) {
+                    Ok(response) => {
+                        // Pass query terms so not-found header preserves user intent
+                        print!("{}", response.render_human_with_query(from_query, to_query));
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse path response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                ExitCode::from(2)
-            }
-        },
+        }
         Err(e) => handle_daemon_error(e),
     }
 }
 
-// ── imports command (REG-1) ──────────────────────────────────────────
+// ── imports command (REG-1 + CLI-OUT-3) ──────────────────────────────
+//
+// `rmap imports <file_path> [--json]`
+//
+// Human mode (default): plain text showing file dependencies.
+// Machine mode (--json): full envelope.
 
 pub fn run_imports(args: &[String]) -> ExitCode {
+    // ── Parse args (filter out --json) ──────────────────────────
+    let mut json_mode = false;
+    let positional: Vec<&String> = args
+        .iter()
+        .filter(|a| {
+            if *a == "--json" {
+                json_mode = true;
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+
     // REG-1: one positional arg (file_path), repo from cwd
-    if args.len() != 1 {
-        eprintln!("usage: rmap imports <file_path>");
+    if positional.len() != 1 {
+        eprintln!("usage: rmap imports <file_path> [--json]");
         return ExitCode::from(1);
     }
 
-    let file_path = &args[0];
+    let file_path = positional[0];
 
     let repo_path = match resolve_repo_from_cwd() {
         Ok(p) => p,
@@ -306,16 +463,34 @@ pub fn run_imports(args: &[String]) -> ExitCode {
     });
 
     match client.request("imports", Some(params)) {
-        Ok(result) => match serde_json::to_string_pretty(&result) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
+        Ok(result) => {
+            if json_mode {
+                // Machine mode: print full envelope
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
+            } else {
+                // Human mode: parse and render (CLI-OUT-3)
+                use crate::presentation::imports::ImportsResponse;
+                match serde_json::from_value::<ImportsResponse>(result) {
+                    Ok(response) => {
+                        print!("{}", response.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse imports response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                ExitCode::from(2)
-            }
-        },
+        }
         Err(e) => handle_daemon_error(e),
     }
 }

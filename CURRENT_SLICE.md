@@ -1,16 +1,31 @@
 # CURRENT_SLICE.md
 
-## Next Priority
+## Current Priority
 
-**CLI-OUT-3: Graph Drilldown Output**
+**CLI-OUT-4: Module/Architecture Output** — IN PROGRESS
 
-Slice doc: `docs/slices/cli-out-3-drilldown.md` (to be created)
+Slice doc: `docs/slices/cli-out-4-modules.md` (to be created)
 
-Human renderers for callers, callees, path, imports, explain.
+Human renderers for modules list, modules files, modules deps, modules violations,
+surfaces list, surfaces show, boundaries list, boundaries show, boundaries summary.
 
 ---
 
 ## Recently Implemented
+
+**CLI-OUT-3: Graph Drilldown Output** — IMPLEMENTED (2026-05-19)
+
+Slice doc: `docs/slices/cli-out-3-drilldown.md`
+Review packet: `docs/audits/cli-out-3/review-packet.md`
+
+Delivered:
+- Human renderer for `callers` and `callees` (shared `graph_edges.rs` module)
+- Human renderer for `path` with query-term-preserving header
+- Human renderer for `imports` with depth and resolution
+- `--json` flag for machine mode on all commands
+- Structured `AmbiguousSymbol` error handling with daemon data payload
+- CLI renders numbered match list with disambiguation hint
+- Validated on 3-repo corpus (OpenXcom, django, duckdb)
 
 **CLI-OUT-2C: Stats Renderer** — IMPLEMENTED (2026-05-19)
 
@@ -79,8 +94,8 @@ See `docs/slices/orient-bug-1-module-count.md`.
 |------|-------|----------|--------|
 | 1 | CLI-OUT-2B | orient, trust, cycles, check | VALIDATED |
 | 1b | CLI-OUT-2C | stats | IMPLEMENTED |
-| 2 | CLI-OUT-3 | callers, callees, path, imports, explain | NEXT |
-| 3 | CLI-OUT-4 | modules *, surfaces *, boundaries * | QUEUED |
+| 2 | CLI-OUT-3 | callers, callees, path, imports | IMPLEMENTED |
+| 3 | CLI-OUT-4 | modules *, surfaces *, boundaries * | IN PROGRESS |
 | 4 | CLI-OUT-5 | docs *, resource *, policy | QUEUED |
 | 5 | CLI-OUT-6 | churn, hotspots, risk, coverage | QUEUED |
 | 6 | CLI-OUT-7 | violations, gate, assess | QUEUED |

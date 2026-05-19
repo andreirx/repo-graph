@@ -79,7 +79,7 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **RMAPD-PERF-1** | Large repo timeout investigation | STATS FIXED |
 | **ORIENT-BUG-1** | Module count mismatch (data bug) | QUEUED |
 | **CLI-OUT-2C** | stats renderer | IMPLEMENTED |
-| **CLI-OUT-3** | Graph drilldown output (callers, callees, path, imports, explain) | QUEUED |
+| **CLI-OUT-3** | Graph drilldown output (callers, callees, path, imports, explain) | IMPLEMENTED |
 | **CLI-OUT-4** | Module/architecture output (modules, surfaces, boundaries) | QUEUED |
 | **CLI-OUT-5** | Inventory output (docs, resource, policy) | QUEUED |
 | **CLI-OUT-6** | Quality/risk output (churn, hotspots, risk, coverage) | QUEUED |
@@ -92,13 +92,27 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 
 ### Next Priority
 
-**CLI-OUT-3: Graph Drilldown Output**
+**CLI-OUT-4: Module/Architecture Output**
 
-Human renderers for callers, callees, path, imports, explain.
+Human renderers for modules list, modules files, modules deps, modules violations,
+surfaces list, surfaces show, boundaries list, boundaries show, boundaries summary.
 
-See `docs/slices/cli-out-3-drilldown.md` for specification (to be created).
+See `docs/slices/cli-out-4-modules.md` for specification (to be created).
 
 ### Recently Completed
+
+**CLI-OUT-3: Graph Drilldown Output** — IMPLEMENTED (2026-05-19)
+
+Delivered:
+- Human renderer for `callers` and `callees` (shared `graph_edges.rs` module)
+- Human renderer for `path` with query-term-preserving header
+- Human renderer for `imports` with depth and resolution status
+- `--json` flag for machine mode on all commands
+- Structured `AmbiguousSymbol` error handling with daemon data payload
+- CLI renders numbered match list with disambiguation hint
+- Validated on 3-repo corpus (OpenXcom, django, duckdb)
+
+See `docs/slices/cli-out-3-drilldown.md` for specification.
 
 **CLI-OUT-2C: Stats Renderer** — IMPLEMENTED (2026-05-19)
 
@@ -174,8 +188,8 @@ See `docs/slices/orient-bug-1-module-count.md`.
 |------|-------|----------|--------|
 | 1 | CLI-OUT-2B | orient, trust, cycles, check | IMPLEMENTED |
 | 1b | CLI-OUT-2C | stats | IMPLEMENTED |
-| 2 | CLI-OUT-3 | callers, callees, path, imports, explain | NEXT |
-| 3 | CLI-OUT-4 | modules *, surfaces *, boundaries * | QUEUED |
+| 2 | CLI-OUT-3 | callers, callees, path, imports, explain | IMPLEMENTED |
+| 3 | CLI-OUT-4 | modules *, surfaces *, boundaries * | NEXT |
 | 4 | CLI-OUT-5 | docs *, resource *, policy | QUEUED |
 | 5 | CLI-OUT-6 | churn, hotspots, risk, coverage | QUEUED |
 | 6 | CLI-OUT-7 | violations, gate, assess | QUEUED |
@@ -290,9 +304,10 @@ HOOK-1 delivered:
 16. ~~CLI-OUT-2A — Cross-repo output audit~~ (HANDOFF COMPLETE)
 17. ~~CLI-OUT-2B — First-contact discovery output~~ (IMPLEMENTED)
 18. ~~CLI-OUT-2C — stats renderer~~ (IMPLEMENTED)
-19. **CLI-OUT-3 — Graph drilldown output (NEXT)**
-20. SMOKE-1 — Validation harness cleanup (QUEUED)
-21. CURSOR-1 — Cursor integration (QUEUED)
+19. ~~CLI-OUT-3 — Graph drilldown output~~ (IMPLEMENTED)
+20. **CLI-OUT-4 — Module/architecture output (NEXT)**
+21. SMOKE-1 — Validation harness cleanup (QUEUED)
+22. CURSOR-1 — Cursor integration (QUEUED)
 
 ### Artifact Matrix (REL-1)
 

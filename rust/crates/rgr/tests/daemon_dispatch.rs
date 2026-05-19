@@ -3206,3 +3206,394 @@ fn modules_list_repo_not_indexed_returns_error() {
         output
     );
 }
+
+// ── CLI-OUT-3: Graph drilldown success-path tests ───────────────────────────
+
+/// Create a test repo with inter-file function calls for graph drilldown tests.
+fn create_graph_drilldown_test_repo(repo_dir: &std::path::Path) {
+    std::fs::create_dir_all(repo_dir).unwrap();
+
+    // main.ts imports and calls helper
+    std::fs::write(
+        repo_dir.join("main.ts"),
+        r#"
+import { helperFunction } from './helper';
+
+export function mainEntry() {
+    helperFunction();
+}
+"#,
+    )
+    .unwrap();
+
+    // helper.ts exports helperFunction
+    std::fs::write(
+        repo_dir.join("helper.ts"),
+        r#"
+export function helperFunction() {
+    console.log('helper');
+}
+"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn callers_returns_success_response_structure() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("graph-repo");
+    create_graph_drilldown_test_repo(&repo_dir);
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    // Index
+    let index_request = format!(
+        r#"{{"id":"gd-idx","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Query callers for helperFunction
+    let callers_request = format!(
+        r#"{{"id":"gd-callers","method":"callers","params":{{"repo":"{}","symbol":"helperFunction"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&callers_request], Arc::clone(&state));
+    let output = &results[0];
+
+    // Verify response structure for human rendering
+    assert!(
+        output.contains(r#""id":"gd-callers""#),
+        "Response should have correct id: {}",
+        output
+    );
+    // Should have target info
+    assert!(
+        output.contains(r#""target""#),
+        "Response should have target field: {}",
+        output
+    );
+    // Should have callers array
+    assert!(
+        output.contains(r#""callers""#),
+        "Response should have callers field: {}",
+        output
+    );
+    // Should have count
+    assert!(
+        output.contains(r#""count""#),
+        "Response should have count field: {}",
+        output
+    );
+    // Should not be an error
+    assert!(
+        !output.contains(r#""code":"InvalidRequest""#)
+            && !output.contains(r#""code":"InternalError""#),
+        "Should not be error: {}",
+        output
+    );
+}
+
+#[test]
+fn callees_returns_success_response_structure() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("graph-repo");
+    create_graph_drilldown_test_repo(&repo_dir);
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    // Index
+    let index_request = format!(
+        r#"{{"id":"gd-idx","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Query callees for mainEntry
+    let callees_request = format!(
+        r#"{{"id":"gd-callees","method":"callees","params":{{"repo":"{}","symbol":"mainEntry"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&callees_request], Arc::clone(&state));
+    let output = &results[0];
+
+    // Verify response structure for human rendering
+    assert!(
+        output.contains(r#""id":"gd-callees""#),
+        "Response should have correct id: {}",
+        output
+    );
+    // Should have target info
+    assert!(
+        output.contains(r#""target""#),
+        "Response should have target field: {}",
+        output
+    );
+    // Should have callees array
+    assert!(
+        output.contains(r#""callees""#),
+        "Response should have callees field: {}",
+        output
+    );
+    // Should have count
+    assert!(
+        output.contains(r#""count""#),
+        "Response should have count field: {}",
+        output
+    );
+    // Should not be an error
+    assert!(
+        !output.contains(r#""code":"InvalidRequest""#)
+            && !output.contains(r#""code":"InternalError""#),
+        "Should not be error: {}",
+        output
+    );
+}
+
+#[test]
+fn path_returns_success_response_structure() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("graph-repo");
+    create_graph_drilldown_test_repo(&repo_dir);
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    // Index
+    let index_request = format!(
+        r#"{{"id":"gd-idx","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Query path from mainEntry to helperFunction
+    let path_request = format!(
+        r#"{{"id":"gd-path","method":"path","params":{{"repo":"{}","from":"mainEntry","to":"helperFunction"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&path_request], Arc::clone(&state));
+    let output = &results[0];
+
+    // Verify response structure for human rendering
+    assert!(
+        output.contains(r#""id":"gd-path""#),
+        "Response should have correct id: {}",
+        output
+    );
+    // Should have path object
+    assert!(
+        output.contains(r#""path""#),
+        "Response should have path field: {}",
+        output
+    );
+    // Should have found boolean
+    assert!(
+        output.contains(r#""found""#),
+        "Response should have found field: {}",
+        output
+    );
+    // Should not be an error
+    assert!(
+        !output.contains(r#""code":"InvalidRequest""#)
+            && !output.contains(r#""code":"InternalError""#),
+        "Should not be error: {}",
+        output
+    );
+}
+
+#[test]
+fn path_not_found_returns_proper_structure() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("graph-repo");
+    create_graph_drilldown_test_repo(&repo_dir);
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    // Index
+    let index_request = format!(
+        r#"{{"id":"gd-idx","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Query path between unrelated symbols (should not find path)
+    let path_request = format!(
+        r#"{{"id":"gd-path-nf","method":"path","params":{{"repo":"{}","from":"helperFunction","to":"mainEntry"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&path_request], Arc::clone(&state));
+    let output = &results[0];
+
+    // Verify response structure even for not-found case
+    assert!(
+        output.contains(r#""id":"gd-path-nf""#),
+        "Response should have correct id: {}",
+        output
+    );
+    // Should have path object with found:false
+    assert!(
+        output.contains(r#""path""#),
+        "Response should have path field: {}",
+        output
+    );
+    assert!(
+        output.contains(r#""found""#),
+        "Response should have found field: {}",
+        output
+    );
+    // Should not be an error (not-found is valid result, not error)
+    assert!(
+        !output.contains(r#""code":"InvalidRequest""#)
+            && !output.contains(r#""code":"InternalError""#),
+        "Should not be error: {}",
+        output
+    );
+}
+
+#[test]
+fn imports_returns_success_response_structure() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("graph-repo");
+    create_graph_drilldown_test_repo(&repo_dir);
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    // Index
+    let index_request = format!(
+        r#"{{"id":"gd-idx","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Query imports for main.ts
+    let imports_request = format!(
+        r#"{{"id":"gd-imports","method":"imports","params":{{"repo":"{}","file":"main.ts"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&imports_request], Arc::clone(&state));
+    let output = &results[0];
+
+    // Verify response structure for human rendering
+    assert!(
+        output.contains(r#""id":"gd-imports""#),
+        "Response should have correct id: {}",
+        output
+    );
+    // Should have file field
+    assert!(
+        output.contains(r#""file""#),
+        "Response should have file field: {}",
+        output
+    );
+    // Should have imports array
+    assert!(
+        output.contains(r#""imports""#),
+        "Response should have imports field: {}",
+        output
+    );
+    // Should not be an error
+    assert!(
+        !output.contains(r#""code":"InvalidRequest""#)
+            && !output.contains(r#""code":"InternalError""#),
+        "Should not be error: {}",
+        output
+    );
+}
+
+// ── Ambiguous symbol handling tests ─────────────────────────────────────────
+
+/// Create a test repo with duplicate symbol names for ambiguity testing.
+fn create_ambiguous_symbol_test_repo(repo_dir: &std::path::Path) {
+    std::fs::create_dir_all(repo_dir).unwrap();
+
+    // Two files with same function name
+    std::fs::write(
+        repo_dir.join("moduleA.ts"),
+        r#"
+export function process() {
+    console.log('module A');
+}
+"#,
+    )
+    .unwrap();
+
+    std::fs::write(
+        repo_dir.join("moduleB.ts"),
+        r#"
+export function process() {
+    console.log('module B');
+}
+"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn callers_ambiguous_symbol_returns_structured_error() {
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("ambig-repo");
+    create_ambiguous_symbol_test_repo(&repo_dir);
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    // Index
+    let index_request = format!(
+        r#"{{"id":"amb-idx","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Query callers with ambiguous symbol name
+    let callers_request = format!(
+        r#"{{"id":"amb-callers","method":"callers","params":{{"repo":"{}","symbol":"process"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&callers_request], Arc::clone(&state));
+    let output = &results[0];
+
+    // Should return AmbiguousSymbol error with structured data
+    assert!(
+        output.contains(r#""code":"AmbiguousSymbol""#),
+        "Should return AmbiguousSymbol error: {}",
+        output
+    );
+    // Should have data field with matches
+    assert!(
+        output.contains(r#""data""#),
+        "Error should have data field for structured ambiguity info: {}",
+        output
+    );
+    assert!(
+        output.contains(r#""query""#),
+        "Data should have query field: {}",
+        output
+    );
+    assert!(
+        output.contains(r#""matches""#),
+        "Data should have matches field: {}",
+        output
+    );
+}

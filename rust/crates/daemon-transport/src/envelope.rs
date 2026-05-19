@@ -73,6 +73,11 @@ pub struct ErrorDetail {
 
     /// Human-readable error message.
     pub message: String,
+
+    /// Optional structured data for errors that need additional context.
+    /// Used by AmbiguousSymbol to provide match candidates for CLI rendering.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
 }
 
 /// Progress update during long-running operations (D4+).
@@ -113,6 +118,9 @@ pub enum ErrorCode {
     /// The specified repo was not found.
     RepoNotFound,
 
+    /// Symbol query matched multiple targets.
+    AmbiguousSymbol,
+
     /// The specified snapshot was not found.
     SnapshotNotFound,
 
@@ -144,6 +152,7 @@ impl ErrorCode {
             Self::InvalidRequest => "InvalidRequest",
             Self::UnknownMethod => "UnknownMethod",
             Self::RepoNotFound => "RepoNotFound",
+            Self::AmbiguousSymbol => "AmbiguousSymbol",
             Self::SnapshotNotFound => "SnapshotNotFound",
             Self::StateUnavailable => "StateUnavailable",
             Self::Timeout => "Timeout",
@@ -160,6 +169,16 @@ impl ErrorDetail {
         Self {
             code: code.as_str().to_string(),
             message: message.into(),
+            data: None,
+        }
+    }
+
+    /// Create an error detail with additional structured data.
+    pub fn with_data(code: ErrorCode, message: impl Into<String>, data: Value) -> Self {
+        Self {
+            code: code.as_str().to_string(),
+            message: message.into(),
+            data: Some(data),
         }
     }
 
@@ -184,6 +203,24 @@ impl ErrorDetail {
     /// Create an internal error.
     pub fn internal_error(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::InternalError, message)
+    }
+
+    /// Create an ambiguous symbol error with structured match data.
+    ///
+    /// `matches` should be a JSON array of match objects, each containing:
+    /// - qualified_name: String
+    /// - kind: String (e.g., "CONSTRUCTOR", "METHOD")
+    /// - file: String
+    /// - line: u32
+    pub fn ambiguous_symbol(query: &str, matches: Value) -> Self {
+        Self::with_data(
+            ErrorCode::AmbiguousSymbol,
+            format!("symbol '{}' is ambiguous", query),
+            serde_json::json!({
+                "query": query,
+                "matches": matches
+            }),
+        )
     }
 }
 

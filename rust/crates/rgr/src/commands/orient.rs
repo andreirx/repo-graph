@@ -201,7 +201,7 @@ pub fn run_orient(args: &[String]) -> ExitCode {
                 }
             }
         }
-        Err(DaemonClientError::DaemonError { code, message }) => {
+        Err(DaemonClientError::DaemonError { code, message, .. }) => {
             if code == "RepoNotFound" {
                 eprintln!("error: repo not indexed");
                 eprintln!("hint: run 'rmap index .' to index this repo");
@@ -331,7 +331,7 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
                 }
             }
         }
-        Err(DaemonClientError::DaemonError { code, message }) => {
+        Err(DaemonClientError::DaemonError { code, message, .. }) => {
             if code == "RepoNotFound" {
                 eprintln!("error: repo not indexed");
                 eprintln!("hint: run 'rmap index .' to index this repo");
@@ -498,7 +498,7 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
                 }
             }
         }
-        Err(DaemonClientError::DaemonError { code, message }) => {
+        Err(DaemonClientError::DaemonError { code, message, .. }) => {
             if code == "RepoNotFound" {
                 eprintln!("error: repo not indexed");
                 eprintln!("hint: run 'rmap index .' to index this repo");

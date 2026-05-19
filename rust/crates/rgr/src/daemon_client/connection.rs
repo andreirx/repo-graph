@@ -49,7 +49,12 @@ pub enum DaemonClientError {
     /// Response was not valid JSON.
     InvalidResponse(String),
     /// Daemon returned an error response.
-    DaemonError { code: String, message: String },
+    DaemonError {
+        code: String,
+        message: String,
+        /// Optional structured data (e.g., ambiguous symbol matches).
+        data: Option<serde_json::Value>,
+    },
 }
 
 impl std::fmt::Display for DaemonClientError {
@@ -59,7 +64,7 @@ impl std::fmt::Display for DaemonClientError {
             Self::SendFailed(msg) => write!(f, "failed to send request: {}", msg),
             Self::ReadFailed(msg) => write!(f, "failed to read response: {}", msg),
             Self::InvalidResponse(msg) => write!(f, "invalid response: {}", msg),
-            Self::DaemonError { code, message } => {
+            Self::DaemonError { code, message, .. } => {
                 write!(f, "daemon error [{}]: {}", code, message)
             }
         }
@@ -94,6 +99,9 @@ struct Response {
 struct ErrorDetail {
     code: String,
     message: String,
+    /// Optional structured data (e.g., for AmbiguousSymbol errors).
+    #[serde(default)]
+    data: Option<serde_json::Value>,
 }
 
 /// A connection to the daemon socket.
@@ -220,6 +228,7 @@ impl DaemonConnection {
                 return Err(DaemonClientError::DaemonError {
                     code: error.code,
                     message: error.message,
+                    data: error.data,
                 });
             }
 
@@ -363,7 +372,7 @@ mod tests {
         handle.join().unwrap();
 
         match result {
-            Err(DaemonClientError::DaemonError { code, message }) => {
+            Err(DaemonClientError::DaemonError { code, message, .. }) => {
                 assert_eq!(code, "TestError");
                 assert_eq!(message, "test failure");
             }

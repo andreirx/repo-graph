@@ -99,7 +99,7 @@ fn run_repo_list(args: &[String]) -> ExitCode {
 
             ExitCode::SUCCESS
         }
-        Err(DaemonClientError::DaemonError { code, message }) => {
+        Err(DaemonClientError::DaemonError { code, message, .. }) => {
             eprintln!("error: daemon returned {}: {}", code, message);
             ExitCode::from(2)
         }
@@ -176,7 +176,7 @@ fn run_repo_info(args: &[String]) -> ExitCode {
 
             ExitCode::SUCCESS
         }
-        Err(DaemonClientError::DaemonError { code, message }) => {
+        Err(DaemonClientError::DaemonError { code, message, .. }) => {
             if code == "RepoNotFound" {
                 eprintln!("error: repo not indexed: {}", repo_ref);
                 eprintln!("hint: run 'rmap index {}' to index this repo", repo_ref);
@@ -239,7 +239,7 @@ fn run_repo_alias(args: &[String]) -> ExitCode {
             eprintln!("Alias set: {} -> {}", set_alias, path);
             ExitCode::SUCCESS
         }
-        Err(DaemonClientError::DaemonError { code, message }) => {
+        Err(DaemonClientError::DaemonError { code, message, .. }) => {
             eprintln!("error: daemon returned {}: {}", code, message);
             ExitCode::from(2)
         }
@@ -295,7 +295,7 @@ fn run_repo_remove(args: &[String]) -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        Err(DaemonClientError::DaemonError { code, message }) => {
+        Err(DaemonClientError::DaemonError { code, message, .. }) => {
             eprintln!("error: daemon returned {}: {}", code, message);
             ExitCode::from(2)
         }

@@ -191,6 +191,7 @@ impl Dispatcher for MockDispatcher {
                     ErrorDetail {
                         code: code.to_string(),
                         message: message.to_string(),
+                        data: None,
                     },
                 )
             }
