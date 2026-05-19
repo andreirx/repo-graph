@@ -78,7 +78,7 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **CLI-OUT-2B** | First-contact discovery output (orient, trust, cycles) | IMPLEMENTED |
 | **RMAPD-PERF-1** | Large repo timeout investigation | STATS FIXED |
 | **ORIENT-BUG-1** | Module count mismatch (data bug) | QUEUED |
-| **CLI-OUT-2C** | stats renderer | **CURRENT** |
+| **CLI-OUT-2C** | stats renderer | IMPLEMENTED |
 | **CLI-OUT-3** | Graph drilldown output (callers, callees, path, imports, explain) | QUEUED |
 | **CLI-OUT-4** | Module/architecture output (modules, surfaces, boundaries) | QUEUED |
 | **CLI-OUT-5** | Inventory output (docs, resource, policy) | QUEUED |
@@ -90,16 +90,26 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **MAC-2** | macOS signing/notarization | DEFERRED |
 | **UPDATE-1** | Updater/repair channel | DEFERRED |
 
-### Current Priority
+### Next Priority
 
-**CLI-OUT-2C: Stats Renderer** — CURRENT
+**CLI-OUT-3: Graph Drilldown Output**
 
-Human renderer for `stats` command. RMAPD-PERF-1 resolved, so stats now works
-on large repos. See Wave 1b in Output Program.
+Human renderers for callers, callees, path, imports, explain.
 
-See `docs/slices/cli-out-2c-stats.md` for specification (to be created).
+See `docs/slices/cli-out-3-drilldown.md` for specification (to be created).
 
 ### Recently Completed
+
+**CLI-OUT-2C: Stats Renderer** — IMPLEMENTED (2026-05-19)
+
+Delivered:
+- Human renderer for `stats` with full sorted sections
+- No arbitrary top-N clipping or threshold-based labeling
+- Sections: Summary, By size, By fan-in, By fan-out, By distance from main sequence
+- `--json` flag for machine mode
+- Validated on 5-repo corpus
+
+See `docs/slices/cli-out-2c-stats-renderer.md` for specification.
 
 **CLI-OUT-2B: First-Contact Discovery Output** — IMPLEMENTED (2026-05-18)
 
@@ -163,8 +173,8 @@ See `docs/slices/orient-bug-1-module-count.md`.
 | Wave | Slice | Commands | Status |
 |------|-------|----------|--------|
 | 1 | CLI-OUT-2B | orient, trust, cycles, check | IMPLEMENTED |
-| 1b | CLI-OUT-2C | stats | CURRENT |
-| 2 | CLI-OUT-3 | callers, callees, path, imports, explain | QUEUED |
+| 1b | CLI-OUT-2C | stats | IMPLEMENTED |
+| 2 | CLI-OUT-3 | callers, callees, path, imports, explain | NEXT |
 | 3 | CLI-OUT-4 | modules *, surfaces *, boundaries * | QUEUED |
 | 4 | CLI-OUT-5 | docs *, resource *, policy | QUEUED |
 | 5 | CLI-OUT-6 | churn, hotspots, risk, coverage | QUEUED |
@@ -278,9 +288,9 @@ HOOK-1 delivered:
 14. ~~REG-1 — Repo registry + cwd auto-discovery (read-side)~~ (IMPLEMENTED)
 15. ~~CLI-OUT-1 — Presentation layer (human-default output)~~ (IMPLEMENTED)
 16. ~~CLI-OUT-2A — Cross-repo output audit~~ (HANDOFF COMPLETE)
-17. **CLI-OUT-2B — First-contact discovery output (CURRENT)**
-18. CLI-OUT-2C — stats renderer (stats query fixed, now CURRENT)
-19. CLI-OUT-3 — Graph drilldown output (QUEUED)
+17. ~~CLI-OUT-2B — First-contact discovery output~~ (IMPLEMENTED)
+18. ~~CLI-OUT-2C — stats renderer~~ (IMPLEMENTED)
+19. **CLI-OUT-3 — Graph drilldown output (NEXT)**
 20. SMOKE-1 — Validation harness cleanup (QUEUED)
 21. CURSOR-1 — Cursor integration (QUEUED)
 

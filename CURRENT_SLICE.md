@@ -1,13 +1,27 @@
 # CURRENT_SLICE.md
 
-## Current Priority
+## Next Priority
 
-**CLI-OUT-2C: Stats Renderer** — CURRENT
+**CLI-OUT-3: Graph Drilldown Output**
 
-Slice doc: `docs/slices/cli-out-2c-stats-renderer.md` (to be created)
+Slice doc: `docs/slices/cli-out-3-drilldown.md` (to be created)
 
-Stats query pathology fixed. Stats now completes in under 6 seconds on all
-tested repos. Renderer can proceed.
+Human renderers for callers, callees, path, imports, explain.
+
+---
+
+## Recently Implemented
+
+**CLI-OUT-2C: Stats Renderer** — IMPLEMENTED (2026-05-19)
+
+Slice doc: `docs/slices/cli-out-2c-stats-renderer.md`
+
+Delivered:
+- Human renderer for `stats` with full sorted sections
+- No arbitrary top-N clipping or threshold-based labeling
+- Sections: Summary, By size, By fan-in, By fan-out, By distance
+- `--json` flag for machine mode
+- Validated on 5-repo corpus
 
 ---
 
@@ -21,8 +35,6 @@ Stats root cause (OBSERVED): `compute_module_stats` had correlated subqueries
 with O(modules × edges × symbols) complexity.
 
 Fix: Rewrote query with CTEs. Django stats improved from 760s to 3s (255x speedup).
-
-Evidence: Instrumentation (`--features perf-trace`) confirmed before/after.
 
 Not proven: Trust, cycles, other query performance. Timeout class mitigated,
 not universally solved.
@@ -66,8 +78,8 @@ See `docs/slices/orient-bug-1-module-count.md`.
 | Wave | Slice | Commands | Status |
 |------|-------|----------|--------|
 | 1 | CLI-OUT-2B | orient, trust, cycles, check | VALIDATED |
-| 1b | CLI-OUT-2C | stats | CURRENT |
-| 2 | CLI-OUT-3 | callers, callees, path, imports, explain | QUEUED |
+| 1b | CLI-OUT-2C | stats | IMPLEMENTED |
+| 2 | CLI-OUT-3 | callers, callees, path, imports, explain | NEXT |
 | 3 | CLI-OUT-4 | modules *, surfaces *, boundaries * | QUEUED |
 | 4 | CLI-OUT-5 | docs *, resource *, policy | QUEUED |
 | 5 | CLI-OUT-6 | churn, hotspots, risk, coverage | QUEUED |

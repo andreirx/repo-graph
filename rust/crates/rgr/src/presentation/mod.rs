@@ -38,6 +38,7 @@ pub mod check;
 pub mod cycles;
 pub mod explain;
 pub mod orient;
+pub mod stats;
 pub mod trust;
 
 // ── Shared Helpers ───────────────────────────────────────────────────────────

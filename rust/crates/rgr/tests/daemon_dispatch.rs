@@ -193,6 +193,14 @@ fn refresh_missing_repo_returns_invalid_request() {
     assert!(output.contains("repo"));
 }
 
+#[test]
+fn stats_missing_repo_returns_invalid_request() {
+    let output = run_daemon_request(r#"{"id":"11b","method":"stats","params":{}}"#);
+    assert!(output.contains(r#""id":"11b""#));
+    assert!(output.contains(r#""code":"InvalidRequest""#));
+    assert!(output.contains("repo"));
+}
+
 // ── REG-1: Repo not indexed tests ───────────────────────────────────────
 
 #[test]
@@ -236,6 +244,14 @@ fn refresh_repo_not_indexed_returns_error() {
         r#"{"id":"16","method":"refresh","params":{"repo":"/nonexistent/path"}}"#,
     );
     assert!(output.contains(r#""id":"16""#));
+    assert!(output.contains(r#""code":"RepoNotFound""#));
+}
+
+#[test]
+fn stats_repo_not_indexed_returns_error() {
+    let output =
+        run_daemon_request(r#"{"id":"16b","method":"stats","params":{"repo":"/nonexistent/path"}}"#);
+    assert!(output.contains(r#""id":"16b""#));
     assert!(output.contains(r#""code":"RepoNotFound""#));
 }
 
@@ -381,6 +397,98 @@ fn index_then_query_end_to_end() {
         "Refresh should succeed: {}",
         refresh_output
     );
+}
+
+#[test]
+fn stats_success_returns_module_metrics() {
+    // Create isolated state root
+    let state_temp = tempdir().unwrap();
+    let state = create_isolated_state_in(&state_temp);
+
+    // Create temp directory for test repo
+    let repo_temp = tempdir().unwrap();
+    let repo_dir = repo_temp.path().join("stats-test-repo");
+    std::fs::create_dir(&repo_dir).unwrap();
+    std::fs::write(repo_dir.join("main.ts"), "export function hello() {}").unwrap();
+
+    let repo_path_str = repo_dir.to_string_lossy();
+
+    // Step 1: Index the repo
+    let index_request = format!(
+        r#"{{"id":"stats-1","method":"index","params":{{"repo_path":"{}"}}}}"#,
+        repo_path_str
+    );
+    let results = run_daemon_requests_with_state(vec![&index_request], Arc::clone(&state));
+    let (_repo_uid, _db_path, canonical_path) = extract_index_result(&results[0]);
+
+    // Step 2: Query stats
+    let stats_request = format!(
+        r#"{{"id":"stats-2","method":"stats","params":{{"repo":"{}"}}}}"#,
+        canonical_path
+    );
+    let results = run_daemon_requests_with_state(vec![&stats_request], state);
+    let stats_output = &results[0];
+
+    // Parse last line (result, not progress events)
+    let last_line = stats_output.lines().last().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(last_line).unwrap();
+    let result = &parsed["result"];
+
+    assert!(
+        result.get("repo_uid").is_some(),
+        "stats response missing repo_uid: {}",
+        stats_output
+    );
+    assert!(
+        result.get("snapshot_uid").is_some(),
+        "stats response missing snapshot_uid: {}",
+        stats_output
+    );
+    assert!(
+        result.get("stats").is_some(),
+        "stats response missing stats array: {}",
+        stats_output
+    );
+
+    // Verify stats is an array
+    let stats = result["stats"].as_array().expect("stats should be an array");
+
+    // For each module, verify required fields exist
+    for module_stats in stats {
+        assert!(
+            module_stats.get("module").is_some(),
+            "module_stats missing module: {}",
+            stats_output
+        );
+        assert!(
+            module_stats.get("fan_in").is_some(),
+            "module_stats missing fan_in"
+        );
+        assert!(
+            module_stats.get("fan_out").is_some(),
+            "module_stats missing fan_out"
+        );
+        assert!(
+            module_stats.get("instability").is_some(),
+            "module_stats missing instability"
+        );
+        assert!(
+            module_stats.get("abstractness").is_some(),
+            "module_stats missing abstractness"
+        );
+        assert!(
+            module_stats.get("distance_from_main_sequence").is_some(),
+            "module_stats missing distance_from_main_sequence"
+        );
+        assert!(
+            module_stats.get("file_count").is_some(),
+            "module_stats missing file_count"
+        );
+        assert!(
+            module_stats.get("symbol_count").is_some(),
+            "module_stats missing symbol_count"
+        );
+    }
 }
 
 #[test]

@@ -832,16 +832,18 @@ impl ServiceDispatcher {
     }
 
     /// RMAPD-PERF-1: Added emitter for heartbeat during long queries.
+    /// CLI-OUT-2C: Added display_name for human renderer.
     #[allow(unused_variables)] // Timing variables used only with perf-trace feature
     fn handle_stats(&self, request: &Request, emitter: &mut dyn ProgressEmitter) -> DispatchResult {
         let handler_start = Instant::now();
 
-        // REG-1: resolve repo from path/alias and auto-load
+        // REG-1: resolve repo from path/alias and auto-load (with display_name for CLI-OUT-2C)
         let resolve_start = Instant::now();
-        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
-            Ok(r) => r,
-            Err(e) => return DispatchResult::error(&request.id, e),
-        };
+        let (repo_state, repo_uid, display_name) =
+            match self.resolve_and_load_repo_with_display_name(&request.params) {
+                Ok(r) => r,
+                Err(e) => return DispatchResult::error(&request.id, e),
+            };
         let resolve_ms = resolve_start.elapsed().as_millis();
 
         // Acquire read lock
@@ -896,7 +898,11 @@ impl ServiceDispatcher {
         // RMAPD-PERF-1: Timing instrumentation (enable with --features perf-trace)
         perf_trace!(
             "[PERF] stats: total={}ms resolve={}ms lock={}ms snapshot={}ms query={}ms",
-            total_ms, resolve_ms, lock_ms, snapshot_ms, query_ms
+            total_ms,
+            resolve_ms,
+            lock_ms,
+            snapshot_ms,
+            query_ms
         );
 
         DispatchResult::success(
@@ -904,6 +910,7 @@ impl ServiceDispatcher {
             serde_json::json!({
                 "repo_uid": repo_uid,
                 "snapshot_uid": snapshot.snapshot_uid,
+                "display_name": display_name,
                 "stats": stats,
                 "count": stats.len(),
             }),
@@ -980,7 +987,11 @@ impl ServiceDispatcher {
         // RMAPD-PERF-1: Timing instrumentation (enable with --features perf-trace)
         perf_trace!(
             "[PERF] cycles: total={}ms resolve={}ms lock={}ms snapshot={}ms query={}ms",
-            total_ms, resolve_ms, lock_ms, snapshot_ms, query_ms
+            total_ms,
+            resolve_ms,
+            lock_ms,
+            snapshot_ms,
+            query_ms
         );
 
         // CLI-OUT-2B: Include display_name for human renderers
@@ -1994,7 +2005,11 @@ impl ServiceDispatcher {
         // RMAPD-PERF-1: Timing instrumentation (enable with --features perf-trace)
         perf_trace!(
             "[PERF] orient: total={}ms resolve={}ms lock={}ms orient={}ms overlay={}ms",
-            total_ms, resolve_ms, lock_ms, orient_ms, overlay_ms
+            total_ms,
+            resolve_ms,
+            lock_ms,
+            orient_ms,
+            overlay_ms
         );
 
         DispatchResult::success(&request.id, output)
@@ -2039,7 +2054,10 @@ impl ServiceDispatcher {
         // RMAPD-PERF-1: Timing instrumentation (enable with --features perf-trace)
         perf_trace!(
             "[PERF] check: total={}ms resolve={}ms lock={}ms check={}ms",
-            total_ms, resolve_ms, lock_ms, check_ms
+            total_ms,
+            resolve_ms,
+            lock_ms,
+            check_ms
         );
 
         match check_result {
@@ -2233,7 +2251,11 @@ impl ServiceDispatcher {
         // RMAPD-PERF-1: Timing instrumentation (enable with --features perf-trace)
         perf_trace!(
             "[PERF] trust: total={}ms resolve={}ms lock={}ms snapshot={}ms trust={}ms",
-            total_ms, resolve_ms, lock_ms, snapshot_ms, trust_ms
+            total_ms,
+            resolve_ms,
+            lock_ms,
+            snapshot_ms,
+            trust_ms
         );
 
         match serde_json::to_value(&report) {
