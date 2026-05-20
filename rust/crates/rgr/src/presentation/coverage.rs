@@ -322,13 +322,7 @@ mod tests {
 
     #[test]
     fn empty_import_with_unnormalized_shows_hint() {
-        let resp = make_response(
-            vec![],
-            5,
-            0,
-            vec!["../outside.js".to_string()],
-            vec![],
-        );
+        let resp = make_response(vec![], 5, 0, vec!["../outside.js".to_string()], vec![]);
         let out = resp.render_human();
 
         assert!(out.contains("hint: no files were imported"));

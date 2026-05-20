@@ -191,7 +191,10 @@ mod tests {
         let c_pos = out.find("src/c.rs").unwrap();
 
         assert!(b_pos < a_pos, "b should come before a (more lines)");
-        assert!(a_pos < c_pos, "a should come before c (same lines, alphabetical)");
+        assert!(
+            a_pos < c_pos,
+            "a should come before c (same lines, alphabetical)"
+        );
     }
 
     #[test]

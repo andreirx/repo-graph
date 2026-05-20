@@ -168,10 +168,16 @@ impl GateResponse {
 
         // Counts breakdown
         out.push_str("\nObligation counts:\n");
-        out.push_str(&format!("  total              {}\n", self.gate.counts.total));
+        out.push_str(&format!(
+            "  total              {}\n",
+            self.gate.counts.total
+        ));
         out.push_str(&format!("  pass               {}\n", self.gate.counts.pass));
         out.push_str(&format!("  fail               {}\n", self.gate.counts.fail));
-        out.push_str(&format!("  waived             {}\n", self.gate.counts.waived));
+        out.push_str(&format!(
+            "  waived             {}\n",
+            self.gate.counts.waived
+        ));
         out.push_str(&format!(
             "  missing evidence   {}\n",
             self.gate.counts.missing_evidence
@@ -221,8 +227,11 @@ impl GateResponse {
             // Sort obligations deterministically by (req_id, req_version, obligation_id)
             let mut obligations = self.obligations.clone();
             obligations.sort_by(|a, b| {
-                (&a.req_id, a.req_version, &a.obligation_id)
-                    .cmp(&(&b.req_id, b.req_version, &b.obligation_id))
+                (&a.req_id, a.req_version, &a.obligation_id).cmp(&(
+                    &b.req_id,
+                    b.req_version,
+                    &b.obligation_id,
+                ))
             });
 
             for obl in &obligations {
@@ -243,7 +252,10 @@ impl GateResponse {
                 out.push_str(&format!("    effective: {}\n", obl.effective_verdict));
 
                 // Evidence display (method-specific)
-                out.push_str(&format!("    evidence: {}\n", render_evidence(&obl.evidence)));
+                out.push_str(&format!(
+                    "    evidence: {}\n",
+                    render_evidence(&obl.evidence)
+                ));
 
                 // Waiver basis (when effective != computed)
                 if let Some(ref waiver) = obl.waiver_basis {
@@ -251,7 +263,7 @@ impl GateResponse {
                     if let Some(ref expires) = waiver.expires_at {
                         out.push_str(&format!(" (expires: {})", expires));
                     }
-                    out.push_str("\n");
+                    out.push('\n');
                 }
             }
         }
@@ -391,7 +403,7 @@ mod tests {
             command: "gate".to_string(),
             repo: "test-repo".to_string(),
             snapshot: "snap_abc".to_string(),
-            toolchain: None,
+            toolchain: serde_json::Value::Null,
             obligations,
             quality_assessments: vec![],
             gate: outcome,
@@ -419,8 +431,24 @@ mod tests {
         let resp = make_response(
             make_outcome("pass", "strict", 0, make_counts(2, 2, 0, 0, 0, 0)),
             vec![
-                make_obligation("REQ-001", 1, "obl-1", "core clean", "arch_violations", "PASS", "PASS"),
-                make_obligation("REQ-001", 1, "obl-2", "no hotspots", "hotspot_threshold", "PASS", "PASS"),
+                make_obligation(
+                    "REQ-001",
+                    1,
+                    "obl-1",
+                    "core clean",
+                    "arch_violations",
+                    "PASS",
+                    "PASS",
+                ),
+                make_obligation(
+                    "REQ-001",
+                    1,
+                    "obl-2",
+                    "no hotspots",
+                    "hotspot_threshold",
+                    "PASS",
+                    "PASS",
+                ),
             ],
         );
         let out = resp.render_human();
@@ -573,8 +601,24 @@ mod tests {
         let resp = make_response(
             make_outcome("pass", "default", 0, make_counts(2, 2, 0, 0, 0, 0)),
             vec![
-                make_obligation("REQ-002", 1, "obl-1", "second", "arch_violations", "PASS", "PASS"),
-                make_obligation("REQ-001", 1, "obl-1", "first", "arch_violations", "PASS", "PASS"),
+                make_obligation(
+                    "REQ-002",
+                    1,
+                    "obl-1",
+                    "second",
+                    "arch_violations",
+                    "PASS",
+                    "PASS",
+                ),
+                make_obligation(
+                    "REQ-001",
+                    1,
+                    "obl-1",
+                    "first",
+                    "arch_violations",
+                    "PASS",
+                    "PASS",
+                ),
             ],
         );
         let out = resp.render_human();
@@ -593,7 +637,15 @@ mod tests {
                 make_obligation("R", 1, "1", "a", "m", "PASS", "PASS"),
                 make_obligation("R", 1, "2", "b", "m", "FAIL", "FAIL"),
                 make_obligation("R", 1, "3", "c", "m", "FAIL", "WAIVED"),
-                make_obligation("R", 1, "4", "d", "m", "MISSING_EVIDENCE", "MISSING_EVIDENCE"),
+                make_obligation(
+                    "R",
+                    1,
+                    "4",
+                    "d",
+                    "m",
+                    "MISSING_EVIDENCE",
+                    "MISSING_EVIDENCE",
+                ),
             ],
         );
         let out = resp.render_human();

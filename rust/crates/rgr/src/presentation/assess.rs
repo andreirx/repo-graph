@@ -254,7 +254,9 @@ mod tests {
         // "not comparable" is longest at 14 chars
         // Check that shorter labels have trailing spaces before the count
         let lines: Vec<&str> = out.lines().collect();
-        let pass_line = lines.iter().find(|l| l.contains("pass") && l.contains("10"));
+        let pass_line = lines
+            .iter()
+            .find(|l| l.contains("pass") && l.contains("10"));
         let nc_line = lines
             .iter()
             .find(|l| l.contains("not comparable") && l.contains("40"));

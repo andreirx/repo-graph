@@ -64,7 +64,10 @@ impl RiskResponse {
         let mut out = String::new();
 
         // Header with time window
-        out.push_str(&format!("Risk Analysis ({})\n\n", format_since(&self.since)));
+        out.push_str(&format!(
+            "Risk Analysis ({})\n\n",
+            format_since(&self.since)
+        ));
 
         // Formula
         out.push_str(&format!("Formula: {}\n\n", self.formula));
@@ -93,7 +96,9 @@ impl RiskResponse {
         if self.count == 0 {
             out.push_str("\nhint: no files have both hotspot and coverage data.\n");
             if self.hotspot_files > 0 && self.coverage_files == 0 {
-                out.push_str("      Import coverage data with 'rmap coverage <db> <repo> <report>'.\n");
+                out.push_str(
+                    "      Import coverage data with 'rmap coverage <db> <repo> <report>'.\n",
+                );
             } else if self.hotspot_files == 0 {
                 out.push_str("      No hotspot data available. Check churn and complexity.\n");
             }
@@ -308,7 +313,14 @@ mod tests {
 
         // Explicitly verify no verdict language (excluding file paths)
         // Split by lines and check non-path content
-        let verdict_words = ["critical", "high risk", "medium risk", "low risk", "danger", "severe"];
+        let verdict_words = [
+            "critical",
+            "high risk",
+            "medium risk",
+            "low risk",
+            "danger",
+            "severe",
+        ];
         for word in verdict_words {
             assert!(
                 !out.to_lowercase().contains(word),

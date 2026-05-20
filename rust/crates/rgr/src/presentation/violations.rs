@@ -133,8 +133,11 @@ impl ViolationsResponse {
 
             let mut violations = self.results.declared_boundary_violations.clone();
             violations.sort_by(|a, b| {
-                (&a.boundary_module, &a.forbidden_module, &a.source_file)
-                    .cmp(&(&b.boundary_module, &b.forbidden_module, &b.source_file))
+                (&a.boundary_module, &a.forbidden_module, &a.source_file).cmp(&(
+                    &b.boundary_module,
+                    &b.forbidden_module,
+                    &b.source_file,
+                ))
             });
 
             for v in &violations {
@@ -142,10 +145,7 @@ impl ViolationsResponse {
                     "  {} -> {}\n",
                     v.boundary_module, v.forbidden_module
                 ));
-                let line_suffix = v
-                    .line
-                    .map(|l| format!(":{}", l))
-                    .unwrap_or_default();
+                let line_suffix = v.line.map(|l| format!(":{}", l)).unwrap_or_default();
                 out.push_str(&format!("    source: {}{}\n", v.source_file, line_suffix));
                 out.push_str(&format!("    target: {}\n", v.target_file));
                 if let Some(ref reason) = v.reason {

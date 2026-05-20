@@ -70,7 +70,9 @@ pub fn run_assess(args: &[String]) -> ExitCode {
             }
             _ if arg.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", arg);
-                eprintln!("usage: rmap assess <db_path> <repo_uid> [--baseline <snapshot_uid>] [--json]");
+                eprintln!(
+                    "usage: rmap assess <db_path> <repo_uid> [--baseline <snapshot_uid>] [--json]"
+                );
                 return ExitCode::from(1);
             }
             _ => {

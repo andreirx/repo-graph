@@ -316,7 +316,14 @@ fn assess_comparative_policy_with_baseline() {
     assert_eq!(declare_output.status.code(), Some(0));
 
     // Run assessment with --baseline.
-    let output = run_cmd(&["assess", db_str, "r1", "--baseline", &snapshot_uid, "--json"]);
+    let output = run_cmd(&[
+        "assess",
+        db_str,
+        "r1",
+        "--baseline",
+        &snapshot_uid,
+        "--json",
+    ]);
     assert_eq!(
         output.status.code(),
         Some(0),
