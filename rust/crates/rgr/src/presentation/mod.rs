@@ -39,9 +39,16 @@ pub mod cycles;
 pub mod explain;
 pub mod graph_edges;
 pub mod imports;
+pub mod module_inventory;
+pub mod module_shared;
+pub mod modules_deps;
+pub mod modules_list;
+pub mod modules_show;
+pub mod modules_violations;
 pub mod orient;
 pub mod path;
 pub mod stats;
+pub mod surfaces;
 pub mod trust;
 
 // ── Shared Helpers ───────────────────────────────────────────────────────────

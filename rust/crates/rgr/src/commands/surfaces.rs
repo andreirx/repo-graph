@@ -9,8 +9,10 @@
 //!
 //! # Commands
 //!
-//! - `rmap surfaces list [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>]`
-//! - `rmap surfaces show <surface_ref>`
+//! - `rmap surfaces list [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>] [--json]`
+//! - `rmap surfaces show <surface_ref> [--json]`
+//!
+//! CLI-OUT-4: Human-readable output with `--json` for machine mode.
 //!
 //! # Boundary rules
 //!
@@ -40,9 +42,9 @@ pub fn run_surfaces(args: &[String]) -> ExitCode {
     if args.is_empty() {
         eprintln!("usage:");
         eprintln!(
-            "  rmap surfaces list [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>]"
+            "  rmap surfaces list [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>] [--json]"
         );
-        eprintln!("  rmap surfaces show <surface_ref>");
+        eprintln!("  rmap surfaces show <surface_ref> [--json]");
         eprintln!();
         eprintln!("Run from within a repo directory.");
         return ExitCode::from(1);
@@ -54,8 +56,8 @@ pub fn run_surfaces(args: &[String]) -> ExitCode {
         other => {
             eprintln!("unknown surfaces subcommand: {}", other);
             eprintln!("usage:");
-            eprintln!("  rmap surfaces list [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>]");
-            eprintln!("  rmap surfaces show <surface_ref>");
+            eprintln!("  rmap surfaces list [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>] [--json]");
+            eprintln!("  rmap surfaces show <surface_ref> [--json]");
             ExitCode::from(1)
         }
     }
@@ -64,12 +66,12 @@ pub fn run_surfaces(args: &[String]) -> ExitCode {
 // ── surfaces list command ────────────────────────────────────────
 
 fn run_surfaces_list(args: &[String]) -> ExitCode {
-    // Parse filters
-    let (kind, runtime, source, module) = match parse_surfaces_list_args(args) {
+    // Parse filters and --json flag
+    let (kind, runtime, source, module, json_mode) = match parse_surfaces_list_args(args) {
         Ok(v) => v,
         Err(msg) => {
             eprintln!("error: {}", msg);
-            eprintln!("usage: rmap surfaces list [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>]");
+            eprintln!("usage: rmap surfaces list [--kind <kind>] [--runtime <rt>] [--source <src>] [--module <m>] [--json]");
             return ExitCode::from(1);
         }
     };
@@ -121,16 +123,34 @@ fn run_surfaces_list(args: &[String]) -> ExitCode {
     }
 
     match client.request("surfaces_list", Some(params)) {
-        Ok(result) => match serde_json::to_string_pretty(&result) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
+        Ok(result) => {
+            if json_mode {
+                // Machine mode: print full envelope
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to serialize result: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
+            } else {
+                // Human mode: parse and render (CLI-OUT-4)
+                use crate::presentation::surfaces::SurfacesListResponse;
+                match serde_json::from_value::<SurfacesListResponse>(result) {
+                    Ok(response) => {
+                        print!("{}", response.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse surfaces list response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("error: failed to serialize result: {}", e);
-                ExitCode::from(2)
-            }
-        },
+        }
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)
@@ -141,19 +161,15 @@ fn run_surfaces_list(args: &[String]) -> ExitCode {
 // ── surfaces show command ────────────────────────────────────────
 
 fn run_surfaces_show(args: &[String]) -> ExitCode {
-    if args.is_empty() {
-        eprintln!("usage: rmap surfaces show <surface_ref>");
-        return ExitCode::from(1);
-    }
-
-    let surface_ref = &args[0];
-
-    // Check for unexpected args
-    if args.len() > 1 {
-        eprintln!("error: unexpected argument: {}", args[1]);
-        eprintln!("usage: rmap surfaces show <surface_ref>");
-        return ExitCode::from(1);
-    }
+    // Parse args: <surface_ref> [--json]
+    let (surface_ref, json_mode) = match parse_surfaces_show_args(args) {
+        Ok(v) => v,
+        Err(msg) => {
+            eprintln!("error: {}", msg);
+            eprintln!("usage: rmap surfaces show <surface_ref> [--json]");
+            return ExitCode::from(1);
+        }
+    };
 
     // Get cwd for repo resolution
     let cwd = match std::env::current_dir() {
@@ -193,16 +209,34 @@ fn run_surfaces_show(args: &[String]) -> ExitCode {
     });
 
     match client.request("surfaces_show", Some(params)) {
-        Ok(result) => match serde_json::to_string_pretty(&result) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
+        Ok(result) => {
+            if json_mode {
+                // Machine mode: print full envelope
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to serialize result: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
+            } else {
+                // Human mode: parse and render (CLI-OUT-4)
+                use crate::presentation::surfaces::SurfacesShowResponse;
+                match serde_json::from_value::<SurfacesShowResponse>(result) {
+                    Ok(response) => {
+                        print!("{}", response.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse surfaces show response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("error: failed to serialize result: {}", e);
-                ExitCode::from(2)
-            }
-        },
+        }
         Err(e) => {
             // Check for "surface not found" error
             let err_str = e.to_string();
@@ -218,12 +252,13 @@ fn run_surfaces_show(args: &[String]) -> ExitCode {
 
 // ── Argument parsing helpers ──────────────────────────────────────
 
-/// Parsed filters for surfaces list: (kind, runtime, source, module)
+/// Parsed filters for surfaces list: (kind, runtime, source, module, json_mode)
 type SurfacesListFilters = (
     Option<String>,
     Option<String>,
     Option<String>,
     Option<String>,
+    bool,
 );
 
 fn parse_surfaces_list_args(args: &[String]) -> Result<SurfacesListFilters, String> {
@@ -231,10 +266,15 @@ fn parse_surfaces_list_args(args: &[String]) -> Result<SurfacesListFilters, Stri
     let mut runtime = None;
     let mut source = None;
     let mut module = None;
+    let mut json_mode = false;
     let mut i = 0;
 
     while i < args.len() {
         match args[i].as_str() {
+            "--json" => {
+                json_mode = true;
+                i += 1;
+            }
             "--kind" => {
                 if i + 1 >= args.len() {
                     return Err("--kind requires a value".to_string());
@@ -272,5 +312,33 @@ fn parse_surfaces_list_args(args: &[String]) -> Result<SurfacesListFilters, Stri
         }
     }
 
-    Ok((kind, runtime, source, module))
+    Ok((kind, runtime, source, module, json_mode))
+}
+
+/// Parsed args for surfaces show: (surface_ref, json_mode)
+fn parse_surfaces_show_args(args: &[String]) -> Result<(String, bool), String> {
+    let mut surface_ref: Option<String> = None;
+    let mut json_mode = false;
+
+    for arg in args {
+        match arg.as_str() {
+            "--json" => {
+                json_mode = true;
+            }
+            other if other.starts_with("--") => {
+                return Err(format!("unknown option: {}", other));
+            }
+            _ => {
+                if surface_ref.is_some() {
+                    return Err(format!("unexpected argument: {}", arg));
+                }
+                surface_ref = Some(arg.clone());
+            }
+        }
+    }
+
+    match surface_ref {
+        Some(ref_str) => Ok((ref_str, json_mode)),
+        None => Err("missing surface reference".to_string()),
+    }
 }

@@ -2,12 +2,89 @@
 
 ## Current Priority
 
-**CLI-OUT-4: Module/Architecture Output** — IN PROGRESS
+**CLI-OUT-4: Module/Architecture Output** — IN PROGRESS (Groups 1-4 complete)
 
-Slice doc: `docs/slices/cli-out-4-modules.md` (to be created)
+Slice doc: `docs/slices/cli-out-4-modules.md`
 
-Human renderers for modules list, modules files, modules deps, modules violations,
-surfaces list, surfaces show, boundaries list, boundaries show, boundaries summary.
+Human renderers for 11 read-side architecture commands:
+- modules list, show, files, unowned, deps, violations
+- surfaces list, show
+- boundaries list, show, summary
+
+Excludes `modules boundary` (legacy write command).
+
+### Group Status
+
+| Group | Commands | Status |
+|-------|----------|--------|
+| 1 | modules list, show | COMPLETE (2026-05-20) |
+| 2 | modules files, unowned | COMPLETE (2026-05-20) |
+| 3 | modules deps, violations | COMPLETE (2026-05-20) |
+| 4 | surfaces list, show | COMPLETE (2026-05-20, empty-case corpus, populated-case fixture) |
+| 5 | boundaries list, show, summary | QUEUED |
+
+### Group 1 Deliverables
+
+Module catalog/detail (list, show):
+- `presentation/module_shared.rs` — shared formatting helpers (109 lines)
+- `presentation/modules_list.rs` — list DTO + renderer (264 lines)
+- `presentation/modules_show.rs` — show DTO + renderer (454 lines)
+- Unit tests: 26 (8 + 7 + 11)
+- Daemon dispatch tests: 7
+- CLI integration tests: 7 (opt-in)
+- Corpus validated: OpenXcom, django, duckdb
+
+### Group 2 Deliverables
+
+Ownership inventory (files, unowned):
+- `presentation/module_inventory.rs` — DTOs + renderers (422 lines)
+- `commands/modules/files.rs` — updated with --json + human mode (154 lines)
+- `commands/modules/unowned.rs` — updated with --json + human mode (138 lines)
+- Unit tests: 14 in module_inventory.rs
+- Daemon dispatch tests: 5 (3 files + 2 unowned, pre-existing)
+- CLI integration tests: 5 (opt-in)
+
+### Group 3 Deliverables
+
+Dependency/violation analysis (deps, violations):
+- `presentation/modules_deps.rs` — deps DTO + renderer (263 lines)
+- `presentation/modules_violations.rs` — violations DTO + renderer (319 lines)
+- `commands/modules/deps.rs` — updated with --json + human mode (182 lines)
+- `commands/modules/violations.rs` — updated with --json + human mode (373 lines)
+- Unit tests: 15 (7 deps + 8 violations)
+- Daemon dispatch tests: 8 (5 deps + 3 violations)
+- CLI integration tests: 4 (opt-in)
+
+Note: Split into separate files because `modules deps` (relationship reporting)
+and `modules violations` (policy breach surface) have different change axes.
+
+### Group 4 Deliverables
+
+Architectural surfaces (surfaces list, show):
+- `presentation/surfaces.rs` — DTOs + renderers (594 lines total)
+- `commands/surfaces.rs` — updated with --json + human mode (342 lines)
+- Unit tests: 14 (7 list + 7 show)
+- CLI integration tests: 4 tests
+- Review packet: `docs/audits/cli-out-4/group-4-surfaces-review.md`
+- Handles degradation warning when surfaces not populated
+- Deterministic ordering: (kind, name, uid) for list, (evidence_kind, path) for show
+
+**500-line guardrail note:** `presentation/surfaces.rs` exceeds 500 lines (594).
+Kept as single file because list/show share surface identity domain, same actor,
+same degradation model. Split not required unless change axes diverge.
+
+**Corpus validation note:** All indexed repos (OpenXcom, django, duckdb) have 0
+surfaces (C++/Python codebases). Empty-case and error-path behavior validated.
+Populated-case covered by unit tests with synthetic data only.
+
+### Next: Group 5
+
+Architectural boundaries (boundaries list, show, summary):
+- Evaluate `commands/boundaries.rs` refactor (472 lines, approaching guardrail)
+- `presentation/boundaries.rs` — DTOs + renderers
+- `boundaries list` human renderer + `--json` flag
+- `boundaries show` human renderer + `--json` flag
+- `boundaries summary` human renderer + `--json` flag
 
 ---
 
@@ -95,7 +172,7 @@ See `docs/slices/orient-bug-1-module-count.md`.
 | 1 | CLI-OUT-2B | orient, trust, cycles, check | VALIDATED |
 | 1b | CLI-OUT-2C | stats | IMPLEMENTED |
 | 2 | CLI-OUT-3 | callers, callees, path, imports | IMPLEMENTED |
-| 3 | CLI-OUT-4 | modules *, surfaces *, boundaries * | IN PROGRESS |
+| 3 | CLI-OUT-4 | modules (6), surfaces (2), boundaries (3) | IN PROGRESS |
 | 4 | CLI-OUT-5 | docs *, resource *, policy | QUEUED |
 | 5 | CLI-OUT-6 | churn, hotspots, risk, coverage | QUEUED |
 | 6 | CLI-OUT-7 | violations, gate, assess | QUEUED |

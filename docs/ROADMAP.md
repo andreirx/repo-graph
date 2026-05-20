@@ -80,7 +80,7 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **ORIENT-BUG-1** | Module count mismatch (data bug) | QUEUED |
 | **CLI-OUT-2C** | stats renderer | IMPLEMENTED |
 | **CLI-OUT-3** | Graph drilldown output (callers, callees, path, imports, explain) | IMPLEMENTED |
-| **CLI-OUT-4** | Module/architecture output (modules, surfaces, boundaries) | QUEUED |
+| **CLI-OUT-4** | Module/architecture output (modules, surfaces, boundaries) | IN PROGRESS |
 | **CLI-OUT-5** | Inventory output (docs, resource, policy) | QUEUED |
 | **CLI-OUT-6** | Quality/risk output (churn, hotspots, risk, coverage) | QUEUED |
 | **CLI-OUT-7** | Governance output (violations, gate, assess) | QUEUED |
@@ -90,14 +90,33 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **MAC-2** | macOS signing/notarization | DEFERRED |
 | **UPDATE-1** | Updater/repair channel | DEFERRED |
 
-### Next Priority
+### Current Priority
 
-**CLI-OUT-4: Module/Architecture Output**
+**CLI-OUT-4: Module/Architecture Output** — IN PROGRESS
 
-Human renderers for modules list, modules files, modules deps, modules violations,
-surfaces list, surfaces show, boundaries list, boundaries show, boundaries summary.
+Human renderers for 11 read-side architecture commands, in 5 groups:
 
-See `docs/slices/cli-out-4-modules.md` for specification (to be created).
+| Group | Commands | Status |
+|-------|----------|--------|
+| 1 | modules list, show | COMPLETE |
+| 2 | modules files, unowned | COMPLETE |
+| 3 | modules deps, violations | COMPLETE |
+| 4 | surfaces list, show | COMPLETE (empty-case corpus, populated-case fixture) |
+| 5 | boundaries list, show, summary | QUEUED |
+
+Excludes `modules boundary` (legacy write command).
+
+**Group 1 complete (2026-05-20):** Module catalog/detail renderers with full proof
+surface (26 unit tests, 7 daemon dispatch tests, 7 CLI integration tests).
+
+**Group 2 complete (2026-05-20):** Ownership inventory renderers with full output
+(14 unit tests, 5 daemon dispatch tests, 5 CLI integration tests).
+
+**Group 3 complete (2026-05-20):** Dependency/violation analysis renderers
+(15 unit tests, 8 daemon dispatch tests, 4 CLI integration tests).
+Split into separate files: `modules_deps.rs` and `modules_violations.rs`.
+
+See `docs/slices/cli-out-4-modules.md` for specification.
 
 ### Recently Completed
 
@@ -189,7 +208,7 @@ See `docs/slices/orient-bug-1-module-count.md`.
 | 1 | CLI-OUT-2B | orient, trust, cycles, check | IMPLEMENTED |
 | 1b | CLI-OUT-2C | stats | IMPLEMENTED |
 | 2 | CLI-OUT-3 | callers, callees, path, imports, explain | IMPLEMENTED |
-| 3 | CLI-OUT-4 | modules *, surfaces *, boundaries * | NEXT |
+| 3 | CLI-OUT-4 | modules (list/show/files/unowned/deps/violations), surfaces, boundaries | IN PROGRESS |
 | 4 | CLI-OUT-5 | docs *, resource *, policy | QUEUED |
 | 5 | CLI-OUT-6 | churn, hotspots, risk, coverage | QUEUED |
 | 6 | CLI-OUT-7 | violations, gate, assess | QUEUED |
@@ -305,7 +324,7 @@ HOOK-1 delivered:
 17. ~~CLI-OUT-2B — First-contact discovery output~~ (IMPLEMENTED)
 18. ~~CLI-OUT-2C — stats renderer~~ (IMPLEMENTED)
 19. ~~CLI-OUT-3 — Graph drilldown output~~ (IMPLEMENTED)
-20. **CLI-OUT-4 — Module/architecture output (NEXT)**
+20. **CLI-OUT-4 — Module/architecture output (IN PROGRESS)**
 21. SMOKE-1 — Validation harness cleanup (QUEUED)
 22. CURSOR-1 — Cursor integration (QUEUED)
 

@@ -2,6 +2,7 @@
 //!
 //! RS-MG-12b: Module list with rollup statistics.
 //! Phase 3.1: Module sanity metrics for trust surface.
+//! CLI-OUT-4: Human-readable output with `--json` for machine mode.
 //!
 //! # REG-1 Contract
 //!
@@ -13,32 +14,52 @@
 //! This module owns:
 //! - `run_modules_list` handler
 //! - argument parsing for list command
-//! - output rendering for list command
+//! - mode switching (human vs --json)
 //!
 //! This module does **not** own:
 //! - shared infrastructure (lives in `crate::cli`)
 //! - module graph loading (lives in daemon via module-queries)
 //! - rollup computation (lives in daemon via classification)
 //! - sanity metrics computation (lives in daemon)
+//! - human output rendering (lives in `presentation::modules_list`)
 
 use std::process::ExitCode;
 
-use crate::daemon_client::DaemonClient;
-
-fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
-    format!(
-        "Daemon unavailable (socket: {}). Start with: rmapd",
-        socket_path.display()
-    )
-}
+use crate::daemon_client::{daemon_unavailable_message, DaemonClient};
 
 // ── modules list command ─────────────────────────────────────────
+//
+// `rmap modules list [--json]`
+//
+// Human mode (default): plain text with module catalog.
+// Machine mode (--json): full envelope.
 
 pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
-    // Check for unexpected args
-    if !args.is_empty() {
-        eprintln!("error: unexpected argument: {}", args[0]);
-        eprintln!("usage: rmap modules list");
+    // ── Parse args (filter out --json) ──────────────────────────
+    let mut json_mode = false;
+    let mut unexpected: Option<&String> = None;
+
+    for arg in args {
+        match arg.as_str() {
+            "--json" => {
+                json_mode = true;
+            }
+            flag if flag.starts_with("--") => {
+                eprintln!("error: unknown flag: {}", flag);
+                eprintln!("usage: rmap modules list [--json]");
+                return ExitCode::from(1);
+            }
+            _ => {
+                if unexpected.is_none() {
+                    unexpected = Some(arg);
+                }
+            }
+        }
+    }
+
+    if let Some(arg) = unexpected {
+        eprintln!("error: unexpected argument: {}", arg);
+        eprintln!("usage: rmap modules list [--json]");
         eprintln!();
         eprintln!("Run from within a repo directory.");
         return ExitCode::from(1);
@@ -71,7 +92,10 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
     };
 
     if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        eprintln!(
+            "{}",
+            daemon_unavailable_message(client.socket_path(), "modules list")
+        );
         return ExitCode::from(2);
     }
 
@@ -81,16 +105,34 @@ pub(super) fn run_modules_list(args: &[String]) -> ExitCode {
     });
 
     match client.request("modules_list", Some(params)) {
-        Ok(result) => match serde_json::to_string_pretty(&result) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
+        Ok(result) => {
+            if json_mode {
+                // Machine mode: print full envelope
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to serialize result: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
+            } else {
+                // Human mode: parse and render (CLI-OUT-4)
+                use crate::presentation::modules_list::ModulesListResponse;
+                match serde_json::from_value::<ModulesListResponse>(result) {
+                    Ok(response) => {
+                        print!("{}", response.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse modules list response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("error: failed to serialize result: {}", e);
-                ExitCode::from(2)
-            }
-        },
+        }
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)

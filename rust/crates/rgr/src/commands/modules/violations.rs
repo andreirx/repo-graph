@@ -4,6 +4,9 @@
 //! - `run_violations` — unified violations command (legacy + discovered-module)
 //! - `run_modules_violations` — discovered-module violations only (REG-1)
 //!
+//! RS-MG-12b: Boundary violation diagnostics.
+//! CLI-OUT-4: Human-readable output with `--json` for machine mode.
+//!
 //! # REG-1 Contract
 //!
 //! `run_modules_violations` resolves repo from cwd via daemon registry.
@@ -13,26 +16,21 @@
 //!
 //! This module owns violations command behavior:
 //! - command handlers
-//! - family-local output shaping
+//! - argument parsing for violations command
+//! - mode switching (human vs --json)
 //!
 //! This module does **not** own:
 //! - shared infrastructure (lives in `crate::cli`)
 //! - module graph loading (lives in daemon via module-queries)
 //! - boundary evaluation logic (lives in daemon via classification)
+//! - human output rendering (lives in `presentation::modules_violations`)
 
 use std::path::Path;
 use std::process::ExitCode;
 
 use super::shared::{evaluate_violations_from_facts, load_module_graph_facts};
 use crate::cli::{build_envelope, open_storage};
-use crate::daemon_client::DaemonClient;
-
-fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
-    format!(
-        "Daemon unavailable (socket: {}). Start with: rmapd",
-        socket_path.display()
-    )
-}
+use crate::daemon_client::{daemon_unavailable_message, DaemonClient};
 
 // ── unified violations command ───────────────────────────────────
 //
@@ -244,12 +242,43 @@ pub fn run_violations(args: &[String]) -> ExitCode {
 }
 
 // ── modules violations command (REG-1) ───────────────────────────
+//
+// `rmap modules violations [--json]`
+//
+// Human mode (default): plain text with violation diagnostics.
+// Machine mode (--json): full envelope.
+//
+// Exit codes:
+// - 0: no violations
+// - 1: violations found (stale declarations alone do not force exit 1)
+// - 2: runtime error
 
 pub(super) fn run_modules_violations(args: &[String]) -> ExitCode {
-    // Check for unexpected args
-    if !args.is_empty() {
-        eprintln!("error: unexpected argument: {}", args[0]);
-        eprintln!("usage: rmap modules violations");
+    // ── Parse args (filter out --json) ──────────────────────────
+    let mut json_mode = false;
+    let mut unexpected: Option<&String> = None;
+
+    for arg in args {
+        match arg.as_str() {
+            "--json" => {
+                json_mode = true;
+            }
+            flag if flag.starts_with("--") => {
+                eprintln!("error: unknown flag: {}", flag);
+                eprintln!("usage: rmap modules violations [--json]");
+                return ExitCode::from(1);
+            }
+            _ => {
+                if unexpected.is_none() {
+                    unexpected = Some(arg);
+                }
+            }
+        }
+    }
+
+    if let Some(arg) = unexpected {
+        eprintln!("error: unexpected argument: {}", arg);
+        eprintln!("usage: rmap modules violations [--json]");
         eprintln!();
         eprintln!("Run from within a repo directory.");
         return ExitCode::from(1);
@@ -282,7 +311,10 @@ pub(super) fn run_modules_violations(args: &[String]) -> ExitCode {
     };
 
     if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
+        eprintln!(
+            "{}",
+            daemon_unavailable_message(client.socket_path(), "modules violations")
+        );
         return ExitCode::from(2);
     }
 
@@ -296,20 +328,40 @@ pub(super) fn run_modules_violations(args: &[String]) -> ExitCode {
             // Extract violation count for exit code
             let violation_count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
 
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
-                    // Exit code: 0 if no violations, 1 if violations
-                    // stale_declarations alone do not force exit 1
-                    if violation_count > 0 {
-                        ExitCode::from(1)
-                    } else {
-                        ExitCode::SUCCESS
+            if json_mode {
+                // Machine mode: print full envelope
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        // Exit code: 0 if no violations, 1 if violations
+                        if violation_count > 0 {
+                            ExitCode::from(1)
+                        } else {
+                            ExitCode::SUCCESS
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to serialize result: {}", e);
+                        ExitCode::from(2)
                     }
                 }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
+            } else {
+                // Human mode: parse and render (CLI-OUT-4)
+                use crate::presentation::modules_violations::ModulesViolationsResponse;
+                match serde_json::from_value::<ModulesViolationsResponse>(result) {
+                    Ok(response) => {
+                        print!("{}", response.render_human());
+                        // Exit code: 0 if no violations, 1 if violations
+                        if violation_count > 0 {
+                            ExitCode::from(1)
+                        } else {
+                            ExitCode::SUCCESS
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse modules violations response: {}", e);
+                        ExitCode::from(2)
+                    }
                 }
             }
         }
