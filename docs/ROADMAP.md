@@ -82,9 +82,10 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **CLI-OUT-3** | Graph drilldown output (callers, callees, path, imports, explain) | IMPLEMENTED |
 | **CLI-OUT-4** | Module/architecture output (modules, surfaces, boundaries) | COMPLETE |
 | **CLI-OUT-5** | Inventory output (docs, resource, policy) | COMPLETE |
-| **CLI-OUT-6** | Quality/risk output (churn, hotspots, risk, coverage) | QUEUED |
-| **CLI-OUT-7** | Governance output (violations, gate, assess) | QUEUED |
-| **SMOKE-1** | Validation harness cleanup (command model, verdict semantics) | QUEUED |
+| **CLI-OUT-6** | Quality/risk output (churn, hotspots, risk, coverage) | COMPLETE |
+| **CLI-OUT-7** | Governance output (violations, gate, assess) | COMPLETE |
+| **SMOKE-1** | Validation harness cleanup (bash fixes, 12-repo validation) | COMPLETE |
+| **CLI-AUDIT-1** | Cross-repo full surface audit (35+ commands × 12 repos) | CURRENT |
 | **CURSOR-1** | Cursor MCP/rules integration | QUEUED |
 | **WIN-1** | Windows distribution/install | DEFERRED |
 | **MAC-2** | macOS signing/notarization | DEFERRED |
@@ -92,22 +93,63 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 
 ### Current Priority
 
-**CLI-OUT-5: Inventory/Policy Output** — COMPLETE (2026-05-20)
+**CLI-AUDIT-1: Cross-Repo Full Surface Audit** — CURRENT
 
-Human renderers for 6 inventory and policy commands, in 3 groups:
+Systematic human-output review across all redesigned command families.
+SMOKE-1 validated 4 commands; this audit covers all 35+ commands across 12 repos.
 
-| Group | Commands | Status |
-|-------|----------|--------|
-| 1 | docs list, extract | COMPLETE |
-| 2 | resource list, readers, writers | COMPLETE |
-| 3 | policy | COMPLETE |
+Deliverable: command × repo matrix with explicit status per cell, defect list categorized
+by root cause (presentation / backend / corpus gaps).
 
-Implementation order: documentation inventory first (smallest), resource inventory
-second (same vocabulary), policy last (different semantic class).
-
-See `docs/slices/cli-out-5-inventory.md` for specification.
+See `docs/slices/cli-audit-1-full-surface.md` for full scope.
 
 ### Recently Completed
+
+**SMOKE-1: Validation Harness Cleanup** — COMPLETE (2026-05-20)
+
+Fixed bash empty array handling in smoke-rmap.sh (`${arr[@]+"${arr[@]}"}`).
+Validated 4 commands (gate, orient, trust, stats) across 12 repos:
+- repo-graph, amodx, zap-engine, zap-squad, glamCRM, hexmanos
+- legacy-codebases: OpenXcom, django, duckdb, grpc-java, leveldb, sqlite, langchain4j
+
+Result: 48/48 commands passed. Harness operational across diverse corpus.
+
+**CLI-OUT-7: Governance Output** — COMPLETE (2026-05-20)
+
+Human renderers for 3 governance commands, grouped by output complexity:
+
+| Group | Command | Status |
+|-------|---------|--------|
+| 1 | assess | COMPLETE (fixture-validated) |
+| 2 | violations | COMPLETE (fixture-validated) |
+| 3 | gate | COMPLETE (corpus-validated) |
+
+Proof surfaces:
+- assess: 9 unit tests, 7 CLI tests, 10 fixture tests
+- violations: 10 unit tests, 4 CLI tests, 12 fixture tests
+- gate: 13 unit tests, 7 CLI tests, corpus observation (django, repo-graph)
+
+Verdicts observed via live daemon:
+- PASS, MISSING_EVIDENCE, UNSUPPORTED: OBSERVED
+- FAIL, WAIVED: NOT OBSERVED (no corpus data)
+
+See `docs/slices/cli-out-7-governance.md` for full specification and review packets.
+
+**CLI-OUT-6: Quality/Risk Output** — COMPLETE (2026-05-20)
+
+Human renderers for 4 quality/risk commands:
+- churn, hotspots (Group 1): time-window semantics, ranking surfaces
+- risk (Group 2): join metadata, no invented verdict labels
+- coverage (Group 3): backend-bounded diagnostic samples
+
+**CLI-OUT-5: Inventory/Policy Output** — COMPLETE (2026-05-20)
+
+Human renderers for 6 inventory and policy commands:
+- docs list, extract
+- resource list, readers, writers
+- policy (STATUS_MAPPING, BEHAVIORAL_MARKER, RETURN_FATE)
+
+See `docs/slices/cli-out-5-inventory.md` for specification.
 
 **CLI-OUT-4: Module/Architecture Output** — COMPLETE (2026-05-20)
 
@@ -211,8 +253,8 @@ See `docs/slices/orient-bug-1-module-count.md`.
 | 2 | CLI-OUT-3 | callers, callees, path, imports, explain | IMPLEMENTED |
 | 3 | CLI-OUT-4 | modules (list/show/files/unowned/deps/violations), surfaces, boundaries | COMPLETE |
 | 4 | CLI-OUT-5 | docs (2), resource (3), policy (1) | COMPLETE |
-| 5 | CLI-OUT-6 | churn, hotspots, risk, coverage | QUEUED |
-| 6 | CLI-OUT-7 | violations, gate, assess | QUEUED |
+| 5 | CLI-OUT-6 | churn, hotspots, risk, coverage | COMPLETE |
+| 6 | CLI-OUT-7 | violations, gate, assess | COMPLETE |
 
 Each wave: audit, define contracts, implement renderers, validate.
 
@@ -326,9 +368,11 @@ HOOK-1 delivered:
 18. ~~CLI-OUT-2C — stats renderer~~ (IMPLEMENTED)
 19. ~~CLI-OUT-3 — Graph drilldown output~~ (IMPLEMENTED)
 20. ~~CLI-OUT-4 — Module/architecture output~~ (COMPLETE)
-21. **CLI-OUT-5 — Inventory/policy output (IN PROGRESS)**
-22. SMOKE-1 — Validation harness cleanup (QUEUED)
-23. CURSOR-1 — Cursor integration (QUEUED)
+21. ~~CLI-OUT-5 — Inventory/policy output~~ (COMPLETE)
+22. ~~CLI-OUT-6 — Quality/risk output~~ (COMPLETE)
+23. ~~CLI-OUT-7 — Governance output~~ (COMPLETE)
+24. **SMOKE-1 — Validation harness cleanup (CURRENT)**
+25. CURSOR-1 — Cursor integration (QUEUED)
 
 ### Artifact Matrix (REL-1)
 

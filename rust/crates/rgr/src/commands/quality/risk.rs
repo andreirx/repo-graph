@@ -4,6 +4,19 @@
 //! Only files with BOTH hotspot AND coverage data are included.
 //! Missing coverage = file excluded (not degraded to risk = hotspot).
 //!
+//! # CLI-OUT-6 Output Contract
+//!
+//! - Human output by default
+//! - `--json` for machine mode (raw JSON)
+//! - Deterministic ordering (by risk_score desc, then path asc)
+//! - Full output, no truncation
+//! - **No invented verdict labels** (no CRITICAL/HIGH/MEDIUM/LOW)
+//!
+//! # Legacy Contract Exception
+//!
+//! This command uses legacy direct-storage contract (explicit db_path/repo_uid),
+//! not REG-1 daemon contract.
+//!
 //! # Boundary rules
 //!
 //! This module owns risk command behavior:
@@ -12,7 +25,7 @@
 //!
 //! This module does **not** own:
 //! - shared infrastructure (lives in `crate::cli`)
-//! - arg parsing (reuses `super::churn::parse_churn_args`)
+//! - arg parsing (reuses `super::churn::parse_since_args`)
 //! - risk scoring (belongs in `repo-graph-classification`)
 //! - hotspot scoring (belongs in `repo-graph-classification`)
 //! - git churn extraction (belongs in `repo-graph-git`)
@@ -36,12 +49,13 @@ struct RiskRow {
 
 pub fn run_risk(args: &[String]) -> ExitCode {
     // Parse args: same signature as churn
-    let (db_path, repo_uid, since) = match parse_since_args(args) {
-        Ok(parsed) => parsed,
+    // Note: --json flag parsed but not used yet (Group 2 will add human output)
+    let parsed = match parse_since_args(args) {
+        Ok(p) => p,
         Err(e) => {
             match e {
                 SinceArgsError::MissingArgs => {
-                    eprintln!("usage: rmap risk <db_path> <repo_uid> [--since <expr>]");
+                    eprintln!("usage: rmap risk <db_path> <repo_uid> [--since <expr>] [--json]");
                 }
                 SinceArgsError::SinceMissingValue => {
                     eprintln!("error: --since requires a value");
@@ -53,6 +67,11 @@ pub fn run_risk(args: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
+
+    let db_path = parsed.db_path;
+    let repo_uid = parsed.repo_uid;
+    let since = parsed.since;
+    let json_mode = parsed.json_mode;
 
     let storage = match open_storage(db_path) {
         Ok(s) => s,
@@ -283,14 +302,31 @@ pub fn run_risk(args: &[String]) -> ExitCode {
         }
     };
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::SUCCESS
+    if json_mode {
+        // Raw JSON output
+        match serde_json::to_string_pretty(&output) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
         }
-        Err(e) => {
-            eprintln!("error: {}", e);
-            ExitCode::from(2)
+    } else {
+        // Human-readable output
+        use crate::presentation::risk::RiskResponse;
+
+        match serde_json::from_value::<RiskResponse>(output) {
+            Ok(response) => {
+                print!("{}", response.render_human());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to parse response for rendering: {}", e);
+                ExitCode::from(2)
+            }
         }
     }
 }

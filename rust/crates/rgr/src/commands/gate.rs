@@ -5,14 +5,20 @@
 //! # REG-1 Contract
 //!
 //! With REG-1, gate resolves repo from cwd via daemon.
-//! New contract: `rmap gate [--strict | --advisory]`
+//! New contract: `rmap gate [--strict | --advisory] [--json]`
+//!
+//! # CLI-OUT-7 Group 3
+//!
+//! Human-readable output by default. Use `--json` for machine mode.
+//! Domain verdicts (PASS/FAIL/WAIVED/MISSING_EVIDENCE/UNSUPPORTED) are
+//! preserved exactly in human output.
 
 use std::process::ExitCode;
 
 use crate::daemon_client::DaemonClient;
 
 fn print_usage() {
-    eprintln!("usage: rmap gate [--strict | --advisory]");
+    eprintln!("usage: rmap gate [--strict | --advisory] [--json]");
     eprintln!();
     eprintln!("Evaluates the gate for the repository.");
     eprintln!("Repository is resolved from current working directory.");
@@ -20,6 +26,7 @@ fn print_usage() {
     eprintln!("Options:");
     eprintln!("  --strict    Strict mode (fail on any unmet requirement)");
     eprintln!("  --advisory  Advisory mode (warn but don't fail)");
+    eprintln!("  --json      Output raw JSON instead of human-readable text");
 }
 
 fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
@@ -31,7 +38,7 @@ fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
 
 /// Run the `rmap gate` command.
 ///
-/// Usage: `rmap gate [--strict | --advisory]`
+/// Usage: `rmap gate [--strict | --advisory] [--json]`
 ///
 /// Exit codes:
 /// - 0: gate pass
@@ -42,11 +49,13 @@ pub fn run_gate(args: &[String]) -> ExitCode {
     // Parse optional mode flags
     let mut strict = false;
     let mut advisory = false;
+    let mut json_mode = false;
 
     for arg in args {
         match arg.as_str() {
             "--strict" => strict = true,
             "--advisory" => advisory = true,
+            "--json" => json_mode = true,
             flag if flag.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", flag);
                 print_usage();
@@ -113,23 +122,38 @@ pub fn run_gate(args: &[String]) -> ExitCode {
 
     match client.request("gate", Some(params)) {
         Ok(result) => {
-            // Pretty-print JSON to stdout
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => {
-                    println!("{}", json);
+            // Determine exit code from gate outcome
+            let exit_code = result
+                .get("gate")
+                .and_then(|g| g.get("exit_code"))
+                .and_then(|c| c.as_u64())
+                .unwrap_or(0) as u8;
 
-                    // Determine exit code from gate outcome
-                    let exit_code = result
-                        .get("gate")
-                        .and_then(|g| g.get("exit_code"))
-                        .and_then(|c| c.as_u64())
-                        .unwrap_or(0) as u8;
-
-                    ExitCode::from(exit_code)
+            if json_mode {
+                // Machine mode: raw JSON output
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::from(exit_code)
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to serialize result: {}", e);
+                        ExitCode::from(2)
+                    }
                 }
-                Err(e) => {
-                    eprintln!("error: failed to serialize result: {}", e);
-                    ExitCode::from(2)
+            } else {
+                // Human mode: render readable output (CLI-OUT-7)
+                use crate::presentation::gate::GateResponse;
+
+                match serde_json::from_value::<GateResponse>(result) {
+                    Ok(response) => {
+                        print!("{}", response.render_human());
+                        ExitCode::from(exit_code)
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse gate response: {}", e);
+                        ExitCode::from(2)
+                    }
                 }
             }
         }

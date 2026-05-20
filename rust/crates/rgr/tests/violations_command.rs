@@ -157,7 +157,7 @@ fn violations_empty_when_no_declarations() {
     let db_str = db.to_str().unwrap();
 
     // No boundary declarations exist.
-    let output = run_cmd(&["violations", db_str, "r1"]);
+    let output = run_cmd(&["violations", db_str, "r1", "--json"]);
     assert_eq!(
         output.status.code(),
         Some(0),
@@ -181,7 +181,7 @@ fn violations_empty_when_no_violating_imports() {
     // core does NOT import from adapters, so 0 violations.
     insert_boundary_declaration(&db, "r1", "src/core", "src/adapters", None);
 
-    let output = run_cmd(&["violations", db_str, "r1"]);
+    let output = run_cmd(&["violations", db_str, "r1", "--json"]);
     assert_eq!(
         output.status.code(),
         Some(0),
@@ -211,7 +211,7 @@ fn violations_exact_results() {
         Some("adapters must not depend on core"),
     );
 
-    let output = run_cmd(&["violations", db_str, "r1"]);
+    let output = run_cmd(&["violations", db_str, "r1", "--json"]);
     assert_eq!(
         output.status.code(),
         Some(0),
@@ -283,7 +283,7 @@ fn violations_dedup_duplicate_declarations() {
 	)
 	.unwrap();
 
-    let output = run_cmd(&["violations", db_str, "r1"]);
+    let output = run_cmd(&["violations", db_str, "r1", "--json"]);
     assert_eq!(
         output.status.code(),
         Some(0),
@@ -311,7 +311,7 @@ fn violations_envelope_contract() {
 
     insert_boundary_declaration(&db, "r1", "src/adapters", "src/core", None);
 
-    let output = run_cmd(&["violations", db_str, "r1"]);
+    let output = run_cmd(&["violations", db_str, "r1", "--json"]);
     assert_eq!(
         output.status.code(),
         Some(0),
@@ -366,7 +366,7 @@ fn violations_discovered_section_empty_when_no_modules() {
     let db_str = db.to_str().unwrap();
 
     // No module candidates exist, so discovered_module_violations should be empty
-    let output = run_cmd(&["violations", db_str, "r1"]);
+    let output = run_cmd(&["violations", db_str, "r1", "--json"]);
     assert_eq!(output.status.code(), Some(0));
 
     let result = parse_json(&output);
@@ -391,7 +391,7 @@ fn violations_both_sections_independent() {
     insert_boundary_declaration(&db, "r1", "src/adapters", "src/core", None);
 
     // Run violations command
-    let output = run_cmd(&["violations", db_str, "r1"]);
+    let output = run_cmd(&["violations", db_str, "r1", "--json"]);
     assert_eq!(output.status.code(), Some(0));
 
     let result = parse_json(&output);
@@ -404,4 +404,92 @@ fn violations_both_sections_independent() {
     // Both sections should exist
     assert!(result["results"]["declared_boundary_violations"].is_array());
     assert!(result["results"]["discovered_module_violations"].is_array());
+}
+
+// -- 10. Human output format (CLI-OUT-7) ----------------------------------
+
+#[test]
+fn violations_human_output_format() {
+    let (_r, _d, db) = build_violations_db();
+    let db_str = db.to_str().unwrap();
+
+    // Set up declared boundary that will produce a violation
+    insert_boundary_declaration(
+        &db,
+        "r1",
+        "src/adapters",
+        "src/core",
+        Some("adapters must not depend on core"),
+    );
+
+    // Run WITHOUT --json to get human output
+    let output = run_cmd(&["violations", db_str, "r1"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Verify human output structure
+    assert!(
+        stdout.contains("Architectural Violations"),
+        "should have header, got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("1 declared boundary violation"),
+        "should show singular count, got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("0 discovered module violations"),
+        "should show discovered count, got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("0 stale declarations"),
+        "should show stale count, got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("Declared boundary violations:"),
+        "should have section header, got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("src/adapters -> src/core"),
+        "should show boundary rule, got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("reason: adapters must not depend on core"),
+        "should show reason, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn violations_human_output_empty_case() {
+    let (_r, _d, db) = build_violations_db();
+    let db_str = db.to_str().unwrap();
+
+    // No declarations - should show empty message
+    let output = run_cmd(&["violations", db_str, "r1"]);
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains("No violations detected"),
+        "should show empty message, got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("0 declared boundary violations"),
+        "should show zero declared, got: {}",
+        stdout
+    );
 }

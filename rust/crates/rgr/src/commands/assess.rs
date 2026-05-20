@@ -2,6 +2,18 @@
 //!
 //! Quality policy assessment for snapshots.
 //!
+//! # CLI-OUT-7 Output Contract
+//!
+//! - Human output by default
+//! - `--json` for machine mode (raw JSON)
+//! - Domain verdicts preserved (pass, fail, not_applicable, not_comparable)
+//! - Baseline hint when required but missing
+//!
+//! # Legacy Contract Exception
+//!
+//! This command uses legacy direct-storage contract (explicit db_path/repo_uid),
+//! not REG-1 daemon contract.
+//!
 //! # Boundary rules
 //!
 //! This module owns assess command-family behavior:
@@ -12,6 +24,7 @@
 //! This module does **not** own:
 //! - shared infrastructure (lives in `crate::cli`)
 //! - assessment domain logic (belongs in `repo-graph-quality-policy-runner`)
+//! - human output rendering (lives in `presentation::assess`)
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -31,9 +44,10 @@ use crate::cli::open_storage;
 ///   1 — usage error
 ///   2 — runtime error (storage failure, invalid policy, missing baseline)
 pub fn run_assess(args: &[String]) -> ExitCode {
-    // Parse positional args and optional --baseline flag.
+    // Parse positional args and optional flags.
     let mut positional: Vec<&String> = Vec::new();
     let mut baseline_snapshot_uid: Option<String> = None;
+    let mut json_mode = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -43,16 +57,20 @@ pub fn run_assess(args: &[String]) -> ExitCode {
                 if i + 1 >= args.len() {
                     eprintln!("error: --baseline requires a snapshot_uid argument");
                     eprintln!(
-                        "usage: rmap assess <db_path> <repo_uid> [--baseline <snapshot_uid>]"
+                        "usage: rmap assess <db_path> <repo_uid> [--baseline <snapshot_uid>] [--json]"
                     );
                     return ExitCode::from(1);
                 }
                 baseline_snapshot_uid = Some(args[i + 1].clone());
                 i += 2;
             }
+            "--json" => {
+                json_mode = true;
+                i += 1;
+            }
             _ if arg.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", arg);
-                eprintln!("usage: rmap assess <db_path> <repo_uid> [--baseline <snapshot_uid>]");
+                eprintln!("usage: rmap assess <db_path> <repo_uid> [--baseline <snapshot_uid>] [--json]");
                 return ExitCode::from(1);
             }
             _ => {
@@ -63,7 +81,7 @@ pub fn run_assess(args: &[String]) -> ExitCode {
     }
 
     if positional.len() != 2 {
-        eprintln!("usage: rmap assess <db_path> <repo_uid> [--baseline <snapshot_uid>]");
+        eprintln!("usage: rmap assess <db_path> <repo_uid> [--baseline <snapshot_uid>] [--json]");
         return ExitCode::from(1);
     }
 
@@ -125,14 +143,31 @@ pub fn run_assess(args: &[String]) -> ExitCode {
         "baseline_required_count": result.baseline_required_count,
     });
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::from(0)
+    if json_mode {
+        // Raw JSON output
+        match serde_json::to_string_pretty(&output) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
         }
-        Err(e) => {
-            eprintln!("error: {}", e);
-            ExitCode::from(2)
+    } else {
+        // Human-readable output
+        use crate::presentation::assess::AssessResponse;
+
+        match serde_json::from_value::<AssessResponse>(output) {
+            Ok(response) => {
+                print!("{}", response.render_human());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to parse response for rendering: {}", e);
+                ExitCode::from(2)
+            }
         }
     }
 }

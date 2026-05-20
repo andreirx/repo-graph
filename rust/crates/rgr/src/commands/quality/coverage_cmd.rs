@@ -3,6 +3,19 @@
 //! RS-MS-4-prereq-b/c: Import Istanbul/c8 coverage into measurements.
 //! Delete-before-insert for idempotency. Reports matched/unmatched counts.
 //!
+//! # CLI-OUT-6 Output Contract
+//!
+//! - Human output by default
+//! - `--json` for machine mode (raw JSON)
+//! - Imported file rows: full output, no truncation
+//! - Sample-path diagnostics: backend-bounded (max 10), labeled as samples
+//! - Deterministic ordering (by file_path)
+//!
+//! # Legacy Contract Exception
+//!
+//! This command uses legacy direct-storage contract (explicit db_path/repo_uid),
+//! not REG-1 daemon contract.
+//!
 //! # Boundary rules
 //!
 //! This module owns coverage command behavior:
@@ -31,14 +44,31 @@ struct CoverageImportResult {
 }
 
 pub fn run_coverage(args: &[String]) -> ExitCode {
-    if args.len() != 3 {
-        eprintln!("usage: rmap coverage <db_path> <repo_uid> <report_path>");
+    // Parse args: <db_path> <repo_uid> <report_path> [--json]
+    if args.len() < 3 {
+        eprintln!("usage: rmap coverage <db_path> <repo_uid> <report_path> [--json]");
         return ExitCode::from(1);
     }
 
     let db_path = Path::new(&args[0]);
     let repo_uid = &args[1];
     let report_path = Path::new(&args[2]);
+
+    // Parse optional --json flag
+    let mut json_mode = false;
+    let mut i = 3;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => {
+                json_mode = true;
+                i += 1;
+            }
+            other => {
+                eprintln!("error: unknown argument: {}", other);
+                return ExitCode::from(1);
+            }
+        }
+    }
 
     // Validate report exists
     if !report_path.is_file() {
@@ -226,14 +256,31 @@ pub fn run_coverage(args: &[String]) -> ExitCode {
         }
     };
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::SUCCESS
+    if json_mode {
+        // Raw JSON output
+        match serde_json::to_string_pretty(&output) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
         }
-        Err(e) => {
-            eprintln!("error: {}", e);
-            ExitCode::from(2)
+    } else {
+        // Human-readable output
+        use crate::presentation::coverage::CoverageResponse;
+
+        match serde_json::from_value::<CoverageResponse>(output) {
+            Ok(response) => {
+                print!("{}", response.render_human());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to parse response for rendering: {}", e);
+                ExitCode::from(2)
+            }
         }
     }
 }

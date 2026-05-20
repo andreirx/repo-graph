@@ -5,12 +5,18 @@
 //! - `run_modules_violations` — discovered-module violations only (REG-1)
 //!
 //! RS-MG-12b: Boundary violation diagnostics.
-//! CLI-OUT-4: Human-readable output with `--json` for machine mode.
+//! CLI-OUT-4: Human-readable output with `--json` for machine mode (modules violations).
+//! CLI-OUT-7: Human-readable output with `--json` for machine mode (top-level violations).
 //!
-//! # REG-1 Contract
+//! # Contract Split
 //!
-//! `run_modules_violations` resolves repo from cwd via daemon registry.
-//! No explicit db_path or repo_uid arguments.
+//! - `run_violations`: Legacy direct-storage contract (db_path, repo_uid)
+//! - `run_modules_violations`: REG-1 daemon contract (cwd auto-discovery)
+//!
+//! # Presentation Split
+//!
+//! - `run_violations`: Uses `presentation::violations` (CLI-OUT-7)
+//! - `run_modules_violations`: Uses `presentation::modules_violations` (CLI-OUT-4)
 //!
 //! # Boundary rules
 //!
@@ -23,7 +29,7 @@
 //! - shared infrastructure (lives in `crate::cli`)
 //! - module graph loading (lives in daemon via module-queries)
 //! - boundary evaluation logic (lives in daemon via classification)
-//! - human output rendering (lives in `presentation::modules_violations`)
+//! - human output rendering (lives in `presentation::*`)
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -38,13 +44,33 @@ use crate::daemon_client::{daemon_unavailable_message, DaemonClient};
 // It will be migrated separately as a top-level command.
 
 pub fn run_violations(args: &[String]) -> ExitCode {
-    if args.len() != 2 {
-        eprintln!("usage: rmap violations <db_path> <repo_uid>");
+    // Parse args: <db_path> <repo_uid> [--json]
+    let mut positional: Vec<&String> = Vec::new();
+    let mut json_mode = false;
+
+    for arg in args {
+        match arg.as_str() {
+            "--json" => {
+                json_mode = true;
+            }
+            flag if flag.starts_with('-') => {
+                eprintln!("error: unknown flag: {}", flag);
+                eprintln!("usage: rmap violations <db_path> <repo_uid> [--json]");
+                return ExitCode::from(1);
+            }
+            _ => {
+                positional.push(arg);
+            }
+        }
+    }
+
+    if positional.len() != 2 {
+        eprintln!("usage: rmap violations <db_path> <repo_uid> [--json]");
         return ExitCode::from(1);
     }
 
-    let db_path = Path::new(&args[0]);
-    let repo_uid = &args[1];
+    let db_path = Path::new(positional[0]);
+    let repo_uid = positional[1].as_str();
 
     let storage = match open_storage(db_path) {
         Ok(s) => s,
@@ -227,16 +253,33 @@ pub fn run_violations(args: &[String]) -> ExitCode {
         }
     };
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            // Preserve legacy exit behavior: always 0 on success
-            // Exit code change (fail on violations) is a separate contract slice
-            ExitCode::SUCCESS
+    if json_mode {
+        // Raw JSON output
+        match serde_json::to_string_pretty(&output) {
+            Ok(json) => {
+                println!("{}", json);
+                // Preserve legacy exit behavior: always 0 on success
+                // Exit code change (fail on violations) is a separate contract slice
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
         }
-        Err(e) => {
-            eprintln!("error: {}", e);
-            ExitCode::from(2)
+    } else {
+        // Human-readable output
+        use crate::presentation::violations::ViolationsResponse;
+
+        match serde_json::from_value::<ViolationsResponse>(output) {
+            Ok(response) => {
+                print!("{}", response.render_human());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to parse response for rendering: {}", e);
+                ExitCode::from(2)
+            }
         }
     }
 }

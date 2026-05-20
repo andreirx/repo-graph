@@ -3,6 +3,18 @@
 //! RS-MS-2: Query-time per-file git churn for indexed files.
 //! No persistence. Git is the authoritative history source.
 //!
+//! # CLI-OUT-6 Output Contract
+//!
+//! - Human output by default
+//! - `--json` for machine mode (raw JSON)
+//! - Deterministic ordering (by lines_changed desc, then path asc)
+//! - Full output, no truncation
+//!
+//! # Legacy Contract Exception
+//!
+//! This command uses legacy direct-storage contract (explicit db_path/repo_uid),
+//! not REG-1 daemon contract.
+//!
 //! # Boundary rules
 //!
 //! This module owns churn command behavior:
@@ -30,14 +42,14 @@ pub(super) struct ChurnRow {
 }
 
 pub fn run_churn(args: &[String]) -> ExitCode {
-    // Parse args: <db_path> <repo_uid> [--since <expr>]
+    // Parse args: <db_path> <repo_uid> [--since <expr>] [--json]
     // Default --since: 90.days.ago
-    let (db_path, repo_uid, since) = match parse_since_args(args) {
-        Ok(parsed) => parsed,
+    let parsed = match parse_since_args(args) {
+        Ok(p) => p,
         Err(e) => {
             match e {
                 SinceArgsError::MissingArgs => {
-                    eprintln!("usage: rmap churn <db_path> <repo_uid> [--since <expr>]");
+                    eprintln!("usage: rmap churn <db_path> <repo_uid> [--since <expr>] [--json]");
                 }
                 SinceArgsError::SinceMissingValue => {
                     eprintln!("error: --since requires a value");
@@ -49,6 +61,11 @@ pub fn run_churn(args: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
+
+    let db_path = parsed.db_path;
+    let repo_uid = parsed.repo_uid;
+    let since = parsed.since;
+    let json_mode = parsed.json_mode;
 
     let storage = match open_storage(db_path) {
         Ok(s) => s,
@@ -152,14 +169,31 @@ pub fn run_churn(args: &[String]) -> ExitCode {
         }
     };
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::SUCCESS
+    if json_mode {
+        // Raw JSON output
+        match serde_json::to_string_pretty(&output) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
         }
-        Err(e) => {
-            eprintln!("error: {}", e);
-            ExitCode::from(2)
+    } else {
+        // Human-readable output
+        use crate::presentation::churn::ChurnResponse;
+
+        match serde_json::from_value::<ChurnResponse>(output) {
+            Ok(response) => {
+                print!("{}", response.render_human());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to parse response for rendering: {}", e);
+                ExitCode::from(2)
+            }
         }
     }
 }
@@ -178,12 +212,19 @@ pub enum SinceArgsError {
     UnknownArgument(String),
 }
 
-/// Parse args for commands with `<db_path> <repo_uid> [--since <expr>]` signature.
-/// Returns (db_path, repo_uid, since).
+/// Parsed result from since-window commands.
+pub struct SinceArgs<'a> {
+    pub db_path: &'a Path,
+    pub repo_uid: &'a str,
+    pub since: String,
+    pub json_mode: bool,
+}
+
+/// Parse args for commands with `<db_path> <repo_uid> [--since <expr>] [--json]` signature.
 ///
 /// Used by churn and risk commands (same arg signature).
 /// Returns typed errors so each caller can provide its own usage string.
-pub fn parse_since_args(args: &[String]) -> Result<(&Path, &str, String), SinceArgsError> {
+pub fn parse_since_args(args: &[String]) -> Result<SinceArgs<'_>, SinceArgsError> {
     if args.len() < 2 {
         return Err(SinceArgsError::MissingArgs);
     }
@@ -193,20 +234,33 @@ pub fn parse_since_args(args: &[String]) -> Result<(&Path, &str, String), SinceA
 
     // Default window
     let mut since = "90.days.ago".to_string();
+    let mut json_mode = false;
 
-    // Parse optional --since flag
+    // Parse optional flags
     let mut i = 2;
     while i < args.len() {
-        if args[i] == "--since" {
-            if i + 1 >= args.len() {
-                return Err(SinceArgsError::SinceMissingValue);
+        match args[i].as_str() {
+            "--since" => {
+                if i + 1 >= args.len() {
+                    return Err(SinceArgsError::SinceMissingValue);
+                }
+                since = args[i + 1].clone();
+                i += 2;
             }
-            since = args[i + 1].clone();
-            i += 2;
-        } else {
-            return Err(SinceArgsError::UnknownArgument(args[i].clone()));
+            "--json" => {
+                json_mode = true;
+                i += 1;
+            }
+            _ => {
+                return Err(SinceArgsError::UnknownArgument(args[i].clone()));
+            }
         }
     }
 
-    Ok((db_path, repo_uid, since))
+    Ok(SinceArgs {
+        db_path,
+        repo_uid,
+        since,
+        json_mode,
+    })
 }

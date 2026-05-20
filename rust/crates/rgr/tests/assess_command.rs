@@ -93,7 +93,7 @@ fn assess_no_policies() {
     let (_r, _d, db) = build_db();
     let db_str = db.to_str().unwrap();
 
-    let output = run_cmd(&["assess", db_str, "r1"]);
+    let output = run_cmd(&["assess", db_str, "r1", "--json"]);
     assert_eq!(
         output.status.code(),
         Some(0),
@@ -136,7 +136,7 @@ fn assess_absolute_policy_pass() {
     );
 
     // Run assessment.
-    let output = run_cmd(&["assess", db_str, "r1"]);
+    let output = run_cmd(&["assess", db_str, "r1", "--json"]);
     assert_eq!(
         output.status.code(),
         Some(0),
@@ -183,7 +183,7 @@ fn assess_absolute_policy_fail() {
     assert_eq!(declare_output.status.code(), Some(0));
 
     // Run assessment.
-    let output = run_cmd(&["assess", db_str, "r1"]);
+    let output = run_cmd(&["assess", db_str, "r1", "--json"]);
     // Assessment should still succeed (exit 0) even if policies fail.
     // The assessment persisted successfully; verdicts are informational.
     assert_eq!(
@@ -316,7 +316,7 @@ fn assess_comparative_policy_with_baseline() {
     assert_eq!(declare_output.status.code(), Some(0));
 
     // Run assessment with --baseline.
-    let output = run_cmd(&["assess", db_str, "r1", "--baseline", &snapshot_uid]);
+    let output = run_cmd(&["assess", db_str, "r1", "--baseline", &snapshot_uid, "--json"]);
     assert_eq!(
         output.status.code(),
         Some(0),
@@ -337,7 +337,7 @@ fn assess_json_shape() {
     let (_r, _d, db) = build_db();
     let db_str = db.to_str().unwrap();
 
-    let output = run_cmd(&["assess", db_str, "r1"]);
+    let output = run_cmd(&["assess", db_str, "r1", "--json"]);
     assert_eq!(output.status.code(), Some(0));
 
     let json = parse_json(&output);

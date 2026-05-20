@@ -4,6 +4,18 @@
 //! No persistence. Git is the authoritative churn source.
 //! Complexity from stored measurements.
 //!
+//! # CLI-OUT-6 Output Contract
+//!
+//! - Human output by default
+//! - `--json` for machine mode (raw JSON)
+//! - Deterministic ordering (by hotspot_score desc, then path asc)
+//! - Full output, no truncation
+//!
+//! # Legacy Contract Exception
+//!
+//! This command uses legacy direct-storage contract (explicit db_path/repo_uid),
+//! not REG-1 daemon contract.
+//!
 //! # Boundary rules
 //!
 //! This module owns hotspots command behavior:
@@ -70,12 +82,13 @@ struct HotspotArgs<'a> {
     since: String,
     exclude_tests: bool,
     exclude_vendored: bool,
+    json_mode: bool,
 }
 
 /// Parse hotspots command args.
 fn parse_hotspot_args(args: &[String]) -> Result<HotspotArgs<'_>, String> {
     if args.len() < 2 {
-        return Err("usage: rmap hotspots <db_path> <repo_uid> [--since <expr>] [--exclude-tests] [--exclude-vendored]".to_string());
+        return Err("usage: rmap hotspots <db_path> <repo_uid> [--since <expr>] [--exclude-tests] [--exclude-vendored] [--json]".to_string());
     }
 
     let db_path = Path::new(&args[0]);
@@ -84,6 +97,7 @@ fn parse_hotspot_args(args: &[String]) -> Result<HotspotArgs<'_>, String> {
     let mut since = "90.days.ago".to_string();
     let mut exclude_tests = false;
     let mut exclude_vendored = false;
+    let mut json_mode = false;
 
     let mut i = 2;
     while i < args.len() {
@@ -103,6 +117,10 @@ fn parse_hotspot_args(args: &[String]) -> Result<HotspotArgs<'_>, String> {
                 exclude_vendored = true;
                 i += 1;
             }
+            "--json" => {
+                json_mode = true;
+                i += 1;
+            }
             _ => {
                 return Err(format!("unknown argument: {}", args[i]));
             }
@@ -115,6 +133,7 @@ fn parse_hotspot_args(args: &[String]) -> Result<HotspotArgs<'_>, String> {
         since,
         exclude_tests,
         exclude_vendored,
+        json_mode,
     })
 }
 
@@ -132,6 +151,7 @@ pub fn run_hotspots(args: &[String]) -> ExitCode {
     let since = parsed.since;
     let exclude_tests = parsed.exclude_tests;
     let exclude_vendored = parsed.exclude_vendored;
+    let json_mode = parsed.json_mode;
 
     let storage = match open_storage(db_path) {
         Ok(s) => s,
@@ -329,14 +349,31 @@ pub fn run_hotspots(args: &[String]) -> ExitCode {
         }
     };
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{}", json);
-            ExitCode::SUCCESS
+    if json_mode {
+        // Raw JSON output
+        match serde_json::to_string_pretty(&output) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
         }
-        Err(e) => {
-            eprintln!("error: {}", e);
-            ExitCode::from(2)
+    } else {
+        // Human-readable output
+        use crate::presentation::hotspots::HotspotsResponse;
+
+        match serde_json::from_value::<HotspotsResponse>(output) {
+            Ok(response) => {
+                print!("{}", response.render_human());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to parse response for rendering: {}", e);
+                ExitCode::from(2)
+            }
         }
     }
 }

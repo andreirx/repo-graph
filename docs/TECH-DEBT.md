@@ -3004,6 +3004,40 @@ exist as proof surface but are not part of the default `cargo test` path.
 
 **Severity:** Medium. Same class as CLI-OUT-1 debt.
 
+### CLI-OUT-6 Legacy Command Success-Path Test Gap (2026-05-20)
+
+**Context:** CLI-OUT-6 Group 1 (`churn`, `hotspots`) commands use legacy direct-storage
+contract (explicit db_path/repo_uid), not REG-1 daemon. The existing test harness pattern
+(daemon spawn + socket) does not apply.
+
+**Problem:** The `cli_out_6_quality.rs` test file contains 13 tests, but all are
+error-path tests (usage errors, flag acceptance, invalid DB handling). No tests verify
+success-path behavior:
+- Human output on valid data
+- JSON output on valid data
+- Output mode switching between human/JSON
+
+**Location:** `rust/crates/rgr/tests/cli_out_6_quality.rs`
+
+**Gap classification:**
+- **NOT** the same class as CLI-OUT-1/CLI-OUT-3 daemon pre-build debt
+- **IS** a coverage gap for legacy-contract commands
+
+**Current evidence:** Success-path behavior validated manually against repo-graph corpus
+(OBSERVED in review packet), not automated.
+
+**Disposition:** Accepted gap for Group 1. Revisit at CLI-OUT-6 slice closure or
+future SMOKE-1 harness cleanup slice. The existing corpus validation provides
+sufficient evidence for current slice, but automated regression is missing.
+
+**Resolution paths:**
+1. Create fixture-based test that uses a pre-populated test database (no daemon needed)
+2. Add success-path tests to existing file with appropriate fixtures
+3. Accept as documented manual validation until SMOKE-1 addresses broader harness
+
+**Severity:** Low. Commands work correctly (OBSERVED). Gap is in automated regression,
+not in functionality.
+
 ### Smoke Script Validation Model Defects (2026-05-18)
 
 **Context:** The smoke scripts (`smoke-rmap.sh`, `smoke-validation-repos.sh`) were updated

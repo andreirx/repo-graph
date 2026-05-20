@@ -296,9 +296,10 @@ FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # Write run logs (non-adhoc only)
 if [[ "$ADHOC" == "false" ]]; then
     # Build commands JSON array
+    # Use ${arr[@]+"${arr[@]}"} pattern to handle empty arrays with set -u
     CMDS_JSON=$(json_array "${COMMANDS[@]}")
-    PASSED_JSON=$(json_array "${PASSED_COMMANDS[@]}")
-    FAILED_JSON=$(json_array "${FAILED_COMMANDS[@]}")
+    PASSED_JSON=$(json_array ${PASSED_COMMANDS[@]+"${PASSED_COMMANDS[@]}"})
+    FAILED_JSON=$(json_array ${FAILED_COMMANDS[@]+"${FAILED_COMMANDS[@]}"})
 
     # 00-meta.json with generator provenance
     cat > "$RUN_DIR/00-meta.json" << EOF

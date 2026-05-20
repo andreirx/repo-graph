@@ -2,52 +2,54 @@
 
 ## Current Priority
 
-**CLI-OUT-5: Inventory/Policy Output** — COMPLETE (2026-05-20)
+**CLI-AUDIT-1: Cross-Repo Full Surface Audit** — CURRENT
 
-Slice doc: `docs/slices/cli-out-5-inventory.md`
+Systematic human-output review across all redesigned command families.
+SMOKE-1 validated 4 commands across 12 repos. This audit covers all 35+ commands.
 
-Human renderers for 6 inventory and policy commands:
-- docs list, extract
-- resource list, readers, writers
-- policy
-
-### Group Status
-
-| Group | Commands | Status |
-|-------|----------|--------|
-| 1 | docs list, extract | COMPLETE (2026-05-20) |
-| 2 | resource list, readers, writers | COMPLETE (2026-05-20) |
-| 3 | policy | COMPLETE (2026-05-20) |
-
-### Implementation Order
-
-1. **Documentation inventory** — `docs list`, `docs extract` — smallest coherent family
-2. **Resource inventory** — `resource list`, `resource readers`, `resource writers` — same vocabulary
-3. **Policy introspection** — `policy` — different semantic class
-
-### Structural Assessment
-
-Command file sizes (all under 500-line guardrail):
-- `commands/docs.rs` — 179 lines
-- `commands/resource.rs` — 249 lines
-- `commands/policy.rs` — 264 lines
-
-No refactoring required before adding renderer logic.
-
-### Presentation Module Plan
-
-- `presentation/docs.rs` — list + extract renderers (single file, two functions)
-- `presentation/resources.rs` — list + readers/writers renderers
-- `presentation/policy.rs` — STATUS_MAPPING + BEHAVIORAL_MARKER + RETURN_FATE renderers
-
-### Contract Note
-
-`policy` command does NOT use REG-1 contract. It requires explicit `db_path` and
-`repo_uid` arguments. This is preserved; no migration to daemon planned.
+Slice doc: `docs/slices/cli-audit-1-full-surface.md`
 
 ---
 
 ## Recently Implemented
+
+**SMOKE-1: Validation Harness Cleanup** — COMPLETE (2026-05-20)
+
+Fixed bash empty array handling in smoke-rmap.sh. Validated 4 commands (gate, orient,
+trust, stats) across 12 repos with zero failures. Harness operational.
+
+**CLI-OUT-7: Governance Output** — COMPLETE (2026-05-20)
+
+Slice doc: `docs/slices/cli-out-7-governance.md`
+
+Delivered:
+- Human renderers for 3 governance commands
+- assess (Group 1): fixture-validated
+- violations (Group 2): fixture-validated
+- gate (Group 3): corpus-validated via live daemon (django, repo-graph)
+- Domain verdicts preserved exactly: PASS, FAIL, WAIVED, MISSING_EVIDENCE, UNSUPPORTED
+
+**CLI-OUT-6: Quality/Risk Output** — COMPLETE (2026-05-20)
+
+Slice doc: `docs/slices/cli-out-6-quality.md`
+
+Delivered:
+- Human renderers for 4 quality/risk commands
+- churn, hotspots (Group 1): time-window semantics, ranking surfaces
+- risk (Group 2): join metadata, no invented verdict labels
+- coverage (Group 3): backend-bounded diagnostic samples, write-command contract
+- All groups corpus-validated where data exists
+
+**CLI-OUT-5: Inventory/Policy Output** — COMPLETE (2026-05-20)
+
+Slice doc: `docs/slices/cli-out-5-inventory.md`
+
+Delivered:
+- Human renderers for 6 inventory and policy commands
+- docs list, extract
+- resource list, readers, writers
+- policy (STATUS_MAPPING, BEHAVIORAL_MARKER, RETURN_FATE)
+- Groups 1-3: corpus-validated where data exists, fixture-validated otherwise
 
 **CLI-OUT-4: Module/Architecture Output** — COMPLETE (2026-05-20)
 
@@ -60,10 +62,6 @@ Delivered:
 - boundaries list, show, summary
 - Groups 1-3: corpus-validated (OpenXcom, django, duckdb)
 - Groups 4-5: empty-case corpus-validated, populated-case fixture-validated
-
-Review packets:
-- `docs/audits/cli-out-4/group-4-surfaces-review.md`
-- `docs/audits/cli-out-4/group-5-boundaries-review.md`
 
 **CLI-OUT-3: Graph Drilldown Output** — IMPLEMENTED (2026-05-19)
 
@@ -146,8 +144,8 @@ See `docs/slices/orient-bug-1-module-count.md`.
 | 2 | CLI-OUT-3 | callers, callees, path, imports | IMPLEMENTED |
 | 3 | CLI-OUT-4 | modules (6), surfaces (2), boundaries (3) | COMPLETE |
 | 4 | CLI-OUT-5 | docs (2), resource (3), policy (1) | COMPLETE |
-| 5 | CLI-OUT-6 | churn, hotspots, risk, coverage | QUEUED |
-| 6 | CLI-OUT-7 | violations, gate, assess | QUEUED |
+| 5 | CLI-OUT-6 | churn, hotspots, risk, coverage | COMPLETE |
+| 6 | CLI-OUT-7 | violations, gate, assess | COMPLETE |
 
 ---
 

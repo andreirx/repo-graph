@@ -61,6 +61,17 @@ pub mod docs;
 pub mod policy;
 pub mod resources;
 
+// CLI-OUT-6: Quality/Risk
+pub mod churn;
+pub mod coverage;
+pub mod hotspots;
+pub mod risk;
+
+// CLI-OUT-7: Governance
+pub mod assess;
+pub mod gate;
+pub mod violations;
+
 // ── Shared Helpers ───────────────────────────────────────────────────────────
 
 /// Render a section heading.
