@@ -1,6 +1,6 @@
 # CLI-OUT-4: Module/Architecture Output
 
-**Status:** IN PROGRESS  
+**Status:** COMPLETE (2026-05-20)  
 **Type:** Product Surface / Implementation  
 **Prerequisite:** CLI-OUT-3
 
@@ -412,26 +412,44 @@ degradation model, same terminology. Split not required unless change axes diver
 surfaces (C++/Python codebases, no TypeScript). Empty-case and error-path behavior
 validated. Populated-case covered by unit tests with synthetic data only.
 
-### Group 5: Architectural Boundaries
-- [ ] Evaluate boundaries.rs refactor (472 lines, approaching guardrail)
-- [ ] `presentation/boundaries.rs` with list + show + summary renderers
-- [ ] `boundaries list` human renderer + `--json` flag
-- [ ] `boundaries show` human renderer + `--json` flag
-- [ ] `boundaries summary` human renderer + `--json` flag
-- [ ] Unit tests for boundaries renderers
+### Group 5: Architectural Boundaries — COMPLETE (2026-05-20, empty-case corpus, populated-case fixture)
+
+**Command refactor (COMPLETE):**
+- [x] `commands/boundaries/mod.rs` — dispatcher (75 lines)
+- [x] `commands/boundaries/list.rs` — list handler (210 lines)
+- [x] `commands/boundaries/show.rs` — show handler (135 lines)
+- [x] `commands/boundaries/summary.rs` — summary handler (119 lines)
+- [x] `commands/boundaries/links.rs` — preserved, out of scope (113 lines)
+
+**Presentation modules (COMPLETE):**
+- [x] `presentation/boundaries_list.rs` — list DTO + renderer (309 lines)
+- [x] `presentation/boundaries_show.rs` — show DTO + renderer (338 lines)
+- [x] `presentation/boundaries_summary.rs` — summary DTO + renderer (332 lines)
+
+**Functionality:**
+- [x] `boundaries list` human renderer + `--json` flag (deterministic sort)
+- [x] `boundaries show` human renderer + `--json` flag (evidence sort)
+- [x] `boundaries summary` human renderer + `--json` flag (count-desc sort)
+- [x] Full output, no truncation
+
+**Proof surfaces:**
+- [x] Unit tests: 27 (8 list + 11 show + 8 summary)
+- [x] Daemon dispatch tests: 10 (pre-existing)
+- [x] CLI integration tests: 6 (list human/json/empty, summary human/json, show not-found)
+- [x] Review packet: `docs/audits/cli-out-4/group-5-boundaries-review.md`
 
 ### Integration Tests
 - [x] Group 1: `cli_out_4_modules.rs` (7 tests, opt-in)
 - [x] Group 2: `cli_out_4_modules.rs` (5 tests, opt-in)
 - [x] Group 3: `cli_out_4_modules.rs` (4 tests, opt-in)
 - [x] Group 4: `cli_out_4_modules.rs` (4 tests, opt-in)
-- [ ] Group 5: CLI integration tests (opt-in, per CLI-OUT-3 pattern)
+- [x] Group 5: `cli_out_4_modules.rs` (6 tests, opt-in)
 
 ### Validation
 - [x] Group 4 review packet: `docs/audits/cli-out-4/group-4-surfaces-review.md`
 - [x] Group 4 corpus validation: OpenXcom, django, duckdb (empty-case only; populated-case fixture-validated)
-- [ ] Group 5 review packet (pending)
-- [ ] Group 5 corpus validation (pending)
+- [x] Group 5 review packet: `docs/audits/cli-out-4/group-5-boundaries-review.md`
+- [x] Group 5 corpus validation: OpenXcom, django, duckdb (empty-case only; populated-case fixture-validated)
 
 ## Files in Scope
 
@@ -452,9 +470,14 @@ validated. Populated-case covered by unit tests with synthetic data only.
 **Group 4 (DELIVERED):**
 - `presentation/surfaces.rs` — list + show DTOs + renderers (594 lines)
 
-**Group 5 (PLANNED):**
-- `presentation/boundaries.rs`
-- `presentation/mod.rs` (add module)
+**Group 5 (DELIVERED):**
+- `presentation/boundaries_list.rs` — list DTO + renderer (309 lines)
+- `presentation/boundaries_show.rs` — show DTO + renderer (338 lines)
+- `presentation/boundaries_summary.rs` — summary DTO + renderer (332 lines)
+
+**Command refactor (DELIVERED):**
+- `commands/boundaries/` directory replacing `commands/boundaries.rs`
+- mod.rs (75), list.rs (210), show.rs (135), summary.rs (119), links.rs (113)
 
 ### CLI (commands) — updates
 - `commands/modules/list.rs` (add --json)

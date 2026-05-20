@@ -11,6 +11,13 @@
 //! Both subcommands resolve the repo from cwd via daemon registry.
 //! No explicit db_path or repo_uid arguments.
 //!
+//! # CLI-OUT-5 Output Contract
+//!
+//! - Human output by default
+//! - `--json` for machine mode (raw daemon response)
+//! - Deterministic ordering
+//! - Full output, no truncation
+//!
 //! # Boundary rules
 //!
 //! This module owns docs command-family behavior:
@@ -24,6 +31,7 @@
 use std::process::ExitCode;
 
 use crate::daemon_client::DaemonClient;
+use crate::presentation::docs::{DocsExtractResponse, DocsListResponse};
 
 fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
     format!(
@@ -52,16 +60,34 @@ pub fn run_docs(args: &[String]) -> ExitCode {
 
 fn print_docs_usage() {
     eprintln!("usage:");
-    eprintln!("  rmap docs list     — documentation inventory (run from repo)");
-    eprintln!("  rmap docs extract  — extract semantic hints (run from repo)");
+    eprintln!("  rmap docs list [--json]    — documentation inventory (run from repo)");
+    eprintln!("  rmap docs extract [--json] — extract semantic hints (run from repo)");
+}
+
+/// Parse --json flag from args.
+fn parse_json_flag(args: &[String]) -> (bool, Vec<&String>) {
+    let mut json_mode = false;
+    let mut remaining = Vec::new();
+
+    for arg in args {
+        if arg == "--json" {
+            json_mode = true;
+        } else {
+            remaining.push(arg);
+        }
+    }
+
+    (json_mode, remaining)
 }
 
 /// List documentation inventory (primary documentation surface).
 ///
 /// REG-1 contract: resolves repo from cwd via daemon.
 fn run_docs_list(args: &[String]) -> ExitCode {
-    if !args.is_empty() {
-        eprintln!("usage: rmap docs list");
+    let (json_mode, remaining) = parse_json_flag(args);
+
+    if !remaining.is_empty() {
+        eprintln!("usage: rmap docs list [--json]");
         eprintln!("       (run from within a repo directory)");
         return ExitCode::from(1);
     }
@@ -100,16 +126,33 @@ fn run_docs_list(args: &[String]) -> ExitCode {
     // Send docs_list request with repo path
     let params = serde_json::json!({ "repo": repo_path });
     match client.request("docs_list", Some(params)) {
-        Ok(result) => match serde_json::to_string_pretty(&result) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
+        Ok(result) => {
+            if json_mode {
+                // Raw JSON output
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to serialize result: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
+            } else {
+                // Human-readable output
+                match serde_json::from_value::<DocsListResponse>(result) {
+                    Ok(response) => {
+                        print!("{}", response.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("error: failed to serialize result: {}", e);
-                ExitCode::from(2)
-            }
-        },
+        }
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)
@@ -121,8 +164,10 @@ fn run_docs_list(args: &[String]) -> ExitCode {
 ///
 /// REG-1 contract: resolves repo from cwd via daemon.
 fn run_docs_extract(args: &[String]) -> ExitCode {
-    if !args.is_empty() {
-        eprintln!("usage: rmap docs extract");
+    let (json_mode, remaining) = parse_json_flag(args);
+
+    if !remaining.is_empty() {
+        eprintln!("usage: rmap docs extract [--json]");
         eprintln!("       (run from within a repo directory)");
         return ExitCode::from(1);
     }
@@ -161,16 +206,33 @@ fn run_docs_extract(args: &[String]) -> ExitCode {
     // Send docs_extract request with repo path
     let params = serde_json::json!({ "repo": repo_path });
     match client.request("docs_extract", Some(params)) {
-        Ok(result) => match serde_json::to_string_pretty(&result) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
+        Ok(result) => {
+            if json_mode {
+                // Raw JSON output
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => {
+                        println!("{}", json);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to serialize result: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
+            } else {
+                // Human-readable output
+                match serde_json::from_value::<DocsExtractResponse>(result) {
+                    Ok(response) => {
+                        print!("{}", response.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("error: failed to serialize result: {}", e);
-                ExitCode::from(2)
-            }
-        },
+        }
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::from(2)

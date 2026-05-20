@@ -51,6 +51,16 @@ pub mod stats;
 pub mod surfaces;
 pub mod trust;
 
+// Group 5: Boundaries (CLI-OUT-4)
+pub mod boundaries_list;
+pub mod boundaries_show;
+pub mod boundaries_summary;
+
+// CLI-OUT-5: Inventory
+pub mod docs;
+pub mod policy;
+pub mod resources;
+
 // ── Shared Helpers ───────────────────────────────────────────────────────────
 
 /// Render a section heading.

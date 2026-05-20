@@ -18,6 +18,11 @@
 //! - `rmap surfaces list` (human and --json)
 //! - `rmap surfaces show <ref>` (not found error)
 //!
+//! ## Group 5: Architectural Boundaries
+//! - `rmap boundaries list` (human and --json)
+//! - `rmap boundaries summary` (human and --json)
+//! - `rmap boundaries show <ref>` (not found error)
+//!
 //! # Module Identity Contract
 //!
 //! These tests validate the module identity contract established by Group 1:
@@ -1150,6 +1155,229 @@ fn surfaces_show_not_found_returns_error() {
     assert!(
         stderr.contains("not found") || stderr.contains("error"),
         "Error should mention surface not found. stderr:\n{}",
+        stderr
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GROUP 5: BOUNDARIES LIST OUTPUT MODE TESTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+#[ignore = "requires rmapd binary - run with --ignored"]
+fn boundaries_list_human_mode_shows_catalog() {
+    let harness = ModuleCatalogHarness::new();
+    let output = harness.run_cli(&["boundaries", "list"]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "boundaries list should succeed. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Human mode: header
+    assert!(
+        stdout.contains("Boundaries"),
+        "Human output should contain 'Boundaries' header. stdout:\n{}",
+        stdout
+    );
+
+    // Human mode: count line (even if 0 boundaries)
+    assert!(
+        stdout.contains("boundar"),
+        "Human output should show boundary count. stdout:\n{}",
+        stdout
+    );
+
+    // Should NOT contain JSON envelope fields
+    assert!(
+        !stdout.contains(r#""command":"#),
+        "Human output should not contain JSON 'command' field. stdout:\n{}",
+        stdout
+    );
+}
+
+#[test]
+#[ignore = "requires rmapd binary - run with --ignored"]
+fn boundaries_list_json_mode_returns_valid_envelope() {
+    let harness = ModuleCatalogHarness::new();
+    let output = harness.run_cli(&["boundaries", "list", "--json"]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "boundaries list --json should succeed. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should be valid JSON
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    // Standard envelope fields
+    assert!(
+        parsed.get("command").is_some(),
+        "JSON should have 'command' field. stdout:\n{}",
+        stdout
+    );
+    assert!(
+        parsed.get("repo").is_some(),
+        "JSON should have 'repo' field. stdout:\n{}",
+        stdout
+    );
+    assert!(
+        parsed.get("snapshot").is_some(),
+        "JSON should have 'snapshot' field. stdout:\n{}",
+        stdout
+    );
+
+    // Results array
+    assert!(
+        parsed.get("results").is_some() && parsed["results"].is_array(),
+        "JSON should have 'results' array. stdout:\n{}",
+        stdout
+    );
+
+    // Count field
+    assert!(
+        parsed.get("count").is_some(),
+        "JSON should have 'count' field. stdout:\n{}",
+        stdout
+    );
+}
+
+#[test]
+#[ignore = "requires rmapd binary - run with --ignored"]
+fn boundaries_list_empty_shows_hint() {
+    let harness = ModuleCatalogHarness::new();
+    let output = harness.run_cli(&["boundaries", "list"]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "boundaries list should succeed even with 0 boundaries. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // If 0 boundaries, should show hint
+    if stdout.contains("0 boundaries") {
+        assert!(
+            stdout.contains("hint:"),
+            "Empty boundaries list should show hint. stdout:\n{}",
+            stdout
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GROUP 5: BOUNDARIES SUMMARY OUTPUT MODE TESTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+#[ignore = "requires rmapd binary - run with --ignored"]
+fn boundaries_summary_human_mode_shows_totals() {
+    let harness = ModuleCatalogHarness::new();
+    let output = harness.run_cli(&["boundaries", "summary"]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "boundaries summary should succeed. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Human mode: header
+    assert!(
+        stdout.contains("Boundaries Summary"),
+        "Human output should contain 'Boundaries Summary' header. stdout:\n{}",
+        stdout
+    );
+
+    // Human mode: totals
+    assert!(
+        stdout.contains("surfaces") && stdout.contains("channels"),
+        "Human output should show surface and channel counts. stdout:\n{}",
+        stdout
+    );
+
+    // Should NOT contain JSON envelope fields
+    assert!(
+        !stdout.contains(r#""command":"#),
+        "Human output should not contain JSON 'command' field. stdout:\n{}",
+        stdout
+    );
+}
+
+#[test]
+#[ignore = "requires rmapd binary - run with --ignored"]
+fn boundaries_summary_json_mode_returns_valid_envelope() {
+    let harness = ModuleCatalogHarness::new();
+    let output = harness.run_cli(&["boundaries", "summary", "--json"]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "boundaries summary --json should succeed. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should be valid JSON
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    // Standard envelope fields
+    assert!(
+        parsed.get("command").is_some(),
+        "JSON should have 'command' field. stdout:\n{}",
+        stdout
+    );
+    assert!(
+        parsed.get("repo").is_some(),
+        "JSON should have 'repo' field. stdout:\n{}",
+        stdout
+    );
+    assert!(
+        parsed.get("summary").is_some(),
+        "JSON should have 'summary' field. stdout:\n{}",
+        stdout
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GROUP 5: BOUNDARIES SHOW OUTPUT MODE TESTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+#[ignore = "requires rmapd binary - run with --ignored"]
+fn boundaries_show_not_found_returns_error() {
+    let harness = ModuleCatalogHarness::new();
+    let output = harness.run_cli(&["boundaries", "show", "nonexistent-boundary-uid"]);
+
+    // Should return exit code 1 (user error, not runtime error)
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "boundaries show nonexistent should return exit code 1. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should show error message
+    assert!(
+        stderr.contains("not found") || stderr.contains("error"),
+        "Error should mention boundary not found. stderr:\n{}",
         stderr
     );
 }

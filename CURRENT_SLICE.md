@@ -2,93 +2,68 @@
 
 ## Current Priority
 
-**CLI-OUT-4: Module/Architecture Output** — IN PROGRESS (Groups 1-4 complete)
+**CLI-OUT-5: Inventory/Policy Output** — COMPLETE (2026-05-20)
 
-Slice doc: `docs/slices/cli-out-4-modules.md`
+Slice doc: `docs/slices/cli-out-5-inventory.md`
 
-Human renderers for 11 read-side architecture commands:
-- modules list, show, files, unowned, deps, violations
-- surfaces list, show
-- boundaries list, show, summary
-
-Excludes `modules boundary` (legacy write command).
+Human renderers for 6 inventory and policy commands:
+- docs list, extract
+- resource list, readers, writers
+- policy
 
 ### Group Status
 
 | Group | Commands | Status |
 |-------|----------|--------|
-| 1 | modules list, show | COMPLETE (2026-05-20) |
-| 2 | modules files, unowned | COMPLETE (2026-05-20) |
-| 3 | modules deps, violations | COMPLETE (2026-05-20) |
-| 4 | surfaces list, show | COMPLETE (2026-05-20, empty-case corpus, populated-case fixture) |
-| 5 | boundaries list, show, summary | QUEUED |
+| 1 | docs list, extract | COMPLETE (2026-05-20) |
+| 2 | resource list, readers, writers | COMPLETE (2026-05-20) |
+| 3 | policy | COMPLETE (2026-05-20) |
 
-### Group 1 Deliverables
+### Implementation Order
 
-Module catalog/detail (list, show):
-- `presentation/module_shared.rs` — shared formatting helpers (109 lines)
-- `presentation/modules_list.rs` — list DTO + renderer (264 lines)
-- `presentation/modules_show.rs` — show DTO + renderer (454 lines)
-- Unit tests: 26 (8 + 7 + 11)
-- Daemon dispatch tests: 7
-- CLI integration tests: 7 (opt-in)
-- Corpus validated: OpenXcom, django, duckdb
+1. **Documentation inventory** — `docs list`, `docs extract` — smallest coherent family
+2. **Resource inventory** — `resource list`, `resource readers`, `resource writers` — same vocabulary
+3. **Policy introspection** — `policy` — different semantic class
 
-### Group 2 Deliverables
+### Structural Assessment
 
-Ownership inventory (files, unowned):
-- `presentation/module_inventory.rs` — DTOs + renderers (422 lines)
-- `commands/modules/files.rs` — updated with --json + human mode (154 lines)
-- `commands/modules/unowned.rs` — updated with --json + human mode (138 lines)
-- Unit tests: 14 in module_inventory.rs
-- Daemon dispatch tests: 5 (3 files + 2 unowned, pre-existing)
-- CLI integration tests: 5 (opt-in)
+Command file sizes (all under 500-line guardrail):
+- `commands/docs.rs` — 179 lines
+- `commands/resource.rs` — 249 lines
+- `commands/policy.rs` — 264 lines
 
-### Group 3 Deliverables
+No refactoring required before adding renderer logic.
 
-Dependency/violation analysis (deps, violations):
-- `presentation/modules_deps.rs` — deps DTO + renderer (263 lines)
-- `presentation/modules_violations.rs` — violations DTO + renderer (319 lines)
-- `commands/modules/deps.rs` — updated with --json + human mode (182 lines)
-- `commands/modules/violations.rs` — updated with --json + human mode (373 lines)
-- Unit tests: 15 (7 deps + 8 violations)
-- Daemon dispatch tests: 8 (5 deps + 3 violations)
-- CLI integration tests: 4 (opt-in)
+### Presentation Module Plan
 
-Note: Split into separate files because `modules deps` (relationship reporting)
-and `modules violations` (policy breach surface) have different change axes.
+- `presentation/docs.rs` — list + extract renderers (single file, two functions)
+- `presentation/resources.rs` — list + readers/writers renderers
+- `presentation/policy.rs` — STATUS_MAPPING + BEHAVIORAL_MARKER + RETURN_FATE renderers
 
-### Group 4 Deliverables
+### Contract Note
 
-Architectural surfaces (surfaces list, show):
-- `presentation/surfaces.rs` — DTOs + renderers (594 lines total)
-- `commands/surfaces.rs` — updated with --json + human mode (342 lines)
-- Unit tests: 14 (7 list + 7 show)
-- CLI integration tests: 4 tests
-- Review packet: `docs/audits/cli-out-4/group-4-surfaces-review.md`
-- Handles degradation warning when surfaces not populated
-- Deterministic ordering: (kind, name, uid) for list, (evidence_kind, path) for show
-
-**500-line guardrail note:** `presentation/surfaces.rs` exceeds 500 lines (594).
-Kept as single file because list/show share surface identity domain, same actor,
-same degradation model. Split not required unless change axes diverge.
-
-**Corpus validation note:** All indexed repos (OpenXcom, django, duckdb) have 0
-surfaces (C++/Python codebases). Empty-case and error-path behavior validated.
-Populated-case covered by unit tests with synthetic data only.
-
-### Next: Group 5
-
-Architectural boundaries (boundaries list, show, summary):
-- Evaluate `commands/boundaries.rs` refactor (472 lines, approaching guardrail)
-- `presentation/boundaries.rs` — DTOs + renderers
-- `boundaries list` human renderer + `--json` flag
-- `boundaries show` human renderer + `--json` flag
-- `boundaries summary` human renderer + `--json` flag
+`policy` command does NOT use REG-1 contract. It requires explicit `db_path` and
+`repo_uid` arguments. This is preserved; no migration to daemon planned.
 
 ---
 
 ## Recently Implemented
+
+**CLI-OUT-4: Module/Architecture Output** — COMPLETE (2026-05-20)
+
+Slice doc: `docs/slices/cli-out-4-modules.md`
+
+Delivered:
+- Human renderers for 11 read-side architecture commands
+- modules list, show, files, unowned, deps, violations
+- surfaces list, show
+- boundaries list, show, summary
+- Groups 1-3: corpus-validated (OpenXcom, django, duckdb)
+- Groups 4-5: empty-case corpus-validated, populated-case fixture-validated
+
+Review packets:
+- `docs/audits/cli-out-4/group-4-surfaces-review.md`
+- `docs/audits/cli-out-4/group-5-boundaries-review.md`
 
 **CLI-OUT-3: Graph Drilldown Output** — IMPLEMENTED (2026-05-19)
 
@@ -100,8 +75,6 @@ Delivered:
 - Human renderer for `path` with query-term-preserving header
 - Human renderer for `imports` with depth and resolution
 - `--json` flag for machine mode on all commands
-- Structured `AmbiguousSymbol` error handling with daemon data payload
-- CLI renders numbered match list with disambiguation hint
 - Validated on 3-repo corpus (OpenXcom, django, duckdb)
 
 **CLI-OUT-2C: Stats Renderer** — IMPLEMENTED (2026-05-19)
@@ -111,7 +84,6 @@ Slice doc: `docs/slices/cli-out-2c-stats-renderer.md`
 Delivered:
 - Human renderer for `stats` with full sorted sections
 - No arbitrary top-N clipping or threshold-based labeling
-- Sections: Summary, By size, By fan-in, By fan-out, By distance
 - `--json` flag for machine mode
 - Validated on 5-repo corpus
 
@@ -124,7 +96,7 @@ Delivered:
 Slice doc: `docs/slices/rmapd-perf-1-timeout.md`
 
 Stats root cause (OBSERVED): `compute_module_stats` had correlated subqueries
-with O(modules × edges × symbols) complexity.
+with O(modules * edges * symbols) complexity.
 
 Fix: Rewrote query with CTEs. Django stats improved from 760s to 3s (255x speedup).
 
@@ -172,8 +144,8 @@ See `docs/slices/orient-bug-1-module-count.md`.
 | 1 | CLI-OUT-2B | orient, trust, cycles, check | VALIDATED |
 | 1b | CLI-OUT-2C | stats | IMPLEMENTED |
 | 2 | CLI-OUT-3 | callers, callees, path, imports | IMPLEMENTED |
-| 3 | CLI-OUT-4 | modules (6), surfaces (2), boundaries (3) | IN PROGRESS |
-| 4 | CLI-OUT-5 | docs *, resource *, policy | QUEUED |
+| 3 | CLI-OUT-4 | modules (6), surfaces (2), boundaries (3) | COMPLETE |
+| 4 | CLI-OUT-5 | docs (2), resource (3), policy (1) | COMPLETE |
 | 5 | CLI-OUT-6 | churn, hotspots, risk, coverage | QUEUED |
 | 6 | CLI-OUT-7 | violations, gate, assess | QUEUED |
 
