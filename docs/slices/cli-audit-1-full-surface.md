@@ -1,6 +1,6 @@
 # CLI-AUDIT-1: Cross-Repo Full Surface Audit
 
-**Status:** CURRENT  
+**Status:** COMPLETE (2026-05-20, reconciled 2026-05-21)  
 **Type:** Audit / Product Surface Review  
 **Prerequisite:** CLI-OUT-7 (all human renderers implemented)
 
@@ -161,8 +161,39 @@ Audit first. Implementation decisions after.
 
 ## Definition of Done
 
-- [ ] Matrix complete for all command × repo combinations
-- [ ] Each cell has explicit status (not blank)
-- [ ] Defect list categorized
-- [ ] Summary with counts: GOOD / EMPTY_HONEST / FIXTURE_ONLY / UNSUPPORTED / NEEDS_WORK
-- [ ] Recommendation: which defects warrant follow-on slices
+- [x] Matrix complete for all command × repo combinations
+- [x] Each cell has explicit status (not blank)
+- [x] Defect list categorized
+- [x] Summary with counts: GOOD / EMPTY_HONEST / FIXTURE_ONLY / UNSUPPORTED / NEEDS_WORK
+- [x] Recommendation: which defects warrant follow-on slices
+
+## Findings Summary (Reconciled 2026-05-21)
+
+See `docs/audits/cli-audit-1/summary.md` for full reconciled details.
+
+### Defects Found
+
+1. **boundaries summary** - CRITICAL (DTO mismatch with daemon)
+2. **boundaries list** - HIGH (shows direction only, no details)
+3. **modules deps** - HIGH (missing target module names in edge output)
+4. **Legacy contract commands** - 7 commands need daemon migration
+5. **TypeScript imports** - 0 imports extracted (data gap)
+
+### Reconciled Totals
+
+| Phase | GOOD | EMPTY_HONEST | NEEDS_WORK | ERROR | LEGACY | NOT RUN |
+|-------|------|--------------|------------|-------|--------|---------|
+| 1 | 66 | 4 | 0 | 0 | 0 | 0 |
+| 2 | ~25 | ~5 | 0 | 0 | 0 | ~26 |
+| 3 | 15 | 10 | 4 | 3 | 0 | ~24 |
+| 4-5 | 7 | 2 | 0 | 1 | 16 | 13 |
+
+### Recommendation
+
+Create follow-on slice **MODULE-BOUNDARY-FIX-1** to address:
+- boundaries summary DTO mismatch (CRITICAL)
+- boundaries list missing details (HIGH)
+- modules deps missing module names (HIGH)
+
+Legacy command migration is lower priority - commands work,
+just require explicit args.

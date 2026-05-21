@@ -27,13 +27,13 @@ use super::module_shared::format_count;
 /// Import analysis diagnostics from deps response.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ImportDiagnostics {
-    #[serde(default)]
+    #[serde(default, rename = "imports_total")]
     pub total_import_edges: u64,
-    #[serde(default)]
+    #[serde(default, rename = "imports_intra_module")]
     pub intra_module_edges: u64,
-    #[serde(default)]
+    #[serde(default, rename = "imports_cross_module")]
     pub cross_module_edges: u64,
-    #[serde(default)]
+    #[serde(default, rename = "imports_source_unowned")]
     pub from_unowned_edges: u64,
 }
 
@@ -44,9 +44,9 @@ pub struct ImportDiagnostics {
 /// A module dependency edge in the deps response.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModuleDependencyEdge {
-    #[serde(default)]
+    #[serde(default, rename = "source")]
     pub source_module: String,
-    #[serde(default)]
+    #[serde(default, rename = "target")]
     pub target_module: String,
     #[serde(default)]
     pub import_count: u64,

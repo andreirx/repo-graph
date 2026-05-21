@@ -142,7 +142,7 @@ fn churn_success_with_default_window() {
     let (_dir, db_path) = build_indexed_db();
 
     let output = Command::new(binary_path())
-        .args(["churn", db_path.to_str().unwrap(), "test-repo"])
+        .args(["churn", db_path.to_str().unwrap(), "test-repo", "--json"])
         .output()
         .unwrap();
 
@@ -179,6 +179,7 @@ fn churn_custom_since_window() {
             "test-repo",
             "--since",
             "30.days.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -275,6 +276,7 @@ fn churn_excludes_unindexed_files() {
             "test-repo",
             "--since",
             "1.year.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -319,6 +321,7 @@ fn churn_empty_results_is_success() {
             "test-repo",
             "--since",
             "1.second.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -345,7 +348,7 @@ fn churn_envelope_contract() {
     let (_dir, db_path) = build_indexed_db();
 
     let output = Command::new(binary_path())
-        .args(["churn", db_path.to_str().unwrap(), "test-repo"])
+        .args(["churn", db_path.to_str().unwrap(), "test-repo", "--json"])
         .output()
         .unwrap();
 

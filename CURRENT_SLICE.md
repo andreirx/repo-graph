@@ -2,16 +2,42 @@
 
 ## Current Priority
 
-**CLI-AUDIT-1: Cross-Repo Full Surface Audit** — CURRENT
-
-Systematic human-output review across all redesigned command families.
-SMOKE-1 validated 4 commands across 12 repos. This audit covers all 35+ commands.
-
-Slice doc: `docs/slices/cli-audit-1-full-surface.md`
+None active. MODULE-BOUNDARY-FIX-1 complete.
 
 ---
 
 ## Recently Implemented
+
+**MODULE-BOUNDARY-FIX-1: Module/Boundary Command DTO Fixes** — COMPLETE (2026-05-21)
+
+Fixed 3 DTO mismatches discovered in CLI-AUDIT-1:
+1. `boundaries summary` - Rewrote DTO to match daemon's category-specific field names and string-array filesWithBoundaries
+2. `boundaries list` - Added serde rename annotations for all camelCase daemon fields
+3. `modules deps` - Added serde rename for source/target and diagnostics fields
+
+Slice doc: `docs/slices/module-boundary-fix-1.md`
+
+---
+
+## Recently Implemented
+
+**CLI-AUDIT-1: Cross-Repo Full Surface Audit** — COMPLETE (2026-05-20, reconciled 2026-05-21)
+
+Systematic human-output review across 35+ commands × 14 repos.
+
+Summary: `docs/audits/cli-audit-1/summary.md`
+
+Reconciled results:
+- Phase 1: 70/70 cells (66 GOOD, 4 EMPTY_HONEST)
+- Phase 2: ~56 cells sampled, format GOOD
+- Phase 3: ~56 cells (15 GOOD, 10 EMPTY_HONEST, 4 NEEDS_WORK, 3 ERROR, ~24 NOT RUN)
+- Phase 4-5: ~39 cells (7 GOOD, 2 EMPTY_HONEST, 16 LEGACY, 14 NOT RUN)
+
+Defects found:
+- boundaries summary (DTO mismatch - CRITICAL)
+- boundaries list (missing details - HIGH)
+- modules deps (missing module names - HIGH)
+- 7 legacy commands need daemon migration
 
 **SMOKE-1: Validation Harness Cleanup** — COMPLETE (2026-05-20)
 

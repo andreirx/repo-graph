@@ -76,7 +76,7 @@ pub(super) fn run_boundaries_summary(args: &[String]) -> ExitCode {
             } else {
                 // Human mode: parse and render (CLI-OUT-4)
                 use crate::presentation::boundaries_summary::BoundariesSummaryResponse;
-                match serde_json::from_value::<BoundariesSummaryResponse>(result) {
+                match BoundariesSummaryResponse::from_json(result) {
                     Ok(response) => {
                         print!("{}", response.render_human());
                         ExitCode::SUCCESS

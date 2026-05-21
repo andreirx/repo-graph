@@ -85,7 +85,8 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **CLI-OUT-6** | Quality/risk output (churn, hotspots, risk, coverage) | COMPLETE |
 | **CLI-OUT-7** | Governance output (violations, gate, assess) | COMPLETE |
 | **SMOKE-1** | Validation harness cleanup (bash fixes, 12-repo validation) | COMPLETE |
-| **CLI-AUDIT-1** | Cross-repo full surface audit (35+ commands × 12 repos) | CURRENT |
+| **CLI-AUDIT-1** | Cross-repo full surface audit (35+ commands × 14 repos) | COMPLETE |
+| **MODULE-BOUNDARY-FIX-1** | Module/boundary command defects (deps, list, summary) | COMPLETE |
 | **CURSOR-1** | Cursor MCP/rules integration | QUEUED |
 | **WIN-1** | Windows distribution/install | DEFERRED |
 | **MAC-2** | macOS signing/notarization | DEFERRED |
@@ -93,17 +94,36 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 
 ### Current Priority
 
-**CLI-AUDIT-1: Cross-Repo Full Surface Audit** — CURRENT
-
-Systematic human-output review across all redesigned command families.
-SMOKE-1 validated 4 commands; this audit covers all 35+ commands across 12 repos.
-
-Deliverable: command × repo matrix with explicit status per cell, defect list categorized
-by root cause (presentation / backend / corpus gaps).
-
-See `docs/slices/cli-audit-1-full-surface.md` for full scope.
+None active. See queued items: ORIENT-BUG-1, CURSOR-1.
 
 ### Recently Completed
+
+**MODULE-BOUNDARY-FIX-1: Module/Boundary Command Defects** — COMPLETE (2026-05-21)
+
+Fixed 3 DTO mismatches discovered in CLI-AUDIT-1:
+1. `boundaries summary` - Rewrote DTO to match daemon's category-specific field names
+2. `boundaries list` - Added serde rename annotations for camelCase fields
+3. `modules deps` - Added serde rename for source/target fields
+
+See `docs/slices/module-boundary-fix-1.md` for implementation details.
+
+**CLI-AUDIT-1: Cross-Repo Full Surface Audit** — COMPLETE (2026-05-20, reconciled 2026-05-21)
+
+Systematic human-output review across 35+ commands × 14 repos.
+
+Reconciled results:
+- Phase 1: 70/70 cells assessed (66 GOOD, 4 EMPTY_HONEST)
+- Phase 2: ~56 cells sampled, format GOOD
+- Phase 3: ~56 cells (15 GOOD, 4 NEEDS_WORK, 3 ERROR, ~24 NOT RUN)
+- Phase 4-5: ~39 cells (7 GOOD, 16 LEGACY, 14 NOT RUN)
+
+Defects found:
+- boundaries summary (DTO mismatch)
+- boundaries list (missing details)
+- modules deps (missing module names)
+- 7 legacy commands need daemon migration
+
+See `docs/audits/cli-audit-1/summary.md` for reconciled report.
 
 **SMOKE-1: Validation Harness Cleanup** — COMPLETE (2026-05-20)
 

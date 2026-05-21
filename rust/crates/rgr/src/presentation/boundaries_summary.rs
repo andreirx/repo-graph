@@ -21,56 +21,171 @@ use serde::Deserialize;
 // BOUNDARIES SUMMARY RESPONSE
 // =============================================================================
 
-/// Count by category entry.
-#[derive(Debug, Clone, Deserialize)]
+/// Generic count by category entry (for rendering).
+#[derive(Debug, Clone)]
 pub struct CategoryCount {
-    #[serde(default)]
     pub category: String,
-    #[serde(default)]
     pub count: u64,
 }
 
-/// File with boundaries entry.
+// Category-specific DTOs matching daemon's camelCase field names
 #[derive(Debug, Clone, Deserialize)]
-pub struct FileWithBoundaries {
+struct ChannelKindCount {
+    #[serde(default, rename = "channelKind")]
+    kind: String,
     #[serde(default)]
-    pub file_path: String,
-    #[serde(default)]
-    pub boundary_count: u64,
+    count: u64,
 }
 
-/// Summary data object.
 #[derive(Debug, Clone, Deserialize)]
-pub struct BoundarySummary {
+struct BoundaryScopeCount {
+    #[serde(default, rename = "boundaryScope")]
+    scope: String,
+    #[serde(default)]
+    count: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DirectionCount {
+    #[serde(default)]
+    direction: String,
+    #[serde(default)]
+    count: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ProtocolFamilyCount {
+    #[serde(default, rename = "protocolFamily")]
+    family: String,
+    #[serde(default)]
+    count: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BasisCount {
+    #[serde(default)]
+    basis: String,
+    #[serde(default)]
+    count: u64,
+}
+
+/// Summary data object (internal DTO matching daemon response).
+#[derive(Debug, Clone, Deserialize)]
+struct BoundarySummaryDto {
     #[serde(default, rename = "totalSurfaces")]
-    pub total_surfaces: u64,
+    total_surfaces: u64,
     #[serde(default, rename = "totalChannels")]
-    pub total_channels: u64,
+    total_channels: u64,
     #[serde(default, rename = "byChannelKind")]
-    pub by_channel_kind: Vec<CategoryCount>,
+    by_channel_kind: Vec<ChannelKindCount>,
     #[serde(default, rename = "byBoundaryScope")]
-    pub by_boundary_scope: Vec<CategoryCount>,
+    by_boundary_scope: Vec<BoundaryScopeCount>,
     #[serde(default, rename = "byDirection")]
-    pub by_direction: Vec<CategoryCount>,
+    by_direction: Vec<DirectionCount>,
     #[serde(default, rename = "byProtocolFamily")]
-    pub by_protocol_family: Vec<CategoryCount>,
+    by_protocol_family: Vec<ProtocolFamilyCount>,
     #[serde(default, rename = "byBasis")]
-    pub by_basis: Vec<CategoryCount>,
+    by_basis: Vec<BasisCount>,
     #[serde(default, rename = "filesWithBoundaries")]
-    pub files_with_boundaries: Vec<FileWithBoundaries>,
+    files_with_boundaries: Vec<String>,
 }
 
-/// Response structure for boundaries summary command.
+/// Summary data object (normalized for rendering).
+#[derive(Debug, Clone)]
+pub struct BoundarySummary {
+    pub total_surfaces: u64,
+    pub total_channels: u64,
+    pub by_channel_kind: Vec<CategoryCount>,
+    pub by_boundary_scope: Vec<CategoryCount>,
+    pub by_direction: Vec<CategoryCount>,
+    pub by_protocol_family: Vec<CategoryCount>,
+    pub by_basis: Vec<CategoryCount>,
+    pub files_with_boundaries: Vec<String>,
+}
+
+impl From<BoundarySummaryDto> for BoundarySummary {
+    fn from(dto: BoundarySummaryDto) -> Self {
+        BoundarySummary {
+            total_surfaces: dto.total_surfaces,
+            total_channels: dto.total_channels,
+            by_channel_kind: dto
+                .by_channel_kind
+                .into_iter()
+                .map(|c| CategoryCount {
+                    category: c.kind,
+                    count: c.count,
+                })
+                .collect(),
+            by_boundary_scope: dto
+                .by_boundary_scope
+                .into_iter()
+                .map(|c| CategoryCount {
+                    category: c.scope,
+                    count: c.count,
+                })
+                .collect(),
+            by_direction: dto
+                .by_direction
+                .into_iter()
+                .map(|c| CategoryCount {
+                    category: c.direction,
+                    count: c.count,
+                })
+                .collect(),
+            by_protocol_family: dto
+                .by_protocol_family
+                .into_iter()
+                .map(|c| CategoryCount {
+                    category: c.family,
+                    count: c.count,
+                })
+                .collect(),
+            by_basis: dto
+                .by_basis
+                .into_iter()
+                .map(|c| CategoryCount {
+                    category: c.basis,
+                    count: c.count,
+                })
+                .collect(),
+            files_with_boundaries: dto.files_with_boundaries,
+        }
+    }
+}
+
+/// Response DTO for deserialization (matches daemon response).
 #[derive(Debug, Deserialize)]
+struct BoundariesSummaryResponseDto {
+    #[serde(default)]
+    command: String,
+    #[serde(default)]
+    repo: String,
+    #[serde(default)]
+    snapshot: String,
+    #[serde(default)]
+    summary: Option<BoundarySummaryDto>,
+}
+
+/// Response structure for boundaries summary command (normalized).
+#[derive(Debug)]
 pub struct BoundariesSummaryResponse {
-    #[serde(default)]
     pub command: String,
-    #[serde(default)]
     pub repo: String,
-    #[serde(default)]
     pub snapshot: String,
-    #[serde(default)]
     pub summary: Option<BoundarySummary>,
+}
+
+impl BoundariesSummaryResponse {
+    /// Parse from JSON value (daemon response).
+    pub fn from_json(value: serde_json::Value) -> Result<Self, serde_json::Error> {
+        let dto: BoundariesSummaryResponseDto = serde_json::from_value(value)?;
+        Ok(BoundariesSummaryResponse {
+            command: dto.command,
+            repo: dto.repo,
+            snapshot: dto.snapshot,
+            summary: dto.summary.map(BoundarySummary::from),
+        })
+    }
 }
 
 impl BoundariesSummaryResponse {
@@ -172,19 +287,15 @@ impl BoundariesSummaryResponse {
             }
         }
 
-        // -- Files with boundaries (top 10 if many) --
+        // -- Files with boundaries --
         if !summary.files_with_boundaries.is_empty() {
             out.push_str("\nFiles with boundaries:\n");
             let mut files = summary.files_with_boundaries.clone();
-            files.sort_by(|a, b| {
-                b.boundary_count
-                    .cmp(&a.boundary_count)
-                    .then_with(|| a.file_path.cmp(&b.file_path))
-            });
+            files.sort();
 
-            // Full output, no truncation
+            // Full output, no truncation (daemon only sends file paths, no counts)
             for file in &files {
-                out.push_str(&format!("  {}  {}\n", file.boundary_count, file.file_path));
+                out.push_str(&format!("  {}\n", file));
             }
         }
 
@@ -249,14 +360,8 @@ mod tests {
                     },
                 ],
                 files_with_boundaries: vec![
-                    FileWithBoundaries {
-                        file_path: "src/api/client.ts".to_string(),
-                        boundary_count: 3,
-                    },
-                    FileWithBoundaries {
-                        file_path: "src/db/pool.ts".to_string(),
-                        boundary_count: 2,
-                    },
+                    "src/api/client.ts".to_string(),
+                    "src/db/pool.ts".to_string(),
                 ],
             }),
         }
