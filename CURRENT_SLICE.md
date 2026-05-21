@@ -2,7 +2,23 @@
 
 ## Current Priority
 
-None active. MODULE-BOUNDARY-FIX-1 complete.
+None active. CLI output track complete.
+
+---
+
+## Recently Implemented
+
+**SHOW-DETAIL-AUDIT-1: Unexercised Detail Command Audit** — COMPLETE (2026-05-21)
+
+Final closure pass for CLI output track. Exercised remaining detail commands:
+- `surfaces show` — GOOD
+- `boundaries show` — GOOD (fixed DTO mismatch)
+- `resource readers` — GOOD
+- `resource writers` — GOOD
+
+Fixed: boundaries show DTO had `boundary` field but daemon sends `detail`, plus camelCase rename annotations.
+
+Slice doc: `docs/slices/show-detail-audit-1.md`
 
 ---
 
@@ -30,14 +46,15 @@ Summary: `docs/audits/cli-audit-1/summary.md`
 Reconciled results:
 - Phase 1: 70/70 cells (66 GOOD, 4 EMPTY_HONEST)
 - Phase 2: ~56 cells sampled, format GOOD
-- Phase 3: ~56 cells (15 GOOD, 10 EMPTY_HONEST, 4 NEEDS_WORK, 3 ERROR, ~24 NOT RUN)
-- Phase 4-5: ~39 cells (7 GOOD, 2 EMPTY_HONEST, 16 LEGACY, 14 NOT RUN)
+- Phase 3: ~56 cells (24 GOOD, 10 EMPTY_HONEST, 4 CAPTURED, ~18 NOT RUN)
+- Phase 4-5: ~39 cells (9 GOOD, 2 EMPTY_HONEST, 16 LEGACY, 12 NOT RUN)
 
-Defects found:
-- boundaries summary (DTO mismatch - CRITICAL)
-- boundaries list (missing details - HIGH)
-- modules deps (missing module names - HIGH)
-- 7 legacy commands need daemon migration
+Defects found and resolved:
+- boundaries summary (DTO mismatch) — FIXED in MODULE-BOUNDARY-FIX-1
+- boundaries list (missing details) — FIXED in MODULE-BOUNDARY-FIX-1
+- boundaries show (DTO mismatch) — FIXED in SHOW-DETAIL-AUDIT-1
+- modules deps (missing module names) — FIXED in MODULE-BOUNDARY-FIX-1
+- 7 legacy commands need daemon migration (deferred)
 
 **SMOKE-1: Validation Harness Cleanup** — COMPLETE (2026-05-20)
 

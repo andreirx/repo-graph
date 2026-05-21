@@ -87,6 +87,7 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **SMOKE-1** | Validation harness cleanup (bash fixes, 12-repo validation) | COMPLETE |
 | **CLI-AUDIT-1** | Cross-repo full surface audit (35+ commands × 14 repos) | COMPLETE |
 | **MODULE-BOUNDARY-FIX-1** | Module/boundary command defects (deps, list, summary) | COMPLETE |
+| **SHOW-DETAIL-AUDIT-1** | Detail command exercise (surfaces/boundaries show, resource readers/writers) | COMPLETE |
 | **CURSOR-1** | Cursor MCP/rules integration | QUEUED |
 | **WIN-1** | Windows distribution/install | DEFERRED |
 | **MAC-2** | macOS signing/notarization | DEFERRED |
@@ -97,6 +98,16 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 None active. See queued items: ORIENT-BUG-1, CURSOR-1.
 
 ### Recently Completed
+
+**SHOW-DETAIL-AUDIT-1: Detail Command Exercise** — COMPLETE (2026-05-21)
+
+Final closure pass for CLI output track. Exercised and validated:
+- `surfaces show` — GOOD
+- `boundaries show` — GOOD (fixed DTO: detail vs boundary, camelCase renames)
+- `resource readers` — GOOD
+- `resource writers` — GOOD
+
+Discovery workflow documented. CLI output track now complete.
 
 **MODULE-BOUNDARY-FIX-1: Module/Boundary Command Defects** — COMPLETE (2026-05-21)
 
@@ -111,17 +122,18 @@ See `docs/slices/module-boundary-fix-1.md` for implementation details.
 
 Systematic human-output review across 35+ commands × 14 repos.
 
-Reconciled results:
-- Phase 1: 70/70 cells assessed (66 GOOD, 4 EMPTY_HONEST)
+Reconciled results (post-SHOW-DETAIL-AUDIT-1):
+- Phase 1: 70/70 cells (66 GOOD, 4 EMPTY_HONEST)
 - Phase 2: ~56 cells sampled, format GOOD
-- Phase 3: ~56 cells (15 GOOD, 4 NEEDS_WORK, 3 ERROR, ~24 NOT RUN)
-- Phase 4-5: ~39 cells (7 GOOD, 16 LEGACY, 14 NOT RUN)
+- Phase 3: ~56 cells (24 GOOD, 10 EMPTY_HONEST, 4 CAPTURED, ~18 NOT RUN)
+- Phase 4-5: ~39 cells (9 GOOD, 2 EMPTY_HONEST, 16 LEGACY, 12 NOT RUN)
 
-Defects found:
-- boundaries summary (DTO mismatch)
-- boundaries list (missing details)
-- modules deps (missing module names)
-- 7 legacy commands need daemon migration
+Defects found and resolved:
+- boundaries summary (DTO mismatch) — FIXED
+- boundaries list (missing details) — FIXED
+- boundaries show (DTO mismatch) — FIXED
+- modules deps (missing module names) — FIXED
+- 7 legacy commands need daemon migration (deferred)
 
 See `docs/audits/cli-audit-1/summary.md` for reconciled report.
 

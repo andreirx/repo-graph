@@ -26,27 +26,27 @@ use super::module_shared::format_count;
 /// Full boundary detail object.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BoundaryDetail {
-    #[serde(default)]
+    #[serde(default, rename = "surfaceUid")]
     pub boundary_channel_uid: String,
-    #[serde(default)]
+    #[serde(default, rename = "channelKind")]
     pub channel_kind: String,
-    #[serde(default)]
+    #[serde(default, rename = "boundaryScope")]
     pub boundary_scope: String,
     #[serde(default)]
     pub direction: String,
-    #[serde(default)]
+    #[serde(default, rename = "protocolFamily")]
     pub protocol_family: Option<String>,
     #[serde(default)]
     pub service_name: Option<String>,
-    #[serde(default)]
+    #[serde(default, rename = "sourceFile")]
     pub file_path: Option<String>,
-    #[serde(default)]
+    #[serde(default, rename = "symbolStableKey")]
     pub symbol_key: Option<String>,
     #[serde(default)]
     pub confidence: f64,
     #[serde(default)]
     pub basis: Option<String>,
-    #[serde(default)]
+    #[serde(default, rename = "evidenceJson")]
     pub metadata_json: Option<serde_json::Value>,
 }
 
@@ -87,7 +87,7 @@ pub struct BoundariesShowResponse {
     pub repo: String,
     #[serde(default)]
     pub snapshot: String,
-    #[serde(default)]
+    #[serde(default, rename = "detail")]
     pub boundary: Option<BoundaryDetail>,
     #[serde(default)]
     pub surface: Option<BoundarySurface>,

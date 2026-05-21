@@ -273,7 +273,7 @@ fn declare_boundary_visible_to_violations() {
     ]);
     assert_eq!(declare_out.status.code(), Some(0));
 
-    let violations_out = run_cmd(&["violations", db_str, "r1"]);
+    let violations_out = run_cmd(&["violations", db_str, "r1", "--json"]);
     assert_eq!(violations_out.status.code(), Some(0));
 
     let violations = parse_json(&violations_out);
