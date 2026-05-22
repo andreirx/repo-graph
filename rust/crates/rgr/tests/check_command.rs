@@ -21,18 +21,25 @@ fn binary_path() -> PathBuf {
 
 #[test]
 fn check_no_args_is_valid() {
-    // With REG-1, check takes no positional arguments - repo comes from cwd
-    // Running without daemon returns exit 2 (runtime error), not exit 1 (usage)
+    // With REG-1, check takes no positional arguments - repo comes from cwd.
+    // Run from temp dir to ensure we're not in an indexed repo.
+    // Expected: exit 2 (runtime error - repo not indexed) if daemon running,
+    //           or exit 2 (daemon unavailable) if daemon not running.
+    // NOT exit 1 (usage error).
+    let temp_dir = tempfile::tempdir().unwrap();
+
     let output = Command::new(binary_path())
         .args(["check"])
+        .current_dir(temp_dir.path())
         .output()
         .unwrap();
 
     // Exit code 2 = runtime error (daemon unavailable or repo not indexed)
+    // Exit code 1 from this dir would mean usage error (wrong)
     assert_eq!(
         output.status.code(),
         Some(2),
-        "stderr: {}",
+        "Expected runtime error (2), not usage error (1). stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -70,16 +77,20 @@ fn check_unexpected_args_is_usage_error() {
 #[test]
 fn check_json_flag_accepted() {
     // --json is a valid flag; should not cause usage error (exit 1)
-    // Will still exit 2 (daemon unavailable) but flag is parsed
+    // Run from temp dir to ensure we're not in an indexed repo.
+    // Expected: exit 2 (runtime error) not exit 1 (usage error).
+    let temp_dir = tempfile::tempdir().unwrap();
+
     let output = Command::new(binary_path())
         .args(["check", "--json"])
+        .current_dir(temp_dir.path())
         .output()
         .unwrap();
 
     assert_eq!(
         output.status.code(),
         Some(2),
-        "Should be daemon error (2), not usage error (1). stderr: {}",
+        "Should be runtime error (2), not usage error (1). stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }

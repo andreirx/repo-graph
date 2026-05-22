@@ -2,8 +2,8 @@
 # ── cut_release_major.sh ───────────────────────────────────────────
 #
 # Full major release workflow:
-# 1. Bump major version (0.5.3 → 1.0.0)
-# 2. Validate workspace (cargo check, clippy)
+# 1. Validate workspace (cargo check, clippy, test)
+# 2. Bump major version (0.5.3 → 1.0.0)
 # 3. Commit version bump
 # 4. Create annotated tag
 # 5. Print push instructions
@@ -28,15 +28,7 @@ if ! git -C "$REPO_ROOT" diff --quiet || ! git -C "$REPO_ROOT" diff --cached --q
     exit 1
 fi
 
-# Bump version
-echo "=== Bumping major version ==="
-"$SCRIPT_DIR/bump_version_major.sh"
-
-# Get new version
-VERSION=$(grep -A10 '^\[workspace\.package\]' "$CARGO_TOML" | grep '^version = "' | sed 's/version = "\(.*\)"/\1/')
-TAG="v${VERSION}"
-
-echo ""
+# Validate BEFORE bumping version (so failure doesn't leave dirty state)
 echo "=== Validating workspace ==="
 cd "$REPO_ROOT/rust"
 
@@ -53,6 +45,15 @@ echo "--- cargo test (skip parity) ---"
 cargo test --workspace -- --skip parity
 
 cd "$REPO_ROOT"
+
+# Bump version (only after validation passes)
+echo ""
+echo "=== Bumping major version ==="
+"$SCRIPT_DIR/bump_version_major.sh"
+
+# Get new version
+VERSION=$(grep -A10 '^\[workspace\.package\]' "$CARGO_TOML" | grep '^version = "' | sed 's/version = "\(.*\)"/\1/')
+TAG="v${VERSION}"
 
 echo ""
 echo "=== Creating release commit ==="
