@@ -194,7 +194,9 @@ fn declare_deactivate_boundary_removes_from_violations() {
     // 4. Run violations via daemon
     // 5. Deactivate boundary
     // 6. Run violations again via daemon
-    unimplemented!("requires daemon harness - declare/violations contract mismatch after REG-1 migration");
+    unimplemented!(
+        "requires daemon harness - declare/violations contract mismatch after REG-1 migration"
+    );
 }
 
 // -- 6. Deactivated requirement no longer affects gate ----------------

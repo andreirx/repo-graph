@@ -272,7 +272,9 @@ fn declare_boundary_visible_to_violations() {
     // 2. Index test repo with daemon
     // 3. Declare boundary via daemon
     // 4. Run violations via daemon
-    unimplemented!("requires daemon harness - declare/violations contract mismatch after REG-1 migration");
+    unimplemented!(
+        "requires daemon harness - declare/violations contract mismatch after REG-1 migration"
+    );
 }
 
 // -- 9. Exact JSON output shape --------------------------------------

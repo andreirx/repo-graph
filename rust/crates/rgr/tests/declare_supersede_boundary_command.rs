@@ -316,7 +316,9 @@ fn supersede_boundary_violations_see_replacement() {
     // This test verifies that superseding a boundary changes which violations appear.
     // Pre-REG-1 contract: rmap violations <db_path> <repo_uid> --json
     // Post-REG-1 contract: rmap violations --json (daemon resolves repo from cwd)
-    unimplemented!("requires daemon harness - declare/violations contract mismatch after REG-1 migration");
+    unimplemented!(
+        "requires daemon harness - declare/violations contract mismatch after REG-1 migration"
+    );
 }
 
 // -- 11. Exact JSON shape --------------------------------------------
