@@ -426,7 +426,10 @@ mod tests {
         // RMAP-IO-1: WouldBlock (EAGAIN on macOS) should map to Timeout
         let io_err = std::io::Error::new(std::io::ErrorKind::WouldBlock, "would block");
         let result = super::classify_read_error(io_err, 300);
-        assert!(matches!(result, DaemonClientError::Timeout { timeout_secs: 300 }));
+        assert!(matches!(
+            result,
+            DaemonClientError::Timeout { timeout_secs: 300 }
+        ));
     }
 
     #[test]
@@ -434,7 +437,10 @@ mod tests {
         // RMAP-IO-1: TimedOut should map to Timeout
         let io_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out");
         let result = super::classify_read_error(io_err, 60);
-        assert!(matches!(result, DaemonClientError::Timeout { timeout_secs: 60 }));
+        assert!(matches!(
+            result,
+            DaemonClientError::Timeout { timeout_secs: 60 }
+        ));
     }
 
     #[test]
