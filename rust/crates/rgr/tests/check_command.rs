@@ -17,25 +17,29 @@ fn binary_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_rmap"))
 }
 
+/// Returns a non-existent socket path for test isolation.
+fn isolated_socket_path(dir: &std::path::Path) -> PathBuf {
+    dir.join("nonexistent-daemon.sock")
+}
+
+fn run_cmd_isolated(args: &[&str]) -> std::process::Output {
+    let dir = tempfile::tempdir().unwrap();
+    Command::new(binary_path())
+        .env("RMAP_SOCKET_PATH", isolated_socket_path(dir.path()))
+        .args(args)
+        .output()
+        .expect("failed to spawn rmap")
+}
+
 // -- REG-1: Usage tests ---------------------------------------------------
 
 #[test]
 fn check_no_args_is_valid() {
     // With REG-1, check takes no positional arguments - repo comes from cwd.
-    // Run from temp dir to ensure we're not in an indexed repo.
-    // Expected: exit 2 (runtime error - repo not indexed) if daemon running,
-    //           or exit 2 (daemon unavailable) if daemon not running.
-    // NOT exit 1 (usage error).
-    let temp_dir = tempfile::tempdir().unwrap();
+    // Use isolated socket to ensure daemon unavailable.
+    let output = run_cmd_isolated(&["check"]);
 
-    let output = Command::new(binary_path())
-        .args(["check"])
-        .current_dir(temp_dir.path())
-        .output()
-        .unwrap();
-
-    // Exit code 2 = runtime error (daemon unavailable or repo not indexed)
-    // Exit code 1 from this dir would mean usage error (wrong)
+    // Exit code 2 = runtime error (daemon unavailable)
     assert_eq!(
         output.status.code(),
         Some(2),
@@ -77,15 +81,8 @@ fn check_unexpected_args_is_usage_error() {
 #[test]
 fn check_json_flag_accepted() {
     // --json is a valid flag; should not cause usage error (exit 1)
-    // Run from temp dir to ensure we're not in an indexed repo.
-    // Expected: exit 2 (runtime error) not exit 1 (usage error).
-    let temp_dir = tempfile::tempdir().unwrap();
-
-    let output = Command::new(binary_path())
-        .args(["check", "--json"])
-        .current_dir(temp_dir.path())
-        .output()
-        .unwrap();
+    // Use isolated socket to ensure daemon unavailable.
+    let output = run_cmd_isolated(&["check", "--json"]);
 
     assert_eq!(
         output.status.code(),

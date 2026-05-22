@@ -17,19 +17,31 @@ fn binary_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_rmap"))
 }
 
+/// Returns a non-existent socket path for test isolation.
+fn isolated_socket_path(dir: &std::path::Path) -> PathBuf {
+    dir.join("nonexistent-daemon.sock")
+}
+
+fn run_cmd_isolated(args: &[&str]) -> std::process::Output {
+    let dir = tempfile::tempdir().unwrap();
+    Command::new(binary_path())
+        .env("RMAP_SOCKET_PATH", isolated_socket_path(dir.path()))
+        .args(args)
+        .output()
+        .expect("failed to spawn rmap")
+}
+
 #[test]
 fn cycles_no_args_is_valid() {
-    // With REG-1, cycles takes no positional arguments - repo comes from cwd
-    let output = Command::new(binary_path())
-        .args(["cycles"])
-        .output()
-        .unwrap();
+    // With REG-1, cycles takes no positional arguments - repo comes from cwd.
+    // Use isolated socket to ensure daemon unavailable.
+    let output = run_cmd_isolated(&["cycles"]);
 
-    // Exit code 2 = runtime error (daemon unavailable or repo not indexed)
+    // Exit code 2 = runtime error (daemon unavailable)
     assert_eq!(
         output.status.code(),
         Some(2),
-        "stderr: {}",
+        "Expected runtime error (2), not success (0). stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
