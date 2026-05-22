@@ -91,17 +91,51 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **MODULE-BOUNDARY-FIX-1** | Module/boundary command defects (deps, list, summary) | COMPLETE |
 | **SHOW-DETAIL-AUDIT-1** | Detail command exercise (surfaces/boundaries show, resource readers/writers) | COMPLETE |
 | **CURSOR-1** | Cursor MCP/rules integration | QUEUED |
-| **LEGACY-CONTRACT-MIGRATION-1** | Migrate 7 legacy commands to REG-1 daemon contract | QUEUED |
+| **LEGACY-CONTRACT-MIGRATION-1** | Migrate 7 legacy commands to REG-1 daemon contract | CURRENT |
 | **TS-IMPORT-RESOLUTION-1** | TypeScript aliased and namespace import resolution | QUEUED |
 | **WIN-1** | Windows distribution/install | DEFERRED |
 | **MAC-2** | macOS signing/notarization | DEFERRED |
 | **UPDATE-1** | Updater/repair channel | DEFERRED |
 
+## Storage Architecture Track
+
+Three-tier storage model: Durable Authority Store, Derived Snapshot Cache, Live Working Graph.
+See `agent_docs/storage-architecture-v2.md` for full specification.
+
+| Slice | Scope | Status |
+|-------|-------|--------|
+| **STORAGE-ARCH-1** | Architecture specification (tier definitions, table classification, invariants) | SPEC COMPLETE |
+| **PERF-OBS-1** | Storage performance observability (table sizes, command latency, memory) | QUEUED |
+| **CACHE-SEMANTICS-1** | Mark extracted facts as rebuildable cache (retention policy, versioning) | QUEUED |
+| **LIVE-GRAPH-1** | In-memory current snapshot graph (LiveGraph struct, loader, parity tests) | QUEUED |
+| **LIVE-GRAPH-2** | Migrate callers/callees/path to LiveGraph | QUEUED |
+| **LIVE-GRAPH-3** | Migrate cycles/dead to LiveGraph | FUTURE |
+| **CACHE-RETENTION-1** | Aggressive pruning of old Tier B snapshots | FUTURE |
+| **CACHE-STORAGE-1** | Evaluate Tier B backing store alternatives | FUTURE |
+
+### Track Priority
+
+This track is **queued future work**, not current priority.
+
+Sequence: PERF-OBS-1 → CACHE-SEMANTICS-1 → LIVE-GRAPH-1 → LIVE-GRAPH-2.
+
+**Gate to start PERF-OBS-1:**
+1. Current release is shipped
+2. LEGACY-CONTRACT-MIGRATION-1 is complete
+3. TS-IMPORT-RESOLUTION-1 is complete
+
+**Gate to continue past PERF-OBS-1:**
+4. Baseline metrics from PERF-OBS-1 justify the investment in later slices
+
+PERF-OBS-1 is the decision point. If metrics show current performance is acceptable, the track pauses.
+
 ### Current Priority
 
 LEGACY-CONTRACT-MIGRATION-1 (daemon contract migration) — CURRENT.
 
-Queue: TS-IMPORT-RESOLUTION-1, CURSOR-1.
+Next: TS-IMPORT-RESOLUTION-1.
+
+Queue: CURSOR-1, Storage Architecture Track (starts with PERF-OBS-1).
 
 ### Recently Completed
 
