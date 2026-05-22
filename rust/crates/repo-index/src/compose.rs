@@ -12,6 +12,20 @@
 
 use std::ops::ControlFlow;
 use std::path::Path;
+use std::time::Instant;
+
+/// Perf logging macro - only emits when perf-trace feature is enabled.
+#[cfg(feature = "perf-trace")]
+macro_rules! perf_log {
+    ($($arg:tt)*) => {
+        eprintln!($($arg)*);
+    };
+}
+
+#[cfg(not(feature = "perf-trace"))]
+macro_rules! perf_log {
+    ($($arg:tt)*) => {};
+}
 
 use repo_graph_boundary_interaction::table::Language as BiLanguage;
 use repo_graph_boundary_interaction::ChannelKind;
@@ -284,6 +298,47 @@ pub struct InferredExtractionResult {
     pub modules: Vec<ExtractedInferredModule>,
 }
 
+// ── ORIENT-BUG-1: Ecosystem-scoped module coverage ──────────────────────────
+//
+// Module ecosystems define which file languages they cover.
+// A declared module only suppresses inferred detection for files
+// in languages that belong to that module's ecosystem.
+
+/// Module ecosystem — determines which file languages a declared module covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleEcosystem {
+    /// Cargo/Rust: covers .rs files
+    Cargo,
+    /// npm/Node: covers .js, .ts, .jsx, .tsx, .mjs, .cjs files
+    Npm,
+    /// Python: covers .py, .pyi files
+    Python,
+    /// Gradle/Java: covers .java, .kt, .scala files
+    Gradle,
+}
+
+impl ModuleEcosystem {
+    /// Check if this ecosystem covers a file based on its extension.
+    fn covers_extension(&self, ext: &str) -> bool {
+        match self {
+            ModuleEcosystem::Cargo => ext == "rs",
+            ModuleEcosystem::Npm => matches!(ext, "js" | "ts" | "jsx" | "tsx" | "mjs" | "cjs"),
+            ModuleEcosystem::Python => matches!(ext, "py" | "pyi"),
+            ModuleEcosystem::Gradle => matches!(ext, "java" | "kt" | "scala"),
+        }
+    }
+}
+
+/// A declared module root with its ecosystem.
+/// Used for ecosystem-scoped coverage checks (ORIENT-BUG-1).
+#[derive(Debug, Clone)]
+pub struct DeclaredRoot {
+    /// Root path (relative to repo root, "." for repo root)
+    pub path: String,
+    /// Ecosystem that owns this module
+    pub ecosystem: ModuleEcosystem,
+}
+
 pub struct PreparedRepoInputs {
     /// Readable source files with config attached, ready for the orchestrator.
     pub file_inputs: Vec<FileInput>,
@@ -451,16 +506,21 @@ pub fn prepare_repo_inputs(repo_path: &Path) -> Result<PreparedRepoInputs, Compo
     // Extract Gradle modules from collected settings.gradle files (Phase 2b).
     let gradle_modules = extract_gradle_modules(&settings_gradle_files);
 
-    // Detect inferred modules (Phase 3) — only if no declared modules exist.
-    let has_declared_modules = !cargo_modules.modules.is_empty()
-        || !npm_modules.modules.is_empty()
-        || !pyproject_modules.modules.is_empty()
-        || !gradle_modules.modules.is_empty();
+    // Detect inferred modules (Phase 3, ORIENT-BUG-1 fix) — gap-fill approach.
+    // Collect declared module roots and run inferred detection only on uncovered paths.
+    let declared_roots = collect_declared_module_roots(
+        &cargo_modules,
+        &npm_modules,
+        &pyproject_modules,
+        &gradle_modules,
+    );
 
-    let inferred_modules = if has_declared_modules {
-        InferredExtractionResult::default()
-    } else {
+    let inferred_modules = if declared_roots.is_empty() {
+        // No declared modules — run inferred detection on all files.
         detect_inferred_modules_from_inputs(&file_inputs, repo_path)
+    } else {
+        // Gap-fill: run inferred detection only on files NOT under declared roots.
+        detect_inferred_modules_gap_fill(&file_inputs, &declared_roots, repo_path)
     };
 
     Ok(PreparedRepoInputs {
@@ -476,52 +536,96 @@ pub fn prepare_repo_inputs(repo_path: &Path) -> Result<PreparedRepoInputs, Compo
     })
 }
 
-// ── Cargo module extraction ──────────────────────────────────────────
+// ── Cargo module extraction (ORIENT-BUG-1: Deep Manifest Discovery) ─────────
 
-/// Extract Cargo modules from Cargo.toml files.
+/// Extract Cargo modules from ALL Cargo.toml files in the tree.
 ///
-/// Parses the root Cargo.toml, expands workspace member patterns using
-/// glob, and collects all resolved crates with their evidence.
+/// Deep discovery approach (ORIENT-BUG-1):
+/// 1. Find all workspace roots anywhere in tree (Cargo.toml with [workspace])
+/// 2. For each workspace root, expand members relative to that root's directory
+/// 3. Find standalone crates (Cargo.toml with [package] not discovered via workspace)
+/// 4. Deduplicate by crate_root to avoid double-counting
+///
+/// This fixes repos where Rust code lives in a subdirectory (e.g., rust/Cargo.toml).
 fn extract_cargo_modules(
     repo_path: &Path,
     cargo_toml_files: &std::collections::HashMap<String, String>,
 ) -> CargoExtractionResult {
     let mut result = CargoExtractionResult::default();
+    let mut discovered_crate_roots: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
 
-    // Check for root Cargo.toml
-    let root_manifest_path = "Cargo.toml";
-    let root_content = match cargo_toml_files.get(root_manifest_path) {
-        Some(content) => content,
-        None => return result, // No Cargo.toml at root, not a Rust project
-    };
+    // Track if root Cargo.toml exists (for compatibility)
+    result.has_root_manifest = cargo_toml_files.contains_key("Cargo.toml");
 
-    result.has_root_manifest = true;
+    // Phase 1: Find all workspace roots and expand their members
+    let mut workspace_roots: Vec<(String, Vec<String>)> = Vec::new(); // (manifest_path, patterns)
 
-    // Parse root manifest
-    let root_parsed = match cargo_manifest::parse_cargo_toml(root_content, root_manifest_path) {
-        Ok(parsed) => parsed,
-        Err(_) => return result, // Parse error, skip silently (matches Cargo behavior)
-    };
-
-    // Add root crate if it has a [package] section
-    for module in &root_parsed.modules {
-        result.modules.push(ExtractedCargoModule {
-            module: module.clone(),
-            declared_pattern: None,
-        });
+    for (manifest_path, content) in cargo_toml_files {
+        if let Ok(parsed) = cargo_manifest::parse_cargo_toml(content, manifest_path) {
+            if parsed.is_workspace_root {
+                workspace_roots.push((manifest_path.clone(), parsed.workspace_members.clone()));
+            }
+        }
     }
 
-    // If workspace root, expand member patterns
-    if root_parsed.is_workspace_root {
-        for pattern in &root_parsed.workspace_members {
-            let expanded = expand_workspace_pattern(repo_path, pattern, cargo_toml_files);
+    // Phase 2: For each workspace root, expand members relative to that root's directory
+    for (manifest_path, patterns) in &workspace_roots {
+        // Get workspace root directory (e.g., "rust" for "rust/Cargo.toml", "" for "Cargo.toml")
+        let workspace_dir = manifest_path
+            .rsplit_once('/')
+            .map(|(dir, _)| dir.to_string())
+            .unwrap_or_default();
+
+        // Check if workspace root itself has a [package] section
+        if let Some(content) = cargo_toml_files.get(manifest_path) {
+            if let Ok(parsed) = cargo_manifest::parse_cargo_toml(content, manifest_path) {
+                for module in &parsed.modules {
+                    if !discovered_crate_roots.contains(&module.crate_root) {
+                        discovered_crate_roots.insert(module.crate_root.clone());
+                        result.modules.push(ExtractedCargoModule {
+                            module: module.clone(),
+                            declared_pattern: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Expand member patterns relative to workspace directory
+        for pattern in patterns {
+            let expanded = expand_workspace_pattern_relative(
+                repo_path,
+                &workspace_dir,
+                pattern,
+                cargo_toml_files,
+            );
             if expanded.is_empty() {
                 result.unmatched_patterns.push(pattern.clone());
             } else {
                 for member_module in expanded {
+                    if !discovered_crate_roots.contains(&member_module.crate_root) {
+                        discovered_crate_roots.insert(member_module.crate_root.clone());
+                        result.modules.push(ExtractedCargoModule {
+                            module: member_module,
+                            declared_pattern: Some(pattern.clone()),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Phase 3: Find standalone crates not discovered via workspace
+    for (manifest_path, content) in cargo_toml_files {
+        if let Ok(parsed) = cargo_manifest::parse_cargo_toml(content, manifest_path) {
+            // Only consider packages, not workspace-only manifests
+            for module in &parsed.modules {
+                if !discovered_crate_roots.contains(&module.crate_root) {
+                    discovered_crate_roots.insert(module.crate_root.clone());
                     result.modules.push(ExtractedCargoModule {
-                        module: member_module,
-                        declared_pattern: Some(pattern.clone()),
+                        module: module.clone(),
+                        declared_pattern: None,
                     });
                 }
             }
@@ -531,25 +635,31 @@ fn extract_cargo_modules(
     result
 }
 
-/// Expand a workspace member pattern and return resolved modules.
+/// Expand a workspace member pattern relative to a workspace directory.
 ///
-/// Pattern examples:
-/// - "crates/foo" → direct path
-/// - "crates/*" → glob all directories under crates/
-/// - "packages/*" → glob all directories under packages/
-///
-/// For each match, checks if a Cargo.toml exists and parses it.
-fn expand_workspace_pattern(
+/// For pattern "crates/*" in workspace at "rust/Cargo.toml":
+/// - workspace_dir = "rust"
+/// - Full pattern becomes "rust/crates/*"
+/// - Member crate_root is relative to repo root (e.g., "rust/crates/foo")
+fn expand_workspace_pattern_relative(
     repo_path: &Path,
+    workspace_dir: &str,
     pattern: &str,
     cargo_toml_files: &std::collections::HashMap<String, String>,
 ) -> Vec<CargoModule> {
     let mut modules = Vec::new();
 
+    // Build full pattern path relative to repo root
+    let full_pattern_base = if workspace_dir.is_empty() {
+        pattern.to_string()
+    } else {
+        format!("{}/{}", workspace_dir, pattern)
+    };
+
     // Check if pattern contains glob characters
     if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
         // Glob expansion
-        let full_pattern = repo_path.join(pattern).join("Cargo.toml");
+        let full_pattern = repo_path.join(&full_pattern_base).join("Cargo.toml");
         let pattern_str = full_pattern.to_string_lossy();
 
         if let Ok(paths) = glob::glob(&pattern_str) {
@@ -570,7 +680,7 @@ fn expand_workspace_pattern(
         }
     } else {
         // Direct path (no glob)
-        let manifest_path = format!("{}/Cargo.toml", pattern);
+        let manifest_path = format!("{}/Cargo.toml", full_pattern_base);
         if let Some(content) = cargo_toml_files.get(&manifest_path) {
             if let Ok(parsed) = cargo_manifest::parse_cargo_toml(content, &manifest_path) {
                 for mut module in parsed.modules {
@@ -806,9 +916,152 @@ fn extract_gradle_modules(
     result
 }
 
-// ── Inferred module detection (rust-module-parity Phase 3) ────────
+// ── Inferred module detection (rust-module-parity Phase 3, ORIENT-BUG-1) ────
 
-/// Detect inferred modules from file inputs.
+/// Collect all declared module roots with their ecosystems.
+///
+/// These roots define coverage regions where inferred detection should NOT run.
+/// Coverage is ecosystem-scoped: a Cargo root only covers .rs files, npm only covers JS/TS, etc.
+/// This prevents a root npm package from suppressing Rust inference in mixed-language repos.
+fn collect_declared_module_roots(
+    cargo_modules: &CargoExtractionResult,
+    npm_modules: &NpmExtractionResult,
+    pyproject_modules: &PyprojectExtractionResult,
+    gradle_modules: &GradleExtractionResult,
+) -> Vec<DeclaredRoot> {
+    let mut roots = Vec::new();
+
+    // Cargo modules → cover Rust files
+    for m in &cargo_modules.modules {
+        let root = &m.module.crate_root;
+        let path = if root.is_empty() || root == "." {
+            ".".to_string()
+        } else {
+            root.clone()
+        };
+        roots.push(DeclaredRoot {
+            path,
+            ecosystem: ModuleEcosystem::Cargo,
+        });
+    }
+
+    // npm modules → cover JS/TS files
+    for m in &npm_modules.modules {
+        let root = &m.module.package_root;
+        let path = if root.is_empty() || root == "." {
+            ".".to_string()
+        } else {
+            root.clone()
+        };
+        roots.push(DeclaredRoot {
+            path,
+            ecosystem: ModuleEcosystem::Npm,
+        });
+    }
+
+    // pyproject modules → cover Python files
+    for m in &pyproject_modules.modules {
+        let root = &m.module.package_root;
+        let path = if root.is_empty() || root == "." {
+            ".".to_string()
+        } else {
+            root.clone()
+        };
+        roots.push(DeclaredRoot {
+            path,
+            ecosystem: ModuleEcosystem::Python,
+        });
+    }
+
+    // Gradle modules → cover Java/Kotlin/Scala files
+    for m in &gradle_modules.modules {
+        let root = &m.module.project_root;
+        let path = if root.is_empty() || root == "." {
+            ".".to_string()
+        } else {
+            root.clone()
+        };
+        roots.push(DeclaredRoot {
+            path,
+            ecosystem: ModuleEcosystem::Gradle,
+        });
+    }
+
+    roots
+}
+
+/// Check if a file is covered by any declared module root (ecosystem-scoped).
+///
+/// Coverage rule: a file at `some/path/file.rs` is covered by a Cargo root `some/path`
+/// only if:
+/// 1. The file is under that root path (or root is ".")
+/// 2. The file's extension belongs to that ecosystem (e.g., .rs for Cargo)
+///
+/// This prevents a root npm package from suppressing Rust inference.
+fn is_file_covered_by_roots(file_path: &str, roots: &[DeclaredRoot]) -> bool {
+    // Extract file extension
+    let ext = file_path.rsplit('.').next().unwrap_or("");
+
+    for root in roots {
+        // Check if ecosystem covers this file type
+        if !root.ecosystem.covers_extension(ext) {
+            continue;
+        }
+
+        // Check if file is under this root
+        if root.path == "." {
+            // Root "." covers everything (for its ecosystem)
+            return true;
+        }
+        if file_path == root.path || file_path.starts_with(&format!("{}/", root.path)) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Detect inferred modules using gap-fill approach (ORIENT-BUG-1 fix).
+///
+/// Filters file paths to exclude those covered by declared module roots,
+/// using ecosystem-scoped coverage (npm covers JS/TS, Cargo covers Rust, etc.).
+/// Then runs inferred detection on the remaining uncovered paths.
+fn detect_inferred_modules_gap_fill(
+    file_inputs: &[FileInput],
+    declared_roots: &[DeclaredRoot],
+    repo_path: &Path,
+) -> InferredExtractionResult {
+    // Filter to uncovered paths only (ecosystem-scoped)
+    let uncovered_paths: Vec<String> = file_inputs
+        .iter()
+        .map(|f| f.rel_path.clone())
+        .filter(|path| !is_file_covered_by_roots(path, declared_roots))
+        .collect();
+
+    // If all paths are covered, no inferred modules
+    if uncovered_paths.is_empty() {
+        return InferredExtractionResult::default();
+    }
+
+    // Derive repo display name from path
+    let repo_display_name = repo_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("root");
+
+    // Detect inferred modules on uncovered paths
+    let detected = inferred_modules::detect_inferred_modules(&uncovered_paths, repo_display_name);
+
+    // Convert to extraction result
+    let modules = detected
+        .modules
+        .into_iter()
+        .map(|module| ExtractedInferredModule { module })
+        .collect();
+
+    InferredExtractionResult { modules }
+}
+
+/// Detect inferred modules from file inputs (original behavior).
 ///
 /// Uses top-level directory heuristics to infer module boundaries
 /// in repos without manifest files.
@@ -2096,7 +2349,17 @@ fn persist_cargo_modules(
         .map_err(ComposeError::Storage)?;
 
     // Phase 1.5: Compute and persist file ownership.
-    let ownership = compute_cargo_file_ownership(repo_uid, snapshot_uid, &candidates, file_inputs);
+    // ORIENT-BUG-1: Only Rust files should be owned by Cargo modules.
+    let rust_files: Vec<_> = file_inputs
+        .iter()
+        .filter(|f| {
+            let lang = routing::detect_language(&f.rel_path);
+            matches!(lang, Some("rust"))
+        })
+        .cloned()
+        .collect();
+
+    let ownership = compute_cargo_file_ownership(repo_uid, snapshot_uid, &candidates, &rust_files);
 
     if !ownership.is_empty() {
         storage
@@ -2358,13 +2621,17 @@ fn persist_gradle_modules(
 ///
 /// Phase 3: persists module rows and ownership assignments for inferred modules.
 /// - Top-level directories containing source files
-/// - File ownership via longest-prefix-match (all source files)
+/// - File ownership via longest-prefix-match (uncovered files only)
+///
+/// ORIENT-BUG-1: Only compute ownership for files NOT covered by declared modules.
+/// This prevents duplicate ownership between declared and inferred modules.
 fn persist_inferred_modules(
     storage: &mut StorageConnection,
     repo_uid: &str,
     snapshot_uid: &str,
     inferred_extraction: &InferredExtractionResult,
     file_inputs: &[FileInput],
+    declared_roots: &[DeclaredRoot],
 ) -> Result<usize, ComposeError> {
     if inferred_extraction.modules.is_empty() {
         return Ok(0);
@@ -2390,8 +2657,16 @@ fn persist_inferred_modules(
         .map_err(ComposeError::Storage)?;
 
     // Compute and persist file ownership.
-    // For inferred modules, all source files are eligible (no language filter).
-    let ownership = compute_cargo_file_ownership(repo_uid, snapshot_uid, &candidates, file_inputs);
+    // ORIENT-BUG-1: Only compute ownership for files NOT covered by declared modules.
+    // This prevents a .rs file under a Cargo module from also being owned by an inferred module.
+    let uncovered_files: Vec<FileInput> = file_inputs
+        .iter()
+        .filter(|f| !is_file_covered_by_roots(&f.rel_path, declared_roots))
+        .cloned()
+        .collect();
+
+    let ownership =
+        compute_cargo_file_ownership(repo_uid, snapshot_uid, &candidates, &uncovered_files);
 
     if !ownership.is_empty() {
         storage
@@ -2640,12 +2915,20 @@ pub fn index_into_storage_with_progress(
 
     emit_progress(&mut progress, "persisting", 11, 12)?; // about to persist inferred modules
                                                          // rust-module-parity Phase 3: Persist inferred module candidates and file ownership.
+                                                         // ORIENT-BUG-1: Compute declared roots to prevent duplicate ownership.
+    let declared_roots = collect_declared_module_roots(
+        &prepared.cargo_modules,
+        &prepared.npm_modules,
+        &prepared.pyproject_modules,
+        &prepared.gradle_modules,
+    );
     persist_inferred_modules(
         storage,
         repo_uid,
         &result.snapshot_uid,
         &prepared.inferred_modules,
         &prepared.file_inputs,
+        &declared_roots,
     )?;
 
     Ok(result)
@@ -2690,6 +2973,8 @@ pub fn refresh_into_storage(
 }
 
 /// Refresh with progress reporting.
+// RMAPD-PERF-2: Allow unused timing variables when perf-trace feature is disabled.
+#[allow(unused_variables)]
 pub fn refresh_into_storage_with_progress(
     repo_path: &Path,
     storage: &mut StorageConnection,
@@ -2697,8 +2982,18 @@ pub fn refresh_into_storage_with_progress(
     options: &ComposeOptions,
     mut progress: Option<ProgressCallback<'_>>,
 ) -> Result<IndexResult, ComposeError> {
+    // RMAPD-PERF-2: Timing instrumentation for refresh regression diagnosis
+    let refresh_start = Instant::now();
+
     emit_progress(&mut progress, "scanning", 0, 1)?;
+    let scan_start = Instant::now();
     let prepared = prepare_repo_inputs(repo_path)?;
+    let scan_ms = scan_start.elapsed().as_millis();
+    perf_log!(
+        "[PERF] refresh: scan={}ms files={}",
+        scan_ms,
+        prepared.file_inputs.len()
+    );
     emit_progress(&mut progress, "scanning", 1, 1)?;
 
     let mut ts_extractor = TsExtractor::new();
@@ -2783,6 +3078,8 @@ pub fn refresh_into_storage_with_progress(
 
     // The indexer now emits per-file progress with abort checkpoints.
     // IndexError::Aborted maps to ComposeError::Aborted for transport failure.
+    // RMAPD-PERF-2: Time the core refresh
+    let refresh_core_start = Instant::now();
     let mut result = match orchestrator::refresh_repo(
         storage,
         &mut extractors,
@@ -2797,6 +3094,11 @@ pub fn refresh_into_storage_with_progress(
         Err(IndexError::Aborted) => return Err(ComposeError::Aborted),
         Err(e) => return Err(ComposeError::Index(format!("{}", e))),
     };
+    let refresh_core_ms = refresh_core_start.elapsed().as_millis();
+    perf_log!("[PERF] refresh: core_refresh={}ms", refresh_core_ms);
+
+    // RMAPD-PERF-2: Time copy-forward phase
+    let copy_forward_start = Instant::now();
 
     // ══════════════════════════════════════════════════════════════════════════
     // Contract-Driven Refresh Dispatch (ACR-2)
@@ -2815,10 +3117,18 @@ pub fn refresh_into_storage_with_progress(
         .as_ref()
         .map(|files| files.iter().map(|s| s.as_str()).collect())
         .unwrap_or_default();
+    perf_log!(
+        "[PERF] refresh: unchanged_set built, count={}",
+        unchanged_file_set.len()
+    );
 
     if let (Some(parent_uid), Some(unchanged_files)) =
         (&result.parent_snapshot_uid, &result.unchanged_files)
     {
+        perf_log!(
+            "[PERF] refresh: entering copy-forward, unchanged_files={}",
+            unchanged_files.len()
+        );
         let mut diagnostics = RefreshDiagnostics::new();
 
         // Per-family counters for backward-compatible ArtifactCopyForward
@@ -2831,6 +3141,7 @@ pub fn refresh_into_storage_with_progress(
         let contract_elements_copied: u64 = 0;
 
         // ── Contract-driven dispatch for COPY_FORWARD_FAMILIES ──
+        let copy_loop_start = Instant::now();
         for family in COPY_FORWARD_FAMILIES {
             let contract = get_contract(*family);
 
@@ -2840,6 +3151,7 @@ pub fn refresh_into_storage_with_progress(
                     // Unchanged branch: copy forward from parent snapshot
                     match family {
                         ArtifactFamily::Measurements => {
+                            let t = Instant::now();
                             let n = storage
                                 .copy_forward_measurements(
                                     parent_uid,
@@ -2848,10 +3160,16 @@ pub fn refresh_into_storage_with_progress(
                                     unchanged_files,
                                 )
                                 .map_err(ComposeError::Storage)?;
+                            perf_log!(
+                                "[PERF] refresh: copy_measurements={}ms copied={}",
+                                t.elapsed().as_millis(),
+                                n
+                            );
                             measurements_copied = n;
                             (RefreshAction::CopiedForward, Some(n as usize))
                         }
                         ArtifactFamily::Inferences => {
+                            let t = Instant::now();
                             let n = storage
                                 .copy_forward_inferences(
                                     parent_uid,
@@ -2860,10 +3178,16 @@ pub fn refresh_into_storage_with_progress(
                                     unchanged_files,
                                 )
                                 .map_err(ComposeError::Storage)?;
+                            perf_log!(
+                                "[PERF] refresh: copy_inferences={}ms copied={}",
+                                t.elapsed().as_millis(),
+                                n
+                            );
                             inferences_copied = n;
                             (RefreshAction::CopiedForward, Some(n as usize))
                         }
                         ArtifactFamily::BoundaryInteractionSurfaces => {
+                            let t = Instant::now();
                             let (surfaces, channels) = storage
                                 .copy_forward_boundary_surfaces(
                                     parent_uid,
@@ -2871,6 +3195,12 @@ pub fn refresh_into_storage_with_progress(
                                     unchanged_files,
                                 )
                                 .map_err(ComposeError::Storage)?;
+                            perf_log!(
+                                "[PERF] refresh: copy_boundaries={}ms surfaces={} channels={}",
+                                t.elapsed().as_millis(),
+                                surfaces,
+                                channels
+                            );
                             boundary_surfaces_copied = surfaces;
                             boundary_channels_copied = channels;
                             (
@@ -2899,6 +3229,8 @@ pub fn refresh_into_storage_with_progress(
                 rows_affected: rows,
             });
         }
+        let copy_loop_ms = copy_loop_start.elapsed().as_millis();
+        perf_log!("[PERF] refresh: copy_loop={}ms", copy_loop_ms);
 
         // Diagnostics are captured but not emitted here.
         // The structured data is available in `diagnostics` for future
@@ -2927,14 +3259,20 @@ pub fn refresh_into_storage_with_progress(
         // Collect stable keys of nodes from changed files. A file is "changed" if
         // it was re-extracted (not in unchanged_files). We use the stable_key format
         // `{repo_uid}:{path}#{symbol}:SYMBOL:{type}` to match nodes to changed files.
+        let impact_start = Instant::now();
         let changed_file_paths: Vec<&str> = prepared
             .file_inputs
             .iter()
             .map(|f| f.rel_path.as_str())
             .filter(|path| !unchanged_file_set.contains(*path))
             .collect();
+        perf_log!(
+            "[PERF] refresh: changed_file_paths={}",
+            changed_file_paths.len()
+        );
 
         let changed_stable_keys: Vec<String> = if changed_file_paths.is_empty() {
+            perf_log!("[PERF] refresh: skipping query_all_nodes (no changed files)");
             Vec::new()
         } else {
             // Query all nodes for the snapshot and filter to those from changed files.
@@ -2944,11 +3282,20 @@ pub fn refresh_into_storage_with_progress(
             //
             // We must check for the delimiter to avoid false-matching path prefixes
             // (e.g., "src/A.java" should not match "src/A.javax/Foo.java").
+            perf_log!("[PERF] refresh: querying all nodes...");
+            let query_start = Instant::now();
             let all_nodes = storage
                 .query_all_nodes(&result.snapshot_uid)
                 .map_err(ComposeError::Storage)?;
+            let query_ms = query_start.elapsed().as_millis();
+            perf_log!(
+                "[PERF] refresh: query_all_nodes={}ms nodes={}",
+                query_ms,
+                all_nodes.len()
+            );
 
-            all_nodes
+            let filter_start = Instant::now();
+            let result: Vec<String> = all_nodes
                 .into_iter()
                 .filter(|node| {
                     changed_file_paths.iter().any(|path| {
@@ -2960,18 +3307,39 @@ pub fn refresh_into_storage_with_progress(
                     })
                 })
                 .map(|node| node.stable_key)
-                .collect()
+                .collect();
+            let filter_ms = filter_start.elapsed().as_millis();
+            perf_log!(
+                "[PERF] refresh: filter_nodes={}ms matched={}",
+                filter_ms,
+                result.len()
+            );
+            result
         };
 
         // Propagate impact to derived artifacts whose provenance references changed stable keys
+        perf_log!("[PERF] refresh: propagating impact...");
+        let prop_start = Instant::now();
         let _impact_report: ImpactReport =
             propagate_impact(storage, &result.snapshot_uid, &changed_stable_keys)
                 .map_err(ComposeError::Storage)?;
+        let prop_ms = prop_start.elapsed().as_millis();
+        let impact_ms = impact_start.elapsed().as_millis();
+        perf_log!(
+            "[PERF] refresh: propagate_impact={}ms total_impact={}ms",
+            prop_ms,
+            impact_ms
+        );
 
         // Impact report available for future diagnostics integration.
         // Fields: total_impacted(), get(family) per artifact family.
         // TODO: Include impact_report in result diagnostics (ACR-4 follow-on)
     }
+    let copy_forward_ms = copy_forward_start.elapsed().as_millis();
+    perf_log!("[PERF] refresh: copy_forward_impact={}ms", copy_forward_ms);
+
+    // RMAPD-PERF-2: Time postpass and module persistence phase
+    let postpass_start = Instant::now();
 
     // Filter file inputs to only changed files for postpass extraction.
     // Unchanged files already have their artifacts from copy-forward.
@@ -3056,6 +3424,12 @@ pub fn refresh_into_storage_with_progress(
         &changed_files_owned,
     )?;
 
+    let early_postpass_ms = postpass_start.elapsed().as_millis();
+    perf_log!("[PERF] refresh: early_postpass={}ms", early_postpass_ms);
+
+    // RMAPD-PERF-2: Time module persistence phase
+    let module_persist_start = Instant::now();
+
     emit_progress(&mut progress, "persisting", 7, 8)?; // about to persist Cargo modules
                                                        // rust-module-parity Phase 1.5: Persist Cargo.toml-derived module candidates and file ownership.
                                                        // Always recompute from current prepared inputs (Cargo.toml content).
@@ -3121,13 +3495,32 @@ pub fn refresh_into_storage_with_progress(
 
     // rust-module-parity Phase 3: Persist inferred module candidates and file ownership.
     // Same recompute semantics as declared modules.
+    // ORIENT-BUG-1: Compute declared roots to prevent duplicate ownership.
+    let declared_roots = collect_declared_module_roots(
+        &prepared.cargo_modules,
+        &prepared.npm_modules,
+        &prepared.pyproject_modules,
+        &prepared.gradle_modules,
+    );
     persist_inferred_modules(
         storage,
         repo_uid,
         &result.snapshot_uid,
         &prepared.inferred_modules,
         &prepared.file_inputs,
+        &declared_roots,
     )?;
+
+    #[cfg(feature = "perf-trace")]
+    {
+        let module_persist_ms = module_persist_start.elapsed().as_millis();
+        let total_ms = refresh_start.elapsed().as_millis();
+        perf_log!(
+            "[PERF] refresh: module_persist={}ms total={}ms",
+            module_persist_ms,
+            total_ms
+        );
+    }
 
     Ok(result)
 }

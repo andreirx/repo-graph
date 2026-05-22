@@ -2,11 +2,35 @@
 
 ## Current Priority
 
-None active. CLI output track complete.
+**LEGACY-CONTRACT-MIGRATION-1:** Migrate 7 legacy commands to REG-1 daemon contract.
+See `docs/slices/legacy-contract-migration-1.md`.
+
+---
+
+## Queued
+
+**TS-IMPORT-RESOLUTION-1:** TypeScript aliased and namespace import resolution.
+See `docs/slices/ts-import-resolution-1.md`.
 
 ---
 
 ## Recently Implemented
+
+**ORIENT-BUG-1: Module Count Mismatch** — COMPLETE (2026-05-21)
+
+Read-model fix: orient and trust counts now align via shared `module_candidates` source.
+Refresh performance regression (RMAPD-PERF-2) fixed: batched copy-forward queries.
+Bug fixed: off-by-one in `:FILE` key extraction (-5 → -4).
+Transport timeout bug (EAGAIN) separated to RMAP-IO-1.
+
+See `docs/slices/orient-bug-1-module-count.md`.
+
+**RMAP-IO-1: Client Transport Timeout Classification** — COMPLETE (2026-05-21)
+
+macOS socket timeout (EAGAIN / os error 35) now classified as `Timeout` instead of `ReadFailed`.
+Error message: "daemon response timed out after 300s" instead of cryptic os error.
+
+See `docs/slices/rmap-io-1.md`.
 
 **SHOW-DETAIL-AUDIT-1: Unexercised Detail Command Audit** — COMPLETE (2026-05-21)
 
@@ -166,15 +190,6 @@ Delivered:
 **CLI-OUT-2A: Cross-Repo Output Audit** — HANDOFF COMPLETE
 
 Audit sufficient to drive first implementation wave. Findings in `docs/audits/cli-out-2a/`.
-
----
-
-## Bug Slices
-
-**ORIENT-BUG-1: Module Count Mismatch** — QUEUED
-
-Orient shows 2-17 modules, trust shows 19-240+. Data/query bug.
-See `docs/slices/orient-bug-1-module-count.md`.
 
 ---
 

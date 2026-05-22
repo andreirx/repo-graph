@@ -77,7 +77,9 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **CLI-OUT-2A** | Cross-repo output audit (findings + contracts) | HANDOFF COMPLETE |
 | **CLI-OUT-2B** | First-contact discovery output (orient, trust, cycles) | IMPLEMENTED |
 | **RMAPD-PERF-1** | Large repo timeout investigation | STATS FIXED |
-| **ORIENT-BUG-1** | Module count mismatch (data bug) | QUEUED |
+| **RMAPD-PERF-2** | Refresh copy-forward performance (batched queries) | COMPLETE |
+| **ORIENT-BUG-1** | Module count mismatch (data bug) | COMPLETE |
+| **RMAP-IO-1** | Client transport timeout classification | COMPLETE |
 | **CLI-OUT-2C** | stats renderer | IMPLEMENTED |
 | **CLI-OUT-3** | Graph drilldown output (callers, callees, path, imports, explain) | IMPLEMENTED |
 | **CLI-OUT-4** | Module/architecture output (modules, surfaces, boundaries) | COMPLETE |
@@ -89,15 +91,31 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **MODULE-BOUNDARY-FIX-1** | Module/boundary command defects (deps, list, summary) | COMPLETE |
 | **SHOW-DETAIL-AUDIT-1** | Detail command exercise (surfaces/boundaries show, resource readers/writers) | COMPLETE |
 | **CURSOR-1** | Cursor MCP/rules integration | QUEUED |
+| **LEGACY-CONTRACT-MIGRATION-1** | Migrate 7 legacy commands to REG-1 daemon contract | QUEUED |
+| **TS-IMPORT-RESOLUTION-1** | TypeScript aliased and namespace import resolution | QUEUED |
 | **WIN-1** | Windows distribution/install | DEFERRED |
 | **MAC-2** | macOS signing/notarization | DEFERRED |
 | **UPDATE-1** | Updater/repair channel | DEFERRED |
 
 ### Current Priority
 
-None active. See queued items: ORIENT-BUG-1, CURSOR-1.
+LEGACY-CONTRACT-MIGRATION-1 (daemon contract migration) — CURRENT.
+
+Queue: TS-IMPORT-RESOLUTION-1, CURSOR-1.
 
 ### Recently Completed
+
+**ORIENT-BUG-1: Module Count Mismatch** — COMPLETE (2026-05-21)
+
+Read-model fix: orient/trust counts now align via shared `module_candidates` source.
+RMAPD-PERF-2: batched copy-forward queries (6+ min → ~100s).
+Bug fix: `:FILE` key extraction off-by-one (-5 → -4).
+Transport timeout (EAGAIN) separated to RMAP-IO-1.
+
+**RMAP-IO-1: Client Transport Timeout Classification** — COMPLETE (2026-05-21)
+
+macOS socket timeout (EAGAIN / os error 35) now classified as `Timeout` instead of `ReadFailed`.
+User sees: "daemon response timed out after 300s" instead of cryptic os error.
 
 **SHOW-DETAIL-AUDIT-1: Detail Command Exercise** — COMPLETE (2026-05-21)
 
@@ -259,20 +277,28 @@ Completed:
 - Contracts proposed for first-contact discovery commands
 
 Gaps handed off:
-- ORIENT-BUG-1: Module count mismatch (still queued)
+- ORIENT-BUG-1: Module count mismatch (COMPLETE — fixed 2026-05-21)
 
 See `docs/audits/cli-out-2a/synthesis.md` for findings.
 
 ---
 
-### Queued Bug/Support Slices
+### Closed Bug/Support Slices
 
-**ORIENT-BUG-1: Module Count Mismatch** — QUEUED
+**ORIENT-BUG-1: Module Count Mismatch** — COMPLETE (2026-05-21)
 
-Data/query bug. Orient shows 2-17 modules when trust shows 19-240+.
-Not a renderer issue. Requires storage/query investigation.
+Read-model fix: orient/trust counts now align (Option C hybrid approach).
+Refresh performance: RMAPD-PERF-2 batched queries (6+ min → ~100s).
+Transport timeout: separated to RMAP-IO-1.
 
 See `docs/slices/orient-bug-1-module-count.md`.
+
+**RMAP-IO-1: Client Transport Timeout Classification** — COMPLETE (2026-05-21)
+
+macOS EAGAIN (os error 35) now classified as `Timeout` instead of `ReadFailed`.
+Message: "daemon response timed out after 300s".
+
+See `docs/slices/rmap-io-1.md`.
 
 ---
 

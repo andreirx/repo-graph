@@ -314,57 +314,58 @@ impl TrustStorageRead for StorageConnection {
         &self,
         snapshot_uid: &str,
     ) -> Result<Vec<TrustModuleStats>, StorageError> {
-        // Mirrors TS computeModuleStats at sqlite-storage.ts:2846,
-        // simplified to the 5 fields TrustModuleStats carries.
-        // The TS version computes 10 fields with 12 parameter
-        // bindings (symbol_count, abstract_count, type_count
-        // correlated subqueries + instability, abstractness,
-        // distance_from_main_sequence derived computations).
-        // The trust service only reads stable_key, path, fan_in,
-        // fan_out, file_count, so the 3 correlated subqueries and
-        // derived metrics are dropped. 6 → 1 parameter bindings
-        // via numbered parameter ?1.
+        // ORIENT-BUG-1: Rewritten to use module_candidates as source of truth.
         //
-        // Null guard: `m.qualified_name IS NOT NULL` excludes
-        // MODULE nodes that lack a qualified_name. Without this,
-        // the row mapper would need to coerce NULL to empty string
-        // (silent data fabrication) or fail on every such row.
+        // Previous implementation started from MODULE nodes in `nodes` table,
+        // which are directory-based and don't align with module_candidates.
+        // This caused trust to report different module counts than orient.
+        //
+        // New implementation:
+        // 1. Start from module_candidates (semantic module model)
+        // 2. Get file counts from module_file_ownership table
+        // 3. LEFT JOIN to MODULE nodes for fan_in/fan_out metrics
+        // 4. Modules without matching MODULE nodes get 0 fan_in/fan_out
+        //
+        // The stable_key is synthesized from repo_uid and canonical_root_path
+        // to match the format used by MODULE nodes (repo_uid:path:MODULE).
         let mut stmt = self.connection().prepare(
             "SELECT \
-			   m.stable_key, \
-			   m.qualified_name AS path, \
-			   COALESCE(fan_in.cnt, 0) AS fan_in, \
-			   COALESCE(fan_out.cnt, 0) AS fan_out, \
-			   COALESCE(files.cnt, 0) AS file_count \
-			 FROM nodes m \
-			 LEFT JOIN ( \
-			   SELECT target_node_uid AS nid, COUNT(DISTINCT source_node_uid) AS cnt \
-			   FROM edges \
-			   WHERE snapshot_uid = ?1 AND type = 'IMPORTS' \
-			     AND source_node_uid IN ( \
-			       SELECT node_uid FROM nodes WHERE snapshot_uid = ?1 AND kind = 'MODULE' \
-			     ) \
-			   GROUP BY target_node_uid \
-			 ) fan_in ON fan_in.nid = m.node_uid \
-			 LEFT JOIN ( \
-			   SELECT source_node_uid AS nid, COUNT(DISTINCT target_node_uid) AS cnt \
-			   FROM edges \
-			   WHERE snapshot_uid = ?1 AND type = 'IMPORTS' \
-			     AND target_node_uid IN ( \
-			       SELECT node_uid FROM nodes WHERE snapshot_uid = ?1 AND kind = 'MODULE' \
-			     ) \
-			   GROUP BY source_node_uid \
-			 ) fan_out ON fan_out.nid = m.node_uid \
-			 LEFT JOIN ( \
-			   SELECT source_node_uid AS nid, COUNT(*) AS cnt \
-			   FROM edges \
-			   WHERE snapshot_uid = ?1 AND type = 'OWNS' \
-			   GROUP BY source_node_uid \
-			 ) files ON files.nid = m.node_uid \
-			 WHERE m.snapshot_uid = ?1 AND m.kind = 'MODULE' \
-			   AND m.qualified_name IS NOT NULL \
-			   AND COALESCE(files.cnt, 0) > 0 \
-			 ORDER BY m.qualified_name",
+               mc.repo_uid || ':' || mc.canonical_root_path || ':MODULE' AS stable_key, \
+               mc.canonical_root_path AS path, \
+               COALESCE(fan_in.cnt, 0) AS fan_in, \
+               COALESCE(fan_out.cnt, 0) AS fan_out, \
+               COALESCE(files.cnt, 0) AS file_count \
+             FROM module_candidates mc \
+             LEFT JOIN nodes m ON m.snapshot_uid = mc.snapshot_uid \
+               AND m.kind = 'MODULE' \
+               AND m.qualified_name = mc.canonical_root_path \
+             LEFT JOIN ( \
+               SELECT target_node_uid AS nid, COUNT(DISTINCT source_node_uid) AS cnt \
+               FROM edges \
+               WHERE snapshot_uid = ?1 AND type = 'IMPORTS' \
+                 AND source_node_uid IN ( \
+                   SELECT node_uid FROM nodes WHERE snapshot_uid = ?1 AND kind = 'MODULE' \
+                 ) \
+               GROUP BY target_node_uid \
+             ) fan_in ON fan_in.nid = m.node_uid \
+             LEFT JOIN ( \
+               SELECT source_node_uid AS nid, COUNT(DISTINCT target_node_uid) AS cnt \
+               FROM edges \
+               WHERE snapshot_uid = ?1 AND type = 'IMPORTS' \
+                 AND target_node_uid IN ( \
+                   SELECT node_uid FROM nodes WHERE snapshot_uid = ?1 AND kind = 'MODULE' \
+                 ) \
+               GROUP BY source_node_uid \
+             ) fan_out ON fan_out.nid = m.node_uid \
+             LEFT JOIN ( \
+               SELECT module_candidate_uid, COUNT(*) AS cnt \
+               FROM module_file_ownership \
+               WHERE snapshot_uid = ?1 \
+               GROUP BY module_candidate_uid \
+             ) files ON files.module_candidate_uid = mc.module_candidate_uid \
+             WHERE mc.snapshot_uid = ?1 \
+               AND COALESCE(files.cnt, 0) > 0 \
+             ORDER BY mc.canonical_root_path",
         )?;
 
         let rows = stmt.query_map(rusqlite::params![snapshot_uid], |row| {

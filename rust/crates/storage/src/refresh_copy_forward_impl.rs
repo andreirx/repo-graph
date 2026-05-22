@@ -34,10 +34,11 @@ impl StorageConnection {
     /// Copy forward measurements for unchanged files.
     ///
     /// Measurements are keyed by `target_stable_key` which contains the file path.
-    /// Format: `<repo_uid>:<file_path>#<symbol>:SYMBOL:<subtype>`
+    /// Format: `<repo_uid>:<file_path>#<symbol>:SYMBOL:<subtype>` for symbol measurements
+    /// Format: `<repo_uid>:<file_path>:FILE` for file-level measurements
     ///
-    /// For each unchanged file, copies measurements whose target_stable_key
-    /// starts with `<repo_uid>:<file_path>` from parent to current snapshot.
+    /// RMAPD-PERF-2: Uses batched temp table approach instead of per-file queries.
+    /// Extracts file path from stable_key and joins against temp table.
     pub fn copy_forward_measurements(
         &self,
         parent_snapshot_uid: &str,
@@ -50,17 +51,33 @@ impl StorageConnection {
         }
 
         let conn = self.connection();
-        let mut copied = 0u64;
 
-        // Build LIKE patterns for each unchanged file path.
-        // target_stable_key format: <repo_uid>:<file_path>#...
-        // We match on the file path prefix.
-        for file_path in unchanged_file_paths {
-            let prefix = format!("{}:{}#%", repo_uid, file_path);
-            let prefix_file_only = format!("{}:{}:FILE", repo_uid, file_path);
+        // Build temp table of unchanged file paths for efficient batch join.
+        conn.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS _unchanged_files_m (path TEXT PRIMARY KEY)",
+            [],
+        )?;
+        conn.execute("DELETE FROM _unchanged_files_m", [])?;
 
-            // Copy measurements matching this file's symbols or the file itself.
-            let rows = conn.execute(
+        {
+            let mut stmt = conn.prepare("INSERT INTO _unchanged_files_m (path) VALUES (?)")?;
+            for path in unchanged_file_paths {
+                stmt.execute([path])?;
+            }
+        }
+
+        // Extract file path from target_stable_key:
+        // - Symbol measurements: "repo:path#symbol:SYMBOL:type" → extract between first ':' and '#'
+        // - File measurements: "repo:path:FILE" → extract between first ':' and ':FILE'
+        //
+        // Use INSTR to find delimiters and SUBSTR to extract.
+        // The prefix is repo_uid + ':' which we know the length of.
+        // RMAPD-PERF-2: SQLite SUBSTR is 1-indexed.
+        // repo_uid:path#... where repo_uid is at positions 1..N, colon is at N+1, path starts at N+2.
+        let prefix_len = repo_uid.len() + 2; // +1 for colon + 1 for SQLite 1-indexing
+
+        let copied = conn.execute(
+            &format!(
                 "INSERT INTO measurements (
                     measurement_uid, snapshot_uid, repo_uid,
                     target_stable_key, kind, value_json, source, created_at
@@ -76,23 +93,32 @@ impl StorageConnection {
                     created_at
                 FROM measurements
                 WHERE snapshot_uid = ?2
-                  AND (target_stable_key LIKE ?3 OR target_stable_key = ?4)",
-                rusqlite::params![
-                    current_snapshot_uid,
-                    parent_snapshot_uid,
-                    prefix,
-                    prefix_file_only,
-                ],
-            )?;
-            copied += rows as u64;
-        }
+                  AND repo_uid = ?3
+                  AND (
+                    -- Symbol measurements: extract path between prefix and '#'
+                    (INSTR(target_stable_key, '#') > 0 AND
+                     SUBSTR(target_stable_key, {prefix_len}, INSTR(target_stable_key, '#') - {prefix_len})
+                       IN (SELECT path FROM _unchanged_files_m))
+                    OR
+                    -- File measurements: extract path between prefix and ':FILE'
+                    -- Formula: total_len - prefix_len - 4 (not -5)
+                    -- Because: total = prefix_len-1 + path_len + 5, so path_len = total - prefix_len + 1 - 5 = total - prefix_len - 4
+                    (target_stable_key LIKE '%:FILE' AND
+                     SUBSTR(target_stable_key, {prefix_len}, LENGTH(target_stable_key) - {prefix_len} - 4)
+                       IN (SELECT path FROM _unchanged_files_m))
+                  )",
+                prefix_len = prefix_len
+            ),
+            rusqlite::params![current_snapshot_uid, parent_snapshot_uid, repo_uid],
+        )?;
 
-        Ok(copied)
+        Ok(copied as u64)
     }
 
     /// Copy forward inferences for unchanged files.
     ///
     /// Similar to measurements, inferences use `target_stable_key` for anchoring.
+    /// RMAPD-PERF-2: Uses batched temp table approach instead of per-file queries.
     pub fn copy_forward_inferences(
         &self,
         parent_snapshot_uid: &str,
@@ -105,17 +131,30 @@ impl StorageConnection {
         }
 
         let conn = self.connection();
-        let mut copied = 0u64;
 
-        for file_path in unchanged_file_paths {
-            let prefix = format!("{}:{}#%", repo_uid, file_path);
-            let prefix_file_only = format!("{}:{}:FILE", repo_uid, file_path);
+        // Build temp table of unchanged file paths for efficient batch join.
+        conn.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS _unchanged_files_i (path TEXT PRIMARY KEY)",
+            [],
+        )?;
+        conn.execute("DELETE FROM _unchanged_files_i", [])?;
 
-            // Copy forward inferences including provenance_json and freshness_state (ACR-4).
-            // Preserving these columns enables impact propagation on copy-forwarded rows:
-            // - provenance_json: tracks L0 dependencies
-            // - freshness_state: preserved so 'current' stays 'current' until impacted
-            let rows = conn.execute(
+        {
+            let mut stmt = conn.prepare("INSERT INTO _unchanged_files_i (path) VALUES (?)")?;
+            for path in unchanged_file_paths {
+                stmt.execute([path])?;
+            }
+        }
+
+        // RMAPD-PERF-2: SQLite SUBSTR is 1-indexed.
+        let prefix_len = repo_uid.len() + 2; // +1 for colon + 1 for SQLite 1-indexing
+
+        // Copy forward inferences including provenance_json and freshness_state (ACR-4).
+        // Preserving these columns enables impact propagation on copy-forwarded rows:
+        // - provenance_json: tracks L0 dependencies
+        // - freshness_state: preserved so 'current' stays 'current' until impacted
+        let copied = conn.execute(
+            &format!(
                 "INSERT INTO inferences (
                     inference_uid, snapshot_uid, repo_uid,
                     target_stable_key, kind, value_json, confidence,
@@ -137,18 +176,25 @@ impl StorageConnection {
                     freshness_state
                 FROM inferences
                 WHERE snapshot_uid = ?2
-                  AND (target_stable_key LIKE ?3 OR target_stable_key = ?4)",
-                rusqlite::params![
-                    current_snapshot_uid,
-                    parent_snapshot_uid,
-                    prefix,
-                    prefix_file_only,
-                ],
-            )?;
-            copied += rows as u64;
-        }
+                  AND repo_uid = ?3
+                  AND (
+                    -- Symbol inferences: extract path between prefix and '#'
+                    (INSTR(target_stable_key, '#') > 0 AND
+                     SUBSTR(target_stable_key, {prefix_len}, INSTR(target_stable_key, '#') - {prefix_len})
+                       IN (SELECT path FROM _unchanged_files_i))
+                    OR
+                    -- File inferences: extract path between prefix and ':FILE'
+                    -- Formula: total_len - prefix_len - 4 (not -5)
+                    (target_stable_key LIKE '%:FILE' AND
+                     SUBSTR(target_stable_key, {prefix_len}, LENGTH(target_stable_key) - {prefix_len} - 4)
+                       IN (SELECT path FROM _unchanged_files_i))
+                  )",
+                prefix_len = prefix_len
+            ),
+            rusqlite::params![current_snapshot_uid, parent_snapshot_uid, repo_uid],
+        )?;
 
-        Ok(copied)
+        Ok(copied as u64)
     }
 
     /// Copy forward boundary interaction surfaces for unchanged source files.

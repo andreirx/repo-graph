@@ -55,6 +55,12 @@ pub enum DaemonClientError {
         /// Optional structured data (e.g., ambiguous symbol matches).
         data: Option<serde_json::Value>,
     },
+    /// Read timed out waiting for daemon response.
+    ///
+    /// RMAP-IO-1: On macOS, socket read timeout returns EAGAIN (os error 35),
+    /// which manifests as `io::ErrorKind::WouldBlock` or `io::ErrorKind::TimedOut`.
+    /// This variant distinguishes timeout from actual read failures.
+    Timeout { timeout_secs: u64 },
 }
 
 impl std::fmt::Display for DaemonClientError {
@@ -67,11 +73,28 @@ impl std::fmt::Display for DaemonClientError {
             Self::DaemonError { code, message, .. } => {
                 write!(f, "daemon error [{}]: {}", code, message)
             }
+            Self::Timeout { timeout_secs } => {
+                write!(f, "daemon response timed out after {}s", timeout_secs)
+            }
         }
     }
 }
 
 impl std::error::Error for DaemonClientError {}
+
+/// Classify an I/O error from socket read into the appropriate DaemonClientError.
+///
+/// RMAP-IO-1: On macOS, socket read timeout returns EAGAIN (os error 35),
+/// which maps to `WouldBlock`. `TimedOut` is the portable variant.
+/// Both are classified as `Timeout` to provide a clear user message.
+fn classify_read_error(e: std::io::Error, timeout_secs: u64) -> DaemonClientError {
+    match e.kind() {
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+            DaemonClientError::Timeout { timeout_secs }
+        }
+        _ => DaemonClientError::ReadFailed(e.to_string()),
+    }
+}
 
 /// NDJSON request envelope (matches daemon-transport protocol).
 #[derive(Debug, Serialize)]
@@ -192,7 +215,7 @@ impl DaemonConnection {
             let mut line = String::new();
             self.reader
                 .read_line(&mut line)
-                .map_err(|e| DaemonClientError::ReadFailed(e.to_string()))?;
+                .map_err(|e| classify_read_error(e, READ_TIMEOUT_SECS))?;
 
             if line.is_empty() {
                 return Err(DaemonClientError::ReadFailed(
@@ -377,6 +400,51 @@ mod tests {
                 assert_eq!(message, "test failure");
             }
             other => panic!("expected DaemonError, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn timeout_error_displays_correctly() {
+        let err = DaemonClientError::Timeout { timeout_secs: 300 };
+        assert_eq!(err.to_string(), "daemon response timed out after 300s");
+    }
+
+    #[test]
+    fn timeout_error_is_distinct_from_read_failed() {
+        // Verify the error variants are distinct for pattern matching
+        let timeout = DaemonClientError::Timeout { timeout_secs: 60 };
+        let read_failed = DaemonClientError::ReadFailed("some error".to_string());
+
+        assert!(matches!(timeout, DaemonClientError::Timeout { .. }));
+        assert!(matches!(read_failed, DaemonClientError::ReadFailed(_)));
+        assert!(!matches!(timeout, DaemonClientError::ReadFailed(_)));
+        assert!(!matches!(read_failed, DaemonClientError::Timeout { .. }));
+    }
+
+    #[test]
+    fn classify_read_error_maps_would_block_to_timeout() {
+        // RMAP-IO-1: WouldBlock (EAGAIN on macOS) should map to Timeout
+        let io_err = std::io::Error::new(std::io::ErrorKind::WouldBlock, "would block");
+        let result = super::classify_read_error(io_err, 300);
+        assert!(matches!(result, DaemonClientError::Timeout { timeout_secs: 300 }));
+    }
+
+    #[test]
+    fn classify_read_error_maps_timed_out_to_timeout() {
+        // RMAP-IO-1: TimedOut should map to Timeout
+        let io_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out");
+        let result = super::classify_read_error(io_err, 60);
+        assert!(matches!(result, DaemonClientError::Timeout { timeout_secs: 60 }));
+    }
+
+    #[test]
+    fn classify_read_error_maps_other_errors_to_read_failed() {
+        // Other errors should map to ReadFailed
+        let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "connection reset");
+        let result = super::classify_read_error(io_err, 300);
+        assert!(matches!(result, DaemonClientError::ReadFailed(_)));
+        if let DaemonClientError::ReadFailed(msg) = result {
+            assert!(msg.contains("connection reset"));
         }
     }
 }

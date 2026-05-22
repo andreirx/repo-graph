@@ -100,5 +100,11 @@ tree-sitter-c = "0.23"
 # Tree-sitter for BI-1C SharedArrayBuffer/Worker boundary detection (TEMPORARY).
 tree-sitter-typescript = "0.23"
 
+[features]
+default = []
+# Enable PERF timing instrumentation for refresh path diagnosis.
+# Logs to stderr (daemon.log). Use for debugging refresh performance.
+perf-trace = []
+
 [dev-dependencies]
 tempfile = "3"

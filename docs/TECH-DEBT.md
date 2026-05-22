@@ -3191,3 +3191,105 @@ pathological query was found and fixed. Future heavy operations could
 still encounter issues.
 
 See `docs/slices/rmapd-perf-1-timeout.md` for honest assessment.
+
+### RMAPD-PERF-2: Refresh Copy-Forward Query Performance — COMPLETE
+
+**Discovered:** 2026-05-21 during ORIENT-BUG-1 validation  
+**Fixed:** 2026-05-21
+
+**Symptom:** `rmap refresh` on large repos (Django) took 6+ minutes, causing
+client timeout. Daemon continued processing after client disconnect.
+
+**Root Cause (OBSERVED via timing instrumentation):**
+
+`copy_forward_measurements()` executed one SQL INSERT...SELECT per unchanged file:
+```
+for file_path in unchanged_file_paths {  // 3015 iterations
+    conn.execute("INSERT ... WHERE ... LIKE ?3", ...)?;  // ~23ms each
+}
+// Total: 3015 * 23ms = 69,345ms (69 seconds)
+```
+
+**Evidence:**
+```
+[PERF] refresh: copy_measurements=71170ms copied=11386  // BEFORE FIX (per-file)
+[PERF] refresh: copy_measurements=34416ms copied=121015 // AFTER FIX (batched)
+```
+
+**Fix:** Replaced per-file loop with batched temp-table approach:
+1. Insert all unchanged paths into temp table `_unchanged_files_m`
+2. Single INSERT...SELECT with SUBSTR extraction and IN subquery
+
+**Bug fix:** `:FILE` key extraction off-by-one.
+- Wrong: `LENGTH(target_stable_key) - prefix_len - 5`
+- Correct: `LENGTH(target_stable_key) - prefix_len - 4`
+- This truncated last character of file path for file-level measurements/inferences.
+
+**Files modified:**
+- `rust/crates/storage/src/refresh_copy_forward_impl.rs`
+
+**Result:**
+- Django refresh: 6+ min (timeout) → ~100 seconds (completes)
+- copy_loop: 71s → 34s for 121K measurements (2x improvement)
+
+**Separately fixed (RMAP-IO-1):**
+- EAGAIN / os error 35: Transport timeout classification. See RMAPD-PERF-2C (now FIXED).
+
+**Remaining performance note:**
+SQLite cannot index SUBSTR expressions. The 34s copy time is due to
+full-table scan with expression evaluation. Further optimization would
+require schema changes (storing extracted path as indexed column).
+See RMAPD-PERF-2B below.
+
+### RMAPD-PERF-2B: Copy-Forward Path Extraction Not Indexed — DEFERRED
+
+**Discovered:** 2026-05-21 during RMAPD-PERF-2 fix
+
+**Symptom:** Copy-forward queries take 34s for 121K measurements due to
+SUBSTR evaluation on every row (O(n) full scan).
+
+**Current implementation:**
+```sql
+SUBSTR(target_stable_key, 32, INSTR(target_stable_key, '#') - 32)
+  IN (SELECT path FROM _unchanged_files_m)
+```
+
+**Why not indexed:** SQLite cannot create indexes on expression results.
+The SUBSTR extraction runs for every row in measurements table.
+
+**Potential fix:** Add denormalized `anchor_file_path` column to measurements
+table, populated at write time. Add index on (snapshot_uid, anchor_file_path).
+
+**Trade-off:**
+- Pro: Copy-forward becomes O(log n) index scan instead of O(n) full scan
+- Con: Storage overhead, write-time extraction, schema migration
+
+**Priority:** Low (current 34s is acceptable, only affects large repos)
+
+**Not addressed in RMAPD-PERF-2 fix because:**
+- Current performance is acceptable (~100s total vs 6+ min timeout)
+- Schema changes require migration strategy
+- Complexity vs benefit ratio unfavorable
+
+### RMAPD-PERF-2C: EAGAIN / os error 35 Transport Bug — FIXED (RMAP-IO-1)
+
+**Discovered:** 2026-05-21 during ORIENT-BUG-1 validation  
+**Status:** FIXED
+
+**Symptom:** Client reported `Resource temporarily unavailable (os error 35)`
+during refresh on large repos. This is EAGAIN from socket read timeout.
+
+**Root Cause (IDENTIFIED):**
+- macOS socket read timeout returns EAGAIN (error 35), not ETIMEDOUT
+- Client mapped all I/O errors to `ReadFailed`, losing timeout distinction
+- User saw cryptic "os error 35" instead of "timed out after 300s"
+
+**Fix (RMAP-IO-1):**
+- Added `Timeout` variant to `DaemonClientError`
+- Map `io::ErrorKind::WouldBlock` and `io::ErrorKind::TimedOut` to `Timeout`
+- User now sees: "daemon response timed out after 300s"
+
+**Files modified:**
+- `rust/crates/rgr/src/daemon_client/connection.rs`
+
+See `docs/slices/rmap-io-1.md`.
