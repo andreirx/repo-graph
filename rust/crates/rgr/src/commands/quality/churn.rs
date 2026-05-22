@@ -10,239 +10,58 @@
 //! - Deterministic ordering (by lines_changed desc, then path asc)
 //! - Full output, no truncation
 //!
-//! # Legacy Contract Exception
+//! # REG-1 Contract (LEGACY-CONTRACT-MIGRATION-1B)
 //!
-//! This command uses legacy direct-storage contract (explicit db_path/repo_uid),
-//! not REG-1 daemon contract.
+//! Migrated from legacy `<db_path> <repo_uid>` contract to REG-1:
+//! - Repo resolved from cwd via daemon
+//! - No storage paths in user-facing contract
 //!
 //! # Boundary rules
 //!
 //! This module owns churn command behavior:
 //! - `run_churn` handler
-//! - `parse_churn_args` (also used by risk command)
-//! - `ChurnRow` DTO
+//! - CLI argument parsing for `--since` and `--json`
+//! - Presentation DTO (via presentation::churn)
 //!
 //! This module does **not** own:
-//! - shared infrastructure (lives in `crate::cli`)
-//! - git churn extraction (belongs in `repo-graph-git`)
+//! - Shared daemon support (lives in `crate::daemon_command`)
+//! - Git churn extraction (belongs in `repo-graph-git`)
 
-use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::{build_envelope, open_storage, resolve_repo_root};
+use crate::daemon_command::{
+    execute_repo_request, output_result, print_daemon_error, EXIT_RUNTIME_ERROR, EXIT_USAGE_ERROR,
+};
+use crate::presentation::churn::ChurnResponse;
 
-// ── churn command ────────────────────────────────────────────────
-
-/// Output row for churn command.
-#[derive(serde::Serialize)]
-pub(super) struct ChurnRow {
-    file_path: String,
-    commit_count: u64,
-    lines_changed: u64,
+fn print_usage() {
+    eprintln!("usage: rmap churn [--since <expr>] [--json]");
+    eprintln!();
+    eprintln!("Show file churn (commits and lines changed) for the repository.");
+    eprintln!("Repository is resolved from current working directory.");
+    eprintln!();
+    eprintln!("Options:");
+    eprintln!("  --since <expr>  Time window (default: 90.days.ago)");
+    eprintln!("  --json          Output raw JSON instead of human-readable text");
 }
 
-pub fn run_churn(args: &[String]) -> ExitCode {
-    // Parse args: <db_path> <repo_uid> [--since <expr>] [--json]
-    // Default --since: 90.days.ago
-    let parsed = match parse_since_args(args) {
-        Ok(p) => p,
-        Err(e) => {
-            match e {
-                SinceArgsError::MissingArgs => {
-                    eprintln!("usage: rmap churn <db_path> <repo_uid> [--since <expr>] [--json]");
-                }
-                SinceArgsError::SinceMissingValue => {
-                    eprintln!("error: --since requires a value");
-                }
-                SinceArgsError::UnknownArgument(arg) => {
-                    eprintln!("error: unknown argument: {}", arg);
-                }
-            }
-            return ExitCode::from(1);
-        }
-    };
-
-    let db_path = parsed.db_path;
-    let repo_uid = parsed.repo_uid;
-    let since = parsed.since;
-    let json_mode = parsed.json_mode;
-
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
-            return ExitCode::from(2);
-        }
-    };
-
-    let snapshot = match storage.get_latest_snapshot(repo_uid) {
-        Ok(Some(snap)) => snap,
-        Ok(None) => {
-            eprintln!("error: no snapshot found for repo '{}'", repo_uid);
-            return ExitCode::from(2);
-        }
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Get repo for root_path (needed to invoke git)
-    use repo_graph_storage::types::RepoRef;
-    let repo = match storage.get_repo(&RepoRef::Uid(repo_uid.to_string())) {
-        Ok(Some(r)) => r,
-        Ok(None) => {
-            eprintln!("error: repo not found: {}", repo_uid);
-            return ExitCode::from(2);
-        }
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Get indexed files for filtering
-    let indexed_files = match storage.get_files_by_repo(repo_uid) {
-        Ok(files) => files,
-        Err(e) => {
-            eprintln!("error: failed to read indexed files: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    let indexed_paths: std::collections::HashSet<&str> =
-        indexed_files.iter().map(|f| f.path.as_str()).collect();
-
-    // Call git crate for churn
-    use repo_graph_git::{get_file_churn, ChurnWindow};
-    let window = ChurnWindow::new(&since);
-
-    // Resolve repo root relative to DB location (cwd-independent)
-    let repo_path = match resolve_repo_root(db_path, &repo.root_path) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    let raw_churn = match get_file_churn(&repo_path, &window) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: git churn failed: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Filter to indexed files only, preserving git crate ordering
-    let results: Vec<ChurnRow> = raw_churn
-        .into_iter()
-        .filter(|entry| indexed_paths.contains(entry.file_path.as_str()))
-        .map(|entry| ChurnRow {
-            file_path: entry.file_path,
-            commit_count: entry.commit_count,
-            lines_changed: entry.lines_changed,
-        })
-        .collect();
-
-    // Build envelope with extra `since` field
-    let count = results.len();
-    let mut extra = serde_json::Map::new();
-    extra.insert(
-        "since".to_string(),
-        serde_json::Value::String(since.clone()),
-    );
-
-    let output = match build_envelope(
-        &storage,
-        "churn",
-        repo_uid,
-        &snapshot,
-        serde_json::to_value(&results).unwrap(),
-        count,
-        extra,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    if json_mode {
-        // Raw JSON output
-        match serde_json::to_string_pretty(&output) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                ExitCode::from(2)
-            }
-        }
-    } else {
-        // Human-readable output
-        use crate::presentation::churn::ChurnResponse;
-
-        match serde_json::from_value::<ChurnResponse>(output) {
-            Ok(response) => {
-                print!("{}", response.render_human());
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("error: failed to parse response for rendering: {}", e);
-                ExitCode::from(2)
-            }
-        }
-    }
+/// Parsed arguments for churn command.
+struct ChurnArgs {
+    since: String,
+    json_mode: bool,
 }
 
-/// Typed parse error for since-window commands.
-///
-/// Allows callers to provide their own usage strings without
-/// string inspection.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SinceArgsError {
-    /// Missing required positional args (db_path, repo_uid).
-    MissingArgs,
-    /// --since flag without value.
-    SinceMissingValue,
-    /// Unknown argument encountered.
-    UnknownArgument(String),
-}
-
-/// Parsed result from since-window commands.
-pub struct SinceArgs<'a> {
-    pub db_path: &'a Path,
-    pub repo_uid: &'a str,
-    pub since: String,
-    pub json_mode: bool,
-}
-
-/// Parse args for commands with `<db_path> <repo_uid> [--since <expr>] [--json]` signature.
-///
-/// Used by churn and risk commands (same arg signature).
-/// Returns typed errors so each caller can provide its own usage string.
-pub fn parse_since_args(args: &[String]) -> Result<SinceArgs<'_>, SinceArgsError> {
-    if args.len() < 2 {
-        return Err(SinceArgsError::MissingArgs);
-    }
-
-    let db_path = Path::new(&args[0]);
-    let repo_uid = &args[1];
-
-    // Default window
+fn parse_args(args: &[String]) -> Result<ChurnArgs, ExitCode> {
     let mut since = "90.days.ago".to_string();
     let mut json_mode = false;
+    let mut i = 0;
 
-    // Parse optional flags
-    let mut i = 2;
     while i < args.len() {
         match args[i].as_str() {
             "--since" => {
                 if i + 1 >= args.len() {
-                    return Err(SinceArgsError::SinceMissingValue);
+                    eprintln!("error: --since requires a value");
+                    return Err(ExitCode::from(EXIT_USAGE_ERROR));
                 }
                 since = args[i + 1].clone();
                 i += 2;
@@ -251,16 +70,50 @@ pub fn parse_since_args(args: &[String]) -> Result<SinceArgs<'_>, SinceArgsError
                 json_mode = true;
                 i += 1;
             }
-            _ => {
-                return Err(SinceArgsError::UnknownArgument(args[i].clone()));
+            flag if flag.starts_with("--") => {
+                eprintln!("error: unknown flag: {}", flag);
+                print_usage();
+                return Err(ExitCode::from(EXIT_USAGE_ERROR));
+            }
+            other => {
+                eprintln!("error: unexpected argument: {}", other);
+                print_usage();
+                return Err(ExitCode::from(EXIT_USAGE_ERROR));
             }
         }
     }
 
-    Ok(SinceArgs {
-        db_path,
-        repo_uid,
-        since,
-        json_mode,
-    })
+    Ok(ChurnArgs { since, json_mode })
+}
+
+/// Run the `rmap churn` command.
+///
+/// Usage: `rmap churn [--since <expr>] [--json]`
+///
+/// Exit codes:
+/// - 0: success
+/// - 1: usage error
+/// - 2: runtime error (daemon unavailable, repo not indexed, computation failure)
+pub fn run_churn(args: &[String]) -> ExitCode {
+    let parsed = match parse_args(args) {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+
+    // Build params for daemon request
+    let params = serde_json::json!({
+        "since": parsed.since,
+    });
+
+    // Execute request via daemon
+    let result = match execute_repo_request("churn", Some(params)) {
+        Ok(r) => r,
+        Err(e) => {
+            print_daemon_error(&e, "churn");
+            return ExitCode::from(EXIT_RUNTIME_ERROR);
+        }
+    };
+
+    // Output result
+    output_result::<ChurnResponse, _>(result, parsed.json_mode, |response| response.render_human())
 }

@@ -3335,3 +3335,38 @@ for maintenance burden.
 **Priority:** Medium — the parity test is the cross-runtime contract gate
 for Rust-2. Until regenerated, schema drift between TS and Rust adapters
 may go undetected.
+
+## Quality Handler Bug Fixes
+
+### Git Spawn Failure in Quality Commands — FIXED (2026-05-22)
+
+**Discovered:** 2026-05-22 during LEGACY-CONTRACT-MIGRATION-1B validation  
+**Status:** FIXED
+
+**Symptom:** `rmap churn`, `rmap hotspots`, `rmap risk` commands failed with:
+```
+error: InternalError: git churn failed: failed to spawn git: No such file or directory (os error 2)
+```
+
+**Root Cause Analysis:**
+
+1. **Missing PATH in launchd:** The daemon launchd plist lacked PATH environment variable.
+   Fix: Added `PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin` to plist template.
+
+2. **Relative `root_path` not resolved:** The `repos.root_path` column stores paths
+   relative to the db_path location (e.g., `../../../../Documents/repo`). The handler
+   passed this relative path directly to `Command::new("git").current_dir(path)`.
+
+   Problem: The daemon runs with cwd=`/` (root). Resolving `../../../../Documents/repo`
+   from `/` fails when there aren't enough parent segments to reach the target.
+
+   Fix: Added `resolve_root_path(db_path, relative_root_path)` helper in
+   `handlers/quality.rs` that joins the path relative to db_path's parent directory
+   and canonicalizes.
+
+**Files modified:**
+- `scripts/templates/com.repo-graph.rmapd.plist` — added PATH
+- `rust/crates/daemon-runtime/src/handlers/quality.rs` — resolve_root_path helper
+
+**Verification:** All quality commands (churn, hotspots, risk, coverage) working
+on live daemon with launchd service.

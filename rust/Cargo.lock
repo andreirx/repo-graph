@@ -984,7 +984,7 @@ dependencies = [
 
 [[package]]
 name = "repo-graph-algorithms"
-version = "0.1.9"
+version = "0.2.0"
 
 [[package]]
 name = "repo-graph-boundary-interaction"
@@ -1024,6 +1024,7 @@ dependencies = [
 name = "repo-graph-classification"
 version = "0.1.0"
 dependencies = [
+ "repo-graph-coverage",
  "serde",
  "serde_json",
  "walkdir",
@@ -1061,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "repo-graph-daemon-runtime"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "dirs 6.0.0",
  "enrichment",
@@ -1072,11 +1073,14 @@ dependencies = [
  "repo-graph-agent",
  "repo-graph-boundary-interaction",
  "repo-graph-classification",
+ "repo-graph-coverage",
  "repo-graph-daemon-policy",
  "repo-graph-daemon-transport",
  "repo-graph-doc-facts",
  "repo-graph-gate",
+ "repo-graph-git",
  "repo-graph-module-queries",
+ "repo-graph-quality-policy-runner",
  "repo-graph-repo-index",
  "repo-graph-storage",
  "repo-graph-trust",
@@ -1271,7 +1275,7 @@ dependencies = [
 
 [[package]]
 name = "repo-graph-rgr"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -1395,7 +1399,7 @@ dependencies = [
 
 [[package]]
 name = "rmapd"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "repo-graph-daemon-runtime",
 ]

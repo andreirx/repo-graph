@@ -41,6 +41,9 @@
     <dict>
         <key>RMAP_LOG_LEVEL</key>
         <string>info</string>
+        <!-- PATH required for git operations (churn, hotspots, risk) -->
+        <key>PATH</key>
+        <string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin</string>
     </dict>
 
     <!-- Background process, not user-interactive -->

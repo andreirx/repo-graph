@@ -15,11 +15,19 @@
 //! Does NOT:
 //! - Parse coverage reports (that's repo-graph-coverage crate)
 //! - Write to storage (caller uses replace_measurements_by_kind for atomicity)
+//!
+//! # Implementation
+//!
+//! Uses shared matching algorithm from `repo_graph_classification::coverage_matcher`.
+//! This module adapts the plain DTOs to storage-bound `MeasurementInput` types.
 
-use repo_graph_coverage::{CoverageParseResult, FileCoverageFact};
+use repo_graph_classification::coverage_matcher::{
+    self, CoverageMatchError as SharedMatchError, MatchedCoverageFact,
+};
+use repo_graph_coverage::CoverageParseResult;
 use repo_graph_storage::types::MeasurementInput;
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 /// Result of matching coverage facts to indexed files.
 #[derive(Debug, Clone)]
@@ -88,50 +96,35 @@ pub fn match_coverage_to_indexed_files(
     snapshot_uid: &str,
     now: &str,
 ) -> Result<CoverageMatchResult, CoverageMatchError> {
-    // Check for duplicate paths in the coverage report
-    let mut seen_paths: HashMap<&str, usize> = HashMap::new();
-    for fact in &parse_result.facts {
-        *seen_paths.entry(&fact.file_path).or_insert(0) += 1;
-    }
-    let duplicates: Vec<String> = seen_paths
-        .into_iter()
-        .filter(|(_, count)| *count > 1)
-        .map(|(path, _)| path.to_string())
+    // Use shared matching algorithm
+    let match_result = coverage_matcher::match_coverage_to_indexed(parse_result, indexed_files)
+        .map_err(|e| match e {
+            SharedMatchError::DuplicatePaths { paths } => {
+                CoverageMatchError::DuplicatePaths { paths }
+            }
+        })?;
+
+    // Adapt matched facts to MeasurementInput
+    let measurements: Vec<MeasurementInput> = match_result
+        .matched
+        .iter()
+        .map(|fact| fact_to_measurement(fact, repo_uid, snapshot_uid, now))
         .collect();
-
-    if !duplicates.is_empty() {
-        return Err(CoverageMatchError::DuplicatePaths { paths: duplicates });
-    }
-
-    let mut measurements = Vec::new();
-    let mut unmatched_indexed_paths = Vec::new();
-
-    for fact in &parse_result.facts {
-        if indexed_files.contains(&fact.file_path) {
-            let measurement = fact_to_measurement(fact, repo_uid, snapshot_uid, now);
-            measurements.push(measurement);
-        } else {
-            unmatched_indexed_paths.push(fact.file_path.clone());
-        }
-    }
-
-    // Sort for deterministic output
-    unmatched_indexed_paths.sort();
 
     Ok(CoverageMatchResult {
         matched_count: measurements.len(),
         measurements,
-        unnormalized_paths: parse_result.unnormalized_paths.clone(),
-        unmatched_indexed_paths,
+        unnormalized_paths: match_result.unnormalized_paths,
+        unmatched_indexed_paths: match_result.unmatched_indexed_paths,
     })
 }
 
-/// Convert a single coverage fact to a measurement input.
+/// Convert a single matched coverage fact to a measurement input.
 ///
 /// Measurement UID is derived from SHA-256 of `(snapshot_uid, target_stable_key, kind)`.
 /// This ensures collision-safety for any valid file path (no character-collapsing).
 fn fact_to_measurement(
-    fact: &FileCoverageFact,
+    fact: &MatchedCoverageFact,
     repo_uid: &str,
     snapshot_uid: &str,
     now: &str,
@@ -170,6 +163,7 @@ fn fact_to_measurement(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use repo_graph_coverage::FileCoverageFact;
 
     fn make_parse_result(
         facts: Vec<(&str, f64, u64, u64)>,

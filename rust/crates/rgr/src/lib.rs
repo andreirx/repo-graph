@@ -26,5 +26,6 @@ pub mod cli;
 pub mod commands;
 pub mod coverage;
 pub mod daemon_client;
+pub mod daemon_command;
 pub mod platform;
 pub mod presentation;

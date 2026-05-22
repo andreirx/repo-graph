@@ -48,6 +48,15 @@ repo-graph-module-queries = { path = "../module-queries" }
 repo-graph-boundary-interaction = { path = "../boundary-interaction" }
 repo-graph-classification = { path = "../classification" }
 
+# Git operations (churn, hotspots, risk)
+repo-graph-git = { path = "../git" }
+
+# Coverage parsing (coverage import)
+repo-graph-coverage = { path = "../coverage" }
+
+# Quality policy assessment (assess command)
+repo-graph-quality-policy-runner = { path = "../quality-policy-runner" }
+
 # Enrichment pipeline and resolvers
 enrichment = { path = "../enrichment" }
 rust-analyzer-resolver = { path = "../rust-analyzer-resolver" }

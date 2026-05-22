@@ -5,17 +5,17 @@
 //! ## Group 1: Assess
 //! - `rmap assess` (human and --json)
 //!
-//! ## Group 2: Violations (TBD)
+//! ## Group 2: Violations
 //! - `rmap violations`
 //!
-//! ## Group 3: Gate (TBD)
+//! ## Group 3: Gate
 //! - `rmap gate`
 //!
 //! # Test Strategy
 //!
-//! These commands use mixed contracts:
-//! - assess, violations: legacy direct-storage (explicit db_path/repo_uid)
-//! - gate: REG-1 daemon (cwd auto-discovery)
+//! All governance commands use REG-1 daemon contract:
+//! - assess, violations, gate: cwd auto-discovery via daemon
+//! - No db_path/repo_uid positional arguments
 //!
 //! Tests focus on:
 //! - Argument parsing and error handling
@@ -50,41 +50,14 @@ fn run_rmap(args: &[&str]) -> Output {
         .expect("failed to execute rmap")
 }
 
-// ── Group 1: Assess ──────────────────────────────────────────────────────────
+// ── Group 1: Assess (REG-1) ──────────────────────────────────────────────────
+
+// Note: repo-not-found path tested in assess_command.rs::assess_from_temp_dir_fails
 
 #[test]
 #[ignore] // Requires binary pre-built
-fn assess_shows_usage_without_args() {
-    let output = run_rmap(&["assess"]);
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("usage:"),
-        "expected usage message, got: {}",
-        stderr
-    );
-    assert!(stderr.contains("db_path"));
-}
-
-#[test]
-#[ignore] // Requires binary pre-built
-fn assess_shows_error_for_invalid_db() {
-    let output = run_rmap(&["assess", "/nonexistent/path.db", "fake_repo"]);
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("error:"),
-        "expected error message, got: {}",
-        stderr
-    );
-}
-
-#[test]
-#[ignore] // Requires binary pre-built
-fn assess_shows_error_for_unknown_argument() {
-    let output = run_rmap(&["assess", "/tmp/test.db", "repo", "--unknown-flag"]);
+fn assess_shows_error_for_unknown_flag() {
+    let output = run_rmap(&["assess", "--unknown-flag"]);
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -98,8 +71,8 @@ fn assess_shows_error_for_unknown_argument() {
 #[test]
 #[ignore] // Requires binary pre-built
 fn assess_accepts_json_flag() {
-    // Even with invalid db, --json should be accepted as a valid flag
-    let output = run_rmap(&["assess", "/nonexistent/path.db", "fake_repo", "--json"]);
+    // --json should be accepted (will fail on daemon/repo, not unknown flag)
+    let output = run_rmap(&["assess", "--json"]);
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     // Should NOT complain about --json being unknown
@@ -113,13 +86,7 @@ fn assess_accepts_json_flag() {
 #[test]
 #[ignore] // Requires binary pre-built
 fn assess_accepts_baseline_flag() {
-    let output = run_rmap(&[
-        "assess",
-        "/nonexistent/path.db",
-        "fake_repo",
-        "--baseline",
-        "snap_123",
-    ]);
+    let output = run_rmap(&["assess", "--baseline", "snap_123"]);
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     // Should NOT complain about --baseline being unknown
@@ -133,14 +100,7 @@ fn assess_accepts_baseline_flag() {
 #[test]
 #[ignore] // Requires binary pre-built
 fn assess_accepts_all_flags_together() {
-    let output = run_rmap(&[
-        "assess",
-        "/nonexistent/path.db",
-        "fake_repo",
-        "--baseline",
-        "snap_123",
-        "--json",
-    ]);
+    let output = run_rmap(&["assess", "--baseline", "snap_123", "--json"]);
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     // Should not complain about any unknown flags
@@ -154,7 +114,7 @@ fn assess_accepts_all_flags_together() {
 #[test]
 #[ignore] // Requires binary pre-built
 fn assess_baseline_requires_value() {
-    let output = run_rmap(&["assess", "/nonexistent/path.db", "fake_repo", "--baseline"]);
+    let output = run_rmap(&["assess", "--baseline"]);
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -165,41 +125,29 @@ fn assess_baseline_requires_value() {
     );
 }
 
-// ── Group 2: Violations ──────────────────────────────────────────────────────
-
 #[test]
 #[ignore] // Requires binary pre-built
-fn violations_shows_usage_without_args() {
-    let output = run_rmap(&["violations"]);
+fn assess_unexpected_positional_is_error() {
+    // REG-1: No positional arguments expected
+    let output = run_rmap(&["assess", "unexpected_arg"]);
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("usage:"),
-        "expected usage message, got: {}",
-        stderr
-    );
-    assert!(stderr.contains("db_path"));
-}
-
-#[test]
-#[ignore] // Requires binary pre-built
-fn violations_shows_error_for_invalid_db() {
-    let output = run_rmap(&["violations", "/nonexistent/path.db", "fake_repo"]);
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("error:"),
-        "expected error message, got: {}",
+        stderr.contains("unexpected") || stderr.contains("usage"),
+        "expected unexpected argument error, got: {}",
         stderr
     );
 }
 
+// ── Group 2: Violations (REG-1) ──────────────────────────────────────────────
+
+// Note: repo-not-found path tested in violations_command.rs::violations_from_temp_dir_fails
+
 #[test]
 #[ignore] // Requires binary pre-built
-fn violations_shows_error_for_unknown_argument() {
-    let output = run_rmap(&["violations", "/tmp/test.db", "repo", "--unknown-flag"]);
+fn violations_shows_error_for_unknown_flag() {
+    let output = run_rmap(&["violations", "--unknown-flag"]);
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -213,14 +161,29 @@ fn violations_shows_error_for_unknown_argument() {
 #[test]
 #[ignore] // Requires binary pre-built
 fn violations_accepts_json_flag() {
-    // Even with invalid db, --json should be accepted as a valid flag
-    let output = run_rmap(&["violations", "/nonexistent/path.db", "fake_repo", "--json"]);
+    // --json should be accepted (will fail on daemon/repo, not unknown flag)
+    let output = run_rmap(&["violations", "--json"]);
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     // Should NOT complain about --json being unknown
     assert!(
         !stderr.contains("unknown flag: --json"),
         "expected --json to be accepted, got: {}",
+        stderr
+    );
+}
+
+#[test]
+#[ignore] // Requires binary pre-built
+fn violations_unexpected_positional_is_error() {
+    // REG-1: No positional arguments expected
+    let output = run_rmap(&["violations", "unexpected_arg"]);
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unexpected") || stderr.contains("usage"),
+        "expected unexpected argument error, got: {}",
         stderr
     );
 }

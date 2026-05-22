@@ -107,6 +107,13 @@ publish      = false
 # structs.
 serde = { version = "1", features = ["derive"] }
 
+# Coverage crate for CoverageParseResult/FileCoverageFact types.
+# Used by coverage_matcher module to define the matching algorithm
+# between parsed coverage reports and indexed files.
+# Added for LEGACY-CONTRACT-MIGRATION-1B: coverage matching needs
+# to be shared between daemon-runtime and CLI.
+repo-graph-coverage = { path = "../coverage" }
+
 # serde_json added at R3-B (narrow D-A1 timing correction, not a
 # general relaxation of the "no speculative deps" rule).
 #

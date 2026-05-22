@@ -271,6 +271,7 @@ pub(crate) mod blast_radius;
 pub mod boundary_evaluator;
 pub(crate) mod boundary_matcher;
 pub mod boundary_parser;
+pub mod coverage_matcher;
 pub(crate) mod framework_boundary;
 pub(crate) mod framework_entrypoints;
 pub mod hotspot_scorer;

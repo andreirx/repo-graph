@@ -2,8 +2,69 @@
 
 ## Current Priority
 
-**LEGACY-CONTRACT-MIGRATION-1:** Migrate 7 legacy commands to REG-1 daemon contract.
-See `docs/slices/legacy-contract-migration-1.md`.
+**LEGACY-CONTRACT-MIGRATION-1D:** Inventory family migration (policy).
+
+Parent slice: `docs/slices/legacy-contract-migration-1.md`
+
+**Commands:**
+- `policy` — list policy facts (RETURN_FATE, BEHAVIORAL_MARKER, STATUS_MAPPING)
+
+**For each command:**
+1. Add daemon handler (extracted to `handlers/inventory/`)
+2. Rewrite CLI to use `daemon_command` support module
+3. Verify `--json` output parity
+4. Verify human output parity
+5. Test repo-not-found and daemon-unavailable paths
+
+**Special requirements:**
+- `policy` has filter params: `--kind`, `--file`, `--callee`, `--fate`
+- Read-only command
+
+**Sub-slice sequence:**
+1. **1A** — Shared CLI support — COMPLETE (2026-05-22)
+2. **1B** — Quality family (churn, hotspots, risk, coverage) — COMPLETE (2026-05-22)
+3. **1C** — Governance family (assess, violations) — COMPLETE (2026-05-22)
+4. **1D** — Inventory family (policy) — CURRENT
+
+---
+
+## Recently Completed
+
+**LEGACY-CONTRACT-MIGRATION-1C:** Governance family — COMPLETE (2026-05-22)
+
+Delivered:
+- `handlers/governance/assess.rs` — quality policy assessment (write operation)
+- `handlers/governance/violations.rs` — unified violations (declared + discovered)
+- `handlers/support.rs` — shared handler utilities
+- CLI commands migrated to daemon_command pattern
+- 5 governance handler unit tests
+
+Write-path validation: assess persists assessments via QualityPolicyRunner.
+JSON parity: structured envelope with counts.
+Human parity: summary output with policy evaluation results.
+
+**LEGACY-CONTRACT-MIGRATION-1B:** Quality family — COMPLETE (2026-05-22)
+
+Delivered:
+- `handlers/quality/` (churn.rs, hotspots.rs, risk.rs, coverage.rs, support.rs)
+- All handler files under 500-line guardrail
+- Coverage matcher in classification crate with pure DTOs
+- 15 quality handler unit tests
+
+**LEGACY-CONTRACT-MIGRATION-1A:** Shared CLI support — COMPLETE (2026-05-22)
+
+Delivered `rust/crates/rgr/src/daemon_command.rs`:
+- `resolve_repo_from_cwd()` — cwd → canonical path
+- `DaemonError` — classified error type (Unavailable, RepoNotFound, Timeout, RuntimeError)
+- `execute_daemon_request()` — core request wrapper
+- `execute_repo_request()` — convenience wrapper with repo resolution
+- `print_daemon_error()` — error printing with actionable hints
+- `output_json()` / `output_result()` — JSON vs human-render branch
+- `run_daemon_command()` — full command execution helper
+- Exit code constants (EXIT_SUCCESS=0, EXIT_USAGE_ERROR=1, EXIT_RUNTIME_ERROR=2)
+
+15 unit tests covering repo resolution, error classification, display formatting.
+427 rgr lib tests pass. Existing REG-1 commands unaffected.
 
 ---
 

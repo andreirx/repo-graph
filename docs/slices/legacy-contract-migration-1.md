@@ -1,6 +1,6 @@
 # LEGACY-CONTRACT-MIGRATION-1: Daemon Migration for Legacy Commands
 
-**Status:** QUEUED  
+**Status:** CURRENT  
 **Type:** Refactor / Contract Alignment  
 **Prerequisite:** REG-1 complete (daemon registry infrastructure exists)  
 **Discovered:** CLI-AUDIT-1 (2026-05-20)
@@ -10,15 +10,15 @@
 Seven CLI commands still use the legacy direct-storage contract requiring explicit `<db_path> <repo_uid>` arguments. All other read-side commands have migrated to the REG-1 daemon contract (auto-discovery from cwd, no leaked storage concepts).
 
 **Legacy commands:**
-| Command | Category | Current Contract |
-|---------|----------|------------------|
-| assess | Governance | `rmap assess <db_path> <repo_uid>` |
-| violations | Governance | `rmap violations <db_path> <repo_uid>` |
-| churn | Quality | `rmap churn <db_path> <repo_uid>` |
-| hotspots | Quality | `rmap hotspots <db_path> <repo_uid>` |
-| risk | Quality | `rmap risk <db_path> <repo_uid>` |
-| coverage | Quality | `rmap coverage <db_path> <repo_uid> <report>` |
-| policy | Inventory | `rmap policy <db_path> <repo_uid>` |
+| Command | Category | Current Contract | Write Path |
+|---------|----------|------------------|------------|
+| assess | Governance | `rmap assess <db_path> <repo_uid>` | YES (persists assessments) |
+| violations | Governance | `rmap violations <db_path> <repo_uid>` | no |
+| churn | Quality | `rmap churn <db_path> <repo_uid>` | no |
+| hotspots | Quality | `rmap hotspots <db_path> <repo_uid>` | no |
+| risk | Quality | `rmap risk <db_path> <repo_uid>` | no |
+| coverage | Quality | `rmap coverage <db_path> <repo_uid> <report>` | YES (imports report) |
+| policy | Inventory | `rmap policy <db_path> <repo_uid>` | no |
 
 **Target contract (REG-1 pattern):**
 ```bash
@@ -34,83 +34,169 @@ rmap coverage <report>  # report path is the only required arg
 2. **Contract inconsistency:** Some commands work from cwd, others don't
 3. **Leaky abstraction:** `repo_uid` is daemon-internal identity
 
-## Scope
+## Sub-Slice Structure
 
-**In scope:**
-- Daemon handler implementation for each command (7 handlers)
-- CLI presentation layer migration (7 commands)
-- Existing human/JSON renderers preserved (already implemented in CLI-OUT-5/6/7)
+Migration proceeds in four sub-slices to minimize blast radius and isolate write-path commands.
 
-**Out of scope:**
-- New renderer work (renderers exist)
-- Storage schema changes (queries exist, just need daemon routing)
-- Write-side commands (separate track)
+### LEGACY-CONTRACT-MIGRATION-1A: Shared CLI Support
 
-## Architecture Pattern
+**Scope:** CLI-side shared support for REG-1-style commands. No command migration yet.
 
-Each legacy command follows the same migration pattern:
+**Deliverables:**
+- `rust/crates/rgr/src/daemon_command.rs` (new module)
+- Repo resolution from cwd (`resolve_repo_from_cwd()`)
+- Daemon availability handling
+- Request execution wrapper with timeout
+- Repo-not-found / runtime error mapping with hints
+- JSON passthrough vs DTO rendering switch
+- Exit code mapping (0=success, 1=usage, 2=runtime)
 
-1. **Daemon handler:** Route request to existing query logic
-2. **CLI command:** Replace direct storage call with daemon RPC
-3. **Response DTO:** Reuse existing DTO (already validated in CLI-OUT track)
+**Explicitly out of scope:**
+- Daemon handlers (added in 1B-1D)
+- Command migrations (added in 1B-1D)
+- Daemon-side shared logic (if needed, separate module)
 
-Reference implementation: Any REG-1 command (e.g., `modules list`, `surfaces list`)
+**Validation:**
+- Unit tests for repo resolution and error classification
+- First real consumer proof deferred to 1B (support module implemented and unit-tested; no existing command refactored yet)
 
-## Migration Checklist
+### LEGACY-CONTRACT-MIGRATION-1B: Quality Family
 
-For each command:
-- [ ] Daemon handler in `daemon-runtime/src/handlers/`
-- [ ] Register handler in daemon router
-- [ ] CLI command calls daemon via socket
-- [ ] Remove db_path/repo_uid positional args
-- [ ] Validate human output unchanged
-- [ ] Validate JSON output unchanged
+**Commands:** `churn`, `hotspots`, `risk`, `coverage`
 
-## Command-Specific Notes
+**Why first:**
+- Strongest shared mechanics (`--since` time-window pattern)
+- Mostly read/query path
+- Exercises the support module before write-sensitive commands
 
-### assess
-- Returns repo assessment with violation counts, risk scores
-- Query exists in storage crate
+**Special notes:**
+- `coverage` is operationally different: performs report ingestion (write) then query/report
+- `coverage` keeps `<report>` as positional argument
 
-### violations
-- Returns policy violations list
-- Query exists, used by `gate` (already migrated)
+**Daemon handlers:**
+- `churn` → method `"churn"`
+- `hotspots` → method `"hotspots"`
+- `risk` → method `"risk"`
+- `coverage` → method `"coverage"` (params include `report_path`)
 
-### churn
-- Returns file churn metrics with time window
-- Query exists in storage crate
+**Validation per command:**
+1. Daemon handler unit test
+2. CLI command test (usage error, success, filters)
+3. Repo-not-found path
+4. Daemon-unavailable path
+5. `--json` output parity with legacy
+6. Human output parity with legacy
+7. Real corpus run (classifier-repo fixture minimum)
 
-### hotspots
-- Returns ranked hotspot files
-- Query exists in storage crate
+**Additional for coverage:**
+- Write-path validation: report import succeeds
+- Invalid report path error handling
 
-### risk
-- Returns risk-scored files with metadata
-- Query exists in storage crate
+### LEGACY-CONTRACT-MIGRATION-1C: Governance Family
 
-### coverage
-- Takes report path argument (keep as positional)
-- Returns coverage gaps
-- Query exists in storage crate
+**Commands:** `assess`, `violations`
 
-### policy
-- Returns policy facts (STATUS_MAPPING, BEHAVIORAL_MARKER, RETURN_FATE)
-- Query exists in storage crate
+**Why second:**
+- `assess` writes (persists assessment results)
+- Governance semantics more sensitive
+- Better isolated after query-family path proven
 
-## Definition of Done
+**Special notes:**
+- `assess` runs `QualityPolicyRunner::assess_snapshot()` which writes to storage
+- `assess` has `--baseline` optional parameter
+- `violations` is read-only despite governance category
 
+**Daemon handlers:**
+- `assess` → method `"assess"` (params include optional `baseline_snapshot_uid`)
+- `violations` → method `"violations"`
+
+**Validation per command:**
+1. Daemon handler unit test
+2. CLI command test
+3. Repo-not-found path
+4. Daemon-unavailable path
+5. `--json` output parity
+6. Human output parity
+7. Real corpus run
+
+**Additional for assess:**
+- Write-path validation: assessments persisted correctly
+- Baseline parameter handling
+- Re-run produces same results (idempotent write)
+
+### LEGACY-CONTRACT-MIGRATION-1D: Inventory Family
+
+**Commands:** `policy`
+
+**Why last:**
+- One command, smallest blast radius
+- Filter-heavy (--kind, --file, --callee, --fate)
+- Easy to isolate if policy fact query shape needs special handling
+
+**Daemon handler:**
+- `policy` → method `"policy"` (params include filters)
+
+**Validation:**
+1. Daemon handler unit test
+2. CLI command test (all filter combinations)
+3. Repo-not-found path
+4. Daemon-unavailable path
+5. `--json` output parity
+6. Human output parity
+7. Real corpus run (needs repo with policy facts)
+
+## Daemon-Side Architecture
+
+If daemon handlers share logic, isolate it:
+
+```
+daemon-runtime/src/
+  dispatch.rs          # match arms route to handlers
+  handlers/            # NEW: handler implementations (if extracted)
+    quality.rs         # churn, hotspots, risk, coverage
+    governance.rs      # assess, violations
+    inventory.rs       # policy
+  util/                # shared daemon-side helpers
+```
+
+Do NOT duplicate shared query logic across inline handlers in dispatch.rs.
+
+## Definition of Done (Full Slice)
+
+- [x] 1A: Shared CLI support module complete and tested (2026-05-22)
+- [x] 1B: Quality family migrated (churn, hotspots, risk, coverage) (2026-05-22)
+- [x] 1C: Governance family migrated (assess, violations) (2026-05-22)
+- [ ] 1D: Inventory family migrated (policy)
 - [ ] All 7 commands work with `rmap <cmd>` from registered repo cwd
 - [ ] Human output identical to legacy contract
 - [ ] JSON output identical to legacy contract
 - [ ] No db_path/repo_uid in user-facing contract
+- [ ] Write-path validation for assess and coverage
 - [ ] Smoke validation on corpus repos
 
 ## Files in Scope
 
-- `rust/crates/daemon-runtime/src/handlers/` (new handlers)
-- `rust/crates/daemon-runtime/src/router.rs` (handler registration)
-- `rust/crates/rgr/src/commands/` (CLI command files)
-- `rust/crates/rgr/src/presentation/` (no changes expected, renderers exist)
+**CLI (rgr crate):**
+- `rust/crates/rgr/src/daemon_command.rs` — NEW: shared support
+- `rust/crates/rgr/src/commands/assess.rs`
+- `rust/crates/rgr/src/commands/modules/violations.rs`
+- `rust/crates/rgr/src/commands/quality/churn.rs`
+- `rust/crates/rgr/src/commands/quality/hotspots.rs`
+- `rust/crates/rgr/src/commands/quality/risk.rs`
+- `rust/crates/rgr/src/commands/quality/coverage_cmd.rs`
+- `rust/crates/rgr/src/commands/policy.rs`
+
+**Daemon (daemon-runtime crate):**
+- `rust/crates/daemon-runtime/src/dispatch.rs` — add 7 handlers
+- `rust/crates/daemon-runtime/src/handlers/` — optional extraction
+
+**Tests:**
+- `rust/crates/rgr/tests/assess_command.rs`
+- `rust/crates/rgr/tests/violations_command.rs`
+- `rust/crates/rgr/tests/churn_command.rs`
+- `rust/crates/rgr/tests/hotspots_command.rs`
+- `rust/crates/rgr/tests/risk_command.rs`
+- `rust/crates/rgr/tests/cli_out_6_quality.rs` (coverage)
 
 ## Risk Assessment
 
@@ -120,6 +206,11 @@ For each command:
 - Pattern is well-established (REG-1 commands as reference)
 - No storage schema changes
 
+**Medium risk (mitigated by sub-slicing):**
+- `assess` write path needs daemon coordination
+- `coverage` report import needs file path handling across daemon boundary
+
 **Testing approach:**
 - Reuse existing test fixtures
 - Compare output before/after migration
+- Explicit write-path validation for assess/coverage

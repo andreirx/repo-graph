@@ -254,6 +254,18 @@ impl Dispatcher for ServiceDispatcher {
             "trust" => self.handle_trust(request, emitter),
             "gate" => self.handle_gate(request),
 
+            // ── Quality queries (LEGACY-CONTRACT-MIGRATION-1B) ──────
+            // Handlers extracted to handlers/quality.rs
+            "churn" => crate::handlers::quality::handle_churn(&self.state, request),
+            "hotspots" => crate::handlers::quality::handle_hotspots(&self.state, request),
+            "risk" => crate::handlers::quality::handle_risk(&self.state, request),
+            "coverage" => crate::handlers::quality::handle_coverage(&self.state, request),
+
+            // ── Governance (LEGACY-CONTRACT-MIGRATION-1C) ────────────
+            // Handlers extracted to handlers/governance.rs
+            "assess" => crate::handlers::governance::handle_assess(&self.state, request),
+            "violations" => crate::handlers::governance::handle_violations(&self.state, request),
+
             // ── Documentation ───────────────────────────────────────
             "docs_list" => self.handle_docs_list(request),
             "docs_extract" => self.handle_docs_extract(request),
@@ -2403,6 +2415,10 @@ impl ServiceDispatcher {
 
         DispatchResult::success(&request.id, response)
     }
+
+    // ── Quality handlers ─────────────────────────────────────────────────
+    // LEGACY-CONTRACT-MIGRATION-1B: Handlers extracted to handlers/quality.rs
+    // Dispatch wiring is in the match statement above.
 
     // ── Documentation handlers ──────────────────────────────────────
 

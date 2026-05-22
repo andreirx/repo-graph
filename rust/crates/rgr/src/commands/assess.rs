@@ -9,27 +9,30 @@
 //! - Domain verdicts preserved (pass, fail, not_applicable, not_comparable)
 //! - Baseline hint when required but missing
 //!
-//! # Legacy Contract Exception
+//! # REG-1 Contract (LEGACY-CONTRACT-MIGRATION-1C)
 //!
-//! This command uses legacy direct-storage contract (explicit db_path/repo_uid),
-//! not REG-1 daemon contract.
+//! This command uses REG-1 daemon contract:
+//! - Repo resolved from cwd (auto-discovery)
+//! - Daemon handles storage access
+//! - CLI handles argument parsing and output rendering
 //!
 //! # Boundary rules
 //!
 //! This module owns assess command-family behavior:
 //! - `run_assess` handler
 //! - assess-local argument parsing (inline)
-//! - assess-local output shaping (inline JSON)
+//! - mode switching (human vs --json)
 //!
 //! This module does **not** own:
-//! - shared infrastructure (lives in `crate::cli`)
-//! - assessment domain logic (belongs in `repo-graph-quality-policy-runner`)
+//! - shared infrastructure (lives in `crate::daemon_command`)
+//! - assessment domain logic (belongs in daemon)
 //! - human output rendering (lives in `presentation::assess`)
 
-use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::open_storage;
+use crate::daemon_command::{
+    execute_repo_request, output_result, print_daemon_error, EXIT_RUNTIME_ERROR, EXIT_USAGE_ERROR,
+};
 
 // ── assess command ───────────────────────────────────────────────
 
@@ -42,10 +45,9 @@ use crate::cli::open_storage;
 /// Exit codes:
 ///   0 — success (assessments persisted)
 ///   1 — usage error
-///   2 — runtime error (storage failure, invalid policy, missing baseline)
+///   2 — runtime error (daemon unavailable, repo not found, assessment failure)
 pub fn run_assess(args: &[String]) -> ExitCode {
-    // Parse positional args and optional flags.
-    let mut positional: Vec<&String> = Vec::new();
+    // Parse flags.
     let mut baseline_snapshot_uid: Option<String> = None;
     let mut json_mode = false;
 
@@ -56,10 +58,8 @@ pub fn run_assess(args: &[String]) -> ExitCode {
             "--baseline" => {
                 if i + 1 >= args.len() {
                     eprintln!("error: --baseline requires a snapshot_uid argument");
-                    eprintln!(
-                        "usage: rmap assess <db_path> <repo_uid> [--baseline <snapshot_uid>] [--json]"
-                    );
-                    return ExitCode::from(1);
+                    eprintln!("usage: rmap assess [--baseline <snapshot_uid>] [--json]");
+                    return ExitCode::from(EXIT_USAGE_ERROR);
                 }
                 baseline_snapshot_uid = Some(args[i + 1].clone());
                 i += 2;
@@ -70,106 +70,34 @@ pub fn run_assess(args: &[String]) -> ExitCode {
             }
             _ if arg.starts_with('-') => {
                 eprintln!("error: unknown flag: {}", arg);
-                eprintln!(
-                    "usage: rmap assess <db_path> <repo_uid> [--baseline <snapshot_uid>] [--json]"
-                );
-                return ExitCode::from(1);
+                eprintln!("usage: rmap assess [--baseline <snapshot_uid>] [--json]");
+                return ExitCode::from(EXIT_USAGE_ERROR);
             }
             _ => {
-                positional.push(arg);
-                i += 1;
+                eprintln!("error: unexpected argument: {}", arg);
+                eprintln!("usage: rmap assess [--baseline <snapshot_uid>] [--json]");
+                eprintln!();
+                eprintln!("Run from within a repo directory.");
+                return ExitCode::from(EXIT_USAGE_ERROR);
             }
         }
     }
 
-    if positional.len() != 2 {
-        eprintln!("usage: rmap assess <db_path> <repo_uid> [--baseline <snapshot_uid>] [--json]");
-        return ExitCode::from(1);
-    }
+    // Build request params
+    let params = baseline_snapshot_uid
+        .as_ref()
+        .map(|baseline| serde_json::json!({"baseline": baseline}));
 
-    let db_path = Path::new(positional[0]);
-    let repo_uid = positional[1];
-
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Get latest snapshot for the repo.
-    let snapshot = match storage.get_latest_snapshot(repo_uid) {
-        Ok(Some(snap)) => snap,
-        Ok(None) => {
-            eprintln!("error: no snapshot found for repo '{}'", repo_uid);
-            return ExitCode::from(2);
-        }
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Run assessment via the runner.
-    // The runner takes ownership of storage because assess_snapshot
-    // requires mutable access for atomic persistence.
-    use repo_graph_quality_policy_runner::QualityPolicyRunner;
-
-    let mut runner = QualityPolicyRunner::new(storage);
-    let result = match runner.assess_snapshot(
-        repo_uid,
-        &snapshot.snapshot_uid,
-        baseline_snapshot_uid.as_deref(),
-    ) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Build JSON output.
-    let output = serde_json::json!({
-        "command": "assess",
-        "repo": repo_uid,
-        "snapshot": snapshot.snapshot_uid,
-        "baseline_snapshot": baseline_snapshot_uid,
-        "assessments": {
-            "total": result.total_assessments,
-            "pass": result.pass_count,
-            "fail": result.fail_count,
-            "not_applicable": result.not_applicable_count,
-            "not_comparable": result.not_comparable_count,
-        },
-        "baseline_required_count": result.baseline_required_count,
-    });
-
-    if json_mode {
-        // Raw JSON output
-        match serde_json::to_string_pretty(&output) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                ExitCode::from(2)
-            }
-        }
-    } else {
-        // Human-readable output
-        use crate::presentation::assess::AssessResponse;
-
-        match serde_json::from_value::<AssessResponse>(output) {
-            Ok(response) => {
-                print!("{}", response.render_human());
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("error: failed to parse response for rendering: {}", e);
-                ExitCode::from(2)
-            }
+    // Execute via daemon
+    match execute_repo_request("assess", params) {
+        Ok(result) => output_result(
+            result,
+            json_mode,
+            |response: crate::presentation::assess::AssessResponse| response.render_human(),
+        ),
+        Err(err) => {
+            print_daemon_error(&err, "assess");
+            ExitCode::from(EXIT_RUNTIME_ERROR)
         }
     }
 }

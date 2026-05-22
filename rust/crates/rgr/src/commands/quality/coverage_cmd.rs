@@ -11,276 +11,145 @@
 //! - Sample-path diagnostics: backend-bounded (max 10), labeled as samples
 //! - Deterministic ordering (by file_path)
 //!
-//! # Legacy Contract Exception
+//! # REG-1 Contract (LEGACY-CONTRACT-MIGRATION-1B)
 //!
-//! This command uses legacy direct-storage contract (explicit db_path/repo_uid),
-//! not REG-1 daemon contract.
+//! Migrated from legacy `<db_path> <repo_uid>` contract to REG-1:
+//! - Repo resolved from cwd via daemon
+//! - Only `<report>` positional arg required
+//! - No storage paths in user-facing contract
 //!
 //! # Boundary rules
 //!
 //! This module owns coverage command behavior:
 //! - `run_coverage` handler
-//! - `CoverageImportResult` DTO
+//! - CLI argument parsing
+//! - Presentation DTO (via presentation::coverage)
 //!
 //! This module does **not** own:
-//! - shared infrastructure (lives in `crate::cli`)
-//! - coverage matching orchestration (lives in `crate::coverage`)
-//! - coverage report parsing (belongs in `repo-graph-coverage`)
+//! - Shared daemon support (lives in `crate::daemon_command`)
+//! - Coverage matching orchestration (lives in `repo-graph-classification::coverage_matcher`)
+//! - Coverage report parsing (belongs in `repo-graph-coverage`)
 
 use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::{build_envelope, chrono_now, open_storage, resolve_repo_root};
-use crate::coverage;
+use crate::daemon_command::{
+    execute_repo_request, output_result, print_daemon_error, EXIT_RUNTIME_ERROR, EXIT_USAGE_ERROR,
+};
+use crate::presentation::coverage::CoverageResponse;
 
-// ── coverage command ─────────────────────────────────────────────
-
-#[derive(serde::Serialize)]
-struct CoverageImportResult {
-    file_path: String,
-    line_coverage: f64,
-    covered_statements: u64,
-    total_statements: u64,
+fn print_usage() {
+    eprintln!("usage: rmap coverage <report> [--json]");
+    eprintln!();
+    eprintln!("Import Istanbul/c8 coverage report into the repository.");
+    eprintln!("Repository is resolved from current working directory.");
+    eprintln!();
+    eprintln!("Arguments:");
+    eprintln!("  <report>  Path to coverage-final.json or similar Istanbul/c8 report");
+    eprintln!();
+    eprintln!("Options:");
+    eprintln!("  --json    Output raw JSON instead of human-readable text");
 }
 
-pub fn run_coverage(args: &[String]) -> ExitCode {
-    // Parse args: <db_path> <repo_uid> <report_path> [--json]
-    if args.len() < 3 {
-        eprintln!("usage: rmap coverage <db_path> <repo_uid> <report_path> [--json]");
-        return ExitCode::from(1);
-    }
+/// Parsed arguments for coverage command.
+struct CoverageArgs {
+    report_path: String,
+    json_mode: bool,
+}
 
-    let db_path = Path::new(&args[0]);
-    let repo_uid = &args[1];
-    let report_path = Path::new(&args[2]);
-
-    // Parse optional --json flag
+fn parse_args(args: &[String]) -> Result<CoverageArgs, ExitCode> {
+    let mut report_path: Option<String> = None;
     let mut json_mode = false;
-    let mut i = 3;
+    let mut i = 0;
+
     while i < args.len() {
         match args[i].as_str() {
             "--json" => {
                 json_mode = true;
                 i += 1;
             }
+            flag if flag.starts_with("--") => {
+                eprintln!("error: unknown flag: {}", flag);
+                print_usage();
+                return Err(ExitCode::from(EXIT_USAGE_ERROR));
+            }
             other => {
-                eprintln!("error: unknown argument: {}", other);
-                return ExitCode::from(1);
+                // Positional argument: report path
+                if report_path.is_some() {
+                    eprintln!("error: unexpected argument: {}", other);
+                    print_usage();
+                    return Err(ExitCode::from(EXIT_USAGE_ERROR));
+                }
+                report_path = Some(other.to_string());
+                i += 1;
             }
         }
     }
 
-    // Validate report exists
+    let report_path = match report_path {
+        Some(p) => p,
+        None => {
+            eprintln!("error: missing <report> argument");
+            print_usage();
+            return Err(ExitCode::from(EXIT_USAGE_ERROR));
+        }
+    };
+
+    Ok(CoverageArgs {
+        report_path,
+        json_mode,
+    })
+}
+
+/// Run the `rmap coverage` command.
+///
+/// Usage: `rmap coverage <report> [--json]`
+///
+/// Exit codes:
+/// - 0: success
+/// - 1: usage error
+/// - 2: runtime error (daemon unavailable, repo not indexed, import failure)
+pub fn run_coverage(args: &[String]) -> ExitCode {
+    let parsed = match parse_args(args) {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+
+    // Validate report exists before sending to daemon
+    let report_path = Path::new(&parsed.report_path);
     if !report_path.is_file() {
         eprintln!(
             "error: coverage report not found: {}",
             report_path.display()
         );
-        return ExitCode::from(1);
+        return ExitCode::from(EXIT_USAGE_ERROR);
     }
 
-    // Open storage
-    let mut storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Get latest snapshot
-    let snapshot = match storage.get_latest_snapshot(repo_uid) {
-        Ok(Some(snap)) => snap,
-        Ok(None) => {
-            eprintln!("error: no snapshot found for repo '{}'", repo_uid);
-            return ExitCode::from(2);
-        }
+    // Canonicalize report path for daemon (daemon doesn't know CLI's cwd)
+    let report_path_abs = match report_path.canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
         Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            eprintln!("error: cannot resolve report path: {}", e);
+            return ExitCode::from(EXIT_RUNTIME_ERROR);
         }
     };
 
-    // Get repo for root_path
-    use repo_graph_storage::types::RepoRef;
-    let repo = match storage.get_repo(&RepoRef::Uid(repo_uid.to_string())) {
-        Ok(Some(r)) => r,
-        Ok(None) => {
-            eprintln!("error: repo not found: {}", repo_uid);
-            return ExitCode::from(2);
-        }
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
+    // Build params for daemon request
+    let params = serde_json::json!({
+        "report_path": report_path_abs,
+    });
 
-    // Resolve repo root relative to DB location (cwd-independent)
-    let repo_root_abs = match resolve_repo_root(db_path, &repo.root_path) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Parse coverage report
-    use repo_graph_coverage::parse_istanbul_file;
-    let parse_result = match parse_istanbul_file(
-        report_path.to_str().unwrap(),
-        repo_root_abs.to_str().unwrap(),
-    ) {
+    // Execute request via daemon
+    let result = match execute_repo_request("coverage", Some(params)) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("error: failed to parse coverage report: {}", e);
-            return ExitCode::from(2);
+            print_daemon_error(&e, "coverage");
+            return ExitCode::from(EXIT_RUNTIME_ERROR);
         }
     };
 
-    // Get indexed files
-    let indexed_files = match storage.get_files_by_repo(repo_uid) {
-        Ok(files) => files,
-        Err(e) => {
-            eprintln!("error: failed to read indexed files: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    let indexed_paths: std::collections::HashSet<String> =
-        indexed_files.iter().map(|f| f.path.clone()).collect();
-
-    // Match coverage to indexed files
-    let now = chrono_now();
-    let match_result = match coverage::match_coverage_to_indexed_files(
-        &parse_result,
-        &indexed_paths,
-        repo_uid,
-        &snapshot.snapshot_uid,
-        &now,
-    ) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Atomically replace existing line_coverage measurements with new ones.
-    // Single transaction ensures no data loss if insert fails.
-    if let Err(e) = storage.replace_measurements_by_kind(
-        &snapshot.snapshot_uid,
-        &["line_coverage"],
-        &match_result.measurements,
-    ) {
-        eprintln!("error: failed to replace coverage measurements: {}", e);
-        return ExitCode::from(2);
-    }
-
-    // Build output
-    let results: Vec<CoverageImportResult> = match_result
-        .measurements
-        .iter()
-        .map(|m| {
-            // Parse value_json to extract fields
-            let v: serde_json::Value = serde_json::from_str(&m.value_json).unwrap_or_default();
-            CoverageImportResult {
-                // Extract path from stable key: {repo}:{path}:FILE
-                file_path: m
-                    .target_stable_key
-                    .strip_prefix(&format!("{}:", repo_uid))
-                    .and_then(|s| s.strip_suffix(":FILE"))
-                    .unwrap_or(&m.target_stable_key)
-                    .to_string(),
-                line_coverage: v.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                covered_statements: v.get("covered").and_then(|v| v.as_u64()).unwrap_or(0),
-                total_statements: v.get("total").and_then(|v| v.as_u64()).unwrap_or(0),
-            }
-        })
-        .collect();
-
-    // Build envelope with extra stats
-    let mut extra = serde_json::Map::new();
-    extra.insert(
-        "imported_count".to_string(),
-        serde_json::Value::Number(match_result.matched_count.into()),
-    );
-    extra.insert(
-        "unnormalized_count".to_string(),
-        serde_json::Value::Number(match_result.unnormalized_paths.len().into()),
-    );
-    extra.insert(
-        "unmatched_indexed_count".to_string(),
-        serde_json::Value::Number(match_result.unmatched_indexed_paths.len().into()),
-    );
-
-    // Include sample unmatched paths for debugging (max 10)
-    if !match_result.unnormalized_paths.is_empty() {
-        let sample: Vec<_> = match_result
-            .unnormalized_paths
-            .iter()
-            .take(10)
-            .cloned()
-            .collect();
-        extra.insert(
-            "unnormalized_paths_sample".to_string(),
-            serde_json::to_value(sample).unwrap(),
-        );
-    }
-    if !match_result.unmatched_indexed_paths.is_empty() {
-        let sample: Vec<_> = match_result
-            .unmatched_indexed_paths
-            .iter()
-            .take(10)
-            .cloned()
-            .collect();
-        extra.insert(
-            "unmatched_indexed_paths_sample".to_string(),
-            serde_json::to_value(sample).unwrap(),
-        );
-    }
-
-    let count = results.len();
-    let output = match build_envelope(
-        &storage,
-        "coverage",
-        repo_uid,
-        &snapshot,
-        serde_json::to_value(&results).unwrap(),
-        count,
-        extra,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    if json_mode {
-        // Raw JSON output
-        match serde_json::to_string_pretty(&output) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                ExitCode::from(2)
-            }
-        }
-    } else {
-        // Human-readable output
-        use crate::presentation::coverage::CoverageResponse;
-
-        match serde_json::from_value::<CoverageResponse>(output) {
-            Ok(response) => {
-                print!("{}", response.render_human());
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("error: failed to parse response for rendering: {}", e);
-                ExitCode::from(2)
-            }
-        }
-    }
+    // Output result
+    output_result::<CoverageResponse, _>(result, parsed.json_mode, |response| {
+        response.render_human()
+    })
 }

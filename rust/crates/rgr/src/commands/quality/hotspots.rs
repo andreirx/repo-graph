@@ -11,100 +11,67 @@
 //! - Deterministic ordering (by hotspot_score desc, then path asc)
 //! - Full output, no truncation
 //!
-//! # Legacy Contract Exception
+//! # REG-1 Contract (LEGACY-CONTRACT-MIGRATION-1B)
 //!
-//! This command uses legacy direct-storage contract (explicit db_path/repo_uid),
-//! not REG-1 daemon contract.
+//! Migrated from legacy `<db_path> <repo_uid>` contract to REG-1:
+//! - Repo resolved from cwd via daemon
+//! - No storage paths in user-facing contract
 //!
 //! # Boundary rules
 //!
 //! This module owns hotspots command behavior:
 //! - `run_hotspots` handler
-//! - `parse_hotspot_args`
-//! - `HotspotRow`, `HotspotFiltering`, `HotspotArgs` DTOs
-//! - `is_vendored_path` helper
+//! - CLI argument parsing
+//! - Presentation DTO (via presentation::hotspots)
 //!
 //! This module does **not** own:
-//! - shared infrastructure (lives in `crate::cli`)
-//! - hotspot scoring (belongs in `repo-graph-classification`)
-//! - git churn extraction (belongs in `repo-graph-git`)
+//! - Shared daemon support (lives in `crate::daemon_command`)
+//! - Hotspot scoring (belongs in `repo-graph-classification`)
+//! - Git churn extraction (belongs in `repo-graph-git`)
 
-use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::{build_envelope, open_storage, resolve_repo_root};
+use crate::daemon_command::{
+    execute_repo_request, output_result, print_daemon_error, EXIT_RUNTIME_ERROR, EXIT_USAGE_ERROR,
+};
+use crate::presentation::hotspots::HotspotsResponse;
 
-// ── hotspots command ─────────────────────────────────────────────
-
-/// Output row for hotspots command.
-#[derive(serde::Serialize)]
-struct HotspotRow {
-    file_path: String,
-    commit_count: u64,
-    lines_changed: u64,
-    sum_complexity: u64,
-    hotspot_score: u64,
+fn print_usage() {
+    eprintln!(
+        "usage: rmap hotspots [--since <expr>] [--exclude-tests] [--exclude-vendored] [--json]"
+    );
+    eprintln!();
+    eprintln!("Show hotspot files (high churn x complexity) for the repository.");
+    eprintln!("Repository is resolved from current working directory.");
+    eprintln!();
+    eprintln!("Options:");
+    eprintln!("  --since <expr>       Time window (default: 90.days.ago)");
+    eprintln!("  --exclude-tests      Exclude test files from results");
+    eprintln!("  --exclude-vendored   Exclude vendored directories from results");
+    eprintln!("  --json               Output raw JSON instead of human-readable text");
 }
 
-/// Filtering metadata for hotspots output.
-#[derive(serde::Serialize)]
-struct HotspotFiltering {
-    exclude_tests: bool,
-    exclude_vendored: bool,
-    excluded_count: usize,
-    excluded_tests_count: usize,
-    excluded_vendored_count: usize,
-}
-
-/// Vendored directory segments (exact match only).
-const VENDORED_SEGMENTS: &[&str] = &[
-    "vendor",
-    "vendors",
-    "third_party",
-    "third-party",
-    "external",
-    "deps",
-    "node_modules",
-];
-
-/// Check if path contains a vendored directory segment.
-fn is_vendored_path(path: &str) -> bool {
-    path.split('/').any(|segment| {
-        let lower = segment.to_lowercase();
-        VENDORED_SEGMENTS.contains(&lower.as_str())
-    })
-}
-
-/// Parsed hotspot command arguments.
-struct HotspotArgs<'a> {
-    db_path: &'a Path,
-    repo_uid: &'a str,
+/// Parsed arguments for hotspots command.
+struct HotspotsArgs {
     since: String,
     exclude_tests: bool,
     exclude_vendored: bool,
     json_mode: bool,
 }
 
-/// Parse hotspots command args.
-fn parse_hotspot_args(args: &[String]) -> Result<HotspotArgs<'_>, String> {
-    if args.len() < 2 {
-        return Err("usage: rmap hotspots <db_path> <repo_uid> [--since <expr>] [--exclude-tests] [--exclude-vendored] [--json]".to_string());
-    }
-
-    let db_path = Path::new(&args[0]);
-    let repo_uid = &args[1];
-
+fn parse_args(args: &[String]) -> Result<HotspotsArgs, ExitCode> {
     let mut since = "90.days.ago".to_string();
     let mut exclude_tests = false;
     let mut exclude_vendored = false;
     let mut json_mode = false;
+    let mut i = 0;
 
-    let mut i = 2;
     while i < args.len() {
         match args[i].as_str() {
             "--since" => {
                 if i + 1 >= args.len() {
-                    return Err("--since requires a value".to_string());
+                    eprintln!("error: --since requires a value");
+                    return Err(ExitCode::from(EXIT_USAGE_ERROR));
                 }
                 since = args[i + 1].clone();
                 i += 2;
@@ -121,15 +88,20 @@ fn parse_hotspot_args(args: &[String]) -> Result<HotspotArgs<'_>, String> {
                 json_mode = true;
                 i += 1;
             }
-            _ => {
-                return Err(format!("unknown argument: {}", args[i]));
+            flag if flag.starts_with("--") => {
+                eprintln!("error: unknown flag: {}", flag);
+                print_usage();
+                return Err(ExitCode::from(EXIT_USAGE_ERROR));
+            }
+            other => {
+                eprintln!("error: unexpected argument: {}", other);
+                print_usage();
+                return Err(ExitCode::from(EXIT_USAGE_ERROR));
             }
         }
     }
 
-    Ok(HotspotArgs {
-        db_path,
-        repo_uid,
+    Ok(HotspotsArgs {
         since,
         exclude_tests,
         exclude_vendored,
@@ -137,243 +109,38 @@ fn parse_hotspot_args(args: &[String]) -> Result<HotspotArgs<'_>, String> {
     })
 }
 
+/// Run the `rmap hotspots` command.
+///
+/// Usage: `rmap hotspots [--since <expr>] [--exclude-tests] [--exclude-vendored] [--json]`
+///
+/// Exit codes:
+/// - 0: success
+/// - 1: usage error
+/// - 2: runtime error (daemon unavailable, repo not indexed, computation failure)
 pub fn run_hotspots(args: &[String]) -> ExitCode {
-    let parsed = match parse_hotspot_args(args) {
+    let parsed = match parse_args(args) {
         Ok(p) => p,
-        Err(msg) => {
-            eprintln!("{}", msg);
-            return ExitCode::from(1);
-        }
+        Err(code) => return code,
     };
 
-    let db_path = parsed.db_path;
-    let repo_uid = parsed.repo_uid;
-    let since = parsed.since;
-    let exclude_tests = parsed.exclude_tests;
-    let exclude_vendored = parsed.exclude_vendored;
-    let json_mode = parsed.json_mode;
+    // Build params for daemon request
+    let params = serde_json::json!({
+        "since": parsed.since,
+        "exclude_tests": parsed.exclude_tests,
+        "exclude_vendored": parsed.exclude_vendored,
+    });
 
-    let storage = match open_storage(db_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
-            return ExitCode::from(2);
-        }
-    };
-
-    let snapshot = match storage.get_latest_snapshot(repo_uid) {
-        Ok(Some(snap)) => snap,
-        Ok(None) => {
-            eprintln!("error: no snapshot found for repo '{}'", repo_uid);
-            return ExitCode::from(2);
-        }
+    // Execute request via daemon
+    let result = match execute_repo_request("hotspots", Some(params)) {
+        Ok(r) => r,
         Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
+            print_daemon_error(&e, "hotspots");
+            return ExitCode::from(EXIT_RUNTIME_ERROR);
         }
     };
 
-    // Get repo for root_path
-    use repo_graph_storage::types::RepoRef;
-    let repo = match storage.get_repo(&RepoRef::Uid(repo_uid.to_string())) {
-        Ok(Some(r)) => r,
-        Ok(None) => {
-            eprintln!("error: repo not found: {}", repo_uid);
-            return ExitCode::from(2);
-        }
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Get indexed files
-    let indexed_files = match storage.get_files_by_repo(repo_uid) {
-        Ok(files) => files,
-        Err(e) => {
-            eprintln!("error: failed to read indexed files: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    let indexed_paths: std::collections::HashSet<&str> =
-        indexed_files.iter().map(|f| f.path.as_str()).collect();
-
-    // Get churn from git
-    use repo_graph_git::{get_file_churn, ChurnWindow};
-    let window = ChurnWindow::new(&since);
-
-    // Resolve repo root relative to DB location (cwd-independent)
-    let repo_path = match resolve_repo_root(db_path, &repo.root_path) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    let raw_churn = match get_file_churn(&repo_path, &window) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: git churn failed: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Filter churn to indexed files
-    let churn_inputs: Vec<repo_graph_classification::hotspot_scorer::ChurnInput> = raw_churn
-        .into_iter()
-        .filter(|entry| indexed_paths.contains(entry.file_path.as_str()))
-        .map(
-            |entry| repo_graph_classification::hotspot_scorer::ChurnInput {
-                file_path: entry.file_path,
-                commit_count: entry.commit_count,
-                lines_changed: entry.lines_changed,
-            },
-        )
-        .collect();
-
-    // Get per-file complexity via proper join (measurements -> nodes -> files).
-    // RS-MS-3a fix: avoids parsing stable_key strings which have the format
-    // `{repo}:{path}#{symbol}:SYMBOL:{kind}`, not `{repo}:{path}:SYMBOL:{name}`.
-    let complexity_rows = match storage.query_complexity_by_file(&snapshot.snapshot_uid) {
-        Ok(rows) => rows,
-        Err(e) => {
-            eprintln!("error: failed to read complexity measurements: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    // Convert to ComplexityInput for the scorer
-    let complexity_inputs: Vec<repo_graph_classification::hotspot_scorer::ComplexityInput> =
-        complexity_rows
-            .into_iter()
-            .map(
-                |row| repo_graph_classification::hotspot_scorer::ComplexityInput {
-                    file_path: row.file_path,
-                    sum_complexity: row.sum_complexity,
-                },
-            )
-            .collect();
-
-    // Compute hotspots
-    let hotspots = repo_graph_classification::hotspot_scorer::compute_hotspots(
-        &churn_inputs,
-        &complexity_inputs,
-    );
-
-    // Build file_path -> is_test lookup
-    let test_files: std::collections::HashSet<&str> = indexed_files
-        .iter()
-        .filter(|f| f.is_test)
-        .map(|f| f.path.as_str())
-        .collect();
-
-    // Apply filtering and count exclusions
-    let mut excluded_tests_count = 0usize;
-    let mut excluded_vendored_count = 0usize;
-    let mut excluded_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    let results: Vec<HotspotRow> = hotspots
-        .into_iter()
-        .filter_map(|h| {
-            let is_test = test_files.contains(h.file_path.as_str());
-            let is_vendored = is_vendored_path(&h.file_path);
-
-            let exclude_as_test = exclude_tests && is_test;
-            let exclude_as_vendored = exclude_vendored && is_vendored;
-
-            if exclude_as_test {
-                excluded_tests_count += 1;
-            }
-            if exclude_as_vendored {
-                excluded_vendored_count += 1;
-            }
-            if exclude_as_test || exclude_as_vendored {
-                excluded_paths.insert(h.file_path.clone());
-                return None;
-            }
-
-            Some(HotspotRow {
-                file_path: h.file_path,
-                commit_count: h.commit_count,
-                lines_changed: h.lines_changed,
-                sum_complexity: h.sum_complexity,
-                hotspot_score: h.hotspot_score,
-            })
-        })
-        .collect();
-
-    let excluded_count = excluded_paths.len();
-
-    // Build envelope
-    let count = results.len();
-    let mut extra = serde_json::Map::new();
-    extra.insert(
-        "since".to_string(),
-        serde_json::Value::String(since.clone()),
-    );
-    extra.insert(
-        "formula".to_string(),
-        serde_json::Value::String("lines_changed * sum_complexity".to_string()),
-    );
-
-    // Add filtering metadata only when filters are active
-    if exclude_tests || exclude_vendored {
-        let filtering = HotspotFiltering {
-            exclude_tests,
-            exclude_vendored,
-            excluded_count,
-            excluded_tests_count,
-            excluded_vendored_count,
-        };
-        extra.insert(
-            "filtering".to_string(),
-            serde_json::to_value(&filtering).unwrap(),
-        );
-    }
-
-    let output = match build_envelope(
-        &storage,
-        "hotspots",
-        repo_uid,
-        &snapshot,
-        serde_json::to_value(&results).unwrap(),
-        count,
-        extra,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
-
-    if json_mode {
-        // Raw JSON output
-        match serde_json::to_string_pretty(&output) {
-            Ok(json) => {
-                println!("{}", json);
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("error: {}", e);
-                ExitCode::from(2)
-            }
-        }
-    } else {
-        // Human-readable output
-        use crate::presentation::hotspots::HotspotsResponse;
-
-        match serde_json::from_value::<HotspotsResponse>(output) {
-            Ok(response) => {
-                print!("{}", response.render_human());
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("error: failed to parse response for rendering: {}", e);
-                ExitCode::from(2)
-            }
-        }
-    }
+    // Output result
+    output_result::<HotspotsResponse, _>(result, parsed.json_mode, |response| {
+        response.render_human()
+    })
 }
