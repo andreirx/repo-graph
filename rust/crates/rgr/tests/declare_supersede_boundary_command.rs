@@ -315,7 +315,8 @@ fn supersede_boundary_violations_see_replacement() {
     // store.ts imports core/service.ts → violations > 0.
     let old_uid = declare_boundary(db_str, "src/adapters", "src/core");
 
-    let viol_before = run_cmd(&["violations", db_str, "r1"]);
+    // CLI-OUT-1: need --json for machine-readable output
+    let viol_before = run_cmd(&["violations", db_str, "r1", "--json"]);
     let before = parse_json(&viol_before);
     assert!(
         before["count"].as_i64().unwrap() > 0,
@@ -335,7 +336,7 @@ fn supersede_boundary_violations_see_replacement() {
     ]);
     assert_eq!(output.status.code(), Some(0));
 
-    let viol_after = run_cmd(&["violations", db_str, "r1"]);
+    let viol_after = run_cmd(&["violations", db_str, "r1", "--json"]);
     let after = parse_json(&viol_after);
     assert_eq!(
         after["count"], 0,

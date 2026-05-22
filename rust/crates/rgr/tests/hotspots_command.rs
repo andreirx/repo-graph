@@ -262,6 +262,7 @@ fn hotspots_success_with_complexity() {
     // Insert complexity measurement for the indexed file
     insert_complexity_measurement(&db_path, &snapshot_uid, "test-repo", "index.ts", "greet", 5);
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "hotspots",
@@ -269,6 +270,7 @@ fn hotspots_success_with_complexity() {
             "test-repo",
             "--since",
             "1.year.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -304,6 +306,7 @@ fn hotspots_success_with_complexity() {
 fn hotspots_custom_since_window() {
     let (_dir, db_path) = build_indexed_db();
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "hotspots",
@@ -311,6 +314,7 @@ fn hotspots_custom_since_window() {
             "test-repo",
             "--since",
             "30.days.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -335,6 +339,7 @@ fn hotspots_excludes_files_without_complexity() {
     let (_dir, db_path) = build_indexed_db();
     // Do NOT insert any complexity measurements
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "hotspots",
@@ -342,6 +347,7 @@ fn hotspots_excludes_files_without_complexity() {
             "test-repo",
             "--since",
             "1.year.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -378,6 +384,7 @@ fn hotspots_empty_results_is_success() {
         10,
     );
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "hotspots",
@@ -385,6 +392,7 @@ fn hotspots_empty_results_is_success() {
             "test-repo",
             "--since",
             "1.second.ago", // No churn in this window
+            "--json",
         ])
         .output()
         .unwrap();
@@ -411,6 +419,7 @@ fn hotspots_envelope_contract() {
 
     insert_complexity_measurement(&db_path, &snapshot_uid, "test-repo", "index.ts", "greet", 5);
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "hotspots",
@@ -418,6 +427,7 @@ fn hotspots_envelope_contract() {
             "test-repo",
             "--since",
             "1.year.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -532,6 +542,7 @@ fn hotspots_score_is_lines_times_complexity() {
     insert_complexity_measurement(&db_path, &snapshot_uid, "test-repo", "index.ts", "x", 3);
     insert_complexity_measurement(&db_path, &snapshot_uid, "test-repo", "index.ts", "y", 4);
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "hotspots",
@@ -539,6 +550,7 @@ fn hotspots_score_is_lines_times_complexity() {
             "test-repo",
             "--since",
             "1.year.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -590,6 +602,7 @@ fn hotspots_no_flags_omits_filtering_field() {
 
     insert_complexity_measurement(&db_path, &snapshot_uid, "test-repo", "index.ts", "greet", 5);
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "hotspots",
@@ -597,6 +610,7 @@ fn hotspots_no_flags_omits_filtering_field() {
             "test-repo",
             "--since",
             "1.year.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -691,6 +705,7 @@ fn hotspots_exclude_tests_removes_test_files() {
     assert_eq!(is_test, 1, "src.test.ts should have is_test=1");
 
     // Run with --exclude-tests
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "hotspots",
@@ -699,6 +714,7 @@ fn hotspots_exclude_tests_removes_test_files() {
             "--since",
             "1.year.ago",
             "--exclude-tests",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -811,6 +827,7 @@ fn hotspots_exclude_vendored_uses_segment_matching() {
         5,
     );
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "hotspots",
@@ -819,6 +836,7 @@ fn hotspots_exclude_vendored_uses_segment_matching() {
             "--since",
             "1.year.ago",
             "--exclude-vendored",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -941,6 +959,7 @@ fn hotspots_combined_filters_with_overlap() {
         5,
     );
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "hotspots",
@@ -950,6 +969,7 @@ fn hotspots_combined_filters_with_overlap() {
             "1.year.ago",
             "--exclude-tests",
             "--exclude-vendored",
+            "--json",
         ])
         .output()
         .unwrap();

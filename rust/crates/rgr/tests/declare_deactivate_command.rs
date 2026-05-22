@@ -185,7 +185,8 @@ fn declare_deactivate_boundary_removes_from_violations() {
     let uid = declare_boundary(db_str);
 
     // Before deactivation: violations should exist.
-    let viol_before = run_cmd(&["violations", db_str, "r1"]);
+    // CLI-OUT-1: need --json for machine-readable output
+    let viol_before = run_cmd(&["violations", db_str, "r1", "--json"]);
     let before = parse_json(&viol_before);
     assert!(
         before["count"].as_i64().unwrap() > 0,
@@ -197,7 +198,7 @@ fn declare_deactivate_boundary_removes_from_violations() {
     assert_eq!(deact.status.code(), Some(0));
 
     // After deactivation: no violations (no active boundary declarations).
-    let viol_after = run_cmd(&["violations", db_str, "r1"]);
+    let viol_after = run_cmd(&["violations", db_str, "r1", "--json"]);
     let after = parse_json(&viol_after);
     assert_eq!(
         after["count"], 0,
