@@ -3113,6 +3113,39 @@ trusting the smoke harness as a stable protocol tool.
 
 **Full resolution:** Requires a dedicated cleanup slice addressing A-E above.
 
+## CLI Contract Migration
+
+### Declare Family Still Uses Legacy Contract
+
+**Added:** LEGACY-CONTRACT-MIGRATION-1C (2026-05-22)
+
+The `declare` command family (`declare boundary`, `declare requirement`, `declare waiver`,
+`declare quality-policy`, `declare deactivate`, `declare supersede`) still uses the legacy
+`<db_path> <repo_uid>` contract while read-side commands have migrated to REG-1 daemon contract.
+
+**Affected commands:**
+- `rmap declare boundary <db_path> <repo_uid> <module_path> --forbids <target>`
+- `rmap declare requirement <db_path> <repo_uid> ...`
+- `rmap declare waiver <db_path> <repo_uid> ...`
+- `rmap declare quality-policy <db_path> <repo_uid> ...`
+- `rmap declare deactivate <db_path> <repo_uid> ...`
+- `rmap declare supersede <db_path> <repo_uid> ...`
+
+**Impact:**
+- Test `declare_boundary_visible_to_violations` marked `#[ignore]` — declares a boundary
+  via legacy contract but `violations` now uses REG-1, so the test cannot validate the
+  integration path without daemon harness.
+- Users cannot use `declare` commands from cwd like other commands.
+
+**Target contract (REG-1 pattern):**
+```bash
+rmap declare boundary <module_path> --forbids <target>  # repo resolved from cwd
+```
+
+**Resolution:** A future slice (LEGACY-CONTRACT-MIGRATION-2 or similar) should migrate
+the `declare` family to REG-1, adding daemon handlers for write operations. This requires
+daemon-side write coordination similar to `assess` (acquire write lock + refresh lock).
+
 ## CLI Presentation
 
 ### display_name in shared response DTOs
