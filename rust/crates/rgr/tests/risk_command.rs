@@ -254,6 +254,7 @@ fn risk_success_with_hotspot_and_coverage() {
     // Insert coverage
     insert_coverage_measurement(&db_path, &snapshot_uid, "test-repo", "index.ts", 0.8);
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "risk",
@@ -261,6 +262,7 @@ fn risk_success_with_hotspot_and_coverage() {
             "test-repo",
             "--since",
             "1.year.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -297,6 +299,7 @@ fn risk_custom_since_window() {
     insert_complexity_measurement(&db_path, &snapshot_uid, "test-repo", "index.ts", "greet", 5);
     insert_coverage_measurement(&db_path, &snapshot_uid, "test-repo", "index.ts", 0.5);
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "risk",
@@ -304,6 +307,7 @@ fn risk_custom_since_window() {
             "test-repo",
             "--since",
             "30.days.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -333,6 +337,7 @@ fn risk_excludes_files_without_coverage() {
 
     // Do NOT insert coverage
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "risk",
@@ -340,6 +345,7 @@ fn risk_excludes_files_without_coverage() {
             "test-repo",
             "--since",
             "1.year.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -373,6 +379,7 @@ fn risk_excludes_files_without_hotspot() {
     // Insert coverage for a different file than the one with churn
     insert_coverage_measurement(&db_path, &snapshot_uid, "test-repo", "other.ts", 0.1);
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "risk",
@@ -380,6 +387,7 @@ fn risk_excludes_files_without_hotspot() {
             "test-repo",
             "--since",
             "1.year.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -406,6 +414,7 @@ fn risk_empty_results_is_success() {
 
     // No complexity, no coverage
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "risk",
@@ -413,6 +422,7 @@ fn risk_empty_results_is_success() {
             "test-repo",
             "--since",
             "1.second.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -440,6 +450,7 @@ fn risk_envelope_contract() {
     insert_complexity_measurement(&db_path, &snapshot_uid, "test-repo", "index.ts", "greet", 5);
     insert_coverage_measurement(&db_path, &snapshot_uid, "test-repo", "index.ts", 0.5);
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "risk",
@@ -447,6 +458,7 @@ fn risk_envelope_contract() {
             "test-repo",
             "--since",
             "1.year.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -520,6 +532,7 @@ fn risk_formula_is_hotspot_times_coverage_gap() {
     // Coverage = 0.6 (60%), so coverage_gap = 0.4
     insert_coverage_measurement(&db_path, &snapshot_uid, "test-repo", "index.ts", 0.6);
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "risk",
@@ -527,6 +540,7 @@ fn risk_formula_is_hotspot_times_coverage_gap() {
             "test-repo",
             "--since",
             "1.year.ago",
+            "--json",
         ])
         .output()
         .unwrap();
@@ -645,6 +659,7 @@ fn risk_high_coverage_reduces_risk() {
         0.1,
     );
 
+    // CLI-OUT-1: need --json for machine-readable output
     let output = Command::new(binary_path())
         .args([
             "risk",
@@ -652,6 +667,7 @@ fn risk_high_coverage_reduces_risk() {
             "test-repo",
             "--since",
             "1.year.ago",
+            "--json",
         ])
         .output()
         .unwrap();

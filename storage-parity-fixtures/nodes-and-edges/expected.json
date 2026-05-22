@@ -3882,6 +3882,11 @@
         "version": 26,
         "name": "026-gcm-created-at",
         "applied_at": "<TIMESTAMP>"
+      },
+      {
+        "version": 27,
+        "name": "027-freshness-provenance",
+        "applied_at": "<TIMESTAMP>"
       }
     ],
     "snapshots": [

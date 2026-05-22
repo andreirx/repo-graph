@@ -921,12 +921,37 @@ mod tests {
         let mut storage = setup();
         let snap_uid = setup_with_snapshot(&storage);
 
-        // Create 3 MODULE nodes and 1 FILE node.
-        // m_core imports m_api (fan_out for m_core, fan_in for m_api).
-        // m_api imports m_util (fan_out for m_api, fan_in for m_util).
-        // m_core OWNS file f1 (file_count for m_core).
-        // m_api OWNS nothing → excluded by file_count > 0 guard
-        //   (we add an OWNS for m_api too to include it).
+        // ORIENT-BUG-1: The query now starts from module_candidates, not nodes.
+        // We need: module_candidates + module_file_ownership for file count,
+        // and MODULE nodes + IMPORTS edges for fan_in/fan_out.
+
+        // 1. Insert module_candidates (source of truth for module list)
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO module_candidates \
+                 (module_candidate_uid, snapshot_uid, repo_uid, module_key, \
+                  module_kind, canonical_root_path, confidence) VALUES \
+                 ('mc_core', '{snap_uid}', 'r1', 'dir:src/core', 'directory', 'src/core', 1.0), \
+                 ('mc_api', '{snap_uid}', 'r1', 'dir:src/api', 'directory', 'src/api', 1.0), \
+                 ('mc_util', '{snap_uid}', 'r1', 'dir:src/util', 'directory', 'src/util', 1.0)"
+            ))
+            .unwrap();
+
+        // 2. Insert module_file_ownership (determines file_count)
+        storage
+            .connection()
+            .execute_batch(&format!(
+                "INSERT INTO module_file_ownership \
+                 (snapshot_uid, repo_uid, file_uid, module_candidate_uid, assignment_kind, confidence) VALUES \
+                 ('{snap_uid}', 'r1', 'r1:src/core/index.ts', 'mc_core', 'directory', 1.0), \
+                 ('{snap_uid}', 'r1', 'r1:src/api/handler.ts', 'mc_api', 'directory', 1.0), \
+                 ('{snap_uid}', 'r1', 'r1:src/util/helpers.ts', 'mc_util', 'directory', 1.0)"
+            ))
+            .unwrap();
+
+        // 3. Insert MODULE nodes (for fan_in/fan_out via IMPORTS edges)
+        // qualified_name must match canonical_root_path for the JOIN to work.
         storage
             .insert_nodes(&[
                 crate::types::GraphNode {
@@ -980,66 +1005,12 @@ mod tests {
                     doc_comment: None,
                     metadata_json: None,
                 },
-                // FILE nodes targeted by OWNS edges. file_uid is
-                // None because these are graph nodes (the OWNS edge
-                // links by node_uid), and the files table entries
-                // are not needed for this test.
-                crate::types::GraphNode {
-                    node_uid: "f1".into(),
-                    snapshot_uid: snap_uid.clone(),
-                    repo_uid: "r1".into(),
-                    stable_key: "r1:src/core/index.ts:FILE".into(),
-                    kind: "FILE".into(),
-                    subtype: None,
-                    name: "index.ts".into(),
-                    qualified_name: Some("src/core/index.ts".into()),
-                    file_uid: None,
-                    parent_node_uid: None,
-                    location: None,
-                    signature: None,
-                    visibility: None,
-                    doc_comment: None,
-                    metadata_json: None,
-                },
-                crate::types::GraphNode {
-                    node_uid: "f2".into(),
-                    snapshot_uid: snap_uid.clone(),
-                    repo_uid: "r1".into(),
-                    stable_key: "r1:src/api/handler.ts:FILE".into(),
-                    kind: "FILE".into(),
-                    subtype: None,
-                    name: "handler.ts".into(),
-                    qualified_name: Some("src/api/handler.ts".into()),
-                    file_uid: None,
-                    parent_node_uid: None,
-                    location: None,
-                    signature: None,
-                    visibility: None,
-                    doc_comment: None,
-                    metadata_json: None,
-                },
-                crate::types::GraphNode {
-                    node_uid: "f3".into(),
-                    snapshot_uid: snap_uid.clone(),
-                    repo_uid: "r1".into(),
-                    stable_key: "r1:src/util/helpers.ts:FILE".into(),
-                    kind: "FILE".into(),
-                    subtype: None,
-                    name: "helpers.ts".into(),
-                    qualified_name: Some("src/util/helpers.ts".into()),
-                    file_uid: None,
-                    parent_node_uid: None,
-                    location: None,
-                    signature: None,
-                    visibility: None,
-                    doc_comment: None,
-                    metadata_json: None,
-                },
             ])
             .unwrap();
 
-        // IMPORTS: m_core → m_api, m_api → m_util
-        // OWNS: m_core → f1, m_api → f2, m_util → f3
+        // 4. Insert IMPORTS edges (determines fan_in/fan_out)
+        // m_core → m_api: fan_out for m_core, fan_in for m_api
+        // m_api → m_util: fan_out for m_api, fan_in for m_util
         storage
             .insert_edges(&[
                 crate::types::GraphEdge {
@@ -1061,42 +1032,6 @@ mod tests {
                     source_node_uid: "m_api".into(),
                     target_node_uid: "m_util".into(),
                     edge_type: "IMPORTS".into(),
-                    resolution: "static".into(),
-                    extractor: "ts-base:1".into(),
-                    location: None,
-                    metadata_json: None,
-                },
-                crate::types::GraphEdge {
-                    edge_uid: "e_own1".into(),
-                    snapshot_uid: snap_uid.clone(),
-                    repo_uid: "r1".into(),
-                    source_node_uid: "m_core".into(),
-                    target_node_uid: "f1".into(),
-                    edge_type: "OWNS".into(),
-                    resolution: "static".into(),
-                    extractor: "ts-base:1".into(),
-                    location: None,
-                    metadata_json: None,
-                },
-                crate::types::GraphEdge {
-                    edge_uid: "e_own2".into(),
-                    snapshot_uid: snap_uid.clone(),
-                    repo_uid: "r1".into(),
-                    source_node_uid: "m_api".into(),
-                    target_node_uid: "f2".into(),
-                    edge_type: "OWNS".into(),
-                    resolution: "static".into(),
-                    extractor: "ts-base:1".into(),
-                    location: None,
-                    metadata_json: None,
-                },
-                crate::types::GraphEdge {
-                    edge_uid: "e_own3".into(),
-                    snapshot_uid: snap_uid.clone(),
-                    repo_uid: "r1".into(),
-                    source_node_uid: "m_util".into(),
-                    target_node_uid: "f3".into(),
-                    edge_type: "OWNS".into(),
                     resolution: "static".into(),
                     extractor: "ts-base:1".into(),
                     location: None,
