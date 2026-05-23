@@ -436,7 +436,7 @@ fn find_binding_for_identifier<'a>(
 mod tests {
     use super::*;
     use crate::types::{
-        ImportBinding, PackageDependencySet, RuntimeBuiltinsSet, TsconfigAliasEntry,
+        ImportBinding, ImportKind, PackageDependencySet, RuntimeBuiltinsSet, TsconfigAliasEntry,
         TsconfigAliases,
     };
 
@@ -699,6 +699,7 @@ mod tests {
             location: None,
             is_type_only: false,
             imported_name: None,
+            kind: ImportKind::Named,
         }];
         fs.package_dependencies = PackageDependencySet {
             names: vec!["lodash".into()],
@@ -729,6 +730,7 @@ mod tests {
             location: None,
             is_type_only: false,
             imported_name: None,
+            kind: ImportKind::Named,
         }];
         let v = classify_unresolved_edge(
             &edge("helper"),
@@ -756,6 +758,7 @@ mod tests {
             location: None,
             is_type_only: false,
             imported_name: None,
+            kind: ImportKind::Named,
         }];
         fs.tsconfig_aliases = TsconfigAliases {
             entries: vec![TsconfigAliasEntry {

@@ -2,7 +2,9 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use repo_graph_classification::types::{ImportBinding, RuntimeBuiltinsSet, SourceLocation};
+use repo_graph_classification::types::{
+    ImportBinding, ImportKind, RuntimeBuiltinsSet, SourceLocation,
+};
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::types::{
     CallArgPayload, EdgeType, ExtractedEdge, ExtractedMetrics, ExtractedNode, ExtractionResult,
@@ -622,6 +624,9 @@ fn extract_import_statement(node: &Node, ctx: &mut ExtractionCtx) {
                 // P2 fix: whole-module imports have no specific imported symbol.
                 // The module itself is the binding, not a symbol exported from it.
                 imported_name: None,
+                // Python `import foo` is similar to TypeScript namespace import:
+                // the module object itself is bound to the identifier.
+                kind: ImportKind::Namespace,
             });
 
             ctx.edges.push(ExtractedEdge {
@@ -807,6 +812,8 @@ fn emit_from_import_binding(
         is_type_only: false,
         // `from X import Y` imports a specific symbol Y, so imported_name is set
         imported_name: Some(imported_name.to_string()),
+        // Python `from X import Y` is a named import
+        kind: ImportKind::Named,
     });
 
     ctx.edges.push(ExtractedEdge {

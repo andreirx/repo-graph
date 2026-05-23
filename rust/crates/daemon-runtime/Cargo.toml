@@ -57,6 +57,9 @@ repo-graph-coverage = { path = "../coverage" }
 # Quality policy assessment (assess command)
 repo-graph-quality-policy-runner = { path = "../quality-policy-runner" }
 
+# Policy facts (policy command)
+repo-graph-policy-facts = { path = "../policy-facts" }
+
 # Enrichment pipeline and resolvers
 enrichment = { path = "../enrichment" }
 rust-analyzer-resolver = { path = "../rust-analyzer-resolver" }

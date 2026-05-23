@@ -9,12 +9,18 @@
 - **Imported free-function call resolution:** bare-identifier calls that match an
   import binding are resolved using the binding's source module. Disambiguates
   when the same function name exists in multiple files.
-- **Aliased imports not yet resolved:** `import { foo as bar }` — the binding
-  stores the local name (`bar`) but not the original name (`foo`). The resolver
-  looks for `bar` in the target file, which finds nothing. Requires storing the
-  original name in ImportBinding.
-- **Namespace imports not resolved:** `import * as ns from "./m"; ns.foo()` —
-  the callee is `ns.foo`, which includes the namespace alias. Not handled.
+- **Aliased named imports now resolved:** `import { foo as bar }` — the binding
+  stores both local name (`bar`) and original name (`foo`) in `imported_name`.
+  The resolver uses `imported_name` for symbol lookup in the target module.
+  Fixed in TS-IMPORT-RESOLUTION-1 Phase 1 (2026-05-23).
+- **Namespace imports now resolved:** `import * as ns from "./m"; ns.foo()` —
+  the resolver extracts the member name (`foo`) and looks it up in the target
+  module. Requires explicit import-kind modeling (`ImportKind` enum) to
+  distinguish from default imports. Fixed in TS-IMPORT-RESOLUTION-1 Phase 2-3
+  (2026-05-23).
+- **Default import member access not resolved:** `import fs from "fs"; fs.readFile()`
+  — requires modeling default export structure. Conservative: no resolution,
+  no false positives. Out of scope.
 - Inherited method resolution: 11 remaining cases on FRAKTAG (diminishing returns).
 - External SDK types (node_modules): not indexed.
 - Destructured bindings, reassignment: not tracked.
@@ -1453,44 +1459,49 @@ Not in slice 1. Each is its own planned future slice.
   "env_key"`) and does NOT emit CONFIG_KEY nodes. See
   state-boundary-contract.txt §5.6.
 
-### TS-side `importedName` population deferred (SB-3-pre)
+### TS-side `importedName` and `kind` population deferred (SB-3-pre, TS-IMPORT-RESOLUTION-1)
 
-`ImportBinding.importedName` (TS interface in
+`ImportBinding.importedName` and `ImportBinding.kind` (TS interface in
 `src/core/ports/extractor.ts`; Rust struct in
-`rust/crates/classification/src/types.rs`) stores the original
-exported symbol name for named imports:
+`rust/crates/classification/src/types.rs`) are used for import
+resolution:
 
+**importedName:** Original exported symbol name for named imports:
 - `import { readFile } from "fs"` → `importedName = "readFile"`.
-- `import { readFile as rf } from "fs"` → `importedName =
-  "readFile"`, `identifier = "rf"`.
+- `import { readFile as rf } from "fs"` → `importedName = "readFile"`, `identifier = "rf"`.
 - `import fs from "fs"` (default) → `importedName = null`.
 - `import * as fs from "fs"` (namespace) → `importedName = null`.
 
+**kind:** Import kind enum (`NAMED`, `DEFAULT`, `NAMESPACE`):
+- `import { X }` or `import { X as Y }` → `kind = NAMED`.
+- `import X from "m"` → `kind = DEFAULT`.
+- `import * as X from "m"` → `kind = NAMESPACE`.
+
 **Rust populated.** `rust/crates/ts-extractor/src/extractor.rs`
-populates this correctly for all four patterns. Covered by unit
-tests.
+populates both fields correctly for all patterns. The resolver uses
+`kind` to distinguish namespace imports (resolvable) from default
+imports (conservative).
 
 **TS NOT populated.** All five TS extractors
 (`src/adapters/extractors/{typescript,python,rust,java,cpp}/`)
-pass `importedName: null` unconditionally. This is a deliberate
-Fork-1 posture: TS-side state-boundary emission is deferred, so
-no current TS consumer needs the resolved original-symbol name.
+pass `importedName: null` and omit `kind` (defaults to `NAMED`).
+This is a deliberate Fork-1 posture: TS-side state-boundary emission
+is deferred, so no current TS consumer needs these fields. The
+resolver only uses these fields when populated by Rust extractors.
 
 **Parity impact.** Cross-runtime parity harness
 (`test/ts-extractor-parity/ts-extractor-parity.test.ts:88-100`)
 projects `ImportBinding` to a fixed field set that does NOT
-include `importedName`. The Rust serde attribute
-`#[serde(default, skip_serializing_if = "Option::is_none")]`
-additionally keeps absent values invisible on the wire for
-`None` cases. Net effect: no parity harness impact, no
-serialization drift.
+include `importedName` or `kind`. The Rust serde attributes
+`#[serde(default)]` keep absent values invisible on the wire.
+Net effect: no parity harness impact, no serialization drift.
 
 **Follow-on slice.** When TS-side state-boundary emission is
-prioritized (or any other TS consumer needs resolved original-
-symbol names), ship a dedicated slice that ports the Rust
-alias-resolution logic to each TS extractor. Until then, TS
-consumers of `ImportBinding` must treat `importedName` as
-potentially null.
+prioritized (or any other TS consumer needs these fields), ship
+a dedicated slice that ports the Rust import-resolution logic
+to each TS extractor. Until then, TS consumers of `ImportBinding`
+must treat `importedName` as potentially null and `kind` as
+potentially absent (defaulting to `NAMED`).
 
 ### Refresh stale-orphan resource nodes (SB-4-pre Fix B)
 

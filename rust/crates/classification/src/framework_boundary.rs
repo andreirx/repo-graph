@@ -98,6 +98,7 @@ pub fn detect_framework_boundary(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ImportKind;
 
     fn express_import() -> ImportBinding {
         ImportBinding {
@@ -107,6 +108,7 @@ mod tests {
             location: None,
             is_type_only: false,
             imported_name: None,
+            kind: ImportKind::Default, // import express from "express"
         }
     }
 
@@ -118,6 +120,7 @@ mod tests {
             location: None,
             is_type_only: true,
             imported_name: None,
+            kind: ImportKind::Named, // import { Express } from "@types/express"
         }
     }
 
@@ -129,6 +132,7 @@ mod tests {
             location: None,
             is_type_only: false,
             imported_name: None,
+            kind: ImportKind::Default, // import React from "react"
         }
     }
 

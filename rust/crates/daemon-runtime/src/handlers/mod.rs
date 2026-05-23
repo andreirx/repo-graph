@@ -8,7 +8,7 @@
 //! ```text
 //! dispatch.rs → handlers/quality.rs → application services
 //!             → handlers/governance.rs
-//!             → handlers/inventory.rs (future)
+//!             → handlers/inventory.rs
 //! ```
 //!
 //! Handler functions take the necessary context (DaemonState, Request)
@@ -16,5 +16,6 @@
 //! serialization beyond the JSON request/response contract.
 
 pub mod governance;
+pub mod inventory;
 pub mod quality;
 pub mod support;

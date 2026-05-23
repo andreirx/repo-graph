@@ -1,6 +1,6 @@
 # LEGACY-CONTRACT-MIGRATION-1: Daemon Migration for Legacy Commands
 
-**Status:** CURRENT  
+**Status:** COMPLETE (2026-05-23)  
 **Type:** Refactor / Contract Alignment  
 **Prerequisite:** REG-1 complete (daemon registry infrastructure exists)  
 **Discovered:** CLI-AUDIT-1 (2026-05-20)
@@ -166,13 +166,13 @@ Do NOT duplicate shared query logic across inline handlers in dispatch.rs.
 - [x] 1A: Shared CLI support module complete and tested (2026-05-22)
 - [x] 1B: Quality family migrated (churn, hotspots, risk, coverage) (2026-05-22)
 - [x] 1C: Governance family migrated (assess, violations) (2026-05-22)
-- [ ] 1D: Inventory family migrated (policy)
-- [ ] All 7 commands work with `rmap <cmd>` from registered repo cwd
-- [ ] Human output identical to legacy contract
-- [ ] JSON output identical to legacy contract
-- [ ] No db_path/repo_uid in user-facing contract
-- [ ] Write-path validation for assess and coverage
-- [ ] Smoke validation on corpus repos
+- [x] 1D: Inventory family migrated (policy) (2026-05-23)
+- [x] All 7 commands work with `rmap <cmd>` from registered repo cwd
+- [x] Human output identical to legacy contract
+- [x] JSON output identical to legacy contract
+- [x] No db_path/repo_uid in user-facing contract
+- [x] Write-path validation for assess and coverage
+- [x] Smoke validation on corpus repos (leveldb, sqlite)
 
 ## Files in Scope
 

@@ -266,6 +266,10 @@ impl Dispatcher for ServiceDispatcher {
             "assess" => crate::handlers::governance::handle_assess(&self.state, request),
             "violations" => crate::handlers::governance::handle_violations(&self.state, request),
 
+            // ── Inventory (LEGACY-CONTRACT-MIGRATION-1D) ─────────────
+            // Handler extracted to handlers/inventory.rs
+            "policy" => crate::handlers::inventory::handle_policy(&self.state, request),
+
             // ── Documentation ───────────────────────────────────────
             "docs_list" => self.handle_docs_list(request),
             "docs_extract" => self.handle_docs_extract(request),

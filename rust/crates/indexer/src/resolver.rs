@@ -19,7 +19,9 @@
 
 use std::collections::HashMap;
 
-use repo_graph_classification::types::{ImportBinding, SourceLocation, UnresolvedEdgeCategory};
+use repo_graph_classification::types::{
+    ImportBinding, ImportKind, SourceLocation, UnresolvedEdgeCategory,
+};
 
 use crate::include_resolver::{IncludeResolutionMap, ResolutionStatus};
 use crate::types::{EdgeType, ExtractedEdge, Resolution};
@@ -358,22 +360,102 @@ fn resolve_call_target(
     import_bindings_by_file: Option<&HashMap<String, Vec<ImportBinding>>>,
     node_uid_to_file_uid: &HashMap<String, String>,
 ) -> Option<String> {
-    // Dotted name: extract method name from "obj.method" or
+    // ── Namespace import resolution ───────────────────────────────────
+    // For calls like `fs.readFile()` where `fs` is a namespace import,
+    // extract the member name and look it up in the imported module.
+    if target_key.contains('.') {
+        if let Some(bindings_map) = import_bindings_by_file {
+            if let Some(source_file_uid) = node_uid_to_file_uid.get(source_node_uid) {
+                if let Some(bindings) = bindings_map.get(source_file_uid) {
+                    // Extract potential namespace prefix and member
+                    let parts: Vec<&str> = target_key.splitn(2, '.').collect();
+                    if parts.len() == 2 {
+                        let prefix = parts[0];
+                        let member = parts[1];
+
+                        // Check if prefix matches a namespace import
+                        if let Some(binding) = bindings
+                            .iter()
+                            .find(|b| b.identifier == prefix && b.kind == ImportKind::Namespace)
+                        {
+                            if let Some(resolved_file_uid) = resolve_import_specifier_to_file(
+                                &binding.specifier,
+                                source_file_uid,
+                                file_resolution,
+                            ) {
+                                // For nested member access like `fs.promises.readFile`,
+                                // we only handle the immediate member for now.
+                                // Extract the first part of the member (before any dot).
+                                let immediate_member = member.split('.').next().unwrap_or(member);
+
+                                if let Some(candidates) = nodes_by_name.get(immediate_member) {
+                                    let in_file: Vec<ResolverNode> = candidates
+                                        .iter()
+                                        .filter(|n| {
+                                            n.file_uid.as_deref()
+                                                == Some(resolved_file_uid.as_str())
+                                        })
+                                        .cloned()
+                                        .collect();
+                                    if let Some(uid) =
+                                        pick_unambiguous(Some(&in_file), EdgeType::Calls)
+                                    {
+                                        return Some(uid);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Dotted name fallback ──────────────────────────────────────────
+    // For non-namespace cases: extract method name from "obj.method" or
     // "this.field.method" patterns.
+    //
+    // IMPORTANT: Skip this fallback for default-import member access.
+    // `import fs from "fs"; fs.readFile()` must NOT resolve by bare
+    // method name lookup, as that creates false positives. Default
+    // import member access is conservatively unresolved until we model
+    // default export structure.
     if target_key.contains('.') {
         let parts: Vec<&str> = target_key.split('.').collect();
+        let prefix = parts[0];
         let method_name = parts[parts.len() - 1];
 
-        // "this.repo.findById" style (3+ parts starting with "this")
-        if parts[0] == "this" && parts.len() >= 3 {
+        // Check if prefix matches a Default import — if so, skip fallback.
+        // This prevents false positives for default-import member access.
+        let prefix_is_default_import = import_bindings_by_file
+            .and_then(|bindings_map| {
+                node_uid_to_file_uid
+                    .get(source_node_uid)
+                    .and_then(|file_uid| bindings_map.get(file_uid))
+            })
+            .map(|bindings| {
+                bindings
+                    .iter()
+                    .any(|b| b.identifier == prefix && b.kind == ImportKind::Default)
+            })
+            .unwrap_or(false);
+
+        if prefix_is_default_import {
+            // Conservative: default-import member access is not resolved.
+            // Fall through to return None.
+        } else {
+            // "this.repo.findById" style (3+ parts starting with "this")
+            if prefix == "this" && parts.len() >= 3 {
+                if let Some(uid) = pick_unambiguous(nodes_by_name.get(method_name), EdgeType::Calls)
+                {
+                    return Some(uid);
+                }
+            }
+
+            // "obj.method()" — try method name (only for non-import objects).
             if let Some(uid) = pick_unambiguous(nodes_by_name.get(method_name), EdgeType::Calls) {
                 return Some(uid);
             }
-        }
-
-        // "obj.method()" — try method name.
-        if let Some(uid) = pick_unambiguous(nodes_by_name.get(method_name), EdgeType::Calls) {
-            return Some(uid);
         }
     }
 
@@ -382,8 +464,8 @@ fn resolve_call_target(
         return Some(uid);
     }
 
-    // Import-binding-assisted resolution: if the identifier was
-    // imported in the source file, narrow lookup to that module.
+    // ── Named import resolution ───────────────────────────────────────
+    // For aliased named imports: look up the original exported name.
     if let Some(bindings_map) = import_bindings_by_file {
         if let Some(source_file_uid) = node_uid_to_file_uid.get(source_node_uid) {
             if let Some(bindings) = bindings_map.get(source_file_uid) {
@@ -393,7 +475,11 @@ fn resolve_call_target(
                         source_file_uid,
                         file_resolution,
                     ) {
-                        if let Some(candidates) = nodes_by_name.get(target_key) {
+                        // For aliased named imports, use the original exported
+                        // name (e.g., "readFile" not "rf" for `import { readFile as rf }`).
+                        // For default imports, imported_name is None — conservative fallback.
+                        let lookup_name = binding.imported_name.as_deref().unwrap_or(target_key);
+                        if let Some(candidates) = nodes_by_name.get(lookup_name) {
                             let in_file: Vec<ResolverNode> = candidates
                                 .iter()
                                 .filter(|n| {
@@ -1222,6 +1308,7 @@ mod tests {
                 location: None,
                 is_type_only: false,
                 imported_name: Some("classifyMedia".into()),
+                kind: ImportKind::Named,
             }],
         )]
         .into_iter()
@@ -1232,6 +1319,206 @@ mod tests {
 
         assert_eq!(result.resolved.len(), 1);
         assert_eq!(result.resolved[0].target_node_uid, "fn_media");
+    }
+
+    #[test]
+    fn aliased_named_import_uses_imported_name_for_lookup() {
+        // Test: import { readFile as rf } from "./utils"; rf()
+        // The callee is "rf" but the target module exports "readFile".
+        // The resolver must use imported_name ("readFile") for the lookup.
+        let n1 = make_node(
+            "fn_readFile",
+            "r1:src/utils.ts:readFile:SYMBOL",
+            "readFile",
+            Some("FUNCTION"),
+            Some("r1:src/utils.ts"),
+        );
+        let mut index = ResolverIndex {
+            nodes_by_stable_key: HashMap::new(),
+            nodes_by_name: HashMap::new(),
+            node_uid_to_file_uid: HashMap::new(),
+            file_resolution: HashMap::new(),
+            per_file_include_resolution: HashMap::new(),
+            stable_key_to_uid: HashMap::new(),
+            file_to_module: HashMap::new(),
+            include_resolver: None,
+        };
+        // The target module exports "readFile", NOT "rf".
+        index
+            .nodes_by_name
+            .entry("readFile".into())
+            .or_default()
+            .push(n1);
+        // Source node lives in src/index.ts.
+        index
+            .node_uid_to_file_uid
+            .insert("src1".into(), "r1:src/index.ts".into());
+        // File resolution: "./utils" from src/ → src/utils.ts.
+        index
+            .file_resolution
+            .insert("r1:src/utils:FILE".into(), "r1:src/utils.ts:FILE".into());
+
+        // Import binding: "rf" is local alias, "readFile" is original name.
+        let bindings: HashMap<String, Vec<ImportBinding>> = [(
+            "r1:src/index.ts".into(),
+            vec![ImportBinding {
+                identifier: "rf".into(), // Local alias
+                specifier: "./utils".into(),
+                is_relative: true,
+                location: None,
+                is_type_only: false,
+                imported_name: Some("readFile".into()), // Original exported name
+                kind: ImportKind::Named,
+            }],
+        )]
+        .into_iter()
+        .collect();
+
+        // Edge target_key is "rf" (the local alias used in code).
+        let edge = make_edge("e1", "rf", EdgeType::Calls);
+        let result = resolve_edges(&[edge], &index, Some(&bindings));
+
+        // Should resolve to "readFile" in the target module.
+        assert_eq!(result.resolved.len(), 1, "aliased import should resolve");
+        assert_eq!(result.resolved[0].target_node_uid, "fn_readFile");
+    }
+
+    #[test]
+    fn namespace_import_member_resolves_to_target_module() {
+        // Test: import * as utils from "./utils"; utils.helper()
+        // The callee is "utils.helper" and the target module exports "helper".
+        // The resolver must strip the namespace prefix and look up "helper"
+        // in the resolved module.
+        let n1 = make_node(
+            "fn_helper",
+            "r1:src/utils.ts:helper:SYMBOL",
+            "helper",
+            Some("FUNCTION"),
+            Some("r1:src/utils.ts"),
+        );
+        let mut index = ResolverIndex {
+            nodes_by_stable_key: HashMap::new(),
+            nodes_by_name: HashMap::new(),
+            node_uid_to_file_uid: HashMap::new(),
+            file_resolution: HashMap::new(),
+            per_file_include_resolution: HashMap::new(),
+            stable_key_to_uid: HashMap::new(),
+            file_to_module: HashMap::new(),
+            include_resolver: None,
+        };
+        // The target module exports "helper".
+        index
+            .nodes_by_name
+            .entry("helper".into())
+            .or_default()
+            .push(n1);
+        // Source node lives in src/index.ts.
+        index
+            .node_uid_to_file_uid
+            .insert("src1".into(), "r1:src/index.ts".into());
+        // File resolution: "./utils" from src/ → src/utils.ts.
+        index
+            .file_resolution
+            .insert("r1:src/utils:FILE".into(), "r1:src/utils.ts:FILE".into());
+
+        // Import binding: namespace import `import * as utils from "./utils"`.
+        let bindings: HashMap<String, Vec<ImportBinding>> = [(
+            "r1:src/index.ts".into(),
+            vec![ImportBinding {
+                identifier: "utils".into(),
+                specifier: "./utils".into(),
+                is_relative: true,
+                location: None,
+                is_type_only: false,
+                imported_name: None, // Namespace imports have no imported_name
+                kind: ImportKind::Namespace,
+            }],
+        )]
+        .into_iter()
+        .collect();
+
+        // Edge target_key is "utils.helper" (namespace prefix + member).
+        let edge = make_edge("e1", "utils.helper", EdgeType::Calls);
+        let result = resolve_edges(&[edge], &index, Some(&bindings));
+
+        // Should resolve to "helper" in the target module.
+        assert_eq!(
+            result.resolved.len(),
+            1,
+            "namespace import member should resolve"
+        );
+        assert_eq!(result.resolved[0].target_node_uid, "fn_helper");
+    }
+
+    #[test]
+    fn default_import_member_does_not_resolve_by_bare_method_name() {
+        // Test: import fs from "fs"; fs.readFile()
+        // This is a default import, NOT a namespace import.
+        // The resolver must NOT resolve by bare method name lookup,
+        // as that would create false positives.
+        //
+        // Even though "readFile" exists globally, the call should NOT
+        // resolve because we don't model default export structure.
+        let n1 = make_node(
+            "fn_readFile",
+            "r1:src/utils.ts:readFile:SYMBOL",
+            "readFile",
+            Some("FUNCTION"),
+            Some("r1:src/utils.ts"),
+        );
+        let mut index = ResolverIndex {
+            nodes_by_stable_key: HashMap::new(),
+            nodes_by_name: HashMap::new(),
+            node_uid_to_file_uid: HashMap::new(),
+            file_resolution: HashMap::new(),
+            per_file_include_resolution: HashMap::new(),
+            stable_key_to_uid: HashMap::new(),
+            file_to_module: HashMap::new(),
+            include_resolver: None,
+        };
+        // There exists a "readFile" function globally.
+        index
+            .nodes_by_name
+            .entry("readFile".into())
+            .or_default()
+            .push(n1);
+        // Source node lives in src/index.ts.
+        index
+            .node_uid_to_file_uid
+            .insert("src1".into(), "r1:src/index.ts".into());
+
+        // Import binding: DEFAULT import `import fs from "fs"`.
+        let bindings: HashMap<String, Vec<ImportBinding>> = [(
+            "r1:src/index.ts".into(),
+            vec![ImportBinding {
+                identifier: "fs".into(),
+                specifier: "fs".into(),
+                is_relative: false,
+                location: None,
+                is_type_only: false,
+                imported_name: None, // Default imports have no imported_name
+                kind: ImportKind::Default,
+            }],
+        )]
+        .into_iter()
+        .collect();
+
+        // Edge target_key is "fs.readFile" (default import member access).
+        let edge = make_edge("e1", "fs.readFile", EdgeType::Calls);
+        let result = resolve_edges(&[edge], &index, Some(&bindings));
+
+        // Should NOT resolve — default import member access is conservative.
+        // Even though "readFile" exists, we don't resolve to avoid false positives.
+        assert_eq!(
+            result.resolved.len(),
+            0,
+            "default import member should NOT resolve by bare method name"
+        );
+        assert_eq!(
+            result.still_unresolved.len(),
+            1,
+            "default import member should remain unresolved"
+        );
     }
 
     // ── build_per_file_include_resolution ────────────────────

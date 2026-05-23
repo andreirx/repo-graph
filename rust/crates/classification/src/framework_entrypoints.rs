@@ -90,6 +90,7 @@ pub fn detect_lambda_entrypoints(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ImportKind;
 
     fn lambda_import() -> ImportBinding {
         ImportBinding {
@@ -99,6 +100,7 @@ mod tests {
             location: None,
             is_type_only: true,
             imported_name: None,
+            kind: ImportKind::Named, // import { Handler } from "aws-lambda"
         }
     }
 
@@ -110,6 +112,7 @@ mod tests {
             location: None,
             is_type_only: false,
             imported_name: None,
+            kind: ImportKind::Named, // import { Logger } from "@aws-lambda-powertools/logger"
         }
     }
 
@@ -121,6 +124,7 @@ mod tests {
             location: None,
             is_type_only: false,
             imported_name: None,
+            kind: ImportKind::Default, // import middy from "@middy/core"
         }
     }
 

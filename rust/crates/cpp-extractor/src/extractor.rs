@@ -5,7 +5,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use repo_graph_classification::types::{ImportBinding, RuntimeBuiltinsSet, SourceLocation};
+use repo_graph_classification::types::{
+    ImportBinding, ImportKind, RuntimeBuiltinsSet, SourceLocation,
+};
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::routing::is_test_file;
 use repo_graph_indexer::types::{CallArgPayload, ResolvedCallsite};
@@ -534,6 +536,9 @@ fn extract_include(node: &tree_sitter::Node, src: &[u8], ctx: &mut ExtractionCtx
         location: Some(location_from_node(node)),
         is_type_only: false,
         imported_name: None,
+        // C++ #include brings in all declarations from the header,
+        // similar to TypeScript namespace import semantics
+        kind: ImportKind::Namespace,
     });
 }
 

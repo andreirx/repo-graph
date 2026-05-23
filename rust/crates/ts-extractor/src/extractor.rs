@@ -2,7 +2,9 @@
 
 use std::collections::BTreeMap;
 
-use repo_graph_classification::types::{ImportBinding, RuntimeBuiltinsSet, SourceLocation};
+use repo_graph_classification::types::{
+    ImportBinding, ImportKind, RuntimeBuiltinsSet, SourceLocation,
+};
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::jsts_extensions::{get_extension, is_jsts_jsx_extension};
 use repo_graph_indexer::types::{
@@ -1341,7 +1343,7 @@ fn extract_import(
         if child.kind() != "import_clause" {
             continue;
         }
-        for (ident, imported) in collect_local_identifiers(&child, source) {
+        for (ident, imported, kind) in collect_local_identifiers(&child, source) {
             import_bindings.push(ImportBinding {
                 identifier: ident,
                 specifier: raw_path.to_string(),
@@ -1349,6 +1351,7 @@ fn extract_import(
                 location: Some(location),
                 is_type_only,
                 imported_name: imported,
+                kind,
             });
         }
     }
@@ -1386,25 +1389,26 @@ fn extract_import(
 }
 
 /// Collect local identifier names from an `import_clause` node,
-/// paired with the original exported symbol name (if any).
+/// paired with the original exported symbol name (if any) and import kind.
 ///
-/// Returns `(identifier, imported_name)` tuples:
+/// Returns `(identifier, imported_name, kind)` tuples:
 ///
-/// - Default import `import X from "m"` → `("X", None)`.
-/// - Namespace import `import * as X from "m"` → `("X", None)`.
-/// - Named import `import { X } from "m"` → `("X", Some("X"))`.
+/// - Default import `import X from "m"` → `("X", None, Default)`.
+/// - Namespace import `import * as X from "m"` → `("X", None, Namespace)`.
+/// - Named import `import { X } from "m"` → `("X", Some("X"), Named)`.
 /// - Named import with alias `import { X as Y } from "m"` →
-///   `("Y", Some("X"))`.
+///   `("Y", Some("X"), Named)`.
 ///
-/// Default and namespace imports carry `None` because they bring
-/// in the whole module surface; the actual symbol comes from the
-/// member expression at the call site.
+/// Default and namespace imports carry `None` for `imported_name` because
+/// they bring in the whole module surface; the actual symbol comes from
+/// the member expression at the call site. The `kind` field distinguishes
+/// them for correct resolution semantics.
 ///
 /// Mirror of `collectLocalIdentifiers` from `ts-extractor.ts:1691`.
 fn collect_local_identifiers(
     import_clause: &tree_sitter::Node,
     source: &[u8],
-) -> Vec<(String, Option<String>)> {
+) -> Vec<(String, Option<String>, ImportKind)> {
     let mut identifiers = Vec::new();
     let mut cursor = import_clause.walk();
     for child in import_clause.children(&mut cursor) {
@@ -1412,7 +1416,7 @@ fn collect_local_identifiers(
             "identifier" => {
                 // Default import: `import X from "m"`.
                 let ident = child.utf8_text(source).unwrap_or("").to_string();
-                identifiers.push((ident, None));
+                identifiers.push((ident, None, ImportKind::Default));
             }
             "namespace_import" => {
                 // `import * as ns from "m"`.
@@ -1420,7 +1424,7 @@ fn collect_local_identifiers(
                 for n in child.children(&mut ns_cursor) {
                     if n.kind() == "identifier" {
                         let ident = n.utf8_text(source).unwrap_or("").to_string();
-                        identifiers.push((ident, None));
+                        identifiers.push((ident, None, ImportKind::Namespace));
                         break;
                     }
                 }
@@ -1442,7 +1446,7 @@ fn collect_local_identifiers(
                         .or(name_node)
                         .map(|n| n.utf8_text(source).unwrap_or("").to_string());
                     if let Some(ident) = local {
-                        identifiers.push((ident, exported_name));
+                        identifiers.push((ident, exported_name, ImportKind::Named));
                     }
                 }
             }

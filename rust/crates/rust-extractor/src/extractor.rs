@@ -2,7 +2,9 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use repo_graph_classification::types::{ImportBinding, RuntimeBuiltinsSet, SourceLocation};
+use repo_graph_classification::types::{
+    ImportBinding, ImportKind, RuntimeBuiltinsSet, SourceLocation,
+};
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::types::{
     EdgeType, ExtractedEdge, ExtractedMetrics, ExtractedNode, ExtractionResult, NodeKind,
@@ -234,6 +236,7 @@ fn extract_use_declaration(node: &Node, source: &str, ctx: &mut ExtractionCtx) {
             location: Some(location),
             is_type_only: false, // Rust `use` imports both types and values
             imported_name: Some(binding.imported_name.clone()), // Original name, not alias
+            kind: ImportKind::Named, // Rust `use` is always named import semantics
         });
 
         // IMPORTS edge

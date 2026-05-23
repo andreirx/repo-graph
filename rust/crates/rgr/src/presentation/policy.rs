@@ -2,9 +2,10 @@
 //!
 //! # CLI-OUT-5 Group 3
 //!
-//! **Legacy contract exception:** `policy` does NOT use REG-1 daemon contract.
-//! Requires explicit `db_path` and `repo_uid` arguments. This is preserved,
-//! not migrated.
+//! # REG-1 Contract (LEGACY-CONTRACT-MIGRATION-1D)
+//!
+//! Migrated to REG-1 daemon contract. Repo resolved from cwd via daemon.
+//! No storage paths in user-facing contract.
 //!
 //! Three policy fact kinds with different structures:
 //! - `STATUS_MAPPING`: function-level status code translation tables

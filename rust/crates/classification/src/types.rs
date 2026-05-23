@@ -91,6 +91,32 @@ pub struct SourceLocation {
     pub col_end: i64,
 }
 
+/// The kind of import statement.
+///
+/// Distinguishes named imports, default imports, and namespace
+/// imports. Required for correct resolution semantics:
+/// - Named: `import { X }` or `import { X as Y }` — resolve using
+///   `imported_name` as the exported symbol
+/// - Default: `import X from "m"` — `X` is the default export
+/// - Namespace: `import * as X from "m"` — `X` is the module namespace
+///
+/// Default and namespace imports look similar (`imported_name = None`)
+/// but have different semantics for member access resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ImportKind {
+    /// Named import: `import { X }` or `import { X as Y }`.
+    /// Use `imported_name` for symbol resolution.
+    #[default]
+    Named,
+    /// Default import: `import X from "m"`.
+    /// `X` is the module's default export (could be any value).
+    Default,
+    /// Namespace import: `import * as X from "m"`.
+    /// `X` is the module namespace object containing all exports.
+    Namespace,
+}
+
 /// One import-statement binding observed in a source file.
 ///
 /// Mirror of `ImportBinding` from
@@ -150,6 +176,21 @@ pub struct ImportBinding {
     /// excluding this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imported_name: Option<String>,
+    /// The kind of import statement (Named, Default, or Namespace).
+    ///
+    /// Required to distinguish between default imports and namespace
+    /// imports for correct member resolution semantics:
+    /// - Namespace + `ns.member` → resolve `member` in module exports
+    /// - Default + `obj.member` → default export member (conservative)
+    ///
+    /// Defaults to `Named` for backward compatibility with existing
+    /// bindings that don't populate this field.
+    ///
+    /// TS-side note: under Fork-1 posture, TS extractors will emit
+    /// `null` (or omit the field), which deserializes to `Named`.
+    /// Full TS-side population is deferred.
+    #[serde(default)]
+    pub kind: ImportKind,
 }
 
 /// Classification-local input type for the unresolved-edge
@@ -910,6 +951,7 @@ mod tests {
             location: None,
             is_type_only: false,
             imported_name: None,
+            kind: ImportKind::Named,
         };
         let s = serde_json::to_string(&ib).unwrap();
         assert!(s.contains("\"isRelative\":true"));
@@ -919,6 +961,8 @@ mod tests {
         // None importedName is skipped from serialized output
         // (contract §serde: skip_serializing_if = Option::is_none).
         assert!(!s.contains("importedName"));
+        // kind is serialized as SCREAMING_SNAKE_CASE
+        assert!(s.contains("\"kind\":\"NAMED\""));
     }
 
     #[test]

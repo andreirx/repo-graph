@@ -91,8 +91,8 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 | **MODULE-BOUNDARY-FIX-1** | Module/boundary command defects (deps, list, summary) | COMPLETE |
 | **SHOW-DETAIL-AUDIT-1** | Detail command exercise (surfaces/boundaries show, resource readers/writers) | COMPLETE |
 | **CURSOR-1** | Cursor MCP/rules integration | QUEUED |
-| **LEGACY-CONTRACT-MIGRATION-1** | Migrate 7 legacy commands to REG-1 daemon contract | CURRENT |
-| **TS-IMPORT-RESOLUTION-1** | TypeScript aliased and namespace import resolution | QUEUED |
+| **LEGACY-CONTRACT-MIGRATION-1** | Migrate 7 legacy commands to REG-1 daemon contract | COMPLETE |
+| **TS-IMPORT-RESOLUTION-1** | TypeScript aliased and namespace import resolution | COMPLETE |
 | **WIN-1** | Windows distribution/install | DEFERRED |
 | **MAC-2** | macOS signing/notarization | DEFERRED |
 | **UPDATE-1** | Updater/repair channel | DEFERRED |
@@ -121,8 +121,8 @@ Sequence: PERF-OBS-1 → CACHE-SEMANTICS-1 → LIVE-GRAPH-1 → LIVE-GRAPH-2.
 
 **Gate to start PERF-OBS-1:**
 1. Current release is shipped
-2. LEGACY-CONTRACT-MIGRATION-1 is complete
-3. TS-IMPORT-RESOLUTION-1 is complete
+2. LEGACY-CONTRACT-MIGRATION-1 is complete ✓
+3. TS-IMPORT-RESOLUTION-1 is complete ✓
 
 **Gate to continue past PERF-OBS-1:**
 4. Baseline metrics from PERF-OBS-1 justify the investment in later slices
@@ -131,13 +131,20 @@ PERF-OBS-1 is the decision point. If metrics show current performance is accepta
 
 ### Current Priority
 
-LEGACY-CONTRACT-MIGRATION-1 (daemon contract migration) — CURRENT.
+No active slice. Gate to start PERF-OBS-1 is met.
 
-Next: TS-IMPORT-RESOLUTION-1.
-
-Queue: CURSOR-1, Storage Architecture Track (starts with PERF-OBS-1).
+Candidates: CURSOR-1, PERF-OBS-1.
 
 ### Recently Completed
+
+**TS-IMPORT-RESOLUTION-1: TypeScript Import Resolution** — COMPLETE (2026-05-23)
+
+Three-phase implementation:
+- Phase 1: Aliased named import resolution (resolver uses `imported_name`)
+- Phase 2: `ImportKind` enum (`Named`, `Default`, `Namespace`)
+- Phase 3: Namespace import member resolution + conservative default-import handling
+
+Self-index call resolution: 18.8% → 20.0% (+1.2pp).
 
 **ORIENT-BUG-1: Module Count Mismatch** — COMPLETE (2026-05-21)
 

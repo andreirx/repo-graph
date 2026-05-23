@@ -2,33 +2,51 @@
 
 ## Current Priority
 
-**LEGACY-CONTRACT-MIGRATION-1D:** Inventory family migration (policy).
-
-Parent slice: `docs/slices/legacy-contract-migration-1.md`
-
-**Commands:**
-- `policy` — list policy facts (RETURN_FATE, BEHAVIORAL_MARKER, STATUS_MAPPING)
-
-**For each command:**
-1. Add daemon handler (extracted to `handlers/inventory/`)
-2. Rewrite CLI to use `daemon_command` support module
-3. Verify `--json` output parity
-4. Verify human output parity
-5. Test repo-not-found and daemon-unavailable paths
-
-**Special requirements:**
-- `policy` has filter params: `--kind`, `--file`, `--callee`, `--fate`
-- Read-only command
-
-**Sub-slice sequence:**
-1. **1A** — Shared CLI support — COMPLETE (2026-05-22)
-2. **1B** — Quality family (churn, hotspots, risk, coverage) — COMPLETE (2026-05-22)
-3. **1C** — Governance family (assess, violations) — COMPLETE (2026-05-22)
-4. **1D** — Inventory family (policy) — CURRENT
+No active slice. See ROADMAP.md for queued work.
 
 ---
 
 ## Recently Completed
+
+**TS-IMPORT-RESOLUTION-1:** TypeScript aliased and namespace import resolution — COMPLETE (2026-05-23)
+
+See `docs/slices/ts-import-resolution-1.md`.
+
+Phase completion:
+1. **Phase 1** — Aliased named import resolver fix (uses `imported_name`)
+2. **Phase 2** — `ImportKind` enum (`Named`, `Default`, `Namespace`)
+3. **Phase 3** — Namespace import member resolution + conservative default handling
+   - Namespace: `ns.member` → lookup `member` in target module
+   - Default: `obj.member` → NOT resolved (prevents false positives)
+
+Self-index resolution: 18.8% → 20.0% (+1.2pp). Modest gain — repo-graph uses few
+aliased/namespace imports for internal calls.
+
+**LEGACY-CONTRACT-MIGRATION-1:** Full slice — COMPLETE (2026-05-23)
+
+All 7 legacy commands migrated to REG-1 daemon contract.
+
+Sub-slice completion:
+1. **1A** — Shared CLI support — COMPLETE (2026-05-22)
+2. **1B** — Quality family (churn, hotspots, risk, coverage) — COMPLETE (2026-05-22)
+3. **1C** — Governance family (assess, violations) — COMPLETE (2026-05-22)
+4. **1D** — Inventory family (policy) — COMPLETE (2026-05-23)
+
+**LEGACY-CONTRACT-MIGRATION-1D:** Inventory family — COMPLETE (2026-05-23)
+
+Delivered:
+- `handlers/inventory/policy.rs` — policy fact queries (216 lines)
+- CLI command migrated to daemon_command pattern
+- 5 inventory handler unit tests
+- 14 policy CLI tests (arg parsing)
+
+Corpus validation (EXECUTED on leveldb + sqlite):
+- RETURN_FATE: 524 facts, JSON envelope correct
+- BEHAVIORAL_MARKER: 1 fact (retry loop), evidence structure correct
+- STATUS_MAPPING: 0 facts, hint displayed
+- --file, --callee, --fate filters: all verified
+- Empty results: exit 0, hint message
+- Repo-not-found: exit 2, actionable hint
 
 **LEGACY-CONTRACT-MIGRATION-1C:** Governance family — COMPLETE (2026-05-22)
 
@@ -70,8 +88,9 @@ Delivered `rust/crates/rgr/src/daemon_command.rs`:
 
 ## Queued
 
-**TS-IMPORT-RESOLUTION-1:** TypeScript aliased and namespace import resolution.
-See `docs/slices/ts-import-resolution-1.md`.
+Candidates (see ROADMAP.md):
+- **CURSOR-1:** Cursor MCP/rules integration
+- **PERF-OBS-1:** Performance observability baseline (gate to Storage Architecture Track)
 
 ---
 
