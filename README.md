@@ -56,21 +56,21 @@ The Rust CLI (`rmap`) is the primary binary.
 The daemon owns repo state. Normal usage requires no paths or identifiers:
 
 ```bash
-rmap index .              # index current directory (daemon allocates storage)
-rmap index . --alias pmc  # index with friendly alias
-rmap orient               # orient on current repo (daemon resolves from cwd)
-rmap check                # check current repo
-rmap explain src/foo.ts   # explain file in current repo
+rmap index .                  # index current directory (daemon allocates storage)
+rmap index . --alias frontend # index with friendly alias
+rmap orient                   # orient on current repo (daemon resolves from cwd)
+rmap check                    # check current repo
+rmap explain src/foo.ts       # explain file in current repo
 ```
 
 ### Repo management
 
 ```bash
-rmap repo list            # list all registered repos
-rmap repo info            # show details for current repo
-rmap repo info pmc        # show details by alias
-rmap repo alias . pmc     # set alias for current repo
-rmap repo remove pmc      # remove from registry
+rmap repo list             # list all registered repos
+rmap repo info             # show details for current repo
+rmap repo info frontend    # show details by alias
+rmap repo alias . frontend # set alias for current repo
+rmap repo remove frontend  # remove from registry
 ```
 
 ### Discovery workflow
