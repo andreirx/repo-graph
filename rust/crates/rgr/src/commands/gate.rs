@@ -29,13 +29,6 @@ fn print_usage() {
     eprintln!("  --json      Output raw JSON instead of human-readable text");
 }
 
-fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
-    format!(
-        "Daemon unavailable (socket: {}). Start with: rmapd",
-        socket_path.display()
-    )
-}
-
 /// Run the `rmap gate` command.
 ///
 /// Usage: `rmap gate [--strict | --advisory] [--json]`
@@ -99,11 +92,6 @@ pub fn run_gate(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-
-    if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
-        return ExitCode::from(2);
-    }
 
     // Determine mode for daemon request
     let mode = if strict {

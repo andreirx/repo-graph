@@ -51,14 +51,6 @@ fn run_repo_list(args: &[String]) -> ExitCode {
         }
     };
 
-    if !client.is_available() {
-        eprintln!(
-            "{}",
-            crate::daemon_client::daemon_unavailable_message(client.socket_path(), "repo list")
-        );
-        return ExitCode::from(2);
-    }
-
     match client.request("list_repos", None) {
         Ok(result) => {
             if json_output {
@@ -139,14 +131,6 @@ fn run_repo_info(args: &[String]) -> ExitCode {
         }
     };
 
-    if !client.is_available() {
-        eprintln!(
-            "{}",
-            crate::daemon_client::daemon_unavailable_message(client.socket_path(), "repo info")
-        );
-        return ExitCode::from(2);
-    }
-
     let params = serde_json::json!({"repo": repo_ref});
 
     match client.request("repo_info", Some(params)) {
@@ -219,14 +203,6 @@ fn run_repo_alias(args: &[String]) -> ExitCode {
         }
     };
 
-    if !client.is_available() {
-        eprintln!(
-            "{}",
-            crate::daemon_client::daemon_unavailable_message(client.socket_path(), "repo alias")
-        );
-        return ExitCode::from(2);
-    }
-
     let params = serde_json::json!({
         "repo": canonical,
         "alias": alias,
@@ -267,14 +243,6 @@ fn run_repo_remove(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-
-    if !client.is_available() {
-        eprintln!(
-            "{}",
-            crate::daemon_client::daemon_unavailable_message(client.socket_path(), "repo remove")
-        );
-        return ExitCode::from(2);
-    }
 
     let params = serde_json::json!({
         "repo": repo_ref,

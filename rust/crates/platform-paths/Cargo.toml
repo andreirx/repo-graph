@@ -1,0 +1,18 @@
+[package]
+name = "repo-graph-platform-paths"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Platform-native path resolution for repo-graph daemon infrastructure"
+
+[dependencies]
+# libc for getpwuid on Unix
+libc = "0.2"
+
+# dirs as fallback for non-Unix or when passwd lookup fails
+dirs = "5"
+
+[dev-dependencies]
+tempfile = "3"

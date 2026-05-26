@@ -64,12 +64,3 @@ fn print_usage() {
     eprintln!();
     eprintln!("Run from within a repo directory.");
 }
-
-// ── Shared helper ────────────────────────────────────────────────────────────
-
-pub(super) fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
-    format!(
-        "Daemon unavailable (socket: {}). Start with: rmapd",
-        socket_path.display()
-    )
-}

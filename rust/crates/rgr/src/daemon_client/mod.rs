@@ -3,7 +3,7 @@
 //! This module provides the client-side transport for communicating with
 //! the repo-graph daemon (`rmapd`). It handles:
 //!
-//! - Socket connection management
+//! - Transport abstraction (socket vs stdio)
 //! - NDJSON request/response protocol
 //! - Fallback policy enforcement
 //! - Daemon availability checking
@@ -16,18 +16,29 @@
 //!         ▼
 //! ┌───────────────────────┐
 //! │    DaemonClient       │  ← This module
-//! │   (adapter layer)     │
+//! │   (transport layer)   │
 //! └───────────────────────┘
 //!         │
-//!         ▼
-//!    Unix Socket
-//!         │
-//!         ▼
+//!    ┌────┴────┐
+//!    ▼         ▼
+//! Socket    Stdio
+//! (primary) (fallback)
+//!    │         │
+//!    ▼         ▼
 //! ┌───────────────────────┐
 //! │       rmapd           │
-//! │   (daemon process)    │
+//! │   (daemon/subprocess) │
 //! └───────────────────────┘
 //! ```
+//!
+//! ## Transport Selection (STDIO-TRANSPORT-1)
+//!
+//! 1. `RMAP_TRANSPORT=stdio` → use stdio subprocess unconditionally
+//! 2. `RMAP_TRANSPORT=socket` → use socket (fail if unavailable)
+//! 3. Default (auto):
+//!    - Try socket transport
+//!    - If EPERM/EACCES (sandbox denial) → fall back to stdio
+//!    - Other errors → return error (no fallback)
 //!
 //! ## Fallback Policy
 //!
@@ -38,50 +49,51 @@
 //!
 //! The fallback policy is enforced by the `DaemonClient::execute()` method,
 //! which checks operation classification before attempting connection.
-//!
-//! ## Usage
-//!
-//! ```ignore
-//! use repo_graph_rgr::daemon_client::{DaemonClient, OperationClass};
-//!
-//! let client = DaemonClient::new()?;
-//!
-//! // Check if daemon is available
-//! if client.is_available() {
-//!     let result = client.request("ping", None)?;
-//! }
-//!
-//! // Or let the client handle fallback
-//! let result = client.execute_or_fallback(
-//!     &["graph", "query"],  // command path
-//!     || { /* fallback implementation */ },
-//! );
-//! ```
 
 mod connection;
 mod fallback;
+mod reachability;
+mod socket_transport;
+mod stdio_transport;
+mod transport;
 
-pub use connection::{is_daemon_reachable, DaemonClientError, DaemonConnection};
+pub use connection::{DaemonClientError, DaemonConnection};
 pub use fallback::{classify_operation, daemon_unavailable_message, OperationClass};
+pub use reachability::{check_socket_connectivity, is_daemon_reachable, SocketConnectResult};
+pub use stdio_transport::StateRootMode;
+pub use transport::{Transport, TransportMode};
 
 use crate::cli::paths::daemon_socket_path;
+use socket_transport::SocketTransport;
 use std::path::PathBuf;
+use stdio_transport::StdioTransport;
+use transport::is_permission_denied_connection_error;
 
-/// High-level daemon client with fallback support.
+/// High-level daemon client with transport abstraction.
 ///
 /// This is the main entry point for CLI commands that need to communicate
 /// with the daemon. It handles:
 ///
-/// - Daemon availability checking
+/// - Transport selection (socket vs stdio)
+/// - Bounded automatic fallback on sandbox denial
 /// - Connection management
+/// - State root tracking for sandbox mode
 /// - Fallback policy enforcement
 pub struct DaemonClient {
     socket_path: PathBuf,
-    connection: Option<DaemonConnection>,
+    transport: Option<Box<dyn Transport>>,
+    transport_mode: TransportMode,
+    /// Sandbox state root if stdio fallback was used with injected root.
+    sandbox_state_root: Option<PathBuf>,
 }
 
 impl DaemonClient {
     /// Create a new daemon client using the platform-native socket path.
+    ///
+    /// Transport mode is determined by `RMAP_TRANSPORT` env var:
+    /// - `stdio` → use stdio subprocess unconditionally
+    /// - `socket` → use socket (fail if unavailable)
+    /// - unset/other → auto (socket with bounded stdio fallback)
     pub fn new() -> Result<Self, DaemonClientError> {
         let socket_path = daemon_socket_path().ok_or_else(|| {
             DaemonClientError::ConnectionFailed(
@@ -91,7 +103,9 @@ impl DaemonClient {
 
         Ok(Self {
             socket_path,
-            connection: None,
+            transport: None,
+            transport_mode: TransportMode::from_env(),
+            sandbox_state_root: None,
         })
     }
 
@@ -99,7 +113,20 @@ impl DaemonClient {
     pub fn with_socket_path(socket_path: PathBuf) -> Self {
         Self {
             socket_path,
-            connection: None,
+            transport: None,
+            transport_mode: TransportMode::from_env(),
+            sandbox_state_root: None,
+        }
+    }
+
+    /// Create a daemon client with explicit transport mode (for testing).
+    #[allow(dead_code)]
+    pub fn with_transport_mode(socket_path: PathBuf, mode: TransportMode) -> Self {
+        Self {
+            socket_path,
+            transport: None,
+            transport_mode: mode,
+            sandbox_state_root: None,
         }
     }
 
@@ -108,22 +135,84 @@ impl DaemonClient {
         &self.socket_path
     }
 
-    /// Check if the daemon is reachable (quick connectivity test).
+    /// Get the configured transport mode.
+    pub fn transport_mode(&self) -> TransportMode {
+        self.transport_mode
+    }
+
+    /// Get the active transport name (if connected).
+    pub fn active_transport_name(&self) -> Option<&'static str> {
+        self.transport.as_ref().map(|t| t.mode_name())
+    }
+
+    /// Get the state root mode for this client.
+    ///
+    /// Returns the mode after connection is established.
+    pub fn state_root_mode(&self) -> StateRootMode {
+        if self.sandbox_state_root.is_some() {
+            StateRootMode::SandboxLocal
+        } else if std::env::var("RMAP_STATE_ROOT").is_ok() {
+            StateRootMode::Override
+        } else {
+            StateRootMode::Global
+        }
+    }
+
+    /// Get the sandbox state root path if one was injected.
+    pub fn sandbox_state_root(&self) -> Option<&PathBuf> {
+        self.sandbox_state_root.as_ref()
+    }
+
+    /// Check if the daemon is reachable via socket (quick connectivity test).
     ///
     /// This does NOT send any requests. For a full health check, use `ping()`.
+    /// Note: This checks socket reachability, not stdio availability.
     pub fn is_available(&self) -> bool {
         is_daemon_reachable(&self.socket_path)
     }
 
-    /// Connect to the daemon if not already connected.
+    /// Connect to the daemon using the configured transport.
     ///
-    /// Returns a mutable reference to the connection, or an error if
-    /// connection fails.
-    fn ensure_connected(&mut self) -> Result<&mut DaemonConnection, DaemonClientError> {
-        if self.connection.is_none() {
-            self.connection = Some(DaemonConnection::connect(&self.socket_path)?);
+    /// Implements bounded fallback: if socket fails with EPERM/EACCES
+    /// (sandbox denial), automatically falls back to stdio transport.
+    fn ensure_connected(&mut self) -> Result<&mut Box<dyn Transport>, DaemonClientError> {
+        if let Some(ref mut transport) = self.transport {
+            return Ok(transport);
         }
-        Ok(self.connection.as_mut().unwrap())
+
+        let transport: Box<dyn Transport> = match self.transport_mode {
+            TransportMode::Stdio => {
+                // Explicit stdio mode - no sandbox root injection
+                Box::new(StdioTransport::spawn(None)?)
+            }
+            TransportMode::Socket => {
+                // Explicit socket mode - no fallback
+                Box::new(SocketTransport::connect(&self.socket_path)?)
+            }
+            TransportMode::Auto => {
+                // Auto mode: try socket, fallback to stdio on permission denied
+                match SocketTransport::connect(&self.socket_path) {
+                    Ok(socket) => Box::new(socket),
+                    Err(ref e) if is_permission_denied_connection_error(e) => {
+                        // Sandbox denial - fall back to stdio with sandbox state root
+                        eprintln!(
+                            "note: socket connection denied (sandbox), using stdio transport"
+                        );
+                        // Compute and track sandbox root
+                        let sandbox_root = StdioTransport::prepare_sandbox_state_root()?;
+                        self.sandbox_state_root = sandbox_root.clone();
+                        Box::new(StdioTransport::spawn(sandbox_root)?)
+                    }
+                    Err(e) => {
+                        // Other error - do not mask with stdio fallback
+                        return Err(e);
+                    }
+                }
+            }
+        };
+
+        self.transport = Some(transport);
+        Ok(self.transport.as_mut().unwrap())
     }
 
     /// Send a request to the daemon.
@@ -134,16 +223,16 @@ impl DaemonClient {
         method: &str,
         params: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, DaemonClientError> {
-        let conn = self.ensure_connected()?;
-        conn.request(method, params)
+        let transport = self.ensure_connected()?;
+        transport.request(method, params)
     }
 
     /// Ping the daemon to verify it's responsive.
     ///
     /// Uses the same code path as all other requests.
     pub fn ping(&mut self) -> Result<(), DaemonClientError> {
-        let conn = self.ensure_connected()?;
-        conn.ping()
+        let transport = self.ensure_connected()?;
+        transport.ping()
     }
 
     /// Execute an operation with fallback support.
@@ -186,23 +275,25 @@ impl DaemonClient {
 
             OperationClass::ReadOnly => {
                 // Try daemon first, fall back if unavailable
-                if self.is_available() {
-                    daemon_fn(self)
-                } else {
-                    fallback_fn()
+                // Note: with transport abstraction, we try to connect which
+                // may use stdio fallback automatically
+                match self.ensure_connected() {
+                    Ok(_) => daemon_fn(self),
+                    Err(_) => fallback_fn(),
                 }
             }
 
             OperationClass::DaemonRequired => {
                 // Must use daemon, fail if unavailable
-                if self.is_available() {
-                    daemon_fn(self)
-                } else {
-                    let operation_name = command_path.join(" ");
-                    Err(daemon_unavailable_message(
-                        &self.socket_path,
-                        &operation_name,
-                    ))
+                match self.ensure_connected() {
+                    Ok(_) => daemon_fn(self),
+                    Err(_) => {
+                        let operation_name = command_path.join(" ");
+                        Err(daemon_unavailable_message(
+                            &self.socket_path,
+                            &operation_name,
+                        ))
+                    }
                 }
             }
         }

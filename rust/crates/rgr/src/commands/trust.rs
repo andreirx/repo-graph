@@ -14,7 +14,7 @@
 
 use std::process::ExitCode;
 
-use crate::daemon_client::{daemon_unavailable_message, DaemonClient, DaemonClientError};
+use crate::daemon_client::{DaemonClient, DaemonClientError};
 use crate::presentation::trust::TrustResponse;
 
 fn print_usage() {
@@ -79,14 +79,6 @@ pub fn run_trust(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-
-    if !client.is_available() {
-        eprintln!(
-            "{}",
-            daemon_unavailable_message(client.socket_path(), "trust")
-        );
-        return ExitCode::from(2);
-    }
 
     // Send trust request
     let params = serde_json::json!({

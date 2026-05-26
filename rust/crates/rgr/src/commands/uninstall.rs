@@ -152,7 +152,8 @@ fn execute_uninstall(dry_run: bool, force: bool, remove_data: bool) -> Result<()
     // 5. Remove binaries (paths from manifest, fallback to defaults)
     println!("Removing binaries...");
 
-    let default_install_dir = dirs::home_dir()
+    // Use canonical home to find actual installation regardless of $HOME
+    let default_install_dir = paths::canonical_home()
         .map(|h| h.join(".local").join("bin"))
         .ok_or_else(|| "could not determine home directory".to_string())?;
 

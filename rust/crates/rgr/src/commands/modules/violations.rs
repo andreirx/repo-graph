@@ -35,7 +35,7 @@
 
 use std::process::ExitCode;
 
-use crate::daemon_client::{daemon_unavailable_message, DaemonClient};
+use crate::daemon_client::DaemonClient;
 use crate::daemon_command::{
     execute_repo_request, output_result, print_daemon_error, EXIT_RUNTIME_ERROR, EXIT_USAGE_ERROR,
 };
@@ -151,14 +151,6 @@ pub(super) fn run_modules_violations(args: &[String]) -> ExitCode {
             return ExitCode::from(EXIT_RUNTIME_ERROR);
         }
     };
-
-    if !client.is_available() {
-        eprintln!(
-            "{}",
-            daemon_unavailable_message(client.socket_path(), "modules violations")
-        );
-        return ExitCode::from(EXIT_RUNTIME_ERROR);
-    }
 
     // Build request params
     let params = serde_json::json!({

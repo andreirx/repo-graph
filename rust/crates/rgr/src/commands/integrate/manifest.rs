@@ -12,6 +12,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::cli::paths;
+
 /// A recorded host integration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostIntegration {
@@ -75,20 +77,23 @@ impl InstallManifest {
 }
 
 /// Get the platform-specific manifest directory.
+///
+/// Uses canonical home because the install manifest is our infrastructure,
+/// not session-local preference. Must be findable regardless of $HOME.
 pub fn manifest_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
-        dirs::home_dir().map(|h| h.join("Library/Application Support/repo-graph"))
+        paths::canonical_home().map(|h| h.join("Library/Application Support/repo-graph"))
     }
 
     #[cfg(target_os = "linux")]
     {
-        dirs::home_dir().map(|h| h.join(".config/rmap"))
+        paths::canonical_home().map(|h| h.join(".config/rmap"))
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
-        dirs::home_dir().map(|h| h.join(".rmap"))
+        paths::canonical_home().map(|h| h.join(".rmap"))
     }
 }
 

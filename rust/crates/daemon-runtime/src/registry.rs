@@ -513,19 +513,10 @@ fn state_root_dir() -> Result<PathBuf, RegistryError> {
 }
 
 fn platform_data_dir() -> Result<PathBuf, RegistryError> {
-    #[cfg(target_os = "macos")]
-    {
-        dirs::data_dir()
-            .map(|p| p.join("repo-graph"))
-            .ok_or_else(|| RegistryError::Io("could not determine data directory".to_string()))
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        dirs::data_local_dir()
-            .map(|p| p.join("rmap"))
-            .ok_or_else(|| RegistryError::Io("could not determine data directory".to_string()))
-    }
+    // Use platform-paths crate for canonical home lookup
+    // This ensures stable paths across sandboxed shells
+    repo_graph_platform_paths::data_dir()
+        .ok_or_else(|| RegistryError::Io("could not determine data directory".to_string()))
 }
 
 /// Canonicalize a path, returning a descriptive error on failure.

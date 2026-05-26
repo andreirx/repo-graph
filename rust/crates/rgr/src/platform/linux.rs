@@ -32,8 +32,11 @@ impl LinuxAdapter {
     }
 
     /// Get the path to the systemd user unit directory.
+    ///
+    /// Uses canonical home because systemd user services are infrastructure,
+    /// not session-local preference. Must be findable regardless of $HOME.
     fn systemd_user_dir() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".config").join("systemd").join("user"))
+        paths::canonical_home().map(|h| h.join(".config").join("systemd").join("user"))
     }
 
     /// Get the path to the systemd unit file.
@@ -345,8 +348,8 @@ impl PlatformAdapter for LinuxAdapter {
     fn doctor_probes(&self) -> Vec<ProbeResult> {
         let mut probes = Vec::new();
 
-        // Binary checks
-        let install_dir = dirs::home_dir()
+        // Binary checks - use canonical home to find actual installation
+        let install_dir = paths::canonical_home()
             .map(|h| h.join(".local").join("bin"))
             .unwrap_or_default();
 

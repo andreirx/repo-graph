@@ -29,13 +29,6 @@ use std::process::ExitCode;
 
 use crate::daemon_client::DaemonClient;
 
-fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
-    format!(
-        "Daemon unavailable (socket: {}). Start with: rmapd",
-        socket_path.display()
-    )
-}
-
 /// Entry point for `rmap deps` command family.
 pub fn run_deps(args: &[String]) -> ExitCode {
     if args.is_empty() {
@@ -98,11 +91,6 @@ fn run_deps_list(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-
-    if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
-        return ExitCode::from(2);
-    }
 
     // Build request params
     let mut params = serde_json::json!({ "repo": repo_path });
@@ -191,11 +179,6 @@ fn run_deps_why(args: &[String]) -> ExitCode {
         }
     };
 
-    if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
-        return ExitCode::from(2);
-    }
-
     // Build request params
     let mut params = serde_json::json!({
         "repo": repo_path,
@@ -268,11 +251,6 @@ fn run_deps_drift(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-
-    if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
-        return ExitCode::from(2);
-    }
 
     // Build request params
     let mut params = serde_json::json!({ "repo": repo_path });

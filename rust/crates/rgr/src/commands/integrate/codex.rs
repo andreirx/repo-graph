@@ -22,6 +22,7 @@ use super::config::{
     plan_remove, CodexHooks, ConfigAnalysis, HookDefinitions,
 };
 use super::manifest::{self, get_integration, record_integration, remove_integration_record};
+use crate::cli::paths::legacy_home;
 
 /// Host identifier for manifest recording.
 pub const HOST_ID: &str = "codex";
@@ -33,8 +34,11 @@ pub const SCOPE_GLOBAL: &str = "global";
 pub const SCOPE_PROJECT: &str = "project";
 
 /// Get the global Codex hooks path.
+///
+/// Uses `$HOME` because Codex uses the user's shell environment
+/// to locate its hooks configuration.
 pub fn global_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".codex/hooks.json"))
+    legacy_home().map(|h| h.join(".codex/hooks.json"))
 }
 
 /// Get the project Codex hooks path.

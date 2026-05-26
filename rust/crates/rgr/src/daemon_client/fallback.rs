@@ -37,6 +37,9 @@
 
 use std::path::Path;
 
+use super::reachability::{check_socket_connectivity, SocketConnectResult};
+use crate::cli::paths;
+
 /// Classification of a CLI operation for fallback purposes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperationClass {
@@ -122,22 +125,113 @@ pub fn classify_operation(command_path: &[&str]) -> OperationClass {
 
 /// Generate an actionable error message for daemon-required operations.
 ///
-/// The message includes platform-specific instructions for starting the daemon.
+/// The message includes:
+/// - Socket path and existence status
+/// - Connection failure details
+/// - Path resolution method used
+/// - Possible causes
+/// - Platform-specific recovery steps
 pub fn daemon_unavailable_message(socket_path: &Path, operation: &str) -> String {
-    let platform_hint = if cfg!(target_os = "macos") {
-        "Start with: launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.repo-graph.rmapd.plist"
+    let connect_result = check_socket_connectivity(socket_path);
+    let diag = paths::daemon_socket_path_with_diagnostics();
+
+    let socket_exists = socket_path.exists();
+    let socket_exists_str = if socket_exists { "yes" } else { "no" };
+
+    let connect_status = match &connect_result {
+        SocketConnectResult::SocketMissing => "n/a (socket missing)".to_string(),
+        SocketConnectResult::ConnectFailed { error, code } => {
+            if let Some(c) = code {
+                format!("failed ({}, errno {})", error, c)
+            } else {
+                format!("failed ({})", error)
+            }
+        }
+        SocketConnectResult::Connected => "succeeded (unexpected)".to_string(),
+    };
+
+    let resolution = diag.resolution_reason.to_string();
+
+    // Determine possible causes based on observed state
+    let causes = match &connect_result {
+        SocketConnectResult::SocketMissing => {
+            "- Daemon has never been started\n\
+             - Daemon was cleanly stopped (socket removed)\n\
+             - Socket directory does not exist"
+        }
+        SocketConnectResult::ConnectFailed { code, .. } => {
+            // ECONNREFUSED: 61 on macOS, 111 on Linux
+            if *code == Some(61) || *code == Some(111) {
+                "- Daemon process crashed but socket file remains (stale socket)\n\
+                 - Daemon is starting up and not ready yet\n\
+                 - Socket permissions prevent connection"
+            } else {
+                "- Daemon process is not running\n\
+                 - Socket file may be stale from crashed daemon\n\
+                 - Socket permissions issue"
+            }
+        }
+        SocketConnectResult::Connected => {
+            "- Daemon responded to connect but subsequent operation failed"
+        }
+    };
+
+    // Platform-specific recovery steps
+    let recovery = if cfg!(target_os = "macos") {
+        format!(
+            "To recover:\n\
+             \n\
+             # Stop any running daemon\n\
+             launchctl bootout gui/$(id -u)/com.repo-graph.rmapd 2>/dev/null\n\
+             \n\
+             # Remove stale socket if present\n\
+             rm -f \"{}\"\n\
+             \n\
+             # Start daemon\n\
+             launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.repo-graph.rmapd.plist\n\
+             \n\
+             # Verify\n\
+             rmap doctor",
+            socket_path.display()
+        )
     } else {
-        "Start with: systemctl --user start rmapd"
+        format!(
+            "To recover:\n\
+             \n\
+             # Stop any running daemon\n\
+             systemctl --user stop rmapd 2>/dev/null\n\
+             \n\
+             # Remove stale socket if present\n\
+             rm -f \"{}\"\n\
+             \n\
+             # Start daemon\n\
+             systemctl --user start rmapd\n\
+             \n\
+             # Verify\n\
+             rmap doctor",
+            socket_path.display()
+        )
     };
 
     format!(
-        "Daemon unavailable for '{}'\n\n\
-         The daemon is required for this operation but is not running.\n\
-         Socket: {}\n\n\
+        "Daemon unavailable for '{}'\n\
+         \n\
+         Socket path:    {}\n\
+         Socket exists:  {}\n\
+         Connect:        {}\n\
+         Resolution:     {}\n\
+         \n\
+         Possible causes:\n\
+         {}\n\
+         \n\
          {}",
         operation,
         socket_path.display(),
-        platform_hint
+        socket_exists_str,
+        connect_status,
+        resolution,
+        causes,
+        recovery
     )
 }
 
@@ -223,5 +317,23 @@ mod tests {
         let msg = daemon_unavailable_message(Path::new("/tmp/test.sock"), "rmap index");
         assert!(msg.contains("/tmp/test.sock"));
         assert!(msg.contains("rmap index"));
+    }
+
+    #[test]
+    fn daemon_unavailable_message_includes_diagnostics() {
+        let msg = daemon_unavailable_message(Path::new("/tmp/test.sock"), "index");
+
+        // Should include socket status
+        assert!(msg.contains("Socket path:"));
+        assert!(msg.contains("Socket exists:"));
+        assert!(msg.contains("Connect:"));
+        assert!(msg.contains("Resolution:"));
+
+        // Should include causes section
+        assert!(msg.contains("Possible causes:"));
+
+        // Should include recovery steps
+        assert!(msg.contains("To recover:"));
+        assert!(msg.contains("rmap doctor"));
     }
 }

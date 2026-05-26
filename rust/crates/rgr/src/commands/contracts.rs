@@ -21,13 +21,6 @@ use std::process::ExitCode;
 
 use crate::daemon_client::DaemonClient;
 
-fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
-    format!(
-        "Daemon unavailable (socket: {}). Start with: rmapd",
-        socket_path.display()
-    )
-}
-
 // ── contracts command ────────────────────────────────────────────
 
 pub fn run_contracts(args: &[String]) -> ExitCode {
@@ -107,11 +100,6 @@ fn run_contracts_list(args: &[String]) -> ExitCode {
         }
     };
 
-    if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
-        return ExitCode::from(2);
-    }
-
     // Build request params
     let mut params = serde_json::json!({ "repo": repo_path });
     if let Some(kind) = kind_filter {
@@ -171,11 +159,6 @@ fn run_contracts_show(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-
-    if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
-        return ExitCode::from(2);
-    }
 
     // Send request
     let params = serde_json::json!({
@@ -258,11 +241,6 @@ fn run_contracts_elements(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-
-    if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
-        return ExitCode::from(2);
-    }
 
     // Build request params
     let mut params = serde_json::json!({ "repo": repo_path });
@@ -354,11 +332,6 @@ fn run_contracts_usages(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-
-    if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
-        return ExitCode::from(2);
-    }
 
     // Build request params
     let mut params = serde_json::json!({ "repo": repo_path });

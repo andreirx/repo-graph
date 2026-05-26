@@ -191,7 +191,8 @@ fn execute_status() -> (HookResult<StatusOutput>, HookStatus) {
 }
 
 fn check_claude_code_integration() -> IntegrationStatus {
-    let global_config = dirs::home_dir().map(|h| h.join(".claude").join("settings.json"));
+    // Use legacy_home() because Claude Code uses $HOME to locate its settings
+    let global_config = paths::legacy_home().map(|h| h.join(".claude").join("settings.json"));
 
     let (installed, config_path, hooks) = match global_config {
         Some(path) if path.exists() => {
@@ -213,7 +214,8 @@ fn check_claude_code_integration() -> IntegrationStatus {
 }
 
 fn check_codex_integration() -> IntegrationStatus {
-    let global_config = dirs::home_dir().map(|h| h.join(".codex").join("hooks.json"));
+    // Use legacy_home() because Codex uses $HOME to locate its hooks
+    let global_config = paths::legacy_home().map(|h| h.join(".codex").join("hooks.json"));
 
     let (installed, config_path, hooks) = match global_config {
         Some(path) if path.exists() => {
@@ -234,7 +236,8 @@ fn check_codex_integration() -> IntegrationStatus {
 }
 
 fn check_cursor_integration() -> IntegrationStatus {
-    let mcp_config = dirs::home_dir().map(|h| h.join(".cursor").join("mcp.json"));
+    // Use legacy_home() because Cursor uses $HOME to locate its config
+    let mcp_config = paths::legacy_home().map(|h| h.join(".cursor").join("mcp.json"));
 
     let (installed, config_path) = match mcp_config {
         Some(path) if path.exists() => {

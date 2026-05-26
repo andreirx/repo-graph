@@ -33,8 +33,11 @@ impl MacOSAdapter {
     }
 
     /// Get the path to the LaunchAgents directory.
+    ///
+    /// Uses canonical home because LaunchAgents are system infrastructure,
+    /// not session-local preference. Must be findable regardless of $HOME.
     fn launch_agents_dir() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join("Library").join("LaunchAgents"))
+        paths::canonical_home().map(|h| h.join("Library").join("LaunchAgents"))
     }
 
     /// Get the path to the plist file.
@@ -188,8 +191,8 @@ impl PlatformAdapter for MacOSAdapter {
     fn doctor_probes(&self) -> Vec<ProbeResult> {
         let mut probes = Vec::new();
 
-        // Binary checks
-        let install_dir = dirs::home_dir()
+        // Binary checks - use canonical home to find actual installation
+        let install_dir = paths::canonical_home()
             .map(|h| h.join(".local").join("bin"))
             .unwrap_or_default();
 

@@ -42,6 +42,7 @@ members = [
     "crates/jdtls-resolver",
     "crates/lsp-subprocess",
     "crates/module-queries",
+    "crates/platform-paths",
     "crates/policy-facts",
     "crates/proto-parser",
     "crates/python-extractor",

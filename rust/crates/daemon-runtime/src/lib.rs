@@ -63,35 +63,16 @@ use repo_graph_daemon_transport::{run_socket_transport, run_stdio, SocketConfig}
 
 /// Returns the daemon socket path.
 ///
-/// Resolution order:
+/// Resolution is delegated to `platform-paths` crate, which is the
+/// single source of truth for path resolution across both CLI and daemon.
+///
+/// Resolution order (per platform-paths):
 /// 1. `RMAP_SOCKET_PATH` environment variable (if set)
-/// 2. Platform-native default path
-///
-/// This duplicates the logic from `rgr/src/cli/paths.rs` to avoid
-/// a dependency from daemon-runtime to rgr. The paths must stay in sync.
-///
-/// Default paths:
-/// - macOS: `~/Library/Application Support/repo-graph/daemon.sock`
-/// - Linux: `~/.local/share/rmap/daemon.sock`
+/// 2. Canonical path from passwd home (stable across sandboxed shells)
+/// 3. Legacy path from `$HOME` (migration fallback)
 fn daemon_socket_path() -> Result<PathBuf, String> {
-    // Check for environment override (used by tests)
-    if let Ok(override_path) = std::env::var("RMAP_SOCKET_PATH") {
-        return Ok(PathBuf::from(override_path));
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        dirs::data_dir()
-            .map(|p| p.join("repo-graph").join("daemon.sock"))
-            .ok_or_else(|| "could not determine data directory".to_string())
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        dirs::data_local_dir()
-            .map(|p| p.join("rmap").join("daemon.sock"))
-            .ok_or_else(|| "could not determine data directory".to_string())
-    }
+    repo_graph_platform_paths::daemon_socket_path()
+        .ok_or_else(|| "could not determine daemon socket path".to_string())
 }
 
 /// Run the daemon in socket mode (default).

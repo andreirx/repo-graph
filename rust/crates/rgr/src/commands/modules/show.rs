@@ -24,7 +24,7 @@
 
 use std::process::ExitCode;
 
-use crate::daemon_client::{daemon_unavailable_message, DaemonClient};
+use crate::daemon_client::DaemonClient;
 
 // ── modules show command ─────────────────────────────────────────
 //
@@ -97,14 +97,6 @@ pub(super) fn run_modules_show(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-
-    if !client.is_available() {
-        eprintln!(
-            "{}",
-            daemon_unavailable_message(client.socket_path(), "modules show")
-        );
-        return ExitCode::from(2);
-    }
 
     // Build request params
     let params = serde_json::json!({

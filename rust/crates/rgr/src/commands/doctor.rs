@@ -10,7 +10,10 @@ use std::process::ExitCode;
 
 use serde::Serialize;
 
-use crate::platform::{get_adapter, PlatformAdapter, ProbeResult};
+use crate::cli::paths;
+use crate::platform::{
+    get_adapter, granular_socket_probes, socket_resolution_probes, PlatformAdapter, ProbeResult,
+};
 
 /// Doctor output for JSON mode.
 #[derive(Debug, Serialize)]
@@ -90,7 +93,15 @@ pub fn run_doctor(args: &[String]) -> ExitCode {
 
 fn execute_doctor() -> (DoctorOutput, bool) {
     let adapter = get_adapter();
-    let probes = adapter.doctor_probes();
+    let mut probes = adapter.doctor_probes();
+
+    // Add socket resolution diagnostics for detailed output
+    let resolution_probes = socket_resolution_probes();
+    probes.extend(resolution_probes);
+
+    // Add granular socket probes for agent-parseable diagnostics (DAEMON-SOCKET-HEALTH-1)
+    let granular_probes = granular_socket_probes();
+    probes.extend(granular_probes);
 
     let passed = probes.iter().filter(|p| p.passed).count();
     let failed = probes.len() - passed;
@@ -141,7 +152,32 @@ fn print_human_output(output: &DoctorOutput) {
         .filter(|p| {
             matches!(
                 p.name.as_str(),
-                "daemon_service" | "daemon_socket" | "plist" | "unit_file" | "pid_file"
+                "daemon_service"
+                    | "daemon_socket"
+                    | "plist"
+                    | "unit_file"
+                    | "pid_file"
+                    | "socket_file"
+                    | "socket_connect"
+                    | "socket_ping"
+                    | "transport"
+                    | "state_root"
+            )
+        })
+        .collect();
+
+    let resolution_probes: Vec<_> = output
+        .probes
+        .iter()
+        .filter(|p| {
+            matches!(
+                p.name.as_str(),
+                "effective_uid"
+                    | "env_home"
+                    | "canonical_home"
+                    | "socket_path"
+                    | "socket_resolution"
+                    | "socket_override"
             )
         })
         .collect();
@@ -166,6 +202,24 @@ fn print_human_output(output: &DoctorOutput) {
         print_probe(probe);
     }
     println!();
+
+    // Socket Resolution (only show if there's a problem or using fallback)
+    let has_resolution_issue = resolution_probes.iter().any(|p| !p.passed);
+    let using_legacy = paths::is_using_legacy_fallback();
+
+    if has_resolution_issue || using_legacy {
+        println!("Socket Resolution:");
+        for probe in &resolution_probes {
+            print_probe(probe);
+        }
+        println!();
+
+        if using_legacy {
+            println!("Warning: Using legacy socket path from $HOME.");
+            println!("         Restart daemon to use canonical path.");
+            println!();
+        }
+    }
 
     // Summary
     if output.summary.healthy {

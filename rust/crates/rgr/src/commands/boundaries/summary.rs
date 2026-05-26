@@ -12,8 +12,6 @@ use std::process::ExitCode;
 
 use crate::daemon_client::DaemonClient;
 
-use super::daemon_unavailable_message;
-
 pub(super) fn run_boundaries_summary(args: &[String]) -> ExitCode {
     // Parse args: [--json]
     let json_mode = match parse_summary_args(args) {
@@ -50,11 +48,6 @@ pub(super) fn run_boundaries_summary(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-
-    if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
-        return ExitCode::from(2);
-    }
 
     // Build request params
     let params = serde_json::json!({ "repo": repo_path });

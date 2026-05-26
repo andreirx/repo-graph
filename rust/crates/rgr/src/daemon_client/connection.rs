@@ -277,26 +277,6 @@ impl DaemonConnection {
     }
 }
 
-/// Check if the daemon is available at the given socket path.
-///
-/// This is a quick connectivity test that does NOT send any requests.
-/// Use `ping()` for a full health check.
-pub fn is_daemon_reachable(socket_path: &Path) -> bool {
-    if !socket_path.exists() {
-        return false;
-    }
-
-    // Try to connect briefly
-    match UnixStream::connect(socket_path) {
-        Ok(stream) => {
-            // Connection succeeded, daemon is accepting
-            drop(stream);
-            true
-        }
-        Err(_) => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,21 +291,6 @@ mod tests {
             result,
             Err(DaemonClientError::ConnectionFailed(_))
         ));
-    }
-
-    #[test]
-    fn is_daemon_reachable_returns_false_for_missing_socket() {
-        assert!(!is_daemon_reachable(Path::new("/nonexistent/path.sock")));
-    }
-
-    #[test]
-    fn is_daemon_reachable_returns_true_for_listening_socket() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("test.sock");
-
-        let _listener = UnixListener::bind(&path).unwrap();
-
-        assert!(is_daemon_reachable(&path));
     }
 
     #[test]

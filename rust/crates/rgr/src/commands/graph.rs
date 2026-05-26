@@ -18,7 +18,7 @@
 
 use std::process::ExitCode;
 
-use crate::daemon_client::{daemon_unavailable_message, DaemonClient, DaemonClientError};
+use crate::daemon_client::{DaemonClient, DaemonClientError};
 
 // ── Edge type parsing (graph-family-local) ───────────────────────
 
@@ -82,8 +82,8 @@ fn resolve_repo_from_cwd() -> Result<String, String> {
     Ok(canonical.to_string_lossy().to_string())
 }
 
-/// Create daemon client and check availability.
-fn create_daemon_client(command: &str) -> Result<DaemonClient, ExitCode> {
+/// Create daemon client.
+fn create_daemon_client(_command: &str) -> Result<DaemonClient, ExitCode> {
     let client = match DaemonClient::new() {
         Ok(c) => c,
         Err(e) => {
@@ -91,14 +91,6 @@ fn create_daemon_client(command: &str) -> Result<DaemonClient, ExitCode> {
             return Err(ExitCode::from(2));
         }
     };
-
-    if !client.is_available() {
-        eprintln!(
-            "{}",
-            daemon_unavailable_message(client.socket_path(), command)
-        );
-        return Err(ExitCode::from(2));
-    }
 
     Ok(client)
 }

@@ -33,13 +33,6 @@ use std::process::ExitCode;
 use crate::daemon_client::DaemonClient;
 use crate::presentation::docs::{DocsExtractResponse, DocsListResponse};
 
-fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
-    format!(
-        "Daemon unavailable (socket: {}). Start with: rmapd",
-        socket_path.display()
-    )
-}
-
 /// Dispatcher for `rmap docs <subcommand>`.
 pub fn run_docs(args: &[String]) -> ExitCode {
     if args.is_empty() {
@@ -118,11 +111,6 @@ fn run_docs_list(args: &[String]) -> ExitCode {
         }
     };
 
-    if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
-        return ExitCode::from(2);
-    }
-
     // Send docs_list request with repo path
     let params = serde_json::json!({ "repo": repo_path });
     match client.request("docs_list", Some(params)) {
@@ -197,11 +185,6 @@ fn run_docs_extract(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-
-    if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
-        return ExitCode::from(2);
-    }
 
     // Send docs_extract request with repo path
     let params = serde_json::json!({ "repo": repo_path });

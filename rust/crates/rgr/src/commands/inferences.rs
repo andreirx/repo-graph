@@ -11,13 +11,6 @@ use std::process::ExitCode;
 
 use crate::daemon_client::DaemonClient;
 
-fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
-    format!(
-        "Daemon unavailable (socket: {}). Start with: rmapd",
-        socket_path.display()
-    )
-}
-
 // ── inferences command ───────────────────────────────────────────
 
 pub fn run_inferences(args: &[String]) -> ExitCode {
@@ -88,11 +81,6 @@ fn run_inferences_list(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-
-    if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
-        return ExitCode::from(2);
-    }
 
     // Build request params
     let mut params = serde_json::json!({ "repo": repo_path });

@@ -19,6 +19,7 @@ use super::config::{
     ConfigAnalysis, HookDefinitions, RepoGraphHooks,
 };
 use super::manifest::{self, get_integration, record_integration, remove_integration_record};
+use crate::cli::paths::legacy_home;
 
 /// Host identifier for manifest recording.
 pub const HOST_ID: &str = "claude-code";
@@ -30,8 +31,11 @@ pub const SCOPE_GLOBAL: &str = "global";
 pub const SCOPE_PROJECT: &str = "project";
 
 /// Get the global Claude Code settings path.
+///
+/// Uses `$HOME` because Claude Code uses the user's shell environment
+/// to locate its settings.
 pub fn global_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".claude/settings.json"))
+    legacy_home().map(|h| h.join(".claude/settings.json"))
 }
 
 /// Get the project Claude Code settings path.

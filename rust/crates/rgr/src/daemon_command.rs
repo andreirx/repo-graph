@@ -188,14 +188,8 @@ pub fn execute_daemon_request(method: &str, params: Option<serde_json::Value>) -
 
     let socket_path = client.socket_path().clone();
 
-    // Check availability
-    if !client.is_available() {
-        return Err(DaemonError::Unavailable {
-            socket_path: socket_path.to_string_lossy().to_string(),
-        });
-    }
-
-    // Execute request
+    // Execute request - transport selection (socket vs stdio) happens in ensure_connected()
+    // Do NOT preflight with is_available() - that bypasses bounded stdio fallback
     client
         .request(method, params)
         .map_err(|e| DaemonError::from_client_error(e, &socket_path))

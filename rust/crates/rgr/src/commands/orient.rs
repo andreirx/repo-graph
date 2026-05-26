@@ -23,7 +23,7 @@
 
 use std::process::ExitCode;
 
-use crate::daemon_client::{daemon_unavailable_message, DaemonClient, DaemonClientError};
+use crate::daemon_client::{DaemonClient, DaemonClientError};
 use crate::presentation::check::CheckResponse;
 use crate::presentation::explain::ExplainResponse;
 use crate::presentation::orient::OrientResponse;
@@ -154,14 +154,6 @@ pub fn run_orient(args: &[String]) -> ExitCode {
         }
     };
 
-    if !client.is_available() {
-        eprintln!(
-            "{}",
-            daemon_unavailable_message(client.socket_path(), "orient")
-        );
-        return ExitCode::from(2);
-    }
-
     // ── Build request ────────────────────────────────────────
     let mut params = serde_json::json!({
         "repo": repo_path,
@@ -274,14 +266,6 @@ pub fn run_check_cmd(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-
-    if !client.is_available() {
-        eprintln!(
-            "{}",
-            daemon_unavailable_message(client.socket_path(), "check")
-        );
-        return ExitCode::from(2);
-    }
 
     // ── Execute request ──────────────────────────────────────
     let params = serde_json::json!({
@@ -455,14 +439,6 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
         }
     };
 
-    if !client.is_available() {
-        eprintln!(
-            "{}",
-            daemon_unavailable_message(client.socket_path(), "explain")
-        );
-        return ExitCode::from(2);
-    }
-
     // ── Execute request ──────────────────────────────────────
     let params = serde_json::json!({
         "repo": repo_path,
@@ -470,6 +446,7 @@ pub fn run_explain_cmd(args: &[String]) -> ExitCode {
         "budget": budget,
     });
 
+    // Transport selection (socket vs stdio) happens in request() via ensure_connected()
     match client.request("explain", Some(params)) {
         Ok(result) => {
             if json_mode {

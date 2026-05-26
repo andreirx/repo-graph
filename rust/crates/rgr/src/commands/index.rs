@@ -113,14 +113,7 @@ pub fn run_index(args: &[String]) -> ExitCode {
         }
     };
 
-    if !client.is_available() {
-        eprintln!(
-            "{}",
-            crate::daemon_client::daemon_unavailable_message(client.socket_path(), "index")
-        );
-        return ExitCode::from(2);
-    }
-
+    // Transport selection (socket vs stdio) happens in request() via ensure_connected()
     match client.request("index", Some(params)) {
         Ok(result) => {
             // Extract fields from daemon response
@@ -832,14 +825,7 @@ pub fn run_refresh(args: &[String]) -> ExitCode {
         }
     };
 
-    if !client.is_available() {
-        eprintln!(
-            "{}",
-            crate::daemon_client::daemon_unavailable_message(client.socket_path(), "refresh")
-        );
-        return ExitCode::from(2);
-    }
-
+    // Transport selection (socket vs stdio) happens in request() via ensure_connected()
     match client.request("refresh", Some(params)) {
         Ok(result) => {
             // Extract fields from daemon response

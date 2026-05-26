@@ -21,13 +21,6 @@ use crate::presentation::resources::{
     AccessDirection, ResourceAccessResponse, ResourceListResponse,
 };
 
-fn daemon_unavailable_message(socket_path: &std::path::Path) -> String {
-    format!(
-        "Daemon unavailable (socket: {}). Start with: rmapd",
-        socket_path.display()
-    )
-}
-
 /// Run the `rmap resource` command dispatcher.
 ///
 /// Usage:
@@ -146,11 +139,6 @@ fn run_resource_list(args: &[String]) -> ExitCode {
         }
     };
 
-    if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
-        return ExitCode::from(2);
-    }
-
     // Build request params
     let mut params = serde_json::json!({ "repo": repo_path });
     if let Some(kind) = kind_filter {
@@ -260,11 +248,6 @@ fn run_resource_access(
             return ExitCode::from(2);
         }
     };
-
-    if !client.is_available() {
-        eprintln!("{}", daemon_unavailable_message(client.socket_path()));
-        return ExitCode::from(2);
-    }
 
     // Send request
     let params = serde_json::json!({
