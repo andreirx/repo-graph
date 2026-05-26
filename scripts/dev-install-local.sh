@@ -2,7 +2,7 @@
 #
 # dev-install-local.sh - Developer-only local build install/refresh
 #
-# Builds rmap and rmapd from source and installs to ~/.local/bin,
+# Builds rmap, rmapd, and rgistr from source and installs to ~/.local/bin,
 # restarting the daemon service. This is NOT a user-facing install
 # command - it is a maintainer workflow for testing local changes.
 #
@@ -16,12 +16,13 @@
 #
 # PREREQUISITES:
 #   - Rust toolchain (cargo)
+#   - Node.js 20+ (for rgistr SEA build)
 #   - Running from repo-graph source tree root
 #   - launchd service already installed (via install.sh)
 #
 # WHAT IT DOES:
-#   1. Verifies source tree
-#   2. Builds release binaries
+#   1. Verifies source tree and toolchains
+#   2. Builds release binaries (rmap, rmapd via cargo, rgistr via SEA)
 #   3. Stops daemon gracefully (launchctl bootout)
 #   4. Removes stale socket
 #   5. Installs binaries atomically to ~/.local/bin
@@ -68,6 +69,21 @@ check_rust_toolchain() {
     info "Rust toolchain: ${rust_version}"
 }
 
+check_node_toolchain() {
+    if ! command -v node &>/dev/null; then
+        error "Node.js not found. Install Node.js 20+ for rgistr build."
+    fi
+    local node_version
+    node_version=$(node --version 2>/dev/null || echo "unknown")
+    # Check for v20+ (SEA requires 20+)
+    local major_version
+    major_version=$(echo "${node_version}" | sed 's/v\([0-9]*\).*/\1/')
+    if [[ "${major_version}" -lt 20 ]]; then
+        error "Node.js 20+ required for SEA support. Found: ${node_version}"
+    fi
+    info "Node.js: ${node_version}"
+}
+
 check_launchd_service_exists() {
     if [[ ! -f "${LAUNCHD_PLIST}" ]]; then
         error "launchd service not installed: ${LAUNCHD_PLIST}
@@ -100,6 +116,39 @@ build_release() {
     fi
 
     info "Build complete"
+}
+
+build_rgistr() {
+    info "Building rgistr SEA binary..."
+    cd "${REPO_ROOT}/tools/rgistr"
+
+    # Install dependencies (pinned postject required for SEA injection)
+    info "  Installing npm dependencies..."
+    npm ci --silent
+
+    # Bundle TypeScript to single CJS file
+    info "  Bundling..."
+    npm run bundle --silent
+
+    # Build SEA binary
+    info "  Building SEA..."
+    ./scripts/build-sea.sh
+
+    # Determine output binary name
+    local platform arch output_binary
+    platform=$(uname -s | tr '[:upper:]' '[:lower:]')
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64|amd64) arch="x86_64" ;;
+        arm64|aarch64) arch="aarch64" ;;
+    esac
+    output_binary="${REPO_ROOT}/tools/rgistr/build/rgistr-${platform}-${arch}"
+
+    if [[ ! -x "${output_binary}" ]]; then
+        error "rgistr binary not found after build: ${output_binary}"
+    fi
+
+    info "  rgistr build complete"
 }
 
 # ── Service Lifecycle ─────────────────────────────────────────────────────────
@@ -155,18 +204,31 @@ install_binaries_atomic() {
 
     mkdir -p "${INSTALL_DIR}"
 
-    local tmp_rmap tmp_rmapd
+    local tmp_rmap tmp_rmapd tmp_rgistr
     tmp_rmap=$(mktemp "${INSTALL_DIR}/rmap.XXXXXX")
     tmp_rmapd=$(mktemp "${INSTALL_DIR}/rmapd.XXXXXX")
+    tmp_rgistr=$(mktemp "${INSTALL_DIR}/rgistr.XXXXXX")
+
+    # Determine rgistr binary path
+    local platform arch rgistr_binary
+    platform=$(uname -s | tr '[:upper:]' '[:lower:]')
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64|amd64) arch="x86_64" ;;
+        arm64|aarch64) arch="aarch64" ;;
+    esac
+    rgistr_binary="${REPO_ROOT}/tools/rgistr/build/rgistr-${platform}-${arch}"
 
     # Copy to temp files
     cp "${REPO_ROOT}/rust/target/release/rmap" "${tmp_rmap}"
     cp "${REPO_ROOT}/rust/target/release/rmapd" "${tmp_rmapd}"
-    chmod 755 "${tmp_rmap}" "${tmp_rmapd}"
+    cp "${rgistr_binary}" "${tmp_rgistr}"
+    chmod 755 "${tmp_rmap}" "${tmp_rmapd}" "${tmp_rgistr}"
 
     # Atomic move
     mv -f "${tmp_rmap}" "${INSTALL_DIR}/rmap"
     mv -f "${tmp_rmapd}" "${INSTALL_DIR}/rmapd"
+    mv -f "${tmp_rgistr}" "${INSTALL_DIR}/rgistr"
 
     info "  Binaries installed"
 }
@@ -195,7 +257,7 @@ validate_installation() {
     local failed=0
 
     # Version checks
-    local rmap_version rmapd_version
+    local rmap_version rmapd_version rgistr_version
     if rmap_version=$("${INSTALL_DIR}/rmap" --version 2>&1); then
         info "  rmap: ${rmap_version}"
     else
@@ -207,6 +269,13 @@ validate_installation() {
         info "  rmapd: ${rmapd_version}"
     else
         warn "  rmapd --version failed"
+        failed=1
+    fi
+
+    if rgistr_version=$("${INSTALL_DIR}/rgistr" --version 2>&1); then
+        info "  rgistr: ${rgistr_version}"
+    else
+        warn "  rgistr --version failed"
         failed=1
     fi
 
@@ -255,10 +324,12 @@ main() {
     check_platform
     check_source_tree
     check_rust_toolchain
+    check_node_toolchain
     check_launchd_service_exists
 
     echo ""
     build_release
+    build_rgistr
 
     echo ""
     stop_daemon_graceful
@@ -276,6 +347,7 @@ main() {
     echo "Installed:"
     echo "  ${INSTALL_DIR}/rmap"
     echo "  ${INSTALL_DIR}/rmapd"
+    echo "  ${INSTALL_DIR}/rgistr"
     echo ""
 }
 
