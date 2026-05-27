@@ -92,15 +92,28 @@ pub struct SnapshotRetentionMetrics {
 /// Table-to-tier classification.
 ///
 /// Based on STORAGE-ARCH-1 (agent_docs/storage-architecture-v2.md).
+///
+/// ## Semantic Contract (CACHE-SEMANTICS-1)
+///
+/// - **Tier A**: Durable authority. These tables contain user-authored or
+///   system-critical data that MUST be preserved. Losing Tier A data is
+///   data loss.
+///
+/// - **Tier B**: Rebuildable cache. These tables contain extracted or
+///   derived data that CAN be regenerated from source code + Tier A.
+///   Losing Tier B data is cache invalidation, not data loss.
+///
+/// The snapshot-level `derived_cache_epoch` tracks Tier B validity.
+/// On epoch mismatch, entire snapshots can be pruned and re-extracted.
 fn classify_table(name: &str) -> (&'static str, &'static str) {
     match name {
-        // Tier A: Authority
+        // Tier A: Authority — MUST preserve
         "repos" => ("A", "N/A"),
         "declarations" => ("A", "N/A"),
         "schema_migrations" => ("A", "N/A"),
         "snapshots" => ("A", "N/A"), // Metadata only
 
-        // Tier B, Layer 0-1: Extracted facts
+        // Tier B, Layer 0-1: Extracted facts — rebuildable via re-indexing
         "nodes" => ("B", "0-1"),
         "edges" => ("B", "0-1"),
         "files" => ("B", "0-1"),
@@ -111,7 +124,7 @@ fn classify_table(name: &str) -> (&'static str, &'static str) {
         "staged_edges" => ("B", "0-1"),
         "file_signals" => ("B", "0-1"),
 
-        // Tier B, Layer 2: Derived/inferred
+        // Tier B, Layer 2: Derived/inferred — rebuildable via enrichment
         "inferences" => ("B", "2"),
         "module_candidates" => ("B", "2"),
         "module_candidate_evidence" => ("B", "2"),
@@ -133,7 +146,7 @@ fn classify_table(name: &str) -> (&'static str, &'static str) {
         "return_fates" => ("B", "2"),
         "annotations" => ("B", "2"),
 
-        // Tier B, Layer 3: Hints
+        // Tier B, Layer 3: Hints — rebuildable via surface discovery
         "project_surfaces" => ("B", "3"),
         "project_surface_evidence" => ("B", "3"),
         "surface_entrypoints" => ("B", "3"),

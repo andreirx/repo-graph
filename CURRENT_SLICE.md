@@ -2,36 +2,41 @@
 
 ## Current Priority
 
-**PERF-OBS-1:** Storage Performance Observability — PARTIAL
-
-See `docs/slices/perf-obs-1.md`.
-
-### Completed (PERF-OBS-1A)
-
-- `rmap perf` with per-table/tier/layer metrics and classification coverage
-- `rmap doctor` shows DB size and snapshot count (transport-correct)
-- Daemon startup timing logged (cold vs warm)
-- Volume baselines: repo-graph (1.4GB), glamCRM, django
-- State root lifecycle audit
-
-**Key finding:** Authority rows are tiny (44 in repo-graph), extracted cache dominates (1.6M rows).
-
-### Not Completed (PERF-OBS-1B)
-
-- `rmap perf --timing` with phase breakdown — removed because implementation was wall-clock only
-- Global vs sandbox comparison artifact — requires running in both modes
-- hadoop baseline — timeout boundary documented, not actual capture
-
-### Decision Point
-
-Options:
-1. **Start CACHE-SEMANTICS-1** — PERF-OBS-1A provides sufficient baseline for tier semantics work
-2. **Complete PERF-OBS-1B** — finish timing instrumentation before storage architecture work
-3. **Split slice** — close PERF-OBS-1A, create PERF-OBS-1B as separate slice
+No active slice. Next candidate: RETENTION-POLICY-1 (automatic pruning).
 
 ---
 
 ## Recently Completed
+
+**CACHE-SEMANTICS-1:** Extracted Facts as Rebuildable Cache — COMPLETE (2026-05-27)
+
+See `docs/slices/cache-semantics-1.md`.
+
+Semantic contract for cache/authority separation:
+- Migration 028 adds `derived_cache_epoch` and `retention_class` to snapshots
+- Storage crate exposes `classify_repo_retention()`, `prune_prunable_snapshots()`, etc.
+- **Whole-snapshot invalidation enforced**: stale-epoch snapshots excluded from protected roles (current/parent/baseline_auto), always marked prunable
+- Valid epoch: `CURRENT_CACHE_EPOCH` or `NULL` (legacy)
+- Daemon auto-classifies retention after index/refresh
+- `rmap perf` shows retention stats
+- `rmap doctor` reports prunable count
+- User baseline marking via daemon methods only (`mark_baseline`/`unmark_baseline`); no CLI surface
+- 15 storage tests verify retention behavior including stale epoch exclusion and baseline marking invariants
+
+Design decisions made:
+- Snapshot-level epoch (simpler than per-table versioning)
+- Whole-snapshot invalidation: stale epochs cannot become current/parent/baseline_auto
+- Hybrid baseline selection (automatic + user-explicit via daemon methods; CLI deferred)
+
+**PERF-OBS-1A:** Storage Performance Observability (Volume Baseline) — COMPLETE (2026-05-27)
+
+See `docs/slices/perf-obs-1.md`.
+
+Volume baselines captured. Key finding: authority tiny, cache dominates. Sufficient for CACHE-SEMANTICS-1.
+
+**PERF-OBS-1B** (timing instrumentation) deferred — can return to it later if needed.
+
+---
 
 **STDIO-STATE-ROOT-1:** Sandbox-Writable State Root for Stdio Transport — COMPLETE (2026-05-26)
 
@@ -86,8 +91,8 @@ All 7 legacy commands migrated to REG-1 daemon contract.
 
 Candidates (see ROADMAP.md):
 - **PERF-OBS-1B:** Timing instrumentation (phase breakdown, global/sandbox comparison)
-- **CACHE-SEMANTICS-1:** Tier B refresh/invalidation semantics (PERF-OBS-1A volume baseline sufficient)
 - **CURSOR-1:** Cursor MCP/rules integration
+- **RETENTION-POLICY-1:** Automatic pruning on refresh (after CACHE-SEMANTICS-1)
 
 ---
 

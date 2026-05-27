@@ -198,18 +198,34 @@ fn storage_summary_probe() -> Option<ProbeResult> {
         .get("db_size_bytes")
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
-    let snapshot_count = response
-        .get("retention")
+    let retention = response.get("retention");
+    let snapshot_count = retention
         .and_then(|r| r.get("total_snapshots"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+
+    // CACHE-SEMANTICS-1: prunable snapshot count
+    let prunable_count = retention
+        .and_then(|r| r.get("prunable"))
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
 
     let size_human = format_size(db_size);
 
+    // Include prunable count if > 0
+    let message = if prunable_count > 0 {
+        format!(
+            "db: {}, {} snapshots ({} prunable)",
+            size_human, snapshot_count, prunable_count
+        )
+    } else {
+        format!("db: {}, {} snapshots", size_human, snapshot_count)
+    };
+
     Some(ProbeResult {
         name: "storage".to_string(),
         passed: true,
-        message: format!("db: {}, {} snapshots", size_human, snapshot_count),
+        message,
         details: None,
     })
 }

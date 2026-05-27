@@ -177,6 +177,7 @@ mod grpc_impl_hint_port_impl; // GrpcImplHintReadPort/StorePort impl (GR-1A)
 mod indexer_impl; // SnapshotLifecyclePort + FileCatalogPort impl (R5-C)
 pub mod metrics; // PERF-OBS-1: Storage metrics for performance observability
 pub mod migrations;
+pub mod retention; // CACHE-SEMANTICS-1: Snapshot retention management
 mod policy_facts_impl; // PolicyFactsStorageRead/Write impl for StorageConnection (PF-1)
 mod proto_schema_impl; // ProtoSchemaStorePort impl for StorageConnection (CS-1)
 mod quality_policy_impl; // QualityPolicyStoragePort impl for StorageConnection

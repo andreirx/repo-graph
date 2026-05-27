@@ -110,8 +110,9 @@ pub mod migration_024;
 pub mod migration_025;
 pub mod migration_026;
 pub mod migration_027;
+pub mod migration_028;
 
-/// Apply all 27 storage migrations to the given connection.
+/// Apply all 28 storage migrations to the given connection.
 ///
 /// Sets connection-level pragmas, runs migration 001
 /// unconditionally (idempotent via `CREATE TABLE IF NOT EXISTS`),
@@ -241,6 +242,9 @@ pub fn run_migrations(conn: &mut Connection) -> Result<(), StorageError> {
     if max_version < 27 {
         migration_027::run(conn)?;
     }
+    if max_version < 28 {
+        migration_028::run(conn)?;
+    }
 
     Ok(())
 }
@@ -359,17 +363,17 @@ mod tests {
     // ── Category 1: Schema creation parity ────────────────────
 
     #[test]
-    fn run_migrations_applies_all_twenty_seven_migrations() {
+    fn run_migrations_applies_all_twenty_eight_migrations() {
         let mut conn = fresh_conn();
         run_migrations(&mut conn).expect("run all migrations");
 
-        // schema_migrations table exists and contains rows 1..=27
+        // schema_migrations table exists and contains rows 1..=28
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 27, "expected 27 migration rows after full run");
+        assert_eq!(count, 28, "expected 28 migration rows after full run");
     }
 
     #[test]
@@ -460,7 +464,7 @@ mod tests {
     // ── Category 2: Migration version progression parity ─────
 
     #[test]
-    fn schema_migrations_records_versions_one_through_twenty_seven_in_order() {
+    fn schema_migrations_records_versions_one_through_twenty_eight_in_order() {
         let mut conn = fresh_conn();
         run_migrations(&mut conn).expect("run all migrations");
 
@@ -505,6 +509,7 @@ mod tests {
             (25, "025-contract-schema"),
             (26, "026-gcm-created-at"),
             (27, "027-freshness-provenance"),
+            (28, "028-cache-semantics"),
         ];
 
         assert_eq!(rows.len(), expected.len());
@@ -520,14 +525,14 @@ mod tests {
         run_migrations(&mut conn).expect("first run");
         run_migrations(&mut conn).expect("second run must not error");
 
-        // Still exactly 27 rows.
+        // Still exactly 28 rows.
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
                 row.get(0)
             })
             .unwrap();
         assert_eq!(
-            count, 27,
+            count, 28,
             "re-run must not duplicate schema_migrations rows"
         );
 

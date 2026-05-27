@@ -83,6 +83,23 @@ struct RetentionOutput {
     failed_snapshots: i64,
     oldest_snapshot: Option<String>,
     newest_snapshot: Option<String>,
+    // CACHE-SEMANTICS-1: retention class breakdown
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baseline_auto: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baseline_user: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prunable: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unclassified: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stale_epoch: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "_debug_error")]
+    debug_error: Option<String>,
 }
 
 /// Run the perf command.

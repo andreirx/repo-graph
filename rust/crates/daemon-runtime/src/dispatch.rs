@@ -269,6 +269,16 @@ impl Dispatcher for ServiceDispatcher {
             // ── Inventory (LEGACY-CONTRACT-MIGRATION-1D) ─────────────
             // Handler extracted to handlers/inventory.rs
             "policy" => crate::handlers::inventory::handle_policy(&self.state, request),
+            // CACHE-SEMANTICS-1: retention classification and baseline management
+            "classify_retention" => {
+                crate::handlers::inventory::handle_classify_retention(&self.state, request)
+            }
+            "mark_baseline" => {
+                crate::handlers::inventory::handle_mark_baseline(&self.state, request)
+            }
+            "unmark_baseline" => {
+                crate::handlers::inventory::handle_unmark_baseline(&self.state, request)
+            }
 
             // ── Metrics (PERF-OBS-1) ────────────────────────────────
             // Storage performance observability
@@ -1358,9 +1368,24 @@ impl ServiceDispatcher {
                 }
 
                 // Auto-load repo so subsequent queries work immediately
-                if let Err(e) = self.state.load_repo(&db_path, &repo_uid) {
-                    eprintln!("warning: index succeeded but auto-load failed: {}", e);
-                }
+                let loaded_ok = match self.state.load_repo(&db_path, &repo_uid) {
+                    Ok(repo_state) => {
+                        // CACHE-SEMANTICS-1: Classify retention after successful index
+                        // For first index, this marks the single snapshot as "current"
+                        if let Err(e) = repo_state.storage.classify_repo_retention(&repo_uid) {
+                            eprintln!(
+                                "warning: retention classification failed for {}: {}",
+                                repo_uid, e
+                            );
+                        }
+                        true
+                    }
+                    Err(e) => {
+                        eprintln!("warning: index succeeded but auto-load failed: {}", e);
+                        false
+                    }
+                };
+                let _ = loaded_ok; // Silence unused variable warning
 
                 DispatchResult::success(&request.id, response)
             }
@@ -1534,6 +1559,16 @@ impl ServiceDispatcher {
                         "symbol_query_error": mappings.symbol_query_error,
                         "storage_error": mappings.storage_error,
                     });
+                }
+
+                // CACHE-SEMANTICS-1: Classify retention after successful refresh
+                // This runs under the refresh lock, so it's safe to modify snapshots
+                if let Err(e) = repo_state.storage.classify_repo_retention(&repo_uid) {
+                    // Non-fatal: log warning but don't fail the refresh
+                    eprintln!(
+                        "warning: retention classification failed for {}: {}",
+                        repo_uid, e
+                    );
                 }
 
                 DispatchResult::success(&request.id, response)

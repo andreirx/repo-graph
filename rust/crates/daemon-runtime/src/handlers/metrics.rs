@@ -89,6 +89,13 @@ pub fn handle_perf(state: &DaemonState, request: &Request) -> DispatchResult {
         }
     };
 
+    // Collect retention class stats (CACHE-SEMANTICS-1)
+    let (retention_stats, retention_stats_error) =
+        match repo_state.storage.get_retention_stats(repo_uid) {
+            Ok(s) => (Some(s), None),
+            Err(e) => (None, Some(format!("{}", e))),
+        };
+
     // Build response
     let tables: Vec<serde_json::Value> = db_metrics
         .tables
@@ -133,7 +140,16 @@ pub fn handle_perf(state: &DaemonState, request: &Request) -> DispatchResult {
             "ready_snapshots": retention_metrics.ready_snapshots,
             "failed_snapshots": retention_metrics.failed_snapshots,
             "oldest_snapshot": retention_metrics.oldest_snapshot,
-            "newest_snapshot": retention_metrics.newest_snapshot
+            "newest_snapshot": retention_metrics.newest_snapshot,
+            // CACHE-SEMANTICS-1: retention class breakdown
+            "current": retention_stats.as_ref().map(|s| s.current),
+            "parent": retention_stats.as_ref().map(|s| s.parent),
+            "baseline_auto": retention_stats.as_ref().map(|s| s.baseline_auto),
+            "baseline_user": retention_stats.as_ref().map(|s| s.baseline_user),
+            "prunable": retention_stats.as_ref().map(|s| s.prunable),
+            "unclassified": retention_stats.as_ref().map(|s| s.unclassified),
+            "stale_epoch": retention_stats.as_ref().map(|s| s.stale_epoch),
+            "_debug_error": retention_stats_error
         }
     });
 
