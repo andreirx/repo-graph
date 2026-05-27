@@ -270,6 +270,10 @@ impl Dispatcher for ServiceDispatcher {
             // Handler extracted to handlers/inventory.rs
             "policy" => crate::handlers::inventory::handle_policy(&self.state, request),
 
+            // ── Metrics (PERF-OBS-1) ────────────────────────────────
+            // Storage performance observability
+            "perf" => crate::handlers::metrics::handle_perf(&self.state, request),
+
             // ── Documentation ───────────────────────────────────────
             "docs_list" => self.handle_docs_list(request),
             "docs_extract" => self.handle_docs_extract(request),

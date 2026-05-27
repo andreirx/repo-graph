@@ -1,0 +1,341 @@
+{
+  "repo_path": "/Users/apple/Documents/APLICATII BIJUTERIE/legacy-codebases/django",
+  "db_size_bytes": 1624662016,
+  "page_size": 4096,
+  "page_count": 396646,
+  "tables": [
+    {
+      "name": "annotations",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "artifacts",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "varies"
+    },
+    {
+      "name": "behavioral_markers",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "boundary_channel_details",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "boundary_consumer_facts",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "boundary_contracts",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "boundary_interaction_links",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "boundary_interaction_surfaces",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "boundary_links",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "boundary_provider_facts",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "contract_elements",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "contract_schemas",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "declarations",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "A",
+      "layer": "N/A"
+    },
+    {
+      "name": "edges",
+      "row_count": 243133,
+      "size_bytes": 69537792,
+      "tier": "B",
+      "layer": "0-1"
+    },
+    {
+      "name": "evidence_links",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "varies"
+    },
+    {
+      "name": "extraction_edges",
+      "row_count": 510477,
+      "size_bytes": 170049536,
+      "tier": "B",
+      "layer": "0-1"
+    },
+    {
+      "name": "file_signals",
+      "row_count": 6762,
+      "size_bytes": 13484032,
+      "tier": "B",
+      "layer": "0-1"
+    },
+    {
+      "name": "file_versions",
+      "row_count": 9057,
+      "size_bytes": 2060288,
+      "tier": "B",
+      "layer": "0-1"
+    },
+    {
+      "name": "files",
+      "row_count": 3019,
+      "size_bytes": 512000,
+      "tier": "B",
+      "layer": "0-1"
+    },
+    {
+      "name": "generated_code_mappings",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "inferences",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "measurements",
+      "row_count": 363045,
+      "size_bytes": 217309184,
+      "tier": "B",
+      "layer": "0-1"
+    },
+    {
+      "name": "module_candidate_evidence",
+      "row_count": 2,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "module_candidates",
+      "row_count": 2,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "module_discovery_diagnostics",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "module_file_ownership",
+      "row_count": 3015,
+      "size_bytes": 716800,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "nodes",
+      "row_count": 245802,
+      "size_bytes": 117805056,
+      "tier": "B",
+      "layer": "0-1"
+    },
+    {
+      "name": "project_surface_evidence",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "3"
+    },
+    {
+      "name": "project_surfaces",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "3"
+    },
+    {
+      "name": "quality_assessments",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "3"
+    },
+    {
+      "name": "repos",
+      "row_count": 1,
+      "size_bytes": 4096,
+      "tier": "A",
+      "layer": "N/A"
+    },
+    {
+      "name": "return_fates",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "schema_migrations",
+      "row_count": 27,
+      "size_bytes": 4096,
+      "tier": "A",
+      "layer": "N/A"
+    },
+    {
+      "name": "semantic_facts",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "snapshots",
+      "row_count": 3,
+      "size_bytes": 4096,
+      "tier": "A",
+      "layer": "N/A"
+    },
+    {
+      "name": "staged_edges",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "0-1"
+    },
+    {
+      "name": "status_mappings",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "2"
+    },
+    {
+      "name": "surface_config_roots",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "3"
+    },
+    {
+      "name": "surface_entrypoints",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "3"
+    },
+    {
+      "name": "surface_env_dependencies",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "3"
+    },
+    {
+      "name": "surface_env_evidence",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "3"
+    },
+    {
+      "name": "surface_fs_mutation_evidence",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "3"
+    },
+    {
+      "name": "surface_fs_mutations",
+      "row_count": 0,
+      "size_bytes": 4096,
+      "tier": "B",
+      "layer": "3"
+    },
+    {
+      "name": "unresolved_edges",
+      "row_count": 283739,
+      "size_bytes": 98799616,
+      "tier": "B",
+      "layer": "0-1"
+    }
+  ],
+  "tiers": {
+    "tier_a_rows": 31,
+    "tier_b_rows": 1668053
+  },
+  "layers": {
+    "layer_01_rows": 1665034,
+    "layer_2_rows": 3019,
+    "layer_3_rows": 0
+  },
+  "classification": {
+    "total_rows": 1668084,
+    "classified_tier_rows": 1668084,
+    "unclassified_tier_rows": 0,
+    "classified_layer_rows": 1668084,
+    "unclassified_layer_rows": 0,
+    "unknown_tier_tables": [],
+    "unknown_layer_tables": []
+  },
+  "retention": {
+    "total_snapshots": 3,
+    "ready_snapshots": 3,
+    "failed_snapshots": 0,
+    "oldest_snapshot": "2026-05-21T18:19:21.136Z",
+    "newest_snapshot": "2026-05-21T18:30:56.917Z"
+  }
+}

@@ -2,7 +2,32 @@
 
 ## Current Priority
 
-No active slice. Agent shell transport issues resolved.
+**PERF-OBS-1:** Storage Performance Observability — PARTIAL
+
+See `docs/slices/perf-obs-1.md`.
+
+### Completed (PERF-OBS-1A)
+
+- `rmap perf` with per-table/tier/layer metrics and classification coverage
+- `rmap doctor` shows DB size and snapshot count (transport-correct)
+- Daemon startup timing logged (cold vs warm)
+- Volume baselines: repo-graph (1.4GB), glamCRM, django
+- State root lifecycle audit
+
+**Key finding:** Authority rows are tiny (44 in repo-graph), extracted cache dominates (1.6M rows).
+
+### Not Completed (PERF-OBS-1B)
+
+- `rmap perf --timing` with phase breakdown — removed because implementation was wall-clock only
+- Global vs sandbox comparison artifact — requires running in both modes
+- hadoop baseline — timeout boundary documented, not actual capture
+
+### Decision Point
+
+Options:
+1. **Start CACHE-SEMANTICS-1** — PERF-OBS-1A provides sufficient baseline for tier semantics work
+2. **Complete PERF-OBS-1B** — finish timing instrumentation before storage architecture work
+3. **Split slice** — close PERF-OBS-1A, create PERF-OBS-1B as separate slice
 
 ---
 
@@ -60,8 +85,9 @@ All 7 legacy commands migrated to REG-1 daemon contract.
 ## Queued
 
 Candidates (see ROADMAP.md):
+- **PERF-OBS-1B:** Timing instrumentation (phase breakdown, global/sandbox comparison)
+- **CACHE-SEMANTICS-1:** Tier B refresh/invalidation semantics (PERF-OBS-1A volume baseline sufficient)
 - **CURSOR-1:** Cursor MCP/rules integration
-- **PERF-OBS-1:** Performance observability baseline (gate to Storage Architecture Track)
 
 ---
 

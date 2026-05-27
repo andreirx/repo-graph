@@ -17,5 +17,6 @@
 
 pub mod governance;
 pub mod inventory;
+pub mod metrics;
 pub mod quality;
 pub mod support;

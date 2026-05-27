@@ -242,6 +242,30 @@ Tier A and Tier B may evolve on different migration tracks. Tier B schema change
 | First command migration | callers/callees/path | Graph-native, current-snapshot, high latency sensitivity |
 | Physical DB split | Deferred | Logical separation first; measure before splitting |
 
+## State Root Lifecycle
+
+The daemon supports two state roots:
+
+| Root | Path | Lifecycle | Contains |
+|------|------|-----------|----------|
+| Global | `~/Library/Application Support/repo-graph/` | Persistent | All tiers (A + B) |
+| Sandbox | `/private/tmp/repo-graph-agent/<uid>/` | Ephemeral | All tiers (A + B) — cleared on daemon restart |
+
+**Current behavior (as of 2026-05-27):**
+- Sandbox root is created when stdio transport is used (sandbox fallback)
+- Sandbox root is shared across sandboxed sessions for same user
+- **Socket daemon startup clears sandbox root** — ensures ephemeral semantics
+- Sandbox state does not persist across daemon restarts
+
+**Implication:** Authority data (declarations, policies) created in sandbox mode is lost when the socket daemon restarts. This is intentional — sandbox mode is a temporary workspace, not a durable environment.
+
+**Future direction (CACHE-SEMANTICS-1+):** Clean separation where:
+- Tier A lives only in global root
+- Tier B can live in either root (rebuildable)
+- Sandbox mode fails or redirects for authority writes
+
+See `docs/architecture/state-root-lifecycle.md` for full lifecycle audit.
+
 ## Open Questions
 
 1. Should `files` table be Tier A (registry) or Tier B (cache)? Currently classified as Tier B because file list is derivable from source tree, but `file_uid` is used as FK across tiers.
@@ -249,6 +273,8 @@ Tier A and Tier B may evolve on different migration tracks. Tier B schema change
 2. Should baseline snapshot selection be explicit (user-declared) or implicit (most recent ready snapshot before current)?
 
 3. What is the warm-start time budget for Tier C graph loading from Tier B? Acceptable latency before daemon reports ready?
+
+4. Should authority writes (declare commands) be blocked in sandbox mode with an explicit error?
 
 ## References
 

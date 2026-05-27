@@ -11,6 +11,7 @@ use std::process::ExitCode;
 use serde::Serialize;
 
 use crate::cli::paths;
+use crate::daemon_client::DaemonClient;
 use crate::platform::{
     get_adapter, granular_socket_probes, socket_resolution_probes, PlatformAdapter, ProbeResult,
 };
@@ -103,6 +104,13 @@ fn execute_doctor() -> (DoctorOutput, bool) {
     let granular_probes = granular_socket_probes();
     probes.extend(granular_probes);
 
+    // Add storage summary probe (PERF-OBS-1)
+    // Uses DaemonClient which handles transport fallback (socket → stdio)
+    // so this works in both normal and sandboxed environments
+    if let Some(storage_probe) = storage_summary_probe() {
+        probes.push(storage_probe);
+    }
+
     let passed = probes.iter().filter(|p| p.passed).count();
     let failed = probes.len() - passed;
     let healthy = failed == 0;
@@ -127,6 +135,100 @@ fn execute_doctor() -> (DoctorOutput, bool) {
     };
 
     (output, healthy)
+}
+
+/// Query daemon for storage summary (DB size, snapshot count).
+///
+/// Returns a probe with storage info on success, or a degraded/info probe on error.
+/// Never returns None — failures should be visible in diagnostics.
+fn storage_summary_probe() -> Option<ProbeResult> {
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(e) => {
+            return Some(ProbeResult {
+                name: "storage".to_string(),
+                passed: false,
+                message: "failed to get cwd".to_string(),
+                details: Some(format!("{}", e)),
+            });
+        }
+    };
+
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
+        Err(e) => {
+            return Some(ProbeResult {
+                name: "storage".to_string(),
+                passed: false,
+                message: "daemon unavailable".to_string(),
+                details: Some(format!("{}", e)),
+            });
+        }
+    };
+
+    let params = serde_json::json!({
+        "path": cwd.to_string_lossy()
+    });
+
+    let response = match client.request("perf", Some(params)) {
+        Ok(r) => r,
+        Err(e) => {
+            let msg = format!("{}", e);
+            if msg.contains("not indexed") {
+                // Not an error — just no repo in cwd
+                return Some(ProbeResult {
+                    name: "storage".to_string(),
+                    passed: true,
+                    message: "no repo indexed in cwd".to_string(),
+                    details: None,
+                });
+            }
+            // Other errors are degraded diagnostics
+            return Some(ProbeResult {
+                name: "storage".to_string(),
+                passed: false,
+                message: "query failed".to_string(),
+                details: Some(msg),
+            });
+        }
+    };
+
+    // Parse response
+    let db_size = response
+        .get("db_size_bytes")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let snapshot_count = response
+        .get("retention")
+        .and_then(|r| r.get("total_snapshots"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+
+    let size_human = format_size(db_size);
+
+    Some(ProbeResult {
+        name: "storage".to_string(),
+        passed: true,
+        message: format!("db: {}, {} snapshots", size_human, snapshot_count),
+        details: None,
+    })
+}
+
+/// Format size in human-readable form.
+fn format_size(bytes: i64) -> String {
+    const KB: i64 = 1024;
+    const MB: i64 = KB * 1024;
+    const GB: i64 = MB * 1024;
+
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.0} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
 }
 
 fn print_human_output(output: &DoctorOutput) {
@@ -219,6 +321,21 @@ fn print_human_output(output: &DoctorOutput) {
             println!("         Restart daemon to use canonical path.");
             println!();
         }
+    }
+
+    // Storage (PERF-OBS-1)
+    let storage_probes: Vec<_> = output
+        .probes
+        .iter()
+        .filter(|p| p.name == "storage")
+        .collect();
+
+    if !storage_probes.is_empty() {
+        println!("Storage:");
+        for probe in &storage_probes {
+            print_probe(probe);
+        }
+        println!();
     }
 
     // Summary

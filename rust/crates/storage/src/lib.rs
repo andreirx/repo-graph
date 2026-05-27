@@ -175,6 +175,7 @@ mod generated_code_mapping_read_impl; // GeneratedCodeMappingReadPort impl (CS-2
 pub mod grpc_impl_hint_impl; // gRPC implementation hint queries (GR-1A)
 mod grpc_impl_hint_port_impl; // GrpcImplHintReadPort/StorePort impl (GR-1A)
 mod indexer_impl; // SnapshotLifecyclePort + FileCatalogPort impl (R5-C)
+pub mod metrics; // PERF-OBS-1: Storage metrics for performance observability
 pub mod migrations;
 mod policy_facts_impl; // PolicyFactsStorageRead/Write impl for StorageConnection (PF-1)
 mod proto_schema_impl; // ProtoSchemaStorePort impl for StorageConnection (CS-1)

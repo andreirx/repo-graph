@@ -952,7 +952,7 @@ dependencies = [
 
 [[package]]
 name = "repo-graph-algorithms"
-version = "0.2.0"
+version = "0.2.1"
 
 [[package]]
 name = "repo-graph-boundary-interaction"
@@ -1030,11 +1030,12 @@ dependencies = [
 
 [[package]]
 name = "repo-graph-daemon-runtime"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "enrichment",
  "hex",
  "jdtls-resolver",
+ "libc",
  "parking_lot",
  "pathdiff",
  "repo-graph-agent",
@@ -1156,7 +1157,7 @@ dependencies = [
 
 [[package]]
 name = "repo-graph-platform-paths"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "dirs",
  "libc",
@@ -1253,7 +1254,7 @@ dependencies = [
 
 [[package]]
 name = "repo-graph-rgr"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "enrichment",
@@ -1377,7 +1378,7 @@ dependencies = [
 
 [[package]]
 name = "rmapd"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "repo-graph-daemon-runtime",
 ]

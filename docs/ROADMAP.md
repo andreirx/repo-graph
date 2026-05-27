@@ -105,7 +105,7 @@ See `agent_docs/storage-architecture-v2.md` for full specification.
 | Slice | Scope | Status |
 |-------|-------|--------|
 | **STORAGE-ARCH-1** | Architecture specification (tier definitions, table classification, invariants) | SPEC COMPLETE |
-| **PERF-OBS-1** | Storage performance observability (table sizes, command latency, memory) | QUEUED |
+| **PERF-OBS-1** | Storage performance observability (table sizes, command latency, memory) | IN PROGRESS |
 | **CACHE-SEMANTICS-1** | Mark extracted facts as rebuildable cache (retention policy, versioning) | QUEUED |
 | **LIVE-GRAPH-1** | In-memory current snapshot graph (LiveGraph struct, loader, parity tests) | QUEUED |
 | **LIVE-GRAPH-2** | Migrate callers/callees/path to LiveGraph | QUEUED |
@@ -115,25 +115,27 @@ See `agent_docs/storage-architecture-v2.md` for full specification.
 
 ### Track Priority
 
-This track is **queued future work**, not current priority.
+This track is **now active**. PERF-OBS-1 is the decision point.
 
 Sequence: PERF-OBS-1 → CACHE-SEMANTICS-1 → LIVE-GRAPH-1 → LIVE-GRAPH-2.
 
 **Gate to start PERF-OBS-1:**
-1. Current release is shipped
+1. Current release is shipped ✓
 2. LEGACY-CONTRACT-MIGRATION-1 is complete ✓
 3. TS-IMPORT-RESOLUTION-1 is complete ✓
+4. STDIO-TRANSPORT-1 + STDIO-STATE-ROOT-1 complete ✓ (validates Tier B isolation)
 
 **Gate to continue past PERF-OBS-1:**
-4. Baseline metrics from PERF-OBS-1 justify the investment in later slices
+5. Baseline metrics from PERF-OBS-1 justify the investment in later slices
 
 PERF-OBS-1 is the decision point. If metrics show current performance is acceptable, the track pauses.
 
 ### Current Priority
 
-No active slice. Gate to start PERF-OBS-1 is met.
+**PERF-OBS-1** — Storage performance observability baseline.
 
-Candidates: CURSOR-1, PERF-OBS-1.
+Reference corpus: repo-graph, glamCRM, django, hadoop (9.5GB DB).
+Comparison axis: global launchd state root vs sandbox-local stdio state root.
 
 ### Recently Completed
 

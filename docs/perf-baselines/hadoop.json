@@ -1,0 +1,7 @@
+{
+  "_note": "BASELINE PENDING - perf query times out (>300s) on 9.5GB database",
+  "_captured": "2026-05-27",
+  "_reason": "COUNT(*) across 44 tables with dbstat is too slow for this database size",
+  "_db_size_estimate": "9.5 GB",
+  "_action": "Consider table sampling or cached row counts for large databases"
+}
