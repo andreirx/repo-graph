@@ -17,12 +17,16 @@
 //! Those are in rgr/tests/policy_command.rs with daemon harness.
 
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
 use std::sync::Arc;
 
 use serde_json::json;
 
-use repo_graph_daemon_transport::{DispatchResult, Dispatcher, NoOpEmitter, Request};
+use repo_graph_daemon_transport::{DispatchResult, Request};
+#[cfg(target_os = "macos")]
+use repo_graph_daemon_transport::{Dispatcher, NoOpEmitter};
 
+#[cfg(target_os = "macos")]
 use crate::dispatch::ServiceDispatcher;
 use crate::registry::RepoRegistry;
 use crate::state::DaemonState;
