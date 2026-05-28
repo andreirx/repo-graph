@@ -175,8 +175,14 @@ fn execute_prune(client: &mut DaemonClient) -> Result<PruneOutput, String> {
     let retention = response.get("retention").ok_or("missing retention stats")?;
 
     let stats = RetentionStats {
-        current: retention.get("current").and_then(|v| v.as_i64()).unwrap_or(0),
-        parent: retention.get("parent").and_then(|v| v.as_i64()).unwrap_or(0),
+        current: retention
+            .get("current")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
+        parent: retention
+            .get("parent")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
         baseline_auto: retention
             .get("baseline_auto")
             .and_then(|v| v.as_i64())

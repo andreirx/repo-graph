@@ -86,7 +86,8 @@ pub fn classify_retention_only(
     let stats = storage.get_retention_stats(repo_uid)?;
 
     // Calculate prunable count from stats
-    let prunable_count = stats.total
+    let prunable_count = stats
+        .total
         .saturating_sub(stats.current)
         .saturating_sub(stats.parent)
         .saturating_sub(stats.baseline_auto)

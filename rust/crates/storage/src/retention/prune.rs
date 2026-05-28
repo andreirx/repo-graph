@@ -101,10 +101,7 @@ impl StorageConnection {
             // Delete orphan rows for this specific snapshot
             for table in &orphan_cleanup_tables {
                 tx.execute(
-                    &format!(
-                        "DELETE FROM {} WHERE snapshot_uid = ?1",
-                        table
-                    ),
+                    &format!("DELETE FROM {} WHERE snapshot_uid = ?1", table),
                     rusqlite::params![snapshot_uid],
                 )?;
             }

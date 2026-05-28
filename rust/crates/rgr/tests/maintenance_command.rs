@@ -76,11 +76,7 @@ fn maintenance_help_shows_usage() {
         .output()
         .unwrap();
 
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "--help should succeed"
-    );
+    assert_eq!(output.status.code(), Some(0), "--help should succeed");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("prune"),
@@ -96,11 +92,7 @@ fn maintenance_h_shows_usage() {
         .output()
         .unwrap();
 
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "-h should succeed"
-    );
+    assert_eq!(output.status.code(), Some(0), "-h should succeed");
 }
 
 #[test]
@@ -134,11 +126,7 @@ fn maintenance_prune_help_shows_usage() {
         .output()
         .unwrap();
 
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "prune --help should succeed"
-    );
+    assert_eq!(output.status.code(), Some(0), "prune --help should succeed");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("prune") && stderr.contains("--json"),
