@@ -3338,6 +3338,46 @@ during refresh on large repos. This is EAGAIN from socket read timeout.
 
 See `docs/slices/rmap-io-1.md`.
 
+## Sandbox Mode Detection — macOS-Specific
+
+**Added:** 2026-05-28  
+**Status:** Known limitation
+
+**Context:** STATE-ROOT-SEPARATION-1 introduced sandbox mode to constrain
+authority writes (A1: baselines, aliases, declarations) when the daemon
+operates in an isolated environment where durable state would be lost.
+
+**Platform-agnostic concept:**
+- Daemon cannot rely on normal shared socket path / shared durable root
+- Authority writes must be blocked to prevent silent data loss
+- Local cache/state may need an isolated root
+
+This concept is valid on any platform with sandboxing or container isolation.
+
+**Platform-specific implementation:**
+- Current detection: state root path starts with `/private/tmp/`
+- This is macOS-specific (Codex sandbox writes to `/private/tmp/repo-graph-agent/<uid>/`)
+- Linux/container sandbox scenarios are not modeled
+
+**Consequences:**
+- Integration test `index_allowed_in_sandbox_mode_proves_a2_and_b_writes` is `#[cfg(target_os = "macos")]`
+- Linux gets no sandbox-mode test coverage
+- Future Linux sandbox scenarios would need detection logic extension
+
+**Future refactor direction:**
+- Decouple sandbox-mode classification from path-prefix heuristics
+- Make `StateRootMode::SandboxLocal` derivable from:
+  - Explicit state-root mode enum set at startup
+  - Transport fallback context (stdio fallback = sandbox)
+  - Configuration flag
+- Tests could then construct sandbox state directly without OS-specific paths
+
+**Impact:** Low — macOS is the primary sandbox scenario (Codex). Linux container
+isolation typically uses different mechanisms (volume mounts, network namespaces)
+that may not trigger the same socket-access-denied pattern.
+
+See `docs/slices/state-root-separation-1.md`.
+
 ## Parity Test Fixtures — Schema Drift
 
 **Discovered:** 2026-05-22 during release preparation  

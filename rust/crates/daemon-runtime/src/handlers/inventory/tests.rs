@@ -312,7 +312,10 @@ fn mark_baseline_allowed_in_global_mode() {
 /// 2. Creates a tiny repo with one TypeScript file
 /// 3. Runs index through the ServiceDispatcher
 /// 4. Asserts success and verifies data was written
+///
+/// macOS-only: sandbox detection uses /private/tmp/ which is macOS-specific.
 #[test]
+#[cfg(target_os = "macos")]
 fn index_allowed_in_sandbox_mode_proves_a2_and_b_writes() {
     use std::fs;
 

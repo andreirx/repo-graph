@@ -133,10 +133,16 @@ while preventing silent loss of user-authored policy data.
 
 **Validation notes:**
 - A1 blocking: `mark_baseline_blocked_in_sandbox_mode`, `unmark_baseline_blocked_in_sandbox_mode`, `mark_baseline_allowed_in_global_mode`
-- A2/B allowed: `index_allowed_in_sandbox_mode_proves_a2_and_b_writes` — integration test that:
+- A2/B allowed: `index_allowed_in_sandbox_mode_proves_a2_and_b_writes` (macOS-only) — integration test that:
   - Creates sandbox state root under `/private/tmp/`
   - Indexes a real repo through `ServiceDispatcher`
   - Verifies registration (A2) and cache data (B) written successfully
+
+**Platform scope:**
+- Enforcement model (A1/A2/B classification, guard helper): platform-agnostic
+- Sandbox detection (path-prefix heuristic): macOS-specific (`/private/tmp/`)
+- Integration test: macOS-only due to detection mechanism
+- Linux sandbox scenarios: not modeled (see TECH-DEBT.md)
 15. [x] storage-architecture-v2.md updated with A1/A2 split
 16. [x] state-root-lifecycle.md updated with implementation status
 
