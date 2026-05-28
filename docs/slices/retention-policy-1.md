@@ -1,10 +1,52 @@
-# RETENTION-POLICY-1: Automatic Pruning on Refresh
+# RETENTION-POLICY-1: Retention Policy Lifecycle
 
 ## Status
 
-COMPLETE (2026-05-27)
+**CONTRACT AMENDED** (2026-05-28)
 
-## Validation
+Originally: Auto-prune prunable snapshots after index/refresh (COMPLETE 2026-05-27).
+
+Amended by REFRESH-HANG-1: Foreground auto-prune replaced with classify-only.
+Prune is now deferred to explicit maintenance.
+
+See "Contract Amendment" section below.
+
+## Contract Amendment (REFRESH-HANG-1)
+
+### What Changed
+
+The original contract was:
+- **Foreground auto-prune** after every index/refresh
+
+The current contract is:
+- **Foreground classify-only** after index/refresh (~2ms)
+- **Deferred prune** via explicit maintenance command
+
+### Why
+
+Prune can delete 1M+ rows from `unresolved_edges`. On repos with accumulated
+stale snapshots, this took 60+ seconds and blocked interactive commands.
+
+Destructive cleanup must not sit on the synchronous product hot path.
+
+### Current State
+
+| Operation | Foreground | Maintenance |
+|-----------|------------|-------------|
+| Classify retention | Yes | Yes |
+| Prune prunable | No | Yes |
+| Response includes prunable_count | Yes | N/A |
+
+### Incomplete Work
+
+The maintenance path is not fully user-operable:
+- Daemon method `classify_retention` exists (includes prune)
+- **No CLI command surface yet** — user cannot easily trigger maintenance
+
+This is acknowledged technical debt. Follow-on slice required:
+- MAINTENANCE-CLI-1: Explicit maintenance command for prune
+
+## Original Validation (2026-05-27)
 
 Field-validated on `/tmp/test-retention`:
 - Index + 3 refreshes → 4 snapshots created
@@ -21,22 +63,27 @@ CACHE-SEMANTICS-1 established the semantic model:
 - stale-epoch exclusion from protected roles
 - classification logic
 
-But classification without operational consequence leaves storage pressure untouched. The `prune_prunable_snapshots()` method exists but is never called automatically. Prunable snapshots accumulate indefinitely.
-
-This slice wires policy into behavior: classification triggers pruning.
+But classification without operational consequence leaves storage pressure untouched.
 
 ## Scope
 
-### In Scope
+### Current Behavior (After Amendment)
 
-- Auto-prune prunable snapshots after index/refresh
-- Observability: pruned count in daemon response, rmap doctor, rmap perf
-- Tests proving protection invariants hold under pruning
-- Daemon log output for pruning operations
+- **Classify retention** after index/refresh (foreground, fast)
+- **Report prunable_count** in response so user knows maintenance is needed
+- Prune available via daemon method (not CLI-exposed)
+
+### Original In Scope (Partially Implemented)
+
+- [x] Auto-classify after index/refresh
+- [x] Observability: prunable count in daemon response, rmap doctor, rmap perf
+- [x] Tests proving protection invariants hold under pruning
+- [x] Daemon log output for pruning operations (when prune runs)
+- [~] Auto-prune after index/refresh — **AMENDED: classify-only on foreground**
 
 ### Out of Scope
 
-- CLI commands for manual pruning (daemon methods sufficient)
+- CLI commands for manual pruning — **NOW REQUIRED as follow-on**
 - Configurable retention depth (fixed at current + parent + baseline)
 - Physical Tier A / Tier B file separation
 - State root separation (STATE-ROOT-SEPARATION-1)
@@ -44,7 +91,7 @@ This slice wires policy into behavior: classification triggers pruning.
 ## Definition of Done
 
 1. [x] Auto-classify after index/refresh stays in place
-2. [x] Auto-prune prunable snapshots after classification
+2. [~] Auto-prune prunable snapshots after classification — **AMENDED: deferred**
 3. [x] Never prune protected classes:
    - `current`
    - `parent`
@@ -54,101 +101,74 @@ This slice wires policy into behavior: classification triggers pruning.
 5. [x] Pruning observable in:
    - [x] `rmap doctor` — shows "(N prunable)" in storage probe
    - [x] `rmap perf` — retention stats include prunable count
-   - [x] Daemon command response — includes `retention.pruned_count`
-   - [x] Daemon logs — logs "retention: pruned N snapshot(s) for repo X"
+   - [x] Daemon command response — includes `retention.pruned_count` and `prunable_count`
+   - [x] Daemon logs — logs "retention: pruned N snapshot(s) for repo X" (when prune runs)
 6. [x] Tests prove:
    - [x] No protected snapshot can be deleted by prune operation (19 retention tests)
    - [x] Stale-epoch snapshots are reclaimed (`classify_then_prune_reclaims_stale_epochs`)
    - [x] Marking/unmarking baselines changes retention safely (CACHE-SEMANTICS-1)
 
-## Implementation Plan
+## Implementation
 
-### Phase 1: Wire pruning into handlers
+### Current Architecture
 
-In `handle_index` and `handle_refresh`:
-1. After `classify_repo_retention()` succeeds
-2. Call `prune_prunable_snapshots()` for the repo
-3. Capture pruned count
-4. Include in response JSON
+**Foreground path (index/refresh):**
+```
+index/refresh success
+  → classify_retention_only()
+    → classify_repo_retention()  [fast, ~1ms]
+    → get_retention_stats()
+    → return {pruned_count: 0, prunable_count: N, stats}
+```
 
-### Phase 1.5: Transactional safety and code organization
+**Maintenance path (daemon method):**
+```
+classify_retention command
+  → enforce_retention_lifecycle()
+    → classify_repo_retention()
+    → prune_prunable_snapshots()  [slow, can be 60s+]
+    → get_retention_stats()
+    → return {pruned_count: N, prunable_count: 0, stats}
+```
 
-**Transaction boundaries:**
+### Transaction Boundaries
+
 - `classify_repo_retention()` — single transaction (all class assignments atomic)
-- `prune_prunable_snapshots()` — single transaction (orphan cleanup + delete atomic)
+- `prune_prunable_snapshots()` — per-snapshot transactions (batched to avoid giant deletes)
 - `enforce_retention_lifecycle()` — sequenced, not single-transaction atomic
 
 If classification commits and prune fails, the repo has correct retention classes
-but pruning is deferred. Next lifecycle run will complete pruning. This is a
-safe intermediate state, not corruption.
+but pruning is deferred. Next lifecycle run will complete pruning.
 
-**Code organization:**
-- `retention.rs` (878 lines) split into module directory:
-  - `retention/types.rs`: RetentionClass, RetentionStats, CURRENT_CACHE_EPOCH
-  - `retention/classify.rs`: classification logic (transactional)
-  - `retention/prune.rs`: prune logic (transactional)
-  - `retention/tests/`: split by concern (types, classify, epoch, baseline, prune, lifecycle)
+### Code Organization
 
-### Phase 2: Observability
-
-- `rmap doctor`: Already shows "(N prunable)" — after pruning this should typically be 0
-- `rmap perf`: Already shows retention stats — verify prunable count updates
-- Daemon response: Add `pruned_count` field to index/refresh results
-- Logs: Add info-level log for "pruned N snapshots for repo X"
-
-### Phase 3: Safety tests
-
-Storage-level tests:
-- `prune_cannot_delete_current_snapshot`
-- `prune_cannot_delete_parent_snapshot`
-- `prune_cannot_delete_baseline_auto_snapshot`
-- `prune_cannot_delete_baseline_user_snapshot`
-- `prune_deletes_stale_epoch_snapshots`
-
-Integration test (optional):
-- Full refresh cycle → verify only current + parent + baselines remain
-
-## Existing Infrastructure
-
-From CACHE-SEMANTICS-1:
-- `prune_prunable_snapshots(repo_uid)` — deletes all prunable snapshots for repo
-- `classify_repo_retention(repo_uid)` — assigns retention classes
-- `mark_stale_epochs_prunable(repo_uid)` — marks stale epochs as prunable
-- `get_retention_stats()` — returns class counts
-- 15 retention tests already verify classification correctness
-
-## Risk Assessment
-
-**Low risk.** The protection semantics are already enforced:
-- `classify_repo_retention()` only marks excess snapshots as prunable
-- Protected classes are assigned before prunable
-- `prune_prunable_snapshots()` only deletes WHERE retention_class = 'prunable'
-
-The only new behavior is calling an existing safe method automatically.
+- `retention/types.rs`: RetentionClass, RetentionStats, CURRENT_CACHE_EPOCH
+- `retention/classify.rs`: classification logic (transactional)
+- `retention/prune.rs`: prune logic (per-snapshot batched)
+- `retention/tests/`: split by concern
 
 ## Known Issues
 
-1. ~~**Pre-existing repos may fail pruning**~~ **RESOLVED by migration 029.**
-   Migration 029 (`029-repair-orphan-fks`) automatically cleans up orphan FK
-   references in tables without `ON DELETE CASCADE`. This runs automatically
-   when the daemon starts, so existing repos are repaired transparently.
-   
-2. **Large repo refresh hangs**: Refresh on repos like `leveldb` (1.7GB DB) hangs
-   indefinitely. This is a separate performance regression, not related to retention
-   policy. Tracked separately — not a blocker for this slice.
+1. **Maintenance not CLI-accessible** — daemon method exists but no CLI surface.
+   User must either:
+   - Use daemon protocol directly (not practical)
+   - Wait for MAINTENANCE-CLI-1 slice
+
+2. **Backlog accumulation** — repos indexed before REFRESH-HANG-1 fix may have
+   many prunable snapshots. One-time cleanup via daemon method needed.
 
 ## Dependencies
 
 - CACHE-SEMANTICS-1 (COMPLETE)
+- REFRESH-HANG-1 (emergency amendment)
+
+## Follow-On Work
+
+- **MAINTENANCE-CLI-1**: Add `rmap maintenance` or `rmap prune` CLI command
+  to make deferred cleanup user-operable.
 
 ## Files in Scope
 
-- `rust/crates/daemon-runtime/src/handlers/inventory/index.rs` — add prune call
-- `rust/crates/daemon-runtime/src/handlers/inventory/refresh.rs` — add prune call
-- `rust/crates/storage/src/retention.rs` — add safety tests
-- `rust/crates/rgr/src/commands/doctor.rs` — verify observability
-- `rust/crates/rgr/src/commands/perf.rs` — verify observability
-
-## Estimated Effort
-
-Small — wiring existing methods, adding observability, adding tests.
+- `rust/crates/daemon-runtime/src/handlers/inventory/retention.rs`
+- `rust/crates/daemon-runtime/src/dispatch.rs`
+- `rust/crates/storage/src/retention/`

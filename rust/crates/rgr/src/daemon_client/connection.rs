@@ -188,6 +188,53 @@ impl DaemonConnection {
         method: &str,
         params: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, DaemonClientError> {
+        self.request_internal(method, params, READ_TIMEOUT_SECS)
+    }
+
+    /// Send a request with a custom timeout.
+    ///
+    /// # MAINTENANCE-CLI-1 Technical Debt
+    ///
+    /// This method temporarily modifies the socket read timeout for a single request.
+    /// It's a workaround for operations like `maintenance prune` that can exceed the
+    /// default 300s timeout.
+    ///
+    /// The proper fix is to have the daemon emit progress events during long operations,
+    /// which would keep the connection alive and provide user feedback. That requires
+    /// passing a `ProgressEmitter` through the storage layer.
+    ///
+    /// See: docs/slices/maintenance-cli-1.md
+    pub fn request_with_timeout(
+        &mut self,
+        method: &str,
+        params: Option<serde_json::Value>,
+        timeout_secs: u64,
+    ) -> Result<serde_json::Value, DaemonClientError> {
+        // Temporarily change read timeout
+        self.stream
+            .set_read_timeout(Some(Duration::from_secs(timeout_secs)))
+            .map_err(|e| {
+                DaemonClientError::ConnectionFailed(format!("failed to set read timeout: {}", e))
+            })?;
+
+        // Execute request
+        let result = self.request_internal(method, params, timeout_secs);
+
+        // Restore default timeout (best effort, don't fail on error)
+        let _ = self
+            .stream
+            .set_read_timeout(Some(Duration::from_secs(READ_TIMEOUT_SECS)));
+
+        result
+    }
+
+    /// Internal request implementation that accepts timeout parameter for error reporting.
+    fn request_internal(
+        &mut self,
+        method: &str,
+        params: Option<serde_json::Value>,
+        timeout_secs: u64,
+    ) -> Result<serde_json::Value, DaemonClientError> {
         // Generate request ID
         let id = uuid::Uuid::new_v4().to_string();
 
@@ -215,7 +262,7 @@ impl DaemonConnection {
             let mut line = String::new();
             self.reader
                 .read_line(&mut line)
-                .map_err(|e| classify_read_error(e, READ_TIMEOUT_SECS))?;
+                .map_err(|e| classify_read_error(e, timeout_secs))?;
 
             if line.is_empty() {
                 return Err(DaemonClientError::ReadFailed(

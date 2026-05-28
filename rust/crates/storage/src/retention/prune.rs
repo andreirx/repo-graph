@@ -64,24 +64,21 @@ impl StorageConnection {
     pub fn prune_prunable_snapshots(&self, repo_uid: &str) -> Result<i64, StorageError> {
         let conn = self.connection();
 
-        // Count before transaction - this is the return value.
-        // Safe to read outside transaction; worst case we return a count
-        // that's slightly stale if concurrent writes happen, but the actual
-        // deletion is atomic.
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM snapshots WHERE repo_uid = ?1 AND retention_class = 'prunable'",
-            rusqlite::params![repo_uid],
-            |row| row.get(0),
-        )?;
+        // Collect prunable snapshot UIDs first.
+        // This allows us to delete one snapshot at a time, avoiding massive
+        // single-statement deletes that can hang on large tables.
+        let snapshot_uids: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT snapshot_uid FROM snapshots \
+                 WHERE repo_uid = ?1 AND retention_class = 'prunable'",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![repo_uid], |row| row.get(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
 
-        if count == 0 {
+        if snapshot_uids.is_empty() {
             return Ok(0);
         }
-
-        // Begin transaction for all mutations.
-        // Uses unchecked_transaction() because &self, not &mut self.
-        // Safe: daemon holds write lock, no nested transactions.
-        let tx = conn.unchecked_transaction()?;
 
         // Tables without ON DELETE CASCADE on snapshot_uid FK.
         // Must delete explicitly before deleting the snapshot.
@@ -94,40 +91,40 @@ impl StorageConnection {
             "boundary_interaction_links",
         ];
 
-        for table in &orphan_cleanup_tables {
+        // Process one snapshot at a time.
+        // This prevents giant deletes that can hang on tables with 1M+ rows.
+        // Each snapshot is deleted atomically within its own transaction.
+        for snapshot_uid in &snapshot_uids {
+            // Begin transaction for this snapshot's deletion.
+            let tx = conn.unchecked_transaction()?;
+
+            // Delete orphan rows for this specific snapshot
+            for table in &orphan_cleanup_tables {
+                tx.execute(
+                    &format!(
+                        "DELETE FROM {} WHERE snapshot_uid = ?1",
+                        table
+                    ),
+                    rusqlite::params![snapshot_uid],
+                )?;
+            }
+
+            // Clear parent_snapshot_uid references to this snapshot
             tx.execute(
-                &format!(
-                    "DELETE FROM {} WHERE snapshot_uid IN ( \
-                     SELECT snapshot_uid FROM snapshots \
-                     WHERE repo_uid = ?1 AND retention_class = 'prunable' \
-                     )",
-                    table
-                ),
-                rusqlite::params![repo_uid],
+                "UPDATE snapshots SET parent_snapshot_uid = NULL \
+                 WHERE parent_snapshot_uid = ?1",
+                rusqlite::params![snapshot_uid],
             )?;
+
+            // Delete the snapshot itself
+            tx.execute(
+                "DELETE FROM snapshots WHERE snapshot_uid = ?1",
+                rusqlite::params![snapshot_uid],
+            )?;
+
+            tx.commit()?;
         }
 
-        // Clear parent_snapshot_uid references to prunable snapshots.
-        // This breaks the self-referencing FK link before deletion.
-        tx.execute(
-            "UPDATE snapshots SET parent_snapshot_uid = NULL \
-             WHERE repo_uid = ?1 \
-             AND parent_snapshot_uid IN ( \
-                 SELECT snapshot_uid FROM snapshots \
-                 WHERE repo_uid = ?1 AND retention_class = 'prunable' \
-             )",
-            rusqlite::params![repo_uid],
-        )?;
-
-        // Delete the prunable snapshots
-        tx.execute(
-            "DELETE FROM snapshots WHERE repo_uid = ?1 AND retention_class = 'prunable'",
-            rusqlite::params![repo_uid],
-        )?;
-
-        // Commit - all changes become visible atomically
-        tx.commit()?;
-
-        Ok(count)
+        Ok(snapshot_uids.len() as i64)
     }
 }

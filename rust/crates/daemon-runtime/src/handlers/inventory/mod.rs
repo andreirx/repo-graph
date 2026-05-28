@@ -17,4 +17,7 @@ mod tests;
 
 pub use baseline::{handle_mark_baseline, handle_unmark_baseline};
 pub use policy::handle_policy;
-pub use retention::{enforce_retention_lifecycle, handle_classify_retention, LifecycleResult};
+pub use retention::{
+    classify_retention_only, enforce_retention_lifecycle, handle_classify_retention,
+    LifecycleResult,
+};

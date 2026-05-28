@@ -118,6 +118,7 @@ impl SocketTransport {
         &mut self,
         method: &str,
         params: Option<serde_json::Value>,
+        timeout_secs: u64,
     ) -> Result<serde_json::Value, DaemonClientError> {
         let id = uuid::Uuid::new_v4().to_string();
 
@@ -142,7 +143,7 @@ impl SocketTransport {
             let mut line = String::new();
             self.reader
                 .read_line(&mut line)
-                .map_err(|e| classify_read_error(e, READ_TIMEOUT_SECS))?;
+                .map_err(|e| classify_read_error(e, timeout_secs))?;
 
             if line.is_empty() {
                 return Err(DaemonClientError::ReadFailed(
@@ -189,7 +190,30 @@ impl Transport for SocketTransport {
         method: &str,
         params: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, DaemonClientError> {
-        self.send_request(method, params)
+        self.send_request(method, params, READ_TIMEOUT_SECS)
+    }
+
+    fn request_with_timeout(
+        &mut self,
+        method: &str,
+        params: Option<serde_json::Value>,
+        timeout_secs: u64,
+    ) -> Result<serde_json::Value, DaemonClientError> {
+        // Temporarily change read timeout
+        self.stream
+            .set_read_timeout(Some(Duration::from_secs(timeout_secs)))
+            .map_err(|e| {
+                DaemonClientError::ConnectionFailed(format!("failed to set read timeout: {}", e))
+            })?;
+
+        let result = self.send_request(method, params, timeout_secs);
+
+        // Restore default timeout (best effort)
+        let _ = self
+            .stream
+            .set_read_timeout(Some(Duration::from_secs(READ_TIMEOUT_SECS)));
+
+        result
     }
 
     fn ping(&mut self) -> Result<(), DaemonClientError> {

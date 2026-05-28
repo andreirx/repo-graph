@@ -331,6 +331,23 @@ impl Transport for StdioTransport {
         self.send_request(method, params)
     }
 
+    fn request_with_timeout(
+        &mut self,
+        method: &str,
+        params: Option<serde_json::Value>,
+        _timeout_secs: u64,
+    ) -> Result<serde_json::Value, DaemonClientError> {
+        // Note: StdioTransport does not support per-request timeouts because
+        // subprocess stdin/stdout don't have the same timeout semantics as
+        // sockets. The timeout parameter is ignored. Long-running operations
+        // will block until the subprocess responds.
+        //
+        // This is acceptable because stdio transport is primarily used for
+        // sandbox fallback scenarios where the daemon subprocess is local
+        // and unlikely to hang.
+        self.send_request(method, params)
+    }
+
     fn ping(&mut self) -> Result<(), DaemonClientError> {
         let result = self.request("ping", None)?;
 

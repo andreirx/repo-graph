@@ -35,7 +35,7 @@ use rust_analyzer_resolver::RustAnalyzerResolver;
 use serde_json::Value;
 use tsserver_resolver::TsServerResolver;
 
-use crate::handlers::inventory::enforce_retention_lifecycle;
+use crate::handlers::inventory::classify_retention_only;
 use crate::state::{DaemonState, RepoKey};
 use crate::util::{compute_storage_root_path, compute_trust_overlay_for_snapshot, utc_now_iso8601};
 
@@ -1416,12 +1416,15 @@ impl ServiceDispatcher {
                 // Auto-load repo so subsequent queries work immediately
                 match self.state.load_repo(&db_path, &repo_uid) {
                     Ok(repo_state) => {
-                        // RETENTION-POLICY-1: Enforce retention lifecycle after successful index
-                        // Sequence: classify → prune → report
-                        match enforce_retention_lifecycle(&repo_state.storage, &repo_uid) {
+                        // REFRESH-HANG-1: Classify only, do NOT prune on foreground path.
+                        // Pruning can take 60+ seconds on large tables.
+                        // Use classify_retention_only() for fast foreground classification.
+                        // User runs explicit maintenance to prune if needed.
+                        match classify_retention_only(&repo_state.storage, &repo_uid) {
                             Ok(lifecycle) => {
                                 response["retention"] = serde_json::json!({
                                     "pruned_count": lifecycle.pruned_count,
+                                    "prunable_count": lifecycle.prunable_count,
                                     "current": lifecycle.stats.current,
                                     "parent": lifecycle.stats.parent,
                                     "baseline_auto": lifecycle.stats.baseline_auto,
@@ -1431,7 +1434,7 @@ impl ServiceDispatcher {
                             }
                             Err(e) => {
                                 eprintln!(
-                                    "warning: retention lifecycle failed for {}: {}",
+                                    "warning: retention classification failed for {}: {}",
                                     repo_uid, e
                                 );
                             }
@@ -1616,13 +1619,15 @@ impl ServiceDispatcher {
                     });
                 }
 
-                // RETENTION-POLICY-1: Enforce retention lifecycle after successful refresh
-                // This runs under the refresh lock, so it's safe to modify snapshots
-                // Sequence: classify → prune → report
-                match enforce_retention_lifecycle(&repo_state.storage, &repo_uid) {
+                // REFRESH-HANG-1: Classify only, do NOT prune on foreground path.
+                // Pruning can take 60+ seconds on large tables.
+                // Use classify_retention_only() for fast foreground classification.
+                // User runs explicit maintenance to prune if needed.
+                match classify_retention_only(&repo_state.storage, &repo_uid) {
                     Ok(lifecycle) => {
                         response["retention"] = serde_json::json!({
                             "pruned_count": lifecycle.pruned_count,
+                            "prunable_count": lifecycle.prunable_count,
                             "current": lifecycle.stats.current,
                             "parent": lifecycle.stats.parent,
                             "baseline_auto": lifecycle.stats.baseline_auto,
@@ -1633,7 +1638,7 @@ impl ServiceDispatcher {
                     Err(e) => {
                         // Non-fatal: log warning but don't fail the refresh
                         eprintln!(
-                            "warning: retention lifecycle failed for {}: {}",
+                            "warning: retention classification failed for {}: {}",
                             repo_uid, e
                         );
                     }

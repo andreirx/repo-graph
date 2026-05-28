@@ -69,6 +69,23 @@ pub trait Transport {
         params: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, DaemonClientError>;
 
+    /// Send a request with a custom timeout.
+    ///
+    /// # MAINTENANCE-CLI-1 Technical Debt
+    ///
+    /// This method allows operations like `maintenance prune` to use longer
+    /// timeouts than the default 300s. The proper fix is to have the daemon
+    /// emit progress events during long operations, which would keep the
+    /// connection alive and provide user feedback.
+    ///
+    /// See: docs/slices/maintenance-cli-1.md
+    fn request_with_timeout(
+        &mut self,
+        method: &str,
+        params: Option<serde_json::Value>,
+        timeout_secs: u64,
+    ) -> Result<serde_json::Value, DaemonClientError>;
+
     /// Send a ping request to verify the daemon is responsive.
     fn ping(&mut self) -> Result<(), DaemonClientError>;
 

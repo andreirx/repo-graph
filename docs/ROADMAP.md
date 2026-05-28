@@ -107,7 +107,7 @@ See `agent_docs/storage-architecture-v2.md` for full specification.
 | **STORAGE-ARCH-1** | Architecture specification (tier definitions, table classification, invariants) | COMPLETE |
 | **PERF-OBS-1A** | Storage volume baseline (table sizes, row counts) | COMPLETE |
 | **CACHE-SEMANTICS-1** | Retention classes, cache epoch, stale-epoch exclusion | COMPLETE |
-| **RETENTION-POLICY-1** | Auto-prune prunable snapshots after index/refresh | COMPLETE |
+| **RETENTION-POLICY-1** | Retention lifecycle (classify + deferred prune) | AMENDED |
 | **STATE-ROOT-SEPARATION-1** | Authority vs sandbox-local state boundaries | COMPLETE |
 | **PERF-OBS-1B** | Timing instrumentation (phase breakdown, global vs sandbox) | QUEUED |
 | **LIVE-GRAPH-1** | In-memory current snapshot graph (LiveGraph struct, loader, parity tests) | FUTURE |
@@ -123,7 +123,7 @@ Sequence: RETENTION-POLICY-1 → STATE-ROOT-SEPARATION-1 → PERF-OBS-1B → ree
 
 **Rationale:**
 - CACHE-SEMANTICS-1 gave the semantic model (retention classes, stale-epoch exclusion)
-- RETENTION-POLICY-1 turns that model into actual lifecycle behavior (auto-prune)
+- RETENTION-POLICY-1 turns that model into lifecycle behavior (amended: classify-only on foreground, prune deferred)
 - STATE-ROOT-SEPARATION-1 fixes the authority/sandbox boundary
 - PERF-OBS-1B measures the system after lifecycle semantics are real
 - LIVE-GRAPH-1 decision deferred until post-prune behavior is observable
@@ -145,15 +145,17 @@ Next in sequence after STATE-ROOT-SEPARATION-1 (COMPLETE).
 - A1 blocking: EXECUTED (3 unit tests)
 - A2/B allowed: EXECUTED (1 integration test — sandbox index with real repo)
 
-**RETENTION-POLICY-1: Automatic Pruning on Refresh** — COMPLETE (2026-05-27)
+**RETENTION-POLICY-1: Retention Lifecycle** — AMENDED (2026-05-28)
 
-- `enforce_retention_lifecycle()` helper: classify → prune → stats
-- Response includes `retention.pruned_count` and stats
+Original (2026-05-27): Auto-prune after index/refresh.
+Amended by REFRESH-HANG-1: Foreground prune replaced with classify-only.
+
+Current behavior:
+- `classify_retention_only()` on foreground (fast, ~2ms)
+- `enforce_retention_lifecycle()` for maintenance (includes prune)
+- `rmap maintenance prune` CLI surface (MAINTENANCE-CLI-1)
+- Response includes `retention.prunable_count` so user knows cleanup needed
 - 23 storage tests (19 retention + 4 migration) verify lifecycle invariants
-- Field-validated: auto-prune works on all repos
-- `prune_prunable_snapshots()` is transactional (atomic orphan cleanup + delete)
-- Migration 029 repairs orphan FK references from pre-fix repos
-- `retention.rs` refactored to directory module (under 500-line guardrail)
 
 **CACHE-SEMANTICS-1: Extracted Facts as Rebuildable Cache** — COMPLETE (2026-05-27)
 

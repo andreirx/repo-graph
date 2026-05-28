@@ -1,11 +1,24 @@
 //! RETENTION-POLICY-1: Retention lifecycle enforcement.
 //!
-//! Provides a single path for retention lifecycle:
-//! 1. classify_repo_retention — assign retention classes
-//! 2. prune_prunable_snapshots — delete prunable snapshots
-//! 3. emit summary — report what changed
+//! # Architecture (REFRESH-HANG-1 fix)
 //!
-//! Called after successful index/refresh. Never called on failure.
+//! Retention is split into two phases:
+//!
+//! **Foreground (synchronous index/refresh):**
+//! - `classify_retention_only()` — assign retention classes, return stats
+//! - Fast (~1ms), never blocks user commands
+//! - Reports prunable_count so user knows maintenance is needed
+//!
+//! **Maintenance (explicit or deferred):**
+//! - `enforce_retention_lifecycle()` — classify + prune + stats
+//! - Can be slow (deletes rows), runs only on explicit request
+//! - Called by `classify_retention` daemon command
+//!
+//! # Why prune is not on the hot path
+//!
+//! Prune deletes potentially millions of rows from `unresolved_edges` and
+//! other tables. On repos with many stale snapshots, this can take 60+
+//! seconds. That must never block interactive index/refresh.
 //!
 //! # Invariants
 //!
@@ -18,6 +31,7 @@
 //!
 //! - `docs/slices/retention-policy-1.md`
 //! - `docs/slices/cache-semantics-1.md`
+//! - `docs/slices/refresh-hang-1.md`
 
 use std::path::Path;
 
@@ -35,16 +49,61 @@ use crate::state::DaemonState;
 pub struct LifecycleResult {
     /// Retention classification completed
     pub classified: bool,
-    /// Number of snapshots pruned
+    /// Number of snapshots pruned (0 if prune was not performed)
     pub pruned_count: i64,
+    /// Number of snapshots marked prunable but not yet deleted
+    pub prunable_count: i64,
     /// Retention stats after lifecycle enforcement
     pub stats: RetentionStats,
 }
 
-/// Enforce retention lifecycle: classify → prune → return summary.
+/// Classify retention only — foreground path for index/refresh.
 ///
-/// This is the single path for retention lifecycle enforcement.
-/// Call only after successful snapshot commit.
+/// This is the fast path for synchronous index/refresh. It:
+/// 1. Classifies all snapshots (assigns retention classes)
+/// 2. Returns stats including prunable_count
+///
+/// It does **NOT** prune. Pruning is deferred to explicit maintenance
+/// because deleting rows from large tables can take 60+ seconds.
+///
+/// # When to use
+///
+/// Call from `handle_index` and `handle_refresh` after successful
+/// snapshot commit. The user sees `prunable_count` in the response
+/// and knows to run maintenance if needed.
+///
+/// # Performance
+///
+/// Classification is fast (~1ms). Safe to call on every index/refresh.
+pub fn classify_retention_only(
+    storage: &StorageConnection,
+    repo_uid: &str,
+) -> Result<LifecycleResult, StorageError> {
+    // 1. Classify all snapshots
+    storage.classify_repo_retention(repo_uid)?;
+
+    // 2. Get current retention stats (includes prunable count)
+    let stats = storage.get_retention_stats(repo_uid)?;
+
+    // Calculate prunable count from stats
+    let prunable_count = stats.total
+        .saturating_sub(stats.current)
+        .saturating_sub(stats.parent)
+        .saturating_sub(stats.baseline_auto)
+        .saturating_sub(stats.baseline_user);
+
+    Ok(LifecycleResult {
+        classified: true,
+        pruned_count: 0,
+        prunable_count,
+        stats,
+    })
+}
+
+/// Enforce full retention lifecycle: classify → prune → return summary.
+///
+/// This is the **maintenance** path that includes pruning.
+/// Use for explicit maintenance commands, NOT for interactive index/refresh.
 ///
 /// # Sequence
 ///
@@ -52,22 +111,15 @@ pub struct LifecycleResult {
 /// 2. Prune all snapshots marked `prunable`
 /// 3. Return stats
 ///
+/// # Warning
+///
+/// Pruning can be slow (60+ seconds) on repos with many stale snapshots.
+/// Do NOT call from synchronous index/refresh hot path.
+///
 /// # Transaction Boundaries
 ///
 /// Classification and prune are each atomic (single transaction), but
 /// the combined lifecycle is **sequenced, not single-transaction atomic**.
-///
-/// If classification commits and prune fails, the repo has correct
-/// retention classes but pruning is deferred. The next lifecycle run
-/// will complete pruning. This is a safe intermediate state.
-///
-/// # Invariants
-///
-/// - Classification assigns: current, parent, baseline_auto, prunable
-/// - Classification preserves: baseline_user
-/// - Prune deletes only: prunable (WHERE retention_class = 'prunable')
-/// - Stale-epoch snapshots are prunable because classification excluded them
-///   from protected roles
 ///
 /// # Idempotence
 ///
@@ -97,6 +149,7 @@ pub fn enforce_retention_lifecycle(
     Ok(LifecycleResult {
         classified: true,
         pruned_count,
+        prunable_count: 0, // All prunable were just pruned
         stats,
     })
 }

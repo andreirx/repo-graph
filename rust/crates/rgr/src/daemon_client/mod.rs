@@ -227,6 +227,26 @@ impl DaemonClient {
         transport.request(method, params)
     }
 
+    /// Send a request with a custom timeout.
+    ///
+    /// # MAINTENANCE-CLI-1 Technical Debt
+    ///
+    /// This method allows operations like `maintenance prune` to use longer
+    /// timeouts than the default 300s. The proper fix is to have the daemon
+    /// emit progress events during long operations.
+    ///
+    /// Note: For StdioTransport, the timeout parameter is ignored because
+    /// subprocess I/O doesn't have the same timeout semantics as sockets.
+    pub fn request_with_timeout(
+        &mut self,
+        method: &str,
+        params: Option<serde_json::Value>,
+        timeout_secs: u64,
+    ) -> Result<serde_json::Value, DaemonClientError> {
+        let transport = self.ensure_connected()?;
+        transport.request_with_timeout(method, params, timeout_secs)
+    }
+
     /// Ping the daemon to verify it's responsive.
     ///
     /// Uses the same code path as all other requests.
