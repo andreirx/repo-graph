@@ -168,15 +168,50 @@ fn clear_stale_sandbox_state() {
 
 Called from `run_daemon()` at socket-mode startup, before bind.
 
-**THIS IS TEMPORARY DEBT, NOT ARCHITECTURAL RESOLUTION.**
+**UPDATE (2026-05-27): STATE-ROOT-SEPARATION-1 implemented.**
 
-The cleanup is lifecycle coercion by deletion. It does not address:
-- Tier A authority data still created in sandbox root during stdio sessions
-- No warning when authority writes happen in sandbox mode
-- Same DB schema in both roots (no tier separation at storage layer)
+The architectural goal from Option A is now partially achieved:
+
+### A1 Authority Writes Blocked in Sandbox Mode
+
+Authority writes (Tier A1 — user decisions) are now blocked in sandbox mode with explicit errors:
+
+| Handler | Error |
+|---------|-------|
+| `mark_baseline` | "cannot modify authority data in sandbox mode: mark_baseline" |
+| `unmark_baseline` | "cannot modify authority data in sandbox mode: unmark_baseline" |
+| `repo_alias` | "cannot modify authority data in sandbox mode: repo_alias" |
+
+Implementation:
+- `require_global_mode_for_authority_write()` guard helper in `lib.rs`
+- Each A1 handler calls the guard before proceeding
+- Guard checks `DaemonState::is_sandbox_mode()` which detects `/private/tmp/` state root
+
+### A2 Operational Writes Allowed
+
+Operational writes (Tier A2 — system bookkeeping) remain allowed in sandbox mode:
+- Repo registration (`handle_index`)
+- Snapshot metadata (`handle_refresh`)
+- Registry cleanup (`handle_repo_remove`)
+
+### Diagnostic Visibility
+
+`rmap doctor` now reports:
+- `state_root: global | sandbox-local` — execution mode
+- `authority_policy: baselines, aliases, declarations: allowed | blocked` — write policy
+
+### Remaining Debt
+
+The cleanup is still lifecycle coercion by deletion. STATE-ROOT-SEPARATION-1 addresses:
+- [x] Warning when authority writes happen in sandbox mode (now errors instead)
+- [x] No tier separation at write time (now A1 blocked, A2/B allowed)
+
+Still not addressed:
+- Same DB schema in both roots (structural tier separation)
 - User experience: every daemon restart forces reindex in subsequent sandbox sessions
 
-The architectural goal remains Option A: clean tier separation where Tier A cannot be written to sandbox root. This cleanup is a stop-gap to prevent stale state accumulation until proper tier semantics are implemented.
+The enforcement is now at the handler level rather than the storage layer. This is sufficient
+for preventing silent authority data loss, which was the primary hazard.
 
 ## Proposed Cleanup Behavior
 

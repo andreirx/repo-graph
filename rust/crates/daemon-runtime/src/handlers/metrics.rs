@@ -79,7 +79,10 @@ pub fn handle_perf(state: &DaemonState, request: &Request) -> DispatchResult {
     };
 
     // Collect retention metrics
-    let retention_metrics = match repo_state.storage.collect_snapshot_retention_metrics(repo_uid) {
+    let retention_metrics = match repo_state
+        .storage
+        .collect_snapshot_retention_metrics(repo_uid)
+    {
         Ok(m) => m,
         Err(e) => {
             return DispatchResult::error(

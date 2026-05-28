@@ -23,11 +23,66 @@
 //!    - Reader/writer semantics for loaded repo queries
 //!    - Keyed by `RepoKey`
 //!    - Acquired for repo-level operations after DB coordination
+//!
+//! # State Root Mode (STATE-ROOT-SEPARATION-1)
+//!
+//! The daemon operates in one of two modes based on its state root:
+//!
+//! - **Global mode**: Normal operation, all writes allowed
+//! - **Sandbox-local mode**: Ephemeral sandbox, A1 authority writes blocked
+//!
+//! See `agent_docs/storage-architecture-v2.md` for the A1/A2/B tier model.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
+
+// ── State Root Mode ─────────────────────────────────────────────────────
+
+/// State root operation mode.
+///
+/// Determines which classes of writes are permitted:
+///
+/// | Mode | A1 (User Authority) | A2 (Operational) | B (Cache) |
+/// |------|---------------------|------------------|-----------|
+/// | Global | Allowed | Allowed | Allowed |
+/// | SandboxLocal | **Blocked** | Allowed | Allowed |
+///
+/// See `agent_docs/storage-architecture-v2.md` for tier definitions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateRootMode {
+    /// Normal operation: global state root, all writes allowed.
+    ///
+    /// Examples:
+    /// - `~/Library/Application Support/repo-graph/` (macOS)
+    /// - `~/.local/share/rmap/` (Linux)
+    Global,
+
+    /// Sandbox fallback: sandbox-local state root, A1 writes blocked.
+    ///
+    /// Sandbox mode is detected when the state root is under `/private/tmp/`.
+    /// This is the macOS sandbox-writable temp directory used by Codex and
+    /// similar sandboxed environments.
+    ///
+    /// Example: `/private/tmp/repo-graph-agent/501/`
+    SandboxLocal,
+}
+
+impl StateRootMode {
+    /// Returns true if A1 (user authority) writes are allowed.
+    pub fn allows_authority_writes(&self) -> bool {
+        matches!(self, StateRootMode::Global)
+    }
+
+    /// Returns the mode as a string for diagnostics.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            StateRootMode::Global => "global",
+            StateRootMode::SandboxLocal => "sandbox-local",
+        }
+    }
+}
 
 use parking_lot::{Mutex, MutexGuard};
 use repo_graph_daemon_policy::RepoCoordinator;
@@ -254,6 +309,42 @@ impl DaemonState {
             db_runtimes: RwLock::new(HashMap::new()),
             registry: RefCell::new(registry),
         }
+    }
+
+    // ── State Root Mode (STATE-ROOT-SEPARATION-1) ───────────────────
+
+    /// Returns the current state root mode.
+    ///
+    /// Determines which classes of writes are permitted:
+    /// - Global: all writes allowed
+    /// - SandboxLocal: A1 (user authority) writes blocked
+    ///
+    /// Detection: sandbox mode if state root is under `/private/tmp/`.
+    pub fn state_root_mode(&self) -> StateRootMode {
+        let state_root = self.registry.borrow().state_root().to_path_buf();
+
+        // macOS sandbox environments use /private/tmp/ as writable root
+        // This is where STDIO-STATE-ROOT-1 places sandbox state
+        if state_root.starts_with("/private/tmp/") {
+            StateRootMode::SandboxLocal
+        } else {
+            StateRootMode::Global
+        }
+    }
+
+    /// Convenience: returns true if in sandbox-local mode.
+    ///
+    /// Equivalent to `self.state_root_mode() == StateRootMode::SandboxLocal`.
+    pub fn is_sandbox_mode(&self) -> bool {
+        self.state_root_mode() == StateRootMode::SandboxLocal
+    }
+
+    /// Returns true if A1 (user authority) writes are allowed.
+    ///
+    /// A1 writes include: aliases, explicit baselines, declarations, waivers.
+    /// Blocked in sandbox-local mode to prevent silent authority loss.
+    pub fn allows_authority_writes(&self) -> bool {
+        self.state_root_mode().allows_authority_writes()
     }
 
     // ── Database-level coordination ─────────────────────────────────
@@ -731,5 +822,51 @@ mod tests {
                 repos
             );
         }
+    }
+
+    // ── State Root Mode Tests (STATE-ROOT-SEPARATION-1) ─────────────
+
+    #[test]
+    fn state_root_mode_global_for_normal_paths() {
+        // A temp directory is NOT under /private/tmp/ on macOS
+        // (tempfile uses /var/folders/... by default)
+        let dir = tempdir().unwrap();
+        let registry = RepoRegistry::with_state_root(dir.path()).unwrap();
+        let daemon = DaemonState::with_registry(registry);
+
+        assert_eq!(daemon.state_root_mode(), StateRootMode::Global);
+        assert!(!daemon.is_sandbox_mode());
+        assert!(daemon.allows_authority_writes());
+    }
+
+    #[test]
+    fn state_root_mode_sandbox_for_private_tmp() {
+        // Test sandbox mode detection through the actual implementation path
+        let sandbox_path = PathBuf::from("/private/tmp/repo-graph-agent/501");
+        let registry = RepoRegistry::with_test_state_root(sandbox_path);
+        let daemon = DaemonState::with_registry(registry);
+
+        // Verify full implementation path
+        assert_eq!(daemon.state_root_mode(), StateRootMode::SandboxLocal);
+        assert!(daemon.is_sandbox_mode());
+        assert!(!daemon.allows_authority_writes());
+
+        // Verify state_root() returns the expected path
+        assert_eq!(
+            daemon.registry().state_root(),
+            Path::new("/private/tmp/repo-graph-agent/501")
+        );
+    }
+
+    #[test]
+    fn state_root_mode_enum_as_str() {
+        assert_eq!(StateRootMode::Global.as_str(), "global");
+        assert_eq!(StateRootMode::SandboxLocal.as_str(), "sandbox-local");
+    }
+
+    #[test]
+    fn state_root_mode_allows_authority_writes() {
+        assert!(StateRootMode::Global.allows_authority_writes());
+        assert!(!StateRootMode::SandboxLocal.allows_authority_writes());
     }
 }

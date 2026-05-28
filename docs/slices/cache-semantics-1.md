@@ -113,6 +113,13 @@ The fix is semantic, not mechanical: reframe Tier B data as explicitly rebuildab
    - No CLI surface for baseline marking yet (deferred to future slice)
    - Rationale: Sensible defaults with user override capability at daemon level
 
+## Deferred Items (Not Closure Blockers)
+
+- **CLI surface for baseline marking**: Daemon methods exist; CLI commands deferred
+- **Automatic pruning on refresh**: RETENTION-POLICY-1
+- **Physical Tier A / Tier B separation**: Future architectural evolution
+- **Timing instrumentation**: PERF-OBS-1B
+
 ## Estimated Effort
 
 Medium — schema change + semantic reframing, but no query path changes.

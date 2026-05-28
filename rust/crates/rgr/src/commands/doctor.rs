@@ -111,6 +111,11 @@ fn execute_doctor() -> (DoctorOutput, bool) {
         probes.push(storage_probe);
     }
 
+    // Add state root mode probe (STATE-ROOT-SEPARATION-1)
+    if let Some(state_root_probe) = state_root_mode_probe() {
+        probes.push(state_root_probe);
+    }
+
     let passed = probes.iter().filter(|p| p.passed).count();
     let failed = probes.len() - passed;
     let healthy = failed == 0;
@@ -230,6 +235,61 @@ fn storage_summary_probe() -> Option<ProbeResult> {
     })
 }
 
+/// Query daemon for authority write policy.
+///
+/// STATE-ROOT-SEPARATION-1: Reports whether authority writes (baselines, aliases,
+/// declarations) are permitted in the current daemon execution mode.
+///
+/// The key diagnostic question: "Can I write authority data from this context?"
+fn state_root_mode_probe() -> Option<ProbeResult> {
+    let mut client = match DaemonClient::new() {
+        Ok(c) => c,
+        Err(e) => {
+            return Some(ProbeResult {
+                name: "authority_policy".to_string(),
+                passed: false,
+                message: "daemon unavailable".to_string(),
+                details: Some(format!("{}", e)),
+            });
+        }
+    };
+
+    let response = match client.request("daemon_info", None) {
+        Ok(r) => r,
+        Err(e) => {
+            return Some(ProbeResult {
+                name: "authority_policy".to_string(),
+                passed: false,
+                message: "query failed".to_string(),
+                details: Some(format!("{}", e)),
+            });
+        }
+    };
+
+    let authority_writes = response
+        .get("authority_writes_allowed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // In sandbox mode, authority writes are blocked — this is expected behavior, not a failure
+    // The probe always passes; it's informational
+    if authority_writes {
+        Some(ProbeResult {
+            name: "authority_policy".to_string(),
+            passed: true,
+            message: "baselines, aliases, declarations: allowed".to_string(),
+            details: None,
+        })
+    } else {
+        Some(ProbeResult {
+            name: "authority_policy".to_string(),
+            passed: true, // Not a failure - sandbox mode is valid operation
+            message: "baselines, aliases, declarations: blocked (sandbox mode)".to_string(),
+            details: Some("authority writes require socket daemon".to_string()),
+        })
+    }
+}
+
 /// Format size in human-readable form.
 fn format_size(bytes: i64) -> String {
     const KB: i64 = 1024;
@@ -280,6 +340,7 @@ fn print_human_output(output: &DoctorOutput) {
                     | "socket_ping"
                     | "transport"
                     | "state_root"
+                    | "authority_policy"
             )
         })
         .collect();

@@ -104,40 +104,69 @@ See `agent_docs/storage-architecture-v2.md` for full specification.
 
 | Slice | Scope | Status |
 |-------|-------|--------|
-| **STORAGE-ARCH-1** | Architecture specification (tier definitions, table classification, invariants) | SPEC COMPLETE |
-| **PERF-OBS-1** | Storage performance observability (table sizes, command latency, memory) | IN PROGRESS |
-| **CACHE-SEMANTICS-1** | Mark extracted facts as rebuildable cache (retention policy, versioning) | QUEUED |
-| **LIVE-GRAPH-1** | In-memory current snapshot graph (LiveGraph struct, loader, parity tests) | QUEUED |
-| **LIVE-GRAPH-2** | Migrate callers/callees/path to LiveGraph | QUEUED |
+| **STORAGE-ARCH-1** | Architecture specification (tier definitions, table classification, invariants) | COMPLETE |
+| **PERF-OBS-1A** | Storage volume baseline (table sizes, row counts) | COMPLETE |
+| **CACHE-SEMANTICS-1** | Retention classes, cache epoch, stale-epoch exclusion | COMPLETE |
+| **RETENTION-POLICY-1** | Auto-prune prunable snapshots after index/refresh | COMPLETE |
+| **STATE-ROOT-SEPARATION-1** | Authority vs sandbox-local state boundaries | COMPLETE |
+| **PERF-OBS-1B** | Timing instrumentation (phase breakdown, global vs sandbox) | QUEUED |
+| **LIVE-GRAPH-1** | In-memory current snapshot graph (LiveGraph struct, loader, parity tests) | FUTURE |
+| **LIVE-GRAPH-2** | Migrate callers/callees/path to LiveGraph | FUTURE |
 | **LIVE-GRAPH-3** | Migrate cycles/dead to LiveGraph | FUTURE |
-| **CACHE-RETENTION-1** | Aggressive pruning of old Tier B snapshots | FUTURE |
 | **CACHE-STORAGE-1** | Evaluate Tier B backing store alternatives | FUTURE |
 
 ### Track Priority
 
-This track is **now active**. PERF-OBS-1 is the decision point.
+This track is **active**. Lifecycle semantics before timing instrumentation.
 
-Sequence: PERF-OBS-1 → CACHE-SEMANTICS-1 → LIVE-GRAPH-1 → LIVE-GRAPH-2.
+Sequence: RETENTION-POLICY-1 → STATE-ROOT-SEPARATION-1 → PERF-OBS-1B → reevaluate LIVE-GRAPH-1.
 
-**Gate to start PERF-OBS-1:**
-1. Current release is shipped ✓
-2. LEGACY-CONTRACT-MIGRATION-1 is complete ✓
-3. TS-IMPORT-RESOLUTION-1 is complete ✓
-4. STDIO-TRANSPORT-1 + STDIO-STATE-ROOT-1 complete ✓ (validates Tier B isolation)
-
-**Gate to continue past PERF-OBS-1:**
-5. Baseline metrics from PERF-OBS-1 justify the investment in later slices
-
-PERF-OBS-1 is the decision point. If metrics show current performance is acceptable, the track pauses.
+**Rationale:**
+- CACHE-SEMANTICS-1 gave the semantic model (retention classes, stale-epoch exclusion)
+- RETENTION-POLICY-1 turns that model into actual lifecycle behavior (auto-prune)
+- STATE-ROOT-SEPARATION-1 fixes the authority/sandbox boundary
+- PERF-OBS-1B measures the system after lifecycle semantics are real
+- LIVE-GRAPH-1 decision deferred until post-prune behavior is observable
 
 ### Current Priority
 
-**PERF-OBS-1** — Storage performance observability baseline.
+**PERF-OBS-1B** — Timing instrumentation (phase breakdown, global vs sandbox).
 
-Reference corpus: repo-graph, glamCRM, django, hadoop (9.5GB DB).
-Comparison axis: global launchd state root vs sandbox-local stdio state root.
+Next in sequence after STATE-ROOT-SEPARATION-1 (COMPLETE).
 
 ### Recently Completed
+
+**STATE-ROOT-SEPARATION-1: Authority vs Sandbox-Local State Boundaries** — COMPLETE (2026-05-28)
+
+- A1/A2/B tier model: User Authority vs Operational Local vs Derived Cache
+- `require_global_mode_for_authority_write()` guard blocks A1 in sandbox
+- Guards on `mark_baseline`, `unmark_baseline`, `repo_alias`
+- `rmap doctor` reports `authority_policy` probe
+- A1 blocking: EXECUTED (3 unit tests)
+- A2/B allowed: EXECUTED (1 integration test — sandbox index with real repo)
+
+**RETENTION-POLICY-1: Automatic Pruning on Refresh** — COMPLETE (2026-05-27)
+
+- `enforce_retention_lifecycle()` helper: classify → prune → stats
+- Response includes `retention.pruned_count` and stats
+- 23 storage tests (19 retention + 4 migration) verify lifecycle invariants
+- Field-validated: auto-prune works on all repos
+- `prune_prunable_snapshots()` is transactional (atomic orphan cleanup + delete)
+- Migration 029 repairs orphan FK references from pre-fix repos
+- `retention.rs` refactored to directory module (under 500-line guardrail)
+
+**CACHE-SEMANTICS-1: Extracted Facts as Rebuildable Cache** — COMPLETE (2026-05-27)
+
+Semantic contract for cache/authority separation:
+- Migration 028 adds `derived_cache_epoch` and `retention_class` to snapshots
+- Whole-snapshot invalidation: stale-epoch snapshots excluded from protected roles
+- 15 storage tests verify retention behavior
+- Daemon methods for baseline marking (CLI deferred)
+
+**PERF-OBS-1A: Storage Volume Baseline** — COMPLETE (2026-05-27)
+
+Volume baselines captured. Key finding: authority tiny (44 rows), cache dominates (1.6M rows).
+Sufficient to justify CACHE-SEMANTICS-1. Timing instrumentation (1B) deferred.
 
 **TS-IMPORT-RESOLUTION-1: TypeScript Import Resolution** — COMPLETE (2026-05-23)
 

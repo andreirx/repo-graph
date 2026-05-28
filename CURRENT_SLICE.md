@@ -2,11 +2,53 @@
 
 ## Current Priority
 
-No active slice. Next candidate: RETENTION-POLICY-1 (automatic pruning).
+**PERF-OBS-1B:** Timing instrumentation (phase breakdown, global vs sandbox).
+
+See `docs/slices/perf-obs-1.md` for specification.
 
 ---
 
 ## Recently Completed
+
+**STATE-ROOT-SEPARATION-1:** Authority vs Sandbox-Local State Boundaries — COMPLETE (2026-05-28)
+
+See `docs/slices/state-root-separation-1.md`.
+
+Architecture refinement: Split original "Tier A" into two sub-classes:
+
+| Class | Sandbox Behavior | Examples |
+|-------|------------------|----------|
+| **A1: User Authority** | Blocked | aliases, baselines, declarations |
+| **A2: Operational Local** | Allowed | repo registration, snapshot metadata |
+| **B: Derived Cache** | Allowed | nodes, edges, measurements |
+
+Implementation:
+- `StateRootMode` enum with `Global` and `SandboxLocal` variants
+- `DaemonState::state_root_mode()` detects sandbox via `/private/tmp/` prefix
+- `require_global_mode_for_authority_write()` guard helper
+- Guards applied to `mark_baseline`, `unmark_baseline`, `repo_alias`
+- `rmap doctor` reports `authority_policy` probe
+- Stdio daemon startup warning in sandbox mode
+
+Validation (all EXECUTED):
+- A1 blocking: 3 unit tests (mark_baseline, unmark_baseline blocked; global mode allowed)
+- A2/B allowed: 1 integration test (sandbox index with real repo, verifies registration + cache)
+
+**RETENTION-POLICY-1:** Automatic Pruning on Refresh — COMPLETE (2026-05-27)
+
+See `docs/slices/retention-policy-1.md`.
+
+- `enforce_retention_lifecycle()` helper: classify → prune → stats (sequenced, not single-tx)
+- Wired into `handle_index` and `handle_refresh` in dispatch.rs
+- Response includes `retention.pruned_count` and stats
+- Daemon logs "retention: pruned N snapshot(s) for repo X"
+- 19 retention tests + 4 migration tests verify lifecycle invariants
+- Field-validated on `/tmp/test-retention`: 4 snapshots → 2 after auto-prune
+- `classify_repo_retention()` is atomic (single transaction)
+- `prune_prunable_snapshots()` is atomic (single transaction)
+- Lifecycle is sequenced: if prune fails after classify commits, next run completes it
+- Migration 029 repairs orphan FK references from pre-fix repos
+- `retention/` module split by concern (all files under 500-line guardrail)
 
 **CACHE-SEMANTICS-1:** Extracted Facts as Rebuildable Cache — COMPLETE (2026-05-27)
 
@@ -92,7 +134,6 @@ All 7 legacy commands migrated to REG-1 daemon contract.
 Candidates (see ROADMAP.md):
 - **PERF-OBS-1B:** Timing instrumentation (phase breakdown, global/sandbox comparison)
 - **CURSOR-1:** Cursor MCP/rules integration
-- **RETENTION-POLICY-1:** Automatic pruning on refresh (after CACHE-SEMANTICS-1)
 
 ---
 

@@ -35,6 +35,7 @@ use rust_analyzer_resolver::RustAnalyzerResolver;
 use serde_json::Value;
 use tsserver_resolver::TsServerResolver;
 
+use crate::handlers::inventory::enforce_retention_lifecycle;
 use crate::state::{DaemonState, RepoKey};
 use crate::util::{compute_storage_root_path, compute_trust_overlay_for_snapshot, utc_now_iso8601};
 
@@ -223,6 +224,7 @@ impl Dispatcher for ServiceDispatcher {
             "echo" => DispatchResult::success(&request.id, request.params.clone()),
 
             // ── Daemon management ───────────────────────────────────
+            "daemon_info" => self.handle_daemon_info(request),
             "load_repo" => self.handle_load_repo(request),
             "unload_repo" => self.handle_unload_repo(request),
             "list_loaded_repos" => self.handle_list_loaded_repos(request),
@@ -339,6 +341,39 @@ impl Dispatcher for ServiceDispatcher {
 // ── Method handlers ─────────────────────────────────────────────────
 
 impl ServiceDispatcher {
+    /// Return daemon-level diagnostic information.
+    ///
+    /// STATE-ROOT-SEPARATION-1: Reports state root mode and authority write policy.
+    ///
+    /// Request: `{"method": "daemon_info", "params": {}}`
+    ///
+    /// Response:
+    /// ```json
+    /// {
+    ///   "state_root": "/path/to/state",
+    ///   "state_root_mode": "global" | "sandbox-local",
+    ///   "authority_writes_allowed": true | false
+    /// }
+    /// ```
+    fn handle_daemon_info(&self, request: &Request) -> DispatchResult {
+        let state_root = self
+            .state
+            .registry()
+            .state_root()
+            .to_string_lossy()
+            .to_string();
+        let mode = self.state.state_root_mode();
+
+        DispatchResult::success(
+            &request.id,
+            serde_json::json!({
+                "state_root": state_root,
+                "state_root_mode": mode.as_str(),
+                "authority_writes_allowed": mode.allows_authority_writes()
+            }),
+        )
+    }
+
     fn handle_load_repo(&self, request: &Request) -> DispatchResult {
         let db_path = match Self::get_string_param(&request.params, "db_path") {
             Ok(p) => p,
@@ -515,8 +550,19 @@ impl ServiceDispatcher {
 
     /// Set or change alias for a registered repo.
     ///
+    /// # Authority Classification
+    ///
+    /// This is an A1 (User Authority) write. Blocked in sandbox-local mode.
+    ///
     /// Request: `{"method": "repo_alias", "params": {"repo": "<path>", "alias": "<new_alias>"}}`
     fn handle_repo_alias(&self, request: &Request) -> DispatchResult {
+        // STATE-ROOT-SEPARATION-1: A1 authority write guard
+        if let Err(e) =
+            crate::require_global_mode_for_authority_write(&self.state, request, "repo_alias")
+        {
+            return e;
+        }
+
         let repo_path = match Self::get_string_param(&request.params, "repo") {
             Ok(r) => r,
             Err(e) => return DispatchResult::error(&request.id, e),
@@ -1368,24 +1414,33 @@ impl ServiceDispatcher {
                 }
 
                 // Auto-load repo so subsequent queries work immediately
-                let loaded_ok = match self.state.load_repo(&db_path, &repo_uid) {
+                match self.state.load_repo(&db_path, &repo_uid) {
                     Ok(repo_state) => {
-                        // CACHE-SEMANTICS-1: Classify retention after successful index
-                        // For first index, this marks the single snapshot as "current"
-                        if let Err(e) = repo_state.storage.classify_repo_retention(&repo_uid) {
-                            eprintln!(
-                                "warning: retention classification failed for {}: {}",
-                                repo_uid, e
-                            );
+                        // RETENTION-POLICY-1: Enforce retention lifecycle after successful index
+                        // Sequence: classify → prune → report
+                        match enforce_retention_lifecycle(&repo_state.storage, &repo_uid) {
+                            Ok(lifecycle) => {
+                                response["retention"] = serde_json::json!({
+                                    "pruned_count": lifecycle.pruned_count,
+                                    "current": lifecycle.stats.current,
+                                    "parent": lifecycle.stats.parent,
+                                    "baseline_auto": lifecycle.stats.baseline_auto,
+                                    "baseline_user": lifecycle.stats.baseline_user,
+                                    "total": lifecycle.stats.total,
+                                });
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "warning: retention lifecycle failed for {}: {}",
+                                    repo_uid, e
+                                );
+                            }
                         }
-                        true
                     }
                     Err(e) => {
                         eprintln!("warning: index succeeded but auto-load failed: {}", e);
-                        false
                     }
                 };
-                let _ = loaded_ok; // Silence unused variable warning
 
                 DispatchResult::success(&request.id, response)
             }
@@ -1561,14 +1616,27 @@ impl ServiceDispatcher {
                     });
                 }
 
-                // CACHE-SEMANTICS-1: Classify retention after successful refresh
+                // RETENTION-POLICY-1: Enforce retention lifecycle after successful refresh
                 // This runs under the refresh lock, so it's safe to modify snapshots
-                if let Err(e) = repo_state.storage.classify_repo_retention(&repo_uid) {
-                    // Non-fatal: log warning but don't fail the refresh
-                    eprintln!(
-                        "warning: retention classification failed for {}: {}",
-                        repo_uid, e
-                    );
+                // Sequence: classify → prune → report
+                match enforce_retention_lifecycle(&repo_state.storage, &repo_uid) {
+                    Ok(lifecycle) => {
+                        response["retention"] = serde_json::json!({
+                            "pruned_count": lifecycle.pruned_count,
+                            "current": lifecycle.stats.current,
+                            "parent": lifecycle.stats.parent,
+                            "baseline_auto": lifecycle.stats.baseline_auto,
+                            "baseline_user": lifecycle.stats.baseline_user,
+                            "total": lifecycle.stats.total,
+                        });
+                    }
+                    Err(e) => {
+                        // Non-fatal: log warning but don't fail the refresh
+                        eprintln!(
+                            "warning: retention lifecycle failed for {}: {}",
+                            repo_uid, e
+                        );
+                    }
                 }
 
                 DispatchResult::success(&request.id, response)

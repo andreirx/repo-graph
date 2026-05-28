@@ -2,6 +2,15 @@
 //!
 //! Allows users to explicitly mark a snapshot as a baseline for comparison.
 //! User baselines are preserved across automatic retention classification.
+//!
+//! # Authority Classification (STATE-ROOT-SEPARATION-1)
+//!
+//! User baselines are A1 (User Authority) data:
+//! - Represent explicit user decisions about retention
+//! - Cannot be automatically recovered
+//! - Blocked in sandbox-local mode
+//!
+//! See `agent_docs/storage-architecture-v2.md` for tier definitions.
 
 use std::path::Path;
 
@@ -9,12 +18,17 @@ use repo_graph_daemon_transport::{DispatchResult, ErrorCode, ErrorDetail, Reques
 use repo_graph_storage::retention::RetentionClass;
 use serde_json::json;
 
+use crate::require_global_mode_for_authority_write;
 use crate::state::DaemonState;
 
 /// Handle `mark_baseline` request.
 ///
 /// Marks a specific snapshot as a user baseline. User baselines are preserved
 /// across automatic retention classification and are never auto-pruned.
+///
+/// # Authority Classification
+///
+/// This is an A1 (User Authority) write. Blocked in sandbox-local mode.
 ///
 /// Params:
 ///   - `path` (required): Repo path
@@ -26,6 +40,11 @@ use crate::state::DaemonState;
 ///   - `snapshot_uid`: the snapshot that was marked
 ///   - `repo_path`: canonical path of repo
 pub fn handle_mark_baseline(state: &DaemonState, request: &Request) -> DispatchResult {
+    // STATE-ROOT-SEPARATION-1: A1 authority write guard
+    if let Err(e) = require_global_mode_for_authority_write(state, request, "mark_baseline") {
+        return e;
+    }
+
     let path: &str = match request.params.get("path").and_then(|v| v.as_str()) {
         Some(p) => p,
         None => {
@@ -158,6 +177,10 @@ pub fn handle_mark_baseline(state: &DaemonState, request: &Request) -> DispatchR
 /// Removes the user baseline marking from a snapshot. The snapshot will be
 /// reclassified during the next retention classification.
 ///
+/// # Authority Classification
+///
+/// This is an A1 (User Authority) write. Blocked in sandbox-local mode.
+///
 /// Params:
 ///   - `path` (required): Repo path
 ///   - `snapshot_uid` (required): Snapshot to unmark
@@ -166,6 +189,11 @@ pub fn handle_mark_baseline(state: &DaemonState, request: &Request) -> DispatchR
 ///   - `unmarked`: true if unmarking succeeded
 ///   - `snapshot_uid`: the snapshot that was unmarked
 pub fn handle_unmark_baseline(state: &DaemonState, request: &Request) -> DispatchResult {
+    // STATE-ROOT-SEPARATION-1: A1 authority write guard
+    if let Err(e) = require_global_mode_for_authority_write(state, request, "unmark_baseline") {
+        return e;
+    }
+
     let path: &str = match request.params.get("path").and_then(|v| v.as_str()) {
         Some(p) => p,
         None => {

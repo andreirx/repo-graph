@@ -20,27 +20,52 @@ This conflation creates three problems:
 
 ## Target Architecture
 
-Three distinct storage tiers with different persistence semantics:
+Storage tiers with different persistence semantics and sandbox-mode behavior:
 
-### Tier A: Durable Authority Store
+### Tier A1: User Authority (Global-Only)
 
-**Purpose**: Non-derivable, user-authored, policy-bearing state that cannot be reconstructed from source code.
+**Purpose**: User-authored, policy-bearing state that represents explicit human decisions.
+Cannot be reconstructed from source code or re-derived automatically.
+
+**Contents**:
+| Table/Field | Description |
+|-------------|-------------|
+| `declarations` | Boundaries, requirements, waivers, quality policies |
+| `snapshots.retention_class = 'baseline_user'` | Explicit user baseline marking |
+| `registry.alias` | User-assigned repo aliases |
+
+**Properties**:
+- Authoritative — loss requires manual reconstruction by user
+- User intent — represents explicit human decisions, not system state
+- Global-only — must NOT be written in sandbox-local mode
+- Migration-stable — schema changes require careful versioning
+
+**Retention**: Indefinite (until user deletes)
+
+**Sandbox behavior**: Writes BLOCKED with explicit error.
+
+### Tier A2: Operational Local State
+
+**Purpose**: System bookkeeping needed for index/refresh/query continuity.
+Not user-authored, but required for daemon operation.
 
 **Contents**:
 | Table | Description |
 |-------|-------------|
-| `repos` | Repository registry |
-| `declarations` | Boundaries, requirements, waivers, quality policies |
+| `repos` | Repository registration (path → db mapping) |
+| `snapshots` (metadata) | Snapshot manifest, status, timestamps, retention_class (auto) |
 | `schema_migrations` | Migration tracking |
-| `snapshots` (metadata only) | Snapshot manifest, status, timestamps |
+| `registry.json` (sans alias) | Repo discovery mapping |
 
 **Properties**:
-- Authoritative — loss requires manual reconstruction
-- Migration-stable — schema changes require careful versioning
-- Small volume — grows with policy complexity, not repo size
-- SQLite is appropriate backing store
+- Operational — needed for any daemon operation
+- Rebuildable — re-running index recreates this state
+- Session-scoped in sandbox — exists for sandbox session lifetime
+- Not user intent — system-generated, not user decisions
 
-**Retention**: Indefinite (until user deletes)
+**Retention**: Indefinite in global mode; ephemeral in sandbox mode (cleared on daemon restart)
+
+**Sandbox behavior**: Writes ALLOWED (required for index/refresh to function)
 
 ### Tier B: Derived Snapshot Cache
 

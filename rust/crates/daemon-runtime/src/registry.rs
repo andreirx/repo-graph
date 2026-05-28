@@ -108,6 +108,10 @@ impl Default for RegistryFile {
 /// The registry is the daemon's authoritative list of known repos.
 /// It maps canonical paths to registry entries and provides resolution.
 pub struct RepoRegistry {
+    /// State root directory (parent of registry.json and databases/).
+    /// Used for sandbox mode detection.
+    state_root: PathBuf,
+
     /// Path to the registry JSON file.
     registry_path: PathBuf,
 
@@ -133,15 +137,16 @@ impl RepoRegistry {
     ///    - macOS: `~/Library/Application Support/repo-graph/`
     ///    - Linux: `~/.local/share/rmap/`
     pub fn new() -> Result<Self, RegistryError> {
-        let data_dir = state_root_dir()?;
-        let registry_path = data_dir.join("registry.json");
-        let db_dir = data_dir.join("databases");
+        let state_root = state_root_dir()?;
+        let registry_path = state_root.join("registry.json");
+        let db_dir = state_root.join("databases");
 
         // Ensure directories exist
         fs::create_dir_all(&db_dir)
             .map_err(|e| RegistryError::Io(format!("failed to create db directory: {}", e)))?;
 
         let mut registry = Self {
+            state_root,
             registry_path,
             db_dir,
             by_path: HashMap::new(),
@@ -162,6 +167,7 @@ impl RepoRegistry {
     /// - Custom state locations
     /// - Integration testing with hermetic state
     pub fn with_state_root(state_root: &Path) -> Result<Self, RegistryError> {
+        let state_root = state_root.to_path_buf();
         let registry_path = state_root.join("registry.json");
         let db_dir = state_root.join("databases");
 
@@ -169,6 +175,7 @@ impl RepoRegistry {
             .map_err(|e| RegistryError::Io(format!("failed to create db directory: {}", e)))?;
 
         let mut registry = Self {
+            state_root,
             registry_path,
             db_dir,
             by_path: HashMap::new(),
@@ -187,12 +194,39 @@ impl RepoRegistry {
     /// persistence is not required.
     pub fn empty_non_persistent() -> Self {
         Self {
+            state_root: PathBuf::new(),
             registry_path: PathBuf::from("/dev/null"), // Will fail to write, which is intentional
             db_dir: PathBuf::new(),
             by_path: HashMap::new(),
             by_alias: HashMap::new(),
             dirty: false,
         }
+    }
+
+    /// Create a registry with a specific state root for testing.
+    ///
+    /// Does not require the path to exist or create any directories.
+    /// Used to test sandbox mode detection without filesystem access.
+    #[cfg(test)]
+    pub fn with_test_state_root(state_root: PathBuf) -> Self {
+        Self {
+            registry_path: state_root.join("registry.json"),
+            db_dir: state_root.join("databases"),
+            state_root,
+            by_path: HashMap::new(),
+            by_alias: HashMap::new(),
+            dirty: false,
+        }
+    }
+
+    // ── State Root Access ───────────────────────────────────────────────
+
+    /// Returns the state root directory.
+    ///
+    /// Used for sandbox mode detection. The state root is the parent directory
+    /// containing registry.json and databases/.
+    pub fn state_root(&self) -> &Path {
+        &self.state_root
     }
 
     // ── Path Resolution ─────────────────────────────────────────────────

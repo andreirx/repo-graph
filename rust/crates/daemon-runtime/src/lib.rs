@@ -54,13 +54,15 @@ pub mod util;
 
 pub use dispatch::ServiceDispatcher;
 pub use registry::{RegistryEntry, RegistryError, RepoRegistry};
-pub use state::{DaemonState, RepoKey, RepoState};
+pub use state::{DaemonState, RepoKey, RepoState, StateRootMode};
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use repo_graph_daemon_transport::{run_socket_transport, run_stdio, SocketConfig};
+use repo_graph_daemon_transport::{
+    run_socket_transport, run_stdio, DispatchResult, ErrorCode, ErrorDetail, Request, SocketConfig,
+};
 
 /// Returns the daemon socket path.
 ///
@@ -74,6 +76,59 @@ use repo_graph_daemon_transport::{run_socket_transport, run_stdio, SocketConfig}
 fn daemon_socket_path() -> Result<PathBuf, String> {
     repo_graph_platform_paths::daemon_socket_path()
         .ok_or_else(|| "could not determine daemon socket path".to_string())
+}
+
+// ── A1 Authority Write Guard (STATE-ROOT-SEPARATION-1) ─────────────────
+
+/// Require global state root mode for A1 (user authority) writes.
+///
+/// A1 writes include:
+/// - Explicit baselines (`mark_baseline`, `unmark_baseline`)
+/// - Aliases (`repo_alias`)
+/// - Declarations, waivers, quality policies (future)
+///
+/// These represent user intent that would be silently lost in sandbox-local
+/// mode (cleared on daemon restart). This guard enforces the boundary.
+///
+/// # Returns
+///
+/// - `Ok(())` in global mode: write may proceed
+/// - `Err(DispatchResult)` in sandbox-local mode: return this error to client
+///
+/// # Usage
+///
+/// ```ignore
+/// pub fn handle_mark_baseline(state: &DaemonState, request: &Request) -> DispatchResult {
+///     if let Err(e) = require_global_mode_for_authority_write(state, request, "mark_baseline") {
+///         return e;
+///     }
+///     // ... proceed with A1 write
+/// }
+/// ```
+#[allow(clippy::result_large_err)] // Rich error detail is intentional
+pub fn require_global_mode_for_authority_write(
+    state: &DaemonState,
+    request: &Request,
+    operation: &str,
+) -> Result<(), DispatchResult> {
+    if state.is_sandbox_mode() {
+        let state_root = state.registry().state_root().display().to_string();
+        Err(DispatchResult::error(
+            &request.id,
+            ErrorDetail::new(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "cannot modify authority data in sandbox mode: {} \
+                     (state root: {}, mode: sandbox-local). \
+                     Authority data (baselines, aliases, declarations) must be written \
+                     via the socket daemon for durability.",
+                    operation, state_root
+                ),
+            ),
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 /// Clear stale sandbox state on daemon startup.
@@ -177,11 +232,28 @@ pub fn run_daemon() -> Result<(), String> {
 ///
 /// **Warning:** This mode is for testing and debugging only.
 /// Do not use for production services.
+///
+/// **Sandbox mode:** If the state root is under `/private/tmp/`, the daemon
+/// is running in sandbox-local mode. A1 authority writes (baselines, aliases,
+/// declarations) will be blocked. Cache operations (index, refresh, queries)
+/// remain allowed.
 pub fn run_daemon_stdio() -> Result<(), String> {
     // DaemonState is !Send/!Sync due to interior mutability. Arc is used for
     // shared ownership, not cross-thread access. The daemon is single-threaded.
     #[allow(clippy::arc_with_non_send_sync)]
     let state = Arc::new(DaemonState::new());
+
+    // STATE-ROOT-SEPARATION-1: Warn on sandbox mode startup
+    if state.is_sandbox_mode() {
+        let state_root = state.registry().state_root().display().to_string();
+        eprintln!(
+            "note: running in sandbox-local mode (state root: {})",
+            state_root
+        );
+        eprintln!("note: authority writes (baselines, aliases, declarations) are blocked");
+        eprintln!("note: cache operations (index, refresh, queries) are allowed");
+    }
+
     let dispatcher = ServiceDispatcher::new(state);
 
     run_stdio(&dispatcher).map_err(|e| e.to_string())

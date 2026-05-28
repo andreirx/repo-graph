@@ -157,8 +157,8 @@ pub fn run_perf(args: &[String]) -> ExitCode {
 
 fn execute_perf_current(client: &mut DaemonClient) -> Result<PerfOutput, String> {
     // Get current repo via daemon
-    let cwd = std::env::current_dir()
-        .map_err(|e| format!("failed to get current directory: {}", e))?;
+    let cwd =
+        std::env::current_dir().map_err(|e| format!("failed to get current directory: {}", e))?;
 
     let params = serde_json::json!({
         "path": cwd.to_string_lossy()
