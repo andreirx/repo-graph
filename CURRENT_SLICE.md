@@ -23,8 +23,28 @@ RETIRED.** Clean-C++ value attachment + macro-heavy nginx **95.9% name-confirmed
 containment AND name correspondence agree; **range-only joining is forbidden** (silently
 misattaches 15.1% on C++ annotation-macro code). CJOIN-PROVE-1's 92.3% amended to **77.1%**
 name-guarded strong attach. Specs `docs/slices/cjoin-prove-{1,2}.md`; evidence
-`docs/audits/cjoin-prove-{1,2}/`; probe `rust/tools/cjoin-probe`. **Next Stage B:
-XPART-PROVE-1** (cross-partition traversal / ST3), then REFRESH-PROBE-1, RUST-INGEST-PROVE-1.
+`docs/audits/cjoin-prove-{1,2}/`; probe `rust/tools/cjoin-probe`.
+
+**XPART-PROVE-1 (cross-partition traversal / ST3) — SPLIT, PARTIAL. ST3 NOT retired.**
+EXECUTED on two FRAKTAG partitions (api + engine) via `rust/tools/xpart-probe`:
+- **XPART-PROVE-1A (answer-class semantics) — PASS.** Under a source-aligned api capture all
+  six `callers` cases returned a typed `AnswerClass` (Exact / Partial / Unavailable / Stale)
+  with explicit reasons; **no silent-empty path**. Ratified default holds: xref-exact where the
+  always-resident global xref is sufficient (per-partition counts), else
+  partial-with-explicit-degradation; load-on-demand opt-in only.
+- **XPART-PROVE-1B (dist↔src export-symbol reconciliation) — REQUIRED, OPEN.** First-class
+  finding: a consumer resolves a dependency through its **published interface**
+  (`dist/index.d.ts/...`) while the provider partition is indexed from **source**
+  (`src/index.ts/...`). Same entity, different SCIP symbols → **raw SCIP equality misses 95/95
+  real api→engine references.** A cross-partition export-surface reconciliation layer (alias
+  published-decl symbol ↔ source-def symbol via the package export map) is needed before
+  cross-partition traversal is correct on real consumer captures.
+
+**ST3 stays open: 1A proves the contract, 1B proves the package-boundary identity problem it
+must still solve.** Spec `docs/slices/xpart-prove-1.md` (split 1A/1B); evidence
+`docs/audits/xpart-prove-1/`; probe `rust/tools/xpart-probe`. **Next Stage B: XPART-PROVE-1B**,
+then REFRESH-PROBE-1, RUST-INGEST-PROVE-1.
+
 Stage C runtime work (TRUST-MODEL-REBASE-1, LiveGraph/query/value-join) stays **gated behind
 Stage B probe evidence** and must not begin before it exists.
 
