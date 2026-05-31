@@ -20,6 +20,8 @@
 
 // ── Axis 1: answer class + delivery granularity ───────────────────
 
+use std::collections::BTreeSet;
+
 /// The completeness class of a query answer (XPART-PROVE-1A answer-class contract).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -132,7 +134,7 @@ pub enum DegradationReason {
 
 /// Per-language support maturity (a separate, query-visible axis). Language lives here +
 /// provenance, never inside a basis name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LanguageSupport {
     /// TypeScript — declaration-map-backed named boundaries proven (XPART-1B).
@@ -311,6 +313,8 @@ pub enum TrustError {
     PartialRequiresReasons,
     /// `stale` must not be labelled `FreshnessState::Fresh`.
     StaleMustNotBeFresh,
+    /// `exact` / `partial` / `stale` require a non-empty contributing-language set (D1).
+    MissingContributingLanguages,
 }
 
 impl core::fmt::Display for TrustError {
@@ -322,6 +326,9 @@ impl core::fmt::Display for TrustError {
             TrustError::ExactRequiresComplete => "Exact requires Complete completeness",
             TrustError::PartialRequiresReasons => "Partial requires non-empty degradation reasons",
             TrustError::StaleMustNotBeFresh => "Stale must not be Fresh",
+            TrustError::MissingContributingLanguages => {
+                "Exact/Partial/Stale require a non-empty contributing-language set"
+            }
         };
         f.write_str(s)
     }
@@ -346,22 +353,32 @@ pub struct AnswerEnvelope<T> {
     /// degradation. (`String` ids now; a typed `PartitionId` is a recorded follow-up.)
     missing_partitions: Vec<String>,
     provenance: Vec<ProvenanceBasis>,
+    /// The `LanguageSupport` maturity of EVERY partition that contributed to this answer (D1,
+    /// QUERY-MIGRATION-1). A deduped `BTreeSet`: a multi-partition answer carries ALL contributing
+    /// languages — NEVER one collapsed/last-wins value. Non-empty for `Exact` / `Partial` / `Stale`;
+    /// MAY be empty only for `Unavailable` (target unknown before any partition is identified).
+    contributing_languages: BTreeSet<LanguageSupport>,
 }
 
 impl<T> AnswerEnvelope<T> {
-    /// `Exact`: requires `data` present, `freshness == Fresh`, `completeness == Complete`, and no
-    /// degradation reasons. (For the `PrecisionPending` exception use [`AnswerEnvelope::exact_precision_pending`].)
+    /// `Exact`: requires `data` present, `freshness == Fresh`, `completeness == Complete`, no
+    /// degradation reasons, and a non-empty `contributing_languages` set (D1). (For the
+    /// `PrecisionPending` exception use [`AnswerEnvelope::exact_precision_pending`].)
     pub fn exact(
         data: T,
         completeness: QueryCompleteness,
         freshness: FreshnessState,
         provenance: Vec<ProvenanceBasis>,
+        contributing_languages: BTreeSet<LanguageSupport>,
     ) -> Result<Self, TrustError> {
         if freshness != FreshnessState::Fresh {
             return Err(TrustError::ExactRequiresFresh);
         }
         if completeness != QueryCompleteness::Complete {
             return Err(TrustError::ExactRequiresComplete);
+        }
+        if contributing_languages.is_empty() {
+            return Err(TrustError::MissingContributingLanguages);
         }
         Ok(Self {
             class: AnswerClass::Exact,
@@ -371,19 +388,25 @@ impl<T> AnswerEnvelope<T> {
             degradation_reasons: Vec::new(),
             missing_partitions: Vec::new(),
             provenance,
+            contributing_languages,
         })
     }
 
     /// `Exact` under `PrecisionPending` — admissible ONLY with a [`NotScipDependent`] proof
-    /// (invariant 6: the answer must not depend on SCIP-backed state). Requires `Complete`.
+    /// (invariant 6: the answer must not depend on SCIP-backed state). Requires `Complete` and a
+    /// non-empty `contributing_languages` set (D1).
     pub fn exact_precision_pending(
         data: T,
         completeness: QueryCompleteness,
         _proof: NotScipDependent,
         provenance: Vec<ProvenanceBasis>,
+        contributing_languages: BTreeSet<LanguageSupport>,
     ) -> Result<Self, TrustError> {
         if completeness != QueryCompleteness::Complete {
             return Err(TrustError::ExactRequiresComplete);
+        }
+        if contributing_languages.is_empty() {
+            return Err(TrustError::MissingContributingLanguages);
         }
         Ok(Self {
             class: AnswerClass::Exact,
@@ -393,6 +416,7 @@ impl<T> AnswerEnvelope<T> {
             degradation_reasons: Vec::new(),
             missing_partitions: Vec::new(),
             provenance,
+            contributing_languages,
         })
     }
 
@@ -406,10 +430,14 @@ impl<T> AnswerEnvelope<T> {
         missing_partitions: Vec<String>,
         freshness: FreshnessState,
         provenance: Vec<ProvenanceBasis>,
+        contributing_languages: BTreeSet<LanguageSupport>,
     ) -> Result<Self, TrustError> {
         if freshness == FreshnessState::Fresh && reasons.is_empty() && missing_partitions.is_empty()
         {
             return Err(TrustError::PartialRequiresReasons);
+        }
+        if contributing_languages.is_empty() {
+            return Err(TrustError::MissingContributingLanguages);
         }
         Ok(Self {
             class: AnswerClass::Partial,
@@ -419,11 +447,19 @@ impl<T> AnswerEnvelope<T> {
             degradation_reasons: reasons,
             missing_partitions,
             provenance,
+            contributing_languages,
         })
     }
 
-    /// `Unavailable`: an explicit (typed) reason, NO data (invariant 3 + `null` ≠ empty).
-    pub fn unavailable(reason: DegradationReason, freshness: FreshnessState) -> Self {
+    /// `Unavailable`: an explicit (typed) reason, NO data (invariant 3 + `null` ≠ empty). The
+    /// `contributing_languages` set MAY be empty (D1) — the target may be unknown before any
+    /// partition is identified; it may also carry languages when the partition is known but the
+    /// xref is absent.
+    pub fn unavailable(
+        reason: DegradationReason,
+        freshness: FreshnessState,
+        contributing_languages: BTreeSet<LanguageSupport>,
+    ) -> Self {
         Self {
             class: AnswerClass::Unavailable,
             freshness,
@@ -432,19 +468,25 @@ impl<T> AnswerEnvelope<T> {
             degradation_reasons: vec![reason],
             missing_partitions: Vec::new(),
             provenance: Vec::new(),
+            contributing_languages,
         }
     }
 
     /// `Stale`: last-good data served from a non-fresh epoch. Rejects `Fresh` (invariant 4).
+    /// Requires a non-empty `contributing_languages` set (D1).
     pub fn stale(
         last_good_data: T,
         freshness: FreshnessState,
         reasons: Vec<DegradationReason>,
         missing_partitions: Vec<String>,
         provenance: Vec<ProvenanceBasis>,
+        contributing_languages: BTreeSet<LanguageSupport>,
     ) -> Result<Self, TrustError> {
         if freshness == FreshnessState::Fresh {
             return Err(TrustError::StaleMustNotBeFresh);
+        }
+        if contributing_languages.is_empty() {
+            return Err(TrustError::MissingContributingLanguages);
         }
         Ok(Self {
             class: AnswerClass::Stale,
@@ -454,6 +496,7 @@ impl<T> AnswerEnvelope<T> {
             degradation_reasons: reasons,
             missing_partitions,
             provenance,
+            contributing_languages,
         })
     }
 
@@ -487,6 +530,11 @@ impl<T> AnswerEnvelope<T> {
     /// The provenance bases.
     pub fn provenance(&self) -> &[ProvenanceBasis] {
         &self.provenance
+    }
+    /// The contributing-language set (D1): the `LanguageSupport` maturity of every partition that
+    /// contributed to this answer. Deduped + ordered; never one collapsed value.
+    pub fn contributing_languages(&self) -> &BTreeSet<LanguageSupport> {
+        &self.contributing_languages
     }
 }
 
@@ -639,13 +687,20 @@ mod tests {
 
     // ── AnswerEnvelope smart constructors (illegal states unrepresentable) ──
 
+    /// A non-empty contributing-language set for the constructor tests (D1 requires non-empty for
+    /// `Exact`/`Partial`/`Stale`).
+    fn langs() -> BTreeSet<LanguageSupport> {
+        BTreeSet::from([LanguageSupport::TypeScriptPrimary])
+    }
+
     #[test]
     fn exact_requires_fresh_and_complete() {
         assert!(AnswerEnvelope::exact(
             1u32,
             QueryCompleteness::Complete,
             FreshnessState::Fresh,
-            vec![]
+            vec![],
+            langs()
         )
         .is_ok());
         // not fresh → rejected
@@ -654,7 +709,8 @@ mod tests {
                 1u32,
                 QueryCompleteness::Complete,
                 FreshnessState::Stale,
-                vec![]
+                vec![],
+                langs()
             )
             .unwrap_err(),
             TrustError::ExactRequiresFresh
@@ -665,7 +721,8 @@ mod tests {
                 1u32,
                 QueryCompleteness::Degraded,
                 FreshnessState::Fresh,
-                vec![]
+                vec![],
+                langs()
             )
             .unwrap_err(),
             TrustError::ExactRequiresComplete
@@ -680,6 +737,7 @@ mod tests {
             QueryCompleteness::Complete,
             proof,
             vec![],
+            langs(),
         )
         .unwrap();
         assert_eq!(env.class(), AnswerClass::Exact);
@@ -689,8 +747,15 @@ mod tests {
     #[test]
     fn partial_fresh_without_reason_or_missing_rejected() {
         assert_eq!(
-            AnswerEnvelope::partial(Some(1u32), vec![], vec![], FreshnessState::Fresh, vec![])
-                .unwrap_err(),
+            AnswerEnvelope::partial(
+                Some(1u32),
+                vec![],
+                vec![],
+                FreshnessState::Fresh,
+                vec![],
+                langs()
+            )
+            .unwrap_err(),
             TrustError::PartialRequiresReasons
         );
     }
@@ -703,6 +768,7 @@ mod tests {
             vec![],
             FreshnessState::PrecisionPending,
             vec![],
+            langs(),
         )
         .unwrap();
         assert_eq!(env.class(), AnswerClass::Partial);
@@ -711,10 +777,15 @@ mod tests {
 
     #[test]
     fn partial_stale_without_reason_is_valid() {
-        assert!(
-            AnswerEnvelope::partial(Some(1u32), vec![], vec![], FreshnessState::Stale, vec![])
-                .is_ok()
-        );
+        assert!(AnswerEnvelope::partial(
+            Some(1u32),
+            vec![],
+            vec![],
+            FreshnessState::Stale,
+            vec![],
+            langs()
+        )
+        .is_ok());
     }
 
     #[test]
@@ -724,7 +795,8 @@ mod tests {
             vec![],
             vec![],
             FreshnessState::RefreshFailed,
-            vec![]
+            vec![],
+            langs()
         )
         .is_ok());
     }
@@ -740,7 +812,8 @@ mod tests {
                 1u32,
                 QueryCompleteness::Complete,
                 FreshnessState::PrecisionPending,
-                vec![]
+                vec![],
+                langs()
             )
             .unwrap_err(),
             TrustError::ExactRequiresFresh
@@ -755,6 +828,7 @@ mod tests {
             vec!["engine".to_string()],
             FreshnessState::Fresh,
             vec![],
+            langs(),
         )
         .unwrap();
         assert_eq!(env.class(), AnswerClass::Partial);
@@ -770,6 +844,7 @@ mod tests {
             vec!["api".to_string()],
             FreshnessState::Fresh,
             vec![],
+            langs(),
         )
         .unwrap();
         assert_eq!(env.class(), AnswerClass::Partial);
@@ -786,6 +861,7 @@ mod tests {
             QueryCompleteness::Complete,
             FreshnessState::Fresh,
             vec![],
+            langs(),
         )
         .unwrap();
         assert!(env.missing_partitions().is_empty());
@@ -796,6 +872,7 @@ mod tests {
         let env: AnswerEnvelope<u32> = AnswerEnvelope::unavailable(
             DegradationReason::UnresolvedAlias,
             FreshnessState::Unavailable,
+            BTreeSet::new(),
         );
         assert_eq!(env.class(), AnswerClass::Unavailable);
         assert!(env.data().is_none());
@@ -806,9 +883,61 @@ mod tests {
     #[test]
     fn stale_must_not_be_fresh() {
         assert_eq!(
-            AnswerEnvelope::stale(1u32, FreshnessState::Fresh, vec![], vec![], vec![]).unwrap_err(),
+            AnswerEnvelope::stale(1u32, FreshnessState::Fresh, vec![], vec![], vec![], langs())
+                .unwrap_err(),
             TrustError::StaleMustNotBeFresh
         );
-        assert!(AnswerEnvelope::stale(1u32, FreshnessState::Stale, vec![], vec![], vec![]).is_ok());
+        assert!(AnswerEnvelope::stale(
+            1u32,
+            FreshnessState::Stale,
+            vec![],
+            vec![],
+            vec![],
+            langs()
+        )
+        .is_ok());
+    }
+
+    // ── D1: contributing-language invariant ──
+
+    #[test]
+    fn exact_answer_requires_nonempty_languages() {
+        // Empty language set → Exact rejected (D1: Exact/Partial/Stale require non-empty).
+        assert_eq!(
+            AnswerEnvelope::exact(
+                1u32,
+                QueryCompleteness::Complete,
+                FreshnessState::Fresh,
+                vec![],
+                BTreeSet::new()
+            )
+            .unwrap_err(),
+            TrustError::MissingContributingLanguages
+        );
+        // Non-empty → accepted; the set is carried on the envelope.
+        let env = AnswerEnvelope::exact(
+            1u32,
+            QueryCompleteness::Complete,
+            FreshnessState::Fresh,
+            vec![],
+            BTreeSet::from([
+                LanguageSupport::TypeScriptPrimary,
+                LanguageSupport::RustPartialBeta,
+            ]),
+        )
+        .unwrap();
+        assert_eq!(env.contributing_languages().len(), 2);
+    }
+
+    #[test]
+    fn unavailable_unknown_target_may_have_empty_languages() {
+        // D1 carve-out: an Unavailable answer for an unknown target may carry NO languages.
+        let env: AnswerEnvelope<u32> = AnswerEnvelope::unavailable(
+            DegradationReason::UnresolvedAlias,
+            FreshnessState::Unavailable,
+            BTreeSet::new(),
+        );
+        assert_eq!(env.class(), AnswerClass::Unavailable);
+        assert!(env.contributing_languages().is_empty());
     }
 }
