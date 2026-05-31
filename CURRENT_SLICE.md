@@ -55,8 +55,23 @@ complex-`exports` packages → `Partial`/`Unavailable`/`UnreconciledExportSurfac
 `null`=unknown, never empty** (an unaddressable target is unknown, not known-zero). Each residual
 carries a named upgrade slice (positional/VLQ; Basis 2). Specs `docs/slices/xpart-prove-1.md` +
 `xpart-prove-1b.md` + `xpart-st3-boundary-decision.md`; evidence `docs/audits/xpart-prove-1/`
-(incl. `findings-1b.md`); probe `rust/tools/xpart-probe` (`export_alias.rs`). **Next Stage B:
-REFRESH-PROBE-1**, then RUST-INGEST-PROVE-1.
+(incl. `findings-1b.md`); probe `rust/tools/xpart-probe` (`export_alias.rs`).
+
+**REFRESH-PROBE-1 (refresh model / cost) — EXECUTED → VERDICT B (two-speed refresh).** Whole-partition
+SCIP indexing dominates and exceeds the synchronous A budget on every measured partition (FRAKTAG
+engine ~1.9s chain; amodx plugins ~3.0s); no-op ≈ edit (refresh unit is the partition). C not
+indicated (seconds, tooling stable). **Workload shape:** bursts MUST coalesce (8.4× waste, K=8);
+provider public-API edits invalidate **only referencing consumers** (precise, ~3.5s cascade =
+dist-rebuild + provider + consumer reindex); cross-partition xref/alias recompute ~21ms → the slow
+path is **indexer-bound**, not repo-graph-bound. **Runtime contract:** serve last-good epoch + AST
+fast delta + `Stale`/`PrecisionPending`, coalesce bursts, atomic epoch swap, keep last-good on
+failure, never `Exact`-empty. **Constraints:** burst proves coalescing mandatory but NOT the final
+window (runtime tunes later); fanout invalidation must use affected exported-symbol refs + degrade
+conservatively when uncertain; xref/alias negligibility is TS-package-boundary-only (do not
+generalize to all languages / huge workspaces). Spec `docs/slices/refresh-probe-1.md`; evidence
+`docs/audits/refresh-probe-1/findings.md`; probe `rust/tools/refresh-probe`. **Next Stage B:
+RUST-INGEST-PROVE-1** (Rust ingestion robustness / per-crate support boundary — last open Stage B
+risk; ST1/ST3/refresh now bounded).
 
 Stage C runtime work (TRUST-MODEL-REBASE-1, LiveGraph/query/value-join) stays **gated behind
 Stage B probe evidence** and must not begin before it exists.

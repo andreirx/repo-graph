@@ -138,6 +138,18 @@ Basis 2). **REFRESH-PROBE-1 is next.**
   keep correctness) or residency-scoped answers with explicit degradation.
 
 ### REFRESH-PROBE-1 — compiler-grade refresh cost at scale  (ST2 / RK3)
+
+**EXECUTED (2026-05-31) → VERDICT B (two-speed refresh).** Whole-partition SCIP indexing dominates
+and exceeds the synchronous A budget on every measured partition (FRAKTAG engine ~1.9s chain; amodx
+plugins ~3.0s); no-op ≈ edit (refresh unit = partition). C not indicated (seconds, tooling stable).
+Bursts MUST coalesce (8.4× waste, K=8); provider public-API edits invalidate only **referencing**
+consumers (precise ~3.5s cascade = dist-rebuild + provider + consumer reindex); cross-partition
+xref/alias recompute ~21ms → the slow path is **indexer-bound**, not repo-graph-bound. Runtime
+contract + claim constraints (burst window not yet set; fanout uses affected exported-symbol refs;
+xref/alias negligibility is TS-package-boundary-only) in `docs/slices/refresh-probe-1.md`; evidence
+`docs/audits/refresh-probe-1/findings.md`. **ST2/RK3 refresh-model risk retired (B).**
+**RUST-INGEST-PROVE-1 is next** (last open Stage B risk).
+
 - **Measure workflow shape, not just wall-clock:** (1) cost per edit (single-file edit
   -> partition reindex); (2) cost per partition unit (package / crate / TU-group);
   (3) cost under a **bursty edit loop** (rapid successive edits, as in real agent/dev
