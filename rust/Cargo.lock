@@ -135,6 +135,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cjoin-probe"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-cpp-extractor",
+ "repo-graph-indexer",
+ "repo-graph-scip-ingest",
+]
+
+[[package]]
 name = "contract-schema"
 version = "0.1.0"
 dependencies = [
