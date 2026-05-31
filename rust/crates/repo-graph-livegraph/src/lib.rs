@@ -11,11 +11,11 @@
 //! indexers, persist, or touch the CLI. Deps: `repo-graph-ir` + `repo-graph-trust-model` only.
 //! Headless API (no query migration). See docs/slices/livegraph-runtime-1.md.
 
-use repo_graph_ir::{IdentitySource, PartitionIr};
+use repo_graph_ir::{CanonicalKey, IdentitySource, PartitionIr, Provenance, SourceRange};
 use repo_graph_trust_model::{
     classify_answer, AnswerClass, AnswerEnvelope, CompletenessInput, DegradationReason,
-    FreshnessState, Granularity, IdentityBasis, LanguageSupport, QueryCompleteness,
-    QueryGranularity,
+    FreshnessState, Granularity, IdentityBasis, LanguageSupport, NotScipDependent,
+    QueryCompleteness, QueryGranularity,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -69,6 +69,8 @@ struct Slot {
     language: LanguageSupport,
     defines: HashMap<String, IdentityBasis>, // cross-partition key -> def basis (retained on unload)
     ref_counts: HashMap<String, usize>,      // cross-partition key -> reference count (retained)
+    value_facts: Vec<ValueFact>,             // VALUE-JOIN-1: value facts (retained on unload)
+    value_facts_epoch: Option<PartitionEpoch>, // D7: partition epoch the facts were loaded for
 }
 
 /// The payload of a `callers` answer (`AnswerEnvelope<CallersAnswer>`).
@@ -90,6 +92,53 @@ pub struct CalleesAnswer {
     /// (callee key, defining partition) identities — populated for `CallerDetail`. The partition is
     /// `None` when the callee has no known defining partition (`UnresolvedAlias`).
     pub callee_identities: Vec<(String, Option<String>)>,
+    /// Contributing partition epochs (D3).
+    pub contributing_epochs: BTreeMap<String, u64>,
+}
+
+// ── VALUE-JOIN-1 value-fact model (D6 separate channel; D1 cyclomatic complexity) ──
+
+/// One kind of value-layer fact (D1: cyclomatic complexity only this slice).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueFactKind {
+    /// Cyclomatic complexity of a function/method.
+    CyclomaticComplexity,
+}
+
+/// What a value fact is attached to. A `RawAnchor` is NOT a canonical identity (D3 — do not
+/// overload `CanonicalKey` for raw anchors); `SourceRange` already carries the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValueSubject {
+    /// Attached to a canonical symbol identity.
+    Symbol(CanonicalKey),
+    /// Attached only to a source range (ownership not certified).
+    RawAnchor(SourceRange),
+}
+
+/// A value-layer fact attached under the trust model. The measured `value` is a true observation;
+/// the `basis` governs ONLY the ownership claim (the key semantic rule: a value fact is not less
+/// true because it is raw-anchored — only the ownership claim is degraded).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValueFact {
+    /// What the fact is attached to.
+    pub subject: ValueSubject,
+    /// The fact kind.
+    pub kind: ValueFactKind,
+    /// The measured value.
+    pub value: u32,
+    /// The identity basis governing the ownership claim.
+    pub basis: IdentityBasis,
+    /// The source range the fact was observed at, if known.
+    pub source_range: Option<SourceRange>,
+    /// External-producer provenance.
+    pub provenance: Provenance,
+}
+
+/// The payload of a `value_facts` answer (`AnswerEnvelope<ValueFactsAnswer>`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValueFactsAnswer {
+    /// The symbol-owned (or ownership-degraded) value facts for the queried symbol.
+    pub facts: Vec<ValueFact>,
     /// Contributing partition epochs (D3).
     pub contributing_epochs: BTreeMap<String, u64>,
 }
@@ -221,6 +270,8 @@ impl LiveGraph {
                 language,
                 defines,
                 ref_counts,
+                value_facts: Vec::new(),
+                value_facts_epoch: None,
             },
         );
     }
@@ -260,6 +311,14 @@ impl LiveGraph {
             .get(id)
             .map(|s| s.language)
             .unwrap_or(LanguageSupport::TypeScriptPrimary);
+        // D7: carry the prior epoch's value facts forward as last-good; their `value_facts_epoch`
+        // stays the OLD epoch, so `value_facts` detects the mismatch and reports them `Stale` until
+        // reloaded for the new epoch (never silently attached to the new graph epoch).
+        let (value_facts, value_facts_epoch) = self
+            .slots
+            .get(id)
+            .map(|s| (s.value_facts.clone(), s.value_facts_epoch))
+            .unwrap_or_default();
         self.slots.insert(
             id.to_string(),
             Slot {
@@ -269,9 +328,21 @@ impl LiveGraph {
                 language,
                 defines,
                 ref_counts,
+                value_facts,
+                value_facts_epoch,
             },
         );
         self.xref_epoch += 1;
+    }
+
+    /// Load value facts for a partition (VALUE-JOIN-1, D6 separate channel). Stamps the current
+    /// partition epoch (D7) — a later swap without reload makes these facts detectably `Stale`.
+    /// No-op if the partition is not loaded (value facts attach to an existing partition).
+    pub fn load_value_facts(&mut self, id: &str, facts: Vec<ValueFact>) {
+        if let Some(s) = self.slots.get_mut(id) {
+            s.value_facts = facts;
+            s.value_facts_epoch = Some(s.epoch);
+        }
     }
 
     /// The global xref epoch.
@@ -484,6 +555,145 @@ impl LiveGraph {
         // callees. callees is SCIP-dependent (cross-partition resolution): PrecisionPending → Partial.
         let class_c = classify_cross_partition(&bases, freshness, &reasons, &languages);
         finalize_envelope(data, class_c, freshness, reasons, Vec::new(), languages)
+    }
+
+    /// `value_facts(symbol)` — the headless value-fact lookup (VALUE-JOIN-1, D5). Returns the
+    /// symbol-owned value facts as a trust-labelled `AnswerEnvelope` (`SymbolOwnership` granularity).
+    /// The KEY SEMANTIC RULE: ownership is degraded — NOT the measured value — when the basis does
+    /// not certify ownership. Epoch-bound (D7): facts from a superseded partition epoch are `Stale`.
+    pub fn value_facts(&self, symbol: &str) -> AnswerEnvelope<ValueFactsAnswer> {
+        // Resolve the defining partition; unknown symbol → Unavailable (null ≠ empty).
+        let def_part = match self
+            .slots
+            .iter()
+            .find_map(|(id, s)| s.defines.get(symbol).map(|_| id.clone()))
+        {
+            Some(id) => id,
+            None => {
+                return AnswerEnvelope::unavailable(
+                    DegradationReason::UnresolvedAlias,
+                    FreshnessState::Unavailable,
+                    BTreeSet::new(),
+                )
+            }
+        };
+        let slot = self.slots.get(&def_part).expect("defining slot exists");
+        let languages = BTreeSet::from([slot.language]);
+
+        // Symbol-subject value facts for this symbol (RawAnchor-subject facts are stored but not
+        // symbol-retrievable — range retrieval is a follow-up).
+        let facts: Vec<ValueFact> = slot
+            .value_facts
+            .iter()
+            .filter(|f| matches!(&f.subject, ValueSubject::Symbol(k) if k.as_str() == symbol))
+            .cloned()
+            .collect();
+        if facts.is_empty() {
+            // Known symbol, no value fact (e.g. not a function) → Unavailable, not empty.
+            return AnswerEnvelope::unavailable(
+                DegradationReason::UnresolvedAlias,
+                FreshnessState::Unavailable,
+                languages,
+            );
+        }
+
+        let mut contributing_epochs = BTreeMap::new();
+        contributing_epochs.insert(def_part.clone(), slot.epoch.0);
+        let basis = facts[0].basis; // D1: one value-fact kind (complexity) per symbol
+        let data = ValueFactsAnswer {
+            facts,
+            contributing_epochs,
+        };
+
+        // Non-resident defining partition → Partial + missing (retained last-good).
+        if slot.ir.is_none() {
+            return AnswerEnvelope::partial(
+                Some(data),
+                Vec::new(),
+                vec![def_part],
+                status_freshness(slot.status),
+                Vec::new(),
+                languages,
+            )
+            .expect("partial with missing partition is valid");
+        }
+
+        // Freshness: partition status, bumped to at least `Stale` on an epoch mismatch (D7).
+        let base = status_freshness(slot.status);
+        let epoch_mismatch = slot.value_facts_epoch != Some(slot.epoch);
+        let freshness =
+            if epoch_mismatch && freshness_rank(base) < freshness_rank(FreshnessState::Stale) {
+                FreshnessState::Stale
+            } else {
+                base
+            };
+
+        // Ownership (D2): owned iff the basis is `SymbolOwnership`-complete (derived via the policy).
+        let owned = classify_answer(&CompletenessInput {
+            granularity: QueryGranularity::SymbolOwnership,
+            bases: vec![basis],
+            freshness: FreshnessState::Fresh,
+            degradation_reasons: Vec::new(),
+            language: slot.language,
+        })
+        .0 == AnswerClass::Exact;
+
+        if !owned {
+            // Ownership degraded (raw-anchored); the VALUE is preserved; never Exact-owned. For TS
+            // the reachable non-owned basis is `ScipSynthesized` (fallback identity).
+            return AnswerEnvelope::partial(
+                Some(data),
+                vec![DegradationReason::ScipFallbackIdentity],
+                Vec::new(),
+                freshness,
+                Vec::new(),
+                languages,
+            )
+            .expect("partial with reason is valid");
+        }
+
+        // Owned: class follows freshness. A value fact is AST-LOCAL — under `PrecisionPending` an
+        // AST-derived basis stays `Exact` via the `NotScipDependent` proof (the invariant-6 path
+        // `callers`/`callees` avoid); a SCIP-backed owned basis degrades to `Partial`.
+        match freshness {
+            FreshnessState::Fresh => AnswerEnvelope::exact(
+                data,
+                QueryCompleteness::Complete,
+                FreshnessState::Fresh,
+                Vec::new(),
+                languages,
+            )
+            .expect("exact invariant holds"),
+            FreshnessState::PrecisionPending => match NotScipDependent::prove(&[basis]) {
+                Some(proof) => AnswerEnvelope::exact_precision_pending(
+                    data,
+                    QueryCompleteness::Complete,
+                    proof,
+                    Vec::new(),
+                    languages,
+                )
+                .expect("exact_precision_pending invariant holds"),
+                None => AnswerEnvelope::partial(
+                    Some(data),
+                    Vec::new(),
+                    Vec::new(),
+                    FreshnessState::PrecisionPending,
+                    Vec::new(),
+                    languages,
+                )
+                .expect("partial precision-pending is valid"),
+            },
+            // Stale / RefreshFailed / epoch-mismatch → Stale (last-good).
+            _ => AnswerEnvelope::stale(
+                data,
+                freshness,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                languages,
+            )
+            .expect("stale invariant holds"),
+        }
     }
 }
 
@@ -826,5 +1036,152 @@ mod tests {
         assert_eq!(a.class(), AnswerClass::Stale);
         assert_eq!(a.freshness(), FreshnessState::Stale);
         assert!(a.data().is_some()); // last-good served
+    }
+
+    // ── VALUE-JOIN-1: value facts (D1 complexity, D5 value_facts, D7 epoch coherence) ──
+
+    fn complexity_fact(key: &str, value: u32, basis: IdentityBasis) -> ValueFact {
+        ValueFact {
+            subject: ValueSubject::Symbol(CanonicalKey::from_existing(key)),
+            kind: ValueFactKind::CyclomaticComplexity,
+            value,
+            basis,
+            source_range: None,
+            provenance: prov(),
+        }
+    }
+    // engine(TS) resident, defines engine.foo (AstAdopted).
+    fn vf_lg() -> LiveGraph {
+        let mut lg = LiveGraph::new();
+        lg.load_partition("engine", engine(), LanguageSupport::TypeScriptPrimary);
+        lg
+    }
+
+    #[test]
+    fn symbol_owned_complexity_exact_for_ast_adopted_ts() {
+        let mut lg = vf_lg();
+        lg.load_value_facts(
+            "engine",
+            vec![complexity_fact("engine.foo", 7, IdentityBasis::AstAdopted)],
+        );
+        let a = lg.value_facts("engine.foo");
+        assert_eq!(a.class(), AnswerClass::Exact);
+        assert_eq!(a.freshness(), FreshnessState::Fresh);
+        assert_eq!(a.data().unwrap().facts.len(), 1);
+        assert_eq!(a.data().unwrap().facts[0].value, 7);
+        assert_eq!(a.data().unwrap().facts[0].basis, IdentityBasis::AstAdopted);
+    }
+
+    #[test]
+    fn raw_anchored_complexity_partial_not_exact_for_symbol_ownership() {
+        let mut lg = vf_lg();
+        // Keyed to the symbol, but the basis does NOT certify ownership (TS fallback identity).
+        lg.load_value_facts(
+            "engine",
+            vec![complexity_fact(
+                "engine.foo",
+                9,
+                IdentityBasis::ScipSynthesized,
+            )],
+        );
+        let a = lg.value_facts("engine.foo");
+        assert_eq!(a.class(), AnswerClass::Partial);
+        assert_ne!(a.class(), AnswerClass::Exact);
+        // KEY RULE: the value is NOT less true — only ownership is degraded.
+        assert_eq!(a.data().unwrap().facts[0].value, 9);
+        assert!(a
+            .degradation_reasons()
+            .contains(&DegradationReason::ScipFallbackIdentity));
+    }
+
+    #[test]
+    fn missing_value_fact_unavailable_not_empty() {
+        let lg = vf_lg(); // no value facts loaded
+                          // Known symbol, no complexity fact → Unavailable (null ≠ empty).
+        let a = lg.value_facts("engine.foo");
+        assert_eq!(a.class(), AnswerClass::Unavailable);
+        assert!(a.data().is_none());
+        assert!(!a.degradation_reasons().is_empty());
+        // Unknown symbol is likewise Unavailable.
+        let u = lg.value_facts("nonexistent.symbol");
+        assert_eq!(u.class(), AnswerClass::Unavailable);
+        assert!(u.data().is_none());
+    }
+
+    #[test]
+    fn value_fact_epoch_mismatch_stale_or_precision_pending() {
+        let mut lg = vf_lg();
+        lg.load_value_facts(
+            "engine",
+            vec![complexity_fact("engine.foo", 7, IdentityBasis::AstAdopted)],
+        );
+        lg.swap_partition("engine", engine()); // bumps epoch; facts not reloaded → epoch mismatch
+        let a = lg.value_facts("engine.foo");
+        assert_eq!(a.class(), AnswerClass::Stale);
+        assert_eq!(a.freshness(), FreshnessState::Stale);
+        assert!(a.data().is_some()); // last-good served, never empty
+    }
+
+    #[test]
+    fn partition_swap_without_value_reload_marks_value_facts_stale() {
+        let mut lg = vf_lg();
+        lg.load_value_facts(
+            "engine",
+            vec![complexity_fact("engine.foo", 7, IdentityBasis::AstAdopted)],
+        );
+        assert_eq!(lg.value_facts("engine.foo").class(), AnswerClass::Exact);
+        lg.swap_partition("engine", engine());
+        let after = lg.value_facts("engine.foo");
+        assert_ne!(after.class(), AnswerClass::Exact);
+        assert_eq!(after.class(), AnswerClass::Stale);
+        // Reloading for the new epoch restores Exact (D7).
+        lg.load_value_facts(
+            "engine",
+            vec![complexity_fact("engine.foo", 7, IdentityBasis::AstAdopted)],
+        );
+        assert_eq!(lg.value_facts("engine.foo").class(), AnswerClass::Exact);
+    }
+
+    #[test]
+    fn nonresident_partition_value_facts_partial_or_unavailable() {
+        let mut lg = vf_lg();
+        lg.load_value_facts(
+            "engine",
+            vec![complexity_fact("engine.foo", 7, IdentityBasis::AstAdopted)],
+        );
+        lg.unload_partition("engine"); // ir dropped; value facts retained
+        let a = lg.value_facts("engine.foo");
+        assert_eq!(a.class(), AnswerClass::Partial);
+        assert_eq!(a.missing_partitions(), ["engine"]);
+        assert!(a.data().is_some()); // last-good retained
+    }
+
+    #[test]
+    fn contributing_languages_preserved() {
+        let mut lg = vf_lg();
+        lg.load_value_facts(
+            "engine",
+            vec![complexity_fact("engine.foo", 7, IdentityBasis::AstAdopted)],
+        );
+        let a = lg.value_facts("engine.foo");
+        assert_eq!(
+            *a.contributing_languages(),
+            BTreeSet::from([LanguageSupport::TypeScriptPrimary])
+        );
+    }
+
+    #[test]
+    fn ast_owned_value_fact_exact_under_precision_pending() {
+        // A value fact on an AST-adopted identity is AST-LOCAL, so under PrecisionPending it stays
+        // Exact via the NotScipDependent proof — the invariant-6 path callers/callees avoid.
+        let mut lg = vf_lg();
+        lg.load_value_facts(
+            "engine",
+            vec![complexity_fact("engine.foo", 7, IdentityBasis::AstAdopted)],
+        );
+        lg.begin_refresh("engine"); // PrecisionPending, epoch unchanged → no mismatch
+        let a = lg.value_facts("engine.foo");
+        assert_eq!(a.class(), AnswerClass::Exact);
+        assert_eq!(a.freshness(), FreshnessState::PrecisionPending);
     }
 }
