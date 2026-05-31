@@ -1,0 +1,13 @@
+[package]
+name = "repo-graph-ir"
+version = "0.1.0"
+edition = "2021"
+description = "Canonical ingestion IR for repo-graph (INGEST-CORE-1). repo-graph-owned domain model fed by SCIP; zero scip/sqlite/tree-sitter dependencies."
+
+[dependencies]
+# Intentionally empty: pure domain. No scip/sqlite/tree-sitter (foundational rule),
+# and no serde this slice (no serialization hooks per INGEST-CORE-1 scope).
+# Canonical identity reuses the existing canonical key VALUE as a String.
+
+[dev-dependencies]
+# None — unit tests use standard assertions.

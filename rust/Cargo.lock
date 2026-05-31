@@ -1132,6 +1132,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-ir"
+version = "0.1.0"
+
+[[package]]
 name = "repo-graph-java-extractor"
 version = "0.1.0"
 dependencies = [

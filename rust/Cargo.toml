@@ -48,6 +48,7 @@ members = [
     "crates/python-extractor",
     "crates/quality-policy",
     "crates/quality-policy-runner",
+    "crates/repo-graph-ir",
     "crates/repo-index",
     "crates/rgr",
     "crates/rmapd",
