@@ -16,14 +16,12 @@
 //! Default semantics (ratified): xref-exact where sufficient, else partial-with-explicit-
 //! degradation; load-on-demand is opt-in only; forced eager load rejected. `callers` only.
 
-mod export_alias;
-
-use export_alias::{reconcile, Basis, EngineDefIndex};
 use repo_graph_ir::{IrNode, SourceRange};
 use repo_graph_scip_ingest::{decode_index, ingest_partition};
 use scip::types::Index;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
+use xpart_probe::export_alias::{reconcile, Basis, EngineDefIndex};
 
 // ── Always-resident global cross-reference index (partition-level summary) ──
 

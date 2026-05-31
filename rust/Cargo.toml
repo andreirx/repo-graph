@@ -64,6 +64,7 @@ members = [
     # Research / probe tooling (non-production; rust/tools).
     "tools/cjoin-probe",
     "tools/xpart-probe",
+    "tools/refresh-probe",
 ]
 
 # ── Workspace Package Metadata ─────────────────────────────────────
