@@ -1,8 +1,9 @@
 # TRUST-MODEL-REBASE-1: `repo-graph-trust-model` Vocabulary Support Crate (Stage C, slice 1)
 
 Slice ID: TRUST-MODEL-REBASE-1
-Status: **BUILT (2026-05-31) — crate `repo-graph-trust-model`, 16 invariant tests green; maturity
-PROTOTYPE.** (Amended during LIVEGRAPH-RUNTIME-1: `AnswerEnvelope.missing_partitions` residency axis.) D1 optional `serde` feature; **D2 completeness is QUERY-CONTEXTUAL (no global basis
+Status: **BUILT (2026-05-31) — crate `repo-graph-trust-model`, 20 invariant tests green; maturity
+PROTOTYPE.** (Amended ×2 during LIVEGRAPH-RUNTIME-1: `AnswerEnvelope.missing_partitions` residency
+axis; `Partial` may be justified by non-`Fresh` freshness.) D1 optional `serde` feature; **D2 completeness is QUERY-CONTEXTUAL (no global basis
 `is_complete`)**; D3 enforcement at the `AnswerEnvelope` / `QueryCompleteness` layer. `IdentityBasis`
 labels are **descriptive only**. Not PRODUCTION until LiveGraph/query surfaces consume it.
 Depends: STAGE-C-ENTRY-DECISION (`docs/architecture/stage-c-entry-decision.md`) and the Stage B
@@ -125,12 +126,22 @@ Constructors (a downstream runtime CANNOT mint an unjustified `Exact`):
 - `PrecisionPending` cannot be `Exact` unless the answer is explicitly NOT dependent on SCIP-backed
   state.
 
-**Amendment (2026-05-31, ratified during LIVEGRAPH-RUNTIME-1):** `missing_partitions` added so a
+**Amendment 1 (2026-05-31, ratified during LIVEGRAPH-RUNTIME-1):** `missing_partitions` added so a
 `Partial` caused by a non-resident partition is expressible WITHOUT an identity `DegradationReason`
-(residency ≠ identity degradation; do NOT add `DegradationReason::NonResidentPartition`). 16 tests
-green, incl. `partial_with_missing_partition_is_valid`,
-`partial_with_no_reason_and_no_missing_partition_rejected`, `exact_with_missing_partition_rejected`,
-`partial_with_reason_and_missing_partition_valid`. Follow-up: typed `PartitionId` instead of `String`.
+(residency ≠ identity degradation; do NOT add `DegradationReason::NonResidentPartition`).
+
+**Amendment 2 (2026-05-31, ratified during LIVEGRAPH-RUNTIME-1):** invariant 2 refined — a `Partial`
+may be justified by identity degradation, missing partitions, **OR a non-`Fresh` freshness** (a
+non-`Fresh` answer is already incomplete vs an `Exact` current-state claim). A `Partial` is invalid
+ONLY when `Fresh` AND no reasons AND no missing partitions. Do NOT add
+`DegradationReason::PrecisionPending` (freshness is already its own axis).
+
+**20 tests green**, incl. `partial_with_missing_partition_is_valid`,
+`partial_fresh_without_reason_or_missing_rejected`, `exact_with_missing_partition_rejected`,
+`partial_with_reason_and_missing_partition_valid`, `partial_precision_pending_without_reason_is_valid`,
+`partial_stale_without_reason_is_valid`, `partial_refresh_failed_without_reason_is_valid`,
+`exact_precision_pending_still_rejected_without_not_scip_dependent_proof`. Follow-up: typed
+`PartitionId` instead of `String`.
 
 ## Ratified decisions (2026-05-31)
 

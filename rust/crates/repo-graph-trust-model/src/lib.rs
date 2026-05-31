@@ -395,9 +395,10 @@ impl<T> AnswerEnvelope<T> {
         })
     }
 
-    /// `Partial`: resident facts plus AT LEAST ONE of — a non-empty degradation-reason set OR a
-    /// non-empty missing-partitions list (invariant 2; residency is a separate axis from identity
-    /// degradation).
+    /// `Partial` (invariant 2). May be justified by identity degradation (`reasons`), residency
+    /// (`missing_partitions`), OR a non-`Fresh` `freshness` (a non-`Fresh` answer is already
+    /// incomplete relative to an `Exact` current-state claim). It is invalid ONLY when it would be
+    /// indistinguishable from `Exact`: `Fresh` AND no reasons AND no missing partitions.
     pub fn partial(
         data: Option<T>,
         reasons: Vec<DegradationReason>,
@@ -405,7 +406,8 @@ impl<T> AnswerEnvelope<T> {
         freshness: FreshnessState,
         provenance: Vec<ProvenanceBasis>,
     ) -> Result<Self, TrustError> {
-        if reasons.is_empty() && missing_partitions.is_empty() {
+        if freshness == FreshnessState::Fresh && reasons.is_empty() && missing_partitions.is_empty()
+        {
             return Err(TrustError::PartialRequiresReasons);
         }
         Ok(Self {
@@ -682,11 +684,63 @@ mod tests {
     }
 
     #[test]
-    fn partial_with_no_reason_and_no_missing_partition_rejected() {
+    fn partial_fresh_without_reason_or_missing_rejected() {
         assert_eq!(
             AnswerEnvelope::partial(Some(1u32), vec![], vec![], FreshnessState::Fresh, vec![])
                 .unwrap_err(),
             TrustError::PartialRequiresReasons
+        );
+    }
+
+    #[test]
+    fn partial_precision_pending_without_reason_is_valid() {
+        let env = AnswerEnvelope::partial(
+            Some(1u32),
+            vec![],
+            vec![],
+            FreshnessState::PrecisionPending,
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(env.class(), AnswerClass::Partial);
+        assert_eq!(env.freshness(), FreshnessState::PrecisionPending);
+    }
+
+    #[test]
+    fn partial_stale_without_reason_is_valid() {
+        assert!(
+            AnswerEnvelope::partial(Some(1u32), vec![], vec![], FreshnessState::Stale, vec![])
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn partial_refresh_failed_without_reason_is_valid() {
+        assert!(AnswerEnvelope::partial(
+            Some(1u32),
+            vec![],
+            vec![],
+            FreshnessState::RefreshFailed,
+            vec![]
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn exact_precision_pending_still_rejected_without_not_scip_dependent_proof() {
+        // The only path to Exact under PrecisionPending is exact_precision_pending(_, proof); a
+        // NotScipDependent proof cannot be obtained for a SCIP-backed basis → no Exact+PP for SCIP.
+        assert!(NotScipDependent::prove(&[IdentityBasis::DeclarationMapExact]).is_none());
+        // And plain exact() rejects a non-Fresh freshness outright.
+        assert_eq!(
+            AnswerEnvelope::exact(
+                1u32,
+                QueryCompleteness::Complete,
+                FreshnessState::PrecisionPending,
+                vec![]
+            )
+            .unwrap_err(),
+            TrustError::ExactRequiresFresh
         );
     }
 
