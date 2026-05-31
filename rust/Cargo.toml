@@ -63,6 +63,7 @@ members = [
     "crates/tsserver-resolver",
     # Research / probe tooling (non-production; rust/tools).
     "tools/cjoin-probe",
+    "tools/xpart-probe",
 ]
 
 # ── Workspace Package Metadata ─────────────────────────────────────

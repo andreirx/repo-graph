@@ -1,0 +1,15 @@
+# ── xpart-probe (research / probe tooling — NOT production) ────────
+# XPART-PROVE-1 (Stage B, ST3) probe: cross-partition `callers` answer-class semantics over
+# two FRAKTAG TS partitions (api + engine) + an always-resident global xref. Proves no silent
+# incompleteness. Reproducible research evidence, not shipped. See docs/slices/xpart-prove-1.md.
+[package]
+name = "xpart-probe"
+version = "0.1.0"
+edition = "2021"
+description = "XPART-PROVE-1 research/probe tooling (cross-partition answer classes). Non-production."
+publish = false
+
+[dependencies]
+repo-graph-scip-ingest = { path = "../../crates/repo-graph-scip-ingest" }
+repo-graph-ir = { path = "../../crates/repo-graph-ir" }
+scip = "0.7.1"
