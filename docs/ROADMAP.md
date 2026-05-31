@@ -99,8 +99,14 @@ This track makes repo-graph installable developer infrastructure, not just a CLI
 
 ## Storage Architecture Track
 
-Three-tier storage model: Durable Authority Store, Derived Snapshot Cache, Live Working Graph.
-See `agent_docs/storage-architecture-v2.md` for full specification.
+Tier model (Durable Authority, Operational Metadata, Derived Cache, Live Working
+Graph) from STORAGE-ARCH-1 stands. **Revised by
+`docs/architecture/adr/adr-extraction-substrate-scip-first.md`
+(EXTRACTION-SUBSTRATE-ADR-1):** L0/L1 facts now come from SCIP (external
+compiler-grade producer), not homegrown extraction; raw graph leaves SQLite for a
+partitioned binary warm cache (format pending spike evidence). SQLite raw-graph
+storage is now transitional, not strategic.
+See `agent_docs/storage-architecture-v2.md` for the tier specification.
 
 | Slice | Scope | Status |
 |-------|-------|--------|
@@ -109,30 +115,40 @@ See `agent_docs/storage-architecture-v2.md` for full specification.
 | **CACHE-SEMANTICS-1** | Retention classes, cache epoch, stale-epoch exclusion | COMPLETE |
 | **RETENTION-POLICY-1** | Retention lifecycle (classify + deferred prune) | AMENDED |
 | **STATE-ROOT-SEPARATION-1** | Authority vs sandbox-local state boundaries | COMPLETE |
-| **PERF-OBS-1B** | Timing instrumentation (phase breakdown, global vs sandbox) | QUEUED |
-| **LIVE-GRAPH-1** | In-memory current snapshot graph (LiveGraph struct, loader, parity tests) | FUTURE |
-| **LIVE-GRAPH-2** | Migrate callers/callees/path to LiveGraph | FUTURE |
-| **LIVE-GRAPH-3** | Migrate cycles/dead to LiveGraph | FUTURE |
-| **CACHE-STORAGE-1** | Evaluate Tier B backing store alternatives | FUTURE |
+| **EXTRACTION-SUBSTRATE-ADR-1** | SCIP-first substrate decision (committed; operational decisions deferred) | ACCEPTED |
+| **SCIP-TS-PARITY-SPIKE-1** | TS SCIP parity + operational spike | PARTIAL (GO for TS) |
+| **SCIP-CLANG-SPIKE-1** | C/C++ via scip-clang | PARTIAL (GO; leveldb 39 TUs->90 docs) |
+| **SCIP-RUST-SPIKE-1** | Rust via rust-analyzer SCIP; self-host | PARTIAL (GO w/ caveats; per-crate + dedup) |
+| **SCIP-INGEST-IR-1** | Canonical IR, SCIP ingestion, stable-key mapping, call-graph derivation | PLANNED (post-spike) |
+| **PARTITIONED-WARM-CACHE-ARCH-1** | Binary warm cache; format decision | PLANNED (post-spike) |
+| **QUERY-MIGRATION-1** | callers/callees/path/cycles on LiveGraph partitions | PLANNED (post-spike) |
+| **COHERENCE-LAYER-1** | orient/check/trust mixed live+persisted contract | PLANNED (post-spike) |
+| **LIVE-GRAPH-1** | In-memory graph (struct + loader) | REVISED by ADR (loader = SCIP-derived; residency per-partition) |
+| **LIVE-GRAPH-2** | Migrate callers/callees/path to LiveGraph | REVISED by ADR (folded into QUERY-MIGRATION-1) |
+| **LIVE-GRAPH-3** | Migrate cycles/dead to LiveGraph | REVISED by ADR (folded into QUERY-MIGRATION-1) |
+| **PERF-OBS-1B** | Timing of SQLite raw-graph substrate | DEPRIORITIZED (outgoing substrate) |
+| **CACHE-STORAGE-1** | Evaluate Tier B backing store alternatives | SUBSUMED by PARTITIONED-WARM-CACHE-ARCH-1 |
 
 ### Track Priority
 
-This track is **active**. Lifecycle semantics before timing instrumentation.
+This track is **active**, now centered on the SCIP-first extraction substrate
+pivot, not on SQLite raw-graph lifecycle polish.
 
-Sequence: RETENTION-POLICY-1 → STATE-ROOT-SEPARATION-1 → PERF-OBS-1B → reevaluate LIVE-GRAPH-1.
+Sequence: EXTRACTION-SUBSTRATE-ADR-1 (ACCEPTED) → SCIP-TS-PARITY-SPIKE-1 (gating
+evidence) → SCIP-INGEST-IR-1 → PARTITIONED-WARM-CACHE-ARCH-1 → QUERY-MIGRATION-1
+→ COHERENCE-LAYER-1.
 
-**Rationale:**
-- CACHE-SEMANTICS-1 gave the semantic model (retention classes, stale-epoch exclusion)
-- RETENTION-POLICY-1 turns that model into lifecycle behavior (amended: classify-only on foreground, prune deferred)
-- STATE-ROOT-SEPARATION-1 fixes the authority/sandbox boundary
-- PERF-OBS-1B measures the system after lifecycle semantics are real
-- LIVE-GRAPH-1 decision deferred until post-prune behavior is observable
+**Honesty:** the viability spikes (TS/C/Rust) are complete and the gate is retired.
+Refresh model, partition granularity, and warm-cache format remain deferred to
+migration-plan Stages B–D — not gated on the spikes. See
+`docs/architecture/scip-migration-plan.md`.
 
 ### Current Priority
 
-**PERF-OBS-1B** — Timing instrumentation (phase breakdown, global vs sandbox).
-
-Next in sequence after STATE-ROOT-SEPARATION-1 (COMPLETE).
+**SCIP-INGEST-IR-1** — design the repo-graph-centered ingestion IR over SCIP. The
+multi-language substrate gate is retired (TS/C GO, Rust GO-with-caveats). Remaining
+spike measures are IR validation tracks, not blockers. See
+`docs/slices/scip-ingest-ir-1.md`.
 
 ### Recently Completed
 

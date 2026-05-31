@@ -2,7 +2,12 @@
 
 ## Status
 
-QUEUED — specification complete, not yet implemented.
+REVISED by `docs/architecture/adr/adr-extraction-substrate-scip-first.md`
+(EXTRACTION-SUBSTRATE-ADR-1). The in-memory `LiveGraph` struct and parity intent
+below stand. Two assumptions change: (1) the loader source is SCIP-derived facts
+mapped to canonical stable keys, not SQLite `nodes`/`edges`; (2) residency is
+per-partition, not one-per-registered-repo. No longer far-future — now on the
+active substrate track. Not yet implemented.
 
 ## Problem Statement
 

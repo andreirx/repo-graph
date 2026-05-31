@@ -226,6 +226,7 @@ See `docs/cli/rmap-contracts.md` for the full governance CLI contract.
 
 - Public dead-code claims are withdrawn until coverage-backed evidence is integrated. Do not treat old dead-code expectations as current product behavior.
 - SQLite is the current persistence mechanism, not the conceptual end-state center.
+- **Active re-centering (in progress):** the extraction substrate is pivoting from homegrown tree-sitter + SQLite raw-graph to a **SCIP-first** model — compiler-grade producers (`scip-typescript` / `scip-clang` / `rust-analyzer`) feed a repo-graph-owned in-memory IR, and the SQLite raw-graph tables are being retired. This is mid-flight (foundation crates landing); the shipped daemon / CLI / install shell described above is unaffected. See `docs/architecture/adr/adr-extraction-substrate-scip-first.md` and `docs/architecture/scip-migration-plan.md`.
 - The runtime architecture now relies on a shipped, long-lived daemon that coordinates many-reader/few-writer shared access for multiple AI agents, removing CLI bootstrap latency.
 
 ## Installation

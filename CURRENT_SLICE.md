@@ -2,25 +2,58 @@
 
 ## Current Priority
 
-**PERF-OBS-1B:** Timing instrumentation (phase breakdown, global vs sandbox).
+**EXTRACTION-SUBSTRATE-PIVOT** — SCIP-first L0/L1 substrate.
 
-Per ROADMAP.md Storage Architecture Track sequence. Blocked pending backlog remediation.
+Committed direction: `docs/architecture/adr/adr-extraction-substrate-scip-first.md`
+(EXTRACTION-SUBSTRATE-ADR-1).
+
+Substrate viability gate **RETIRED**: TypeScript GO, C/C++ GO, Rust GO-with-caveats.
+Evidence in `docs/audits/scip-{ts-parity,clang,rust}-spike-1/`.
+
+SCIP-INGEST-IR-1 is DESIGN READY (D1-D5 resolved). Current priority: **INGEST-CORE-1**
+(first code slice; spec `docs/slices/ingest-core-1.md`, implementation pending sign-off).
+IR design: the repo-graph-centered ingestion IR
+over SCIP. See `docs/slices/scip-ingest-ir-1.md`. First-class requirements: canonical
+stable-key mapping over SCIP IDs, call-graph derivation from occurrences + syntax
+context, AST<->SCIP correlation contract, Rust per-crate mode + duplicate-symbol
+dedup, C/C++ build-root/context provenance.
+
+The remaining spike measures (precise CALLS parity, multi-config C, all-crates Rust,
+M3, M4b) are validation tracks for the IR slice, not blockers. Warm-cache format and
+refresh model remain deferred until after the IR.
+
+Execution spine (risk-driven): `docs/architecture/scip-migration-plan.md`. Stages:
+A thin foundation (SCIP-INGEST-IR-1 design → INGEST-CORE-1) → B retire the four
+strategic-trigger risks on that foundation (CJOIN-PROVE-1 C/C++ join, XPART-PROVE-1
+cross-partition, REFRESH-PROBE-1 refresh-at-scale, RUST-INGEST-PROVE-1) → C runtime
+(LiveGraph/query/value-join/trust) → D persistence + raw decommission. Each slice
+carries a go/no-go and a documented retreat that narrows scope, never kills the plan.
+
+Refresh model, partition granularity, and warm-cache format remain deferred to
+migration-plan Stages B–D. They were never gated on the viability spikes (TS/C/Rust),
+which are complete and retired the gate. Do not treat them as settled.
 
 ---
 
-## Blocking Issue
+## Superseded / Deprioritized
 
-**BACKLOG-REMEDIATION:** repo-graph database has 20 prunable snapshots with ~1.17M rows.
+**BACKLOG-REMEDIATION-1** — WITHDRAWN. Pathological prune of rebuildable SQLite
+raw-graph backlog is no longer a product concern. Per STORAGE-ARCH-1 Tier B
+semantics and the SCIP-first ADR, those local DBs are disposable derived cache;
+the remediation is operator reset (delete affected DBs, reindex), not heroic
+prune. See `docs/slices/backlog-remediation-1.md`.
 
-`rmap maintenance prune` exists but cannot complete within 900s timeout on this pathological backlog.
+Its abandoned progress-emitter working-tree edits (`ProgressEmitter` /
+`prune_prunable_snapshots_with_progress` / `OperationAborted` across `dispatch.rs`,
+`retention.rs`, `error.rs`, `prune.rs`) were **reverted from the working tree
+(2026-05-30)**; they were uncommitted and left daemon-runtime/storage
+non-compiling. **The daemon (`rmapd`) and dev-install are existing shipped
+capability** (committed HEAD, RMAPD/MAC/LINUX) and were unaffected — only the dirty
+working tree was.
 
-**Status:** Operator intervention required (one-time).
-
-**Emergency workaround:** See `docs/slices/maintenance-cli-1.md` for manual SQL cleanup procedure.
-This is an emergency operator workaround, not the product path. After cleanup, `rmap maintenance prune`
-will function normally (typical prunes: 1-2 snapshots, <30s).
-
-**Next action:** Execute manual cleanup, then validate `rmap maintenance prune` on clean state.
+**PERF-OBS-1B** — DEPRIORITIZED. Timing the outgoing SQLite raw-graph substrate is
+low value now. Meaningful timing comes from the SCIP spike (M5) on the incoming
+substrate.
 
 ---
 
@@ -30,9 +63,6 @@ will function normally (typical prunes: 1-2 snapshots, <30s).
 
 See `docs/slices/refresh-hang-1.md`.
 
-Root cause: Destructive prune on synchronous hot path.
-Fix: Split retention into classify-only (foreground) + deferred prune (maintenance).
-
 Completed:
 - [x] Hot-path unblock (index completes in ~38-53s)
 - [x] Classification on foreground (~2ms)
@@ -40,7 +70,7 @@ Completed:
 - [x] RETENTION-POLICY-1 contract amended
 
 Incomplete:
-- [ ] Backlog cleanup executed (requires operator intervention)
+- [~] Backlog cleanup — MOOT under SCIP-first pivot (operator reset, not prune; see Superseded section)
 
 ---
 
@@ -53,41 +83,19 @@ See `docs/slices/maintenance-cli-1.md`.
 Implemented:
 - `rmap maintenance prune` command
 - Human and JSON output formats
-- Extended timeout (900s) for large prunes
+- Extended timeout (900s)
 - Tests for CLI parsing and daemon-unavailable cases
 
-**Operationally incomplete:** Cannot clear pathological repo-graph backlog within timeout.
-Normal operation (1-2 snapshots) will work. Backlog requires one-time operator cleanup.
-
-Technical debt:
-- Progress emission during prune (MAINTENANCE-PROGRESS-1) would allow unlimited prune duration
+**Operationally incomplete:** Cannot clear pathological backlog within timeout.
+Blocked by BACKLOG-REMEDIATION-1.
 
 **HOT-PATH-ANALYSIS-1:** Hot-path mapping artifact — COMPLETE (2026-05-28)
 
 See `docs/hot-path-analysis.md`.
 
-Mapped call graphs for: index, refresh, orient, check, trust, callers, path, cycles.
-
 **STATE-ROOT-SEPARATION-1:** Authority vs Sandbox-Local State Boundaries — COMPLETE (2026-05-28)
 
-See `docs/slices/state-root-separation-1.md`.
-
-A1/A2/B tier model validated. A1 blocking tested, A2/B sandbox writes allowed.
-
 **RETENTION-POLICY-1:** Retention lifecycle — AMENDED (2026-05-28)
-
-See `docs/slices/retention-policy-1.md`.
-
-Original: Auto-prune after index/refresh.
-Amended: Foreground classify-only + deferred prune via `rmap maintenance prune`.
-
----
-
-## Queued
-
-Candidates (see ROADMAP.md):
-- **PERF-OBS-1B:** Timing instrumentation (blocked by backlog cleanup)
-- **CURSOR-1:** Cursor MCP/rules integration
 
 ---
 
