@@ -2,7 +2,9 @@
 
 Slice ID: LIVEGRAPH-RUNTIME-1
 Status: **BUILT (2026-05-31) — crate `repo-graph-livegraph`, 8 tests green (the 7 D5 `callers`
-cases + atomic swap).** D1 accept+swap (no indexers); D2 explicit load/unload (eviction policy
+cases + atomic swap).** **Extended by QUERY-MIGRATION-1** (added `callees` + the D1
+contributing-language union; `repo-graph-livegraph` now 17 tests — see
+`docs/slices/query-migration-1.md`). D1 accept+swap (no indexers); D2 explicit load/unload (eviction policy
 deferred); D3 per-partition epoch + `XrefEpoch` + contributing-epochs on answers; D4
 `repo-graph-livegraph` (deps `repo-graph-ir` + `repo-graph-trust-model` only); D5 `callers` only via
 the trust vocabulary. The build triggered TWO ratified `repo-graph-trust-model` amendments (residency

@@ -94,8 +94,10 @@ the trust/freshness/identity vocabulary + the order `TRUST-MODEL-REBASE-1 → LI
 QUERY-MIGRATION-1 → VALUE-JOIN-1`. **TRUST-MODEL-REBASE-1 IMPLEMENTED** — crate
 `repo-graph-trust-model` (pure-domain; 7 types AnswerClass / FreshnessState / IdentityBasis /
 DegradationReason / LanguageSupport / ProvenanceBasis / QueryCompleteness; **query-contextual**
-`classify_answer` — no global basis completeness; `AnswerEnvelope` smart constructors; 20 invariant
-tests green (amended ×2 during LIVEGRAPH); maturity **PROTOTYPE**, not PRODUCTION until consumed). The existing `repo-graph-trust`
+`classify_answer` — no global basis completeness; `AnswerEnvelope` smart constructors; 22 invariant
+tests green (amended ×3: residency `missing_partitions`, `Partial` by non-`Fresh` freshness, **+D1
+`contributing_languages` set** in QUERY-MIGRATION-1); maturity **PROTOTYPE**, not PRODUCTION until
+consumed). The existing `repo-graph-trust`
 (v1 SQLite reporting) is untouched. Spec `docs/slices/trust-model-rebase-1.md`.
 
 **LIVEGRAPH-RUNTIME-1 IMPLEMENTED** — crate `repo-graph-livegraph` (in-memory; deps `repo-graph-ir`
@@ -103,12 +105,24 @@ tests green (amended ×2 during LIVEGRAPH); maturity **PROTOTYPE**, not PRODUCTI
 always-resident xref + trust-labelled `callers` (`AnswerEnvelope` via the vocabulary). D1 accept+swap
 (no indexers); D2 explicit load/unload; D3 per-partition epoch + contributing-epochs; D5 `callers`
 only. **`callers` is SCIP-dependent → refresh-pending is `Partial`+`PrecisionPending`, never
-`Exact`.** 8 tests green (the 7 D5 cases + atomic swap). The build surfaced + fixed TWO
+`Exact`.** 8 tests green at closure (the 7 D5 cases + atomic swap; now 17 after QUERY-MIGRATION-1
+added `callees` + the language union). The build surfaced + fixed TWO
 `repo-graph-trust-model` amendments (residency `missing_partitions`; `Partial` justified by
 non-`Fresh` freshness; 20 trust tests). Spec `docs/slices/livegraph-runtime-1.md`.
 
-**Next: QUERY-MIGRATION-1 (spec-first)** — route the real query surfaces (`callers`/`callees`/`path`)
-onto the runtime, emitting the trust vocabulary; no new vocabulary, no warm-cache. Then VALUE-JOIN-1.
+**QUERY-MIGRATION-1 IMPLEMENTED** — `repo-graph-livegraph` now serves `callers` + `callees` (D2;
+`path` deferred) through the trust vocabulary, headless (D3; no shipped CLI), extending the runtime
+crate (D4). **D1 language metadata:** `AnswerEnvelope` carries `contributing_languages:
+BTreeSet<LanguageSupport>` — a multi-partition answer reports the UNION of contributing language
+maturities; the prior last-wins collapse is gone. `callees` requires the target's defining partition
+resident (the always-resident xref retains only incoming adjacency — ratified asymmetry;
+summary-level `callees` deferred). `callers`/`callees` share one `finalize_envelope` (SCIP-dependent
+refresh → `Partial`, residency → `Partial`). 17 livegraph tests (4 language-union + 5 callees-core +
+8 prior); 22 trust tests. Scope rule: this migrated query SEMANTICS onto the headless Test API, NOT
+the shipped CLI. Spec `docs/slices/query-migration-1.md`.
+
+**Next: VALUE-JOIN-1** — value-level cross-partition identity on the runtime; it does not redefine the
+query surfaces or the trust vocabulary. Then Stage D (persistence + raw decommission).
 
 The remaining spike measures (precise CALLS parity, multi-config C, all-crates Rust,
 M3, M4b) are validation tracks for the IR slice, not blockers. Warm-cache format and

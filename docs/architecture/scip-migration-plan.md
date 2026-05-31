@@ -200,9 +200,10 @@ ST4/RK5) all executed. **Stage B probes complete. Strategic risks are bounded, n
 may begin with scoped support contracts.** **Stage C STARTED:** STAGE-C-ENTRY-DECISION recorded
 (`docs/architecture/stage-c-entry-decision.md`) and **TRUST-MODEL-REBASE-1 IMPLEMENTED** (crate
 `repo-graph-trust-model`, pure-domain vocabulary, PROTOTYPE) and **LIVEGRAPH-RUNTIME-1 IMPLEMENTED**
-(crate `repo-graph-livegraph`, in-memory runtime; residency + epoch + trust-labelled `callers`).
-**Next: QUERY-MIGRATION-1** (route the real query surfaces onto the runtime; no new vocabulary, no
-warm-cache).
+(crate `repo-graph-livegraph`, in-memory runtime; residency + epoch + trust-labelled `callers`) and
+**QUERY-MIGRATION-1 IMPLEMENTED** (`callers` + `callees` headless on the runtime via the trust
+vocabulary; D1 `AnswerEnvelope.contributing_languages` union — no language collapse; `path` deferred).
+**Next: VALUE-JOIN-1.**
 
 ---
 
@@ -212,12 +213,14 @@ warm-cache).
 
 **IMPLEMENTED (2026-05-31).** Pure-domain crate `repo-graph-trust-model` (NOT the shipped v1
 `repo-graph-trust`): the 7 trust/freshness/identity types, **query-contextual** `classify_answer`
-(no global basis completeness), and `AnswerEnvelope` smart constructors with 13 invariant tests.
+(no global basis completeness), and `AnswerEnvelope` smart constructors with 22 invariant tests.
 Maturity PROTOTYPE (not PRODUCTION until LiveGraph/query consume it). Spec
 `docs/slices/trust-model-rebase-1.md`; entry decision `docs/architecture/stage-c-entry-decision.md`.
 **LIVEGRAPH-RUNTIME-1 IMPLEMENTED** (crate `repo-graph-livegraph`; the build refined the trust
-vocabulary twice — residency `missing_partitions`, `Partial` by non-`Fresh` freshness). **Next:
-QUERY-MIGRATION-1.**
+vocabulary twice — residency `missing_partitions`, `Partial` by non-`Fresh` freshness).
+**QUERY-MIGRATION-1 IMPLEMENTED** (D1 contributing-language set on `AnswerEnvelope`; `callers` +
+`callees` headless via the vocabulary; `callees` requires target-partition residency — ratified xref
+asymmetry; 17 livegraph + 22 trust tests). **Next: VALUE-JOIN-1.**
 
 unresolved-rate is dead, and the runtime is heterogeneous (graded calls, C raw-anchored
 facts, Rust second-class possibility, residency-dependent completeness). Trust is being
@@ -243,6 +246,15 @@ freshness states the TRUST-MODEL-REBASE-1 contract consumes.** Exit: partitions 
 and evict under ceiling; queries carry honest residency/freshness labels.
 
 ### QUERY-MIGRATION-1 — re-point callers/callees/path/cycles to LiveGraph
+**IMPLEMENTED (2026-05-31) — headless query SEMANTICS, not shipped-CLI rewiring.** `callers` +
+`callees` run on `repo-graph-livegraph` via the trust vocabulary; `path`/`cycles` deferred. D1:
+`AnswerEnvelope` carries `contributing_languages: BTreeSet<LanguageSupport>` (multi-partition UNION,
+no collapse). `callees` requires the target's defining partition resident (xref keeps only incoming
+adjacency — ratified asymmetry; summary-level callees deferred). **DIVERGENCE from the original plan
+bullet (below):** this slice did NOT implement the strict-CALLS-default / graded-REFERENCES surfacing
+or the SQLite fallback-during-transition — those remain for the shipped-CLI integration slice. Spec
+`docs/slices/query-migration-1.md`. (Original plan intent below.)
+
 Strict default (D2): default traversal uses syntax-confirmed CALLS only (preserves the
 Layer-1 deterministic claim); graded REFERENCES carried underneath, surfaced on request
 with labels. Honors the TRUST-MODEL-REBASE-1 contract and the XPART answer-class

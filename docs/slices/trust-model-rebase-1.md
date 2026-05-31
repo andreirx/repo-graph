@@ -1,7 +1,7 @@
 # TRUST-MODEL-REBASE-1: `repo-graph-trust-model` Vocabulary Support Crate (Stage C, slice 1)
 
 Slice ID: TRUST-MODEL-REBASE-1
-Status: **BUILT (2026-05-31) — crate `repo-graph-trust-model`, 20 invariant tests green; maturity
+Status: **BUILT (2026-05-31) — crate `repo-graph-trust-model`, 22 invariant tests green; maturity
 PROTOTYPE.** (Amended ×2 during LIVEGRAPH-RUNTIME-1: `AnswerEnvelope.missing_partitions` residency
 axis; `Partial` may be justified by non-`Fresh` freshness.) D1 optional `serde` feature; **D2 completeness is QUERY-CONTEXTUAL (no global basis
 `is_complete`)**; D3 enforcement at the `AnswerEnvelope` / `QueryCompleteness` layer. `IdentityBasis`
@@ -136,12 +136,19 @@ non-`Fresh` answer is already incomplete vs an `Exact` current-state claim). A `
 ONLY when `Fresh` AND no reasons AND no missing partitions. Do NOT add
 `DegradationReason::PrecisionPending` (freshness is already its own axis).
 
-**20 tests green**, incl. `partial_with_missing_partition_is_valid`,
+**Amendment 3 (2026-05-31, ratified during QUERY-MIGRATION-1, D1):** `AnswerEnvelope` carries
+`contributing_languages: BTreeSet<LanguageSupport>` — `LanguageSupport` is part of the trust label,
+so a multi-partition answer reports the UNION of contributing language maturities, never one
+collapsed value. Non-empty for `Exact`/`Partial`/`Stale` (`TrustError::MissingContributingLanguages`);
+MAY be empty for `Unavailable` (unknown target). `LanguageSupport` gained `Ord` (for `BTreeSet`).
+
+**22 tests green**, incl. `partial_with_missing_partition_is_valid`,
 `partial_fresh_without_reason_or_missing_rejected`, `exact_with_missing_partition_rejected`,
 `partial_with_reason_and_missing_partition_valid`, `partial_precision_pending_without_reason_is_valid`,
 `partial_stale_without_reason_is_valid`, `partial_refresh_failed_without_reason_is_valid`,
-`exact_precision_pending_still_rejected_without_not_scip_dependent_proof`. Follow-up: typed
-`PartitionId` instead of `String`.
+`exact_precision_pending_still_rejected_without_not_scip_dependent_proof`,
+`exact_answer_requires_nonempty_languages`, `unavailable_unknown_target_may_have_empty_languages`.
+Follow-up: typed `PartitionId` instead of `String`.
 
 ## Ratified decisions (2026-05-31)
 
