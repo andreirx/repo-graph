@@ -199,8 +199,10 @@ local" is NOT reproduced — measured distinct-local 15–23%.)
 ST4/RK5) all executed. **Stage B probes complete. Strategic risks are bounded, not erased. Stage C
 may begin with scoped support contracts.** **Stage C STARTED:** STAGE-C-ENTRY-DECISION recorded
 (`docs/architecture/stage-c-entry-decision.md`) and **TRUST-MODEL-REBASE-1 IMPLEMENTED** (crate
-`repo-graph-trust-model`, pure-domain vocabulary, PROTOTYPE). **Next: LIVEGRAPH-RUNTIME-1
-(spec-first), in-memory only, consuming the trust vocabulary; no query migration / warm-cache yet.**
+`repo-graph-trust-model`, pure-domain vocabulary, PROTOTYPE) and **LIVEGRAPH-RUNTIME-1 IMPLEMENTED**
+(crate `repo-graph-livegraph`, in-memory runtime; residency + epoch + trust-labelled `callers`).
+**Next: QUERY-MIGRATION-1** (route the real query surfaces onto the runtime; no new vocabulary, no
+warm-cache).
 
 ---
 
@@ -213,7 +215,9 @@ may begin with scoped support contracts.** **Stage C STARTED:** STAGE-C-ENTRY-DE
 (no global basis completeness), and `AnswerEnvelope` smart constructors with 13 invariant tests.
 Maturity PROTOTYPE (not PRODUCTION until LiveGraph/query consume it). Spec
 `docs/slices/trust-model-rebase-1.md`; entry decision `docs/architecture/stage-c-entry-decision.md`.
-**LIVEGRAPH-RUNTIME-1 is next.**
+**LIVEGRAPH-RUNTIME-1 IMPLEMENTED** (crate `repo-graph-livegraph`; the build refined the trust
+vocabulary twice — residency `missing_partitions`, `Partial` by non-`Fresh` freshness). **Next:
+QUERY-MIGRATION-1.**
 
 unresolved-rate is dead, and the runtime is heterogeneous (graded calls, C raw-anchored
 facts, Rust second-class possibility, residency-dependent completeness). Trust is being
