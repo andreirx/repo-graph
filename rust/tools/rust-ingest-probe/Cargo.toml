@@ -1,0 +1,16 @@
+# ── rust-ingest-probe (research / probe tooling — NOT production) ──
+# RUST-INGEST-PROVE-1 (Stage B) probe: measures Rust SCIP ingestion (rust-analyzer scip per crate)
+# to DEFINE THE RUST SUPPORT BOUNDARY honestly — indexing unit, refresh class (evidence-gated),
+# duplicate/error behavior, identity basis (SCIP-synthesized fallback), cross-crate refs. It does
+# NOT fix rust-analyzer, build a Rust frontend, or wire runtime. See docs/slices/rust-ingest-prove-1.md.
+[package]
+name = "rust-ingest-probe"
+version = "0.1.0"
+edition = "2021"
+description = "RUST-INGEST-PROVE-1 research/probe tooling (Rust SCIP ingestion support boundary). Non-production."
+publish = false
+
+[dependencies]
+repo-graph-scip-ingest = { path = "../../crates/repo-graph-scip-ingest" }
+repo-graph-ir = { path = "../../crates/repo-graph-ir" }
+scip = "0.7.1"

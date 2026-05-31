@@ -65,6 +65,7 @@ members = [
     "tools/cjoin-probe",
     "tools/xpart-probe",
     "tools/refresh-probe",
+    "tools/rust-ingest-probe",
 ]
 
 # ── Workspace Package Metadata ─────────────────────────────────────

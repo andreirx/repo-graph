@@ -1466,6 +1466,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-ingest-probe"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-ir",
+ "repo-graph-scip-ingest",
+ "scip",
+]
+
+[[package]]
 name = "rustix"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
