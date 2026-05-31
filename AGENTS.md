@@ -87,6 +87,11 @@ Never present inferred output as observed.
 
 - Write bash commands ONE AT A TIME. Compound commands (`&&`, `;`, pipes) trigger permission checks that block execution. Single commands flow faster.
 
+## Generated OS Cruft
+
+- `.DS_Store` (and kin: `Thumbs.db`, editor swap/lock files) are gitignored. macOS regenerates `.DS_Store` on directory access; it cannot enter a commit (`git add <dir>` honors `.gitignore`).
+- Do not delete, flag, or mention them. Do not interfere with OS-generated noise — macOS does its thing, we do not fight it.
+
 ## Local Development Build
 
 After code changes that need testing against the installed daemon:
