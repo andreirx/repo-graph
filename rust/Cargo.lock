@@ -2341,6 +2341,7 @@ dependencies = [
  "repo-graph-ir",
  "repo-graph-scip-ingest",
  "scip",
+ "serde_json",
 ]
 
 [[package]]

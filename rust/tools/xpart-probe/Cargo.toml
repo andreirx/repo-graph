@@ -13,3 +13,6 @@ publish = false
 repo-graph-scip-ingest = { path = "../../crates/repo-graph-scip-ingest" }
 repo-graph-ir = { path = "../../crates/repo-graph-ir" }
 scip = "0.7.1"
+# XPART-PROVE-1B: read `.d.ts.map` JSON `sources[]` only. NO source-map VLQ decode (deferred
+# hardening for descriptor-divergent declarations) — so no `sourcemap` crate this slice.
+serde_json = "1"
