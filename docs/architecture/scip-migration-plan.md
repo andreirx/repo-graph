@@ -148,7 +148,7 @@ xref/alias recompute ~21ms → the slow path is **indexer-bound**, not repo-grap
 contract + claim constraints (burst window not yet set; fanout uses affected exported-symbol refs;
 xref/alias negligibility is TS-package-boundary-only) in `docs/slices/refresh-probe-1.md`; evidence
 `docs/audits/refresh-probe-1/findings.md`. **ST2/RK3 refresh-model risk retired (B).**
-**RUST-INGEST-PROVE-1 is next** (last open Stage B risk).
+**RUST-INGEST-PROVE-1 EXECUTED** (GO with caveats; Stage B complete).
 
 - **Measure workflow shape, not just wall-clock:** (1) cost per edit (single-file edit
   -> partition reindex); (2) cost per partition unit (package / crate / TU-group);
@@ -167,6 +167,18 @@ xref/alias negligibility is TS-package-boundary-only) in `docs/slices/refresh-pr
   before committing.
 
 ### RUST-INGEST-PROVE-1 — Rust per-crate robustness at breadth  (ST4 / RK5)
+
+**EXECUTED (2026-05-31) → VERDICT GO WITH CAVEATS.** Per-crate Rust SCIP ingestion is supportable as
+a **degraded (PARTIAL/BETA)** language: per-crate stable ~29–32s p95 (N=3, storage/indexer/rgr, 0
+panics), cross-crate resolution works; **whole-workspace export UNSUPPORTED** (rust-analyzer panics
+~32.5s) → per-crate only. Identity ~94–96% **SCIP-synthesized fallback** (no value-level AST join)
+→ **no TS/C parity**. **Refresh = B-very-slow-async** (background per-crate, never synchronous;
+last-good epoch + `Stale`/`PrecisionPending`; explicit refresh = operator fallback). Written support
+boundary + residuals (public-duplicate audit; def-not-in-document impact audit, both before
+PRODUCTION) in `docs/slices/rust-ingest-prove-1.md`; evidence
+`docs/audits/rust-ingest-prove-1/findings.md`. **ST4/RK5 bounded.** (Honesty: the spike's "72%
+local" is NOT reproduced — measured distinct-local 15–23%.)
+
 - **Step forward:** per-crate ingestion + duplicate-symbol dedup (D5 deterministic
   canonicalization: lib > bin > test; alternates preserved as provenance) across ALL
   repo-graph crates (only `storage` proven in the spike).
@@ -182,8 +194,11 @@ xref/alias negligibility is TS-package-boundary-only) in `docs/slices/refresh-pr
   caveats); TS/C are the primary supported substrates. Taken explicitly, not drifted
   into.
 
-**End of Stage B = all four fault lines characterized.** Proceed to build the runtime
-only with the strategic envelope known.
+**End of Stage B = all four fault lines characterized — REACHED (2026-05-31).** CJOIN (ST1), XPART
++ ST3 boundary decision (ST3), REFRESH (B two-speed; ST2/RK3), RUST-INGEST (GO-with-caveats;
+ST4/RK5) all executed. **Stage B probes complete. Strategic risks are bounded, not erased. Stage C
+may begin with scoped support contracts** — but author the **Stage C entry decision first
+(TRUST-MODEL-REBASE-1 lean); no LiveGraph / runtime / query code before that decision.**
 
 ---
 

@@ -69,12 +69,30 @@ failure, never `Exact`-empty. **Constraints:** burst proves coalescing mandatory
 window (runtime tunes later); fanout invalidation must use affected exported-symbol refs + degrade
 conservatively when uncertain; xref/alias negligibility is TS-package-boundary-only (do not
 generalize to all languages / huge workspaces). Spec `docs/slices/refresh-probe-1.md`; evidence
-`docs/audits/refresh-probe-1/findings.md`; probe `rust/tools/refresh-probe`. **Next Stage B:
-RUST-INGEST-PROVE-1** (Rust ingestion robustness / per-crate support boundary — last open Stage B
-risk; ST1/ST3/refresh now bounded).
+`docs/audits/refresh-probe-1/findings.md`; probe `rust/tools/refresh-probe`.
 
-Stage C runtime work (TRUST-MODEL-REBASE-1, LiveGraph/query/value-join) stays **gated behind
-Stage B probe evidence** and must not begin before it exists.
+**RUST-INGEST-PROVE-1 (Rust SCIP ingestion support boundary) — EXECUTED → GO WITH CAVEATS.** Rust
+enters Stage C only as **per-crate, async (B-very-slow-async), SCIP-backed, degraded (PARTIAL/BETA)**.
+Per-crate stable ~29–32s p95 (N=3, storage/indexer/rgr, 0 panics); **whole-workspace UNSUPPORTED**
+(rust-analyzer panics ~32.5s). Identity **~94–96% SCIP-synthesized fallback** (no value-level AST
+join) → **no TS/C parity**. Cross-crate resolution works (other-crate/stdlib/external). Refresh =
+**background per-crate, never synchronous**; last-good epoch served, `Stale`/`PrecisionPending` until
+done; explicit refresh = operator fallback. **Support boundary** (per-crate only; whole-ws
+unsupported; B-very-slow-async; fallback-identity dominant; deterministic dedup+aliases;
+def-not-in-document tolerated if bounded/surfaced + not corrupting public symbols/call-graph) +
+**residuals** (public-duplicate audit; def-not-in-document impact audit — both before PRODUCTION) in
+`docs/slices/rust-ingest-prove-1.md`; evidence `docs/audits/rust-ingest-prove-1/findings.md`; probe
+`rust/tools/rust-ingest-probe`. Honesty correction: the spike's "72% local" is NOT reproduced
+(measured distinct-local 15–23%).
+
+**STAGE B COMPLETE.** All four strategic-trigger probes done — CJOIN (ST1), XPART + boundary (ST3),
+REFRESH (B two-speed), RUST-INGEST (GO-with-caveats). **Strategic risks are bounded, not erased.
+Stage C may begin with scoped support contracts.** **Next: author the Stage C ENTRY DECISION first —
+do NOT start LiveGraph code.** Lean: **TRUST-MODEL-REBASE-1** before runtime/query work.
+
+Stage C runtime work (LiveGraph / query / value-join) stays **gated behind a written Stage C entry
+decision** (TRUST-MODEL-REBASE-1 lean) plus the per-language scoped support contracts; no runtime
+code before that decision.
 
 The remaining spike measures (precise CALLS parity, multi-config C, all-crates Rust,
 M3, M4b) are validation tracks for the IR slice, not blockers. Warm-cache format and
