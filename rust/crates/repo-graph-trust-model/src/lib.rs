@@ -340,6 +340,10 @@ pub struct AnswerEnvelope<T> {
     completeness: QueryCompleteness,
     data: Option<T>,
     degradation_reasons: Vec<DegradationReason>,
+    /// Partitions whose non-residency makes the answer incomplete (XPART `missing=[...]`). A
+    /// SEPARATE axis from `degradation_reasons`: residency incompleteness is NOT an identity
+    /// degradation. (`String` ids now; a typed `PartitionId` is a recorded follow-up.)
+    missing_partitions: Vec<String>,
     provenance: Vec<ProvenanceBasis>,
 }
 
@@ -364,6 +368,7 @@ impl<T> AnswerEnvelope<T> {
             completeness,
             data: Some(data),
             degradation_reasons: Vec::new(),
+            missing_partitions: Vec::new(),
             provenance,
         })
     }
@@ -385,18 +390,22 @@ impl<T> AnswerEnvelope<T> {
             completeness,
             data: Some(data),
             degradation_reasons: Vec::new(),
+            missing_partitions: Vec::new(),
             provenance,
         })
     }
 
-    /// `Partial`: resident facts plus a NON-EMPTY set of degradation reasons (invariant 2).
+    /// `Partial`: resident facts plus AT LEAST ONE of — a non-empty degradation-reason set OR a
+    /// non-empty missing-partitions list (invariant 2; residency is a separate axis from identity
+    /// degradation).
     pub fn partial(
         data: Option<T>,
         reasons: Vec<DegradationReason>,
+        missing_partitions: Vec<String>,
         freshness: FreshnessState,
         provenance: Vec<ProvenanceBasis>,
     ) -> Result<Self, TrustError> {
-        if reasons.is_empty() {
+        if reasons.is_empty() && missing_partitions.is_empty() {
             return Err(TrustError::PartialRequiresReasons);
         }
         Ok(Self {
@@ -405,6 +414,7 @@ impl<T> AnswerEnvelope<T> {
             completeness: QueryCompleteness::Degraded,
             data,
             degradation_reasons: reasons,
+            missing_partitions,
             provenance,
         })
     }
@@ -417,6 +427,7 @@ impl<T> AnswerEnvelope<T> {
             completeness: QueryCompleteness::Unknown,
             data: None,
             degradation_reasons: vec![reason],
+            missing_partitions: Vec::new(),
             provenance: Vec::new(),
         }
     }
@@ -426,6 +437,7 @@ impl<T> AnswerEnvelope<T> {
         last_good_data: T,
         freshness: FreshnessState,
         reasons: Vec<DegradationReason>,
+        missing_partitions: Vec<String>,
         provenance: Vec<ProvenanceBasis>,
     ) -> Result<Self, TrustError> {
         if freshness == FreshnessState::Fresh {
@@ -437,6 +449,7 @@ impl<T> AnswerEnvelope<T> {
             completeness: QueryCompleteness::Degraded,
             data: Some(last_good_data),
             degradation_reasons: reasons,
+            missing_partitions,
             provenance,
         })
     }
@@ -460,6 +473,11 @@ impl<T> AnswerEnvelope<T> {
     /// The degradation reasons (empty only for `Exact`).
     pub fn degradation_reasons(&self) -> &[DegradationReason] {
         &self.degradation_reasons
+    }
+    /// Partitions whose non-residency makes the answer incomplete (the residency axis; empty for
+    /// `Exact`).
+    pub fn missing_partitions(&self) -> &[String] {
+        &self.missing_partitions
     }
     /// The provenance bases.
     pub fn provenance(&self) -> &[ProvenanceBasis] {
@@ -664,18 +682,56 @@ mod tests {
     }
 
     #[test]
-    fn partial_requires_reasons() {
+    fn partial_with_no_reason_and_no_missing_partition_rejected() {
         assert_eq!(
-            AnswerEnvelope::partial(Some(1u32), vec![], FreshnessState::Fresh, vec![]).unwrap_err(),
+            AnswerEnvelope::partial(Some(1u32), vec![], vec![], FreshnessState::Fresh, vec![])
+                .unwrap_err(),
             TrustError::PartialRequiresReasons
         );
-        assert!(AnswerEnvelope::partial(
+    }
+
+    #[test]
+    fn partial_with_missing_partition_is_valid() {
+        let env = AnswerEnvelope::partial(
             Some(1u32),
-            vec![DegradationReason::UnreconciledExportSurface],
+            vec![],
+            vec!["engine".to_string()],
             FreshnessState::Fresh,
-            vec![]
+            vec![],
         )
-        .is_ok());
+        .unwrap();
+        assert_eq!(env.class(), AnswerClass::Partial);
+        assert!(env.degradation_reasons().is_empty());
+        assert_eq!(env.missing_partitions(), ["engine"]);
+    }
+
+    #[test]
+    fn partial_with_reason_and_missing_partition_valid() {
+        let env = AnswerEnvelope::partial(
+            Some(1u32),
+            vec![DegradationReason::ScipFallbackIdentity],
+            vec!["api".to_string()],
+            FreshnessState::Fresh,
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(env.class(), AnswerClass::Partial);
+        assert!(!env.degradation_reasons().is_empty());
+        assert!(!env.missing_partitions().is_empty());
+    }
+
+    #[test]
+    fn exact_with_missing_partition_rejected() {
+        // No constructor yields Exact with missing partitions: exact() always sets missing empty.
+        // Residency-incompleteness must be expressed via partial().
+        let env = AnswerEnvelope::exact(
+            1u32,
+            QueryCompleteness::Complete,
+            FreshnessState::Fresh,
+            vec![],
+        )
+        .unwrap();
+        assert!(env.missing_partitions().is_empty());
     }
 
     #[test]
@@ -693,9 +749,9 @@ mod tests {
     #[test]
     fn stale_must_not_be_fresh() {
         assert_eq!(
-            AnswerEnvelope::stale(1u32, FreshnessState::Fresh, vec![], vec![]).unwrap_err(),
+            AnswerEnvelope::stale(1u32, FreshnessState::Fresh, vec![], vec![], vec![]).unwrap_err(),
             TrustError::StaleMustNotBeFresh
         );
-        assert!(AnswerEnvelope::stale(1u32, FreshnessState::Stale, vec![], vec![]).is_ok());
+        assert!(AnswerEnvelope::stale(1u32, FreshnessState::Stale, vec![], vec![], vec![]).is_ok());
     }
 }

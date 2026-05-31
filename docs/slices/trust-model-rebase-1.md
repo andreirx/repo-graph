@@ -1,8 +1,8 @@
 # TRUST-MODEL-REBASE-1: `repo-graph-trust-model` Vocabulary Support Crate (Stage C, slice 1)
 
 Slice ID: TRUST-MODEL-REBASE-1
-Status: **BUILT (2026-05-31) — crate `repo-graph-trust-model`, 13 invariant tests green; maturity
-PROTOTYPE.** D1 optional `serde` feature; **D2 completeness is QUERY-CONTEXTUAL (no global basis
+Status: **BUILT (2026-05-31) — crate `repo-graph-trust-model`, 16 invariant tests green; maturity
+PROTOTYPE.** (Amended during LIVEGRAPH-RUNTIME-1: `AnswerEnvelope.missing_partitions` residency axis.) D1 optional `serde` feature; **D2 completeness is QUERY-CONTEXTUAL (no global basis
 `is_complete`)**; D3 enforcement at the `AnswerEnvelope` / `QueryCompleteness` layer. `IdentityBasis`
 labels are **descriptive only**. Not PRODUCTION until LiveGraph/query surfaces consume it.
 Depends: STAGE-C-ENTRY-DECISION (`docs/architecture/stage-c-entry-decision.md`) and the Stage B
@@ -107,19 +107,30 @@ AnswerEnvelope<T> {
   freshness: FreshnessState,
   completeness: QueryCompleteness,
   data: Option<T>,
-  degradation_reasons: Vec<DegradationReason>,
+  degradation_reasons: Vec<DegradationReason>,   // identity-degradation axis
+  missing_partitions: Vec<String>,               // residency axis (XPART missing=[...]); String now, typed PartitionId is a follow-up
   provenance: Vec<ProvenanceBasis>,
 }
 ```
 
 Constructors (a downstream runtime CANNOT mint an unjustified `Exact`):
 - `exact(data, completeness, freshness, provenance)` — requires `data` Some, `freshness == Fresh`,
-  `completeness == Complete`, `degradation_reasons` empty.
-- `partial(data, reasons, …)` — requires `reasons` non-empty.
-- `unavailable(reason, …)` — requires `data` None, `reason` non-empty.
-- `stale(last_good_data, …)` — `class == Stale`, `freshness != Fresh`.
+  `completeness == Complete`, `degradation_reasons` empty, **`missing_partitions` empty**.
+- `partial(data, reasons, missing_partitions, …)` — requires **at least one of**: `reasons`
+  non-empty OR `missing_partitions` non-empty (residency is a SEPARATE axis from identity degradation).
+- `unavailable(reason, …)` — requires `data` None, typed `reason` present; `missing_partitions`
+  empty (allowed only if the unavailability cause is residency/capability).
+- `stale(last_good_data, reasons, missing_partitions, …)` — `class == Stale`, `freshness != Fresh`;
+  may carry `missing_partitions` only when the stale answer is also partial-by-residency.
 - `PrecisionPending` cannot be `Exact` unless the answer is explicitly NOT dependent on SCIP-backed
   state.
+
+**Amendment (2026-05-31, ratified during LIVEGRAPH-RUNTIME-1):** `missing_partitions` added so a
+`Partial` caused by a non-resident partition is expressible WITHOUT an identity `DegradationReason`
+(residency ≠ identity degradation; do NOT add `DegradationReason::NonResidentPartition`). 16 tests
+green, incl. `partial_with_missing_partition_is_valid`,
+`partial_with_no_reason_and_no_missing_partition_rejected`, `exact_with_missing_partition_rejected`,
+`partial_with_reason_and_missing_partition_valid`. Follow-up: typed `PartitionId` instead of `String`.
 
 ## Ratified decisions (2026-05-31)
 
