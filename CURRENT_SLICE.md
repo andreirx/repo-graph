@@ -87,12 +87,22 @@ def-not-in-document tolerated if bounded/surfaced + not corrupting public symbol
 
 **STAGE B COMPLETE.** All four strategic-trigger probes done — CJOIN (ST1), XPART + boundary (ST3),
 REFRESH (B two-speed), RUST-INGEST (GO-with-caveats). **Strategic risks are bounded, not erased.
-Stage C may begin with scoped support contracts.** **Next: author the Stage C ENTRY DECISION first —
-do NOT start LiveGraph code.** Lean: **TRUST-MODEL-REBASE-1** before runtime/query work.
+Stage C may begin with scoped support contracts.**
 
-Stage C runtime work (LiveGraph / query / value-join) stays **gated behind a written Stage C entry
-decision** (TRUST-MODEL-REBASE-1 lean) plus the per-language scoped support contracts; no runtime
-code before that decision.
+**STAGE C STARTED.** **STAGE-C-ENTRY-DECISION** recorded (`docs/architecture/stage-c-entry-decision.md`):
+the trust/freshness/identity vocabulary + the order `TRUST-MODEL-REBASE-1 → LIVEGRAPH-RUNTIME-1 →
+QUERY-MIGRATION-1 → VALUE-JOIN-1`. **TRUST-MODEL-REBASE-1 IMPLEMENTED** — crate
+`repo-graph-trust-model` (pure-domain; 7 types AnswerClass / FreshnessState / IdentityBasis /
+DegradationReason / LanguageSupport / ProvenanceBasis / QueryCompleteness; **query-contextual**
+`classify_answer` — no global basis completeness; `AnswerEnvelope` smart constructors; 13 invariant
+tests green; maturity **PROTOTYPE**, not PRODUCTION until consumed). The existing `repo-graph-trust`
+(v1 SQLite reporting) is untouched. Spec `docs/slices/trust-model-rebase-1.md`.
+
+**Next: LIVEGRAPH-RUNTIME-1 (spec-first).** In-memory runtime ONLY; consumes `repo-graph-trust-model`;
+**partition residency + epoch state + answer-class degradation are first-class.** **NO query
+migration, NO warm-cache persistence, NO callers/callees CLI behavior** in this slice — query
+migration comes AFTER the runtime substrate exists. Stage C order then continues:
+QUERY-MIGRATION-1 → VALUE-JOIN-1.
 
 The remaining spike measures (precise CALLS parity, multi-config C, all-crates Rust,
 M3, M4b) are validation tracks for the IR slice, not blockers. Warm-cache format and

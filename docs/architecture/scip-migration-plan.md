@@ -197,14 +197,24 @@ local" is NOT reproduced — measured distinct-local 15–23%.)
 **End of Stage B = all four fault lines characterized — REACHED (2026-05-31).** CJOIN (ST1), XPART
 + ST3 boundary decision (ST3), REFRESH (B two-speed; ST2/RK3), RUST-INGEST (GO-with-caveats;
 ST4/RK5) all executed. **Stage B probes complete. Strategic risks are bounded, not erased. Stage C
-may begin with scoped support contracts** — but author the **Stage C entry decision first
-(TRUST-MODEL-REBASE-1 lean); no LiveGraph / runtime / query code before that decision.**
+may begin with scoped support contracts.** **Stage C STARTED:** STAGE-C-ENTRY-DECISION recorded
+(`docs/architecture/stage-c-entry-decision.md`) and **TRUST-MODEL-REBASE-1 IMPLEMENTED** (crate
+`repo-graph-trust-model`, pure-domain vocabulary, PROTOTYPE). **Next: LIVEGRAPH-RUNTIME-1
+(spec-first), in-memory only, consuming the trust vocabulary; no query migration / warm-cache yet.**
 
 ---
 
 ## Stage C — Build the runtime (strategic risks now characterized)
 
 ### TRUST-MODEL-REBASE-1 — rebuild trust from first principles  (FIRST in Stage C; gates query credibility)
+
+**IMPLEMENTED (2026-05-31).** Pure-domain crate `repo-graph-trust-model` (NOT the shipped v1
+`repo-graph-trust`): the 7 trust/freshness/identity types, **query-contextual** `classify_answer`
+(no global basis completeness), and `AnswerEnvelope` smart constructors with 13 invariant tests.
+Maturity PROTOTYPE (not PRODUCTION until LiveGraph/query consume it). Spec
+`docs/slices/trust-model-rebase-1.md`; entry decision `docs/architecture/stage-c-entry-decision.md`.
+**LIVEGRAPH-RUNTIME-1 is next.**
+
 unresolved-rate is dead, and the runtime is heterogeneous (graded calls, C raw-anchored
 facts, Rust second-class possibility, residency-dependent completeness). Trust is being
 rebuilt from scratch, so it is first-class and must precede any claim that a migrated
