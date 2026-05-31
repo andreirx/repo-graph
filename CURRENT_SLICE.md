@@ -121,8 +121,19 @@ refresh → `Partial`, residency → `Partial`). 17 livegraph tests (4 language-
 8 prior); 22 trust tests. Scope rule: this migrated query SEMANTICS onto the headless Test API, NOT
 the shipped CLI. Spec `docs/slices/query-migration-1.md`.
 
-**Next: VALUE-JOIN-1** — value-level cross-partition identity on the runtime; it does not redefine the
-query surfaces or the trust vocabulary. Then Stage D (persistence + raw decommission).
+**VALUE-JOIN-1 IMPLEMENTED** — `repo-graph-livegraph` value-layer facts: `load_value_facts` (D6
+separate channel — NOT on `PartitionIr`) + `value_facts(symbol)` trust-labelled (`SymbolOwnership`).
+D1 cyclomatic complexity only; D2 attach owned only when the basis is `SymbolOwnership`-complete, else
+RawAnchored; D3 raw-anchored preserved (value true, only ownership degraded — the key rule); D4 TS
+only (C/C++ → VALUE-JOIN-CXX-1, Rust deferred); D5 `value_facts` only; D7 epoch-bound facts
+(swap-without-reload → `Stale`). An AST-owned fact stays `Exact` under `PrecisionPending` via
+`NotScipDependent` (the invariant-6 path callers/callees avoid). 8 value-fact tests (25 livegraph
+total). `repo-graph-ir` + `repo-graph-trust-model` UNTOUCHED. The real complexity→`ValueFact` adapter
+belongs in the Stage-D wiring layer (dependency direction). Spec `docs/slices/value-join-1.md`.
+
+**STAGE C COMPLETE** (TRUST-MODEL-REBASE-1 → LIVEGRAPH-RUNTIME-1 → QUERY-MIGRATION-1 → VALUE-JOIN-1 all
+implemented). **Next: Stage D** — persistence (warm-cache) + raw-substrate decommission; and the
+ingest→runtime wiring layer (real `PartitionIr` + `ValueFact` feed; dep-direction adapter lives here).
 
 The remaining spike measures (precise CALLS parity, multi-config C, all-crates Rust,
 M3, M4b) are validation tracks for the IR slice, not blockers. Warm-cache format and

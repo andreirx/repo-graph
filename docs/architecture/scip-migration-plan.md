@@ -202,8 +202,10 @@ may begin with scoped support contracts.** **Stage C STARTED:** STAGE-C-ENTRY-DE
 `repo-graph-trust-model`, pure-domain vocabulary, PROTOTYPE) and **LIVEGRAPH-RUNTIME-1 IMPLEMENTED**
 (crate `repo-graph-livegraph`, in-memory runtime; residency + epoch + trust-labelled `callers`) and
 **QUERY-MIGRATION-1 IMPLEMENTED** (`callers` + `callees` headless on the runtime via the trust
-vocabulary; D1 `AnswerEnvelope.contributing_languages` union — no language collapse; `path` deferred).
-**Next: VALUE-JOIN-1.**
+vocabulary; D1 `AnswerEnvelope.contributing_languages` union — no language collapse; `path` deferred)
+and **VALUE-JOIN-1 IMPLEMENTED** (`load_value_facts` + `value_facts(symbol)` trust-labelled; D1
+complexity, D6 separate channel — NOT on `PartitionIr`, D7 epoch-bound facts; TS only). **STAGE C
+COMPLETE. Next: Stage D** (persistence + raw decommission; ingest→runtime wiring layer).
 
 ---
 
@@ -262,6 +264,17 @@ contract. SQLite fallback during transition. Exit: traversal LiveGraph-driven, p
 on confirmed edges, strict-default + explicit expanded mode, trust-labeled.
 
 ### VALUE-JOIN-1 — AST value-layer extractor as a separate pass (D4)
+**IMPLEMENTED (2026-05-31) — headless `value_facts(symbol)` on `repo-graph-livegraph`.** D1
+cyclomatic complexity only (already produced by INGEST-CORE-1); D2 attach owned only when the basis
+is `SymbolOwnership`-complete, else `RawAnchored`; D3 raw-anchored facts preserved (value true, only
+ownership degraded); D4 **TS only** (C/C++ → VALUE-JOIN-CXX-1; Rust deferred); D5 `value_facts` only;
+D6 **separate value-fact channel** (`load_value_facts`, NOT on `PartitionIr` — Common Closure); D7
+**epoch-bound facts** (swap-without-reload → `Stale`). 8 value-fact tests. The real
+complexity→`ValueFact` adapter lives in the Stage-D wiring layer (dep direction: livegraph cannot dep
+scip-ingest; scip-ingest must not dep the runtime). Spec `docs/slices/value-join-1.md`. (Original
+broader plan intent — boundaries/state/framework/contracts/quality — below; this slice proved the
+join + trust labelling on ONE fact kind.)
+
 Boundaries/state/framework/contracts/quality, joined to canonical identity where strong
 (D3 mixed-mode), raw-anchored+labeled otherwise. tree-sitter formally demoted from graph
 backbone to value producer. Feeds the join-strength trust axis. Exit: value facts attach
