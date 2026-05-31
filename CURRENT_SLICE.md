@@ -17,11 +17,15 @@ FILE nodes + bubble-up caller resolution (no dangling endpoints), narrow
 constructor/getter name reconciliation. A 10-group off-target acceptance harness is
 green, plus an ignored engine regression. Closure evidence: `docs/slices/ingest-core-1.md`.
 
-**Current priority: CJOIN-PROVE-1** — the first Stage B risk probe (C/C++ SCIP join on
-the ingestion foundation). Spec to be authored. The remaining Stage B probes
-(XPART-PROVE-1, REFRESH-PROBE-1, RUST-INGEST-PROVE-1) follow. Stage C runtime work
-(TRUST-MODEL-REBASE-1, LiveGraph/query/value-join) is **gated behind Stage B probe
-evidence** and must not begin before it exists.
+**Current priority: Stage B probes.** CJOIN-PROVE-1 (C/C++ SCIP join) is **EXECUTED** —
+verdict **GO for clean-C++ value attachment** (92.3% body-bearing callable join, 0 join
+bugs / 0 coordinate defects; residual = cpp-extractor coverage gaps). **ST1 is NOT fully
+retired** — leveldb is macro-light, so the macro/preprocessor sub-risk is deferred to
+**CJOIN-PROVE-2** (macro-heavy C/C++ target). Spec + verdict:
+`docs/slices/cjoin-prove-1.md`; evidence: `docs/audits/cjoin-prove-1/findings.md`; probe:
+`rust/tools/cjoin-probe`. Remaining Stage B: CJOIN-PROVE-2, XPART-PROVE-1, REFRESH-PROBE-1,
+RUST-INGEST-PROVE-1. Stage C runtime work (TRUST-MODEL-REBASE-1, LiveGraph/query/value-join)
+stays **gated behind Stage B probe evidence** and must not begin before it exists.
 
 The remaining spike measures (precise CALLS parity, multi-config C, all-crates Rust,
 M3, M4b) are validation tracks for the IR slice, not blockers. Warm-cache format and
