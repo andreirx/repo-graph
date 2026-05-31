@@ -50,6 +50,7 @@ members = [
     "crates/quality-policy-runner",
     "crates/repo-graph-ir",
     "crates/repo-graph-scip-ingest",
+    "crates/repo-graph-trust-model",
     "crates/repo-index",
     "crates/rgr",
     "crates/rmapd",

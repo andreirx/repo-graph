@@ -1418,6 +1418,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-trust-model"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "repo-graph-ts-extractor"
 version = "0.1.0"
 dependencies = [

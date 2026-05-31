@@ -1,0 +1,26 @@
+# ── repo-graph-trust-model ─────────────────────────────────────────
+# TRUST-MODEL-REBASE-1 (Stage C, slice 1): the Stage B trust / freshness / identity vocabulary as
+# PURE DOMAIN types. The most stable, abstract layer — everything trust-related depends inward on
+# it; it depends on nothing volatile. NO scip / sqlite / tree-sitter / daemon / ir / ingest deps
+# (structurally enforced). See docs/slices/trust-model-rebase-1.md and
+# docs/architecture/stage-c-entry-decision.md.
+#
+# NOTE: the existing `repo-graph-trust` crate (rust/crates/trust) is the SHIPPED v1 trust-reporting
+# service for the OUTGOING SQLite/raw-graph substrate. It is NOT pure-domain and is untouched by
+# this slice. Naming convergence (whether this crate eventually claims the `repo-graph-trust` name)
+# is a Stage D / raw-decommission decision, not a Stage C one.
+[package]
+name = "repo-graph-trust-model"
+version = "0.1.0"
+edition = "2021"
+description = "Pure-domain trust/freshness/identity vocabulary for repo-graph (TRUST-MODEL-REBASE-1)."
+license = "MIT"
+
+[features]
+# Trust vocabulary is domain; serialization is a delivery concern. Query/API layers enable this
+# later for stable DTOs. Off by default to keep the crate pure.
+default = []
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
