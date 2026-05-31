@@ -104,6 +104,12 @@ those two deps only. Confirm the name.
 **D5 — answer surface scope.** Implement `callers` only this slice (the XPART must), routed through
 `repo-graph-trust-model`; `path`/`callees` deferred to QUERY-MIGRATION-1. *Lean:* `callers` only.
 
+**`callers` is SCIP-dependent (cross-partition resolution).** A pending SCIP refresh is therefore
+**`Partial` + `PrecisionPending`, NOT `Exact`** — trust invariant 6: `Exact` + `PrecisionPending` is
+admissible only with a `NotScipDependent` proof, which a cross-partition `callers` lookup does not
+have. `callers` never calls `exact_precision_pending`. Test:
+`refresh_pending_returns_partial_precision_pending`.
+
 ## Out of scope (hard guardrails)
 
 ```text
@@ -123,6 +129,8 @@ No eviction-policy engine.
   `FreshnessState` / `DegradationReason` — no exact-empty for missing/stale state.
 - Epoch contract tested: serve last-good during refresh; atomic swap on success; keep last-good on
   failure (`RefreshFailed`).
+- Refresh-pending `callers` → **`Partial` + `PrecisionPending`** (SCIP-dependent; never `Exact`);
+  last-good data served; never exact-empty.
 - Residency cases tested: both-resident `Exact`; non-resident referenced partition → `Partial`
   (missing listed) or `Unavailable`; never silent-empty.
 - Headless tests only; no CLI wiring; no persistence.

@@ -14,8 +14,8 @@
 use repo_graph_ir::{IdentitySource, PartitionIr};
 use repo_graph_trust_model::{
     classify_answer, AnswerClass, AnswerEnvelope, CompletenessInput, DegradationReason,
-    FreshnessState, Granularity, IdentityBasis, LanguageSupport, NotScipDependent,
-    QueryCompleteness, QueryGranularity,
+    FreshnessState, Granularity, IdentityBasis, LanguageSupport, QueryCompleteness,
+    QueryGranularity,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -273,15 +273,20 @@ impl LiveGraph {
         // Classify by identity + freshness (residency applied after — a separate axis).
         let input = CompletenessInput {
             granularity: QueryGranularity::CallGraph,
-            bases: bases.clone(),
+            bases,
             freshness,
             degradation_reasons: reasons.clone(),
             language,
         };
         let (class_c, _completeness) = classify_answer(&input);
 
-        // A non-resident referencing partition forces at least Partial (residency).
-        let final_class = if !missing.is_empty() && class_c == AnswerClass::Exact {
+        // `callers` is a cross-partition, SCIP-dependent query: a pending SCIP refresh means the
+        // answer CANNOT be Exact (trust invariant 6 — there is no NotScipDependent proof for a
+        // cross-partition lookup), so PrecisionPending → Partial. A non-resident referencing
+        // partition also forces Partial (residency). Both are valid non-Fresh / residency Partials.
+        let scip_dependent_refresh = freshness == FreshnessState::PrecisionPending;
+        let residency_incomplete = !missing.is_empty() && class_c == AnswerClass::Exact;
+        let final_class = if scip_dependent_refresh || residency_incomplete {
             AnswerClass::Partial
         } else {
             class_c
@@ -299,28 +304,15 @@ impl LiveGraph {
                 AnswerEnvelope::partial(Some(data), reasons, missing, freshness, Vec::new())
                     .expect("partial invariant holds")
             }
-            AnswerClass::Exact => {
-                if freshness == FreshnessState::Fresh {
-                    AnswerEnvelope::exact(
-                        data,
-                        QueryCompleteness::Complete,
-                        FreshnessState::Fresh,
-                        Vec::new(),
-                    )
-                    .expect("exact invariant holds")
-                } else {
-                    // classify yields Exact under PrecisionPending only for non-SCIP bases.
-                    let proof =
-                        NotScipDependent::prove(&bases).expect("non-scip proof for exact-pp");
-                    AnswerEnvelope::exact_precision_pending(
-                        data,
-                        QueryCompleteness::Complete,
-                        proof,
-                        Vec::new(),
-                    )
-                    .expect("exact-pp invariant holds")
-                }
-            }
+            // final_class == Exact only when freshness == Fresh (PrecisionPending → Partial above).
+            // callers NEVER uses exact_precision_pending — it is SCIP-dependent.
+            AnswerClass::Exact => AnswerEnvelope::exact(
+                data,
+                QueryCompleteness::Complete,
+                FreshnessState::Fresh,
+                Vec::new(),
+            )
+            .expect("exact invariant holds"),
         }
     }
 }
@@ -448,13 +440,17 @@ mod tests {
     }
 
     #[test]
-    fn case5_refresh_pending_is_precision_pending() {
+    fn refresh_pending_returns_partial_precision_pending() {
         let mut lg = both();
         lg.begin_refresh("api");
         let a = lg.callers("engine.foo", Granularity::CallerDetail);
-        // AST-backed (not SCIP-dependent) → Exact answer, but freshness flags the pending refresh.
+        // callers is SCIP-dependent: a pending SCIP refresh is Partial + PrecisionPending, NOT Exact
+        // (Exact + PrecisionPending is admissible only with a NotScipDependent proof, which callers
+        // — a cross-partition lookup — does not have).
+        assert_ne!(a.class(), AnswerClass::Exact);
+        assert_eq!(a.class(), AnswerClass::Partial);
         assert_eq!(a.freshness(), FreshnessState::PrecisionPending);
-        assert_eq!(a.class(), AnswerClass::Exact);
+        assert!(a.data().is_some()); // last-good served
     }
 
     #[test]
