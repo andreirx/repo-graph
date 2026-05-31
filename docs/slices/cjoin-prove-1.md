@@ -1,9 +1,11 @@
 # CJOIN-PROVE-1: C/C++ AST↔SCIP Join Reliability (Stage B, ST1 / RK1)
 
 Slice ID: CJOIN-PROVE-1
-Status: EXECUTED 2026-05-31 — verdict GO for clean-C++ value envelope; ST1 macro sub-risk
-OPEN (deferred to CJOIN-PROVE-2). Evidence: `docs/audits/cjoin-prove-1/findings.md`; probe:
-`rust/tools/cjoin-probe`.
+Status: AMENDED 2026-05-31 (by CJOIN-PROVE-2). The original "92.3% strong attach" was
+**range-contained only**; the name-guarded strong attach is **77.1%** — the 15.1% gap was
+range-only misattachment risk (C++ annotation-macro span collapse), now raw-anchored.
+**Range-only joining is invalid for production C/C++.** Evidence:
+`docs/audits/cjoin-prove-1/findings.md` + `cjoin-prove-2/`.
 Depends: SCIP-CLANG-SPIKE-1 (GO — scip-clang real on leveldb), INGEST-CORE-1 (IMPLEMENTED
 — the `(file,range)` join mechanism + IR exist and are clean for TS)
 Track: Extraction Substrate Pivot — Stage B (`docs/architecture/scip-migration-plan.md`)
@@ -125,16 +127,23 @@ stable; raw counts vary ±2 methods / ±17 occ).
 Retired by a *measured body-bearing-callable join rate + a written mixed-mode boundary* — not
 by an inflated all-declarations rate, and not by "it joined once."
 
-## Verdict (EXECUTED 2026-05-31)
+## Verdict (EXECUTED 2026-05-31; AMENDED by CJOIN-PROVE-2)
 
-**GO for leveldb-like clean-C++ AST↔SCIP value attachment.** Body-bearing callable join rate
-is stable at **92.3%**; residual misses are cpp-extractor coverage gaps (anonymous-namespace
-`.cc` class methods, template member functions, `operator()`); **no join bugs or coordinate
-defects** (0/0). **ST1 is NOT fully retired** — macro/preprocessor-heavy behavior was not
-exercised (leveldb is macro-light; `macro_mismatch=0`). **Open CJOIN-PROVE-2** for a
-macro-heavy C/C++ target before declaring broad C/C++ value-layer readiness. Also recorded:
-scip-clang is not byte-deterministic (±2 methods / ±17 occ across captures; join envelope
-stable). Full evidence: `docs/audits/cjoin-prove-1/findings.md`.
+> **AMENDED:** the "92.3%" below is **range-contained** join, not confirmed attach.
+> CJOIN-PROVE-2's name-correspondence check shows **77.1% name-guarded strong attach**; the
+> 15.1% gap is range-only misattachment (C++ annotation-macro span collapse) that MUST be
+> raw-source-anchored, not bound. **Range-only joining is invalid for production C/C++.**
+> See `cjoin-prove-2.md`.
+
+**SUPERSEDED by CJOIN-PROVE-2.** The original conclusion ("GO for leveldb-like clean-C++ value
+attachment") does **not** hold: it measured **92.3% range-contained** join, not confirmed
+attachment. CJOIN-PROVE-2's name guard shows **77.1% name-confirmed** and **15.1% rejected
+range-only attachments** (C++ annotation-macro span collapse) — so leveldb-like C++ is **not** a
+clean-value-envelope proof under range-only joining. The "no join bugs (0/0)" was a
+range-containment statement, not an attachment-correctness one. CJOIN-PROVE-1 remains useful as
+the **fixture + probe setup** (and the cpp-extractor coverage-gap evidence stands), but its
+strong-attach verdict is superseded. Also recorded: scip-clang is not byte-deterministic
+(±2 methods / ±17 occ across captures). Full evidence: `docs/audits/cjoin-prove-{1,2}/`.
 
 ## Definition of Done
 

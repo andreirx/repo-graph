@@ -94,6 +94,14 @@ Ratify D1–D5. No code. Exit: design signed off.
 - **Retreat (ST1):** if join is unreliable AND raw-anchored fallback is insufficient
   → C/C++ ships **graph-only** (references/calls), value-layer deferred. "Living
   working code" narrows to TS/Rust + C-graph. Documented narrowing.
+- **Status (2026-05-31): ST1 range-only / terminal-name-mismatch risk RETIRED.** CJOIN-PROVE-1
+  provided the leveldb fixture/probe setup; CJOIN-PROVE-2 amended its verdict and (macro-heavy
+  nginx 95.9% name-confirmed; the range+terminal-name guard) retired the terminal-name-mismatch
+  class. **Same-name overload / signature / template-instantiation ambiguity remains deferred
+  hardening** (terminal-name correspondence is necessary, not sufficient).
+  **Production rule:** a C/C++ value fact attaches to SCIP identity only when **range
+  containment AND name correspondence agree**; otherwise raw-source-anchored. Range-only
+  joining is **forbidden** (silently misattaches 15.1% on C++ annotation-macro code).
 
 ### XPART-PROVE-1 — cross-partition traversal semantics  (ST3)
 - **Step forward:** minimal 2-partition in-memory load (TS api + engine) + an

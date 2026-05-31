@@ -116,8 +116,15 @@ dependency order (D3 -> D4 -> D1 -> D2 -> D5).
 
 - **D3 = mixed-mode (C/C++).** The SCIP semantic graph (references/calls) is
   authoritative for C/C++. Value-layer facts attach to canonical symbol identity only
-  where a strong (file, range) join exists; otherwise they remain raw-source-anchored
-  and are explicitly labeled "not symbol-correlated." No heuristic force-join.
+  where a strong join exists; otherwise they remain raw-source-anchored and are explicitly
+  labeled "not symbol-correlated." No heuristic force-join.
+  **A "strong join" REQUIRES range containment AND name correspondence (CJOIN-PROVE-2,
+  2026-05-31). Range-only joining is forbidden: it silently misattaches value facts to the
+  wrong callable (15.1% on C++ annotation-macro code, where macros collapse the AST function
+  span). A name mismatch forces raw-source anchoring, never attachment. Terminal-name
+  correspondence is NECESSARY, not sufficient: same-name overload / signature /
+  template-instantiation ambiguity is NOT retired by it — stronger hardening
+  (signature / arity / scope correspondence) is deferred.**
 - **D4 = separate AST value-layer pass** with an explicit join contract (not a fused
   ingestion pass). Revisit only if C/C++ correlation proves impossible without
   integration.
