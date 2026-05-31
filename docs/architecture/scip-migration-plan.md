@@ -111,9 +111,11 @@ Ratify D1–D5. No code. Exit: design signed off.
 identity reconciliation (FRAKTAG named surface 78/78 reconciled, 0 misattachment, 0 silent miss).
 **ST3 remains OPEN** for two residuals: anonymous structural members (`typeLiteralNN` is
 compilation-unit-relative, unstable across indexes even same-file) and packages without
-declaration maps / with complex `exports` (Basis 2). Whether those residuals block Stage-B ST3
-closure for LiveGraph or become documented degraded answer-classes is a follow-on
-boundary-decision slice, not this section.
+declaration maps / with complex `exports` (Basis 2). **Resolved by XPART-ST3-BOUNDARY-DECISION
+(2026-05-31)** (`docs/slices/xpart-st3-boundary-decision.md`): both residuals are documented
+**degraded answer-classes** (`null`=unknown, never empty), **not blockers**; ST3 is **closed for
+the LiveGraph stage** with those classes, each carrying a named upgrade slice (positional/VLQ;
+Basis 2). **REFRESH-PROBE-1 is next.**
 
 - **Step forward:** minimal 2-partition in-memory load (TS api + engine) + an
   always-resident global cross-reference index (symbol → partition); `callers` /

@@ -25,7 +25,7 @@ misattaches 15.1% on C++ annotation-macro code). CJOIN-PROVE-1's 92.3% amended t
 name-guarded strong attach. Specs `docs/slices/cjoin-prove-{1,2}.md`; evidence
 `docs/audits/cjoin-prove-{1,2}/`; probe `rust/tools/cjoin-probe`.
 
-**XPART-PROVE-1 (cross-partition traversal / ST3) — SPLIT; 1A+1B EXECUTED. ST3 NARROWED, NOT retired.**
+**XPART-PROVE-1 (cross-partition traversal / ST3) — SPLIT; 1A+1B EXECUTED. ST3 NARROWED → CLOSED for the LiveGraph stage with degraded classes (not globally retired).**
 EXECUTED on two FRAKTAG partitions (api + engine) via `rust/tools/xpart-probe`:
 - **XPART-PROVE-1A (answer-class semantics) — PASS.** Under a source-aligned api capture all
   six `callers` cases returned a typed `AnswerClass` (Exact / Partial / Unavailable / Stale)
@@ -47,13 +47,16 @@ EXECUTED on two FRAKTAG partitions (api + engine) via `rust/tools/xpart-probe`:
   complete-basis symbols; an `Unresolved`/`Ambiguous`-dependent answer is `Partial`/`Unavailable`,
   never `Exact`.
 
-**ST3 NARROWED, not retired:** declaration-map-backed **named** package-boundary traversal is
-proven; ST3 stays open for anonymous structural members and no-declaration-map / complex-`exports`
-packages. Specs `docs/slices/xpart-prove-1.md` + `xpart-prove-1b.md`; evidence
-`docs/audits/xpart-prove-1/` (incl. `findings-1b.md`); probe `rust/tools/xpart-probe`
-(`export_alias.rs`). **Next: XPART-ST3-BOUNDARY-DECISION** — decide whether the two residuals
-block Stage-B ST3 closure for LiveGraph or become documented degraded answer-classes; **REFRESH-
-PROBE-1 and RUST-INGEST-PROVE-1 follow after**, not before (migration plan treats ST3 as one unit).
+**ST3 NARROWED → CLOSED for the LiveGraph stage (not globally retired).** Declaration-map-backed
+**named** package-boundary traversal is proven. **XPART-ST3-BOUNDARY-DECISION (2026-05-31)**
+classifies the two residuals as **degraded answer-classes, not blockers**: anonymous structural
+members (`typeLiteralNN`) → `Unavailable`/`AnonymousStructuralMember`; no-declaration-map /
+complex-`exports` packages → `Partial`/`Unavailable`/`UnreconciledExportSurface`. **Safety rule:
+`null`=unknown, never empty** (an unaddressable target is unknown, not known-zero). Each residual
+carries a named upgrade slice (positional/VLQ; Basis 2). Specs `docs/slices/xpart-prove-1.md` +
+`xpart-prove-1b.md` + `xpart-st3-boundary-decision.md`; evidence `docs/audits/xpart-prove-1/`
+(incl. `findings-1b.md`); probe `rust/tools/xpart-probe` (`export_alias.rs`). **Next Stage B:
+REFRESH-PROBE-1**, then RUST-INGEST-PROVE-1.
 
 Stage C runtime work (TRUST-MODEL-REBASE-1, LiveGraph/query/value-join) stays **gated behind
 Stage B probe evidence** and must not begin before it exists.
