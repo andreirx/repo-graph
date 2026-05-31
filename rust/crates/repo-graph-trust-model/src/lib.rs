@@ -26,7 +26,8 @@
 pub enum AnswerClass {
     /// Complete and trustworthy: every required basis is complete for the query and data is fresh.
     Exact,
-    /// Resident facts plus an explicit, non-empty set of missing / degraded reasons.
+    /// Resident facts, incomplete vs an `Exact` current-state claim — justified by identity
+    /// degradation reasons, missing partitions, OR a non-`Fresh` freshness.
     Partial,
     /// Cannot be answered (no entry / not indexed). Distinguishable from an `Exact` empty result.
     Unavailable,
@@ -472,7 +473,9 @@ impl<T> AnswerEnvelope<T> {
     pub fn data(&self) -> Option<&T> {
         self.data.as_ref()
     }
-    /// The degradation reasons (empty only for `Exact`).
+    /// The identity-degradation reasons. May be EMPTY even for a non-`Exact` answer: a `Partial` /
+    /// `Stale` can be justified by `missing_partitions` (residency) or a non-`Fresh` freshness
+    /// instead of an identity degradation.
     pub fn degradation_reasons(&self) -> &[DegradationReason] {
         &self.degradation_reasons
     }
