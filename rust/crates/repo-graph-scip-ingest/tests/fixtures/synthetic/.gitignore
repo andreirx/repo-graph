@@ -1,0 +1,3 @@
+# Installed by `npm install` only when regenerating index.scip. NOT committed.
+# The committed fixture is: src/, package.json, package-lock.json, tsconfig.json, index.scip.
+node_modules/
