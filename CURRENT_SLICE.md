@@ -10,13 +10,18 @@ Committed direction: `docs/architecture/adr/adr-extraction-substrate-scip-first.
 Substrate viability gate **RETIRED**: TypeScript GO, C/C++ GO, Rust GO-with-caveats.
 Evidence in `docs/audits/scip-{ts-parity,clang,rust}-spike-1/`.
 
-SCIP-INGEST-IR-1 is DESIGN READY (D1-D5 resolved). Current priority: **INGEST-CORE-1**
-(first code slice; spec `docs/slices/ingest-core-1.md`, implementation pending sign-off).
-IR design: the repo-graph-centered ingestion IR
-over SCIP. See `docs/slices/scip-ingest-ir-1.md`. First-class requirements: canonical
-stable-key mapping over SCIP IDs, call-graph derivation from occurrences + syntax
-context, AST<->SCIP correlation contract, Rust per-crate mode + duplicate-symbol
-dedup, C/C++ build-root/context provenance.
+SCIP-INGEST-IR-1 is DESIGN READY (D1-D5 resolved). **INGEST-CORE-1 is IMPLEMENTED**
+(2026-05-31): `repo-graph-ir` + `repo-graph-scip-ingest` — value-level canonical
+identity, strict edge derivation (Calls/References/FileScopeReference), materialized
+FILE nodes + bubble-up caller resolution (no dangling endpoints), narrow
+constructor/getter name reconciliation. A 10-group off-target acceptance harness is
+green, plus an ignored engine regression. Closure evidence: `docs/slices/ingest-core-1.md`.
+
+**Current priority: CJOIN-PROVE-1** — the first Stage B risk probe (C/C++ SCIP join on
+the ingestion foundation). Spec to be authored. The remaining Stage B probes
+(XPART-PROVE-1, REFRESH-PROBE-1, RUST-INGEST-PROVE-1) follow. Stage C runtime work
+(TRUST-MODEL-REBASE-1, LiveGraph/query/value-join) is **gated behind Stage B probe
+evidence** and must not begin before it exists.
 
 The remaining spike measures (precise CALLS parity, multi-config C, all-crates Rust,
 M3, M4b) are validation tracks for the IR slice, not blockers. Warm-cache format and
