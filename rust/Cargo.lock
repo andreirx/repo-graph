@@ -1189,6 +1189,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-livegraph"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-ir",
+ "repo-graph-trust-model",
+]
+
+[[package]]
 name = "repo-graph-module-queries"
 version = "0.1.0"
 dependencies = [

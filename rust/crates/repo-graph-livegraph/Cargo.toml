@@ -1,0 +1,17 @@
+# ── repo-graph-livegraph ───────────────────────────────────────────
+# LIVEGRAPH-RUNTIME-1 (Stage C, slice 2): the in-memory runtime substrate — partition residency +
+# per-partition epoch + always-resident xref + trust-labelled answers via repo-graph-trust-model.
+# It is FED already-ingested PartitionIr (D1 accept+swap); it does NOT run indexers, persist, or
+# touch the CLI. Deps limited to repo-graph-ir + repo-graph-trust-model (D4). See
+# docs/slices/livegraph-runtime-1.md.
+[package]
+name = "repo-graph-livegraph"
+version = "0.1.0"
+edition = "2021"
+description = "In-memory LiveGraph runtime substrate (LIVEGRAPH-RUNTIME-1). Non-production."
+license = "MIT"
+publish = false
+
+[dependencies]
+repo-graph-ir = { path = "../repo-graph-ir" }
+repo-graph-trust-model = { path = "../repo-graph-trust-model" }

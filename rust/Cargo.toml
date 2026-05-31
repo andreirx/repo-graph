@@ -51,6 +51,7 @@ members = [
     "crates/repo-graph-ir",
     "crates/repo-graph-scip-ingest",
     "crates/repo-graph-trust-model",
+    "crates/repo-graph-livegraph",
     "crates/repo-index",
     "crates/rgr",
     "crates/rmapd",
