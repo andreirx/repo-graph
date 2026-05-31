@@ -25,25 +25,35 @@ misattaches 15.1% on C++ annotation-macro code). CJOIN-PROVE-1's 92.3% amended t
 name-guarded strong attach. Specs `docs/slices/cjoin-prove-{1,2}.md`; evidence
 `docs/audits/cjoin-prove-{1,2}/`; probe `rust/tools/cjoin-probe`.
 
-**XPART-PROVE-1 (cross-partition traversal / ST3) — SPLIT, PARTIAL. ST3 NOT retired.**
+**XPART-PROVE-1 (cross-partition traversal / ST3) — SPLIT; 1A+1B EXECUTED. ST3 NARROWED, NOT retired.**
 EXECUTED on two FRAKTAG partitions (api + engine) via `rust/tools/xpart-probe`:
 - **XPART-PROVE-1A (answer-class semantics) — PASS.** Under a source-aligned api capture all
   six `callers` cases returned a typed `AnswerClass` (Exact / Partial / Unavailable / Stale)
   with explicit reasons; **no silent-empty path**. Ratified default holds: xref-exact where the
   always-resident global xref is sufficient (per-partition counts), else
   partial-with-explicit-degradation; load-on-demand opt-in only.
-- **XPART-PROVE-1B (dist↔src export-symbol reconciliation) — REQUIRED, OPEN.** First-class
-  finding: a consumer resolves a dependency through its **published interface**
-  (`dist/index.d.ts/...`) while the provider partition is indexed from **source**
-  (`src/index.ts/...`). Same entity, different SCIP symbols → **raw SCIP equality misses 95/95
-  real api→engine references.** A cross-partition export-surface reconciliation layer (alias
-  published-decl symbol ↔ source-def symbol via the package export map) is needed before
-  cross-partition traversal is correct on real consumer captures.
+- **XPART-PROVE-1B (dist↔src export-surface reconciliation) — EXECUTED, PASS (conditional).**
+  Consumer resolves the dependency through its **published interface** (`dist/index.d.ts/...`)
+  while the provider is indexed from **source** (`src/index.ts/...`): raw SCIP equality misses
+  **95/95** api→engine refs. The `export_alias` layer (`DeclarationMapExact`: `.d.ts.map`
+  `sources[]` + descriptor-exact reconstruction, asserted unique in `engine.scip`) reconciles the
+  **named public API surface 78/78** (0 ambiguous, 0 misattachment, 0 silent miss); the six
+  answer-class cases then PASS over the **dist** capture (target `BaseNode#id {api:2, engine:81}`).
+  **Residuals keep ST3 open:** (1) anonymous structural members — 17 `typeLiteralNN` members are
+  compilation-unit-relative, unstable across indexes **even in source-path** (`api-src` is
+  95/78/17) → stay `Unresolved`, need positional/VLQ or explicit non-addressable degrade; (2)
+  packages without declaration maps / complex `exports` (Basis 2 deferred). **No silent rewrite** —
+  every alias carries basis + provenance (D3). **Answer-class precision rule:** `Exact` only for
+  complete-basis symbols; an `Unresolved`/`Ambiguous`-dependent answer is `Partial`/`Unavailable`,
+  never `Exact`.
 
-**ST3 stays open: 1A proves the contract, 1B proves the package-boundary identity problem it
-must still solve.** Spec `docs/slices/xpart-prove-1.md` (split 1A/1B); evidence
-`docs/audits/xpart-prove-1/`; probe `rust/tools/xpart-probe`. **Next Stage B: XPART-PROVE-1B**,
-then REFRESH-PROBE-1, RUST-INGEST-PROVE-1.
+**ST3 NARROWED, not retired:** declaration-map-backed **named** package-boundary traversal is
+proven; ST3 stays open for anonymous structural members and no-declaration-map / complex-`exports`
+packages. Specs `docs/slices/xpart-prove-1.md` + `xpart-prove-1b.md`; evidence
+`docs/audits/xpart-prove-1/` (incl. `findings-1b.md`); probe `rust/tools/xpart-probe`
+(`export_alias.rs`). **Next: XPART-ST3-BOUNDARY-DECISION** — decide whether the two residuals
+block Stage-B ST3 closure for LiveGraph or become documented degraded answer-classes; **REFRESH-
+PROBE-1 and RUST-INGEST-PROVE-1 follow after**, not before (migration plan treats ST3 as one unit).
 
 Stage C runtime work (TRUST-MODEL-REBASE-1, LiveGraph/query/value-join) stays **gated behind
 Stage B probe evidence** and must not begin before it exists.

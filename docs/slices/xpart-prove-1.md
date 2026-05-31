@@ -114,14 +114,18 @@ The FRAKTAG TS workspace — two real partitions with a known `api → engine` c
   engine unlinked → the import resolved local/unresolved; it is neither a source nor a published
   view). Two purpose-built captures replace it:
   - **`api-src.scip`** (source-path: tsconfig `paths @fraktag/engine → ../engine/src/index.ts`)
-    — api references resolve to engine **src** symbols matching `engine.scip`. The controlled
-    source-aligned capture; the **1A** answer-class proof.
+    — api references resolve to engine **src** symbols matching `engine.scip` **for the named
+    surface** (measured 78/95; the other 17 are anonymous inline type-literal members whose
+    `typeLiteralNN` numbering is compilation-unit-relative and diverges even here — see
+    XPART-PROVE-1B). The controlled capture for the **1A** answer-class proof; the named target
+    is source-aligned.
   - **`api-dist.scip`** (published interface: engine resolved via its package `types`
     `dist/index.d.ts`) — api references carry `dist/index.d.ts/...` symbols `engine.scip` never
     defines. The real consumer view; the **1B** dist↔src divergence proof.
 - **Known edge `api → engine`** — ~95 `api` references into `engine`. The probe re-measures it
-  exactly: under `api-src.scip` they are source-aligned (a pickable cross-partition target
-  exists); under `api-dist.scip` all 95 are DIVERGENT (0 source-aligned → 1B required).
+  exactly: under `api-src.scip` the **named** surface is source-aligned (measured 78/95; a
+  pickable cross-partition target exists), while 17 anonymous type-literal members diverge even
+  here; under `api-dist.scip` all 95 are DIVERGENT (0 source-aligned → 1B required).
 
 First build step (the leveldb lesson): re-confirm each capture is valid (non-externalized)
 before measuring; do **not** reuse the discarded `api.scip`.

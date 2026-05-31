@@ -104,6 +104,17 @@ Ratify D1–D5. No code. Exit: design signed off.
   joining is **forbidden** (silently misattaches 15.1% on C++ annotation-macro code).
 
 ### XPART-PROVE-1 — cross-partition traversal semantics  (ST3)
+
+**EXECUTED (2026-05-31), split into 1A + 1B. ST3 NARROWED, not retired.** 1A
+(`docs/slices/xpart-prove-1.md`) proved the answer-class contract; 1B
+(`docs/slices/xpart-prove-1b.md`) proved declaration-map-backed **named** package-boundary
+identity reconciliation (FRAKTAG named surface 78/78 reconciled, 0 misattachment, 0 silent miss).
+**ST3 remains OPEN** for two residuals: anonymous structural members (`typeLiteralNN` is
+compilation-unit-relative, unstable across indexes even same-file) and packages without
+declaration maps / with complex `exports` (Basis 2). Whether those residuals block Stage-B ST3
+closure for LiveGraph or become documented degraded answer-classes is a follow-on
+boundary-decision slice, not this section.
+
 - **Step forward:** minimal 2-partition in-memory load (TS api + engine) + an
   always-resident global cross-reference index (symbol → partition); `callers` /
   `path` spanning partitions.
@@ -117,8 +128,9 @@ Ratify D1–D5. No code. Exit: design signed off.
 - **Go/no-go:** results exact when all referenced partitions are resident; when not,
   the answer falls into a *declared* class carrying an explicit degradation marker —
   never silent partial; global xref index size and build cost bounded and measured.
-  The risk is retired only when the completeness contract is written down and enforced,
-  not when "it worked once."
+  The answer-class half is retired only when the completeness contract is written down and
+  enforced (1A); the cross-partition identity half (1B) and its residuals are separate — ST3 is
+  NOT globally retired by this section.
 - **Retreat (ST3):** if stitching is too complex/incomplete to preserve trust →
   fall back to load-all-partitions-of-a-repo-per-query (sacrifice memory benefit,
   keep correctness) or residency-scoped answers with explicit degradation.
