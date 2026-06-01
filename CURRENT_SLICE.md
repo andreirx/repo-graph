@@ -142,9 +142,15 @@ non-empty + trust-labelled; epoch-bound (swap→Stale). 3 integration tests; `re
 proven (single committed partition) → LIVEGRAPH-INTEGRATION-XPART-1. Spec
 `docs/slices/livegraph-integration-1a.md`.
 
-**Next: LIVEGRAPH-INTEGRATION-1B** — route shipped `rmap callers/callees` onto the runtime via the
-same `feed_partition` seam (higher blast radius; separate). Then Stage D persistence (warm-cache) +
-RAW-DECOMMISSION.
+**LIVEGRAPH-INTEGRATION-1B DESIGN RATIFIED (phase-1)** — flag-gated shipped `rmap callers/callees`
+serving from PRE-LOADED LiveGraph state (D2a=(a) pilot pre-load; the daemon does NOT run SCIP), SQLite
+fallback, default output unchanged, trust behind a flag; side-by-side compare vs the live `rmap`
+oracle (mismatches classified). **Task packet required before code (shipped daemon/CLI); S1–S3
+shipped-surface sub-decisions pending.** Spec `docs/slices/livegraph-integration-1b.md`.
+
+**Stage D order (ratified):** 1B → **1C** (daemon SCIP indexing & refresh orchestration) →
+**DATAFLOW-HOTPATH-MAP-1** (data-shape/hot-path architecture evidence; before warm-cache) →
+PARTITIONED-WARM-CACHE-ARCH-1 → WARM-CACHE-1 → RAW-DECOMMISSION.
 
 The remaining spike measures (precise CALLS parity, multi-config C, all-crates Rust,
 M3, M4b) are validation tracks for the IR slice, not blockers. Warm-cache format and

@@ -293,6 +293,26 @@ converts a real `IngestOutcome` (`ir` + `complexity`) into `LiveGraph.load_parti
 multi-partition real data → LIVEGRAPH-INTEGRATION-XPART-1. **1B** routes shipped `rmap` onto the same
 seam (next). Spec `docs/slices/livegraph-integration-1a.md`.
 
+### LIVEGRAPH-INTEGRATION-1B — flag-gated shipped query serving from preloaded LiveGraph (DESIGN RATIFIED)
+Route shipped `rmap callers`/`callees` through LiveGraph when state is PRE-LOADED (D2a=(a) pilot
+pre-load; the daemon does NOT run SCIP). Opt-in flag; SQLite fallback on miss; default output
+unchanged; trust metadata behind a flag. Side-by-side compare vs the live `rmap` oracle, mismatches
+classified (MissingInLiveGraph / ExtraInLiveGraph / IdentityMismatch / EdgeBasisMismatch /
+PartitionUnavailable / TrustClassMismatch). Does NOT prove daemon SCIP indexing. Task packet required
+(shipped daemon/CLI). Spec `docs/slices/livegraph-integration-1b.md`.
+
+### LIVEGRAPH-INTEGRATION-1C — daemon SCIP indexing & refresh orchestration (DEFERRED)
+Stand up the in-daemon SCIP-producing path (scip-typescript per package + scip-ingest + partitioning +
+refresh→swap into LiveGraph) — the ingestion orchestration LiveGraph kept out; where auto-refresh +
+multi-repo + primary-with-fallback default live.
+
+### DATAFLOW-HOTPATH-MAP-1 — data shapes & hot paths as architecture evidence (INSERT BEFORE WARM-CACHE)
+Map source → AST/SCIP/build-maps → IR/value facts → LiveGraph → AnswerEnvelope → persistence: data
+shapes per boundary, authority vs rebuildability vs epoch-binding, hot paths, copy/allocation points.
+**Must guide warm-cache architecture and raw decommission** — else cache format drifts into "serialize
+whatever exists" (the SQLite mistake in binary). Deferred; run before warm-cache (or earlier if 1B/1C
+surfaces data-shape confusion). Charter `docs/slices/dataflow-hotpath-map-1.md`.
+
 ### PARTITIONED-WARM-CACHE-ARCH-1 (design) + WARM-CACHE-1 (impl) — RK6
 Format decision (rkyv / Cap'n Proto / embedded KV) + partitioned binary write/load +
 coherence/versioning. Done AFTER the runtime is credible (D1=A kept the IR in-memory
