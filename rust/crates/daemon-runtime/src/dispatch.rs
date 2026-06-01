@@ -732,31 +732,33 @@ impl ServiceDispatcher {
     /// producer → `ProducerUnavailable` (D6); the LiveGraph last-good + the sqlite default are
     /// untouched. Read-only — this handler changes no runtime state.
     fn handle_livegraph_refresh(&self, request: &Request) -> DispatchResult {
-        let (_repo_state, _repo_uid) = match self.resolve_and_load_repo(&request.params) {
+        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
             Ok(r) => r,
             Err(e) => return DispatchResult::error(&request.id, e),
         };
-        let partition = Self::get_optional_string_param(&request.params, "partition")
-            .unwrap_or("")
-            .to_string();
-        let body = match crate::livegraph_refresh::discover_scip_typescript() {
-            Err(failure) => serde_json::json!({
-                "status": failure.code(),
-                "detail": failure.detail(),
-                "partition": partition,
-                "refreshed": false,
-            }),
-            // Producer found, but the daemon success path is step 4 (gated on a provisioned producer)
-            // — run NOTHING; report so the operator knows step 4 is pending.
-            Ok(path) => serde_json::json!({
-                "status": "ProducerFound",
-                "detail": "scip-typescript found; daemon SCIP success path (1C step 4) not implemented yet",
-                "producer": path.display().to_string(),
-                "partition": partition,
-                "refreshed": false,
-            }),
+        let repo_path = match Self::get_string_param(&request.params, "repo") {
+            Ok(s) => s.to_string(),
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
-        DispatchResult::success(&request.id, body)
+        let partition = Self::get_optional_string_param(&request.params, "partition")
+            .unwrap_or("default")
+            .to_string();
+        // 1C step 4: SYNCHRONOUS daemon-owned refresh (producer runs inline; single-threaded daemon,
+        // DAEMON-ASYNC-REFRESH-1 is the non-blocking follow-up). Absent producer → structured
+        // ProducerUnavailable (steps 2-3 behavior preserved); on any failure the last-good is untouched.
+        match crate::livegraph_refresh::run_refresh(&repo_state, &repo_uid, &partition, &repo_path)
+        {
+            Ok(body) => DispatchResult::success(&request.id, body),
+            Err(failure) => DispatchResult::success(
+                &request.id,
+                serde_json::json!({
+                    "status": failure.code(),
+                    "detail": failure.detail(),
+                    "partition": partition,
+                    "refreshed": false,
+                }),
+            ),
+        }
     }
 
     fn handle_callers(&self, request: &Request) -> DispatchResult {

@@ -5,7 +5,15 @@
 //! module changes for a different reason than the `livegraph_feed` adapter (Common Closure), so it is
 //! its own module.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+use repo_graph_livegraph::LiveGraph;
+use repo_graph_scip_ingest::{decode_index, ingest_partition};
+use repo_graph_trust_model::LanguageSupport;
+
+use crate::state::RepoState;
 
 /// Structured refresh failure classes (D6). Surfaced in the refresh command's structured response;
 /// `ProducerUnavailable` is the D0 graceful-absent path.
@@ -93,6 +101,181 @@ fn which_on_path(name: &str) -> Option<PathBuf> {
     None
 }
 
+// ── Step 4: synchronous daemon-owned SCIP refresh ──
+// The daemon is single-threaded + !Send (DaemonState uses RefCell), so the producer runs INLINE on
+// the request thread (DAEMON-ASYNC-REFRESH-1 tracks the non-blocking follow-up). The producer runs
+// LOCK-FREE; the LiveGraph write lock is acquired ONLY for the swap; on any failure the last-good
+// epoch is untouched.
+
+/// Compute a real `build_inputs_hash` (D4): a fast SHA-256 digest over the partition's config +
+/// `.ts` sources + the producer identity (path + size + mtime — `scip-typescript@0.4.0 --version`
+/// is unavailable, so the binary metadata stands in). Coherence, not security.
+fn compute_build_inputs_hash(project_dir: &str, producer: &Path) -> Result<String, RefreshFailure> {
+    use sha2::{Digest, Sha256};
+    let root = Path::new(project_dir);
+    let mut hasher = Sha256::new();
+    for rel in [
+        "tsconfig.json",
+        "package.json",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+    ] {
+        if let Ok(bytes) = std::fs::read(root.join(rel)) {
+            hasher.update(rel.as_bytes());
+            hasher.update(&bytes);
+        }
+    }
+    let mut sources = Vec::new();
+    collect_ts_sources(root, &mut sources).map_err(RefreshFailure::HashFailed)?;
+    sources.sort();
+    for p in &sources {
+        let bytes = std::fs::read(p)
+            .map_err(|e| RefreshFailure::HashFailed(format!("read {}: {e}", p.display())))?;
+        hasher.update(p.to_string_lossy().as_bytes());
+        hasher.update(&bytes);
+    }
+    hasher.update(producer.to_string_lossy().as_bytes());
+    if let Ok(meta) = std::fs::metadata(producer) {
+        hasher.update(meta.len().to_le_bytes());
+        if let Ok(mtime) = meta.modified() {
+            if let Ok(d) = mtime.duration_since(std::time::UNIX_EPOCH) {
+                hasher.update(d.as_secs().to_le_bytes());
+            }
+        }
+    }
+    hasher.update(b"scip-typescript@0.4.0");
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Collect `.ts` source files under `dir`, skipping `node_modules` / `.git`.
+fn collect_ts_sources(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("read_dir {}: {e}", dir.display()))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name();
+        if name == "node_modules" || name == ".git" {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            collect_ts_sources(&path, out)?;
+        } else if path.extension().map(|e| e == "ts").unwrap_or(false) {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// Run the producer binary-direct (D3): `scip-typescript index --cwd <dir> --output <out>
+/// --no-progress-bar` via `std::process::Command` (no shell), with a timeout + captured stderr.
+fn run_producer(
+    producer: &Path,
+    project_dir: &str,
+    output: &Path,
+    timeout: Duration,
+) -> Result<(), RefreshFailure> {
+    let mut child = Command::new(producer)
+        .arg("index")
+        .arg("--cwd")
+        .arg(project_dir)
+        .arg("--output")
+        .arg(output)
+        .arg("--no-progress-bar")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| RefreshFailure::ProducerFailed(format!("spawn: {e}")))?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if status.success() {
+                    return Ok(());
+                }
+                let mut err = String::new();
+                if let Some(mut s) = child.stderr.take() {
+                    use std::io::Read;
+                    let _ = s.read_to_string(&mut err);
+                }
+                return Err(RefreshFailure::ProducerFailed(format!(
+                    "exit {:?}: {}",
+                    status.code(),
+                    err.trim()
+                )));
+            }
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    return Err(RefreshFailure::Timeout);
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(e) => return Err(RefreshFailure::ProducerFailed(format!("wait: {e}"))),
+        }
+    }
+}
+
+/// Synchronous daemon-owned refresh (1C step 4): discover the producer (D0), run it on the
+/// partition's project dir, decode + ingest, and SWAP the result into the repo's LiveGraph (the write
+/// lock is acquired ONLY for the swap). On any failure the last-good epoch is untouched. A
+/// single-package partition = the repo root (D1; multi-package enumeration is a natural extension).
+pub fn run_refresh(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    partition_id: &str,
+    project_dir: &str,
+) -> Result<serde_json::Value, RefreshFailure> {
+    if !Path::new(project_dir).join("tsconfig.json").is_file() {
+        return Err(RefreshFailure::UnsupportedPartition(format!(
+            "no tsconfig.json under {project_dir}"
+        )));
+    }
+    let producer = discover_scip_typescript()?; // Err(ProducerUnavailable) propagates
+    let hash = compute_build_inputs_hash(project_dir, &producer)?;
+    let output = std::env::temp_dir().join(format!("rmap-scip-refresh-{partition_id}.scip"));
+    run_producer(&producer, project_dir, &output, Duration::from_secs(120))?;
+    let bytes = std::fs::read(&output)
+        .map_err(|e| RefreshFailure::IngestFailed(format!("read producer output: {e}")))?;
+    let index =
+        decode_index(&bytes).map_err(|e| RefreshFailure::IngestFailed(format!("decode: {e}")))?;
+    let outcome = ingest_partition(
+        &index,
+        project_dir,
+        repo_uid,
+        partition_id,
+        "scip-typescript",
+        "0.4.0",
+        &hash,
+    );
+    let nodes = outcome.ir.nodes.len();
+    let edges = outcome.ir.edges.len();
+    let value_facts = outcome.complexity.len();
+    // SWAP: hold the LiveGraph write lock ONLY here (D5). The producer ran lock-free above.
+    let epoch = {
+        let mut guard = repo_state.livegraph.write();
+        let lg = guard.get_or_insert_with(LiveGraph::new);
+        repo_graph_livegraph_feed::feed_partition(
+            lg,
+            partition_id,
+            outcome,
+            LanguageSupport::TypeScriptPrimary,
+        );
+        lg.partition_epoch(partition_id).map(|e| e.0)
+    };
+    let _ = std::fs::remove_file(&output);
+    Ok(serde_json::json!({
+        "status": "Refreshed",
+        "refreshed": true,
+        "partition": partition_id,
+        "nodes": nodes,
+        "edges": edges,
+        "value_facts": value_facts,
+        "epoch": epoch,
+        "build_inputs_hash": hash,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,5 +322,20 @@ mod tests {
             discover_from(None, None).unwrap_err(),
             RefreshFailure::ProducerUnavailable
         );
+    }
+
+    #[test]
+    fn build_inputs_hash_is_deterministic_and_nonempty() {
+        // D4: hash over the synthetic fixture's real configs + .ts sources (node_modules excluded).
+        let synth = format!(
+            "{}/../repo-graph-scip-ingest/tests/fixtures/synthetic",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let producer = PathBuf::from("/nonexistent/scip-typescript"); // metadata skipped; path hashed
+        let h1 = compute_build_inputs_hash(&synth, &producer).expect("hash");
+        let h2 = compute_build_inputs_hash(&synth, &producer).expect("hash");
+        assert!(!h1.is_empty());
+        assert_eq!(h1, h2, "build_inputs_hash must be deterministic");
+        assert_ne!(h1, "preload", "real hash, not the placeholder");
     }
 }
