@@ -293,7 +293,7 @@ converts a real `IngestOutcome` (`ir` + `complexity`) into `LiveGraph.load_parti
 multi-partition real data → LIVEGRAPH-INTEGRATION-XPART-1. **1B** routes shipped `rmap` onto the same
 seam (next). Spec `docs/slices/livegraph-integration-1a.md`.
 
-### LIVEGRAPH-INTEGRATION-1B — flag-gated shipped query serving from preloaded LiveGraph (DESIGN RATIFIED)
+### LIVEGRAPH-INTEGRATION-1B — flag-gated shipped query serving from preloaded LiveGraph (IMPLEMENTED + LIVE-VALIDATED 2026-06-01)
 Route shipped `rmap callers`/`callees` through LiveGraph when state is PRE-LOADED (D2a=(a) pilot
 pre-load; the daemon does NOT run SCIP). Opt-in flag; SQLite fallback on miss; default output
 unchanged; trust metadata behind a flag. Side-by-side compare vs the live `rmap` oracle, mismatches
@@ -306,7 +306,7 @@ Stand up the in-daemon SCIP-producing path (scip-typescript per package + scip-i
 refresh→swap into LiveGraph) — the ingestion orchestration LiveGraph kept out; where auto-refresh +
 multi-repo + primary-with-fallback default live.
 
-### DATAFLOW-HOTPATH-MAP-1 — data shapes & hot paths as architecture evidence (INSERT BEFORE WARM-CACHE)
+### DATAFLOW-HOTPATH-MAP-1 — data shapes & hot paths as architecture evidence (DELIVERED 2026-06-01 → docs/architecture/dataflow-hotpath-map.md)
 Map source → AST/SCIP/build-maps → IR/value facts → LiveGraph → AnswerEnvelope → persistence: data
 shapes per boundary, authority vs rebuildability vs epoch-binding, hot paths, copy/allocation points.
 **Must guide warm-cache architecture and raw decommission** — else cache format drifts into "serialize

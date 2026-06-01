@@ -142,14 +142,22 @@ non-empty + trust-labelled; epoch-bound (swap→Stale). 3 integration tests; `re
 proven (single committed partition) → LIVEGRAPH-INTEGRATION-XPART-1. Spec
 `docs/slices/livegraph-integration-1a.md`.
 
-**LIVEGRAPH-INTEGRATION-1B DESIGN RATIFIED (phase-1)** — flag-gated shipped `rmap callers/callees`
-serving from PRE-LOADED LiveGraph state (D2a=(a) pilot pre-load; the daemon does NOT run SCIP), SQLite
-fallback, default output unchanged, trust behind a flag; side-by-side compare vs the live `rmap`
-oracle (mismatches classified). **Task packet required before code (shipped daemon/CLI); S1–S3
-shipped-surface sub-decisions pending.** Spec `docs/slices/livegraph-integration-1b.md`.
+**LIVEGRAPH-INTEGRATION-1B IMPLEMENTED + LIVE-VALIDATED (phase-1, 2026-06-01)** — flag-gated `--engine
+sqlite|livegraph|compare` on shipped `rmap callers/callees` (default sqlite byte-identical) + hidden
+`rmap dev livegraph-preload` (S1: Rust-only `DaemonClient`, no TypeScript). Daemon `RepoState` holds a
+preloaded `LiveGraph`; livegraph serves with SQLite fallback; compare writes a classified
+`.rgr/livegraph-compare/<ms>.json` sidecar. Validated live (`dev-install-local.sh` + the six `rmap`
+calls on the synthetic pilot): default unchanged, livegraph hit the populated graph
+(`resolution: livegraph`), compare sidecars `Exact` (SCIP keys byte-equal to SQLite via repo_uid). 65
+daemon + 444 rgr tests; clippy/fmt clean. Spec `docs/slices/livegraph-integration-1b.md`.
 
-**Stage D order (ratified):** 1B → **1C** (daemon SCIP indexing & refresh orchestration) →
-**DATAFLOW-HOTPATH-MAP-1** (data-shape/hot-path architecture evidence; before warm-cache) →
+**DATAFLOW-HOTPATH-MAP-1 DELIVERED (2026-06-01)** — `docs/architecture/dataflow-hotpath-map.md` (10
+sections): the source→SCIP→ingest→`PartitionIr`→value-facts→LiveGraph→`AnswerEnvelope`→persistence data
+shapes, authority/rebuildability, epochs, hot paths (pipeline is **indexer-bound**: SCIP ~1.9–3.0s/TS
+partition vs xref ~21ms), copy points, and implications for 1C + warm-cache (**serialize `PartitionIr`
+only; rebuild the rest**; key interning is the dominant allocation target).
+
+**Stage D order:** 1B ✓ → DATAFLOW ✓ → **1C** (daemon SCIP indexing & refresh orchestration — NEXT) →
 PARTITIONED-WARM-CACHE-ARCH-1 → WARM-CACHE-1 → RAW-DECOMMISSION.
 
 The remaining spike measures (precise CALLS parity, multi-config C, all-crates Rust,

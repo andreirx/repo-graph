@@ -1,8 +1,8 @@
 # DATAFLOW-HOTPATH-MAP-1: Data Shapes & Hot Paths as Architecture Evidence
 
 Slice ID: DATAFLOW-HOTPATH-MAP-1
-Status: **CHARTER — DEFERRED. Do NOT run yet** (run before any warm-cache/decommission work, or
-earlier if LIVEGRAPH-INTEGRATION-1B/1C surfaces data-shape confusion).
+Status: **DELIVERED (2026-06-01).** The map is at `docs/architecture/dataflow-hotpath-map.md` (10
+sections, evidence-labelled), produced before LIVEGRAPH-INTEGRATION-1C per the ratified order.
 Track: Stage D, **inserted before PARTITIONED-WARM-CACHE-ARCH-1**.
 
 ## Purpose

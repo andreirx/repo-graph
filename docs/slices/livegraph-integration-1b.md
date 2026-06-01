@@ -1,9 +1,11 @@
 # LIVEGRAPH-INTEGRATION-1B: Flag-Gated Shipped Query Serving from Preloaded LiveGraph (Stage D)
 
 Slice ID: LIVEGRAPH-INTEGRATION-1B
-Status: **DESIGN RATIFIED (phase-1; D2a=(a) pilot pre-load; S1–S3 ratified). HIGH blast radius (shipped
-`rmapd` + `rmap`). Grounding the RUST transport/CLI surface before code — preload + flag must NOT
-depend on possibly-stale TypeScript tooling.**
+Status: **BUILT + LIVE-VALIDATED (phase-1, 2026-06-01).** Flag-gated `--engine sqlite|livegraph|compare`
+on shipped `rmap callers/callees` + hidden `rmap dev livegraph-preload` (Rust-only transport). Validated
+via `dev-install-local.sh` + live `rmap` on the synthetic pilot: default unchanged, livegraph hit the
+populated graph (`resolution: livegraph`), compare sidecars `Exact`. daemon-runtime 65 + rgr 444 tests,
+clippy/fmt clean. Maturity PROTOTYPE. **Next: 1C** (in-daemon SCIP indexing).
 Depends: LIVEGRAPH-INTEGRATION-1A (`repo-graph-livegraph-feed::feed_partition`), VALUE-JOIN-1 /
 QUERY-MIGRATION-1.
 Track: Stage D integration, sub-slice **1B** (after 1A; before 1C).
