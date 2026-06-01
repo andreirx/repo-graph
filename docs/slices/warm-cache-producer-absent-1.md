@@ -1,7 +1,44 @@
 # WARM-CACHE-PRODUCER-ABSENT-1: Trust a Warm Cache When the Producer Is Absent (Stage D)
 
 Slice ID: WARM-CACHE-PRODUCER-ABSENT-1
-Status: **DESIGN — decisions FORCED below, awaiting ratification. Implementation NOT started.**
+Status: **RATIFIED (2026-06-01, D1–D5) — implementing. See "Ratified" below; the matrices are the
+rationale.**
+
+## Ratified (2026-06-01)
+
+- **D1 — C/B hybrid.** Split `source_inputs_hash` from `producer_fingerprint`; the manifest carries
+  `producer_fingerprint` from the prior successful run; producer-absent load only when
+  `source_inputs_hash` matches.
+- **D2 — key split, de-duplicated.** `producer_fingerprint = { name, version }` REPLACES the separate
+  `indexer_name`/`indexer_version` (same fact — do not store twice); `build_inputs_hash` becomes
+  `source_inputs_hash`:
+  ```text
+  ProducerFingerprint { name, version }   // optional impl fingerprint later
+  CacheKey {
+    repo_uid, partition_id,
+    source_inputs_hash,                    // source files + tsconfig + package.json + lockfile + build config; NOT producer
+    producer_fingerprint: ProducerFingerprint,
+    repo_graph_version,
+  }
+  ```
+- **D3 — `producer_fingerprint` = logical name + version** (`scip-typescript` + `0.4.0`); NOT binary
+  path/mtime. Record: when the producer exposes a reliable `--version`, replace the hardcoded version
+  source with the command output.
+- **D4 — degraded label, no new `FreshnessState`.** Producer-absent cache answers are
+  `FreshnessState::Stale` + `AnswerClass::Stale` + a NEW `DegradationReason::ProducerUnavailable`
+  (added to `repo-graph-trust-model`). NEVER `Fresh`/`Exact`.
+- **D5 — flow (confirmed) + ambiguity guard.** If, producer-absent, multiple cache candidates match
+  `source_inputs_hash` but disagree on `producer_fingerprint`, reject all / report
+  `AmbiguousProducerFingerprint` — never pick arbitrarily. (The single-file-per-partition layout yields
+  ≤1 candidate today; the guard is a total function over the candidate set, tested directly.)
+- **Required acceptance tests:** `producer_absent_cache_hit_loads_stale_with_ProducerUnavailable`,
+  `producer_absent_source_hash_mismatch_rejects_cache`,
+  `producer_absent_multiple_matching_fingerprints_rejected_or_reported_ambiguous`,
+  `producer_present_cache_hit_still_fresh`,
+  `producer_present_reinstall_same_logical_version_does_not_invalidate`.
+- **Commit split (approved):** (1) key split / warm-cache DTO update, (2) trust label, (3) daemon
+  producer-absent flow — but combine dependent changes to avoid a non-building intermediate (the key
+  split must leave the daemon building + producer-present behavior intact).
 Depends: WARM-CACHE-DAEMON-WIRING-1 (graph warm load; `build_cache_key`; `compute_build_inputs_hash`),
 WARM-CACHE-VALUEFACTS-1 (sidecar), WARM-CACHE-1 (`CacheKey`/`CacheManifest`), LIVEGRAPH-INTEGRATION-1C
 (`run_refresh`, `discover_scip_typescript`, the `ProducerUnavailable` failure), the trust model
