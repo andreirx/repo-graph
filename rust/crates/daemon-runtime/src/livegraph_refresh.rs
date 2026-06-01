@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use repo_graph_livegraph::LiveGraph;
 use repo_graph_scip_ingest::{decode_index, ingest_partition};
-use repo_graph_trust_model::LanguageSupport;
+use repo_graph_trust_model::{DegradationReason, LanguageSupport};
 
 use crate::livegraph_warm_cache;
 use crate::state::RepoState;
@@ -32,6 +32,9 @@ pub enum RefreshFailure {
     HashFailed(String),
     /// The target is not a supported TS partition (D1).
     UnsupportedPartition(String),
+    /// Producer-absent: multiple cache candidates matched the source hash but disagreed on the
+    /// producer fingerprint — refused to pick arbitrarily (PRODUCER-ABSENT-1 D5).
+    AmbiguousProducerFingerprint,
 }
 
 impl RefreshFailure {
@@ -44,6 +47,7 @@ impl RefreshFailure {
             RefreshFailure::IngestFailed(_) => "IngestFailed",
             RefreshFailure::HashFailed(_) => "HashFailed",
             RefreshFailure::UnsupportedPartition(_) => "UnsupportedPartition",
+            RefreshFailure::AmbiguousProducerFingerprint => "AmbiguousProducerFingerprint",
         }
     }
 
@@ -54,6 +58,10 @@ impl RefreshFailure {
                 "scip-typescript not found (set RMAP_SCIP_TYPESCRIPT or add it to PATH)".to_string()
             }
             RefreshFailure::Timeout => "producer timed out".to_string(),
+            RefreshFailure::AmbiguousProducerFingerprint => {
+                "multiple cached producer fingerprints matched the source inputs; refusing to pick"
+                    .to_string()
+            }
             RefreshFailure::ProducerFailed(d)
             | RefreshFailure::IngestFailed(d)
             | RefreshFailure::HashFailed(d)
@@ -224,10 +232,24 @@ pub fn run_refresh(
             "no tsconfig.json under {project_dir}"
         )));
     }
-    // PRODUCER-ABSENT-1 D2/D5: the SOURCE hash is producer-free, so it is computed FIRST (a future
-    // producer-absent path will gate on it). The producer is still required here in this slice.
+    // PRODUCER-ABSENT-1 D2/D5: the SOURCE hash is producer-free, so it is computed FIRST and used to
+    // gate a producer-absent load.
     let source_inputs_hash = compute_source_inputs_hash(project_dir)?;
-    let producer = discover_scip_typescript()?; // Err(ProducerUnavailable) propagates (PRODUCER-ABSENT-1 relaxes this)
+    // On producer ABSENCE, try a degraded producer-absent warm load instead of failing (D1/D5). Other
+    // discovery errors (none today) propagate.
+    let producer = match discover_scip_typescript() {
+        Ok(p) => p,
+        Err(RefreshFailure::ProducerUnavailable) => {
+            return run_producer_absent(
+                repo_state,
+                repo_uid,
+                partition_id,
+                project_dir,
+                &source_inputs_hash,
+            );
+        }
+        Err(e) => return Err(e),
+    };
 
     // WARM-CACHE-DAEMON-WIRING-1 (D3): try a VALID warm cache BEFORE running the producer. A hit feeds
     // the cached PartitionIr graph-only (value facts Unavailable until a producer refresh) and SKIPS
@@ -278,6 +300,7 @@ pub fn run_refresh(
             "status": "WarmedFromCache",
             "refreshed": true,
             "warmed_from_cache": true,
+            "producer_unavailable": false,
             "value_facts_warmed": value_facts_warmed,
             "partition": partition_id,
             "nodes": nodes,
@@ -355,11 +378,94 @@ pub fn run_refresh(
         "status": "Refreshed",
         "refreshed": true,
         "warmed_from_cache": false,
+        "producer_unavailable": false,
         "value_facts_warmed": false,
         "partition": partition_id,
         "nodes": nodes,
         "edges": edges,
         "value_facts": value_facts,
+        "epoch": epoch,
+        "source_inputs_hash": source_inputs_hash,
+    }))
+}
+
+/// PRODUCER-ABSENT-1 (D1/D5): warm-load a partition from a VALID cache when the producer binary is
+/// absent. Gates on `source_inputs_hash` (the producer-free digest); the `producer_fingerprint` is
+/// taken from the cache manifest (NOT re-verified live). On success the partition is fed and marked
+/// `Stale` + `ProducerUnavailable`, so every query degrades honestly; no new cache is written.
+fn run_producer_absent(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    partition_id: &str,
+    project_dir: &str,
+    source_inputs_hash: &str,
+) -> Result<serde_json::Value, RefreshFailure> {
+    use livegraph_warm_cache::ProducerAbsentCandidate;
+    let (bytes, expected_key) = match livegraph_warm_cache::find_producer_absent_candidate(
+        project_dir,
+        repo_uid,
+        partition_id,
+        source_inputs_hash,
+    ) {
+        ProducerAbsentCandidate::None => return Err(RefreshFailure::ProducerUnavailable),
+        ProducerAbsentCandidate::Ambiguous => {
+            return Err(RefreshFailure::AmbiguousProducerFingerprint)
+        }
+        ProducerAbsentCandidate::One {
+            bytes,
+            expected_key,
+        } => (bytes, expected_key),
+    };
+    // Final acceptance: full checksum + key validation. A corrupt/mismatched entry -> no usable cache.
+    let ir = match livegraph_warm_cache::decode_validated(&bytes, &expected_key) {
+        Some(ir) => ir,
+        None => return Err(RefreshFailure::ProducerUnavailable),
+    };
+    let nodes = ir.nodes.len();
+    let edges = ir.edges.len();
+    // The value-facts sidecar (best-effort, same key). None -> graph-only.
+    let sidecar_facts =
+        livegraph_warm_cache::read_value_facts_sidecar(project_dir, partition_id, &expected_key);
+    let (value_facts_warmed, value_facts_count, epoch) = {
+        let mut guard = repo_state.livegraph.write();
+        let lg = guard.get_or_insert_with(LiveGraph::new);
+        let (warmed, count) = match sidecar_facts {
+            Some(facts) => {
+                let count = facts.len();
+                repo_graph_warm_cache_feed::feed_partition_ir_with_value_facts(
+                    lg,
+                    partition_id,
+                    ir,
+                    facts,
+                    LanguageSupport::TypeScriptPrimary,
+                );
+                (true, count)
+            }
+            None => {
+                repo_graph_livegraph_feed::feed_partition_ir(
+                    lg,
+                    partition_id,
+                    ir,
+                    LanguageSupport::TypeScriptPrimary,
+                );
+                (false, 0)
+            }
+        };
+        // D4: degrade -> every query of this partition returns Stale + ProducerUnavailable.
+        lg.mark_stale(partition_id);
+        lg.add_partition_degradation(partition_id, DegradationReason::ProducerUnavailable);
+        (warmed, count, lg.partition_epoch(partition_id).map(|e| e.0))
+    };
+    Ok(serde_json::json!({
+        "status": "WarmedFromCacheProducerUnavailable",
+        "refreshed": true,
+        "warmed_from_cache": true,
+        "producer_unavailable": true,
+        "value_facts_warmed": value_facts_warmed,
+        "partition": partition_id,
+        "nodes": nodes,
+        "edges": edges,
+        "value_facts": value_facts_count,
         "epoch": epoch,
         "source_inputs_hash": source_inputs_hash,
     }))

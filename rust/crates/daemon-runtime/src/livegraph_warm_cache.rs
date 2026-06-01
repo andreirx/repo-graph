@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use repo_graph_ir::PartitionIr;
 use repo_graph_livegraph::ValueFact;
 use repo_graph_warm_cache::{
-    atomic_write, decode_partition, encode_partition, read_validated, CacheKey, CacheManifest,
-    ProducerFingerprint,
+    atomic_write, decode_partition, encode_partition, peek_manifest, read_validated, CacheKey,
+    CacheManifest, ProducerFingerprint,
 };
 use repo_graph_warm_cache_feed::{encode_value_facts_sidecar, try_decode_value_facts_sidecar};
 
@@ -182,6 +182,89 @@ pub fn best_effort_write_value_facts_sidecar(
     }
 }
 
+/// The result of selecting a producer-absent cache candidate for a partition (PRODUCER-ABSENT-1 D5).
+pub enum ProducerAbsentCandidate {
+    /// No cache file whose manifest `source_inputs_hash` matches the current one.
+    None,
+    /// Exactly one producer fingerprint among matching candidates: the cache bytes + the expected key
+    /// reconstructed from the manifest's `producer_fingerprint` + the CURRENT repo/runtime fields.
+    One {
+        /// The on-disk cache bytes (still subject to final checksum/key validation via `decode_validated`).
+        bytes: Vec<u8>,
+        /// The expected key for final validation (current fields + the manifest's producer fingerprint).
+        expected_key: CacheKey,
+    },
+    /// Matching candidates disagree on `producer_fingerprint` — refuse to pick arbitrarily (D5).
+    Ambiguous,
+}
+
+/// Find a producer-absent cache candidate for `partition_id` (PRODUCER-ABSENT-1 D5). Reads the
+/// partition's cache file(s), peeks each manifest (magic/schema only — not acceptance), keeps those
+/// whose `manifest.key.source_inputs_hash` matches the CURRENT `source_inputs_hash`, and delegates to
+/// [`select_producer_absent_candidate`]. The single-file layout yields ≤1 candidate; the
+/// distinct-fingerprint guard exists for any future multi-file layout.
+pub fn find_producer_absent_candidate(
+    project_dir: &str,
+    repo_uid: &str,
+    partition_id: &str,
+    source_inputs_hash: &str,
+) -> ProducerAbsentCandidate {
+    let paths = [partition_cache_path(project_dir, partition_id)];
+    let mut candidates: Vec<(Vec<u8>, ProducerFingerprint)> = Vec::new();
+    for path in paths {
+        if !path.is_file() {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let Ok(manifest) = peek_manifest(&bytes) else {
+            continue; // not a compatible cache file (magic/schema) -> not a candidate
+        };
+        if manifest.key.source_inputs_hash == source_inputs_hash {
+            candidates.push((bytes, manifest.key.producer_fingerprint));
+        }
+    }
+    select_producer_absent_candidate(candidates, repo_uid, partition_id, source_inputs_hash)
+}
+
+/// Pure selection over a candidate list (testable; PRODUCER-ABSENT-1 D5): 0 → `None`; all candidates
+/// share one fingerprint → `One` (the expected key is built from that fingerprint + the CURRENT
+/// repo/partition/source/runtime fields, so a runtime-version mismatch is still caught by the final
+/// `decode_validated`); ≥2 DISTINCT fingerprints → `Ambiguous` (never pick arbitrarily).
+fn select_producer_absent_candidate(
+    candidates: Vec<(Vec<u8>, ProducerFingerprint)>,
+    repo_uid: &str,
+    partition_id: &str,
+    source_inputs_hash: &str,
+) -> ProducerAbsentCandidate {
+    let Some(first) = candidates.first() else {
+        return ProducerAbsentCandidate::None;
+    };
+    let first_fp = first.1.clone();
+    if candidates.iter().any(|(_, fp)| *fp != first_fp) {
+        return ProducerAbsentCandidate::Ambiguous;
+    }
+    let (bytes, fingerprint) = candidates.into_iter().next().expect("non-empty");
+    let expected_key = CacheKey {
+        repo_uid: repo_uid.to_string(),
+        partition_id: partition_id.to_string(),
+        source_inputs_hash: source_inputs_hash.to_string(),
+        producer_fingerprint: fingerprint,
+        repo_graph_version: REPO_GRAPH_VERSION.to_string(),
+    };
+    ProducerAbsentCandidate::One {
+        bytes,
+        expected_key,
+    }
+}
+
+/// Final acceptance for a producer-absent candidate: decode + FULLY validate (checksum + key) the
+/// bytes into a `PartitionIr`; `None` on any rejection (corrupt/mismatch → no usable cache).
+pub fn decode_validated(bytes: &[u8], expected_key: &CacheKey) -> Option<PartitionIr> {
+    decode_partition(bytes, expected_key).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,5 +294,30 @@ mod tests {
     fn missing_cache_file_is_a_miss_not_an_error() {
         let key = build_cache_key("repo_1", "default", "deadbeef");
         assert!(try_read_partition_cache("/nonexistent/repo/path", "default", &key).is_none());
+    }
+
+    #[test]
+    fn producer_absent_distinct_fingerprints_is_ambiguous_else_one_or_none() {
+        let fp = |v: &str| ProducerFingerprint {
+            name: "scip-typescript".to_string(),
+            version: v.to_string(),
+        };
+        // >=2 DISTINCT fingerprints -> Ambiguous (never pick arbitrarily; D5).
+        let cands = vec![(vec![1u8], fp("0.4.0")), (vec![2u8], fp("0.5.0"))];
+        assert!(matches!(
+            select_producer_absent_candidate(cands, "r", "p", "h"),
+            ProducerAbsentCandidate::Ambiguous
+        ));
+        // one fingerprint -> One.
+        let cands = vec![(vec![1u8], fp("0.4.0"))];
+        assert!(matches!(
+            select_producer_absent_candidate(cands, "r", "p", "h"),
+            ProducerAbsentCandidate::One { .. }
+        ));
+        // empty -> None.
+        assert!(matches!(
+            select_producer_absent_candidate(vec![], "r", "p", "h"),
+            ProducerAbsentCandidate::None
+        ));
     }
 }

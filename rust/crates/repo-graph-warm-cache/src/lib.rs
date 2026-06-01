@@ -737,6 +737,31 @@ pub fn read_validated(path: &Path, expected_key: &CacheKey) -> Result<Vec<u8>, C
     Ok(bytes)
 }
 
+/// Read the [`CacheManifest`] header from cache bytes WITHOUT accepting the entry
+/// (WARM-CACHE-PRODUCER-ABSENT-1). Validates only `magic` + `schema_version` — enough to trust that
+/// the manifest STRUCTURE is from a compatible format — and returns the manifest (which carries
+/// `key.producer_fingerprint` + `key.source_inputs_hash`). It does NOT validate the key or the payload
+/// checksum, so it is NOT acceptance: it exists solely to obtain the producer fingerprint a
+/// producer-absent caller needs to construct the expected key. The caller MUST still
+/// `read_validated` / `decode_partition` (full checksum + key validation) before serving the payload.
+pub fn peek_manifest(bytes: &[u8]) -> Result<CacheManifest, CacheError> {
+    let envelope: CacheFileEnvelope =
+        bincode::deserialize(bytes).map_err(|_| CacheError::Truncated)?;
+    if envelope.manifest.magic != MAGIC {
+        return Err(CacheError::MagicMismatch {
+            expected: MAGIC,
+            found: envelope.manifest.magic,
+        });
+    }
+    if envelope.manifest.schema_version != SCHEMA_VERSION {
+        return Err(CacheError::SchemaMismatch {
+            expected: SCHEMA_VERSION,
+            found: envelope.manifest.schema_version,
+        });
+    }
+    Ok(envelope.manifest)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1038,5 +1063,33 @@ mod tests {
         wrong.source_inputs_hash = "a-different-source-inputs-hash".to_string();
         let err = read_validated(&path, &wrong).expect_err("a wrong key must be rejected");
         assert!(matches!(err, CacheError::KeyMismatch), "got {err:?}");
+    }
+
+    #[test]
+    fn peek_manifest_reads_key_without_accepting_corrupt_payload() {
+        let key = sample_key();
+        let bytes = encode_partition(&sample_partition_ir(), sample_manifest(&key));
+
+        // Peek reads the key (incl. producer_fingerprint) from a VALID file.
+        let m = peek_manifest(&bytes).expect("peek a valid file");
+        assert_eq!(m.key, key);
+        assert_eq!(m.key.producer_fingerprint.name, "scip-typescript");
+
+        // Corrupt a PAYLOAD byte: peek STILL returns the manifest (it does not validate the payload),
+        // but decode_partition (final acceptance) REJECTS it -> peek is read-the-key, not acceptance.
+        let mut env: CacheFileEnvelope = bincode::deserialize(&bytes).unwrap();
+        assert!(!env.payload.is_empty());
+        env.payload[0] ^= 0xFF;
+        let corrupt = bincode::serialize(&env).unwrap();
+        let m2 =
+            peek_manifest(&corrupt).expect("peek reads the manifest even with a corrupt payload");
+        assert_eq!(m2.key, key);
+        assert!(
+            matches!(
+                decode_partition(&corrupt, &key),
+                Err(CacheError::ChecksumMismatch)
+            ),
+            "a corrupt payload must NOT be accepted by decode_partition"
+        );
     }
 }

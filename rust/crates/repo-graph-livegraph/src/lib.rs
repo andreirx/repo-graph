@@ -62,6 +62,19 @@ fn basis_of(src: IdentitySource) -> IdentityBasis {
     }
 }
 
+/// Merge degradation reasons into `out` without duplicates (order-preserving). Used to fold
+/// partition-level reasons (PRODUCER-ABSENT-1) into a query's identity-derived reasons.
+fn merge_partition_reasons(
+    out: &mut Vec<DegradationReason>,
+    more: impl Iterator<Item = DegradationReason>,
+) {
+    for r in more {
+        if !out.contains(&r) {
+            out.push(r);
+        }
+    }
+}
+
 struct Slot {
     epoch: PartitionEpoch,
     status: RefreshStatus,
@@ -71,6 +84,10 @@ struct Slot {
     ref_counts: HashMap<String, usize>,      // cross-partition key -> reference count (retained)
     value_facts: Vec<ValueFact>,             // VALUE-JOIN-1: value facts (retained on unload)
     value_facts_epoch: Option<PartitionEpoch>, // D7: partition epoch the facts were loaded for
+    // PRODUCER-ABSENT-1: partition-level degradation reasons (e.g. `ProducerUnavailable` when this
+    // partition was warm-loaded with the producer absent). A fresh `load_partition` (a successful
+    // producer refresh) starts empty, which clears any prior `ProducerUnavailable`.
+    partition_degradation_reasons: BTreeSet<DegradationReason>,
 }
 
 /// The payload of a `callers` answer (`AnswerEnvelope<CallersAnswer>`).
@@ -272,6 +289,7 @@ impl LiveGraph {
                 ref_counts,
                 value_facts: Vec::new(),
                 value_facts_epoch: None,
+                partition_degradation_reasons: BTreeSet::new(),
             },
         );
     }
@@ -299,6 +317,23 @@ impl LiveGraph {
         if let Some(s) = self.slots.get_mut(id) {
             s.status = st;
         }
+    }
+
+    /// Add a partition-level degradation reason (PRODUCER-ABSENT-1). Surfaced by `callers` / `callees`
+    /// / `value_facts` answers that touch this partition. No-op if the partition is not loaded. A fresh
+    /// `load_partition` / `swap_partition` (a producer refresh) starts with none, clearing these.
+    pub fn add_partition_degradation(&mut self, id: &str, reason: DegradationReason) {
+        if let Some(s) = self.slots.get_mut(id) {
+            s.partition_degradation_reasons.insert(reason);
+        }
+    }
+
+    /// The partition-level degradation reasons for `id` (PRODUCER-ABSENT-1), empty if none / unloaded.
+    fn partition_reasons(&self, id: &str) -> Vec<DegradationReason> {
+        self.slots
+            .get(id)
+            .map(|s| s.partition_degradation_reasons.iter().copied().collect())
+            .unwrap_or_default()
     }
 
     /// Accept a new `PartitionIr` and ATOMICALLY swap (D1): replace IR, bump epoch + xref epoch,
@@ -330,6 +365,8 @@ impl LiveGraph {
                 ref_counts,
                 value_facts,
                 value_facts_epoch,
+                // A swap is a fresh producer IR -> clears any prior `ProducerUnavailable` (PRODUCER-ABSENT-1).
+                partition_degradation_reasons: BTreeSet::new(),
             },
         );
         self.xref_epoch += 1;
@@ -422,6 +459,14 @@ impl LiveGraph {
         if bases.contains(&IdentityBasis::ScipSynthesized) {
             reasons.push(DegradationReason::ScipFallbackIdentity);
         }
+        // PRODUCER-ABSENT-1: surface each contributing partition's partition-level degradation reasons
+        // (e.g. `ProducerUnavailable` when that partition was warm-loaded producer-absent).
+        merge_partition_reasons(
+            &mut reasons,
+            contributing
+                .iter()
+                .flat_map(|id| self.partition_reasons(id)),
+        );
 
         let data = CallersAnswer {
             per_partition_counts: referencing,
@@ -540,6 +585,13 @@ impl LiveGraph {
         if bases.contains(&IdentityBasis::ScipSynthesized) {
             reasons.push(DegradationReason::ScipFallbackIdentity);
         }
+        // PRODUCER-ABSENT-1: include contributing partitions' partition-level degradation reasons.
+        merge_partition_reasons(
+            &mut reasons,
+            contributing
+                .iter()
+                .flat_map(|id| self.partition_reasons(id)),
+        );
 
         let (freshness, contributing_epochs, languages) =
             self.fold_contributing(contributing.iter());
@@ -641,11 +693,14 @@ impl LiveGraph {
         // Ownership degradation is carried in the reasons regardless of class (the VALUE stays true;
         // only the ownership claim is degraded). For TS the reachable non-owned basis is
         // `ScipSynthesized` (fallback identity).
-        let reasons: Vec<DegradationReason> = if owned {
+        let mut reasons: Vec<DegradationReason> = if owned {
             Vec::new()
         } else {
             vec![DegradationReason::ScipFallbackIdentity]
         };
+        // PRODUCER-ABSENT-1: include the defining partition's partition-level degradation reasons (e.g.
+        // `ProducerUnavailable` when warm-loaded producer-absent). The Stale branch below carries them.
+        merge_partition_reasons(&mut reasons, self.partition_reasons(&def_part).into_iter());
 
         // Precedence: FRESHNESS DOMINATES the answer class (consistent with callers/callees + the
         // epoch contract). Stale/RefreshFailed last-good → `Stale`; ownership degradation rides in
@@ -791,6 +846,67 @@ mod tests {
         assert!(a.missing_partitions().is_empty());
         // both engine (internal) and api callers present
         assert_eq!(a.data().unwrap().caller_identities.len(), 2);
+    }
+
+    // PRODUCER-ABSENT-1: a partition warm-loaded producer-absent is marked Stale +
+    // `ProducerUnavailable`; queries touching it must surface that reason (D4).
+    #[test]
+    fn producer_unavailable_partition_reason_propagates_to_callers() {
+        let mut lg = both();
+        lg.mark_stale("engine");
+        lg.add_partition_degradation("engine", DegradationReason::ProducerUnavailable);
+        let a = lg.callers("engine.foo", Granularity::CallerDetail);
+        assert_eq!(a.class(), AnswerClass::Stale);
+        assert_eq!(a.freshness(), FreshnessState::Stale);
+        assert!(
+            a.degradation_reasons()
+                .contains(&DegradationReason::ProducerUnavailable),
+            "callers must surface ProducerUnavailable: {:?}",
+            a.degradation_reasons()
+        );
+    }
+
+    #[test]
+    fn producer_unavailable_partition_reason_propagates_to_callees() {
+        let mut lg = both();
+        lg.mark_stale("engine");
+        lg.add_partition_degradation("engine", DegradationReason::ProducerUnavailable);
+        let a = lg.callees("engine.bar", Granularity::CallerDetail);
+        assert_eq!(a.freshness(), FreshnessState::Stale);
+        assert!(
+            a.degradation_reasons()
+                .contains(&DegradationReason::ProducerUnavailable),
+            "callees must surface ProducerUnavailable: {:?}",
+            a.degradation_reasons()
+        );
+    }
+
+    #[test]
+    fn producer_unavailable_partition_reason_propagates_to_value_facts() {
+        let mut lg = LiveGraph::new();
+        lg.load_partition("engine", engine(), LanguageSupport::TypeScriptPrimary);
+        lg.load_value_facts(
+            "engine",
+            vec![ValueFact {
+                subject: ValueSubject::Symbol(CanonicalKey::from_existing("engine.foo")),
+                kind: ValueFactKind::CyclomaticComplexity,
+                value: 3,
+                basis: IdentityBasis::AstAdopted,
+                source_range: None,
+                provenance: prov(),
+            }],
+        );
+        lg.mark_stale("engine");
+        lg.add_partition_degradation("engine", DegradationReason::ProducerUnavailable);
+        let a = lg.value_facts("engine.foo");
+        assert_eq!(a.class(), AnswerClass::Stale);
+        assert_eq!(a.freshness(), FreshnessState::Stale);
+        assert!(
+            a.degradation_reasons()
+                .contains(&DegradationReason::ProducerUnavailable),
+            "value_facts must surface ProducerUnavailable: {:?}",
+            a.degradation_reasons()
+        );
     }
 
     #[test]

@@ -107,7 +107,7 @@ impl IdentityBasis {
 
 /// WHY a fact is degraded — a separate axis from [`IdentityBasis`]. A fact carries a basis (how)
 /// AND, when degraded, one or more of these (why). Never conflate the two.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DegradationReason {
     /// TS `typeLiteralNN`, compilation-unit-relative, not cross-partition-addressable (XPART-1B).
