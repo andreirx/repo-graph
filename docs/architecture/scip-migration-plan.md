@@ -301,10 +301,14 @@ classified (MissingInLiveGraph / ExtraInLiveGraph / IdentityMismatch / EdgeBasis
 PartitionUnavailable / TrustClassMismatch). Does NOT prove daemon SCIP indexing. Task packet required
 (shipped daemon/CLI). Spec `docs/slices/livegraph-integration-1b.md`.
 
-### LIVEGRAPH-INTEGRATION-1C — daemon SCIP indexing & refresh orchestration (PARTIAL 2026-06-01 — steps 1–3 done; step 4 needs scip-typescript)
-Stand up the in-daemon SCIP-producing path (scip-typescript per package + scip-ingest + partitioning +
-refresh→swap into LiveGraph) — the ingestion orchestration LiveGraph kept out; where auto-refresh +
-multi-repo + primary-with-fallback default live.
+### LIVEGRAPH-INTEGRATION-1C — daemon SCIP indexing & refresh orchestration (COMPLETE 2026-06-01 — synchronous; async = DAEMON-ASYNC-REFRESH-1)
+DONE (synchronous): the daemon discovers + runs `scip-typescript` binary-direct, ingests, and swaps
+into the LiveGraph (real `build_inputs_hash`); `rmap dev livegraph-refresh` → `refreshed: true`,
+`--engine livegraph` served WITHOUT preload; default sqlite unchanged; `ProducerUnavailable` tested;
+failure keeps last-good. **Follow-ups:** DAEMON-ASYNC-REFRESH-1 (non-blocking refresh — the daemon is
+single-threaded + `DaemonState` `!Send`; via a `Send+Sync` LiveGraph handle or a worker+channel);
+PRODUCER-COMPAT-1 (scip-typescript 0.4.0 ⊥ Node 22 — run under Node 18). Multi-package partition
+discovery + primary-with-fallback default are later extensions.
 
 ### DATAFLOW-HOTPATH-MAP-1 — data shapes & hot paths as architecture evidence (DELIVERED 2026-06-01 → docs/architecture/dataflow-hotpath-map.md)
 Map source → AST/SCIP/build-maps → IR/value facts → LiveGraph → AnswerEnvelope → persistence: data

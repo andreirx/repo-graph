@@ -157,16 +157,20 @@ shapes, authority/rebuildability, epochs, hot paths (pipeline is **indexer-bound
 partition vs xref ~21ms), copy points, and implications for 1C + warm-cache (**serialize `PartitionIr`
 only; rebuild the rest**; key interning is the dominant allocation target).
 
-**LIVEGRAPH-INTEGRATION-1C PARTIAL (2026-06-01)** — steps 1–3 of 7: producer discovery (D0:
-`RMAP_SCIP_TYPESCRIPT` → PATH → `ProducerUnavailable`), the six structured D6 failure classes, and
-`rmap dev livegraph-refresh` + a read-only dispatch handler. Live-validated: `livegraph-refresh` →
-structured `ProducerUnavailable`, daemon healthy, default sqlite (`callers`/`callees`) unaffected,
-LiveGraph last-good untouched. **NOT complete:** the success path (step 4 — `scip-typescript`
-subprocess + background swap) is blocked on a provisioned producer (absent here). Spec
+**LIVEGRAPH-INTEGRATION-1C COMPLETE (synchronous daemon-owned production, 2026-06-01)** — all 7
+build-order steps: producer discovery (D0), the six D6 failure classes, `rmap dev livegraph-refresh`,
+and the SYNCHRONOUS success path (Option 1: producer runs inline via `std::process::Command`; write
+lock only for the swap; real `build_inputs_hash`). Live-validated: `livegraph-refresh` →
+`refreshed: true` (the daemon ran `scip-typescript` itself, NO preload — 15 nodes/5 value facts);
+`--engine livegraph` callers/callees served from the refresh-populated LiveGraph; default sqlite
+unchanged; `ProducerUnavailable` tested; failure keeps last-good (swap only on Ok). Producer
+provisioned dev-only (pinned `scip-typescript@0.4.0` under a local Node-18 wrapper — 0.4.0 crashes on
+Node 22; `RMAP_SCIP_TYPESCRIPT` via launchd; not committed). **Non-blocking async deferred
+(`DaemonState` is `!Send`) → DAEMON-ASYNC-REFRESH-1; PRODUCER-COMPAT-1 = 0.4.0⊥Node22.** Spec
 `docs/slices/livegraph-integration-1c.md`.
 
-**Stage D order:** 1B ✓ → DATAFLOW ✓ → **1C PARTIAL** (steps 1–3 ✓; step 4 needs `scip-typescript`) →
-PARTITIONED-WARM-CACHE-ARCH-1 → WARM-CACHE-1 → RAW-DECOMMISSION.
+**Stage D order:** 1B ✓ → DATAFLOW ✓ → **1C ✓** (synchronous; async = DAEMON-ASYNC-REFRESH-1) →
+**PARTITIONED-WARM-CACHE-ARCH-1 (next)** → WARM-CACHE-1 → RAW-DECOMMISSION.
 
 The remaining spike measures (precise CALLS parity, multi-config C, all-crates Rust,
 M3, M4b) are validation tracks for the IR slice, not blockers. Warm-cache format and

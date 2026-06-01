@@ -1,12 +1,16 @@
 # LIVEGRAPH-INTEGRATION-1C: Daemon-Owned Async SCIP Ingestion / Refresh (Stage D)
 
 Slice ID: LIVEGRAPH-INTEGRATION-1C
-Status: **PARTIAL (2026-06-01) — steps 1–3 of 7 done + live-validated.** Producer discovery (D0) +
-failure model (D6) + `rmap dev livegraph-refresh` + the read-only absent-producer dispatch path are
-built and validated end-to-end (`dev-install` → `livegraph-refresh` → structured `ProducerUnavailable`,
-`refreshed: false`; daemon healthy; default sqlite unaffected). **NOT complete:** the success path
-(step 4 — `scip-typescript` subprocess + background swap) is blocked on a provisioned `scip-typescript`
-(absent here). Guided by `docs/architecture/dataflow-hotpath-map.md`.
+Status: **COMPLETE for daemon-owned SCIP production on the current single-threaded daemon
+(2026-06-01).** All 7 build-order steps done + live-validated: producer discovery (D0), the six D6
+failure classes, `rmap dev livegraph-refresh`, and the SYNCHRONOUS success path (Option 1 — producer
+runs inline; write lock held only for the swap; real `build_inputs_hash`). Live: `livegraph-refresh` →
+`refreshed: true` (the daemon ran `scip-typescript` itself, NO preload — 15 nodes/11 edges/5 value
+facts, sha256 hash); `--engine livegraph` callers/callees served from the refresh-populated LiveGraph;
+default sqlite unchanged; `ProducerUnavailable` tested; failure keeps last-good (swap only on Ok). 67
+daemon-runtime tests, clippy/fmt clean. **REFRESH async/non-blocking production remains a follow-up
+(`DaemonState` is `!Send/!Sync`) → DAEMON-ASYNC-REFRESH-1.** Guided by
+`docs/architecture/dataflow-hotpath-map.md`.
 Depends: LIVEGRAPH-INTEGRATION-1B, DATAFLOW-HOTPATH-MAP-1, REFRESH-PROBE-1.
 Track: Stage D integration, **1C** (after 1B; before warm-cache).
 
@@ -139,6 +143,20 @@ No warm cache / persistence. No SQLite decommission. No LiveGraph default. No Ru
 No worker pool (D5). No piggyback on rmap index (D2). No npx / install / network (D0). No Tokio.
 No broad multi-workspace resolver (D1). dev-preload stays a DEV tool, not the production fallback.
 ```
+
+## Follow-ups + producer provisioning (recorded)
+
+**DAEMON-ASYNC-REFRESH-1** — non-blocking async refresh is DEFERRED. The daemon is single-threaded +
+`DaemonState` is `!Send/!Sync`, so a worker thread cannot swap into daemon state; 1C runs the producer
+SYNCHRONOUSLY inline (Option 1). Make refresh non-blocking via either a `Send+Sync` LiveGraph handle
+outside `DaemonState`, or a worker + result channel + poll/drain. **Do NOT claim the REFRESH two-speed
+non-blocking runtime is implemented in the daemon.**
+
+**PRODUCER-COMPAT-1** (note) — `@sourcegraph/scip-typescript@0.4.0` crashes on Node 22 (`H.replace`).
+For 1C it runs under a local Node 18 via a wrapper
+(`/private/tmp/repo-graph-tools/scip-typescript-0.4.0/bin/scip-typescript-node18` exec'ing Node 18 +
+`dist/src/main.js`); `RMAP_SCIP_TYPESCRIPT` is set in the launchd env so the daemon inherits it.
+**Dev provisioning only — node_modules / downloaded runtimes are NOT committed.**
 
 ## References
 - `docs/architecture/dataflow-hotpath-map.md` (indexer-bound; async producer; real hash)
