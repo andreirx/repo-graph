@@ -145,6 +145,101 @@ fn handle_daemon_error(err: DaemonClientError) -> ExitCode {
 // Human mode (default): plain text with caller list.
 // Machine mode (--json): full envelope.
 
+/// Extract `--engine <value>` (LIVEGRAPH-INTEGRATION-1B). Default `sqlite`. The value is validated
+/// daemon-side (lenient here); removes the flag + its value from the args.
+fn extract_engine_flag(args: Vec<String>) -> (Vec<String>, String) {
+    let mut engine = "sqlite".to_string();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--engine" && i + 1 < args.len() {
+            engine = args[i + 1].clone();
+            i += 2;
+        } else {
+            out.push(args[i].clone());
+            i += 1;
+        }
+    }
+    (out, engine)
+}
+
+/// `rmap dev <subcommand>` — hidden/dev-only commands (LIVEGRAPH-INTEGRATION-1B). NOT part of the
+/// default user workflow.
+pub fn run_dev(args: &[String]) -> ExitCode {
+    match args.first().map(|s| s.as_str()) {
+        Some("livegraph-preload") => run_dev_livegraph_preload(&args[1..]),
+        _ => {
+            eprintln!("usage: rmap dev livegraph-preload --repo <repo> --partition-id <id> --scip <index.scip> --source-root <source-root>");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// Hidden dev (S1): send the daemon `livegraph_preload` transport method over the SAME DaemonClient
+/// the query commands use (Rust-only, no TypeScript). The daemon DECODES the supplied `.scip`, ingests
+/// it, and feeds it into the repo's in-memory LiveGraph — it does NOT run scip-typescript.
+fn run_dev_livegraph_preload(args: &[String]) -> ExitCode {
+    let mut repo = None;
+    let mut partition_id = None;
+    let mut scip = None;
+    let mut source_root = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--repo" if i + 1 < args.len() => {
+                repo = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "--partition-id" if i + 1 < args.len() => {
+                partition_id = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "--scip" if i + 1 < args.len() => {
+                scip = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "--source-root" if i + 1 < args.len() => {
+                source_root = Some(args[i + 1].clone());
+                i += 2;
+            }
+            other => {
+                eprintln!("error: unknown arg: {}", other);
+                return ExitCode::from(1);
+            }
+        }
+    }
+    let (repo, partition_id, scip, source_root) = match (repo, partition_id, scip, source_root) {
+        (Some(r), Some(p), Some(s), Some(sr)) => (r, p, s, sr),
+        _ => {
+            eprintln!("usage: rmap dev livegraph-preload --repo <repo> --partition-id <id> --scip <index.scip> --source-root <source-root>");
+            return ExitCode::from(1);
+        }
+    };
+    let mut client = match create_daemon_client("dev") {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    let params = serde_json::json!({
+        "repo": repo,
+        "partition_id": partition_id,
+        "scip": scip,
+        "source_root": source_root,
+    });
+    match client.request("livegraph_preload", Some(params)) {
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
+        },
+        Err(e) => handle_daemon_error(e),
+    }
+}
+
 pub fn run_callers(args: &[String]) -> ExitCode {
     // ── Parse args (filter out --json before edge_types parsing) ────
     let mut json_mode = false;
@@ -161,11 +256,14 @@ pub fn run_callers(args: &[String]) -> ExitCode {
         .cloned()
         .collect();
 
+    // LIVEGRAPH-INTEGRATION-1B: extract --engine before edge-type parsing.
+    let (filtered_args, engine) = extract_engine_flag(filtered_args);
+
     let (positional, edge_types) = match parse_edge_types_flag(&filtered_args) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
-            eprintln!("usage: rmap callers <symbol> [--edge-types <types>] [--json]");
+            eprintln!("usage: rmap callers <symbol> [--edge-types <types>] [--engine sqlite|livegraph|compare] [--json]");
             return ExitCode::from(1);
         }
     };
@@ -195,6 +293,7 @@ pub fn run_callers(args: &[String]) -> ExitCode {
         "repo": repo_path,
         "symbol": symbol,
         "edge_types": edge_types,
+        "engine": engine,
     });
 
     match client.request("callers", Some(params)) {
@@ -212,7 +311,19 @@ pub fn run_callers(args: &[String]) -> ExitCode {
                     }
                 }
             } else {
-                // Human mode: parse and render (CLI-OUT-3)
+                // Human mode (CLI-OUT-3). 1B: surface the comparison sidecar (if present) and strip
+                // the diagnostic fields so the sqlite-compatible render is byte-unchanged.
+                let mut result = result;
+                if let Some(p) = result
+                    .get("livegraph_compare_sidecar")
+                    .and_then(|v| v.as_str())
+                {
+                    eprintln!("livegraph comparison written to {}", p);
+                }
+                if let Some(obj) = result.as_object_mut() {
+                    obj.remove("livegraph_compare");
+                    obj.remove("livegraph_compare_sidecar");
+                }
                 use crate::presentation::graph_edges::CallersResponse;
                 match serde_json::from_value::<CallersResponse>(result) {
                     Ok(response) => {
@@ -253,11 +364,14 @@ pub fn run_callees(args: &[String]) -> ExitCode {
         .cloned()
         .collect();
 
+    // LIVEGRAPH-INTEGRATION-1B: extract --engine before edge-type parsing.
+    let (filtered_args, engine) = extract_engine_flag(filtered_args);
+
     let (positional, edge_types) = match parse_edge_types_flag(&filtered_args) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
-            eprintln!("usage: rmap callees <symbol> [--edge-types <types>] [--json]");
+            eprintln!("usage: rmap callees <symbol> [--edge-types <types>] [--engine sqlite|livegraph|compare] [--json]");
             return ExitCode::from(1);
         }
     };
@@ -287,6 +401,7 @@ pub fn run_callees(args: &[String]) -> ExitCode {
         "repo": repo_path,
         "symbol": symbol,
         "edge_types": edge_types,
+        "engine": engine,
     });
 
     match client.request("callees", Some(params)) {
@@ -304,7 +419,19 @@ pub fn run_callees(args: &[String]) -> ExitCode {
                     }
                 }
             } else {
-                // Human mode: parse and render (CLI-OUT-3)
+                // Human mode (CLI-OUT-3). 1B: surface the comparison sidecar (if present) and strip
+                // the diagnostic fields so the sqlite-compatible render is byte-unchanged.
+                let mut result = result;
+                if let Some(p) = result
+                    .get("livegraph_compare_sidecar")
+                    .and_then(|v| v.as_str())
+                {
+                    eprintln!("livegraph comparison written to {}", p);
+                }
+                if let Some(obj) = result.as_object_mut() {
+                    obj.remove("livegraph_compare");
+                    obj.remove("livegraph_compare_sidecar");
+                }
                 use crate::presentation::graph_edges::CalleesResponse;
                 match serde_json::from_value::<CalleesResponse>(result) {
                     Ok(response) => {

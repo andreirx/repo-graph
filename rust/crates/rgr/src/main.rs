@@ -51,11 +51,11 @@
 use repo_graph_rgr::cli::print_usage;
 use repo_graph_rgr::commands::{
     run_assess, run_boundaries, run_callees, run_callers, run_check_cmd, run_churn, run_contracts,
-    run_coverage, run_cycles, run_dead, run_declare, run_deps, run_docs, run_doctor, run_enrich,
-    run_explain_cmd, run_gate, run_hook, run_hotspots, run_imports, run_index, run_inferences,
-    run_integrate, run_maintenance, run_metrics, run_modules, run_orient, run_path, run_perf,
-    run_policy, run_refresh, run_repo, run_resource, run_risk, run_stats, run_surfaces, run_trust,
-    run_uninstall, run_violations,
+    run_coverage, run_cycles, run_dead, run_declare, run_deps, run_dev, run_docs, run_doctor,
+    run_enrich, run_explain_cmd, run_gate, run_hook, run_hotspots, run_imports, run_index,
+    run_inferences, run_integrate, run_maintenance, run_metrics, run_modules, run_orient, run_path,
+    run_perf, run_policy, run_refresh, run_repo, run_resource, run_risk, run_stats, run_surfaces,
+    run_trust, run_uninstall, run_violations,
 };
 use std::process::ExitCode;
 
@@ -87,6 +87,7 @@ fn main() -> ExitCode {
         "trust" => run_trust(&args[2..]),
         "callers" => run_callers(&args[2..]),
         "callees" => run_callees(&args[2..]),
+        "dev" => run_dev(&args[2..]),
         "path" => run_path(&args[2..]),
         "imports" => run_imports(&args[2..]),
         "violations" => run_violations(&args[2..]),

@@ -802,14 +802,23 @@ impl ServiceDispatcher {
             }
         };
 
-        DispatchResult::success(
-            &request.id,
-            serde_json::json!({
-                "target": target,
-                "callers": callers,
-                "count": callers.len(),
-            }),
-        )
+        // LIVEGRAPH-INTEGRATION-1B: engine selector (default sqlite = byte-compatible above).
+        let engine = crate::livegraph_feed::Engine::parse(Self::get_optional_string_param(
+            &request.params,
+            "engine",
+        ));
+        let repo_root = Self::get_optional_string_param(&request.params, "repo")
+            .unwrap_or("")
+            .to_string();
+        let value = crate::livegraph_feed::callers_engine_response(
+            engine,
+            &repo_state,
+            &target,
+            callers,
+            symbol,
+            &repo_root,
+        );
+        DispatchResult::success(&request.id, value)
     }
 
     fn handle_callees(&self, request: &Request) -> DispatchResult {
@@ -888,14 +897,23 @@ impl ServiceDispatcher {
             }
         };
 
-        DispatchResult::success(
-            &request.id,
-            serde_json::json!({
-                "target": target,
-                "callees": callees,
-                "count": callees.len(),
-            }),
-        )
+        // LIVEGRAPH-INTEGRATION-1B: engine selector (default sqlite = byte-compatible above).
+        let engine = crate::livegraph_feed::Engine::parse(Self::get_optional_string_param(
+            &request.params,
+            "engine",
+        ));
+        let repo_root = Self::get_optional_string_param(&request.params, "repo")
+            .unwrap_or("")
+            .to_string();
+        let value = crate::livegraph_feed::callees_engine_response(
+            engine,
+            &repo_state,
+            &target,
+            callees,
+            symbol,
+            &repo_root,
+        );
+        DispatchResult::success(&request.id, value)
     }
 
     fn handle_imports(&self, request: &Request) -> DispatchResult {
