@@ -1,7 +1,8 @@
 # WARM-CACHE-VALUEFACTS-1: Value-Facts Sidecar Warm Start (Stage D)
 
 Slice ID: WARM-CACHE-VALUEFACTS-1
-Status: **DESIGN — decisions SURFACED, awaiting ratification. Implementation NOT started.**
+Status: **IMPLEMENTED + live-validated (2026-06-01).** Decisions D1–D5 ratified; commit 1 support
+adapter `f741307`, commit 2 daemon wiring `0b11520`. Acceptance 1–4 live, 5–6 unit (see Completion).
 Depends: WARM-CACHE-DAEMON-WIRING-1 (graph warm load; `feed_partition_ir`; `livegraph_warm_cache`
 seam; `ef98a92`), WARM-CACHE-1 (`CacheValueFactDto`, `encode_value_facts`/`decode_value_facts`,
 sidecar-independence rule), VALUE-JOIN-1 (`ValueFact` model; epoch-bound value facts D7).
@@ -114,3 +115,36 @@ No eviction. No SQLite decommission. No new value-fact KINDS (complexity only, p
 - `docs/slices/warm-cache-daemon-wiring-1.md` (graph warm load; the seam this extends)
 - `docs/slices/warm-cache-1.md` (`CacheValueFactDto`, `encode_value_facts`/`decode_value_facts`, D7 independence)
 - `docs/slices/value-join-1.md` (`ValueFact` model; epoch-bound value facts D7)
+
+## Completion (ratified + live-validated 2026-06-01, EXECUTED)
+
+Ratified: D1 (b) new `repo-graph-warm-cache-feed` adapter crate; D2 combined epoch-coherent feed; D3
+`.vf`, same `CacheKey`; D4 timing/independence; D5 conversion completeness. Commits: `f741307`
+(support adapter), `0b11520` (daemon wiring).
+
+```text
+1. producer refresh      -> writes default.cache (9288B) + default.vf (1925B)                [LIVE PASS]
+2. warm refresh (hit)    -> warmed_from_cache=true, value_facts_warmed=true, value_facts=5,
+                            0.043s (producer skipped) — graph AND facts restored               [LIVE PASS]
+3. delete .vf; refresh   -> warmed_from_cache=true, value_facts_warmed=false, value_facts=0,
+                            graph survives (15 nodes) — D7 independence                          [LIVE PASS]
+4. truncate .vf; refresh -> warmed_from_cache=true, value_facts_warmed=false, no crash          [LIVE PASS]
+5. wrong-key .vf         -> unit-covered (same None fallback, KeyMismatch branch; warm-cache
+                            manifest_key_mismatch_rejected + try_decode_value_facts_sidecar)      [UNIT]
+6. ValueFact round-trip  -> 5 warm-cache-feed tests green                                         [UNIT]
+regression               -> callers makeCircle --engine livegraph -> report; default sqlite
+                            callers/callees unchanged                                            [LIVE PASS]
+```
+
+Recorded notes/divergences:
+- Trust-model added as a 4th adapter dep (beyond the ratified 3) — required to name `IdentityBasis` +
+  `LanguageSupport`; mirrors `repo-graph-livegraph-feed`'s dep set.
+- `feed_partition_ir_with_value_facts` takes `value_facts: Vec<ValueFact>` (the ratified shape); the
+  daemon hit path branches `Some`→this fn / `None`→`feed_partition_ir` (graph-only).
+- `livegraph-feed::value_facts_of` exposed `pub` so the daemon sources the EXACT facts; the duplicate
+  join is negligible on the cold producer path.
+- No live `value_facts` query CLI exists, so per-symbol queryability of warmed facts is unit-covered
+  (`feed_partition_ir_with_value_facts_loads_same_epoch`), not live. A value-facts query surface is a
+  separate slice.
+- A graph cache HIT still requires producer discovery (WARM-CACHE-PRODUCER-ABSENT-1, inherited from
+  WARM-CACHE-DAEMON-WIRING-1). No eviction.
