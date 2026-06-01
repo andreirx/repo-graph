@@ -192,6 +192,11 @@ pub struct RepoState {
 
     /// Storage connection (owned by daemon, not opened per-request).
     pub storage: StorageConnection,
+
+    /// LIVEGRAPH-INTEGRATION-1B: optional in-memory LiveGraph, populated by the dev-only
+    /// `livegraph_preload` method (`None` until preloaded). Interior mutability because `RepoState`
+    /// is shared as `Arc<RepoState>` — preload write-locks, callers/callees read-lock.
+    pub livegraph: parking_lot::RwLock<Option<repo_graph_livegraph::LiveGraph>>,
 }
 
 impl RepoState {
@@ -228,6 +233,7 @@ impl RepoState {
             key,
             coordinator: RepoCoordinator::new(),
             storage,
+            livegraph: parking_lot::RwLock::new(None),
         })
     }
 

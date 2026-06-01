@@ -239,6 +239,7 @@ impl Dispatcher for ServiceDispatcher {
             // ── Read operations ─────────────────────────────────────
             "callers" => self.handle_callers(request),
             "callees" => self.handle_callees(request),
+            "livegraph_preload" => self.handle_livegraph_preload(request),
             "imports" => self.handle_imports(request),
             // RMAPD-PERF-1: These operations emit heartbeat for long queries
             "stats" => self.handle_stats(request, emitter),
@@ -688,6 +689,41 @@ impl ServiceDispatcher {
                 "db_deleted": db_deleted,
             }),
         )
+    }
+
+    /// LIVEGRAPH-INTEGRATION-1B (dev-only): decode a SUPPLIED `index.scip`, ingest it, and feed the
+    /// resulting partition + value facts into the repo's in-memory LiveGraph. The daemon does NOT run
+    /// scip-typescript / package discovery / refresh (that is 1C) — it only decodes + ingests the
+    /// supplied file. Additive: changes no existing serving behavior.
+    fn handle_livegraph_preload(&self, request: &Request) -> DispatchResult {
+        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let partition_id = match Self::get_string_param(&request.params, "partition_id") {
+            Ok(s) => s.to_string(),
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let scip = match Self::get_string_param(&request.params, "scip") {
+            Ok(s) => s.to_string(),
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let source_root = match Self::get_string_param(&request.params, "source_root") {
+            Ok(s) => s.to_string(),
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        match crate::livegraph_feed::preload_partition(
+            &repo_state,
+            &repo_uid,
+            &partition_id,
+            &scip,
+            &source_root,
+        ) {
+            Ok(summary) => DispatchResult::success(&request.id, summary),
+            Err(e) => {
+                DispatchResult::error(&request.id, ErrorDetail::new(ErrorCode::InternalError, e))
+            }
+        }
     }
 
     fn handle_callers(&self, request: &Request) -> DispatchResult {

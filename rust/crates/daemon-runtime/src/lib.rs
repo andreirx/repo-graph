@@ -48,6 +48,7 @@
 
 pub mod dispatch;
 pub mod handlers;
+pub mod livegraph_feed;
 pub mod registry;
 pub mod state;
 pub mod util;

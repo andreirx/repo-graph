@@ -48,6 +48,13 @@ repo-graph-module-queries = { path = "../module-queries" }
 repo-graph-boundary-interaction = { path = "../boundary-interaction" }
 repo-graph-classification = { path = "../classification" }
 
+# LiveGraph runtime + ingestion feed (LIVEGRAPH-INTEGRATION-1B: flag-gated serving from preloaded state).
+# The daemon may DECODE a supplied .scip and feed it; it must NOT run scip-typescript (that is 1C).
+repo-graph-livegraph = { path = "../repo-graph-livegraph" }
+repo-graph-livegraph-feed = { path = "../repo-graph-livegraph-feed" }
+repo-graph-scip-ingest = { path = "../repo-graph-scip-ingest" }
+repo-graph-trust-model = { path = "../repo-graph-trust-model" }
+
 # Git operations (churn, hotspots, risk)
 repo-graph-git = { path = "../git" }
 
