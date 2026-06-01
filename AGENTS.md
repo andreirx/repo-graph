@@ -106,6 +106,35 @@ This builds release binaries, restarts the daemon, and validates the installatio
 
 Persisted feature is incomplete without: write path, read path, refresh behavior, trust impact, CLI visibility, validation.
 
+## Decision Autonomy
+
+Match ceremony to blast radius. Do not stop for low-stakes calls; do not decide unilaterally on
+load-bearing ones. "Decision" in any always-ask rule means an **architecture-boundary or
+invariant-affecting** decision — not naming or local mechanism.
+
+**Decide and record (do NOT stop):**
+
+- Naming (crates, types, fns, tests) once a convention exists.
+- Local implementation detail with no effect across an architectural boundary.
+- Choices the docs, an established convention, or a ratified decision already imply.
+- Commit shape / split once the convention is set; which validation commands to run.
+
+Record the call in one line (slice doc, task packet, or commit body). Decided ≠ silent.
+
+**Stop and ask (BLOCKING):**
+
+- Architecture boundary: a new module/crate boundary, dependency edge, or data shape crossing a boundary.
+- Contradiction with evidence, `docs/`, or a ratified decision.
+- Risk of a false trust claim: anything that could present Layer 2–4 as Layer 0, or mislabel
+  certainty / freshness / ownership.
+- A discovered mechanism that threatens a ratified invariant.
+
+Spec only the **invariants** up front; discover mechanisms by building/probing; stop only when a
+discovered mechanism threatens an invariant — not at every uncertainty. Tie-break: foundational or
+irreversible → stop; local or cheap-to-unwind → decide and record. When you do surface a decision,
+present it as an exhaustive matrix (every cell filled), not loose bullets — gaps belong at sign-off,
+not a later correction.
+
 ## Stop Conditions
 
 Stop and report if:
