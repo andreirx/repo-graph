@@ -1,0 +1,23 @@
+# ── repo-graph-warm-cache ──────────────────────────────────────────
+# WARM-CACHE-1 (Stage D): pure support crate that serializes/validates the warm-cache artifacts
+# (PartitionIr + a ValueFacts sidecar) per PARTITIONED-WARM-CACHE-ARCH-1. Cache-side mirror DTOs +
+# From/TryFrom conversions; NO serde on repo-graph-ir (D8). NO daemon/CLI/LiveGraph/scip-ingest dep,
+# NO warm-start runtime behavior. See docs/slices/warm-cache-1.md.
+[package]
+name = "repo-graph-warm-cache"
+version = "0.1.0"
+edition = "2021"
+description = "Warm-cache serialization/validation support crate (WARM-CACHE-1). Non-production."
+license = "MIT"
+publish = false
+
+[dependencies]
+repo-graph-ir = { path = "../repo-graph-ir" }
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
+thiserror = "1"
+sha2 = "0.10"
+hex = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
