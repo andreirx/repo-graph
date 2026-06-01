@@ -1,8 +1,9 @@
 # WARM-CACHE-PRODUCER-ABSENT-1: Trust a Warm Cache When the Producer Is Absent (Stage D)
 
 Slice ID: WARM-CACHE-PRODUCER-ABSENT-1
-Status: **RATIFIED (2026-06-01, D1–D5) — implementing. See "Ratified" below; the matrices are the
-rationale.**
+Status: **IMPLEMENTED + live-validated (2026-06-01).** Commit 1 key split `f836401`; commit 2 trust
+label `215445d`; commit 3 producer-absent behavior `7de0e8a`. See "Ratified" (the matrices are the
+rationale) and "Completion".
 
 ## Ratified (2026-06-01)
 
@@ -187,3 +188,42 @@ never Fresh.
 - `docs/slices/warm-cache-1.md` (`CacheKey`/`CacheManifest` shapes)
 - `docs/slices/livegraph-integration-1c.md` (`compute_build_inputs_hash`; `discover_scip_typescript`; `ProducerUnavailable`)
 - `agent_docs/architecture.md` (fact-certainty model — freshness must not over-claim)
+
+## Completion (implemented + live-validated 2026-06-01, EXECUTED)
+
+Commits: `f836401` (key split), `215445d` (trust label), `7de0e8a` (producer-absent behavior).
+
+```text
+Unit (all green):
+  peek_manifest_reads_key_without_accepting_corrupt_payload                       (warm-cache)
+  producer_absent_distinct_fingerprints_is_ambiguous_else_one_or_none             (daemon)
+  producer_unavailable_partition_reason_propagates_to_callers/callees/value_facts (livegraph)
+  source_inputs_hash_is_deterministic_and_producer_free                           (daemon)
+  daemon-runtime 72 + livegraph 30 + trust-model 22 + warm-cache 11; clippy -D warnings; fmt --all
+
+Live (synthetic fixture, daemon v0.2.1):
+  1. producer present  -> refresh writes default.cache + default.vf; producer_unavailable=false       [PASS]
+  2. launchctl unsetenv RMAP_SCIP_TYPESCRIPT + daemon restart (fresh LiveGraph)
+  3. refresh           -> status WarmedFromCacheProducerUnavailable; producer_unavailable=true;
+                          warmed_from_cache=true; value_facts_warmed=true; graph(15)+5 value facts
+                          restored; gated on source_inputs_hash (producer-free)                        [PASS]
+  4. callers makeCircle --engine livegraph -> report (served from the degraded graph)                  [PASS]
+```
+
+Acceptance map: #1 producer-present Fresh (PASS, live #1); #2 producer-absent hit Stale+ProducerUnavailable
+(graph LIVE #3/#4; per-query trust UNIT — see limitation); #3 source mismatch reject (the key gates on
+source_inputs_hash — UNIT via key validation); #4 no cache -> ProducerUnavailable (find returns None);
+#5 producer returns -> Fresh (load_partition clears the reason); #6 source hash producer-free (UNIT).
+
+### Limitation (stated)
+The livegraph-engine CLI (`callers`/`callees` `--engine livegraph`) surfaces edges only, NOT the
+`AnswerEnvelope` trust fields (class / freshness / degradation_reasons). So the per-query
+`Stale + ProducerUnavailable` labeling is validated via the refresh response (`producer_unavailable=true`)
++ the 3 unit propagation tests, not directly via the CLI. Exposing the livegraph engine's trust envelope
+is a separate slice (a livegraph-engine trust surface).
+
+### Recorded notes
+- `DegradationReason` gained `Ord` (for the Slot `BTreeSet` — deterministic iteration).
+- The single-file-per-partition layout yields ≤1 candidate, so `Ambiguous` cannot arise today; the guard
+  is a total function over the candidate set (unit-tested) for a future multi-file layout.
+- `producer_fingerprint` version is the hardcoded `0.4.0` until a producer exposes a reliable `--version`.
