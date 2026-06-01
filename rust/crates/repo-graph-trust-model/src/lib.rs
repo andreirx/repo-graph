@@ -128,6 +128,10 @@ pub enum DegradationReason {
     DefinitionOutsideDocument,
     /// Duplicate symbol canonicalized by the deterministic dedup rule; provenance alias kept (Rust).
     DuplicateCanonicalized,
+    /// Producer binary absent at load time; served from a warm cache validated on `source_inputs_hash`
+    /// only — the producer side of the key was NOT re-verified live (WARM-CACHE-PRODUCER-ABSENT-1 D4).
+    /// Pairs with `FreshnessState::Stale` / `AnswerClass::Stale`; never `Fresh`/`Exact`.
+    ProducerUnavailable,
 }
 
 // ── Axis 5: language support maturity ─────────────────────────────
