@@ -132,8 +132,19 @@ total). `repo-graph-ir` + `repo-graph-trust-model` UNTOUCHED. The real complexit
 belongs in the Stage-D wiring layer (dependency direction). Spec `docs/slices/value-join-1.md`.
 
 **STAGE C COMPLETE** (TRUST-MODEL-REBASE-1 → LIVEGRAPH-RUNTIME-1 → QUERY-MIGRATION-1 → VALUE-JOIN-1 all
-implemented). **Next: Stage D** — persistence (warm-cache) + raw-substrate decommission; and the
-ingest→runtime wiring layer (real `PartitionIr` + `ValueFact` feed; dep-direction adapter lives here).
+implemented). **LIVEGRAPH-INTEGRATION-1A IMPLEMENTED** — crate `repo-graph-livegraph-feed` (the outer adapter
+depending on BOTH `repo-graph-scip-ingest` + `repo-graph-livegraph` — the dep direction the runtime
+must never invert). `feed_partition` converts a real `IngestOutcome` → `load_partition` +
+complexity→`ValueFact`→`load_value_facts`. Proven against the committed real `synthetic/index.scip`
+(real producer output, NOT hand-built): `value_facts(Circle.describe)` → Exact; real callers/callees
+non-empty + trust-labelled; epoch-bound (swap→Stale). 3 integration tests; `repo-graph-livegraph` +
+`repo-graph-ir` + `repo-graph-scip-ingest` UNTOUCHED. **Residual:** multi-partition real data NOT
+proven (single committed partition) → LIVEGRAPH-INTEGRATION-XPART-1. Spec
+`docs/slices/livegraph-integration-1a.md`.
+
+**Next: LIVEGRAPH-INTEGRATION-1B** — route shipped `rmap callers/callees` onto the runtime via the
+same `feed_partition` seam (higher blast radius; separate). Then Stage D persistence (warm-cache) +
+RAW-DECOMMISSION.
 
 The remaining spike measures (precise CALLS parity, multi-config C, all-crates Rust,
 M3, M4b) are validation tracks for the IR slice, not blockers. Warm-cache format and

@@ -284,6 +284,15 @@ to canonical keys where joinable; honest raw-anchored fallback elsewhere.
 
 ## Stage D — Persistence and decommission (downstream, lower severity)
 
+### LIVEGRAPH-INTEGRATION-1A — real-data wiring (IMPLEMENTED 2026-06-01)
+Crate `repo-graph-livegraph-feed` (deps scip-ingest + livegraph + ir + trust-model): `feed_partition`
+converts a real `IngestOutcome` (`ir` + `complexity`) into `LiveGraph.load_partition` +
+`load_value_facts`. Proven against the committed real `synthetic/index.scip` (non-hand-built): real
+`value_facts` → Exact, real callers/callees non-empty + trust-labelled, epoch-bound.
+`repo-graph-ir` / `repo-graph-scip-ingest` / `repo-graph-livegraph` untouched. **Residual:**
+multi-partition real data → LIVEGRAPH-INTEGRATION-XPART-1. **1B** routes shipped `rmap` onto the same
+seam (next). Spec `docs/slices/livegraph-integration-1a.md`.
+
 ### PARTITIONED-WARM-CACHE-ARCH-1 (design) + WARM-CACHE-1 (impl) — RK6
 Format decision (rkyv / Cap'n Proto / embedded KV) + partitioned binary write/load +
 coherence/versioning. Done AFTER the runtime is credible (D1=A kept the IR in-memory
