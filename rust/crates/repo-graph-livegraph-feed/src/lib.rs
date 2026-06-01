@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use repo_graph_ir::{CanonicalKey, IdentitySource};
+use repo_graph_ir::{CanonicalKey, IdentitySource, PartitionIr};
 use repo_graph_livegraph::{LiveGraph, ValueFact, ValueFactKind, ValueSubject};
 use repo_graph_scip_ingest::IngestOutcome;
 use repo_graph_trust_model::{IdentityBasis, LanguageSupport};
@@ -70,4 +70,20 @@ pub fn feed_partition(
     let value_facts = value_facts_of(&outcome);
     lg.load_partition(id, outcome.ir, language);
     lg.load_value_facts(id, value_facts);
+}
+
+/// Feed a decoded `PartitionIr` (e.g. from the warm cache — WARM-CACHE-DAEMON-WIRING-1) into the
+/// runtime, **graph-only**: load the partition resident with the SAME xref / residency behavior as
+/// [`feed_partition`], but WITHOUT value facts.
+///
+/// A warm graph load deliberately leaves `value_facts` empty: the partition cache carries graph
+/// topology only (no complexity), so `value_facts` queries degrade to `Unavailable` — never faked as a
+/// fresh-empty result. A subsequent producer refresh ([`feed_partition`]) repopulates them; caching +
+/// restoring value facts is WARM-CACHE-VALUEFACTS-1.
+///
+/// `id` is the partition slot id (as in [`feed_partition`]); the runtime keys slots per-partition
+/// within a per-repo `LiveGraph`, so repo identity rides in the IR's canonical keys, not the slot id.
+/// No `IngestOutcome` / `repo-graph-scip-ingest` dependency is needed at this callsite.
+pub fn feed_partition_ir(lg: &mut LiveGraph, id: &str, ir: PartitionIr, language: LanguageSupport) {
+    lg.load_partition(id, ir, language);
 }
