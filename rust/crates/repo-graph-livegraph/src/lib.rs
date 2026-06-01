@@ -638,34 +638,46 @@ impl LiveGraph {
         })
         .0 == AnswerClass::Exact;
 
-        if !owned {
-            // Ownership degraded (raw-anchored); the VALUE is preserved; never Exact-owned. For TS
-            // the reachable non-owned basis is `ScipSynthesized` (fallback identity).
-            return AnswerEnvelope::partial(
-                Some(data),
-                vec![DegradationReason::ScipFallbackIdentity],
-                Vec::new(),
-                freshness,
-                Vec::new(),
-                languages,
-            )
-            .expect("partial with reason is valid");
-        }
+        // Ownership degradation is carried in the reasons regardless of class (the VALUE stays true;
+        // only the ownership claim is degraded). For TS the reachable non-owned basis is
+        // `ScipSynthesized` (fallback identity).
+        let reasons: Vec<DegradationReason> = if owned {
+            Vec::new()
+        } else {
+            vec![DegradationReason::ScipFallbackIdentity]
+        };
 
-        // Owned: class follows freshness. A value fact is AST-LOCAL — under `PrecisionPending` an
-        // AST-derived basis stays `Exact` via the `NotScipDependent` proof (the invariant-6 path
-        // `callers`/`callees` avoid); a SCIP-backed owned basis degrades to `Partial`.
+        // Precedence: FRESHNESS DOMINATES the answer class (consistent with callers/callees + the
+        // epoch contract). Stale/RefreshFailed last-good → `Stale`; ownership degradation rides in
+        // `degradation_reasons`, never by downgrading a stale answer to `Partial`.
         match freshness {
-            FreshnessState::Fresh => AnswerEnvelope::exact(
-                data,
-                QueryCompleteness::Complete,
-                FreshnessState::Fresh,
-                Vec::new(),
-                languages,
-            )
-            .expect("exact invariant holds"),
-            FreshnessState::PrecisionPending => match NotScipDependent::prove(&[basis]) {
-                Some(proof) => AnswerEnvelope::exact_precision_pending(
+            // Fresh: ownership decides — owned → Exact; degraded → Partial.
+            FreshnessState::Fresh => {
+                if owned {
+                    AnswerEnvelope::exact(
+                        data,
+                        QueryCompleteness::Complete,
+                        FreshnessState::Fresh,
+                        Vec::new(),
+                        languages,
+                    )
+                    .expect("exact invariant holds")
+                } else {
+                    AnswerEnvelope::partial(
+                        Some(data),
+                        reasons,
+                        Vec::new(),
+                        FreshnessState::Fresh,
+                        Vec::new(),
+                        languages,
+                    )
+                    .expect("partial with reason is valid")
+                }
+            }
+            // PrecisionPending: an AST-owned fact stays Exact via NotScipDependent (the invariant-6
+            // path callers/callees avoid); a degraded or SCIP-backed owned fact → Partial + PP.
+            FreshnessState::PrecisionPending => match (owned, NotScipDependent::prove(&[basis])) {
+                (true, Some(proof)) => AnswerEnvelope::exact_precision_pending(
                     data,
                     QueryCompleteness::Complete,
                     proof,
@@ -673,9 +685,9 @@ impl LiveGraph {
                     languages,
                 )
                 .expect("exact_precision_pending invariant holds"),
-                None => AnswerEnvelope::partial(
+                _ => AnswerEnvelope::partial(
                     Some(data),
-                    Vec::new(),
+                    reasons,
                     Vec::new(),
                     FreshnessState::PrecisionPending,
                     Vec::new(),
@@ -683,16 +695,10 @@ impl LiveGraph {
                 )
                 .expect("partial precision-pending is valid"),
             },
-            // Stale / RefreshFailed / epoch-mismatch → Stale (last-good).
-            _ => AnswerEnvelope::stale(
-                data,
-                freshness,
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                languages,
-            )
-            .expect("stale invariant holds"),
+            // Stale / RefreshFailed (incl. epoch mismatch): freshness dominates → Stale, last-good
+            // served, ownership degradation carried in the reasons.
+            _ => AnswerEnvelope::stale(data, freshness, reasons, Vec::new(), Vec::new(), languages)
+                .expect("stale invariant holds"),
         }
     }
 }
@@ -1183,5 +1189,48 @@ mod tests {
         let a = lg.value_facts("engine.foo");
         assert_eq!(a.class(), AnswerClass::Exact);
         assert_eq!(a.freshness(), FreshnessState::PrecisionPending);
+    }
+
+    #[test]
+    fn raw_anchored_stale_value_fact_returns_stale_with_reason() {
+        // Precedence: freshness dominates. A non-owned (raw-anchored) fact on a STALE partition is
+        // class Stale (not Partial); the ownership degradation rides in degradation_reasons.
+        let mut lg = vf_lg();
+        lg.load_value_facts(
+            "engine",
+            vec![complexity_fact(
+                "engine.foo",
+                9,
+                IdentityBasis::ScipSynthesized,
+            )],
+        );
+        lg.mark_stale("engine");
+        let a = lg.value_facts("engine.foo");
+        assert_eq!(a.class(), AnswerClass::Stale);
+        assert_eq!(a.freshness(), FreshnessState::Stale);
+        assert!(a
+            .degradation_reasons()
+            .contains(&DegradationReason::ScipFallbackIdentity));
+        assert_eq!(a.data().unwrap().facts[0].value, 9); // value preserved
+    }
+
+    #[test]
+    fn raw_anchored_refresh_failed_value_fact_returns_stale_with_reason() {
+        let mut lg = vf_lg();
+        lg.load_value_facts(
+            "engine",
+            vec![complexity_fact(
+                "engine.foo",
+                9,
+                IdentityBasis::ScipSynthesized,
+            )],
+        );
+        lg.mark_refresh_failed("engine");
+        let a = lg.value_facts("engine.foo");
+        assert_eq!(a.class(), AnswerClass::Stale);
+        assert_eq!(a.freshness(), FreshnessState::RefreshFailed);
+        assert!(a
+            .degradation_reasons()
+            .contains(&DegradationReason::ScipFallbackIdentity));
     }
 }

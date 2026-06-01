@@ -82,17 +82,17 @@ on unload like the xref summary.
    superseded epoch → **`Stale`** (swap-without-reload).
 4. **Residency:** defining partition non-resident → **`Partial` + `missing=[partition]`** (retained
    facts served as last-good; never silent-empty).
-5. **Ownership (D2):** owned iff the fact's basis is `SymbolOwnership`-complete (derived via
-   `classify_answer(SymbolOwnership, [basis], Fresh, [])` == `Exact`).
-   - **Owned + Fresh → `Exact`** (symbol-owned; value + basis + provenance).
-   - **Owned + `PrecisionPending`** and basis is AST-derived (not SCIP-backed): **`Exact` via
-     `exact_precision_pending` + `NotScipDependent` proof** — complexity is AST-local, so the
-     invariant-6 path `callers`/`callees` avoid is admissible here. (SCIP-backed owned basis →
-     `Partial` + `PrecisionPending`.)
-   - **Owned + `Stale`/`RefreshFailed`/epoch-mismatch → `Stale`** (last-good).
-   - **NOT owned (basis not `SymbolOwnership`-complete, e.g. `ScipSynthesized`) → `Partial`** + the
-     ownership degraded to raw-anchored + `DegradationReason` (`ScipFallbackIdentity` for
-     `ScipSynthesized`). **The value is preserved; NEVER `Exact`-owned.**
+5. **Class precedence — FRESHNESS DOMINATES** (consistent with callers/callees + the epoch contract).
+   Ownership (D2) is owned iff the basis is `SymbolOwnership`-complete (derived via
+   `classify_answer(SymbolOwnership, [basis], Fresh, [])` == `Exact`); ownership degradation rides in
+   `degradation_reasons`, NEVER by downgrading a stale answer to `Partial`:
+   - **`Stale` / `RefreshFailed` (incl. epoch-mismatch) → `Stale`** (last-good), owned OR not; if not
+     owned, `degradation_reasons` carries `ScipFallbackIdentity`.
+   - **`PrecisionPending` + owned + AST-derived → `Exact`** via `exact_precision_pending` +
+     `NotScipDependent` (the invariant-6 path `callers`/`callees` avoid). **Otherwise (non-owned, or
+     SCIP-backed owned) → `Partial` + `PrecisionPending`.**
+   - **`Fresh` + owned → `Exact`**; **`Fresh` + not owned → `Partial`** + `ScipFallbackIdentity`.
+   In all cases the measured VALUE is preserved; a non-owned fact is NEVER `Exact`-owned.
 6. **Multi-language:** `contributing_languages` preserved (the defining partition's language; a union
    when future facts span partitions).
 
@@ -112,6 +112,8 @@ value_fact_epoch_mismatch_stale_or_precision_pending
 partition_swap_without_value_reload_marks_value_facts_stale
 nonresident_partition_value_facts_partial_or_unavailable
 contributing_languages_preserved
+raw_anchored_stale_value_fact_returns_stale_with_reason
+raw_anchored_refresh_failed_value_fact_returns_stale_with_reason
 ```
 Plus the criteria: attached fact carries `IdentityBasis` + provenance; raw-anchored cannot be `Exact`
 symbol-owned; missing → `Unavailable` not empty; stale/refresh propagates; AST-only fact `Exact`
