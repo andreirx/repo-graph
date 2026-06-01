@@ -1,7 +1,9 @@
 # WARM-CACHE-DAEMON-WIRING-1: Wire the Warm Cache into the Daemon Refresh Path (Stage D)
 
 Slice ID: WARM-CACHE-DAEMON-WIRING-1
-Status: **DESIGN — decisions ratified (2026-06-01); spec recorded; implementation NOT started.**
+Status: **IMPLEMENTED + live-validated (2026-06-01).** Commit 1 support `feed_partition_ir` (`103f76b`);
+commit 2 daemon wiring (`ef98a92`). All 6 acceptance checks pass on the synthetic fixture (see
+Completion). Next: WARM-CACHE-VALUEFACTS-1.
 Depends: WARM-CACHE-1 (`repo-graph-warm-cache`, incl. the `repo_graph_version` key fix `7b0eb4c`),
 LIVEGRAPH-INTEGRATION-1C (daemon-owned synchronous SCIP refresh: `run_refresh`,
 `compute_build_inputs_hash`, `discover_scip_typescript`, `feed_partition`), PARTITIONED-WARM-CACHE-ARCH-1
@@ -150,3 +152,44 @@ Out of scope files: repo-graph-warm-cache (done), scip-ingest, storage/SQLite, r
 - `docs/slices/partitioned-warm-cache-arch-1.md` (D3 key identity refinement; D5 atomic write; D6 refresh interaction; D7 sidecar independence)
 - `docs/slices/livegraph-integration-1c.md` (`run_refresh`, `compute_build_inputs_hash`, `feed_partition`)
 - `docs/architecture/dataflow-hotpath-map.md` (§5 indexer-bound; §9 warm-cache implications)
+
+## Completion (live-validated 2026-06-01, EXECUTED)
+
+Commits: `103f76b` (support `feed_partition_ir`) + `ef98a92` (daemon wiring). Validated against the
+synthetic fixture (`rust/crates/repo-graph-scip-ingest/tests/fixtures/synthetic`) via the installed
+daemon (v0.2.1) with the Node-18 producer wrapper:
+
+```text
+1. cleared .rgr/warm-cache
+2. rmap dev livegraph-refresh         -> warmed_from_cache=false, producer ran, default.cache (9288B) created
+3. rmap dev livegraph-refresh (again) -> warmed_from_cache=true, producer SKIPPED (0.177s vs ~2.4s), value_facts=0
+4. rmap callers makeCircle --engine livegraph -> report (served from the cache-populated LiveGraph)
+5. truncate default.cache to 7 bytes; refresh -> warmed_from_cache=false, producer fallback (2.436s), no crash
+6. rmap callers makeCircle / callees report (default sqlite) -> unchanged (report; Circle.describe + makeCircle)
+```
+
+Tests: 71 daemon-runtime lib tests (incl. 3 new `livegraph_warm_cache`) + the warm-cache crate's 10 +
+`feed_partition_ir` (live) green; `clippy -D warnings` clean; `cargo fmt --all --check` clean.
+
+Recorded notes: the `PartitionIr` is cloned before the feed so the cache write is strictly after the
+swap (cold producer path only). A cache HIT still runs producer DISCOVERY (the `build_inputs_hash`
+embeds producer identity); only producer EXECUTION is skipped — serving purely from cache with an
+absent producer is out of scope (would need hash/producer decoupling). No eviction: stale entries are
+inert (KeyMismatch) but accumulate on disk (tech debt).
+
+## Known limitation (producer-absent warm start)
+
+```text
+Known limitation:
+Current warm-cache lookup still requires producer discovery because CacheKey includes indexer
+identity/version. A valid cache cannot yet be used when the producer is absent. This preserves strict
+coherence but limits warm-start usefulness in producer-unavailable environments.
+
+Follow-up:
+WARM-CACHE-PRODUCER-ABSENT-1 — decide whether a cache may be trusted from manifest + source hash when
+the producer binary is absent, and what trust/freshness label it must carry.
+```
+
+This is NOT solved in this slice. "Warm cache works even when the producer is unavailable" is NOT
+proven and must not be implied: strict key validation (incl. producer identity) is correct, but it
+means a hit currently depends on producer discovery succeeding.
