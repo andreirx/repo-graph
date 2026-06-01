@@ -1,8 +1,9 @@
 # LIVEGRAPH-INTEGRATION-1B: Flag-Gated Shipped Query Serving from Preloaded LiveGraph (Stage D)
 
 Slice ID: LIVEGRAPH-INTEGRATION-1B
-Status: **DESIGN RATIFIED (phase-1; D2a=(a) pilot pre-load). HIGH blast radius (shipped `rmapd` +
-`rmap`). TASK PACKET REQUIRED before code; CODE BLOCKED on the shipped-surface sub-decisions (S1–S3).**
+Status: **DESIGN RATIFIED (phase-1; D2a=(a) pilot pre-load; S1–S3 ratified). HIGH blast radius (shipped
+`rmapd` + `rmap`). Grounding the RUST transport/CLI surface before code — preload + flag must NOT
+depend on possibly-stale TypeScript tooling.**
 Depends: LIVEGRAPH-INTEGRATION-1A (`repo-graph-livegraph-feed::feed_partition`), VALUE-JOIN-1 /
 QUERY-MIGRATION-1.
 Track: Stage D integration, sub-slice **1B** (after 1A; before 1C).
@@ -67,20 +68,46 @@ LIVEGRAPH-INTEGRATION-1B: flag-gated shipped query serving from preloaded LiveGr
 LIVEGRAPH-INTEGRATION-1C: daemon SCIP indexing and refresh orchestration
 ```
 
-## Shipped-surface sub-decisions (S1–S3) — confirm in the TASK PACKET before code
+## Shipped-surface sub-decisions (S1–S3) — RATIFIED
 
-These touch shipped daemon/CLI behavior; the task packet surfaces them for sign-off (the build does
-NOT start until they are confirmed):
+**S1 — pilot pre-load: a dev-only DAEMON TRANSPORT METHOD, NOT a public CLI command, NOT `rgr`.** The
+TypeScript-side tooling may be stale vs the SQLite schema, so the preload must NOT depend on it.
+- Add a dev-only daemon method `livegraph_preload` (params `{repo, partition_id, scip, source_root}`),
+  invoked by a Rust integration/dev harness over daemon transport. (Acceptable alternative: a hidden
+  Rust-side `rmap dev livegraph-preload` ONLY if Rust `rmap` owns the transport path cleanly — never
+  the TS layer.)
+- The daemon may DECODE/INGEST a supplied existing `index.scip` and feed the resulting `PartitionIr` +
+  `ValueFact`s into LiveGraph. The daemon must NOT run scip-typescript, NOT do package discovery, NOT
+  do refresh orchestration. STOP CONDITION: if preload needs daemon-side SCIP generation → move to 1C.
+- **Pilot repo: the committed `synthetic/` fixture first** (SQLite/tree-sitter indexes it as the
+  oracle; the LiveGraph path preloads its committed real `index.scip`; CI/dev-repeatable; no FRAKTAG
+  dependency). FRAKTAG only as optional manual evidence.
 
-- **S1 — pilot pre-load trigger:** (a) hidden `rgr`/`rmap` dev command that ingests + `feed_partition`s
-  a repo into the running daemon's LiveGraph · (b) daemon-start config/env pointing at a pre-ingested
-  partition set · (c) test-only harness. *Lean (a)* (a real daemon path is needed so `rmap` can serve
-  from it; (c) cannot satisfy "rmap uses the LiveGraph path").
-- **S2 — serving flag surface:** the engine selector threaded CLI → daemon-transport request →
-  dispatch (e.g. `rmap callers --engine livegraph` / `--livegraph`). *Confirm name + that it is opt-in,
-  default unchanged.*
-- **S3 — comparison surface:** where the classified mismatch report lives (a `rmap`/`rgr` diagnostic
-  subcommand vs a dev harness vs structured logs). *Confirm.*
+**S2 — serving flag: explicit engine selector `--engine sqlite|livegraph|compare`, default `sqlite`.**
+- `sqlite` — current behavior, byte-compatible default. `livegraph` — use LiveGraph if present, else
+  fallback (D4). `compare` — run both, return the normal SQLite output, emit the classified report.
+- `livegraph` is NEVER the default in 1B. (If the current CLI style resists `--engine`, use an
+  equivalent hidden/dev flag but keep the three modes — Rust-side only.)
+
+**S3 — comparison: `--engine compare` is the primary surface.** stdout stays the SQLite-compatible
+answer; the classified report goes to a structured sidecar `.rgr/livegraph-compare/<timestamp>.json`
+(NOT logs-only). Buckets: the 6 classes.
+
+**Fallback guardrail:** `--engine livegraph` miss (no preloaded partition) → fall back to `sqlite`,
+record `PartitionUnavailable`, do NOT fail the user-facing query. Only a future explicit strict mode
+may fail.
+
+## Build order (ratified)
+
+```text
+1. Transport enum / request DTO: engine mode (sqlite|livegraph|compare) + the livegraph_preload method.
+2. Daemon state: RepoState += optional LiveGraph.
+3. Hidden preload: daemon method livegraph_preload (decode supplied .scip → feed_partition).
+4. callers LiveGraph path behind the engine selector (+ fallback).
+5. callees LiveGraph path behind the engine selector (+ fallback).
+6. compare-mode classified report (sidecar).
+7. Validation against the committed synthetic fixture (live rmap sqlite vs livegraph/compare).
+```
 
 ## Acceptance (ratified — phase-1)
 
