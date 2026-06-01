@@ -5,7 +5,7 @@
 use repo_graph_livegraph::LiveGraph;
 use repo_graph_scip_ingest::{decode_index, ingest_partition};
 use repo_graph_storage::queries::{CalleeResult, CallerResult, ResolvedSymbol};
-use repo_graph_trust_model::{AnswerClass, Granularity, LanguageSupport};
+use repo_graph_trust_model::{AnswerClass, FreshnessState, Granularity, LanguageSupport};
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -68,21 +68,99 @@ pub fn preload_partition(
 
 // ── LIVEGRAPH-INTEGRATION-1B serving + comparison (S2 engine flag, S3 compare report) ──
 
-/// Engine selector (S2). Default `Sqlite` (byte-compatible current behavior).
+/// Engine selector (S2 + QUERY-MIGRATION-CLI-1). Default `Auto`: serve LiveGraph when complete
+/// (Exact + Fresh + TS-only), else fall back to SQLite — with `backend_used`/`fallback_reason` metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Engine {
+    /// LiveGraph-when-complete, else labelled SQLite fallback (the new default; QUERY-MIGRATION-CLI-1).
+    Auto,
+    /// Force the SQLite path (the old default; an explicit escape hatch).
     Sqlite,
+    /// Force LiveGraph explicitly (strict; serves even Partial/Stale — but still falls back when the
+    /// partition is unavailable, the existing 1B behavior). NOT a strict-failure mode in this slice.
     LiveGraph,
+    /// SQLite answer + a LiveGraph compare report + sidecar (diagnostic).
     Compare,
 }
 
 impl Engine {
-    /// Parse the `engine` param; anything other than `livegraph`/`compare` is `Sqlite` (default).
+    /// Parse the `engine` param. No param / unknown → `Auto` (QUERY-MIGRATION-CLI-1 default). Explicit
+    /// `sqlite`/`livegraph`/`compare`/`auto` select that engine.
     pub fn parse(s: Option<&str>) -> Engine {
         match s {
+            Some("sqlite") => Engine::Sqlite,
             Some("livegraph") => Engine::LiveGraph,
             Some("compare") => Engine::Compare,
-            _ => Engine::Sqlite,
+            _ => Engine::Auto,
+        }
+    }
+}
+
+/// Why the `Auto` (or strict-LiveGraph) path fell back to SQLite (QUERY-MIGRATION-CLI-1). Surfaced in
+/// the JSON `fallback_reason`; `null` when the served answer IS from LiveGraph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FallbackReason {
+    /// No LiveGraph for this repo / target (not preloaded/refreshed, or `Unavailable`).
+    LiveGraphUnavailable,
+    /// LiveGraph answered but not `Exact` (e.g. a non-resident contributing partition).
+    LiveGraphPartial,
+    /// LiveGraph answer is not `Fresh` (Stale / RefreshFailed / PrecisionPending — incl. producer-absent).
+    LiveGraphStale,
+    /// Contributing languages are not exclusively `TypeScriptPrimary` (D4 scope).
+    LiveGraphUnsupportedLanguage,
+    /// The LiveGraph answer could not be rendered into the response shape (reserved; not hit for
+    /// callers/callees, whose keys always render).
+    LiveGraphRenderUnsupported,
+    /// The LiveGraph engine errored (reserved; the callers/callees query path does not error today).
+    LiveGraphError,
+}
+
+impl FallbackReason {
+    /// Stable string for the JSON `fallback_reason`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FallbackReason::LiveGraphUnavailable => "LiveGraphUnavailable",
+            FallbackReason::LiveGraphPartial => "LiveGraphPartial",
+            FallbackReason::LiveGraphStale => "LiveGraphStale",
+            FallbackReason::LiveGraphUnsupportedLanguage => "LiveGraphUnsupportedLanguage",
+            FallbackReason::LiveGraphRenderUnsupported => "LiveGraphRenderUnsupported",
+            FallbackReason::LiveGraphError => "LiveGraphError",
+        }
+    }
+}
+
+/// A LiveGraph callers/callees answer reduced to what the `Auto` decision needs.
+struct LgAuto {
+    class: AnswerClass,
+    freshness: FreshnessState,
+    /// True iff the contributing languages are non-empty and ALL `TypeScriptPrimary` (D4).
+    ts_only: bool,
+    keys: Vec<String>,
+}
+
+fn ts_only(langs: &std::collections::BTreeSet<LanguageSupport>) -> bool {
+    !langs.is_empty()
+        && langs
+            .iter()
+            .all(|l| matches!(l, LanguageSupport::TypeScriptPrimary))
+}
+
+/// The `Auto` decision (QUERY-MIGRATION-CLI-1 D3/D4): serve LiveGraph keys ONLY when Exact + Fresh +
+/// TS-only; otherwise the labelled SQLite fallback. Freshness is checked before class so a Stale answer
+/// reports `LiveGraphStale` (not `LiveGraphPartial`).
+fn auto_outcome(lg: Option<LgAuto>) -> Result<Vec<String>, FallbackReason> {
+    match lg {
+        None => Err(FallbackReason::LiveGraphUnavailable),
+        Some(a) => {
+            if a.freshness != FreshnessState::Fresh {
+                Err(FallbackReason::LiveGraphStale)
+            } else if a.class != AnswerClass::Exact {
+                Err(FallbackReason::LiveGraphPartial)
+            } else if !a.ts_only {
+                Err(FallbackReason::LiveGraphUnsupportedLanguage)
+            } else {
+                Ok(a.keys)
+            }
         }
     }
 }
@@ -192,6 +270,47 @@ pub fn livegraph_callee_keys(
     Some((env.class(), keys))
 }
 
+/// LiveGraph `callers` answer reduced for the `Auto` decision (class + freshness + TS-only + keys).
+/// `None` = not usable (`Unavailable` / no LiveGraph) → `Auto` falls back with `LiveGraphUnavailable`.
+fn livegraph_callers_auto(repo_state: &RepoState, target: &str) -> Option<LgAuto> {
+    let guard = repo_state.livegraph.read();
+    let lg = guard.as_ref()?;
+    let env = lg.callers(target, Granularity::CallerDetail);
+    if env.class() == AnswerClass::Unavailable {
+        return None;
+    }
+    let keys = env
+        .data()
+        .map(|d| d.caller_identities.iter().map(|(_, k)| k.clone()).collect())
+        .unwrap_or_default();
+    Some(LgAuto {
+        class: env.class(),
+        freshness: env.freshness(),
+        ts_only: ts_only(env.contributing_languages()),
+        keys,
+    })
+}
+
+/// LiveGraph `callees` answer reduced for the `Auto` decision (symmetric to [`livegraph_callers_auto`]).
+fn livegraph_callees_auto(repo_state: &RepoState, target: &str) -> Option<LgAuto> {
+    let guard = repo_state.livegraph.read();
+    let lg = guard.as_ref()?;
+    let env = lg.callees(target, Granularity::CallerDetail);
+    if env.class() == AnswerClass::Unavailable {
+        return None;
+    }
+    let keys = env
+        .data()
+        .map(|d| d.callee_identities.iter().map(|(k, _)| k.clone()).collect())
+        .unwrap_or_default();
+    Some(LgAuto {
+        class: env.class(),
+        freshness: env.freshness(),
+        ts_only: ts_only(env.contributing_languages()),
+        keys,
+    })
+}
+
 fn caller_results_from_keys(keys: &[String]) -> Vec<CallerResult> {
     keys.iter()
         .map(|k| CallerResult {
@@ -249,9 +368,28 @@ pub fn write_compare_sidecar(repo_root: &str, report: &CompareReport) -> Result<
     Ok(path.display().to_string())
 }
 
-/// Build the `callers` response for the selected engine. `Sqlite` (and the LiveGraph-miss fallback)
-/// return the byte-compatible `{target, callers, count}`. `Compare` returns the SQLite answer plus a
-/// `livegraph_compare` report + `livegraph_compare_sidecar` path.
+/// `{target, callers, count, backend_used, fallback_reason}` (QUERY-MIGRATION-CLI-1). `fallback_reason`
+/// is `null` iff `backend_used == "livegraph"`.
+fn callers_value(
+    target: &ResolvedSymbol,
+    callers: Vec<CallerResult>,
+    backend_used: &str,
+    fallback_reason: Option<FallbackReason>,
+) -> Value {
+    let count = callers.len();
+    json!({
+        "target": target,
+        "callers": callers,
+        "count": count,
+        "backend_used": backend_used,
+        "fallback_reason": fallback_reason.map(|r| r.as_str()),
+    })
+}
+
+/// Build the `callers` response for the selected engine (QUERY-MIGRATION-CLI-1). `Auto` serves
+/// LiveGraph when Exact+Fresh+TS-only, else a labelled SQLite fallback. ALL responses carry
+/// `backend_used` + `fallback_reason`; the human renderer ignores them (format unchanged), the
+/// `--json` renderer surfaces them. `Compare` keeps the diagnostic sidecar (serves SQLite).
 pub fn callers_engine_response(
     engine: Engine,
     repo_state: &RepoState,
@@ -261,20 +399,27 @@ pub fn callers_engine_response(
     repo_root: &str,
 ) -> Value {
     match engine {
-        Engine::Sqlite => {
-            let count = sqlite_callers.len();
-            json!({ "target": target, "callers": sqlite_callers, "count": count })
+        Engine::Sqlite => callers_value(target, sqlite_callers, "sqlite", None),
+        Engine::Auto => {
+            match auto_outcome(livegraph_callers_auto(repo_state, &target.stable_key)) {
+                Ok(keys) => {
+                    callers_value(target, caller_results_from_keys(&keys), "livegraph", None)
+                }
+                Err(reason) => callers_value(target, sqlite_callers, "sqlite", Some(reason)),
+            }
         }
         Engine::LiveGraph => match livegraph_caller_keys(repo_state, &target.stable_key) {
             Some((_class, keys)) => {
-                let results = caller_results_from_keys(&keys);
-                let count = results.len();
-                json!({ "target": target, "callers": results, "count": count })
+                callers_value(target, caller_results_from_keys(&keys), "livegraph", None)
             }
-            None => {
-                let count = sqlite_callers.len();
-                json!({ "target": target, "callers": sqlite_callers, "count": count })
-            }
+            // Strict LiveGraph still falls back when the partition is unavailable (existing 1B
+            // behavior; NOT a new strict-failure mode in this slice).
+            None => callers_value(
+                target,
+                sqlite_callers,
+                "sqlite",
+                Some(FallbackReason::LiveGraphUnavailable),
+            ),
         },
         Engine::Compare => {
             let sqlite_keys: Vec<String> = sqlite_callers
@@ -284,8 +429,8 @@ pub fn callers_engine_response(
             let lg = livegraph_caller_keys(repo_state, &target.stable_key);
             let report = compare_keys(symbol, "callers", &sqlite_keys, lg);
             let sidecar = write_compare_sidecar(repo_root, &report).ok();
-            let count = sqlite_callers.len();
-            let mut v = json!({ "target": target, "callers": sqlite_callers, "count": count });
+            // Compare deliberately SERVES the SQLite answer + the diagnostic report.
+            let mut v = callers_value(target, sqlite_callers, "sqlite", None);
             v["livegraph_compare"] = serde_json::to_value(&report).unwrap_or(Value::Null);
             if let Some(p) = sidecar {
                 v["livegraph_compare_sidecar"] = json!(p);
@@ -295,7 +440,25 @@ pub fn callers_engine_response(
     }
 }
 
-/// Build the `callees` response for the selected engine (symmetric to [`callers_engine_response`]).
+/// `{target, callees, count, backend_used, fallback_reason}` (QUERY-MIGRATION-CLI-1).
+fn callees_value(
+    target: &ResolvedSymbol,
+    callees: Vec<CalleeResult>,
+    backend_used: &str,
+    fallback_reason: Option<FallbackReason>,
+) -> Value {
+    let count = callees.len();
+    json!({
+        "target": target,
+        "callees": callees,
+        "count": count,
+        "backend_used": backend_used,
+        "fallback_reason": fallback_reason.map(|r| r.as_str()),
+    })
+}
+
+/// Build the `callees` response for the selected engine (symmetric to [`callers_engine_response`];
+/// QUERY-MIGRATION-CLI-1).
 pub fn callees_engine_response(
     engine: Engine,
     repo_state: &RepoState,
@@ -305,20 +468,25 @@ pub fn callees_engine_response(
     repo_root: &str,
 ) -> Value {
     match engine {
-        Engine::Sqlite => {
-            let count = sqlite_callees.len();
-            json!({ "target": target, "callees": sqlite_callees, "count": count })
+        Engine::Sqlite => callees_value(target, sqlite_callees, "sqlite", None),
+        Engine::Auto => {
+            match auto_outcome(livegraph_callees_auto(repo_state, &target.stable_key)) {
+                Ok(keys) => {
+                    callees_value(target, callee_results_from_keys(&keys), "livegraph", None)
+                }
+                Err(reason) => callees_value(target, sqlite_callees, "sqlite", Some(reason)),
+            }
         }
         Engine::LiveGraph => match livegraph_callee_keys(repo_state, &target.stable_key) {
             Some((_class, keys)) => {
-                let results = callee_results_from_keys(&keys);
-                let count = results.len();
-                json!({ "target": target, "callees": results, "count": count })
+                callees_value(target, callee_results_from_keys(&keys), "livegraph", None)
             }
-            None => {
-                let count = sqlite_callees.len();
-                json!({ "target": target, "callees": sqlite_callees, "count": count })
-            }
+            None => callees_value(
+                target,
+                sqlite_callees,
+                "sqlite",
+                Some(FallbackReason::LiveGraphUnavailable),
+            ),
         },
         Engine::Compare => {
             let sqlite_keys: Vec<String> = sqlite_callees
@@ -328,8 +496,7 @@ pub fn callees_engine_response(
             let lg = livegraph_callee_keys(repo_state, &target.stable_key);
             let report = compare_keys(symbol, "callees", &sqlite_keys, lg);
             let sidecar = write_compare_sidecar(repo_root, &report).ok();
-            let count = sqlite_callees.len();
-            let mut v = json!({ "target": target, "callees": sqlite_callees, "count": count });
+            let mut v = callees_value(target, sqlite_callees, "sqlite", None);
             v["livegraph_compare"] = serde_json::to_value(&report).unwrap_or(Value::Null);
             if let Some(p) = sidecar {
                 v["livegraph_compare_sidecar"] = json!(p);

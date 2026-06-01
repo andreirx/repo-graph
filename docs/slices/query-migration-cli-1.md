@@ -1,7 +1,8 @@
 # QUERY-MIGRATION-CLI-1: callers/callees Default → LiveGraph-with-SQLite-Fallback (Stage D)
 
 Slice ID: QUERY-MIGRATION-CLI-1
-Status: **DESIGN — fallback contract + D1–D5 ratified (2026-06-01). Implementation NOT started.**
+Status: **IMPLEMENTED + live-validated (2026-06-01).** Default callers/callees engine flipped to `auto`
+(LiveGraph-when-complete, else labelled SQLite fallback). See "Completion".
 Depends: SQLITE-RAW-DECOMMISSION-READINESS-1 (the §4 fallback decision), LIVEGRAPH-INTEGRATION-1B
 (the `--engine` selector + `callers_engine_response`/`callees_engine_response`), WARM-CACHE-* (warm
 LiveGraph population), the trust model (`AnswerClass`/`FreshnessState`).
@@ -39,7 +40,9 @@ default at `daemon-runtime/src/livegraph_feed.rs:82`; CLI default `"sqlite"` at 
 
 ### D2 — fallback visibility
 ```text
-human output: UNCHANGED (byte-compatible with today's callers/callees rendering)
+human output: FORMAT unchanged (same rendering shape as today). CONTENT may differ ONLY when the
+              backend differs (LiveGraph vs SQLite edges) — and any such difference must be explainable
+              by the JSON metadata (backend_used) and the compare sidecar. NOT byte-identical by claim.
 JSON (--json): adds backend_used + fallback_reason
 compare sidecar (--engine compare): remains the diagnostic parity harness (.rgr/livegraph-compare/<ms>.json)
 ```
@@ -101,7 +104,8 @@ fallback_reason=null.
 1. default callers/callees on a preloaded/refreshed synthetic repo serves LiveGraph (or records
    backend_used=livegraph in JSON)
 2. if the LiveGraph is absent, the default falls back to SQLite (backend_used=sqlite, fallback_reason set)
-3. human (non-JSON) output remains byte-compatible with the current SQLite rendering
+3. human (non-JSON) output FORMAT is unchanged (content may differ only when the backend differs,
+   explainable by backend_used / compare; no new trust metadata in human output)
 4. JSON (--json) exposes backend_used + fallback_reason
 5. --engine sqlite forces the old SQLite path (backend_used=sqlite)
 6. --engine livegraph remains explicit (strict LiveGraph)
@@ -135,6 +139,29 @@ No multi-language LiveGraph (TS only). No change to the LiveGraph engine's own a
 2. CLI default -> auto + JSON metadata surfacing (rgr); human output unchanged
    (combine if the default flip would otherwise leave a non-building / behavior-inconsistent step)
 ```
+
+## Completion (implemented + live-validated 2026-06-01, EXECUTED)
+
+Daemon (`livegraph_feed.rs`): `Engine::Auto` (new default) + `FallbackReason` enum + `auto_outcome`
+(Stale-before-class so a producer-absent partition reports `LiveGraphStale`) + `backend_used`/
+`fallback_reason` on every callers/callees response. CLI (`rgr graph.rs`): `--engine` default
+`sqlite → auto`; human path strips `backend_used`/`fallback_reason` (format unchanged); `--json` surfaces
+them. daemon-runtime 72 tests + clippy `-D warnings` (daemon + rgr) + `fmt --all` clean.
+
+Live (synthetic fixture, daemon v0.2.1; after a refresh populated the LiveGraph Fresh):
+```text
+callers makeCircle (human)          -> 1 caller, format unchanged
+callers makeCircle --json           -> backend_used=livegraph, fallback_reason=null        [#1,#4]
+callers makeCircle --engine sqlite  -> backend_used=sqlite, fallback_reason=null (static)   [#5]
+callers makeCircle --engine livegraph -> backend_used=livegraph                              [#6]
+callers makeCircle --engine compare -> SQLite answer + compare sidecar                       [#7]
+callees report (all five variants)  -> symmetric PASS
+daemon restart (no refresh -> empty LiveGraph):
+  callers makeCircle --json         -> backend_used=sqlite, fallback_reason=LiveGraphUnavailable [#2]
+  callees report --json             -> backend_used=sqlite, fallback_reason=LiveGraphUnavailable [#2]
+```
+All 7 acceptance criteria PASS. The first default-path migration ships: default `auto` serves LiveGraph
+when Exact+Fresh+TS-only, else a labelled SQLite fallback; SQLite fallback retained permanently.
 
 ## References
 - `docs/slices/sqlite-raw-decommission-readiness-1.md` (§4 fallback contract; the command/backend map)

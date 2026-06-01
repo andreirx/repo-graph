@@ -145,10 +145,12 @@ fn handle_daemon_error(err: DaemonClientError) -> ExitCode {
 // Human mode (default): plain text with caller list.
 // Machine mode (--json): full envelope.
 
-/// Extract `--engine <value>` (LIVEGRAPH-INTEGRATION-1B). Default `sqlite`. The value is validated
-/// daemon-side (lenient here); removes the flag + its value from the args.
+/// Extract `--engine <value>` (LIVEGRAPH-INTEGRATION-1B; default flipped to `auto` in
+/// QUERY-MIGRATION-CLI-1). Default `auto` = LiveGraph when complete (Exact+Fresh+TS-only), else a
+/// labelled SQLite fallback. Explicit `sqlite`/`livegraph`/`compare` still force that engine. The value
+/// is validated daemon-side (lenient here); removes the flag + its value from the args.
 fn extract_engine_flag(args: Vec<String>) -> (Vec<String>, String) {
-    let mut engine = "sqlite".to_string();
+    let mut engine = "auto".to_string();
     let mut out = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -319,7 +321,7 @@ pub fn run_callers(args: &[String]) -> ExitCode {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
-            eprintln!("usage: rmap callers <symbol> [--edge-types <types>] [--engine sqlite|livegraph|compare] [--json]");
+            eprintln!("usage: rmap callers <symbol> [--edge-types <types>] [--engine auto|sqlite|livegraph|compare] [--json]");
             return ExitCode::from(1);
         }
     };
@@ -379,6 +381,10 @@ pub fn run_callers(args: &[String]) -> ExitCode {
                 if let Some(obj) = result.as_object_mut() {
                     obj.remove("livegraph_compare");
                     obj.remove("livegraph_compare_sidecar");
+                    // QUERY-MIGRATION-CLI-1: backend_used/fallback_reason are JSON-only metadata; strip
+                    // them so the human render is unaffected (no new trust metadata in human output).
+                    obj.remove("backend_used");
+                    obj.remove("fallback_reason");
                 }
                 use crate::presentation::graph_edges::CallersResponse;
                 match serde_json::from_value::<CallersResponse>(result) {
@@ -427,7 +433,7 @@ pub fn run_callees(args: &[String]) -> ExitCode {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
-            eprintln!("usage: rmap callees <symbol> [--edge-types <types>] [--engine sqlite|livegraph|compare] [--json]");
+            eprintln!("usage: rmap callees <symbol> [--edge-types <types>] [--engine auto|sqlite|livegraph|compare] [--json]");
             return ExitCode::from(1);
         }
     };
@@ -487,6 +493,9 @@ pub fn run_callees(args: &[String]) -> ExitCode {
                 if let Some(obj) = result.as_object_mut() {
                     obj.remove("livegraph_compare");
                     obj.remove("livegraph_compare_sidecar");
+                    // QUERY-MIGRATION-CLI-1: strip JSON-only metadata before the human render.
+                    obj.remove("backend_used");
+                    obj.remove("fallback_reason");
                 }
                 use crate::presentation::graph_edges::CalleesResponse;
                 match serde_json::from_value::<CalleesResponse>(result) {
