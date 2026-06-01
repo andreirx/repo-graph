@@ -62,6 +62,15 @@ repo_uid | partition_id | build_inputs_hash | indexer_name | indexer_version | s
 producer identity). `schema_version` = the cache format/layout version; `repo_graph_version` = the
 runtime's version. A change in ANY field invalidates the entry.
 
+**WARM-CACHE-1 refinement (ratified 2026-06-01).** The seven properties are realized as TWO distinct
+identity axes with distinct diagnostics, not one flat key:
+- `repo_graph_version` is a **`CacheKey` field** (producer/runtime identity; only the caller knows the
+  expected value, so it must travel in the key) → mismatch = `KeyMismatch`.
+- `schema_version` is a **crate-owned constant** (`SCHEMA_VERSION`) self-validated by
+  `repo-graph-warm-cache`, NOT a key field (cache-format identity) → mismatch = `SchemaMismatch`.
+- `created_at` is manifest **metadata only**, never part of identity.
+A change in any of the seven still invalidates the entry; the split preserves specific diagnostics.
+
 ## D4 — validation before load (manifest header; never partially trust)
 
 ```text

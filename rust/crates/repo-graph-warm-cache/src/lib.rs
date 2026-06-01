@@ -97,9 +97,15 @@ pub type CacheValidationError = CacheError;
 // Cache key, manifest, file envelope (D3 / D4 / D5)
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-/// Identity of a cache entry (D3). A change in ANY field invalidates the entry. `schema_version` and
-/// `repo_graph_version` live on the manifest, not here, because they are runtime/format properties
-/// rather than entry identity.
+/// Identity of a cache entry (D3). A change in ANY field invalidates the entry (a mismatch surfaces
+/// as [`CacheError::KeyMismatch`]).
+///
+/// `repo_graph_version` (producer/runtime identity) lives HERE: only the caller knows the expected
+/// runtime version, so it must travel in the key to be validated. `schema_version` (cache-FORMAT
+/// identity) does NOT live here — it is a crate-owned constant ([`SCHEMA_VERSION`]) self-validated by
+/// `repo-graph-warm-cache` and surfaced as [`CacheError::SchemaMismatch`]. The two are different
+/// invalidation axes and keep distinct diagnostics. `created_at` is metadata on the manifest, never
+/// part of identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheKey {
     /// Stable repository id.
@@ -113,22 +119,26 @@ pub struct CacheKey {
     pub indexer_name: String,
     /// Producer version (e.g. `0.4.0`).
     pub indexer_version: String,
+    /// The runtime's version string (producer/runtime identity). A change invalidates the entry via
+    /// [`CacheError::KeyMismatch`]. Distinct from `schema_version` (cache-format identity).
+    pub repo_graph_version: String,
 }
 
 /// The validation header written at the head of every cache file (D4). `magic`, `schema_version`,
-/// `content_length`, and `checksum` are filled by the `encode_*` functions; the caller supplies
-/// `repo_graph_version`, `key`, and `created_at`.
+/// `content_length`, and `checksum` are filled by the `encode_*` functions; the caller supplies `key`
+/// and `created_at`. `repo_graph_version` is NOT a standalone manifest field — it is part of `key`
+/// (entry identity); the manifest owns only `schema_version` (cache-format identity).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheManifest {
     /// File magic ([`MAGIC`]).
     pub magic: u32,
-    /// Cache format version ([`SCHEMA_VERSION`]).
+    /// Cache format version ([`SCHEMA_VERSION`]). Self-validated by this crate; mismatch ->
+    /// [`CacheError::SchemaMismatch`]. Distinct axis from `key.repo_graph_version`.
     pub schema_version: u32,
-    /// The runtime's version string at write time.
-    pub repo_graph_version: String,
-    /// Entry identity (D3).
+    /// Entry identity (D3), including `repo_graph_version`.
     pub key: CacheKey,
-    /// Caller-supplied creation timestamp (unix seconds). This crate does not read the clock.
+    /// Caller-supplied creation timestamp (unix seconds). Metadata only — NOT part of identity. This
+    /// crate does not read the clock.
     pub created_at: u64,
     /// Length of the opaque payload in bytes.
     pub content_length: u64,
@@ -576,6 +586,11 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 /// Validate a manifest against the expected key and the actual payload bytes (D4). Order: magic,
 /// schema, key, length, checksum. The FIRST mismatch is reported.
+///
+/// Two distinct identity axes with distinct diagnostics: `schema_version` (cache-format identity,
+/// crate-owned) mismatches as [`CacheError::SchemaMismatch`]; `repo_graph_version` (producer/runtime
+/// identity, carried inside `key`) mismatches as [`CacheError::KeyMismatch`] via the key equality
+/// check below.
 fn validate_manifest(
     manifest: &CacheManifest,
     payload: &[u8],
@@ -836,6 +851,7 @@ mod tests {
             build_inputs_hash: "abc123".to_string(),
             indexer_name: "scip-typescript".to_string(),
             indexer_version: "0.4.0".to_string(),
+            repo_graph_version: "0.1.0".to_string(),
         }
     }
 
@@ -844,7 +860,6 @@ mod tests {
         CacheManifest {
             magic: 0,
             schema_version: 0,
-            repo_graph_version: "0.1.0".to_string(),
             key: key.clone(),
             created_at: 1_700_000_000,
             content_length: 0,
@@ -889,6 +904,18 @@ mod tests {
         let mut other = sample_key();
         other.partition_id = "a-different-partition".to_string();
         let err = decode_partition(&bytes, &other).expect_err("key mismatch must reject");
+        assert!(matches!(err, CacheError::KeyMismatch), "got {err:?}");
+    }
+
+    /// `repo_graph_version` (producer/runtime identity) is part of the key: a runtime-version change
+    /// with the SAME inputs invalidates the entry as `KeyMismatch` — a DISTINCT axis/diagnostic from
+    /// `schema_version` (`SchemaMismatch`). Closes the WARM-CACHE-1 validation gap.
+    #[test]
+    fn repo_graph_version_mismatch_rejected() {
+        let bytes = encode_partition(&sample_partition_ir(), sample_manifest(&sample_key()));
+        let mut other = sample_key();
+        other.repo_graph_version = "a-different-runtime-version".to_string();
+        let err = decode_partition(&bytes, &other).expect_err("repo_graph_version must reject");
         assert!(matches!(err, CacheError::KeyMismatch), "got {err:?}");
     }
 

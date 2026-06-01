@@ -36,13 +36,27 @@ zero-dep. The cache crate owns the serde-deriving mirror DTOs + `From`/`TryFrom`
 ## Core types
 
 ```text
-CacheKey            { repo_uid, partition_id, build_inputs_hash, indexer_name, indexer_version }
-CacheManifest       { magic, schema_version, repo_graph_version, key: CacheKey, created_at, content_length, checksum }
+CacheKey            { repo_uid, partition_id, build_inputs_hash, indexer_name, indexer_version, repo_graph_version }
+CacheManifest       { magic, schema_version, key: CacheKey, created_at, content_length, checksum }
 CachePartitionIrDto + IR sub-DTOs (node/edge/range/provenance/identity-source/edge-type/edge-basis/partition/kind)
 CacheValueFactsDto  (Vec<CacheValueFactDto>)
 CacheFileEnvelope<T> { manifest: CacheManifest, payload: <bytes> }
 CacheValidationError / CacheError  (thiserror)
 ```
+
+### Cache-key identity (amended — two distinct axes, distinct diagnostics)
+
+```text
+repo_graph_version  -> producer/runtime identity -> IN CacheKey  -> mismatch = KeyMismatch
+schema_version      -> cache-FORMAT identity     -> crate const  -> mismatch = SchemaMismatch
+created_at          -> metadata only             -> on Manifest  -> NEVER part of identity
+```
+
+`repo_graph_version` lives in the key because only the caller knows the expected runtime version, so
+it must travel in the key to be validated. `schema_version` is a crate-owned constant
+(`SCHEMA_VERSION`) self-validated by `repo-graph-warm-cache`. The two are different invalidation axes
+and keep distinct diagnostics. (Refines PARTITIONED-WARM-CACHE-ARCH-1 D3, which listed both under one
+key: `schema_version` is NOT a key field.)
 
 `CachePartitionIrDto`: `impl From<&PartitionIr>` + `impl TryFrom<CachePartitionIrDto> for PartitionIr`
 (repo-graph-ir is a dep, so conversion is direct; `TryFrom` for untrusted input).
@@ -92,10 +106,12 @@ An invalid/absent ValueFacts sidecar MUST NOT invalidate the partition cache.
 partition_ir_roundtrip_preserves_semantics          (PartitionIr → DTO → bytes → DTO → PartitionIr equal)
 value_facts_sidecar_roundtrip_preserves_semantics   (CacheValueFactDto[] → bytes → [] equal)
 manifest_key_mismatch_rejected                       (D4)
-schema_version_mismatch_rejected                     (D4)
+repo_graph_version_mismatch_rejected                 (D4 — repo_graph_version in key -> KeyMismatch)
+schema_version_mismatch_rejected                     (D4 — schema_version format gate -> SchemaMismatch)
 checksum_mismatch_rejected                           (D4)
 truncated_payload_rejected                           (D4)
 atomic_write_replaces_old_file                       (D5)
+read_validated_reads_and_validates_written_partition_cache   (read_validated disk read + validate + wrong-key reject)
 invalid_value_facts_sidecar_does_not_invalidate_partition_cache   (D7 independence)
 ```
 
