@@ -34,7 +34,10 @@ fn basis_from_source(src: IdentitySource) -> IdentityBasis {
 /// Build the value facts for an ingested partition: each `complexity` entry joined to its IR node
 /// (by canonical key) for basis / source range / provenance. A complexity key with no matching node
 /// is skipped — it cannot be attributed to a known identity.
-fn value_facts_of(outcome: &IngestOutcome) -> Vec<ValueFact> {
+///
+/// Public so the daemon can source the EXACT value facts to persist in the warm-cache value-facts
+/// sidecar (WARM-CACHE-VALUEFACTS-1) — the same facts `feed_partition` loads into the runtime.
+pub fn value_facts_of(outcome: &IngestOutcome) -> Vec<ValueFact> {
     let by_key: HashMap<&str, _> = outcome
         .ir
         .nodes

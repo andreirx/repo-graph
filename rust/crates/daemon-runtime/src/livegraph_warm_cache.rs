@@ -13,9 +13,11 @@
 use std::path::{Path, PathBuf};
 
 use repo_graph_ir::PartitionIr;
+use repo_graph_livegraph::ValueFact;
 use repo_graph_warm_cache::{
     atomic_write, decode_partition, encode_partition, read_validated, CacheKey, CacheManifest,
 };
+use repo_graph_warm_cache_feed::{encode_value_facts_sidecar, try_decode_value_facts_sidecar};
 
 /// Producer name stamped into the cache key. MUST match the value passed to `ingest_partition` in
 /// [`crate::livegraph_refresh::run_refresh`] — `run_refresh` references this same constant so the cache
@@ -108,6 +110,66 @@ pub fn best_effort_write_partition_cache(
     }
     if let Err(e) = atomic_write(&path, &bytes) {
         eprintln!("warm-cache: cache write failed for {}: {e}", path.display());
+    }
+}
+
+/// The value-facts sidecar path: `<project_dir>/.rgr/warm-cache/<partition_id>.vf` (sibling of the
+/// partition `.cache`; WARM-CACHE-VALUEFACTS-1 D3).
+pub fn value_facts_sidecar_path(project_dir: &str, partition_id: &str) -> PathBuf {
+    Path::new(project_dir)
+        .join(".rgr")
+        .join("warm-cache")
+        .join(format!("{partition_id}.vf"))
+}
+
+/// Try to load a VALID value-facts sidecar (non-fatal, D7 independence). Returns `Some(facts)` only on
+/// a fully-validated hit under `expected_key` (the SAME key as the partition); absence / mismatch /
+/// corruption returns `None` so the caller warm-loads the graph WITHOUT value facts. Never panics.
+pub fn read_value_facts_sidecar(
+    project_dir: &str,
+    partition_id: &str,
+    expected_key: &CacheKey,
+) -> Option<Vec<ValueFact>> {
+    let path = value_facts_sidecar_path(project_dir, partition_id);
+    if !path.is_file() {
+        return None;
+    }
+    let bytes = std::fs::read(&path).ok()?;
+    try_decode_value_facts_sidecar(&bytes, expected_key)
+}
+
+/// Best-effort write of the value-facts sidecar after a successful producer refresh (D5 atomic; D6
+/// after-feed). INDEPENDENT of the partition cache write: a failure here is logged and swallowed and
+/// NEVER fails the refresh (D7 — the sidecar is optional for serving graph queries). `created_at` is
+/// supplied by the caller (this module does not read the clock).
+pub fn best_effort_write_value_facts_sidecar(
+    project_dir: &str,
+    partition_id: &str,
+    facts: &[ValueFact],
+    key: &CacheKey,
+    created_at: u64,
+) {
+    let manifest = CacheManifest {
+        magic: 0,
+        schema_version: 0,
+        key: key.clone(),
+        created_at,
+        content_length: 0,
+        checksum: String::new(),
+    };
+    let bytes = encode_value_facts_sidecar(facts, manifest);
+    let path = value_facts_sidecar_path(project_dir, partition_id);
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!("warm-cache: cannot create {}: {e}", parent.display());
+            return;
+        }
+    }
+    if let Err(e) = atomic_write(&path, &bytes) {
+        eprintln!(
+            "warm-cache: value-facts sidecar write failed for {}: {e}",
+            path.display()
+        );
     }
 }
 

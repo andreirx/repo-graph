@@ -247,25 +247,47 @@ pub fn run_refresh(
     {
         let nodes = ir.nodes.len();
         let edges = ir.edges.len();
-        let epoch = {
+        // WARM-CACHE-VALUEFACTS-1: read the value-facts sidecar (best-effort, OUTSIDE the write lock).
+        // `None` on absent / corrupt / wrong-key -> graph-only warm load (value facts Unavailable, D7
+        // independence): the sidecar NEVER blocks the graph hit.
+        let sidecar_facts =
+            livegraph_warm_cache::read_value_facts_sidecar(project_dir, partition_id, &cache_key);
+        let (value_facts_warmed, value_facts_count, epoch) = {
             let mut guard = repo_state.livegraph.write();
             let lg = guard.get_or_insert_with(LiveGraph::new);
-            repo_graph_livegraph_feed::feed_partition_ir(
-                lg,
-                partition_id,
-                ir,
-                LanguageSupport::TypeScriptPrimary,
-            );
-            lg.partition_epoch(partition_id).map(|e| e.0)
+            let (warmed, count) = match sidecar_facts {
+                Some(facts) => {
+                    let count = facts.len();
+                    repo_graph_warm_cache_feed::feed_partition_ir_with_value_facts(
+                        lg,
+                        partition_id,
+                        ir,
+                        facts,
+                        LanguageSupport::TypeScriptPrimary,
+                    );
+                    (true, count)
+                }
+                None => {
+                    repo_graph_livegraph_feed::feed_partition_ir(
+                        lg,
+                        partition_id,
+                        ir,
+                        LanguageSupport::TypeScriptPrimary,
+                    );
+                    (false, 0)
+                }
+            };
+            (warmed, count, lg.partition_epoch(partition_id).map(|e| e.0))
         };
         return Ok(serde_json::json!({
             "status": "WarmedFromCache",
             "refreshed": true,
             "warmed_from_cache": true,
+            "value_facts_warmed": value_facts_warmed,
             "partition": partition_id,
             "nodes": nodes,
             "edges": edges,
-            "value_facts": 0, // graph-only warm load: value facts Unavailable (not faked)
+            "value_facts": value_facts_count, // restored from the sidecar (0 if graph-only)
             "epoch": epoch,
             "build_inputs_hash": hash,
         }));
@@ -293,6 +315,10 @@ pub fn run_refresh(
     // strictly AFTER the swap (D6 order). The clone is on the cold producer path (which just spent
     // seconds indexing), never the hot query path.
     let ir_for_cache = outcome.ir.clone();
+    // WARM-CACHE-VALUEFACTS-1: capture the EXACT value facts feed_partition will load (the same join),
+    // BEFORE the feed consumes `outcome`, for the sidecar write. The duplicate join is negligible on
+    // this cold producer path.
+    let value_facts_for_sidecar = repo_graph_livegraph_feed::value_facts_of(&outcome);
     // SWAP: hold the LiveGraph write lock ONLY here (D5). The producer ran lock-free above.
     let epoch = {
         let mut guard = repo_state.livegraph.write();
@@ -319,11 +345,22 @@ pub fn run_refresh(
         &cache_key,
         created_at,
     );
+    // Independent best-effort sidecar write (D7): a failure here never affects the graph cache or the
+    // refresh. value_facts_warmed is false on the producer path (facts are freshly computed, not warmed
+    // from a sidecar).
+    livegraph_warm_cache::best_effort_write_value_facts_sidecar(
+        project_dir,
+        partition_id,
+        &value_facts_for_sidecar,
+        &cache_key,
+        created_at,
+    );
     let _ = std::fs::remove_file(&output);
     Ok(serde_json::json!({
         "status": "Refreshed",
         "refreshed": true,
         "warmed_from_cache": false,
+        "value_facts_warmed": false,
         "partition": partition_id,
         "nodes": nodes,
         "edges": edges,

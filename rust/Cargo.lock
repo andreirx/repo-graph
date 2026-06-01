@@ -1108,6 +1108,7 @@ dependencies = [
  "repo-graph-trust",
  "repo-graph-trust-model",
  "repo-graph-warm-cache",
+ "repo-graph-warm-cache-feed",
  "rust-analyzer-resolver",
  "serde",
  "serde_json",

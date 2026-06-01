@@ -757,6 +757,7 @@ impl ServiceDispatcher {
                     "partition": partition,
                     "refreshed": false,
                     "warmed_from_cache": false,
+                    "value_facts_warmed": false,
                 }),
             ),
         }
