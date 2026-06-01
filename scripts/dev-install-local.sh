@@ -47,6 +47,35 @@ info()  { echo "==> $*"; }
 warn()  { echo "WARN: $*" >&2; }
 error() { echo "ERROR: $*" >&2; exit 1; }
 
+# ── Phase timing (MEASUREMENT ONLY — does not change build profile or validation) ──
+# Identifies where wall-clock goes (cargo release vs rgistr/SEA vs daemon lifecycle vs validation).
+# `timed "<name>" <cmd...>` records the phase duration; `print_timing_summary` prints the breakdown.
+declare -a PHASE_NAMES=()
+declare -a PHASE_SECS=()
+
+timed() {
+    local name="$1"; shift
+    local start end
+    start=$(date +%s)
+    "$@"
+    end=$(date +%s)
+    PHASE_NAMES+=("${name}")
+    PHASE_SECS+=("$((end - start))")
+    info "  [timing] ${name}: $((end - start))s"
+}
+
+print_timing_summary() {
+    echo ""
+    echo "── Phase timing (seconds) ──────────────────────────"
+    local i total=0
+    for i in "${!PHASE_NAMES[@]}"; do
+        printf "  %-26s %6ss\n" "${PHASE_NAMES[$i]}" "${PHASE_SECS[$i]}"
+        total=$((total + PHASE_SECS[i]))
+    done
+    printf "  %-26s %6ss\n" "TOTAL (timed phases)" "${total}"
+    echo "────────────────────────────────────────────────────"
+}
+
 check_platform() {
     if [[ "$(uname -s)" != "Darwin" ]]; then
         error "This script is macOS-only. Linux support pending."
@@ -123,16 +152,20 @@ build_rgistr() {
     cd "${REPO_ROOT}/tools/rgistr"
 
     # Install dependencies (pinned postject required for SEA injection)
+    local t0 t1
     info "  Installing npm dependencies..."
-    npm ci --silent
+    t0=$(date +%s); npm ci --silent; t1=$(date +%s)
+    info "  [timing] npm ci: $((t1 - t0))s"
 
     # Bundle TypeScript to single CJS file
     info "  Bundling..."
-    npm run bundle --silent
+    t0=$(date +%s); npm run bundle --silent; t1=$(date +%s)
+    info "  [timing] npm bundle: $((t1 - t0))s"
 
     # Build SEA binary
     info "  Building SEA..."
-    ./scripts/build-sea.sh
+    t0=$(date +%s); ./scripts/build-sea.sh; t1=$(date +%s)
+    info "  [timing] build-sea: $((t1 - t0))s"
 
     # Determine output binary name
     local platform arch output_binary
@@ -328,17 +361,19 @@ main() {
     check_launchd_service_exists
 
     echo ""
-    build_release
-    build_rgistr
+    timed "cargo release build" build_release
+    timed "rgistr SEA build"    build_rgistr
 
     echo ""
-    stop_daemon_graceful
-    remove_stale_socket
-    install_binaries_atomic
-    start_daemon
+    timed "stop daemon"         stop_daemon_graceful
+    timed "remove socket"       remove_stale_socket
+    timed "install binaries"    install_binaries_atomic
+    timed "start daemon"        start_daemon
 
     echo ""
-    validate_installation
+    timed "validate"            validate_installation
+
+    print_timing_summary
 
     echo ""
     echo "====================================================="
