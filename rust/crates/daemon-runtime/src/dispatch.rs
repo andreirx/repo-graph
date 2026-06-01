@@ -287,6 +287,11 @@ impl Dispatcher for ServiceDispatcher {
             // ── Metrics (PERF-OBS-1) ────────────────────────────────
             // Storage performance observability
             "perf" => crate::handlers::metrics::handle_perf(&self.state, request),
+            // DEV-INSTALL-DOCTOR-WAIT-1: cheap storage health summary for `rmap doctor` (no per-table
+            // scan); distinct from the heavy `perf` diagnostic.
+            "storage_health" => {
+                crate::handlers::metrics::handle_storage_health(&self.state, request)
+            }
 
             // ── Documentation ───────────────────────────────────────
             "docs_list" => self.handle_docs_list(request),

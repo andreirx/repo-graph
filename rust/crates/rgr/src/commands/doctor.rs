@@ -175,7 +175,9 @@ fn storage_summary_probe() -> Option<ProbeResult> {
         "path": cwd.to_string_lossy()
     });
 
-    let response = match client.request("perf", Some(params)) {
+    // DEV-INSTALL-DOCTOR-WAIT-1: use the cheap `storage_health` summary, NOT the heavy `perf`
+    // diagnostic (which runs a per-table COUNT(*) scan — ~80-100s on large repos).
+    let response = match client.request("storage_health", Some(params)) {
         Ok(r) => r,
         Err(e) => {
             let msg = format!("{}", e);
@@ -198,20 +200,19 @@ fn storage_summary_probe() -> Option<ProbeResult> {
         }
     };
 
-    // Parse response
+    // Parse response (DEV-INSTALL-DOCTOR-WAIT-1: flat `storage_health` shape).
     let db_size = response
         .get("db_size_bytes")
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
-    let retention = response.get("retention");
-    let snapshot_count = retention
-        .and_then(|r| r.get("total_snapshots"))
+    let snapshot_count = response
+        .get("total_snapshots")
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
 
     // CACHE-SEMANTICS-1: prunable snapshot count
-    let prunable_count = retention
-        .and_then(|r| r.get("prunable"))
+    let prunable_count = response
+        .get("prunable_snapshots")
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
 
