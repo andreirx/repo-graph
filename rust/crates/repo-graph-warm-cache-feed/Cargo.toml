@@ -1,0 +1,21 @@
+# ── repo-graph-warm-cache-feed ─────────────────────────────────────
+# WARM-CACHE-VALUEFACTS-1 (Stage D): the cache<->runtime value-fact adapter. The ONLY crate that
+# depends on BOTH the runtime (repo-graph-livegraph) and the warm cache (repo-graph-warm-cache) — it
+# owns the ValueFact <-> CacheValueFactDto conversion + the value-facts warm-load feed. Mirrors
+# repo-graph-livegraph-feed (the ingest<->runtime adapter). No daemon / scip-ingest dependency.
+# See docs/slices/warm-cache-valuefacts-1.md.
+[package]
+name = "repo-graph-warm-cache-feed"
+version = "0.1.0"
+edition = "2021"
+description = "Value-fact cache adapter: ValueFact <-> CacheValueFactDto + warm-load feed (WARM-CACHE-VALUEFACTS-1). Non-production."
+license = "MIT"
+publish = false
+
+[dependencies]
+repo-graph-ir = { path = "../repo-graph-ir" }
+# Required (beyond the ratified 3-dep list): IdentityBasis (conversion) + LanguageSupport (feed param)
+# live in trust-model; livegraph re-exports neither. Mirrors repo-graph-livegraph-feed's dep set.
+repo-graph-trust-model = { path = "../repo-graph-trust-model" }
+repo-graph-livegraph = { path = "../repo-graph-livegraph" }
+repo-graph-warm-cache = { path = "../repo-graph-warm-cache" }

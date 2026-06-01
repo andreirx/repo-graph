@@ -1485,6 +1485,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-warm-cache-feed"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-ir",
+ "repo-graph-livegraph",
+ "repo-graph-trust-model",
+ "repo-graph-warm-cache",
+]
+
+[[package]]
 name = "rmapd"
 version = "0.2.1"
 dependencies = [

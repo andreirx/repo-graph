@@ -54,6 +54,7 @@ members = [
     "crates/repo-graph-livegraph",
     "crates/repo-graph-livegraph-feed",
     "crates/repo-graph-warm-cache",
+    "crates/repo-graph-warm-cache-feed",
     "crates/repo-index",
     "crates/rgr",
     "crates/rmapd",
