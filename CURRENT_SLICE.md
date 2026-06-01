@@ -157,7 +157,15 @@ shapes, authority/rebuildability, epochs, hot paths (pipeline is **indexer-bound
 partition vs xref ~21ms), copy points, and implications for 1C + warm-cache (**serialize `PartitionIr`
 only; rebuild the rest**; key interning is the dominant allocation target).
 
-**Stage D order:** 1B ✓ → DATAFLOW ✓ → **1C** (daemon SCIP indexing & refresh orchestration — NEXT) →
+**LIVEGRAPH-INTEGRATION-1C PARTIAL (2026-06-01)** — steps 1–3 of 7: producer discovery (D0:
+`RMAP_SCIP_TYPESCRIPT` → PATH → `ProducerUnavailable`), the six structured D6 failure classes, and
+`rmap dev livegraph-refresh` + a read-only dispatch handler. Live-validated: `livegraph-refresh` →
+structured `ProducerUnavailable`, daemon healthy, default sqlite (`callers`/`callees`) unaffected,
+LiveGraph last-good untouched. **NOT complete:** the success path (step 4 — `scip-typescript`
+subprocess + background swap) is blocked on a provisioned producer (absent here). Spec
+`docs/slices/livegraph-integration-1c.md`.
+
+**Stage D order:** 1B ✓ → DATAFLOW ✓ → **1C PARTIAL** (steps 1–3 ✓; step 4 needs `scip-typescript`) →
 PARTITIONED-WARM-CACHE-ARCH-1 → WARM-CACHE-1 → RAW-DECOMMISSION.
 
 The remaining spike measures (precise CALLS parity, multi-config C, all-crates Rust,

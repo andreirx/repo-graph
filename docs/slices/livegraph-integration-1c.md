@@ -1,10 +1,12 @@
 # LIVEGRAPH-INTEGRATION-1C: Daemon-Owned Async SCIP Ingestion / Refresh (Stage D)
 
 Slice ID: LIVEGRAPH-INTEGRATION-1C
-Status: **DESIGN RATIFIED (D0–D6). Building per the order. HIGH blast radius (daemon subprocess +
-background thread + refresh).** **Completion is GATED on the success path running** — which requires a
-provisioned `scip-typescript` (absent here). Until then the slice can only be **PARTIAL**
-(absent-producer path validated). Guided by `docs/architecture/dataflow-hotpath-map.md`.
+Status: **PARTIAL (2026-06-01) — steps 1–3 of 7 done + live-validated.** Producer discovery (D0) +
+failure model (D6) + `rmap dev livegraph-refresh` + the read-only absent-producer dispatch path are
+built and validated end-to-end (`dev-install` → `livegraph-refresh` → structured `ProducerUnavailable`,
+`refreshed: false`; daemon healthy; default sqlite unaffected). **NOT complete:** the success path
+(step 4 — `scip-typescript` subprocess + background swap) is blocked on a provisioned `scip-typescript`
+(absent here). Guided by `docs/architecture/dataflow-hotpath-map.md`.
 Depends: LIVEGRAPH-INTEGRATION-1B, DATAFLOW-HOTPATH-MAP-1, REFRESH-PROBE-1.
 Track: Stage D integration, **1C** (after 1B; before warm-cache).
 
