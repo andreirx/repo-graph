@@ -169,8 +169,16 @@ Node 22; `RMAP_SCIP_TYPESCRIPT` via launchd; not committed). **Non-blocking asyn
 (`DaemonState` is `!Send`) → DAEMON-ASYNC-REFRESH-1; PRODUCER-COMPAT-1 = 0.4.0⊥Node22.** Spec
 `docs/slices/livegraph-integration-1c.md`.
 
-**Stage D order:** 1B ✓ → DATAFLOW ✓ → **1C ✓** (synchronous; async = DAEMON-ASYNC-REFRESH-1) →
-**PARTITIONED-WARM-CACHE-ARCH-1 (next)** → WARM-CACHE-1 → RAW-DECOMMISSION.
+**PARTITIONED-WARM-CACHE-ARCH-1 RATIFIED (2026-06-01)** — warm-cache architecture (non-authoritative,
+safe-to-delete, validated-before-load). D1 persist `PartitionIr` only; D2 bincode first (format
+subordinate to the validation envelope); D7 + a ValueFacts sidecar (independent — its failure never
+invalidates the graph cache); D8 cache-side mirror DTOs (**NO serde in `repo-graph-ir`**); D3–D6 cache
+key / manifest validation / atomic write / refresh interaction. Spec
+`docs/slices/partitioned-warm-cache-arch-1.md`.
+
+**Stage D order:** 1B ✓ → DATAFLOW ✓ → 1C ✓ → **WARM-CACHE-ARCH ✓** → **WARM-CACHE-1 (next — the
+`repo-graph-warm-cache` support crate: DTO round-trips, manifest, atomic write; no daemon wiring)** →
+RAW-DECOMMISSION.
 
 The remaining spike measures (precise CALLS parity, multi-config C, all-crates Rust,
 M3, M4b) are validation tracks for the IR slice, not blockers. Warm-cache format and

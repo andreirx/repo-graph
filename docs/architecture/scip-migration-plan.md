@@ -317,7 +317,14 @@ shapes per boundary, authority vs rebuildability vs epoch-binding, hot paths, co
 whatever exists" (the SQLite mistake in binary). Deferred; run before warm-cache (or earlier if 1B/1C
 surfaces data-shape confusion). Charter `docs/slices/dataflow-hotpath-map-1.md`.
 
-### PARTITIONED-WARM-CACHE-ARCH-1 (design) + WARM-CACHE-1 (impl) — RK6
+### PARTITIONED-WARM-CACHE-ARCH-1 (design RATIFIED 2026-06-01) + WARM-CACHE-1 (impl, next) — RK6
+**ARCH RATIFIED:** persist `PartitionIr` only (bincode; format subordinate to a validation envelope);
+cache key = repo_uid/partition_id/build_inputs_hash/indexer+version/schema+repo_graph_version; manifest
+validation (discard+reindex on any mismatch); atomic write (temp→fsync→rename); value facts in an
+INDEPENDENT sidecar (failure never invalidates the graph cache); serialization via cache-side mirror
+DTOs (`repo-graph-warm-cache`), **no serde in `repo-graph-ir`**. Spec
+`docs/slices/partitioned-warm-cache-arch-1.md`. WARM-CACHE-1 builds the support crate (DTO round-trips,
+manifest, atomic write; no daemon wiring).
 Format decision (rkyv / Cap'n Proto / embedded KV) + partitioned binary write/load +
 coherence/versioning. Done AFTER the runtime is credible (D1=A kept the IR in-memory
 until here). Exit: warm restart beats reindex; invalidation correct; domain model not
