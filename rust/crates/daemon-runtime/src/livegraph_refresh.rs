@@ -108,10 +108,12 @@ fn which_on_path(name: &str) -> Option<PathBuf> {
 // LOCK-FREE; the LiveGraph write lock is acquired ONLY for the swap; on any failure the last-good
 // epoch is untouched.
 
-/// Compute a real `build_inputs_hash` (D4): a fast SHA-256 digest over the partition's config +
-/// `.ts` sources + the producer identity (path + size + mtime — `scip-typescript@0.4.0 --version`
-/// is unavailable, so the binary metadata stands in). Coherence, not security.
-fn compute_build_inputs_hash(project_dir: &str, producer: &Path) -> Result<String, RefreshFailure> {
+/// Compute the SOURCE inputs hash (PRODUCER-ABSENT-1 D2): a fast SHA-256 digest over the partition's
+/// config + `.ts` sources ONLY — NOT the producer. Recomputable WITHOUT the producer binary, which is
+/// exactly what lets a producer-absent load validate the source side of the key. The producer's
+/// identity lives in the cache key's `producer_fingerprint` (logical name + version), no longer in this
+/// hash. Coherence, not security.
+fn compute_source_inputs_hash(project_dir: &str) -> Result<String, RefreshFailure> {
     use sha2::{Digest, Sha256};
     let root = Path::new(project_dir);
     let mut hasher = Sha256::new();
@@ -136,16 +138,6 @@ fn compute_build_inputs_hash(project_dir: &str, producer: &Path) -> Result<Strin
         hasher.update(p.to_string_lossy().as_bytes());
         hasher.update(&bytes);
     }
-    hasher.update(producer.to_string_lossy().as_bytes());
-    if let Ok(meta) = std::fs::metadata(producer) {
-        hasher.update(meta.len().to_le_bytes());
-        if let Ok(mtime) = meta.modified() {
-            if let Ok(d) = mtime.duration_since(std::time::UNIX_EPOCH) {
-                hasher.update(d.as_secs().to_le_bytes());
-            }
-        }
-    }
-    hasher.update(b"scip-typescript@0.4.0");
     Ok(hex::encode(hasher.finalize()))
 }
 
@@ -232,8 +224,10 @@ pub fn run_refresh(
             "no tsconfig.json under {project_dir}"
         )));
     }
-    let producer = discover_scip_typescript()?; // Err(ProducerUnavailable) propagates
-    let hash = compute_build_inputs_hash(project_dir, &producer)?;
+    // PRODUCER-ABSENT-1 D2/D5: the SOURCE hash is producer-free, so it is computed FIRST (a future
+    // producer-absent path will gate on it). The producer is still required here in this slice.
+    let source_inputs_hash = compute_source_inputs_hash(project_dir)?;
+    let producer = discover_scip_typescript()?; // Err(ProducerUnavailable) propagates (PRODUCER-ABSENT-1 relaxes this)
 
     // WARM-CACHE-DAEMON-WIRING-1 (D3): try a VALID warm cache BEFORE running the producer. A hit feeds
     // the cached PartitionIr graph-only (value facts Unavailable until a producer refresh) and SKIPS
@@ -241,7 +235,8 @@ pub fn run_refresh(
     // (try_read_partition_cache is non-fatal). NOTE: producer DISCOVERY still runs (the hash embeds
     // producer identity); only producer EXECUTION is skipped. Serving purely from cache with an absent
     // producer is out of scope here (would need hash/producer decoupling).
-    let cache_key = livegraph_warm_cache::build_cache_key(repo_uid, partition_id, &hash);
+    let cache_key =
+        livegraph_warm_cache::build_cache_key(repo_uid, partition_id, &source_inputs_hash);
     if let Some(ir) =
         livegraph_warm_cache::try_read_partition_cache(project_dir, partition_id, &cache_key)
     {
@@ -289,7 +284,7 @@ pub fn run_refresh(
             "edges": edges,
             "value_facts": value_facts_count, // restored from the sidecar (0 if graph-only)
             "epoch": epoch,
-            "build_inputs_hash": hash,
+            "source_inputs_hash": source_inputs_hash,
         }));
     }
 
@@ -306,7 +301,7 @@ pub fn run_refresh(
         partition_id,
         livegraph_warm_cache::INDEXER_NAME,
         livegraph_warm_cache::INDEXER_VERSION,
-        &hash,
+        &source_inputs_hash,
     );
     let nodes = outcome.ir.nodes.len();
     let edges = outcome.ir.edges.len();
@@ -366,7 +361,7 @@ pub fn run_refresh(
         "edges": edges,
         "value_facts": value_facts,
         "epoch": epoch,
-        "build_inputs_hash": hash,
+        "source_inputs_hash": source_inputs_hash,
     }))
 }
 
@@ -419,17 +414,18 @@ mod tests {
     }
 
     #[test]
-    fn build_inputs_hash_is_deterministic_and_nonempty() {
-        // D4: hash over the synthetic fixture's real configs + .ts sources (node_modules excluded).
+    fn source_inputs_hash_is_deterministic_and_producer_free() {
+        // PRODUCER-ABSENT-1 D2: hash over the synthetic fixture's real configs + .ts sources
+        // (node_modules excluded). Producer-free BY CONSTRUCTION — the fn takes no producer, so a
+        // producer reinstall / path / mtime change cannot affect it (acceptance #6 + #5 structural).
         let synth = format!(
             "{}/../repo-graph-scip-ingest/tests/fixtures/synthetic",
             env!("CARGO_MANIFEST_DIR")
         );
-        let producer = PathBuf::from("/nonexistent/scip-typescript"); // metadata skipped; path hashed
-        let h1 = compute_build_inputs_hash(&synth, &producer).expect("hash");
-        let h2 = compute_build_inputs_hash(&synth, &producer).expect("hash");
+        let h1 = compute_source_inputs_hash(&synth).expect("hash");
+        let h2 = compute_source_inputs_hash(&synth).expect("hash");
         assert!(!h1.is_empty());
-        assert_eq!(h1, h2, "build_inputs_hash must be deterministic");
+        assert_eq!(h1, h2, "source_inputs_hash must be deterministic");
         assert_ne!(h1, "preload", "real hash, not the placeholder");
     }
 }

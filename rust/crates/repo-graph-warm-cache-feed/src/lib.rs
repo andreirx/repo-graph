@@ -320,9 +320,11 @@ mod tests {
         let key = repo_graph_warm_cache::CacheKey {
             repo_uid: "repo_1".to_string(),
             partition_id: "p".to_string(),
-            build_inputs_hash: "abc123".to_string(),
-            indexer_name: "scip-typescript".to_string(),
-            indexer_version: "0.4.0".to_string(),
+            source_inputs_hash: "abc123".to_string(),
+            producer_fingerprint: repo_graph_warm_cache::ProducerFingerprint {
+                name: "scip-typescript".to_string(),
+                version: "0.4.0".to_string(),
+            },
             repo_graph_version: "0.1.0".to_string(),
         };
         // A corrupt sidecar decodes to None (never panics, never blocks).

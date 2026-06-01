@@ -16,6 +16,7 @@ use repo_graph_ir::PartitionIr;
 use repo_graph_livegraph::ValueFact;
 use repo_graph_warm_cache::{
     atomic_write, decode_partition, encode_partition, read_validated, CacheKey, CacheManifest,
+    ProducerFingerprint,
 };
 use repo_graph_warm_cache_feed::{encode_value_facts_sidecar, try_decode_value_facts_sidecar};
 
@@ -39,16 +40,24 @@ pub fn partition_cache_path(project_dir: &str, partition_id: &str) -> PathBuf {
         .join(format!("{partition_id}.cache"))
 }
 
-/// Construct the expected cache key (D3 identity). Note `schema_version` is NOT a key field — it is the
-/// warm-cache crate's self-validated format gate (`SchemaMismatch`); `repo_graph_version` IS a key
-/// field (`KeyMismatch`).
-pub fn build_cache_key(repo_uid: &str, partition_id: &str, build_inputs_hash: &str) -> CacheKey {
+/// The producer's logical fingerprint (PRODUCER-ABSENT-1 D3): name + version, stable across reinstalls
+/// (NOT binary path/mtime). A producer-absent load compares this against the manifest's stored value.
+pub fn logical_fingerprint() -> ProducerFingerprint {
+    ProducerFingerprint {
+        name: INDEXER_NAME.to_string(),
+        version: INDEXER_VERSION.to_string(),
+    }
+}
+
+/// Construct the expected cache key (D2/D3 identity). `source_inputs_hash` is the producer-free source
+/// digest; `producer_fingerprint` is the logical producer identity. `schema_version` is NOT a key field
+/// (crate-owned format gate → `SchemaMismatch`); `repo_graph_version` IS a key field (`KeyMismatch`).
+pub fn build_cache_key(repo_uid: &str, partition_id: &str, source_inputs_hash: &str) -> CacheKey {
     CacheKey {
         repo_uid: repo_uid.to_string(),
         partition_id: partition_id.to_string(),
-        build_inputs_hash: build_inputs_hash.to_string(),
-        indexer_name: INDEXER_NAME.to_string(),
-        indexer_version: INDEXER_VERSION.to_string(),
+        source_inputs_hash: source_inputs_hash.to_string(),
+        producer_fingerprint: logical_fingerprint(),
         repo_graph_version: REPO_GRAPH_VERSION.to_string(),
     }
 }
@@ -192,9 +201,9 @@ mod tests {
         let k = build_cache_key("repo_1", "default", "deadbeef");
         assert_eq!(k.repo_uid, "repo_1");
         assert_eq!(k.partition_id, "default");
-        assert_eq!(k.build_inputs_hash, "deadbeef");
-        assert_eq!(k.indexer_name, INDEXER_NAME);
-        assert_eq!(k.indexer_version, INDEXER_VERSION);
+        assert_eq!(k.source_inputs_hash, "deadbeef");
+        assert_eq!(k.producer_fingerprint.name, INDEXER_NAME);
+        assert_eq!(k.producer_fingerprint.version, INDEXER_VERSION);
         assert_eq!(k.repo_graph_version, REPO_GRAPH_VERSION);
     }
 

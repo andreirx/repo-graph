@@ -97,30 +97,38 @@ pub type CacheValidationError = CacheError;
 // Cache key, manifest, file envelope (D3 / D4 / D5)
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-/// Identity of a cache entry (D3). A change in ANY field invalidates the entry (a mismatch surfaces
-/// as [`CacheError::KeyMismatch`]).
+/// A producer's LOGICAL identity (WARM-CACHE-PRODUCER-ABSENT-1 D3): the stable name + version that
+/// governs cache coherence, INDEPENDENT of the binary's install path/mtime (which over-invalidate
+/// across reinstalls). A producer-absent load validates this against the manifest's stored value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProducerFingerprint {
+    /// Producer name (e.g. `scip-typescript`).
+    pub name: String,
+    /// Producer logical version (e.g. `0.4.0`).
+    pub version: String,
+}
+
+/// Identity of a cache entry. A change in ANY field invalidates the entry ([`CacheError::KeyMismatch`]).
 ///
-/// `repo_graph_version` (producer/runtime identity) lives HERE: only the caller knows the expected
-/// runtime version, so it must travel in the key to be validated. `schema_version` (cache-FORMAT
-/// identity) does NOT live here — it is a crate-owned constant ([`SCHEMA_VERSION`]) self-validated by
-/// `repo-graph-warm-cache` and surfaced as [`CacheError::SchemaMismatch`]. The two are different
-/// invalidation axes and keep distinct diagnostics. `created_at` is metadata on the manifest, never
-/// part of identity.
+/// The two hash axes are SEPARATED (PRODUCER-ABSENT-1 D2): `source_inputs_hash` covers ONLY the
+/// source + config inputs (recomputable WITHOUT the producer binary), and `producer_fingerprint` is
+/// the producer's logical identity. This lets a producer-absent load validate `source_inputs_hash`
+/// while taking `producer_fingerprint` from the manifest. `repo_graph_version` (runtime identity) is
+/// here; `schema_version` is NOT (a crate-owned const → [`CacheError::SchemaMismatch`]); `created_at`
+/// is manifest metadata, never identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheKey {
     /// Stable repository id.
     pub repo_uid: String,
     /// Partition id (e.g. the TS package).
     pub partition_id: String,
-    /// sha256 over the build inputs (sources + tsconfig/package.json/lockfile + producer identity),
-    /// produced by the refresh path (LIVEGRAPH-INTEGRATION-1C).
-    pub build_inputs_hash: String,
-    /// Producer name (e.g. `scip-typescript`).
-    pub indexer_name: String,
-    /// Producer version (e.g. `0.4.0`).
-    pub indexer_version: String,
-    /// The runtime's version string (producer/runtime identity). A change invalidates the entry via
-    /// [`CacheError::KeyMismatch`]. Distinct from `schema_version` (cache-format identity).
+    /// sha256 over the SOURCE inputs ONLY (sources + tsconfig/package.json/lockfile/build config) —
+    /// NOT the producer. Recomputable without the producer binary (the producer-absent gate).
+    pub source_inputs_hash: String,
+    /// The producer's logical identity (name + version). Replaces the former `indexer_name` +
+    /// `indexer_version` (same fact — not stored twice).
+    pub producer_fingerprint: ProducerFingerprint,
+    /// The runtime's version string. A change invalidates the entry ([`CacheError::KeyMismatch`]).
     pub repo_graph_version: String,
 }
 
@@ -848,9 +856,11 @@ mod tests {
         CacheKey {
             repo_uid: "repo_01kt12m5h1jkaa9ksv80qe9fhr".to_string(),
             partition_id: "pkg".to_string(),
-            build_inputs_hash: "abc123".to_string(),
-            indexer_name: "scip-typescript".to_string(),
-            indexer_version: "0.4.0".to_string(),
+            source_inputs_hash: "abc123".to_string(),
+            producer_fingerprint: ProducerFingerprint {
+                name: "scip-typescript".to_string(),
+                version: "0.4.0".to_string(),
+            },
             repo_graph_version: "0.1.0".to_string(),
         }
     }
@@ -1025,7 +1035,7 @@ mod tests {
 
         // A wrong expected key is rejected.
         let mut wrong = key.clone();
-        wrong.build_inputs_hash = "a-different-build-inputs-hash".to_string();
+        wrong.source_inputs_hash = "a-different-source-inputs-hash".to_string();
         let err = read_validated(&path, &wrong).expect_err("a wrong key must be rejected");
         assert!(matches!(err, CacheError::KeyMismatch), "got {err:?}");
     }
