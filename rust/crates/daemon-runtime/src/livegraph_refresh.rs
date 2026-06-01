@@ -7,12 +7,13 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use repo_graph_livegraph::LiveGraph;
 use repo_graph_scip_ingest::{decode_index, ingest_partition};
 use repo_graph_trust_model::LanguageSupport;
 
+use crate::livegraph_warm_cache;
 use crate::state::RepoState;
 
 /// Structured refresh failure classes (D6). Surfaced in the refresh command's structured response;
@@ -233,6 +234,43 @@ pub fn run_refresh(
     }
     let producer = discover_scip_typescript()?; // Err(ProducerUnavailable) propagates
     let hash = compute_build_inputs_hash(project_dir, &producer)?;
+
+    // WARM-CACHE-DAEMON-WIRING-1 (D3): try a VALID warm cache BEFORE running the producer. A hit feeds
+    // the cached PartitionIr graph-only (value facts Unavailable until a producer refresh) and SKIPS
+    // the multi-second producer; any miss / mismatch / corruption falls through to the producer below
+    // (try_read_partition_cache is non-fatal). NOTE: producer DISCOVERY still runs (the hash embeds
+    // producer identity); only producer EXECUTION is skipped. Serving purely from cache with an absent
+    // producer is out of scope here (would need hash/producer decoupling).
+    let cache_key = livegraph_warm_cache::build_cache_key(repo_uid, partition_id, &hash);
+    if let Some(ir) =
+        livegraph_warm_cache::try_read_partition_cache(project_dir, partition_id, &cache_key)
+    {
+        let nodes = ir.nodes.len();
+        let edges = ir.edges.len();
+        let epoch = {
+            let mut guard = repo_state.livegraph.write();
+            let lg = guard.get_or_insert_with(LiveGraph::new);
+            repo_graph_livegraph_feed::feed_partition_ir(
+                lg,
+                partition_id,
+                ir,
+                LanguageSupport::TypeScriptPrimary,
+            );
+            lg.partition_epoch(partition_id).map(|e| e.0)
+        };
+        return Ok(serde_json::json!({
+            "status": "WarmedFromCache",
+            "refreshed": true,
+            "warmed_from_cache": true,
+            "partition": partition_id,
+            "nodes": nodes,
+            "edges": edges,
+            "value_facts": 0, // graph-only warm load: value facts Unavailable (not faked)
+            "epoch": epoch,
+            "build_inputs_hash": hash,
+        }));
+    }
+
     let output = std::env::temp_dir().join(format!("rmap-scip-refresh-{partition_id}.scip"));
     run_producer(&producer, project_dir, &output, Duration::from_secs(120))?;
     let bytes = std::fs::read(&output)
@@ -244,13 +282,17 @@ pub fn run_refresh(
         project_dir,
         repo_uid,
         partition_id,
-        "scip-typescript",
-        "0.4.0",
+        livegraph_warm_cache::INDEXER_NAME,
+        livegraph_warm_cache::INDEXER_VERSION,
         &hash,
     );
     let nodes = outcome.ir.nodes.len();
     let edges = outcome.ir.edges.len();
     let value_facts = outcome.complexity.len();
+    // Clone the IR for the cache write BEFORE the feed consumes `outcome`, so the write happens
+    // strictly AFTER the swap (D6 order). The clone is on the cold producer path (which just spent
+    // seconds indexing), never the hot query path.
+    let ir_for_cache = outcome.ir.clone();
     // SWAP: hold the LiveGraph write lock ONLY here (D5). The producer ran lock-free above.
     let epoch = {
         let mut guard = repo_state.livegraph.write();
@@ -263,10 +305,25 @@ pub fn run_refresh(
         );
         lg.partition_epoch(partition_id).map(|e| e.0)
     };
+    // WARM-CACHE write (D5 atomic, D6 after-feed): best-effort + non-fatal — a write failure never
+    // blocks serving the fresh in-memory graph. `created_at` from the daemon clock (the warm-cache
+    // crate stays clock-free).
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    livegraph_warm_cache::best_effort_write_partition_cache(
+        project_dir,
+        partition_id,
+        &ir_for_cache,
+        &cache_key,
+        created_at,
+    );
     let _ = std::fs::remove_file(&output);
     Ok(serde_json::json!({
         "status": "Refreshed",
         "refreshed": true,
+        "warmed_from_cache": false,
         "partition": partition_id,
         "nodes": nodes,
         "edges": edges,

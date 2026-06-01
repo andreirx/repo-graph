@@ -50,6 +50,7 @@ pub mod dispatch;
 pub mod handlers;
 pub mod livegraph_feed;
 pub mod livegraph_refresh;
+pub mod livegraph_warm_cache;
 pub mod registry;
 pub mod state;
 pub mod util;

@@ -756,6 +756,7 @@ impl ServiceDispatcher {
                     "detail": failure.detail(),
                     "partition": partition,
                     "refreshed": false,
+                    "warmed_from_cache": false,
                 }),
             ),
         }
