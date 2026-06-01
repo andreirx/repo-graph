@@ -968,4 +968,38 @@ mod tests {
             "the corrupt sidecar must fail on its own"
         );
     }
+
+    /// `read_validated` is public + part of the ratified function list: read a cache file from disk,
+    /// validate its manifest against the expected key, and reject a wrong key. Daemon wiring
+    /// (WARM-CACHE-DAEMON-WIRING-1) depends on it, so it is covered directly.
+    #[test]
+    fn read_validated_reads_and_validates_written_partition_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("partition.cache");
+        let key = sample_key();
+        let ir = sample_partition_ir();
+
+        let bytes = encode_partition(&ir, sample_manifest(&key));
+        atomic_write(&path, &bytes).unwrap();
+
+        // Read + validate from disk: returns the exact on-disk bytes.
+        let validated = read_validated(&path, &key).expect("matching key must be accepted");
+        assert_eq!(
+            validated, bytes,
+            "read_validated must return the on-disk bytes verbatim"
+        );
+
+        // The validated bytes decode back to the original PartitionIr (semantic equality from disk).
+        let decoded = decode_partition(&validated, &key).expect("decode the validated bytes");
+        assert_eq!(
+            ir, decoded,
+            "round-trip through disk must preserve the PartitionIr"
+        );
+
+        // A wrong expected key is rejected.
+        let mut wrong = key.clone();
+        wrong.build_inputs_hash = "a-different-build-inputs-hash".to_string();
+        let err = read_validated(&path, &wrong).expect_err("a wrong key must be rejected");
+        assert!(matches!(err, CacheError::KeyMismatch), "got {err:?}");
+    }
 }
