@@ -240,6 +240,7 @@ impl Dispatcher for ServiceDispatcher {
             "callers" => self.handle_callers(request),
             "callees" => self.handle_callees(request),
             "livegraph_preload" => self.handle_livegraph_preload(request),
+            "livegraph_refresh" => self.handle_livegraph_refresh(request),
             "imports" => self.handle_imports(request),
             // RMAPD-PERF-1: These operations emit heartbeat for long queries
             "stats" => self.handle_stats(request, emitter),
@@ -724,6 +725,38 @@ impl ServiceDispatcher {
                 DispatchResult::error(&request.id, ErrorDetail::new(ErrorCode::InternalError, e))
             }
         }
+    }
+
+    /// LIVEGRAPH-INTEGRATION-1C (steps 2–3, dev-only): discover the SCIP producer (D0) and return a
+    /// STRUCTURED result. No background worker / subprocess / SCIP generation yet (step 4). Absent
+    /// producer → `ProducerUnavailable` (D6); the LiveGraph last-good + the sqlite default are
+    /// untouched. Read-only — this handler changes no runtime state.
+    fn handle_livegraph_refresh(&self, request: &Request) -> DispatchResult {
+        let (_repo_state, _repo_uid) = match self.resolve_and_load_repo(&request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let partition = Self::get_optional_string_param(&request.params, "partition")
+            .unwrap_or("")
+            .to_string();
+        let body = match crate::livegraph_refresh::discover_scip_typescript() {
+            Err(failure) => serde_json::json!({
+                "status": failure.code(),
+                "detail": failure.detail(),
+                "partition": partition,
+                "refreshed": false,
+            }),
+            // Producer found, but the daemon success path is step 4 (gated on a provisioned producer)
+            // — run NOTHING; report so the operator knows step 4 is pending.
+            Ok(path) => serde_json::json!({
+                "status": "ProducerFound",
+                "detail": "scip-typescript found; daemon SCIP success path (1C step 4) not implemented yet",
+                "producer": path.display().to_string(),
+                "partition": partition,
+                "refreshed": false,
+            }),
+        };
+        DispatchResult::success(&request.id, body)
     }
 
     fn handle_callers(&self, request: &Request) -> DispatchResult {
