@@ -1,7 +1,9 @@
 # CYCLES-FILE-IMPORT-RENDER-1: FILE-import cycle human render (no "module-level" mislabel)
 
 Slice ID: CYCLES-FILE-IMPORT-RENDER-1
-Status: **RATIFIED (2026-06-02). Implementation in progress.** A shipped human-output correctness defect
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-02).** `rmap cycles --engine livegraph --kind file-import`
+now renders FILE vocabulary ("FILE import cycle", "(N files)", no "rmap modules deps"); SQLite MODULE
+render + the JSON are unchanged. See **Completion**. Fixed a shipped human-output correctness defect
 (O2 from IMPORTS-XPART-ENUMERATION-1): `rmap cycles --engine livegraph --kind file-import` prints its
 NON-empty result through the generic module renderer, so it says "module-level cycle", "(N modules)", and
 "Run: rmap modules deps <module>" — a FALSE semantic label for FILE-import cycles (the project explicitly
@@ -64,6 +66,48 @@ in the presentation layer); the `run_cycles` early-return for the empty case is 
 ```text
 The Scope line itself (already correct, structured, from D6). The nested-fixture display_name (O1 /
 XPART-FIXTURE-STANDALONE-1). Any daemon/JSON change. SQLite MODULE rendering.
+```
+
+## Completion (implemented 2026-06-02, EXECUTED)
+
+Commits: `4795b00` (spec) + `0a7d94c` (impl) + this doc.
+
+### What landed
+```text
+presentation/cycles.rs : CyclesResponse::render_human_file_import (FILE vocabulary -- "N FILE import
+  cycle(s) found", "Cycle i (N file(s))", correct plurals; NO "rmap modules deps" hint; owns empty +
+  non-empty), reusing render_cycle_chain. render_human (MODULE) untouched.
+commands/graph.rs      : run_cycles routes the livegraph --kind file-import path to
+  render_human_file_import; the empty early-return moved into the renderer; SQLite -> render_human verbatim.
+```
+
+### Requirements outcomes
+```text
+1. FILE vocabulary ("FILE import cycle(s)")               DONE.
+2. member-count says "file(s)" not "module(s)"            DONE.
+3. no "rmap modules deps" hint on the FILE path           DONE (omitted; chain already lists files).
+4. SQLite render_human UNCHANGED                          DONE (untouched; sqlite_module_render_unchanged test).
+5. JSON UNCHANGED                                         DONE (no human-only strings in the response).
+6. tests: empty + non-empty file-import + SQLite unchanged DONE (3 tests).
+```
+
+### Before / after (live, two-package fixture, one cross-partition cycle)
+```text
+BEFORE:  1 module-level cycle found / Cycle 1 (2 modules): / Run: rmap modules deps <module> ...
+AFTER:   1 FILE import cycle found  / Cycle 1 (2 files):   / (no module-deps hint)
+```
+
+### Validation evidence
+```text
+EXECUTED: cargo test -p repo-graph-rgr (9 cycles tests incl. the 3 new; SQLite module tests still green);
+  cargo test --workspace (220 binaries ok, 0 failures); clippy --workspace --all-targets
+  -- -D warnings (clean); cargo fmt --all -- --check (clean).
+LIVE (EXECUTED): dev-install healthy; fixture re-refreshed (both partitions resident). `rmap cycles
+  --engine livegraph --kind file-import` -> "1 FILE import cycle found" / "Cycle 1 (2 files):" /
+  packages/a/src/main.ts -> packages/b/src/foo.ts -> ...; NO "module-level", NO "(N modules)", NO "rmap
+  modules deps". `--json` still carries the structured scope object (kind file-import, cross_partition true,
+  xpart_edge_count 2) -> JSON unchanged (#5). `rmap cycles` (SQLite) -> "5 module-level cycles found" /
+  "(2 modules)" -> MODULE render unchanged (#4).
 ```
 
 ## References
