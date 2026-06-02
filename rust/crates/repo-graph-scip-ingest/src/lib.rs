@@ -16,11 +16,13 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use protobuf::Message;
 use repo_graph_indexer::extractor_port::ExtractorPort;
-use repo_graph_indexer::types::{EdgeType as TsEdgeType, NodeKind};
+use repo_graph_indexer::types::{
+    EdgeType as TsEdgeType, ImportObservation as TsImportObservation, NodeKind,
+};
 use repo_graph_ir::{
     CanonicalKey, EdgeBasis, EdgeType as IrEdgeType, IdentitySource, ImportEdgeMeta,
-    ImportResolution, IrEdge, IrNode, Partition, PartitionId, PartitionIr, PartitionKind,
-    Provenance, SourceRange,
+    ImportObservation as IrImportObservation, ImportResolution, IrEdge, IrNode, Partition,
+    PartitionId, PartitionIr, PartitionKind, Provenance, SourceRange,
 };
 use repo_graph_ts_extractor::TsExtractor;
 use scip::types::Index;
@@ -440,6 +442,9 @@ pub struct AstFacts {
     pub call_sites: Vec<CallSite>,
     /// Relative + resolved module-import candidates (IMPORTS-MODULE-INGEST-1).
     pub imports: Vec<RawImport>,
+    /// All producer import OBSERVATIONS (IMPORTS-EXTRACT-COMPLETENESS-1), carried through verbatim;
+    /// ingest classifies them (with node-resolution) into IR observations.
+    pub import_observations: Vec<TsImportObservation>,
 }
 
 /// Run ts-extractor on one file; return nodes + call-expression sites + relative import candidates.
@@ -450,6 +455,7 @@ pub fn ast_facts_for_source(source: &str, file_path: &str, repo_uid: &str) -> As
             nodes: Vec::new(),
             call_sites: Vec::new(),
             imports: Vec::new(),
+            import_observations: Vec::new(),
         };
     }
     let file_uid = format!("{repo_uid}:{file_path}");
@@ -460,6 +466,7 @@ pub fn ast_facts_for_source(source: &str, file_path: &str, repo_uid: &str) -> As
                 nodes: Vec::new(),
                 call_sites: Vec::new(),
                 imports: Vec::new(),
+                import_observations: Vec::new(),
             }
         }
     };
@@ -508,6 +515,7 @@ pub fn ast_facts_for_source(source: &str, file_path: &str, repo_uid: &str) -> As
         nodes,
         call_sites,
         imports,
+        import_observations: result.import_observations,
     }
 }
 
@@ -734,6 +742,67 @@ fn strip_ts_ext(path: &str) -> &str {
     path
 }
 
+/// Build the partition's FILE-node index: extensionless partition-relative path -> full FILE node key,
+/// for every file-scope node. Shared by edge resolution AND observation classification (so they agree on
+/// what "node-resolves in this partition" means).
+fn build_file_index<'a>(
+    repo_uid: &str,
+    node_keys: &'a HashSet<String>,
+) -> HashMap<&'a str, &'a str> {
+    let prefix = format!("{repo_uid}:");
+    let mut file_index: HashMap<&str, &str> = HashMap::new();
+    for k in node_keys {
+        if let Some(path) = k
+            .strip_prefix(&prefix)
+            .and_then(|s| s.strip_suffix(":FILE"))
+        {
+            file_index.insert(strip_ts_ext(path), k.as_str());
+        }
+    }
+    file_index
+}
+
+/// Classify producer import observations into IR observations (IMPORTS-EXTRACT-COMPLETENESS-1), WITHOUT
+/// inference — each class follows from an observed fact + the partition's node-resolution:
+///   dynamic              -> DynamicUnsupported
+///   non-relative         -> PackageExternal
+///   relative + resolves  -> StaticResolved   (the SAME node-resolution as the edge; also an edge exists)
+///   relative + no resolve-> StaticUnresolved (target file not in this partition)
+/// Modifiers (re-export / type-only / side-effect) are carried through. Observations are NEVER edges.
+fn classify_import_observations(
+    repo_uid: &str,
+    observations: &[TsImportObservation],
+    node_keys: &HashSet<String>,
+) -> Vec<IrImportObservation> {
+    let file_index = build_file_index(repo_uid, node_keys);
+    observations
+        .iter()
+        .map(|o| {
+            let resolution = if o.is_dynamic {
+                ImportResolution::DynamicUnsupported
+            } else if !o.is_relative {
+                ImportResolution::PackageExternal
+            } else if o
+                .resolved_path
+                .as_deref()
+                .map(|rp| file_index.contains_key(rp))
+                .unwrap_or(false)
+            {
+                ImportResolution::StaticResolved
+            } else {
+                ImportResolution::StaticUnresolved
+            };
+            IrImportObservation {
+                raw_specifier: o.raw_specifier.clone(),
+                resolution,
+                is_re_export: o.is_re_export,
+                is_type_only: o.is_type_only,
+                is_side_effect: o.is_side_effect,
+            }
+        })
+        .collect()
+}
+
 /// Resolve `ts-extractor` import candidates into node-connected FILE -> FILE import edges (D4).
 ///
 /// BOTH endpoints must be existing file-scope (`:FILE`) nodes in THIS partition: `src` is the importing
@@ -750,17 +819,7 @@ fn resolve_import_edges(
     indexer_version: &str,
     build_inputs_hash: &str,
 ) -> (Vec<IrEdge>, usize, usize) {
-    let prefix = format!("{repo_uid}:");
-    // Extensionless partition-relative path -> full FILE node key, for every file-scope node.
-    let mut file_index: HashMap<&str, &str> = HashMap::new();
-    for k in node_keys {
-        if let Some(path) = k
-            .strip_prefix(&prefix)
-            .and_then(|s| s.strip_suffix(":FILE"))
-        {
-            file_index.insert(strip_ts_ext(path), k.as_str());
-        }
-    }
+    let file_index = build_file_index(repo_uid, node_keys);
 
     let mut edges = Vec::new();
     let (mut resolved, mut not_captured) = (0usize, 0usize);
@@ -910,6 +969,15 @@ pub fn ingest_partition(
     );
     ir.edges.extend(import_edges);
 
+    // IMPORTS-EXTRACT-COMPLETENESS-1: classify ALL producer import observations into IR observations
+    // (completeness evidence; never edges). Uses the SAME node-resolution as the edge pass.
+    let all_observations: Vec<TsImportObservation> = facts_by_doc
+        .iter()
+        .filter_map(|f| f.as_ref())
+        .flat_map(|f| f.import_observations.iter().cloned())
+        .collect();
+    ir.import_observations = classify_import_observations(repo_uid, &all_observations, &node_keys);
+
     IngestOutcome {
         ir,
         edges_report,
@@ -1029,5 +1097,75 @@ mod tests {
         let meta = e.import.as_ref().expect("import meta present");
         assert_eq!(meta.raw_specifier, "./shapes");
         assert_eq!(meta.resolution, ImportResolution::StaticResolved);
+    }
+
+    // ── IMPORTS-EXTRACT-COMPLETENESS-1: observation classification ──
+
+    fn ts_obs(
+        spec: &str,
+        resolved: Option<&str>,
+        is_relative: bool,
+        is_dynamic: bool,
+    ) -> TsImportObservation {
+        TsImportObservation {
+            raw_specifier: spec.to_string(),
+            resolved_path: resolved.map(|s| s.to_string()),
+            is_relative,
+            is_type_only: false,
+            is_re_export: false,
+            is_side_effect: false,
+            is_dynamic,
+            location: None,
+        }
+    }
+
+    #[test]
+    fn classify_import_observations_each_class() {
+        let node_keys: HashSet<String> = ["r:src/main.ts:FILE", "r:src/shapes.ts:FILE"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let mut reexport_type = ts_obs("./missing", Some("src/missing"), true, false);
+        reexport_type.is_re_export = true;
+        reexport_type.is_type_only = true;
+        let obs = vec![
+            ts_obs("./shapes", Some("src/shapes"), true, false), // resolves -> StaticResolved
+            reexport_type, // no resolve -> StaticUnresolved + mods
+            ts_obs("react", None, false, false), // non-relative -> PackageExternal
+            ts_obs("./z", None, true, true), // dynamic -> DynamicUnsupported
+        ];
+        let ir_obs = classify_import_observations("r", &obs, &node_keys);
+        assert_eq!(ir_obs.len(), 4);
+        assert_eq!(ir_obs[0].resolution, ImportResolution::StaticResolved);
+        assert_eq!(ir_obs[1].resolution, ImportResolution::StaticUnresolved);
+        assert!(ir_obs[1].is_re_export && ir_obs[1].is_type_only); // modifiers carried through
+        assert_eq!(ir_obs[2].resolution, ImportResolution::PackageExternal);
+        assert_eq!(ir_obs[3].resolution, ImportResolution::DynamicUnsupported);
+    }
+
+    #[test]
+    fn synthetic_fixture_import_observation_static_resolved() {
+        let root = format!("{}/tests/fixtures/synthetic", env!("CARGO_MANIFEST_DIR"));
+        let bytes = std::fs::read(format!("{root}/index.scip")).expect("read index.scip");
+        let index = decode_index(&bytes).expect("decode index.scip");
+        let outcome = ingest_partition(
+            &index,
+            &root,
+            "synthetic",
+            "synthetic",
+            "scip-typescript",
+            "test",
+            "h",
+        );
+        // The fixture's single relative import (`./shapes`) is observed AND classified StaticResolved
+        // (it also produced an edge); no spurious extra observations.
+        let resolved: Vec<_> = outcome
+            .ir
+            .import_observations
+            .iter()
+            .filter(|o| o.resolution == ImportResolution::StaticResolved)
+            .collect();
+        assert_eq!(resolved.len(), 1, "one StaticResolved observation");
+        assert_eq!(resolved[0].raw_specifier, "./shapes");
     }
 }
