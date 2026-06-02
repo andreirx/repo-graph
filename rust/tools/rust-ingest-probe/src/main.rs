@@ -278,6 +278,7 @@ fn main() {
                 "rust-analyzer",
                 "x",
                 "h",
+                "",
             );
             let secs = t.elapsed().as_secs_f64();
             let nodes = outcome.ir.nodes.len();

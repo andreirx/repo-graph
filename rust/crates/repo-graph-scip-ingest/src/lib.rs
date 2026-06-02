@@ -321,6 +321,7 @@ pub struct PartitionBuild {
 #[allow(clippy::too_many_arguments)]
 pub fn build_partition_nodes(
     doc: &scip::types::Document,
+    key_path: &str,
     ast_nodes: &[AstNodeLite],
     repo_uid: &str,
     partition_id: &str,
@@ -352,7 +353,7 @@ pub fn build_partition_nodes(
                     subtype: d.kind.clone(),
                     name: d.name.clone(),
                     range: Some(SourceRange {
-                        file: doc.relative_path.clone(),
+                        file: key_path.to_string(),
                         start_line: ast.line_start.max(0) as u32,
                         start_col: ast.col_start.max(0) as u32,
                         end_line: ast.line_end.max(0) as u32,
@@ -368,11 +369,9 @@ pub fn build_partition_nodes(
                 }
             }
             None => {
-                // Labeled fallback: synthesize a canonical-format key from SCIP info.
-                let synth = format!(
-                    "{repo_uid}:{}#{}:SYMBOL:{}",
-                    doc.relative_path, d.name, d.kind
-                );
+                // Labeled fallback: synthesize a canonical-format key from SCIP info. Uses the
+                // REPO-RELATIVE key_path so it shares the producer's namespace (KEY-NAMESPACE-REPO-RELATIVE-1).
+                let synth = format!("{repo_uid}:{key_path}#{}:SYMBOL:{}", d.name, d.kind);
                 out.nodes.push(IrNode {
                     key: CanonicalKey::from_existing(synth),
                     subtype: d.kind.clone(),
@@ -396,7 +395,7 @@ pub fn build_partition_nodes(
             subtype: "FileScope".to_string(),
             name: n.name.clone(),
             range: Some(SourceRange {
-                file: doc.relative_path.clone(),
+                file: key_path.to_string(),
                 start_line: n.line_start.max(0) as u32,
                 start_col: n.col_start.max(0) as u32,
                 end_line: n.line_end.max(0) as u32,
@@ -857,9 +856,41 @@ fn resolve_import_edges(
     (edges, resolved, not_captured)
 }
 
+/// Build the REPO-RELATIVE key path for a document (KEY-NAMESPACE-REPO-RELATIVE-1): qualify the
+/// partition-relative SCIP document path with the partition's repo-relative prefix, so keys across
+/// partitions share one collision-free namespace. POSIX-normalized; `..` is REJECTED (paths are not
+/// allowed to escape). `partition_prefix` is `""` for a repo-root package (keys then == the doc path).
+fn repo_relative_file_path(partition_prefix: &str, doc_relative: &str) -> Result<String, String> {
+    let combined = if partition_prefix.is_empty() {
+        doc_relative.to_string()
+    } else {
+        format!(
+            "{}/{}",
+            partition_prefix.trim_end_matches('/'),
+            doc_relative
+        )
+    };
+    let posix = combined.replace('\\', "/");
+    let mut parts = Vec::new();
+    for seg in posix.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                return Err(format!(
+                    "'..' not allowed in repo-relative key path: {posix}"
+                ))
+            }
+            s => parts.push(s),
+        }
+    }
+    Ok(parts.join("/"))
+}
+
 /// Ingest one TypeScript partition: decode-driven node build (AST-adopted / reconciled /
 /// fallback / materialized FILE) plus strict edge derivation, assembled into a
-/// `PartitionIr`. Source is read from `{root}/{relative_path}`. One buildable unit.
+/// `PartitionIr`. Source is read from `{root}/{relative_path}`. `partition_prefix` is the partition's
+/// REPO-RELATIVE root (e.g. `"packages/a"`; `""` for a repo-root package); keys are built repo-relative
+/// from it (KEY-NAMESPACE-REPO-RELATIVE-1). One buildable unit.
 #[allow(clippy::too_many_arguments)]
 pub fn ingest_partition(
     index: &Index,
@@ -869,6 +900,7 @@ pub fn ingest_partition(
     indexer: &str,
     indexer_version: &str,
     build_inputs_hash: &str,
+    partition_prefix: &str,
 ) -> IngestOutcome {
     let partition = Partition {
         id: PartitionId::new(partition_id),
@@ -888,9 +920,21 @@ pub fn ingest_partition(
 
     // Pass 1: per document, build nodes + the partition-wide symbol map and key set.
     let mut facts_by_doc: Vec<Option<AstFacts>> = Vec::with_capacity(index.documents.len());
+    let mut doc_key_paths: Vec<String> = Vec::with_capacity(index.documents.len());
     for doc in &index.documents {
+        // KEY-NAMESPACE-REPO-RELATIVE-1: keys derive from the REPO-RELATIVE path; the source is still
+        // read from the partition-relative on-disk path. A malformed (`..`) path skips the doc.
+        let key_path = match repo_relative_file_path(partition_prefix, &doc.relative_path) {
+            Ok(p) => p,
+            Err(_) => {
+                missing_source += 1;
+                doc_key_paths.push(String::new());
+                facts_by_doc.push(None);
+                continue;
+            }
+        };
         let facts = match std::fs::read_to_string(format!("{root}/{}", doc.relative_path)) {
-            Ok(src) => Some(ast_facts_for_source(&src, &doc.relative_path, repo_uid)),
+            Ok(src) => Some(ast_facts_for_source(&src, &key_path, repo_uid)),
             Err(_) => {
                 missing_source += 1;
                 None
@@ -900,6 +944,7 @@ pub fn ingest_partition(
             ts_call_sites += f.call_sites.len();
             let b = build_partition_nodes(
                 doc,
+                &key_path,
                 &f.nodes,
                 repo_uid,
                 partition_id,
@@ -926,6 +971,7 @@ pub fn ingest_partition(
             }
             ir.nodes.extend(b.nodes);
         }
+        doc_key_paths.push(key_path);
         facts_by_doc.push(facts);
     }
 
@@ -949,14 +995,13 @@ pub fn ingest_partition(
     // Pass 3 (IMPORTS-MODULE-INGEST-1): resolve AST import candidates to node-connected FILE -> FILE
     // import edges. Runs after pass 1 so EVERY partition file-scope node is known (a target may live in
     // a different document than the importer).
-    let per_doc_imports: Vec<(String, Vec<RawImport>)> = index
-        .documents
+    let per_doc_imports: Vec<(String, Vec<RawImport>)> = facts_by_doc
         .iter()
-        .zip(facts_by_doc.iter())
-        .filter_map(|(doc, facts)| {
+        .zip(doc_key_paths.iter())
+        .filter_map(|(facts, key_path)| {
             facts
                 .as_ref()
-                .map(|f| (doc.relative_path.clone(), f.imports.clone()))
+                .map(|f| (key_path.clone(), f.imports.clone()))
         })
         .collect();
     let (import_edges, imports_resolved, imports_not_captured) = resolve_import_edges(
@@ -1077,6 +1122,7 @@ mod tests {
             "scip-typescript",
             "test",
             "h",
+            "", // single-partition: repo-relative prefix is empty (keys byte-stable)
         );
         assert_eq!(
             outcome.imports_resolved, 1,
@@ -1156,6 +1202,7 @@ mod tests {
             "scip-typescript",
             "test",
             "h",
+            "", // single-partition: repo-relative prefix is empty (keys byte-stable)
         );
         // The fixture's single relative import (`./shapes`) is observed AND classified StaticResolved
         // (it also produced an edge); no spurious extra observations.
@@ -1167,5 +1214,75 @@ mod tests {
             .collect();
         assert_eq!(resolved.len(), 1, "one StaticResolved observation");
         assert_eq!(resolved[0].raw_specifier, "./shapes");
+    }
+
+    // ── KEY-NAMESPACE-REPO-RELATIVE-1: repo-relative key namespace ──
+
+    #[test]
+    fn repo_relative_path_rejects_dotdot_and_normalizes() {
+        assert!(repo_relative_file_path("packages/a", "../escape.ts").is_err());
+        assert!(repo_relative_file_path("", "../escape.ts").is_err());
+        // single-partition: empty prefix -> unchanged (byte-stable).
+        assert_eq!(
+            repo_relative_file_path("", "src/main.ts").unwrap(),
+            "src/main.ts"
+        );
+        // qualified + POSIX-normalized (`.` dropped, trailing slash on prefix trimmed).
+        assert_eq!(
+            repo_relative_file_path("packages/a/", "./src/main.ts").unwrap(),
+            "packages/a/src/main.ts"
+        );
+    }
+
+    #[test]
+    fn two_partitions_repo_relative_keys_are_distinct() {
+        // The SAME source file ingested under two partition prefixes -> DISTINCT repo-relative keys (no
+        // collision; the LiveGraph defines map would retain both).
+        let root = format!("{}/tests/fixtures/synthetic", env!("CARGO_MANIFEST_DIR"));
+        let bytes = std::fs::read(format!("{root}/index.scip")).expect("read index.scip");
+        let index = decode_index(&bytes).expect("decode index.scip");
+        let a = ingest_partition(
+            &index,
+            &root,
+            "repo",
+            "pkg-a",
+            "scip-typescript",
+            "t",
+            "h",
+            "packages/a",
+        );
+        let b = ingest_partition(
+            &index,
+            &root,
+            "repo",
+            "pkg-b",
+            "scip-typescript",
+            "t",
+            "h",
+            "packages/b",
+        );
+        let has = |o: &IngestOutcome, k: &str| o.ir.nodes.iter().any(|n| n.key.as_str() == k);
+        assert!(
+            has(&a, "repo:packages/a/src/main.ts:FILE"),
+            "pkg-a repo-relative FILE key"
+        );
+        assert!(
+            has(&b, "repo:packages/b/src/main.ts:FILE"),
+            "pkg-b repo-relative FILE key"
+        );
+        let a_keys: HashSet<String> =
+            a.ir.nodes
+                .iter()
+                .map(|n| n.key.as_str().to_string())
+                .collect();
+        let b_keys: HashSet<String> =
+            b.ir.nodes
+                .iter()
+                .map(|n| n.key.as_str().to_string())
+                .collect();
+        assert!(
+            a_keys.is_disjoint(&b_keys),
+            "no cross-partition key collision (defines would not overwrite)"
+        );
     }
 }

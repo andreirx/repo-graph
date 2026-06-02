@@ -718,12 +718,17 @@ impl ServiceDispatcher {
             Ok(s) => s.to_string(),
             Err(e) => return DispatchResult::error(&request.id, e),
         };
+        // KEY-NAMESPACE-REPO-RELATIVE-1: the partition's repo-relative prefix = source_root relative to the
+        // repo path (the `repo` param). Empty for a repo-root package (keys stay doc-relative, byte-stable).
+        let repo_path = Self::get_optional_string_param(&request.params, "repo").unwrap_or("");
+        let partition_prefix = crate::livegraph_feed::repo_relative_prefix(repo_path, &source_root);
         match crate::livegraph_feed::preload_partition(
             &repo_state,
             &repo_uid,
             &partition_id,
             &scip,
             &source_root,
+            &partition_prefix,
         ) {
             Ok(summary) => DispatchResult::success(&request.id, summary),
             Err(e) => {

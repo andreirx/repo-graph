@@ -32,6 +32,7 @@ fn ingest_fixture() -> IngestOutcome {
         "scip-typescript",
         "0.4.0",
         "h",
+        "",
     )
 }
 

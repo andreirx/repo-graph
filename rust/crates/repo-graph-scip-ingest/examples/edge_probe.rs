@@ -28,6 +28,7 @@ fn main() {
         "scip-typescript",
         "0.4.0",
         "h",
+        "",
     );
 
     let node_keys: HashSet<&str> = o.ir.nodes.iter().map(|n| n.key.as_str()).collect();

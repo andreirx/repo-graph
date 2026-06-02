@@ -130,6 +130,7 @@ fn run_chain(cfg: &Cfg) -> Sample {
         "scip-typescript",
         "0.4.0",
         "h",
+        "",
     );
     let ingest = t_i.elapsed().as_secs_f64();
     let nodes = outcome.ir.nodes.len();
@@ -267,6 +268,7 @@ fn sym2canon(engine_index: &Index, engine_root: &str) -> HashMap<String, String>
         "scip-typescript",
         "0.4.0",
         "h",
+        "",
     );
     let mut m = HashMap::new();
     for n in &outcome.ir.nodes {

@@ -317,6 +317,9 @@ pub fn run_refresh(
         .map_err(|e| RefreshFailure::IngestFailed(format!("read producer output: {e}")))?;
     let index =
         decode_index(&bytes).map_err(|e| RefreshFailure::IngestFailed(format!("decode: {e}")))?;
+    // KEY-NAMESPACE-REPO-RELATIVE-1: the refresh handles ONLY the default partition today (project_dir ==
+    // the repo root, F2 no multi-partition enumeration), so the repo-relative prefix is "" (keys stay
+    // byte-stable). Multi-partition refresh threads a real prefix in IMPORTS-XPART-ENUMERATION-1.
     let outcome = ingest_partition(
         &index,
         project_dir,
@@ -325,6 +328,7 @@ pub fn run_refresh(
         livegraph_warm_cache::INDEXER_NAME,
         livegraph_warm_cache::INDEXER_VERSION,
         &source_inputs_hash,
+        "",
     );
     let nodes = outcome.ir.nodes.len();
     let edges = outcome.ir.edges.len();

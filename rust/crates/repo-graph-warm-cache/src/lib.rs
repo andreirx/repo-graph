@@ -45,7 +45,9 @@ pub const MAGIC: u32 = 0x5247_5743;
 /// Cache wire-format / layout version. A change here invalidates every existing entry (D3/D4).
 /// v2 (IMPORTS-MODULE-INGEST-1): `CacheIrEdgeDto` gained the optional `import` field (import edges).
 /// v3 (IMPORTS-EXTRACT-COMPLETENESS-1): `CachePartitionIrDto` gained `import_observations`.
-pub const SCHEMA_VERSION: u32 = 3;
+/// v4 (KEY-NAMESPACE-REPO-RELATIVE-1): node/edge KEYS are now repo-relative; the DTO shape is unchanged
+/// but cached key VALUES differ, so old (partition-relative) caches MUST be discarded -> re-extract.
+pub const SCHEMA_VERSION: u32 = 4;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // Errors (D4)

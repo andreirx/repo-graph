@@ -15,16 +15,29 @@ use crate::state::RepoState;
 /// Decode a supplied `index.scip`, ingest it into a `PartitionIr` + complexity map, and feed both
 /// into `lg` (epoch-stamped). Pure over the runtime (no daemon state) so it is unit-testable against
 /// the committed fixture. Returns a summary `{partition_id, nodes, edges, value_facts, epoch}`.
+/// A partition's REPO-RELATIVE prefix = `source_root` relative to `repo_path` (POSIX, no trailing
+/// slash). Empty when `source_root == repo_path` (a repo-root package) or when `source_root` is not
+/// under `repo_path` (defensive). The repo-relative key namespace prepends this (KEY-NAMESPACE-REPO-RELATIVE-1).
+pub fn repo_relative_prefix(repo_path: &str, source_root: &str) -> String {
+    std::path::Path::new(source_root)
+        .strip_prefix(repo_path)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default()
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn preload_into(
     lg: &mut LiveGraph,
     repo_uid: &str,
     partition_id: &str,
     scip_path: &str,
     source_root: &str,
+    partition_prefix: &str,
 ) -> Result<serde_json::Value, String> {
     let bytes = std::fs::read(scip_path).map_err(|e| format!("read scip '{scip_path}': {e}"))?;
     let index = decode_index(&bytes).map_err(|e| format!("decode scip '{scip_path}': {e}"))?;
-    // The daemon DECODES + ingests a supplied index; it does NOT run the indexer (1C).
+    // The daemon DECODES + ingests a supplied index; it does NOT run the indexer (1C). `partition_prefix`
+    // is the partition's repo-relative root for the repo-relative key namespace (KEY-NAMESPACE-REPO-RELATIVE-1).
     let outcome = ingest_partition(
         &index,
         source_root,
@@ -33,6 +46,7 @@ pub fn preload_into(
         "scip-typescript",
         "preload",
         "preload",
+        partition_prefix,
     );
     let nodes = outcome.ir.nodes.len();
     let edges = outcome.ir.edges.len();
@@ -55,16 +69,25 @@ pub fn preload_into(
 
 /// Preload a partition into the repo's LiveGraph (creating it if absent). Write-locks the repo's
 /// LiveGraph — interior mutability over the shared `Arc<RepoState>`.
+#[allow(clippy::too_many_arguments)]
 pub fn preload_partition(
     repo_state: &RepoState,
     repo_uid: &str,
     partition_id: &str,
     scip_path: &str,
     source_root: &str,
+    partition_prefix: &str,
 ) -> Result<serde_json::Value, String> {
     let mut guard = repo_state.livegraph.write();
     let lg = guard.get_or_insert_with(LiveGraph::new);
-    preload_into(lg, repo_uid, partition_id, scip_path, source_root)
+    preload_into(
+        lg,
+        repo_uid,
+        partition_id,
+        scip_path,
+        source_root,
+        partition_prefix,
+    )
 }
 
 // ── LIVEGRAPH-INTEGRATION-1B serving + comparison (S2 engine flag, S3 compare report) ──
@@ -934,7 +957,7 @@ mod tests {
         let scip = format!("{root}/index.scip");
         let mut lg = LiveGraph::new();
         let summary =
-            preload_into(&mut lg, "synthetic", "synthetic", &scip, &root).expect("preload");
+            preload_into(&mut lg, "synthetic", "synthetic", &scip, &root, "").expect("preload");
         assert!(summary["nodes"].as_u64().unwrap() > 0, "real nodes loaded");
         assert!(
             summary["value_facts"].as_u64().unwrap() > 0,

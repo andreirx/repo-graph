@@ -457,6 +457,7 @@ fn main() {
         "scip-typescript",
         "0.4.0",
         "h",
+        "",
     );
     let api_outcome = ingest_partition(
         &api_index,
@@ -466,6 +467,7 @@ fn main() {
         "scip-typescript",
         "0.4.0",
         "h",
+        "",
     );
     let engine_nodes = &engine_outcome.ir.nodes;
     let api_nodes = &api_outcome.ir.nodes;

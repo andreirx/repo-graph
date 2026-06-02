@@ -37,6 +37,7 @@ fn ingest(scip_path: &str) -> IngestOutcome {
         "scip-typescript",
         "0.4.0",
         "h",
+        "",
     )
 }
 
