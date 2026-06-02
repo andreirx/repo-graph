@@ -1393,6 +1393,7 @@ dependencies = [
  "repo-graph-ir",
  "repo-graph-ts-extractor",
  "scip",
+ "serde_json",
 ]
 
 [[package]]

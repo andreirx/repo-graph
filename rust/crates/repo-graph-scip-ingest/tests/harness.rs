@@ -247,12 +247,22 @@ fn group9_provenance() {
             ),
         }
     }
-    assert!(
-        o.ir.edges
-            .iter()
-            .all(|e| e.provenance.scip_symbol_id.is_some()),
-        "every edge must carry its SCIP referent provenance"
-    );
+    // SCIP-derived edges (Calls/References) carry the SCIP referent symbol; AST-derived import edges
+    // (EdgeBasis::AstImport, IMPORTS-MODULE-INGEST-1) carry none — like FILE nodes above.
+    for e in &o.ir.edges {
+        match e.basis {
+            EdgeBasis::AstImport => assert!(
+                e.provenance.scip_symbol_id.is_none(),
+                "AST import edge must carry no SCIP provenance: {} -> {}",
+                e.src.as_str(),
+                e.dst.as_str()
+            ),
+            _ => assert!(
+                e.provenance.scip_symbol_id.is_some(),
+                "every SCIP-derived edge must carry its SCIP referent provenance"
+            ),
+        }
+    }
 }
 
 // 10. Dependency boundary: repo-graph-ir has zero scip/sqlite/tree-sitter/storage deps.

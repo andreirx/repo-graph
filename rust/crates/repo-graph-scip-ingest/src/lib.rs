@@ -18,8 +18,9 @@ use protobuf::Message;
 use repo_graph_indexer::extractor_port::ExtractorPort;
 use repo_graph_indexer::types::{EdgeType as TsEdgeType, NodeKind};
 use repo_graph_ir::{
-    CanonicalKey, EdgeBasis, EdgeType as IrEdgeType, IdentitySource, IrEdge, IrNode, Partition,
-    PartitionId, PartitionIr, PartitionKind, Provenance, SourceRange,
+    CanonicalKey, EdgeBasis, EdgeType as IrEdgeType, IdentitySource, ImportEdgeMeta,
+    ImportResolution, IrEdge, IrNode, Partition, PartitionId, PartitionIr, PartitionKind,
+    Provenance, SourceRange,
 };
 use repo_graph_ts_extractor::TsExtractor;
 use scip::types::Index;
@@ -419,6 +420,17 @@ pub fn build_partition_nodes(
 /// Lines 1-based, columns 0-based.
 type CallSite = (String, (i64, i64, i64, i64));
 
+/// A raw module-import candidate from the `ts-extractor` (IMPORTS-MODULE-INGEST-1). The extractor emits
+/// these only for relative + resolved imports; `resolved_path` is partition-relative and EXTENSIONLESS
+/// (e.g. `src/shapes`). The target is resolved to a real file-scope node later (D4), or NOT CAPTURED.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawImport {
+    /// The raw specifier as written (e.g. `"./shapes"`).
+    pub raw_specifier: String,
+    /// The extractor-resolved partition-relative path (extensionless).
+    pub resolved_path: String,
+}
+
 /// AST facts for one file: located nodes (with complexity) + call-expression sites,
 /// each carrying the callee name (last segment) and the call-expression range.
 pub struct AstFacts {
@@ -426,15 +438,18 @@ pub struct AstFacts {
     pub nodes: Vec<AstNodeLite>,
     /// Call-expression sites used to confirm `Calls` (callee name + range).
     pub call_sites: Vec<CallSite>,
+    /// Relative + resolved module-import candidates (IMPORTS-MODULE-INGEST-1).
+    pub imports: Vec<RawImport>,
 }
 
-/// Run ts-extractor on one file; return nodes + call-expression sites.
+/// Run ts-extractor on one file; return nodes + call-expression sites + relative import candidates.
 pub fn ast_facts_for_source(source: &str, file_path: &str, repo_uid: &str) -> AstFacts {
     let mut extractor = TsExtractor::new();
     if extractor.initialize().is_err() {
         return AstFacts {
             nodes: Vec::new(),
             call_sites: Vec::new(),
+            imports: Vec::new(),
         };
     }
     let file_uid = format!("{repo_uid}:{file_path}");
@@ -444,6 +459,7 @@ pub fn ast_facts_for_source(source: &str, file_path: &str, repo_uid: &str) -> As
             return AstFacts {
                 nodes: Vec::new(),
                 call_sites: Vec::new(),
+                imports: Vec::new(),
             }
         }
     };
@@ -459,6 +475,15 @@ pub fn ast_facts_for_source(source: &str, file_path: &str, repo_uid: &str) -> As
                 )
             })
         })
+        .collect();
+    // IMPORTS-MODULE-INGEST-1: harvest relative+resolved import candidates from the SAME public
+    // `result.edges` (the extractor emits import EDGES only for those; see slice doc D3). The resolved
+    // path lives in `metadata_json.resolvedPath` (extensionless). Authority = ts-extractor, NOT SCIP.
+    let imports: Vec<RawImport> = result
+        .edges
+        .iter()
+        .filter(|e| matches!(e.edge_type, TsEdgeType::Imports))
+        .filter_map(|e| raw_import_from_metadata(e.metadata_json.as_deref()))
         .collect();
     let metrics = result.metrics;
     let nodes = result
@@ -479,7 +504,23 @@ pub fn ast_facts_for_source(source: &str, file_path: &str, repo_uid: &str) -> As
             })
         })
         .collect();
-    AstFacts { nodes, call_sites }
+    AstFacts {
+        nodes,
+        call_sites,
+        imports,
+    }
+}
+
+/// Parse a ts-extractor import edge's `metadata_json` (`{"rawPath":..,"resolvedPath":..}`) into a
+/// [`RawImport`]. Returns `None` if the metadata is absent or malformed (the edge is then NOT CAPTURED).
+fn raw_import_from_metadata(metadata_json: Option<&str>) -> Option<RawImport> {
+    let v: serde_json::Value = serde_json::from_str(metadata_json?).ok()?;
+    let raw_specifier = v.get("rawPath")?.as_str()?.to_string();
+    let resolved_path = v.get("resolvedPath")?.as_str()?.to_string();
+    Some(RawImport {
+        raw_specifier,
+        resolved_path,
+    })
 }
 
 /// Extract a callee name from a ts-extractor edge target (a stable key
@@ -673,6 +714,88 @@ pub struct IngestOutcome {
     pub ts_call_sites: usize,
     /// Documents whose source file could not be read.
     pub missing_source: usize,
+    /// IMPORTS-MODULE-INGEST-1: relative+resolved import candidates that matched a real file-scope node
+    /// in this partition and became `EdgeType::Imports` edges (node-connected FILE -> FILE).
+    pub imports_resolved: usize,
+    /// IMPORTS-MODULE-INGEST-1: import candidates NOT CAPTURED (target file not present in this partition
+    /// — cross-partition / index-file / extension mismatch). NOT emitted as symbolic dangling edges.
+    pub imports_not_captured: usize,
+}
+
+/// Strip a TypeScript source extension from a partition-relative path (longest match first), so a real
+/// FILE node path (`src/shapes.ts`) can be compared to the extractor's extensionless resolved path
+/// (`src/shapes`). Returns the input unchanged if it carries no known TS extension.
+fn strip_ts_ext(path: &str) -> &str {
+    for ext in [".d.ts", ".ts", ".tsx", ".mts", ".cts"] {
+        if let Some(s) = path.strip_suffix(ext) {
+            return s;
+        }
+    }
+    path
+}
+
+/// Resolve `ts-extractor` import candidates into node-connected FILE -> FILE import edges (D4).
+///
+/// BOTH endpoints must be existing file-scope (`:FILE`) nodes in THIS partition: `src` is the importing
+/// file's FILE node; `dst` is found by matching the extractor's extensionless `resolved_path` against the
+/// partition's FILE nodes (extension stripped). An import whose target file is not present in the
+/// partition (cross-partition, missing, index-file, or extension mismatch) is **NOT CAPTURED** — never a
+/// symbolic dangling edge (the resolution gap is a documented limitation, IMPORTS-XPART-RESOLUTION-1).
+/// Returns `(edges, resolved_count, not_captured_count)`.
+fn resolve_import_edges(
+    repo_uid: &str,
+    per_doc_imports: &[(String, Vec<RawImport>)],
+    node_keys: &HashSet<String>,
+    indexer: &str,
+    indexer_version: &str,
+    build_inputs_hash: &str,
+) -> (Vec<IrEdge>, usize, usize) {
+    let prefix = format!("{repo_uid}:");
+    // Extensionless partition-relative path -> full FILE node key, for every file-scope node.
+    let mut file_index: HashMap<&str, &str> = HashMap::new();
+    for k in node_keys {
+        if let Some(path) = k
+            .strip_prefix(&prefix)
+            .and_then(|s| s.strip_suffix(":FILE"))
+        {
+            file_index.insert(strip_ts_ext(path), k.as_str());
+        }
+    }
+
+    let mut edges = Vec::new();
+    let (mut resolved, mut not_captured) = (0usize, 0usize);
+    for (source_file, imports) in per_doc_imports {
+        let src_key = format!("{repo_uid}:{source_file}:FILE");
+        let src_present = node_keys.contains(&src_key);
+        for imp in imports {
+            // Both src (importing file) and dst (target) must resolve to real file-scope nodes.
+            match (src_present, file_index.get(imp.resolved_path.as_str())) {
+                (true, Some(dst_key)) => {
+                    edges.push(IrEdge {
+                        src: CanonicalKey::from_existing(src_key.clone()),
+                        dst: CanonicalKey::from_existing((*dst_key).to_string()),
+                        edge_type: IrEdgeType::Imports,
+                        basis: EdgeBasis::AstImport,
+                        provenance: Provenance {
+                            indexer: indexer.to_string(),
+                            indexer_version: indexer_version.to_string(),
+                            // AST-derived (ts-extractor import declaration), no SCIP symbol.
+                            scip_symbol_id: None,
+                            build_inputs_hash: build_inputs_hash.to_string(),
+                        },
+                        import: Some(ImportEdgeMeta {
+                            raw_specifier: imp.raw_specifier.clone(),
+                            resolved_path: imp.resolved_path.clone(),
+                            resolution: ImportResolution::StaticResolved,
+                        }),
+                    });
+                    resolved += 1;
+                }
+                _ => not_captured += 1,
+            }
+        }
+    }
+    (edges, resolved, not_captured)
 }
 
 /// Ingest one TypeScript partition: decode-driven node build (AST-adopted / reconciled /
@@ -764,6 +887,29 @@ pub fn ingest_partition(
         }
     }
 
+    // Pass 3 (IMPORTS-MODULE-INGEST-1): resolve AST import candidates to node-connected FILE -> FILE
+    // import edges. Runs after pass 1 so EVERY partition file-scope node is known (a target may live in
+    // a different document than the importer).
+    let per_doc_imports: Vec<(String, Vec<RawImport>)> = index
+        .documents
+        .iter()
+        .zip(facts_by_doc.iter())
+        .filter_map(|(doc, facts)| {
+            facts
+                .as_ref()
+                .map(|f| (doc.relative_path.clone(), f.imports.clone()))
+        })
+        .collect();
+    let (import_edges, imports_resolved, imports_not_captured) = resolve_import_edges(
+        repo_uid,
+        &per_doc_imports,
+        &node_keys,
+        indexer,
+        indexer_version,
+        build_inputs_hash,
+    );
+    ir.edges.extend(import_edges);
+
     IngestOutcome {
         ir,
         edges_report,
@@ -771,6 +917,8 @@ pub fn ingest_partition(
         complexity,
         ts_call_sites,
         missing_source,
+        imports_resolved,
+        imports_not_captured,
     }
 }
 
@@ -806,5 +954,80 @@ mod tests {
         assert_eq!(reconcile_scip_name(""), "");
         assert_eq!(reconcile_scip_name("<unknown>x"), "<unknown>x");
         assert_eq!(reconcile_scip_name("getter"), "getter");
+    }
+
+    // ── IMPORTS-MODULE-INGEST-1: node-resolved FILE -> FILE import edges (D4) ──
+
+    #[test]
+    fn resolve_import_edges_node_resolves_and_skips() {
+        let node_keys: HashSet<String> = ["r:src/main.ts:FILE", "r:src/shapes.ts:FILE"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let per_doc = vec![(
+            "src/main.ts".to_string(),
+            vec![
+                // Resolves: target src/shapes matches src/shapes.ts (extension stripped).
+                RawImport {
+                    raw_specifier: "./shapes".into(),
+                    resolved_path: "src/shapes".into(),
+                },
+                // Target absent from the partition -> NOT CAPTURED (no symbolic dangling edge).
+                RawImport {
+                    raw_specifier: "./missing".into(),
+                    resolved_path: "src/missing".into(),
+                },
+            ],
+        )];
+        let (edges, resolved, not_captured) =
+            resolve_import_edges("r", &per_doc, &node_keys, "scip-typescript", "0", "h");
+        assert_eq!(resolved, 1);
+        assert_eq!(not_captured, 1);
+        assert_eq!(edges.len(), 1);
+        let e = &edges[0];
+        assert_eq!(e.src.as_str(), "r:src/main.ts:FILE");
+        assert_eq!(e.dst.as_str(), "r:src/shapes.ts:FILE"); // node-resolved
+        assert_eq!(e.edge_type, IrEdgeType::Imports);
+        assert_eq!(e.basis, EdgeBasis::AstImport);
+        let meta = e.import.as_ref().expect("import meta present");
+        assert_eq!(meta.raw_specifier, "./shapes");
+        assert_eq!(meta.resolved_path, "src/shapes");
+        assert_eq!(meta.resolution, ImportResolution::StaticResolved);
+    }
+
+    #[test]
+    fn synthetic_fixture_import_edge_is_node_resolved() {
+        // End-to-end on the committed real index.scip: src/main.ts has `import { Circle } from "./shapes"`.
+        let root = format!("{}/tests/fixtures/synthetic", env!("CARGO_MANIFEST_DIR"));
+        let bytes = std::fs::read(format!("{root}/index.scip")).expect("read index.scip");
+        let index = decode_index(&bytes).expect("decode index.scip");
+        let outcome = ingest_partition(
+            &index,
+            &root,
+            "synthetic",
+            "synthetic",
+            "scip-typescript",
+            "test",
+            "h",
+        );
+        assert_eq!(
+            outcome.imports_resolved, 1,
+            "the single relative import resolves to a real file-scope node"
+        );
+        assert_eq!(outcome.imports_not_captured, 0);
+        let imports: Vec<&IrEdge> = outcome
+            .ir
+            .edges
+            .iter()
+            .filter(|e| e.edge_type == IrEdgeType::Imports)
+            .collect();
+        assert_eq!(imports.len(), 1, "exactly one import edge");
+        let e = imports[0];
+        assert_eq!(e.src.as_str(), "synthetic:src/main.ts:FILE");
+        assert_eq!(e.dst.as_str(), "synthetic:src/shapes.ts:FILE");
+        assert_eq!(e.basis, EdgeBasis::AstImport);
+        let meta = e.import.as_ref().expect("import meta present");
+        assert_eq!(meta.raw_specifier, "./shapes");
+        assert_eq!(meta.resolution, ImportResolution::StaticResolved);
     }
 }
