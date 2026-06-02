@@ -1,7 +1,10 @@
 # IMPORTS-EXTRACT-COMPLETENESS-1: widen TS import extraction (observations, no inference) (Stage D)
 
 Slice ID: IMPORTS-EXTRACT-COMPLETENESS-1
-Status: **DESIGN — Decision A + direction ratified (2026-06-02). Implementation NOT started.**
+Status: **IMPLEMENTED + validated (2026-06-02).** Producer emits import observations (incl. dynamic);
+ingest classifies them into `PartitionIr.import_observations` (StaticResolved/StaticUnresolved/
+PackageExternal/DynamicUnsupported + modifiers); warm-cache schema v3. Only StaticResolved still becomes a
+graph edge. See Completion.
 Depends: IMPORTS-MODULE-INGEST-1 (the captured FILE import graph + the NOT-CAPTURED limits this closes;
 the no-dangling-symbolic-edges rule D4), `repo-graph-ir` / `repo-graph-warm-cache` (PartitionIr shape +
 schema_version), `repo-graph-ts-extractor` (the producer being widened).
@@ -125,6 +128,48 @@ view here, recorded as an observation). No widening of NON-import extraction.
 3. ingest:   classify observations -> edges (StaticResolved only) + import_observations + fixture tests.
 4. docs:     status/evidence; update IMPORTS-MODULE-INGEST-1's NOT-CAPTURED list (now CAPTURED-as-evidence).
 ```
+
+## Completion (implemented + validated 2026-06-02, EXECUTED)
+
+Commits: `5351288` (1/4 producer) + `dd30d3a` (2/4 support) + `013b74d` (3/4 ingest) + this doc (4/4).
+
+- **Producer** (`repo-graph-indexer::types` + `ts-extractor`): `ImportObservation` DTO +
+  `ExtractionResult.import_observations`; one observation per import / export-from statement (raw facts:
+  relative, type-only, re-export, side-effect, resolved-path) + a self-contained full-AST walk for dynamic
+  `import()` (DynamicObserved — the grammar parses it cleanly, so NOT deferred). Resolved IMPORTS edges
+  unchanged. Non-TS extractors carry an empty vec (cross-runtime parity).
+- **Support** (`repo-graph-ir` + `repo-graph-warm-cache`): `ImportResolution` extended; IR
+  `ImportObservation`; `PartitionIr.import_observations`; warm-cache DTO + `SCHEMA_VERSION 2->3` (old caches
+  -> SchemaMismatch -> re-extract, NOT backward-decode); round-trip test carries observations.
+- **Ingest** (`repo-graph-scip-ingest`): `classify_import_observations` (no inference) using the SAME
+  node-resolution (`build_file_index`) as the edge pass; ALL observations -> `ir.import_observations`; only
+  StaticResolved still becomes an `EdgeType::Imports` edge.
+
+### Classes now CAPTURED (as evidence) vs UNSUPPORTED
+```text
+CAPTURED as classified observations (no inference, each from a producer-observed fact):
+  StaticResolved      relative, node-resolved in this partition  (ALSO a graph edge)
+  StaticUnresolved    relative, target FILE not in this partition (cross-partition / index-file / ext-miss)
+  PackageExternal     non-relative / bare specifier (e.g. "react")
+  DynamicUnsupported  dynamic import() (specifier captured when a static string literal)
+  + modifiers ReExport / TypeOnly / SideEffect (orthogonal, carried through)
+STILL UNSUPPORTED / not represented (honest gaps):
+  - cross-partition node RESOLUTION (StaticUnresolved stays an observation, not an edge) -> IMPORTS-XPART-RESOLUTION-1
+  - dynamic imports with a non-literal specifier: observed (DynamicUnsupported) but raw_specifier may be empty
+  - import KIND (named/default/namespace) at edge/file granularity: still deferred (binding-level)
+  - non-TS languages: no import observations (TS-only)
+```
+
+```text
+Tests (EXECUTED): ts-extractor 309 (incl. 6 observation tests + dynamic detection); repo-graph-ir 3;
+  repo-graph-warm-cache 11 (v3 round-trip exercises observations); repo-graph-scip-ingest 9 unit
+  (classify-each-class + synthetic StaticResolved observation) + 10 harness. Full cargo test --workspace
+  green; clippy --workspace -D warnings + fmt clean. No daemon/CLI/cycles code.
+```
+
+The IMPORTS-MODULE-INGEST-1 NOT-CAPTURED list (non-relative / unresolved / dynamic / re-export) is now
+CAPTURED **as classified observations** (completeness evidence) — NOT as graph edges. The graph edge set is
+unchanged (StaticResolved node-resolved only); D4 (no dangling symbolic edges) holds.
 
 ## Follow-up slices
 ```text
