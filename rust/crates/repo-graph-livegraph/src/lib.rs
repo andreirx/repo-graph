@@ -11,7 +11,9 @@
 //! indexers, persist, or touch the CLI. Deps: `repo-graph-ir` + `repo-graph-trust-model` only.
 //! Headless API (no query migration). See docs/slices/livegraph-runtime-1.md.
 
-use repo_graph_ir::{CanonicalKey, IdentitySource, PartitionIr, Provenance, SourceRange};
+use repo_graph_ir::{
+    CanonicalKey, EdgeBasis, IdentitySource, PartitionIr, Provenance, SourceRange,
+};
 use repo_graph_trust_model::{
     classify_answer, AnswerClass, AnswerEnvelope, CompletenessInput, DegradationReason,
     FreshnessState, Granularity, IdentityBasis, LanguageSupport, NotScipDependent,
@@ -110,6 +112,19 @@ pub struct CalleesAnswer {
     /// `None` when the callee has no known defining partition (`UnresolvedAlias`).
     pub callee_identities: Vec<(String, Option<String>)>,
     /// Contributing partition epochs (D3).
+    pub contributing_epochs: BTreeMap<String, u64>,
+}
+
+/// The payload of a `path` answer (`AnswerEnvelope<PathAnswer>`; PATH-CYCLES-LIVEGRAPH-1). A shortest
+/// path over the STRICT call graph (`SyntaxConfirmedCall` edges). Empty `nodes` = no path (the class
+/// distinguishes a PROVEN no-path (`Exact`) from an incomplete traversal (`Partial`)).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathAnswer {
+    /// The path node keys in order (`from` .. `to`); empty if no path.
+    pub nodes: Vec<String>,
+    /// The path edges `(src, dst)` in order; empty if no path.
+    pub edges: Vec<(String, String)>,
+    /// Contributing partition epochs (the partitions the path's nodes/edges came from).
     pub contributing_epochs: BTreeMap<String, u64>,
 }
 
@@ -756,6 +771,199 @@ impl LiveGraph {
                 .expect("stale invariant holds"),
         }
     }
+
+    /// `path(from, to)` — shortest path over the STRICT call graph (PATH-CYCLES-LIVEGRAPH-1). BFS over
+    /// RESIDENT partitions' `SyntaxConfirmedCall` edges (the acceptable basis for path semantics; the
+    /// xref summary lacks outgoing adjacency, so traversal needs the resident IR).
+    ///
+    /// Trust (D3, corrected): a FOUND path is `Exact` ONLY if every partition on the path is resident +
+    /// Fresh (a found path is all-`SyntaxConfirmedCall` by construction, so the basis condition holds);
+    /// a stale path partition → `Stale` (freshness dominates). A NO-PATH result is `Exact` ONLY if the
+    /// reachable region was proven complete — every expanded node was defined in a resident + Fresh
+    /// partition. If traversal reached a node it could not fully expand (its defining partition is
+    /// non-resident / stale / unknown) → `Partial`, NEVER a confident exact-empty "no path".
+    pub fn path(&self, from: &str, to: &str) -> AnswerEnvelope<PathAnswer> {
+        use std::collections::VecDeque;
+
+        // Precompute node -> defining partition (from `defines`, resident or not).
+        let mut owner: HashMap<&str, &str> = HashMap::new();
+        for (pid, s) in &self.slots {
+            for k in s.defines.keys() {
+                owner.insert(k.as_str(), pid.as_str());
+            }
+        }
+
+        // Strict call-graph adjacency from RESIDENT partitions: src -> [(dst, partition)] over
+        // `SyntaxConfirmedCall` edges only. Also collect the set of KNOWN node keys.
+        let mut adj: HashMap<String, Vec<(String, String)>> = HashMap::new();
+        let mut known: BTreeSet<String> = owner.keys().map(|k| k.to_string()).collect();
+        for (pid, s) in &self.slots {
+            if let Some(ir) = &s.ir {
+                for e in &ir.edges {
+                    if e.basis == EdgeBasis::SyntaxConfirmedCall {
+                        let src = e.src.as_str().to_string();
+                        let dst = e.dst.as_str().to_string();
+                        known.insert(src.clone());
+                        known.insert(dst.clone());
+                        adj.entry(src).or_default().push((dst, pid.clone()));
+                    }
+                }
+            }
+        }
+
+        // Unknown source or target → Unavailable (null ≠ empty).
+        if !known.contains(from) || !known.contains(to) {
+            return AnswerEnvelope::unavailable(
+                DegradationReason::UnresolvedAlias,
+                FreshnessState::Unavailable,
+                BTreeSet::new(),
+            );
+        }
+
+        // A node is FULLY EXPANDABLE iff it is defined in a resident + Fresh partition (its outgoing
+        // call edges are all loaded). Otherwise expansion is incomplete.
+        let fully_expandable = |node: &str| -> bool {
+            match owner.get(node) {
+                Some(pid) => self
+                    .slots
+                    .get(*pid)
+                    .map(|s| s.ir.is_some() && status_freshness(s.status) == FreshnessState::Fresh)
+                    .unwrap_or(false),
+                None => false,
+            }
+        };
+
+        // BFS.
+        let mut visited: BTreeSet<String> = BTreeSet::new();
+        let mut parent: HashMap<String, (String, String)> = HashMap::new(); // node -> (prev, edge partition)
+        let mut queue: VecDeque<String> = VecDeque::new();
+        let mut degraded = false; // reached a node we could not fully expand
+        visited.insert(from.to_string());
+        queue.push_back(from.to_string());
+        let mut found = false;
+        while let Some(n) = queue.pop_front() {
+            if n == to {
+                found = true;
+                break;
+            }
+            if !fully_expandable(&n) {
+                degraded = true;
+            }
+            if let Some(neighbors) = adj.get(&n) {
+                for (dst, pid) in neighbors {
+                    if visited.insert(dst.clone()) {
+                        parent.insert(dst.clone(), (n.clone(), pid.clone()));
+                        queue.push_back(dst.clone());
+                    }
+                }
+            }
+        }
+
+        // Freshness/languages/epochs over a set of partition ids.
+        let collect_parts = |parts: &BTreeSet<String>| {
+            let mut epochs = BTreeMap::new();
+            let mut languages = BTreeSet::new();
+            let mut worst = FreshnessState::Fresh;
+            for pid in parts {
+                if let Some(s) = self.slots.get(pid) {
+                    epochs.insert(pid.clone(), s.epoch.0);
+                    languages.insert(s.language);
+                    let f = status_freshness(s.status);
+                    if freshness_rank(f) > freshness_rank(worst) {
+                        worst = f;
+                    }
+                }
+            }
+            if languages.is_empty() {
+                languages.insert(LanguageSupport::TypeScriptPrimary);
+            }
+            (epochs, languages, worst)
+        };
+
+        if found {
+            // Reconstruct the path (nodes + edges) and the partitions it touches.
+            let mut nodes_rev = vec![to.to_string()];
+            let mut edges_rev: Vec<(String, String)> = Vec::new();
+            let mut parts: BTreeSet<String> = BTreeSet::new();
+            if let Some(p) = owner.get(to) {
+                parts.insert(p.to_string());
+            }
+            let mut cur = to.to_string();
+            while let Some((prev, pid)) = parent.get(&cur).cloned() {
+                edges_rev.push((prev.clone(), cur.clone()));
+                parts.insert(pid.clone());
+                if let Some(p) = owner.get(prev.as_str()) {
+                    parts.insert(p.to_string());
+                }
+                nodes_rev.push(prev.clone());
+                cur = prev;
+                if cur == from {
+                    break;
+                }
+            }
+            nodes_rev.reverse();
+            edges_rev.reverse();
+            let (epochs, languages, worst) = collect_parts(&parts);
+            let data = PathAnswer {
+                nodes: nodes_rev,
+                edges: edges_rev,
+                contributing_epochs: epochs,
+            };
+            // Edges are all SyntaxConfirmedCall by construction → basis condition holds.
+            return if worst == FreshnessState::Fresh {
+                AnswerEnvelope::exact(
+                    data,
+                    QueryCompleteness::Complete,
+                    FreshnessState::Fresh,
+                    Vec::new(),
+                    languages,
+                )
+                .expect("path exact invariant holds")
+            } else {
+                // A path partition is non-Fresh → freshness dominates → Stale (path still served).
+                AnswerEnvelope::stale(data, worst, Vec::new(), Vec::new(), Vec::new(), languages)
+                    .expect("path stale invariant holds")
+            };
+        }
+
+        // No path. Languages from the source's partition (+ any).
+        let mut languages = BTreeSet::new();
+        if let Some(pid) = owner.get(from) {
+            if let Some(s) = self.slots.get(*pid) {
+                languages.insert(s.language);
+            }
+        }
+        if languages.is_empty() {
+            languages.insert(LanguageSupport::TypeScriptPrimary);
+        }
+        let empty = PathAnswer {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            contributing_epochs: BTreeMap::new(),
+        };
+        if degraded {
+            // Incomplete traversal → NEVER a confident exact-empty "no path"; Partial.
+            AnswerEnvelope::partial(
+                Some(empty),
+                vec![DegradationReason::UnresolvedAlias],
+                Vec::new(),
+                FreshnessState::Fresh,
+                Vec::new(),
+                languages,
+            )
+            .expect("path partial invariant holds")
+        } else {
+            // The reachable region was proven complete (resident + Fresh) → Exact no-path.
+            AnswerEnvelope::exact(
+                empty,
+                QueryCompleteness::Complete,
+                FreshnessState::Fresh,
+                Vec::new(),
+                languages,
+            )
+            .expect("path exact no-path invariant holds")
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1348,5 +1556,71 @@ mod tests {
         assert!(a
             .degradation_reasons()
             .contains(&DegradationReason::ScipFallbackIdentity));
+    }
+
+    // ── PATH-CYCLES-LIVEGRAPH-1: path() ──
+    // Fixtures: both() = engine (defines engine.foo/engine.bar; edge engine.bar->engine.foo) + api
+    // (defines api.caller; edge api.caller->engine.foo). All edges are SyntaxConfirmedCall.
+
+    #[test]
+    fn path_found_exact_when_all_resident_fresh() {
+        let lg = both();
+        let a = lg.path("api.caller", "engine.foo");
+        assert_eq!(a.class(), AnswerClass::Exact);
+        assert_eq!(a.freshness(), FreshnessState::Fresh);
+        let d = a.data().expect("path data");
+        assert_eq!(
+            d.nodes,
+            vec!["api.caller".to_string(), "engine.foo".to_string()]
+        );
+        assert_eq!(
+            d.edges,
+            vec![("api.caller".to_string(), "engine.foo".to_string())]
+        );
+    }
+
+    #[test]
+    fn path_found_stale_when_path_partition_stale() {
+        let mut lg = both();
+        lg.mark_stale("api"); // the partition that owns the path edge
+        let a = lg.path("api.caller", "engine.foo");
+        assert_eq!(a.class(), AnswerClass::Stale);
+        assert_eq!(a.freshness(), FreshnessState::Stale);
+        // the path is still served (last-good), not dropped
+        assert!(!a.data().expect("stale path data").nodes.is_empty());
+    }
+
+    #[test]
+    fn no_path_exact_when_reachable_region_complete() {
+        // engine.bar is NOT reachable from api.caller (no edge into engine.bar), and the whole
+        // reachable region (api.caller -> engine.foo) is resident + Fresh -> proven no-path.
+        let lg = both();
+        let a = lg.path("api.caller", "engine.bar");
+        assert_eq!(a.class(), AnswerClass::Exact);
+        assert!(a.data().expect("no-path data").nodes.is_empty());
+    }
+
+    #[test]
+    fn no_path_partial_when_frontier_partition_nonresident() {
+        // Unload engine: api.caller -> engine.foo is still resident, but engine.foo's defining
+        // partition is non-resident, so the traversal cannot prove no-path -> Partial, not exact-empty.
+        let mut lg = both();
+        lg.unload_partition("engine");
+        let a = lg.path("api.caller", "engine.bar");
+        assert_eq!(a.class(), AnswerClass::Partial);
+        assert_ne!(a.class(), AnswerClass::Exact);
+    }
+
+    #[test]
+    fn unknown_source_or_target_unavailable() {
+        let lg = both();
+        assert_eq!(
+            lg.path("does.not.exist", "engine.foo").class(),
+            AnswerClass::Unavailable
+        );
+        assert_eq!(
+            lg.path("api.caller", "does.not.exist").class(),
+            AnswerClass::Unavailable
+        );
     }
 }
