@@ -888,6 +888,30 @@ fn file_import_cycles_json(answer: &FileImportCyclesAnswer) -> Vec<Value> {
         .collect()
 }
 
+/// Emit the D5 [`ImportCycleScope`] flag set as a STRUCTURED JSON object (IMPORTS-XPART-ENUMERATION-1 D6).
+/// The JSON ALWAYS carries the structured fields; a human renderer may stringify from them. This replaces
+/// the prior hard-coded scope string, which would under-report a multi-partition answer.
+fn scope_json(answer: &FileImportCyclesAnswer) -> Value {
+    let s = answer.scope;
+    json!({
+        "captured_resolved_relative": s.captured_resolved_relative,
+        "intra_partition": s.intra_partition,
+        "cross_partition": s.cross_partition,
+        "xpart_edge_count": s.xpart_edge_count,
+    })
+}
+
+/// Scope for an Unavailable answer (no resident LiveGraph): the query FAMILY is still captured
+/// resolved-relative; nothing contributed (the Unavailable class carries the absence).
+fn default_scope_json() -> Value {
+    json!({
+        "captured_resolved_relative": true,
+        "intra_partition": false,
+        "cross_partition": false,
+        "xpart_edge_count": 0,
+    })
+}
+
 /// CYCLES-LIVEGRAPH-CLI-1: build the `--engine livegraph --kind file-import` cycles response. Calls the
 /// headless `file_import_cycles()` and maps it into the cycles shape + trust metadata. NO SQLite fallback
 /// (D7): the trust class/scope are surfaced; the answer never silently becomes the SQLite MODULE graph.
@@ -898,10 +922,14 @@ pub fn file_import_cycles_response(
     snapshot_uid: &str,
 ) -> Value {
     let guard = repo_state.livegraph.read();
-    let (class, freshness, missing, reasons, cycles) = match guard.as_ref() {
+    let (class, freshness, missing, reasons, cycles, scope) = match guard.as_ref() {
         Some(lg) => {
             let env = lg.file_import_cycles();
-            let cycles = env.data().map(file_import_cycles_json).unwrap_or_default();
+            let data = env.data();
+            let cycles = data.map(file_import_cycles_json).unwrap_or_default();
+            // IMPORTS-XPART-ENUMERATION-1 (D6): emit the STRUCTURED D5 scope flag set (not the old
+            // hard-coded string), so a multi-partition answer honestly reports cross_partition.
+            let scope = data.map(scope_json).unwrap_or_else(default_scope_json);
             (
                 format!("{:?}", env.class()),
                 format!("{:?}", env.freshness()),
@@ -911,6 +939,7 @@ pub fn file_import_cycles_response(
                     .map(|r| format!("{r:?}"))
                     .collect::<Vec<_>>(),
                 cycles,
+                scope,
             )
         }
         // No LiveGraph for this repo (never preloaded/refreshed) -> Unavailable, NOT a SQLite fallback.
@@ -920,6 +949,7 @@ pub fn file_import_cycles_response(
             Vec::new(),
             vec!["LiveGraphUnavailable".to_string()],
             Vec::new(),
+            default_scope_json(),
         ),
     };
     let count = cycles.len();
@@ -931,7 +961,7 @@ pub fn file_import_cycles_response(
         "count": count,
         "backend_used": "livegraph",
         "kind": "file-import",
-        "scope": "CapturedResolvedRelativeIntraPartition",
+        "scope": scope,
         "answer_class": class,
         "freshness": freshness,
         "missing_partitions": missing,

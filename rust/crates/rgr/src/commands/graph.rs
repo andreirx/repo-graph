@@ -837,10 +837,22 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
                 // D4/D7: LiveGraph file-import output LABELS its scope + surfaces the trust class (never a
                 // silent SQLite fallback). SQLite output is unchanged (no extra line).
                 if livegraph {
-                    let scope = result
-                        .get("scope")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("CapturedResolvedRelativeIntraPartition");
+                    // IMPORTS-XPART-ENUMERATION-1 (D6): `scope` is now a STRUCTURED object (the D5 flag
+                    // set). The human line is stringified FROM the flags; JSON mode (above) prints the
+                    // structured object verbatim.
+                    let scope = result.get("scope");
+                    let intra = scope
+                        .and_then(|s| s.get("intra_partition"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let cross = scope
+                        .and_then(|s| s.get("cross_partition"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let xpart = scope
+                        .and_then(|s| s.get("xpart_edge_count"))
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
                     let class = result
                         .get("answer_class")
                         .and_then(|v| v.as_str())
@@ -849,9 +861,21 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
                         .get("freshness")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
+                    let mut surfaces: Vec<String> = Vec::new();
+                    if intra {
+                        surfaces.push("intra-partition".to_string());
+                    }
+                    if cross {
+                        surfaces.push(format!("cross-partition({xpart})"));
+                    }
+                    let surfaces = if surfaces.is_empty() {
+                        "none".to_string()
+                    } else {
+                        surfaces.join(" + ")
+                    };
                     println!(
-                        "Scope: captured resolved-relative intra-partition FILE import cycles \
-                         (backend=livegraph; scope={scope}; class={class}; freshness={freshness})"
+                        "Scope: captured resolved-relative FILE import cycles [{surfaces}] \
+                         (backend=livegraph; class={class}; freshness={freshness})"
                     );
                     // Empty case: render a FILE-import-specific message (the generic CyclesResponse text
                     // says "module-level", which would contradict the scope label). SQLite is unchanged.
