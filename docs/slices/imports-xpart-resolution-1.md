@@ -1,7 +1,10 @@
 # IMPORTS-XPART-RESOLUTION-1: pure cross-partition import resolver (support only) (Stage D)
 
 Slice ID: IMPORTS-XPART-RESOLUTION-1
-Status: **DESIGN — Scope A + 3 decisions ratified (2026-06-02). Implementation NOT started.**
+Status: **IMPLEMENTED + validated (2026-06-02).** Pure `repo-graph-import-resolver` crate
+(relative + extension/index; ambiguity reported, never picked) + `EdgeBasis::AstImportFileInventoryResolved`
+(no warm-cache schema bump). In-memory edge candidates only. Wiring deferred to IMPORTS-XPART-WIRING-1.
+See Completion.
 Depends: IMPORTS-EXTRACT-COMPLETENESS-1 (the `StaticUnresolved` observations this upgrades), `repo-graph-ir`
 (EdgeBasis / IrEdge), `repo-graph-warm-cache` (the DTO enum-variant compat touch).
 Track: Stage D. A **pure support resolver** only. NO CLI/cycles/default migration. NO module aggregation.
@@ -107,6 +110,37 @@ inventory = { repo:packages/a/src/main.ts:FILE, repo:packages/b/src/foo.ts:FILE,
    (From-arm compat, NO schema bump) + new crate repo-graph-import-resolver (types + resolve_imports) + unit
    tests (the 6 cases).
 2. docs: status/evidence.
+```
+
+## Completion (implemented + validated 2026-06-02, EXECUTED)
+
+Commits: `229a9dc` (1/2 support) + this doc (2/2). NO daemon/CLI; NO wiring; NO module aggregation; NO cycles.
+
+- **New PURE crate `repo-graph-import-resolver`** (deps: `repo-graph-ir` only, for the output `EdgeBasis`;
+  inputs are plain strings; no filesystem/producer/daemon). `FileInventory::from_file_keys`,
+  `ImportCandidate{source_file_key, raw_specifier}`, `resolve_imports -> ImportResolutionReport{resolved,
+  unresolved}`. D2 rules (relative + ext/index); `>1` match -> `Ambiguous` (never a silent pick);
+  non-relative -> `PackageExternal`; malformed key -> `BadSourceKey`.
+- **`repo-graph-ir`**: `EdgeBasis::AstImportFileInventoryResolved` (runtime-only; never persisted).
+- **`repo-graph-warm-cache`**: `CacheEdgeBasisDto` variant + From-arm compat ONLY — **SCHEMA_VERSION stays
+  v3** (the variant never appears in a cache payload; the stop condition "if the variant forces a schema
+  bump, stop" was NOT triggered).
+
+```text
+Tests (EXECUTED): repo-graph-import-resolver 7 — cross-partition `../../b/src/foo` -> packages/b/src/foo.ts;
+  `./bar` -> bar/index.ts; `./widget` -> widget.tsx; `./missing` -> NotFound; `react` -> PackageExternal;
+  `./dup` (dup.ts + dup.tsx) -> Ambiguous; malformed key -> BadSourceKey. Full cargo test --workspace green;
+  clippy --workspace -D warnings + fmt clean.
+```
+
+### Handoff to IMPORTS-XPART-WIRING-1 (the F3 gap, explicit)
+```text
+The IR `ImportObservation` carries `{raw_specifier, resolution, modifiers}` — NOT the source file. So the
+wiring slice MUST PROVIDE the `ImportCandidate`s itself (source_file_key + raw_specifier); the resolver does
+NOT read observations. The wiring decides how to obtain the source file per StaticUnresolved import — e.g.
+extend the IR observation with source/resolved-path (intra-partition, cacheable) THEN, or carry candidates
+out-of-band at ingest. The wiring also builds the global `FileInventory` (FILE keys across loaded
+partitions) and inserts resolved edges into the LiveGraph IN-MEMORY (never a per-partition cache).
 ```
 
 ## Follow-up slices
