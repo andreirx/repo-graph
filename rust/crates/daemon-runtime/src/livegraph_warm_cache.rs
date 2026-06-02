@@ -31,13 +31,27 @@ pub const INDEXER_VERSION: &str = "0.4.0";
 /// crate version consistently (this module lives in daemon-runtime).
 pub const REPO_GRAPH_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// A filesystem-safe rendering of a `partition_id` for use as a FILENAME component
+/// (IMPORTS-XPART-ENUMERATION-1): a multi-partition `partition_id` is the repo-relative root (e.g.
+/// `"packages/a"`), whose `/` would otherwise create a spurious nested directory (the bug live
+/// validation surfaced). Path separators -> `_`. This does NOT change the partition's identity (slot
+/// key / keys); only the filename. The per-partition `project_dir` already disambiguates partitions, so
+/// a sanitization collision cannot cross-contaminate two partitions' caches.
+pub fn filename_safe_partition_id(partition_id: &str) -> String {
+    partition_id.replace(['/', '\\'], "_")
+}
+
 /// The cache file path: `<project_dir>/.rgr/warm-cache/<partition_id>.cache` (D1: repo-local +
-/// disposable; `.rgr/` is gitignored).
+/// disposable; `.rgr/` is gitignored). `partition_id` is filename-sanitized (multi-partition ids carry
+/// `/`).
 pub fn partition_cache_path(project_dir: &str, partition_id: &str) -> PathBuf {
     Path::new(project_dir)
         .join(".rgr")
         .join("warm-cache")
-        .join(format!("{partition_id}.cache"))
+        .join(format!(
+            "{}.cache",
+            filename_safe_partition_id(partition_id)
+        ))
 }
 
 /// The producer's logical fingerprint (PRODUCER-ABSENT-1 D3): name + version, stable across reinstalls
@@ -128,7 +142,7 @@ pub fn value_facts_sidecar_path(project_dir: &str, partition_id: &str) -> PathBu
     Path::new(project_dir)
         .join(".rgr")
         .join("warm-cache")
-        .join(format!("{partition_id}.vf"))
+        .join(format!("{}.vf", filename_safe_partition_id(partition_id)))
 }
 
 /// Try to load a VALID value-facts sidecar (non-fatal, D7 independence). Returns `Some(facts)` only on
@@ -276,6 +290,26 @@ mod tests {
             p.ends_with(".rgr/warm-cache/default.cache"),
             "{}",
             p.display()
+        );
+    }
+
+    #[test]
+    fn multi_partition_id_is_filename_safe() {
+        // IMPORTS-XPART-ENUMERATION-1: a repo-relative partition id ("packages/a") must NOT create a
+        // nested path in any filename (the live-validation ENOENT bug).
+        assert_eq!(filename_safe_partition_id("packages/a"), "packages_a");
+        assert_eq!(filename_safe_partition_id("default"), "default"); // single-partition unchanged
+        let p = partition_cache_path("/repo/packages/a", "packages/a");
+        assert!(
+            p.ends_with(".rgr/warm-cache/packages_a.cache"),
+            "no nested dir from the id slash: {}",
+            p.display()
+        );
+        let vf = value_facts_sidecar_path("/repo/packages/a", "packages/a");
+        assert!(
+            vf.ends_with(".rgr/warm-cache/packages_a.vf"),
+            "{}",
+            vf.display()
         );
     }
 

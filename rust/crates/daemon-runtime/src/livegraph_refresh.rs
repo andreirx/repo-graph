@@ -316,7 +316,11 @@ pub fn run_refresh(
         }));
     }
 
-    let output = std::env::temp_dir().join(format!("rmap-scip-refresh-{partition_id}.scip"));
+    // Filename-safe partition id: a multi-partition id is the repo-relative root ("packages/a"), whose
+    // `/` would create a spurious nested temp path (IMPORTS-XPART-ENUMERATION-1; the bug live validation
+    // surfaced). Sequential refresh + the post-ingest remove keep this unique without a per-run nonce.
+    let safe_pid = livegraph_warm_cache::filename_safe_partition_id(partition_id);
+    let output = std::env::temp_dir().join(format!("rmap-scip-refresh-{safe_pid}.scip"));
     run_producer(&producer, project_dir, &output, Duration::from_secs(120))?;
     let bytes = std::fs::read(&output)
         .map_err(|e| RefreshFailure::IngestFailed(format!("read producer output: {e}")))?;
