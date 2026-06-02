@@ -1,16 +1,39 @@
 # IMPORTS-XPART-WIRING-1: cross-partition import-edge overlay in the LiveGraph (Stage D)
 
 Slice ID: IMPORTS-XPART-WIRING-1
-Status: **BLOCKED on KEY-NAMESPACE-REPO-RELATIVE-1 (2026-06-02).** D1–D4 ratified, but a grounding probe found
-that FILE/node keys are PARTITION-relative (`{repo}:{partition-relative}:FILE`), so multi-partition repos
-COLLIDE (`packages/a/src/main.ts` == `packages/b/src/main.ts`) and the flat `defines` map is unsound. The
-cross-partition overlay needs one collision-free repo-relative namespace across slots AND overlay. Fix the
-key namespace first (KEY-NAMESPACE-REPO-RELATIVE-1), then resume. Implementation NOT started.
+Status: **UNBLOCKED — amended (2026-06-02). Implementation NOT started.** The key-collision blocker is
+CLOSED by KEY-NAMESPACE-REPO-RELATIVE-1 (`b72b075`): node/FILE keys are now repo-relative, so slots + overlay
+share one collision-free namespace. D1–D4 stand. See **Amendment** for the re-evaluation (source_file is
+still needed; cache is now v4 → v5 when source_file lands; no new boundary decision).
 Depends: IMPORTS-XPART-RESOLUTION-1 (the pure `repo-graph-import-resolver` + `EdgeBasis::AstImportFileInventoryResolved`),
 IMPORTS-EXTRACT-COMPLETENESS-1 (the `StaticUnresolved` observations), CYCLES-LIVEGRAPH-1 (`file_import_cycles`),
-`repo-graph-warm-cache` (schema v3 -> v4).
+KEY-NAMESPACE-REPO-RELATIVE-1 (repo-relative keys; cache now v4), `repo-graph-warm-cache` (schema v4 -> v5).
 Track: Stage D. The STATEFUL wiring for cross-partition resolved import edges. NO CLI/cycles migration. NO
 module aggregation. NO raw decommission. NO persisted cross-partition edges.
+
+## Amendment (2026-06-02, post KEY-NAMESPACE-REPO-RELATIVE-1)
+```text
+UNBLOCKED: keys are now repo-relative (b72b075). The F1 collision blocker is CLOSED — slots + overlay share
+one namespace; a cross-partition target FILE key (e.g. repo:packages/b/src/foo.ts:FILE) is unambiguous.
+
+RE-EVALUATION (is source_file still needed?): YES.
+  - A cross-partition edge is src_file -> dst_file; the file-import SCC needs BOTH endpoints.
+  - dst is now derivable: the producer's resolved_path is REPO-RELATIVE and correct cross-partition
+    (resolve_import_path("../b/src/foo", "packages/a/src/main.ts") = "packages/b/src/foo"), so the resolver's
+    normalize_join(dirname(source_file), raw_specifier) lands the right target — exactly because source_file
+    is repo-relative now.
+  - src is NOT recoverable from the IR ImportObservation ({raw_specifier, resolution, modifiers}): the
+    observations are flattened per-partition, losing WHICH file imported. So the importing file's identity
+    must be carried -> ImportObservation.source_file (the importing file's repo-relative path = the doc's
+    ingest key_path). This is the F3 gap, now closed by extending the observation.
+
+DECISIONS UNCHANGED: D1 ImportObservation.source_file (ingest-populated, repo-relative); D2 overlay inside
+LiveGraph; D3 eager rebuild on load/swap/unload; D4 EdgeBasis::AstImportFileInventoryResolved + degrade on
+non-resident, never persist.
+CACHE: KEY-NAMESPACE took SCHEMA_VERSION to v4; source_file lands -> v5 (support+consumer co-committed).
+NO PERSISTED OVERLAY (confirmed). DAEMON STILL LACKS ENUMERATION (F2) -> validation is manual multi-preload
+OR unit-level (hand-built 2-partition LiveGraph). NO NEW BOUNDARY DECISION -> proceed to implement.
+```
 
 ## Framing
 ```text
@@ -40,10 +63,10 @@ Precedent: the warm-cache value-facts SIDECAR shows independent per-partition ar
 
 ## Ratified decisions (2026-06-02)
 
-### D1 — `ImportObservation` gains `source_file` (schema v3 -> v4)
+### D1 — `ImportObservation` gains `source_file` (schema v4 -> v5)
 `ImportObservation` (repo-graph-ir) gains `source_file` (the importing file's repo-relative path / FILE
 identity). PRODUCER/INGEST-populated — never guessed later. Warm-cache `CacheImportObservationDto` +
-`SCHEMA_VERSION 3 -> 4` (old caches -> SchemaMismatch -> re-extract through the existing manifest gate).
+`SCHEMA_VERSION 4 -> 5` (old caches -> SchemaMismatch -> re-extract through the existing manifest gate).
 **Support + consumer co-committed** (the IR field + the cache DTO + the ingest population land together).
 
 ### D2 — overlay INSIDE the LiveGraph
@@ -63,20 +86,21 @@ Overlay edges carry `EdgeBasis::AstImportFileInventoryResolved`. They feed `file
 import edge; the EXISTING whole-graph completeness rule degrades the answer (Partial/Stale) when a
 contributing partition is non-resident/stale (CYCLES-LIVEGRAPH-1 D2). The overlay is NEVER persisted.
 
-## Key design point — repo-relative namespace
+## Key design point — repo-relative namespace (now RESOLVED upstream)
 ```text
-FILE keys are `{repo}:{partition-relative-path}:FILE` (path relative to partition.root). For cross-partition
-resolution the inventory + candidates MUST use a single REPO-RELATIVE namespace: prepend `partition.root` to
-each partition-relative path before building the inventory / candidates (so `packages/a/src/index.ts` and
-`packages/b/src/index.ts` do not collide). The resolved dst is then mapped back to the actual FILE key. The
-overlay builder owns this re-basing; the pure resolver stays namespace-agnostic (it just matches strings).
+KEY-NAMESPACE-REPO-RELATIVE-1 made FILE/node keys repo-relative (`{repo}:packages/a/src/main.ts:FILE`), so
+the overlay builder needs NO re-basing: it builds `FileInventory::from_file_keys` DIRECTLY from the slots'
+(already repo-relative) FILE keys, and `ImportObservation.source_file` is already the repo-relative importing
+path. `ImportCandidate{ source_file_key = {repo}:{source_file}:FILE, raw_specifier }`; the resolver derives
+the repo-relative target (correct cross-partition, because source_file is repo-relative). The pure resolver
+stays namespace-agnostic (string matching).
 ```
 
 ## Build contract (the commit plan)
 ```text
 1. source-file plumbing (support + consumer co-committed, D1):
    - repo-graph-ir: ImportObservation.source_file
-   - repo-graph-warm-cache: CacheImportObservationDto.source_file + SCHEMA_VERSION 3 -> 4 + round-trip
+   - repo-graph-warm-cache: CacheImportObservationDto.source_file + SCHEMA_VERSION 4 -> 5 + round-trip
    - repo-graph-scip-ingest: populate source_file (the importing file's repo-relative path) on each IR
      observation; update unit + synthetic-fixture tests
 2. overlay (D2/D3):
