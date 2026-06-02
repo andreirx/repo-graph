@@ -273,6 +273,8 @@ O1 NESTED FIXTURE REPO RESOLUTION: the committed fixture lives UNDER the repo-gr
    path I passed as --repo; the overlay + keys + cycle are correct. The display_name/snapshot belonging to
    the enclosing repo is cosmetic impurity inherent to a committed-in-repo fixture. A standalone registered
    fixture repo would be cleaner (follow-up).
+   RESOLVED by XPART-FIXTURE-STANDALONE-1: `rmap index <fixture>` registers the fixture (longest-prefix
+   resolution -> its OWN repo_uid + the "xpart-monorepo" alias); scripts/validate-xpart-fixture.sh asserts it.
 O2 HUMAN RENDER SAYS "module-level": the NON-empty file-import cycle falls through to the generic
    CyclesResponse::render_human ("1 module-level cycle found" / "(2 modules)" / "rmap modules deps"), which
    CONFLATES FILE-import cycles with MODULE cycles -- the exact distinction the project guards. The scope
@@ -301,8 +303,8 @@ HEADLESS: acceptance #5 (unload degradation) via IMPORTS-XPART-WIRING-1 (no daem
   cycle is never printed as "module-level cycle" / "(N modules)" / "rmap modules deps" (the generic
   CyclesResponse text). Scope line + JSON are already correct; only the human body conflates the two cycle
   families the project otherwise guards.
-- XPART-FIXTURE-STANDALONE-1 (from O1) : a standalone registered fixture repo so live validation does not
-  resolve to the enclosing repo-graph registration (cosmetic repo_uid/display_name impurity).
+- XPART-FIXTURE-STANDALONE-1 (from O1) : DONE — `rmap index <fixture>` gives the fixture its own identity
+  (longest-prefix registry resolution); scripts/validate-xpart-fixture.sh is the harness.
 ```
 
 ## References
