@@ -191,7 +191,7 @@ pub fn run_dev(args: &[String]) -> ExitCode {
         _ => {
             eprintln!("usage: rmap dev <livegraph-preload|livegraph-refresh> ...");
             eprintln!("  livegraph-preload --repo <repo> --partition-id <id> --scip <index.scip> --source-root <source-root>");
-            eprintln!("  livegraph-refresh --repo <repo> [--partition <id>]");
+            eprintln!("  livegraph-refresh --repo <repo> [--partition <id>] [--source-root <repo-relative-root>]...");
             ExitCode::from(1)
         }
     }
@@ -203,6 +203,9 @@ pub fn run_dev(args: &[String]) -> ExitCode {
 fn run_dev_livegraph_refresh(args: &[String]) -> ExitCode {
     let mut repo = None;
     let mut partition = None;
+    // IMPORTS-XPART-ENUMERATION-1 (D4): repeated --source-root -> one partition each (multi-partition,
+    // best-effort). 0/1 root preserves single-partition behaviour.
+    let mut source_roots: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -214,6 +217,10 @@ fn run_dev_livegraph_refresh(args: &[String]) -> ExitCode {
                 partition = Some(args[i + 1].clone());
                 i += 2;
             }
+            "--source-root" if i + 1 < args.len() => {
+                source_roots.push(args[i + 1].clone());
+                i += 2;
+            }
             other => {
                 eprintln!("error: unknown arg: {}", other);
                 return ExitCode::from(1);
@@ -223,7 +230,10 @@ fn run_dev_livegraph_refresh(args: &[String]) -> ExitCode {
     let repo = match repo {
         Some(r) => r,
         None => {
-            eprintln!("usage: rmap dev livegraph-refresh --repo <repo> [--partition <id>]");
+            eprintln!(
+                "usage: rmap dev livegraph-refresh --repo <repo> [--partition <id>] \
+                 [--source-root <repo-relative-root>]..."
+            );
             return ExitCode::from(1);
         }
     };
@@ -234,6 +244,9 @@ fn run_dev_livegraph_refresh(args: &[String]) -> ExitCode {
     let mut params = serde_json::json!({ "repo": repo });
     if let Some(p) = partition {
         params["partition"] = serde_json::json!(p);
+    }
+    if !source_roots.is_empty() {
+        params["source_roots"] = serde_json::json!(source_roots);
     }
     match client.request("livegraph_refresh", Some(params)) {
         Ok(result) => match serde_json::to_string_pretty(&result) {

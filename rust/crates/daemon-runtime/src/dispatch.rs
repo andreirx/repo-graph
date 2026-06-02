@@ -750,6 +750,28 @@ impl ServiceDispatcher {
             Ok(s) => s.to_string(),
             Err(e) => return DispatchResult::error(&request.id, e),
         };
+        // IMPORTS-XPART-ENUMERATION-1 (D4): repeated `--source-root` arrives as a `source_roots` array.
+        // Present + non-empty -> multi-partition BEST-EFFORT refresh (per-partition + aggregate, D5);
+        // absent/empty -> the single-partition path below (byte-stable; 0/1 root preserves behaviour).
+        let source_roots: Vec<String> = request
+            .params
+            .get("source_roots")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !source_roots.is_empty() {
+            let body = crate::livegraph_refresh::run_refresh_multi(
+                &repo_state,
+                &repo_uid,
+                &repo_path,
+                &source_roots,
+            );
+            return DispatchResult::success(&request.id, body);
+        }
         let partition = Self::get_optional_string_param(&request.params, "partition")
             .unwrap_or("default")
             .to_string();
