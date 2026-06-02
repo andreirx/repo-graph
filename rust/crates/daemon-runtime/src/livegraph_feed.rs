@@ -3,7 +3,7 @@
 //! discovery / refresh orchestration (that is LIVEGRAPH-INTEGRATION-1C).
 
 use repo_graph_ir::CanonicalKey;
-use repo_graph_livegraph::LiveGraph;
+use repo_graph_livegraph::{FileImportCyclesAnswer, LiveGraph};
 use repo_graph_scip_ingest::{decode_index, ingest_partition};
 use repo_graph_storage::queries::{CalleeResult, CallerResult, ResolvedSymbol};
 use repo_graph_trust_model::{AnswerClass, FreshnessState, Granularity, LanguageSupport};
@@ -829,6 +829,91 @@ fn write_path_compare_sidecar(
         serde_json::to_string_pretty(report).map_err(|e| format!("serialize report: {e}"))?;
     std::fs::write(&path, body).map_err(|e| format!("write sidecar: {e}"))?;
     Ok(path.display().to_string())
+}
+
+/// Display a file-scope FILE node key (`{repo}:{path}:FILE`) as its partition-relative path
+/// (`{path}`) for human cycle output. Falls back to the raw key if it has no `:FILE`/`:` shape.
+fn file_display(key: &str) -> String {
+    let no_file = key.strip_suffix(":FILE").unwrap_or(key);
+    match no_file.find(':') {
+        Some(i) => no_file[i + 1..].to_string(),
+        None => no_file.to_string(),
+    }
+}
+
+/// Map a [`FileImportCyclesAnswer`] into the `CyclesResponse` `cycles:[{nodes:[{node_id,name,file}]}]`
+/// shape. `node_id` keeps the full FILE key; `name` is the partition-relative path; `file` is null
+/// (the cycle node IS a file).
+fn file_import_cycles_json(answer: &FileImportCyclesAnswer) -> Vec<Value> {
+    answer
+        .cycles
+        .iter()
+        .map(|c| {
+            let nodes: Vec<Value> = c
+                .members
+                .iter()
+                .map(|m| {
+                    json!({
+                        "node_id": m,
+                        "name": file_display(m),
+                        "file": Value::Null,
+                    })
+                })
+                .collect();
+            json!({ "nodes": nodes })
+        })
+        .collect()
+}
+
+/// CYCLES-LIVEGRAPH-CLI-1: build the `--engine livegraph --kind file-import` cycles response. Calls the
+/// headless `file_import_cycles()` and maps it into the cycles shape + trust metadata. NO SQLite fallback
+/// (D7): the trust class/scope are surfaced; the answer never silently becomes the SQLite MODULE graph.
+pub fn file_import_cycles_response(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+) -> Value {
+    let guard = repo_state.livegraph.read();
+    let (class, freshness, missing, reasons, cycles) = match guard.as_ref() {
+        Some(lg) => {
+            let env = lg.file_import_cycles();
+            let cycles = env.data().map(file_import_cycles_json).unwrap_or_default();
+            (
+                format!("{:?}", env.class()),
+                format!("{:?}", env.freshness()),
+                env.missing_partitions().to_vec(),
+                env.degradation_reasons()
+                    .iter()
+                    .map(|r| format!("{r:?}"))
+                    .collect::<Vec<_>>(),
+                cycles,
+            )
+        }
+        // No LiveGraph for this repo (never preloaded/refreshed) -> Unavailable, NOT a SQLite fallback.
+        None => (
+            "Unavailable".to_string(),
+            "Unavailable".to_string(),
+            Vec::new(),
+            vec!["LiveGraphUnavailable".to_string()],
+            Vec::new(),
+        ),
+    };
+    let count = cycles.len();
+    json!({
+        "repo_uid": repo_uid,
+        "display_name": display_name,
+        "snapshot_uid": snapshot_uid,
+        "cycles": cycles,
+        "count": count,
+        "backend_used": "livegraph",
+        "kind": "file-import",
+        "scope": "CapturedResolvedRelativeIntraPartition",
+        "answer_class": class,
+        "freshness": freshness,
+        "missing_partitions": missing,
+        "degradation_reasons": reasons,
+    })
 }
 
 #[cfg(test)]

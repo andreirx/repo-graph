@@ -165,6 +165,23 @@ fn extract_engine_flag(args: Vec<String>) -> (Vec<String>, String) {
     (out, engine)
 }
 
+/// Extract `--kind <value>` (CYCLES-LIVEGRAPH-CLI-1). Default `""` = no kind (the SQLite default).
+fn extract_kind_flag(args: Vec<String>) -> (Vec<String>, String) {
+    let mut kind = String::new();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--kind" && i + 1 < args.len() {
+            kind = args[i + 1].clone();
+            i += 2;
+        } else {
+            out.push(args[i].clone());
+            i += 1;
+        }
+    }
+    (out, kind)
+}
+
 /// `rmap dev <subcommand>` — hidden/dev-only commands (LIVEGRAPH-INTEGRATION-1B). NOT part of the
 /// default user workflow.
 pub fn run_dev(args: &[String]) -> ExitCode {
@@ -707,26 +724,66 @@ pub fn run_imports(args: &[String]) -> ExitCode {
 // Machine mode (--json): full envelope.
 
 pub fn run_cycles(args: &[String]) -> ExitCode {
-    // ── Parse args ───────────────────────────────────────────
-    let mut json_mode = false;
+    // CYCLES-LIVEGRAPH-CLI-1: extract --engine + --kind FIRST. Default (no flags) = SQLite MODULE-import
+    // cycles (unchanged). `--engine livegraph --kind file-import` = LiveGraph captured FILE import cycles
+    // (a DIFFERENT graph; NO SQLite fallback). Then parse --json from the remaining positionals.
+    let (args, engine_raw) = extract_engine_flag(args.to_vec());
+    let (args, kind) = extract_kind_flag(args);
+    // Absent engine == sqlite for cycles — the default stays SQLite (no `auto` migration).
+    let engine = if engine_raw == "auto" {
+        "sqlite"
+    } else {
+        engine_raw.as_str()
+    };
 
-    for arg in args {
+    let usage = "usage: rmap cycles [--engine sqlite|livegraph] [--kind file-import] [--json]";
+    let mut json_mode = false;
+    for arg in &args {
         match arg.as_str() {
-            "--json" => {
-                json_mode = true;
-            }
+            "--json" => json_mode = true,
             flag if flag.starts_with("--") => {
-                eprintln!("error: unknown flag: {}", flag);
-                eprintln!("usage: rmap cycles [--json]");
+                eprintln!("error: unknown flag: {flag}");
+                eprintln!("{usage}");
                 return ExitCode::from(1);
             }
             other => {
-                eprintln!("error: unexpected argument: {}", other);
-                eprintln!("usage: rmap cycles [--json]");
+                eprintln!("error: unexpected argument: {other}");
+                eprintln!("{usage}");
                 return ExitCode::from(1);
             }
         }
     }
+
+    // Validate the engine/kind combination (D2/D6/D7): reject invalid combos with a clear error rather
+    // than silently computing a different graph.
+    let livegraph = match (engine, kind.as_str()) {
+        ("sqlite", "") => false, // SQLite MODULE-import cycles (default, unchanged)
+        ("livegraph", "file-import") => true, // LiveGraph captured FILE import cycles
+        ("livegraph", _) => {
+            eprintln!("error: --engine livegraph requires --kind file-import");
+            return ExitCode::from(1);
+        }
+        ("sqlite", "file-import") => {
+            eprintln!("error: SQLite does not answer captured FILE import cycles; use --engine livegraph --kind file-import");
+            return ExitCode::from(1);
+        }
+        ("compare", _) => {
+            eprintln!("error: --engine compare is not supported for cycles (FILE-import and MODULE-import are different graphs)");
+            return ExitCode::from(1);
+        }
+        (_, "file-import") => {
+            eprintln!("error: --kind file-import requires --engine livegraph");
+            return ExitCode::from(1);
+        }
+        (e, "") => {
+            eprintln!("error: unknown --engine '{e}' (supported: sqlite, livegraph)");
+            return ExitCode::from(1);
+        }
+        (_, k) => {
+            eprintln!("error: unknown --kind '{k}' (supported: file-import)");
+            return ExitCode::from(1);
+        }
+    };
 
     let repo_path = match resolve_repo_from_cwd() {
         Ok(p) => p,
@@ -741,14 +798,17 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
         Err(code) => return code,
     };
 
-    let params = serde_json::json!({
-        "repo": repo_path,
-    });
+    let params = if livegraph {
+        serde_json::json!({ "repo": repo_path, "engine": "livegraph", "kind": "file-import" })
+    } else {
+        serde_json::json!({ "repo": repo_path })
+    };
 
     match client.request("cycles", Some(params)) {
         Ok(result) => {
             if json_mode {
-                // Machine mode: print full envelope
+                // Machine mode: print full envelope (includes scope/backend_used/answer_class/freshness/
+                // missing_partitions/degradation_reasons for the LiveGraph path; D5).
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
@@ -760,8 +820,34 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
                     }
                 }
             } else {
-                // Human mode: parse and render
                 use crate::presentation::cycles::CyclesResponse;
+                // D4/D7: LiveGraph file-import output LABELS its scope + surfaces the trust class (never a
+                // silent SQLite fallback). SQLite output is unchanged (no extra line).
+                if livegraph {
+                    let scope = result
+                        .get("scope")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("CapturedResolvedRelativeIntraPartition");
+                    let class = result
+                        .get("answer_class")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let freshness = result
+                        .get("freshness")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    println!(
+                        "Scope: captured resolved-relative intra-partition FILE import cycles \
+                         (backend=livegraph; scope={scope}; class={class}; freshness={freshness})"
+                    );
+                    // Empty case: render a FILE-import-specific message (the generic CyclesResponse text
+                    // says "module-level", which would contradict the scope label). SQLite is unchanged.
+                    let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+                    if count == 0 {
+                        println!("No FILE import cycles found within the captured scope.");
+                        return ExitCode::SUCCESS;
+                    }
+                }
                 match serde_json::from_value::<CyclesResponse>(result) {
                     Ok(response) => {
                         println!("{}", response.render_human());

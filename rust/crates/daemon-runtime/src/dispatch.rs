@@ -1166,6 +1166,65 @@ impl ServiceDispatcher {
         };
         let snapshot_ms = snapshot_start.elapsed().as_millis();
 
+        // CYCLES-LIVEGRAPH-CLI-1: engine/kind routing. Default (no flags / engine=sqlite, no kind) =
+        // SQLite MODULE-import cycles (unchanged below). `livegraph` + `file-import` = the LiveGraph
+        // captured FILE import-cycle graph (a DIFFERENT question; NO SQLite fallback — D7). The CLI
+        // validates combinations; the daemon is defensive and rejects unsupported combos rather than
+        // silently computing a different graph (D2/D6).
+        let engine = Self::get_optional_string_param(&request.params, "engine").unwrap_or("sqlite");
+        let kind = Self::get_optional_string_param(&request.params, "kind").unwrap_or("");
+        match (engine, kind) {
+            ("livegraph", "file-import") => {
+                return DispatchResult::success(
+                    &request.id,
+                    crate::livegraph_feed::file_import_cycles_response(
+                        &repo_state,
+                        &repo_uid,
+                        &display_name,
+                        &snapshot.snapshot_uid,
+                    ),
+                );
+            }
+            // Defensive rejects (the CLI gives the primary user-facing errors).
+            ("livegraph", _) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InvalidRequest,
+                        "--engine livegraph requires --kind file-import",
+                    ),
+                );
+            }
+            ("sqlite", "file-import") => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InvalidRequest,
+                        "SQLite does not answer captured FILE import cycles; use --engine livegraph --kind file-import",
+                    ),
+                );
+            }
+            ("compare", _) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InvalidRequest,
+                        "--engine compare is not supported for cycles (FILE-import and MODULE-import are different graphs)",
+                    ),
+                );
+            }
+            (_, "file-import") => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(
+                        ErrorCode::InvalidRequest,
+                        "--kind file-import requires --engine livegraph",
+                    ),
+                );
+            }
+            _ => {} // sqlite / no-kind -> the SQLite MODULE-import path below (unchanged).
+        }
+
         // RMAPD-PERF-1: Emit heartbeat before potentially long Tarjan SCC
         let _ = emitter.emit(ProgressDetail {
             phase: "finding_cycles".to_string(),

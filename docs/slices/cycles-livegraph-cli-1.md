@@ -1,7 +1,9 @@
 # CYCLES-LIVEGRAPH-CLI-1: CLI surface for FILE import-cycle detection (Stage D)
 
 Slice ID: CYCLES-LIVEGRAPH-CLI-1
-Status: **DESIGN — Surface A + rules ratified (2026-06-02). Implementation NOT started.**
+Status: **IMPLEMENTED + live-validated (2026-06-02).** `rmap cycles --engine livegraph --kind file-import`
+serves the LiveGraph captured FILE import-cycle graph (scoped + labelled); SQLite MODULE default unchanged;
+invalid combos reject; no cross-engine fallback. See Completion.
 Depends: CYCLES-LIVEGRAPH-1 (`LiveGraph::file_import_cycles()` + `CapturedResolvedRelativeIntraPartition`),
 QUERY-MIGRATION-CLI-1 / PATH-LIVEGRAPH-DEFAULT-1 (the `--engine` + `backend_used`/`fallback_reason` pattern).
 Track: Stage D. Adds a CLI surface only. NOT a default migration. NOT raw decommission.
@@ -114,6 +116,35 @@ MODULE cycles (D6). No MODULE aggregation. No raw decommission credit. No new da
 - Exact error text + exit codes for D2/D6/D7 rejects.
 - Whether `--kind` defaults are needed (only `file-import` exists; `module` is implicit-SQLite).
 ```
+
+## Completion (implemented + live-validated 2026-06-02, EXECUTED)
+
+Daemon: `handle_cycles` engine/kind routing — `(livegraph, file-import)` → `livegraph_feed::file_import_cycles_response`
+(maps `FileImportCyclesAnswer` → `cycles:[{nodes:[{node_id, name=file path, file:null}]}]` + metadata
+`backend_used`/`kind`/`scope`/`answer_class`/`freshness`/`missing_partitions`/`degradation_reasons`); the
+defensive rejects (`InvalidRequest`) for `(livegraph,!file-import)`, `(sqlite,file-import)`, `(compare,*)`,
+`(_,file-import)`; default `(sqlite,"")` → unchanged SQLite MODULE path. No SQLite fallback for a degraded
+LiveGraph answer (D7). CLI: `run_cycles` extracts `--engine` + `--kind`, validates the combination
+client-side (clear errors, exit 1), labels the scope in human output, and renders a FILE-import-specific
+empty message (the generic "module-level" text would contradict the scope label; SQLite unchanged).
+
+```text
+Gating (EXECUTED): daemon-runtime 78, rgr 444; clippy --workspace -D warnings clean; fmt clean.
+Live (synthetic fixture, daemon rebuilt; preload = 15 nodes / 12 edges incl. the main.ts->shapes.ts import):
+  [1] rmap cycles                                  -> SQLite "No module-level cycles found" (unchanged)   ✓
+  [2] rmap cycles --engine livegraph               -> reject "requires --kind file-import" (exit 1)       ✓
+  [3] rmap cycles --engine sqlite --kind file-import -> reject "SQLite does not answer..." (exit 1)       ✓
+  [4] rmap cycles --engine compare --kind file-import -> reject "compare not supported..." (exit 1)       ✓
+  [5] rmap cycles --engine livegraph --kind file-import --json -> backend_used=livegraph, kind=file-import,
+      scope=CapturedResolvedRelativeIntraPartition, answer_class=Exact, freshness=Fresh, count=0, missing=[],
+      degradation=[]                                                                                       ✓
+  [6] rmap cycles --engine livegraph --kind file-import -> scope label + "No FILE import cycles found
+      within the captured scope" (Exact-empty; synthetic has the import edge but no cycle)                 ✓
+  [7] found-cycle = headless (CYCLES-LIVEGRAPH-1 unit `file_import_cycle_ab_is_exact_with_cycle`)          ✓
+```
+
+All 7 validations PASS. `rmap cycles` default unchanged; no daemon default flip; no module aggregation; no
+decommission credit beyond "the LiveGraph file-import cycle surface now exists".
 
 ## Follow-up slices
 ```text
