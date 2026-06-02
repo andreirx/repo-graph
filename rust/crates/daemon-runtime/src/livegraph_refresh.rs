@@ -219,13 +219,18 @@ fn run_producer(
 
 /// Synchronous daemon-owned refresh (1C step 4): discover the producer (D0), run it on the
 /// partition's project dir, decode + ingest, and SWAP the result into the repo's LiveGraph (the write
-/// lock is acquired ONLY for the swap). On any failure the last-good epoch is untouched. A
-/// single-package partition = the repo root (D1; multi-package enumeration is a natural extension).
+/// lock is acquired ONLY for the swap). On any failure the last-good epoch is untouched.
+///
+/// `partition_prefix` (IMPORTS-XPART-ENUMERATION-1) is the partition's REPO-RELATIVE root used for the
+/// repo-relative key namespace (KEY-NAMESPACE-REPO-RELATIVE-1): `""` for a repo-root package (single
+/// partition; keys stay byte-stable), `"packages/a"` for a sub-package. The orchestrator
+/// [`run_refresh_multi`] derives it; the single-partition handler passes `""`.
 pub fn run_refresh(
     repo_state: &RepoState,
     repo_uid: &str,
     partition_id: &str,
     project_dir: &str,
+    partition_prefix: &str,
 ) -> Result<serde_json::Value, RefreshFailure> {
     if !Path::new(project_dir).join("tsconfig.json").is_file() {
         return Err(RefreshFailure::UnsupportedPartition(format!(
@@ -317,9 +322,9 @@ pub fn run_refresh(
         .map_err(|e| RefreshFailure::IngestFailed(format!("read producer output: {e}")))?;
     let index =
         decode_index(&bytes).map_err(|e| RefreshFailure::IngestFailed(format!("decode: {e}")))?;
-    // KEY-NAMESPACE-REPO-RELATIVE-1: the refresh handles ONLY the default partition today (project_dir ==
-    // the repo root, F2 no multi-partition enumeration), so the repo-relative prefix is "" (keys stay
-    // byte-stable). Multi-partition refresh threads a real prefix in IMPORTS-XPART-ENUMERATION-1.
+    // KEY-NAMESPACE-REPO-RELATIVE-1 + IMPORTS-XPART-ENUMERATION-1: thread the partition's repo-relative
+    // prefix so a sub-package's keys are repo-relative (collision-free across partitions). "" for a
+    // repo-root package keeps keys byte-stable (single-partition path unchanged).
     let outcome = ingest_partition(
         &index,
         project_dir,
@@ -328,7 +333,7 @@ pub fn run_refresh(
         livegraph_warm_cache::INDEXER_NAME,
         livegraph_warm_cache::INDEXER_VERSION,
         &source_inputs_hash,
-        "",
+        partition_prefix,
     );
     let nodes = outcome.ir.nodes.len();
     let edges = outcome.ir.edges.len();
@@ -391,6 +396,102 @@ pub fn run_refresh(
         "epoch": epoch,
         "source_inputs_hash": source_inputs_hash,
     }))
+}
+
+/// Derive `(project_dir, partition_id, partition_prefix)` for ONE source root under a repo
+/// (IMPORTS-XPART-ENUMERATION-1, D1/D4). `project_dir` is ABSOLUTE (producer cwd / tsconfig / source
+/// hash); `partition_prefix` is the REPO-RELATIVE root (KEY-NAMESPACE-REPO-RELATIVE-1); `partition_id`
+/// defaults to that prefix, falling back to `"default"` when the root IS the repo (prefix `""` ->
+/// byte-stable single partition). `source_root` may be absolute or repo-relative.
+///
+/// ASSUMPTION (recorded): `source_root` resolves WITHIN `repo_path`. A root outside the repo strips to
+/// prefix `""` -> partition_id `"default"`; the caller (explicit `--source-root`, D1=A) is responsible
+/// for passing in-repo roots until workspace auto-discovery (ENUMERATION-2) validates them.
+pub fn derive_partition_target(repo_path: &str, source_root: &str) -> (String, String, String) {
+    let project_dir = if Path::new(source_root).is_absolute() {
+        source_root.to_string()
+    } else {
+        Path::new(repo_path)
+            .join(source_root)
+            .to_string_lossy()
+            .replace('\\', "/")
+    };
+    let prefix = crate::livegraph_feed::repo_relative_prefix(repo_path, &project_dir);
+    let partition_id = if prefix.is_empty() {
+        "default".to_string()
+    } else {
+        prefix.clone()
+    };
+    (project_dir, partition_id, prefix)
+}
+
+/// Aggregate multi-partition refresh status (D5): `AllRefreshed` (no failures), `AllFailed` (no
+/// successes), else `PartiallyRefreshed`. Pure (testable without a producer).
+fn aggregate_status(succeeded: usize, failed: usize) -> &'static str {
+    if failed == 0 {
+        "AllRefreshed"
+    } else if succeeded == 0 {
+        "AllFailed"
+    } else {
+        "PartiallyRefreshed"
+    }
+}
+
+/// Multi-partition daemon refresh (IMPORTS-XPART-ENUMERATION-1, D2/D3/D5): run [`run_refresh`]
+/// SEQUENTIALLY (D3 — the daemon is single-threaded + !Send) over each repo-relative source root,
+/// BEST-EFFORT (D2 — a failing partition is recorded but never discards the others), feeding all into
+/// the SAME repo LiveGraph (distinct partition_ids -> distinct slots -> the cross-partition overlay
+/// rebuilds across them). Returns a per-partition array + an aggregate summary (D5) so a partial failure
+/// is LOUD (never a bare success over a hidden failure).
+pub fn run_refresh_multi(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    repo_path: &str,
+    source_roots: &[String],
+) -> serde_json::Value {
+    let mut partitions = Vec::with_capacity(source_roots.len());
+    let mut succeeded = 0usize;
+    let mut failed = 0usize;
+    let mut degraded = 0usize;
+    for source_root in source_roots {
+        let (project_dir, partition_id, prefix) = derive_partition_target(repo_path, source_root);
+        match run_refresh(repo_state, repo_uid, &partition_id, &project_dir, &prefix) {
+            Ok(body) => {
+                succeeded += 1;
+                // A warmed-but-producer-absent load succeeds yet is Stale (honest degradation): counted
+                // as succeeded AND degraded so the aggregate never hides it.
+                if body
+                    .get("producer_unavailable")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    degraded += 1;
+                }
+                partitions.push(body);
+            }
+            Err(failure) => {
+                failed += 1;
+                partitions.push(serde_json::json!({
+                    "status": failure.code(),
+                    "detail": failure.detail(),
+                    "partition": partition_id,
+                    "source_root": source_root,
+                    "refreshed": false,
+                }));
+            }
+        }
+    }
+    serde_json::json!({
+        "repo_uid": repo_uid,
+        "partitions": partitions,
+        "aggregate": {
+            "total": source_roots.len(),
+            "succeeded": succeeded,
+            "failed": failed,
+            "degraded": degraded,
+        },
+        "status": aggregate_status(succeeded, failed),
+    })
 }
 
 /// PRODUCER-ABSENT-1 (D1/D5): warm-load a partition from a VALID cache when the producer binary is
@@ -537,5 +638,30 @@ mod tests {
         assert!(!h1.is_empty());
         assert_eq!(h1, h2, "source_inputs_hash must be deterministic");
         assert_ne!(h1, "preload", "real hash, not the placeholder");
+    }
+
+    #[test]
+    fn derive_partition_target_repo_relative_absolute_and_root() {
+        // Sub-package (repo-relative): partition_id == prefix == the repo-relative root.
+        let (pd, pid, prefix) = derive_partition_target("/repo", "packages/a");
+        assert_eq!(pid, "packages/a");
+        assert_eq!(prefix, "packages/a");
+        assert_eq!(pd, "/repo/packages/a");
+        // Absolute source root under the repo -> identical derivation.
+        let (_pd, pid2, prefix2) = derive_partition_target("/repo", "/repo/packages/b");
+        assert_eq!(pid2, "packages/b");
+        assert_eq!(prefix2, "packages/b");
+        // Root IS the repo -> prefix "" -> partition_id "default" (byte-stable single-partition path).
+        let (pd3, pid3, prefix3) = derive_partition_target("/repo", "/repo");
+        assert_eq!(pid3, "default");
+        assert_eq!(prefix3, "");
+        assert_eq!(pd3, "/repo");
+    }
+
+    #[test]
+    fn aggregate_status_classes() {
+        assert_eq!(aggregate_status(2, 0), "AllRefreshed");
+        assert_eq!(aggregate_status(0, 2), "AllFailed");
+        assert_eq!(aggregate_status(1, 1), "PartiallyRefreshed");
     }
 }

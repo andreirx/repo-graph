@@ -756,8 +756,13 @@ impl ServiceDispatcher {
         // 1C step 4: SYNCHRONOUS daemon-owned refresh (producer runs inline; single-threaded daemon,
         // DAEMON-ASYNC-REFRESH-1 is the non-blocking follow-up). Absent producer → structured
         // ProducerUnavailable (steps 2-3 behavior preserved); on any failure the last-good is untouched.
-        match crate::livegraph_refresh::run_refresh(&repo_state, &repo_uid, &partition, &repo_path)
-        {
+        match crate::livegraph_refresh::run_refresh(
+            &repo_state,
+            &repo_uid,
+            &partition,
+            &repo_path,
+            "",
+        ) {
             Ok(body) => DispatchResult::success(&request.id, body),
             Err(failure) => DispatchResult::success(
                 &request.id,
