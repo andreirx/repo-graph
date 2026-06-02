@@ -1,7 +1,9 @@
 # CYCLES-LIVEGRAPH-1: Headless FILE import-cycle detection over `EdgeType::Imports` (Stage D)
 
 Slice ID: CYCLES-LIVEGRAPH-1
-Status: **DESIGN — framing ratified (2026-06-02). Implementation NOT started.**
+Status: **IMPLEMENTED + validated (2026-06-02).** Headless `LiveGraph::file_import_cycles()` over the
+resident `AstImport` graph, trust-labelled + scoped to `CapturedResolvedRelativeIntraPartition`. No CLI,
+no `rmap cycles` change. See Completion.
 Depends: IMPORTS-MODULE-INGEST-1 (the `EdgeType::Imports` graph in `PartitionIr`/LiveGraph), the trust
 model (`AnswerEnvelope`; never exact-empty on a partial graph), `repo-graph-algorithms` (`find_sccs`).
 Track: Stage D. NOT a default migration. NOT raw decommission. NOT MODULE aggregation.
@@ -127,6 +129,43 @@ nodes/edges decommission credit. No default migration. No new persistence.
 1. support: LiveGraph `file_import_cycles()` (SCC over resident Imports edges) + CapturedImportGraphScope
    semantics + unit tests (found-cycle, no-cycle-within-scope, non-resident degrade). Possibly a minimal
    multi-file import-cycle fixture.
+```
+
+## Completion (implemented + validated 2026-06-02, EXECUTED)
+
+`repo-graph-livegraph`: `file_import_cycles() -> AnswerEnvelope<FileImportCyclesAnswer>` (Tarjan SCC via
+`find_sccs` over RESIDENT `EdgeBasis::AstImport` edges only); types `FileImportCycle`,
+`FileImportCyclesAnswer{cycles, scope, contributing_epochs}`, `ImportCycleScope::CapturedResolvedRelativeIntraPartition`.
+
+Class logic (mirrors `path()` D3, but whole-graph): every partition must be resident + Fresh + TS-primary
+for an Exact claim. `missing` = partitions that are non-resident OR non-TS; freshness = worst across all.
+`missing.is_empty() && Fresh` → Exact (found-or-no-cycle, within scope); `!missing.is_empty()` → Partial
+(found cycles still REAL in `data`); else (all resident+TS, some non-Fresh) → Stale.
+
+```text
+DECISIONS RECORDED:
+- Degradation vocabulary: residency/language gaps are expressed via the envelope's `missing_partitions`
+  axis (the non-resident/non-TS partition ids); staleness via `freshness`. NO new DegradationReason added
+  (none of the existing variants honestly fits "non-resident partition"; `missing_partitions` is the
+  correct, honest channel and avoids a partial->indistinguishable-from-Exact error).
+- DEPENDENCY EDGE (divergence from the livegraph 2-dep note): added `repo-graph-algorithms` (a PURE,
+  zero-dependency SCC crate) to `repo-graph-livegraph`. Decide-and-record, not stop: reuse over inlining
+  Tarjan (SCC is a generic algorithm, not core business logic), the crate is pure (no volatility), and
+  the Dependency Rule holds (livegraph -> stable lower-level pure algorithms). Cargo.toml dep-note updated.
+```
+
+```text
+Tests (EXECUTED, repo-graph-livegraph 39 -> 46): the 7 acceptance cases —
+  1 no-cycle complete -> Exact empty + scope label
+  2 a<->b import cycle -> Exact with cycle (members {a,b})
+  3 non-resident partition -> Partial, not Exact no-cycle
+  4 stale partition -> Stale, not Exact
+  5 CALLS cycle ignored (Exact empty)
+  6 REFERENCES cycle ignored (Exact empty)
+  7 unloaded partition loses outgoing adjacency (cross-partition a<->b: resident=Exact-with-cycle;
+    after unload=Partial + cycle gone)
+Full `cargo test --workspace` green; clippy --workspace -D warnings clean; fmt clean. No CLI, no
+daemon, no warm-cache change, no `rmap cycles` change.
 ```
 
 ## Follow-up slices

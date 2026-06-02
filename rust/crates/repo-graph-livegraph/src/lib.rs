@@ -978,14 +978,140 @@ impl LiveGraph {
             .find_map(|ir| ir.node(key))
             .and_then(|n| n.range.clone())
     }
+
+    /// FILE import-cycle detection (CYCLES-LIVEGRAPH-1): Tarjan SCC over the RESIDENT `EdgeBasis::AstImport`
+    /// graph ONLY (no Calls/References/Module edges). Honestly scoped: the answer is over the
+    /// `CapturedResolvedRelativeIntraPartition` import graph — NOT all TS imports. A FOUND cycle is REAL
+    /// within that captured graph (positive evidence). A NO-CYCLE result is `Exact` ONLY when EVERY
+    /// partition is resident + Fresh + TS-primary (whole-graph completeness — a non-resident partition's
+    /// outgoing import adjacency is dropped on unload, so it could hide a cycle). Non-resident / non-TS
+    /// partitions → `Partial` (listed as missing); a stale partition → `Stale`. This is a DIFFERENT
+    /// question from `rmap cycles` (MODULE-import) and is never comparable to it.
+    pub fn file_import_cycles(&self) -> AnswerEnvelope<FileImportCyclesAnswer> {
+        use repo_graph_algorithms::{find_sccs, DirectedEdge};
+
+        // Adjacency from RESIDENT partitions' import edges only (basis == AstImport).
+        let mut edges: Vec<DirectedEdge> = Vec::new();
+        for s in self.slots.values() {
+            if let Some(ir) = &s.ir {
+                for e in &ir.edges {
+                    if e.basis == EdgeBasis::AstImport {
+                        edges.push(DirectedEdge {
+                            source: e.src.as_str().to_string(),
+                            target: e.dst.as_str().to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Whole-graph scope: EVERY partition must be resident + TS-primary to be IN the captured scope;
+        // a partition failing either is `missing` (its imports are not analyzable). Freshness is the worst
+        // across all partitions.
+        let mut missing: Vec<String> = Vec::new();
+        let mut worst = FreshnessState::Fresh;
+        let mut languages: BTreeSet<LanguageSupport> = BTreeSet::new();
+        let mut epochs: BTreeMap<String, u64> = BTreeMap::new();
+        for (pid, s) in &self.slots {
+            epochs.insert(pid.clone(), s.epoch.0);
+            languages.insert(s.language);
+            let resident = s.ir.is_some();
+            let ts = matches!(s.language, LanguageSupport::TypeScriptPrimary);
+            if !resident || !ts {
+                missing.push(pid.clone());
+            }
+            let f = status_freshness(s.status);
+            if freshness_rank(f) > freshness_rank(worst) {
+                worst = f;
+            }
+        }
+        if languages.is_empty() {
+            languages.insert(LanguageSupport::TypeScriptPrimary);
+        }
+        missing.sort();
+
+        // SCC → cycles (find_sccs pre-filters to size > 1).
+        let scc = find_sccs(&edges);
+        let cycles: Vec<FileImportCycle> = scc
+            .cycles
+            .iter()
+            .map(|c| FileImportCycle {
+                members: c.members.clone(),
+            })
+            .collect();
+
+        let data = FileImportCyclesAnswer {
+            cycles,
+            scope: ImportCycleScope::CapturedResolvedRelativeIntraPartition,
+            contributing_epochs: epochs,
+        };
+
+        if missing.is_empty() && worst == FreshnessState::Fresh {
+            // Whole captured graph resident + Fresh + TS → Exact WITHIN SCOPE (found-or-no-cycle).
+            AnswerEnvelope::exact(
+                data,
+                QueryCompleteness::Complete,
+                FreshnessState::Fresh,
+                Vec::new(),
+                languages,
+            )
+            .expect("file_import_cycles exact invariant holds")
+        } else if !missing.is_empty() {
+            // A partition is non-resident or non-TS → captured graph incomplete; NEVER an Exact no-cycle.
+            // Found cycles remain REAL (carried in `data`). `missing` justifies Partial even if Fresh.
+            AnswerEnvelope::partial(
+                Some(data),
+                Vec::new(),
+                missing,
+                worst,
+                Vec::new(),
+                languages,
+            )
+            .expect("file_import_cycles partial invariant holds")
+        } else {
+            // Structurally complete (all resident + TS) but a partition is non-Fresh → Stale.
+            AnswerEnvelope::stale(data, worst, Vec::new(), Vec::new(), Vec::new(), languages)
+                .expect("file_import_cycles stale invariant holds")
+        }
+    }
+}
+
+/// A FILE import cycle (CYCLES-LIVEGRAPH-1): the file-scope node keys forming a strongly-connected
+/// import ring (an SCC of size > 1 over the captured import graph).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileImportCycle {
+    /// File-scope node keys in the cycle (reverse finishing order, from Tarjan).
+    pub members: Vec<String>,
+}
+
+/// The scope a [`FileImportCyclesAnswer`] is computed over (CYCLES-LIVEGRAPH-1 D2). It is explicitly NOT
+/// "all TS imports": the captured graph is resolved-relative, intra-partition, node-resolved FILE imports
+/// only. A `no cycles` answer over this scope makes no claim about imports outside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportCycleScope {
+    /// Cycles over the captured FILE import graph: resolved-relative + intra-partition + node-resolved
+    /// imports ONLY. Non-relative / unresolved / dynamic / re-export / cross-partition imports are NOT
+    /// CAPTURED (IMPORTS-MODULE-INGEST-1) and thus outside this scope.
+    CapturedResolvedRelativeIntraPartition,
+}
+
+/// Answer for [`LiveGraph::file_import_cycles`]: the detected cycles + the scope they cover + epochs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileImportCyclesAnswer {
+    /// Detected cycles (SCCs of size > 1) over the captured FILE import graph.
+    pub cycles: Vec<FileImportCycle>,
+    /// The scope this answer covers — never "all TS imports".
+    pub scope: ImportCycleScope,
+    /// Epoch per contributing partition (every slot, resident or not).
+    pub contributing_epochs: BTreeMap<String, u64>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use repo_graph_ir::{
-        CanonicalKey, EdgeBasis, EdgeType, IrEdge, IrNode, Partition, PartitionId, PartitionKind,
-        Provenance,
+        CanonicalKey, EdgeBasis, EdgeType, ImportEdgeMeta, ImportResolution, IrEdge, IrNode,
+        Partition, PartitionId, PartitionKind, Provenance,
     };
 
     fn part(id: &str) -> Partition {
@@ -1699,6 +1825,181 @@ mod tests {
         assert_eq!(
             lg.path("api.caller", "does.not.exist").class(),
             AnswerClass::Unavailable
+        );
+    }
+
+    // ── file_import_cycles (CYCLES-LIVEGRAPH-1) ───────────────────────
+
+    fn import_edge(src: &str, dst: &str) -> IrEdge {
+        IrEdge {
+            src: CanonicalKey::from_existing(src),
+            dst: CanonicalKey::from_existing(dst),
+            edge_type: EdgeType::Imports,
+            basis: EdgeBasis::AstImport,
+            provenance: prov(),
+            import: Some(ImportEdgeMeta {
+                raw_specifier: "./x".into(),
+                resolved_path: "x".into(),
+                resolution: ImportResolution::StaticResolved,
+            }),
+        }
+    }
+    fn ref_edge(src: &str, dst: &str) -> IrEdge {
+        IrEdge {
+            src: CanonicalKey::from_existing(src),
+            dst: CanonicalKey::from_existing(dst),
+            edge_type: EdgeType::References,
+            basis: EdgeBasis::DerivedReference,
+            provenance: prov(),
+            import: None,
+        }
+    }
+
+    #[test]
+    fn file_import_no_cycle_complete_is_exact_empty_scoped() {
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir("p", vec![], vec![import_edge("a", "b")]),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        let a = lg.file_import_cycles();
+        assert_eq!(a.class(), AnswerClass::Exact);
+        assert_eq!(a.freshness(), FreshnessState::Fresh);
+        let d = a.data().expect("data");
+        assert!(d.cycles.is_empty(), "no cycle over a->b");
+        assert_eq!(
+            d.scope,
+            ImportCycleScope::CapturedResolvedRelativeIntraPartition
+        );
+    }
+
+    #[test]
+    fn file_import_cycle_ab_is_exact_with_cycle() {
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir(
+                "p",
+                vec![],
+                vec![import_edge("a", "b"), import_edge("b", "a")],
+            ),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        let a = lg.file_import_cycles();
+        assert_eq!(a.class(), AnswerClass::Exact);
+        let d = a.data().expect("data");
+        assert_eq!(d.cycles.len(), 1, "one a<->b import cycle");
+        let mut members = d.cycles[0].members.clone();
+        members.sort();
+        assert_eq!(members, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn file_import_nonresident_partition_is_partial_not_exact() {
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p1",
+            ir("p1", vec![], vec![import_edge("a", "b")]),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        lg.load_partition(
+            "p2",
+            ir("p2", vec![], vec![import_edge("c", "d")]),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        lg.unload_partition("p2"); // non-resident -> its import adjacency is gone, scope incomplete
+        let a = lg.file_import_cycles();
+        assert_eq!(
+            a.class(),
+            AnswerClass::Partial,
+            "a non-resident partition can never yield an Exact no-cycle"
+        );
+        assert_ne!(a.class(), AnswerClass::Exact);
+    }
+
+    #[test]
+    fn file_import_stale_partition_is_stale_not_exact() {
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir("p", vec![], vec![import_edge("a", "b")]),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        lg.mark_stale("p");
+        let a = lg.file_import_cycles();
+        assert_eq!(
+            a.class(),
+            AnswerClass::Stale,
+            "stale partition -> not Exact"
+        );
+        assert_eq!(a.freshness(), FreshnessState::Stale);
+    }
+
+    #[test]
+    fn file_import_ignores_calls_cycle() {
+        // A CALLS cycle (a<->b) must NOT register as an import cycle.
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir("p", vec![], vec![edge("a", "b"), edge("b", "a")]),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        let a = lg.file_import_cycles();
+        assert_eq!(a.class(), AnswerClass::Exact);
+        assert!(
+            a.data().expect("data").cycles.is_empty(),
+            "CALLS edges are not import edges"
+        );
+    }
+
+    #[test]
+    fn file_import_ignores_references_cycle() {
+        // A REFERENCES cycle (a<->b) must NOT register as an import cycle.
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir("p", vec![], vec![ref_edge("a", "b"), ref_edge("b", "a")]),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        let a = lg.file_import_cycles();
+        assert_eq!(a.class(), AnswerClass::Exact);
+        assert!(
+            a.data().expect("data").cycles.is_empty(),
+            "REFERENCES edges are not import edges"
+        );
+    }
+
+    #[test]
+    fn file_import_unloaded_partition_loses_adjacency_and_degrades() {
+        // A cross-partition import cycle: p1 has a->b, p2 has b->a. Both resident -> cycle is Exact.
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p1",
+            ir("p1", vec![], vec![import_edge("a", "b")]),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        lg.load_partition(
+            "p2",
+            ir("p2", vec![], vec![import_edge("b", "a")]),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        let resident = lg.file_import_cycles();
+        assert_eq!(resident.class(), AnswerClass::Exact);
+        assert_eq!(
+            resident.data().expect("data").cycles.len(),
+            1,
+            "a<->b found"
+        );
+
+        // Unload p2 -> its outgoing import edge (b->a) is gone (adjacency lost): no cycle visible AND
+        // completeness degrades to Partial (NOT a confident Exact no-cycle).
+        lg.unload_partition("p2");
+        let degraded = lg.file_import_cycles();
+        assert_eq!(degraded.class(), AnswerClass::Partial);
+        assert!(
+            degraded.data().expect("data").cycles.is_empty(),
+            "the b->a edge is gone with p2's IR"
         );
     }
 }
