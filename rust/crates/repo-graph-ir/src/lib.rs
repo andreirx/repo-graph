@@ -151,6 +151,10 @@ pub struct ImportEdgeMeta {
 /// the mutually-exclusive class; `is_re_export`/`is_type_only`/`is_side_effect` are orthogonal modifiers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportObservation {
+    /// The IMPORTING file's REPO-RELATIVE path (e.g. `"packages/a/src/main.ts"`) — the source endpoint a
+    /// cross-partition resolver needs (IMPORTS-XPART-WIRING-1). Ingest-populated from the doc key path;
+    /// repo-relative since KEY-NAMESPACE-REPO-RELATIVE-1.
+    pub source_file: String,
     /// The raw module specifier as written (e.g. `"./foo"`, `"react"`).
     pub raw_specifier: String,
     /// The mutually-exclusive resolution class.

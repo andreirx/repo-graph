@@ -47,7 +47,8 @@ pub const MAGIC: u32 = 0x5247_5743;
 /// v3 (IMPORTS-EXTRACT-COMPLETENESS-1): `CachePartitionIrDto` gained `import_observations`.
 /// v4 (KEY-NAMESPACE-REPO-RELATIVE-1): node/edge KEYS are now repo-relative; the DTO shape is unchanged
 /// but cached key VALUES differ, so old (partition-relative) caches MUST be discarded -> re-extract.
-pub const SCHEMA_VERSION: u32 = 4;
+/// v5 (IMPORTS-XPART-WIRING-1): `CacheImportObservationDto` gained `source_file`.
+pub const SCHEMA_VERSION: u32 = 5;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // Errors (D4)
@@ -264,6 +265,8 @@ pub enum CacheImportResolutionDto {
 /// Mirror of `repo_graph_ir::ImportObservation` (IMPORTS-EXTRACT-COMPLETENESS-1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheImportObservationDto {
+    /// Importing file's repo-relative path (IMPORTS-XPART-WIRING-1).
+    pub source_file: String,
     /// Raw module specifier.
     pub raw_specifier: String,
     /// Resolution class.
@@ -468,6 +471,7 @@ impl From<CacheImportResolutionDto> for ImportResolution {
 impl From<&ImportObservation> for CacheImportObservationDto {
     fn from(o: &ImportObservation) -> Self {
         Self {
+            source_file: o.source_file.clone(),
             raw_specifier: o.raw_specifier.clone(),
             resolution: CacheImportResolutionDto::from(&o.resolution),
             is_re_export: o.is_re_export,
@@ -479,6 +483,7 @@ impl From<&ImportObservation> for CacheImportObservationDto {
 impl From<CacheImportObservationDto> for ImportObservation {
     fn from(o: CacheImportObservationDto) -> Self {
         Self {
+            source_file: o.source_file,
             raw_specifier: o.raw_specifier,
             resolution: ImportResolution::from(o.resolution),
             is_re_export: o.is_re_export,
@@ -989,6 +994,7 @@ mod tests {
         // IMPORTS-EXTRACT-COMPLETENESS-1: observations (each non-edge class + a modifier) so the round-trip
         // exercises the v3 `import_observations` field.
         ir.import_observations.push(ImportObservation {
+            source_file: "src/main.ts".to_string(),
             raw_specifier: "react".to_string(),
             resolution: ImportResolution::PackageExternal,
             is_re_export: false,
@@ -996,6 +1002,7 @@ mod tests {
             is_side_effect: false,
         });
         ir.import_observations.push(ImportObservation {
+            source_file: "src/main.ts".to_string(),
             raw_specifier: "./missing".to_string(),
             resolution: ImportResolution::StaticUnresolved,
             is_re_export: true,

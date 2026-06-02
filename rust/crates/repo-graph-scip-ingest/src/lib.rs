@@ -770,6 +770,7 @@ fn build_file_index<'a>(
 /// Modifiers (re-export / type-only / side-effect) are carried through. Observations are NEVER edges.
 fn classify_import_observations(
     repo_uid: &str,
+    source_file: &str,
     observations: &[TsImportObservation],
     node_keys: &HashSet<String>,
 ) -> Vec<IrImportObservation> {
@@ -792,6 +793,7 @@ fn classify_import_observations(
                 ImportResolution::StaticUnresolved
             };
             IrImportObservation {
+                source_file: source_file.to_string(),
                 raw_specifier: o.raw_specifier.clone(),
                 resolution,
                 is_re_export: o.is_re_export,
@@ -1014,14 +1016,21 @@ pub fn ingest_partition(
     );
     ir.edges.extend(import_edges);
 
-    // IMPORTS-EXTRACT-COMPLETENESS-1: classify ALL producer import observations into IR observations
-    // (completeness evidence; never edges). Uses the SAME node-resolution as the edge pass.
-    let all_observations: Vec<TsImportObservation> = facts_by_doc
-        .iter()
-        .filter_map(|f| f.as_ref())
-        .flat_map(|f| f.import_observations.iter().cloned())
-        .collect();
-    ir.import_observations = classify_import_observations(repo_uid, &all_observations, &node_keys);
+    // IMPORTS-EXTRACT-COMPLETENESS-1 + IMPORTS-XPART-WIRING-1: classify each doc's producer import
+    // observations into IR observations, stamping the importing file's repo-relative key_path as
+    // `source_file` (needed for the cross-partition edge src). Same node-resolution as the edge pass.
+    let mut ir_observations: Vec<IrImportObservation> = Vec::new();
+    for (facts, key_path) in facts_by_doc.iter().zip(doc_key_paths.iter()) {
+        if let Some(f) = facts {
+            ir_observations.extend(classify_import_observations(
+                repo_uid,
+                key_path,
+                &f.import_observations,
+                &node_keys,
+            ));
+        }
+    }
+    ir.import_observations = ir_observations;
 
     IngestOutcome {
         ir,
@@ -1180,8 +1189,12 @@ mod tests {
             ts_obs("react", None, false, false), // non-relative -> PackageExternal
             ts_obs("./z", None, true, true), // dynamic -> DynamicUnsupported
         ];
-        let ir_obs = classify_import_observations("r", &obs, &node_keys);
+        let ir_obs = classify_import_observations("r", "packages/a/src/main.ts", &obs, &node_keys);
         assert_eq!(ir_obs.len(), 4);
+        assert_eq!(
+            ir_obs[0].source_file, "packages/a/src/main.ts",
+            "source_file stamped"
+        );
         assert_eq!(ir_obs[0].resolution, ImportResolution::StaticResolved);
         assert_eq!(ir_obs[1].resolution, ImportResolution::StaticUnresolved);
         assert!(ir_obs[1].is_re_export && ir_obs[1].is_type_only); // modifiers carried through
