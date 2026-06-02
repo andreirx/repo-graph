@@ -19,3 +19,6 @@ repo-graph-ir = { path = "../repo-graph-ir" }
 repo-graph-trust-model = { path = "../repo-graph-trust-model" }
 # Pure, zero-dependency Tarjan SCC (CYCLES-LIVEGRAPH-1). Reuse, not inline.
 repo-graph-algorithms = { path = "../graph-algorithms" }
+# Pure cross-partition import resolver (IMPORTS-XPART-RESOLUTION-1). The LiveGraph is a CLIENT of it
+# (D2): it stores the resolver's OUTPUT as the in-memory cross-partition overlay (IMPORTS-XPART-WIRING-1).
+repo-graph-import-resolver = { path = "../repo-graph-import-resolver" }

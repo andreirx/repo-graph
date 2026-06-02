@@ -37,8 +37,11 @@ impl FileInventory {
         FileInventory { by_path }
     }
 
-    /// The FILE key for a repo-relative path, if present.
-    fn get(&self, path: &str) -> Option<&str> {
+    /// The FILE key for a repo-relative path, if present. PUBLIC so a caller (the LiveGraph overlay,
+    /// IMPORTS-XPART-WIRING-1) can resolve the IMPORTING file's actual FILE key from the SAME inventory
+    /// rather than reconstructing `{repo}:{path}:FILE` by hand — one source of truth, and `None` (skip)
+    /// when the importing file is not resident.
+    pub fn file_key_for(&self, path: &str) -> Option<&str> {
         self.by_path.get(path).map(String::as_str)
     }
 }
@@ -178,7 +181,7 @@ pub fn resolve_imports(
         // Collect ALL inventory matches (extension/index); >1 -> Ambiguous (no silent priority).
         let mut matches: Vec<(String, String)> = Vec::new();
         for path in candidate_paths(&base) {
-            if let Some(key) = inv.get(&path) {
+            if let Some(key) = inv.file_key_for(&path) {
                 matches.push((path, key.to_string()));
             }
         }

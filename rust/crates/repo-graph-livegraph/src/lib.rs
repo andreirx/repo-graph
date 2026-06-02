@@ -11,8 +11,11 @@
 //! indexers, persist, or touch the CLI. Deps: `repo-graph-ir` + `repo-graph-trust-model` only.
 //! Headless API (no query migration). See docs/slices/livegraph-runtime-1.md.
 
+use repo_graph_import_resolver::{
+    resolve_imports, FileInventory, ImportCandidate, ResolvedImportEdgeCandidate,
+};
 use repo_graph_ir::{
-    CanonicalKey, EdgeBasis, IdentitySource, PartitionIr, Provenance, SourceRange,
+    CanonicalKey, EdgeBasis, IdentitySource, ImportResolution, PartitionIr, Provenance, SourceRange,
 };
 use repo_graph_trust_model::{
     classify_answer, AnswerClass, AnswerEnvelope, CompletenessInput, DegradationReason,
@@ -187,6 +190,12 @@ pub struct ValueFactsAnswer {
 pub struct LiveGraph {
     slots: HashMap<String, Slot>,
     xref_epoch: u64,
+    /// IMPORTS-XPART-WIRING-1 (D2): the in-memory cross-partition import overlay — `StaticUnresolved`
+    /// import observations upgraded into node-resolved FILE -> FILE edges over the RESIDENT FILE
+    /// inventory (the resolver's output, basis `AstImportFileInventoryResolved`). Rebuilt eagerly on
+    /// every load/swap/unload (D3) so it is always coherent with the resident set; NEVER serialized
+    /// (per-partition cache coherence, F1 — it is derived, not a partition fact).
+    xpart_overlay: Vec<ResolvedImportEdgeCandidate>,
 }
 
 /// xref contribution of a partition: cross-partition key (an IR `CanonicalKey`) → def basis, and
@@ -307,6 +316,7 @@ impl LiveGraph {
                 partition_degradation_reasons: BTreeSet::new(),
             },
         );
+        self.rebuild_xpart_overlay(); // D3: keep the cross-partition overlay coherent with the new set.
     }
 
     /// Unload a partition's detail (D2 explicit unload): drops the IR but KEEPS the xref summary.
@@ -314,6 +324,9 @@ impl LiveGraph {
         if let Some(s) = self.slots.get_mut(id) {
             s.ir = None;
         }
+        // D3: the unloaded partition's FILE nodes leave the inventory, so any cross-partition edge
+        // touching it can no longer resolve -> the rebuild drops it (acceptance #4 degradation).
+        self.rebuild_xpart_overlay();
     }
 
     /// Begin a refresh: serve last-good, freshness becomes `PrecisionPending`.
@@ -385,6 +398,7 @@ impl LiveGraph {
             },
         );
         self.xref_epoch += 1;
+        self.rebuild_xpart_overlay(); // D3: a swapped IR can add/remove cross-partition imports.
     }
 
     /// Load value facts for a partition (VALUE-JOIN-1, D6 separate channel). Stamps the current
@@ -979,19 +993,75 @@ impl LiveGraph {
             .and_then(|n| n.range.clone())
     }
 
-    /// FILE import-cycle detection (CYCLES-LIVEGRAPH-1): Tarjan SCC over the RESIDENT `EdgeBasis::AstImport`
-    /// graph ONLY (no Calls/References/Module edges). Honestly scoped: the answer is over the
-    /// `CapturedResolvedRelativeIntraPartition` import graph — NOT all TS imports. A FOUND cycle is REAL
-    /// within that captured graph (positive evidence). A NO-CYCLE result is `Exact` ONLY when EVERY
-    /// partition is resident + Fresh + TS-primary (whole-graph completeness — a non-resident partition's
-    /// outgoing import adjacency is dropped on unload, so it could hide a cycle). Non-resident / non-TS
-    /// partitions → `Partial` (listed as missing); a stale partition → `Stale`. This is a DIFFERENT
-    /// question from `rmap cycles` (MODULE-import) and is never comparable to it.
+    /// Rebuild the cross-partition import overlay (IMPORTS-XPART-WIRING-1 D3). Pure + in-memory: build the
+    /// repo-relative FILE inventory from ALL resident slots' FILE-scope node keys, turn each resident
+    /// `StaticUnresolved` import observation into an `ImportCandidate` (its importing FILE key looked up
+    /// from that SAME inventory via `source_file`), run the resolver, and store the resolved FILE -> FILE
+    /// edges. Cheap (hashmap lookups, no I/O); called on every load/swap/unload so the overlay is always
+    /// coherent with the resident set.
+    ///
+    /// Only `StaticUnresolved` observations are candidates: `StaticResolved` imports are already
+    /// node-resolved intra-partition `AstImport` edges (in `ir.edges`); `PackageExternal` /
+    /// `DynamicUnsupported` are out of the resolver's scope. An observation whose importing file is not
+    /// resident is skipped (`file_key_for` -> `None`): no src FILE node to anchor the edge.
+    fn rebuild_xpart_overlay(&mut self) {
+        let inventory = FileInventory::from_file_keys(
+            self.slots
+                .values()
+                .filter_map(|s| s.ir.as_ref())
+                .flat_map(|ir| {
+                    ir.nodes
+                        .iter()
+                        .filter(|n| n.identity_source == IdentitySource::AstFileScope)
+                        .map(|n| n.key.as_str().to_string())
+                }),
+        );
+        let mut candidates: Vec<ImportCandidate> = Vec::new();
+        for s in self.slots.values() {
+            if let Some(ir) = &s.ir {
+                for o in &ir.import_observations {
+                    if o.resolution != ImportResolution::StaticUnresolved {
+                        continue;
+                    }
+                    if let Some(src_key) = inventory.file_key_for(&o.source_file) {
+                        candidates.push(ImportCandidate {
+                            source_file_key: src_key.to_string(),
+                            raw_specifier: o.raw_specifier.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        self.xpart_overlay = resolve_imports(&inventory, candidates).resolved;
+    }
+
+    /// The current cross-partition import overlay edges (IMPORTS-XPART-WIRING-1): resolved FILE -> FILE
+    /// edges (basis `AstImportFileInventoryResolved`) over the resident set. Read-only runtime artifact,
+    /// never persisted. Empty when no cross-partition import resolves over the resident inventory (e.g. a
+    /// single loaded partition).
+    pub fn xpart_import_edges(&self) -> &[ResolvedImportEdgeCandidate] {
+        &self.xpart_overlay
+    }
+
+    /// FILE import-cycle detection (CYCLES-LIVEGRAPH-1 + IMPORTS-XPART-WIRING-1): Tarjan SCC over the
+    /// RESIDENT FILE import graph — intra-partition `EdgeBasis::AstImport` edges UNION the in-memory
+    /// cross-partition overlay (`AstImportFileInventoryResolved`); no Calls/References/Module edges.
+    /// Honestly scoped via the [`ImportCycleScope`] flag set (D5): resolved-relative, node-resolved FILE
+    /// imports only — NOT all TS imports. A FOUND cycle is REAL within that captured graph (positive
+    /// evidence) and MAY now span partitions via the overlay. A NO-CYCLE result is `Exact` ONLY when
+    /// EVERY partition is resident + Fresh + TS-primary (whole-graph completeness — a non-resident
+    /// partition's outgoing import adjacency, and any overlay edge touching it, is dropped on unload, so
+    /// it could hide a cycle). Non-resident / non-TS partitions → `Partial` (listed as missing); a stale
+    /// partition → `Stale`. This is a DIFFERENT question from `rmap cycles` (MODULE-import), never
+    /// comparable to it.
     pub fn file_import_cycles(&self) -> AnswerEnvelope<FileImportCyclesAnswer> {
         use repo_graph_algorithms::{find_sccs, DirectedEdge};
 
-        // Adjacency from RESIDENT partitions' import edges only (basis == AstImport).
+        // Adjacency = RESIDENT partitions' intra-partition import edges (basis AstImport) UNION the
+        // in-memory cross-partition overlay (basis AstImportFileInventoryResolved; IMPORTS-XPART-WIRING-1).
+        // Both are resolved-relative FILE -> FILE imports, so they share one SCC universe.
         let mut edges: Vec<DirectedEdge> = Vec::new();
+        let mut intra_count: usize = 0;
         for s in self.slots.values() {
             if let Some(ir) = &s.ir {
                 for e in &ir.edges {
@@ -1000,10 +1070,28 @@ impl LiveGraph {
                             source: e.src.as_str().to_string(),
                             target: e.dst.as_str().to_string(),
                         });
+                        intra_count += 1;
                     }
                 }
             }
         }
+        let xpart_edge_count = self.xpart_overlay.len();
+        for e in &self.xpart_overlay {
+            edges.push(DirectedEdge {
+                source: e.src_file_key.clone(),
+                target: e.dst_file_key.clone(),
+            });
+        }
+        // D5 (scope as flag set): describe the graph UNIVERSE the SCC ran over. This is NOT completeness
+        // (the answer class + `missing` carry that). `cross_partition` reflects ACTUAL contribution:
+        // false here means no cross-partition edge was in the universe (e.g. a single loaded partition),
+        // NOT that cross-partition resolution was skipped. `xpart_edge_count` gives the exact magnitude.
+        let scope = ImportCycleScope {
+            captured_resolved_relative: true,
+            intra_partition: intra_count > 0,
+            cross_partition: xpart_edge_count > 0,
+            xpart_edge_count,
+        };
 
         // Whole-graph scope: EVERY partition must be resident + TS-primary to be IN the captured scope;
         // a partition failing either is `missing` (its imports are not analyzable). Freshness is the worst
@@ -1042,7 +1130,7 @@ impl LiveGraph {
 
         let data = FileImportCyclesAnswer {
             cycles,
-            scope: ImportCycleScope::CapturedResolvedRelativeIntraPartition,
+            scope,
             contributing_epochs: epochs,
         };
 
@@ -1084,15 +1172,26 @@ pub struct FileImportCycle {
     pub members: Vec<String>,
 }
 
-/// The scope a [`FileImportCyclesAnswer`] is computed over (CYCLES-LIVEGRAPH-1 D2). It is explicitly NOT
-/// "all TS imports": the captured graph is resolved-relative, intra-partition, node-resolved FILE imports
-/// only. A `no cycles` answer over this scope makes no claim about imports outside it.
+/// The graph UNIVERSE a [`FileImportCyclesAnswer`] was computed over (CYCLES-LIVEGRAPH-1 D2;
+/// IMPORTS-XPART-WIRING-1 D5 — a FLAG SET, not a single label). It is explicitly NOT "all TS imports":
+/// only resolved-relative, node-resolved FILE imports are captured. This describes the SCC INPUT, NOT
+/// completeness — the answer class + `missing` list carry whether that universe was fully resident.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImportCycleScope {
-    /// Cycles over the captured FILE import graph: resolved-relative + intra-partition + node-resolved
-    /// imports ONLY. Non-relative / unresolved / dynamic / re-export / cross-partition imports are NOT
-    /// CAPTURED (IMPORTS-MODULE-INGEST-1) and thus outside this scope.
-    CapturedResolvedRelativeIntraPartition,
+pub struct ImportCycleScope {
+    /// Always true for this query family: cycles are over the CAPTURED resolved-relative FILE import
+    /// graph. Non-relative/package, unresolved-even-cross-partition, dynamic, and re-export imports are
+    /// NOT captured (IMPORTS-MODULE-INGEST-1) and the answer makes no claim about them.
+    pub captured_resolved_relative: bool,
+    /// True iff >= 1 RESIDENT partition-local FILE import edge (basis `AstImport`) entered the universe.
+    pub intra_partition: bool,
+    /// True iff >= 1 CROSS-partition resolved import edge (the in-memory overlay, basis
+    /// `AstImportFileInventoryResolved`) entered the universe. FALSE does NOT mean cross-partition
+    /// resolution was skipped — it means none was in the universe (a single loaded partition, or no
+    /// import resolved across the resident inventory). Equals `xpart_edge_count > 0`.
+    pub cross_partition: bool,
+    /// Exact count of cross-partition overlay edges included (D5 contribution precision — the
+    /// user-ratified tie-break against the participation-vs-contribution ambiguity).
+    pub xpart_edge_count: usize,
 }
 
 /// Answer for [`LiveGraph::file_import_cycles`]: the detected cycles + the scope they cover + epochs.
@@ -1110,8 +1209,8 @@ pub struct FileImportCyclesAnswer {
 mod tests {
     use super::*;
     use repo_graph_ir::{
-        CanonicalKey, EdgeBasis, EdgeType, ImportEdgeMeta, ImportResolution, IrEdge, IrNode,
-        Partition, PartitionId, PartitionKind, Provenance,
+        CanonicalKey, EdgeBasis, EdgeType, ImportEdgeMeta, ImportObservation, ImportResolution,
+        IrEdge, IrNode, Partition, PartitionId, PartitionKind, Provenance,
     };
 
     fn part(id: &str) -> Partition {
@@ -1871,7 +1970,13 @@ mod tests {
         assert!(d.cycles.is_empty(), "no cycle over a->b");
         assert_eq!(
             d.scope,
-            ImportCycleScope::CapturedResolvedRelativeIntraPartition
+            ImportCycleScope {
+                captured_resolved_relative: true,
+                intra_partition: true,
+                cross_partition: false,
+                xpart_edge_count: 0,
+            },
+            "single partition with one intra import edge -> intra true, cross false"
         );
     }
 
@@ -2002,5 +2107,165 @@ mod tests {
             degraded.data().expect("data").cycles.is_empty(),
             "the b->a edge is gone with p2's IR"
         );
+    }
+
+    // ── cross-partition import OVERLAY (IMPORTS-XPART-WIRING-1) ─────────
+    //
+    // The cases above hand-build a cross-partition `AstImport` EDGE in each partition. These cover the
+    // real wiring: a `StaticUnresolved` import OBSERVATION (a relative import whose target is NOT a FILE
+    // node in its own partition) is upgraded into a node-resolved FILE -> FILE overlay edge ONLY once the
+    // target partition is resident — purely in memory, never in any `PartitionIr`.
+
+    /// A FILE-scope node (its key is the repo-relative FILE key the resolver inventory indexes).
+    fn file_node(key: &str) -> IrNode {
+        node(key, IdentitySource::AstFileScope)
+    }
+    /// A locally-unresolved relative import observation (the overlay's candidate class).
+    fn unresolved_obs(source_file: &str, raw_specifier: &str) -> ImportObservation {
+        ImportObservation {
+            source_file: source_file.to_string(),
+            raw_specifier: raw_specifier.to_string(),
+            resolution: ImportResolution::StaticUnresolved,
+            is_re_export: false,
+            is_type_only: false,
+            is_side_effect: false,
+        }
+    }
+    /// A partition IR carrying import observations (the `ir` helper above always has none).
+    fn ir_obs(
+        id: &str,
+        nodes: Vec<IrNode>,
+        edges: Vec<IrEdge>,
+        obs: Vec<ImportObservation>,
+    ) -> PartitionIr {
+        PartitionIr {
+            partition: part(id),
+            nodes,
+            edges,
+            import_observations: obs,
+        }
+    }
+    /// pkg-a: `packages/a/src/main.ts` imports `../../b/src/foo` (unresolved within a).
+    fn pkg_a_imports_b() -> PartitionIr {
+        ir_obs(
+            "a",
+            vec![file_node("repo:packages/a/src/main.ts:FILE")],
+            vec![],
+            vec![unresolved_obs("packages/a/src/main.ts", "../../b/src/foo")],
+        )
+    }
+    /// pkg-b: `packages/b/src/foo.ts` imports `../../a/src/main` (unresolved within b) -> mutual.
+    fn pkg_b_imports_a() -> PartitionIr {
+        ir_obs(
+            "b",
+            vec![file_node("repo:packages/b/src/foo.ts:FILE")],
+            vec![],
+            vec![unresolved_obs("packages/b/src/foo.ts", "../../a/src/main")],
+        )
+    }
+    /// pkg-b with NO imports (just the target FILE node).
+    fn pkg_b_leaf() -> PartitionIr {
+        ir_obs(
+            "b",
+            vec![file_node("repo:packages/b/src/foo.ts:FILE")],
+            vec![],
+            vec![],
+        )
+    }
+
+    #[test]
+    fn xpart_overlay_resolves_cross_partition_edge_only_when_target_resident() {
+        // Acceptance #2 + eager rebuild (D3): the edge appears only once the target partition loads.
+        let mut lg = LiveGraph::new();
+        lg.load_partition("a", pkg_a_imports_b(), LanguageSupport::TypeScriptPrimary);
+        assert!(
+            lg.xpart_import_edges().is_empty(),
+            "target partition b not resident yet -> nothing resolves"
+        );
+
+        lg.load_partition("b", pkg_b_leaf(), LanguageSupport::TypeScriptPrimary);
+        let edges = lg.xpart_import_edges();
+        assert_eq!(
+            edges.len(),
+            1,
+            "a/main -> b/foo resolves once b is resident"
+        );
+        assert_eq!(edges[0].src_file_key, "repo:packages/a/src/main.ts:FILE");
+        assert_eq!(edges[0].dst_file_key, "repo:packages/b/src/foo.ts:FILE");
+        assert_eq!(
+            edges[0].basis,
+            EdgeBasis::AstImportFileInventoryResolved,
+            "overlay edges carry the resolved basis (D4)"
+        );
+    }
+
+    #[test]
+    fn xpart_overlay_forms_cross_partition_file_import_cycle() {
+        // Acceptance #3: mutual cross-partition imports -> a file-import CYCLE via the overlay. The cycle
+        // is built ENTIRELY from the runtime overlay (both partitions have empty `ir.edges`), so
+        // `intra_partition == false` is the evidence the cycle was NEVER a persisted edge (acceptance #5:
+        // overlay is runtime-only; `PartitionIr` has no overlay field to serialize).
+        let mut lg = LiveGraph::new();
+        lg.load_partition("a", pkg_a_imports_b(), LanguageSupport::TypeScriptPrimary);
+        lg.load_partition("b", pkg_b_imports_a(), LanguageSupport::TypeScriptPrimary);
+
+        let a = lg.file_import_cycles();
+        assert_eq!(a.class(), AnswerClass::Exact, "both resident + Fresh + TS");
+        let d = a.data().expect("data");
+        assert_eq!(
+            d.cycles.len(),
+            1,
+            "a/main <-> b/foo is one cross-partition cycle"
+        );
+        let members: BTreeSet<&str> = d.cycles[0].members.iter().map(String::as_str).collect();
+        assert!(members.contains("repo:packages/a/src/main.ts:FILE"));
+        assert!(members.contains("repo:packages/b/src/foo.ts:FILE"));
+        // D5 scope flag set: cross-partition contributed (2 overlay edges); no intra AstImport edge.
+        assert_eq!(
+            d.scope,
+            ImportCycleScope {
+                captured_resolved_relative: true,
+                intra_partition: false,
+                cross_partition: true,
+                xpart_edge_count: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn unload_rebuilds_overlay_without_the_edge_and_degrades() {
+        // Acceptance #4: unloading a cycle partition drops the overlay edge (rebuild D3) AND degrades the
+        // answer to Partial (whole-graph completeness) — never a stale edge, never a confident no-cycle.
+        let mut lg = LiveGraph::new();
+        lg.load_partition("a", pkg_a_imports_b(), LanguageSupport::TypeScriptPrimary);
+        lg.load_partition("b", pkg_b_imports_a(), LanguageSupport::TypeScriptPrimary);
+        assert_eq!(
+            lg.xpart_import_edges().len(),
+            2,
+            "mutual overlay edges present"
+        );
+
+        lg.unload_partition("b");
+        assert!(
+            lg.xpart_import_edges().is_empty(),
+            "b non-resident -> a/main's import cannot resolve and b's observation is gone"
+        );
+        let degraded = lg.file_import_cycles();
+        assert_eq!(
+            degraded.class(),
+            AnswerClass::Partial,
+            "b non-resident -> incomplete"
+        );
+        assert!(
+            degraded.missing_partitions().contains(&"b".to_string()),
+            "b listed missing: {:?}",
+            degraded.missing_partitions()
+        );
+        let d = degraded
+            .data()
+            .expect("partial still carries last-good data");
+        assert!(d.cycles.is_empty(), "the cross-partition cycle is gone");
+        assert!(!d.scope.cross_partition, "no overlay edge after unload");
+        assert_eq!(d.scope.xpart_edge_count, 0);
     }
 }

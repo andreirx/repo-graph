@@ -1216,6 +1216,7 @@ name = "repo-graph-livegraph"
 version = "0.1.0"
 dependencies = [
  "repo-graph-algorithms",
+ "repo-graph-import-resolver",
  "repo-graph-ir",
  "repo-graph-trust-model",
 ]
