@@ -1171,6 +1171,7 @@ mod tests {
             partition: part(id),
             nodes,
             edges,
+            import_observations: Vec::new(),
         }
     }
 

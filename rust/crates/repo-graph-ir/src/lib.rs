@@ -106,17 +106,23 @@ pub enum EdgeBasis {
     AstImport,
 }
 
-/// Resolution class of an extracted module-import edge (IMPORTS-MODULE-INGEST-1).
+/// Resolution class of an extracted module import (IMPORTS-MODULE-INGEST-1 + IMPORTS-EXTRACT-COMPLETENESS-1).
 ///
-/// This slice's `ts-extractor` output emits import EDGES only for **relative + resolved** imports, so
-/// `StaticResolved` is the ONLY class produced today. Non-relative (package), unresolved-relative, and
-/// dynamic `import()` imports are dropped by the producer before output (NOT a silent ingest drop) and
-/// are therefore `NOT CAPTURED` — see IMPORTS-EXTRACT-COMPLETENESS-1. The enum is left open for those
-/// classes so widening the producer later does not break the IR shape.
+/// `EdgeType::Imports` edges ONLY ever carry `StaticResolved` (a relative import node-resolved to a FILE
+/// in the same partition). The other classes are produced by IMPORTS-EXTRACT-COMPLETENESS-1 for
+/// [`ImportObservation`]s — completeness evidence that is NEVER a graph edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportResolution {
-    /// A relative import that the producer resolved to a concrete FILE target.
+    /// A relative import node-resolved to a concrete FILE target in this partition (the ONLY class that
+    /// becomes an `EdgeType::Imports` edge).
     StaticResolved,
+    /// A relative import whose target FILE is not node-resolved in this partition (no resolvable path, or
+    /// the target file is in another partition). Observation only.
+    StaticUnresolved,
+    /// A non-relative (package / bare) specifier (e.g. `"react"`). Observation only.
+    PackageExternal,
+    /// A dynamic `import()` with no static target. Observation only.
+    DynamicUnsupported,
 }
 
 /// Display/dependency metadata for an `EdgeType::Imports` edge (IMPORTS-MODULE-INGEST-1).
@@ -129,8 +135,26 @@ pub struct ImportEdgeMeta {
     pub raw_specifier: String,
     /// The producer-resolved partition-relative target path (the `:FILE` target's path).
     pub resolved_path: String,
-    /// Resolution class (see [`ImportResolution`]).
+    /// Resolution class (always [`ImportResolution::StaticResolved`] for an edge).
     pub resolution: ImportResolution,
+}
+
+/// A classified module-import OBSERVATION (IMPORTS-EXTRACT-COMPLETENESS-1) — completeness evidence for an
+/// import that did NOT become a graph edge (and, for honest counts, also the StaticResolved ones that
+/// did). It is NEVER a graph edge: a non-node-resolved import has no FILE-node endpoint. `resolution` is
+/// the mutually-exclusive class; `is_re_export`/`is_type_only`/`is_side_effect` are orthogonal modifiers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportObservation {
+    /// The raw module specifier as written (e.g. `"./foo"`, `"react"`).
+    pub raw_specifier: String,
+    /// The mutually-exclusive resolution class.
+    pub resolution: ImportResolution,
+    /// From an `export ... from` (a re-export), not an `import`.
+    pub is_re_export: bool,
+    /// `import type` / `export type` (type-only).
+    pub is_type_only: bool,
+    /// Bound no local identifier (e.g. `import "./x"`).
+    pub is_side_effect: bool,
 }
 
 // ── Partition + provenance ────────────────────────────────────────
@@ -257,6 +281,9 @@ pub struct PartitionIr {
     pub nodes: Vec<IrNode>,
     /// Edges.
     pub edges: Vec<IrEdge>,
+    /// Classified module-import observations (IMPORTS-EXTRACT-COMPLETENESS-1) — completeness evidence for
+    /// imports that are NOT graph edges (unresolved/package/dynamic) plus the resolved ones (for counts).
+    pub import_observations: Vec<ImportObservation>,
 }
 
 impl PartitionIr {
@@ -266,6 +293,7 @@ impl PartitionIr {
             partition,
             nodes: Vec::new(),
             edges: Vec::new(),
+            import_observations: Vec::new(),
         }
     }
 

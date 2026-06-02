@@ -35,15 +35,17 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use repo_graph_ir::{
-    CanonicalKey, EdgeBasis, EdgeType, IdentitySource, ImportEdgeMeta, ImportResolution, IrEdge,
-    IrNode, Partition, PartitionId, PartitionIr, PartitionKind, Provenance, SourceRange,
+    CanonicalKey, EdgeBasis, EdgeType, IdentitySource, ImportEdgeMeta, ImportObservation,
+    ImportResolution, IrEdge, IrNode, Partition, PartitionId, PartitionIr, PartitionKind,
+    Provenance, SourceRange,
 };
 
 /// Magic marker for a repo-graph warm-cache file ("RGWC").
 pub const MAGIC: u32 = 0x5247_5743;
 /// Cache wire-format / layout version. A change here invalidates every existing entry (D3/D4).
 /// v2 (IMPORTS-MODULE-INGEST-1): `CacheIrEdgeDto` gained the optional `import` field (import edges).
-pub const SCHEMA_VERSION: u32 = 2;
+/// v3 (IMPORTS-EXTRACT-COMPLETENESS-1): `CachePartitionIrDto` gained `import_observations`.
+pub const SCHEMA_VERSION: u32 = 3;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // Errors (D4)
@@ -245,6 +247,27 @@ pub enum CacheEdgeBasisDto {
 pub enum CacheImportResolutionDto {
     /// `StaticResolved`.
     StaticResolved,
+    /// `StaticUnresolved` (IMPORTS-EXTRACT-COMPLETENESS-1).
+    StaticUnresolved,
+    /// `PackageExternal` (IMPORTS-EXTRACT-COMPLETENESS-1).
+    PackageExternal,
+    /// `DynamicUnsupported` (IMPORTS-EXTRACT-COMPLETENESS-1).
+    DynamicUnsupported,
+}
+
+/// Mirror of `repo_graph_ir::ImportObservation` (IMPORTS-EXTRACT-COMPLETENESS-1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CacheImportObservationDto {
+    /// Raw module specifier.
+    pub raw_specifier: String,
+    /// Resolution class.
+    pub resolution: CacheImportResolutionDto,
+    /// Re-export modifier.
+    pub is_re_export: bool,
+    /// Type-only modifier.
+    pub is_type_only: bool,
+    /// Side-effect modifier.
+    pub is_side_effect: bool,
 }
 
 /// Mirror of `repo_graph_ir::ImportEdgeMeta`.
@@ -328,6 +351,9 @@ pub struct CachePartitionIrDto {
     pub nodes: Vec<CacheIrNodeDto>,
     /// Edges.
     pub edges: Vec<CacheIrEdgeDto>,
+    /// Import observations (IMPORTS-EXTRACT-COMPLETENESS-1; schema v3). Old (v2) caches are rejected at
+    /// the manifest `schema_version` gate (SchemaMismatch -> discard), so no backward-decode default.
+    pub import_observations: Vec<CacheImportObservationDto>,
 }
 
 impl From<&SourceRange> for CacheSourceRangeDto {
@@ -416,6 +442,9 @@ impl From<&ImportResolution> for CacheImportResolutionDto {
     fn from(v: &ImportResolution) -> Self {
         match v {
             ImportResolution::StaticResolved => Self::StaticResolved,
+            ImportResolution::StaticUnresolved => Self::StaticUnresolved,
+            ImportResolution::PackageExternal => Self::PackageExternal,
+            ImportResolution::DynamicUnsupported => Self::DynamicUnsupported,
         }
     }
 }
@@ -423,6 +452,32 @@ impl From<CacheImportResolutionDto> for ImportResolution {
     fn from(v: CacheImportResolutionDto) -> Self {
         match v {
             CacheImportResolutionDto::StaticResolved => Self::StaticResolved,
+            CacheImportResolutionDto::StaticUnresolved => Self::StaticUnresolved,
+            CacheImportResolutionDto::PackageExternal => Self::PackageExternal,
+            CacheImportResolutionDto::DynamicUnsupported => Self::DynamicUnsupported,
+        }
+    }
+}
+
+impl From<&ImportObservation> for CacheImportObservationDto {
+    fn from(o: &ImportObservation) -> Self {
+        Self {
+            raw_specifier: o.raw_specifier.clone(),
+            resolution: CacheImportResolutionDto::from(&o.resolution),
+            is_re_export: o.is_re_export,
+            is_type_only: o.is_type_only,
+            is_side_effect: o.is_side_effect,
+        }
+    }
+}
+impl From<CacheImportObservationDto> for ImportObservation {
+    fn from(o: CacheImportObservationDto) -> Self {
+        Self {
+            raw_specifier: o.raw_specifier,
+            resolution: ImportResolution::from(o.resolution),
+            is_re_export: o.is_re_export,
+            is_type_only: o.is_type_only,
+            is_side_effect: o.is_side_effect,
         }
     }
 }
@@ -565,6 +620,11 @@ impl From<&PartitionIr> for CachePartitionIrDto {
             partition: CachePartitionDto::from(&ir.partition),
             nodes: ir.nodes.iter().map(CacheIrNodeDto::from).collect(),
             edges: ir.edges.iter().map(CacheIrEdgeDto::from).collect(),
+            import_observations: ir
+                .import_observations
+                .iter()
+                .map(CacheImportObservationDto::from)
+                .collect(),
         }
     }
 }
@@ -577,6 +637,11 @@ impl TryFrom<CachePartitionIrDto> for PartitionIr {
             partition: Partition::from(dto.partition),
             nodes: dto.nodes.into_iter().map(IrNode::from).collect(),
             edges: dto.edges.into_iter().map(IrEdge::from).collect(),
+            import_observations: dto
+                .import_observations
+                .into_iter()
+                .map(ImportObservation::from)
+                .collect(),
         })
     }
 }
@@ -910,6 +975,22 @@ mod tests {
                 resolved_path: "src/shapes.ts".to_string(),
                 resolution: ImportResolution::StaticResolved,
             }),
+        });
+        // IMPORTS-EXTRACT-COMPLETENESS-1: observations (each non-edge class + a modifier) so the round-trip
+        // exercises the v3 `import_observations` field.
+        ir.import_observations.push(ImportObservation {
+            raw_specifier: "react".to_string(),
+            resolution: ImportResolution::PackageExternal,
+            is_re_export: false,
+            is_type_only: false,
+            is_side_effect: false,
+        });
+        ir.import_observations.push(ImportObservation {
+            raw_specifier: "./missing".to_string(),
+            resolution: ImportResolution::StaticUnresolved,
+            is_re_export: true,
+            is_type_only: true,
+            is_side_effect: false,
         });
         ir
     }
