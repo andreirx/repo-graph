@@ -2237,6 +2237,7 @@ mod tests {
                 metrics: BTreeMap::new(),
                 import_bindings: vec![],
                 resolved_callsites: vec![],
+                import_observations: vec![],
             })
         }
     }

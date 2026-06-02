@@ -8,8 +8,8 @@ use repo_graph_classification::types::{
 use repo_graph_indexer::extractor_port::{ExtractorError, ExtractorPort};
 use repo_graph_indexer::jsts_extensions::{get_extension, is_jsts_jsx_extension};
 use repo_graph_indexer::types::{
-    CallArgPayload, EdgeType, ExtractedEdge, ExtractedNode, ExtractionResult, NodeKind,
-    NodeSubtype, Resolution, ResolvedCallsite, Visibility,
+    CallArgPayload, EdgeType, ExtractedEdge, ExtractedNode, ExtractionResult, ImportObservation,
+    NodeKind, NodeSubtype, Resolution, ResolvedCallsite, Visibility,
 };
 
 use crate::builtins::ts_js_runtime_builtins;
@@ -177,6 +177,7 @@ impl ExtractorPort for TsExtractor {
             }],
             edges: Vec::new(),
             import_bindings: Vec::new(),
+            import_observations: Vec::new(),
             resolved_callsites: Vec::new(),
             metrics: BTreeMap::new(),
             exported_names: std::collections::HashSet::new(),
@@ -202,6 +203,8 @@ impl ExtractorPort for TsExtractor {
                         snapshot_uid,
                         &mut ctx.edges,
                         &mut ctx.import_bindings,
+                        false, // not a re-export
+                        &mut ctx.import_observations,
                     );
                 }
                 "export_statement" => {
@@ -216,6 +219,8 @@ impl ExtractorPort for TsExtractor {
                             snapshot_uid,
                             &mut ctx.edges,
                             &mut ctx.import_bindings,
+                            true, // re-export (`export ... from`)
+                            &mut ctx.import_observations,
                         );
                     }
                     // Exported declarations: `export function f() {}`
@@ -279,12 +284,18 @@ impl ExtractorPort for TsExtractor {
             }
         }
 
+        // IMPORTS-EXTRACT-COMPLETENESS-1: a self-contained full-AST walk for dynamic `import(...)` calls
+        // (they can appear anywhere, not just at top level). Additive — does NOT alter the static import /
+        // call extraction above.
+        collect_dynamic_imports(&root, src, &mut ctx.import_observations);
+
         Ok(ExtractionResult {
             nodes: ctx.nodes,
             edges: ctx.edges,
             metrics: ctx.metrics,
             import_bindings: ctx.import_bindings,
             resolved_callsites: ctx.resolved_callsites,
+            import_observations: ctx.import_observations,
         })
     }
 }
@@ -301,6 +312,7 @@ struct ExtractionCtx<'a> {
     nodes: Vec<ExtractedNode>,
     edges: Vec<ExtractedEdge>,
     import_bindings: Vec<ImportBinding>,
+    import_observations: Vec<ImportObservation>,
     resolved_callsites: Vec<repo_graph_indexer::types::ResolvedCallsite>,
     metrics: BTreeMap<String, repo_graph_indexer::types::ExtractedMetrics>,
     exported_names: std::collections::HashSet<String>,
@@ -1319,6 +1331,8 @@ fn extract_import(
     snapshot_uid: &str,
     edges: &mut Vec<ExtractedEdge>,
     import_bindings: &mut Vec<ImportBinding>,
+    is_re_export: bool,
+    observations: &mut Vec<ImportObservation>,
 ) {
     // Get the import source string (the module specifier).
     let source_node = match node.child_by_field_name("source") {
@@ -1331,13 +1345,18 @@ fn extract_import(
     let is_relative = raw_path.starts_with('.');
     let location = location_from_node(node);
 
-    // Statement-level `import type` detection.
+    // Statement-level `import type` / `export type ... from` detection.
     let node_text = node.utf8_text(source).unwrap_or("");
     let is_type_only = node_text.starts_with("import type ")
         || node_text.starts_with("import type\t")
-        || node_text.starts_with("import type{");
+        || node_text.starts_with("import type{")
+        || node_text.starts_with("export type ")
+        || node_text.starts_with("export type\t")
+        || node_text.starts_with("export type{");
 
-    // Collect import bindings from the import clause.
+    // Collect import bindings from the import clause. Track how many THIS statement produced so a
+    // side-effect import (no bound identifier, e.g. `import "./x"`) is observable.
+    let bindings_before = import_bindings.len();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() != "import_clause" {
@@ -1355,13 +1374,32 @@ fn extract_import(
             });
         }
     }
+    // Side-effect = bound nothing AND not a re-export (re-exports bind no local identifier here either).
+    let is_side_effect = import_bindings.len() == bindings_before && !is_re_export;
 
-    // Only relative imports produce IMPORTS edges.
-    if !is_relative {
-        return;
-    }
+    // Producer-normalized relative path (extensionless); `None` for non-relative or unresolvable.
+    let resolved_path = if is_relative {
+        resolve_import_path(raw_path, file_path)
+    } else {
+        None
+    };
 
-    let resolved_path = match resolve_import_path(raw_path, file_path) {
+    // OBSERVATION (IMPORTS-EXTRACT-COMPLETENESS-1): one per import / export-from statement. RAW FACTS;
+    // ingest classifies. Pushed REGARDLESS of relative/resolved — non-resolved imports are completeness
+    // evidence, never edges.
+    observations.push(ImportObservation {
+        raw_specifier: raw_path.to_string(),
+        resolved_path: resolved_path.clone(),
+        is_relative,
+        is_type_only,
+        is_re_export,
+        is_side_effect,
+        is_dynamic: false,
+        location: Some(location),
+    });
+
+    // EDGE (unchanged): only a relative + resolved import produces an IMPORTS edge.
+    let resolved_path = match resolved_path {
         Some(p) => p,
         None => return,
     };
@@ -1386,6 +1424,54 @@ fn extract_import(
             .to_string(),
         ),
     });
+}
+
+/// Self-contained full-AST walk for dynamic `import(...)` calls (IMPORTS-EXTRACT-COMPLETENESS-1). A
+/// dynamic import is a `call_expression` whose `function` text is `import`; they can appear anywhere, so
+/// this walks the whole tree. Emits one observation per call (`is_dynamic = true`); the specifier is the
+/// first string-literal argument when statically present (else empty). ADDITIVE: does not touch static
+/// import or call extraction.
+fn collect_dynamic_imports(
+    root: &tree_sitter::Node,
+    source: &[u8],
+    observations: &mut Vec<ImportObservation>,
+) {
+    let mut stack = vec![*root];
+    while let Some(node) = stack.pop() {
+        if node.kind() == "call_expression" {
+            if let Some(f) = node.child_by_field_name("function") {
+                if f.utf8_text(source).map(str::trim) == Ok("import") {
+                    let raw = node
+                        .child_by_field_name("arguments")
+                        .and_then(|args| {
+                            let mut c = args.walk();
+                            let found = args.children(&mut c).find(|n| n.kind() == "string");
+                            found
+                        })
+                        .and_then(|s| s.utf8_text(source).ok())
+                        .map(|t| t.trim_matches(|c| c == '\'' || c == '"').to_string())
+                        .unwrap_or_default();
+                    let is_relative = raw.starts_with('.');
+                    observations.push(ImportObservation {
+                        raw_specifier: raw,
+                        // Dynamic imports are not statically node-resolved here (ingest classifies them
+                        // as DynamicUnsupported/Observed).
+                        resolved_path: None,
+                        is_relative,
+                        is_type_only: false,
+                        is_re_export: false,
+                        is_side_effect: false,
+                        is_dynamic: true,
+                        location: Some(location_from_node(&node)),
+                    });
+                }
+            }
+        }
+        let mut c = node.walk();
+        for child in node.children(&mut c) {
+            stack.push(child);
+        }
+    }
 }
 
 /// Collect local identifier names from an `import_clause` node,
@@ -2441,6 +2527,83 @@ mod tests {
         assert_eq!(result.edges.len(), 1);
         // But no ImportBinding (no identifier).
         assert_eq!(result.import_bindings.len(), 0);
+    }
+
+    // ── IMPORTS-EXTRACT-COMPLETENESS-1: import observations ───
+
+    #[test]
+    fn observation_static_relative_import() {
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let r = extract_ok(&ext, r#"import { A } from "./shapes";"#, "src/main.ts");
+        let obs: Vec<_> = r
+            .import_observations
+            .iter()
+            .filter(|o| !o.is_dynamic)
+            .collect();
+        assert_eq!(obs.len(), 1);
+        let o = obs[0];
+        assert_eq!(o.raw_specifier, "./shapes");
+        assert_eq!(o.resolved_path.as_deref(), Some("src/shapes"));
+        assert!(o.is_relative);
+        assert!(!o.is_type_only && !o.is_re_export && !o.is_side_effect && !o.is_dynamic);
+    }
+
+    #[test]
+    fn observation_side_effect_import() {
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let r = extract_ok(&ext, r#"import "./polyfill";"#, "src/index.ts");
+        assert_eq!(r.import_observations.len(), 1);
+        assert!(r.import_observations[0].is_side_effect);
+    }
+
+    #[test]
+    fn observation_package_non_relative() {
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let r = extract_ok(&ext, r#"import { x } from "react";"#, "src/main.ts");
+        assert_eq!(r.import_observations.len(), 1);
+        let o = &r.import_observations[0];
+        assert!(!o.is_relative);
+        assert!(o.resolved_path.is_none());
+    }
+
+    #[test]
+    fn observation_re_export() {
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let r = extract_ok(&ext, r#"export { A } from "./shapes";"#, "src/main.ts");
+        assert_eq!(r.import_observations.len(), 1);
+        assert!(r.import_observations[0].is_re_export);
+    }
+
+    #[test]
+    fn observation_type_only() {
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let r = extract_ok(&ext, r#"import type { A } from "./shapes";"#, "src/main.ts");
+        assert_eq!(r.import_observations.len(), 1);
+        assert!(r.import_observations[0].is_type_only);
+    }
+
+    #[test]
+    fn observation_dynamic_import() {
+        let mut ext = TsExtractor::new();
+        ext.initialize().unwrap();
+        let r = extract_ok(
+            &ext,
+            r#"async function f() { return await import("./z"); }"#,
+            "src/main.ts",
+        );
+        let dyn_obs: Vec<_> = r
+            .import_observations
+            .iter()
+            .filter(|o| o.is_dynamic)
+            .collect();
+        assert_eq!(dyn_obs.len(), 1, "dynamic import() observed");
+        assert_eq!(dyn_obs[0].raw_specifier, "./z");
+        assert!(dyn_obs[0].is_relative);
     }
 
     // ── resolve_import_path unit tests ───────────────────────

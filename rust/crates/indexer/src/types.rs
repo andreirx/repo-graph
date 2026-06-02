@@ -403,6 +403,31 @@ pub struct ResolvedCallsite {
     pub source_location: SourceLocation,
 }
 
+/// A raw module-import OBSERVATION (IMPORTS-EXTRACT-COMPLETENESS-1). One per import / export-from /
+/// dynamic-`import()` statement. RAW SYNTACTIC FACTS only — NO classification, NO node-resolution (the
+/// extractor never owns node-resolution; ingest classifies). `resolved_path` is the producer's
+/// extensionless relative-path normalization, present only for relative specifiers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportObservation {
+    /// The module specifier as written (e.g. `"./foo"`, `"react"`).
+    pub raw_specifier: String,
+    /// Producer-normalized extensionless relative path (`Some` only for relative specifiers).
+    pub resolved_path: Option<String>,
+    /// Specifier starts with `.` (a relative import).
+    pub is_relative: bool,
+    /// `import type` / `export type` (statement-level type-only).
+    pub is_type_only: bool,
+    /// From an `export ... from` statement (a re-export), not an `import`.
+    pub is_re_export: bool,
+    /// No import clause bound any local identifier (e.g. `import "./x"`).
+    pub is_side_effect: bool,
+    /// A dynamic `import(...)` call expression (no static binding).
+    pub is_dynamic: bool,
+    /// Source location of the statement.
+    pub location: Option<SourceLocation>,
+}
+
 /// The result of extracting a single file. Mirrors
 /// `ExtractionResult` from `src/core/ports/extractor.ts`.
 ///
@@ -430,6 +455,9 @@ pub struct ExtractionResult {
     /// Fork 1, empty for all other extractors. See
     /// `ResolvedCallsite` docs.
     pub resolved_callsites: Vec<ResolvedCallsite>,
+    /// Raw module-import observations (IMPORTS-EXTRACT-COMPLETENESS-1). One per import / export-from /
+    /// dynamic-`import()` statement; ADDITIVE to `edges` (resolved IMPORTS edges are unchanged).
+    pub import_observations: Vec<ImportObservation>,
 }
 
 // ── Indexer input/output types ──────────────────────────────────
