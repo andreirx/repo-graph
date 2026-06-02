@@ -1,7 +1,11 @@
 # IMPORTS-XPART-WIRING-1: cross-partition import-edge overlay in the LiveGraph (Stage D)
 
 Slice ID: IMPORTS-XPART-WIRING-1
-Status: **DESIGN — D1–D4 ratified (2026-06-02). Implementation NOT started.**
+Status: **BLOCKED on KEY-NAMESPACE-REPO-RELATIVE-1 (2026-06-02).** D1–D4 ratified, but a grounding probe found
+that FILE/node keys are PARTITION-relative (`{repo}:{partition-relative}:FILE`), so multi-partition repos
+COLLIDE (`packages/a/src/main.ts` == `packages/b/src/main.ts`) and the flat `defines` map is unsound. The
+cross-partition overlay needs one collision-free repo-relative namespace across slots AND overlay. Fix the
+key namespace first (KEY-NAMESPACE-REPO-RELATIVE-1), then resume. Implementation NOT started.
 Depends: IMPORTS-XPART-RESOLUTION-1 (the pure `repo-graph-import-resolver` + `EdgeBasis::AstImportFileInventoryResolved`),
 IMPORTS-EXTRACT-COMPLETENESS-1 (the `StaticUnresolved` observations), CYCLES-LIVEGRAPH-1 (`file_import_cycles`),
 `repo-graph-warm-cache` (schema v3 -> v4).
