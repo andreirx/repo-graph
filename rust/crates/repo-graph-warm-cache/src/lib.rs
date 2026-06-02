@@ -35,14 +35,15 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use repo_graph_ir::{
-    CanonicalKey, EdgeBasis, EdgeType, IdentitySource, IrEdge, IrNode, Partition, PartitionId,
-    PartitionIr, PartitionKind, Provenance, SourceRange,
+    CanonicalKey, EdgeBasis, EdgeType, IdentitySource, ImportEdgeMeta, ImportResolution, IrEdge,
+    IrNode, Partition, PartitionId, PartitionIr, PartitionKind, Provenance, SourceRange,
 };
 
 /// Magic marker for a repo-graph warm-cache file ("RGWC").
 pub const MAGIC: u32 = 0x5247_5743;
 /// Cache wire-format / layout version. A change here invalidates every existing entry (D3/D4).
-pub const SCHEMA_VERSION: u32 = 1;
+/// v2 (IMPORTS-MODULE-INGEST-1): `CacheIrEdgeDto` gained the optional `import` field (import edges).
+pub const SCHEMA_VERSION: u32 = 2;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // Errors (D4)
@@ -222,6 +223,8 @@ pub enum CacheEdgeTypeDto {
     Calls,
     /// `References`.
     References,
+    /// `Imports` (IMPORTS-MODULE-INGEST-1).
+    Imports,
 }
 
 /// Mirror of `repo_graph_ir::EdgeBasis`.
@@ -233,6 +236,26 @@ pub enum CacheEdgeBasisDto {
     DerivedReference,
     /// `FileScopeReference`.
     FileScopeReference,
+    /// `AstImport` (IMPORTS-MODULE-INGEST-1).
+    AstImport,
+}
+
+/// Mirror of `repo_graph_ir::ImportResolution`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CacheImportResolutionDto {
+    /// `StaticResolved`.
+    StaticResolved,
+}
+
+/// Mirror of `repo_graph_ir::ImportEdgeMeta`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CacheImportEdgeMetaDto {
+    /// Raw module specifier.
+    pub raw_specifier: String,
+    /// Resolved partition-relative target path.
+    pub resolved_path: String,
+    /// Resolution class.
+    pub resolution: CacheImportResolutionDto,
 }
 
 /// Mirror of `repo_graph_ir::PartitionKind`.
@@ -274,6 +297,8 @@ pub struct CacheIrEdgeDto {
     pub basis: CacheEdgeBasisDto,
     /// Provenance.
     pub provenance: CacheProvenanceDto,
+    /// Import metadata — `Some` iff this is an import edge (IMPORTS-MODULE-INGEST-1).
+    pub import: Option<CacheImportEdgeMetaDto>,
 }
 
 /// Mirror of `repo_graph_ir::Partition`.
@@ -373,6 +398,7 @@ impl From<&EdgeType> for CacheEdgeTypeDto {
         match v {
             EdgeType::Calls => Self::Calls,
             EdgeType::References => Self::References,
+            EdgeType::Imports => Self::Imports,
         }
     }
 }
@@ -381,6 +407,41 @@ impl From<CacheEdgeTypeDto> for EdgeType {
         match v {
             CacheEdgeTypeDto::Calls => Self::Calls,
             CacheEdgeTypeDto::References => Self::References,
+            CacheEdgeTypeDto::Imports => Self::Imports,
+        }
+    }
+}
+
+impl From<&ImportResolution> for CacheImportResolutionDto {
+    fn from(v: &ImportResolution) -> Self {
+        match v {
+            ImportResolution::StaticResolved => Self::StaticResolved,
+        }
+    }
+}
+impl From<CacheImportResolutionDto> for ImportResolution {
+    fn from(v: CacheImportResolutionDto) -> Self {
+        match v {
+            CacheImportResolutionDto::StaticResolved => Self::StaticResolved,
+        }
+    }
+}
+
+impl From<&ImportEdgeMeta> for CacheImportEdgeMetaDto {
+    fn from(m: &ImportEdgeMeta) -> Self {
+        Self {
+            raw_specifier: m.raw_specifier.clone(),
+            resolved_path: m.resolved_path.clone(),
+            resolution: CacheImportResolutionDto::from(&m.resolution),
+        }
+    }
+}
+impl From<CacheImportEdgeMetaDto> for ImportEdgeMeta {
+    fn from(m: CacheImportEdgeMetaDto) -> Self {
+        Self {
+            raw_specifier: m.raw_specifier,
+            resolved_path: m.resolved_path,
+            resolution: ImportResolution::from(m.resolution),
         }
     }
 }
@@ -391,6 +452,7 @@ impl From<&EdgeBasis> for CacheEdgeBasisDto {
             EdgeBasis::SyntaxConfirmedCall => Self::SyntaxConfirmedCall,
             EdgeBasis::DerivedReference => Self::DerivedReference,
             EdgeBasis::FileScopeReference => Self::FileScopeReference,
+            EdgeBasis::AstImport => Self::AstImport,
         }
     }
 }
@@ -400,6 +462,7 @@ impl From<CacheEdgeBasisDto> for EdgeBasis {
             CacheEdgeBasisDto::SyntaxConfirmedCall => Self::SyntaxConfirmedCall,
             CacheEdgeBasisDto::DerivedReference => Self::DerivedReference,
             CacheEdgeBasisDto::FileScopeReference => Self::FileScopeReference,
+            CacheEdgeBasisDto::AstImport => Self::AstImport,
         }
     }
 }
@@ -454,6 +517,7 @@ impl From<&IrEdge> for CacheIrEdgeDto {
             edge_type: CacheEdgeTypeDto::from(&e.edge_type),
             basis: CacheEdgeBasisDto::from(&e.basis),
             provenance: CacheProvenanceDto::from(&e.provenance),
+            import: e.import.as_ref().map(CacheImportEdgeMetaDto::from),
         }
     }
 }
@@ -465,6 +529,7 @@ impl From<CacheIrEdgeDto> for IrEdge {
             edge_type: EdgeType::from(e.edge_type),
             basis: EdgeBasis::from(e.basis),
             provenance: Provenance::from(e.provenance),
+            import: e.import.map(ImportEdgeMeta::from),
         }
     }
 }
@@ -823,6 +888,7 @@ mod tests {
             edge_type: EdgeType::Calls,
             basis: EdgeBasis::SyntaxConfirmedCall,
             provenance: prov(),
+            import: None,
         });
         ir.edges.push(IrEdge {
             src: CanonicalKey::from_existing("repo:src/main.ts#report"),
@@ -830,6 +896,20 @@ mod tests {
             edge_type: EdgeType::References,
             basis: EdgeBasis::DerivedReference,
             provenance: prov(),
+            import: None,
+        });
+        // IMPORTS-MODULE-INGEST-1: an import edge so the round-trip exercises the new `import` field.
+        ir.edges.push(IrEdge {
+            src: CanonicalKey::from_existing("repo:src/main.ts:FILE"),
+            dst: CanonicalKey::from_existing("repo:src/shapes.ts:FILE"),
+            edge_type: EdgeType::Imports,
+            basis: EdgeBasis::AstImport,
+            provenance: prov(),
+            import: Some(ImportEdgeMeta {
+                raw_specifier: "./shapes".to_string(),
+                resolved_path: "src/shapes.ts".to_string(),
+                resolution: ImportResolution::StaticResolved,
+            }),
         });
         ir
     }

@@ -69,15 +69,18 @@ pub enum IdentitySource {
 
 /// Edge classification carried by the IR.
 ///
-/// INGEST-CORE-1 carries only `Calls` and `References`. `Imports` is intentionally
-/// absent: `scip-typescript` does not reliably emit import roles (spike M2), so
-/// import edges are deferred to AST-derived classification in a later slice.
+/// INGEST-CORE-1 carried only `Calls` and `References`; `Imports` was deferred because
+/// `scip-typescript` does not reliably emit import roles (spike M2). IMPORTS-MODULE-INGEST-1 adds
+/// `Imports` as an **AST-derived** edge (authority = `ts-extractor`, NOT SCIP roles): a module-import
+/// edge between file-scope (FILE) identities. See `EdgeBasis::AstImport` and `ImportEdgeMeta`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EdgeType {
     /// A syntax-confirmed call.
     Calls,
     /// A resolved reference that is not a confirmed call.
     References,
+    /// A module-import edge (FILE -> FILE), AST-derived. Carries `ImportEdgeMeta`.
+    Imports,
 }
 
 /// The derivation basis for an edge (D2 graded model: carried data only — there is
@@ -97,6 +100,37 @@ pub enum EdgeBasis {
     /// is excluded from strict call-graph traversal by default. Carries real
     /// module-scope provenance (imports, boundary/dependency analysis).
     FileScopeReference,
+    /// An AST-extracted module-import edge (IMPORTS-MODULE-INGEST-1). Maps to `EdgeType::Imports`.
+    /// Authority is the `ts-extractor` AST (an `import` declaration), NOT SCIP roles or a
+    /// `FileScopeReference` inference. FILE -> FILE; carries `ImportEdgeMeta`.
+    AstImport,
+}
+
+/// Resolution class of an extracted module-import edge (IMPORTS-MODULE-INGEST-1).
+///
+/// This slice's `ts-extractor` output emits import EDGES only for **relative + resolved** imports, so
+/// `StaticResolved` is the ONLY class produced today. Non-relative (package), unresolved-relative, and
+/// dynamic `import()` imports are dropped by the producer before output (NOT a silent ingest drop) and
+/// are therefore `NOT CAPTURED` — see IMPORTS-EXTRACT-COMPLETENESS-1. The enum is left open for those
+/// classes so widening the producer later does not break the IR shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportResolution {
+    /// A relative import that the producer resolved to a concrete FILE target.
+    StaticResolved,
+}
+
+/// Display/dependency metadata for an `EdgeType::Imports` edge (IMPORTS-MODULE-INGEST-1).
+///
+/// FILE-granular only (D2): no import `kind`/`type-only` (those are binding-level facts, deferred). The
+/// edge's `src`/`dst` are the file-scope FILE identities; this carries the specifier provenance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportEdgeMeta {
+    /// The raw module specifier as written (e.g. `"./foo"`).
+    pub raw_specifier: String,
+    /// The producer-resolved partition-relative target path (the `:FILE` target's path).
+    pub resolved_path: String,
+    /// Resolution class (see [`ImportResolution`]).
+    pub resolution: ImportResolution,
 }
 
 // ── Partition + provenance ────────────────────────────────────────
@@ -208,6 +242,9 @@ pub struct IrEdge {
     pub basis: EdgeBasis,
     /// Provenance.
     pub provenance: Provenance,
+    /// Import metadata — `Some` iff this is an `EdgeType::Imports` / `EdgeBasis::AstImport` edge,
+    /// `None` for all call/reference edges (IMPORTS-MODULE-INGEST-1).
+    pub import: Option<ImportEdgeMeta>,
 }
 
 /// The ingested IR for a single partition. In-memory only (D1: the warm cache is a
@@ -324,6 +361,7 @@ mod tests {
             edge_type: EdgeType::Calls,
             basis: EdgeBasis::SyntaxConfirmedCall,
             provenance: prov(),
+            import: None,
         });
         let callers = ir.incoming(&callee);
         assert_eq!(callers.len(), 1);

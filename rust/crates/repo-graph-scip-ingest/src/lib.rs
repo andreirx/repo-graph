@@ -634,6 +634,9 @@ pub fn derive_edges(
                 scip_symbol_id: Some(occ.symbol.clone()),
                 build_inputs_hash: build_inputs_hash.to_string(),
             },
+            // Call/reference edges carry no import metadata (IMPORTS-MODULE-INGEST-1); import edges
+            // are joined separately from the ts-extractor in the ingest commit.
+            import: None,
         });
     }
     r

@@ -1037,6 +1037,7 @@ mod tests {
             edge_type: EdgeType::Calls,
             basis: EdgeBasis::SyntaxConfirmedCall,
             provenance: prov(),
+            import: None,
         }
     }
     fn ir(id: &str, nodes: Vec<IrNode>, edges: Vec<IrEdge>) -> PartitionIr {
