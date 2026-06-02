@@ -1,7 +1,9 @@
 # IMPORTS-XPART-ENUMERATION-1: multi-partition daemon loading for the cross-partition overlay (Stage D)
 
 Slice ID: IMPORTS-XPART-ENUMERATION-1
-Status: **RATIFIED (2026-06-02). Implementation in progress.** Ratified: D1=A (explicit repeated
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-02).** The cross-partition overlay is reachable in the
+live daemon: a two-package fixture refreshed via repeated `--source-root` yields `cross_partition=true` in
+`rmap cycles --engine livegraph --kind file-import` (JSON + CLI). See **Completion**. Ratified: D1=A (explicit repeated
 `--source-root`), D2=B (best-effort per partition), D3=A (sequential), D4=A (repeated `--source-root` on the
 existing `livegraph-refresh`), D5=B (per-partition + aggregate), D6=A (structured scope emitted + rendered;
 JSON carries structured fields, human render may stringify from them), Fixture=b (committed two-package +
@@ -206,12 +208,101 @@ live step degrades to NOT RUN + documented, headless still gates.
 5. docs: completion + evidence + the ENUMERATION-2 (workspace auto-discovery) follow-up.
 ```
 
+## Completion (implemented 2026-06-02, EXECUTED)
+
+Commits: `3e8dde5` (spec) + `faa5c13` (1/5 orchestration) + `90063c1` (2/5 dispatch+CLI) + `821c01a`
+(3/5 structured scope, D6) + `6452f92` (4/5 filename-safe partition ids) + this doc (5/5).
+
+### What landed
+```text
+daemon-runtime/livegraph_refresh.rs : run_refresh gains partition_prefix (threaded to ingest_partition);
+  derive_partition_target (repo_path, source_root) -> (project_dir abs, partition_id, prefix repo-relative;
+  prefix "" -> "default"); run_refresh_multi: sequential (D3) best-effort (D2) loop over source roots,
+  feeding all into ONE repo LiveGraph (distinct partition_ids -> overlay rebuilds), returning per-partition
+  + aggregate {total,succeeded,failed,degraded} + status (D5).
+daemon-runtime/dispatch.rs          : handle_livegraph_refresh routes a non-empty `source_roots` array to
+  run_refresh_multi; absent/empty preserves the single-partition path (D4).
+rgr/commands/graph.rs               : dev livegraph-refresh repeated --source-root; cycles render reads the
+  STRUCTURED scope (D6) and stringifies the human line ("[intra-partition + cross-partition(N)]").
+daemon-runtime/livegraph_feed.rs    : file_import_cycles_response emits the structured D5 scope object
+  (scope_json/default_scope_json), replacing the hard-coded string (discharges the WIRING-1 debt).
+daemon-runtime/livegraph_warm_cache.rs : filename_safe_partition_id (path-sep -> "_") for the .cache/.vf
+  filenames; run_refresh sanitizes the temp .scip name (the live-validation ENOENT fix).
+fixtures/xpart-monorepo             : packages/a (imports ../../b/src/foo) + packages/b (imports
+  ../../a/src/main) -> the cross-partition file-import cycle.
+```
+
+### Live validation (EXECUTED 2026-06-02, dev-install + real scip-typescript producer)
+```text
+dev-install-local.sh -> daemon healthy. `rmap dev livegraph-refresh --repo <fixture> --source-root
+  packages/a --source-root packages/b`:
+  - FIRST run (pre-fix) surfaced a real bug: partition_id "packages/a" (slash) broke the temp .scip path
+    -> scip-typescript ENOENT -> per-partition ProducerFailed + aggregate AllFailed. The best-effort +
+    aggregate machinery behaved CORRECTLY under failure (no crash, partial-ness loud) -> D2/D5 validated
+    live BEFORE the fix. Fixed in 6452f92 (filename-safe ids).
+  - SECOND run (post-fix): both partitions Refreshed (3 nodes, 0 edges each; distinct source_inputs_hash);
+    aggregate {total:2, succeeded:2, failed:0}, status AllRefreshed. 0 intra edges => the real producer did
+    NOT pull B's file into A's partition; the relative cross-package import is partition-unresolved (the
+    overlay precondition) -- the producer-determinism question RESOLVED in our favour, not papered over.
+`rmap cycles --engine livegraph --kind file-import` (both resident):
+  scope = { captured_resolved_relative:true, intra_partition:false, cross_partition:true, xpart_edge_count:2 },
+  class=Exact, freshness=Fresh, missing=[]; cycle packages/a/src/main.ts <-> packages/b/src/foo.ts built
+  ENTIRELY from the overlay; keys repo-relative + distinct + non-colliding. CLI human line:
+  "[cross-partition(2)]".
+```
+
+### Acceptance outcomes
+```text
+1. two partitions in one LiveGraph                       PASS (both Refreshed, both resident).
+2. repo-relative keys distinct / non-colliding           PASS (packages/a/... vs packages/b/...).
+3. overlay contains >= 1 cross-partition edge            PASS (xpart_edge_count == 2, live).
+4. file_import_cycles scope cross_partition=true (live)  PASS (daemon JSON + CLI render, D6).
+5. unload one partition degrades                          HEADLESS (no daemon single-partition UNLOAD CLI;
+   covered by IMPORTS-XPART-WIRING-1 unload_rebuilds_overlay_without_the_edge_and_degrades).
+6. no persisted overlay                                   PASS (structural: PartitionIr has no overlay field).
+7. best-effort partial failure is loud                   PASS (the pre-fix ProducerFailed run -> AllFailed).
+8. full gate + live                                       PASS (see Validation evidence).
+```
+
+### Observations recorded (NOT papered over)
+```text
+O1 NESTED FIXTURE REPO RESOLUTION: the committed fixture lives UNDER the repo-graph repo, so both the
+   refresh (--repo <fixture>) and `rmap cycles` (cwd) resolve to the ENCLOSING repo-graph registration
+   (repo_uid repo_01ks2..., display_name "repo-graph", an old snapshot_uid). The partitions still load with
+   CORRECT repo-relative prefixes ("packages/a"/"packages/b") because repo_relative_prefix used the fixture
+   path I passed as --repo; the overlay + keys + cycle are correct. The display_name/snapshot belonging to
+   the enclosing repo is cosmetic impurity inherent to a committed-in-repo fixture. A standalone registered
+   fixture repo would be cleaner (follow-up).
+O2 HUMAN RENDER SAYS "module-level": the NON-empty file-import cycle falls through to the generic
+   CyclesResponse::render_human ("1 module-level cycle found" / "(2 modules)" / "rmap modules deps"), which
+   CONFLATES FILE-import cycles with MODULE cycles -- the exact distinction the project guards. The scope
+   line + JSON are correct; only the generic body wording is wrong. PRE-EXISTING (CYCLES-LIVEGRAPH-CLI-1,
+   which special-cased only the EMPTY message), now more visible. Recorded as debt (a file-import-specific
+   non-empty renderer); not fixed here to avoid expanding CLI scope beyond D6 -- flagged for ratification.
+```
+
+### Validation evidence
+```text
+EXECUTED: cargo test -p repo-graph-daemon-runtime (orchestration + filename-safe helpers green);
+  cargo test --workspace (220 binaries ok, 0 failures); clippy --workspace --all-targets
+  -- -D warnings (clean); cargo fmt --all -- --check (clean).
+LIVE (EXECUTED): dev-install healthy; two-partition refresh AllRefreshed; cross-partition file-import cycle
+  with cross_partition=true (JSON + CLI). Best-effort/aggregate validated live (the pre-fix AllFailed run).
+HEADLESS: acceptance #5 (unload degradation) via IMPORTS-XPART-WIRING-1 (no daemon unload CLI).
+```
+
 ## Follow-up slices
 ```text
 - IMPORTS-XPART-ENUMERATION-2 : auto-discover roots from package.json/pnpm workspaces (REUSE
   indexer/package_json.rs), replacing the explicit --source-root list.
 - DAEMON-ASYNC-REFRESH-1 : move producers off the request thread (enables parallel D3=B).
 - IMPORTS-PACKAGE-RESOLUTION-1 : tsconfig path aliases + package exports/types.
+- CYCLES-FILE-IMPORT-RENDER-1 (from O2) : a FILE-import-specific NON-empty CLI renderer so a file-import
+  cycle is never printed as "module-level cycle" / "(N modules)" / "rmap modules deps" (the generic
+  CyclesResponse text). Scope line + JSON are already correct; only the human body conflates the two cycle
+  families the project otherwise guards.
+- XPART-FIXTURE-STANDALONE-1 (from O1) : a standalone registered fixture repo so live validation does not
+  resolve to the enclosing repo-graph registration (cosmetic repo_uid/display_name impurity).
 ```
 
 ## References
