@@ -1,7 +1,9 @@
 # IMPORTS-MODULE-INGEST-1: Module-import extraction authority → AST facts into `PartitionIr` (Stage D)
 
 Slice ID: IMPORTS-MODULE-INGEST-1
-Status: **DESIGN — extraction authority + D1 ratified (2026-06-02). Implementation NOT started.**
+Status: **IMPLEMENTED + validated (2026-06-02).** AST import facts (authority = `ts-extractor`) join into
+`PartitionIr` as node-resolved FILE→FILE `EdgeType::Imports` edges; warm-cache schema bumped. Extraction is
+EXTRACTED-BUT-INCOMPLETE (resolved relative imports only). See Completion + Ratified mid-build decisions.
 Depends: PATH-CYCLES-LIVEGRAPH-2 (the cycles blocker that motivated this), `repo-graph-ir` (EdgeType/EdgeBasis),
 `repo-graph-scip-ingest` (the SCIP+AST join), `repo-graph-warm-cache` (PartitionIr serialization + schema_version).
 Track: Stage D. This is a **data-shape / extraction-authority** slice. NOT a cycles slice; NO daemon/CLI work.
@@ -124,10 +126,87 @@ No dynamic-import extraction (degraded class only). No new persistence store (wa
 2. ingest:  repo-graph-scip-ingest joins ts-extractor import facts into PartitionIr + synthetic-fixture tests
 ```
 
+## Ratified mid-build decisions (2026-06-02)
+
+Three decisions were forced by grounding during the build (the producer's actual capability vs the
+target contract). All ratified by the user:
+
+### D2 — defer import kind / type-only
+The IR import edge is FILE-granular: `src`, `dst`, `raw_specifier`, `resolved_path`, `resolution` ONLY.
+Import `kind` (Named/Default/Namespace) and `type-only` are `ImportBinding`-level (per-identifier) facts;
+aggregating them onto a FILE→FILE edge is lossy (mixed-kind statements; side-effect imports have no
+binding) and unused by cycles. Deferred. Side-effect imports are valid FILE→FILE edges regardless (the
+edge is binding-agnostic at this granularity).
+
+### D3 — resolved-only; document producer incompleteness (stop condition #1)
+The Rust `ts-extractor` emits an import EDGE only for **relative + resolved** imports, always
+`Resolution::Static`; non-relative (package), unresolved-relative, and dynamic `import()` are dropped
+inside the producer before output (extractor.rs:1360–1367), and `scip-typescript` emits zero import roles
+(spike M2). Surfacing them would require widening the volatile `ts-extractor` public API — out of scope.
+So `ImportResolution::StaticResolved` is the ONLY class emitted; the rest are `NOT CAPTURED` (a documented
+**producer** limitation, not a silent ingest drop). The import graph is **EXTRACTED-BUT-INCOMPLETE**.
+
+### D4 — node-resolved dst (stop condition: symbolic vs resolved)
+The producer's import `target_key` is extensionless + symbolic (`repo:src/shapes:FILE`) and never matches
+a real file-scope node (`repo:src/shapes.ts:FILE`). The IR import edge's `src` AND `dst` MUST both be
+existing `AstFileScope` nodes in the SAME partition: `dst` is found by matching the extractor's
+`resolved_path` against the partition's file-scope nodes (TS extension stripped). Matched → emit;
+unmatched / **cross-partition** / index-file / extension-mismatch → `NOT CAPTURED` (no symbolic dangling
+edge). No full TS resolver, no filesystem probing, no synthetic nodes.
+
+## Trust wording (honest degradation)
+```text
+The current import graph is EXTRACTED (Layer 0–1, AST-derived) but INCOMPLETE.
+It supports POSITIVE evidence for resolved relative, intra-partition imports.
+It CANNOT support an Exact "no import cycles" claim globally.
+CYCLES-LIVEGRAPH-1 remains BLOCKED for an Exact default migration until the completeness gap is closed
+or explicitly scoped.
+```
+
+## Completion (implemented + validated 2026-06-02, EXECUTED)
+
+Commit 1 `5c19605` (IR shape + warm-cache schema bump); Commit 2 `a3ac193` (ingest join). Authority =
+`ts-extractor` AST; no SCIP role inference.
+
+- `repo-graph-ir`: `EdgeType::Imports`, `EdgeBasis::AstImport`, `ImportResolution::StaticResolved`,
+  `ImportEdgeMeta{raw_specifier, resolved_path, resolution}`, `IrEdge.import: Option<ImportEdgeMeta>`.
+- `repo-graph-warm-cache`: DTO mirrors + From both ways; `SCHEMA_VERSION 1→2` (old caches → SchemaMismatch
+  → graceful re-extract); round-trip test exercises an import edge (full `assert_eq!(ir, decoded)`).
+- `repo-graph-scip-ingest`: `RawImport` + `AstFacts.imports` (from the public `result.edges`); pass 3
+  `resolve_import_edges` (D4 node-resolution); `imports_resolved`/`imports_not_captured` counters;
+  `serde_json` dep for the `metadata_json` parse.
+
+```text
+Tests (EXECUTED): repo-graph-ir 3, repo-graph-warm-cache 11 (round-trip incl. import edge), repo-graph-
+  livegraph 39, repo-graph-scip-ingest 7 unit + 10 harness. Full `cargo test --workspace` green; clippy
+  --workspace -D warnings clean; fmt clean.
+Key proof (synthetic_fixture_import_edge_is_node_resolved): ingesting the committed real index.scip,
+  `src/main.ts`'s `import { Circle } from "./shapes"` becomes ONE node-connected edge
+  synthetic:src/main.ts:FILE -> synthetic:src/shapes.ts:FILE (AstImport, raw="./shapes",
+  resolution=StaticResolved); imports_resolved=1, imports_not_captured=0.
+harness group9_provenance invariant evolved: AST import edges carry NO SCIP provenance (like FILE nodes).
+```
+
+## NOT CAPTURED this slice (documented limitations)
+```text
+- non-relative (package) imports         -> no producer edge (D3)
+- unresolved relative imports            -> no producer edge (D3)
+- dynamic import('x')                     -> not parsed as an import (D3)
+- re-export distinction / import kind / type-only -> deferred (D2)
+- index-file targets (./foo -> foo/index.ts)      -> extension-strip match misses (D4) -> NOT CAPTURED
+- cross-partition import targets (file in another partition) -> NOT CAPTURED (D4)
+No raw nodes/edges decommission credit. No daemon/CLI. No MODULE aggregation.
+```
+
 ## Follow-up slices
 ```text
+- IMPORTS-EXTRACT-COMPLETENESS-1 : widen ts-extractor output (unresolved/package/dynamic imports,
+  re-export distinction, resolution classes). Producer-API-boundary slice.
+- IMPORTS-XPART-RESOLUTION-1      : resolve import targets across partitions/packages + index files +
+  extension variants + package exports. (May fold into IMPORTS-EXTRACT-COMPLETENESS-1.)
 - MODULE-AGGREGATION-1  : derive MODULE identity / MODULE->MODULE edges from the FILE import graph (Layer 2).
-- CYCLES-LIVEGRAPH-1    : LiveGraph-backed module-import cycles, gated on the import graph existing in IR/LiveGraph.
+- CYCLES-LIVEGRAPH-1    : LiveGraph-backed module-import cycles, gated on a COMPLETE-ENOUGH import graph
+  in IR/LiveGraph (needs IMPORTS-EXTRACT-COMPLETENESS-1 + IMPORTS-XPART-RESOLUTION-1).
 - CALL-CYCLES-LIVEGRAPH-1 (optional): call/recursion cycles — a NEW query, never a migration of rmap cycles.
 ```
 
