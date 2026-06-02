@@ -1169,6 +1169,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "repo-graph-import-resolver"
+version = "0.1.0"
+dependencies = [
+ "repo-graph-ir",
+]
+
+[[package]]
 name = "repo-graph-indexer"
 version = "0.1.0"
 dependencies = [

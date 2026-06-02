@@ -240,6 +240,10 @@ pub enum CacheEdgeBasisDto {
     FileScopeReference,
     /// `AstImport` (IMPORTS-MODULE-INGEST-1).
     AstImport,
+    /// `AstImportFileInventoryResolved` (IMPORTS-XPART-RESOLUTION-1). Present for DTO/enum compatibility;
+    /// cross-partition resolved edges are NEVER persisted, so this never appears in a real cache payload
+    /// (hence NO SCHEMA_VERSION bump).
+    AstImportFileInventoryResolved,
 }
 
 /// Mirror of `repo_graph_ir::ImportResolution`.
@@ -508,6 +512,7 @@ impl From<&EdgeBasis> for CacheEdgeBasisDto {
             EdgeBasis::DerivedReference => Self::DerivedReference,
             EdgeBasis::FileScopeReference => Self::FileScopeReference,
             EdgeBasis::AstImport => Self::AstImport,
+            EdgeBasis::AstImportFileInventoryResolved => Self::AstImportFileInventoryResolved,
         }
     }
 }
@@ -518,6 +523,9 @@ impl From<CacheEdgeBasisDto> for EdgeBasis {
             CacheEdgeBasisDto::DerivedReference => Self::DerivedReference,
             CacheEdgeBasisDto::FileScopeReference => Self::FileScopeReference,
             CacheEdgeBasisDto::AstImport => Self::AstImport,
+            CacheEdgeBasisDto::AstImportFileInventoryResolved => {
+                Self::AstImportFileInventoryResolved
+            }
         }
     }
 }

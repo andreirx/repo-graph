@@ -104,6 +104,12 @@ pub enum EdgeBasis {
     /// Authority is the `ts-extractor` AST (an `import` declaration), NOT SCIP roles or a
     /// `FileScopeReference` inference. FILE -> FILE; carries `ImportEdgeMeta`.
     AstImport,
+    /// A CROSS-PARTITION module-import edge (IMPORTS-XPART-RESOLUTION-1): an AST import OBSERVATION whose
+    /// target FILE was resolved against the global FILE inventory (relative + extension/index), NOT
+    /// node-resolved inside the producing partition. A STRONGER inference than a raw observation but NOT
+    /// identical to `AstImport`. Maps to `EdgeType::Imports`. These edges are RUNTIME/in-memory only and
+    /// are NEVER persisted in a per-partition IR / warm cache (per-partition cache coherence, F1).
+    AstImportFileInventoryResolved,
 }
 
 /// Resolution class of an extracted module import (IMPORTS-MODULE-INGEST-1 + IMPORTS-EXTRACT-COMPLETENESS-1).
