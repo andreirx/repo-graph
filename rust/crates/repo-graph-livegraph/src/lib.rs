@@ -964,6 +964,20 @@ impl LiveGraph {
             .expect("path exact no-path invariant holds")
         }
     }
+
+    /// Read-only DISPLAY lookup (PATH-LIVEGRAPH-DEFAULT-1): the `SourceRange` of `key` from the resident
+    /// IR, or `None` if no resident partition defines `key` or the node carries no range. This is purely
+    /// presentation metadata for rendering a path's `file:line` — it does NOT participate in `path()`
+    /// traversal, completeness, or trust semantics (a missing range never changes an answer's class). The
+    /// daemon's default (`Auto`) path serve GATES on this being present for every rendered node so the
+    /// human default never renders `:0`; explicit `--engine livegraph` may still serve without it.
+    pub fn node_location(&self, key: &CanonicalKey) -> Option<SourceRange> {
+        self.slots
+            .values()
+            .filter_map(|s| s.ir.as_ref())
+            .find_map(|ir| ir.node(key))
+            .and_then(|n| n.range.clone())
+    }
 }
 
 #[cfg(test)]
@@ -1001,6 +1015,19 @@ mod tests {
             partition_id: PartitionId::new("p"),
             identity_source: src,
             provenance: prov(),
+        }
+    }
+    /// A node carrying a source range (for `node_location` display tests).
+    fn node_at(key: &str, file: &str, line: u32) -> IrNode {
+        IrNode {
+            range: Some(SourceRange {
+                file: file.into(),
+                start_line: line,
+                start_col: 0,
+                end_line: line,
+                end_col: 1,
+            }),
+            ..node(key, IdentitySource::AstAdopted)
         }
     }
     fn edge(src: &str, dst: &str) -> IrEdge {
@@ -1043,6 +1070,56 @@ mod tests {
         lg.load_partition("engine", engine(), LanguageSupport::TypeScriptPrimary);
         lg.load_partition("api", api(), LanguageSupport::TypeScriptPrimary);
         lg
+    }
+
+    // ── node_location (PATH-LIVEGRAPH-DEFAULT-1 display lookup) ────────
+
+    #[test]
+    fn node_location_returns_range_when_resident_with_range() {
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir("p", vec![node_at("p.foo", "src/foo.ts", 12)], vec![]),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        let r = lg.node_location(&CanonicalKey::from_existing("p.foo"));
+        assert_eq!(r.as_ref().map(|r| r.file.as_str()), Some("src/foo.ts"));
+        assert_eq!(r.map(|r| r.start_line), Some(12));
+    }
+
+    #[test]
+    fn node_location_none_when_node_has_no_range() {
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir("p", vec![node("p.foo", IdentitySource::AstAdopted)], vec![]),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        assert!(lg
+            .node_location(&CanonicalKey::from_existing("p.foo"))
+            .is_none());
+    }
+
+    #[test]
+    fn node_location_none_when_partition_nonresident() {
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir("p", vec![node_at("p.foo", "src/foo.ts", 12)], vec![]),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        lg.unload_partition("p"); // IR dropped; only the `defines` summary remains.
+        assert!(lg
+            .node_location(&CanonicalKey::from_existing("p.foo"))
+            .is_none());
+    }
+
+    #[test]
+    fn node_location_none_when_unknown_key() {
+        let lg = both();
+        assert!(lg
+            .node_location(&CanonicalKey::from_existing("does.not.exist"))
+            .is_none());
     }
 
     #[test]

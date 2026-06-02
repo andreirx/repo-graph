@@ -1,7 +1,10 @@
 # PATH-LIVEGRAPH-DEFAULT-1: `rmap path` Default → auto (LiveGraph with SQLite fallback) (Stage D)
 
 Slice ID: PATH-LIVEGRAPH-DEFAULT-1
-Status: **DESIGN — D1–D5 ratified (2026-06-02). Implementation NOT started.**
+Status: **IMPLEMENTED + live-validated (2026-06-02).** `path` default flipped to `auto`; serves LiveGraph
+when Exact+Fresh+TS-only AND every rendered node has display metadata, else labelled SQLite fallback. A
+ratified mid-build addition (display-metadata gate + `node_location` support API) closed a human-format
+regression. See Completion.
 Depends: PATH-CYCLES-LIVEGRAPH-1 (LiveGraph `path()` + the D3 completeness class), QUERY-MIGRATION-CLI-1
 (the `auto` default + `backend_used`/`fallback_reason` pattern for callers/callees).
 Track: Stage D. Flips the `path` DEFAULT (shipped behavior). Does NOT touch cycles; does NOT decommission
@@ -86,6 +89,61 @@ completeness semantics. No multi-language (TS partitions only).
 1. daemon Auto path decision + CLI default flip (combined, like QUERY-MIGRATION-CLI-1, so the flip never
    leaves a non-building/inconsistent step) + live validation.
 ```
+
+## Ratified mid-build addition (2026-06-02) — display-metadata gate (DIVERGENCE from the spec notes)
+
+The spec assumed PATH-CYCLES-LIVEGRAPH-1's `livegraph_path_result` preserved the human format. It did
+NOT for the **human/default** case: it emitted `symbol = full stable key` and `file:""`/`line:0`
+(acceptable when LiveGraph was opt-in + JSON-focused behind `--engine livegraph`, but a visible
+regression once `auto` is the human default — `Path: synthetic:...#report:FUNCTION:...` / `report  :0`).
+Surfaced as a STOP-and-ask. Ratified **C** with an added invariant:
+
+```text
+1. node_id stays the full stable key; symbol = key_name(key).
+2. file/line populated from the resident IrNode.range via a NEW read-only support API
+   LiveGraph::node_location(&CanonicalKey) -> Option<SourceRange>. PathAnswer is NOT grown.
+3. Engine::Auto serves LiveGraph ONLY if Exact + Fresh + TS-only AND every rendered path node has
+   display metadata {file,line}; else SQLite fallback with FallbackReason::LiveGraphDisplayMetadataUnavailable.
+   Never render `:0` on the default path. A no-path serves with no nodes to render (gate vacuous).
+4. --engine livegraph MAY still serve degraded/missing metadata (explicit); default auto MUST NOT.
+5. Display metadata is presentation only — it does NOT become trust/completeness semantics; it gates
+   DEFAULT serving because default human-output compatibility is part of the shipped-surface contract.
+```
+
+Line-base (spec rule 4): `SourceRange.start_line` is 1-based (IR convention, from `ast.line_start`).
+**Verified live**: LiveGraph lines (`9,5`) equal SQLite lines (`9,5`) for `report`/`makeCircle` on the
+synthetic — no conversion needed. (Had they differed, conversion would be applied at the presentation
+boundary in `livegraph_path_result`.)
+
+Bonus: `livegraph_path_result` now fills real `file:line` for `--engine livegraph` too (was `:0`).
+
+## Completion (implemented + live-validated 2026-06-02, EXECUTED)
+
+Support: `LiveGraph::node_location` (read-only IR lookup) + 4 unit tests (repo-graph-livegraph 35→39).
+Daemon: `FallbackReason::LiveGraphDisplayMetadataUnavailable`; `PathNodeDisplay{key, location}`;
+`livegraph_path` resolves per-node locations under the read guard; `path_auto_outcome` gates on
+Exact+Fresh+TS-only+all-metadata-present; `Engine::Auto` arm decides (was → SQLite); `livegraph_path_result`
+emits `symbol=key_name`, real `file:line` (+6 path_auto unit tests: serves-exact-fresh-ts, partial, stale,
+unsupported-language, **missing-display-metadata**, unavailable). CLI: `run_path` default `auto` (removed
+the `auto→sqlite` override); usage advertises `auto|sqlite|livegraph|compare`; human render strips JSON-only
+metadata (unchanged).
+
+```text
+Gating (EXECUTED): repo-graph-livegraph 39, repo-graph-daemon-runtime 78, repo-graph-rgr 444 (+suites);
+  cargo clippy --workspace --all-targets -D warnings clean; cargo fmt --all --check clean.
+Live (synthetic fixture, daemon v0.2.1; after livegraph-preload synthetic = 15 nodes/11 edges):
+  rmap path report makeCircle               -> backend_used=livegraph; human BYTE-IDENTICAL to SQLite;
+                                               report src/main.ts:9 -CALLS-> makeCircle src/main.ts:5   [#1]
+  rmap path report makeCircle --json        -> backend_used=livegraph, fallback_reason=null, lines 9,5  [#2]
+  rmap path report makeCircle --engine sqlite --json    -> backend_used=sqlite                          [#4]
+  rmap path report makeCircle --engine livegraph --json -> backend_used=livegraph, Exact/Fresh, lines 9,5 [#5]
+  rmap path report makeCircle --engine compare          -> sidecar written, buckets=[]                  [#6]
+  rmap path makeCircle report               -> "No path found." human; --json backend_used=livegraph,
+                                               found=false (D3: Exact no-path SERVED from LiveGraph)
+  Partial/Stale/missing-metadata fallback   -> unit-tested (live single-partition is always Exact)      [#3]
+```
+
+All 7 acceptance criteria PASS; no cycles touched; no nodes/edges decommission.
 
 ## After this
 ```text

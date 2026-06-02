@@ -522,14 +522,10 @@ pub fn run_callees(args: &[String]) -> ExitCode {
 // Machine mode (--json): full envelope.
 
 pub fn run_path(args: &[String]) -> ExitCode {
-    // PATH-CYCLES-LIVEGRAPH-1: extract --engine FIRST (path default SQLite this slice; LiveGraph behind
-    // the flag — path does NOT auto-migrate). Then filter --json from the positionals.
-    let (args, engine_raw) = extract_engine_flag(args.to_vec());
-    let engine = if engine_raw == "auto" {
-        "sqlite".to_string()
-    } else {
-        engine_raw
-    };
+    // PATH-LIVEGRAPH-DEFAULT-1: extract --engine FIRST; `path` now DEFAULTS to `auto` (serve LiveGraph
+    // when Exact/Fresh/complete, else labelled SQLite fallback — the daemon decides). `--engine sqlite`
+    // forces SQLite, `--engine livegraph`/`compare` stay explicit. Then filter --json from the positionals.
+    let (args, engine) = extract_engine_flag(args.to_vec());
     let mut json_mode = false;
     let positional: Vec<&String> = args
         .iter()
@@ -545,7 +541,7 @@ pub fn run_path(args: &[String]) -> ExitCode {
 
     // REG-1: two positional args (from, to), repo from cwd
     if positional.len() != 2 {
-        eprintln!("usage: rmap path <from> <to> [--engine sqlite|livegraph|compare] [--json]");
+        eprintln!("usage: rmap path <from> <to> [--engine auto|sqlite|livegraph|compare] [--json]");
         return ExitCode::from(1);
     }
 

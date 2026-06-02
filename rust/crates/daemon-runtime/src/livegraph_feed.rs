@@ -2,6 +2,7 @@
 //! LiveGraph. Decode + ingest + feed ONLY — the daemon does NOT run scip-typescript or do package
 //! discovery / refresh orchestration (that is LIVEGRAPH-INTEGRATION-1C).
 
+use repo_graph_ir::CanonicalKey;
 use repo_graph_livegraph::LiveGraph;
 use repo_graph_scip_ingest::{decode_index, ingest_partition};
 use repo_graph_storage::queries::{CalleeResult, CallerResult, ResolvedSymbol};
@@ -111,6 +112,10 @@ pub enum FallbackReason {
     /// The LiveGraph answer could not be rendered into the response shape (reserved; not hit for
     /// callers/callees, whose keys always render).
     LiveGraphRenderUnsupported,
+    /// A rendered `path` node lacks display metadata (`file:line` not recoverable from the resident IR),
+    /// so the DEFAULT (`Auto`) path falls back to SQLite rather than render `:0` (PATH-LIVEGRAPH-DEFAULT-1).
+    /// Distinct from `RenderUnsupported`: the answer is trust-complete, only its presentation is.
+    LiveGraphDisplayMetadataUnavailable,
     /// The LiveGraph engine errored (reserved; the callers/callees query path does not error today).
     LiveGraphError,
 }
@@ -124,6 +129,9 @@ impl FallbackReason {
             FallbackReason::LiveGraphStale => "LiveGraphStale",
             FallbackReason::LiveGraphUnsupportedLanguage => "LiveGraphUnsupportedLanguage",
             FallbackReason::LiveGraphRenderUnsupported => "LiveGraphRenderUnsupported",
+            FallbackReason::LiveGraphDisplayMetadataUnavailable => {
+                "LiveGraphDisplayMetadataUnavailable"
+            }
             FallbackReason::LiveGraphError => "LiveGraphError",
         }
     }
@@ -520,33 +528,100 @@ fn key_name(key: &str) -> String {
     }
 }
 
+/// A rendered path node: its stable `key` plus the DISPLAY metadata (`file`, 1-based `line`) recovered
+/// from the resident IR. `location == None` means the node carries no recoverable range — the DEFAULT
+/// path then falls back to SQLite rather than render `:0` (PATH-LIVEGRAPH-DEFAULT-1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PathNodeDisplay {
+    key: String,
+    location: Option<(String, u32)>,
+}
+
+/// A LiveGraph path answer reduced to what the `Auto` decision needs (PATH-LIVEGRAPH-DEFAULT-1).
+struct LgPathAuto {
+    class: AnswerClass,
+    freshness: FreshnessState,
+    /// Contributing languages are non-empty and ALL `TypeScriptPrimary` (D2 TS-only).
+    ts_only: bool,
+    /// Whether a path was found (vs a no-path result).
+    found: bool,
+    /// Path nodes with display metadata (key + resolved `file:line`).
+    nodes: Vec<PathNodeDisplay>,
+}
+
 /// LiveGraph path for `(from_key, to_key)`, if the LiveGraph can answer. `None` = no LiveGraph for this
-/// repo. Returns `(class, freshness, found, node_keys)`.
-fn livegraph_path(
-    repo_state: &RepoState,
-    from_key: &str,
-    to_key: &str,
-) -> Option<(AnswerClass, FreshnessState, bool, Vec<String>)> {
+/// repo. Carries class + freshness + TS-only + found + per-node display metadata. The `file:line` is
+/// resolved here (under the read guard) via the read-only `node_location` lookup over the resident IR —
+/// it does NOT affect path()/trust semantics, only presentation.
+fn livegraph_path(repo_state: &RepoState, from_key: &str, to_key: &str) -> Option<LgPathAuto> {
     let guard = repo_state.livegraph.read();
     let lg = guard.as_ref()?;
     let env = lg.path(from_key, to_key);
-    let nodes = env.data().map(|d| d.nodes.clone()).unwrap_or_default();
-    let found = !nodes.is_empty();
-    Some((env.class(), env.freshness(), found, nodes))
+    let keys = env.data().map(|d| d.nodes.clone()).unwrap_or_default();
+    let found = !keys.is_empty();
+    let nodes = keys
+        .into_iter()
+        .map(|k| {
+            let location = lg
+                .node_location(&CanonicalKey::from_existing(k.clone()))
+                .map(|r| (r.file, r.start_line));
+            PathNodeDisplay { key: k, location }
+        })
+        .collect();
+    Some(LgPathAuto {
+        class: env.class(),
+        freshness: env.freshness(),
+        ts_only: ts_only(env.contributing_languages()),
+        found,
+        nodes,
+    })
 }
 
-/// Render LiveGraph path node keys into the `{found, path_length, path:[step]}` shape the CLI
-/// `PathResponse` renders (keys, not source locations — placeholders, like callers/callees).
-fn livegraph_path_result(found: bool, nodes: &[String]) -> Value {
+/// The `Auto` path decision (PATH-LIVEGRAPH-DEFAULT-1 D2/D3 + the display-metadata invariant): serve
+/// LiveGraph ONLY when Exact + Fresh + TS-only AND every rendered node has `file:line`. Freshness is
+/// checked before class so a Stale answer reports `LiveGraphStale`. The D3 no-path rule needs NO special
+/// case: `path()` returns `Exact` only for a proven-complete result (a found path OR a proven no-path)
+/// and `Partial` for an incomplete traversal — so an Exact no-path is served and a Partial no-path falls
+/// back. A no-path serves with no nodes to render (the display gate is vacuous). Returns `Ok((found,
+/// nodes))` to serve, or `Err(reason)` to fall back to SQLite.
+fn path_auto_outcome(
+    lg: Option<LgPathAuto>,
+) -> Result<(bool, Vec<PathNodeDisplay>), FallbackReason> {
+    match lg {
+        None => Err(FallbackReason::LiveGraphUnavailable),
+        Some(a) => {
+            if a.freshness != FreshnessState::Fresh {
+                Err(FallbackReason::LiveGraphStale)
+            } else if a.class != AnswerClass::Exact {
+                Err(FallbackReason::LiveGraphPartial)
+            } else if !a.ts_only {
+                Err(FallbackReason::LiveGraphUnsupportedLanguage)
+            } else if a.nodes.iter().any(|n| n.location.is_none()) {
+                // Trust-complete but a rendered node lacks file:line — never render `:0` by default.
+                Err(FallbackReason::LiveGraphDisplayMetadataUnavailable)
+            } else {
+                Ok((a.found, a.nodes))
+            }
+        }
+    }
+}
+
+/// Render LiveGraph path nodes into the `{found, path_length, path:[step]}` shape the CLI `PathResponse`
+/// renders. `node_id` keeps the full stable key (identity); `symbol` is the clean NAME (so the human
+/// renderer shows `report`, not the full key); `file`/`line` are the resolved display metadata. A node
+/// with no location renders `file:""`/`line:0` — only reachable via explicit `--engine livegraph`, since
+/// the DEFAULT `Auto` gates on all-present (PATH-LIVEGRAPH-DEFAULT-1).
+fn livegraph_path_result(found: bool, nodes: &[PathNodeDisplay]) -> Value {
     let steps: Vec<Value> = nodes
         .iter()
         .enumerate()
-        .map(|(i, k)| {
+        .map(|(i, n)| {
+            let (file, line) = n.location.clone().unwrap_or_else(|| (String::new(), 0));
             json!({
-                "node_id": k,
-                "symbol": k,
-                "file": "",
-                "line": 0,
+                "node_id": n.key,
+                "symbol": key_name(&n.key),
+                "file": file,
+                "line": line,
                 "edge_type": if i == 0 { "" } else { "CALLS" },
             })
         })
@@ -661,21 +736,42 @@ pub fn path_engine_response(
 
     let mut sqlite_response = sqlite_value;
     match engine {
-        Engine::Sqlite | Engine::Auto => {
+        // `--engine sqlite` FORCES SQLite (the proven path), regardless of LiveGraph state.
+        Engine::Sqlite => {
             sqlite_response["backend_used"] = json!("sqlite");
             sqlite_response["fallback_reason"] = Value::Null;
             sqlite_response
         }
-        Engine::LiveGraph => match livegraph_path(repo_state, from_key, to_key) {
-            Some((class, freshness, found, nodes)) => json!({
+        // DEFAULT (PATH-LIVEGRAPH-DEFAULT-1): serve LiveGraph only when Exact + Fresh + TS-only; else
+        // labelled SQLite fallback. The D3 no-path rule is encoded by `path()`'s class (Exact = proven
+        // complete found-OR-no-path; Partial = incomplete), so `path_auto_outcome` needs no special case.
+        // Mirrors the callers/callees `Auto` arm: served LiveGraph carries backend_used only (the explicit
+        // `--engine livegraph` branch keeps trust_class/freshness as a diagnostic surface).
+        Engine::Auto => match path_auto_outcome(livegraph_path(repo_state, from_key, to_key)) {
+            Ok((found, nodes)) => json!({
                 "repo_uid": repo_uid,
                 "snapshot_uid": snapshot_uid,
                 "found": found,
                 "path": livegraph_path_result(found, &nodes),
                 "backend_used": "livegraph",
                 "fallback_reason": Value::Null,
-                "trust_class": format!("{class:?}"),
-                "freshness": format!("{freshness:?}"),
+            }),
+            Err(reason) => {
+                sqlite_response["backend_used"] = json!("sqlite");
+                sqlite_response["fallback_reason"] = json!(reason.as_str());
+                sqlite_response
+            }
+        },
+        Engine::LiveGraph => match livegraph_path(repo_state, from_key, to_key) {
+            Some(a) => json!({
+                "repo_uid": repo_uid,
+                "snapshot_uid": snapshot_uid,
+                "found": a.found,
+                "path": livegraph_path_result(a.found, &a.nodes),
+                "backend_used": "livegraph",
+                "fallback_reason": Value::Null,
+                "trust_class": format!("{:?}", a.class),
+                "freshness": format!("{:?}", a.freshness),
             }),
             None => {
                 sqlite_response["backend_used"] = json!("sqlite");
@@ -686,12 +782,12 @@ pub fn path_engine_response(
         },
         Engine::Compare => {
             // Normalize LiveGraph keys to names for an apples-to-apples comparison (see above).
-            let lg = livegraph_path(repo_state, from_key, to_key).map(|(c, f, found, keys)| {
+            let lg = livegraph_path(repo_state, from_key, to_key).map(|a| {
                 (
-                    c,
-                    f,
-                    found,
-                    keys.iter().map(|k| key_name(k)).collect::<Vec<_>>(),
+                    a.class,
+                    a.freshness,
+                    a.found,
+                    a.nodes.iter().map(|n| key_name(&n.key)).collect::<Vec<_>>(),
                 )
             });
             let report = compare_path(
@@ -791,5 +887,122 @@ mod tests {
         let lg = Some((AnswerClass::Partial, vec!["a".to_string()]));
         let r = compare_keys("sym", "callers", &["a".to_string()], lg);
         assert!(!r.trust_class_mismatch.is_empty());
+    }
+
+    // PATH-LIVEGRAPH-DEFAULT-1: the `Auto` decision. Serve LiveGraph ONLY when Exact + Fresh + TS-only;
+    // otherwise SQLite fallback with a labelled reason.
+
+    /// A path node WITH display metadata (resolvable `file:line`).
+    fn pnode(key: &str, line: u32) -> PathNodeDisplay {
+        PathNodeDisplay {
+            key: key.to_string(),
+            location: Some((format!("{key}.ts"), line)),
+        }
+    }
+    /// A path node WITHOUT display metadata (no recoverable range).
+    fn pnode_no_loc(key: &str) -> PathNodeDisplay {
+        PathNodeDisplay {
+            key: key.to_string(),
+            location: None,
+        }
+    }
+    fn lg_path(
+        class: AnswerClass,
+        freshness: FreshnessState,
+        ts_only: bool,
+        found: bool,
+        nodes: Vec<PathNodeDisplay>,
+    ) -> Option<LgPathAuto> {
+        Some(LgPathAuto {
+            class,
+            freshness,
+            ts_only,
+            found,
+            nodes,
+        })
+    }
+
+    #[test]
+    fn path_auto_serves_livegraph_when_exact_fresh_ts() {
+        // A found Exact/Fresh/TS path WITH display metadata is served from LiveGraph.
+        let nodes = vec![pnode("a", 1), pnode("b", 2)];
+        let found = path_auto_outcome(lg_path(
+            AnswerClass::Exact,
+            FreshnessState::Fresh,
+            true,
+            true,
+            nodes.clone(),
+        ));
+        assert_eq!(found, Ok((true, nodes)));
+        // D3: an EXACT no-path (traversal completeness proven) is ALSO served — no nodes to render, so
+        // the display gate is vacuous.
+        let no_path = path_auto_outcome(lg_path(
+            AnswerClass::Exact,
+            FreshnessState::Fresh,
+            true,
+            false,
+            vec![],
+        ));
+        assert_eq!(no_path, Ok((false, vec![])));
+    }
+
+    #[test]
+    fn path_auto_falls_back_on_partial() {
+        // D3: a PARTIAL no-path (incomplete traversal) MUST fall back to SQLite, never an exact-empty.
+        let r = path_auto_outcome(lg_path(
+            AnswerClass::Partial,
+            FreshnessState::Fresh,
+            true,
+            false,
+            vec![],
+        ));
+        assert_eq!(r, Err(FallbackReason::LiveGraphPartial));
+    }
+
+    #[test]
+    fn path_auto_falls_back_on_stale() {
+        // Freshness is checked BEFORE class, so a Stale (even Exact) answer reports LiveGraphStale.
+        let r = path_auto_outcome(lg_path(
+            AnswerClass::Exact,
+            FreshnessState::Stale,
+            true,
+            true,
+            vec![pnode("a", 1), pnode("b", 2)],
+        ));
+        assert_eq!(r, Err(FallbackReason::LiveGraphStale));
+    }
+
+    #[test]
+    fn path_auto_falls_back_on_unsupported_language() {
+        // Exact + Fresh but NOT TS-only -> fall back (D2 TS-only scope).
+        let r = path_auto_outcome(lg_path(
+            AnswerClass::Exact,
+            FreshnessState::Fresh,
+            false,
+            true,
+            vec![pnode("a", 1), pnode("b", 2)],
+        ));
+        assert_eq!(r, Err(FallbackReason::LiveGraphUnsupportedLanguage));
+    }
+
+    #[test]
+    fn path_auto_falls_back_on_missing_display_metadata() {
+        // Exact + Fresh + TS, but a rendered node lacks file:line -> fall back rather than render `:0`
+        // (PATH-LIVEGRAPH-DEFAULT-1 invariant; never serve a degraded default human path).
+        let r = path_auto_outcome(lg_path(
+            AnswerClass::Exact,
+            FreshnessState::Fresh,
+            true,
+            true,
+            vec![pnode("a", 1), pnode_no_loc("b")],
+        ));
+        assert_eq!(r, Err(FallbackReason::LiveGraphDisplayMetadataUnavailable));
+    }
+
+    #[test]
+    fn path_auto_falls_back_on_unavailable() {
+        // No LiveGraph for this repo -> LiveGraphUnavailable.
+        let r = path_auto_outcome(None);
+        assert_eq!(r, Err(FallbackReason::LiveGraphUnavailable));
     }
 }
