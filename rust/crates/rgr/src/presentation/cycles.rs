@@ -101,6 +101,47 @@ impl CyclesResponse {
         out.trim_end().to_string()
     }
 
+    /// Render FILE-import cycles (CYCLES-FILE-IMPORT-RENDER-1): the `--engine livegraph --kind
+    /// file-import` answer is over the FILE import graph, NOT the MODULE graph, so it must NOT borrow the
+    /// MODULE vocabulary of [`render_human`] ("module-level cycle", "(N modules)", "rmap modules deps").
+    /// Owns BOTH the empty and non-empty cases (so both are unit-testable here, not in the command). No
+    /// "rmap modules deps" follow-up hint — the cycle chain already lists the files, and no such relation
+    /// command applies to FILE-import cycles.
+    pub fn render_human_file_import(&self) -> String {
+        let mut out = String::new();
+
+        let repo_display = self.display_name.as_deref().unwrap_or(&self.repo_uid);
+        out.push_str(&kv_line("Cycles", repo_display));
+        out.push_str(&kv_line("Snapshot", &truncate_uid(&self.snapshot_uid)));
+        out.push('\n');
+
+        if self.count == 0 {
+            out.push_str("No FILE import cycles found within the captured scope.\n");
+            return out.trim_end().to_string();
+        }
+
+        out.push_str(&format!(
+            "{} FILE import cycle{} found\n\n",
+            self.count,
+            if self.count == 1 { "" } else { "s" }
+        ));
+
+        for (i, cycle) in self.cycles.iter().enumerate() {
+            let size = cycle.nodes.len();
+            out.push_str(&format!(
+                "Cycle {} ({} file{}):\n",
+                i + 1,
+                size,
+                if size == 1 { "" } else { "s" }
+            ));
+            let members = self.render_cycle_chain(cycle);
+            out.push_str(&format!("  {}\n", members));
+            out.push('\n');
+        }
+
+        out.trim_end().to_string()
+    }
+
     fn render_cycle_chain(&self, cycle: &Cycle) -> String {
         if cycle.nodes.is_empty() {
             return "(empty cycle)".to_string();
@@ -264,5 +305,68 @@ mod tests {
         r.display_name = None;
         let out = r.render_human();
         assert!(out.contains("Cycles: repo_01kr12345678"));
+    }
+
+    // ── CYCLES-FILE-IMPORT-RENDER-1: FILE-import vocabulary (not MODULE) ──
+
+    fn two_file_cycle() -> CyclesResponse {
+        let mut r = minimal_response();
+        r.count = 1;
+        r.cycles = vec![Cycle {
+            nodes: vec![
+                CycleNode {
+                    node_id: "repo:packages/a/src/main.ts:FILE".to_string(),
+                    name: "packages/a/src/main.ts".to_string(),
+                    file: None,
+                },
+                CycleNode {
+                    node_id: "repo:packages/b/src/foo.ts:FILE".to_string(),
+                    name: "packages/b/src/foo.ts".to_string(),
+                    file: None,
+                },
+            ],
+        }];
+        r
+    }
+
+    #[test]
+    fn file_import_render_empty_says_files_not_modules() {
+        let out = minimal_response().render_human_file_import(); // count 0
+        assert!(
+            out.contains("No FILE import cycles found within the captured scope"),
+            "{out}"
+        );
+        assert!(!out.contains("module"), "empty must not say module: {out}");
+    }
+
+    #[test]
+    fn file_import_render_nonempty_says_files_not_modules() {
+        let out = two_file_cycle().render_human_file_import();
+        assert!(out.contains("1 FILE import cycle found"), "{out}");
+        assert!(out.contains("(2 files)"), "{out}");
+        assert!(
+            out.contains(
+                "packages/a/src/main.ts -> packages/b/src/foo.ts -> packages/a/src/main.ts"
+            ),
+            "{out}"
+        );
+        // Requirements 1-3: no MODULE vocabulary and no module-deps follow-up hint.
+        assert!(!out.contains("module"), "no module vocab: {out}");
+        assert!(
+            !out.contains("rmap modules deps"),
+            "no module-deps hint: {out}"
+        );
+    }
+
+    #[test]
+    fn sqlite_module_render_unchanged() {
+        // Requirement 4: the SQLite path uses render_human (MODULE), which must stay verbatim.
+        let out = two_file_cycle().render_human();
+        assert!(out.contains("1 module-level cycle found"), "{out}");
+        assert!(out.contains("(2 modules)"), "{out}");
+        assert!(
+            out.contains("Run: rmap modules deps <module>"),
+            "module-deps hint retained for SQLite: {out}"
+        );
     }
 }

@@ -877,17 +877,18 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
                         "Scope: captured resolved-relative FILE import cycles [{surfaces}] \
                          (backend=livegraph; class={class}; freshness={freshness})"
                     );
-                    // Empty case: render a FILE-import-specific message (the generic CyclesResponse text
-                    // says "module-level", which would contradict the scope label). SQLite is unchanged.
-                    let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-                    if count == 0 {
-                        println!("No FILE import cycles found within the captured scope.");
-                        return ExitCode::SUCCESS;
-                    }
                 }
                 match serde_json::from_value::<CyclesResponse>(result) {
                     Ok(response) => {
-                        println!("{}", response.render_human());
+                        // CYCLES-FILE-IMPORT-RENDER-1: route the FILE-import path to its own renderer
+                        // (FILE vocabulary, no "rmap modules deps"); SQLite keeps the generic MODULE
+                        // renderer verbatim. The empty case is owned by render_human_file_import.
+                        let rendered = if livegraph {
+                            response.render_human_file_import()
+                        } else {
+                            response.render_human()
+                        };
+                        println!("{}", rendered);
                         ExitCode::SUCCESS
                     }
                     Err(e) => {
