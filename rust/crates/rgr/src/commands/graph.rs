@@ -522,7 +522,14 @@ pub fn run_callees(args: &[String]) -> ExitCode {
 // Machine mode (--json): full envelope.
 
 pub fn run_path(args: &[String]) -> ExitCode {
-    // ── Parse args (filter out --json) ──────────────────────────
+    // PATH-CYCLES-LIVEGRAPH-1: extract --engine FIRST (path default SQLite this slice; LiveGraph behind
+    // the flag — path does NOT auto-migrate). Then filter --json from the positionals.
+    let (args, engine_raw) = extract_engine_flag(args.to_vec());
+    let engine = if engine_raw == "auto" {
+        "sqlite".to_string()
+    } else {
+        engine_raw
+    };
     let mut json_mode = false;
     let positional: Vec<&String> = args
         .iter()
@@ -538,7 +545,7 @@ pub fn run_path(args: &[String]) -> ExitCode {
 
     // REG-1: two positional args (from, to), repo from cwd
     if positional.len() != 2 {
-        eprintln!("usage: rmap path <from> <to> [--json]");
+        eprintln!("usage: rmap path <from> <to> [--engine sqlite|livegraph|compare] [--json]");
         return ExitCode::from(1);
     }
 
@@ -562,6 +569,7 @@ pub fn run_path(args: &[String]) -> ExitCode {
         "repo": repo_path,
         "from": from_query,
         "to": to_query,
+        "engine": engine,
     });
 
     match client.request("path", Some(params)) {
@@ -579,7 +587,23 @@ pub fn run_path(args: &[String]) -> ExitCode {
                     }
                 }
             } else {
-                // Human mode: parse and render (CLI-OUT-3)
+                // Human mode: parse and render (CLI-OUT-3). PATH-CYCLES-LIVEGRAPH-1: surface the compare
+                // sidecar (if present) + strip JSON-only metadata so the human render is unaffected.
+                let mut result = result;
+                if let Some(p) = result
+                    .get("livegraph_path_compare_sidecar")
+                    .and_then(|v| v.as_str())
+                {
+                    eprintln!("livegraph path comparison written to {}", p);
+                }
+                if let Some(obj) = result.as_object_mut() {
+                    obj.remove("livegraph_path_compare");
+                    obj.remove("livegraph_path_compare_sidecar");
+                    obj.remove("backend_used");
+                    obj.remove("fallback_reason");
+                    obj.remove("trust_class");
+                    obj.remove("freshness");
+                }
                 use crate::presentation::path::PathResponse;
                 match serde_json::from_value::<PathResponse>(result) {
                     Ok(response) => {

@@ -506,6 +506,235 @@ pub fn callees_engine_response(
     }
 }
 
+// ── PATH-CYCLES-LIVEGRAPH-1: path engine ──
+
+/// Extract the symbol NAME from a canonical key `repo:file#name:KIND:SUBTYPE` → `name` (for comparing
+/// across the SQLite/LiveGraph key spaces). Falls back to the whole key if there is no `#`.
+fn key_name(key: &str) -> String {
+    match key.find('#') {
+        Some(h) => {
+            let after = &key[h + 1..];
+            after.split(':').next().unwrap_or(after).to_string()
+        }
+        None => key.to_string(),
+    }
+}
+
+/// LiveGraph path for `(from_key, to_key)`, if the LiveGraph can answer. `None` = no LiveGraph for this
+/// repo. Returns `(class, freshness, found, node_keys)`.
+fn livegraph_path(
+    repo_state: &RepoState,
+    from_key: &str,
+    to_key: &str,
+) -> Option<(AnswerClass, FreshnessState, bool, Vec<String>)> {
+    let guard = repo_state.livegraph.read();
+    let lg = guard.as_ref()?;
+    let env = lg.path(from_key, to_key);
+    let nodes = env.data().map(|d| d.nodes.clone()).unwrap_or_default();
+    let found = !nodes.is_empty();
+    Some((env.class(), env.freshness(), found, nodes))
+}
+
+/// Render LiveGraph path node keys into the `{found, path_length, path:[step]}` shape the CLI
+/// `PathResponse` renders (keys, not source locations — placeholders, like callers/callees).
+fn livegraph_path_result(found: bool, nodes: &[String]) -> Value {
+    let steps: Vec<Value> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, k)| {
+            json!({
+                "node_id": k,
+                "symbol": k,
+                "file": "",
+                "line": 0,
+                "edge_type": if i == 0 { "" } else { "CALLS" },
+            })
+        })
+        .collect();
+    json!({
+        "found": found,
+        "path_length": nodes.len().saturating_sub(1),
+        "path": steps,
+    })
+}
+
+/// Classified path comparison (PATH-CYCLES-LIVEGRAPH-1). Path-specific buckets — an "SQLite includes
+/// IMPORTS" difference is `DifferentPath`/`PathOnlyInSqlite`, NOT a generic failure.
+#[derive(Debug, Serialize)]
+pub struct PathCompareReport {
+    pub from: String,
+    pub to: String,
+    pub sqlite_found: bool,
+    pub sqlite_path: Vec<String>,
+    pub livegraph_found: bool,
+    pub livegraph_class: String,
+    pub livegraph_path: Vec<String>,
+    pub partition_unavailable: bool,
+    /// Classified buckets: PathOnlyInSqlite / PathOnlyInLiveGraph / DifferentPath / LiveGraphPartial /
+    /// PartitionUnavailable / TrustClassMismatch. Empty = the two backends agree.
+    pub buckets: Vec<String>,
+}
+
+fn compare_path(
+    from: &str,
+    to: &str,
+    sqlite_found: bool,
+    sqlite_path: Vec<String>,
+    lg: Option<(AnswerClass, FreshnessState, bool, Vec<String>)>,
+) -> PathCompareReport {
+    let mut buckets = Vec::new();
+    match lg {
+        None => {
+            buckets.push("PartitionUnavailable".to_string());
+            PathCompareReport {
+                from: from.to_string(),
+                to: to.to_string(),
+                sqlite_found,
+                sqlite_path,
+                livegraph_found: false,
+                livegraph_class: "Unavailable".to_string(),
+                livegraph_path: Vec::new(),
+                partition_unavailable: true,
+                buckets,
+            }
+        }
+        Some((class, _freshness, lg_found, lg_path)) => {
+            if class == AnswerClass::Partial {
+                buckets.push("LiveGraphPartial".to_string());
+            } else if class != AnswerClass::Exact {
+                buckets.push("TrustClassMismatch".to_string());
+            }
+            if sqlite_found && !lg_found {
+                buckets.push("PathOnlyInSqlite".to_string());
+            } else if !sqlite_found && lg_found {
+                buckets.push("PathOnlyInLiveGraph".to_string());
+            } else if sqlite_found && lg_found && sqlite_path != lg_path {
+                buckets.push("DifferentPath".to_string());
+            }
+            PathCompareReport {
+                from: from.to_string(),
+                to: to.to_string(),
+                sqlite_found,
+                sqlite_path,
+                livegraph_found: lg_found,
+                livegraph_class: format!("{class:?}"),
+                livegraph_path: lg_path,
+                partition_unavailable: false,
+                buckets,
+            }
+        }
+    }
+}
+
+/// Build the `path` response for the selected engine (PATH-CYCLES-LIVEGRAPH-1). `Sqlite`/`Auto` serve
+/// the (unchanged) SQLite path — path does NOT auto-migrate this slice. `LiveGraph` serves the
+/// LiveGraph BFS path (or falls back to SQLite when no LiveGraph). `Compare` serves SQLite + a path
+/// compare report + sidecar. All responses carry `backend_used`; the human render is unaffected.
+#[allow(clippy::too_many_arguments)]
+pub fn path_engine_response(
+    engine: Engine,
+    repo_state: &RepoState,
+    from_key: &str,
+    to_key: &str,
+    repo_uid: &str,
+    snapshot_uid: &str,
+    sqlite_value: Value,
+    repo_root: &str,
+) -> Value {
+    let sqlite_found = sqlite_value
+        .pointer("/path/found")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    // Compare by SYMBOL NAME: SQLite path node_ids are DB UUIDs while LiveGraph keys are stable keys —
+    // different key spaces. Name-based comparison normalizes them so a representation difference is NOT
+    // mistaken for a real path difference. (Approximation: a full cross-key-space alignment is a
+    // follow-up; `DifferentPath` then reflects a genuine route difference, e.g. SQLite's IMPORTS edges.)
+    let sqlite_names: Vec<String> = sqlite_value
+        .pointer("/path/path")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|s| s.get("symbol").and_then(|v| v.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut sqlite_response = sqlite_value;
+    match engine {
+        Engine::Sqlite | Engine::Auto => {
+            sqlite_response["backend_used"] = json!("sqlite");
+            sqlite_response["fallback_reason"] = Value::Null;
+            sqlite_response
+        }
+        Engine::LiveGraph => match livegraph_path(repo_state, from_key, to_key) {
+            Some((class, freshness, found, nodes)) => json!({
+                "repo_uid": repo_uid,
+                "snapshot_uid": snapshot_uid,
+                "found": found,
+                "path": livegraph_path_result(found, &nodes),
+                "backend_used": "livegraph",
+                "fallback_reason": Value::Null,
+                "trust_class": format!("{class:?}"),
+                "freshness": format!("{freshness:?}"),
+            }),
+            None => {
+                sqlite_response["backend_used"] = json!("sqlite");
+                sqlite_response["fallback_reason"] =
+                    json!(FallbackReason::LiveGraphUnavailable.as_str());
+                sqlite_response
+            }
+        },
+        Engine::Compare => {
+            // Normalize LiveGraph keys to names for an apples-to-apples comparison (see above).
+            let lg = livegraph_path(repo_state, from_key, to_key).map(|(c, f, found, keys)| {
+                (
+                    c,
+                    f,
+                    found,
+                    keys.iter().map(|k| key_name(k)).collect::<Vec<_>>(),
+                )
+            });
+            let report = compare_path(
+                &key_name(from_key),
+                &key_name(to_key),
+                sqlite_found,
+                sqlite_names,
+                lg,
+            );
+            let sidecar = write_path_compare_sidecar(repo_root, &report).ok();
+            sqlite_response["backend_used"] = json!("sqlite");
+            sqlite_response["fallback_reason"] = Value::Null;
+            sqlite_response["livegraph_path_compare"] =
+                serde_json::to_value(&report).unwrap_or(Value::Null);
+            if let Some(p) = sidecar {
+                sqlite_response["livegraph_path_compare_sidecar"] = json!(p);
+            }
+            sqlite_response
+        }
+    }
+}
+
+/// Write a path compare report to `<repo_root>/.rgr/livegraph-compare/path-<ms>.json` (best-effort).
+fn write_path_compare_sidecar(
+    repo_root: &str,
+    report: &PathCompareReport,
+) -> Result<String, String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let dir = std::path::Path::new(repo_root)
+        .join(".rgr")
+        .join("livegraph-compare");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create sidecar dir: {e}"))?;
+    let path = dir.join(format!("path-{ts}.json"));
+    let body =
+        serde_json::to_string_pretty(report).map_err(|e| format!("serialize report: {e}"))?;
+    std::fs::write(&path, body).map_err(|e| format!("write sidecar: {e}"))?;
+    Ok(path.display().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

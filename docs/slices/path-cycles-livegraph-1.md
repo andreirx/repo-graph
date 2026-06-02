@@ -1,7 +1,8 @@
 # PATH-CYCLES-LIVEGRAPH-1: LiveGraph-backed `path` (cycles deferred) (Stage D)
 
 Slice ID: PATH-CYCLES-LIVEGRAPH-1
-Status: **DESIGN — D1–D5 ratified (2026-06-01). Implementation NOT started.**
+Status: **IMPLEMENTED + live-validated (2026-06-01).** LiveGraph `path()` (support `8aa0050`) + daemon/CLI
+engine wiring. `path` default stays SQLite; LiveGraph behind `--engine`. Cycles deferred. See Completion.
 Depends: QUERY-MIGRATION-CLI-1 (the `--engine` auto/compare pattern; `callers_engine_response`),
 SQLITE-RAW-DECOMMISSION-READINESS-1 (path/cycles keep `nodes`/`edges` alive), the trust model
 (`AnswerEnvelope`; never exact-empty).
@@ -95,6 +96,33 @@ No new SQLite path semantics.
 1. support: LiveGraph path() API + the D3 completeness logic + unit tests (repo-graph-livegraph)
 2. impl:    daemon handle_path engine branch + rgr --engine for path + compare sidecar; SQLite default
 ```
+
+## Completion (implemented + live-validated 2026-06-01, EXECUTED)
+
+Support `8aa0050` (LiveGraph `path()` + D3 logic + 5 unit tests). Wiring: daemon `handle_path` engine
+branch + `livegraph_feed::path_engine_response` (+ `livegraph_path`, `livegraph_path_result`,
+`PathCompareReport`/`compare_path`, `key_name`); `rgr path` `--engine` (default SQLite). 
+
+Compare is **name-based**: SQLite path node_ids are DB UUIDs, LiveGraph keys are stable keys — comparing
+the raw key strings produced a FALSE `DifferentPath` on every match. Fixed by comparing symbol NAMES
+(`PathStep.symbol` vs the name extracted from the LiveGraph key), so `DifferentPath` now reflects a
+genuine route difference (e.g. SQLite's IMPORTS edges), not a representation artifact. (Approximation:
+full cross-key-space alignment is a follow-up.)
+
+```text
+Live (synthetic fixture, daemon v0.2.1; after a refresh):
+  rmap path report makeCircle                      -> "1 hop", report -CALLS-> makeCircle (sqlite, human) [#4]
+  rmap path report makeCircle --engine livegraph   -> backend_used=livegraph, trust_class=Exact, found    [#2]
+  rmap path report makeCircle --engine compare      -> buckets=[] (sqlite=livegraph=[report,makeCircle])    [#5]
+  rmap path report Circle.describe (all 3 variants) -> livegraph Exact; compare buckets=[]                  [#2,#5]
+  rmap path makeCircle report --engine livegraph    -> found=false, trust_class=Exact (no-path; single
+                                                       resident partition is provably complete)              [#3]
+Unit: 5 path tests (commit 8aa0050). daemon-runtime 72 + livegraph 35; clippy -D warnings (daemon+rgr);
+cargo fmt --all clean.
+```
+
+All 5 acceptance criteria PASS. `path` default unchanged (SQLite); LiveGraph path behind `--engine`;
+no nodes/edges decommission; cycles deferred (PATH-CYCLES-LIVEGRAPH-2).
 
 ## References
 - `docs/slices/query-migration-cli-1.md` (the `--engine` auto/compare pattern; backend_used metadata)

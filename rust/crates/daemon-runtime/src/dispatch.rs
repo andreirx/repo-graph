@@ -1321,15 +1321,31 @@ impl ServiceDispatcher {
             }
         };
 
-        DispatchResult::success(
-            &request.id,
-            serde_json::json!({
-                "repo_uid": repo_uid,
-                "snapshot_uid": snapshot.snapshot_uid,
-                "path": path_result,
-                "found": path_result.found,
-            }),
-        )
+        let sqlite_value = serde_json::json!({
+            "repo_uid": repo_uid,
+            "snapshot_uid": snapshot.snapshot_uid,
+            "path": path_result,
+            "found": path_result.found,
+        });
+        // PATH-CYCLES-LIVEGRAPH-1: engine branch. Path default = SQLite (Auto maps to SQLite — path does
+        // NOT auto-migrate this slice); --engine livegraph/compare select the LiveGraph BFS path.
+        let engine = crate::livegraph_feed::Engine::parse(Self::get_optional_string_param(
+            &request.params,
+            "engine",
+        ));
+        let repo_root =
+            Self::get_optional_string_param(&request.params, "repo").unwrap_or_default();
+        let response = crate::livegraph_feed::path_engine_response(
+            engine,
+            &repo_state,
+            &from_sym.stable_key,
+            &to_sym.stable_key,
+            &repo_uid,
+            &snapshot.snapshot_uid,
+            sqlite_value,
+            repo_root,
+        );
+        DispatchResult::success(&request.id, response)
     }
 
     // ── Write operations ────────────────────────────────────────────
