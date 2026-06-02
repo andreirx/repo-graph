@@ -1,10 +1,11 @@
 # IMPORTS-XPART-WIRING-1: cross-partition import-edge overlay in the LiveGraph (Stage D)
 
 Slice ID: IMPORTS-XPART-WIRING-1
-Status: **UNBLOCKED — amended (2026-06-02). Implementation NOT started.** The key-collision blocker is
-CLOSED by KEY-NAMESPACE-REPO-RELATIVE-1 (`b72b075`): node/FILE keys are now repo-relative, so slots + overlay
-share one collision-free namespace. D1–D4 stand. See **Amendment** for the re-evaluation (source_file is
-still needed; cache is now v4 → v5 when source_file lands; no new boundary decision).
+Status: **IMPLEMENTED (2026-06-02), headless.** D1–D4 landed + D5 (scope flag set, user-ratified). Overlay
+edges are in-memory only; `file_import_cycles()` detects cross-partition cycles via the overlay. The
+multi-partition DAEMON path stays gated behind IMPORTS-XPART-ENUMERATION-1 (F2), so live validation covers
+single-partition regression + the v5 re-extraction only — the cross-partition path is covered headlessly.
+See **Completion**. The key-collision blocker was CLOSED by KEY-NAMESPACE-REPO-RELATIVE-1 (`b72b075`).
 Depends: IMPORTS-XPART-RESOLUTION-1 (the pure `repo-graph-import-resolver` + `EdgeBasis::AstImportFileInventoryResolved`),
 IMPORTS-EXTRACT-COMPLETENESS-1 (the `StaticUnresolved` observations), CYCLES-LIVEGRAPH-1 (`file_import_cycles`),
 KEY-NAMESPACE-REPO-RELATIVE-1 (repo-relative keys; cache now v4), `repo-graph-warm-cache` (schema v4 -> v5).
@@ -138,10 +139,98 @@ aggregation. NO package/tsconfig resolution (the resolver is relative+ext/index 
    shows the cross-partition cycle; else the unit test stands and the live gap is documented.
 ```
 
+## Completion (implemented 2026-06-02, EXECUTED)
+
+Commits: `0aef2fe` (1/4 source_file plumbing) + `a334e56` (2/4 overlay) + this doc (3/4).
+
+### What landed
+```text
+repo-graph-ir            : ImportObservation.source_file (importing file's repo-relative path = the
+                           cross-partition edge src the flattened observation otherwise loses).
+repo-graph-warm-cache    : CacheImportObservationDto.source_file + SCHEMA_VERSION 4 -> 5 (old caches ->
+                           SchemaMismatch -> re-extract); round-trip carries source_file.
+repo-graph-scip-ingest   : classify PER-DOC (not flattened), stamping each doc's repo-relative key_path
+                           as source_file on every IR observation.
+repo-graph-import-resolver: FileInventory::file_key_for made PUBLIC (the overlay resolves the importing
+                           file's src key from the SAME inventory).
+repo-graph-livegraph     : CLIENT of the resolver; `xpart_overlay` field; rebuild_xpart_overlay() on
+                           load/swap/unload (D3); xpart_import_edges() read accessor; file_import_cycles()
+                           unions intra AstImport edges WITH the overlay; ImportCycleScope = D5 flag set.
+```
+
+### D5 ratification — scope as a FLAG SET (user decision 2026-06-02)
+```text
+ImportCycleScope: single enum variant -> closed struct
+  { captured_resolved_relative, intra_partition, cross_partition, xpart_edge_count }.
+Rationale (user): a new single variant loses single-partition precision; an overlay bool beside a stale
+enum name forces readers to compose fields; a flag set is honest + extensible without overclaiming "all
+imports". cross_partition = xpart_edge_count > 0 (CONTRIBUTION semantics): false means no cross-partition
+edge was in the SCC universe, NOT that resolution was skipped. Scope describes the UNIVERSE queried; the
+answer class + `missing` carry completeness.
+```
+
+### Divergence (recorded)
+```text
+src key via inventory lookup, NOT string reconstruction: the ratified text wrote
+  ImportCandidate.source_file_key = {repo}:{source_file}:FILE.
+Implementation instead looks it up via FileInventory::file_key_for(source_file) — identical key, one
+source of truth, and returns None (skip) when the importing file is not resident (no src node to anchor an
+edge). No behavior difference for a resident importer. resolver: file_key_for made public; no logic change.
+```
+
+### TECH DEBT — must address WITH IMPORTS-XPART-ENUMERATION-1
+```text
+The daemon serializes the cycles scope as a HARD-CODED string (livegraph_feed.rs:934
+"CapturedResolvedRelativeIntraPartition") and the CLI renders that string (graph.rs:830). This slice left
+BOTH untouched (the "no CLI" guardrail). It stays ACCURATE only because the daemon loads ONE partition at a
+time (F2): the overlay contributes zero edges in any daemon-served answer, so cross_partition is always
+false there. WHEN IMPORTS-XPART-ENUMERATION-1 enables multi-partition daemon serving, the daemon MUST emit
+the structured env.scope (the D5 flag set) and the CLI MUST render it — else the CLI under-reports
+cross-partition coverage (a false trust claim). (Pre-existing latent: the daemon scope was ALREADY
+hard-coded, never derived from the answer; this slice did not introduce that, but enumeration must fix it.)
+```
+
+### Acceptance outcomes (EXECUTED unless noted)
+```text
+1. source_file populated by ingest; warm-cache v5 round-trip preserves it; old caches re-extract. PASS.
+2. 2-partition overlay: a/main imports ../../b/src/foo -> a cross-partition edge with basis
+   AstImportFileInventoryResolved, and ONLY once b is resident.  PASS
+   (xpart_overlay_resolves_cross_partition_edge_only_when_target_resident).
+3. file_import_cycles() detects the a/main <-> b/foo cross-partition CYCLE via the overlay; the cycle is
+   built ENTIRELY from the overlay (intra_partition == false, xpart_edge_count == 2).  PASS
+   (xpart_overlay_forms_cross_partition_file_import_cycle).
+4. unload b -> overlay rebuilt without the edge; answer degrades to Partial + missing=[b], never a stale
+   edge.  PASS (unload_rebuilds_overlay_without_the_edge_and_degrades).
+5. Overlay never serialized: PartitionIr has NO overlay field (compile-time guarantee); the cross-partition
+   cycle came from the runtime overlay, not ir.edges (intra_partition == false in #3).  PASS (structural).
+6. LIVE 2-package daemon path: NOT RUN — the daemon loads one partition at a time (F2), so the live path
+   cannot stage a cross-import this slice. The cross-partition behavior is covered headlessly (#2-#5); the
+   live gap is the IMPORTS-XPART-ENUMERATION-1 follow-up.  DOCUMENTED LIMITATION.
+```
+
+### Validation evidence
+```text
+EXECUTED: cargo test -p repo-graph-ir -p repo-graph-warm-cache -p repo-graph-scip-ingest (green);
+  cargo test -p repo-graph-livegraph (49) -p repo-graph-import-resolver (7) (green);
+  cargo test --workspace (220 binaries ok, 0 failures, exit 0);
+  cargo clippy --workspace --all-targets -- -D warnings (clean); cargo fmt --all -- --check (clean).
+LIVE (dev-install-local.sh, EXECUTED): release build + daemon restart -> doctor healthy, validation
+  passed (rmap/rmapd 0.2.1, pid 92015). `rmap dev livegraph-refresh` of the synthetic partition ->
+  "warmed_from_cache": false (the v4 cache was REJECTED under v5 -> fresh re-extract: 15 nodes, 12 edges,
+  epoch 1) = live v5 re-extraction evidence. `rmap cycles --engine livegraph --kind file-import` (single
+  partition) -> class=Exact, freshness=Fresh, no cycles, serves WITHOUT panic on the new overlay/scope
+  code. The daemon still emits the HARD-CODED scope string (accurate single-partition: cross_partition is
+  false under F2) -- confirming the TECH DEBT above (the string even keeps the retired variant NAME; it is
+  a JSON literal, not the headless type). Cross-partition overlay NOT exercisable live under F2 (by design).
+```
+
 ## Follow-up slices
 ```text
 - IMPORTS-XPART-ENUMERATION-1 : daemon auto-discovery + loading of all a repo's packages (F2), so the
-  overlay covers the whole repo without manual preloads.
+  overlay covers the whole repo without manual preloads. PREREQUISITE OF THAT SLICE (carried from the TECH
+  DEBT above): the daemon cycles emission (`livegraph_feed.rs:934`) MUST switch from the hard-coded scope
+  string to the structured `env.scope` (D5 flag set), and the CLI (`graph.rs:830`) MUST render it — else a
+  multi-partition daemon answer would under-report cross-partition coverage (a false trust claim).
 - IMPORTS-PACKAGE-RESOLUTION-1 : tsconfig path aliases + package exports/types.
 - MODULE-AGGREGATION-1 / CYCLES-LIVEGRAPH default migration : once the import graph is complete enough.
 ```
