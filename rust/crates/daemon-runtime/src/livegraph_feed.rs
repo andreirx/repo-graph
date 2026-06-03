@@ -1138,7 +1138,9 @@ pub fn module_cycle_compare_response(
     snapshot_uid: &str,
     repo_root: &str,
 ) -> Result<Value, String> {
-    use repo_graph_livegraph::module_cycle_compare::compare_module_cycles;
+    use repo_graph_livegraph::module_cycle_compare::{
+        classify_missing_module_cycle, compare_module_cycles,
+    };
     // SQLite MODULE cycles (the primary) + qualified module paths (D5: short name "src" collides).
     let sqlite_cycles = repo_state
         .storage
@@ -1164,7 +1166,7 @@ pub fn module_cycle_compare_response(
         })
         .collect();
     // LiveGraph derived MODULE cycles + trust class.
-    let (lg_cycles, lg_class): (Vec<Vec<String>>, String) = {
+    let (lg_cycles, lg_class, obs_by_module, lg_modules) = {
         let guard = repo_state.livegraph.read();
         match guard.as_ref() {
             Some(lg) => {
@@ -1173,19 +1175,34 @@ pub fn module_cycle_compare_response(
                     .data()
                     .map(|d| d.cycles.iter().map(|c| c.members.clone()).collect())
                     .unwrap_or_default();
-                (cycles, format!("{:?}", env.class()))
+                (
+                    cycles,
+                    format!("{:?}", env.class()),
+                    lg.import_observations_by_module(),
+                    lg.resident_module_paths(),
+                )
             }
-            None => (Vec::new(), "Unavailable".to_string()),
+            None => (
+                Vec::new(),
+                "Unavailable".to_string(),
+                std::collections::BTreeMap::new(),
+                std::collections::BTreeSet::new(),
+            ),
         }
     };
     let cmp = compare_module_cycles(&lg_cycles, &sqlite_qualified);
-    // D4=A: the fixed classification (no auto cause attribution).
+    // MODULE-CYCLES-COMPARE-CLASSIFY-1 (D2=A): classify each missing cycle from LiveGraph evidence
+    // (replacing the blanket UnknownDivergence); evidence-backed or Unknown.
     let missing_in_livegraph: Vec<ModuleDivergenceEntry> = cmp
         .missing_in_livegraph
         .iter()
-        .map(|c| ModuleDivergenceEntry {
-            cycle: c.clone(),
-            divergence: "UnknownDivergence".to_string(),
+        .map(|c| {
+            let cycle_set: std::collections::BTreeSet<String> = c.iter().cloned().collect();
+            let class = classify_missing_module_cycle(&cycle_set, &obs_by_module, &lg_modules);
+            ModuleDivergenceEntry {
+                cycle: c.clone(),
+                divergence: class.as_str().to_string(),
+            }
         })
         .collect();
     let extra_in_livegraph: Vec<ModuleDivergenceEntry> = cmp

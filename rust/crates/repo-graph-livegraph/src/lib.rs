@@ -29,6 +29,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 /// divergences. A separate module (the 500-line guardrail keeps it out of this file).
 pub mod module_cycle_compare;
 
+use module_cycle_compare::{ObsResolution, ObservationView};
+
 /// Per-partition epoch (bumped on each swap; D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PartitionEpoch(pub u64);
@@ -1196,6 +1198,61 @@ impl LiveGraph {
             contributing_epochs: epochs,
         };
         capture_envelope(data, missing, worst, languages)
+    }
+
+    /// The resident MODULE paths (MODULE-CYCLES-COMPARE-CLASSIFY-1 D5): `module_path_of` each resident
+    /// FILE-scope node key. These are the dirname module identities the LiveGraph actually has — the
+    /// classifier uses them to tell a non-resident cycle module from an identity divergence.
+    pub fn resident_module_paths(&self) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        for s in self.slots.values() {
+            if let Some(ir) = &s.ir {
+                for n in &ir.nodes {
+                    if n.identity_source == IdentitySource::AstFileScope {
+                        if let Some(m) = module_path_of(n.key.as_str()) {
+                            out.insert(m);
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Resident import OBSERVATIONS grouped by their source MODULE (MODULE-CYCLES-COMPARE-CLASSIFY-1 D5):
+    /// `dirname(source_file)` -> the [`ObservationView`]s of that module's files. The IR-free view the pure
+    /// classifier consumes (it maps `ImportResolution` -> `ObsResolution` here). Observations at the repo
+    /// root (no module) are skipped.
+    pub fn import_observations_by_module(&self) -> BTreeMap<String, Vec<ObservationView>> {
+        let mut out: BTreeMap<String, Vec<ObservationView>> = BTreeMap::new();
+        for s in self.slots.values() {
+            if let Some(ir) = &s.ir {
+                for o in &ir.import_observations {
+                    let module = dirname(&o.source_file);
+                    if module.is_empty() {
+                        continue;
+                    }
+                    out.entry(module.to_string())
+                        .or_default()
+                        .push(ObservationView {
+                            raw_specifier: o.raw_specifier.clone(),
+                            resolution: match o.resolution {
+                                ImportResolution::StaticResolved => ObsResolution::StaticResolved,
+                                ImportResolution::StaticUnresolved => {
+                                    ObsResolution::StaticUnresolved
+                                }
+                                ImportResolution::PackageExternal => ObsResolution::PackageExternal,
+                                ImportResolution::DynamicUnsupported => {
+                                    ObsResolution::DynamicUnsupported
+                                }
+                            },
+                            is_re_export: o.is_re_export,
+                            is_type_only: o.is_type_only,
+                        });
+                }
+            }
+        }
+        out
     }
 }
 
