@@ -1217,13 +1217,25 @@ impl ServiceDispatcher {
                     ),
                 );
             }
+            // MODULE-CYCLES-CLI-1 (D2): LiveGraph directory-aggregated MODULE cycles (no SQLite fallback).
+            ("livegraph", "module-import") => {
+                return DispatchResult::success(
+                    &request.id,
+                    crate::livegraph_feed::module_import_cycles_response(
+                        &repo_state,
+                        &repo_uid,
+                        &display_name,
+                        &snapshot.snapshot_uid,
+                    ),
+                );
+            }
             // Defensive rejects (the CLI gives the primary user-facing errors).
             ("livegraph", _) => {
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::new(
                         ErrorCode::InvalidRequest,
-                        "--engine livegraph requires --kind file-import",
+                        "--engine livegraph requires --kind file-import or module-import",
                     ),
                 );
             }
@@ -1254,7 +1266,9 @@ impl ServiceDispatcher {
                     ),
                 );
             }
-            _ => {} // sqlite / no-kind -> the SQLite MODULE-import path below (unchanged).
+            // sqlite / no-kind AND sqlite+module-import (D6: the SQLite MODULE default is the module-import
+            // graph) -> the SQLite MODULE-import path below (unchanged).
+            _ => {}
         }
 
         // RMAPD-PERF-1: Emit heartbeat before potentially long Tarjan SCC

@@ -142,6 +142,45 @@ impl CyclesResponse {
         out.trim_end().to_string()
     }
 
+    /// Render MODULE-import cycles (MODULE-CYCLES-CLI-1 D3): the `--engine livegraph --kind module-import`
+    /// answer is over the DIRECTORY-aggregated MODULE import graph, so it uses MODULE vocabulary (members
+    /// are module PATHS) and — like the FILE renderer — NOT the generic SQLite "module-level" / "rmap
+    /// modules deps" text. Owns empty + non-empty (both unit-testable here).
+    pub fn render_human_module_import(&self) -> String {
+        let mut out = String::new();
+
+        let repo_display = self.display_name.as_deref().unwrap_or(&self.repo_uid);
+        out.push_str(&kv_line("Cycles", repo_display));
+        out.push_str(&kv_line("Snapshot", &truncate_uid(&self.snapshot_uid)));
+        out.push('\n');
+
+        if self.count == 0 {
+            out.push_str("No MODULE import cycles found within the captured scope.\n");
+            return out.trim_end().to_string();
+        }
+
+        out.push_str(&format!(
+            "{} MODULE import cycle{} found\n\n",
+            self.count,
+            if self.count == 1 { "" } else { "s" }
+        ));
+
+        for (i, cycle) in self.cycles.iter().enumerate() {
+            let size = cycle.nodes.len();
+            out.push_str(&format!(
+                "Cycle {} ({} module{}):\n",
+                i + 1,
+                size,
+                if size == 1 { "" } else { "s" }
+            ));
+            let members = self.render_cycle_chain(cycle);
+            out.push_str(&format!("  {}\n", members));
+            out.push('\n');
+        }
+
+        out.trim_end().to_string()
+    }
+
     fn render_cycle_chain(&self, cycle: &Cycle) -> String {
         if cycle.nodes.is_empty() {
             return "(empty cycle)".to_string();
@@ -368,5 +407,53 @@ mod tests {
             out.contains("Run: rmap modules deps <module>"),
             "module-deps hint retained for SQLite: {out}"
         );
+    }
+
+    // ── MODULE-CYCLES-CLI-1: dedicated MODULE-import renderer (module paths) ──
+
+    fn two_module_cycle() -> CyclesResponse {
+        let mut r = minimal_response();
+        r.count = 1;
+        r.cycles = vec![Cycle {
+            nodes: vec![
+                CycleNode {
+                    node_id: "repo:packages/a/src:MODULE".to_string(),
+                    name: "packages/a/src".to_string(),
+                    file: None,
+                },
+                CycleNode {
+                    node_id: "repo:packages/b/src:MODULE".to_string(),
+                    name: "packages/b/src".to_string(),
+                    file: None,
+                },
+            ],
+        }];
+        r
+    }
+
+    #[test]
+    fn module_import_render_says_modules_with_paths() {
+        let out = two_module_cycle().render_human_module_import();
+        assert!(out.contains("1 MODULE import cycle found"), "{out}");
+        assert!(out.contains("(2 modules)"), "{out}");
+        assert!(
+            out.contains("packages/a/src -> packages/b/src -> packages/a/src"),
+            "members are module PATHS: {out}"
+        );
+        // Requirements 7: precise MODULE-import wording -- NOT the generic SQLite "module-level" text, NOT
+        // the file-import renderer, NO "rmap modules deps" hint.
+        assert!(!out.contains("module-level"), "{out}");
+        assert!(!out.contains("FILE import"), "{out}");
+        assert!(!out.contains("rmap modules deps"), "{out}");
+    }
+
+    #[test]
+    fn module_import_render_empty() {
+        let out = minimal_response().render_human_module_import();
+        assert!(
+            out.contains("No MODULE import cycles found within the captured scope"),
+            "{out}"
+        );
+        assert!(!out.contains("module-level"), "{out}");
     }
 }

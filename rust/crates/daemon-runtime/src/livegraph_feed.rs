@@ -3,7 +3,7 @@
 //! discovery / refresh orchestration (that is LIVEGRAPH-INTEGRATION-1C).
 
 use repo_graph_ir::CanonicalKey;
-use repo_graph_livegraph::{FileImportCyclesAnswer, LiveGraph};
+use repo_graph_livegraph::{FileImportCyclesAnswer, LiveGraph, ModuleImportCyclesAnswer};
 use repo_graph_scip_ingest::{decode_index, ingest_partition};
 use repo_graph_storage::queries::{CalleeResult, CallerResult, ResolvedSymbol};
 use repo_graph_trust_model::{AnswerClass, FreshnessState, Granularity, LanguageSupport};
@@ -961,6 +961,112 @@ pub fn file_import_cycles_response(
         "count": count,
         "backend_used": "livegraph",
         "kind": "file-import",
+        "scope": scope,
+        "answer_class": class,
+        "freshness": freshness,
+        "missing_partitions": missing,
+        "degradation_reasons": reasons,
+    })
+}
+
+/// Map a [`ModuleImportCyclesAnswer`] into the `cycles:[{nodes:[{node_id,name,file}]}]` shape
+/// (MODULE-CYCLES-CLI-1 D2). The member `name` is the MODULE PATH (e.g. `packages/a/src`), NOT a short
+/// name — so the human + compare are unambiguous (SQLite's short-name `src`/`src` collision is what we avoid).
+fn module_import_cycles_json(answer: &ModuleImportCyclesAnswer) -> Vec<Value> {
+    answer
+        .cycles
+        .iter()
+        .map(|c| {
+            let nodes: Vec<Value> = c
+                .members
+                .iter()
+                .map(|m| {
+                    json!({
+                        "node_id": m,
+                        "name": m,
+                        "file": Value::Null,
+                    })
+                })
+                .collect();
+            json!({ "nodes": nodes })
+        })
+        .collect()
+}
+
+/// Emit the MODULE-import scope (MODULE-CYCLES-CLI-1 D2): the aggregated FILE scope flags + the
+/// directory-aggregation markers (`module_aggregated`, `aggregation_basis="dirname"`).
+fn module_scope_json(answer: &ModuleImportCyclesAnswer) -> Value {
+    let s = answer.scope;
+    json!({
+        "captured_resolved_relative": s.file_scope.captured_resolved_relative,
+        "intra_partition": s.file_scope.intra_partition,
+        "cross_partition": s.file_scope.cross_partition,
+        "xpart_edge_count": s.file_scope.xpart_edge_count,
+        "module_aggregated": s.module_aggregated,
+        "aggregation_basis": "dirname",
+    })
+}
+
+/// MODULE-import scope for an Unavailable answer (no resident LiveGraph).
+fn default_module_scope_json() -> Value {
+    json!({
+        "captured_resolved_relative": true,
+        "intra_partition": false,
+        "cross_partition": false,
+        "xpart_edge_count": 0,
+        "module_aggregated": true,
+        "aggregation_basis": "dirname",
+    })
+}
+
+/// MODULE-CYCLES-CLI-1 (D2): build the `--engine livegraph --kind module-import` response. Mirrors
+/// [`file_import_cycles_response`] but over [`repo_graph_livegraph::LiveGraph::module_import_cycles`] — the
+/// directory-aggregated MODULE cycle answer. NO SQLite fallback; the trust class/scope are surfaced.
+pub fn module_import_cycles_response(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+) -> Value {
+    let guard = repo_state.livegraph.read();
+    let (class, freshness, missing, reasons, cycles, scope) = match guard.as_ref() {
+        Some(lg) => {
+            let env = lg.module_import_cycles();
+            let data = env.data();
+            let cycles = data.map(module_import_cycles_json).unwrap_or_default();
+            let scope = data
+                .map(module_scope_json)
+                .unwrap_or_else(default_module_scope_json);
+            (
+                format!("{:?}", env.class()),
+                format!("{:?}", env.freshness()),
+                env.missing_partitions().to_vec(),
+                env.degradation_reasons()
+                    .iter()
+                    .map(|r| format!("{r:?}"))
+                    .collect::<Vec<_>>(),
+                cycles,
+                scope,
+            )
+        }
+        None => (
+            "Unavailable".to_string(),
+            "Unavailable".to_string(),
+            Vec::new(),
+            vec!["LiveGraphUnavailable".to_string()],
+            Vec::new(),
+            default_module_scope_json(),
+        ),
+    };
+    let count = cycles.len();
+    json!({
+        "repo_uid": repo_uid,
+        "display_name": display_name,
+        "snapshot_uid": snapshot_uid,
+        "cycles": cycles,
+        "count": count,
+        "backend_used": "livegraph",
+        "kind": "module-import",
         "scope": scope,
         "answer_class": class,
         "freshness": freshness,
