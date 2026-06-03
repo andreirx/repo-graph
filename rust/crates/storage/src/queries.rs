@@ -1038,6 +1038,27 @@ impl StorageConnection {
         Ok(results)
     }
 
+    /// MODULE-CYCLES-CLI-1 (D5): map each MODULE node_uid -> its QUALIFIED module path (the directory),
+    /// for the `--engine compare --kind module-import` path. `find_cycles` returns the SHORT module name
+    /// (e.g. "src"), which collides across packages; the compare needs the qualified path
+    /// (e.g. "packages/a/src") to diff against the LiveGraph's dirname identities. Read-only; the DEFAULT
+    /// `rmap cycles` output (short `name`) is UNCHANGED.
+    pub fn module_qualified_names(
+        &self,
+        snapshot_uid: &str,
+    ) -> Result<std::collections::HashMap<String, String>, StorageError> {
+        let mut stmt = self.connection().prepare(
+            "SELECT node_uid, COALESCE(qualified_name, name)
+             FROM nodes WHERE snapshot_uid = ? AND kind = 'MODULE'",
+        )?;
+        let map = stmt
+            .query_map(rusqlite::params![snapshot_uid], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
+        Ok(map)
+    }
+
     /// Compute per-module structural metrics.
     ///
     /// Mirrors the TS `computeModuleStats` (sqlite-storage.ts:2846-2964).

@@ -1075,6 +1075,153 @@ pub fn module_import_cycles_response(
     })
 }
 
+/// One classed module-cycle divergence in the compare report (MODULE-CYCLES-CLI-1 D4=A).
+#[derive(Debug, Serialize)]
+pub struct ModuleDivergenceEntry {
+    /// The diverging cycle as a canonical module-path set.
+    pub cycle: Vec<String>,
+    /// The divergence class (the `ModuleCycleDivergence` variant name).
+    pub divergence: String,
+}
+
+/// The `--engine compare --kind module-import` report (D4=A: STRUCTURAL only — missing ->
+/// UnknownDivergence, extra -> UnexpectedExtraInLiveGraph; NO automatic package/dynamic attribution this
+/// slice, MODULE-CYCLES-COMPARE-CLASSIFY-1). Written to the sidecar + inlined in the response.
+#[derive(Debug, Serialize)]
+pub struct ModuleCycleCompareReport {
+    /// SQLite MODULE cycle count (the primary answer).
+    pub sqlite_count: usize,
+    /// LiveGraph derived MODULE cycle count.
+    pub livegraph_count: usize,
+    /// The LiveGraph module-cycle answer's trust class.
+    pub livegraph_class: String,
+    /// Cycles present in BOTH (by module-path set).
+    pub matched: usize,
+    /// True iff the LiveGraph has NO extra cycle (the real-repo expectation; an extra is an overclaim/bug).
+    pub livegraph_subset: bool,
+    /// SQLite cycles the LiveGraph lacks (D4=A: each `UnknownDivergence` — cause attribution deferred).
+    pub missing_in_livegraph: Vec<ModuleDivergenceEntry>,
+    /// LiveGraph cycles SQLite lacks (each `UnexpectedExtraInLiveGraph` — an overclaim signal).
+    pub extra_in_livegraph: Vec<ModuleDivergenceEntry>,
+}
+
+/// Write the module-cycle compare report to `<repo_root>/.rgr/livegraph-compare/module-<ms>.json` (the
+/// callers/callees/path sidecar convention). Best-effort; the caller must not fail the query on error.
+fn write_module_compare_sidecar(
+    repo_root: &str,
+    report: &ModuleCycleCompareReport,
+) -> Result<String, String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let dir = std::path::Path::new(repo_root)
+        .join(".rgr")
+        .join("livegraph-compare");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create sidecar dir: {e}"))?;
+    let path = dir.join(format!("module-{ts}.json"));
+    let body =
+        serde_json::to_string_pretty(report).map_err(|e| format!("serialize report: {e}"))?;
+    std::fs::write(&path, body).map_err(|e| format!("write sidecar: {e}"))?;
+    Ok(path.display().to_string())
+}
+
+/// MODULE-CYCLES-CLI-1 (D4=A): build the `--engine compare --kind module-import` response. PRIMARY = the
+/// SQLite MODULE cycles (unchanged shape); plus a STRUCTURAL compare of the LiveGraph derived module cycles
+/// (by qualified module-path sets, D5) against SQLite + a diagnostic sidecar. Missing -> UnknownDivergence,
+/// extra -> UnexpectedExtraInLiveGraph (no auto cause attribution this slice).
+pub fn module_cycle_compare_response(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+    repo_root: &str,
+) -> Result<Value, String> {
+    use repo_graph_livegraph::module_cycle_compare::compare_module_cycles;
+    // SQLite MODULE cycles (the primary) + qualified module paths (D5: short name "src" collides).
+    let sqlite_cycles = repo_state
+        .storage
+        .find_cycles(snapshot_uid, "module")
+        .map_err(|e| e.to_string())?;
+    let qnames = repo_state
+        .storage
+        .module_qualified_names(snapshot_uid)
+        .map_err(|e| e.to_string())?;
+    let sqlite_count = sqlite_cycles.len();
+    let sqlite_qualified: Vec<Vec<String>> = sqlite_cycles
+        .iter()
+        .map(|c| {
+            c.nodes
+                .iter()
+                .map(|n| {
+                    qnames
+                        .get(&n.node_id)
+                        .cloned()
+                        .unwrap_or_else(|| n.name.clone())
+                })
+                .collect()
+        })
+        .collect();
+    // LiveGraph derived MODULE cycles + trust class.
+    let (lg_cycles, lg_class): (Vec<Vec<String>>, String) = {
+        let guard = repo_state.livegraph.read();
+        match guard.as_ref() {
+            Some(lg) => {
+                let env = lg.module_import_cycles();
+                let cycles = env
+                    .data()
+                    .map(|d| d.cycles.iter().map(|c| c.members.clone()).collect())
+                    .unwrap_or_default();
+                (cycles, format!("{:?}", env.class()))
+            }
+            None => (Vec::new(), "Unavailable".to_string()),
+        }
+    };
+    let cmp = compare_module_cycles(&lg_cycles, &sqlite_qualified);
+    // D4=A: the fixed classification (no auto cause attribution).
+    let missing_in_livegraph: Vec<ModuleDivergenceEntry> = cmp
+        .missing_in_livegraph
+        .iter()
+        .map(|c| ModuleDivergenceEntry {
+            cycle: c.clone(),
+            divergence: "UnknownDivergence".to_string(),
+        })
+        .collect();
+    let extra_in_livegraph: Vec<ModuleDivergenceEntry> = cmp
+        .extra_in_livegraph
+        .iter()
+        .map(|c| ModuleDivergenceEntry {
+            cycle: c.clone(),
+            divergence: "UnexpectedExtraInLiveGraph".to_string(),
+        })
+        .collect();
+    let report = ModuleCycleCompareReport {
+        sqlite_count,
+        livegraph_count: lg_cycles.len(),
+        livegraph_class: lg_class,
+        matched: cmp.matched.len(),
+        livegraph_subset: cmp.is_livegraph_subset(),
+        missing_in_livegraph,
+        extra_in_livegraph,
+    };
+    let sidecar = write_module_compare_sidecar(repo_root, &report).ok();
+    let mut v = json!({
+        "repo_uid": repo_uid,
+        "display_name": display_name,
+        "snapshot_uid": snapshot_uid,
+        "cycles": sqlite_cycles,
+        "count": sqlite_count,
+        "backend_used": "sqlite",
+        "kind": "module-import",
+        "livegraph_module_compare": serde_json::to_value(&report).unwrap_or(Value::Null),
+    });
+    if let Some(p) = sidecar {
+        v["livegraph_module_compare_sidecar"] = json!(p);
+    }
+    Ok(v)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -737,8 +737,8 @@ pub fn run_imports(args: &[String]) -> ExitCode {
 // Machine mode (--json): full envelope.
 
 /// The resolved cycles route (MODULE-CYCLES-CLI-1 D1): replaces the prior `livegraph: bool` now that the
-/// engine/kind matrix has 3+ live routes. Derived from the (engine, kind) pair; each maps to the daemon
-/// params + the human renderer. (`CompareModule` lands with the compare route.)
+/// engine/kind matrix has 4 live routes. Derived from the (engine, kind) pair; each maps to the daemon
+/// params + the human renderer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CyclesRoute {
     /// SQLite MODULE-import cycles (the default; `--engine sqlite [--kind module-import]`).
@@ -747,6 +747,9 @@ enum CyclesRoute {
     LivegraphFile,
     /// LiveGraph directory-aggregated MODULE-import cycles (`--engine livegraph --kind module-import`).
     LivegraphModule,
+    /// SQLite MODULE cycles PRIMARY + a LiveGraph-vs-SQLite compare report
+    /// (`--engine compare --kind module-import`).
+    CompareModule,
 }
 
 pub fn run_cycles(args: &[String]) -> ExitCode {
@@ -796,8 +799,13 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
             eprintln!("error: SQLite does not answer captured FILE import cycles; use --engine livegraph --kind file-import");
             return ExitCode::from(1);
         }
+        ("compare", "module-import") => CyclesRoute::CompareModule,
+        ("compare", "file-import") => {
+            eprintln!("error: --engine compare --kind file-import is not supported (FILE-import has no SQLite peer graph); use --kind module-import");
+            return ExitCode::from(1);
+        }
         ("compare", _) => {
-            eprintln!("error: --engine compare is not supported for cycles yet (module-import compare lands in MODULE-CYCLES-CLI-1)");
+            eprintln!("error: --engine compare requires --kind module-import");
             return ExitCode::from(1);
         }
         (_, "file-import") => {
@@ -835,6 +843,9 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
         CyclesRoute::LivegraphModule => {
             serde_json::json!({ "repo": repo_path, "engine": "livegraph", "kind": "module-import" })
         }
+        CyclesRoute::CompareModule => {
+            serde_json::json!({ "repo": repo_path, "engine": "compare", "kind": "module-import" })
+        }
     };
 
     match client.request("cycles", Some(params)) {
@@ -854,6 +865,47 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
                 }
             } else {
                 use crate::presentation::cycles::CyclesResponse;
+                // CompareModule (MODULE-CYCLES-CLI-1): capture the diagnostic compare summary BEFORE
+                // `result` is consumed by from_value. The PRIMARY answer is SQLite (render_human); the
+                // compare metadata rides alongside as one summary line.
+                let compare_summary: Option<String> = if route == CyclesRoute::CompareModule {
+                    let cmp = result.get("livegraph_module_compare");
+                    let n = |k: &str| {
+                        cmp.and_then(|c| c.get(k))
+                            .and_then(|v| v.as_array())
+                            .map(|a| a.len())
+                            .unwrap_or(0)
+                    };
+                    let matched = cmp
+                        .and_then(|c| c.get("matched"))
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let lg_count = cmp
+                        .and_then(|c| c.get("livegraph_count"))
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let lg_class = cmp
+                        .and_then(|c| c.get("livegraph_class"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let subset = cmp
+                        .and_then(|c| c.get("livegraph_subset"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let sidecar = result
+                        .get("livegraph_module_compare_sidecar")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("<none>");
+                    Some(format!(
+                        "LiveGraph module-cycle compare: {matched} matched, {} missing (UnknownDivergence), \
+                         {} extra (UnexpectedExtraInLiveGraph); livegraph_count={lg_count} class={lg_class}; \
+                         livegraph_subset={subset}; sidecar={sidecar}",
+                        n("missing_in_livegraph"),
+                        n("extra_in_livegraph"),
+                    ))
+                } else {
+                    None
+                };
                 // D4/D7: LiveGraph file-import output LABELS its scope + surfaces the trust class (never a
                 // silent SQLite fallback). SQLite output is unchanged (no extra line).
                 // Scope line for the LiveGraph routes (file + module); the SQLite default prints no extra
@@ -916,9 +968,16 @@ pub fn run_cycles(args: &[String]) -> ExitCode {
                         let rendered = match route {
                             CyclesRoute::LivegraphFile => response.render_human_file_import(),
                             CyclesRoute::LivegraphModule => response.render_human_module_import(),
-                            CyclesRoute::SqliteModule => response.render_human(),
+                            // CompareModule serves the SQLite primary (generic MODULE renderer) + the
+                            // compare summary line below.
+                            CyclesRoute::SqliteModule | CyclesRoute::CompareModule => {
+                                response.render_human()
+                            }
                         };
                         println!("{}", rendered);
+                        if let Some(summary) = compare_summary {
+                            println!("{summary}");
+                        }
                         ExitCode::SUCCESS
                     }
                     Err(e) => {

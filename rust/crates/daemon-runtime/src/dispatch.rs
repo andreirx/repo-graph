@@ -1248,12 +1248,32 @@ impl ServiceDispatcher {
                     ),
                 );
             }
+            // MODULE-CYCLES-CLI-1 (D4=A): compare LiveGraph derived MODULE cycles vs SQLite (structural;
+            // SQLite primary + classified sidecar). Only MODULE-import — FILE-import has no SQLite peer.
+            ("compare", "module-import") => {
+                let repo_root = Self::get_optional_string_param(&request.params, "repo")
+                    .unwrap_or("")
+                    .to_string();
+                return match crate::livegraph_feed::module_cycle_compare_response(
+                    &repo_state,
+                    &repo_uid,
+                    &display_name,
+                    &snapshot.snapshot_uid,
+                    &repo_root,
+                ) {
+                    Ok(v) => DispatchResult::success(&request.id, v),
+                    Err(e) => DispatchResult::error(
+                        &request.id,
+                        ErrorDetail::new(ErrorCode::InternalError, e),
+                    ),
+                };
+            }
             ("compare", _) => {
                 return DispatchResult::error(
                     &request.id,
                     ErrorDetail::new(
                         ErrorCode::InvalidRequest,
-                        "--engine compare is not supported for cycles (FILE-import and MODULE-import are different graphs)",
+                        "--engine compare is only supported with --kind module-import (FILE-import has no SQLite peer graph)",
                     ),
                 );
             }
