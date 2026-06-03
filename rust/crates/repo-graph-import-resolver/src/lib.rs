@@ -48,7 +48,12 @@ impl FileInventory {
 
 /// Extract the repo-relative path from a FILE node key `{repo}:{path}:FILE` (path is everything after the
 /// first `:` and before the `:FILE` suffix). `None` if the key is not a `:FILE` key.
-fn file_key_path(key: &str) -> Option<&str> {
+///
+/// PUBLIC (MODULE-AGGREGATION-1): the proven, colon-safe key parser. `repo_uid` is `repo_<ulid>` (no
+/// colon), so the FIRST `:` is the repo/path boundary and any colon WITHIN the path is preserved. Callers
+/// that need a FILE key's repo-relative path (e.g. directory/module aggregation) MUST reuse this rather
+/// than re-slice.
+pub fn file_key_path(key: &str) -> Option<&str> {
     let inner = key.strip_suffix(":FILE")?;
     inner.find(':').map(|i| &inner[i + 1..])
 }
@@ -143,8 +148,10 @@ fn normalize_join(dir: &str, spec: &str) -> String {
     parts.join("/")
 }
 
-/// Directory of a repo-relative file path (everything before the last `/`; empty if none).
-fn dirname(path: &str) -> &str {
+/// Directory of a repo-relative file path (everything before the last `/`; empty if none). PUBLIC
+/// (MODULE-AGGREGATION-1): matches the SQLite cycle path's `get_module_path` (dirname) — empty result means
+/// the file is at the repo root and has NO module.
+pub fn dirname(path: &str) -> &str {
     match path.rfind('/') {
         Some(i) => &path[..i],
         None => "",

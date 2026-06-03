@@ -12,7 +12,8 @@
 //! Headless API (no query migration). See docs/slices/livegraph-runtime-1.md.
 
 use repo_graph_import_resolver::{
-    resolve_imports, FileInventory, ImportCandidate, ResolvedImportEdgeCandidate,
+    dirname, file_key_path, resolve_imports, FileInventory, ImportCandidate,
+    ResolvedImportEdgeCandidate,
 };
 use repo_graph_ir::{
     CanonicalKey, EdgeBasis, IdentitySource, ImportResolution, PartitionIr, Provenance, SourceRange,
@@ -1056,20 +1057,43 @@ impl LiveGraph {
     /// comparable to it.
     pub fn file_import_cycles(&self) -> AnswerEnvelope<FileImportCyclesAnswer> {
         use repo_graph_algorithms::{find_sccs, DirectedEdge};
+        let (file_edges, scope) = self.file_import_edges();
+        let edges: Vec<DirectedEdge> = file_edges
+            .iter()
+            .map(|(s, d)| DirectedEdge {
+                source: s.clone(),
+                target: d.clone(),
+            })
+            .collect();
+        let (missing, worst, languages, epochs) = self.whole_graph_completeness();
+        // SCC → cycles (find_sccs pre-filters to size > 1).
+        let cycles: Vec<FileImportCycle> = find_sccs(&edges)
+            .cycles
+            .iter()
+            .map(|c| FileImportCycle {
+                members: c.members.clone(),
+            })
+            .collect();
+        let data = FileImportCyclesAnswer {
+            cycles,
+            scope,
+            contributing_epochs: epochs,
+        };
+        capture_envelope(data, missing, worst, languages)
+    }
 
-        // Adjacency = RESIDENT partitions' intra-partition import edges (basis AstImport) UNION the
-        // in-memory cross-partition overlay (basis AstImportFileInventoryResolved; IMPORTS-XPART-WIRING-1).
-        // Both are resolved-relative FILE -> FILE imports, so they share one SCC universe.
-        let mut edges: Vec<DirectedEdge> = Vec::new();
+    /// The captured FILE import edge universe (`(src_key, dst_key)` pairs) + the D5 scope flag set, shared
+    /// by `file_import_cycles` and `module_import_cycles` (MODULE-AGGREGATION-1): RESIDENT partitions'
+    /// intra-partition `AstImport` edges UNION the in-memory cross-partition overlay
+    /// (`AstImportFileInventoryResolved`). Both are resolved-relative FILE -> FILE imports.
+    fn file_import_edges(&self) -> (Vec<(String, String)>, ImportCycleScope) {
+        let mut edges: Vec<(String, String)> = Vec::new();
         let mut intra_count: usize = 0;
         for s in self.slots.values() {
             if let Some(ir) = &s.ir {
                 for e in &ir.edges {
                     if e.basis == EdgeBasis::AstImport {
-                        edges.push(DirectedEdge {
-                            source: e.src.as_str().to_string(),
-                            target: e.dst.as_str().to_string(),
-                        });
+                        edges.push((e.src.as_str().to_string(), e.dst.as_str().to_string()));
                         intra_count += 1;
                     }
                 }
@@ -1077,25 +1101,31 @@ impl LiveGraph {
         }
         let xpart_edge_count = self.xpart_overlay.len();
         for e in &self.xpart_overlay {
-            edges.push(DirectedEdge {
-                source: e.src_file_key.clone(),
-                target: e.dst_file_key.clone(),
-            });
+            edges.push((e.src_file_key.clone(), e.dst_file_key.clone()));
         }
-        // D5 (scope as flag set): describe the graph UNIVERSE the SCC ran over. This is NOT completeness
-        // (the answer class + `missing` carry that). `cross_partition` reflects ACTUAL contribution:
-        // false here means no cross-partition edge was in the universe (e.g. a single loaded partition),
-        // NOT that cross-partition resolution was skipped. `xpart_edge_count` gives the exact magnitude.
+        // D5 (scope flag set): the graph UNIVERSE, NOT completeness. `cross_partition` reflects ACTUAL
+        // contribution (false = no cross-partition edge in the universe, not that resolution was skipped).
         let scope = ImportCycleScope {
             captured_resolved_relative: true,
             intra_partition: intra_count > 0,
             cross_partition: xpart_edge_count > 0,
             xpart_edge_count,
         };
+        (edges, scope)
+    }
 
-        // Whole-graph scope: EVERY partition must be resident + TS-primary to be IN the captured scope;
-        // a partition failing either is `missing` (its imports are not analyzable). Freshness is the worst
-        // across all partitions.
+    /// Whole-graph completeness fold shared by `file_import_cycles` + `module_import_cycles` (D4): EVERY
+    /// partition must be resident + TS-primary to be IN the captured scope; a partition failing either is
+    /// `missing` (its imports are not analyzable). Returns (missing sorted, worst freshness, contributing
+    /// languages, per-partition epochs).
+    fn whole_graph_completeness(
+        &self,
+    ) -> (
+        Vec<String>,
+        FreshnessState,
+        BTreeSet<LanguageSupport>,
+        BTreeMap<String, u64>,
+    ) {
         let mut missing: Vec<String> = Vec::new();
         let mut worst = FreshnessState::Fresh;
         let mut languages: BTreeSet<LanguageSupport> = BTreeSet::new();
@@ -1117,50 +1147,99 @@ impl LiveGraph {
             languages.insert(LanguageSupport::TypeScriptPrimary);
         }
         missing.sort();
+        (missing, worst, languages, epochs)
+    }
 
-        // SCC → cycles (find_sccs pre-filters to size > 1).
-        let scc = find_sccs(&edges);
-        let cycles: Vec<FileImportCycle> = scc
+    /// MODULE import-cycle detection (MODULE-AGGREGATION-1): the SAME captured FILE import graph as
+    /// `file_import_cycles`, AGGREGATED to MODULE granularity. `module(file) = dirname(repo-relative path)`
+    /// (matching the SQLite `rmap cycles` identity; reuses the resolver's proven key parser); intra-module
+    /// (self) edges are SKIPPED and module edges DEDUPED before Tarjan. The answer INHERITS
+    /// file_import_cycles' completeness (D4) and is honestly scoped (`module_aggregated`; the captured FILE
+    /// graph it aggregated; NEVER "all module cycles" — the FILE-graph completeness caveat propagates up).
+    pub fn module_import_cycles(&self) -> AnswerEnvelope<ModuleImportCyclesAnswer> {
+        use repo_graph_algorithms::{find_sccs, DirectedEdge};
+        let (file_edges, file_scope) = self.file_import_edges();
+        // Aggregate FILE edges -> MODULE edges: dirname identity, SKIP self-module, DEDUP (BTreeSet).
+        let mut module_pairs: BTreeSet<(String, String)> = BTreeSet::new();
+        for (src_key, dst_key) in &file_edges {
+            if let (Some(sm), Some(dm)) = (module_path_of(src_key), module_path_of(dst_key)) {
+                if sm != dm {
+                    module_pairs.insert((sm, dm));
+                }
+            }
+        }
+        let edges: Vec<DirectedEdge> = module_pairs
+            .iter()
+            .map(|(s, d)| DirectedEdge {
+                source: s.clone(),
+                target: d.clone(),
+            })
+            .collect();
+        let (missing, worst, languages, epochs) = self.whole_graph_completeness();
+        let cycles: Vec<ModuleImportCycle> = find_sccs(&edges)
             .cycles
             .iter()
-            .map(|c| FileImportCycle {
+            .map(|c| ModuleImportCycle {
                 members: c.members.clone(),
             })
             .collect();
-
-        let data = FileImportCyclesAnswer {
+        let data = ModuleImportCyclesAnswer {
             cycles,
-            scope,
+            scope: ModuleImportCycleScope {
+                file_scope,
+                module_aggregated: true,
+            },
             contributing_epochs: epochs,
         };
+        capture_envelope(data, missing, worst, languages)
+    }
+}
 
-        if missing.is_empty() && worst == FreshnessState::Fresh {
-            // Whole captured graph resident + Fresh + TS → Exact WITHIN SCOPE (found-or-no-cycle).
-            AnswerEnvelope::exact(
-                data,
-                QueryCompleteness::Complete,
-                FreshnessState::Fresh,
-                Vec::new(),
-                languages,
-            )
-            .expect("file_import_cycles exact invariant holds")
-        } else if !missing.is_empty() {
-            // A partition is non-resident or non-TS → captured graph incomplete; NEVER an Exact no-cycle.
-            // Found cycles remain REAL (carried in `data`). `missing` justifies Partial even if Fresh.
-            AnswerEnvelope::partial(
-                Some(data),
-                Vec::new(),
-                missing,
-                worst,
-                Vec::new(),
-                languages,
-            )
-            .expect("file_import_cycles partial invariant holds")
-        } else {
-            // Structurally complete (all resident + TS) but a partition is non-Fresh → Stale.
-            AnswerEnvelope::stale(data, worst, Vec::new(), Vec::new(), Vec::new(), languages)
-                .expect("file_import_cycles stale invariant holds")
-        }
+/// The MODULE path of a FILE key (MODULE-AGGREGATION-1): `dirname(repo-relative path of the FILE key)`.
+/// `None` if the key is not a FILE key OR the file is at the repo root (no module) — matching the SQLite
+/// cycle path's `get_module_path`. REUSES the resolver's proven `file_key_path` (first-colon = repo
+/// boundary; `repo_uid` has no colon) rather than new colon slicing (the ratified key-parse safety).
+fn module_path_of(file_key: &str) -> Option<String> {
+    let path = file_key_path(file_key)?;
+    let dir = dirname(path);
+    if dir.is_empty() {
+        None
+    } else {
+        Some(dir.to_string())
+    }
+}
+
+/// Finalize a CAPTURED-graph cycle answer with the shared completeness semantics (D4), generic over the
+/// payload: all resident + Fresh + TS -> Exact WITHIN SCOPE; a `missing` partition -> Partial (found
+/// cycles stay real); else (all resident, non-Fresh) -> Stale. Reused by file + module cycle answers.
+fn capture_envelope<T>(
+    data: T,
+    missing: Vec<String>,
+    worst: FreshnessState,
+    languages: BTreeSet<LanguageSupport>,
+) -> AnswerEnvelope<T> {
+    if missing.is_empty() && worst == FreshnessState::Fresh {
+        AnswerEnvelope::exact(
+            data,
+            QueryCompleteness::Complete,
+            FreshnessState::Fresh,
+            Vec::new(),
+            languages,
+        )
+        .expect("captured-graph exact invariant holds")
+    } else if !missing.is_empty() {
+        AnswerEnvelope::partial(
+            Some(data),
+            Vec::new(),
+            missing,
+            worst,
+            Vec::new(),
+            languages,
+        )
+        .expect("captured-graph partial invariant holds")
+    } else {
+        AnswerEnvelope::stale(data, worst, Vec::new(), Vec::new(), Vec::new(), languages)
+            .expect("captured-graph stale invariant holds")
     }
 }
 
@@ -1201,6 +1280,38 @@ pub struct FileImportCyclesAnswer {
     pub cycles: Vec<FileImportCycle>,
     /// The scope this answer covers — never "all TS imports".
     pub scope: ImportCycleScope,
+    /// Epoch per contributing partition (every slot, resident or not).
+    pub contributing_epochs: BTreeMap<String, u64>,
+}
+
+/// A MODULE import cycle (MODULE-AGGREGATION-1): module identities (repo-relative directory paths) forming
+/// a strongly-connected ring over the DIRECTORY-aggregated FILE import graph.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleImportCycle {
+    /// Module identities (repo-relative directory paths) in the cycle (Tarjan reverse finishing order).
+    pub members: Vec<String>,
+}
+
+/// The scope of a [`ModuleImportCyclesAnswer`] (MODULE-AGGREGATION-1 D4): the FILE-graph scope it was
+/// aggregated FROM, plus the directory-aggregation marker. It is NEVER "all module cycles" — the FILE
+/// graph's completeness caveat (package / path-alias / dynamic / re-export NOT captured) propagates up, so
+/// these module cycles are a SUBSET of a complete module-cycle answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModuleImportCycleScope {
+    /// The captured FILE import graph these module cycles were aggregated from.
+    pub file_scope: ImportCycleScope,
+    /// Always true: cycles are DIRECTORY-aggregated (`module = dirname(file)`). Records that this is a
+    /// DERIVED module view of the captured FILE graph, not an independent/complete module graph.
+    pub module_aggregated: bool,
+}
+
+/// Answer for [`LiveGraph::module_import_cycles`]: the derived MODULE cycles + the scope + epochs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleImportCyclesAnswer {
+    /// Detected MODULE cycles (SCCs of size > 1) over the directory-aggregated FILE import graph.
+    pub cycles: Vec<ModuleImportCycle>,
+    /// The scope — the captured FILE graph + module aggregation; never "all module cycles".
+    pub scope: ModuleImportCycleScope,
     /// Epoch per contributing partition (every slot, resident or not).
     pub contributing_epochs: BTreeMap<String, u64>,
 }
@@ -2267,5 +2378,148 @@ mod tests {
         assert!(d.cycles.is_empty(), "the cross-partition cycle is gone");
         assert!(!d.scope.cross_partition, "no overlay edge after unload");
         assert_eq!(d.scope.xpart_edge_count, 0);
+    }
+
+    // ── module_import_cycles (MODULE-AGGREGATION-1) ────────────────────
+    //
+    // module(file) = dirname(repo-relative path of the FILE key). FILE keys here are
+    // `repo:{dir}/{file}.ts:FILE` so module aggregation has real directory identities.
+
+    #[test]
+    fn module_cycle_from_cross_dir_file_imports() {
+        // Files in DIFFERENT dirs importing each other -> a MODULE cycle (dirA <-> dirB).
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir(
+                "p",
+                vec![
+                    file_node("repo:dirA/a.ts:FILE"),
+                    file_node("repo:dirB/b.ts:FILE"),
+                ],
+                vec![
+                    import_edge("repo:dirA/a.ts:FILE", "repo:dirB/b.ts:FILE"),
+                    import_edge("repo:dirB/b.ts:FILE", "repo:dirA/a.ts:FILE"),
+                ],
+            ),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        let a = lg.module_import_cycles();
+        assert_eq!(a.class(), AnswerClass::Exact);
+        let d = a.data().expect("data");
+        assert_eq!(d.cycles.len(), 1, "dirA <-> dirB module cycle");
+        let members: BTreeSet<&str> = d.cycles[0].members.iter().map(String::as_str).collect();
+        assert!(
+            members.contains("dirA") && members.contains("dirB"),
+            "{members:?}"
+        );
+        assert!(d.scope.module_aggregated);
+        assert!(d.scope.file_scope.captured_resolved_relative);
+    }
+
+    #[test]
+    fn module_self_edge_same_dir_is_skipped() {
+        // Two files in the SAME dir importing each other -> NO module cycle (self-module skipped), even
+        // though they DO form a FILE cycle. This is the key file-vs-module distinction.
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir(
+                "p",
+                vec![
+                    file_node("repo:dir/a.ts:FILE"),
+                    file_node("repo:dir/b.ts:FILE"),
+                ],
+                vec![
+                    import_edge("repo:dir/a.ts:FILE", "repo:dir/b.ts:FILE"),
+                    import_edge("repo:dir/b.ts:FILE", "repo:dir/a.ts:FILE"),
+                ],
+            ),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        assert!(
+            lg.module_import_cycles()
+                .data()
+                .expect("data")
+                .cycles
+                .is_empty(),
+            "same-dir imports aggregate to a self-module edge -> skipped"
+        );
+        assert_eq!(
+            lg.file_import_cycles().data().expect("data").cycles.len(),
+            1,
+            "the FILES still cycle"
+        );
+    }
+
+    #[test]
+    fn module_edges_dedup_duplicate_file_imports() {
+        // Two distinct files in dirA both import dirB -> ONE module edge (dedup); reciprocated -> a single
+        // 2-module cycle (members exactly {dirA, dirB}, no duplicate module node).
+        let mut lg = LiveGraph::new();
+        lg.load_partition(
+            "p",
+            ir(
+                "p",
+                vec![
+                    file_node("repo:dirA/a1.ts:FILE"),
+                    file_node("repo:dirA/a2.ts:FILE"),
+                    file_node("repo:dirB/b.ts:FILE"),
+                ],
+                vec![
+                    import_edge("repo:dirA/a1.ts:FILE", "repo:dirB/b.ts:FILE"),
+                    import_edge("repo:dirA/a2.ts:FILE", "repo:dirB/b.ts:FILE"), // duplicate dirA->dirB
+                    import_edge("repo:dirB/b.ts:FILE", "repo:dirA/a1.ts:FILE"),
+                ],
+            ),
+            LanguageSupport::TypeScriptPrimary,
+        );
+        let d = lg.module_import_cycles().data().expect("data").clone();
+        assert_eq!(d.cycles.len(), 1);
+        assert_eq!(
+            d.cycles[0].members.len(),
+            2,
+            "exactly dirA + dirB; the duplicate file import deduped to one module edge"
+        );
+    }
+
+    #[test]
+    fn module_cycle_uses_xpart_overlay() {
+        // FIXTURE-equivalent: the cross-partition OVERLAY edges feed module aggregation. pkg-a/src/main.ts
+        // <-> pkg-b/src/foo.ts aggregates to packages/a/src <-> packages/b/src -- the SAME modules SQLite
+        // `rmap cycles` reports on the xpart-monorepo fixture.
+        let mut lg = LiveGraph::new();
+        lg.load_partition("a", pkg_a_imports_b(), LanguageSupport::TypeScriptPrimary);
+        lg.load_partition("b", pkg_b_imports_a(), LanguageSupport::TypeScriptPrimary);
+        let d = lg.module_import_cycles().data().expect("data").clone();
+        assert_eq!(
+            d.cycles.len(),
+            1,
+            "cross-partition module cycle via the overlay"
+        );
+        let m: BTreeSet<&str> = d.cycles[0].members.iter().map(String::as_str).collect();
+        assert!(
+            m.contains("packages/a/src") && m.contains("packages/b/src"),
+            "{m:?}"
+        );
+        assert!(d.scope.file_scope.cross_partition, "overlay contributed");
+        assert!(d.scope.module_aggregated);
+    }
+
+    #[test]
+    fn module_cycles_inherit_completeness_degradation() {
+        // D4: the module answer inherits file_import_cycles' completeness exactly.
+        let mut lg = LiveGraph::new();
+        lg.load_partition("a", pkg_a_imports_b(), LanguageSupport::TypeScriptPrimary);
+        lg.load_partition("b", pkg_b_imports_a(), LanguageSupport::TypeScriptPrimary);
+        assert_eq!(lg.module_import_cycles().class(), AnswerClass::Exact);
+
+        lg.mark_stale("a"); // both resident, one stale -> Stale.
+        assert_eq!(lg.module_import_cycles().class(), AnswerClass::Stale);
+
+        lg.unload_partition("b"); // b non-resident -> Partial + missing (overlay also drops).
+        let degraded = lg.module_import_cycles();
+        assert_eq!(degraded.class(), AnswerClass::Partial);
+        assert!(degraded.missing_partitions().contains(&"b".to_string()));
     }
 }
