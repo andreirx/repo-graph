@@ -25,6 +25,10 @@ use repo_graph_trust_model::{
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+/// MODULE-AGGREGATION-1 (D5): compare LiveGraph-derived MODULE cycles to SQLite `rmap cycles` + class the
+/// divergences. A separate module (the 500-line guardrail keeps it out of this file).
+pub mod module_cycle_compare;
+
 /// Per-partition epoch (bumped on each swap; D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PartitionEpoch(pub u64);
