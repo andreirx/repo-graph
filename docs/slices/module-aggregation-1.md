@@ -1,7 +1,11 @@
 # MODULE-AGGREGATION-1: derive MODULE import cycles from the FILE import graph (equivalence analysis)
 
 Slice ID: MODULE-AGGREGATION-1
-Status: **RATIFIED (2026-06-03). Implementation in progress.** Ratified: D1=A (`module(file)=dirname(repo-
+Status: **IMPLEMENTED (2026-06-03), headless.** module_import_cycles derives MODULE cycles from the FILE
+graph (dirname identity); the fixture is EXACT-equivalent to SQLite `rmap cycles` (unit + live harness); the
+compare/classify logic + divergence vocabulary are built; the real-repo compare is deferred to
+MODULE-CYCLES-CLI-1 (no surface this slice). NO default flip / decommission / deletion. See **Completion**.
+Ratified: D1=A (`module(file)=dirname(repo-
 relative path)`), D2=skip-self + dedup, D3=A (headless + compare harness; no CLI), D4=inherit
 file-import completeness + module-aggregation caveat, D5=fixture EXACT / real-repo subset with classed
 divergences / no default migration. Key-parse: REUSE the resolver's proven `file_key_path` (first-colon =
@@ -154,6 +158,60 @@ module-cycle parity). No new trust class. No module MEASUREMENTS (degree/complex
    procedure to compare on a real repo with module cycles.
 3. docs: completion + the equivalence EVIDENCE (fixture exact; real-repo divergences explained) + the
    ratified equivalence criteria for any future default migration.
+```
+
+## Completion (implemented 2026-06-03, EXECUTED)
+
+Commits: `49e8a8e` (spec) + `77d9516` (1/3 headless) + `1e07d15` (2/3 compare) + this doc (3/3).
+
+### What landed
+```text
+repo-graph-import-resolver : file_key_path + dirname made PUBLIC (the proven, colon-safe key parsers
+  reused for module identity; NO new slicing -> the ratified key-parse stop condition satisfied).
+repo-graph-livegraph       : LiveGraph::module_import_cycles() — aggregate the SAME captured FILE import
+  graph file_import_cycles uses (resident AstImport UNION the xpart overlay) to MODULE granularity:
+  module(file)=dirname(file_key_path(key)) (D1), SKIP self-module + DEDUP (D2), Tarjan SCC. Refactored the
+  shared parts (file_import_edges, whole_graph_completeness, capture_envelope) so the module answer INHERITS
+  the file completeness model EXACTLY (D4). Types: ModuleImportCycle, ModuleImportCyclesAnswer,
+  ModuleImportCycleScope { file_scope, module_aggregated } — never "all module cycles".
+repo-graph-livegraph/module_cycle_compare.rs : pure compare_module_cycles (by module-path SETS) ->
+  { matched, missing_in_livegraph, extra_in_livegraph } + is_exact()/is_livegraph_subset(); the
+  ModuleCycleDivergence vocabulary (5 classes) + classify_divergences (D5). Separate file (500-line guardrail).
+scripts/compare-module-cycles.sh : LIVE equivalence cross-check on the fixture (no module-cycle CLI yet).
+```
+
+### Equivalence evidence (D5)
+```text
+FIXTURE = EXACT (the gate):
+  - AUTHORITATIVE (unit): module_cycle_uses_xpart_overlay asserts the LiveGraph module cycle ==
+    {packages/a/src, packages/b/src} — the SAME modules SQLite `rmap cycles` reports.
+  - LIVE corroboration (scripts/compare-module-cycles.sh, EXECUTED, exit 0): SQLite -> 1 module cycle, 2
+    "src" modules; the LiveGraph FILE cycle dirname-aggregates to {packages/a/src, packages/b/src};
+    short-names match. PASS.
+REAL REPO = DEFERRED (honest): comparing LiveGraph module cycles against SQLite on an ARBITRARY repo needs a
+  surface to dump LiveGraph module cycles (none this slice — D3/req4 "no CLI"). The compare LOGIC + the
+  divergence vocabulary are BUILT + unit-tested now; the live real-repo run is MODULE-CYCLES-CLI-1. The
+  expected outcome is recorded: LiveGraph SUBSET-of SQLite (package/dynamic/unresolved gaps), each missing
+  cycle CLASSED; an `extra` LiveGraph cycle would be an overclaim/bug.
+```
+
+### Acceptance outcomes
+```text
+1. headless module_import_cycles (dirname + skip-self + dedup + Tarjan)             PASS (5 unit tests).
+2. trust-labelled like file_import_cycles; module_aggregated; never "all module"     PASS (inherited; tests).
+3. equivalence harness; fixture EXACT; real-repo subset/classed                       PARTIAL: fixture EXACT
+   (unit + live); real-repo compare DEFERRED to MODULE-CYCLES-CLI-1 (no surface) — documented.
+4. full gate + harness EXECUTED                                                        PASS (see evidence).
+5. no default flip / decommission / deletion                                          PASS (none touched).
+```
+
+### Validation evidence
+```text
+EXECUTED: cargo test -p repo-graph-livegraph (54: 49 prior + 5 module + 5 compare; refactor behavior-
+  preserving) -p repo-graph-import-resolver; cargo test --workspace (220 binaries ok, 0 failures);
+  clippy --workspace --all-targets -- -D warnings (clean); cargo fmt --all -- --check (clean).
+LIVE (EXECUTED): scripts/compare-module-cycles.sh PASS (exit 0) — dirname-aggregated LiveGraph FILE cycle ==
+  SQLite MODULE cycle on the fixture.
 ```
 
 ## Follow-up slices
