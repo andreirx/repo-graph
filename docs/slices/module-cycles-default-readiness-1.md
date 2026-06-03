@@ -1,7 +1,10 @@
 # MODULE-CYCLES-DEFAULT-READINESS-1: measure module-cycle compare across a real repo set
 
 Slice ID: MODULE-CYCLES-DEFAULT-READINESS-1
-Status: **RATIFIED (2026-06-03). Implementation in progress.** Spec ratified with the B-control
+Status: **MEASURED (2026-06-03). VERDICT: YELLOW.** EXECUTED across 5 repos: control A EXACT; 3 real TS
+repos (amodx/hexmanos/zap-engine) ALL EXACT (0 missing, 0 extra); the only divergence is 1 Rust/non-TS cycle
+in mixed-language repo-graph (MissingDueToUnloadedOrNonTsPartition). Unknown=0, extra=0. The "package
+resolution is the dominant gap" assumption is REFUTED on the measured set. See **Completion**. Spec ratified with the B-control
 refinement: control B (repo-graph) is the EXPECTED BOUNDARY OUTCOME, not a hard invariant — if repo-graph
 has no meaningful TS LiveGraph partition set / producer path, it is a BOUNDARY-CONTROL OBSERVATION (NOT RUN
 / boundary-only), not a migration-readiness sample. Only control A invalidates the run. A MEASUREMENT slice: run the existing
@@ -117,11 +120,82 @@ measurement harness/doc. The compare is DIAGNOSTIC; it changes no default answer
    vs fix-correctness).
 ```
 
-## Follow-up (verdict-dependent; NOT chosen here)
+## Completion (measured 2026-06-03, EXECUTED)
+
+Commits: `17c4aec` (spec) + this doc + `scripts/measure-module-cycle-readiness.sh`.
+
+### Result table (EXECUTED; sidecars are exact paths)
 ```text
-- IMPORTS-PACKAGE-RESOLUTION-1   : if MissingDueToPackageExternal/path-alias dominates.
-- CYCLES-DEFAULT-MIGRATION-1     : if YELLOW + labeled-degradation is acceptable (a ratified flip).
-- a derivation/classifier fix    : if any UnexpectedExtra or Unknown appears (correctness before completeness).
+repo                       sqlite lg matched missing  [by class]                       extra  coverage(part/loaded/xpart)
+A xpart-monorepo (control)   1     1    1      0       [all 0]                            0     2/2/2          EXACT
+B repo-graph (mixed Rust+TS) 6     5    5      1       [unloaded=1]                       0     2/2/0          TS-exact; 1 Rust/non-TS
+C amodx (real TS monorepo)   3     3    3      0       [all 0]                            0     8/8/20         EXACT
+C hexmanos (real TS)         1     1    1      0       [all 0]                            0     3/3/0          EXACT
+C zap-engine (real TS)       1     1    1      0       [all 0]                            0     4/4/4          EXACT
+TOTALS over 5 EXECUTED       —     —   11      1       missing=1 (unloaded), unknown=0,   0     —
+                                                       extra=0, identity=0
+Sidecars: A .../xpart-monorepo/.rgr/livegraph-compare/module-1780511102206.json;
+  B <repo-graph>/.rgr/livegraph-compare/module-1780511202100.json;
+  C amodx .../amodx/.rgr/.../module-1780511220901.json; hexmanos .../module-1780511280426.json;
+  zap-engine .../module-1780511326110.json.
+NOT RUN: none (all candidates A,B,amodx,hexmanos,zap-engine were EXECUTED). fraktag/glamCRM/zap-squad were
+  not attempted (no root tsconfig); legacy-codebases not attempted (non-TS).
+```
+
+### VERDICT: YELLOW (labeled-degradation candidate; NOT a flip)
+```text
+Control A EXACT (run VALID). UnknownDivergence = 0. UnexpectedExtraInLiveGraph = 0. ModuleIdentityMismatch =
+0. missing = 1, SOLELY MissingDueToUnloadedOrNonTsPartition (a Rust/non-TS module cycle in the mixed-language
+repo-graph). -> YELLOW by the ratified rules. For the FOUR pure-TS repos (A, amodx, hexmanos, zap-engine) it
+is GREEN (all EXACT, including the cross-partition monorepo amodx: 8 partitions / 20 overlay edges).
+```
+
+### The headline finding (refutes the READINESS-4 hypothesis)
+```text
+On EVERY real TS repo measured (amodx, hexmanos, zap-engine -- incl. a real cross-partition monorepo), the
+LiveGraph derived MODULE cycles are EXACTLY EQUAL to SQLite `rmap cycles`: 0 missing, 0 extra. PACKAGE-name /
+dynamic / path-alias imports caused ZERO module-cycle divergence. The READINESS-4 assumption ("package
+resolution is likely the dominant gap") is NOT SUPPORTED by the measured set. The ONLY divergence in the
+whole run is a single NON-TS (Rust) module cycle in the mixed-language repo-graph -- the TS-only LANGUAGE
+boundary, correctly classified, NOT a completeness gap closable by package resolution.
+SAMPLE CAVEAT (honest): 3 real TS repos, all single-org. A broader/heavier-package-import open-source set
+COULD still surface PackageExternal divergence; this run does not prove its universal absence -- it
+DISPROVES it being dominant on the measured repos. NOT RUN cannot contribute to GREEN (rules), so the verdict
+stays YELLOW even though the TS subset is GREEN.
+```
+
+### Measurement integrity note (a flaw found + fixed)
+```text
+The FIRST run mis-framed B (repo-graph) as a "non-TS control" and refreshed NO TS roots -> it relied on
+pre-existing non-deterministic LiveGraph state (it surfaced repo-graph's OWN TS codebase under src/, which I
+had wrongly assumed was Rust-only). FIXED: the harness now DISCOVERS + refreshes repo-graph's TS roots
+(excluding the in-repo fixture), making B deterministic (5 TS cycles matched + 1 Rust cycle missing). This
+doc records the FIXED run. repo-graph is a MIXED-language repo, not a non-TS control.
+```
+
+### Next slice (data-driven; the histogram, not the assumption)
+```text
+NOT IMPORTS-PACKAGE-RESOLUTION-1 -- the data shows NO package-import divergence on the measured TS repos, so
+package resolution is NOT the priority the assumption predicted. The evidence instead supports:
+  - CYCLES-DEFAULT-MIGRATION-1 (labeled-degradation): TS module cycles are EXACT; a migrated default would
+    need only to LABEL the non-TS (UnloadedOrNonTsPartition) cycles as incomplete (never silently drop). The
+    YELLOW verdict is exactly this candidate.
+  - OR broaden the measurement (READINESS-1b): a larger/open-source TS set to test the no-package-gap finding
+    before committing to a flip -- because NOT RUN cannot contribute to GREEN and the sample is small.
+Recommend confirming with a broader set OR proceeding to a labeled-degradation flip SPEC; do NOT build
+package resolution on the strength of an assumption the measurement refuted.
+```
+
+## Follow-up (data-driven by the YELLOW verdict)
+```text
+- IMPORTS-PACKAGE-RESOLUTION-1   : NOT INDICATED -- the measurement found ZERO MissingDueToPackageExternal on
+                                   the real TS repos. Do not build it on the refuted assumption.
+- MODULE-CYCLES-DEFAULT-READINESS-1b : broaden the measurement to a larger/open-source TS set (NOT RUN can't
+                                   contribute to GREEN; the sample is 3 single-org repos). Cheap; de-risks a flip.
+- CYCLES-DEFAULT-MIGRATION-1     : a LABELED-DEGRADATION default flip SPEC -- TS module cycles are EXACT; the
+                                   default must LABEL non-TS (UnloadedOrNonTsPartition) cycles as incomplete,
+                                   never silently drop. The YELLOW verdict is precisely this candidate. (Still
+                                   does NOT free nodes/edges -- the other commands / non-TS / fallback remain.)
 ```
 
 ## References
