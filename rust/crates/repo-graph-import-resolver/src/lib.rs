@@ -129,8 +129,10 @@ fn candidate_paths(base: &str) -> [String; 7] {
 }
 
 /// Join a repo-relative directory with a relative specifier, resolving `.`/`..` (a `..` that escapes the
-/// directory pops the parent — so an import from `packages/a/src` of `../../b/x` -> `packages/b/x`).
-fn normalize_join(dir: &str, spec: &str) -> String {
+/// directory pops the parent — so an import from `packages/a/src` of `../../b/x` -> `packages/b/x`). PUBLIC
+/// (MODULE-CYCLES-COMPARE-CLASSIFY-1): the classifier reuses this to normalize a `StaticUnresolved` import's
+/// target path from its source MODULE directory (no new path math).
+pub fn normalize_join(dir: &str, spec: &str) -> String {
     let mut parts: Vec<&str> = if dir.is_empty() {
         Vec::new()
     } else {
