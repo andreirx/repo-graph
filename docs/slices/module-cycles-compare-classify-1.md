@@ -1,7 +1,10 @@
 # MODULE-CYCLES-COMPARE-CLASSIFY-1: evidence-backed classification of missing module-cycle divergences
 
 Slice ID: MODULE-CYCLES-COMPARE-CLASSIFY-1
-Status: **RATIFIED (2026-06-03). Implementation in progress.** Ratified: D1 pure support module; **D2=A
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-03).** Missing module-cycle divergences are now
+evidence-backed: the compare classifier replaces the blanket `UnknownDivergence` (live: a partial-load
+exercise classified the missing cycle `MissingDueToUnloadedOrNonTsPartition`; the fixture exact case stays
+empty). See **Completion**. Ratified: D1 pure support module; **D2=A
 LiveGraph-evidence-only** (no SQLite edge reads); D3 refined vocabulary; D4 conservative precedence
 (Unknown over a guess); D5 `import_observations_by_module()` + `ObservationView`. NO default flip /
 decommission / deletion. Replace the fixed `UnknownDivergence`
@@ -149,6 +152,54 @@ exact-edge attribution is the rejected B). NO exact-cause guess without evidence
 3. validation: synthetic unit tests; compare-module-cycles.sh fixture stays exact; document the real-repo
    procedure + the Unknown=0/no-extra default-migration gate.
 4. docs: completion + (if a real repo is staged) the class histogram.
+```
+
+## Completion (implemented 2026-06-03, EXECUTED)
+
+Commits: `b86ec6e` (spec) + `e2fafde` (1/3 classifier) + `eadc0ae` (2/3 wiring) + this doc (3/3).
+
+### What landed
+```text
+repo-graph-import-resolver : normalize_join made PUBLIC (the classifier reuses it; no new path math).
+repo-graph-livegraph/module_cycle_compare : ModuleCycleDivergence REFINED (D3) + as_str(); ObsResolution +
+  ObservationView (D5, IR-free); classify_missing_module_cycle (D2=A, D4 precedence: residency -> identity
+  near-variant -> confirmed StaticUnresolved bridge -> sole package XOR dynamic -> else Unknown).
+repo-graph-livegraph/lib.rs : resident_module_paths() + import_observations_by_module() accessors (D5).
+daemon livegraph_feed.rs : module_cycle_compare_response classifies each MISSING cycle via the classifier
+  (replacing the blanket UnknownDivergence); extra cycles stay UnexpectedExtraInLiveGraph; sidecar shape
+  preserved (only the missing entries' `divergence` strings are now evidence-backed).
+```
+
+### Live validation (EXECUTED 2026-06-03)
+```text
+1 FIXTURE EXACT (regression): scripts/compare-module-cycles.sh PASS (exit 0) -- both partitions resident ->
+  missing=[] -> the classifier is NOT invoked; compare empty; default SQLite unchanged.
+2 CLASSIFIER LIVE (partial-load exercise, not a fabricated divergence): refresh ONLY packages/a into the
+  LiveGraph (b non-resident) while SQLite still has the a<->b module cycle -> compare missing=1, classified
+  "MissingDueToUnloadedOrNonTsPartition" (OBSERVED: cycle [packages/a/src, packages/b/src], divergence
+  MissingDueToUnloadedOrNonTsPartition; matched=0; livegraph_subset=true). The blanket UnknownDivergence is
+  replaced by the evidence-backed cause. Re-refreshing both -> exact again (harness PASS).
+```
+
+### Acceptance outcomes
+```text
+1. unit test each cause + mixed -> Unknown                       PASS (7 classify tests, 1/3).
+2. fixture exact compare stays EMPTY (classifier not invoked)    PASS (harness, live).
+3. real-repo class histogram                                     DEFERRED (no real repo with a LiveGraph-
+   missed module cycle staged; the partial-load exercise demonstrates the non-resident class live; the full
+   package/dynamic/unresolved histogram needs a real multi-partition repo -- recorded).
+4. no default-migration claim                                    HELD (the default is untouched; the
+   Unknown=0/no-extra gate is recorded for CYCLES-DEFAULT-MIGRATION-1).
+5. full gate                                                     PASS (see evidence).
+```
+
+### Validation evidence
+```text
+EXECUTED: cargo test -p repo-graph-livegraph (incl. 7 classify cases) -p repo-graph-import-resolver
+  -p repo-graph-daemon-runtime (green); cargo test --workspace (220 binaries ok, 0 failures);
+  clippy --workspace --all-targets -- -D warnings (clean); cargo fmt --all -- --check (clean).
+LIVE (EXECUTED): dev-install healthy; compare-module-cycles.sh PASS (fixture exact, compare empty);
+  partial-load classifier exercise -> missing cycle classified MissingDueToUnloadedOrNonTsPartition.
 ```
 
 ## Follow-up slices
