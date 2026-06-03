@@ -1,7 +1,9 @@
 # MODULE-CYCLES-CLI-1: explicit CLI surface for LiveGraph MODULE import cycles + compare
 
 Slice ID: MODULE-CYCLES-CLI-1
-Status: **RATIFIED (2026-06-03). Implementation in progress.** Ratified: D1 CyclesRoute enum; D2 LiveGraph
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-03).** All 4 cycles routes ship
+(`--engine livegraph|compare|sqlite --kind module-import`); the fixture compare is EXACT (empty
+divergences); the `rmap cycles` default is byte-unchanged. See **Completion**. Ratified: D1 CyclesRoute enum; D2 LiveGraph
 module response (member name = module PATH; scope `aggregation_basis:"dirname"`); D3 dedicated MODULE-import
 human renderer; **D4=A** (structural compare + sidecar: missing -> UnknownDivergence, extra ->
 UnexpectedExtraInLiveGraph; NO auto package/dynamic attribution this slice -> MODULE-CYCLES-COMPARE-CLASSIFY-1);
@@ -156,6 +158,59 @@ measurements. The compare is DIAGNOSTIC; it changes no default answer.
 3. validation: drive scripts/compare-module-cycles.sh through the new CLI (fixture exact, compare empty);
    document the real-repo procedure + the stop-on-unexplained gate.
 4. docs: completion + the fixture compare evidence + (if a real repo is staged) the classed divergences.
+```
+
+## Completion (implemented 2026-06-03, EXECUTED)
+
+Commits: `812dcfc` (spec) + `fd3ef81` (2/4 livegraph route) + `dcfce82` (3/4 compare route) + this doc (4/4).
+
+### What landed
+```text
+CLI (rgr/graph.rs)       : CyclesRoute enum (SqliteModule/LivegraphFile/LivegraphModule/CompareModule)
+  replaces the livegraph bool; the 4 live routes + reject matrix; render_human_module_import (D3); the
+  compare summary line beside the SQLite primary.
+daemon livegraph_feed.rs : module_import_cycles_response (D2; member name = module PATH; scope
+  aggregation_basis=dirname) + module_cycle_compare_response (D4=A) + the .rgr/livegraph-compare/module-<ts>
+  sidecar.
+daemon dispatch.rs       : handle_cycles routes (livegraph,module-import) + (compare,module-import); the
+  compare reject is now (compare,file-import)/(compare,_); sqlite+module-import falls through (D6).
+storage queries.rs       : module_qualified_names (D5; compare-only node_uid->qualified path; default output
+  unchanged).
+presentation/cycles.rs   : render_human_module_import (MODULE vocabulary, module paths, no "rmap modules deps").
+```
+
+### Live validation (EXECUTED 2026-06-03, scripts/compare-module-cycles.sh PASS exit 0)
+```text
+A --engine livegraph --kind module-import -> "1 MODULE import cycle found / Cycle 1 (2 modules): packages/a/src
+  -> packages/b/src -> packages/a/src"; scope backend=livegraph, aggregation=dirname, class=Exact; JSON
+  carries backend_used/kind/answer_class/freshness/scope/module_aggregated/aggregation_basis=dirname (req 6).
+B --engine compare --kind module-import -> SQLite primary (the "src" MODULE cycle) + summary "1 matched, 0
+  missing (UnknownDivergence), 0 extra (UnexpectedExtraInLiveGraph); livegraph_subset=true; sidecar=...".
+  FIXTURE EXACT: matched=1, missing_in_livegraph=[], extra_in_livegraph=[], sidecar written.
+C default `rmap cycles` -> "1 module-level cycle / (2 modules)" UNCHANGED; `--engine sqlite --kind
+  module-import` BYTE-IDENTICAL to the default (D6).
+D rejects: --engine compare --kind file-import; --engine livegraph (no kind); --engine sqlite --kind
+  file-import -> all rejected with precise messages.
+```
+
+### Acceptance outcomes
+```text
+1. fixture livegraph module cycle + compare EMPTY                 PASS (harness A + B, live).
+2. real repo compare classifies (D4=A: missing=Unknown, extra=overclaim); stop on extra  DEFERRED (no real
+   repo staged; the route + the structural compare + the stop signal livegraph_subset=false are READY; auto
+   cause attribution is MODULE-CYCLES-COMPARE-CLASSIFY-1).
+3. default + --engine sqlite unchanged; --kind file-import unchanged                       PASS (harness C).
+4. reject matrix                                                                            PASS (harness D).
+5. full gate                                                                                PASS (see evidence).
+```
+
+### Validation evidence
+```text
+EXECUTED: cargo test -p repo-graph-storage -p repo-graph-daemon-runtime -p repo-graph-rgr (green; incl.
+  render_human_module_import); cargo test --workspace (220 binaries ok, 0 failures); clippy --workspace
+  --all-targets -- -D warnings (clean); cargo fmt --all -- --check (clean).
+LIVE (EXECUTED): dev-install healthy; scripts/compare-module-cycles.sh PASS (exit 0) -- all 4 routes +
+  reject matrix on the fixture; compare EXACT (empty divergences); default SQLite unchanged.
 ```
 
 ## Follow-up slices
