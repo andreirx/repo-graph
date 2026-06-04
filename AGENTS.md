@@ -9,6 +9,10 @@ If a rule can be enforced by script, hook, or CI, prefer enforcement over instru
 
 You are not constrained by human development timelines. No need to cut corners. Implement full solutions.
 
+## VISION: Orientation over Perfection
+
+80% right with 20% effort beats 100% right with 100% effort. We beat the command line tools like grep, sed, awk — we don't replace compilers. Precision matters for call graphs; fuzziness is fine for module discovery (agents can refine). Build with effort where it matters — ask for keeping it simple where the informational gains are not that good.
+
 ## Fact Certainty Model
 
 Not all stored data has the same factual status.
