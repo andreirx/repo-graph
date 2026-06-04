@@ -29,6 +29,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 /// divergences. A separate module (the 500-line guardrail keeps it out of this file).
 pub mod module_cycle_compare;
 
+/// CYCLES-COMPLETENESS-CERT-1: the module-import-cycle completeness certificate type + pure evaluator (the
+/// policy boundary the deferred default migration consumes). Separate module (500-line guardrail).
+pub mod module_cycle_cert;
+
 use module_cycle_compare::{ObsResolution, ObservationView};
 
 /// Per-partition epoch (bumped on each swap; D3).
@@ -1253,6 +1257,71 @@ impl LiveGraph {
             }
         }
         out
+    }
+
+    /// CYCLES-COMPLETENESS-CERT-1: snapshot the certificate-relevant LiveGraph state (per-partition epoch /
+    /// freshness / language / producer fingerprint + the uncaptured import-class evidence). PURE read; the
+    /// cert evaluator consumes this + a baseline. `has_unresolved_after_overlay` EXCLUDES `StaticUnresolved`
+    /// observations the cross-partition overlay DID resolve (those are captured edges).
+    pub fn module_cycle_live_state(&self) -> module_cycle_cert::LiveCycleState {
+        use module_cycle_cert::{LiveCycleState, LivePartition, ObservationClassSummary};
+        let partitions: Vec<LivePartition> = self
+            .slots
+            .iter()
+            .map(|(id, s)| {
+                let (source_inputs_hash, producer_fingerprint) = s
+                    .ir
+                    .as_ref()
+                    .map(|ir| {
+                        (
+                            ir.partition.build_inputs_hash.clone(),
+                            format!("{}@{}", ir.partition.indexer, ir.partition.indexer_version),
+                        )
+                    })
+                    .unwrap_or_default();
+                LivePartition {
+                    id: id.clone(),
+                    epoch: s.epoch.0,
+                    // RESIDENT + Fresh: an unloaded slot (ir=None, summary retained) is NOT providing its
+                    // cycle data, so it must NOT count as fresh (else a missing partition reads as present).
+                    fresh: s.ir.is_some() && status_freshness(s.status) == FreshnessState::Fresh,
+                    ts: matches!(s.language, LanguageSupport::TypeScriptPrimary),
+                    source_inputs_hash,
+                    producer_fingerprint,
+                }
+            })
+            .collect();
+        // (src FILE key, raw specifier) the overlay RESOLVED -> a matching StaticUnresolved obs is captured.
+        let overlay: BTreeSet<(&str, &str)> = self
+            .xpart_overlay
+            .iter()
+            .map(|e| (e.src_file_key.as_str(), e.raw_specifier.as_str()))
+            .collect();
+        let mut o = ObservationClassSummary::default();
+        for s in self.slots.values() {
+            if let Some(ir) = &s.ir {
+                for obs in &ir.import_observations {
+                    match obs.resolution {
+                        ImportResolution::PackageExternal => o.has_package_external = true,
+                        ImportResolution::DynamicUnsupported => o.has_dynamic = true,
+                        ImportResolution::StaticUnresolved => {
+                            let resolved = overlay.iter().any(|(src_key, raw)| {
+                                *raw == obs.raw_specifier.as_str()
+                                    && file_key_path(src_key) == Some(obs.source_file.as_str())
+                            });
+                            if !resolved {
+                                o.has_unresolved_after_overlay = true;
+                            }
+                        }
+                        ImportResolution::StaticResolved => {}
+                    }
+                }
+            }
+        }
+        LiveCycleState {
+            partitions,
+            observation_classes: o,
+        }
     }
 }
 
@@ -2582,5 +2651,48 @@ mod tests {
         let degraded = lg.module_import_cycles();
         assert_eq!(degraded.class(), AnswerClass::Partial);
         assert!(degraded.missing_partitions().contains(&"b".to_string()));
+    }
+
+    // ── module_cycle_live_state (CYCLES-COMPLETENESS-CERT-1) ───────────
+
+    #[test]
+    fn module_cycle_live_state_snapshot_and_evaluate() {
+        use crate::module_cycle_cert::{
+            evaluate_module_cycle_completeness, BaselineInput, ModuleCycleCompleteness,
+        };
+        let baseline = BaselineInput {
+            expected_partition_ids: ["a".to_string(), "b".to_string()].into_iter().collect(),
+            has_non_ts_cycle_source: false,
+            repo_index_epoch: 1,
+            language_support_version: 1,
+        };
+
+        let mut lg = LiveGraph::new();
+        lg.load_partition("a", pkg_a_imports_b(), LanguageSupport::TypeScriptPrimary);
+        lg.load_partition("b", pkg_b_imports_a(), LanguageSupport::TypeScriptPrimary);
+        let snap = lg.module_cycle_live_state();
+        assert_eq!(snap.partitions.len(), 2);
+        assert!(snap.partitions.iter().all(|p| p.fresh && p.ts));
+        // the cross-partition StaticUnresolved imports were OVERLAY-resolved -> NOT counted as a gap.
+        assert!(!snap.observation_classes.has_unresolved_after_overlay);
+        assert!(!snap.observation_classes.has_package_external);
+        assert!(!snap.observation_classes.has_dynamic);
+        assert_eq!(
+            evaluate_module_cycle_completeness(&snap, Some(&baseline)),
+            ModuleCycleCompleteness::CompleteForModuleImportCycles
+        );
+        // no baseline -> never Complete.
+        assert_eq!(
+            evaluate_module_cycle_completeness(&snap, None),
+            ModuleCycleCompleteness::UnknownBaselineMissing
+        );
+
+        // unload b -> b non-resident (not fresh) -> the expected set is not all loaded-fresh -> missing.
+        lg.unload_partition("b");
+        let snap2 = lg.module_cycle_live_state();
+        assert_eq!(
+            evaluate_module_cycle_completeness(&snap2, Some(&baseline)),
+            ModuleCycleCompleteness::IncompleteMissingPartitions
+        );
     }
 }
