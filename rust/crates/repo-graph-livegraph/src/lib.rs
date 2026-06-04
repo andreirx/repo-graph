@@ -2665,6 +2665,7 @@ mod tests {
             has_non_ts_cycle_source: false,
             repo_index_epoch: 1,
             language_support_version: 1,
+            import_completeness_policy_version: 1,
         };
 
         let mut lg = LiveGraph::new();

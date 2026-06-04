@@ -46,6 +46,7 @@
 //! }
 //! ```
 
+pub mod cycle_completeness_audit;
 pub mod dispatch;
 pub mod handlers;
 pub mod livegraph_feed;

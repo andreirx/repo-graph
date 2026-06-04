@@ -241,6 +241,7 @@ impl Dispatcher for ServiceDispatcher {
             "callees" => self.handle_callees(request),
             "livegraph_preload" => self.handle_livegraph_preload(request),
             "livegraph_refresh" => self.handle_livegraph_refresh(request),
+            "cycle_completeness_audit" => self.handle_cycle_completeness_audit(request),
             "imports" => self.handle_imports(request),
             // RMAPD-PERF-1: These operations emit heartbeat for long queries
             "stats" => self.handle_stats(request, emitter),
@@ -798,6 +799,47 @@ impl ServiceDispatcher {
                     "value_facts_warmed": false,
                 }),
             ),
+        }
+    }
+
+    /// CYCLES-COMPLETENESS-AUDIT-1 (dev-only, READ-ONLY): build the module-cycle completeness BASELINE
+    /// (filesystem tsconfig discovery + the SQLite language inventory, AT THE AUDIT BOUNDARY) and report the
+    /// SQLite-free certificate for the CURRENT in-memory LiveGraph. Does NOT refresh/load partitions (the
+    /// caller loads them first via `livegraph_refresh`) and changes NO default. Mirrors the ratified
+    /// boundary: the audit reads SQLite; the certificate evaluator never does.
+    fn handle_cycle_completeness_audit(&self, request: &Request) -> DispatchResult {
+        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
+            Ok(r) => r,
+            Err(e) => return DispatchResult::error(&request.id, e),
+        };
+        let repo_root = Self::get_optional_string_param(&request.params, "repo")
+            .unwrap_or("")
+            .to_string();
+        let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
+            Ok(Some(snap)) => snap,
+            Ok(None) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::SnapshotNotFound, "no snapshot found"),
+                );
+            }
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+        match crate::cycle_completeness_audit::cycle_completeness_audit_response(
+            &repo_state,
+            &repo_uid,
+            &snapshot.snapshot_uid,
+            &repo_root,
+        ) {
+            Ok(v) => DispatchResult::success(&request.id, v),
+            Err(e) => {
+                DispatchResult::error(&request.id, ErrorDetail::new(ErrorCode::InternalError, e))
+            }
         }
     }
 

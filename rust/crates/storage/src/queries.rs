@@ -1059,6 +1059,25 @@ impl StorageConnection {
         Ok(map)
     }
 
+    /// CYCLES-COMPLETENESS-AUDIT-1 (D3-A): the DISTINCT non-null `files.language` values for a repo -- the
+    /// language INVENTORY the completeness audit reads (at the audit boundary) to decide
+    /// `has_non_ts_cycle_source`. `files` is keyed by `repo_uid` (no snapshot dimension); the indexer
+    /// (`indexer/routing.rs::detect_language`) writes only a CLOSED, code-only vocabulary
+    /// (typescript/tsx/javascript/jsx/java/python/rust/c/cpp) or NULL for non-code files -- so a non-null
+    /// value is ALWAYS a real code language (no "unknown"/doc/data pollution to filter). Read-only; never
+    /// consulted by the runtime certificate evaluator (which stays SQLite-free).
+    pub fn distinct_file_languages(&self, repo_uid: &str) -> Result<Vec<String>, StorageError> {
+        let mut stmt = self.connection().prepare(
+            "SELECT DISTINCT language FROM files
+             WHERE repo_uid = ? AND language IS NOT NULL
+             ORDER BY language ASC",
+        )?;
+        let langs = stmt
+            .query_map(rusqlite::params![repo_uid], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(langs)
+    }
+
     /// Compute per-module structural metrics.
     ///
     /// Mirrors the TS `computeModuleStats` (sqlite-storage.ts:2846-2964).

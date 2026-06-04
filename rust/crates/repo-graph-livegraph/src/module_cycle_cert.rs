@@ -111,6 +111,12 @@ pub struct BaselineInput {
     pub repo_index_epoch: u64,
     /// The language-support policy version (invalidation: a language-support change re-opens the question).
     pub language_support_version: u32,
+    /// The import-completeness policy version (CYCLES-COMPLETENESS-AUDIT-1 D2): which import classes the
+    /// policy treats as cycle-relevant/uncaptured. Invalidation: if the policy that maps
+    /// PackageExternal/Dynamic/StaticUnresolved -> `IncompleteImportClasses` changes (e.g. a future
+    /// IMPORTS-PACKAGE-RESOLUTION-1 declares resolved package imports non-cycle-relevant), every prior
+    /// certificate must be re-evaluated -- so it rides in the fingerprint.
+    pub import_completeness_policy_version: u32,
 }
 
 /// Evaluate the module-import-cycle completeness certificate (CYCLES-COMPLETENESS-CERT-1 D2/D3). PURE: no
@@ -192,11 +198,12 @@ pub fn certificate_inputs_fingerprint(
                 .collect();
             exp.sort();
             s.push_str(&format!(
-                "|base[{}:nts{}:ie{}:lv{}]",
+                "|base[{}:nts{}:ie{}:lv{}:ip{}]",
                 exp.join(","),
                 b.has_non_ts_cycle_source as u8,
                 b.repo_index_epoch,
-                b.language_support_version
+                b.language_support_version,
+                b.import_completeness_policy_version
             ));
         }
     }
@@ -223,6 +230,7 @@ mod tests {
             has_non_ts_cycle_source: non_ts,
             repo_index_epoch: 1,
             language_support_version: 1,
+            import_completeness_policy_version: 1,
         }
     }
     fn live(parts: Vec<LivePartition>, o: ObservationClassSummary) -> LiveCycleState {
@@ -375,6 +383,14 @@ mod tests {
             f0,
             certificate_inputs_fingerprint(&l, Some(&b3)),
             "language version invalidates"
+        );
+        // import-completeness policy version change (CYCLES-COMPLETENESS-AUDIT-1 D2)
+        let mut b4 = b.clone();
+        b4.import_completeness_policy_version = 2;
+        assert_ne!(
+            f0,
+            certificate_inputs_fingerprint(&l, Some(&b4)),
+            "import-completeness policy version invalidates"
         );
         // baseline present vs absent
         assert_ne!(

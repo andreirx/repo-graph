@@ -188,10 +188,14 @@ pub fn run_dev(args: &[String]) -> ExitCode {
     match args.first().map(|s| s.as_str()) {
         Some("livegraph-preload") => run_dev_livegraph_preload(&args[1..]),
         Some("livegraph-refresh") => run_dev_livegraph_refresh(&args[1..]),
+        Some("cycle-completeness-audit") => run_dev_cycle_completeness_audit(&args[1..]),
         _ => {
-            eprintln!("usage: rmap dev <livegraph-preload|livegraph-refresh> ...");
+            eprintln!(
+                "usage: rmap dev <livegraph-preload|livegraph-refresh|cycle-completeness-audit> ..."
+            );
             eprintln!("  livegraph-preload --repo <repo> --partition-id <id> --scip <index.scip> --source-root <source-root>");
             eprintln!("  livegraph-refresh --repo <repo> [--partition <id>] [--source-root <repo-relative-root>]...");
+            eprintln!("  cycle-completeness-audit --repo <repo>   (read-only; load partitions first via livegraph-refresh)");
             ExitCode::from(1)
         }
     }
@@ -249,6 +253,53 @@ fn run_dev_livegraph_refresh(args: &[String]) -> ExitCode {
         params["source_roots"] = serde_json::json!(source_roots);
     }
     match client.request("livegraph_refresh", Some(params)) {
+        Ok(result) => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                println!("{}", json);
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::from(2)
+            }
+        },
+        Err(e) => handle_daemon_error(e),
+    }
+}
+
+/// Hidden dev (CYCLES-COMPLETENESS-AUDIT-1): send the daemon `cycle_completeness_audit` method. READ-ONLY
+/// diagnostic — the daemon discovers the expected TS partition set (filesystem), reads the SQLite language
+/// inventory (audit boundary), and reports the SQLite-free module-cycle completeness certificate for the
+/// CURRENT in-memory LiveGraph. Load partitions first via `livegraph-refresh`; this does NOT load them and
+/// changes no default.
+fn run_dev_cycle_completeness_audit(args: &[String]) -> ExitCode {
+    let mut repo = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--repo" if i + 1 < args.len() => {
+                repo = Some(args[i + 1].clone());
+                i += 2;
+            }
+            other => {
+                eprintln!("error: unknown arg: {}", other);
+                return ExitCode::from(1);
+            }
+        }
+    }
+    let repo = match repo {
+        Some(r) => r,
+        None => {
+            eprintln!("usage: rmap dev cycle-completeness-audit --repo <repo>");
+            return ExitCode::from(1);
+        }
+    };
+    let mut client = match create_daemon_client("dev") {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    let params = serde_json::json!({ "repo": repo });
+    match client.request("cycle_completeness_audit", Some(params)) {
         Ok(result) => match serde_json::to_string_pretty(&result) {
             Ok(json) => {
                 println!("{}", json);
