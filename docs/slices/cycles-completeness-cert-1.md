@@ -1,7 +1,11 @@
 # CYCLES-COMPLETENESS-CERT-1: a module-import cycle completeness certificate + evaluator
 
 Slice ID: CYCLES-COMPLETENESS-CERT-1
-Status: **RATIFIED (2026-06-04). Implementation in progress.** D1–D6 as recommended. SUPPORT + TESTS ONLY
+Status: **IMPLEMENTED (2026-06-04), support-first.** The certificate type + pure evaluator +
+`LiveGraph::module_cycle_live_state` snapshot landed (`fbd899b`). Conservative-safe: no baseline provider
+exists yet, so it returns `UnknownBaselineMissing` everywhere -> SQLite fallback -> the default is UNCHANGED.
+Does NOT unblock the migration alone (the Complete path needs the baseline follow-ups). See **Completion**.
+D1–D6 as recommended. SUPPORT + TESTS ONLY
 (pure type/evaluator; NO SQLite reads in the evaluator; NO daemon default behaviour change; NO durable cache;
 NO migration). Baseline absent -> explicit `UnknownBaselineMissing` (never faked from loaded state). Records
 explicitly that this slice does NOT unblock the default migration alone. A SUPPORT slice: a CERTIFICATE TYPE + an
@@ -141,6 +145,56 @@ index-time audit) are PREREQUISITES, specced/built separately.
    baseline; expose it for diagnostics (e.g. surface in the compare/JSON). It returns Unknown/Incomplete
    until the baseline exists -> no behaviour change to the default.
 3. docs: completion + the explicit statement that the Complete path is gated on the baseline prerequisites.
+```
+
+## Completion (implemented 2026-06-04, EXECUTED)
+
+Commits: `98850a8` (spec) + `fbd899b` (impl).
+
+### What landed
+```text
+repo-graph-livegraph/module_cycle_cert.rs (new, pure -- no SQLite/IO):
+  - ModuleCycleCompleteness (D3, 6 states incl. explicit UnknownBaselineMissing) + as_str() +
+    permits_livegraph_default() (D6: Complete-only).
+  - LiveCycleState / LivePartition / ObservationClassSummary (the pure live snapshot) + BaselineInput (D2
+    interface: expected partition ids + non-TS evidence + repo index epoch + language-support version).
+  - evaluate_module_cycle_completeness(live, baseline?) -> state (precedence: baseline-missing ->
+    missing-partitions -> unsupported-language -> import-classes -> Complete; NEVER Complete without baseline).
+  - certificate_inputs_fingerprint (D4: all invalidation keys -> any change busts a cached certificate).
+repo-graph-livegraph/lib.rs: LiveGraph::module_cycle_live_state() -- read-only snapshot; a partition is
+  fresh ONLY if resident; has_unresolved_after_overlay EXCLUDES overlay-resolved StaticUnresolved (captured).
+```
+
+### Constraints honored
+```text
+SUPPORT + TESTS ONLY: no daemon wiring, no default behaviour change, no durable cache, no SQLite read in the
+evaluator, no migration. Baseline absent -> UnknownBaselineMissing (never faked). CONSERVATIVE by design.
+```
+
+### Acceptance outcomes
+```text
+1. type + pure evaluator + unit tests per state (incl. precedence + Unknown-without-baseline)  PASS (7 tests).
+2. invalidation: epoch / source_inputs_hash / producer fingerprint / repo index epoch / language version each
+   busts the inputs fingerprint                                                                  PASS.
+3. CONSERVATIVE today (no baseline provider exists) -> the evaluator returns UnknownBaselineMissing for every
+   real repo -> SQLite fallback -> default UNCHANGED + safe                                       PASS (by construction; UnknownBaselineMissing test).
+4. (when the baseline exists) a clean TS LiveGraph + matching baseline -> Complete; a non-resident/non-TS/
+   uncaptured-import case -> the matching Incomplete state                                        PASS (livegraph snapshot->evaluate test).
+5. full gate                                                                                      PASS (see evidence).
+```
+
+### Validation evidence
+```text
+EXECUTED: cargo test -p repo-graph-livegraph (23 module_cycle tests: compare + 7 cert + the snapshot->evaluate);
+  cargo test --workspace (220 binaries ok, 0 failures); clippy --workspace --all-targets -- -D warnings
+  (clean); cargo fmt --all -- --check (clean). NO live validation (support+tests only; no daemon change).
+```
+
+### Does NOT unblock the migration (explicit)
+```text
+This slice builds the certificate MECHANISM only. With NO baseline provider today the evaluator returns
+UnknownBaselineMissing everywhere -> SQLite fallback -> the `rmap cycles` default is UNCHANGED. The Complete
+path (and the migration it gates) lights up ONLY with the two follow-up baseline providers below.
 ```
 
 ## Follow-up (the baseline prerequisites + the unblocked migration)
