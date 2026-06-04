@@ -1,70 +1,159 @@
-# CYCLES-COMPLETENESS-CERT-1: certify LiveGraph whole-cycle-graph coverage (without SQLite-per-query)
+# CYCLES-COMPLETENESS-CERT-1: a module-import cycle completeness certificate + evaluator
 
 Slice ID: CYCLES-COMPLETENESS-CERT-1
-Status: **RECORDED PREREQUISITE (2026-06-04). NOT a build slice; not yet prioritized.** The blocker that
-CYCLES-DEFAULT-MIGRATION-1 deferred onto: a way to certify the LiveGraph covers the WHOLE cycle-relevant
-graph for a repo WITHOUT consulting SQLite on every query. Spec stub; ratify scope before any build.
-Depends: IMPORTS-XPART-ENUMERATION-1 (whole-repo partition discovery, the deferred F2), the trust/freshness
-model (epochs), MODULE-AGGREGATION-1 / MODULE-CYCLES-* (the cycle surface this would unblock). Track: Stage D.
+Status: **RATIFIED (2026-06-04). Implementation in progress.** D1–D6 as recommended. SUPPORT + TESTS ONLY
+(pure type/evaluator; NO SQLite reads in the evaluator; NO daemon default behaviour change; NO durable cache;
+NO migration). Baseline absent -> explicit `UnknownBaselineMissing` (never faked from loaded state). Records
+explicitly that this slice does NOT unblock the default migration alone. A SUPPORT slice: a CERTIFICATE TYPE + an
+EVALUATOR that decides whether the LiveGraph covers the WHOLE module-import-cycle graph for a repo, WITHOUT
+consulting SQLite per query. Goal is a certificate/policy, NOT a query feature. NO default flip, NO SQLite
+deletion, NO raw decommission, NO package resolver (unless this spec proves it required — it does not).
+Depends: MODULE-AGGREGATION-1 / MODULE-CYCLES-* (the cycle surface), the LiveGraph slot/epoch/language state,
+IMPORTS-XPART-ENUMERATION-1 (the expected-partition baseline — a Complete-path prerequisite). Track: Stage D.
 
-## Why (the gap CYCLES-DEFAULT-MIGRATION-1 hit)
+## Why (the blocker CYCLES-DEFAULT-MIGRATION-1 deferred onto)
 ```text
-A whole-graph cycle answer cannot be served LiveGraph-first because the LiveGraph CANNOT self-certify
-completeness: it is blind to (a) non-TS files (repo-graph's Rust module cycle: SQLite has it, the LiveGraph
-never had it as a partition, and `Exact` did not see it) and (b) TS partitions it has not loaded (F2). The
-only current completeness check is COMPARE-vs-SQLite EVERY call -- which keeps the SQLite dependency, so it
-is not a migration. This slice would build a certification that lets the default serve LiveGraph ONLY when
-provably complete, WITHOUT the per-query SQLite compare.
+The cycles default cannot go LiveGraph-first because a whole-graph answer cannot be certified COMPLETE from
+the LiveGraph's self-reported Exact+Fresh (repo-graph: Exact yet missing a non-TS Rust cycle). The only
+current check is compare-vs-SQLite EVERY call (keeps the dependency). This slice builds a CERTIFICATE the
+default can consult instead: valid+Complete -> serve LiveGraph (no per-query SQLite); else -> labelled SQLite
+fallback.
 ```
 
-## Goal
+## Grounding (EXECUTED 2026-06-04) — what the evaluator can vs cannot read
 ```text
-Produce a per-repo CYCLE-COMPLETENESS CERTIFICATE: a cached, epoch-invalidated fact that says "the LiveGraph's
-captured module-cycle graph is COMPLETE for this repo" (or names exactly why it is not). When valid, the
-`rmap cycles` default may serve LiveGraph WITHOUT consulting SQLite; when invalid/absent, it falls back to a
-labelled SQLite answer (never a silent drop).
+LIVE state (all accessible, NO SQLite): per loaded partition -> Slot.{epoch, status(freshness), language};
+  resident ir.partition.{build_inputs_hash, indexer, indexer_version} (producer fingerprint);
+  import_observations_by_module() (the observation classes); module_import_cycles().scope.
+NOT accessible from the LiveGraph (the GAP): the EXPECTED partition set (which partitions SHOULD exist --
+  the LiveGraph only knows what is LOADED; F2 no-enumeration) and the repo's LANGUAGE COMPOSITION (does the
+  repo have non-TS sources with import/cycle semantics? the LiveGraph is TS-only and blind to it).
+=> `Complete` requires PROVING NEGATIVES (no missing partition, no unrepresented non-TS source). Live state
+   ALONE can only DETECT some incompleteness; it cannot reach Complete without a recorded BASELINE.
 ```
 
-## Must answer (the certification questions — to spec before building)
+## Forced decisions (to ratify at sign-off) — every cell filled
+
+### D1 — certificate scope (the brief)
 ```text
-1. ENUMERATION: are ALL of the repo's cycle-relevant partitions DISCOVERED + loaded? (needs
-   IMPORTS-XPART-ENUMERATION-1 -- whole-repo partition discovery, not the current explicit --source-root.)
-2. LANGUAGES: are ALL languages with import / module-cycle semantics ACCOUNTED FOR? (the LiveGraph is
-   TS-only; a repo with non-TS import graphs -- Rust, Python, ... -- cannot be certified complete for cycles
-   unless those languages are either represented or explicitly excluded-from-scope.)
-3. TS IMPORT CLASSES: are all TS import classes either RESOLVED (captured edges) or REPRESENTED as DEGRADED
-   evidence (the classifier's PackageExternal/Dynamic/StaticUnresolved)? An unrepresented class = a possible
-   hidden cycle -> not certifiable.
-4. NON-TS HIDDEN CYCLES: can NO non-TS SQLite module cycle exist UNREPRESENTED -- i.e. either the repo is
-   provably TS-only (no non-TS source with import semantics), OR any non-TS import graph forces FALLBACK.
-   (This is the exact repo-graph failure: a Rust cycle the TS LiveGraph cannot see.)
-5. CACHING / INVALIDATION: the certificate is CACHED and INVALIDATED by repo / partition EPOCH (every
-   refresh / swap / re-index busts it) -- so the default never serves a stale "complete" claim.
+PER (repo) x (language: TS) x (partition set: the loaded set vs the expected set) x (query family:
+MODULE-IMPORT CYCLES ONLY). Not file-import, not callers/callees -- a certificate is specific to the
+module-import-cycle question (a different completeness shape per family). RECOMMENDED as written.
 ```
 
-## Outcome that unblocks the migration
+### D2 — the BASELINE source (THE crux)
 ```text
-ONLY after a VALID certificate exists can `rmap cycles` default become LiveGraph-first WITHOUT
-compare-every-call: valid certificate -> serve LiveGraph (no SQLite read); invalid/absent -> labelled SQLite
-fallback. THAT is the migration that actually frees the SQLite dependency for cycles (vs the deferred P2,
-which kept it).
+The evaluator needs a BASELINE to reach Complete: (i) the EXPECTED partition set, (ii) whether the repo has
+NON-TS cycle sources. Neither is in the LiveGraph.
+A. BUILD the evaluator + a BASELINE INTERFACE now; the baseline is an INPUT supplied by prerequisites --
+   (i) from IMPORTS-XPART-ENUMERATION-1 (whole-repo partition discovery), (ii) from a ONE-TIME index-time
+   AUDIT (SQLite language composition recorded at registration/index -- "SQLite for audit/training, NOT
+   per-query"). Without a baseline the evaluator is CONSERVATIVE (never Complete -> Unknown/Incomplete ->
+   SQLite fallback; SAFE).                                                                  [RECOMMENDED]
+B. Try to reach Complete from LIVE STATE ALONE.   REJECTED: cannot prove the negatives (repo-graph proves
+   a TS-Exact LiveGraph can still miss a non-TS cycle).
+RECOMMENDATION: A. This slice ships the TYPE + EVALUATOR + the baseline interface; it correctly returns
+Incomplete/Unknown today (the migration stays gated, safely), and the Complete path LIGHTS UP when the
+baseline prerequisites land. HONEST: this slice ALONE does not enable the migration -- it builds the
+certificate the migration will consume + the conservative-safe evaluator.
 ```
 
-## Out of scope (when/if this is built)
+### D3 — certificate states + evaluator mapping (the brief's 5 states)
 ```text
-No raw decommission, no deletion, no SQLite removal, no package resolver, no default flip (that is the
-SUBSEQUENT CYCLES-DEFAULT-MIGRATION-1 build, gated on this certificate). This slice produces the CERTIFICATE
-mechanism only.
+CompleteForModuleImportCycles      : baseline present AND loaded partitions == expected set AND ALL loaded
+                                     are TS + Fresh AND repo has NO non-TS cycle source AND every import
+                                     observation is RESOLVED or REPRESENTED (no bare unrepresented class).
+IncompleteMissingPartitions        : expected set (baseline) has partitions NOT loaded (or non-Fresh).
+IncompleteUnsupportedLanguage      : the baseline flags a non-TS cycle-source language (or a loaded
+                                     partition is non-TS).
+IncompleteImportClasses            : an import observation class is unrepresented as a cycle-relevant gap
+                                     (e.g. PackageExternal/Dynamic that could close a hidden ring) -- the
+                                     captured graph may be missing edges.
+UnknownBaselineMissing             : NO baseline supplied -> CANNOT certify (the explicit no-baseline state;
+                                     never faked from loaded state). -> SQLite fallback (D6).
+Unknown                            : indeterminate (reserved). -> SQLite fallback (D6).
+RECOMMENDATION: this exact set (UnknownBaselineMissing explicit, per the ratified constraint) + the
+precedence (baseline-missing first; then missing-partitions / unsupported-language structural; import-classes
+next; Complete only when all clear).
+CONSERVATISM (honest): the import-classes check flags IncompleteImportClasses on ANY uncaptured class
+(PackageExternal / Dynamic / StaticUnresolved-not-overlay-resolved). So a TS repo WITH package imports
+evaluates IncompleteImportClasses even though its module cycles MAY be exact (the measurement showed amodx
+exact) -- the cert cannot know that WITHOUT the compare, so it errs to Incomplete -> SQLite fallback (safe).
+Complete therefore needs NOT JUST "TS-only" but "no uncaptured import class" -> on real repos that points back
+to IMPORTS-PACKAGE-RESOLUTION-1 (to CAPTURE package imports, lifting the conservative block), even though
+package imports were NOT a divergence cause (READINESS-1). Recorded so the gap is explicit, not implicit.
 ```
 
-## Keep (unchanged regardless)
+### D4 — invalidation (the brief)
 ```text
-`--engine livegraph --kind module-import`; `--engine compare --kind module-import`; the readiness harness
-(scripts/measure-module-cycle-readiness.sh); the SQLite `rmap cycles` default.
+The certificate is INVALIDATED by ANY of: a partition REFRESH epoch bump (Slot.epoch / xref epoch); the repo
+REGISTRATION/INDEX epoch (a re-index changes the SQLite baseline); a partition source_inputs_hash change; a
+producer fingerprint change (indexer/version); a language-support change. KEYED so that a stale "Complete"
+can never be served. (build_inputs_hash + indexer/version are on the resident ir.partition; epoch on the
+Slot; the baseline's index epoch comes from the audit.) RECOMMENDED.
+```
+
+### D5 — storage (the brief)
+```text
+IN-MEMORY ONLY first: the certificate is computed/cached in the daemon's LiveGraph runtime state, recomputed
+on invalidation. NO durable on-disk certificate cache unless SEPARATELY ratified (a durable cache adds a
+trust surface -- a persisted "Complete" that could outlive its inputs). RECOMMENDED in-memory only.
+```
+
+### D6 — trust behavior (the brief)
+```text
+Complete certificate    -> the LiveGraph MAY serve the default module cycles (the eventual migration).
+Incomplete / Unknown    -> SQLite fallback REQUIRED (never the LiveGraph default).
+HARD RULE: NEVER an Exact "no module cycle" answer WITHOUT a Complete certificate (the exact silent-drop the
+READINESS verdict forbids). The certificate does NOT itself change the default this slice (the migration is
+the separate, gated CYCLES-DEFAULT-MIGRATION-1); it provides the predicate that gate needs.
+```
+
+## Acceptance (EXECUTED later)
+```text
+1. a `ModuleCycleCompletenessCertificate` type (the 5 states) + a pure EVALUATOR over (live LiveGraph state,
+   baseline) with unit tests for EACH state, incl. precedence (missing-partition vs unsupported-language vs
+   import-classes vs Complete vs Unknown) and Unknown-without-baseline.
+2. invalidation: a state-changing event (refresh epoch, re-index epoch, hash/fingerprint, language) busts a
+   cached certificate (unit-tested).
+3. CONSERVATIVE today: with NO enumeration/audit baseline, the evaluator returns Unknown/Incomplete for ALL
+   repos -> SQLite fallback everywhere -> the default is UNCHANGED + safe (no silent drop).
+4. (when the baseline prerequisites exist) the measured TS-only repos (amodx/hexmanos/zap-engine) evaluate
+   CompleteForModuleImportCycles; repo-graph evaluates IncompleteUnsupportedLanguage (the non-TS Rust cycle).
+5. full gate (workspace test, clippy -D warnings, fmt); `--engine livegraph|compare`, the readiness harness,
+   and the SQLite default all unchanged.
+```
+
+## Out of scope (hard guardrails)
+```text
+No default flip (CYCLES-DEFAULT-MIGRATION-1, gated on a Complete certificate). No SQLite deletion, no raw
+decommission, no package resolver. No per-query SQLite (the whole point: certify WITHOUT it; SQLite is
+audit/training-time only). No durable certificate cache (D5). The baseline SOURCES (enumeration + the
+index-time audit) are PREREQUISITES, specced/built separately.
+```
+
+## Build contract (PROPOSED — gated on ratification)
+```text
+1. repo-graph-livegraph (or a support module): the certificate TYPE + the pure EVALUATOR(live snapshot,
+   baseline) -> state, with the D3 precedence + D4 invalidation keying; a `BaselineInput` interface (expected
+   partition set + non-TS-source flag + index epoch). Unit tests for every state (synthetic baselines).
+2. daemon wiring (read-only): compute the certificate from the repo's LiveGraph + the (currently ABSENT)
+   baseline; expose it for diagnostics (e.g. surface in the compare/JSON). It returns Unknown/Incomplete
+   until the baseline exists -> no behaviour change to the default.
+3. docs: completion + the explicit statement that the Complete path is gated on the baseline prerequisites.
+```
+
+## Follow-up (the baseline prerequisites + the unblocked migration)
+```text
+- IMPORTS-XPART-ENUMERATION-1                : whole-repo partition discovery (the expected-partition baseline).
+- CYCLES-COMPLETENESS-AUDIT-1                : the one-time index-time non-TS / language-composition audit
+                                              (SQLite for audit/training -> recorded baseline).
+- CYCLES-DEFAULT-MIGRATION-1 (un-deferred)   : once a Complete certificate is reachable, the LiveGraph-first
+                                              default WITHOUT compare-every-call.
 ```
 
 ## References
-- `docs/slices/cycles-default-migration-1.md` (the DEFERRED migration that needs this; the P1/P2/P3 analysis)
-- `docs/slices/imports-xpart-enumeration-1.md` (F2 whole-repo enumeration -- question 1's prerequisite)
-- `docs/slices/module-cycles-default-readiness-1.md` (the YELLOW measurement; the repo-graph non-TS evidence)
-- `docs/slices/sqlite-raw-decommission-readiness-4.md` (the broader decommission gate this serves)
+- `rust/crates/repo-graph-livegraph/src/lib.rs` (Slot epoch/status/language; ir.partition fingerprint; observations; module_import_cycles scope)
+- `docs/slices/cycles-default-migration-1.md` (the DEFERRED migration this unblocks; the P1/P2/P3 analysis)
+- `docs/slices/module-cycles-default-readiness-1.md` (the YELLOW measurement; repo-graph non-TS evidence)
+- `docs/slices/imports-xpart-enumeration-1.md` (F2 — the expected-partition baseline prerequisite)
