@@ -12,8 +12,8 @@
 //! Headless API (no query migration). See docs/slices/livegraph-runtime-1.md.
 
 use repo_graph_import_resolver::{
-    dirname, file_key_path, resolve_imports, FileInventory, ImportCandidate,
-    ResolvedImportEdgeCandidate,
+    classify_package_import, dirname, file_key_path, resolve_imports, FileInventory,
+    ImportCandidate, PackageImportClass, ResolvedImportEdgeCandidate,
 };
 use repo_graph_ir::{
     CanonicalKey, EdgeBasis, IdentitySource, ImportResolution, PartitionIr, Provenance, SourceRange,
@@ -1297,12 +1297,38 @@ impl LiveGraph {
             .iter()
             .map(|e| (e.src_file_key.as_str(), e.raw_specifier.as_str()))
             .collect();
+        // IMPORTS-PACKAGE-RESOLUTION-1: the WORKSPACE MAP = the package.json `name`s of the LOADED partitions
+        // (their workspace identity). Refines the single ingest `PackageExternal` bucket via the source
+        // partition's DECLARED dependencies (positive external evidence) + this map.
+        let workspace_packages: BTreeSet<String> = self
+            .slots
+            .values()
+            .filter_map(|s| s.ir.as_ref())
+            .filter_map(|ir| ir.partition.package_name.clone())
+            .collect();
         let mut o = ObservationClassSummary::default();
         for s in self.slots.values() {
             if let Some(ir) = &s.ir {
+                let declared = &ir.partition.declared_dependencies;
                 for obs in &ir.import_observations {
                     match obs.resolution {
-                        ImportResolution::PackageExternal => o.has_package_external = true,
+                        ImportResolution::PackageExternal => {
+                            match classify_package_import(
+                                &obs.raw_specifier,
+                                &workspace_packages,
+                                declared,
+                            ) {
+                                PackageImportClass::ExternalPackageNonLocal => {
+                                    o.has_external_nonlocal = true
+                                }
+                                PackageImportClass::WorkspaceLocalUnedgeable => {
+                                    o.has_workspace_local_unedgeable = true
+                                }
+                                PackageImportClass::PackageUnresolved => {
+                                    o.has_unresolved_package = true
+                                }
+                            }
+                        }
                         ImportResolution::DynamicUnsupported => o.has_dynamic = true,
                         ImportResolution::StaticUnresolved => {
                             let resolved = overlay.iter().any(|(src_key, raw)| {
@@ -1462,6 +1488,8 @@ mod tests {
             indexer: "scip-typescript".into(),
             indexer_version: "0.4.0".into(),
             build_inputs_hash: "h".into(),
+            package_name: None,
+            declared_dependencies: std::collections::BTreeSet::new(),
         }
     }
     fn prov() -> Provenance {
@@ -2676,7 +2704,10 @@ mod tests {
         assert!(snap.partitions.iter().all(|p| p.fresh && p.ts));
         // the cross-partition StaticUnresolved imports were OVERLAY-resolved -> NOT counted as a gap.
         assert!(!snap.observation_classes.has_unresolved_after_overlay);
-        assert!(!snap.observation_classes.has_package_external);
+        // no package imports in these fixtures -> no package class (benign or blocking) set.
+        assert!(!snap.observation_classes.has_external_nonlocal);
+        assert!(!snap.observation_classes.has_workspace_local_unedgeable);
+        assert!(!snap.observation_classes.has_unresolved_package);
         assert!(!snap.observation_classes.has_dynamic);
         assert_eq!(
             evaluate_module_cycle_completeness(&snap, Some(&baseline)),

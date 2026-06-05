@@ -77,15 +77,24 @@ pub struct LivePartition {
     pub producer_fingerprint: String,
 }
 
-/// The uncaptured import-class evidence across the loaded partitions (CYCLES-COMPLETENESS-CERT-1 D3).
+/// The import-class evidence across the loaded partitions (CYCLES-COMPLETENESS-CERT-1 D3; the package classes
+/// refined by IMPORTS-PACKAGE-RESOLUTION-1 D5). Only the BLOCKING flags prevent `Complete`; the benign
+/// external flag is reported-but-non-blocking (an external package cannot be in a repo-local module cycle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ObservationClassSummary {
-    /// A `PackageExternal` observation exists (a package-name import; not in the captured relative graph).
-    pub has_package_external: bool,
-    /// A `DynamicUnsupported` observation exists (a dynamic `import()`).
+    /// BENIGN (reported, does NOT block): a `node:`/builtin or DECLARED-dependency external package import
+    /// (`ExternalPackageNonLocal`). It cannot participate in a repo-local module cycle.
+    pub has_external_nonlocal: bool,
+    /// BLOCKS: a WORKSPACE-LOCAL package import this slice cannot yet convert to a module edge
+    /// (`WorkspaceLocalUnedgeable`; the edge is IMPORTS-WORKSPACE-PACKAGE-EDGE-1). Detected-local but a hole.
+    pub has_workspace_local_unedgeable: bool,
+    /// BLOCKS: a non-relative import that is NEITHER workspace-local NOR a declared external
+    /// (`PackageUnresolved`; e.g. a tsconfig path alias `@/lib`) -- a genuine unknown.
+    pub has_unresolved_package: bool,
+    /// BLOCKS: a `DynamicUnsupported` observation (a dynamic `import()`).
     pub has_dynamic: bool,
-    /// A `StaticUnresolved` observation exists that the cross-partition OVERLAY did NOT resolve (a genuine
-    /// uncaptured relative import). Overlay-resolved ones are captured and do NOT count.
+    /// BLOCKS: a `StaticUnresolved` (relative) observation the cross-partition OVERLAY did NOT resolve.
+    /// Overlay-resolved ones are captured and do NOT count.
     pub has_unresolved_after_overlay: bool,
 }
 
@@ -148,9 +157,16 @@ pub fn evaluate_module_cycle_completeness(
     if baseline.has_non_ts_cycle_source || live.partitions.iter().any(|p| !p.ts) {
         return ModuleCycleCompleteness::IncompleteUnsupportedLanguage;
     }
-    // Import classes: ANY uncaptured class -> the captured graph may miss a cycle edge (conservative).
+    // Import classes (IMPORTS-PACKAGE-RESOLUTION-1 D5): ANY BLOCKING uncaptured class -> the captured graph
+    // may miss a cycle edge. ExternalPackageNonLocal is BENIGN (an external package cannot be in a repo-local
+    // module cycle) and does NOT block; only workspace-local-unedgeable / unresolved-package / dynamic /
+    // unresolved-relative block.
     let o = &live.observation_classes;
-    if o.has_package_external || o.has_dynamic || o.has_unresolved_after_overlay {
+    if o.has_workspace_local_unedgeable
+        || o.has_unresolved_package
+        || o.has_dynamic
+        || o.has_unresolved_after_overlay
+    {
         return ModuleCycleCompleteness::IncompleteImportClasses;
     }
     ModuleCycleCompleteness::CompleteForModuleImportCycles
@@ -182,8 +198,10 @@ pub fn certificate_inputs_fingerprint(
     parts.sort();
     let o = &live.observation_classes;
     let mut s = format!(
-        "obs[pkg{}:dyn{}:unr{}]|parts[{}]",
-        o.has_package_external as u8,
+        "obs[ext{}:wsl{}:unp{}:dyn{}:unr{}]|parts[{}]",
+        o.has_external_nonlocal as u8,
+        o.has_workspace_local_unedgeable as u8,
+        o.has_unresolved_package as u8,
         o.has_dynamic as u8,
         o.has_unresolved_after_overlay as u8,
         parts.join(",")
@@ -240,7 +258,9 @@ mod tests {
         }
     }
     const CLEAN: ObservationClassSummary = ObservationClassSummary {
-        has_package_external: false,
+        has_external_nonlocal: false,
+        has_workspace_local_unedgeable: false,
+        has_unresolved_package: false,
         has_dynamic: false,
         has_unresolved_after_overlay: false,
     };
@@ -289,27 +309,51 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_import_classes() {
-        let pkg = ObservationClassSummary {
-            has_package_external: true,
-            ..CLEAN
+    fn import_class_split_external_benign_others_block() {
+        let b = baseline(&["a"], false);
+        let check = |o: ObservationClassSummary| {
+            evaluate_module_cycle_completeness(&live(vec![part("a", true, true)], o), Some(&b))
         };
+        // IMPORTS-PACKAGE-RESOLUTION-1 D5: ExternalPackageNonLocal ALONE is BENIGN -> still Complete.
         assert_eq!(
-            evaluate_module_cycle_completeness(
-                &live(vec![part("a", true, true)], pkg),
-                Some(&baseline(&["a"], false))
-            ),
-            ModuleCycleCompleteness::IncompleteImportClasses
+            check(ObservationClassSummary {
+                has_external_nonlocal: true,
+                ..CLEAN
+            }),
+            ModuleCycleCompleteness::CompleteForModuleImportCycles,
+            "external npm/node: imports do NOT block repo-local module cycles"
         );
-        let unr = ObservationClassSummary {
-            has_unresolved_after_overlay: true,
-            ..CLEAN
-        };
+        // each BLOCKING class -> IncompleteImportClasses.
+        for blocking in [
+            ObservationClassSummary {
+                has_workspace_local_unedgeable: true,
+                ..CLEAN
+            },
+            ObservationClassSummary {
+                has_unresolved_package: true,
+                ..CLEAN
+            },
+            ObservationClassSummary {
+                has_dynamic: true,
+                ..CLEAN
+            },
+            ObservationClassSummary {
+                has_unresolved_after_overlay: true,
+                ..CLEAN
+            },
+        ] {
+            assert_eq!(
+                check(blocking),
+                ModuleCycleCompleteness::IncompleteImportClasses
+            );
+        }
+        // benign external ALONGSIDE a blocking class still blocks (the blocking one dominates).
         assert_eq!(
-            evaluate_module_cycle_completeness(
-                &live(vec![part("a", true, true)], unr),
-                Some(&baseline(&["a"], false))
-            ),
+            check(ObservationClassSummary {
+                has_external_nonlocal: true,
+                has_unresolved_package: true,
+                ..CLEAN
+            }),
             ModuleCycleCompleteness::IncompleteImportClasses
         );
     }
@@ -327,9 +371,9 @@ mod tests {
 
     #[test]
     fn structural_precedence_missing_before_language_before_classes() {
-        // missing-partition wins over a non-TS + package state.
+        // missing-partition wins over a non-TS + blocking-import-class state.
         let dirty = ObservationClassSummary {
-            has_package_external: true,
+            has_unresolved_package: true,
             ..CLEAN
         };
         let l = live(vec![part("a", true, false)], dirty); // a is non-TS AND dirty, but b is missing

@@ -888,6 +888,35 @@ fn repo_relative_file_path(partition_prefix: &str, doc_relative: &str) -> Result
     Ok(parts.join("/"))
 }
 
+/// IMPORTS-PACKAGE-RESOLUTION-1: read `{root}/package.json` -> (`name`, declared dependency NAMES). The
+/// metadata captured at the INGEST boundary so the livegraph classifier stays IO-free. Best-effort: a
+/// missing/malformed manifest -> `(None, empty)` (SAFE -- the partition contributes no workspace identity +
+/// no external evidence, so its bare imports stay conservatively `PackageUnresolved`). dependencies +
+/// devDependencies + peerDependencies keys are unioned (positive external evidence).
+fn read_package_manifest(root: &str) -> (Option<String>, std::collections::BTreeSet<String>) {
+    let text = match std::fs::read_to_string(format!("{root}/package.json")) {
+        Ok(t) => t,
+        Err(_) => return (None, std::collections::BTreeSet::new()),
+    };
+    let json: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(_) => return (None, std::collections::BTreeSet::new()),
+    };
+    let name = json
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let mut deps = std::collections::BTreeSet::new();
+    for key in ["dependencies", "devDependencies", "peerDependencies"] {
+        if let Some(obj) = json.get(key).and_then(|v| v.as_object()) {
+            for dep_name in obj.keys() {
+                deps.insert(dep_name.clone());
+            }
+        }
+    }
+    (name, deps)
+}
+
 /// Ingest one TypeScript partition: decode-driven node build (AST-adopted / reconciled /
 /// fallback / materialized FILE) plus strict edge derivation, assembled into a
 /// `PartitionIr`. Source is read from `{root}/{relative_path}`. `partition_prefix` is the partition's
@@ -904,6 +933,7 @@ pub fn ingest_partition(
     build_inputs_hash: &str,
     partition_prefix: &str,
 ) -> IngestOutcome {
+    let (package_name, declared_dependencies) = read_package_manifest(root);
     let partition = Partition {
         id: PartitionId::new(partition_id),
         kind: PartitionKind::TsPackage,
@@ -911,6 +941,8 @@ pub fn ingest_partition(
         indexer: indexer.to_string(),
         indexer_version: indexer_version.to_string(),
         build_inputs_hash: build_inputs_hash.to_string(),
+        package_name,
+        declared_dependencies,
     };
     let mut ir = PartitionIr::new(partition);
     let mut node_counts = NodeCounts::default();

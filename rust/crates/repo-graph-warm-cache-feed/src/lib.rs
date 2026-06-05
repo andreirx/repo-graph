@@ -236,6 +236,8 @@ mod tests {
             indexer: "scip-typescript".to_string(),
             indexer_version: "0.4.0".to_string(),
             build_inputs_hash: "abc123".to_string(),
+            package_name: None,
+            declared_dependencies: std::collections::BTreeSet::new(),
         };
         let mut ir = PartitionIr::new(partition);
         ir.nodes.push(IrNode {

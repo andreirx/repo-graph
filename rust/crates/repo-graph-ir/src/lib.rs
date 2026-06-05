@@ -207,6 +207,14 @@ pub struct Partition {
     pub indexer_version: String,
     /// Hash of the build inputs that produced this partition's facts.
     pub build_inputs_hash: String,
+    /// IMPORTS-PACKAGE-RESOLUTION-1: the package.json `name` of this partition (its WORKSPACE identity).
+    /// `None` when the root has no readable package.json `name`. The union of these across loaded partitions
+    /// is the workspace map that classifies a bare import as workspace-local (vs external/unresolved).
+    pub package_name: Option<String>,
+    /// IMPORTS-PACKAGE-RESOLUTION-1: the declared dependency NAMES (dependencies + devDependencies +
+    /// peerDependencies) from this partition's package.json -- POSITIVE evidence that a bare import is an
+    /// EXTERNAL package (non-cycle-relevant). NEVER inferred from absence in the workspace map.
+    pub declared_dependencies: std::collections::BTreeSet<String>,
 }
 
 /// Provenance for a node or edge: the external-producer evidence (IR design R6).
@@ -353,6 +361,8 @@ mod tests {
             indexer: "scip-typescript".into(),
             indexer_version: "0.4.0".into(),
             build_inputs_hash: "h".into(),
+            package_name: None,
+            declared_dependencies: std::collections::BTreeSet::new(),
         }
     }
 

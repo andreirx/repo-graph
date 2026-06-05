@@ -348,6 +348,14 @@ pub struct CachePartitionDto {
     pub indexer_version: String,
     /// Build-inputs hash.
     pub build_inputs_hash: String,
+    /// IMPORTS-PACKAGE-RESOLUTION-1: package.json `name` (workspace identity). `#[serde(default)]` so an
+    /// older cache (written before this field) still deserializes -> `None` (safe: re-index repopulates).
+    #[serde(default)]
+    pub package_name: Option<String>,
+    /// IMPORTS-PACKAGE-RESOLUTION-1: declared dependency names (external evidence). `#[serde(default)]` for
+    /// backward-compatible deserialization of older caches.
+    #[serde(default)]
+    pub declared_dependencies: std::collections::BTreeSet<String>,
 }
 
 /// Mirror of `repo_graph_ir::PartitionIr`. `impl From<&PartitionIr>` + `impl TryFrom<_> for
@@ -613,6 +621,8 @@ impl From<&Partition> for CachePartitionDto {
             indexer: p.indexer.clone(),
             indexer_version: p.indexer_version.clone(),
             build_inputs_hash: p.build_inputs_hash.clone(),
+            package_name: p.package_name.clone(),
+            declared_dependencies: p.declared_dependencies.clone(),
         }
     }
 }
@@ -625,6 +635,8 @@ impl From<CachePartitionDto> for Partition {
             indexer: p.indexer,
             indexer_version: p.indexer_version,
             build_inputs_hash: p.build_inputs_hash,
+            package_name: p.package_name,
+            declared_dependencies: p.declared_dependencies,
         }
     }
 }
@@ -942,6 +954,8 @@ mod tests {
             indexer: "scip-typescript".to_string(),
             indexer_version: "0.4.0".to_string(),
             build_inputs_hash: "abc123".to_string(),
+            package_name: Some("@sample/pkg".to_string()),
+            declared_dependencies: ["react".to_string()].into_iter().collect(),
         };
         let mut ir = PartitionIr::new(partition);
         ir.nodes.push(IrNode {

@@ -15,9 +15,103 @@
 //! later wiring slice) inserts them into the LiveGraph IN-MEMORY; they are NEVER persisted in a
 //! per-partition IR / warm cache (per-partition cache coherence, F1).
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use repo_graph_ir::EdgeBasis;
+
+/// IMPORTS-PACKAGE-RESOLUTION-1: the class of a NON-RELATIVE (bare) TS import for module-cycle completeness.
+/// Refines the single ingest `PackageExternal` bucket using POSITIVE package.json metadata. PURE.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageImportClass {
+    /// The specifier's package name matches a LOADED workspace package. Cycle-relevant, but this slice does
+    /// NOT form the module edge (the producer gives no target file; package entries point to unindexed
+    /// `dist/`) -> it BLOCKS completeness, labelled. The edge is IMPORTS-WORKSPACE-PACKAGE-EDGE-1.
+    WorkspaceLocalUnedgeable,
+    /// POSITIVE external evidence: a `node:`/builtin specifier, OR a DECLARED dependency. An external package
+    /// cannot be in a REPO-LOCAL module cycle -> BENIGN (does not block). Never inferred from absence.
+    ExternalPackageNonLocal,
+    /// Neither workspace-local nor a declared external (e.g. a tsconfig path alias `@/lib`) -> a genuine
+    /// unknown -> BLOCKS (honest).
+    PackageUnresolved,
+}
+
+/// Node.js builtin module names (the bare forms; the `node:` prefix is handled separately). Closed set --
+/// a bare specifier matching one cannot be a repo-local cycle source.
+const NODE_BUILTINS: &[&str] = &[
+    "assert",
+    "buffer",
+    "child_process",
+    "cluster",
+    "console",
+    "crypto",
+    "dgram",
+    "dns",
+    "events",
+    "fs",
+    "http",
+    "http2",
+    "https",
+    "net",
+    "os",
+    "path",
+    "perf_hooks",
+    "process",
+    "punycode",
+    "querystring",
+    "readline",
+    "stream",
+    "string_decoder",
+    "timers",
+    "tls",
+    "tty",
+    "url",
+    "util",
+    "v8",
+    "vm",
+    "worker_threads",
+    "zlib",
+];
+
+/// The PACKAGE NAME of a bare import specifier: `@scope/pkg/sub` -> `@scope/pkg`; `pkg/sub` -> `pkg`;
+/// `pkg` -> `pkg`. (A `node:` specifier is handled by the caller before this.)
+pub fn package_name_of(specifier: &str) -> String {
+    let mut segs = specifier.split('/');
+    let first = segs.next().unwrap_or(specifier);
+    if first.starts_with('@') {
+        match segs.next() {
+            Some(second) => format!("{first}/{second}"),
+            None => first.to_string(),
+        }
+    } else {
+        first.to_string()
+    }
+}
+
+/// Classify a NON-RELATIVE import specifier (IMPORTS-PACKAGE-RESOLUTION-1 D1, ratified A). PURE -- given the
+/// loaded `workspace_packages` (package.json `name`s) + the source partition's `declared_dependencies`.
+/// Precedence: `node:`/builtin -> external; workspace map -> WorkspaceLocalUnedgeable (a workspace package is
+/// LOCAL even when also a declared dep, via the workspace protocol); declared dep -> external; else ->
+/// PackageUnresolved. CONSERVATIVE: external requires POSITIVE evidence; an unknown bare specifier BLOCKS.
+pub fn classify_package_import(
+    specifier: &str,
+    workspace_packages: &BTreeSet<String>,
+    declared_dependencies: &BTreeSet<String>,
+) -> PackageImportClass {
+    if specifier.starts_with("node:") {
+        return PackageImportClass::ExternalPackageNonLocal;
+    }
+    let pkg = package_name_of(specifier);
+    if NODE_BUILTINS.contains(&pkg.as_str()) {
+        return PackageImportClass::ExternalPackageNonLocal;
+    }
+    if workspace_packages.contains(&pkg) {
+        return PackageImportClass::WorkspaceLocalUnedgeable;
+    }
+    if declared_dependencies.contains(&pkg) {
+        return PackageImportClass::ExternalPackageNonLocal;
+    }
+    PackageImportClass::PackageUnresolved
+}
 
 /// Global FILE inventory: repo-relative path -> FILE node key.
 #[derive(Debug, Clone, Default)]
@@ -221,6 +315,73 @@ pub fn resolve_imports(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn set(items: &[&str]) -> BTreeSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn package_name_extraction() {
+        assert_eq!(package_name_of("react"), "react");
+        assert_eq!(package_name_of("react/jsx-runtime"), "react");
+        assert_eq!(package_name_of("@amodx/shared"), "@amodx/shared");
+        assert_eq!(package_name_of("@tiptap/pm/model"), "@tiptap/pm");
+        assert_eq!(package_name_of("@scope"), "@scope"); // malformed -> whole
+    }
+
+    #[test]
+    fn workspace_local_takes_precedence_over_declared_dep() {
+        // @amodx/shared is BOTH a workspace package AND declared (workspace protocol) -> LOCAL, not external.
+        let ws = set(&["@amodx/shared", "@amodx/effects"]);
+        let deps = set(&["@amodx/shared", "react"]);
+        assert_eq!(
+            classify_package_import("@amodx/shared", &ws, &deps),
+            PackageImportClass::WorkspaceLocalUnedgeable
+        );
+    }
+
+    #[test]
+    fn declared_external_is_benign() {
+        let ws = set(&["@amodx/shared"]);
+        let deps = set(&["react", "@tiptap/react"]);
+        assert_eq!(
+            classify_package_import("react", &ws, &deps),
+            PackageImportClass::ExternalPackageNonLocal
+        );
+        assert_eq!(
+            classify_package_import("@tiptap/react/menus", &ws, &deps),
+            PackageImportClass::ExternalPackageNonLocal
+        );
+    }
+
+    #[test]
+    fn node_builtins_are_external_with_or_without_prefix() {
+        let empty = BTreeSet::new();
+        assert_eq!(
+            classify_package_import("node:fs", &empty, &empty),
+            PackageImportClass::ExternalPackageNonLocal
+        );
+        assert_eq!(
+            classify_package_import("path", &empty, &empty),
+            PackageImportClass::ExternalPackageNonLocal
+        );
+    }
+
+    #[test]
+    fn unknown_bare_specifier_blocks() {
+        // a tsconfig path alias (@/lib) is NEITHER workspace nor declared -> PackageUnresolved (blocks);
+        // NEVER inferred external from absence in the workspace map (the trust hinge).
+        let ws = set(&["@amodx/shared"]);
+        let deps = set(&["react"]);
+        assert_eq!(
+            classify_package_import("@/lib/api", &ws, &deps),
+            PackageImportClass::PackageUnresolved
+        );
+        assert_eq!(
+            classify_package_import("some-undeclared-pkg", &ws, &deps),
+            PackageImportClass::PackageUnresolved
+        );
+    }
 
     fn inventory() -> FileInventory {
         FileInventory::from_file_keys(
