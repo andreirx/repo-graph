@@ -1,11 +1,13 @@
 # IMPORTS-WORKSPACE-PACKAGE-EDGE-1: resolve workspace-local package imports to module-cycle edges
 
 Slice ID: IMPORTS-WORKSPACE-PACKAGE-EDGE-1
-Status: **SPEC — awaiting ratification (2026-06-05). NOT started.** Convert `WorkspaceLocalUnedgeable` imports
-(e.g. `@amodx/shared`) into module-import-cycle edges. The grounding REFUTED the expected lean (B): no
-declaration maps exist; two stop conditions fired. The principled mechanism (A) has a hard PREREQUISITE PROBE.
-This spec re-scopes to **a probe first (1A), then the edge build (1B) only if the probe is green**. NO default
-migration, NO raw decommission, NO package-external resolver, NO tsconfig path aliases, NO heuristic dist->src.
+Status: **PROBE 1A EXECUTED -> RED (2026-06-05). 1B NOT BUILT (deferred).** Mechanism A is REFUTED by
+measurement: in separate partition indexes, `packages/shared` exports under `@amodx/shared 1.0.0 src/...` while
+`admin` references `@amodx/shared 1.0.0 dist/...` (it resolves the dep through the BUILT `node_modules/.../dist`).
+Package@version match; the descriptor path differs (src vs dist) -> no cross-index symbol match without a
+dist->src bridge (declaration maps absent, or a rejected heuristic). B refuted, C/D rejected, A RED ->
+workspace-local package imports REMAIN `WorkspaceLocalUnedgeable` (honest block). See **Probe 1A**. NO default
+migration, NO raw decommission, NO heuristic dist->src.
 Depends: IMPORTS-PACKAGE-RESOLUTION-1 (the classifier + `WorkspaceLocalUnedgeable`). Track: Stage D, import edges.
 
 ## Goal
@@ -35,6 +37,43 @@ cycle edges; the blocker is purely TARGET-MODULE RESOLUTION, which the grounding
    precedent; a new derived basis can be added.
 => STOP CONDITIONS FIRED: "entrypoint -> unindexed dist + no declarationMap" (B); "module-level only vs FILE->
    FILE graph" (D). A is the only NON-heuristic mechanism, and it is GATED on a probe (3) + new plumbing (2).
+```
+
+## Probe 1A (EXECUTED 2026-06-05) — VERDICT: RED (measurement-only, no production code)
+```text
+METHOD: generated per-partition SCIP exactly as the daemon does --
+  scip-typescript-node18 index --cwd amodx/packages/shared --output /tmp/probe-shared.scip
+  scip-typescript-node18 index --cwd amodx/admin            --output /tmp/probe-admin.scip
+then compared the @amodx/shared SCIP symbol monikers across the two INDEPENDENT indexes (`strings` + grep;
+2326 @amodx/shared symbol strings in shared, 520 references in admin).
+
+THE FIVE FACTS:
+1. shared exports carry stable monikers?           YES -- `scip-typescript npm @amodx/shared 1.0.0 src/...`
+                                                    (package + version + descriptor; stable).
+2. admin references the SAME moniker?              NO  -- admin references `@amodx/shared 1.0.0 dist/...`.
+                                                    Package@version MATCH; the DESCRIPTOR PATH differs (dist
+                                                    vs src) because admin resolves the dep through the BUILT
+                                                    node_modules/@amodx/shared/dist, not shared's source.
+3. map reference -> shared SOURCE file (no decl maps)? NO -- requires bridging dist/... -> src/... ; the
+                                                    declaration maps that would do it are absent (B grounding).
+4. cross-partition match survives separate indexes? PARTIAL -- only the PACKAGE@VERSION survives (which the
+                                                    classifier already knows); the exact symbol/file does NOT.
+5. ambiguity surfaced not picked?                  MOOT -- there is no exact match to be ambiguous about.
+
+ROOT CAUSE (inherent, not a config miss): repo-graph indexes PER-PARTITION. Each partition resolves its
+imports through its own node_modules -> a workspace dep resolves to the BUILT package (dist/*.d.ts), while the
+exporting partition is indexed from SOURCE (src/*.ts). The SCIP descriptor encodes that path -> src vs dist
+mismatch. The ONLY bridges are declaration maps (absent) or a heuristic (rejected). A whole-repo single SCIP
+index WOULD resolve to source, but that contradicts the foundational partition model (out of scope).
+
+VERDICT: RED. Mechanism A cannot resolve a workspace-local import to the exporting SOURCE module/file without
+the rejected dist->src bridge. Per the ratified outcomes: record the blocker; @amodx/shared etc. REMAIN
+WorkspaceLocalUnedgeable (the IMPORTS-PACKAGE-RESOLUTION-1 honest block stands). NO 1B build.
+
+NEXT (higher value, now): IMPORTS-PACKAGE-RESOLUTION-1C (tsconfig path aliases @/lib -- the OTHER blocking
+class, structurally cleaner: paths/baseUrl are repo-local source, no dist indirection). Workspace-package edges
+would need either declaration-map emission in the target repos (a per-repo build-config change, not ours to
+make) OR a whole-repo unified index mode (a foundational re-architecture) -> a research item, not a near slice.
 ```
 
 ## Forced decisions (to ratify at sign-off) — every cell filled
