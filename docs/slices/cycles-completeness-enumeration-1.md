@@ -1,11 +1,13 @@
 # CYCLES-COMPLETENESS-ENUMERATION-1: an accurate expected-partition set + a load plan (no audit mutation)
 
 Slice ID: CYCLES-COMPLETENESS-ENUMERATION-1
-Status: **SPEC — awaiting ratification (2026-06-04). NOT started.** Refine the EXPECTED TS partition set so the
-module-cycle certificate can advance past `IncompleteMissingPartitions` on real repos, and provide a LOAD PLAN
-that feeds the existing refresh WITHOUT the audit ever mutating. Partition-enumeration/baseline-precision
-slice; NOT a default migration. NO default flip, NO decommission, NO package resolver, NO daemon self-refresh
-inside the audit.
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-05).** D1 narrow `{fixtures, __fixtures__, testdata}` + D2/D3/D4
+ratified. A SHARED fixture-aware discovery (`partition_discovery.rs`) feeds BOTH the read-only audit's expected
+set and `livegraph-refresh --all-discovered`'s load plan (`4e77f8b`). The full precedence chain is now LIVE:
+xpart -> Complete; repo-graph -> IncompleteUnsupportedLanguage (after load; 8 fixtures excluded); amodx ->
+IncompleteImportClasses (the import-class axis, finally reachable). Audit stayed read-only. See **Completion**.
+NOT a default migration. NO default flip, NO decommission, NO package resolver, NO daemon self-refresh inside
+the audit.
 Depends: CYCLES-COMPLETENESS-AUDIT-1 (the read-only audit + `discover_tsconfig_dirs`), IMPORTS-XPART-
 ENUMERATION-1 (`run_refresh_multi`, `derive_partition_target`). Track: Stage D, audit/provider precision.
 
@@ -122,6 +124,59 @@ refined discovery is SHARED between the (read-only) audit and the (mutating) ref
 4. (optional) `--include-fixtures` opt-in on both, for fixture-root certification.
 5. docs: completion + the refined repo-graph expected set + a LIVE run showing repo-graph/amodx advancing past
    MissingPartitions after `--all-discovered`. Explicit "still not a migration".
+```
+
+## Completion (implemented + live-validated 2026-06-05, EXECUTED)
+
+Commits: `cb9fb61` (spec) + `4e77f8b` (impl). Ratified D1 NARROW + D2 + D3 + D4 + the key invariant.
+
+### What landed
+```text
+partition_discovery.rs (new, SHARED): discover_partition_roots(repo_root, include_fixtures) -> {included,
+  excluded}. All-tsconfig bounded std::fs walk MINUS the CLOSED set {fixtures, __fixtures__, testdata} (D1
+  NARROW: NOT __tests__/__mocks__ -- real source-adjacent test trees -> excluding risks a FALSE Complete).
+  Exclusion is repo-root-RELATIVE (D3). ONE function -> expected set and load plan cannot drift.
+cycle_completeness_audit.rs: consumes the shared discovery; reports `excluded_fixture_partitions` (never
+  silent); `include_fixtures` opt-in. STILL READ-ONLY.
+dispatch.rs: `livegraph_refresh` gains `all_discovered` -> run_refresh_multi(included) -- the MUTATION lives in
+  refresh, never the audit; reports included + excluded. rgr: `--all-discovered` + `--include-fixtures`.
+```
+
+### Live validation (EXECUTED 2026-06-05, dev-install-local.sh)
+```text
+REPO          STEP                          CERTIFICATE                    expected==loaded   note
+xpart fixture refresh --all-discovered ->   CompleteForModuleImportCycles  {a,b}=={a,b}        excluded=[] (D3:
+              audit                                                                            fixture-root keeps
+                                                                                               its own packages)
+repo-graph    audit (pre-load)              IncompleteMissingPartitions    {default,rgistr}/0  8 fixtures EXCLUDED
+                                                                                               + listed (was 10)
+repo-graph    --all-discovered -> audit     IncompleteUnsupportedLanguage  2==2, missing=[]    Rust; PAST Missing
+amodx         --all-discovered (8/8) ->     IncompleteImportClasses        8==8, missing=[]    pkg+dynamic imports;
+              audit                                                                            pure-TS -> the
+                                                                                               IMPORT-CLASS axis LIVE
+```
+
+### Acceptance (D4) — all PASS
+```text
+1. xpart fixture -> Complete                                                                    PASS.
+2. real TS repos load all expected partitions + advance PAST MissingPartitions                  PASS (repo-graph
+   {default,tools/rgistr} both loaded -> past Missing; amodx 8/8 -> past Missing).
+3. repo-graph no longer over-discovers nested fixture tsconfigs (unless --include-fixtures)      PASS (8 excluded:
+   the synthetic + xpart packages + test/fixtures/typescript/*; expected dropped 10 -> 2).
+4. after loading, the certificate reaches UnsupportedLanguage OR ImportClasses as appropriate    PASS (repo-graph
+   -> UnsupportedLanguage [Rust]; amodx -> ImportClasses [pkg/dynamic imports]).
+The audit performed NO refresh in any step (read-only invariant held); the report lists every exclusion.
+Gate: workspace tests ok / 0 failures; clippy -D warnings clean; fmt clean; 5 partition_discovery + 5 audit
+unit tests (incl. __tests__/__mocks__ NOT excluded; fixture-root keeps packages; include_fixtures opt-in).
+```
+
+### Significance (the full chain, end to end)
+```text
+The four certificate states are now demonstrated LIVE on real inputs: Complete (xpart) ->
+IncompleteMissingPartitions (repo-graph pre-load) -> IncompleteUnsupportedLanguage (repo-graph post-load) ->
+IncompleteImportClasses (amodx). The over-discovery that pinned AUDIT-1 at MissingPartitions is gone; the
+import-class axis -- the lever that IMPORTS-PACKAGE-RESOLUTION-1 would move -- is now observable on a real repo.
+STILL NOT a migration: default `rmap cycles` unchanged; the audit is a read-only diagnostic.
 ```
 
 ## Follow-up
