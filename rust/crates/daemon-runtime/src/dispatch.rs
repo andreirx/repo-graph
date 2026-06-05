@@ -751,6 +751,45 @@ impl ServiceDispatcher {
             Ok(s) => s.to_string(),
             Err(e) => return DispatchResult::error(&request.id, e),
         };
+        // CYCLES-COMPLETENESS-ENUMERATION-1 (D2): `--all-discovered` loads the SHARED discovery's INCLUDED
+        // roots (the SAME function the read-only audit's EXPECTED set uses -> they cannot drift). Best-effort
+        // multi-refresh; the load step that lets the audit advance past IncompleteMissingPartitions. The
+        // mutation lives HERE (refresh), never in the audit. Reports what it excluded (fixtures) + included.
+        let all_discovered = request
+            .params
+            .get("all_discovered")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if all_discovered {
+            let include_fixtures = request
+                .params
+                .get("include_fixtures")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let discovered =
+                crate::partition_discovery::discover_partition_roots(&repo_path, include_fixtures);
+            let mut body = crate::livegraph_refresh::run_refresh_multi(
+                &repo_state,
+                &repo_uid,
+                &repo_path,
+                &discovered.included,
+            );
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert(
+                    "discovered_included".to_string(),
+                    serde_json::json!(discovered.included),
+                );
+                obj.insert(
+                    "excluded_fixture_partitions".to_string(),
+                    serde_json::json!(discovered
+                        .excluded
+                        .iter()
+                        .map(|(d, r)| serde_json::json!({ "dir": d, "reason": r }))
+                        .collect::<Vec<_>>()),
+                );
+            }
+            return DispatchResult::success(&request.id, body);
+        }
         // IMPORTS-XPART-ENUMERATION-1 (D4): repeated `--source-root` arrives as a `source_roots` array.
         // Present + non-empty -> multi-partition BEST-EFFORT refresh (per-partition + aggregate, D5);
         // absent/empty -> the single-partition path below (byte-stable; 0/1 root preserves behaviour).
@@ -815,6 +854,12 @@ impl ServiceDispatcher {
         let repo_root = Self::get_optional_string_param(&request.params, "repo")
             .unwrap_or("")
             .to_string();
+        // ENUMERATION-1 (D3): opt-in to certify a fixture corpus (disables the fixture-segment exclusion).
+        let include_fixtures = request
+            .params
+            .get("include_fixtures")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let snapshot = match repo_state.storage.get_latest_snapshot(&repo_uid) {
             Ok(Some(snap)) => snap,
             Ok(None) => {
@@ -835,6 +880,7 @@ impl ServiceDispatcher {
             &repo_uid,
             &snapshot.snapshot_uid,
             &repo_root,
+            include_fixtures,
         ) {
             Ok(v) => DispatchResult::success(&request.id, v),
             Err(e) => {

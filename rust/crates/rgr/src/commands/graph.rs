@@ -194,8 +194,8 @@ pub fn run_dev(args: &[String]) -> ExitCode {
                 "usage: rmap dev <livegraph-preload|livegraph-refresh|cycle-completeness-audit> ..."
             );
             eprintln!("  livegraph-preload --repo <repo> --partition-id <id> --scip <index.scip> --source-root <source-root>");
-            eprintln!("  livegraph-refresh --repo <repo> [--partition <id>] [--source-root <repo-relative-root>]...");
-            eprintln!("  cycle-completeness-audit --repo <repo>   (read-only; load partitions first via livegraph-refresh)");
+            eprintln!("  livegraph-refresh --repo <repo> [--partition <id>] [--source-root <repo-relative-root>]... [--all-discovered] [--include-fixtures]");
+            eprintln!("  cycle-completeness-audit --repo <repo> [--include-fixtures]   (read-only; load first via livegraph-refresh --all-discovered)");
             ExitCode::from(1)
         }
     }
@@ -210,6 +210,10 @@ fn run_dev_livegraph_refresh(args: &[String]) -> ExitCode {
     // IMPORTS-XPART-ENUMERATION-1 (D4): repeated --source-root -> one partition each (multi-partition,
     // best-effort). 0/1 root preserves single-partition behaviour.
     let mut source_roots: Vec<String> = Vec::new();
+    // CYCLES-COMPLETENESS-ENUMERATION-1 (D2/D3): --all-discovered loads the shared-discovery included roots;
+    // --include-fixtures disables the fixture-segment exclusion.
+    let mut all_discovered = false;
+    let mut include_fixtures = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -224,6 +228,14 @@ fn run_dev_livegraph_refresh(args: &[String]) -> ExitCode {
             "--source-root" if i + 1 < args.len() => {
                 source_roots.push(args[i + 1].clone());
                 i += 2;
+            }
+            "--all-discovered" => {
+                all_discovered = true;
+                i += 1;
+            }
+            "--include-fixtures" => {
+                include_fixtures = true;
+                i += 1;
             }
             other => {
                 eprintln!("error: unknown arg: {}", other);
@@ -252,6 +264,12 @@ fn run_dev_livegraph_refresh(args: &[String]) -> ExitCode {
     if !source_roots.is_empty() {
         params["source_roots"] = serde_json::json!(source_roots);
     }
+    if all_discovered {
+        params["all_discovered"] = serde_json::json!(true);
+    }
+    if include_fixtures {
+        params["include_fixtures"] = serde_json::json!(true);
+    }
     match client.request("livegraph_refresh", Some(params)) {
         Ok(result) => match serde_json::to_string_pretty(&result) {
             Ok(json) => {
@@ -274,12 +292,18 @@ fn run_dev_livegraph_refresh(args: &[String]) -> ExitCode {
 /// changes no default.
 fn run_dev_cycle_completeness_audit(args: &[String]) -> ExitCode {
     let mut repo = None;
+    // ENUMERATION-1 (D3): --include-fixtures certifies a fixture corpus (disables fixture-segment exclusion).
+    let mut include_fixtures = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--repo" if i + 1 < args.len() => {
                 repo = Some(args[i + 1].clone());
                 i += 2;
+            }
+            "--include-fixtures" => {
+                include_fixtures = true;
+                i += 1;
             }
             other => {
                 eprintln!("error: unknown arg: {}", other);
@@ -290,7 +314,9 @@ fn run_dev_cycle_completeness_audit(args: &[String]) -> ExitCode {
     let repo = match repo {
         Some(r) => r,
         None => {
-            eprintln!("usage: rmap dev cycle-completeness-audit --repo <repo>");
+            eprintln!(
+                "usage: rmap dev cycle-completeness-audit --repo <repo> [--include-fixtures]"
+            );
             return ExitCode::from(1);
         }
     };
@@ -298,7 +324,10 @@ fn run_dev_cycle_completeness_audit(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
-    let params = serde_json::json!({ "repo": repo });
+    let mut params = serde_json::json!({ "repo": repo });
+    if include_fixtures {
+        params["include_fixtures"] = serde_json::json!(true);
+    }
     match client.request("cycle_completeness_audit", Some(params)) {
         Ok(result) => match serde_json::to_string_pretty(&result) {
             Ok(json) => {

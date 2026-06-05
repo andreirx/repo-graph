@@ -20,7 +20,6 @@ use repo_graph_livegraph::module_cycle_cert::{
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
 
 /// The language-support policy version (the LiveGraph supports the TS family today). Bump when the
 /// supported-language set changes -> every certificate re-evaluates (rides in the inputs fingerprint).
@@ -35,18 +34,6 @@ pub const IMPORT_COMPLETENESS_POLICY_VERSION: u32 = 1;
 /// CODE source: the indexer vocabulary (`indexer/routing.rs::detect_language`) is CLOSED + code-only, so
 /// there is no doc/data/"unknown" value to exclude -- a non-null value is always a real code language.
 const TS_FAMILY: &[&str] = &["typescript", "tsx", "javascript", "jsx"];
-
-/// Directories never descended during tsconfig discovery (deps / VCS / build output / our own artifacts).
-const SKIP_DIRS: &[&str] = &[
-    "node_modules",
-    ".git",
-    "dist",
-    "build",
-    "target",
-    ".rgr",
-    "out",
-    "coverage",
-];
 
 /// Classify the SQLite language inventory: `(has_non_ts_cycle_source, sorted distinct non-TS languages)`.
 /// PURE. CONSERVATIVE: ANY non-TS-family code language -> `true` (the TS-only LiveGraph cannot have covered
@@ -73,55 +60,6 @@ fn index_epoch_from_snapshot(snapshot_uid: &str) -> u64 {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     hash
-}
-
-/// Filesystem discovery (D1): the repo-relative directories containing a `tsconfig.json` -- the EXPECTED TS
-/// partition roots. Bounded `std::fs` walk (no new dependency); skips deps/VCS/build dirs + dotfiles;
-/// does NOT follow symlinks (cycle/escape safety). The repo root maps to `"."`.
-///
-/// CAVEAT (recorded): this treats EVERY `tsconfig.json` dir as an expected partition. A repo with nested /
-/// base tsconfigs may OVER-discover -> the certificate returns `IncompleteMissingPartitions` if the caller
-/// did not load them all. That is conservative + honest (never a false `Complete`); the narrower "project
-/// root" heuristic is out of scope here.
-fn discover_tsconfig_dirs(repo_root: &str) -> Vec<String> {
-    let root = Path::new(repo_root);
-    let mut out: Vec<String> = Vec::new();
-    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let mut has_tsconfig = false;
-        for entry in entries.flatten() {
-            let file_type = match entry.file_type() {
-                Ok(t) => t,
-                Err(_) => continue,
-            };
-            if file_type.is_symlink() {
-                continue;
-            }
-            if file_type.is_dir() {
-                let name = entry.file_name();
-                let name = name.to_string_lossy();
-                if name.starts_with('.') || SKIP_DIRS.contains(&name.as_ref()) {
-                    continue;
-                }
-                stack.push(entry.path());
-            } else if entry.file_name() == "tsconfig.json" {
-                has_tsconfig = true;
-            }
-        }
-        if has_tsconfig {
-            if let Ok(rel) = dir.strip_prefix(root) {
-                let rel = rel.to_string_lossy().replace('\\', "/");
-                out.push(if rel.is_empty() { ".".to_string() } else { rel });
-            }
-        }
-    }
-    out.sort();
-    out.dedup();
-    out
 }
 
 /// Build the [`BaselineInput`] from the discovered TS partition set + the SQLite language inventory + the
@@ -152,12 +90,23 @@ pub fn cycle_completeness_audit_response(
     repo_uid: &str,
     snapshot_uid: &str,
     repo_root: &str,
+    include_fixtures: bool,
 ) -> Result<Value, String> {
-    // 1. Filesystem discovery (D1): the EXPECTED TS partition set (repo-relative roots -> partition ids).
-    let source_roots = discover_tsconfig_dirs(repo_root);
-    let expected_partition_ids: BTreeSet<String> = source_roots
+    // 1. SHARED discovery (ENUMERATION-1 D1/D2): the EXPECTED TS partition set (fixture-excluded unless
+    //    --include-fixtures). The SAME function `livegraph-refresh --all-discovered` loads from -> the
+    //    expected set and the load plan cannot drift. (repo-relative roots -> partition ids.)
+    let discovered =
+        crate::partition_discovery::discover_partition_roots(repo_root, include_fixtures);
+    let expected_partition_ids: BTreeSet<String> = discovered
+        .included
         .iter()
         .map(|sr| crate::livegraph_refresh::derive_partition_target(repo_root, sr).1)
+        .collect();
+    // The EXCLUDED fixture tsconfigs (repo-relative dir + reason) -- surfaced so an exclusion is never silent.
+    let excluded_fixture_partitions: Vec<Value> = discovered
+        .excluded
+        .iter()
+        .map(|(dir, reason)| json!({ "dir": dir, "reason": reason }))
         .collect();
 
     // 2. SQLite language inventory (D3-A): non-TS evidence (audit-time read; NOT the evaluator).
@@ -233,6 +182,7 @@ pub fn cycle_completeness_audit_response(
             "non_ts_languages": non_ts_languages,
             "loaded_fresh_partitions": loaded_fresh,
             "missing_expected_partitions": missing_expected_partitions,
+            "excluded_fixture_partitions": excluded_fixture_partitions,
             "observation_classes": {
                 "has_package_external": o.has_package_external,
                 "has_dynamic": o.has_dynamic,
@@ -312,34 +262,6 @@ mod tests {
         assert_eq!(
             baseline.import_completeness_policy_version,
             IMPORT_COMPLETENESS_POLICY_VERSION
-        );
-    }
-
-    #[test]
-    fn discover_tsconfig_dirs_finds_packages_skips_node_modules() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let root = tmp.path();
-        let mk = |rel: &str| {
-            let dir = root.join(rel);
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("tsconfig.json"), "{}").unwrap();
-        };
-        mk("packages/a");
-        mk("packages/b");
-        mk("node_modules/dep"); // must be skipped
-                                // a non-tsconfig dir must not appear
-        std::fs::create_dir_all(root.join("packages/c")).unwrap();
-
-        let found = discover_tsconfig_dirs(&root.to_string_lossy());
-        assert!(found.contains(&"packages/a".to_string()));
-        assert!(found.contains(&"packages/b".to_string()));
-        assert!(
-            !found.iter().any(|d| d.contains("node_modules")),
-            "node_modules must be skipped, got {found:?}"
-        );
-        assert!(
-            !found.contains(&"packages/c".to_string()),
-            "a dir without tsconfig.json must not be discovered"
         );
     }
 }
