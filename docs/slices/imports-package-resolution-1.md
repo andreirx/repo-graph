@@ -1,11 +1,12 @@
 # IMPORTS-PACKAGE-RESOLUTION-1: classify TS package imports (workspace-local vs external vs unresolved)
 
 Slice ID: IMPORTS-PACKAGE-RESOLUTION-1
-Status: **SPEC — awaiting ratification (2026-06-05). NOT started. Policy only; no implementation.** Decide which
-package/import classes RESOLVE (workspace-local -> graph edges) vs are SAFELY non-cycle-relevant (external) vs
-still BLOCK (unresolved/dynamic), so the module-cycle certificate stops counting benign external npm imports as
-completeness holes. TS package-import resolution/completeness slice; NOT a default migration, NO raw
-decommission, NO module-cycle default flip, NO non-TS support.
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-05), variant A (classify + cert split, NO edge).** D1–D5
+ratified; A ratified after the module-target-identity stop fired (the producer gives no package target; package
+entries point to unindexed `dist/`). The 3-way classification + the cert split landed (`c5fea46`): external npm
+is now BENIGN, workspace-local is detected-but-blocks (un-edgeable), unknown blocks. amodx's external noise no
+longer blocks; the blocking set is precise. The workspace-local EDGE is the follow-up IMPORTS-WORKSPACE-PACKAGE-EDGE-1.
+See **Completion**. NOT a default migration, NO raw decommission, NO module-cycle default flip, NO non-TS support.
 Depends: CYCLES-COMPLETENESS-ENUMERATION-1 (amodx now reaches `IncompleteImportClasses`), the IR
 `ImportObservation`/`ImportResolution`, the livegraph cross-partition overlay, the import-resolver crate.
 Track: Stage D, import completeness.
@@ -148,8 +149,73 @@ Stop if capturing package_name requires reading package.json OUTSIDE the ingest 
 present a boundary matrix (the IR must carry it; livegraph stays IO-free).
 ```
 
+## Completion (implemented + live-validated 2026-06-05, EXECUTED)
+
+Commits: `3a97650` (spec) + `c5fea46` (impl). Ratified D1–D5 + **A** (classify + cert split, NO workspace-local
+edge -- the module-target identity was unresolvable in v1; see the stop record above).
+
+### What landed
+```text
+IR (Partition): + package_name + declared_dependencies, captured at the INGEST boundary
+  (scip-ingest::read_package_manifest reads {root}/package.json; missing/malformed -> None/empty, SAFE) so the
+  livegraph classifier stays IO-free. Round-trips through the warm-cache DTO (serde(default), backward-compatible).
+import-resolver (PURE): PackageImportClass {WorkspaceLocalUnedgeable | ExternalPackageNonLocal | PackageUnresolved}
+  + classify_package_import + package_name_of + NODE_BUILTINS. POSITIVE-evidence rule (node:/builtin OR declared
+  dep -> external); workspace map PRECEDES declared dep (workspace protocol); unknown bare specifier -> blocks.
+cert (module_cycle_cert) D5: ObservationClassSummary SPLIT -> has_external_nonlocal (BENIGN, reported, does NOT
+  block) + has_workspace_local_unedgeable / has_unresolved_package / has_dynamic / has_unresolved_after_overlay
+  (BLOCK). evaluate + fingerprint updated. livegraph snapshot builds the workspace map from loaded partitions'
+  package_names + classifies each PackageExternal obs via the source partition's declared deps. audit reports the
+  breakdown + bumps IMPORT_COMPLETENESS_POLICY_VERSION 1 -> 2.
+```
+
+### The trust hinge — honored
+```text
+External-benign requires POSITIVE evidence (node:/builtin OR a DECLARED dep), NEVER inferred from absence in the
+workspace map. A workspace-local import that CANNOT be edged stays BLOCKING (WorkspaceLocalUnedgeable), never
+benign. Unknown bare specifiers (e.g. @/lib) BLOCK. Under-classify is safe; nothing over-claims benign/resolved.
+```
+
+### Live validation (EXECUTED 2026-06-05; dev-install + cleared warm caches -> fresh ingest)
+```text
+amodx (8/8 loaded) -> IncompleteImportClasses, policy_version=2, observation_classes:
+    has_external_nonlocal_benign      = true   (react / @tiptap-declared / node:* / declared deps -> BENIGN)
+    has_workspace_local_unedgeable    = true   (@amodx/shared etc. -> detected workspace-local, BLOCKS)
+    has_unresolved_package            = true   (@/lib + transitive externals -> BLOCKS, honest)
+    has_dynamic                       = true   (dynamic import() -> BLOCKS)
+    has_unresolved_after_overlay      = true   (relative unresolved -> BLOCKS)
+  => the external npm noise is SEPARATED + benign; the cert is NOT Complete; the blocking set is now PRECISE.
+xpart fixture -> CompleteForModuleImportCycles (permits_default=true; all obs classes false) -- REGRESSION INTACT
+  (the policy split did not break the Complete path).
+repo-graph -> unaffected (IncompleteUnsupportedLanguage; non-TS PRECEDES import classes -- precedence unit test).
+```
+
+### Acceptance (the ratified-A targets) — all PASS
+```text
+1. @amodx/shared classified workspace-local but UNEDGEABLE; remains blocking            PASS (has_workspace_local_unedgeable).
+2. external npm / node: / declared-dep imports become benign ExternalPackageNonLocal      PASS (has_external_nonlocal_benign).
+3. @/lib/* remains unresolved/blocking                                                    PASS (has_unresolved_package).
+4. certificate does NOT become Complete for amodx                                         PASS (IncompleteImportClasses).
+5. the blocking set shrinks + becomes more precise                                        PASS (external separated out).
+6. xpart fixture remains Complete                                                         PASS.
+Gate: workspace tests ok / 0 failures; clippy -D warnings clean; fmt clean. 5 classifier + 23 module_cycle tests.
+```
+
+### Stop record (why NO edge in this slice)
+```text
+The workspace-local EDGE was deferred because the module-target identity is unresolvable in v1: (a) the producer
+gives only the package NAME for a non-relative import (no target file/symbol); (b) the package.json entry points
+to the BUILT dist/ (e.g. packages/shared main=dist/index.js) while the LiveGraph indexes src/; (c) partition_id
+is not a module-dirname. Forming an edge would require SCIP cross-package symbol monikers OR entry+tsconfig
+dist->src mapping -- neither in v1 scope. Per the trust hinge, WorkspaceLocalUnedgeable BLOCKS (does not fake an
+edge). -> IMPORTS-WORKSPACE-PACKAGE-EDGE-1.
+```
+
 ## Follow-up
 ```text
+- IMPORTS-WORKSPACE-PACKAGE-EDGE-1: resolve workspace-local imports to MODULE edges (SCIP cross-package symbol
+  monikers, OR package entry + tsconfig rootDir/outDir dist->src) -> WorkspaceLocalUnedgeable becomes a captured
+  edge -> a pure-workspace TS repo can reach Complete.
 - IMPORTS-PACKAGE-RESOLUTION-1C: tsconfig paths/baseUrl -> reclassify @/ aliases from PackageUnresolved -> local.
 - dynamic-import literal resolution (literal + local-resolvable `import('...')`).
 - the daemon RUNTIME wiring (cache the BaselineInput) + CYCLES-DEFAULT-MIGRATION-1 (un-deferred) -- once real
