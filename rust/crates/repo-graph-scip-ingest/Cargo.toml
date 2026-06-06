@@ -18,6 +18,9 @@ repo-graph-classification = { path = "../classification" }
 repo-graph-ir = { path = "../repo-graph-ir" }
 # IMPORTS-MODULE-INGEST-1: parse the ts-extractor import edge `metadata_json` ({rawPath, resolvedPath}).
 serde_json = "1"
+# IMPORTS-TSCONFIG-PATHS-1: tsconfig.json is JSONC (comments + trailing commas); json5 (a JSONC superset)
+# parses it into serde_json::Value. Ratified: REUSE a parser, do NOT hand-roll comment/comma stripping.
+json5 = "0.4"
 
 [dev-dependencies]
 # None — the de-risk runs via examples/decode_smoke.rs.

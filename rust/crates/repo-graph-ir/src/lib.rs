@@ -110,6 +110,12 @@ pub enum EdgeBasis {
     /// identical to `AstImport`. Maps to `EdgeType::Imports`. These edges are RUNTIME/in-memory only and
     /// are NEVER persisted in a per-partition IR / warm cache (per-partition cache coherence, F1).
     AstImportFileInventoryResolved,
+    /// A TSCONFIG-PATH-ALIAS import edge (IMPORTS-TSCONFIG-PATHS-1): an AST import OBSERVATION whose
+    /// non-relative specifier matched a `compilerOptions.paths` alias and was EXPANDED (paths + baseUrl) then
+    /// resolved against the global FILE inventory (extension/index). DISTINCT from a relative import
+    /// (`AstImportFileInventoryResolved`) and from a package import. Maps to `EdgeType::Imports`. RUNTIME/
+    /// in-memory ONLY -- never persisted (cache coherence; the alias config IS persisted, the edge is not).
+    AstImportTsconfigPathResolved,
 }
 
 /// Resolution class of an extracted module import (IMPORTS-MODULE-INGEST-1 + IMPORTS-EXTRACT-COMPLETENESS-1).
@@ -215,6 +221,25 @@ pub struct Partition {
     /// peerDependencies) from this partition's package.json -- POSITIVE evidence that a bare import is an
     /// EXTERNAL package (non-cycle-relevant). NEVER inferred from absence in the workspace map.
     pub declared_dependencies: std::collections::BTreeSet<String>,
+    /// IMPORTS-TSCONFIG-PATHS-1: this partition's tsconfig path-alias config (baseUrl + paths), captured at
+    /// ingest. `None` when the partition has no readable `compilerOptions.paths`. The pure resolver expands a
+    /// non-relative specifier matching a `paths` pattern against this + the FILE inventory.
+    pub tsconfig_aliases: Option<TsconfigAliasConfig>,
+}
+
+/// IMPORTS-TSCONFIG-PATHS-1: a partition's tsconfig path-alias configuration (compilerOptions `baseUrl` +
+/// `paths`), captured at the INGEST boundary so the pure resolver stays IO-free. PERSISTED in the IR (the
+/// config is partition-stable); the resolved EDGES are runtime-overlay only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TsconfigAliasConfig {
+    /// `compilerOptions.baseUrl`, relative to the tsconfig dir (= the partition root). Defaults to `"."` when
+    /// `paths` is present but `baseUrl` is absent (modern TS resolves `paths` relative to the tsconfig).
+    pub base_url: String,
+    /// `compilerOptions.paths`: alias pattern -> target list. Each pattern/target may contain ONE `*`.
+    pub paths: std::collections::BTreeMap<String, Vec<String>>,
+    /// The partition's repo-relative prefix (e.g. `"admin"`; `""` for a repo-root partition). `base_url`
+    /// resolves against it so the expanded path is a repo-relative key into the global FILE inventory.
+    pub partition_prefix: String,
 }
 
 /// Provenance for a node or edge: the external-producer evidence (IR design R6).
@@ -363,6 +388,7 @@ mod tests {
             build_inputs_hash: "h".into(),
             package_name: None,
             declared_dependencies: std::collections::BTreeSet::new(),
+            tsconfig_aliases: None,
         }
     }
 

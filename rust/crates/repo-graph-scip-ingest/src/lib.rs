@@ -22,7 +22,7 @@ use repo_graph_indexer::types::{
 use repo_graph_ir::{
     CanonicalKey, EdgeBasis, EdgeType as IrEdgeType, IdentitySource, ImportEdgeMeta,
     ImportObservation as IrImportObservation, ImportResolution, IrEdge, IrNode, Partition,
-    PartitionId, PartitionIr, PartitionKind, Provenance, SourceRange,
+    PartitionId, PartitionIr, PartitionKind, Provenance, SourceRange, TsconfigAliasConfig,
 };
 use repo_graph_ts_extractor::TsExtractor;
 use scip::types::Index;
@@ -917,6 +917,42 @@ fn read_package_manifest(root: &str) -> (Option<String>, std::collections::BTree
     (name, deps)
 }
 
+/// IMPORTS-TSCONFIG-PATHS-1: read `{root}/tsconfig.json` (JSONC, via json5) -> the partition's path-alias
+/// config (compilerOptions.baseUrl + paths). Captured at the INGEST boundary (resolver stays IO-free).
+/// Best-effort: missing/malformed/no-paths -> `None` (SAFE -- the partition's `@/` imports stay blocking).
+/// `base_url` defaults to `"."` when paths exist without an explicit baseUrl.
+fn read_tsconfig_aliases(root: &str, partition_prefix: &str) -> Option<TsconfigAliasConfig> {
+    let text = std::fs::read_to_string(format!("{root}/tsconfig.json")).ok()?;
+    let json: serde_json::Value = json5::from_str(&text).ok()?;
+    let compiler_options = json.get("compilerOptions")?;
+    let paths_obj = compiler_options.get("paths").and_then(|v| v.as_object())?;
+    let mut paths = std::collections::BTreeMap::new();
+    for (pattern, targets) in paths_obj {
+        if let Some(arr) = targets.as_array() {
+            let target_list: Vec<String> = arr
+                .iter()
+                .filter_map(|t| t.as_str().map(|s| s.to_string()))
+                .collect();
+            if !target_list.is_empty() {
+                paths.insert(pattern.clone(), target_list);
+            }
+        }
+    }
+    if paths.is_empty() {
+        return None;
+    }
+    let base_url = compiler_options
+        .get("baseUrl")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".")
+        .to_string();
+    Some(TsconfigAliasConfig {
+        base_url,
+        paths,
+        partition_prefix: partition_prefix.to_string(),
+    })
+}
+
 /// Ingest one TypeScript partition: decode-driven node build (AST-adopted / reconciled /
 /// fallback / materialized FILE) plus strict edge derivation, assembled into a
 /// `PartitionIr`. Source is read from `{root}/{relative_path}`. `partition_prefix` is the partition's
@@ -934,6 +970,7 @@ pub fn ingest_partition(
     partition_prefix: &str,
 ) -> IngestOutcome {
     let (package_name, declared_dependencies) = read_package_manifest(root);
+    let tsconfig_aliases = read_tsconfig_aliases(root, partition_prefix);
     let partition = Partition {
         id: PartitionId::new(partition_id),
         kind: PartitionKind::TsPackage,
@@ -943,6 +980,7 @@ pub fn ingest_partition(
         build_inputs_hash: build_inputs_hash.to_string(),
         package_name,
         declared_dependencies,
+        tsconfig_aliases,
     };
     let mut ir = PartitionIr::new(partition);
     let mut node_counts = NodeCounts::default();

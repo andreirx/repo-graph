@@ -26,10 +26,10 @@ use std::collections::BTreeSet;
 pub const LANGUAGE_SUPPORT_VERSION: u32 = 1;
 
 /// The import-completeness policy version: which import classes the policy treats as
-/// uncaptured/cycle-relevant. Bumped to 2 by IMPORTS-PACKAGE-RESOLUTION-1 (ExternalPackageNonLocal is now
-/// benign; only workspace-local-unedgeable / unresolved-package / dynamic / unresolved-relative block) ->
-/// every prior certificate re-evaluates.
-pub const IMPORT_COMPLETENESS_POLICY_VERSION: u32 = 2;
+/// uncaptured/cycle-relevant. v2 = IMPORTS-PACKAGE-RESOLUTION-1 (ExternalPackageNonLocal benign). v3 =
+/// IMPORTS-TSCONFIG-PATHS-1 (a RESOLVED tsconfig path alias is a captured edge -> non-blocking; an unresolved
+/// alias -> has_alias_unresolved, blocking). Any bump re-evaluates every prior certificate.
+pub const IMPORT_COMPLETENESS_POLICY_VERSION: u32 = 3;
 
 /// The LiveGraph-supported TS family (D3-A). A non-null `files.language` value OUTSIDE this set is a non-TS
 /// CODE source: the indexer vocabulary (`indexer/routing.rs::detect_language`) is CLOSED + code-only, so
@@ -188,6 +188,7 @@ pub fn cycle_completeness_audit_response(
                 "has_external_nonlocal_benign": o.has_external_nonlocal,
                 "has_workspace_local_unedgeable": o.has_workspace_local_unedgeable,
                 "has_unresolved_package": o.has_unresolved_package,
+                "has_alias_unresolved": o.has_alias_unresolved,
                 "has_dynamic": o.has_dynamic,
                 "has_unresolved_after_overlay": o.has_unresolved_after_overlay,
             },

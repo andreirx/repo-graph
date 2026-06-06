@@ -247,6 +247,9 @@ pub enum CacheEdgeBasisDto {
     /// cross-partition resolved edges are NEVER persisted, so this never appears in a real cache payload
     /// (hence NO SCHEMA_VERSION bump).
     AstImportFileInventoryResolved,
+    /// `AstImportTsconfigPathResolved` (IMPORTS-TSCONFIG-PATHS-1). Like the inventory-resolved basis, alias
+    /// edges are RUNTIME-ONLY and NEVER persisted -> never appears in a real cache payload (NO bump).
+    AstImportTsconfigPathResolved,
 }
 
 /// Mirror of `repo_graph_ir::ImportResolution`.
@@ -333,6 +336,17 @@ pub struct CacheIrEdgeDto {
     pub import: Option<CacheImportEdgeMetaDto>,
 }
 
+/// Mirror of `repo_graph_ir::TsconfigAliasConfig` (IMPORTS-TSCONFIG-PATHS-1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CacheTsconfigAliasConfigDto {
+    /// `compilerOptions.baseUrl`.
+    pub base_url: String,
+    /// `compilerOptions.paths`: pattern -> targets.
+    pub paths: std::collections::BTreeMap<String, Vec<String>>,
+    /// The partition repo-relative prefix.
+    pub partition_prefix: String,
+}
+
 /// Mirror of `repo_graph_ir::Partition`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CachePartitionDto {
@@ -356,6 +370,10 @@ pub struct CachePartitionDto {
     /// backward-compatible deserialization of older caches.
     #[serde(default)]
     pub declared_dependencies: std::collections::BTreeSet<String>,
+    /// IMPORTS-TSCONFIG-PATHS-1: the partition's tsconfig path-alias config. `#[serde(default)]` for
+    /// backward-compatible deserialization of older caches (-> `None`).
+    #[serde(default)]
+    pub tsconfig_aliases: Option<CacheTsconfigAliasConfigDto>,
 }
 
 /// Mirror of `repo_graph_ir::PartitionIr`. `impl From<&PartitionIr>` + `impl TryFrom<_> for
@@ -528,6 +546,7 @@ impl From<&EdgeBasis> for CacheEdgeBasisDto {
             EdgeBasis::FileScopeReference => Self::FileScopeReference,
             EdgeBasis::AstImport => Self::AstImport,
             EdgeBasis::AstImportFileInventoryResolved => Self::AstImportFileInventoryResolved,
+            EdgeBasis::AstImportTsconfigPathResolved => Self::AstImportTsconfigPathResolved,
         }
     }
 }
@@ -541,6 +560,7 @@ impl From<CacheEdgeBasisDto> for EdgeBasis {
             CacheEdgeBasisDto::AstImportFileInventoryResolved => {
                 Self::AstImportFileInventoryResolved
             }
+            CacheEdgeBasisDto::AstImportTsconfigPathResolved => Self::AstImportTsconfigPathResolved,
         }
     }
 }
@@ -623,6 +643,14 @@ impl From<&Partition> for CachePartitionDto {
             build_inputs_hash: p.build_inputs_hash.clone(),
             package_name: p.package_name.clone(),
             declared_dependencies: p.declared_dependencies.clone(),
+            tsconfig_aliases: p
+                .tsconfig_aliases
+                .as_ref()
+                .map(|a| CacheTsconfigAliasConfigDto {
+                    base_url: a.base_url.clone(),
+                    paths: a.paths.clone(),
+                    partition_prefix: a.partition_prefix.clone(),
+                }),
         }
     }
 }
@@ -637,6 +665,13 @@ impl From<CachePartitionDto> for Partition {
             build_inputs_hash: p.build_inputs_hash,
             package_name: p.package_name,
             declared_dependencies: p.declared_dependencies,
+            tsconfig_aliases: p
+                .tsconfig_aliases
+                .map(|a| repo_graph_ir::TsconfigAliasConfig {
+                    base_url: a.base_url,
+                    paths: a.paths,
+                    partition_prefix: a.partition_prefix,
+                }),
         }
     }
 }
@@ -956,6 +991,13 @@ mod tests {
             build_inputs_hash: "abc123".to_string(),
             package_name: Some("@sample/pkg".to_string()),
             declared_dependencies: ["react".to_string()].into_iter().collect(),
+            tsconfig_aliases: Some(repo_graph_ir::TsconfigAliasConfig {
+                base_url: ".".to_string(),
+                paths: [("@/*".to_string(), vec!["./src/*".to_string()])]
+                    .into_iter()
+                    .collect(),
+                partition_prefix: "pkg".to_string(),
+            }),
         };
         let mut ir = PartitionIr::new(partition);
         ir.nodes.push(IrNode {

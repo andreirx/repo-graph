@@ -88,9 +88,12 @@ pub struct ObservationClassSummary {
     /// BLOCKS: a WORKSPACE-LOCAL package import this slice cannot yet convert to a module edge
     /// (`WorkspaceLocalUnedgeable`; the edge is IMPORTS-WORKSPACE-PACKAGE-EDGE-1). Detected-local but a hole.
     pub has_workspace_local_unedgeable: bool,
-    /// BLOCKS: a non-relative import that is NEITHER workspace-local NOR a declared external
-    /// (`PackageUnresolved`; e.g. a tsconfig path alias `@/lib`) -- a genuine unknown.
+    /// BLOCKS: a non-relative import that is NEITHER workspace-local NOR a declared external NOR a tsconfig
+    /// alias (`PackageUnresolved`) -- a genuine unknown bare specifier.
     pub has_unresolved_package: bool,
+    /// BLOCKS (IMPORTS-TSCONFIG-PATHS-1): a tsconfig `paths` ALIAS that matched a pattern but did NOT resolve
+    /// to an indexed FILE (no file / ambiguous). DISTINCT from has_unresolved_package (an unknown specifier).
+    pub has_alias_unresolved: bool,
     /// BLOCKS: a `DynamicUnsupported` observation (a dynamic `import()`).
     pub has_dynamic: bool,
     /// BLOCKS: a `StaticUnresolved` (relative) observation the cross-partition OVERLAY did NOT resolve.
@@ -164,6 +167,7 @@ pub fn evaluate_module_cycle_completeness(
     let o = &live.observation_classes;
     if o.has_workspace_local_unedgeable
         || o.has_unresolved_package
+        || o.has_alias_unresolved
         || o.has_dynamic
         || o.has_unresolved_after_overlay
     {
@@ -198,10 +202,11 @@ pub fn certificate_inputs_fingerprint(
     parts.sort();
     let o = &live.observation_classes;
     let mut s = format!(
-        "obs[ext{}:wsl{}:unp{}:dyn{}:unr{}]|parts[{}]",
+        "obs[ext{}:wsl{}:unp{}:alu{}:dyn{}:unr{}]|parts[{}]",
         o.has_external_nonlocal as u8,
         o.has_workspace_local_unedgeable as u8,
         o.has_unresolved_package as u8,
+        o.has_alias_unresolved as u8,
         o.has_dynamic as u8,
         o.has_unresolved_after_overlay as u8,
         parts.join(",")
@@ -261,6 +266,7 @@ mod tests {
         has_external_nonlocal: false,
         has_workspace_local_unedgeable: false,
         has_unresolved_package: false,
+        has_alias_unresolved: false,
         has_dynamic: false,
         has_unresolved_after_overlay: false,
     };
@@ -331,6 +337,10 @@ mod tests {
             },
             ObservationClassSummary {
                 has_unresolved_package: true,
+                ..CLEAN
+            },
+            ObservationClassSummary {
+                has_alias_unresolved: true,
                 ..CLEAN
             },
             ObservationClassSummary {

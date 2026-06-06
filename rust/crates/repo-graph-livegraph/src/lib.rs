@@ -12,8 +12,9 @@
 //! Headless API (no query migration). See docs/slices/livegraph-runtime-1.md.
 
 use repo_graph_import_resolver::{
-    classify_package_import, dirname, file_key_path, resolve_imports, FileInventory,
-    ImportCandidate, PackageImportClass, ResolvedImportEdgeCandidate,
+    classify_package_import, dirname, file_key_path, resolve_imports, resolve_tsconfig_alias,
+    specifier_matches_any_alias, AliasResolution, FileInventory, ImportCandidate,
+    PackageImportClass, ResolvedImportEdgeCandidate,
 };
 use repo_graph_ir::{
     CanonicalKey, EdgeBasis, IdentitySource, ImportResolution, PartitionIr, Provenance, SourceRange,
@@ -1028,22 +1029,51 @@ impl LiveGraph {
                 }),
         );
         let mut candidates: Vec<ImportCandidate> = Vec::new();
+        // IMPORTS-TSCONFIG-PATHS-1: alias-resolved FILE->FILE edges (a PackageExternal specifier matching a
+        // tsconfig `paths` alias that resolves to an indexed source FILE). Runtime-only, like the relative
+        // overlay; basis AstImportTsconfigPathResolved.
+        let mut alias_edges: Vec<ResolvedImportEdgeCandidate> = Vec::new();
         for s in self.slots.values() {
             if let Some(ir) = &s.ir {
                 for o in &ir.import_observations {
-                    if o.resolution != ImportResolution::StaticUnresolved {
-                        continue;
-                    }
-                    if let Some(src_key) = inventory.file_key_for(&o.source_file) {
-                        candidates.push(ImportCandidate {
-                            source_file_key: src_key.to_string(),
-                            raw_specifier: o.raw_specifier.clone(),
-                        });
+                    match o.resolution {
+                        ImportResolution::StaticUnresolved => {
+                            if let Some(src_key) = inventory.file_key_for(&o.source_file) {
+                                candidates.push(ImportCandidate {
+                                    source_file_key: src_key.to_string(),
+                                    raw_specifier: o.raw_specifier.clone(),
+                                });
+                            }
+                        }
+                        ImportResolution::PackageExternal => {
+                            let Some(cfg) = &ir.partition.tsconfig_aliases else {
+                                continue;
+                            };
+                            let Some(src_key) = inventory.file_key_for(&o.source_file) else {
+                                continue;
+                            };
+                            if let AliasResolution::Resolved(dst_key) =
+                                resolve_tsconfig_alias(&o.raw_specifier, cfg, &inventory)
+                            {
+                                let resolved_repo_path =
+                                    file_key_path(&dst_key).unwrap_or_default().to_string();
+                                alias_edges.push(ResolvedImportEdgeCandidate {
+                                    src_file_key: src_key.to_string(),
+                                    dst_file_key: dst_key,
+                                    basis: EdgeBasis::AstImportTsconfigPathResolved,
+                                    raw_specifier: o.raw_specifier.clone(),
+                                    resolved_repo_path,
+                                });
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
         }
-        self.xpart_overlay = resolve_imports(&inventory, candidates).resolved;
+        let mut overlay = resolve_imports(&inventory, candidates).resolved;
+        overlay.extend(alias_edges);
+        self.xpart_overlay = overlay;
     }
 
     /// The current cross-partition import overlay edges (IMPORTS-XPART-WIRING-1): resolved FILE -> FILE
@@ -1313,19 +1343,37 @@ impl LiveGraph {
                 for obs in &ir.import_observations {
                     match obs.resolution {
                         ImportResolution::PackageExternal => {
-                            match classify_package_import(
-                                &obs.raw_specifier,
-                                &workspace_packages,
-                                declared,
-                            ) {
-                                PackageImportClass::ExternalPackageNonLocal => {
-                                    o.has_external_nonlocal = true
-                                }
-                                PackageImportClass::WorkspaceLocalUnedgeable => {
-                                    o.has_workspace_local_unedgeable = true
-                                }
-                                PackageImportClass::PackageUnresolved => {
-                                    o.has_unresolved_package = true
+                            // IMPORTS-TSCONFIG-PATHS-1: a tsconfig path ALIAS is resolved BEFORE the package
+                            // classification. Overlay-resolved (an edge was emitted) -> captured, NOT blocking.
+                            // Matched a `paths` pattern but NOT overlay-resolved (no file / ambiguous) ->
+                            // has_alias_unresolved (blocks). Not an alias -> package classification.
+                            let alias_resolved = overlay.iter().any(|(src_key, raw)| {
+                                *raw == obs.raw_specifier.as_str()
+                                    && file_key_path(src_key) == Some(obs.source_file.as_str())
+                            });
+                            let is_alias =
+                                ir.partition.tsconfig_aliases.as_ref().is_some_and(|cfg| {
+                                    specifier_matches_any_alias(cfg, &obs.raw_specifier)
+                                });
+                            if alias_resolved {
+                                // captured tsconfig-path edge -> not blocking
+                            } else if is_alias {
+                                o.has_alias_unresolved = true;
+                            } else {
+                                match classify_package_import(
+                                    &obs.raw_specifier,
+                                    &workspace_packages,
+                                    declared,
+                                ) {
+                                    PackageImportClass::ExternalPackageNonLocal => {
+                                        o.has_external_nonlocal = true
+                                    }
+                                    PackageImportClass::WorkspaceLocalUnedgeable => {
+                                        o.has_workspace_local_unedgeable = true
+                                    }
+                                    PackageImportClass::PackageUnresolved => {
+                                        o.has_unresolved_package = true
+                                    }
                                 }
                             }
                         }
@@ -1490,6 +1538,7 @@ mod tests {
             build_inputs_hash: "h".into(),
             package_name: None,
             declared_dependencies: std::collections::BTreeSet::new(),
+            tsconfig_aliases: None,
         }
     }
     fn prov() -> Provenance {

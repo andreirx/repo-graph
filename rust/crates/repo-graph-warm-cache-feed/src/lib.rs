@@ -238,6 +238,7 @@ mod tests {
             build_inputs_hash: "abc123".to_string(),
             package_name: None,
             declared_dependencies: std::collections::BTreeSet::new(),
+            tsconfig_aliases: None,
         };
         let mut ir = PartitionIr::new(partition);
         ir.nodes.push(IrNode {

@@ -17,7 +17,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use repo_graph_ir::EdgeBasis;
+use repo_graph_ir::{EdgeBasis, TsconfigAliasConfig};
 
 /// IMPORTS-PACKAGE-RESOLUTION-1: the class of a NON-RELATIVE (bare) TS import for module-cycle completeness.
 /// Refines the single ingest `PackageExternal` bucket using POSITIVE package.json metadata. PURE.
@@ -312,12 +312,174 @@ pub fn resolve_imports(
     report
 }
 
+/// IMPORTS-TSCONFIG-PATHS-1: the resolution of a NON-RELATIVE specifier against a partition's tsconfig
+/// `paths`. PURE. `NotAnAlias` means no pattern matched (the caller then does the package classification).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AliasResolution {
+    /// No `paths` pattern matched -> NOT an alias (caller falls through to package classification).
+    NotAnAlias,
+    /// Exactly one inventory FILE matched -> the resolved FILE key (-> a real FILE->FILE edge).
+    Resolved(String),
+    /// A pattern matched but NO inventory FILE resolved (extension/index) -> BLOCKS (honest).
+    Unresolved,
+    /// More than one DISTINCT FILE matched -> AMBIGUOUS; surfaced, NEVER silently picked -> BLOCKS.
+    Ambiguous,
+}
+
+/// Match `specifier` against ONE tsconfig `paths` pattern; return the `*` capture if it matches. Patterns
+/// have at most one `*` (TS semantics). An exact pattern (no `*`) matches the whole specifier (capture `""`).
+fn match_alias_pattern(pattern: &str, specifier: &str) -> Option<String> {
+    match pattern.split_once('*') {
+        Some((prefix, suffix)) => {
+            if specifier.len() >= prefix.len() + suffix.len()
+                && specifier.starts_with(prefix)
+                && specifier.ends_with(suffix)
+            {
+                Some(specifier[prefix.len()..specifier.len() - suffix.len()].to_string())
+            } else {
+                None
+            }
+        }
+        None => (pattern == specifier).then(String::new),
+    }
+}
+
+/// True if `specifier` matches ANY of the partition's tsconfig `paths` patterns (i.e. it IS an alias, even if
+/// it does not resolve to a FILE). Lets a caller distinguish an UNRESOLVED alias (blocks as alias) from a
+/// non-alias bare specifier (package classification) without re-running the full inventory resolution.
+pub fn specifier_matches_any_alias(config: &TsconfigAliasConfig, specifier: &str) -> bool {
+    config
+        .paths
+        .keys()
+        .any(|pattern| match_alias_pattern(pattern, specifier).is_some())
+}
+
+/// Resolve a NON-RELATIVE `specifier` against the partition's tsconfig alias `config` + the global FILE
+/// inventory. PURE. For each matching `paths` target: substitute the `*`, join against `baseUrl` (resolved
+/// from the partition's repo-relative prefix), then try the SAME extension/index candidates as a relative
+/// import. Collects DISTINCT FILE hits: 0 -> Unresolved, 1 -> Resolved, >1 -> Ambiguous (never picked). No
+/// pattern match -> NotAnAlias. Reuses `candidate_paths` -- alias resolution differs from relative ONLY in how
+/// the base path is formed (paths/baseUrl vs `dirname(source)`).
+pub fn resolve_tsconfig_alias(
+    specifier: &str,
+    config: &TsconfigAliasConfig,
+    inv: &FileInventory,
+) -> AliasResolution {
+    // baseUrl is relative to the tsconfig dir (= the partition root, repo-relative `partition_prefix`).
+    let effective_base = normalize_join(&config.partition_prefix, &config.base_url);
+    let mut matched_any = false;
+    let mut hits: BTreeSet<String> = BTreeSet::new();
+    for (pattern, targets) in &config.paths {
+        let Some(capture) = match_alias_pattern(pattern, specifier) else {
+            continue;
+        };
+        matched_any = true;
+        for target in targets {
+            let substituted = target.replacen('*', &capture, 1);
+            let base = normalize_join(&effective_base, &substituted);
+            for path in candidate_paths(&base) {
+                if let Some(key) = inv.file_key_for(&path) {
+                    hits.insert(key.to_string());
+                }
+            }
+        }
+    }
+    if !matched_any {
+        return AliasResolution::NotAnAlias;
+    }
+    match hits.len() {
+        0 => AliasResolution::Unresolved,
+        1 => AliasResolution::Resolved(hits.into_iter().next().unwrap()),
+        _ => AliasResolution::Ambiguous,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn set(items: &[&str]) -> BTreeSet<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn alias_config(
+        prefix: &str,
+        base_url: &str,
+        pattern: &str,
+        target: &str,
+    ) -> TsconfigAliasConfig {
+        TsconfigAliasConfig {
+            base_url: base_url.to_string(),
+            paths: [(pattern.to_string(), vec![target.to_string()])]
+                .into_iter()
+                .collect(),
+            partition_prefix: prefix.to_string(),
+        }
+    }
+
+    #[test]
+    fn alias_wildcard_resolves_to_partition_source() {
+        // admin: baseUrl=".", paths {"@/*":["./src/*"]}; @/lib/api -> admin/src/lib/api.ts.
+        let inv = FileInventory::from_file_keys(["repo:admin/src/lib/api.ts:FILE".to_string()]);
+        let cfg = alias_config("admin", ".", "@/*", "./src/*");
+        assert_eq!(
+            resolve_tsconfig_alias("@/lib/api", &cfg, &inv),
+            AliasResolution::Resolved("repo:admin/src/lib/api.ts:FILE".to_string())
+        );
+    }
+
+    #[test]
+    fn alias_index_resolution() {
+        let inv = FileInventory::from_file_keys(["repo:admin/src/lib/index.ts:FILE".to_string()]);
+        let cfg = alias_config("admin", ".", "@/*", "./src/*");
+        assert_eq!(
+            resolve_tsconfig_alias("@/lib", &cfg, &inv),
+            AliasResolution::Resolved("repo:admin/src/lib/index.ts:FILE".to_string())
+        );
+    }
+
+    #[test]
+    fn alias_no_pattern_match_is_not_an_alias() {
+        let inv = FileInventory::from_file_keys(["repo:admin/src/lib/api.ts:FILE".to_string()]);
+        let cfg = alias_config("admin", ".", "@/*", "./src/*");
+        // react does not match @/* -> NotAnAlias (caller does package classification).
+        assert_eq!(
+            resolve_tsconfig_alias("react", &cfg, &inv),
+            AliasResolution::NotAnAlias
+        );
+    }
+
+    #[test]
+    fn alias_matched_but_no_file_blocks() {
+        let inv = FileInventory::from_file_keys(["repo:admin/src/other.ts:FILE".to_string()]);
+        let cfg = alias_config("admin", ".", "@/*", "./src/*");
+        assert_eq!(
+            resolve_tsconfig_alias("@/lib/missing", &cfg, &inv),
+            AliasResolution::Unresolved
+        );
+    }
+
+    #[test]
+    fn alias_ambiguous_when_multiple_targets_resolve() {
+        // two targets both resolve to distinct files -> Ambiguous (never silently picked).
+        let inv = FileInventory::from_file_keys([
+            "repo:admin/src/lib/api.ts:FILE".to_string(),
+            "repo:admin/generated/lib/api.ts:FILE".to_string(),
+        ]);
+        let cfg = TsconfigAliasConfig {
+            base_url: ".".to_string(),
+            paths: [(
+                "@/*".to_string(),
+                vec!["./src/*".to_string(), "./generated/*".to_string()],
+            )]
+            .into_iter()
+            .collect(),
+            partition_prefix: "admin".to_string(),
+        };
+        assert_eq!(
+            resolve_tsconfig_alias("@/lib/api", &cfg, &inv),
+            AliasResolution::Ambiguous
+        );
     }
 
     #[test]
