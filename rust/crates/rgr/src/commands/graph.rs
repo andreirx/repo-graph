@@ -736,27 +736,30 @@ pub fn run_path(args: &[String]) -> ExitCode {
 // Machine mode (--json): full envelope.
 
 pub fn run_imports(args: &[String]) -> ExitCode {
-    // ── Parse args (filter out --json) ──────────────────────────
+    // IMPORTS-LIVEGRAPH-CLI-1: extract --engine FIRST. Absent == "auto" -> "sqlite" (NO default migration:
+    // the SQLite single-file listing stays the default; `--engine livegraph` is the explicit opt-in, D3).
+    let (args, engine_raw) = extract_engine_flag(args.to_vec());
+    let engine = if engine_raw == "auto" {
+        "sqlite"
+    } else {
+        engine_raw.as_str()
+    };
+    let usage = "usage: rmap imports [<file>] [--engine sqlite|livegraph] [--json]";
+
+    // Parse --json + the optional positional <file> from the remaining args.
     let mut json_mode = false;
-    let positional: Vec<&String> = args
-        .iter()
-        .filter(|a| {
-            if *a == "--json" {
-                json_mode = true;
-                false
-            } else {
-                true
+    let mut positional: Vec<String> = Vec::new();
+    for a in &args {
+        match a.as_str() {
+            "--json" => json_mode = true,
+            flag if flag.starts_with("--") => {
+                eprintln!("error: unknown flag: {flag}");
+                eprintln!("{usage}");
+                return ExitCode::from(1);
             }
-        })
-        .collect();
-
-    // REG-1: one positional arg (file_path), repo from cwd
-    if positional.len() != 1 {
-        eprintln!("usage: rmap imports <file_path> [--json]");
-        return ExitCode::from(1);
+            other => positional.push(other.to_string()),
+        }
     }
-
-    let file_path = positional[0];
 
     let repo_path = match resolve_repo_from_cwd() {
         Ok(p) => p,
@@ -766,20 +769,44 @@ pub fn run_imports(args: &[String]) -> ExitCode {
         }
     };
 
+    // Validate the engine/arg combination + build params (D6: sqlite REQUIRES <file>; livegraph file OPTIONAL
+    // -> repo-wide).
+    let params = match engine {
+        "sqlite" => {
+            if positional.len() != 1 {
+                eprintln!("error: the sqlite engine requires exactly one <file>");
+                eprintln!("{usage}");
+                return ExitCode::from(1);
+            }
+            serde_json::json!({ "repo": repo_path, "file": positional[0] })
+        }
+        "livegraph" => {
+            if positional.len() > 1 {
+                eprintln!("error: at most one <file> (omit for a repo-wide view)");
+                eprintln!("{usage}");
+                return ExitCode::from(1);
+            }
+            let mut p = serde_json::json!({ "repo": repo_path, "engine": "livegraph" });
+            if let Some(file) = positional.first() {
+                p["file"] = serde_json::Value::String(file.clone());
+            }
+            p
+        }
+        other => {
+            eprintln!("error: unknown --engine '{other}' (supported: sqlite, livegraph)");
+            return ExitCode::from(1);
+        }
+    };
+
     let mut client = match create_daemon_client("imports") {
         Ok(c) => c,
         Err(code) => return code,
     };
 
-    let params = serde_json::json!({
-        "repo": repo_path,
-        "file": file_path,
-    });
-
     match client.request("imports", Some(params)) {
         Ok(result) => {
             if json_mode {
-                // Machine mode: print full envelope
+                // Machine mode: the full envelope (the AUTHORITATIVE, complete evidence for livegraph, D4).
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => {
                         println!("{}", json);
@@ -790,8 +817,20 @@ pub fn run_imports(args: &[String]) -> ExitCode {
                         ExitCode::from(2)
                     }
                 }
+            } else if engine == "livegraph" {
+                use crate::presentation::imports::LivegraphImportsResponse;
+                match serde_json::from_value::<LivegraphImportsResponse>(result) {
+                    Ok(response) => {
+                        print!("{}", response.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse imports response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
             } else {
-                // Human mode: parse and render (CLI-OUT-3)
+                // Human mode (sqlite, CLI-OUT-3): the existing single-file listing renderer (unchanged).
                 use crate::presentation::imports::ImportsResponse;
                 match serde_json::from_value::<ImportsResponse>(result) {
                     Ok(response) => {
