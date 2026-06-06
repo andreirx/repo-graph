@@ -1,12 +1,13 @@
 # IMPORTS-TSCONFIG-PATHS-1: resolve tsconfig path aliases (`@/lib/*`) to source FILE edges
 
 Slice ID: IMPORTS-TSCONFIG-PATHS-1
-Status: **SPEC — awaiting ratification (2026-06-05). NOT started.** Resolve TypeScript `paths`/`baseUrl` aliases
-(e.g. `@/lib/api`) into source FILE edges, so a resolved alias stops blocking module-cycle completeness. Unlike
-workspace-package imports (blocked by the src-vs-dist moniker chasm, IMPORTS-WORKSPACE-PACKAGE-EDGE-1A=RED),
-aliases resolve to the partition's OWN indexed SOURCE -- no dist indirection. NO workspace package imports, NO
-external package resolver, NO default migration, NO raw decommission, NO heuristic package-entry remapping.
-Depends: IMPORTS-PACKAGE-RESOLUTION-1 (the classifier; `@/` currently -> `PackageUnresolved`), the import-resolver
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-06), D1–D4 ratified.** tsconfig `paths`/`baseUrl` aliases
+(`@/lib/api`) now resolve to source FILE edges (basis `AstImportTsconfigPathResolved`); a resolved alias stops
+blocking, an unresolved one -> `has_alias_unresolved`. Captured at the INGEST boundary (JSONC via `json5`),
+resolved by the pure resolver, edged in the runtime overlay. Live: amodx `@/lib/*` resolve; xpart stays
+Complete. See **Completion**. NO workspace package imports, NO external package resolver, NO default migration,
+NO raw decommission, NO heuristic package-entry remapping.
+Depends: IMPORTS-PACKAGE-RESOLUTION-1 (the classifier; `@/` was `PackageUnresolved`), the import-resolver
 relative resolution. Track: Stage D, import completeness.
 
 ## Goal
@@ -113,6 +114,73 @@ Dynamic imports stay blocking. Only paths/baseUrl in the partition's own (JSONC)
 5. live: amodx alias edges resolve + the audit shows has_unresolved_package shrink; gate; completion doc.
 Stop if: tsconfig `paths` semantics need full Node/TS module resolution (conditional exports, nested baseUrl) to
 disambiguate -> present a matrix (v1 is prefix/wildcard + extension/index ONLY).
+```
+
+## Completion (implemented + live-validated 2026-06-06, EXECUTED)
+
+Commits: `30c852e` (spec) + the impl/docs commits below. Ratified D1–D4.
+
+### What landed
+```text
+dep: json5 = "0.4" (scip-ingest) -- the ratified JSONC parser (REUSE, not hand-rolled). Parse failure -> no
+  aliases (SAFE).
+IR: Partition + tsconfig_aliases: Option<TsconfigAliasConfig{base_url, paths, partition_prefix}> (captured at
+  ingest) + a new EdgeBasis::AstImportTsconfigPathResolved (runtime-only, never persisted). Round-trips through
+  the warm-cache DTO (serde(default)).
+scip-ingest: read_tsconfig_aliases({root}/tsconfig.json via json5) -> the config; partition_prefix captured for
+  baseUrl resolution.
+import-resolver (PURE): resolve_tsconfig_alias(specifier, config, inventory) -> {NotAnAlias | Resolved(file) |
+  Unresolved | Ambiguous}: match a `paths` pattern (wildcard + exact), substitute, join baseUrl+prefix, then the
+  SAME candidate_paths/inventory match as a relative import; >1 distinct file -> Ambiguous (NEVER picked). +
+  specifier_matches_any_alias (the snapshot's is-alias test).
+livegraph: the overlay (rebuild_xpart_overlay) emits a FILE->FILE alias edge on Resolved (basis
+  AstImportTsconfigPathResolved); the snapshot classifies a PackageExternal obs: overlay-resolved -> captured;
+  matched-a-pattern-but-not-resolved -> has_alias_unresolved; else -> package classification (alias precedes
+  package).
+cert: ObservationClassSummary + has_alias_unresolved (BLOCKS); evaluate + fingerprint; audit reports it; policy
+  version 2 -> 3.
+```
+
+### Live validation (EXECUTED 2026-06-06; durable producer reprovisioned -- see note)
+```text
+amodx (8/8 loaded) -> IncompleteImportClasses, policy_version=3:
+    has_external_nonlocal_benign   = true   (react/@tiptap/node: -> benign)
+    has_workspace_local_unedgeable = true   (@amodx/shared -> blocks; the RED-probe honest block)
+    has_unresolved_package         = true   (transitive externals + @/ from an extends/app-config -> blocks)
+    has_alias_unresolved           = false  (every @/ in a partition whose tsconfig.json HAS the paths resolved)
+    has_dynamic                    = true   (blocks)
+  PROOF the @/lib aliases RESOLVED (not silently fell through): admin's warm cache persists the alias config
+  (`./src/*` present) AND has_alias_unresolved=false -- the snapshot clears that flag ONLY via overlay
+  membership, and the overlay adds an alias edge ONLY on Resolved. So admin's `@/lib/*` -> AstImportTsconfigPath
+  FILE edges to admin/src/lib/*. The blocking set shrank (the @/ that resolve left has_unresolved_package).
+xpart fixture -> CompleteForModuleImportCycles (permits_default=true; all obs false) -- REGRESSION INTACT.
+```
+
+### Acceptance (D4) — PASS
+```text
+1. amodx `@/lib/*` resolve (config captured + has_alias_unresolved=false -> edges)            PASS.
+2. external package noise remains benign                                                       PASS (has_external_nonlocal_benign).
+3. workspace-local unedgeable remains blocking                                                 PASS.
+4. dynamic remains blocking                                                                     PASS.
+5. xpart fixture remains Complete                                                               PASS.
+Gate: workspace tests ok / 0 failures; clippy -D warnings clean; fmt clean. 5 alias-resolver + 23 module_cycle
++ the warm-cache round-trip tests green.
+```
+
+### Honest caveat (recorded)
+```text
+A `@/` import resolves ONLY when the partition's OWN `tsconfig.json` carries the `paths` (extends/app-config is
+DEFERRED). amodx backend's `@/` (its paths live elsewhere) therefore stay PackageUnresolved -> has_unresolved_
+package=true is partly from that + transitive externals. That is honest (no extends-flattening in v1); the
+follow-up handles extends.
+```
+
+### Provisioning note (environment, not the slice)
+```text
+The scip-typescript@0.4.0 producer was installed under the EPHEMERAL /private/tmp and macOS cleaned part of it
+mid-session, breaking re-ingest. Reprovisioned DURABLY under ~/.local/share/repo-graph-tools/scip-typescript-
+0.4.0 (+ a copied Node 18; node_modules NOT committed); the daemon points at it via RMAP_SCIP_TYPESCRIPT. No
+production daemon behaviour changed. Verified with a minimal `scip-typescript index` before re-validating.
 ```
 
 ## Follow-up
