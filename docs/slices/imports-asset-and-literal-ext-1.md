@@ -1,11 +1,11 @@
 # IMPORTS-ASSET-AND-LITERAL-EXT-1: asset imports benign + literal-source-extension resolution
 
 Slice ID: IMPORTS-ASSET-AND-LITERAL-EXT-1
-Status: **SPEC — awaiting ratification (2026-06-06). NOT started.** Close the last 3 relative blockers: (1) a
-relative import of a known NON-CODE ASSET (`.css`/`.svg`/...) is non-cycle-relevant (benign, like an external
-package), and (2) a relative import written with the LITERAL SOURCE extension (`./App.tsx`) resolves to the
-exact FILE node. Finishes relative import classification. NO workspace package edge, NO default migration, NO
-decommission, NO package resolver, NO broad asset graph.
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-06), D1–D3 ratified.** A relative NON-CODE ASSET import
+(`.css`/`.svg`/...) is benign (`has_asset_nonrelevant`); a literal-source-extension import (`./App.tsx`) resolves
+to the exact FILE. Live: amodx `has_unresolved_after_overlay` = FALSE -> **workspace-local (RED) is now amodx's
+SOLE remaining module-cycle blocker** (import classification COMPLETE). xpart Complete. See **Completion**. NO
+workspace package edge, NO default migration, NO decommission, NO package resolver, NO broad asset graph.
 Depends: IMPORTS-RELATIVE-RESOLUTION-COMPLETE-1 (the resolver + the snapshot StaticUnresolved arm), the cert
 ObservationClassSummary. Track: Stage D, import completeness.
 
@@ -94,10 +94,57 @@ Stop if a `.json` (or other data) import turns out to be load-bearing for some r
 (v1 EXCLUDES .json from the asset allowlist; it stays a normal import).
 ```
 
+## Completion (implemented + live-validated 2026-06-06, EXECUTED)
+
+Commits: `cc71951` (spec) + the impl/docs commits below. Ratified D1–D3.
+
+### What landed
+```text
+import-resolver: `is_asset_specifier` (the CLOSED allowlist -- styles/images/fonts; NOT .json; unknown ext ->
+  never asset) + a literal-source-extension EXACT pre-check in resolve_imports (base ends in .ts/.tsx/.mts/.cts
+  AND is exactly a FILE node -> resolve directly, EXCLUSIVE of candidate-append/Ambiguity; else fall through).
+livegraph snapshot: a relative specifier (static StaticUnresolved OR literal-relative dynamic) ending in an
+  asset extension -> has_asset_nonrelevant (BENIGN), BEFORE the unresolved-relative check.
+cert: ObservationClassSummary + has_asset_nonrelevant (benign, NOT in the blocking set); fingerprint; audit
+  reports it; policy 5 -> 6. NO SCHEMA bump (snapshot-derived; no persisted IR shape change).
+```
+
+### Live validation (EXECUTED 2026-06-06)
+```text
+amodx (8/8) -> IncompleteImportClasses, policy_version=6:
+    has_asset_nonrelevant_benign   = TRUE   (the 2 CSS imports -> benign)
+    has_unresolved_after_overlay   = FALSE  <- CLEARED: 2 CSS benign + ./App.tsx resolved exact
+    has_workspace_local_unedgeable = TRUE   <- the SOLE remaining blocker (RED)
+    has_external_nonlocal_benign   = true ; has_unresolved_package=false ; has_alias_unresolved=false ;
+    has_dynamic_unresolved=false
+  => amodx now blocks ONLY on workspace-local. Every other import class is false or benign. Import
+     CLASSIFICATION is COMPLETE for amodx.
+xpart fixture -> CompleteForModuleImportCycles (regression intact).
+```
+
+### Acceptance (D1–D4) — PASS
+```text
+1. amodx has_unresolved_after_overlay = false                                                    PASS.
+2. xpart remains Complete                                                                          PASS.
+3. amodx blocked ONLY by workspace-local-unedgeable                                                PASS.
+4. unit: asset allowlist (.css/.svg/.woff2 benign; .ts/.tsx/.json/unknown NOT); literal-source exact match;
+   literal-source no-node falls through; asset benign + code still blocks (livegraph)              PASS.
+Gate: workspace tests ok / 0 failures; clippy -D warnings clean; fmt clean. 3 resolver + 1 livegraph new tests.
+```
+
+### Significance — the import-classification thread is DONE
+```text
+Across PACKAGE-RESOLUTION-1 / TSCONFIG-PATHS-1 / PACKAGE-EXTERNAL-EVIDENCE-1 / DYNAMIC-CLASSIFICATION-1 /
+RELATIVE-RESOLUTION-COMPLETE-1 / ASSET-AND-LITERAL-EXT-1, EVERY import class is now classified precisely. amodx's
+SOLE remaining module-cycle blocker is has_workspace_local_unedgeable -- the RED IMPORTS-WORKSPACE-PACKAGE-EDGE
+case (src-vs-dist moniker chasm). The CYCLES default-migration readiness is now a CLEAN single-variable
+question: workspace-local is the only thing between amodx and a Complete certificate.
+```
+
 ## Follow-up
 ```text
-- IMPORTS-WORKSPACE-PACKAGE-EDGE (research): once has_unresolved_after_overlay clears, workspace-local (RED) is
-  amodx's SOLE remaining module-cycle blocker -> CYCLES default-migration readiness becomes a clean measurement.
+- IMPORTS-WORKSPACE-PACKAGE-EDGE (research): workspace-local (RED) is now amodx's SOLE remaining module-cycle
+  blocker -> CYCLES default-migration readiness becomes a clean measurement.
 - `.json`/data-module import policy, if a repo needs it.
 ```
 
