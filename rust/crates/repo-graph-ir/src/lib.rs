@@ -171,6 +171,12 @@ pub struct ImportObservation {
     pub is_type_only: bool,
     /// Bound no local identifier (e.g. `import "./x"`).
     pub is_side_effect: bool,
+    /// IMPORTS-PACKAGE-EXTERNAL-EVIDENCE-1: POSITIVE external evidence captured at the INGEST boundary -- the
+    /// non-relative specifier's package resolves into a `node_modules` (or `@types/`) install whose REALPATH
+    /// is NOT in the repo source tree (so it is a real external package, NOT a workspace symlink). Lets the
+    /// IO-free classifier mark a transitively-pulled / type-only external benign without re-touching the FS.
+    /// `false` for relative imports and for anything not resolved as external at ingest.
+    pub external_node_modules: bool,
 }
 
 // ── Partition + provenance ────────────────────────────────────────

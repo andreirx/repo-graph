@@ -1364,6 +1364,7 @@ impl LiveGraph {
                                     &obs.raw_specifier,
                                     &workspace_packages,
                                     declared,
+                                    obs.external_node_modules,
                                 ) {
                                     PackageImportClass::ExternalPackageNonLocal => {
                                         o.has_external_nonlocal = true
@@ -2447,6 +2448,7 @@ mod tests {
             is_re_export: false,
             is_type_only: false,
             is_side_effect: false,
+            external_node_modules: false,
         }
     }
     /// A partition IR carrying import observations (the `ir` helper above always has none).

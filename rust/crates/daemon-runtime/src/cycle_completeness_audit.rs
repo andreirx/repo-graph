@@ -27,9 +27,10 @@ pub const LANGUAGE_SUPPORT_VERSION: u32 = 1;
 
 /// The import-completeness policy version: which import classes the policy treats as
 /// uncaptured/cycle-relevant. v2 = IMPORTS-PACKAGE-RESOLUTION-1 (ExternalPackageNonLocal benign). v3 =
-/// IMPORTS-TSCONFIG-PATHS-1 (a RESOLVED tsconfig path alias is a captured edge -> non-blocking; an unresolved
-/// alias -> has_alias_unresolved, blocking). Any bump re-evaluates every prior certificate.
-pub const IMPORT_COMPLETENESS_POLICY_VERSION: u32 = 3;
+/// IMPORTS-TSCONFIG-PATHS-1 (a RESOLVED tsconfig path alias -> non-blocking; unresolved -> has_alias_unresolved).
+/// v4 = IMPORTS-PACKAGE-EXTERNAL-EVIDENCE-1 (a node_modules/@types-resolvable external is benign, not just a
+/// directly-declared dep). Any bump re-evaluates every prior certificate.
+pub const IMPORT_COMPLETENESS_POLICY_VERSION: u32 = 4;
 
 /// The LiveGraph-supported TS family (D3-A). A non-null `files.language` value OUTSIDE this set is a non-TS
 /// CODE source: the indexer vocabulary (`indexer/routing.rs::detect_language`) is CLOSED + code-only, so

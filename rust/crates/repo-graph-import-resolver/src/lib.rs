@@ -87,15 +87,19 @@ pub fn package_name_of(specifier: &str) -> String {
     }
 }
 
-/// Classify a NON-RELATIVE import specifier (IMPORTS-PACKAGE-RESOLUTION-1 D1, ratified A). PURE -- given the
-/// loaded `workspace_packages` (package.json `name`s) + the source partition's `declared_dependencies`.
-/// Precedence: `node:`/builtin -> external; workspace map -> WorkspaceLocalUnedgeable (a workspace package is
-/// LOCAL even when also a declared dep, via the workspace protocol); declared dep -> external; else ->
-/// PackageUnresolved. CONSERVATIVE: external requires POSITIVE evidence; an unknown bare specifier BLOCKS.
+/// Classify a NON-RELATIVE import specifier (IMPORTS-PACKAGE-RESOLUTION-1 D1 + IMPORTS-PACKAGE-EXTERNAL-
+/// EVIDENCE-1). PURE -- given the loaded `workspace_packages`, the source partition's
+/// `declared_dependencies`, and `external_node_modules` (ingest-captured: the package resolves to a REAL
+/// node_modules/@types install, NOT a workspace symlink). Precedence (the trust hinge): `node:`/builtin ->
+/// external; WORKSPACE MAP -> WorkspaceLocalUnedgeable (BEFORE node_modules, so a workspace package symlinked
+/// into node_modules stays local); declared dep OR external_node_modules -> external; else -> PackageUnresolved.
+/// CONSERVATIVE: external requires POSITIVE evidence; an unknown bare specifier (not declared, not in
+/// node_modules) BLOCKS; never inferred from absence in the workspace map.
 pub fn classify_package_import(
     specifier: &str,
     workspace_packages: &BTreeSet<String>,
     declared_dependencies: &BTreeSet<String>,
+    external_node_modules: bool,
 ) -> PackageImportClass {
     if specifier.starts_with("node:") {
         return PackageImportClass::ExternalPackageNonLocal;
@@ -104,10 +108,11 @@ pub fn classify_package_import(
     if NODE_BUILTINS.contains(&pkg.as_str()) {
         return PackageImportClass::ExternalPackageNonLocal;
     }
+    // WORKSPACE precedes node_modules (a workspace package symlinked into node_modules is NOT external).
     if workspace_packages.contains(&pkg) {
         return PackageImportClass::WorkspaceLocalUnedgeable;
     }
-    if declared_dependencies.contains(&pkg) {
+    if declared_dependencies.contains(&pkg) || external_node_modules {
         return PackageImportClass::ExternalPackageNonLocal;
     }
     PackageImportClass::PackageUnresolved
@@ -492,12 +497,18 @@ mod tests {
     }
 
     #[test]
-    fn workspace_local_takes_precedence_over_declared_dep() {
-        // @amodx/shared is BOTH a workspace package AND declared (workspace protocol) -> LOCAL, not external.
+    fn workspace_local_takes_precedence_over_declared_dep_and_node_modules() {
+        // @amodx/shared is workspace + declared + (symlinked) in node_modules -> STILL LOCAL, never external.
         let ws = set(&["@amodx/shared", "@amodx/effects"]);
         let deps = set(&["@amodx/shared", "react"]);
         assert_eq!(
-            classify_package_import("@amodx/shared", &ws, &deps),
+            classify_package_import("@amodx/shared", &ws, &deps, false),
+            PackageImportClass::WorkspaceLocalUnedgeable
+        );
+        // EXTERNAL-EVIDENCE-1 trust hinge: even with external_node_modules=true (a workspace symlink in
+        // node_modules), the workspace map wins -> stays WorkspaceLocalUnedgeable, NOT benign.
+        assert_eq!(
+            classify_package_import("@amodx/shared", &ws, &deps, true),
             PackageImportClass::WorkspaceLocalUnedgeable
         );
     }
@@ -507,12 +518,29 @@ mod tests {
         let ws = set(&["@amodx/shared"]);
         let deps = set(&["react", "@tiptap/react"]);
         assert_eq!(
-            classify_package_import("react", &ws, &deps),
+            classify_package_import("react", &ws, &deps, false),
             PackageImportClass::ExternalPackageNonLocal
         );
         assert_eq!(
-            classify_package_import("@tiptap/react/menus", &ws, &deps),
+            classify_package_import("@tiptap/react/menus", &ws, &deps, false),
             PackageImportClass::ExternalPackageNonLocal
+        );
+    }
+
+    #[test]
+    fn node_modules_external_is_benign_even_when_undeclared() {
+        // EXTERNAL-EVIDENCE-1: a transitively-pulled / type-only package (NOT directly declared) that resolves
+        // to a real node_modules/@types install -> benign.
+        let ws = set(&["@amodx/shared"]);
+        let deps = set(&["@tiptap/react"]); // @tiptap/core is transitive, NOT declared
+        assert_eq!(
+            classify_package_import("@tiptap/core", &ws, &deps, true),
+            PackageImportClass::ExternalPackageNonLocal
+        );
+        // without the node_modules evidence -> blocks (unknown).
+        assert_eq!(
+            classify_package_import("@tiptap/core", &ws, &deps, false),
+            PackageImportClass::PackageUnresolved
         );
     }
 
@@ -520,27 +548,27 @@ mod tests {
     fn node_builtins_are_external_with_or_without_prefix() {
         let empty = BTreeSet::new();
         assert_eq!(
-            classify_package_import("node:fs", &empty, &empty),
+            classify_package_import("node:fs", &empty, &empty, false),
             PackageImportClass::ExternalPackageNonLocal
         );
         assert_eq!(
-            classify_package_import("path", &empty, &empty),
+            classify_package_import("path", &empty, &empty, false),
             PackageImportClass::ExternalPackageNonLocal
         );
     }
 
     #[test]
     fn unknown_bare_specifier_blocks() {
-        // a tsconfig path alias (@/lib) is NEITHER workspace nor declared -> PackageUnresolved (blocks);
-        // NEVER inferred external from absence in the workspace map (the trust hinge).
+        // NEITHER workspace, declared, nor in node_modules -> PackageUnresolved (blocks); NEVER inferred
+        // external from absence in the workspace map (the trust hinge).
         let ws = set(&["@amodx/shared"]);
         let deps = set(&["react"]);
         assert_eq!(
-            classify_package_import("@/lib/api", &ws, &deps),
+            classify_package_import("@/lib/api", &ws, &deps, false),
             PackageImportClass::PackageUnresolved
         );
         assert_eq!(
-            classify_package_import("some-undeclared-pkg", &ws, &deps),
+            classify_package_import("some-undeclared-pkg", &ws, &deps, false),
             PackageImportClass::PackageUnresolved
         );
     }

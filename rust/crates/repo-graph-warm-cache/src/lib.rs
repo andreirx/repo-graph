@@ -48,7 +48,10 @@ pub const MAGIC: u32 = 0x5247_5743;
 /// v4 (KEY-NAMESPACE-REPO-RELATIVE-1): node/edge KEYS are now repo-relative; the DTO shape is unchanged
 /// but cached key VALUES differ, so old (partition-relative) caches MUST be discarded -> re-extract.
 /// v5 (IMPORTS-XPART-WIRING-1): `CacheImportObservationDto` gained `source_file`.
-pub const SCHEMA_VERSION: u32 = 5;
+/// v6 (IMPORTS-PACKAGE-EXTERNAL-EVIDENCE-1): `CacheImportObservationDto` gained `external_node_modules` +
+/// `CachePartitionDto` gained package_name/declared_dependencies/tsconfig_aliases (PACKAGE-RESOLUTION-1 /
+/// TSCONFIG-PATHS-1 were serde(default)-compatible; this bump forces a clean re-ingest for the new evidence).
+pub const SCHEMA_VERSION: u32 = 6;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // Errors (D4)
@@ -280,6 +283,10 @@ pub struct CacheImportObservationDto {
     pub is_type_only: bool,
     /// Side-effect modifier.
     pub is_side_effect: bool,
+    /// IMPORTS-PACKAGE-EXTERNAL-EVIDENCE-1: node_modules/@types external evidence (captured at ingest).
+    /// `#[serde(default)]` for backward-compatible deserialization (also gated by the SCHEMA_VERSION bump).
+    #[serde(default)]
+    pub external_node_modules: bool,
 }
 
 /// Mirror of `repo_graph_ir::ImportEdgeMeta`.
@@ -503,6 +510,7 @@ impl From<&ImportObservation> for CacheImportObservationDto {
             is_re_export: o.is_re_export,
             is_type_only: o.is_type_only,
             is_side_effect: o.is_side_effect,
+            external_node_modules: o.external_node_modules,
         }
     }
 }
@@ -515,6 +523,7 @@ impl From<CacheImportObservationDto> for ImportObservation {
             is_re_export: o.is_re_export,
             is_type_only: o.is_type_only,
             is_side_effect: o.is_side_effect,
+            external_node_modules: o.external_node_modules,
         }
     }
 }
@@ -1056,6 +1065,7 @@ mod tests {
             is_re_export: false,
             is_type_only: false,
             is_side_effect: false,
+            external_node_modules: true, // exercise the v6 field round-trip
         });
         ir.import_observations.push(ImportObservation {
             source_file: "src/main.ts".to_string(),
@@ -1064,6 +1074,7 @@ mod tests {
             is_re_export: true,
             is_type_only: true,
             is_side_effect: false,
+            external_node_modules: false,
         });
         ir
     }

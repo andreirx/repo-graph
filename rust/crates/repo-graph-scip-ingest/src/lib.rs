@@ -768,11 +768,66 @@ fn build_file_index<'a>(
 ///   relative + resolves  -> StaticResolved   (the SAME node-resolution as the edge; also an edge exists)
 ///   relative + no resolve-> StaticUnresolved (target file not in this partition)
 /// Modifiers (re-export / type-only / side-effect) are carried through. Observations are NEVER edges.
+/// IMPORTS-PACKAGE-EXTERNAL-EVIDENCE-1: the PACKAGE NAME of a bare specifier (`@scope/pkg/sub` -> `@scope/pkg`;
+/// `pkg/sub` -> `pkg`). Local copy -- scip-ingest does not depend on the import-resolver.
+fn ingest_package_name_of(specifier: &str) -> String {
+    let mut segs = specifier.split('/');
+    let first = segs.next().unwrap_or(specifier);
+    if first.starts_with('@') {
+        match segs.next() {
+            Some(second) => format!("{first}/{second}"),
+            None => first.to_string(),
+        }
+    } else {
+        first.to_string()
+    }
+}
+
+/// The DefinitelyTyped package dir for a package name: `pkg` -> `@types/pkg`; `@scope/pkg` -> `@types/scope__pkg`.
+fn types_package_dir(package_name: &str) -> String {
+    match package_name.strip_prefix('@') {
+        Some(rest) => format!("@types/{}", rest.replacen('/', "__", 1)),
+        None => format!("@types/{package_name}"),
+    }
+}
+
+/// IMPORTS-PACKAGE-EXTERNAL-EVIDENCE-1 (the trust hinge): does `package_name` resolve to a REAL external
+/// install -- NOT a workspace package symlinked into node_modules? Checks the partition + repo-root
+/// node_modules (and `@types/`) and CANONICALIZES: external iff the realpath has a `node_modules` path
+/// segment OR is outside the canonical repo root. A realpath INSIDE the repo source tree (a workspace
+/// symlink, e.g. node_modules/@amodx/shared -> packages/shared) is NOT external. CONSERVATIVE: any
+/// canonicalization failure (incl. an ambiguous/symlinked repo root) -> `false` (blocks, never a false
+/// external). Workspace-map precedence in the classifier is the primary guard; this is the second.
+fn resolves_external_node_modules(root: &str, repo_root: &str, package_name: &str) -> bool {
+    let canon_repo = match std::fs::canonicalize(repo_root) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let types = types_package_dir(package_name);
+    for base in [root, repo_root] {
+        for name in [package_name, types.as_str()] {
+            let candidate = format!("{base}/node_modules/{name}");
+            if let Ok(real) = std::fs::canonicalize(&candidate) {
+                let in_node_modules = real.components().any(|c| c.as_os_str() == "node_modules");
+                let outside_repo = !real.starts_with(&canon_repo);
+                if in_node_modules || outside_repo {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+#[allow(clippy::too_many_arguments)]
 fn classify_import_observations(
     repo_uid: &str,
     source_file: &str,
     observations: &[TsImportObservation],
     node_keys: &HashSet<String>,
+    root: &str,
+    repo_root: &str,
+    nm_memo: &mut std::collections::HashMap<String, bool>,
 ) -> Vec<IrImportObservation> {
     let file_index = build_file_index(repo_uid, node_keys);
     observations
@@ -792,6 +847,20 @@ fn classify_import_observations(
             } else {
                 ImportResolution::StaticUnresolved
             };
+            // IMPORTS-PACKAGE-EXTERNAL-EVIDENCE-1: positive external evidence for a non-relative specifier
+            // (memoized per package; the FS resolution runs at the ingest boundary, NOT the classifier).
+            let external_node_modules = if o.is_relative {
+                false
+            } else {
+                let pkg = ingest_package_name_of(&o.raw_specifier);
+                if let Some(&cached) = nm_memo.get(&pkg) {
+                    cached
+                } else {
+                    let result = resolves_external_node_modules(root, repo_root, &pkg);
+                    nm_memo.insert(pkg, result);
+                    result
+                }
+            };
             IrImportObservation {
                 source_file: source_file.to_string(),
                 raw_specifier: o.raw_specifier.clone(),
@@ -799,6 +868,7 @@ fn classify_import_observations(
                 is_re_export: o.is_re_export,
                 is_type_only: o.is_type_only,
                 is_side_effect: o.is_side_effect,
+                external_node_modules,
             }
         })
         .collect()
@@ -1089,6 +1159,16 @@ pub fn ingest_partition(
     // IMPORTS-EXTRACT-COMPLETENESS-1 + IMPORTS-XPART-WIRING-1: classify each doc's producer import
     // observations into IR observations, stamping the importing file's repo-relative key_path as
     // `source_file` (needed for the cross-partition edge src). Same node-resolution as the edge pass.
+    // IMPORTS-PACKAGE-EXTERNAL-EVIDENCE-1: the repo root (= partition root minus the repo-relative prefix) is
+    // the canonicalization base for the node_modules realpath check; the memo dedups the FS check per package.
+    let repo_root = if partition_prefix.is_empty() {
+        root.to_string()
+    } else {
+        root.strip_suffix(partition_prefix)
+            .map(|s| s.trim_end_matches('/').to_string())
+            .unwrap_or_else(|| root.to_string())
+    };
+    let mut nm_memo: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
     let mut ir_observations: Vec<IrImportObservation> = Vec::new();
     for (facts, key_path) in facts_by_doc.iter().zip(doc_key_paths.iter()) {
         if let Some(f) = facts {
@@ -1097,6 +1177,9 @@ pub fn ingest_partition(
                 key_path,
                 &f.import_observations,
                 &node_keys,
+                root,
+                &repo_root,
+                &mut nm_memo,
             ));
         }
     }
@@ -1259,7 +1342,16 @@ mod tests {
             ts_obs("react", None, false, false), // non-relative -> PackageExternal
             ts_obs("./z", None, true, true), // dynamic -> DynamicUnsupported
         ];
-        let ir_obs = classify_import_observations("r", "packages/a/src/main.ts", &obs, &node_keys);
+        let mut nm_memo = std::collections::HashMap::new();
+        let ir_obs = classify_import_observations(
+            "r",
+            "packages/a/src/main.ts",
+            &obs,
+            &node_keys,
+            "/tmp/nonexistent-root",
+            "/tmp/nonexistent-root",
+            &mut nm_memo,
+        );
         assert_eq!(ir_obs.len(), 4);
         assert_eq!(
             ir_obs[0].source_file, "packages/a/src/main.ts",
