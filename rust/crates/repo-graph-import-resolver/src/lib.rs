@@ -213,10 +213,12 @@ pub struct ImportResolutionReport {
     pub unresolved: Vec<UnresolvedImport>,
 }
 
-/// The DETERMINISTIC candidate paths tried for a normalized target base `T` (extensions THEN index). The
-/// resolver collects ALL inventory matches across this set; >1 match -> `Ambiguous`.
-fn candidate_paths(base: &str) -> [String; 7] {
-    [
+/// The DETERMINISTIC candidate paths tried for a normalized target base `T` (extensions THEN index, PLUS the
+/// IMPORTS-RELATIVE-RESOLUTION-COMPLETE-1 ESM output->source substitutions). The resolver collects ALL
+/// inventory matches across this set; >1 match -> `Ambiguous` (no silent extension preference -- order here is
+/// irrelevant because the caller counts matches, it does NOT take the first).
+fn candidate_paths(base: &str) -> Vec<String> {
+    let mut out = vec![
         format!("{base}.ts"),
         format!("{base}.tsx"),
         format!("{base}.d.ts"),
@@ -224,7 +226,21 @@ fn candidate_paths(base: &str) -> [String; 7] {
         format!("{base}.cts"),
         format!("{base}/index.ts"),
         format!("{base}/index.tsx"),
-    ]
+    ];
+    // TS moduleResolution: a relative import that writes the OUTPUT extension resolves to its SOURCE file
+    // (`./x.js` -> `x.ts`/`x.tsx`). Stem = base minus the JS-family extension. Both substitution candidates
+    // for `.js` join the set -> if BOTH `x.ts` and `x.tsx` exist the caller reports Ambiguous (never picks).
+    if let Some(stem) = base.strip_suffix(".js") {
+        out.push(format!("{stem}.ts"));
+        out.push(format!("{stem}.tsx"));
+    } else if let Some(stem) = base.strip_suffix(".jsx") {
+        out.push(format!("{stem}.tsx"));
+    } else if let Some(stem) = base.strip_suffix(".mjs") {
+        out.push(format!("{stem}.mts"));
+    } else if let Some(stem) = base.strip_suffix(".cjs") {
+        out.push(format!("{stem}.cts"));
+    }
+    out
 }
 
 /// Join a repo-relative directory with a relative specifier, resolving `.`/`..` (a `..` that escapes the
@@ -640,6 +656,70 @@ mod tests {
         let r = resolve_imports(&inventory(), vec![cand("react")]);
         assert_eq!(r.resolved.len(), 0);
         assert_eq!(r.unresolved[0].reason, UnresolvedReason::PackageExternal);
+    }
+
+    #[test]
+    fn js_substitution_resolves_to_ts_source() {
+        // IMPORTS-RELATIVE-RESOLUTION-COMPLETE-1: `./x.js` (ESM output) -> the `.ts` SOURCE.
+        let r = resolve_imports(&inventory(), vec![cand("../../b/src/foo.js")]);
+        assert_eq!(r.resolved.len(), 1, "unresolved: {:?}", r.unresolved);
+        assert_eq!(
+            r.resolved[0].dst_file_key,
+            "repo:packages/b/src/foo.ts:FILE"
+        );
+    }
+
+    #[test]
+    fn js_substitution_resolves_to_tsx_source() {
+        // `./widget.js` -> widget.tsx (no widget.ts present).
+        let r = resolve_imports(&inventory(), vec![cand("./widget.js")]);
+        assert_eq!(r.resolved.len(), 1, "unresolved: {:?}", r.unresolved);
+        assert_eq!(
+            r.resolved[0].dst_file_key,
+            "repo:packages/a/src/widget.tsx:FILE"
+        );
+    }
+
+    #[test]
+    fn js_substitution_ambiguous_when_both_ts_and_tsx() {
+        // `./dup.js` with BOTH dup.ts AND dup.tsx -> Ambiguous (no silent .ts-over-.tsx preference).
+        let r = resolve_imports(&inventory(), vec![cand("./dup.js")]);
+        assert_eq!(r.resolved.len(), 0);
+        assert_eq!(r.unresolved[0].reason, UnresolvedReason::Ambiguous);
+    }
+
+    #[test]
+    fn jsx_mjs_cjs_substitution_families() {
+        let inv = FileInventory::from_file_keys(
+            [
+                "repo:p/comp.tsx:FILE", // .jsx -> .tsx
+                "repo:p/mod.mts:FILE",  // .mjs -> .mts
+                "repo:p/cfg.cts:FILE",  // .cjs -> .cts
+            ]
+            .into_iter()
+            .map(String::from),
+        );
+        let c = |spec: &str| ImportCandidate {
+            source_file_key: "repo:p/main.ts:FILE".to_string(),
+            raw_specifier: spec.to_string(),
+        };
+        let dst = |spec: &str| {
+            resolve_imports(&inv, vec![c(spec)])
+                .resolved
+                .first()
+                .map(|e| e.dst_file_key.clone())
+        };
+        assert_eq!(dst("./comp.jsx").as_deref(), Some("repo:p/comp.tsx:FILE"));
+        assert_eq!(dst("./mod.mjs").as_deref(), Some("repo:p/mod.mts:FILE"));
+        assert_eq!(dst("./cfg.cjs").as_deref(), Some("repo:p/cfg.cts:FILE"));
+    }
+
+    #[test]
+    fn js_substitution_no_source_stays_unresolved() {
+        // `./nope.js` with no `nope.ts`/`nope.tsx` -> still unresolved (blocks).
+        let r = resolve_imports(&inventory(), vec![cand("./nope.js")]);
+        assert_eq!(r.resolved.len(), 0);
+        assert_eq!(r.unresolved[0].reason, UnresolvedReason::NotFound);
     }
 
     #[test]

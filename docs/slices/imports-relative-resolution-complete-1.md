@@ -1,11 +1,11 @@
 # IMPORTS-RELATIVE-RESOLUTION-COMPLETE-1: ESM extension substitution for relative imports
 
 Slice ID: IMPORTS-RELATIVE-RESOLUTION-COMPLETE-1
-Status: **SPEC — awaiting ratification (2026-06-06). NOT started.** Add SAFE extension-substitution candidates
-(`.js`->`.ts`/`.tsx`, `.jsx`->`.tsx`, `.mjs`->`.mts`, `.cjs`->`.cts`) so a TypeScript-ESM relative import that
-writes the OUTPUT extension (`./x.js`) resolves to its SOURCE FILE (`x.ts`). Relative resolution ONLY. NO
-workspace package edge, NO external package resolver, NO default migration, NO decommission, NO heuristic unsafe
-remapping (inventory-only, exactly-one-match).
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-06), D1–D3 ratified.** `candidate_paths` now adds the ESM
+output->source substitutions (`.js`->`.ts`/`.tsx`, `.jsx`->`.tsx`, `.mjs`->`.mts`, `.cjs`->`.cts`). Live: amodx's
+454 `.js` relative imports resolve (628 relatives resolve, 0 ambiguous); only 3 OUT-OF-SCOPE relatives remain
+(2 CSS asset imports + 1 literal-`.tsx` import). xpart Complete. See **Completion**. Relative resolution ONLY; no
+IR/cert change; no policy bump.
 Depends: the import-resolver `candidate_paths` + the livegraph overlay (`resolve_imports`). Track: Stage D,
 import completeness.
 
@@ -95,8 +95,59 @@ Stop if a `.js` base also legitimately names a real `x.js.ts` file in the invent
 -> both the literal and the substitution match -> Ambiguous (the existing safe behaviour); record if observed.
 ```
 
+## Completion (implemented + live-validated 2026-06-06, EXECUTED)
+
+Commits: `5e584a0` (spec) + the impl/docs commits below. Ratified D1–D3.
+
+### What landed
+```text
+import-resolver candidate_paths: returns the existing 7 PLUS, when the base ends in a JS-family OUTPUT
+extension, the SOURCE candidates -- `.js`->`<stem>.ts`/`.tsx`, `.jsx`->`.tsx`, `.mjs`->`.mts`, `.cjs`->`.cts`.
+The caller (resolve_imports) counts ALL matches -> exactly-one-or-Ambiguous, UNCHANGED (no silent extension
+preference; e.g. `.js` with both `.ts` and `.tsx` -> Ambiguous). NO other crate change; NO IR/cert/warm-cache;
+NO policy version bump.
+```
+
+### Live validation (EXECUTED 2026-06-06; measured over amodx's 364-file inventory)
+```text
+RELATIVE imports: RESOLVED 628 (incl. all 454 `.js`->`.ts`) ; AMBIGUOUS 0 ; UNRESOLVED 3.
+The 3 unresolved are OUT OF THIS SLICE'S SCOPE (none are `.js`):
+  ./index.css, ./globals.css  -- CSS asset imports (NOT TS modules; should be non-cycle-relevant -> a separate
+                                 "ignore non-TS asset imports" follow-up).
+  ./App.tsx                   -- an import written with the LITERAL source extension; candidate_paths always
+                                 APPENDS an extension, so it never tries the base as-is -> a literal-source-ext
+                                 follow-up.
+amodx audit: has_unresolved_after_overlay is STILL true (those 3), but the DOMINANT cause (454 `.js`) is CLEARED
+  -- a massive decrease. The other classes unchanged: has_unresolved_package=false, has_dynamic_unresolved=false,
+  has_alias_unresolved=false, has_external_nonlocal_benign=true, has_workspace_local_unedgeable=true.
+xpart fixture -> CompleteForModuleImportCycles (regression intact; its relatives are extensionless).
+```
+
+### Acceptance — PASS (for the ratified substitution scope)
+```text
+1. unit tests for each substitution family (`.js`/.jsx/.mjs/.cjs)                                PASS.
+2. ambiguous `.js` with both `.ts` AND `.tsx` -> Ambiguous (blocks)                              PASS (unit).
+3. `.js` with no `.ts`/`.tsx` source -> unresolved                                               PASS (unit).
+4. amodx has_unresolved_after_overlay DECREASES (454 `.js` -> 0; 628 relatives resolve)          PASS (decreased,
+   not cleared -- 3 out-of-scope non-substitution cases remain).
+5. xpart remains Complete                                                                         PASS.
+Gate: workspace tests ok / 0 failures; clippy -D warnings clean; fmt clean. 5 new substitution unit tests green.
+```
+
+### Honest note (recorded)
+```text
+has_unresolved_after_overlay did NOT fully clear -- 3 NON-substitution relatives remain (2 CSS, 1 literal-.tsx).
+The slice's ratified scope (ESM extension SUBSTITUTION) is fully delivered + measured (454 resolved, 0 ambiguous).
+Clearing the last 3 needs two SEPARATE follow-ups (non-TS asset imports; literal-source-extension base candidate)
+-- NOT in this slice's scope. After those, amodx's SOLE remaining blocker would be workspace-local (RED).
+```
+
 ## Follow-up
 ```text
+- IGNORE NON-TS ASSET IMPORTS (`.css`/`.svg`/`.png`/...): a relative import of a non-TS asset is non-cycle-
+  relevant (like an external package) -> should not block (the 2 amodx CSS cases).
+- LITERAL-SOURCE-EXTENSION base candidate: also try the normalized base AS-IS (for `./App.tsx`) -- exactly-one-
+  match (the 1 amodx case).
 - `.js`->`.d.ts` substitution (a type-only output import), if a repo needs it.
 - IMPORTS-WORKSPACE-PACKAGE-EDGE (research): once has_unresolved_after_overlay clears, workspace-local (RED) is
   amodx's SOLE remaining blocker -> the default-migration readiness is a clean measurement.
