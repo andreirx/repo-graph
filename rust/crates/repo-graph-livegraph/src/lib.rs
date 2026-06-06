@@ -34,6 +34,10 @@ pub mod module_cycle_compare;
 /// policy boundary the deferred default migration consumes). Separate module (500-line guardrail).
 pub mod module_cycle_cert;
 
+/// IMPORTS-LIVEGRAPH-CLI-1: the LiveGraph import read-model DTOs (edges + classified observations) the
+/// `imports --engine livegraph` surface projects. Separate module (500-line guardrail).
+pub mod import_view;
+
 use module_cycle_compare::{ObsResolution, ObservationView};
 
 /// Per-partition epoch (bumped on each swap; D3).
@@ -1362,6 +1366,26 @@ impl LiveGraph {
                 }
             })
             .collect();
+        // IMPORTS-LIVEGRAPH-CLI-1 (GAP-A): ONE classification pass (`classified_observations`) feeds BOTH this
+        // summary and the import read-model, so the summary booleans literally cannot drift from the
+        // per-observation evidence the `imports --engine livegraph` surface shows.
+        let mut o = ObservationClassSummary::default();
+        for (_src, _raw, class) in self.classified_observations() {
+            class.fold_into(&mut o);
+        }
+        LiveCycleState {
+            partitions,
+            observation_classes: o,
+        }
+    }
+
+    /// IMPORTS-LIVEGRAPH-CLI-1 (GAP-A): classify EVERY resident import observation into its
+    /// [`module_cycle_cert::ObservationClass`] label -- the SINGLE iteration both the cert summary
+    /// ([`Self::module_cycle_live_state`]) and the import read-model ([`Self::live_import_view`]) consume, so
+    /// they cannot diverge. Returns `(source_file, raw_specifier, class)` borrowing the resident IR (no clone).
+    /// The classification CONTEXT (overlay-resolved set + workspace package map + per-partition declared deps /
+    /// tsconfig aliases) is built ONCE here.
+    fn classified_observations(&self) -> Vec<(&str, &str, module_cycle_cert::ObservationClass)> {
         // (src FILE key, raw specifier) the overlay RESOLVED -> a matching StaticUnresolved obs is captured.
         let overlay: BTreeSet<(&str, &str)> = self
             .xpart_overlay
@@ -1377,37 +1401,115 @@ impl LiveGraph {
             .filter_map(|s| s.ir.as_ref())
             .filter_map(|ir| ir.partition.package_name.clone())
             .collect();
-        // overlay-resolved? (a relative / alias / dynamic edge was emitted for this obs -> captured, not
-        // blocking). Hoisted out of the loop -- it only borrows `overlay`.
+        // overlay-resolved? (a relative / alias / dynamic edge was emitted for this obs -> captured).
         let overlay_resolved = |obs: &repo_graph_ir::ImportObservation| {
             overlay.iter().any(|(src_key, raw)| {
                 *raw == obs.raw_specifier.as_str()
                     && file_key_path(src_key) == Some(obs.source_file.as_str())
             })
         };
-        // IMPORTS-LIVEGRAPH-CLI-1 (GAP-A): classify each observation into ONE label, then FOLD into the
-        // summary. `classify_observation` is the SINGLE classification authority (the import read-model reuses
-        // it for the observations section), so the summary booleans cannot drift from the per-observation
-        // evidence.
-        let mut o = ObservationClassSummary::default();
+        let mut out: Vec<(&str, &str, module_cycle_cert::ObservationClass)> = Vec::new();
         for s in self.slots.values() {
             if let Some(ir) = &s.ir {
                 let declared = &ir.partition.declared_dependencies;
                 for obs in &ir.import_observations {
-                    classify_observation(
+                    let class = classify_observation(
                         obs,
                         overlay_resolved(obs),
                         ir.partition.tsconfig_aliases.as_ref(),
                         &workspace_packages,
                         declared,
-                    )
-                    .fold_into(&mut o);
+                    );
+                    out.push((obs.source_file.as_str(), obs.raw_specifier.as_str(), class));
                 }
             }
         }
-        LiveCycleState {
-            partitions,
-            observation_classes: o,
+        out
+    }
+
+    /// IMPORTS-LIVEGRAPH-CLI-1 (D2): the LiveGraph IMPORT READ-MODEL -- captured FILE -> FILE EDGES (facts) +
+    /// classified non-edge OBSERVATIONS (evidence), separated. EDGES = each resident partition's
+    /// intra-partition `AstImport` edges UNION the cross-partition overlay (the SAME universe as
+    /// `file_import_edges`, but preserving basis + specifier). OBSERVATIONS = `classified_observations`
+    /// EXCLUDING captured `ResolvedEdge`s (those are in EDGES). D6: an optional `file_filter` (repo-relative
+    /// path) narrows to one IMPORTING file; `None` = repo-wide. D5: a benign external / asset is an
+    /// OBSERVATION, never an edge. Pure read; no SQLite. Output is deterministically sorted.
+    pub fn live_import_view(&self, file_filter: Option<&str>) -> import_view::LiveImportView {
+        use import_view::{
+            import_edge_basis_label, ImportEdgeView, ImportObservationView, LiveImportView,
+        };
+        // EDGES: intra-partition AstImport edges (carry ImportEdgeMeta) + the cross-partition overlay. FILE
+        // keys -> repo-relative paths.
+        let mut edges: Vec<ImportEdgeView> = Vec::new();
+        for s in self.slots.values() {
+            if let Some(ir) = &s.ir {
+                for e in &ir.edges {
+                    if e.basis != EdgeBasis::AstImport {
+                        continue;
+                    }
+                    if let (Some(src), Some(dst)) =
+                        (file_key_path(e.src.as_str()), file_key_path(e.dst.as_str()))
+                    {
+                        edges.push(ImportEdgeView {
+                            src_file: src.to_string(),
+                            dst_file: dst.to_string(),
+                            basis: import_edge_basis_label(e.basis).to_string(),
+                            raw_specifier: e.import.as_ref().map(|m| m.raw_specifier.clone()),
+                        });
+                    }
+                }
+            }
+        }
+        for e in &self.xpart_overlay {
+            if let (Some(src), Some(dst)) = (
+                file_key_path(&e.src_file_key),
+                file_key_path(&e.dst_file_key),
+            ) {
+                edges.push(ImportEdgeView {
+                    src_file: src.to_string(),
+                    dst_file: dst.to_string(),
+                    basis: import_edge_basis_label(e.basis).to_string(),
+                    raw_specifier: Some(e.raw_specifier.clone()),
+                });
+            }
+        }
+        // OBSERVATIONS: the shared classification pass, EXCLUDING captured edges (ResolvedEdge).
+        let mut observations: Vec<ImportObservationView> = self
+            .classified_observations()
+            .into_iter()
+            .filter(|(_, _, class)| !class.is_edge())
+            .map(
+                |(source_file, raw_specifier, class)| ImportObservationView {
+                    source_file: source_file.to_string(),
+                    raw_specifier: raw_specifier.to_string(),
+                    class: class.as_str().to_string(),
+                    blocking: class.is_blocking(),
+                },
+            )
+            .collect();
+        // D6 file filter: keep edges whose IMPORTING file == filter; observations whose source_file == filter.
+        if let Some(f) = file_filter {
+            edges.retain(|e| e.src_file == f);
+            observations.retain(|o| o.source_file == f);
+        }
+        // Deterministic order (stable output + testable).
+        edges.sort_by(|a, b| {
+            (&a.src_file, &a.dst_file, &a.raw_specifier).cmp(&(
+                &b.src_file,
+                &b.dst_file,
+                &b.raw_specifier,
+            ))
+        });
+        observations.sort_by(|a, b| {
+            (&a.source_file, &a.raw_specifier, &a.class).cmp(&(
+                &b.source_file,
+                &b.raw_specifier,
+                &b.class,
+            ))
+        });
+        LiveImportView {
+            edges,
+            observations,
         }
     }
 }
@@ -3139,5 +3241,160 @@ mod tests {
             evaluate_module_cycle_completeness(&snap2, Some(&baseline)),
             ModuleCycleCompleteness::IncompleteMissingPartitions
         );
+    }
+
+    // ---- IMPORTS-LIVEGRAPH-CLI-1: live_import_view read-model ----
+
+    /// A partition IR with a package name (workspace identity) + declared deps (positive external evidence).
+    fn ir_pkg(
+        id: &str,
+        package_name: Option<&str>,
+        declared: &[&str],
+        nodes: Vec<IrNode>,
+        edges: Vec<IrEdge>,
+        obs: Vec<ImportObservation>,
+    ) -> PartitionIr {
+        let mut p = part(id);
+        p.package_name = package_name.map(|s| s.to_string());
+        p.declared_dependencies = declared.iter().map(|s| s.to_string()).collect();
+        PartitionIr {
+            partition: p,
+            nodes,
+            edges,
+            import_observations: obs,
+        }
+    }
+    /// A bare (non-relative) `PackageExternal` import observation.
+    fn bare_obs(source_file: &str, raw_specifier: &str, external_nm: bool) -> ImportObservation {
+        ImportObservation {
+            source_file: source_file.to_string(),
+            raw_specifier: raw_specifier.to_string(),
+            resolution: ImportResolution::PackageExternal,
+            is_re_export: false,
+            is_type_only: false,
+            is_side_effect: false,
+            external_node_modules: external_nm,
+        }
+    }
+
+    #[test]
+    fn live_import_view_projects_overlay_edges_no_observations() {
+        // a <-> b cross-partition relative imports -> the overlay resolves both -> EDGES (basis
+        // AstImportFileInventoryResolved); the StaticUnresolved observations became captured edges -> NO
+        // observation rows.
+        let mut lg = LiveGraph::new();
+        lg.load_partition("a", pkg_a_imports_b(), LanguageSupport::TypeScriptPrimary);
+        lg.load_partition("b", pkg_b_imports_a(), LanguageSupport::TypeScriptPrimary);
+        let view = lg.live_import_view(None);
+        assert_eq!(view.edges.len(), 2, "two cross-partition overlay edges");
+        assert!(view
+            .edges
+            .iter()
+            .all(|e| e.basis == "AstImportFileInventoryResolved"));
+        assert!(
+            view.observations.is_empty(),
+            "overlay-resolved relatives are EDGES, not observation rows"
+        );
+        assert!(view.edges.iter().any(
+            |e| e.src_file == "packages/a/src/main.ts" && e.dst_file == "packages/b/src/foo.ts"
+        ));
+        // D6 file filter: narrow to one importing file.
+        let f = lg.live_import_view(Some("packages/a/src/main.ts"));
+        assert_eq!(f.edges.len(), 1);
+        assert_eq!(f.edges[0].dst_file, "packages/b/src/foo.ts");
+        assert!(lg.live_import_view(Some("nope.ts")).edges.is_empty());
+    }
+
+    #[test]
+    fn live_import_view_projects_intra_partition_ast_import_edge() {
+        let app = ir_pkg(
+            "app",
+            None,
+            &[],
+            vec![
+                file_node("repo:app/src/a.ts:FILE"),
+                file_node("repo:app/src/b.ts:FILE"),
+            ],
+            vec![import_edge(
+                "repo:app/src/a.ts:FILE",
+                "repo:app/src/b.ts:FILE",
+            )],
+            vec![],
+        );
+        let mut lg = LiveGraph::new();
+        lg.load_partition("app", app, LanguageSupport::TypeScriptPrimary);
+        let view = lg.live_import_view(None);
+        assert_eq!(view.edges.len(), 1);
+        let e = &view.edges[0];
+        assert_eq!(e.src_file, "app/src/a.ts");
+        assert_eq!(e.dst_file, "app/src/b.ts");
+        assert_eq!(e.basis, "AstImport");
+        // the shared `import_edge` helper stamps raw_specifier "./x".
+        assert_eq!(e.raw_specifier.as_deref(), Some("./x"));
+    }
+
+    #[test]
+    fn live_import_view_classifies_observations_never_edges_external_or_asset() {
+        // app imports a declared external (react), a workspace-local package (@scope/wslocal -> another
+        // resident partition), an unknown package, and a relative CSS asset. D5: NONE is a graph edge.
+        let app = ir_pkg(
+            "app",
+            Some("@app/root"),
+            &["react"],
+            vec![file_node("repo:app/src/main.ts:FILE")],
+            vec![],
+            vec![
+                bare_obs("app/src/main.ts", "react", true),
+                bare_obs("app/src/main.ts", "@scope/wslocal", false),
+                bare_obs("app/src/main.ts", "totally-unknown-xyz", false),
+                unresolved_obs("app/src/main.ts", "./styles.css"),
+            ],
+        );
+        let wslocal = ir_pkg(
+            "wslocal",
+            Some("@scope/wslocal"),
+            &[],
+            vec![file_node("repo:wslocal/src/index.ts:FILE")],
+            vec![],
+            vec![],
+        );
+        let mut lg = LiveGraph::new();
+        lg.load_partition("app", app, LanguageSupport::TypeScriptPrimary);
+        lg.load_partition("wslocal", wslocal, LanguageSupport::TypeScriptPrimary);
+        let view = lg.live_import_view(None);
+        // D5: external / asset / package specifiers are OBSERVATIONS, never edges.
+        assert!(
+            view.edges.is_empty(),
+            "external/asset/package are observations, never graph edges"
+        );
+        let by_class = |c: &str| view.observations.iter().find(|o| o.class == c);
+        assert!(
+            by_class("ExternalNonLocal").is_some_and(|o| !o.blocking),
+            "external is benign (non-blocking)"
+        );
+        assert!(
+            by_class("AssetNonRelevant").is_some_and(|o| !o.blocking),
+            "asset is benign (non-blocking)"
+        );
+        assert!(
+            by_class("WorkspaceLocalUnedgeable").is_some_and(|o| o.blocking),
+            "workspace-local-unedgeable BLOCKS"
+        );
+        assert!(
+            by_class("UnresolvedPackage").is_some_and(|o| o.blocking),
+            "unknown package BLOCKS"
+        );
+        assert_eq!(view.observations.len(), 4);
+        // D6 file filter.
+        assert_eq!(
+            lg.live_import_view(Some("app/src/main.ts"))
+                .observations
+                .len(),
+            4
+        );
+        assert!(lg
+            .live_import_view(Some("other.ts"))
+            .observations
+            .is_empty());
     }
 }
