@@ -94,8 +94,12 @@ pub struct ObservationClassSummary {
     /// BLOCKS (IMPORTS-TSCONFIG-PATHS-1): a tsconfig `paths` ALIAS that matched a pattern but did NOT resolve
     /// to an indexed FILE (no file / ambiguous). DISTINCT from has_unresolved_package (an unknown specifier).
     pub has_alias_unresolved: bool,
-    /// BLOCKS: a `DynamicUnsupported` observation (a dynamic `import()`).
-    pub has_dynamic: bool,
+    /// BLOCKS (IMPORTS-DYNAMIC-CLASSIFICATION-1, model B): a dynamic `import()` that is NON-LITERAL
+    /// (`import(expr)`, no static specifier) -- the ONLY genuinely dynamic-unresolvable case. A LITERAL dynamic
+    /// is classified by its TARGET CLASS (its static counterpart): resolved-relative -> captured edge;
+    /// unresolved-relative -> has_unresolved_after_overlay; bare -> workspace/external/alias/unknown. So a
+    /// literal dynamic is NEVER counted here.
+    pub has_dynamic_unresolved: bool,
     /// BLOCKS: a `StaticUnresolved` (relative) observation the cross-partition OVERLAY did NOT resolve.
     /// Overlay-resolved ones are captured and do NOT count.
     pub has_unresolved_after_overlay: bool,
@@ -168,7 +172,7 @@ pub fn evaluate_module_cycle_completeness(
     if o.has_workspace_local_unedgeable
         || o.has_unresolved_package
         || o.has_alias_unresolved
-        || o.has_dynamic
+        || o.has_dynamic_unresolved
         || o.has_unresolved_after_overlay
     {
         return ModuleCycleCompleteness::IncompleteImportClasses;
@@ -202,12 +206,12 @@ pub fn certificate_inputs_fingerprint(
     parts.sort();
     let o = &live.observation_classes;
     let mut s = format!(
-        "obs[ext{}:wsl{}:unp{}:alu{}:dyn{}:unr{}]|parts[{}]",
+        "obs[ext{}:wsl{}:unp{}:alu{}:dyu{}:unr{}]|parts[{}]",
         o.has_external_nonlocal as u8,
         o.has_workspace_local_unedgeable as u8,
         o.has_unresolved_package as u8,
         o.has_alias_unresolved as u8,
-        o.has_dynamic as u8,
+        o.has_dynamic_unresolved as u8,
         o.has_unresolved_after_overlay as u8,
         parts.join(",")
     );
@@ -267,7 +271,7 @@ mod tests {
         has_workspace_local_unedgeable: false,
         has_unresolved_package: false,
         has_alias_unresolved: false,
-        has_dynamic: false,
+        has_dynamic_unresolved: false,
         has_unresolved_after_overlay: false,
     };
 
@@ -344,7 +348,7 @@ mod tests {
                 ..CLEAN
             },
             ObservationClassSummary {
-                has_dynamic: true,
+                has_dynamic_unresolved: true,
                 ..CLEAN
             },
             ObservationClassSummary {

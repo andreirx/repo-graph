@@ -253,6 +253,9 @@ pub enum CacheEdgeBasisDto {
     /// `AstImportTsconfigPathResolved` (IMPORTS-TSCONFIG-PATHS-1). Like the inventory-resolved basis, alias
     /// edges are RUNTIME-ONLY and NEVER persisted -> never appears in a real cache payload (NO bump).
     AstImportTsconfigPathResolved,
+    /// `AstDynamicImportResolved` (IMPORTS-DYNAMIC-CLASSIFICATION-1). Runtime-only resolved dynamic-import
+    /// edge; NEVER persisted -> never appears in a real cache payload (NO bump).
+    AstDynamicImportResolved,
 }
 
 /// Mirror of `repo_graph_ir::ImportResolution`.
@@ -556,6 +559,7 @@ impl From<&EdgeBasis> for CacheEdgeBasisDto {
             EdgeBasis::AstImport => Self::AstImport,
             EdgeBasis::AstImportFileInventoryResolved => Self::AstImportFileInventoryResolved,
             EdgeBasis::AstImportTsconfigPathResolved => Self::AstImportTsconfigPathResolved,
+            EdgeBasis::AstDynamicImportResolved => Self::AstDynamicImportResolved,
         }
     }
 }
@@ -570,6 +574,7 @@ impl From<CacheEdgeBasisDto> for EdgeBasis {
                 Self::AstImportFileInventoryResolved
             }
             CacheEdgeBasisDto::AstImportTsconfigPathResolved => Self::AstImportTsconfigPathResolved,
+            CacheEdgeBasisDto::AstDynamicImportResolved => Self::AstDynamicImportResolved,
         }
     }
 }

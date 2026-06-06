@@ -116,6 +116,11 @@ pub enum EdgeBasis {
     /// (`AstImportFileInventoryResolved`) and from a package import. Maps to `EdgeType::Imports`. RUNTIME/
     /// in-memory ONLY -- never persisted (cache coherence; the alias config IS persisted, the edge is not).
     AstImportTsconfigPathResolved,
+    /// A LITERAL DYNAMIC import edge (IMPORTS-DYNAMIC-CLASSIFICATION-1): an `import('...')` call whose literal
+    /// specifier resolved (relative via the FILE inventory, or a tsconfig alias) to a FILE. DISTINCT from a
+    /// static import -- the provenance is "a cycle edge via a dynamic import". Maps to `EdgeType::Imports`.
+    /// RUNTIME/in-memory ONLY -- never persisted. A NON-LITERAL `import(expr)` is NEVER edged (blocks).
+    AstDynamicImportResolved,
 }
 
 /// Resolution class of an extracted module import (IMPORTS-MODULE-INGEST-1 + IMPORTS-EXTRACT-COMPLETENESS-1).

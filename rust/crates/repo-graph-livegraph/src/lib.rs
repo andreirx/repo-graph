@@ -1029,10 +1029,10 @@ impl LiveGraph {
                 }),
         );
         let mut candidates: Vec<ImportCandidate> = Vec::new();
-        // IMPORTS-TSCONFIG-PATHS-1: alias-resolved FILE->FILE edges (a PackageExternal specifier matching a
-        // tsconfig `paths` alias that resolves to an indexed source FILE). Runtime-only, like the relative
-        // overlay; basis AstImportTsconfigPathResolved.
+        // IMPORTS-TSCONFIG-PATHS-1 alias edges + IMPORTS-DYNAMIC-CLASSIFICATION-1 literal-relative dynamic
+        // candidates (resolved via the SAME relative machinery, then re-stamped AstDynamicImportResolved).
         let mut alias_edges: Vec<ResolvedImportEdgeCandidate> = Vec::new();
+        let mut dynamic_relative_candidates: Vec<ImportCandidate> = Vec::new();
         for s in self.slots.values() {
             if let Some(ir) = &s.ir {
                 for o in &ir.import_observations {
@@ -1066,13 +1066,54 @@ impl LiveGraph {
                                 });
                             }
                         }
-                        _ => {}
+                        ImportResolution::DynamicUnsupported => {
+                            // IMPORTS-DYNAMIC-CLASSIFICATION-1: only LITERAL dynamics get edges; a NON-LITERAL
+                            // `import(expr)` (empty specifier) is NEVER edged.
+                            if o.raw_specifier.is_empty() {
+                                continue;
+                            }
+                            let Some(src_key) = inventory.file_key_for(&o.source_file) else {
+                                continue;
+                            };
+                            if o.raw_specifier.starts_with('.') {
+                                // literal RELATIVE dynamic -> resolved like a relative import (re-stamped below).
+                                dynamic_relative_candidates.push(ImportCandidate {
+                                    source_file_key: src_key.to_string(),
+                                    raw_specifier: o.raw_specifier.clone(),
+                                });
+                            } else if let Some(cfg) = &ir.partition.tsconfig_aliases {
+                                // literal BARE dynamic matching a tsconfig alias -> a dynamic-resolved edge.
+                                if let AliasResolution::Resolved(dst_key) =
+                                    resolve_tsconfig_alias(&o.raw_specifier, cfg, &inventory)
+                                {
+                                    let resolved_repo_path =
+                                        file_key_path(&dst_key).unwrap_or_default().to_string();
+                                    alias_edges.push(ResolvedImportEdgeCandidate {
+                                        src_file_key: src_key.to_string(),
+                                        dst_file_key: dst_key,
+                                        basis: EdgeBasis::AstDynamicImportResolved,
+                                        raw_specifier: o.raw_specifier.clone(),
+                                        resolved_repo_path,
+                                    });
+                                }
+                            }
+                            // literal BARE dynamic (workspace/external/unknown) -> no edge; snapshot classifies.
+                        }
+                        ImportResolution::StaticResolved => {}
                     }
                 }
             }
         }
         let mut overlay = resolve_imports(&inventory, candidates).resolved;
         overlay.extend(alias_edges);
+        // IMPORTS-DYNAMIC-CLASSIFICATION-1: resolve literal-relative dynamics with the relative machinery, then
+        // re-stamp the basis so the provenance stays "dynamic import", not a static relative edge.
+        let mut dynamic_resolved =
+            resolve_imports(&inventory, dynamic_relative_candidates).resolved;
+        for e in &mut dynamic_resolved {
+            e.basis = EdgeBasis::AstDynamicImportResolved;
+        }
+        overlay.extend(dynamic_resolved);
         self.xpart_overlay = overlay;
     }
 
@@ -1341,50 +1382,52 @@ impl LiveGraph {
             if let Some(ir) = &s.ir {
                 let declared = &ir.partition.declared_dependencies;
                 for obs in &ir.import_observations {
+                    // overlay-resolved? (a relative/alias/dynamic edge was emitted for this obs).
+                    let overlay_resolved = |obs: &repo_graph_ir::ImportObservation| {
+                        overlay.iter().any(|(src_key, raw)| {
+                            *raw == obs.raw_specifier.as_str()
+                                && file_key_path(src_key) == Some(obs.source_file.as_str())
+                        })
+                    };
                     match obs.resolution {
                         ImportResolution::PackageExternal => {
-                            // IMPORTS-TSCONFIG-PATHS-1: a tsconfig path ALIAS is resolved BEFORE the package
-                            // classification. Overlay-resolved (an edge was emitted) -> captured, NOT blocking.
-                            // Matched a `paths` pattern but NOT overlay-resolved (no file / ambiguous) ->
-                            // has_alias_unresolved (blocks). Not an alias -> package classification.
-                            let alias_resolved = overlay.iter().any(|(src_key, raw)| {
-                                *raw == obs.raw_specifier.as_str()
-                                    && file_key_path(src_key) == Some(obs.source_file.as_str())
-                            });
-                            let is_alias =
-                                ir.partition.tsconfig_aliases.as_ref().is_some_and(|cfg| {
-                                    specifier_matches_any_alias(cfg, &obs.raw_specifier)
-                                });
-                            if alias_resolved {
-                                // captured tsconfig-path edge -> not blocking
-                            } else if is_alias {
-                                o.has_alias_unresolved = true;
+                            // IMPORTS-TSCONFIG-PATHS-1: a tsconfig ALIAS resolves BEFORE the package
+                            // classification; else the package class (workspace/external/unknown).
+                            classify_bare_specifier(
+                                obs,
+                                overlay_resolved(obs),
+                                ir.partition.tsconfig_aliases.as_ref(),
+                                &workspace_packages,
+                                declared,
+                                &mut o,
+                            );
+                        }
+                        ImportResolution::DynamicUnsupported => {
+                            // IMPORTS-DYNAMIC-CLASSIFICATION-1 (B): a LITERAL dynamic is classified by its
+                            // TARGET CLASS (its static counterpart); only a NON-LITERAL `import(expr)` (empty
+                            // specifier) is genuinely dynamic-unresolvable.
+                            if obs.raw_specifier.is_empty() {
+                                o.has_dynamic_unresolved = true;
+                            } else if obs.raw_specifier.starts_with('.') {
+                                // literal RELATIVE dynamic -> overlay edge, OR (unresolved) the SAME
+                                // relative-unresolved bucket as a static relative (NOT a dynamic signal).
+                                if !overlay_resolved(obs) {
+                                    o.has_unresolved_after_overlay = true;
+                                }
                             } else {
-                                match classify_package_import(
-                                    &obs.raw_specifier,
+                                // literal BARE dynamic -> the SAME bare classification as a static import.
+                                classify_bare_specifier(
+                                    obs,
+                                    overlay_resolved(obs),
+                                    ir.partition.tsconfig_aliases.as_ref(),
                                     &workspace_packages,
                                     declared,
-                                    obs.external_node_modules,
-                                ) {
-                                    PackageImportClass::ExternalPackageNonLocal => {
-                                        o.has_external_nonlocal = true
-                                    }
-                                    PackageImportClass::WorkspaceLocalUnedgeable => {
-                                        o.has_workspace_local_unedgeable = true
-                                    }
-                                    PackageImportClass::PackageUnresolved => {
-                                        o.has_unresolved_package = true
-                                    }
-                                }
+                                    &mut o,
+                                );
                             }
                         }
-                        ImportResolution::DynamicUnsupported => o.has_dynamic = true,
                         ImportResolution::StaticUnresolved => {
-                            let resolved = overlay.iter().any(|(src_key, raw)| {
-                                *raw == obs.raw_specifier.as_str()
-                                    && file_key_path(src_key) == Some(obs.source_file.as_str())
-                            });
-                            if !resolved {
+                            if !overlay_resolved(obs) {
                                 o.has_unresolved_after_overlay = true;
                             }
                         }
@@ -1396,6 +1439,39 @@ impl LiveGraph {
         LiveCycleState {
             partitions,
             observation_classes: o,
+        }
+    }
+}
+
+/// IMPORTS-TSCONFIG-PATHS-1 + -DYNAMIC-CLASSIFICATION-1: classify a BARE (non-relative) specifier into the
+/// `ObservationClassSummary` -- SHARED by a static `PackageExternal` and a literal-bare `DynamicUnsupported`
+/// so the two cannot drift. `overlay_resolved` (an alias edge was emitted) -> captured (not blocking); matched
+/// a tsconfig `paths` pattern but not resolved -> `has_alias_unresolved`; else the package class (workspace ->
+/// workspace-local; declared/node_modules external -> benign; else unresolved-package).
+fn classify_bare_specifier(
+    obs: &repo_graph_ir::ImportObservation,
+    overlay_resolved: bool,
+    tsconfig_aliases: Option<&repo_graph_ir::TsconfigAliasConfig>,
+    workspace_packages: &BTreeSet<String>,
+    declared: &BTreeSet<String>,
+    o: &mut module_cycle_cert::ObservationClassSummary,
+) {
+    let is_alias =
+        tsconfig_aliases.is_some_and(|cfg| specifier_matches_any_alias(cfg, &obs.raw_specifier));
+    if overlay_resolved {
+        // captured tsconfig-path edge -> not blocking
+    } else if is_alias {
+        o.has_alias_unresolved = true;
+    } else {
+        match classify_package_import(
+            &obs.raw_specifier,
+            workspace_packages,
+            declared,
+            obs.external_node_modules,
+        ) {
+            PackageImportClass::ExternalPackageNonLocal => o.has_external_nonlocal = true,
+            PackageImportClass::WorkspaceLocalUnedgeable => o.has_workspace_local_unedgeable = true,
+            PackageImportClass::PackageUnresolved => o.has_unresolved_package = true,
         }
     }
 }
@@ -2451,6 +2527,18 @@ mod tests {
             external_node_modules: false,
         }
     }
+    /// IMPORTS-DYNAMIC-CLASSIFICATION-1: a dynamic `import()` observation (empty specifier = non-literal).
+    fn dynamic_obs(source_file: &str, raw_specifier: &str, external_nm: bool) -> ImportObservation {
+        ImportObservation {
+            source_file: source_file.to_string(),
+            raw_specifier: raw_specifier.to_string(),
+            resolution: ImportResolution::DynamicUnsupported,
+            is_re_export: false,
+            is_type_only: false,
+            is_side_effect: false,
+            external_node_modules: external_nm,
+        }
+    }
     /// A partition IR carrying import observations (the `ir` helper above always has none).
     fn ir_obs(
         id: &str,
@@ -2735,6 +2823,53 @@ mod tests {
     // ── module_cycle_live_state (CYCLES-COMPLETENESS-CERT-1) ───────────
 
     #[test]
+    fn dynamic_import_classification() {
+        // IMPORTS-DYNAMIC-CLASSIFICATION-1: literal dynamics classify like their static counterpart; only the
+        // non-literal `import(expr)` (empty specifier) blocks as dynamic.
+        let ir = ir_obs(
+            "app",
+            vec![
+                file_node("repo:app/src/main.ts:FILE"),
+                file_node("repo:app/src/foo.ts:FILE"), // the literal-relative dynamic target
+            ],
+            vec![],
+            vec![
+                dynamic_obs("app/src/main.ts", "", false), // non-literal -> has_dynamic_unresolved
+                dynamic_obs("app/src/main.ts", "./foo", false), // literal relative resolves -> captured edge
+                dynamic_obs("app/src/main.ts", "./missing", false), // literal relative UNRESOLVED -> relative bucket
+                dynamic_obs("app/src/main.ts", "react", true), // literal external (node_modules) -> benign
+                dynamic_obs("app/src/main.ts", "totally-unknown", false), // literal unknown -> unresolved-package
+            ],
+        );
+        let mut lg = LiveGraph::new();
+        lg.load_partition("app", ir, LanguageSupport::TypeScriptPrimary);
+        let snap = lg.module_cycle_live_state();
+        assert!(
+            snap.observation_classes.has_dynamic_unresolved,
+            "NON-LITERAL dynamic import(expr) -> has_dynamic_unresolved"
+        );
+        assert!(
+            snap.observation_classes.has_unresolved_after_overlay,
+            "B: a literal RELATIVE dynamic that does not resolve -> the relative-unresolved bucket, NOT dynamic"
+        );
+        assert!(
+            snap.observation_classes.has_external_nonlocal,
+            "literal external dynamic (node_modules evidence) is benign"
+        );
+        assert!(
+            snap.observation_classes.has_unresolved_package,
+            "literal unknown dynamic blocks as unresolved-package"
+        );
+        // the literal RELATIVE dynamic resolved -> a distinct-basis edge, NOT counted dynamic-unresolved.
+        assert!(
+            lg.xpart_import_edges()
+                .iter()
+                .any(|e| e.basis == EdgeBasis::AstDynamicImportResolved),
+            "literal relative dynamic -> AstDynamicImportResolved edge"
+        );
+    }
+
+    #[test]
     fn module_cycle_live_state_snapshot_and_evaluate() {
         use crate::module_cycle_cert::{
             evaluate_module_cycle_completeness, BaselineInput, ModuleCycleCompleteness,
@@ -2759,7 +2894,7 @@ mod tests {
         assert!(!snap.observation_classes.has_external_nonlocal);
         assert!(!snap.observation_classes.has_workspace_local_unedgeable);
         assert!(!snap.observation_classes.has_unresolved_package);
-        assert!(!snap.observation_classes.has_dynamic);
+        assert!(!snap.observation_classes.has_dynamic_unresolved);
         assert_eq!(
             evaluate_module_cycle_completeness(&snap, Some(&baseline)),
             ModuleCycleCompleteness::CompleteForModuleImportCycles
