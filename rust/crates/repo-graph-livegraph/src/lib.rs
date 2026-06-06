@@ -1377,68 +1377,31 @@ impl LiveGraph {
             .filter_map(|s| s.ir.as_ref())
             .filter_map(|ir| ir.partition.package_name.clone())
             .collect();
+        // overlay-resolved? (a relative / alias / dynamic edge was emitted for this obs -> captured, not
+        // blocking). Hoisted out of the loop -- it only borrows `overlay`.
+        let overlay_resolved = |obs: &repo_graph_ir::ImportObservation| {
+            overlay.iter().any(|(src_key, raw)| {
+                *raw == obs.raw_specifier.as_str()
+                    && file_key_path(src_key) == Some(obs.source_file.as_str())
+            })
+        };
+        // IMPORTS-LIVEGRAPH-CLI-1 (GAP-A): classify each observation into ONE label, then FOLD into the
+        // summary. `classify_observation` is the SINGLE classification authority (the import read-model reuses
+        // it for the observations section), so the summary booleans cannot drift from the per-observation
+        // evidence.
         let mut o = ObservationClassSummary::default();
         for s in self.slots.values() {
             if let Some(ir) = &s.ir {
                 let declared = &ir.partition.declared_dependencies;
                 for obs in &ir.import_observations {
-                    // overlay-resolved? (a relative/alias/dynamic edge was emitted for this obs).
-                    let overlay_resolved = |obs: &repo_graph_ir::ImportObservation| {
-                        overlay.iter().any(|(src_key, raw)| {
-                            *raw == obs.raw_specifier.as_str()
-                                && file_key_path(src_key) == Some(obs.source_file.as_str())
-                        })
-                    };
-                    match obs.resolution {
-                        ImportResolution::PackageExternal => {
-                            // IMPORTS-TSCONFIG-PATHS-1: a tsconfig ALIAS resolves BEFORE the package
-                            // classification; else the package class (workspace/external/unknown).
-                            classify_bare_specifier(
-                                obs,
-                                overlay_resolved(obs),
-                                ir.partition.tsconfig_aliases.as_ref(),
-                                &workspace_packages,
-                                declared,
-                                &mut o,
-                            );
-                        }
-                        ImportResolution::DynamicUnsupported => {
-                            // IMPORTS-DYNAMIC-CLASSIFICATION-1 (B): a LITERAL dynamic is classified by its
-                            // TARGET CLASS (its static counterpart); only a NON-LITERAL `import(expr)` (empty
-                            // specifier) is genuinely dynamic-unresolvable.
-                            if obs.raw_specifier.is_empty() {
-                                o.has_dynamic_unresolved = true;
-                            } else if obs.raw_specifier.starts_with('.') {
-                                // literal RELATIVE dynamic -> asset (benign), OR overlay edge, OR (unresolved)
-                                // the SAME relative-unresolved bucket as a static relative (NOT a dynamic signal).
-                                if is_asset_specifier(&obs.raw_specifier) {
-                                    o.has_asset_nonrelevant = true;
-                                } else if !overlay_resolved(obs) {
-                                    o.has_unresolved_after_overlay = true;
-                                }
-                            } else {
-                                // literal BARE dynamic -> the SAME bare classification as a static import.
-                                classify_bare_specifier(
-                                    obs,
-                                    overlay_resolved(obs),
-                                    ir.partition.tsconfig_aliases.as_ref(),
-                                    &workspace_packages,
-                                    declared,
-                                    &mut o,
-                                );
-                            }
-                        }
-                        ImportResolution::StaticUnresolved => {
-                            // IMPORTS-ASSET-AND-LITERAL-EXT-1: a relative asset import (.css/.svg/...) is
-                            // non-cycle-relevant (benign), BEFORE the unresolved-relative check.
-                            if is_asset_specifier(&obs.raw_specifier) {
-                                o.has_asset_nonrelevant = true;
-                            } else if !overlay_resolved(obs) {
-                                o.has_unresolved_after_overlay = true;
-                            }
-                        }
-                        ImportResolution::StaticResolved => {}
-                    }
+                    classify_observation(
+                        obs,
+                        overlay_resolved(obs),
+                        ir.partition.tsconfig_aliases.as_ref(),
+                        &workspace_packages,
+                        declared,
+                    )
+                    .fold_into(&mut o);
                 }
             }
         }
@@ -1449,25 +1412,92 @@ impl LiveGraph {
     }
 }
 
-/// IMPORTS-TSCONFIG-PATHS-1 + -DYNAMIC-CLASSIFICATION-1: classify a BARE (non-relative) specifier into the
-/// `ObservationClassSummary` -- SHARED by a static `PackageExternal` and a literal-bare `DynamicUnsupported`
-/// so the two cannot drift. `overlay_resolved` (an alias edge was emitted) -> captured (not blocking); matched
-/// a tsconfig `paths` pattern but not resolved -> `has_alias_unresolved`; else the package class (workspace ->
-/// workspace-local; declared/node_modules external -> benign; else unresolved-package).
+/// IMPORTS-LIVEGRAPH-CLI-1 (GAP-A): classify ONE import observation into its [`module_cycle_cert::
+/// ObservationClass`] label -- the SINGLE classification authority. `module_cycle_live_state` folds the labels
+/// into [`module_cycle_cert::ObservationClassSummary`]; the import read-model (`live_import_view`) reuses the
+/// SAME labels for the observations section, so the summary and the per-observation evidence cannot diverge.
+/// Mirrors the ratified import-classification semantics EXACTLY (PACKAGE-RESOLUTION-1 / TSCONFIG-PATHS-1 /
+/// DYNAMIC-CLASSIFICATION-1 model B / ASSET-AND-LITERAL-EXT-1) -- a behaviour-preserving extraction of the
+/// prior in-line match arms, NOT a rule change (asserted equivalent by a unit test).
+fn classify_observation(
+    obs: &repo_graph_ir::ImportObservation,
+    overlay_resolved: bool,
+    tsconfig_aliases: Option<&repo_graph_ir::TsconfigAliasConfig>,
+    workspace_packages: &BTreeSet<String>,
+    declared: &BTreeSet<String>,
+) -> module_cycle_cert::ObservationClass {
+    use module_cycle_cert::ObservationClass;
+    match obs.resolution {
+        // The only class already captured as an intra-partition FILE->FILE edge.
+        ImportResolution::StaticResolved => ObservationClass::ResolvedEdge,
+        // A non-relative (bare) specifier: tsconfig alias BEFORE the package class.
+        ImportResolution::PackageExternal => classify_bare_specifier(
+            obs,
+            overlay_resolved,
+            tsconfig_aliases,
+            workspace_packages,
+            declared,
+        ),
+        ImportResolution::DynamicUnsupported => {
+            // DYNAMIC-CLASSIFICATION-1 (B): a LITERAL dynamic is classified by its TARGET CLASS (its static
+            // counterpart); only a NON-LITERAL `import(expr)` (empty specifier) is genuinely dynamic-unresolvable.
+            if obs.raw_specifier.is_empty() {
+                ObservationClass::DynamicUnresolved
+            } else if obs.raw_specifier.starts_with('.') {
+                // literal RELATIVE dynamic -> the SAME buckets as a static relative (NOT a dynamic signal).
+                classify_relative(obs, overlay_resolved)
+            } else {
+                // literal BARE dynamic -> the SAME bare classification as a static import.
+                classify_bare_specifier(
+                    obs,
+                    overlay_resolved,
+                    tsconfig_aliases,
+                    workspace_packages,
+                    declared,
+                )
+            }
+        }
+        // ASSET-AND-LITERAL-EXT-1: a relative asset (.css/.svg/...) is benign BEFORE the unresolved check.
+        ImportResolution::StaticUnresolved => classify_relative(obs, overlay_resolved),
+    }
+}
+
+/// A RELATIVE specifier (static-unresolved OR literal-relative-dynamic): asset (benign) -> overlay-resolved
+/// (captured edge) -> else unresolved-after-overlay (blocks). SHARED so the static + dynamic relative paths
+/// cannot drift (they were identical in the prior in-line arms).
+fn classify_relative(
+    obs: &repo_graph_ir::ImportObservation,
+    overlay_resolved: bool,
+) -> module_cycle_cert::ObservationClass {
+    use module_cycle_cert::ObservationClass;
+    if is_asset_specifier(&obs.raw_specifier) {
+        ObservationClass::AssetNonRelevant
+    } else if overlay_resolved {
+        ObservationClass::ResolvedEdge
+    } else {
+        ObservationClass::UnresolvedAfterOverlay
+    }
+}
+
+/// IMPORTS-TSCONFIG-PATHS-1 + -DYNAMIC-CLASSIFICATION-1: classify a BARE (non-relative) specifier into an
+/// [`module_cycle_cert::ObservationClass`] -- SHARED by a static `PackageExternal` and a literal-bare
+/// `DynamicUnsupported` so the two cannot drift. overlay-resolved (an alias edge was emitted) -> captured
+/// `ResolvedEdge`; matched a tsconfig `paths` pattern but not resolved -> `AliasUnresolved`; else the package
+/// class (workspace -> workspace-local; declared/node_modules external -> benign external; else unresolved).
 fn classify_bare_specifier(
     obs: &repo_graph_ir::ImportObservation,
     overlay_resolved: bool,
     tsconfig_aliases: Option<&repo_graph_ir::TsconfigAliasConfig>,
     workspace_packages: &BTreeSet<String>,
     declared: &BTreeSet<String>,
-    o: &mut module_cycle_cert::ObservationClassSummary,
-) {
+) -> module_cycle_cert::ObservationClass {
+    use module_cycle_cert::ObservationClass;
     let is_alias =
         tsconfig_aliases.is_some_and(|cfg| specifier_matches_any_alias(cfg, &obs.raw_specifier));
     if overlay_resolved {
-        // captured tsconfig-path edge -> not blocking
+        ObservationClass::ResolvedEdge
     } else if is_alias {
-        o.has_alias_unresolved = true;
+        ObservationClass::AliasUnresolved
     } else {
         match classify_package_import(
             &obs.raw_specifier,
@@ -1475,9 +1505,11 @@ fn classify_bare_specifier(
             declared,
             obs.external_node_modules,
         ) {
-            PackageImportClass::ExternalPackageNonLocal => o.has_external_nonlocal = true,
-            PackageImportClass::WorkspaceLocalUnedgeable => o.has_workspace_local_unedgeable = true,
-            PackageImportClass::PackageUnresolved => o.has_unresolved_package = true,
+            PackageImportClass::ExternalPackageNonLocal => ObservationClass::ExternalNonLocal,
+            PackageImportClass::WorkspaceLocalUnedgeable => {
+                ObservationClass::WorkspaceLocalUnedgeable
+            }
+            PackageImportClass::PackageUnresolved => ObservationClass::UnresolvedPackage,
         }
     }
 }
@@ -2545,6 +2577,169 @@ mod tests {
             external_node_modules: external_nm,
         }
     }
+    /// IMPORTS-LIVEGRAPH-CLI-1 (GAP-A) EQUIVALENCE GATE: the per-observation labeller, folded into the
+    /// summary, MUST reproduce the PRE-REFACTOR in-line match arms EXACTLY. `old_summary` below is a VERBATIM
+    /// copy of those arms (the oracle); any divergence fails the build -- the ratified stop condition ("Unit
+    /// test must assert fold(labels) equals old summary behavior. Stop if equivalence fails").
+    #[test]
+    fn classify_observation_fold_equals_old_summary() {
+        use module_cycle_cert::ObservationClassSummary;
+        // OLD bare-specifier classifier (verbatim, mutating).
+        fn old_bare(
+            obs: &ImportObservation,
+            overlay_resolved: bool,
+            tsconfig_aliases: Option<&repo_graph_ir::TsconfigAliasConfig>,
+            workspace_packages: &std::collections::BTreeSet<String>,
+            declared: &std::collections::BTreeSet<String>,
+            o: &mut ObservationClassSummary,
+        ) {
+            let is_alias = tsconfig_aliases
+                .is_some_and(|cfg| specifier_matches_any_alias(cfg, &obs.raw_specifier));
+            if overlay_resolved {
+            } else if is_alias {
+                o.has_alias_unresolved = true;
+            } else {
+                match classify_package_import(
+                    &obs.raw_specifier,
+                    workspace_packages,
+                    declared,
+                    obs.external_node_modules,
+                ) {
+                    PackageImportClass::ExternalPackageNonLocal => o.has_external_nonlocal = true,
+                    PackageImportClass::WorkspaceLocalUnedgeable => {
+                        o.has_workspace_local_unedgeable = true
+                    }
+                    PackageImportClass::PackageUnresolved => o.has_unresolved_package = true,
+                }
+            }
+        }
+        // OLD observation classifier (verbatim, mutating) -> the oracle summary.
+        fn old_summary(
+            obs: &ImportObservation,
+            overlay_resolved: bool,
+            tsconfig_aliases: Option<&repo_graph_ir::TsconfigAliasConfig>,
+            workspace_packages: &std::collections::BTreeSet<String>,
+            declared: &std::collections::BTreeSet<String>,
+        ) -> ObservationClassSummary {
+            let mut o = ObservationClassSummary::default();
+            match obs.resolution {
+                ImportResolution::PackageExternal => old_bare(
+                    obs,
+                    overlay_resolved,
+                    tsconfig_aliases,
+                    workspace_packages,
+                    declared,
+                    &mut o,
+                ),
+                ImportResolution::DynamicUnsupported => {
+                    if obs.raw_specifier.is_empty() {
+                        o.has_dynamic_unresolved = true;
+                    } else if obs.raw_specifier.starts_with('.') {
+                        if is_asset_specifier(&obs.raw_specifier) {
+                            o.has_asset_nonrelevant = true;
+                        } else if !overlay_resolved {
+                            o.has_unresolved_after_overlay = true;
+                        }
+                    } else {
+                        old_bare(
+                            obs,
+                            overlay_resolved,
+                            tsconfig_aliases,
+                            workspace_packages,
+                            declared,
+                            &mut o,
+                        );
+                    }
+                }
+                ImportResolution::StaticUnresolved => {
+                    if is_asset_specifier(&obs.raw_specifier) {
+                        o.has_asset_nonrelevant = true;
+                    } else if !overlay_resolved {
+                        o.has_unresolved_after_overlay = true;
+                    }
+                }
+                ImportResolution::StaticResolved => {}
+            }
+            o
+        }
+        fn mk(res: ImportResolution, raw: &str, ext_nm: bool) -> ImportObservation {
+            ImportObservation {
+                source_file: "src/x.ts".to_string(),
+                raw_specifier: raw.to_string(),
+                resolution: res,
+                is_re_export: false,
+                is_type_only: false,
+                is_side_effect: false,
+                external_node_modules: ext_nm,
+            }
+        }
+        let ws: std::collections::BTreeSet<String> =
+            ["@scope/wslocal".to_string()].into_iter().collect();
+        let declared: std::collections::BTreeSet<String> =
+            ["react".to_string()].into_iter().collect();
+        let aliases = repo_graph_ir::TsconfigAliasConfig {
+            base_url: ".".to_string(),
+            paths: [("@app/*".to_string(), vec!["src/*".to_string()])]
+                .into_iter()
+                .collect(),
+            partition_prefix: String::new(),
+        };
+        // (resolution, raw, external_node_modules, overlay_resolved) -- every arm + sub-case.
+        let fixtures: &[(ImportResolution, &str, bool, bool)] = &[
+            (ImportResolution::StaticResolved, "./x", false, false), // ResolvedEdge
+            (ImportResolution::StaticUnresolved, "./x", false, false), // UnresolvedAfterOverlay
+            (ImportResolution::StaticUnresolved, "./x", false, true), // overlay-resolved -> none
+            (ImportResolution::StaticUnresolved, "./a.css", false, false), // AssetNonRelevant
+            (ImportResolution::PackageExternal, "react", false, false), // ExternalNonLocal (declared)
+            (ImportResolution::PackageExternal, "node:fs", false, false), // ExternalNonLocal (builtin)
+            (
+                ImportResolution::PackageExternal,
+                "@scope/wslocal",
+                false,
+                false,
+            ), // WorkspaceLocalUnedgeable
+            (
+                ImportResolution::PackageExternal,
+                "unknown-xyz-pkg",
+                false,
+                false,
+            ), // UnresolvedPackage
+            (
+                ImportResolution::PackageExternal,
+                "@app/thing",
+                false,
+                false,
+            ), // AliasUnresolved
+            (ImportResolution::PackageExternal, "@app/thing", false, true), // overlay alias -> none
+            (ImportResolution::DynamicUnsupported, "", false, false), // DynamicUnresolved (non-literal)
+            (ImportResolution::DynamicUnsupported, "./y", false, false), // UnresolvedAfterOverlay
+            (ImportResolution::DynamicUnsupported, "./y", false, true), // overlay -> none
+            (
+                ImportResolution::DynamicUnsupported,
+                "./y.svg",
+                false,
+                false,
+            ), // AssetNonRelevant
+            (ImportResolution::DynamicUnsupported, "react", false, false), // ExternalNonLocal (literal bare)
+            (
+                ImportResolution::DynamicUnsupported,
+                "@scope/wslocal",
+                false,
+                false,
+            ), // WorkspaceLocalUnedgeable
+        ];
+        for &(res, raw, ext, ovr) in fixtures {
+            let obs = mk(res, raw, ext);
+            let mut new = ObservationClassSummary::default();
+            classify_observation(&obs, ovr, Some(&aliases), &ws, &declared).fold_into(&mut new);
+            let old = old_summary(&obs, ovr, Some(&aliases), &ws, &declared);
+            assert_eq!(
+                new, old,
+                "fold(label) != old summary for {res:?} raw={raw:?} overlay_resolved={ovr}"
+            );
+        }
+    }
+
     /// A partition IR carrying import observations (the `ir` helper above always has none).
     fn ir_obs(
         id: &str,

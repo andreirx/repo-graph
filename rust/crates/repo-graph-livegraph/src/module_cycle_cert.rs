@@ -109,6 +109,83 @@ pub struct ObservationClassSummary {
     pub has_unresolved_after_overlay: bool,
 }
 
+/// IMPORTS-LIVEGRAPH-CLI-1 (D2 / GAP-A): the per-observation classification LABEL. The labeller
+/// (`LiveGraph::classify_observation`, which needs the import resolver) emits exactly ONE of these per import
+/// observation; [`ObservationClassSummary`] is then a FOLD over the labels (the SINGLE source of truth -- the
+/// summary booleans can no longer drift from the per-observation evidence the `imports --engine livegraph`
+/// surface shows). Two labels are BENIGN (reported, non-blocking); five BLOCK `Complete`;
+/// [`ObservationClass::ResolvedEdge`] is a captured edge (never a summary flag, never an observation row -- it
+/// appears in the EDGES section, projected from the edge collections).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObservationClass {
+    /// A captured FILE->FILE edge: a `StaticResolved` intra-partition import OR a cross-partition
+    /// overlay-resolved relative / tsconfig-alias / literal-dynamic import. NOT a summary flag; NOT an
+    /// observation row (it is projected into the EDGES section from the edge collections).
+    ResolvedEdge,
+    /// BENIGN (does NOT block): a `node:`/builtin or DECLARED-dependency external package import
+    /// (folds to `has_external_nonlocal`).
+    ExternalNonLocal,
+    /// BENIGN (does NOT block): a relative NON-CODE asset import (folds to `has_asset_nonrelevant`).
+    AssetNonRelevant,
+    /// BLOCKS: a workspace-local package import not yet edgeable (folds to `has_workspace_local_unedgeable`).
+    WorkspaceLocalUnedgeable,
+    /// BLOCKS: an unknown bare specifier (folds to `has_unresolved_package`).
+    UnresolvedPackage,
+    /// BLOCKS: a tsconfig `paths` alias matched but unresolved (folds to `has_alias_unresolved`).
+    AliasUnresolved,
+    /// BLOCKS: a non-literal dynamic `import(expr)` (folds to `has_dynamic_unresolved`).
+    DynamicUnresolved,
+    /// BLOCKS: a `StaticUnresolved` relative the cross-partition overlay did NOT resolve
+    /// (folds to `has_unresolved_after_overlay`).
+    UnresolvedAfterOverlay,
+}
+
+impl ObservationClass {
+    /// Fold this label into the summary -- the ONLY place a summary flag is set. `ResolvedEdge` sets nothing
+    /// (a captured edge is not uncaptured evidence). Multiple observations OR into the same flag (idempotent).
+    pub fn fold_into(self, o: &mut ObservationClassSummary) {
+        match self {
+            ObservationClass::ResolvedEdge => {}
+            ObservationClass::ExternalNonLocal => o.has_external_nonlocal = true,
+            ObservationClass::AssetNonRelevant => o.has_asset_nonrelevant = true,
+            ObservationClass::WorkspaceLocalUnedgeable => o.has_workspace_local_unedgeable = true,
+            ObservationClass::UnresolvedPackage => o.has_unresolved_package = true,
+            ObservationClass::AliasUnresolved => o.has_alias_unresolved = true,
+            ObservationClass::DynamicUnresolved => o.has_dynamic_unresolved = true,
+            ObservationClass::UnresolvedAfterOverlay => o.has_unresolved_after_overlay = true,
+        }
+    }
+    /// Whether this class BLOCKS `Complete`. MUST stay in lockstep with the blocking set in
+    /// [`evaluate_module_cycle_completeness`] (asserted by a unit test). Benign + `ResolvedEdge` do not block.
+    pub fn is_blocking(self) -> bool {
+        matches!(
+            self,
+            ObservationClass::WorkspaceLocalUnedgeable
+                | ObservationClass::UnresolvedPackage
+                | ObservationClass::AliasUnresolved
+                | ObservationClass::DynamicUnresolved
+                | ObservationClass::UnresolvedAfterOverlay
+        )
+    }
+    /// Whether this label is a captured edge (-> the EDGES section), not an observation row.
+    pub fn is_edge(self) -> bool {
+        matches!(self, ObservationClass::ResolvedEdge)
+    }
+    /// Stable string for JSON / diagnostics (the per-observation `class` field).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ObservationClass::ResolvedEdge => "ResolvedEdge",
+            ObservationClass::ExternalNonLocal => "ExternalNonLocal",
+            ObservationClass::AssetNonRelevant => "AssetNonRelevant",
+            ObservationClass::WorkspaceLocalUnedgeable => "WorkspaceLocalUnedgeable",
+            ObservationClass::UnresolvedPackage => "UnresolvedPackage",
+            ObservationClass::AliasUnresolved => "AliasUnresolved",
+            ObservationClass::DynamicUnresolved => "DynamicUnresolved",
+            ObservationClass::UnresolvedAfterOverlay => "UnresolvedAfterOverlay",
+        }
+    }
+}
+
 /// The PURE live snapshot the evaluator reads (produced by `LiveGraph::module_cycle_live_state`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LiveCycleState {
@@ -376,6 +453,45 @@ mod tests {
             }),
             ModuleCycleCompleteness::IncompleteImportClasses
         );
+    }
+
+    #[test]
+    fn observation_class_is_blocking_matches_evaluator() {
+        // IMPORTS-LIVEGRAPH-CLI-1: ObservationClass::is_blocking() MUST agree with the blocking set in
+        // evaluate_module_cycle_completeness. Folding a BLOCKING class -> IncompleteImportClasses; a BENIGN
+        // class (or ResolvedEdge, which folds to nothing) -> still Complete. Catches drift if either side changes.
+        use ObservationClass::*;
+        let b = baseline(&["a"], false);
+        for class in [
+            ResolvedEdge,
+            ExternalNonLocal,
+            AssetNonRelevant,
+            WorkspaceLocalUnedgeable,
+            UnresolvedPackage,
+            AliasUnresolved,
+            DynamicUnresolved,
+            UnresolvedAfterOverlay,
+        ] {
+            let mut o = ObservationClassSummary::default();
+            class.fold_into(&mut o);
+            let verdict =
+                evaluate_module_cycle_completeness(&live(vec![part("a", true, true)], o), Some(&b));
+            if class.is_blocking() {
+                assert_eq!(
+                    verdict,
+                    ModuleCycleCompleteness::IncompleteImportClasses,
+                    "{} is_blocking() but the evaluator did not block",
+                    class.as_str()
+                );
+            } else {
+                assert_eq!(
+                    verdict,
+                    ModuleCycleCompleteness::CompleteForModuleImportCycles,
+                    "{} is benign/edge but the evaluator did not return Complete",
+                    class.as_str()
+                );
+            }
+        }
     }
 
     #[test]
