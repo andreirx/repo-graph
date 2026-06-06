@@ -1,11 +1,12 @@
 # IMPORTS-DYNAMIC-CLASSIFICATION-1: classify dynamic `import()` (literal vs non-literal)
 
 Slice ID: IMPORTS-DYNAMIC-CLASSIFICATION-1
-Status: **SPEC — awaiting ratification (2026-06-06). NOT started.** Split the blanket `DynamicUnsupported` so a
-LITERAL dynamic `import('...')` is classified like its static counterpart (relative -> resolved edge;
-bare -> workspace/external/node_modules), and only NON-LITERAL `import(expr)` stays blocking. NO workspace
-package edge, NO default migration, NO raw decommission, NO package-manager/network, NO heuristic target
-resolution.
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-06), D1–D4 ratified (D3 = model B).** A LITERAL dynamic
+`import('...')` is classified by its TARGET CLASS (relative -> resolved edge `AstDynamicImportResolved` or the
+relative-unresolved bucket; bare -> workspace/external/node_modules/alias/unknown); only NON-LITERAL
+`import(expr)` -> `has_dynamic_unresolved`. Live: amodx's dynamic flag DISAPPEARS (all dynamics literal); blocking
+stays workspace-local + unresolved-relative. See **Completion**. NO workspace package edge, NO default migration,
+NO raw decommission, NO package-manager/network, NO heuristic target resolution.
 Depends: IMPORTS-PACKAGE-RESOLUTION-1 / -TSCONFIG-PATHS-1 / -PACKAGE-EXTERNAL-EVIDENCE-1 (the static
 classification this reuses), the import-resolver relative + alias resolution. Track: Stage D, import completeness.
 
@@ -66,13 +67,17 @@ RECOMMENDATION: as written -- a literal dynamic is its static counterpart + the 
 non-literal case is genuinely dynamic-specific (and unresolvable without runtime).
 ```
 
-### D3 — cert policy split (the user's #2)
+### D3 — cert policy split (the user's #2) — RATIFIED MODEL B (corrected 2026-06-06)
 ```text
 ObservationClassSummary: replace the blanket `has_dynamic` with `has_dynamic_unresolved` (BLOCKS) = a
-NON-LITERAL dynamic OR a literal-relative dynamic the overlay did not resolve. A literal dynamic that resolves /
-classifies routes to the EXISTING flags (a resolved-relative edge -> captured; workspace -> has_workspace_local_
-unedgeable; external -> has_external_nonlocal benign; alias -> resolved/has_alias_unresolved; unknown bare ->
-has_unresolved_package). Blocking set = has_dynamic_unresolved + the existing blocking flags. Policy version 4 -> 5.
+NON-LITERAL dynamic `import(expr)` (empty specifier) ONLY -- the only genuinely dynamic-unresolvable case. A
+LITERAL dynamic is classified by its TARGET CLASS (its static counterpart): resolved-relative -> captured edge;
+UNRESOLVED-relative -> has_unresolved_after_overlay (the SAME relative bucket as static, NOT a dynamic signal);
+bare -> workspace -> has_workspace_local_unedgeable; external -> has_external_nonlocal benign; alias ->
+resolved/has_alias_unresolved; unknown bare -> has_unresolved_package. Policy version 4 -> 5.
+(Original D3 also put unresolved-literal-relative in has_dynamic_unresolved; corrected to model B -- once a
+dynamic has a literal specifier the remaining uncertainty is target-resolution class, not "dynamic". This makes
+has_dynamic_unresolved a PRECISE non-literal signal + matches the validation intent.)
 RECOMMENDATION: as written. (`has_external_nonlocal` already benign; `has_workspace_local_unedgeable` already
 blocks; no NEW benign/blocking semantics beyond has_dynamic_unresolved.)
 ```
@@ -122,8 +127,68 @@ Stop if distinguishing literal-relative-resolvable from a concatenation needs AS
 producer's first-string capture -> present a matrix (v1 = first-string-literal, best-effort).
 ```
 
+## Completion (implemented + live-validated 2026-06-06, EXECUTED)
+
+Commits: `182bf38` (spec) + the impl/docs commits below. Ratified D1–D4 with **D3 = model B** (corrected).
+
+### What landed
+```text
+IR: + EdgeBasis::AstDynamicImportResolved (runtime-only, never persisted; warm-cache enum arm).
+livegraph overlay: a LITERAL relative dynamic resolves via the SAME relative machinery (re-stamped
+  AstDynamicImportResolved); a literal bare dynamic matching a tsconfig alias -> a dynamic-resolved edge; a
+  NON-LITERAL `import(expr)` is NEVER edged.
+livegraph snapshot: the DynamicUnsupported arm splits -- empty specifier -> has_dynamic_unresolved; literal
+  relative -> overlay edge OR has_unresolved_after_overlay (B: the relative bucket, not dynamic); literal bare ->
+  the SHARED classify_bare_specifier helper (workspace/external/alias/unknown -- the SAME path as a static
+  PackageExternal, so they cannot drift).
+cert: ObservationClassSummary has_dynamic -> has_dynamic_unresolved (NON-LITERAL ONLY); evaluate + fingerprint;
+  audit policy 4 -> 5.
+```
+
+### Live validation (EXECUTED 2026-06-06)
+```text
+amodx dynamics (comprehensive scan): ALL LITERAL -- @amodx/effects x6 (workspace-local) + ../src/auth/authorizer
+  x4 + ../types.js x1 (relative); ZERO non-literal.
+amodx audit -> IncompleteImportClasses, policy_version=5:
+    has_dynamic_unresolved         = FALSE  <- the dynamic flag DISAPPEARED (all dynamics literal): the 6
+                                              @amodx/effects -> has_workspace_local_unedgeable; the relative ones
+                                              -> has_unresolved_after_overlay (e.g. ../types.js: the .js->.ts
+                                              extension gap, a pre-existing relative-resolver limitation).
+    has_workspace_local_unedgeable = true   (static @amodx/* + the dynamic @amodx/effects)
+    has_unresolved_after_overlay   = true   (static + dynamic unresolved relatives)
+    has_external_nonlocal_benign   = true ; has_unresolved_package = false ; has_alias_unresolved = false
+  => amodx now blocks ONLY on workspace-local (RED) + unresolved-relative -- NOT dynamic. The dynamic category
+     is gone from the report; the blocking set is maximally precise.
+xpart fixture -> CompleteForModuleImportCycles (permits_default=true) -- REGRESSION INTACT.
+unit (the paths amodx lacks): non-literal -> has_dynamic_unresolved; literal-relative-resolved ->
+  AstDynamicImportResolved edge; literal-relative-UNRESOLVED -> has_unresolved_after_overlay; literal-external
+  (node_modules) -> benign; literal-unknown -> has_unresolved_package.
+```
+
+### Acceptance — PASS
+```text
+1. amodx dynamic flag disappears; blocking -> workspace-local + unresolved-relative                PASS.
+2. fixture: literal relative dynamic -> edge + cycle contribution (AstDynamicImportResolved)        PASS (unit).
+3. fixture: literal external dynamic benign with positive external evidence                          PASS (unit).
+4. fixture: non-literal dynamic blocks                                                               PASS (unit).
+5. xpart remains Complete                                                                            PASS.
+Gate: workspace tests ok / 0 failures; clippy -D warnings clean; fmt clean.
+```
+
+### Significance — amodx's import-class story is now COMPLETE
+```text
+Across PACKAGE-RESOLUTION-1 / TSCONFIG-PATHS-1 / PACKAGE-EXTERNAL-EVIDENCE-1 / DYNAMIC-CLASSIFICATION-1, every
+import CLASS is now classified precisely. amodx's ONLY remaining module-cycle blockers are:
+  - has_workspace_local_unedgeable (the RED IMPORTS-WORKSPACE-PACKAGE-EDGE probe -- src-vs-dist moniker chasm)
+  - has_unresolved_after_overlay (unresolved RELATIVE imports -- a relative-resolver gap, e.g. .js->.ts)
+Neither is an import-classification gap. The next levers are the workspace-edge research and relative-resolver
+completeness -- both measurable now.
+```
+
 ## Follow-up
 ```text
+- relative-resolver completeness (e.g. `.js` import specifier -> `.ts` source; the remaining has_unresolved_
+  after_overlay on amodx) -- the now-dominant non-RED blocker.
 - IMPORTS-WORKSPACE-PACKAGE-EDGE (research): the workspace-local block now ALSO covers the dynamic @amodx/effects.
 - unresolved-relative imports (amodx's other remaining axis: has_unresolved_after_overlay).
 - once amodx's blocking set is only workspace-local (RED) + unresolved-relative, the default-migration readiness
