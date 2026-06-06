@@ -1,10 +1,11 @@
 # IMPORTS-PACKAGE-EXTERNAL-EVIDENCE-1: node_modules / lock-closure external evidence
 
 Slice ID: IMPORTS-PACKAGE-EXTERNAL-EVIDENCE-1
-Status: **SPEC — awaiting ratification (2026-06-06). NOT started.** Broaden `ExternalPackageNonLocal` evidence
-beyond a DIRECT package.json declaration to include positive evidence from `node_modules` resolution (incl.
-`@types`) and/or the lockfile dependency closure, so transitively-pulled / type-only external packages stop
-blocking module-cycle completeness. NO package workspace edge, NO default migration, NO raw decommission.
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-06), D1–D4 ratified.** A non-relative specifier resolving to a
+REAL node_modules/@types install (realpath outside the repo source) is now benign `ExternalPackageNonLocal`,
+captured at ingest (`external_node_modules`), with the WORKSPACE MAP taking precedence (the trust hinge). Live:
+amodx `has_unresolved_package` -> false; `@amodx/shared` still workspace-local; xpart Complete. See
+**Completion**. NO package workspace edge, NO default migration, NO raw decommission.
 Depends: IMPORTS-PACKAGE-RESOLUTION-1 (the classifier; the declared-dep external rule this extends). Track:
 Stage D, import completeness.
 
@@ -121,6 +122,60 @@ stays blocking. Lock-closure parsing (D1-B) deferred unless node_modules is unav
 5. live: amodx has_unresolved_package -> false; gate; completion doc.
 Stop if distinguishing a workspace symlink from a real external requires more than realpath-outside-repo (e.g.
 a pnpm store layout that aliases workspace packages) -> present a matrix.
+```
+
+## Completion (implemented + live-validated 2026-06-06, EXECUTED)
+
+Commits: `afae08f` (spec + measurement) + the impl/docs commits below. Ratified D1–D4.
+
+### What landed
+```text
+IR: ImportObservation + external_node_modules: bool (captured at ingest). Warm-cache CacheImportObservationDto
+  round-trip + SCHEMA_VERSION 5 -> 6 (forces a clean re-ingest for the new evidence).
+scip-ingest: resolves_external_node_modules(root, repo_root, pkg) -- checks the partition + repo-root
+  node_modules (and @types/<pkg>) and CANONICALIZES: external iff the realpath has a `node_modules` segment OR
+  is outside the canonical repo root (a workspace symlink resolving INTO the repo source is NOT external);
+  conservative on any canonicalize failure (-> false, blocks). Memoized per package; runs at the ingest
+  boundary, NOT the classifier. repo_root = partition root minus the repo-relative prefix.
+import-resolver (PURE): classify_package_import gains external_node_modules. Precedence (the trust hinge):
+  node:/builtin -> external; WORKSPACE map -> WorkspaceLocalUnedgeable (BEFORE node_modules); declared dep OR
+  external_node_modules -> ExternalPackageNonLocal; else PackageUnresolved.
+livegraph snapshot: passes obs.external_node_modules into the classifier. cert: NO change; audit policy 3 -> 4.
+```
+
+### Live validation (EXECUTED 2026-06-06)
+```text
+amodx (8/8 loaded) -> IncompleteImportClasses, policy_version=4:
+    has_external_nonlocal_benign   = true
+    has_workspace_local_unedgeable = true   <- @amodx/shared STILL blocks despite its node_modules symlink
+                                              (the trust hinge: workspace precedence held)
+    has_unresolved_package         = FALSE  <- the 110 node_modules/@types externals (aws-lambda/lucide-react/
+                                              @tiptap/core/domhandler) are now BENIGN; was true
+    has_alias_unresolved           = false
+    has_dynamic                    = true   (blocks)
+    has_unresolved_after_overlay   = true   (relative StaticUnresolved -- a separate axis, pre-existing)
+  => the package-external residual is GONE; the remaining blockers are workspace-local (RED) + dynamic +
+     unresolved-relative. The cert is honestly IncompleteImportClasses (not Complete) on those.
+xpart fixture -> CompleteForModuleImportCycles (permits_default=true) -- REGRESSION INTACT.
+```
+
+### Acceptance (D4) — PASS
+```text
+1. amodx has_unresolved_package = false                                                          PASS.
+2. @amodx/shared still blocks as workspace-local despite the node_modules symlink (trust hinge)   PASS
+   (has_workspace_local_unedgeable=true; the unit test workspace_local_takes_precedence...node_modules covers it).
+3. dynamic still blocks                                                                            PASS.
+4. xpart remains Complete                                                                           PASS.
+Gate: workspace tests ok / 0 failures; clippy -D warnings clean; fmt clean. Resolver classify tests (incl.
+node_modules-external-benign + workspace-precedence-over-node_modules) + warm-cache v6 round-trip green.
+```
+
+### Provisioning note (environment, unchanged from PATHS-1)
+```text
+Live re-ingest uses the DURABLE scip-typescript producer under ~/.local/share/repo-graph-tools (the /private/tmp
+install stays cleaned by macOS); the daemon points at it via RMAP_SCIP_TYPESCRIPT. The dev-install launcher
+still races on validation in this environment; rmapd was restarted manually (exact `pkill -x rmapd`). No
+production daemon behaviour changed.
 ```
 
 ## Follow-up
