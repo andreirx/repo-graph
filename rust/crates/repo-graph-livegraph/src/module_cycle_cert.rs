@@ -85,6 +85,10 @@ pub struct ObservationClassSummary {
     /// BENIGN (reported, does NOT block): a `node:`/builtin or DECLARED-dependency external package import
     /// (`ExternalPackageNonLocal`). It cannot participate in a repo-local module cycle.
     pub has_external_nonlocal: bool,
+    /// BENIGN (reported, does NOT block, IMPORTS-ASSET-AND-LITERAL-EXT-1): a relative import of a known
+    /// NON-CODE asset (`.css`/`.svg`/font/...). It is not a TS module -> cannot be in a repo-local module
+    /// cycle. (Never an edge.)
+    pub has_asset_nonrelevant: bool,
     /// BLOCKS: a WORKSPACE-LOCAL package import this slice cannot yet convert to a module edge
     /// (`WorkspaceLocalUnedgeable`; the edge is IMPORTS-WORKSPACE-PACKAGE-EDGE-1). Detected-local but a hole.
     pub has_workspace_local_unedgeable: bool,
@@ -206,8 +210,9 @@ pub fn certificate_inputs_fingerprint(
     parts.sort();
     let o = &live.observation_classes;
     let mut s = format!(
-        "obs[ext{}:wsl{}:unp{}:alu{}:dyu{}:unr{}]|parts[{}]",
+        "obs[ext{}:ast{}:wsl{}:unp{}:alu{}:dyu{}:unr{}]|parts[{}]",
         o.has_external_nonlocal as u8,
+        o.has_asset_nonrelevant as u8,
         o.has_workspace_local_unedgeable as u8,
         o.has_unresolved_package as u8,
         o.has_alias_unresolved as u8,
@@ -268,6 +273,7 @@ mod tests {
     }
     const CLEAN: ObservationClassSummary = ObservationClassSummary {
         has_external_nonlocal: false,
+        has_asset_nonrelevant: false,
         has_workspace_local_unedgeable: false,
         has_unresolved_package: false,
         has_alias_unresolved: false,

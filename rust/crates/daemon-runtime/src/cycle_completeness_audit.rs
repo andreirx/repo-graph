@@ -30,8 +30,10 @@ pub const LANGUAGE_SUPPORT_VERSION: u32 = 1;
 /// IMPORTS-TSCONFIG-PATHS-1 (a RESOLVED tsconfig path alias -> non-blocking; unresolved -> has_alias_unresolved).
 /// v4 = IMPORTS-PACKAGE-EXTERNAL-EVIDENCE-1 (a node_modules/@types-resolvable external is benign, not just a
 /// directly-declared dep). v5 = IMPORTS-DYNAMIC-CLASSIFICATION-1 (a LITERAL dynamic import is classified like
-/// its static counterpart; only a NON-LITERAL `import(expr)` blocks). Any bump re-evaluates every prior cert.
-pub const IMPORT_COMPLETENESS_POLICY_VERSION: u32 = 5;
+/// its static counterpart; only a NON-LITERAL `import(expr)` blocks). v6 = IMPORTS-ASSET-AND-LITERAL-EXT-1 (a
+/// relative asset import `.css`/`.svg`/... is benign non-cycle-relevant; a literal-source-extension import
+/// resolves to the exact FILE). Any bump re-evaluates every prior cert.
+pub const IMPORT_COMPLETENESS_POLICY_VERSION: u32 = 6;
 
 /// The LiveGraph-supported TS family (D3-A). A non-null `files.language` value OUTSIDE this set is a non-TS
 /// CODE source: the indexer vocabulary (`indexer/routing.rs::detect_language`) is CLOSED + code-only, so
@@ -188,6 +190,7 @@ pub fn cycle_completeness_audit_response(
             "excluded_fixture_partitions": excluded_fixture_partitions,
             "observation_classes": {
                 "has_external_nonlocal_benign": o.has_external_nonlocal,
+                "has_asset_nonrelevant_benign": o.has_asset_nonrelevant,
                 "has_workspace_local_unedgeable": o.has_workspace_local_unedgeable,
                 "has_unresolved_package": o.has_unresolved_package,
                 "has_alias_unresolved": o.has_alias_unresolved,

@@ -12,9 +12,9 @@
 //! Headless API (no query migration). See docs/slices/livegraph-runtime-1.md.
 
 use repo_graph_import_resolver::{
-    classify_package_import, dirname, file_key_path, resolve_imports, resolve_tsconfig_alias,
-    specifier_matches_any_alias, AliasResolution, FileInventory, ImportCandidate,
-    PackageImportClass, ResolvedImportEdgeCandidate,
+    classify_package_import, dirname, file_key_path, is_asset_specifier, resolve_imports,
+    resolve_tsconfig_alias, specifier_matches_any_alias, AliasResolution, FileInventory,
+    ImportCandidate, PackageImportClass, ResolvedImportEdgeCandidate,
 };
 use repo_graph_ir::{
     CanonicalKey, EdgeBasis, IdentitySource, ImportResolution, PartitionIr, Provenance, SourceRange,
@@ -1409,9 +1409,11 @@ impl LiveGraph {
                             if obs.raw_specifier.is_empty() {
                                 o.has_dynamic_unresolved = true;
                             } else if obs.raw_specifier.starts_with('.') {
-                                // literal RELATIVE dynamic -> overlay edge, OR (unresolved) the SAME
-                                // relative-unresolved bucket as a static relative (NOT a dynamic signal).
-                                if !overlay_resolved(obs) {
+                                // literal RELATIVE dynamic -> asset (benign), OR overlay edge, OR (unresolved)
+                                // the SAME relative-unresolved bucket as a static relative (NOT a dynamic signal).
+                                if is_asset_specifier(&obs.raw_specifier) {
+                                    o.has_asset_nonrelevant = true;
+                                } else if !overlay_resolved(obs) {
                                     o.has_unresolved_after_overlay = true;
                                 }
                             } else {
@@ -1427,7 +1429,11 @@ impl LiveGraph {
                             }
                         }
                         ImportResolution::StaticUnresolved => {
-                            if !overlay_resolved(obs) {
+                            // IMPORTS-ASSET-AND-LITERAL-EXT-1: a relative asset import (.css/.svg/...) is
+                            // non-cycle-relevant (benign), BEFORE the unresolved-relative check.
+                            if is_asset_specifier(&obs.raw_specifier) {
+                                o.has_asset_nonrelevant = true;
+                            } else if !overlay_resolved(obs) {
                                 o.has_unresolved_after_overlay = true;
                             }
                         }
@@ -2866,6 +2872,32 @@ mod tests {
                 .iter()
                 .any(|e| e.basis == EdgeBasis::AstDynamicImportResolved),
             "literal relative dynamic -> AstDynamicImportResolved edge"
+        );
+    }
+
+    #[test]
+    fn asset_import_is_benign_not_unresolved() {
+        // IMPORTS-ASSET-AND-LITERAL-EXT-1: a relative `.css` import -> has_asset_nonrelevant (benign), NOT
+        // has_unresolved_after_overlay; a real unresolved CODE import still blocks.
+        let ir = ir_obs(
+            "app",
+            vec![file_node("repo:app/src/main.ts:FILE")],
+            vec![],
+            vec![
+                unresolved_obs("app/src/main.ts", "./styles.css"), // asset -> benign
+                unresolved_obs("app/src/main.ts", "./missing-code"), // code -> blocks
+            ],
+        );
+        let mut lg = LiveGraph::new();
+        lg.load_partition("app", ir, LanguageSupport::TypeScriptPrimary);
+        let snap = lg.module_cycle_live_state();
+        assert!(
+            snap.observation_classes.has_asset_nonrelevant,
+            "a relative .css import is benign non-cycle-relevant"
+        );
+        assert!(
+            snap.observation_classes.has_unresolved_after_overlay,
+            "a real unresolved CODE import still blocks"
         );
     }
 

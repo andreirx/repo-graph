@@ -213,6 +213,32 @@ pub struct ImportResolutionReport {
     pub unresolved: Vec<UnresolvedImport>,
 }
 
+/// IMPORTS-ASSET-AND-LITERAL-EXT-1: known NON-CODE asset extensions (CLOSED allowlist -- styles/images/fonts).
+/// A relative import ending in one is non-cycle-relevant (benign), NEVER a graph edge. `.json` is DATA, NOT
+/// here. Unknown extensions are NEVER assets.
+const ASSET_EXTENSIONS: &[&str] = &[
+    "css", "scss", "sass", "less", "styl", // styles
+    "svg", "png", "jpg", "jpeg", "gif", "webp", "avif", "ico", "bmp", // images
+    "woff", "woff2", "ttf", "eot", "otf", // fonts
+];
+
+/// TS SOURCE file extensions for the literal-source-extension exact match (`.d.ts` ends with `.ts`).
+const SOURCE_EXTENSIONS: &[&str] = &[".ts", ".tsx", ".mts", ".cts"];
+
+/// IMPORTS-ASSET-AND-LITERAL-EXT-1: is `specifier` a known NON-CODE ASSET import (by the extension of its LAST
+/// path segment)? CLOSED allowlist; an unknown extension is NEVER an asset. PURE.
+pub fn is_asset_specifier(specifier: &str) -> bool {
+    let last_segment = specifier.rsplit('/').next().unwrap_or(specifier);
+    last_segment
+        .rsplit_once('.')
+        .is_some_and(|(_, ext)| ASSET_EXTENSIONS.contains(&ext))
+}
+
+/// True if the normalized base already ends in a TS source extension (`./App.tsx` -> base `.../App.tsx`).
+fn base_ends_with_source_extension(base: &str) -> bool {
+    SOURCE_EXTENSIONS.iter().any(|ext| base.ends_with(ext))
+}
+
 /// The DETERMINISTIC candidate paths tried for a normalized target base `T` (extensions THEN index, PLUS the
 /// IMPORTS-RELATIVE-RESOLUTION-COMPLETE-1 ESM output->source substitutions). The resolver collects ALL
 /// inventory matches across this set; >1 match -> `Ambiguous` (no silent extension preference -- order here is
@@ -302,6 +328,21 @@ pub fn resolve_imports(
             }
         };
         let base = normalize_join(dirname(&src_path), &cand.raw_specifier);
+        // IMPORTS-ASSET-AND-LITERAL-EXT-1: a literal SOURCE-extension import (`./App.tsx`) resolves to the
+        // EXACT FILE node if present -- EXCLUSIVE (do NOT append candidates / risk Ambiguity). Fall through to
+        // the normal candidate matching only when no exact FILE node exists.
+        if base_ends_with_source_extension(&base) {
+            if let Some(key) = inv.file_key_for(&base) {
+                report.resolved.push(ResolvedImportEdgeCandidate {
+                    src_file_key: cand.source_file_key,
+                    dst_file_key: key.to_string(),
+                    basis: EdgeBasis::AstImportFileInventoryResolved,
+                    raw_specifier: cand.raw_specifier,
+                    resolved_repo_path: base,
+                });
+                continue;
+            }
+        }
         // Collect ALL inventory matches (extension/index); >1 -> Ambiguous (no silent priority).
         let mut matches: Vec<(String, String)> = Vec::new();
         for path in candidate_paths(&base) {
@@ -720,6 +761,37 @@ mod tests {
         let r = resolve_imports(&inventory(), vec![cand("./nope.js")]);
         assert_eq!(r.resolved.len(), 0);
         assert_eq!(r.unresolved[0].reason, UnresolvedReason::NotFound);
+    }
+
+    #[test]
+    fn literal_source_extension_exact_match() {
+        // IMPORTS-ASSET-AND-LITERAL-EXT-1: `./widget.tsx` -> the EXACT widget.tsx FILE node (not subject to
+        // ambiguity with appended candidates).
+        let r = resolve_imports(&inventory(), vec![cand("./widget.tsx")]);
+        assert_eq!(r.resolved.len(), 1, "unresolved: {:?}", r.unresolved);
+        assert_eq!(
+            r.resolved[0].dst_file_key,
+            "repo:packages/a/src/widget.tsx:FILE"
+        );
+    }
+
+    #[test]
+    fn literal_source_extension_no_node_falls_through() {
+        // `./nope.tsx` with no `nope.tsx` node -> falls through -> candidate_paths -> NotFound.
+        let r = resolve_imports(&inventory(), vec![cand("./nope.tsx")]);
+        assert_eq!(r.resolved.len(), 0);
+        assert_eq!(r.unresolved[0].reason, UnresolvedReason::NotFound);
+    }
+
+    #[test]
+    fn asset_specifier_allowlist() {
+        assert!(is_asset_specifier("./globals.css"));
+        assert!(is_asset_specifier("../assets/logo.svg"));
+        assert!(is_asset_specifier("./fonts/x.woff2"));
+        assert!(!is_asset_specifier("./App.tsx")); // a SOURCE file, not an asset
+        assert!(!is_asset_specifier("./lib/db")); // extensionless
+        assert!(!is_asset_specifier("./data.json")); // .json is DATA, NOT in the allowlist
+        assert!(!is_asset_specifier("./x.weird")); // unknown extension -> never benign
     }
 
     #[test]
