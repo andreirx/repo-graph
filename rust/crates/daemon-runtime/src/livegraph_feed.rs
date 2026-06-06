@@ -1075,6 +1075,168 @@ pub fn module_import_cycles_response(
     })
 }
 
+/// IMPORTS-LIVEGRAPH-CLI-1 (D2/D4/D5): build the `imports --engine livegraph` response -- the
+/// captured/classified import READ-MODEL (EDGES = graph facts; OBSERVATIONS = completeness evidence,
+/// SEPARATED) over [`repo_graph_livegraph::LiveGraph::live_import_view`]. The module-cycle trust signals are
+/// named EXPLICITLY after their SOURCE (the module-cycle certificate / answer), NEVER a generic
+/// import-listing-completeness claim (the ratified wording correction): `module_cycle_completeness` (the
+/// certificate verdict), `module_cycle_answer_class` (the module-cycle answer class), `module_cycle_import_
+/// scope` (the captured-graph universe). D6: `file_filter` `None` -> repo-wide. NO SQLite fallback; NO default
+/// migration. The module-cycle baseline is assembled BEFORE the LiveGraph read lock (no re-entrant locking).
+pub fn imports_view_response(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+    repo_root: &str,
+    include_fixtures: bool,
+    file_filter: Option<&str>,
+) -> Value {
+    use repo_graph_livegraph::module_cycle_cert::evaluate_module_cycle_completeness;
+    // Assemble the module-cycle baseline BEFORE taking the LiveGraph lock (no re-entrant locking). Best-effort:
+    // a SQLite language-inventory error -> None -> the certificate reads `UnknownBaselineMissing` (honest, not
+    // a false completeness claim). REUSES the audit's `build_baseline` (the single policy-versioned assembly).
+    let baseline = repo_state
+        .storage
+        .distinct_file_languages(repo_uid)
+        .ok()
+        .map(|languages| {
+            let discovered =
+                crate::partition_discovery::discover_partition_roots(repo_root, include_fixtures);
+            let expected: std::collections::BTreeSet<String> = discovered
+                .included
+                .iter()
+                .map(|sr| crate::livegraph_refresh::derive_partition_target(repo_root, sr).1)
+                .collect();
+            crate::cycle_completeness_audit::build_baseline(expected, &languages, snapshot_uid).0
+        });
+
+    let guard = repo_state.livegraph.read();
+    let body = match guard.as_ref() {
+        Some(lg) => {
+            let snapshot = lg.module_cycle_live_state();
+            let certificate = evaluate_module_cycle_completeness(&snapshot, baseline.as_ref());
+            let view = lg.live_import_view(file_filter);
+            let env = lg.module_import_cycles();
+            let scope = env
+                .data()
+                .map(module_scope_json)
+                .unwrap_or_else(default_module_scope_json);
+            import_view_body(
+                &view,
+                certificate.as_str(),
+                &format!("{:?}", env.class()),
+                scope,
+                &format!("{:?}", env.freshness()),
+                env.missing_partitions().to_vec(),
+                env.degradation_reasons()
+                    .iter()
+                    .map(|r| format!("{r:?}"))
+                    .collect(),
+            )
+        }
+        None => import_view_body_unavailable(),
+    };
+    drop(guard);
+    // The common header; the `body` (data + trust) is spliced in (avoids a large tuple + header duplication).
+    let mut out = json!({
+        "repo_uid": repo_uid,
+        "display_name": display_name,
+        "snapshot_uid": snapshot_uid,
+        "backend_used": "livegraph",
+        "engine": "livegraph",
+        "file_filter": file_filter,
+        "scope_is_repo_wide": file_filter.is_none(),
+    });
+    if let (Value::Object(out_map), Value::Object(body_map)) = (&mut out, body) {
+        for (k, v) in body_map {
+            out_map.insert(k, v);
+        }
+    }
+    out
+}
+
+/// IMPORTS-LIVEGRAPH-CLI-1 (D2/D4/D5): PURE JSON assembly of the import read-model body -- the SEPARATED
+/// EDGES (facts) + OBSERVATIONS (evidence) + per-class counts + the module-cycle trust fields NAMED after
+/// their source (`module_cycle_completeness` / `module_cycle_answer_class` / `module_cycle_import_scope`),
+/// NEVER a bare `answer_class` / `completeness` that would imply the import LISTING is complete. No
+/// RepoState / no lock -> unit-testable against a hand-built view (the trust-naming invariant is asserted).
+fn import_view_body(
+    view: &repo_graph_livegraph::import_view::LiveImportView,
+    module_cycle_completeness: &str,
+    module_cycle_answer_class: &str,
+    module_cycle_import_scope: Value,
+    freshness: &str,
+    missing_partitions: Vec<String>,
+    degradation_reasons: Vec<String>,
+) -> Value {
+    let mut class_counts: std::collections::BTreeMap<&str, usize> =
+        std::collections::BTreeMap::new();
+    let mut blocking_observations = 0usize;
+    for o in &view.observations {
+        *class_counts.entry(o.class.as_str()).or_default() += 1;
+        if o.blocking {
+            blocking_observations += 1;
+        }
+    }
+    let observation_class_counts: serde_json::Map<String, Value> = class_counts
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), json!(v)))
+        .collect();
+    let edges: Vec<Value> = view
+        .edges
+        .iter()
+        .map(|e| {
+            json!({
+                "src_file": e.src_file,
+                "dst_file": e.dst_file,
+                "basis": e.basis,
+                "raw_specifier": e.raw_specifier,
+            })
+        })
+        .collect();
+    let observations: Vec<Value> = view
+        .observations
+        .iter()
+        .map(|o| {
+            json!({
+                "source_file": o.source_file,
+                "raw_specifier": o.raw_specifier,
+                "class": o.class,
+                "blocking": o.blocking,
+            })
+        })
+        .collect();
+    json!({
+        "edges": edges,
+        "edge_count": edges.len(),
+        "observations": observations,
+        "observation_count": observations.len(),
+        "blocking_observation_count": blocking_observations,
+        "observation_class_counts": observation_class_counts,
+        "module_cycle_completeness": module_cycle_completeness,
+        "module_cycle_answer_class": module_cycle_answer_class,
+        "module_cycle_import_scope": module_cycle_import_scope,
+        "freshness": freshness,
+        "missing_partitions": missing_partitions,
+        "degradation_reasons": degradation_reasons,
+    })
+}
+
+/// The import read-model body when the LiveGraph is not resident (no fallback, D-no-SQLite): empty data +
+/// an explicit Unavailable trust posture (NEVER a faked completeness).
+fn import_view_body_unavailable() -> Value {
+    import_view_body(
+        &repo_graph_livegraph::import_view::LiveImportView::default(),
+        "Unknown",
+        "Unavailable",
+        default_module_scope_json(),
+        "Unavailable",
+        Vec::new(),
+        vec!["LiveGraphUnavailable".to_string()],
+    )
+}
+
 /// One classed module-cycle divergence in the compare report (MODULE-CYCLES-CLI-1 D4=A).
 #[derive(Debug, Serialize)]
 pub struct ModuleDivergenceEntry {
@@ -1267,6 +1429,73 @@ mod tests {
             lg.partition_epoch("synthetic").is_some(),
             "partition resident after preload"
         );
+    }
+
+    #[test]
+    fn import_view_body_names_module_cycle_trust_fields_explicitly() {
+        use repo_graph_livegraph::import_view::{
+            ImportEdgeView, ImportObservationView, LiveImportView,
+        };
+        use serde_json::json;
+        let view = LiveImportView {
+            edges: vec![ImportEdgeView {
+                src_file: "a/src/x.ts".to_string(),
+                dst_file: "a/src/y.ts".to_string(),
+                basis: "AstImport".to_string(),
+                raw_specifier: Some("./y".to_string()),
+            }],
+            observations: vec![
+                ImportObservationView {
+                    source_file: "a/src/x.ts".to_string(),
+                    raw_specifier: "react".to_string(),
+                    class: "ExternalNonLocal".to_string(),
+                    blocking: false,
+                },
+                ImportObservationView {
+                    source_file: "a/src/x.ts".to_string(),
+                    raw_specifier: "@scope/wslocal".to_string(),
+                    class: "WorkspaceLocalUnedgeable".to_string(),
+                    blocking: true,
+                },
+            ],
+        };
+        let body = import_view_body(
+            &view,
+            "IncompleteImportClasses",
+            "Exact",
+            json!({"module_aggregated": true}),
+            "Fresh",
+            vec![],
+            vec![],
+        );
+        // The module-cycle trust fields are NAMED after their source (the ratified wording correction).
+        assert_eq!(body["module_cycle_completeness"], "IncompleteImportClasses");
+        assert_eq!(body["module_cycle_answer_class"], "Exact");
+        assert!(body["module_cycle_import_scope"].is_object());
+        // NEVER a bare answer_class / completeness implying the import LISTING is complete.
+        assert!(body.get("answer_class").is_none(), "no bare answer_class");
+        assert!(body.get("completeness").is_none(), "no bare completeness");
+        // EDGES (facts) + OBSERVATIONS (evidence), separated.
+        assert_eq!(body["edge_count"], 1);
+        assert_eq!(body["edges"][0]["basis"], "AstImport");
+        assert_eq!(body["edges"][0]["src_file"], "a/src/x.ts");
+        assert_eq!(body["observation_count"], 2);
+        assert_eq!(body["blocking_observation_count"], 1);
+        assert_eq!(body["observation_class_counts"]["ExternalNonLocal"], 1);
+        assert_eq!(
+            body["observation_class_counts"]["WorkspaceLocalUnedgeable"],
+            1
+        );
+    }
+
+    #[test]
+    fn import_view_body_unavailable_is_honest() {
+        let body = import_view_body_unavailable();
+        assert_eq!(body["module_cycle_completeness"], "Unknown");
+        assert_eq!(body["module_cycle_answer_class"], "Unavailable");
+        assert_eq!(body["edge_count"], 0);
+        assert_eq!(body["observation_count"], 0);
+        assert_eq!(body["degradation_reasons"][0], "LiveGraphUnavailable");
     }
 
     #[test]

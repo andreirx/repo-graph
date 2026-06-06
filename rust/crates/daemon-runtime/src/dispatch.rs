@@ -1080,16 +1080,16 @@ impl ServiceDispatcher {
     }
 
     fn handle_imports(&self, request: &Request) -> DispatchResult {
-        // REG-1: resolve repo from path/alias and auto-load
-        let (repo_state, repo_uid) = match self.resolve_and_load_repo(&request.params) {
-            Ok(r) => r,
-            Err(e) => return DispatchResult::error(&request.id, e),
-        };
-
-        let file_path = match Self::get_string_param(&request.params, "file") {
-            Ok(f) => f,
-            Err(e) => return DispatchResult::error(&request.id, e),
-        };
+        // REG-1: resolve repo from path/alias and auto-load (display_name for the livegraph feed).
+        let (repo_state, repo_uid, display_name) =
+            match self.resolve_and_load_repo_with_display_name(&request.params) {
+                Ok(r) => r,
+                Err(e) => return DispatchResult::error(&request.id, e),
+            };
+        // IMPORTS-LIVEGRAPH-CLI-1: engine routing. Default `sqlite` = the single-file SQLite import listing
+        // (UNCHANGED). `livegraph` = the captured/classified import read-model (file OPTIONAL -> repo-wide,
+        // D6). No default migration (D3): the CLI must pass `--engine livegraph` EXPLICITLY.
+        let engine = Self::get_optional_string_param(&request.params, "engine").unwrap_or("sqlite");
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
@@ -1109,6 +1109,46 @@ impl ServiceDispatcher {
                     ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
                 );
             }
+        };
+
+        if engine == "livegraph" {
+            // D6: file filter OPTIONAL (None -> repo-wide). repo_root + include_fixtures feed the
+            // module-cycle completeness certificate (the named `module_cycle_*` trust fields).
+            let repo_root = Self::get_optional_string_param(&request.params, "repo")
+                .unwrap_or("")
+                .to_string();
+            let include_fixtures = request
+                .params
+                .get("include_fixtures")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let file_filter = Self::get_optional_string_param(&request.params, "file");
+            return DispatchResult::success(
+                &request.id,
+                crate::livegraph_feed::imports_view_response(
+                    &repo_state,
+                    &repo_uid,
+                    &display_name,
+                    &snapshot.snapshot_uid,
+                    &repo_root,
+                    include_fixtures,
+                    file_filter,
+                ),
+            );
+        }
+        if engine != "sqlite" {
+            return DispatchResult::error(
+                &request.id,
+                ErrorDetail::invalid_request(format!(
+                    "unsupported imports engine: {engine} (expected sqlite|livegraph)"
+                )),
+            );
+        }
+
+        // ---- engine = sqlite (default): the existing single-file SQLite import listing (file REQUIRED). ----
+        let file_path = match Self::get_string_param(&request.params, "file") {
+            Ok(f) => f,
+            Err(e) => return DispatchResult::error(&request.id, e),
         };
 
         // Construct FILE stable key

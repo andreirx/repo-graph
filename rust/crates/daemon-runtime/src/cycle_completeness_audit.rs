@@ -69,8 +69,10 @@ fn index_epoch_from_snapshot(snapshot_uid: &str) -> u64 {
 
 /// Build the [`BaselineInput`] from the discovered TS partition set + the SQLite language inventory + the
 /// snapshot epoch + the policy versions. PURE given its inputs (the SQLite/filesystem reads happen in the
-/// caller, at the boundary). Exposed for the audit response + tests.
-fn build_baseline(
+/// caller, at the boundary). Exposed (`pub(crate)`) for the audit response, the `imports --engine livegraph`
+/// module-cycle completeness field (IMPORTS-LIVEGRAPH-CLI-1), and tests -- the SINGLE baseline assembly (the
+/// policy versions ride here) so the two consumers cannot drift.
+pub(crate) fn build_baseline(
     expected_partition_ids: BTreeSet<String>,
     languages: &[String],
     snapshot_uid: &str,
