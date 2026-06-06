@@ -1,9 +1,13 @@
 # CYCLES-DEFAULT-MIGRATION-1: can `rmap cycles` default become LiveGraph-first?
 
 Slice ID: CYCLES-DEFAULT-MIGRATION-1
-Status: **DEFERRED / NOT READY (ratified 2026-06-04). NOT a build slice.** The decision is recorded below
-(see **Deferral**). The `rmap cycles` default STAYS SQLite. The prerequisite is CYCLES-COMPLETENESS-CERT-1.
-Original spec (the analysis that drove the deferral) preserved below.
+Status: **DEFERRED / NOT READY (ratified 2026-06-04; RE-CONFIRMED by READINESS-2, 2026-06-06). NOT a build
+slice.** The `rmap cycles` default STAYS SQLite. The prerequisite (CYCLES-COMPLETENESS-CERT-1) now EXISTS and
+is PROVEN SAFE -- but CYCLES-DEFAULT-MIGRATION-READINESS-2 measured that ONLY the xpart fixture reaches
+Complete; every real repo falls back (workspace-edge RED / non-TS), so building default-auto today changes
+metadata more than behaviour + frees no SQLite. Re-deferred until at least one REAL repo reaches Complete.
+See `docs/slices/cycles-default-migration-readiness-2.md`. Original spec (the analysis that drove the deferral)
+preserved below.
 
 ## Deferral (ratified 2026-06-04)
 ```text

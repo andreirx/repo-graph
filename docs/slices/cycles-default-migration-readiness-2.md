@@ -1,10 +1,14 @@
 # CYCLES-DEFAULT-MIGRATION-READINESS-2: re-measure default readiness post import-classification
 
 Slice ID: CYCLES-DEFAULT-MIGRATION-READINESS-2
-Status: **MEASURED — YELLOW; awaiting the migration-model ratification (2026-06-06).** The certificate is a
-PROVEN-SAFE predicate (0 extra; no Complete-with-missing across xpart/amodx/hexmanos/zap-engine/repo-graph) ->
-model A (LiveGraph-iff-Complete else labelled SQLite fallback) is BUILDABLE + safe; but ONLY xpart reaches
-Complete, so the benefit is fixture-only today (real repos fall back). See **Findings** + **Verdict**.
+Status: **RATIFIED — YELLOW / SAFE-BUT-LOW-VALUE; default migration DEFERRED (2026-06-06).** D1=A
+(WorkspaceLocalUnedgeable is a HARD blocker -> SQLite fallback). D2=C (STATUS QUO SQLite default). The Complete
+certificate is now PROVEN SAFE (0 extra; no Complete-with-missing across the 5 repos), but ONLY the xpart
+fixture reaches Complete -> building default-auto now changes metadata more than behaviour and does NOT reduce
+the SQLite dependency for any real repo. No decommission value until at least one REAL repo reaches Complete
+(blocked by the RED workspace-edge for amodx; non-TS for repo-graph/others). KEEP: explicit `--engine livegraph
+--kind module-import`; explicit `--engine compare`; the certificate/audit machinery; the SQLite default. See
+**Findings** + **Verdict (ratified)**.
 Recompute `rmap cycles` default-migration
 readiness now that import CLASSIFICATION is complete (every import class precise; the residual is isolated to
 `WorkspaceLocalUnedgeable`). Decide the migration MODEL from a fresh readiness histogram. NO default flip in this
@@ -116,10 +120,12 @@ YELLOW for BENEFIT: ONLY xpart (the fixture) reaches Complete -> model A serves 
 D3 application: repo-graph has missing>0 AND its cert is Incomplete -> fallback REQUIRED (satisfied by model A).
   amodx/hexmanos/zap-engine have missing=0 but Incomplete -> model A conservatively falls back (safe); we do NOT
   infer the no-missing result globally. EXTRA=0 -> the forbidden case is absent. -> model A is RATIFIABLE + SAFE.
-RECOMMENDATION: ratify D1=A (workspace-local -> fallback) + D2=A (AUTO with labelled SQLite fallback) as the safe
-  model, and BUILD it as the un-deferred CYCLES-DEFAULT-MIGRATION (the certificate is the proven predicate) IF
-  the served-by metadata + the xpart-Complete foundation have value; ELSE D2=C (status quo) until a real repo
-  reaches Complete. Either is defensible; the measurement makes A SAFE, not yet HIGH-VALUE.
+RATIFIED (2026-06-06): D1=A (WorkspaceLocalUnedgeable -> hard blocker -> SQLite fallback) + D2=C (STATUS QUO
+  SQLite default). The default migration is DEFERRED: the Complete certificate is proven safe, but only the
+  fixture reaches Complete + every real repo still falls back, so building default-auto now changes metadata
+  more than product behaviour and does NOT reduce the SQLite dependency. No decommission value until at least one
+  REAL repo reaches Complete -> the RED workspace-edge (amodx) / non-TS support (repo-graph/others) is the real
+  blocker. KEEP: explicit `--engine livegraph`/`compare`; the certificate/audit machinery; the SQLite default.
 ```
 
 ## Out of scope (hard guardrails)
