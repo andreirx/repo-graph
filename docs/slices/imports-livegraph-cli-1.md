@@ -1,7 +1,10 @@
 # IMPORTS-LIVEGRAPH-CLI-1: explicit LiveGraph import-query surface
 
 Slice ID: IMPORTS-LIVEGRAPH-CLI-1
-Status: **RATIFIED (D1=A, D2=C, D3=A, D4=C, D5=invariants, D6=C — 2026-06-06). BUILD IN PROGRESS.** Expose the
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-06). D1=A, D2=C, D3=A, D4=C, D5=invariants, D6=C — all ratified.**
+Full gate green; acceptance PASS on xpart (Complete, 2 edges) + amodx (1055 edges all 4 bases; 831 benign
+external + 2 asset as observations; 69 workspace-local blocking; no unknown-package noise) + SQLite default
+unchanged. Commits dfb1998 (spec) -> 352bbdd -> ee4c18a -> 24b727e -> 41a7f22, UNPUSHED. See **Completion**. Expose the
 captured/classified import graph + import evidence ALREADY BUILT (the six import-classification slices) through an
 explicit LiveGraph surface on `rmap imports`. NO default migration (unless separately ratified), NO raw
 decommission, NO SQLite deletion, NO workspace package edge, NO new resolver logic. This is a READ-MODEL /
@@ -206,6 +209,74 @@ rules, NO module-level cycle re-derivation (that is `cycles`).
 5. live + gate + completion doc.
 Stop if: the per-observation labels CANNOT reproduce the summary booleans (would mean a hidden rule) -> surface
   before proceeding. Stop if D6 repo-wide output proves to need a new traversal not already materialised.
+```
+
+## Completion (IMPLEMENTED + LIVE-VALIDATED 2026-06-06, EXECUTED)
+
+Commits: `dfb1998` (spec) -> `352bbdd` (1/N labeller) -> `ee4c18a` (2/N read-model) -> `24b727e` (3/N daemon)
+-> `41a7f22` (4/N CLI). UNPUSHED (await the "push" instruction).
+
+### What landed (per layer)
+```text
+1/N livegraph: classify_observation -> module_cycle_cert::ObservationClass labeller (GAP-A); the summary is a
+    FOLD over labels. Equivalence gate test (fold == verbatim pre-refactor arms) + is_blocking/evaluator lockstep
+    test. classify_relative DRY. NO rule change (behaviour-preserving extraction).
+2/N livegraph: import_view.rs DTOs + LiveGraph::live_import_view (EDGES = intra AstImport UNION xpart overlay,
+    preserving basis + specifier; OBSERVATIONS = the non-edge labels). classified_observations = ONE pass shared
+    by the cert summary + the read-model (cannot diverge). 3 tests (overlay edges, intra edge, D5 + filter).
+3/N daemon: handle_imports engine routing (sqlite default UNCHANGED; livegraph file OPTIONAL). imports_view_
+    response + the PURE import_view_body (unit-tested trust-naming). build_baseline reused (pub(crate)). The
+    module-cycle trust is NAMED after its source (module_cycle_completeness / _answer_class / _import_scope).
+4/N CLI: run_imports --engine routing; LivegraphImportsResponse compact renderer (benign suppressed repo-wide,
+    listed when file-filtered). 3 renderer tests.
+```
+
+### Gate (EXECUTED 2026-06-06)
+```text
+cargo test --workspace -> all ok, 0 failed. cargo clippy --workspace --all-targets -- -D warnings -> clean.
+cargo fmt --all -- --check -> clean.
+```
+
+### Live validation (EXECUTED 2026-06-06) -- daemon: the freshly-built release rmapd run MANUALLY with
+`RMAP_SCIP_TYPESCRIPT` (the launchd service carries no producer env), repos loaded via `livegraph-refresh
+--all-discovered`.
+```text
+ACCEPTANCE 1 -- xpart `imports --engine livegraph`: edge_count=2 (packages/a/src/main.ts <-> packages/b/src/
+  foo.ts, basis AstImportFileInventoryResolved); observation_count=0; module_cycle_completeness=
+  CompleteForModuleImportCycles; answer_class=Exact.                                                    PASS.
+ACCEPTANCE 2 -- amodx `imports --engine livegraph`: edge_count=1055 across ALL 4 bases (AstImport intra,
+  AstImportFileInventoryResolved xpart, AstImportTsconfigPathResolved alias, AstDynamicImportResolved dynamic);
+  observation_class_counts = {ExternalNonLocal:831 (benign), AssetNonRelevant:2 (benign),
+  WorkspaceLocalUnedgeable:69 (blocking)}; blocking_observation_count=69 (== workspace-local only); NO
+  UnresolvedPackage (zero unknown-package noise); module_cycle_completeness=IncompleteImportClasses; Exact.
+  D5: the 831 external + 2 asset are OBSERVATIONS, never edges. Matches READINESS-2's amodx picture exactly. PASS.
+  file-filtered (MediaPicker.tsx): 2 tsconfig-alias edges + 3 observations (react/lucide-react benign LISTED,
+  @amodx/shared BLOCKING) -- file mode lists benign (rule 4).                                            PASS.
+ACCEPTANCE 3 -- SQLite default UNCHANGED: `imports <file>` -> {file, imports, count} (old shape); `imports
+  --engine sqlite` without a file rejects (required-file contract).                                      PASS.
+```
+
+### Acceptance (the ratified list) -- PASS
+```text
+1. xpart resolved FILE->FILE edges.                                                                      PASS.
+2. amodx resolved relative/alias/dynamic edges; benign external/assets observations-only; workspace-local
+   blocking; no unknown-package noise.                                                                   PASS.
+3. SQLite default unchanged.                                                                             PASS.
+4. No default flip; no decommission; no SQLite deletion; no workspace-package edge; no new resolver logic. PASS.
+```
+
+### Divergences / notes (recorded)
+```text
+- The daemon response builder (imports_view_response) is NOT RepoState-unit-tested (no RepoState harness exists;
+  the sibling module_import_cycles_response is likewise live-only). MITIGATED: the PURE import_view_body is
+  unit-tested (trust-naming + shape) and the end-to-end is live-validated. Consistent with the existing pattern.
+- build_baseline raised to pub(crate) (the single policy-versioned assembly); imports_view_response inlines the
+  discover + languages orchestration (~5 lines) shared with the audit -- the correctness-critical core
+  (build_baseline) is shared, so no policy-version drift. Minor orchestration duplication accepted (refactoring
+  the audit to share it would lose the audit's intermediates).
+- LIVE-VALIDATION DAEMON STATE: the launchd-managed daemon was `launchctl bootout`-ed (its env has no producer)
+  and a MANUAL release rmapd was started with the producer env (the ratified pattern). To restore the standard
+  launchd-managed daemon, re-run `./scripts/dev-install-local.sh`.
 ```
 
 ## References
