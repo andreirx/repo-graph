@@ -1,7 +1,11 @@
 # CYCLES-DEFAULT-MIGRATION-READINESS-2: re-measure default readiness post import-classification
 
 Slice ID: CYCLES-DEFAULT-MIGRATION-READINESS-2
-Status: **SPEC + MEASUREMENT — awaiting ratification (2026-06-06).** Recompute `rmap cycles` default-migration
+Status: **MEASURED — YELLOW; awaiting the migration-model ratification (2026-06-06).** The certificate is a
+PROVEN-SAFE predicate (0 extra; no Complete-with-missing across xpart/amodx/hexmanos/zap-engine/repo-graph) ->
+model A (LiveGraph-iff-Complete else labelled SQLite fallback) is BUILDABLE + safe; but ONLY xpart reaches
+Complete, so the benefit is fixture-only today (real repos fall back). See **Findings** + **Verdict**.
+Recompute `rmap cycles` default-migration
 readiness now that import CLASSIFICATION is complete (every import class precise; the residual is isolated to
 `WorkspaceLocalUnedgeable`). Decide the migration MODEL from a fresh readiness histogram. NO default flip in this
 spec, NO raw decommission, NO workspace package edge, NO heuristic source target, NO deletion.
@@ -77,12 +81,45 @@ Capture per repo: certificate; {has_workspace_local_unedgeable, has_unresolved_a
 
 ## Findings (EXECUTED 2026-06-06)
 ```text
-<< filled by the measurement run below >>
+REPO        CERTIFICATE                    BLOCKING FLAGS                  SQLITE/LG/MATCHED/MISSING/EXTRA
+xpart       CompleteForModuleImportCycles  --                             1 / 1 / 1 / 0 / 0   EXACT
+amodx       IncompleteImportClasses        workspace_local_unedgeable     3 / 3 / 3 / 0 / 0   EXACT
+hexmanos    IncompleteUnsupportedLanguage  unresolved_package*            1 / 1 / 1 / 0 / 0   EXACT
+zap-engine  IncompleteUnsupportedLanguage  alias_U,dynamic_U,unres_rel*   1 / 1 / 1 / 0 / 0   EXACT
+repo-graph  IncompleteUnsupportedLanguage  -- (language precedes)         6 / 5 / 5 / 1 / 0   MISSING=1
+  *hexmanos/zap-engine: language precedence fires (non-TS present) BEFORE the import-class flags; the flags are
+   shown for the histogram but the cert reason is UnsupportedLanguage.
+  repo-graph MISSING=1 -> `MissingDueToUnloadedOrNonTsPartition`: the cycle is the nested xpart FIXTURE's
+   packages/a/src <-> packages/b/src -- correctly EXCLUDED from repo-graph's partitions (ENUMERATION-1 fixture
+   policy), but SQLite indexes it -> the compare flags it. The cert (Incomplete) correctly forces fallback.
+
+THREE decisive facts:
+1. EXTRA = 0 in EVERY repo. The FORBIDDEN over-claim (a LiveGraph cycle SQLite lacks) NEVER occurs.
+2. The CERTIFICATE IS A SAFE PREDICATE: Complete -> EXACT (xpart). Incomplete -> EXACT (amodx/hexmanos/
+   zap-engine, CONSERVATIVE) OR missing>0 (repo-graph). NEVER Complete-with-missing -> serving LiveGraph only on
+   Complete can NEVER lose a SQLite cycle.
+3. amodx (the WorkspaceLocalUnedgeable case) is EXACT (missing=0): the unedgeable workspace imports do NOT close
+   any SQLite module cycle the LiveGraph misses IN THE MEASURED SET. So WorkspaceLocalUnedgeable is CONSERVATIVE
+   here (the cert blocks; the LiveGraph happens to be exact) -- safe, not proven-necessary, NOT inferable globally.
 ```
 
-## Verdict
+## Verdict — YELLOW (safe predicate proven; benefit still fixture-only)
 ```text
-<< GREEN / YELLOW / RED, from the Findings + D3 >>
+GREEN for SAFETY: the certificate is a PROVEN-SAFE migration predicate -- model A (serve LiveGraph iff Complete,
+  else labelled SQLite fallback) loses NO cycle in the measured set (0 extra; no Complete-with-missing). This is
+  the predicate READINESS-1 LACKED -> the deferred CYCLES-DEFAULT-MIGRATION-1 is now BUILDABLE + safe.
+YELLOW for BENEFIT: ONLY xpart (the fixture) reaches Complete -> model A serves LiveGraph for xpart ALONE; every
+  real repo falls back to SQLite (amodx: workspace-local RED; hexmanos/zap-engine/repo-graph: non-TS). So model A
+  today is a SAFE RELABEL (`backend_used`) with NO decommission win for real repos -- SQLite is still read every
+  real-repo call. The decommission value awaits a real repo reaching Complete: the RED workspace-edge (amodx) or
+  non-TS support (the others).
+D3 application: repo-graph has missing>0 AND its cert is Incomplete -> fallback REQUIRED (satisfied by model A).
+  amodx/hexmanos/zap-engine have missing=0 but Incomplete -> model A conservatively falls back (safe); we do NOT
+  infer the no-missing result globally. EXTRA=0 -> the forbidden case is absent. -> model A is RATIFIABLE + SAFE.
+RECOMMENDATION: ratify D1=A (workspace-local -> fallback) + D2=A (AUTO with labelled SQLite fallback) as the safe
+  model, and BUILD it as the un-deferred CYCLES-DEFAULT-MIGRATION (the certificate is the proven predicate) IF
+  the served-by metadata + the xpart-Complete foundation have value; ELSE D2=C (status quo) until a real repo
+  reaches Complete. Either is defensible; the measurement makes A SAFE, not yet HIGH-VALUE.
 ```
 
 ## Out of scope (hard guardrails)
