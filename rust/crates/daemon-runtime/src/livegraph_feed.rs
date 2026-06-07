@@ -1237,6 +1237,139 @@ fn import_view_body_unavailable() -> Value {
     )
 }
 
+/// IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1 (D2/D6): the PURE per-file directional-compare sidecar. EDGE
+/// EQUIVALENCE is DIRECTIONAL no-loss -- every SQLite resolved-local target must appear in the LiveGraph edge
+/// targets (a LiveGraph edge SQLite lacks is an IMPROVEMENT, not a failure). The D3 PRECONDITION (resident +
+/// Fresh + TS-primary) gates the verdict: unmet -> `FallbackPreconditionUnmet` (SQLite is the sole source);
+/// met + a missing SQLite import -> `Regression` (the dangerous case the measurement hunts); met + no loss ->
+/// `NoLossEquivalent` / `NoLossLivegraphSuperset`. No RepoState / no lock -> unit-testable.
+fn imports_compare_sidecar(
+    sqlite_resolved_targets: &[String],
+    view: &repo_graph_livegraph::import_view::LiveImportView,
+    precondition: Option<&repo_graph_livegraph::import_view::FilePartitionStatus>,
+) -> Value {
+    let lg_edge_targets: std::collections::BTreeSet<&str> =
+        view.edges.iter().map(|e| e.dst_file.as_str()).collect();
+    let sqlite_set: std::collections::BTreeSet<&str> =
+        sqlite_resolved_targets.iter().map(|s| s.as_str()).collect();
+    let matched: Vec<&str> = sqlite_set
+        .iter()
+        .filter(|t| lg_edge_targets.contains(*t))
+        .copied()
+        .collect();
+    let missing_in_livegraph: Vec<&str> = sqlite_set
+        .iter()
+        .filter(|t| !lg_edge_targets.contains(*t))
+        .copied()
+        .collect();
+    let extra_livegraph_edges: Vec<Value> = view
+        .edges
+        .iter()
+        .filter(|e| !sqlite_set.contains(e.dst_file.as_str()))
+        .map(|e| {
+            json!({
+                "dst_file": e.dst_file,
+                "basis": e.basis,
+                "raw_specifier": e.raw_specifier,
+            })
+        })
+        .collect();
+    let blocking_observations: Vec<Value> = view
+        .observations
+        .iter()
+        .filter(|o| o.blocking)
+        .map(|o| {
+            json!({
+                "source_file": o.source_file,
+                "raw_specifier": o.raw_specifier,
+                "class": o.class,
+            })
+        })
+        .collect();
+    let precondition_met = precondition.is_some_and(|p| p.precondition_met());
+    // D3 verdict: the precondition GATES -- an unmet precondition is a fallback, NEVER a regression (a non-TS /
+    // non-resident file legitimately has no LiveGraph data; that is the language gate, not a loss).
+    let status = if !precondition_met {
+        "FallbackPreconditionUnmet"
+    } else if !missing_in_livegraph.is_empty() {
+        "Regression"
+    } else if !extra_livegraph_edges.is_empty() {
+        "NoLossLivegraphSuperset"
+    } else {
+        "NoLossEquivalent"
+    };
+    json!({
+        "status": status,
+        "precondition": precondition.map(|p| {
+            json!({
+                "partition": p.partition_id,
+                "resident": p.resident,
+                "fresh": p.fresh,
+                "ts_primary": p.ts_primary,
+                "precondition_met": p.precondition_met(),
+            })
+        }),
+        "matched": matched,
+        "missing_in_livegraph": missing_in_livegraph,
+        "extra_livegraph_edges": extra_livegraph_edges,
+        "blocking_observations": blocking_observations,
+        "sqlite_resolved_local_count": sqlite_set.len(),
+        "livegraph_edge_count": view.edges.len(),
+    })
+}
+
+/// IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1 (D6): build the `imports --engine compare <file>` response. SQLite is
+/// PRIMARY (the existing `{file, imports, count}`, byte-compatible -- D5); the directional compare rides as a
+/// `comparison` SIDECAR. READ-ONLY; NO default change; NO fallback flip (this MEASURES the per-file gate). The
+/// LiveGraph view + the D3 precondition are read under ONE lock.
+pub fn imports_compare_response(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    snapshot_uid: &str,
+    file_path: &str,
+) -> Value {
+    // SQLite PRIMARY (the existing per-file listing -- unchanged shape).
+    let file_stable_key = format!("{repo_uid}:{file_path}:FILE");
+    let imports = repo_state
+        .storage
+        .find_imports(snapshot_uid, &file_stable_key)
+        .unwrap_or_default();
+    // The SQLite RESOLVED-LOCAL subset (D2): kind=FILE, NOT external, resolution=static, a target file path.
+    let sqlite_resolved_targets: Vec<String> = imports
+        .iter()
+        .filter(|r| {
+            r.kind == "FILE"
+                && r.subtype.as_deref() != Some("EXTERNAL")
+                && r.resolution.as_deref() == Some("static")
+                && !r.file.is_empty()
+        })
+        .map(|r| r.file.clone())
+        .collect();
+    // LiveGraph view + the D3 precondition (ONE lock).
+    let guard = repo_state.livegraph.read();
+    let (view, precondition) = match guard.as_ref() {
+        Some(lg) => (
+            lg.live_import_view(Some(file_path)),
+            lg.file_partition_status(file_path),
+        ),
+        None => (
+            repo_graph_livegraph::import_view::LiveImportView::default(),
+            None,
+        ),
+    };
+    drop(guard);
+    let comparison =
+        imports_compare_sidecar(&sqlite_resolved_targets, &view, precondition.as_ref());
+    json!({
+        "file": file_path,
+        "imports": imports,
+        "count": imports.len(),
+        "backend_used": "sqlite",
+        "engine": "compare",
+        "comparison": comparison,
+    })
+}
+
 /// One classed module-cycle divergence in the compare report (MODULE-CYCLES-CLI-1 D4=A).
 #[derive(Debug, Serialize)]
 pub struct ModuleDivergenceEntry {
@@ -1496,6 +1629,57 @@ mod tests {
         assert_eq!(body["edge_count"], 0);
         assert_eq!(body["observation_count"], 0);
         assert_eq!(body["degradation_reasons"][0], "LiveGraphUnavailable");
+    }
+
+    #[test]
+    fn imports_compare_sidecar_directional_verdicts() {
+        use repo_graph_livegraph::import_view::{
+            FilePartitionStatus, ImportEdgeView, LiveImportView,
+        };
+        let met = FilePartitionStatus {
+            partition_id: "app".to_string(),
+            resident: true,
+            fresh: true,
+            ts_primary: true,
+        };
+        let edge = |dst: &str, basis: &str| ImportEdgeView {
+            src_file: "app/src/x.ts".to_string(),
+            dst_file: dst.to_string(),
+            basis: basis.to_string(),
+            raw_specifier: None,
+        };
+        // NoLossEquivalent: SQLite {y.ts} == LiveGraph edge {y.ts}.
+        let view = LiveImportView {
+            edges: vec![edge("app/src/y.ts", "AstImport")],
+            observations: vec![],
+        };
+        let s = imports_compare_sidecar(&["app/src/y.ts".to_string()], &view, Some(&met));
+        assert_eq!(s["status"], "NoLossEquivalent");
+        assert_eq!(s["matched"][0], "app/src/y.ts");
+        assert_eq!(s["missing_in_livegraph"].as_array().unwrap().len(), 0);
+        // NoLossLivegraphSuperset: LiveGraph has an extra alias edge SQLite lacks.
+        let view2 = LiveImportView {
+            edges: vec![
+                edge("app/src/y.ts", "AstImport"),
+                edge("app/src/z.ts", "AstImportTsconfigPathResolved"),
+            ],
+            observations: vec![],
+        };
+        let s2 = imports_compare_sidecar(&["app/src/y.ts".to_string()], &view2, Some(&met));
+        assert_eq!(s2["status"], "NoLossLivegraphSuperset");
+        assert_eq!(s2["extra_livegraph_edges"][0]["dst_file"], "app/src/z.ts");
+        // Regression: SQLite has y.ts but the (precondition-met) LiveGraph lacks it -- a real loss.
+        let empty = LiveImportView {
+            edges: vec![],
+            observations: vec![],
+        };
+        let s3 = imports_compare_sidecar(&["app/src/y.ts".to_string()], &empty, Some(&met));
+        assert_eq!(s3["status"], "Regression");
+        assert_eq!(s3["missing_in_livegraph"][0], "app/src/y.ts");
+        // FallbackPreconditionUnmet: no resident TS partition -> fallback, NEVER a regression (the language gate).
+        let s4 = imports_compare_sidecar(&["app/src/y.ts".to_string()], &empty, None);
+        assert_eq!(s4["status"], "FallbackPreconditionUnmet");
+        assert!(s4["precondition"].is_null());
     }
 
     #[test]

@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 // ── Response Types ───────────────────────────────────────────────────────────
 
 /// An import edge in the response.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct ImportEntry {
     #[serde(default)]
     pub node_id: String,
@@ -239,6 +239,155 @@ impl LivegraphImportsResponse {
     }
 }
 
+// ── IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1: the `imports --engine compare` response (D6) ────────
+
+/// A LiveGraph edge SQLite lacks (an improvement) in the compare sidecar.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CompareExtraEdge {
+    #[serde(default)]
+    pub dst_file: String,
+    #[serde(default)]
+    pub basis: String,
+    #[serde(default)]
+    pub raw_specifier: Option<String>,
+}
+
+/// A blocking LiveGraph observation reported by the compare sidecar.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CompareBlockingObs {
+    #[serde(default)]
+    pub raw_specifier: String,
+    #[serde(default)]
+    pub class: String,
+}
+
+/// The D3 precondition (the file's partition residency) in the compare sidecar.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ComparePrecondition {
+    #[serde(default)]
+    pub partition: String,
+    #[serde(default)]
+    pub resident: bool,
+    #[serde(default)]
+    pub fresh: bool,
+    #[serde(default)]
+    pub ts_primary: bool,
+    #[serde(default)]
+    pub precondition_met: bool,
+}
+
+/// The directional-compare sidecar (SQLite-vs-LiveGraph) for one file.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ImportsComparison {
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub matched: Vec<String>,
+    #[serde(default)]
+    pub missing_in_livegraph: Vec<String>,
+    #[serde(default)]
+    pub extra_livegraph_edges: Vec<CompareExtraEdge>,
+    #[serde(default)]
+    pub blocking_observations: Vec<CompareBlockingObs>,
+    #[serde(default)]
+    pub sqlite_resolved_local_count: usize,
+    #[serde(default)]
+    pub livegraph_edge_count: usize,
+    #[serde(default)]
+    pub precondition: Option<ComparePrecondition>,
+}
+
+/// The `imports <file> --engine compare` response: the SQLite listing (PRIMARY) + the directional-compare
+/// sidecar. The SQLite part renders byte-compatibly with the default; the compare summary follows.
+#[derive(Debug, Deserialize)]
+pub struct ImportsCompareResponse {
+    #[serde(default)]
+    pub file: String,
+    #[serde(default)]
+    pub imports: Vec<ImportEntry>,
+    #[serde(default)]
+    pub comparison: ImportsComparison,
+}
+
+impl ImportsCompareResponse {
+    /// Render the SQLite listing (primary, default-compatible) then the directional-compare summary.
+    pub fn render_human(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!("Imports: {}\n\n", self.file));
+        let count = self.imports.len();
+        out.push_str(&format!(
+            "{} import{}\n",
+            count,
+            if count == 1 { "" } else { "s" }
+        ));
+        if !self.imports.is_empty() {
+            out.push('\n');
+            for imp in &self.imports {
+                let resolution = if imp.resolution.is_empty() {
+                    "-"
+                } else {
+                    &imp.resolution
+                };
+                out.push_str(&format!(
+                    "  {}  depth={}  {}\n",
+                    imp.symbol, imp.depth, resolution
+                ));
+            }
+        }
+        // ── Compare summary (the sidecar) ──
+        let c = &self.comparison;
+        out.push_str(&format!("\nCompare (sqlite vs livegraph): {}\n", c.status));
+        match &c.precondition {
+            Some(p) => out.push_str(&format!(
+                "  precondition: partition={} resident={} fresh={} ts={} -> met={}\n",
+                p.partition, p.resident, p.fresh, p.ts_primary, p.precondition_met
+            )),
+            None => out.push_str(
+                "  precondition: no resident TS partition for this file -> SQLite fallback\n",
+            ),
+        }
+        out.push_str(&format!(
+            "  sqlite resolved-local={}  livegraph edges={}  matched={}\n",
+            c.sqlite_resolved_local_count,
+            c.livegraph_edge_count,
+            c.matched.len()
+        ));
+        if !c.missing_in_livegraph.is_empty() {
+            out.push_str(&format!(
+                "  MISSING in livegraph (REGRESSIONS): {}\n",
+                c.missing_in_livegraph.len()
+            ));
+            for m in &c.missing_in_livegraph {
+                out.push_str(&format!("    - {m}\n"));
+            }
+        }
+        if !c.extra_livegraph_edges.is_empty() {
+            out.push_str(&format!(
+                "  extra livegraph edges (improvements): {}\n",
+                c.extra_livegraph_edges.len()
+            ));
+            for e in &c.extra_livegraph_edges {
+                let spec = e
+                    .raw_specifier
+                    .as_deref()
+                    .map(|s| format!(" \"{s}\""))
+                    .unwrap_or_default();
+                out.push_str(&format!("    + {} [{}]{}\n", e.dst_file, e.basis, spec));
+            }
+        }
+        if !c.blocking_observations.is_empty() {
+            out.push_str(&format!(
+                "  blocking observations: {}\n",
+                c.blocking_observations.len()
+            ));
+            for o in &c.blocking_observations {
+                out.push_str(&format!("    ! {} [{}]\n", o.raw_specifier, o.class));
+            }
+        }
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,5 +576,79 @@ mod tests {
         // file-filtered -> the benign external is listed too.
         assert!(out.contains("react"));
         assert!(out.contains("[ExternalNonLocal] benign"));
+    }
+
+    #[test]
+    fn compare_render_shows_sqlite_listing_and_summary() {
+        let r = ImportsCompareResponse {
+            file: "app/src/x.ts".to_string(),
+            imports: vec![ImportEntry {
+                symbol: "app/src/y.ts".to_string(),
+                resolution: "static".to_string(),
+                depth: 1,
+                ..Default::default()
+            }],
+            comparison: ImportsComparison {
+                status: "NoLossLivegraphSuperset".to_string(),
+                matched: vec!["app/src/y.ts".to_string()],
+                missing_in_livegraph: vec![],
+                extra_livegraph_edges: vec![CompareExtraEdge {
+                    dst_file: "app/src/z.ts".to_string(),
+                    basis: "AstImportTsconfigPathResolved".to_string(),
+                    raw_specifier: Some("@/z".to_string()),
+                }],
+                blocking_observations: vec![CompareBlockingObs {
+                    raw_specifier: "@scope/wslocal".to_string(),
+                    class: "WorkspaceLocalUnedgeable".to_string(),
+                }],
+                sqlite_resolved_local_count: 1,
+                livegraph_edge_count: 2,
+                precondition: Some(ComparePrecondition {
+                    partition: "app".to_string(),
+                    resident: true,
+                    fresh: true,
+                    ts_primary: true,
+                    precondition_met: true,
+                }),
+            },
+        };
+        let out = r.render_human();
+        // SQLite listing PRIMARY (default-compatible).
+        assert!(out.contains("Imports: app/src/x.ts"));
+        assert!(out.contains("1 import"));
+        assert!(out.contains("app/src/y.ts"));
+        // compare summary.
+        assert!(out.contains("Compare (sqlite vs livegraph): NoLossLivegraphSuperset"));
+        assert!(out.contains("precondition: partition=app"));
+        assert!(out.contains("extra livegraph edges (improvements): 1"));
+        assert!(out.contains("+ app/src/z.ts [AstImportTsconfigPathResolved]"));
+        assert!(out.contains("blocking observations: 1"));
+        assert!(out.contains("@scope/wslocal"));
+    }
+
+    #[test]
+    fn compare_render_regression_is_loud() {
+        let r = ImportsCompareResponse {
+            file: "app/src/x.ts".to_string(),
+            imports: vec![],
+            comparison: ImportsComparison {
+                status: "Regression".to_string(),
+                missing_in_livegraph: vec!["app/src/lost.ts".to_string()],
+                sqlite_resolved_local_count: 1,
+                livegraph_edge_count: 0,
+                precondition: Some(ComparePrecondition {
+                    partition: "app".to_string(),
+                    resident: true,
+                    fresh: true,
+                    ts_primary: true,
+                    precondition_met: true,
+                }),
+                ..Default::default()
+            },
+        };
+        let out = r.render_human();
+        assert!(out.contains("Compare (sqlite vs livegraph): Regression"));
+        assert!(out.contains("MISSING in livegraph (REGRESSIONS): 1"));
+        assert!(out.contains("- app/src/lost.ts"));
     }
 }

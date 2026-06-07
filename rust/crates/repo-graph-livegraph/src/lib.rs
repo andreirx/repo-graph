@@ -1512,6 +1512,34 @@ impl LiveGraph {
             observations,
         }
     }
+
+    /// IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1 (D3 precondition): the residency status of the partition that OWNS
+    /// `file_path` (its repo-relative path) -- the RESIDENT slot whose IR contains the file's `AstFileScope`
+    /// FILE node. `None` if the file is not in any resident partition (non-resident / unknown -> precondition
+    /// unmet -> SQLite fallback). A found-but-stale or found-but-non-TS partition returns the status with
+    /// `fresh` / `ts_primary` = false (the precondition fails on that axis). Pure read.
+    pub fn file_partition_status(
+        &self,
+        file_path: &str,
+    ) -> Option<import_view::FilePartitionStatus> {
+        for (id, s) in &self.slots {
+            if let Some(ir) = &s.ir {
+                let has_file = ir.nodes.iter().any(|n| {
+                    n.identity_source == IdentitySource::AstFileScope
+                        && file_key_path(n.key.as_str()) == Some(file_path)
+                });
+                if has_file {
+                    return Some(import_view::FilePartitionStatus {
+                        partition_id: id.clone(),
+                        resident: true,
+                        fresh: status_freshness(s.status) == FreshnessState::Fresh,
+                        ts_primary: matches!(s.language, LanguageSupport::TypeScriptPrimary),
+                    });
+                }
+            }
+        }
+        None
+    }
 }
 
 /// IMPORTS-LIVEGRAPH-CLI-1 (GAP-A): classify ONE import observation into its [`module_cycle_cert::
@@ -3396,5 +3424,46 @@ mod tests {
             .live_import_view(Some("other.ts"))
             .observations
             .is_empty());
+    }
+
+    #[test]
+    fn file_partition_status_reports_residency_and_precondition() {
+        let app = ir_pkg(
+            "app",
+            Some("@app/x"),
+            &[],
+            vec![file_node("repo:app/src/main.ts:FILE")],
+            vec![],
+            vec![],
+        );
+        let mut lg = LiveGraph::new();
+        lg.load_partition("app", app, LanguageSupport::TypeScriptPrimary);
+        // resident TS file -> precondition met.
+        let st = lg
+            .file_partition_status("app/src/main.ts")
+            .expect("file found");
+        assert_eq!(st.partition_id, "app");
+        assert!(st.resident && st.fresh && st.ts_primary);
+        assert!(st.precondition_met());
+        // unknown file -> None (precondition unmet).
+        assert!(lg.file_partition_status("app/src/nope.ts").is_none());
+        // a NON-TS partition -> ts_primary false -> precondition fails (the language gate).
+        let cpp = ir_pkg(
+            "cpp",
+            None,
+            &[],
+            vec![file_node("repo:cpp/main.cpp:FILE")],
+            vec![],
+            vec![],
+        );
+        lg.load_partition("cpp", cpp, LanguageSupport::CppGuarded);
+        let cst = lg.file_partition_status("cpp/main.cpp").expect("found");
+        assert!(!cst.ts_primary);
+        assert!(!cst.precondition_met());
+        // a STALE partition -> fresh false -> precondition fails.
+        lg.mark_stale("app");
+        let sst = lg.file_partition_status("app/src/main.ts").expect("found");
+        assert!(!sst.fresh);
+        assert!(!sst.precondition_met());
     }
 }

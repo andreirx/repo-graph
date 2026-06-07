@@ -52,6 +52,30 @@ pub struct LiveImportView {
     pub observations: Vec<ImportObservationView>,
 }
 
+/// IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1 (D3 precondition): the residency status of the partition that OWNS a
+/// given file in the LiveGraph -- the language/residency GATE for whether the default could serve LiveGraph for
+/// that file. Produced by [`crate::LiveGraph::file_partition_status`]; `None` there means the file is NOT in any
+/// resident TS partition (non-resident / unknown) -> the precondition is UNMET -> SQLite fallback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilePartitionStatus {
+    /// The partition id owning the file.
+    pub partition_id: String,
+    /// The partition is RESIDENT (its IR is loaded). Always true when returned (the search is over resident IRs).
+    pub resident: bool,
+    /// The partition is Fresh (not stale / refresh-failed).
+    pub fresh: bool,
+    /// The partition is TypeScript-primary (the only language the LiveGraph import view covers).
+    pub ts_primary: bool,
+}
+
+impl FilePartitionStatus {
+    /// The D3 precondition: resident AND Fresh AND TS-primary. Only then could the default serve LiveGraph for
+    /// this file (else SQLite is the sole / authoritative source).
+    pub fn precondition_met(&self) -> bool {
+        self.resident && self.fresh && self.ts_primary
+    }
+}
+
 /// Stable string for an IMPORT edge's [`EdgeBasis`] (the read-model's JSON contract). Import edges only ever
 /// carry the four import bases (intra `AstImport`; overlay relative / tsconfig-alias / dynamic); any other
 /// basis (a call / reference) never appears on an import edge and maps to `"Other"`.

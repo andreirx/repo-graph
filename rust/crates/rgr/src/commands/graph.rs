@@ -744,7 +744,7 @@ pub fn run_imports(args: &[String]) -> ExitCode {
     } else {
         engine_raw.as_str()
     };
-    let usage = "usage: rmap imports [<file>] [--engine sqlite|livegraph] [--json]";
+    let usage = "usage: rmap imports [<file>] [--engine sqlite|livegraph|compare] [--json]";
 
     // Parse --json + the optional positional <file> from the remaining args.
     let mut json_mode = false;
@@ -792,8 +792,17 @@ pub fn run_imports(args: &[String]) -> ExitCode {
             }
             p
         }
+        "compare" => {
+            // IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1 (D6/D1): per-file SQLite-vs-LiveGraph compare; file REQUIRED.
+            if positional.len() != 1 {
+                eprintln!("error: the compare engine requires exactly one <file>");
+                eprintln!("{usage}");
+                return ExitCode::from(1);
+            }
+            serde_json::json!({ "repo": repo_path, "engine": "compare", "file": positional[0] })
+        }
         other => {
-            eprintln!("error: unknown --engine '{other}' (supported: sqlite, livegraph)");
+            eprintln!("error: unknown --engine '{other}' (supported: sqlite, livegraph, compare)");
             return ExitCode::from(1);
         }
     };
@@ -820,6 +829,19 @@ pub fn run_imports(args: &[String]) -> ExitCode {
             } else if engine == "livegraph" {
                 use crate::presentation::imports::LivegraphImportsResponse;
                 match serde_json::from_value::<LivegraphImportsResponse>(result) {
+                    Ok(response) => {
+                        print!("{}", response.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse imports response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
+            } else if engine == "compare" {
+                // IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1 (D6): SQLite listing PRIMARY + the compare summary.
+                use crate::presentation::imports::ImportsCompareResponse;
+                match serde_json::from_value::<ImportsCompareResponse>(result) {
                     Ok(response) => {
                         print!("{}", response.render_human());
                         ExitCode::SUCCESS
