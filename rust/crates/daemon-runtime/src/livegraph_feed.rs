@@ -1050,24 +1050,13 @@ pub fn file_import_cycles_response(
 /// (MODULE-CYCLES-CLI-1 D2). The member `name` is the MODULE PATH (e.g. `packages/a/src`), NOT a short
 /// name — so the human + compare are unambiguous (SQLite's short-name `src`/`src` collision is what we avoid).
 fn module_import_cycles_json(answer: &ModuleImportCyclesAnswer) -> Vec<Value> {
-    answer
-        .cycles
-        .iter()
-        .map(|c| {
-            let nodes: Vec<Value> = c
-                .members
-                .iter()
-                .map(|m| {
-                    json!({
-                        "node_id": m,
-                        "name": m,
-                        "file": Value::Null,
-                    })
-                })
-                .collect();
-            json!({ "nodes": nodes })
-        })
-        .collect()
+    // CYCLES-OUTPUT-CONTRACT-1 (D1=B/D2=B, step 3): the LiveGraph module cycles share the SAME canonical,
+    // qualified, deterministically-ordered output as the SQLite default (`cycle_output`), so the two render
+    // byte-identically for the same cycle SET (the precondition for the deferred cycles fastpath). Members ARE
+    // the qualified dirname module identities; the adapter sets node_id = qualified_name = member, name =
+    // basename(member).
+    let cycles: Vec<Vec<String>> = answer.cycles.iter().map(|c| c.members.clone()).collect();
+    crate::cycle_output::livegraph_module_cycles_json(&cycles)
 }
 
 /// Emit the MODULE-import scope (MODULE-CYCLES-CLI-1 D2): the aggregated FILE scope flags + the

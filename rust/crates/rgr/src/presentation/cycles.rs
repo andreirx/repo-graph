@@ -50,7 +50,12 @@ pub struct Cycle {
 pub struct CycleNode {
     #[allow(dead_code)]
     pub node_id: String,
+    /// SHORT module name (legacy default). Collision-prone across packages; kept for back-compat.
     pub name: String,
+    /// CYCLES-OUTPUT-CONTRACT-1 (D1=B/D2=B): the QUALIFIED module path (e.g. `packages/a/src`). The default
+    /// human render PREFERS it over the short `name`. Absent for non-module cycles -> falls back to `name`.
+    #[serde(default)]
+    pub qualified_name: Option<String>,
     #[allow(dead_code)]
     pub file: Option<String>,
 }
@@ -186,8 +191,13 @@ impl CyclesResponse {
             return "(empty cycle)".to_string();
         }
 
-        // Show first 4 members + ellipsis + back to first
-        let names: Vec<&str> = cycle.nodes.iter().map(|n| n.name.as_str()).collect();
+        // Show first 4 members + ellipsis + back to first. CYCLES-OUTPUT-CONTRACT-1: prefer the QUALIFIED
+        // module path (disambiguates the collision-prone short `name`); fall back to `name` when absent.
+        let names: Vec<&str> = cycle
+            .nodes
+            .iter()
+            .map(|n| n.qualified_name.as_deref().unwrap_or(n.name.as_str()))
+            .collect();
 
         if names.len() <= 5 {
             // Show full chain
@@ -228,6 +238,17 @@ mod tests {
         }
     }
 
+    /// CYCLES-OUTPUT-CONTRACT-1: a MODULE cycle node for tests; `qualified_name` defaults to `None`, so these
+    /// legacy fixtures exercise the renderer's `name` fallback (unchanged behavior).
+    fn cnode(node_id: &str, name: &str) -> CycleNode {
+        CycleNode {
+            node_id: node_id.to_string(),
+            name: name.to_string(),
+            qualified_name: None,
+            file: None,
+        }
+    }
+
     #[test]
     fn render_shows_repo_display_name() {
         let r = minimal_response();
@@ -248,46 +269,13 @@ mod tests {
         r.count = 3;
         r.cycles = vec![
             Cycle {
-                nodes: vec![
-                    CycleNode {
-                        node_id: "n1".to_string(),
-                        name: "src/a".to_string(),
-                        file: None,
-                    },
-                    CycleNode {
-                        node_id: "n2".to_string(),
-                        name: "src/b".to_string(),
-                        file: None,
-                    },
-                ],
+                nodes: vec![cnode("n1", "src/a"), cnode("n2", "src/b")],
             },
             Cycle {
-                nodes: vec![
-                    CycleNode {
-                        node_id: "n3".to_string(),
-                        name: "src/c".to_string(),
-                        file: None,
-                    },
-                    CycleNode {
-                        node_id: "n4".to_string(),
-                        name: "src/d".to_string(),
-                        file: None,
-                    },
-                ],
+                nodes: vec![cnode("n3", "src/c"), cnode("n4", "src/d")],
             },
             Cycle {
-                nodes: vec![
-                    CycleNode {
-                        node_id: "n5".to_string(),
-                        name: "src/e".to_string(),
-                        file: None,
-                    },
-                    CycleNode {
-                        node_id: "n6".to_string(),
-                        name: "src/f".to_string(),
-                        file: None,
-                    },
-                ],
+                nodes: vec![cnode("n5", "src/e"), cnode("n6", "src/f")],
             },
         ];
         let out = r.render_human();
@@ -300,25 +288,46 @@ mod tests {
         r.count = 1;
         r.cycles = vec![Cycle {
             nodes: vec![
+                cnode("n1", "src/a"),
+                cnode("n2", "src/b"),
+                cnode("n3", "src/c"),
+            ],
+        }];
+        let out = r.render_human();
+        assert!(out.contains("src/a -> src/b -> src/c -> src/a"));
+    }
+
+    #[test]
+    fn render_prefers_qualified_name_over_short_name() {
+        // CYCLES-OUTPUT-CONTRACT-1 (D1=B): with qualified_name present, the chain shows the QUALIFIED path, not
+        // the short, collision-prone `name` (here both modules are short-named "src").
+        let mut r = minimal_response();
+        r.count = 1;
+        r.cycles = vec![Cycle {
+            nodes: vec![
                 CycleNode {
-                    node_id: "n1".to_string(),
-                    name: "src/a".to_string(),
+                    node_id: "repo:packages/a/src:MODULE".to_string(),
+                    name: "src".to_string(),
+                    qualified_name: Some("packages/a/src".to_string()),
                     file: None,
                 },
                 CycleNode {
-                    node_id: "n2".to_string(),
-                    name: "src/b".to_string(),
-                    file: None,
-                },
-                CycleNode {
-                    node_id: "n3".to_string(),
-                    name: "src/c".to_string(),
+                    node_id: "repo:packages/b/src:MODULE".to_string(),
+                    name: "src".to_string(),
+                    qualified_name: Some("packages/b/src".to_string()),
                     file: None,
                 },
             ],
         }];
         let out = r.render_human();
-        assert!(out.contains("src/a -> src/b -> src/c -> src/a"));
+        assert!(
+            out.contains("packages/a/src -> packages/b/src -> packages/a/src"),
+            "qualified path shown, not the ambiguous short name: {out}"
+        );
+        assert!(
+            !out.contains("src -> src"),
+            "the collision-prone short name must NOT be what renders: {out}"
+        );
     }
 
     #[test]
@@ -327,11 +336,7 @@ mod tests {
         r.count = 1;
         // Create a 10-node cycle
         let nodes: Vec<CycleNode> = (0..10)
-            .map(|i| CycleNode {
-                node_id: format!("n{}", i),
-                name: format!("src/mod{}", i),
-                file: None,
-            })
+            .map(|i| cnode(&format!("n{}", i), &format!("src/mod{}", i)))
             .collect();
         r.cycles = vec![Cycle { nodes }];
         let out = r.render_human();
@@ -353,16 +358,8 @@ mod tests {
         r.count = 1;
         r.cycles = vec![Cycle {
             nodes: vec![
-                CycleNode {
-                    node_id: "repo:packages/a/src/main.ts:FILE".to_string(),
-                    name: "packages/a/src/main.ts".to_string(),
-                    file: None,
-                },
-                CycleNode {
-                    node_id: "repo:packages/b/src/foo.ts:FILE".to_string(),
-                    name: "packages/b/src/foo.ts".to_string(),
-                    file: None,
-                },
+                cnode("repo:packages/a/src/main.ts:FILE", "packages/a/src/main.ts"),
+                cnode("repo:packages/b/src/foo.ts:FILE", "packages/b/src/foo.ts"),
             ],
         }];
         r
@@ -416,16 +413,8 @@ mod tests {
         r.count = 1;
         r.cycles = vec![Cycle {
             nodes: vec![
-                CycleNode {
-                    node_id: "repo:packages/a/src:MODULE".to_string(),
-                    name: "packages/a/src".to_string(),
-                    file: None,
-                },
-                CycleNode {
-                    node_id: "repo:packages/b/src:MODULE".to_string(),
-                    name: "packages/b/src".to_string(),
-                    file: None,
-                },
+                cnode("repo:packages/a/src:MODULE", "packages/a/src"),
+                cnode("repo:packages/b/src:MODULE", "packages/b/src"),
             ],
         }];
         r

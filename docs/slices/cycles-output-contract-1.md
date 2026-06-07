@@ -1,8 +1,12 @@
 # CYCLES-OUTPUT-CONTRACT-1: the default `rmap cycles` identity + ordering contract
 
 Slice ID: CYCLES-OUTPUT-CONTRACT-1
-Status: **SPEC — AWAITING RATIFICATION (D1–D3). DECISION-ONLY; NO code, NO renderer change, NO fastpath, NO
-default flip until ratified.** Decide the DEFAULT `rmap cycles` output contract — node IDENTITY (short vs
+Status: **IMPLEMENTED + LIVE-VALIDATED 2026-06-07 (D1=B canonical qualified human identity + deterministic
+order; D2=B additive `qualified_name` JSON; D3=A full fastpath unblocks AFTER byte-identity is proven).
+Output-contract migration ONLY; NO fastpath this slice — FASTPATH-1 is now UNBLOCKED (byte-identity proven on
+xpart + amodx) and may resume as a separate slice.** Gate green (build/fmt/clippy/`test --workspace` 0 failures);
+byte-identity proven LIVE (default == `--engine livegraph --kind module-import`). Decided (DONE) the DEFAULT
+`rmap cycles` output contract — node IDENTITY (short vs
 qualified) and cycle/ring ORDERING (Tarjan-discovery vs canonical-deterministic) — for the HUMAN text and,
 SEPARATELY, for the JSON. This is the explicit blocker surfaced by CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1 (ratified
 C: hold): a LiveGraph cycles fastpath CANNOT be byte-transparent under today's contract, so the contract must be
@@ -105,6 +109,55 @@ RECOMMENDATION: follows D1/D2. If D1=B -> A (clean, full). If human stability is
   cycles regardless). State the chosen consequence so FASTPATH-1's status is updated correctly (resume vs close).
 ```
 
+## Build plan (RATIFIED D1=B / D2=B / D3=A — implementation, no fastpath)
+```text
+DESIGN INVARIANT (byte-identity by construction): the compare matches cycles as canonical SETS -- each cycle
+sorted+deduped via BTreeSet<String> (module_cycle_compare.rs:19-30), cycles ordered as BTreeSet<Vec<String>>.
+Both are PLAIN lexicographic String order. The output canonicalization uses the SAME lexicographic order over
+the QUALIFIED name, so: cert GREEN (sets match) => SQLite-default canonical render == LiveGraph canonical render,
+inherently (both String::cmp). An SCC is a SET (scc.rs:21 "members = stack pop order" is an artifact, NOT a ring)
+-> "canonical ring rotation" reduces to "sort+dedup the member set". A unit test ALSO asserts equivalence to the
+compare's canonical_set (defense in depth).
+
+NEW MODULE (decided+recorded; internal file in daemon-runtime, no new crate/dep edge, SRP = the canonical
+module-cycle OUTPUT contract): `rust/crates/daemon-runtime/src/cycle_output.rs`
+  - CanonModuleCycleNode { node_id, name, qualified_name }.
+  - canonical_module_cycles_json(cycles: &[Vec<CanonModuleCycleNode>]) -> Vec<Value>:
+      per cycle: sort+DEDUP nodes by qualified_name (mirror canonical_set; on a qualified-name collision keep the
+      lexicographically-smallest node_id -- deterministic) ; sort cycles by their Vec<qualified_name> ;
+      emit {cycle_id:"cycle-{i+1}", length:nodes.len(), nodes:[{node_id,name,qualified_name,file:null}]}.
+  - sqlite_module_cycles_json(cycles: &[CycleResult], qualified: &HashMap<uid,qual>) -> adapter: node.name (short)
+      + qualified_name = qualified.get(node_id).unwrap_or(name) -> canonical_module_cycles_json.
+  - module_basename(path) helper for the LiveGraph short `name`.
+
+WIRING (additive; storage find_cycles / CycleResult / CycleNode UNCHANGED -- the contract is a PRESENTATION
+concern, applied at the daemon output layer, NOT in the low-level SCC query):
+  1. dispatch.rs handle_cycles SQLite default: find_cycles + module_qualified_names -> sqlite_module_cycles_json.
+  2. livegraph_feed.rs module_import_cycles_json: build CanonModuleCycleNode from members (node_id=member,
+     qualified_name=member, name=basename(member)) -> canonical_module_cycles_json (so --engine livegraph
+     --kind module-import is canonical + carries qualified_name too).
+  3. rgr presentation/cycles.rs: CycleNode gains `qualified_name: Option<String>` (additive, serde default) ;
+     the renderer displays qualified_name.unwrap_or(name) (file-level / absent -> name, unchanged).
+
+JSON (D2=B additive, backward-compatible): cycle_id, length, node_id, name, file ALL preserved ; + qualified_name.
+  node_id stays backend-NATIVE (SQLite uid / LiveGraph member) -- the human + qualified_name are the cross-backend
+  stable identity; a fully cross-backend-identical JSON node_id is a RESIDUAL deferred to FASTPATH-1 (its proof
+  target per the user's validation is the HUMAN output). RECORDED.
+
+TESTS: cycle_output (ordering, dedup, additive fields, basename, equivalence-to-canonical_set) ; an adapter-
+  parity test (SQLite-adapter vs LiveGraph-adapter produce IDENTICAL json for the same member sets) ; rgr
+  renderer (qualified_name shown ; fallback to name) ; update existing cycles.rs tests (add qualified_name).
+LIVE: xpart fixture default-human == `--engine livegraph --kind module-import` human ; amodx (GREEN) the same ;
+  `--engine sqlite` now canonical too (no legacy-short promise). Gate (test/clippy/fmt) then completion doc.
+
+ASSUMPTIONS / DIVERGENCES (recorded): (a) module_qualified_names = COALESCE(qualified_name,name); a NULL
+  qualified column falls back to short -> would mismatch LiveGraph, BUT such a repo is NOT compare-GREEN so the
+  future fastpath would not fire; this slice renders whatever the compare basis is (consistent). (b) LiveGraph
+  short `name` = basename(member); if a repo's stored MODULE `name` is NOT the dir basename, the JSON `name`
+  cosmetic differs (human uses qualified_name, unaffected). (c) `length`/size = UNIQUE-qualified member count
+  after dedup (honest aggregated size).
+```
+
 ## What this slice does NOT decide / out of scope (hard guardrails)
 ```text
 NO code, NO renderer edit, NO JSON field added, NO canonicalization implemented THIS slice — DECISION ONLY. The
@@ -113,6 +166,46 @@ ratified slice AFTER this. NO change to the GRAPH's module identity/resolver (pr
 NO change to `--engine compare` (already qualified). NO raw decommission, NO table deletion. The `file`-kind
 cycles output is untouched. If D1=B, the implementation slice MUST land the canonical order on BOTH backends
 BEFORE any fastpath (so the SQLite default and the LiveGraph fastpath are proven byte-identical first).
+```
+
+## Completion (EXECUTED 2026-06-07)
+```text
+IMPLEMENTED (additive; storage find_cycles / CycleResult / CycleNode UNCHANGED):
+  - NEW daemon-runtime/src/cycle_output.rs: CanonModuleCycleNode + canonical_module_cycles_json (sort+dedup by
+    qualified_name; cycles sorted by qualified-name vector; emit {cycle_id,length,nodes:[{node_id,name,
+    qualified_name,file}]}) + sqlite_module_cycles_json + livegraph_module_cycles_json + module_basename.
+  - dispatch.rs handle_cycles SQLite default -> find_cycles + module_qualified_names -> sqlite_module_cycles_json.
+  - livegraph_feed.rs module_import_cycles_json -> livegraph_module_cycles_json (same canonical builder).
+  - rgr presentation/cycles.rs: CycleNode.qualified_name (additive, serde default); render prefers it.
+
+GATE (EXECUTED): cargo build (daemon-runtime+rgr) clean ; cargo fmt --all --check clean ; cargo clippy
+  --workspace --all-targets -D warnings PASS ; cargo test --workspace = 0 failures across 220 test-result lines.
+  cycle_output 7/7 (ordering, dedup-keep-min-node_id, additive fields, basename, ADAPTER PARITY, equivalence to
+  the compare canonical_set basis). rgr cycles 12/12 (incl. render_prefers_qualified_name_over_short_name).
+
+LIVE (EXECUTED, release rmapd, producer env):
+  - xpart-monorepo (refreshed packages/a+b): DEFAULT, --engine sqlite, AND --engine livegraph --kind
+    module-import ALL render the SAME chain "packages/a/src -> packages/b/src -> packages/a/src". JSON identical
+    on qualified_name/name/cycle_id/length/count (only node_id backend-native: SQLite uuid vs LiveGraph member).
+    The fixture's two modules BOTH short-name "src" -> the OLD default would have shown the ambiguous
+    "src -> src"; the qualified default disambiguates. PROOF of the D1=B value + byte-identity.
+  - amodx (GREEN real repo, 8 partitions): default vs livegraph -> count 3==3; the qualified-name sequences of
+    ALL 3 cycles (incl. a 21-member plugins cycle) + cycle_id + length are IDENTICAL; canonical order
+    deterministic. No default cycle lost.
+  - `--engine sqlite` is now canonical too (no legacy-short-name promise) — verified identical to default.
+
+DIVERGENCES / RESIDUALS (recorded): (1) the EXPLICIT `--engine livegraph --kind module-import` JSON `name`
+  changed from the qualified path to the basename, with the qualified path RELOCATED to the new `qualified_name`
+  (information-preserving; required for SQLite/LiveGraph consistency + the future fastpath). (2) JSON `node_id`
+  stays backend-native (SQLite uuid / LiveGraph member) — a fully cross-backend-identical JSON node_id is a
+  RESIDUAL deferred to FASTPATH-1 (its proof target is the HUMAN output, which IS identical). (3) `length`/size =
+  unique-qualified member count after dedup. (4) module_qualified_names = COALESCE(qualified_name,name): a NULL
+  qualified column would fall back to short, but such a repo is not compare-GREEN so the future fastpath would
+  not fire. (5) the agent orient/explain cycle rendering is UNCHANGED (out of scope; separate read path).
+
+CONSEQUENCE: FASTPATH-1 (BLOCKED) is now UNBLOCKED — byte-identity is proven, so a cert-gated LiveGraph cycles
+  default fastpath can resume as a SEPARATE slice (no human/JSON regression on GREEN). NOT done here (D3=A: prove
+  first, fastpath after).
 ```
 
 ## References

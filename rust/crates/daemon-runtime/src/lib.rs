@@ -47,6 +47,7 @@
 //! ```
 
 pub mod cycle_completeness_audit;
+pub mod cycle_output;
 pub mod dispatch;
 pub mod handlers;
 pub mod livegraph_feed;

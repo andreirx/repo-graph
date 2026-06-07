@@ -1465,7 +1465,10 @@ impl ServiceDispatcher {
             total: 1,
         });
 
-        // Module-level cycles (default)
+        // Module-level cycles (default). CYCLES-OUTPUT-CONTRACT-1 (D1=B/D2=B): the raw SCC cycles are mapped to
+        // the CANONICAL, qualified, deterministically-ordered output AT THE DAEMON BOUNDARY — `find_cycles`
+        // (the low-level SCC query) is UNCHANGED. `module_qualified_names` supplies the qualified module path
+        // per node_uid; `cycle_output` applies the sort/dedup + the additive `qualified_name` field.
         let query_start = Instant::now();
         let cycles = match repo_state
             .storage
@@ -1479,6 +1482,20 @@ impl ServiceDispatcher {
                 );
             }
         };
+        let qualified = match repo_state
+            .storage
+            .module_qualified_names(&snapshot.snapshot_uid)
+        {
+            Ok(q) => q,
+            Err(e) => {
+                return DispatchResult::error(
+                    &request.id,
+                    ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
+                );
+            }
+        };
+        let canonical_cycles = crate::cycle_output::sqlite_module_cycles_json(&cycles, &qualified);
+        let cycle_count = canonical_cycles.len();
         let query_ms = query_start.elapsed().as_millis();
 
         let total_ms = handler_start.elapsed().as_millis();
@@ -1493,15 +1510,16 @@ impl ServiceDispatcher {
             query_ms
         );
 
-        // CLI-OUT-2B: Include display_name for human renderers
+        // CLI-OUT-2B: Include display_name for human renderers. CYCLES-OUTPUT-CONTRACT-1: `cycles` is the
+        // canonical qualified+ordered output; `count` is the (unchanged) cycle count.
         DispatchResult::success(
             &request.id,
             serde_json::json!({
                 "repo_uid": repo_uid,
                 "display_name": display_name,
                 "snapshot_uid": snapshot.snapshot_uid,
-                "cycles": cycles,
-                "count": cycles.len(),
+                "cycles": canonical_cycles,
+                "count": cycle_count,
             }),
         )
     }
