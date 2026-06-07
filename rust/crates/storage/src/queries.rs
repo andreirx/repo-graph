@@ -112,6 +112,24 @@ pub struct ImportResult {
     pub depth: i64,
 }
 
+/// IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1: one IMPORTS edge in the BULK per-snapshot enumeration -- the
+/// importing file's path + the imported node's classification, for the repo-wide directional compare. The
+/// `source_file` is the importing FILE; `target_file` is the imported FILE path (empty for a non-FILE / no-file
+/// target). Read-only; never mutates storage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkImportRow {
+    /// The importing file's repo-relative path.
+    pub source_file: String,
+    /// The imported file's repo-relative path (empty if the target has no file).
+    pub target_file: String,
+    /// The target node kind (e.g. `FILE`).
+    pub kind: String,
+    /// The target node subtype (e.g. `SOURCE` / `EXTERNAL`).
+    pub subtype: Option<String>,
+    /// The import edge resolution (e.g. `static` / `unresolved`).
+    pub resolution: Option<String>,
+}
+
 /// Result of a shortest-path search between two symbols.
 ///
 /// Matches the TS `formatPathResult` wire format (json.ts:74-86).
@@ -1299,6 +1317,44 @@ impl StorageConnection {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StorageError::from)
+    }
+
+    /// IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1: enumerate ALL IMPORTS edges for a snapshot as
+    /// [`BulkImportRow`]s (the importing FILE path + the imported node's path / kind / subtype / resolution) in
+    /// ONE read-only query -- the SQLite import-bearing file set + their classified targets for the repo-wide
+    /// directional compare. Does NOT touch [`Self::find_imports`] (the per-file path stays unchanged). Rows
+    /// with no importing-file path are skipped (an IMPORTS edge must have an importing file).
+    pub fn all_imports(&self, snapshot_uid: &str) -> Result<Vec<BulkImportRow>, StorageError> {
+        let mut stmt = self.connection().prepare(
+            "SELECT
+				sf.path AS source_path, tf.path AS target_path,
+				tn.kind, tn.subtype, e.resolution
+			 FROM edges e
+			 JOIN nodes sn ON e.source_node_uid = sn.node_uid
+			 JOIN nodes tn ON e.target_node_uid = tn.node_uid
+			 LEFT JOIN files sf ON sn.file_uid = sf.file_uid
+			 LEFT JOIN files tf ON tn.file_uid = tf.file_uid
+			 WHERE e.snapshot_uid = ?1
+			   AND e.type = 'IMPORTS'
+			 ORDER BY source_path ASC, target_path ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![snapshot_uid], |row| {
+            let source_path: Option<String> = row.get(0)?;
+            let target_path: Option<String> = row.get(1)?;
+            Ok(BulkImportRow {
+                source_file: source_path.unwrap_or_default(),
+                target_file: target_path.unwrap_or_default(),
+                kind: row.get(2)?,
+                subtype: row.get(3)?,
+                resolution: row.get(4)?,
+            })
+        })?;
+        Ok(rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)?
+            .into_iter()
+            .filter(|r| !r.source_file.is_empty())
+            .collect())
     }
 
     /// Find the shortest path between two nodes via BFS.
@@ -3410,6 +3466,56 @@ mod tests {
 				rusqlite::params![edge_uid, snapshot_uid, source_node_uid, target_node_uid, edge_type],
 			)
 			.unwrap();
+    }
+
+    #[test]
+    fn all_imports_enumerates_source_and_target_paths() {
+        // IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1: the bulk query returns (source_file, target_file, kind,
+        // subtype, resolution) for IMPORTS edges only, with the FILE-path JOINs resolved.
+        let (storage, snap) = setup_db_with_snapshot();
+        let file_node = |path: &str, node_uid: &str| {
+            let file_uid = format!("r1:{path}");
+            storage
+                .connection()
+                .execute(
+                    "INSERT OR IGNORE INTO files (file_uid, repo_uid, path, language, is_test)
+                     VALUES (?, 'r1', ?, 'typescript', 0)",
+                    rusqlite::params![file_uid, path],
+                )
+                .unwrap();
+            storage
+                .connection()
+                .execute(
+                    "INSERT INTO nodes (node_uid, snapshot_uid, repo_uid, stable_key, kind, subtype, name, file_uid)
+                     VALUES (?, ?, 'r1', ?, 'FILE', 'SOURCE', ?, ?)",
+                    rusqlite::params![
+                        node_uid,
+                        snap,
+                        format!("r1:{path}:FILE"),
+                        path,
+                        file_uid
+                    ],
+                )
+                .unwrap();
+        };
+        file_node("src/a.ts", "n-a");
+        file_node("src/b.ts", "n-b");
+        insert_raw_edge(&storage, &snap, "e-ab", "n-a", "n-b", "IMPORTS");
+        let rows = storage.all_imports(&snap).unwrap();
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(r.source_file, "src/a.ts");
+        assert_eq!(r.target_file, "src/b.ts");
+        assert_eq!(r.kind, "FILE");
+        assert_eq!(r.subtype.as_deref(), Some("SOURCE"));
+        assert_eq!(r.resolution.as_deref(), Some("static"));
+        // a non-IMPORTS edge is excluded.
+        insert_raw_edge(&storage, &snap, "e-call", "n-a", "n-b", "CALLS");
+        assert_eq!(
+            storage.all_imports(&snap).unwrap().len(),
+            1,
+            "only IMPORTS edges are enumerated"
+        );
     }
 
     #[test]

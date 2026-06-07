@@ -388,6 +388,153 @@ impl ImportsCompareResponse {
     }
 }
 
+// ── IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1: the repo-wide aggregate report (D6) ────────────────
+
+/// The repo-wide readiness metrics (D3).
+#[derive(Debug, Default, Deserialize)]
+pub struct ReadinessMetrics {
+    #[serde(default)]
+    pub files_total: usize,
+    #[serde(default)]
+    pub files_precondition_met: usize,
+    #[serde(default)]
+    pub files_fallback_required: usize,
+    #[serde(default)]
+    pub files_regression: usize,
+    #[serde(default)]
+    pub missing_in_livegraph_total: usize,
+    #[serde(default)]
+    pub extra_livegraph_edges_total: usize,
+    #[serde(default)]
+    pub blocking_observation_total: usize,
+    #[serde(default)]
+    pub blocking_observation_by_class: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub unknown_total: usize,
+    #[serde(default)]
+    pub sqlite_import_bearing_files: usize,
+    #[serde(default)]
+    pub livegraph_import_bearing_files: usize,
+    #[serde(default)]
+    pub fallback_share: f64,
+    #[serde(default)]
+    pub fallback_heavy: bool,
+}
+
+/// A per-file regression in the report (a SQLite resolved-local import LiveGraph lost).
+#[derive(Debug, Deserialize)]
+pub struct ReadinessRegression {
+    #[serde(default)]
+    pub file: String,
+    #[serde(default)]
+    pub missing: Vec<String>,
+}
+
+/// An ambiguous SQLite import the harness could not classify.
+#[derive(Debug, Deserialize)]
+pub struct ReadinessUnknown {
+    #[serde(default)]
+    pub file: String,
+    #[serde(default)]
+    pub target: String,
+    #[serde(default)]
+    pub resolution: String,
+}
+
+/// The `imports --engine compare` NO-FILE (repo-wide) aggregate readiness report.
+#[derive(Debug, Deserialize)]
+pub struct ImportsReadinessReport {
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub verdict: String,
+    #[serde(default)]
+    pub coverage_complete: bool,
+    #[serde(default)]
+    pub metrics: ReadinessMetrics,
+    #[serde(default)]
+    pub regressions: Vec<ReadinessRegression>,
+    #[serde(default)]
+    pub unknowns: Vec<ReadinessUnknown>,
+}
+
+impl ImportsReadinessReport {
+    /// Render the repo-wide readiness summary (the verdict + the D3 metrics; regressions / unknowns are LOUD).
+    pub fn render_human(&self) -> String {
+        let m = &self.metrics;
+        let mut out = String::new();
+        out.push_str(&format!(
+            "Imports readiness (repo-wide): {}\n",
+            self.display_name
+        ));
+        out.push_str(&format!("VERDICT: {}\n\n", self.verdict));
+        out.push_str(&format!("  files_total            = {}\n", m.files_total));
+        out.push_str(&format!(
+            "  precondition_met       = {}\n",
+            m.files_precondition_met
+        ));
+        out.push_str(&format!(
+            "  fallback_required      = {}  (share {:.1}%{})\n",
+            m.files_fallback_required,
+            m.fallback_share * 100.0,
+            if m.fallback_heavy {
+                " FALLBACK-HEAVY"
+            } else {
+                ""
+            }
+        ));
+        out.push_str(&format!(
+            "  REGRESSIONS            = {}\n",
+            m.files_regression
+        ));
+        out.push_str(&format!("  unknown                = {}\n", m.unknown_total));
+        out.push_str(&format!(
+            "  missing_in_livegraph   = {}\n",
+            m.missing_in_livegraph_total
+        ));
+        out.push_str(&format!(
+            "  extra_livegraph_edges  = {}\n",
+            m.extra_livegraph_edges_total
+        ));
+        out.push_str(&format!(
+            "  blocking_observations  = {}\n",
+            m.blocking_observation_total
+        ));
+        if !m.blocking_observation_by_class.is_empty() {
+            let by: Vec<String> = m
+                .blocking_observation_by_class
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect();
+            out.push_str(&format!("    by class: {}\n", by.join("  ")));
+        }
+        out.push_str(&format!(
+            "  import-bearing files (sqlite / livegraph) = {} / {}\n",
+            m.sqlite_import_bearing_files, m.livegraph_import_bearing_files
+        ));
+        out.push_str(&format!(
+            "  coverage_complete      = {}\n",
+            self.coverage_complete
+        ));
+        if !self.regressions.is_empty() {
+            out.push_str("\n  REGRESSION DETAIL (SQLite resolved-local imports LiveGraph lost):\n");
+            for r in &self.regressions {
+                out.push_str(&format!("    {} -> missing {:?}\n", r.file, r.missing));
+            }
+        }
+        if !self.unknowns.is_empty() {
+            out.push_str("\n  UNKNOWN DETAIL (ambiguous SQLite imports):\n");
+            for u in &self.unknowns {
+                out.push_str(&format!(
+                    "    {} -> {} [{}]\n",
+                    u.file, u.target, u.resolution
+                ));
+            }
+        }
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -650,5 +797,45 @@ mod tests {
         assert!(out.contains("Compare (sqlite vs livegraph): Regression"));
         assert!(out.contains("MISSING in livegraph (REGRESSIONS): 1"));
         assert!(out.contains("- app/src/lost.ts"));
+    }
+
+    #[test]
+    fn readiness_report_renders_verdict_and_metrics() {
+        let json = serde_json::json!({
+            "display_name": "amodx",
+            "verdict": "GREEN",
+            "coverage_complete": true,
+            "metrics": {
+                "files_total": 100, "files_precondition_met": 100, "files_fallback_required": 0,
+                "files_regression": 0, "missing_in_livegraph_total": 0, "extra_livegraph_edges_total": 50,
+                "blocking_observation_total": 5,
+                "blocking_observation_by_class": {"WorkspaceLocalUnedgeable": 5},
+                "unknown_total": 0, "sqlite_import_bearing_files": 30,
+                "livegraph_import_bearing_files": 100, "fallback_share": 0.0, "fallback_heavy": false
+            },
+            "regressions": [], "unknowns": []
+        });
+        let r: ImportsReadinessReport = serde_json::from_value(json).unwrap();
+        let out = r.render_human();
+        assert!(out.contains("Imports readiness (repo-wide): amodx"));
+        assert!(out.contains("VERDICT: GREEN"));
+        assert!(out.contains("files_total            = 100"));
+        assert!(out.contains("REGRESSIONS            = 0"));
+        assert!(out.contains("WorkspaceLocalUnedgeable=5"));
+    }
+
+    #[test]
+    fn readiness_report_regression_detail_is_loud() {
+        let json = serde_json::json!({
+            "display_name": "x", "verdict": "RED", "coverage_complete": true,
+            "metrics": { "files_regression": 1, "missing_in_livegraph_total": 1 },
+            "regressions": [{"file": "a.ts", "missing": ["b.ts"]}],
+            "unknowns": []
+        });
+        let r: ImportsReadinessReport = serde_json::from_value(json).unwrap();
+        let out = r.render_human();
+        assert!(out.contains("VERDICT: RED"));
+        assert!(out.contains("REGRESSION DETAIL"));
+        assert!(out.contains("a.ts -> missing [\"b.ts\"]"));
     }
 }

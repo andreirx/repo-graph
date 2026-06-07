@@ -1237,6 +1237,22 @@ fn import_view_body_unavailable() -> Value {
     )
 }
 
+/// IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1 / -REPOWIDE-1 (D2/D4): the SHARED per-file directional verdict. The
+/// precondition GATES -- an unmet precondition is a FALLBACK, NEVER a regression (a non-TS / non-resident file
+/// legitimately has no LiveGraph data: the language gate, not a loss). Reused by the per-file sidecar AND the
+/// repo-wide aggregate so the two cannot diverge.
+fn directional_status(precondition_met: bool, has_missing: bool, has_extra: bool) -> &'static str {
+    if !precondition_met {
+        "FallbackPreconditionUnmet"
+    } else if has_missing {
+        "Regression"
+    } else if has_extra {
+        "NoLossLivegraphSuperset"
+    } else {
+        "NoLossEquivalent"
+    }
+}
+
 /// IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1 (D2/D6): the PURE per-file directional-compare sidecar. EDGE
 /// EQUIVALENCE is DIRECTIONAL no-loss -- every SQLite resolved-local target must appear in the LiveGraph edge
 /// targets (a LiveGraph edge SQLite lacks is an IMPROVEMENT, not a failure). The D3 PRECONDITION (resident +
@@ -1287,17 +1303,11 @@ fn imports_compare_sidecar(
         })
         .collect();
     let precondition_met = precondition.is_some_and(|p| p.precondition_met());
-    // D3 verdict: the precondition GATES -- an unmet precondition is a fallback, NEVER a regression (a non-TS /
-    // non-resident file legitimately has no LiveGraph data; that is the language gate, not a loss).
-    let status = if !precondition_met {
-        "FallbackPreconditionUnmet"
-    } else if !missing_in_livegraph.is_empty() {
-        "Regression"
-    } else if !extra_livegraph_edges.is_empty() {
-        "NoLossLivegraphSuperset"
-    } else {
-        "NoLossEquivalent"
-    };
+    let status = directional_status(
+        precondition_met,
+        !missing_in_livegraph.is_empty(),
+        !extra_livegraph_edges.is_empty(),
+    );
     json!({
         "status": status,
         "precondition": precondition.map(|p| {
@@ -1368,6 +1378,187 @@ pub fn imports_compare_response(
         "engine": "compare",
         "comparison": comparison,
     })
+}
+
+/// IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1 (D2/D3/D4): the PURE repo-wide aggregation -- run the per-file
+/// DIRECTIONAL verdict (`directional_status`) over the UNION of SQLite + LiveGraph import-bearing files and fold
+/// the metrics + verdict. No RepoState / no lock -> unit-testable. `precond_map` = file -> resident TS partition
+/// status (ABSENT = precondition unmet -> the language gate). UNKNOWN = a kind=FILE non-empty-target import that
+/// is neither resolved-local (static) nor external -> could hide a loss -> forces RED.
+#[allow(clippy::too_many_arguments)]
+fn aggregate_readiness(
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+    bulk: &[repo_graph_storage::queries::BulkImportRow],
+    view: &repo_graph_livegraph::import_view::LiveImportView,
+    precond_map: &std::collections::BTreeMap<
+        String,
+        repo_graph_livegraph::import_view::FilePartitionStatus,
+    >,
+) -> Value {
+    use std::collections::{BTreeMap, BTreeSet};
+    // SQLite grouped by source -> resolved-local targets + unknown rows (D2/D3).
+    let mut sqlite_resolved: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let mut sqlite_unknown: Vec<(&str, &str, &str)> = Vec::new(); // (source, target, resolution)
+    let mut sqlite_sources: BTreeSet<&str> = BTreeSet::new();
+    for r in bulk {
+        sqlite_sources.insert(r.source_file.as_str());
+        let is_file = r.kind == "FILE" && !r.target_file.is_empty();
+        let is_external = r.subtype.as_deref() == Some("EXTERNAL");
+        let is_static = r.resolution.as_deref() == Some("static");
+        if is_file && !is_external && is_static {
+            sqlite_resolved
+                .entry(r.source_file.as_str())
+                .or_default()
+                .insert(r.target_file.as_str());
+        } else if is_file && !is_external {
+            // a FILE-target import that is neither resolved-local nor external -> UNKNOWN.
+            sqlite_unknown.push((
+                r.source_file.as_str(),
+                r.target_file.as_str(),
+                r.resolution.as_deref().unwrap_or(""),
+            ));
+        }
+        // else: external / no-file target -> excluded from edge equivalence.
+    }
+    // LiveGraph grouped by source.
+    let mut lg_edges: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let mut lg_blocking: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    let mut lg_sources: BTreeSet<&str> = BTreeSet::new();
+    for e in &view.edges {
+        lg_sources.insert(e.src_file.as_str());
+        lg_edges
+            .entry(e.src_file.as_str())
+            .or_default()
+            .insert(e.dst_file.as_str());
+    }
+    for o in &view.observations {
+        lg_sources.insert(o.source_file.as_str());
+        if o.blocking {
+            lg_blocking
+                .entry(o.source_file.as_str())
+                .or_default()
+                .push(o.class.as_str());
+        }
+    }
+    // The compared file set = the UNION (D2).
+    let mut all_files: BTreeSet<&str> = BTreeSet::new();
+    all_files.extend(sqlite_sources.iter().copied());
+    all_files.extend(lg_sources.iter().copied());
+    let unknown_total = sqlite_unknown.len();
+    let empty: BTreeSet<&str> = BTreeSet::new();
+    let (mut files_total, mut met, mut fallback, mut regression) = (0usize, 0usize, 0usize, 0usize);
+    let (mut missing_total, mut extra_total, mut blocking_total) = (0usize, 0usize, 0usize);
+    let mut blocking_by_class: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut regressions: Vec<Value> = Vec::new();
+    for file in &all_files {
+        files_total += 1;
+        let precond_met = precond_map.get(*file).is_some_and(|s| s.precondition_met());
+        let st = sqlite_resolved.get(file).unwrap_or(&empty);
+        let lt = lg_edges.get(file).unwrap_or(&empty);
+        let missing: Vec<&str> = st.iter().filter(|t| !lt.contains(*t)).copied().collect();
+        let extra = lt.iter().filter(|t| !st.contains(*t)).count();
+        extra_total += extra;
+        if let Some(bs) = lg_blocking.get(file) {
+            for c in bs {
+                blocking_total += 1;
+                *blocking_by_class.entry(c).or_default() += 1;
+            }
+        }
+        match directional_status(precond_met, !missing.is_empty(), extra > 0) {
+            "FallbackPreconditionUnmet" => fallback += 1,
+            "Regression" => {
+                met += 1;
+                regression += 1;
+                missing_total += missing.len();
+                regressions.push(json!({ "file": file, "missing": missing }));
+            }
+            _ => met += 1,
+        }
+    }
+    let fallback_share = if files_total > 0 {
+        fallback as f64 / files_total as f64
+    } else {
+        0.0
+    };
+    // fallback-heavy = > 50% of files fall back (documented threshold; ALWAYS reported, never hidden -- D5).
+    let fallback_heavy = fallback_share > 0.5;
+    // D4 verdict: RED on any regression OR unknown; YELLOW if safe but fallback-heavy / serves no file; else GREEN.
+    let verdict = if regression > 0 || unknown_total > 0 {
+        "RED"
+    } else if fallback_heavy || met == 0 {
+        "YELLOW"
+    } else {
+        "GREEN"
+    };
+    let blocking_by_class_json: serde_json::Map<String, Value> = blocking_by_class
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), json!(v)))
+        .collect();
+    let unknowns_json: Vec<Value> = sqlite_unknown
+        .iter()
+        .map(|(f, t, r)| json!({ "file": f, "target": t, "resolution": r }))
+        .collect();
+    json!({
+        "repo_uid": repo_uid,
+        "display_name": display_name,
+        "snapshot_uid": snapshot_uid,
+        "engine": "compare",
+        "scope": "repo-wide",
+        "backend_used": "sqlite",
+        "verdict": verdict,
+        "coverage_complete": true,
+        "metrics": {
+            "files_total": files_total,
+            "files_precondition_met": met,
+            "files_fallback_required": fallback,
+            "files_regression": regression,
+            "missing_in_livegraph_total": missing_total,
+            "extra_livegraph_edges_total": extra_total,
+            "blocking_observation_total": blocking_total,
+            "blocking_observation_by_class": blocking_by_class_json,
+            "unknown_total": unknown_total,
+            "sqlite_import_bearing_files": sqlite_sources.len(),
+            "livegraph_import_bearing_files": lg_sources.len(),
+            "fallback_share": fallback_share,
+            "fallback_heavy": fallback_heavy,
+        },
+        "regressions": regressions,
+        "unknowns": unknowns_json,
+    })
+}
+
+/// IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1 (D6): the `imports --engine compare` NO-FILE response -- the repo-wide
+/// readiness aggregate. Reads the bulk SQLite imports + the full LiveGraph view + the bulk precondition map ONCE
+/// (the view + map under one lock), then the PURE `aggregate_readiness`. READ-ONLY; NO default flip.
+pub fn imports_readiness_response(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    display_name: &str,
+    snapshot_uid: &str,
+) -> Value {
+    let bulk = repo_state
+        .storage
+        .all_imports(snapshot_uid)
+        .unwrap_or_default();
+    let guard = repo_state.livegraph.read();
+    let (view, precond_map) = match guard.as_ref() {
+        Some(lg) => (lg.live_import_view(None), lg.resident_file_statuses()),
+        None => (
+            repo_graph_livegraph::import_view::LiveImportView::default(),
+            std::collections::BTreeMap::new(),
+        ),
+    };
+    drop(guard);
+    aggregate_readiness(
+        repo_uid,
+        display_name,
+        snapshot_uid,
+        &bulk,
+        &view,
+        &precond_map,
+    )
 }
 
 /// One classed module-cycle divergence in the compare report (MODULE-CYCLES-CLI-1 D4=A).
@@ -1680,6 +1871,69 @@ mod tests {
         let s4 = imports_compare_sidecar(&["app/src/y.ts".to_string()], &empty, None);
         assert_eq!(s4["status"], "FallbackPreconditionUnmet");
         assert!(s4["precondition"].is_null());
+    }
+
+    #[test]
+    fn aggregate_readiness_verdicts() {
+        use repo_graph_livegraph::import_view::{
+            FilePartitionStatus, ImportEdgeView, LiveImportView,
+        };
+        use repo_graph_storage::queries::BulkImportRow;
+        use std::collections::BTreeMap;
+        let row = |src: &str, tgt: &str, res: &str| BulkImportRow {
+            source_file: src.to_string(),
+            target_file: tgt.to_string(),
+            kind: "FILE".to_string(),
+            subtype: Some("SOURCE".to_string()),
+            resolution: Some(res.to_string()),
+        };
+        let edge = |src: &str, dst: &str| ImportEdgeView {
+            src_file: src.to_string(),
+            dst_file: dst.to_string(),
+            basis: "AstImport".to_string(),
+            raw_specifier: None,
+        };
+        let met: BTreeMap<String, FilePartitionStatus> = [(
+            "a.ts".to_string(),
+            FilePartitionStatus {
+                partition_id: "app".to_string(),
+                resident: true,
+                fresh: true,
+                ts_primary: true,
+            },
+        )]
+        .into_iter()
+        .collect();
+        let bulk = vec![row("a.ts", "b.ts", "static")];
+        // GREEN: SQLite{b.ts} == LiveGraph edge{b.ts}, precondition met.
+        let view = LiveImportView {
+            edges: vec![edge("a.ts", "b.ts")],
+            observations: vec![],
+        };
+        let r = aggregate_readiness("r1", "t", "snap", &bulk, &view, &met);
+        assert_eq!(r["verdict"], "GREEN");
+        assert_eq!(r["metrics"]["files_precondition_met"], 1);
+        assert_eq!(r["metrics"]["files_regression"], 0);
+        // RED regression: SQLite{b.ts} but LiveGraph empty, precondition met.
+        let empty_view = LiveImportView {
+            edges: vec![],
+            observations: vec![],
+        };
+        let r2 = aggregate_readiness("r1", "t", "snap", &bulk, &empty_view, &met);
+        assert_eq!(r2["verdict"], "RED");
+        assert_eq!(r2["metrics"]["files_regression"], 1);
+        assert_eq!(r2["metrics"]["missing_in_livegraph_total"], 1);
+        // YELLOW fallback: SQLite{b.ts}, LiveGraph empty, precondition UNMET (no map entry).
+        let no_precond: BTreeMap<String, FilePartitionStatus> = BTreeMap::new();
+        let r3 = aggregate_readiness("r1", "t", "snap", &bulk, &empty_view, &no_precond);
+        assert_eq!(r3["verdict"], "YELLOW");
+        assert_eq!(r3["metrics"]["files_fallback_required"], 1);
+        assert_eq!(r3["metrics"]["files_regression"], 0);
+        // RED unknown: a FILE-target import that is non-external AND non-static.
+        let bulk_unknown = vec![row("a.ts", "b.ts", "unresolved")];
+        let r4 = aggregate_readiness("r1", "t", "snap", &bulk_unknown, &empty_view, &met);
+        assert_eq!(r4["verdict"], "RED");
+        assert_eq!(r4["metrics"]["unknown_total"], 1);
     }
 
     #[test]

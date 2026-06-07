@@ -1137,21 +1137,32 @@ impl ServiceDispatcher {
             );
         }
         if engine == "compare" {
-            // IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1 (D6): the per-file SQLite-vs-LiveGraph compare. File
-            // REQUIRED (file-level only, D1). SQLite primary + the directional-compare sidecar; no default flip.
-            let file_path = match Self::get_string_param(&request.params, "file") {
-                Ok(f) => f,
-                Err(e) => return DispatchResult::error(&request.id, e),
-            };
-            return DispatchResult::success(
-                &request.id,
-                crate::livegraph_feed::imports_compare_response(
-                    &repo_state,
-                    &repo_uid,
-                    &snapshot.snapshot_uid,
-                    file_path,
-                ),
-            );
+            // IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1 (D6) + REPOWIDE-1 (D6): NO file -> the repo-wide readiness
+            // aggregate; WITH file -> the per-file SQLite-vs-LiveGraph compare. SQLite primary; no default flip.
+            match Self::get_optional_string_param(&request.params, "file") {
+                Some(file_path) => {
+                    return DispatchResult::success(
+                        &request.id,
+                        crate::livegraph_feed::imports_compare_response(
+                            &repo_state,
+                            &repo_uid,
+                            &snapshot.snapshot_uid,
+                            file_path,
+                        ),
+                    );
+                }
+                None => {
+                    return DispatchResult::success(
+                        &request.id,
+                        crate::livegraph_feed::imports_readiness_response(
+                            &repo_state,
+                            &repo_uid,
+                            &display_name,
+                            &snapshot.snapshot_uid,
+                        ),
+                    );
+                }
+            }
         }
         if engine != "sqlite" {
             return DispatchResult::error(

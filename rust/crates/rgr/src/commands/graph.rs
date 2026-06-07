@@ -793,13 +793,18 @@ pub fn run_imports(args: &[String]) -> ExitCode {
             p
         }
         "compare" => {
-            // IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1 (D6/D1): per-file SQLite-vs-LiveGraph compare; file REQUIRED.
-            if positional.len() != 1 {
-                eprintln!("error: the compare engine requires exactly one <file>");
+            // compare: WITH file -> per-file (READINESS-1); NO file -> repo-wide readiness aggregate
+            // (REPOWIDE-1 D6). At most one <file>.
+            if positional.len() > 1 {
+                eprintln!("error: at most one <file> (omit for the repo-wide readiness aggregate)");
                 eprintln!("{usage}");
                 return ExitCode::from(1);
             }
-            serde_json::json!({ "repo": repo_path, "engine": "compare", "file": positional[0] })
+            let mut p = serde_json::json!({ "repo": repo_path, "engine": "compare" });
+            if let Some(file) = positional.first() {
+                p["file"] = serde_json::Value::String(file.clone());
+            }
+            p
         }
         other => {
             eprintln!("error: unknown --engine '{other}' (supported: sqlite, livegraph, compare)");
@@ -838,8 +843,21 @@ pub fn run_imports(args: &[String]) -> ExitCode {
                         ExitCode::from(2)
                     }
                 }
+            } else if engine == "compare" && positional.is_empty() {
+                // IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1 (D6): the repo-wide readiness aggregate.
+                use crate::presentation::imports::ImportsReadinessReport;
+                match serde_json::from_value::<ImportsReadinessReport>(result) {
+                    Ok(report) => {
+                        print!("{}", report.render_human());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to parse imports response: {}", e);
+                        ExitCode::from(2)
+                    }
+                }
             } else if engine == "compare" {
-                // IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1 (D6): SQLite listing PRIMARY + the compare summary.
+                // IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1 (D6): per-file SQLite listing PRIMARY + the summary.
                 use crate::presentation::imports::ImportsCompareResponse;
                 match serde_json::from_value::<ImportsCompareResponse>(result) {
                     Ok(response) => {

@@ -1540,6 +1540,35 @@ impl LiveGraph {
         }
         None
     }
+
+    /// IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1: the BULK file->partition-status map -- every resident
+    /// `AstFileScope` FILE node's repo-relative path -> its partition's [`import_view::FilePartitionStatus`].
+    /// Built ONCE (O(nodes)) for the repo-wide compare so it does not re-scan per file. A file present in more
+    /// than one resident partition keeps the FIRST (a file normally belongs to one). Files NOT in the map are
+    /// non-resident / non-TS (precondition unmet). Pure read.
+    pub fn resident_file_statuses(
+        &self,
+    ) -> std::collections::BTreeMap<String, import_view::FilePartitionStatus> {
+        let mut out = std::collections::BTreeMap::new();
+        for (id, s) in &self.slots {
+            if let Some(ir) = &s.ir {
+                let status = import_view::FilePartitionStatus {
+                    partition_id: id.clone(),
+                    resident: true,
+                    fresh: status_freshness(s.status) == FreshnessState::Fresh,
+                    ts_primary: matches!(s.language, LanguageSupport::TypeScriptPrimary),
+                };
+                for n in &ir.nodes {
+                    if n.identity_source == IdentitySource::AstFileScope {
+                        if let Some(p) = file_key_path(n.key.as_str()) {
+                            out.entry(p.to_string()).or_insert_with(|| status.clone());
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
 }
 
 /// IMPORTS-LIVEGRAPH-CLI-1 (GAP-A): classify ONE import observation into its [`module_cycle_cert::
@@ -3465,5 +3494,37 @@ mod tests {
         let sst = lg.file_partition_status("app/src/main.ts").expect("found");
         assert!(!sst.fresh);
         assert!(!sst.precondition_met());
+    }
+
+    #[test]
+    fn resident_file_statuses_maps_all_resident_files() {
+        let app = ir_pkg(
+            "app",
+            Some("@app/x"),
+            &[],
+            vec![
+                file_node("repo:app/src/main.ts:FILE"),
+                file_node("repo:app/src/util.ts:FILE"),
+            ],
+            vec![],
+            vec![],
+        );
+        let cpp = ir_pkg(
+            "cpp",
+            None,
+            &[],
+            vec![file_node("repo:cpp/main.cpp:FILE")],
+            vec![],
+            vec![],
+        );
+        let mut lg = LiveGraph::new();
+        lg.load_partition("app", app, LanguageSupport::TypeScriptPrimary);
+        lg.load_partition("cpp", cpp, LanguageSupport::CppGuarded);
+        let map = lg.resident_file_statuses();
+        assert_eq!(map.len(), 3);
+        assert!(map["app/src/main.ts"].precondition_met());
+        assert!(map["app/src/util.ts"].precondition_met());
+        assert!(!map["cpp/main.cpp"].ts_primary);
+        assert!(!map.contains_key("app/src/nonexistent.ts"));
     }
 }
