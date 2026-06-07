@@ -141,6 +141,12 @@ pub enum FallbackReason {
     LiveGraphDisplayMetadataUnavailable,
     /// The LiveGraph engine errored (reserved; the callers/callees query path does not error today).
     LiveGraphError,
+    /// IMPORTS-LIVEGRAPH-DEFAULT-1 (D5): the per-call no-loss compare found a SQLite resolved-local import the
+    /// LiveGraph edge set LOST (a regression) -> the DEFAULT falls back to SQLite (never a silent loss).
+    LiveGraphImportRegression,
+    /// IMPORTS-LIVEGRAPH-DEFAULT-1 (D5): the file has an AMBIGUOUS SQLite import (a FILE target that is neither
+    /// resolved-local nor external) the harness cannot confidently bucket -> conservative SQLite fallback.
+    LiveGraphImportUnknown,
 }
 
 impl FallbackReason {
@@ -156,6 +162,8 @@ impl FallbackReason {
                 "LiveGraphDisplayMetadataUnavailable"
             }
             FallbackReason::LiveGraphError => "LiveGraphError",
+            FallbackReason::LiveGraphImportRegression => "LiveGraphImportRegression",
+            FallbackReason::LiveGraphImportUnknown => "LiveGraphImportUnknown",
         }
     }
 }
@@ -1380,6 +1388,145 @@ pub fn imports_compare_response(
     })
 }
 
+/// IMPORTS-LIVEGRAPH-DEFAULT-1 (D3/D4): map a captured LiveGraph edge into the existing SQLite `ImportEntry`
+/// JSON shape so the human renderer + JSON consumers stay byte-compatible. `evidence` carries the edge basis.
+fn edge_to_import_entry(e: &repo_graph_livegraph::import_view::ImportEdgeView) -> Value {
+    json!({
+        "node_id": "",
+        "symbol": e.dst_file,
+        "kind": "FILE",
+        "subtype": "SOURCE",
+        "file": e.dst_file,
+        "line": 0,
+        "column": 0,
+        "edge_type": "IMPORTS",
+        "resolution": "static",
+        "evidence": [e.basis],
+        "depth": 1,
+    })
+}
+
+/// IMPORTS-LIVEGRAPH-DEFAULT-1 (D5): the precondition-failure fallback reason (called only when the precondition
+/// is NOT met). None -> no resident TS partition owns the file (`LiveGraphUnavailable`); a stale partition ->
+/// `LiveGraphStale`; a non-TS partition -> `LiveGraphUnsupportedLanguage`.
+fn precondition_fallback_reason(
+    precond: Option<&repo_graph_livegraph::import_view::FilePartitionStatus>,
+) -> FallbackReason {
+    match precond {
+        None => FallbackReason::LiveGraphUnavailable,
+        Some(s) if !s.fresh => FallbackReason::LiveGraphStale,
+        Some(s) if !s.ts_primary => FallbackReason::LiveGraphUnsupportedLanguage,
+        // Precondition met -> not a fallback (defensive; this fn is only called on !met).
+        Some(_) => FallbackReason::LiveGraphUnavailable,
+    }
+}
+
+/// IMPORTS-LIVEGRAPH-DEFAULT-1 (D2=B / D3 / D4 / D5): the PURE per-file AUTO decision -- COMPARE-ON-CALL. Serve
+/// the LiveGraph edge listing (mapped to ImportEntry, WITH the alias/dynamic extras) IFF the precondition is met
+/// AND the directional no-loss passes (NO SQLite resolved-local import missing) AND there is no ambiguous SQLite
+/// import; ELSE serve the SQLite listing (byte-identical) with a labelled `fallback_reason`. NEVER a silent loss.
+/// No RepoState / no lock -> unit-testable.
+fn imports_auto_body(
+    file_path: &str,
+    sqlite_imports: &[repo_graph_storage::queries::ImportResult],
+    view: &repo_graph_livegraph::import_view::LiveImportView,
+    precond: Option<&repo_graph_livegraph::import_view::FilePartitionStatus>,
+) -> Value {
+    use std::collections::BTreeSet;
+    let sqlite_resolved: BTreeSet<&str> = sqlite_imports
+        .iter()
+        .filter(|r| {
+            r.kind == "FILE"
+                && r.subtype.as_deref() != Some("EXTERNAL")
+                && r.resolution.as_deref() == Some("static")
+                && !r.file.is_empty()
+        })
+        .map(|r| r.file.as_str())
+        .collect();
+    let has_unknown = sqlite_imports.iter().any(|r| {
+        r.kind == "FILE"
+            && r.subtype.as_deref() != Some("EXTERNAL")
+            && r.resolution.as_deref() != Some("static")
+            && !r.file.is_empty()
+    });
+    let lg_edge_targets: BTreeSet<&str> = view.edges.iter().map(|e| e.dst_file.as_str()).collect();
+    let missing = sqlite_resolved
+        .iter()
+        .filter(|t| !lg_edge_targets.contains(*t))
+        .count();
+    let extra = lg_edge_targets
+        .iter()
+        .filter(|t| !sqlite_resolved.contains(*t))
+        .count();
+    let precond_met = precond.is_some_and(|p| p.precondition_met());
+    // D1 / D2=B decision: the precondition GATES; then the per-call no-loss + unknown gate.
+    let fallback_reason: Option<FallbackReason> = if !precond_met {
+        Some(precondition_fallback_reason(precond))
+    } else if has_unknown {
+        Some(FallbackReason::LiveGraphImportUnknown)
+    } else if missing > 0 {
+        Some(FallbackReason::LiveGraphImportRegression)
+    } else {
+        None
+    };
+    let (backend_used, imports_value): (&str, Value) = match fallback_reason {
+        None => (
+            "livegraph",
+            Value::Array(view.edges.iter().map(edge_to_import_entry).collect()),
+        ),
+        // SQLite fallback: serialize the Vec the SAME way as the existing sqlite path (byte-identical listing).
+        Some(_) => (
+            "sqlite",
+            serde_json::to_value(sqlite_imports).unwrap_or_else(|_| Value::Array(Vec::new())),
+        ),
+    };
+    let count = imports_value.as_array().map(|a| a.len()).unwrap_or(0);
+    json!({
+        "file": file_path,
+        "imports": imports_value,
+        "count": count,
+        "backend_used": backend_used,
+        "fallback_reason": fallback_reason.map(|r| r.as_str()),
+        // D3: a compatible compare summary (JSON-only; stripped in human).
+        "comparison": {
+            "sqlite_resolved_local": sqlite_resolved.len(),
+            "livegraph_edges": view.edges.len(),
+            "missing_in_livegraph": missing,
+            "extra_livegraph_edges": extra,
+        },
+    })
+}
+
+/// IMPORTS-LIVEGRAPH-DEFAULT-1 (D2=B): the AUTO (default) `imports <file>` response -- compare-on-call. Reads
+/// the SQLite per-file imports (the no-loss baseline + the fallback answer) + the file's LiveGraph view +
+/// precondition (one lock), then the PURE `imports_auto_body`. SQLite is STILL read every call (the safety net;
+/// no decommission -- that is IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1).
+pub fn imports_auto_response(
+    repo_state: &RepoState,
+    repo_uid: &str,
+    snapshot_uid: &str,
+    file_path: &str,
+) -> Value {
+    let file_stable_key = format!("{repo_uid}:{file_path}:FILE");
+    let sqlite_imports = repo_state
+        .storage
+        .find_imports(snapshot_uid, &file_stable_key)
+        .unwrap_or_default();
+    let guard = repo_state.livegraph.read();
+    let (view, precond) = match guard.as_ref() {
+        Some(lg) => (
+            lg.live_import_view(Some(file_path)),
+            lg.file_partition_status(file_path),
+        ),
+        None => (
+            repo_graph_livegraph::import_view::LiveImportView::default(),
+            None,
+        ),
+    };
+    drop(guard);
+    imports_auto_body(file_path, &sqlite_imports, &view, precond.as_ref())
+}
+
 /// IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1 (D2/D3/D4): the PURE repo-wide aggregation -- run the per-file
 /// DIRECTIONAL verdict (`directional_status`) over the UNION of SQLite + LiveGraph import-bearing files and fold
 /// the metrics + verdict. No RepoState / no lock -> unit-testable. `precond_map` = file -> resident TS partition
@@ -1934,6 +2081,81 @@ mod tests {
         let r4 = aggregate_readiness("r1", "t", "snap", &bulk_unknown, &empty_view, &met);
         assert_eq!(r4["verdict"], "RED");
         assert_eq!(r4["metrics"]["unknown_total"], 1);
+    }
+
+    #[test]
+    fn imports_auto_body_serves_livegraph_or_falls_back() {
+        use repo_graph_livegraph::import_view::{
+            FilePartitionStatus, ImportEdgeView, LiveImportView,
+        };
+        use repo_graph_storage::queries::ImportResult;
+        let sqlite_row = |target: &str, resolution: &str| ImportResult {
+            node_id: String::new(),
+            symbol: target.to_string(),
+            kind: "FILE".to_string(),
+            subtype: Some("SOURCE".to_string()),
+            file: target.to_string(),
+            line: None,
+            column: None,
+            edge_type: Some("IMPORTS".to_string()),
+            resolution: Some(resolution.to_string()),
+            evidence: vec![],
+            depth: 1,
+        };
+        let edge = |dst: &str, basis: &str| ImportEdgeView {
+            src_file: "a.ts".to_string(),
+            dst_file: dst.to_string(),
+            basis: basis.to_string(),
+            raw_specifier: None,
+        };
+        let met = FilePartitionStatus {
+            partition_id: "app".to_string(),
+            resident: true,
+            fresh: true,
+            ts_primary: true,
+        };
+        let sqlite = vec![sqlite_row("b.ts", "static")];
+        // SERVE LIVEGRAPH: SQLite{b.ts} subset of LiveGraph{b.ts + c.ts (alias extra)}, precondition met.
+        let view = LiveImportView {
+            edges: vec![
+                edge("b.ts", "AstImport"),
+                edge("c.ts", "AstImportTsconfigPathResolved"),
+            ],
+            observations: vec![],
+        };
+        let r = imports_auto_body("a.ts", &sqlite, &view, Some(&met));
+        assert_eq!(r["backend_used"], "livegraph");
+        assert!(r["fallback_reason"].is_null());
+        assert_eq!(r["count"], 2); // the extra alias edge IS served (D4)
+        assert_eq!(r["imports"][1]["symbol"], "c.ts");
+        assert_eq!(r["imports"][0]["kind"], "FILE");
+        // FALLBACK precondition unmet (no resident TS partition).
+        let r2 = imports_auto_body("a.ts", &sqlite, &view, None);
+        assert_eq!(r2["backend_used"], "sqlite");
+        assert_eq!(r2["fallback_reason"], "LiveGraphUnavailable");
+        assert_eq!(r2["count"], 1);
+        // FALLBACK regression: SQLite{b.ts} but LiveGraph lacks b.ts, precondition met.
+        let view_missing = LiveImportView {
+            edges: vec![edge("c.ts", "AstImport")],
+            observations: vec![],
+        };
+        let r3 = imports_auto_body("a.ts", &sqlite, &view_missing, Some(&met));
+        assert_eq!(r3["backend_used"], "sqlite");
+        assert_eq!(r3["fallback_reason"], "LiveGraphImportRegression");
+        // FALLBACK unknown: a SQLite FILE-target non-static row, precondition met.
+        let sqlite_unknown = vec![sqlite_row("b.ts", "unresolved")];
+        let r4 = imports_auto_body("a.ts", &sqlite_unknown, &view, Some(&met));
+        assert_eq!(r4["backend_used"], "sqlite");
+        assert_eq!(r4["fallback_reason"], "LiveGraphImportUnknown");
+        // FALLBACK stale: precondition partition present but not Fresh.
+        let stale = FilePartitionStatus {
+            partition_id: "app".to_string(),
+            resident: true,
+            fresh: false,
+            ts_primary: true,
+        };
+        let r5 = imports_auto_body("a.ts", &sqlite, &view, Some(&stale));
+        assert_eq!(r5["fallback_reason"], "LiveGraphStale");
     }
 
     #[test]

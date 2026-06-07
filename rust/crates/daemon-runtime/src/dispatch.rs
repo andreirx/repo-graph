@@ -1086,10 +1086,11 @@ impl ServiceDispatcher {
                 Ok(r) => r,
                 Err(e) => return DispatchResult::error(&request.id, e),
             };
-        // IMPORTS-LIVEGRAPH-CLI-1: engine routing. Default `sqlite` = the single-file SQLite import listing
-        // (UNCHANGED). `livegraph` = the captured/classified import read-model (file OPTIONAL -> repo-wide,
-        // D6). No default migration (D3): the CLI must pass `--engine livegraph` EXPLICITLY.
-        let engine = Self::get_optional_string_param(&request.params, "engine").unwrap_or("sqlite");
+        // IMPORTS-LIVEGRAPH-DEFAULT-1 (D2=B): engine routing. The DEFAULT is now `auto` -- LiveGraph-first with
+        // a per-call directional no-loss compare + a labelled SQLite fallback. `sqlite` (EXPLICIT) = the
+        // unchanged single-file listing (the escape hatch); `livegraph` / `compare` = the read-model / compare
+        // surfaces (unchanged, D6).
+        let engine = Self::get_optional_string_param(&request.params, "engine").unwrap_or("auto");
 
         // Acquire read lock
         let _read_guard = repo_state.coordinator.acquire_read();
@@ -1164,16 +1165,16 @@ impl ServiceDispatcher {
                 }
             }
         }
-        if engine != "sqlite" {
+        if engine != "sqlite" && engine != "auto" {
             return DispatchResult::error(
                 &request.id,
                 ErrorDetail::invalid_request(format!(
-                    "unsupported imports engine: {engine} (expected sqlite|livegraph|compare)"
+                    "unsupported imports engine: {engine} (expected auto|sqlite|livegraph|compare)"
                 )),
             );
         }
 
-        // ---- engine = sqlite (default): the existing single-file SQLite import listing (file REQUIRED). ----
+        // ---- engine = auto (DEFAULT) or sqlite (explicit): single-file (file REQUIRED + must exist). ----
         let file_path = match Self::get_string_param(&request.params, "file") {
             Ok(f) => f,
             Err(e) => return DispatchResult::error(&request.id, e),
@@ -1182,7 +1183,7 @@ impl ServiceDispatcher {
         // Construct FILE stable key
         let file_stable_key = format!("{}:{}:FILE", repo_uid, file_path);
 
-        // Verify file exists
+        // Verify file exists (the existing "file not found" contract is preserved for BOTH auto + sqlite).
         match repo_state
             .storage
             .node_exists(&snapshot.snapshot_uid, &file_stable_key)
@@ -1202,7 +1203,21 @@ impl ServiceDispatcher {
             }
         }
 
-        // Find imports
+        if engine == "auto" {
+            // IMPORTS-LIVEGRAPH-DEFAULT-1 (D2=B): LiveGraph-first with the per-call no-loss compare + a labelled
+            // SQLite fallback (backend_used / fallback_reason are JSON-only; the human render strips them).
+            return DispatchResult::success(
+                &request.id,
+                crate::livegraph_feed::imports_auto_response(
+                    &repo_state,
+                    &repo_uid,
+                    &snapshot.snapshot_uid,
+                    file_path,
+                ),
+            );
+        }
+
+        // ---- engine = sqlite (EXPLICIT escape hatch): the existing listing, UNCHANGED (no backend metadata). --
         let imports = match repo_state
             .storage
             .find_imports(&snapshot.snapshot_uid, &file_stable_key)

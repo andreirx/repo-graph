@@ -736,15 +736,12 @@ pub fn run_path(args: &[String]) -> ExitCode {
 // Machine mode (--json): full envelope.
 
 pub fn run_imports(args: &[String]) -> ExitCode {
-    // IMPORTS-LIVEGRAPH-CLI-1: extract --engine FIRST. Absent == "auto" -> "sqlite" (NO default migration:
-    // the SQLite single-file listing stays the default; `--engine livegraph` is the explicit opt-in, D3).
+    // IMPORTS-LIVEGRAPH-DEFAULT-1 (D2=B): extract --engine FIRST. Absent == `auto` -- the LiveGraph-first
+    // default (per-call no-loss compare + labelled SQLite fallback). `--engine sqlite` is the explicit escape
+    // hatch (unchanged listing); `--engine livegraph|compare` are the read-model / compare surfaces.
     let (args, engine_raw) = extract_engine_flag(args.to_vec());
-    let engine = if engine_raw == "auto" {
-        "sqlite"
-    } else {
-        engine_raw.as_str()
-    };
-    let usage = "usage: rmap imports [<file>] [--engine sqlite|livegraph|compare] [--json]";
+    let engine = engine_raw.as_str();
+    let usage = "usage: rmap imports [<file>] [--engine auto|sqlite|livegraph|compare] [--json]";
 
     // Parse --json + the optional positional <file> from the remaining args.
     let mut json_mode = false;
@@ -772,13 +769,15 @@ pub fn run_imports(args: &[String]) -> ExitCode {
     // Validate the engine/arg combination + build params (D6: sqlite REQUIRES <file>; livegraph file OPTIONAL
     // -> repo-wide).
     let params = match engine {
-        "sqlite" => {
+        "auto" | "sqlite" => {
+            // auto (DEFAULT, LiveGraph-first) + sqlite (explicit escape hatch) are both single-file (file
+            // REQUIRED). The daemon routes on `engine`.
             if positional.len() != 1 {
-                eprintln!("error: the sqlite engine requires exactly one <file>");
+                eprintln!("error: imports requires exactly one <file>");
                 eprintln!("{usage}");
                 return ExitCode::from(1);
             }
-            serde_json::json!({ "repo": repo_path, "file": positional[0] })
+            serde_json::json!({ "repo": repo_path, "engine": engine, "file": positional[0] })
         }
         "livegraph" => {
             if positional.len() > 1 {
@@ -870,8 +869,16 @@ pub fn run_imports(args: &[String]) -> ExitCode {
                     }
                 }
             } else {
-                // Human mode (sqlite, CLI-OUT-3): the existing single-file listing renderer (unchanged).
+                // Human mode (auto | sqlite): the SQLite-compatible listing. For `auto`, STRIP the JSON-only
+                // backend_used / fallback_reason / comparison (the QUERY-MIGRATION-CLI-1 precedent) so the human
+                // render is byte-unchanged whichever backend served (D3).
                 use crate::presentation::imports::ImportsResponse;
+                let mut result = result;
+                if let Some(obj) = result.as_object_mut() {
+                    obj.remove("backend_used");
+                    obj.remove("fallback_reason");
+                    obj.remove("comparison");
+                }
                 match serde_json::from_value::<ImportsResponse>(result) {
                     Ok(response) => {
                         print!("{}", response.render_human());
