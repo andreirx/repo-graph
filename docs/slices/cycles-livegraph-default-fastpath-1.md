@@ -1,9 +1,18 @@
 # CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1: cert-gated LiveGraph default for `rmap cycles`
 
 Slice ID: CYCLES-LIVEGRAPH-DEFAULT-FASTPATH-1
-Status: **RATIFIED (D1=A compare-GREEN only [missing=0 && extra=0 && unknown=0]; D2–D5 as written — 2026-06-07).
-BUILD IN PROGRESS.** `Complete` is NOT the gate (stricter than no-loss; would block amodx); UnknownDivergence /
-unresolved compare -> non-GREEN -> SQLite. Flip the DEFAULT
+Status: **BLOCKED / DEFERRED (2026-06-07) — superseded by CYCLES-OUTPUT-CONTRACT-1.** D1–D5 were ratified
+(D1=A compare-GREEN only), but the build HALTED at the D4 byte-compatibility gate BEFORE any fastpath code was
+written. The LiveGraph fastpath would change human-visible cycle IDENTITIES (short `src` -> qualified
+`packages/a/src`) and ORDERING (SQLite Tarjan discovery order -> LiveGraph derivation order) for the SAME cert-
+proven cycle SET. That is a user-visible OUTPUT MIGRATION, not a transparent fastpath, so it CANNOT satisfy this
+slice's scope (SQLite-dependency reduction WITH default compatibility). **D4 was NOT re-ratified** (ratified C:
+hold). `--engine sqlite` preserving byte-exact legacy is NOT sufficient license for a default flip absent a
+SEPARATE, ratified output-migration decision. NO raw-decommission credit for a cycles fastpath. Resolution
+deferred to CYCLES-OUTPUT-CONTRACT-1 (decide the default identity/order contract first); only then can a cycles
+default fastpath proceed. See "BLOCKED — output-contract discovery" below.
+
+(Original spec body RETAINED verbatim below for the eventual unblock.) Flip the DEFAULT
 `rmap cycles` (MODULE-import, SQLite `find_cycles` every call) to a cert-gated LiveGraph fastpath: serve the
 LiveGraph MODULE cycles WITHOUT reading SQLite when a GREEN repo no-loss certificate is valid for the current
 fingerprint; ELSE the SQLite fallback (NO loss). Mirrors IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1, reusing the
@@ -13,6 +22,39 @@ Depends: MODULE-CYCLES-CLI-1 (the explicit `--engine livegraph|compare --kind mo
 COMPLETENESS-CERT-1 (`evaluate_module_cycle_completeness` + `certificate_inputs_fingerprint`), MODULE-CYCLES-
 COMPARE-CLASSIFY-1 (the compare missing/extra), IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1 (the cert-fastpath pattern
 + the SQLite-free fingerprint). Track: Stage D, QUERY-MIGRATION-1 (decommission path).
+
+## BLOCKED — output-contract discovery (EXECUTED 2026-06-07, build halted pre-code)
+```text
+The cert proves the cycle SET is lossless (missing=0, extra=0). It does NOT make the rendered BYTES identical,
+and D4 ratified "the cycles renderer is byte-unchanged". TWO independent divergences, each alone breaking it:
+
+1. NODE NAMES short vs qualified (DEFINITE). [OBSERVED]
+   - SQLite default find_cycles populates CycleNode.name from the bare `name` column -- the SHORT module name
+     (e.g. "src"). queries.rs:1059-1063 docstring is explicit: find_cycles returns the SHORT name; the DEFAULT
+     `rmap cycles` output (short name) is UNCHANGED.
+   - The compare matches QUALIFIED names -- module_qualified_names = COALESCE(qualified_name, name) (e.g.
+     "packages/a/src", queries.rs:1069). The LiveGraph members ARE these qualified dirname identities (that is
+     WHY amodx matched EXACT). module_import_cycles_json (livegraph_feed.rs:1052) emits them verbatim.
+   => human chain differs for the SAME cycle: "src -> services -> src" vs
+      "packages/a/src -> packages/a/services -> packages/a/src".
+
+2. CYCLE + RING ORDERING (NOT GUARANTEEABLE). [OBSERVED]
+   SQLite emits cycles in Tarjan SCC discovery order sorted by cycle_id; each ring starts at Tarjan member order
+   (find_cycles 1024-1054). LiveGraph emits cycles/ring members in ITS derivation order. The cert proves the SET,
+   not the sequence or ring rotation; reproducing Tarjan order from LiveGraph = re-deriving the SQLite answer
+   (defeats the SQLite-free purpose).
+
+The renderer reads ONLY nodes.len() + n.name and ignores extra fields (cycles.rs:44-56, no deny_unknown_fields),
+so the LiveGraph shape PARSES -- but the rendered TEXT changes. This is the slice's own stop condition:
+"Stop if the LiveGraph cycle -> SQLite-shape mapping changes the human bytes for the SAME cycle set." HIT.
+
+DECISION (ratified 2026-06-07): C -- HOLD the slice. Do NOT re-ratify D4. A flip changing human identities/order
+is a user-visible OUTPUT MIGRATION, out of this slice's compatibility scope. Rejected: A (flip both, qualified+
+canonical -- needs D4 re-ratification, out of scope here) ; B (flip JSON only, human stays SQLite -- asymmetric,
+near-zero decommission leverage, still changes JSON identities) ; mimic-short-basename (couples to an unverified
+ingest assumption, reintroduces the `src` collision, STILL does not fix ordering). The output-identity/order
+contract is decided FIRST in CYCLES-OUTPUT-CONTRACT-1; this slice resumes (or is rewritten) only after.
+```
 
 ## Why now (priority path)
 ```text
