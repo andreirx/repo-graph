@@ -1,8 +1,10 @@
 # IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1: measure whether LiveGraph can replace SQLite `rmap imports`
 
 Slice ID: IMPORTS-LIVEGRAPH-DEFAULT-READINESS-1
-Status: **RATIFIED (D1=A file-level; D2 directional no-loss; D3 precondition+sufficiency; D4 xpart/amodx/non-TS;
-D5 default frozen; D6=A `imports --engine compare` — 2026-06-07). BUILD IN PROGRESS.** Measurement/readiness
+Status: **IMPLEMENTED + MEASURED (2026-06-07). VERDICT: GREEN-SAFE (zero regression across D4); default flip
+DEFERRED to a separate slice.** D1=A; D2 directional no-loss; D3 precondition+sufficiency; D4 EXECUTED
+(xpart/amodx/non-TS); D5 default frozen; D6=A `imports --engine compare`. Commits c206489 (spec) -> 7083d52
+(impl), UNPUSHED. See **Completion**. Measurement/readiness
 ONLY. Decide whether the DEFAULT `rmap imports <file>` (SQLite today) can safely serve the LiveGraph import view
 for the SAME single-file query. NO default flip, NO decommission, NO resolver changes, NO raw deletion. The
 deliverable of THIS slice is the readiness DECISION + (if ratified) a per-file COMPARE harness; the default flip
@@ -179,6 +181,62 @@ the default `imports <file>` response shape (D5). The default flip is the SEPARA
 4. live + gate + completion doc.
 Stop if: a SQLite resolved-local import is MISSING from LiveGraph for any D4 file (a real regression) -> RED,
 surface before any flip. Stop if the language/residency precondition is ambiguous for a file (present the case).
+```
+
+## Completion (IMPLEMENTED + MEASURED 2026-06-07, EXECUTED) — verdict GREEN-SAFE; default flip DEFERRED
+
+Commits: `c206489` (spec) -> `7083d52` (impl: livegraph `file_partition_status` + daemon `imports_compare_
+sidecar`/`imports_compare_response` + the `compare` route + the CLI renderer; the per-file gate). UNPUSHED.
+
+### Gate (EXECUTED 2026-06-07)
+```text
+cargo test --workspace -> no failures. cargo clippy --workspace --all-targets -- -D warnings -> clean.
+cargo fmt --all -- --check -> clean. Unit tests: file_partition_status (precondition); imports_compare_sidecar
+(the 4 directional verdicts); the CLI compare renderer (SQLite primary + summary; regressions loud).
+```
+
+### D4 measurement (EXECUTED 2026-06-07) — `rmap imports <file> --engine compare`
+```text
+REPO/FILE                                              VERDICT                  sqlite_rl/lg_edges/missing  precond
+xpart  packages/a/src/main.ts                          NoLossEquivalent         1 / 1 / 0                    met
+amodx  admin/src/components/MediaPicker.tsx (alias+ws)  NoLossLivegraphSuperset  0 / 2 / 0  (1 blocking obs)  met
+amodx  admin/src/main.tsx (asset importer)             NoLossEquivalent         1 / 1 / 0                    met
+amodx  packages/effects/src/pipelines/base.ts (dyn)    NoLossLivegraphSuperset  0 / 1 / 0                    met
+OpenXcom src/main.cpp (NON-TS control)                  FallbackPreconditionUnmet 6 / 0 / 6                   UNMET (null)
+
+THREE decisive facts:
+1. missing_in_livegraph (the REGRESSION set) = EMPTY for EVERY TS file (precondition met). No SQLite resolved-
+   local import is LOST by LiveGraph anywhere in the measured set.
+2. The non-TS control (6 SQLite imports, 0 LiveGraph) is `FallbackPreconditionUnmet`, NOT `Regression` -- the
+   language/residency gate (precondition=null) correctly routes it to SQLite fallback, never a false loss.
+3. LiveGraph is a SUPERSET for TS (it captures tsconfig-alias / dynamic edges SQLite's homegrown extractor
+   misses): amodx files are NoLossLivegraphSuperset (more edges, zero loss).
+```
+
+### Verdict — GREEN-SAFE (no regression); default flip DEFERRED to a separate slice
+```text
+GREEN for SAFETY: the DIRECTIONAL no-loss gate is PROVEN SAFE across the D4 cases -- zero `Regression`; the only
+  missing-imports case is the non-TS control, correctly gated to fallback. The per-file predicate the future
+  default flip needs (precondition met AND no-loss) is BUILDABLE + safe; for TS files the LiveGraph view is a
+  strict IMPROVEMENT over the sparse SQLite imports.
+DEFERRED: per scope (D3/D5 -- this slice MEASURES, does not flip), the default `imports <file>` stays SQLite.
+  The flip is a SEPARATE slice. Before it, a REPO-WIDE compare (D1 deferred) should broaden coverage beyond the
+  5 sampled files (the measured set is not all files) -- the per-file gate is the right predicate; the open work
+  is coverage, not a known regression.
+KEEP: explicit `imports --engine livegraph` + `--engine compare`; the SQLite default; the per-file gate.
+```
+
+### Divergences / notes (recorded)
+```text
+- `imports_compare_response` (daemon, RepoState-bound) is not RepoState-unit-tested (no harness; the sibling
+  cycle responses are likewise) -- MITIGATED: the PURE `imports_compare_sidecar` (the 4 verdicts) is unit-
+  tested + the end-to-end is live-validated across D4.
+- The SQLite resolved-local definition = kind=FILE AND subtype!=EXTERNAL AND resolution=static AND non-empty
+  target. The amodx SQLite emptiness for alias files is an EXTRACTOR-STYLE limit (the homegrown `ts-core`
+  resolves plain-relative only), confirmed by the `ts-core:0.2.0` evidence tag -- NOT an indexing-method gap.
+- LIVE-VALIDATION DAEMON STATE: the manual release rmapd was restarted (pkill -x rmapd, exact; new binary +
+  producer env) and xpart/amodx re-refreshed (the in-memory LiveGraph is lost on restart). Reported before
+  acting. To restore the launchd-managed daemon, re-run `./scripts/dev-install-local.sh`.
 ```
 
 ## References
