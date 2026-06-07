@@ -1,8 +1,10 @@
 # IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1: repo-wide directional no-loss imports compare
 
 Slice ID: IMPORTS-LIVEGRAPH-REPOWIDE-READINESS-1
-Status: **RATIFIED (D1 xpart/amodx/repo-graph/OpenXcom; D2 union no-silent-cap; D3 metrics+unknown; D4 verdict;
-D5 report-only; D6=A `imports --engine compare` no-file=repo-wide — 2026-06-07). BUILD IN PROGRESS.**
+Status: **IMPLEMENTED + MEASURED (2026-06-07). VERDICT: GREEN-SAFE** — zero regression + zero unknown over 1303
+files across xpart/amodx/repo-graph/OpenXcom; every non-TS file fallback-by-precondition (OpenXcom YELLOW =
+pure-non-TS control). D6=A. Commits 40df5e4 (spec) -> 94164d5 (impl); reports under
+`docs/audits/imports-repowide-readiness-1/`. UNPUSHED. See **Completion**.
 Measurement/readiness
 ONLY. Run the per-file DIRECTIONAL no-loss compare (READINESS-1) across ALL import-bearing files in selected
 repos, and emit an aggregate report + verdict. NO default flip, NO decommission, NO resolver changes, NO CLI
@@ -158,6 +160,69 @@ if unknown_total > 0 (ambiguous imports) -> classify before a verdict.
 If GREEN / YELLOW-safe (zero regression): IMPORTS-LIVEGRAPH-DEFAULT-1 becomes considerable -- the default
 `imports <file>` serves LiveGraph WHEN the precondition is met AND the per-file gate passes, ELSE a LABELLED
 SQLite fallback (precondition-unmet OR a regression). That flip is a SEPARATE ratified slice.
+```
+
+## Completion (IMPLEMENTED + MEASURED 2026-06-07, EXECUTED) — verdict GREEN-SAFE
+
+Commits: `40df5e4` (spec) -> `94164d5` (impl: storage `all_imports` + livegraph `resident_file_statuses` +
+daemon `directional_status`/`aggregate_readiness`/`imports_readiness_response` + the `compare` no-file route +
+the CLI `ImportsReadinessReport`). UNPUSHED. Report artifacts: `docs/audits/imports-repowide-readiness-1/{xpart,amodx,repo-graph,openxcom}.json`
+(the full per-repo aggregates -- LOCAL, the `docs/audits/` dir is gitignored; the **Measurement** metrics table
+below is the committed record, and regressions/unknowns are EMPTY so the JSON adds only the per-file detail).
+Reproduce: `rmap imports --engine compare --json` from each repo (after `livegraph-refresh --all-discovered`).
+
+### Gate (EXECUTED 2026-06-07)
+```text
+cargo test --workspace -> no failures. clippy --workspace --all-targets -- -D warnings -> clean. fmt --check ->
+clean. Unit tests: storage all_imports (path JOINs + IMPORTS-only); livegraph resident_file_statuses;
+aggregate_readiness (GREEN / RED-regression / YELLOW-fallback / RED-unknown); the CLI report renderer.
+```
+
+### Measurement (EXECUTED 2026-06-07) — `rmap imports --engine compare` (no file), per the D1 set
+```text
+REPO        VERDICT  files_total  precond_met  fallback  REGRESSION  unknown  missing  extra  fallback_share
+xpart       GREEN    2            2            0         0           0        0        0      0%
+amodx       GREEN    377          371          6         0           0        0        414    1.6%
+repo-graph  GREEN    324          165          159       0           0        0        7      49.1% (mixed: Rust falls back)
+OpenXcom    YELLOW   600          0            600       0           0        0        0      100% (pure non-TS; serves none)
+TOTAL       --       1303         538          765       0           0        0        421    --
+
+amodx: blocking_observation_by_class = {WorkspaceLocalUnedgeable: 69}. All four: NOT RUN = none (all available).
+
+THREE decisive facts:
+1. files_regression == 0 AND unknown_total == 0 across ALL FOUR repos (1303 files). The directional no-loss gate
+   loses NO SQLite resolved-local import for ANY TS file, and no SQLite import is ambiguous.
+2. Every NON-TS file falls back by PRECONDITION, never a silent loss: repo-graph's 159 Rust files + OpenXcom's
+   600 C++ files are FallbackPreconditionUnmet (precond_met counts only the TS files), NEVER Regression.
+3. LiveGraph is a SUPERSET for the served TS files: 421 extra edges total (amodx 414, repo-graph 7) -- imports
+   the homegrown SQLite extractor missed; for amodx LiveGraph even covers MORE files (371) than SQLite (205).
+```
+
+### Verdict — GREEN-SAFE (the slice); OpenXcom YELLOW is the expected pure-non-TS control
+```text
+GREEN-SAFE: the per-file directional no-loss gate is PROVEN SAFE at repo scale -- zero regression + zero unknown
+  over 1303 files spanning a TS fixture (xpart), a real TS monorepo (amodx), a MIXED Rust+TS repo (repo-graph),
+  and a pure C++ repo (OpenXcom). Per-repo: xpart/amodx/repo-graph GREEN; OpenXcom YELLOW (100% fallback, serves
+  no file -- SAFE, the language gate, the expected pure-non-TS outcome; reported explicitly, not hidden).
+NOTE: repo-graph fallback_share = 49.1% (just under the 50% fallback-heavy threshold) -> GREEN; the 165 TS files
+  (default + tools/rgistr) are served with no loss, the 159 Rust files fall back. This is the honest mixed-repo
+  picture (fallback recorded explicitly).
+=> the predicate IMPORTS-LIVEGRAPH-DEFAULT-1 needs (precondition met AND no-loss, else labelled SQLite fallback)
+  is BUILDABLE + coverage-backed safe. The flip is a SEPARATE ratified slice.
+```
+
+### Divergences / notes (recorded)
+```text
+- fallback-heavy threshold = 50% of files (documented; the share is ALWAYS reported so a fallback-heavy repo is
+  never hidden -- D5). A repo just under (repo-graph 49.1%) is GREEN; OpenXcom (100%) is YELLOW.
+- The bulk SQLite source path uses sn.file_uid -> files.path (FILE nodes carry file_uid); rows with no source
+  file are dropped (defensive). Validated live: amodx 205 / repo-graph 297 / OpenXcom 600 SQLite import-bearing
+  files enumerated (non-empty -> the JOIN resolves).
+- imports_readiness_response (RepoState-bound) is not RepoState-unit-tested (no harness; siblings likewise) --
+  MITIGATED: the PURE aggregate_readiness + the bulk query are unit-tested, and the end-to-end is live-measured.
+- LIVE-VALIDATION DAEMON STATE: the manual release rmapd was restarted (pkill -x rmapd, exact; new binary +
+  producer env) and xpart/amodx/repo-graph/OpenXcom refreshed. Reported before acting. Re-run
+  ./scripts/dev-install-local.sh to restore the launchd-managed daemon.
 ```
 
 ## References
