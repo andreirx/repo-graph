@@ -1,9 +1,11 @@
 # IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1: skip the per-call SQLite read for the imports default
 
 Slice ID: IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1
-Status: **RATIFIED (D1=C repo-level cert; D2=T1+S1 lazy build / in-memory; D3–D5 as recommended — 2026-06-07).
-BUILD IN PROGRESS.** Only a GREEN cert (valid fingerprint) lets the default skip SQLite; RED/YELLOW/stale/
-missing/build-failed -> compare-on-call; non-TS -> SQLite. Replace the imports
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-07). D1=C, D2=T1+S1.** The imports default now serves LiveGraph
+WITHOUT per-call SQLite when a GREEN repo cert is valid (live: amodx 1st call builds + fastpaths, 2nd file
+served from cache; OpenXcom non-TS -> sqlite; re-refresh invalidates + rebuilds). SQLite read ONCE per
+fingerprint, not every call. Commits 02e2a50 (spec) -> 10e7602 (impl), UNPUSHED. See **Completion**. Replace
+the imports
 default (`Auto`) COMPARE-ON-CALL (which reads SQLite `find_imports` EVERY served call) with a SAFE FASTPATH that
 serves LiveGraph WITHOUT the per-call SQLite read when a no-loss SIGNAL is valid -- ELSE the existing
 compare-on-call / SQLite fallback (NO behavior loss). NO raw decommission, NO SQLite deletion, NO resolver
@@ -137,6 +139,61 @@ Stop if: the fingerprint does NOT change on an input the no-loss depends on (wou
 NO precondition-only (D1=A) without explicit risk acceptance ; NO raw decommission (SQLite still read to BUILD
 the cert + on fallback) ; NO SQLite deletion ; NO resolver changes ; NO cycles/stats/orient/explain/check change ;
 NO change to the explicit engines ; NO behavior loss (RED/stale/missing -> compare-on-call).
+```
+
+## Completion (IMPLEMENTED + LIVE-VALIDATED 2026-06-07, EXECUTED)
+
+Commits: `02e2a50` (spec) -> `10e7602` (impl: live_partitions + RepoState.import_cert + ImportNoLossCert +
+import_cert_fingerprint + the fastpath ladder + build_and_store_import_cert + imports_auto_response refactor).
+UNPUSHED.
+
+### Gate (EXECUTED 2026-06-07)
+```text
+cargo test --workspace -> no failures. clippy --workspace --all-targets -- -D warnings -> clean. fmt --check ->
+clean. Unit (imports_fastpath_ladder): GREEN cert -> panicking find_imports NEVER called ; RED -> compare-on-
+call ; stale/missing -> build then (green->fastpath / red->compare) ; build-failure(None) -> compare-on-call ;
+non-TS -> sqlite.
+```
+
+### Live validation (EXECUTED 2026-06-07)
+```text
+FASTPATH (GREEN cert): amodx MediaPicker.tsx (1st call) -> builds the cert (GREEN), serves backend=livegraph,
+  count=2 (the alias edges), comparison.source="repo_no_loss_certificate" (NO per-call find_imports). A SECOND
+  file admin/src/main.tsx -> backend=livegraph, comparison.source=cert (served from the CACHED cert, no SQLite).
+FALLBACK (non-TS): OpenXcom src/main.cpp -> backend=sqlite, fallback_reason=LiveGraphUnavailable, count=6
+  (precondition unmet -> SQLite, the 6 C++ imports preserved).
+COMPARE unchanged: amodx MediaPicker --engine compare -> comparison.status=NoLossLivegraphSuperset (per-file).
+HUMAN unchanged: the default human render shows the 2 edges in the existing format, NO backend/comparison leak.
+INVALIDATION: re-refresh amodx (partition epochs change -> the fingerprint changes) -> the next default query
+  REBUILDS the cert (StaleOrMissing) and still serves the fastpath (GREEN) -- the cert correctly invalidated +
+  rebuilt, no break.
+```
+
+### Acceptance (the ratified list) — PASS
+```text
+1. xpart/amodx fastpath serves LiveGraph WITHOUT SQLite after cert GREEN (comparison.source=cert; the 2nd file
+   served from the cache).                                                                                PASS.
+2. OpenXcom / non-TS falls back to SQLite (LiveGraphUnavailable, imports preserved).                      PASS.
+3. compare mode still works (--engine compare -> the per-file directional compare).                       PASS.
+4. No default loss (human byte-identical; the served `imports` array == compare-on-call's LiveGraph answer). PASS.
+5. Invalidation: a fingerprint change rebuilds the cert (live re-refresh + the stale unit test).          PASS.
+```
+
+### Divergences / notes (recorded)
+```text
+- The cert build reuses imports_readiness_response (the repo-wide compare) -- it needs NO repo_root (the verdict
+  is from the precond map + bulk all_imports, not the module-cycle baseline) -> imports_auto_response keeps its
+  4-arg signature; handle_imports unchanged.
+- The fastpath `imports` array is byte-identical to compare-on-call's served-LiveGraph answer; only the JSON
+  `comparison` differs ({source: repo_no_loss_certificate} vs the per-call {sqlite_resolved_local, ...}) -- both
+  JSON-only, stripped in human. NO import is lost.
+- DECOMMISSION WIN: SQLite is read ONCE per fingerprint (to build the cert), not every served call. NOT a raw
+  decommission (the cert build + the non-TS/RED fallback still read SQLite); the table stays.
+- imports_auto_response (RepoState-bound) is not RepoState-unit-tested (siblings likewise) -- MITIGATED: the
+  PURE imports_fastpath_or_compare (6 branches) is unit-tested + the end-to-end is live-validated.
+- LIVE-VALIDATION DAEMON STATE: the manual release rmapd was restarted (pkill -x rmapd, exact; new binary +
+  producer env) and xpart/amodx refreshed. Reported before acting. Re-run ./scripts/dev-install-local.sh to
+  restore the launchd-managed daemon.
 ```
 
 ## References
