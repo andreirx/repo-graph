@@ -1,9 +1,11 @@
 # IMPORTS-LIVEGRAPH-DEFAULT-1: flip the default `rmap imports <file>` to LiveGraph-first
 
 Slice ID: IMPORTS-LIVEGRAPH-DEFAULT-1
-Status: **RATIFIED (D1/D3/D4/D5/D6 as written; D2=B COMPARE-ON-CALL — 2026-06-07). BUILD IN PROGRESS.** The
-first imports default migration gets a HARD per-call no-loss guarantee (SQLite still read as the safety net; no
-decommission yet -- that is the follow-up IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1). Flip the DEFAULT
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-07). D2=B COMPARE-ON-CALL.** The default `rmap imports <file>`
+is now LiveGraph-first (serves the alias/dynamic extras on TS files) with a labelled SQLite fallback (non-TS /
+regression / unknown / stale); human byte-compatible; explicit engines unchanged. Commits b4c0392 (spec) ->
+95ef88c (impl), UNPUSHED. SQLite still read every call (safety net; decommission = the follow-up FASTPATH-1).
+See **Completion**. Flip the DEFAULT
 single-file `rmap imports <file>` (SQLite today) to LiveGraph-first with a LABELLED SQLite fallback, mirroring
 the ratified QUERY-MIGRATION-CLI-1 pattern (callers/callees/path). NO raw decommission, NO SQLite deletion, NO
 resolver changes, NO repo-wide default surface. The explicit `--engine sqlite|livegraph|compare` overrides are
@@ -171,6 +173,65 @@ Stop if: any default call would serve a LiveGraph answer missing a SQLite resolv
 IMPORTS-LIVEGRAPH-DECOMMISSION-1 (separate): once the default is LiveGraph-first + trusted, move D2 B -> A
 (precondition-only) or C (cache) to SKIP the SQLite read for served files -- the real decommission. Gated on
 this slice being stable in production.
+```
+
+## Completion (IMPLEMENTED + LIVE-VALIDATED 2026-06-07, EXECUTED)
+
+Commits: `b4c0392` (spec) -> `95ef88c` (impl: FallbackReason +2 / edge_to_import_entry / imports_auto_body /
+imports_auto_response + the handle_imports default->auto + the CLI auto routing & human-strip). UNPUSHED.
+
+### Gate (EXECUTED 2026-06-07)
+```text
+cargo test --workspace -> no failures. clippy --workspace --all-targets -- -D warnings -> clean. fmt --check ->
+clean. Unit: imports_auto_body (serve-livegraph-with-extras / fallback precondition / regression / unknown /
+stale -- all five branches).
+```
+
+### Live validation (EXECUTED 2026-06-07) — the default `rmap imports <file>` (no --engine)
+```text
+1. amodx admin/src/components/MediaPicker.tsx (tsconfig-alias file): backend_used=livegraph, fallback_reason=
+   null, count=2 -> the TWO alias edges SQLite had ZERO of (the IMPROVED answer; comparison missing=0,extra=2).
+2. xpart packages/a/src/main.ts: backend_used=livegraph, count=1 (no loss).
+3. OpenXcom src/main.cpp (NON-TS): backend_used=sqlite, fallback_reason=LiveGraphUnavailable, count=6 -> the
+   SQLite C++ imports preserved (the language gate).
+4. HUMAN byte-compatibility: the default human render uses the EXISTING format ("Imports: <file>\n\nN imports\n
+   \n  symbol depth=N resolution") with NO backend/fallback/comparison leak ; OpenXcom default human ==
+   `--engine sqlite` human (byte-IDENTICAL diff).
+5. OVERRIDES unchanged: `--engine sqlite` -> count + NO backend_used field (escape hatch untouched) ; `--engine
+   livegraph` -> the full evidence view (edges + observations + module_cycle_*) ; `--engine compare` -> the
+   per-file compare. All UNCHANGED.
+```
+
+### Acceptance (the ratified list) — PASS
+```text
+1. xpart/amodx TS files: DEFAULT serves LiveGraph with the alias/dynamic extras, NO missing SQLite import. PASS.
+2. OpenXcom / non-TS: DEFAULT falls back to SQLite (labelled).                                          PASS.
+3. Human `rmap imports <file>` byte-compatible (metadata stripped; non-TS default == sqlite).           PASS.
+4. No default call silently loses imports (compare-on-call + the regression/unknown fallback; unit-tested +
+   the readiness proved 0 regression / 1303 files).                                                     PASS.
+5. --engine sqlite|livegraph|compare unchanged.                                                          PASS.
+```
+
+### Divergences / notes (recorded)
+```text
+- D2=B compare-on-call: SQLite is STILL read every default call (the safety net) -> NO raw decommission this
+  slice. The SKIP-SQLite fastpath (precondition-only or a certificate/cache) is the FOLLOW-UP
+  IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1, gated on this being stable.
+- The LiveGraph default serves EDGES only (the resolved import graph + extras); the benign/blocking OBSERVATIONS
+  stay in `--engine livegraph` (they are not in the SQLite TS output, so omitting them loses nothing -- proven:
+  SQLite TS imports are resolved-relative FILE/static only).
+- imports_auto_response (RepoState-bound) is not RepoState-unit-tested (no harness; siblings likewise) --
+  MITIGATED: the PURE imports_auto_body (5 branches) is unit-tested + the end-to-end is live-validated.
+- LIVE-VALIDATION DAEMON STATE: the manual release rmapd was restarted (pkill -x rmapd, exact; new binary +
+  producer env) and xpart/amodx/repo-graph refreshed. Reported before acting. Re-run
+  ./scripts/dev-install-local.sh to restore the launchd-managed daemon.
+```
+
+## After this slice
+```text
+IMPORTS-LIVEGRAPH-DEFAULT-FASTPATH-1 (separate): replace compare-on-call (D2=B) with precondition-only (A) or a
+certificate/cache (C) to SKIP the SQLite read for served files -- the real decommission. Gated on this slice
+being stable in production.
 ```
 
 ## References
