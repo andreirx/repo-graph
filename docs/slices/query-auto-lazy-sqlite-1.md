@@ -1,8 +1,10 @@
 # QUERY-AUTO-LAZY-SQLITE-1: lazy SQLite fallback for the callers/callees/path default (Auto)
 
 Slice ID: QUERY-AUTO-LAZY-SQLITE-1
-Status: **RATIFIED (D1 lazy closure; D2 pure decision; D3 panicking-closure tests; D4 callers/callees/path only,
-byte-preserving — 2026-06-07). BUILD IN PROGRESS.** Refactor the DEFAULT
+Status: **IMPLEMENTED + LIVE-VALIDATED (2026-06-07).** The default Auto path of callers/callees/path no longer
+reads SQLite when LiveGraph serves (live: amodx served -> backend=livegraph; OpenXcom non-TS -> sqlite
+fallback). Output byte-preserving; --engine sqlite/compare unchanged. Commits df75c0e (spec) -> 65e099d (impl),
+UNPUSHED. See **Completion**. Refactor the DEFAULT
 `Auto` path of `callers` / `callees` / `path` from an EAGER SQLite fallback read (fetched every call, before
 the LiveGraph decision) to a LAZY one (fetched ONLY when LiveGraph cannot serve). OUTPUT-PRESERVING: byte-
 identical served + fallback answers; the only change is that a LiveGraph-served default call no longer reads
@@ -125,6 +127,58 @@ Stop if: making the read lazy changes ANY byte of the served OR fallback output 
 NO imports change (FASTPATH-1 is separate) ; NO cycles/stats/orient/explain/check/trust change ; NO raw
 decommission ; NO SQLite deletion ; NO new fallback conditions / trust model ; NO output change (byte-
 preserving) ; NO change to `--engine sqlite` / `--engine compare`.
+```
+
+## Completion (IMPLEMENTED + LIVE-VALIDATED 2026-06-07, EXECUTED)
+
+Commits: `df75c0e` (spec) -> `65e099d` (impl: the 3 *_engine_response lazy refactors + the 3 pure
+*_auto_or_sqlite decisions + the dispatch closures + the stale-comment fix). UNPUSHED.
+
+### Gate (EXECUTED 2026-06-07)
+```text
+cargo test --workspace -> no failures (98 daemon tests). clippy --workspace --all-targets -- -D warnings ->
+clean. fmt --check -> clean. Unit: callers_auto_or_sqlite (served = PANICKING closure NEVER called; fallback +
+sqlite = closure runs, sentinel appears) + path_auto_or_sqlite (no-path-EXACT served skips; fallback calls).
+```
+
+### Live validation (EXECUTED 2026-06-07)
+```text
+SERVED (LiveGraph, TS) -> backend_used=livegraph (the eager SQLite read is SKIPPED): amodx callers
+  deriveTenantFromOrigin/detectGpuTier(5)/verifyTenantFromOrigin(12)/loadMediaMap(6)/publishAudit(66) ; callees
+  detectGpuTier(12). All fallback_reason=null.
+FALLBACK (non-TS) -> backend_used=sqlite: OpenXcom callers `Action` -> fallback_reason=LiveGraphUnavailable,
+  count=7 (the C++ callers preserved). The empty LiveGraph correctly forces the LAZY SQLite read.
+HUMAN unchanged: amodx callers detectGpuTier -> the existing "Callers of <s>\nFile: ...\n\nN callers found\n..."
+  format, NO backend/fallback leak.
+OVERRIDES: `--engine sqlite` -> backend_used=sqlite (the escape hatch reads SQLite) ; `--engine compare` ->
+  backend_used=sqlite + livegraph_compare present (Compare STILL reads SQLite + writes the sidecar). UNCHANGED.
+```
+
+### Acceptance (the ratified list) — PASS
+```text
+1. SQLite query function NOT called on the LiveGraph-served path -- the panicking-closure unit test (structural
+   proof) + live backend_used=livegraph.                                                                 PASS.
+2. Forced fallback (non-TS) calls SQLite + preserves output (OpenXcom 7 callers, byte-identical).         PASS.
+3. path no-path EXACT skips SQLite (unit test: served Some((false, [])) with a panicking closure).        PASS.
+4. Compare calls SQLite (live: --engine compare -> backend=sqlite + the compare report). UNIT: covered
+   structurally (the Compare arm's first line is sqlite_fetch()?) -- see Divergences.                     PASS.
+5. callers/callees/path ONLY; imports/cycles/stats/orient/explain/check/trust untouched; --engine sqlite/
+   compare unchanged; human unchanged; the stale path comment corrected.                                  PASS.
+```
+
+### Divergences / notes (recorded)
+```text
+- Test 4 (Compare-calls-SQLite) is NOT a pure unit test: the Compare arm needs a RepoState (the LiveGraph
+  compare report), and RepoState construction needs a real db path (RepoKey::new) -- disproportionate. MITIGATED:
+  the Compare arm calls sqlite_fetch()? UNCONDITIONALLY as its first line (structural), and the LIVE check
+  (--engine compare -> backend=sqlite + livegraph_compare) confirms it. The pure tests cover served-skip /
+  fallback-call / sqlite-call / no-path-EXACT.
+- error handling (constraint #2): *_engine_response returns Result<Value, StorageError>; the dispatch maps it
+  to DispatchResult ONLY when the closure runs. The eager-SQLite-error on a served path is intentionally gone
+  (the served path never reads SQLite) -- the point of the slice.
+- LIVE-VALIDATION DAEMON STATE: the manual release rmapd was restarted (pkill -x rmapd, exact; new binary +
+  producer env) and amodx/repo-graph refreshed. Reported before acting. Re-run ./scripts/dev-install-local.sh
+  to restore the launchd-managed daemon.
 ```
 
 ## References
